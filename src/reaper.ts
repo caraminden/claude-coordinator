@@ -42,7 +42,11 @@ export interface Proc {
 }
 
 /** A minion's process the reaper found, with whose it is. */
-export interface Owned { proc: Proc; ticketId: number; projectId: number }
+export interface Owned {
+  proc: Proc;
+  ticketId: number;
+  projectId: number;
+}
 
 /** The units whose processes are never reaped: ships and deploys (citadel-builds.slice, and each job's own unit), kit sync,
  * ultra reviews, the turns' shared tool server, the watchdog and embed services, and the server's own unit. */
@@ -90,7 +94,13 @@ async function readProc(pid: number, uid: number, now: number): Promise<Proc | n
     const cwd = await readlink(`/proc/${pid}/cwd`).catch(() => null);
     const cgroup = /^0::(.*)$/m.exec(await readFile(`/proc/${pid}/cgroup`, 'utf8').catch(() => ''))?.[1] ?? '';
     return {
-      pid, ppid: Number(fields[1]), start: fields[19], tty: Number(fields[4]), cwd, argv, cgroup,
+      pid,
+      ppid: Number(fields[1]),
+      start: fields[19],
+      tty: Number(fields[4]),
+      cwd,
+      argv,
+      cgroup,
       cpuS: (Number(fields[11]) + Number(fields[12])) / CLK_TCK,
       ageS: Math.max(0, now - Number(fields[19]) / CLK_TCK),
     };
@@ -145,7 +155,7 @@ export function ownerOf(projectsRoot: string, p: Proc): { projectId: number; tic
 export function guardedPids(procs: Proc[], o: { selfPid: number; wrapperMark: string | readonly string[]; guardCgroup: (cg: string) => boolean }): Set<number> {
   const byPid = new Map(procs.map((p) => [p.pid, p]));
   const marks = typeof o.wrapperMark === 'string' ? [o.wrapperMark] : o.wrapperMark;
-  const own = (p: Proc) => p.pid === o.selfPid || p.tty !== 0 || o.guardCgroup(p.cgroup) || (marks.some((m) => !!p.argv.at(-2)?.endsWith(m)) || (p.argv[1] === '-c' && p.argv[2] === SHIM));
+  const own = (p: Proc) => p.pid === o.selfPid || p.tty !== 0 || o.guardCgroup(p.cgroup) || marks.some((m) => !!p.argv.at(-2)?.endsWith(m)) || (p.argv[1] === '-c' && p.argv[2] === SHIM);
   const memo = new Map<number, boolean>();
   const guarded = (p: Proc): boolean => {
     const known = memo.get(p.pid);
@@ -167,7 +177,8 @@ export function guardedPids(procs: Proc[], o: { selfPid: number; wrapperMark: st
 
 /** A command line as people may see it: tokens, keys and passwords in it masked, and cut to 160 characters. */
 export function shownCommand(argv: string[]): string {
-  return argv.join(' ')
+  return argv
+    .join(' ')
     .replace(/\bBearer \S+/g, 'Bearer …')
     .replace(/(:\/\/)[^\s/@]+@/g, '$1…@')
     .replace(/((?:token|key|secret|password|passwd|auth|cookie|credential)[\w-]*[=: ]+)\S+/gi, '$1…')
@@ -192,7 +203,11 @@ export async function supervisorOrphaned(home: string, landingsRoots: string[]):
   }
   for (const root of landingsRoots) {
     const n = home.startsWith(root + '/') && /^(\d+)\/tmp\//.exec(home.slice(root.length + 1))?.[1];
-    if (n) return stat(join(root, n, 'code')).then(() => true, () => false);
+    if (n)
+      return stat(join(root, n, 'code')).then(
+        () => true,
+        () => false,
+      );
   }
   return false;
 }
@@ -222,7 +237,16 @@ export interface ReaperOptions {
 }
 
 /** One process a reap stopped (or found gone), as its health row says it. */
-export interface Reaped { ticket: number; number: number; scheme: number; pid: number; command: string; cpuS: number; ageS: number; signal: 'TERM' | 'KILL' }
+export interface Reaped {
+  ticket: number;
+  number: number;
+  scheme: number;
+  pid: number;
+  command: string;
+  cpuS: number;
+  ageS: number;
+  signal: 'TERM' | 'KILL';
+}
 
 /** The health_events kind of a reaped process. */
 export const REAPED = 'reaped';
@@ -239,14 +263,25 @@ export class Reaper {
   constructor(o: ReaperOptions) {
     const root = join(o.dataDir, 'projects');
     let real = root;
-    try { real = realpathSync(root); } catch { /* not made yet: the path as given */ }
+    try {
+      real = realpathSync(root);
+    } catch {
+      /* not made yet: the path as given */
+    }
     this.projectsRoot = real;
     this.landingsRoots = [...new Set([join(resolve(o.dataDir), 'run', 'landings'), join(dirname(real), 'run', 'landings')])];
     this.o = {
-      store: o.store, dataDir: o.dataDir, commit: o.commit ?? null, selfPid: o.selfPid ?? process.pid, wrapperMark: o.wrapperMark ?? WRAPPER_MARKS,
-      guardCgroup: o.guardCgroup ?? guardedCgroup, scan: o.scan ?? scanProcs, kill: o.kill ?? ((pid, sig) => process.kill(pid, sig)),
+      store: o.store,
+      dataDir: o.dataDir,
+      commit: o.commit ?? null,
+      selfPid: o.selfPid ?? process.pid,
+      wrapperMark: o.wrapperMark ?? WRAPPER_MARKS,
+      guardCgroup: o.guardCgroup ?? guardedCgroup,
+      scan: o.scan ?? scanProcs,
+      kill: o.kill ?? ((pid, sig) => process.kill(pid, sig)),
       stopUnit: o.stopUnit ?? ((unit) => promisify(execFile)('systemctl', ['--user', 'stop', unit], { timeout: 30_000 })),
-      termWaitMs: o.termWaitMs ?? 5000, log: o.log ?? ((l) => console.log(l)),
+      termWaitMs: o.termWaitMs ?? 5000,
+      log: o.log ?? ((l) => console.log(l)),
     };
   }
 
@@ -285,7 +320,9 @@ export class Reaper {
       try {
         this.o.kill(x.proc.pid, 'SIGTERM');
         sent.push(x);
-      } catch { /* gone meanwhile */ }
+      } catch {
+        /* gone meanwhile */
+      }
     }
     const killed = new Set<number>();
     const deadline = Date.now() + this.o.termWaitMs;
@@ -299,7 +336,9 @@ export class Reaper {
       try {
         this.o.kill(x.proc.pid, 'SIGKILL');
         killed.add(x.proc.pid);
-      } catch { /* gone meanwhile */ }
+      } catch {
+        /* gone meanwhile */
+      }
     }
     return { sent, killed };
   }
@@ -345,7 +384,15 @@ export class Reaper {
 }
 
 /** One minion's processes on the host-load page. */
-export interface MinionProcs { ticket: number; number: number; title: string; scheme: string; schemeId: number; status: string; procs: { pid: number; command: string; cpuS: number; ageS: number }[] }
+export interface MinionProcs {
+  ticket: number;
+  number: number;
+  title: string;
+  scheme: string;
+  schemeId: number;
+  status: string;
+  procs: { pid: number; command: string; cpuS: number; ageS: number }[];
+}
 
 /** `owned` grouped by minion, for the schemes `canSee` lets the viewer see, most CPU first. */
 export function byMinion(owned: Owned[], store: ReaperStore & { getProject(id: number): { name: string } | undefined }, canSee: (projectId: number) => boolean): MinionProcs[] {
@@ -365,7 +412,11 @@ export function reapedRows(events: { at: number; detail: string }[], store: { ge
   const out: (Reaped & { at: number; schemeName: string })[] = [];
   for (const e of events) {
     let r: Reaped;
-    try { r = JSON.parse(e.detail); } catch { continue; }
+    try {
+      r = JSON.parse(e.detail);
+    } catch {
+      continue;
+    }
     if (!Number.isInteger(r?.scheme) || !canSee(r.scheme)) continue;
     out.push({ ...r, at: e.at, schemeName: store.getProject(r.scheme)?.name ?? '' });
   }

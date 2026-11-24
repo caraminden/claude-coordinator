@@ -42,7 +42,11 @@ export function countGate(counts: Record<string, Record<string, number>> | null,
   const n = (counts?.[day]?.[gate] ?? 0) + by;
   const { [gate]: _, ...rest } = counts?.[day] ?? {};
   const next = { ...counts, [day]: n > 0 ? { ...rest, [gate]: n } : rest };
-  return Object.fromEntries(Object.entries(next).sort(([a], [b]) => b.localeCompare(a)).slice(0, GATE_DAYS));
+  return Object.fromEntries(
+    Object.entries(next)
+      .sort(([a], [b]) => b.localeCompare(a))
+      .slice(0, GATE_DAYS),
+  );
 }
 
 export interface KeepaliveSeries {
@@ -93,16 +97,30 @@ const prefixEnv = (name: string) => (/^(COORDINATOR_|CLAUDE_CODE_)/.test(name) |
 /** A hash per part of what the cached prefix is built from, the turn's own folder taken out. */
 export function prefixParts(p: PrefixInput): Record<string, string> {
   const norm = (s: string) => s.split(p.dir).join('<turn>');
-  const env = Object.keys(p.env).filter(prefixEnv).sort().map((k) => `${k}=${norm(p.env[k])}`);
+  const env = Object.keys(p.env)
+    .filter(prefixEnv)
+    .sort()
+    .map((k) => `${k}=${norm(p.env[k])}`);
   const files = p.files.filter((f) => f.name === 'mcp.json' || f.name === 'settings.json').map((f) => `${f.name}\n${norm(f.text)}`);
   return {
-    system: short(p.systemPrompt), args: short(norm(JSON.stringify(p.args))), files: short(files.join('\n')), env: short(env.join('\n')),
-    pinned: short(p.pinned), claude: short(p.claude), context: short(p.context), date: short(p.date),
+    system: short(p.systemPrompt),
+    args: short(norm(JSON.stringify(p.args))),
+    files: short(files.join('\n')),
+    env: short(env.join('\n')),
+    pinned: short(p.pinned),
+    claude: short(p.claude),
+    context: short(p.context),
+    date: short(p.date),
   };
 }
 
 export function fingerprint(parts: Record<string, string>): string {
-  return short(Object.keys(parts).sort().map((k) => `${k}:${parts[k]}`).join('\n'));
+  return short(
+    Object.keys(parts)
+      .sort()
+      .map((k) => `${k}:${parts[k]}`)
+      .join('\n'),
+  );
 }
 
 /** The parts whose hash differs (or that one side lacks). */
@@ -144,7 +162,12 @@ export function treeHash(root: string): string {
 /** Which Claude Code build a command runs: its real path, size and time, so an update counts as a change. */
 export function claudeStamp(bin: string, path = process.env.PATH ?? ''): string {
   try {
-    const found = isAbsolute(bin) ? bin : path.split(delimiter).map((d) => join(d, bin)).find((p) => existsSync(p));
+    const found = isAbsolute(bin)
+      ? bin
+      : path
+          .split(delimiter)
+          .map((d) => join(d, bin))
+          .find((p) => existsSync(p));
     if (!found) return bin;
     const real = realpathSync(found);
     const s = statSync(real);
@@ -270,7 +293,9 @@ const usd = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toFixed(2)}`;
 
 /** The week's line for the Taskmaster. */
 export function reportText(r: KeepaliveReport, off: boolean): string {
-  return `Minion keepalives, last 7 days (#862): ${r.pings} pings cost ${usd(r.pingUsd)}${r.misses ? ` (${r.misses} missed the cache)` : ''}; `
-    + `${r.warm} waits ended in a warm wake, ${r.cold} cold; the warm wakes saved about ${usd(r.savedUsd)} of reloads, so the net is ${r.netUsd >= 0 ? '+' : ''}${usd(r.netUsd)}.`
-    + (off ? ' The net is below zero, so keepalives are now off server-wide (setting keepalive_off).' : '');
+  return (
+    `Minion keepalives, last 7 days (#862): ${r.pings} pings cost ${usd(r.pingUsd)}${r.misses ? ` (${r.misses} missed the cache)` : ''}; ` +
+    `${r.warm} waits ended in a warm wake, ${r.cold} cold; the warm wakes saved about ${usd(r.savedUsd)} of reloads, so the net is ${r.netUsd >= 0 ? '+' : ''}${usd(r.netUsd)}.` +
+    (off ? ' The net is below zero, so keepalives are now off server-wide (setting keepalive_off).' : '')
+  );
 }

@@ -11,17 +11,20 @@ const WOKE = /Woke ((?:#\d+(?:, )?)+)\./;
 export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
   const start = ctx.now - ctx.days * 86_400_000;
   const store = replayStore(ctx.db, ['settings']);
-  const deploys = store.db
-    .prepare("SELECT project_id, version, live_at FROM releases WHERE target = 'citadel-server' AND live_at IS NOT NULL AND live_at <= ? ORDER BY live_at")
-    .all(ctx.now) as { project_id: number; version: string; live_at: number }[];
+  const deploys = store.db.prepare("SELECT project_id, version, live_at FROM releases WHERE target = 'citadel-server' AND live_at IS NOT NULL AND live_at <= ? ORDER BY live_at").all(ctx.now) as { project_id: number; version: string; live_at: number }[];
   const before = deploys.filter((d) => d.live_at < start).at(-1);
   const inWindow = deploys.filter((d) => d.live_at >= start);
   const schemeId = ctx.scheme ?? inWindow[0]?.project_id ?? before?.project_id;
-  const scheme = schemeId != null ? store.getProject(schemeId) ?? null : null;
+  const scheme = schemeId != null ? (store.getProject(schemeId) ?? null) : null;
   let now = before?.live_at ?? start;
   const hits: Act[] = [];
   const watch = new DeployWatch({
-    store, dbPath: ctx.db, head: () => null, scheme: () => scheme, now: () => now, bootAt: 0,
+    store,
+    dbPath: ctx.db,
+    head: () => null,
+    scheme: () => scheme,
+    now: () => now,
+    bootAt: 0,
     commits: gitCommits(ctx.repo),
     wake: () => {},
     mail: (_tm, text) => hits.push({ at: now, key: DEPLOY.exec(text)?.[1] ?? '?', text }),
@@ -36,18 +39,15 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     if (v) watch.live(v);
     await watch.tick();
   }
-  const real = (store.db
-    .prepare("SELECT created_at, data FROM events WHERE id >= ? AND kind = 'user_message' AND data LIKE '{\"author\":\"Citadel\",\"text\":\"Post-deploy watch: after %' ORDER BY id")
-    .all(store.eventIdAt(start)) as { created_at: number; data: string }[])
-    .map((r) => { const text = String(JSON.parse(r.data).text); return { at: r.created_at, key: DEPLOY.exec(text)?.[1] ?? '?', text }; });
+  const real = (store.db.prepare('SELECT created_at, data FROM events WHERE id >= ? AND kind = \'user_message\' AND data LIKE \'{"author":"Citadel","text":"Post-deploy watch: after %\' ORDER BY id').all(store.eventIdAt(start)) as { created_at: number; data: string }[]).map((r) => {
+    const text = String(JSON.parse(r.data).text);
+    return { at: r.created_at, key: DEPLOY.exec(text)?.[1] ?? '?', text };
+  });
   return {
     inputs: `${inWindow.length} deploys of the Citadel server, health_events and turns from the database`,
     hits: hits.map((h) => ({ ...h, text: short(h.text) })),
     real: real.map((r) => ({ ...r, text: short(r.text) })),
-    limits: [
-      'health_events are kept 8 days (and only exist from Nov 17), so a window older than that reads as quiet',
-      "a check due after now hasn't run yet, in the replay as in life",
-    ],
+    limits: ['health_events are kept 8 days (and only exist from Nov 17), so a window older than that reads as quiet', "a check due after now hasn't run yet, in the replay as in life"],
   };
 }
 

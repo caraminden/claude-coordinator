@@ -69,7 +69,10 @@ test('the worker leaves a short WAL alone, so writes do not start it over, until
   const s = store();
   // The WAL's generation: its header's salts change each time a writer starts it over.
   const salt = () => readFileSync(`${s.path}-wal`).subarray(16, 24).toString('hex');
-  const round = async (w: NonNullable<ReturnType<typeof checkpointOffThread>>) => { await once(w, 'message'); await once(w, 'message'); };
+  const round = async (w: NonNullable<ReturnType<typeof checkpointOffThread>>) => {
+    await once(w, 'message');
+    await once(w, 'message');
+  };
   let worker = checkpointOffThread(s, 20, 1000, 60_000)!;
   s.setSetting('a', 1);
   const [before, gen, frames] = [size(s.path), salt(), walFrames(s.path)!];
@@ -90,7 +93,10 @@ test('the worker leaves a short WAL alone, so writes do not start it over, until
   s.setSetting('b', 2);
   // The write after a finished checkpoint starts the WAL over; queued rounds say nothing of whether one has run.
   let c = 0;
-  await until('a write starting the WAL over', () => { s.setSetting(`c${c++}`, c); return salt() !== gen; });
+  await until('a write starting the WAL over', () => {
+    s.setSetting(`c${c++}`, c);
+    return salt() !== gen;
+  });
   assert.ok(walFrames(s.path)! < 10, 'the write after it started the WAL over');
   await settled();
   await worker.terminate();
@@ -108,7 +114,9 @@ test('an in-memory store has no worker', () => {
 test("reading the WAL length keeps SQLite's -shm locks, so other processes opening the database cannot crash this one", () => {
   const dir = mkdtempSync(join(root, 'shm-'));
   const script = join(dir, 'child.ts');
-  writeFileSync(script, `
+  writeFileSync(
+    script,
+    `
     import { DatabaseSync } from 'node:sqlite';
     import { spawn } from 'node:child_process';
     import { walFrames } from ${JSON.stringify(new URL('../src/checkpoint.ts', import.meta.url).href)};
@@ -122,7 +130,8 @@ test("reading the WAL length keeps SQLite's -shm locks, so other processes openi
     for (let i = 0; i < 4; i++) other();
     const spin = () => { for (let i = 0; i < 200; i++) { walFrames(p); q.all(); } if (Date.now() - t0 < ms) setImmediate(spin); };
     spin();
-  `);
+  `,
+  );
   const r = spawnSync(process.execPath, [script, join(dir, 'x.db')], { encoding: 'utf8', timeout: 60_000 });
   assert.equal(r.signal, null, `the process died with ${r.signal}`);
   assert.equal(r.status, 0, r.stderr);

@@ -12,12 +12,22 @@ export const GRACE_MS = 2 * 60_000;
 /** An MCP call has no timeout of its own we can read; the slow ones (a land) ran up to ~10 min. */
 const MCP_MS = 10 * 60_000;
 /** Claude Code's Bash default and ceiling. */
-const BASH_MS = 120_000, BASH_MAX_MS = 600_000;
+const BASH_MS = 120_000,
+  BASH_MAX_MS = 600_000;
 
-export interface OpenTool { id: string; name: string; label: string; started: number; limit: number }
+export interface OpenTool {
+  id: string;
+  name: string;
+  label: string;
+  started: number;
+  limit: number;
+}
 
 /** What a running turn last did: when it last wrote anything, and the tool calls still waiting on their result. */
-export interface Activity { at: number; tools: OpenTool[] }
+export interface Activity {
+  at: number;
+  tools: OpenTool[];
+}
 
 /** How long a tool call may run before its silence counts against it: its own timeout where it has one. */
 export function toolLimit(name: string, input: any): number {
@@ -39,8 +49,7 @@ export function noteEvent(a: Activity, ev: any, now: number): Activity {
   let tools = a.tools;
   const blocks: any[] = Array.isArray(ev?.message?.content) ? ev.message.content : [];
   if (ev?.type === 'assistant') {
-    const opened = blocks.filter((b) => b?.type === 'tool_use' && typeof b.id === 'string')
-      .map((b) => ({ id: b.id, name: String(b.name ?? ''), label: toolWords(String(b.name ?? ''), b.input), started: now, limit: toolLimit(String(b.name ?? ''), b.input) }));
+    const opened = blocks.filter((b) => b?.type === 'tool_use' && typeof b.id === 'string').map((b) => ({ id: b.id, name: String(b.name ?? ''), label: toolWords(String(b.name ?? ''), b.input), started: now, limit: toolLimit(String(b.name ?? ''), b.input) }));
     if (opened.length) tools = [...tools, ...opened];
   } else if (ev?.type === 'user') {
     const done = new Set(blocks.filter((b) => b?.type === 'tool_result').map((b) => b.tool_use_id));
@@ -68,7 +77,13 @@ export interface ProcCheck {
   ranMs?: number;
 }
 
-interface Proc { pid: number; ppid: number; start: number; cpu: number; comm: string }
+interface Proc {
+  pid: number;
+  ppid: number;
+  start: number;
+  cpu: number;
+  comm: string;
+}
 
 /** Every process's parent, start (clock ticks since boot) and CPU ticks, from /proc. */
 function procs(root = '/proc'): Map<number, Proc> {
@@ -82,7 +97,9 @@ function procs(root = '/proc'): Map<number, Proc> {
       const f = s.slice(close + 2).split(' ');
       // After the name: state(0) ppid(1) ... utime(11) stime(12) ... starttime(19).
       out.set(+d, { pid: +d, ppid: +f[1], cpu: +f[11] + +f[12], start: +f[19], comm });
-    } catch { /* gone meanwhile */ }
+    } catch {
+      /* gone meanwhile */
+    }
   }
   return out;
 }
@@ -91,7 +108,8 @@ function procs(root = '/proc'): Map<number, Proc> {
 export function descendants(all: Map<number, { pid: number; ppid: number }>, pid: number): number[] {
   const kids = new Map<number, number[]>();
   for (const p of all.values()) kids.set(p.ppid, [...(kids.get(p.ppid) ?? []), p.pid]);
-  const out: number[] = [], todo = [pid];
+  const out: number[] = [],
+    todo = [pid];
   while (todo.length) {
     const p = todo.pop()!;
     if (!all.has(p)) continue;
@@ -123,18 +141,20 @@ export async function checkProcess(claudePid: number | null, sampleMs = 1000): P
   const b = procs();
   if (!b.has(claudePid)) return { verdict: 'gone', text: "The turn's process just ended." };
   const tree = descendants(b, claudePid);
-  const used = tree.some((p) => (b.get(p)!.cpu - (a.get(p)?.cpu ?? b.get(p)!.cpu)) > 0);
+  const used = tree.some((p) => b.get(p)!.cpu - (a.get(p)?.cpu ?? b.get(p)!.cpu) > 0);
   // MCP servers and the like start with claude; a command the turn ran started later.
   const claudeStart = b.get(claudePid)!.start;
-  const cmds = tree.filter((p) => p !== claudePid && b.get(p)!.start > claudeStart + 200 && b.get(b.get(p)!.ppid)?.pid === claudePid)
-    .sort((x, y) => b.get(x)!.start - b.get(y)!.start);
+  const cmds = tree.filter((p) => p !== claudePid && b.get(p)!.start > claudeStart + 200 && b.get(b.get(p)!.ppid)?.pid === claudePid).sort((x, y) => b.get(x)!.start - b.get(y)!.start);
   const oldest = cmds[0];
   const command = oldest ? cmdline(oldest) || b.get(oldest)!.comm : undefined;
   const ranMs = oldest ? Math.max(0, (uptimeTicks() - b.get(oldest)!.start) * 10) : undefined;
   const mins = ranMs !== undefined ? `${Math.round(ranMs / 60_000)}m` : '';
   const text = used
-    ? command ? `Still going: \`${command}\` has run ${mins} and is using CPU.` : 'Still going: the model is working (using CPU) with no command running.'
-    : command ? `Idle: \`${command}\` has run ${mins} but used no CPU in the last second. It may be stuck, or waiting on the network.`
+    ? command
+      ? `Still going: \`${command}\` has run ${mins} and is using CPU.`
+      : 'Still going: the model is working (using CPU) with no command running.'
+    : command
+      ? `Idle: \`${command}\` has run ${mins} but used no CPU in the last second. It may be stuck, or waiting on the network.`
       : 'Idle: no command running and no CPU used. It may be waiting on the API; Stop it if this goes on.';
   return { verdict: used ? 'busy' : 'idle', text, ...(command ? { command, ranMs } : {}) };
 }

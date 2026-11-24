@@ -26,7 +26,10 @@ function live(dir: string) {
 }
 const rows = (file: string) => {
   const db = new DatabaseSync(file, { readOnly: true });
-  const r = db.prepare('SELECT ticket_id, created_at FROM events ORDER BY id').all().map((x: any) => `${x.ticket_id}:${x.created_at}`);
+  const r = db
+    .prepare('SELECT ticket_id, created_at FROM events ORDER BY id')
+    .all()
+    .map((x: any) => `${x.ticket_id}:${x.created_at}`);
   const idx = db.prepare("SELECT count(*) n FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events'").get()!.n;
   db.close();
   return { r, idx };
@@ -67,13 +70,23 @@ test('a copy waits for a writer that holds events.db, not "database is locked"',
   w.exec('PRAGMA journal_mode = DELETE'); // a rollback-journal file: an exclusive lock blocks readers
   w.close();
   // The lock is held by another process, since a busy wait in this one would also stop the timer that releases it.
-  const holder = spawn(process.execPath, ['-e', `
+  const holder = spawn(
+    process.execPath,
+    [
+      '-e',
+      `
     const { DatabaseSync } = require('node:sqlite');
     const d = new DatabaseSync(process.argv[1]);
     d.exec('BEGIN EXCLUSIVE'); console.log('locked');
-    setTimeout(() => { d.exec('COMMIT'); console.log('released ' + Date.now()); process.exit(0); }, 1000);`, evFile], { stdio: ['ignore', 'pipe', 'inherit'] });
+    setTimeout(() => { d.exec('COMMIT'); console.log('released ' + Date.now()); process.exit(0); }, 1000);`,
+      evFile,
+    ],
+    { stdio: ['ignore', 'pipe', 'inherit'] },
+  );
   let outText = '';
-  holder.stdout.on('data', (c) => { outText += c; });
+  holder.stdout.on('data', (c) => {
+    outText += c;
+  });
   try {
     await new Promise((res) => holder.stdout.once('data', res));
     const out = join(root, 'd-out');

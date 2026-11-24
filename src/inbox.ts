@@ -39,7 +39,10 @@ const forPerson = (card: { to?: string }, person: string) => !card.to || card.to
 export function inboxItems(store: Store, approvals: Approvals, projectId: number, person: string): InboxItem[] {
   const all = store.listTickets(projectId).filter((t) => t.status !== 'closed');
   // One read for every open minion's properties in a request's read scope (src/read-scope.ts, #1527), for minionPerson and requester.
-  store.props.warmTargets('minion', all.map((t) => t.id));
+  store.props.warmTargets(
+    'minion',
+    all.map((t) => t.id),
+  );
   store.warmSettings(all.filter((t) => t.status === 'running').map((t) => `turn:${t.id}`));
   // In a split scheme (#919) a person's own Taskmaster is theirs alone; the Overlord's (coordinator_of null) is everyone's.
   // A minion is its assignee's, the scheme owner's once they're gone (Store.minionPerson, as push, #1449), else everyone's.
@@ -48,33 +51,42 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
   // Who asked for a minion (#906): its requestedBy, else who created it.
   const requester = (t: { id: number; created_by: string | null }) => {
     const r = String(store.props.forTarget('minion', t.id).requestedBy ?? '') || t.created_by || '';
-    return (r && store.props.personName(r) || r).toLowerCase();
+    return ((r && store.props.personName(r)) || r).toLowerCase();
   };
   const ids = new Set(tickets.map((t) => t.id));
   const asleep = new Set(store.settingsWithPrefix(SLEEP_PREFIX).map((r) => Number(r.key.slice(SLEEP_PREFIX.length))));
   const awake = new Set(tickets.filter((t) => t.state !== 'parked' && !asleep.has(t.id)).map((t) => t.id));
   const items: InboxItem[] = [
-    ...approvals.pending().filter((a) => ids.has(a.ticketId))
+    ...approvals
+      .pending()
+      .filter((a) => ids.has(a.ticketId))
       .map(({ ticketId, at, card }) => ({ kind: 'approval', ticketId, at, card, eventId: store.cardEventId(ticketId, 'approval', (card as { id: string }).id) ?? undefined, key: `approval:${(card as { id: string }).id}` })),
     // A new stored card kind only needs adding to Store.openCards.
     // A card addressed to one person (#687) is theirs alone, whoever the minion is assigned to and even while it's sealed, but not asleep (#1636; Cara picked "Hide them too", 2026-11-22).
-    ...store.openCards(projectId).map((e) => ({ e, card: JSON.parse(e.data) }))
+    ...store
+      .openCards(projectId)
+      .map((e) => ({ e, card: JSON.parse(e.data) }))
       .filter(({ e, card }) => (card.to ? forPerson(card, person) && !asleep.has(e.ticket_id) : awake.has(e.ticket_id)))
       .map(({ e, card }) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card, eventId: e.id, key: `${e.kind}:${e.id}` })),
     // A running turn past a spend stage (#723), until Keep going or the turn's end; the runner keeps a turn's spend in its saved turn.
-    ...tickets.filter((t) => t.status === 'running').flatMap((t) => {
-      const spend = openSpend(store.getSetting<{ spend?: SpendState }>(`turn:${t.id}`)?.spend);
-      return spend ? [{ kind: 'spend', ticketId: t.id, at: spend.at, card: spend, eventId: spend.event, key: `spend:${spend.event}` }] : [];
-    }),
+    ...tickets
+      .filter((t) => t.status === 'running')
+      .flatMap((t) => {
+        const spend = openSpend(store.getSetting<{ spend?: SpendState }>(`turn:${t.id}`)?.spend);
+        return spend ? [{ kind: 'spend', ticketId: t.id, at: spend.at, card: spend, eventId: spend.event, key: `spend:${spend.event}` }] : [];
+      }),
     // A running turn gone quiet (#906; Cara, 2026-11-17, "Yes, for the requester"): in its requester's Needs you only, until it talks again.
-    ...all.filter((t) => t.status === 'running' && requester(t) === person.toLowerCase()).flatMap((t) => {
-      const since = store.getSetting<{ quiet?: number }>(`turn:${t.id}`)?.quiet;
-      return since ? [{ kind: 'quiet', ticketId: t.id, at: since, key: `quiet:${t.id}:${since}` }] : [];
-    }),
+    ...all
+      .filter((t) => t.status === 'running' && requester(t) === person.toLowerCase())
+      .flatMap((t) => {
+        const since = store.getSetting<{ quiet?: number }>(`turn:${t.id}`)?.quiet;
+        return since ? [{ kind: 'quiet', ticketId: t.id, at: since, key: `quiet:${t.id}:${since}` }] : [];
+      }),
     // Messages the loop guard holds (#1067; Josh, 2026-11-19, "Needs-you + chat"), until a person continues them.
     ...[...loopHolds(store)].filter(([id]) => ids.has(id)).map(([ticketId, hold]) => ({ kind: 'loop', ticketId, at: hold.at, card: hold, key: `loop:${ticketId}:${hold.at}` })),
     // A message that @mentions them (#1149; Josh, 2026-11-20: "Needs you, and counted"), until they open its chat; theirs whoever the minion's assignee, but not while it's asleep (#1636), like a card to them.
-    ...openMentions(store, projectId, person, store.seenTimes(person, projectId)).filter((m) => all.some((t) => t.id === m.ticketId) && !asleep.has(m.ticketId))
+    ...openMentions(store, projectId, person, store.seenTimes(person, projectId))
+      .filter((m) => all.some((t) => t.id === m.ticketId) && !asleep.has(m.ticketId))
       .map((m) => ({ kind: 'mention', ticketId: m.ticketId, at: m.at, card: { by: m.by, text: m.text }, eventId: m.eventId, key: `mention:${m.eventId}` })),
     // Ready, try and complete are for a person to look at, not answers, so they're not here (#1121; Josh, 2026-11-19: "Answers only").
     // Minions set replies as a turn ends, so a running one is listed with its chips hidden for a moment.
@@ -86,8 +98,7 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
 /** The items the scheme's Needs-you badge counts for `person`, who last saw each minion at `seen` (ticket id -> time): a replies item they opened since it changed stops counting, as in public/inbox.js. */
 export function inboxWaiting(store: Store, approvals: Approvals, projectId: number, person: string, seen: Record<number, number>): InboxItem[] {
   const updated = new Map(store.listTickets(projectId).map((t) => [t.id, t.updated_at]));
-  return inboxItems(store, approvals, projectId, person)
-    .filter((i) => !(i.kind === 'replies' && (seen[i.ticketId] ?? 0) >= (updated.get(i.ticketId) ?? 0)));
+  return inboxItems(store, approvals, projectId, person).filter((i) => !(i.kind === 'replies' && (seen[i.ticketId] ?? 0) >= (updated.get(i.ticketId) ?? 0)));
 }
 
 /** How many minions the badge counts: one with any item left in `inboxWaiting`; the open scheme's strip counts with the same function (#1400). */
@@ -216,7 +227,7 @@ export class HomeBucketCache {
     const h = this.held!;
     const top = store.eventIdAt(Number.MAX_SAFE_INTEGER);
     // top < mark: the newest events were deleted and their ids may come back, so read the window afresh.
-    if (top < h.mark) return drain(this.fillSteps(store, now)), this.get(store, now);
+    if (top < h.mark) return (drain(this.fillSteps(store, now)), this.get(store, now));
     const fresh = top > h.mark ? store.shippedNotes(0, [h.mark, top]) : [];
     h.mark = top;
     // Old notes leave the window once a minute; the buckets are worked out again only when the notes changed.
@@ -249,7 +260,11 @@ export function homeDays(now: number): string[] {
  */
 export function homeView(store: Store, approvals: Approvals, who: { name: string; uid?: number }, busy: (t: Ticket) => boolean, since: number, now = Date.now(), cache?: HomeBucketCache): HomeView {
   const hidden = store.hiddenProjects(who.uid ?? -1);
-  const ids = inOrder([...store.memberSchemes(who.uid)].filter((id) => !hidden.has(id)), (id: number) => id, who.uid === undefined ? [] : store.listOrder(who.uid, 'schemes')) as number[];
+  const ids = inOrder(
+    [...store.memberSchemes(who.uid)].filter((id) => !hidden.has(id)),
+    (id: number) => id,
+    who.uid === undefined ? [] : store.listOrder(who.uid, 'schemes'),
+  ) as number[];
   const schemes = ids.map((id) => store.getProject(id)).filter((p): p is Project => !!p);
   const days = homeDays(now);
   const held = cache?.get(store, now);

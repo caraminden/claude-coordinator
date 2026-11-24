@@ -13,7 +13,13 @@ export const IDLE_MS = 10 * 60_000;
 /** The most of a body it passes on, as `gh api`'s maxBuffer in ghGet. */
 export const MAX_BODY = 16 * 1024 * 1024;
 
-interface Init { socket: string; nonce: string; token: string | null; api?: string; idleMs?: number }
+interface Init {
+  socket: string;
+  nonce: string;
+  token: string | null;
+  api?: string;
+  idleMs?: number;
+}
 
 async function main() {
   // The server going away closes stdin, at any point: the helper goes with it.
@@ -28,7 +34,12 @@ async function main() {
   });
   const init = JSON.parse(line) as Init;
   // No token from the server: the login gh itself would use (the box's, or GH_CONFIG_DIR's), read once.
-  const token = init.token || (await promisify(execFile)('gh', ['auth', 'token'], { timeout: 15_000 }).then((r) => r.stdout.trim(), () => ''));
+  const token =
+    init.token ||
+    (await promisify(execFile)('gh', ['auth', 'token'], { timeout: 15_000 }).then(
+      (r) => r.stdout.trim(),
+      () => '',
+    ));
   if (!token) process.exit(3); // no login: the server reads through `gh` as before, which says why
   const api = (init.api ?? 'https://api.github.com').replace(/\/$/, '');
   let idle: NodeJS.Timeout;
@@ -61,7 +72,9 @@ async function main() {
       try {
         const res = await fetch(`${api}/${ask.path.replace(/^\/+/, '')}`, {
           headers: {
-            authorization: `token ${token}`, accept: 'application/vnd.github+json', 'user-agent': 'citadel-gh-helper',
+            authorization: `token ${token}`,
+            accept: 'application/vnd.github+json',
+            'user-agent': 'citadel-gh-helper',
             ...(typeof ask.etag === 'string' ? { 'if-none-match': ask.etag } : {}),
           },
           signal: AbortSignal.timeout(30_000),

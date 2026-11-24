@@ -11,10 +11,23 @@ const run = (args: unknown, agent: (prompt: string, opts: any) => Promise<any>) 
   const calls: { prompt: string; opts: any }[] = [];
   const parallel = (thunks: (() => Promise<any>)[]) => Promise.all(thunks.map((t) => t().catch(() => null)));
   const spy = (prompt: string, opts: any) => (calls.push({ prompt, opts }), agent(prompt, opts));
-  const result = new AsyncFunction('args', 'agent', 'parallel', 'phase', 'log', SCRIPT)(args, spy, parallel, () => {}, () => {});
+  const result = new AsyncFunction('args', 'agent', 'parallel', 'phase', 'log', SCRIPT)(
+    args,
+    spy,
+    parallel,
+    () => {},
+    () => {},
+  );
   return { result, calls };
 };
-const args = { brief: '/s/BRIEF.md', scratch: '/s', groups: [{ name: 'Rust Studio', repos: 'a/b', compare: 'x' }, { name: 'bug-ops', repos: 'c/d', compare: 'y' }] };
+const args = {
+  brief: '/s/BRIEF.md',
+  scratch: '/s',
+  groups: [
+    { name: 'Rust Studio', repos: 'a/b', compare: 'x' },
+    { name: 'bug-ops', repos: 'c/d', compare: 'y' },
+  ],
+};
 const ok = { ok: true, use: 0, mine: 1, skip: 2, headline: 'mine the perf rules' };
 
 test('survey script: every agent is pinned to Sonnet at medium effort', async () => {
@@ -55,6 +68,12 @@ test('survey script: no collation when every group fails', async () => {
 
 test('survey script: refuses bad args and groups that share a folder', async () => {
   await assert.rejects(run({}, async () => ok).result, /args must be/);
-  const clash = { ...args, groups: [{ name: 'Godot', repos: 'a', compare: 'x' }, { name: 'godot!', repos: 'b', compare: 'y' }] };
+  const clash = {
+    ...args,
+    groups: [
+      { name: 'Godot', repos: 'a', compare: 'x' },
+      { name: 'godot!', repos: 'b', compare: 'y' },
+    ],
+  };
   await assert.rejects(run(clash, async () => ok).result, /distinct/);
 });

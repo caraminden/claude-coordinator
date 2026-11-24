@@ -49,11 +49,7 @@ test('the kit core, deploy-queue.sh and the server put a line of deploy.sh, core
   writeFileSync(join(q, '.order'), '# Cara moved deploy-c\n0000000003\n0000000002\n0000000006\n0000000005\n');
 
   const core = bash(`${fn(template, 'queue_order')}Q_DIR=$1; queue_order; printf '%s\\n' "\${Q_ORDER[@]}"`, q);
-  const deploy = bash(
-    `. "$2"; queue_order "$1"; for t in "$1"/[0-9]*; do t=\${t##*/}; echo "$(queue_key "$t") $t"; done | LC_ALL=C sort | cut -d' ' -f2`,
-    q,
-    deployQueue,
-  );
+  const deploy = bash(`. "$2"; queue_order "$1"; for t in "$1"/[0-9]*; do t=\${t##*/}; echo "$(queue_key "$t") $t"; done | LC_ALL=C sort | cut -d' ' -f2`, q, deployQueue);
   const server = readQueue(q, 4, () => true).map((t) => String(t.seq).padStart(10, '0'));
 
   // Old-d waits for every lower ticket; .order ranks the others among themselves on either side of it.
@@ -104,7 +100,8 @@ test("land.local.sh's CI defaults match land.sh's", () => {
     }
     return out;
   };
-  const land = defaults('land.sh'), local = defaults('land.local.sh');
+  const land = defaults('land.sh'),
+    local = defaults('land.local.sh');
   const shared = [...local.keys()].filter((k) => land.has(k));
   assert.ok(shared.includes('LAND_CI_TIMEOUT') && shared.includes('LAND_CI_POLL'), `shared: ${shared.join(' ')}`);
   for (const k of shared) assert.equal(local.get(k), land.get(k), `${k}: land.local.sh ${local.get(k)}, land.sh ${land.get(k)}`);

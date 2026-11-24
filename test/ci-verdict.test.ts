@@ -6,11 +6,20 @@ import { verdict, check } from '../src/github.ts';
 
 test('every conclusion has one answer', () => {
   const table: [string, string | null, CiState][] = [
-    ['completed', 'success', 'pass'], ['completed', 'skipped', 'skip'], ['completed', 'neutral', 'skip'],
-    ['completed', 'stale', 'skip'], ['completed', 'cancelled', 'cancelled'], ['completed', 'failure', 'fail'],
-    ['completed', 'timed_out', 'fail'], ['completed', 'action_required', 'fail'], ['completed', 'startup_failure', 'fail'],
-    ['completed', null, 'fail'], ['in_progress', null, 'running'], ['queued', null, 'running'],
-    ['COMPLETED', 'SUCCESS', 'pass'], ['IN_PROGRESS', null, 'running'],
+    ['completed', 'success', 'pass'],
+    ['completed', 'skipped', 'skip'],
+    ['completed', 'neutral', 'skip'],
+    ['completed', 'stale', 'skip'],
+    ['completed', 'cancelled', 'cancelled'],
+    ['completed', 'failure', 'fail'],
+    ['completed', 'timed_out', 'fail'],
+    ['completed', 'action_required', 'fail'],
+    ['completed', 'startup_failure', 'fail'],
+    ['completed', null, 'fail'],
+    ['in_progress', null, 'running'],
+    ['queued', null, 'running'],
+    ['COMPLETED', 'SUCCESS', 'pass'],
+    ['IN_PROGRESS', null, 'running'],
   ];
   for (const [s, c, want] of table) assert.equal(ciState(s, c), want, `${s}/${c}`);
 });

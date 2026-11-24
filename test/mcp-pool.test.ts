@@ -14,7 +14,10 @@ const tmp = tempRoot('mcp-pool-');
 let nRoots = 0;
 const pools: number[] = [];
 after(async () => {
-  for (const pid of pools) try { process.kill(pid, 'SIGKILL'); } catch {}
+  for (const pid of pools)
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {}
   await tmp.teardown();
 });
 
@@ -49,9 +52,12 @@ async function fakeApp() {
         res.writeHead(202).end('{}');
         // The machine's server answers each request at once.
         if (message.id !== undefined && message.method) {
-          const result = message.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'box', version: '1' } }
-            : message.method === 'tools/list' ? { tools: [{ name: 'run_task', description: 'Run a task', inputSchema: { type: 'object' } }] }
-            : { content: [{ type: 'text', text: `ran ${message.params?.name}` }] };
+          const result =
+            message.method === 'initialize'
+              ? { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'box', version: '1' } }
+              : message.method === 'tools/list'
+                ? { tools: [{ name: 'run_task', description: 'Run a task', inputSchema: { type: 'object' } }] }
+                : { content: [{ type: 'text', text: `ran ${message.params?.name}` }] };
           setTimeout(() => machine.stream?.write(`data: ${JSON.stringify({ message: { jsonrpc: '2.0', id: message.id, result } })}\n\n`), 5);
         }
         return;
@@ -89,7 +95,10 @@ async function rpc(port: number, token: string, path: string, message: object): 
   const text = await res.text();
   if (!res.ok) return { status: res.status, text };
   if (!(res.headers.get('content-type') ?? '').includes('event-stream')) return text ? JSON.parse(text) : {};
-  const data = text.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim());
+  const data = text
+    .split('\n')
+    .filter((l) => l.startsWith('data:'))
+    .map((l) => l.slice(5).trim());
   return JSON.parse(data[data.length - 1]);
 }
 
@@ -104,7 +113,13 @@ test('each turn acts only as itself: its token picks its own identity, and an un
   await rpc(pool.port, 'token-a', '/mcp', toolCall(1, 'set_thread_status', { note: 'a' }));
   await rpc(pool.port, 'token-b', '/mcp', toolCall(2, 'set_thread_status', { note: 'b' }));
   const patches = app.calls.filter((c) => c.method === 'PATCH');
-  assert.deepEqual(patches.map((c) => [c.path, c.token]), [['/api/tickets/11', 'token-a'], ['/api/tickets/22', 'token-b']]);
+  assert.deepEqual(
+    patches.map((c) => [c.path, c.token]),
+    [
+      ['/api/tickets/11', 'token-a'],
+      ['/api/tickets/22', 'token-b'],
+    ],
+  );
 
   // The tool list is each turn's own: only A deploys, so only A is offered start_preview.
   const names = async (t: string) => (await rpc(pool.port, t, '/mcp', { id: 3, method: 'tools/list' })).result.tools.map((x: any) => x.name);
@@ -120,10 +135,13 @@ test('each turn acts only as itself: its token picks its own identity, and an un
   // Registering needs the pool's key, which only its own place can read: a turn elsewhere can't plant an identity here.
   const planted = await fetch(`http://127.0.0.1:${pool.port}/register`, { method: 'POST', headers: { Authorization: 'Bearer token-c', 'Content-Type': 'application/json' }, body: JSON.stringify(turn(app.base, 11, 1)) });
   assert.equal(planted.status, 403);
-  await registerTurn({ ...pool, key: 'wrong' }, 'token-c', turn(app.base, 11, 1)).then(() => assert.fail('registered with a wrong key'), () => {});
+  await registerTurn({ ...pool, key: 'wrong' }, 'token-c', turn(app.base, 11, 1)).then(
+    () => assert.fail('registered with a wrong key'),
+    () => {},
+  );
 });
 
-test('a pool killed mid-turn is started again on the same port, and the turn\'s next tool call works', async () => {
+test("a pool killed mid-turn is started again on the same port, and the turn's next tool call works", async () => {
   const app = await fakeApp();
   const s = spec(root(), 'v1', undefined, true);
   const t = turn(app.base, 11, 1);
@@ -132,7 +150,14 @@ test('a pool killed mid-turn is started again on the same port, and the turn\'s 
   assert.ok((await rpc(first.port, 'token-a', '/mcp', toolCall(1, 'set_thread_status', { note: 'x' }))).result);
 
   process.kill(first.pid, 'SIGKILL');
-  await until('the pool is gone', () => { try { process.kill(first.pid, 0); return false; } catch { return true; } });
+  await until('the pool is gone', () => {
+    try {
+      process.kill(first.pid, 0);
+      return false;
+    } catch {
+      return true;
+    }
+  });
   // The wrapper's next beat brings it back and registers its turn again.
   // keepTurn starts a fresh pool at once (it doesn't wait on the dead one or a stale lock); it throws at its own 20 s
   // deadline if it hangs, so getting here is the "comes back" proof and no elapsed time is read.
@@ -144,7 +169,7 @@ test('a pool killed mid-turn is started again on the same port, and the turn\'s 
   assert.ok(r.result && !r.result.isError, JSON.stringify(r));
 });
 
-test('a call that arrives before the restarted pool has its turn back waits for the wrapper\'s registration', async () => {
+test("a call that arrives before the restarted pool has its turn back waits for the wrapper's registration", async () => {
   const app = await fakeApp();
   const s = spec(root(), 'v1', undefined, true);
   const pool = await started(s);
@@ -201,7 +226,18 @@ test('two pinned versions run side by side, each serving only its own turns, and
   // The old version's last turn ends (its wrapper stops refreshing): that pool exits; the new one keeps its turn.
   clearInterval(keepOld);
   try {
-    await until('the old pool exits', () => { try { process.kill(oldPool.pid, 0); return false; } catch { return true; } }, 10_000);
+    await until(
+      'the old pool exits',
+      () => {
+        try {
+          process.kill(oldPool.pid, 0);
+          return false;
+        } catch {
+          return true;
+        }
+      },
+      10_000,
+    );
     assert.equal(readPool(sOld.dir), null);
     process.kill(newPool.pid, 0);
   } finally {
@@ -209,7 +245,7 @@ test('two pinned versions run side by side, each serving only its own turns, and
   }
 });
 
-test('machine tools are lazy: a remembered tool list answers the turn\'s start, and the machine is only opened on its first call', async () => {
+test("machine tools are lazy: a remembered tool list answers the turn's start, and the machine is only opened on its first call", async () => {
   const app = await fakeApp();
   const r = root();
   const pool = await started(spec(r, 'v1', undefined, true));
@@ -220,7 +256,10 @@ test('machine tools are lazy: a remembered tool list answers the turn\'s start, 
   // No remembered list yet: the first turn learns the tools from the machine, and the list is kept.
   assert.equal((await rpc(pool.port, 'token-a', path, { id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } } })).result.serverInfo.name, 'box');
   const listed = await rpc(pool.port, 'token-a', path, { id: 2, method: 'tools/list' });
-  assert.deepEqual(listed.result.tools.map((t: any) => t.name), ['run_task']);
+  assert.deepEqual(
+    listed.result.tools.map((t: any) => t.name),
+    ['run_task'],
+  );
   assert.equal(app.machine.gets, 1);
   await until('the tool list is remembered', () => existsSync(cache));
 
@@ -229,7 +268,10 @@ test('machine tools are lazy: a remembered tool list answers the turn\'s start, 
   const gets = app.machine.gets;
   const init = await rpc(pool.port, 'token-b', path, { id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } } });
   assert.equal(init.result.serverInfo.name, 'box');
-  assert.deepEqual((await rpc(pool.port, 'token-b', path, { id: 2, method: 'tools/list' })).result.tools.map((t: any) => t.name), ['run_task']);
+  assert.deepEqual(
+    (await rpc(pool.port, 'token-b', path, { id: 2, method: 'tools/list' })).result.tools.map((t: any) => t.name),
+    ['run_task'],
+  );
   assert.equal(app.machine.gets, gets, 'the machine was opened for a turn that has not used it');
 
   // Its first call opens the machine, replays the handshake, and gets the machine's answer, as the turn's own token.
@@ -246,7 +288,7 @@ test('machine tools are lazy: a remembered tool list answers the turn\'s start, 
   assert.equal((await rpc(pool.port, 'token-b', path, toolCall(4, 'run_task', { task: 'again' }))).result.content[0].text, 'ran run_task');
 });
 
-test('a turn whose pool won\'t start runs with its own helpers instead (the stdio config)', async () => {
+test("a turn whose pool won't start runs with its own helpers instead (the stdio config)", async () => {
   const r = root();
   const dir = join(r, 'turn');
   mkdirSync(dir);
@@ -271,11 +313,14 @@ test('a turn whose pool starts gets its port, and its wrapper registers it', asy
   mkdirSync(dir);
   const fake = join(r, 'fake-claude.mjs');
   // The stand-in calls a tool through the pool the way Claude would, then ends the turn.
-  writeFileSync(fake, `
+  writeFileSync(
+    fake,
+    `
     const port = process.env.CITADEL_POOL_PORT;
     const res = await fetch('http://127.0.0.1:' + port + '/mcp', { method: 'POST', headers: { Authorization: 'Bearer ' + process.env.COORDINATOR_TOKEN, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'set_thread_status', arguments: { note: 'w' } } }) });
     (await import('node:fs')).writeFileSync(${JSON.stringify(join(r, 'out.json'))}, JSON.stringify({ port, status: res.status, argv: process.argv.slice(2) }));
-    console.log(JSON.stringify({ type: 'result' }));`);
+    console.log(JSON.stringify({ type: 'result' }));`,
+  );
   writeFileSync(join(dir, 'prompt.jsonl'), '{}\n');
   const s = spec(r);
   writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: process.execPath, args: [fake, '--mcp-config', join(dir, 'mcp.json')], cwd: r, env: { ...turn(app.base, 44, 1).env, PATH: process.env.PATH, COORDINATOR_TOKEN: 'tok-w' }, pool: s }));

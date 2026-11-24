@@ -44,7 +44,10 @@ test('a contraption is enabled only for the people on its list, and disabling ta
   store.setContraptionUser(mandate.id, josh.id, true, cara.id);
   assert.equal(c.enabled('mandate', josh.id), true);
   assert.equal(c.enabled('peek-auras', josh.id), false, 'enabling one contraption enables no other');
-  assert.deepEqual(store.contraptionsFor(josh.id).map((r) => ({ name: r.name, title: r.title, icon: r.icon })), [{ name: 'mandate', title: 'Mandate', icon: '/icon.svg' }]);
+  assert.deepEqual(
+    store.contraptionsFor(josh.id).map((r) => ({ name: r.name, title: r.title, icon: r.icon })),
+    [{ name: 'mandate', title: 'Mandate', icon: '/icon.svg' }],
+  );
   store.setContraptionUser(mandate.id, josh.id, false, cara.id);
   assert.equal(c.enabled('mandate', josh.id), false);
   assert.deepEqual(store.contraptionsFor(josh.id), []);
@@ -70,7 +73,7 @@ test('key files are written for the contraption to read, and only this account c
   assert.equal(store.db.prepare('SELECT count(*) AS n FROM credentials').get()!.n, 0, 'nothing goes in the credentials table turns can reach');
 });
 
-test('an identity header verifies with its own contraption\'s public key only, until it expires', () => {
+test("an identity header verifies with its own contraption's public key only, until it expires", () => {
   const header = c.signIdentity('mandate', josh)!;
   assert.match(header, /^v1\.[\w-]+\.[\w-]+$/);
   const claims = verifyIdentity(header, file('mandate', 'identity.pub'), 'mandate')!;
@@ -78,7 +81,7 @@ test('an identity header verifies with its own contraption\'s public key only, u
   assert.equal(claims.login, 'josh');
   assert.equal(claims.name, 'Josh');
   assert.equal(claims.exp - claims.iat, 60);
-  assert.equal(verifyIdentity(header, file('peek-auras', 'identity.pub'), 'mandate'), null, 'another contraption\'s key');
+  assert.equal(verifyIdentity(header, file('peek-auras', 'identity.pub'), 'mandate'), null, "another contraption's key");
   assert.equal(verifyIdentity(header, file('mandate', 'identity.pub'), 'peek-auras'), null, 'naming another contraption');
   assert.equal(verifyIdentity(header, file('mandate', 'identity.pub'), 'mandate', Date.now() + 61_000), null, 'expired');
   // A changed claim breaks the signature.
@@ -94,12 +97,22 @@ test("a contraption's frame gets the clipboard only when its citadel-app.json as
   const home = join(root, 'home');
   const reader = new Contraptions(store, SECRET, keys);
   reader.appsHome = home;
-  const manifest = (name: string, body: string) => { mkdirSync(join(home, 'apps', name), { recursive: true }); writeFileSync(join(home, 'apps', name, 'citadel-app.json'), body); };
+  const manifest = (name: string, body: string) => {
+    mkdirSync(join(home, 'apps', name), { recursive: true });
+    writeFileSync(join(home, 'apps', name, 'citadel-app.json'), body);
+  };
   manifest('writes', JSON.stringify({ start: ['node'], clipboard: 'write' }));
   manifest('plain', JSON.stringify({ start: ['node'] }));
   manifest('broken', '{ not json');
   manifest('no-start', JSON.stringify({ clipboard: 'write' }));
-  for (const [name, want] of [['writes', true], ['plain', false], ['broken', false], ['no-start', false], ['missing', false]] as const) assert.equal(await reader.clipboard({ name, folder: null }), want, name);
+  for (const [name, want] of [
+    ['writes', true],
+    ['plain', false],
+    ['broken', false],
+    ['no-start', false],
+    ['missing', false],
+  ] as const)
+    assert.equal(await reader.clipboard({ name, folder: null }), want, name);
   assert.equal(await reader.clipboard({ name: 'elsewhere', folder: join(home, 'apps', 'writes') }), true, 'its own folder, when it has one');
 });
 
@@ -140,9 +153,12 @@ test('admins register, edit, enable and rotate; everyone else is refused, and li
   const made = await srv.call('/api/people', { name: 'Olive' });
   const invited = await fetch(`${srv.base}/api/invite/${made.data.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
   const olive = { id: made.data.person.id as number, cookie: invited.headers.get('set-cookie')!.split(';')[0] };
-  const asOlive = (path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') => fetch(srv.base + path, {
-    method, headers: { Cookie: olive.cookie, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
-  }).then(async (r) => ({ status: r.status, data: await r.json() }));
+  const asOlive = (path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') =>
+    fetch(srv.base + path, {
+      method,
+      headers: { Cookie: olive.cookie, 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(async (r) => ({ status: r.status, data: await r.json() }));
 
   assert.equal((await srv.call('/api/contraptions', { name: 'Bad Name', title: 'x', port: 9000 })).status, 400);
   assert.equal((await srv.call('/api/contraptions', { name: 'mine', title: 'x', port: 9000 })).status, 400);
@@ -158,16 +174,19 @@ test('admins register, edit, enable and rotate; everyone else is refused, and li
 
   assert.deepEqual((await asOlive('/api/contraptions/mine')).data, []);
   for (const [path, body, method] of [
-    ['/api/contraptions', undefined, 'GET'], ['/api/contraptions', { name: 'x', title: 'x', port: 9000 }, 'POST'],
-    ['/api/contraptions/mandate', { title: 'Mine now' }, 'PATCH'], [`/api/contraptions/mandate/people/${olive.id}`, { enabled: true }, 'PUT'],
+    ['/api/contraptions', undefined, 'GET'],
+    ['/api/contraptions', { name: 'x', title: 'x', port: 9000 }, 'POST'],
+    ['/api/contraptions/mandate', { title: 'Mine now' }, 'PATCH'],
+    [`/api/contraptions/mandate/people/${olive.id}`, { enabled: true }, 'PUT'],
     ['/api/contraptions/mandate/keys', {}, 'POST'],
-  ] as const) assert.equal((await asOlive(path, body, method)).status, 403, `${method} ${path}`);
+  ] as const)
+    assert.equal((await asOlive(path, body, method)).status, 403, `${method} ${path}`);
 
   assert.equal((await srv.call(`/api/contraptions/mandate/people/${olive.id}`, { enabled: true }, 'PUT')).data.people.includes(olive.id), true);
   const mine = (await asOlive('/api/contraptions/mine')).data;
   assert.deepEqual(mine, [{ name: 'mandate', title: 'Mandate!', icon: '/icon.svg', up: mine[0]?.up }]);
   assert.equal(typeof mine[0].up, 'boolean', 'whether it is up, for the rail (Contraptions.up, tested above)');
-  assert.deepEqual((await srv.call('/api/contraptions/mine')).data, [], 'an admin isn\'t enabled by being one');
+  assert.deepEqual((await srv.call('/api/contraptions/mine')).data, [], "an admin isn't enabled by being one");
   const key = readFileSync(join(srv.data, 'contraptions', 'mandate', 'contraption.key'), 'utf8');
   assert.equal((await srv.call('/api/contraptions/mandate/keys', {})).status, 200);
   assert.notEqual(readFileSync(join(srv.data, 'contraptions', 'mandate', 'contraption.key'), 'utf8'), key);
@@ -175,11 +194,16 @@ test('admins register, edit, enable and rotate; everyone else is refused, and li
   assert.deepEqual((await asOlive('/api/contraptions/mine')).data, []);
   assert.equal((await srv.call('/api/contraptions/nope/keys', {})).status, 404);
   for (const [path, body, method, status] of [
-    ['/api/contraptions/mandate', { icon: 'icon.svg' }, 'PATCH', 400], ['/api/contraptions/mandate', { open_paths: '/link' }, 'PATCH', 400],
-    ['/api/contraptions/mandate', { open_paths: ['/a b'] }, 'PATCH', 400], ['/api/contraptions/mandate', { home_scheme: 999 }, 'PATCH', 400],
-    ['/api/contraptions/mandate', { default_model: 'rm -rf' }, 'PATCH', 400], ['/api/contraptions/mandate', { turn_cap: 0 }, 'PATCH', 400],
-    ['/api/contraptions/mandate', { title: '' }, 'PATCH', 400], [`/api/contraptions/mandate/people/${olive.id}`, { enabled: 'yes' }, 'PUT', 400],
+    ['/api/contraptions/mandate', { icon: 'icon.svg' }, 'PATCH', 400],
+    ['/api/contraptions/mandate', { open_paths: '/link' }, 'PATCH', 400],
+    ['/api/contraptions/mandate', { open_paths: ['/a b'] }, 'PATCH', 400],
+    ['/api/contraptions/mandate', { home_scheme: 999 }, 'PATCH', 400],
+    ['/api/contraptions/mandate', { default_model: 'rm -rf' }, 'PATCH', 400],
+    ['/api/contraptions/mandate', { turn_cap: 0 }, 'PATCH', 400],
+    ['/api/contraptions/mandate', { title: '' }, 'PATCH', 400],
+    [`/api/contraptions/mandate/people/${olive.id}`, { enabled: 'yes' }, 'PUT', 400],
     ['/api/contraptions/mandate/people/999', { enabled: true }, 'PUT', 404],
-  ] as const) assert.equal((await srv.call(path, body, method)).status, status, `${method} ${path} ${JSON.stringify(body)}`);
+  ] as const)
+    assert.equal((await srv.call(path, body, method)).status, status, `${method} ${path} ${JSON.stringify(body)}`);
   assert.equal((await srv.call('/api/contraptions')).data[0].title, 'Mandate!', 'a refused edit changes nothing');
 });

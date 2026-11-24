@@ -32,4 +32,7 @@ export const stateWord = (s: string | null | undefined): string | null | undefin
  */
 export const SLEEP_PREFIX = 'sleep:';
 export const sleepKey = (ticketId: number) => `${SLEEP_PREFIX}${ticketId}`;
-export interface Sleep { at: number; by: string }
+export interface Sleep {
+  at: number;
+  by: string;
+}

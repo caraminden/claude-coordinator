@@ -44,16 +44,23 @@ const BATCH = 'ultrareview_batch';
 export const EXPIRE_DAYS = 7;
 /** The CLI's refusal of a repo too big to send whole: the cue for a draft PR. */
 const TOO_LARGE = /Repo is too large/i;
-const NO_GITHUB = 'you haven\'t linked GitHub (Settings → Your account), so Citadel can\'t open a draft pull request as you, and it never uses anyone else\'s login';
+const NO_GITHUB = "you haven't linked GitHub (Settings → Your account), so Citadel can't open a draft pull request as you, and it never uses anyone else's login";
 
-export type ReviewSpec =
-  | { mode: 'branch'; repo: string; base: string; branch: string }
-  | { mode: 'area'; repo: string; base: string; paths: string[] };
+export type ReviewSpec = { mode: 'branch'; repo: string; base: string; branch: string } | { mode: 'area'; repo: string; base: string; paths: string[] };
 
-export interface Size { files: number; lines: number }
+export interface Size {
+  files: number;
+  lines: number;
+}
 
 /** A review's draft PR on GitHub: `number` and `url` once it is open (the branches are named before that, for clean-up). */
-export interface ReviewPr { slug: string; head: string; base: string; number?: number; url?: string }
+export interface ReviewPr {
+  slug: string;
+  head: string;
+  base: string;
+  number?: number;
+  url?: string;
+}
 
 /** One area of a batch, prepped as a draft PR and waiting for its person's Start. */
 export interface BatchRow {
@@ -75,13 +82,26 @@ export interface BatchRow {
   at: number;
 }
 
-export interface AreaAsk { repo: string; base: string; name: string; paths: string[]; question?: string; size: Size }
+export interface AreaAsk {
+  repo: string;
+  base: string;
+  name: string;
+  paths: string[];
+  question?: string;
+  size: Size;
+}
 
 export const overLimit = (s: Size) => s.files > LIMITS.files || s.lines > LIMITS.lines;
 const fmt = (n: number) => n.toLocaleString('en-US');
 const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 /** A branch-name word from an area's name: review/<this>-<id>. */
-export const branchSlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'area';
+export const branchSlug = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/, '') || 'area';
 
 /** Area paths as typed: repo-relative, no `..`, no options, at most 200 of them. Throws a message people can read. */
 export function cleanPaths(raw: unknown): string[] {
@@ -148,11 +168,14 @@ export async function prepare(spec: ReviewSpec, dir: string): Promise<string> {
 /** The scheme repo's GitHub "owner/name", from its origin. Throws a line people can read when it has none. */
 export async function repoOnGithub(repo: string): Promise<string> {
   const slug = githubRepo(await git(repo, 'remote', 'get-url', 'origin').catch(() => ''));
-  if (!slug) throw new Error('this scheme\'s repo isn\'t on GitHub, so there\'s nowhere to open a draft pull request');
+  if (!slug) throw new Error("this scheme's repo isn't on GitHub, so there's nowhere to open a draft pull request");
   return slug;
 }
 
-export interface GhRun { gh: string; env: NodeJS.ProcessEnv }
+export interface GhRun {
+  gh: string;
+  env: NodeJS.ProcessEnv;
+}
 
 async function ghCall(g: GhRun, args: string[]): Promise<string> {
   const { stdout } = await run(g.gh, args, { env: g.env, timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
@@ -245,7 +268,9 @@ interface Deps {
 
 /** A review the server follows; saved, so the next server picks it back up. */
 interface Running {
-  ticketId: number; uid: number; id: string;
+  ticketId: number;
+  uid: number;
+  id: string;
   /** Its scratch clone, in the person's own space. */
   dir: string;
   container?: string;
@@ -373,10 +398,13 @@ export class UltraReviews {
   private cleanUp(uid: number, ticketId: number, pr: ReviewPr) {
     const gh = this.deps.github(uid);
     const left = (why: string) => this.deps.emit(ticketId, 'note', { text: `Couldn't clean up the ultra review's draft PR${pr.number ? ` #${pr.number}` : ''} (branches ${pr.head} and ${pr.base}): ${why}. Close it and delete them on GitHub.` });
-    if (!gh) return left(NO_GITHUB.replace(', so Citadel can\'t open a draft pull request as you', ''));
+    if (!gh) return left(NO_GITHUB.replace(", so Citadel can't open a draft pull request as you", ''));
     const dir = join(this.deps.scratch(uid), `ultrareview-gh-${newId()}`);
     void closeReviewPr(pr, this.ghRun(gh.token, dir))
-      .then((why) => why && left(why), (err) => left(errorText(err)))
+      .then(
+        (why) => why && left(why),
+        (err) => left(errorText(err)),
+      )
       .finally(() => rmSync(dir, { recursive: true, force: true }));
   }
 
@@ -388,17 +416,29 @@ export class UltraReviews {
   async start(ticketId: number, uid: number, by: string, spec: ReviewSpec, size: Size, findingsDir?: string, via?: { pr: ReviewPr; row: string; question?: string }): Promise<ReviewEvent> {
     if (!via && this.busy(uid)) throw new Error('You already have an ultra review running. Wait for its findings first.');
     const place = this.deps.place(uid);
-    if (!place) throw new Error('Your Claude plan isn\'t linked (Settings → Your account), so there\'s no login of yours to run it on.');
+    if (!place) throw new Error("Your Claude plan isn't linked (Settings → Your account), so there's no login of yours to run it on.");
     const id = newId();
     const dir = join(this.deps.scratch(uid), `ultrareview-${id}`);
     const event: ReviewEvent = {
-      id, by, mode: spec.mode, base: spec.base, ...(spec.mode === 'branch' ? { branch: spec.branch } : { paths: spec.paths }), size,
+      id,
+      by,
+      mode: spec.mode,
+      base: spec.base,
+      ...(spec.mode === 'branch' ? { branch: spec.branch } : { paths: spec.paths }),
+      size,
       ...(via ? { pr: { number: via.pr.number!, url: via.pr.url! }, ...(via.question ? { question: via.question } : {}) } : {}),
     };
     const { mode, base, branch, paths } = event;
     const r: Running = {
-      ticketId, uid, id, dir, by, spec, ...(via ? { pr: via.pr, row: via.row } : {}),
-      ...(place.host ? {} : { container: place.container }), ...(findingsDir ? { findings: { dir: findingsDir, ev: { mode, base, branch, paths } } } : {}),
+      ticketId,
+      uid,
+      id,
+      dir,
+      by,
+      spec,
+      ...(via ? { pr: via.pr, row: via.row } : {}),
+      ...(place.host ? {} : { container: place.container }),
+      ...(findingsDir ? { findings: { dir: findingsDir, ev: { mode, base, branch, paths } } } : {}),
     };
     this.live.set(id, r);
     this.save();
@@ -456,7 +496,7 @@ export class UltraReviews {
   private check(r: Running) {
     if (!this.live.has(r.id) || !r.job) return;
     const job = this.jobs.state(this.jobDir(r.id), MAX_OUTPUT);
-    if (!job) return this.finish(r, { id: r.id, ok: false, code: null, text: 'The review\'s run folder is gone, so its findings were lost.' });
+    if (!job) return this.finish(r, { id: r.id, ok: false, code: null, text: "The review's run folder is gone, so its findings were lost." });
     if (job.code === null) return;
     if (job.code !== 0 && r.spec?.mode === 'area' && !r.pr && TOO_LARGE.test(job.output)) return void this.viaPr(r, r.spec, stripAnsi(job.output).trim());
     this.finish(r, this.result(r, job));
@@ -480,7 +520,7 @@ export class UltraReviews {
       return this.finish(r, { id: r.id, ok: false, code: null, text: `${said}\n\nCitadel tried a draft pull request instead, but ${err?.message ?? err}.` });
     }
     const place = this.deps.place(r.uid);
-    if (!place) return this.finish(r, { id: r.id, ok: false, code: null, text: 'Your Claude plan isn\'t linked any more, so the review stopped.' });
+    if (!place) return this.finish(r, { id: r.id, ok: false, code: null, text: "Your Claude plan isn't linked any more, so the review stopped." });
     await this.run(r, place, spec);
   }
 
@@ -535,19 +575,32 @@ export class UltraReviews {
     const id = newId();
     const head = `review/${branchSlug(a.name)}-${id.slice(-6)}`;
     const row: BatchRow = {
-      id, ticketId, uid, by, name: a.name, paths: a.paths, ...(a.question ? { question: a.question } : {}),
-      repo: a.repo, base: a.base, size: a.size, state: 'prepping', pr: { slug, head, base: `${head}-base` }, at: Date.now(),
+      id,
+      ticketId,
+      uid,
+      by,
+      name: a.name,
+      paths: a.paths,
+      ...(a.question ? { question: a.question } : {}),
+      repo: a.repo,
+      base: a.base,
+      size: a.size,
+      state: 'prepping',
+      pr: { slug, head, base: `${head}-base` },
+      at: Date.now(),
     };
     this.saveBatch([...this.batch(), row]);
     // One clone and push at a time per person: a 20-area batch shouldn't run 20 clones at once on the shared box.
-    const turn = (this.prepping.get(uid) ?? Promise.resolve()).then(() => (this.batch().some((x) => x.id === id) ? this.openPr(uid, { mode: 'area', repo: a.repo, base: a.base, paths: a.paths }, row.pr!, { name: a.name, question: a.question, by }) : null)).then(
-      (pr) => {
-        if (!pr) return; // discarded while it waited its turn
-        // Discarded while it prepped: close what it just made.
-        if (!this.editRow(id, (x) => Object.assign(x, { state: 'ready', pr }))) this.cleanUp(uid, ticketId, pr);
-      },
-      (err) => void this.editRow(id, (x) => Object.assign(x, { state: 'failed', error: String(err?.message ?? err).slice(0, 500), pr: undefined })),
-    );
+    const turn = (this.prepping.get(uid) ?? Promise.resolve())
+      .then(() => (this.batch().some((x) => x.id === id) ? this.openPr(uid, { mode: 'area', repo: a.repo, base: a.base, paths: a.paths }, row.pr!, { name: a.name, question: a.question, by }) : null))
+      .then(
+        (pr) => {
+          if (!pr) return; // discarded while it waited its turn
+          // Discarded while it prepped: close what it just made.
+          if (!this.editRow(id, (x) => Object.assign(x, { state: 'ready', pr }))) this.cleanUp(uid, ticketId, pr);
+        },
+        (err) => void this.editRow(id, (x) => Object.assign(x, { state: 'failed', error: String(err?.message ?? err).slice(0, 500), pr: undefined })),
+      );
     this.prepping.set(uid, turn);
     void turn.then(() => this.prepping.get(uid) === turn && this.prepping.delete(uid));
     return row;
@@ -559,13 +612,12 @@ export class UltraReviews {
     if (!row) throw new Error('No such prepped review: it may have been discarded');
     if (row.uid !== uid) throw new Error('That prepped review is not yours: a review runs on the login of whoever prepped it');
     if (row.state === 'running') throw new Error('It is already running');
-    if (row.state !== 'ready' || !row.pr?.number) throw new Error(row.state === 'prepping' ? 'It is still prepping its draft PR' : 'Its draft PR didn\'t open: discard it and prep it again');
+    if (row.state !== 'ready' || !row.pr?.number) throw new Error(row.state === 'prepping' ? 'It is still prepping its draft PR' : "Its draft PR didn't open: discard it and prep it again");
     this.editRow(id, (x) => Object.assign(x, { state: 'running', error: undefined }));
-    return this.start(row.ticketId, uid, by, { mode: 'area', repo: row.repo, base: row.base, paths: row.paths }, row.size, findingsDir, { pr: row.pr, row: id, question: row.question })
-      .catch((err) => {
-        this.editRow(id, (x) => Object.assign(x, { state: 'ready' }));
-        throw err;
-      });
+    return this.start(row.ticketId, uid, by, { mode: 'area', repo: row.repo, base: row.base, paths: row.paths }, row.size, findingsDir, { pr: row.pr, row: id, question: row.question }).catch((err) => {
+      this.editRow(id, (x) => Object.assign(x, { state: 'ready' }));
+      throw err;
+    });
   }
 
   /** Drop a row now and close its PR behind it. A running row can't be discarded. */

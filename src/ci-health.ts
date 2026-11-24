@@ -63,8 +63,78 @@ import { failuresIn, ghText } from './flake-evidence.ts';
 
 import { thrown } from './thrown.ts';
 import type { LongJob } from './long-jobs.ts';
-import { clock, humanText, VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, HEAVY_WORKFLOW, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, startedRed, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
-export { humanText, WAIT_MS, HUNG_MS, RED_FIX_MS, ORPHAN_MS, type Problem, type ProblemLink, type WakeAt, problemLink, itemText, clock, trackOffline, servers, stuckProblems, hungProblems, neverStarted, deadGroups, deadProblem, orphanRuns, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, computerOf, sharedHost, bundleTitle, ciPage, CI_SENDER, itemKey } from './ci-problems.ts';
+import {
+  clock,
+  humanText,
+  VERDICTS,
+  WAIT_MS,
+  HUNG_MS,
+  RED_FIX_MS,
+  type Problem,
+  type WakeAt,
+  WAKE_AT,
+  problemLink,
+  WAKE_STEPS,
+  itemText,
+  at,
+  short,
+  runUrl,
+  workflowFile,
+  quietWorkflow,
+  HEAVY_WORKFLOW,
+  DISPATCH_SINCE,
+  trackOffline,
+  servers,
+  stuckProblems,
+  hungProblems,
+  deadGroups,
+  deadProblem,
+  orphanRuns,
+  place,
+  type RedMark,
+  type Fix,
+  redProblem,
+  startedRed,
+  verdictPair,
+  skippedJobs,
+  bundleTitle,
+  ciPage,
+  CI_SENDER,
+  BUNDLE_ITEM,
+  itemKey,
+} from './ci-problems.ts';
+export {
+  humanText,
+  WAIT_MS,
+  HUNG_MS,
+  RED_FIX_MS,
+  ORPHAN_MS,
+  type Problem,
+  type ProblemLink,
+  type WakeAt,
+  problemLink,
+  itemText,
+  clock,
+  trackOffline,
+  servers,
+  stuckProblems,
+  hungProblems,
+  neverStarted,
+  deadGroups,
+  deadProblem,
+  orphanRuns,
+  type RedMark,
+  type Fix,
+  redProblem,
+  verdictPair,
+  skippedJobs,
+  computerOf,
+  sharedHost,
+  bundleTitle,
+  ciPage,
+  CI_SENDER,
+  itemKey,
+} from './ci-problems.ts';
 import { type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
 export { LAND_STREAK, LAND_SLOW_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
 import { type GhGet, ghGet, ghPost, RateLimited, GhError } from './gh-api.ts';
@@ -135,7 +205,10 @@ interface GhBody {
   message?: string;
 }
 /** One annotation on a check run. */
-interface GhNote { annotation_level?: string; message?: string }
+interface GhNote {
+  annotation_level?: string;
+  message?: string;
+}
 export interface Runner {
   name: string;
   status: string;
@@ -189,17 +262,19 @@ export function runningNow(all: Job[], runs: Run[], runners: Runner[] | null, mi
     const r = runs.find((x) => x.id === j.run_id);
     return r ? { branch: r.head_branch, event: r.event, minion: minion(r) } : {};
   };
-  const running = all.filter((j) => j.status === 'in_progress' && j.runner_name)
-    .map((j) => ({ name: j.name, runner: j.runner_name!, since: j.started_at ?? j.created_at, run: j.run_id, ...ofRun(j) }));
+  const running = all.filter((j) => j.status === 'in_progress' && j.runner_name).map((j) => ({ name: j.name, runner: j.runner_name!, since: j.started_at ?? j.created_at, run: j.run_id, ...ofRun(j) }));
   const groups = new Map<string, Job[]>();
   for (const j of all.filter((x) => x.status === 'queued' || x.status === 'waiting')) {
     const key = [...j.labels].sort().join(',');
     (groups.get(key) ?? groups.set(key, []).get(key)!).push(j);
   }
-  const queues = [...groups.values()].map((js) => ({
-    labels: [...js[0].labels].sort(), jobs: js.length,
-    runners: runners && servers(runners, js[0]).filter((r) => r.status === 'online').length,
-  })).sort((a, b) => b.jobs - a.jobs);
+  const queues = [...groups.values()]
+    .map((js) => ({
+      labels: [...js[0].labels].sort(),
+      jobs: js.length,
+      runners: runners && servers(runners, js[0]).filter((r) => r.status === 'online').length,
+    }))
+    .sort((a, b) => b.jobs - a.jobs);
   return { running, queues };
 }
 
@@ -207,7 +282,7 @@ export function runningNow(all: Job[], runs: Run[], runners: Runner[] | null, mi
 export function runKind(r: { branch?: string; event?: string }, main: string): string {
   if (r.event === 'schedule') return 'scheduled run';
   if (r.event === 'workflow_dispatch') return `run by hand on ${r.branch ?? main}`;
-  return r.branch === main ? `${main} itself` : r.branch ?? '';
+  return r.branch === main ? `${main} itself` : (r.branch ?? '');
 }
 
 /** A repo's branch tips, commit → branch names; empty with no repo on this box or when git fails. */
@@ -216,12 +291,17 @@ async function branchTips(dir: string | null | undefined): Promise<Map<string, s
   if (!dir) return tips;
   try {
     const { stdout } = await run('git', ['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads/'], { cwd: dir });
-    for (const [sha, ref] of stdout.split('\n').filter(Boolean).map((l) => l.split(' '))) (tips.get(sha) ?? tips.set(sha, []).get(sha)!).push(ref);
-  } catch { /* no tips: runs on minion branches still link */ }
+    for (const [sha, ref] of stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => l.split(' ')))
+      (tips.get(sha) ?? tips.set(sha, []).get(sha)!).push(ref);
+  } catch {
+    /* no tips: runs on minion branches still link */
+  }
   return tips;
 }
 /** Something wrong now: what the alert says, keyed so the same trouble keeps one item. */
-
 
 // ---------- wake_when_runners_back (#541) ----------
 // A landing whose CI gate got no verdict (the kit's land.sh exits 75: no runner took the run, nearly always the
@@ -262,9 +342,16 @@ export function registerRunnersBack(store: Store, outbox: Outbox): void {
         old.map((w) => {
           const t = store.getTicket(w.ticket);
           return {
-            project_id: t?.project_id ?? 0, kind: 'runners_back', to_kind: 'minion' as const, to_id: w.ticket, when_kind: 'runners',
-            when_arg: runnerLabel(store.getProject(t?.project_id ?? 0)?.name ?? ''), payload: { reason: w.reason }, set_by: `minion:${w.ticket}`,
-            dedupe_key: String(w.ticket), origin: `${RUNNER_WAITERS}:${createHash('sha256').update(JSON.stringify(w)).digest('hex').slice(0, 16)}`,
+            project_id: t?.project_id ?? 0,
+            kind: 'runners_back',
+            to_kind: 'minion' as const,
+            to_id: w.ticket,
+            when_kind: 'runners',
+            when_arg: runnerLabel(store.getProject(t?.project_id ?? 0)?.name ?? ''),
+            payload: { reason: w.reason },
+            set_by: `minion:${w.ticket}`,
+            dedupe_key: String(w.ticket),
+            origin: `${RUNNER_WAITERS}:${createHash('sha256').update(JSON.stringify(w)).digest('hex').slice(0, 16)}`,
           };
         }),
         outbox.clock(),
@@ -283,7 +370,6 @@ export function onlineRunners(runners: Runner[], schemeName: string): Runner[] {
   const labels = schemeLabels(schemeName);
   return runners.filter((r) => r.status === 'online' && r.labels?.some((l) => labels.includes(l.name)));
 }
-
 
 // ---------- the poller ----------
 
@@ -318,14 +404,18 @@ export interface BrokenRow {
   who: { kind: 'minion' | 'taskmaster' | 'person'; label: string; href: string };
 }
 /** The one alert (#1662): its key's generation, the problems it holds (`<scheme>:<key>`), the ones ringing at the last send, and each admin's item. */
-interface AlertState { gen: number; rung: string[]; loud: string[]; sent: Record<string, string> }
+interface AlertState {
+  gen: number;
+  rung: string[];
+  loud: string[];
+  sent: Record<string, string>;
+}
 const ALERT = 'ci-health:alert';
 const bundleKey = (gen: number) => (gen ? `${BUNDLE_ITEM}.${gen}` : BUNDLE_ITEM);
 /** Where the one alert opens (#1662, Cara's pick "A strip on Citadel's front page, opening the list"): Home, with "Broken now" open. */
 export const BROKEN_PAGE = '/c/#/home/broken';
 /** Each problem with when it opened (#1662's "since"): its own, else the last round's for its key, else now. */
-const opened = (problems: Problem[], before: Problem[] | undefined, now: number): Problem[] =>
-  problems.map((x) => ({ ...x, since: x.since ?? before?.find((b) => b.key === x.key)?.since ?? now }));
+const opened = (problems: Problem[], before: Problem[] | undefined, now: number): Problem[] => problems.map((x) => ({ ...x, since: x.since ?? before?.find((b) => b.key === x.key)?.since ?? now }));
 
 export interface CiHealthDeps {
   /** The GitHub login to read a scheme's repo as: its owner's linked one, or undefined for the box's. */
@@ -578,7 +668,8 @@ export class CiHealth {
     s.loud = loud;
     const shown = all.filter((x) => s.rung.includes(x.key));
     if (fresh && Object.keys(s.sent).length) s.gen++;
-    const key = bundleKey(s.gen), quiet = !loud.length;
+    const key = bundleKey(s.gen),
+      quiet = !loud.length;
     const title = shown.length ? bundleTitle(shown) : null;
     // What a person's item is: its key, alarm or not, and its words; an older build's was the words alone, under BUNDLE_ITEM.
     const sig = title && `${key}\n${quiet ? 'quiet' : 'alarm'}\n${title}`;
@@ -620,20 +711,27 @@ export class CiHealth {
 
   /** The one alert's problems as the Taskmaster's wake tells them (#869): the land alarm with each fallen-back run's link, failed step and runner. */
   private async parts(open: { scheme: string; problem: Problem; id: number }[], land: LandWatch | null | undefined): Promise<AlertPart[]> {
-    return Promise.all(open.map(async ({ scheme, problem, id }) => {
-      const part: AlertPart = { id: `${id}:${problem.key}`, title: `${scheme}: ${itemText(problem).replace(/^CI: /, '')}` };
-      const p = this.store.getProject(id);
-      const slug = p && repoSlug(p.repo_url);
-      if (problem.key !== 'land:fallback' || !p || !slug || !land) return part;
-      const runs = land.state.fellBack.slice(-3).map((f) => f.run).filter((r): r is number => !!r);
-      const said = await Promise.all(runs.map(async (run) => {
-        const jobs = await this.guarded(Date.now(), () => this.jobs(slug, { id: run } as Run, this.deps.as(p)));
-        const j = jobs?.find((x) => x.conclusion === 'failure');
-        const step = (j?.steps as { name?: string; conclusion?: string }[] | undefined)?.find((x) => x.conclusion === 'failure')?.name;
-        return `https://github.com/${slug}/actions/runs/${run}: ${j ? `${j.name}${step ? ` › ${step}` : ''} failed${j.runner_name ? ` on ${j.runner_name}` : ''}` : 'no failed job'}`;
-      }));
-      return said.length ? { ...part, facts: said.join('; ') } : part;
-    }));
+    return Promise.all(
+      open.map(async ({ scheme, problem, id }) => {
+        const part: AlertPart = { id: `${id}:${problem.key}`, title: `${scheme}: ${itemText(problem).replace(/^CI: /, '')}` };
+        const p = this.store.getProject(id);
+        const slug = p && repoSlug(p.repo_url);
+        if (problem.key !== 'land:fallback' || !p || !slug || !land) return part;
+        const runs = land.state.fellBack
+          .slice(-3)
+          .map((f) => f.run)
+          .filter((r): r is number => !!r);
+        const said = await Promise.all(
+          runs.map(async (run) => {
+            const jobs = await this.guarded(Date.now(), () => this.jobs(slug, { id: run } as Run, this.deps.as(p)));
+            const j = jobs?.find((x) => x.conclusion === 'failure');
+            const step = (j?.steps as { name?: string; conclusion?: string }[] | undefined)?.find((x) => x.conclusion === 'failure')?.name;
+            return `https://github.com/${slug}/actions/runs/${run}: ${j ? `${j.name}${step ? ` › ${step}` : ''} failed${j.runner_name ? ` on ${j.runner_name}` : ''}` : 'no failed job'}`;
+          }),
+        );
+        return said.length ? { ...part, facts: said.join('; ') } : part;
+      }),
+    );
   }
 
   async problems(p: Project, slug: string, saved: Saved, now: number): Promise<Problem[]> {
@@ -652,20 +750,26 @@ export class CiHealth {
     else this.sayOnce(`runners:${p.id}`, `CI health: can't list ${slug}'s runners (needs a repo admin's linked GitHub), so work stuck on offline runners there goes unseen.`);
     this.wakeParked(p, runners);
 
-    const runs: Run[] = ((await this.read(`repos/${slug}/actions/runs?per_page=${RUNS}`, as))?.workflow_runs ?? [])
-      .filter((r: Run) => now - at(r.created_at) <= WINDOW_MS);
+    const runs: Run[] = ((await this.read(`repos/${slug}/actions/runs?per_page=${RUNS}`, as))?.workflow_runs ?? []).filter((r: Run) => now - at(r.created_at) <= WINDOW_MS);
     const all: Job[] = [];
     for (const r of runs) all.push(...(await this.jobs(slug, r, as)));
     await this.sweepOrphans(p, slug, runs, as, now);
     this.recent.set(p.id, all);
-    this.store.setSetting(`ci-health:recent:${p.id}`, all.map(({ steps, ...j }) => j));
+    this.store.setSetting(
+      `ci-health:recent:${p.id}`,
+      all.map(({ steps, ...j }) => j),
+    );
     for (const g of deadGroups(all)) out.push(deadProblem(g, await this.reason(slug, g.dead.at(-1)!, as)));
     // A runner list it can't read keeps the stuck items as they were: it can't tell, so it neither clears nor rings anew.
     out.push(...(runners ? stuckProblems(runners, all, saved.offline, now) : (saved.problems ?? []).filter((x) => x.key.startsWith('stuck:'))));
     out.push(...hungProblems(all, now, this.deps.longs?.() ?? []));
 
     const branch = (await this.read(`repos/${slug}`, as))?.default_branch ?? 'main';
-    this.deps.green?.(p, runs.filter((r) => !quietWorkflow(p, r)).map((r) => ({ head_sha: r.head_sha, workflow_id: r.workflow_id, status: r.status, conclusion: r.conclusion, created_at: r.created_at, file: workflowFile(r) })), branch);
+    this.deps.green?.(
+      p,
+      runs.filter((r) => !quietWorkflow(p, r)).map((r) => ({ head_sha: r.head_sha, workflow_id: r.workflow_id, status: r.status, conclusion: r.conclusion, created_at: r.created_at, file: workflowFile(r) })),
+      branch,
+    );
     const onMain = new Map<number, Run[]>();
     for (const w of workflows) {
       const mainRuns: Run[] = (await this.read(`repos/${slug}/actions/workflows/${w.id}/runs?branch=${encodeURIComponent(branch)}&per_page=${RUNS}`, as))?.workflow_runs ?? [];
@@ -681,18 +785,36 @@ export class CiHealth {
       const verdict = mainRuns.find((r) => r.status === 'completed' && VERDICTS.has(r.conclusion ?? ''));
       const pair = verdictPair(mainRuns);
       const skipped = pair ? skippedJobs(await this.jobs(slug, pair[0], as), await this.jobs(slug, pair[1], as)) : [];
-      shown.push({ name: w.name, file: String(w.path ?? '').split('/').pop() ?? '', verdict: verdict ? viewRun(slug, verdict, minion) : null, skipped });
+      shown.push({
+        name: w.name,
+        file:
+          String(w.path ?? '')
+            .split('/')
+            .pop() ?? '',
+        verdict: verdict ? viewRun(slug, verdict, minion) : null,
+        skipped,
+      });
     }
     this.store.setSetting(`ci-health:view:${p.id}`, {
-      at: now, slug, branch,
-      runners: runners && runners.map((r) => ({
-        name: r.name, status: r.status, busy: !!r.busy, labels: (r.labels ?? []).map((l) => l.name),
-        job: all.find((j) => j.status === 'in_progress' && j.runner_name === r.name)?.name ?? null, offlineSince: saved.offline[r.name] ?? null,
-      })),
-      waiting: all.filter((j) => j.status === 'queued' || j.status === 'waiting').map((j) => {
-        const r = runs.find((x) => x.id === j.run_id);
-        return { name: j.name, labels: j.labels, since: j.created_at, run: j.run_id, ...(r && { branch: r.head_branch, event: r.event, minion: minion(r) }) };
-      }),
+      at: now,
+      slug,
+      branch,
+      runners:
+        runners &&
+        runners.map((r) => ({
+          name: r.name,
+          status: r.status,
+          busy: !!r.busy,
+          labels: (r.labels ?? []).map((l) => l.name),
+          job: all.find((j) => j.status === 'in_progress' && j.runner_name === r.name)?.name ?? null,
+          offlineSince: saved.offline[r.name] ?? null,
+        })),
+      waiting: all
+        .filter((j) => j.status === 'queued' || j.status === 'waiting')
+        .map((j) => {
+          const r = runs.find((x) => x.id === j.run_id);
+          return { name: j.name, labels: j.labels, since: j.created_at, run: j.run_id, ...(r && { branch: r.head_branch, event: r.event, minion: minion(r) }) };
+        }),
       ...runningNow(all, runs, runners, minion),
       workflows: shown,
       runs: runs.slice(0, 30).map((r) => viewRun(slug, r, minion)),
@@ -708,13 +830,11 @@ export class CiHealth {
       const view = repoSlug(p.repo_url) && canSee(p.id) ? this.store.getSetting<CiView>(`ci-health:view:${p.id}`) : undefined;
       if (!view) return [];
       const wakes = this.store.getSetting<WakeAt>(WAKE_AT) ?? {};
-      const problems = [...(this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []), ...(land?.project === p.id ? land.problems : [])]
-        .map((x) => ({ ...x, link: problemLink(x, p.id, wakes, (n) => this.store.getTicketByNumber(p.id, n)?.title) }));
+      const problems = [...(this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []), ...(land?.project === p.id ? land.problems : [])].map((x) => ({ ...x, link: problemLink(x, p.id, wakes, (n) => this.store.getTicketByNumber(p.id, n)?.title) }));
       // Each run's and queued job's minion (#1019), its title read now so a renamed minion reads right: a link, else what the run is.
-      const who = (r: { minion?: number | null; branch?: string; event?: string }) => r.minion
-        ? { href: `#/p/${p.id}/t/${r.minion}`, label: `#${r.minion} ${this.store.getTicketByNumber(p.id, r.minion)?.title ?? ''}`.trim() }
-        : { label: runKind(r, view.branch) };
-      const quiet = new Set(lines(p.ci_quiet)), watch = new Set(lines(p.ci_watch ?? ''));
+      const who = (r: { minion?: number | null; branch?: string; event?: string }) => (r.minion ? { href: `#/p/${p.id}/t/${r.minion}`, label: `#${r.minion} ${this.store.getTicketByNumber(p.id, r.minion)?.title ?? ''}`.trim() } : { label: runKind(r, view.branch) });
+      const quiet = new Set(lines(p.ci_quiet)),
+        watch = new Set(lines(p.ci_watch ?? ''));
       const shown = {
         ...view,
         waiting: view.waiting.map((j) => ({ ...j, who: who(j) })),
@@ -732,16 +852,25 @@ export class CiHealth {
    * else the Taskmaster's wake), or that it needs a person (it rings, and no fix minion is on it).
    */
   broken(canSee: (projectId: number) => boolean): BrokenRow[] {
-    return this.snapshot(canSee).flatMap((s) => s.problems.map((x) => {
-      const fixing = x.fixMinion && !x.fixMinion.closed;
-      const rerun = x.rerun && { running: 'shipped, re-running', failed: 'its re-run failed too', manual: 'shipped, needs a re-run by hand' }[x.rerun.state];
-      const who: BrokenRow['who'] = fixing ? { kind: 'minion', label: `#${x.fixMinion!.number} fixing${rerun ? ` · ${rerun}` : ''}`, href: x.link!.href }
-        : x.quiet ? { kind: 'taskmaster', label: 'Taskmaster looking', href: x.link!.href }
-          : { kind: 'person', label: 'Needs you', href: x.link!.href };
-      return { scheme: s.name, schemeId: s.id, key: x.key, what: x.plain?.what ?? x.title.replace(/^CI: /, ''), next: x.plain?.next, since: x.since ?? null,
-        // A red waiting on its first fix minion rings at noFix.ringsAt; every other quiet one at `held`.
-        ringing: !x.quiet, ...(x.quiet && (x.held ?? (x.noFix && !x.noFix.late ? x.noFix.ringsAt : null)) != null && { ringsAt: x.held ?? x.noFix!.ringsAt }), who };
-    }));
+    return this.snapshot(canSee).flatMap((s) =>
+      s.problems.map((x) => {
+        const fixing = x.fixMinion && !x.fixMinion.closed;
+        const rerun = x.rerun && { running: 'shipped, re-running', failed: 'its re-run failed too', manual: 'shipped, needs a re-run by hand' }[x.rerun.state];
+        const who: BrokenRow['who'] = fixing ? { kind: 'minion', label: `#${x.fixMinion!.number} fixing${rerun ? ` · ${rerun}` : ''}`, href: x.link!.href } : x.quiet ? { kind: 'taskmaster', label: 'Taskmaster looking', href: x.link!.href } : { kind: 'person', label: 'Needs you', href: x.link!.href };
+        return {
+          scheme: s.name,
+          schemeId: s.id,
+          key: x.key,
+          what: x.plain?.what ?? x.title.replace(/^CI: /, ''),
+          next: x.plain?.next,
+          since: x.since ?? null,
+          // A red waiting on its first fix minion rings at noFix.ringsAt; every other quiet one at `held`.
+          ringing: !x.quiet,
+          ...(x.quiet && (x.held ?? (x.noFix && !x.noFix.late ? x.noFix.ringsAt : null)) != null && { ringsAt: x.held ?? x.noFix!.ringsAt }),
+          who,
+        };
+      }),
+    );
   }
 
   /**
@@ -905,8 +1034,7 @@ export class CiHealth {
     save();
     // Back to green: the first green run on the branch after the red one (or the red one re-run green), a push's or a PR merge's too.
     for (const [w, was] of Object.entries(red)) {
-      const green = [...(onMain.get(Number(w)) ?? []), ...listed.filter((r) => String(r.workflow_id) === w && r.head_branch === branch)]
-        .filter((r) => r.status === 'completed' && r.conclusion === 'success' && (at(r.created_at) > at(was.at) || r.id === was.run)).sort((a, b) => at(a.created_at) - at(b.created_at))[0];
+      const green = [...(onMain.get(Number(w)) ?? []), ...listed.filter((r) => String(r.workflow_id) === w && r.head_branch === branch)].filter((r) => r.status === 'completed' && r.conclusion === 'success' && (at(r.created_at) > at(was.at) || r.id === was.run)).sort((a, b) => at(a.created_at) - at(b.created_at))[0];
       if (!green) continue;
       if (!quieted(green) && !this.say(p, green.id, `${p.name}'s ${green.name} is back to green on ${branch}: ${runUrl(slug, green)} (${short(green.head_sha)}, ${pacific(ended(green))}), after run ${was.run} failed.`)) continue;
       delete red[w];
@@ -940,8 +1068,7 @@ export class CiHealth {
     const t = this.fixTicket(p, mark);
     if (t) return { number: t.number!, closedAt: t.status === 'closed' ? t.updated_at : null };
     const c = mark.fixer ? this.store.getTicket(mark.fixer.ticket) : null;
-    return c && c.project_id === p.id && c.number != null
-      ? { number: c.number, closedAt: c.status === 'closed' ? c.updated_at : null, via: `shipped ${short(mark.fixer!.sha)} touching ${mark.fixer!.file}` } : null;
+    return c && c.project_id === p.id && c.number != null ? { number: c.number, closedAt: c.status === 'closed' ? c.updated_at : null, via: `shipped ${short(mark.fixer!.sha)} touching ${mark.fixer!.file}` } : null;
   }
   /** The red's named fix minion: only these are held open and re-run for (#1074); a credited fixer (mark.fixer) only touched the file. */
   private fixTicket(p: Project, mark: RedMark): Ticket | null {
@@ -951,7 +1078,9 @@ export class CiHealth {
     const ids = [mark.run, ...(mark.runs ?? [])].map(String);
     // The first open one, else the newest (Josh, 2026-11-19): a second fix after the first closed is the one at work, and a
     // later minion that only quotes the run (a review) can't take the hold from the open one.
-    const named = this.store.listTickets(p.id).filter((x) => x.number != null && (mark.chat?.ids.includes(x.id) || x.created_at >= (mark.told ?? 0) - 60_000))
+    const named = this.store
+      .listTickets(p.id)
+      .filter((x) => x.number != null && (mark.chat?.ids.includes(x.id) || x.created_at >= (mark.told ?? 0) - 60_000))
       .sort((a, b) => a.created_at - b.created_at)
       .filter((x) => {
         if (mark.chat?.ids.includes(x.id)) return true;
@@ -968,8 +1097,10 @@ export class CiHealth {
    * shortcut: a land of several commits with no "#N" subjects is only seen when the touching commit is its last; read the land's range if one is missed.
    */
   private async noteRed(p: Project, slug: string, branch: string, mark: RedMark, runs: Run[], as: GithubEnv, save: () => void) {
-    const later = runs.filter((r) => r.status === 'completed' && r.conclusion === 'failure' && r.id !== mark.run && at(r.created_at) > at(mark.at) && !mark.runs?.includes(r.id))
-      .sort((a, b) => at(a.created_at) - at(b.created_at)).map((r) => r.id);
+    const later = runs
+      .filter((r) => r.status === 'completed' && r.conclusion === 'failure' && r.id !== mark.run && at(r.created_at) > at(mark.at) && !mark.runs?.includes(r.id))
+      .sort((a, b) => at(a.created_at) - at(b.created_at))
+      .map((r) => r.id);
     if (later.length) {
       mark.runs = [...(mark.runs ?? []), ...later].slice(-20);
       save();
@@ -1042,13 +1173,25 @@ export class CiHealth {
     const url = runUrl(slug, { id: mark.run } as Run);
     const fails = mark.failures ?? [];
     const tests = fails.length
-      ? fails.map((f) => `- ${f.file}${f.name ? ` › ${f.name}` : ''}${f.message ? `\n${f.message.split('\n').map((l) => `    ${l}`).join('\n')}` : ''}`).join('\n')
+      ? fails
+          .map(
+            (f) =>
+              `- ${f.file}${f.name ? ` › ${f.name}` : ''}${
+                f.message
+                  ? `\n${f.message
+                      .split('\n')
+                      .map((l) => `    ${l}`)
+                      .join('\n')}`
+                  : ''
+              }`,
+          )
+          .join('\n')
       : '- none read yet from its job logs';
     const message = [
       `${p.name}'s ${file} is red on ${branch}: run ${mark.run} (${url}), ${pacific(at(mark.at))}${mark.where ? `, at ${mark.where}` : ''}.`,
       ...(mark.runs?.length ? [`Later red runs of the same streak: ${mark.runs.join(', ')}.`] : []),
       '',
-      'Failing tests, from the run\'s failed job logs:',
+      "Failing tests, from the run's failed job logs:",
       tests,
       '',
       `\`ci-failures ${mark.run} -R ${slug}\` prints them in full.`,
@@ -1104,10 +1247,12 @@ export class CiHealth {
         this.busy = false;
       }
     };
-    const timers = [30_000, 150_000].map((ms, i) => setTimeout(() => {
-      if (i === 1) this.soonAt.delete(projectId);
-      void look();
-    }, ms));
+    const timers = [30_000, 150_000].map((ms, i) =>
+      setTimeout(() => {
+        if (i === 1) this.soonAt.delete(projectId);
+        void look();
+      }, ms),
+    );
     for (const x of timers) x.unref?.();
     this.soonAt.set(projectId, timers);
   }
@@ -1125,9 +1270,7 @@ export class CiHealth {
     const re = mark.rerun?.ticket === t.id ? mark.rerun : undefined;
     if (re && !re.failed) {
       // Ours is the first dispatched run since: GitHub runs the branch's tip when it starts it, which can be past re.sha.
-      const seen = re.dispatched
-        ? runs.filter((r) => r.event === 'workflow_dispatch' && at(r.created_at) >= re.at - 60_000).sort((a, b) => at(a.created_at) - at(b.created_at))[0]
-        : runs.filter((r) => r.head_sha === re.sha).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
+      const seen = re.dispatched ? runs.filter((r) => r.event === 'workflow_dispatch' && at(r.created_at) >= re.at - 60_000).sort((a, b) => at(a.created_at) - at(b.created_at))[0] : runs.filter((r) => r.head_sha === re.sha).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
       if (seen && (seen.id !== re.run || seen.head_sha !== re.sha)) {
         re.run = seen.id;
         re.sha = seen.head_sha;
@@ -1139,8 +1282,11 @@ export class CiHealth {
         re.failed = true;
         save(); // before sending, so a restart can't wake it twice
         this.deps.held?.(t.id, null);
-        this.deps.wake?.(t.id, `The ${file} re-run on ${branch} after your fix went live ended ${seen.conclusion ?? 'without a verdict'}, so ${branch} is still red and this minion stays open until it's green. Fix it and ship again; Citadel re-runs ${file} once that's live.
-${text}`);
+        this.deps.wake?.(
+          t.id,
+          `The ${file} re-run on ${branch} after your fix went live ended ${seen.conclusion ?? 'without a verdict'}, so ${branch} is still red and this minion stays open until it's green. Fix it and ship again; Citadel re-runs ${file} once that's live.
+${text}`,
+        );
         return;
       }
     }
@@ -1202,7 +1348,12 @@ ${text}`);
   /** Held mail for the Taskmaster about `run`: true once it has it; false (no Taskmaster yet, or the send threw) to try again next poll. */
   private say(p: Project, run: number | string, text: string, wake = false, entry?: (id: number) => void): boolean {
     try {
-      const told = this.deps.tell!(p, text, wake, this.admins().map((u) => u.id));
+      const told = this.deps.tell!(
+        p,
+        text,
+        wake,
+        this.admins().map((u) => u.id),
+      );
       if (typeof told === 'number' && told > 0) entry?.(told);
       return !!told;
     } catch (err) {
@@ -1235,8 +1386,15 @@ ${text}`);
     const extra = [
       // GitHub's API has no way to read a job's step summary, so its error annotations (::error:: lines) stand in.
       errors.length ? `GitHub's error lines:\n${errors.map((e) => `- ${e}`).join('\n')}` : '',
-      files.length ? `Its files in ${APP_NAME}'s CI store (ci_files with run: ${r.id}): ${files.slice(0, 5).map((f) => `${f.name} (${f.kind})`).join(', ')}${files.length > 5 ? `, ${files.length - 5} more` : ''}.` : '',
-    ].filter(Boolean).join('\n');
+      files.length
+        ? `Its files in ${APP_NAME}'s CI store (ci_files with run: ${r.id}): ${files
+            .slice(0, 5)
+            .map((f) => `${f.name} (${f.kind})`)
+            .join(', ')}${files.length > 5 ? `, ${files.length - 5} more` : ''}.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
     const finished = `finished ${pacific(at(r.updated_at ?? r.created_at))}`;
     const failures = `\`ci-failures ${r.id} -R ${slug}\` prints its failing tests.`;
     if (to === 'minion') {
@@ -1255,8 +1413,13 @@ ${text}`);
     const notes = await this.read<GhNote[]>(path, as, true);
     this.cache.delete(path);
     if (!Array.isArray(notes)) return [];
-    return notes.filter((n) => n?.annotation_level === 'failure' && typeof n.message === 'string' && !/^Process completed with exit code \d+\.?$/.test(n.message.trim()))
-      .slice(0, 5).map((n) => { const m = n.message!.replace(/\s+/g, ' ').trim(); return m.length > 200 ? `${m.slice(0, 199)}…` : m; });
+    return notes
+      .filter((n) => n?.annotation_level === 'failure' && typeof n.message === 'string' && !/^Process completed with exit code \d+\.?$/.test(n.message.trim()))
+      .slice(0, 5)
+      .map((n) => {
+        const m = n.message!.replace(/\s+/g, ' ').trim();
+        return m.length > 200 ? `${m.slice(0, 199)}…` : m;
+      });
   }
 
   /** The outbox's rows waiting on this scheme's runners: met once one is online, or when the list can't be read (they are told to ask). The outbox sends, retries and holds them for a dismissed minion. */
@@ -1284,12 +1447,18 @@ ${text}`);
     this.meetRunners(p, runners);
     const all = runnerWaiters(this.store);
     const mine = (w: RunnerWaiter) => this.store.getTicket(w.ticket)?.project_id === p.id;
-    const gone = (w: RunnerWaiter) => { const t = this.store.getTicket(w.ticket); return !t || t.status === 'closed'; };
+    const gone = (w: RunnerWaiter) => {
+      const t = this.store.getTicket(w.ticket);
+      return !t || t.status === 'closed';
+    };
     const up = runners && onlineRunners(runners, p.name);
     const woken = (!up || up.length) && this.deps.wake ? all.filter((w) => mine(w) && !gone(w)) : [];
     if (!woken.length && !all.some(gone)) return;
     // Dropped before sending, so a send that throws can't wake anyone twice.
-    this.store.setSetting(RUNNER_WAITERS, all.filter((w) => !gone(w) && !woken.includes(w)));
+    this.store.setSetting(
+      RUNNER_WAITERS,
+      all.filter((w) => !gone(w) && !woken.includes(w)),
+    );
     const names = up?.map((r) => r.name).join(', ');
     for (const w of woken) {
       const reason = w.reason.replace(/[.\s]+$/, '');
@@ -1310,7 +1479,8 @@ ${text}`);
     const admins = this.admins();
     const open = new Map(problems.map((x) => [x.key, x]));
     for (const [key, x] of open) {
-      const title = humanText(p.name, { ...x, onIt: this.onIt(p, x) }), quiet = x.quiet;
+      const title = humanText(p.name, { ...x, onIt: this.onIt(p, x) }),
+        quiet = x.quiet;
       const sent = (saved.sent[key] ??= {});
       for (const u of admins) {
         if (sent[u.id] === title) continue;
@@ -1337,7 +1507,7 @@ ${text}`);
     } catch (err) {
       if (!(err instanceof GhError) || err.status !== 404) throw err;
       const owner = as && p.owner_id != null ? this.store.getUser(p.owner_id) : null;
-      const who = !as ? "the box's GitHub login" : `${owner?.name ?? "the scheme owner"}'s linked GitHub`;
+      const who = !as ? "the box's GitHub login" : `${owner?.name ?? 'the scheme owner'}'s linked GitHub`;
       throw new Error(`${who} can't see ${slug} (GitHub answers 404): it has no access to the repo or its invite is still waiting to be accepted, or the repo isn't at that address (deleted, or repo_url is wrong).`);
     }
   }

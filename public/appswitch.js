@@ -62,15 +62,21 @@ let cancelled = false; // Esc while Alt is held: its release is still the switch
 
 const storeKey = () => `citadel-app-switch:${person}`;
 function recent() {
-  try { return JSON.parse(localStorage.getItem(storeKey())) ?? []; } catch { return []; }
+  try {
+    return JSON.parse(localStorage.getItem(storeKey())) ?? [];
+  } catch {
+    return [];
+  }
 }
 // A contraption's own page (/apps/<name>/…), else Citadel's.
-const own = typeof location === 'undefined' ? null : location.pathname.match(/^\/apps\/([^/]+)\//)?.[1] ?? null;
+const own = typeof location === 'undefined' ? null : (location.pathname.match(/^\/apps\/([^/]+)\//)?.[1] ?? null);
 /** The app showing: a contraption's name, or '' for Citadel's own views. */
 const showing = () => own ?? location.hash.match(/^#\/apps\/([^/]+)$/)?.[1] ?? '';
 function record() {
   if (!person) return;
-  try { localStorage.setItem(storeKey(), JSON.stringify(remember(recent(), showing()))); } catch {}
+  try {
+    localStorage.setItem(storeKey(), JSON.stringify(remember(recent(), showing())));
+  } catch {}
 }
 
 /** Start switching for `name` (signed in), counting where they are now as used. */
@@ -105,7 +111,11 @@ function onKey(e) {
     if (document.querySelector('dialog:modal') || e.view?.document.querySelector('dialog:modal')) return;
     const list = entries();
     const byName = new Map(list.map((x) => [x.name, x]));
-    order = appOrder(recent(), list.map((x) => x.name), list.find((x) => x.current)?.name ?? '').map((n) => byName.get(n));
+    order = appOrder(
+      recent(),
+      list.map((x) => x.name),
+      list.find((x) => x.current)?.name ?? '',
+    ).map((n) => byName.get(n));
   }
   const r = switchKey(state, e, order);
   if (r.consume) {
@@ -191,7 +201,10 @@ function draw() {
 }
 
 // Focus left the browser window mid-switch (the system's own Alt-Tab, say): no keyup will come.
-const onBlur = () => setTimeout(() => { if (state && !document.hasFocus()) shut(); });
+const onBlur = () =>
+  setTimeout(() => {
+    if (state && !document.hasFocus()) shut();
+  });
 
 /** A key a contraption's frame passed on (rail.js forwardKeys) as { type, code, key, altKey, … }, or null: it lost focus. */
 export function frameKey(k) {

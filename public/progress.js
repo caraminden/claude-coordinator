@@ -28,10 +28,17 @@ export function createProgress() {
   };
 }
 
-const basename = (path) => String(path ?? '').split('/').filter(Boolean).pop() || String(path ?? '');
+const basename = (path) =>
+  String(path ?? '')
+    .split('/')
+    .filter(Boolean)
+    .pop() || String(path ?? '');
 
 function clip(text, max = 90) {
-  const line = String(text ?? '').trim().split('\n')[0].trim();
+  const line = String(text ?? '')
+    .trim()
+    .split('\n')[0]
+    .trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
@@ -46,12 +53,30 @@ function hostname(url) {
 }
 
 const GIT_WORDS = {
-  status: 'Checked what changed', diff: 'Looked at code changes', log: 'Looked at commit history', show: 'Looked at a commit',
-  add: 'Staged changes', commit: 'Committed changes', merge: 'Merged branches', rebase: 'Rebased the branch',
-  push: 'Pushed to the remote', pull: 'Pulled from the remote', fetch: 'Fetched from the remote', checkout: 'Switched branches',
-  switch: 'Switched branches', branch: 'Looked at branches', stash: 'Stashed changes', clone: 'Cloned a repo',
-  worktree: 'Managed worktrees', reset: 'Reset changes', restore: 'Restored files', 'ls-files': 'Listed tracked files',
-  grep: 'Searched the code', blame: 'Looked at who changed what', remote: 'Looked at remotes', 'rev-parse': 'Looked up a commit',
+  status: 'Checked what changed',
+  diff: 'Looked at code changes',
+  log: 'Looked at commit history',
+  show: 'Looked at a commit',
+  add: 'Staged changes',
+  commit: 'Committed changes',
+  merge: 'Merged branches',
+  rebase: 'Rebased the branch',
+  push: 'Pushed to the remote',
+  pull: 'Pulled from the remote',
+  fetch: 'Fetched from the remote',
+  checkout: 'Switched branches',
+  switch: 'Switched branches',
+  branch: 'Looked at branches',
+  stash: 'Stashed changes',
+  clone: 'Cloned a repo',
+  worktree: 'Managed worktrees',
+  reset: 'Reset changes',
+  restore: 'Restored files',
+  'ls-files': 'Listed tracked files',
+  grep: 'Searched the code',
+  blame: 'Looked at who changed what',
+  remote: 'Looked at remotes',
+  'rev-parse': 'Looked up a commit',
 };
 
 const TEST_RE = /^(npm|pnpm|yarn|bun) (run )?test|^(pytest|jest|vitest|go test|cargo test|make test|node --test)/;
@@ -69,10 +94,13 @@ function describeOne(cmd) {
   const [prog, ...rest] = c.split(/\s+/);
   const args = rest.filter((a) => !a.startsWith('-'));
   const file = args.find((a) => /[./]/.test(a) && !/[|<>$]/.test(a));
-  if (!prog || prog === 'cd' || prog === 'true' || prog === 'echo' && /^echo\s*$/.test(c)) return null;
+  if (!prog || prog === 'cd' || prog === 'true' || (prog === 'echo' && /^echo\s*$/.test(c))) return null;
   if (TEST_RE.test(c)) return 'Ran the tests';
   if (prog === 'git') {
-    const sub = bareGit(c).split(/\s+/).slice(1).find((a) => !a.startsWith('-'));
+    const sub = bareGit(c)
+      .split(/\s+/)
+      .slice(1)
+      .find((a) => !a.startsWith('-'));
     return GIT_WORDS[sub] ?? `Ran git ${sub ?? ''}`.trim();
   }
   if (prog === 'gh') return `Used GitHub (${args.slice(0, 2).join(' ')})`;
@@ -89,8 +117,8 @@ function describeOne(cmd) {
   if (written) return `Wrote ${basename(written)}`;
   // sed's and perl's script comes before the file, and may hold slashes and dots itself.
   const target = /^(sed|perl)$/.test(prog) && args.length > 1 ? args.at(-1) : file;
-  if (/^(cat|head|tail|less|bat)$/.test(prog) || prog === 'sed' && rest.includes('-n')) return target ? `Looked at ${basename(target)}` : 'Looked at a file';
-  if (prog === 'sed' || prog === 'perl' && rest.some((a) => /^-[a-z]*i/.test(a))) return target ? `Edited ${basename(target)}` : 'Edited a file';
+  if (/^(cat|head|tail|less|bat)$/.test(prog) || (prog === 'sed' && rest.includes('-n'))) return target ? `Looked at ${basename(target)}` : 'Looked at a file';
+  if (prog === 'sed' || (prog === 'perl' && rest.some((a) => /^-[a-z]*i/.test(a)))) return target ? `Edited ${basename(target)}` : 'Edited a file';
   if (/^(grep|rg|ag)$/.test(prog)) return 'Searched files';
   if (/^(wc|du|df|stat|file)$/.test(prog)) return 'Measured files';
   if (/^(mkdir|touch)$/.test(prog)) return 'Created files';
@@ -127,7 +155,10 @@ function describeCommand(command) {
   // Filler like `echo done` only matters when it is all the command did.
   const filler = ['Printed some text', 'Waited', 'Listed files'];
   if (parts.some((t) => !filler.includes(t))) parts.splice(0, parts.length, ...parts.filter((t) => !filler.includes(t)));
-  const shown = parts.slice(0, 2).map((t, n) => (n ? t.charAt(0).toLowerCase() + t.slice(1) : t)).join(', ');
+  const shown = parts
+    .slice(0, 2)
+    .map((t, n) => (n ? t.charAt(0).toLowerCase() + t.slice(1) : t))
+    .join(', ');
   return parts.length > 2 ? `${shown} and more` : shown;
 }
 
@@ -151,9 +182,19 @@ function commandPhase(command, description = '') {
 }
 
 const TOOL_PHASE = {
-  Read: 'explore', Grep: 'explore', Glob: 'explore', LS: 'explore',
-  Edit: 'change', MultiEdit: 'change', NotebookEdit: 'change', Write: 'change',
-  WebFetch: 'research', WebSearch: 'research', Task: 'delegate', Agent: 'delegate', Workflow: 'delegate',
+  Read: 'explore',
+  Grep: 'explore',
+  Glob: 'explore',
+  LS: 'explore',
+  Edit: 'change',
+  MultiEdit: 'change',
+  NotebookEdit: 'change',
+  Write: 'change',
+  WebFetch: 'research',
+  WebSearch: 'research',
+  Task: 'delegate',
+  Agent: 'delegate',
+  Workflow: 'delegate',
 };
 
 /** Which phase of the work a tool call belongs to (see PHASES). */
@@ -358,7 +399,12 @@ export function applyEvent(p, kind, data, at = null) {
       if (block.name === 'TaskCreate') {
         p.pendingCreates.set(block.id, input);
       } else if (block.name === 'TaskUpdate') {
-        updateTask(p, p.tasks.findIndex((t) => t.id === String(input.taskId)), input, at);
+        updateTask(
+          p,
+          p.tasks.findIndex((t) => t.id === String(input.taskId)),
+          input,
+          at,
+        );
       } else if (PLAN_TOOLS.has(block.name)) {
         applyPlan(p, block.id, input, at);
       } else if (block.name === 'TodoWrite' && Array.isArray(input.todos)) {
@@ -370,7 +416,7 @@ export function applyEvent(p, kind, data, at = null) {
           const was = i < 0 ? null : old.splice(i, 1)[0];
           const id = was?.id ?? `todo-${block.id}-${n}`;
           const startedAt = t.status !== 'in_progress' ? undefined : was?.status === 'in_progress' ? was.startedAt : at;
-          return { id, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0, startedAt, work: was?.work ?? 0, workFrom: t.status === 'in_progress' ? was?.workFrom ?? at : null };
+          return { id, subject: t.content, activeForm: t.activeForm, status: t.status, actions: 0, startedAt, work: was?.work ?? 0, workFrom: t.status === 'in_progress' ? (was?.workFrom ?? at) : null };
         });
       } else if (isWorkTool(block.name)) {
         const task = stepInfo(p, true).current;
@@ -410,7 +456,7 @@ function updateTask(p, idx, input, at) {
       p.finished?.push({ id: task.id, subject: input.subject || task.subject, estimate: task.estimate ?? null, startedAt: task.startedAt, finishedAt: at, work: task.work ?? 0, model: p.model });
     }
     // The order steps finished in, so the plan's track fills left to right (#630).
-    if (input.status === 'completed' && task.status !== 'completed') task.doneN = (p.doneCount = (p.doneCount ?? 0) + 1);
+    if (input.status === 'completed' && task.status !== 'completed') task.doneN = p.doneCount = (p.doneCount ?? 0) + 1;
     task.status = input.status;
   }
   if (input.subject) task.subject = input.subject;
@@ -473,8 +519,7 @@ function estimateOf(input) {
  */
 export function planTrack(p) {
   const rank = { completed: 0, in_progress: 1 };
-  return [...p.tasks].sort((a, b) => (rank[a.status] ?? 2) - (rank[b.status] ?? 2) || (a.status === 'completed' ? (a.doneN ?? 0) - (b.doneN ?? 0) : 0))
-    .map((t) => [t.estimate ?? null, t.status === 'completed' ? 'c' : t.status === 'in_progress' ? 'i' : 'p']);
+  return [...p.tasks].sort((a, b) => (rank[a.status] ?? 2) - (rank[b.status] ?? 2) || (a.status === 'completed' ? (a.doneN ?? 0) - (b.doneN ?? 0) : 0)).map((t) => [t.estimate ?? null, t.status === 'completed' ? 'c' : t.status === 'in_progress' ? 'i' : 'p']);
 }
 
 /**
@@ -535,9 +580,7 @@ export function progressLine(p, running) {
  * older "Running tests… 3/7" form, which stored last_activity may still hold.
  */
 export function withoutCount(line) {
-  return line
-    .replace(/^(?:Step|(Paused at) step) \d+ of \d+: /, (_, paused) => (paused ? 'Paused at: ' : ''))
-    .replace(/(?: · | )\d+(?:\/| of )\d+(?: steps| done)?$/, '');
+  return line.replace(/^(?:Step|(Paused at) step) \d+ of \d+: /, (_, paused) => (paused ? 'Paused at: ' : '')).replace(/(?: · | )\d+(?:\/| of )\d+(?: steps| done)?$/, '');
 }
 
 /** How long the readout keeps a finished call's label before saying "Thinking…", so the line doesn't blink between two calls (#543). */

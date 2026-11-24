@@ -3,9 +3,23 @@
 // rules page both read this file, so the gate is decided in one place.
 
 /** [value, what people read] for each setting, in the order the page shows them. */
-export const SHIP_PATHS = [['citadel', 'Citadel ships it'], ['pr-auto', 'Pull request, auto-merge when green'], ['pr-minion', 'Pull request, the minion merges when green'], ['pr-person', 'Pull request, a person merges']];
-export const GO_FROM = [['never', 'Never needed'], ['high', 'High-risk changes'], ['medium', 'Medium and high-risk changes'], ['all', 'Every change']];
-export const TRY_FIRST = [['never', 'Ships when green'], ['ui', 'UI changes wait for a try'], ['features', 'Every feature waits for a try']];
+export const SHIP_PATHS = [
+  ['citadel', 'Citadel ships it'],
+  ['pr-auto', 'Pull request, auto-merge when green'],
+  ['pr-minion', 'Pull request, the minion merges when green'],
+  ['pr-person', 'Pull request, a person merges'],
+];
+export const GO_FROM = [
+  ['never', 'Never needed'],
+  ['high', 'High-risk changes'],
+  ['medium', 'Medium and high-risk changes'],
+  ['all', 'Every change'],
+];
+export const TRY_FIRST = [
+  ['never', 'Ships when green'],
+  ['ui', 'UI changes wait for a try'],
+  ['features', 'Every feature waits for a try'],
+];
 export const values = (opts) => opts.map(([v]) => v);
 export const label = (opts, v) => opts.find(([k]) => k === v)?.[1] ?? v;
 
@@ -26,7 +40,10 @@ export const needsGo = (goFrom, risk) => RANK[risk] >= FROM[goFrom || 'high'];
 export function shippingGate({ ship_path, go_from, approval_rules }) {
   const goFrom = ship_path === 'pr-person' ? 'all' : go_from;
   if (!ship_path?.startsWith('pr-')) return { go_from: goFrom, approval_rules };
-  const rules = (approval_rules ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const rules = (approval_rules ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
   const next = goFrom === 'all' ? [...rules, ...MERGE_RULES.filter((r) => !rules.includes(r))] : rules.filter((r) => !MERGE_RULES.includes(r));
   return { go_from: goFrom, approval_rules: next.length === rules.length && next.every((r, i) => r === rules[i]) ? approval_rules : next.join('\n') };
 }

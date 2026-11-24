@@ -7,10 +7,7 @@ import { join, sep } from 'node:path';
 import type { ContraptionRow, Store } from './db.ts';
 
 /** Where a scheme's favicon may be, best first: the first that exists is the scheme's icon. */
-export const ICON_PATHS = [
-  'assets/icon/icon.svg', 'assets/icon/favicon.svg', 'assets/icon/favicon-48.svg', 'assets/icon/favicon-32.svg',
-  'web/public/icon.svg', 'app/web/public/icon.svg', 'public/icon.svg', 'public/favicon.svg', 'static/favicon.svg', 'favicon.svg',
-];
+export const ICON_PATHS = ['assets/icon/icon.svg', 'assets/icon/favicon.svg', 'assets/icon/favicon-48.svg', 'assets/icon/favicon-32.svg', 'web/public/icon.svg', 'app/web/public/icon.svg', 'public/icon.svg', 'public/favicon.svg', 'static/favicon.svg', 'favicon.svg'];
 export const MAX_ICON_BYTES = 256 * 1024;
 
 /** Sent with the icon: an SVG in an <img> can't run scripts, and these keep it inert when opened on its own too. */
@@ -26,11 +23,16 @@ const NO_ICON = { missing: 'This scheme has no favicon' };
 
 /** The first usable of ICON_PATHS, or why there is none: none there, a link out of the checkout, or too big. */
 export async function findIcon(repoDir: string | null): Promise<Found | { missing: string }> {
-  const root = repoDir && await realpath(repoDir).catch(() => null);
+  const root = repoDir && (await realpath(repoDir).catch(() => null));
   if (!root) return NO_ICON;
   let refused: { missing: string } | undefined;
   // citadel-app.json's icon (#840): the scheme's own override for this use, else the source it names, then the usual places.
-  const cfg = await readFile(join(root, 'citadel-app.json'), 'utf8').then((t) => JSON.parse(t).icon, () => null).catch(() => null);
+  const cfg = await readFile(join(root, 'citadel-app.json'), 'utf8')
+    .then(
+      (t) => JSON.parse(t).icon,
+      () => null,
+    )
+    .catch(() => null);
   const named = [cfg?.overrides?.scheme, cfg?.source].filter((p): p is string => typeof p === 'string' && !!p && !p.startsWith('/') && !p.split('/').includes('..'));
   for (const path of [...named, ...ICON_PATHS]) {
     // realpath, so neither the file nor a folder on its way can be a symlink out of the checkout.
@@ -56,11 +58,14 @@ export async function findIcon(repoDir: string | null): Promise<Found | { missin
  * with an icon on its own service. With several, the oldest registration (lowest id) wins, so the pick never flips.
  */
 export function homeApp(store: Store, projectId: number): ContraptionRow | undefined {
-  return store.listContraptions().filter((c) => c.home_scheme === projectId && c.icon && !/^https?:/.test(c.icon)).sort((a, b) => a.id - b.id)[0];
+  return store
+    .listContraptions()
+    .filter((c) => c.home_scheme === projectId && c.icon && !/^https?:/.test(c.icon))
+    .sort((a, b) => a.id - b.id)[0];
 }
 
 /** Where the app serves its icon, as the rail's icon proxy builds it (src/apps.ts). */
-const appIconPath = (c: ContraptionRow) => c.icon!.startsWith('/apps/') ? c.icon! : `/apps/${c.name}/${c.icon!.replace(/^\//, '')}`;
+const appIconPath = (c: ContraptionRow) => (c.icon!.startsWith('/apps/') ? c.icon! : `/apps/${c.name}/${c.icon!.replace(/^\//, '')}`);
 
 /** The app icon's version: its last deployed commit (a redeploy is when its icon can change), as a number for the URL. */
 function appVersion(store: Store, c: ContraptionRow): number {
@@ -92,20 +97,36 @@ function fetchAppIcon(c: ContraptionRow, identity: string | null): Promise<{ bod
   return new Promise((resolve) => {
     const fail = (missing: string) => resolve({ missing });
     let up: ReturnType<typeof request>;
-    try { up = request({ host: '127.0.0.1', port: c.port, path: appIconPath(c), headers: identity ? { accept: 'image/*', 'x-citadel-identity': identity } : { accept: 'image/*' } }, (r) => {
-      const type = String(r.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
-      if (r.statusCode !== 200 || !IMAGE_TYPE.test(type)) { r.resume(); return fail(`${c.title} has no icon`); }
-      const chunks: Buffer[] = [];
-      let size = 0;
-      r.on('data', (d: Buffer) => {
-        size += d.length;
-        if (size > MAX_ICON_BYTES) { up.destroy(); return fail(`${c.title}'s icon is over ${MAX_ICON_BYTES / 1024} KB`); }
-        chunks.push(d);
+    try {
+      up = request({ host: '127.0.0.1', port: c.port, path: appIconPath(c), headers: identity ? { accept: 'image/*', 'x-citadel-identity': identity } : { accept: 'image/*' } }, (r) => {
+        const type = String(r.headers['content-type'] ?? '')
+          .split(';')[0]
+          .trim()
+          .toLowerCase();
+        if (r.statusCode !== 200 || !IMAGE_TYPE.test(type)) {
+          r.resume();
+          return fail(`${c.title} has no icon`);
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        r.on('data', (d: Buffer) => {
+          size += d.length;
+          if (size > MAX_ICON_BYTES) {
+            up.destroy();
+            return fail(`${c.title}'s icon is over ${MAX_ICON_BYTES / 1024} KB`);
+          }
+          chunks.push(d);
+        });
+        r.on('end', () => resolve({ body: Buffer.concat(chunks), type }));
+        r.on('error', () => fail(`${c.title} is not answering`));
       });
-      r.on('end', () => resolve({ body: Buffer.concat(chunks), type }));
-      r.on('error', () => fail(`${c.title} is not answering`));
-    }); } catch { return fail(`${c.title} has no icon`); } // a path request() refuses
-    up.setTimeout(10_000, () => { up.destroy(); fail(`${c.title} is not answering`); });
+    } catch {
+      return fail(`${c.title} has no icon`);
+    } // a path request() refuses
+    up.setTimeout(10_000, () => {
+      up.destroy();
+      fail(`${c.title} is not answering`);
+    });
     up.on('error', () => fail(`${c.title} is not answering`));
     up.end();
   });
@@ -122,7 +143,10 @@ export async function readIcon(projectId: number, repoDir: string | null, store?
   if (!('file' in found)) {
     cache.delete(projectId);
     const c = store && homeApp(store, projectId);
-    if (!c) { appCache.delete(projectId); return found; }
+    if (!c) {
+      appCache.delete(projectId);
+      return found;
+    }
     const key = `${c.id}:${c.icon}:${appVersion(store, c)}`;
     const hit = appCache.get(projectId);
     if (hit?.key === key) return hit;

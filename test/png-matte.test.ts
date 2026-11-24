@@ -57,7 +57,7 @@ test('anything the matte cannot read is left for the caller to keep as sent', ()
   assert.equal(decodePng(shortHeader), null, 'a broken header is unreadable, not a throw');
 });
 
-test('the matte off the server\'s thread gives the same pixels', async () => {
+test("the matte off the server's thread gives the same pixels", async () => {
   const png = encodePng(2, 1, Buffer.from([0, 0, 0, 255, 128, 0, 0, 255]));
   assert.deepEqual(await matteBlackOff(png), matteBlack(png));
   assert.equal(await matteBlackOff(Buffer.from('nope')), null);

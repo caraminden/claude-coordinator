@@ -27,11 +27,28 @@ function watch(gh: ReturnType<typeof github>, repos = ['caraminden/claude-coordi
   return { w, sent, logs };
 }
 
-test('only a ship branch\'s running jobs on self-hosted runners count, each with its repo, so same-named runners in two repos stay apart', async () => {
+test("only a ship branch's running jobs on self-hosted runners count, each with its repo, so same-named runners in two repos stay apart", async () => {
   const gh = github({
-    [runs('caraminden/claude-coordinator')]: { workflow_runs: [{ id: 1, head_branch: 'land/1268-x' }, { id: 2, head_branch: 'main' }] },
-    [jobs('caraminden/claude-coordinator', 1)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-G248IJ8' }, { status: 'queued', runner_name: null }, { status: 'in_progress', labels: ['ubuntu-latest'], runner_name: 'GitHub Actions 3' }, { status: 'completed', runner_name: 'DESKTOP-G248IJ8-2' }] },
-    [runs('caraminden/peek-auras')]: { workflow_runs: [{ id: 7, head_branch: 'land/peek-9' }, { id: 8, head_branch: 'feature/land/x' }] },
+    [runs('caraminden/claude-coordinator')]: {
+      workflow_runs: [
+        { id: 1, head_branch: 'land/1268-x' },
+        { id: 2, head_branch: 'main' },
+      ],
+    },
+    [jobs('caraminden/claude-coordinator', 1)]: {
+      jobs: [
+        { status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-G248IJ8' },
+        { status: 'queued', runner_name: null },
+        { status: 'in_progress', labels: ['ubuntu-latest'], runner_name: 'GitHub Actions 3' },
+        { status: 'completed', runner_name: 'DESKTOP-G248IJ8-2' },
+      ],
+    },
+    [runs('caraminden/peek-auras')]: {
+      workflow_runs: [
+        { id: 7, head_branch: 'land/peek-9' },
+        { id: 8, head_branch: 'feature/land/x' },
+      ],
+    },
     [jobs('caraminden/peek-auras', 7)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-G248IJ8' }] },
   });
   const { w, sent } = watch(gh);
@@ -110,11 +127,13 @@ test("while Citadel's own ship runs, only its runners are ships, so another sche
 test("an early next train's run is squeezed while a ship runs; with none, the oldest early run is the ship, being a train's own counted CI (#1568)", async () => {
   const repo = 'caraminden/claude-coordinator';
   const gh = github({
-    [runs(repo)]: { workflow_runs: [
-      { id: 3, head_branch: 'early/ticket/5-x', created_at: '2026-11-22T21:05:00Z' },
-      { id: 1, head_branch: 'land/ticket/3-x', created_at: '2026-11-22T21:00:00Z' },
-      { id: 2, head_branch: 'early/ticket/4-x', created_at: '2026-11-22T21:02:00Z' },
-    ] },
+    [runs(repo)]: {
+      workflow_runs: [
+        { id: 3, head_branch: 'early/ticket/5-x', created_at: '2026-11-22T21:05:00Z' },
+        { id: 1, head_branch: 'land/ticket/3-x', created_at: '2026-11-22T21:00:00Z' },
+        { id: 2, head_branch: 'early/ticket/4-x', created_at: '2026-11-22T21:02:00Z' },
+      ],
+    },
     [jobs(repo, 1)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-linux' }] },
     [jobs(repo, 2)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-linux-2' }] },
     [jobs(repo, 3)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-linux-3' }] },

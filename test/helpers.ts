@@ -32,7 +32,16 @@ export function testPins(dataDir?: string): TurnPins {
  * can write into its folder while the test deletes it (ENOTEMPTY on a disk-backed TMPDIR, #218).
  */
 export async function stopProcs(procs: ChildProcess[]) {
-  await Promise.all(procs.map((p) => (p.exitCode !== null || p.signalCode !== null ? undefined : new Promise((r) => { p.once('exit', r); p.kill(); }))));
+  await Promise.all(
+    procs.map((p) =>
+      p.exitCode !== null || p.signalCode !== null
+        ? undefined
+        : new Promise((r) => {
+            p.once('exit', r);
+            p.kill();
+          }),
+    ),
+  );
 }
 
 export type TempRoot = {
@@ -169,7 +178,10 @@ export const REPO = join(import.meta.dirname, '..');
 /** The lines a fake's log file holds, leaving out a last line it is still writing. */
 export function lines(path: string): string[] {
   const text = existsSync(path) ? readFileSync(path, 'utf8') : '';
-  return text.slice(0, text.lastIndexOf('\n') + 1).split('\n').filter(Boolean);
+  return text
+    .slice(0, text.lastIndexOf('\n') + 1)
+    .split('\n')
+    .filter(Boolean);
 }
 /**
  * A stand-in for `claude -p` in `root`: it waits for the release file, ends with its words as its result (an error
@@ -235,7 +247,7 @@ export function agentToken(data: string, id: number): string {
   const db = new DatabaseSync(join(data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(`agent-nonce:${id}`) as { value: string } | undefined;
   db.close();
-  return new Auth(PASSWORD, SECRET).agentToken(id, row ? JSON.parse(row.value).current ?? undefined : undefined);
+  return new Auth(PASSWORD, SECRET).agentToken(id, row ? (JSON.parse(row.value).current ?? undefined) : undefined);
 }
 
 export { until, holds };
@@ -314,8 +326,14 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
   const err = opts.log ? openSync(opts.log, 'a') : 'inherit';
   const proc = spawn(bin, [...pre, opts.script ?? join(REPO, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
+      ...process.env,
+      MACHINES_URL: undefined,
+      PORT: '0',
+      DATA_DIR: data,
+      CLAUDE_BIN: '/bin/false',
+      CLAUDE_CONFIG_DIR: join(root, 'claude'),
+      COORDINATOR_PASSWORD: PASSWORD,
+      SESSION_SECRET: SECRET,
       // No scheme has id 0, so none is indexed: a test server never calls the box's live embedding service.
       CITADEL_MEMORY_SCHEMES: '0',
       // A CI runner that is itself a systemd service sets INVOCATION_ID, which turns the shared tool server on (#1259):
@@ -326,7 +344,10 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       // the runner's env); test/host-signals-guards.test.ts checks every test that starts server.ts itself sets this too.
       // It exits, and stops its turns and supervisors, when the test's process does, however that ends (#1546).
       CITADEL_EXIT_WITH_PARENT: '1',
-      CITADEL_HOST_SIGNALS: 'fixed', CITADEL_PSI_CPU: undefined, CITADEL_PSI_MEMORY: undefined, CITADEL_PSI_IO: undefined,
+      CITADEL_HOST_SIGNALS: 'fixed',
+      CITADEL_PSI_CPU: undefined,
+      CITADEL_PSI_MEMORY: undefined,
+      CITADEL_PSI_IO: undefined,
       // Its day and hour, in the zone this test's fixtures use too (TEST_ZONE above, #1536).
       CITADEL_ZONE: TEST_ZONE,
       // GitHub reads go through the `gh` on PATH, which tests stub, not a helper reaching api.github.com (#1542).
@@ -375,29 +396,34 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
   });
   base = `http://127.0.0.1:${port}`;
   const login = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: opts.name ?? 'Cara', password: PASSWORD }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: opts.name ?? 'Cara', password: PASSWORD }),
   });
   const cookie = login.headers.get('set-cookie')?.split(';')[0];
   if (!cookie) {
     await stop();
     throw new Error(`Signing in answered ${login.status} without a cookie`);
   }
-  const as = (who: { cookie?: string; token?: string }): Caller => async (path, body, method) => {
-    const res = await fetch(base + path, {
-      method: method ?? (body === undefined ? 'GET' : 'POST'),
-      headers: {
-        ...(who.cookie ? { Cookie: who.cookie } : {}), ...(who.token ? { Authorization: `Bearer ${who.token}` } : {}),
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await res.text();
-    let data: any = text;
-    try {
-      data = JSON.parse(text);
-    } catch {}
-    return { status: res.status, data };
-  };
+  const as =
+    (who: { cookie?: string; token?: string }): Caller =>
+    async (path, body, method) => {
+      const res = await fetch(base + path, {
+        method: method ?? (body === undefined ? 'GET' : 'POST'),
+        headers: {
+          ...(who.cookie ? { Cookie: who.cookie } : {}),
+          ...(who.token ? { Authorization: `Bearer ${who.token}` } : {}),
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const text = await res.text();
+      let data: any = text;
+      try {
+        data = JSON.parse(text);
+      } catch {}
+      return { status: res.status, data };
+    };
   const call = as({ cookie });
   return { base, port, root, data, proc, zone: opts.env?.CITADEL_ZONE ?? TEST_ZONE, cookie, call, as, settled, stop };
 }
@@ -406,7 +432,9 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
 export function fakeSystemd(dir: string) {
   mkdirSync(dir, { recursive: true });
   const bin = join(dir, 'systemctl');
-  writeFileSync(bin, `#!/bin/sh
+  writeFileSync(
+    bin,
+    `#!/bin/sh
 d="${dir}"; echo "$*" >> "$d/calls"; shift; verb=$1; shift
 case $verb in
   show) u=$1; a=inactive; s=dead; e=disabled; l=loaded
@@ -422,7 +450,8 @@ case $verb in
   *) echo "unknown $verb" >&2; exit 1;;
 esac
 exit 0
-`);
+`,
+  );
   chmodSync(bin, 0o755);
   const journal = join(dir, 'journalctl');
   writeFileSync(journal, '#!/bin/sh\necho "journal $*"\n');
@@ -430,7 +459,9 @@ exit 0
   // systemd-run --user --wait for a build step (#847): the unit shows active to the systemctl above while it runs, which
   // runs the command with only the --setenv environment, its output appended to the StandardOutput file.
   const run = join(dir, 'systemd-run');
-  writeFileSync(run, `#!/bin/bash
+  writeFileSync(
+    run,
+    `#!/bin/bash
 d="${dir}"; echo "run $*" >> "$d/calls"; unit= cwd=. out=/dev/null; envs=()
 while [ $# -gt 0 ]; do case $1 in
   --) shift; break;;
@@ -439,7 +470,8 @@ while [ $# -gt 0 ]; do case $1 in
 esac; shift; done
 touch "$d/$unit.active"; trap 'rm -f "$d/$unit.active"' EXIT
 (cd "$cwd" && env -i "\${envs[@]}" "$@") >>"$out" 2>&1
-`);
+`,
+  );
   chmodSync(run, 0o755);
   return { bin, journal, run, calls: () => (existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n') : []), state: (f: string) => existsSync(join(dir, f)) };
 }

@@ -44,7 +44,14 @@ test('backfill works turn costs out of stored result events, once', () => {
   add({ type: 'system', subtype: 'init', session_id: 's2' });
   add({ type: 'result', subtype: 'success', duration_ms: 500, total_cost_usd: 0.5 });
   assert.equal(store.backfillTurns(), 3);
-  assert.deepEqual(store.listTurns(t.id).map((u) => [u.session_id, u.cost_usd, u.duration_ms, u.input_tokens]), [['s1', 1, 1000, null], ['s1', 2, 2000, null], ['s2', 0.5, 500, null]]);
+  assert.deepEqual(
+    store.listTurns(t.id).map((u) => [u.session_id, u.cost_usd, u.duration_ms, u.input_tokens]),
+    [
+      ['s1', 1, 1000, null],
+      ['s1', 2, 2000, null],
+      ['s2', 0.5, 500, null],
+    ],
+  );
   assert.equal(store.backfillTurns(), 0);
 });
 
@@ -66,7 +73,10 @@ test('daily totals: seven local days, today first, per scheme and overall', () =
   assert.equal(days[0].total, 3);
   assert.deepEqual(days[0].byProject, { [p.id]: 2, [other.id]: 1 });
   assert.equal(days[1].total, 4);
-  assert.equal(days.reduce((s, d) => s + d.total, 0), 7);
+  assert.equal(
+    days.reduce((s, d) => s + d.total, 0),
+    7,
+  );
   assert.equal(localDay(yesterday), '2026-10-27');
 });
 
@@ -95,28 +105,57 @@ test("two accounts: the day budget is a seventh of both accounts' limits togethe
   // Account 1 sits at 100% with an estimate kept from an earlier window; account 2 reset 9 hours ago and is at 17%.
   store.setSetting('week_usd:host', 1800);
   store.recordTurn(t.id, { session_id: 'a2', ended_at: now - 3600_000, session_cost_usd: 230, account: 2 });
-  const usage = { ...win(1, now + 3 * 86400_000), account: 2, accounts: [
-    { n: 1, label: 'the server\'s own login', usage: win(1, now - 3600_000) }, // window already past
-    { n: 2, label: "cara's account", usage: win(0.17, now + 7 * 86400_000 - 9 * 3600_000) },
-  ] };
+  const usage = {
+    ...win(1, now + 3 * 86400_000),
+    account: 2,
+    accounts: [
+      { n: 1, label: "the server's own login", usage: win(1, now - 3600_000) }, // window already past
+      { n: 2, label: "cara's account", usage: win(0.17, now + 7 * 86400_000 - 9 * 3600_000) },
+    ],
+  };
   const w = hostWeek(store, usage, now);
   close(w.limit!, 1800 + 230 / 0.17);
-  assert.deepEqual(w.parts.map((x) => [x.n, x.label]), [[1, "the server's own login"], [2, "cara's account"]]);
+  assert.deepEqual(
+    w.parts.map((x) => [x.n, x.label]),
+    [
+      [1, "the server's own login"],
+      [2, "cara's account"],
+    ],
+  );
   close(w.parts[1].limit!, 230 / 0.17);
   // An account never priced counts like the average of the priced ones, flagged as assumed.
   const { store: s2 } = setup('two-b');
-  const w2 = hostWeek(s2, { ...usage, accounts: [{ n: 1, label: 'a', usage: win(1, now - 1) }, { n: 2, label: 'b', usage: win(0.17, now + 86400_000) }] }, now);
+  const w2 = hostWeek(
+    s2,
+    {
+      ...usage,
+      accounts: [
+        { n: 1, label: 'a', usage: win(1, now - 1) },
+        { n: 2, label: 'b', usage: win(0.17, now + 86400_000) },
+      ],
+    },
+    now,
+  );
   assert.equal(w2.limit, null);
 });
 
-test("an unpriced account counts like the priced one beside it, marked assumed", () => {
+test('an unpriced account counts like the priced one beside it, marked assumed', () => {
   const { store, t } = setup('assume');
   const now = Date.now();
   store.recordTurn(t.id, { session_id: 'a2', ended_at: now - 3600_000, session_cost_usd: 100, account: 2 });
-  const usage = { ...win(0.5, now + 86400_000), accounts: [{ n: 1, label: 'a', usage: null }, { n: 2, label: 'b', usage: win(0.5, now + 6 * 86400_000) }] };
+  const usage = {
+    ...win(0.5, now + 86400_000),
+    accounts: [
+      { n: 1, label: 'a', usage: null },
+      { n: 2, label: 'b', usage: win(0.5, now + 6 * 86400_000) },
+    ],
+  };
   const w = hostWeek(store, usage, now);
   close(w.limit!, 400);
-  assert.deepEqual(w.parts.map((x) => x.assumed), [true, false]);
+  assert.deepEqual(
+    w.parts.map((x) => x.assumed),
+    [true, false],
+  );
 });
 
 test("the day totals and a minion's share of the week count only the server login's turns, as its meter does (#468 S05-3)", () => {
@@ -139,16 +178,27 @@ test('the spend split counts every payer by person and by scheme, for 7 and 30 d
   const u = store.createTicket({ project_id: q.id, title: 'y', permission_mode: 'default', created_by: 'Josh' });
   const now = Date.now();
   const day = 86400_000;
-  const turn = (ticket: number, cost: number, ago: number, payer: number | null) =>
-    store.recordTurn(ticket, { session_id: `s${Math.random()}`, ended_at: now - ago, session_cost_usd: cost, payer });
+  const turn = (ticket: number, cost: number, ago: number, payer: number | null) => store.recordTurn(ticket, { session_id: `s${Math.random()}`, ended_at: now - ago, session_cost_usd: cost, payer });
   turn(t.id, 5, 0, null);
   turn(t.id, 3, 20 * day, null);
   turn(u.id, 2, 0, josh.id);
   turn(u.id, 40, 40 * day, josh.id); // past the month
   const { people, schemes } = spendSplit(store, now);
   assert.equal(cara.server_login, 1);
-  assert.deepEqual(people.map((r) => [r.name, r.week, r.month]), [['Cara (server login)', 5, 8], ['Josh', 2, 2]]);
-  assert.deepEqual(schemes.map((r) => [r.name, r.week, r.month]), [[p.name, 5, 8], ['Delve', 2, 2]]);
+  assert.deepEqual(
+    people.map((r) => [r.name, r.week, r.month]),
+    [
+      ['Cara (server login)', 5, 8],
+      ['Josh', 2, 2],
+    ],
+  );
+  assert.deepEqual(
+    schemes.map((r) => [r.name, r.week, r.month]),
+    [
+      [p.name, 5, 8],
+      ['Delve', 2, 2],
+    ],
+  );
 });
 
 const usage = (m: Record<string, number>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, { costUSD: v, outputTokens: 1 }]));
@@ -176,8 +226,14 @@ test("a turn's split by model is each model's rise in the session's running tota
   assert.equal(by['Sonnet 5.5'].estimated, 0);
   assert.equal(w.models[0].name, 'Sonnet 5.5', 'biggest first');
   assert.equal(store.listTurns(t.id)[2].account, 2);
-  assert.deepEqual(w.schemes.map((s) => [s.id, s.name]), [[p.id, p.name]]);
-  assert.deepEqual(w.top.map((m) => m.id), [t.id]);
+  assert.deepEqual(
+    w.schemes.map((s) => [s.id, s.name]),
+    [[p.id, p.name]],
+  );
+  assert.deepEqual(
+    w.top.map((m) => m.id),
+    [t.id],
+  );
   // A ticket deleted takes its split with it.
   store.deleteTicket(t.id);
   assert.equal(whereItWent(store, null, null, now + 1).total, 0);
@@ -185,7 +241,8 @@ test("a turn's split by model is each model's rise in the session's running tota
 
 test('where it went: one payer only, this week against last, by kind of work (#905)', () => {
   const { store, p, t } = setup('kinds');
-  const now = Date.now(), day = 86400_000;
+  const now = Date.now(),
+    day = 86400_000;
   const tm = store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara' });
   const sched = store.createTicket({ project_id: p.id, title: 'audit', permission_mode: 'default', created_by: 'Citadel' });
   store.props.set('minion', t.id, p.id, { type: 'bug' }, 'Cara');
@@ -200,8 +257,19 @@ test('where it went: one payer only, this week against last, by kind of work (#9
   close(w.total, 10);
   close(w.lastWeek, 6);
   assert.equal(w.weekUsd, 100);
-  assert.deepEqual(w.kinds.map((k) => [k.name, k.usd, k.lastWeek]), [['Bug', 4, 6], ['Scheduled runs', 3, 0], ['Taskmasters', 2, 0], ['Keepalive pings', 1, 0]]);
-  assert.deepEqual(w.top.map((m) => m.id), [t.id, sched.id, tm.id]);
+  assert.deepEqual(
+    w.kinds.map((k) => [k.name, k.usd, k.lastWeek]),
+    [
+      ['Bug', 4, 6],
+      ['Scheduled runs', 3, 0],
+      ['Taskmasters', 2, 0],
+      ['Keepalive pings', 1, 0],
+    ],
+  );
+  assert.deepEqual(
+    w.top.map((m) => m.id),
+    [t.id, sched.id, tm.id],
+  );
   close(whereItWent(store, 7, null, now).total, 50);
 });
 
@@ -216,9 +284,13 @@ test('model names read like the model picker', () => {
 test("usage_split's text gives shares of the week, all accounts together, with dollars, and Fable's share each week (#905)", () => {
   const s = (name: string, usd: number, lastWeek: number, estimated = 0) => ({ name, usd, lastWeek, estimated });
   const text = usageSplitText({
-    total: 50, lastWeek: 80, weekUsd: 500, accounts: 2,
+    total: 50,
+    lastWeek: 80,
+    weekUsd: 500,
+    accounts: 2,
     models: [s('Opus 5.5', 30, 40, 10), s('Fable 5.2', 10, 40), s('Sonnet 5.5', 10, 0)],
-    schemes: [s('Citadel', 50, 80)], kinds: [s('Feature', 50, 80)],
+    schemes: [s('Citadel', 50, 80)],
+    kinds: [s('Feature', 50, 80)],
     top: [{ id: 3, number: 12, title: 'Big one', scheme: 'Citadel', usd: 20 }],
   });
   assert.match(text, /^Last 7 days: 10% \(\$50\); the 7 before: 16% \(\$80\)\. 100% is the weekly limit of all 2 Claude accounts together, about \$500/);
@@ -247,7 +319,8 @@ test("one account's week is priced from that account's turns since its reset, on
 
 test('where it went: all time covers every turn, summed in the database (#956)', () => {
   const { store, t } = setup('alltime');
-  const now = Date.now(), day = 86400_000;
+  const now = Date.now(),
+    day = 86400_000;
   const turn = (at: number, usd: number) => store.recordTurn(t.id, { session_id: `s${Math.random()}`, ended_at: at, session_cost_usd: usd, modelUsage: usage({ 'claude-opus-5-5': usd }) });
   turn(now - day, 1);
   turn(now - 40 * day, 2);
@@ -260,7 +333,7 @@ test('where it went: all time covers every turn, summed in the database (#956)',
   assert.equal(w.lastWeek, 0);
 });
 
-test('the Fable meter counts every payer\'s Fable dollars against a share of the weekly plans (#1061)', () => {
+test("the Fable meter counts every payer's Fable dollars against a share of the weekly plans (#1061)", () => {
   const { store, t } = setup('fable-meter');
   const now = Date.now();
   assert.equal(fableMeter(store, now).capPct, 20);

@@ -47,7 +47,9 @@ export function parseNumbers(body: unknown): Sent[] {
   if (list.length > LIMITS.perUpload) throw new HttpError(413, `A run sends at most ${LIMITS.perUpload} numbers`);
   const seen = new Set<string>();
   return list.map((n: { name?: unknown; value?: unknown; unit?: unknown } | null) => {
-    const name = n?.name, value = n?.value, unit = n?.unit ?? '';
+    const name = n?.name,
+      value = n?.value,
+      unit = n?.unit ?? '';
     if (typeof name !== 'string' || !NUMBER_NAME.test(name)) throw new HttpError(400, `A number's name is letters, digits and . _ + -, at most 80: ${JSON.stringify(name)?.slice(0, 90)}`);
     if (typeof value !== 'number' || !Number.isFinite(value)) throw new HttpError(400, `${name}'s value is not a number`);
     if (typeof unit !== 'string' || !UNIT.test(unit)) throw new HttpError(400, `${name}'s unit is letters, % and /, at most 12`);
@@ -106,8 +108,10 @@ export class CiNumbers {
     const pct = s.baseline ? ` (+${Math.round(((s.level - s.baseline) / Math.abs(s.baseline)) * 100)}%)` : '';
     const slug = repoSlug(project.repo_url);
     const commit = slug ? `https://github.com/${slug}/commit/${s.sha}` : s.sha.slice(0, 10);
-    return `CI numbers: ${s.name} in ${project.name} stepped up ${round(s.baseline)}${u} → ${round(s.level)}${u}${pct} and held for ${STEP.held} runs on ${s.ref.replace(/^refs\/heads\//, '')}, ` +
-      `starting at ${first.workflow} run ${s.run_id}, commit ${commit}. The CI page's Numbers tab charts it. A flag, not a gate: check whether it's a real slowdown and which change made it.`;
+    return (
+      `CI numbers: ${s.name} in ${project.name} stepped up ${round(s.baseline)}${u} → ${round(s.level)}${u}${pct} and held for ${STEP.held} runs on ${s.ref.replace(/^refs\/heads\//, '')}, ` +
+      `starting at ${first.workflow} run ${s.run_id}, commit ${commit}. The CI page's Numbers tab charts it. A flag, not a gate: check whether it's a real slowdown and which change made it.`
+    );
   }
 
   /**
@@ -118,16 +122,20 @@ export class CiNumbers {
     const all = this.store.ciNumbers(projectId);
     const steps = this.store.ciNumberSteps(projectId);
     const byName = Map.groupBy(all, (n) => n.name);
-    const series = [...byName].map(([name, rows]) => {
-      const refs = Map.groupBy(rows, (n) => n.ref);
-      const [ref, onRef] = [...refs].sort((a, b) => b[1].length - a[1].length)[0];
-      return {
-        name, ref, unit: onRef.at(-1)!.unit,
-        // shortcut: the chart gets a series' last 500 runs, not all 400 days of them; page through older runs if a scheme sends many a day.
-        points: onRef.slice(-500).map((n) => ({ value: n.value, sha: n.sha, run_id: n.run_id, workflow: n.workflow, at: n.created_at })),
-        steps: steps.filter((s) => s.name === name && s.ref === ref).map((s) => ({ run_id: s.run_id, sha: s.sha, at: s.created_at, baseline: s.baseline, level: s.level })),
-      };
-    }).sort((a, b) => a.name.localeCompare(b.name));
+    const series = [...byName]
+      .map(([name, rows]) => {
+        const refs = Map.groupBy(rows, (n) => n.ref);
+        const [ref, onRef] = [...refs].sort((a, b) => b[1].length - a[1].length)[0];
+        return {
+          name,
+          ref,
+          unit: onRef.at(-1)!.unit,
+          // shortcut: the chart gets a series' last 500 runs, not all 400 days of them; page through older runs if a scheme sends many a day.
+          points: onRef.slice(-500).map((n) => ({ value: n.value, sha: n.sha, run_id: n.run_id, workflow: n.workflow, at: n.created_at })),
+          steps: steps.filter((s) => s.name === name && s.ref === ref).map((s) => ({ run_id: s.run_id, sha: s.sha, at: s.created_at, baseline: s.baseline, level: s.level })),
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
     const slug = repoSlug(this.store.getProject(projectId)?.repo_url ?? null);
     return { repo: slug ? `https://github.com/${slug}` : null, series, rules: { ...STEP, keepDays: LIMITS.keepMs / DAY } };
   }

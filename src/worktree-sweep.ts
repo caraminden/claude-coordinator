@@ -119,7 +119,13 @@ export async function clearTrash(parent: string): Promise<{ bytes: number; stuck
       out.bytes += before;
     } catch (err: any) {
       out.bytes += before - (await diskUsage([dir]));
-      out.stuck.push(`${dir}: ${String(err.stderr || err.message).trim().split('\n')[0]}`);
+      out.stuck.push(
+        `${dir}: ${
+          String(err.stderr || err.message)
+            .trim()
+            .split('\n')[0]
+        }`,
+      );
     }
   }
   return out;

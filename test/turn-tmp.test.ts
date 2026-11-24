@@ -47,14 +47,22 @@ test('the sweep removes only ticket folders it is told to, and leaves anything e
   const gone = sweepTmpDirs(tmpRoot, (id) => id === 2);
   assert.deepEqual(gone.sort(), [1, 3, 4]);
   for (const kept of ['2', 'notes', '01', '2-old', '.hidden']) assert.ok(existsSync(join(tmpRoot, kept)), kept);
-  assert.deepEqual(sweepTmpDirs(join(root, 'missing'), () => false), []);
+  assert.deepEqual(
+    sweepTmpDirs(join(root, 'missing'), () => false),
+    [],
+  );
 });
 
 test("dismissing a minion clears its temp folder, and a restart sweeps those of dismissed minions (#218), not of minions it can't find (#259)", async () => {
   const data = join(root, 'data');
   mkdirSync(data);
   const store = new Store(join(data, 'test.db'));
-  const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   const project = store.createProject('Test', null);
   const tmpRoot = runner.tmpRoot(project.id);
   assert.equal(tmpRoot, join(data, 'projects', String(project.id), 'tmp'));

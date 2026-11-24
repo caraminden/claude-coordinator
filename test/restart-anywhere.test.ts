@@ -62,13 +62,21 @@ const LIMIT = `You've hit your 5-hour limit · resets ${new Date(Date.now() + 2 
 type Msg = { text: string };
 /** What a flow's steps see: the runner now serving (a step may restart it), its store and minion. */
 type Ctx = {
-  runner: Runner; store: Store; id: number; say: (author: string, text: string) => void;
+  runner: Runner;
+  store: Store;
+  id: number;
+  say: (author: string, text: string) => void;
   /** A message another minion relays (send's `from`), as a minion's ask to its Taskmaster. */
   relay: (text: string) => void;
-  mail: (from: string, text: string) => void; hold: (author: string, text: string) => void; wake: (note: string, inMs: number) => void; stop: () => void;
+  mail: (from: string, text: string) => void;
+  hold: (author: string, text: string) => void;
+  wake: (note: string, inMs: number) => void;
+  stop: () => void;
   /** Chain the minion on another's work (create_ticket's start_after), its brief held in a `chain` row; meetChain is the check finding that work in. */
-  chain: (brief: string) => void; meetChain: () => void;
-  quiet: (what: string, also?: () => boolean) => Promise<void>; restart: () => Runner;
+  chain: (brief: string) => void;
+  meetChain: () => void;
+  quiet: (what: string, also?: () => boolean) => Promise<void>;
+  restart: () => Runner;
 };
 type Flow = {
   name: string;
@@ -91,43 +99,64 @@ const FLOWS: Flow[] = [
   {
     name: 'a plain turn with a message queued behind it',
     steps: [
-      { name: 'Cara asks for a turn', run: async (c) => {
-        setRelease(null);
-        c.say('Cara', 'build it');
-        await until('the turn to start', () => c.runner.isRunning(c.id));
-      } },
-      { name: 'Josh queues a message behind it', run: async (c) => {
-        c.say('Josh', 'also add a test');
-        await sleep(50);
-      } },
-      { name: 'the turn ends and the queued message runs', run: async (c) => {
-        const before = turnsRun();
-        setRelease('ok');
-        await c.quiet('the queued turn', () => turnsRun() === before + 2);
-      } },
+      {
+        name: 'Cara asks for a turn',
+        run: async (c) => {
+          setRelease(null);
+          c.say('Cara', 'build it');
+          await until('the turn to start', () => c.runner.isRunning(c.id));
+        },
+      },
+      {
+        name: 'Josh queues a message behind it',
+        run: async (c) => {
+          c.say('Josh', 'also add a test');
+          await sleep(50);
+        },
+      },
+      {
+        name: 'the turn ends and the queued message runs',
+        run: async (c) => {
+          const before = turnsRun();
+          setRelease('ok');
+          await c.quiet('the queued turn', () => turnsRun() === before + 2);
+        },
+      },
     ],
   },
   {
     name: 'a usage-limit wait and its resume',
     steps: [
-      { name: 'the turn hits the usage limit', run: async (c) => {
-        setRelease(LIMIT);
-        c.say('Cara', 'go');
-        await c.quiet('the limit wait', () => !!c.runner.limitWait(c.id));
-      } },
-      { name: 'a message is held for the resume', run: async (c) => {
-        c.say('Cara', 'held through the wait');
-        await sleep(30);
-      } },
-      { name: 'the limit resets and the resume restores the session, then runs', run: async (c) => {
-        // A stored session file this login's folder lacks: the resume restores it off the event loop first (A2's gap).
-        c.store.putClaudeState({ path: `projects/ra/${c.id}.jsonl`, project_id: c.store.getTicket(c.id)!.project_id, ticket_id: c.id, size: 2, mtime: Date.now(), data: gzipSync('{}') });
-        setRelease('ok');
-        c.store.setSetting('limit-resumes', c.store.getSetting<any[]>('limit-resumes')!.map((w) => ({ ...w, at: Date.now() })));
-        const before = turnsRun();
-        (c.runner as any).limitResumeNext();
-        await c.quiet('the resume', () => turnsRun() === before + 1 && !c.runner.limitWait(c.id));
-      } },
+      {
+        name: 'the turn hits the usage limit',
+        run: async (c) => {
+          setRelease(LIMIT);
+          c.say('Cara', 'go');
+          await c.quiet('the limit wait', () => !!c.runner.limitWait(c.id));
+        },
+      },
+      {
+        name: 'a message is held for the resume',
+        run: async (c) => {
+          c.say('Cara', 'held through the wait');
+          await sleep(30);
+        },
+      },
+      {
+        name: 'the limit resets and the resume restores the session, then runs',
+        run: async (c) => {
+          // A stored session file this login's folder lacks: the resume restores it off the event loop first (A2's gap).
+          c.store.putClaudeState({ path: `projects/ra/${c.id}.jsonl`, project_id: c.store.getTicket(c.id)!.project_id, ticket_id: c.id, size: 2, mtime: Date.now(), data: gzipSync('{}') });
+          setRelease('ok');
+          c.store.setSetting(
+            'limit-resumes',
+            c.store.getSetting<any[]>('limit-resumes')!.map((w) => ({ ...w, at: Date.now() })),
+          );
+          const before = turnsRun();
+          (c.runner as any).limitResumeNext();
+          await c.quiet('the resume', () => turnsRun() === before + 1 && !c.runner.limitWait(c.id));
+        },
+      },
     ],
   },
   {
@@ -135,7 +164,10 @@ const FLOWS: Flow[] = [
     setup: (store, projectId) => {
       const pat = store.createUser({ name: 'Pat', login: 'pat1290' });
       store.addMember(projectId, pat.id);
-      const labels = [{ n: 1, label: 'one@x' }, { n: 2, label: 'two@x' }];
+      const labels = [
+        { n: 1, label: 'one@x' },
+        { n: 2, label: 'two@x' },
+      ];
       const s = { inUse: 1, limited: new Map<number, number>() };
       return (r) => {
         r.personOf = (author) => (author === 'Pat' ? pat.id : null);
@@ -151,156 +183,213 @@ const FLOWS: Flow[] = [
       };
     },
     steps: [
-      { name: 'the turn hits its account\'s limit and carries on with the next account', run: async (c) => {
-        setRelease(LIMIT);
-        const before = turnsRun();
-        c.say('Pat', 'go');
-        await c.quiet('the turn on account 2', () => turnsRun() === before + 2);
-      } },
+      {
+        name: "the turn hits its account's limit and carries on with the next account",
+        run: async (c) => {
+          setRelease(LIMIT);
+          const before = turnsRun();
+          c.say('Pat', 'go');
+          await c.quiet('the turn on account 2', () => turnsRun() === before + 2);
+        },
+      },
     ],
   },
   {
     name: 'held mail released',
     steps: [
-      { name: 'a relay is held as mail for the cold session', run: async (c) => {
-        c.mail('Taskmaster', 'held: build 3 merged');
-        await sleep(30);
-      } },
-      { name: 'the cold sweep releases it into a turn', run: async (c) => {
-        setRelease('ok');
-        const before = turnsRun();
-        c.runner.coldSweep();
-        await c.quiet('the mail\'s turn', () => turnsRun() === before + 1);
-      } },
+      {
+        name: 'a relay is held as mail for the cold session',
+        run: async (c) => {
+          c.mail('Taskmaster', 'held: build 3 merged');
+          await sleep(30);
+        },
+      },
+      {
+        name: 'the cold sweep releases it into a turn',
+        run: async (c) => {
+          setRelease('ok');
+          const before = turnsRun();
+          c.runner.coldSweep();
+          await c.quiet("the mail's turn", () => turnsRun() === before + 1);
+        },
+      },
     ],
   },
   {
     name: 'mail held for a parked minion, and its unpark',
     steps: [
-      { name: 'the minion is parked and Josh leaves it a message', run: async (c) => {
-        c.store.updateTicket(c.id, { state: 'parked' });
-        c.hold('Josh', 'for when you are back');
-        await sleep(30);
-      } },
-      { name: 'Cara unparks it and the turn reads the message', run: async (c) => {
-        setRelease('ok');
-        const before = turnsRun();
-        c.runner.unpark(c.id, 'Cara', 'Cara');
-        await c.quiet('the unparked turn', () => turnsRun() === before + 1);
-      } },
+      {
+        name: 'the minion is parked and Josh leaves it a message',
+        run: async (c) => {
+          c.store.updateTicket(c.id, { state: 'parked' });
+          c.hold('Josh', 'for when you are back');
+          await sleep(30);
+        },
+      },
+      {
+        name: 'Cara unparks it and the turn reads the message',
+        run: async (c) => {
+          setRelease('ok');
+          const before = turnsRun();
+          c.runner.unpark(c.id, 'Cara', 'Cara');
+          await c.quiet('the unparked turn', () => turnsRun() === before + 1);
+        },
+      },
     ],
   },
   {
     name: 'a stop drops the queue but keeps held mail',
     steps: [
-      { name: 'Cara asks for a turn, and a message and some mail wait behind it', run: async (c) => {
-        setRelease(null);
-        c.say('Cara', 'build it');
-        await until('the turn to start', () => c.runner.isRunning(c.id));
-        c.say('Josh', 'dropped by the stop');
-        c.mail('Taskmaster', 'held: kept through the stop');
-        await sleep(50);
-      } },
-      { name: 'Cara stops the turn', run: async (c) => {
-        c.stop();
-        setRelease('ok');
-        await c.quiet('the stopped turn to end');
-      } },
-      { name: 'Cara carries on, and the mail rides along', run: async (c) => {
-        const before = turnsRun();
-        c.say('Cara', 'carry on');
-        await c.quiet('the next turn', () => turnsRun() === before + 1);
-      } },
+      {
+        name: 'Cara asks for a turn, and a message and some mail wait behind it',
+        run: async (c) => {
+          setRelease(null);
+          c.say('Cara', 'build it');
+          await until('the turn to start', () => c.runner.isRunning(c.id));
+          c.say('Josh', 'dropped by the stop');
+          c.mail('Taskmaster', 'held: kept through the stop');
+          await sleep(50);
+        },
+      },
+      {
+        name: 'Cara stops the turn',
+        run: async (c) => {
+          c.stop();
+          setRelease('ok');
+          await c.quiet('the stopped turn to end');
+        },
+      },
+      {
+        name: 'Cara carries on, and the mail rides along',
+        run: async (c) => {
+          const before = turnsRun();
+          c.say('Cara', 'carry on');
+          await c.quiet('the next turn', () => turnsRun() === before + 1);
+        },
+      },
     ],
   },
   {
     name: 'a turn cut off by a restart, and its resume',
     steps: [
-      { name: 'Cara asks for a turn', run: async (c) => {
-        setRelease(null);
-        c.say('Cara', 'build it');
-        c.say('Josh', 'and the readme');
-        await until('the turn to start', () => c.runner.isRunning(c.id));
-      } },
-      { name: 'the server dies mid-turn, and the next one resumes it', run: async (c) => {
-        await crash(c.runner, c.id);
-        setRelease('ok');
-        const before = turnsRun();
-        const next = c.restart();
-        next.recover();
-        await c.quiet('the resume', () => turnsRun() === before + 1);
-      } },
+      {
+        name: 'Cara asks for a turn',
+        run: async (c) => {
+          setRelease(null);
+          c.say('Cara', 'build it');
+          c.say('Josh', 'and the readme');
+          await until('the turn to start', () => c.runner.isRunning(c.id));
+        },
+      },
+      {
+        name: 'the server dies mid-turn, and the next one resumes it',
+        run: async (c) => {
+          await crash(c.runner, c.id);
+          setRelease('ok');
+          const before = turnsRun();
+          const next = c.restart();
+          next.recover();
+          await c.quiet('the resume', () => turnsRun() === before + 1);
+        },
+      },
     ],
   },
   {
     name: 'a wake_at comes due on an idle minion',
     outbox: true,
     steps: [
-      { name: 'the minion sets a wake', run: async (c) => {
-        setRelease('ok');
-        c.wake('wake: check the deploy', 600);
-        await sleep(30);
-      } },
-      { name: 'it comes due and its turn runs', run: async (c) => {
-        const before = turnsRun();
-        await c.quiet('the wake\'s turn', () => turnsRun() === before + 1);
-      } },
+      {
+        name: 'the minion sets a wake',
+        run: async (c) => {
+          setRelease('ok');
+          c.wake('wake: check the deploy', 600);
+          await sleep(30);
+        },
+      },
+      {
+        name: 'it comes due and its turn runs',
+        run: async (c) => {
+          const before = turnsRun();
+          await c.quiet("the wake's turn", () => turnsRun() === before + 1);
+        },
+      },
     ],
   },
   {
     name: 'a wake_at due mid-turn waits behind the turn',
     outbox: true,
     steps: [
-      { name: 'Cara asks for a turn', run: async (c) => {
-        setRelease(null);
-        c.say('Cara', 'build it');
-        await until('the turn to start', () => c.runner.isRunning(c.id));
-      } },
-      { name: 'a wake comes due while it runs', run: async (c) => {
-        c.wake('wake: mid-turn', 100);
-        // timing-ok: waits for the wake's 100 ms due time to pass while the turn runs (an elapsed-time requirement)
-        await sleep(300);
-      } },
-      { name: 'the turn ends and the wake\'s turn runs', run: async (c) => {
-        const before = turnsRun();
-        setRelease('ok');
-        await c.quiet('the wake\'s turn', () => turnsRun() === before + 2);
-      } },
+      {
+        name: 'Cara asks for a turn',
+        run: async (c) => {
+          setRelease(null);
+          c.say('Cara', 'build it');
+          await until('the turn to start', () => c.runner.isRunning(c.id));
+        },
+      },
+      {
+        name: 'a wake comes due while it runs',
+        run: async (c) => {
+          c.wake('wake: mid-turn', 100);
+          // timing-ok: waits for the wake's 100 ms due time to pass while the turn runs (an elapsed-time requirement)
+          await sleep(300);
+        },
+      },
+      {
+        name: "the turn ends and the wake's turn runs",
+        run: async (c) => {
+          const before = turnsRun();
+          setRelease('ok');
+          await c.quiet("the wake's turn", () => turnsRun() === before + 2);
+        },
+      },
     ],
   },
   {
-    name: 'a chained minion\'s brief starts it once its leader\'s work is in',
+    name: "a chained minion's brief starts it once its leader's work is in",
     outbox: true,
     steps: [
-      { name: 'the Taskmaster chains the minion on another\'s work', run: async (c) => {
-        setRelease('ok');
-        c.chain('build part two');
-        await sleep(30);
-      } },
-      { name: 'the leader\'s work ships and the brief starts the minion', run: async (c) => {
-        const before = turnsRun();
-        c.meetChain();
-        await c.quiet('the brief\'s turn', () => turnsRun() === before + 1);
-      } },
+      {
+        name: "the Taskmaster chains the minion on another's work",
+        run: async (c) => {
+          setRelease('ok');
+          c.chain('build part two');
+          await sleep(30);
+        },
+      },
+      {
+        name: "the leader's work ships and the brief starts the minion",
+        run: async (c) => {
+          const before = turnsRun();
+          c.meetChain();
+          await c.quiet("the brief's turn", () => turnsRun() === before + 1);
+        },
+      },
     ],
   },
   // Seam review R3, R4, R6 (#1283, #1452): what a turn sets at its start or mid-turn and reads later survives a cut.
   {
-    name: 'a Taskmaster turn a minion\'s relay started, cut off and resumed',
+    name: "a Taskmaster turn a minion's relay started, cut off and resumed",
     steps: [
-      { name: 'a minion relays an ask', run: async (c) => {
-        setRelease(null);
-        c.relay('please start part two');
-        await until('the turn to start', () => c.runner.isRunning(c.id));
-      } },
-      { name: 'the server dies mid-turn, and the next one resumes it', run: async (c) => {
-        await crash(c.runner, c.id);
-        setRelease('ok');
-        const before = turnsRun();
-        const next = c.restart();
-        next.recover();
-        await c.quiet('the resume', () => turnsRun() === before + 1);
-      } },
+      {
+        name: 'a minion relays an ask',
+        run: async (c) => {
+          setRelease(null);
+          c.relay('please start part two');
+          await until('the turn to start', () => c.runner.isRunning(c.id));
+        },
+      },
+      {
+        name: 'the server dies mid-turn, and the next one resumes it',
+        run: async (c) => {
+          await crash(c.runner, c.id);
+          setRelease('ok');
+          const before = turnsRun();
+          const next = c.restart();
+          next.recover();
+          await c.quiet('the resume', () => turnsRun() === before + 1);
+        },
+      },
     ],
   },
   {
@@ -309,39 +398,54 @@ const FLOWS: Flow[] = [
       r.heldFor = () => '#9 ships';
     },
     steps: [
-      { name: 'the minion is held on another\'s work', run: async (c) => {
-        c.store.updateTicket(c.id, { state: 'parked', note: 'waits on #9' });
-      } },
-      { name: 'Cara asks the held minion something', run: async (c) => {
-        setRelease(null);
-        c.say('Cara', 'a question while you wait');
-        await until('the turn to start', () => c.runner.isRunning(c.id));
-      } },
-      { name: 'the turn sets its own state', run: async (c) => {
-        c.store.updateTicket(c.id, { state: 'ready', note: 'answered' });
-      } },
-      { name: 'the server dies mid-turn, and the next one resumes it', run: async (c) => {
-        await crash(c.runner, c.id);
-        setRelease('ok');
-        const before = turnsRun();
-        const next = c.restart();
-        next.recover();
-        await c.quiet('the resume', () => turnsRun() === before + 1);
-        const t = c.store.getTicket(c.id)!;
-        assert.deepEqual([t.state, t.note], ['parked', 'waits on #9'], 'still parked once the resumed turn ends');
-      } },
+      {
+        name: "the minion is held on another's work",
+        run: async (c) => {
+          c.store.updateTicket(c.id, { state: 'parked', note: 'waits on #9' });
+        },
+      },
+      {
+        name: 'Cara asks the held minion something',
+        run: async (c) => {
+          setRelease(null);
+          c.say('Cara', 'a question while you wait');
+          await until('the turn to start', () => c.runner.isRunning(c.id));
+        },
+      },
+      {
+        name: 'the turn sets its own state',
+        run: async (c) => {
+          c.store.updateTicket(c.id, { state: 'ready', note: 'answered' });
+        },
+      },
+      {
+        name: 'the server dies mid-turn, and the next one resumes it',
+        run: async (c) => {
+          await crash(c.runner, c.id);
+          setRelease('ok');
+          const before = turnsRun();
+          const next = c.restart();
+          next.recover();
+          await c.quiet('the resume', () => turnsRun() === before + 1);
+          const t = c.store.getTicket(c.id)!;
+          assert.deepEqual([t.state, t.note], ['parked', 'waits on #9'], 'still parked once the resumed turn ends');
+        },
+      },
     ],
   },
   {
     name: 'a reply with a status trailer',
     steps: [
-      { name: 'the turn replies with a trailer and ends', run: async (c) => {
-        setReply('done <!-- status: {"state":"ready","note":"read me","replies":["Ship it"]} -->');
-        setRelease('ok');
-        const before = turnsRun();
-        c.say('Cara', 'go');
-        await c.quiet('the turn', () => turnsRun() === before + 1);
-      } },
+      {
+        name: 'the turn replies with a trailer and ends',
+        run: async (c) => {
+          setReply('done <!-- status: {"state":"ready","note":"read me","replies":["Ship it"]} -->');
+          setRelease('ok');
+          const before = turnsRun();
+          c.say('Cara', 'go');
+          await c.quiet('the turn', () => turnsRun() === before + 1);
+        },
+      },
     ],
   },
 ];
@@ -349,7 +453,7 @@ const FLOWS: Flow[] = [
 /** The server dies mid-turn and its turn goes with it, as in auto-resume.test.ts. */
 async function crash(r: Runner, id: number) {
   const dir: string = (r as any).turns.get(id).dir;
-  await until('the turn\'s pid.json', () => existsSync(join(dir, 'pid.json')));
+  await until("the turn's pid.json", () => existsSync(join(dir, 'pid.json')));
   r.detachAll();
   clearTimeout((r as any).limitTimer);
   const { wrapper, claude } = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8'));
@@ -364,7 +468,12 @@ async function crash(r: Runner, id: number) {
 }
 
 function makeRunner(store: Store, hooks?: (r: Runner) => void) {
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.resumeGapMs = 1;
   r.pollMs = 10;
   r.limitDelayMs = 0;
@@ -478,7 +587,10 @@ class Recorder {
   /** Messages sent before cut `n` and not yet handed to a turn that started, nor dropped by a stop (a wake's note is inside the text it sends). */
   held(n: number): string[] {
     const handed = this.log.filter((l) => l.kind !== 'sent' && l.at <= n).flatMap((l) => l.texts);
-    return this.log.filter((l) => l.kind === 'sent' && l.at <= n).flatMap((l) => l.texts).filter((t) => !handed.some((h) => h.includes(t)));
+    return this.log
+      .filter((l) => l.kind === 'sent' && l.at <= n)
+      .flatMap((l) => l.texts)
+      .filter((t) => !handed.some((h) => h.includes(t)));
   }
 
   /** The turn the uncut run started after cut `n` in the same step, which a restart there still owes. */
@@ -525,7 +637,9 @@ async function record(flow: Flow) {
   };
   const runners = [withOutbox(watch(makeRunner(store, hooks)))];
   const ctx: Ctx = {
-    runner: runners[0], store, id: t.id,
+    runner: runners[0],
+    store,
+    id: t.id,
     say: (author, text) => {
       rec.log.push({ kind: 'sent', texts: [text], at: rec.cuts.length, step: rec.step });
       ctx.runner.send(t.id, author, text);
@@ -602,7 +716,10 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
   (r as any).startTurn = (_p: unknown, ticket: { id: number }, batch: (Msg & { id?: number })[]) => {
     if (ticket.id !== id) return;
     started.push(batch);
-    r.onTurnStart(id, batch.flatMap((m) => (m.id == null ? [] : [m.id]))); // as the real one does once the turn is saved
+    r.onTurnStart(
+      id,
+      batch.flatMap((m) => (m.id == null ? [] : [m.id])),
+    ); // as the real one does once the turn is saved
   };
   (r as any).reattach = () => false; // its turn died with the old server
   const outbox = flow.outbox ? new Outbox(store, r, { author: 'Citadel' }) : null;
@@ -618,7 +735,7 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
     void outbox?.boot();
     // Settled: a turn started, or its lane stayed free past recover's spaced starts.
     const t0 = Date.now();
-    for (let free = 0; !started.length && free < 3;) {
+    for (let free = 0; !started.length && free < 3; ) {
       await sleep(5);
       free = (r as any).lanes.busy(id) || Date.now() - t0 < 20 ? 0 : free + 1;
       if (Date.now() - t0 > 5_000) {

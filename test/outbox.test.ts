@@ -136,7 +136,7 @@ test('a wake missed while the server was down is sent at boot, saying how late',
   assert.match(r.sent[0].text, /start the retire minion/);
 });
 
-test('a dismissed minion\'s wake is held: delivered on a reopen on day 2, dropped on day 4', async () => {
+test("a dismissed minion's wake is held: delivered on a reopen on day 2, dropped on day 4", async () => {
   const now = { t: T0 };
   const r = fakeRunner();
   const { outbox, wakes } = server(r, now);
@@ -217,7 +217,7 @@ test('a far-off wake outlives a dismissal until 3 days past its own time', async
   assert.equal(rows(gone)[0].state, 'dropped');
 });
 
-test('a send that fails is retried 1, 5, 30, 120 and 360 minutes on, then fails and wakes the setter\'s Taskmaster', async () => {
+test("a send that fails is retried 1, 5, 30, 120 and 360 minutes on, then fails and wakes the setter's Taskmaster", async () => {
   const id = minion();
   const tm = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' } as any).id;
   const now = { t: T0 };
@@ -323,8 +323,14 @@ test('the old timed-wakes key moves into the table on boot in one go, keeping id
   const { outbox, wakes } = server(r, now);
   await outbox.boot();
   assert.equal(store.getSetting('timed-wakes'), null, 'the old key is emptied');
-  assert.deepEqual(wakes.list(a).map((w) => [w.id, w.note, w.at]), [[3, 'one', T0 + HOUR], [7, 'two', T0 + 2 * HOUR]]);
-  assert.equal(rows(b)[0].state, 'held', 'a closed minion\'s migrated wake is held, not dropped');
+  assert.deepEqual(
+    wakes.list(a).map((w) => [w.id, w.note, w.at]),
+    [
+      [3, 'one', T0 + HOUR],
+      [7, 'two', T0 + 2 * HOUR],
+    ],
+  );
+  assert.equal(rows(b)[0].state, 'held', "a closed minion's migrated wake is held, not dropped");
   assert.ok(rows(a).every((d) => d.origin?.startsWith('timed-wakes:')));
   // An older release after a rollback writes the old key again: the next poke moves it, once.
   store.setSetting('timed-wakes', [{ id: 1, ticket: a, at: T0 + 3 * HOUR, note: 'from the rollback', setBy: 'Minion' }]);
@@ -356,7 +362,10 @@ test('limits still hold, cancel works only in its own chat, and sent rows are pr
   now.t += 10_000;
   await outbox.poke({ type: 'tick' });
   assert.equal(r.sent.length, 20);
-  outbox.turnStarted(a, r.sent.map((m) => m.event));
+  outbox.turnStarted(
+    a,
+    r.sent.map((m) => m.event),
+  );
   assert.equal(wakes.list(a).length, 0);
   now.t += DAY + 1;
   await outbox.poke({ type: 'tick' });

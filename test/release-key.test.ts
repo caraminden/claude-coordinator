@@ -48,5 +48,8 @@ test('a keytool failure or a bad name leaves nothing behind', async () => {
   await assert.rejects(makeReleaseKey(keyDir, 'broke', { home: root, keytool: fake({ fail: true }).keytool }), /boom/);
   assert.ok(!hasKey(keyDir, 'broke'));
   await assert.rejects(makeReleaseKey(keyDir, '../x', { home: root, keytool: fake().keytool }), /isn't an app name/);
-  assert.deepEqual(readdirSync(keyDir).filter((f) => f.startsWith('.')), []);
+  assert.deepEqual(
+    readdirSync(keyDir).filter((f) => f.startsWith('.')),
+    [],
+  );
 });

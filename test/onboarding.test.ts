@@ -16,7 +16,9 @@ const root = tmp.dir;
 after(() => tmp.teardown()); // ends the children and the detached turns (#271) before the folder goes
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync, readFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -24,15 +26,15 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 
 let base = '';
 let cookie = '';
 let srv: Booted;
-const call = (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) =>
-  (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET');
+const call = (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) => (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET');
 
 before(async () => {
   srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude } });
@@ -51,7 +53,7 @@ test('the onboarding section is in the prompt only while setup is under way', ()
   }
 });
 
-test('both plans name a skills survey for the stack, with every scheme\'s survey reports listed for the three-month check (#357)', () => {
+test("both plans name a skills survey for the stack, with every scheme's survey reports listed for the three-month check (#357)", () => {
   const data = join(root, 'surveys');
   const report = (id: number, name: string) => {
     const dir = join(projectSharedDir(data, id), 'reports');
@@ -107,7 +109,13 @@ test('the catalogue gives names and one-line descriptions, never bodies', () => 
   write(join(repo, '.claude', 'skills', 'game-design', 'SKILL.md'), '---\nname: game-design\ndescription: Turns a design ask into a spec.\n---\n# Game design\nBODY-SECRET\n');
   write(join(repo, '.claude', 'agents', 'art-critic.md'), '---\nname: art-critic\ndescription: Looks at art.\ntools: Read\n---\nBODY-SECRET\n');
   write(join(repo, '.claude', 'rules', 'godot.md'), '---\npaths:\n  - "godot/**"\n---\n\n# Working in godot/\n\nBODY-SECRET\n');
-  const items = catalogue([{ name: 'Delve', repo_dir: repo }, { name: 'Docs', repo_dir: null }], kit);
+  const items = catalogue(
+    [
+      { name: 'Delve', repo_dir: repo },
+      { name: 'Docs', repo_dir: null },
+    ],
+    kit,
+  );
   assert.ok(!JSON.stringify(items).includes('SECRET'), 'no body text');
   assert.deepEqual(items, [
     { name: 'bug-fixing', kind: 'skill', source: 'kit', description: 'How to fix a bug.', in_kit: true },
@@ -141,7 +149,7 @@ test('"Create and set up" sends the Taskmaster one kickoff from Citadel; "Create
   const turn = await until('the Taskmaster turn', () => turns().find((t) => t.token?.startsWith(`${page.coordinator.id}.`)));
   assert.match(JSON.stringify(turn.prompt), /New scheme \\"Lanternfall\\"/);
   assert.match(turn.system, /## Setting up this scheme \(onboarding: interview, first-run\)/);
-  assert.ok(turn.system.includes(join(surveyDir, 'skills-survey-2026-11.md')), 'the plan lists every scheme\'s survey reports');
+  assert.ok(turn.system.includes(join(surveyDir, 'skills-survey-2026-11.md')), "the plan lists every scheme's survey reports");
 
   const only = await call('/api/projects', { method: 'POST', body: { name: 'Scratch', setup: false } });
   assert.equal(only.data.onboarding, 'skipped');
@@ -226,7 +234,14 @@ test('keys and values an approved setup plan names go in approved, only while th
   // Approved: what the plan names is live and reviewed; what it doesn't name still waits.
   assert.equal((await register('game', ['wow', 'poe', 'all'], t)).data.status, 'active');
   const game = (await props()).find((k: any) => k.key === 'game');
-  assert.deepEqual(game.values.map((v: any) => [v.value, v.reviewed]), [['wow', true], ['poe', true], ['all', false]]);
+  assert.deepEqual(
+    game.values.map((v: any) => [v.value, v.reviewed]),
+    [
+      ['wow', true],
+      ['poe', true],
+      ['all', false],
+    ],
+  );
   const added = await call(`/api/projects/${p.id}/properties/values`, { method: 'POST', body: { key: 'game', values: [{ value: 'lol' }] }, token: t });
   assert.deepEqual(added.data.unreviewed, ['lol']);
   assert.equal((await register('zone', [], t)).data.status, 'proposed', 'a key the plan never names');

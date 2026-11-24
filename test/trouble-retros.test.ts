@@ -16,14 +16,24 @@ function setup(mode: 'act' | 'log-only' = 'act') {
   const sent: string[] = [];
   const notes: string[] = [];
   const retros = new TroubleRetros({
-    store, by: 'Citadel', now: () => T0 + H, mode,
+    store,
+    by: 'Citadel',
+    now: () => T0 + H,
+    mode,
     newMinion: async (project, m) => {
       made.push(m);
       const x = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'default', created_by: 'Citadel' });
       return { id: x.id, number: x.number };
     },
-    runner: { emit: () => {}, send: (_id: number, _by: string, text: string) => { sent.push(text); } } as any,
-    note: (line: string) => { notes.push(line); },
+    runner: {
+      emit: () => {},
+      send: (_id: number, _by: string, text: string) => {
+        sent.push(text);
+      },
+    } as any,
+    note: (line: string) => {
+      notes.push(line);
+    },
   });
   const minion = (status = 'closed') => {
     const x = store.createTicket({ project_id: peek.id, title: 'feature', permission_mode: 'default', created_by: 'Cara', model: 'claude-sonnet-5-5' } as any);

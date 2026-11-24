@@ -84,7 +84,10 @@ test('a Home row opens its minion when Home redraws during the click', { skip },
 });
 
 // Folded shut means skipped (#1405): answering the last card in an open scheme doesn't open a row of a folded one.
-for (const [folded, expect] of [[true, '#/home/p/1/t/7'], [false, '#/home/p/2/t/9']] as const) {
+for (const [folded, expect] of [
+  [true, '#/home/p/1/t/7'],
+  [false, '#/home/p/2/t/9'],
+] as const) {
   test(`after an answer, Home ${folded ? 'skips' : 'moves on to'} a scheme folded ${folded ? 'shut' : 'open'}`, { skip }, async () => {
     const page = await browser.page(`${app.base}#/home`, { width: 1280, height: 800 });
     await page.eval(`localStorage.setItem('cc-home-folded', ${JSON.stringify(folded ? '[2]' : '[]')}); location.reload()`);

@@ -24,10 +24,7 @@ test('the day is the Pacific one', () => {
 });
 
 test('a group is the message with numbers, ids, times and long quoted text taken out', () => {
-  const same = [
-    'Error: room 1234 not found (request 3f2a9c1e-77b0-4d2e-9a51-0c1d2e3f4a5b at 2026-11-16T09:12:44.120Z)',
-    'Error: room 98 not found (request 0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9 at 2026-11-15T23:01:02Z)',
-  ];
+  const same = ['Error: room 1234 not found (request 3f2a9c1e-77b0-4d2e-9a51-0c1d2e3f4a5b at 2026-11-16T09:12:44.120Z)', 'Error: room 98 not found (request 0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9 at 2026-11-15T23:01:02Z)'];
   assert.equal(errorKey(same[0]), errorKey(same[1]));
   assert.notEqual(errorKey('Error: room 12 not found'), errorKey('Error: player 12 not found'));
   assert.equal(errorKey('fetch failed for job 5f3e2a9b8c7d'), errorKey('fetch failed for job a01b9c33ee21'), 'hex ids');
@@ -44,14 +41,22 @@ test('a sample is one scrubbed, short line', () => {
 });
 
 test('which journal lines are errors', () => {
-  for (const l of ['Error: ENOENT: no such file', 'Traceback (most recent call last):', 'TypeError: x is not a function', 'citadel-app-peek.service: Main process exited, code=exited, status=1/FAILURE',
-    "citadel-app-peek.service: Failed with result 'exit-code'.", 'Unhandled promise rejection', 'FATAL: database is locked', 'panic: runtime error']) assert.ok(isErrorLine(l, 6), l);
-  for (const l of ['Started Peek Auras (Citadel contraption).', 'citadel-app-peek.service: Consumed 1.2s CPU time', 'ggg_forum: 0 errors, 3 facts added',
-    'citadel-app-peek.service: Main process exited, code=exited, status=0/SUCCESS', 'retire drop-disabled-uniques: 2 retired']) assert.ok(!isErrorLine(l, 6), l);
+  for (const l of [
+    'Error: ENOENT: no such file',
+    'Traceback (most recent call last):',
+    'TypeError: x is not a function',
+    'citadel-app-peek.service: Main process exited, code=exited, status=1/FAILURE',
+    "citadel-app-peek.service: Failed with result 'exit-code'.",
+    'Unhandled promise rejection',
+    'FATAL: database is locked',
+    'panic: runtime error',
+  ])
+    assert.ok(isErrorLine(l, 6), l);
+  for (const l of ['Started Peek Auras (Citadel contraption).', 'citadel-app-peek.service: Consumed 1.2s CPU time', 'ggg_forum: 0 errors, 3 facts added', 'citadel-app-peek.service: Main process exited, code=exited, status=0/SUCCESS', 'retire drop-disabled-uniques: 2 retired']) assert.ok(!isErrorLine(l, 6), l);
   assert.ok(isErrorLine('something odd', 3), 'priority err and worse');
 });
 
-test('counts per app, day and group, written to the owning scheme\'s shared folder, and the morning count', async () => {
+test("counts per app, day and group, written to the owning scheme's shared folder, and the morning count", async () => {
   const store = new Store(join(root, 'coordinator.db'));
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   const peekScheme = store.createProject('Peek Auras', null, josh.id);
@@ -82,20 +87,36 @@ test('counts per app, day and group, written to the owning scheme\'s shared fold
   digest.httpError(peek, 502, 'GET', '/api/rooms/17/state?token=abc');
   digest.httpError(peek, 502, 'GET', '/api/rooms/9000/state');
   digest.toolError(orphan, 'Bash', 'exit 1');
-  journal = [{ at: NOV15_LATE, unit: 'citadel-app-peek-auras.service', text: 'Error: ENOENT: no such file, open /srv/peek/rooms/77.json', priority: 6 },
-    { at: NOV15_LATE, unit: 'citadel-app-peek-auras.service', text: 'Peek Auras contraption on 127.0.0.1:9201', priority: 6 }];
+  journal = [
+    { at: NOV15_LATE, unit: 'citadel-app-peek-auras.service', text: 'Error: ENOENT: no such file, open /srv/peek/rooms/77.json', priority: 6 },
+    { at: NOV15_LATE, unit: 'citadel-app-peek-auras.service', text: 'Peek Auras contraption on 127.0.0.1:9201', priority: 6 },
+  ];
   await digest.tick();
   now = NOV16_NOON;
   digest.toolError(peek, 'mcp__peek__roll', 'Error: No such tool available: mcp__peek__roll');
 
   const day = store.contraptionErrors('2026-11-15');
   const tool = day.filter((r) => r.kind === 'tool' && r.name === 'peek-auras');
-  assert.deepEqual(tool.map((r) => [r.key, r.count]).sort(), [['Read: File does not exist: /home/peek/notes/#.md', 1], ['mcp__peek__roll: Error: No such tool available: mcp__peek__roll (room #)', 10]]);
+  assert.deepEqual(tool.map((r) => [r.key, r.count]).sort(), [
+    ['Read: File does not exist: /home/peek/notes/#.md', 1],
+    ['mcp__peek__roll: Error: No such tool available: mcp__peek__roll (room #)', 10],
+  ]);
   const roll = tool.find((r) => r.count === 10)!;
   assert.equal(roll.sample, 'mcp__peek__roll: Error: No such tool available: mcp__peek__roll (room 0)', 'the first one seen, tags stripped');
-  assert.deepEqual(day.filter((r) => r.kind === 'http').map((r) => [r.key, r.count]), [['502 GET /api/rooms/#/state', 2]], 'query dropped, ids grouped');
-  assert.deepEqual(day.filter((r) => r.kind === 'log').map((r) => [r.key, r.count]), [['Error: ENOENT: no such file, open /srv/peek/rooms/#.json', 1]], 'only error lines');
-  assert.equal(store.contraptionErrors('2026-11-16').reduce((n, r) => n + r.count, 0), 1);
+  assert.deepEqual(
+    day.filter((r) => r.kind === 'http').map((r) => [r.key, r.count]),
+    [['502 GET /api/rooms/#/state', 2]],
+    'query dropped, ids grouped',
+  );
+  assert.deepEqual(
+    day.filter((r) => r.kind === 'log').map((r) => [r.key, r.count]),
+    [['Error: ENOENT: no such file, open /srv/peek/rooms/#.json', 1]],
+    'only error lines',
+  );
+  assert.equal(
+    store.contraptionErrors('2026-11-16').reduce((n, r) => n + r.count, 0),
+    1,
+  );
   assert.deepEqual(cursors, [null]);
 
   // The day ends: its file is final, a scheme whose apps had no errors gets a file saying so, an app with no scheme none.
@@ -167,8 +188,20 @@ test('a 502-504 inside a restart window is tagged deploy and counted apart; one 
   digest.httpError(other, 502, 'GET', '/api/x'); // no restart of this one
 
   const rows = store.contraptionErrors('2026-11-16');
-  const by = (name: string) => rows.filter((r) => r.name === name).map((r) => [r.kind, r.count]).sort();
-  assert.deepEqual(by('mandate'), [['deploy', 2], ['http', 1], ['http', 1]], 'two in the window are deploy; the 500 and the late 502 stay http');
+  const by = (name: string) =>
+    rows
+      .filter((r) => r.name === name)
+      .map((r) => [r.kind, r.count])
+      .sort();
+  assert.deepEqual(
+    by('mandate'),
+    [
+      ['deploy', 2],
+      ['http', 1],
+      ['http', 1],
+    ],
+    'two in the window are deploy; the 500 and the late 502 stay http',
+  );
   assert.deepEqual(by('other'), [['http', 1]]);
   await digest.tick();
   const text = readFileSync(join(root, 'deploy-shared', String(home.id), 'reports', 'contraption-errors', '2026-11-16.md'), 'utf8');

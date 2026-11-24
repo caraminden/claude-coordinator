@@ -96,7 +96,12 @@ test('the backfill rewires named copies in place, adds only the picked audits, s
   const other = row(citadel.id, 'Daily pipeline check');
 
   const lines = backfillStandardAudits(store, '/data');
-  const by = (p: number) => store.schedules.list(p).map((s) => s.template).filter(Boolean).sort();
+  const by = (p: number) =>
+    store.schedules
+      .list(p)
+      .map((s) => s.template)
+      .filter(Boolean)
+      .sort();
   assert.deepEqual(by(delve.id), ['code-health', 'monthly-retro', 'test-audit', 'upstream-check']);
   assert.deepEqual(by(citadel.id), ['code-health', 'monthly-retro', 'test-audit', 'upstream-check']);
   assert.deepEqual(by(threadspace.id), ['monthly-retro', 'upstream-check'], 'a notes vault gets no code or test audit');

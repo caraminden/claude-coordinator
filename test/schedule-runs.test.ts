@@ -16,7 +16,14 @@ test('a started slot and a gate skip each leave a history row; an error does not
   store.schedules.ran(s.id, { skip: 'quiet' }, now - 3 * day);
   store.schedules.ran(s.id, { error: 'busy' }, now - 2 * day);
   store.schedules.ran(s.id, { skip: 'quiet again' }, now - day);
-  assert.deepEqual(store.schedules.runs(s.id).map((r) => [r.ticket_id, r.skip]), [[null, 'quiet again'], [null, 'quiet'], [7, null]]);
+  assert.deepEqual(
+    store.schedules.runs(s.id).map((r) => [r.ticket_id, r.skip]),
+    [
+      [null, 'quiet again'],
+      [null, 'quiet'],
+      [7, null],
+    ],
+  );
   assert.equal(store.schedules.runs(s.id, 1).length, 1);
   assert.equal(store.schedules.skipsSince(s.id, now - 14 * day), 2);
   store.schedules.remove(s.id);

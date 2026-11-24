@@ -15,7 +15,9 @@ after(() => rmSync(root, { recursive: true, force: true })); // timing-ok: own t
 
 const fake = join(root, 'npm-fake');
 mkdirSync(join(fake, 'bin'), { recursive: true });
-writeFileSync(join(fake, 'bin', 'npm'), `#!${process.execPath}
+writeFileSync(
+  join(fake, 'bin', 'npm'),
+  `#!${process.execPath}
 const fs = require('node:fs');
 const dir = ${JSON.stringify(fake)};
 fs.appendFileSync(dir + '/calls', JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2), cache: process.env.npm_config_cache ?? null, claude: Object.keys(process.env).filter((k) => /^(CLAUDE_|ANTHROPIC_)/.test(k)) }) + '\\n');
@@ -30,7 +32,8 @@ else if (mode === 'stubborn') {
   setInterval(() => {}, 1000);
 }
 else fs.mkdirSync('node_modules/left-pad', { recursive: true });
-`);
+`,
+);
 chmodSync(join(fake, 'bin', 'npm'), 0o755);
 const npm = [join(fake, 'bin', 'npm')];
 const setMode = (m: string) => writeFileSync(join(fake, 'mode'), m);
@@ -109,12 +112,15 @@ test('each tracked lockfile folder is installed: a companion app beside the root
   assert.ok(existsSync(join(dir, 'companion', 'node_modules')));
 });
 
-test('a failed install is reported, never thrown, with npm\'s own error line', async () => {
+test("a failed install is reported, never thrown, with npm's own error line", async () => {
   setMode('fail');
   const dir = repo({ '.gitignore': 'node_modules/\n', 'package-lock.json': LOCK, 'companion/package-lock.json': LOCK });
   const r = await installDeps(dir, cache, { npm });
   assert.deepEqual(r.installed, []);
-  assert.deepEqual(r.failed, [{ dir: '', why: 'npm error code EBOOM' }, { dir: 'companion', why: 'npm error code EBOOM' }]);
+  assert.deepEqual(r.failed, [
+    { dir: '', why: 'npm error code EBOOM' },
+    { dir: 'companion', why: 'npm error code EBOOM' },
+  ]);
   const note = depsNote(r)!;
   assert.match(note, /at the root: npm error code EBOOM/);
   assert.match(note, /in companion\/: npm error code EBOOM/);
@@ -150,17 +156,20 @@ test('an install that ignores TERM is killed with its scripts, so the lane is fr
 
 // Through the server: the first turn starts after the install, with node_modules there, and a failed install still
 // starts the turn, with held mail saying so. The fake claude logs whether node_modules was there and what it was told.
-test('a new minion\'s first turn waits for the install, and starts when it fails', async () => {
+test("a new minion's first turn waits for the install, and starts when it fails", async () => {
   const home = join(root, 'srv');
   mkdirSync(home);
   const turns = join(root, 'turns.log');
   const claude = join(root, 'claude-fake');
-  writeFileSync(claude, `#!${process.execPath}
+  writeFileSync(
+    claude,
+    `#!${process.execPath}
 const fs = require('node:fs');
 fs.appendFileSync(${JSON.stringify(turns)}, JSON.stringify({ cwd: process.cwd(), modules: fs.existsSync('node_modules') }) + '\\n');
 process.stdin.on('data', (d) => fs.appendFileSync(${JSON.stringify(turns)}, JSON.stringify({ cwd: process.cwd(), said: String(d) }) + '\\n'));
 setInterval(() => {}, 1000);
-`);
+`,
+  );
   chmodSync(claude, 0o755);
   const code = repo({ '.gitignore': 'node_modules/\n', 'package.json': '{}', 'package-lock.json': LOCK });
   const srv = await bootServer({ root: home, env: { HOME: root, CLAUDE_BIN: claude, CITADEL_HEAVY_UNIT: '0', PATH: `${join(fake, 'bin')}:${process.env.PATH}` } });

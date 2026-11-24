@@ -29,8 +29,15 @@ const STUB = `<script>
 
 let app: App;
 let browser: Browser;
-before(async () => { if (skip) return; app = await serveApp({ stub: STUB }); browser = await launch(bin!); });
-after(async () => { await browser?.close(); await app?.close(); });
+before(async () => {
+  if (skip) return;
+  app = await serveApp({ stub: STUB });
+  browser = await launch(bin!);
+});
+after(async () => {
+  await browser?.close();
+  await app?.close();
+});
 
 test('a release row in the rail opens the Releases page when the release redraws during the click', { skip }, async () => {
   const page = await browser.page(`${app.base}#/p/1`, { width: 1280, height: 800 });

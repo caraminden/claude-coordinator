@@ -45,7 +45,12 @@ const project = store.createProject('Test', null);
 
 /** A runner as a freshly started server would make it. */
 function server() {
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.resumeGapMs = 10;
   r.pollMs = 10;
   return r;
@@ -82,7 +87,11 @@ async function finish(r: Runner, id: number) {
   rmSync(join(root, 'release'), { force: true });
 }
 
-const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+const notes = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
 const settle = () => new Promise((r) => setTimeout(r, 200));
 
 test('an interrupted turn resumes after a restart, with the messages queued behind it', async () => {
@@ -199,7 +208,7 @@ test('a resume still owed when the server restarts again is resumed by the next 
   await until("existsSync(prompts) && readFileSync(prompts, 'utf8').includes('and the docs')", () => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('and the docs'));
   assert.match(readFileSync(prompts, 'utf8'), /\[System\]: The \S+ server restarted while you were working/);
   await finish(third, id);
-  assert.equal((store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null), null, 'the debt is paid once the resume starts');
+  assert.equal(store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null, null, 'the debt is paid once the resume starts');
 });
 
 test("messages queued behind a cut-off turn that isn't resumed outlive a second restart (#468 S03-8)", async () => {
@@ -224,7 +233,7 @@ test("messages queued behind a cut-off turn that isn't resumed outlive a second 
 
 // C8 (#1406): a turn that wrote while no server read it, then died before its end, keeps those words: boot recovery
 // reads the rest of its stream before it deletes the folder, as the live path does for a turn gone without a word.
-test("a turn that vanished while the server was down keeps the text it wrote meanwhile (C8)", async () => {
+test('a turn that vanished while the server was down keeps the text it wrote meanwhile (C8)', async () => {
   const id = newTicket();
   const before = server();
   before.send(id, 'Cara', 'write something');
@@ -258,8 +267,14 @@ test('a turn whose reply came in while the server was down is not resumed after 
   after.recover();
   await settle();
   const events = store.listEvents(id);
-  assert.ok(events.some((e) => e.data.includes(words)), 'its reply reached the chat');
-  assert.ok(events.some((e) => e.kind === 'note' && e.data.includes('Its reply was already in, so it was not resumed.')), 'the note says why it was not resumed');
+  assert.ok(
+    events.some((e) => e.data.includes(words)),
+    'its reply reached the chat',
+  );
+  assert.ok(
+    events.some((e) => e.kind === 'note' && e.data.includes('Its reply was already in, so it was not resumed.')),
+    'the note says why it was not resumed',
+  );
   assert.ok(!events.some((e) => e.kind === 'note' && /Resumed after a server restart/.test(e.data)), 'no resume');
   assert.equal(after.isRunning(id), false);
   assert.equal(readFileSync(prompts, 'utf8'), '', 'no turn was told to carry on');

@@ -88,8 +88,14 @@ const EDGES = `Object.fromEntries(${JSON.stringify(PANES)}.map((s) => {
 }))`;
 const frames = `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`;
 
-for (const [what, size] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844, touch: true }]] as const) {
-  for (const [view, route, ticket] of [['the Taskmaster chat', '#/p/1', 100], ["a minion's chat", '#/p/1/t/7', 101]] as const) {
+for (const [what, size] of [
+  ['desktop', { width: 1440, height: 900 }],
+  ['phone', { width: 390, height: 844, touch: true }],
+] as const) {
+  for (const [view, route, ticket] of [
+    ['the Taskmaster chat', '#/p/1', 100],
+    ["a minion's chat", '#/p/1/t/7', 101],
+  ] as const) {
     test(`on ${what}, ${view} keeps its panes still while live news arrives with nobody touching it`, { skip }, async () => {
       const page = await browser.page(`${base}${route}`, size);
       await waitFor(page, 'the chat to draw', `document.getElementById('log')?.textContent.includes('Reading the code')`);

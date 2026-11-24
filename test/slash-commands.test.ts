@@ -13,7 +13,12 @@ import { chatCommandList, matchCommands, mentionQuery, menuQuery, parseCommand }
 const root = mkdtempSync(join(tmpdir(), 'slash-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const store = new Store(join(root, 'test.db'));
-const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  '/bin/false',
+);
 
 test("describe takes a SKILL.md's description up to its first sentence, quoted or folded", () => {
   assert.equal(describe('---\nname: x\ndescription: Grill the user. Use when asked.\n---\nbody'), 'Grill the user.');
@@ -35,10 +40,15 @@ test("a turn's init event is kept without terminal and internal commands, and li
   mkdirSync(join(cwd, '.claude', 'skills', 'deploy'), { recursive: true });
   writeFileSync(join(cwd, '.claude', 'skills', 'deploy', 'SKILL.md'), '---\ndescription: Ship it.\n---\n');
   (runner as any).saveCommands(t.id, {
-    type: 'system', subtype: 'init', cwd,
+    type: 'system',
+    subtype: 'init',
+    cwd,
     slash_commands: ['citadel:grilling', 'deploy', 'compact', 'statusline', '__remote-workflow', 'mystery', 'citadel:../../etc'],
     terminal_slash_commands: ['statusline'],
-    plugins: [{ name: 'citadel', path: kit }, { name: 'builtin-thing', path: 'builtin' }],
+    plugins: [
+      { name: 'citadel', path: kit },
+      { name: 'builtin-thing', path: 'builtin' },
+    ],
   });
   assert.deepEqual(chatCommands(store, t), {
     loaded: true,
@@ -73,14 +83,34 @@ test('menuQuery opens only while the box is one /word', () => {
 });
 
 test("the list: Citadel's own for the chat's kind lead, matched by name, by the part after plugin:, then anywhere", () => {
-  const loaded = [{ name: 'compact', description: '' }, { name: 'citadel:grilling', description: '' }, { name: 'fresh', description: 'theirs' }, { name: 'focus', description: '' }];
+  const loaded = [
+    { name: 'compact', description: '' },
+    { name: 'citadel:grilling', description: '' },
+    { name: 'fresh', description: 'theirs' },
+    { name: 'focus', description: '' },
+  ];
   const minion = chatCommandList(loaded, true);
-  assert.deepEqual(minion.map((c) => c.name), ['btw', 'fresh', 'help', 'compact', 'citadel:grilling', 'focus']);
+  assert.deepEqual(
+    minion.map((c) => c.name),
+    ['btw', 'fresh', 'help', 'compact', 'citadel:grilling', 'focus'],
+  );
   assert.equal(minion.find((c) => c.name === 'fresh')!.citadel, true);
-  assert.deepEqual(chatCommandList(loaded, false).map((c) => c.name), ['fresh', 'help', 'compact', 'citadel:grilling', 'focus']);
-  assert.deepEqual(matchCommands(minion, 'f').map((c) => c.name), ['fresh', 'focus']);
-  assert.deepEqual(matchCommands(minion, 'gri').map((c) => c.name), ['citadel:grilling']);
-  assert.deepEqual(matchCommands(minion, 'act').map((c) => c.name), ['compact']);
+  assert.deepEqual(
+    chatCommandList(loaded, false).map((c) => c.name),
+    ['fresh', 'help', 'compact', 'citadel:grilling', 'focus'],
+  );
+  assert.deepEqual(
+    matchCommands(minion, 'f').map((c) => c.name),
+    ['fresh', 'focus'],
+  );
+  assert.deepEqual(
+    matchCommands(minion, 'gri').map((c) => c.name),
+    ['citadel:grilling'],
+  );
+  assert.deepEqual(
+    matchCommands(minion, 'act').map((c) => c.name),
+    ['compact'],
+  );
   assert.equal(matchCommands(minion, '').length, minion.length);
 });
 

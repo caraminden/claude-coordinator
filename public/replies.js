@@ -10,17 +10,33 @@ import { answerNow } from './inbox.js';
 export function replyChips(t, send) {
   if (!t.replies?.length || t.status === 'running' || t.status === 'closed') return '';
   const box = h('span', { class: 'replies', role: 'group', 'aria-label': 'One-tap replies' });
-  box.append(...t.replies.map((text) => h('button', { type: 'button', class: 'reply-chip', title: `Send "${text}" to the minion`, onclick: (e) => {
-    // The message shows in the chat at once, queued and retried as the composer's are (composer.js send); the
-    // other replies stay tappable, and one that finally didn't go frees this one again.
-    const tapped = e.currentTarget;
-    const mark = (on) => {
-      tapped.disabled = on;
-      tapped.classList.toggle('sent', on);
-    };
-    mark(true);
-    const unanswer = answerNow(t.id, (i) => i.kind === 'replies'); // #1409: the strip and pill drop it at the tap
-    send(text).catch(() => { mark(false); unanswer(); });
-  } }, text)));
+  box.append(
+    ...t.replies.map((text) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'reply-chip',
+          title: `Send "${text}" to the minion`,
+          onclick: (e) => {
+            // The message shows in the chat at once, queued and retried as the composer's are (composer.js send); the
+            // other replies stay tappable, and one that finally didn't go frees this one again.
+            const tapped = e.currentTarget;
+            const mark = (on) => {
+              tapped.disabled = on;
+              tapped.classList.toggle('sent', on);
+            };
+            mark(true);
+            const unanswer = answerNow(t.id, (i) => i.kind === 'replies'); // #1409: the strip and pill drop it at the tap
+            send(text).catch(() => {
+              mark(false);
+              unanswer();
+            });
+          },
+        },
+        text,
+      ),
+    ),
+  );
   return box;
 }

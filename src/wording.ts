@@ -43,15 +43,18 @@ export const RESERVED: Reserved[] = [
     // Only the shapes that can't mean a build: "merge it" / "merge #12" / "PR #12 merged" with no "into" after, "merged
     // to main", "ready to merge", "merged PRs", "the merge card". A bare "merged" or "the merge" is left alone: it's
     // as often git's as ours.
-    match: new RegExp([
-      String.raw`\b${MERGE}\s+(?:it|this|that|them|(?:PR\s*)?#\d+|PR\s+\d+)\b${INTO}`,
-      String.raw`\bmerge\s+\d+\b${INTO}`,
-      String.raw`\b${MERGE}\b(?:\s+\S+){0,4}?\s+(?:in)?to\s+main\b`,
-      String.raw`\bready\s+to\s+merge\b${INTO}`,
-      String.raw`\bPR\s*#?\d+\s+(?:(?:was|is|has\s+been|got)\s+)?merged\b${INTO}`,
-      String.raw`\bmerged\s+PRs?\b`,
-      String.raw`\bmerge\s+(?:card|chip|go|button)s?\b`,
-    ].join('|'), 'gi'),
+    match: new RegExp(
+      [
+        String.raw`\b${MERGE}\s+(?:it|this|that|them|(?:PR\s*)?#\d+|PR\s+\d+)\b${INTO}`,
+        String.raw`\bmerge\s+\d+\b${INTO}`,
+        String.raw`\b${MERGE}\b(?:\s+\S+){0,4}?\s+(?:in)?to\s+main\b`,
+        String.raw`\bready\s+to\s+merge\b${INTO}`,
+        String.raw`\bPR\s*#?\d+\s+(?:(?:was|is|has\s+been|got)\s+)?merged\b${INTO}`,
+        String.raw`\bmerged\s+PRs?\b`,
+        String.raw`\bmerge\s+(?:card|chip|go|button)s?\b`,
+      ].join('|'),
+      'gi',
+    ),
     allow: /^(?:builds?|feeders?|git)$/i,
     always: /\bmain\b/i,
     suggest: '"ship it", "shipped to main", "ready to ship", "shipped PRs" or "the ship card"; "merge into Build <n>" for a feeder',
@@ -61,16 +64,19 @@ export const RESERVED: Reserved[] = [
     why: 'A change going onto main "ships" now, not "lands" (Cara, 2026-11-19, picked "Ship" on #1020\'s card); code, tool and file names (hand_off_land, tools/land.sh, land/* branches) keep theirs',
     // The shapes that mean a change going onto main: "land it" / "land #12", "landed on main", "ready to land",
     // "#12 has landed", "landed PRs", "the land card". A bare "lands" is left alone: findings and files land too.
-    match: new RegExp([
-      String.raw`\b${LAND}\s+(?:it|this|that|them|(?:PR\s*)?#\d+|PR\s+\d+)\b`,
-      // "land 196": the go parser reads a bare number as a PR.
-      String.raw`\bland\s+\d+\b`,
-      String.raw`\b${LAND}\b(?:\s+\S+){0,4}?\s+(?:on(?:to)?|in(?:to)?|to)\s+main\b(?!\.\w)`,
-      String.raw`\bready\s+to\s+land\b`,
-      String.raw`(?:\bPR\s*#?\d+|#\d+)\s+(?:(?:was|is|has|had|has\s+been|got)\s+)?landed\b`,
-      String.raw`\blanded\s+PRs?\b`,
-      String.raw`\bland\s+(?:card|chip|go|button|line)s?\b`,
-    ].join('|'), 'gi'),
+    match: new RegExp(
+      [
+        String.raw`\b${LAND}\s+(?:it|this|that|them|(?:PR\s*)?#\d+|PR\s+\d+)\b`,
+        // "land 196": the go parser reads a bare number as a PR.
+        String.raw`\bland\s+\d+\b`,
+        String.raw`\b${LAND}\b(?:\s+\S+){0,4}?\s+(?:on(?:to)?|in(?:to)?|to)\s+main\b(?!\.\w)`,
+        String.raw`\bready\s+to\s+land\b`,
+        String.raw`(?:\bPR\s*#?\d+|#\d+)\s+(?:(?:was|is|has|had|has\s+been|got)\s+)?landed\b`,
+        String.raw`\blanded\s+PRs?\b`,
+        String.raw`\bland\s+(?:card|chip|go|button|line)s?\b`,
+      ].join('|'),
+      'gi',
+    ),
     suggest: '"ship it", "shipped to main", "ready to ship", "#12 has shipped", "shipped PRs" or "the ship card"',
   },
 ];
@@ -115,8 +121,14 @@ export const CODE = /^ {0,3}(```|~~~)[\s\S]*?(?:^ {0,3}\1|(?![\s\S]))|(`+)(?!`)[
 export function prose(text: string, html = false): string {
   let t = text;
   if (html) {
-    t = t.replace(/<(script|style|pre|code)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"');
+    t = t
+      .replace(/<(script|style|pre|code)\b[\s\S]*?<\/\1\s*>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/&quot;/g, '"');
   }
   return t.replace(CODE, ' ').replace(/\S*[/\\]\S*/g, ' ');
 }

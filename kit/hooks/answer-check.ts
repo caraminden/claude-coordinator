@@ -47,8 +47,7 @@ export type Turn = { toolCalls: string[]; finalText: string; steered: boolean; c
 // `steered` covers every turn cut short rather than ended: a steer, a stop, a usage-limit or API error.
 
 const isNotification = (text: string) => /^\s*<task-notification>/.test(text);
-const textOf = (content: unknown): string =>
-  typeof content === 'string' ? content : Array.isArray(content) ? content.map((b: TranscriptBlock | null) => (b?.type === 'text' ? String(b.text ?? '') : '')).join('\n') : '';
+const textOf = (content: unknown): string => (typeof content === 'string' ? content : Array.isArray(content) ? content.map((b: TranscriptBlock | null) => (b?.type === 'text' ? String(b.text ?? '') : '')).join('\n') : '');
 
 /**
  * The turn of `promptId` in a transcript (JSONL): its tool calls, its last text, and whether a
@@ -89,8 +88,7 @@ export function readTurn(transcript: string, promptId?: string): Turn {
             const parts = qs.flatMap((q: AskedQuestion | null) => [q?.question, ...(Array.isArray(q?.options) ? q.options.map((o: { description?: unknown } | null) => o?.description) : [])]).filter((t: unknown) => typeof t === 'string');
             if (parts.length) turn.cardText = `${turn.cardText ?? ''}\n${parts.join('\n')}`;
           }
-        }
-        else if (b?.type === 'text' && String(b.text ?? '').trim()) turn.finalText = String(b.text);
+        } else if (b?.type === 'text' && String(b.text ?? '').trim()) turn.finalText = String(b.text);
       }
     } else if (e?.type === 'attachment' && e.attachment?.type === 'queued_command') {
       // A message passed in mid-turn: a steer, unless it is a Grunt's or a job's finish notice.
@@ -179,8 +177,13 @@ const READ_COMMANDS = /\b(?:git|gh|sqlite3|curl|journalctl|systemctl|ci-failures
 
 /** The sentences of `text` that state live state, outside code, quotes and comments; hedged ones and questions left out. */
 export function liveClaims(text: string): string[] {
-  const prose = text.replace(/^[ \t]*```[\s\S]*?^[ \t]*```/gm, '').replace(/<!--[\s\S]*?-->/g, '').replace(/`[^`\n]*`/g, '`…`')
-    .split('\n').filter((l) => !/^\s*>/.test(l)).join('\n');
+  const prose = text
+    .replace(/^[ \t]*```[\s\S]*?^[ \t]*```/gm, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/`[^`\n]*`/g, '`…`')
+    .split('\n')
+    .filter((l) => !/^\s*>/.test(l))
+    .join('\n');
   const out: string[] = [];
   for (const raw of prose.split(/(?<=[.!?])\s+|\n+/)) {
     const s = raw.replace(/~~[^~]*~~/g, '').trim();
@@ -193,7 +196,10 @@ export function liveClaims(text: string): string[] {
 
 /** The parts of a prompt Citadel, GitHub, a Taskmaster or a minion wrote (`[Citadel]:`, `[#N title]:`, a quoted Taskmaster), not a person's words. */
 function toldBy(prompt: string): string {
-  return prompt.split(/^(?=\[[^\]\n]+\]:)/m).filter((b) => /^\[(?:System|Citadel|GitHub|Taskmaster|#\d)/.test(b) || b.includes('(Quoted from ')).join('\n');
+  return prompt
+    .split(/^(?=\[[^\]\n]+\]:)/m)
+    .filter((b) => /^\[(?:System|Citadel|GitHub|Taskmaster|#\d)/.test(b) || b.includes('(Quoted from '))
+    .join('\n');
 }
 const numbers = (s: string) => new Set(s.match(/#\d{2,5}\b/g) ?? []);
 
@@ -206,7 +212,10 @@ export function liveClaimCheck(turn: Turn): string[] {
   const toldNumbers = numbers(told);
   const toldLive = LIVE_CLAIMS.some((re) => re.test(told));
   const passedOn = (s: string) => toldLive && [...numbers(s)].every((n) => toldNumbers.has(n));
-  return liveClaims(turn.finalText).filter((s) => !passedOn(s)).slice(0, 3).map((s) => `live-state claim without a read · "${s.replace(/\s+/g, ' ').slice(0, 160)}"`);
+  return liveClaims(turn.finalText)
+    .filter((s) => !passedOn(s))
+    .slice(0, 3)
+    .map((s) => `live-state claim without a read · "${s.replace(/\s+/g, ' ').slice(0, 160)}"`);
 }
 
 // The minion checks (#1154). The trailer as src/status-trailer.ts reads it: only at the very end, its body can't cross a `-->`.
@@ -318,7 +327,9 @@ function refusalFor(input: HookInput, hits: string[], stateDir: string): string 
   } catch {
     return null; // no marker to stop a second refusal: let the turn end
   }
-  return '[citadel answer check] Your reply proposes work (a proposal, recommendation, next steps or follow-ups) and no card, plan or message to the Taskmaster went with it. '
-    + 'Post the choice as an ask_question card (a plan as propose_plan; a handoff as a message to the Taskmaster), one option per proposal with your pick marked, then write the reply again with the card\'s link. '
-    + 'If nobody has a choice to make (a report that only lists what was done), write the reply again without the proposal wording.';
+  return (
+    '[citadel answer check] Your reply proposes work (a proposal, recommendation, next steps or follow-ups) and no card, plan or message to the Taskmaster went with it. ' +
+    "Post the choice as an ask_question card (a plan as propose_plan; a handoff as a message to the Taskmaster), one option per proposal with your pick marked, then write the reply again with the card's link. " +
+    'If nobody has a choice to make (a report that only lists what was done), write the reply again without the proposal wording.'
+  );
 }

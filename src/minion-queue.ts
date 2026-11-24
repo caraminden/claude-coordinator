@@ -10,7 +10,11 @@ export const QUEUE_PREFIX = 'minion-queue:';
 
 /** A resume a restart must still start (a cut-off turn's, or an account switch's, #779): its count and how it resumes. */
 export type OwedResume = {
-  resumes: number; limitTries?: number; onAccount?: true; killTries?: number; switchTries?: number;
+  resumes: number;
+  limitTries?: number;
+  onAccount?: true;
+  killTries?: number;
+  switchTries?: number;
   /** What the cut-off turn set and its resume reads (Runner's TurnState from, parkedAs, status, #1452), so a restart before the resume keeps them. */
   carry?: { from?: number; parkedAs?: { state: string | null; note: string | null }; status?: Record<string, unknown> };
 };
@@ -45,7 +49,9 @@ type SettingsStore = {
  */
 export class MinionQueue {
   private store: SettingsStore;
-  constructor(store: SettingsStore) { this.store = store; }
+  constructor(store: SettingsStore) {
+    this.store = store;
+  }
 
   /** The minion's record, read-only; an empty one when nothing waits. */
   get(id: number): Readonly<QueueRecord> {
@@ -96,7 +102,9 @@ export class MinionQueue {
 
   putAll(id: number, msgs: QueuedMessage[], first = false) {
     if (!msgs.length) return;
-    this.edit(id, (r) => { r.msgs = first ? [...msgs, ...(r.msgs ?? [])] : [...(r.msgs ?? []), ...msgs]; });
+    this.edit(id, (r) => {
+      r.msgs = first ? [...msgs, ...(r.msgs ?? [])] : [...(r.msgs ?? []), ...msgs];
+    });
   }
 
   /**
@@ -110,7 +118,9 @@ export class MinionQueue {
     if (!batch.length && !r.owed && !r.coldAt) return [];
     this.edit(id, (r) => {
       r.taken = [...(r.taken ?? []), ...batch];
-      delete r.msgs; delete r.held; delete r.coldAt;
+      delete r.msgs;
+      delete r.held;
+      delete r.coldAt;
     });
     return batch;
   }
@@ -130,12 +140,19 @@ export class MinionQueue {
   /** The turn is durably done (its session saved): its batch and steers are in its transcript now. */
   done(id: number) {
     const r = this.get(id);
-    if (r.taken || r.steered) this.edit(id, (r) => { delete r.taken; delete r.steered; });
+    if (r.taken || r.steered)
+      this.edit(id, (r) => {
+        delete r.taken;
+        delete r.steered;
+      });
   }
 
   /** The cold cap's clock stops; the mail stays held. */
   warm(id: number) {
-    if (this.get(id).coldAt) this.edit(id, (r) => { delete r.coldAt; });
+    if (this.get(id).coldAt)
+      this.edit(id, (r) => {
+        delete r.coldAt;
+      });
   }
 
   /** Hold a message as mail for the next turn; `cold` starts the cold cap's clock (#413) at `now`. */
@@ -150,7 +167,12 @@ export class MinionQueue {
   release(id: number): number {
     const r = this.get(id);
     const n = r.held?.length ?? 0;
-    if (n || r.coldAt) this.edit(id, (r) => { r.msgs = [...(r.msgs ?? []), ...(r.held ?? [])]; delete r.held; delete r.coldAt; });
+    if (n || r.coldAt)
+      this.edit(id, (r) => {
+        r.msgs = [...(r.msgs ?? []), ...(r.held ?? [])];
+        delete r.held;
+        delete r.coldAt;
+      });
     return n;
   }
 
@@ -160,7 +182,10 @@ export class MinionQueue {
 
   owe(id: number, owed: OwedResume | null) {
     if (!owed && !this.get(id).owed) return;
-    this.edit(id, (r) => { if (owed) r.owed = owed; else delete r.owed; });
+    this.edit(id, (r) => {
+      if (owed) r.owed = owed;
+      else delete r.owed;
+    });
   }
 
   steers(id: number): Steer[] {
@@ -168,48 +193,67 @@ export class MinionQueue {
   }
 
   steered(id: number, steer: Steer) {
-    this.edit(id, (r) => { r.steered = [...(r.steered ?? []), steer]; });
+    this.edit(id, (r) => {
+      r.steered = [...(r.steered ?? []), steer];
+    });
   }
 
   /** A turn's end: its steers' fate is decided, and the unsent ones (`unsent`) join the queue for the next turn. */
   endSteers(id: number, unsent: QueuedMessage[]) {
     const r = this.get(id);
     if (!r.steered && !unsent.length) return;
-    this.edit(id, (r) => { delete r.steered; if (unsent.length) r.msgs = [...(r.msgs ?? []), ...unsent]; });
+    this.edit(id, (r) => {
+      delete r.steered;
+      if (unsent.length) r.msgs = [...(r.msgs ?? []), ...unsent];
+    });
   }
 
   /** A stop drops what waits for the next turn, the running turn's steers and the owed resume, on purpose; held mail stays for the next turn. */
   drop(id: number): QueuedMessage[] {
     const r = this.get(id);
     const gone = r.msgs ?? [];
-    if (gone.length || r.owed || r.steered) this.edit(id, (r) => { delete r.msgs; delete r.owed; delete r.steered; });
+    if (gone.length || r.owed || r.steered)
+      this.edit(id, (r) => {
+        delete r.msgs;
+        delete r.owed;
+        delete r.steered;
+      });
     return gone;
   }
 
   /** A refused start drops what waits for the next turn, as send() refuses a message; held mail stays (#468 S03-6). */
   refuse(id: number) {
-    if (this.get(id).msgs) this.edit(id, (r) => { delete r.msgs; });
+    if (this.get(id).msgs)
+      this.edit(id, (r) => {
+        delete r.msgs;
+      });
   }
 
   /** Take the queued and held messages `gone` picks out of the queue (a disabled person's, #1509): what went. */
   dropWhere(id: number, gone: (m: QueuedMessage) => boolean): QueuedMessage[] {
     const r = this.get(id);
     const out = [...(r.msgs ?? []), ...(r.held ?? [])].filter(gone);
-    if (out.length) this.edit(id, (r) => { r.msgs = r.msgs?.filter((m) => !gone(m)); r.held = r.held?.filter((m) => !gone(m)); });
+    if (out.length)
+      this.edit(id, (r) => {
+        r.msgs = r.msgs?.filter((m) => !gone(m));
+        r.held = r.held?.filter((m) => !gone(m));
+      });
     return out;
   }
 
   /** Take back one queued message (its user_message event id): whether it was waiting. */
   remove(id: number, eventId: number): boolean {
     if (!this.get(id).msgs?.some((m) => m.id === eventId)) return false;
-    this.edit(id, (r) => { r.msgs = r.msgs!.filter((m) => m.id !== eventId); });
+    this.edit(id, (r) => {
+      r.msgs = r.msgs!.filter((m) => m.id !== eventId);
+    });
     return true;
   }
 
   /** A closed minion's queue goes: what was still waiting in it (queued, and held unless `keepHeld`), for the chat line that says so. */
   clear(id: number, keepHeld = false): QueuedMessage[] {
     const r = this.get(id);
-    const left = [...(r.msgs ?? []), ...(keepHeld ? [] : r.held ?? [])];
+    const left = [...(r.msgs ?? []), ...(keepHeld ? [] : (r.held ?? []))];
     if (Object.keys(r).length) this.save(id, keepHeld && r.held?.length ? { held: r.held } : {});
     return left;
   }
@@ -269,7 +313,11 @@ export function migrateQueues(store: MigrateStore): number {
     turns.push(t);
   }
   // The waits: a network or kill wait's messages had left the queue (they go first); a limit wait's were a copy of it.
-  const waits: [string, boolean][] = [['net-resumes', true], ['kill-resumes', true], ['limit-resumes', false]];
+  const waits: [string, boolean][] = [
+    ['net-resumes', true],
+    ['kill-resumes', true],
+    ['limit-resumes', false],
+  ];
   const lists = new Map<string, { ticket: number; queued?: QueuedMessage[] }[]>();
   for (const [name, front] of waits) {
     const list = store.getSetting<{ ticket: number; queued?: QueuedMessage[] }[]>(name);
@@ -279,7 +327,10 @@ export function migrateQueues(store: MigrateStore): number {
   }
   if (!found.size && !lists.size) return 0;
   const once = (list: QueuedMessage[], seen = new Set<string>()) =>
-    list.filter((m) => { const k = JSON.stringify(m); return !seen.has(k) && !!seen.add(k); });
+    list.filter((m) => {
+      const k = JSON.stringify(m);
+      return !seen.has(k) && !!seen.add(k);
+    });
   for (const [id, f] of found) {
     const now = store.getSetting<QueueRecord>(queueKey(id)) ?? {};
     const r: QueueRecord = { ...now };
@@ -298,6 +349,10 @@ export function migrateQueues(store: MigrateStore): number {
     const { queued: _q, steered: _s, ...rest } = value;
     store.setSetting(key, rest);
   }
-  for (const [name, list] of lists) store.setSetting(name, list.map(({ queued: _q, ...w }) => w));
+  for (const [name, list] of lists)
+    store.setSetting(
+      name,
+      list.map(({ queued: _q, ...w }) => w),
+    );
   return found.size;
 }

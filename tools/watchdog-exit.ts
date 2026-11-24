@@ -7,5 +7,9 @@ import { thrown } from '../src/thrown.ts';
 import { markExit, markStop } from '../src/sd-watchdog.ts';
 
 const dataDir = process.env.DATA_DIR || join(homedir(), '.local/share/claude-coordinator');
-try { markStop(process.env, dataDir); } catch (err) { console.error(`Stop mark failed: ${thrown(err).message ?? err}`); } // never at the cost of the watchdog mark below
+try {
+  markStop(process.env, dataDir);
+} catch (err) {
+  console.error(`Stop mark failed: ${thrown(err).message ?? err}`);
+} // never at the cost of the watchdog mark below
 if (markExit(process.env, dataDir)) console.log('Watchdog stop: marked for the next boot.');

@@ -21,13 +21,26 @@ import type { ClaudeEvent, ContentBlock } from '../src/claude-events.ts';
 export const ADVISED = 'claude-sonnet-5-5+opus-advisor';
 const SONNET = 'claude-sonnet-5-5';
 
-export interface TurnRow { ticket: number; cost: number; model: string | null; consults: number }
-export interface Totals { minions: number; turns: number; cost: number; consults: number; over3: number }
+export interface TurnRow {
+  ticket: number;
+  cost: number;
+  model: string | null;
+  consults: number;
+}
+export interface Totals {
+  minions: number;
+  turns: number;
+  cost: number;
+  consults: number;
+  over3: number;
+}
 
 /** Every minion turn ended since `since`, with the model its init event named and its advisor consults. */
 export function trialTurns(db: DatabaseSync, since: number): TurnRow[] {
-  const turns = db.prepare(`SELECT t.ticket_id, t.event_id, t.cost_usd FROM turns t JOIN tickets k ON k.id = t.ticket_id
-    WHERE t.ended_at >= ? AND k.kind != 'coordinator' ORDER BY t.ticket_id, t.id`).all(since) as { ticket_id: number; event_id: number | null; cost_usd: number }[];
+  const turns = db
+    .prepare(`SELECT t.ticket_id, t.event_id, t.cost_usd FROM turns t JOIN tickets k ON k.id = t.ticket_id
+    WHERE t.ended_at >= ? AND k.kind != 'coordinator' ORDER BY t.ticket_id, t.id`)
+    .all(since) as { ticket_id: number; event_id: number | null; cost_usd: number }[];
   const out: TurnRow[] = [];
   let ticket = -1;
   let from = 0;
@@ -37,8 +50,10 @@ export function trialTurns(db: DatabaseSync, since: number): TurnRow[] {
       from = (db.prepare('SELECT COALESCE(MAX(event_id), 0) AS e FROM turns WHERE ticket_id = ? AND ended_at < ?').get(ticket, since) as { e: number }).e;
     }
     const to = t.event_id ?? Number.MAX_SAFE_INTEGER;
-    const events = db.prepare(`SELECT data FROM events WHERE ticket_id = ? AND kind = 'claude' AND id > ? AND id <= ?
-      AND (data LIKE '%"subtype":"init"%' OR (data LIKE '%server_tool_use%' AND data LIKE '%"advisor"%')) ORDER BY id`).all(ticket, from, to) as { data: string }[];
+    const events = db
+      .prepare(`SELECT data FROM events WHERE ticket_id = ? AND kind = 'claude' AND id > ? AND id <= ?
+      AND (data LIKE '%"subtype":"init"%' OR (data LIKE '%server_tool_use%' AND data LIKE '%"advisor"%')) ORDER BY id`)
+      .all(ticket, from, to) as { data: string }[];
     let model: string | null = null;
     let consults = 0;
     for (const e of events) {
@@ -58,8 +73,11 @@ export function trialNumbers(db: DatabaseSync, since: number) {
   const settings = new Map((db.prepare('SELECT id, model, effort FROM tickets').all() as { id: number; model: string | null; effort: string | null }[]).map((t) => [t.id, t]));
   const trialIds = new Set(rows.filter((r) => r.consults || settings.get(r.ticket)?.model === ADVISED).map((r) => r.ticket));
   const sum = (list: TurnRow[]): Totals => ({
-    minions: new Set(list.map((r) => r.ticket)).size, turns: list.length, cost: list.reduce((s, r) => s + r.cost, 0),
-    consults: list.reduce((s, r) => s + r.consults, 0), over3: list.filter((r) => r.consults > 3).length,
+    minions: new Set(list.map((r) => r.ticket)).size,
+    turns: list.length,
+    cost: list.reduce((s, r) => s + r.cost, 0),
+    consults: list.reduce((s, r) => s + r.consults, 0),
+    over3: list.filter((r) => r.consults > 3).length,
   });
   const trial = rows.filter((r) => trialIds.has(r.ticket) && r.model === SONNET);
   return {
@@ -83,12 +101,20 @@ if (import.meta.main) {
   const names = new Map((db.prepare('SELECT t.id, t.number, t.title, t.model, t.effort, p.name AS scheme FROM tickets t JOIN projects p ON p.id = t.project_id').all() as { id: number; number: number; title: string; model: string; effort: string; scheme: string }[]).map((t) => [t.id, t]));
   const money = (x: number) => `$${x.toFixed(2)}`;
   const per = (a: number, b: number) => (b ? a / b : 0);
-  const out = [`# Advisor trial numbers since ${values.since} (PST)`, '',
-    '| | minions | turns | cost a turn | consults a turn | turns over 3 consults | total |', '|---|---|---|---|---|---|---|',
+  const out = [
+    `# Advisor trial numbers since ${values.since} (PST)`,
+    '',
+    '| | minions | turns | cost a turn | consults a turn | turns over 3 consults | total |',
+    '|---|---|---|---|---|---|---|',
     `| Sonnet + Opus advisor | ${n.trial.minions} | ${n.trial.turns} | ${money(per(n.trial.cost, n.trial.turns))} | ${per(n.trial.consults, n.trial.turns).toFixed(2)} | ${n.trial.over3} | ${money(n.trial.cost)} |`,
     `| their turns after moving off Sonnet | ${n.escalated.minions} | ${n.escalated.turns} | ${money(per(n.escalated.cost, n.escalated.turns))} | – | – | ${money(n.escalated.cost)} |`,
     `| Sonnet, minions now at medium, no advisor | ${n.baseline.minions} | ${n.baseline.turns} | ${money(per(n.baseline.cost, n.baseline.turns))} | – | – | ${money(n.baseline.cost)} |`,
-    '', '## Trial minions', '', '| minion | setting now | Sonnet turns | cost a turn | consults (a turn) | max in a turn | moved off |', '|---|---|---|---|---|---|---|'];
+    '',
+    '## Trial minions',
+    '',
+    '| minion | setting now | Sonnet turns | cost a turn | consults (a turn) | max in a turn | moved off |',
+    '|---|---|---|---|---|---|---|',
+  ];
   for (const m of n.perMinion) {
     const t = names.get(m.id)!;
     out.push(`| ${t.scheme} #${t.number} ${String(t.title).replaceAll('|', '/')} | ${t.model ?? 'default'} ${t.effort ?? ''} | ${m.turns} | ${money(per(m.cost, m.turns))} | ${m.consults} (${per(m.consults, m.turns).toFixed(2)}) | ${m.max} | ${m.escalated ? 'yes' : ''} |`);

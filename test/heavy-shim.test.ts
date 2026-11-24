@@ -35,7 +35,11 @@ tool(real, 'mise', `#!/bin/sh\ncase $1 in reshim|install) ln -sfn "$(command -v 
 tool(miseDir, 'cargo', report('mise-cargo'));
 const PATH = `${join(bin, 'heavy')}:${bin}:${real}:${process.env.PATH}`;
 const run = (cmd: string, env: Record<string, string> = {}) => spawnSync('sh', ['-c', cmd], { env: scriptEnv({ PATH, ...env }), encoding: 'utf8' });
-const lines = (out: string) => out.trim().split('\n').map((l) => l.split(' '));
+const lines = (out: string) =>
+  out
+    .trim()
+    .split('\n')
+    .map((l) => l.split(' '));
 
 test('every shim is a command a turn may type, once', () => {
   assert.equal(new Set(HEAVY_SHIMS).size, HEAVY_SHIMS.length);
@@ -91,7 +95,10 @@ test("another turn's shims further down PATH are passed over, not handed the com
   // The deadline means "it hung": before the fix the two shims exec each other forever.
   const r = spawnSync('sh', ['-c', 'node hook.js && cargo build'], { env, encoding: 'utf8', timeout: 60_000 });
   assert.equal(r.signal, null, 'the shims looped');
-  assert.deepEqual(lines(r.stdout).map((l) => l[0]), ['node', 'cargo']);
+  assert.deepEqual(
+    lines(r.stdout).map((l) => l[0]),
+    ['node', 'cargo'],
+  );
 });
 
 test('mise reshim or install in a turn links the shims to the real mise, never into the turn folder (#1651)', () => {

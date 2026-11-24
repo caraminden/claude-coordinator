@@ -39,7 +39,10 @@ function queue(key, send) {
   const prev = tails.get(key);
   // Only the first of a key starts in this tick; the rest wait for the one before to settle, failed or not.
   const sent = prev ? prev.then(() => start(send)) : start(send);
-  const tail = sent.then(() => {}, () => {});
+  const tail = sent.then(
+    () => {},
+    () => {},
+  );
   tails.set(key, tail);
   tail.then(() => tails.get(key) === tail && tails.delete(key));
   return sent;
@@ -91,19 +94,22 @@ function run(action, settle) {
     list.splice(0, n);
     if (!list.length && open.get(action.sets) === list) open.delete(action.sets);
   };
-  queue(action.key ?? action.sets, action.send).then((value) => {
-    forget(list.indexOf(mine) + 1); // it stands, so the failures before it need no rolling back
-    settle.ok(value);
-  }, (err) => {
-    mine.err = err;
-    // While a later one is on its way, it decides what stands; with none, roll back to what the server last took.
-    if (list.at(-1) === mine) {
-      const back = list.slice().reverse();
-      forget(list.length);
-      for (const a of back) if ('err' in a) undo(a);
-    }
-    fail({ action, settle, err });
-  });
+  queue(action.key ?? action.sets, action.send).then(
+    (value) => {
+      forget(list.indexOf(mine) + 1); // it stands, so the failures before it need no rolling back
+      settle.ok(value);
+    },
+    (err) => {
+      mine.err = err;
+      // While a later one is on its way, it decides what stands; with none, roll back to what the server last took.
+      if (list.at(-1) === mine) {
+        const back = list.slice().reverse();
+        forget(list.length);
+        for (const a of back) if ('err' in a) undo(a);
+      }
+      fail({ action, settle, err });
+    },
+  );
 }
 
 /** Roll back one failed action; one undo throwing (its item gone in a redraw) still lets the older ones run. */

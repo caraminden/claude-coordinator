@@ -2,7 +2,39 @@
 // Importing it here is itself the check that it needs no document at load.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { account, ago, api, missedNews, newsArrived, poller, whenShown, baseName, costText, fileExt, fileHref, fileKind, fileUrl, formatSize, isLocalPath, isSeen, joinPath, listGroupsOf, me, setAccount, setView, sharedHref, sharedUrl, shortPath, statusLabel, taskmasterName, threadFullName, threadHref, threadLabel, threadTitleParts, uploadUrl } from '../public/base.js';
+import {
+  account,
+  ago,
+  api,
+  missedNews,
+  newsArrived,
+  poller,
+  whenShown,
+  baseName,
+  costText,
+  fileExt,
+  fileHref,
+  fileKind,
+  fileUrl,
+  formatSize,
+  isLocalPath,
+  isSeen,
+  joinPath,
+  listGroupsOf,
+  me,
+  setAccount,
+  setView,
+  sharedHref,
+  sharedUrl,
+  shortPath,
+  statusLabel,
+  taskmasterName,
+  threadFullName,
+  threadHref,
+  threadLabel,
+  threadTitleParts,
+  uploadUrl,
+} from '../public/base.js';
 
 test('joinPath resolves a relative link against its folder', () => {
   const rows = [
@@ -37,7 +69,7 @@ test('fileKind goes by extension, whatever its case, ignoring a query or fragmen
   assert.equal(fileExt('Makefile'), 'FILE');
 });
 
-test('baseName is the last part of a path, a folder\'s trailing slash ignored', () => {
+test("baseName is the last part of a path, a folder's trailing slash ignored", () => {
   const rows = [
     ['docs/specs/plan.md', 'plan.md'],
     ['plan.md', 'plan.md'],
@@ -97,7 +129,7 @@ test('ago rounds down to the biggest unit', (t) => {
   assert.equal(back(3 * 86400), '3d ago');
 });
 
-test('listGroupsOf reads a scheme\'s promoted groups and survives junk', () => {
+test("listGroupsOf reads a scheme's promoted groups and survives junk", () => {
   assert.deepEqual(listGroupsOf({ list_groups: '["area: ui"]' }), ['area: ui']);
   assert.deepEqual(listGroupsOf({ list_groups: '{oops' }), []);
   assert.deepEqual(listGroupsOf({}), []);
@@ -107,16 +139,44 @@ test('listGroupsOf reads a scheme\'s promoted groups and survives junk', () => {
 // h() makes elements, so the name helpers that return nodes get the least document that can.
 class Node {}
 class El extends Node {
-  constructor(tag) { super(); this.tag = tag; this.attrs = {}; this.kids = []; }
-  setAttribute(k, v) { this.attrs[k] = v; }
-  append(c) { this.kids.push(c); }
-  get text() { return this.kids.map((k) => (k instanceof El ? k.text : k)).join(''); }
+  constructor(tag) {
+    super();
+    this.tag = tag;
+    this.attrs = {};
+    this.kids = [];
+  }
+  setAttribute(k, v) {
+    this.attrs[k] = v;
+  }
+  append(c) {
+    this.kids.push(c);
+  }
+  get text() {
+    return this.kids.map((k) => (k instanceof El ? k.text : k)).join('');
+  }
 }
-const flat = (parts) => [parts].flat().map((p) => (p instanceof El ? `<${p.className ?? Object.entries(p.attrs).map(([k, v]) => `${k}=${v}`).join(' ')}>${p.text}</>` : p)).join('');
+const flat = (parts) =>
+  [parts]
+    .flat()
+    .map((p) =>
+      p instanceof El
+        ? `<${
+            p.className ??
+            Object.entries(p.attrs)
+              .map(([k, v]) => `${k}=${v}`)
+              .join(' ')
+          }>${p.text}</>`
+        : p,
+    )
+    .join('');
 
 test('minion names: the full name, its phone-friendly parts, the address and the status word', (t) => {
   Object.assign(globalThis, { Node, document: { createElement: (tag) => new El(tag) } });
-  t.after(() => { delete globalThis.Node; delete globalThis.document; setView(null); });
+  t.after(() => {
+    delete globalThis.Node;
+    delete globalThis.document;
+    setView(null);
+  });
   const minion = { id: 900, number: 12, project_id: 2, title: 'Usage bar', status: 'idle', state: 'ready', properties: { type: 'feature' } };
   // No type or state emoji (#647); `other` has no type word; no number falls back to the id.
   assert.equal(threadFullName(minion), '12 FEATURE: Usage bar');
@@ -151,7 +211,14 @@ test('isSeen: a thread opened at or after its last change, and not one never ope
 
 test('the Taskmaster goes by the name of the scheme asked for, from the list or the scheme on screen', (t) => {
   t.after(() => setView(null));
-  setView({ kind: 'project', projectId: 2, projects: [{ id: 1, name: 'Delve' }, { id: 2, name: 'Citadel' }] });
+  setView({
+    kind: 'project',
+    projectId: 2,
+    projects: [
+      { id: 1, name: 'Delve' },
+      { id: 2, name: 'Citadel' },
+    ],
+  });
   assert.equal(taskmasterName(), 'Citadel Taskmaster', 'the scheme on screen by default');
   assert.equal(taskmasterName(1), 'Delve Taskmaster');
   assert.equal(taskmasterName(9), 'Taskmaster', 'a scheme not in the list');
@@ -167,10 +234,17 @@ test('the Taskmaster goes by the name of the scheme asked for, from the list or 
 
 test('threadLabel: "#number title" for a minion, falling back to the id, and the scheme\'s Taskmaster name for a Taskmaster', (t) => {
   t.after(() => setView(null));
-  setView({ kind: 'project', projectId: 2, projects: [{ id: 1, name: 'Delve' }, { id: 2, name: 'Citadel' }] });
+  setView({
+    kind: 'project',
+    projectId: 2,
+    projects: [
+      { id: 1, name: 'Delve' },
+      { id: 2, name: 'Citadel' },
+    ],
+  });
   assert.equal(threadLabel({ id: 900, kind: 'ticket', number: 12, project_id: 2, title: 'Usage bar' }), '#12 Usage bar');
   assert.equal(threadLabel({ id: 900, kind: 'ticket', project_id: 2, title: 'Odd job' }), '#900 Odd job', 'a server from before per-scheme numbers');
-  assert.equal(threadLabel({ id: 50, kind: 'ticket', number: 3, project_id: 1, title: 'Cave art' }), '#3 Cave art', 'another scheme\'s minion');
+  assert.equal(threadLabel({ id: 50, kind: 'ticket', number: 3, project_id: 1, title: 'Cave art' }), '#3 Cave art', "another scheme's minion");
   assert.equal(threadLabel({ id: 1, kind: 'coordinator', project_id: 1, title: 'ignored' }), 'Delve Taskmaster', 'its own scheme, not the one on screen');
 });
 
@@ -197,19 +271,28 @@ function fakeFetch(t) {
   const calls = [];
   const real = globalThis.fetch;
   globalThis.fetch = (path, opts) => new Promise((resolve) => calls.push({ path, method: opts?.method ?? 'GET', answer: (body) => resolve({ ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(body)) }) }));
-  t.after(() => { globalThis.fetch = real; newsArrived(); });
+  t.after(() => {
+    globalThis.fetch = real;
+    newsArrived();
+  });
   return calls;
 }
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 test('api: GETs of one path at once share a request, and each caller gets its own copy (#1528)', async (t) => {
   const calls = fakeFetch(t);
-  const a = api('api/x'), b = api('api/x'), c = api('api/y');
-  assert.deepEqual(calls.map((x) => x.path), ['api/x', 'api/y']);
-  calls[0].answer({ list: [1] }); calls[1].answer({});
+  const a = api('api/x'),
+    b = api('api/x'),
+    c = api('api/y');
+  assert.deepEqual(
+    calls.map((x) => x.path),
+    ['api/x', 'api/y'],
+  );
+  calls[0].answer({ list: [1] });
+  calls[1].answer({});
   const [ra, rb] = await Promise.all([a, b, c]);
   assert.deepEqual(ra, { list: [1] });
-  assert.notEqual(ra, rb, 'a caller changing its answer leaves the other\'s alone');
+  assert.notEqual(ra, rb, "a caller changing its answer leaves the other's alone");
   await settle();
   api('api/x');
   assert.equal(calls.length, 3, 'once answered, the next GET asks again');
@@ -220,7 +303,11 @@ test('api: a write, or news on the stream, stops a later GET joining one sent be
   api('api/x');
   api('api/x', { method: 'POST', body: { a: 1 } });
   api('api/x');
-  assert.deepEqual(calls.map((x) => x.method), ['GET', 'POST', 'GET'], 'after a write');
+  assert.deepEqual(
+    calls.map((x) => x.method),
+    ['GET', 'POST', 'GET'],
+    'after a write',
+  );
   newsArrived();
   api('api/x');
   assert.equal(calls.length, 4, 'after stream news');
@@ -234,15 +321,21 @@ test('whenShown: runs at once in a shown tab, and only once the tab is next show
   whenShown(() => ran.push('no document'));
   const listeners = new Set();
   globalThis.document = { hidden: true, addEventListener: (_, f) => listeners.add(f), removeEventListener: (_, f) => listeners.delete(f) };
-  t.after(() => { delete globalThis.document; });
-  const change = (hidden) => { document.hidden = hidden; for (const f of [...listeners]) f(); };
+  t.after(() => {
+    delete globalThis.document;
+  });
+  const change = (hidden) => {
+    document.hidden = hidden;
+    for (const f of [...listeners]) f();
+  };
   whenShown(() => ran.push('poll'));
   assert.deepEqual(ran, ['no document'], 'nothing while hidden');
   change(true);
   assert.deepEqual(ran, ['no document'], 'still hidden');
   change(false);
   assert.deepEqual(ran, ['no document', 'poll'], 'shown');
-  change(true); change(false);
+  change(true);
+  change(false);
   assert.deepEqual(ran, ['no document', 'poll'], 'once');
   whenShown(() => ran.push('shown tab'));
   assert.deepEqual(ran, ['no document', 'poll', 'shown tab']);
@@ -252,28 +345,47 @@ test('poller: one read at a time, a joiner during a read takes it, it waits whil
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const listeners = new Set();
   globalThis.document = { hidden: false, addEventListener: (_, f) => listeners.add(f), removeEventListener: (_, f) => listeners.delete(f) };
-  t.after(() => { delete globalThis.document; });
-  const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
-  let reads = 0, release = null, alive = true;
-  const p = poller(() => { reads++; return new Promise((r) => { release = () => r(alive ? undefined : false); }); }, 60_000);
-  p.now(); p.now();
+  t.after(() => {
+    delete globalThis.document;
+  });
+  const flush = async () => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  };
+  let reads = 0,
+    release = null,
+    alive = true;
+  const p = poller(() => {
+    reads++;
+    return new Promise((r) => {
+      release = () => r(alive ? undefined : false);
+    });
+  }, 60_000);
+  p.now();
+  p.now();
   t.mock.timers.tick(0);
   assert.equal(reads, 1, 'two now() calls before the timer fire one read');
-  p.now(); t.mock.timers.tick(0);
+  p.now();
+  t.mock.timers.tick(0);
   assert.equal(reads, 1, 'now() during a read starts no second one');
   document.hidden = true;
-  release(); await flush();
+  release();
+  await flush();
   t.mock.timers.tick(60_000);
   assert.equal(reads, 1, 'due but hidden: waits');
-  p.now(); t.mock.timers.tick(0);
+  p.now();
+  t.mock.timers.tick(0);
   assert.equal(reads, 1, 'now() while a read is due starts no second one');
-  document.hidden = false; for (const f of [...listeners]) f();
+  document.hidden = false;
+  for (const f of [...listeners]) f();
   assert.equal(reads, 2, 'read once shown');
   alive = false;
-  release(); await flush();
+  release();
+  await flush();
   t.mock.timers.tick(120_000);
   assert.equal(reads, 2, 'false stops the loop');
-  p.now(); t.mock.timers.tick(0);
+  p.now();
+  t.mock.timers.tick(0);
   assert.equal(reads, 3, 'now() restarts a stopped one');
-  release(); await flush();
+  release();
+  await flush();
 });

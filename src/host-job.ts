@@ -45,8 +45,7 @@ export const jobLost = { hear: (_dir: string, _detail: string) => {} };
 
 /** systemd's lines for a unit killed for memory: systemd-oomd's kill, the kernel's OOM killer, and the unit's result. */
 const OOM_LINE = /Failed with result 'oom-kill'|systemd-oomd killed|OOM killer killed/;
-const userJournal = (unit: string) => new Promise<string>((done) =>
-  execFile('journalctl', ['--user', '-u', unit, '-n', '50', '-o', 'cat', '--no-pager', '-q'], { timeout: 10_000 }, (err, out) => done(err ? '' : String(out))));
+const userJournal = (unit: string) => new Promise<string>((done) => execFile('journalctl', ['--user', '-u', unit, '-n', '50', '-o', 'cat', '--no-pager', '-q'], { timeout: 10_000 }, (err, out) => done(err ? '' : String(out))));
 
 /** Whether this account's own journal says `unit` was killed for memory (never another user's or the system journal). */
 export async function oomKilled(unit: string, journal: (unit: string) => Promise<string> = userJournal): Promise<boolean> {
@@ -55,7 +54,11 @@ export async function oomKilled(unit: string, journal: (unit: string) => Promise
 
 async function heardLost(dir: string) {
   let unit: string | null = null;
-  try { unit = readFileSync(join(dir, 'unit'), 'utf8').trim() || null; } catch { /* ran as the server's child */ }
+  try {
+    unit = readFileSync(join(dir, 'unit'), 'utf8').trim() || null;
+  } catch {
+    /* ran as the server's child */
+  }
   const oom = unit ? await oomKilled(unit) : false;
   jobLost.hear(dir, `${dir}${unit ? ` (${unit})` : ''}: ${oom ? 'killed for memory (out of memory, says the journal)' : 'ended with no exit code (killed from outside, stopped, or cut off by a restart)'}`);
 }
@@ -120,7 +123,9 @@ export class HostJobs {
     // deleted here, it held the thread 9.9 s under load (#1734).
     moveAside(dir);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const lines = Object.entries(job.env).filter(([k, v]) => v !== undefined && VALID.test(k) && !SKIP.test(k)).map(([k, v]) => `export ${k}=${quote(String(v))}\n`);
+    const lines = Object.entries(job.env)
+      .filter(([k, v]) => v !== undefined && VALID.test(k) && !SKIP.test(k))
+      .map(([k, v]) => `export ${k}=${quote(String(v))}\n`);
     // Scratch on disk, never in perigee's RAM-backed /tmp (#1339): boot-check's database copy and a test run's files
     // otherwise sit there until the job's end, and for good when it is killed. A TMPDIR already on disk stays.
     if (!onDisk(job.env.TMPDIR)) {
@@ -191,7 +196,13 @@ export class HostJobs {
     if (code === null && !(await this.aliveAsync(dir))) {
       code = await readCodeAsync(dir);
       if (code === null) {
-        if (!(await readFile(join(dir, 'started')).then(() => true, () => false))) return null;
+        if (
+          !(await readFile(join(dir, 'started')).then(
+            () => true,
+            () => false,
+          ))
+        )
+          return null;
         code = lost(dir);
       }
     }
@@ -276,7 +287,10 @@ function tail(file: string, max: number): string {
 }
 
 async function readCodeAsync(dir: string): Promise<number | null> {
-  const text = await readFile(join(dir, 'code'), 'utf8').then((t) => t.trim(), () => '');
+  const text = await readFile(join(dir, 'code'), 'utf8').then(
+    (t) => t.trim(),
+    () => '',
+  );
   return text === '' ? null : Number(text);
 }
 

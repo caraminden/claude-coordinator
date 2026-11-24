@@ -18,7 +18,9 @@ after(async () => {
 });
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -26,7 +28,8 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let base = '';
@@ -36,8 +39,7 @@ let project: any;
 let dir = '';
 
 let srv: Booted;
-const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) =>
-  ok(await srv.as(who === 'minion' ? { token: agentToken(srv.data, ticket.id) } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
+const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.as(who === 'minion' ? { token: agentToken(srv.data, ticket.id) } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 const idle = () => until('the turn to end', async () => (await call('Cara', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
 const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
@@ -46,7 +48,7 @@ const propose = (changes: unknown) => call('minion', `/api/tickets/${ticket.id}/
 const answered = async (act: () => Promise<unknown>) => {
   const n = turns().length;
   const out = await act();
-  await until('the answer\'s turn', () => turns().length > n);
+  await until("the answer's turn", () => turns().length > n);
   await idle();
   return out;
 };
@@ -100,14 +102,24 @@ test('a run proposes; the card waits, nothing is written, and the run cannot app
   assert.deepEqual(['a.md', 'b.md', 'c.md', 'MEMORY.md'].map(read), before, 'an unapproved tidy is never applied');
   const { open } = await proposals();
   assert.equal(open.id, r.proposal);
-  assert.deepEqual(open.changes.map((c: any) => [c.file, c.drifted]), [['a.md', false], ['b.md', false], ['c.md', false]]);
+  assert.deepEqual(
+    open.changes.map((c: any) => [c.file, c.drifted]),
+    [
+      ['a.md', false],
+      ['b.md', false],
+      ['c.md', false],
+    ],
+  );
   assert.deepEqual(open.changes[2].diff, [{ op: '+', text: '- [C](c.md) — unindexed' }]);
 });
 
 test('applying the ticked changes leaves the unticked delete, tells the run, and Put back undoes it', async () => {
   const { open } = await proposals();
   const out: any = await answered(() => call('Cara', `/api/projects/${project.id}/memory-proposals/${open.id}/decide`, { method: 'POST', body: { apply: [1, 3] } }));
-  assert.deepEqual(out.changes.map((c: any) => c.outcome), ['applied', 'turned down', 'applied']);
+  assert.deepEqual(
+    out.changes.map((c: any) => c.outcome),
+    ['applied', 'turned down', 'applied'],
+  );
   assert.equal(read('a.md'), 'alpha and beta\n');
   assert.equal(read('b.md'), B);
   assert.equal(read('MEMORY.md'), '- [A](a.md) — first\n- [B](b.md) — second\n- [C](c.md) — unindexed\n');
@@ -126,7 +138,7 @@ test('applying the ticked changes leaves the unticked delete, tells the run, and
 
 test('a newer proposal supersedes the open one, and turning it all down changes nothing', async () => {
   const first = await propose([{ action: 'flag', file: 'b.md', reason: 'live state: make it a pointer' }]);
-  const second = await answered(() => propose([{ action: 'delete', file: 'b.md', reason: 'stale' }])) as any; // its supersede wakes the run
+  const second = (await answered(() => propose([{ action: 'delete', file: 'b.md', reason: 'stale' }]))) as any; // its supersede wakes the run
   const cards = await events('plan');
   assert.equal(cards.find((c: any) => c.memory?.proposal === first.proposal).status, 'superseded');
   await assert.rejects(call('Cara', `/api/projects/${project.id}/memory-proposals/${first.proposal}/decide`, { method: 'POST', body: { apply: [] } }), /409 A newer tidy replaced this one/);
@@ -138,7 +150,7 @@ test('a newer proposal supersedes the open one, and turning it all down changes 
 });
 
 // #1803 (Cara, 2026-11-24: "We should make it something a minion can do with approval"): Approve on the card, the run applies.
-test('approved on the card, the run applies the whole tidy through the page\'s path and is told to', async () => {
+test("approved on the card, the run applies the whole tidy through the page's path and is told to", async () => {
   writeFileSync(join(dir, 'd.md'), '---\nname: D\ndescription: dup\n---\ndelta\n');
   const r = await propose([
     { action: 'edit', file: 'c.md', text: 'gamma, tidied', line: '- [C](c.md) — tidied', reason: 'shorter' },
@@ -153,7 +165,10 @@ test('approved on the card, the run applies the whole tidy through the page\'s p
   assert.equal((await proposals()).open.approved_by, 'Cara', 'the page shows it approved on the card');
   const out = await applyMine();
   assert.match(out.line, /^Applied 2 of the 2 changes Cara approved \(1 edit, 1 delete\)\.$/);
-  assert.deepEqual(out.changes.map((c: any) => c.outcome), ['applied', 'applied', 'noted']);
+  assert.deepEqual(
+    out.changes.map((c: any) => c.outcome),
+    ['applied', 'applied', 'noted'],
+  );
   assert.equal(read('c.md'), 'gamma, tidied\n');
   assert.equal(read('d.md'), null, 'Approve all deletes too (Cara, 2026-11-24: "Include deletes")');
   assert.match(read('MEMORY.md')!, /- \[C\]\(c\.md\) — tidied/);
@@ -168,7 +183,7 @@ test('approved on the card, the run applies the whole tidy through the page\'s p
   rmSync(join(dir, 'd.md'));
 });
 
-test('a non-member\'s answer applies nothing, and Reject turns it down at once', async () => {
+test("a non-member's answer applies nothing, and Reject turns it down at once", async () => {
   const made = await call('Cara', '/api/people', { method: 'POST', body: { name: 'Olive' } });
   const res = await fetch(`${base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
   cookies.Olive = res.headers.get('set-cookie')!.split(';')[0];
@@ -189,7 +204,10 @@ test('a non-member\'s answer applies nothing, and Reject turns it down at once',
 
 test('ticked on the page, then approved on the card: applied once', async () => {
   const was = read('c.md');
-  const r = await propose([{ action: 'edit', file: 'c.md', text: 'once', reason: 'r' }, { action: 'index', file: 'b.md', line: '- [B](b.md) — again', reason: 'r' }]);
+  const r = await propose([
+    { action: 'edit', file: 'c.md', text: 'once', reason: 'r' },
+    { action: 'index', file: 'b.md', line: '- [B](b.md) — again', reason: 'r' },
+  ]);
   await idle();
   const card = await cardOf(r.proposal);
   await answered(() => call('Cara', `/api/projects/${project.id}/memory-proposals/${r.proposal}/decide`, { method: 'POST', body: { apply: [1] } }));
@@ -205,7 +223,10 @@ test('ticked on the page, then approved on the card: applied once', async () => 
 });
 
 test('approved on the card, then ticked on the page before the run applies: the run finds it applied', async () => {
-  const r = await propose([{ action: 'edit', file: 'c.md', text: 'page first', reason: 'r' }, { action: 'index', file: 'b.md', line: '- [B](b.md) — again', reason: 'r' }]);
+  const r = await propose([
+    { action: 'edit', file: 'c.md', text: 'page first', reason: 'r' },
+    { action: 'index', file: 'b.md', line: '- [B](b.md) — again', reason: 'r' },
+  ]);
   await idle();
   await answered(async () => verdict('Cara', (await cardOf(r.proposal)).id, 'approve'));
   await answered(() => call('Cara', `/api/projects/${project.id}/memory-proposals/${r.proposal}/decide`, { method: 'POST', body: { apply: [1] } }));

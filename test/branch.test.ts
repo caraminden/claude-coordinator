@@ -105,7 +105,7 @@ function same(text: string, by: string): string {
   return git(repo, 'rev-parse', 'HEAD');
 }
 
-test("a branch whose commits all vanished in a rebase, as main already had the same change, has nothing of its own, so no live chip (#590)", async () => {
+test('a branch whose commits all vanished in a rebase, as main already had the same change, has nothing of its own, so no live chip (#590)', async () => {
   git(repo, 'checkout', '-q', '-b', 't/10', 'main');
   same('ten', 't/10');
   git(repo, 'checkout', '-q', 'main');
@@ -158,11 +158,12 @@ test('the ship line says where the change is, and why it is not moving', () => {
   assert.equal(line({ deploy: { pulled: true, live: true } }, 3, 'Deploy failed.')?.stage, 'live', 'live wins over an older failure');
   const report = 'Deploy of abc1234 "x" failed: the server did not answer healthy on it within 30 s. Rolled back to last-good.';
   assert.deepEqual(line({}, 0, report), {
-    stage: 'failed', commit: 'abcdef0', detail: report,
+    stage: 'failed',
+    commit: 'abcdef0',
+    detail: report,
     text: 'Not live, the last deploy failed: the server did not answer healthy on it within 30 s',
   });
-  assert.equal(line({ deploy: { pulled: true, live: false } }, 0, 'Gave up after 120 min waiting for turns, so nothing restarted. Run it again.')?.text,
-    'Not live, the last deploy failed: Gave up after 120 min waiting for turns, so nothing restarted');
+  assert.equal(line({ deploy: { pulled: true, live: false } }, 0, 'Gave up after 120 min waiting for turns, so nothing restarted. Run it again.')?.text, 'Not live, the last deploy failed: Gave up after 120 min waiting for turns, so nothing restarted');
 });
 
 // Build branches (#592, specs/build-branches.md): a feeder merged into build/<n> reads as in its build, and once
@@ -292,10 +293,14 @@ test('a git that fails once is asked again: a failed look never pins a branch as
   const fail = join(root, 'git-fails');
   const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
   // While the flag file is there, the reflog and log reads fail, as a timeout would.
-  writeFileSync(join(bin, 'git'), `#!/bin/sh
+  writeFileSync(
+    join(bin, 'git'),
+    `#!/bin/sh
 if [ -e '${fail}' ] && { [ "$1" = reflog ] || [ "$1" = log ]; }; then exit 1; fi
 exec '${real}' "$@"
-`, { mode: 0o755 });
+`,
+    { mode: 0o755 },
+  );
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path}`;
   try {

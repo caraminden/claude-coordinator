@@ -61,19 +61,32 @@ export function areaOf(path: string): [string, number] {
   return ['(no area)', 2];
 }
 
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 }).trim();
 const gitTry = (cwd: string, ...args: string[]) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20 });
 
 type Plan = {
-  sha: string; date: string; subject: string; ticket: string | null;
-  src: string[]; ownTests: string[]; siblingTests: string[]; tests: string[]; testsFrom: 'own' | 'sibling' | 'none';
-  testOrDoc: string[]; area: string; blast: number;
+  sha: string;
+  date: string;
+  subject: string;
+  ticket: string | null;
+  src: string[];
+  ownTests: string[];
+  siblingTests: string[];
+  tests: string[];
+  testsFrom: 'own' | 'sibling' | 'none';
+  testOrDoc: string[];
+  area: string;
+  blast: number;
 };
 
 function plan(args: string[]) {
-  const opt = (name: string, dflt: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
-  const since = opt('--since', '2026-11-01'), size = Number(opt('--batch', '25')), out = resolve(opt('--out', 'fix-replay'));
+  const opt = (name: string, dflt: string) => {
+    const i = args.indexOf(name);
+    return i >= 0 ? args[i + 1] : dflt;
+  };
+  const since = opt('--since', '2026-11-01'),
+    size = Number(opt('--batch', '25')),
+    out = resolve(opt('--out', 'fix-replay'));
   if (!Number.isInteger(size) || size < 1) throw new Error(`--batch must be a whole number above 0, not ${opt('--batch', '')}`);
   const spec = opt('--spec', join(process.env.HOME ?? '', '.local/share/claude-coordinator/projects/2/shared/project/specs/review-heat-map.md'));
   // Areas only rank the report; without the heat map every fix gets '(no area)'.
@@ -82,11 +95,14 @@ function plan(args: string[]) {
   const exists = new Set(git(repo, 'ls-files').split('\n'));
   // Every commit's files since the cutoff, for the sibling lookup too (a test-first commit before it is missed).
   const log = git(repo, 'log', '--no-merges', `--since=${since}`, '--format=%x00%H%x09%cI%x09%s', '--name-only', 'HEAD');
-  const commits = log.split('\0').filter(Boolean).map((chunk) => {
-    const [head, ...files] = chunk.split('\n').filter(Boolean);
-    const [sha, date, subject] = head.split('\t');
-    return { sha, date, subject, files };
-  });
+  const commits = log
+    .split('\0')
+    .filter(Boolean)
+    .map((chunk) => {
+      const [head, ...files] = chunk.split('\n').filter(Boolean);
+      const [sha, date, subject] = head.split('\t');
+      return { sha, date, subject, files };
+    });
   const testsByTicket = new Map<string, Set<string>>();
   for (const c of commits) {
     const t = ticketOf(c.subject);
@@ -104,17 +120,30 @@ function plan(args: string[]) {
     const ticket = ticketOf(c.subject);
     const siblingTests = ownTests.length || !ticket ? [] : [...(testsByTicket.get(ticket) ?? [])].slice(0, 8);
     const tests = ownTests.length ? ownTests : siblingTests;
-    let area = '(none)', blast = 0;
-    for (const f of src) { const [a, b] = areaOf(f); if (b > blast) [area, blast] = [a, b]; }
+    let area = '(none)',
+      blast = 0;
+    for (const f of src) {
+      const [a, b] = areaOf(f);
+      if (b > blast) [area, blast] = [a, b];
+    }
     plans.push({
-      sha: c.sha, date: c.date, subject: c.subject, ticket, src, ownTests, siblingTests, tests,
-      testsFrom: ownTests.length ? 'own' : siblingTests.length ? 'sibling' : 'none', testOrDoc, area, blast,
+      sha: c.sha,
+      date: c.date,
+      subject: c.subject,
+      ticket,
+      src,
+      ownTests,
+      siblingTests,
+      tests,
+      testsFrom: ownTests.length ? 'own' : siblingTests.length ? 'sibling' : 'none',
+      testOrDoc,
+      area,
+      blast,
     });
   }
   mkdirSync(out, { recursive: true });
   const n = Math.ceil(plans.length / size);
-  for (let i = 0; i < n; i++)
-    writeFileSync(join(out, `batch-${String(i + 1).padStart(2, '0')}.json`), JSON.stringify(plans.slice(i * size, (i + 1) * size), null, 1));
+  for (let i = 0; i < n; i++) writeFileSync(join(out, `batch-${String(i + 1).padStart(2, '0')}.json`), JSON.stringify(plans.slice(i * size, (i + 1) * size), null, 1));
   writeFileSync(join(out, 'all.json'), JSON.stringify(plans, null, 1));
   const by = (k: string) => plans.filter((p) => p.testsFrom === k).length;
   console.log(`${plans.length} fix commits since ${since} in ${n} batches of ${size} (${out}); tests: own ${by('own')}, sibling ${by('sibling')}, none ${by('none')}; no source: ${plans.filter((p) => !p.src.length).length}`);
@@ -133,16 +162,27 @@ type Run = { code: number | null; pass: number; fail: number; skipped: number; f
 function runTests(cwd: string, files: string[]): Run {
   const started = Date.now();
   const conc = String(Math.max(1, Math.floor(availableParallelism() / 2)));
-  const r = spawnSync('timeout', ['-k', '10', '300', join(cwd, 'tools/citadel-node'), '--test', '--test-reporter=tap', '--test-timeout=60000',
-    `--test-concurrency=${conc}`, '--test-global-setup=test/leak-guard.ts', ...files],
-  { cwd, encoding: 'utf8', maxBuffer: 256 << 20, env: { ...process.env, CITADEL_HEAVY_HELD: '1' } });
+  const r = spawnSync('timeout', ['-k', '10', '300', join(cwd, 'tools/citadel-node'), '--test', '--test-reporter=tap', '--test-timeout=60000', `--test-concurrency=${conc}`, '--test-global-setup=test/leak-guard.ts', ...files], {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 256 << 20,
+    env: { ...process.env, CITADEL_HEAVY_HELD: '1' },
+  });
   const out = (r.stdout ?? '') + (r.stderr ?? '');
   const num = (k: string) => Number(new RegExp(`^# ${k} (\\d+)`, 'm').exec(out)?.[1] ?? 0);
   // Failing leaves: "not ok N - name" lines that aren't a file's own wrapper.
-  const failed = [...out.matchAll(/^\s*not ok \d+ - (.+)$/gm)].map((m) => m[1].trim()).filter((n) => !/\.test\.[cm]?[jt]s$/.test(n)).slice(0, 8);
+  const failed = [...out.matchAll(/^\s*not ok \d+ - (.+)$/gm)]
+    .map((m) => m[1].trim())
+    .filter((n) => !/\.test\.[cm]?[jt]s$/.test(n))
+    .slice(0, 8);
   return {
-    code: r.status, pass: num('pass'), fail: num('fail'), skipped: num('skipped') + num('todo'), failed,
-    secs: Math.round((Date.now() - started) / 1000), ...(r.status && !failed.length ? { tail: out.slice(-600) } : {}),
+    code: r.status,
+    pass: num('pass'),
+    fail: num('fail'),
+    skipped: num('skipped') + num('todo'),
+    failed,
+    secs: Math.round((Date.now() - started) / 1000),
+    ...(r.status && !failed.length ? { tail: out.slice(-600) } : {}),
   };
 }
 
@@ -162,8 +202,14 @@ function run(args: string[]) {
   for (const p of plans) {
     const head = { sha: p.sha.slice(0, 10), subject: p.subject.slice(0, 160), ticket: p.ticket, area: p.area, blast: p.blast, testsFrom: p.testsFrom, tests: p.tests };
     const t0 = Date.now();
-    if (!p.src.length) { say({ ...head, outcome: 'no-source' }); continue; }
-    if (!p.tests.length) { say({ ...head, outcome: 'no-test', src: p.src }); continue; }
+    if (!p.src.length) {
+      say({ ...head, outcome: 'no-source' });
+      continue;
+    }
+    if (!p.tests.length) {
+      say({ ...head, outcome: 'no-test', src: p.src });
+      continue;
+    }
     const wt = join(scratch, `wt${k++}`);
     try {
       git(repo, 'worktree', 'add', '--detach', '--quiet', wt, base);
@@ -173,11 +219,15 @@ function run(args: string[]) {
         // Tests and docs the commit touched go back to today's version (or away, if today has none).
         for (const f of p.testOrDoc) {
           if (gitTry(wt, 'cat-file', '-e', `${base}:${f}`).status === 0) git(wt, 'checkout', base, '--', f);
-          else { gitTry(wt, 'rm', '-f', '--quiet', '--ignore-unmatch', '--', f); rmSync(join(wt, f), { force: true }); }
+          else {
+            gitTry(wt, 'rm', '-f', '--quiet', '--ignore-unmatch', '--', f);
+            rmSync(join(wt, f), { force: true });
+          }
         }
         return git(wt, 'diff', '--name-only', '--diff-filter=U').split('\n').filter(Boolean);
       };
-      let unmerged = restoreTests(), conflicts: string[] = [];
+      let unmerged = restoreTests(),
+        conflicts: string[] = [];
       if (unmerged.length) {
         conflicts = unmerged;
         gitTry(wt, 'revert', '--abort');
@@ -191,22 +241,30 @@ function run(args: string[]) {
       }
       const changed = git(wt, 'diff', '--cached', '--name-only', base).split('\n').filter(Boolean);
       const changedSrc = changed.filter((f) => !isTest(f) && !isDoc(f));
-      if (!changedSrc.length) { say({ ...head, outcome: conflicts.length ? 'no-apply' : 'no-op', conflicts }); continue; }
+      if (!changedSrc.length) {
+        say({ ...head, outcome: conflicts.length ? 'no-apply' : 'no-op', conflicts });
+        continue;
+      }
       // How much of the fix's source change the undo carries: 1 for a whole undo, less when hunks were kept.
       const lines = (out: string) => out.split('\n').reduce((n, l) => n + (Number(l.split('\t')[0]) || 0) + (Number(l.split('\t')[1]) || 0), 0);
-      const share = conflicts.length
-        ? Math.min(1, +(lines(git(wt, 'diff', '--cached', '--numstat', base, '--', ...changedSrc)) / Math.max(1, lines(git(repo, 'diff', '--numstat', `${p.sha}^`, p.sha, '--', ...p.src)))).toFixed(2))
-        : 1;
+      const share = conflicts.length ? Math.min(1, +(lines(git(wt, 'diff', '--cached', '--numstat', base, '--', ...changedSrc)) / Math.max(1, lines(git(repo, 'diff', '--numstat', `${p.sha}^`, p.sha, '--', ...p.src)))).toFixed(2)) : 1;
       const pre = conflicts.length ? 'partial-' : '';
       const stat = git(wt, 'diff', '--cached', '--shortstat', base);
       // The tests that exist today; a test file the fix deleted again since is gone already.
       const tests = p.tests.filter((f) => existsSync(join(wt, f)));
       // None left: node --test with no files would run the whole of test/.
-      if (!tests.length) { say({ ...head, outcome: 'no-test', src: p.src, gone: p.tests }); continue; }
+      if (!tests.length) {
+        say({ ...head, outcome: 'no-test', src: p.src, gone: p.tests });
+        continue;
+      }
       // FIX_REPLAY_DRY=1 stops before the tests: the undo alone is cheap git, fine on perigee, and sorts out no-apply.
-      if (process.env.FIX_REPLAY_DRY) { say({ ...head, outcome: pre + 'applies', share, conflicts, undo: stat, changedSrc, tests }); continue; }
+      if (process.env.FIX_REPLAY_DRY) {
+        say({ ...head, outcome: pre + 'applies', share, conflicts, undo: stat, changedSrc, tests });
+        continue;
+      }
       const undone = runTests(wt, tests);
-      let outcome = verdict(undone), clean: Run | undefined;
+      let outcome = verdict(undone),
+        clean: Run | undefined;
       if (outcome === 'needs-clean') {
         // Red with the fix undone: is it green on today's tree? Only then does red mean the tests guard the fix.
         git(wt, 'reset', '--hard', '--quiet', base);
@@ -226,8 +284,16 @@ function run(args: string[]) {
 }
 
 function tally(files: string[]) {
-  const rows = files.flatMap((f) => readFileSync(f, 'utf8').split('\n'))
-    .filter((l) => l.includes('FIXREPLAY {')).flatMap((l) => { try { return [JSON.parse(l.slice(l.indexOf('FIXREPLAY {') + 10))]; } catch { return []; } });
+  const rows = files
+    .flatMap((f) => readFileSync(f, 'utf8').split('\n'))
+    .filter((l) => l.includes('FIXREPLAY {'))
+    .flatMap((l) => {
+      try {
+        return [JSON.parse(l.slice(l.indexOf('FIXREPLAY {') + 10))];
+      } catch {
+        return [];
+      }
+    });
   const counts: Record<string, number> = {};
   for (const r of rows) counts[r.outcome] = (counts[r.outcome] ?? 0) + 1;
   console.log(JSON.stringify({ total: rows.length, ...counts }));
@@ -238,5 +304,8 @@ if (import.meta.main) {
   if (cmd === 'plan') plan(rest);
   else if (cmd === 'run') run(rest);
   else if (cmd === 'tally') tally(rest);
-  else { console.error('usage: fix-replay.ts plan|run|tally ... (the header of tools/fix-replay.ts says more)'); process.exit(2); }
+  else {
+    console.error('usage: fix-replay.ts plan|run|tally ... (the header of tools/fix-replay.ts says more)');
+    process.exit(2);
+  }
 }

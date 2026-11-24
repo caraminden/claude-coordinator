@@ -93,7 +93,10 @@ let forgetting = false;
 function forgetSoon() {
   if (forgetting) return;
   forgetting = true;
-  setTimeout(() => { forgetting = false; forgetLeft(); });
+  setTimeout(() => {
+    forgetting = false;
+    forgetLeft();
+  });
 }
 function forgetLeft() {
   for (const [id, cards] of drawn) {
@@ -108,7 +111,11 @@ function tick() {
   if (ticker) return;
   ticker = setInterval(() => {
     const running = [...known.values()].filter((v) => v.state === 'running' && drawn.get(v.id)?.size);
-    if (!running.length) { clearInterval(ticker); ticker = null; return; }
+    if (!running.length) {
+      clearInterval(ticker);
+      ticker = null;
+      return;
+    }
     for (const v of running) redraw(v.id);
   }, 30_000);
 }
@@ -137,16 +144,22 @@ export function jobCard(id, first, where = 'chat') {
   drawn.get(id).set(el, draw);
   draw();
   // By the next task it's on the page; once it leaves, redraw() lets it go.
-  setTimeout(() => { el.wasShown = true; });
-  if (!known.has(id) || ['needs-go', 'queued', 'starting', ...ACTIVE].includes(known.get(id).state)) api(`api/jobs/${id}`).then((v) => { rememberJob(v); redraw(id); }, () => {});
+  setTimeout(() => {
+    el.wasShown = true;
+  });
+  if (!known.has(id) || ['needs-go', 'queued', 'starting', ...ACTIVE].includes(known.get(id).state))
+    api(`api/jobs/${id}`).then(
+      (v) => {
+        rememberJob(v);
+        redraw(id);
+      },
+      () => {},
+    );
   return el;
 }
 
 function cardParts(v, where) {
-  const parts = [h('div', { class: 'jc-top' },
-    h('span', { class: 'jc-kind' }, `Job #${v.id} · ${v.kind.name}`),
-    h('span', { class: 'jc-pill' }, PILL[v.state] ?? v.state),
-    h('span', { class: 'jc-where' }, where === 'chat' ? machineLink(v) : askerLink(v)))];
+  const parts = [h('div', { class: 'jc-top' }, h('span', { class: 'jc-kind' }, `Job #${v.id} · ${v.kind.name}`), h('span', { class: 'jc-pill' }, PILL[v.state] ?? v.state), h('span', { class: 'jc-where' }, where === 'chat' ? machineLink(v) : askerLink(v)))];
   parts.push(...body(v));
   if (!['needs-go', 'queued', 'refused'].includes(v.state)) parts.push(logPart(v));
   const acts = actions(v, where);
@@ -177,11 +190,14 @@ function body(v) {
     const run = elapsed(v);
     const pct = Math.min(100, (run / v.limit_s) * 100);
     out.push(bar(pct));
-    out.push(facts(
-      h('span', {}, b(duration(run)), ` of ${limitText(v.limit_s)}`),
-      v.state === 'running' && v.gpu_pct != null ? h('span', {}, 'GPU ', b(`${Math.round(v.gpu_pct)}%`), v.vram_mb != null ? [' · VRAM ', b(gb(v.vram_mb))] : '') : null,
-      h('span', {}, 'GPU busy ', b(duration(v.gpu_busy_s))),
-      v.started_at ? h('span', { class: 'muted' }, `started ${pacific(v.started_at)}`) : null));
+    out.push(
+      facts(
+        h('span', {}, b(duration(run)), ` of ${limitText(v.limit_s)}`),
+        v.state === 'running' && v.gpu_pct != null ? h('span', {}, 'GPU ', b(`${Math.round(v.gpu_pct)}%`), v.vram_mb != null ? [' · VRAM ', b(gb(v.vram_mb))] : '') : null,
+        h('span', {}, 'GPU busy ', b(duration(v.gpu_busy_s))),
+        v.started_at ? h('span', { class: 'muted' }, `started ${pacific(v.started_at)}`) : null,
+      ),
+    );
     // A Stop the agent hasn't acted on yet: the server keeps the state until the agent reports it ended.
     if (v.error) out.push(h('p', { class: 'jc-why' }, `Stopping, waiting for the machine (${v.error})`));
     else if (v.state === 'uploading') out.push(h('p', { class: 'jc-why' }, 'Sending its results back'));
@@ -206,12 +222,10 @@ export { bar as jobBar };
 
 /** Pause tells the truth: a resumable kind freed its VRAM; one that can't resume is frozen and still holds it. */
 function pausedParts(v) {
-  const by = v.paused_by === 'hours' ? 'Paused: its job hours closed, and it resumes when they open.'
-    : v.paused_by === 'machine' ? `Paused: ${v.machine} is paused for jobs.`
-    : 'Paused by its owner.';
+  const by = v.paused_by === 'hours' ? 'Paused: its job hours closed, and it resumes when they open.' : v.paused_by === 'machine' ? `Paused: ${v.machine} is paused for jobs.` : 'Paused by its owner.';
   if (v.kind.resumable) return [h('p', { class: 'jc-why' }, `${by} All its VRAM is freed, and Resume picks up from its files. Paused time doesn't count against the limit.`)];
   const held = v.held_vram_mb ?? v.vram_mb;
-  return [h('p', { class: 'jc-why' }, by), h('div', { class: 'jc-warn' }, 'Frozen, not stopped: it still holds ', h('b', {}, held != null ? gb(held) : 'its'), ' of VRAM. This kind can\'t resume from its files, so Stop frees the GPU but loses the run.')];
+  return [h('p', { class: 'jc-why' }, by), h('div', { class: 'jc-warn' }, 'Frozen, not stopped: it still holds ', h('b', {}, held != null ? gb(held) : 'its'), " of VRAM. This kind can't resume from its files, so Stop frees the GPU but loses the run.")];
 }
 
 /** The result files, linked where people can open them: the scheme's shared folder's jobs/<id>/. */
@@ -219,24 +233,33 @@ function results(v) {
   const files = (v.outputs ?? []).filter((o) => o.uploaded);
   if (!files.length) return h('p', { class: 'jc-why muted' }, v.swept ? 'Its results were cleared after 14 days.' : 'No result files.');
   const shown = files.slice(0, 8);
-  const link = (o) => (v.ticket_id !== null && !v.swept
-    ? h('a', { href: sharedHref(v.project_id, `jobs/${v.id}/${o.path}`) }, `jobs/${v.id}/${o.path}`)
-    : h('span', {}, o.path));
-  return h('ul', { class: 'jc-files' }, ...shown.map((o) => h('li', {}, link(o), h('span', { class: 'muted' }, ` ${formatSize(o.size)}`))),
-    files.length > shown.length ? h('li', { class: 'muted' }, `and ${files.length - shown.length} more (${formatSize(files.reduce((n, o) => n + o.size, 0))} in all)`) : '');
+  const link = (o) => (v.ticket_id !== null && !v.swept ? h('a', { href: sharedHref(v.project_id, `jobs/${v.id}/${o.path}`) }, `jobs/${v.id}/${o.path}`) : h('span', {}, o.path));
+  return h('ul', { class: 'jc-files' }, ...shown.map((o) => h('li', {}, link(o), h('span', { class: 'muted' }, ` ${formatSize(o.size)}`))), files.length > shown.length ? h('li', { class: 'muted' }, `and ${files.length - shown.length} more (${formatSize(files.reduce((n, o) => n + o.size, 0))} in all)`) : '');
 }
 
 /** The log's last lines: nothing until opened (Cara's pick), then in place. */
 function logPart(v) {
   const open = openLogs.has(v.id);
-  const toggle = h('button', { type: 'button', class: 'jc-logbtn', 'aria-expanded': String(open), onclick: () => {
-    if (openLogs.has(v.id)) openLogs.delete(v.id); else openLogs.add(v.id);
-    redraw(v.id);
-  } }, open ? '▾ Log' : '▸ Log');
+  const toggle = h(
+    'button',
+    {
+      type: 'button',
+      class: 'jc-logbtn',
+      'aria-expanded': String(open),
+      onclick: () => {
+        if (openLogs.has(v.id)) openLogs.delete(v.id);
+        else openLogs.add(v.id);
+        redraw(v.id);
+      },
+    },
+    open ? '▾ Log' : '▸ Log',
+  );
   if (!open) return h('div', { class: 'jc-log' }, toggle);
   const pre = h('pre', {}, v.log_tail || 'Nothing logged yet.');
   // The newest lines are what you opened it for.
-  requestAnimationFrame(() => { pre.scrollTop = pre.scrollHeight; });
+  requestAnimationFrame(() => {
+    pre.scrollTop = pre.scrollHeight;
+  });
   return h('div', { class: 'jc-log' }, toggle, pre);
 }
 
@@ -249,7 +272,21 @@ function actions(v, where) {
     if (!isOwner(v)) items = [btn('Stop', 'stop', 'small secondary')];
     else if (where === 'chat') {
       const goCard = document.querySelector(`[data-go-job="${v.id}"]`);
-      items = goCard ? [h('a', { href: '#', onclick: (e) => { e.preventDefault(); goCard.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }, 'Answer on the go card')] : [];
+      items = goCard
+        ? [
+            h(
+              'a',
+              {
+                href: '#',
+                onclick: (e) => {
+                  e.preventDefault();
+                  goCard.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                },
+              },
+              'Answer on the go card',
+            ),
+          ]
+        : [];
     } else {
       items = [btn('Run in job hours', 'go:hours'), btn('Run now', 'go:now', 'small secondary'), btn('Always allow this kind', 'go:always', 'small secondary'), btn('No', 'go:no', 'small secondary')];
     }
@@ -258,8 +295,7 @@ function actions(v, where) {
   else if (v.state === 'running') items = [btn('Pause', 'pause'), btn('Stop', 'stop', 'small secondary')];
   else if (v.state === 'paused') {
     const held = v.held_vram_mb ?? v.vram_mb;
-    items = v.kind.resumable ? [btn('Resume', 'resume'), btn('Stop', 'stop', 'small secondary')]
-      : [btn(held != null ? `Stop and free ${gb(held)}` : 'Stop and free the GPU', 'stop'), btn('Resume', 'resume', 'small secondary')];
+    items = v.kind.resumable ? [btn('Resume', 'resume'), btn('Stop', 'stop', 'small secondary')] : [btn(held != null ? `Stop and free ${gb(held)}` : 'Stop and free the GPU', 'stop'), btn('Resume', 'resume', 'small secondary')];
   }
   return items.length ? h('div', { class: 'jc-acts' }, ...items) : null;
 }
@@ -283,7 +319,11 @@ export function act(v, action) {
   return optimistic({
     key: `job:${v.id}`,
     label: `${LABEL[action]} job #${v.id}`,
-    apply: () => { known.set(v.id, { ...before, ...GUESS[action](before) }); redraw(v.id); for (const fn of listeners) fn(known.get(v.id)); },
+    apply: () => {
+      known.set(v.id, { ...before, ...GUESS[action](before) });
+      redraw(v.id);
+      for (const fn of listeners) fn(known.get(v.id));
+    },
     send: async () => {
       const [path, choice] = action.split(':');
       const out = await api(`api/jobs/${v.id}/${path}`, { method: 'POST', body: choice ? { choice } : {} });
@@ -292,7 +332,11 @@ export function act(v, action) {
       for (const fn of listeners) fn(out);
       return out;
     },
-    undo: () => { known.set(v.id, before); redraw(v.id); for (const fn of listeners) fn(before); },
+    undo: () => {
+      known.set(v.id, before);
+      redraw(v.id);
+      for (const fn of listeners) fn(before);
+    },
   });
 }
 
@@ -307,22 +351,28 @@ export function jobMovedNote(data, href) {
 export function jobRecipe(r) {
   const row = (label, ...value) => [h('dt', {}, label), h('dd', {}, ...value)];
   const code = (t) => h('code', {}, t);
-  return h('dl', { class: 'jc-recipe' },
+  return h(
+    'dl',
+    { class: 'jc-recipe' },
     row('Asked by', r.asked_by),
-    row('Kind', r.kind.name, h('span', { class: 'muted' }, r.kind.resumable ? ' · can pause and resume' : ' · can\'t resume: a pause freezes it')),
+    row('Kind', r.kind.name, h('span', { class: 'muted' }, r.kind.resumable ? ' · can pause and resume' : " · can't resume: a pause freezes it")),
     row('Image', code(r.kind.image)),
     row('Command', code(r.kind.command.join(' '))),
     row('Reads', r.kind.reads.length ? r.kind.reads.join(', ') : 'none of your folders'),
     row('GPU · network', `${r.kind.gpu ? 'GPU on' : 'GPU off'} · ${r.kind.network ? 'network on' : 'network off'}`),
     row('Limit', limitText(r.limit_s)),
     row('Inputs', r.inputs.length ? r.inputs.map((i, n) => h('span', {}, n ? ', ' : '', i.name, h('span', { class: 'muted' }, ` (${formatSize(i.size)})`))) : 'none'),
-    row('When', r.when === 'now' ? h('span', {}, h('b', {}, 'Now'), `: ${r.reason}`) : 'In job hours'));
+    row('When', r.when === 'now' ? h('span', {}, h('b', {}, 'Now'), `: ${r.reason}`) : 'In job hours'),
+  );
 }
 
 /** Every job of a minion, for its chat: one fetch fills the cards that came without a view. */
 export async function loadTicketJobs(ticketId) {
   const { jobs } = await api(`api/tickets/${ticketId}/jobs`);
-  for (const v of jobs) { known.set(v.id, v); redraw(v.id); }
+  for (const v of jobs) {
+    known.set(v.id, v);
+    redraw(v.id);
+  }
   return jobs;
 }
 
@@ -357,20 +407,30 @@ function newSection(machineId) {
   const listEl = h('div', { class: 'mjobs-list' });
   el.append(head, settingsEl, kindsEl, listEl);
 
-  const load = () => api(`api/machines/${machineId}/jobs`).then((r) => {
-    st.allowed = true;
-    st.jobs = r.jobs;
-    st.kinds = r.kinds;
-    st.settings = r.settings;
-    for (const v of r.jobs) rememberJob(v);
-    el.hidden = false;
-    drawAll();
-  }, (e) => { if (e.status !== 404) { el.hidden = false; el.replaceChildren(h('p', { class: 'muted' }, `Couldn't load its jobs: ${e.message}`)); } });
+  const load = () =>
+    api(`api/machines/${machineId}/jobs`).then(
+      (r) => {
+        st.allowed = true;
+        st.jobs = r.jobs;
+        st.kinds = r.kinds;
+        st.settings = r.settings;
+        for (const v of r.jobs) rememberJob(v);
+        el.hidden = false;
+        drawAll();
+      },
+      (e) => {
+        if (e.status !== 404) {
+          el.hidden = false;
+          el.replaceChildren(h('p', { class: 'muted' }, `Couldn't load its jobs: ${e.message}`));
+        }
+      },
+    );
 
   onJobs((v) => {
     if (v.machine_id !== machineId || !st.allowed) return;
     const i = st.jobs.findIndex((j) => j.id === v.id);
-    if (i >= 0) st.jobs[i] = v; else st.jobs.unshift(v);
+    if (i >= 0) st.jobs[i] = v;
+    else st.jobs.unshift(v);
     drawHead();
     drawList();
   });
@@ -378,9 +438,8 @@ function newSection(machineId) {
   const active = () => st.jobs.find((j) => ACTIVE.includes(j.state));
   function drawHead() {
     const a = active();
-    const gpu = a && a.state === 'running' && a.gpu_pct != null
-      ? h('span', { class: 'mjobs-gpu' }, meter(a.gpu_pct), h('span', {}, `GPU ${Math.round(a.gpu_pct)}%`, a.vram_mb != null ? ` · VRAM ${gb(a.vram_mb)}` : '', ` · job #${a.id}`))
-      : h('span', { class: 'muted' }, a ? `Job #${a.id} is ${a.state}` : 'No job running');
+    const gpu =
+      a && a.state === 'running' && a.gpu_pct != null ? h('span', { class: 'mjobs-gpu' }, meter(a.gpu_pct), h('span', {}, `GPU ${Math.round(a.gpu_pct)}%`, a.vram_mb != null ? ` · VRAM ${gb(a.vram_mb)}` : '', ` · job #${a.id}`)) : h('span', { class: 'muted' }, a ? `Job #${a.id} is ${a.state}` : 'No job running');
     head.replaceChildren(h('b', {}, 'Jobs'), gpu);
   }
   function drawSettings(force = false) {
@@ -403,73 +462,109 @@ function newSection(machineId) {
       h('span', { class: 'muted' }, 'Job hours'),
       h('div', { class: 'row' }, time('start'), h('span', {}, 'to'), time('end'), h('span', { class: 'muted' }, zone)),
       h('span', { class: 'muted' }, 'One-off window'),
-      untilOn
-        ? h('div', { class: 'row' }, h('span', {}, `Jobs may run until ${pacific(set.until)}`), h('button', { type: 'button', class: 'small secondary', onclick: () => patch({ until: null }, 'end the window') }, 'End it'))
-        : h('div', { class: 'row' }, h('span', {}, 'Jobs may run until'), untilInput, untilBtn),
+      untilOn ? h('div', { class: 'row' }, h('span', {}, `Jobs may run until ${pacific(set.until)}`), h('button', { type: 'button', class: 'small secondary', onclick: () => patch({ until: null }, 'end the window') }, 'End it')) : h('div', { class: 'row' }, h('span', {}, 'Jobs may run until'), untilInput, untilBtn),
       h('span', { class: 'muted' }, 'Pause'),
-      h('label', { class: 'row mjobs-pause' }, pause, h('span', {}, set.paused ? 'Paused: the running job is paused and nothing new starts' : 'Pause every job on this machine')));
+      h('label', { class: 'row mjobs-pause' }, pause, h('span', {}, set.paused ? 'Paused: the running job is paused and nothing new starts' : 'Pause every job on this machine')),
+    );
   }
   function patch(fields, label) {
     const was = { ...st.settings };
     optimistic({
       key: `jobsettings:${machineId}`,
       label,
-      apply: () => { st.settings = { ...st.settings, ...fields }; drawSettings(); },
-      send: async () => { st.settings = await api(`api/machines/${machineId}/job-settings`, { method: 'PATCH', body: fields }); drawSettings(); },
-      undo: () => { st.settings = was; drawSettings(); },
+      apply: () => {
+        st.settings = { ...st.settings, ...fields };
+        drawSettings();
+      },
+      send: async () => {
+        st.settings = await api(`api/machines/${machineId}/job-settings`, { method: 'PATCH', body: fields });
+        drawSettings();
+      },
+      undo: () => {
+        st.settings = was;
+        drawSettings();
+      },
     });
   }
   function drawKinds() {
-    if (!st.kinds.length) { kindsEl.replaceChildren(); return; }
-    kindsEl.replaceChildren(h('span', { class: 'muted' }, 'Always allowed'),
-      h('div', { class: 'mjobs-chips' }, ...st.kinds.map((k) => h('span', { class: 'mjobs-chip', title: `Allowed by ${k.allowed_by}, ${pacificDay(k.at)}` }, k.name,
-        h('button', { type: 'button', class: 'small secondary', onclick: () => removeKind(k) }, 'Remove')))));
+    if (!st.kinds.length) {
+      kindsEl.replaceChildren();
+      return;
+    }
+    kindsEl.replaceChildren(
+      h('span', { class: 'muted' }, 'Always allowed'),
+      h('div', { class: 'mjobs-chips' }, ...st.kinds.map((k) => h('span', { class: 'mjobs-chip', title: `Allowed by ${k.allowed_by}, ${pacificDay(k.at)}` }, k.name, h('button', { type: 'button', class: 'small secondary', onclick: () => removeKind(k) }, 'Remove')))),
+    );
   }
   function removeKind(k) {
     const was = st.kinds;
     optimistic({
       key: `jobkind:${machineId}:${k.hash}`,
       label: `remove ${k.name} from always allowed`,
-      apply: () => { st.kinds = st.kinds.filter((x) => x.hash !== k.hash); drawKinds(); },
+      apply: () => {
+        st.kinds = st.kinds.filter((x) => x.hash !== k.hash);
+        drawKinds();
+      },
       send: () => api(`api/machines/${machineId}/job-kinds/${encodeURIComponent(k.hash)}`, { method: 'DELETE' }),
-      undo: () => { st.kinds = was; drawKinds(); },
+      undo: () => {
+        st.kinds = was;
+        drawKinds();
+      },
     });
   }
   function drawList() {
-    if (!st.jobs.length) { listEl.replaceChildren(h('p', { class: 'muted' }, 'No jobs yet.')); return; }
+    if (!st.jobs.length) {
+      listEl.replaceChildren(h('p', { class: 'muted' }, 'No jobs yet.'));
+      return;
+    }
     // The one running or paused on top, then newest first.
-    const rows = [...st.jobs].sort((a, b) => (ACTIVE.includes(b.state) - ACTIVE.includes(a.state)) || b.created_at - a.created_at);
+    const rows = [...st.jobs].sort((a, b) => ACTIVE.includes(b.state) - ACTIVE.includes(a.state) || b.created_at - a.created_at);
     listEl.replaceChildren(...rows.map((v) => jobRow(v)));
   }
   function jobRow(v) {
     const isOpen = st.open.has(v.id);
-    const toggle = () => { if (isOpen) st.open.delete(v.id); else st.open.add(v.id); drawList(); };
+    const toggle = () => {
+      if (isOpen) st.open.delete(v.id);
+      else st.open.add(v.id);
+      drawList();
+    };
     const run = ACTIVE.includes(v.state) ? elapsed(v) : v.run_s;
     const when = v.ended_at ? `ended ${pacificDay(v.ended_at)}` : v.started_at ? `started ${pacificDay(v.started_at)}` : `asked ${pacificDay(v.created_at)}`;
     const sub = [PILL[v.state], v.state === 'queued' && v.waits ? v.waits : '', when, `from ${v.asked_by}`].filter(Boolean).join(' · ');
     const right = run ? `${duration(run)}${v.gpu_busy_s ? ` · GPU ${duration(v.gpu_busy_s)}` : ''}` : '';
-    const btn = h('button', { type: 'button', class: 'mjobs-row', 'aria-expanded': String(isOpen), onclick: toggle },
+    const btn = h(
+      'button',
+      { type: 'button', class: 'mjobs-row', 'aria-expanded': String(isOpen), onclick: toggle },
       h('span', { class: 'jc-dot' }),
       h('span', { class: 'text' }, h('span', { class: 'name' }, `Job #${v.id} · ${v.kind.name}`), h('span', { class: 'meta' }, sub)),
       h('span', { class: 'meta right' }, right),
       // Cara's note on her pick (2026-11-17): "with a simple progress bar on the currently running job".
-      v.state === 'running' || v.state === 'paused' ? bar(Math.min(100, (run / v.limit_s) * 100)) : '');
+      v.state === 'running' || v.state === 'paused' ? bar(Math.min(100, (run / v.limit_s) * 100)) : '',
+    );
     let card = '';
     if (isOpen) {
       // Kept while it stays live; one redraw() let go of (closed, or the page left) is built again.
       card = st.cards.get(v.id);
-      if (!card || !drawn.get(v.id)?.has(card)) st.cards.set(v.id, card = jobCard(v.id, v, 'machines'));
+      if (!card || !drawn.get(v.id)?.has(card)) st.cards.set(v.id, (card = jobCard(v.id, v, 'machines')));
     }
     return h('div', { class: `mjobs-item ${tone(v.state)}${isOpen ? ' open' : ''}` }, btn, card);
   }
-  function drawAll() { drawHead(); drawSettings(); drawKinds(); drawList(); }
+  function drawAll() {
+    drawHead();
+    drawSettings();
+    drawKinds();
+    drawList();
+  }
 
   return {
     el,
     setMachine(m) {
       const first = !st.machine;
       st.machine = m;
-      if (!m.jobs) { el.hidden = true; return; }
+      if (!m.jobs) {
+        el.hidden = true;
+        return;
+      }
       if (first) load();
       else if (st.allowed && m.job_settings && JSON.stringify(m.job_settings) !== JSON.stringify(st.settings)) {
         st.settings = m.job_settings;

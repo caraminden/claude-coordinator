@@ -89,7 +89,7 @@ test('an update to the open minion keeps the header parts it did not change, and
     [...head.querySelectorAll('button')].find((b) => /^Pin/.test(b.textContent.trim())).click();
   })()`);
   await waitFor(page, 'the header after pinning', `[...document.querySelectorAll('#ticket-head button')].some((b) => /Pinned|Unpin/.test(b.textContent))`);
-  assert.ok(await page.eval<number>('window.kept.length') > 1, 'the header has parts to keep');
+  assert.ok((await page.eval<number>('window.kept.length')) > 1, 'the header has parts to keep');
   assert.deepEqual(await page.eval<string[]>(`window.kept.filter((el) => !el.isConnected).map((el) => el.textContent.trim())`), [], 'these were drawn again');
   assert.equal(await page.eval<string>(`document.querySelector('#ticket-head input')?.value`), 'fox');
 });

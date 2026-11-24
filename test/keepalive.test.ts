@@ -8,10 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import {
-  changedParts, countGate, fingerprint, inWindow, KEEPALIVE_AFTER_MS, KEEPALIVE_GATES_KEY, KEEPALIVE_OFF_KEY, KEEPALIVE_REPORT_KEY, KEEPALIVE_TEXT, keepaliveKey, missed, prefixParts, SERIES_CAP_MS,
-  tooManyMisses, WEEK_MS, weekReport, type KeepaliveSeries, type KeepaliveRow,
-} from '../src/keepalive.ts';
+import { changedParts, countGate, fingerprint, inWindow, KEEPALIVE_AFTER_MS, KEEPALIVE_GATES_KEY, KEEPALIVE_OFF_KEY, KEEPALIVE_REPORT_KEY, KEEPALIVE_TEXT, keepaliveKey, missed, prefixParts, SERIES_CAP_MS, tooManyMisses, WEEK_MS, weekReport, type KeepaliveSeries, type KeepaliveRow } from '../src/keepalive.ts';
 import { sleepKey } from '../src/needs.ts';
 import { Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
@@ -34,15 +31,22 @@ test('the window is 11:00 to midnight Pacific, in winter and summer time', () =>
 
 test('the fingerprint ignores the per-turn folder and names the part that moved', () => {
   const base = {
-    dir: '/run/turns/5-111', systemPrompt: 'You are a minion.', args: ['-p', '--settings', '/run/turns/5-111/settings.json', '--model', 'opus'],
-    files: [{ name: 'mcp.json', text: '{"a":"/run/turns/5-111/pin/mcp.ts"}' }, { name: 'settings.json', text: '{"hooks":"/run/turns/5-111/pin/x"}' }],
+    dir: '/run/turns/5-111',
+    systemPrompt: 'You are a minion.',
+    args: ['-p', '--settings', '/run/turns/5-111/settings.json', '--model', 'opus'],
+    files: [
+      { name: 'mcp.json', text: '{"a":"/run/turns/5-111/pin/mcp.ts"}' },
+      { name: 'settings.json', text: '{"hooks":"/run/turns/5-111/pin/x"}' },
+    ],
     env: { COORDINATOR_APPROVALS: '1', COORDINATOR_TOKEN: 'secret-1', CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', GITHUB_TOKEN: 'g', PATH: '/run/turns/5-111/pin/bin:/usr/bin' },
-    pinned: 'kit-hash', claude: 'claude-2.1', context: 'claude.md', date: '2026-11-16',
+    pinned: 'kit-hash',
+    claude: 'claude-2.1',
+    context: 'claude.md',
+    date: '2026-11-16',
   };
   const a = prefixParts(base);
   // Another turn's folder, token and secrets: the same prefix.
-  const b = prefixParts({ ...base, dir: '/run/turns/5-999', args: base.args.map((s) => s.replace('5-111', '5-999')),
-    files: base.files.map((f) => ({ ...f, text: f.text.replace('5-111', '5-999') })), env: { ...base.env, COORDINATOR_TOKEN: 'secret-2', GITHUB_TOKEN: 'h', CITADEL_SECRET_X: 'y' } });
+  const b = prefixParts({ ...base, dir: '/run/turns/5-999', args: base.args.map((s) => s.replace('5-111', '5-999')), files: base.files.map((f) => ({ ...f, text: f.text.replace('5-111', '5-999') })), env: { ...base.env, COORDINATOR_TOKEN: 'secret-2', GITHUB_TOKEN: 'h', CITADEL_SECRET_X: 'y' } });
   assert.equal(fingerprint(a), fingerprint(b));
   assert.deepEqual(changedParts(a, b), []);
   // A prompt edit, a tool flag, a model, the kit, CLAUDE.md or the date each make it dirty, and say which.
@@ -68,17 +72,30 @@ test('the week readout counts warm and cold wakes and the reload a warm one save
   const H = 3_600_000;
   const t0 = pst(12);
   const row = (ticket_id: number, end: number, extra: Partial<KeepaliveRow> = {}): KeepaliveRow => ({
-    ticket_id, ended_at: end, duration_ms: 60_000, cost_usd: 1, input_tokens: 10, output_tokens: 500, cache_read_tokens: 100_000, cache_write_tokens: 2_000, keepalive: 0, ...extra,
+    ticket_id,
+    ended_at: end,
+    duration_ms: 60_000,
+    cost_usd: 1,
+    input_tokens: 10,
+    output_tokens: 500,
+    cache_read_tokens: 100_000,
+    cache_write_tokens: 2_000,
+    keepalive: 0,
+    ...extra,
   });
   // A ping: 100k read at 0.1 and a few tokens, $0.05 in all, so a unit is 0.05 / (10 + 10_000 + 0 + 10) per token.
   const ping = (ticket_id: number, end: number) => row(ticket_id, end, { keepalive: 1, cost_usd: 0.05, input_tokens: 10, output_tokens: 2, cache_read_tokens: 100_000, cache_write_tokens: 0, duration_ms: 3000 });
   const rows = [
     // Minion 1: a turn, a ping 55 min later, then a person's answer 30 min after the ping: a warm wake.
-    row(1, t0), ping(1, t0 + 55 * 60_000), row(1, t0 + 85 * 60_000 + 60_000),
+    row(1, t0),
+    ping(1, t0 + 55 * 60_000),
+    row(1, t0 + 85 * 60_000 + 60_000),
     // Minion 2: a turn and an answer three hours later with no ping: a cold wake.
-    row(2, t0), row(2, t0 + 3 * H + 60_000),
+    row(2, t0),
+    row(2, t0 + 3 * H + 60_000),
     // Minion 3: back within the hour: no wait at all.
-    row(3, t0), row(3, t0 + 30 * 60_000),
+    row(3, t0),
+    row(3, t0 + 30 * 60_000),
   ];
   const r = weekReport(rows, t0 - H, t0 + 24 * H);
   assert.equal(r.pings, 1);
@@ -144,7 +161,12 @@ process.stdin.on('data', (d) => {
 chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 
 let n = 0;
 /** A minion with a session whose transcript is on this login, so its turns resume it. */
@@ -165,7 +187,11 @@ const callCount = () => lines(calls).length;
 const promptText = (p: any) => (typeof p === 'string' ? p : p.map((b: any) => b.text).join('\n'));
 const series = (id: number) => store.getSetting<KeepaliveSeries>(keepaliveKey(id));
 const turnsOf = (id: number) => store.listTurns(id);
-const notesOf = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+const notesOf = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
 const idle = (id: number) => until('the lane to go idle', () => !runner.isRunning(id) && !(runner as any).lanes.busy(id));
 
 /** Run a real turn to its end, then move its end (and its series' start) to `end`, so a sweep's clock can be Pacific noon. */
@@ -279,7 +305,10 @@ test('a real wake that arrives while a keepalive waits goes first, and the keepa
 
 // 2A2 (#1510): a keepalive sweep that lands between recover() and its staggered resumes leaves the owed resume alone,
 // whether the keepalive would have run (and taken the resume's place) or backed out (and held the cut turn's batch as mail).
-for (const [name, dirty] of [['would run', false], ['would back out on a changed prompt', true]] as const) {
+for (const [name, dirty] of [
+  ['would run', false],
+  ['would back out on a changed prompt', true],
+] as const) {
   test(`no keepalive on a minion with a restart's resume owed: one that ${name}`, async () => {
     const id = minion();
     const end = pst(15);
@@ -296,7 +325,11 @@ for (const [name, dirty] of [['would run', false], ['would back out on a changed
       assert.equal(callCount(), before, 'no keepalive ran');
       assert.deepEqual(runner.queue.owed(id), { resumes: 1 }, 'the resume is still owed');
       const q = runner.queue.get(id);
-      assert.deepEqual(q.taken?.map((m) => m.text), ['the cut turn read this'], 'its batch is still taken, for the resume');
+      assert.deepEqual(
+        q.taken?.map((m) => m.text),
+        ['the cut turn read this'],
+        'its batch is still taken, for the resume',
+      );
       assert.equal(q.held, undefined, 'not turned into held mail');
       assert.equal(series(id)!.stopped, undefined);
     } finally {
@@ -375,7 +408,7 @@ test('a minion waiting on its ship gets a keepalive too, and a ship that ends du
   assert.equal(turnsOf(id).at(-1)!.keepalive, 1);
 });
 
-test('a deploy that goes live during a keepalive dismisses its pending-deploy minion at the keepalive\'s end (#1274)', async () => {
+test("a deploy that goes live during a keepalive dismisses its pending-deploy minion at the keepalive's end (#1274)", async () => {
   const id = minion();
   const end = pst(14, 20);
   await realTurn(id, end);
@@ -449,13 +482,18 @@ test('a keepalive turn left by a restart is killed and dropped, not resumed', as
   writeFileSync(join(root, 'gone-turn', 'pid.json'), JSON.stringify({ claude: orphan.pid }));
   const gone = new Promise((resolve) => orphan.once('exit', resolve));
   store.setSetting(`turn:${id}`, { resumes: 0, keepalive: true, dir: join(root, 'gone-turn'), startedAt: Date.now() });
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.recover();
   assert.equal(await Promise.race([gone.then(() => 'killed'), new Promise((res) => setTimeout(res, 3000, 'alive'))]), 'killed');
   assert.equal(store.getSetting(`turn:${id}`), null);
   assert.equal(existsSync(join(root, 'gone-turn')), false);
   assert.equal(r.isRunning(id), false, 'no resume started');
-  assert.equal((store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null), null);
+  assert.equal(store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null, null);
 });
 
 test('the weekly readout switches keepalives off when they cost more than they saved', async () => {

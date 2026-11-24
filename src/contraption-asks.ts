@@ -19,7 +19,12 @@ export const README_INBOX_LINE = "- `inbox/` (written by Citadel): files people 
 /** A name that is safe as one path segment: no folders, no leading dot, letters, digits, dots, dashes and underscores only. */
 export function safeName(name: string): string {
   const last = name.split(/[\\/]/).pop() ?? '';
-  return last.replace(/[^\w.-]+/g, '-').slice(-100).replace(/^[.-]+/, '') || 'file';
+  return (
+    last
+      .replace(/[^\w.-]+/g, '-')
+      .slice(-100)
+      .replace(/^[.-]+/, '') || 'file'
+  );
 }
 
 export interface AskFile {
@@ -121,15 +126,14 @@ export function askMessage(c: ContraptionRow, scheme: Project, person: User, mem
   const who = `${person.name} (${person.login})`;
   // The item is the contraption's word (an aura's name, say), quoted so it can't pass for the label.
   const about = item ? ` about ${JSON.stringify(item)}` : '';
-  const lines = [
-    `${kind === 'bug' ? 'A bug report' : 'A feature ask'}${about} from the ${c.title} contraption (${c.name}), sent by ${who} while using it:`,
-    asData(`${person.name}, through ${c.title}`, text),
-  ];
+  const lines = [`${kind === 'bug' ? 'A bug report' : 'A feature ask'}${about} from the ${c.title} contraption (${c.name}), sent by ${who} while using it:`, asData(`${person.name}, through ${c.title}`, text)];
   if (files.length) lines.push(`Files they sent, in this scheme's shared folder: ${files.join(', ')}`);
   if (!member) {
-    lines.push(kind === 'feature'
-      ? `Proposal only: ${person.name} isn't a ${scheme.name} member, so this is never built on their word. Start an idea minion that writes a proposal into specs/ in the shared folder, and build it only once a ${scheme.name} member says go.`
-      : `${person.name} isn't a ${scheme.name} member: a bug (${c.title} broken, or doing what its own rules or docs say it shouldn't) you may work as usual, but if this is really new or changed behaviour, it is a proposal only, built once a ${scheme.name} member says go.`);
+    lines.push(
+      kind === 'feature'
+        ? `Proposal only: ${person.name} isn't a ${scheme.name} member, so this is never built on their word. Start an idea minion that writes a proposal into specs/ in the shared folder, and build it only once a ${scheme.name} member says go.`
+        : `${person.name} isn't a ${scheme.name} member: a bug (${c.title} broken, or doing what its own rules or docs say it shouldn't) you may work as usual, but if this is really new or changed behaviour, it is a proposal only, built once a ${scheme.name} member says go.`,
+    );
   }
   lines.push(`The contraption doesn't see your reply here.`);
   return {

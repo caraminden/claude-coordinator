@@ -5,14 +5,39 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { readProposals } from '../src/review-describe.ts';
-import { agentKind, BACKFILL_KEY, backfillRuns, BUILT_INS, CRITIC_ON_FAIL, importAllRubrics, VERDICTS, orderLine, importRubrics, IMPORT_KEY, kitLine, loadStarters, nameFor, parseWhen, readAgentFiles, renderEntry, renderSet, repoRubrics, ReviewSet, rubricsLine, splitRubric, stageFor, whenText, withoutGoneAgents } from '../src/review-set.ts';
+import {
+  agentKind,
+  BACKFILL_KEY,
+  backfillRuns,
+  BUILT_INS,
+  CRITIC_ON_FAIL,
+  importAllRubrics,
+  VERDICTS,
+  orderLine,
+  importRubrics,
+  IMPORT_KEY,
+  kitLine,
+  loadStarters,
+  nameFor,
+  parseWhen,
+  readAgentFiles,
+  renderEntry,
+  renderSet,
+  repoRubrics,
+  ReviewSet,
+  rubricsLine,
+  splitRubric,
+  stageFor,
+  whenText,
+  withoutGoneAgents,
+} from '../src/review-set.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-set-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
 function fresh() {
   const db = new DatabaseSync(':memory:');
-  db.exec('PRAGMA foreign_keys = ON; CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO projects VALUES (3, \'Peek Auras\'), (9, \'Genesis Tree\');');
+  db.exec("PRAGMA foreign_keys = ON; CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO projects VALUES (3, 'Peek Auras'), (9, 'Genesis Tree');");
   return { db, set: new ReviewSet(db) };
 }
 
@@ -72,10 +97,21 @@ test('every save is a version; History restores one as a new version, and stale 
   set.save(9, 'ui', { body: '# UI, sharper' }, 'Josh', 'Edited by hand', 2);
   const back = set.restore(9, 'ui', 1, 'Cara');
   assert.deepEqual([back.version, back.enabled, back.body], [4, true, '# UI']);
-  assert.deepEqual(set.versions(9, 'ui').map((v) => [v.version, v.by, v.note]), [[4, 'Cara', 'Restored version 1'], [3, 'Josh', 'Edited by hand'], [2, 'Cara', 'Turned off'], [1, 'Josh', 'Made']]);
+  assert.deepEqual(
+    set.versions(9, 'ui').map((v) => [v.version, v.by, v.note]),
+    [
+      [4, 'Cara', 'Restored version 1'],
+      [3, 'Josh', 'Edited by hand'],
+      [2, 'Cara', 'Turned off'],
+      [1, 'Josh', 'Made'],
+    ],
+  );
   // Schemes are apart: the same slug is free in another, and one scheme's list never shows another's.
   set.create(3, { slug: 'ui', name: 'UI' }, 'Cara');
-  assert.deepEqual(set.list(9).map((x) => x.project_id), [9]);
+  assert.deepEqual(
+    set.list(9).map((x) => x.project_id),
+    [9],
+  );
   assert.throws(() => set.create(9, { slug: 'ui', name: 'Again' }, 'Cara'), /already has an entry named ui/);
   assert.throws(() => set.create(9, { slug: 'Bad Slug', name: 'x' }, 'Cara'), /kebab-case/);
   assert.throws(() => set.save(9, 'ui', { kind: 'judge' as any }, 'Cara', 'x'), /kind is one of/);
@@ -108,13 +144,19 @@ test("the one-off import moves each scheme's Rubrics line files in once, keeping
   writeFileSync(join(repo, 'docs', 'rubrics', 'README.md'), '# How these work\n');
   assert.deepEqual(rubricsLine('- **Rubrics:** none yet'), []);
   assert.deepEqual(rubricsLine('- **Rubrics:** docs/rubrics/; docs/extra.md.'), ['docs/rubrics/', 'docs/extra.md']);
-  assert.deepEqual(repoRubrics(repo).map(([p]) => p), ['docs/rubrics/ui.md']);
+  assert.deepEqual(
+    repoRubrics(repo).map(([p]) => p),
+    ['docs/rubrics/ui.md'],
+  );
 
   const settings = new Map<string, unknown>();
   const store = {
     getSetting: <T>(k: string) => (settings.get(k) ?? null) as T | null,
     setSetting: (k: string, v: unknown) => void settings.set(k, v),
-    listProjects: () => [{ id: 9, name: 'Genesis Tree', repo_dir: repo }, { id: 3, name: 'Peek Auras', repo_dir: join(root, 'none') }],
+    listProjects: () => [
+      { id: 9, name: 'Genesis Tree', repo_dir: repo },
+      { id: 3, name: 'Peek Auras', repo_dir: join(root, 'none') },
+    ],
     reviews: set,
   };
   assert.deepEqual(importAllRubrics(store, 1), ['Genesis Tree: imported docs/rubrics/ui.md']);
@@ -133,7 +175,10 @@ test("a body's own frontmatter can't override the keys a person sets (trial, whe
   set.create(9, { slug: 'x', name: 'X', triggers: { diff: ['public/**'] }, trial: true }, 'Cara');
   const e = set.save(9, 'x', { body: '---\ntrial: false\nwhen: ask\njudges: the page\n---\n\n## Pass\n\n- ok' }, 'minion', 'learned');
   const head = renderEntry(e).split('\n---\n')[0];
-  assert.deepEqual(head.split('\n').filter((l) => /^(trial|when):/.test(l)), ['when: "diff: public/**"', 'trial: true']);
+  assert.deepEqual(
+    head.split('\n').filter((l) => /^(trial|when):/.test(l)),
+    ['when: "diff: public/**"', 'trial: true'],
+  );
   assert.match(head, /^judges: the page$/m);
 });
 
@@ -146,7 +191,7 @@ test('context and triggers of the wrong shape are refused, so a bad save never b
   assert.doesNotThrow(() => renderEntry(set.get(9, 'x')!));
 });
 
-test("the import reads only inside the repo, brings a file the store refuses in switched off, and retries a failure", () => {
+test('the import reads only inside the repo, brings a file the store refuses in switched off, and retries a failure', () => {
   const { set } = fresh();
   const repo = join(root, 'repo');
   mkdirSync(join(repo, 'r'), { recursive: true });
@@ -155,7 +200,10 @@ test("the import reads only inside the repo, brings a file the store refuses in 
   writeFileSync(join(repo, 'CLAUDE.md'), '- **Rubrics:** r/; ../repo-other/\n');
   writeFileSync(join(repo, 'r', 'bad-model.md'), '---\nname: bad-model\nmodel: gpt\n---\n\n## Pass\n');
   writeFileSync(join(repo, 'r', 'bad-when.md'), '---\nname: bad-when\nwhen: bogus\n---\n\n## Pass\n');
-  assert.deepEqual(repoRubrics(repo).map(([p]) => p), ['r/bad-model.md', 'r/bad-when.md']);
+  assert.deepEqual(
+    repoRubrics(repo).map(([p]) => p),
+    ['r/bad-model.md', 'r/bad-when.md'],
+  );
   const { added, failed } = importRubrics(set, 9, repoRubrics(repo), 'Citadel');
   assert.equal(added.length, 2);
   assert.deepEqual(failed, []);
@@ -167,7 +215,17 @@ test("the import reads only inside the repo, brings a file the store refuses in 
   }
   // Nothing marked done while a file failed outright, so the next start tries it again.
   const settings = new Map<string, unknown>();
-  const store = { getSetting: <T>(k: string) => (settings.get(k) ?? null) as T | null, setSetting: (k: string, v: unknown) => void settings.set(k, v), listProjects: () => [{ id: 9, name: 'G', repo_dir: repo }], reviews: { get: () => null, create: () => { throw new Error('disk full'); } } as any };
+  const store = {
+    getSetting: <T>(k: string) => (settings.get(k) ?? null) as T | null,
+    setSetting: (k: string, v: unknown) => void settings.set(k, v),
+    listProjects: () => [{ id: 9, name: 'G', repo_dir: repo }],
+    reviews: {
+      get: () => null,
+      create: () => {
+        throw new Error('disk full');
+      },
+    } as any,
+  };
   assert.match(importAllRubrics(store)[0], /FAILED r\/bad-model\.md \(disk full\)/);
   assert.equal(settings.get(IMPORT_KEY), undefined);
 });
@@ -177,7 +235,11 @@ test("the kit's built-ins: on every scheme's page once, switchable, their own te
   set.ensureBuiltIns(3, 1);
   set.ensureBuiltIns(3, 2);
   const kit = set.list(3);
-  assert.deepEqual(kit.map((e) => e.slug), BUILT_INS.map((b) => b.slug), 'each once, in the kit order, first on the page');
+  assert.deepEqual(
+    kit.map((e) => e.slug),
+    BUILT_INS.map((b) => b.slug),
+    'each once, in the kit order, first on the page',
+  );
   assert.ok(kit.every((e) => e.stage === 'ship' && e.enabled && !e.trial && e.source?.startsWith('kit:')));
   assert.equal(set.list(9).length, 0, 'per scheme: another scheme gets its own when its page opens');
   // A scheme switches one and adds to its text; the kit's name, kind and trial are not its to change.
@@ -193,7 +255,10 @@ test("every lens in the self-review's lenses.md has a built-in, and no built-in 
   const md = readFileSync(join(import.meta.dirname, '..', 'kit', 'skills', 'self-review', 'references', 'lenses.md'), 'utf8');
   const table = md.split('### Pick by the diff')[1].split('\n####')[0];
   const lenses = [...table.matchAll(/^\| ([^|]+?)(?:, in `[^`]+`)? \|/gm)].map((m) => m[1]).filter((l) => l !== 'Lens' && !/^-+$/.test(l));
-  assert.deepEqual(BUILT_INS.filter((b) => b.slug.startsWith('lens-')).map((b) => b.name.replace(/^Lens: /, '')), lenses);
+  assert.deepEqual(
+    BUILT_INS.filter((b) => b.slug.startsWith('lens-')).map((b) => b.name.replace(/^Lens: /, '')),
+    lenses,
+  );
 });
 
 test('who gives the risk label: the pre-ship review, else a calibrated entry marked to; the turn hears which', () => {
@@ -250,7 +315,9 @@ test('trial until calibrated: a run that passes takes it off trial, a weak one k
 test('a database phase 1 made gets the phase 2 columns', () => {
   const db = new DatabaseSync(':memory:');
   db.exec("CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO projects VALUES (3, 'Peek Auras');");
-  db.exec("CREATE TABLE review_entries (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, slug TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'critic', extends TEXT, body TEXT NOT NULL DEFAULT '', triggers TEXT NOT NULL DEFAULT '{}', context TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1, trial INTEGER NOT NULL DEFAULT 0, model TEXT, effort TEXT, stage TEXT NOT NULL DEFAULT 'work', position INTEGER NOT NULL DEFAULT 0, gate TEXT, source TEXT, version INTEGER NOT NULL DEFAULT 1, updated_by TEXT NOT NULL, updated_at INTEGER NOT NULL, UNIQUE (project_id, slug))");
+  db.exec(
+    "CREATE TABLE review_entries (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, slug TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'critic', extends TEXT, body TEXT NOT NULL DEFAULT '', triggers TEXT NOT NULL DEFAULT '{}', context TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1, trial INTEGER NOT NULL DEFAULT 0, model TEXT, effort TEXT, stage TEXT NOT NULL DEFAULT 'work', position INTEGER NOT NULL DEFAULT 0, gate TEXT, source TEXT, version INTEGER NOT NULL DEFAULT 1, updated_by TEXT NOT NULL, updated_at INTEGER NOT NULL, UNIQUE (project_id, slug))",
+  );
   db.exec("INSERT INTO review_entries (project_id, slug, name, updated_by, updated_at) VALUES (3, 'ui', 'UI', 'Josh', 1)");
   const set = new ReviewSet(db);
   set.ensureBuiltIns(3);
@@ -281,12 +348,38 @@ test('run order, panels and hand-offs: saved, checked, rendered, and told to the
   assert.equal(set.list(3).filter((x) => x.stage === 'work')[1].slug, 'look');
   assert.match(set.versions(3, 'look')[0].note, /^Run order: after Taste A$/);
   assert.throws(() => set.move(3, 'alone', 'up', 'Josh'), /already first/);
-  e = set.save(3, 'look', { on_fail: [{ after: 1, to: 'taste-ref' }, { after: 3, to: 'person' }] }, 'Josh', 'x');
+  e = set.save(
+    3,
+    'look',
+    {
+      on_fail: [
+        { after: 1, to: 'taste-ref' },
+        { after: 3, to: 'person' },
+      ],
+    },
+    'Josh',
+    'x',
+  );
   assert.match(renderEntry(e), /^on_fail: taste-ref after 1 fail, person after 3 fails$/m);
   assert.match(renderEntry(set.get(3, 'taste-a')!), /^panel: Taste$/m);
   assert.throws(() => set.save(3, 'look', { on_fail: [{ after: 2, to: 'nobody' }] }, 'Josh', 'x'), /isn't in this scheme's review set/);
   assert.throws(() => set.save(3, 'look', { on_fail: [{ after: 2, to: 'look' }] }, 'Josh', 'x'), /to itself/);
-  assert.throws(() => set.save(3, 'look', { on_fail: [{ after: 3, to: 'person' }, { after: 2, to: 'professor' }] }, 'Josh', 'x'), /rising/);
+  assert.throws(
+    () =>
+      set.save(
+        3,
+        'look',
+        {
+          on_fail: [
+            { after: 3, to: 'person' },
+            { after: 2, to: 'professor' },
+          ],
+        },
+        'Josh',
+        'x',
+      ),
+    /rising/,
+  );
   assert.throws(() => set.save(3, 'look', { panel: 'x'.repeat(41) }, 'Josh', 'x'), /1 to 40/);
   assert.equal(set.save(3, 'taste-b', { panel: '  ' } as any, 'Josh', 'x').panel, null, 'an empty panel is none');
 });
@@ -327,10 +420,20 @@ test('the run backfill (#1095): history from critic logs sorts before live runs,
   set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 1, verdict: 'pass' }, t0 + 30 * 86_400_000);
   set.recordVerdict(3, 'ui', { person: 'Josh', words: 'Too loose', ticketId: 40, minion: '#40' }, t0 + 31 * 86_400_000);
   const logs = [
-    { project: 3, scheme: 'Peek Auras', log: '3/shared/40/critic.md', ticketId: 40, minion: '#40', runs: [
-      { slug: 'ui', round: 1, verdict: 'fail', at: t0 }, { slug: 'ui', round: 2, verdict: 'ask', at: t0 + 60_000 },
-      { slug: 'professor', round: 2, verdict: 'pass', at: t0 + 61_000 }, { slug: 'gone', round: 1, verdict: 'pass', at: t0 }],
-      verdicts: [{ slug: 'ui', person: 'Cara', words: 'Ship as is', at: t0 + 120_000 }] },
+    {
+      project: 3,
+      scheme: 'Peek Auras',
+      log: '3/shared/40/critic.md',
+      ticketId: 40,
+      minion: '#40',
+      runs: [
+        { slug: 'ui', round: 1, verdict: 'fail', at: t0 },
+        { slug: 'ui', round: 2, verdict: 'ask', at: t0 + 60_000 },
+        { slug: 'professor', round: 2, verdict: 'pass', at: t0 + 61_000 },
+        { slug: 'gone', round: 1, verdict: 'pass', at: t0 },
+      ],
+      verdicts: [{ slug: 'ui', person: 'Cara', words: 'Ship as is', at: t0 + 120_000 }],
+    },
     { project: 3, scheme: 'Peek Auras', log: '3/shared/project/design/x/critic.md', ticketId: null, minion: 'design: x', runs: [{ slug: 'ui', round: 1, verdict: 'pass', at: t0 - 86_400_000 }], verdicts: [] },
   ];
   const settings = new Map<string, unknown>();
@@ -342,10 +445,26 @@ test('the run backfill (#1095): history from critic logs sorts before live runs,
   assert.equal(set.get(3, 'professor')!.kind, 'teacher', "a teacher run brings the kit's professor onto the page, as opening it would");
   assert.deepEqual(set.holds(3, 40), [], "an old log's ask doesn't hold the minion's ship: its live pass is what counts");
   const ui = set.record(3).get(set.get(3, 'ui')!.id)!;
-  assert.deepEqual(ui.runs.map((r) => [r.minion, r.round, r.verdict, r.disagreed]), [['design: x', 1, 'pass', false], ['#40', 1, 'fail', false], ['#40', 2, 'ask', true], ['#40', 1, 'pass', true]], 'by date, the live run last; the run before the person spoke is amber');
+  assert.deepEqual(
+    ui.runs.map((r) => [r.minion, r.round, r.verdict, r.disagreed]),
+    [
+      ['design: x', 1, 'pass', false],
+      ['#40', 1, 'fail', false],
+      ['#40', 2, 'ask', true],
+      ['#40', 1, 'pass', true],
+    ],
+    'by date, the live run last; the run before the person spoke is amber',
+  );
   assert.deepEqual([ui.firsts, ui.passes], [3, 2]);
   assert.equal(set.record(3).get(set.get(3, 'professor')!.id)!.passes, 1);
-  assert.deepEqual(set.verdicts(3).get(set.get(3, 'ui')!.id)!.map((v) => v.words), ['Too loose', 'Ship as is'], "newest first by date, so a log's old verdict sits under today's");
+  assert.deepEqual(
+    set
+      .verdicts(3)
+      .get(set.get(3, 'ui')!.id)!
+      .map((v) => v.words),
+    ['Too loose', 'Ship as is'],
+    "newest first by date, so a log's old verdict sits under today's",
+  );
   // Once: a second start adds nothing, and a direct second pass finds every log already in.
   assert.deepEqual(backfillRuns(store, logs), []);
   const count = () => (db.prepare("SELECT count(*) AS n FROM review_runs WHERE source = 'backfill'").get() as { n: number }).n;
@@ -353,7 +472,24 @@ test('the run backfill (#1095): history from critic logs sorts before live runs,
   assert.match(set.backfill(logs)[0], /^Peek Auras: 0 runs and 0 verdicts from 0 logs; 3 already in/);
   assert.equal(count(), 4);
   // A bad row rolls the whole import back.
-  assert.throws(() => set.backfill([{ project: 3, scheme: 'Peek Auras', log: 'l', ticketId: 1, minion: '#1', runs: [{ slug: 'ui', round: 1, verdict: 'pass', at: 1 }, { slug: 'ui', round: 0, verdict: 'pass', at: 2 }], verdicts: [] }]), /bad run/);
+  assert.throws(
+    () =>
+      set.backfill([
+        {
+          project: 3,
+          scheme: 'Peek Auras',
+          log: 'l',
+          ticketId: 1,
+          minion: '#1',
+          runs: [
+            { slug: 'ui', round: 1, verdict: 'pass', at: 1 },
+            { slug: 'ui', round: 0, verdict: 'pass', at: 2 },
+          ],
+          verdicts: [],
+        },
+      ]),
+    /bad run/,
+  );
   assert.equal(count(), 4);
 });
 
@@ -369,7 +505,11 @@ test('src/review-backfill.json: every run is well formed and in date order per l
     assert.equal(new Set(rounds).size, rounds.length, `${l.log}: a critic round twice`);
     // A verdict lands only beside its log's runs of that entry, so the "already in" check keeps a replay from doubling it.
     for (const v of l.verdicts) assert.ok(Number.isInteger(v.at) && l.runs.some((r: { slug: string }) => r.slug === v.slug), `${l.log} ${JSON.stringify(v)}`);
-    assert.deepEqual(l.runs.map((r: { at: number }) => r.at), l.runs.map((r: { at: number }) => r.at).sort((a: number, b: number) => a - b), l.log);
+    assert.deepEqual(
+      l.runs.map((r: { at: number }) => r.at),
+      l.runs.map((r: { at: number }) => r.at).sort((a: number, b: number) => a - b),
+      l.log,
+    );
   }
 });
 
@@ -387,7 +527,10 @@ test("a teacher's record counts every round after its fix, not just first rounds
   set.save(3, 'critic', { gate: 'block', on_fail: [{ after: 2, to: 'prof' }] }, 'Josh', 'x');
   set.recordRun(3, 'critic', { ticketId: 91, minion: '#91', round: 3, verdict: 'fail' });
   set.recordRun(3, 'prof', { ticketId: 91, minion: '#91', round: 3, verdict: 'pass' });
-  assert.deepEqual(set.holds(3, 91).map((x) => x.slug), ['critic']);
+  assert.deepEqual(
+    set.holds(3, 91).map((x) => x.slug),
+    ['critic'],
+  );
 });
 
 test("a blocking entry's fail is lifted by a later pass from what judges in its place: its panel's referee or its hand-off", () => {
@@ -400,10 +543,18 @@ test("a blocking entry's fail is lifted by a later pass from what judges in its 
   set.recordRun(3, 'taste-ref', { ticketId: 40, minion: '#40', round: 1, verdict: 'pass' });
   set.recordRun(3, 'layout', { ticketId: 40, minion: '#40', round: 1, verdict: 'fail' });
   set.recordRun(3, 'copy', { ticketId: 40, minion: '#40', round: 1, verdict: 'fail' });
-  assert.deepEqual(set.holds(3, 40).map((h) => h.slug), ['layout', 'copy'], 'a pass from before the fail lifts nothing');
+  assert.deepEqual(
+    set.holds(3, 40).map((h) => h.slug),
+    ['layout', 'copy'],
+    'a pass from before the fail lifts nothing',
+  );
   set.recordRun(3, 'taste-ref', { ticketId: 40, minion: '#40', round: 1, verdict: 'pass' });
   set.recordRun(3, 'tone', { ticketId: 41, minion: '#41', round: 2, verdict: 'pass' });
-  assert.deepEqual(set.holds(3, 40).map((h) => h.slug), ['copy'], "the referee's merged pass governs the panel; another minion's hand-off pass doesn't count");
+  assert.deepEqual(
+    set.holds(3, 40).map((h) => h.slug),
+    ['copy'],
+    "the referee's merged pass governs the panel; another minion's hand-off pass doesn't count",
+  );
   set.recordRun(3, 'tone', { ticketId: 40, minion: '#40', round: 2, verdict: 'pass' });
   assert.deepEqual(set.holds(3, 40), [], 'the hand-off passed it');
 });
@@ -413,7 +564,18 @@ test("hand-offs to an entry switched off drop out of the rubric, and a kit revie
   set.ensureBuiltIns(3);
   set.create(3, { slug: 'copy', name: 'Copy' }, 'Josh');
   set.create(3, { slug: 'tone', name: 'Tone' }, 'Josh');
-  set.save(3, 'copy', { on_fail: [{ after: 1, to: 'tone' }, { after: 3, to: 'person' }] }, 'Josh', 'x');
+  set.save(
+    3,
+    'copy',
+    {
+      on_fail: [
+        { after: 1, to: 'tone' },
+        { after: 3, to: 'person' },
+      ],
+    },
+    'Josh',
+    'x',
+  );
   set.save(3, 'tone', { enabled: false }, 'Josh', 'x');
   const dir = join(root, 'dangling');
   renderSet(set.list(3), dir, new Map());
@@ -431,7 +593,11 @@ test("people's verdicts: recorded by a minion, an amber dot, read by the next ru
   set.recordRun(3, 'ui', { ticketId: 41, minion: '#41', round: 1, verdict: 'fail' });
   const v = set.recordVerdict(3, 'ui', { person: 'Josh', words: 'The tight spacing there is on purpose.', ticketId: 40, minion: '#40' }, Date.UTC(2026, 10, 19));
   const runs = set.record(3).get(e.id)!.runs;
-  assert.deepEqual(runs.map((r) => r.disagreed), [true, false], "only that minion's run turns amber");
+  assert.deepEqual(
+    runs.map((r) => r.disagreed),
+    [true, false],
+    "only that minion's run turns amber",
+  );
   const verdicts = set.verdicts(3);
   assert.equal(verdicts.get(e.id)![0].words, 'The tight spacing there is on purpose.');
   const text = renderEntry(e, { verdicts: verdicts.get(e.id) });
@@ -450,7 +616,7 @@ test("people's verdicts: recorded by a minion, an amber dot, read by the next ru
 
 test("the requester's words: off by default, the minion's first message in the brief when on", () => {
   const { db, set } = fresh();
-  db.exec("CREATE TABLE events (id INTEGER PRIMARY KEY, ticket_id INTEGER, kind TEXT, data TEXT)");
+  db.exec('CREATE TABLE events (id INTEGER PRIMARY KEY, ticket_id INTEGER, kind TEXT, data TEXT)');
   db.prepare('INSERT INTO events (ticket_id, kind, data) VALUES (?, ?, ?)').run(40, 'note', '{}');
   db.prepare('INSERT INTO events (ticket_id, kind, data) VALUES (?, ?, ?)').run(40, 'user_message', JSON.stringify({ author: 'Cara', text: 'Make the tree glow.\nSoftly.' }));
   db.prepare('INSERT INTO events (ticket_id, kind, data) VALUES (?, ?, ?)').run(40, 'user_message', JSON.stringify({ author: 'Josh', text: 'Later words' }));
@@ -467,11 +633,14 @@ test("the describe agent may change a scheme entry's gate, panel and hand-offs, 
   const { set } = fresh();
   set.ensureBuiltIns(3);
   set.create(3, { slug: 'ui', name: 'UI', body: '# UI' }, 'Josh');
-  const reply = JSON.stringify({ note: 'ok', edits: [
-    { slug: 'ui', settings: { panel: 'Taste', on_fail: [{ after: 1, to: 'person' }], gate: 'advise' }, why: 'Panel' },
-    { slug: 'finding-checker', settings: { gate: 'block' } },
-    { slug: 'ui', body: 'second edit of the same entry is dropped' },
-  ] });
+  const reply = JSON.stringify({
+    note: 'ok',
+    edits: [
+      { slug: 'ui', settings: { panel: 'Taste', on_fail: [{ after: 1, to: 'person' }], gate: 'advise' }, why: 'Panel' },
+      { slug: 'finding-checker', settings: { gate: 'block' } },
+      { slug: 'ui', body: 'second edit of the same entry is dropped' },
+    ],
+  });
   const { proposals } = readProposals(reply, set.list(3));
   assert.equal(proposals.length, 1, 'a settings-only edit of a kit entry proposes nothing');
   assert.deepEqual(proposals[0].settings, { gate: 'advise', panel: 'Taste', on_fail: [{ after: 1, to: 'person' }] });
@@ -484,7 +653,21 @@ test("the describe agent may change a scheme entry's gate, panel and hand-offs, 
 test('a critic hands a second fail to its teacher entry: the file keeps the step, the teacher says kind and has no column', () => {
   const { set } = fresh();
   set.create(9, { slug: 'art-teacher', name: 'Art teacher', kind: 'teacher', body: '# Fixes\n\nChange the generator, never the PNG.', triggers: {}, stage: 'work' }, 'Cara');
-  set.create(9, { slug: 'art', name: 'Art', kind: 'critic', triggers: { creative: 'new art' }, stage: 'work', on_fail: [{ after: 2, to: 'art-teacher' }, { after: 3, to: 'person' }] }, 'Cara');
+  set.create(
+    9,
+    {
+      slug: 'art',
+      name: 'Art',
+      kind: 'critic',
+      triggers: { creative: 'new art' },
+      stage: 'work',
+      on_fail: [
+        { after: 2, to: 'art-teacher' },
+        { after: 3, to: 'person' },
+      ],
+    },
+    'Cara',
+  );
   const dir = join(root, 'teacher-set');
   assert.equal(renderSet(set.list(9), dir), 2);
   assert.match(readFileSync(join(dir, 'art.md'), 'utf8'), /\non_fail: art-teacher after 2 fails, person after 3 fails\n/);
@@ -513,11 +696,14 @@ test("a scheme's agent files: kind from name, description or kind:, one entry ea
   writeFileSync(join(dir, 'tuner.md'), '---\ndescription: Tunes\nkind: checker\n---\nCheck.\n');
   writeFileSync(join(dir, 'notes.txt'), 'not an agent');
   const files = readAgentFiles(repo);
-  assert.deepEqual(files.map((f) => [f.slug, f.kind, f.path, f.description]), [
-    ['shader-critic', 'critic', '.claude/agents/Shader_Critic.md', 'Judges shaders'],
-    ['art-professor', 'teacher', '.claude/agents/art-professor.md', 'Teaches art fixes'],
-    ['tuner', 'checker', '.claude/agents/tuner.md', 'Tunes'],
-  ]);
+  assert.deepEqual(
+    files.map((f) => [f.slug, f.kind, f.path, f.description]),
+    [
+      ['shader-critic', 'critic', '.claude/agents/Shader_Critic.md', 'Judges shaders'],
+      ['art-professor', 'teacher', '.claude/agents/art-professor.md', 'Teaches art fixes'],
+      ['tuner', 'checker', '.claude/agents/tuner.md', 'Tunes'],
+    ],
+  );
   assert.equal(files[0].text.trim(), 'You judge shaders.');
   assert.deepEqual(readAgentFiles(null), []);
   assert.deepEqual(readAgentFiles(join(root, 'no-such-repo')), []);
@@ -527,7 +713,14 @@ test("a scheme's agent files: kind from name, description or kind:, one entry ea
   set.ensureAgents(3, files);
   set.ensureAgents(3, files);
   const own = set.list(3).filter((e) => e.source?.startsWith('agent:'));
-  assert.deepEqual(own.map((e) => [e.slug, e.kind, e.source]), [['shader-critic', 'critic', 'agent:.claude/agents/Shader_Critic.md'], ['tuner', 'checker', 'agent:.claude/agents/tuner.md']], 'once each; the same-named entry stays the scheme\'s');
+  assert.deepEqual(
+    own.map((e) => [e.slug, e.kind, e.source]),
+    [
+      ['shader-critic', 'critic', 'agent:.claude/agents/Shader_Critic.md'],
+      ['tuner', 'checker', 'agent:.claude/agents/tuner.md'],
+    ],
+    "once each; the same-named entry stays the scheme's",
+  );
   assert.throws(() => set.save(3, 'shader-critic', { kind: 'reviewer' }, 'Josh', 'x'), /agent file \.claude\/agents\/Shader_Critic\.md/);
   set.save(3, 'shader-critic', { body: 'Look at banding.' }, 'Josh', 'Edited by hand');
   set.save(3, 'tuner', { enabled: false }, 'Josh', 'Turned off');
@@ -548,7 +741,18 @@ test("a scheme's agent files: kind from name, description or kind:, one entry ea
   assert.equal(set.get(3, 'tuner')!.kind, 'teacher');
   // A critic's hand-off to a repo teacher that's on stays in its rubric; back on trial, a repo blocker only advises.
   set.save(3, 'tuner', { enabled: true }, 'Josh', 'On');
-  set.create(3, { slug: 'look', name: 'Look', on_fail: [{ after: 2, to: 'tuner' }, { after: 3, to: 'person' }] }, 'Josh');
+  set.create(
+    3,
+    {
+      slug: 'look',
+      name: 'Look',
+      on_fail: [
+        { after: 2, to: 'tuner' },
+        { after: 3, to: 'person' },
+      ],
+    },
+    'Josh',
+  );
   renderSet(set.list(3), join(root, 'agents-set'));
   assert.match(readFileSync(join(root, 'agents-set', 'look.md'), 'utf8'), /on_fail: tuner after 2 fails, person after 3 fails/);
   set.save(3, 'shader-critic', { gate: 'block' }, 'Josh', 'Blocks');
@@ -564,11 +768,21 @@ test('lessons (#1158): a kind refuted 3 times with no 30-day gap reaches the rev
   set.recordRefutes(3, { ...by, refuted: [{ kind: 'Missing build step.', why: 'the repo has no build step: Node runs the TypeScript' }] }, t0);
   set.recordRefutes(3, { ...by, refuted: [{ kind: 'missing  build step', why: 'the repo has no build step: Node runs the TypeScript' }] }, t0 + 10 * day);
   assert.deepEqual(set.lessons(3, t0 + 11 * day), [], 'two refutes make no lesson');
-  assert.deepEqual(set.lessons(3, t0 + 11 * day, true).map((l) => [l.kind, l.count]), [['missing build step', 2]], 'the same words count together');
+  assert.deepEqual(
+    set.lessons(3, t0 + 11 * day, true).map((l) => [l.kind, l.count]),
+    [['missing build step', 2]],
+    'the same words count together',
+  );
   // One minion's review counts once per kind: three findings on one diff, or its later rounds, are one hit.
   set.recordRefutes(3, { ticketId: 7, minion: '#7', refuted: [1, 2, 3].map(() => ({ kind: 'untested helper', why: 'the helper is tested through its caller' })) }, t0 + 10 * day);
   set.recordRefutes(3, { ticketId: 7, minion: '#7', refuted: [{ kind: 'untested helper', why: 'the helper is tested through its caller' }] }, t0 + 10 * day);
-  assert.deepEqual(set.lessons(3, t0 + 11 * day, true).map((l) => [l.kind, l.count]), [['missing build step', 2], ['untested helper', 1]]);
+  assert.deepEqual(
+    set.lessons(3, t0 + 11 * day, true).map((l) => [l.kind, l.count]),
+    [
+      ['missing build step', 2],
+      ['untested helper', 1],
+    ],
+  );
   set.removeLesson(3, 'untested helper');
   set.recordRefutes(3, { ...by, refuted: [{ kind: 'missing build step', why: 'there is no build: package.json has no build script' }] }, t0 + 20 * day);
   const [l] = set.lessons(3, t0 + 21 * day);
@@ -590,7 +804,10 @@ test('lessons (#1158): a kind refuted 3 times with no 30-day gap reaches the rev
   assert.equal(set.lessons(3, t0 + 50 * day).length, 1);
   assert.deepEqual(set.lessons(3, t0 + 51 * day, true), [], 'expired after 30 days without a hit');
   set.recordRefutes(3, { ...by, refuted: [{ kind: 'missing build step', why: 'the repo has no build step at all' }] }, t0 + 60 * day);
-  assert.deepEqual(set.lessons(3, t0 + 60 * day, true).map((l) => l.count), [1]);
+  assert.deepEqual(
+    set.lessons(3, t0 + 60 * day, true).map((l) => l.count),
+    [1],
+  );
 
   // Never "don't look at X"; bad input refused whole.
   assert.throws(() => set.recordRefutes(3, { ...by, refuted: [{ kind: 'unused helper', why: "Don't flag helpers in tools/" }] }), /a fact about the repo/);
@@ -624,7 +841,10 @@ test('RV3: a changed `when` moves the column only when the entry sat where its o
 
 test('RV4: an agent file that is gone, or set to kind: none, is left out of what the turn is told', () => {
   const { set } = fresh();
-  const files = [{ path: '.claude/agents/auditor.md', slug: 'auditor', description: 'audits', kind: 'critic', text: '' }, { path: '.claude/agents/judge.md', slug: 'judge', description: 'judges', kind: 'critic', text: '' }];
+  const files = [
+    { path: '.claude/agents/auditor.md', slug: 'auditor', description: 'audits', kind: 'critic', text: '' },
+    { path: '.claude/agents/judge.md', slug: 'judge', description: 'judges', kind: 'critic', text: '' },
+  ];
   set.ensureAgents(3, files);
   set.create(3, { slug: 'own', name: 'Own' }, 'Cara');
   const all = set.list(3);
@@ -643,10 +863,14 @@ test('RV8: removing a person\'s verdict clears "a person disagreed" on its run, 
   set.recordRun(3, 'ui', { ticketId: 40, minion: '#40', round: 1, verdict: 'fail' });
   const a = set.recordVerdict(3, 'ui', { person: 'Josh', words: 'Too loose', ticketId: 40, minion: '#40' });
   const b = set.recordVerdict(3, 'ui', { person: 'Cara', words: 'Too tight', ticketId: 40, minion: '#40' });
-  const amber = () => set.record(3).get(set.get(3, 'ui')!.id)!.runs.map((r) => r.disagreed);
+  const amber = () =>
+    set
+      .record(3)
+      .get(set.get(3, 'ui')!.id)!
+      .runs.map((r) => r.disagreed);
   assert.deepEqual(amber(), [true]);
   set.removeVerdict(3, 'ui', a.id);
-  assert.deepEqual(amber(), [true], 'Cara\'s verdict still stands');
+  assert.deepEqual(amber(), [true], "Cara's verdict still stands");
   set.removeVerdict(3, 'ui', b.id);
   assert.deepEqual(amber(), [false]);
   // A later run of the same minion doesn't hide which run the verdict marked.

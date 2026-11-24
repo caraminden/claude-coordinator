@@ -6,13 +6,13 @@
  * one); a person, text or number key offers the values its minions carry.
  */
 export function filterChoices(keys, tickets) {
-  return keys.filter((k) => k.status === 'active').map((k) => ({
-    key: k.key,
-    values: k.value_kind === 'enum'
-      ? k.values.filter((v) => v.status === 'active').map((v) => v.value)
-      : [...new Set(tickets.flatMap((t) => [t.properties?.[k.key] ?? []].flat()))]
-          .sort((a, b) => (typeof a === 'number' ? a - b : String(a).localeCompare(String(b)))),
-  })).filter((c) => c.values.length);
+  return keys
+    .filter((k) => k.status === 'active')
+    .map((k) => ({
+      key: k.key,
+      values: k.value_kind === 'enum' ? k.values.filter((v) => v.status === 'active').map((v) => v.value) : [...new Set(tickets.flatMap((t) => [t.properties?.[k.key] ?? []].flat()))].sort((a, b) => (typeof a === 'number' ? a - b : String(a).localeCompare(String(b)))),
+    }))
+    .filter((c) => c.values.length);
 }
 
 /** Whether a minion matches the ticked values: any ticked value of a key, for every key with ticks. */

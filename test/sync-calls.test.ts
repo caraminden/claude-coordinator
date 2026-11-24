@@ -27,7 +27,8 @@ export function code(text: string): string {
   let i = 0;
   let last = ''; // the last code character that isn't a space: whether a `/` starts a regex or divides
   while (i < text.length) {
-    const c = text[i], n = text[i + 1];
+    const c = text[i],
+      n = text[i + 1];
     if (c === '/' && n === '/') {
       while (i < text.length && text[i] !== '\n') i++;
     } else if (c === '/' && n === '*') {
@@ -37,14 +38,21 @@ export function code(text: string): string {
       i = stop;
     } else if (c === "'" || c === '"' || c === '`' || (c === '/' && (last === '' || /[(,=:[!&|?{};+\-*%<>~^]/.test(last)))) {
       // A string ends at its quote (a plain one also at the line's end); a regex also skips its [classes].
-      let j = i + 1, inClass = false;
+      let j = i + 1,
+        inClass = false;
       for (; j < text.length; j++) {
         const d = text[j];
-        if (d === '\\') { j++; continue; }
+        if (d === '\\') {
+          j++;
+          continue;
+        }
         if (d === '\n' && c !== '`') break;
         if (c === '/' && d === '[') inClass = true;
         else if (c === '/' && d === ']') inClass = false;
-        else if (d === c && !inClass) { j++; break; }
+        else if (d === c && !inClass) {
+          j++;
+          break;
+        }
       }
       out += text.slice(i, j);
       last = c;
@@ -99,20 +107,29 @@ test('no new blocking file or process call in server.ts or src/ (#1463)', () => 
     const what = [...new Set(kinds[file])].map((c) => c.slice(0, -1)).join(', ');
     over.push(`${file}: ${n} blocking calls, ${may} allowed (${what})${procs ? `; ${procs} start a process` : ''}`);
   }
-  assert.deepEqual(over, [], `${over.join('\n')}\n\nThe server has one thread, and a blocking call holds all of it. Use the async way: ` +
-    "node:fs/promises (readFile, stat, readdir, rm, writeFile, mkdir) for files, and execFile through promisify(execFile) or spawn for processes. " +
-    'Only code that never runs on the server\'s thread once it listens (boot before listen, a worker, a child process) may raise its number in test/sync-calls.json, with the why in the commit.');
+  assert.deepEqual(
+    over,
+    [],
+    `${over.join('\n')}\n\nThe server has one thread, and a blocking call holds all of it. Use the async way: ` +
+      'node:fs/promises (readFile, stat, readdir, rm, writeFile, mkdir) for files, and execFile through promisify(execFile) or spawn for processes. ' +
+      "Only code that never runs on the server's thread once it listens (boot before listen, a worker, a child process) may raise its number in test/sync-calls.json, with the why in the commit.",
+  );
 });
 
 test('the counter skips comments and classes, and counts each call', () => {
-  assert.deepEqual(syncCalls([
-    "const a = readFileSync('x'); // statSync(y) in a comment",
-    '/** existsSync(z) in a doc comment',
-    ' * spans lines rmSync(q) */ execFileSync(\'git\');',
-    "const db = new DatabaseSync(':memory:'); const u = 'https://x.y/z'; mkdirSync(d);",
-    // #1463's review: a `/*` in a string, a comment or a regex once hid the rest of a file.
-    "route('/api/relay/:to/*rest', () => statSync(a)); // public/ui/*.d.ts",
-    'const re = /a\\/*b/; const g = /[/*]/g; const t = `/* ${x}`; existsSync(e);',
-    'rmSync(r); const half = a / 2; // writeFileSync(no)',
-  ].join('\n')), ['readFileSync(', 'execFileSync(', 'mkdirSync(', 'statSync(', 'existsSync(', 'rmSync(']);
+  assert.deepEqual(
+    syncCalls(
+      [
+        "const a = readFileSync('x'); // statSync(y) in a comment",
+        '/** existsSync(z) in a doc comment',
+        " * spans lines rmSync(q) */ execFileSync('git');",
+        "const db = new DatabaseSync(':memory:'); const u = 'https://x.y/z'; mkdirSync(d);",
+        // #1463's review: a `/*` in a string, a comment or a regex once hid the rest of a file.
+        "route('/api/relay/:to/*rest', () => statSync(a)); // public/ui/*.d.ts",
+        'const re = /a\\/*b/; const g = /[/*]/g; const t = `/* ${x}`; existsSync(e);',
+        'rmSync(r); const half = a / 2; // writeFileSync(no)',
+      ].join('\n'),
+    ),
+    ['readFileSync(', 'execFileSync(', 'mkdirSync(', 'statSync(', 'existsSync(', 'rmSync('],
+  );
 });

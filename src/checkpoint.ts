@@ -71,7 +71,11 @@ if (!isMainThread && workerData?.checkpoint) {
           // Not yet: only make what's in the WAL safe from a power cut, as the checkpoint's own fsync did.
           // Closing this fd is safe, unlike one on -shm or the database: SQLite takes no locks on the -wal file.
           const fd = openSync(`${paths[i]}-wal`, 'r');
-          try { fsyncSync(fd); } finally { closeSync(fd); }
+          try {
+            fsyncSync(fd);
+          } finally {
+            closeSync(fd);
+          }
           return;
         }
         db.exec('PRAGMA wal_checkpoint(PASSIVE)');

@@ -22,12 +22,16 @@ function selectors(css: string): string[] {
 /** Splits at `sep` outside any brackets or parentheses. */
 function splitTop(s: string, sep: string): string[] {
   const parts: string[] = [];
-  let depth = 0, from = 0;
+  let depth = 0,
+    from = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (c === '(' || c === '[') depth++;
     else if (c === ')' || c === ']') depth--;
-    else if (c === sep && depth === 0) { parts.push(s.slice(from, i)); from = i + 1; }
+    else if (c === sep && depth === 0) {
+      parts.push(s.slice(from, i));
+      from = i + 1;
+    }
   }
   parts.push(s.slice(from));
   return parts;
@@ -36,7 +40,9 @@ function splitTop(s: string, sep: string): string[] {
 /** A complex selector as [compound, combinator, compound, …]; the combinator is ' ', '>', '+' or '~'. */
 function compounds(sel: string): string[] {
   const out: string[] = [];
-  let depth = 0, cur = '', comb = '';
+  let depth = 0,
+    cur = '',
+    comb = '';
   for (const c of sel.trim()) {
     if (c === '(' || c === '[') depth++;
     if (c === ')' || c === ']') depth--;
@@ -45,7 +51,10 @@ function compounds(sel: string): string[] {
       else if (!comb) comb = ' ';
       continue;
     }
-    if (comb && cur) { out.push(cur, comb === ' ' || /\s/.test(comb) ? ' ' : comb); cur = ''; }
+    if (comb && cur) {
+      out.push(cur, comb === ' ' || /\s/.test(comb) ? ' ' : comb);
+      cur = '';
+    }
     comb = '';
     cur += c;
   }
@@ -55,14 +64,18 @@ function compounds(sel: string): string[] {
 
 /** The compound with every functional pseudo-class (`:not()`, `:nth-child()`, `:is()` …) cut out, and the arguments
  *  of each `:is()` / `:where()` it held. */
-function cutFunctions(compound: string): { rest: string, groups: string[] } {
+function cutFunctions(compound: string): { rest: string; groups: string[] } {
   let s = compound;
   const groups: string[] = [];
   for (;;) {
     const at = s.search(/::?[a-z-]+\(/);
     if (at < 0) return { rest: s.replace(/::?[a-z-]+/g, ''), groups };
-    let i = s.indexOf('(', at), depth = 0;
-    for (; i < s.length; i++) { if (s[i] === '(') depth++; else if (s[i] === ')' && --depth === 0) break; }
+    let i = s.indexOf('(', at),
+      depth = 0;
+    for (; i < s.length; i++) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')' && --depth === 0) break;
+    }
     if (/^:(is|where)\(/.test(s.slice(at))) groups.push(s.slice(s.indexOf('(', at) + 1, i));
     s = s.slice(0, at) + s.slice(i + 1);
   }
@@ -73,7 +86,12 @@ function cutFunctions(compound: string): { rest: string, groups: string[] } {
 function narrows(compound: string): boolean {
   const { rest, groups } = cutFunctions(compound);
   if (/^[a-zA-Z]|[.#[]/.test(rest)) return true;
-  return groups.some((g) => splitTop(g, ',').every((branch) => { const c = compounds(branch); return narrows(c[c.length - 1]); }));
+  return groups.some((g) =>
+    splitTop(g, ',').every((branch) => {
+      const c = compounds(branch);
+      return narrows(c[c.length - 1]);
+    }),
+  );
 }
 
 /** The costly shape: a `:has()` in an ancestor or parent compound, and a subject with nothing to filter on. */
@@ -90,8 +108,7 @@ function costlyHas(sel: string): boolean {
   return false;
 }
 
-const sheets = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-  e.isDirectory() ? sheets(join(dir, e.name)) : e.name.endsWith('.css') ? [join(dir, e.name)] : []);
+const sheets = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sheets(join(dir, e.name)) : e.name.endsWith('.css') ? [join(dir, e.name)] : []));
 
 test('the checker flags the four rules that cost 20 ms, and passes their rewrites', () => {
   for (const bad of [
@@ -104,7 +121,8 @@ test('the checker flags the four rules that cost 20 ms, and passes their rewrite
     'body:has(.split) *::before',
     '.panel:has(.flag) > :nth-child(2)',
     '.panel:has(.flag) > :is(*, .row)',
-  ]) assert.ok(costlyHas(bad), `flags ${bad}`);
+  ])
+    assert.ok(costlyHas(bad), `flags ${bad}`);
   for (const ok of [
     '.artifacts-main > .ticket-head:has(> .settings-tabs) ~ :not(.ticket-head)',
     '.artifacts-main > :has(~ .ticket-head > .settings-tabs)',
@@ -117,7 +135,8 @@ test('the checker flags the four rules that cost 20 ms, and passes their rewrite
     '.qcard.answered .tile:not(:has(.opt.picked))',
     '.foo:has(.x) + *',
     '.panel:has(.flag) > :is(.row, .head):nth-child(2)',
-  ]) assert.ok(!costlyHas(ok), `passes ${ok}`);
+  ])
+    assert.ok(!costlyHas(ok), `passes ${ok}`);
 });
 
 test('no stylesheet puts :has() before a child or descendant with nothing to filter on', () => {
@@ -125,7 +144,12 @@ test('no stylesheet puts :has() before a child or descendant with nothing to fil
   for (const file of sheets(PUBLIC)) {
     for (const sel of selectors(readFileSync(file, 'utf8'))) if (costlyHas(sel)) found.push(`${relative(ROOT, file)}: ${sel}`);
   }
-  assert.deepEqual(found, [], 'A :has() before `> *`, ` *` or `> :not(…)` makes every node added anywhere on the page cost ' +
-    'about 20 ms of style (#1534). Give the child a class (`X:has(…) > .row`), use the siblings around the one that ' +
-    'decides (`X > .tabs ~ *`, `X > :has(~ .tabs)`), or set a class from the code that knows. Found:\n' + found.join('\n'));
+  assert.deepEqual(
+    found,
+    [],
+    'A :has() before `> *`, ` *` or `> :not(…)` makes every node added anywhere on the page cost ' +
+      'about 20 ms of style (#1534). Give the child a class (`X:has(…) > .row`), use the siblings around the one that ' +
+      'decides (`X > .tabs ~ *`, `X > :has(~ .tabs)`), or set a class from the code that knows. Found:\n' +
+      found.join('\n'),
+  );
 });

@@ -85,7 +85,10 @@ test('scrubber: a Start pin comes in, the clip opens there, and pins go out thro
   // The End pin at 1 s, before the Start: the Start goes, and both changes are reported.
   await page.eval(`s.seek(1)`);
   await click(page, '.cui-scrub-pin ~ .cui-scrub-pin');
-  assert.deepEqual(await page.eval('log'), [['start', null], ['end', 1000]]);
+  assert.deepEqual(await page.eval('log'), [
+    ['start', null],
+    ['end', 1000],
+  ]);
   assert.deepEqual(await page.eval(`[...document.querySelectorAll('.cui-scrub-pins text')].map((t) => t.textContent)`), ['End 0:01']);
 
   // S on the seek bar pins the Start at the playhead; the part draws it at once and stores nothing else.
@@ -122,7 +125,7 @@ test('panner: a wide picture pans and the slider looks around; reduced motion st
   await page.eval(`(() => { const i = new Image(); i.src = '/media/panorama.svg'; box.append(i); window.p = panner(i); })()`);
   await waitFor(page, 'the panorama to load and move', `p.el.querySelector('.cui-pan-view').scrollLeft > 5`);
   assert.equal(await page.eval(`p.el.classList.contains('cui-pan-fits')`), false);
-  assert.equal(await page.eval(`p.img.offsetHeight === p.el.querySelector('.cui-pan-view').clientHeight`), true, 'the page\'s img { height: auto } leaves it the box\'s height');
+  assert.equal(await page.eval(`p.img.offsetHeight === p.el.querySelector('.cui-pan-view').clientHeight`), true, "the page's img { height: auto } leaves it the box's height");
   await page.eval(`p.look(1)`);
   assert.equal(await page.eval(`(() => { const v = p.el.querySelector('.cui-pan-view'); return Math.abs(v.scrollLeft - (v.scrollWidth - v.clientWidth)) <= 1; })()`), true, 'look(1) is the right end');
   assert.equal(await page.eval(`p.el.querySelector('.cui-pan-bar .cui-btn').getAttribute('aria-label')`), 'Pan', 'looking pauses');
@@ -155,10 +158,10 @@ test('lightbox: a wide picture shows whole unless the app opts in to panning', {
   await page.eval(`lb.destroy(); box.replaceChildren(); window.lb = lightbox([{ src: '/media/panorama.svg', pan: 'ltr' }], { into: box, pan: false })`);
   await waitFor(page, 'the picture to load', `document.querySelector('.cui-lb-stage img')?.complete`);
   await frames(page, 5);
-  assert.equal(await page.eval(`!!document.querySelector('.cui-panner')`), false, 'pan: false beats an item\'s pan');
+  assert.equal(await page.eval(`!!document.querySelector('.cui-panner')`), false, "pan: false beats an item's pan");
 });
 
-test('lightbox: ←/→ step and wrap, the app hears of a person\'s move but not of its own go(); keys in a field stay there', { skip }, async () => {
+test("lightbox: ←/→ step and wrap, the app hears of a person's move but not of its own go(); keys in a field stay there", { skip }, async () => {
   const page = await browser.page(app.base, { width: 700, height: 600 });
   await page.eval(`window.lb = lightbox([{ src: '/media/screen-1.svg' }, { src: clip, kind: 'video' }, { src: '/media/screen-2.svg', caption: 'Minions' }],
     { into: box, onChange: (i) => log.push(i) })`);
@@ -166,7 +169,7 @@ test('lightbox: ←/→ step and wrap, the app hears of a person\'s move but not
   await press(page, 'ArrowRight');
   assert.equal(await page.eval('lb.at'), 1);
   assert.equal(await page.eval(`!!document.querySelector('.cui-lb-stage .cui-scrubber')`), true, 'a clip gets the scrubber');
-  assert.equal(await page.eval(`getComputedStyle(document.querySelector('.cui-lb-next svg')).color`), 'rgb(255, 255, 255)', 'the page\'s button { color: inherit } leaves the arrow white on its scrim');
+  assert.equal(await page.eval(`getComputedStyle(document.querySelector('.cui-lb-next svg')).color`), 'rgb(255, 255, 255)', "the page's button { color: inherit } leaves the arrow white on its scrim");
   await press(page, 'ArrowLeft');
   await press(page, 'ArrowLeft');
   assert.equal(await page.eval('lb.at'), 2, 'wraps round');
@@ -196,22 +199,45 @@ test('panner: once pans one leg and reports progress and the end; onPause hears 
   await page.eval(PAN(`{ pan: 'ltr', once: true, duration: 400, onLeg: (n) => log.push(['leg', n]), onProgress: (f) => log.push(['p', f]), onPause: (b) => log.push(['pause', b]) }`));
   await waitFor(page, 'the leg to end', `log.some((e) => e[0] === 'leg')`);
   await frames(page);
-  assert.deepEqual((await page.eval<unknown[][]>('log')).filter((e) => e[0] === 'leg'), [['leg', 1]], 'once: one leg, once');
+  assert.deepEqual(
+    (await page.eval<unknown[][]>('log')).filter((e) => e[0] === 'leg'),
+    [['leg', 1]],
+    'once: one leg, once',
+  );
   const ps = (await page.eval<unknown[][]>('log')).filter((e) => e[0] === 'p').map((e) => e[1] as number);
   assert.equal(ps.at(-1), 1);
-  assert.deepEqual([...ps].sort((a, b) => a - b), ps, 'progress only climbs within the leg');
+  assert.deepEqual(
+    [...ps].sort((a, b) => a - b),
+    ps,
+    'progress only climbs within the leg',
+  );
   assert.equal(await page.eval(`p.el.querySelector('.cui-pan-bar .cui-btn').getAttribute('aria-label')`), 'Pan', 'it stops at the end');
   assert.equal(await page.eval(`(() => { const v = p.el.querySelector('.cui-pan-view'); return Math.abs(v.scrollLeft - (v.scrollWidth - v.clientWidth)) <= 1; })()`), true);
-  assert.equal((await page.eval<unknown[][]>('log')).some((e) => e[0] === 'pause'), false, 'the part\'s own stop is not a person\'s Pause');
+  assert.equal(
+    (await page.eval<unknown[][]>('log')).some((e) => e[0] === 'pause'),
+    false,
+    "the part's own stop is not a person's Pause",
+  );
 
   await page.eval(`log.length = 0; p.play(); p.pause()`);
-  assert.deepEqual(await page.eval('log'), [], 'the app\'s play() and pause() stay quiet');
+  assert.deepEqual(await page.eval('log'), [], "the app's play() and pause() stay quiet");
   await click(page, '.cui-pan-bar .cui-btn');
   await click(page, '.cui-pan-bar .cui-btn');
-  assert.deepEqual((await page.eval<unknown[][]>('log')).filter((e) => e[0] === 'pause'), [['pause', false], ['pause', true]], 'Pan then Pause');
+  assert.deepEqual(
+    (await page.eval<unknown[][]>('log')).filter((e) => e[0] === 'pause'),
+    [
+      ['pause', false],
+      ['pause', true],
+    ],
+    'Pan then Pause',
+  );
   await page.eval(`log.length = 0; p.play()`);
   await page.eval(`p.el.querySelector('.cui-pan-view').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`);
-  assert.deepEqual((await page.eval<unknown[][]>('log')).filter((e) => e[0] === 'pause'), [['pause', true]], 'a press on the picture pauses, and says so once');
+  assert.deepEqual(
+    (await page.eval<unknown[][]>('log')).filter((e) => e[0] === 'pause'),
+    [['pause', true]],
+    'a press on the picture pauses, and says so once',
+  );
 });
 
 test('panner: fits and onFit say whether the picture shows whole; the overlay sits over it, above the bar', { skip }, async () => {
@@ -264,20 +290,24 @@ test('scrubber: pinKeys move or drop the pin keys, and the tooltip names only th
   assert.deepEqual(await off.eval('log'), []);
 });
 
-test('scrubber: onUser hears a person\'s play, pause and seek, never the app\'s own', { skip }, async () => {
+test("scrubber: onUser hears a person's play, pause and seek, never the app's own", { skip }, async () => {
   const page = await clipPage(`{ onUser: (kind, sec) => log.push([kind, sec == null ? null : Math.round(sec)]) }`);
   await page.eval(`s.seek(3); s.toggle(); s.toggle()`);
-  assert.deepEqual(await page.eval('log'), [], 'the app\'s own calls are quiet');
+  assert.deepEqual(await page.eval('log'), [], "the app's own calls are quiet");
   await click(page, '.cui-scrub-play');
   await click(page, '.cui-scrub-play');
   await page.eval(`(() => { const r = document.querySelector('.cui-scrub-range'); r.value = '5'; r.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  assert.deepEqual(await page.eval('log'), [['play', null], ['pause', null], ['seek', 5]]);
+  assert.deepEqual(await page.eval('log'), [
+    ['play', null],
+    ['pause', null],
+    ['seek', 5],
+  ]);
 });
 
 // #963: the clip's own play and pause events redraw the buttons, swapping their icons. A press that began on an icon
 // swapped before the release made no click at all, so a person's Pause was lost now and then (and this file's
 // two-click test above with it, in CI).
-test('scrubber: a click counts when the button\'s icon is redrawn between the press and the release', { skip }, async () => {
+test("scrubber: a click counts when the button's icon is redrawn between the press and the release", { skip }, async () => {
   const page = await clipPage(`{ onUser: (kind) => log.push(kind) }`);
   const { x, y } = await page.centre('.cui-scrub-play');
   assert.equal(await page.eval(`document.elementFromPoint(${x}, ${y}).className`), 'cui-scrub-play', 'the press lands on the button, not its icon');
@@ -295,15 +325,21 @@ test('scrubber: Play after the end goes back to the Start pin when there is no E
   await page.eval(`s.toggle()`);
 });
 
-test('tap targets: the panner\'s Look around and the scrubber\'s seek bar are at least 24 px (desktop) and 40 px (phone) tall', { skip }, async () => {
-  for (const [width, min] of [[900, 24], [390, 40]]) {
+test("tap targets: the panner's Look around and the scrubber's seek bar are at least 24 px (desktop) and 40 px (phone) tall", { skip }, async () => {
+  for (const [width, min] of [
+    [900, 24],
+    [390, 40],
+  ]) {
     const page = await browser.page(app.base, { width, height: 800 });
     await page.eval(`(() => { const v = document.createElement('video'); v.src = clip; box.append(v); window.s = scrubber(v); box.append(s.el); })()`);
     const pan = await browser.page(app.base, { width, height: 800 });
     await pan.eval(PAN(`{}`));
     await waitFor(pan, 'the panorama to load', `p.img.complete && !p.fits`);
     const h = [await pan.eval<number>(`document.querySelector('.cui-pan-look').getBoundingClientRect().height`), await page.eval<number>(`document.querySelector('.cui-scrub-range').getBoundingClientRect().height`)];
-    assert.ok(h.every((x) => x >= min), `${width}px wide: ${h} ≥ ${min}`);
+    assert.ok(
+      h.every((x) => x >= min),
+      `${width}px wide: ${h} ≥ ${min}`,
+    );
   }
 });
 

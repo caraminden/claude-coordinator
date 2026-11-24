@@ -13,7 +13,7 @@ const root = mkdtempSync(join(tmpdir(), 'architecture-'));
 after(() => rmSync(root, { recursive: true, force: true })); // timing-ok: own temp dir
 const rows = (store: Store, id: number) => store.schedules.list(id).filter((s) => s.template === 'architecture');
 
-test('every scheme gets the check once, a deleted one stays deleted, and Citadel\'s hand-written row is adopted, not doubled', () => {
+test("every scheme gets the check once, a deleted one stays deleted, and Citadel's hand-written row is adopted, not doubled", () => {
   const store = new Store(join(root, 'db1.sqlite'));
   const citadel = store.createProject('Citadel', null);
   const other = store.createProject('Theory of Crafting', null);
@@ -50,14 +50,24 @@ test('an inactive scheme skips at no cost; an active one runs', async () => {
   const busy = store.createProject('Busy', null);
   const made: string[] = [];
   const runs = new ScheduledRuns({
-    store, by: 'Citadel', dataDir: '/data', held: undefined as any, broadcast: () => {},
-    newMinion: async (project, m, by) => { made.push(`${project.name}:${m.title}`); const t = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'bypassPermissions', created_by: by }); return { id: t.id, number: t.number! }; },
+    store,
+    by: 'Citadel',
+    dataDir: '/data',
+    held: undefined as any,
+    broadcast: () => {},
+    newMinion: async (project, m, by) => {
+      made.push(`${project.name}:${m.title}`);
+      const t = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'bypassPermissions', created_by: by });
+      return { id: t.id, number: t.number! };
+    },
     runner: { emit() {}, send() {}, limitWait: () => null, netWait: () => null, killWait: () => null } as any,
   } as any);
   addArchitectureChecks(store, '/data');
   // The window opens at the row's making: put that a day back so minions made in the same millisecond still count.
   store.db.prepare('UPDATE schedules SET created_at = created_at - 86400000').run();
-  const mk = (id: number, n: number) => { for (let i = 0; i < n; i++) store.createTicket({ project_id: id, title: 'work', permission_mode: 'bypassPermissions', created_by: 'Cara' }); };
+  const mk = (id: number, n: number) => {
+    for (let i = 0; i < n; i++) store.createTicket({ project_id: id, title: 'work', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+  };
   mk(quiet.id, 19);
   mk(busy.id, 20);
   const later = Date.now() + 1000;

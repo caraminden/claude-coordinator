@@ -5,7 +5,8 @@ import { waitFam, waitShows, waitWords } from './wait.js';
 
 /** Rows that need you first (longest waiting at the top), then working, then waiting elsewhere, then parked until woken, then parked. */
 export function byUrgency(a, b, usage, now = Date.now()) {
-  const sa = rowState(a, usage, now), sb = rowState(b, usage, now);
+  const sa = rowState(a, usage, now),
+    sb = rowState(b, usage, now);
   if (sa.rank !== sb.rank) return sa.rank - sb.rank;
   return sa.rank === 0 ? (sa.since ?? a.updated_at) - (sb.since ?? b.updated_at) : b.updated_at - a.updated_at;
 }
@@ -87,8 +88,10 @@ function baseState(t, usage, now) {
   // screen readers. A wait on someone else keeps their name ("Josh 2h"), and a mention its "@": they say who, not what.
   const waited = (who = '') => `${who ? `${who} ` : ''}${shortAgo(t.updated_at, now)}`;
   // An approval is its assignee's to answer, as the server's Needs you counts it (src/inbox.ts).
-  if (t.approvals) { const who = cardFor(null, t);
-    return isYou(who) ? { rank: 0, fam: 'you', cell: waited(), label: 'Answer needed: approve or deny' } : { rank: 2, fam: 'wait', cell: waited(who), label: `Waiting on ${who} to approve or deny` }; }
+  if (t.approvals) {
+    const who = cardFor(null, t);
+    return isYou(who) ? { rank: 0, fam: 'you', cell: waited(), label: 'Answer needed: approve or deny' } : { rank: 2, fam: 'wait', cell: waited(who), label: `Waiting on ${who} to approve or deny` };
+  }
   // A minion parked on start_after is new (it hasn't run) but not working (#261).
   const by = workingBy(t);
   // Gone quiet (#906; Cara picked "Running blue, dot stopped", 2026-11-17): no output well past its usual gap (src/quiet.ts).
@@ -217,10 +220,13 @@ export function span(ms) {
 export function rowWhy(t, st, now = Date.now()) {
   const at = (ms) => `${pacific(ms, now)}, ${span(now - ms)} ago`;
   const lines = [];
-  let more = null, link = null;
-  const card = cardsYours(t)[0] ?? t.open_cards?.[0], w = t.status !== 'closed' && !st.quiet ? t.wait : null;
+  let more = null,
+    link = null;
+  const card = cardsYours(t)[0] ?? t.open_cards?.[0],
+    w = t.status !== 'closed' && !st.quiet ? t.wait : null;
   if (st.quiet) {
-    const a = t.activity, tool = a.tool;
+    const a = t.activity,
+      tool = a.tool;
     lines.push(`No output for ${span(now - a.at)}, since ${pacific(a.at, now)}.`);
     if (tool) {
       const over = tool.limit && now > tool.started + tool.limit ? `, now ${span(now - tool.started - tool.limit)} past it` : '';
@@ -256,14 +262,23 @@ export function askWhy(item, t, now = Date.now()) {
   const card = item.card ?? {};
   const what = card.notice ? 'notice' : card.doc ? 'choices page' : card.secret ? 'secret' : item.kind;
   switch (item.kind) {
-    case 'approval': return `An approval card since ${since}: its turn waits on it. Approvals count even while the minion is sealed.`;
-    case 'question': case 'plan': return `A ${what} card for you since ${since}. It leaves once someone answers it.`;
-    case 'spend': return `This turn passed $${card.stage} at ${since}. It leaves once someone answers the alert.`;
-    case 'quiet': return `No output from its turn since ${since}, well past its usual gap. You asked for it, so it shows here until the turn talks again or ends.`;
-    case 'loop': return `The loop guard has held ${card.n === 1 ? 'a message' : `${card.n} messages`} since ${since} ("${card.text}"). Continue in its chat sends ${card.n === 1 ? 'it' : 'them'}.`;
-    case 'mention': return `${card.by} mentioned you at ${since}: "${card.text}". It leaves once you open its chat.`;
-    case 'replies': return `It offered one-tap replies at ${since} and waits for a go. It stops counting once you open it.`;
-    default: return `Answer needed since ${since}.`;
+    case 'approval':
+      return `An approval card since ${since}: its turn waits on it. Approvals count even while the minion is sealed.`;
+    case 'question':
+    case 'plan':
+      return `A ${what} card for you since ${since}. It leaves once someone answers it.`;
+    case 'spend':
+      return `This turn passed $${card.stage} at ${since}. It leaves once someone answers the alert.`;
+    case 'quiet':
+      return `No output from its turn since ${since}, well past its usual gap. You asked for it, so it shows here until the turn talks again or ends.`;
+    case 'loop':
+      return `The loop guard has held ${card.n === 1 ? 'a message' : `${card.n} messages`} since ${since} ("${card.text}"). Continue in its chat sends ${card.n === 1 ? 'it' : 'them'}.`;
+    case 'mention':
+      return `${card.by} mentioned you at ${since}: "${card.text}". It leaves once you open its chat.`;
+    case 'replies':
+      return `It offered one-tap replies at ${since} and waits for a go. It stops counting once you open it.`;
+    default:
+      return `Answer needed since ${since}.`;
   }
 }
 
@@ -289,9 +304,10 @@ export const EMPTY_TRACK = [[null, 'p']];
 export function rowBar(t, st) {
   if (st.rank === 0 || t.status === 'closed') return null;
   // Rank 1 is working: running, or new and not parked on start_after (#261); the Taskmaster's idle row has no rank.
-  const working = st.rank === 1, w = waitShows(t.wait) ? t.wait : null;
+  const working = st.rank === 1,
+    w = waitShows(t.wait) ? t.wait : null;
   // The plan's track and the wait together (#630): wait.js progressTrack draws the wait in the step underway.
-  if (w && (working || t.state === 'outside' || t.state === 'pending-deploy')) return { ...(working && t.steps), track: working ? t.step_track ?? null : null, wait: w };
+  if (w && (working || t.state === 'outside' || t.state === 'pending-deploy')) return { ...(working && t.steps), track: working ? (t.step_track ?? null) : null, wait: w };
   if (!working) return null;
   // Before its task list exists, one empty piece holds the line's room, so the row doesn't grow when the steps arrive (#696).
   if (!t.steps) return { track: EMPTY_TRACK };

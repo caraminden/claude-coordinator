@@ -21,7 +21,7 @@ import { LOOK } from './threadstate.js';
 const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status) && !t.server_work;
 const isParked = (t) => t.state === 'parked' && resting(t) && (t.status !== 'new' || !!t.parked_for);
 /** Deploying: pending-deploy, or dismissed with its change still on its way in a release (#764, `release` from releases.js). */
-const isDeploying = (t) => (t.state === 'pending-deploy' || (t.status === 'closed' && !!t.release)) && resting(t) || onMainDeploying(t);
+const isDeploying = (t) => ((t.state === 'pending-deploy' || (t.status === 'closed' && !!t.release)) && resting(t)) || onMainDeploying(t);
 /** The server is landing its change (server_work: line, rebase, tests, deploy, restart), nothing of its own is stuck: a failed land, a running turn or a waiting approval keeps it in its type (#1003). */
 const onMainDeploying = (t) => !!t.server_work && t.status !== 'closed' && !t.approvals && !['running', 'error'].includes(t.status) && !['live', 'failed'].includes(t.ship?.stage);
 /** Parked until something wakes it by itself (the server's wakes_on; a held start_after chain has none). */
@@ -42,20 +42,20 @@ export function threadSections(all, types, groups = [], deployOrder = () => unde
   const open = all.filter((t) => !isParked(t) && !isDeploying(t));
   const builds = [...new Set([...open, ...parkedInBuild].map(buildOf).filter(Boolean))].sort((a, b) => a - b);
   // Parked rows follow the active ones in their build.
-  const buildSection = (build, i) => ({ key: `build-${build}`, build, current: i === 0,
-    rows: [...open, ...parkedInBuild].filter((t) => buildOf(t) === build) });
+  const buildSection = (build, i) => ({ key: `build-${build}`, build, current: i === 0, rows: [...open, ...parkedInBuild].filter((t) => buildOf(t) === build) });
   const has = (t, group) => {
     const i = group.indexOf(':');
-    return [t.properties?.[group.slice(0, i).trim()]].flat().map(String).includes(group.slice(i + 1).trim());
+    return [t.properties?.[group.slice(0, i).trim()]]
+      .flat()
+      .map(String)
+      .includes(group.slice(i + 1).trim());
   };
   const loose = open.filter((t) => !buildOf(t));
   const promotedTo = new Map(loose.map((t) => [t, groups.find((g) => has(t, g))]));
   const promoted = groups.map((group, i) => ({ key: `group-${i}`, group, rows: loose.filter((t) => promotedTo.get(t) === group) }));
   const typeOf = (t) => (types.includes(t.properties?.type) ? t.properties.type : 'other');
   const kinds = types.map((type) => ({ key: type, type, rows: loose.filter((t) => !promotedTo.get(t) && typeOf(t) === type) }));
-  return [{ key: 'deploying', rows: deploying }, ...builds.slice(0, 1).map(buildSection), ...promoted, ...kinds, ...builds.slice(1).map((b, i) => buildSection(b, i + 1)),
-    { key: 'waiting', rows: parked.filter(wakesItself) }, { key: 'parked', rows: parked.filter((t) => !wakesItself(t)) }]
-    .filter((s) => s.rows.length);
+  return [{ key: 'deploying', rows: deploying }, ...builds.slice(0, 1).map(buildSection), ...promoted, ...kinds, ...builds.slice(1).map((b, i) => buildSection(b, i + 1)), { key: 'waiting', rows: parked.filter(wakesItself) }, { key: 'parked', rows: parked.filter((t) => !wakesItself(t)) }].filter((s) => s.rows.length);
 }
 
 /**

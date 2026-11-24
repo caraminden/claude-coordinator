@@ -5,7 +5,12 @@ import type { Store } from './db.ts';
 import { HttpError } from './http.ts';
 import { monthStart } from './openrouter.ts';
 
-export interface SpendInput { service: string; usd: number; units: number | null; note: string | null }
+export interface SpendInput {
+  service: string;
+  usd: number;
+  units: number | null;
+  note: string | null;
+}
 export interface SchemeBill {
   project_id: number;
   name: string;
@@ -47,20 +52,23 @@ export class OutsideSpend {
   /** One scheme's month: outside spend and OpenRouter's calls together, by service, most first. */
   month(projectId: number, now = Date.now()): Omit<SchemeBill, 'name'> {
     const since = monthStart(now);
-    const rows = this.store.db.prepare(`
+    const rows = this.store.db
+      .prepare(`
       SELECT service, SUM(usd) AS usd FROM (
         SELECT service, usd FROM outside_spend WHERE project_id = ? AND created_at >= ? AND created_at < ?
         UNION ALL
         SELECT 'openrouter', CASE status WHEN 'ok' THEN cost_usd WHEN 'failed' THEN 0 ELSE estimate_usd END
           FROM openrouter_calls WHERE project_id = ? AND created_at >= ? AND created_at < ?
-      ) GROUP BY service HAVING usd > 0 ORDER BY usd DESC, service`).all(projectId, since, monthEnd(now), projectId, since, monthEnd(now)) as { service: string; usd: number }[];
+      ) GROUP BY service HAVING usd > 0 ORDER BY usd DESC, service`)
+      .all(projectId, since, monthEnd(now), projectId, since, monthEnd(now)) as { service: string; usd: number }[];
     const services = rows.map((r) => ({ service: r.service, usd: round(r.usd) }));
     return { project_id: projectId, month_usd: round(services.reduce((s, r) => s + r.usd, 0)), cap_usd: this.store.getSetting<number | null>(capKey(projectId)) ?? null, services };
   }
 
   /** Every scheme with spend or a cap this month, biggest first. */
   bill(now = Date.now()): SchemeBill[] {
-    return this.store.listProjects()
+    return this.store
+      .listProjects()
       .map((p) => ({ name: p.name, ...this.month(p.id, now) }))
       .filter((b) => b.month_usd > 0 || b.cap_usd !== null)
       .sort((a, b) => b.month_usd - a.month_usd);
@@ -68,8 +76,7 @@ export class OutsideSpend {
 
   /** Book it. `over` is whether the month is at or past the cap; the warning goes out only the first time that month. */
   record(projectId: number, s: SpendInput, source: string, now = Date.now()) {
-    this.store.db.prepare('INSERT INTO outside_spend (project_id, service, usd, units, note, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(projectId, s.service, s.usd, s.units, s.note, source, now);
+    this.store.db.prepare('INSERT INTO outside_spend (project_id, service, usd, units, note, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(projectId, s.service, s.usd, s.units, s.note, source, now);
     const m = this.month(projectId, now);
     const over = m.cap_usd !== null && m.month_usd >= m.cap_usd;
     if (over && this.store.getSetting<number>(warnedKey(projectId)) !== monthStart(now)) {

@@ -68,10 +68,15 @@ document.getElementById('leave').onclick = () => { location.href = '/clean'; };
   // A 36 px chip on a 40 px phone control height: the loop stops before a critic is spent.
   '/chip': `${STYLE}<button class="chip" id="chip36" style="height:36px;border:0">filter</button>`,
   // A modal dialog (position: fixed, scrolling itself) whose head scrolls away, rebuilt from Peek's before #175.
-  ...Object.fromEntries(['static', 'sticky'].map((pos) => [`/modal-${pos}`, `${STYLE}
+  ...Object.fromEntries(
+    ['static', 'sticky'].map((pos) => [
+      `/modal-${pos}`,
+      `${STYLE}
 <dialog id="m" style="width:400px;max-height:300px;padding:0"><div style="display:flex;padding:8px;position:${pos};top:0;background:#fff">
 <h2 style="flex:1;margin:0;font-size:15px">Your PC</h2><button class="btn" aria-label="Close" id="x">✕</button></div><div style="height:900px">body</div></dialog>
-<script>document.getElementById('m').showModal()</script>`])),
+<script>document.getElementById('m').showModal()</script>`,
+    ]),
+  ),
 };
 
 let server: Server;
@@ -93,7 +98,11 @@ const has = (fs: any[], check: string, selector: string) => fs.some((f) => f.che
 
 test('a clean page has no findings at either width', { skip }, async () => {
   const r = await measure(opts('/clean'));
-  assert.deepEqual(r.pages.map((p: any) => p.findings), [[], []], JSON.stringify(r.pages.map((p: any) => p.findings)));
+  assert.deepEqual(
+    r.pages.map((p: any) => p.findings),
+    [[], []],
+    JSON.stringify(r.pages.map((p: any) => p.findings)),
+  );
   assert.equal(r.ok, true);
   assert.equal(r.pages[0].truncated[0].full_text_in, 'data-tip-overflow');
 });
@@ -115,7 +124,7 @@ test('each planted defect is found, with its numbers', { skip }, async () => {
   assert.ok(has(desk, 'close-scrolls', '#close'));
   assert.equal(desk.find((f: any) => f.check === 'bare-link' && f.selector === '#bare')?.text, 'https://x.io/a');
   assert.ok(has(desk, 'bare-link', '#tipped'));
-  assert.ok(has(desk, 'bare-link', '#tipwrap'), 'a link inside to somewhere else does not make the tooltip\'s address clickable');
+  assert.ok(has(desk, 'bare-link', '#tipwrap'), "a link inside to somewhere else does not make the tooltip's address clickable");
   assert.equal(r.ok, false);
 });
 
@@ -127,9 +136,15 @@ test('--ignore drops a finding and counts it', { skip }, async () => {
 
 test('--click flags a click that disables the other controls, not one that shows its result', { skip }, async () => {
   const bad = at(await measure(opts('/clicks', { widths: [1440], click: '#bad' })), 1440);
-  assert.ok(bad.some((f: any) => f.check === 'click-froze' && f.disabled?.length === 2), JSON.stringify(bad));
+  assert.ok(
+    bad.some((f: any) => f.check === 'click-froze' && f.disabled?.length === 2),
+    JSON.stringify(bad),
+  );
   const good = at(await measure(opts('/clicks', { widths: [1440], click: '#good' })), 1440);
-  assert.deepEqual(good.filter((f: any) => f.selector === '#good'), []);
+  assert.deepEqual(
+    good.filter((f: any) => f.selector === '#good'),
+    [],
+  );
 });
 
 test("a modal dialog's ✕ that scrolls away is found, and a pinned one isn't", { skip }, async () => {
@@ -169,10 +184,17 @@ test('a shot settles first: a spinner is frozen on its first frame and the point
         await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 385, y: 835 }); // hover the fixed button
         shots.push(readFileSync(await shot(page, join(tmpdir(), `uim-busy-${process.pid}-${i}.png`), { pointer: true })).toString('base64'));
         assert.equal(await page.evaluate(`document.getElementById('tip').offsetParent === null && getComputedStyle(document.getElementById('fade')).opacity`), '1');
-      } finally { await page.close(); }
+      } finally {
+        await page.close();
+      }
     }
-    assert.ok(shots.every((x) => x === shots[0]), 'three shots of the same view differ');
-  } finally { await browser.close(); }
+    assert.ok(
+      shots.every((x) => x === shots[0]),
+      'three shots of the same view differ',
+    );
+  } finally {
+    await browser.close();
+  }
 });
 
 test('sweep: false keeps --click to its one control, and shot() leaves a hover the flow asked for', { skip }, async () => {
@@ -186,7 +208,9 @@ test('sweep: false keeps --click to its one control, and shot() leaves a hover t
     await shot(page, join(tmpdir(), `uim-hover-${process.pid}.png`));
     assert.equal(await page.evaluate(`document.getElementById('tip').offsetParent !== null`), true);
     await page.close();
-  } finally { await browser.close(); }
+  } finally {
+    await browser.close();
+  }
 });
 
 test('the sweep lists the view before --click changes it', { skip }, async () => {

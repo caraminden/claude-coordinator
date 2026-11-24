@@ -23,7 +23,7 @@ test('storeName makes any artifact or file name one the store takes', () => {
   assert.equal(storeName('x'.repeat(200), 143).length, 143);
 });
 
-test('a mirror keeps an artifact once as its run\'s release, one file as itself and several as a .tar.gz, never past the caps, and retries a failure only after an hour', async () => {
+test("a mirror keeps an artifact once as its run's release, one file as itself and several as a .tar.gz, never past the caps, and retries a failure only after an hour", async () => {
   const store = new Store(join(root, 'm.db'));
   const p = store.createProject('Peek Auras', 'https://github.com/o/peek-auras');
   const data = join(root, 'data');
@@ -55,7 +55,7 @@ test('a mirror keeps an artifact once as its run\'s release, one file as itself 
   const [one] = rows(1);
   assert.deepEqual([one.name, one.kind, one.target, one.workflow, one.run_attempt, one.size, one.ref], ['Peek-Auras.exe', 'release', 'release', 'windows.yml', 2, 40, 'refs/heads/main']);
   assert.equal(one.sha256, createHash('sha256').update('x'.repeat(40)).digest('hex'));
-  assert.equal(one.created_at, Date.parse(run(1).created_at), 'filed at its run\'s time, so the rules order runs as they ran');
+  assert.equal(one.created_at, Date.parse(run(1).created_at), "filed at its run's time, so the rules order runs as they ran");
   assert.equal(readFileSync(ci.path(one), 'utf8'), 'x'.repeat(40));
 
   // Several files: one .tar.gz of them, as ci-upload.sh sends a folder.
@@ -64,7 +64,13 @@ test('a mirror keeps an artifact once as its run\'s release, one file as itself 
   await mirror.idle();
   const [two] = rows(2);
   assert.equal(two.name, 'peek-auras-sha2.tar.gz');
-  assert.deepEqual(execFileSync('tar', ['-tzf', ci.path(two)], { encoding: 'utf8' }).split('\n').filter((l) => /\.txt$/.test(l)).sort(), ['./a.txt', './sub/b.txt']);
+  assert.deepEqual(
+    execFileSync('tar', ['-tzf', ci.path(two)], { encoding: 'utf8' })
+      .split('\n')
+      .filter((l) => /\.txt$/.test(l))
+      .sort(),
+    ['./a.txt', './sub/b.txt'],
+  );
 
   // Over the caps by GitHub's own count: not even downloaded. Over them once downloaded: not kept.
   const before = got.length;
@@ -88,7 +94,11 @@ test('a mirror keeps an artifact once as its run\'s release, one file as itself 
   clock += 61 * 60_000;
   mirror.want(want(5, {}));
   await mirror.idle();
-  assert.deepEqual(rows(5).map((f) => f.name), ['ok.exe'], 'tried again after it');
+  assert.deepEqual(
+    rows(5).map((f) => f.name),
+    ['ok.exe'],
+    'tried again after it',
+  );
 
   // Once kept, never downloaded again, even after the store sweeps it.
   const n5 = got.length;
@@ -108,7 +118,10 @@ test('a mirror keeps an artifact once as its run\'s release, one file as itself 
 
   // No part folders left in any run's folder.
   const left = readdirSync(join(ci.dir(p.id), 'windows.yml'), { recursive: true }).map(String);
-  assert.deepEqual(left.filter((f) => f.includes('.part')), []);
+  assert.deepEqual(
+    left.filter((f) => f.includes('.part')),
+    [],
+  );
   assert.ok(!existsSync(join(ci.dir(p.id), 'windows.yml', '3-2')) && !existsSync(join(ci.dir(p.id), 'windows.yml', '4-2')), 'a refused run leaves no folder');
 });
 
@@ -118,7 +131,14 @@ test("a build mirror past its fifth run takes the place of the oldest, which the
   const q = store.createProject('Delve', 'https://github.com/o/delve');
   const ci = new CiStore(store, join(root, 'bdata'), undefined, { ...RULES, fileBytes: 1000, schemeBytes: 2500 });
   const clock = Date.now();
-  const mirror = new CiMirror(ci, async (_w: Want, dir: string) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'app.apk'), 'x'.repeat(100)); }, () => clock);
+  const mirror = new CiMirror(
+    ci,
+    async (_w: Want, dir: string) => {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'app.apk'), 'x'.repeat(100));
+    },
+    () => clock,
+  );
   const run = (id: number): Run => ({ id, name: 'android', workflow_id: 1, head_branch: 'main', head_sha: 'a'.repeat(40), status: 'completed', conclusion: 'success', created_at: new Date(clock - (100 - id) * 60_000).toISOString(), run_attempt: 1 });
   const want = (id: number): Want => ({ project: p, slug: 'o/peek-auras', run: run(id), artifact: { id, name: `apk-${id}`, expired: false, size_in_bytes: 100 }, workflow: 'android.yml', kind: 'build', target: 'android', done: () => {} });
   // Delve has six runs of a build: its oldest is due to go by the rules (buildRuns 5) whenever the daily sweep comes.
@@ -127,16 +147,29 @@ test("a build mirror past its fifth run takes the place of the oldest, which the
   const warn = console.warn;
   console.warn = (...a: unknown[]) => void warned.push(a.join(' '));
   try {
-    for (let id = 1; id <= 7; id++) { mirror.want(want(id)); await mirror.idle(); }
-  } finally { console.warn = warn; }
-  const runs = store.ciFiles(p.id).map((f) => f.run_id).sort((a, b) => a - b);
+    for (let id = 1; id <= 7; id++) {
+      mirror.want(want(id));
+      await mirror.idle();
+    }
+  } finally {
+    console.warn = warn;
+  }
+  const runs = store
+    .ciFiles(p.id)
+    .map((f) => f.run_id)
+    .sort((a, b) => a - b);
   assert.deepEqual(runs, [3, 4, 5, 6, 7], `each newer run is kept and the oldest past five goes: ${warned.join('; ')}`);
   assert.deepEqual(warned, []);
 
   // Over the scheme's cap, where only pushing out another file would fit it: refused, and the log says that, not "full".
   store.putCiFile({ project_id: p.id, workflow: 'big.yml', run_id: 1, run_attempt: 1, name: 'big.zip', sha: 'b'.repeat(40), ref: '', kind: 'report', target: '', size: 2100, sha256: '', created_at: clock });
   console.warn = (...a: unknown[]) => void warned.push(a.join(' '));
-  try { mirror.want(want(8)); await mirror.idle(); } finally { console.warn = warn; }
+  try {
+    mirror.want(want(8));
+    await mirror.idle();
+  } finally {
+    console.warn = warn;
+  }
   assert.equal(store.ciFiles(p.id).filter((f) => f.run_id === 8).length, 0);
   assert.match(warned.join('\n'), /would push out another file/);
 });

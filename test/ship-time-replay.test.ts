@@ -31,7 +31,11 @@ test('3 days of 12 ships each keep the 8 slowest per day, slowest first', () => 
     const rows = t.ships.filter((s) => s.at >= noon(day) && s.at < noon(day) + 60_000);
     assert.equal(rows.length, 8, `day ${day} keeps 8`);
     const took = rows.map((s) => s.took);
-    assert.deepEqual(took, [...took].sort((a, b) => b - a), 'slowest first');
+    assert.deepEqual(
+      took,
+      [...took].sort((a, b) => b - a),
+      'slowest first',
+    );
     assert.equal(Math.min(...took), 100 + 4 * 10 + d, 'the 4 fastest were dropped');
   }
 });
@@ -45,5 +49,8 @@ test('a deploy of an app that is no longer registered gives no app row; a regist
   for (const name of ['alive', 'gone']) {
     store.addContraptionDeploy({ name, from_sha: 'a'.repeat(40), to_sha: 'b'.repeat(40), by: 'josh', started_at: noon(DAYS[1]) - 60_000, finished_at: noon(DAYS[1]), outcome: 'deployed', stages: '{}', changes: '[]' });
   }
-  assert.deepEqual(shipTargets(store, DAYS, p.id).map((t) => t.key), ['app:alive']);
+  assert.deepEqual(
+    shipTargets(store, DAYS, p.id).map((t) => t.key),
+    ['app:alive'],
+  );
 });

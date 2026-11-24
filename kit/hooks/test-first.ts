@@ -12,8 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { failedTests, mask, testRuns } from './retro-log.ts';
 import type { HookInput } from './hook-input.ts';
 
-export const REMINDER =
-  '[citadel test-first] Logic or bug work: write the failing test first and see it red (citadel:test-quality, citadel:bug-fixing); refactors, config and UI skip this. Self-review later runs new tests against the base and flags any that pass there.';
+export const REMINDER = '[citadel test-first] Logic or bug work: write the failing test first and see it red (citadel:test-quality, citadel:bug-fixing); refactors, config and UI skip this. Self-review later runs new tests against the base and flags any that pass there.';
 
 const CODE = /\.(?:[cm]?[jt]s|rs|py|cs|go|java|kt|gd|c|cc|cpp|h|hpp|swift|rb|sh|ps1|lua|php|scala|zig)$/;
 const TEST = /(?:^|\/)(?:test|tests|__tests__|spec|testdata|fixtures)\/|(?:\.(?:test|spec)|[-_]test)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]*\.py$|_test\.(?:py|go)$|Tests?\.cs$|(?:^|\/)tests?\.rs$/;

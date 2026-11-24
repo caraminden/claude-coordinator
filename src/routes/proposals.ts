@@ -30,7 +30,10 @@ const APPROVAL_POLL_MS = 25_000;
 
 export const proposalRoutes: Route[] = [
   {
-    method: 'POST', path: '/api/tickets/:ticket/plans', who: ['self'], refuse: 'Only the minion or Taskmaster itself can propose a plan in its chat',
+    method: 'POST',
+    path: '/api/tickets/:ticket/plans',
+    who: ['self'],
+    refuse: 'Only the minion or Taskmaster itself can propose a plan in its chat',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const { id } = ticket;
@@ -45,7 +48,10 @@ export const proposalRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/machine-notes', who: ['minion'], refuse: 'Only the minion itself can propose a machine\'s notes in its chat',
+    method: 'POST',
+    path: '/api/tickets/:ticket/machine-notes',
+    who: ['minion'],
+    refuse: "Only the minion itself can propose a machine's notes in its chat",
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const { store } = app;
@@ -60,7 +66,7 @@ export const proposalRoutes: Route[] = [
       // As a turn of this minion's gets it (src/runner.ts): lent to this scheme, and someone's own only on its owner's ask.
       if (!machine || !lendsMachine(store, machine, project, asker === null ? [] : [asker])) throw new HttpError(404, `No machine called ${name} that this minion gets`);
       if (notes === machine.notes) throw new HttpError(400, `Those are already ${name}'s notes`);
-      const owner = machine.owner_id === null ? null : store.getUser(machine.owner_id)?.name ?? null;
+      const owner = machine.owner_id === null ? null : (store.getUser(machine.owner_id)?.name ?? null);
       const event = postPlan(app, ticket.id, {
         summary: `New notes for ${name}`,
         plan: notes,
@@ -72,7 +78,10 @@ export const proposalRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/machine-lend', who: ['self'], refuse: 'Only the minion or Taskmaster itself can propose machine lending in its chat',
+    method: 'POST',
+    path: '/api/tickets/:ticket/machine-lend',
+    who: ['self'],
+    refuse: 'Only the minion or Taskmaster itself can propose machine lending in its chat',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const { store } = app;
@@ -113,17 +122,27 @@ export const proposalRoutes: Route[] = [
       if (!lines.length) throw new HttpError(400, `Nothing to change: ${name} already ${Object.keys(change).length ? 'has all of that' : 'is as it is; name what should change'}`);
       const after = lendAfter(change, now, project.id);
       const was = view.projects.includes(project.id);
-      const owner = machine.owner_id === null ? null : store.getUser(machine.owner_id)?.name ?? null;
+      const owner = machine.owner_id === null ? null : (store.getUser(machine.owner_id)?.name ?? null);
       const event = postPlan(app, ticket.id, {
         summary: change.here === false && was ? `Take ${name} from ${project.name}` : change.here && !was ? `Lend ${name} to ${project.name}` : `Change what ${name} lends`,
-        plan: [...lines, '', view.managed === false ? 'It goes on lending what its own command line says.' : `After this it lends: ${after.server ? `the ${after.server} MCP server; ` : ''}${after.workspaces.length ? `workspaces ${after.workspaces.join(', ')}` : 'no workspaces'}.`, ...(why ? ['', `Why: ${why}`] : []), '', `[${name} on the Machines page](${page})`].join('\n'),
+        plan: [
+          ...lines,
+          '',
+          view.managed === false ? 'It goes on lending what its own command line says.' : `After this it lends: ${after.server ? `the ${after.server} MCP server; ` : ''}${after.workspaces.length ? `workspaces ${after.workspaces.join(', ')}` : 'no workspaces'}.`,
+          ...(why ? ['', `Why: ${why}`] : []),
+          '',
+          `[${name} on the Machines page](${page})`,
+        ].join('\n'),
         machineLend: { id: machine.id, name, owner, scheme, change, lines, after, why, page },
       });
       return json(res, 201, { id: JSON.parse(event.data).id, href: cardHref(ticket, event.id), owner, page });
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/host-tool', who: ['minion'], refuse: 'Only the minion itself can propose a host tool in its chat',
+    method: 'POST',
+    path: '/api/tickets/:ticket/host-tool',
+    who: ['minion'],
+    refuse: 'Only the minion itself can propose a host tool in its chat',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       // propose_host_tool (#1147; Josh, 2026-11-19): a card showing the exact install; only a member of the Citadel scheme approves it.
@@ -145,7 +164,10 @@ export const proposalRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/release-key', who: ['self'], refuse: 'Only the minion or Taskmaster itself can ask for a release key in its chat',
+    method: 'POST',
+    path: '/api/tickets/:ticket/release-key',
+    who: ['self'],
+    refuse: 'Only the minion or Taskmaster itself can ask for a release key in its chat',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       // make_release_key (#837; Cara, 2026-11-17, "Both"): a card a member approves, which makes the key on the server.
@@ -161,7 +183,10 @@ export const proposalRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/verdict', who: ['person'], refuse: 'Only people approve plans',
+    method: 'POST',
+    path: '/api/tickets/:ticket/verdict',
+    who: ['person'],
+    refuse: 'Only people approve plans',
     async handler(ctx) {
       const { req, res, app, session, ticket } = ctx;
       const { id } = ticket;
@@ -183,9 +208,27 @@ export const proposalRoutes: Route[] = [
       const notes = body.verdict === 'approve' ? null : (fixed || ins) && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
       if (card.status === 'withdrawn') throw new HttpError(409, 'Its minion withdrew this card: nothing to answer');
       if (card.status === 'dismissed') throw new HttpError(409, `${card.by} dismissed this card`);
-      if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : ml ? `A newer proposal for ${ml.name}'s lending replaced this one` : card.releaseKey ? 'A newer card for this key replaced this one' : card.hostTool ? `A newer proposal for ${card.hostTool.package} replaced this one` : 'A newer plan replaced this one');
+      if (card.status === 'superseded')
+        throw new HttpError(
+          409,
+          card.machine
+            ? `A newer proposal for ${card.machine.name}'s notes replaced this one`
+            : ml
+              ? `A newer proposal for ${ml.name}'s lending replaced this one`
+              : card.releaseKey
+                ? 'A newer card for this key replaced this one'
+                : card.hostTool
+                  ? `A newer proposal for ${card.hostTool.package} replaced this one`
+                  : 'A newer plan replaced this one',
+        );
       if (ins && card.status !== 'pending') throw new HttpError(409, `${card.by} already ${card.status === 'approved' ? 'saved' : card.status === 'rejected' ? 'cancelled' : 'sent back'} this edit`);
-      if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : ml ? 'this change' : card.hostTool ? 'this tool' : card.memory ? 'this memory tidy' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
+      if (card.status !== 'pending')
+        throw new HttpError(
+          409,
+          fixed
+            ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : ml ? 'this change' : card.hostTool ? 'this tool' : card.memory ? 'this memory tidy' : 'this key'}`
+            : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`,
+        );
       // One answer per card: the key, the notes and the install each take time (keytool, a write) before the card says "approved",
       // so a second click in that gap would run them again after the first one's answer. Held until the card's new status is readable.
       if (deciding.has(event.id)) throw new HttpError(409, `${card.by}'s card is being answered right now`);
@@ -234,38 +277,43 @@ export const proposalRoutes: Route[] = [
         store.setEventData(event.id, { ...card, ...result });
         runner.emit(id, 'plan_result', { id: card.id, ...result });
         runner.echoOverlordAnswer(ticket, session.name, `${card.summary}\n→ ${notes === null ? (ins ? 'Saved anyway' : 'Approved') : body.verdict === 'reject' ? `Cancelled${notes ? `: ${notes}` : ''}` : `Sent back${notes ? `: ${notes}` : ''}`}`, undefined, session.uid);
-        deliverAnswer(app, id, session.name, ins
-          ? notes === null
-            ? 'Saved anyway: your instructions edit is saved as it was, beside what already said it.'
-            : body.verdict === 'reject'
-              ? `Cancelled: your instructions edit is dropped and nothing was saved. Don't make it again unless asked.${notes ? `\n\n${notes}` : ''}`
-              : `Work it in: nothing was saved. Put your change where the card shows it is already said, or reword it to point there in a few words, then call edit_instructions again.${notes ? `\n\n${notes}` : ''}`
-          : card.hostTool
-          ? notes === null
-            ? card.hostTool.source === 'pacman'
-              ? `Approved: ${toolLabel(card.hostTool)} goes in the host tools list. You get a message saying who runs the install.`
-              : `Approved: ${toolLabel(card.hostTool)} is installing on the server now (\`${card.hostTool.command}\`). You get a message once it's in. Keep working on what doesn't depend on it.`
-            : `Rejected installing ${toolLabel(card.hostTool)}; nothing was installed.${notes ? `\n\n${notes}` : ''}`
-          : card.releaseKey
-          ? notes === null
-            ? `Approved: ${card.releaseKey.title}'s release key is made on the server, and its APK is building now. The key and its password stay out of chats and repos.`
-            : `Rejected the release key card for ${card.releaseKey.title}; no key was made.${notes ? `\n\n${notes}` : ''}`
-          : ml
-          ? notes === null
-            ? `Approved: ${ml.name}'s lending is saved as the card showed${lendResult}. Its agent has it now, and minion turns that start from now get it: a minion that needs it ends its turn and carries on in the next.`
-            : `Rejected your proposed lending for ${ml.name}; nothing changed.${notes ? `\n\n${notes}` : ''}`
-          : card.memory
-          ? notes === null
-            ? `Approved: ${session.name} approved your memory tidy (${card.memory.counts}). Call apply_memory now: it applies every change, deletes too, and says what changed. Then report that in a few lines and close yourself with close_self.`
-            : `${session.name} turned the memory tidy down; nothing changed.${notes ? `\n\n${notes}` : ''} Close yourself with close_self.`
-          : card.machine
-          ? notes === null
-            ? `Approved: ${card.machine.name}'s new notes are saved, and turns read them from their next start.`
-            : `Rejected your proposed notes for ${card.machine.name}; they are unchanged.${notes ? `\n\n${notes}` : ''}`
-          : notes === null
-            ? `Plan approved: build it this way. ("${card.summary}")`
-            : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
-          { plan: { planId: card.id, verdict: body.verdict } });
+        deliverAnswer(
+          app,
+          id,
+          session.name,
+          ins
+            ? notes === null
+              ? 'Saved anyway: your instructions edit is saved as it was, beside what already said it.'
+              : body.verdict === 'reject'
+                ? `Cancelled: your instructions edit is dropped and nothing was saved. Don't make it again unless asked.${notes ? `\n\n${notes}` : ''}`
+                : `Work it in: nothing was saved. Put your change where the card shows it is already said, or reword it to point there in a few words, then call edit_instructions again.${notes ? `\n\n${notes}` : ''}`
+            : card.hostTool
+              ? notes === null
+                ? card.hostTool.source === 'pacman'
+                  ? `Approved: ${toolLabel(card.hostTool)} goes in the host tools list. You get a message saying who runs the install.`
+                  : `Approved: ${toolLabel(card.hostTool)} is installing on the server now (\`${card.hostTool.command}\`). You get a message once it's in. Keep working on what doesn't depend on it.`
+                : `Rejected installing ${toolLabel(card.hostTool)}; nothing was installed.${notes ? `\n\n${notes}` : ''}`
+              : card.releaseKey
+                ? notes === null
+                  ? `Approved: ${card.releaseKey.title}'s release key is made on the server, and its APK is building now. The key and its password stay out of chats and repos.`
+                  : `Rejected the release key card for ${card.releaseKey.title}; no key was made.${notes ? `\n\n${notes}` : ''}`
+                : ml
+                  ? notes === null
+                    ? `Approved: ${ml.name}'s lending is saved as the card showed${lendResult}. Its agent has it now, and minion turns that start from now get it: a minion that needs it ends its turn and carries on in the next.`
+                    : `Rejected your proposed lending for ${ml.name}; nothing changed.${notes ? `\n\n${notes}` : ''}`
+                  : card.memory
+                    ? notes === null
+                      ? `Approved: ${session.name} approved your memory tidy (${card.memory.counts}). Call apply_memory now: it applies every change, deletes too, and says what changed. Then report that in a few lines and close yourself with close_self.`
+                      : `${session.name} turned the memory tidy down; nothing changed.${notes ? `\n\n${notes}` : ''} Close yourself with close_self.`
+                    : card.machine
+                      ? notes === null
+                        ? `Approved: ${card.machine.name}'s new notes are saved, and turns read them from their next start.`
+                        : `Rejected your proposed notes for ${card.machine.name}; they are unchanged.${notes ? `\n\n${notes}` : ''}`
+                      : notes === null
+                        ? `Plan approved: build it this way. ("${card.summary}")`
+                        : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
+          { plan: { planId: card.id, verdict: body.verdict } },
+        );
         // After the answer, so its message comes first; it runs behind the click (an install can take minutes).
         if (card.hostTool && notes === null) void approveHostTool(app, id, card.hostTool, session.name);
         personWrote(ctx);
@@ -277,7 +325,10 @@ export const proposalRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/approvals', who: ['minion'], refuse: 'Only the minion itself can ask for approval in its chat',
+    method: 'POST',
+    path: '/api/tickets/:ticket/approvals',
+    who: ['minion'],
+    refuse: 'Only the minion itself can ask for approval in its chat',
     async handler(ctx) {
       const { req, res, ticket, app } = ctx;
       const { id } = ticket;
@@ -302,7 +353,7 @@ export const proposalRoutes: Route[] = [
       const schemeRepo = (goCall || near) && project.repo_dir ? await originRepo(project.repo_dir) : null;
       const target = goCall ? mergeTarget(goPr, schemeRepo) : null;
       // The card's lookup skips a moved shell's PR; a refusal runs nothing, so the worktree's answer does here.
-      const nearPr = near ? pr ?? (near.moved && !near.repo ? await prInfo({ ...near, moved: false }, ticket.cwd, env!) : null) : null;
+      const nearPr = near ? (pr ?? (near.moved && !near.repo ? await prInfo({ ...near, moved: false }, ticket.cwd, env!) : null)) : null;
       const nearTarget = near ? mergeTarget(nearPr, schemeRepo) : null;
       const retry = nearTarget && { target: nearTarget, command: `gh pr merge ${nearTarget.number} --repo ${schemeRepo} ${near!.method === 'merge' ? '--merge' : '--squash'}${near!.auto ? ' --auto' : ''}` };
       if ((merge || goCall) && !runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
@@ -313,7 +364,10 @@ export const proposalRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/tickets/:ticket/approvals', who: ['minion'], refuse: 'Only the minion itself can wait on its approvals',
+    method: 'GET',
+    path: '/api/tickets/:ticket/approvals',
+    who: ['minion'],
+    refuse: 'Only the minion itself can wait on its approvals',
     async handler(ctx) {
       const { res, url, app, ticket } = ctx;
       const { id } = ticket;
@@ -323,7 +377,10 @@ export const proposalRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/approve', who: ['person'], refuse: 'Only people approve tool calls',
+    method: 'POST',
+    path: '/api/tickets/:ticket/approve',
+    who: ['person'],
+    refuse: 'Only people approve tool calls',
     async handler(ctx) {
       const { req, res, session, app, ticket } = ctx;
       const { id } = ticket;

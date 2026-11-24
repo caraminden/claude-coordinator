@@ -13,7 +13,10 @@ import { test } from 'node:test';
 const root = join(import.meta.dirname, '..');
 const kit = 'kit/skills/scheme-setup/templates/windows-ci';
 const lint = join(root, kit, 'lint-ps1.ps1');
-const ps1s = (dir: string) => readdirSync(join(root, dir)).filter((f) => f.endsWith('.ps1')).map((f) => join(root, dir, f));
+const ps1s = (dir: string) =>
+  readdirSync(join(root, dir))
+    .filter((f) => f.endsWith('.ps1'))
+    .map((f) => join(root, dir, f));
 
 const planted = `using namespace System.Text
 $op = [Net.SecurityProtocolType]::Tls12x
@@ -28,7 +31,7 @@ Write-Output $op $tls $list $sb ([MadeHere]::One())
 const found = spawnSync('pwsh', ['-NoProfile', '-Command', 'if (Get-Module -ListAvailable PSScriptAnalyzer) { exit 0 } else { exit 3 }'], { encoding: 'utf8' });
 const skip = found.error ? 'no pwsh on PATH' : found.status !== 0 ? 'no PSScriptAnalyzer module' : false;
 
-test('Citadel\'s .ps1 files lint clean, and the lint still finds planted mistakes', { skip, timeout: 120_000 }, () => {
+test("Citadel's .ps1 files lint clean, and the lint still finds planted mistakes", { skip, timeout: 120_000 }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'ps1-lint-'));
   try {
     const bad = join(dir, 'planted.ps1');
@@ -43,9 +46,17 @@ test('Citadel\'s .ps1 files lint clean, and the lint still finds planted mistake
     const out = r.stdout + r.stderr;
     assert.equal(r.status, 1, out);
     const lines = out.split('\n').filter((l) => /:\d+:\d+: /.test(l));
-    assert.deepEqual(lines.filter((l) => !l.startsWith(bad) && !l.startsWith(broken)), [], 'Citadel\'s own scripts have findings');
+    assert.deepEqual(
+      lines.filter((l) => !l.startsWith(bad) && !l.startsWith(broken)),
+      [],
+      "Citadel's own scripts have findings",
+    );
     // Each finding as "line rule", so a reworded message doesn't break this.
-    const rules = (file: string) => lines.filter((l) => l.startsWith(`${file}:`)).map((l) => l.slice(file.length).replace(/^:(\d+):\d+: (\w+):.*$/s, '$1 $2')).sort();
+    const rules = (file: string) =>
+      lines
+        .filter((l) => l.startsWith(`${file}:`))
+        .map((l) => l.slice(file.length).replace(/^:(\d+):\d+: (\w+):.*$/s, '$1 $2'))
+        .sort();
     assert.deepEqual(rules(bad), ['2 UnknownMember', '3 UnknownType', '4 UnknownType', '5 PSUseCompatibleCommands'], out);
     assert.deepEqual(rules(broken), ['1 ParseError'], out);
   } finally {
@@ -76,10 +87,13 @@ test("list-runners.ps1 lists a hand-made logon task with no folder as not Citade
   const dir = mkdtempSync(join(tmpdir(), 'ps1-list-'));
   try {
     const stub = join(dir, 'stub.ps1');
-    writeFileSync(stub, `function Get-CimInstance { }
+    writeFileSync(
+      stub,
+      `function Get-CimInstance { }
 function Get-ScheduledTask { [pscustomobject]@{ TaskName = 'GitHub runner by hand'; State = 'Ready'; Actions = @([pscustomobject]@{ WorkingDirectory = $null }); Principal = [pscustomobject]@{ UserId = 'cara' } } }
 & $args[0]
-`);
+`,
+    );
     const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', stub, 'tools/ci-runner/list-runners.ps1'], { encoding: 'utf8' });
     assert.match(r.stdout, /^GitHub runner by hand {2}session, Ready, for cara {4}\(not Citadel's\)$/m, r.stdout + r.stderr);
   } finally {
@@ -113,7 +127,9 @@ async function removeRunners(dir: string, root: string, services: { Name: string
   const log = join(dir, 'calls.log');
   writeFileSync(log, '');
   const stub = join(dir, 'stub.ps1');
-  writeFileSync(stub, `$global:services = @(${services.map((s) => `[pscustomobject]@{ Name = '${s.Name}'; PathName = '${s.PathName}'; State = 'Running' }`).join(', ')})
+  writeFileSync(
+    stub,
+    `$global:services = @(${services.map((s) => `[pscustomobject]@{ Name = '${s.Name}'; PathName = '${s.PathName}'; State = 'Running' }`).join(', ')})
 function Note([string]$Line) { Add-Content -LiteralPath '${log}' -Value $Line }
 function Get-CimInstance {
   param([string]$ClassName, [string]$Filter)
@@ -134,11 +150,14 @@ function Unregister-ScheduledTask { param([string]$TaskName, [switch]$Confirm) N
 $script, $rest = $args
 & $script @rest
 exit $LASTEXITCODE
-`);
+`,
+  );
   const asked: any[] = [];
   const citadel = createServer((req, res) => {
     let text = '';
-    req.on('data', (c) => { text += c; });
+    req.on('data', (c) => {
+      text += c;
+    });
     req.on('end', () => {
       const body = JSON.parse(text);
       asked.push({ auth: req.headers.authorization, url: req.url, ...body });
@@ -153,8 +172,12 @@ exit $LASTEXITCODE
     const url = `http://127.0.0.1:${(citadel.address() as any).port}`;
     const child = spawn(psRun[0], [...psRun.slice(1), '-NoProfile', '-NonInteractive', '-File', stub, script, '-Scheme', 'Peek Auras', '-CitadelUrl', url, '-MachineToken', 'ccm_test'], { cwd: dir });
     let out = '';
-    child.stdout.on('data', (c) => { out += c; });
-    child.stderr.on('data', (c) => { out += c; });
+    child.stdout.on('data', (c) => {
+      out += c;
+    });
+    child.stderr.on('data', (c) => {
+      out += c;
+    });
     const status = await new Promise<number | null>((r) => child.on('close', r));
     return { status, out, asked, calls: readFileSync(log, 'utf8').split(/\r?\n/).filter(Boolean) };
   } finally {
@@ -175,7 +198,7 @@ function runnerFolder(dir: string, canary: string, agent: string, marker: object
 const noPwsh = !win && found.error ? 'no pwsh on PATH' : false;
 const svc = (name: string, dir: string) => ({ Name: `actions.runner.caraminden-peek-auras.${name}`, PathName: `"${join(dir, 'bin', 'RunnerService.exe')}"` });
 
-test('remove-runner.ps1 runs nothing from a runner\'s folder: Citadel takes it off GitHub, then the service and folder go', { skip: noPwsh, timeout: 120_000 }, async () => {
+test("remove-runner.ps1 runs nothing from a runner's folder: Citadel takes it off GitHub, then the service and folder go", { skip: noPwsh, timeout: 120_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ps1-remove-'));
   try {
     // A folder name with wildcard characters in it is still only itself.
@@ -216,12 +239,21 @@ test('remove-runner.ps1 runs nothing from a runner\'s folder: Citadel takes it o
     assert.match(r.out, /actions-runner-planted has a marker .* left alone/);
     assert.match(r.out, /remove-runner: 1 runner folder\(s\) weren't removed; the lines above say why\./);
     // Each ask carries the label of the kind of runner being removed: the scheme's for a service, the logon task's for a session runner.
-    assert.deepEqual(r.asked.filter((a) => a.kind === 'delete').map((a) => [a.url, a.auth, a.scheme, a.name, a.label]).sort(), [
-      ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'DESK', 'peek-auras-ci'],
-      ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'DESK-desktop', 'peek-auras-desktop'],
-      ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'LONGNAME', 'peek-auras-ci'],
-    ]);
-    assert.ok(r.asked.every((a) => a.mint !== true), 'no removal token is asked for any more');
+    assert.deepEqual(
+      r.asked
+        .filter((a) => a.kind === 'delete')
+        .map((a) => [a.url, a.auth, a.scheme, a.name, a.label])
+        .sort(),
+      [
+        ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'DESK', 'peek-auras-ci'],
+        ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'DESK-desktop', 'peek-auras-desktop'],
+        ['/api/machines/runner-token', 'Bearer ccm_test', 'Peek Auras', 'LONGNAME', 'peek-auras-ci'],
+      ],
+    );
+    assert.ok(
+      r.asked.every((a) => a.mint !== true),
+      'no removal token is asked for any more',
+    );
     assert.deepEqual(r.calls, [
       'sc.exe stop actions.runner.caraminden-peek-auras.DESK',
       'sc.exe delete actions.runner.caraminden-peek-auras.DESK',
@@ -236,14 +268,14 @@ test('remove-runner.ps1 runs nothing from a runner\'s folder: Citadel takes it o
     assert.equal(existsSync(session), false, r.out);
     assert.equal(existsSync(long), false, r.out);
     assert.equal(readFileSync(join(outside, 'keep.txt'), 'utf8'), 'keep', 'a link in the folder was followed');
-    assert.equal(existsSync(join(delve, 'config.cmd')), true, 'Delve\'s folder was touched');
+    assert.equal(existsSync(join(delve, 'config.cmd')), true, "Delve's folder was touched");
     assert.equal(existsSync(join(plantedDir, 'config.cmd')), true, 'the planted folder was touched');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('remove-runner.ps1 leaves a runner Citadel couldn\'t take off GitHub as it was, and says why', { skip: noPwsh, timeout: 120_000 }, async () => {
+test("remove-runner.ps1 leaves a runner Citadel couldn't take off GitHub as it was, and says why", { skip: noPwsh, timeout: 120_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ps1-remove-'));
   try {
     const root = join(dir, 'c');
@@ -264,7 +296,10 @@ test('remove-runner.ps1 leaves a runner Citadel couldn\'t take off GitHub as it 
     // Run again once GitHub lets it go: the one that stayed is found and removed, and the run is clean.
     const again = await removeRunners(dir, root, [svc('DESK', one)], null);
     assert.equal(again.status, 0, again.out);
-    assert.deepEqual(again.asked.filter((a) => a.kind === 'delete').map((a) => a.name), ['DESK']);
+    assert.deepEqual(
+      again.asked.filter((a) => a.kind === 'delete').map((a) => a.name),
+      ['DESK'],
+    );
     assert.equal(existsSync(one), false, again.out);
     assert.equal(existsSync(canary), false, again.out);
   } finally {
@@ -274,7 +309,11 @@ test('remove-runner.ps1 leaves a runner Citadel couldn\'t take off GitHub as it 
 
 // What Linux can't show: no line of the script starts anything from the folder it is removing.
 test('remove-runner.ps1 has no line that runs a file of the runner folder', () => {
-  const code = readFileSync(join(root, 'tools/ci-runner/remove-runner.ps1'), 'utf8').replace(/<#[\s\S]*?#>/, '').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  const code = readFileSync(join(root, 'tools/ci-runner/remove-runner.ps1'), 'utf8')
+    .replace(/<#[\s\S]*?#>/, '')
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n');
   assert.doesNotMatch(code, /config\.(cmd|sh)|Invoke-Expression|\biex\b|Start-Process|Invoke-Command|Import-Module|Push-Location|Set-Location|^\s*\.\s+\S/m);
   // The call operator starts sc.exe and nothing else.
   assert.deepEqual([...new Set(code.match(/(?<!&)&\s*[^\s&]+/g))], ['& sc.exe']);

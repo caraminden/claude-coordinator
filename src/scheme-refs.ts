@@ -37,12 +37,22 @@ export interface Stray {
 // The chat's list separator (public/threadrefs.js), kept in step by hand.
 const LIST_SEP = String.raw`(?:\s*(?:,|\/|&)\s*|,?\s+(?:and|or)\s+)`;
 /** A name with any run of spaces where it has one; case-blind, as the chat reads it. */
-const namePattern = (name: string) => name.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join(String.raw`\s+`);
+const namePattern = (name: string) =>
+  name
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&'))
+    .join(String.raw`\s+`);
 const key = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
 /** "ToC" for "Theory of Crafting": a short form the chat doesn't know, so its numbers link here. */
 const initials = (name: string) => {
   const words = name.trim().split(/\s+/);
-  return words.length > 1 ? words.map((w) => w[0]).join('').toLowerCase() : '';
+  return words.length > 1
+    ? words
+        .map((w) => w[0])
+        .join('')
+        .toLowerCase()
+    : '';
 };
 
 /**
@@ -63,7 +73,10 @@ export function strayRefs(text: string, refs: SchemeRefs): Stray[] {
   }
   for (const n of others) byKey.set(key(n), { other: n.trim().replace(/\s+/g, ' '), full: true });
   // Longest first, and this scheme's own name too, so "Delve Two #3" isn't read as "Delve" + "Two #3".
-  const names = [...byKey.keys(), own].sort((a, b) => b.length - a.length).map(namePattern).join('|');
+  const names = [...byKey.keys(), own]
+    .sort((a, b) => b.length - a.length)
+    .map(namePattern)
+    .join('|');
   const run = new RegExp(String.raw`(?<![\p{L}\p{N}_])(?<name>${names})(?<poss>'s|\u2019s|'|\u2019)?(?<aside>\s*\([^()\n]{1,60}\))?\s+(?<minion>[Mm]inions?\s+)?#(?<first>\d{1,6})(?<rest>(?:${LIST_SEP}#\d{1,6})*)(?![\w#/-])`, 'giu');
   const found: Stray[] = [];
   for (const m of text.replace(CODE, ' ').matchAll(run)) {
@@ -75,7 +88,7 @@ export function strayRefs(text: string, refs: SchemeRefs): Stray[] {
     const { other } = named;
     // As the chat reads it: the full name, "'s" or nothing, then "#3" or "minion(s) #3".
     const scoped = named.full && !g.aside && (!g.poss || g.poss.endsWith('s'));
-    const nums = [...(scoped ? [] : [g.first]), ...(scoped && /^minions/i.test(g.minion ?? '') ? [] : g.rest.match(/\d+/g) ?? [])].map(Number);
+    const nums = [...(scoped ? [] : [g.first]), ...(scoped && /^minions/i.test(g.minion ?? '') ? [] : (g.rest.match(/\d+/g) ?? []))].map(Number);
     for (const n of nums) {
       if (found.some((f) => f.n === n)) continue;
       const minion = refs.minions[n];
@@ -88,7 +101,7 @@ export function strayRefs(text: string, refs: SchemeRefs): Stray[] {
 
 /** The send-back's lines for these: what each link opens, and what to write instead. */
 export function explainStrays(found: Stray[], scheme: string): string {
-  const lines = ['A bare #N links to this scheme\'s own minion, and these sit next to another scheme\'s name:'];
+  const lines = ["A bare #N links to this scheme's own minion, and these sit next to another scheme's name:"];
   for (const f of found) lines.push(`- #${f.n} here opens ${f.opens}. Meant ${f.other}'s? Write "${f.other} #${f.n}".`);
   lines.push(`If you meant ${scheme}'s own minion, leave it as it is: the next try goes through.`);
   return lines.join('\n');

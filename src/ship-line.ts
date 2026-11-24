@@ -41,13 +41,14 @@ export function moveShip(app: Pick<App, 'store' | 'releases' | 'waits'>, project
   const before = waiting.map((e) => e.seq);
   if (by.taskmaster) {
     const after = moveIn(before, seqs, movedSeq);
-    const pinned = (e: LineEntry) => state.placed[placedKey(e)] && !state.placed[placedKey(e)].taskmaster ? state.placed[placedKey(e)] : null;
+    const pinned = (e: LineEntry) => (state.placed[placedKey(e)] && !state.placed[placedKey(e)].taskmaster ? state.placed[placedKey(e)] : null);
     const own1 = pinned(moved);
     if (own1) throw new HttpError(409, `${moved.name} was placed by ${own1.by} on ${when(own1.at)}, so it stays where they put it until it ships`);
     for (const p of waiting) {
       const pin = pinned(p);
       if (!pin || p.seq === movedSeq) continue;
-      const was = before.indexOf(movedSeq) < before.indexOf(p.seq), now = after.indexOf(movedSeq) < after.indexOf(p.seq);
+      const was = before.indexOf(movedSeq) < before.indexOf(p.seq),
+        now = after.indexOf(movedSeq) < after.indexOf(p.seq);
       if (was !== now) throw new HttpError(409, `That would move ${moved.name} past ${p.name}, which ${pin.by} placed on ${when(pin.at)}; it stays where they put it until it ships`);
     }
   }

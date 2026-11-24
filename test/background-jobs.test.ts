@@ -23,8 +23,7 @@ function setup() {
   const sent: object[] = [];
   return { store, project, sent, broadcast: (m: object) => void sent.push(m) };
 }
-const minion = (store: Store, projectId: number, title = 'work', by = 'Cara') =>
-  store.createTicket({ project_id: projectId, title, permission_mode: 'bypassPermissions', created_by: by });
+const minion = (store: Store, projectId: number, title = 'work', by = 'Cara') => store.createTicket({ project_id: projectId, title, permission_mode: 'bypassPermissions', created_by: by });
 
 // ---------- scheduled runs ----------
 
@@ -42,8 +41,13 @@ function scheduled() {
       const t = minion(s.store, project.id, m.title, by);
       return { id: t.id, number: t.number! };
     },
-    runner: { emit: (id: number, kind: string, data: unknown) => void notes.push({ id, kind, data }), send: (id: number, from: string, text: string) => void sends.push({ id, from, text }),
-      limitWait: (id: number) => (waits.limit.has(id) ? { ticket: id, at: 0, tries: 1 } : null), netWait: (id: number) => (waits.net.has(id) ? { ticket: id, tries: 1 } : null), killWait: (id: number) => (waits.kill.has(id) ? { ticket: id, tries: 1, resumes: 0 } : null) } as any,
+    runner: {
+      emit: (id: number, kind: string, data: unknown) => void notes.push({ id, kind, data }),
+      send: (id: number, from: string, text: string) => void sends.push({ id, from, text }),
+      limitWait: (id: number) => (waits.limit.has(id) ? { ticket: id, at: 0, tries: 1 } : null),
+      netWait: (id: number) => (waits.net.has(id) ? { ticket: id, tries: 1 } : null),
+      killWait: (id: number) => (waits.kill.has(id) ? { ticket: id, tries: 1, resumes: 0 } : null),
+    } as any,
     broadcast: s.broadcast,
     by: 'Citadel',
     dataDir: '/data',
@@ -258,9 +262,20 @@ test('memory indexing drains each indexed scheme, skips the rest, and logs an ou
   let fail = false;
   const store = {
     listProjects: () => [{ id: 1 }, { id: 2 }],
-    memory: { index: async (id: number) => { if (fail) throw new Error('down'); calls.push(id); return left-- > 0 ? 1 : 0; } },
+    memory: {
+      index: async (id: number) => {
+        if (fail) throw new Error('down');
+        calls.push(id);
+        return left-- > 0 ? 1 : 0;
+      },
+    },
   };
-  const indexer = new MemoryIndexer(store as any, async () => [], 'model', (id) => id === 1);
+  const indexer = new MemoryIndexer(
+    store as any,
+    async () => [],
+    'model',
+    (id) => id === 1,
+  );
   await indexer.run();
   assert.deepEqual(calls, [1, 1, 1, 1], 'scheme 1 until nothing is left; scheme 2 never');
 
@@ -282,12 +297,23 @@ test('one scheme that fails sits out the pass without stopping the others (#488)
   let left = 2;
   const store = {
     listProjects: () => [{ id: 1 }, { id: 2 }],
-    memory: { index: async (id: number) => { calls.push(id); if (id === 1) throw new Error('refused'); return left-- > 0 ? 1 : 0; } },
+    memory: {
+      index: async (id: number) => {
+        calls.push(id);
+        if (id === 1) throw new Error('refused');
+        return left-- > 0 ? 1 : 0;
+      },
+    },
   };
   const was = console.error;
   console.error = () => {};
   try {
-    await new MemoryIndexer(store as any, async () => [], 'model', () => true).run();
+    await new MemoryIndexer(
+      store as any,
+      async () => [],
+      'model',
+      () => true,
+    ).run();
   } finally {
     console.error = was;
   }
@@ -314,7 +340,10 @@ test('a scan lists only the files a reply linked, and the shared folder broadcas
 
   reply(store, t.id, `Here it is: [the report](${join(cwd, 'report.md')})`);
   await scanner.scan(t.id);
-  assert.deepEqual(store.listArtifacts(project.id).map((a) => a.path), ['report.md']);
+  assert.deepEqual(
+    store.listArtifacts(project.id).map((a) => a.path),
+    ['report.md'],
+  );
   assert.equal(sent.filter((m: any) => m.type === 'artifacts').length, 1, 'the new artifact, not the first shared-folder look');
 
   sent.length = 0;
@@ -323,7 +352,10 @@ test('a scan lists only the files a reply linked, and the shared folder broadcas
   writeFileSync(join(shared, 'spec.md'), '# Spec');
   await scanner.scan(t.id);
   assert.deepEqual(sent, [{ type: 'artifacts', projectId: project.id }], 'a change in the shared folder tells open pages');
-  assert.deepEqual((await scanner.sharedFiles(project.id)).map((f) => f.path), ['spec.md']);
+  assert.deepEqual(
+    (await scanner.sharedFiles(project.id)).map((f) => f.path),
+    ['spec.md'],
+  );
 });
 
 test('a scan reads only the replies since the last one, a page at a time, and keeps what earlier ones linked (#609)', async () => {
@@ -344,12 +376,25 @@ test('a scan reads only the replies since the last one, a page at a time, and ke
     return read(id, after, limit);
   };
   await scanner.scan(t.id);
-  assert.deepEqual(store.listArtifacts(project.id).map((a) => a.path).sort(), ['a.md', 'b.md']);
+  assert.deepEqual(
+    store
+      .listArtifacts(project.id)
+      .map((a) => a.path)
+      .sort(),
+    ['a.md', 'b.md'],
+  );
   assert.equal(reads.length, 3, `452 events read 200 at a time: ${reads}`);
   reads.length = 0;
   reply(store, t.id, `[c](${join(cwd, 'c.md')})`);
   await scanner.scan(t.id);
-  assert.deepEqual(store.listArtifacts(project.id).map((a) => a.path).sort(), ['a.md', 'b.md', 'c.md'], 'the earlier links stay');
+  assert.deepEqual(
+    store
+      .listArtifacts(project.id)
+      .map((a) => a.path)
+      .sort(),
+    ['a.md', 'b.md', 'c.md'],
+    'the earlier links stay',
+  );
   assert.equal(reads.length, 1);
   assert.ok(reads[0] > 0, 'it starts after the last event read');
 });
@@ -409,7 +454,14 @@ test('after a run, tool results wait out the gap, while a soon request (a linkin
 // ---------- ship status ----------
 
 const merged = (live: boolean): BranchStatus => ({
-  branch: 'ticket/1-x', tip: 'abcdef1234', base: 'main', ahead: 0, merged: true, empty: false, pr: null, deploy: { pulled: true, live },
+  branch: 'ticket/1-x',
+  tip: 'abcdef1234',
+  base: 'main',
+  ahead: 0,
+  merged: true,
+  empty: false,
+  pr: null,
+  deploy: { pulled: true, live },
 });
 
 function ships() {

@@ -20,10 +20,20 @@ export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 /** The tiers, in the order the prompt reads them: the work each covers, its model and effort, and when to move off it. */
 export const TIERS = [
   // Known-shape middle work on Sonnet (Cara, 2026-11-14, "Widen to known-shape work"; "a sonnet minion can remove a link or move something somewhere I ask it to, but it cant build new screens").
-  { work: 'chores (docs, instruction edits, config, renames, setup) and known-shape work (a bug with a clear repro and a known place to look, a small spec\'d tweak with no new data model or screen, a follow-up to a shipped change, adopting a handoff, a deploy or release, a doc or skill edit needing judgment)', model: 'claude-sonnet-5-5', effort: 'medium', then: 'if it stalls or the fix does not hold Opus 5.5 at medium, then high', short: 'for known-shape work' },
+  {
+    work: "chores (docs, instruction edits, config, renames, setup) and known-shape work (a bug with a clear repro and a known place to look, a small spec'd tweak with no new data model or screen, a follow-up to a shipped change, adopting a handoff, a deploy or release, a doc or skill edit needing judgment)",
+    model: 'claude-sonnet-5-5',
+    effort: 'medium',
+    then: 'if it stalls or the fix does not hold Opus 5.5 at medium, then high',
+    short: 'for known-shape work',
+  },
   { work: 'a read-only check', model: 'claude-sonnet-5-5', effort: 'low' },
   // The advisor trial (#817) has its own row: it is over on its date, and taking the row out (and from MODELS in src/db.ts, MODEL_IDS in src/mcp.ts) ends it.
-  { work: 'in the advisor trial (#817) until 2026-11-30, about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high at medium, and a stalled Sonnet-medium minion before Opus medium, never a Taskmaster (`node tools/advisor-trial.ts` reads its numbers)', model: 'claude-sonnet-5-5+opus-advisor', effort: 'medium' },
+  {
+    work: 'in the advisor trial (#817) until 2026-11-30, about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high at medium, and a stalled Sonnet-medium minion before Opus medium, never a Taskmaster (`node tools/advisor-trial.ts` reads its numbers)',
+    model: 'claude-sonnet-5-5+opus-advisor',
+    effort: 'medium',
+  },
   { work: 'design, ideation, new screens or data models, the ship pipeline, runner, tripwire, auth, migrations, multi-file refactors, art, a bug whose first repro failed', model: 'claude-opus-5-5', effort: 'high', short: 'for design and risky work' },
   // Research on Opus medium (Cara, 2026-11-17, picked "Research on Opus medium" on #940's card): research minions spent $236 in a week on Opus high, and the vendor's curve for research is nearly flat from medium to high.
   { work: 'research', model: 'claude-opus-5-5', effort: 'medium', then: 'high if the report is thin or sent back' },
@@ -87,7 +97,9 @@ export function tierLabel(model, effort) {
  */
 export function pickReason(by, type, model, effort, why = '') {
   const line = pickLine(by, type, model, effort);
-  const w = String(why ?? '').replace(/\s+/g, ' ').trim();
+  const w = String(why ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return w ? `${line}: ${w}` : line;
 }
 
@@ -119,14 +131,18 @@ export function nextStep(model, effort, fable = true, today = new Date().toISOSt
 
 /** The table as one line of prose, for the Taskmaster's prompt. */
 export function tableText(fable = true) {
-  const tiers = TIERS.filter((t) => fable || !/fable/.test(t.model)).map((t) => `${t.work} ${t.model} at ${t.effort}${t.then ? `, ${t.then}` : ''}`).join('; ');
+  const tiers = TIERS.filter((t) => fable || !/fable/.test(t.model))
+    .map((t) => `${t.work} ${t.model} at ${t.effort}${t.then ? `, ${t.then}` : ''}`)
+    .join('; ');
   // xhigh and max are in create_ticket's effort description, which every Taskmaster reads with the tool.
   return `${tiers}.${fable ? '' : ' Fable is off in this scheme: never pick it for a minion, a Grunt or a review; the nearest tier below it is Opus 5.5 at high.'}`;
 }
 
 /** The tiers with a `short` line, as citadel:subagents and citadel:briefing say them: "Sonnet 5.5 medium for known-shape work, …". */
 export function tierSummary(fable = true) {
-  return TIERS.filter((t) => t.short && (fable || !/fable/.test(t.model))).map((t) => `${tierLabel(t.model, t.effort)} ${t.short}`).join(', ');
+  return TIERS.filter((t) => t.short && (fable || !/fable/.test(t.model)))
+    .map((t) => `${tierLabel(t.model, t.effort)} ${t.short}`)
+    .join(', ');
 }
 
 /** The table as rows for the Models section (#1061): what a person reads of each tier, straight from TIERS. */
@@ -137,5 +153,5 @@ export function tierRows() {
 /** When the advisor trial ends, read from its TIERS row ("until 2026-11-30"), or null once the row is gone. */
 export function advisorTrialEnd() {
   const row = TIERS.find((t) => /advisor/.test(t.model));
-  return row ? /until (\d{4}-\d{2}-\d{2})/.exec(row.work)?.[1] ?? null : null;
+  return row ? (/until (\d{4}-\d{2}-\d{2})/.exec(row.work)?.[1] ?? null) : null;
 }

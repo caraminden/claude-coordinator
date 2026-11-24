@@ -17,7 +17,9 @@ after(async () => {
 });
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -25,7 +27,8 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let base = '';
@@ -36,11 +39,16 @@ let project: any;
 let josh = 0;
 let joshCookie = '';
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
-const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
+const live = () =>
+  turns()
+    .filter((t) => t.token.startsWith(`${ticket.id}.`))
+    .at(-1).token;
 
 async function edit(scope: string, edits: unknown, overlaps?: string[]) {
   const res = await fetch(`${base}/api/tickets/${ticket.id}/edit-instructions`, {
-    method: 'POST', headers: { Authorization: `Bearer ${live()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, edits, overlaps }),
+    method: 'POST',
+    headers: { Authorization: `Bearer ${live()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope, edits, overlaps }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(`${res.status} ${data.error}`);
@@ -73,14 +81,23 @@ before(async () => {
 });
 
 test('a partial match saves nothing and names the failing edits', async () => {
-  await assert.rejects(edit('scheme', [{ find: 'Alpha one.', replace: 'Alpha 1.' }, { find: 'Beta two', replace: 'x' }, { find: 'Missing', replace: 'y' }]),
-    /409 Nothing saved\. edit 2: "Beta two" matches 2 times, not once; edit 3: "Missing" matches 0 times/);
+  await assert.rejects(
+    edit('scheme', [
+      { find: 'Alpha one.', replace: 'Alpha 1.' },
+      { find: 'Beta two', replace: 'x' },
+      { find: 'Missing', replace: 'y' },
+    ]),
+    /409 Nothing saved\. edit 2: "Beta two" matches 2 times, not once; edit 3: "Missing" matches 0 times/,
+  );
   assert.equal(store.getProject(project.id)!.instructions, 'Alpha one.\nBeta two.\nBeta two again.');
   assert.equal(store.instructionHistory(project.id, 10).length, 1);
 });
 
 test('a scheme save is one history row by the minion and the person its turn runs for', async () => {
-  await edit('scheme', [{ find: 'Alpha one.', replace: 'Alpha 1.' }, { find: 'Beta two again.', replace: 'Gamma.' }]);
+  await edit('scheme', [
+    { find: 'Alpha one.', replace: 'Alpha 1.' },
+    { find: 'Beta two again.', replace: 'Gamma.' },
+  ]);
   assert.equal(store.getProject(project.id)!.instructions, 'Alpha 1.\nBeta two.\nGamma.');
   const [row] = store.instructionHistory(project.id, 1);
   assert.equal(row.by, `#${ticket.number} for Josh`);
@@ -106,7 +123,7 @@ const verdict = async (verdict: string, as = cookie, notes?: string) => {
   const n = turns().length;
   const res = await fetch(`${base}/api/tickets/${ticket.id}/verdict`, { method: 'POST', headers: { Cookie: as, 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: lastCard().id, verdict, notes }) });
   // and for it to end, so the test's own writes don't race the server's.
-  if (res.status === 202) await until('the answer\'s turn', () => turns().length > n && store.getTicket(ticket.id)!.status !== 'running');
+  if (res.status === 202) await until("the answer's turn", () => turns().length > n && store.getTicket(ticket.id)!.status !== 'running');
   return { status: res.status, body: await res.json() };
 };
 
@@ -183,7 +200,8 @@ test('a newer held edit does not supersede a card that is mid-answer, so its ans
   const events = new Map<number, string>([[1, JSON.stringify({ id: 'old', status: 'pending', instructions: {} })]]);
   const app: any = {
     store: { eventsOfKinds: () => [...events].map(([id, data]) => ({ id, data })), setEventData: (id: number, d: unknown) => events.set(id, JSON.stringify(d)) },
-    runner: { emit: () => ({ id: 2 }), broadcastTicket() {} }, notify() {},
+    runner: { emit: () => ({ id: 2 }), broadcastTicket() {} },
+    notify() {},
   };
   deciding.add(1);
   postPlan(app, 1, { summary: 's', plan: 'p', instructions: {} });
@@ -193,7 +211,7 @@ test('a newer held edit does not supersede a card that is mid-answer, so its ans
   assert.equal(JSON.parse(events.get(1)!).status, 'superseded', 'superseded as before once it is not');
 });
 
-test('a person\'s own Settings save is checked by the same matcher', async () => {
+test("a person's own Settings save is checked by the same matcher", async () => {
   const r = await api(`/api/projects/${project.id}/instructions/overlaps`, 'POST', { scope: 'scheme', text: `Hello.\n\nOne card, one choice: ask early and together, with your pick marked.` });
   assert.equal(r.found.length, 1);
   assert.match(r.found[0].why, /one home is the Citadel-wide card rule/);

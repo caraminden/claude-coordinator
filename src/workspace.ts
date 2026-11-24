@@ -16,7 +16,13 @@ async function git(args: string[], cwd?: string, as?: GithubEnv, timeout = GIT_T
 }
 
 export function slugify(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'ticket';
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 40) || 'ticket'
+  );
 }
 
 export function projectDir(dataDir: string, projectId: number): string {
@@ -41,7 +47,9 @@ export function surveyReports(dataDir: string): string[] {
     .filter((id) => /^\d+$/.test(id))
     .flatMap((id) => {
       const dir = join(projectSharedDir(dataDir, Number(id)), 'reports');
-      return ls(dir).filter((f) => /^skills-survey-.*\.md$/.test(f)).map((f) => join(dir, f));
+      return ls(dir)
+        .filter((f) => /^skills-survey-.*\.md$/.test(f))
+        .map((f) => join(dir, f));
     });
 }
 
@@ -66,12 +74,16 @@ export async function cloneProject(dataDir: string, projectId: number, repoUrl: 
  * main with nothing uncommitted. Returns why it didn't, or null when it moved or had nothing to do.
  */
 export async function catchUpMain(repoDir: string): Promise<string | null> {
-  const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
+  const ok = (args: string[]) =>
+    git(args, repoDir).then(
+      () => true,
+      () => false,
+    );
   const origin = await git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repoDir).catch(() => null);
   const local = origin?.replace(/^origin\//, '');
-  if (!origin || !local || !await ok(['rev-parse', '--verify', '--quiet', `refs/heads/${local}`])) return null;
+  if (!origin || !local || !(await ok(['rev-parse', '--verify', '--quiet', `refs/heads/${local}`]))) return null;
   if (await ok(['merge-base', '--is-ancestor', origin, local])) return null; // level, or local is ahead
-  if (!await ok(['merge-base', '--is-ancestor', local, origin])) return `${local} and ${origin} have diverged`;
+  if (!(await ok(['merge-base', '--is-ancestor', local, origin]))) return `${local} and ${origin} have diverged`;
   const on = await git(['symbolic-ref', '--quiet', '--short', 'HEAD'], repoDir).catch(() => null);
   if (on !== local) return `the checkout is on ${on ?? 'a detached HEAD'}, not ${local}`;
   // Untracked files don't block it: the merge itself refuses to overwrite one.
@@ -79,14 +91,20 @@ export async function catchUpMain(repoDir: string): Promise<string | null> {
   try {
     await git(['merge', '--ff-only', '--quiet', origin], repoDir);
   } catch (err: any) {
-    return `the fast-forward failed: ${String(err.stderr || err.message).trim().split('\n')[0]}`;
+    return `the fast-forward failed: ${
+      String(err.stderr || err.message)
+        .trim()
+        .split('\n')[0]
+    }`;
   }
   return null;
 }
 
 /** Told when why a scheme's main can't catch up changes: a reason, or null once it's level again (server.ts notes it). */
 export const mainSync = {
-  stuck: (repoDir: string, why: string | null) => { if (why) console.warn(`Not fast-forwarding main in ${repoDir}: ${why}`); },
+  stuck: (repoDir: string, why: string | null) => {
+    if (why) console.warn(`Not fast-forwarding main in ${repoDir}: ${why}`);
+  },
   /** The GitHub login the fetch runs as (#321: the scheme owner's; server.ts sets it); undefined is the box's. */
   as: (_repoDir: string): GithubEnv => undefined,
   /** How long the fetch may take: a remote that stalls would hold up every new minion of the repo behind it. */
@@ -117,7 +135,10 @@ export function syncMain(repoDir: string): Promise<void> {
       console.error(`Reporting main in ${repoDir} failed:`, err);
     }
   });
-  syncing.set(repoDir, next.catch(() => {}));
+  syncing.set(
+    repoDir,
+    next.catch(() => {}),
+  );
   return next;
 }
 
@@ -129,7 +150,10 @@ export function syncMain(repoDir: string): Promise<void> {
  */
 export function buildBranch(repoDir: string | null, build: number | null | undefined): string | null {
   if (!repoDir || !build) return null;
-  for (const [ref, name] of [[`refs/heads/build/${build}`, `build/${build}`], [`refs/remotes/origin/build/${build}`, `origin/build/${build}`]]) {
+  for (const [ref, name] of [
+    [`refs/heads/build/${build}`, `build/${build}`],
+    [`refs/remotes/origin/build/${build}`, `origin/build/${build}`],
+  ]) {
     try {
       execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoDir, stdio: 'ignore', timeout: 10_000 });
       return name;
@@ -162,7 +186,11 @@ export async function ticketBase(repoDir: string, build: number | null = null): 
   await syncMain(repoDir);
   const ofBuild = buildBranch(repoDir, build);
   if (ofBuild) return ofBuild;
-  const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
+  const ok = (args: string[]) =>
+    git(args, repoDir).then(
+      () => true,
+      () => false,
+    );
   let base = 'HEAD';
   try {
     base = await git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repoDir);
@@ -172,8 +200,7 @@ export async function ticketBase(repoDir: string, build: number | null = null): 
   // Minions merge into the local default branch, which may never be pushed: branch from it
   // unless origin's copy is ahead of it (a scheme kept up to date by pushes). Diverged: local wins.
   const local = base.replace(/^origin\//, '');
-  if (local !== base && await ok(['rev-parse', '--verify', '--quiet', `refs/heads/${local}`])
-    && !await ok(['merge-base', '--is-ancestor', local, base])) {
+  if (local !== base && (await ok(['rev-parse', '--verify', '--quiet', `refs/heads/${local}`])) && !(await ok(['merge-base', '--is-ancestor', local, base]))) {
     base = local;
   }
   return base;
@@ -186,15 +213,19 @@ export async function ticketBase(repoDir: string, build: number | null = null): 
  * base to use.
  */
 async function bornBase(repoDir: string, base: string): Promise<string> {
-  const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
+  const ok = (args: string[]) =>
+    git(args, repoDir).then(
+      () => true,
+      () => false,
+    );
   if (await ok(['rev-parse', '--verify', '--quiet', `${base}^{commit}`])) return base;
   const branch = await git(['symbolic-ref', '--short', 'HEAD'], repoDir);
   if (await ok(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`])) return `origin/${branch}`;
   const tree = await git(['hash-object', '-t', 'tree', '-w', '/dev/null'], repoDir);
-  const commit = await git([...await identity(repoDir), 'commit-tree', tree, '-m', 'Start'], repoDir);
+  const commit = await git([...(await identity(repoDir)), 'commit-tree', tree, '-m', 'Start'], repoDir);
   // The empty old value: only if main is still unborn, so two minions created at once agree on one commit.
   await git(['update-ref', `refs/heads/${branch}`, commit, ''], repoDir).catch(async (err) => {
-    if (!await ok(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`])) throw err;
+    if (!(await ok(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`]))) throw err;
   });
   return branch;
 }
@@ -224,22 +255,18 @@ export async function catchUpTicketDir(cwd: string, repoDir: string | null, buil
  * Create the working directory for a ticket: a fresh git worktree on its own
  * branch when the project has a repo (from its build's branch when it has one), otherwise a plain folder.
  */
-export async function createTicketDir(
-  dataDir: string,
-  projectId: number,
-  repoDir: string | null,
-  ticketId: number,
-  ticketNumber: number,
-  title: string,
-  build: number | null = null,
-): Promise<{ cwd: string; branch: string | null }> {
+export async function createTicketDir(dataDir: string, projectId: number, repoDir: string | null, ticketId: number, ticketNumber: number, title: string, build: number | null = null): Promise<{ cwd: string; branch: string | null }> {
   const cwd = join(projectDir(dataDir, projectId), 'tickets', String(ticketId));
   if (!repoDir) {
     await mkdir(cwd, { recursive: true });
     return { cwd, branch: null };
   }
   const base = await bornBase(repoDir, await ticketBase(repoDir, build));
-  const ok = (args: string[]) => git(args, repoDir).then(() => true, () => false);
+  const ok = (args: string[]) =>
+    git(args, repoDir).then(
+      () => true,
+      () => false,
+    );
   // Branches are named by the per-project number; a branch left over from before
   // per-project numbering may already have the name, so add a suffix then.
   const name = `ticket/${ticketNumber}-${slugify(title)}`;

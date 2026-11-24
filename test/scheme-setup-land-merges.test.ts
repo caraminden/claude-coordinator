@@ -21,12 +21,13 @@ ${BASELINE} main
 land_rebased() { sha256sum ${BUDGET_FILE} ${DB_FILE} >${BASELINE}; git add ${BASELINE}; git diff --cached --quiet || git commit -qm 'baseline again'; }
 `;
 
-const budget = (minion: string, minionNotes: string, kit: string, kitNotes: string) =>
-  `import { test } from 'node:test';\n\nconst BUDGET = { minion: ${minion} /* ${minionNotes} */, taskmaster: 41_500 /* +100 (#1119) */ };\n\nconst KIT_BUDGET = ${kit}; // ${kitNotes}\n\ntest('budget', () => {});\n`;
-const db = (...cols: string[]) =>
-  `export const x = 1;\n\nconst MIGRATIONS: [table: string, column: string, ddl: string][] = [\n  ['tickets', 'a', 'TEXT'],\n${cols.map((c) => `  ['tickets', '${c}', 'TEXT'],\n`).join('')}];\n\nexport function migrate() {}\n`;
+const budget = (minion: string, minionNotes: string, kit: string, kitNotes: string) => `import { test } from 'node:test';\n\nconst BUDGET = { minion: ${minion} /* ${minionNotes} */, taskmaster: 41_500 /* +100 (#1119) */ };\n\nconst KIT_BUDGET = ${kit}; // ${kitNotes}\n\ntest('budget', () => {});\n`;
+const db = (...cols: string[]) => `export const x = 1;\n\nconst MIGRATIONS: [table: string, column: string, ddl: string][] = [\n  ['tickets', 'a', 'TEXT'],\n${cols.map((c) => `  ['tickets', '${c}', 'TEXT'],\n`).join('')}];\n\nexport function migrate() {}\n`;
 const baseline = (where: string) => {
-  const sum = (f: string) => createHash('sha256').update(readFileSync(join(where, f))).digest('hex');
+  const sum = (f: string) =>
+    createHash('sha256')
+      .update(readFileSync(join(where, f)))
+      .digest('hex');
   return `${sum(BUDGET_FILE)}  ${BUDGET_FILE}\n${sum(DB_FILE)}  ${DB_FILE}\n`;
 };
 const show = (where: string, f: string) => git(where, 'show', `main:${f}`) + '\n';
@@ -134,4 +135,3 @@ test('inside a batch: each member merges onto the one below it, and all three sh
     c.stop();
   }
 });
-

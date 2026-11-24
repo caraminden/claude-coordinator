@@ -30,7 +30,14 @@ const project = store.createProject('Test', null);
 const shown: [number, number | null][] = [];
 const pushes: { ticket: number; text: string }[] = [];
 function makeRunner() {
-  const r = new Runner(store, (m: any) => { if (m.type === 'ticket') shown.push([m.ticket.id, m.ticket.context_live]); }, () => ({}), fake);
+  const r = new Runner(
+    store,
+    (m: any) => {
+      if (m.type === 'ticket') shown.push([m.ticket.id, m.ticket.context_live]);
+    },
+    () => ({}),
+    fake,
+  );
   r.onTurnError = (ticket, text) => pushes.push({ ticket, text });
   r.limitDelayMs = 0;
   r.limitGapMs = 0;
@@ -56,13 +63,17 @@ async function turn(id: number, result: string, text = 'go') {
   return store.getTicket(id)!;
 }
 
-const events = (id: number, kind: string) => store.listEvents(id).filter((e) => e.kind === kind).map((e) => JSON.parse(e.data).text as string);
+const events = (id: number, kind: string) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === kind)
+    .map((e) => JSON.parse(e.data).text as string);
 
 // Two hours from now: a fixed time came round once a day, and a run in the minute before it saw no wait to speak of (#564).
 const LIMIT = `You've hit your 5-hour limit · resets ${new Date(Date.now() + 2 * 60 * 60 * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' }).replace(' ', '').toLowerCase()} (America/Los_Angeles)`;
 const IDENTITY = 'API Error: 400 Identity verification is required to continue.';
 
-test('the reset time comes from Claude\'s words, in the zone they name', () => {
+test("the reset time comes from Claude's words, in the zone they name", () => {
   const now = Date.parse('2026-10-29T10:00:00Z'); // 3am in Los Angeles (PDT, UTC-7)
   assert.equal(parseResetTime("You've hit your 5-hour limit · resets 3:30pm (America/Los_Angeles)", now), Date.parse('2026-10-29T22:30:00Z'));
   // Already past today: tomorrow's.
@@ -180,7 +191,10 @@ test("someone on another plan carries on through the payer's limit, on their own
     assert.deepEqual(runner.view(t).payer, { id: null, name: 'Cara' });
     assert.equal(runner.view(t).context_tokens, 122005);
     // The chat's size meter (#1193): the window is the main model's, not a Grunt's; mid-turn the live size shows, and it drops with a smaller one.
-    assert.ok(shown.some(([tid, live]) => tid === id && live === 122005), 'the size went out while the turn ran');
+    assert.ok(
+      shown.some(([tid, live]) => tid === id && live === 122005),
+      'the size went out while the turn ran',
+    );
     assert.equal(runner.view(t).context_window, 1000000);
     assert.equal(runner.view(t).context_live, null);
     // A size left over from a turn that never sent a result isn't live once no turn runs.
@@ -348,7 +362,10 @@ test('the wait and its held messages outlive a restart', async () => {
   const before = turnsRun();
   // A new server on the same database, once the reset time has come.
   const list = store.getSetting<any[]>('limit-resumes')!;
-  store.setSetting('limit-resumes', list.map((w) => ({ ...w, at: Date.now() })));
+  store.setSetting(
+    'limit-resumes',
+    list.map((w) => ({ ...w, at: Date.now() })),
+  );
   runner = makeRunner();
   runner.recover();
   await until('the resume after the restart', () => turnsRun() === before + 1 && !runner.isRunning(id));
@@ -360,7 +377,10 @@ test('dismissing ends the wait; a held message can be taken back', async () => {
   const id = minion();
   await turn(id, "You've hit your session limit");
   runner.send(id, 'Cara', 'never mind');
-  const held = store.listEvents(id).filter((e) => e.kind === 'user_message').at(-1)!.id;
+  const held = store
+    .listEvents(id)
+    .filter((e) => e.kind === 'user_message')
+    .at(-1)!.id;
   assert.equal(runner.unqueue(id, held, 'Cara'), true);
   assert.deepEqual(runner.queue.msgs(id), [], 'gone from the saved queue');
   runner.close(id, 'Cara dismissed this minion.');
@@ -369,7 +389,12 @@ test('dismissing ends the wait; a held message can be taken back', async () => {
 });
 
 test('a turn whose claude never starts says why', async () => {
-  const r = new Runner(store, () => {}, () => ({}), join(root, 'no-such-claude'));
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    join(root, 'no-such-claude'),
+  );
   r.onTurnError = (ticket, text) => pushes.push({ ticket, text });
   const id = minion();
   r.send(id, 'Cara', 'go');
@@ -382,7 +407,10 @@ test('a turn whose claude never starts says why', async () => {
 // Several Claude accounts (#779): fakes for ClaudeLink's side. Account 2's turns end as FAKE_RESULT says.
 function accountsFor(person: number, second: string) {
   const s = { inUse: 1, limited: new Map<number, number>(), cleared: [] as number[] };
-  const labels = [{ n: 1, label: 'one@x' }, { n: 2, label: 'two@x' }];
+  const labels = [
+    { n: 1, label: 'one@x' },
+    { n: 2, label: 'two@x' },
+  ];
   runner.personOf = (author) => (author === 'Pat' ? person : null);
   runner.placeFor = () => (s.inUse === 1 ? { host: true } : { host: true, account: 2, configDir: join(root, 'acct-2'), env: { CLAUDE_CONFIG_DIR: join(root, 'acct-2'), FAKE_RESULT: second } });
   runner.claudeAccounts = () => ({ inUse: s.inUse, accounts: labels });
@@ -399,7 +427,7 @@ const noAccounts = () => {
   runner.personOf = runner.placeFor = runner.claudeAccounts = runner.onLimit = runner.onCleared = undefined;
 };
 
-test('a turn that hits its account\'s limit carries on at once with the next ready account, not as a limit resume (#779)', async () => {
+test("a turn that hits its account's limit carries on at once with the next ready account, not as a limit resume (#779)", async () => {
   const pat = store.createUser({ name: 'Pat', login: 'pat779' });
   // A member, as anyone writing to a minion is: a resume runs for its turn's person only while they're in the scheme (#1270).
   store.addMember(project.id, pat.id);
@@ -446,7 +474,7 @@ test('a restart after a switch to the next account, before its resume starts, st
     assert.equal(s.inUse, 2);
     assert.match(lines(prompts).at(-1)!, /another of your person's Claude accounts/, 'it resumes as the account switch, not as a plain restart');
     assert.equal(store.getTicket(id)!.status, 'idle');
-    assert.equal((store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null), null, 'the debt is paid once the resume starts');
+    assert.equal(store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null, null, 'the debt is paid once the resume starts');
   } finally {
     noAccounts();
   }
@@ -487,7 +515,10 @@ test('a restart while a limit resume restores the session keeps the resume and i
   // A stored session file this login's folder lacks: the resume restores it off the event loop before its turn starts.
   store.putClaudeState({ path: `projects/a2/${id}.jsonl`, project_id: project.id, ticket_id: id, size: 2, mtime: Date.now(), data: gzipSync('{}') });
   const list = store.getSetting<any[]>('limit-resumes')!;
-  store.setSetting('limit-resumes', list.map((w) => ({ ...w, at: Date.now() })));
+  store.setSetting(
+    'limit-resumes',
+    list.map((w) => ({ ...w, at: Date.now() })),
+  );
   const before = turnsRun();
   const old = runner;
   (old as any).limitResumeNext();
@@ -509,7 +540,10 @@ test('a limit resume that starts no turn still ends its wait, though it is kept 
   const id = minion();
   await turn(id, "You've hit your session limit");
   const list = store.getSetting<any[]>('limit-resumes')!;
-  store.setSetting('limit-resumes', list.map((w) => ({ ...w, at: Date.now() })));
+  store.setSetting(
+    'limit-resumes',
+    list.map((w) => ({ ...w, at: Date.now() })),
+  );
   const before = turnsRun();
   // Its person's Claude can't run a turn now: the resume says so and starts nothing.
   runner.placeFor = () => ({ refused: 'Link Claude again.' });
@@ -524,7 +558,7 @@ test('a limit resume that starts no turn still ends its wait, though it is kept 
   assert.equal(runner.limitWait(id), null);
 });
 
-test('a minion\'s turn names its session to the account pick once it has one, and says where it ran (#793)', async () => {
+test("a minion's turn names its session to the account pick once it has one, and says where it ran (#793)", async () => {
   const pat = store.findUser('name', 'Pat')!;
   accountsFor(pat.id, 'ok');
   const asked: (string | undefined)[] = [];
@@ -593,7 +627,13 @@ test('weekly on one account and 5-hour on another: the note says which account i
     assert.doesNotMatch(note, /Every linked Claude account is limited now\. It resumes/);
     const v = runner.view(store.getTicket(id)!);
     assert.equal(v.limit_resume_at! < week, true, 'waits for the 5-hour account, not the week');
-    assert.deepEqual(v.limit_accounts!.map((a: any) => [a.label, !!a.here]), [['one@x', false], ['two@x', true]]);
+    assert.deepEqual(
+      v.limit_accounts!.map((a: any) => [a.label, !!a.here]),
+      [
+        ['one@x', false],
+        ['two@x', true],
+      ],
+    );
     assert.equal(v.limit_accounts!.find((a: any) => a.here)!.kind, 'weekly');
     assert.equal(runner.stop(id), true);
   } finally {
@@ -608,7 +648,11 @@ test('the limit note says the time in Pacific, whatever zone Claude named', asyn
   const t = await turn(id, "You've hit your 5-hour limit · resets 9:00am (Asia/Tokyo)");
   const LA = 'America/Los_Angeles';
   assert.equal(t.note, `Usage limit, resumes ${clockTime(resetsAt, LA)}`);
-  assert.ok(events(id, 'note').at(-1)!.includes(`resumes by itself at ${clockTime(resetsAt, LA)}`));
+  assert.ok(
+    events(id, 'note')
+      .at(-1)!
+      .includes(`resumes by itself at ${clockTime(resetsAt, LA)}`),
+  );
   runner.stop(id);
   store.deleteSetting('usage');
 });

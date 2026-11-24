@@ -12,11 +12,7 @@ const minion = { number: 291, status: 'running', cwd: '/data/projects/3/tickets/
 
 test('a turn stuck in a tool call says which, with its input and how long it has run', () => {
   const token = `ghp_${'a'.repeat(36)}`;
-  const events = [
-    ev(-100, { type: 'system', subtype: 'init' }), use(-90, 'old', 'Bash', { command: 'from an earlier turn' }),
-    init(0), use(10, 'a', 'Read', { file_path: '/x/app.ts' }), result(11, 'a', 'line one\nline two'),
-    use(60, 'b', 'Bash', { command: `GH_TOKEN=${token} npm test`, description: 'Run the tests' }),
-  ];
+  const events = [ev(-100, { type: 'system', subtype: 'init' }), use(-90, 'old', 'Bash', { command: 'from an earlier turn' }), init(0), use(10, 'a', 'Read', { file_path: '/x/app.ts' }), result(11, 'a', 'line one\nline two'), use(60, 'b', 'Bash', { command: `GH_TOKEN=${token} npm test`, description: 'Run the tests' })];
   const text = liveState(minion, events, T0 + 780_000).join('\n');
   assert.match(text, /^Live state of #291: status running, turn running 13m 0s$/m);
   assert.match(text, /^worktree: \/data\/projects\/3\/tickets\/1405$/m);

@@ -48,8 +48,12 @@ before(async () => {
 async function tool(from: number, name: string, args: object): Promise<{ text: string; error: boolean }> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(from),
-      COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(from), COORDINATOR_ROLE: 'thread',
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(from),
+      COORDINATOR_PROJECT: String(A.id),
+      COORDINATOR_TICKET: String(from),
+      COORDINATOR_ROLE: 'thread',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -63,7 +67,11 @@ async function tool(from: number, name: string, args: object): Promise<{ text: s
   }
 }
 
-const events = (id: number, kind: string) => store.listEvents(id).filter((e) => e.kind === kind).map((e) => JSON.parse(e.data));
+const events = (id: number, kind: string) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === kind)
+    .map((e) => JSON.parse(e.data));
 
 test('a message shows in both chats, labelled with the sender, and the Taskmaster gets a copy as held mail that wakes nothing', async () => {
   const r = await tool(M1.id, 'message_minion', { ticket_id: M2.number, text: 'I changed src/foo.ts: rebase before you touch it', wake: false });
@@ -74,14 +82,17 @@ test('a message shows in both chats, labelled with the sender, and the Taskmaste
   assert.equal(got.text, 'I changed src/foo.ts: rebase before you touch it');
   assert.match(events(M1.id, 'note').at(-1).text, /^Left held mail for #2 Receiver: I changed src\/foo\.ts/);
   // The chat's bubble reads "Not sent yet" while the ticket lists the message as held (#910).
-  const heldRow = store.listEvents(M2.id).filter((e) => e.kind === 'user_message').at(-1)!;
+  const heldRow = store
+    .listEvents(M2.id)
+    .filter((e) => e.kind === 'user_message')
+    .at(-1)!;
   assert.ok((await srv.call(`/api/tickets/${M2.id}`)).data.ticket.held_ids.includes(heldRow.id));
   const copy = events(TM.id, 'minion_copy').at(-1);
   assert.equal(copy.author, '#1 Sender');
   assert.deepEqual([copy.from, copy.to], [1, 2]);
   assert.match(copy.text, /^I changed/);
   // A chat-only row (#924): nothing queued for its next turn, and no message of its own.
-  assert.equal(((store.getSetting<any>(`minion-queue:${TM.id}`)?.held ?? null) ?? []).length, 0, "the Taskmaster's next turn gets no copy");
+  assert.equal((store.getSetting<any>(`minion-queue:${TM.id}`)?.held ?? null ?? []).length, 0, "the Taskmaster's next turn gets no copy");
   assert.equal(events(TM.id, 'user_message').length, 0);
   const { data: tm } = await srv.call(`/api/tickets/${TM.id}`);
   assert.notEqual(tm.ticket.status, 'running');
@@ -98,7 +109,9 @@ test('only minions of its own scheme: a number that exists only in another schem
   assert.equal(peek.error, true);
   // The route takes the sender from the path, so a minion can't post as another one either.
   const forged = await fetch(`${srv.base}/api/tickets/${M2.id}/minion-message`, {
-    method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(M1.id)}`, 'content-type': 'application/json' }, body: JSON.stringify({ to: 1, text: 'x' }),
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokens.agentToken(M1.id)}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ to: 1, text: 'x' }),
   });
   assert.equal(forged.status, 403);
   assert.equal(events(OTHER.id, 'user_message').length, before);
@@ -118,7 +131,7 @@ test('unpark: true wakes a minion parked on the sender, and the Taskmaster gets 
   const copy = events(TM.id, 'minion_copy').at(-1);
   assert.equal(copy.unparked, true);
   assert.match(copy.text, /^my work is on main/);
-  assert.equal(((store.getSetting<any>(`minion-queue:${TM.id}`)?.held ?? null) ?? []).length, 0);
+  assert.equal((store.getSetting<any>(`minion-queue:${TM.id}`)?.held ?? null ?? []).length, 0);
 });
 
 test('unpark: a chain a person put on hold is refused and stays parked', async () => {
@@ -176,9 +189,14 @@ test("read_minion shows a minion's line with its worktree and its chat's words, 
 
 test('the Taskmaster has neither tool, and its list leaves worktrees to read_ticket', async () => {
   const res = await fetch(`${srv.base}/api/tickets/${M1.id}/minion-message`, {
-    method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(TM.id)}`, 'content-type': 'application/json' }, body: JSON.stringify({ to: 2, text: 'x' }),
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokens.agentToken(TM.id)}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ to: 2, text: 'x' }),
   });
   assert.equal(res.status, 403);
   const list = await fetch(`${srv.base}/api/projects/${A.id}/tickets`, { headers: { Authorization: `Bearer ${tokens.agentToken(TM.id)}` } });
-  assert.equal((await list.json()).tickets.some((t: any) => 'worktree' in t), false);
+  assert.equal(
+    (await list.json()).tickets.some((t: any) => 'worktree' in t),
+    false,
+  );
 });

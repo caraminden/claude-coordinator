@@ -53,7 +53,7 @@ ticket(Delve, 'ticket', 5); // Delve #3, a leader to chain after
 ticket(Citadel, 'coordinator');
 for (let i = 0; i < 30; i++) ticket(Citadel, 'ticket', 3); // Citadel #1-#30, so #30 is only Citadel's
 
-test('a new minion rides its parent\'s build unless the create sets one', async () => {
+test("a new minion rides its parent's build unless the create sets one", async () => {
   const tokens = new Auth(PASSWORD, SECRET);
   const srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
   after(() => srv.stop());

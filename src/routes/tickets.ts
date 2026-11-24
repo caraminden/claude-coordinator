@@ -99,8 +99,8 @@ export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<st
   if (Object.keys(fields).length) {
     // A new model or effort changes why it runs where it does (#1061): a Taskmaster's change is a step-up after a stall, a person's is theirs.
     if ('model' in fields || 'effort' in fields) {
-      fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
-      store.addPick(id, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort, caller !== null && caller !== id ? 'Taskmaster' : name, fields.picked_because!);
+      fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? (fields.model ?? null) : stored.model, 'effort' in fields ? (fields.effort ?? null) : stored.effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
+      store.addPick(id, 'model' in fields ? (fields.model ?? null) : stored.model, 'effort' in fields ? (fields.effort ?? null) : stored.effort, caller !== null && caller !== id ? 'Taskmaster' : name, fields.picked_because!);
     }
     store.updateTicket(id, fields);
     if (fields.state === 'pending-deploy') runner.deployPending(id);
@@ -123,7 +123,7 @@ export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<st
     // shortcut: a state with no note of its own still falls back to the row read above, so a note write still queued
     // when this one arrives pings the note before it; upgrade when a write can hand back the row it wrote.
     if (fields.state && NOTIFY_STATES[fields.state]) {
-      app.notify(id, { kind: 'state', state: fields.state, note: 'note' in fields ? fields.note ?? null : stored.note }, caller ? null : name);
+      app.notify(id, { kind: 'state', state: fields.state, note: 'note' in fields ? (fields.note ?? null) : stored.note }, caller ? null : name);
     }
   }
   if (unparks) {
@@ -145,7 +145,11 @@ function pluginPicks(store: App['store'], ticket: { kind: string; project_id: nu
 }
 
 /** One area of a batch ask as sent. */
-interface RawArea { paths?: unknown; name?: unknown; question?: unknown }
+interface RawArea {
+  paths?: unknown;
+  name?: unknown;
+  question?: unknown;
+}
 
 const ULTRAREVIEW_REFUSE = 'Only a person can start an ultra review: it is billed to their own Claude account';
 const ULTRAREVIEW_PREP_REFUSE = "Only a person, or this chat's own minion for the person its turn runs for, can prep ultra reviews";
@@ -175,15 +179,39 @@ const SAYS_RECOMMENDED = /\s*\((recommended|rec\.?)\)\s*$/i;
 // A description that opens with "Recommended." flags its option when none is flagged (#481); the words go, the card shows them.
 const DESCRIBED_RECOMMENDED = /^\s*recommended(?:\s*[.:;,!\u2013\u2014-]+\s*|\s*$)/i;
 
-interface SecretAsk { name: string; scope: SecretScope; why?: string }
+interface SecretAsk {
+  name: string;
+  scope: SecretScope;
+  why?: string;
+}
 
 /** A question card's option as stored, once cleanQuestions has checked it. */
-interface CardOption { label: string; description?: string; image?: string; recommended?: true }
+interface CardOption {
+  label: string;
+  description?: string;
+  image?: string;
+  recommended?: true;
+}
 /** A question card's question as stored. */
-interface CardQuestion { question: string; header?: string; multiSelect: boolean; options: CardOption[] }
+interface CardQuestion {
+  question: string;
+  header?: string;
+  multiSelect: boolean;
+  options: CardOption[];
+}
 /** An option or a question as the ask sends it, before the checks. */
-interface RawOption { label?: unknown; description?: unknown; image?: unknown; recommended?: unknown }
-interface RawQuestion { question?: unknown; header?: unknown; multiSelect?: unknown; options?: unknown }
+interface RawOption {
+  label?: unknown;
+  description?: unknown;
+  image?: unknown;
+  recommended?: unknown;
+}
+interface RawQuestion {
+  question?: unknown;
+  header?: unknown;
+  multiSelect?: unknown;
+  options?: unknown;
+}
 
 /** A secret card's ask (#838): the name it saves under, whose it is (the answerer's own unless "scheme"), and why. */
 function secretAsk(raw: Record<string, unknown> | null | undefined): SecretAsk {
@@ -237,7 +265,11 @@ async function cleanQuestions(app: App, ticket: Ticket | TicketView, raw: unknow
     if (recommended > 1 && q.multiSelect !== true) throw new HttpError(400, `${n} recommends ${recommended} options; mark just one`);
     const question = str(q.question, n, 500);
     const untagged = [question, ...options.map((o) => o.description ?? '')].some(untaggedFence);
-    if (untagged) throw new HttpError(400, `${n} has a code block with no tag. A command people run goes in a fenced block tagged with where it runs (${SHELL_TAGS.map((t) => '```' + t).join(', ')}): the card draws it with that header and a Copy button, as a reply does, and every value in it is filled in, no <placeholder> but a secret. Tag anything else \`\`\`text`);
+    if (untagged)
+      throw new HttpError(
+        400,
+        `${n} has a code block with no tag. A command people run goes in a fenced block tagged with where it runs (${SHELL_TAGS.map((t) => '```' + t).join(', ')}): the card draws it with that header and a Copy button, as a reply does, and every value in it is filled in, no <placeholder> but a secret. Tag anything else \`\`\`text`,
+      );
     return {
       question,
       ...(q.header ? { header: str(q.header, `${n} header`, 24) } : {}),
@@ -247,7 +279,7 @@ async function cleanQuestions(app: App, ticket: Ticket | TicketView, raw: unknow
   });
   for (const [i, q] of questions.entries()) {
     for (const [j, o] of q.options.entries()) {
-      const problem = o.image && await optionImageProblem(o.image, ticket.cwd, ticketRoots(app, ticket));
+      const problem = o.image && (await optionImageProblem(o.image, ticket.cwd, ticketRoots(app, ticket)));
       if (problem) throw new HttpError(400, `Question ${i + 1} option ${j + 1} image ${problem}`);
     }
   }
@@ -320,7 +352,7 @@ export async function unparkTicket(app: App, ticket: Ticket | TicketView, by: st
     }
     // Not sealed since #1757 and not chained: this Unseal is its go.
     if (ticket.state !== 'parked' && !app.runner.heldFor(ticket.id)) {
-      if (!quiet) app.runner.startHeld(ticket.id, author, 'I OK\'d your start.');
+      if (!quiet) app.runner.startHeld(ticket.id, author, "I OK'd your start.");
       await ownWrites();
       return;
     }
@@ -347,7 +379,7 @@ function cleanAnswers(questions: CardQuestion[], raw: unknown, pictured = false)
   if (!Array.isArray(raw) || raw.length !== questions.length) throw new HttpError(400, 'Answer every question on the card (a question may have joined it since you opened it)');
   return questions.map((q, i) => {
     const a: { selected?: unknown; other?: unknown } = raw[i] ?? {};
-    const selected = Array.isArray(a.selected) ? [...new Set(a.selected.filter((l: unknown) => q.options.some((o) => o.label === l)))] as string[] : [];
+    const selected = Array.isArray(a.selected) ? ([...new Set(a.selected.filter((l: unknown) => q.options.some((o) => o.label === l)))] as string[]) : [];
     const other = typeof a.other === 'string' ? a.other.trim().slice(0, 2000) : '';
     if (!q.multiSelect && selected.length > 1) throw new HttpError(400, `Pick one answer for question ${i + 1}`);
     // A picture sent with the answer counts for every question left blank (Cara, 2026-11-18).
@@ -375,7 +407,10 @@ export function personWrote({ app: { store, runner, presence }, caller, session,
   // Writing in a minion's chat (or answering its card) touches it: its updates reach their Taskmaster too (#919).
   if (ticket.kind !== 'coordinator' && session.uid != null) store.touch(ticket.id, session.uid);
   const minions = ticket.kind === 'coordinator' ? store.listTickets(ticket.project_id) : [ticket];
-  runner.continueLoops(minions.map((t) => t.id), session.name);
+  runner.continueLoops(
+    minions.map((t) => t.id),
+    session.name,
+  );
 }
 
 /**
@@ -401,7 +436,12 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
   try {
     size = await diffSize(spec);
   } catch (err) {
-    throw new HttpError(400, String(thrown(err).stderr || thrown(err).message).trim().split('\n')[0]);
+    throw new HttpError(
+      400,
+      String(thrown(err).stderr || thrown(err).message)
+        .trim()
+        .split('\n')[0],
+    );
   }
   if (!size.files) throw new HttpError(400, spec.mode === 'branch' ? `Nothing to review: ${spec.branch} has no changes against ${base}` : 'Nothing to review: those paths hold no files');
   return { spec, size };
@@ -410,7 +450,10 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
 export const ticketRoutes: Route[] = [
   {
     // An ultra review's size, before the person confirms (#432). Person-only like starting one.
-    method: 'GET', path: '/api/tickets/:ticket/ultrareview', who: ['person'], refuse: ULTRAREVIEW_REFUSE,
+    method: 'GET',
+    path: '/api/tickets/:ticket/ultrareview',
+    who: ['person'],
+    refuse: ULTRAREVIEW_REFUSE,
     async handler({ res, url, app, session, ticket }) {
       const paths = url.searchParams.getAll('path');
       const { spec, size } = await ultrareviewSpec(app, ticket, url.searchParams.get('mode'), paths);
@@ -422,7 +465,10 @@ export const ticketRoutes: Route[] = [
     // Start an ultra review on the clicker's own Claude login (#432). It spends a free run or usage credits,
     // so it is person-only: no minion, Taskmaster, schedule or contraption reaches this route, and the
     // body must carry the confirmation the button shows.
-    method: 'POST', path: '/api/tickets/:ticket/ultrareview', who: ['person'], refuse: ULTRAREVIEW_REFUSE,
+    method: 'POST',
+    path: '/api/tickets/:ticket/ultrareview',
+    who: ['person'],
+    refuse: ULTRAREVIEW_REFUSE,
     async handler({ req, res, app, session, ticket }) {
       if (!session.uid) throw new HttpError(403, 'Sign in as yourself to run an ultra review: it runs on your own Claude login');
       const body = await readJson(req);
@@ -439,12 +485,17 @@ export const ticketRoutes: Route[] = [
   },
   {
     // A person's prepped ultra reviews in this chat (#1399): one draft PR per area, each waiting for its Start.
-    method: 'GET', path: '/api/tickets/:ticket/ultrareview/batch', who: ['person', 'self'], refuse: ULTRAREVIEW_PREP_REFUSE,
+    method: 'GET',
+    path: '/api/tickets/:ticket/ultrareview/batch',
+    who: ['person', 'self'],
+    refuse: ULTRAREVIEW_PREP_REFUSE,
     async handler({ res, app, session, caller, ticket }) {
       const uid = prepper(app, session, caller, ticket)?.uid;
       return json(res, 200, {
-        rows: uid ? app.ultrareviews.rows(ticket.id, uid).map(rowView) : [], limits: LIMITS,
-        linked: !!(uid && app.claude.place(uid)), github: !!(uid && hasGithub(app, uid)),
+        rows: uid ? app.ultrareviews.rows(ticket.id, uid).map(rowView) : [],
+        limits: LIMITS,
+        linked: !!(uid && app.claude.place(uid)),
+        github: !!(uid && hasGithub(app, uid)),
       });
     },
   },
@@ -453,7 +504,10 @@ export const ticketRoutes: Route[] = [
     // get a draft PR as the asker's own GitHub login. Prepping costs nothing, so the chat's own minion may prep too, for
     // the person its turn runs for (Cara, 2026-11-20, "Yes, minions prep too"): the rows wait for that person's Start,
     // which stays person-only.
-    method: 'POST', path: '/api/tickets/:ticket/ultrareview/batch', who: ['person', 'self'], refuse: ULTRAREVIEW_PREP_REFUSE,
+    method: 'POST',
+    path: '/api/tickets/:ticket/ultrareview/batch',
+    who: ['person', 'self'],
+    refuse: ULTRAREVIEW_PREP_REFUSE,
     async handler({ req, res, app, session, caller, ticket }) {
       const who = prepper(app, session, caller, ticket);
       if (!who) throw new HttpError(403, caller ? 'No person to prep for: this chat has not run a turn for anyone yet, so nobody would get the Start' : 'Sign in as yourself to prep ultra reviews: their pull requests go out as your own GitHub login');
@@ -472,7 +526,11 @@ export const ticketRoutes: Route[] = [
           name = typeof a?.name === 'string' && a.name.trim() ? a.name.trim().slice(0, 80) : paths.join(', ').slice(0, 80);
           const question = typeof a?.question === 'string' && a.question.trim() ? a.question.trim().slice(0, 2000) : undefined;
           const size = await diffSize({ mode: 'area', repo, base, paths }).catch((err: unknown) => {
-            throw new Error(String(thrown(err).stderr || thrown(err).message).trim().split('\n')[0]);
+            throw new Error(
+              String(thrown(err).stderr || thrown(err).message)
+                .trim()
+                .split('\n')[0],
+            );
           });
           if (!size.files) throw new Error('Nothing to review: those paths hold no files');
           if (overLimit(size)) {
@@ -489,7 +547,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // Start one prepped review (#1399): billed to the clicker, so person-only and confirmed, like the single start.
-    method: 'POST', path: '/api/tickets/:ticket/ultrareview/batch/:row/start', who: ['person'], refuse: ULTRAREVIEW_REFUSE,
+    method: 'POST',
+    path: '/api/tickets/:ticket/ultrareview/batch/:row/start',
+    who: ['person'],
+    refuse: ULTRAREVIEW_REFUSE,
     async handler({ req, res, app, session, ticket, params }) {
       if (!session.uid) throw new HttpError(403, 'Sign in as yourself to run an ultra review: it runs on your own Claude login');
       const body = await readJson(req);
@@ -505,7 +566,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // Discard a prepped review (#1399): its row goes now; its PR is closed and its branches deleted behind it.
-    method: 'DELETE', path: '/api/tickets/:ticket/ultrareview/batch/:row', who: ['person'], refuse: ULTRAREVIEW_REFUSE,
+    method: 'DELETE',
+    path: '/api/tickets/:ticket/ultrareview/batch/:row',
+    who: ['person'],
+    refuse: ULTRAREVIEW_REFUSE,
     async handler({ res, app, session, ticket, params }) {
       if (!session.uid) throw new HttpError(403, 'Sign in as yourself');
       const row = app.ultrareviews.rows(ticket.id, session.uid).find((x) => x.id === params.row);
@@ -520,14 +584,16 @@ export const ticketRoutes: Route[] = [
   {
     // Ask a minion on the side (#932): a read-only fork of its session answers in a side thread, on the asker's own
     // login (sender pays), so only a signed-in person reaches it. `thread` follows up the asker's own thread.
-    method: 'POST', path: '/api/tickets/:ticket/side', who: ['person'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/side',
+    who: ['person'],
     async handler({ req, res, app, session, ticket }) {
       if (!session.uid) throw new HttpError(403, 'Sign in as yourself to ask on the side: it runs on your own Claude login');
       if (ticket.kind === 'coordinator') throw new HttpError(400, 'Side questions are for minions, not the Taskmaster');
       const body = await readJson(req);
       const text = str(body.text, 'text', SIDE_MAX_CHARS);
       const thread = body.thread === undefined || body.thread === null ? undefined : Number(body.thread);
-      if (thread !== undefined && !Number.isSafeInteger(thread)) throw new HttpError(400, 'thread must be a side thread\'s id');
+      if (thread !== undefined && !Number.isSafeInteger(thread)) throw new HttpError(400, "thread must be a side thread's id");
       try {
         return json(res, 202, app.sideAsks.ask(ticket.id, session.uid, session.name, text, thread));
       } catch (err) {
@@ -537,13 +603,18 @@ export const ticketRoutes: Route[] = [
   },
   // The slash commands this chat's turns load, with a line on each (#937): the composer's menu and its check of what it sends.
   {
-    method: 'GET', path: '/api/tickets/:ticket/commands', who: ['person'],
+    method: 'GET',
+    path: '/api/tickets/:ticket/commands',
+    who: ['person'],
     async handler({ res, app, ticket }) {
       return json(res, 200, chatCommands(app.store, ticket));
     },
   },
   {
-    method: 'GET', path: '/api/tickets/:ticket', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
+    method: 'GET',
+    path: '/api/tickets/:ticket',
+    who: ['person', 'taskmaster', 'minion'],
+    everyScheme: true,
     async handler(ctx) {
       const { res, ticket, app } = ctx;
       const { store } = app;
@@ -552,13 +623,18 @@ export const ticketRoutes: Route[] = [
   },
   {
     // A waiting heavy run's newest output lines (#1681), for the readout under the wait; the page asks every few seconds.
-    method: 'GET', path: '/api/tickets/:ticket/wait-tail', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
+    method: 'GET',
+    path: '/api/tickets/:ticket/wait-tail',
+    who: ['person', 'taskmaster', 'minion'],
+    everyScheme: true,
     async handler({ res, ticket, app }) {
       return json(res, 200, { lines: (await app.waits?.tail(ticket.id, 20)) ?? [] });
     },
   },
   {
-    method: 'PATCH', path: '/api/tickets/:ticket', who: ['person', 'taskmaster', 'minion'],
+    method: 'PATCH',
+    path: '/api/tickets/:ticket',
+    who: ['person', 'taskmaster', 'minion'],
     async handler(ctx) {
       const { req, res, app, session, caller, ticket } = ctx;
       const closeCancelled = setLabels(app, ticket, await readJson(req), session.name, caller?.id ?? null);
@@ -568,7 +644,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // People's own note (#146): one plain line, shown only to people, never in a ticket's JSON or its chat.
-    method: 'PUT', path: '/api/tickets/:ticket/person-note', who: ['person'], refuse: 'Only people write person notes',
+    method: 'PUT',
+    path: '/api/tickets/:ticket/person-note',
+    who: ['person'],
+    refuse: 'Only people write person notes',
     async handler({ req, res, app, session, ticket }) {
       if (ticket.kind !== 'ticket') throw new HttpError(400, `The ${AGENT_NAME} has no person note`);
       const body = await readJson(req);
@@ -582,7 +661,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // A person's own pin (#179): the minion shows in a Pinned section atop their list, for them only.
-    method: 'PUT', path: '/api/tickets/:ticket/pin', who: ['person'], refuse: 'Only people pin minions',
+    method: 'PUT',
+    path: '/api/tickets/:ticket/pin',
+    who: ['person'],
+    refuse: 'Only people pin minions',
     async handler({ req, res, app, session, ticket }) {
       if (ticket.kind !== 'ticket') throw new HttpError(400, `The ${AGENT_NAME} can't be pinned`);
       const body = await readJson(req);
@@ -594,7 +676,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/seen', who: ['person'], refuse: 'Only people mark minions seen',
+    method: 'POST',
+    path: '/api/tickets/:ticket/seen',
+    who: ['person'],
+    refuse: 'Only people mark minions seen',
     async handler(ctx) {
       const { req, res, session, app, ticket } = ctx;
       const { id } = ticket;
@@ -608,7 +693,9 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/tickets/:ticket/branch', who: ['person', 'taskmaster'],
+    method: 'GET',
+    path: '/api/tickets/:ticket/branch',
+    who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { res, app, ticket } = ctx;
       const { id } = ticket;
@@ -617,7 +704,9 @@ export const ticketRoutes: Route[] = [
   },
   {
     // ship_risk (#1196): ships by risk per scheme and Pacific week. The Citadel scheme's minions and Taskmaster read every scheme (its process digest); another scheme's, its own.
-    method: 'GET', path: '/api/tickets/:ticket/ship-risk', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/tickets/:ticket/ship-risk',
+    who: ['person', 'taskmaster', 'minion'],
     handler({ res, url, app, ticket }) {
       const weeks = Math.min(26, Math.max(1, Math.floor(Number(url.searchParams.get('weeks'))) || 4));
       const r = shipRisk(app.store, ticket.project_id === GLOBAL_OWNER ? null : [ticket.project_id], weeks);
@@ -626,7 +715,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // live_facts (#1113): a minion's live facts in one read. A minion asks as itself, for a minion of its scheme by ?number=.
-    method: 'GET', path: '/api/tickets/:ticket/facts', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
+    method: 'GET',
+    path: '/api/tickets/:ticket/facts',
+    who: ['person', 'taskmaster', 'minion'],
+    everyScheme: true,
     async handler({ res, url, app, caller, ticket }) {
       let id = ticket.id;
       if (caller && caller.kind !== 'coordinator' && url.searchParams.has('number')) {
@@ -640,7 +732,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'PUT', path: '/api/tickets/:ticket/uploads', who: ['person'], refuse: 'Only people attach files',
+    method: 'PUT',
+    path: '/api/tickets/:ticket/uploads',
+    who: ['person'],
+    refuse: 'Only people attach files',
     async handler(ctx) {
       const { req, res, url, app, ticket } = ctx;
       // A file from the composer, streamed to disk as it arrives; the message that sends it names it.
@@ -650,7 +745,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/tickets/:ticket/events', who: ['person', 'taskmaster'], everyScheme: true,
+    method: 'GET',
+    path: '/api/tickets/:ticket/events',
+    who: ['person', 'taskmaster'],
+    everyScheme: true,
     async handler(ctx) {
       const { res, url, app, ticket } = ctx;
       const { id } = ticket;
@@ -663,7 +761,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // One event whole: what an opened action row fetches when the page sent its input or result cut (public/eventcut.js).
-    method: 'GET', path: '/api/tickets/:ticket/events/:event', who: ['person', 'taskmaster'], everyScheme: true,
+    method: 'GET',
+    path: '/api/tickets/:ticket/events/:event',
+    who: ['person', 'taskmaster'],
+    everyScheme: true,
     async handler({ res, app, ticket, params }) {
       const row = app.store.getEvent(Number(params.event));
       if (!row || row.ticket_id !== ticket.id) throw new HttpError(404, 'Not found');
@@ -671,7 +772,9 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/messages', who: ['person', 'taskmaster'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/messages',
+    who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { req, res, app, session, caller } = ctx;
       const { runner } = app;
@@ -736,7 +839,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/unqueue', who: ['person'], refuse: 'Only people can take back a queued message',
+    method: 'POST',
+    path: '/api/tickets/:ticket/unqueue',
+    who: ['person'],
+    refuse: 'Only people can take back a queued message',
     async handler(ctx) {
       const { req, res, app, session, ticket } = ctx;
       const { id } = ticket;
@@ -747,7 +853,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/continue', who: ['person'], refuse: 'Only people continue a paused minion',
+    method: 'POST',
+    path: '/api/tickets/:ticket/continue',
+    who: ['person'],
+    refuse: 'Only people continue a paused minion',
     async handler(ctx) {
       const { res, session, app, ticket } = ctx;
       const { id } = ticket;
@@ -758,7 +867,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // Deliver now on the Held list (#1059): a ticket's held mail runs as a turn without waiting for the cold hold.
-    method: 'POST', path: '/api/tickets/:ticket/deliver-mail', who: ['person'], refuse: 'Only people deliver held mail',
+    method: 'POST',
+    path: '/api/tickets/:ticket/deliver-mail',
+    who: ['person'],
+    refuse: 'Only people deliver held mail',
     async handler(ctx) {
       const { res, session, app, ticket } = ctx;
       if (app.runner.isRunning(ticket.id)) return json(res, 409, { error: 'It is running: its held mail reaches it with its next turn' });
@@ -768,14 +880,17 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/comments', who: ['person'], refuse: 'Only people comment on files',
+    method: 'POST',
+    path: '/api/tickets/:ticket/comments',
+    who: ['person'],
+    refuse: 'Only people comment on files',
     async handler(ctx) {
       const { req, res, app, session, ticket } = ctx;
       const { id } = ticket;
       const { runner } = app;
       // A comment from a file's viewer: a chat message to the ticket that made the file, saying which file.
       const body = await readJson(req);
-      const found = typeof body.path === 'string' && await resolveTicketFile(app, ticket, body.path);
+      const found = typeof body.path === 'string' && (await resolveTicketFile(app, ticket, body.path));
       if (!found) throw new HttpError(404, 'That file is no longer there');
       const quote = typeof body.quote === 'string' ? body.quote.slice(0, 2000) : '';
       // Named as the ticket would write it: relative to its working directory, else in full.
@@ -787,7 +902,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/questions', who: ['self'], refuse: 'Only the minion itself can ask in its chat',
+    method: 'POST',
+    path: '/api/tickets/:ticket/questions',
+    who: ['self'],
+    refuse: 'Only the minion itself can ask in its chat',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       // Claude asks people multiple-choice questions; the card shows in the chat until someone answers.
@@ -802,7 +920,7 @@ export const ticketRoutes: Route[] = [
       const questions = notice || doc || secret ? [] : await cleanQuestions(app, ticket, body.questions);
       // A card asking for the go to ship says so, for the minions list's chip (#575). "ship" is the word people read
       // (Cara, 2026-11-19, picked "Ship" on #1020's card); it is stored as the older kind "merge", and "land" still counts.
-      const kind = oneOf(body.kind ?? null, ['merge', 'ship', 'land'], 'kind') ? 'merge' as const : null;
+      const kind = oneOf(body.kind ?? null, ['merge', 'ship', 'land'], 'kind') ? ('merge' as const) : null;
       // A feeder (a build whose branch exists, and not its owner) merges into the build: its go card says Merge, not Ship It.
       const proj = kind && ticket.build ? app.store.getProject(ticket.project_id) : null;
       const into = proj && ticket.kind !== 'coordinator' && buildBranch(proj.repo_dir, ticket.build) && app.store.getSetting<number>(buildOwnerKey(proj.id, ticket.build!)) !== ticket.id ? ticket.build! : null;
@@ -811,24 +929,24 @@ export const ticketRoutes: Route[] = [
       // A card that repeats one open or just answered is refused once; not_duplicate posts it. Both are counted (settings
       // card_twin:refused and card_twin:override) so the false-alarm rate can be read.
       const checkTwin = () => {
-      if (questions.length && !kind) {
-        const bump = (k: string) => app.store.setSetting(`card_twin:${k}`, (app.store.getSetting<number>(`card_twin:${k}`) ?? 0) + 1);
-        const twin = cardTwin(app.store, ticket, card);
-        if (twin && body.not_duplicate !== true) {
-          bump('refused');
-          console.log(`card-twin: refused #${ticket.number ?? ticket.id}`);
-          throw new HttpError(409, twin);
+        if (questions.length && !kind) {
+          const bump = (k: string) => app.store.setSetting(`card_twin:${k}`, (app.store.getSetting<number>(`card_twin:${k}`) ?? 0) + 1);
+          const twin = cardTwin(app.store, ticket, card);
+          if (twin && body.not_duplicate !== true) {
+            bump('refused');
+            console.log(`card-twin: refused #${ticket.number ?? ticket.id}`);
+            throw new HttpError(409, twin);
+          }
+          if (twin) {
+            bump('override');
+            console.log(`card-twin: override #${ticket.number ?? ticket.id}`);
+          }
         }
-        if (twin) {
-          bump('override');
-          console.log(`card-twin: override #${ticket.number ?? ticket.id}`);
-        }
-      }
       };
       // For everyone (#921): a person's Taskmaster asks a scheme-wide question in the Overlord's chat, where every member
       // sees it; its answer still comes back to the asker (Cara, 2026-11-17: "Asker acts on it").
       if (body.for_everyone === true) {
-        if (ticket.kind !== 'coordinator' || !questions.length || to || body.when_ci_passes === true) throw new HttpError(400, 'for_everyone is a Taskmaster\'s question card, with no to or when_ci_passes');
+        if (ticket.kind !== 'coordinator' || !questions.length || to || body.when_ci_passes === true) throw new HttpError(400, "for_everyone is a Taskmaster's question card, with no to or when_ci_passes");
         checkTwin();
         const overlord = ticket.coordinator_of != null ? app.store.getOverlord(ticket.project_id) : undefined;
         if (overlord) {
@@ -844,7 +962,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/settle', who: ['self'], refuse: 'Only the minion itself can settle its question cards',
+    method: 'POST',
+    path: '/api/tickets/:ticket/settle',
+    who: ['self'],
+    refuse: 'Only the minion itself can settle its question cards',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const { id } = ticket;
@@ -882,7 +1003,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/dismiss', who: ['person'], refuse: 'Only people dismiss cards',
+    method: 'POST',
+    path: '/api/tickets/:ticket/dismiss',
+    who: ['person'],
+    refuse: 'Only people dismiss cards',
     async handler(ctx) {
       const { req, res, app, session, ticket } = ctx;
       const { id } = ticket;
@@ -893,7 +1017,10 @@ export const ticketRoutes: Route[] = [
       const event = store.openCardsOf(id).find((e) => JSON.parse(e.data).id === want);
       if (!event) {
         // Told how it ended, so two people racing read why theirs didn't count.
-        const done = store.eventsOfKinds(id, ['question', 'plan']).map((e) => JSON.parse(e.data)).find((d) => d.id === want);
+        const done = store
+          .eventsOfKinds(id, ['question', 'plan'])
+          .map((e) => JSON.parse(e.data))
+          .find((d) => d.id === want);
         if (!done) throw new HttpError(404, 'No such card');
         const by = done.settled?.by ?? done.by;
         throw new HttpError(409, done.settled?.dismissed || done.status === 'dismissed' ? `${by} dismissed this card` : `This card was already ${done.status ?? (by ? 'handled by ' + by : 'answered or settled')}`);
@@ -920,7 +1047,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/strike', who: ['self'], refuse: 'Only a thread itself can strike its words',
+    method: 'POST',
+    path: '/api/tickets/:ticket/strike',
+    who: ['self'],
+    refuse: 'Only a thread itself can strike its words',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const { id } = ticket;
@@ -939,7 +1069,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/answer', who: ['person'], refuse: 'Only people answer question cards',
+    method: 'POST',
+    path: '/api/tickets/:ticket/answer',
+    who: ['person'],
+    refuse: 'Only people answer question cards',
     async handler(ctx) {
       const { req, res, app, session, ticket } = ctx;
       const { id } = ticket;
@@ -970,7 +1103,7 @@ export const ticketRoutes: Route[] = [
       // The minion that asked hears it held, with no turn: it is woken when the job ends or is refused.
       if (data.job) {
         const choice = MachineJobs.choiceOf(answers[0]?.selected[0] ?? '');
-        if (!choice) throw new HttpError(400, 'Pick one of the card\'s options');
+        if (!choice) throw new HttpError(400, "Pick one of the card's options");
         app.jobs.decide(data.job, choice, { uid: session.uid ?? -1, name: session.name, admin: !!session.admin }, true);
         runner.send(id, session.name, `My answer to job #${data.job}'s go card: ${answers[0].selected[0]}`, [], { answer: { questionId: body.questionId, answers }, hold: true });
         runner.broadcastTicket(id);
@@ -1007,7 +1140,14 @@ export const ticketRoutes: Route[] = [
           else runner.startHeld(id, session.name, `I picked ${START} on your start card: go ahead.`);
         } else {
           await runner.close(id, `${session.name} picked ${SPLIT} on its start card, so it was dismissed before it ran.`);
-          await tellTaskmaster(app, ticket, `${session.name} picked "${SPLIT}" on the start card of #${ticket.number} ${ticket.title} (expected ${money(data.startCost)}): it was dismissed without running.${added} Split its brief (and the handoff it names) into minions expected at ${money(START_CARD_USD)} or less each, with an "Expected cost" line in each, and start those.`, false, true, 'ask');
+          await tellTaskmaster(
+            app,
+            ticket,
+            `${session.name} picked "${SPLIT}" on the start card of #${ticket.number} ${ticket.title} (expected ${money(data.startCost)}): it was dismissed without running.${added} Split its brief (and the handoff it names) into minions expected at ${money(START_CARD_USD)} or less each, with an "Expected cost" line in each, and start those.`,
+            false,
+            true,
+            'ask',
+          );
         }
         await ownWrites();
         return json(res, 202, ticketView(app, id));
@@ -1019,12 +1159,14 @@ export const ticketRoutes: Route[] = [
         runner.recordAnswer(id, session.name, `My answer to your budget card: ${CARD_STOP}. I stopped your turn.`, { answer: { questionId: body.questionId, answers } });
         return json(res, 202, ticketView(app, id));
       }
-      const text = questions.map((q: CardQuestion, i: number) => {
-        const { selected, other } = answers[i];
-        // The text typed with a pick expands on it; typed alone, it is the answer.
-        const picked = !selected.length && !other ? '(no option picked; see the attachment)' : selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
-        return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
-      }).join('\n\n');
+      const text = questions
+        .map((q: CardQuestion, i: number) => {
+          const { selected, other } = answers[i];
+          // The text typed with a pick expands on it; typed alone, it is the answer.
+          const picked = !selected.length && !other ? '(no option picked; see the attachment)' : selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
+          return `${questions.length > 1 ? `${i + 1}. ` : ''}${q.question}\n→ ${picked}`;
+        })
+        .join('\n\n');
       const answer = { answer: { questionId: body.questionId, answers } };
       // Pictures and files pasted into the card's box ride in the answer message, as in the composer.
       const files = await messageFiles(app, ticket, body.files);
@@ -1042,7 +1184,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/secret', who: ['person'], refuse: 'Only people save secrets',
+    method: 'POST',
+    path: '/api/tickets/:ticket/secret',
+    who: ['person'],
+    refuse: 'Only people save secrets',
     async handler(ctx) {
       const { req, res, app, session, ticket } = ctx;
       const { id } = ticket;
@@ -1068,7 +1213,9 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'PUT', path: '/api/tickets/:ticket/properties', who: ['person', 'taskmaster', 'minion'],
+    method: 'PUT',
+    path: '/api/tickets/:ticket/properties',
+    who: ['person', 'taskmaster', 'minion'],
     async handler(ctx) {
       const { req, res, app, session, ticket } = ctx;
       const { id } = ticket;
@@ -1089,8 +1236,7 @@ export const ticketRoutes: Route[] = [
       if (after !== before && ticket.kind === 'ticket') {
         const agent = session.agent != null ? store.getTicket(session.agent) : null;
         const by = !agent ? session.name : agent.kind === 'coordinator' ? 'The Taskmaster' : `#${agent.number}`;
-        const text = !agent && after.toLowerCase() === by.toLowerCase() ? `${by} took over #${ticket.number}`
-          : after ? `${by} handed #${ticket.number} to ${after}` : `${by} unassigned #${ticket.number}`;
+        const text = !agent && after.toLowerCase() === by.toLowerCase() ? `${by} took over #${ticket.number}` : after ? `${by} handed #${ticket.number} to ${after}` : `${by} unassigned #${ticket.number}`;
         runner.emit(id, 'note', { text });
         // The old owner stays touched, so its updates still reach their Taskmaster (#919).
         const was = store.findUser('name', store.props.personName(before) || '')?.id;
@@ -1111,7 +1257,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // Leave a minion (#919): its updates stop reaching your Taskmaster until you write in it again. The menu item is #920's.
-    method: 'POST', path: '/api/tickets/:ticket/leave', who: ['person'], refuse: 'Only a person can leave a minion',
+    method: 'POST',
+    path: '/api/tickets/:ticket/leave',
+    who: ['person'],
+    refuse: 'Only a person can leave a minion',
     async handler({ res, app, session, ticket }) {
       if (ticket.kind === 'coordinator') throw new HttpError(400, `Only a minion can be left, not a ${AGENT_NAME}`);
       app.store.leaveTouched(ticket.id, session.uid!);
@@ -1120,7 +1269,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // Sleep or wake a minion (#1636): { asleep: boolean }. Out of Needs you and keepalives until this, or any turn, wakes it.
-    method: 'POST', path: '/api/tickets/:ticket/sleep', who: ['person'], refuse: 'Only a person can put a minion to sleep',
+    method: 'POST',
+    path: '/api/tickets/:ticket/sleep',
+    who: ['person'],
+    refuse: 'Only a person can put a minion to sleep',
     async handler({ req, res, app, session, ticket }) {
       if (ticket.kind === 'coordinator') throw new HttpError(400, `Only a minion can sleep, not a ${AGENT_NAME}`);
       if (ticket.status === 'closed') throw new HttpError(409, 'This minion is dismissed');
@@ -1131,15 +1283,19 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/stop', who: ['person', 'taskmaster'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/stop',
+    who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { res, app, ticket, session } = ctx;
-      return json(res, 200, stopMinion(app, ticket, session?.agent !== undefined ? 'the Taskmaster' : session?.name ?? 'a member'));
+      return json(res, 200, stopMinion(app, ticket, session?.agent !== undefined ? 'the Taskmaster' : (session?.name ?? 'a member')));
     },
   },
   // "Is this still going?" on a quiet turn's chip (#906): a look at its process, no message and no model call.
   {
-    method: 'POST', path: '/api/tickets/:ticket/check', who: ['person'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/check',
+    who: ['person'],
     async handler(ctx) {
       const { res, app, ticket } = ctx;
       const check = await app.runner.checkTurn(ticket.id);
@@ -1149,7 +1305,9 @@ export const ticketRoutes: Route[] = [
   // A spend alert card's Stop and Keep going (#723): each names its turn's start, so a card left over from an earlier
   // turn can't stop or mute a later one.
   {
-    method: 'POST', path: '/api/tickets/:ticket/spend-stop', who: ['person'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/spend-stop',
+    who: ['person'],
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const turn = Number((await readJson(req))?.turn);
@@ -1159,7 +1317,9 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/spend-mute', who: ['person'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/spend-mute',
+    who: ['person'],
     async handler(ctx) {
       const { req, res, app, session, ticket } = ctx;
       return json(res, 200, { muted: app.runner.muteSpend(ticket.id, session.name, Number((await readJson(req))?.turn)) });
@@ -1168,20 +1328,22 @@ export const ticketRoutes: Route[] = [
   // A Taskmaster's fresh session (#406): a person asks for one (the chat's button), or the Taskmaster's turn hands off (fresh_session),
   // as a minion in the seam trial's fresh group does (#1129).
   {
-    method: 'POST', path: '/api/tickets/:ticket/fresh-session', who: ['person', 'self'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/fresh-session',
+    who: ['person', 'self'],
     async handler(ctx) {
       const { req, res, app, session, caller, ticket } = ctx;
       const body = await readJson(req);
-      const why = caller
-        ? app.runner.recordHandoff(ticket.id, str(body.summary, 'Summary', 20_000), body.carry_on !== false)
-        : app.runner.requestFresh(ticket.id, `${session.name} asked for it`);
+      const why = caller ? app.runner.recordHandoff(ticket.id, str(body.summary, 'Summary', 20_000), body.carry_on !== false) : app.runner.requestFresh(ticket.id, `${session.name} asked for it`);
       if (why) throw new HttpError(409, why);
       return json(res, 202, ticketView(app, ticket.id));
     },
   },
   // Unseal (#718): the chat header's button and update_ticket's state change; for a chained minion, as Start now.
   {
-    method: 'POST', path: '/api/tickets/:ticket/unpark', who: ['person', 'taskmaster'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/unpark',
+    who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { res, app, session, caller, ticket } = ctx;
       await unparkTicket(app, ticket, session.name, caller ? APP_NAME : session.name);
@@ -1190,10 +1352,12 @@ export const ticketRoutes: Route[] = [
   },
   // Start now (#261): a minion sealed on start_after starts before its leader's work is in, its held brief first.
   {
-    method: 'POST', path: '/api/tickets/:ticket/start', who: ['person', 'taskmaster'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/start',
+    who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { res, app, session, ticket } = ctx;
-      if (ticket.kind === 'coordinator') throw new HttpError(400, 'The Taskmaster never waits on another minion\'s work');
+      if (ticket.kind === 'coordinator') throw new HttpError(400, "The Taskmaster never waits on another minion's work");
       const chained = app.waiters.claim(ticket.id); // released by startChained as it sends the brief
       if (!chained) throw new HttpError(409, `#${ticket.number} isn't sealed waiting on another minion's work`);
       await app.startChained(chained, `${session.name} started it before its leader's work was in`);
@@ -1201,7 +1365,9 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/status', who: ['person', 'taskmaster'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/status',
+    who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { req, res, app, session, ticket } = ctx;
       const { id } = ticket;
@@ -1228,7 +1394,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/coordinator', who: ['minion'], refuse: 'Only a minion can message its Taskmaster',
+    method: 'POST',
+    path: '/api/tickets/:ticket/coordinator',
+    who: ['minion'],
+    refuse: 'Only a minion can message its Taskmaster',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       // A thread asks its project's coordinator for something only the coordinator can do (message_coordinator).
@@ -1250,7 +1419,10 @@ export const ticketRoutes: Route[] = [
     // message_minion (#783): one minion messages another in its own scheme, with the Taskmaster's wake rules
     // (runner.relayMinion) and one loop guard per pair. It never reopens a dismissed one, and the Taskmaster
     // gets a one-line copy as held mail, which wakes nothing.
-    method: 'POST', path: '/api/tickets/:ticket/minion-message', who: ['minion'], refuse: 'Only a minion messages another minion this way',
+    method: 'POST',
+    path: '/api/tickets/:ticket/minion-message',
+    who: ['minion'],
+    refuse: 'Only a minion messages another minion this way',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const { store, runner } = app;
@@ -1287,7 +1459,10 @@ export const ticketRoutes: Route[] = [
   {
     // read_minion (#783): another minion's line, worktree and recent chat, for its scheme's minions. Only
     // the chat's words: no cards, tool calls, approvals, attachments or costs.
-    method: 'GET', path: '/api/tickets/:ticket/peer', who: ['minion'], refuse: 'Only a minion reads another this way',
+    method: 'GET',
+    path: '/api/tickets/:ticket/peer',
+    who: ['minion'],
+    refuse: 'Only a minion reads another this way',
     handler({ res, url, app, ticket }) {
       const { store, runner } = app;
       const n = Number(url.searchParams.get('number'));
@@ -1299,19 +1474,26 @@ export const ticketRoutes: Route[] = [
       const line = { ...Object.fromEntries(LINE_FIELDS.map((k) => [k, v[k]])), cost: v.cost, budget: v.budget, ...(target.cwd ? { worktree: target.cwd } : {}) };
       const events = store.listEvents(target.id).flatMap((e) => {
         const d = JSON.parse(e.data);
-        const keep = e.kind === 'user_message' ? { author: d.author, text: d.text ?? '', ...(d.comment ? { comment: { about: d.comment.about } } : {}) }
-          : e.kind === 'note' || e.kind === 'error' ? { text: d.text ?? '' }
-          : e.kind === 'claude' && d.type === 'assistant' && !d.replaced && (d.message?.content ?? []).some((b: ContentBlock) => b.type === 'text' && b.text!.trim())
-            ? { type: 'assistant', message: { content: d.message.content.filter((b: ContentBlock) => b.type === 'text') }, ...(d.parent_tool_use_id ? { parent_tool_use_id: d.parent_tool_use_id } : {}) }
-          : e.kind === 'claude' && d.type === 'result' ? { type: 'result', is_error: !!d.is_error }
-          : null;
+        const keep =
+          e.kind === 'user_message'
+            ? { author: d.author, text: d.text ?? '', ...(d.comment ? { comment: { about: d.comment.about } } : {}) }
+            : e.kind === 'note' || e.kind === 'error'
+              ? { text: d.text ?? '' }
+              : e.kind === 'claude' && d.type === 'assistant' && !d.replaced && (d.message?.content ?? []).some((b: ContentBlock) => b.type === 'text' && b.text!.trim())
+                ? { type: 'assistant', message: { content: d.message.content.filter((b: ContentBlock) => b.type === 'text') }, ...(d.parent_tool_use_id ? { parent_tool_use_id: d.parent_tool_use_id } : {}) }
+                : e.kind === 'claude' && d.type === 'result'
+                  ? { type: 'result', is_error: !!d.is_error }
+                  : null;
         return keep ? [{ kind: e.kind, data: JSON.stringify(keep) }] : [];
       });
       return json(res, 200, { ticket: line, events: events.slice(-last), skipped: Math.max(events.length - last, 0) });
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/deploy', who: ['minion'], refuse: 'Only the deploying minion can report its deploy',
+    method: 'POST',
+    path: '/api/tickets/:ticket/deploy',
+    who: ['minion'],
+    refuse: 'Only the deploying minion can report its deploy',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const { id } = ticket;
@@ -1334,7 +1516,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // The host_check tool (#621): the host's read-only checks (masked database, a user unit's journal and status) for a turn in a container.
-    method: 'POST', path: '/api/host-check', who: ['minion', 'taskmaster'], refuse: 'Only a turn can run host checks',
+    method: 'POST',
+    path: '/api/host-check',
+    who: ['minion', 'taskmaster'],
+    refuse: 'Only a turn can run host checks',
     async handler({ req, res, app, caller }) {
       const body = await readJson(req);
       // The database holds every scheme's chat, so only a turn whose person sees every scheme reads it (db.ts canSee).
@@ -1346,7 +1531,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // The land tool (src/land.ts): run tools/land.sh in this minion's worktree on the host, for a turn in a container.
-    method: 'POST', path: '/api/tickets/:ticket/land', who: ['minion'], refuse: 'Only the minion itself can ship its branch',
+    method: 'POST',
+    path: '/api/tickets/:ticket/land',
+    who: ['minion'],
+    refuse: 'Only the minion itself can ship its branch',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       // { fix: true }: LAND_FIX=1, for the fix of a commit whose deploy was rolled back (tools/land.sh's bad_check). No body from older tools.
@@ -1374,7 +1562,10 @@ export const ticketRoutes: Route[] = [
   {
     // generate_image, edit_image, generate_audio and generate_speech (#717, #808): the server calls OpenRouter on the key of the person this
     // turn runs for (ticket.person_id), booked against their monthly cap; the turn never sees the key.
-    method: 'POST', path: '/api/tickets/:ticket/openrouter', who: ['minion'], refuse: 'Only the minion itself can make media in its folders',
+    method: 'POST',
+    path: '/api/tickets/:ticket/openrouter',
+    who: ['minion'],
+    refuse: 'Only the minion itself can make media in its folders',
     async handler({ req, res, app, ticket }) {
       const body = (await readJson(req)) ?? {};
       if (ticket.kind !== 'ticket' || !ticket.cwd) throw new HttpError(403, 'Only a minion with a worktree makes media');
@@ -1383,10 +1574,18 @@ export const ticketRoutes: Route[] = [
       const args = body.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
       // provider "azure" (#842): any minion of the scheme spends the scheme's own key, with no per-person cap (the scheme's outside-spend cap only warns): raw SSML to Azure Speech on the scheme's own key, booked to the scheme as outside spend (#839), not OpenRouter.
       if (tool === 'generate_speech' && args.provider === 'azure') {
-        return json(res, 200, await azureSpeech(args, { roots: ticketRoots(app, ticket) }, {
-          secret: (name) => app.secrets.get('scheme', ticket.project_id, name),
-          book: (s) => app.outsideSpend.record(ticket.project_id, s, `minion:#${ticket.number}`),
-        }));
+        return json(
+          res,
+          200,
+          await azureSpeech(
+            args,
+            { roots: ticketRoots(app, ticket) },
+            {
+              secret: (name) => app.secrets.get('scheme', ticket.project_id, name),
+              book: (s) => app.outsideSpend.record(ticket.project_id, s, `minion:#${ticket.number}`),
+            },
+          ),
+        );
       }
       if (args.provider !== undefined && args.provider !== 'openrouter') throw new HttpError(400, "provider is 'openrouter' (the default) or 'azure'");
       return json(res, 200, await app.openrouter.tool(tool, args, { userId: ticket.person_id, ticketId: ticket.id, projectId: ticket.project_id, roots: ticketRoots(app, ticket) }));
@@ -1394,14 +1593,20 @@ export const ticketRoutes: Route[] = [
   },
   {
     // report_spend (#839): a minion books what an outside API call cost to its scheme's month.
-    method: 'POST', path: '/api/tickets/:ticket/spend', who: ['minion'], refuse: 'Only the minion itself can report its spend',
+    method: 'POST',
+    path: '/api/tickets/:ticket/spend',
+    who: ['minion'],
+    refuse: 'Only the minion itself can report its spend',
     async handler({ req, res, app, ticket }) {
       return json(res, 200, app.outsideSpend.record(ticket.project_id, parseSpend(await readJson(req)), `minion:#${ticket.number}`));
     },
   },
   {
     // log_learned (#1119): a pull-request ship's three lines; hand_off_land takes them as learned instead.
-    method: 'POST', path: '/api/tickets/:ticket/learned', who: ['minion'], refuse: 'Only the minion itself logs what it learned',
+    method: 'POST',
+    path: '/api/tickets/:ticket/learned',
+    who: ['minion'],
+    refuse: 'Only the minion itself logs what it learned',
     async handler({ req, res, app, ticket }) {
       const body = (await readJson(req)) ?? {};
       const lines = parseLearned(body.learned);
@@ -1413,7 +1618,10 @@ export const ticketRoutes: Route[] = [
   },
   {
     // hand_off_land (#706): the server runs tools/land.sh and reports it (LandHandoffs in src/land.ts), so the minion ends its turn now.
-    method: 'POST', path: '/api/tickets/:ticket/land/handoff', who: ['minion'], refuse: 'Only the minion itself can ship its branch',
+    method: 'POST',
+    path: '/api/tickets/:ticket/land/handoff',
+    who: ['minion'],
+    refuse: 'Only the minion itself can ship its branch',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const body = (await readJson(req)) ?? {};
@@ -1445,7 +1653,13 @@ export const ticketRoutes: Route[] = [
         // The reason carries the line, so the shipped line says it (and Releases reads it there) without a field in land.ts, a pipeline file.
         h.reason = `${h.reason.replace(/[.\s]+$/, '')}. ${fixLine(proof)}`;
       } else if (body.into === undefined && (unlabelled || needsGo(goFrom, h.risk))) {
-        if (!hasGo) throw new HttpError(400, unlabelled ? `Not handed off: ${unlabelled}, so this ship waits for a person's go. Ask with a ship card (kind ship), then hand it off again with go naming who gave it and when` : `In this scheme ${goFrom === 'all' ? 'every change' : `a ${h.risk}-risk change`} ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first${goFrom === 'all' || reviewOff ? '' : '. A bug fix that proves itself passes fix_proof instead (self-review skill, "The go threshold")'}`);
+        if (!hasGo)
+          throw new HttpError(
+            400,
+            unlabelled
+              ? `Not handed off: ${unlabelled}, so this ship waits for a person's go. Ask with a ship card (kind ship), then hand it off again with go naming who gave it and when`
+              : `In this scheme ${goFrom === 'all' ? 'every change' : `a ${h.risk}-risk change`} ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first${goFrom === 'all' || reviewOff ? '' : '. A bug fix that proves itself passes fix_proof instead (self-review skill, "The go threshold")'}`,
+          );
         h.go = str(body.go, 'Go', 200);
       } else if (body.into === undefined && project && offSkills(project).includes('self-review')) {
         // Cara's Q10 (#1062, ADR 0014): with self-review off nothing labels a change's risk, so every ship waits for a person's go.
@@ -1455,7 +1669,11 @@ export const ticketRoutes: Route[] = [
       // A blocking reviewer or critic whose last verdict on this minion failed holds the ship (Q7, Block or advise), a feeder's merge too, until it passes or a person gives the go.
       const holds = app.store.reviews.holds(ticket.project_id, ticket.id);
       if (holds.length && !h.go) {
-        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, `Not handed off: ${holds.map((x) => `${x.name} (\`${x.slug}\`, last verdict ${x.verdict})`).join(', ')} ${holds.length > 1 ? 'block' : 'blocks'} this ship. Fix what it found and run it again until it passes (record each round with review_set run), or ask a person with a ship card (kind ship) and hand it off again with go naming who gave it and when`);
+        if (typeof body.go !== 'string' || !body.go.trim())
+          throw new HttpError(
+            400,
+            `Not handed off: ${holds.map((x) => `${x.name} (\`${x.slug}\`, last verdict ${x.verdict})`).join(', ')} ${holds.length > 1 ? 'block' : 'blocks'} this ship. Fix what it found and run it again until it passes (record each round with review_set run), or ask a person with a ship card (kind ship) and hand it off again with go naming who gave it and when`,
+          );
         h.go = str(body.go, 'Go', 200);
       }
       if (body.deploy !== undefined && typeof body.deploy !== 'boolean') throw new HttpError(400, 'deploy must be true or false');
@@ -1521,7 +1739,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/tickets/:ticket/land', who: ['minion'], refuse: 'Only the minion itself can ship its branch',
+    method: 'GET',
+    path: '/api/tickets/:ticket/land',
+    who: ['minion'],
+    refuse: 'Only the minion itself can ship its branch',
     handler: ({ res, app, ticket }) => {
       const run = app.landings.get(ticket.id);
       if (!run) throw new HttpError(404, 'Nothing has started shipping for this minion');
@@ -1529,7 +1750,9 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/preview', who: ['person', 'taskmaster', 'minion'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/preview',
+    who: ['person', 'taskmaster', 'minion'],
     async handler(ctx) {
       const { res, url, app, ticket } = ctx;
       const { id } = ticket;
@@ -1542,7 +1765,9 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/wake', who: ['person', 'taskmaster', 'minion'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/wake',
+    who: ['person', 'taskmaster', 'minion'],
     async handler(ctx) {
       const { req, res, ticket, app } = ctx;
       const { id } = ticket;
@@ -1569,7 +1794,10 @@ export const ticketRoutes: Route[] = [
   {
     // relay_when_live: a note for another scheme's Taskmaster or a minion of this scheme, sent as held mail once a commit is live.
     // The minion's own Taskmaster sees the full text now (held mail, no wake), so it can notice if something is off.
-    method: 'POST', path: '/api/tickets/:ticket/relay-when-live', who: ['minion'], refuse: 'Only a minion queues a relay',
+    method: 'POST',
+    path: '/api/tickets/:ticket/relay-when-live',
+    who: ['minion'],
+    refuse: 'Only a minion queues a relay',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const { store, runner, waiters } = app;
@@ -1600,9 +1828,7 @@ export const ticketRoutes: Route[] = [
           tos.push({ scheme: project.name, taskmaster: (await ensureCoordinatorFor(app, project, null)).id }); // not for a member: the Overlord (#919)
         }
       }
-      const commit = body.commit == null || body.commit === ''
-        ? (ticket.cwd ? await gitOut(['rev-parse', 'HEAD'], ticket.cwd) : null)
-        : await waiters.resolve(String(body.commit), store.getProject(ticket.project_id)?.repo_dir ?? null, !!(await waiters.elsewhere(ticket.id)));
+      const commit = body.commit == null || body.commit === '' ? (ticket.cwd ? await gitOut(['rev-parse', 'HEAD'], ticket.cwd) : null) : await waiters.resolve(String(body.commit), store.getProject(ticket.project_id)?.repo_dir ?? null, !!(await waiters.elsewhere(ticket.id)));
       if (!commit) throw new HttpError(400, body.commit ? `No commit ${String(body.commit).slice(0, 40)} in the live checkout or the scheme's repo` : 'No commit to wait for: commit the work first, or give a commit');
       const added = [];
       for (const to of tos) added.push({ to, ...(await waiters.addRelay({ ticket: ticket.id, to, text, commit })) });
@@ -1617,13 +1843,16 @@ export const ticketRoutes: Route[] = [
       if (queuedRs.length) runner.emit(ticket.id, 'note', { text: `Relay to ${relayDests(queuedRs)} queued until ${commit.slice(0, 7)} is live: ${short}` });
       if (sentRs.length) runner.emit(ticket.id, 'note', { text: `Relay to ${relayDests(sentRs)} sent: ${commit.slice(0, 7)} was live already: ${short}` });
       const queued = queuedRs.length > 0;
-      const relay = (queuedRs[0] ?? added[0].relay);
+      const relay = queuedRs[0] ?? added[0].relay;
       return json(res, 201, { queued, id: relay.id, ids: queuedRs.map((r) => r.id), commit, to: dest, relays: mine() });
     },
   },
   {
     // wake_at (#722): the minion or Taskmaster itself sets, lists or cancels timed wakes in its own chat.
-    method: 'POST', path: '/api/tickets/:ticket/wake-at', who: ['self'], refuse: 'Only the minion or Taskmaster itself can set a wake in its chat',
+    method: 'POST',
+    path: '/api/tickets/:ticket/wake-at',
+    who: ['self'],
+    refuse: 'Only the minion or Taskmaster itself can set a wake in its chat',
     async handler(ctx) {
       const { req, res, ticket, app, session } = ctx;
       const { timedWakes: wakes, runner } = app;
@@ -1650,19 +1879,24 @@ export const ticketRoutes: Route[] = [
   },
   {
     // The list chip's Cancel (ADR 0021 step 7): a person drops one of the outbox's waiting rows for this minion.
-    method: 'POST', path: '/api/tickets/:ticket/waits/:wait/cancel', who: ['person'], refuse: 'Only people cancel a wait from the list',
+    method: 'POST',
+    path: '/api/tickets/:ticket/waits/:wait/cancel',
+    who: ['person'],
+    refuse: 'Only people cancel a wait from the list',
     async handler({ res, app, ticket, params, session }) {
       const row = app.store.getDelivery(Number(params.wait));
       if (!row || row.to_kind !== 'minion' || row.to_id !== ticket.id) throw new HttpError(404, 'No such wait on this minion');
       // A chain's row is its held brief: dropping it would leave the minion sealed with nothing to start it.
-      if (row.kind === 'chain') throw new HttpError(409, 'That wait is this minion\'s brief: Start now starts it, or dismiss the minion');
+      if (row.kind === 'chain') throw new HttpError(409, "That wait is this minion's brief: Start now starts it, or dismiss the minion");
       if (!app.outbox?.cancel(row.id, `cancelled by ${session.name}`)) throw new HttpError(409, 'It already went out or was cancelled');
       app.runner.broadcastTicket(ticket.id);
       return json(res, 200, { cancelled: row.id });
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/wake-runners', who: ['minion'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/wake-runners',
+    who: ['minion'],
     async handler(ctx) {
       const { req, res, ticket, app } = ctx;
       // wake_when_runners_back (#541): a landing sealed because CI gave no verdict waits for the scheme's runners.
@@ -1677,7 +1911,10 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/tickets/:ticket/close', who: ['minion'], refuse: 'A minion may only be dismissed by itself',
+    method: 'POST',
+    path: '/api/tickets/:ticket/close',
+    who: ['minion'],
+    refuse: 'A minion may only be dismissed by itself',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const { id } = ticket;

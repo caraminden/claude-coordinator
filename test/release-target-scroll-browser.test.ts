@@ -39,8 +39,15 @@ const STUB = `<script>
 
 let app: App;
 let browser: Browser;
-before(async () => { if (skip) return; app = await serveApp({ stub: STUB }); browser = await launch(bin!); });
-after(async () => { await browser?.close(); await app?.close(); });
+before(async () => {
+  if (skip) return;
+  app = await serveApp({ stub: STUB });
+  browser = await launch(bin!);
+});
+after(async () => {
+  await browser?.close();
+  await app?.close();
+});
 
 const card = (scheme: number, id: string) => `document.querySelector('[data-target="${scheme}/${id}"]')`;
 const top = (scheme: number, id: string) => `${card(scheme, id)}?.getBoundingClientRect().top`;
@@ -58,7 +65,7 @@ const open = async (hash: string) => {
   return page;
 };
 
-test('a target row in the rail opens the page with that target\'s card at the top, and a live update leaves it there', { skip }, async () => {
+test("a target row in the rail opens the page with that target's card at the top, and a live update leaves it there", { skip }, async () => {
   const page = await open('#/p/1');
   await click(page, row(1, 'apk%3Aapp'));
   await waitFor(page, 'the card at the top', atTop(1, 'apk:app'));
@@ -80,14 +87,14 @@ test('on the page, one target row and then another each bring their card to the 
   await waitFor(page, 'Desktop app at the top', atTop(1, 'apk:app'));
 });
 
-test('another scheme\'s target row opens that scheme\'s page at the target\'s card', { skip }, async () => {
+test("another scheme's target row opens that scheme's page at the target's card", { skip }, async () => {
   const page = await open('#/p/1');
   await click(page, row(2, 'file%3Awindows'));
-  await waitFor(page, 'Beta\'s Windows card at the top', atTop(2, 'file:windows'));
+  await waitFor(page, "Beta's Windows card at the top", atTop(2, 'file:windows'));
   assert.match(await page.eval<string>('location.hash'), /^#\/p\/1\/releases\/2\/target\/file%3Awindows$/);
 });
 
-test('a change\'s link opens the page with its card in view', { skip }, async () => {
+test("a change's link opens the page with its card in view", { skip }, async () => {
   const page = await open('#/p/1');
   await page.eval(`location.hash = '#/p/1/releases/1/610'`); // a change in Android's card, far below the fold
   await waitFor(page, 'the change in view', `(() => { const r = document.querySelector('.rel-change.hl')?.getBoundingClientRect(); return !!r && r.top >= 0 && r.bottom <= innerHeight + 1; })()`);

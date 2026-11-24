@@ -10,9 +10,15 @@ export async function readTail(file: string, n: number): Promise<string[]> {
   let fh;
   try {
     fh = await open(file, 'r');
-    const size = (await fh.stat()).size, len = Math.min(size, READ), buf = Buffer.alloc(len);
+    const size = (await fh.stat()).size,
+      len = Math.min(size, READ),
+      buf = Buffer.alloc(len);
     await fh.read(buf, 0, len, size - len);
-    const lines = buf.toString('utf8').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').split('\n').map((l) => l.replace(/\r+$/, '').split('\r').pop()!);
+    const lines = buf
+      .toString('utf8')
+      .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+      .split('\n')
+      .map((l) => l.replace(/\r+$/, '').split('\r').pop()!);
     if (lines.at(-1) === '') lines.pop();
     // A read that began mid-file starts mid-line: its first piece isn't a whole line.
     if (size > len && lines.length > 1) lines.shift();

@@ -27,7 +27,14 @@ export function costDetail() {
 let costTimer = null;
 export function costSoon() {
   if (!account?.admin || costTimer) return;
-  costTimer = setTimeout(() => whenShown(() => { costTimer = null; renderCost(); }), 10_000);
+  costTimer = setTimeout(
+    () =>
+      whenShown(() => {
+        costTimer = null;
+        renderCost();
+      }),
+    10_000,
+  );
 }
 
 /** Fetch the daily totals again and redraw. */
@@ -36,7 +43,12 @@ export async function renderCost() {
   const before = budget;
   let limit;
   try {
-    ({ days, week: { limit, parts }, split, outside } = await api('api/costs'));
+    ({
+      days,
+      week: { limit, parts },
+      split,
+      outside,
+    } = await api('api/costs'));
     budget = limit && limit / 7;
   } catch {
     return; // keep the last figures; the next turn tries again
@@ -58,13 +70,18 @@ export function weekShare(usd) {
 
 /** Who paid and where it went: every login's turns, not just the server login's, in dollars. */
 function splitTables() {
-  const table = (head, rows) => h('table', {},
-    h('thead', {}, h('tr', {}, h('th', {}, head), h('th', { class: 'num' }, '7 days'), h('th', { class: 'num' }, '30 days'))),
-    h('tbody', {}, rows.map((r) => h('tr', {}, h('th', { scope: 'row' }, r.name),
-      h('td', { class: 'num' }, r.week ? costText(r.week) : '–'), h('td', { class: 'num' }, costText(r.month))))));
-  return h('div', { class: 'spend-split' },
-    h('h4', {}, 'Every login, by person and scheme'),
-    table('Person', split.people), table('Scheme', split.schemes));
+  const table = (head, rows) =>
+    h(
+      'table',
+      {},
+      h('thead', {}, h('tr', {}, h('th', {}, head), h('th', { class: 'num' }, '7 days'), h('th', { class: 'num' }, '30 days'))),
+      h(
+        'tbody',
+        {},
+        rows.map((r) => h('tr', {}, h('th', { scope: 'row' }, r.name), h('td', { class: 'num' }, r.week ? costText(r.week) : '–'), h('td', { class: 'num' }, costText(r.month)))),
+      ),
+    );
+  return h('div', { class: 'spend-split' }, h('h4', {}, 'Every login, by person and scheme'), table('Person', split.people), table('Scheme', split.schemes));
 }
 
 /** This month's bill for outside APIs, per scheme and service, with a cap field for the scheme you're in (#839). */
@@ -81,18 +98,30 @@ function outsideBill() {
       toast(`Couldn't set the cap: ${err.message}`, { tone: 'warn' });
     }
   });
-  return h('div', { class: 'spend-split outside-bill' },
+  return h(
+    'div',
+    { class: 'spend-split outside-bill' },
     h('h4', {}, 'Outside APIs this month, by scheme'),
-    outside.length ? h('table', {},
-      h('tbody', {}, outside.flatMap((b) => {
-        const over = b.cap_usd !== null && b.month_usd >= b.cap_usd;
-        return [
-          h('tr', {}, h('th', { scope: 'row' }, b.name), h('td', { class: `num${over ? ' warn' : ''}` }, costText(b.month_usd), b.cap_usd === null ? '' : h('span', { class: 'usd' }, ` of ${costText(b.cap_usd)}`))),
-          ...b.services.map((s) => h('tr', { class: 'service' }, h('td', { class: 'indent' }, s.service), h('td', { class: 'num' }, costText(s.usd)))),
-        ];
-      }))) : h('p', { class: 'key' }, 'Nothing reported this month.'),
+    outside.length
+      ? h(
+          'table',
+          {},
+          h(
+            'tbody',
+            {},
+            outside.flatMap((b) => {
+              const over = b.cap_usd !== null && b.month_usd >= b.cap_usd;
+              return [
+                h('tr', {}, h('th', { scope: 'row' }, b.name), h('td', { class: `num${over ? ' warn' : ''}` }, costText(b.month_usd), b.cap_usd === null ? '' : h('span', { class: 'usd' }, ` of ${costText(b.cap_usd)}`))),
+                ...b.services.map((s) => h('tr', { class: 'service' }, h('td', { class: 'indent' }, s.service), h('td', { class: 'num' }, costText(s.usd)))),
+              ];
+            }),
+          ),
+        )
+      : h('p', { class: 'key' }, 'Nothing reported this month.'),
     pid ? h('label', { class: 'cap-row' }, 'Cap for this scheme, $/month ', cap) : '',
-    h('p', { class: 'foot' }, 'Reported by contraptions (POST /api/contraptions/spend) and minions (report_spend), with OpenRouter calls. Crossing a cap warns the scheme once a month; nothing stops.'));
+    h('p', { class: 'foot' }, 'Reported by contraptions (POST /api/contraptions/spend) and minions (report_spend), with OpenRouter calls. Crossing a cap warns the scheme once a month; nothing stops.'),
+  );
 }
 
 /** A cost as a share of an even day: "38%". */
@@ -101,23 +130,46 @@ const pct = (usd) => `${Math.round((usd / budget) * 100)}%`;
 function drawPop(chip) {
   if (!days) return;
   const pid = view?.projectId;
-  const label = (day, i) => i === 0 ? 'Today' : i === 1 ? 'Yesterday'
-    : new Date(`${day}T12:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+  const label = (day, i) => (i === 0 ? 'Today' : i === 1 ? 'Yesterday' : new Date(`${day}T12:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }));
   // The share of an even day first, the dollars beside it; a day over its share in amber.
-  const cell = (usd, n = 1) => h('td', { class: `num${budget && usd > budget * n ? ' warn' : ''}` },
-    !usd ? '–' : budget ? [pct(usd / n), h('span', { class: 'usd' }, costText(usd / n))] : costText(usd));
+  const cell = (usd, n = 1) => h('td', { class: `num${budget && usd > budget * n ? ' warn' : ''}` }, !usd ? '–' : budget ? [pct(usd / n), h('span', { class: 'usd' }, costText(usd / n))] : costText(usd));
   const here = (d) => d.byProject[pid] ?? 0;
   const sum = (f) => days.reduce((s, d) => s + f(d), 0);
   chip.replaceChildren(
-    h('h4', {}, budget ? "Each day against an even share of the week" : 'Cost at API prices, not a bill'),
-    h('table', {},
+    h('h4', {}, budget ? 'Each day against an even share of the week' : 'Cost at API prices, not a bill'),
+    h(
+      'table',
+      {},
       h('thead', {}, h('tr', {}, h('th', {}), h('th', { class: 'num' }, 'This scheme'), h('th', { class: 'num' }, 'All schemes'))),
-      h('tbody', {}, days.map((d, i) => h('tr', {}, h('th', { scope: 'row' }, label(d.day, i)), cell(here(d)), cell(d.total)))),
-      h('tfoot', {}, h('tr', {}, h('th', { scope: 'row' }, budget ? '7-day average' : '7 days'), cell(sum(here), budget ? days.length : 1), cell(sum((d) => d.total), budget ? days.length : 1)))),
-    budget ? h('p', { class: 'key' }, h('span', { class: 'warn' }, 'Amber'), ': over that day\'s even share.') : '',
+      h(
+        'tbody',
+        {},
+        days.map((d, i) => h('tr', {}, h('th', { scope: 'row' }, label(d.day, i)), cell(here(d)), cell(d.total))),
+      ),
+      h(
+        'tfoot',
+        {},
+        h(
+          'tr',
+          {},
+          h('th', { scope: 'row' }, budget ? '7-day average' : '7 days'),
+          cell(sum(here), budget ? days.length : 1),
+          cell(
+            sum((d) => d.total),
+            budget ? days.length : 1,
+          ),
+        ),
+      ),
+    ),
+    budget ? h('p', { class: 'key' }, h('span', { class: 'warn' }, 'Amber'), ": over that day's even share.") : '',
     outsideBill(),
     split?.people.length ? splitTables() : '',
-    h('p', { class: 'foot' }, budget
-      ? `100% is a seventh of the weekly limit, ≈ ${costText(budget).slice(2)} a day at API prices, worked out from the weekly meter and this week's turns (last week's, early in a week). Over it, the week runs out early. The server login's turns only, Taskmasters included; not a bill.`
-      : "The server login's turns at API prices, not a bill. Taskmasters included. Shown against the weekly limit once its meter reaches 3%."));
+    h(
+      'p',
+      { class: 'foot' },
+      budget
+        ? `100% is a seventh of the weekly limit, ≈ ${costText(budget).slice(2)} a day at API prices, worked out from the weekly meter and this week's turns (last week's, early in a week). Over it, the week runs out early. The server login's turns only, Taskmasters included; not a bill.`
+        : "The server login's turns at API prices, not a bill. Taskmasters included. Shown against the weekly limit once its meter reaches 3%.",
+    ),
+  );
 }

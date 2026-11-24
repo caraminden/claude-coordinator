@@ -26,11 +26,15 @@ const tries = (dir: string) => `
     await tryIt('readFileSync', () => fs.readFileSync(${JSON.stringify(guard.replace('file://', ''))}));
     parentPort.postMessage(out);
   })();`;
-const inWorker = (dir: string, reader: boolean) => new Promise<Record<string, string>>((resolve, reject) => {
-  const w = new Worker(tries(dir), { eval: true, workerData: reader ? { reader: {} } : {} });
-  w.once('message', (m) => { resolve(m); void w.terminate(); });
-  w.once('error', reject);
-});
+const inWorker = (dir: string, reader: boolean) =>
+  new Promise<Record<string, string>>((resolve, reject) => {
+    const w = new Worker(tries(dir), { eval: true, workerData: reader ? { reader: {} } : {} });
+    w.once('message', (m) => {
+      resolve(m);
+      void w.terminate();
+    });
+    w.once('error', reject);
+  });
 
 test('on a reader thread processes and file writes throw, a load-time copy too; reads work; elsewhere all run', async () => {
   const tmp = tempRoot('only-reads-');
@@ -55,11 +59,22 @@ test('a reader hands back an answer made while something was refused, though the
   const { Auth } = await import('../src/auth.ts');
   const { json, router } = await import('../src/http.ts');
   let refuse = false;
-  const routes = router([{ method: 'GET', path: '/x', who: 'anyone', handler: ({ res }) => {
-    let owner: string | null = 'someone';
-    try { if (refuse) throw refusal('run git'); } catch { owner = null; }
-    json(res, 200, { owner });
-  } }]);
+  const routes = router([
+    {
+      method: 'GET',
+      path: '/x',
+      who: 'anyone',
+      handler: ({ res }) => {
+        let owner: string | null = 'someone';
+        try {
+          if (refuse) throw refusal('run git');
+        } catch {
+          owner = null;
+        }
+        json(res, 200, { owner });
+      },
+    },
+  ]);
   const ask = () => answer({} as never, new Auth('a-long-password', 'x'.repeat(32)), routes, { method: 'GET', url: '/x', headers: {} });
   assert.equal((await ask())?.status, 200);
   refuse = true;

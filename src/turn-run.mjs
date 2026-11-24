@@ -97,7 +97,11 @@ export async function prepare(dir, spec) {
 }
 
 /** One beat of a pooled turn: re-registered, its pool started again if it died. Never throws. @param {PoolTurn} p */
-export const keepPooled = (p) => keepTurn(p.spec, p.token, p.reg).then(() => {}, () => {});
+export const keepPooled = (p) =>
+  keepTurn(p.spec, p.token, p.reg).then(
+    () => {},
+    () => {},
+  );
 
 /**
  * Feed claude's stdin: the prompt, then steers until the turn's reply (its result) is out. Claude reads stdin line by

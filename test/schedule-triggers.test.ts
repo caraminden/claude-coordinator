@@ -202,7 +202,10 @@ test("the run window counts ships and minions, and a trigger's line leads it", (
 
 test('standard audits carry their template trigger, and opening a database from before them fills it on their rows once', () => {
   const templates = loadTemplates();
-  const withTrigger = [...templates.values()].filter((t) => t.trigger_count != null).map((t) => t.slug).sort();
+  const withTrigger = [...templates.values()]
+    .filter((t) => t.trigger_count != null)
+    .map((t) => t.slug)
+    .sort();
   assert.deepEqual(withTrigger, ['code-health', 'monthly-retro', 'test-audit']);
   for (const slug of withTrigger) {
     const t = templates.get(slug)!;

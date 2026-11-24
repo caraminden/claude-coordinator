@@ -36,8 +36,7 @@ export function openMasked(file: string): DatabaseSync {
   for (const table of [...Object.keys(SECRET), 'settings']) {
     const cols = (db.prepare(`SELECT name FROM pragma_table_info('${table}')`).all() as { name: string }[]).map((c) => c.name);
     if (!cols.length) continue;
-    const pick = cols.map((c) => (SECRET[table]?.includes(c) ? `${HIDDEN} AS "${c}"`
-      : table === 'settings' && c === 'value' ? `CASE WHEN ${SECRET_SETTINGS} THEN ${HIDDEN} ELSE value END AS value` : `"${c}"`));
+    const pick = cols.map((c) => (SECRET[table]?.includes(c) ? `${HIDDEN} AS "${c}"` : table === 'settings' && c === 'value' ? `CASE WHEN ${SECRET_SETTINGS} THEN ${HIDDEN} ELSE value END AS value` : `"${c}"`));
     db.exec(`CREATE TEMP ${table === 'settings' ? 'TABLE' : 'VIEW'} "${table}" AS SELECT ${pick.join(', ')} FROM main."${table}"`);
   }
   db.setAuthorizer((action, a, b, dbName) => {
@@ -58,12 +57,16 @@ export function query(db: DatabaseSync, sql: string): string {
   const lines: string[] = [];
   let header = false;
   for (const row of stmt.iterate() as Iterable<Record<string, unknown>>) {
-    if (!header) lines.push(Object.keys(row).join('|')), header = true;
+    if (!header) lines.push(Object.keys(row).join('|')), (header = true);
     if (lines.length > MAX_ROWS) {
       lines.push(`… stopped at ${MAX_ROWS} rows: add a LIMIT or narrow the WHERE`);
       break;
     }
-    lines.push(Object.values(row).map((v) => (v === null ? '' : v instanceof Uint8Array ? `<blob ${v.length} bytes>` : String(v))).join('|'));
+    lines.push(
+      Object.values(row)
+        .map((v) => (v === null ? '' : v instanceof Uint8Array ? `<blob ${v.length} bytes>` : String(v)))
+        .join('|'),
+    );
   }
   return lines.length ? lines.join('\n') : '(no rows)';
 }
@@ -72,12 +75,13 @@ if (import.meta.main) {
   const chunks: Buffer[] = [];
   for await (const c of process.stdin) chunks.push(c as Buffer);
   try {
-    const db = openMasked(process.argv[2]), sql = Buffer.concat(chunks).toString();
+    const db = openMasked(process.argv[2]),
+      sql = Buffer.concat(chunks).toString();
     // --first (the live probe, src/live-probe.ts): the first row's first value as JSON, its type kept, or "no rows".
     if (process.argv[3] === '--first') {
       const row = db.prepare(sql).get() as Record<string, unknown> | undefined;
       const v = row ? Object.values(row)[0] : 'no rows';
-      process.stdout.write(`${JSON.stringify(v instanceof Uint8Array ? 'blob' : v ?? null)}\n`);
+      process.stdout.write(`${JSON.stringify(v instanceof Uint8Array ? 'blob' : (v ?? null))}\n`);
     } else process.stdout.write(query(db, sql) + '\n');
   } catch (err: any) {
     process.stderr.write(`${err.message}\n`);

@@ -18,7 +18,7 @@ export const DEFAULT_CAP_USD = 10;
 /** No single call may cost more than this, whatever the cap says: a typo'd model or n can't eat a month. */
 export const PER_CALL_LIMIT_USD = 0.5;
 export const MAX_CAP_USD = 1000;
-export const CONNECT = 'OpenRouter isn\'t connected for the person this turn runs for: connect it on the account page (Settings → Account), with a monthly cap.';
+export const CONNECT = "OpenRouter isn't connected for the person this turn runs for: connect it on the account page (Settings → Account), with a monthly cap.";
 const DAY = 86_400_000;
 
 export const MODELS = {
@@ -55,8 +55,16 @@ const SPEECH_SECONDS = 120;
 /** The longest input any speech model on OpenRouter lists (Eleven Flash v2.5), for models that list none. */
 const MAX_SPEECH_CHARS = 40_000;
 
-interface PriceLine { billable: string; unit: string; cost_usd: number; variant?: string }
-export interface ImageEndpoint { pricing?: PriceLine[]; supported_parameters?: Record<string, { type: string; values?: string[]; min?: number; max?: number }> }
+interface PriceLine {
+  billable: string;
+  unit: string;
+  cost_usd: number;
+  variant?: string;
+}
+export interface ImageEndpoint {
+  pricing?: PriceLine[];
+  supported_parameters?: Record<string, { type: string; values?: string[]; min?: number; max?: number }>;
+}
 
 /**
  * The most an image call could cost across `endpoints` (OpenRouter may route to any), or null when one
@@ -75,13 +83,13 @@ export function imageEstimate(endpoints: ImageEndpoint[], o: { resolution?: stri
       let these = lines.filter((p) => p.billable === billable);
       if (res && these.some((p) => p.variant?.toLowerCase() === res)) these = these.filter((p) => p.variant?.toLowerCase() === res);
       const out = billable === 'output_image';
-      const each = Math.max(...these.map((p) => {
-        const mp = MEGAPIXELS[(p.variant ?? res ?? '4k').toLowerCase()] ?? MEGAPIXELS['4k'];
-        const units = p.unit === 'megapixel' ? (out ? mp : INPUT_IMAGE_MEGAPIXELS)
-          : p.unit === 'token' ? (out ? OUTPUT_IMAGE_TOKENS : billable === 'input_text' ? o.promptChars : INPUT_IMAGE_TOKENS)
-          : 1;
-        return Number(p.cost_usd) * units;
-      }));
+      const each = Math.max(
+        ...these.map((p) => {
+          const mp = MEGAPIXELS[(p.variant ?? res ?? '4k').toLowerCase()] ?? MEGAPIXELS['4k'];
+          const units = p.unit === 'megapixel' ? (out ? mp : INPUT_IMAGE_MEGAPIXELS) : p.unit === 'token' ? (out ? OUTPUT_IMAGE_TOKENS : billable === 'input_text' ? o.promptChars : INPUT_IMAGE_TOKENS) : 1;
+          return Number(p.cost_usd) * units;
+        }),
+      );
       total += each * (out ? o.n : billable === 'input_text' ? 1 : o.refs);
     }
     worst = Math.max(worst ?? 0, total);
@@ -97,7 +105,12 @@ export function perRequestPrice(model: { pricing?: Record<string, string>; descr
   return req > 0 ? req : null;
 }
 
-interface SpeechModel { id: string; pricing?: Record<string, string>; top_provider?: { max_completion_tokens?: number | null }; description?: string }
+interface SpeechModel {
+  id: string;
+  pricing?: Record<string, string>;
+  top_provider?: { max_completion_tokens?: number | null };
+  description?: string;
+}
 
 /**
  * The most a speech call could cost, or null when it can't be bounded. OpenRouter lists a speech model's
@@ -209,30 +222,41 @@ export class OpenRouter {
     if (!c) return { connected: false, default_cap_usd: DEFAULT_CAP_USD };
     const spent = this.store.openrouterSpent(userId, monthStart());
     return {
-      connected: true, failed: c.failed, cap_usd: c.meta.cap_usd, spent_usd: spent, left_usd: Math.max(0, c.meta.cap_usd - spent), resets: resetsAt(),
-      or_limit: c.meta.or_limit, or_limit_reset: c.meta.or_limit_reset, linked_at: c.meta.linked_at,
+      connected: true,
+      failed: c.failed,
+      cap_usd: c.meta.cap_usd,
+      spent_usd: spent,
+      left_usd: Math.max(0, c.meta.cap_usd - spent),
+      resets: resetsAt(),
+      or_limit: c.meta.or_limit,
+      or_limit_reset: c.meta.or_limit_reset,
+      linked_at: c.meta.linked_at,
     };
   }
 
   /** Check `key` with OpenRouter and keep it, sealed, with the person's cap. */
   async connect(userId: number, key: unknown, cap: unknown) {
-    if (typeof key !== 'string' || !/^[\x21-\x7e]{16,256}$/.test(key.trim())) throw new HttpError(400, 'That doesn\'t look like an OpenRouter key (it starts sk-or-)');
+    if (typeof key !== 'string' || !/^[\x21-\x7e]{16,256}$/.test(key.trim())) throw new HttpError(400, "That doesn't look like an OpenRouter key (it starts sk-or-)");
     const capUsd = cap === undefined ? DEFAULT_CAP_USD : this.validCap(cap);
     const res = await this.request(key.trim(), 'GET', '/key').catch((err) => {
-      throw err instanceof HttpError && err.status === 403 ? new HttpError(400, 'OpenRouter didn\'t accept that key') : err;
+      throw err instanceof HttpError && err.status === 403 ? new HttpError(400, "OpenRouter didn't accept that key") : err;
     });
-    const data = (await res.json() as { data?: Record<string, any> }).data ?? {};
+    const data = ((await res.json()) as { data?: Record<string, any> }).data ?? {};
     const now = Date.now();
     this.creds.put(userId, 'openrouter', key.trim(), {
-      cap_usd: capUsd, or_limit: typeof data.limit === 'number' ? data.limit : null, or_limit_reset: typeof data.limit_reset === 'string' ? data.limit_reset : null,
-      or_usage_monthly: typeof data.usage_monthly === 'number' ? data.usage_monthly : null, checked_at: now, linked_at: now,
+      cap_usd: capUsd,
+      or_limit: typeof data.limit === 'number' ? data.limit : null,
+      or_limit_reset: typeof data.limit_reset === 'string' ? data.limit_reset : null,
+      or_usage_monthly: typeof data.usage_monthly === 'number' ? data.usage_monthly : null,
+      checked_at: now,
+      linked_at: now,
     } satisfies OpenRouterMeta);
     return this.status(userId);
   }
 
   setCap(userId: number, cap: unknown) {
     const c = this.creds.get<OpenRouterMeta>(userId, 'openrouter');
-    if (!c?.secret) throw new HttpError(404, 'OpenRouter isn\'t connected');
+    if (!c?.secret) throw new HttpError(404, "OpenRouter isn't connected");
     // put re-seals the same key and clears a failure: only a working key should get here, so keep failed ones failed.
     this.creds.put(userId, 'openrouter', c.secret, { ...c.meta, cap_usd: this.validCap(cap) });
     if (c.failed) this.creds.fail(userId, 'openrouter');
@@ -253,7 +277,7 @@ export class OpenRouter {
   private key(userId: number | null): { key: string; cap: number } {
     const c = userId ? this.creds.get<OpenRouterMeta>(userId, 'openrouter') : null;
     if (!c) throw refusal(403, 'openrouter_not_connected', CONNECT);
-    if (c.failed || !c.secret) throw refusal(403, 'openrouter_key_refused', 'OpenRouter refused this person\'s key: connect it again on the account page.');
+    if (c.failed || !c.secret) throw refusal(403, 'openrouter_key_refused', "OpenRouter refused this person's key: connect it again on the account page.");
     return { key: c.secret, cap: c.meta.cap_usd };
   }
 
@@ -276,7 +300,8 @@ export class OpenRouter {
   /** A request to OpenRouter; any refusal becomes an HttpError that names the cause, never the key. */
   private async request(key: string, method: string, path: string, body?: object, timeoutMs = 180_000): Promise<Response> {
     const res = await this.fetch(`${this.base}${path}`, {
-      method, signal: AbortSignal.timeout(timeoutMs),
+      method,
+      signal: AbortSignal.timeout(timeoutMs),
       headers: { Authorization: `Bearer ${key}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
@@ -313,7 +338,7 @@ export class OpenRouter {
     if (!id) return null;
     try {
       const res = await this.request(key, 'GET', `/generation?id=${encodeURIComponent(id)}`, undefined, 15_000);
-      const cost = (await res.json() as { data?: { total_cost?: number } }).data?.total_cost;
+      const cost = ((await res.json()) as { data?: { total_cost?: number } }).data?.total_cost;
       return typeof cost === 'number' ? cost : null;
     } catch {
       return null;
@@ -326,7 +351,7 @@ export class OpenRouter {
       if (fresh || !this.models || Date.now() - this.models.at > DAY) {
         const res = await this.fetch(`${this.base}/models?output_modalities=all`, { signal: AbortSignal.timeout(30_000) });
         if (!res.ok) throw new HttpError(502, `OpenRouter's model list answered ${res.status}`);
-        const list = (await res.json() as { data?: any[] }).data ?? [];
+        const list = ((await res.json()) as { data?: any[] }).data ?? [];
         this.models = { at: Date.now(), byId: new Map(list.map((m) => [m.id, m])) };
       }
       const m = this.models!.byId.get(id);
@@ -341,7 +366,7 @@ export class OpenRouter {
     const res = await this.fetch(`${this.base}/images/models/${id.split('/').map(encodeURIComponent).join('/')}/endpoints`, { signal: AbortSignal.timeout(30_000) });
     if (res.status === 404) throw new HttpError(400, `OpenRouter has no image model ${id}`);
     if (!res.ok) throw new HttpError(502, `OpenRouter's image model list answered ${res.status}`);
-    const list = (await res.json() as { endpoints?: ImageEndpoint[] }).endpoints ?? [];
+    const list = ((await res.json()) as { endpoints?: ImageEndpoint[] }).endpoints ?? [];
     this.endpoints.set(id, { at: Date.now(), list });
     return list;
   }
@@ -376,9 +401,7 @@ export class OpenRouter {
       const model = args.model ?? MODELS[kind];
       // Only models that list seed take one (Lyria does; no effect model does today): refused before anything is spent.
       if (seed !== undefined && !(await this.model(model)).supported_parameters?.includes('seed')) throw new HttpError(400, `${model} takes no seed`);
-      const { value: bytes, cost } = kind === 'effect'
-        ? await this.effect(userId, key, cap, ctx, model, seconds ? `${prompt}\nLength: about ${seconds} seconds.` : prompt)
-        : await this.music(userId, key, cap, ctx, model, prompt, extname(out).toLowerCase() === '.wav' ? 'wav' : 'mp3', seed);
+      const { value: bytes, cost } = kind === 'effect' ? await this.effect(userId, key, cap, ctx, model, seconds ? `${prompt}\nLength: about ${seconds} seconds.` : prompt) : await this.music(userId, key, cap, ctx, model, prompt, extname(out).toLowerCase() === '.wav' ? 'wav' : 'mp3', seed);
       writeOutput(file, bytes, { tool: name, kind, prompt, model, cost_usd: cost, date, ...(seconds ? { seconds } : {}), ...(seed !== undefined ? { seed } : {}), licence: licence(model) });
       return { paths: [file], cost_usd: cost, left_usd: this.left(userId, cap), model };
     }
@@ -401,8 +424,7 @@ export class OpenRouter {
     const format = extname(out).slice(1).toLowerCase();
     // A transparent background (#732): the model's own when every endpoint it may route to lists one, else a matte here over black.
     if (args.background !== undefined && args.background !== 'transparent') throw new HttpError(400, 'background is "transparent" or left out');
-    const clear = args.background !== 'transparent' ? null
-      : endpoints.length && endpoints.every((ep) => ep.supported_parameters?.background?.values?.includes('transparent')) ? 'native' : 'matte';
+    const clear = args.background !== 'transparent' ? null : endpoints.length && endpoints.every((ep) => ep.supported_parameters?.background?.values?.includes('transparent')) ? 'native' : 'matte';
     if (clear === 'native' && format !== 'png' && format !== 'webp') throw new HttpError(400, 'A transparent background needs out to end in .png or .webp');
     if (clear === 'matte' && format !== 'png') throw new HttpError(400, `${model} has no transparent background of its own, so Citadel mattes it from black: out must end in .png (or pick a model with one, like bytedance-seed/seedream-5-0-flash)`);
     const files = Array.from({ length: n }, (_, i) => target(out, n, i, args.overwrite === true));
@@ -411,17 +433,19 @@ export class OpenRouter {
     const id = this.reserve(userId, cap, ctx, 'image', model, estimate);
     const { value: images, cost } = await this.settled(userId, id, estimate!, async () => {
       const res = await this.request(key, 'POST', '/images', {
-        model, n, prompt: sent,
+        model,
+        n,
+        prompt: sent,
         ...(clear === 'native' ? { background: 'transparent' } : {}),
         ...(args.resolution ? { resolution: args.resolution } : {}),
         ...(args.aspect_ratio ? { aspect_ratio: args.aspect_ratio } : {}),
         ...(params.output_format?.values?.includes(format) ? { output_format: format } : {}),
         ...(refs.length ? { input_references: refs.map((url) => ({ type: 'image_url', image_url: { url } })) } : {}),
       });
-      const body = await res.json() as { id?: string; data?: { b64_json?: string; media_type?: string }[]; usage?: { cost?: number } };
+      const body = (await res.json()) as { id?: string; data?: { b64_json?: string; media_type?: string }[]; usage?: { cost?: number } };
       const images = (body.data ?? []).filter((d) => typeof d.b64_json === 'string');
       if (!images.length) throw new Error('the answer had no images');
-      return { value: images, cost: body.usage?.cost ?? await this.generationCost(key, body.id) };
+      return { value: images, cost: body.usage?.cost ?? (await this.generationCost(key, body.id)) };
     });
     const paths: string[] = [];
     const warnings: string[] = [];
@@ -437,8 +461,14 @@ export class OpenRouter {
         if (got && got !== extname(file).toLowerCase()) file = target(file.slice(0, -extname(file).length) + got, 1, 0, args.overwrite === true);
       } catch {} // that name is taken: keep the paid-for image under the asked name rather than lose it
       writeOutput(file, matted ?? raw, {
-        tool: name, prompt, model, cost_usd: Math.round((cost / images.length) * 10000) / 10000, date, licence: licence(model),
-        ...(args.resolution ? { resolution: args.resolution } : {}), ...(args.aspect_ratio ? { aspect_ratio: args.aspect_ratio } : {}),
+        tool: name,
+        prompt,
+        model,
+        cost_usd: Math.round((cost / images.length) * 10000) / 10000,
+        date,
+        licence: licence(model),
+        ...(args.resolution ? { resolution: args.resolution } : {}),
+        ...(args.aspect_ratio ? { aspect_ratio: args.aspect_ratio } : {}),
         ...(inputs.length ? { refs: inputs } : {}),
         ...(clear ? { background: clear === 'native' ? 'transparent (native)' : matted ? 'transparent (matte)' : 'black (the matte could not read it)' } : {}),
       });
@@ -456,7 +486,7 @@ export class OpenRouter {
     const { input, voice, instructions, speed } = args;
     if (typeof args.model !== 'string' || !/^[\w.-]+\/[\w.:-]+$/.test(args.model)) throw new HttpError(400, 'model is required: an OpenRouter speech model id, like fish-audio/drama-3');
     if (typeof input !== 'string' || !input.trim()) throw new HttpError(400, 'input is required: the text to read');
-    if (voice !== undefined && (typeof voice !== 'string' || !voice || voice.length > 200)) throw new HttpError(400, 'voice is the model\'s voice id, a string');
+    if (voice !== undefined && (typeof voice !== 'string' || !voice || voice.length > 200)) throw new HttpError(400, "voice is the model's voice id, a string");
     if (instructions !== undefined && (typeof instructions !== 'string' || instructions.length > 8000)) throw new HttpError(400, 'instructions is a string, at most 8000 characters');
     if (speed !== undefined && !(typeof speed === 'number' && speed >= 0.25 && speed <= 4)) throw new HttpError(400, 'speed is a number from 0.25 to 4 (1 is normal)');
     const out = outPath(args.out, ctx.roots, new Set(SPEECH_FORMATS.map((f) => `.${f}`)), ctx.place ?? MINION_PLACE);
@@ -473,16 +503,28 @@ export class OpenRouter {
     const id = this.reserve(userId, cap, ctx, 'speech', model, estimate);
     const { value: bytes, cost } = await this.settled(userId, id, estimate!, async () => {
       const res = await this.request(key, 'POST', '/audio/speech', {
-        model, input, response_format: format,
-        ...(voice !== undefined ? { voice } : {}), ...(instructions !== undefined ? { instructions } : {}), ...(speed !== undefined ? { speed } : {}),
+        model,
+        input,
+        response_format: format,
+        ...(voice !== undefined ? { voice } : {}),
+        ...(instructions !== undefined ? { instructions } : {}),
+        ...(speed !== undefined ? { speed } : {}),
       });
       const bytes = Buffer.from(await res.arrayBuffer());
       if (!bytes.length) throw new Error('the answer had no audio');
       return { value: bytes, cost: await this.generationCost(key, res.headers.get('x-generation-id')) };
     });
     writeOutput(file, bytes, {
-      tool: 'generate_speech', input, model, response_format: format, cost_usd: cost, date: new Date().toISOString(), licence: licence(model),
-      ...(voice !== undefined ? { voice } : {}), ...(instructions !== undefined ? { instructions } : {}), ...(speed !== undefined ? { speed } : {}),
+      tool: 'generate_speech',
+      input,
+      model,
+      response_format: format,
+      cost_usd: cost,
+      date: new Date().toISOString(),
+      licence: licence(model),
+      ...(voice !== undefined ? { voice } : {}),
+      ...(instructions !== undefined ? { instructions } : {}),
+      ...(speed !== undefined ? { speed } : {}),
     });
     this.store.setOpenrouterCallPath(id, file);
     return { paths: [file], cost_usd: cost, left_usd: this.left(userId, cap), model };
@@ -499,7 +541,7 @@ export class OpenRouter {
       const bytes = Buffer.from(await res.arrayBuffer());
       if (!bytes.length) throw new Error('the answer had no audio');
       const seconds = mp3Seconds(bytes);
-      const cost = await this.generationCost(key, res.headers.get('x-generation-id')) ?? (perSecond > 0 && seconds !== null ? perSecond * seconds : null);
+      const cost = (await this.generationCost(key, res.headers.get('x-generation-id'))) ?? (perSecond > 0 && seconds !== null ? perSecond * seconds : null);
       return { value: bytes, cost };
     });
   }
@@ -510,7 +552,12 @@ export class OpenRouter {
     const id = this.reserve(userId, cap, ctx, 'music', model, estimate);
     return this.settled(userId, id, estimate!, async () => {
       const res = await this.request(key, 'POST', '/chat/completions', {
-        model, messages: [{ role: 'user', content: prompt }], modalities: ['text', 'audio'], audio: { format }, stream: true, stream_options: { include_usage: true },
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        modalities: ['text', 'audio'],
+        audio: { format },
+        stream: true,
+        stream_options: { include_usage: true },
         ...(seed !== undefined ? { seed } : {}),
       });
       let audio = '';
@@ -523,7 +570,7 @@ export class OpenRouter {
         if (event.error) throw new HttpError(502, `OpenRouter: ${String(event.error.message ?? 'the stream failed').slice(0, 300)}`);
       }
       if (!audio) throw new Error('the answer had no audio');
-      return { value: Buffer.from(audio, 'base64'), cost: cost ?? await this.generationCost(key, genId) };
+      return { value: Buffer.from(audio, 'base64'), cost: cost ?? (await this.generationCost(key, genId)) };
     });
   }
 
@@ -539,8 +586,8 @@ export class OpenRouter {
     const id = this.reserve(ctx.userId!, cap, ctx, 'text', model, Number.isFinite(estimate) ? estimate : null);
     const { value, cost } = await this.settled(ctx.userId!, id, estimate, async () => {
       const res = await this.request(key, 'POST', '/chat/completions', { model, messages, max_tokens: maxTokens });
-      const body = await res.json() as { id?: string; choices?: { message?: { content?: string } }[]; usage?: { cost?: number } };
-      return { value: body.choices?.[0]?.message?.content ?? '', cost: body.usage?.cost ?? await this.generationCost(key, body.id) };
+      const body = (await res.json()) as { id?: string; choices?: { message?: { content?: string } }[]; usage?: { cost?: number } };
+      return { value: body.choices?.[0]?.message?.content ?? '', cost: body.usage?.cost ?? (await this.generationCost(key, body.id)) };
     });
     return { text: value, cost_usd: cost, left_usd: this.left(ctx.userId!, cap) };
   }

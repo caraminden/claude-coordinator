@@ -79,7 +79,12 @@ mkdirSync(join(volume, '.claude'), { recursive: true });
 const joshPlace = { host: false as const, container: 'citadel-claude-test-2', configDir: join(volume, '.claude'), home: volume, turnsDir: join(root, 'run', 'turns', 'person-2'), env: { HOME: volume, CLAUDE_CONFIG_DIR: join(volume, '.claude'), DISABLE_AUTOUPDATER: '1' }, ensure: async () => {} };
 
 function runner() {
-  const r = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 'secret' }), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({ COORDINATOR_TOKEN: 'secret' }),
+    fake,
+  );
   r.resumeGapMs = 10;
   r.pollMs = 10;
   r.personOf = (author) => (author === 'Josh' ? josh.id : author === 'Cara' ? cara.id : null);
@@ -87,7 +92,11 @@ function runner() {
   return r;
 }
 const turns = () => jsonLines(seen);
-const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+const notes = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
 
 test("a message that arrives during Josh's turn, from Cara, resumes the same conversation on the host's login", async () => {
   rmSync(seen, { force: true });
@@ -124,14 +133,17 @@ test('a session nobody has a copy of starts fresh with a note, instead of failin
   assert.equal(turns()[0].resume, null, 'no --resume of a transcript that is nowhere');
   assert.equal(store.getTicket(t.id)!.status, 'idle');
   assert.notEqual(store.getTicket(t.id)!.session_id, 'lost-session');
-  assert.ok(notes(t.id).some((n) => /fresh session/.test(n) && n.includes('lost-session') && n.includes('last 2 chat entries')), notes(t.id).join('\n'));
+  assert.ok(
+    notes(t.id).some((n) => /fresh session/.test(n) && n.includes('lost-session') && n.includes('last 2 chat entries')),
+    notes(t.id).join('\n'),
+  );
   // The fresh session starts from the note and the chat so far (#899), and this turn's own message only once.
   const prompt = turns()[0].prompt;
   for (const want of ['waiting on the bill PR', '[Cara]: keep the clips', '[You]: Kept them; the bill is PR #4.']) assert.ok(prompt.includes(want), prompt);
   assert.equal(prompt.split('hello?').length, 2, prompt);
 });
 
-test("a minion whose creation was cut off before its worktree was recorded runs in its worktree and keeps its session (#899)", async () => {
+test('a minion whose creation was cut off before its worktree was recorded runs in its worktree and keeps its session (#899)', async () => {
   rmSync(seen, { force: true });
   // A restart between createTicket and setTicketDir (server.ts newMinion) left the row's cwd empty, its folder made.
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
@@ -237,7 +249,11 @@ test('while a turn waits for its restore, its message is saved for a restart, an
   const r = runner();
   r.send(t.id, 'Cara', 'one');
   assert.equal(r.isRunning(t.id), false, 'the turn waits for the restore');
-  assert.deepEqual(store.getSetting<any>(`minion-queue:${t.id}`)?.msgs?.map((m: any) => m.text), ['one'], 'a restart now would still run it');
+  assert.deepEqual(
+    store.getSetting<any>(`minion-queue:${t.id}`)?.msgs?.map((m: any) => m.text),
+    ['one'],
+    'a restart now would still run it',
+  );
   await until("turns().length === 1 && store.getTicket(t.id)!.status !== 'running'", () => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
   assert.equal(turns()[0].resume, 'waits');
   assert.equal(store.getSetting<any>(`minion-queue:${t.id}`)?.msgs, undefined, 'the turn took it');
@@ -289,7 +305,10 @@ test('a stored session id with a path in it reaches no file (C1)', async () => {
   assert.equal(transcriptPath(joshPlace.configDir, cwd, ticket.session_id!), null);
   assert.equal(transcriptPath(joshPlace.configDir, cwd, 'sess-1'), join(joshPlace.configDir, 'projects', projectSlug(cwd), 'sess-1.jsonl'));
   await saveSession(store, ticket, project, joshPlace.configDir, null);
-  assert.deepEqual(store.listClaudeState(project.id, ticket.id).map((row) => row.path), []);
+  assert.deepEqual(
+    store.listClaudeState(project.id, ticket.id).map((row) => row.path),
+    [],
+  );
 });
 
 test("a link planted in the volume isn't followed out of it, so a restore can't hand a host file back (C1)", async () => {
@@ -300,12 +319,18 @@ test("a link planted in the volume isn't followed out of it, so a restore can't 
   // The session's folder of saved tool output: a link to a host folder.
   symlinkSync(hostSecret, join(a.slugDir, 'sess-1'));
   await saveSession(store, a.ticket, project, joshPlace.configDir, null);
-  assert.deepEqual(store.listClaudeState(project.id, a.ticket.id).map((row) => row.path), []);
+  assert.deepEqual(
+    store.listClaudeState(project.id, a.ticket.id).map((row) => row.path),
+    [],
+  );
   // One level up: the scheme's folder itself is the link, so the transcript's own name is a plain file.
   const b = planted('wt-c1-dir', 'sess-1');
   symlinkSync(hostSecret, b.slugDir);
   await saveSession(store, b.ticket, project, joshPlace.configDir, null);
-  assert.deepEqual(store.listClaudeState(project.id, b.ticket.id).map((row) => row.path), []);
+  assert.deepEqual(
+    store.listClaudeState(project.id, b.ticket.id).map((row) => row.path),
+    [],
+  );
   rmSync(b.slugDir);
   assert.equal(restoreSession(store, b.ticket, project, joshPlace.configDir), 0);
   // A real file beside them is still saved.
@@ -313,7 +338,10 @@ test("a link planted in the volume isn't followed out of it, so a restore can't 
   mkdirSync(c.slugDir, { recursive: true });
   writeFileSync(join(c.slugDir, 'sess-1.jsonl'), '{}\n');
   await saveSession(store, c.ticket, project, joshPlace.configDir, null);
-  assert.deepEqual(store.listClaudeState(project.id, c.ticket.id).map((row) => row.path), [join('projects', projectSlug(c.cwd), 'sess-1.jsonl')]);
+  assert.deepEqual(
+    store.listClaudeState(project.id, c.ticket.id).map((row) => row.path),
+    [join('projects', projectSlug(c.cwd), 'sess-1.jsonl')],
+  );
 });
 
 test("a memory folder that became a link out of the volume isn't read, and its stored notes aren't dropped as deleted (C1 review)", async () => {

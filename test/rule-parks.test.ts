@@ -22,7 +22,8 @@ test('the phrases of a save are the word pairs of what changed, old wording and 
 
 test('parked minions whose note names the changed rule, and the chains behind them, go to their Taskmaster; others do not', () => {
   const dir = mkdtempSync(join(tmpdir(), 'rule-parks-'));
-  try { // timing-ok: own temp dir
+  try {
+    // timing-ok: own temp dir
     const store = new Store(join(dir, 'db.sqlite'));
     const project = store.createProject('P', null);
     const tm = store.createTicket({ project_id: project.id, title: 'TM', permission_mode: 'default', created_by: 'x', kind: 'coordinator' });
@@ -34,9 +35,12 @@ test('parked minions whose note names the changed rule, and the chains behind th
     const lane = make('Lane', 'parked', 'go given; waiting for pipeline lane (11th)');
     const chained = make('Chained', null, 'starts when #1 is live');
     const chained2 = make('Chained 2', null, 'starts when #2 is live');
-    const other = make('Other', 'parked', 'waiting on Josh\'s GPU');
+    const other = make('Other', 'parked', "waiting on Josh's GPU");
     const running = make('Running', null, 'waiting for pipeline lane');
-    const chains = [{ ticket: chained.id, after: lane.id }, { ticket: chained2.id, after: chained.id }];
+    const chains = [
+      { ticket: chained.id, after: lane.id },
+      { ticket: chained2.id, after: chained.id },
+    ];
     const mail: { to: number; text: string }[] = [];
     const runner = { parked: (t: any) => t.state === 'parked' || chains.some((c) => c.ticket === t.id), leaveMail: (to: number, _a: string, text: string) => mail.push({ to, text }) };
     const app = { store, runner, waiters: { chains: () => chains } } as any;
@@ -54,17 +58,20 @@ test('parked minions whose note names the changed rule, and the chains behind th
     mail.length = 0;
     mailParksUnderOldRule(app, [store.getProject(project.id)!], 'Alpha rule with six words in it.', 'Alpha rule with seven words in it now.', 'scheme');
     assert.equal(mail.length, 0, 'a change no park note names sends nothing');
-    void other; void running;
+    void other;
+    void running;
   } finally {
     rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
   }
 });
 
 let srv: Booted;
-before(async () => { srv = await bootServer(); });
+before(async () => {
+  srv = await bootServer();
+});
 after(() => srv?.stop());
 
-test('through the server: a person\'s Settings save mails the Taskmaster about a minion parked under the old wording', async () => {
+test("through the server: a person's Settings save mails the Taskmaster about a minion parked under the old wording", async () => {
   const p = (await srv.call('/api/projects', { name: 'P' })).data;
   await srv.call(`/api/projects/${p.id}`, { instructions: OLD }, 'PATCH');
   const t = (await srv.call(`/api/projects/${p.id}/tickets`, { title: 'Lane', message: 'a lane change' })).data;
@@ -75,7 +82,7 @@ test('through the server: a person\'s Settings save mails the Taskmaster about a
   db.close();
   const tm = (await srv.call(`/api/projects/${p.id}`)).data.coordinator; // reading the scheme makes its Taskmaster
   assert.equal((await srv.call(`/api/projects/${p.id}`, { instructions: NEW }, 'PATCH')).status, 200);
-  await until('the mail in the Taskmaster\'s chat', async () => JSON.stringify((await srv.call(`/api/tickets/${tm.id}/events?after=0`)).data).includes('may be waiting under the old wording'));
+  await until("the mail in the Taskmaster's chat", async () => JSON.stringify((await srv.call(`/api/tickets/${tm.id}/events?after=0`)).data).includes('may be waiting under the old wording'));
   const events = JSON.stringify((await srv.call(`/api/tickets/${tm.id}/events?after=0`)).data);
   assert.ok(events.includes(`#${t.number} Lane`), events.slice(-2000));
 });

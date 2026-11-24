@@ -49,7 +49,14 @@ store.setArtifactPinned(ART.id, 'Cara');
 const service = createServer((_req, res) => res.end('ok')); // a contraption's service: answers everything
 const servicePort = await tmp.serve(service);
 const CX = new Contraptions(store, SECRET, join(data, 'contraptions')).register({
-  name: 'cx', title: 'CX', port: servicePort, icon: null, home_scheme: null, open_paths: '["/link"]', default_model: null, turn_cap: null,
+  name: 'cx',
+  title: 'CX',
+  port: servicePort,
+  icon: null,
+  home_scheme: null,
+  open_paths: '["/link"]',
+  default_model: null,
+  turn_cap: null,
 });
 
 const tokens = new Auth(PASSWORD, SECRET);
@@ -60,9 +67,34 @@ const bearer = (id: number) => ({ Authorization: `Bearer ${tokens.agentToken(id)
 // loaded rows keep a short name (:t a ticket, :p scheme A, :s, :a, :m) that the call fills in.
 type Probe = { method: string; path: string; fresh?: 'schedule' | 'machine'; notAsPerson?: boolean };
 const FILL: Record<string, string> = {
-  ticket: ':t', project: ':p', schedule: ':s', artifact: ':a', machine: ':m', machineId: ':m',
-  person: '999', token: 'not-a-token', view: '0', name: 'nope', session: '0123456789abcdef01234567', turn: '1', event: '1', key: 'k',
-  slug: 'nope', template: 'nope', to: 'nope', rest: 'x', app: 'nope', number: '1', list: 'apps', file: '1', upload: '0123456789abcdef0123456789abcdef', job: '1', hash: 'nohash', id: '1', row: 'nope', wait: '1',
+  ticket: ':t',
+  project: ':p',
+  schedule: ':s',
+  artifact: ':a',
+  machine: ':m',
+  machineId: ':m',
+  person: '999',
+  token: 'not-a-token',
+  view: '0',
+  name: 'nope',
+  session: '0123456789abcdef01234567',
+  turn: '1',
+  event: '1',
+  key: 'k',
+  slug: 'nope',
+  template: 'nope',
+  to: 'nope',
+  rest: 'x',
+  app: 'nope',
+  number: '1',
+  list: 'apps',
+  file: '1',
+  upload: '0123456789abcdef0123456789abcdef',
+  job: '1',
+  hash: 'nohash',
+  id: '1',
+  row: 'nope',
+  wait: '1',
 };
 // Routes probed at other paths than FILL gives: a query the route needs, or more than one case.
 const PATHS: Record<string, string[]> = {
@@ -100,13 +132,21 @@ const UNDECIDED = new Set([
 ]);
 // What the table can't express: wrong methods, unknown paths, and a contraption's proxied paths.
 const EXTRA_TICKET: Probe[] = [
-  { method: 'PUT', path: '/api/tickets/:t' }, { method: 'GET', path: '/api/tickets/:t/messages' }, { method: 'POST', path: '/api/tickets/:t/nonsense' },
+  { method: 'PUT', path: '/api/tickets/:t' },
+  { method: 'GET', path: '/api/tickets/:t/messages' },
+  { method: 'POST', path: '/api/tickets/:t/nonsense' },
 ];
 const EXTRA: Probe[] = [
-  { method: 'DELETE', path: '/api/projects/:p' }, { method: 'PUT', path: '/api/projects/:p/properties' }, { method: 'GET', path: '/api/push/subscription' },
-  { method: 'POST', path: '/api/machines/:m' }, { method: 'GET', path: '/api/nonsense' },
+  { method: 'DELETE', path: '/api/projects/:p' },
+  { method: 'PUT', path: '/api/projects/:p/properties' },
+  { method: 'GET', path: '/api/push/subscription' },
+  { method: 'POST', path: '/api/machines/:m' },
+  { method: 'GET', path: '/api/nonsense' },
   // src/apps.ts: cx is enabled for the admin only, /link is open.
-  { method: 'GET', path: '/apps/cx/x' }, { method: 'POST', path: '/apps/cx/x' }, { method: 'GET', path: '/apps/cx/link' }, { method: 'GET', path: '/apps/nope/' },
+  { method: 'GET', path: '/apps/cx/x' },
+  { method: 'POST', path: '/apps/cx/x' },
+  { method: 'GET', path: '/apps/cx/link' },
+  { method: 'GET', path: '/apps/nope/' },
 ];
 
 /** Every route server.ts hands to router(), read from its source: importing it would boot the server. */
@@ -118,7 +158,11 @@ async function mountedRoutes(): Promise<Route[]> {
   for (const f of readdirSync(join(import.meta.dirname, '..', 'src', 'routes'))) Object.assign(exported, await import(`../src/routes/${f}`));
   assert.ok(names.length >= 9, `server.ts should hand its route arrays to router(); found ${names.join(', ') || 'none'}`);
   // An array server.ts mounts that isn't one of src/routes' exports would go unprobed.
-  assert.deepEqual(names.filter((n) => !Array.isArray(exported[n])), [], 'route arrays server.ts mounts that src/routes/ does not export');
+  assert.deepEqual(
+    names.filter((n) => !Array.isArray(exported[n])),
+    [],
+    'route arrays server.ts mounts that src/routes/ does not export',
+  );
   return names.flatMap((n) => exported[n]);
 }
 const TICKET_ROUTES: Probe[] = [];
@@ -155,14 +199,24 @@ test('every route answers each kind of caller as recorded', { timeout: 120_000 }
   // A contraption whose service (above) answers everything, enabled for the admin.
   store.setContraptionUser(CX.id, store.findUser('name', 'Cara')!.id, true, null);
   const callers: Record<string, Record<string, string>> = {
-    anon: {}, person: { Cookie: srv.cookie }, member: { Cookie: member.cookie }, outsider: { Cookie: outsider.cookie },
-    tmA: bearer(TA.id), tmB: bearer(TB.id), m1: bearer(M1.id), m2: bearer(M2.id),
+    anon: {},
+    person: { Cookie: srv.cookie },
+    member: { Cookie: member.cookie },
+    outsider: { Cookie: outsider.cookie },
+    tmA: bearer(TA.id),
+    tmB: bearer(TB.id),
+    m1: bearer(M1.id),
+    m2: bearer(M2.id),
   };
   let n = 0;
   const probe = async (who: string, p: Probe, t: number) => {
     const id = p.fresh === 'schedule' ? schedule().id : p.fresh === 'machine' ? machine(`fresh-${n++}`).id : null;
-    const path = p.path.replace(':t', String(t)).replace(':p', String(A.id)).replace(':s', String(id ?? S.id))
-      .replace(':a', String(ART.id)).replace(':m', String(id ?? MX.id));
+    const path = p.path
+      .replace(':t', String(t))
+      .replace(':p', String(A.id))
+      .replace(':s', String(id ?? S.id))
+      .replace(':a', String(ART.id))
+      .replace(':m', String(id ?? MX.id));
     const res = await fetch(srv.base + path, {
       method: p.method,
       headers: { ...callers[who], ...(p.method === 'GET' || p.method === 'HEAD' ? {} : { 'Content-Type': 'application/json' }) },
@@ -180,7 +234,10 @@ test('every route answers each kind of caller as recorded', { timeout: 120_000 }
   const got: Record<string, Record<string, string>> = {};
   for (const who of Object.keys(callers)) {
     const ask = (p: Probe) => !(p.notAsPerson && PEOPLE.includes(who));
-    for (const [target, t] of [['minion1', M1.id], ['taskmasterA', TA.id]] as const) {
+    for (const [target, t] of [
+      ['minion1', M1.id],
+      ['taskmasterA', TA.id],
+    ] as const) {
       for (const p of TICKET_ROUTES.filter(ask)) (got[`${p.method} ${p.path.replace(':t', `:${target}`)}`] ??= {})[who] = await probe(who, p, t);
     }
     for (const p of OTHER_ROUTES.filter(ask)) (got[`${p.method} ${p.path}`] ??= {})[who] = await probe(who, p, M1.id);
@@ -190,9 +247,18 @@ test('every route answers each kind of caller as recorded', { timeout: 120_000 }
   }
   // By path, then method, so one thing's routes sit together.
   const byPath = (k: string) => k.replace(/^(\S+) (.*)$/, '$2 $1');
-  const block = (k: string) => Object.fromEntries(Object.keys(callers).filter((who) => who in got[k] && !UNDECIDED.has(`${k} as ${who}`)).map((who) => [who, got[k][who]]));
+  const block = (k: string) =>
+    Object.fromEntries(
+      Object.keys(callers)
+        .filter((who) => who in got[k] && !UNDECIDED.has(`${k} as ${who}`))
+        .map((who) => [who, got[k][who]]),
+    );
   for (const u of UNDECIDED) assert.ok(got[u.split(' as ')[0]]?.[u.split(' as ')[1]], `${u} is probed no more: drop it from UNDECIDED`);
-  const sorted = Object.fromEntries(Object.keys(got).sort((a, b) => byPath(a).localeCompare(byPath(b))).map((k) => [k, block(k)]));
+  const sorted = Object.fromEntries(
+    Object.keys(got)
+      .sort((a, b) => byPath(a).localeCompare(byPath(b)))
+      .map((k) => [k, block(k)]),
+  );
   if (process.env.UPDATE_ACCESS_MATRIX === '1') {
     writeFileSync(SNAPSHOT, JSON.stringify(sorted, null, 1) + '\n');
     return;

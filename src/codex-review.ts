@@ -47,13 +47,15 @@ export function notReady(env: Record<string, string | undefined> = process.env, 
   const cfg = env.CITADEL_CODEX_TRIPWIRE;
   if (!cfg || !existsSync(cfg)) return 'This turn has no Codex tripwire config (CITADEL_CODEX_TRIPWIRE): it started before Codex reviews existed.';
   const home = env.CODEX_HOME || join(env.HOME || homedir(), '.codex');
-  if (!existsSync(join(home, 'auth.json'))) return 'This person hasn\'t signed in to Codex in their container yet (they run `codex login --device-auth` there themselves).';
+  if (!existsSync(join(home, 'auth.json'))) return "This person hasn't signed in to Codex in their container yet (they run `codex login --device-auth` there themselves).";
   return null;
 }
 
-export const DEVELOPER_INSTRUCTIONS = 'You are a read-only reviewer for Citadel, of code or of the work in the images attached to the brief. Read the code with shell commands (git, rg, sed, cat); never edit, create or delete a file, and never run tests, builds, installs or network commands. A Citadel tripwire blocks some commands and says why: take that as final and carry on without it. Reply with the review only, in the format the brief asks for.';
+export const DEVELOPER_INSTRUCTIONS =
+  'You are a read-only reviewer for Citadel, of code or of the work in the images attached to the brief. Read the code with shell commands (git, rg, sed, cat); never edit, create or delete a file, and never run tests, builds, installs or network commands. A Citadel tripwire blocks some commands and says why: take that as final and carry on without it. Reply with the review only, in the format the brief asks for.';
 
-export const IMAGE_INSTRUCTIONS = 'You make one picture for Citadel with your built-in image_gen tool, on behalf of the person whose login this is. Call image_gen exactly once, with the prompt, transparent_background and referenced_image_paths the message gives, unchanged. Run no shell commands and write, copy or move no files yourself: Codex saves the picture in its own folder and Citadel copies it out. Then reply with one short line saying it is done, or why image_gen failed.';
+export const IMAGE_INSTRUCTIONS =
+  'You make one picture for Citadel with your built-in image_gen tool, on behalf of the person whose login this is. Call image_gen exactly once, with the prompt, transparent_background and referenced_image_paths the message gives, unchanged. Run no shell commands and write, copy or move no files yourself: Codex saves the picture in its own folder and Citadel copies it out. Then reply with one short line saying it is done, or why image_gen failed.';
 
 /** The message an --image-gen run sends: the person's prompt and the image_gen arguments, spelled out. */
 export function imageBrief(prompt: string, transparent: boolean, refs: string[]): string {
@@ -126,7 +128,13 @@ export function images(args: string[], cwd: string, env: Record<string, string |
       return { error: `no image at ${p}` };
     }
     if (!IMAGE_TYPES.has(extname(real).toLowerCase())) return { error: `${p} isn't a png, jpg, gif or webp image` };
-    if (!roots.some((r) => { const rel = relative(r, real); return rel && !rel.startsWith('..') && !isAbsolute(rel); })) return { error: `${p} is outside this worktree and the shared folders, so it can't go to Codex` };
+    if (
+      !roots.some((r) => {
+        const rel = relative(r, real);
+        return rel && !rel.startsWith('..') && !isAbsolute(rel);
+      })
+    )
+      return { error: `${p} is outside this worktree and the shared folders, so it can't go to Codex` };
     paths.push(real);
   }
   return { paths };
@@ -141,7 +149,11 @@ export function outPath(p: string | undefined, cwd: string, overwrite: boolean, 
   if (extname(p).toLowerCase() !== '.png') return { error: `${p} must end in .png: Codex makes PNGs` };
   const path = resolve(cwd, p);
   const roots = [cwd, env.COORDINATOR_SHARED_DIR, env.COORDINATOR_FILES_DIR].flatMap((d) => (d ? [resolve(d)] : []));
-  const within = (rs: string[], dir: string) => rs.some((r) => { const rel = relative(r, dir); return !rel.startsWith('..') && !isAbsolute(rel); });
+  const within = (rs: string[], dir: string) =>
+    rs.some((r) => {
+      const rel = relative(r, dir);
+      return !rel.startsWith('..') && !isAbsolute(rel);
+    });
   const outside = `${p} is outside this worktree and the shared folders`;
   if (!within(roots, dirname(path))) return { error: outside };
   const there = lstatSync(path, { throwIfNoEntry: false });
@@ -151,7 +163,13 @@ export function outPath(p: string | undefined, cwd: string, overwrite: boolean, 
   try {
     mkdirSync(dirname(path), { recursive: true });
     // A symlinked folder could lead out of the roots: check where it really is.
-    if (!within(roots.flatMap((r) => (existsSync(r) ? [realpathSync(r)] : [])), realpathSync(dirname(path)))) return { error: outside };
+    if (
+      !within(
+        roots.flatMap((r) => (existsSync(r) ? [realpathSync(r)] : [])),
+        realpathSync(dirname(path)),
+      )
+    )
+      return { error: outside };
   } catch (err: any) {
     return { error: `can't make the folder for ${p}: ${err.message}` };
   }
@@ -160,7 +178,10 @@ export function outPath(p: string | undefined, cwd: string, overwrite: boolean, 
 
 /** "5-hour 12%, weekly 30%": the person's Codex usage, for the self-review report line. */
 export function usageLine(limits: RateLimits | null | undefined): string {
-  return [limits?.primary, limits?.secondary].filter((w): w is RateWindow => !!w && typeof w.usedPercent === 'number').map((w) => `${windowName(w)} ${w.usedPercent}%`).join(', ');
+  return [limits?.primary, limits?.secondary]
+    .filter((w): w is RateWindow => !!w && typeof w.usedPercent === 'number')
+    .map((w) => `${windowName(w)} ${w.usedPercent}%`)
+    .join(', ');
 }
 
 /**
@@ -288,10 +309,14 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
       await call('initialize', { clientInfo: { name: 'citadel-codex-review', version: '1' }, capabilities: { experimentalApi: false, requestAttestation: false } });
       send({ method: 'initialized' });
       // An account without ChatGPT limits (or an older backend) can't answer: review anyway.
-      const read = await Promise.race([call('account/rateLimits/read', { excludeResetCreditDetails: true }), new Promise((r) => setTimeout(r, 15_000).unref())]).catch(() => null) as any;
+      const read = (await Promise.race([call('account/rateLimits/read', { excludeResetCreditDetails: true }), new Promise((r) => setTimeout(r, 15_000).unref())]).catch(() => null)) as any;
       limits = read?.rateLimitsByLimitId?.codex ?? read?.rateLimits ?? null;
       // shortcut: an image run also paces against any limit whose id names images (a failed generation carries its own limitId); the id isn't documented, so check it on a real read.
-      const imageLimits = gen ? Object.entries(read?.rateLimitsByLimitId ?? {}).filter(([id]) => /image/i.test(id)).map(([, l]) => l as RateLimits) : [];
+      const imageLimits = gen
+        ? Object.entries(read?.rateLimitsByLimitId ?? {})
+            .filter(([id]) => /image/i.test(id))
+            .map(([, l]) => l as RateLimits)
+        : [];
       const why = [limits, ...imageLimits].map((l) => overPace(l, opts.now?.(), !gen)).find(Boolean);
       if (why) return finish(4, `Skipped to save your Codex plan: ${why}.`);
       const { thread } = await call('thread/start', { cwd: opts.cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true, developerInstructions: gen ? IMAGE_INSTRUCTIONS : DEVELOPER_INSTRUCTIONS });
@@ -447,47 +472,48 @@ function tail(s: string): string {
 }
 
 // In a function, never awaited at the top level: a thread that loads this module would abort the process if it were terminated mid-start (test/worker-tla.test.ts).
-if (process.argv[1] === fileURLToPath(import.meta.url)) void (async () => {
-  const args = process.argv.slice(2);
-  const imgs = args.includes('--check') ? { paths: [] } : images(args, process.cwd());
-  if ('error' in imgs) {
-    process.stderr.write(`citadel-codex-review: ${imgs.error}\n`);
-    process.exit(2);
-  }
-  // A host turn (#398): no hook here, so the review goes to the Codex container the runner named, never runs here.
-  const cfg = hooked() ? null : runnerConfig();
-  if (cfg?.container) process.exit(await inContainer(args, cfg as CodexConfig & { container: ReviewContainer }, process.cwd()));
-  const why = notReady();
-  if (args.includes('--check')) {
-    process.stdout.write(why ? `${why}\n` : 'ready\n');
-    process.exit(why ? 3 : 0);
-  }
-  if (why) {
-    process.stderr.write(`citadel-codex-review: ${why}\n`);
-    process.exit(3);
-  }
-  const t = args.indexOf('--timeout');
-  const timeoutMs = (t >= 0 ? Number(args[t + 1]) : 900) * 1000;
-  const brief = readFileSync(0, 'utf8').trim();
-  if (!brief || !(timeoutMs > 0)) {
-    process.stderr.write('usage: citadel-codex-review [--timeout seconds] [--image path]... < brief.md   (or --check, or --image-gen --out path.png [--transparent] [--overwrite] [--image ref]... < prompt)\n');
-    process.exit(2);
-  }
-  let imageGen: ReviewOptions['imageGen'];
-  if (args.includes('--image-gen')) {
-    const o = args.indexOf('--out');
-    const out = outPath(o >= 0 ? args[o + 1] : undefined, process.cwd(), args.includes('--overwrite'));
-    if ('error' in out) {
-      process.stderr.write(`citadel-codex-review: ${out.error}\n`);
+if (process.argv[1] === fileURLToPath(import.meta.url))
+  void (async () => {
+    const args = process.argv.slice(2);
+    const imgs = args.includes('--check') ? { paths: [] } : images(args, process.cwd());
+    if ('error' in imgs) {
+      process.stderr.write(`citadel-codex-review: ${imgs.error}\n`);
       process.exit(2);
     }
-    imageGen = { out: out.path, transparent: args.includes('--transparent'), overwrite: args.includes('--overwrite') };
-  }
-  // For the record of what the lock costs (#636): the tool result keeps this line.
-  const onWaited = (ms: number) => ms >= 1000 && process.stderr.write(`citadel-codex-review: waited ${Math.round(ms / 1000)} s for this person's Codex lock.\n`);
-  const onWait = () => process.stderr.write("citadel-codex-review: waiting for this person's other Codex run.\n");
-  const r = await review(brief, { cwd: process.cwd(), timeoutMs, images: imgs.paths, bin: process.env.CITADEL_CODEX_BIN, onWait, onWaited, imageGen });
-  (r.code ? process.stderr : process.stdout).write(r.text + '\n');
-  if (r.usage) process.stderr.write(`Codex usage: ${r.usage}\n`);
-  process.exit(r.code);
-})();
+    // A host turn (#398): no hook here, so the review goes to the Codex container the runner named, never runs here.
+    const cfg = hooked() ? null : runnerConfig();
+    if (cfg?.container) process.exit(await inContainer(args, cfg as CodexConfig & { container: ReviewContainer }, process.cwd()));
+    const why = notReady();
+    if (args.includes('--check')) {
+      process.stdout.write(why ? `${why}\n` : 'ready\n');
+      process.exit(why ? 3 : 0);
+    }
+    if (why) {
+      process.stderr.write(`citadel-codex-review: ${why}\n`);
+      process.exit(3);
+    }
+    const t = args.indexOf('--timeout');
+    const timeoutMs = (t >= 0 ? Number(args[t + 1]) : 900) * 1000;
+    const brief = readFileSync(0, 'utf8').trim();
+    if (!brief || !(timeoutMs > 0)) {
+      process.stderr.write('usage: citadel-codex-review [--timeout seconds] [--image path]... < brief.md   (or --check, or --image-gen --out path.png [--transparent] [--overwrite] [--image ref]... < prompt)\n');
+      process.exit(2);
+    }
+    let imageGen: ReviewOptions['imageGen'];
+    if (args.includes('--image-gen')) {
+      const o = args.indexOf('--out');
+      const out = outPath(o >= 0 ? args[o + 1] : undefined, process.cwd(), args.includes('--overwrite'));
+      if ('error' in out) {
+        process.stderr.write(`citadel-codex-review: ${out.error}\n`);
+        process.exit(2);
+      }
+      imageGen = { out: out.path, transparent: args.includes('--transparent'), overwrite: args.includes('--overwrite') };
+    }
+    // For the record of what the lock costs (#636): the tool result keeps this line.
+    const onWaited = (ms: number) => ms >= 1000 && process.stderr.write(`citadel-codex-review: waited ${Math.round(ms / 1000)} s for this person's Codex lock.\n`);
+    const onWait = () => process.stderr.write("citadel-codex-review: waiting for this person's other Codex run.\n");
+    const r = await review(brief, { cwd: process.cwd(), timeoutMs, images: imgs.paths, bin: process.env.CITADEL_CODEX_BIN, onWait, onWaited, imageGen });
+    (r.code ? process.stderr : process.stdout).write(r.text + '\n');
+    if (r.usage) process.stderr.write(`Codex usage: ${r.usage}\n`);
+    process.exit(r.code);
+  })();

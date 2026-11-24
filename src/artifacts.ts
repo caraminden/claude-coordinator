@@ -158,7 +158,11 @@ export async function findArtifacts(cwd: string, isGit: boolean, keep = listable
   if (!cwd) return [];
   const paths = (isGit ? (await gitAdded(cwd)).filter(keep) : await walk(cwd, keep, max)).slice(0, max);
   // lstat so a symlink pointing elsewhere on disk never becomes an artifact; null when deleted between listing and stat.
-  const stat = (path: string) => lstat(join(cwd, path)).then((st) => (st.isFile() ? { path, size: st.size, mtime: Math.round(st.mtimeMs) } : null), () => null);
+  const stat = (path: string) =>
+    lstat(join(cwd, path)).then(
+      (st) => (st.isFile() ? { path, size: st.size, mtime: Math.round(st.mtimeMs) } : null),
+      () => null,
+    );
   const found: FoundArtifact[] = [];
   // A batch at a time: one by one, Delve's 3,400 shared files took 750 ms a scan (#676).
   for (let i = 0; i < paths.length; i += 64) {
@@ -309,6 +313,12 @@ export function commentMessage(path: string, text: string, quote = '') {
   // Like display names, the file sits inside "[...]:" in the prompt, so keep brackets and newlines out.
   const plain = path.replace(/[\x00-\x1f\x7f\[\]]/g, '').trim();
   const about = plain.length > 200 ? `…${plain.slice(-199)}` : plain;
-  const quoted = quote.trim() ? `${quote.trim().split('\n').map((l) => `> ${l}`.trimEnd()).join('\n')}\n\n` : '';
+  const quoted = quote.trim()
+    ? `${quote
+        .trim()
+        .split('\n')
+        .map((l) => `> ${l}`.trimEnd())
+        .join('\n')}\n\n`
+    : '';
   return { about, text: `${quoted}${text.trim()}` };
 }

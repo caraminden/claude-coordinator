@@ -22,10 +22,11 @@ async function syncCallsUnder<T>(dir: string, fn: () => T | Promise<T>): Promise
   const names = ['readFileSync', 'readdirSync', 'writeFileSync', 'renameSync', 'existsSync', 'statSync', 'openSync', 'accessSync'] as const;
   const real = Object.fromEntries(names.map((n) => [n, fs[n]]));
   const seen: string[] = [];
-  for (const n of names) (fs as any)[n] = (p: unknown, ...rest: unknown[]) => {
-    if (typeof p === 'string' && p.startsWith(dir)) seen.push(`${n} ${p.slice(dir.length)}`);
-    return (real[n] as any)(p, ...rest);
-  };
+  for (const n of names)
+    (fs as any)[n] = (p: unknown, ...rest: unknown[]) => {
+      if (typeof p === 'string' && p.startsWith(dir)) seen.push(`${n} ${p.slice(dir.length)}`);
+      return (real[n] as any)(p, ...rest);
+    };
   syncBuiltinESMExports();
   try {
     await fn();
@@ -36,13 +37,18 @@ async function syncCallsUnder<T>(dir: string, fn: () => T | Promise<T>): Promise
   return seen;
 }
 
-test('a card reaches a running turn\'s snapshot with no synchronous file call on the server\'s thread', async () => {
+test("a card reaches a running turn's snapshot with no synchronous file call on the server's thread", async () => {
   const fake = join(root, 'claude');
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db.sqlite'));
   store.typedHandlesUpTo = 0;
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const clock = new FakeClock();
   runner.clock = clock;
   const p = store.createProject('Busy', null);
@@ -70,7 +76,10 @@ test('a card reaches a running turn\'s snapshot with no synchronous file call on
   runner.emit(c.id, 'question_result', { id: 'q1', answers: {} });
   clock.advance(2_000);
   runner.emit(a.id, 'question', { id: 'own', questions: [{ header: 'O', question: '?' }] });
-  assert.equal((JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs).cards!.some((x) => x.minion === a.number), true);
+  assert.equal(
+    (JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs).cards!.some((x) => x.minion === a.number),
+    true,
+  );
   clock.advance(2_000);
   await runner.refsWritten();
   // Writes to one file run one at a time and the newest text wins: the file is whole and has the last refresh's cards.
@@ -82,7 +91,7 @@ test('a card reaches a running turn\'s snapshot with no synchronous file call on
   (runner as any).turns.clear();
 });
 
-test('the flake log is read with no synchronous file call on the server\'s thread', async () => {
+test("the flake log is read with no synchronous file call on the server's thread", async () => {
   const dir = mkdtempSync(join(root, 'flakes-'));
   const store = new Store(join(dir, 'c.db'));
   const project = store.createProject('P', null);
@@ -103,9 +112,11 @@ test('the flake log is read with no synchronous file call on the server\'s threa
   assert.equal(woken.length, 1);
 });
 
-test('the waits poll reads the land line and the heavy folder with no synchronous file call on the server\'s thread', async () => {
+test("the waits poll reads the land line and the heavy folder with no synchronous file call on the server's thread", async () => {
   const dir = mkdtempSync(join(root, 'waits-'));
-  const state = join(dir, 'state'), heavy = join(dir, 'heavy'), queue = join(state, 'queue');
+  const state = join(dir, 'state'),
+    heavy = join(dir, 'heavy'),
+    queue = join(state, 'queue');
   mkdirSync(queue, { recursive: true });
   mkdirSync(heavy);
   const store = new Store(join(dir, 'c.db'));
@@ -124,8 +135,13 @@ test('the waits poll reads the land line and the heavy folder with no synchronou
   writeFileSync(join(heavy, 'wait-5-6'), `Other #2 (cara)\ncargo test\n${Math.floor(nowMs / 1000) - 5}\nbusy\n`);
   const changed: number[] = [];
   const waits = new Waits({ store, deployState: state, heavyDir: heavy, interruptible: () => 0, changed: (id) => changed.push(id), ship: () => null, alive: () => true });
-  const calls = await syncCallsUnder(dir, async () => { await waits.poll(); });
+  const calls = await syncCallsUnder(dir, async () => {
+    await waits.poll();
+  });
   assert.deepEqual(calls, []);
-  assert.deepEqual(waits.line.map((x) => x.seq), [1, 2]);
+  assert.deepEqual(
+    waits.line.map((x) => x.seq),
+    [1, 2],
+  );
   assert.equal(waits.line[0].tests?.done, 3);
 });

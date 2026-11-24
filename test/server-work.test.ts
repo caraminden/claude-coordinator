@@ -7,13 +7,17 @@ import { Landings } from '../src/land.ts';
 import { serverWorkWatch } from '../src/server-work.ts';
 import { isShipping, isWorking } from '../public/schemecounts.js';
 
-test("server work (#727): a handed-off land is working until it settles, and its row is sent at each end", async (t) => {
+test('server work (#727): a handed-off land is working until it settles, and its row is sent at each end', async (t) => {
   const data = mkdtempSync(join(tmpdir(), 'server-work-'));
   t.after(() => rmSync(data, { recursive: true, force: true }));
   let clock = 0;
   const sent: number[] = [];
   let landings: Landings;
-  const work = serverWorkWatch(() => landings.handoffs(), (id) => sent.push(id), () => clock);
+  const work = serverWorkWatch(
+    () => landings.handoffs(),
+    (id) => sent.push(id),
+    () => clock,
+  );
   // What Landings.handOff leaves, without running land.sh.
   const dir = join(data, 'run', 'landings', '5');
   mkdirSync(dir, { recursive: true });

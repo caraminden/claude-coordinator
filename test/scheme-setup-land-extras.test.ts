@@ -70,7 +70,11 @@ test('land_ci_more: CI past CI_LIMIT gets the time the hook gives, once per key;
     assert.equal(await a.exit, 1, a.stderr());
     assert.match(a.stderr(), /CI on [0-9a-f]{12} ran past its 1 s?.*land_ci_more gives it 1s more \(queued: a runner was busy\)/);
     const calls = readFileSync(join(c.ci, 'more.log'), 'utf8').trim().split('\n');
-    assert.deepEqual(calls.map((l) => l.replace(/^(\S{12})\S*/, '$1')), [`${ta} []`, `${ta} [queued]`], 'asked again with the key it gave, which it may not take twice');
+    assert.deepEqual(
+      calls.map((l) => l.replace(/^(\S{12})\S*/, '$1')),
+      [`${ta} []`, `${ta} [queued]`],
+      'asked again with the key it gave, which it may not take twice',
+    );
   } finally {
     c.stop();
   }
@@ -154,14 +158,20 @@ test('land_suspect: a red batch runs CI on the member below the guess, then refu
     const base = c.mainAt();
     c.open();
     const te = await c.tip(e);
-    const td = c.parent(te), tb = c.parent(td), ta = c.parent(tb);
+    const td = c.parent(te),
+      tb = c.parent(td),
+      ta = c.parent(tb);
     const full = git(c.main, 'rev-parse', te);
     writeFileSync(join(c.ci, 'guess'), `${full}\n`);
     c.verdict(te, RED);
     assert.equal(await c.tip(d), td, 'the member just below the guess pushes, not the halfway one');
     assert.match(e.stderr(), /land_suspect guesses ticket\/4-x \([0-9a-f]{12}\) turned CI red, so the bisect tries it first/);
     const asked = readFileSync(join(c.ci, 'suspect.log'), 'utf8').split('\n')[0].split(' ');
-    assert.deepEqual(asked.map((x) => x.slice(0, 12)), [base, ta, tb, td, te], "main's commit, then each member's");
+    assert.deepEqual(
+      asked.map((x) => x.slice(0, 12)),
+      [base, ta, tb, td, te],
+      "main's commit, then each member's",
+    );
     assert.deepEqual([c.sent(a), c.sent(b)], [[], []]);
     c.verdict(td, GREEN);
     for (const l of [a, b, d]) assert.equal(await l.exit, 0, l.stderr());

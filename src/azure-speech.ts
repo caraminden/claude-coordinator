@@ -55,7 +55,10 @@ export interface AzureDeps {
   book(s: SpendInput): { month_usd: number; cap_usd: number | null; over_cap: boolean };
   fetch?: typeof fetch;
 }
-export interface AzureContext { roots: string[]; place?: string }
+export interface AzureContext {
+  roots: string[];
+  place?: string;
+}
 
 export async function azureSpeech(args: Record<string, any>, ctx: AzureContext, deps: AzureDeps) {
   const { input, voice } = args;

@@ -8,7 +8,11 @@ import { test } from 'node:test';
 // proof and any run that isn't a ship's ask for a label only the second runner carries, and the first stays the ships'.
 const root = join(import.meta.dirname, '..');
 const read = (f: string) => readFileSync(join(root, f), 'utf8');
-const runsOn = (yml: string) => yml.split('\n').filter((l) => /^\s+runs-on:/.test(l)).join('\n');
+const runsOn = (yml: string) =>
+  yml
+    .split('\n')
+    .filter((l) => /^\s+runs-on:/.test(l))
+    .join('\n');
 
 test("a flake proof runs only on the runner with the side label, so it can't take the ships' runner", () => {
   const r = runsOn(read('.github/workflows/flake-proof.yml'));
@@ -29,12 +33,12 @@ test("no workflow but a ship's run can take the first runner: every other self-h
   const files = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
   const side = '"self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"';
   // Long jobs' own runner (#1592) is off the ships' runner too.
-  const long = "inputs.long == 'true' && fromJSON('[\"self-hosted\", \"citadel-ci-linux\", \"citadel-ci-linux-long\"]')";
-  const landOnly = "startsWith(github.ref, 'refs/heads/land/') && fromJSON('[\"self-hosted\", \"citadel-ci-linux\"]')";
+  const long = 'inputs.long == \'true\' && fromJSON(\'["self-hosted", "citadel-ci-linux", "citadel-ci-linux-long"]\')';
+  const landOnly = 'startsWith(github.ref, \'refs/heads/land/\') && fromJSON(\'["self-hosted", "citadel-ci-linux"]\')';
   // A ship's own check (#1567) only on the check runner, which carries no other label.
-  const checkOnly = "startsWith(github.ref, 'refs/heads/check/') && fromJSON('[\"self-hosted\", \"citadel-ci-linux-check\"]')";
+  const checkOnly = 'startsWith(github.ref, \'refs/heads/check/\') && fromJSON(\'["self-hosted", "citadel-ci-linux-check"]\')';
   // The early next train's run (#1568) is a ship's run on a ship runner, guarded by its own branch, never GitHub's.
-  const earlyOnly = "startsWith(github.ref, 'refs/heads/early/') && fromJSON('[\"self-hosted\", \"citadel-ci-linux\"]')";
+  const earlyOnly = 'startsWith(github.ref, \'refs/heads/early/\') && fromJSON(\'["self-hosted", "citadel-ci-linux"]\')';
   const bad: string[] = [];
   let sideJobs = 0;
   for (const f of files) {
@@ -107,7 +111,7 @@ test("a ship's run burns in its new and changed tests before the full suite, in 
   assert.match(body, /if: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/land\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\) \}\}/, "lands, ships' own checks and early runs only");
   // land/<branch> compares with land-base/<branch>, check/<branch> with check-base/<branch> (tools/own-check.sh).
   assert.equal(base, 'land-base');
-  assert.ok(body.includes('base=origin/${GITHUB_REF_NAME%%/*}-base/${GITHUB_REF_NAME#*/}'), "it compares with the base land.sh pushes");
+  assert.ok(body.includes('base=origin/${GITHUB_REF_NAME%%/*}-base/${GITHUB_REF_NAME#*/}'), 'it compares with the base land.sh pushes');
   assert.match(read('tools/own-check.sh'), /"\+\$m:refs\/heads\/check-base\/\$branch"/, 'and the base the own check pushes');
   assert.match(body, /tools\/burn-in\.sh --ship "\$base"/);
   const own = Number(read('tools/burn-in.sh').match(/limit=\$\{BURN_IN_LIMIT:-(\d+)\}/)?.[1]);
@@ -133,7 +137,7 @@ test("the early next train's run goes beside the lands' run, niced, on a ship ru
   const yml = read('.github/workflows/tests.yml');
   assert.match(yml, /group: .*startsWith\(github\.ref, 'refs\/heads\/early\/'\) && format\('citadel-early-\{0\}', github\.ref_name\)/);
   const r = runsOn(yml);
-  const early = r.indexOf("refs/heads/early/') && fromJSON('[\"self-hosted\", \"citadel-ci-linux\"]')");
+  const early = r.indexOf('refs/heads/early/\') && fromJSON(\'["self-hosted", "citadel-ci-linux"]\')');
   assert.ok(early >= 0 && early < r.indexOf('vars.CI_RUNNER'), 'on a ship runner, before the hosted-runner switch, so it never goes to GitHub');
   assert.match(yml, /NICENESS: \$\{\{ !startsWith\(github\.ref, 'refs\/heads\/land\/'\) && '10' \|\| '0' \}\}/);
   assert.match(yml, /BURN_IN_NICE: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\)\) && 'nice -n 10'/);

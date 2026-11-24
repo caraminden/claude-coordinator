@@ -20,7 +20,10 @@ const RULE = /^[A-Za-z_][\w*.-]*(\(.+\))?$/s;
 
 /** The non-empty lines of a stored list. */
 export function lines(text: string | null | undefined): string[] {
-  return (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+  return (text ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
 }
 
 function list(raw: unknown, field: string): string[] {
@@ -46,7 +49,14 @@ export function cleanPluginDirs(raw: unknown): string {
   const dirs = [...new Set(list(raw, 'Plugin folders').map((d) => d.replace(/\/+$/, '').replace(/^\.\//, '')))].filter(Boolean);
   if (dirs.length > MAX_PLUGIN_DIRS) throw new Error(`At most ${MAX_PLUGIN_DIRS} plugin folders`);
   for (const d of dirs) {
-    if (d.length > MAX_RULE || d.startsWith('~') || d.replace(/^\//, '').split('/').some((s) => s === '..' || s === '.' || !s)) {
+    if (
+      d.length > MAX_RULE ||
+      d.startsWith('~') ||
+      d
+        .replace(/^\//, '')
+        .split('/')
+        .some((s) => s === '..' || s === '.' || !s)
+    ) {
       throw new Error(`"${d.slice(0, 80)}" must be a folder path relative to the repo root, like tools/mods/delve, or an absolute one`);
     }
   }
@@ -117,10 +127,7 @@ export function turnPluginDirs(project: { plugin_dirs: string; optional_plugin_d
  */
 export function permissionArgs(cards: boolean): string[] {
   if (!cards) return ['--permission-prompts', 'none'];
-  return [
-    '--permission-prompts', 'host',
-    '--permission-prompt-tool', APPROVAL_TOOL,
-  ];
+  return ['--permission-prompts', 'host', '--permission-prompt-tool', APPROVAL_TOOL];
 }
 
 /** `--plugin-dir` for each of the project's plugin folders that exists: in this worktree, or at its absolute path. */
@@ -146,7 +153,13 @@ export type Decision =
 // "ok, fold it" (Cara, 2026-11-19: fold is retired, but a person's old go still counts).
 const GO = /^(?:(?:ok|okay|yes|yep|great|lgtm|looks good|go ahead|go|please|pls|plz),? )?(?:and )?(?:you can )?(?:merge|fold|land|squash|ship)(?: (?:it|this|the pr|pr #?(\d{1,7})|#(\d{1,7})|(\d{1,7})))?(?: in)?(?: (?:please|pls|plz|now))?$/;
 
-const words = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[.!]+$/, '').trimEnd();
+const words = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.!]+$/, '')
+    .trimEnd();
 
 /** A go and how it names its number: "PR 5", "#5", a bare "5", or none. */
 function parseGo(text: string): { pr: number | null; named: 'pr' | 'hash' | 'bare' | null } | null {
@@ -200,8 +213,7 @@ export interface GoPlace {
  * only while it is open. Bound to the number, not the head: a build that re-merges its tip and
  * pushes a new head is still what they meant; a merge GitHub refused left it open for the retry.
  */
-const covers = (go: Go, target: MergeTarget) =>
-  target.open === true && (go.pr === null ? !!go.branch && go.branch === target.head : target.number === go.pr);
+const covers = (go: Go, target: MergeTarget) => target.open === true && (go.pr === null ? !!go.branch && go.branch === target.head : target.number === go.pr);
 
 /** A merge call's PR as a go is checked against: its number, its head branch, and whether it is open. */
 export interface MergeTarget {
@@ -332,7 +344,9 @@ export class Approvals {
       if (near && !near.go.hinted) {
         near.go.hinted = true;
         this.goes.set(scheme, near.goes);
-        return { refused: `${near.go.by}'s go to merge covers PR #${retry.target.number}, but only as a lone plain merge, so this was not run. Run exactly \`${retry.command}\` as its own Bash call, with nothing before or after it (no cd, 2>&1, pipe, $( ) or chained check); --match-head-commit with the full SHA written out, and --delete-branch, may go on it. Check the result in a separate call. If you need what this call added, run it again unchanged and it gets the approval card.` };
+        return {
+          refused: `${near.go.by}'s go to merge covers PR #${retry.target.number}, but only as a lone plain merge, so this was not run. Run exactly \`${retry.command}\` as its own Bash call, with nothing before or after it (no cd, 2>&1, pipe, $( ) or chained check); --match-head-commit with the full SHA written out, and --delete-branch, may go on it. Check the result in a separate call. If you need what this call added, run it again unchanged and it gets the approval card.`,
+        };
       }
       const id = this.request(ticketId, tool, input, undefined, merge);
       // A person's go typed in any of the scheme's chats covers its PR until that merges or closes (#260).
@@ -401,9 +415,11 @@ export class Approvals {
       return this.goes.set(scheme, goes);
     }
     for (const g of quoted) this.emit(g.ticket, 'note', { text: `${g.by}'s go "${g.text}" was quoted to #${g.to}, then also quoted to #${where.number}, so it covers neither. Give the go again naming the minion ("ship #N"), or in its own chat.` });
-    this.goes.set(scheme, goes.filter((g) => !quoted.includes(g)));
+    this.goes.set(
+      scheme,
+      goes.filter((g) => !quoted.includes(g)),
+    );
   }
-
 
   /** A queued message taken back before any turn read it: a go it gave goes with it. */
   unsaid(scheme: number, message: number) {

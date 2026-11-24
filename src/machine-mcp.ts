@@ -70,26 +70,28 @@ async function post(message: any): Promise<Response> {
 
 // Claude's messages, sent one at a time so the machine sees them in order.
 let chain = Promise.resolve();
-createInterface({ input: process.stdin }).on('line', (line) => {
-  if (!line.trim()) return;
-  let message: any;
-  try {
-    message = JSON.parse(line);
-  } catch {
-    return;
-  }
-  if (message?.method === 'initialize' || message?.method === 'notifications/initialized') handshake.push(message);
-  chain = chain.then(async () => {
-    await ready;
-    if (message?.id !== undefined && message.method) pending.set(message.id, message);
+createInterface({ input: process.stdin })
+  .on('line', (line) => {
+    if (!line.trim()) return;
+    let message: any;
     try {
-      const r = await post(message);
-      if (!r.ok) unreachable(message, r.status === 503 || r.status === 404 ? 'the machine went offline' : `the app answered ${r.status}`);
-    } catch (err: any) {
-      unreachable(message, `could not reach the app (${err.message})`);
+      message = JSON.parse(line);
+    } catch {
+      return;
     }
-  });
-}).on('close', () => process.exit(0));
+    if (message?.method === 'initialize' || message?.method === 'notifications/initialized') handshake.push(message);
+    chain = chain.then(async () => {
+      await ready;
+      if (message?.id !== undefined && message.method) pending.set(message.id, message);
+      try {
+        const r = await post(message);
+        if (!r.ok) unreachable(message, r.status === 503 || r.status === 404 ? 'the machine went offline' : `the app answered ${r.status}`);
+      } catch (err: any) {
+        unreachable(message, `could not reach the app (${err.message})`);
+      }
+    });
+  })
+  .on('close', () => process.exit(0));
 
 // The machine's messages, as server-sent events: first our session id, then one MCP message each.
 // The stream ends when the app restarts; reconnect, and replay the handshake to the new session.
@@ -104,7 +106,11 @@ for (let first = true; ; first = false) {
       while ((end = buf.indexOf('\n\n')) >= 0) {
         const block = buf.slice(0, end);
         buf = buf.slice(end + 2);
-        const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
+        const data = block
+          .split('\n')
+          .filter((l) => l.startsWith('data:'))
+          .map((l) => l.slice(5).trimStart())
+          .join('\n');
         if (!data) continue;
         const msg = JSON.parse(data);
         if (msg.closed) {

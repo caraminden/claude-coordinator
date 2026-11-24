@@ -215,21 +215,24 @@ const onRecord = () => {
   }
 };
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [token, t] of turns)
-    if (now - t.seen > TTL) {
-      turns.delete(token);
-      dropLinks(token);
+setInterval(
+  () => {
+    const now = Date.now();
+    for (const [token, t] of turns)
+      if (now - t.seen > TTL) {
+        turns.delete(token);
+        dropLinks(token);
+      }
+    if (turns.size) idleSince = now;
+    else if (now - idleSince > IDLE || !onRecord()) {
+      // Gone from pool.json first, so a turn starting now starts a fresh pool rather than registering with this one.
+      try {
+        if (onRecord()) unlinkSync(poolFile);
+      } catch {}
+      process.exit(0);
     }
-  if (turns.size) idleSince = now;
-  else if (now - idleSince > IDLE || !onRecord()) {
-    // Gone from pool.json first, so a turn starting now starts a fresh pool rather than registering with this one.
-    try {
-      if (onRecord()) unlinkSync(poolFile);
-    } catch {}
-    process.exit(0);
-  }
-}, Math.min(1000, TTL / 2)).unref();
+  },
+  Math.min(1000, TTL / 2),
+).unref();
 // Keep running while idle so turns can find it; the interval above decides when to go.
 setInterval(() => {}, 1 << 30);

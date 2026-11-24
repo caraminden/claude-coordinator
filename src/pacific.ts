@@ -32,8 +32,7 @@ export function parseResetTime(text: string, now = Date.now()): number | null {
   const minute = Number(m[2] ?? 0);
   // The zone's offset at `t`: its wall clock read as UTC, minus t.
   const offset = (t: number) => {
-    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: m[4], hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
-      .formatToParts(t).map((x) => [x.type, Number(x.value)]));
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: m[4], hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }).formatToParts(t).map((x) => [x.type, Number(x.value)]));
     return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(t / 1000) * 1000;
   };
   try {
@@ -52,7 +51,7 @@ const formats = new Map<string, Intl.DateTimeFormat>();
 function dateFormat(opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   const key = JSON.stringify(opts);
   let f = formats.get(key);
-  if (!f) formats.set(key, f = new Intl.DateTimeFormat('en-US', opts));
+  if (!f) formats.set(key, (f = new Intl.DateTimeFormat('en-US', opts)));
   return f;
 }
 

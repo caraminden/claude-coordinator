@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { env, git, landLockFree, sleep, until, queueSetup, timingLines, ciSetup, GREEN, RED, LOST } from './scheme-setup-land-fixture.ts';
 
-
 test('CI gate: the commit goes to a scratch branch, and lands only once CI passed exactly that commit', async () => {
   const c = ciSetup(1, { stack: '1' });
   try {
@@ -134,8 +133,14 @@ test('CI gate: under a fresh outage note, a run is given CI_GRACE to be taken, a
 // A process and everything under it, parents first, so a stopped parent starts nothing new. Its children are listed
 // before it is signalled, so a killed parent's children are still found.
 function signalTree(pid: number, signal: NodeJS.Signals) {
-  const children = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
-  try { process.kill(pid, signal); } catch { return; }
+  const children = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' })
+    .stdout.split('\n')
+    .filter(Boolean);
+  try {
+    process.kill(pid, signal);
+  } catch {
+    return;
+  }
   for (const child of children) signalTree(Number(child), signal);
 }
 
@@ -159,7 +164,10 @@ test('the stack: a waiter stopped (SIGSTOP) mid-check keeps the check lock, and 
     assert.equal(a.child.exitCode, null, 'the head still waits for its CI');
     assert.deepEqual(c.landed(), []);
   } finally {
-    if (b) { signalTree(b.child.pid!, 'SIGCONT'); signalTree(b.child.pid!, 'SIGKILL'); }
+    if (b) {
+      signalTree(b.child.pid!, 'SIGCONT');
+      signalTree(b.child.pid!, 'SIGKILL');
+    }
     for (const g of Object.values(gate)) writeFileSync(g, '');
     c.stop();
   }
@@ -243,7 +251,7 @@ test('the stack: a red run in the middle is refused, and the one behind it build
     assert.deepEqual(c.landed(), ['f1.txt: 1']);
     c.verdict(again, GREEN);
     assert.equal(await d.exit, 0, d.stderr());
-    assert.doesNotMatch(d.stderr(), /rebasing ticket\/3-x onto main/, 'the 3rd kept the run it had on the 1st\'s commit: it is not built a third time once the red 2nd is all that is ahead (#560)');
+    assert.doesNotMatch(d.stderr(), /rebasing ticket\/3-x onto main/, "the 3rd kept the run it had on the 1st's commit: it is not built a third time once the red 2nd is all that is ahead (#560)");
     assert.deepEqual(c.landed(), ['f1.txt: 1', 'f3.txt: 3'], "none of the 2nd's commits reached main");
     assert.equal(c.mainAt(), again);
     assert.equal(c.on(2), 'ticket/2-x');
@@ -306,7 +314,7 @@ test('a land.sh run again while the first is still landing in that worktree touc
     assert.equal(await again.exit, 1, again.stderr());
     assert.match(again.stderr(), /a landing is still running in .* \(pid \d+\) and has its HEAD detached on purpose, so this touched nothing/);
     assert.doesNotMatch(again.stderr(), /stopped mid-way/);
-    assert.equal(git(c.wt, 'rev-parse', 'HEAD'), git(c.main, 'rev-parse', ta), 'still on the first one\'s commit');
+    assert.equal(git(c.wt, 'rev-parse', 'HEAD'), git(c.main, 'rev-parse', ta), "still on the first one's commit");
     c.verdict(ta, GREEN);
     assert.equal(await a.exit, 0, a.stderr());
     assert.deepEqual(c.landed(), ['f1.txt: 1']);
@@ -467,7 +475,7 @@ test('the stack: nobody builds on a ticket from a land.sh older than the stack, 
   }
 });
 
-test("CI gate: the built-in reader takes the newest run of each workflow, the worst of them, and tells a lost runner from a red step", async () => {
+test('CI gate: the built-in reader takes the newest run of each workflow, the worst of them, and tells a lost runner from a red step', async () => {
   const c = ciSetup(1, { builtin: true });
   const run = (workflow: string, id: number, status: string, result: string) => `.github/workflows/${workflow}\t${id}\t${status}\t${result}\thttps://ci.test/${id}\n`;
   const runs = (...rows: string[]) => writeFileSync(join(c.ci, 'runs.tsv'), rows.join(''));
@@ -508,7 +516,10 @@ test("CI gate: the built-in reader takes the newest run of each workflow, the wo
 // KT6 (#1519): a run GitHub failed before any job started (a workflow file it can't read: "failure" with no jobs, or
 // "startup_failure") is red with its cause named, never run again and parked "for the runners".
 test('CI gate: a run that failed before any job started is red, not a lost runner', async () => {
-  for (const [result, steps] of [['failure', '0 0'], ['startup_failure', '']]) {
+  for (const [result, steps] of [
+    ['failure', '0 0'],
+    ['startup_failure', ''],
+  ]) {
     const c = ciSetup(1, { builtin: true });
     try {
       writeFileSync(join(c.ci, 'failed-steps'), `${steps}\n`);
@@ -642,7 +653,13 @@ test('batches: three share one run on the top commit; main moves once, straight 
     for (const l of [a, b, d]) assert.equal(await l.exit, 0, l.stderr());
     assert.deepEqual(c.landed(), ['f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3']);
     assert.equal(c.mainAt(), td);
-    assert.equal(git(c.main, 'reflog', '--format=%gs', 'main').split('\n').filter((l) => /merge/.test(l)).length, 1, 'main moved once');
+    assert.equal(
+      git(c.main, 'reflog', '--format=%gs', 'main')
+        .split('\n')
+        .filter((l) => /merge/.test(l)).length,
+      1,
+      'main moved once',
+    );
     assert.equal([a, b, d].filter((l) => /pushed main to origin/.test(l.stderr())).length, 1, 'and was pushed once');
     assert.equal(git(c.origin, 'rev-parse', 'main').slice(0, 12), td);
     assert.deepEqual([c.sent(a), c.sent(b)], [[], []], 'the members below the top sent nothing to CI');
@@ -653,13 +670,26 @@ test('batches: three share one run on the top commit; main moves once, straight 
     assert.match(d.stderr(), new RegExp(`landed ${td.slice(0, 7)}[0-9a-f]* "[^"]*" in a batch with ticket/1-x, ticket/2-x, on its own CI run`));
     for (const l of [b, d]) assert.match(l.stderr(), /main is on origin \(the batch head pushed it\)/);
     // The ship line (#1320): each its own commit and place; the timing lines, with no shared folder, in .git/land-log.
-    assert.deepEqual([a, b, d].map((l) => l.stderr().trimEnd().split('\n').pop()), [ta, tb, td].map((t, i) => `ship: landed ${t} batch ${i + 1} of 3 deploy none`));
+    assert.deepEqual(
+      [a, b, d].map((l) => l.stderr().trimEnd().split('\n').pop()),
+      [ta, tb, td].map((t, i) => `ship: landed ${t} batch ${i + 1} of 3 deploy none`),
+    );
     const timed = timingLines(join(c.state, 'land-log')).sort((x, y) => x.split(' · ')[2].localeCompare(y.split(' · ')[2]));
     assert.equal(timed.length, 3, timed.join('\n'));
     timed.forEach((l, i) => assert.match(l, new RegExp(`· timing · ticket/${i + 1}-x · line \\d+ · rebase \\d+ · ci-queue ${i === 2 ? '\\d+' : '-'} · ci-run ${i === 2 ? '-' : '\\d+'} · landed · batch ${i + 1} of 3$`)));
     assert.deepEqual([1, 2, 3].map(c.on), ['ticket/1-x', 'ticket/2-x', 'ticket/3-x']);
-    assert.deepEqual([1, 2, 3].map((i) => branchAt(c, i)), [ta, tb, td], 'each branch sits on its own commit');
-    assert.equal(readFileSync(join(c.state, 'land-queue', '.took'), 'utf8').trim().split('\n').length, 1, 'only the head held the lock, so only it is timed');
+    assert.deepEqual(
+      [1, 2, 3].map((i) => branchAt(c, i)),
+      [ta, tb, td],
+      'each branch sits on its own commit',
+    );
+    assert.equal(
+      readFileSync(join(c.state, 'land-queue', '.took'), 'utf8')
+        .trim()
+        .split('\n').length,
+      1,
+      'only the head held the lock, so only it is timed',
+    );
     assert.deepEqual(c.scratch(), []);
     assert.deepEqual(c.tickets(), []);
     assert.ok(landLockFree(c));
@@ -683,7 +713,11 @@ test('batches: the line follows land-queue/.order (#1007), so the batches form i
     const all = [a, b, d, e];
     const seen = new Set<string>();
     while (all.some((l) => l.child.exitCode === null)) {
-      for (const sha of all.flatMap(c.sent)) if (!seen.has(sha)) { seen.add(sha); c.verdict(sha, GREEN); }
+      for (const sha of all.flatMap(c.sent))
+        if (!seen.has(sha)) {
+          seen.add(sha);
+          c.verdict(sha, GREEN);
+        }
       await sleep(50);
     }
     for (const l of all) assert.equal(await l.exit, 0, l.stderr());
@@ -856,7 +890,10 @@ test("batches: a member whose commit the head lands while it is looking at the l
     git(c.main, 'add', 'lines.txt');
     git(c.main, 'commit', '-qm', 'lines');
     for (const wt of c.wts) git(wt, 'reset', '-q', '--hard', 'main');
-    const edit = (i: number, msg: string, ...l: string[]) => { writeFileSync(join(c.wts[i], 'lines.txt'), lines(...l)); git(c.wts[i], 'commit', '-qam', msg); };
+    const edit = (i: number, msg: string, ...l: string[]) => {
+      writeFileSync(join(c.wts[i], 'lines.txt'), lines(...l));
+      git(c.wts[i], 'commit', '-qam', msg);
+    };
     edit(0, 'lines.txt: 1', ...without('L6'));
     edit(1, 'lines.txt: 2', ...without('L3'));
     edit(2, 'lines.txt: 3', ...without('L3'));
@@ -961,7 +998,13 @@ const deployHook = `land_deploy() {
 `;
 const deploySetup = () => {
   const c = ciSetup(3, { stack: '1', batch: '3', check: gated, local: deployHook });
-  const deploys = () => { try { return readFileSync(join(c.state, 'deploy.log'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const deploys = () => {
+    try {
+      return readFileSync(join(c.state, 'deploy.log'), 'utf8').trim().split('\n');
+    } catch {
+      return [];
+    }
+  };
   const waiting = () => c.tickets().filter((t) => c.phase(t) === "waiting for its batch's deploy").length;
   return { ...c, deploys, waiting };
 };
@@ -980,7 +1023,11 @@ test('batches: with land_deploy the head deploys the batch once, in the main che
     assert.deepEqual(c.deploys(), [`${full} ${full}`], 'once, for the deepest commit, with main checked out there');
     assert.equal(c.mainAt(), td, 'main moved');
     assert.equal(git(c.origin, 'rev-parse', 'main').slice(0, 12), before, 'and is not pushed while it deploys');
-    assert.deepEqual(all.map((l) => l.child.exitCode), [null, null, null], 'nobody has said it shipped');
+    assert.deepEqual(
+      all.map((l) => l.child.exitCode),
+      [null, null, null],
+      'nobody has said it shipped',
+    );
     writeFileSync(join(c.state, 'deploy.go'), '');
     for (const [i, l] of all.entries()) {
       assert.equal(await l.exit, 0, l.stderr());
@@ -1061,7 +1108,10 @@ test("batches: the head runs land.local.sh's land_after for itself and each memb
     c.verdict(td, GREEN);
     for (const l of [a, b, d]) assert.equal(await l.exit, 0, l.stderr());
     // Every landing shares the log, so a member that ran the hook itself would add a line of its own.
-    const lines = readFileSync(log, 'utf8').trim().split('\n').map((l) => l.replace(/^(.{12})\S*/, '$1'));
+    const lines = readFileSync(log, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => l.replace(/^(.{12})\S*/, '$1'));
     assert.deepEqual(lines, [`${ta} ticket/1-x`, `${tb} ticket/2-x`, `${td} ticket/3-x`]);
   } finally {
     c.stop();

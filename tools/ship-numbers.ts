@@ -55,9 +55,8 @@ function onTexts(texts: string[], args: (paths: string[]) => string[]) {
  *  when the path has append or sum rules too) clashes keep its markers: diff3, size 31, the side that is main first. */
 function mergeFile(mainSide: string, out: string, base: string, ours: string, theirs: string): number {
   const r = onTexts([base, ours, theirs], ([o, a, b]) =>
-    process.env.LAND_MERGE_DIFF3 === '1'
-      ? ['merge-file', '-p', '--diff3', '--marker-size=31', '-L', 'main', '-L', 'base', '-L', 'branch', ...(mainSide === 'theirs' ? [b, o, a] : [a, o, b])]
-      : ['merge-file', '-p', '-L', 'ours', '-L', 'base', '-L', 'theirs', a, o, b]);
+    process.env.LAND_MERGE_DIFF3 === '1' ? ['merge-file', '-p', '--diff3', '--marker-size=31', '-L', 'main', '-L', 'base', '-L', 'branch', ...(mainSide === 'theirs' ? [b, o, a] : [a, o, b])] : ['merge-file', '-p', '-L', 'ours', '-L', 'base', '-L', 'theirs', a, o, b],
+  );
   if (r.status === null || r.status < 0 || r.status > 127) return 2;
   writeFileSync(out, r.stdout);
   return r.status === 0 ? 0 : 1;
@@ -115,7 +114,8 @@ function adr(onto: string, name = onto.replace(/^refs\/heads\//, '')): void {
   const addedLines = new Map<string, Set<string>>();
   let file = '';
   for (const line of git('-c', 'core.quotePath=false', 'diff', '-U0', '--no-renames', '--no-color', onto, 'HEAD').split('\n')) {
-    if (line.startsWith('+++ ')) file = line.startsWith('+++ b/') ? line.slice(6).replace(/\t$/, '') : ''; // git ends a name with a space in a tab
+    if (line.startsWith('+++ '))
+      file = line.startsWith('+++ b/') ? line.slice(6).replace(/\t$/, '') : ''; // git ends a name with a space in a tab
     else if (line.startsWith('+') && file) (addedLines.get(file) ?? addedLines.set(file, new Set()).get(file)!).add(line.slice(1));
   }
   const renames: [string, string, string, string][] = []; // old number, new number, old name, new name
@@ -129,11 +129,14 @@ function adr(onto: string, name = onto.replace(/^refs\/heads\//, '')): void {
   const touched = new Set<string>();
   for (const [path, lines] of addedLines) {
     const text = readFileSync(path, 'utf8');
-    const out = text.split('\n').map((l) => {
-      if (!lines.has(l)) return l;
-      for (const [n, m] of renames) if (!ontoFiles.some((f) => num(f) === n && l.includes(f))) l = l.replace(new RegExp(`\\bADR([- ])${n}\\b`, 'g'), `ADR$1${m}`);
-      return l;
-    }).join('\n');
+    const out = text
+      .split('\n')
+      .map((l) => {
+        if (!lines.has(l)) return l;
+        for (const [n, m] of renames) if (!ontoFiles.some((f) => num(f) === n && l.includes(f))) l = l.replace(new RegExp(`\\bADR([- ])${n}\\b`, 'g'), `ADR$1${m}`);
+        return l;
+      })
+      .join('\n');
     if (out !== text) writeFileSync(path, out), touched.add(path);
   }
   for (const [, , from, to] of renames) {

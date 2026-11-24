@@ -5,7 +5,12 @@ import type { Store } from './db.ts';
 import { ZONE } from './pacific.ts';
 
 export type Risk = 'low' | 'medium' | 'high';
-export interface ShipNote { kind: 'shipped' | 'merged'; risk: Risk; go: boolean; pushFailed: boolean }
+export interface ShipNote {
+  kind: 'shipped' | 'merged';
+  risk: Risk;
+  go: boolean;
+  pushFailed: boolean;
+}
 
 /**
  * "Shipped <what>: <summary>. Risk <r>: <reason>. [Go: …] <where>" or "Merged into <build>: …" (land.ts:548), and the push-failed
@@ -30,9 +35,25 @@ export function pacificWeek(ms: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-export interface Bucket { low: number; medium: number; high: number }
-export interface ShipRow { scheme: number; name: string; week: string; kind: 'shipped' | 'merged'; counts: Bucket; pushFailed: number; withGo: number }
-export interface ShipRisk { weeks: string[]; rows: ShipRow[]; schemes: { id: number; name: string; ships: number }[] }
+export interface Bucket {
+  low: number;
+  medium: number;
+  high: number;
+}
+export interface ShipRow {
+  scheme: number;
+  name: string;
+  week: string;
+  kind: 'shipped' | 'merged';
+  counts: Bucket;
+  pushFailed: number;
+  withGo: number;
+}
+export interface ShipRisk {
+  weeks: string[];
+  rows: ShipRow[];
+  schemes: { id: number; name: string; ships: number }[];
+}
 
 const empty = (): Bucket => ({ low: 0, medium: 0, high: 0 });
 
@@ -41,7 +62,11 @@ export function summarize(notes: { scheme: number; at: number; text: string }[],
   const names = new Map(schemes.map((s) => [s.id, s.name]));
   const week0 = pacificWeek(now);
   const wk: string[] = [];
-  for (let i = weeks - 1; i >= 0; i--) { const d = new Date(`${week0}T12:00:00Z`); d.setUTCDate(d.getUTCDate() - 7 * i); wk.push(d.toISOString().slice(0, 10)); }
+  for (let i = weeks - 1; i >= 0; i--) {
+    const d = new Date(`${week0}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 7 * i);
+    wk.push(d.toISOString().slice(0, 10));
+  }
   const rows = new Map<string, ShipRow>();
   const totals = new Map<number, number>();
   for (const n of notes) {
@@ -62,7 +87,10 @@ export function summarize(notes: { scheme: number; at: number; text: string }[],
 
 /** The answer as text: a line per scheme and week, and the schemes with no ship note at all named rather than shown as 0. */
 export function shipRiskText(r: ShipRisk): string {
-  const pct = (b: Bucket) => { const n = b.low + b.medium + b.high; return n ? `${Math.round((b.high / n) * 100)}%` : '-'; };
+  const pct = (b: Bucket) => {
+    const n = b.low + b.medium + b.high;
+    return n ? `${Math.round((b.high / n) * 100)}%` : '-';
+  };
   const out = [`Ships by risk per Pacific week (Mon-Sun), weeks starting ${r.weeks.join(', ')}. Counted from each ship's "Shipped … Risk <r>" note; "Merged" is a feeder going into a build branch, not onto main, so it's shown apart.`];
   for (const s of r.schemes.filter((s) => s.ships)) {
     out.push(`\n${s.name}:`);
@@ -83,7 +111,15 @@ export function shipRiskText(r: ShipRisk): string {
 
 /** The route's answer: every scheme for a minion or Taskmaster of the Citadel scheme (and an admin's person), else its own scheme only. */
 export function shipRisk(store: Store, projectIds: number[] | null, weeks: number, now = Date.now()): ShipRisk {
-  const schemes = store.listProjects().filter((p) => !projectIds || projectIds.includes(p.id)).map((p) => ({ id: p.id, name: p.name }));
+  const schemes = store
+    .listProjects()
+    .filter((p) => !projectIds || projectIds.includes(p.id))
+    .map((p) => ({ id: p.id, name: p.name }));
   const since = new Date(`${pacificWeek(now)}T12:00:00Z`).getTime() - weeks * 7 * 86400000;
-  return summarize(store.shipNotesSince(since).map((n) => ({ scheme: n.project_id, at: n.created_at, text: n.text })), schemes, weeks, now);
+  return summarize(
+    store.shipNotesSince(since).map((n) => ({ scheme: n.project_id, at: n.created_at, text: n.text })),
+    schemes,
+    weeks,
+    now,
+  );
 }

@@ -54,16 +54,14 @@ export function fitLog(parts: Part[], max = HANDOVER_MAX): string {
     .join('\n');
 }
 
-export const blockText = (c: any): string =>
-  typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => (b?.type === 'text' ? String(b.text ?? '') : b?.type === 'image' ? '[image]' : `[${b?.type ?? 'block'}]`)).join('\n') : '';
+export const blockText = (c: any): string => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => (b?.type === 'text' ? String(b.text ?? '') : b?.type === 'image' ? '[image]' : `[${b?.type ?? 'block'}]`)).join('\n') : '');
 
 /**
  * The [System] note that opens each turn message with a minion's own lines, or the Citadel Taskmaster's every-scheme
  * line (promptParts().turn, #878). Each turn's message carries a fresh one, so a hand-over's log leaves the old ones out.
  * Plain prefixes here because the pinned Codex shim imports this file; app-facts and every-scheme keep them in step.
  */
-export const isTurnNote = (text: string): boolean =>
-  ['You are a minion working on #', 'You can read every scheme, read-only', "git in other schemes' folders"].some((p) => text.startsWith(`[System]: ${p}`));
+export const isTurnNote = (text: string): boolean => ['You are a minion working on #', 'You can read every scheme, read-only', "git in other schemes' folders"].some((p) => text.startsWith(`[System]: ${p}`));
 
 /** A tool call as one log line: a Bash command as it is, anything else as its JSON input. */
 export function callLine(name: string, input: any): string {

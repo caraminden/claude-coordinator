@@ -27,7 +27,7 @@ const VERSION_INIT = join(import.meta.dirname, 'apk-version.init.gradle');
 
 /** Where a contraption's Capacitor project sits, from citadel-app.json's `capacitor`: its root (the config's folder) and its Android project, both relative to the checkout. */
 async function capacitorDirs(dir: string): Promise<{ root: string; android: string }> {
-  const c = JSON.parse(await readFile(join(dir, 'citadel-app.json'), 'utf8').catch(() => '{}') || '{}')?.capacitor;
+  const c = JSON.parse((await readFile(join(dir, 'citadel-app.json'), 'utf8').catch(() => '{}')) || '{}')?.capacitor;
   // Inside the checkout only: the build copies and diffs these paths.
   const ok = (v: unknown): v is string => typeof v === 'string' && !v.startsWith('/') && !v.split('/').includes('..');
   const root = ok(c?.root) ? c.root.replace(/\/+$/, '').replace(/^\.$/, '') : '';
@@ -177,7 +177,10 @@ export class ApkBuilds {
       if (hasKey(this.d.keyDir, row.name) && !existsSync(told)) {
         mkdirSync(dirname(told), { recursive: true });
         writeFileSync(told, '');
-        this.d.tell(row, `${row.title} has a release key but no Android build: its Capacitor project isn't at the checkout's root (android/app/build.gradle and capacitor.config.json there). If it sits in a subfolder, name it in citadel-app.json: "capacitor": {"root": "<folder holding capacitor.config.json>", "android": "<folder holding app/build.gradle>"}, e.g. {"root": "android", "android": "android/native"}. Told once; the next deploy builds it.`);
+        this.d.tell(
+          row,
+          `${row.title} has a release key but no Android build: its Capacitor project isn't at the checkout's root (android/app/build.gradle and capacitor.config.json there). If it sits in a subfolder, name it in citadel-app.json: "capacitor": {"root": "<folder holding capacitor.config.json>", "android": "<folder holding app/build.gradle>"}, e.g. {"root": "android", "android": "android/native"}. Told once; the next deploy builds it.`,
+        );
       }
       return { skipped: 'not a Capacitor app' };
     }
@@ -198,7 +201,16 @@ export class ApkBuilds {
     const dir = join(this.d.cacheDir, row.name);
     // The commit its build last failed or was refused at, kept on disk so a restart doesn't tell it again.
     const failedAt = join(dir, 'failed-at');
-    if ((() => { try { return readFileSync(failedAt, 'utf8').trim(); } catch { return ''; } })() === commit) return { skipped: 'already failed at this commit' };
+    if (
+      (() => {
+        try {
+          return readFileSync(failedAt, 'utf8').trim();
+        } catch {
+          return '';
+        }
+      })() === commit
+    )
+      return { skipped: 'already failed at this commit' };
     const fail = (why: string, end?: string): Outcome => {
       mkdirSync(dir, { recursive: true });
       writeFileSync(failedAt, commit);
@@ -213,9 +225,11 @@ export class ApkBuilds {
     else {
       if (existsSync(keyTold)) return { skipped: 'no release key yet, already told' };
       // Half a pair is a key that was lost, not one never made: restore it, never make a new one (phones would have to uninstall).
-      const out = fail(there.length
-        ? `half of its release key is missing: ${there[0]} is there but ${there[0] === key ? pass : key} isn't. Restore it from the desktop's CitadelBackups\\keys (deploy/desktop/README.md, "Restoring"); a new key is never made over half of one. Until then no APK is built after its deploys.`
-        : `it has no release key yet (${key} and its .pass). A member makes it with Make release key on its Releases card, or approves the card make_release_key posts; until then no APK is built after its deploys.`);
+      const out = fail(
+        there.length
+          ? `half of its release key is missing: ${there[0]} is there but ${there[0] === key ? pass : key} isn't. Restore it from the desktop's CitadelBackups\\keys (deploy/desktop/README.md, "Restoring"); a new key is never made over half of one. Until then no APK is built after its deploys.`
+          : `it has no release key yet (${key} and its .pass). A member makes it with Make release key on its Releases card, or approves the card make_release_key posts; until then no APK is built after its deploys.`,
+      );
       writeFileSync(keyTold, commit);
       return out;
     }
@@ -281,7 +295,11 @@ export class ApkBuilds {
       if (signal) throw new Killed(`${what} was killed by ${signal} (a Citadel restart stops its builds): the next check builds it again`);
       if (c) throw new Error(`${what} failed (exit ${c})`);
     };
-    const gradle = gradleVersion(await readFile(join(src, cap.android, 'app/build.gradle'), 'utf8').catch(() => readFile(join(src, cap.android, 'app/build.gradle.kts'), 'utf8')).catch(() => ''));
+    const gradle = gradleVersion(
+      await readFile(join(src, cap.android, 'app/build.gradle'), 'utf8')
+        .catch(() => readFile(join(src, cap.android, 'app/build.gradle.kts'), 'utf8'))
+        .catch(() => ''),
+    );
     const unsigned = join(src, cap.android, 'app/build/outputs/apk/release/app-release-unsigned.apk');
     const signed = join(dir, `${row.name}-${code}.apk`);
     try {
@@ -318,10 +336,13 @@ export class ApkBuilds {
   /** Remove published APKs older than the newest KEEP_APKS, never the one latest.json names. */
   private async prune(dir: string, name: string, keep: number) {
     const re = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-(\\d+)\\.apk$`);
-    const old = (await readdir(dir).catch(() => [] as string[])).flatMap((f) => {
-      const m = re.exec(f);
-      return m && Number(m[1]) !== keep ? [{ f, n: Number(m[1]) }] : [];
-    }).sort((a, b) => b.n - a.n).slice(KEEP_APKS - 1);
+    const old = (await readdir(dir).catch(() => [] as string[]))
+      .flatMap((f) => {
+        const m = re.exec(f);
+        return m && Number(m[1]) !== keep ? [{ f, n: Number(m[1]) }] : [];
+      })
+      .sort((a, b) => b.n - a.n)
+      .slice(KEEP_APKS - 1);
     for (const { f } of old) await rm(join(dir, f), { force: true });
   }
 }

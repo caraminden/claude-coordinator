@@ -2,7 +2,11 @@
 
 /** What it does, in a line or two: the brief's first paragraph that isn't a heading, cut at a sentence near 240 characters. */
 export function briefSummary(brief) {
-  const para = brief.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, ' ').trim()).find((p) => p && !p.startsWith('#')) ?? '';
+  const para =
+    brief
+      .split(/\n\s*\n/)
+      .map((p) => p.replace(/\s+/g, ' ').trim())
+      .find((p) => p && !p.startsWith('#')) ?? '';
   if (para.length <= 240) return para;
   const cut = para.slice(0, 240).match(/^.*[.!?:](?=\s)/)?.[0];
   return cut && cut.length > 60 ? cut : `${para.slice(0, 240).replace(/\s+\S*$/, '')}…`;
@@ -26,6 +30,10 @@ export function groupSchedules(schedules) {
     }
     return [...m.entries()].sort(([a], [b]) => (a === 'Other') - (b === 'Other') || a.localeCompare(b)).map(([c, xs]) => [c, xs.sort(order)]);
   };
-  return [['Standard audits', 'teal', schedules.filter((s) => s.template)], ["This scheme's own", 'running', schedules.filter((s) => !s.template)]]
-    .filter(([, , rows]) => rows.length).map(([title, hue, rows]) => [title, hue, byCategory(rows)]);
+  return [
+    ['Standard audits', 'teal', schedules.filter((s) => s.template)],
+    ["This scheme's own", 'running', schedules.filter((s) => !s.template)],
+  ]
+    .filter(([, , rows]) => rows.length)
+    .map(([title, hue, rows]) => [title, hue, byCategory(rows)]);
 }

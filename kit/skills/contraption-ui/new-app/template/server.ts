@@ -15,8 +15,13 @@ const PUBLIC = join(import.meta.dirname, 'public');
 /** Paths that answer with no identity: the deploy's health check, and the install files a phone fetches without cookies. */
 const OPEN = new Set(['/healthz', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png']);
 const TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.json': 'application/json',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json',
+  '.json': 'application/json',
 };
 
 export interface Options {
@@ -33,8 +38,7 @@ export interface Running {
   close(): Promise<void>;
 }
 
-const send = (res: ServerResponse, status: number, body = '', type = 'text/plain; charset=utf-8') =>
-  void res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' }).end(body);
+const send = (res: ServerResponse, status: number, body = '', type = 'text/plain; charset=utf-8') => void res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' }).end(body);
 const json = (res: ServerResponse, status: number, body: unknown) => send(res, status, JSON.stringify(body), 'application/json');
 
 export async function start(opts: Options): Promise<Running> {
@@ -83,13 +87,19 @@ export async function start(opts: Options): Promise<Running> {
   await new Promise<void>((ok) => server.listen(opts.port, '127.0.0.1', ok));
   const { port } = server.address() as AddressInfo;
   return {
-    server, db, url: `http://127.0.0.1:${port}${opts.base}`,
+    server,
+    db,
+    url: `http://127.0.0.1:${port}${opts.base}`,
     close: () => new Promise<void>((ok) => server.close(() => (db.close(), ok()))),
   };
 }
 
 if (import.meta.main) {
-  const env = (name: string) => process.env[name] || (() => { throw new Error(`${name} is not set: Citadel sets it on the service`); })();
+  const env = (name: string) =>
+    process.env[name] ||
+    (() => {
+      throw new Error(`${name} is not set: Citadel sets it on the service`);
+    })();
   const running = await start({ port: Number(env('PORT')), base: env('BASE_PATH'), dataDir: env('DATA_DIR'), keysDir: env('CITADEL_KEYS') });
   console.log(`${APP} listening on ${running.url}`);
   for (const sig of ['SIGTERM', 'SIGINT'] as const) process.on(sig, () => void running.close().then(() => process.exit(0)));

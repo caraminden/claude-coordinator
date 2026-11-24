@@ -30,7 +30,11 @@ export function expand(targets: string[], cwd = process.cwd()): string[] {
       .flatMap((d) => (d.isDirectory() ? walk(join(dir, d.name)) : [join(dir, d.name)]));
   for (const t of targets) {
     const abs = resolve(cwd, t);
-    if (statSync(abs).isDirectory()) for (const f of walk(abs).filter((f) => nodeRuns.test(relative(abs, f))).sort()) out.add(f);
+    if (statSync(abs).isDirectory())
+      for (const f of walk(abs)
+        .filter((f) => nodeRuns.test(relative(abs, f)))
+        .sort())
+        out.add(f);
     else out.add(abs);
   }
   return [...out];
@@ -73,7 +77,10 @@ export function mergeTimes(old: Map<string, number>, ran: Map<string, number>, c
       return false;
     }
   });
-  return keep.sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([f, s]) => `${Math.round(s * 10) / 10}\t${f}\n`).join('');
+  return keep
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([f, s]) => `${Math.round(s * 10) / 10}\t${f}\n`)
+    .join('');
 }
 
 function parseArgs(argv: string[]) {
@@ -132,7 +139,12 @@ async function main() {
       })(),
     );
   }
-  if (process.env.CITADEL_TEST_PROGRESS_TO) done.push((async () => { for await (const _ of progress(copy())) void _; })());
+  if (process.env.CITADEL_TEST_PROGRESS_TO)
+    done.push(
+      (async () => {
+        for await (const _ of progress(copy())) void _;
+      })(),
+    );
   for await (const event of stream as AsyncIterable<{ type: string; data: { file?: string; nesting?: number; success?: boolean; details?: { duration_ms?: number } } }>) {
     const { type, data } = event;
     if (type === 'test:summary' && data.file === undefined && !data.success) failed = true;

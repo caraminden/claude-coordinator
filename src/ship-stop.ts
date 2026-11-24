@@ -42,7 +42,7 @@ export function cantStop(t: Pick<LandTicket, 'label' | 'phase'>, train?: string)
   if (t.label === 'tools/deploy.sh') return 'A deploy on its own, not a ship: it ends by itself';
   // Citadel's land.sh moved main and runs deploy.sh (which holds the lock too); the kit's has moved main and pushes it.
   if (/^deploying|^pushing /.test(t.phase)) return 'Main has moved and it is going live: stopping it now could leave main and what runs apart, so it ends by itself';
-  if (/^riding in /.test(t.phase) && train !== 'riding') return "Its ship train has moved main and is going live: it ends by itself";
+  if (/^riding in /.test(t.phase) && train !== 'riding') return 'Its ship train has moved main and is going live: it ends by itself';
   return null;
 }
 
@@ -51,9 +51,15 @@ export function shipRows(line: LandTicket[], who: (label: string) => { name: str
   return line.map((t, i) => {
     const p = t.got > 0 ? landPhase(t.phase) : null;
     return {
-      seq: t.seq, ...who(t.label), holds: t.got > 0, place: t.got > 0 ? 'holds' : ordinal(i + (line[0]?.got ? 0 : 1)),
-      heldSince: t.got > 0 ? t.got * 1000 : null, since: t.mtime, stage: p ? p.stage : 'line',
-      text: p ? (t.phase.replace(/ since \d\d:\d\d$/, '') || p.text) : 'waiting', noStop: cantStop(t),
+      seq: t.seq,
+      ...who(t.label),
+      holds: t.got > 0,
+      place: t.got > 0 ? 'holds' : ordinal(i + (line[0]?.got ? 0 : 1)),
+      heldSince: t.got > 0 ? t.got * 1000 : null,
+      since: t.mtime,
+      stage: p ? p.stage : 'line',
+      text: p ? t.phase.replace(/ since \d\d:\d\d$/, '') || p.text : 'waiting',
+      noStop: cantStop(t),
     };
   });
 }
@@ -62,16 +68,30 @@ export function shipRows(line: LandTicket[], who: (label: string) => { name: str
 export function descendants(pid: number, procDir = '/proc'): number[] {
   const kids = new Map<number, number[]>();
   let names: string[];
-  try { names = readdirSync(procDir); } catch { return []; }
+  try {
+    names = readdirSync(procDir);
+  } catch {
+    return [];
+  }
   for (const n of names) {
     if (!/^\d+$/.test(n)) continue;
     let stat: string;
-    try { stat = readFileSync(`${procDir}/${n}/stat`, 'utf8'); } catch { continue; } // gone since the listing
+    try {
+      stat = readFileSync(`${procDir}/${n}/stat`, 'utf8');
+    } catch {
+      continue;
+    } // gone since the listing
     const ppid = Number(stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[1]); // the command's name may hold spaces
     kids.set(ppid, [...(kids.get(ppid) ?? []), Number(n)]);
   }
   const out: number[] = [];
-  const walk = (p: number) => { for (const k of kids.get(p) ?? []) if (!out.includes(k)) { out.push(k); walk(k); } };
+  const walk = (p: number) => {
+    for (const k of kids.get(p) ?? [])
+      if (!out.includes(k)) {
+        out.push(k);
+        walk(k);
+      }
+  };
   walk(pid);
   return out;
 }
@@ -81,7 +101,11 @@ export function signalTree(pid: number, kill: (pid: number, sig: NodeJS.Signals)
   const kids = tree(pid); // before the signal: what the EXIT trap starts (git rebase --abort, the CI cancel) is left to finish
   for (const p of [pid, ...kids]) {
     for (const sig of ['SIGTERM', 'SIGCONT'] as const) {
-      try { kill(p, sig); } catch { /* gone already */ }
+      try {
+        kill(p, sig);
+      } catch {
+        /* gone already */
+      }
     }
   }
 }
@@ -93,12 +117,17 @@ export class StopRefused extends Error {}
  * still in line, still the process the ticket names, and not past moving main. Returns its ticket; throws StopRefused.
  * `before` runs once it is sure to stop, before the signal (the server notes who stopped it there).
  */
-export function stopInLine(q: string, orderAt: number, seq: number, before: (t: LandTicket) => void = () => {},
-  signal: (pid: number) => void = (pid) => signalTree(pid), alive = procAlive): LandTicket {
+export function stopInLine(q: string, orderAt: number, seq: number, before: (t: LandTicket) => void = () => {}, signal: (pid: number) => void = (pid) => signalTree(pid), alive = procAlive): LandTicket {
   const t = readQueue(q, orderAt, alive).find((x) => x.seq === seq);
   if (!t) throw new StopRefused('That ship is no longer in line');
   const name = String(seq).padStart(10, '0');
-  const first = (f: string) => { try { return readFileSync(f, 'utf8').split(/\s/)[0]; } catch { return undefined; } };
+  const first = (f: string) => {
+    try {
+      return readFileSync(f, 'utf8').split(/\s/)[0];
+    } catch {
+      return undefined;
+    }
+  };
   const why = cantStop(t, first(join(q, '..', 'train', name))) ?? (orderAt === 7 ? kitMoved(q, name) : null);
   if (why) throw new StopRefused(why);
   before(t);
@@ -112,7 +141,11 @@ export function stopInLine(q: string, orderAt: number, seq: number, before: (t: 
  */
 function kitMoved(q: string, name: string): string | null {
   let commit = '';
-  try { commit = readFileSync(join(q, name), 'utf8').split('\n')[4] ?? ''; } catch { return null; }
+  try {
+    commit = readFileSync(join(q, name), 'utf8').split('\n')[4] ?? '';
+  } catch {
+    return null;
+  }
   if (!/^[0-9a-f]{40,64}$/.test(commit)) return null;
   try {
     execFileSync('git', ['--git-dir', dirname(q), 'merge-base', '--is-ancestor', commit, 'HEAD'], { stdio: 'ignore' });
@@ -132,23 +165,26 @@ export function lineFor(app: Pick<App, 'releases' | 'waits' | 'store'>, projectI
 
 /** A line ticket's minion in scheme `projectId`, by its label (a branch, or "<scheme> #N"): a branch name is per scheme. */
 function minionOf(app: Pick<App, 'waits' | 'store'>, projectId: number, label: string): number | null {
-  const id = app.waits ? app.waits.ticketFor(label) : label.includes('/') && label !== 'tools/deploy.sh' ? app.store.ticketByBranch(label)?.id ?? null : null;
+  const id = app.waits ? app.waits.ticketFor(label) : label.includes('/') && label !== 'tools/deploy.sh' ? (app.store.ticketByBranch(label)?.id ?? null) : null;
   return id != null && app.store.getTicket(id)?.project_id === projectId ? id : null;
 }
 
 /** Every ship line `visible` lets a person see that has someone in it, read afresh (the panel reads it every 3 s). */
 export function shipLines(app: Pick<App, 'releases' | 'waits' | 'store'>, visible: (projectId: number) => boolean) {
-  return app.store.listProjects().filter((p) => visible(p.id)).flatMap((p) => {
-    const at = lineFor(app, p.id);
-    const line = at ? readQueue(at.q, at.orderAt) : [];
-    if (!line.length) return [];
-    const rows = shipRows(line, (label) => {
-      const id = minionOf(app, p.id, label);
-      const t = id != null ? app.store.getTicket(id) : undefined;
-      return t ? { name: `#${t.number ?? t.id}`, ticketId: t.id } : { name: label.replace(/ \(.*\)$/, ''), ticketId: null };
+  return app.store
+    .listProjects()
+    .filter((p) => visible(p.id))
+    .flatMap((p) => {
+      const at = lineFor(app, p.id);
+      const line = at ? readQueue(at.q, at.orderAt) : [];
+      if (!line.length) return [];
+      const rows = shipRows(line, (label) => {
+        const id = minionOf(app, p.id, label);
+        const t = id != null ? app.store.getTicket(id) : undefined;
+        return t ? { name: `#${t.number ?? t.id}`, ticketId: t.id } : { name: label.replace(/ \(.*\)$/, ''), ticketId: null };
+      });
+      return [{ projectId: p.id, scheme: p.name, rows }];
     });
-    return [{ projectId: p.id, scheme: p.name, rows }];
-  });
 }
 
 /**
@@ -156,19 +192,24 @@ export function shipLines(app: Pick<App, 'releases' | 'waits' | 'store'>, visibl
  * minion's handed-off landing is marked stopped first, so its report says who stopped it rather than "fix the cause";
  * its chat gets a note either way.
  */
-export function stopShip(app: Pick<App, 'releases' | 'waits' | 'store' | 'landings' | 'runner'>, projectId: number, seq: number, who: string,
-  signal?: (pid: number) => void, via = 'from the Status page'): { name: string } {
+export function stopShip(app: Pick<App, 'releases' | 'waits' | 'store' | 'landings' | 'runner'>, projectId: number, seq: number, who: string, signal?: (pid: number) => void, via = 'from the Status page'): { name: string } {
   const at = lineFor(app, projectId);
   if (!at) throw new StopRefused('This scheme has no ship line here');
   let name = '';
-  stopInLine(at.q, at.orderAt, seq, (t) => {
-    const id = minionOf(app, projectId, t.label);
-    const m = id != null ? app.store.getTicket(id) : undefined;
-    name = m ? `#${m.number ?? m.id}` : t.label;
-    if (!m) return;
-    if (app.landings.get(m.id)?.code === null) app.landings.markStopped(m.id, who, Date.now(), via);
-    app.runner.emit(m.id, 'note', { text: `${who} stopped this ship ${via}: it leaves the line and main stays as it was.` });
-  }, signal);
+  stopInLine(
+    at.q,
+    at.orderAt,
+    seq,
+    (t) => {
+      const id = minionOf(app, projectId, t.label);
+      const m = id != null ? app.store.getTicket(id) : undefined;
+      name = m ? `#${m.number ?? m.id}` : t.label;
+      if (!m) return;
+      if (app.landings.get(m.id)?.code === null) app.landings.markStopped(m.id, who, Date.now(), via);
+      app.runner.emit(m.id, 'note', { text: `${who} stopped this ship ${via}: it leaves the line and main stays as it was.` });
+    },
+    signal,
+  );
   console.log(`Ship line: ${who} stopped ${name} (line ticket ${seq}) in scheme ${projectId}`);
   return { name };
 }

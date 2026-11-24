@@ -56,9 +56,21 @@ type Fetch = typeof fetch;
 /** The App's URL name from what was configured: a bare slug, or a pasted URL or path like github.com/apps/<slug>. */
 export function appSlug(raw: string): string {
   let v = (raw ?? '').trim();
-  try { v = decodeURIComponent(v); } catch { /* keep as typed */ }
+  try {
+    v = decodeURIComponent(v);
+  } catch {
+    /* keep as typed */
+  }
   const m = /(?:^|\/)apps\/([^/?#\s]+)/.exec(v);
-  return (m ? m[1] : v.replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop() ?? '').trim();
+  return (
+    m
+      ? m[1]
+      : (v
+          .replace(/[?#].*$/, '')
+          .replace(/\/+$/, '')
+          .split('/')
+          .pop() ?? '')
+  ).trim();
 }
 
 export class GithubLink {
@@ -115,7 +127,9 @@ export class GithubLink {
     const r = this.store.getSetting<{ uid: number; name: string; at: number }>(REFUSED);
     if (!r) return null;
     return {
-      name: r.name, at: r.at, settings_url: this.settingsUrl,
+      name: r.name,
+      at: r.at,
+      settings_url: this.settingsUrl,
       fix: 'Citadel\'s GitHub App hands out user tokens that expire after 8 hours, which Citadel refuses (a refresh would cut off the person\'s other running turns). On the App\'s settings page on GitHub, open Optional features and untick "Expire user authorization tokens" (README, "A limited GitHub link"), then ask them to link again.',
     };
   }
@@ -153,7 +167,7 @@ export class GithubLink {
     for (const [k, expires] of this.used) if (expires < now) this.used.delete(k);
     const s = this.used.has(state) ? null : this.opened(state);
     if (s === 'unset') {
-      this.errors.set(uid, 'That way of linking GitHub isn\'t set up on this server.');
+      this.errors.set(uid, "That way of linking GitHub isn't set up on this server.");
       return null;
     }
     if (!s || s.uid !== uid || s.expires < now) {
@@ -166,7 +180,8 @@ export class GithubLink {
       // Signed with this kind's client secret, so the kind is still set up.
       const client = this.client(s.limited)!;
       const r = await this.fetch('https://github.com/login/oauth/access_token', {
-        method: 'POST', signal: AbortSignal.timeout(GITHUB_WAIT_MS),
+        method: 'POST',
+        signal: AbortSignal.timeout(GITHUB_WAIT_MS),
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ client_id: client.id, client_secret: client.secret, code: params.get('code') ?? '', redirect_uri: redirectUri }),
       });
@@ -177,12 +192,12 @@ export class GithubLink {
         // The person can't change the App, so they're told it isn't on them; the admins get the fix on Settings → People.
         if (s.limited) this.store.setSetting(REFUSED, { uid, name: this.store.getUser(uid)?.name ?? `person ${uid}`, at: Date.now() });
         console.error(`github link: refused an expiring token for person ${uid}; untick "Expire user authorization tokens" on the GitHub App`);
-        throw new Error('GitHub gave Citadel a link that would stop working after 8 hours, so Citadel didn\'t keep it. That\'s nothing you did: it\'s one setting on Citadel\'s GitHub App that only an admin can change, and they can see this on their People page. Link GitHub again once they have.');
+        throw new Error("GitHub gave Citadel a link that would stop working after 8 hours, so Citadel didn't keep it. That's nothing you did: it's one setting on Citadel's GitHub App that only an admin can change, and they can see this on their People page. Link GitHub again once they have.");
       }
       const granted = (body.scope ?? '').split(/[ ,]+/);
-      if (!s.limited && !granted.includes('repo')) throw new Error('GitHub gave a token without the repo permission, so it couldn\'t push.');
+      if (!s.limited && !granted.includes('repo')) throw new Error("GitHub gave a token without the repo permission, so it couldn't push.");
       const me = await this.user(body.access_token);
-      if (!me) throw new Error('GitHub didn\'t accept the new token.');
+      if (!me) throw new Error("GitHub didn't accept the new token.");
       // A link of the other kind is replaced: revoke it on GitHub. Never one of the same kind, whose grant the new token shares.
       const old = this.creds.get<GithubMeta>(uid, 'github');
       if (old?.secret && !!old.meta.app !== s.limited) await this.revoke(old.secret, !!old.meta.app);
@@ -254,11 +269,17 @@ export class GithubLink {
       full: this.full,
       limited: this.limited,
       install_url: this.installUrl,
-      link: now ? {
-        login: now.meta.login, name: now.meta.name, email: noreplyEmail(now.meta), failed: now.failed, linked_at: now.updated_at,
-        limited: !!now.meta.app,
-        reach: now.meta.app && now.secret && !now.failed ? await this.reach(now.secret) : null,
-      } : null,
+      link: now
+        ? {
+            login: now.meta.login,
+            name: now.meta.name,
+            email: noreplyEmail(now.meta),
+            failed: now.failed,
+            linked_at: now.updated_at,
+            limited: !!now.meta.app,
+            reach: now.meta.app && now.secret && !now.failed ? await this.reach(now.secret) : null,
+          }
+        : null,
     };
   }
 
@@ -289,7 +310,8 @@ export class GithubLink {
     const client = this.client(limited);
     if (!client) return;
     await this.fetch(`https://api.github.com/applications/${client.id}/grant`, {
-      method: 'DELETE', signal: AbortSignal.timeout(GITHUB_WAIT_MS),
+      method: 'DELETE',
+      signal: AbortSignal.timeout(GITHUB_WAIT_MS),
       headers: { Authorization: `Basic ${Buffer.from(`${client.id}:${client.secret}`).toString('base64')}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' },
       body: JSON.stringify({ access_token: token }),
     }).catch(() => {});
@@ -336,7 +358,8 @@ export class GithubLink {
     Object.assign(env, gitIdentity(who, `${person?.login ?? 'nobody'}@citadel.invalid`));
     const why = c ? `${who}'s GitHub link stopped working` : `${who} hasn't linked GitHub`;
     return {
-      env, login: null,
+      env,
+      login: null,
       line: `GitHub: this turn runs for ${who}, and ${why}, so it can't push or open pull requests. Commit on your branch, and tell them they can link GitHub in Settings → Your account. Never push from another account or login to get round it.`,
     };
   }

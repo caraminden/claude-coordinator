@@ -53,8 +53,16 @@ test('TipCache: loads once per key and revision, and again on a new revision', a
 
 test('TipCache: forgets a failed load (thrown or rejected) so the next hover asks again', async () => {
   const cache = new TipCache();
-  await assert.rejects(cache.get('k', 1, () => Promise.reject(new Error('busy'))), /busy/);
-  await assert.rejects(cache.get('j', 1, () => { throw new Error('broke'); }), /broke/);
+  await assert.rejects(
+    cache.get('k', 1, () => Promise.reject(new Error('busy'))),
+    /busy/,
+  );
+  await assert.rejects(
+    cache.get('j', 1, () => {
+      throw new Error('broke');
+    }),
+    /broke/,
+  );
   assert.equal(cache.size, 0);
   assert.equal(await cache.get('k', 1, async () => 'ok'), 'ok');
   // A plain value works as well as a promise.

@@ -30,7 +30,11 @@ if (import.meta.main) {
   const send = (m: object) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');
   createInterface({ input: process.stdin }).on('line', (line) => {
     let m: { id?: number | string; method?: string; params?: { protocolVersion?: string; name?: string; arguments?: Record<string, unknown> } };
-    try { m = JSON.parse(line); } catch { return; }
+    try {
+      m = JSON.parse(line);
+    } catch {
+      return;
+    }
     if (m.id === undefined) return;
     if (m.method === 'initialize') {
       return send({ id: m.id, result: { protocolVersion: m.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: process.env.STUB_ROLE ?? 'thread', version: '0' } } });

@@ -16,7 +16,10 @@ Land, not merge (Cara, 2026-11-19, picked "Land" and, for \`fold\`, "Retire it":
 
 ## Who decides in a scheme (Cara, 2026-11-04: "anyone who is assigned to a scheme should have the same authority to make decisions")
 Within a scheme, every member decides.`;
-const SHIP = LAND.replace(/Land, not merge \(Cara[^\n]*/, `Ship, not land or merge (Cara, 2026-11-19: she first picked "Land", then later that day, on #1020's card, picked \`Ship\` over keeping "land", Check in, Accept and Integrate; for \`fold\` she picked "Retire it": "fold was just for major builds, but that can probably just become "merge" into the build branch"). In everything people read, a minion's change going onto main is "shipping", and "ship it" is the go.`);
+const SHIP = LAND.replace(
+  /Land, not merge \(Cara[^\n]*/,
+  `Ship, not land or merge (Cara, 2026-11-19: she first picked "Land", then later that day, on #1020's card, picked \`Ship\` over keeping "land", Check in, Accept and Integrate; for \`fold\` she picked "Retire it": "fold was just for major builds, but that can probably just become "merge" into the build branch"). In everything people read, a minion's change going onto main is "shipping", and "ship it" is the go.`,
+);
 
 test('parseDecisions reads parenthetical attributions with the rule they back', () => {
   const got = parseDecisions(SHIP, NAMES);
@@ -36,17 +39,23 @@ Cara, 2026-11-15, on #767's card: "2 Rerun CI on flake-only red". Later, Alex, 2
 
 Cara 2026-11-18 — "Released" should mean actually released.`;
   const got = parseDecisions(t, NAMES);
-  assert.deepEqual(got.map((d) => [d.who, d.date, d.quote]), [
-    ['Cara', '2026-11-09', 'no reason to have a link you cant click'],
-    ['Josh', '2026-11-10', ''],
-    ['Cara', '2026-11-15', '2 Rerun CI on flake-only red'],
-    ['Cara', '2026-11-18', 'Released'],
-  ]);
+  assert.deepEqual(
+    got.map((d) => [d.who, d.date, d.quote]),
+    [
+      ['Cara', '2026-11-09', 'no reason to have a link you cant click'],
+      ['Josh', '2026-11-10', ''],
+      ['Cara', '2026-11-15', '2 Rerun CI on flake-only red'],
+      ['Cara', '2026-11-18', 'Released'],
+    ],
+  );
   assert.equal(got[0].rule, 'Links are clickable');
   assert.equal(got[1].rule, 'Links are clickable');
   // A decision in a list reads as its own item.
   const items = parseDecisions('- Say land (Cara, 2026-11-19: "Land").\n- Old CI rule (Cara, 2026-11-10: "Keep failing").', NAMES);
-  assert.deepEqual(items.map((d) => d.text), ['- Say land (Cara, 2026-11-19: "Land").', '- Old CI rule (Cara, 2026-11-10: "Keep failing").']);
+  assert.deepEqual(
+    items.map((d) => d.text),
+    ['- Say land (Cara, 2026-11-19: "Land").', '- Old CI rule (Cara, 2026-11-10: "Keep failing").'],
+  );
 });
 
 test('replay: the Land then Ship edit reverses Land; a rewording or a cut does not', () => {
@@ -101,7 +110,15 @@ Members decide (Cara, 2026-11-04: "anyone who is assigned to a scheme should hav
     { kind: 'memory', place: { label: 'Memory', file: 'who-decides.md', href: '#/p/2/memory' }, text: echo },
   ];
   const { decisions, counts } = assemble(docs, NAMES, ['repo', 'memory']);
-  assert.deepEqual(counts.map((c) => [c.kind, c.count, c.files]), [['citadel', 2], ['repo', 2], ['adr', 1], ['memory', 3]].map(([k, n]) => [k, n, k === 'memory' ? 2 : 1]));
+  assert.deepEqual(
+    counts.map((c) => [c.kind, c.count, c.files]),
+    [
+      ['citadel', 2],
+      ['repo', 2],
+      ['adr', 1],
+      ['memory', 3],
+    ].map(([k, n]) => [k, n, k === 'memory' ? 2 : 1]),
+  );
   const land = decisions.find((d) => d.rule === 'Land, not merge')!;
   const ship = decisions.find((d) => d.rule === 'Ship, not land or merge')!;
   assert.ok(land.reversed);
@@ -109,20 +126,35 @@ Members decide (Cara, 2026-11-04: "anyone who is assigned to a scheme should hav
   assert.deepEqual(ship.reverses, [land.id]);
   assert.deepEqual(land.places, []);
   // The repo rule still quoting "Retire it" with "Land" on the same day, without saying it was reversed, is a stale copy.
-  assert.deepEqual(land.reversed.stale.map((p) => p.file), ['.claude/rules/x.md']);
+  assert.deepEqual(
+    land.reversed.stale.map((p) => p.file),
+    ['.claude/rules/x.md'],
+  );
   // The memory note repeating "who decides" joins that row.
   const who = decisions.find((d) => d.rule === 'Who decides in a scheme')!;
-  assert.deepEqual(who.places.map((p) => p.kind), ['citadel', 'memory']);
+  assert.deepEqual(
+    who.places.map((p) => p.kind),
+    ['citadel', 'memory'],
+  );
   // Written in this scheme's memory too, so it shows under This scheme as well as Citadel-wide.
   assert.ok(inScope(who, 'scheme') && inScope(who, 'citadel'));
   assert.ok(!inScope(decisions.find((d) => d.rule === 'Rerun flakes')!, 'citadel'));
   // The ADR's "This reverses Cara's 2026-11-10 …" marks the rule that still says it, and lists it as the copy to clean.
   const ci = decisions.find((d) => d.quote === 'Keep failing, log it')!;
   assert.equal(ci.reversed!.by, decisions.find((d) => d.rule === 'Rerun flakes')!.id);
-  assert.deepEqual(ci.reversed!.stale.map((p) => p.file), ['.claude/rules/x.md']);
+  assert.deepEqual(
+    ci.reversed!.stale.map((p) => p.file),
+    ['.claude/rules/x.md'],
+  );
   // Newest first; the tool's search finds the same entries.
   assert.ok(decisions[0].date >= decisions.at(-1)!.date);
-  assert.deepEqual(searchDecisions(decisions, 'land merge').map((d) => d.id).slice(0, 2).sort(), [land.id, ship.id].sort());
+  assert.deepEqual(
+    searchDecisions(decisions, 'land merge')
+      .map((d) => d.id)
+      .slice(0, 2)
+      .sort(),
+    [land.id, ship.id].sort(),
+  );
 });
 
 test('githubHref links GitHub repos and nothing else', () => {
@@ -148,7 +180,10 @@ test('loadDecisions: the Land then Ship save shows as a reversal, and its Taskma
   const land = decisions.find((d) => d.rule === 'Land, not merge')!;
   assert.equal(decisions.find((d) => d.id === land.reversed!.by)!.rule, 'Ship, not land or merge');
   assert.equal(land.reversed!.editor, 'Taskmaster');
-  assert.deepEqual(land.reversed!.stale.map((p) => p.label), ['Scheme instructions']);
+  assert.deepEqual(
+    land.reversed!.stale.map((p) => p.label),
+    ['Scheme instructions'],
+  );
   assert.ok(counts.find((c) => c.kind === 'kit')!.count > 0, "the kit is read from the server's checkout");
   assert.equal(mail.length, 1);
   assert.match(mail[0], new RegExp(`^${tm.id}\\|.*Land, not merge.*Ship, not land or merge.*Still written in: Scheme instructions`, 's'));

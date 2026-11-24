@@ -4,10 +4,13 @@ import { answeredItems, withoutCards, cardEvent, countMoved, isShipping, isWorki
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
-test('another scheme\'s minion: news that can move its Needs-you count refetches the counts, the rest doesn\'t (#188)', () => {
+test("another scheme's minion: news that can move its Needs-you count refetches the counts, the rest doesn't (#188)", () => {
   let fetches = 0;
   const badges: boolean[] = [];
-  const watch = otherSchemes((badge: boolean) => { fetches++; badges.push(badge); });
+  const watch = otherSchemes((badge: boolean) => {
+    fetches++;
+    badges.push(badge);
+  });
   watch.ticket(minion({ status: 'running' }));
   assert.equal(fetches, 1, 'a minion new to this page may already count');
   watch.ticket(minion({ status: 'running', activity: 'Reading files' }));
@@ -34,7 +37,7 @@ test('another scheme\'s minion: news that can move its Needs-you count refetches
   assert.deepEqual(badges, [true, false, false, true, true, true, true, true], 'only a turn starting or ending is spinner-only');
 });
 
-test('cardEvent and countMoved, as the open scheme\'s badge uses them too', () => {
+test("cardEvent and countMoved, as the open scheme's badge uses them too", () => {
   for (const kind of ['question', 'question_result', 'plan', 'plan_result', 'approval', 'approval_result']) assert.equal(cardEvent({ kind, data: '{}' }), true, kind);
   assert.equal(cardEvent({ kind: 'tool_use', data: '{}' }), false);
   assert.equal(countMoved(undefined, minion()), true);
@@ -46,7 +49,7 @@ test('cardEvent and countMoved, as the open scheme\'s badge uses them too', () =
   assert.equal(turnMoved(minion({ status: 'idle' }), minion({ status: 'error' })), false, 'neither running');
 });
 
-test('isWorking: only a turn doing work spins the scheme\'s spinner and counts beside it, not one held on a person (#373)', () => {
+test("isWorking: only a turn doing work spins the scheme's spinner and counts beside it, not one held on a person (#373)", () => {
   assert.equal(isWorking(minion({ status: 'running' })), true, 'mid-turn');
   assert.equal(isWorking(minion({ status: 'running', approvals: 0 })), true, 'no card waiting');
   assert.equal(isWorking(minion({ status: 'running', approvals: 1 })), false, 'its turn waits on an approval card (Delve #110, 14 hours)');
@@ -81,8 +84,22 @@ test('forget: after the counts are fetched afresh, a minion the watcher last saw
 });
 
 test('rowTarget: a Needs-you row goes to the oldest thing its minion waits on you for (#236)', () => {
-  assert.equal(rowTarget([{ kind: 'approval', at: 30, eventId: 9 }, { kind: 'question', at: 10, eventId: 4 }, { kind: 'plan', at: 20, eventId: 6 }]), 4);
-  assert.equal(rowTarget([{ kind: 'question', at: 20, eventId: 4 }, { kind: 'replies', at: 10 }]), 'latest', 'replies: the latest reply');
+  assert.equal(
+    rowTarget([
+      { kind: 'approval', at: 30, eventId: 9 },
+      { kind: 'question', at: 10, eventId: 4 },
+      { kind: 'plan', at: 20, eventId: 6 },
+    ]),
+    4,
+  );
+  assert.equal(
+    rowTarget([
+      { kind: 'question', at: 20, eventId: 4 },
+      { kind: 'replies', at: 10 },
+    ]),
+    'latest',
+    'replies: the latest reply',
+  );
   assert.equal(rowTarget([{ kind: 'replies', at: 10 }]), 'latest');
   assert.equal(rowTarget([{ kind: 'approval', at: 10 }]), null, 'a card whose event is gone opens the chat as usual');
 });
@@ -104,9 +121,11 @@ test('schemePill: violet only when something new waits, not when the count moved
   assert.equal(schemePill({ inbox: 2, fresh: true, running: true, working: 1 }).label, '2 need your answer (something new since you last opened it) · 1 minion working');
 });
 
-test('the scheme you\'re in: a new ask is new unless the chat you\'re on asks it, until you open another chat (#548)', () => {
+test("the scheme you're in: a new ask is new unless the chat you're on asks it, until you open another chat (#548)", () => {
   const item = (key, ticketId) => ({ key, ticketId });
-  const a = item('question:1', 7), b = item('replies:8', 8), c = item('plan:3', 9);
+  const a = item('question:1', 7),
+    b = item('replies:8', 8),
+    c = item('plan:3', 9);
   let seen = seenInScheme(new Set(), [a], 7, true);
   assert.deepEqual([...seen], ['question:1'], 'opening a chat sees everything waiting');
   seen = seenInScheme(seen, [a, b], 7, false);
@@ -120,8 +139,12 @@ test('the scheme you\'re in: a new ask is new unless the chat you\'re on asks it
   assert.equal(seenInScheme(gone, [b, c], 7, false).has('plan:3'), false, 'an item that stops waiting and waits again later is new again');
 });
 
-test('app badge: on while any visible scheme is purple, the open scheme by this page\'s own word (#980)', () => {
-  const ps = [{ id: 1, inbox: 2, fresh: true }, { id: 2, inbox: 1, fresh: false }, { id: 3, inbox: 1, fresh: true, hidden: true }];
+test("app badge: on while any visible scheme is purple, the open scheme by this page's own word (#980)", () => {
+  const ps = [
+    { id: 1, inbox: 2, fresh: true },
+    { id: 2, inbox: 1, fresh: false },
+    { id: 3, inbox: 1, fresh: true, hidden: true },
+  ];
   assert.equal(wantsBadge(ps, 2, null), true);
   assert.equal(wantsBadge(ps, 1, { projectId: 1, fresh: false }), false, 'you have seen it here');
   assert.equal(wantsBadge([{ id: 1, inbox: 0, fresh: true }], null, null), false, 'nothing waiting');
@@ -132,7 +155,10 @@ test('app badge: calls the API only on a change, and nothing without it (#980)',
   const calls: string[] = [];
   const nav = { setAppBadge: () => (calls.push('set'), Promise.resolve()), clearAppBadge: () => (calls.push('clear'), Promise.resolve()) };
   const st = { on: null as boolean | null };
-  syncBadge(true, st, nav); syncBadge(true, st, nav); syncBadge(false, st, nav); syncBadge(false, st, nav);
+  syncBadge(true, st, nav);
+  syncBadge(true, st, nav);
+  syncBadge(false, st, nav);
+  syncBadge(false, st, nav);
   assert.deepEqual(calls, ['set', 'clear']);
   assert.equal(syncBadge(true, { on: null }, {} as any), false);
 });
@@ -143,8 +169,13 @@ test("the open scheme's strip shows every item the badge counts, a card on a Tas
   const own = { id: 258, kind: 'coordinator', project_id: 3, status: 'idle', updated_at: 1 };
   const shipping = { id: 2955, number: 768, kind: 'ticket', project_id: 3, status: 'running', state: 'outside', note: 'landing: in line', updated_at: 1 };
   const view = {
-    projectId: 3, coordinator: own, tickets: new Map([[shipping.id, shipping]]),
-    taskmasters: [{ id: 2287, person_id: null, person_name: null, updated_at: 5 }, { id: 258, person_id: 1, person_name: 'Cara', updated_at: 1 }],
+    projectId: 3,
+    coordinator: own,
+    tickets: new Map([[shipping.id, shipping]]),
+    taskmasters: [
+      { id: 2287, person_id: null, person_name: null, updated_at: 5 },
+      { id: 258, person_id: 1, person_name: 'Cara', updated_at: 1 },
+    ],
   };
   // What /api/projects/3/inbox sent, and what the rail's badge counts (inboxCount: minions, not items).
   const items = [
@@ -155,8 +186,8 @@ test("the open scheme's strip shows every item the badge counts, a card on a Tas
   assert.equal(minionCount(stripItems(view, items)), 2, 'the same count once you open it');
   const overlord = itemTicket(view, 2287);
   assert.equal(overlord.kind, 'coordinator', 'its row is the Taskmaster');
-  assert.equal(overlord.project_id, 3, 'and links into this scheme, where Mine shows the Overlord\'s cards');
-  assert.equal(itemTicket(view, 2955), shipping, 'a shipping minion\'s card stays too');
+  assert.equal(overlord.project_id, 3, "and links into this scheme, where Mine shows the Overlord's cards");
+  assert.equal(itemTicket(view, 2955), shipping, "a shipping minion's card stays too");
 
   // A minion you dismissed here drops at once, before the server's next list (#589).
   view.tickets.set(2955, { ...shipping, status: 'closed' });
@@ -168,14 +199,20 @@ test("the open scheme's pill is its strip's, whichever list draws it: a scheme-l
   const seen = { projectId: 3, fresh: false, pill: { inbox: 2, running: true, working: 1, shipping: 1 } };
   assert.deepEqual(schemePill(openPill(server, 3, seen)), schemePill({ id: 3, ...seen.pill, fresh: false }));
   assert.equal(schemePill(openPill(server, 3, seen)).need, 2);
-  assert.equal(openPill(server, 4, seen), server, 'another scheme keeps the server\'s word');
+  assert.equal(openPill(server, 4, seen), server, "another scheme keeps the server's word");
   assert.equal(openPill(server, 3, { projectId: 4, fresh: false, pill: seen.pill }), server, 'not drawn here yet');
   assert.equal(wantsBadge([server], 3, seen), false, 'the badge follows the same pill');
-  assert.equal(itemTicket({ projectId: 3, taskmasters: [{ id: 9, person_id: null, status: 'running' }] }, 9).status, 'running', 'an Overlord\'s turn spins it from the first paint');
+  assert.equal(itemTicket({ projectId: 3, taskmasters: [{ id: 9, person_id: null, status: 'running' }] }, 9).status, 'running', "an Overlord's turn spins it from the first paint");
 });
 
-test('answering a card drops it from the strip count and the row\'s open cards before any server refresh (#1409)', () => {
-  const view = { coordinator: { id: 1 }, tickets: new Map([[9, { id: 9, status: 'idle' }], [8, { id: 8, status: 'idle' }]]) };
+test("answering a card drops it from the strip count and the row's open cards before any server refresh (#1409)", () => {
+  const view = {
+    coordinator: { id: 1 },
+    tickets: new Map([
+      [9, { id: 9, status: 'idle' }],
+      [8, { id: 8, status: 'idle' }],
+    ]),
+  };
   const items = [
     { ticketId: 9, key: 'question:50', eventId: 50, card: { id: 'qa' } },
     { ticketId: 9, key: 'question:51', eventId: 51, card: { id: 'qb' } },
@@ -183,7 +220,11 @@ test('answering a card drops it from the strip count and the row\'s open cards b
   ];
   assert.equal(minionCount(stripItems(view, items)), 2);
   const hit = answeredItems(items, 9, 'qa');
-  assert.deepEqual(hit.map((i) => i.key), ['question:50'], 'only that minion\'s card with that id');
+  assert.deepEqual(
+    hit.map((i) => i.key),
+    ['question:50'],
+    "only that minion's card with that id",
+  );
   const gone = new Set(hit.map((i) => i.key));
   assert.equal(stripItems(view, items, gone).length, 2);
   assert.equal(minionCount(stripItems(view, items, gone)), 2, 'it still has its other card');

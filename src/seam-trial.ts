@@ -14,8 +14,17 @@ export const SEAM_CONTEXT_TOKENS = 150_000;
 export const ARM_SIZE = 20;
 
 export type Arm = 'fresh' | 'control';
-export interface Enrolled { id: number; at: number; context: number }
-export interface SeamTrial { since: number; fresh: Enrolled[]; control: Enrolled[]; full?: number }
+export interface Enrolled {
+  id: number;
+  at: number;
+  context: number;
+}
+export interface SeamTrial {
+  since: number;
+  fresh: Enrolled[];
+  control: Enrolled[];
+  full?: number;
+}
 
 /** Which group a minion is in, or null. */
 export function armOf(trial: SeamTrial | null | undefined, ticketId: number): Arm | null {
@@ -59,7 +68,7 @@ export const SEAM_WHY = 'a seam the minion picked, in the fresh-session trial';
 export const CARRY_ON = 'Your fresh session starts here. Carry on from your handoff: recreate your task list from it first, then check your worktree and git log before acting on it.';
 
 /** How the server's facts sheet opens under a minion's handoff. */
-export const MINION_SHEET_CHECK = 'Facts sheet built by the server from the database at hand-off: check your handoff above against it, and trust the sheet where they differ. The people\'s messages below are their own words.';
+export const MINION_SHEET_CHECK = "Facts sheet built by the server from the database at hand-off: check your handoff above against it, and trust the sheet where they differ. The people's messages below are their own words.";
 
 /** Held mail for the Citadel Taskmaster once both groups are full. */
 export const fullText = (t: SeamTrial) =>

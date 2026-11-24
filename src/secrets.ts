@@ -19,9 +19,9 @@ export const SECRET_MAX = 8192;
 /** A secret's name, upper-cased: letters, digits and underscores, a letter first, as an env var name wants. */
 export function secretName(raw: unknown): string {
   const name = typeof raw === 'string' ? raw.trim().toUpperCase() : '';
-  if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) throw new HttpError(400, 'A secret\'s name is a letter, then letters, digits or underscores (at most 64), e.g. AZURE_SPEECH_KEY');
+  if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) throw new HttpError(400, "A secret's name is a letter, then letters, digits or underscores (at most 64), e.g. AZURE_SPEECH_KEY");
   // $CITADEL_SECRET_NAMES lists the names a turn has.
-  if (name === 'NAMES') throw new HttpError(400, 'NAMES is taken: $CITADEL_SECRET_NAMES lists a turn\'s secrets');
+  if (name === 'NAMES') throw new HttpError(400, "NAMES is taken: $CITADEL_SECRET_NAMES lists a turn's secrets");
   return name;
 }
 
@@ -32,7 +32,14 @@ export function secretValue(raw: unknown): string {
 }
 
 /** What a list shows of a secret: never its value. */
-export interface SecretView { name: string; scope: SecretScope; project?: number; updated_by: string | null; created_at: number; updated_at: number }
+export interface SecretView {
+  name: string;
+  scope: SecretScope;
+  project?: number;
+  updated_by: string | null;
+  created_at: number;
+  updated_at: number;
+}
 
 export class Secrets {
   private store: Store;
@@ -62,8 +69,12 @@ export class Secrets {
 
   list(scope: SecretScope, owner: number): SecretView[] {
     return this.store.listSecrets(scope, owner).map((r: SecretRow) => ({
-      name: r.name, scope, ...(scope === 'scheme' ? { project: owner } : {}),
-      updated_by: r.updated_by === null ? null : this.store.getUser(r.updated_by)?.name ?? null, created_at: r.created_at, updated_at: r.updated_at,
+      name: r.name,
+      scope,
+      ...(scope === 'scheme' ? { project: owner } : {}),
+      updated_by: r.updated_by === null ? null : (this.store.getUser(r.updated_by)?.name ?? null),
+      created_at: r.created_at,
+      updated_at: r.updated_at,
     }));
   }
 

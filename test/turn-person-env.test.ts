@@ -23,14 +23,17 @@ after(async () => {
 process.env.CITADEL_PERSON_ID = '999';
 const seen = join(root, 'seen.jsonl');
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
   const e = process.env;
   require('node:fs').appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ has: ['CITADEL_PERSON_ID', 'CITADEL_PERSON_LOGIN'].filter((k) => k in e), id: e.CITADEL_PERSON_ID, login: e.CITADEL_PERSON_LOGIN }) + '\\n');
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'coordinator.db'));
@@ -45,7 +48,12 @@ const cwd = join(root, 'm');
 mkdirSync(cwd);
 store.setTicketDir(t.id, cwd, null);
 store.updateTicket(t.id, { person_id: cara.id });
-const r = new Runner(store, () => {}, () => ({}), fake);
+const r = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 r.pollMs = 10;
 r.resumeGapMs = 10;
 r.personOf = messagePerson(store);

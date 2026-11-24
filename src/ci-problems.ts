@@ -74,11 +74,12 @@ export function problemLink(x: Problem, scheme: number, wakes: WakeAt, titleOf: 
     const { number: n, closed } = x.fixMinion;
     return { kind: 'minion', href: `#/p/${scheme}/t/${n}`, label: `#${n} ${titleOf(n) ?? ''}`.trim(), closed };
   }
-  const at = x.shared ? wakes[`${x.shared}#${scheme}`] ?? wakes[x.shared] : wakes[`${scheme}:${x.key}`];
+  const at = x.shared ? (wakes[`${x.shared}#${scheme}`] ?? wakes[x.shared]) : wakes[`${scheme}:${x.key}`];
   return at ? { kind: 'taskmaster', href: `#/p/${at.project}?e=${at.entry}`, label: "the Taskmaster's wake" } : { kind: 'taskmaster', href: `#/p/${scheme}`, label: 'the Taskmaster' };
 }
 
-export const WAKE_STEPS = "People's phones ring for this. Start a fix minion now and name this problem in its brief; if it needs a person (billing, a machine that's off, a runner), ask them with a card instead. If it's expected, add the workflow to the scheme's quiet CI workflows (set_project_settings quiet_workflows).";
+export const WAKE_STEPS =
+  "People's phones ring for this. Start a fix minion now and name this problem in its brief; if it needs a person (billing, a machine that's off, a runner), ask them with a card instead. If it's expected, add the workflow to the scheme's quiet CI workflows (set_project_settings quiet_workflows).";
 
 /** `x` waiting from `since` (#1662): quiet and `held` until RED_FIX_MS after its Taskmaster can hear (2-9 AM Pacific counts from 9), its next step saying when it rings; then as it was. */
 export function held(x: Problem, since: number, now: number): Problem {
@@ -155,8 +156,10 @@ export function stuckProblems(runners: Runner[], jobs: Job[], offline: Record<st
       title: `CI: ${plural(waiting.length, 'job')} on ${labels} ${waiting.length === 1 ? 'has' : 'have'} waited for a runner since ${clock(since)}`,
       why: `every runner that serves ${labels} (${names.join(', ')}) is offline, since ${clock(down)}`,
       shared: `host:${computerOf(names)}`,
-      plain: { what: `${plural(waiting.length, 'CI job')} can't start: ${host ? `${host} is offline` : `every runner for ${labels} is offline`} (since ${clock(down)})`,
-        next: host ? `Turn on ${host} or restart its runner service; the jobs then start by themselves` : 'Bring one of those runners back online; the jobs then start by themselves' },
+      plain: {
+        what: `${plural(waiting.length, 'CI job')} can't start: ${host ? `${host} is offline` : `every runner for ${labels} is offline`} (since ${clock(down)})`,
+        next: host ? `Turn on ${host} or restart its runner service; the jobs then start by themselves` : 'Bring one of those runners back online; the jobs then start by themselves',
+      },
       fix: host ? `turn on ${host} or restart its runner service; once one is online the jobs start by themselves` : `bring one of those runners back online; the jobs start by themselves`,
     };
   });
@@ -181,16 +184,34 @@ export function hungProblems(jobs: Job[], now: number, longs: Pick<LongJob, 'run
     const next = 'Cancel that run on GitHub (the CI page links it), then restart the runner if it stays busy';
     const base = { key: `hung:${j.runner_name}`, fix: `cancel run ${j.run_id} on GitHub, then restart the runner if it stays busy` };
     if (!long) {
-      out.push(held({ ...base, title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}) since ${clock(at(j.started_at))}`,
-        plain: { what: `runner ${j.runner_name} has been busy on one job (${j.name}) since ${clock(at(j.started_at))}, over 2 hours, so it is probably hung and jobs queued for it wait`, next },
-        why: 'over 2 h on one job is far past a normal run, so it is probably hung (a test waiting forever, or its PC asleep mid-job), and jobs queued for it wait' }, at(j.started_at) + HUNG_MS, now));
+      out.push(
+        held(
+          {
+            ...base,
+            title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}) since ${clock(at(j.started_at))}`,
+            plain: { what: `runner ${j.runner_name} has been busy on one job (${j.name}) since ${clock(at(j.started_at))}, over 2 hours, so it is probably hung and jobs queued for it wait`, next },
+            why: 'over 2 h on one job is far past a normal run, so it is probably hung (a test waiting forever, or its PC asleep mid-job), and jobs queued for it wait',
+          },
+          at(j.started_at) + HUNG_MS,
+          now,
+        ),
+      );
       continue;
     }
     const limit = longDeadlineMs(long);
     if (now - (long.started_at ?? at(j.started_at)) < limit) continue;
-    out.push(held({ ...base, title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}), a long job, since ${clock(at(j.started_at))}, past its ${Math.round(limit / 60_000)} min deadline`,
-      plain: { what: `runner ${j.runner_name} is still on a long job (${j.name}) past its ${Math.round(limit / 60_000)} minute deadline, so it is probably hung and jobs queued for it wait`, next },
-      why: `a long job (citadel-heavy --long) is allowed ${Math.round(limit / 60_000)} min, and this one is still running, so it is probably hung, and jobs queued for it wait` }, (long.started_at ?? at(j.started_at)) + limit, now));
+    out.push(
+      held(
+        {
+          ...base,
+          title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}), a long job, since ${clock(at(j.started_at))}, past its ${Math.round(limit / 60_000)} min deadline`,
+          plain: { what: `runner ${j.runner_name} is still on a long job (${j.name}) past its ${Math.round(limit / 60_000)} minute deadline, so it is probably hung and jobs queued for it wait`, next },
+          why: `a long job (citadel-heavy --long) is allowed ${Math.round(limit / 60_000)} min, and this one is still running, so it is probably hung, and jobs queued for it wait`,
+        },
+        (long.started_at ?? at(j.started_at)) + limit,
+        now,
+      ),
+    );
   }
   return out;
 }
@@ -220,11 +241,12 @@ export function deadProblem(g: { labels: string; dead: Job[] }, reason: string |
     key: `nostart:${g.labels}`,
     title: `CI: ${plural(n, 'job')} on ${g.labels} didn't start since ${clock(at(g.dead[0].created_at))}, so ${n === 1 ? "it isn't a test failure" : "they aren't test failures"}`,
     why: reason ? `GitHub says: "${cap(reason, 300)}"` : 'no runner took them and GitHub gave no reason',
-    plain: { what: `${plural(n, 'CI job')} never started${billing ? ': the GitHub Actions bill or spending limit is blocking them' : ' (no runner took them), so this is not a test failure'} (since ${clock(at(g.dead[0].created_at))})`,
-      next: billing ? "Raise the Actions spending limit or fix the payment in the repo owner's GitHub billing settings, then re-run them" : `Check that a runner for ${g.labels} is online, then re-run them` },
+    plain: {
+      what: `${plural(n, 'CI job')} never started${billing ? ': the GitHub Actions bill or spending limit is blocking them' : ' (no runner took them), so this is not a test failure'} (since ${clock(at(g.dead[0].created_at))})`,
+      next: billing ? "Raise the Actions spending limit or fix the payment in the repo owner's GitHub billing settings, then re-run them" : `Check that a runner for ${g.labels} is online, then re-run them`,
+    },
     ...(billing ? { shared: 'billing' } : {}),
-    fix: billing ? "raise the Actions spending limit or fix the payment in the repo owner's GitHub billing settings, then re-run them"
-      : `check that a runner carries ${g.labels} and is online, then re-run them`,
+    fix: billing ? "raise the Actions spending limit or fix the payment in the repo owner's GitHub billing settings, then re-run them" : `check that a runner carries ${g.labels} and is online, then re-run them`,
   };
 }
 
@@ -236,8 +258,7 @@ export function orphanRuns(runs: Run[], line: Record<string, { name: string; run
   const held = Object.values(line);
   // A landing in its CI wait whose run we haven't read may be about to take any run of its commit (land.sh finds one by SHA, whatever its branch).
   if (held.some((l) => l.ciSince != null && !l.run && !l.tests && !l.green)) return [];
-  return runs.filter((r) => r.status === 'queued' && r.head_branch.startsWith('land/') && now - at(r.created_at) >= ORPHAN_MS
-    && !held.some((l) => l.run === r.id || (/^#(\d+)$/.test(l.name) && r.head_branch.includes(`/${l.name.slice(1)}-`))));
+  return runs.filter((r) => r.status === 'queued' && r.head_branch.startsWith('land/') && now - at(r.created_at) >= ORPHAN_MS && !held.some((l) => l.run === r.id || (/^#(\d+)$/.test(l.name) && r.head_branch.includes(`/${l.name.slice(1)}-`))));
 }
 
 /** Where a failed job failed: "job › step". */
@@ -300,10 +321,12 @@ export function redProblem(file: string, branch: string, mark: RedMark, newest: 
   const red = redProblemOf(file, branch, mark, newest, fix, now, slug);
   if (!red) return red;
   const x = { ...red, since: at(mark.at) };
-  if (!fix) { const ringsAt = (mark.told ?? now) + RED_FIX_MS; return { ...x, noFix: { ringsAt, late: now >= ringsAt } }; }
+  if (!fix) {
+    const ringsAt = (mark.told ?? now) + RED_FIX_MS;
+    return { ...x, noFix: { ringsAt, late: now >= ringsAt } };
+  }
   const re = mark.rerun;
-  const rerun = fix.closedAt == null && re?.ticket != null
-    ? { sha: short(re.sha), url: re.run && slug ? runUrl(slug, { id: re.run } as Run) : undefined, state: re.failed ? 'failed' as const : re.hosted || re.error ? 'manual' as const : 'running' as const } : undefined;
+  const rerun = fix.closedAt == null && re?.ticket != null ? { sha: short(re.sha), url: re.run && slug ? runUrl(slug, { id: re.run } as Run) : undefined, state: re.failed ? ('failed' as const) : re.hosted || re.error ? ('manual' as const) : ('running' as const) } : undefined;
   return { ...x, fixMinion: { number: fix.number, closed: fix.closedAt != null }, ...(rerun && { rerun }) };
 }
 export function redProblemOf(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number, slug?: string): Problem | null {
@@ -320,48 +343,83 @@ export function redProblemOf(file: string, branch: string, mark: RedMark, newest
     const n = `#${fix.number}`;
     const url = re.run && slug ? `: ${runUrl(slug, { id: re.run } as Run)}` : '';
     if (re.failed) {
-      return { key, quiet: true, plain: { what: `${red}, and the re-run with #${fix.number}'s fix failed too`, next: `#${fix.number} has been woken to fix it again; Citadel re-runs it once the next fix is live` }, title: `${what}, and re-run ${re.run} on ${short(re.sha)} failed too`,
+      return {
+        key,
+        quiet: true,
+        plain: { what: `${red}, and the re-run with #${fix.number}'s fix failed too`, next: `#${fix.number} has been woken to fix it again; Citadel re-runs it once the next fix is live` },
+        title: `${what}, and re-run ${re.run} on ${short(re.sha)} failed too`,
         why: `run ${re.run} on ${short(re.sha)}, which has fix minion ${n}'s fix, failed${url}`,
-        fix: `${n} was woken to fix it again; Citadel re-runs ${file} on ${branch} once its next fix is live` };
+        fix: `${n} was woken to fix it again; Citadel re-runs ${file} on ${branch} once its next fix is live`,
+      };
     }
     // #1662 (Cara's pick: "At once"): only a person can start it, so it rings.
     if (re.hosted || re.error) {
-      return { key, plain: { what: `${red}; #${fix.number}'s fix shipped but the tests need re-running by hand`, next: `${re.hosted ? 'They run on GitHub\'s own runners, which cost Actions minutes, so Citadel doesn\'t start them. ' : ''}Re-run them on ${branch} from the CI page; this clears when they pass` }, title: `${what}: fix minion ${n} shipped; re-run ${file} on ${branch} by hand`,
+      return {
+        key,
+        plain: { what: `${red}; #${fix.number}'s fix shipped but the tests need re-running by hand`, next: `${re.hosted ? "They run on GitHub's own runners, which cost Actions minutes, so Citadel doesn't start them. " : ''}Re-run them on ${branch} from the CI page; this clears when they pass` },
+        title: `${what}: fix minion ${n} shipped; re-run ${file} on ${branch} by hand`,
         why: re.hosted ? `${file} runs on GitHub's own runners, which cost Actions minutes, so Citadel doesn't start it` : `GitHub refused Citadel's re-run: ${re.error}`,
-        fix: `a person re-runs ${file} on ${branch}${re.hosted ? ' (it costs Actions minutes)' : ''}; this clears when it's green, and ${n} closes then` };
+        fix: `a person re-runs ${file} on ${branch}${re.hosted ? ' (it costs Actions minutes)' : ''}; this clears when it's green, and ${n} closes then`,
+      };
     }
-    return { key, quiet: true, plain: { what: `${red}; #${fix.number}'s fix shipped and is being re-tested`, next: `This clears when the re-run passes; if it fails, #${fix.number} is woken again` }, title: `${what}: fix minion ${n} shipped; re-running on ${short(re.sha)}`,
+    return {
+      key,
+      quiet: true,
+      plain: { what: `${red}; #${fix.number}'s fix shipped and is being re-tested`, next: `This clears when the re-run passes; if it fails, #${fix.number} is woken again` },
+      title: `${what}: fix minion ${n} shipped; re-running on ${short(re.sha)}`,
       why: `${n}'s fix is on ${branch}, so ${re.dispatched ? `Citadel started ${file} there at ${clock(re.at)}` : `${file} runs on it`}${url || ' (the run shows here once GitHub lists it)'}`,
-      fix: `this clears when that run is green, and ${n} closes then; if it's red, ${n} is woken` };
+      fix: `this clears when that run is green, and ${n} closes then; if it's red, ${n} is woken`,
+    };
   }
   // #1662 (Cara's pick: "After the wait, if nobody's on it"): its Taskmaster first; a new minion naming the run makes it the fix above.
   if (fix?.closedAt != null && at(newest.created_at) > fix.closedAt) {
-    return held({ key, plain: { what: `${red}, and still is after #${fix.number} closed, so its fix didn't hold`, next: `Reopen #${fix.number} or start another fix minion; ${quietIt}` }, title: `${what}, and is still red after fix minion #${fix.number} closed`,
-      why: `run ${newest.id} on ${short(newest.head_sha)}, made after #${fix.number} closed at ${clock(fix.closedAt)}, failed too, so the fix didn't hold`,
-      fix: `reopen #${fix.number} or start another fix minion naming run ${newest.id}; if it's CI itself (a runner, GitHub), add ${file} to the scheme's quiet CI workflows` }, at(newest.updated_at ?? newest.created_at), now);
+    return held(
+      {
+        key,
+        plain: { what: `${red}, and still is after #${fix.number} closed, so its fix didn't hold`, next: `Reopen #${fix.number} or start another fix minion; ${quietIt}` },
+        title: `${what}, and is still red after fix minion #${fix.number} closed`,
+        why: `run ${newest.id} on ${short(newest.head_sha)}, made after #${fix.number} closed at ${clock(fix.closedAt)}, failed too, so the fix didn't hold`,
+        fix: `reopen #${fix.number} or start another fix minion naming run ${newest.id}; if it's CI itself (a runner, GitHub), add ${file} to the scheme's quiet CI workflows`,
+      },
+      at(newest.updated_at ?? newest.created_at),
+      now,
+    );
   }
   // Closed an hour with no newer run: it landed nothing that ran CI, so main is still red with nobody on it.
   if (fix?.closedAt != null && now - fix.closedAt >= RED_FIX_MS) {
-    return { key, plain: { what: `${red}, and an hour after #${fix.number} closed it hasn't gone green`, next: `Reopen #${fix.number} or start another fix minion; if a fix shipped, re-run the tests to check it` }, title: `${what}, and is still red an hour after fix minion #${fix.number} closed`,
+    return {
+      key,
+      plain: { what: `${red}, and an hour after #${fix.number} closed it hasn't gone green`, next: `Reopen #${fix.number} or start another fix minion; if a fix shipped, re-run the tests to check it` },
+      title: `${what}, and is still red an hour after fix minion #${fix.number} closed`,
       why: `no ${file} run on ${branch} has gone green since #${fix.number} closed at ${clock(fix.closedAt)}`,
-      fix: `reopen #${fix.number} or start another fix minion naming run ${mark.run}; if a fix shipped, re-run ${file} on ${branch} to check it` };
+      fix: `reopen #${fix.number} or start another fix minion naming run ${mark.run}; if a fix shipped, re-run ${file} on ${branch} to check it`,
+    };
   }
   if (fix) {
-    return { key, quiet: true, plain: { what: `${red}${fix.closedAt == null ? '' : `; #${fix.number} closed and main is waiting on its next run`}`, next: 'This clears when it is green again' }, title: `${what}: fix minion #${fix.number} ${fix.closedAt == null ? 'started' : 'closed, waiting on the next run'}`,
-      why: `the newest ${file} verdict on ${branch} is red${fix.via ? `; #${fix.number} ${fix.via}` : ''}`, fix: `#${fix.number} is on it; this clears when ${file} is back to green` };
+    return {
+      key,
+      quiet: true,
+      plain: { what: `${red}${fix.closedAt == null ? '' : `; #${fix.number} closed and main is waiting on its next run`}`, next: 'This clears when it is green again' },
+      title: `${what}: fix minion #${fix.number} ${fix.closedAt == null ? 'started' : 'closed, waiting on the next run'}`,
+      why: `the newest ${file} verdict on ${branch} is red${fix.via ? `; #${fix.number} ${fix.via}` : ''}`,
+      fix: `#${fix.number} is on it; this clears when ${file} is back to green`,
+    };
   }
   const late = now - told >= RED_FIX_MS;
-  return { key, quiet: !late, plain: late ? { what: `${red}, and no fix has been started`, next: `Ask the Taskmaster to start a fix minion, or ${quietIt}` } : { what: red, next: `If no fix minion has started by ${clock(told + RED_FIX_MS)}, this rings` }, title: `${what}${late ? ': no fix minion started' : ''}`,
+  return {
+    key,
+    quiet: !late,
+    plain: late ? { what: `${red}, and no fix has been started`, next: `Ask the Taskmaster to start a fix minion, or ${quietIt}` } : { what: red, next: `If no fix minion has started by ${clock(told + RED_FIX_MS)}, this rings` },
+    title: `${what}${late ? ': no fix minion started' : ''}`,
     why: late ? `its Taskmaster heard at ${clock(told)} and no minion naming run ${mark.run} has started since` : `the newest ${file} verdict on ${branch} is red; its Taskmaster heard at ${clock(told)}`,
-    fix: late ? `ask the Taskmaster to start a fix minion naming run ${mark.run}, or add ${file} to the scheme's quiet CI workflows if the red is expected`
-      : `the Taskmaster starts a fix minion naming run ${mark.run}; this rings at ${clock(told + RED_FIX_MS)} if none has` };
+    fix: late ? `ask the Taskmaster to start a fix minion naming run ${mark.run}, or add ${file} to the scheme's quiet CI workflows if the red is expected` : `the Taskmaster starts a fix minion naming run ${mark.run}; this rings at ${clock(told + RED_FIX_MS)} if none has`,
+  };
 }
 
 /** #1491: a red's problem once a person's Investigate started minion #`n` for it, until the next poll's redProblem finds it by the run its title names. */
 export function startedRed(x: Problem, n: number): Problem {
   const { noFix: _, rerun: __, ...rest } = x;
-  return { ...rest, quiet: true, plain: x.plain && { what: x.plain.what, next: 'This clears when it is green again' }, title: x.title.replace(/(\(run [^)]*\)).*$/, `$1: fix minion #${n} started`), fixMinion: { number: n, closed: false },
-    fix: `#${n} is on it; this clears when the workflow is back to green` };
+  return { ...rest, quiet: true, plain: x.plain && { what: x.plain.what, next: 'This clears when it is green again' }, title: x.title.replace(/(\(run [^)]*\)).*$/, `$1: fix minion #${n} started`), fixMinion: { number: n, closed: false }, fix: `#${n} is on it; this clears when the workflow is back to green` };
 }
 
 /** The newest two verdict runs of a workflow's runs on the default branch (newest first): the one to check, and the one before. */

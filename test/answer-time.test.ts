@@ -9,9 +9,16 @@ const msg = (ms: number | null, over: Partial<ProbeMessage> = {}): ProbeMessage 
 
 test('percentiles are nearest rank; a failed probe counts as the worst answer', () => {
   assert.equal(percentile([1, 2, 3, 4], 0.5), 2);
-  const w = summarize([...Array(98).fill(10), 600, null].map((x) => msg(x as number | null)), 20, 5)!;
-  assert.equal(w.n, 99); assert.equal(w.fail, 1);
-  assert.equal(w.p50, 10); assert.equal(w.max, 60_000); assert.equal(w.over, 0.02);
+  const w = summarize(
+    [...Array(98).fill(10), 600, null].map((x) => msg(x as number | null)),
+    20,
+    5,
+  )!;
+  assert.equal(w.n, 99);
+  assert.equal(w.fail, 1);
+  assert.equal(w.p50, 10);
+  assert.equal(w.max, 60_000);
+  assert.equal(w.over, 0.02);
   assert.equal(summarize([], 1, 1), null);
 });
 
@@ -46,7 +53,9 @@ test('the probe makes a real request on a fresh connection each time, and a slow
   probe.start((server.address() as { port: number }).port);
   await new Promise((r) => setTimeout(r, 1200)); // timing-ok: the probe's own clock (every 100 ms) is what is measured
   const w = probe.take(1, 1)!;
-  probe.stop(); server.close(); server.closeAllConnections();
+  probe.stop();
+  server.close();
+  server.closeAllConnections();
   assert.ok(hits >= 8, `probes kept coming while one was slow: ${hits}`);
   assert.equal(sockets.size, hits, 'one connection per probe');
   assert.ok(w.max >= 650, `the slow one is the worst: ${w.max}`);
@@ -68,5 +77,9 @@ test('behind the front thread it also times a reader: its time when a reader ans
     reader = false; // no reader alive: the front passed it to main
     await until('the reading drops', () => probe.readerMs == null);
     assert.ok(probe.lastMs != null, 'main is still timed');
-  } finally { probe.stop(); server.close(); server.closeAllConnections(); }
+  } finally {
+    probe.stop();
+    server.close();
+    server.closeAllConnections();
+  }
 });

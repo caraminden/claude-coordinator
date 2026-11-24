@@ -49,7 +49,11 @@ writeFileSync(join(shared, 'gallery.html'), '<img src="pic.png">');
 writeFileSync(join(shared, 'pic.png'), 'png');
 // Pinned, so the startup scan keeps them listed.
 // gone.md was shown once and has since been deleted.
-store.syncArtifacts(M, [{ path: 'page.html', size: 1, mtime: 1 }, { path: 'notes.md', size: 1, mtime: 1 }, { path: 'gone.md', size: 1, mtime: 1 }]);
+store.syncArtifacts(M, [
+  { path: 'page.html', size: 1, mtime: 1 },
+  { path: 'notes.md', size: 1, mtime: 1 },
+  { path: 'gone.md', size: 1, mtime: 1 },
+]);
 const [PAGE, NOTES, GONE] = ['page.html', 'notes.md', 'gone.md'].map((p) => store.listArtifacts(P.id).find((a) => a.path === p)!);
 for (const a of [PAGE, NOTES, GONE]) store.setArtifactPinned(a.id, 'Cara');
 
@@ -70,9 +74,12 @@ async function follow(path: string, headers: Record<string, string> = { Cookie: 
   return new URL(res.headers.get('location')!, srv.base + path).pathname;
 }
 /** A request sent as written, without the URL parser collapsing `..` and `%2e%2e`. */
-const raw = (path: string) => new Promise<number>((resolve, reject) => {
-  request({ host: '127.0.0.1', port: srv.port, path }, (res) => (res.resume(), resolve(res.statusCode!))).on('error', reject).end();
-});
+const raw = (path: string) =>
+  new Promise<number>((resolve, reject) => {
+    request({ host: '127.0.0.1', port: srv.port, path }, (res) => (res.resume(), resolve(res.statusCode!)))
+      .on('error', reject)
+      .end();
+  });
 
 test("a person's request for an HTML artifact goes to it under a file token; the frame loads it with no cookie", async () => {
   const page = await follow(`/api/artifacts/${PAGE.id}/raw?v=1`);

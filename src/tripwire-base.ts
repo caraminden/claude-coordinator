@@ -26,7 +26,10 @@ export interface TripwireConfig {
 }
 
 /** Why a call is stopped, and whether a person may approve it once on a card instead. */
-export interface Verdict { reason: string; ask: boolean }
+export interface Verdict {
+  reason: string;
+  ask: boolean;
+}
 export const hard = (reason: string): Verdict => ({ reason, ask: false });
 
 export const under = (p: string, root: string) => p === root || p.startsWith(root.endsWith('/') ? root : root + '/');
@@ -37,4 +40,8 @@ export const under = (p: string, root: string) => p === root || p.startsWith(roo
  * function binds), \0__name\0 for a $(basename …), \0\0 for anything else ($(…), $@, ${x%/*}), so a
  * variable the command sets, or the turn's environment, can fill it in later.
  */
-export interface Word { text: string; unknown: boolean; tmpl?: string }
+export interface Word {
+  text: string;
+  unknown: boolean;
+  tmpl?: string;
+}

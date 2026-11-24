@@ -8,7 +8,11 @@ import { HttpError } from './http.ts';
 
 export const RELAY_FILE_MAX = 2 * 1024 * 1024;
 
-const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+/, '').slice(0, 80) || 'file';
+const safe = (s: string) =>
+  s
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[.-]+/, '')
+    .slice(0, 80) || 'file';
 
 /** Copy `file` (absolute, or relative to `fromShared`) into `toShared`/inbox/<fromScheme>/; returns where it landed. */
 export function relayFile(fromShared: string, toShared: string, fromScheme: string, file: string): { path: string; size: number } {

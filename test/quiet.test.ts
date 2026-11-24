@@ -11,7 +11,7 @@ import { until } from './wait.ts';
 const use = (id: string, name: string, input: object) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
 const result = (id: string) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id }] } });
 
-test('quiet 5 min after the last output, or 2 min past an open tool\'s own timeout when that is later (#906)', () => {
+test("quiet 5 min after the last output, or 2 min past an open tool's own timeout when that is later (#906)", () => {
   let a = noteEvent({ at: 0, tools: [] }, { type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }] } }, 1000);
   assert.equal(quietAt(a), 1000 + QUIET_MS, 'thinking: 5 min');
   a = noteEvent(a, use('t1', 'Bash', { command: 'npm test', timeout: 600_000 }), 2000);
@@ -34,7 +34,12 @@ test('tool limits: Bash by its timeout (default 2 min, at most 10), background c
 });
 
 test('descendants walks the process tree from a pid', () => {
-  const all = new Map([[1, { pid: 1, ppid: 0 }], [2, { pid: 2, ppid: 1 }], [3, { pid: 3, ppid: 2 }], [4, { pid: 4, ppid: 9 }]]);
+  const all = new Map([
+    [1, { pid: 1, ppid: 0 }],
+    [2, { pid: 2, ppid: 1 }],
+    [3, { pid: 3, ppid: 2 }],
+    [4, { pid: 4, ppid: 9 }],
+  ]);
   assert.deepEqual(descendants(all, 1).sort(), [1, 2, 3]);
   assert.deepEqual(descendants(all, 7), []);
 });
@@ -59,7 +64,9 @@ const root = tmp.dir;
 after(() => tmp.teardown());
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 const { existsSync, rmSync } = require('node:fs');
 process.stdin.resume();
 const tick = setInterval(() => {
@@ -72,7 +79,8 @@ const tick = setInterval(() => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 }, 20);
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 test('the runner saves a turn going quiet, not while it waits on a person, and clears it when the turn talks again (#906)', async () => {
@@ -80,7 +88,12 @@ test('the runner saves a turn going quiet, not while it waits on a person, and c
   const project = store.createProject('Test', null);
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.pollMs = 10;
   r.send(t.id, 'Cara', 'go');
   await until('!!(r as any).turns.get(t.id)', () => !!(r as any).turns.get(t.id));

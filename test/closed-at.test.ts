@@ -34,7 +34,10 @@ test('closed_at is set on dismiss, kept on a repeat, cleared on reopen', () => {
 // A dismissal before the column existed: the time comes from its last close note, or stays empty.
 test('the backfill reads the last close note and leaves a minion with none empty', () => {
   const { store, mk } = setup('backfill');
-  const a = mk(), b = mk(), c = mk(), open = mk();
+  const a = mk(),
+    b = mk(),
+    c = mk(),
+    open = mk();
   for (const t of [a, b, c]) store.updateTicket(t.id, { status: 'closed' });
   store.db.prepare('UPDATE tickets SET closed_at = NULL').run();
   const note = (id: number, text: string, at: number) => store.db.prepare("INSERT INTO events (ticket_id, kind, data, created_at) VALUES (?, 'note', ?, ?)").run(id, JSON.stringify({ text }), at);

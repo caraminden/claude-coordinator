@@ -8,10 +8,14 @@ function mapStore(init: Record<string, unknown> = {}) {
   const m = new Map<string, string>(Object.entries(init).map(([k, v]) => [k, JSON.stringify(v)]));
   return {
     m,
-    getSetting: <T>(k: string) => (m.has(k) ? JSON.parse(m.get(k)!) as T : null),
+    getSetting: <T>(k: string) => (m.has(k) ? (JSON.parse(m.get(k)!) as T) : null),
     setSetting: (k: string, v: unknown) => void m.set(k, JSON.stringify(v)),
     deleteSetting: (k: string) => void m.delete(k),
-    settingsWithPrefix: <T>(p: string) => [...m.keys()].filter((k) => k.startsWith(p)).sort().map((key) => ({ key, value: JSON.parse(m.get(key)!) as T })),
+    settingsWithPrefix: <T>(p: string) =>
+      [...m.keys()]
+        .filter((k) => k.startsWith(p))
+        .sort()
+        .map((key) => ({ key, value: JSON.parse(m.get(key)!) as T })),
   };
 }
 const msg = (text: string, id?: number): QueuedMessage => ({ author: 'Cara', text, images: [], ...(id ? { id } : {}) });
@@ -70,7 +74,7 @@ test('remove takes back one queued message; refuse drops the queue but keeps hel
   assert.equal(q.remove(1, 11), false);
   q.hold(1, msg('old mail'));
   q.put(1, msg('c'));
-  assert.deepEqual(texts(q.clear(1, true)), ['b', 'c'], 'a boot keeps a closed minion\'s held mail');
+  assert.deepEqual(texts(q.clear(1, true)), ['b', 'c'], "a boot keeps a closed minion's held mail");
   assert.deepEqual(q.get(1), { held: [msg('old mail')] });
   q.put(1, msg('d'));
   q.refuse(1);
@@ -89,7 +93,10 @@ test('migration folds every old store into one record each, keeps each message o
     'turn:2': { resumes: 0, dir: '/x', queued: [msg('t', 4)], steered: [late] },
     'turn:3': { resumes: 0, dir: '/y' },
     'net-resumes': [{ ticket: 2, tries: 1, queued: [msg('net', 5)] }],
-    'limit-resumes': [{ ticket: 4, at: 1, tries: 1, queued: [msg('limit', 6)] }, { ticket: 5, at: 1, tries: 1 }],
+    'limit-resumes': [
+      { ticket: 4, at: 1, tries: 1, queued: [msg('limit', 6)] },
+      { ticket: 5, at: 1, tries: 1 },
+    ],
     'mail:7': [msg('closed minion', 7)],
     'context:1': 1000,
   });
@@ -101,7 +108,10 @@ test('migration folds every old store into one record each, keeps each message o
   assert.deepEqual(s.getSetting('turn:2'), { resumes: 0, dir: '/x' });
   assert.deepEqual(s.getSetting('turn:3'), { resumes: 0, dir: '/y' }, 'untouched');
   assert.deepEqual(s.getSetting('net-resumes'), [{ ticket: 2, tries: 1 }]);
-  assert.deepEqual(s.getSetting('limit-resumes'), [{ ticket: 4, at: 1, tries: 1 }, { ticket: 5, at: 1, tries: 1 }]);
+  assert.deepEqual(s.getSetting('limit-resumes'), [
+    { ticket: 4, at: 1, tries: 1 },
+    { ticket: 5, at: 1, tries: 1 },
+  ]);
   for (const k of ['waiting:1', 'resume-owed:1', 'mail:1', 'cold:1', 'mail:7']) assert.equal(s.getSetting(k), null, k);
   assert.equal(s.getSetting('context:1'), 1000);
   const after = JSON.stringify([...s.m]);
@@ -112,7 +122,9 @@ test('migration folds every old store into one record each, keeps each message o
 test('a migration cut off after its new rows were written runs again without doubling a message', () => {
   const s = mapStore({ 'waiting:1': [msg('a', 1)], 'mail:1': [msg('m', 2)] });
   const del = s.deleteSetting;
-  s.deleteSetting = () => { throw new Error('cut'); };
+  s.deleteSetting = () => {
+    throw new Error('cut');
+  };
   assert.throws(() => migrateQueues(s));
   s.deleteSetting = del;
   migrateQueues(s);

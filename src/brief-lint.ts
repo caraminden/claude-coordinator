@@ -12,17 +12,20 @@ const LEAVE_ALONE = /\bleave[\s-]*alone\b/i;
 export function namedFiles(text: string, shared: string): string {
   const escaped = shared.replace(/\/+$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const paths = new Set([...text.matchAll(new RegExp(`${escaped}/[^\\s\`'"()<>\\[\\]]+\\.md`, 'g'))].map(([p]) => p));
-  return [...paths].slice(0, 5).map((p) => {
-    // Only a plain file of at most 200 kB that really sits in the shared folder (no link out, no FIFO to hang on); a missing or unreadable one adds nothing.
-    try {
-      const real = realpathSync(p);
-      if (!real.startsWith(`${realpathSync(shared)}/`)) return '';
-      const st = statSync(real);
-      return st.isFile() && st.size <= 200_000 ? readFileSync(real, 'utf8') : '';
-    } catch {
-      return '';
-    }
-  }).join('\n');
+  return [...paths]
+    .slice(0, 5)
+    .map((p) => {
+      // Only a plain file of at most 200 kB that really sits in the shared folder (no link out, no FIFO to hang on); a missing or unreadable one adds nothing.
+      try {
+        const real = realpathSync(p);
+        if (!real.startsWith(`${realpathSync(shared)}/`)) return '';
+        const st = statSync(real);
+        return st.isFile() && st.size <= 200_000 ? readFileSync(real, 'utf8') : '';
+      } catch {
+        return '';
+      }
+    })
+    .join('\n');
 }
 
 /** What the brief (with the files it names) is missing, as one warning line, or null when it has both parts. */

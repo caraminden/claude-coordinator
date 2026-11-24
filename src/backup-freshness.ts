@@ -13,7 +13,12 @@ export const DB_STALE_H = 26;
 /** The desktop pulls nightly; this much quiet means it missed one. */
 export const PULL_STALE_H = 36;
 
-export interface AppBackup { name: string; title: string; day: string | null; ok: boolean }
+export interface AppBackup {
+  name: string;
+  title: string;
+  day: string | null;
+  ok: boolean;
+}
 export interface BackupInfo {
   db: { at: number; size: number } | null;
   /** null: nothing has pulled yet (or off-box isn't set up here). */
@@ -25,7 +30,12 @@ export interface BackupInfo {
 
 const newest = (dir: string, pattern: RegExp): string | null => {
   try {
-    return readdirSync(dir).filter((f) => pattern.test(f)).sort().at(-1) ?? null;
+    return (
+      readdirSync(dir)
+        .filter((f) => pattern.test(f))
+        .sort()
+        .at(-1) ?? null
+    );
   } catch {
     return null;
   }
@@ -36,12 +46,22 @@ export function appBackup(appData: string, now: number): { day: string | null; o
   const backups = join(appData, 'backups');
   const days = (() => {
     try {
-      return readdirSync(backups).filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f)).sort().reverse();
+      return readdirSync(backups)
+        .filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f))
+        .sort()
+        .reverse();
     } catch {
       return [];
     }
   })();
-  const day = days.find((d) => { try { return readdirSync(join(backups, d)).some((f) => !f.startsWith('.')); } catch { return false; } }) ?? null;
+  const day =
+    days.find((d) => {
+      try {
+        return readdirSync(join(backups, d)).some((f) => !f.startsWith('.'));
+      } catch {
+        return false;
+      }
+    }) ?? null;
   return { day, ok: !!day && day >= pacificDay(now - 30 * HOUR) };
 }
 
@@ -50,9 +70,18 @@ export function readBackups(dataDir: string, home: string, apps: { name: string;
   const file = newest(dir, /^coordinator-\d{4}-\d{2}-\d{2}\.db$/);
   let db: BackupInfo['db'] = null;
   try {
-    if (file) { const s = statSync(join(dir, file)); db = { at: s.mtimeMs, size: s.size }; }
+    if (file) {
+      const s = statSync(join(dir, file));
+      db = { at: s.mtimeMs, size: s.size };
+    }
   } catch {} // gone between the listing and the stat: no backup to report
-  const mtime = (f: string) => { try { return statSync(join(dataDir, 'offbox', f)).mtimeMs; } catch { return null; } };
+  const mtime = (f: string) => {
+    try {
+      return statSync(join(dataDir, 'offbox', f)).mtimeMs;
+    } catch {
+      return null;
+    }
+  };
   return { db, pulledAt: mtime('.pulled'), setAt: mtime('SHA256SUMS'), apps: apps.map((a) => ({ name: a.name, title: a.title, ...appBackup(join(home, '.local/share', a.name), now) })) };
 }
 

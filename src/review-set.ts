@@ -116,23 +116,68 @@ const EFFORTS = ['low', 'medium', 'high'];
 export const STARTER_DIR = join(import.meta.dirname, '..', 'kit', 'skills', 'critique', 'rubrics');
 
 /** `lines` (#1504): the diff fires only with at least this many lines added plus removed in files its globs match. */
-export interface Triggers { diff?: string[]; lines?: number; creative?: string; schedule?: string; in_app?: string; types?: string[]; ask?: boolean }
-export interface Context { guides?: { label: string; href: string }[]; paths?: string[]; verdicts?: boolean; requester?: boolean }
+export interface Triggers {
+  diff?: string[];
+  lines?: number;
+  creative?: string;
+  schedule?: string;
+  in_app?: string;
+  types?: string[];
+  ask?: boolean;
+}
+export interface Context {
+  guides?: { label: string; href: string }[];
+  paths?: string[];
+  verdicts?: boolean;
+  requester?: boolean;
+}
 /** One hand-off step (Q7): after `after` failed rounds the item goes `to` the professor, a person, or another entry by slug. */
-export interface OnFail { after: number; to: string }
+export interface OnFail {
+  after: number;
+  to: string;
+}
 /** A critic's hand-offs when its row sets none: today's loop (citadel:critique), the professor on the second fail and a person on the third. */
-export const CRITIC_ON_FAIL: OnFail[] = [{ after: 2, to: 'professor' }, { after: 3, to: 'person' }];
+export const CRITIC_ON_FAIL: OnFail[] = [
+  { after: 2, to: 'professor' },
+  { after: 3, to: 'person' },
+];
 export const VERDICTS = ['pass', 'fail', 'ask'] as const;
-export interface Run { id: number; minion: string; round: number; verdict: string; disagreed: boolean; at: number }
-export interface Verdict { id: number; person: string; words: string; minion: string; at: number }
+export interface Run {
+  id: number;
+  minion: string;
+  round: number;
+  verdict: string;
+  disagreed: boolean;
+  at: number;
+}
+export interface Verdict {
+  id: number;
+  person: string;
+  words: string;
+  minion: string;
+  at: number;
+}
 /** A kind of finding the finding checker refuted (#1158): its hits in the current streak, the last hit, and the last reason. */
-export interface Lesson { kind: string; count: number; last: number; why: string }
+export interface Lesson {
+  kind: string;
+  count: number;
+  last: number;
+  why: string;
+}
 // The handoff's numbers (Josh, 2026-11-19, idea E3): three refutes make a lesson, 30 days without one expire it, 30 at most.
 export const LESSON_HITS = 3;
 export const LESSON_MS = 30 * 24 * 60 * 60_000;
 export const LESSON_CAP = 30;
 /** A refuted finding's kind as stored: lower case, one space, no end punctuation, so the same words count together. */
-export const refuteKind = (s: unknown) => typeof s === 'string' ? s.toLowerCase().replace(/[`"']/g, '').replace(/\s+/g, ' ').trim().replace(/^[\s.,;:!?-]+|[\s.,;:!?-]+$/g, '') : '';
+export const refuteKind = (s: unknown) =>
+  typeof s === 'string'
+    ? s
+        .toLowerCase()
+        .replace(/[`"']/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^[\s.,;:!?-]+|[\s.,;:!?-]+$/g, '')
+    : '';
 
 export interface ReviewEntry {
   id: number;
@@ -166,7 +211,16 @@ export type EntryFields = Pick<ReviewEntry, 'slug' | 'name' | 'kind' | 'extends'
 const FIELDS = ['slug', 'name', 'kind', 'extends', 'body', 'triggers', 'context', 'enabled', 'trial', 'model', 'effort', 'stage', 'position', 'gate', 'source', 'gives_label', 'calibration', 'panel', 'on_fail'] as const;
 
 /** A calibration run's counts (citadel:critique, references/calibrate.md), or a person's "mark it good". */
-export interface Calibration { at: number; by: string; model?: string; hits?: number; notes?: number; false_alarms?: number; controls?: number; good?: boolean }
+export interface Calibration {
+  at: number;
+  by: string;
+  model?: string;
+  hits?: number;
+  notes?: number;
+  false_alarms?: number;
+  controls?: number;
+  good?: boolean;
+}
 
 /**
  * The kit's own reviewers (Q1, Q9): on every scheme's page as entries, each switchable per scheme. Their text stays in
@@ -174,23 +228,39 @@ export interface Calibration { at: number; by: string; model?: string; hits?: nu
  * pre-ship review itself and go with it. The lenses' list must match references/lenses.md (test/review-set.test.ts).
  */
 export const BUILT_INS: { slug: string; name: string; kind: string; source: string; when: string; what: string }[] = [
-  { slug: 'pre-ship-review', name: 'Pre-ship review', kind: 'reviewer', source: 'kit:citadel:self-review', when: 'Every change, before it ships', what: "A reviewer Grunt reads the diff through the lenses below and gives the risk label that decides whether a ship waits for a person's go. Its \"Always\" lenses go with it." },
-  ...([
-    ['error-handling', 'Error handling', 'a try/catch, a default, an HTTP status or error message in the diff'],
-    ['comments', 'Comments', 'a comment or doc that describes code, added or edited'],
-    ['tests', 'Tests', 'logic changed, or tests added or changed'],
-    ['new-types', 'New types', 'a new type, class, table or JSON format'],
-    ['access-and-secrets', 'Access and secrets', 'auth or access-control files, or code that reads a secret'],
-    ['smells', 'Smells', 'a new module, or over about 100 new lines of logic'],
-    ['agent-instructions', 'Agent instructions', 'text an agent reads as instructions: the kit, CLAUDE.md, prompts, tool descriptions'],
-    ['added-without-a-remove', 'Added without a remove', 'a listener, timer, growing map or cache, spawn, systemd-run or tmp folder added'],
-    ['check-claims', 'Check claims', 'a check added or changed: a test, lint, audit or count'],
-    ['ui-findings', 'UI findings', 'a front-end file'],
-  ] as const).map(([slug, name, when]) => ({ slug: `lens-${slug}`, name: `Lens: ${name}`, kind: 'reviewer', source: 'kit:citadel:self-review/references/lenses.md', when, what: `One of the pre-ship review's lenses: the reviewer Grunt reads the diff for ${name.toLowerCase()} when it has ${when}.` })),
+  {
+    slug: 'pre-ship-review',
+    name: 'Pre-ship review',
+    kind: 'reviewer',
+    source: 'kit:citadel:self-review',
+    when: 'Every change, before it ships',
+    what: 'A reviewer Grunt reads the diff through the lenses below and gives the risk label that decides whether a ship waits for a person\'s go. Its "Always" lenses go with it.',
+  },
+  ...(
+    [
+      ['error-handling', 'Error handling', 'a try/catch, a default, an HTTP status or error message in the diff'],
+      ['comments', 'Comments', 'a comment or doc that describes code, added or edited'],
+      ['tests', 'Tests', 'logic changed, or tests added or changed'],
+      ['new-types', 'New types', 'a new type, class, table or JSON format'],
+      ['access-and-secrets', 'Access and secrets', 'auth or access-control files, or code that reads a secret'],
+      ['smells', 'Smells', 'a new module, or over about 100 new lines of logic'],
+      ['agent-instructions', 'Agent instructions', 'text an agent reads as instructions: the kit, CLAUDE.md, prompts, tool descriptions'],
+      ['added-without-a-remove', 'Added without a remove', 'a listener, timer, growing map or cache, spawn, systemd-run or tmp folder added'],
+      ['check-claims', 'Check claims', 'a check added or changed: a test, lint, audit or count'],
+      ['ui-findings', 'UI findings', 'a front-end file'],
+    ] as const
+  ).map(([slug, name, when]) => ({ slug: `lens-${slug}`, name: `Lens: ${name}`, kind: 'reviewer', source: 'kit:citadel:self-review/references/lenses.md', when, what: `One of the pre-ship review's lenses: the reviewer Grunt reads the diff for ${name.toLowerCase()} when it has ${when}.` })),
   { slug: 'finding-checker', name: 'Finding checker', kind: 'checker', source: 'kit:citadel:finding-checker', when: 'Deep pre-ship reviews, after the reviewer', what: "Tries to prove each of the reviewer's findings wrong before the author acts on it." },
   { slug: 'fresh-eyes', name: 'Fresh eyes', kind: 'reviewer', source: 'kit:citadel:fresh-eyes', when: 'Feature PRs, after the retro', what: "Reads the requester's own words against the PR and says what was built that they didn't ask for, and what they asked for that wasn't built." },
   // A teacher (#1089): it runs only when a critic hands it a stubborn fail, so the page hangs it under those critics.
-  { slug: 'professor', name: 'Professor', kind: 'teacher', source: 'kit:citadel:professor', when: "When a critic hands it a stubborn fail: after 2 failed rounds, unless the critic's hand-offs say otherwise", what: "Takes the cause a critic keeps failing work on and returns ranked fixes concrete enough to type. Its record is whether the critic's next round passed after its fix." },
+  {
+    slug: 'professor',
+    name: 'Professor',
+    kind: 'teacher',
+    source: 'kit:citadel:professor',
+    when: "When a critic hands it a stubborn fail: after 2 failed rounds, unless the critic's hand-offs say otherwise",
+    what: "Takes the cause a critic keeps failing work on and returns ranked fixes concrete enough to type. Its record is whether the critic's next round passed after its fix.",
+  },
 ];
 export const isKit = (e: Pick<ReviewEntry, 'source'>) => !!e.source?.startsWith('kit:');
 /** A scheme's own agent file (#1089, Q1 "File"): `agent:.claude/agents/<name>.md` in its repo is its text, read live; its body holds the scheme's additions. */
@@ -202,37 +272,43 @@ const AGENT_FIXED = ['slug', 'name', 'kind', 'extends', 'source'] as const;
 /** A kit entry's fields that are the kit's, not the scheme's: a save may change only its switch and its additions (body). */
 const KIT_FIXED = ['slug', 'name', 'kind', 'extends', 'triggers', 'context', 'model', 'effort', 'stage', 'source', 'trial', 'gate', 'gives_label', 'calibration', 'panel', 'on_fail'] as const;
 
-export interface ReviewVersion { version: number; by: string; at: number; note: string; snapshot: EntryFields }
+export interface ReviewVersion {
+  version: number;
+  by: string;
+  at: number;
+  note: string;
+  snapshot: EntryFields;
+}
 
 export class ReviewError extends Error {}
 
 /** `when:` as the rubric format writes it ("diff: a/**, b/** | creative: new art") to triggers, and back. */
 export function parseWhen(when: string): Triggers {
   const t: Triggers = {};
-  for (const part of when.split('|').map((s) => s.trim()).filter(Boolean)) {
+  for (const part of when
+    .split('|')
+    .map((s) => s.trim())
+    .filter(Boolean)) {
     const m = part.match(/^(diff|lines|creative|schedule|in-app|type)\s*:\s*(.*)$/s);
     if (part === 'ask') t.ask = true;
     else if (!m) throw new ReviewError(`"${part}" isn't a when: part (diff: <globs>, lines: <at least>, creative: <what>, schedule: <cadence>, in-app: <step>, type: <minion types>, or ask)`);
     else if (m[1] === 'lines') {
       if (!/^\d+$/.test(m[2].trim())) throw new ReviewError(`"${part}": lines is a whole number, the diff's lines in its diff: globs that fire it`);
       t.lines = Number(m[2].trim());
-    }
-    else if (m[1] === 'diff' || m[1] === 'type') t[m[1] === 'diff' ? 'diff' : 'types'] = m[2].split(',').map((s) => s.trim()).filter(Boolean);
+    } else if (m[1] === 'diff' || m[1] === 'type')
+      t[m[1] === 'diff' ? 'diff' : 'types'] = m[2]
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
     else t[m[1] === 'in-app' ? 'in_app' : (m[1] as 'creative' | 'schedule')] = m[2].trim();
   }
   return t;
 }
 
 export function whenText(t: Triggers): string {
-  return [
-    t.diff?.length ? `diff: ${t.diff.join(', ')}` : '',
-    t.diff?.length && t.lines ? `lines: ${t.lines}` : '',
-    t.creative ? `creative: ${t.creative}` : '',
-    t.schedule ? `schedule: ${t.schedule}` : '',
-    t.in_app ? `in-app: ${t.in_app}` : '',
-    t.types?.length ? `type: ${t.types.join(', ')}` : '',
-    t.ask ? 'ask' : '',
-  ].filter(Boolean).join(' | ');
+  return [t.diff?.length ? `diff: ${t.diff.join(', ')}` : '', t.diff?.length && t.lines ? `lines: ${t.lines}` : '', t.creative ? `creative: ${t.creative}` : '', t.schedule ? `schedule: ${t.schedule}` : '', t.in_app ? `in-app: ${t.in_app}` : '', t.types?.length ? `type: ${t.types.join(', ')}` : '', t.ask ? 'ask' : '']
+    .filter(Boolean)
+    .join(' | ');
 }
 
 /** The page's column for a set of triggers: anything that fires while working is "work"; only a schedule, "schedule"; only an ask, "ask". */
@@ -251,7 +327,14 @@ export function nameFor(slug: string): string {
 /** A scheme's agent file that reviews, critiques or teaches (#1089), as readAgentFiles finds it. */
 export type AgentFile = { path: string; slug: string; description: string; kind: string; text: string };
 // The words that make an agent a judge (Q2 "Guess", Josh 2026-11-19), first match wins: its name, then its description.
-const AGENT_GUESS: [RegExp, string][] = [[/\b(professor|teacher|tutor|coach)\b/, 'teacher'], [/\breferee\b/, 'referee'], [/\b(critic|critique|critiques|judge|judges)\b/, 'critic'], [/\b(checker|fact check)\b/, 'checker'], [/\b(audit|auditor)\b/, 'audit'], [/\b(review|reviews|reviewer)\b/, 'reviewer']];
+const AGENT_GUESS: [RegExp, string][] = [
+  [/\b(professor|teacher|tutor|coach)\b/, 'teacher'],
+  [/\breferee\b/, 'referee'],
+  [/\b(critic|critique|critiques|judge|judges)\b/, 'critic'],
+  [/\b(checker|fact check)\b/, 'checker'],
+  [/\b(audit|auditor)\b/, 'audit'],
+  [/\b(review|reviews|reviewer)\b/, 'reviewer'],
+];
 
 /** Which kind of judge an agent is: its frontmatter `kind:` (any other word, like none, hides it), else a guess from its name, then its description; null for none. */
 export function agentKind(name: string, description: string, kind = ''): string | null {
@@ -274,7 +357,10 @@ export function readAgentFiles(repoDir: string | null | undefined): AgentFile[] 
   if (!repoDir) return [];
   let names: string[];
   try {
-    names = readdirSync(join(repoDir, '.claude', 'agents')).filter((n) => n.endsWith('.md')).sort().slice(0, 100);
+    names = readdirSync(join(repoDir, '.claude', 'agents'))
+      .filter((n) => n.endsWith('.md'))
+      .sort()
+      .slice(0, 100);
   } catch {
     return [];
   }
@@ -290,7 +376,10 @@ export function readAgentFiles(repoDir: string | null | undefined): AgentFile[] 
     const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
     const field = (k: string) => unquote(new RegExp(`^${k}:[ \\t]*(.*)$`, 'm').exec(fm?.[1] ?? '')?.[1].trim() ?? '');
     const base = n.slice(0, -3);
-    const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const slug = base
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
     const kind = agentKind(field('name') || base, field('description'), field('kind'));
     if (slug && kind) out.push({ path: `.claude/agents/${n}`, slug, description: field('description'), kind, text: (fm ? raw.slice(fm[0].length) : raw).trim() });
   }
@@ -333,8 +422,9 @@ export function splitRubric(text: string): { fields: Partial<EntryFields>; body:
     }
     const v = unquote(kv[2]);
     if (kv[1] === 'name') fields.slug = v;
-    else if (kv[1] === 'kind') { if ((KINDS as readonly string[]).includes(v)) fields.kind = v; }
-    else if (kv[1] === 'extends') fields.extends = v.replace(/^citadel:critique\/rubrics\//, '').replace(/\.md$/, '') || null;
+    else if (kv[1] === 'kind') {
+      if ((KINDS as readonly string[]).includes(v)) fields.kind = v;
+    } else if (kv[1] === 'extends') fields.extends = v.replace(/^citadel:critique\/rubrics\//, '').replace(/\.md$/, '') || null;
     else if (kv[1] === 'when') fields.triggers = v === 'set by the extending rubric' ? {} : parseWhen(v);
     else fields[kv[1] as 'model' | 'effort'] = v || null;
   }
@@ -347,7 +437,10 @@ export function splitRubric(text: string): { fields: Partial<EntryFields>; body:
  * section from its context. `extends:` keeps naming the kit starter, which the critic reads first from the kit as it is
  * that turn (citadel:critic, rubric-format.md "Extending a starter"), so a kit fix reaches every scheme's next run (Q9).
  */
-export interface Extra { verdicts?: Verdict[]; requester?: { author: string; text: string } | null }
+export interface Extra {
+  verdicts?: Verdict[];
+  requester?: { author: string; text: string } | null;
+}
 /** Past verdicts are in an entry's context unless a person switched them off: a disagreement only helps if the next run reads it. */
 export const readsVerdicts = (c: Context) => c.verdicts !== false;
 export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers' | 'model' | 'effort' | 'body' | 'context' | 'trial'> & Partial<Pick<ReviewEntry, 'gate' | 'calibration' | 'panel' | 'on_fail' | 'kind'>>, extra: Extra = {}): string {
@@ -370,21 +463,30 @@ export function renderEntry(e: Pick<ReviewEntry, 'slug' | 'extends' | 'triggers'
     e.panel ? `panel: ${quote(e.panel)}` : '',
     e.on_fail?.length ? `on_fail: ${onFailText(e.on_fail)}` : '',
     // The columns own these keys: a body that writes them too (a minion's save may) can't override a person's switches.
-    own ? own[1].split('\n').filter((l) => !owned(l)).join('\n').trim() : '',
+    own
+      ? own[1]
+          .split('\n')
+          .filter((l) => !owned(l))
+          .join('\n')
+          .trim()
+      : '',
   ].filter(Boolean);
   const c = e.context;
-  const ctx = [
-    ...(c.guides ?? []).map((g) => `- Guide: [${g.label}](${g.href})`),
-    ...(c.paths ?? []).map((p) => `- Code and docs: \`${p}\``),
-    c.requester ? "- The requester's words: the brief may quote them." : '',
-  ].filter(Boolean);
+  const ctx = [...(c.guides ?? []).map((g) => `- Guide: [${g.label}](${g.href})`), ...(c.paths ?? []).map((p) => `- Code and docs: \`${p}\``), c.requester ? "- The requester's words: the brief may quote them." : ''].filter(Boolean);
   const sections = (own ? own[2] : e.body).trim();
   const tail: string[] = [];
   if (ctx.length) tail.push(`## Context\n\n${ctx.join('\n')}`);
   // Q13: people's disagreements with this entry's verdicts, newest first, for every later run and for calibration.
   if (readsVerdicts(c) && extra.verdicts?.length) tail.push(verdictsSection(extra.verdicts));
   if (c.requester && extra.requester?.text.trim()) {
-    tail.push(`## The requester's words\n\nWhat ${extra.requester.author} asked this minion for, in their own words (the brief may quote them):\n\n${extra.requester.text.trim().slice(0, 4000).split('\n').map((l) => `> ${l}`).join('\n')}`);
+    tail.push(
+      `## The requester's words\n\nWhat ${extra.requester.author} asked this minion for, in their own words (the brief may quote them):\n\n${extra.requester.text
+        .trim()
+        .slice(0, 4000)
+        .split('\n')
+        .map((l) => `> ${l}`)
+        .join('\n')}`,
+    );
   }
   return `---\n${head.join('\n')}\n---\n\n${[sections, ...tail].filter(Boolean).join('\n\n')}\n`;
 }
@@ -405,10 +507,13 @@ export function calibratedText(c: Calibration): string {
 /** The kit's starters, for New and for the page's "on top of the kit starter" link: slug, what it judges, and its text. */
 export function loadStarters(dir = STARTER_DIR): { slug: string; judges: string; text: string }[] {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir).filter((f) => f.endsWith('.md') && f !== 'example.md').sort().map((f) => {
-    const text = readFileSync(join(dir, f), 'utf8');
-    return { slug: f.slice(0, -3), judges: unquote(text.match(/^judges:\s*(.*)$/m)?.[1] ?? ''), text };
-  });
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.md') && f !== 'example.md')
+    .sort()
+    .map((f) => {
+      const text = readFileSync(join(dir, f), 'utf8');
+      return { slug: f.slice(0, -3), judges: unquote(text.match(/^judges:\s*(.*)$/m)?.[1] ?? ''), text };
+    });
 }
 
 type Row = Record<string, any>;
@@ -447,7 +552,7 @@ function check(f: Partial<EntryFields>): void {
   if (f.panel != null && (typeof f.panel !== 'string' || f.panel.trim().length > 40)) throw new ReviewError('A panel is named in 1 to 40 characters, or empty for none');
   if (f.on_fail != null) {
     const ok = Array.isArray(f.on_fail) && f.on_fail.length <= 4 && f.on_fail.every((s, i, a) => s && Number.isInteger(s.after) && s.after >= 1 && s.after <= 10 && typeof s.to === 'string' && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(s.to) && (i === 0 || s.after > a[i - 1].after));
-    if (!ok) throw new ReviewError('on_fail is up to 4 steps [{after: failed rounds 1 to 10, rising, to: professor, person or an entry\'s slug}]');
+    if (!ok) throw new ReviewError("on_fail is up to 4 steps [{after: failed rounds 1 to 10, rising, to: professor, person or an entry's slug}]");
   }
   const t = f.triggers as Record<string, unknown> | undefined;
   if (t && (!strings(t.diff) || !strings(t.types) || !text(t.creative) || !text(t.schedule) || !text(t.in_app) || !flag(t.ask))) throw new ReviewError('triggers is {diff: [globs], lines: N, types: [minion types], creative, schedule, in_app: text, ask: true or false}');
@@ -494,22 +599,57 @@ export class ReviewSet {
     if (this.get(projectId, fields.slug)) throw new ReviewError(`This scheme already has an entry named ${fields.slug}`);
     const triggers = fields.triggers ?? {};
     const row: EntryFields = {
-      slug: fields.slug, name: fields.name.trim(), kind: fields.kind ?? 'critic', extends: fields.extends ?? null, body: fields.body ?? '',
-      triggers, context: fields.context ?? {}, enabled: fields.enabled ?? true, trial: fields.trial ?? false,
-      model: fields.model ?? null, effort: fields.effort ?? null, stage: fields.stage ?? stageFor(triggers),
-      position: fields.position ?? this.nextPosition(projectId), gate: fields.gate ?? null, source: fields.source ?? null,
-      gives_label: fields.gives_label ?? false, calibration: fields.calibration ?? null,
-      panel: fields.panel?.trim() || null, on_fail: fields.on_fail ?? null,
+      slug: fields.slug,
+      name: fields.name.trim(),
+      kind: fields.kind ?? 'critic',
+      extends: fields.extends ?? null,
+      body: fields.body ?? '',
+      triggers,
+      context: fields.context ?? {},
+      enabled: fields.enabled ?? true,
+      trial: fields.trial ?? false,
+      model: fields.model ?? null,
+      effort: fields.effort ?? null,
+      stage: fields.stage ?? stageFor(triggers),
+      position: fields.position ?? this.nextPosition(projectId),
+      gate: fields.gate ?? null,
+      source: fields.source ?? null,
+      gives_label: fields.gives_label ?? false,
+      calibration: fields.calibration ?? null,
+      panel: fields.panel?.trim() || null,
+      on_fail: fields.on_fail ?? null,
     };
     onlyCalibratedJudge(row);
     this.handOffsExist(projectId, row);
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const { lastInsertRowid } = this.db.prepare(`INSERT INTO review_entries (project_id, slug, name, kind, extends, body, triggers, context, enabled, trial, model, effort, stage, position, gate, source, gives_label, calibration, panel, on_fail, version, updated_by, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`).run(
-        projectId, row.slug, row.name, row.kind, row.extends, row.body, JSON.stringify(row.triggers), JSON.stringify(row.context),
-        row.enabled ? 1 : 0, row.trial ? 1 : 0, row.model, row.effort, row.stage, row.position, row.gate, row.source, row.gives_label ? 1 : 0, row.calibration ? JSON.stringify(row.calibration) : null,
-        row.panel, row.on_fail ? JSON.stringify(row.on_fail) : null, by, at);
+      const { lastInsertRowid } = this.db
+        .prepare(`INSERT INTO review_entries (project_id, slug, name, kind, extends, body, triggers, context, enabled, trial, model, effort, stage, position, gate, source, gives_label, calibration, panel, on_fail, version, updated_by, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
+        .run(
+          projectId,
+          row.slug,
+          row.name,
+          row.kind,
+          row.extends,
+          row.body,
+          JSON.stringify(row.triggers),
+          JSON.stringify(row.context),
+          row.enabled ? 1 : 0,
+          row.trial ? 1 : 0,
+          row.model,
+          row.effort,
+          row.stage,
+          row.position,
+          row.gate,
+          row.source,
+          row.gives_label ? 1 : 0,
+          row.calibration ? JSON.stringify(row.calibration) : null,
+          row.panel,
+          row.on_fail ? JSON.stringify(row.on_fail) : null,
+          by,
+          at,
+        );
       this.db.prepare('INSERT INTO review_versions (entry_id, version, by, at, note, snapshot) VALUES (?, 1, ?, ?, ?, ?)').run(Number(lastInsertRowid), by, at, note, JSON.stringify(row));
       this.db.exec('COMMIT');
     } catch (err) {
@@ -551,11 +691,34 @@ export class ReviewSet {
     const version = was.version + 1;
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      this.db.prepare(`UPDATE review_entries SET slug = ?, name = ?, kind = ?, extends = ?, body = ?, triggers = ?, context = ?, enabled = ?, trial = ?, model = ?, effort = ?,
-        stage = ?, position = ?, gate = ?, source = ?, gives_label = ?, calibration = ?, panel = ?, on_fail = ?, version = ?, updated_by = ?, updated_at = ? WHERE id = ?`).run(
-        next.slug, next.name, next.kind, next.extends, next.body, JSON.stringify(next.triggers), JSON.stringify(next.context), next.enabled ? 1 : 0, next.trial ? 1 : 0,
-        next.model, next.effort, next.stage, next.position, next.gate, next.source, next.gives_label ? 1 : 0, next.calibration ? JSON.stringify(next.calibration) : null,
-        next.panel, next.on_fail ? JSON.stringify(next.on_fail) : null, version, by, at, was.id);
+      this.db
+        .prepare(`UPDATE review_entries SET slug = ?, name = ?, kind = ?, extends = ?, body = ?, triggers = ?, context = ?, enabled = ?, trial = ?, model = ?, effort = ?,
+        stage = ?, position = ?, gate = ?, source = ?, gives_label = ?, calibration = ?, panel = ?, on_fail = ?, version = ?, updated_by = ?, updated_at = ? WHERE id = ?`)
+        .run(
+          next.slug,
+          next.name,
+          next.kind,
+          next.extends,
+          next.body,
+          JSON.stringify(next.triggers),
+          JSON.stringify(next.context),
+          next.enabled ? 1 : 0,
+          next.trial ? 1 : 0,
+          next.model,
+          next.effort,
+          next.stage,
+          next.position,
+          next.gate,
+          next.source,
+          next.gives_label ? 1 : 0,
+          next.calibration ? JSON.stringify(next.calibration) : null,
+          next.panel,
+          next.on_fail ? JSON.stringify(next.on_fail) : null,
+          version,
+          by,
+          at,
+          was.id,
+        );
       this.db.prepare('INSERT INTO review_versions (entry_id, version, by, at, note, snapshot) VALUES (?, ?, ?, ?, ?, ?)').run(was.id, version, by, at, note, JSON.stringify(next));
       this.db.exec('COMMIT');
     } catch (err) {
@@ -569,8 +732,7 @@ export class ReviewSet {
   versions(projectId: number, slug: string): ReviewVersion[] {
     const e = this.get(projectId, slug);
     if (!e) throw new ReviewError(`No entry named ${slug}`);
-    return (this.db.prepare('SELECT version, by, at, note, snapshot FROM review_versions WHERE entry_id = ? ORDER BY version DESC').all(e.id) as Row[])
-      .map((r) => ({ version: r.version, by: r.by, at: r.at, note: r.note, snapshot: JSON.parse(r.snapshot) }));
+    return (this.db.prepare('SELECT version, by, at, note, snapshot FROM review_versions WHERE entry_id = ? ORDER BY version DESC').all(e.id) as Row[]).map((r) => ({ version: r.version, by: r.by, at: r.at, note: r.note, snapshot: JSON.parse(r.snapshot) }));
   }
 
   /** Put version `n` back, as a new version on top: nothing in History is ever lost. The slug stays what it is now. */
@@ -588,7 +750,7 @@ export class ReviewSet {
     const have = new Set((this.db.prepare('SELECT slug FROM review_entries WHERE project_id = ?').all(projectId) as Row[]).map((r) => r.slug));
     BUILT_INS.forEach((b, i) => {
       if (have.has(b.slug)) return;
-      this.create(projectId, { slug: b.slug, name: b.name, kind: b.kind, source: b.source, stage: 'ship', position: i - BUILT_INS.length - 1000 }, 'Citadel', 'The kit\'s, added to the page', at);
+      this.create(projectId, { slug: b.slug, name: b.name, kind: b.kind, source: b.source, stage: 'ship', position: i - BUILT_INS.length - 1000 }, 'Citadel', "The kit's, added to the page", at);
     });
   }
 
@@ -678,8 +840,7 @@ export class ReviewSet {
     if (!e) throw new ReviewError(`No entry named ${slug} in this scheme's review set`);
     if (!(VERDICTS as readonly string[]).includes(r.verdict)) throw new ReviewError(`verdict is ${VERDICTS.join(', ')}`);
     if (!Number.isInteger(r.round) || r.round < 1 || r.round > 50) throw new ReviewError('round is a whole number from 1');
-    const { lastInsertRowid } = this.db.prepare('INSERT INTO review_runs (entry_id, ticket_id, minion, round, verdict, at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(e.id, r.ticketId, r.minion, r.round, r.verdict, at);
+    const { lastInsertRowid } = this.db.prepare('INSERT INTO review_runs (entry_id, ticket_id, minion, round, verdict, at) VALUES (?, ?, ?, ?, ?, ?)').run(e.id, r.ticketId, r.minion, r.round, r.verdict, at);
     return { id: Number(lastInsertRowid), minion: r.minion, round: r.round, verdict: r.verdict, disagreed: false, at };
   }
 
@@ -694,8 +855,7 @@ export class ReviewSet {
     if (typeof v.words !== 'string' || !v.words.trim() || v.words.length > 4000) throw new ReviewError("words are the person's own words, quoted, 1 to 4,000 characters");
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const { lastInsertRowid } = this.db.prepare('INSERT INTO review_verdicts (entry_id, person, words, ticket_id, minion, at) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(e.id, v.person.trim(), v.words.trim(), v.ticketId, v.minion, at);
+      const { lastInsertRowid } = this.db.prepare('INSERT INTO review_verdicts (entry_id, person, words, ticket_id, minion, at) VALUES (?, ?, ?, ?, ?, ?)').run(e.id, v.person.trim(), v.words.trim(), v.ticketId, v.minion, at);
       if (v.ticketId != null) {
         this.db.prepare('UPDATE review_runs SET disagreed = 1 WHERE id = (SELECT max(id) FROM review_runs WHERE entry_id = ? AND ticket_id = ? AND source IS NULL)').run(e.id, v.ticketId);
       }
@@ -725,15 +885,17 @@ export class ReviewSet {
    */
   recordRefutes(projectId: number, r: { ticketId: number | null; minion: string; refuted: { kind: string; why: string }[] }, at = Date.now()): Lesson[] {
     if (!Array.isArray(r.refuted) || !r.refuted.length || r.refuted.length > 25) throw new ReviewError('refuted is a list of 1 to 25 {kind, why}, one per refuted finding');
-    const rows = r.refuted.map((x) => {
-      const kind = refuteKind(x?.kind);
-      const why = typeof x?.why === 'string' ? x.why.replace(/\s+/g, ' ').trim() : '';
-      if (kind.length < 3 || kind.length > 80) throw new ReviewError('kind is the kind of mistake in a few words, 3 to 80 characters, like "missing build step"');
-      if (why.length < 10 || why.length > 300) throw new ReviewError('why is the reason the finding was wrong, 10 to 300 characters');
-      // A lesson says why a finding was wrong, never "don't look at X", so a real case still gets raised (#1158).
-      if (/^(don'?t|do not|never|skip|ignore|avoid|stop)\b/i.test(why)) throw new ReviewError(`why says why it was wrong as a fact about the repo ("the repo has no build step"), not an instruction: "${why.slice(0, 40)}"`);
-      return { kind, why };
-    }).filter((x, i, all) => all.findIndex((y) => y.kind === x.kind) === i); // one review counts once per kind
+    const rows = r.refuted
+      .map((x) => {
+        const kind = refuteKind(x?.kind);
+        const why = typeof x?.why === 'string' ? x.why.replace(/\s+/g, ' ').trim() : '';
+        if (kind.length < 3 || kind.length > 80) throw new ReviewError('kind is the kind of mistake in a few words, 3 to 80 characters, like "missing build step"');
+        if (why.length < 10 || why.length > 300) throw new ReviewError('why is the reason the finding was wrong, 10 to 300 characters');
+        // A lesson says why a finding was wrong, never "don't look at X", so a real case still gets raised (#1158).
+        if (/^(don'?t|do not|never|skip|ignore|avoid|stop)\b/i.test(why)) throw new ReviewError(`why says why it was wrong as a fact about the repo ("the repo has no build step"), not an instruction: "${why.slice(0, 40)}"`);
+        return { kind, why };
+      })
+      .filter((x, i, all) => all.findIndex((y) => y.kind === x.kind) === i); // one review counts once per kind
     if (!this.get(projectId, 'pre-ship-review')) this.ensureBuiltIns(projectId, at);
     const e = this.kit(projectId, 'pre-ship-review');
     if (!e) throw new ReviewError("This scheme's own entry took the slug pre-ship-review, so the kit's reviewer has no lessons here");
@@ -770,7 +932,10 @@ export class ReviewSet {
         if (r.ticket_id != null) was.seen.add(r.ticket_id);
       }
     }
-    const live = [...by.values()].filter((l) => now - l.last <= LESSON_MS).sort((a, b) => b.count - a.count || b.last - a.last).map(({ seen, ...l }) => l);
+    const live = [...by.values()]
+      .filter((l) => now - l.last <= LESSON_MS)
+      .sort((a, b) => b.count - a.count || b.last - a.last)
+      .map(({ seen, ...l }) => l);
     return all ? live : live.filter((l) => l.count >= LESSON_HITS).slice(0, LESSON_CAP);
   }
 
@@ -805,7 +970,11 @@ export class ReviewSet {
       out.get(r.entry_id)!.runs.push({ id: r.id, minion: r.minion, round: r.round, verdict: r.verdict, disagreed: !!r.disagreed, at: r.at });
     }
     // A teacher's every run is one fix and whether the critic's next round passed after it (#1089): its rate is how often a fix held.
-    const firsts = this.db.prepare(`SELECT entry_id, teacher, count(*) AS n, sum(verdict = 'pass') AS pass FROM (SELECT r.entry_id, r.verdict, e.kind = 'teacher' AS teacher, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.at DESC, r.id DESC) AS k FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ? AND (r.round = 1 OR e.kind = 'teacher')) WHERE k <= 20 GROUP BY entry_id`).all(projectId) as Row[];
+    const firsts = this.db
+      .prepare(
+        `SELECT entry_id, teacher, count(*) AS n, sum(verdict = 'pass') AS pass FROM (SELECT r.entry_id, r.verdict, e.kind = 'teacher' AS teacher, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.at DESC, r.id DESC) AS k FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ? AND (r.round = 1 OR e.kind = 'teacher')) WHERE k <= 20 GROUP BY entry_id`,
+      )
+      .all(projectId) as Row[];
     for (const f of firsts) {
       const rec = out.get(f.entry_id)!;
       rec.firsts = f.n;
@@ -837,7 +1006,13 @@ export class ReviewSet {
       // Its panel's referee, or an entry its hand-offs name, judges in its place: a later pass there lifts it too. A teacher
       // doesn't: its run is one fixed item's next round (#1089), not a verdict on the work.
       const inPlace = all.filter((x) => x.id !== e.id && x.enabled && x.kind !== 'teacher' && ((e.panel && x.panel === e.panel && x.stage === e.stage && x.kind === 'referee') || e.on_fail?.some((s) => s.to === x.slug)));
-      if (inPlace.some((x) => { const y = last(x.id); return y && y.id > r.id && y.verdict === 'pass'; })) continue;
+      if (
+        inPlace.some((x) => {
+          const y = last(x.id);
+          return y && y.id > r.id && y.verdict === 'pass';
+        })
+      )
+        continue;
       out.push({ slug: e.slug, name: e.name, verdict: r.verdict });
     }
     return out;
@@ -899,7 +1074,10 @@ export class ReviewSet {
       this.db.exec('ROLLBACK');
       throw err;
     }
-    return [...[...per].map(([id, n]) => `${names.get(id)}: ${n.runs} runs and ${n.verdicts} verdicts from ${n.logs} logs${n.already ? `; ${n.already} already in` : ''}${n.missing.length ? `; no entry today for ${n.missing.join(', ')}` : ''}`), ...(away.length ? [`not in this database, so left out: ${away.join(', ')}`] : [])];
+    return [
+      ...[...per].map(([id, n]) => `${names.get(id)}: ${n.runs} runs and ${n.verdicts} verdicts from ${n.logs} logs${n.already ? `; ${n.already} already in` : ''}${n.missing.length ? `; no entry today for ${n.missing.join(', ')}` : ''}`),
+      ...(away.length ? [`not in this database, so left out: ${away.join(', ')}`] : []),
+    ];
   }
 
   /** The minion's ask (Q8, the requester's words): its first chat message and who wrote it, or null. */
@@ -917,8 +1095,7 @@ export class ReviewSet {
  * Write the scheme's enabled entries into `dir` as `<slug>.md` rubric files, replacing what was there, for a turn's
  * critics to read. Returns how many it wrote.
  */
-const verdictsSection = (vs: Verdict[]) =>
-  `## Verdicts\n\nPeople disagreed with this entry's verdicts. Judge the way they did:\n\n${vs.map((v) => `- ${v.person}, ${day(v.at)}, on ${v.minion}: "${v.words.replace(/\s+/g, ' ').trim()}"`).join('\n')}`;
+const verdictsSection = (vs: Verdict[]) => `## Verdicts\n\nPeople disagreed with this entry's verdicts. Judge the way they did:\n\n${vs.map((v) => `- ${v.person}, ${day(v.at)}, on ${v.minion}: "${v.words.replace(/\s+/g, ' ').trim()}"`).join('\n')}`;
 
 /** The reviewer's lessons as it reads them: why each kind was wrong here, never a ban, so a real case still gets raised. */
 export const lessonsSection = (ls: Lesson[]) =>
@@ -943,7 +1120,15 @@ export function renderSet(entries: ReviewEntry[], dir: string, verdicts: Map<num
 export function rubricsLine(claudeMd: string): string[] {
   const line = claudeMd.match(/^\s*-\s*\*\*Rubrics:\*\*\s*(.*)$/m)?.[1]?.trim() ?? '';
   if (!line || /^none\b/i.test(line)) return [];
-  return line.split(';').map((s) => s.trim().replace(/[.`]+$/, '').replace(/^`/, '')).filter(Boolean);
+  return line
+    .split(';')
+    .map((s) =>
+      s
+        .trim()
+        .replace(/[.`]+$/, '')
+        .replace(/^`/, ''),
+    )
+    .filter(Boolean);
 }
 
 /** The rubric files a scheme's repo has under its Rubrics line: [path relative to the repo, text]. */
@@ -955,7 +1140,12 @@ export function repoRubrics(repoDir: string): [string, string][] {
     const abs = join(repoDir, p);
     const rel = relative(repoDir, abs);
     if (rel.startsWith('..') || isAbsolute(rel) || !existsSync(abs)) continue;
-    const files = p.endsWith('.md') ? [p] : readdirSync(abs).filter((f) => f.endsWith('.md')).sort().map((f) => join(p, f).replace(/\/+/g, '/'));
+    const files = p.endsWith('.md')
+      ? [p]
+      : readdirSync(abs)
+          .filter((f) => f.endsWith('.md'))
+          .sort()
+          .map((f) => join(p, f).replace(/\/+/g, '/'));
     for (const f of files) {
       const text = readFileSync(join(repoDir, f), 'utf8');
       // A folder holds rubrics and maybe a README: only files with rubric frontmatter count (rubric-format.md, "Opting in").
@@ -974,7 +1164,14 @@ export function importRubrics(set: ReviewSet, projectId: number, files: [string,
   const skipped: string[] = [];
   const failed: string[] = [];
   for (const [path, text] of files) {
-    const fileSlug = path.split('/').pop()!.replace(/\.md$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'rubric';
+    const fileSlug =
+      path
+        .split('/')
+        .pop()!
+        .replace(/\.md$/, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') || 'rubric';
     let split: ReturnType<typeof splitRubric> | null = null;
     let why = '';
     try {
@@ -1073,7 +1270,10 @@ export function orderLine(entries: ReviewEntry[]): string {
     const steps: string[] = [];
     const done = new Set<string>();
     for (const e of col) {
-      if (!e.panel) { steps.push(`\`${e.slug}\``); continue; }
+      if (!e.panel) {
+        steps.push(`\`${e.slug}\``);
+        continue;
+      }
       if (done.has(e.panel)) continue;
       done.add(e.panel);
       const members = col.filter((x) => x.panel === e.panel);
@@ -1103,12 +1303,17 @@ export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<numbe
   const out: string[] = [];
   if (off.some((e) => e.slug === 'pre-ship-review')) {
     const giver = entries.find((e) => e.enabled && !e.trial && e.gives_label);
-    out.push(giver
-      ? `This scheme's pre-ship review is off, and its ${giver.name} (\`${giver.slug}\` in the review set) gives the risk label instead: run it where citadel:self-review would run its reviewer, label the change from its verdict, and ship with that label as usual.`
-      : "This scheme's pre-ship review is off: don't run citadel:self-review's reviewer and give no risk label. Every ship waits for a person's go, whatever the scheme's shipping instructions say: ask with a ship card, and ship only on that go, the way the scheme ships (with hand_off_land: no risk, and name the go).");
+    out.push(
+      giver
+        ? `This scheme's pre-ship review is off, and its ${giver.name} (\`${giver.slug}\` in the review set) gives the risk label instead: run it where citadel:self-review would run its reviewer, label the change from its verdict, and ship with that label as usual.`
+        : "This scheme's pre-ship review is off: don't run citadel:self-review's reviewer and give no risk label. Every ship waits for a person's go, whatever the scheme's shipping instructions say: ask with a ship card, and ship only on that go, the way the scheme ships (with hand_off_land: no risk, and name the go).",
+    );
   }
   const rest = off.filter((e) => e.slug !== 'pre-ship-review');
-  if (rest.length) out.push(`This scheme switched off: ${rest.map((e) => e.name).join(', ')}. Skip each where a skill would run it: an off lens stays out of the reviewer's brief, an off finding checker is skipped on deep reviews, an off fresh eyes means no citadel:fresh-eyes Grunt, and an off professor means no citadel:professor, so a stubborn fail's hand-off to it goes to the next step (a person, at the last round).`);
+  if (rest.length)
+    out.push(
+      `This scheme switched off: ${rest.map((e) => e.name).join(', ')}. Skip each where a skill would run it: an off lens stays out of the reviewer's brief, an off finding checker is skipped on deep reviews, an off fresh eyes means no citadel:fresh-eyes Grunt, and an off professor means no citadel:professor, so a stubborn fail's hand-off to it goes to the next step (a person, at the last round).`,
+    );
   const named = (list: ReviewEntry[]) => list.map((e) => `\`${e.slug}\` (${e.source!.slice(6)})`).join(', ');
   const ownOff = own.filter((e) => !e.enabled);
   if (ownOff.length) out.push(`This scheme switched off its own agents ${named(ownOff)}: don't run them where a skill or the scheme's instructions would, and a hand-off to one goes to its next step.`);
@@ -1116,7 +1321,8 @@ export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<numbe
   if (ownOn.length) out.push(`This scheme's own reviewing agents, whose text is their file: ${named(ownOn)}. Where a hand-off or a skill names one of these slugs, run that agent (subagent_type its name) instead of a kit one.`);
   if (added.length) {
     mkdirSync(dir, { recursive: true });
-    for (const e of added) writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to ${isKit(e) ? "the kit's text" : `its agent file, ${e.source!.slice(6)}`}\n\n${[e.body.trim(), said(e).length ? verdictsSection(said(e)) : '', learned(e).length ? lessonsSection(learned(e)) : ''].filter(Boolean).join('\n\n')}\n`);
+    for (const e of added)
+      writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to ${isKit(e) ? "the kit's text" : `its agent file, ${e.source!.slice(6)}`}\n\n${[e.body.trim(), said(e).length ? verdictsSection(said(e)) : '', learned(e).length ? lessonsSection(learned(e)) : ''].filter(Boolean).join('\n\n')}\n`);
     out.push(`This scheme's additions to kit reviewers and its own agents, read with their own text and passed to their Grunts: ${added.map((e) => `\`${dir}/${e.slug}.md\` (${e.name})`).join(', ')}.`);
   }
   return out.length ? `Kit reviewers: ${out.join(' ')}` : '';

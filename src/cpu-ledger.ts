@@ -13,7 +13,11 @@ import { CGROUP_ROOT, hostDir, hostText, PROC_STAT } from './host-signals.ts';
 import { join } from 'node:path';
 
 /** Stored readings: `s` is source key → [usage_usec, system_usec] (cumulative); `h` is the host's [busy_ms, kernel_ms, iowait_ms, processes started]. */
-export interface CpuLedger { v: 1; s: Record<string, [number, number]>; h: [number, number, number, number] | null }
+export interface CpuLedger {
+  v: 1;
+  s: Record<string, [number, number]>;
+  h: [number, number, number, number] | null;
+}
 
 /** The sources, in table order: key, label and the chart group's key. Containers are `container:<n>` and labelled on the fly. */
 export const CPU_SOURCES: { key: string; label: string; group: string }[] = [
@@ -34,9 +38,14 @@ export const CPU_SOURCES: { key: string; label: string; group: string }[] = [
 ];
 /** The chart's seven series: the sources grouped so each stays tellable apart. */
 export const CPU_GROUPS: { key: string; label: string }[] = [
-  { key: 'server', label: 'Server' }, { key: 'turns', label: 'Turns' }, { key: 'containers', label: 'Containers' },
-  { key: 'builds', label: 'Ships and builds' }, { key: 'godot', label: 'Godot' }, { key: 'apps', label: 'Apps and search' },
-  { key: 'mine', label: 'Rest of this account' }, { key: 'others', label: 'Other users and system' },
+  { key: 'server', label: 'Server' },
+  { key: 'turns', label: 'Turns' },
+  { key: 'containers', label: 'Containers' },
+  { key: 'builds', label: 'Ships and builds' },
+  { key: 'godot', label: 'Godot' },
+  { key: 'apps', label: 'Apps and search' },
+  { key: 'mine', label: 'Rest of this account' },
+  { key: 'others', label: 'Other users and system' },
 ];
 export const labelOf = (key: string) => CPU_SOURCES.find((s) => s.key === key)?.label ?? (key.startsWith('container:') ? `Container ${key.slice(10)}` : key);
 export const groupOf = (key: string) => CPU_SOURCES.find((s) => s.key === key)?.group ?? (key.startsWith('container:') ? 'containers' : 'mine');
@@ -46,9 +55,12 @@ async function readStat(file: string): Promise<[number, number] | null> {
   try {
     const t = await hostText(file);
     const num = (k: string) => Number(new RegExp(`^${k} (\\d+)`, 'm').exec(t)?.[1] ?? NaN);
-    const u = num('usage_usec'), s = num('system_usec');
+    const u = num('usage_usec'),
+      s = num('system_usec');
     return Number.isFinite(u) && Number.isFinite(s) ? [u, s] : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /** The first line of /proc/stat (jiffies, 100 a second) and `processes` (started since boot): busy, kernel and iowait in ms. */
@@ -60,10 +72,16 @@ export async function readHost(file = PROC_STAT): Promise<CpuLedger['h']> {
     if (f.length < 7 || f.some((n) => !Number.isFinite(n)) || !Number.isFinite(forks)) return null;
     const [user, nice, sys, idle, iowait, irq, soft, steal = 0] = f;
     return [(user + nice + sys + irq + soft + steal) * 10, (sys + irq + soft) * 10, iowait * 10, forks];
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
-export interface ReadOptions { root?: string; uid?: number; procStat?: string }
+export interface ReadOptions {
+  root?: string;
+  uid?: number;
+  procStat?: string;
+}
 
 /**
  * One reading. `root` is the cgroup mount (tests point it at fake files). Sources whose unit isn't there are left
@@ -78,27 +96,46 @@ export async function readLedger(o: ReadOptions = {}): Promise<CpuLedger> {
   const citadel = join(mgr, 'citadel.slice');
   const app = join(mgr, 'app.slice');
   const named: [string, string][] = [
-    ['server', join(citadel, 'claude-coordinator.service')], ['turns', join(citadel, 'citadel-turns.slice')],
-    ['taskmasters', join(citadel, 'citadel-taskmasters.slice')], ['builds', join(citadel, 'citadel-builds.slice')],
-    ['heavy', join(citadel, 'citadel-heavy.slice')], ['contraptions', join(mgr, 'contraptions.slice')],
-    ['embed', join(app, 'citadel-embed.service')], ['godot', join(app, 'perigee-godot.service')],
+    ['server', join(citadel, 'claude-coordinator.service')],
+    ['turns', join(citadel, 'citadel-turns.slice')],
+    ['taskmasters', join(citadel, 'citadel-taskmasters.slice')],
+    ['builds', join(citadel, 'citadel-builds.slice')],
+    ['heavy', join(citadel, 'citadel-heavy.slice')],
+    ['contraptions', join(mgr, 'contraptions.slice')],
+    ['embed', join(app, 'citadel-embed.service')],
+    ['godot', join(app, 'perigee-godot.service')],
   ];
   const [dirs, hostUsers, mine, mgrTotal, citadelTotal, appTotal, godotAgent, host, ...reads] = await Promise.all([
     hostDir(citadel).catch(() => [] as string[]),
-    readStat(join(userSlice, 'cpu.stat')), readStat(join(mineSlice, 'cpu.stat')), readStat(join(mgr, 'cpu.stat')),
-    readStat(join(citadel, 'cpu.stat')), readStat(join(app, 'cpu.stat')), readStat(join(app, 'perigee-godot-agent.service', 'cpu.stat')),
+    readStat(join(userSlice, 'cpu.stat')),
+    readStat(join(mineSlice, 'cpu.stat')),
+    readStat(join(mgr, 'cpu.stat')),
+    readStat(join(citadel, 'cpu.stat')),
+    readStat(join(app, 'cpu.stat')),
+    readStat(join(app, 'perigee-godot-agent.service', 'cpu.stat')),
     readHost(o.procStat ?? PROC_STAT),
     ...named.map(([, dir]) => readStat(join(dir, 'cpu.stat'))),
   ]);
   const s: Record<string, [number, number]> = {};
-  named.forEach(([k], i) => { if (reads[i]) s[k] = reads[i]!; });
+  named.forEach(([k], i) => {
+    if (reads[i]) s[k] = reads[i]!;
+  });
   if (godotAgent) s.godot = s.godot ? [s.godot[0] + godotAgent[0], s.godot[1] + godotAgent[1]] : godotAgent;
   // Each person's container is its own unit: citadel-claude-<n>.service.
   const boxes = dirs.filter((d) => /^citadel-claude-\d+\.service$/.test(d));
   const boxReads = await Promise.all(boxes.map((d) => readStat(join(citadel, d, 'cpu.stat'))));
-  boxes.forEach((d, i) => { if (boxReads[i]) s[`container:${/\d+/.exec(d)![0]}`] = boxReads[i]!; });
+  boxes.forEach((d, i) => {
+    if (boxReads[i]) s[`container:${/\d+/.exec(d)![0]}`] = boxReads[i]!;
+  });
   // Raw totals, not remainders: a remainder (a slice less its children) jumps when a child restarts, so steps() derives them from each step's deltas.
-  for (const [k, v] of [['t:citadel', citadelTotal], ['t:app', appTotal], ['t:mgr', mgrTotal], ['t:mine', mine], ['t:users', hostUsers]] as const) if (v) s[k] = v;
+  for (const [k, v] of [
+    ['t:citadel', citadelTotal],
+    ['t:app', appTotal],
+    ['t:mgr', mgrTotal],
+    ['t:mine', mine],
+    ['t:users', hostUsers],
+  ] as const)
+    if (v) s[k] = v;
   return { v: 1, s, h: host };
 }
 
@@ -108,11 +145,20 @@ export function parseLedger(text: string | null | undefined): CpuLedger | null {
   try {
     const l = JSON.parse(text);
     return l && l.v === 1 && l.s && typeof l.s === 'object' ? (l as CpuLedger) : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /** One source's row for a window: average cores, the kernel share (0 to 1) and core-seconds. */
-export interface CpuRow { key: string; label: string; group: string; cores: number; kernel: number; coreSeconds: number }
+export interface CpuRow {
+  key: string;
+  label: string;
+  group: string;
+  cores: number;
+  kernel: number;
+  coreSeconds: number;
+}
 /** The remainders of a step's deltas: each slice's total less its named children, never below zero. */
 function withRemainders(d: Record<string, [number, number]>) {
   const g = (k: string): [number, number] => d[k] ?? [0, 0];
@@ -140,11 +186,20 @@ export interface CpuWindow {
   host: { busy: number; kernel: number; iowait: number; started: number } | null;
 }
 /** One hour of the stacked chart: its time and core-seconds per chart group. */
-export interface CpuHour { at: number; seconds: number; groups: Record<string, number> }
+export interface CpuHour {
+  at: number;
+  seconds: number;
+  groups: Record<string, number>;
+}
 
 const delta = (a: number, b: number) => (b >= a ? b - a : b);
 
-export interface LedgerStep { at: number; sec: number; s: Record<string, [number, number]>; h: [number, number, number, number] | null }
+export interface LedgerStep {
+  at: number;
+  sec: number;
+  s: Record<string, [number, number]>;
+  h: [number, number, number, number] | null;
+}
 
 /** Differences between each consecutive pair of readings (a, b): b's time, the seconds between them, per-source [usage, system] µs and host ms. */
 export function ledgerSteps(rows: { at: number; cpu_ledger?: string | null }[]) {
@@ -152,7 +207,10 @@ export function ledgerSteps(rows: { at: number; cpu_ledger?: string | null }[]) 
   let prev: { at: number; l: CpuLedger } | null = null;
   for (const r of rows) {
     const l = parseLedger(r.cpu_ledger);
-    if (!l) { prev = null; continue; }
+    if (!l) {
+      prev = null;
+      continue;
+    }
     if (prev && r.at > prev.at) {
       const s: Record<string, [number, number]> = {};
       for (const [k, v] of Object.entries(l.s)) {
@@ -177,8 +235,14 @@ export function cpuTable(all: LedgerStep[], now: number, windowMs: number): CpuW
   let host = [0, 0, 0, 0];
   let hostSec = 0;
   for (const st of inWin) {
-    for (const [k, v] of Object.entries(st.s)) { const c = use.get(k) ?? [0, 0]; use.set(k, [c[0] + v[0], c[1] + v[1]]); }
-    if (st.h) { host = host.map((x, i) => x + st.h![i]); hostSec += st.sec; }
+    for (const [k, v] of Object.entries(st.s)) {
+      const c = use.get(k) ?? [0, 0];
+      use.set(k, [c[0] + v[0], c[1] + v[1]]);
+    }
+    if (st.h) {
+      host = host.map((x, i) => x + st.h![i]);
+      hostSec += st.sec;
+    }
   }
   const total = (key: string) => use.get(key) ?? [0, 0];
   const rowsOut: CpuRow[] = [];
@@ -200,7 +264,8 @@ export function cpuTable(all: LedgerStep[], now: number, windowMs: number): CpuW
   }
   rowsOut.sort((a, b) => b.cores - a.cores);
   return {
-    seconds, rows: rowsOut,
+    seconds,
+    rows: rowsOut,
     host: hostSec ? { busy: host[0] / 1000 / hostSec, kernel: host[1] / 1000 / hostSec, iowait: host[2] / 1000 / hostSec, started: host[3] / hostSec } : null,
   };
 }

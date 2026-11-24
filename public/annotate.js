@@ -4,7 +4,11 @@
 import { h } from './base.js';
 import { COLOURS, drawMark, lineWidth } from './ui/marks.js';
 
-const TOOLS = [['pen', '✎', 'Pen'], ['arrow', '↗', 'Arrow'], ['box', '▭', 'Box']];
+const TOOLS = [
+  ['pen', '✎', 'Pen'],
+  ['arrow', '↗', 'Arrow'],
+  ['box', '▭', 'Box'],
+];
 
 // The page's CSP refuses style attributes; a property set from script is allowed.
 const swatch = (hex) => {
@@ -77,17 +81,61 @@ export function annotator(stage, src, { marks = [], size = null, onDone, doneLab
   canvas.addEventListener('pointerdown', (e) => e.stopPropagation());
   canvas.addEventListener('pointerup', (e) => e.stopPropagation());
 
-  const choice = (label, title, pressed, onclick, extra) =>
-    h('button', { type: 'button', class: 'cui-choice', title, 'aria-label': title, 'aria-pressed': String(pressed), onclick }, extra ?? label);
-  const undo = h('button', { type: 'button', class: 'cui-btn cui-icon', title: 'Undo (Ctrl+Z)', 'aria-label': 'Undo', onclick: () => { marks.pop(); paint(); sync(); } }, '↶');
-  const clear = h('button', { type: 'button', class: 'cui-btn', onclick: () => { marks = []; paint(); sync(); } }, 'Clear');
+  const choice = (label, title, pressed, onclick, extra) => h('button', { type: 'button', class: 'cui-choice', title, 'aria-label': title, 'aria-pressed': String(pressed), onclick }, extra ?? label);
+  const undo = h(
+    'button',
+    {
+      type: 'button',
+      class: 'cui-btn cui-icon',
+      title: 'Undo (Ctrl+Z)',
+      'aria-label': 'Undo',
+      onclick: () => {
+        marks.pop();
+        paint();
+        sync();
+      },
+    },
+    '↶',
+  );
+  const clear = h(
+    'button',
+    {
+      type: 'button',
+      class: 'cui-btn',
+      onclick: () => {
+        marks = [];
+        paint();
+        sync();
+      },
+    },
+    'Clear',
+  );
   const done = h('button', { type: 'button', class: 'cui-btn cui-primary', onclick: () => onDone(marks.length ? canvas : null, marks) }, doneLabel);
   const toolsEl = h('div', { class: 'cui-choices', role: 'group', 'aria-label': 'Tool' });
   const coloursEl = h('div', { class: 'cui-choices annotate-colours', role: 'group', 'aria-label': 'Colour' });
   const sync = () => {
-    toolsEl.replaceChildren(...TOOLS.map(([t, label, title]) => choice(label, title, s.tool === t, () => { s.tool = t; sync(); })));
-    coloursEl.replaceChildren(...Object.entries(COLOURS).map(([c, hex]) =>
-      choice('', c[0].toUpperCase() + c.slice(1), s.colour === c, () => { s.colour = c; sync(); }, swatch(hex))));
+    toolsEl.replaceChildren(
+      ...TOOLS.map(([t, label, title]) =>
+        choice(label, title, s.tool === t, () => {
+          s.tool = t;
+          sync();
+        }),
+      ),
+    );
+    coloursEl.replaceChildren(
+      ...Object.entries(COLOURS).map(([c, hex]) =>
+        choice(
+          '',
+          c[0].toUpperCase() + c.slice(1),
+          s.colour === c,
+          () => {
+            s.colour = c;
+            sync();
+          },
+          swatch(hex),
+        ),
+      ),
+    );
     undo.disabled = clear.disabled = !marks.length;
   };
   sync();
@@ -103,7 +151,9 @@ export function annotator(stage, src, { marks = [], size = null, onDone, doneLab
   };
   addEventListener('keydown', onKey);
   return {
-    get marks() { return marks; },
+    get marks() {
+      return marks;
+    },
     destroy() {
       removeEventListener('keydown', onKey);
       stage.classList.remove('annotate');

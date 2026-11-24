@@ -92,7 +92,7 @@ export function landArgs(body: { into?: unknown; files?: unknown; full?: unknown
   try {
     root = realpathSync(cwd);
   } catch {
-    throw new Error('this minion\'s worktree is missing');
+    throw new Error("this minion's worktree is missing");
   }
   const rel = list.map((f) => {
     const bad = () => new Error(`${JSON.stringify(f.slice(0, 200))} is not a file in your worktree: name the test files this change touched, as paths inside it`);
@@ -123,7 +123,13 @@ export function landArgs(body: { into?: unknown; files?: unknown; full?: unknown
 export function landConflict(cwd: string, env: Record<string, string>, args: string[], timeout = 30_000): Promise<string | null> {
   return new Promise((done) => {
     execFile('bash', ['tools/land.sh', '--check', ...args], { cwd, env, timeout, maxBuffer: MAX_OUTPUT }, (err: any, _out, stderr) => {
-      done(err?.code === 3 ? String(stderr).replace(/^land: /gm, '').trim() || 'land.sh --check says it would conflict, but named nothing' : null);
+      done(
+        err?.code === 3
+          ? String(stderr)
+              .replace(/^land: /gm, '')
+              .trim() || 'land.sh --check says it would conflict, but named nothing'
+          : null,
+      );
     });
   });
 }
@@ -154,7 +160,14 @@ export class Landings {
     try {
       const names = (await readdir(this.root)).filter((n) => /^\d+$/.test(n));
       for (let i = 0; i < names.length; i += 16) {
-        const found = await Promise.all(names.slice(i, i + 16).map((n) => access(join(this.root, n, HANDOFF)).then(() => Number(n), () => null)));
+        const found = await Promise.all(
+          names.slice(i, i + 16).map((n) =>
+            access(join(this.root, n, HANDOFF)).then(
+              () => Number(n),
+              () => null,
+            ),
+          ),
+        );
         for (const id of found) if (id !== null && !this.goneWhileScanning.has(id)) this.waiting.add(id);
       }
     } catch {
@@ -269,11 +282,19 @@ export class Landings {
 
   /** A person stopped this landing (#1168): its report says who, not "fix the cause". The folder is made afresh at each start. */
   markStopped(ticketId: number, by: string, at = Date.now(), via = 'from the Status page') {
-    try { writeFileSync(join(this.dir(ticketId), STOPPED), JSON.stringify({ by, at, via })); } catch { /* no landing folder: nothing to report */ }
+    try {
+      writeFileSync(join(this.dir(ticketId), STOPPED), JSON.stringify({ by, at, via }));
+    } catch {
+      /* no landing folder: nothing to report */
+    }
   }
 
   stopped(ticketId: number): { by: string; at: number; via?: string } | null {
-    try { return JSON.parse(readFileSync(join(this.dir(ticketId), STOPPED), 'utf8')); } catch { return null; }
+    try {
+      return JSON.parse(readFileSync(join(this.dir(ticketId), STOPPED), 'utf8'));
+    } catch {
+      return null;
+    }
   }
 
   /** The pid of the land.sh a minion's running landing started (its wrapper's child), or null when none runs. */
@@ -282,7 +303,19 @@ export class Landings {
     try {
       const wrapper = Number(readFileSync(join(this.dir(ticketId), 'pid'), 'utf8'));
       // Only land.sh itself: the wrapper's own mv and rm run just after its pid file appears, and a stop sent to one of them missed the ship.
-      return children(wrapper).trim().split(/\s+/).map(Number).find((p) => { try { return p > 0 && cmdline(p).includes('tools/land.sh'); } catch { return false; } }) ?? null;
+      return (
+        children(wrapper)
+          .trim()
+          .split(/\s+/)
+          .map(Number)
+          .find((p) => {
+            try {
+              return p > 0 && cmdline(p).includes('tools/land.sh');
+            } catch {
+              return false;
+            }
+          }) ?? null
+      );
     } catch {
       return null;
     }
@@ -422,27 +455,21 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
   const failedFiles = [...new Set([...output.matchAll(/✖ ([^ :]+\.test\.ts)(?::\d+)? › /gm)].map((m) => m[1]))];
   const k = (kind: string, line: string) => ({ kind, line });
   if (/(won't (rebase|merge( \S+)? in) onto?\b.*cleanly|^land: smoke: it conflicts with main|^CONFLICT \(|the (rebase onto|merging) .* failed \(see git's output)/m.test(output))
-    return k('conflict', 'Kind: merge conflict. Yours: rebase onto main by hand, keep the other minions\' changes, re-test, commit, hand off again.');
-  if (/a \.ts file does not parse|^land: smoke: .*SyntaxError/m.test(output))
-    return k('parse', 'Kind: parse error (a .ts file does not parse, which would stop the server). Yours, not infra: the lines below name the file and line; fix it, re-test, hand off again.');
+    return k('conflict', "Kind: merge conflict. Yours: rebase onto main by hand, keep the other minions' changes, re-test, commit, hand off again.");
+  if (/a \.ts file does not parse|^land: smoke: .*SyntaxError/m.test(output)) return k('parse', 'Kind: parse error (a .ts file does not parse, which would stop the server). Yours, not infra: the lines below name the file and line; fix it, re-test, hand off again.');
   // A burn-in red (#1443) quotes the failing copy's output, which can hold a "passed alone" line: still the ship's own.
-  if (/failed its burn-in in CI/.test(output))
-    return k('burn-in', 'Kind: a new or changed test failed its burn-in (racy when run as copies at once). Yours: fix the race (a shared path, a fixed port, a timing assumption), not the wait; run it with tools/burn-in.sh <file>, then hand off again.');
+  if (/failed its burn-in in CI/.test(output)) return k('burn-in', 'Kind: a new or changed test failed its burn-in (racy when run as copies at once). Yours: fix the race (a shared path, a fixed port, a timing assumption), not the wait; run it with tools/burn-in.sh <file>, then hand off again.');
   const testsRed = /tests failed on the rebased branch/.test(output) || failedFiles.length > 0;
-  if (!testsRed && /failed in its setup step|runner clock:|the runner needs fixing/.test(output))
-    return k('ci', 'Kind: CI or runner problem. Not yours: nothing in your change failed. Hand off again; if it repeats, tell the Taskmaster.');
-  if (/boot check/i.test(output) && /SQLITE_|database is locked|sqlite.*(crash|abort|segfault)/i.test(output))
-    return k('boot-copy', 'Kind: boot-check copy failure (SQLite lock or sqlite crash on the database copy). Not yours: nothing is wrong with your change. Just hand off again.');
+  if (!testsRed && /failed in its setup step|runner clock:|the runner needs fixing/.test(output)) return k('ci', 'Kind: CI or runner problem. Not yours: nothing in your change failed. Hand off again; if it repeats, tell the Taskmaster.');
+  if (/boot check/i.test(output) && /SQLITE_|database is locked|sqlite.*(crash|abort|segfault)/i.test(output)) return k('boot-copy', 'Kind: boot-check copy failure (SQLite lock or sqlite crash on the database copy). Not yours: nothing is wrong with your change. Just hand off again.');
   // What land.sh's flake_only would call passed-alone (#1013, G1 of #1283): some file passed alone and none has another label
   // from tools/run-tests.sh: "failed again alone", "hung when rerun alone", "rerun alone stopped … counts as a real failure",
   // "not rerun: …". Not a "flake" for people: that word is for a known one (#1419), which ships and is never refused.
   if (/: failed in the full run, passed alone/.test(output) && !/run-tests: \S+: (failed again alone|hung when rerun alone|rerun alone stopped|not rerun:|killed \(exit \d+\) when rerun alone)/.test(output))
     return k('passed-alone', 'Kind: the failed files failed in the full run but passed alone (so load, not your change, going by that). Not yours: hand off again; no code change needed.');
   const always = failedFiles.filter((f) => ALWAYS_TESTS.some((a) => f.includes(a)));
-  if (always.length)
-    return k('always-test', `Kind: repo-wide snapshot or budget test (${always.join(', ')}). Your change moved it: regenerate the snapshot, or trim what you added (prompt text, tools, routes), then re-test that file and hand off again.`);
-  if (failedFiles.length)
-    return k('own-test', `Kind: a test failed (${failedFiles.join(', ')}). Probably yours: run that file alone with citadel-test, fix the code (or the test, if it is out of date), then hand off again.`);
+  if (always.length) return k('always-test', `Kind: repo-wide snapshot or budget test (${always.join(', ')}). Your change moved it: regenerate the snapshot, or trim what you added (prompt text, tools, routes), then re-test that file and hand off again.`);
+  if (failedFiles.length) return k('own-test', `Kind: a test failed (${failedFiles.join(', ')}). Probably yours: run that file alone with citadel-test, fix the code (or the test, if it is out of date), then hand off again.`);
   return null;
 }
 
@@ -478,7 +505,16 @@ export function landPhase(output: string): string {
  *  template (CONFLICT_PREP, #1571) says "once <the ship ahead> ships", with no train. */
 const PREP = /^land: prep: (\S+) will conflict with (.+) once (\S+?)('s ship train)? ships; conflicted files: (.*); record the fix against ([0-9a-f]{7,64}) from ([0-9a-f]{7,64}) to ([0-9a-f]{7,64})$/;
 
-export interface PrepConflict { branch: string; cause: string; front: string; files: string; top: string; base: string; head: string; train: boolean }
+export interface PrepConflict {
+  branch: string;
+  cause: string;
+  front: string;
+  files: string;
+  top: string;
+  base: string;
+  head: string;
+  train: boolean;
+}
 
 /** The newest conflict-prep line in a landing's output, if any. */
 export function prepConflict(output: string): PrepConflict | null {
@@ -494,7 +530,7 @@ export function prepConflict(output: string): PrepConflict | null {
 export function prepMessage(p: PrepConflict): string {
   const wt = '"$TMPDIR/train-prep"';
   return [
-    `Heads-up while your ship waits in line: once ${p.front}${p.train ? "'s ship train" : ''} ships, your rebase onto it will conflict with ${p.cause} in ${p.files || 'files git didn\'t name'}. Record the fix now, ahead of time, so the real rebase replays it and your ship isn't refused (conflict prep, #1366).`,
+    `Heads-up while your ship waits in line: once ${p.front}${p.train ? "'s ship train" : ''} ships, your rebase onto it will conflict with ${p.cause} in ${p.files || "files git didn't name"}. Record the fix now, ahead of time, so the real rebase replays it and your ship isn't refused (conflict prep, #1366).`,
     '',
     `Don't touch your branch or worktree: land.sh is running in it, and your branch must never take those unshipped commits. Work in a scratch worktree (\`git worktree\` and \`git cherry-pick\` there are fine; the folder is yours):`,
     '```bash',
@@ -720,7 +756,11 @@ export class LandHandoffs {
       await this.d.landings.markReported(id, done);
       return v;
     };
-    try { await once('flakes', () => this.d.flakes?.(id, run.output)); } catch (err: any) { console.error(`Recording minion ${id}'s flakes failed: ${err?.message ?? err}`); }
+    try {
+      await once('flakes', () => this.d.flakes?.(id, run.output));
+    } catch (err: any) {
+      console.error(`Recording minion ${id}'s flakes failed: ${err?.message ?? err}`);
+    }
     const tail = () => `The end of its output (all of it: ${this.d.landings.log(id)}):\n\`\`\`\n${outputTail(run.output)}\n\`\`\``;
     const stop = r.kind === 'failed' ? this.d.landings.stopped?.(id) : null;
     if (stop) {
@@ -729,7 +769,13 @@ export class LandHandoffs {
       runner.broadcastTicket(id);
       const at = pacificStamp(stop.at);
       const moved = /^land: \S+ is now at [0-9a-f]{7,40} /m.test(run.output);
-      await once('told', () => runner.send(id, from, `Your handed-off land was stopped by ${stop.by} ${stop.via ?? 'from the Status page'} at ${at}. ${moved ? 'Its output says main had already moved, so check `git log main` before handing it off again.' : 'Nothing landed and main is untouched.'} It left the line and let go of the lock. Check your worktree with \`git status\` (a rebase it was in may need \`git rebase --abort\`), ask why if the reason isn't in your chat, and hand it off again when it should go.\n\n${tail()}`));
+      await once('told', () =>
+        runner.send(
+          id,
+          from,
+          `Your handed-off land was stopped by ${stop.by} ${stop.via ?? 'from the Status page'} at ${at}. ${moved ? 'Its output says main had already moved, so check `git log main` before handing it off again.' : 'Nothing landed and main is untouched.'} It left the line and let go of the lock. Check your worktree with \`git status\` (a rebase it was in may need \`git rebase --abort\`), ask why if the reason isn't in your chat, and hand it off again when it should go.\n\n${tail()}`,
+        ),
+      );
       return;
     }
     if (r.kind === 'failed' || (r.kind === 'no-ci' && !(await once('runners', () => this.d.runnersBack(id, 'Your handed-off land sealed because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))))) {
@@ -737,13 +783,21 @@ export class LandHandoffs {
       runner.broadcastTicket(id);
       const why = r.smoke ? `its smoke check refused it before it got in line (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
       const cls = classifyLandFailure(run.output);
-      try { await once('failed', () => this.d.failed?.(id, cls?.kind ?? null)); } catch (err: any) { console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`); }
+      try {
+        await once('failed', () => this.d.failed?.(id, cls?.kind ?? null));
+      } catch (err: any) {
+        console.error(`Counting minion ${id}'s failed ship failed: ${err?.message ?? err}`);
+      }
       await once('told', () => runner.send(id, from, `${cls ? `${cls.line}\n\n` : ''}Your handed-off land didn't go through: ${why}. Fix the cause, re-test, and hand it off again with hand_off_land.\n\n${tail()}`));
       return;
     }
     // It landed (on main or a build, pushed or not): its lines go in the queue, and nothing here can stop the ship (#1119).
     if (r.kind !== 'failed' && r.kind !== 'no-ci') {
-      try { await once('learned', () => this.d.learned?.(id, h)); } catch (err: any) { console.error(`Queueing minion ${id}'s ship lines failed: ${err?.message ?? err}`); }
+      try {
+        await once('learned', () => this.d.learned?.(id, h));
+      } catch (err: any) {
+        console.error(`Queueing minion ${id}'s ship lines failed: ${err?.message ?? err}`);
+      }
     }
     if (r.kind === 'unpushed') {
       // It landed, but only locally. The minion can't push the default branch itself (the kit's guard.sh, pre-push and
@@ -780,7 +834,11 @@ export class LandHandoffs {
     const known = /^land: shipped past known flakes (.+)$/m.exec(run.output)?.[1]; // #1419: a red of known flakes only let through
     const through = /^land: shipped through main's red on (.+)$/m.exec(run.output)?.[1]; // #1478: red only on a test main's tip fails too
     const flakeKept = (run.output.match(/^land: refused on flakes only .*not your change: keeping its place in line/gm) ?? []).length; // #1419 part 2
-    await once('noted', () => runner.emit(id, 'note', { text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''}${through ? ` Shipped through main's red on ${through}: main still needs a fix for it.` : ''}${flakeKept ? ` Kept its place in line after ${flakeKept} red${flakeKept > 1 ? 's' : ''} of flakes only.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}` }));
+    await once('noted', () =>
+      runner.emit(id, 'note', {
+        text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''}${through ? ` Shipped through main's red on ${through}: main still needs a fix for it.` : ''}${flakeKept ? ` Kept its place in line after ${flakeKept} red${flakeKept > 1 ? 's' : ''} of flakes only.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}`,
+      }),
+    );
     await faultPoint('ship-noted'); // a drill's kill between the shipped line and the hand-off's rename (C2)
     await once('woke', () => this.wakeBuildOwner(id, into, `${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.`));
     const t = store.getTicket(id);
@@ -796,7 +854,13 @@ export class LandHandoffs {
         store.updateTicket(id, { state: null, note: null });
         runner.broadcastTicket(id);
       }
-      await once('told-deploy', () => runner.send(id, from, `Your handed-off land went through (${what}, ${(where[0].toLowerCase() + where.slice(1)).replace(/\.$/, '')}), but the deploy after it didn't go live:\n\n${failed.map((f) => (f.detail ? `${f.line}\n${f.detail}` : f.line)).join('\n\n')}\n\nFix the cause and hand the fix off with hand_off_land, which deploys again (deploy_contraption redeploys main as it is). close_self once nothing is left.`));
+      await once('told-deploy', () =>
+        runner.send(
+          id,
+          from,
+          `Your handed-off land went through (${what}, ${(where[0].toLowerCase() + where.slice(1)).replace(/\.$/, '')}), but the deploy after it didn't go live:\n\n${failed.map((f) => (f.detail ? `${f.line}\n${f.detail}` : f.line)).join('\n\n')}\n\nFix the cause and hand the fix off with hand_off_land, which deploys again (deploy_contraption redeploys main as it is). close_self once nothing is left.`,
+        ),
+      );
       return;
     }
     // Its live probe (#1741): live now runs it now, a restart keeps it for the live; a fail woke the minion, so it stays open.
@@ -811,14 +875,23 @@ export class LandHandoffs {
         runner.broadcastTicket(id);
       }
       // light (#951): a land that landed is a success notice; whoever wrote meanwhile keeps the minion's own effort.
-      await once('told-talked', () => runner.send(id, from, `Your handed-off land went through (${what}, ${(where[0].toLowerCase() + where.slice(1)).replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' && !h.stayOpen ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`, [], { light: true }));
+      await once('told-talked', () =>
+        runner.send(
+          id,
+          from,
+          `Your handed-off land went through (${what}, ${(where[0].toLowerCase() + where.slice(1)).replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' && !h.stayOpen ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`,
+          [],
+          { light: true },
+        ),
+      );
       return;
     }
     if (h.stayOpen && h.waitingOn) {
       // #942: never sealed, since nothing would wake it. It is woken once its work is in (after the restart, through
       // wake_when_live's waiter), once, and sets its own state from there.
       const restart = r.kind === 'restart' && !(await this.d.liveAlready(id));
-      const text = (now: string) => `Your handed-off land went through (${what}, ${now}). You handed it off waiting on: ${h.waitingOn}. Run your after-land steps now, then set your state for that wait: a person's test, card or confirmation leaves it null (or try); another minion's land is wake_when_live on its commit, then sealed.`;
+      const text = (now: string) =>
+        `Your handed-off land went through (${what}, ${now}). You handed it off waiting on: ${h.waitingOn}. Run your after-land steps now, then set your state for that wait: a person's test, card or confirmation leaves it null (or try); another minion's land is wake_when_live on its commit, then sealed.`;
       // true: the waiter wakes it at live; false: live already; undefined: no waiter here, so it hears now.
       const queued = restart ? await once('waiter', () => this.d.wakeWhenLive?.(id, r.commit ?? null, text('live now'))) : undefined;
       store.updateTicket(id, { state: queued ? 'outside' : null, note: `${queued ? 'shipped, wakes once live' : 'shipped'}; waiting on: ${h.waitingOn}`.slice(0, 120) });
@@ -848,7 +921,9 @@ export class LandHandoffs {
     if (runner.isRunning(id) || runner.queued(id)) {
       store.updateTicket(id, { state: null, note: null });
       runner.broadcastTicket(id);
-      await once('told-close', () => { if (!runner.closeAfterTurn(id, `${why}.`)) runner.emit(id, 'note', { text: `${why}; this minion has a turn running or queued, so it stays open.` }); });
+      await once('told-close', () => {
+        if (!runner.closeAfterTurn(id, `${why}.`)) runner.emit(id, 'note', { text: `${why}; this minion has a turn running or queued, so it stays open.` });
+      });
       return;
     }
     store.updateTicket(id, { state: null, note: into ? `merged into Build ${into.slice('build/'.length)}` : null });

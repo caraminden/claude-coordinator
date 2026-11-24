@@ -59,11 +59,15 @@ export function errorKey(text: string): string {
   const s = firstLine(text)
     .replace(/\d{4}-\d\d-\d\d[T ][\d:.]+(Z|[+-]\d\d:?\d\d)?/g, '<time>')
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '<id>');
-  return cap(redact(s)
-    .replace(/\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{6,}\b/gi, '<id>')
-    .replace(/"[^"]{25,}"/g, '"…"').replace(/'[^']{25,}'/g, "'…'")
-    .replace(/\d+/g, '#')
-    .replace(/\s+/g, ' '), 160);
+  return cap(
+    redact(s)
+      .replace(/\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{6,}\b/gi, '<id>')
+      .replace(/"[^"]{25,}"/g, '"…"')
+      .replace(/'[^']{25,}'/g, "'…'")
+      .replace(/\d+/g, '#')
+      .replace(/\s+/g, ' '),
+    160,
+  );
 }
 
 /** One error's sample: its first line, scrubbed and cut short (never the rest: player text and stacks stay out). */
@@ -75,7 +79,10 @@ export const isErrorLine = (line: string, priority: number) => priority <= 3 || 
 
 /** A request path as a group: no query, numbers as #, ids and long or encoded segments as *. */
 function pathKey(path: string): string {
-  return (path.split('?')[0] ?? '').split('/').map((seg) => (seg.length > 40 || seg.includes('%') ? '*' : errorKey(seg).replace(/<id>/g, '*'))).join('/');
+  return (path.split('?')[0] ?? '')
+    .split('/')
+    .map((seg) => (seg.length > 40 || seg.includes('%') ? '*' : errorKey(seg).replace(/<id>/g, '*')))
+    .join('/');
 }
 
 export class ErrorDigest {
@@ -231,7 +238,11 @@ export function render(scheme: string, day: string, apps: ContraptionRow[], rows
     if (phantom.length) {
       const byTool = new Map<string, number>();
       for (const r of phantom) byTool.set(r.key.split(': ')[0]!, (byTool.get(r.key.split(': ')[0]!) ?? 0) + r.count);
-      const names = [...byTool].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, n]) => `${tick(t)} ×${n}`).join(', ');
+      const names = [...byTool]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([t, n]) => `${tick(t)} ×${n}`)
+        .join(', ');
       out.push(`Unknown-tool calls (#1174): ${phantom.reduce((n, r) => n + r.count, 0)} (${names})`, '');
     }
     for (const r of mine) out.push(`- ${r.count} × ${r.kind} · \`${tick(r.key)}\``, `  - sample, ${pacific(r.first_at)}${r.count > 1 ? `, last ${pacific(r.last_at)}` : ''}: \`${tick(r.sample)}\``);

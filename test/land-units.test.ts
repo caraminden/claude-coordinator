@@ -15,18 +15,21 @@ after(() => rmSync(root, { recursive: true, force: true }));
 const bin = join(root, 'bin');
 mkdirSync(bin);
 const calls = join(root, 'calls');
-writeFileSync(join(bin, 'systemd-run'), `#!/usr/bin/env bash
+writeFileSync(
+  join(bin, 'systemd-run'),
+  `#!/usr/bin/env bash
 printf '%s\\n' "$*" >>${JSON.stringify(calls)}
 [ -e ${JSON.stringify(join(root, 'fail'))} ] && { echo 'Failed to connect to bus' >&2; exit 1; }
 # The real one expands $ in the command (\$\$ becomes \$), so a command with one would not run as written.
 for a in "$@"; do case $a in *'$'*) echo "systemd would expand the \$ in: $a" >&2; exit 1 ;; esac; done
 while [ "\${1#-}" != "$1" ]; do [ "$1" = -p ] && shift; shift; done
 setsid "$@" </dev/null >/dev/null 2>&1 &
-`);
+`,
+);
 chmodSync(join(bin, 'systemd-run'), 0o755);
 process.env.PATH = `${bin}:${process.env.PATH}`;
 // As the user manager gives every unit: land.sh must not see it, only the env the server hands it.
-process.env.INVOCATION_ID = "from-the-unit";
+process.env.INVOCATION_ID = 'from-the-unit';
 
 let n = 0;
 /** A minion worktree whose land.sh waits for `go`, prints its token and exits 3. */
@@ -35,12 +38,15 @@ function setup() {
   const cwd = join(dir, 'wt');
   mkdirSync(join(cwd, 'tools'), { recursive: true });
   const go = join(dir, 'go');
-  writeFileSync(join(cwd, 'tools', 'land.sh'), `echo "token:$COORDINATOR_TOKEN in $PWD"
+  writeFileSync(
+    join(cwd, 'tools', 'land.sh'),
+    `echo "token:$COORDINATOR_TOKEN in $PWD"
 # At most 30 s, so a failed test leaves nothing running.
 for i in $(seq 600); do [ -e ${JSON.stringify(go)} ] && break; sleep 0.05; done
 echo "the user manager's env stays out: \${INVOCATION_ID:-none}"
 exit 3
-`);
+`,
+  );
   // A token with quotes and a $ goes through the env file as it is.
   const env = { PATH: process.env.PATH!, COORDINATOR_TOKEN: `7.s'g "$HOME"`, 'NOT-A-NAME': 'x' };
   return { data: join(dir, 'data'), cwd, env, go: () => writeFileSync(go, '') };
@@ -55,7 +61,7 @@ test("a landing in a unit doesn't count as interruptible, outlives the Landings 
   assert.equal(first.running(), 0, 'a restart would leave it running, so it does not hold one up');
   const call = readFileSync(calls, 'utf8').slice(before.length);
   assert.match(call, /--user --collect --quiet --unit=citadel-land-[0-9a-f]{8}-1-\d+ --slice=citadel-builds\.slice -p UMask=0077 /);
-  assert.doesNotMatch(call, /7\.s/, "the token stays off the command line, where anyone on the box could read it");
+  assert.doesNotMatch(call, /7\.s/, 'the token stays off the command line, where anyone on the box could read it');
   assert.equal(existsSync(join(s.data, 'run', 'landings', '1', 'env')), false, 'the env file with the token is gone once read');
 
   // The server restarts: a fresh Landings on the same data dir finds it still running, then its result.
@@ -63,14 +69,17 @@ test("a landing in a unit doesn't count as interruptible, outlives the Landings 
   assert.equal(next.get(1)!.code, null);
   assert.equal(next.start(1, s.cwd, s.env).code, null, 'a second land call while it runs joins it');
   s.go();
-  const done = await until('land.sh ends', () => { const r = next.get(1)!; return r.code === null ? null : r; });
+  const done = await until('land.sh ends', () => {
+    const r = next.get(1)!;
+    return r.code === null ? null : r;
+  });
   assert.equal(done.code, 3);
   assert.match(done.output, new RegExp(`token:7\\.s'g "\\$HOME" in ${s.cwd}`));
   assert.match(done.output, /env stays out: none/);
   assert.equal(next.running(), 0);
 });
 
-test('when systemd-run fails, the landing runs as the server\'s child and counts until it ends', async () => {
+test("when systemd-run fails, the landing runs as the server's child and counts until it ends", async () => {
   const s = setup();
   writeFileSync(join(root, 'fail'), '');
   const alerts: { job: string; error: string; ticketId: number }[] = [];

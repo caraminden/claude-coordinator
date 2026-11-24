@@ -32,7 +32,9 @@ before(async () => {
 
 const post = (id: number) =>
   fetch(`${srv.base}/api/tickets/${id}/wake-runners`, {
-    method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'content-type': 'application/json' }, body: JSON.stringify({ reason: 'run tools/land.sh again.' }),
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ reason: 'run tools/land.sh again.' }),
   });
 
 test('a scheme whose name makes no runner label is refused 409 and stores no runner wait (#541)', async () => {
@@ -40,7 +42,13 @@ test('a scheme whose name makes no runner label is refused 409 and stores no run
   const body = await res.json();
   assert.equal(res.status, 409, JSON.stringify(body));
   assert.match(JSON.stringify(body), /no letters a-z or digits to make a runner label/);
-  assert.deepEqual(runnerWaiters(store).map((w) => w.ticket).filter((t) => t === badMinion.id), [], 'no waiter stored');
+  assert.deepEqual(
+    runnerWaiters(store)
+      .map((w) => w.ticket)
+      .filter((t) => t === badMinion.id),
+    [],
+    'no waiter stored',
+  );
   assert.equal(store.listDeliveries({ kind: 'runners_back' }).filter((r) => r.to_id === badMinion.id).length, 0, 'no outbox row either');
 });
 

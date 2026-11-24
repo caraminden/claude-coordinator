@@ -79,14 +79,17 @@ async function downscale(path: string): Promise<Buffer> {
   // The bytes go in on stdin with the decoder named, so a file name's brackets or wildcards mean nothing to magick.
   // `>` shrinks only; `[0]` takes the first frame.
   const args = ['-limit', 'area', '100MP', '-limit', 'memory', '512MiB', '-limit', 'disk', '1GiB', `${fmt}:-[0]`, '-auto-orient', '-resize', `${IMAGE_LONG_SIDE}x${IMAGE_LONG_SIDE}>`, '-background', 'white', '-flatten', '-quality', '85', 'jpeg:-'];
-  return slot(() => new Promise<Buffer>((resolve, reject) => {
-    const fail = () => reject(new HttpError(400, `${name} isn't an image Citadel can read`));
-    const child = spawn('magick', args, { stdio: ['pipe', 'pipe', 'ignore'], timeout: 30_000 });
-    const out: Buffer[] = [];
-    child.stdout.on('data', (d) => out.push(d));
-    child.on('error', fail);
-    child.stdin.on('error', () => {});
-    child.on('close', (code) => (code === 0 && out.length ? resolve(Buffer.concat(out)) : fail()));
-    child.stdin.end(bytes);
-  }));
+  return slot(
+    () =>
+      new Promise<Buffer>((resolve, reject) => {
+        const fail = () => reject(new HttpError(400, `${name} isn't an image Citadel can read`));
+        const child = spawn('magick', args, { stdio: ['pipe', 'pipe', 'ignore'], timeout: 30_000 });
+        const out: Buffer[] = [];
+        child.stdout.on('data', (d) => out.push(d));
+        child.on('error', fail);
+        child.stdin.on('error', () => {});
+        child.on('close', (code) => (code === 0 && out.length ? resolve(Buffer.concat(out)) : fail()));
+        child.stdin.end(bytes);
+      }),
+  );
 }

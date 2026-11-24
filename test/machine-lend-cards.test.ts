@@ -29,8 +29,7 @@ const { mcpServer, fakeClaude, startMachineAgent } = machineFakes(root, procs);
 let srv: Booted;
 const cookies: Record<string, string> = {};
 /** As a person (by name) or an agent ('agent:<ticket id>'). */
-const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) =>
-  ok(await srv.as(who.startsWith('agent:') ? { token: agentToken(srv.data, Number(who.slice(6))) } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
+const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.as(who.startsWith('agent:') ? { token: agentToken(srv.data, Number(who.slice(6))) } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
 
 let project: any;
 let minion: any;
@@ -68,7 +67,10 @@ before(async () => {
   const made = await call('Cara', '/api/machines', { method: 'POST', body: { name: 'box' } });
   box = made.machine;
   ({ output } = startMachineAgent({ base: srv.base, token: made.token, run: ['--config', config], env: { CLAUDE_CONFIG_DIR: join(dir, 'home') } }));
-  await until('box to report what it found', async () => { const m = await boxNow(); return m.managed && m.workspaces.length === 2 && m; });
+  await until('box to report what it found', async () => {
+    const m = await boxNow();
+    return m.managed && m.workspaces.length === 2 && m;
+  });
   await call('Josh', '/api/machines', { method: 'POST', body: { name: 'josh-box' } });
   minion = await call('Cara', `/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'use box' } });
   await idle(minion);
@@ -82,9 +84,7 @@ test('the change is worked out against the machine as it is: only what differs, 
   assert.deepEqual(lendPatch({ here: true, tick: ['w'], server: 'own', always_on: false }, now, 1), {}, 'all of it already so');
   assert.deepEqual(lendPatch({ tick: ['x'], untick: ['w'] }, now, 2), { lend: { server: 'own', workspaces: ['x'], gpu_off: true } });
   assert.deepEqual(lendPatch({ here: false, always_on: true }, now, 1), { projects: [], always_on: true });
-  assert.deepEqual(lendLines({ here: true, tick: ['x'], server: null, workspace_tools: true }, now, { id: 2, name: 'S' }, 'm'), [
-    '+ Lend m to S', '+ Tick the x workspace', '− Untick the own MCP server', '+ Switch workspace tools on',
-  ]);
+  assert.deepEqual(lendLines({ here: true, tick: ['x'], server: null, workspace_tools: true }, now, { id: 2, name: 'S' }, 'm'), ['+ Lend m to S', '+ Tick the x workspace', '− Untick the own MCP server', '+ Switch workspace tools on']);
   // The GPU jobs switch, the page's third (Cara, 2026-11-22, "Machine switches").
   assert.deepEqual(lendPatch({ gpu: true }, now, 1), { lend: { server: 'own', workspaces: ['w'] } });
   assert.deepEqual(lendPatch({ gpu: false }, now, 1), {}, 'already off');
@@ -95,7 +95,7 @@ test('the change is worked out against the machine as it is: only what differs, 
   assert.deepEqual(lendPatch({ gpu: true }, old, 1), {});
 });
 
-test('a minion\'s call posts a card with the change and what it lends after; bad calls are refused before anyone sees them', async () => {
+test("a minion's call posts a card with the change and what it lends after; bad calls are refused before anyone sees them", async () => {
   const r = await propose({ machine: 'box', here: true, tick: ['w'], why: 'Cantrips needs the w folder' });
   assert.equal(r.owner, null);
   assert.equal(r.page, `#/p/${project.id}/machines/box`);
@@ -108,7 +108,7 @@ test('a minion\'s call posts a card with the change and what it lends after; bad
   assert.match(c.plan, new RegExp(`\\[box on the Machines page\\]\\(#/p/${project.id}/machines/box\\)`));
 
   await assert.rejects(propose({ machine: 'nope' }), /404 No machine called nope; there are box$/);
-  await assert.rejects(propose({ machine: 'josh-box', here: true }), /404 No machine called josh-box/, 'someone else\'s own machine is out of sight, as everywhere (#306)');
+  await assert.rejects(propose({ machine: 'josh-box', here: true }), /404 No machine called josh-box/, "someone else's own machine is out of sight, as everywhere (#306)");
   await assert.rejects(propose({ machine: 'box', tick: ['zz'] }), /400 box has no workspace called zz; it has w, x/);
   await assert.rejects(propose({ machine: 'box', server: 'zz' }), /400 box has no MCP server called zz; it found own/);
   await assert.rejects(propose({ machine: 'box', tick: ['w'], untick: ['w'] }), /400 A workspace is in both tick and untick/);
@@ -168,7 +168,7 @@ test('Approve applies the change to the machine as it is then, so a tick made on
   await idle(minion);
 });
 
-test('taking the scheme off ends its minions\' open sessions, as the page does', async () => {
+test("taking the scheme off ends its minions' open sessions, as the page does", async () => {
   const opened = await fetch(`${srv.base}/api/machines/${box.id}/session`, { headers: { Authorization: `Bearer ${agentToken(srv.data, minion.id)}` } });
   assert.equal(opened.status, 200);
   const stream = opened.body!.getReader();
@@ -188,8 +188,13 @@ test('taking the scheme off ends its minions\' open sessions, as the page does',
 async function mcp(t: any, role: string, method: string, params: object) {
   const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: agentToken(srv.data, t.id), COORDINATOR_PROJECT: String(project.id),
-      COORDINATOR_TICKET: String(t.id), COORDINATOR_ROLE: role, COORDINATOR_MACHINES: '',
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: agentToken(srv.data, t.id),
+      COORDINATOR_PROJECT: String(project.id),
+      COORDINATOR_TICKET: String(t.id),
+      COORDINATOR_ROLE: role,
+      COORDINATOR_MACHINES: '',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -203,13 +208,16 @@ async function mcp(t: any, role: string, method: string, params: object) {
 }
 
 test('end to end: the tool call posts the card, its reply links it and the Machines page, and Approve saves it', async () => {
-  for (const [t, role] of [[minion, 'thread'], [taskmaster, 'coordinator']] as const) {
+  for (const [t, role] of [
+    [minion, 'thread'],
+    [taskmaster, 'coordinator'],
+  ] as const) {
     const tools = (await mcp(t, role, 'tools/list', {})).tools.map((x: any) => x.name);
     assert.ok(tools.includes('propose_machine_lend'), `${role} has it`);
   }
   const r = await mcp(taskmaster, 'coordinator', 'tools/call', { name: 'propose_machine_lend', arguments: { machine: 'box', here: true, why: 'for the test' } });
   assert.equal(r.isError, undefined, r.content[0].text);
-  assert.match(r.content[0].text, new RegExp(`\\[the lending card below\\]\\(#/p/${project.id}\\?e=\\d+\\)`), 'a Taskmaster\'s card is in its scheme\'s chat');
+  assert.match(r.content[0].text, new RegExp(`\\[the lending card below\\]\\(#/p/${project.id}\\?e=\\d+\\)`), "a Taskmaster's card is in its scheme's chat");
   assert.match(r.content[0].text, new RegExp(`\\[box on the Machines page\\]\\(#/p/${project.id}/machines/box\\)`));
   const [c] = (await events(taskmaster)).filter((e: any) => e.status === 'pending' && e.machineLend);
   assert.deepEqual(c.machineLend.lines, ['+ Lend box to Cantrips']);

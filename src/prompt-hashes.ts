@@ -20,13 +20,31 @@ export interface PromptHashes {
 }
 
 /** The env vars src/mcp.ts reads to decide its tool list and refusals; not every one it reads (a path constant, and one that feeds the hashed `jobs` part, are left out on purpose). */
-export const TOOL_INPUTS = ['COORDINATOR_ROLE', 'COORDINATOR_APPROVALS', 'COORDINATOR_DEPLOYS', 'COORDINATOR_CONTAINER', 'COORDINATOR_APP_INSTRUCTIONS', 'COORDINATOR_HOME_CONTRAPTIONS', 'COORDINATOR_MACHINES', 'COORDINATOR_MEMORY', 'COORDINATOR_MEDIA', 'COORDINATOR_CODEX_IMAGES', 'COORDINATOR_APP_TURNS_RUN', 'COORDINATOR_MSG', 'COORDINATOR_SEAM_TRIAL'];
+export const TOOL_INPUTS = [
+  'COORDINATOR_ROLE',
+  'COORDINATOR_APPROVALS',
+  'COORDINATOR_DEPLOYS',
+  'COORDINATOR_CONTAINER',
+  'COORDINATOR_APP_INSTRUCTIONS',
+  'COORDINATOR_HOME_CONTRAPTIONS',
+  'COORDINATOR_MACHINES',
+  'COORDINATOR_MEMORY',
+  'COORDINATOR_MEDIA',
+  'COORDINATOR_CODEX_IMAGES',
+  'COORDINATOR_APP_TURNS_RUN',
+  'COORDINATOR_MSG',
+  'COORDINATOR_SEAM_TRIAL',
+];
 
 export const shortHash = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 10);
 
 /** A hash for each non-empty part, under its name. */
 export const hashSections = (parts: PromptSections): Record<string, string> =>
-  Object.fromEntries(Object.entries(parts).filter(([, lines]) => lines.length).map(([name, lines]) => [name, shortHash(lines.join('\n'))]));
+  Object.fromEntries(
+    Object.entries(parts)
+      .filter(([, lines]) => lines.length)
+      .map(([name, lines]) => [name, shortHash(lines.join('\n'))]),
+  );
 
 /** A launch's hashes, from its prompt's two halves, its env and its settings. */
 export function promptHashes(parts: { system: PromptSections; turn: PromptSections }, env: Record<string, string>, model: string | null, effort: string | null, payer: number | null, held = false): PromptHashes {

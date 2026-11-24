@@ -75,7 +75,7 @@ const sum = (text: string, re: RegExp) => [...text.matchAll(re)].reduce((n, m) =
 
 /** How many tests a run's output says failed, read from the given runners' summaries (all of them by default), or 0. */
 export function failedTests(text: string, runners: Runner[] = ['any']): number {
-  const kinds = runners.includes('any') ? (Object.keys(SUMMARIES) as (keyof typeof SUMMARIES)[]) : [...new Set(runners)] as (keyof typeof SUMMARIES)[];
+  const kinds = runners.includes('any') ? (Object.keys(SUMMARIES) as (keyof typeof SUMMARIES)[]) : ([...new Set(runners)] as (keyof typeof SUMMARIES)[]);
   return kinds.reduce((n, k) => n + SUMMARIES[k](text), 0);
 }
 
@@ -182,8 +182,20 @@ export function bashLines(input: HookInput): [string, string][] {
   const out = outputOf(input);
   const lines: [string, string][] = [];
   const runs = readsRetroLog(command) ? [] : testRuns(command);
-  const failed = runs.length ? failedTests(out, runs.map(([, r]) => r)) : 0;
-  if (failed > 0) lines.push(['red test', `${failed} failed: ${runs.map(([c]) => c).join('; ').slice(0, 160)}`]);
+  const failed = runs.length
+    ? failedTests(
+        out,
+        runs.map(([, r]) => r),
+      )
+    : 0;
+  if (failed > 0)
+    lines.push([
+      'red test',
+      `${failed} failed: ${runs
+        .map(([c]) => c)
+        .join('; ')
+        .slice(0, 160)}`,
+    ]);
   // A push in quoted text isn't one, and a red test before it means the chain stopped there.
   if (input.hook_event_name === 'PostToolUseFailure' && !failed && /\bgit(?:\s+-C\s+\S+|\s+-\S+)*\s+push\b/.test(mask(command))) {
     lines.push(['failed push', `${command.slice(0, 120)}: ${out.trim().split('\n').slice(-3).join(' ')}`]);

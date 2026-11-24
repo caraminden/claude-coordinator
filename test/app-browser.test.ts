@@ -105,7 +105,7 @@ test('a loop card shows the Card button until Continue is clicked', { skip }, as
   await page.eval(`document.querySelector('.lcard button').click()`);
   assert.equal(await page.eval('showsCard()'), false, 'Continue clicked: the request is still on its way');
   await page.eval(`add('loop_continued', { minion: 5, by: 'Josh' })`);
-  assert.equal(await page.eval(`document.querySelector('.lcard [role=status]').textContent`), 'Continued by Josh', 'the server\'s event still names who');
+  assert.equal(await page.eval(`document.querySelector('.lcard [role=status]').textContent`), 'Continued by Josh', "the server's event still names who");
   assert.equal(await page.eval('showsCard()'), false);
 });
 
@@ -125,11 +125,11 @@ test('Everyone draws each Taskmaster session with its own state: the Overlord on
       own: [tmv().ticket.id, tmv().part === undefined, tmv().heldCards.length],
     };
   })()`);
-  assert.deepEqual(got.order, ['mine', 'ovl', 'alex'], 'in time order: the Overlord\'s words go below your card, not above it');
+  assert.deepEqual(got.order, ['mine', 'ovl', 'alex'], "in time order: the Overlord's words go below your card, not above it");
   assert.equal(got.ovlWho, 'Overlord');
   assert.equal(got.ovlSession, 'Overlord');
-  assert.equal(got.alexSession, 'Alex\'s Taskmaster');
-  assert.deepEqual(got.own, [1, true, 0], 'your own session\'s state is back in view; the held card let go once another session spoke');
+  assert.equal(got.alexSession, "Alex's Taskmaster");
+  assert.deepEqual(got.own, [1, true, 0], "your own session's state is back in view; the held card let go once another session spoke");
 });
 
 test('the Codex line under the Claude bar reads a 5-hour window past its reset as 0%, not its last 99%', { skip }, async () => {
@@ -138,7 +138,7 @@ test('the Codex line under the Claude bar reads a 5-hour window past its reset a
   const inADay = Math.floor(Date.now() / 1000) + 86400;
   await page.eval(`renderUsage({ weekly: { utilization: 0.95, resetsAt: Date.now() + 86400000 }, updatedAt: new Date().toISOString() })`);
   await page.eval(`setCodex({ on: true, usage: { primary: { usedPercent: 99, windowDurationMins: 300, resetsAt: ${hourAgo} }, secondary: { usedPercent: 40, windowDurationMins: 10080, resetsAt: ${inADay} }, updatedAt: new Date().toISOString() } })`);
-  assert.equal(await page.eval(`document.querySelector('.usage.codex')`), null, "no Codex bar in the top-left (Cara, 2026-11-18); Settings → Usage has its windows");
+  assert.equal(await page.eval(`document.querySelector('.usage.codex')`), null, 'no Codex bar in the top-left (Cara, 2026-11-18); Settings → Usage has its windows');
   const line = await page.eval<{ text: string; level: string; title: string; hidden: boolean }>(`(({ textContent: text, dataset, title, hidden }) => ({ text, level: dataset.level, title, hidden }))(document.querySelector('.codex-usage'))`);
   assert.equal(line.hidden, false);
   assert.equal(line.text, 'Codex 40%');
@@ -148,7 +148,8 @@ test('the Codex line under the Claude bar reads a 5-hour window past its reset a
 
 test('with several Claude accounts the bar combines them: average weekly, a reset or missing report counts 0%, error only when all are out', { skip }, async () => {
   const page = await open();
-  const soon = Date.now() + 3600000, later = Date.now() + 86400000;
+  const soon = Date.now() + 3600000,
+    later = Date.now() + 86400000;
   const acc = (n: number, usage: string) => `{ n: ${n}, label: 'Account ${n}', usage: ${usage} }`;
   const wk = (u: number, resetsAt: number, status = 'allowed') => `{ weekly: { utilization: ${u}, resetsAt: ${resetsAt}, status: '${status}' } }`;
   const show = (accounts: string[]) => page.eval(`renderUsage({ weekly: { utilization: 0.2, resetsAt: ${later} }, account: 1, accounts: [${accounts.join(',')}], updatedAt: new Date().toISOString() })`);
@@ -171,7 +172,7 @@ test('with several Claude accounts the bar combines them: average weekly, a rese
   assert.equal((await bar()).level, 'warn');
 });
 
-test('a row\'s card badge opens the oldest open card, the rest of the row the chat, and a row without cards has none', { skip }, async () => {
+test("a row's card badge opens the oldest open card, the rest of the row the chat, and a row without cards has none", { skip }, async () => {
   const page = await open();
   await page.eval(`(async () => {
     const { threadRow } = await import('/sidebar.js');
@@ -186,7 +187,7 @@ test('a row\'s card badge opens the oldest open card, the rest of the row the ch
   assert.equal(await page.eval('location.hash'), '#/p/2/t/7', 'the rest of the row opens the chat');
 });
 
-test('the Taskmaster\'s waiting strip links each of its open cards, oldest first, and is gone with none', { skip }, async () => {
+test("the Taskmaster's waiting strip links each of its open cards, oldest first, and is gone with none", { skip }, async () => {
   const page = await open();
   const got = await page.eval<{ none: boolean; head: string; links: string[][] }>(`(async () => {
     const { waitingStrip } = await import('/waiting.js');
@@ -199,7 +200,10 @@ test('the Taskmaster\'s waiting strip links each of its open cards, oldest first
   })()`);
   assert.equal(got.none, true, 'nothing waits, no strip');
   assert.equal(got.head, '2 cards wait on you');
-  assert.deepEqual(got.links, [['#/p/2?e=11', 'questionLayout'], ['#/p/2?e=12', 'planBuild 9']]);
+  assert.deepEqual(got.links, [
+    ['#/p/2?e=11', 'questionLayout'],
+    ['#/p/2?e=12', 'planBuild 9'],
+  ]);
   await page.eval(`document.querySelectorAll('.waiting-strip a')[1].click()`);
   assert.equal(await page.eval('location.hash'), '#/p/2?e=12', 'a click opens the chat at that card');
 });
@@ -275,7 +279,10 @@ test('reopening a dismissed minion that still waits on you puts it back in Needs
 // loaded installed never came, and the controls sat on a white box. The page has them from the start, for the app only.
 test('the window controls take the page colour from the first load, and a browser tab gets no theme colour', () => {
   const metas = [...readFileSync(join(pub, 'index.html'), 'utf8').matchAll(/<meta name="theme-color" content="([^"]+)" media="([^"]+)">/g)].map((m) => ({ colour: m[1], media: m[2] }));
-  for (const [scheme, colour] of [['light', '#f6f5f2'], ['dark', '#161514']]) {
+  for (const [scheme, colour] of [
+    ['light', '#f6f5f2'],
+    ['dark', '#161514'],
+  ]) {
     const first = metas.find((m) => m.media.includes('window-controls-overlay') && m.media.includes(scheme));
     assert.equal(first?.colour, colour, `the ${scheme} page colour, for the title bar overlay`);
   }
@@ -285,7 +292,8 @@ test('the window controls take the page colour from the first load, and a browse
 test('the installed app shows the title bar hint once: gone for good on close or when the title bar is hidden, never in a tab', { skip }, async () => {
   const page = await open();
   // Headless Chromium has no app window, so the overlay and the display-mode query are stand-ins that fire like the real ones.
-  const run = (expr: string) => page.eval(`(async () => {
+  const run = (expr: string) =>
+    page.eval(`(async () => {
     const { wcoHint } = await import('/wco-hint.js');
     const fake = (k, v) => Object.assign(new EventTarget(), { [k]: v });
     window.wco ??= fake('visible', false);
@@ -314,10 +322,14 @@ test('the installed app shows the title bar hint once: gone for good on close or
 // #694: in the installed app the window controls sit on the window-controls-overlay theme colour; a see-through
 // background (the Taskmaster chat's after #693) once came back from the canvas as #000000, a black strip.
 test('the window controls keep the base colour for a see-through background and take an opaque one', { skip }, async () => {
-  for (const [dark, baseColour] of [[false, '#f6f5f2'], [true, '#161514']] as const) {
+  for (const [dark, baseColour] of [
+    [false, '#f6f5f2'],
+    [true, '#161514'],
+  ] as const) {
     const page = await browser.page(base, { dark });
     const meta = `document.querySelector('meta[name=theme-color][media*="${dark ? 'dark' : 'light'}"]').content`;
-    const tint = (bg: string | null) => page.eval(`(async () => {
+    const tint = (bg: string | null) =>
+      page.eval(`(async () => {
       const { tintTitleBar } = await import('/base.js');
       // Headless Chromium can't emulate display-mode, so each meta also matches on its colour scheme alone.
       if (!document.querySelector('meta[name=theme-color]')) {

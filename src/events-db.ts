@@ -60,8 +60,7 @@ WHEN EXISTS (SELECT 1 FROM card_fates LIMIT 1)
 BEGIN DELETE FROM card_fates; END;`;
 }
 
-const hasTable = (db: DatabaseSync, schema: string, name: string) =>
-  !!db.prepare(`SELECT 1 FROM ${schema}.sqlite_master WHERE type = 'table' AND name = ?`).get(name);
+const hasTable = (db: DatabaseSync, schema: string, name: string) => !!db.prepare(`SELECT 1 FROM ${schema}.sqlite_master WHERE type = 'table' AND name = ?`).get(name);
 
 /** Where a connection's events table is: main (not yet moved), chat (events.db), or none yet (a new database). */
 export function eventsHome(db: DatabaseSync): 'main' | typeof CHAT | null {
@@ -105,8 +104,7 @@ export function moveEvents(db: DatabaseSync, file: string): { rows: number; ms: 
   const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
   // Moved already, yet the main file has events again: a release older than the one that reads events.db ran without
   // tools/events-unsplit.ts and wrote new events there, whose ids collide with events.db's. Merging either way loses rows.
-  if (eventsMoved(db) || hasTable(db, 'main', 'events_old'))
-    throw new Error(`The chat log moved to ${file}, but the main file has an events table again: an older release wrote it after the move. Nothing was changed; merge the two by hand (their ids collide) or restore both files from backups/.`);
+  if (eventsMoved(db) || hasTable(db, 'main', 'events_old')) throw new Error(`The chat log moved to ${file}, but the main file has an events table again: an older release wrote it after the move. Nothing was changed; merge the two by hand (their ids collide) or restore both files from backups/.`);
   // A copy left by a move that stopped before its second commit is stale: the main file stayed in charge since.
   db.exec(`BEGIN IMMEDIATE;
     DROP TABLE IF EXISTS ${CHAT}.events;

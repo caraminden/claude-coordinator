@@ -88,8 +88,11 @@ function fakeTurn(name: string, dir: string, script: string, props: string[] = [
   // From a file: systemd would expand each $ in a unit's command line.
   writeFileSync(join(dir, 'turn.sh'), script);
   const env = { ...scriptEnv(), CITADEL_HEAVY_SLICE: heavySlice, CITADEL_HEAVY_UNIT_PROPS: 'MemoryMax=96M MemorySwapMax=0', HU: unitTool };
-  const r = spawnSync('systemd-run', ['--user', '--quiet', `--unit=${unit}`, `--slice=${turnSlice}`, `--working-directory=${dir}`, ...props.flatMap((p) => ['-p', p]),
-    ...['PATH', 'XDG_RUNTIME_DIR', 'HOME', 'CITADEL_HEAVY_SLICE', 'CITADEL_HEAVY_UNIT_PROPS', 'HU'].map((k) => `--setenv=${k}=${env[k] ?? ''}`), 'bash', join(dir, 'turn.sh')], { encoding: 'utf8' });
+  const r = spawnSync(
+    'systemd-run',
+    ['--user', '--quiet', `--unit=${unit}`, `--slice=${turnSlice}`, `--working-directory=${dir}`, ...props.flatMap((p) => ['-p', p]), ...['PATH', 'XDG_RUNTIME_DIR', 'HOME', 'CITADEL_HEAVY_SLICE', 'CITADEL_HEAVY_UNIT_PROPS', 'HU'].map((k) => `--setenv=${k}=${env[k] ?? ''}`), 'bash', join(dir, 'turn.sh')],
+    { encoding: 'utf8' },
+  );
   assert.equal(r.status, 0, r.stderr);
   return `${unit}.service`;
 }

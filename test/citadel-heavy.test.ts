@@ -23,13 +23,29 @@ function folder(slots?: number, pressure = 5) {
   const dir = join(root, `locks-${n++}`);
   const pressureFile = `${dir}-pressure`;
   setPressure(pressureFile, psi(pressure));
-  const env = { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_DIR: dir, CITADEL_HEAVY_SLOTS: slots === undefined ? undefined : String(slots), CITADEL_HEAVY_PRESSURE: pressureFile, CITADEL_HEAVY_POLL: '0.1', CITADEL_HEAVY_MAX_PRESSURE: undefined, CITADEL_HEAVY_LOAD_WAIT: undefined, CITADEL_HEAVY_PRIORITY: undefined, CITADEL_HEAVY_WHAT: undefined,
+  const env = {
+    ...process.env,
+    CITADEL_HEAVY_HELD: undefined,
+    CITADEL_HEAVY_DIR: dir,
+    CITADEL_HEAVY_SLOTS: slots === undefined ? undefined : String(slots),
+    CITADEL_HEAVY_PRESSURE: pressureFile,
+    CITADEL_HEAVY_POLL: '0.1',
+    CITADEL_HEAVY_MAX_PRESSURE: undefined,
+    CITADEL_HEAVY_LOAD_WAIT: undefined,
+    CITADEL_HEAVY_PRIORITY: undefined,
+    CITADEL_HEAVY_WHAT: undefined,
     // No test reads the real box's memory (#1340: test/mem-room.test.ts has the memory wait).
-    CITADEL_HEAVY_MEM_NEED: '0', CITADEL_MEM_ROOM_MB: undefined,
+    CITADEL_HEAVY_MEM_NEED: '0',
+    CITADEL_MEM_ROOM_MB: undefined,
     // The slots as they were before #1160's small slot, and never the repo's CI (test/heavy-ci.test.ts has that).
-    CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_PLAIN_SLOTS: '64',
+    CITADEL_HEAVY_HERE: '1',
+    CITADEL_HEAVY_PLAIN_SLOTS: '64',
     // The line's own tests send every job to the line, as before #1629; judged() below turns the judgment back on.
-    CITADEL_HEAVY_JUDGE: '0', CITADEL_HEAVY_GUESS: undefined, CITADEL_HEAVY_MIN_RUN: undefined, CITADEL_HEAVY_MIN_CPU: undefined };
+    CITADEL_HEAVY_JUDGE: '0',
+    CITADEL_HEAVY_GUESS: undefined,
+    CITADEL_HEAVY_MIN_RUN: undefined,
+    CITADEL_HEAVY_MIN_CPU: undefined,
+  };
   return { dir, env, pressureFile };
 }
 type Job = { child: ChildProcess; err: () => string; done: Promise<number | null> };
@@ -174,7 +190,10 @@ test('with a slot free but the box busy, the job waits, says the pressure, and s
     await until('the next to queue', () => /others are in line/.test(b.err()));
     assert.ok(!existsSync(join(root, 'load-up-2')));
     // Each waiter leaves a wait-<pid>-<random> file for Citadel's wait readout (#544): who, what, since, on what.
-    const waits = () => readdirSync(dir).filter((f) => /^wait-\d+-\d+$/.test(f)).map((f) => readFileSync(join(dir, f), 'utf8').split('\n'));
+    const waits = () =>
+      readdirSync(dir)
+        .filter((f) => /^wait-\d+-\d+$/.test(f))
+        .map((f) => readFileSync(join(dir, f), 'utf8').split('\n'));
     await until('both waiter files', () => waits().length === 2);
     const byWho = Object.fromEntries(waits().map((l) => [l[0], l]));
     assert.equal(byWho['Peek #4'][3], 'load');
@@ -190,7 +209,11 @@ test('with a slot free but the box busy, the job waits, says the pressure, and s
   assert.ok(existsSync(join(root, 'load-up')));
   assert.doesNotMatch(a.err(), /starts anyway in slot/);
   assert.ok(!existsSync(join(dir, 'slot-0.who')));
-  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('wait-')), [], 'a waiter that got its slot takes its wait file with it');
+  assert.deepEqual(
+    readdirSync(dir).filter((f) => f.startsWith('wait-')),
+    [],
+    'a waiter that got its slot takes its wait file with it',
+  );
 });
 
 test('a job never waits on load past the limit: then it takes the free slot anyway, and says so', async () => {
@@ -232,7 +255,7 @@ test('the slots file can carry comments, digits and all', async () => {
   for (const j of jobs) assert.equal(await j.done, 0);
 });
 
-test('a job gets its slot\'s progress file for a test run\'s counts (#545), cleared before it starts and gone after', () => {
+test("a job gets its slot's progress file for a test run's counts (#545), cleared before it starts and gone after", () => {
   const { dir, env } = folder(1);
   spawnSync(heavy, ['true'], { env });
   writeFileSync(join(dir, 'slot-0.progress'), '1\n2\nstale\n');
@@ -276,7 +299,11 @@ test('a job that waits while no slot changes hands gives up at the limit, loudly
     assert.equal(await b.done, 75);
     assert.match(b.err(), /gave up: no heavy slot has changed hands in 1 s of waiting, so nothing ran \(Delve #3: sh -c.*\)\. .*\n.*slot 1: Peek #1: sh -c/);
     assert.ok(!existsSync(join(root, 'cap-b-up')), 'its command never ran');
-    assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('wait-')), [], 'its wait file is gone');
+    assert.deepEqual(
+      readdirSync(dir).filter((f) => f.startsWith('wait-')),
+      [],
+      'its wait file is gone',
+    );
   } finally {
     writeFileSync(go, '');
   }
@@ -310,7 +337,8 @@ test('jobs going past a stopped head still start one at a time on a busy box, ea
 test("a job deletes the wait files of waiters killed long ago, and leaves a live waiter's", () => {
   const { dir, env } = folder(1);
   mkdirSync(dir, { recursive: true });
-  const old = join(dir, 'wait-123-456'), fresh = join(dir, 'wait-124-457');
+  const old = join(dir, 'wait-123-456'),
+    fresh = join(dir, 'wait-124-457');
   writeFileSync(old, 'x\n');
   writeFileSync(fresh, 'x\n');
   const hourAgo = Date.now() / 1000 - 3600;
@@ -321,7 +349,11 @@ test("a job deletes the wait files of waiters killed long ago, and leaves a live
 });
 
 // #596: one history line per job, so a week of real waits and runs can be read back.
-const history = (dir: string) => readFileSync(join(dir, 'history'), 'utf8').split('\n').filter(Boolean).map((l) => l.split('\t'));
+const history = (dir: string) =>
+  readFileSync(join(dir, 'history'), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => l.split('\t'));
 
 test('a job that ran appends one line: start, who, what, on what it waited, wait s, run s, status, pressure', () => {
   const { dir, env } = folder(2, 7);
@@ -380,7 +412,11 @@ test('nested calls write no line of their own, and a history past its limit keep
   assert.match(lines[0], /^old line \d\d\.+$/, 'starts on a whole line');
   assert.match(lines.at(-2)!, /^old line 39/);
   assert.equal(lines.at(-1)!.split('\t')[2], 'echo newest');
-  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('history.')), [], 'no copy left behind');
+  assert.deepEqual(
+    readdirSync(dir).filter((f) => f.startsWith('history.')),
+    [],
+    'no copy left behind',
+  );
 });
 
 test('a history write that hangs holds no slot: the next job runs', async () => {
@@ -460,7 +496,10 @@ test('while Citadel eases off memory (#1748) the job waits on the level file, an
   const a = job({ ...env, CITADEL_MEMORY_LEVEL: level }, 'Peek #10', touch(join(root, 'ease-up')));
   await until('the job to say it waits for memory', () => /waiting for memory: Citadel is easing off \(easing: 5\.0 GB free/.test(a.err()));
   assert.ok(!existsSync(join(root, 'ease-up')), 'it waits though a slot is free and the memory room check would pass');
-  assert.ok(readdirSync(dir).some((f) => f.startsWith('wait-')), 'it shows as waiting');
+  assert.ok(
+    readdirSync(dir).some((f) => f.startsWith('wait-')),
+    'it shows as waiting',
+  );
   setPressure(level, 'ok\n\n');
   assert.equal(await a.done, 0);
   assert.ok(existsSync(join(root, 'ease-up')));
@@ -478,17 +517,20 @@ test('a level file over 60 s old counts as ok: a stopped server never holds a jo
 });
 
 // Only heavy work waits (#1629): each job is judged light or heavy by its own past runs before it takes a place in line.
-const past = (who: string, what: string, run: number, cpu?: number) =>
-  `2026-11-20T10:00:00-0800\t${who}\t${what}\tnone\t0\t${run}\t0\t5${cpu === undefined ? '' : `\t${cpu}`}\n`;
+const past = (who: string, what: string, run: number, cpu?: number) => `2026-11-20T10:00:00-0800\t${who}\t${what}\tnone\t0\t${run}\t0\t5${cpu === undefined ? '' : `\t${cpu}`}\n`;
 // One slot, held by a job until its go file appears; returns the go file and the holder.
 async function holdSlot(env: NodeJS.ProcessEnv) {
-  const up = join(root, `hold-up-${n}`), go = join(root, `hold-go-${n++}`);
+  const up = join(root, `hold-up-${n}`),
+    go = join(root, `hold-go-${n++}`);
   const holder = job(env, 'Holder #1 (cara)', `${touch(up)}; ${waitFor(go)}`);
   await until('the holder in its slot', () => existsSync(up));
   return { go, holder };
 }
 const lastLine = (dir: string) => history(dir).at(-1)!;
-const seed = (dir: string, text: string) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'history'), text); };
+const seed = (dir: string, text: string) => {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'history'), text);
+};
 const judged = (env: NodeJS.ProcessEnv) => ({ ...env, CITADEL_HEAVY_JUDGE: undefined });
 
 test('a job whose past runs were short runs at once while the slot is held, and its line says light', async () => {
@@ -570,7 +612,8 @@ test('a long job busy under 75 % of its run runs at once; a long one from before
 test('a job with no past runs runs at once and never asks for CI, unless the caller guesses --heavy', async () => {
   const { dir, env } = folder(1);
   // A fake citadel-node: the CI path's first step (heavy-ci.ts --repo) leaves a mark, then says "no CI here".
-  const bin = join(root, `bin-${n++}`), asked = join(root, `ci-asked-${n}`);
+  const bin = join(root, `bin-${n++}`),
+    asked = join(root, `ci-asked-${n}`);
   mkdirSync(bin);
   writeFileSync(join(bin, 'citadel-node'), `#!/bin/sh\ntouch '${asked}'\nexit 1\n`, { mode: 0o755 });
   const fresh = { ...judged(env), CITADEL_HEAVY_HERE: undefined, PATH: `${bin}:${process.env.PATH}` };
@@ -605,11 +648,12 @@ test("the history line's last column is the command's CPU seconds, its children'
   assert.ok(cpu >= 1 && cpu <= Number(lastLine(dir)[5]) * 16, `${cpu} CPU s`);
 });
 
-test('what the command prints is teed into its slot\'s .out file while it runs, and the file goes with the run (#1681)', async () => {
+test("what the command prints is teed into its slot's .out file while it runs, and the file goes with the run (#1681)", async () => {
   const { dir, env } = folder(2);
   const go = join(root, 'go-tee');
   const j = spawn(heavy, ['sh', '-c', `echo out-line; echo err-line >&2; ${waitFor(go)}`], { env: { ...env, CITADEL_HEAVY_WHO: 'Citadel #1 (cara)' }, stdio: ['ignore', 'pipe', 'pipe'] });
-  let out = '', err = '';
+  let out = '',
+    err = '';
   j.stdout!.on('data', (b) => (out += b));
   j.stderr!.on('data', (b) => (err += b));
   const closed = new Promise((r) => j.on('close', r));

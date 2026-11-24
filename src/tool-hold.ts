@@ -22,12 +22,18 @@ export async function toolsForTurn<T>(current: T[], env: NodeJS.ProcessEnv): Pro
   // The scheme's message numbers sit in tool text and are enforced elsewhere (src/msg-settings.ts): a change to them is no rewording.
   const msg = env.COORDINATOR_MSG ?? '';
   const hold = env.CITADEL_TOOL_HOLD === '1';
-  const kept = hold ? await readFile(file, 'utf8').then((t) => JSON.parse(t)).catch(() => null) : null;
+  const kept = hold
+    ? await readFile(file, 'utf8')
+        .then((t) => JSON.parse(t))
+        .catch(() => null)
+    : null;
   const tools = heldTools(current, kept?.msg === msg ? kept.tools : null, hold);
   if (tools === current) {
     // Whole or not at all: a half-written file would only lose the hold, but a rename never leaves one.
     const part = `${file}.${process.pid}.part`;
-    await writeFile(part, JSON.stringify({ msg, tools: current })).then(() => rename(part, file)).catch(() => {});
+    await writeFile(part, JSON.stringify({ msg, tools: current }))
+      .then(() => rename(part, file))
+      .catch(() => {});
   }
   return tools;
 }

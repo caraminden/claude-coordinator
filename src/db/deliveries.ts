@@ -26,8 +26,7 @@ export type Delivery = {
   created_at: number;
   updated_at: number;
 };
-export type NewDelivery = Pick<Delivery, 'project_id' | 'kind' | 'to_kind' | 'to_id' | 'when_kind' | 'set_by'> &
-  Partial<Pick<Delivery, 'id' | 'when_arg' | 'payload' | 'state' | 'due' | 'met_at' | 'dedupe_key' | 'origin' | 'reason'>>;
+export type NewDelivery = Pick<Delivery, 'project_id' | 'kind' | 'to_kind' | 'to_id' | 'when_kind' | 'set_by'> & Partial<Pick<Delivery, 'id' | 'when_arg' | 'payload' | 'state' | 'due' | 'met_at' | 'dedupe_key' | 'origin' | 'reason'>>;
 export type DeliveryPatch = Partial<Pick<Delivery, 'when_arg' | 'payload' | 'state' | 'due' | 'met_at' | 'attempts' | 'last_error' | 'reason' | 'event_id'>>;
 
 // The states of a row not yet sent or dropped, which a read scope keeps.
@@ -38,7 +37,7 @@ const PATCHABLE = new Set(['when_arg', 'payload', 'state', 'due', 'met_at', 'att
 function insert(store: Store, d: NewDelivery, now: number): number {
   const cols = ['project_id', 'kind', 'to_kind', 'to_id', 'when_kind', 'when_arg', 'payload', 'set_by', 'state', 'due', 'met_at', 'dedupe_key', 'origin', 'reason', 'created_at', 'updated_at'];
   const vals = [d.project_id, d.kind, d.to_kind, d.to_id, d.when_kind, JSON.stringify(d.when_arg ?? null), JSON.stringify(d.payload ?? {}), d.set_by, d.state ?? 'waiting', d.due ?? null, d.met_at ?? null, d.dedupe_key ?? null, d.origin ?? null, d.reason ?? null, now, now];
-  if (d.id != null) (cols.unshift('id'), vals.unshift(d.id));
+  if (d.id != null) cols.unshift('id'), vals.unshift(d.id);
   const r = store.db.prepare(`INSERT INTO deliveries (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) ON CONFLICT (origin) DO NOTHING`).run(...(vals as any[]));
   return r.changes ? Number(r.lastInsertRowid) : 0;
 }
@@ -65,10 +64,10 @@ export const deliveryQueries = {
     }
     const where: string[] = [];
     const args: (string | number)[] = [];
-    if (q.kind != null) (where.push('kind = ?'), args.push(q.kind));
-    if (q.to != null) (where.push('to_kind = ? AND to_id = ?'), args.push(q.toKind ?? 'minion', q.to));
-    if (q.dedupe != null) (where.push('dedupe_key = ?'), args.push(q.dedupe));
-    if (q.states?.length) (where.push(`state IN (${q.states.map(() => '?').join(', ')})`), args.push(...q.states));
+    if (q.kind != null) where.push('kind = ?'), args.push(q.kind);
+    if (q.to != null) where.push('to_kind = ? AND to_id = ?'), args.push(q.toKind ?? 'minion', q.to);
+    if (q.dedupe != null) where.push('dedupe_key = ?'), args.push(q.dedupe);
+    if (q.states?.length) where.push(`state IN (${q.states.map(() => '?').join(', ')})`), args.push(...q.states);
     return (this.db.prepare(`SELECT * FROM deliveries ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id`).all(...args) as any[]).map(row);
   },
 
@@ -92,9 +91,7 @@ export const deliveryQueries = {
 
   /** Delete sent rows older than `sentBefore` and dropped or failed rows older than `endedBefore`. */
   pruneDeliveries(this: Store, sentBefore: number, endedBefore: number): number {
-    return Number(
-      this.db.prepare("DELETE FROM deliveries WHERE (state = 'sent' AND updated_at < ?) OR (state IN ('dropped', 'failed') AND updated_at < ?)").run(sentBefore, endedBefore).changes,
-    );
+    return Number(this.db.prepare("DELETE FROM deliveries WHERE (state = 'sent' AND updated_at < ?) OR (state IN ('dropped', 'failed') AND updated_at < ?)").run(sentBefore, endedBefore).changes);
   },
 
   /** Whether a turn of `ticketId` started after event `eventId` was posted: its session's init comes after it (output alone could be the turn it queued behind). */

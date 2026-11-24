@@ -89,11 +89,13 @@ async function moved(page: Page, changes: string[], ignore: string[] = []) {
   return out;
 }
 
-for (const [label, opts] of [['desktop', { width: 900, height: 600 }], ['phone, dark', { width: 390, height: 700, touch: true, dark: true }]] as const) {
+for (const [label, opts] of [
+  ['desktop', { width: 900, height: 600 }],
+  ['phone, dark', { width: 390, height: 700, touch: true, dark: true }],
+] as const) {
   test(`${label}: a status line through empty, text, a long text, working, a tone and clear moves nothing`, { skip }, async () => {
     const page = await browser.page(base, opts);
-    const steps = [`slot.text('Saved')`, `slot.text(${JSON.stringify(LONG)})`, `slot.working('Saving…')`, `slot.text('Couldn\\'t save', { tone: 'danger' })`, 'slot.clear()',
-      `inline.text(${JSON.stringify(LONG)})`, `inline.working()`, 'inline.clear()'];
+    const steps = [`slot.text('Saved')`, `slot.text(${JSON.stringify(LONG)})`, `slot.working('Saving…')`, `slot.text('Couldn\\'t save', { tone: 'danger' })`, 'slot.clear()', `inline.text(${JSON.stringify(LONG)})`, `inline.working()`, 'inline.clear()'];
     // The lines' own children come and go; the lines themselves and everything else stay put.
     assert.deepEqual(await moved(page, steps, ['naive']), []);
     assert.deepEqual(await page.eval('window.shifts'), [], 'no layout-shift entries');
@@ -102,8 +104,7 @@ for (const [label, opts] of [['desktop', { width: 900, height: 600 }], ['phone, 
 
   test(`${label}: a steady label through each of its labels keeps its width`, { skip }, async () => {
     const page = await browser.page(base, opts);
-    const steps = [`save.set('saving')`, `save.set('saved')`, `save.set('failed')`, `save.set('idle')`,
-      `document.querySelector('#send .cui-steady').children[0].hidden = true, document.querySelector('#send .cui-steady').children[1].hidden = false`];
+    const steps = [`save.set('saving')`, `save.set('saved')`, `save.set('failed')`, `save.set('idle')`, `document.querySelector('#send .cui-steady').children[0].hidden = true, document.querySelector('#send .cui-steady').children[1].hidden = false`];
     assert.deepEqual(await moved(page, steps), []);
     assert.deepEqual(await page.eval('window.shifts'), []);
   });
@@ -157,12 +158,14 @@ test('the working state is a spinner and its words; a tone sets data-tone; role=
 
 const LINES = `'<div>Line one</div><div>Line two</div>'`;
 
-for (const [label, opts] of [['desktop', { width: 900, height: 900 }], ['phone, dark', { width: 390, height: 900, touch: true, dark: true }]] as const) {
+for (const [label, opts] of [
+  ['desktop', { width: 900, height: 900 }],
+  ['phone, dark', { width: 390, height: 900, touch: true, dark: true }],
+] as const) {
   test(`${label}: a long status in a fill slot in a header row never widens its card`, { skip }, async () => {
     const page = await browser.page(base, opts);
     await page.eval(`document.getElementById('head-slot').innerHTML = statusWorkingHtml('Refreshing…')`);
-    const steps = [`document.getElementById('head-slot').innerHTML = statusTextHtml(${JSON.stringify(LONG)})`,
-      `document.getElementById('head-slot').innerHTML = statusTextHtml('Couldn\\'t refresh', { tone: 'danger' })`, `document.getElementById('head-slot').innerHTML = ''`];
+    const steps = [`document.getElementById('head-slot').innerHTML = statusTextHtml(${JSON.stringify(LONG)})`, `document.getElementById('head-slot').innerHTML = statusTextHtml('Couldn\\'t refresh', { tone: 'danger' })`, `document.getElementById('head-slot').innerHTML = ''`];
     assert.deepEqual(await moved(page, steps, ['naive-card', 'naive-head-slot']), []);
     assert.equal(await page.eval('document.getElementById("card").getBoundingClientRect().width'), 200);
     // The same slot without cui-status-fill: the long text widens its card (why the fill exists).
@@ -184,7 +187,7 @@ for (const [label, opts] of [['desktop', { width: 900, height: 900 }], ['phone, 
     assert.equal(await page.eval('document.querySelector(".cui-toast").dataset.tone'), 'danger');
     // Its bar is in that tone: the toast's own rule once set a neutral tone after the tone rules, and won.
     assert.equal(await page.eval('getComputedStyle(document.querySelector(".cui-toast")).borderLeftColor'), await page.eval('(() => { const p = document.createElement("p"); p.style.color = "var(--citadel-danger)"; document.body.append(p); return getComputedStyle(p).color; })()'));
-    assert.equal(await page.eval('window.frame().then(() => document.querySelector(".cui-toast-say").textContent)'), 'Couldn\'t copy', 'heard from the live region');
+    assert.equal(await page.eval('window.frame().then(() => document.querySelector(".cui-toast-say").textContent)'), "Couldn't copy", 'heard from the live region');
     const box = await page.eval<{ bottom: number; left: number; right: number }>('document.querySelector(".cui-toast").getBoundingClientRect().toJSON()');
     assert.ok(box.bottom <= opts.height && box.left >= 0 && box.right <= opts.width, 'inside the window');
   });
@@ -344,7 +347,11 @@ test("Ctrl-Z in a text field, a textarea or contenteditable is the field's own u
   const page = await browser.page(base, { width: 900, height: 700 });
   await page.eval(UNDO_PAGE);
   await page.eval(`offer('a')`);
-  for (const [id, prop] of [['field', 'value'], ['area', 'value'], ['editable', 'textContent']]) {
+  for (const [id, prop] of [
+    ['field', 'value'],
+    ['area', 'value'],
+    ['editable', 'textContent'],
+  ]) {
     await page.eval(`document.getElementById('${id}').focus()`);
     const before = await page.eval<string>(`document.getElementById('${id}').${prop}`);
     await page.send('Input.insertText', { text: 'typed' });

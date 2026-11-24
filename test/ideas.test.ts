@@ -76,11 +76,16 @@ test('a page, its handoff, a start and a ship fill one row, in a scheme that is 
   const page = join(shared, 'mockups', 'ideas', 'ideas.html');
   writeFileSync(page, "<script>mock.picks({ collection: 'ideas', options: ['go', 'later', 'skip'] });\nmock.picks({ collection: 'takes', options: ['pick'] });</script>");
   const old = new Date(Date.now() - LATER_STALE_MS - 86_400_000).toISOString();
-  store.writeArtifactData(p.id, page, [
-    { key: 'db/ideas/G3', value: JSON.stringify({ v: 'go', by: 'Josh', at: '2026-11-19T20:00:00Z', note: 'one view of everything' }) },
-    { key: 'db/ideas/F7', value: JSON.stringify({ v: 'later', by: 'Josh', at: old }) },
-    { key: 'db/takes/A', value: JSON.stringify({ v: 'pick', by: 'Josh', at: old }) },
-  ], 'Josh');
+  store.writeArtifactData(
+    p.id,
+    page,
+    [
+      { key: 'db/ideas/G3', value: JSON.stringify({ v: 'go', by: 'Josh', at: '2026-11-19T20:00:00Z', note: 'one view of everything' }) },
+      { key: 'db/ideas/F7', value: JSON.stringify({ v: 'later', by: 'Josh', at: old }) },
+      { key: 'db/takes/A', value: JSON.stringify({ v: 'pick', by: 'Josh', at: old }) },
+    ],
+    'Josh',
+  );
   writeFileSync(join(shared, 'handoffs', 'handoff-ledger.md'), `# Handoff: one ledger (G3)\n\nFrom #12's ideas page, card G3: \`${page}\`.\n`);
   writeFileSync(join(shared, 'handoffs', 'loose.md'), '# Handoff: something with no page\n\nFrom #40.\n');
 
@@ -110,7 +115,10 @@ test('a page, its handoff, a start and a ship fill one row, in a scheme that is 
 
   // Hand edits: a status and an unlink stick through later scans.
   const f7 = rows.find((r) => r.card === 'F7')!;
-  assert.deepEqual(store.ideas.staleLater(p.id).map((r) => r.id), [f7.id]);
+  assert.deepEqual(
+    store.ideas.staleLater(p.id).map((r) => r.id),
+    [f7.id],
+  );
   const note = store.ideas.laterNote(p.id)!;
   assert.match(note, /F7 Pick bars \(from #12\): Later since/);
   assert.equal(store.ideas.laterNote(p.id), null, 'once a week');
@@ -225,14 +233,17 @@ const counting = (store: Store) => {
     const st = real(sql) as Record<string, unknown>;
     for (const m of ['get', 'all', 'run']) {
       const f = (st[m] as (...a: unknown[]) => unknown).bind(st);
-      st[m] = (...a: unknown[]) => { seen.push(sql); return f(...a); };
+      st[m] = (...a: unknown[]) => {
+        seen.push(sql);
+        return f(...a);
+      };
     }
     return st;
   };
   return seen;
 };
 
-test('a sync reads the scheme\'s Send messages once, however many untitled pages it has', async () => {
+test("a sync reads the scheme's Send messages once, however many untitled pages it has", async () => {
   const store = newStore();
   const p = store.createProject('Mandate', null);
   const shared = join(root, 'once-shared');
@@ -247,7 +258,7 @@ test('a sync reads the scheme\'s Send messages once, however many untitled pages
   assert.ok(seen.filter((s) => s.includes('Picks on')).length <= 1, 'one scan of the messages, not one per page');
 });
 
-test('restatus rescans a minion\'s events only when it has new ones, and never once it shipped', async () => {
+test("restatus rescans a minion's events only when it has new ones, and never once it shipped", async () => {
   const store = newStore();
   const p = store.createProject('Mandate', null);
   const shared = join(root, 'ship-shared');
@@ -284,20 +295,35 @@ test('the first Send read goes in ranges of event ids, then only past the last o
   const db = (store.ideas as unknown as { db: { prepare: (s: string) => { run: (...a: unknown[]) => unknown } } }).db;
   db.prepare("INSERT INTO events (id, ticket_id, kind, data, created_at) VALUES (65000, ?, 'note', '{}', ?)").run(t.id, Date.now());
   store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'Picks on "X":\n- A2 Two: Go', comment: { path: page, about: 'X' } });
-  store.writeArtifactData(p.id, page, ['A1', 'A2', 'A3'].map((c) => ({ key: `db/ideas/${c}`, value: JSON.stringify({ v: 'go', by: 'Josh', at: '2026-11-20T20:00:00Z' }) })), 'Josh');
+  store.writeArtifactData(
+    p.id,
+    page,
+    ['A1', 'A2', 'A3'].map((c) => ({ key: `db/ideas/${c}`, value: JSON.stringify({ v: 'go', by: 'Josh', at: '2026-11-20T20:00:00Z' }) })),
+    'Josh',
+  );
   const ranges: unknown[][] = [];
   const real = (db.prepare as Function).bind(db);
   db.prepare = (sql: string) => {
     const st = real(sql);
     if (!sql.includes('Picks on')) return st;
     const all = st.all.bind(st);
-    st.all = (...a: unknown[]) => { ranges.push(a); return all(...a); };
+    st.all = (...a: unknown[]) => {
+      ranges.push(a);
+      return all(...a);
+    };
     return st;
   };
   await store.ideas.sync(p.id, shared);
   assert.ok(ranges.length >= 4, `read in ranges, not in one statement: ${JSON.stringify(ranges)}`);
   for (const [lo, hi] of ranges) assert.ok(Number(hi) - Number(lo) <= 20_000, `a range of at most 20k ids: ${lo}..${hi}`);
-  assert.deepEqual(store.ideas.list(p.id).map((r) => r.title).sort(), ['A1 One', 'A2 Two', 'A3'], 'both Sends read; A3 had none yet');
+  assert.deepEqual(
+    store.ideas
+      .list(p.id)
+      .map((r) => r.title)
+      .sort(),
+    ['A1 One', 'A2 Two', 'A3'],
+    'both Sends read; A3 had none yet',
+  );
   ranges.length = 0;
   store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'Picks on "X":\n- A3 Three: Go', comment: { path: page, about: 'X' } });
   assert.match(store.ideas.sendsOf(p.id, page).text, /Three[\s\S]*Two[\s\S]*One/, 'newest first, the new one included');
@@ -321,7 +347,7 @@ test('after a restart, restatus leaves the ship scan to a paced pass instead of 
   const next = new Store(file);
   const seen = counting(next);
   next.ideas.restatus(p.id);
-  assert.equal(seen.filter((s) => s.includes('Shipped')).length, 0, 'no ship scan on the request\'s own turn');
+  assert.equal(seen.filter((s) => s.includes('Shipped')).length, 0, "no ship scan on the request's own turn");
   assert.notEqual(next.ideas.list(p.id)[0].status, 'built', 'not yet');
   await next.ideas.now(p.id, shared);
   assert.equal(next.ideas.list(p.id)[0].status, 'built', 'the paced pass marks it built');

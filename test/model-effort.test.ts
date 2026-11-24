@@ -79,12 +79,15 @@ test('a new minion takes a model and effort; the scheme default shows when it ha
   assert.equal(why.status, 200);
   assert.equal((await call(`/api/tickets/${chore.data.id}`)).data.ticket.picked_because, 'set by Cara: Opus 5.5 high: fix did not hold twice');
   const picks = (await call(`/api/tickets/${chore.data.id}`)).data.picks;
-  assert.deepEqual(picks.map((x) => [x.model, x.effort, x.reason]), [
-    ['claude-sonnet-5-5', 'medium', 'chore → Sonnet 5.5 medium'],
-    ['claude-opus-5-5', 'medium', 'set by Cara: Opus 5.5 medium'],
-    ['claude-opus-5-5', 'high', 'set by Cara: Opus 5.5 high: fix did not hold twice'],
-  ]);
-  assert.equal(plain.data.properties.assigned, 'Cara', 'a new minion is its starter\'s (#197)');
+  assert.deepEqual(
+    picks.map((x) => [x.model, x.effort, x.reason]),
+    [
+      ['claude-sonnet-5-5', 'medium', 'chore → Sonnet 5.5 medium'],
+      ['claude-opus-5-5', 'medium', 'set by Cara: Opus 5.5 medium'],
+      ['claude-opus-5-5', 'high', 'set by Cara: Opus 5.5 high: fix did not hold twice'],
+    ],
+  );
+  assert.equal(plain.data.properties.assigned, 'Cara', "a new minion is its starter's (#197)");
   const nobodys = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { title: 'Nobody', message: 'hi', properties: { assigned: null } } });
   assert.equal(nobodys.data.properties.assigned, undefined, 'unless it says otherwise');
 
@@ -121,7 +124,10 @@ test("a minion's Workflow switch (#359): off by default, set at creation or late
   assert.match(tm.data.error, /Only minions/);
   const notes = (await call(`/api/tickets/${plain.data.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
   // Its first turn may still be running, so the note says now or the next turn.
-  assert.ok(notes.some((n: string) => /^Cara turned the Workflow tool on for this minion from (now on|the next turn)\.$/.test(n)), notes.join('\n'));
+  assert.ok(
+    notes.some((n: string) => /^Cara turned the Workflow tool on for this minion from (now on|the next turn)\.$/.test(n)),
+    notes.join('\n'),
+  );
   assert.ok(notes.some((n: string) => /^Cara turned the Workflow tool off for this minion/.test(n)));
 });
 
@@ -148,28 +154,39 @@ test("a minion's plugin picks (#361): from the scheme's optional folders, at cre
   assert.equal(tm.status, 400);
   assert.match(tm.data.error, /Only minions/);
   const notes = (await call(`/api/tickets/${plain.data.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
-  assert.ok(notes.some((n: string) => /^Cara set this minion's extra plugin folders to tools\/plugins\/lsp, tools\/plugins\/devtools from (now on|the next turn)\.$/.test(n)), notes.join('\n'));
+  assert.ok(
+    notes.some((n: string) => /^Cara set this minion's extra plugin folders to tools\/plugins\/lsp, tools\/plugins\/devtools from (now on|the next turn)\.$/.test(n)),
+    notes.join('\n'),
+  );
   assert.ok(notes.some((n: string) => /^Cara took this minion's extra plugin folders off/.test(n)));
   const tmNotes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
-  assert.ok(tmNotes.includes("Cara set the optional plugin folders to: tools/plugins/devtools, tools/plugins/lsp. Minions load them only when they pick them, from their next turn."), tmNotes.join('\n'));
+  assert.ok(tmNotes.includes('Cara set the optional plugin folders to: tools/plugins/devtools, tools/plugins/lsp. Minions load them only when they pick them, from their next turn.'), tmNotes.join('\n'));
 });
 
 test("the Taskmaster's create_ticket and update_ticket pass model and effort on", async () => {
   const bodies: { method: string; path: string; body: any }[] = [];
   const api = createHttpServer((req, res) => {
     let raw = '';
-    req.on('data', (c) => (raw += c)).on('end', () => {
-      bodies.push({ method: req.method!, path: req.url!, body: raw ? JSON.parse(raw) : null });
-      const t = { id: 40, number: 4, title: 'T', status: 'idle', created_by: 'Taskmaster', model: 'claude-haiku-5-5', effort: 'low' };
-      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(req.method === 'GET' ? { tickets: [t] } : t));
-    });
+    req
+      .on('data', (c) => (raw += c))
+      .on('end', () => {
+        bodies.push({ method: req.method!, path: req.url!, body: raw ? JSON.parse(raw) : null });
+        const t = { id: 40, number: 4, title: 'T', status: 'idle', created_by: 'Taskmaster', model: 'claude-haiku-5-5', effort: 'low' };
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(req.method === 'GET' ? { tickets: [t] } : t));
+      });
   });
   const apiPort = await tmp.serve(api);
   const mcp = tmp.spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
     env: {
       // No COORDINATOR_MEMORY from a turn running the tests: create_ticket's duplicate check would call first.
-      ...process.env, MACHINES_URL: undefined, COORDINATOR_MEMORY: undefined, COORDINATOR_API: `http://127.0.0.1:${apiPort}`,
-      COORDINATOR_TOKEN: 'c.sig', COORDINATOR_PROJECT: '2', COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: '1',
+      ...process.env,
+      MACHINES_URL: undefined,
+      COORDINATOR_MEMORY: undefined,
+      COORDINATOR_API: `http://127.0.0.1:${apiPort}`,
+      COORDINATOR_TOKEN: 'c.sig',
+      COORDINATOR_PROJECT: '2',
+      COORDINATOR_ROLE: 'coordinator',
+      COORDINATOR_TICKET: '1',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -180,10 +197,11 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
       replies.get(r.id)?.(r);
     });
     let rid = 0;
-    const tool = (name: string, args: object) => new Promise<any>((r) => {
-      replies.set(++rid, (x) => r(x.result));
-      mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: rid, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-    });
+    const tool = (name: string, args: object) =>
+      new Promise<any>((r) => {
+        replies.set(++rid, (x) => r(x.result));
+        mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: rid, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+      });
     const created = await tool('create_ticket', { title: 'T', properties: { type: 'chore' }, message: 'go', model: 'claude-haiku-5-5', effort: 'low', workflow: true, plugin_folders: ['tools/plugins/devtools'] });
     assert.ok(!created.isError, created.content[0].text);
     assert.match(created.content[0].text, /model: claude-haiku-5-5 \| effort: low/);
@@ -191,7 +209,10 @@ test("the Taskmaster's create_ticket and update_ticket pass model and effort on"
     assert.ok(!updated.isError, updated.content[0].text);
     const switched = await tool('update_ticket', { ticket_id: 4, workflow: false, plugin_folders: [] });
     assert.ok(!switched.isError, switched.content[0].text);
-    assert.deepEqual(bodies.map((b) => `${b.method} ${b.path}`), ['POST /api/projects/2/tickets', 'GET /api/projects/2?number=4', 'PATCH /api/tickets/40', 'GET /api/projects/2?number=4', 'PATCH /api/tickets/40']);
+    assert.deepEqual(
+      bodies.map((b) => `${b.method} ${b.path}`),
+      ['POST /api/projects/2/tickets', 'GET /api/projects/2?number=4', 'PATCH /api/tickets/40', 'GET /api/projects/2?number=4', 'PATCH /api/tickets/40'],
+    );
     assert.equal(bodies[0].body.model, 'claude-haiku-5-5');
     assert.equal(bodies[0].body.effort, 'low');
     assert.equal(bodies[0].body.workflow, true);
@@ -214,10 +235,12 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   try {
-    const listed = new Promise<any>((resolve) => createInterface({ input: mcp.stdout! }).on('line', (l) => {
-      const r = JSON.parse(l);
-      if (r.id === 2) resolve(r.result);
-    }));
+    const listed = new Promise<any>((resolve) =>
+      createInterface({ input: mcp.stdout! }).on('line', (l) => {
+        const r = JSON.parse(l);
+        if (r.id === 2) resolve(r.result);
+      }),
+    );
     mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } } }) + '\n');
     mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
     const withModel = (await listed).tools.filter((t: any) => t.inputSchema.properties?.model && t.name !== 'review_set'); // review_set's model is a critic's alias (opus, sonnet, haiku), not a ticket's model id
@@ -225,7 +248,10 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
     for (const t of withModel) assert.deepEqual(t.inputSchema.properties.model.enum, t.name === 'update_ticket' ? [...MODELS, null] : [...MODELS], `${t.name}'s model enum`);
     for (const name of ['create_ticket', 'schedule_minion']) {
       const t = withModel.find((x: any) => x.name === name);
-      assert.ok(['model', 'effort'].every((k) => t.inputSchema.required.includes(k)), `${name} requires a model and effort`);
+      assert.ok(
+        ['model', 'effort'].every((k) => t.inputSchema.required.includes(k)),
+        `${name} requires a model and effort`,
+      );
     }
   } finally {
     mcp.kill();
@@ -237,6 +263,6 @@ test('Fable 5.2 (#431) is a pickable model in the server list, the MCP enum and 
   const composer = readFileSync(join(repo, 'public/composer.js'), 'utf8');
   const listIds = (name: string) => [...composer.match(new RegExp(`const ${name} = \\[([^;]*?)\\n\\];`))![1].matchAll(/\['([^']+)', '[^']+'\]/g)].map((m) => m[1]);
   const { CLAUDE_MODELS } = await import('../public/model-table.js');
-  assert.match(composer, /const MODELS = CLAUDE_MODELS;/, 'the composer offers the model table\'s Claude models');
+  assert.match(composer, /const MODELS = CLAUDE_MODELS;/, "the composer offers the model table's Claude models");
   assert.deepEqual([...CLAUDE_MODELS.map(([id]) => id), ...listIds('CODEX_MODELS')], [...MODELS], 'the composer offers exactly the server list');
 });

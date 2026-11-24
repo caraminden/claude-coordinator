@@ -101,7 +101,10 @@ function nextUp(input: PickInput): { n: number; full: boolean } | null {
   const cur = roomy.find((a) => a.n === input.nextUp);
   const best = roomy.reduce<PickAccount | null>((b, a) => (!b || resetOf(a.n, input) < resetOf(b.n, input) ? a : b), null);
   if (best) return { n: cur && !(resetOf(best.n, input) < resetOf(cur.n, input) - RESET_MARGIN_MS) ? cur.n : best.n, full: false };
-  const at = Math.max(0, list.findIndex((a) => a.n === input.nextUp));
+  const at = Math.max(
+    0,
+    list.findIndex((a) => a.n === input.nextUp),
+  );
   const order = [...list.slice(at), ...list.slice(0, at)];
   const any = order.find((a) => accountReady(a, input.now)) ?? order.find((a) => !a.expired);
   return any ? { n: any.n, full: true } : null;

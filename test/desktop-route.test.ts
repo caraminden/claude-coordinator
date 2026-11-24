@@ -11,7 +11,7 @@ test('Citadel pages at its own address stay in the window', () => {
   assert.deepEqual(go('/c/#/p/2/t/1186'), { kind: 'here', url: 'https://citadel.zip/c/#/p/2/t/1186' });
 });
 
-test('an old-domain link opens here, on the app\'s address, keeping its path', () => {
+test("an old-domain link opens here, on the app's address, keeping its path", () => {
   assert.deepEqual(go('https://cara.apps.webplatformisbestplatform.net/c/#/p/2/t/1?e=5'), { kind: 'here', url: 'https://citadel.zip/c/#/p/2/t/1?e=5' });
 });
 
@@ -25,7 +25,7 @@ test('other sites, contraption hosts and mail go to the default browser', () => 
   }
 });
 
-test('an old-domain link carrying a login, or over http, is not taken as Citadel\'s', () => {
+test("an old-domain link carrying a login, or over http, is not taken as Citadel's", () => {
   assert.equal(go('https://u:p@cara.apps.webplatformisbestplatform.net/c/').kind, 'browser');
   assert.equal(go('http://cara.apps.webplatformisbestplatform.net/c/').kind, 'browser');
 });

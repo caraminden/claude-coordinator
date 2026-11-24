@@ -33,7 +33,9 @@ export async function openStartScheme() {
   const projects = await api('api/projects');
   if (shelfSchemes(projects).length > 1) return replaceHash('#/home');
   let last = NaN;
-  try { last = Number(localStorage.getItem(LAST_SCHEME)); } catch {}
+  try {
+    last = Number(localStorage.getItem(LAST_SCHEME));
+  } catch {}
   // A hidden scheme, or one you aren't a member of (#674), only opens by itself when it was the last one open, or there's no other.
   const shown = projects.filter((p) => (!p.hidden && p.member !== false) || p.id === last);
   const id = startScheme(shown.length ? shown : projects, last);
@@ -52,7 +54,9 @@ export async function homeScheme() {
   const shown = shelfSchemes(projects);
   if (view?.kind === 'project' && shown.some((p) => p.id === view.projectId)) return view.projectId;
   let last = NaN;
-  try { last = Number(localStorage.getItem(LAST_SCHEME)); } catch {}
+  try {
+    last = Number(localStorage.getItem(LAST_SCHEME));
+  } catch {}
   return startScheme(shown.length ? shown : projects, last);
 }
 
@@ -71,20 +75,25 @@ const DEFAULT_SOURCE = 'new';
 /** Name, code source and what it's about for a new scheme; on success it opens the scheme. */
 function newSchemeForm() {
   const admin = !!account?.admin;
-  const sources = SOURCES.filter((s) => !s.admin || admin).map((s) => h('label', { class: 'source' },
-    h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === (admin ? DEFAULT_SOURCE : 'none'), disabled: !!s.linked && !admin }),
-    h('span', {}, s.label),
-    s.field ? h('input', { name: s.field, 'data-draft': true, placeholder: s.placeholder }) : '',
-    s.linked && !admin ? h('span', { class: 'source-note muted', hidden: true }) : ''));
-  const form = h('form', {},
+  const sources = SOURCES.filter((s) => !s.admin || admin).map((s) =>
+    h(
+      'label',
+      { class: 'source' },
+      h('input', { type: 'radio', name: 'source', value: s.value, checked: s.value === (admin ? DEFAULT_SOURCE : 'none'), disabled: !!s.linked && !admin }),
+      h('span', {}, s.label),
+      s.field ? h('input', { name: s.field, 'data-draft': true, placeholder: s.placeholder }) : '',
+      s.linked && !admin ? h('span', { class: 'source-note muted', hidden: true }) : '',
+    ),
+  );
+  const form = h(
+    'form',
+    {},
     h('label', {}, 'Name', h('input', { name: 'name', required: true, maxlength: 80, 'data-draft': true })),
     h('fieldset', { class: 'sources' }, h('legend', {}, 'Code'), ...sources),
-    h('label', {}, "What's it about? (the Taskmaster starts from this)",
-      h('textarea', { name: 'about', rows: 3, maxlength: 4000, 'data-draft': true, placeholder: 'What it is, who it is for, the first milestone' })),
+    h('label', {}, "What's it about? (the Taskmaster starts from this)", h('textarea', { name: 'about', rows: 3, maxlength: 4000, 'data-draft': true, placeholder: 'What it is, who it is for, the first milestone' })),
     h('p', { class: 'error', hidden: true }),
-    h('div', { class: 'row create-buttons' },
-      h('button', { type: 'submit', value: 'setup' }, 'Create and set up'),
-      h('button', { type: 'submit', value: 'only', class: 'secondary' }, 'Create only')));
+    h('div', { class: 'row create-buttons' }, h('button', { type: 'submit', value: 'setup' }, 'Create and set up'), h('button', { type: 'submit', value: 'only', class: 'secondary' }, 'Create only')),
+  );
   // Only the picked source's field shows.
   const showField = () => {
     for (const l of form.querySelectorAll('label.source')) {
@@ -93,9 +102,18 @@ function newSchemeForm() {
     }
   };
   let touched = false;
-  form.addEventListener('change', () => { touched = true; showField(); });
+  form.addEventListener('change', () => {
+    touched = true;
+    showField();
+  });
   showField();
-  if (!admin) linkedRepo(form, () => { if (!touched) { form.source.value = DEFAULT_SOURCE; showField(); } });
+  if (!admin)
+    linkedRepo(form, () => {
+      if (!touched) {
+        form.source.value = DEFAULT_SOURCE;
+        showField();
+      }
+    });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = e.submitter ?? form.querySelector('button[type=submit]');
@@ -107,9 +125,16 @@ function newSchemeForm() {
     try {
       // Only the picked source's own field: a non-admin's form has no folder field at all.
       const field = SOURCES.find((s) => s.value === source)?.field;
-      const p = await api('api/projects', { method: 'POST', body: {
-        name: form.name.value, source, ...(field && { [field]: form.elements[field].value }), about: form.about.value, setup: btn.value === 'setup',
-      } });
+      const p = await api('api/projects', {
+        method: 'POST',
+        body: {
+          name: form.name.value,
+          source,
+          ...(field && { [field]: form.elements[field].value }),
+          about: form.about.value,
+          setup: btn.value === 'setup',
+        },
+      });
       form.closest('dialog')?.close();
       location.hash = `#/p/${p.id}`;
     } catch (ex) {
@@ -138,9 +163,7 @@ async function linkedRepo(form, onLinked) {
     return onLinked();
   }
   const scheme = view?.projectId ?? view?.projects?.[0]?.id;
-  note.replaceChildren(gh?.link?.failed ? 'Link GitHub again in ' : 'Link GitHub in ',
-    scheme != null ? h('a', { href: `#/p/${scheme}/account`, onclick: () => form.closest('dialog')?.close() }, 'Settings → Your account') : 'Settings → Your account',
-    ' to make one on your own account.');
+  note.replaceChildren(gh?.link?.failed ? 'Link GitHub again in ' : 'Link GitHub in ', scheme != null ? h('a', { href: `#/p/${scheme}/account`, onclick: () => form.closest('dialog')?.close() }, 'Settings → Your account') : 'Settings → Your account', ' to make one on your own account.');
   note.hidden = false;
 }
 
@@ -162,9 +185,12 @@ function groupHeading(group) {
  */
 function buildHeading(s) {
   const b = view.builds?.find((x) => x.build === s.build);
-  return ['Build ', s.build, s.current ? h('span', { class: 'muted' }, ' current') : '',
-    b ? h('span', { class: 'build-counts muted' }, `${b.merged} merged in · ${b.open} open · ${b.behind} behind main`,
-      view.buildPreviews ? [' · ', h('a', { href: `../preview/build/${b.build}/`, target: '_blank', rel: 'noopener', title: `build/${b.build}'s tip on a copy of the data` }, 'Preview')] : '') : ''];
+  return [
+    'Build ',
+    s.build,
+    s.current ? h('span', { class: 'muted' }, ' current') : '',
+    b ? h('span', { class: 'build-counts muted' }, `${b.merged} merged in · ${b.open} open · ${b.behind} behind main`, view.buildPreviews ? [' · ', h('a', { href: `../preview/build/${b.build}/`, target: '_blank', rel: 'noopener', title: `build/${b.build}'s tip on a copy of the data` }, 'Preview')] : '') : '',
+  ];
 }
 
 /** The resting sections' headings (threadgroups.js threadSections). */
@@ -178,7 +204,10 @@ let sidebarFrame = 0;
  */
 export function scheduleSidebar() {
   if (sidebarFrame) return;
-  const run = () => { sidebarFrame = 0; if (view?.kind === 'project') renderSidebar(); };
+  const run = () => {
+    sidebarFrame = 0;
+    if (view?.kind === 'project') renderSidebar();
+  };
   sidebarFrame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(run) : setTimeout(run, 16);
 }
 
@@ -197,20 +226,34 @@ export function renderSidebar() {
   const tickets = picks.size ? all.filter((t) => matchesPicks(t, picks)) : all;
   // Its count depends on which minions you've seen, which changes with the rows.
   renderInbox();
-  if (threadSearch.q) return renderThreadResults(el, tickets.sort((a, b) => b.updated_at - a.updated_at));
+  if (threadSearch.q)
+    return renderThreadResults(
+      el,
+      tickets.sort((a, b) => b.updated_at - a.updated_at),
+    );
   const open = tickets.filter((t) => t.status !== 'closed' || t.release);
   const closed = tickets.filter((t) => t.status === 'closed' && !t.release).sort((a, b) => b.updated_at - a.updated_at);
   const sections = threadSections(open, Object.keys(TYPES), listGroupsOf(view.project), releaseOrder()).map((s) =>
-    h('section', { class: `thread-group g-${s.build ? 'build' : s.group ? 'promoted' : s.key}` },
+    h(
+      'section',
+      { class: `thread-group g-${s.build ? 'build' : s.group ? 'promoted' : s.key}` },
       h('h3', {}, s.build ? buildHeading(s) : s.key === 'parked' ? gloss('parked', REST.parked) : s.key in REST ? REST[s.key] : s.group ? groupHeading(s.group) : TYPES[s.type].section),
-      s.rows.sort((a, b) => byUrgency(a, b, usage)).map((t) => threadRow(t))));
+      s.rows.sort((a, b) => byUrgency(a, b, usage)).map((t) => threadRow(t)),
+    ),
+  );
   // Your pins (#179) on top, oldest pin first: a second copy of each row, which keeps its place below. A dismissed minion's pin waits, hidden, until it is reopened.
   const byId = new Map(open.filter((t) => t.status !== 'closed').map((t) => [t.id, t]));
   const pinned = (view.pins ?? []).map((id) => byId.get(id)).filter(Boolean);
-  const pinnedGroup = pinned.length ? h('section', { class: 'thread-group g-pinned' }, h('h3', {}, 'Pinned'), pinned.map((t) => threadRow(t))) : '';
+  const pinnedGroup = pinned.length
+    ? h(
+        'section',
+        { class: 'thread-group g-pinned' },
+        h('h3', {}, 'Pinned'),
+        pinned.map((t) => threadRow(t)),
+      )
+    : '';
   const head = [pinnedGroup, ...sections];
-  const tail = [!all.length ? h('p', { class: 'empty-state' }, 'No minions yet. Ask the Taskmaster to start one.')
-    : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : ''];
+  const tail = [!all.length ? h('p', { class: 'empty-state' }, 'No minions yet. Ask the Taskmaster to start one.') : !tickets.length ? h('p', { class: 'muted small' }, 'No minions match the filter.') : ''];
   if (!closed.length && !closedCount()) {
     closedRows.clear();
     return finish(el, head, tail);
@@ -240,14 +283,20 @@ function finish(el, head, tail) {
   if (whyTips?.open) whyTips.refresh();
 }
 
-let closedGroup = null, closedList = [];
+let closedGroup = null,
+  closedList = [];
 const closedRows = new Map();
 // The rows' stamps change words with the Pacific day, and their cost shares with the plan's usage (replaced, never changed in place) and the weekly limit (cost.js).
-let closedUsage = null, closedDay = '', closedShare = null;
+let closedUsage = null,
+  closedDay = '',
+  closedShare = null;
 
 // The Dismissed list shows a page of rows at a time (CLOSED_PAGE) and reads another from the server when its foot scrolls into view:
 // a scheme can have thousands, and their rows are most of the page's elements.
-let closedShown = CLOSED_PAGE, closedFor = null, closedFoot = null, closedWatch = null;
+let closedShown = CLOSED_PAGE,
+  closedFor = null,
+  closedFoot = null,
+  closedWatch = null;
 
 function dismissedGroup() {
   const g = h('details', { class: 'thread-group g-closed' }, h('summary', {}, 'Dismissed', h('span', { class: 'count' })));
@@ -261,7 +310,12 @@ function dismissedGroup() {
     }
   });
   // Observed again after each redraw (observe() always reports once), so a foot still in view asks for the next page.
-  closedWatch = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) growClosed(); }, { rootMargin: '300px' });
+  closedWatch = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting)) growClosed();
+    },
+    { rootMargin: '300px' },
+  );
   return g;
 }
 
@@ -272,11 +326,12 @@ function closedSummary(n) {
 
 /** The foot asked for more: build another page of rows, reading it from the server first when the page has none left in hand. */
 async function growClosed() {
-  const list = view.tickets, s = closedState(list);
+  const list = view.tickets,
+    s = closedState(list);
   if (!view.showClosed || list !== closedFor) return;
   if (closedShown < loadedClosed(list).length) closedShown += CLOSED_PAGE;
   else if (s.more && !s.failed) {
-    if (!await loadMoreClosed(list) || view.tickets !== list) return renderClosedFoot();
+    if (!(await loadMoreClosed(list)) || view.tickets !== list) return renderClosedFoot();
     closedShown += CLOSED_PAGE;
   } else return;
   renderSidebar();
@@ -287,7 +342,21 @@ function renderClosedFoot() {
   const s = closedState();
   const failed = s.failed && s.more;
   if (!failed) return closedFoot.replaceChildren();
-  closedFoot.replaceChildren('Couldn’t load more dismissed minions. ', h('button', { type: 'button', class: 'secondary small', onclick: () => { s.failed = false; growClosed(); } }, 'Try again'));
+  closedFoot.replaceChildren(
+    'Couldn’t load more dismissed minions. ',
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'secondary small',
+        onclick: () => {
+          s.failed = false;
+          growClosed();
+        },
+      },
+      'Try again',
+    ),
+  );
 }
 
 /** What a dismissed row shows besides its minion: when any of it changes the row is built again. */
@@ -299,7 +368,10 @@ function closedKey(t) {
 /** Fills the Dismissed list with its rows (none while it is shut), building only the rows that are new or changed. */
 function fillClosed(closed) {
   const rows = [];
-  if (view.tickets !== closedFor) { closedFor = view.tickets; closedShown = CLOSED_PAGE; }
+  if (view.tickets !== closedFor) {
+    closedFor = view.tickets;
+    closedShown = CLOSED_PAGE;
+  }
   if (view.showClosed) {
     // The minion you're on keeps its row built, however far down it sits.
     const at = closed.findIndex((t) => t.id === view.id);
@@ -314,7 +386,8 @@ function fillClosed(closed) {
     const live = new Set();
     for (const t of closed) {
       live.add(t.id);
-      const key = closedKey(t), hit = closedRows.get(t.id);
+      const key = closedKey(t),
+        hit = closedRows.get(t.id);
       if (hit && hit.t === t && hit.key === key) rows.push(hit.row);
       else {
         const row = threadRow(t);
@@ -360,7 +433,8 @@ export function revealActiveRow() {
   if (!row) return;
   const dismissed = row.closest('details.g-closed');
   if (dismissed && !dismissed.open) dismissed.open = true;
-  const r = row.getBoundingClientRect(), b = box.getBoundingClientRect();
+  const r = row.getBoundingClientRect(),
+    b = box.getBoundingClientRect();
   if (r.top < b.top || r.bottom > b.bottom) box.scrollTop += r.top - b.top - (box.clientHeight - r.height) / 2;
 }
 
@@ -433,23 +507,17 @@ function meaningHit(hit) {
   const t = { project_id: threadSearch.projectId, number: hit.number, id: hit.ticket_id, kind: hit.kind };
   const href = hit.source_kind === 'turn' ? jumpHref(t, hit.source_id) : threadHref(t);
   const day = new Date(hit.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-  return h('a', { class: 'meaning-hit', href, title: hit.text },
-    h('span', { class: 'name' }, isCoordinator(t) ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, hit.number), ' ', hit.title], h('span', { class: 'muted' }, ` · ${day}`)),
-    h('span', { class: 'snippet' }, hit.text));
+  return h('a', { class: 'meaning-hit', href, title: hit.text }, h('span', { class: 'name' }, isCoordinator(t) ? taskmasterLabel(t.project_id) : [h('span', { class: 'num' }, hit.number), ' ', hit.title], h('span', { class: 'muted' }, ` · ${day}`)), h('span', { class: 'snippet' }, hit.text));
 }
 
 /** The chats-by-meaning part of the results: a button until it runs, then what it found. */
 function meaningSection() {
   const { q, meaning } = threadSearch;
   const ran = meaning?.q === q ? meaning : null;
-  const button = h('button', { type: 'button', class: 'secondary meaning-go', disabled: q.length < 2 || ran?.busy, onclick: searchByMeaning },
-    ran?.busy ? 'Searching chats…' : ran ? 'Search again' : 'Search chats by meaning ⏎');
-  const body = !ran || ran.busy ? h('p', { class: 'muted small' }, 'What people and minions said, closest in meaning first, not just exact words.')
-    : ran.error ? h('p', { class: 'muted small' }, ran.error)
-    : ran.hits.length ? ran.hits.map(meaningHit)
-    : h('p', { class: 'muted small' }, 'Nothing in the chats comes close.');
-  return h('section', { class: 'column meaning', 'aria-busy': ran?.busy ? 'true' : 'false' },
-    h('h3', {}, 'In chats, by meaning', ran?.hits ? h('span', { class: 'count' }, ran.hits.length) : ''), button, body);
+  const button = h('button', { type: 'button', class: 'secondary meaning-go', disabled: q.length < 2 || ran?.busy, onclick: searchByMeaning }, ran?.busy ? 'Searching chats…' : ran ? 'Search again' : 'Search chats by meaning ⏎');
+  const body =
+    !ran || ran.busy ? h('p', { class: 'muted small' }, 'What people and minions said, closest in meaning first, not just exact words.') : ran.error ? h('p', { class: 'muted small' }, ran.error) : ran.hits.length ? ran.hits.map(meaningHit) : h('p', { class: 'muted small' }, 'Nothing in the chats comes close.');
+  return h('section', { class: 'column meaning', 'aria-busy': ran?.busy ? 'true' : 'false' }, h('h3', {}, 'In chats, by meaning', ran?.hits ? h('span', { class: 'count' }, ran.hits.length) : ''), button, body);
 }
 
 /** Search results: threads whose title, number or properties match, then the chats by meaning. */
@@ -462,21 +530,46 @@ function renderThreadResults(el, tickets) {
   const have = new Set(found.map((t) => t.id));
   const results = [...found, ...(asked?.tickets ?? []).filter((t) => !have.has(t.id) && !view.tickets.has(t.id) && matchesPicks(t, picks))].sort((a, b) => b.updated_at - a.updated_at);
   el.replaceChildren(
-    h('section', { class: 'column' },
+    h(
+      'section',
+      { class: 'column' },
       h('h3', {}, 'Results', h('span', { class: 'count' }, results.length)),
       results.length
-        ? [results.map((t) => threadRow(t)), asked?.busy ? h('p', { class: 'muted small' }, 'Searching the dismissed minions…') : asked?.error ? h('p', { class: 'muted small' }, `Couldn’t search the dismissed minions: ${asked.error}`) : asked?.more ? h('p', { class: 'muted small' }, `Showing the newest ${CLOSED_PAGE} dismissed matches: type more to narrow.`) : '']
-        : asked?.busy ? h('p', { class: 'muted small' }, 'Searching the dismissed minions…')
-        : h('div', { class: 'empty-state' },
-          h('p', {}, 'No minion has “', threadSearch.q.trim(), '” in its title, number or properties.'),
-          h('button', { type: 'button', class: 'secondary small', onclick: () => {
-            const input = document.querySelector('.thread-search');
-            if (!input) return;
-            input.value = '';
-            input.dispatchEvent(new Event('input'));
-            input.focus();
-          } }, 'Clear search'))),
-    meaningSection());
+        ? [
+            results.map((t) => threadRow(t)),
+            asked?.busy
+              ? h('p', { class: 'muted small' }, 'Searching the dismissed minions…')
+              : asked?.error
+                ? h('p', { class: 'muted small' }, `Couldn’t search the dismissed minions: ${asked.error}`)
+                : asked?.more
+                  ? h('p', { class: 'muted small' }, `Showing the newest ${CLOSED_PAGE} dismissed matches: type more to narrow.`)
+                  : '',
+          ]
+        : asked?.busy
+          ? h('p', { class: 'muted small' }, 'Searching the dismissed minions…')
+          : h(
+              'div',
+              { class: 'empty-state' },
+              h('p', {}, 'No minion has “', threadSearch.q.trim(), '” in its title, number or properties.'),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  class: 'secondary small',
+                  onclick: () => {
+                    const input = document.querySelector('.thread-search');
+                    if (!input) return;
+                    input.value = '';
+                    input.dispatchEvent(new Event('input'));
+                    input.focus();
+                  },
+                },
+                'Clear search',
+              ),
+            ),
+    ),
+    meaningSection(),
+  );
 }
 
 /** One compact row: number + short ask and the state on top, the thread's note (or what it is doing) below. */
@@ -496,12 +589,23 @@ export function threadRow(t, href = threadHref(t)) {
   const pnote = !coord && view.personNotes?.[t.id];
   const details = [
     threadFullName(t),
-    [gone ? `Dismissed ${gone.full}` : st.label, t.queued ? `${t.queued} queued` : '', coord ? '' : `started by ${t.created_by}`, !coord && t.parent ? `from #${t.parent}` : '', `updated ${ago(t.updated_at)}`, t.cost ? `${share ? `${share} of the server login's weekly limit, ` : ''}${costText(t.cost)} at API prices` : ''].filter(Boolean).join(' · '),
+    [
+      gone ? `Dismissed ${gone.full}` : st.label,
+      t.queued ? `${t.queued} queued` : '',
+      coord ? '' : `started by ${t.created_by}`,
+      !coord && t.parent ? `from #${t.parent}` : '',
+      `updated ${ago(t.updated_at)}`,
+      t.cost ? `${share ? `${share} of the server login's weekly limit, ` : ''}${costText(t.cost)} at API prices` : '',
+    ]
+      .filter(Boolean)
+      .join(' · '),
     note,
     !coord && t.status !== 'closed' && t.wait ? waitWords(t.wait) : '',
     !coord && t.ship ? `${t.ship.text} · ${t.ship.commit}` : '',
     pnote ? `✎ ${pnote.text} (${pnote.by})` : '',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
   const shipStage = !coord && t.status !== 'closed' && SHIP[t.ship?.stage];
   const wait = !coord && t.status !== 'closed' && t.wait;
   // Landed and on its way (#1019): the row says where its release is ("Windows: desktop waiting for a CI runner · 22m"), not the minion's last note.
@@ -522,7 +626,9 @@ export function threadRow(t, href = threadHref(t)) {
   const yours = !coord && !asleep && st.rank === 0 ? ' yours' : '';
   const unread = !coord && rowUnread(t, st, isSeen(t)) ? ' unread' : '';
   // No one-tap replies on list rows (#130): a stray tap on "Merge it" would ship work nobody opened.
-  return h('a', { class: `thread-row s-${t.status} f-${asleep ? 'idle' : st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${spend ? ' spend' : ''}${active ? ' active' : ''}${asleep ? ' asleep' : ''}`, href, title: details, 'data-id': t.id },
+  return h(
+    'a',
+    { class: `thread-row s-${t.status} f-${asleep ? 'idle' : st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${spend ? ' spend' : ''}${active ? ' active' : ''}${asleep ? ' asleep' : ''}`, href, title: details, 'data-id': t.id },
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), asleep ? sleepMark(t) : '', h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     // Messages the loop guard holds for a person (#1067; Josh, 2026-11-19: "a minion badge for the loop guard"): Continue is in its chat.
@@ -532,19 +638,25 @@ export function threadRow(t, href = threadHref(t)) {
     presenceChip(t),
     ownerChip(t, coord),
     waitChip(t, coord),
-    wait ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, st.server ? 'Server: ' : '', waitLine(wait), ' · ', waitClock(wait))
-      : rel ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, `${rel.target}: ${rel.text || rel.stage}`, rel.since ? [' · ', waitClock({ since: rel.since })] : '')
-      : note || ship || gone ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, gone ? h('span', { class: 'closed-at', title: gone.full }, `Dismissed ${gone.short}`) : '', gone && note ? ' · ' : '', note) : '',
+    wait
+      ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, st.server ? 'Server: ' : '', waitLine(wait), ' · ', waitClock(wait))
+      : rel
+        ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, `${rel.target}: ${rel.text || rel.stage}`, rel.since ? [' · ', waitClock({ since: rel.since })] : '')
+        : note || ship || gone
+          ? h('span', { class: `note${quiet && !unread ? ' t' : ''}` }, ship, gone ? h('span', { class: 'closed-at', title: gone.full }, `Dismissed ${gone.short}`) : '', gone && note ? ' · ' : '', note)
+          : '',
     t.cost && !(share && share.startsWith('<')) ? h('span', { class: 'cost' }, share ? `${share} wk` : costText(t.cost)) : '',
     pnote ? h('span', { class: 'pnote' }, `✎ ${pnote.text}`) : '',
-    bar);
+    bar,
+  );
 }
 
 /** An asleep row's moon (#1636): says since when and who; Wake is in the chat header. */
 const sleepMark = (t) => h('span', { class: 'sleep-mark', role: 'img', 'aria-label': 'Asleep', title: `Asleep since ${ago(t.asleep.at)}${t.asleep.by ? `, put to sleep by ${t.asleep.by}` : ''}. Wake it from its chat header` }, '🌙 ');
 
 /** The rows drawn last, by id, for their chips' popovers; a check's answer per minion while its popover shows it. */
-const drawn = new Map(), checks = new Map();
+const drawn = new Map(),
+  checks = new Map();
 let whyTips = null;
 
 /**
@@ -554,8 +666,7 @@ let whyTips = null;
 function stateChip(t, st) {
   drawn.set(t.id, { t, st });
   whyTips ??= mountTips(document.body, { selector: '.thread-row .state[data-tip-id]', body: (el) => whyBody(Number(el.dataset.tipId)), role: 'dialog', label: 'Why', tapOpens: true, className: 'why-tip' });
-  return h('span', { class: `state${st.quiet ? ' quiet' : ''}`, 'data-tip-id': t.id, tabindex: 0, title: '', 'aria-label': spokenCell(st) },
-    st.pulse ? phase(h('i', { class: 'pulse' }), 1600) : st.quiet ? h('i', { class: 'still' }) : '', st.cell);
+  return h('span', { class: `state${st.quiet ? ' quiet' : ''}`, 'data-tip-id': t.id, tabindex: 0, title: '', 'aria-label': spokenCell(st) }, st.pulse ? phase(h('i', { class: 'pulse' }), 1600) : st.quiet ? h('i', { class: 'still' }) : '', st.cell);
 }
 
 /**
@@ -565,7 +676,7 @@ function stateChip(t, st) {
  */
 const waitTips = { tips: null };
 function waitChip(t, coord) {
-  const rows = coord ? [] : t.outbox_waits ?? [];
+  const rows = coord ? [] : (t.outbox_waits ?? []);
   const live = rows.filter((w) => w.state !== 'dropped' && w.state !== 'failed');
   const shown = live[0] ?? rows[0];
   if (!shown) drawnWaits.delete(t.id);
@@ -577,9 +688,13 @@ function waitChip(t, coord) {
   if (changed && waitTips.tips?.open?.dataset.waitId === String(t.id)) queueMicrotask(() => waitTips.tips.refresh());
   waitTips.tips ??= mountTips(document.body, { selector: '.thread-row .wait-chip[data-wait-id]', body: (el) => waitBody(Number(el.dataset.waitId)), role: 'dialog', label: 'Waits', tapOpens: true, className: 'why-tip' });
   const more = live.length > 1 ? ` +${live.length - 1}` : '';
-  return h('span', { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, 'data-tip-wait': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.headline ?? w.what).join('; ')}` },
+  return h(
+    'span',
+    { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, 'data-tip-wait': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.headline ?? w.what).join('; ')}` },
     // The minion it names opens from the chip itself (Cara, 2026-11-22: "this should link to the minion it is waiting on"); the click stays off the row and the popover.
-    shown.link ? h('a', { class: 'wait-chip-link', href: `#/p/${shown.link.project}/t/${shown.link.number}`, title: `Waits on #${shown.link.number}`, 'aria-label': `Waits on #${shown.link.number}`, onclick: (e) => e.stopPropagation() }, shown.chip) : shown.chip, more);
+    shown.link ? h('a', { class: 'wait-chip-link', href: `#/p/${shown.link.project}/t/${shown.link.number}`, title: `Waits on #${shown.link.number}`, 'aria-label': `Waits on #${shown.link.number}`, onclick: (e) => e.stopPropagation() }, shown.chip) : shown.chip,
+    more,
+  );
 }
 export const drawnWaits = new Map();
 /**
@@ -594,46 +709,104 @@ export function waitBody(id) {
   waitOpening.delete(id);
   // Any wait on another minion puts it in a chain (Cara picked "every wait on another minion", #1679): the popover leads there.
   const t = rows.some((w) => w.link && w.state !== 'dropped' && w.state !== 'failed') && view.tickets?.get(id);
-  return h('div', { class: 'why wait-lines' }, rows.map((w) => {
-    const gone = w.state === 'dropped' || w.state === 'failed';
-    const key = waitKey(w), open = waitOpen.get(id) === key;
-    return h('div', { class: `wait-line${gone ? ' gone' : ''}${open ? ' open' : ''}${open && opening === key ? ' opening' : ''}` },
-      h('button', { type: 'button', class: 'wait-line-hd', 'data-wait-key': key, 'aria-expanded': String(open), onclick: () => toggleWait(id, key) },
-        h('b', { class: 'wait-line-chip' }, w.chip),
-        h('span', { class: 'wait-line-hl' }, w.headline ?? w.what, gone ? ` (${w.reason ?? w.state})` : ''),
-        h('span', { class: 'wait-line-chev', 'aria-hidden': 'true' }, '▸'),
-        w.headline && w.line ? h('span', { class: 'wait-line-meta' }, w.line) : ''),
-      open ? waitSummary(id, w, gone) : '');
-  }), t?.number ? h('a', { class: 'wait-chain-link', href: chainsHref(t.project_id, t.number), onclick: () => waitTips.tips?.close() }, 'See the chain →') : '');
+  return h(
+    'div',
+    { class: 'why wait-lines' },
+    rows.map((w) => {
+      const gone = w.state === 'dropped' || w.state === 'failed';
+      const key = waitKey(w),
+        open = waitOpen.get(id) === key;
+      return h(
+        'div',
+        { class: `wait-line${gone ? ' gone' : ''}${open ? ' open' : ''}${open && opening === key ? ' opening' : ''}` },
+        h(
+          'button',
+          { type: 'button', class: 'wait-line-hd', 'data-wait-key': key, 'aria-expanded': String(open), onclick: () => toggleWait(id, key) },
+          h('b', { class: 'wait-line-chip' }, w.chip),
+          h('span', { class: 'wait-line-hl' }, w.headline ?? w.what, gone ? ` (${w.reason ?? w.state})` : ''),
+          h('span', { class: 'wait-line-chev', 'aria-hidden': 'true' }, '▸'),
+          w.headline && w.line ? h('span', { class: 'wait-line-meta' }, w.line) : '',
+        ),
+        open ? waitSummary(id, w, gone) : '',
+      );
+    }),
+    t?.number ? h('a', { class: 'wait-chain-link', href: chainsHref(t.project_id, t.number), onclick: () => waitTips.tips?.close() }, 'See the chain →') : '',
+  );
 }
 /** The open line per minion (by wait id), so a redraw keeps it open; and the one just clicked, which animates once. */
-const waitOpen = new Map(), waitOpening = new Map(), waitAll = new Set();
+const waitOpen = new Map(),
+  waitOpening = new Map(),
+  waitAll = new Set();
 const waitKey = (w) => String(w.id ?? `${w.kind}:${w.what}`);
 function toggleWait(id, key) {
   if (waitOpen.get(id) === key) waitOpen.delete(id);
-  else { waitOpen.set(id, key); waitOpening.set(id, key); }
+  else {
+    waitOpen.set(id, key);
+    waitOpening.set(id, key);
+  }
   waitTips.tips?.refresh();
   document.querySelector(`.why-tip:popover-open .wait-line-hd[data-wait-key="${CSS.escape(key)}"]`)?.focus();
 }
 const sentences = (t) => t.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)\s*/g) ?? [t];
 function waitSummary(id, w, gone) {
-  const text = w.text ?? w.what ?? '', all = sentences(text), key = waitKey(w), full = waitAll.has(key) || all.length <= 3;
-  return h('div', { class: 'wait-sum' }, h('div', { class: 'wait-sum-in' },
-    text ? h('p', { class: 'wait-sum-words' }, full ? text : all.slice(0, 3).join('').trim(), full ? '' : [' ', h('button', { type: 'button', class: 'wait-more', onclick: () => { waitAll.add(key); waitTips.tips?.refresh(); } }, 'Show all')]) : '',
-    w.facts?.length ? h('p', { class: 'wait-facts' }, w.facts.join(' · ')) : '',
-    // The link and Cancel share their own row, so neither leaves a dangling "·" when the facts wrap.
-    w.link || (w.cancellable && !gone) ? h('div', { class: 'wait-acts' },
-      w.link ? h('a', { href: `#/p/${w.link.project}/t/${w.link.number}`, onclick: () => waitTips.tips?.close() }, `Open #${w.link.number}`) : '',
-      w.cancellable && !gone ? h('button', { type: 'button', class: 'wait-cancel', onclick: () => cancelWait(id, w) }, 'Cancel') : '') : ''));
+  const text = w.text ?? w.what ?? '',
+    all = sentences(text),
+    key = waitKey(w),
+    full = waitAll.has(key) || all.length <= 3;
+  return h(
+    'div',
+    { class: 'wait-sum' },
+    h(
+      'div',
+      { class: 'wait-sum-in' },
+      text
+        ? h(
+            'p',
+            { class: 'wait-sum-words' },
+            full ? text : all.slice(0, 3).join('').trim(),
+            full
+              ? ''
+              : [
+                  ' ',
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      class: 'wait-more',
+                      onclick: () => {
+                        waitAll.add(key);
+                        waitTips.tips?.refresh();
+                      },
+                    },
+                    'Show all',
+                  ),
+                ],
+          )
+        : '',
+      w.facts?.length ? h('p', { class: 'wait-facts' }, w.facts.join(' · ')) : '',
+      // The link and Cancel share their own row, so neither leaves a dangling "·" when the facts wrap.
+      w.link || (w.cancellable && !gone)
+        ? h('div', { class: 'wait-acts' }, w.link ? h('a', { href: `#/p/${w.link.project}/t/${w.link.number}`, onclick: () => waitTips.tips?.close() }, `Open #${w.link.number}`) : '', w.cancellable && !gone ? h('button', { type: 'button', class: 'wait-cancel', onclick: () => cancelWait(id, w) }, 'Cancel') : '')
+        : '',
+    ),
+  );
 }
 function cancelWait(id, w) {
   const was = { state: w.state, reason: w.reason, cancellable: w.cancellable };
-  const redraw = () => { if (waitTips.tips?.open) waitTips.tips.refresh(); };
+  const redraw = () => {
+    if (waitTips.tips?.open) waitTips.tips.refresh();
+  };
   optimistic({
     sets: `wait:${w.id}`,
-    apply: () => { Object.assign(w, { state: 'dropped', reason: 'cancelled', cancellable: false }); redraw(); },
+    apply: () => {
+      Object.assign(w, { state: 'dropped', reason: 'cancelled', cancellable: false });
+      redraw();
+    },
     send: () => api(`api/tickets/${id}/waits/${w.id}/cancel`, { method: 'POST', body: {} }),
-    undo: () => { Object.assign(w, was); redraw(); },
+    undo: () => {
+      Object.assign(w, was);
+      redraw();
+    },
     label: 'cancel the wait',
   }).catch(() => {});
 }
@@ -641,21 +814,33 @@ function cancelWait(id, w) {
 function whyBody(id) {
   const row = drawn.get(id);
   if (!row) return null;
-  const { t, st } = row, why = rowWhy(t, st);
+  const { t, st } = row,
+    why = rowWhy(t, st);
   const check = checks.get(id);
-  return h('div', { class: `why f-${st.fam || 'none'}` },
+  return h(
+    'div',
+    { class: `why f-${st.fam || 'none'}` },
     h('b', { class: 'why-title' }, why.title),
     why.lines.map((l) => h('p', {}, l)),
     why.more ? h('p', { class: 'why-more' }, why.more) : '',
-    check ? h('p', { class: `why-check${check.busy ? ' busy' : ''}` }, check.busy ? 'Checking the turn\'s process…' : check.text) : '',
-    why.quiet ? h('div', { class: 'why-acts' },
-      h('button', { type: 'button', class: 'secondary act-stop', disabled: stoppingIds.has(t.id), onclick: () => stopTurn(t) }, stoppingIds.has(t.id) ? 'Stopping…' : 'Stop'),
-      h('button', { type: 'button', class: 'secondary', disabled: !!check?.busy, onclick: () => checkTurn(t) }, 'Is this still going?')) : '',
-    why.link ? h('a', { href: why.link.href, onclick: () => whyTips?.close() }, why.link.text) : '');
+    check ? h('p', { class: `why-check${check.busy ? ' busy' : ''}` }, check.busy ? "Checking the turn's process…" : check.text) : '',
+    why.quiet
+      ? h(
+          'div',
+          { class: 'why-acts' },
+          h('button', { type: 'button', class: 'secondary act-stop', disabled: stoppingIds.has(t.id), onclick: () => stopTurn(t) }, stoppingIds.has(t.id) ? 'Stopping…' : 'Stop'),
+          h('button', { type: 'button', class: 'secondary', disabled: !!check?.busy, onclick: () => checkTurn(t) }, 'Is this still going?'),
+        )
+      : '',
+    why.link ? h('a', { href: why.link.href, onclick: () => whyTips?.close() }, why.link.text) : '',
+  );
 }
 
 function stopTurn(t) {
-  stopChat(t, () => { if (whyTips?.open) whyTips.refresh(); renderSidebar(); });
+  stopChat(t, () => {
+    if (whyTips?.open) whyTips.refresh();
+    renderSidebar();
+  });
 }
 
 /** The server looks at the turn's process (src/quiet.ts checkProcess): no model call, no message to the minion. */
@@ -694,9 +879,21 @@ function cardBadge(cards, spend = null, theirs = false) {
     else openHash(cards[0].href);
   };
   const what = spend ? `spend alert: this turn passed $${spend.stage} and has used about $${spend.usd}` : `${cards[0].what ?? cards[0].kind} card${cards[0].label ? ` "${cards[0].label}"` : ''}`;
-  return h('span', {
-    class: `card-badge${spend ? ' spend' : theirs ? ' theirs' : ''}`, role: 'link', tabindex: 0,
-    title: cards.length > 1 ? `${cards.length} cards wait: open the oldest, the ${what}` : `Open the ${what}`,
-    onclick: go, onauxclick: (e) => { if (e.button === 1) go(e); }, onkeydown: (e) => { if (e.key === 'Enter') go(e); },
-  }, cardChip(cards));
+  return h(
+    'span',
+    {
+      class: `card-badge${spend ? ' spend' : theirs ? ' theirs' : ''}`,
+      role: 'link',
+      tabindex: 0,
+      title: cards.length > 1 ? `${cards.length} cards wait: open the oldest, the ${what}` : `Open the ${what}`,
+      onclick: go,
+      onauxclick: (e) => {
+        if (e.button === 1) go(e);
+      },
+      onkeydown: (e) => {
+        if (e.key === 'Enter') go(e);
+      },
+    },
+    cardChip(cards),
+  );
 }

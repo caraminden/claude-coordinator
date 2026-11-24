@@ -19,17 +19,25 @@ after(async () => {
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 const NOW = Date.UTC(2026, 10, 8, 14, 5);
 const store = new Store(join(root, 'test.db'));
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 runner.now = () => NOW;
 
 test('Deliver now on cold mail whose Claude login is refused returns 0 and keeps the mail and its cold time', async () => {

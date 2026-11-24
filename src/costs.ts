@@ -72,9 +72,12 @@ export function spendSplit(store: Store, now = Date.now()): { people: SpendRow[]
     const row = into.get(name) ?? into.set(name, { name, week: 0, month: 0 }).get(name)!;
     row[key] += cost;
   };
-  for (const [key, since] of [['month', dayStart(MONTH_DAYS - 1)], ['week', dayStart(COST_DAYS - 1)]] as const) {
+  for (const [key, since] of [
+    ['month', dayStart(MONTH_DAYS - 1)],
+    ['week', dayStart(COST_DAYS - 1)],
+  ] as const) {
     for (const r of store.spendByPayer(since)) {
-      add(people, r.payer === null ? `${host} (server login)` : users.get(r.payer) ?? `Person ${r.payer}`, key, r.cost);
+      add(people, r.payer === null ? `${host} (server login)` : (users.get(r.payer) ?? `Person ${r.payer}`), key, r.cost);
       add(schemes, projects.get(r.project_id) ?? `Scheme ${r.project_id}`, key, r.cost);
     }
   }
@@ -89,7 +92,12 @@ const MIN_UTILIZATION = 0.03;
 const LAST_BUDGET = 'day_budget';
 
 type Meter = { weekly: { utilization: number; resetsAt: number | null } | null };
-export interface WeekPart { n: number; label: string; limit: number | null; /** no estimate of its own yet: counted like the priced accounts' average */ assumed: boolean }
+export interface WeekPart {
+  n: number;
+  label: string;
+  limit: number | null /** no estimate of its own yet: counted like the priced accounts' average */;
+  assumed: boolean;
+}
 
 /**
  * The server login's weekly limit at API prices, every Claude account together (Cara, 2026-11-17: the Day chip ignored the
@@ -102,7 +110,11 @@ export function hostWeek(store: Store, usage: (Meter & { accounts?: { n: number;
   const priced = parts.filter((p) => p.limit !== null);
   if (!priced.length) return { limit: null, parts };
   const avg = priced.reduce((x, p) => x + p.limit!, 0) / priced.length;
-  for (const p of parts) if (p.limit === null) { p.limit = avg; p.assumed = true; }
+  for (const p of parts)
+    if (p.limit === null) {
+      p.limit = avg;
+      p.assumed = true;
+    }
   return { limit: parts.reduce((x, p) => x + p.limit!, 0), parts };
 }
 
@@ -152,21 +164,25 @@ function kindOf(r: SpendRowRaw): string {
  * kind of work, and the top 10 minions. Turns from before the split count under their minion's model, marked estimated.
  */
 export function whereItWent(store: Store, payer: number | null, weekUsd: number | null, now = Date.now(), range: 'week' | 'all' = 'week'): WhereItWent {
-  const week = 7 * 86400_000, all = range === 'all';
+  const week = 7 * 86400_000,
+    all = range === 'all';
   const projects = new Map(store.listProjects().map((p) => [p.id, p.name]));
   const group = <K>(rows: [SpendRowRaw, number, boolean][], key: (r: SpendRowRaw) => K, name: (k: K) => string, cur: boolean) => {
     const out = new Map<K, Slice>();
     for (const [r, usd, est] of rows) {
       const k = key(r);
       const s = out.get(k) ?? out.set(k, { name: name(k), usd: 0, lastWeek: 0, estimated: 0 }).get(k)!;
-      if (cur) { s.usd += usd; if (est) s.estimated += usd; } else s.lastWeek += usd;
+      if (cur) {
+        s.usd += usd;
+        if (est) s.estimated += usd;
+      } else s.lastWeek += usd;
     }
     return out;
   };
-  const rows = (since: number, until: number) => store.spendRows(payer, since, until).map((r): [SpendRowRaw, number, boolean] =>
-    [{ ...r, model: modelName(r.model ?? r.minion_model ?? 'claude-opus-5-5') }, r.cost, r.model === null]);
+  const rows = (since: number, until: number) => store.spendRows(payer, since, until).map((r): [SpendRowRaw, number, boolean] => [{ ...r, model: modelName(r.model ?? r.minion_model ?? 'claude-opus-5-5') }, r.cost, r.model === null]);
   // All time (#956): everything recorded, no week before to set it against.
-  const cur = rows(all ? 0 : now - week, now + 1), prev = all ? [] : rows(now - 2 * week, now - week);
+  const cur = rows(all ? 0 : now - week, now + 1),
+    prev = all ? [] : rows(now - 2 * week, now - week);
   const merge = <K>(key: (r: SpendRowRaw) => K, name: (k: K) => string) => {
     const m = group(cur, key, name, true);
     for (const [k, s] of group(prev, key, name, false)) (m.get(k) ?? m.set(k, { ...s, lastWeek: 0 }).get(k)!).lastWeek = s.lastWeek;
@@ -179,9 +195,20 @@ export function whereItWent(store: Store, payer: number | null, weekUsd: number 
   }
   const sum = (rs: [SpendRowRaw, number, boolean][]) => rs.reduce((a, [, usd]) => a + usd, 0);
   return {
-    range, since: all ? 0 : now - week, until: now, total: sum(cur), lastWeek: sum(prev), weekUsd,
-    models: merge((r) => r.model!, (k) => k).map(([, s]) => s),
-    schemes: merge((r) => r.project_id, (id) => projects.get(id) ?? `Scheme ${id}`).map(([id, s]) => ({ ...s, id })),
+    range,
+    since: all ? 0 : now - week,
+    until: now,
+    total: sum(cur),
+    lastWeek: sum(prev),
+    weekUsd,
+    models: merge(
+      (r) => r.model!,
+      (k) => k,
+    ).map(([, s]) => s),
+    schemes: merge(
+      (r) => r.project_id,
+      (id) => projects.get(id) ?? `Scheme ${id}`,
+    ).map(([id, s]) => ({ ...s, id })),
     kinds: merge(kindOf, (k) => k).map(([, s]) => s),
     top: [...minions.values()].sort((a, b) => b.usd - a.usd).slice(0, 10),
   };
@@ -236,7 +263,11 @@ export function fableMeter(store: Store, now = Date.now()): FableMeter {
   // Each account's estimated weekly limit is kept as week_usd:<payer or host>[:account:N] (weekLimit).
   // Only the server login's and the signed-up people's own: a removed person's old estimate stays in settings and must not inflate the cap.
   const live = new Set(['host', ...store.listUsers().map((u) => String(u.id))]);
-  const limits = store.settingsWithPrefix<number>('week_usd:').filter((r) => live.has(r.key.split(':')[1])).map((r) => r.value).filter((v) => typeof v === 'number' && v > 0);
+  const limits = store
+    .settingsWithPrefix<number>('week_usd:')
+    .filter((r) => live.has(r.key.split(':')[1]))
+    .map((r) => r.value)
+    .filter((v) => typeof v === 'number' && v > 0);
   const weekUsd = limits.length ? limits.reduce((a, b) => a + b, 0) : null;
   const capUsd = weekUsd === null ? null : (weekUsd * capPct) / 100;
   return { capPct, usd, weekUsd, capUsd, over: capUsd !== null && usd >= capUsd };

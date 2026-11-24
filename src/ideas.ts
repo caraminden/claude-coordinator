@@ -122,12 +122,12 @@ export interface HandoffHead {
 export function parseHandoff(text: string, sharedDir: string): HandoffHead {
   const head = text.split('\n').slice(0, HEAD_LINES).join('\n');
   const h1 = /^#\s+(.+)$/m.exec(head)?.[1].trim() ?? '';
-  const title = h1.replace(/^handoff\s*[:—-]\s*/i, '').replace(/[*_`]/g, '').trim();
-  const abs = new RegExp(`${esc(sharedDir)}/([^\\s\`'")\\]]+?\\.html)`).exec(head)?.[1]
-    ?? /(?<![\w/.-])((?:mockups|reports|specs|pages)\/[^\s`'")\]]+?\.html)/.exec(head)?.[1];
-  const card = /\b(?:card|idea)\s+([A-Z]{1,2}\d{1,2})\b/.exec(head)?.[1]
-    ?? /\(([A-Z]{1,2}\d{1,2})\)\s*$/.exec(h1)?.[1]
-    ?? /\*\*Pick[^*]*\*\*:?\s*([A-Z]{1,2}\d{1,2})\b/.exec(head)?.[1] ?? null;
+  const title = h1
+    .replace(/^handoff\s*[:—-]\s*/i, '')
+    .replace(/[*_`]/g, '')
+    .trim();
+  const abs = new RegExp(`${esc(sharedDir)}/([^\\s\`'")\\]]+?\\.html)`).exec(head)?.[1] ?? /(?<![\w/.-])((?:mockups|reports|specs|pages)\/[^\s`'")\]]+?\.html)/.exec(head)?.[1];
+  const card = /\b(?:card|idea)\s+([A-Z]{1,2}\d{1,2})\b/.exec(head)?.[1] ?? /\(([A-Z]{1,2}\d{1,2})\)\s*$/.exec(h1)?.[1] ?? /\*\*Pick[^*]*\*\*:?\s*([A-Z]{1,2}\d{1,2})\b/.exec(head)?.[1] ?? null;
   const src = /\bfrom\s+(?:[\w-]+\s+)?#(\d{1,6})\b/i.exec(head)?.[1];
   return { title: title || h1, page: abs ? join(sharedDir, abs) : null, card, source: src ? Number(src) : null };
 }
@@ -154,7 +154,11 @@ export function handoffFiles(sharedDir: string): string[] {
   const out: string[] = [];
   const walk = (dir: string, depth: number) => {
     let names: import('node:fs').Dirent[];
-    try { names = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try {
+      names = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
     for (const d of names) {
       if (d.name.startsWith('.')) continue;
       const p = join(dir, d.name);
@@ -165,7 +169,9 @@ export function handoffFiles(sharedDir: string): string[] {
   walk(join(sharedDir, 'handoffs'), 0);
   try {
     for (const n of readdirSync(sharedDir)) if (n.endsWith('.md') && /handoff/i.test(n)) out.push(n);
-  } catch { /* no shared folder yet */ }
+  } catch {
+    /* no shared folder yet */
+  }
   return out.sort();
 }
 
@@ -221,8 +227,7 @@ export class Ideas {
       const vals = [projectId, page, card, now, now, ...keys.map((k) => (patch as Record<string, unknown>)[k])];
       this.db.prepare(`INSERT INTO ideas (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(...(vals as (string | number | null)[]));
     } else {
-      this.db.prepare(`UPDATE ideas SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`)
-        .run(...(keys.map((k) => (patch as Record<string, unknown>)[k]) as (string | number | null)[]), now, cur.id);
+      this.db.prepare(`UPDATE ideas SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`).run(...(keys.map((k) => (patch as Record<string, unknown>)[k]) as (string | number | null)[]), now, cur.id);
     }
     return this.find(projectId, page, card)!;
   }
@@ -254,11 +259,19 @@ export class Ideas {
   fromHandoff(projectId: number, sharedDir: string, rel: string): Idea | null {
     const abs = join(sharedDir, rel);
     let mtime: number;
-    try { mtime = statSync(abs).mtimeMs; } catch { return this.byHandoff(projectId, rel) ?? null; }
+    try {
+      mtime = statSync(abs).mtimeMs;
+    } catch {
+      return this.byHandoff(projectId, rel) ?? null;
+    }
     let h = this.heads.get(abs);
     if (!h || h.mtime !== mtime) {
       let text = '';
-      try { text = readFileSync(abs, 'utf8').slice(0, 20_000); } catch { return null; }
+      try {
+        text = readFileSync(abs, 'utf8').slice(0, 20_000);
+      } catch {
+        return null;
+      }
       h = { mtime, head: parseHandoff(text, sharedDir) };
       this.heads.set(abs, h);
     }
@@ -271,9 +284,7 @@ export class Ideas {
   private join(projectId: number, rel: string, head: HandoffHead): Idea {
     const { card, title, source } = head;
     // A handoff that names its card and the minion whose page it was ("#1093's ideas, idea A1") but not the page's path.
-    const onPage = head.page && card ? this.find(projectId, head.page, card)
-      : card && source ? this.db.prepare("SELECT * FROM ideas WHERE project_id = ? AND source_number = ? AND card = ? AND page != '' ORDER BY id LIMIT 1").get(projectId, source, card) as unknown as Idea | undefined
-      : undefined;
+    const onPage = head.page && card ? this.find(projectId, head.page, card) : card && source ? (this.db.prepare("SELECT * FROM ideas WHERE project_id = ? AND source_number = ? AND card = ? AND page != '' ORDER BY id LIMIT 1").get(projectId, source, card) as unknown as Idea | undefined) : undefined;
     const page = head.page ?? onPage?.page;
     if (page && card && (!onPage || !onPage.handoff)) {
       return this.upsert(projectId, page, card, { handoff: rel, title: onPage?.title || title, source_number: onPage?.source_number ?? source });
@@ -291,7 +302,9 @@ export class Ideas {
       let ids: string[] = [];
       try {
         ids = (JSON.parse(u.data).message?.content ?? []).filter((c: { type?: string; input?: unknown }) => c.type === 'tool_use' && JSON.stringify(c.input ?? '').includes(abs)).map((c: { id: string }) => c.id);
-      } catch { continue; }
+      } catch {
+        continue;
+      }
       for (const id of ids) {
         const r = result.get(ticketId, like(id)) as { data: string } | undefined;
         if (!r) continue;
@@ -299,7 +312,9 @@ export class Ideas {
         try {
           const c = (JSON.parse(r.data).message?.content ?? []).find((x: { tool_use_id?: string }) => x.tool_use_id === id)?.content;
           text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x: { text?: string }) => x.text ?? '').join('\n') : '';
-        } catch { continue; }
+        } catch {
+          continue;
+        }
         // Read's output numbers each line ("    12\t…" or "12→…"); cat's doesn't.
         text = text.replace(/^ *\d+(?:\t|→)/gm, '');
         if (/^#\s/m.test(text)) return this.join(projectId, rel, parseHandoff(text.slice(0, 20_000), sharedDir));
@@ -320,16 +335,24 @@ export class Ideas {
         colls = laterCollections(readFileSync(file, 'utf8'));
         this.pages.set(file, { mtime, colls });
       }
-    } catch { /* gone: its rows stay */ }
+    } catch {
+      /* gone: its rows stay */
+    }
     const docs = this.db.prepare("SELECT key, value FROM artifact_data WHERE project_id = ? AND file = ? AND key LIKE 'db/%'").all(projectId, file) as { key: string; value: string }[];
     const parsed = docs.flatMap((d) => {
       const m = /^db\/([^/]+)\/(.+)$/.exec(d.key);
       if (!m) return [];
-      try { return [{ collection: m[1], id: m[2], doc: JSON.parse(d.value) as { v?: string | null; note?: string; by?: string; at?: string } }]; } catch { return []; }
+      try {
+        return [{ collection: m[1], id: m[2], doc: JSON.parse(d.value) as { v?: string | null; note?: string; by?: string; at?: string } }];
+      } catch {
+        return [];
+      }
     });
-    const later = new Set([...colls, ...parsed.filter((p) => p.doc.v === 'later').map((p) => p.collection),
-      ...(this.db.prepare('SELECT DISTINCT collection FROM ideas WHERE project_id = ? AND page = ?').all(projectId, file) as { collection: string }[]).map((r) => r.collection)]);
-    const titles = sendTitles(sendText, parsed.filter((p) => later.has(p.collection)).map((p) => p.id));
+    const later = new Set([...colls, ...parsed.filter((p) => p.doc.v === 'later').map((p) => p.collection), ...(this.db.prepare('SELECT DISTINCT collection FROM ideas WHERE project_id = ? AND page = ?').all(projectId, file) as { collection: string }[]).map((r) => r.collection)]);
+    const titles = sendTitles(
+      sendText,
+      parsed.filter((p) => later.has(p.collection)).map((p) => p.id),
+    );
     for (const it of items) if (later.has(it.collection) && it.title && it.title !== it.id) titles.set(it.id, it.title);
     const known = new Set<string>();
     for (const { collection, id, doc } of parsed) {
@@ -338,8 +361,14 @@ export class Ideas {
       const label = items.find((i) => i.collection === collection && i.id === id)?.label;
       const at = doc.at ? Date.parse(doc.at) : NaN;
       this.upsert(projectId, file, id, {
-        collection, source_number: source ?? undefined, pick: doc.v || null, decided_by: doc.by ?? null, words: doc.note?.trim() || null,
-        decided_at: Number.isFinite(at) ? at : null, ...(titles.get(id) ? { title: titles.get(id) } : {}), ...(label ? { pick_label: label } : {}),
+        collection,
+        source_number: source ?? undefined,
+        pick: doc.v || null,
+        decided_by: doc.by ?? null,
+        words: doc.note?.trim() || null,
+        decided_at: Number.isFinite(at) ? at : null,
+        ...(titles.get(id) ? { title: titles.get(id) } : {}),
+        ...(label ? { pick_label: label } : {}),
       });
     }
     // An item the page lists that nobody picked yet: proposed, with its title.
@@ -409,7 +438,10 @@ export class Ideas {
     const lesson = this.db.prepare('SELECT 1 FROM ship_lessons WHERE ticket_id = ? LIMIT 1');
     const did = (id: number) => {
       if (this.shipped.has(id)) return true;
-      if (lesson.get(id)) { this.shipped.add(id); return true; }
+      if (lesson.get(id)) {
+        this.shipped.add(id);
+        return true;
+      }
       const m = (last.get(id) as { m: number | null }).m ?? 0;
       const from = this.shipScanned.get(id) ?? 0;
       if (m === from) return false;
@@ -422,7 +454,10 @@ export class Ideas {
     };
     for (const id of linked) {
       yield;
-      if (did(id)) { out.add(id); continue; }
+      if (did(id)) {
+        out.add(id);
+        continue;
+      }
       const t = this.db.prepare('SELECT build FROM tickets WHERE id = ?').get(id) as { build: number | null } | undefined;
       if (!t?.build) continue;
       const owner = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(`build-owner:${projectId}:${t.build}`) as { value: string } | undefined;
@@ -441,7 +476,11 @@ export class Ideas {
     for (const t of tickets) {
       const row = first.get(t.id) as { data: string } | undefined;
       let text = '';
-      try { text = row ? String(JSON.parse(row.data).text ?? '') : ''; } catch { /* not JSON */ }
+      try {
+        text = row ? String(JSON.parse(row.data).text ?? '') : '';
+      } catch {
+        /* not JSON */
+      }
       const rel = handoffIn(text, sharedDir);
       if (rel) this.linkHandoff(projectId, sharedDir, rel, t);
     }
@@ -470,7 +509,10 @@ export class Ideas {
       const untitled = this.db.prepare("SELECT 1 FROM ideas WHERE project_id = ? AND page = ? AND title = '' LIMIT 1").get(projectId, file);
       const fresh = !this.db.prepare('SELECT 1 FROM ideas WHERE project_id = ? AND page = ? LIMIT 1').get(projectId, file);
       const key = `${projectId}\0${file}`;
-      if ((!untitled && !fresh) || this.searched.has(key)) { this.readPage(projectId, file, src?.number ?? null); continue; }
+      if ((!untitled && !fresh) || this.searched.has(key)) {
+        this.readPage(projectId, file, src?.number ?? null);
+        continue;
+      }
       this.searched.add(key);
       yield* this.sendSteps(projectId);
       const sends = this.sendsOf(projectId, file);
@@ -494,7 +536,7 @@ export class Ideas {
     const top = (this.db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1').get() as { id: number } | undefined)?.id ?? 0;
     let held = this.sends.get(projectId);
     // Past the newest event: the newest were deleted and their ids may come back, so read afresh.
-    if (!held || held.mark > top) this.sends.set(projectId, held = { mark: 0, rows: [] });
+    if (!held || held.mark > top) this.sends.set(projectId, (held = { mark: 0, rows: [] }));
     // CROSS JOIN keeps events first, on events_asks: from tickets, it read every event of the scheme's minions to check its kind.
     const range = this.db.prepare(`SELECT t.id AS ticket, e.data, t.number, t.kind FROM events e CROSS JOIN tickets t ON t.id = e.ticket_id
       WHERE e.kind = 'user_message' AND e.id > ? AND e.id <= ? AND t.project_id = ? AND e.data LIKE '%Picks on %' ORDER BY e.id`);
@@ -515,7 +557,11 @@ export class Ideas {
     const rows = this.sends.get(projectId)!.rows.filter((r) => r.data.includes(file) && here.get(r.ticket, projectId));
     const texts: string[] = [];
     for (const r of rows) {
-      try { texts.push(String(JSON.parse(r.data).text ?? '')); } catch { /* skip */ }
+      try {
+        texts.push(String(JSON.parse(r.data).text ?? ''));
+      } catch {
+        /* skip */
+      }
     }
     return { text: texts.reverse().join('\n'), source: rows.find((r) => r.kind === 'ticket')?.number ?? null };
   }
@@ -523,10 +569,13 @@ export class Ideas {
   /** Run sync soon (debounced per scheme), off the request that asked for it; errors are logged, never thrown. */
   soon(projectId: number, sharedDir: string, ms = 1500): void {
     clearTimeout(this.timers.get(projectId));
-    this.timers.set(projectId, setTimeout(() => {
-      this.timers.delete(projectId);
-      void this.now(projectId, sharedDir);
-    }, ms).unref());
+    this.timers.set(
+      projectId,
+      setTimeout(() => {
+        this.timers.delete(projectId);
+        void this.now(projectId, sharedDir);
+      }, ms).unref(),
+    );
   }
 
   now(projectId: number, sharedDir: string): Promise<void> {
@@ -543,7 +592,8 @@ export class Ideas {
 
   /** Later rows decided over two weeks ago, oldest first. */
   staleLater(projectId: number, now = Date.now()): Idea[] {
-    return this.list(projectId).filter((r) => r.status === 'later' && (r.decided_at ?? r.created_at) < now - LATER_STALE_MS)
+    return this.list(projectId)
+      .filter((r) => r.status === 'later' && (r.decided_at ?? r.created_at) < now - LATER_STALE_MS)
       .sort((a, b) => (a.decided_at ?? a.created_at) - (b.decided_at ?? b.created_at));
   }
 

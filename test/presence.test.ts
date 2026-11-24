@@ -8,7 +8,7 @@ import { Presence, VIEW_TTL_MS, WROTE_MS } from '../src/presence.ts';
 function world() {
   let now = 1_000_000;
   const sent: any[] = [];
-  const projectOf = (id: number) => ({ 1: 10, 2: 10, 3: 20 } as Record<number, number>)[id];
+  const projectOf = (id: number) => (({ 1: 10, 2: 10, 3: 20 }) as Record<number, number>)[id];
   const p = new Presence({ projectOf, broadcast: (m) => sent.push(m), now: () => now });
   return { p, sent, tick: (ms: number) => (now += ms) };
 }
@@ -31,7 +31,10 @@ test('moving to another scheme clears the old one; another person can not use yo
   p.open('s1', 'Josh');
   p.view('s1', 'Josh', 1);
   p.view('s1', 'Josh', 3);
-  assert.deepEqual(sent.slice(-2), [{ type: 'presence', projectId: 10, tickets: {} }, { type: 'presence', projectId: 20, tickets: { 3: ['Josh'] } }]);
+  assert.deepEqual(sent.slice(-2), [
+    { type: 'presence', projectId: 10, tickets: {} },
+    { type: 'presence', projectId: 20, tickets: { 3: ['Josh'] } },
+  ]);
   assert.equal(p.view('s1', 'Olive', 1), false);
   assert.equal(p.view('nope', 'Josh', 1), false);
 });

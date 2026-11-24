@@ -62,14 +62,22 @@ after(async () => {
 
 const start = async (projectId: number, title: string) => {
   const res = await fetch(`${srv.base}/api/projects/${projectId}/tickets`, {
-    method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ title, message: title, properties: { type: 'chore' } }),
+    method: 'POST',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, message: title, properties: { type: 'chore' } }),
   });
   assert.equal(res.status, 201);
   return (await res.json()) as { id: number; number: number };
 };
 const events = (ticketId: number) => db.listEvents(ticketId).map((e) => ({ kind: e.kind, data: JSON.parse(e.data) }));
-const mail = (ticketId: number) => events(ticketId).filter((e) => e.kind === 'user_message' && e.data.mail).map((e) => String(e.data.text));
-const cards = (ticketId: number) => events(ticketId).filter((e) => e.kind === 'question').map((e) => e.data);
+const mail = (ticketId: number) =>
+  events(ticketId)
+    .filter((e) => e.kind === 'user_message' && e.data.mail)
+    .map((e) => String(e.data.text));
+const cards = (ticketId: number) =>
+  events(ticketId)
+    .filter((e) => e.kind === 'question')
+    .map((e) => e.data);
 
 test("the Overlord hears of every start, and gets a card when one reads like another person's open minion", async () => {
   // Josh's minion has to be indexed before a look-alike can be found.
@@ -77,9 +85,18 @@ test("the Overlord hears of every start, and gets a card when one reads like ano
   await until('the hit', async () => (await hits()).some((h: any) => h.ticket_id === joshWork.id), 10000);
 
   const twin = await start(Shared.id, 'Fix the retry loop in land.sh after a refused push');
-  const heard = await until(`mail naming #${twin.number}`, () => { const m = mail(overlord.id); return m.some((t) => t.includes(`#${twin.number}`)) && m; });
-  assert.ok(heard.some((t) => t.startsWith(`Cara started #${twin.number} `)), heard.join('\n'));
-  const [card] = await until('a card for the look-alike', () => { const c = cards(overlord.id); return c.length > 0 && c; });
+  const heard = await until(`mail naming #${twin.number}`, () => {
+    const m = mail(overlord.id);
+    return m.some((t) => t.includes(`#${twin.number}`)) && m;
+  });
+  assert.ok(
+    heard.some((t) => t.startsWith(`Cara started #${twin.number} `)),
+    heard.join('\n'),
+  );
+  const [card] = await until('a card for the look-alike', () => {
+    const c = cards(overlord.id);
+    return c.length > 0 && c;
+  });
   assert.ok(card, 'a card for the look-alike');
   const q = card.questions[0];
   assert.match(q.question, new RegExp(`Cara started #${twin.number} .*Josh's #${joshWork.number} `));
@@ -105,7 +122,8 @@ test("the Overlord's cards are for everyone, a person's own Taskmaster's aren't;
   const ownJosh = db.coordinatorFor(Shared.id, Josh.id)!;
   const ask = async (ticketId: number) => {
     const res = await fetch(`${srv.base}/api/tickets/${ticketId}/questions`, {
-      method: 'POST', headers: { Authorization: `Bearer ${agentToken(data, ticketId)}`, 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: { Authorization: `Bearer ${agentToken(data, ticketId)}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ not_duplicate: true, questions: [{ question: 'Who takes the pipeline lane next?', options: [{ label: 'Josh', recommended: true }, { label: 'Cara' }] }] }),
     });
     assert.equal(res.status, 201);
@@ -118,23 +136,33 @@ test("the Overlord's cards are for everyone, a person's own Taskmaster's aren't;
   assert.equal(card(ownJosh.id, ownCard).everyone, undefined);
 
   const res = await fetch(`${srv.base}/api/tickets/${overlord.id}/answer`, {
-    method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: lordCard, answers: [{ selected: ['Josh'] }] }),
+    method: 'POST',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questionId: lordCard, answers: [{ selected: ['Josh'] }] }),
   });
   assert.equal(res.status, 202);
-  const got = await until(`the answer in mail for Taskmaster #${ownJosh.id}`, () => { const m = mail(ownJosh.id); return m.some((t) => t.includes('Who takes the pipeline lane next?')) && m; });
-  assert.ok(got.some((t) => /Cara answered the Overlord's card[\s\S]*→ Josh/.test(t)), got.join('\n'));
+  const got = await until(`the answer in mail for Taskmaster #${ownJosh.id}`, () => {
+    const m = mail(ownJosh.id);
+    return m.some((t) => t.includes('Who takes the pipeline lane next?')) && m;
+  });
+  assert.ok(
+    got.some((t) => /Cara answered the Overlord's card[\s\S]*→ Josh/.test(t)),
+    got.join('\n'),
+  );
   // Cara answered it herself, so her own Taskmaster's chat gets no "for your tracking" row (#1630; the echo runs before the 202 returns).
-  assert.ok(!mail(ownCara.id).some((t) => t.includes('answered the Overlord')), 'the answerer\'s own Taskmaster gets no tracking mail');
-  assert.ok(!mail(overlord.id).some((t) => t.includes('for your tracking')), 'the Overlord, the card\'s own chat, gets no tracking mail');
+  assert.ok(!mail(ownCara.id).some((t) => t.includes('answered the Overlord')), "the answerer's own Taskmaster gets no tracking mail");
+  assert.ok(!mail(overlord.id).some((t) => t.includes('for your tracking')), "the Overlord, the card's own chat, gets no tracking mail");
 });
 
-test("a person's Taskmaster asks for everyone: the card sits with the Overlord, and its answer wakes the asker (Cara: \"Asker acts on it\")", async () => {
+test('a person\'s Taskmaster asks for everyone: the card sits with the Overlord, and its answer wakes the asker (Cara: "Asker acts on it")', async () => {
   const ownCara = db.coordinatorFor(Shared.id, Cara.id)!;
   const ownJosh = db.coordinatorFor(Shared.id, Josh.id)!;
-  const ask = (ticketId: number, extra: object = {}) => fetch(`${srv.base}/api/tickets/${ticketId}/questions`, {
-    method: 'POST', headers: { Authorization: `Bearer ${agentToken(data, ticketId)}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ questions: [{ question: 'Freeze lands over the weekend?', options: [{ label: 'Yes', recommended: true }, { label: 'No' }] }], for_everyone: true, ...extra }),
-  });
+  const ask = (ticketId: number, extra: object = {}) =>
+    fetch(`${srv.base}/api/tickets/${ticketId}/questions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${agentToken(data, ticketId)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questions: [{ question: 'Freeze lands over the weekend?', options: [{ label: 'Yes', recommended: true }, { label: 'No' }] }], for_everyone: true, ...extra }),
+    });
   const res = await ask(ownJosh.id);
   assert.equal(res.status, 201);
   const { id, href } = (await res.json()) as { id: string; href: string };
@@ -146,18 +174,33 @@ test("a person's Taskmaster asks for everyone: the card sits with the Overlord, 
   assert.equal((await ask(joshWork.id)).status, 400, 'only a Taskmaster asks for everyone');
 
   const answered = await fetch(`${srv.base}/api/tickets/${overlord.id}/answer`, {
-    method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: id, answers: [{ selected: ['No'] }] }),
+    method: 'POST',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questionId: id, answers: [{ selected: ['No'] }] }),
   });
   assert.equal(answered.status, 202);
-  const told = await until("a plain message with 'Freeze lands' for Josh's Taskmaster", () => { const t = events(ownJosh.id).filter((e) => e.kind === 'user_message' && !e.data.mail).map((e) => String(e.data.text)); return t.some((x) => x.includes('Freeze lands')) && t; });
-  assert.ok(told.some((t) => /for everyone[\s\S]*Freeze lands over the weekend\?\n→ No/.test(t)), told.join('\n'));
+  const told = await until("a plain message with 'Freeze lands' for Josh's Taskmaster", () => {
+    const t = events(ownJosh.id)
+      .filter((e) => e.kind === 'user_message' && !e.data.mail)
+      .map((e) => String(e.data.text));
+    return t.some((x) => x.includes('Freeze lands')) && t;
+  });
+  assert.ok(
+    told.some((t) => /for everyone[\s\S]*Freeze lands over the weekend\?\n→ No/.test(t)),
+    told.join('\n'),
+  );
   const lord = events(overlord.id).filter((e) => e.kind === 'user_message');
-  assert.ok(lord.some((e) => e.data.answer?.questionId === id && !e.data.mail), "the answer is in the Overlord's chat, where the card is");
+  assert.ok(
+    lord.some((e) => e.data.answer?.questionId === id && !e.data.mail),
+    "the answer is in the Overlord's chat, where the card is",
+  );
   assert.ok(!lord.some((e) => e.data.mail && String(e.data.text).includes('Freeze lands')), 'the Overlord, where the card is, gets no tracking mail about it');
   assert.ok(!mail(ownCara.id).some((t) => t.includes('Freeze lands')), "nor does Cara's own: she answered it herself (#1630)");
   assert.ok(!mail(ownJosh.id).some((t) => t.includes('Freeze lands')), 'the asker gets it once, as its wake');
   const again = await fetch(`${srv.base}/api/tickets/${overlord.id}/answer`, {
-    method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: id, answers: [{ selected: ['Yes'] }] }),
+    method: 'POST',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questionId: id, answers: [{ selected: ['Yes'] }] }),
   });
   assert.equal(again.status, 409, 'one answer settles it for everyone');
 });
@@ -165,14 +208,24 @@ test("a person's Taskmaster asks for everyone: the card sits with the Overlord, 
 test("dismissing a Taskmaster's card for everyone tells the Taskmaster that asked, not the Overlord (#1593)", async () => {
   const ownJosh = db.coordinatorFor(Shared.id, Josh.id)!;
   const posted = await fetch(`${srv.base}/api/tickets/${ownJosh.id}/questions`, {
-    method: 'POST', headers: { Authorization: `Bearer ${agentToken(data, ownJosh.id)}`, 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { Authorization: `Bearer ${agentToken(data, ownJosh.id)}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ questions: [{ question: 'Pause the nightly sweep?', options: [{ label: 'Yes', recommended: true }, { label: 'No' }] }], for_everyone: true }),
   });
   const { id } = (await posted.json()) as { id: string };
   const res = await fetch(`${srv.base}/api/tickets/${overlord.id}/dismiss`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ cardId: id }) });
   assert.equal(res.status, 200);
-  const told = await until("the dismissal for Josh's Taskmaster", () => { const t = events(ownJosh.id).filter((e) => e.kind === 'user_message').map((e) => String(e.data.text)).filter((x) => x.includes('dismissed your card')); return t.length && t; });
-  assert.ok(told.some((t) => t.includes('"Pause the nightly sweep?"')), told.join('\n'));
+  const told = await until("the dismissal for Josh's Taskmaster", () => {
+    const t = events(ownJosh.id)
+      .filter((e) => e.kind === 'user_message')
+      .map((e) => String(e.data.text))
+      .filter((x) => x.includes('dismissed your card'));
+    return t.length && t;
+  });
+  assert.ok(
+    told.some((t) => t.includes('"Pause the nightly sweep?"')),
+    told.join('\n'),
+  );
   assert.ok(!events(overlord.id).some((e) => e.kind === 'user_message' && String(e.data.text).includes('dismissed your card')), 'the Overlord, where the card is, gets no note');
   assert.equal(cards(overlord.id).find((c) => c.id === id).settled.dismissed, true);
 });
@@ -186,7 +239,12 @@ test("an Overlord turn runs for whoever started it, else the scheme's owner, nev
   s.splitScheme(p.id, josh.id);
   const lord = s.getOverlord(p.id)!;
   s.updateTicket(lord.id, { person_id: josh.id }); // Josh answered its last card
-  const runner = new Runner(s, () => {}, () => ({}), '/bin/false');
+  const runner = new Runner(
+    s,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   runner.personOf = (author) => s.findUser('name', author)?.id ?? null;
   const turnPerson = (batch: any[]) => (runner as any).turnPerson(s.getTicket(lord.id), s.getProject(p.id), batch);
   assert.equal(turnPerson([{ author: 'Josh', text: 'Both stay', images: [], own: true }]), josh.id, 'the starter');
@@ -200,11 +258,16 @@ test("a plain note on the Overlord is one person's; one emitted for everyone is 
   const josh = s.createUser({ name: 'Josh', login: 'josh' });
   const p = s.createProject('Shared', null, cara.id);
   const first = s.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
-  const runner = new Runner(s, () => {}, () => ({}), '/bin/false');
+  const runner = new Runner(
+    s,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   const note = (id: number) => JSON.parse(runner.emit(id, 'note', { text: 'CI store is full' }).data);
-  assert.equal(note(first.id).everyone, undefined, 'before a split its only Taskmaster is everyone\'s anyway');
+  assert.equal(note(first.id).everyone, undefined, "before a split its only Taskmaster is everyone's anyway");
   s.splitScheme(p.id, josh.id);
-  assert.equal(note(s.getOverlord(p.id)!.id).everyone, undefined, 'a one-person note on the Overlord stays out of everyone\'s Mine');
+  assert.equal(note(s.getOverlord(p.id)!.id).everyone, undefined, "a one-person note on the Overlord stays out of everyone's Mine");
   const lord = s.getOverlord(p.id)!.id;
   assert.equal(JSON.parse(runner.emit(lord, 'note', { text: 'CI store is full', everyone: true }).data).everyone, true);
   assert.equal(note(s.coordinatorFor(p.id, josh.id)!.id).everyone, undefined);
@@ -217,14 +280,19 @@ test("a plain note on the Overlord is one person's; one emitted for everyone is 
   s.db.close();
 });
 
-test("a dismissed minion is a line in a split scheme's Taskmaster digest (#919: \"claims and closes are yours to add\")", async () => {
+test('a dismissed minion is a line in a split scheme\'s Taskmaster digest (#919: "claims and closes are yours to add")', async () => {
   const s = new Store(join(root, 'closes.db'));
   const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });
   const josh = s.createUser({ name: 'Josh', login: 'josh' });
   const p = s.createProject('Shared', null, cara.id);
   s.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
   const before = s.createTicket({ project_id: p.id, title: 'Before the split', permission_mode: 'default', created_by: 'Cara' });
-  const runner = new Runner(s, () => {}, () => ({}), '/bin/false');
+  const runner = new Runner(
+    s,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   await runner.close(before.id, 'Dismissed.');
   s.splitScheme(p.id, josh.id);
   const m = s.createTicket({ project_id: p.id, title: 'Lairs', permission_mode: 'default', created_by: 'Josh' });

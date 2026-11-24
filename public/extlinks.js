@@ -45,7 +45,6 @@ export function appSrc(name, to, origin) {
   return url.pathname + url.search + url.hash;
 }
 
-
 /**
  * What a click on `href` (at `base`) should do, the one rule every handler uses. `ctx`: `own` Citadel's hosts, `apps`
  * app host -> name, `domain` the apps domain (APPS_DOMAIN: every host on it is Citadel's), `self` the app this page is (null on Citadel's own pages). Answers

@@ -14,7 +14,10 @@ export function inOrder(items, keyOf, keys) {
   if (!keys?.length) return items;
   const at = new Map(keys.map((k, i) => [String(k), i]));
   const rank = (x) => at.get(String(keyOf(x))) ?? Infinity;
-  return items.map((x, i) => [x, i]).sort(([a, i], [b, j]) => rank(a) - rank(b) || i - j).map(([x]) => x);
+  return items
+    .map((x, i) => [x, i])
+    .sort(([a, i], [b, j]) => rank(a) - rank(b) || i - j)
+    .map(([x]) => x);
 }
 
 /** `keys` with the one at `from` moved to `to`. */
@@ -59,7 +62,9 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
 
   /** Where `row` sits with its carried lines, measured once as the drag starts. */
   const extent = (row) => {
-    const all = parts(row).map((el) => el.getBoundingClientRect()).filter((b) => b.height);
+    const all = parts(row)
+      .map((el) => el.getBoundingClientRect())
+      .filter((b) => b.height);
     return { row, top: all[0].top, bottom: Math.max(...all.map((b) => b.bottom)), left: all[0].left, width: all[0].width };
   };
 
@@ -94,8 +99,10 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
     const at = press.marker.offsetParent ?? document.documentElement; // the list, unless a page made it static
     const box = at.getBoundingClientRect();
     Object.assign(press.marker.style, {
-      top: `${top - box.top - at.clientTop + at.scrollTop}px`, left: `${self.left - box.left - at.clientLeft + at.scrollLeft}px`,
-      width: `${self.width}px`, height: `${self.bottom - self.top}px`,
+      top: `${top - box.top - at.clientTop + at.scrollTop}px`,
+      left: `${self.left - box.left - at.clientLeft + at.scrollLeft}px`,
+      width: `${self.width}px`,
+      height: `${self.bottom - self.top}px`,
     });
   };
 
@@ -145,11 +152,15 @@ export function dragReorder(list, { items, carry = () => [], onDrop }) {
     (row?.matches('a, button, [tabindex]') ? row : row?.querySelector('a, button, [tabindex]'))?.focus();
   });
   // Once a row is up, the finger moves it: no scrolling, and no drawer swipe (drawers.js listens on document).
-  list.addEventListener('touchmove', (e) => {
-    if (!press?.dragging) return;
-    if (e.cancelable) e.preventDefault();
-    e.stopPropagation();
-  }, { passive: false });
+  list.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!press?.dragging) return;
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+    },
+    { passive: false },
+  );
   // The phone's long-press menu, and the browser's own drag of a link or an image, would steal the press.
   list.addEventListener('contextmenu', (e) => press && e.preventDefault());
   list.addEventListener('dragstart', (e) => items().some((r) => r.contains(e.target)) && e.preventDefault());

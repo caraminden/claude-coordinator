@@ -28,10 +28,19 @@ function fake(queue: object[], extraArgs: string[] = [], files: Record<string, s
     const r = spawnSync(process.execPath, [join(HERE, 'fake-claude.mjs'), '-p', '--input-format', 'stream-json', ...extraArgs.map((a) => a.replace('{dir}', dir))], {
       input: JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'hello' }] } }) + '\n',
       env: { ...process.env, FAKE_CLAUDE_DIR: dir, CLAUDE_CONFIG_DIR: join(dir, 'config'), COORDINATOR_TICKET: '4', COORDINATOR_ROLE: 'thread' },
-      encoding: 'utf8', cwd: dir, timeout: 30_000,
+      encoding: 'utf8',
+      cwd: dir,
+      timeout: 30_000,
     });
-    const events = r.stdout.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-    const calls = readFileSync(join(dir, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); // raw-read-ok: spawnSync returned, so the fake has exited
+    const events = r.stdout
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+    const calls = readFileSync(join(dir, 'calls.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l)); // raw-read-ok: spawnSync returned, so the fake has exited
     return { status: r.status, events, calls, left: readFileSync(join(dir, 'turns.jsonl'), 'utf8') };
   } finally {
     rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
@@ -63,13 +72,13 @@ test('a not-logged-in turn reads as an account error', async () => {
   assert.match(events.at(-1).result, ACCOUNT_ERROR);
 });
 
-test('the clock offset boot.mjs writes moves the limit\'s reset hour and the log\'s time', () => {
+test("the clock offset boot.mjs writes moves the limit's reset hour and the log's time", () => {
   const day = 24 * 3600_000;
   const { calls } = fake([{}], [], { 'clock-offset': String(day) });
   assert.ok(Math.abs(Date.parse(calls[0].at) - (Date.now() + day)) < 60_000);
 });
 
-test('the server\'s shifted clock moves Date and Date.now, and a bare Date() still returns a string', () => {
+test("the server's shifted clock moves Date and Date.now, and a bare Date() still returns a string", () => {
   const day = 24 * 3600_000;
   const code = 'console.log(JSON.stringify([Date.now(), new Date().getTime(), typeof Date(), new Date(0).getTime(), new Date() instanceof Date, Date.UTC(2026, 0, 1)]))';
   const r = spawnSync(process.execPath, [`--import=${join(HERE, 'verifier-clock.mjs')}`, '-e', code], { env: { ...process.env, VERIFIER_CLOCK_OFFSET_MS: String(day) }, encoding: 'utf8' });
@@ -79,7 +88,7 @@ test('the server\'s shifted clock moves Date and Date.now, and a bare Date() sti
   assert.deepEqual([bare, epoch, isDate, utc], ['string', 0, true, Date.UTC(2026, 0, 1)]);
 });
 
-test('tools go to the turn\'s own stdio MCP server, the way Claude Code calls them', () => {
+test("tools go to the turn's own stdio MCP server, the way Claude Code calls them", () => {
   // A tiny MCP server: answers initialize, echoes a tools/call with the ticket it runs for.
   const server = `const rl = require('node:readline').createInterface({ input: process.stdin });
 rl.on('line', (l) => { const m = JSON.parse(l); if (m.id === undefined) return;
@@ -97,8 +106,17 @@ const drive = (command: string) => JSON.stringify({ type: 'assistant', message: 
 const say = (text: string) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
 
 test('the stay hook counts only calls that drive the running copy', () => {
-  const lines = [drive('curl -s -H "Cookie: $DEV_COOKIE" "${DEV_URL}api/projects"'), drive('node boot.mjs restart'), drive('node tools/ui-shot.ts "#/p/1"'),
-    drive('echo \'{"outcome":"usage_limit"}\' >> fake/turns.jsonl'), drive('git diff main...HEAD'), drive('node --test test/x.test.ts'), drive('cat src/runner.ts'), 'not json', say('done')];
+  const lines = [
+    drive('curl -s -H "Cookie: $DEV_COOKIE" "${DEV_URL}api/projects"'),
+    drive('node boot.mjs restart'),
+    drive('node tools/ui-shot.ts "#/p/1"'),
+    drive('echo \'{"outcome":"usage_limit"}\' >> fake/turns.jsonl'),
+    drive('git diff main...HEAD'),
+    drive('node --test test/x.test.ts'),
+    drive('cat src/runner.ts'),
+    'not json',
+    say('done'),
+  ];
   const t = tally(lines, 0, 20 * 60_000);
   assert.equal(t.drives, 4);
   assert.equal(t.minutes, 20);

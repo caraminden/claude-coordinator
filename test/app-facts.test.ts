@@ -63,7 +63,7 @@ test('a minion parked on start_after is told what it waits on, in its turn messa
   assert.ok(!turnContext(project, minion, null, null, '/tickets', null).includes("#3 Leader's work is merged"));
 });
 
-test('a minion\'s system prompt is byte-identical when its title, state, note or properties change (#704)', () => {
+test("a minion's system prompt is byte-identical when its title, state, note or properties change (#704)", () => {
   const render = (t: any) => systemPrompt(project, t, '/shared/5', '/shared/project', '/tickets', '/memory', [], true, 'App rule.');
   const before = render(minion);
   const after = render({ ...minion, title: 'A completely new title', state: 'ready', note: 'waiting on a pick', replies: ['Merge it'], props: { type: 'bug', stage: 'review' } });

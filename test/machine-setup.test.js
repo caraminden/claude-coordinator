@@ -13,28 +13,30 @@ import { backgroundService, claudeServerNames, cmdLine, loadConfig } from '../pu
 const root = mkdtempSync(join(tmpdir(), 'machine-setup-'));
 
 test('the install lines name no MCP server and no folder: the page ticks those later', () => {
-  assert.equal(machineSetupPosix('https://a', 'pc', 't'),
-    'mkdir -p ~/coordinator-agent && cd ~/coordinator-agent &&\ncurl -fsSLO https://a/machine-agent.mjs &&\nnode machine-agent.mjs https://a t --config machine-agent.json --install pc');
+  assert.equal(machineSetupPosix('https://a', 'pc', 't'), 'mkdir -p ~/coordinator-agent && cd ~/coordinator-agent &&\ncurl -fsSLO https://a/machine-agent.mjs &&\nnode machine-agent.mjs https://a t --config machine-agent.json --install pc');
   const win = machineSetupWindows('https://a', 'pc', 't');
   assert.doesNotMatch(win, /CC_WORKSPACE_SETUP|--claude-mcp| -- /);
   assert.match(win, /--config `"\$dir\\machine-agent\.json`" --log `"\$log`""\n/);
 });
 
-test('the agent finds Claude Code\'s stdio servers by name only, in every scope', () => {
+test("the agent finds Claude Code's stdio servers by name only, in every scope", () => {
   const home = mkdtempSync(join(root, 'names-'));
   const env = { CLAUDE_CONFIG_DIR: home };
   assert.deepEqual(claudeServerNames(env), [], 'no config is no servers');
-  writeFileSync(join(home, '.claude.json'), JSON.stringify({
-    mcpServers: { 'godot-ai': { command: 'uvx', args: ['godot-ai'], env: { KEY: 'secret-value' } }, remote: { type: 'http', url: 'https://x' }, 'bad name!': { command: 'x' } },
-    projects: { '/a': { mcpServers: { blender: { command: 'blender-mcp' }, 'godot-ai': { command: 'other' } } }, '/b': {} },
-  }));
+  writeFileSync(
+    join(home, '.claude.json'),
+    JSON.stringify({
+      mcpServers: { 'godot-ai': { command: 'uvx', args: ['godot-ai'], env: { KEY: 'secret-value' } }, remote: { type: 'http', url: 'https://x' }, 'bad name!': { command: 'x' } },
+      projects: { '/a': { mcpServers: { blender: { command: 'blender-mcp' }, 'godot-ai': { command: 'other' } } }, '/b': {} },
+    }),
+  );
   assert.deepEqual(claudeServerNames(env), ['blender', 'godot-ai'], 'stdio ones, each once; an http server and a name the app would refuse are left out');
   assert.doesNotMatch(JSON.stringify(claudeServerNames(env)), /secret-value|uvx|blender-mcp/);
   writeFileSync(join(home, '.claude.json'), 'not json');
   assert.deepEqual(claudeServerNames(env), []);
 });
 
-test('machine-agent.json lists the owner\'s own servers as a program and its arguments', () => {
+test("machine-agent.json lists the owner's own servers as a program and its arguments", () => {
   const file = join(mkdtempSync(join(root, 'servers-')), 'machine-agent.json');
   writeFileSync(file, JSON.stringify({ servers: { godot: { run: ['uvx', 'godot-ai', 'attach'] }, shelly: { run: 'uvx godot-ai' }, 'no good': { run: ['x'] }, empty: { run: [] } } }));
   const { servers, problems } = loadConfig(file);
@@ -54,11 +56,14 @@ function runBackground({ said = 'Connected to app.example as "pc".', systemctl =
   mkdirSync(bin);
   const agentFile = join(import.meta.dirname, '..', 'public', 'machine-agent.mjs');
   writeFileSync(join(bin, 'curl'), `#!/bin/sh\ncp ${JSON.stringify(agentFile)} machine-agent.mjs\n`);
-  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh
+  writeFileSync(
+    join(bin, 'systemctl'),
+    `#!/bin/sh
 echo "$*" >> "$HOME/systemctl-calls"
 case "$*" in *restart*) echo ${posixQuote(said)} >> "$HOME/coordinator-agent/machine-agent-pc.log";; esac
 exit ${systemctl}
-`);
+`,
+  );
   chmodSync(join(bin, 'curl'), 0o755);
   chmodSync(join(bin, 'systemctl'), 0o755);
   // A Claude Code config with godot-ai, as its dock's Configure button leaves it.
@@ -91,7 +96,7 @@ test('the macOS/Linux line installs a systemd user unit that keeps running, with
   assert.match(run.stdout, /Stop it: systemctl --user stop coordinator-agent-pc\.service/);
 });
 
-test('an agent set up the old way keeps its command\'s arguments after the log option, quoted as systemd reads them', () => {
+test("an agent set up the old way keeps its command's arguments after the log option, quoted as systemd reads them", () => {
   const s = backgroundService({ platform: 'linux', home: '/home/jo', uid: 1000, name: 'pc', env: {}, argv: ['/usr/bin/node', '/home/jo/a/machine-agent.mjs', 'https://a', 't', '--', 'npx', '-y', 'some-mcp', '100%'] });
   assert.match(s.text, /"--log" "[^"]+machine-agent-pc\.log" "--" "npx" "-y" "some-mcp" "100%%"$/m);
 });
@@ -107,7 +112,11 @@ test('the background lines say so when the agent is refused, or there is no syst
 
 test('on macOS it is a launchd agent that starts at login and again if it stops', () => {
   const s = backgroundService({
-    platform: 'darwin', home: '/Users/jo', uid: 501, name: 'mac', env: { PATH: '/opt/homebrew/bin:/usr/bin', HOME: '/Users/jo' },
+    platform: 'darwin',
+    home: '/Users/jo',
+    uid: 501,
+    name: 'mac',
+    env: { PATH: '/opt/homebrew/bin:/usr/bin', HOME: '/Users/jo' },
     argv: ['/opt/homebrew/bin/node', '/Users/jo/coordinator-agent/machine-agent.mjs', 'https://a', 't', '--', 'run', 'a&b<c>'],
   });
   assert.equal(s.file, '/Users/jo/Library/LaunchAgents/coordinator-agent.mac.plist');

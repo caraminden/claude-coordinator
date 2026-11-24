@@ -9,7 +9,10 @@ const fixtures = {
   Citadel: `# CLAUDE.md\n\n## Project facts\n\n- **Check commands:** \`npm test\` (\`node --test test/\` through\n  \`tools/citadel-node\`, so it escapes ananicy's idle rule); a UI change is also checked\n  in a dev copy.\n- **Front end:** \`public/\`, plain JS.\n- **Numbered things:** none.\n\n## Skills\n`,
   'Peek Auras': `# CLAUDE.md\n\n## Project facts\n\n- **Check commands:** ${long}\n- **Front end:** none.\n\n## Other\n`,
 };
-for (const [name, first, last] of [['Citadel', 'Check commands', 'Numbered things'], ['Peek Auras', 'Check commands', null]] as const) {
+for (const [name, first, last] of [
+  ['Citadel', 'Check commands', 'Numbered things'],
+  ['Peek Auras', 'Check commands', null],
+] as const) {
   test(`parses ${name}'s Project facts`, () => {
     const facts = parseProjectFacts(fixtures[name])!;
     assert.equal(facts[0].label, first);
@@ -20,7 +23,10 @@ for (const [name, first, last] of [['Citadel', 'Check commands', 'Numbered thing
 }
 
 test('the block ends at the next ## and a missing block is null', () => {
-  assert.deepEqual(parseProjectFacts('# T\n## Project facts\n\n- **A:** one\n  two\n- **B:** x\n## Next\n- **C:** no'), [{ label: 'A', value: 'one two' }, { label: 'B', value: 'x' }]);
+  assert.deepEqual(parseProjectFacts('# T\n## Project facts\n\n- **A:** one\n  two\n- **B:** x\n## Next\n- **C:** no'), [
+    { label: 'A', value: 'one two' },
+    { label: 'B', value: 'x' },
+  ]);
   assert.equal(parseProjectFacts('# T\n## Other\n'), null);
 });
 
@@ -35,7 +41,10 @@ test('rule files: scoped paths, upstream link and pin', () => {
 test('wrapped continuation lines in both shapes', () => {
   const citadel = '## Project facts\n\nThe kit reads this.\n\n- **Check commands:** `npm test` (`node --test test/` through\n  `tools/citadel-node`), then more.\n- **Front end:** `public/`, plain JS.\n\n## Skills';
   const peek = '## Project facts\n\n- **Check commands:** `tools/check.sh` is the full check, and **its cargo steps run on Windows CI**:\n  `cargo fmt --check`.\n- **UI rules:** none.\n';
-  assert.deepEqual(parseProjectFacts(citadel)!.map((f) => f.label), ['Check commands', 'Front end']);
+  assert.deepEqual(
+    parseProjectFacts(citadel)!.map((f) => f.label),
+    ['Check commands', 'Front end'],
+  );
   assert.match(parseProjectFacts(citadel)![0].value, /through `tools\/citadel-node`\)/);
   assert.match(parseProjectFacts(peek)![0].value, /Windows CI\*\*: `cargo fmt --check`\.$/);
 });

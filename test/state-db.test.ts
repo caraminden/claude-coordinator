@@ -17,8 +17,7 @@ const dir = () => {
   mkdirSync(d);
   return d;
 };
-const row = (path: string, ticketId: number | null, bytes: number, mtime = 1) =>
-  ({ path, project_id: 1, ticket_id: ticketId, size: bytes, mtime, data: new Uint8Array(bytes).fill(7) });
+const row = (path: string, ticketId: number | null, bytes: number, mtime = 1) => ({ path, project_id: 1, ticket_id: ticketId, size: bytes, mtime, data: new Uint8Array(bytes).fill(7) });
 
 // A database as releases before state.db left it: claude_state in the main file.
 function oldLayout(file: string, rows: ReturnType<typeof row>[]) {
@@ -67,11 +66,11 @@ test('opening a database moves its session state into state.db, and the main fil
   again.putClaudeState(row('projects/a/2.jsonl', 1, 5));
   assert.equal(again.listClaudeState(1, 1).length, 2);
   again.deleteTicket(1);
-  assert.equal(again.listClaudeState(1, 1).length, 0, "deleting a minion clears its rows in state.db");
+  assert.equal(again.listClaudeState(1, 1).length, 0, 'deleting a minion clears its rows in state.db');
   again.db.close();
 });
 
-test('a start cut off between the copy and the drop finishes on the next, the main file\'s rows winning', () => {
+test("a start cut off between the copy and the drop finishes on the next, the main file's rows winning", () => {
   const d = dir();
   const file = join(d, 'coordinator.db');
   oldLayout(file, [row('projects/a/1.jsonl', 1, 20, 2)]);
@@ -101,7 +100,7 @@ test('a copy of the main file (previews, boot-check) leaves session state out', 
   s.db.close();
 });
 
-test('restoring an old backup brings back only what state.db lacks or holds an older copy of, and drops deleted minions\' rows', () => {
+test("restoring an old backup brings back only what state.db lacks or holds an older copy of, and drops deleted minions' rows", () => {
   const d = dir();
   const file = join(d, 'coordinator.db');
   const ticket = oldLayout(file, [row('projects/a/1.jsonl', 1, 20, 1)]);

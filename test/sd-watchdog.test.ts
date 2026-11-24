@@ -42,7 +42,10 @@ test('the pings come from the event loop: none while it is held, and they resume
     const during = at.length;
     await until('two pings after the hang', () => at.length >= during + 2);
     assert.ok(before >= 3, `pinged every 100 ms before: ${at}`);
-    assert.ok(at.slice(before).every((t) => t >= from + 1000), `no ping while the loop was held: ${at}`);
+    assert.ok(
+      at.slice(before).every((t) => t >= from + 1000),
+      `no ping while the loop was held: ${at}`,
+    );
   } finally {
     w.stop();
   }
@@ -116,7 +119,7 @@ test('every stop leaves a mark of how systemd says it ended, read at the next bo
   }
 });
 
-test('stopEvent names each cause from systemd\'s words; only a ship and a stop by hand are planned', () => {
+test("stopEvent names each cause from systemd's words; only a ship and a stop by hand are planned", () => {
   const m = (result: string, code: string, status: string) => ({ at: 5, result, code, status });
   const cause = (mark: ReturnType<typeof m> | null, newCode = false) => stopEvent(mark, newCode, 9).cause;
   assert.equal(cause(m('success', 'exited', '0'), true), 'deploy');

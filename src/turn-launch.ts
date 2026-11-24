@@ -92,7 +92,10 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   }
   rmSync(MCP_DIR, { recursive: true, force: true });
   mkdirSync(MCP_DIR);
-  if (!pinDirs.size) process.once('exit', () => { for (const d of pinDirs) rmSync(d, { recursive: true, force: true }); });
+  if (!pinDirs.size)
+    process.once('exit', () => {
+      for (const d of pinDirs) rmSync(d, { recursive: true, force: true });
+    });
   pinDirs.add(MCP_DIR);
   /** Copy a server file and, first, every local file it imports, so the copy starts on its own. */
   function pinnedCopy(file: string): string {
@@ -197,18 +200,20 @@ export function pinTurnFiles(dataDir: string): TurnPins {
  */
 export function copyPinned(src: string, dst: string, link = true): void {
   if (takeSpare(src, dst, link ? 'link' : 'copy')) return;
-  if (link) try {
-    mkdirSync(dst, { recursive: true });
-    for (const e of readdirSync(src, { withFileTypes: true })) {
-      const from = join(src, e.name), to = join(dst, e.name);
-      if (e.isDirectory()) copyPinned(from, to);
-      else if (e.isSymbolicLink()) cpSync(from, to, { verbatimSymlinks: true });
-      else linkSync(from, to);
+  if (link)
+    try {
+      mkdirSync(dst, { recursive: true });
+      for (const e of readdirSync(src, { withFileTypes: true })) {
+        const from = join(src, e.name),
+          to = join(dst, e.name);
+        if (e.isDirectory()) copyPinned(from, to);
+        else if (e.isSymbolicLink()) cpSync(from, to, { verbatimSymlinks: true });
+        else linkSync(from, to);
+      }
+      return;
+    } catch {
+      rmSync(dst, { recursive: true, force: true });
     }
-    return;
-  } catch {
-    rmSync(dst, { recursive: true, force: true });
-  }
   cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
 }
 
@@ -311,10 +316,7 @@ export function schemeRefsHooks(refs: string, sent: string, script = turnPins().
 export function hookRunHooks(cfg: HookRunConfig, script = turnPins().HOOK_RUN) {
   const { hard, soft } = hookRunMatchers(!!cfg.side);
   const command = hookCommand(script, JSON.stringify(cfg));
-  return [
-    { matcher: hard, hooks: [{ type: 'command', command, timeout: 10, onFailure: 'block' }] },
-    ...(soft ? [{ matcher: soft, hooks: [{ type: 'command', command, timeout: 10 }] }] : []),
-  ];
+  return [{ matcher: hard, hooks: [{ type: 'command', command, timeout: 10, onFailure: 'block' }] }, ...(soft ? [{ matcher: soft, hooks: [{ type: 'command', command, timeout: 10 }] }] : [])];
 }
 
 /**
@@ -324,10 +326,30 @@ export function hookRunHooks(cfg: HookRunConfig, script = turnPins().HOOK_RUN) {
  * COORDINATOR_* values it posts with are the runner's per-turn ones (src/runner.ts).
  */
 const ENV_NAMES = new Set([
-  'HOME', 'PATH', 'LANG', 'TERM', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'SSH_AUTH_SOCK', 'XDG_RUNTIME_DIR',
-  'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME',
-  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS',
-  'DOTNET_ROOT', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'GODOT',
+  'HOME',
+  'PATH',
+  'LANG',
+  'TERM',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'TMPDIR',
+  'SSH_AUTH_SOCK',
+  'XDG_RUNTIME_DIR',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_STATE_HOME',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'NODE_EXTRA_CA_CERTS',
+  'DOTNET_ROOT',
+  'DOTNET_CLI_TELEMETRY_OPTOUT',
+  'GODOT',
 ]);
 // LC_* is the locale; CLAUDE_* and ANTHROPIC_* configure Claude Code itself (its config dir, its login).
 const ENV_PREFIXES = ['LC_', 'CLAUDE_', 'ANTHROPIC_'];
@@ -374,9 +396,7 @@ export const LEAN_CONTEXT = { syncClaudeAiSkills: false, disableClaudeAiConnecto
  * (2 uses, by Grunts; Cara's pick, 2026-11-15), whose reviews citadel:self-review does.
  * plugin-authoring (Delve's mods) and the rest stay on.
  */
-export const UNUSED_BUNDLED_SKILLS = Object.fromEntries(
-  ['update-config', 'schedule', 'loop', 'keybindings-help', 'workflow-authoring', 'init', 'simplify', 'fewer-permission-prompts', 'run', 'security-review', 'code-review'].map((n) => [n, 'off']),
-) as Record<string, 'off'>;
+export const UNUSED_BUNDLED_SKILLS = Object.fromEntries(['update-config', 'schedule', 'loop', 'keybindings-help', 'workflow-authoring', 'init', 'simplify', 'fewer-permission-prompts', 'run', 'security-review', 'code-review'].map((n) => [n, 'off'])) as Record<string, 'off'>;
 export const TURN_SETTINGS = { autoCompactWindow: 180_000, bashOutputMaxChars: 12_000, skillOverrides: UNUSED_BUNDLED_SKILLS };
 /** A Taskmaster's compact window (#423): same window as a minion's since #703, kept as its own constant; it hands off past FRESH_CONTEXT_TOKENS (turn end) or FRESH_IDLE_CONTEXT_TOKENS (idle) anyway. */
 export const TASKMASTER_COMPACT_WINDOW = 180_000;
@@ -391,8 +411,7 @@ export function credentialDenies(home: string, claudeConfig: string, dataDir: st
   // resolve (#485). The tripwire guards ~/.ssh, ~/.config/claude-coordinator, ~/.config/citadel-claude and
   // podman's storage and socket (#213) for every tool. If Claude Code's sandbox is ever turned on for
   // turns, those folders go in its filesystem denyRead list.
-  const files = [join(home, '.claude/.credentials.json'), join(claudeConfig, '.credentials.json'), join(home, '.config/gh/hosts.yml'),
-    join(dataDir, 'state.db*'), join(dataDir, 'backups/state-*'), join(dataDir, 'vapid.json')];
+  const files = [join(home, '.claude/.credentials.json'), join(claudeConfig, '.credentials.json'), join(home, '.config/gh/hosts.yml'), join(dataDir, 'state.db*'), join(dataDir, 'backups/state-*'), join(dataDir, 'vapid.json')];
   // `//` makes the path absolute.
   return [...new Set(files)].map((f) => `Read(/${f})`);
 }
@@ -424,13 +443,55 @@ const GIT_FETCH = ['fetch', 'fetch -q', 'fetch origin', 'fetch -q origin', 'fetc
  * write or reach elsewhere (--expand-output, -w %output{}, a second URL; #483 review).
  */
 const READ_ONLY_COMMANDS = [
-  ...['grep', 'ls', 'find', 'cat', 'head', 'tail', 'wc', 'stat', 'sort', 'uniq', 'cut', 'echo', 'uptime', 'free', 'df', 'du', 'ps', 'journalctl --user',
-    'ss -ltn', 'ss -tln', 'ss -lnt', 'ss -ltnp', 'ss -tlnp', 'ss -lntp',
-    'systemctl --user status', 'systemctl --user is-active', 'systemctl --user show', 'systemctl --user list-units', 'systemctl --user list-timers',
-    'sqlite3 -readonly -safe', 'sqlite3 -safe -readonly',
-    'gh pr view', 'gh pr list', 'gh pr checks', 'gh pr diff', 'gh pr status', 'gh run list', 'gh run view', 'gh issue view', 'gh issue list', 'gh api',
+  ...[
+    'grep',
+    'ls',
+    'find',
+    'cat',
+    'head',
+    'tail',
+    'wc',
+    'stat',
+    'sort',
+    'uniq',
+    'cut',
+    'echo',
+    'uptime',
+    'free',
+    'df',
+    'du',
+    'ps',
+    'journalctl --user',
+    'ss -ltn',
+    'ss -tln',
+    'ss -lnt',
+    'ss -ltnp',
+    'ss -tlnp',
+    'ss -lntp',
+    'systemctl --user status',
+    'systemctl --user is-active',
+    'systemctl --user show',
+    'systemctl --user list-units',
+    'systemctl --user list-timers',
+    'sqlite3 -readonly -safe',
+    'sqlite3 -safe -readonly',
+    'gh pr view',
+    'gh pr list',
+    'gh pr checks',
+    'gh pr diff',
+    'gh pr status',
+    'gh run list',
+    'gh run view',
+    'gh issue view',
+    'gh issue list',
+    'gh api',
     // #621: more reads a Taskmaster reached for. Not sed or file: a writing flag bundled anywhere (-nsi, -bC) passes any rule.
-    'gh repo view', 'gh release list', 'gh release view', 'gh workflow list', 'gh workflow view', 'gh label list',
+    'gh repo view',
+    'gh release list',
+    'gh release view',
+    'gh workflow list',
+    'gh workflow view',
+    'gh label list',
     // #1122: looks up a part of Citadel's UI and prints its link; reads nothing but its own list.
     'citadel-where',
   ].map((c) => `Bash(${c}:*)`),
@@ -445,13 +506,18 @@ const READ_ONLY_COMMANDS = [
  * check refuses this server's paths, and that's fine for accidents.
  */
 const READ_ONLY_EXCEPTIONS = [
-  ['find', '-delete', '-exec', '-ok', '-fprint', '-fls'], ['sort', '-o', '--o', '--co'], ['ss', '-D', '--d', '-K', '--k'],
+  ['find', '-delete', '-exec', '-ok', '-fprint', '-fls'],
+  ['sort', '-o', '--o', '--co'],
+  ['ss', '-D', '--d', '-K', '--k'],
   ['journalctl', '--vac', '--rot', '--fl', '--syn', '--rel', '--sm', '--se', '--up', '--cursor-f'],
   ['sqlite3', '-nonce', '--nonce', '-unsafe', '--unsafe'],
   ['gh api', '-X', '--method', '-f', '-F', '--field', '--raw-field', '--input'],
   // A file it saves, or a browser it opens.
-  ['gh release view', '-w', '--w'], ['gh repo view', '-w', '--w'], ['gh workflow view', '-w', '--w'],
-].flatMap(([cmd, ...flags]) => flags.flatMap((f) => [`Bash(${cmd} ${f}*)`, `Bash(${cmd} * ${f}*)`]))
+  ['gh release view', '-w', '--w'],
+  ['gh repo view', '-w', '--w'],
+  ['gh workflow view', '-w', '--w'],
+]
+  .flatMap(([cmd, ...flags]) => flags.flatMap((f) => [`Bash(${cmd} ${f}*)`, `Bash(${cmd} * ${f}*)`]))
   // uniq's second operand is a file it writes.
   .concat('Bash(uniq * *)');
 /** Box-health files a Taskmaster may Read beside its read folders. */
@@ -487,10 +553,21 @@ const envDenies = (folders: string[]) => folders.flatMap((d) => [`Read(/${d}/**/
  * config dir as sensitive, so neither allow rules nor a hook's allow let it write there (tried with
  * real runs); making that folder its auto-memory does, so its memory is the one minions load too.
  */
-export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sharedDir: string | null = null, memoryDir: string | null = null, liveDir: string | null = null, readDirs: string[] = [], everyScheme: EveryScheme | null = null, openTickets: string[] | null = null): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
+export function coordinatorAccess(
+  repoDir: string | null,
+  ticketsDir: string,
+  sharedDir: string | null = null,
+  memoryDir: string | null = null,
+  liveDir: string | null = null,
+  readDirs: string[] = [],
+  everyScheme: EveryScheme | null = null,
+  openTickets: string[] | null = null,
+): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
   const subdirs = (dir: string) => {
     try {
-      return readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(dir, d.name));
+      return readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => join(dir, d.name));
     } catch {
       return []; // No tickets yet.
     }
@@ -510,13 +587,20 @@ export function coordinatorAccess(repoDir: string | null, ticketsDir: string, sh
     settings: {
       permissions: {
         // `//` makes the path absolute. Edit rules also cover Write, NotebookEdit and Bash commands that write there.
-        deny: [...roots.map((d) => `Edit(/${d}/**)`), 'Bash(git * --output*)', ...READ_ONLY_EXCEPTIONS, ...envDenies([...readDirs, ...apps]),
-          ...(everyScheme ? [`Read(/${join(everyScheme.keysDir, '*/contraption.key')})`] : [])],
+        deny: [...roots.map((d) => `Edit(/${d}/**)`), 'Bash(git * --output*)', ...READ_ONLY_EXCEPTIONS, ...envDenies([...readDirs, ...apps]), ...(everyScheme ? [`Read(/${join(everyScheme.keysDir, '*/contraption.key')})`] : [])],
         // The web tools ask by default, and nobody can answer a Taskmaster's prompts, so they were denied (#210).
         // readDirs (the live data folder, mise's installs) and the contraptions' folders are readable but not added, so acceptEdits can't write there.
-        allow: ['WebSearch', 'WebFetch', ...[...readDirs, ...apps].map((d) => `${d}/**`).concat(HEALTH_FILES).map((p) => `Read(/${p})`), ...READ_ONLY_COMMANDS,
+        allow: [
+          'WebSearch',
+          'WebFetch',
+          ...[...readDirs, ...apps]
+            .map((d) => `${d}/**`)
+            .concat(HEALTH_FILES)
+            .map((p) => `Read(/${p})`),
+          ...READ_ONLY_COMMANDS,
           ...readGit.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`)),
-          ...(repoDir ? GIT_FETCH.map((c) => `Bash(git -C ${repoDir} ${c})`) : [])],
+          ...(repoDir ? GIT_FETCH.map((c) => `Bash(git -C ${repoDir} ${c})`) : []),
+        ],
       },
       ...(memoryDir ? { autoMemoryDirectory: memoryDir } : {}),
     },
@@ -599,9 +683,11 @@ function settingsTooBig(bytes: number, allow: string[], facts: TurnFacts): strin
   const n = (x: number) => x.toLocaleString('en-US');
   const own = facts.folders.openTickets?.length ?? 0;
   const every = facts.everyScheme ? `, ${n(facts.everyScheme.gitDirs.length)} folders in other schemes and ${n(facts.everyScheme.apps.length)} contraptions' (every-scheme reads)` : '';
-  return `This turn's settings.json would be ${(bytes / 1024 / 1024).toFixed(1)} MiB, over Claude Code's ${SETTINGS_CAP / 1024 / 1024} MiB cap, so it can't start: `
-    + `${n(allow.length)} allow rules, ${n(git.length)} of them read-only git rules for ${n(folders)} folders (${n(own)} open minions' worktrees in this scheme${every}). `
-    + 'Closing finished minions shrinks it; for good, the per-folder git rules need a hook in their place (shared handoffs/taskmaster-settings-2mib.md, follow-up 4).';
+  return (
+    `This turn's settings.json would be ${(bytes / 1024 / 1024).toFixed(1)} MiB, over Claude Code's ${SETTINGS_CAP / 1024 / 1024} MiB cap, so it can't start: ` +
+    `${n(allow.length)} allow rules, ${n(git.length)} of them read-only git rules for ${n(folders)} folders (${n(own)} open minions' worktrees in this scheme${every}). ` +
+    'Closing finished minions shrinks it; for good, the per-folder git rules need a hook in their place (shared handoffs/taskmaster-settings-2mib.md, follow-up 4).'
+  );
 }
 
 /** What the runner writes to a turn's spec.json for its wrapper, from every path that starts one: one place, so the pool can't go missing from one (#1272). */
@@ -646,14 +732,19 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const rules = ticket.kind === 'coordinator' ? [] : [...new Set([...MERGE_ASKS, ...lines(project.approval_rules)])];
   const args = [
     '-p',
-    '--input-format', 'stream-json',
-    '--output-format', 'stream-json',
+    '--input-format',
+    'stream-json',
+    '--output-format',
+    'stream-json',
     '--verbose',
-    '--permission-mode', ticket.permission_mode,
-    '--append-system-prompt-file', join(dir, 'system-prompt.md'),
+    '--permission-mode',
+    ticket.permission_mode,
+    '--append-system-prompt-file',
+    join(dir, 'system-prompt.md'),
     // Claude Code otherwise replays a session's first system prompt on every resume, so saved instructions,
     // lent machines or a build never reached a running minion (#618). Unchanged text still reads from cache.
-    '--system-prompt-snapshot', 'off',
+    '--system-prompt-snapshot',
+    'off',
     // A minion's tripwire asks and approval rules become Approve / Deny cards; nobody can answer a
     // Taskmaster's prompts, so those are denied instead of waiting.
     ...permissionArgs(ticket.kind !== 'coordinator'),
@@ -668,7 +759,14 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
   // A file, not an argument: a scheme's minion list outgrows a command line.
   const refsFile = join(dir, 'scheme-refs.json');
-  const linkCheck = ticket.cwd ? linkCheckHooks([ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d), pinned(pins.LINK_CHECK), join(dir, 'link-check-nudged'), refsFile) : {};
+  const linkCheck = ticket.cwd
+    ? linkCheckHooks(
+        [ticket.cwd, filesDir, sharedDir].filter((d): d is string => !!d),
+        pinned(pins.LINK_CHECK),
+        join(dir, 'link-check-nudged'),
+        refsFile,
+      )
+    : {};
   // The coordinator gets tools to manage the project's tickets; a ticket gets one to set its own
   // title, state and note. The token travels in the environment (which the MCP server
   // inherits), never on the command line.
@@ -693,31 +791,41 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
     files.push({ name: 'mcp.json', text: JSON.stringify({ mcpServers: servers }) });
   }
   // The contraptions' folders the Citadel scheme's Taskmaster reads this turn (#656) stay unwritable to it.
-  const readOnly = ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER ? facts.everyScheme?.apps ?? [] : [];
+  const readOnly = ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER ? (facts.everyScheme?.apps ?? []) : [];
   // A Taskmaster reads the whole data folder (and the contraptions'), never a .env file in it.
   const envFiles = ticket.kind === 'coordinator' ? [facts.folders.data, ...readOnly] : [];
   const kit = existsSync(pinned(pins.KIT)) ? pinned(pins.KIT) : null;
   // Every PreToolUse check in one process (#1296); the kit's big-read guard rides it, so hooks.json leaves it out.
-  const preToolUse = hookRunHooks({
-    ...(facts.side ? { side: true } : {}),
-    tripwire: tripwireConfig(project.id, claudeConfigDir(facts.env.server), ticket.kind !== 'coordinator', readOnly, envFiles),
-    wording: { shared: [filesDir, sharedDir].filter((d): d is string => !!d), sent: join(dir, 'wording-sent') },
-    schemeRefs: { refs: refsFile, sent: join(dir, 'scheme-refs-sent') },
-    ...(kit ? { kit } : {}),
-  }, pinned(pins.HOOK_RUN));
+  const preToolUse = hookRunHooks(
+    {
+      ...(facts.side ? { side: true } : {}),
+      tripwire: tripwireConfig(project.id, claudeConfigDir(facts.env.server), ticket.kind !== 'coordinator', readOnly, envFiles),
+      wording: { shared: [filesDir, sharedDir].filter((d): d is string => !!d), sent: join(dir, 'wording-sent') },
+      schemeRefs: { refs: refsFile, sent: join(dir, 'scheme-refs-sent') },
+      ...(kit ? { kit } : {}),
+    },
+    pinned(pins.HOOK_RUN),
+  );
   // Codex's managed hook (deploy/claude-container/codex) reads the turn's tripwire from this file: its command can't carry it.
   // A Codex turn's own run is checked in turn mode: its patches and MCP calls too, with no cards, and never its own folder.
   // A host turn has no hook, so the server login's Codex reviews run in its Codex container (#398): named here, where
   // the turn can't change it.
   const container = facts.codexReview ? { container: { name: facts.codexReview.container, turnsDir: facts.codexReview.turnsDir, env: facts.codexReview.env } } : {};
   const codexTripwire = join(dir, 'codex-tripwire.json');
-  files.push({ name: 'codex-tripwire.json', text: JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), false, readOnly, envFiles), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }), mode: 0o444 });
+  files.push({
+    name: 'codex-tripwire.json',
+    text: JSON.stringify({ script: pinned(pins.TRIPWIRE), config: { ...tripwireConfig(project.id, claudeConfigDir(facts.env.server), false, readOnly, envFiles), ...(codex ? { turnDir: dir } : {}) }, ...(codex ? { mode: 'turn', mcp: Object.keys(servers), rules } : {}), ...container }),
+    mode: 0o444,
+  });
   const settings: { permissions: { deny: string[]; ask?: string[]; allow?: string[] }; autoMemoryDirectory?: string; hooks: object } & typeof LEAN_CONTEXT & typeof TURN_SETTINGS = {
-    hooks: { ...linkCheck, PreToolUse: preToolUse }, ...LEAN_CONTEXT, ...TURN_SETTINGS, permissions: { deny },
+    hooks: { ...linkCheck, PreToolUse: preToolUse },
+    ...LEAN_CONTEXT,
+    ...TURN_SETTINGS,
+    permissions: { deny },
   };
   if (rules.length) settings.permissions.ask = rules;
   if (ticket.kind === 'coordinator') {
-    const access = coordinatorAccess(project.repo_dir, facts.folders.tickets, sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null, [facts.folders.data, join(homedir(), '.local/share/mise/installs')], project.id === GLOBAL_OWNER ? facts.everyScheme ?? null : null, facts.folders.openTickets ?? null);
+    const access = coordinatorAccess(project.repo_dir, facts.folders.tickets, sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null, [facts.folders.data, join(homedir(), '.local/share/mise/installs')], project.id === GLOBAL_OWNER ? (facts.everyScheme ?? null) : null, facts.folders.openTickets ?? null);
     addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
     const { permissions, ...rest } = access.settings;
     Object.assign(settings, rest);
@@ -825,9 +933,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // systemd-oomd (#1338): a minion turn is `avoid`, the last pick once heavy commands, ships and test scopes are gone;
   // a Taskmaster turn is `omit`, never picked. A turn unit or scope is a leaf cgroup, which is where oomd reads the mark.
   const group = [`--unit=${facts.unit}`, ...(ticket.kind === 'coordinator' ? [`--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit'] : [`--slice=${TURN_SLICE}`, '-p', 'ManagedOOMPreference=avoid']), '-p', 'TimeoutStopSec=15'];
-  const spawn: LaunchPlan['spawn'] = !place.host ? { how: 'container', wrapper }
-    : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', ...group, '-p', 'UMask=0077', ...thpProps(), ...wrapper], scope: ['--user', '--scope', '--collect', '--quiet', ...group], wrapper }
-    : { how: 'child', wrapper };
+  const spawn: LaunchPlan['spawn'] = !place.host ? { how: 'container', wrapper } : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', ...group, '-p', 'UMask=0077', ...thpProps(), ...wrapper], scope: ['--user', '--scope', '--collect', '--quiet', ...group], wrapper } : { how: 'child', wrapper };
   // One pool per place (the host's turns folder, or a person's) and version; it gets a plain env, each turn's own comes with its registration.
   // On the host it runs in a unit of its own, so it outlives the turn that started it, in the Taskmasters' slice (#1280):
   // it serves their Citadel tools too, so a minion storm mustn't stall it (about 70M). `omit` (#1338): every turn's
@@ -835,9 +941,15 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const poolDir = join(dirname(dir), '.pool', pins.POOL_VERSION);
   const poolEnv = Object.fromEntries(['PATH', 'HOME', 'LANG', 'TZ'].filter((k) => env[k]).map((k) => [k, env[k]]));
   const poolUnit = `citadel-mcp-pool-${createHash('sha256').update(poolDir).digest('hex').slice(0, 12)}`;
-  const pool: PoolSpec | undefined = pooled ? {
-    dir: poolDir, script: pinned(pins.POOL), node, version: pins.POOL_VERSION, env: poolEnv,
-    ...(place.host && facts.unit ? { systemdRun: ['--user', '--collect', '--quiet', `--unit=${poolUnit}`, `--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit', '-p', 'UMask=0077', ...thpProps()] } : {}),
-  } : undefined;
+  const pool: PoolSpec | undefined = pooled
+    ? {
+        dir: poolDir,
+        script: pinned(pins.POOL),
+        node,
+        version: pins.POOL_VERSION,
+        env: poolEnv,
+        ...(place.host && facts.unit ? { systemdRun: ['--user', '--collect', '--quiet', `--unit=${poolUnit}`, `--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit', '-p', 'UMask=0077', ...thpProps()] } : {}),
+      }
+    : undefined;
   return { command, args, env, configDir, files, spawn, ...(pool ? { pool } : {}) };
 }

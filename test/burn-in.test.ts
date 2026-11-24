@@ -36,8 +36,7 @@ function repo(change: Record<string, string>, map = '', base: Record<string, str
   git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'the ship');
   return dir;
 }
-const ship = (dir: string, env: Record<string, string> = {}) =>
-  spawnSync('bash', ['tools/burn-in.sh', '--ship', 'HEAD~1'], { cwd: dir, encoding: 'utf8', env: { ...process.env, TMPDIR: join(dir, '..'), ...env } });
+const ship = (dir: string, env: Record<string, string> = {}) => spawnSync('bash', ['tools/burn-in.sh', '--ship', 'HEAD~1'], { cwd: dir, encoding: 'utf8', env: { ...process.env, TMPDIR: join(dir, '..'), ...env } });
 
 test('a test file failing 1 copy in 10 is refused, with that copy named and its output shown', () => {
   const r = ship(repo({ 'test/racy.test.ts': ONE_IN_TEN, 'test/clean.test.ts': CLEAN }));
@@ -85,9 +84,13 @@ const importing = (...specs: string[]) => specs.map((p) => `import '${p}';\n`).j
 
 test('a source-only change burns in the tests that import it, directly or through one more file, each pick named', () => {
   const dir = repo({ 'src/a.ts': 'export const a = 1;\n' }, '', {
-    'src/a.ts': 'export {};\n', 'src/b.ts': "import './a.ts';\n", 'src/c.ts': "import './b.ts';\n",
-    'test/direct.test.ts': importing('../src/a.ts'), 'test/via.test.ts': importing('../src/b.ts'),
-    'test/too-far.test.ts': importing('../src/c.ts'), 'test/other.test.ts': CLEAN,
+    'src/a.ts': 'export {};\n',
+    'src/b.ts': "import './a.ts';\n",
+    'src/c.ts': "import './b.ts';\n",
+    'test/direct.test.ts': importing('../src/a.ts'),
+    'test/via.test.ts': importing('../src/b.ts'),
+    'test/too-far.test.ts': importing('../src/c.ts'),
+    'test/other.test.ts': CLEAN,
   });
   const r = ship(dir, { BURN_IN_COPIES: '2' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -100,8 +103,12 @@ test('a source-only change burns in the tests that import it, directly or throug
 
 test('the cap holds over the map and importers together, nearest importers first', () => {
   const dir = repo({ 'src/a.ts': 'export const a = 1;\n' }, 'src/a.ts: test/mapped.test.ts\n', {
-    'src/a.ts': 'export {};\n', 'src/b.ts': "import './a.ts';\n", 'test/mapped.test.ts': CLEAN,
-    'test/a.test.ts': importing('../src/a.ts'), 'test/aa.test.ts': importing('../src/a.ts'), 'test/0via.test.ts': importing('../src/b.ts'),
+    'src/a.ts': 'export {};\n',
+    'src/b.ts': "import './a.ts';\n",
+    'test/mapped.test.ts': CLEAN,
+    'test/a.test.ts': importing('../src/a.ts'),
+    'test/aa.test.ts': importing('../src/a.ts'),
+    'test/0via.test.ts': importing('../src/b.ts'),
   });
   const r = ship(dir, { BURN_IN_COPIES: '2' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -113,7 +120,11 @@ test('the cap holds over the map and importers together, nearest importers first
 
 test("a full map doesn't crowd importers out: the map's picks and the importers take turns within the cap", () => {
   const dir = repo({ 'src/a.ts': 'export const a = 1;\n' }, 'src/a.ts: test/m1.test.ts test/m2.test.ts test/m3.test.ts\n', {
-    'src/a.ts': 'export {};\n', 'test/m1.test.ts': CLEAN, 'test/m2.test.ts': CLEAN, 'test/m3.test.ts': CLEAN, 'test/a.test.ts': importing('../src/a.ts'),
+    'src/a.ts': 'export {};\n',
+    'test/m1.test.ts': CLEAN,
+    'test/m2.test.ts': CLEAN,
+    'test/m3.test.ts': CLEAN,
+    'test/a.test.ts': importing('../src/a.ts'),
   });
   const r = ship(dir, { BURN_IN_COPIES: '2' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -137,7 +148,10 @@ test('a changed source file no test imports burns in nothing', () => {
 test("#795's change picks its importers on the real repo, and can't reach fresh-session: no import path leads there", () => {
   const r = spawnSync('bash', ['tools/burn-in.sh', '--importers', 'src/db-writer.ts', 'src/routes/tickets.ts'], { cwd: root, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  const picks = r.stdout.trim().split('\n').map((l) => l.split('\t')[0]);
+  const picks = r.stdout
+    .trim()
+    .split('\n')
+    .map((l) => l.split('\t')[0]);
   assert.equal(picks[0], 'test/db-writer.test.ts', 'the importer named like the changed file comes first');
   assert.ok(picks.includes('test/own-writes.test.ts'), r.stdout);
   assert.ok(!picks.includes('test/fresh-session.test.ts'), r.stdout);

@@ -64,7 +64,10 @@ export function tabs({ items, current, onSelect, label, className = '' }) {
     b.setAttribute('role', 'tab');
     b.dataset.key = key;
     b.append(content instanceof Node ? content : document.createTextNode(content));
-    b.addEventListener('click', () => { show(key); onSelect?.(key); });
+    b.addEventListener('click', () => {
+      show(key);
+      onSelect?.(key);
+    });
     return b;
   });
   const now = () => buttons.find((b) => b.getAttribute('aria-selected') === 'true')?.dataset.key;
@@ -87,5 +90,11 @@ export function tabs({ items, current, onSelect, label, className = '' }) {
   });
   box.append(...buttons);
   show(current ?? items[0]?.[0]);
-  return { element: box, set: show, get current() { return now(); } };
+  return {
+    element: box,
+    set: show,
+    get current() {
+      return now();
+    },
+  };
 }

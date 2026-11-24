@@ -120,7 +120,10 @@ test("in a split scheme the watch's line goes to the Overlord, not the owner's o
   errors(14, at + 5 * MIN);
   clock.now = at + 20 * MIN;
   await w.tick();
-  assert.deepEqual(mailed.map((m) => m.id), [overlord.id]);
+  assert.deepEqual(
+    mailed.map((m) => m.id),
+    [overlord.id],
+  );
 });
 
 test('a doubling under the floor, or a rise short of double, is ignored', async () => {
@@ -194,7 +197,10 @@ test('trouble after the next deploy is blamed on that deploy, not the one before
     clock.now = first + t * MIN;
     await w.tick();
   }
-  assert.deepEqual(woken.map((x) => x.id), [b.id]);
+  assert.deepEqual(
+    woken.map((x) => x.id),
+    [b.id],
+  );
 });
 
 test('a window cut under five minutes by the next deploy compares nothing', async () => {
@@ -208,7 +214,10 @@ test('a window cut under five minutes by the next deploy compares nothing', asyn
   deploy(sha('2'), [{ sha: sha('2'), subject: `#${b.number}: other` }]);
   clock.now = first + 25 * 60 * MIN;
   await w.tick();
-  assert.equal(woken.some((x) => x.id === a.id), false);
+  assert.equal(
+    woken.some((x) => x.id === a.id),
+    false,
+  );
 });
 
 test("git attribution: a Shipped note on a build's merge owns the commits merged in with it", async () => {
@@ -251,14 +260,14 @@ test('event-loop stalls in the first minutes after boot are kept as their own ki
   w.record('loop-lag', 'stalled 900 ms');
   clock.now += 8 * MIN;
   w.record('loop-lag', 'stalled 800 ms: restart warm-up (afterRestore) still running');
-  assert.equal(store.healthCount('loop-lag', 0, Infinity).count, 0, 'a restart\'s warm-up runs minutes in');
+  assert.equal(store.healthCount('loop-lag', 0, Infinity).count, 0, "a restart's warm-up runs minutes in");
   assert.equal(store.healthCount(BOOT_STALL, 0, Infinity).count, 2, 'but its record is kept, marked');
   clock.now += 3 * MIN;
   w.record('loop-lag', 'Running: 90% all < newCode (src/new.ts:1)');
   assert.equal(store.healthCount('loop-lag', 0, Infinity).count, 1, 'new code stalling after warm-up still counts');
 });
 
-test('a stall in the watch\'s own query is not recorded, at any time', () => {
+test("a stall in the watch's own query is not recorded, at any time", () => {
   const { store, watch } = setup();
   const w = watch() as any;
   w.record('loop-lag', 'Running: 92% get < eventIdAt (src/db.ts:2557) < turnOutcomes (src/db.ts:2575) < compare (src/deploy-watch.ts:185)');
@@ -343,8 +352,20 @@ test('the beacon never throws, sends each error once, skips network noise and st
   listeners.unhandledrejection({ reason: r });
   listeners.unhandledrejection({ reason: 'plain string' });
   listeners.unhandledrejection({ reason: undefined });
-  listeners.unhandledrejection({ reason: { get message() { throw new Error('hostile'); } } });
-  assert.deepEqual(sent.slice(1).map((s) => [s.kind, s.message, s.source, s.line]), [['rejection', 'bad', 'https://h/chat.js', 40], ['rejection', 'plain string', '', 0]]);
+  listeners.unhandledrejection({
+    reason: {
+      get message() {
+        throw new Error('hostile');
+      },
+    },
+  });
+  assert.deepEqual(
+    sent.slice(1).map((s) => [s.kind, s.message, s.source, s.line]),
+    [
+      ['rejection', 'bad', 'https://h/chat.js', 40],
+      ['rejection', 'plain string', '', 0],
+    ],
+  );
   failing = true;
   assert.doesNotThrow(() => error('fetch throws'));
   failing = false;
@@ -464,7 +485,10 @@ test('turnOutcomes reads error events through their own index, not every event o
   store.db.prepare = prepare;
   const errs = sql.find((q) => q.includes("kind = 'error'"));
   assert.ok(errs, 'turnOutcomes reads error events');
-  const plan = prepare(`EXPLAIN QUERY PLAN ${errs}`).all(...Array(errs.split('?').length - 1).fill(0)).map((r: any) => r.detail).join(' | ');
+  const plan = prepare(`EXPLAIN QUERY PLAN ${errs}`)
+    .all(...Array(errs.split('?').length - 1).fill(0))
+    .map((r: any) => r.detail)
+    .join(' | ');
   assert.match(plan, /USING (COVERING )?INDEX events_errors/);
 });
 

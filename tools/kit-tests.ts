@@ -12,8 +12,7 @@ import { dirname, join, normalize } from 'node:path';
 
 const code = (f: string) => readFileSync(f, 'utf8').replace(/^\s*(\/\/|\*|\/\*).*$/gm, '');
 const namesKit = (f: string) => /['"`/]kit['"`/]|\bkit\//.test(code(f));
-const imports = (f: string) =>
-  [...code(f).matchAll(/(?:from|import\()\s*['"](\.{1,2}\/[^'"]+)['"]/g)].map((m) => normalize(join(dirname(f), m[1])));
+const imports = (f: string) => [...code(f).matchAll(/(?:from|import\()\s*['"](\.{1,2}\/[^'"]+)['"]/g)].map((m) => normalize(join(dirname(f), m[1])));
 
 const sources = [...['src', 'tools'].flatMap((d) => (existsSync(d) ? readdirSync(d).map((f) => `${d}/${f}`) : [])), 'server.ts'].filter((f) => /\.(ts|js|mjs)$/.test(f) && existsSync(f));
 const kitSources = new Set(sources.filter(namesKit));
@@ -25,6 +24,8 @@ const reaches = (f: string): boolean => {
   seen.set(f, yes);
   return yes;
 };
-for (const f of readdirSync('test').filter((f) => /\.test\.(ts|js|mjs|cjs|mts|cts)$/.test(f)).sort()) {
+for (const f of readdirSync('test')
+  .filter((f) => /\.test\.(ts|js|mjs|cjs|mts|cts)$/.test(f))
+  .sort()) {
   if (reaches(`test/${f}`)) console.log(`test/${f}`);
 }

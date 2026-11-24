@@ -18,15 +18,16 @@ export const MAX_OUTPUT = 60_000;
 const UNIT = /^[\w@.:*-]{1,120}$/;
 const SINCE = /^[\w :+.-]{1,40}$/;
 
-const run = (bin: string, args: string[], input: string | null = null, timeout = 30_000) => new Promise<string>((ok) => {
-  const child = execFile(bin, args, { timeout, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024 }, (err: any, out, errText) => {
-    const text = `${out}${errText ? `${out ? '\n' : ''}${errText}` : ''}`.trimEnd();
-    const why = err?.killed ? `(stopped after ${timeout / 1000} s)` : err && !text ? String(err.message) : '';
-    const all = [text, why].filter(Boolean).join('\n') || '(no output)';
-    ok(all.length > MAX_OUTPUT ? `… (earlier output cut)\n${all.slice(-MAX_OUTPUT)}` : all);
+const run = (bin: string, args: string[], input: string | null = null, timeout = 30_000) =>
+  new Promise<string>((ok) => {
+    const child = execFile(bin, args, { timeout, killSignal: 'SIGKILL', maxBuffer: 8 * 1024 * 1024 }, (err: any, out, errText) => {
+      const text = `${out}${errText ? `${out ? '\n' : ''}${errText}` : ''}`.trimEnd();
+      const why = err?.killed ? `(stopped after ${timeout / 1000} s)` : err && !text ? String(err.message) : '';
+      const all = [text, why].filter(Boolean).join('\n') || '(no output)';
+      ok(all.length > MAX_OUTPUT ? `… (earlier output cut)\n${all.slice(-MAX_OUTPUT)}` : all);
+    });
+    if (input !== null) child.stdin?.end(input);
   });
-  if (input !== null) child.stdin?.end(input);
-});
 
 /** Run one check from a tool call's arguments; a bad argument is a 400 that says what to send. */
 export function hostCheck(opts: HostCheckOptions, body: any): Promise<string> {
@@ -42,8 +43,7 @@ export function hostCheck(opts: HostCheckOptions, body: any): Promise<string> {
       if (!Number.isInteger(lines) || lines < 1 || lines > 5000) throw new HttpError(400, 'lines must be a whole number from 1 to 5000');
       if (body.since !== undefined && (typeof body.since !== 'string' || !SINCE.test(body.since))) throw new HttpError(400, 'since must be a time journalctl reads, like "1 hour ago" or "2026-11-12 18:00"');
       if (body.grep !== undefined && (typeof body.grep !== 'string' || !body.grep || body.grep.length > 200)) throw new HttpError(400, 'grep must be a pattern of at most 200 characters');
-      const args = ['--user', '--no-pager', '-o', 'short-iso', '-n', String(lines), ...(unit ? ['-u', unit] : []),
-        ...(body.since ? ['--since', body.since] : []), ...(body.grep ? ['-g', body.grep] : [])];
+      const args = ['--user', '--no-pager', '-o', 'short-iso', '-n', String(lines), ...(unit ? ['-u', unit] : []), ...(body.since ? ['--since', body.since] : []), ...(body.grep ? ['-g', body.grep] : [])];
       return run(opts.journalctl, args);
     }
     case 'status':

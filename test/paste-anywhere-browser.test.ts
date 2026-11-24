@@ -41,7 +41,8 @@ async function open(width: number, title: string) {
 }
 
 /** Paste `text` and/or a small PNG where the browser would; whether the page took the paste (preventDefault). */
-const paste = (page: Page, { text = '', image = false }) => page.eval<boolean>(`(async () => {
+const paste = (page: Page, { text = '', image = false }) =>
+  page.eval<boolean>(`(async () => {
   const dt = new DataTransfer();
   if (${JSON.stringify(text)}) dt.setData('text/plain', ${JSON.stringify(text)});
   if (${image}) {
@@ -71,7 +72,10 @@ async function shoot(page: Page, name: string) {
   writeFileSync(join(shots, name), Buffer.from(data, 'base64'));
 }
 
-for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
+for (const [width, label] of [
+  [1280, 'desktop'],
+  [390, 'phone'],
+] as const) {
   test(`at ${label} width a paste with nothing focused goes in the chat's box, and a draft image opens large`, { skip }, async () => {
     const page = await open(width, `Paste ${label}`);
     // After the box's own autofocus, a frame after it shows (ui/composer.js), so the blur sticks.

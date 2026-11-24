@@ -181,7 +181,7 @@ test('machineAuthor names the machines that write to a chat and returns null for
   for (const [author, want] of rows) assert.equal(machineAuthor(author), want, String(author));
 });
 
-test('machineAuthor shows this scheme\'s own Taskmaster by the scheme\'s name, from the view', (t) => {
+test("machineAuthor shows this scheme's own Taskmaster by the scheme's name, from the view", (t) => {
   t.after(() => setView(null));
   // The scheme isn't loaded yet: just "Taskmaster".
   setView({ kind: 'thread', projectId: 5, projects: [] });
@@ -234,7 +234,11 @@ test('push notes: back-to-back identical ones count up, anything else ends the r
   for (const t of ["Opened a pull request as @caraminden (Cara's GitHub)", "Couldn't push: this turn runs for Cara, who hasn't linked GitHub. Link it in Settings → Your account.", 'hello', undefined]) assert.equal(pushNote(t), null);
   let r = pushRun(null, a);
   assert.deepEqual(r, { run: { text: a, count: 1 }, joined: false });
-  for (let i = 2; i <= 13; i++) { r = pushRun(r.run, a); assert.equal(r.run.count, i); assert.equal(r.joined, true); }
+  for (let i = 2; i <= 13; i++) {
+    r = pushRun(r.run, a);
+    assert.equal(r.run.count, i);
+    assert.equal(r.joined, true);
+  }
   assert.deepEqual(pushRunParts(r.run), ['Pushed ', { count: 13 }, " times as @caraminden (Cara's GitHub)"]);
   assert.deepEqual(pushRunParts({ text: a, count: 1 }), [a]);
   // A different login starts its own line; a PR note, the warning or a break (null text) ends the run.

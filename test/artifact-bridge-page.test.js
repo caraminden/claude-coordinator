@@ -22,22 +22,41 @@ function page(entries = []) {
   const bars = [];
   const document = {
     body: { append: (el) => bars.push(el) },
-    createElement: (tag) => ({ tag, style: {}, attributes: {}, setAttribute(k, v) { this.attributes[k] = v; } }),
+    createElement: (tag) => ({
+      tag,
+      style: {},
+      attributes: {},
+      setAttribute(k, v) {
+        this.attributes[k] = v;
+      },
+    }),
   };
   const ctx = vm.createContext({
-    console, document, navigator: {}, crypto: globalThis.crypto,
-    setTimeout: (fn, ms = 0) => setTimeout(fn, ms / SCALE), clearTimeout,
+    console,
+    document,
+    navigator: {},
+    crypto: globalThis.crypto,
+    setTimeout: (fn, ms = 0) => setTimeout(fn, ms / SCALE),
+    clearTimeout,
     addEventListener: (type, fn) => (type === 'message' ? listeners : (others[type] ??= [])).push(fn),
-    localStorage: {}, sessionStorage: {},
+    localStorage: {},
+    sessionStorage: {},
   });
   ctx.window = ctx;
   ctx.parent = host;
   vm.runInContext(`${FN}(${JSON.stringify({ page: 't1-0.x.y/p.html', entries: entries.map(([key, value]) => ({ key, value })) })})`, ctx);
-  const deliver = (data) => { for (const fn of listeners) fn({ source: host, data: { bridge: TAG, ...data } }); };
+  const deliver = (data) => {
+    for (const fn of listeners) fn({ source: host, data: { bridge: TAG, ...data } });
+  };
   return {
-    ctx, posted, bars, deliver,
+    ctx,
+    posted,
+    bars,
+    deliver,
     /** The page's own events (a key press, typing in a field). */
-    fire: (type, e = { type }) => { for (const fn of others[type] ?? []) fn(e); },
+    fire: (type, e = { type }) => {
+      for (const fn of others[type] ?? []) fn(e);
+    },
     /** Answer the oldest unanswered request of kind `op`. */
     answer(op, result, ok = true) {
       const m = posted.find((p) => p.op === op && !p.answered);
@@ -81,8 +100,17 @@ test('one write request is out at a time, so a later flush cannot overtake an ea
 });
 
 test('storing null (or NaN, which JSON makes null) deletes the key here too, as the server does (#468 S13-10)', async () => {
-  const p = page([['answer', 1], ['storage/n', 2]]);
-  p.answer('hello', { person: 'Cara', entries: [{ key: 'answer', value: 1 }, { key: 'storage/n', value: 2 }] });
+  const p = page([
+    ['answer', 1],
+    ['storage/n', 2],
+  ]);
+  p.answer('hello', {
+    person: 'Cara',
+    entries: [
+      { key: 'answer', value: 1 },
+      { key: 'storage/n', value: 2 },
+    ],
+  });
   await p.ctx.citadel.ready;
   const a = p.ctx.citadel.storage.set('answer', null);
   const n = p.ctx.window.storage.set('n', NaN);
@@ -115,7 +143,9 @@ test('a write Citadel could not take while it restarts stays on the page, on top
   const states = [];
   p.ctx.citadel.watchSaves((s) => states.push(s));
   let landed = false;
-  const set = p.ctx.citadel.storage.set('k', 'b').then(() => { landed = true; });
+  const set = p.ctx.citadel.storage.set('k', 'b').then(() => {
+    landed = true;
+  });
   await wait(10);
   assert.equal(p.ctx.citadel.saveState(), 'saving');
   const first = p.waiting('write')[0];
@@ -164,7 +194,14 @@ test('a link to another site opens a tab and asks the viewer nothing', async () 
   Object.assign(p.ctx, { URL, location: { origin: 'null' }, open: (...a) => opened.push(a) });
   p.ctx.document.baseURI = 'https://citadel.example/files/p.html';
   const a = { getAttribute: (k) => (k === 'href' ? 'https://example.org/x' : null) };
-  const e = { button: 0, defaultPrevented: false, target: { closest: () => a }, preventDefault() { this.defaultPrevented = true; } };
+  const e = {
+    button: 0,
+    defaultPrevented: false,
+    target: { closest: () => a },
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+  };
   p.fire('click', e);
   assert.equal(e.defaultPrevented, true);
   assert.deepEqual(opened, [['https://example.org/x', '_blank', 'noopener']]);

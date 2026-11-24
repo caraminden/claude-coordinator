@@ -48,7 +48,6 @@ test('the page shows the shared loading line, then its head, the All row, the ta
   assert.match(await page.eval<string>(`document.querySelector('.releases-main .rel-body').textContent`), /Nothing ships yet/);
 });
 
-
 test('opened from a scheme, the page shows that scheme with every tab, Releases picked', { skip }, async () => {
   const page = await browser.page(`${app.base}#/p/1/releases`, { width: 1280, height: 800 });
   await page.eval('window.open()');

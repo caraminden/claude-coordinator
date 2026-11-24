@@ -32,12 +32,27 @@ export interface Raw {
 const DATE = '(20\\d\\d-\\d\\d-\\d\\d)';
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** First names, longest first so "Jo" never shadows "Josh". */
-const namesRe = (names: string[]) => [...new Set(names.map((n) => n.trim().split(/\s+/)[0]).filter((n) => /^[A-Z][\p{L}'-]+$/u.test(n)))].sort((a, b) => b.length - a.length).map(esc).join('|');
+const namesRe = (names: string[]) =>
+  [...new Set(names.map((n) => n.trim().split(/\s+/)[0]).filter((n) => /^[A-Z][\p{L}'-]+$/u.test(n)))]
+    .sort((a, b) => b.length - a.length)
+    .map(esc)
+    .join('|');
 
 const OWN = /\b(first picked|reverse[sd]?|reversing|supersedes?|superseded|over keeping|instead of (?:her|his|their) earlier)\b/i;
 const QUOTE_OPEN: Record<string, string> = { '"': '"', '“': '”', '`': '`' };
-export const norm = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim();
-const words = (s: string) => new Set(norm(s).split(' ').filter((w) => w.length > 2).map((w) => w.replace(/(ing|ed|es|s)$/, '')));
+export const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+const words = (s: string) =>
+  new Set(
+    norm(s)
+      .split(' ')
+      .filter((w) => w.length > 2)
+      .map((w) => w.replace(/(ing|ed|es|s)$/, '')),
+  );
 const jaccard = (a: Set<string>, b: Set<string>) => {
   if (!a.size || !b.size) return 0;
   let n = 0;
@@ -53,7 +68,10 @@ function quotesIn(s: string): string[] {
     if (!close) continue;
     const j = s.indexOf(close, i + 1);
     if (j < 0) break;
-    const q = s.slice(i + 1, j).replace(/\s+/g, ' ').trim();
+    const q = s
+      .slice(i + 1, j)
+      .replace(/\s+/g, ' ')
+      .trim();
     if (q.length >= 2 && !/^#?\d+$/.test(q)) out.push(q);
     i = j;
   }
@@ -67,12 +85,20 @@ function clauseEnd(text: string, from: number, paren: boolean, stop: number): nu
   const max = Math.min(stop, from + 600);
   for (let i = from; i < max; i++) {
     const c = text[i];
-    if (quote) { if (c === quote) quote = null; continue; }
-    if (QUOTE_OPEN[c]) { quote = QUOTE_OPEN[c]; continue; }
+    if (quote) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (QUOTE_OPEN[c]) {
+      quote = QUOTE_OPEN[c];
+      continue;
+    }
     if (c === '\n' && text[i + 1] === '\n') return i;
     if (c === '(') depth++;
-    else if (c === ')') { if (depth === 0 && paren) return i; depth = Math.max(0, depth - 1); }
-    else if (c === ';' && depth === 0) return i;
+    else if (c === ')') {
+      if (depth === 0 && paren) return i;
+      depth = Math.max(0, depth - 1);
+    } else if (c === ';' && depth === 0) return i;
     else if (!paren && c === '.' && /\s/.test(text[i + 1] ?? ' ') && depth === 0 && i > from + 3) return i;
   }
   return max;
@@ -90,9 +116,24 @@ export function parseDecisions(text: string, names: string[], opts: { title?: st
   const re = new RegExp(`(^|[^\\p{L}'’])(${who}),?\\s+${DATE}\\b`, 'gu');
   const lineStarts = [0];
   for (let i = 0; i < text.length; i++) if (text[i] === '\n') lineStarts.push(i + 1);
-  const lineOf = (pos: number) => { let lo = 0, hi = lineStarts.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (lineStarts[mid] <= pos) lo = mid; else hi = mid - 1; } return lo; };
+  const lineOf = (pos: number) => {
+    let lo = 0,
+      hi = lineStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (lineStarts[mid] <= pos) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
   const lines = text.split('\n');
-  const heading = (line: number) => { for (let l = line; l >= 0; l--) { const m = /^#{1,6}\s+(.*)$/.exec(lines[l]); if (m) return stripAttr(m[1]); } return ''; };
+  const heading = (line: number) => {
+    for (let l = line; l >= 0; l--) {
+      const m = /^#{1,6}\s+(.*)$/.exec(lines[l]);
+      if (m) return stripAttr(m[1]);
+    }
+    return '';
+  };
   const matches = [...text.matchAll(re)].map((m) => ({ start: m.index! + m[1].length, end: m.index! + m[0].length, who: m[2], date: m[3] }));
   const out: Raw[] = [];
   const seen = new Set<string>();
@@ -104,13 +145,26 @@ export function parseDecisions(text: string, names: string[], opts: { title?: st
     let paraEnd = text.indexOf('\n\n', m.end);
     if (paraEnd < 0) paraEnd = text.length;
     // Inside an open paren of the same paragraph?
-    let open = -1, depth = 0, quote: string | null = null;
+    let open = -1,
+      depth = 0,
+      quote: string | null = null;
     for (let i = paraStart; i < m.start; i++) {
       const c = text[i];
-      if (quote) { if (c === quote) quote = null; continue; }
-      if (QUOTE_OPEN[c] && c !== '`') { quote = QUOTE_OPEN[c]; continue; }
-      if (c === '(') { if (depth === 0) open = i; depth++; }
-      else if (c === ')') { depth = Math.max(0, depth - 1); if (depth === 0) open = -1; }
+      if (quote) {
+        if (c === quote) quote = null;
+        continue;
+      }
+      if (QUOTE_OPEN[c] && c !== '`') {
+        quote = QUOTE_OPEN[c];
+        continue;
+      }
+      if (c === '(') {
+        if (depth === 0) open = i;
+        depth++;
+      } else if (c === ')') {
+        depth = Math.max(0, depth - 1);
+        if (depth === 0) open = -1;
+      }
     }
     const paren = open >= 0;
     const next = matches[k + 1]?.start ?? text.length;
@@ -131,37 +185,66 @@ export function parseDecisions(text: string, names: string[], opts: { title?: st
     const lineText = lines[line];
     let rule = '';
     if (paren) {
-      const lead = text.slice(Math.max(paraStart, lineStarts[lineOf(open)]), open).replace(/^\s*(#{1,6}\s+|[-*]\s+|\d+\.\s+|\*\*)/, '').trim();
+      const lead = text
+        .slice(Math.max(paraStart, lineStarts[lineOf(open)]), open)
+        .replace(/^\s*(#{1,6}\s+|[-*]\s+|\d+\.\s+|\*\*)/, '')
+        .trim();
       rule = lastSentence(lead.replace(/^(description|name):\s*"?/, ''));
     }
     if (!rule && opts.title) rule = opts.title;
     if (!rule) {
-      const before = lineText.slice(0, m.start - lineStarts[line]).replace(/^\s*(#{1,6}\s+|[-*]\s+|\d+\.\s+|(description|name):\s*"?)/, '').trim();
+      const before = lineText
+        .slice(0, m.start - lineStarts[line])
+        .replace(/^\s*(#{1,6}\s+|[-*]\s+|\d+\.\s+|(description|name):\s*"?)/, '')
+        .trim();
       rule = lastSentence(before) || heading(line);
     }
-    rule = rule.replace(/\*\*/g, '').replace(/[:,(—-]\s*$/, '').trim();
+    rule = rule
+      .replace(/\*\*/g, '')
+      .replace(/[:,(—-]\s*$/, '')
+      .trim();
     rule = rule.replace(new RegExp(`^(${who}),?\\s+${DATE}[:,]?\\s*`, 'u'), '').replace(/^\p{Ll}/u, (c) => c.toUpperCase());
     // In a list, the decision's text is its own item, not the whole list.
     const item = /^\s*([-*]|\d+\.)\s/;
-    let blockStart = paraStart, blockEnd = paraEnd;
-    for (let l = line; l >= 0 && lineStarts[l] >= paraStart; l--) if (item.test(lines[l])) { blockStart = lineStarts[l]; break; }
+    let blockStart = paraStart,
+      blockEnd = paraEnd;
+    for (let l = line; l >= 0 && lineStarts[l] >= paraStart; l--)
+      if (item.test(lines[l])) {
+        blockStart = lineStarts[l];
+        break;
+      }
     if (blockStart !== paraStart || item.test(lines[lineOf(paraStart)] ?? '')) {
-      for (let l = line + 1; l < lines.length && lineStarts[l] < paraEnd; l++) if (item.test(lines[l])) { blockEnd = lineStarts[l] - 1; break; }
+      for (let l = line + 1; l < lines.length && lineStarts[l] < paraEnd; l++)
+        if (item.test(lines[l])) {
+          blockEnd = lineStarts[l] - 1;
+          break;
+        }
     }
     const para = text.slice(blockStart, blockEnd);
     const key = `${m.who}|${m.date}|${quotes.map(norm).join('|') || norm(rule)}`;
     if (seen.has(key)) return;
     seen.add(key);
     out.push({
-      who: m.who, date: m.date, quote: quotes[0] ?? '', quotes, rule: rule.slice(0, 160), section: heading(line), line: line + 1,
-      text: snippet(para, m.start - blockStart), own: OWN.test(clause) || OWN.test(sentenceAround(para, m.start - blockStart)),
+      who: m.who,
+      date: m.date,
+      quote: quotes[0] ?? '',
+      quotes,
+      rule: rule.slice(0, 160),
+      section: heading(line),
+      line: line + 1,
+      text: snippet(para, m.start - blockStart),
+      own: OWN.test(clause) || OWN.test(sentenceAround(para, m.start - blockStart)),
       refs: refsIn(para, who),
     });
   });
   return out;
 }
 
-const stripAttr = (s: string) => s.replace(/\s*\([^()]*20\d\d-\d\d-\d\d[^()]*(\([^()]*\)[^()]*)*\)\s*$/, '').replace(/\*\*/g, '').trim();
+const stripAttr = (s: string) =>
+  s
+    .replace(/\s*\([^()]*20\d\d-\d\d-\d\d[^()]*(\([^()]*\)[^()]*)*\)\s*$/, '')
+    .replace(/\*\*/g, '')
+    .trim();
 function lastSentence(s: string): string {
   s = s.replace(/\s+/g, ' ').trim();
   if (s.length <= 100) return s;
@@ -187,7 +270,10 @@ function refsIn(para: string, who: string): Raw['refs'] {
 
 /** An ADR is one decision: its title, its date, and the first person it quotes (or names). */
 export function parseAdr(text: string, names: string[]): Raw | null {
-  const title = /^#\s+(.*)$/m.exec(text)?.[1]?.replace(/^\d{3,4}:\s*/, '').trim();
+  const title = /^#\s+(.*)$/m
+    .exec(text)?.[1]
+    ?.replace(/^\d{3,4}:\s*/, '')
+    .trim();
   if (!title) return null;
   const head = text.split('\n').slice(0, 12).join('\n');
   const date = /(?:Date|Status)[^\n]*?(20\d\d-\d\d-\d\d)/.exec(head)?.[1] ?? /(20\d\d-\d\d-\d\d)/.exec(head)?.[1];
@@ -198,16 +284,35 @@ export function parseAdr(text: string, names: string[]): Raw | null {
   const whoRe = namesRe(names);
   const body = text.replace(/^#.*$/m, '').trim();
   return {
-    who, date, quote: first?.quote ?? '', quotes: first?.quotes ?? [], rule: title, section: '', line: 1,
-    text: snippet(body.split('\n\n').slice(0, 2).join(' '), 0), own: OWN.test(head),
+    who,
+    date,
+    quote: first?.quote ?? '',
+    quotes: first?.quotes ?? [],
+    rule: title,
+    section: '',
+    line: 1,
+    text: snippet(body.split('\n\n').slice(0, 2).join(' '), 0),
+    own: OWN.test(head),
     refs: whoRe ? refsIn(text, whoRe) : [],
   };
 }
 
 /** One version of a source and the next, as an edit or a commit made them. */
-export interface Edit { before: string; after: string; at: number; by: string; /** A link to see the edit, if any. */ href?: string }
+export interface Edit {
+  before: string;
+  after: string;
+  at: number;
+  by: string /** A link to see the edit, if any. */;
+  href?: string;
+}
 /** A decision an edit replaced, and the one that replaced it. */
-export interface Reversal { old: Raw; by: Raw; at: number; editor: string; href?: string }
+export interface Reversal {
+  old: Raw;
+  by: Raw;
+  at: number;
+  editor: string;
+  href?: string;
+}
 
 export const rawKey = (d: Pick<Raw, 'who' | 'date' | 'quotes' | 'rule'>) => `${d.who}|${d.date}|${d.quotes.map(norm).join('|') || norm(d.rule)}`;
 
@@ -219,7 +324,15 @@ export const rawKey = (d: Pick<Raw, 'who' | 'date' | 'quotes' | 'rule'>) => `${d
 export function replay(edits: Edit[], parse: (text: string) => Raw[]): Reversal[] {
   const out: Reversal[] = [];
   const cache = new Map<string, Raw[]>();
-  const parsed = (t: string) => { let r = cache.get(t); if (!r) { r = parse(t); cache.set(t, r); if (cache.size > 8) cache.delete(cache.keys().next().value!); } return r; };
+  const parsed = (t: string) => {
+    let r = cache.get(t);
+    if (!r) {
+      r = parse(t);
+      cache.set(t, r);
+      if (cache.size > 8) cache.delete(cache.keys().next().value!);
+    }
+    return r;
+  };
   for (const e of edits) {
     if (e.before === e.after) continue;
     const before = parsed(e.before);
@@ -239,7 +352,8 @@ export function replay(edits: Edit[], parse: (text: string) => Raw[]): Reversal[
 function replacement(old: Raw, added: Raw[]): Raw | null {
   const topic = words(`${old.rule} ${old.quotes.join(' ')}`);
   const rule = words(old.rule);
-  let best: Raw | null = null, bestScore = 0;
+  let best: Raw | null = null,
+    bestScore = 0;
   for (const n of added) {
     if (n.date < old.date) continue;
     const same = n.who === old.who && n.date === old.date;
@@ -250,7 +364,10 @@ function replacement(old: Raw, added: Raw[]): Raw | null {
     const score = (n.own && n.who === old.who ? 2 : 0) + (near ? 1 : 0) + overlap * 2;
     if (!n.own && (!near || overlap < 0.15)) continue;
     if (n.own && !near && overlap < 0.15) continue;
-    if (score > bestScore) { best = n; bestScore = score; }
+    if (score > bestScore) {
+      best = n;
+      bestScore = score;
+    }
   }
   return best;
 }
@@ -267,30 +384,61 @@ export function sameDecision(a: Raw, b: Raw): boolean {
 
 export type SourceKind = 'citadel' | 'scheme' | 'repo' | 'adr' | 'kit' | 'memory' | 'ideas';
 export const SOURCE_LABEL: Record<SourceKind, string> = {
-  citadel: 'Citadel-wide instructions', scheme: 'Scheme instructions', repo: 'Repo CLAUDE.md and rules', adr: 'ADRs', kit: 'The kit', memory: 'Memory', ideas: 'Ideas ledger',
+  citadel: 'Citadel-wide instructions',
+  scheme: 'Scheme instructions',
+  repo: 'Repo CLAUDE.md and rules',
+  adr: 'ADRs',
+  kit: 'The kit',
+  memory: 'Memory',
+  ideas: 'Ideas ledger',
 };
 /** Where a decision is written: a source, a file in it and a line, and a link to open it. */
-export interface Place { kind: SourceKind; label: string; file?: string; line?: number; href: string | null }
+export interface Place {
+  kind: SourceKind;
+  label: string;
+  file?: string;
+  line?: number;
+  href: string | null;
+}
 /** One document a source reads: its text, or its edits too when it keeps them. */
-export interface Doc { kind: SourceKind; place: Omit<Place, 'line' | 'kind'>; text: string; adr?: boolean; edits?: Edit[]; title?: string }
+export interface Doc {
+  kind: SourceKind;
+  place: Omit<Place, 'line' | 'kind'>;
+  text: string;
+  adr?: boolean;
+  edits?: Edit[];
+  title?: string;
+}
 
 export interface Decision {
   id: string;
-  who: string; date: string; quote: string; rule: string; section: string; text: string;
+  who: string;
+  date: string;
+  quote: string;
+  rule: string;
+  section: string;
+  text: string;
   /** citadel: the Citadel-wide instructions or the kit; scheme: everything of this scheme's. */
   scope: 'citadel' | 'scheme';
   /** Where it is written now; the first is its home. Empty for a reversed decision no source still holds. */
   places: Place[];
   /** Its own words say it reverses an earlier pick. */
   own: boolean;
-  reversed: null | { by: string | null; byText: string; at: number | null; editor: string | null; href: string | null; /** Copies still written, outside the edited source. */ stale: Place[] };
+  reversed: null | { by: string | null; byText: string; at: number | null; editor: string | null; href: string | null /** Copies still written, outside the edited source. */; stale: Place[] };
   /** Decisions this one reversed. */
   reverses: string[];
 }
 
-export interface DecisionList { decisions: Decision[]; counts: { kind: SourceKind; label: string; count: number; files: number }[] }
+export interface DecisionList {
+  decisions: Decision[];
+  counts: { kind: SourceKind; label: string; count: number; files: number }[];
+}
 
-const idOf = (scope: string, r: Pick<Raw, 'who' | 'date' | 'quotes' | 'rule'>) => createHash('sha1').update(`${scope}|${rawKey(r)}`).digest('hex').slice(0, 12);
+const idOf = (scope: string, r: Pick<Raw, 'who' | 'date' | 'quotes' | 'rule'>) =>
+  createHash('sha1')
+    .update(`${scope}|${rawKey(r)}`)
+    .digest('hex')
+    .slice(0, 12);
 const scopeOf = (k: SourceKind): Decision['scope'] => (k === 'citadel' || k === 'kit' ? 'citadel' : 'scheme');
 /** In a tab: its own scope, or a copy written there (a scheme rule repeating a Citadel-wide one shows under both). */
 export const inScope = (d: Decision, scope: string): boolean => scope === 'all' || d.scope === scope || d.places.some((p) => scopeOf(p.kind) === scope);
@@ -314,10 +462,23 @@ export function assemble(docs: Doc[], names: string[], staleKinds: SourceKind[])
       const place: Place = { ...doc.place, kind: doc.kind, line: raw.line };
       // A repeat (memory echoing a rule, the kit echoing the instructions) joins the decision already listed.
       const twin = raws.find((x) => x.doc.kind !== doc.kind && x.d.places.length && sameDecision(x.raw, raw) && !raw.own === !x.raw.own);
-      if (twin) { twin.d.places.push(place); continue; }
+      if (twin) {
+        twin.d.places.push(place);
+        continue;
+      }
       const d: Decision = {
-        id: idOf(scopeOf(doc.kind), raw), who: raw.who, date: raw.date, quote: raw.quote, rule: raw.rule, section: raw.section, text: raw.text,
-        scope: scopeOf(doc.kind), places: [place], own: raw.own, reversed: null, reverses: [],
+        id: idOf(scopeOf(doc.kind), raw),
+        who: raw.who,
+        date: raw.date,
+        quote: raw.quote,
+        rule: raw.rule,
+        section: raw.section,
+        text: raw.text,
+        scope: scopeOf(doc.kind),
+        places: [place],
+        own: raw.own,
+        reversed: null,
+        reverses: [],
       };
       if (all.some((x) => x.id === d.id)) continue;
       all.push(d);
@@ -351,12 +512,14 @@ export function assemble(docs: Doc[], names: string[], staleKinds: SourceKind[])
   // 2. From words that name what they reverse ("This reverses Cara's 2026-11-10 "Keep failing, log it"").
   for (const { raw, d: by } of [...raws]) {
     for (const ref of raw.refs) {
-      const target = raws.find((x) => x.d !== by && x.raw.who === ref.who && x.raw.date === ref.date && (x.raw.quotes.some((q) => norm(q) === norm(ref.quote)) || norm(x.raw.text).includes(norm(ref.quote))))?.d
-        ?? all.find((x) => x !== by && x.who === ref.who && x.date === ref.date && norm(x.quote) === norm(ref.quote));
+      const target = raws.find((x) => x.d !== by && x.raw.who === ref.who && x.raw.date === ref.date && (x.raw.quotes.some((q) => norm(q) === norm(ref.quote)) || norm(x.raw.text).includes(norm(ref.quote))))?.d ?? all.find((x) => x !== by && x.who === ref.who && x.date === ref.date && norm(x.quote) === norm(ref.quote));
       const stub = { who: ref.who, date: ref.date, quotes: [ref.quote], rule: ref.quote };
-      const d = target ?? { id: idOf(by.scope, stub), who: ref.who, date: ref.date, quote: ref.quote, rule: ref.quote, section: '', text: `Named as reversed in ${by.places[0]?.label ?? 'a later decision'}.`, scope: by.scope, places: [], own: false, reversed: null, reverses: [] } as Decision;
+      const d = target ?? ({ id: idOf(by.scope, stub), who: ref.who, date: ref.date, quote: ref.quote, rule: ref.quote, section: '', text: `Named as reversed in ${by.places[0]?.label ?? 'a later decision'}.`, scope: by.scope, places: [], own: false, reversed: null, reverses: [] } as Decision);
       if (d.reversed) continue;
-      if (!target) { all.push(d); byId.set(d.id, d); }
+      if (!target) {
+        all.push(d);
+        byId.set(d.id, d);
+      }
       // Its own places, if any, are the copies still written.
       d.reversed = { by: by.id, byText: '', at: null, editor: null, href: by.places[0]?.href ?? null, stale: d.places.filter((p) => staleKinds.includes(p.kind)) };
       if (!by.reverses.includes(d.id)) by.reverses.push(d.id);
@@ -390,7 +553,11 @@ export function searchDecisions(list: Decision[], q: string): Decision[] {
     const hay = norm(`${d.rule} ${d.quote} ${d.text} ${d.who} ${d.date} ${d.section} ${d.places.map((p) => `${p.label} ${p.file ?? ''}`).join(' ')}`);
     return terms.reduce((s, t) => s + (hay.includes(t) ? 1 : 0), 0) / terms.length;
   };
-  return list.map((d) => ({ d, s: score(d) })).filter((x) => x.s >= (terms.length > 2 ? 0.6 : 1)).sort((a, b) => b.s - a.s || b.d.date.localeCompare(a.d.date)).map((x) => x.d);
+  return list
+    .map((d) => ({ d, s: score(d) }))
+    .filter((x) => x.s >= (terms.length > 2 ? 0.6 : 1))
+    .sort((a, b) => b.s - a.s || b.d.date.localeCompare(a.d.date))
+    .map((x) => x.d);
 }
 
 // ---- reading sources from git
@@ -420,7 +587,10 @@ export async function gitEdits(repo: string, paths: string[], href: (file: strin
     const [sha, ct, ...by] = first.split(' ');
     for (const file of files) if (/\.md$/.test(file)) pairs.push({ sha, at: Number(ct) * 1000, by: by.join(' '), file });
   }
-  const blobs = await catFiles(repo, pairs.flatMap((p) => [`${p.sha}^:${p.file}`, `${p.sha}:${p.file}`]));
+  const blobs = await catFiles(
+    repo,
+    pairs.flatMap((p) => [`${p.sha}^:${p.file}`, `${p.sha}:${p.file}`]),
+  );
   const edits = new Map<string, Edit[]>();
   for (const p of pairs.reverse()) {
     const before = blobs.get(`${p.sha}^:${p.file}`) ?? '';
@@ -472,7 +642,11 @@ export function githubHref(repoUrl: string | null | undefined, ref: string, file
 /** A memory note's title for the rule column: its description's first clause, without a leading "Cara 2026-11-18:". */
 export function memTitle(text: string): string {
   const { name, description } = frontmatter(text);
-  const d = description.replace(/\\"/g, '"').split(/\s+[—–]\s+|;\s+/)[0].replace(/^\p{Lu}\p{Ll}+,?\s+20\d\d-\d\d-\d\d[:,]?\s*/u, '').trim();
+  const d = description
+    .replace(/\\"/g, '"')
+    .split(/\s+[—–]\s+|;\s+/)[0]
+    .replace(/^\p{Lu}\p{Ll}+,?\s+20\d\d-\d\d-\d\d[:,]?\s*/u, '')
+    .trim();
   return lastSentence(d || name.replace(/-/g, ' ')).slice(0, 120);
 }
 

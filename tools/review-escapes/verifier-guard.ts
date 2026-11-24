@@ -35,16 +35,14 @@ export function verdict(input: { tool_name?: string; tool_input?: Record<string,
   if (tool === 'Bash') {
     const c = String(ti.command ?? '').replace(OWN_OUTPUT, '');
     // Command words, not path parts: `.claude/rules` and `claude-coordinator` in a path pass.
-    if (/(^|[\s;&|(`])(systemctl|loginctl|journalctl|systemd-run|gh|podman|docker|sudo|crontab|tailscale|caddy|pkill|killall|claude|citadel-dev-copy|citadel-heavy|heavy-unit)(?=$|[\s;&|)`])/m.test(c))
-      return 'that command reaches the box, GitHub or other sessions; a verifier case runs only its own copy';
+    if (/(^|[\s;&|(`])(systemctl|loginctl|journalctl|systemd-run|gh|podman|docker|sudo|crontab|tailscale|caddy|pkill|killall|claude|citadel-dev-copy|citadel-heavy|heavy-unit)(?=$|[\s;&|)`])/m.test(c)) return 'that command reaches the box, GitHub or other sessions; a verifier case runs only its own copy';
     // Local pushes and clones between repos it made under scratch are how land scripts get tried; only the network is out.
     // shortcut: a relative path that climbs out of the case folder (../../..) isn't caught; upgrade if a run ever tries it.
-    if (/\bgit\b[^;&|]*(:\/\/|\bgit@|github\.com)/.test(c)) return 'git stays on this box\'s scratch repos: no URLs, GitHub or other remotes';
+    if (/\bgit\b[^;&|]*(:\/\/|\bgit@|github\.com)/.test(c)) return "git stays on this box's scratch repos: no URLs, GitHub or other remotes";
     // A pid it holds (kill $P, kill $(cat x.pid)) is its own; a lookup by name could reach the live Citadel, which runs as the same account.
-    if (/\bkill\b/.test(c) && /\b(pgrep|pidof|ps|xargs\s+kill)\b|\bkill\s+(-\w+\s+)*(--\s+)?-?[01]\b(?!\d)|\bkill\s*($|[;&|)])/m.test(c))
-      return 'kill a pid you started (kill 12345, kill $P, node boot.mjs stop for the server), never one found by name or every process';
+    if (/\bkill\b/.test(c) && /\b(pgrep|pidof|ps|xargs\s+kill)\b|\bkill\s+(-\w+\s+)*(--\s+)?-?[01]\b(?!\d)|\bkill\s*($|[;&|)])/m.test(c)) return 'kill a pid you started (kill 12345, kill $P, node boot.mjs stop for the server), never one found by name or every process';
     if (/(^|[\s'"=:])(~|\$HOME|\$\{HOME\})(\/|\s|$|['"])/.test(c)) return `name paths inside ${root}, not the home folder`;
-    if (/:8573\b/.test(c)) return 'the live Citadel is out of reach; use your own copy\'s port';
+    if (/:8573\b/.test(c)) return "the live Citadel is out of reach; use your own copy's port";
     // Whole path words only: a HOME like /opt/runner/home holds "/home/" mid-path (#1740's CI).
     for (const m of c.matchAll(/(?<![\w.\/-])\/[^\s'"`;|&)<>]*/g)) {
       const p = resolve(m[0]);

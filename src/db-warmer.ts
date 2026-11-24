@@ -20,7 +20,11 @@ export const WARMER_SETTING = 'db-warmer';
 const CHUNK = 1 << 20;
 
 /** The last pass as the Status page's sample stores it; backoffs counts since the server started. */
-export interface WarmStats { ms: number; mb: number; backoffs: number }
+export interface WarmStats {
+  ms: number;
+  mb: number;
+  backoffs: number;
+}
 
 /** Reads `fd` to its end, `chunk` bytes at a time into `buf`; the bytes read. */
 export function readThrough(fd: number, buf: Buffer): number {
@@ -37,14 +41,22 @@ export class Pacer {
   private slow = 0;
   /** Returns the ms to wait before the next pass, and whether this pass began a backoff. */
   after(mb: number, ms: number, everyMs = WARM_MS): { wait: number; backoff: boolean } {
-    const speed = mb / Math.max(ms, 0.001) * 1000;
-    if (mb >= MIN_MB_FOR_SPEED && speed < SLOW_MB_S) this.slow++; else this.slow = 0;
-    if (this.slow >= SLOW_PASSES) { this.slow = 0; return { wait: BACKOFF_MS, backoff: true }; }
+    const speed = (mb / Math.max(ms, 0.001)) * 1000;
+    if (mb >= MIN_MB_FOR_SPEED && speed < SLOW_MB_S) this.slow++;
+    else this.slow = 0;
+    if (this.slow >= SLOW_PASSES) {
+      this.slow = 0;
+      return { wait: BACKOFF_MS, backoff: true };
+    }
     return { wait: Math.max(0, everyMs - ms), backoff: false };
   }
 }
 
-export interface Warmer { worker: Worker; stats: () => WarmStats; stop: () => void }
+export interface Warmer {
+  worker: Worker;
+  stats: () => WarmStats;
+  stop: () => void;
+}
 
 /**
  * Starts the warmer for the store's database. The `db-warmer` setting (false turns it off, no restart: a timer here carries it to the
@@ -57,13 +69,26 @@ export function warmDatabase(store: Store, everyMs = WARM_MS, settingMs = 5000):
   const flag = new Int32Array(new SharedArrayBuffer(4));
   const worker = new Worker(new URL(import.meta.url), { workerData: { warm: { path: store.path, everyMs, shared, flag } }, trackUnmanagedFds: false });
   worker.unref();
-  const apply = () => { try { Atomics.store(flag, 0, store.getSetting<boolean>(WARMER_SETTING) === false ? 0 : 1); } catch { /* keep the last value */ } };
+  const apply = () => {
+    try {
+      Atomics.store(flag, 0, store.getSetting<boolean>(WARMER_SETTING) === false ? 0 : 1);
+    } catch {
+      /* keep the last value */
+    }
+  };
   apply();
   const timer = setInterval(apply, settingMs);
   timer.unref();
   worker.on('error', (err) => console.error(`Database warmer failed: ${err?.message ?? err}`));
   worker.once('exit', () => clearInterval(timer));
-  return { worker, stats: () => ({ ms: shared[0], mb: shared[1], backoffs: shared[2] }), stop: () => { clearInterval(timer); void worker.terminate(); } };
+  return {
+    worker,
+    stats: () => ({ ms: shared[0], mb: shared[1], backoffs: shared[2] }),
+    stop: () => {
+      clearInterval(timer);
+      void worker.terminate();
+    },
+  };
 }
 
 if (!isMainThread && workerData?.warm) {
@@ -80,22 +105,32 @@ if (!isMainThread && workerData?.warm) {
     try {
       dbFd ??= openSync(path, 'r');
       bytes += readThrough(dbFd, buf);
-    } catch (err: any) { if (err?.code !== 'ENOENT') console.error(`Database warmer: reading the database: ${err?.message ?? err}`); }
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') console.error(`Database warmer: reading the database: ${err?.message ?? err}`);
+    }
     try {
       const fd = openSync(`${path}-wal`, 'r');
-      try { bytes += readThrough(fd, buf); } finally { closeSync(fd); }
-    } catch (err: any) { if (err?.code !== 'ENOENT') console.error(`Database warmer: reading the WAL: ${err?.message ?? err}`); }
+      try {
+        bytes += readThrough(fd, buf);
+      } finally {
+        closeSync(fd);
+      }
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') console.error(`Database warmer: reading the WAL: ${err?.message ?? err}`);
+    }
     return { bytes, ms: performance.now() - t0 };
   };
   const loop = () => {
     let wait = everyMs;
     if (Atomics.load(flag, 0) !== 1) {
-      shared[0] = 0; shared[1] = 0; // off: no stale pass for the Status page to show
+      shared[0] = 0;
+      shared[1] = 0; // off: no stale pass for the Status page to show
     } else {
       const { bytes, ms } = pass();
       const mb = bytes / 1048576;
       const p = pacer.after(mb, ms, everyMs);
-      shared[0] = Math.round(ms * 10) / 10; shared[1] = Math.round(mb * 10) / 10;
+      shared[0] = Math.round(ms * 10) / 10;
+      shared[1] = Math.round(mb * 10) / 10;
       if (p.backoff) shared[2]++;
       wait = p.wait;
     }

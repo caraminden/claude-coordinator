@@ -35,7 +35,10 @@ function run(cmd: string, file: string, state: string) {
 async function writer(file: string, counts: number[]) {
   const p = spawn('bash', ['-c', 'sleep 0.3; for v; do echo "wslrelay=$v,listen=40" > "$F.tmp" && mv -f "$F.tmp" "$F"; sleep 1.5; done', 'w', ...counts.map(String)], { env: { ...process.env, F: file } });
   const done = new Promise((r) => p.on('close', r));
-  return async () => { p.kill(); await done; };
+  return async () => {
+    p.kill();
+    await done;
+  };
 }
 
 test('no count file: says so, keeps nothing, and after checks nothing', async () => {

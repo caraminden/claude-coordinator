@@ -198,7 +198,13 @@ export const PREVIOUS = 10;
 export function releaseOf(row: ReleaseRow, link: string | null, number: number | null): Release {
   const changes = JSON.parse(row.changes) as (Release['changes'][number] & { stages?: unknown })[];
   return {
-    version: row.version, number, link, outcome: row.outcome, started: row.started_at, live: row.live_at, stages: JSON.parse(row.stages),
+    version: row.version,
+    number,
+    link,
+    outcome: row.outcome,
+    started: row.started_at,
+    live: row.live_at,
+    stages: JSON.parse(row.stages),
     changes: changes.map(({ ticketId, number, title }) => ({ ticketId, number, title })),
   };
 }
@@ -384,12 +390,18 @@ export class CitadelServer implements Reader {
   private stageUsual(stage: string): number | null {
     const { usual } = this.d;
     switch (stage) {
-      case 'rebase': return usual('land:rebase');
-      case 'test': return usual('land:ci') ?? usual('land:tests');
-      case 'deploy': return usual('land:deploy');
-      case 'restart': return usual('restart');
-      case 'live': return 0;
-      default: return null;
+      case 'rebase':
+        return usual('land:rebase');
+      case 'test':
+        return usual('land:ci') ?? usual('land:tests');
+      case 'deploy':
+        return usual('land:deploy');
+      case 'restart':
+        return usual('restart');
+      case 'live':
+        return 0;
+      default:
+        return null;
     }
   }
 
@@ -404,7 +416,7 @@ export class CitadelServer implements Reader {
     }
     if (!ship) return null;
     // Stable while it lasts: when this stage was first seen (track), so a poll doesn't move it.
-    const since = (stage: string) => (w?.kind === 'restart' ? w.since : this.tracking[id]?.[stage] ?? this.now());
+    const since = (stage: string) => (w?.kind === 'restart' ? w.since : (this.tracking[id]?.[stage] ?? this.now()));
     if (ship.stage === 'deploying') {
       const n = this.d.interruptible();
       const text = n ? `the restart waits for ${n} running turn${n === 1 ? '' : 's'} to end` : 'restarting';
@@ -453,8 +465,7 @@ export class CitadelServer implements Reader {
     const total = store.countReleases(p.id, CITADEL_TARGET);
     const currentRow = head && rows[0]?.version === head ? rows[0] : null;
     // The current release is this site; an older one can't be opened any more.
-    const current = currentRow ? releaseOf(currentRow, '/', total)
-      : head ? { version: head, number: total + 1, link: '/', changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
+    const current = currentRow ? releaseOf(currentRow, '/', total) : head ? { version: head, number: total + 1, link: '/', changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
     const skip = currentRow ? 1 : 0;
     const recent = rows.slice(skip, skip + PREVIOUS).map((r, i) => releaseOf(r, null, total - skip - i));
 
@@ -463,8 +474,15 @@ export class CitadelServer implements Reader {
       const id = this.d.ticketFor(t.label);
       const ticket = id != null ? store.getTicket(id) : undefined;
       return {
-        name: ticket ? `#${ticket.number ?? ticket.id}` : t.label.replace(/ \(.*\)$/, ''), ticketId: ticket?.id ?? null,
-        holds: t.got > 0, place: ordinal(i + 1), seq: t.seq, movable: t.got === 0 && !ridingOf(t.phase) && !!t.orders && !behindOld(lineTickets, t), stage: t.got > 0 ? landPhase(t.phase).stage : 'line', since: t.mtime, ...(t.got > 0 && { label: (id != null ? this.d.wait(id)?.label : undefined) ?? landPhase(t.phase).label }),
+        name: ticket ? `#${ticket.number ?? ticket.id}` : t.label.replace(/ \(.*\)$/, ''),
+        ticketId: ticket?.id ?? null,
+        holds: t.got > 0,
+        place: ordinal(i + 1),
+        seq: t.seq,
+        movable: t.got === 0 && !ridingOf(t.phase) && !!t.orders && !behindOld(lineTickets, t),
+        stage: t.got > 0 ? landPhase(t.phase).stage : 'line',
+        since: t.mtime,
+        ...(t.got > 0 && { label: (id != null ? this.d.wait(id)?.label : undefined) ?? landPhase(t.phase).label }),
         ...(t.got === 0 && !t.orders ? { why: OLD_LAND } : t.got === 0 && behindOld(lineTickets, t) ? { why: BEHIND_OLD } : {}),
       };
     });
@@ -496,7 +514,9 @@ export class CitadelServer implements Reader {
       changes.splice(0, changes.length, ...rest.slice(0, at), front, ...rs, ...rest.slice(at));
     }
     // Lands go one at a time and each starts its own deploy, so only the lead is in the release under way (#888).
-    changes.forEach((c, i) => { if (i > 0 && c.stage === 'line') c.later = true; });
+    changes.forEach((c, i) => {
+      if (i > 0 && c.stage === 'line') c.later = true;
+    });
     this.track(changes);
 
     let next: Next | null = null;
@@ -506,8 +526,7 @@ export class CitadelServer implements Reader {
       const after = stages.slice(TRACK.indexOf(lead.stage) + 1);
       // The idle restart waits on running turns, so with any running no time is promised for a release before it.
       const restartWaits = this.d.interruptible() > 0 && after.some((s) => s.name === 'restart');
-      const eta = lead.waitingOn || restartWaits || lead.usual == null || after.some((s) => s.usual == null)
-        ? null : lead.since + (lead.usual + after.reduce((sum, s) => sum + s.usual!, 0)) * 1000;
+      const eta = lead.waitingOn || restartWaits || lead.usual == null || after.some((s) => s.usual == null) ? null : lead.since + (lead.usual + after.reduce((sum, s) => sum + s.usual!, 0)) * 1000;
       const { ticketId: _i, number: _n, title: _t, ...at } = lead;
       next = { ...at, number: Math.max(total, current?.number ?? 0) + 1, link: null, stages, eta, changes };
       // The ship holding the line: its land.sh lines say what happened so far (riders, flakes, the bisect).
@@ -517,7 +536,14 @@ export class CitadelServer implements Reader {
         const news = this.d.news(holder, (b) => names.get(b) ?? b.replace(/^ticket\//, ''));
         // The files failed so far, live from CI's job (POST /api/ci-tests) or perigee's run (its progress file), before land.sh hears of them.
         const failed = this.d.wait(holder)?.failed;
-        if (failed?.length) news.push({ tone: 'bad', text: `Failed so far: ${failed.slice(0, 3).map((f) => f.replace(/^.*\//, '')).join(', ')}${failed.length > 3 ? ` +${failed.length - 3} more` : ''}` });
+        if (failed?.length)
+          news.push({
+            tone: 'bad',
+            text: `Failed so far: ${failed
+              .slice(0, 3)
+              .map((f) => f.replace(/^.*\//, ''))
+              .join(', ')}${failed.length > 3 ? ` +${failed.length - 3} more` : ''}`,
+          });
         const ids = new Map(tickets.map((t) => [`#${t.number ?? t.id}`, t.id]));
         for (const n of news) {
           const refs = Object.fromEntries((n.text.match(/#\d+/g) ?? []).flatMap((r) => (ids.has(r) ? [[r, ids.get(r)!]] : [])));
@@ -555,15 +581,20 @@ export class CitadelServer implements Reader {
     }
     const starts = changes.flatMap((c) => Object.values(c.stages));
     store.addRelease({
-      project_id: p.id, target: CITADEL_TARGET, version: head, changes: JSON.stringify(changes),
-      started_at: starts.length ? Math.min(...starts) : null, live_at: liveAt, outcome: 'live', stages: JSON.stringify(stages),
+      project_id: p.id,
+      target: CITADEL_TARGET,
+      version: head,
+      changes: JSON.stringify(changes),
+      started_at: starts.length ? Math.min(...starts) : null,
+      live_at: liveAt,
+      outcome: 'live',
+      stages: JSON.stringify(stages),
     });
     if (landed.length) {
       for (const t of landed) delete this.tracking[t.id];
       store.setSetting(TRACKING, this.tracking);
     }
   }
-
 }
 
 /**
@@ -574,10 +605,7 @@ export class CitadelServer implements Reader {
  * not its work. Null when git failed.
  */
 export async function landedIn(store: Store, p: Project, prev: string, head: string) {
-  const [log, refs] = await Promise.all([
-    git(['log', '--format=%x01%H %ct', '--name-only', `${prev}..${head}`], p.repo_dir!),
-    git(['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads/', 'refs/shipping/'], p.repo_dir!),
-  ]);
+  const [log, refs] = await Promise.all([git(['log', '--format=%x01%H %ct', '--name-only', `${prev}..${head}`], p.repo_dir!), git(['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads/', 'refs/shipping/'], p.repo_dir!)]);
   if (log == null || refs == null) return null;
   const commits = new Map<string, number>();
   /** The files each commit touched (#764), so a change can be put on the target that ships them. */
@@ -588,11 +616,15 @@ export async function landedIn(store: Store, p: Project, prev: string, head: str
     commits.set(sha, Number(ct) * 1000);
     files.set(sha, names.filter(Boolean));
   }
-  const lines = refs.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]);
+  const lines = refs
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => l.split(' ') as [string, string]);
   const tips = new Map(lines.filter(([, ref]) => ref.startsWith('refs/heads/')).map(([sha, ref]) => [ref.slice(11), sha]));
   // A batch member's refs/shipping name counts while its branch's tip isn't in the range yet.
   for (const [sha, ref] of lines) if (ref.startsWith('refs/shipping/') && commits.has(sha) && !commits.has(tips.get(ref.slice(14)) ?? '')) tips.set(ref.slice(14), sha);
-  const tickets = store.listTickets(p.id)
+  const tickets = store
+    .listTickets(p.id)
     .filter((t) => t.kind === 'ticket' && t.branch && commits.has(tips.get(t.branch) ?? '') && commits.get(tips.get(t.branch)!)! >= t.created_at - 1000)
     .sort((a, b) => (a.number ?? a.id) - (b.number ?? b.id));
   // A minion's files: its commits, oldest first up to its branch's tip, since the tip before it (history is linear).

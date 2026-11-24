@@ -35,9 +35,13 @@ export class ShipStatus {
 
   constructor(d: ShipDeps) {
     this.d = d;
-    this.timers = new ScanTimers((id) => {
-      this.branch(id, this.d.runner.isRunning(id) ? PR_TTL_MS : 0).catch((err) => console.error(`Branch check of ticket ${id} failed:`, err));
-    }, d.delayMs ?? SCAN_DELAY_MS, d.gapMs ?? TOOL_GAP_MS);
+    this.timers = new ScanTimers(
+      (id) => {
+        this.branch(id, this.d.runner.isRunning(id) ? PR_TTL_MS : 0).catch((err) => console.error(`Branch check of ticket ${id} failed:`, err));
+      },
+      d.delayMs ?? SCAN_DELAY_MS,
+      d.gapMs ?? TOOL_GAP_MS,
+    );
   }
 
   /** Where a ticket's branch stands (null for tickets without one); broadcast when it changes. */

@@ -59,7 +59,16 @@ try {
   // A syntax error in any front-end file blanks the app; node --check finds it without a browser.
   const pub = join(checkout, 'public');
   const scripts = readdirSync(pub).filter((f) => /\.m?js$/.test(f));
-  const bad = (await Promise.all(scripts.map((f) => promisify(execFile)(process.execPath, ['--check', join(pub, f)]).then(() => null, (err) => `${f}: ${err.stderr.trim()}`)))).filter(Boolean);
+  const bad = (
+    await Promise.all(
+      scripts.map((f) =>
+        promisify(execFile)(process.execPath, ['--check', join(pub, f)]).then(
+          () => null,
+          (err) => `${f}: ${err.stderr.trim()}`,
+        ),
+      ),
+    )
+  ).filter(Boolean);
   if (bad.length) fail(`Front-end files don't parse:\n${bad.join('\n')}`);
 
   begin('copying the database');
@@ -82,31 +91,51 @@ try {
   turnStore.db.prepare("DELETE FROM settings WHERE key GLOB 'container_home:*' OR key GLOB 'codex:on:user:*'").run();
   // A Taskmaster's git rules name each open minion's worktree (#92, #661): counted here from the copy, as the runner does.
   const openIn = (projectId: number) => (turnStore.db.prepare(`select count(*) n from tickets where project_id = ? and kind != 'coordinator' and status != 'closed' and coalesce(cwd, '') != ''`).get(projectId) as any).n as number;
-  const busiest = (turnStore.db.prepare(`select id, project_id, permission_mode, branch from tickets where kind = 'coordinator'`).all() as any[])
-    .map((c) => ({ ...c, open: openIn(c.project_id) })).sort((a, b) => Number(b.project_id === GLOBAL_OWNER) - Number(a.project_id === GLOBAL_OWNER) || b.open - a.open)[0];
+  const busiest = (turnStore.db.prepare(`select id, project_id, permission_mode, branch from tickets where kind = 'coordinator'`).all() as any[]).map((c) => ({ ...c, open: openIn(c.project_id) })).sort((a, b) => Number(b.project_id === GLOBAL_OWNER) - Number(a.project_id === GLOBAL_OWNER) || b.open - a.open)[0];
   const turnChecks: { what: string; id: number; dir: string }[] = [];
   // A file in the new minion's folder and one in the scheme's shared folder, for the file viewer's details (#157).
   const fileChecks: { what: string; path: string }[] = [];
   if (busiest) {
     const minion = turnStore.createTicket({ project_id: busiest.project_id, title: 'Boot check', permission_mode: busiest.permission_mode, created_by: 'boot-check' });
-    for (const [what, id, branch] of [['Taskmaster', busiest.id, busiest.branch], ['minion', minion.id, null]] as const) {
+    for (const [what, id, branch] of [
+      ['Taskmaster', busiest.id, busiest.branch],
+      ['minion', minion.id, null],
+    ] as const) {
       const dir = join(root, `turn-${id}`);
       mkdirSync(dir);
       turnStore.setTicketDir(id, dir, branch);
       turnChecks.push({ what, id, dir });
     }
-    const others = busiest.project_id === GLOBAL_OWNER ? (turnStore.db.prepare(`select count(*) n from tickets t join projects p on p.id = t.project_id
-      where t.project_id != ? and coalesce(p.repo_dir, '') != '' and t.kind != 'coordinator' and t.status != 'closed' and coalesce(t.cwd, '') != ''`).get(busiest.project_id) as any).n : null;
+    const others =
+      busiest.project_id === GLOBAL_OWNER
+        ? (
+            turnStore.db
+              .prepare(`select count(*) n from tickets t join projects p on p.id = t.project_id
+      where t.project_id != ? and coalesce(p.repo_dir, '') != '' and t.kind != 'coordinator' and t.status != 'closed' and coalesce(t.cwd, '') != ''`)
+              .get(busiest.project_id) as any
+          ).n
+        : null;
     console.error(`boot-check: the Taskmaster of scheme ${busiest.project_id}, with ${busiest.open} open minions${others === null ? '' : ` and every scheme's reads (${others} open minions in other schemes)`}`);
     // What the Taskmaster's stand-in claude reads back: the longest open chat (#120 broke read_ticket past
     // one page) and the first line of the scheme's instructions.
-    const longest = turnStore.db.prepare(`select t.number from events e join tickets t on t.id = e.ticket_id
-      where t.project_id = ? and t.number is not null and t.status != 'closed' group by e.ticket_id order by count(*) desc limit 1`).get(busiest.project_id) as any;
-    const instructions = turnStore.getProject(busiest.project_id)?.instructions?.split('\n').find((l: string) => l.trim())?.trim() ?? null;
+    const longest = turnStore.db
+      .prepare(`select t.number from events e join tickets t on t.id = e.ticket_id
+      where t.project_id = ? and t.number is not null and t.status != 'closed' group by e.ticket_id order by count(*) desc limit 1`)
+      .get(busiest.project_id) as any;
+    const instructions =
+      turnStore
+        .getProject(busiest.project_id)
+        ?.instructions?.split('\n')
+        .find((l: string) => l.trim())
+        ?.trim() ?? null;
     writeFileSync(join(turnChecks[0].dir, 'boot-check.json'), JSON.stringify({ longest: longest?.number ?? null, instructions }));
     const shared = projectSharedDir(root, busiest.project_id);
     mkdirSync(shared, { recursive: true });
-    for (const [where, dir] of [['linked', turnChecks[1].dir], ['shared', shared]]) writeFileSync(join(dir, 'boot-check.md'), `# Boot check\n\nA ${where} file.\n`);
+    for (const [where, dir] of [
+      ['linked', turnChecks[1].dir],
+      ['shared', shared],
+    ])
+      writeFileSync(join(dir, 'boot-check.md'), `# Boot check\n\nA ${where} file.\n`);
     fileChecks.push({ what: 'a linked file', path: `/api/tickets/${minion.id}/file?path=boot-check.md&info` }, { what: 'a shared file', path: `/api/projects/${busiest.project_id}/shared/file?path=boot-check.md&info` });
     turnStore.deleteSetting('limit-resumes');
   } else {
@@ -128,9 +157,19 @@ try {
   const server = spawn(process.execPath, [join(checkout, 'server.ts')], {
     cwd: checkout,
     env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, LANG: process.env.LANG,
-      HOST: '127.0.0.1', PORT: '0', DATA_DIR: root, BOOT_CHECK: '1', CLAUDE_BIN: claude, TURN_UNITS: '0',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: password, COORDINATOR_ADMIN: 'boot-check', SESSION_SECRET: secret,
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      LANG: process.env.LANG,
+      HOST: '127.0.0.1',
+      PORT: '0',
+      DATA_DIR: root,
+      BOOT_CHECK: '1',
+      CLAUDE_BIN: claude,
+      TURN_UNITS: '0',
+      CLAUDE_CONFIG_DIR: join(root, 'claude'),
+      COORDINATOR_PASSWORD: password,
+      COORDINATOR_ADMIN: 'boot-check',
+      SESSION_SECRET: secret,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -149,7 +188,10 @@ try {
   for (const end = Date.now() + healthy.ms(20_000); !health; await new Promise((r) => setTimeout(r, 100))) {
     if (server.exitCode !== null) fail(`The server exited during boot (code ${server.exitCode})`);
     if (Date.now() > end) fail(`The server did not answer /api/health within ${healthy.ms(20_000) / 1000} s${healthy.why}`);
-    health = await fetch(`${base}/api/health`).then((r) => (r.ok ? r.json() : null), () => null);
+    health = await fetch(`${base}/api/health`).then(
+      (r) => (r.ok ? r.json() : null),
+      () => null,
+    );
   }
   begin('app page and sign-in');
   const page = await fetch(`${base}/`);
@@ -163,39 +205,59 @@ try {
   for (const { what, path } of fileChecks) {
     const r = await fetch(`${base}${path}`, { headers: { Cookie: cookie } });
     const body = await r.text();
-    const name = (() => { try { return JSON.parse(body).name; } catch { return null; } })();
+    const name = (() => {
+      try {
+        return JSON.parse(body).name;
+      } catch {
+        return null;
+      }
+    })();
     if (!r.ok || name !== 'boot-check.md') fail(`The file viewer's details of ${what} (GET ${path}) answered ${r.status}: ${body.slice(0, 300)}`);
   }
   begin('Taskmaster and minion turns');
 
   // A person's message starts each turn; the stand-in claude leaves report.json in its folder. Both settle before a
   // failure is reported: the stop below ends the server, not a turn still running (each has its own 30 s, stretched by the load).
-  const turns = await Promise.allSettled(turnChecks.map(async ({ what, id, dir }) => {
-    const ticket = async () => (await fetch(`${base}/api/tickets/${id}`, { headers: { Cookie: cookie } }).then((r) => r.json())).ticket;
-    const sent = await fetch(`${base}/api/tickets/${id}/messages`, {
-      method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Boot check', after: true }),
-    });
-    if (!sent.ok) fail(`Messaging the ${what} answered ${sent.status}: ${await sent.text()}`);
-    const report = join(dir, 'report.json');
-    const slow = loadStretch();
-    for (const end = Date.now() + slow.ms(30_000); ; await new Promise((r) => setTimeout(r, 100))) {
-      const t = await ticket();
-      if (t.status !== 'running' && t.status !== 'new') {
-        if (!existsSync(report)) fail(`A ${what} turn could not start (${t.status}): ${t.note ?? 'no reason given'}`);
-        const r = JSON.parse(readFileSync(report, 'utf8'));
-        if (!r.ok) fail(`A ${what} turn started, but: ${r.error}`);
-        return console.error(`boot-check: a ${what} turn started (${r.found})`);
+  const turns = await Promise.allSettled(
+    turnChecks.map(async ({ what, id, dir }) => {
+      const ticket = async () => (await fetch(`${base}/api/tickets/${id}`, { headers: { Cookie: cookie } }).then((r) => r.json())).ticket;
+      const sent = await fetch(`${base}/api/tickets/${id}/messages`, {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Boot check', after: true }),
+      });
+      if (!sent.ok) fail(`Messaging the ${what} answered ${sent.status}: ${await sent.text()}`);
+      const report = join(dir, 'report.json');
+      const slow = loadStretch();
+      for (const end = Date.now() + slow.ms(30_000); ; await new Promise((r) => setTimeout(r, 100))) {
+        const t = await ticket();
+        if (t.status !== 'running' && t.status !== 'new') {
+          if (!existsSync(report)) fail(`A ${what} turn could not start (${t.status}): ${t.note ?? 'no reason given'}`);
+          const r = JSON.parse(readFileSync(report, 'utf8'));
+          if (!r.ok) fail(`A ${what} turn started, but: ${r.error}`);
+          return console.error(`boot-check: a ${what} turn started (${r.found})`);
+        }
+        if (Date.now() > end) fail(`A ${what} turn did not finish within ${slow.ms(30_000) / 1000} s${slow.why}`);
       }
-      if (Date.now() > end) fail(`A ${what} turn did not finish within ${slow.ms(30_000) / 1000} s${slow.why}`);
-    }
-  }));
+    }),
+  );
   for (const t of turns) if (t.status === 'rejected') throw t.reason;
   begin('');
   console.error(`boot-check: total ${((Date.now() - start) / 1000).toFixed(1)} s`);
   console.log(health.version);
 } finally {
   for (const p of procs) p.kill();
-  await Promise.all(procs.map((p) => p.exitCode !== null || p.signalCode !== null || new Promise((r) => { p.once('exit', r); setTimeout(r, 5000).unref(); })));
+  await Promise.all(
+    procs.map(
+      (p) =>
+        p.exitCode !== null ||
+        p.signalCode !== null ||
+        new Promise((r) => {
+          p.once('exit', r);
+          setTimeout(r, 5000).unref();
+        }),
+    ),
+  );
   rmSync(root, { recursive: true, force: true });
 }
 
@@ -254,11 +316,12 @@ async function pageCheck(url: string, cookie: string) {
     buf += d;
     for (let i; (i = buf.indexOf('\0')) >= 0; buf = buf.slice(i + 1)) handle(JSON.parse(buf.slice(0, i)));
   });
-  const send = (method: string, params: object = {}, sessionId?: string) => new Promise<any>((ok, no) => {
-    if (gone) return no(gone);
-    pending.set(++next, { ok, no });
-    input.write(JSON.stringify({ id: next, method, params, sessionId }) + '\0');
-  });
+  const send = (method: string, params: object = {}, sessionId?: string) =>
+    new Promise<any>((ok, no) => {
+      if (gone) return no(gone);
+      pending.set(++next, { ok, no });
+      input.write(JSON.stringify({ id: next, method, params, sessionId }) + '\0');
+    });
   const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
   const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
   for (const domain of ['Runtime', 'Log', 'Network', 'Page']) await send(`${domain}.enable`, {}, sessionId);

@@ -46,7 +46,7 @@ export function parseLendChange(body: any): LendChange {
   if (untick?.length) change.untick = untick;
   if (tick && untick && tick.some((w) => untick.includes(w))) throw new Error('A workspace is in both tick and untick');
   if (body.server !== undefined) {
-    if (body.server !== null && !(typeof body.server === 'string' && SERVER_NAME.test(body.server))) throw new Error('server must be an MCP server\'s name, as list_machines shows it, or null to untick it');
+    if (body.server !== null && !(typeof body.server === 'string' && SERVER_NAME.test(body.server))) throw new Error("server must be an MCP server's name, as list_machines shows it, or null to untick it");
     change.server = body.server;
   }
   for (const k of ['workspace_tools', 'always_on', 'gpu'] as const) {

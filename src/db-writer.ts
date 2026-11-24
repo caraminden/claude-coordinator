@@ -14,33 +14,141 @@ import { thrown } from './thrown.ts';
 
 /** The Store's writes the worker runs: none returns a value its callers use, and every argument survives postMessage. */
 export const WRITES = [
-  'setProjectRepoDir', 'setProjectUpstream', 'setProjectInstructions', 'setAppInstructions', 'setPersonalInstructions',
-  'setProjectSettings', 'updateUser', 'deleteUser', 'putCredential', 'failCredential', 'deleteCredential',
-  'finishOpenrouterCall', 'setOpenrouterCallPath', 'sweepOpenrouterCalls', 'adoptOwnerless', 'addMember', 'removeMember',
-  'putRepoCollaborator', 'deleteRepoCollaborator', 'updateContraption', 'setContraptionUser', 'putContraptionSession',
-  'endContraptionTurn', 'putTurnAudit', 'setTurnVerdict', 'sweepTurnAudit', 'deleteTurnAudit', 'setProjectHidden', 'setListOrder', 'setSeenItems', 'deleteProject', 'setTicketDir', 'deleteTicket',
-  'updateTicketQuietly', 'updateTicket', 'setLastActivity', 'setEventData', 'setArtifactPinned', 'deleteCiFile',
-  'publishCiFile', 'recordApkPublish', 'setSharedPin', 'writeArtifactData', 'deleteClaudeState', 'setTicketPinned',
-  'addGithubSeen', 'addStepTimes', 'addHealthEvent', 'setSetting', 'autoCheckpoint', 'deleteSetting', 'setSettings',
-  'addRunnerLoad', 'addRunnerLoads', 'pruneRunnerLoad', 'setMachineProjects', 'deleteMachine', 'saveView',
-  'setPushMuted', 'setPushEverything', 'setPushOnlyPinned', 'deletePushSubscription', 'savePushDevice', 'deletePushDevice', 'insertEvent', 'putFates',
-  'touch', 'leaveTouched', 'noteDigest', 'addPick', 'addContraptionError', 'addContraptionRun', 'addSlowMoments', 'recordGrunts', 'addHostSample', 'addFlakeEvents', 'updateFlakeFix',
-  'props.backfillOther', 'props.setBuild', 'schedules.ran', 'schedules.heldNote', 'memory.deleteTicket',
+  'setProjectRepoDir',
+  'setProjectUpstream',
+  'setProjectInstructions',
+  'setAppInstructions',
+  'setPersonalInstructions',
+  'setProjectSettings',
+  'updateUser',
+  'deleteUser',
+  'putCredential',
+  'failCredential',
+  'deleteCredential',
+  'finishOpenrouterCall',
+  'setOpenrouterCallPath',
+  'sweepOpenrouterCalls',
+  'adoptOwnerless',
+  'addMember',
+  'removeMember',
+  'putRepoCollaborator',
+  'deleteRepoCollaborator',
+  'updateContraption',
+  'setContraptionUser',
+  'putContraptionSession',
+  'endContraptionTurn',
+  'putTurnAudit',
+  'setTurnVerdict',
+  'sweepTurnAudit',
+  'deleteTurnAudit',
+  'setProjectHidden',
+  'setListOrder',
+  'setSeenItems',
+  'deleteProject',
+  'setTicketDir',
+  'deleteTicket',
+  'updateTicketQuietly',
+  'updateTicket',
+  'setLastActivity',
+  'setEventData',
+  'setArtifactPinned',
+  'deleteCiFile',
+  'publishCiFile',
+  'recordApkPublish',
+  'setSharedPin',
+  'writeArtifactData',
+  'deleteClaudeState',
+  'setTicketPinned',
+  'addGithubSeen',
+  'addStepTimes',
+  'addHealthEvent',
+  'setSetting',
+  'autoCheckpoint',
+  'deleteSetting',
+  'setSettings',
+  'addRunnerLoad',
+  'addRunnerLoads',
+  'pruneRunnerLoad',
+  'setMachineProjects',
+  'deleteMachine',
+  'saveView',
+  'setPushMuted',
+  'setPushEverything',
+  'setPushOnlyPinned',
+  'deletePushSubscription',
+  'savePushDevice',
+  'deletePushDevice',
+  'insertEvent',
+  'putFates',
+  'touch',
+  'leaveTouched',
+  'noteDigest',
+  'addPick',
+  'addContraptionError',
+  'addContraptionRun',
+  'addSlowMoments',
+  'recordGrunts',
+  'addHostSample',
+  'addFlakeEvents',
+  'updateFlakeFix',
+  'props.backfillOther',
+  'props.setBuild',
+  'schedules.ran',
+  'schedules.heldNote',
+  'memory.deleteTicket',
 ];
 
 /** Writes that return a value: they run on the server's thread after the queue, and a write they make inside runs with them. */
 export const VALUE_WRITES = [
-  'createProject', 'renameProject', 'createUser', 'addOpenrouterCall', 'createContraption', 'deleteContraptionSession',
-  'startContraptionTurn', 'createTicket', 'putCiFile', 'syncArtifacts', 'markSeen', 'setPersonNote', 'recap',
-  'rewriteClaudeEvents', 'recordTurn', 'backfillTurns', 'addRelease', 'addContraptionDeploy', 'createMachine', 'addMachineJob', 'deleteView', 'addFlakeFix',
+  'createProject',
+  'renameProject',
+  'createUser',
+  'addOpenrouterCall',
+  'createContraption',
+  'deleteContraptionSession',
+  'startContraptionTurn',
+  'createTicket',
+  'putCiFile',
+  'syncArtifacts',
+  'markSeen',
+  'setPersonNote',
+  'recap',
+  'rewriteClaudeEvents',
+  'recordTurn',
+  'backfillTurns',
+  'addRelease',
+  'addContraptionDeploy',
+  'createMachine',
+  'addMachineJob',
+  'deleteView',
+  'addFlakeFix',
   // CI numbers: the step-up check reads them back at once, so they never wait in the queue behind a stalled disk.
-  'putCiNumbers', 'addCiNumberStep', 'pruneCiNumbers',
+  'putCiNumbers',
+  'addCiNumberStep',
+  'pruneCiNumbers',
   // Machines and their jobs: the code reads a row back at once (a job's card, the slot, the go; the lend sent to the agent and
   // checked), so a read that gave up on the queue never acts on the state before (main red, Nov 21). Rare writes: none per beat.
-  'updateMachine', 'updateMachineJob', 'allowJobKind',
-  'savePushSubscription', 'pruneArtifacts', 'props.set', 'props.registerKey', 'props.registerValues', 'props.review',
-  'schedules.create', 'schedules.update', 'schedules.remove', 'memory.index', 'reviews.create', 'reviews.save', 'reviews.restore',
-  'addDelivery', 'updateDelivery', 'pruneDeliveries', 'importDeliveries', 'deliveryTransaction',
+  'updateMachine',
+  'updateMachineJob',
+  'allowJobKind',
+  'savePushSubscription',
+  'pruneArtifacts',
+  'props.set',
+  'props.registerKey',
+  'props.registerValues',
+  'props.review',
+  'schedules.create',
+  'schedules.update',
+  'schedules.remove',
+  'memory.index',
+  'reviews.create',
+  'reviews.save',
+  'reviews.restore',
+  'addDelivery',
+  'updateDelivery',
+  'pruneDeliveries',
+  'importDeliveries',
+  'deliveryTransaction',
 ];
 
 /** What a write makes the server forget of its own caches: when it is sent, and again when it lands, since a read in
@@ -129,7 +237,11 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     const n = Atomics.add(shared, 4, 1n) + 1n;
     queueMicrotask(() => {
       stepOpen = false;
-      try { worker.postMessage({ step: n }); } catch { /* gone: readers stop waiting on steps once it is */ }
+      try {
+        worker.postMessage({ step: n });
+      } catch {
+        /* gone: readers stop waiting on steps once it is */
+      }
     });
   };
   const unlist = busySource(() => (alive && seq > applied() ? [`${seq - applied()} queued DB writes`] : []));
@@ -146,9 +258,11 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   // Reads that went on past queued writes go in the health log (#1656, Cara 2026-11-22, "Count them first"): one row
   // per `staleNoteMs` at most, naming the read that gave up and counting the ones since the last row. An upper bound on
   // wrong answers: a read is counted whether or not the writes it passed touch what it reads.
-  let staleAt = 0, staleMore = 0;
+  let staleAt = 0,
+    staleMore = 0;
   const beforeRead = (sql?: string) => {
-    const target = seq, behind = target - applied();
+    const target = seq,
+      behind = target - applied();
     if (!alive || behind <= 0) return;
     if (stalled && applied() < stalled) return void staleMore++;
     if (waitFor(target, readWaitMs)) return void (stalled = 0);
@@ -156,18 +270,29 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     const now = Date.now();
     if (now - staleAt < staleNoteMs || inline || db.isTransaction) return void staleMore++;
     const text = `${sql ? `SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}` : 'a response'} on the server's thread waited ${readWaitMs} ms for ${behind} queued writes and read without them; ${staleMore} more reads passed queued writes since the last record`;
-    staleAt = now, staleMore = 0;
-    try { void store.addHealthEvent('db-read-stale', now, null, text); } catch { /* best effort */ }
+    (staleAt = now), (staleMore = 0);
+    try {
+      void store.addHealthEvent('db-read-stale', now, null, text);
+    } catch {
+      /* best effort */
+    }
   };
   const drain = (ms = drainMs, what = 'a drain') => {
-    const t0 = Date.now(), target = seq, took = target - applied();
+    const t0 = Date.now(),
+      target = seq,
+      took = target - applied();
     const ok = !alive || waitFor(target, ms);
     const waited = Date.now() - t0;
     if (waited >= SLOW_DRAIN_MS) {
       const text = `${what} on the server's thread waited ${waited} ms for ${took} queued writes${ok ? '' : ' and gave up'}`;
       console.error(`DB write: ${text}.`);
       // Sent to the worker behind the writes it waited for, so it adds no wait; inside a write or transaction here it would run here.
-      if (alive && !inline && !db.isTransaction) try { void store.addHealthEvent('db-write-wait', t0, null, text); } catch { /* best effort */ }
+      if (alive && !inline && !db.isTransaction)
+        try {
+          void store.addHealthEvent('db-write-wait', t0, null, text);
+        } catch {
+          /* best effort */
+        }
     }
     return ok;
   };
@@ -176,7 +301,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   // A response waits for its own request's writes, however long they take, but off the event loop: a client's next
   // request (an invite link right after making the person) or a client reading the file itself finds them (#1244).
   writes.landed = (everyone = false) => {
-    const own = everyone ? seq : writes.request.getStore()?.seq ?? 0;
+    const own = everyone ? seq : (writes.request.getStore()?.seq ?? 0);
     if (!alive || applied() >= own) return null;
     return new Promise<void>((resolve) => {
       const w = { seq: own, done: () => (clearTimeout(timer), waiters.delete(w), resolve()) };
@@ -238,7 +363,11 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
       beforeWrite(name);
       inline++;
       // Only its synchronous part: memory.index awaits embeddings for minutes, and other writes meanwhile go to the worker.
-      try { return f.apply(this, args); } finally { inline--; }
+      try {
+        return f.apply(this, args);
+      } finally {
+        inline--;
+      }
     };
   }
   for (const name of WRITES) {
@@ -272,7 +401,9 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
       else if (name === 'autoCheckpoint') exec(`PRAGMA wal_autocheckpoint = ${args[0] ? 1000 : 0}`);
       FORGETS[name]?.(store, args as number[]);
       const p = new Promise<void>((resolve, reject) => pending.set(n, { name, args, resolve, reject }));
-      p.catch(() => { /* logged by the worker; a caller that awaits sees it */ });
+      p.catch(() => {
+        /* logged by the worker; a caller that awaits sees it */
+      });
       return p;
     };
   }
@@ -298,7 +429,9 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     console.error(`DB write worker stopped (exit code ${code})${lost ? `, ${lost} queued writes lost` : ''}: writes run on the server's thread again.`);
     try {
       store.addHealthEvent('db-writer-stopped', Date.now(), null, `exit code ${code}, ${lost} queued writes lost`);
-    } catch { /* the health log is best effort */ }
+    } catch {
+      /* the health log is best effort */
+    }
   });
 
   // However the server stops, what it queued is written first (the worker runs until the process is gone), and
@@ -337,7 +470,9 @@ if (!isMainThread && workerData?.writer) {
       console.error(`DB write ${name} failed on the write worker: ${thrown(e).stack ?? e}`);
       try {
         store.addHealthEvent('db-write-error', Date.now(), null, `${name}: ${error}`.slice(0, 2000));
-      } catch { /* the health log is best effort */ }
+      } catch {
+        /* the health log is best effort */
+      }
     }
     Atomics.store(shared, 0, BigInt(seq));
     Atomics.notify(shared, 0);

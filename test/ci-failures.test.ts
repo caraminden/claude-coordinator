@@ -12,12 +12,30 @@ const dir = mkdtempSync(join(tmpdir(), 'ci-failures-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
 const run = (id: number, conclusion: string, branch = 'land/ticket/628-releases-page-feedback') => ({
-  id, name: 'tests', head_branch: branch, head_sha: 'a972a3d1b5c0ffee', status: 'completed', conclusion, run_attempt: 1,
-  created_at: '2026-11-13T07:45:24Z', updated_at: '2026-11-13T07:46:45Z', html_url: `https://github.com/o/r/actions/runs/${id}`,
+  id,
+  name: 'tests',
+  head_branch: branch,
+  head_sha: 'a972a3d1b5c0ffee',
+  status: 'completed',
+  conclusion,
+  run_attempt: 1,
+  created_at: '2026-11-13T07:45:24Z',
+  updated_at: '2026-11-13T07:46:45Z',
+  html_url: `https://github.com/o/r/actions/runs/${id}`,
 });
 const jobs = (conclusion: string) => ({
-  jobs: [{ name: 'test', conclusion, started_at: '2026-11-13T07:45:26Z', completed_at: '2026-11-13T07:46:43Z',
-    steps: [{ name: 'actions/checkout@v4', conclusion: 'success' }, { name: 'the full suite', conclusion }] }],
+  jobs: [
+    {
+      name: 'test',
+      conclusion,
+      started_at: '2026-11-13T07:45:26Z',
+      completed_at: '2026-11-13T07:46:43Z',
+      steps: [
+        { name: 'actions/checkout@v4', conclusion: 'success' },
+        { name: 'the full suite', conclusion },
+      ],
+    },
+  ],
 });
 const answers: Record<string, unknown> = {
   'api repos/o/r/actions/runs/1': run(1, 'failure'),
@@ -30,7 +48,9 @@ const answers: Record<string, unknown> = {
 };
 writeFileSync(join(dir, 'answers.json'), JSON.stringify(answers));
 const gh = join(dir, 'gh');
-writeFileSync(gh, `#!${process.execPath}
+writeFileSync(
+  gh,
+  `#!${process.execPath}
 const { readFileSync } = require('node:fs');
 const args = process.argv.slice(2).join(' ');
 if (args === 'run view 1 -R o/r --log-failed') process.stdout.write(readFileSync(${JSON.stringify(join(import.meta.dirname, 'ci-failures.fixture.log'))}));
@@ -39,16 +59,18 @@ else {
   if (answer === undefined) { process.stderr.write('gh: no fake answer for ' + args + '\\n'); process.exit(1); }
   process.stdout.write(JSON.stringify(answer));
 }
-`);
+`,
+);
 chmodSync(gh, 0o755);
-const ci = (...args: string[]) =>
-  spawnSync(tool, ['-R', 'o/r', ...args], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, TMPDIR: dir } });
+const ci = (...args: string[]) => spawnSync(tool, ['-R', 'o/r', ...args], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, TMPDIR: dir } });
 
 test('a red run: its line, the failed step, each failed test with its message and diff, and nothing else', () => {
   const r = ci('1');
   assert.equal(r.stderr, '');
   assert.equal(r.status, 1);
-  assert.equal(r.stdout, `✖ run 1 failure · tests · land/ticket/628-releases-page-feedback a972a3d1 · Nov 12 23:45 PST · queued 2s, ran 1m17s · https://github.com/o/r/actions/runs/1
+  assert.equal(
+    r.stdout,
+    `✖ run 1 failure · tests · land/ticket/628-releases-page-feedback a972a3d1 · Nov 12 23:45 PST · queued 2s, ran 1m17s · https://github.com/o/r/actions/runs/1
 ✖ job test failure, step "the full suite" failure
 
 2 failing tests:
@@ -78,13 +100,14 @@ run-tests: test/chained-minions.test.ts: failed in the full run, passed alone: l
 run-tests: the run still fails: a rerun only labels flakes, it never turns a red run green
 
 full log: ${join(dir, 'ci-1.log')}
-`);
+`,
+  );
   // The saved log is the whole of it, cleaned: no timestamps, escape codes or job and step columns.
   const saved = readFileSync(join(dir, 'ci-1.log'), 'utf8');
   assert.match(saved, /^Current runner version: '2.338.2'\nRunner name/);
   assert.match(saved, /generatedMessage: true/);
   assert.doesNotMatch(saved, /\d{4}-\d\d-\d\dT[\d:.]+Z|\^\[|\x1b|UNKNOWN STEP|﻿/);
-  assert.equal(ci('1', '--full').stdout.includes("ps -u \"$(id -u)\""), true, '--full prints it all');
+  assert.equal(ci('1', '--full').stdout.includes('ps -u "$(id -u)"'), true, '--full prints it all');
 });
 
 test('a green run is one line', () => {
@@ -96,11 +119,7 @@ test('a green run is one line', () => {
 test('--list: one line a run, with queued and run times', () => {
   const r = ci('--list');
   assert.equal(r.status, 0);
-  assert.deepEqual(r.stdout.split('\n'), [
-    '2  success    a972a3d1  Nov 12 23:45 PST  queued    2s  ran  1m17s  land/ticket/628-releases-page-feedback',
-    '1  failure    a972a3d1  Nov 12 23:45 PST  queued    2s  ran  1m17s  land/ticket/628-releases-page-feedback',
-    '',
-  ]);
+  assert.deepEqual(r.stdout.split('\n'), ['2  success    a972a3d1  Nov 12 23:45 PST  queued    2s  ran  1m17s  land/ticket/628-releases-page-feedback', '1  failure    a972a3d1  Nov 12 23:45 PST  queued    2s  ran  1m17s  land/ticket/628-releases-page-feedback', '']);
 });
 
 test('gh failing is exit 2 with what gh said', () => {

@@ -12,10 +12,15 @@ const DRIVES = /\$\{?DEV_(URL|COOKIE|PORT)|127\.0\.0\.1:\d{4,5}|localhost:\d{4,5
 
 /** What the run did so far, from its stream-json lines. */
 export function tally(lines, startedAt, now = Date.now()) {
-  let drives = 0, last = '';
+  let drives = 0,
+    last = '';
   for (const l of lines) {
     let ev;
-    try { ev = JSON.parse(l); } catch { continue; }
+    try {
+      ev = JSON.parse(l);
+    } catch {
+      continue;
+    }
     if (ev.type !== 'assistant') continue;
     for (const b of ev.message?.content ?? []) {
       if (b.type === 'tool_use' && b.name === 'Bash' && DRIVES.test(String(b.input?.command ?? ''))) drives++;
@@ -49,5 +54,7 @@ if (import.meta.main ?? process.argv[1]?.endsWith('verifier-stay.mjs')) {
       writeFileSync(countFile, String(n + 1));
       console.log(JSON.stringify({ decision: 'block', reason: why }));
     }
-  } catch { /* can't read its state: let it stop rather than hold it forever */ }
+  } catch {
+    /* can't read its state: let it stop rather than hold it forever */
+  }
 }

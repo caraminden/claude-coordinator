@@ -44,11 +44,14 @@ function fakeClaude(): { bin: string; log: string } {
   const dir = mkdtempSync(join(root, 'bin-'));
   const bin = join(dir, 'claude');
   const log = join(dir, 'log');
-  writeFileSync(bin, `#!/bin/sh
+  writeFileSync(
+    bin,
+    `#!/bin/sh
 { echo "args: $*"; echo "cwd: $(pwd)"; echo "branch: $(git rev-parse --abbrev-ref HEAD)"; echo "diff: $(git diff --name-only "$2"...HEAD | tr '\\n' ' ')"; } >> '${log}'
 if [ -e '${dir}/refuse' ]; then printf '\\033[31mThis diff has 900 changed files; ultrareview reviews at most 500 files and 8,000 lines.\\033[0m\\n' >&2; exit 1; fi
 echo "1 bug found: src/a.ts:2 off by one"
-`);
+`,
+  );
   chmodSync(bin, 0o755);
   return { bin, log };
 }
@@ -108,10 +111,16 @@ function reviews(bin: string, place: any = { host: true }, extra: Record<string,
   const scratch = mkdtempSync(join(root, 'scratch-'));
   const jobsDir = mkdtempSync(join(root, 'jobs-'));
   const ur = new UltraReviews({
-    claudeBin: bin, place: () => place, scratch: () => scratch, hostEnv: { PATH: process.env.PATH! }, jobsDir,
+    claudeBin: bin,
+    place: () => place,
+    scratch: () => scratch,
+    hostEnv: { PATH: process.env.PATH! },
+    jobsDir,
     emit: (ticketId, kind, data) => events.push({ ticketId, kind, data }),
-    getSetting: (k) => settings.get(k) as any, setSetting: (k, v) => settings.set(k, v),
-    github: () => null, ...extra,
+    getSetting: (k) => settings.get(k) as any,
+    setSetting: (k, v) => settings.set(k, v),
+    github: () => null,
+    ...extra,
   });
   const result = () => until('the result', () => events.find((e) => e.kind === 'ultrareview_result')?.data as ReviewResult | undefined);
   return { ur, events, settings, scratch, jobsDir, result };
@@ -211,15 +220,22 @@ test('only a person can start one: minions and the Taskmaster get 403, and a per
   const srv = await bootServer({ root: dir, env: { CLAUDE_BIN: bin } });
   try {
     const tokens = new Auth(PASSWORD, SECRET);
-    const asAgent = (id: number, method: string) => fetch(`${srv.base}/api/tickets/${M.id}/ultrareview?mode=branch`, {
-      method, headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'Content-Type': 'application/json' },
-      ...(method === 'POST' ? { body: JSON.stringify({ mode: 'branch', confirm: true }) } : {}),
-    });
+    const asAgent = (id: number, method: string) =>
+      fetch(`${srv.base}/api/tickets/${M.id}/ultrareview?mode=branch`, {
+        method,
+        headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'Content-Type': 'application/json' },
+        ...(method === 'POST' ? { body: JSON.stringify({ mode: 'branch', confirm: true }) } : {}),
+      });
     for (const id of [M.id, TM.id]) for (const method of ['GET', 'POST']) assert.equal((await asAgent(id, method)).status, 403, `${id} ${method}`);
     // The batch routes (#1399): no turn starts or discards one, and only the chat's own minion preps, for its turn's person.
-    const batchAs = (id: number, method: string, path: string, on = M.id) => fetch(`${srv.base}/api/tickets/${on}/ultrareview/${path}`, { method, headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'Content-Type': 'application/json' }, ...(method === 'GET' ? {} : { body: JSON.stringify({ areas: [{ paths: 'lib' }], confirm: true }) }) });
+    const batchAs = (id: number, method: string, path: string, on = M.id) =>
+      fetch(`${srv.base}/api/tickets/${on}/ultrareview/${path}`, { method, headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'Content-Type': 'application/json' }, ...(method === 'GET' ? {} : { body: JSON.stringify({ areas: [{ paths: 'lib' }], confirm: true }) }) });
     for (const id of [M.id, M2.id, TM.id]) {
-      for (const [method, path] of [['POST', 'batch/x/start'], ['DELETE', 'batch/x']]) assert.equal((await batchAs(id, method, path)).status, 403, `${id} ${method} ${path}`);
+      for (const [method, path] of [
+        ['POST', 'batch/x/start'],
+        ['DELETE', 'batch/x'],
+      ])
+        assert.equal((await batchAs(id, method, path)).status, 403, `${id} ${method} ${path}`);
     }
     for (const id of [M2.id, TM.id]) for (const method of ['GET', 'POST']) assert.equal((await batchAs(id, method, 'batch')).status, 403, `another thread ${id} ${method} batch`);
     const own = await batchAs(M.id, 'GET', 'batch');
@@ -283,7 +299,8 @@ test("a minion's prep goes out as its turn's person: their GitHub login, their b
   const post = async (caller: any) => {
     const req: any = Readable.from([Buffer.from(JSON.stringify({ areas: [{ name: 'Lib', paths: ['lib'] }] }))]);
     req.headers = { 'content-type': 'application/json' };
-    let status = 0, body = '';
+    let status = 0,
+      body = '';
     const res: any = { destroyed: false, headersSent: false, writeHead: (s: number) => void (status = s), end: (b: Buffer) => void (body = String(b)) };
     try {
       await route.handler({ req, res, app, session: { name: 'agent', agent: caller.id, exp: 0 }, caller, ticket: { id: 9, project_id: 1 }, params: { ticket: '9' } } as any);
@@ -334,7 +351,11 @@ test('a review outlives a restart: the next server follows it and posts its find
     await srv.stop({ keepTurns: true });
     // Its clone looks as old as a long review's: the next server's sweep of turn folders leaves it be.
     const people = join(data, 'run', 'turns');
-    const clones = readdirSync(people).flatMap((p) => readdirSync(join(people, p)).filter((n) => n.startsWith('ultrareview-')).map((n) => join(people, p, n)));
+    const clones = readdirSync(people).flatMap((p) =>
+      readdirSync(join(people, p))
+        .filter((n) => n.startsWith('ultrareview-'))
+        .map((n) => join(people, p, n)),
+    );
     assert.equal(clones.length, 1);
     utimesSync(clones[0], new Date(0), new Date(0));
     srv = await bootServer({ root: dir, env });
@@ -371,14 +392,17 @@ function fakeGh(): { bin: string; log: string; calls: () => string[] } {
   const dir = mkdtempSync(join(root, 'gh-'));
   const bin = join(dir, 'gh');
   const log = join(dir, 'log');
-  writeFileSync(bin, `#!/bin/sh
+  writeFileSync(
+    bin,
+    `#!/bin/sh
 { echo "[$GH_TOKEN] $*" | tr '\\n' ' '; echo; } >> '${log}'
 if [ "$1 $2" = "pr create" ]; then
   [ -e '${dir}/fail-pr' ] && { echo 'pull request create failed: GraphQL: Resource not accessible by integration' >&2; exit 1; }
   echo "https://github.com/o/r/pull/42"
 fi
 exit 0
-`);
+`,
+  );
   chmodSync(bin, 0o755);
   return { bin, log, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []) };
 }
@@ -388,13 +412,16 @@ function bigRepoClaude(): { bin: string; log: string } {
   const dir = mkdtempSync(join(root, 'bin-'));
   const bin = join(dir, 'claude');
   const log = join(dir, 'log');
-  writeFileSync(bin, `#!/bin/sh
+  writeFileSync(
+    bin,
+    `#!/bin/sh
 echo "args: $*" >> '${log}'
 case "$2" in
   [0-9]*) echo "remote: $(git remote get-url origin)" >> '${log}'; echo "2 bugs found in PR $2";;
   *) echo 'Ultrareview could not launch: Repo is too large. Push a PR and use \`claude ultrareview <PR#>\` instead.' >&2; exit 1;;
 esac
-`);
+`,
+  );
   chmodSync(bin, 0o755);
   return { bin, log };
 }
@@ -425,9 +452,18 @@ test('area mode falls back to a draft PR when the CLI says the repo is too large
   const parent = git(bare, 'rev-parse', `${head}^`);
   const name = head.replace('refs/heads/', '');
   const calls = gh.calls();
-  assert.ok(calls.every((c) => c.startsWith('[tok-cara] ')), "every gh call runs on the clicker's own GitHub token");
-  assert.ok(calls.some((c) => c.includes(`api repos/o/r/git/refs -f ref=refs/heads/${name}-base -f sha=${parent}`)), calls.join('\n'));
-  assert.ok(calls.some((c) => /pr create --repo o\/r --draft/.test(c) && c.includes(`--head ${name} --base ${name}-base`)), calls.join('\n'));
+  assert.ok(
+    calls.every((c) => c.startsWith('[tok-cara] ')),
+    "every gh call runs on the clicker's own GitHub token",
+  );
+  assert.ok(
+    calls.some((c) => c.includes(`api repos/o/r/git/refs -f ref=refs/heads/${name}-base -f sha=${parent}`)),
+    calls.join('\n'),
+  );
+  assert.ok(
+    calls.some((c) => /pr create --repo o\/r --draft/.test(c) && c.includes(`--head ${name} --base ${name}-base`)),
+    calls.join('\n'),
+  );
   // Once the findings are in, the PR is closed and both branches deleted.
   await until('the clean-up', () => gh.calls().some((c) => c.includes(`git/refs/heads/${name}-base`) && c.includes('DELETE')));
   const after = gh.calls();
@@ -464,8 +500,11 @@ test('a batch preps one draft PR per area, refuses one over the caps, and surviv
   assert.match(a.pr!.head, /^review\/the-a-file-[a-z0-9]+$/);
   const ready = await until('prepped', () => ur.rows(7, 1).find((x) => x.id === a.id && x.state === 'ready'));
   assert.deepEqual([ready.pr!.number, ready.pr!.url], [42, 'https://github.com/o/r/pull/42']);
-  assert.ok(gh.calls().some((c) => c.includes('Is the off-by-one real?')), 'the question goes in the PR description');
-  assert.deepEqual(ur.rows(7, 2), [], "a person sees only their own rows");
+  assert.ok(
+    gh.calls().some((c) => c.includes('Is the off-by-one real?')),
+    'the question goes in the PR description',
+  );
+  assert.deepEqual(ur.rows(7, 2), [], 'a person sees only their own rows');
   // A row still prepping when the server stops can't be finished: the next server marks it failed and deletes its branches.
   const half = { ...ready, id: 'half', state: 'prepping', pr: { slug: 'o/r', head: 'review/half-x', base: 'review/half-x-base' } };
   settings.set('ultrareview_batch', [...(settings.get('ultrareview_batch') as any[]), half]);
@@ -473,7 +512,11 @@ test('a batch preps one draft PR per area, refuses one over the caps, and surviv
   for (const [k, v] of settings) next.settings.set(k, v);
   next.ur.recover();
   const rows = next.ur.rows(7, 1);
-  assert.deepEqual(rows.find((x) => x.id === a.id), ready, 'the ready row is back as it was');
+  assert.deepEqual(
+    rows.find((x) => x.id === a.id),
+    ready,
+    'the ready row is back as it was',
+  );
   assert.equal(rows.find((x) => x.id === 'half')!.state, 'failed');
   await until('the half-made branches go', () => gh.calls().some((c) => c.includes('DELETE repos/o/r/git/refs/heads/review/half-x-base')));
 });
@@ -494,17 +537,29 @@ test("a batch row's Start reviews its PR, posts the findings and cleans up; disc
   assert.throws(() => ur.startRow(one.id, 2, 'Josh', shared), /not yours|no such/i, "nobody starts someone else's row");
   await ur.startRow(one.id, 1, 'Cara', shared);
   assert.equal(ur.rows(7, 1).find((x) => x.id === one.id)!.state, 'running');
-  await assert.rejects(Promise.resolve().then(() => ur.startRow(one.id, 1, 'Cara', shared)), /already/, 'a second click never pays twice');
+  await assert.rejects(
+    Promise.resolve().then(() => ur.startRow(one.id, 1, 'Cara', shared)),
+    /already/,
+    'a second click never pays twice',
+  );
   const r = await result();
   assert.equal(r.ok, true, r.text);
   assert.match(readFileSync(log, 'utf8'), /^args: ultrareview 42 --trust-workspace --timeout 45$/m);
   assert.doesNotMatch(readFileSync(log, 'utf8'), /ultrareview-base/, 'a prepped row goes straight to its PR');
   assert.ok(readdirSync(shared).length === 1, 'findings saved to the chat');
   await until('its branches go', () => gh.calls().some((c) => c.includes(`DELETE repos/o/r/git/refs/heads/${heads.One}-base`)));
-  assert.equal(ur.rows(7, 1).some((x) => x.id === one.id), false, 'its row is gone once its findings are posted');
+  assert.equal(
+    ur.rows(7, 1).some((x) => x.id === one.id),
+    false,
+    'its row is gone once its findings are posted',
+  );
 
   ur.discard(two.id, 1);
-  assert.equal(ur.rows(7, 1).some((x) => x.id === two.id), false, 'discard drops the row at once');
+  assert.equal(
+    ur.rows(7, 1).some((x) => x.id === two.id),
+    false,
+    'discard drops the row at once',
+  );
   await until('discarded branches go', () => gh.calls().some((c) => c.includes(`DELETE repos/o/r/git/refs/heads/${heads.Two}-base`)));
 
   // Nobody starts the third within 7 days: it's cleaned up the same way, and the chat hears it in one line.
@@ -519,7 +574,7 @@ test("a batch row's Start reviews its PR, posts the findings and cleans up; disc
   void three;
 });
 
-test('a failed prep shows GitHub\'s words on its row and deletes what it pushed', async () => {
+test("a failed prep shows GitHub's words on its row and deletes what it pushed", async () => {
   const { dir, bare } = githubRepo();
   const gh = fakeGh();
   writeFileSync(join(gh.bin, '..', 'fail-pr'), '');

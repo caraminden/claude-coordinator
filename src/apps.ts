@@ -130,19 +130,20 @@ export class RestartHolds {
 }
 
 /** Whether something takes connections on 127.0.0.1:port within ms (the connection is closed at once). */
-const accepts = (port: number, ms: number) => new Promise<boolean>((ok) => {
-  const s = connect(port, '127.0.0.1');
-  // A full backlog leaves a connect pending: give up at the hold's end.
-  s.setTimeout(Math.max(1, ms), () => {
-    s.destroy();
-    ok(false);
+const accepts = (port: number, ms: number) =>
+  new Promise<boolean>((ok) => {
+    const s = connect(port, '127.0.0.1');
+    // A full backlog leaves a connect pending: give up at the hold's end.
+    s.setTimeout(Math.max(1, ms), () => {
+      s.destroy();
+      ok(false);
+    });
+    s.once('connect', () => {
+      s.destroy();
+      ok(true);
+    });
+    s.once('error', () => ok(false));
   });
-  s.once('connect', () => {
-    s.destroy();
-    ok(true);
-  });
-  s.once('error', () => ok(false));
-});
 
 /** Whether a path under the contraption (after /apps/<name>) is one of its open paths, or under one. */
 export function isOpenPath(openPaths: string[], rest: string): boolean {
@@ -165,7 +166,11 @@ export function staticOpen(row: Pick<ContraptionRow, 'icon' | 'static_paths'>, m
   if (STANDARD_MANIFESTS.includes(rest)) return true;
   if (!IMAGE_FILE.test(rest) && !MANIFEST_FILE.test(rest)) return false;
   if (row.icon === rest) return true;
-  try { return (JSON.parse(row.static_paths ?? '[]') as string[]).includes(rest); } catch { return false; }
+  try {
+    return (JSON.parse(row.static_paths ?? '[]') as string[]).includes(rest);
+  } catch {
+    return false;
+  }
 }
 
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -278,13 +283,18 @@ export class AppProxy {
   async backfillStatics() {
     for (const row of this.store.listContraptions()) {
       if (row.static_paths !== null) continue;
-      const user = this.store.contraptionUsers(row.id).map((id) => this.store.getUser(id)).find((u) => u && this.contraptions.enabled(row.name, u.id));
+      const user = this.store
+        .contraptionUsers(row.id)
+        .map((id) => this.store.getUser(id))
+        .find((u) => u && this.contraptions.enabled(row.name, u.id));
       const header = user && this.contraptions.signIdentity(row.name, user);
       if (!header) continue;
       try {
         const found = await installCheck(row.name, (path) => fetch(`http://127.0.0.1:${row.port}${path}`, { headers: { 'x-citadel-identity': header, accept: 'text/html' }, signal: AbortSignal.timeout(5000) }));
         if (found.statics.length) this.store.updateContraption(row.name, { static_paths: JSON.stringify(found.statics) });
-      } catch { /* not up: next start */ }
+      } catch {
+        /* not up: next start */
+      }
     }
   }
 
@@ -311,7 +321,7 @@ export class AppProxy {
     } catch {
       return void res.writeHead(400, text).end('Bad request');
     }
-    if (url.pathname.startsWith('/apps/_citadel/')) return void this.kit(req, res, url, host).catch(() => res.headersSent ? res.destroy() : res.writeHead(500, text).end('Internal error'));
+    if (url.pathname.startsWith('/apps/_citadel/')) return void this.kit(req, res, url, host).catch(() => (res.headersSent ? res.destroy() : res.writeHead(500, text).end('Internal error')));
     // The down page's own checks (appDown) aren't news: the load that showed it was counted. Read before admit drops X-Citadel-*.
     const check = !!req.headers['x-citadel-down-check'];
     const a = host !== null && url.pathname.startsWith('/_citadel/') ? this.enter(req, url, host) : this.admit(req, url, host);
@@ -512,8 +522,7 @@ export class AppProxy {
    * the app, POST $BASE_PATH/app-api/uploaded as the uploader, and the page gets the app's answer with the file's.
    */
   private async upload(req: IncomingMessage, res: ServerResponse, url: URL, host: string | null, name: string, id: string | undefined) {
-    const answer = (status: number, body?: unknown) =>
-      void (body === undefined ? res.writeHead(status, { 'Cache-Control': 'no-store' }).end() : res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body)));
+    const answer = (status: number, body?: unknown) => void (body === undefined ? res.writeHead(status, { 'Cache-Control': 'no-store' }).end() : res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(body)));
     const row = this.store.getContraption(name);
     // On a contraption's host only its own; with APPS_DOMAIN set its pages are there, so Citadel's host takes none.
     if (!this.uploads || !row || (host !== null ? host !== name : this.domain !== null)) return answer(404, { error: 'Not found' });
@@ -532,12 +541,15 @@ export class AppProxy {
       if (req.method === 'DELETE') return answer(204, await chunked.cancel(who, target, id));
       const offset = Number(url.searchParams.get('offset') ?? NaN);
       if (!Number.isSafeInteger(offset) || offset < 0) throw new HttpError(400, 'offset must be the byte the chunk starts at');
-      answer(200, await chunked.put(who, target, id, offset, req, async (meta, part) => {
-        const rel = ['uploads', safeFileName(user.login), ...meta.folder];
-        const saved = await place(part, join(home, '.local/share', row.name, ...rel), meta.name);
-        const file = { path: [...rel, saved.slice(saved.lastIndexOf('/') + 1)].join('/'), name: saved.slice(saved.lastIndexOf('/') + 1), size: meta.size };
-        return { ...file, app: await this.tellUploaded(row, user, file, meta) };
-      }));
+      answer(
+        200,
+        await chunked.put(who, target, id, offset, req, async (meta, part) => {
+          const rel = ['uploads', safeFileName(user.login), ...meta.folder];
+          const saved = await place(part, join(home, '.local/share', row.name, ...rel), meta.name);
+          const file = { path: [...rel, saved.slice(saved.lastIndexOf('/') + 1)].join('/'), name: saved.slice(saved.lastIndexOf('/') + 1), size: meta.size };
+          return { ...file, app: await this.tellUploaded(row, user, file, meta) };
+        }),
+      );
     } catch (err) {
       if (res.headersSent) return void res.destroy();
       answer(err instanceof HttpError ? err.status : 500, { error: err instanceof HttpError ? err.message : 'Internal error' });
@@ -549,8 +561,7 @@ export class AppProxy {
    * own host (cc_app) or Citadel's (cc_session). The same gate as uploads: signed in, enabled for it, same origin.
    */
   private async pushDevice(req: IncomingMessage, res: ServerResponse, host: string | null, name: string) {
-    const answer = (status: number, error?: string) =>
-      void (error === undefined ? res.writeHead(status, { 'Cache-Control': 'no-store' }).end() : res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ error })));
+    const answer = (status: number, error?: string) => void (error === undefined ? res.writeHead(status, { 'Cache-Control': 'no-store' }).end() : res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ error })));
     const row = this.store.getContraption(name);
     if (!row || (host !== null && host !== name)) return answer(404, 'Not found');
     if (req.method !== 'POST' && req.method !== 'DELETE') return answer(405, 'Method not allowed');
@@ -576,7 +587,9 @@ export class AppProxy {
     if (!identity) return { status: 503, answer: null };
     try {
       const r = await fetch(`http://127.0.0.1:${row.port}/apps/${row.name}/app-api/uploaded`, {
-        method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(15_000),
+        method: 'POST',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(15_000),
         headers: { 'X-Citadel-Identity': identity, 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ ...file, folder: meta.folder.join('/') }),
       });

@@ -29,10 +29,12 @@ before(async () => {
     if (path === '/api/slow-moments') {
       if (refuse) return void res.writeHead(503).end();
       const chunks: Buffer[] = [];
-      res.req.on('data', (c: Buffer) => chunks.push(c)).on('end', () => {
-        reports.push(JSON.parse(Buffer.concat(chunks).toString()));
-        res.writeHead(202).end('{}');
-      });
+      res.req
+        .on('data', (c: Buffer) => chunks.push(c))
+        .on('end', () => {
+          reports.push(JSON.parse(Buffer.concat(chunks).toString()));
+          res.writeHead(202).end('{}');
+        });
       return;
     }
     res.writeHead(404).end();

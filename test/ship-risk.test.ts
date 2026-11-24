@@ -30,7 +30,15 @@ test('weeks run Monday to Sunday in Pacific time', () => {
 test('summarize counts per scheme, week and kind, and names a scheme with no notes', () => {
   const at = Date.parse('2026-11-18T20:00:00Z');
   const notes = [SHIPPED, MERGED, GO, PUSH_FAILED, 'Ready. Risk high: x.'].map((text) => ({ scheme: 2, at, text }));
-  const r = summarize(notes, [{ id: 2, name: 'Citadel' }, { id: 5, name: 'Delve' }], 4, Date.parse('2026-11-20T20:00:00Z'));
+  const r = summarize(
+    notes,
+    [
+      { id: 2, name: 'Citadel' },
+      { id: 5, name: 'Delve' },
+    ],
+    4,
+    Date.parse('2026-11-20T20:00:00Z'),
+  );
   assert.deepEqual(r.weeks, ['2026-10-26', '2026-11-02', '2026-11-09', '2026-11-16']);
   const s = r.rows.find((x) => x.kind === 'shipped')!;
   assert.deepEqual(s.counts, { low: 1, medium: 0, high: 2 });

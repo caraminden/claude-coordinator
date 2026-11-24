@@ -9,11 +9,11 @@ import { commandsKey, schemeCommandsKey, type LoadedCommands } from './runner.ts
 
 /** One line on Claude Code's built-ins and bundled skills that have no file to read it from. */
 const BUILT_IN: Record<string, string> = {
-  compact: 'Compact the session\'s context to free up room, keeping a summary',
+  compact: "Compact the session's context to free up room, keeping a summary",
   context: 'Show what fills the context window',
-  usage: 'Show the plan\'s usage limits',
+  usage: "Show the plan's usage limits",
   clear: 'Clear the conversation and start a new Claude session',
-  model: 'Switch Claude\'s model for the session',
+  model: "Switch Claude's model for the session",
   effort: 'Set the reasoning effort for the session',
   fast: 'Toggle fast mode',
   mcp: 'List the MCP servers and their status',
@@ -21,9 +21,9 @@ const BUILT_IN: Record<string, string> = {
   recap: 'Recap the session so far',
   'claude-api': 'Claude API and Anthropic SDK reference',
   dataviz: 'Charts, graphs and data visualizations',
-  'plugin-authoring': 'Make a mod: a change to Claude\'s own interface or behaviour',
-  'code-review': 'Review the branch\'s changes',
-  'security-review': 'Security review of the branch\'s changes',
+  'plugin-authoring': "Make a mod: a change to Claude's own interface or behaviour",
+  'code-review': "Review the branch's changes",
+  'security-review': "Security review of the branch's changes",
   init: 'Write a CLAUDE.md for the repo',
   loop: 'Run a prompt again on an interval',
 };
@@ -48,7 +48,10 @@ export function describe(text: string): string {
     }
     value = block.join(' ');
   }
-  value = value.trim().replace(/^(["'])([\s\S]*)\1$/, '$2').replace(/\s+/g, ' ');
+  value = value
+    .trim()
+    .replace(/^(["'])([\s\S]*)\1$/, '$2')
+    .replace(/\s+/g, ' ');
   const sentence = /^[\s\S]*?[.!?](?=\s|$)/.exec(value)?.[0] ?? value;
   return sentence.length > DESCRIPTION_MAX ? `${sentence.slice(0, DESCRIPTION_MAX - 1).trimEnd()}…` : sentence;
 }
@@ -78,13 +81,14 @@ function fileDescription(path: string): string | null {
 function candidates(name: string, loaded: LoadedCommands): string[] {
   const [plugin, skill] = name.includes(':') ? name.split(':', 2) : [null, name];
   if (!SAFE.test(skill) || (plugin !== null && !SAFE.test(plugin))) return [];
-  const roots = plugin !== null
-    ? loaded.plugins.filter((p) => p.name === plugin).map((p) => p.path)
-    : loaded.cwd ? [join(loaded.cwd, '.claude')] : [];
+  const roots = plugin !== null ? loaded.plugins.filter((p) => p.name === plugin).map((p) => p.path) : loaded.cwd ? [join(loaded.cwd, '.claude')] : [];
   return roots.flatMap((root) => [join(root, 'skills', skill, 'SKILL.md'), join(root, 'commands', `${skill}.md`)]);
 }
 
-export interface CommandInfo { name: string; description: string }
+export interface CommandInfo {
+  name: string;
+  description: string;
+}
 
 /**
  * The commands a chat's turns load, each with its line: its own last turn's list, else the scheme's newest (a chat

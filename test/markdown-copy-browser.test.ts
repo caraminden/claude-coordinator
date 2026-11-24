@@ -57,7 +57,6 @@ async function click(page: Page, selector: string) {
   await page.eval('new Promise((r) => setTimeout(r, 50))');
 }
 
-
 test('only fenced blocks get a button, and the text of the reply stays the code', { skip }, async () => {
   const page = await browser.page(base, { width: 900, height: 700 });
   assert.equal(await page.eval('md.querySelectorAll("pre > .cui-copy").length'), 2, 'one per fence');
@@ -68,7 +67,8 @@ test('only fenced blocks get a button, and the text of the reply stays the code'
 });
 
 /** Whether the first button is hidden by the (hover: hover) rule: headless Chromium has no hover, so the rule's selector is matched by hand. */
-const hoverHides = (page: Page, i = 0) => page.eval<boolean>(`(() => {
+const hoverHides = (page: Page, i = 0) =>
+  page.eval<boolean>(`(() => {
   const rule = document.adoptedStyleSheets.flatMap((s) => [...s.cssRules]).find((r) => r.conditionText === '(hover: hover)');
   return md.querySelectorAll('.cui-copy')[${i}].matches(rule.cssRules[0].selectorText) && rule.cssRules[0].style.opacity === '0';
 })()`);

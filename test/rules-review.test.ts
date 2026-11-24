@@ -30,7 +30,7 @@ test('rules_review: off by default, opened when onboarding turns done, cleared b
   }
 });
 
-test('onboarding step 3 ends with a card linking the scheme\'s rules page, in setup and in a tune-up', () => {
+test("onboarding step 3 ends with a card linking the scheme's rules page, in setup and in a tune-up", () => {
   for (const mode of ['first-run', 'tune-up'] as const) {
     const text = onboardingPrompt({ id: 7, name: 'Lanternfall', onboarding: 'interview', onboarding_mode: mode } as Project, '/shared');
     assert.match(text, /end with one `ask_question` card to the scheme's members/, mode);

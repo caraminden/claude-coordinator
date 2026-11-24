@@ -12,7 +12,10 @@ import { REPO, tempRoot, until } from './helpers.ts';
 const tmp = tempRoot('agent-task-groups-');
 let leftover = 0;
 after(async () => {
-  if (leftover) try { process.kill(-leftover, 'SIGKILL'); } catch {}
+  if (leftover)
+    try {
+      process.kill(-leftover, 'SIGKILL');
+    } catch {}
   await tmp.teardown();
 });
 
@@ -60,5 +63,5 @@ test('a task that has ended but left its group running is ended with the agent',
   assert.equal(alive(pid), true, 'the sleep outlives the shell that started it');
   agent.kill('SIGTERM');
   await new Promise((r) => agent.once('exit', r));
-  await until('the sleep is gone', () => !alive(pid), 5_000).catch(() => assert.fail('the task\'s group outlived the agent'));
+  await until('the sleep is gone', () => !alive(pid), 5_000).catch(() => assert.fail("the task's group outlived the agent"));
 });

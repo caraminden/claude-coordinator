@@ -4,9 +4,7 @@
 // work at all (isWorkTool).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  actionLabel, actionPhase, activityLabel, createProgress, describeAction, isWorkTool, stepInfo, summarizeActions, workPhases,
-} from '../public/progress.js';
+import { actionLabel, actionPhase, activityLabel, createProgress, describeAction, isWorkTool, stepInfo, summarizeActions, workPhases } from '../public/progress.js';
 
 const bash = (command, description) => ({ name: 'Bash', input: description ? { command, description } : { command } });
 const read = (file_path) => ({ name: 'Read', input: { file_path } });
@@ -17,10 +15,16 @@ const failed = (block) => act(block, { is_error: true });
 
 test('only real work counts as an action, not plan bookkeeping or tool loading', () => {
   const cases = [
-    ['TaskCreate', false], ['TaskUpdate', false], ['TaskList', false], ['TaskGet', false], // the task list itself
+    ['TaskCreate', false],
+    ['TaskUpdate', false],
+    ['TaskList', false],
+    ['TaskGet', false], // the task list itself
     ['TodoWrite', false], // the older task list
     ['ToolSearch', false], // loading other tools' schemas
-    ['Bash', true], ['Edit', true], ['Read', true], ['Agent', true],
+    ['Bash', true],
+    ['Edit', true],
+    ['Read', true],
+    ['Agent', true],
     ['mcp__thread__set_thread_status', true], // an MCP tool is work like any other
   ];
   for (const [name, work] of cases) assert.equal(isWorkTool(name), work, name);
@@ -218,44 +222,51 @@ test('the activity line says what the work underway is, naming the file being ch
 });
 
 // A session in four phases: look, change two files (one twice), test (once failing), commit.
-const session = [
-  act(read('/r/src/a.js')),
-  act({ name: 'Grep', input: { pattern: 'x' } }),
-  act(edit('/r/src/a.js')),
-  act(edit('/r/src/b.js')),
-  act(edit('/r/src/a.js')),
-  failed(bash('npm test')),
-  act(bash('npm test')),
-  act(bash('git commit -m "x"')),
-];
+const session = [act(read('/r/src/a.js')), act({ name: 'Grep', input: { pattern: 'x' } }), act(edit('/r/src/a.js')), act(edit('/r/src/b.js')), act(edit('/r/src/a.js')), failed(bash('npm test')), act(bash('npm test')), act(bash('git commit -m "x"'))];
 
 test('back-to-back calls of the same kind merge into one phase, told as done', () => {
   const phases = workPhases(session);
-  assert.deepEqual(phases.map((ph) => [ph.phase, ph.text, ph.count, ph.failed, ph.ongoing]), [
-    ['explore', 'Looked through the code', 2, 0, false],
-    // Each changed file once, in the order first touched.
-    ['change', 'Changed a.js, b.js', 3, 0, false],
-    ['verify', 'Tried it out and checked it works', 2, 1, false],
-    ['save', 'Saved the work in git', 1, 0, false],
-  ]);
+  assert.deepEqual(
+    phases.map((ph) => [ph.phase, ph.text, ph.count, ph.failed, ph.ongoing]),
+    [
+      ['explore', 'Looked through the code', 2, 0, false],
+      // Each changed file once, in the order first touched.
+      ['change', 'Changed a.js, b.js', 3, 0, false],
+      ['verify', 'Tried it out and checked it works', 2, 1, false],
+      ['save', 'Saved the work in git', 1, 0, false],
+    ],
+  );
   assert.equal(phases[2].actions[0], session[5]);
 });
 
 test('while the turn runs, only the last phase reads as ongoing', () => {
   const phases = workPhases(session, true);
-  assert.deepEqual(phases.map((ph) => [ph.text, ph.ongoing]), [
-    ['Looked through the code', false],
-    ['Changed a.js, b.js', false],
-    ['Tried it out and checked it works', false],
-    ['Saving the work in git', true],
-  ]);
+  assert.deepEqual(
+    phases.map((ph) => [ph.text, ph.ongoing]),
+    [
+      ['Looked through the code', false],
+      ['Changed a.js, b.js', false],
+      ['Tried it out and checked it works', false],
+      ['Saving the work in git', true],
+    ],
+  );
   // An ongoing change names its files too.
-  assert.deepEqual(workPhases(session.slice(0, 4), true).map((ph) => ph.text), ['Looked through the code', 'Changing a.js, b.js']);
+  assert.deepEqual(
+    workPhases(session.slice(0, 4), true).map((ph) => ph.text),
+    ['Looked through the code', 'Changing a.js, b.js'],
+  );
 });
 
 test('the same kind of work after something else is a new phase', () => {
   const phases = workPhases([act(read('/r/a.js')), act(edit('/r/a.js')), act(read('/r/b.js'))]);
-  assert.deepEqual(phases.map((ph) => [ph.phase, ph.count]), [['explore', 1], ['change', 1], ['explore', 1]]);
+  assert.deepEqual(
+    phases.map((ph) => [ph.phase, ph.count]),
+    [
+      ['explore', 1],
+      ['change', 1],
+      ['explore', 1],
+    ],
+  );
 });
 
 test('a change phase names three files at most, then counts the rest', () => {

@@ -21,7 +21,13 @@ export const ACTIONS = ['edit', 'add', 'delete', 'index', 'flag'] as const;
 export type Action = (typeof ACTIONS)[number];
 
 /** One change as a run proposes it. */
-export interface ProposedChange { action: Action; file: string; text?: string; line?: string; reason: string }
+export interface ProposedChange {
+  action: Action;
+  file: string;
+  text?: string;
+  line?: string;
+  reason: string;
+}
 
 /** One change as stored: the proposal, the note as it was then (for the diff and the changed-since check), and what became of it. */
 export interface Change {
@@ -41,7 +47,11 @@ export interface Change {
 }
 
 /** A note's state saved before an approved change, for Put back: null text means it didn't exist. */
-export interface Saved { file: string; text: string | null; line: string | null }
+export interface Saved {
+  file: string;
+  text: string | null;
+  line: string | null;
+}
 
 export interface Proposal {
   id: number;
@@ -96,7 +106,7 @@ export function checkChanges(folder: FolderView, raw: unknown): Change[] {
     seen.add(file);
     const reason = typeof c.reason === 'string' ? c.reason.trim() : '';
     if (!reason || reason.length > 500) throw fail(`Change ${i + 1} (${file}) needs a reason under 500 characters: people decide from it`);
-    const was = file === 'MEMORY.md' ? folder.index : notes.get(file) ?? null;
+    const was = file === 'MEMORY.md' ? folder.index : (notes.get(file) ?? null);
     if (action === 'add' ? was !== null : was === null) throw fail(action === 'add' ? `Change ${i + 1}: ${file} already exists; edit it instead` : `Change ${i + 1}: there is no note ${file}`);
     const wasLine = lineFor(folder.index, file);
     let text: string | null = null;
@@ -181,7 +191,10 @@ export function restoreSaved(dir: string, saved: Saved[], gone: (file: string) =
       // The line first, as in applyChanges: a full MEMORY.md refuses before the note is touched.
       writeIndex(dir, withLine(readIndex(dir), s.file, s.text === null ? null : s.line));
       if (s.text === null) {
-        if (existsSync(path)) { rmSync(path); gone(s.file); }
+        if (existsSync(path)) {
+          rmSync(path);
+          gone(s.file);
+        }
       } else writeAtomic(path, s.text);
       restored++;
     } catch (err: any) {
@@ -204,7 +217,10 @@ export function withDrift(dir: string, changes: Change[]): (Change & { drifted: 
 /** A short count of a proposal's changes by kind, for the card and the page: "3 edits, 11 index lines, 2 deletes, 8 flags". */
 export function countLine(changes: Pick<Change, 'action'>[]): string {
   const names: Record<Action, [string, string]> = { edit: ['edit', 'edits'], add: ['new note', 'new notes'], delete: ['delete', 'deletes'], index: ['index line', 'index lines'], flag: ['flag', 'flags'] };
-  return ACTIONS.map((a) => [a, changes.filter((c) => c.action === a).length] as const).filter(([, n]) => n).map(([a, n]) => `${n} ${names[a][n === 1 ? 0 : 1]}`).join(', ');
+  return ACTIONS.map((a) => [a, changes.filter((c) => c.action === a).length] as const)
+    .filter(([, n]) => n)
+    .map(([a, n]) => `${n} ${names[a][n === 1 ? 0 : 1]}`)
+    .join(', ');
 }
 
 export const MEMORY_PROPOSALS_SCHEMA = `
@@ -231,7 +247,9 @@ const parse = (r: Row | undefined): Proposal | null => (r ? { ...r, changes: JSO
 /** The proposals table. The schema is in src/db.ts's SCHEMA, so a new database makes it in its one setup commit. */
 export class MemoryProposals {
   private db: DatabaseSync;
-  constructor(db: DatabaseSync) { this.db = db; }
+  constructor(db: DatabaseSync) {
+    this.db = db;
+  }
 
   get(id: number): Proposal | null {
     return parse(this.db.prepare('SELECT * FROM memory_proposals WHERE id = ?').get(id) as Row | undefined);
@@ -262,8 +280,7 @@ export class MemoryProposals {
 
   /** Record the decision: applied (with the old notes) or dismissed. Only an open proposal can be decided; false otherwise. */
   decide(id: number, d: { status: 'applied' | 'dismissed'; changes: Change[]; backup: Saved[]; by: string }, now = Date.now()): boolean {
-    const r = this.db.prepare("UPDATE memory_proposals SET status = ?, changes = ?, backup = ?, decided_by = ?, decided_at = ? WHERE id = ? AND status = 'open'")
-      .run(d.status, JSON.stringify(d.changes), d.backup.length ? JSON.stringify(d.backup) : null, d.by, now, id);
+    const r = this.db.prepare("UPDATE memory_proposals SET status = ?, changes = ?, backup = ?, decided_by = ?, decided_at = ? WHERE id = ? AND status = 'open'").run(d.status, JSON.stringify(d.changes), d.backup.length ? JSON.stringify(d.backup) : null, d.by, now, id);
     return Number(r.changes) === 1;
   }
 
@@ -280,9 +297,11 @@ export class MemoryProposals {
 
 /** The folder a tidy works on: the scheme's reachable memory folder with the most notes (one per scheme in practice). */
 export function curatorTarget(repoDir: string | null, logins: MemoryLogin[]): { folder: MemoryFolder; notes: number } | null {
-  return memoryFolders(repoDir, logins)
-    .map((folder) => ({ folder, view: readFolder(folder, () => false) }))
-    .filter((f) => f.view.reachable)
-    .sort((a, b) => b.view.notes.length - a.view.notes.length)
-    .map(({ folder, view }) => ({ folder, notes: view.notes.length }))[0] ?? null;
+  return (
+    memoryFolders(repoDir, logins)
+      .map((folder) => ({ folder, view: readFolder(folder, () => false) }))
+      .filter((f) => f.view.reachable)
+      .sort((a, b) => b.view.notes.length - a.view.notes.length)
+      .map(({ folder, view }) => ({ folder, notes: view.notes.length }))[0] ?? null
+  );
 }

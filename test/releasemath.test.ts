@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { changeEta, columnOf, releaseName, shortSpan, STUCK_MS, stuckFor } from '../public/releasemath.js';
 
-const citadel = [{ name: 'line', usual: null }, { name: 'rebase', usual: 5 }, { name: 'test', usual: 90 }, { name: 'deploy', usual: 70 }, { name: 'restart', usual: 40 }, { name: 'live', usual: 0 }];
+const citadel = [
+  { name: 'line', usual: null },
+  { name: 'rebase', usual: 5 },
+  { name: 'test', usual: 90 },
+  { name: 'deploy', usual: 70 },
+  { name: 'restart', usual: 40 },
+  { name: 'live', usual: 0 },
+];
 
 test('shortSpan rounds to the unit people read, carrying minutes into hours', () => {
   assert.equal(shortSpan(-5000), '0s');
@@ -25,7 +32,7 @@ test('columnOf: a wait is Waiting, the land line too, then Checks for the first 
 
 const track = (...names) => [...names, 'live'].map((name) => ({ name, usual: null }));
 
-test('columnOf: a contraption\'s call is Waiting, its build Checks, the drain and restart Shipping, as before #659', () => {
+test("columnOf: a contraption's call is Waiting, its build Checks, the drain and restart Shipping, as before #659", () => {
   const contraption = track('call', 'build', 'drain', 'restart');
   assert.equal(columnOf(contraption, { stage: 'call', waitingOn: 'a deploy' }), 0);
   assert.equal(columnOf(contraption, { stage: 'call', waitingOn: null }), 0);
@@ -46,7 +53,7 @@ test('columnOf: a PR whose checks run is in Checks; queued, failed or waiting fo
   assert.equal(columnOf(track('checks', 'merge', 'call', 'build'), { stage: 'call', waitingOn: null }), 0);
 });
 
-test('changeEta: the later of the release estimate and this change\'s own stages; none while anything is unknown', () => {
+test("changeEta: the later of the release estimate and this change's own stages; none while anything is unknown", () => {
   const next = { eta: 100_000, stages: citadel };
   // At deploy since t=0: deploy 70s + restart 40s + live 0 = 110 s, later than the release's 100 s.
   assert.equal(changeEta(next, { stage: 'deploy', since: 0, usual: 70, waitingOn: null }), 110_000);
@@ -54,7 +61,14 @@ test('changeEta: the later of the release estimate and this change\'s own stages
   assert.equal(changeEta({ ...next, eta: null }, { stage: 'deploy', since: 0, usual: 70, waitingOn: null }), null);
   assert.equal(changeEta(next, { stage: 'deploy', since: 0, usual: 70, waitingOn: 'a runner' }), null);
   assert.equal(changeEta(next, { stage: 'line', since: 0, usual: null, waitingOn: null }), null);
-  const unknownAfter = { eta: 1, stages: [{ name: 'main', usual: 0 }, { name: 'deploy call', usual: null }, { name: 'live', usual: 0 }] };
+  const unknownAfter = {
+    eta: 1,
+    stages: [
+      { name: 'main', usual: 0 },
+      { name: 'deploy call', usual: null },
+      { name: 'live', usual: 0 },
+    ],
+  };
   assert.equal(changeEta(unknownAfter, { stage: 'main', since: 0, usual: 0, waitingOn: null }), null);
 });
 

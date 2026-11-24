@@ -47,7 +47,7 @@ before(async () => {
   procs.push(srv.proc);
 });
 
-test('a thread uses a connected machine\'s MCP server, one copy per turn', async () => {
+test("a thread uses a connected machine's MCP server, one copy per turn", async () => {
   const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'test-box' } });
   assert.equal(machine.online, false);
   assert.match(token, /^ccm_\d+_/);
@@ -61,7 +61,7 @@ test('a thread uses a connected machine\'s MCP server, one copy per turn', async
   const [turn] = await until('the first turn', () => turns().length >= 1 && turns());
   assert.equal(turn.error, undefined);
   assert.deepEqual(turn.results['test-box'].tools, ['whoami']);
-  assert.ok(turn.allow.includes('mcp__test-box'), 'the machine\'s tools are allowed');
+  assert.ok(turn.allow.includes('mcp__test-box'), "the machine's tools are allowed");
   assert.match(turn.message, /Connected machines: test-box/);
 
   // A second turn starts a fresh copy of the machine's server.
@@ -101,7 +101,7 @@ test('an online machine reaches no scheme until it is on its list, and then its 
   await assert.rejects(call(`/api/machines/${box.id}/projects/${project.id}`, { method: 'PUT' }), /404/);
 });
 
-test('a shared machine\'s token shows again to admins, a relink shows the new one, and one linked before #1355 says to relink once', async () => {
+test("a shared machine's token shows again to admins, a relink shows the new one, and one linked before #1355 says to relink once", async () => {
   const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'showme' } });
   assert.equal(machine.token_showable, true);
   assert.equal((await call(`/api/machines/${machine.id}/token`)).token, token);
@@ -186,9 +186,18 @@ test('a machine lends what is ticked of what its agent found, and nothing else (
   await lend(machine.id, project);
   const find = async () => (await call('/api/machines')).find((m: any) => m.name === 'ticks');
   const { output } = startAgent(token, ['--config', config], { CLAUDE_CONFIG_DIR: home });
-  const found = await until('ticks to report what it found', async () => { const m = await find(); return m.managed && m.found.length && m; });
-  assert.deepEqual(found.found, [{ name: 'own', from: 'file' }, { name: 'godot-ai', from: 'claude' }]);
-  assert.deepEqual(found.workspaces.map((w: any) => w.name), ['w', 'x']);
+  const found = await until('ticks to report what it found', async () => {
+    const m = await find();
+    return m.managed && m.found.length && m;
+  });
+  assert.deepEqual(found.found, [
+    { name: 'own', from: 'file' },
+    { name: 'godot-ai', from: 'claude' },
+  ]);
+  assert.deepEqual(
+    found.workspaces.map((w: any) => w.name),
+    ['w', 'x'],
+  );
   assert.doesNotMatch(JSON.stringify(found), /sk-secret-123|API_KEY/);
   assert.deepEqual(found.lend, { server: null, workspaces: [] }, 'a new machine starts with nothing ticked');
   assert.deepEqual([found.status, found.reason, found.fix], ['fix', 'Lends nothing: nothing is ticked', 'tick']);
@@ -197,7 +206,10 @@ test('a machine lends what is ticked of what its agent found, and nothing else (
     await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message } });
     return (await until('a turn', () => turns().length > before && turns())).at(-1);
   };
-  assert.deepEqual(Object.keys((await turnNow('nothing ticked')).results).filter((n) => n.startsWith('ticks')), []);
+  assert.deepEqual(
+    Object.keys((await turnNow('nothing ticked')).results).filter((n) => n.startsWith('ticks')),
+    [],
+  );
 
   for (const lend of [{ server: 'a b', workspaces: [] }, { server: null, workspaces: 'w' }, { server: null }, { server: null, workspaces: ['../x'] }, 'all']) {
     await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend } }), /400 lend must be/);
@@ -205,26 +217,38 @@ test('a machine lends what is ticked of what its agent found, and nothing else (
   // A tick needs no new token: the same agent serves it at once.
   const ticked = await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'godot-ai', workspaces: ['w'] } } });
   assert.deepEqual(ticked.lend, { server: 'godot-ai', workspaces: ['w'] });
-  const ready = await until('its check', async () => { const m = await find(); return m.status === 'ready' && !m.checking && m; });
-  assert.deepEqual(ready.checked.results.map((r: any) => [r.server, r.ok]).sort(), [['mcp', true], ['ws', true]]);
+  const ready = await until('its check', async () => {
+    const m = await find();
+    return m.status === 'ready' && !m.checking && m;
+  });
+  assert.deepEqual(ready.checked.results.map((r: any) => [r.server, r.ok]).sort(), [
+    ['mcp', true],
+    ['ws', true],
+  ]);
   let turn = await turnNow('ticked');
   assert.equal(turn.error, undefined);
   assert.deepEqual(turn.results.ticks.tools, ['whoami']);
   assert.match(turn.results['ticks-ws'].text, /## w\n/);
-  assert.doesNotMatch(turn.results['ticks-ws'].text, /## x\n/, 'a folder that isn\'t ticked is not there for minions');
+  assert.doesNotMatch(turn.results['ticks-ws'].text, /## x\n/, "a folder that isn't ticked is not there for minions");
   assert.match(turn.results['ticks-ws'].ran, /task ran/);
   assert.match(output(), /Lent from the Machines page: MCP server godot-ai and workspaces w/);
 
   // The other server ticked instead: the machine's own, from its file. Its tools keep the machine's name.
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'own', workspaces: [] } } });
   turn = await turnNow('the other one');
-  assert.deepEqual(Object.keys(turn.results).filter((n) => n.startsWith('ticks')), ['ticks']);
+  assert.deepEqual(
+    Object.keys(turn.results).filter((n) => n.startsWith('ticks')),
+    ['ticks'],
+  );
   assert.match(output(), /started own/);
 
   // A name the agent didn't find lends nothing: Citadel can name a server, never a command.
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'not-there', workspaces: ['nor-this'] } } });
   assert.deepEqual((await find()).reason, 'Lends nothing: nothing is ticked');
-  assert.deepEqual(Object.keys((await turnNow('made up')).results).filter((n) => n.startsWith('ticks')), []);
+  assert.deepEqual(
+    Object.keys((await turnNow('made up')).results).filter((n) => n.startsWith('ticks')),
+    [],
+  );
   const opened = await fetch(`${base}/api/machines/${machine.id}/session`, { headers: { Authorization: `Bearer ${(await turnNow('by hand')).token}` } });
   assert.equal(opened.status, 503);
 
@@ -232,13 +256,22 @@ test('a machine lends what is ticked of what its agent found, and nothing else (
   const stuckMarker = join(root, 'stuck-stand-in');
   // A server its owner adds to the file shows up to tick without restarting anything.
   writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] }, second: { run: [process.execPath, mcpServer] } } }));
-  writeFileSync(config, JSON.stringify({ servers: { own: { run: [process.execPath, mcpServer] }, stuck: { run: [process.execPath, '-e', 'setInterval(() => {}, 1000)', stuckMarker] } }, workspaces: { w: { path: join(dir, 'w'), tasks: { wait: { run: [process.execPath, '-e', 'setTimeout(() => {}, 60000)', stuckMarker] } } }, x: { path: join(dir, 'x') } } }));
+  writeFileSync(
+    config,
+    JSON.stringify({
+      servers: { own: { run: [process.execPath, mcpServer] }, stuck: { run: [process.execPath, '-e', 'setInterval(() => {}, 1000)', stuckMarker] } },
+      workspaces: { w: { path: join(dir, 'w'), tasks: { wait: { run: [process.execPath, '-e', 'setTimeout(() => {}, 60000)', stuckMarker] } } }, x: { path: join(dir, 'x') } },
+    }),
+  );
   await until('the new server to show', async () => (await find()).found.some((f: any) => f.name === 'stuck'), 20_000);
   // Another server ticked while the first is still being checked: the check that counts is the new one's.
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'stuck', workspaces: [] } } });
   await until('the check of the stuck server to start', async () => (await find()).checking);
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: 'own', workspaces: [] } } });
-  const swapped = await until('the check of the server ticked instead', async () => { const m = await find(); return !m.checking && m.checked?.results.some((r: any) => r.server === 'mcp') && m; });
+  const swapped = await until('the check of the server ticked instead', async () => {
+    const m = await find();
+    return !m.checking && m.checked?.results.some((r: any) => r.server === 'mcp') && m;
+  });
   assert.deepEqual([swapped.status, swapped.checked.results.filter((r: any) => r.server === 'mcp').map((r: any) => r.ok)], ['ready', [true]]);
   await call(`/api/machines/${machine.id}`, { method: 'DELETE' });
 });
@@ -256,28 +289,49 @@ test('a machine set up before ticks starts from what it lent when its agent firs
   // As caras-laptop is today: --claude-mcp godot-ai, its workspace tools switched on.
   const old = startAgent(token, ['--config', config, '--claude-mcp', 'godot-ai'], { CLAUDE_CONFIG_DIR: dir });
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: true } });
-  const before = await until('the old agent\'s check', async () => { const m = await find(); return m.status === 'ready' && m.checked.results.length === 2 && !m.checking && m; });
+  const before = await until("the old agent's check", async () => {
+    const m = await find();
+    return m.status === 'ready' && m.checked.results.length === 2 && !m.checking && m;
+  });
   assert.deepEqual([before.managed, before.lend, before.mcp_kind, before.mcp_command], [false, null, 'claude', 'godot-ai'], 'an agent set up the old way lends what its command line says');
   // Its GPU jobs switched off (#1175): only the switch is saved, and what it lends stays as its command line says.
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { lend: { server: null, workspaces: [], before_ticks: true, gpu_off: true } } });
   const off = await find();
-  assert.deepEqual([off.lend, off.reason, off.checked.results.length], [{ server: null, workspaces: [], gpu_off: true, before_ticks: true }, before.reason, 2], 'the switch keeps its MCP server\'s check');
+  assert.deepEqual([off.lend, off.reason, off.checked.results.length], [{ server: null, workspaces: [], gpu_off: true, before_ticks: true }, before.reason, 2], "the switch keeps its MCP server's check");
   old.agent.kill();
   await until('it to go offline', async () => !(await find()).online);
   // Reinstalled with the new line: the same server and folders are ticked, so minions get what they got.
   startAgent(token, ['--config', config], { CLAUDE_CONFIG_DIR: dir });
-  const after = await until('the new agent\'s report', async () => { const m = await find(); return m.managed && m.lend && !m.lend.before_ticks && m; });
+  const after = await until("the new agent's report", async () => {
+    const m = await find();
+    return m.managed && m.lend && !m.lend.before_ticks && m;
+  });
   assert.deepEqual(after.lend, { server: 'godot-ai', workspaces: ['w'], gpu_off: true }, 'its ticks start from what it lent, and GPU jobs stay off');
-  assert.equal((await until('it to be Ready', async () => { const m = await find(); return m.status === 'ready' && !m.checking && m; })).reason, before.reason);
+  assert.equal(
+    (
+      await until('it to be Ready', async () => {
+        const m = await find();
+        return m.status === 'ready' && !m.checking && m;
+      })
+    ).reason,
+    before.reason,
+  );
   // A folder added later starts unticked.
   mkdirSync(join(dir, 'later'), { recursive: true });
   writeFileSync(config, JSON.stringify({ workspaces: { w: { path: join(dir, 'w') }, later: { path: join(dir, 'later') } } }));
-  const more = await until('the new folder to show', async () => { const m = await find(); return m.workspaces.length === 2 && m; }, 20_000);
+  const more = await until(
+    'the new folder to show',
+    async () => {
+      const m = await find();
+      return m.workspaces.length === 2 && m;
+    },
+    20_000,
+  );
   assert.deepEqual(more.lend.workspaces, ['w']);
   await call(`/api/machines/${machine.id}`, { method: 'DELETE' });
 });
 
-test('an agent can run a server from Claude Code\'s config, and threads get the machine\'s notes', async () => {
+test("an agent can run a server from Claude Code's config, and threads get the machine's notes", async () => {
   const home = join(root, 'pc-home');
   const { mkdirSync } = await import('node:fs');
   mkdirSync(home, { recursive: true });
@@ -297,7 +351,7 @@ test('an agent can run a server from Claude Code\'s config, and threads get the 
   assert.match(turn.message, /Notes on desk from its owner:\nNever restart this PC\./);
 });
 
-test('workspace tools reach minions only once a person switches them on, and fetch_file lands in the minion\'s files', async () => {
+test("workspace tools reach minions only once a person switches them on, and fetch_file lands in the minion's files", async () => {
   const { mkdirSync } = await import('node:fs');
   const folder = join(root, 'ws-folder');
   mkdirSync(folder, { recursive: true });
@@ -320,7 +374,10 @@ test('workspace tools reach minions only once a person switches them on, and fet
   let before = turns().length;
   await call(`/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'off' } });
   let turn = (await until('a turn', () => turns().length > before && turns())).at(-1);
-  assert.deepEqual(Object.keys(turn.results).filter((n) => n.startsWith('wsbox')), ['wsbox']);
+  assert.deepEqual(
+    Object.keys(turn.results).filter((n) => n.startsWith('wsbox')),
+    ['wsbox'],
+  );
   const refused = await fetch(`${base}/api/machines/${machine.id}/session?server=ws`, { headers: { Authorization: `Bearer ${turn.token}` } });
   assert.equal(refused.status, 503);
   await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: 'yes' } }), /400/);
@@ -351,7 +408,7 @@ test('a machine reaches only the minions of the schemes on its list, and taking 
   await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [999999] } }), /400/);
   await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: 'all' } }), /400/);
   await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: null } }), /400/, '"every scheme an admin owns" is gone');
-  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: 'Josh\'s vault.' } });
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: "Josh's vault." } });
   const scoped = await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [a.id] } });
   assert.deepEqual(scoped.projects, [a.id]);
 
@@ -393,7 +450,7 @@ test('a machine reaches only the minions of the schemes on its list, and taking 
   assert.deepEqual((await turnIn(b, 'switch off, still lent')).results.vault.tools, ['whoami']);
 });
 
-test('a person\'s own machine goes only to turns they ask for, in schemes they\'re in, and only they and admins manage it (#306)', async () => {
+test("a person's own machine goes only to turns they ask for, in schemes they're in, and only they and admins manage it (#306)", async () => {
   // Two people who aren't admins, signed in with their own logins.
   const person = async (name: string) => {
     const made = await call('/api/people', { method: 'POST', body: { name } });
@@ -417,7 +474,12 @@ test('a person\'s own machine goes only to turns they ask for, in schemes they\'
           const { value, done } = await reader.read();
           if (done) throw new Error('stream ended');
           text += new TextDecoder().decode(value);
-          const msg = text.split('\n\n').map((l) => l.replace(/^data: /, '')).filter((l) => l.startsWith('{')).map((l) => JSON.parse(l)).find((m) => m.type === 'machines');
+          const msg = text
+            .split('\n\n')
+            .map((l) => l.replace(/^data: /, ''))
+            .filter((l) => l.startsWith('{'))
+            .map((l) => JSON.parse(l))
+            .find((m) => m.type === 'machines');
           if (msg) {
             await reader.cancel();
             return msg.machines.map((m: any) => m.name);
@@ -447,12 +509,19 @@ test('a person\'s own machine goes only to turns they ask for, in schemes they\'
   assert.deepEqual(machine.projects, []);
   assert.equal((await josh.as(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [notTheirs.id] } })).status, 400);
   assert.equal((await josh.as(`/api/machines/${machine.id}`, { method: 'PATCH', body: { projects: [shared.id] } })).status, 200);
-  assert.equal((await josh.as(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: 'Josh\'s box.' } })).status, 200);
+  assert.equal((await josh.as(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: "Josh's box." } })).status, 200);
 
   // Another person can't see or change it; an admin can, and the live list is cut the same way.
-  assert.deepEqual((await josh.as('/api/machines')).data.map((m: any) => m.name), ['josh-box']);
+  assert.deepEqual(
+    (await josh.as('/api/machines')).data.map((m: any) => m.name),
+    ['josh-box'],
+  );
   assert.deepEqual((await dana.as('/api/machines')).data, []);
-  for (const [method, path] of [['PATCH', `/api/machines/${machine.id}`], ['POST', `/api/machines/${machine.id}/token`], ['DELETE', `/api/machines/${machine.id}`]]) {
+  for (const [method, path] of [
+    ['PATCH', `/api/machines/${machine.id}`],
+    ['POST', `/api/machines/${machine.id}/token`],
+    ['DELETE', `/api/machines/${machine.id}`],
+  ]) {
     assert.equal((await dana.as(path, { method, body: method === 'PATCH' ? { notes: 'mine now' } : undefined })).status, 404, `${method} ${path}`);
   }
   // Its token again (#1355): Josh's to show, not Dana's (she can't see it at all), nor an admin's, who can only relink it.
@@ -462,7 +531,7 @@ test('a person\'s own machine goes only to turns they ask for, in schemes they\'
   assert.equal(asAdmin.status, 403);
   assert.ok(!JSON.stringify(await asAdmin.json()).includes(token));
   const [joshHears, danaHears] = [await josh.nextMachines(), await dana.nextMachines()];
-  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: 'Josh\'s box, checked by an admin.' } });
+  await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { notes: "Josh's box, checked by an admin." } });
   assert.deepEqual(await joshHears(), ['josh-box']);
   assert.deepEqual(await danaHears(), []);
   assert.ok((await call('/api/machines')).some((m: any) => m.name === 'josh-box'));
@@ -506,7 +575,7 @@ test('a person\'s own machine goes only to turns they ask for, in schemes they\'
   await call(`/api/machines/${mineMade.machine.id}`, { method: 'DELETE' });
 });
 
-test('a contraption turn gets its person\'s own machines, and no one else\'s or a shared one (#306)', async () => {
+test("a contraption turn gets its person's own machines, and no one else's or a shared one (#306)", async () => {
   const made = await call('/api/contraptions', { method: 'POST', body: { name: 'tally', title: 'Tally', port: 9102 } });
   const key = readFileSync(join(made.keys_dir, 'contraption.key'), 'utf8');
   const me = await call('/api/me');
@@ -526,7 +595,8 @@ test('a contraption turn gets its person\'s own machines, and no one else\'s or 
   const turnFor = async (person: number) => {
     const before = turns().length;
     const res = await fetch(`${base}/api/contraptions/turns`, {
-      method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ person, session: 's', prompt: 'count' }),
     });
     const events = await res.text();
@@ -550,7 +620,7 @@ test('a contraption turn gets its person\'s own machines, and no one else\'s or 
   for (const m of [own, sharedBox]) await call(`/api/machines/${m.machine.id}`, { method: 'DELETE' });
 });
 
-test('a Taskmaster lists the machines its scheme can see and checks one through a turn\'s path (#307)', async () => {
+test("a Taskmaster lists the machines its scheme can see and checks one through a turn's path (#307)", async () => {
   await srv.settled();
   const store = new Store(join(root, 'data', 'coordinator.db'));
   const josh = store.findUser('name', 'Josh')!;
@@ -588,7 +658,7 @@ test('a Taskmaster lists the machines its scheme can see and checks one through 
     const use = async (name: string, args: object = {}) => {
       child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: ++n, method: 'tools/call', params: { name, arguments: args } }) + '\n');
       const r = JSON.parse((await lines.next()).value).result;
-      return (r.isError ? 'ERROR ' : '') + r.content[0].text as string;
+      return ((r.isError ? 'ERROR ' : '') + r.content[0].text) as string;
     };
     return { use, tm, done: () => child.kill() };
   };
@@ -606,7 +676,7 @@ test('a Taskmaster lists the machines its scheme can see and checks one through 
 
   const passed = await asJosh.use('check_machine', { name: 'tm-box' });
   assert.match(passed, /^tm-box: PASS\n- MCP server: PASS in \d+ ms, 1 tools: whoami$/);
-  await until('the check\'s session to close', async () => (await call('/api/machines')).find((m: any) => m.name === 'tm-box').sessions === 0);
+  await until("the check's session to close", async () => (await call('/api/machines')).find((m: any) => m.name === 'tm-box').sessions === 0);
   list = await asJosh.use('list_machines');
   assert.match(list, /tm-box: READY[^]*?last check .*:\n  - MCP server: PASS in \d+ ms, 1 tools: whoami/);
   assert.match(await asJosh.use('check_machine', { name: 'tm-broken' }), /^tm-broken: FAIL\n- MCP server: FAIL after \d+ ms: the session ended/);
@@ -638,10 +708,10 @@ test('a Taskmaster lists the machines its scheme can see and checks one through 
 test('an older machine learns what it runs from its agent, and a known one keeps its own (#308)', async () => {
   const { mcpFromAgent } = await import('../src/machines.ts');
   assert.deepEqual(mcpFromAgent('workspace tools only'), { mcp_kind: 'none', mcp_command: '' });
-  assert.deepEqual(mcpFromAgent('godot-ai (from Claude Code\'s config)'), { mcp_kind: 'claude', mcp_command: 'godot-ai' });
+  assert.deepEqual(mcpFromAgent("godot-ai (from Claude Code's config)"), { mcp_kind: 'claude', mcp_command: 'godot-ai' });
   assert.equal(mcpFromAgent('npx -y some-mcp'), null, 'a command comes joined with spaces, its quoting lost');
   assert.equal(mcpFromAgent(''), null);
-  assert.equal(mcpFromAgent('x'.repeat(200)), null, 'cut at the route\'s 200 characters');
+  assert.equal(mcpFromAgent('x'.repeat(200)), null, "cut at the route's 200 characters");
   const { machine, token } = await call('/api/machines', { method: 'POST', body: { name: 'kept-box' } });
   await srv.settled();
   new Store(join(root, 'data', 'coordinator.db')).updateMachine(machine.id, { mcp_kind: 'none' });
@@ -657,16 +727,33 @@ test('Citadel checks a machine as it connects, keeps the result through a reconn
   assert.equal((await find()).status, 'asleep', 'added a moment ago, not connected yet');
   const first = startAgent(token);
   // Its tools pass, but no scheme is on its list yet (#438): yellow, with the button that opens the list.
-  const unlent = await until('its connect check', async () => { const m = await find(); return m.checked && !m.checking && m; });
+  const unlent = await until('its connect check', async () => {
+    const m = await find();
+    return m.checked && !m.checking && m;
+  });
   assert.deepEqual([unlent.status, unlent.reason, unlent.fix], ['fix', 'Lent to no scheme', 'lend']);
   await lend(machine.id, (await call('/api/projects'))[0]);
-  const ready = await until('its connect check', async () => { const m = await find(); return m.checked && !m.checking && m.status === 'ready' && m; });
+  const ready = await until('its connect check', async () => {
+    const m = await find();
+    return m.checked && !m.checking && m.status === 'ready' && m;
+  });
   assert.equal(ready.reason, 'Ready · 1 tool');
-  assert.deepEqual(ready.checked.results.map((r: any) => [r.server, r.ok, r.tools]), [['mcp', true, ['whoami']]]);
+  assert.deepEqual(
+    ready.checked.results.map((r: any) => [r.server, r.ok, r.tools]),
+    [['mcp', true, ['whoami']]],
+  );
 
   // Offline under five minutes, always on: no colour yet. Not always on: asleep.
   first.agent.kill();
-  assert.equal((await until('it to go offline', async () => { const m = await find(); return !m.online && m; })).reason, 'Offline');
+  assert.equal(
+    (
+      await until('it to go offline', async () => {
+        const m = await find();
+        return !m.online && m;
+      })
+    ).reason,
+    'Offline',
+  );
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { always_on: false } });
   assert.deepEqual([(await find()).always_on, (await find()).reason], [false, 'Asleep']);
   await assert.rejects(call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { always_on: 'yes' } }), /400 always_on must be true or false/);
@@ -682,7 +769,10 @@ test('Citadel checks a machine as it connects, keeps the result through a reconn
 
   // Check now runs one anyway.
   const { machine: after, results } = await call(`/api/machines/${machine.id}/check`, { method: 'POST' });
-  assert.deepEqual(results.map((r: any) => r.ok), [true]);
+  assert.deepEqual(
+    results.map((r: any) => r.ok),
+    [true],
+  );
   assert.ok(after.checked.at > ready.checked.at);
 });
 
@@ -691,7 +781,10 @@ test('a check that failed is run again when its agent reconnects, and a new serv
   await lend(machine.id, (await call('/api/projects'))[0]);
   const find = async () => (await call('/api/machines')).find((m: any) => m.name === 'mended');
   const broken = startAgent(token, ['--', process.execPath, '-e', 'process.exit(1)']);
-  await until('its failed check', async () => { const m = await find(); return m.status === 'fix' && m.fix === 'check' && !m.checking; });
+  await until('its failed check', async () => {
+    const m = await find();
+    return m.status === 'fix' && m.fix === 'check' && !m.checking;
+  });
   // Its owner fixes the command and restarts the agent: Citadel checks again without being asked.
   broken.agent.kill();
   await until('it to go offline', async () => !(await find()).online);
@@ -700,18 +793,34 @@ test('a check that failed is run again when its agent reconnects, and a new serv
   mkdirSync(join(root, 'mended-agent', 'w'), { recursive: true });
   writeFileSync(config, JSON.stringify({ workspaces: { w: { path: join(root, 'mended-agent', 'w') } } }));
   startAgent(token, ['--config', config, '--', process.execPath, mcpServer]);
-  const ready = await until('it to be Ready', async () => { const m = await find(); return m.status === 'ready' && !m.checking && m; });
-  assert.deepEqual(ready.checked.results.map((r: any) => r.server), ['mcp'], 'workspace tools are off, so only its MCP server');
+  const ready = await until('it to be Ready', async () => {
+    const m = await find();
+    return m.status === 'ready' && !m.checking && m;
+  });
+  assert.deepEqual(
+    ready.checked.results.map((r: any) => r.server),
+    ['mcp'],
+    'workspace tools are off, so only its MCP server',
+  );
 
   // Workspace tools switched on: only they are checked, and the MCP server's check keeps its time.
   await call(`/api/machines/${machine.id}`, { method: 'PATCH', body: { workspace_tools: true } });
-  const both = await until('its workspace tools check', async () => { const m = await find(); return m.checked.results.length === 2 && !m.checking && m; });
-  assert.deepEqual(both.checked.results.map((r: any) => [r.server, r.ok]), [['mcp', true], ['ws', true]]);
+  const both = await until('its workspace tools check', async () => {
+    const m = await find();
+    return m.checked.results.length === 2 && !m.checking && m;
+  });
+  assert.deepEqual(
+    both.checked.results.map((r: any) => [r.server, r.ok]),
+    [
+      ['mcp', true],
+      ['ws', true],
+    ],
+  );
   assert.equal(both.checked.at, ready.checked.at);
   assert.equal(both.status, 'ready');
 });
 
-test('a person\'s own machine lists the schemes on its list as the ones their turns get it in (#437, #438)', async () => {
+test("a person's own machine lists the schemes on its list as the ones their turns get it in (#437, #438)", async () => {
   const { machine } = await call('/api/machines', { method: 'POST', body: { name: 'caras-own', mine: true } });
   const [one] = await call('/api/projects');
   const mine = (await call('/api/machines')).find((m: any) => m.id === machine.id);

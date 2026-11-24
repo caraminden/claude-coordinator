@@ -114,7 +114,7 @@ function during(spans: Span[], at: number): boolean {
  * or when all of them skipped: nothing was tested (#558).
  */
 export function verdict(checks: Check[]): 'pending' | 'passed' | 'failed' | null {
-  const v = ciVerdict(checks.map((c) => ({ failed: 'fail', pending: 'running', skipped: 'skip', passed: 'pass' } as const)[c.status]));
+  const v = ciVerdict(checks.map((c) => (({ failed: 'fail', pending: 'running', skipped: 'skip', passed: 'pass' }) as const)[c.status]));
   return v === 'green' ? 'passed' : v === 'red' ? 'failed' : v === 'running' ? 'pending' : null;
 }
 
@@ -127,18 +127,13 @@ export function verdict(checks: Check[]): 'pending' | 'passed' | 'failed' | null
  * bot that answers every push can't keep a ticket busy. Remarks from outside the repo are only a
  * link, and what insiders wrote is quoted as data.
  */
-export function decide(
-  pr: PrSnapshot,
-  seen: Set<string>,
-  opts: { baseline: boolean; self: string | string[] | null; spans: Span[]; headFor?: number; stuck?: string[] },
-): Decision {
+export function decide(pr: PrSnapshot, seen: Set<string>, opts: { baseline: boolean; self: string | string[] | null; spans: Span[]; headFor?: number; stuck?: string[] }): Decision {
   const selves = opts.self === null ? null : [opts.self].flat().map((s) => s.toLowerCase());
   const messages: string[] = [];
   const handled: string[] = [];
   let fyi = true;
   let quiet = true;
-  const own = (login: string | null, at: number | null) =>
-    at !== null && (selves === null || selves.includes(login?.toLowerCase() ?? '')) && during(opts.spans, at);
+  const own = (login: string | null, at: number | null) => at !== null && (selves === null || selves.includes(login?.toLowerCase() ?? '')) && during(opts.spans, at);
   const consider = (key: string, message: () => string | null, news = false, silent = false) => {
     if (seen.has(key)) return;
     handled.push(key);
@@ -155,19 +150,21 @@ export function decide(
   if (result === 'failed' || result === 'passed') {
     const sent = messages.length;
     if (!seen.has(`ci:${pr.headSha}:${result}`)) ci = { result, line: opts.baseline ? -1 : sent };
-    consider(`ci:${pr.headSha}:${result}`, () => {
-      if (result === 'passed') return `CI passed on ${short(pr.headSha)} in PR #${pr.number} (${pr.checks.length} check${pr.checks.length === 1 ? '' : 's'}).`;
-      const failed = pr.checks.filter((c) => c.status === 'failed');
-      const pending = pr.checks.filter((c) => c.status === 'pending').length;
-      // A job that never started (#368) isn't a red test: say so, with GitHub's reason, so no one hunts a bug for it.
-      const dead = failed.every((c) => c.notStarted !== undefined);
-      const name = (c: Check) => (c.notStarted === undefined ? c.name : `${c.name} didn't start${c.notStarted ? ` (GitHub says: "${excerpt(c.notStarted)}")` : ''}`);
-      const head = `CI ${dead ? "didn't start" : 'failed'} on ${short(pr.headSha)} in PR #${pr.number}${pending ? ` (${pending} still running)` : ''} — `;
-      const tail = dead ? `\nNo step ran, so this isn't a test failure.` : '';
-      return failed.length === 1
-        ? `${head}${name(failed[0])}: ${failed[0].url ?? pr.url}${tail}`
-        : `${head}${failed.length} checks:\n${failed.map((c) => `- ${name(c)}: ${c.url ?? pr.url}`).join('\n')}${tail}`;
-    }, result === 'passed');
+    consider(
+      `ci:${pr.headSha}:${result}`,
+      () => {
+        if (result === 'passed') return `CI passed on ${short(pr.headSha)} in PR #${pr.number} (${pr.checks.length} check${pr.checks.length === 1 ? '' : 's'}).`;
+        const failed = pr.checks.filter((c) => c.status === 'failed');
+        const pending = pr.checks.filter((c) => c.status === 'pending').length;
+        // A job that never started (#368) isn't a red test: say so, with GitHub's reason, so no one hunts a bug for it.
+        const dead = failed.every((c) => c.notStarted !== undefined);
+        const name = (c: Check) => (c.notStarted === undefined ? c.name : `${c.name} didn't start${c.notStarted ? ` (GitHub says: "${excerpt(c.notStarted)}")` : ''}`);
+        const head = `CI ${dead ? "didn't start" : 'failed'} on ${short(pr.headSha)} in PR #${pr.number}${pending ? ` (${pending} still running)` : ''} — `;
+        const tail = dead ? `\nNo step ran, so this isn't a test failure.` : '';
+        return failed.length === 1 ? `${head}${name(failed[0])}: ${failed[0].url ?? pr.url}${tail}` : `${head}${failed.length} checks:\n${failed.map((c) => `- ${name(c)}: ${c.url ?? pr.url}`).join('\n')}${tail}`;
+      },
+      result === 'passed',
+    );
   }
   // GitHub works out `mergeable` when first asked, so an UNKNOWN waits for the next look rather than leave out the cause.
   // A clean draft is left alone (its key unspent, for when it's marked ready); a conflicting one still hears why (#554).
@@ -176,19 +173,22 @@ export function decide(
   if (pr.state === 'OPEN' && result === null && pr.hasCi && pr.mergeable !== 'UNKNOWN' && !expectNone && (opts.headFor ?? 0) >= NO_CHECKS_MS) {
     consider(`nochecks:${pr.headSha}`, () => {
       const n = pr.checks.length;
-      const head = n
-        ? `CI hasn't tested ${short(pr.headSha)} in PR #${pr.number}: ${n === 1 ? 'its check' : `all ${n} checks`} skipped after ${NO_CHECKS_MS / 60_000} minutes`
-        : `CI hasn't started on ${short(pr.headSha)} in PR #${pr.number}: no checks after ${NO_CHECKS_MS / 60_000} minutes`;
+      const head = n ? `CI hasn't tested ${short(pr.headSha)} in PR #${pr.number}: ${n === 1 ? 'its check' : `all ${n} checks`} skipped after ${NO_CHECKS_MS / 60_000} minutes` : `CI hasn't started on ${short(pr.headSha)} in PR #${pr.number}: no checks after ${NO_CHECKS_MS / 60_000} minutes`;
       if (pr.mergeable === 'CONFLICTING') return `${head}, because the PR conflicts with ${pr.baseRef ?? 'its base'} and GitHub runs no pull_request workflows on a conflicting PR. Rebase onto ${pr.baseRef ?? 'its base'} and push to get CI.`;
       return `${head}. If its workflows skip this change by design, nothing is wrong; otherwise look at ${pr.url}/checks`;
     });
   }
   const stuck = result === 'pending' ? pr.checks.filter((c) => opts.stuck?.includes(c.name)) : [];
   if (stuck.length) {
-    consider(`stuck:${pr.headSha}`, () => {
-      const names = stuck.map((c) => c.name).join(', ');
-      return `CI on ${short(pr.headSha)} in PR #${pr.number} is stuck: ${stuck.length === 1 ? `${names} has` : `${stuck.length} checks (${names}) have`} waited ${STUCK_MS / 60_000} minutes for a runner. That isn't a test failure; you'll still hear when CI finishes.`;
-    }, false, true);
+    consider(
+      `stuck:${pr.headSha}`,
+      () => {
+        const names = stuck.map((c) => c.name).join(', ');
+        return `CI on ${short(pr.headSha)} in PR #${pr.number} is stuck: ${stuck.length === 1 ? `${names} has` : `${stuck.length} checks (${names}) have`} waited ${STUCK_MS / 60_000} minutes for a runner. That isn't a test failure; you'll still hear when CI finishes.`;
+      },
+      false,
+      true,
+    );
   }
 
   for (const r of [...pr.remarks].sort((a, b) => a.createdAt - b.createdAt)) {
@@ -208,11 +208,15 @@ export function decide(
   }
 
   if (pr.state !== 'OPEN') {
-    consider(`state:${pr.state}:${pr.closedAt ?? ''}`, () => {
-      if (own(pr.closedBy, pr.closedAt)) return null;
-      const by = pr.closedBy ? ` by ${pr.closedBy}` : '';
-      return pr.state === 'MERGED' ? `PR #${pr.number} was merged${by}.` : `PR #${pr.number} was closed${by} without merging.`;
-    }, pr.state === 'MERGED');
+    consider(
+      `state:${pr.state}:${pr.closedAt ?? ''}`,
+      () => {
+        if (own(pr.closedBy, pr.closedAt)) return null;
+        const by = pr.closedBy ? ` by ${pr.closedBy}` : '';
+        return pr.state === 'MERGED' ? `PR #${pr.number} was merged${by}.` : `PR #${pr.number} was closed${by} without merging.`;
+      },
+      pr.state === 'MERGED',
+    );
   }
   return { messages, handled, fyi: fyi && messages.length > 0, quiet: quiet && messages.length > 0, ...(ci ? { ci } : {}) };
 }
@@ -265,7 +269,6 @@ const QUERY = `query($owner: String!, $name: String!, $branch: String!) {
   }
 }`;
 
-
 export function check(node: any): Check {
   if (node.__typename === 'StatusContext') {
     const s = node.state;
@@ -276,7 +279,9 @@ export function check(node: any): Check {
   if (node.status === 'QUEUED') out.queued = true;
   // Only Actions jobs list steps; another app's check run has none even when it ran.
   if (node.conclusion === 'FAILURE' && node.steps?.totalCount === 0 && /\/actions\/runs\//.test(node.detailsUrl ?? '')) {
-    out.notStarted = String(node.annotations?.nodes?.[0]?.message ?? '').replace(/\s+/g, ' ').trim();
+    out.notStarted = String(node.annotations?.nodes?.[0]?.message ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
   return out;
 }
@@ -347,9 +352,7 @@ export function parseSnapshot(data: any): { pr: PrSnapshot | null; self: string 
 
 async function fetchSnapshot(repoDir: string, repo: string, branch: string, as?: GithubEnv) {
   const [owner, name] = repo.split('/');
-  const { stdout } = await run('gh', [
-    'api', 'graphql', '-f', `query=${QUERY}`, '-f', `owner=${owner}`, '-f', `name=${name}`, '-f', `branch=${branch}`,
-  ], { cwd: repoDir, env: asEnv(as), timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
+  const { stdout } = await run('gh', ['api', 'graphql', '-f', `query=${QUERY}`, '-f', `owner=${owner}`, '-f', `name=${name}`, '-f', `branch=${branch}`], { cwd: repoDir, env: asEnv(as), timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
   return parseSnapshot(JSON.parse(stdout).data);
 }
 
@@ -506,8 +509,18 @@ export class GithubWatcher {
     const { messages, handled } = decision;
     let { fyi, quiet } = decision;
     // Recorded before sending, so a crash in between drops a message rather than repeating it forever.
-    if (handled.length) this.store.addGithubSeen(ticket.id, handled.map((k) => prefix + k), messages.length > 0);
-    if (decision.ci?.result === 'failed' && decision.ci.line >= 0) try { this.onCiFailed(ticket); } catch (e) { console.error('[github] onCiFailed:', e); }
+    if (handled.length)
+      this.store.addGithubSeen(
+        ticket.id,
+        handled.map((k) => prefix + k),
+        messages.length > 0,
+      );
+    if (decision.ci?.result === 'failed' && decision.ci.line >= 0)
+      try {
+        this.onCiFailed(ticket);
+      } catch (e) {
+        console.error('[github] onCiFailed:', e);
+      }
     const armed = decision.ci && (await this.onCi(ticket, pr, decision.ci.result));
     if (armed?.fired) {
       // Its card or message is out, so the CI line is news for the next turn, not a wake.

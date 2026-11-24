@@ -101,11 +101,23 @@ CREATE INDEX IF NOT EXISTS schedule_runs_by_schedule ON schedule_runs (schedule_
 `;
 
 /** One slot in a schedule's history: the minion it started, or why the gate skipped it. */
-export interface ScheduleRun { id: number; schedule_id: number; at: number; ticket_id: number | null; skip: string | null }
+export interface ScheduleRun {
+  id: number;
+  schedule_id: number;
+  at: number;
+  ticket_id: number | null;
+  skip: string | null;
+}
 
 const ALIASES: Record<string, string> = { '@hourly': '0 * * * *', '@daily': '0 0 * * *', '@nightly': '0 0 * * *', '@weekly': '0 0 * * 0' };
 // [lowest, highest] per field: minute, hour, day of month, month, day of week (0 and 7 are Sunday).
-const RANGES: [number, number][] = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]];
+const RANGES: [number, number][] = [
+  [0, 59],
+  [0, 23],
+  [1, 31],
+  [1, 12],
+  [0, 7],
+];
 const FIELD = ['minute', 'hour', 'day of month', 'month', 'day of week'];
 
 export interface Cron {
@@ -158,8 +170,16 @@ export function nextRun(expr: string, after: number): number | null {
   // Clocks going forward skip an hour: a schedule wanting it runs at the first minute after the gap (#468 S04-4).
   const skipped = (h: number) => d.getHours() !== h && d.getHours() !== (h + 1) % 24 && c.hour.has((h + 1) % 24);
   while (d.getTime() <= limit) {
-    if (!c.month.has(d.getMonth() + 1)) { d.setMonth(d.getMonth() + 1, 1); d.setHours(0, 0); continue; }
-    if (!dayMatches(c, d)) { d.setDate(d.getDate() + 1); d.setHours(0, 0); continue; }
+    if (!c.month.has(d.getMonth() + 1)) {
+      d.setMonth(d.getMonth() + 1, 1);
+      d.setHours(0, 0);
+      continue;
+    }
+    if (!dayMatches(c, d)) {
+      d.setDate(d.getDate() + 1);
+      d.setHours(0, 0);
+      continue;
+    }
     const h = d.getHours();
     if (!c.hour.has(h)) {
       d.setHours(h + 1, 0);
@@ -173,7 +193,10 @@ export function nextRun(expr: string, after: number): number | null {
     }
     // In the hour repeated when clocks go back, a schedule at set hours ran in its first pass: as cron, not again (#468 S04-3 review).
     const secondPass = c.hour.size < 24 && new Date(d.getTime() - 3_600_000).getHours() === h;
-    if (d.getTime() <= after || secondPass) { d.setTime(d.getTime() + 60_000); continue; }
+    if (d.getTime() <= after || secondPass) {
+      d.setTime(d.getTime() + 60_000);
+      continue;
+    }
     return d.getTime();
   }
   return null;
@@ -196,7 +219,11 @@ export function describeCron(cron: string): string {
   if (dom !== '*') return cron;
   if (dow === '*') return `Every day at ${at}`;
   if (dow === '1-5') return `Weekdays at ${at}`;
-  if (/^[0-7](,[0-7])*$/.test(dow)) return `${dow.split(',').map((d) => DAYS[Number(d)]).join(', ')} at ${at}`;
+  if (/^[0-7](,[0-7])*$/.test(dow))
+    return `${dow
+      .split(',')
+      .map((d) => DAYS[Number(d)])
+      .join(', ')} at ${at}`;
   return cron;
 }
 
@@ -232,20 +259,38 @@ export const TEMPLATE_DIR = join(import.meta.dirname, '..', 'kit', 'schedules');
 /** The kit's schedule templates by slug, read fresh (a few small files) so a deploy's kit edit applies at once. */
 export function loadTemplates(dir = TEMPLATE_DIR): Map<string, ScheduleTemplate> {
   const out = new Map<string, ScheduleTemplate>();
-  for (const file of readdirSync(dir).filter((f) => f.endsWith('.md')).sort()) {
+  for (const file of readdirSync(dir)
+    .filter((f) => f.endsWith('.md'))
+    .sort()) {
     const slug = file.slice(0, -3);
     const m = readFileSync(join(dir, file), 'utf8').match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
     if (!m) throw new Error(`kit/schedules/${file} has no frontmatter`);
-    const f = Object.fromEntries(m[1].split('\n').map((l) => l.match(/^(\w+):\s*(.*)$/)).filter(Boolean).map((x) => [x![1], x![2].trim()]));
+    const f = Object.fromEntries(
+      m[1]
+        .split('\n')
+        .map((l) => l.match(/^(\w+):\s*(.*)$/))
+        .filter(Boolean)
+        .map((x) => [x![1], x![2].trim()]),
+    );
     for (const k of ['name', 'type', 'model', 'effort', 'cron', 'stagger', 'applies']) if (!f[k]) throw new Error(`kit/schedules/${file} has no ${k}`);
     const trig = f.trigger ? f.trigger.match(/^(\d+) (ships|minions)$/) : null;
     if (f.trigger && !trig) throw new Error(`kit/schedules/${file}: can't read the trigger "${f.trigger}" (e.g. "150 ships" or "300 minions")`);
     const gap = f.trigger_gap ? f.trigger_gap.match(/^(\d+)h$/) : null;
     if (f.trigger_gap && (!gap || !trig)) throw new Error(`kit/schedules/${file}: trigger_gap "${f.trigger_gap}" needs a trigger and hours, e.g. "12h"`);
     out.set(slug, {
-      slug, name: f.name, type: f.type, model: f.model, effort: f.effort, min_minions: f.min_minions ? Number(f.min_minions) : null,
-      trigger_kind: trig ? (trig[2] as TriggerKind) : null, trigger_count: trig ? Number(trig[1]) : null, trigger_gap_hours: gap ? Number(gap[1]) : null,
-      cron: f.cron, stagger: f.stagger, applies: f.applies, body: m[2].trim(),
+      slug,
+      name: f.name,
+      type: f.type,
+      model: f.model,
+      effort: f.effort,
+      min_minions: f.min_minions ? Number(f.min_minions) : null,
+      trigger_kind: trig ? (trig[2] as TriggerKind) : null,
+      trigger_count: trig ? Number(trig[1]) : null,
+      trigger_gap_hours: gap ? Number(gap[1]) : null,
+      cron: f.cron,
+      stagger: f.stagger,
+      applies: f.applies,
+      body: m[2].trim(),
     });
   }
   return out;
@@ -264,7 +309,15 @@ export function staggerCron(base: string, stagger: string, slot: number): string
     return [t % 60, Math.floor(t / 60), ...f.slice(2)].join(' ');
   }
   if (!/^\d+(,\d+)*$/.test(f[2])) throw new Error(`A day stagger needs a set day of the month (or a list like 1,16), not "${base}"`);
-  return [f[0], f[1], f[2].split(',').map((d) => Number(d) + shift).join(','), ...f.slice(3)].join(' ');
+  return [
+    f[0],
+    f[1],
+    f[2]
+      .split(',')
+      .map((d) => Number(d) + shift)
+      .join(','),
+    ...f.slice(3),
+  ].join(' ');
 }
 
 export interface TemplateVars {
@@ -289,9 +342,18 @@ export function renderTemplate(t: ScheduleTemplate, notes: string, v: TemplateVa
 /** A new row from a template: its defaults, the scheme's slot (id − 1), the notes and the rendered brief. */
 export function templateFields(t: ScheduleTemplate, project: Pick<Project, 'id' | 'name'>, notes: string, v: TemplateVars) {
   return {
-    name: t.name, type: t.type, model: t.model, effort: t.effort, min_minions: t.min_minions,
-    trigger_kind: t.trigger_kind, trigger_count: t.trigger_count, trigger_gap_hours: t.trigger_gap_hours,
-    cron: staggerCron(t.cron, t.stagger, project.id - 1), template: t.slug, notes: notes.trim(), brief: renderTemplate(t, notes, v),
+    name: t.name,
+    type: t.type,
+    model: t.model,
+    effort: t.effort,
+    min_minions: t.min_minions,
+    trigger_kind: t.trigger_kind,
+    trigger_count: t.trigger_count,
+    trigger_gap_hours: t.trigger_gap_hours,
+    cron: staggerCron(t.cron, t.stagger, project.id - 1),
+    template: t.slug,
+    notes: notes.trim(),
+    brief: renderTemplate(t, notes, v),
   };
 }
 
@@ -338,7 +400,20 @@ export class Schedules {
     db.exec(SCHEDULES_SCHEMA);
     // Columns added after the table (#387, #745, #799, #1083, #1798), for databases created before them.
     const cols = (db.prepare('PRAGMA table_info(schedules)').all() as { name: string }[]).map((c) => c.name);
-    const added = { model: 'TEXT', effort: 'TEXT', min_minions: 'INTEGER', gate_scope: "TEXT NOT NULL DEFAULT 'scheme'", last_skip: 'TEXT', once: 'INTEGER NOT NULL DEFAULT 0', template: 'TEXT', notes: "TEXT NOT NULL DEFAULT ''", category: "TEXT NOT NULL DEFAULT ''", trigger_kind: 'TEXT', trigger_count: 'INTEGER', trigger_gap_hours: 'INTEGER' };
+    const added = {
+      model: 'TEXT',
+      effort: 'TEXT',
+      min_minions: 'INTEGER',
+      gate_scope: "TEXT NOT NULL DEFAULT 'scheme'",
+      last_skip: 'TEXT',
+      once: 'INTEGER NOT NULL DEFAULT 0',
+      template: 'TEXT',
+      notes: "TEXT NOT NULL DEFAULT ''",
+      category: "TEXT NOT NULL DEFAULT ''",
+      trigger_kind: 'TEXT',
+      trigger_count: 'INTEGER',
+      trigger_gap_hours: 'INTEGER',
+    };
     for (const [c, ddl] of Object.entries(added)) if (!cols.includes(c)) db.exec(`ALTER TABLE schedules ADD COLUMN ${c} ${ddl}`);
     // A database from before triggers (schema 115, #1798): its standard audits take their template's, this once.
     if (!cols.includes('trigger_count')) {
@@ -378,7 +453,27 @@ export class Schedules {
   create(s: Pick<Schedule, 'project_id' | 'name' | 'cron' | 'brief' | 'type' | 'created_by'> & Partial<Pick<Schedule, 'model' | 'effort' | 'min_minions' | 'gate_scope' | 'template' | 'notes' | 'category' | 'trigger_kind' | 'trigger_count' | 'trigger_gap_hours'>> & { once?: boolean }, now = Date.now()): Schedule {
     const r = this.db
       .prepare('INSERT INTO schedules (project_id, name, cron, brief, type, model, effort, min_minions, gate_scope, once, template, notes, category, trigger_kind, trigger_count, trigger_gap_hours, next_run_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(s.project_id, s.name, s.cron.trim(), s.brief, s.type, s.model ?? null, s.effort ?? null, s.min_minions ?? null, s.gate_scope ?? 'scheme', Number(!!s.once), s.template ?? null, s.notes ?? '', s.category ?? guessCategory(s), s.trigger_count == null ? null : s.trigger_kind ?? null, s.trigger_count ?? null, s.trigger_count == null ? null : s.trigger_gap_hours ?? null, this.next(s.cron, now), s.created_by, now);
+      .run(
+        s.project_id,
+        s.name,
+        s.cron.trim(),
+        s.brief,
+        s.type,
+        s.model ?? null,
+        s.effort ?? null,
+        s.min_minions ?? null,
+        s.gate_scope ?? 'scheme',
+        Number(!!s.once),
+        s.template ?? null,
+        s.notes ?? '',
+        s.category ?? guessCategory(s),
+        s.trigger_count == null ? null : (s.trigger_kind ?? null),
+        s.trigger_count ?? null,
+        s.trigger_count == null ? null : (s.trigger_gap_hours ?? null),
+        this.next(s.cron, now),
+        s.created_by,
+        now,
+      );
     return this.get(Number(r.lastInsertRowid))!;
   }
 
@@ -477,7 +572,11 @@ export class Schedules {
   cutOff(s: Schedule, by: string): { id: number; number: number; status: string } | null {
     if (s.next_run_at == null) return null;
     if ((this.db.prepare('SELECT COUNT(*) AS n FROM schedules WHERE project_id = ? AND name = ?').get(s.project_id, s.name) as { n: number }).n > 1) return null;
-    return (this.db.prepare("SELECT id, number, status FROM tickets WHERE project_id = ? AND kind = 'ticket' AND title = ? AND created_by = ? AND created_at >= ? AND id IS NOT ? ORDER BY id LIMIT 1").get(s.project_id, s.name, by, s.next_run_at, s.last_ticket_id) as { id: number; number: number; status: string } | undefined) ?? null;
+    return (
+      (this.db.prepare("SELECT id, number, status FROM tickets WHERE project_id = ? AND kind = 'ticket' AND title = ? AND created_by = ? AND created_at >= ? AND id IS NOT ? ORDER BY id LIMIT 1").get(s.project_id, s.name, by, s.next_run_at, s.last_ticket_id) as
+        | { id: number; number: number; status: string }
+        | undefined) ?? null
+    );
   }
 
   /** The newest `limit` slots, newest first. */
@@ -520,8 +619,14 @@ export class Schedules {
     const since = this.since(s);
     const scope = s.gate_scope === 'all' ? '' : 'AND t.project_id = ?';
     const args = s.gate_scope === 'all' ? [] : [s.project_id];
-    return Number((this.db.prepare(`SELECT COUNT(DISTINCT e.ticket_id) AS n FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.created_at > ? AND e.kind = 'note'
-      AND e.data LIKE '{"text":"Shipped %' AND e.data NOT LIKE '%not pushed to origin: the push failed.%' ${scope}`).get(this.eventIdAt(since), since, ...args) as { n: number }).n);
+    return Number(
+      (
+        this.db
+          .prepare(`SELECT COUNT(DISTINCT e.ticket_id) AS n FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.created_at > ? AND e.kind = 'note'
+      AND e.data LIKE '{"text":"Shipped %' AND e.data NOT LIKE '%not pushed to origin: the push failed.%' ${scope}`)
+          .get(this.eventIdAt(since), since, ...args) as { n: number }
+      ).n,
+    );
   }
 }
 
@@ -714,7 +819,8 @@ export class ScheduledRuns {
       const opts = { brief: true, schedule: s.name };
       const send = () => runner.send(id, by, message, [], opts);
       // The minion exists either way; while the box is starved its brief waits (up to 10 minutes) as a sealed row.
-      if (this.d.held) await this.d.held.start({ ticket: id, from: by, message, opts, schedule: s.id }, send); else send();
+      if (this.d.held) await this.d.held.start({ ticket: id, from: by, message, opts, schedule: s.id }, send);
+      else send();
       console.log(`Schedule ${s.id} "${s.name}" started #${number}`);
     } catch (err: any) {
       console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);

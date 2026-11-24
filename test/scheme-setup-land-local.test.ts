@@ -19,7 +19,13 @@ const hooked = (local: string, ...rest: Parameters<typeof setup>) => {
   const r = setup(rest[0], rest[1], local);
   const log = join(r.dir, 'after.log');
   const extra = { LAND_GITDIR: git(r.main, 'rev-parse', '--absolute-git-dir'), AFTER_LOG: log };
-  const after = () => { try { return readFileSync(log, 'utf8').trim().split('\n'); } catch { return []; } };
+  const after = () => {
+    try {
+      return readFileSync(log, 'utf8').trim().split('\n');
+    } catch {
+      return [];
+    }
+  };
   return { ...r, run: (more: Record<string, string> = {}) => r.run({ ...extra, ...more }), after };
 };
 
@@ -117,7 +123,7 @@ test('a land_after that fails or exits is only warned about: the landing still e
   }
 });
 
-test("a landing whose push failed has its land_after made up by the next landing that pushes (KT4, #1519)", () => {
+test('a landing whose push failed has its land_after made up by the next landing that pushes (KT4, #1519)', () => {
   const r = hooked(recorder);
   const url = git(r.main, 'remote', 'get-url', 'origin');
   git(r.main, 'remote', 'set-url', 'origin', join(r.dir, 'missing.git'));
@@ -139,7 +145,7 @@ test("a landing whose push failed has its land_after made up by the next landing
   assert.equal(r.after().length, 3);
 });
 
-test("land_rebased runs on the branch rebased onto main, before the check, and the commit it makes ships with it", () => {
+test('land_rebased runs on the branch rebased onto main, before the check, and the commit it makes ships with it', () => {
   // The check sees the hook's file: it runs after the hook.
   const r = setup('test -s rebased.txt', {}, rebasedHook);
   r.commit(r.main, 'm.txt', 'main moved\n');
@@ -173,7 +179,11 @@ test('a land_rebased that fails, or leaves changes uncommitted, refuses the land
 });
 
 test("land_deploy on a lone landing: its last word is the ship line's deploy state; a failed one takes main back and nothing is pushed", () => {
-  for (const [body, word] of [['echo restart', 'restart'], ['echo "Deployed it."', 'done'], [':', 'done']]) {
+  for (const [body, word] of [
+    ['echo restart', 'restart'],
+    ['echo "Deployed it."', 'done'],
+    [':', 'done'],
+  ]) {
     const r = setup('true', {}, `land_deploy() { echo "$1" >"$(git rev-parse --path-format=absolute --git-common-dir)/deployed"; ${body}; }\n`);
     r.commit(r.wt, 'b.txt', 'mine\n');
     const res = r.run();

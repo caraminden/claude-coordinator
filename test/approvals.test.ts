@@ -96,7 +96,14 @@ test('the end of a turn expires what still waits', async () => {
   assert.equal((await waiting).state, 'expired');
   assert.equal(a.decide(1, id, true, 'Cara').state, 'expired');
   assert.deepEqual(events.at(-1), { kind: 'approval_result', data: { id, state: 'expired', reason: 'The turn was stopped while this waited.' } });
-  assert.deepEqual(unsettledCards([{ kind: 'approval', data: '{"id":"a"}' }, { kind: 'approval', data: '{"id":"b"}' }, { kind: 'approval_result', data: '{"id":"a"}' }]), ['b']);
+  assert.deepEqual(
+    unsettledCards([
+      { kind: 'approval', data: '{"id":"a"}' },
+      { kind: 'approval', data: '{"id":"b"}' },
+      { kind: 'approval_result', data: '{"id":"a"}' },
+    ]),
+    ['b'],
+  );
 });
 
 test('a merge card carries the PR it names; a refused call posts nothing', () => {
@@ -138,7 +145,8 @@ async function mcpServer(approvals: boolean) {
   await listening;
   const proc = tmp.spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined,
+      ...process.env,
+      MACHINES_URL: undefined,
       COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,
       COORDINATOR_TOKEN: `${TICKET}.sig`,
       COORDINATOR_PROJECT: '1',
@@ -164,8 +172,7 @@ async function mcpServer(approvals: boolean) {
 let server: ReturnType<typeof mcpServer> | null = null;
 const rpc = async (method: string, params: object) => (await (server ??= mcpServer(true)))(method, params);
 /** Ask the approval tool the way Claude Code does, and read its answer. */
-const ask = (input: object) =>
-  rpc('tools/call', { name: 'approve', arguments: { tool_name: 'Bash', input, tool_use_id: 'toolu_1' } }).then((r) => JSON.parse(r.content[0].text));
+const ask = (input: object) => rpc('tools/call', { name: 'approve', arguments: { tool_name: 'Bash', input, tool_use_id: 'toolu_1' } }).then((r) => JSON.parse(r.content[0].text));
 async function nextCard() {
   while (!posted.length) await wait(10);
   return posted.shift();
@@ -258,7 +265,12 @@ const wait = setInterval(() => {
 chmodSync(fake, 0o755);
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const store = new Store(join(root, 'test.db'));
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 
 async function turn(projectId: number, mkdirs: string[] = [], picks = '') {
   const t = store.createTicket({ project_id: projectId, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara' });
@@ -278,7 +290,7 @@ async function finish(id: number) {
   rmSync(join(root, 'release'), { force: true });
 }
 
-test('a project without rules or plugins still sends a minion\'s prompts to cards, for the tripwire', async () => {
+test("a project without rules or plugins still sends a minion's prompts to cards, for the tripwire", async () => {
   const plain = store.createProject('Plain', null);
   const t = await turn(plain.id, ['tools/mods/delve']);
   assert.ok(!t.args.includes('none'));
@@ -344,7 +356,12 @@ test('after a restart, cards left waiting show as expired', () => {
   const t = store.createTicket({ project_id: p.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara' });
   store.addEvent(t.id, 'approval', { id: 'abc', tool: 'Bash', input: {} });
   store.updateTicket(t.id, { status: 'running' });
-  new Runner(store, () => {}, () => ({}), fake).recover();
+  new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  ).recover();
   const result = store.listEvents(t.id).find((e) => e.kind === 'approval_result');
   assert.deepEqual(JSON.parse(result!.data), { id: 'abc', state: 'expired', reason: 'The server restarted while this waited.' });
 });
@@ -365,9 +382,13 @@ test("through the route, a card is judged with the turn's own TMPDIR, not the se
     await until('the turn', async () => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion })).ok);
     const bak = join(srv.data, 'coordinator.db.bak-x');
     const command = `cp ${bak} "$TMPDIR/" && rm ${bak}`;
-    const r = await (await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, {
-      method: 'POST', headers: minion, body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Move the stale copy Cara named out of the data dir' } }),
-    })).json();
+    const r = await (
+      await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, {
+        method: 'POST',
+        headers: minion,
+        body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Move the stale copy Cara named out of the data dir' } }),
+      })
+    ).json();
     assert.ok(r.id, JSON.stringify(r));
   } finally {
     await srv.stop();

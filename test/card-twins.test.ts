@@ -36,7 +36,7 @@ test('the same question a minute after its answer is refused, and shows the answ
   assert.match(out ?? '', /The stuck list/);
 });
 
-test('an answer older than a day, a different question, another person\'s card, and no questions are not twins', () => {
+test("an answer older than a day, a different question, another person's card, and no questions are not twins", () => {
   const { store, a, b } = setup();
   store.addEvent(a.id, 'question', { id: 'q1', to: 'Cara', questions: ask.questions });
   store.addEvent(a.id, 'user_message', { author: 'Cara', text: 'x', answer: { questionId: 'q1', answers: [] } });
@@ -44,7 +44,7 @@ test('an answer older than a day, a different question, another person\'s card, 
   assert.equal(cardTwin(store, b, { questions: [Q('Should the deploy wait for the weekend?', 'Wait', 'Go')], to: 'Cara' }), null);
   const other = setup();
   other.store.addEvent(other.a.id, 'question', { id: 'q2', to: 'Josh', questions: ask.questions });
-  assert.equal(cardTwin(other.store, other.b, { ...ask, to: 'Cara' }), null, 'Josh\'s open card is not one Cara can answer');
+  assert.equal(cardTwin(other.store, other.b, { ...ask, to: 'Cara' }), null, "Josh's open card is not one Cara can answer");
   assert.equal(cardTwin(store, b, { questions: [] }), null, 'a choices-page or secret card has no questions');
 });
 

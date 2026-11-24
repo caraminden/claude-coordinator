@@ -16,15 +16,34 @@ test('repoSlug reads GitHub https and ssh URLs', () => {
 test('a PR belongs to the minion whose branch is its head', () => {
   const t = (id: number, number: number, branch: string | null, kind = 'ticket') => ({ id, number, branch, kind, title: `t${id}` }) as unknown as Ticket;
   const tickets = [t(162, 68, 'ticket/68-laptop'), t(1, 0, 'main', 'coordinator'), t(3, 4, null)];
-  assert.deepEqual(owners([{ number: 186, headRefName: 'ticket/68-laptop' }, { number: 9, headRefName: 'main' }, { number: 2, headRefName: 'other' }], tickets),
-    { 186: { id: 162, number: 68, title: 't162' } });
+  assert.deepEqual(
+    owners(
+      [
+        { number: 186, headRefName: 'ticket/68-laptop' },
+        { number: 9, headRefName: 'main' },
+        { number: 2, headRefName: 'other' },
+      ],
+      tickets,
+    ),
+    { 186: { id: 162, number: 68, title: 't162' } },
+  );
 });
 
 test('a PR from another ticket/<N>- branch belongs to minion N of the scheme', () => {
   const t = (id: number, number: number, branch: string | null) => ({ id, number, branch, kind: 'ticket', title: `t${id}` }) as unknown as Ticket;
   const tickets = [t(193, 93, 'ticket/93-s9-measured'), t(164, 64, 'ticket/64-port-the-mod')];
-  assert.deepEqual(owners([{ number: 217, headRefName: 'ticket/93-s11-targets-doc' }, { number: 195, headRefName: 'ticket/64-drop-fold-check' }, { number: 3, headRefName: 'ticket/7-nobody' }, { number: 4, headRefName: 'claude/project-thread-x' }], tickets),
-    { 217: { id: 193, number: 93, title: 't193' }, 195: { id: 164, number: 64, title: 't164' } });
+  assert.deepEqual(
+    owners(
+      [
+        { number: 217, headRefName: 'ticket/93-s11-targets-doc' },
+        { number: 195, headRefName: 'ticket/64-drop-fold-check' },
+        { number: 3, headRefName: 'ticket/7-nobody' },
+        { number: 4, headRefName: 'claude/project-thread-x' },
+      ],
+      tickets,
+    ),
+    { 217: { id: 193, number: 93, title: 't193' }, 195: { id: 164, number: 64, title: 't164' } },
+  );
 });
 
 test('prOwners lists every PR and issue number, and a failed issue list leaves the PRs', async () => {
@@ -43,10 +62,12 @@ test('prOwners lists every PR and issue number, and a failed issue list leaves t
   }
 });
 
-test('merged and closed PRs of dismissed minions find their owner in each scheme\'s own repo', async () => {
+test("merged and closed PRs of dismissed minions find their owner in each scheme's own repo", async () => {
   // A stand-in gh like GitHub's: without --state all it lists only open PRs. Each repo has its own PRs.
   const bin = mkdtempSync(join(tmpdir(), 'prlinks-gh-'));
-  writeFileSync(join(bin, 'gh'), `#!/bin/sh
+  writeFileSync(
+    join(bin, 'gh'),
+    `#!/bin/sh
 [ "$1" = pr ] || exit 1
 case "$*" in *"--state all"*) all=1 ;; esac
 case "$*" in
@@ -54,7 +75,8 @@ case "$*" in
   *"--repo stub/citadel-like"*) [ -n "$all" ] && echo '[{"number":15,"headRefName":"ticket/240-other"}]' || echo '[]' ;;
   *) exit 1 ;;
 esac
-`);
+`,
+  );
   chmodSync(join(bin, 'gh'), 0o755);
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path}`;
@@ -62,14 +84,20 @@ esac
     // Mandate #24 merged PR 15 and was dismissed; #16's PR 12 was closed unmerged. Citadel's own PR 15 is #240's.
     const t = (id: number, number: number, branch: string) => ({ id, number, branch, kind: 'ticket', status: 'closed', title: `t${number}` }) as unknown as Ticket;
     const tickets: Record<number, Ticket[]> = { 5: [t(422, 24, 'ticket/24-colours'), t(380, 16, 'ticket/16-ics')], 2: [t(500, 240, 'ticket/240-other')] };
-    const repos = await prOwners([
-      { id: 2, name: 'Citadel', repo_url: 'https://github.com/stub/citadel-like' },
-      { id: 5, name: 'Mandate', repo_url: 'https://github.com/stub/mandate-like' },
-    ] as unknown as Project[], (id) => tickets[id]);
-    assert.deepEqual(repos.map((r) => [r.projectId, r.repo, r.prs]), [
-      [2, 'stub/citadel-like', { 15: { id: 500, number: 240, title: 't240' } }],
-      [5, 'stub/mandate-like', { 15: { id: 422, number: 24, title: 't24' }, 12: { id: 380, number: 16, title: 't16' } }],
-    ]);
+    const repos = await prOwners(
+      [
+        { id: 2, name: 'Citadel', repo_url: 'https://github.com/stub/citadel-like' },
+        { id: 5, name: 'Mandate', repo_url: 'https://github.com/stub/mandate-like' },
+      ] as unknown as Project[],
+      (id) => tickets[id],
+    );
+    assert.deepEqual(
+      repos.map((r) => [r.projectId, r.repo, r.prs]),
+      [
+        [2, 'stub/citadel-like', { 15: { id: 500, number: 240, title: 't240' } }],
+        [5, 'stub/mandate-like', { 15: { id: 422, number: 24, title: 't24' }, 12: { id: 380, number: 16, title: 't16' } }],
+      ],
+    );
   } finally {
     process.env.PATH = path;
   }

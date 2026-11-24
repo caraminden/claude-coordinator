@@ -41,10 +41,7 @@ test('a passing file gives a line of counts and where the log is', async () => {
 });
 
 test('a failing test shows its file, line, suite path and the expected/actual diff', async () => {
-  const f = file(
-    'fail.test.ts',
-    `test('fine', () => {});\ndescribe('totals', () => {\n  test('adds up', () => { assert.deepEqual({ sum: 3 }, { sum: 4 }); });\n});`,
-  );
+  const f = file('fail.test.ts', `test('fine', () => {});\ndescribe('totals', () => {\n  test('adds up', () => { assert.deepEqual({ sum: 3 }, { sum: 4 }); });\n});`);
   const r = await run([f]);
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /^✖ 1 passed, 1 failed in/);
@@ -120,7 +117,12 @@ test("a folder is refused: the full suite is the land gate's", async () => {
 
 // #1621: no files is --affected, with the repo-wide guards on top. Against HEAD so the answer doesn't depend on main.
 test('no files runs --affected, the same as asking for it', async (t) => {
-  const dirty = await new Promise<string>((res) => { let o = ''; const c = spawn('git', ['status', '--porcelain'], { cwd: repo }); c.stdout.on('data', (b) => (o += b)); c.on('close', () => res(o)); });
+  const dirty = await new Promise<string>((res) => {
+    let o = '';
+    const c = spawn('git', ['status', '--porcelain'], { cwd: repo });
+    c.stdout.on('data', (b) => (o += b));
+    c.on('close', () => res(o));
+  });
   if (dirty.trim()) return t.skip('the tree has changes, so --affected would run their tests');
   const bare = await run(['--base', 'HEAD']);
   assert.equal(bare.code, 0, bare.out);
@@ -169,7 +171,12 @@ test('the real list names files that exist', () => {
 });
 
 test('--affected with nothing changed is not a failure: it says so and runs only the repo-wide list', async (t) => {
-  const dirty = await new Promise<string>((res) => { let o = ''; const c = spawn('git', ['status', '--porcelain'], { cwd: repo }); c.stdout.on('data', (b) => (o += b)); c.on('close', () => res(o)); });
+  const dirty = await new Promise<string>((res) => {
+    let o = '';
+    const c = spawn('git', ['status', '--porcelain'], { cwd: repo });
+    c.stdout.on('data', (b) => (o += b));
+    c.on('close', () => res(o));
+  });
   if (dirty.trim()) return t.skip('the tree has changes, so --affected would run their tests');
   const r = await run(['--affected', '--base', 'HEAD']);
   assert.equal(r.code, 0, r.out);
@@ -190,7 +197,10 @@ test('workers follow the memory room: a short room says so and runs fewer files 
 
 // #1650 (Cara, 2026-11-22: "On a red, says if the file is a known flake or the box is overloaded, and to rerun it alone once"):
 // a hint under a red, text only. tools/known-flakes.ts reads a retro log made here; the load and cores are set by env.
-const stampOf = (ms: number) => { const d = new Date(ms).toISOString(); return `${d.slice(11, 19)}Z`; };
+const stampOf = (ms: number) => {
+  const d = new Date(ms).toISOString();
+  return `${d.slice(11, 19)}Z`;
+};
 function hintRun(failFile: string, retro: string[], load = '0.50', cores = '8') {
   const shared = join(tmp, `shared-${Math.random().toString(36).slice(2)}`);
   const day = new Date().toISOString().slice(0, 10);

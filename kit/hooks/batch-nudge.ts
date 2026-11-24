@@ -17,8 +17,7 @@ import type { HookInput, TranscriptBlock, TranscriptEntry } from './hook-input.t
 /** Single lookups in a row that earn the line. */
 export const BATCH_AT = 3;
 
-export const BATCH_LINE =
-  `[citadel batch] That is ${BATCH_AT} single lookups in a row. When the next lookups don't depend on each other's results, send them in one message (or one script) instead of one per turn.`;
+export const BATCH_LINE = `[citadel batch] That is ${BATCH_AT} single lookups in a row. When the next lookups don't depend on each other's results, send them in one message (or one script) instead of one per turn.`;
 
 const READ_TOOLS = /^(?:Read|Grep|Glob)$/;
 const EDIT_TOOLS = /^(?:Edit|Write|MultiEdit|NotebookEdit)$/;
@@ -31,16 +30,22 @@ export function readOnlyBash(command: string): boolean {
   if (!c || /[`]|\$\(/.test(c)) return false;
   // Redirects to a file write; 2>&1 and >/dev/null don't.
   if (/(?:^|[^>&\d])>{1,2}\s*(?!\/dev\/null)\S/.test(c.replace(/\d?>&\d/g, ''))) return false;
-  const parts = c.split(/&&|\|\||[;|\n]/).map((s) => s.trim()).filter(Boolean);
-  return parts.length > 0 && parts.every((p) => {
-    const words = p.replace(/^(?:\w+=\S*\s+)+/, '').split(/\s+/);
-    const w = (words[0] ?? '').replace(/^.*\//, '');
-    if (w === 'git') return READ_GIT.has(words.find((x, i) => i > 0 && !x.startsWith('-')) ?? '');
-    if (w === 'sed') return !words.some((x) => /^-\w*i/.test(x));
-    if (w === 'sqlite3') return words.includes('-readonly');
-    if (w === 'find') return !words.some((x) => /^-(?:delete|exec|execdir|ok)$/.test(x));
-    return READ_WORDS.has(w) && w !== 'sqlite3';
-  });
+  const parts = c
+    .split(/&&|\|\||[;|\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return (
+    parts.length > 0 &&
+    parts.every((p) => {
+      const words = p.replace(/^(?:\w+=\S*\s+)+/, '').split(/\s+/);
+      const w = (words[0] ?? '').replace(/^.*\//, '');
+      if (w === 'git') return READ_GIT.has(words.find((x, i) => i > 0 && !x.startsWith('-')) ?? '');
+      if (w === 'sed') return !words.some((x) => /^-\w*i/.test(x));
+      if (w === 'sqlite3') return words.includes('-readonly');
+      if (w === 'find') return !words.some((x) => /^-(?:delete|exec|execdir|ok)$/.test(x));
+      return READ_WORDS.has(w) && w !== 'sqlite3';
+    })
+  );
 }
 
 /** How many tool calls the assistant message holding this call made (1 when it can't be read). */
@@ -54,15 +59,18 @@ export function callsInMessage(transcriptPath: unknown, toolUseId: unknown): num
       const buf = Buffer.alloc(len);
       readSync(fd, buf, 0, len, size - len);
       // The transcript stores one line per content block, parallel calls sharing message.id.
-      const rows = buf.toString('utf8').split('\n').flatMap((l) => {
-        if (!l.includes('"tool_use"')) return [];
-        try {
-          const m: TranscriptEntry['message'] | undefined = JSON.parse(l)?.message;
-          return Array.isArray(m?.content) ? [m as { id?: string; content: TranscriptBlock[] }] : [];
-        } catch {
-          return [];
-        }
-      });
+      const rows = buf
+        .toString('utf8')
+        .split('\n')
+        .flatMap((l) => {
+          if (!l.includes('"tool_use"')) return [];
+          try {
+            const m: TranscriptEntry['message'] | undefined = JSON.parse(l)?.message;
+            return Array.isArray(m?.content) ? [m as { id?: string; content: TranscriptBlock[] }] : [];
+          } catch {
+            return [];
+          }
+        });
       const mine = rows.find((m) => m.content.some((b: TranscriptBlock | null) => b?.type === 'tool_use' && b.id === toolUseId));
       if (mine?.id) return new Set(rows.filter((m) => m.id === mine.id).flatMap((m) => m.content.filter((b: TranscriptBlock | null) => b?.type === 'tool_use').map((b) => b!.id))).size;
       if (mine) return mine.content.filter((b: TranscriptBlock | null) => b?.type === 'tool_use').length;
@@ -92,8 +100,7 @@ export function batchNudgeLine(input: HookInput, env = process.env, stateDir = j
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(file, JSON.stringify(s));
   };
-  const lookup =
-    READ_TOOLS.test(tool) || (tool === 'Bash' && !input?.tool_input?.run_in_background && readOnlyBash(String(input?.tool_input?.command ?? '')));
+  const lookup = READ_TOOLS.test(tool) || (tool === 'Bash' && !input?.tool_input?.run_in_background && readOnlyBash(String(input?.tool_input?.command ?? '')));
   if (!lookup || callsInMessage(input?.transcript_path, input?.tool_use_id) > 1) {
     if (lookup || EDIT_TOOLS.test(tool) || tool === 'Bash') write({ count: 0, said: false });
     return null;

@@ -14,13 +14,16 @@ const log = join(root, 'gh.log');
 const PATH = process.env.PATH;
 before(() => {
   mkdirSync(bin);
-  writeFileSync(join(bin, 'gh'), `#!/bin/sh
+  writeFileSync(
+    join(bin, 'gh'),
+    `#!/bin/sh
 echo "$*" >> "${log}"
 if [ "$1" = run ] && [ "$2" = download ]; then
   while [ $# -gt 0 ]; do [ "$1" = --dir ] && dir="$2"; shift; done
   mkdir -p "$dir/mandate-release-apk" && printf apk > "$dir/mandate-release-apk/$APK_NAME"
 fi
-`);
+`,
+  );
   chmodSync(join(bin, 'gh'), 0o755);
   process.env.PATH = `${bin}${delimiter}${PATH}`;
 });
@@ -30,14 +33,14 @@ after(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test('apkCode and nextFeed: the versionCode in a signed APK\'s name, and latest.json with only what is known', () => {
+test("apkCode and nextFeed: the versionCode in a signed APK's name, and latest.json with only what is known", () => {
   assert.equal(apkCode('mandate-12.apk'), 12);
   assert.equal(apkCode('app-release.apk'), null);
   assert.deepEqual(nextFeed({ versionCode: 5, apk: 'mandate-5.apk', versionName: '1.4', notes: 'x' }, 6, 'mandate-6.apk', null), { notes: 'x', versionCode: 6, apk: 'mandate-6.apk' }, 'an old versionName would mislabel the new build');
   assert.deepEqual(nextFeed({}, 6, 'mandate-6.apk', '1.5'), { versionCode: 6, apk: 'mandate-6.apk', versionName: '1.5' });
 });
 
-test('publish copies the run\'s APK in, then points latest.json at it; an APK no newer is refused with the feed untouched', async () => {
+test("publish copies the run's APK in, then points latest.json at it; an APK no newer is refused with the feed untouched", async () => {
   const dir = join(root, 'android');
   mkdirSync(dir);
   const feedFile = join(dir, 'latest.json');
@@ -54,7 +57,7 @@ test('publish copies the run\'s APK in, then points latest.json at it; an APK no
   assert.match(readFileSync(log, 'utf8'), /^run download 8 --repo o\/mandate --dir \S+$/m);
 });
 
-test('certDigests reads apksigner\'s SHA-256 lines, sorted, and nothing else', () => {
+test("certDigests reads apksigner's SHA-256 lines, sorted, and nothing else", () => {
   const out = `Signer #1 certificate DN: CN=Mandate, O=Citadel
 Signer #1 certificate SHA-256 digest: c85e60a2
 Signer #1 certificate SHA-1 digest: 407455f0
@@ -95,7 +98,10 @@ test('a publish is kept: who, which build, which run and when, by scheme (#663)'
   const p = store.createProject('Mandate', null);
   store.recordApkPublish({ projectId: p.id, contraption: 'mandate', versionCode: 7, runId: 43502731900, by: '#112', uid: null });
   const rows = store.db.prepare('SELECT project_id, contraption, version_code, run_id, published_by, uid FROM apk_publishes').all();
-  assert.deepEqual(rows.map((r) => ({ ...r })), [{ project_id: p.id, contraption: 'mandate', version_code: 7, run_id: 43502731900, published_by: '#112', uid: null }]);
+  assert.deepEqual(
+    rows.map((r) => ({ ...r })),
+    [{ project_id: p.id, contraption: 'mandate', version_code: 7, run_id: 43502731900, published_by: '#112', uid: null }],
+  );
   store.db.close();
 });
 
@@ -104,10 +110,16 @@ test('dispatch starts the release workflow on the branch', async () => {
   assert.match(readFileSync(log, 'utf8'), /^api -X POST repos\/o\/mandate\/actions\/workflows\/android-release\.yml\/dispatches -f ref=main$/m);
 });
 
-test('a CI-signed APK\'s roll back points the branch at last green, then signs it one past the published build; a copy of Citadel never does (ADR 0012)', async () => {
+test("a CI-signed APK's roll back points the branch at last green, then signs it one past the published build; a copy of Citadel never does (ADR 0012)", async () => {
   const calls: string[] = [];
   const o = {
-    name: 'Mandate', workflow: '.github/workflows/android-release.yml', slug: 'cara/mandate', current: 11, copy: false, as: undefined, branch: 'citadel/rollback',
+    name: 'Mandate',
+    workflow: '.github/workflows/android-release.yml',
+    slug: 'cara/mandate',
+    current: 11,
+    copy: false,
+    as: undefined,
+    branch: 'citadel/rollback',
     point: async (slug: string, branch: string, sha: string) => void calls.push(`point ${slug} ${branch} ${sha}`),
     start: async (slug: string, file: string, ref: string, _as: unknown, inputs: Record<string, string> = {}) => void calls.push(`dispatch ${slug} ${file} ${ref} ${JSON.stringify(inputs)}`),
   };
@@ -120,8 +132,18 @@ test('a CI-signed APK\'s roll back points the branch at last green, then signs i
   assert.deepEqual(calls, [], 'a refused roll back moves no branch and starts no run');
 
   // Last green's workflow from before the scheme added the input: GitHub's 422 becomes what the card says to do.
-  const old = { ...o, start: async () => { throw Object.assign(new Error('gh: Unexpected inputs provided: ["version_code"] (HTTP 422)'), { stderr: '' }); } };
+  const old = {
+    ...o,
+    start: async () => {
+      throw Object.assign(new Error('gh: Unexpected inputs provided: ["version_code"] (HTTP 422)'), { stderr: '' });
+    },
+  };
   await assert.rejects(rollBackApk(old, 'abc123'), (e: any) => e.status === 409 && /doesn't take a version_code input yet/.test(e.message) && /build 12/.test(e.message));
-  const down = { ...o, start: async () => { throw new Error('HTTP 502'); } };
+  const down = {
+    ...o,
+    start: async () => {
+      throw new Error('HTTP 502');
+    },
+  };
   await assert.rejects(rollBackApk(down, 'abc123'), /HTTP 502/);
 });

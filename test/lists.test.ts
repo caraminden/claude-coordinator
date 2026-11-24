@@ -38,9 +38,22 @@ test('Enter elsewhere is left alone', () => {
 // A textarea 3 lines of 20px tall, whose copies measure 20px per line of their value.
 const fakeBox = (value: string, caret: number, scrollTop = 0) => {
   const box: any = {
-    value, selectionStart: caret, selectionEnd: caret, scrollTop, clientHeight: 60, offsetWidth: 300,
-    setSelectionRange() {}, after() {},
-    cloneNode: () => ({ style: { cssText: '' }, removeAttribute() {}, remove() {}, get scrollHeight() { return this.value.split('\n').length * 20; } }),
+    value,
+    selectionStart: caret,
+    selectionEnd: caret,
+    scrollTop,
+    clientHeight: 60,
+    offsetWidth: 300,
+    setSelectionRange() {},
+    after() {},
+    cloneNode: () => ({
+      style: { cssText: '' },
+      removeAttribute() {},
+      remove() {},
+      get scrollHeight() {
+        return this.value.split('\n').length * 20;
+      },
+    }),
   };
   return box;
 };
@@ -62,11 +75,13 @@ test('A new item below the bottom edge scrolls the box down to it; one in view l
   // The scripted insert stands in for execCommand: it adds the item and moves the caret past it.
   const press = (value: string, caret: number, scrollTop: number) => {
     const box = fakeBox(value, caret, scrollTop);
-    (globalThis as any).document = { execCommand: (_: string, __: boolean, text: string) => {
-      box.value = box.value.slice(0, caret) + text + box.value.slice(caret);
-      box.selectionStart = box.selectionEnd = caret + text.length;
-      return true;
-    } };
+    (globalThis as any).document = {
+      execCommand: (_: string, __: boolean, text: string) => {
+        box.value = box.value.slice(0, caret) + text + box.value.slice(caret);
+        box.selectionStart = box.selectionEnd = caret + text.length;
+        return true;
+      },
+    };
     continueList(box, { key: 'Enter', shiftKey: true, preventDefault() {} });
     delete (globalThis as any).document;
     return box.scrollTop;

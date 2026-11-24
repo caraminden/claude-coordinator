@@ -42,14 +42,23 @@ test('the newest page is whole turns, as many as fit in the limit', () => {
   const { store, t } = setup('fit');
   const turns = [turn(store, t.id, 10), turn(store, t.id, 10), turn(store, t.id, 3), turn(store, t.id, 3)]; // 25, 25, 11, 11 events
   const page = historyPage(store, t.id, { limit: 30 });
-  assert.deepEqual(page.events.map((e) => e.id), [...turns[2], ...turns[3]]);
+  assert.deepEqual(
+    page.events.map((e) => e.id),
+    [...turns[2], ...turns[3]],
+  );
   assert.equal(page.events[0].kind, 'user_message', 'a turn starts with the message that started it');
   assert.equal(page.more, true);
   // The next page back, before the oldest event shown.
   const earlier = historyPage(store, t.id, { before: page.events[0].id, limit: 30 });
-  assert.deepEqual(earlier.events.map((e) => e.id), turns[1]);
+  assert.deepEqual(
+    earlier.events.map((e) => e.id),
+    turns[1],
+  );
   const first = historyPage(store, t.id, { before: earlier.events[0].id, limit: 30 });
-  assert.deepEqual(first.events.map((e) => e.id), turns[0]);
+  assert.deepEqual(
+    first.events.map((e) => e.id),
+    turns[0],
+  );
   assert.equal(first.more, false);
 });
 
@@ -57,12 +66,18 @@ test('a turn longer than the limit comes whole, running or not', () => {
   const { store, t } = setup('long');
   const old = turn(store, t.id, 2);
   const long = turn(store, t.id, 40);
-  assert.deepEqual(historyPage(store, t.id, { limit: 20 }).events.map((e) => e.id), long);
+  assert.deepEqual(
+    historyPage(store, t.id, { limit: 20 }).events.map((e) => e.id),
+    long,
+  );
   // A turn still running (no result yet) is the newest turn, whole.
   const running = [store.addEvent(t.id, 'user_message', { author: 'Cara', text: 'more' }).id];
   for (let i = 0; i < 30; i++) running.push(store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: `step ${i}` }] } }).id);
   const page = historyPage(store, t.id, { limit: 20 });
-  assert.deepEqual(page.events.map((e) => e.id), running);
+  assert.deepEqual(
+    page.events.map((e) => e.id),
+    running,
+  );
   assert.equal(page.more, true);
   // Paging back gives the long turn whole, then the short first turn, then nothing more.
   const back = historyPage(store, t.id, { before: running[0], limit: 20 });
@@ -75,10 +90,12 @@ test('notes after a long last turn come with that turn, so the newest page is ne
   const { store, t } = setup('tail');
   turn(store, t.id, 2);
   const long = turn(store, t.id, 40);
-  const notes = [store.addEvent(t.id, 'note', { text: 'The deploy is live, so it dismissed this minion.' }).id,
-    store.addEvent(t.id, 'note', { text: 'Deployed abc1234' }).id];
+  const notes = [store.addEvent(t.id, 'note', { text: 'The deploy is live, so it dismissed this minion.' }).id, store.addEvent(t.id, 'note', { text: 'Deployed abc1234' }).id];
   const page = historyPage(store, t.id, { limit: 20 });
-  assert.deepEqual(page.events.map((e) => e.id), [...long, ...notes]);
+  assert.deepEqual(
+    page.events.map((e) => e.id),
+    [...long, ...notes],
+  );
   assert.equal(page.more, true);
 });
 
@@ -86,7 +103,10 @@ test('a short history is one page with nothing more', () => {
   const { store, t } = setup('short');
   const ids = [...turn(store, t.id, 1), ...turn(store, t.id, 1)];
   const page = historyPage(store, t.id);
-  assert.deepEqual(page.events.map((e) => e.id), ids);
+  assert.deepEqual(
+    page.events.map((e) => e.id),
+    ids,
+  );
   assert.deepEqual([page.more, page.tasks], [false, []]);
   assert.deepEqual(historyPage(setup('empty').store, 1), { events: [], more: false, tasks: [] });
 });
@@ -95,10 +115,16 @@ test('from reaches back to the turn holding that event', () => {
   const { store, t } = setup('from');
   const turns = [turn(store, t.id, 5), turn(store, t.id, 5), turn(store, t.id, 5), turn(store, t.id, 5)];
   const newest = historyPage(store, t.id, { limit: 15 });
-  assert.deepEqual(newest.events.map((e) => e.id), turns[3]);
+  assert.deepEqual(
+    newest.events.map((e) => e.id),
+    turns[3],
+  );
   // A match in the middle of turn 1: everything from turn 1's start up to what's loaded.
   const page = historyPage(store, t.id, { before: newest.events[0].id, limit: 15, from: turns[1][5] });
-  assert.deepEqual(page.events.map((e) => e.id), [...turns[1], ...turns[2]]);
+  assert.deepEqual(
+    page.events.map((e) => e.id),
+    [...turns[1], ...turns[2]],
+  );
   assert.equal(page.more, true);
 });
 
@@ -114,16 +140,22 @@ test('the newest page reaches back to the turn holding a card still waiting on p
   const followUp = [store.addEvent(t.id, 'user_message', { author: 'Taskmaster', text: 'hold the WoW steps' }).id];
   for (let i = 0; i < 3; i++) followUp.push(store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: `ok ${i}` }] } }).id);
   followUp.push(store.addEvent(t.id, 'claude', { type: 'result', subtype: 'success', duration_ms: 10 }).id);
-  assert.deepEqual(historyPage(store, t.id, { limit: 20 }).events.map((e) => e.id), [...planning, ...followUp]);
+  assert.deepEqual(
+    historyPage(store, t.id, { limit: 20 }).events.map((e) => e.id),
+    [...planning, ...followUp],
+  );
   // Only so far back: a card with more events after it than a page may hold leaves the page as it was.
   assert.equal(store.openCardEventId(t.id, followUp.length + 2), planning.at(-3));
   assert.equal(store.openCardEventId(t.id, followUp.length + 1), null);
   // Once a person has written after it, the card isn't waiting any more and the page is whole turns that fit again.
   const said = store.addEvent(t.id, 'user_message', { author: 'Josh', text: 'lgtm' }).id;
-  assert.deepEqual(historyPage(store, t.id, { limit: 20 }).events.map((e) => e.id), [...followUp, said]);
+  assert.deepEqual(
+    historyPage(store, t.id, { limit: 20 }).events.map((e) => e.id),
+    [...followUp, said],
+  );
 });
 
-test("each page carries the plan as it stood before it, so the readout matches a full replay", () => {
+test('each page carries the plan as it stood before it, so the readout matches a full replay', () => {
   const { store, t } = setup('plan');
   const create = (id: string, subject: string) => [
     { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'TaskCreate', input: { subject, activeForm: `${subject}ing` } }] } },
@@ -139,7 +171,13 @@ test("each page carries the plan as it stood before it, so the readout matches a
 
   const page = historyPage(store, t.id, { limit: 12 });
   assert.equal(page.more, true);
-  assert.deepEqual(page.tasks.map((x: any) => [x.subject, x.status]), [['Map', 'completed'], ['Build', 'in_progress']]);
+  assert.deepEqual(
+    page.tasks.map((x: any) => [x.subject, x.status]),
+    [
+      ['Map', 'completed'],
+      ['Build', 'in_progress'],
+    ],
+  );
   const seeded = { ...createProgress(), tasks: page.tasks };
   for (const e of page.events) applyEvent(seeded, e.kind, JSON.parse(e.data), e.created_at);
   assert.deepEqual(seeded.tasks, full.tasks);
@@ -169,7 +207,7 @@ test("a page of a running turn reads the same as a full replay, so a step left u
   assert.doesNotMatch(progressLine(seeded, true), /Wait/);
 });
 
-test("planEvents leaves out ordinary tool results yet replays to the same plan as every event (#497)", () => {
+test('planEvents leaves out ordinary tool results yet replays to the same plan as every event (#497)', () => {
   const { store, t } = setup('plan-filter');
   const create = (id: string, subject: string) => [
     { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'TaskCreate', input: { subject } }] } },
@@ -185,7 +223,13 @@ test("planEvents leaves out ordinary tool results yet replays to the same plan a
   };
   const kept = store.planEvents(t.id);
   assert.deepEqual(replay(kept), replay(store.listEvents(t.id)));
-  assert.deepEqual(replay(kept).tasks.map((x: any) => [x.subject, x.status]), [['Map', 'completed'], ['Build', 'in_progress']]);
+  assert.deepEqual(
+    replay(kept).tasks.map((x: any) => [x.subject, x.status]),
+    [
+      ['Map', 'completed'],
+      ['Build', 'in_progress'],
+    ],
+  );
   const results = kept.filter((e) => JSON.parse(e.data).type === 'user');
   assert.equal(results.length, 2, 'only the TaskCreate results, not the five ordinary tool results');
 });
@@ -193,7 +237,10 @@ test("planEvents leaves out ordinary tool results yet replays to the same plan a
 test('after= is unchanged: every event after an id', () => {
   const { store, t } = setup('after');
   const ids = turn(store, t.id, 2);
-  assert.deepEqual(store.listEvents(t.id, ids[2]).map((e) => e.id), ids.slice(3));
+  assert.deepEqual(
+    store.listEvents(t.id, ids[2]).map((e) => e.id),
+    ids.slice(3),
+  );
 });
 
 test('search finds a quote, a backslash or a line break as typed, and a % or _ only literally (#468 S05-4)', () => {
@@ -240,15 +287,24 @@ test('the events route pages by default, keeps after= as a plain list, and searc
   const page = await get(`/api/tickets/${t.id}/events`);
   assert.equal(page.more, true);
   assert.ok(page.events.length <= 200 && page.events.length > 100, `${page.events.length} events`);
-  assert.deepEqual(page.events.map((e: any) => e.id), all.slice(-page.events.length).map((e) => e.id));
+  assert.deepEqual(
+    page.events.map((e: any) => e.id),
+    all.slice(-page.events.length).map((e) => e.id),
+  );
   assert.deepEqual(page.tasks, []);
   const earlier = await get(`/api/tickets/${t.id}/events?before=${page.events[0].id}&limit=30`);
   assert.equal(earlier.events.at(-1).id, all[all.length - page.events.length - 1].id);
   // after= stays a plain list of everything since.
-  assert.deepEqual((await get(`/api/tickets/${t.id}/events?after=0`)).map((e: any) => e.id), all.map((e) => e.id));
+  assert.deepEqual(
+    (await get(`/api/tickets/${t.id}/events?after=0`)).map((e: any) => e.id),
+    all.map((e) => e.id),
+  );
   // Search narrowed to one minion gives its oldest hit, and from= loads back to it.
   const hits = await get(`/api/projects/${p.id}/search?q=pelican&ticket=${t.id}`);
-  assert.deepEqual(hits.map((h: any) => [h.ticketId, h.oldestId, h.matches]), [[t.id, firstHit, 2]]);
+  assert.deepEqual(
+    hits.map((h: any) => [h.ticketId, h.oldestId, h.matches]),
+    [[t.id, firstHit, 2]],
+  );
   const back = await get(`/api/tickets/${t.id}/events?before=${page.events[0].id}&from=${firstHit}`);
   assert.equal(back.events[0].id, firstHit);
   assert.equal(back.more, false);
@@ -293,7 +349,10 @@ test('a newer page carries on from the last replay, with the task list a full re
   turn(store, t.id, 3, [plan('c1', 'One'), made('c1', 1)]);
   turn(store, t.id, 3);
   const first = historyPage(store, t.id, { limit: 12 });
-  assert.deepEqual(first.tasks.map((x: any) => x.subject), ['One']);
+  assert.deepEqual(
+    first.tasks.map((x: any) => x.subject),
+    ['One'],
+  );
   turn(store, t.id, 3, [plan('c2', 'Two'), made('c2', 2)]);
   turn(store, t.id, 3);
   const reads: number[] = [];
@@ -308,7 +367,10 @@ test('a newer page carries on from the last replay, with the task list a full re
   const full = createProgress();
   for (const row of planEvents(t.id, later.events[0].id)) applyEvent(full, row.kind, JSON.parse(row.data), row.created_at);
   assert.deepEqual(later.tasks, full.tasks);
-  assert.deepEqual(later.tasks.map((x: any) => x.subject), ['One', 'Two']);
+  assert.deepEqual(
+    later.tasks.map((x: any) => x.subject),
+    ['One', 'Two'],
+  );
   // Paging back to before the last replay replays from the start, and leaves the furthest one in place.
   reads.length = 0;
   const back = historyPage(store, t.id, { before: first.events[0].id, limit: 12 });
@@ -324,7 +386,10 @@ test("after a restart, a chat's first open carries on from the saved replay, not
   turn(store, t.id, 3);
   turn(store, t.id, 3);
   const first = historyPage(store, t.id, { limit: 12 });
-  assert.deepEqual(first.tasks.map((x: any) => x.subject), ['One']);
+  assert.deepEqual(
+    first.tasks.map((x: any) => x.subject),
+    ['One'],
+  );
   turn(store, t.id, 3, [plan('r2', 'Two'), made('r2', 2)]);
   turn(store, t.id, 3);
   // A new Store on the same file is a restart: nothing kept in memory.
@@ -341,7 +406,10 @@ test("after a restart, a chat's first open carries on from the saved replay, not
   for (const row of planEvents(t.id, later.events[0].id)) applyEvent(full, row.kind, JSON.parse(row.data), row.created_at);
   // As the client gets them: the saved state is JSON, which drops keys left undefined.
   assert.deepEqual(JSON.parse(JSON.stringify(later.tasks)), JSON.parse(JSON.stringify(full.tasks)));
-  assert.deepEqual(later.tasks.map((x: any) => x.subject), ['One', 'Two']);
+  assert.deepEqual(
+    later.tasks.map((x: any) => x.subject),
+    ['One', 'Two'],
+  );
   // Deleting the minion deletes its saved replay too.
   again.deleteTicket(t.id);
   assert.equal(again.getSetting(`plan:${t.id}:page`), null);

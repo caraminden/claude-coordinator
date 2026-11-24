@@ -37,7 +37,8 @@ const store = new Store(join(data, 'coordinator.db'));
 store.createProject('Delve', null);
 store.createProject('Citadel', null);
 let n = 0;
-const app = (name: string, home: number, icon: string | null) => store.createContraption({ name, title: name, icon, port, home_scheme: home, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: `h${n++}`, keys_at: 0 });
+const app = (name: string, home: number, icon: string | null) =>
+  store.createContraption({ name, title: name, icon, port, home_scheme: home, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: `h${n++}`, keys_at: 0 });
 const deploy = (name: string, sha: string) => store.addContraptionDeploy({ name, from_sha: null, to_sha: sha, by: 'Cara', started_at: 1, finished_at: 2, outcome: 'deployed', stages: '{}', changes: '[]' });
 function scheme(name: string, repoIcon?: string) {
   const p = store.createProject(name, null);
@@ -66,7 +67,7 @@ for (const name of ['bad', 'big']) store.updateContraption(name, { name: `x-${na
 store.updateContraption('x-bad', { icon: '/apps/twi/page.svg' });
 store.updateContraption('x-big', { icon: '/apps/twi/big.svg' });
 
-test('a scheme with no repo icon shows its home app\'s icon, inert, capped, versioned by deploy', { timeout: 60_000 }, async () => {
+test("a scheme with no repo icon shows its home app's icon, inert, capped, versioned by deploy", { timeout: 60_000 }, async () => {
   const srv = await bootServer({ root });
   after(() => srv.stop());
   const get = (id: number) => fetch(`${srv.base}/api/projects/${id}/icon`, { headers: { Cookie: srv.cookie } });

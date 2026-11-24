@@ -38,7 +38,11 @@ export async function findBuildOutput(worktree: string): Promise<string[]> {
   const { stdout } = await low(['git', '-C', real, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory']);
   const found: string[] = [];
   // A trailing slash means git found the whole folder ignored; a name without one is a file or a symlink.
-  for (const rel of stdout.split('\0').filter((p) => p.endsWith('/')).map((p) => p.slice(0, -1)).sort()) {
+  for (const rel of stdout
+    .split('\0')
+    .filter((p) => p.endsWith('/'))
+    .map((p) => p.slice(0, -1))
+    .sort()) {
     if (found.some((f) => rel.startsWith(f + '/'))) continue;
     const dir = join(real, rel);
     if (!NAMES.has(basename(rel)) && !(GRADLE_NAMES.has(basename(rel)) && GRADLE_FILES.some((f) => existsSync(join(dirname(dir), f))))) continue;
@@ -76,4 +80,4 @@ export async function low(cmd: string[], extra: { cwd?: string; env?: NodeJS.Pro
 }
 
 /** "12.3 GiB", or MiB under one GiB. */
-export const size = (bytes: number) => bytes >= 2 ** 30 ? `${(bytes / 2 ** 30).toFixed(1)} GiB` : `${Math.round(bytes / 2 ** 20)} MiB`;
+export const size = (bytes: number) => (bytes >= 2 ** 30 ? `${(bytes / 2 ** 30).toFixed(1)} GiB` : `${Math.round(bytes / 2 ** 20)} MiB`);

@@ -23,9 +23,21 @@ import { MAX_LABEL, MAX_MARKS, marksTitle, parseMarks, type Mark } from '../../p
 /** A ticket as the files helpers need it: the row, or the API's view of it (whose replies are a list). */
 type TicketLike = Omit<Ticket, 'replies'>;
 /** The page a viewer asks to open (body.open): what the checks below look for. */
-interface OpenRef { artifact: number; ticket: number; project: number; path: string }
+interface OpenRef {
+  artifact: number;
+  ticket: number;
+  project: number;
+  path: string;
+}
 /** One mark as a minion writes it, before the checks. */
-interface MarkIn { kind: string; colour?: string; at?: unknown; to?: unknown; n?: number; text?: unknown }
+interface MarkIn {
+  kind: string;
+  colour?: string;
+  at?: unknown;
+  to?: unknown;
+  n?: number;
+  text?: unknown;
+}
 
 export function artifactView(app: App, a: Artifact & { ticket_title?: string; ticket_kind?: string; ticket_number?: number | null }) {
   const ticket = a.ticket_title === undefined ? app.store.getTicket(a.ticket_id) : null;
@@ -104,7 +116,10 @@ function findPinTarget(app: App, projectId: number, caller: Ticket, id: unknown,
 async function sharedPinPath(app: App, projectId: number, abs: string, pinning: boolean): Promise<string | null> {
   const dir = projectSharedDir(app.dataDir, projectId);
   if (!abs.startsWith(dir + sep)) return null;
-  const rel = abs.slice(dir.length + 1).split(sep).join('/');
+  const rel = abs
+    .slice(dir.length + 1)
+    .split(sep)
+    .join('/');
   if (!pinning && app.store.sharedPins(projectId).some((p) => p.path === rel)) return rel;
   const found = sharedListable(rel) ? await resolveFile(rel, dir, [dir]) : null;
   // The scan skips symlinks, so the path must be the file itself.
@@ -207,7 +222,6 @@ function scopeRoot(app: App, scope: string): string | null {
   return p && app.store.getProject(Number(p[1])) ? projectSharedDir(app.dataDir, Number(p[1])) : null;
 }
 
-
 /**
  * Serve a file found under `roots` ([scope, folder] pairs). An HTML page a person opens goes to its
  * path under a file token instead: its sandboxed frame sends no cookies, so the token is how the
@@ -227,7 +241,11 @@ async function tokenedPath(app: App, file: string, roots: [string, string][]): P
   for (const [scope, root] of roots) {
     const real = await realpath(root).catch(() => null);
     if (!real || !file.startsWith(real + sep)) continue;
-    const rel = file.slice(real.length + 1).split(sep).map(encodeURIComponent).join('/');
+    const rel = file
+      .slice(real.length + 1)
+      .split(sep)
+      .map(encodeURIComponent)
+      .join('/');
     return tokenPath(rel) === null ? null : `${app.auth.fileToken(scope)}/${rel}`;
   }
   return null;
@@ -263,7 +281,10 @@ function pageItems(raw: unknown): PageItem[] {
   if (!Array.isArray(raw)) return [];
   const s = (v: unknown, max: number) => (typeof v === 'string' && v.length <= max ? v : null);
   return raw.slice(0, 500).flatMap((i) => {
-    const collection = s(i?.collection, 100), id = s(i?.id, 200), title = s(i?.title, 500), label = s(i?.label, 200);
+    const collection = s(i?.collection, 100),
+      id = s(i?.id, 200),
+      title = s(i?.title, 500),
+      label = s(i?.label, 200);
     return collection && id && title !== null ? [{ collection, id, title, ...(label ? { label } : {}) }] : [];
   });
 }
@@ -300,7 +321,7 @@ async function agentPage(app: App, project: Project, caller: Ticket, body: { art
     const a = findPinTarget(app, project.id, caller, body.artifact, null);
     found = await resolveTicketFile(app, app.store.getTicket(a.ticket_id)!, a.path);
   } else {
-    if (typeof body.path !== 'string' || !body.path.trim() || body.path.includes('\0')) throw new HttpError(400, 'Give the artifact (its id) or the page\'s path');
+    if (typeof body.path !== 'string' || !body.path.trim() || body.path.includes('\0')) throw new HttpError(400, "Give the artifact (its id) or the page's path");
     const p = body.path.trim();
     const abs = p.startsWith('scheme shared/') ? join(shared, p.slice('scheme shared/'.length)) : isAbsolute(p) ? normalize(p) : caller.cwd ? join(caller.cwd, p) : '';
     const roots = [shared, ...app.store.listTickets(project.id).flatMap((t) => (t.cwd ? ticketRoots(app, t) : []))];
@@ -359,12 +380,14 @@ export async function saveImages(app: App, ticket: TicketLike, raw: unknown): Pr
   });
   const dir = uploadsDir(app, ticket);
   await mkdir(dir, { recursive: true });
-  return Promise.all(decoded.map(async ({ buf, kind }) => {
-    const name = randomBytes(12).toString('hex') + kind.ext;
-    const path = join(dir, name);
-    await writeFile(path, buf);
-    return { name, path, mediaType: kind.type };
-  }));
+  return Promise.all(
+    decoded.map(async ({ buf, kind }) => {
+      const name = randomBytes(12).toString('hex') + kind.ext;
+      const path = join(dir, name);
+      await writeFile(path, buf);
+      return { name, path, mediaType: kind.type };
+    }),
+  );
 }
 
 /** A thread's attached files: its files folder (COORDINATOR_FILES_DIR), so Claude can read them. */
@@ -376,7 +399,7 @@ async function findUpload(app: App, ticket: TicketLike, name: unknown) {
   const dir = fileUploadsDir(app, ticket);
   try {
     const path = await realpath(join(dir, name));
-    if (!path.startsWith(await realpath(dir) + sep)) return null;
+    if (!path.startsWith((await realpath(dir)) + sep)) return null;
     const st = await stat(path);
     return st.isFile() ? { name, path, size: st.size } : null;
   } catch {
@@ -389,13 +412,15 @@ export async function messageFiles(app: App, ticket: TicketLike, raw: unknown): 
   if (raw == null) return [];
   if (!Array.isArray(raw)) throw new HttpError(400, 'files must be a list');
   if (raw.length > MAX_UPLOADS) throw new HttpError(400, `At most ${MAX_UPLOADS} files per message`);
-  return Promise.all(raw.map(async (f) => {
-    const found = await findUpload(app, ticket, f?.name);
-    if (!found) throw new HttpError(400, 'An attached file is no longer there; attach it again');
-    // The browser's word for the type, only as a hint to Claude.
-    const type = typeof f.type === 'string' && /^[\w.+-]{1,60}\/[\w.+-]{1,100}$/.test(f.type) ? f.type : 'application/octet-stream';
-    return { ...found, type };
-  }));
+  return Promise.all(
+    raw.map(async (f) => {
+      const found = await findUpload(app, ticket, f?.name);
+      if (!found) throw new HttpError(400, 'An attached file is no longer there; attach it again');
+      // The browser's word for the type, only as a hint to Claude.
+      const type = typeof f.type === 'string' && /^[\w.+-]{1,60}\/[\w.+-]{1,100}$/.test(f.type) ? f.type : 'application/octet-stream';
+      return { ...found, type };
+    }),
+  );
 }
 
 /**
@@ -414,7 +439,9 @@ export async function markImage(app: App, ticket: TicketLike, body: { image?: un
     const dir = app.sharedDir(ticket as Ticket);
     path = join(dir, basename(image));
     await mkdir(dir, { recursive: true });
-    await copyFile(src, path).catch((e) => { throw e?.code === 'ENOENT' ? new HttpError(404, `No pasted picture ${basename(image)} in this chat`) : e; });
+    await copyFile(src, path).catch((e) => {
+      throw e?.code === 'ENOENT' ? new HttpError(404, `No pasted picture ${basename(image)} in this chat`) : e;
+    });
   } else {
     const found = await resolveTicketFile(app, ticket, image);
     if (!found || found.type.kind !== 'image') throw new HttpError(400, 'image must be a picture pasted in this chat (its path from the turn) or a PNG, JPEG, GIF or WebP file in your working directory, files folder or shared folder');
@@ -460,13 +487,17 @@ export async function markImage(app: App, ticket: TicketLike, body: { image?: un
 
 export const fileRoutes: Route[] = [
   {
-    method: 'POST', path: '/api/tickets/:ticket/mark-image', who: ['minion'],
+    method: 'POST',
+    path: '/api/tickets/:ticket/mark-image',
+    who: ['minion'],
     async handler({ req, res, app, ticket }) {
       return json(res, 200, await markImage(app, ticket, await readJson(req)));
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project/artifacts', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/projects/:project/artifacts',
+    who: ['person', 'taskmaster', 'minion'],
     async handler({ res, url, app, project }) {
       const views = app.store.listArtifacts(project.id).map((a) => artifactView(app, a));
       // ?titles reads each document's own title, so an agent can find one by the name people use.
@@ -475,22 +506,35 @@ export const fileRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project/shared', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/projects/:project/shared',
+    who: ['person', 'taskmaster', 'minion'],
     async handler({ res, url, app, project }) {
       const files = await app.sharedFiles(project.id);
       // ?titles, for agents: each document's own title, and its absolute path. Only documents and pages, as
       // before #676: a folder of game snaps would bury list_artifacts.
       if (!url.searchParams.has('titles')) return json(res, 200, files);
-      return json(res, 200, await Promise.all(files.filter((f) => isArtifact(f.path)).map(async (f) => {
-        const v = sharedView(app, project.id, f);
-        return { ...v, title: f.missing ? null : await fileTitle(v.abs) };
-      })));
+      return json(
+        res,
+        200,
+        await Promise.all(
+          files
+            .filter((f) => isArtifact(f.path))
+            .map(async (f) => {
+              const v = sharedView(app, project.id, f);
+              return { ...v, title: f.missing ? null : await fileTitle(v.abs) };
+            }),
+        ),
+      );
     },
   },
   {
     // A person drops files into the shared folder (#676), one request a file, the bytes kept as sent. `folder` is
     // relative to the shared folder (default inbox), made if missing; a name already there gets " (2)".
-    method: 'PUT', path: '/api/projects/:project/shared/upload', who: ['person'], refuse: 'Only people upload to the shared folder',
+    method: 'PUT',
+    path: '/api/projects/:project/shared/upload',
+    who: ['person'],
+    refuse: 'Only people upload to the shared folder',
     async handler({ req, res, url, app, project }) {
       if (Number(req.headers['content-length'] ?? 0) > MAX_UPLOAD_BYTES) throw new HttpError(413, 'Files must be under 200 MB');
       const root = projectSharedDir(app.dataDir, project.id);
@@ -505,7 +549,10 @@ export const fileRoutes: Route[] = [
   {
     // A big file into the shared folder in chunks, resumable (#832, src/chunked-uploads.ts): { name, size, folder }
     // starts one, folder as the PUT above (default inbox). public/ui/upload.js is the client.
-    method: 'POST', path: '/api/projects/:project/shared/uploads', who: ['person'], refuse: 'Only people upload to the shared folder',
+    method: 'POST',
+    path: '/api/projects/:project/shared/uploads',
+    who: ['person'],
+    refuse: 'Only people upload to the shared folder',
     async handler({ req, res, app, project, session }) {
       const body = (await readJson(req, 16 * 1024)) ?? {};
       const folder = typeof body.folder === 'string' ? body.folder : 'inbox';
@@ -516,7 +563,10 @@ export const fileRoutes: Route[] = [
   {
     // Where an upload got to (GET), its next chunk at ?offset= (PUT; the last one answers with the file, as the PUT
     // above does), or give it up (DELETE).
-    method: ['GET', 'PUT', 'DELETE'], path: '/api/projects/:project/shared/uploads/:upload', who: ['person'], refuse: 'Only people upload to the shared folder',
+    method: ['GET', 'PUT', 'DELETE'],
+    path: '/api/projects/:project/shared/uploads/:upload',
+    who: ['person'],
+    refuse: 'Only people upload to the shared folder',
     async handler({ req, res, url, app, project, session, params }) {
       const who = uploader(session);
       const target = { kind: 'shared', project: project.id } as const;
@@ -528,16 +578,22 @@ export const fileRoutes: Route[] = [
       const offset = Number(url.searchParams.get('offset') ?? NaN);
       if (!Number.isSafeInteger(offset) || offset < 0) throw new HttpError(400, 'offset must be the byte the chunk starts at');
       const root = projectSharedDir(app.dataDir, project.id);
-      return json(res, 200, await app.chunked.put(who, target, params.upload, offset, req, async (meta, part) => {
-        await realFolders(root, meta.folder);
-        const saved = await place(part, join(root, ...meta.folder), meta.name);
-        app.broadcast({ type: 'artifacts', projectId: project.id });
-        return { path: [...meta.folder, basename(saved)].join('/'), name: basename(saved), size: meta.size, mtime: Math.round((await stat(saved)).mtimeMs) };
-      }));
+      return json(
+        res,
+        200,
+        await app.chunked.put(who, target, params.upload, offset, req, async (meta, part) => {
+          await realFolders(root, meta.folder);
+          const saved = await place(part, join(root, ...meta.folder), meta.name);
+          app.broadcast({ type: 'artifacts', projectId: project.id });
+          return { path: [...meta.folder, basename(saved)].join('/'), name: basename(saved), size: meta.size, mtime: Math.round((await stat(saved)).mtimeMs) };
+        }),
+      );
     },
   },
   {
-    method: 'POST', path: '/api/projects/:project/shared/pin', who: ['person'],
+    method: 'POST',
+    path: '/api/projects/:project/shared/pin',
+    who: ['person'],
     async handler({ req, res, app, project, session }) {
       const body = await readJson(req);
       const path = str(body.path, 'path', 1000);
@@ -550,7 +606,9 @@ export const fileRoutes: Route[] = [
     },
   },
   {
-    method: ['GET', 'HEAD'], path: '/api/projects/:project/shared/file', who: ['person'],
+    method: ['GET', 'HEAD'],
+    path: '/api/projects/:project/shared/file',
+    who: ['person'],
     async handler(ctx) {
       const { res, url, app, project } = ctx;
       // One file of the folder, by path relative to it (or ?info for its details).
@@ -560,18 +618,27 @@ export const fileRoutes: Route[] = [
       if (!found) throw new HttpError(404, 'That file is no longer there, or is not one that can be shown');
       if (!url.searchParams.has('info')) return serveFound(ctx, found, path, [[`p${project.id}`, dir]]);
       return json(res, 200, {
-        path, name: basename(found.abs), display_path: `scheme shared/${path}`, abs: found.abs,
-        kind: found.type.kind, size: found.size, mtime: found.mtime,
+        path,
+        name: basename(found.abs),
+        display_path: `scheme shared/${path}`,
+        abs: found.abs,
+        kind: found.type.kind,
+        size: found.size,
+        mtime: found.mtime,
       });
     },
   },
 
   {
-    method: 'GET', path: '/api/artifacts/:artifact', who: ['person'],
+    method: 'GET',
+    path: '/api/artifacts/:artifact',
+    who: ['person'],
     handler: ({ res, app, artifact }) => json(res, 200, { artifact: artifactView(app, artifact), project: app.store.getProject(artifact.project_id) }),
   },
   {
-    method: ['GET', 'HEAD'], path: '/api/artifacts/:artifact/raw', who: ['person'],
+    method: ['GET', 'HEAD'],
+    path: '/api/artifacts/:artifact/raw',
+    who: ['person'],
     async handler(ctx) {
       const { app, artifact: a } = ctx;
       const ticket = app.store.getTicket(a.ticket_id)!;
@@ -581,7 +648,9 @@ export const fileRoutes: Route[] = [
   {
     // An HTML page's file and the files beside it, for its sandboxed frame, which sends no cookies:
     // the token (see serveFound) is the login, and the path can't leave the token's one folder.
-    method: ['GET', 'HEAD'], path: '/api/files/:token/*path', who: 'anyone',
+    method: ['GET', 'HEAD'],
+    path: '/api/files/:token/*path',
+    who: 'anyone',
     async handler({ req, res, url, app, params }) {
       // The frame's origin is opaque, so fetch() and module scripts need CORS (errors included); no cookies are involved.
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -606,12 +675,14 @@ export const fileRoutes: Route[] = [
     // The artifact bridge (#168): a person's viewer, for the page in its frame, lists or writes the page's
     // store. `open` is what the viewer opened and `page` the token path the page in the frame was served
     // under; both must be the same file, so a frame that has moved on to another page can't write here.
-    method: 'POST', path: '/api/artifact-data', who: ['person'],
+    method: 'POST',
+    path: '/api/artifact-data',
+    who: ['person'],
     async handler({ req, res, app, session }) {
       const body = await readJson(req, 4 * 1024 * 1024);
       const { project, file } = await openedPage(app, body.open);
       if (!app.store.canSee(session, project.id)) throw new HttpError(404, 'That page is no longer there');
-      if (await bridgedPage(app, body.page) !== file) throw new HttpError(409, 'The frame shows a different page from the one this viewer opened; reopen it');
+      if ((await bridgedPage(app, body.page)) !== file) throw new HttpError(409, 'The frame shows a different page from the one this viewer opened; reopen it');
       if (body.op === 'write') {
         writeStore(app.store, project.id, file, cleanEntries(body.entries), session.name);
         await ownWrites(); // the reply re-reads the entries (#1244)
@@ -624,13 +695,15 @@ export const fileRoutes: Route[] = [
     // A page's Send (#417): the person's viewer posts the page's answer as them, straight into the chat of
     // the minion that showed the page, which wakes it. For a shared-folder page that's the minion that last
     // linked it, else the Taskmaster.
-    method: 'POST', path: '/api/artifact-send', who: ['person'],
+    method: 'POST',
+    path: '/api/artifact-send',
+    who: ['person'],
     async handler({ req, res, app, session }) {
       // Up to 6 marked pictures in base64 (#946), as the chat's message route allows.
       const body = await readJson(req, 45_000_000);
       const { project, file, abs, ticket } = await openedPage(app, body.open);
       if (!app.store.canSee(session, project.id)) throw new HttpError(404, 'That page is no longer there');
-      if (await bridgedPage(app, body.page) !== file) throw new HttpError(409, 'The frame shows a different page from the one this viewer opened; reopen it');
+      if ((await bridgedPage(app, body.page)) !== file) throw new HttpError(409, 'The frame shows a different page from the one this viewer opened; reopen it');
       const linker = ticket ? null : app.store.latestArtifact(project.id, [abs, file]);
       const to = ticket ?? (linker && app.store.getTicket(linker.ticket_id)) ?? app.store.coordinatorFor(project.id, session.uid ?? null);
       if (!to) throw new HttpError(404, 'No minion or Taskmaster to send this to');
@@ -652,15 +725,22 @@ export const fileRoutes: Route[] = [
       try {
         app.store.ideas.readPage(project.id, file, to.kind === 'ticket' ? to.number : null, pageItems(body.items), String(body.text ?? ''));
         app.store.ideas.restatus(project.id);
-      } catch (e) { console.error(`ideas: ${file}: ${(e as Error).message}`); }
+      } catch (e) {
+        console.error(`ideas: ${file}: ${(e as Error).message}`);
+      }
       // As in the chat: writing to the Taskmaster continues the loop guard for every minion of the scheme.
-      app.runner.continueLoops((to.kind === 'coordinator' ? app.store.listTickets(project.id) : [to]).map((t) => t.id), session.name);
+      app.runner.continueLoops(
+        (to.kind === 'coordinator' ? app.store.listTickets(project.id) : [to]).map((t) => t.id),
+        session.name,
+      );
       return json(res, 202, { to: { id: to.id, kind: to.kind, number: to.number, label: to.kind === 'coordinator' ? 'the Taskmaster' : `#${to.number ?? to.id}` } });
     },
   },
   {
     // artifact_data: an agent reads, or sets and deletes keys of, what an HTML page of its scheme saved.
-    method: 'POST', path: '/api/projects/:project/artifact-data', who: ['taskmaster', 'minion'],
+    method: 'POST',
+    path: '/api/projects/:project/artifact-data',
+    who: ['taskmaster', 'minion'],
     async handler({ req, res, app, project, caller }) {
       const body = await readJson(req, 4 * 1024 * 1024);
       const file = await agentPage(app, project, caller!, body);
@@ -673,7 +753,9 @@ export const fileRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/artifacts/:artifact/pin', who: ['person'],
+    method: 'POST',
+    path: '/api/artifacts/:artifact/pin',
+    who: ['person'],
     async handler({ req, res, app, session, artifact: a }) {
       const body = await readJson(req);
       app.store.setArtifactPinned(a.id, body.pinned ? session.name : null);
@@ -685,7 +767,9 @@ export const fileRoutes: Route[] = [
   },
 
   {
-    method: 'GET', path: '/api/tickets/:ticket/doc-preview', who: ['person'],
+    method: 'GET',
+    path: '/api/tickets/:ticket/doc-preview',
+    who: ['person'],
     async handler(ctx) {
       // A choices card's picture of its page's top (#821, src/doc-preview.ts); 404 when there is none,
       // and the card shows just its Open button.
@@ -707,7 +791,9 @@ export const fileRoutes: Route[] = [
     },
   },
   {
-    method: ['GET', 'HEAD'], path: '/api/tickets/:ticket/file', who: ['person', 'taskmaster'],
+    method: ['GET', 'HEAD'],
+    path: '/api/tickets/:ticket/file',
+    who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { res, url, app, ticket } = ctx;
       // A file the ticket linked in its reply: ?path= as written there; ?info for its details. With &fix,
@@ -719,14 +805,22 @@ export const fileRoutes: Route[] = [
       const relPath = found.abs.startsWith(ticket.cwd + sep) ? found.abs.slice(ticket.cwd.length + 1) : found.abs;
       const artifact = app.store.findArtifact(ticket.id, [relPath, found.abs]);
       return json(res, 200, {
-        path, name: basename(found.abs), display_path: displayPath(app, ticket, found.abs), abs: found.abs,
-        kind: found.type.kind, size: found.size, mtime: found.mtime, fixed: 'fixed' in found,
+        path,
+        name: basename(found.abs),
+        display_path: displayPath(app, ticket, found.abs),
+        abs: found.abs,
+        kind: found.type.kind,
+        size: found.size,
+        mtime: found.mtime,
+        fixed: 'fixed' in found,
         artifact: artifact ? artifactView(app, artifact) : null,
       });
     },
   },
   {
-    method: 'GET', path: '/api/tickets/:ticket/images/:name', who: ['person'],
+    method: 'GET',
+    path: '/api/tickets/:ticket/images/:name',
+    who: ['person'],
     async handler({ res, app, ticket, params: { name } }) {
       if (!IMAGE_NAME.test(name)) throw new HttpError(404, 'Not found');
       let body: Buffer;
@@ -742,7 +836,9 @@ export const fileRoutes: Route[] = [
     },
   },
   {
-    method: ['GET', 'HEAD'], path: '/api/tickets/:ticket/uploads/:name', who: ['person'],
+    method: ['GET', 'HEAD'],
+    path: '/api/tickets/:ticket/uploads/:name',
+    who: ['person'],
     async handler({ req, res, app, ticket, params }) {
       let name = '';
       try {

@@ -29,7 +29,11 @@ export const STOP = {
 };
 const SCOPE = /^citadel-turn-.*\.scope$/;
 
-export interface ScopeReading { unit: string; current: number; high: number | null }
+export interface ScopeReading {
+  unit: string;
+  current: number;
+  high: number | null;
+}
 
 /** The minion a turn scope belongs to: citadel-turn-<hash>-<ticket id>-<started>.scope. */
 export function scopeTicket(unit: string): number | null {
@@ -46,7 +50,9 @@ export async function readTurnScopes(turnsDir: string): Promise<ScopeReading[]> 
       const current = Number((await hostText(join(turnsDir, unit, 'memory.current'))).trim());
       const h = (await hostText(join(turnsDir, unit, 'memory.high'))).trim();
       if (Number.isFinite(current)) out.push({ unit, current, high: h === 'max' ? null : Number(h) });
-    } catch { /* the turn ended between the listing and the read */ }
+    } catch {
+      /* the turn ended between the listing and the read */
+    }
   }
   return out;
 }
@@ -81,12 +87,20 @@ export class GrowthStop {
     this.dir = d.turnsDir;
   }
 
-  private now() { return this.d.now?.() ?? Date.now(); }
-  private log(line: string) { (this.d.log ?? ((l: string) => console.log(`[growth-stop] ${l}`)))(line); }
-  private set(unit: string, bytes: number | null) { return (this.d.set ?? setMemoryHigh)(unit, bytes); }
+  private now() {
+    return this.d.now?.() ?? Date.now();
+  }
+  private log(line: string) {
+    (this.d.log ?? ((l: string) => console.log(`[growth-stop] ${l}`)))(line);
+  }
+  private set(unit: string, bytes: number | null) {
+    return (this.d.set ?? setMemoryHigh)(unit, bytes);
+  }
 
   /** The turns held now. */
-  slowed(): Slowed[] { return [...this.held.values()]; }
+  slowed(): Slowed[] {
+    return [...this.held.values()];
+  }
 
   /** One reading at this level. Never throws. */
   async tick(level: EaseLevel): Promise<void> {

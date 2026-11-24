@@ -23,9 +23,14 @@ const DAY = 86_400_000;
 const data = join(root, 'data');
 mkdirSync(data);
 const store = new Store(join(data, 'test.db'));
-const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  '/bin/false',
+);
 
-test('the edit of the day\'s cleanup note carries everyone: true, as the note did', async () => {
+test("the edit of the day's cleanup note carries everyone: true, as the note did", async () => {
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   const p = store.createProject('Daily', null, cara.id);

@@ -21,7 +21,9 @@ mkdirSync(shots, { recursive: true });
 // The app: the newest build keys.mjs fetched (or build 9), with this checkout's desktop/ files, the ones build.sh ships.
 const root = path.join(process.env.TEMP, 'citadel-keys');
 mkdirSync(root, { recursive: true });
-const have = readdirSync(root).filter((d) => /^build-\d+$/.test(d)).sort((a, b) => Number(b.slice(6)) - Number(a.slice(6)));
+const have = readdirSync(root)
+  .filter((d) => /^build-\d+$/.test(d))
+  .sort((a, b) => Number(b.slice(6)) - Number(a.slice(6)));
 let base = have[0] && path.join(root, have[0]);
 if (!base) {
   const zip = path.join(root, 'citadel-9.zip');
@@ -36,37 +38,66 @@ cpSync(base, dir, { recursive: true });
 rmSync(path.join(dir, 'resources', 'app'), { recursive: true, force: true });
 mkdirSync(path.join(dir, 'resources', 'app'));
 const from = path.join(repo, 'desktop');
-for (const f of readFileSync(path.join(from, 'build.sh'), 'utf8').match(/cp "\$here"\/\{([^}]+)\} "\$work\/Citadel\/resources\/app\/"/)[1].split(',')) {
+for (const f of readFileSync(path.join(from, 'build.sh'), 'utf8')
+  .match(/cp "\$here"\/\{([^}]+)\} "\$work\/Citadel\/resources\/app\/"/)[1]
+  .split(',')) {
   cpSync(path.join(from, f), path.join(dir, 'resources', 'app', f));
 }
 
 const [uh, up] = cfg.upstream.split(':');
-const fwd = net.createServer((c) => { const u = net.connect(Number(up), uh); c.pipe(u).pipe(c); c.on('error', () => u.destroy()); u.on('error', () => c.destroy()); });
+const fwd = net.createServer((c) => {
+  const u = net.connect(Number(up), uh);
+  c.pipe(u).pipe(c);
+  c.on('error', () => u.destroy());
+  u.on('error', () => c.destroy());
+});
 const port = await new Promise((res) => fwd.listen(0, '127.0.0.1', () => res(fwd.address().port)));
 const origin = `http://localhost:${port}`;
 const profile = mkdtempSync(path.join(os.tmpdir(), 'citadel-saved-login-'));
 const dbg = 20000 + Math.floor(Math.random() * 9000);
 let app;
-const launch = () => { app = spawn(path.join(dir, 'Citadel.exe'), [`--remote-debugging-port=${dbg}`, `--user-data-dir=${profile}`], { env: { ...process.env, CITADEL_URL: `${origin}/c/` }, stdio: 'ignore' }); };
-
+const launch = () => {
+  app = spawn(path.join(dir, 'Citadel.exe'), [`--remote-debugging-port=${dbg}`, `--user-data-dir=${profile}`], { env: { ...process.env, CITADEL_URL: `${origin}/c/` }, stdio: 'ignore' });
+};
 
 /** A DevTools connection to the app's page: ev(expr), until(what, expr), shot(name), close(). */
 async function connect() {
   let browserWs;
   for (let i = 0; i < 60 && !browserWs; i++) {
-    try { browserWs = (await (await fetch(`http://127.0.0.1:${dbg}/json/version`)).json()).webSocketDebuggerUrl; } catch { await sleep(500); }
+    try {
+      browserWs = (await (await fetch(`http://127.0.0.1:${dbg}/json/version`)).json()).webSocketDebuggerUrl;
+    } catch {
+      await sleep(500);
+    }
   }
   const ws = new WebSocket(browserWs);
-  await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-  let id = 0; const waits = new Map();
+  await new Promise((r, j) => {
+    ws.onopen = r;
+    ws.onerror = j;
+  });
+  let id = 0;
+  const waits = new Map();
   ws.onmessage = (m) => {
     const d = JSON.parse(m.data);
     if (d.method === 'Runtime.exceptionThrown') console.log('page error:', d.params.exceptionDetails.exception?.description ?? d.params.exceptionDetails.text);
     if (d.method === 'Runtime.consoleAPICalled' && ['error', 'warning'].includes(d.params.type)) console.log(`page ${d.params.type}:`, d.params.args.map((a) => a.value ?? a.description).join(' '));
-    const w = waits.get(d.id); if (w) { waits.delete(d.id); d.error ? w.j(new Error(d.error.message)) : w.r(d.result); } };
-  const send = (method, params = {}, sessionId) => new Promise((r, j) => { const n = ++id; waits.set(n, { r, j }); ws.send(JSON.stringify({ id: n, method, params, sessionId })); });
+    const w = waits.get(d.id);
+    if (w) {
+      waits.delete(d.id);
+      d.error ? w.j(new Error(d.error.message)) : w.r(d.result);
+    }
+  };
+  const send = (method, params = {}, sessionId) =>
+    new Promise((r, j) => {
+      const n = ++id;
+      waits.set(n, { r, j });
+      ws.send(JSON.stringify({ id: n, method, params, sessionId }));
+    });
   let page;
-  for (let i = 0; i < 60 && !page; i++) { page = (await send('Target.getTargets')).targetInfos.find((t) => t.type === 'page'); if (!page) await sleep(500); }
+  for (let i = 0; i < 60 && !page; i++) {
+    page = (await send('Target.getTargets')).targetInfos.find((t) => t.type === 'page');
+    if (!page) await sleep(500);
+  }
   const s = (await send('Target.attachToTarget', { targetId: page.targetId, flatten: true })).sessionId;
   await send('Runtime.enable', {}, s);
   const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, s)).result.value;
@@ -78,13 +109,19 @@ async function connect() {
       throw new Error(`timed out waiting for ${what}`);
     },
     // After the reload splash (index.html #splash) has gone, so the shot shows the page.
-    shot: async (name) => { for (let i = 0; i < 40 && (await ev("!!document.getElementById('splash')")); i++) await sleep(250); writeFileSync(path.join(shots, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' }, s)).data, 'base64')); },
+    shot: async (name) => {
+      for (let i = 0; i < 40 && (await ev("!!document.getElementById('splash')")); i++) await sleep(250);
+      writeFileSync(path.join(shots, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' }, s)).data, 'base64'));
+    },
     close: () => ws.close(),
   };
 }
 
 let failed = 0;
-const check = (ok, what) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${what}`); if (!ok) failed++; };
+const check = (ok, what) => {
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${what}`);
+  if (!ok) failed++;
+};
 const form = `document.getElementById('login-form')`;
 // The password itself never goes in the log: its length, and whether it is the dev copy's.
 const STATE = `(() => { const f = ${form}; const r = f?.querySelector('.login-remember'); const e = document.getElementById('login-error');
@@ -92,7 +129,10 @@ const STATE = `(() => { const f = ${form}; const r = f?.querySelector('.login-re
   forget: !!r && !r.querySelector('button').hidden, error: e.hidden ? '' : e.textContent }; })()`;
 const SIGN_OUT = `[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Sign out').click()`;
 const file = path.join(profile, 'saved-login.bin');
-const waitFile = async (there) => { for (let i = 0; i < 40 && existsSync(file) !== there; i++) await sleep(250); return existsSync(file) === there; };
+const waitFile = async (there) => {
+  for (let i = 0; i < 40 && existsSync(file) !== there; i++) await sleep(250);
+  return existsSync(file) === there;
+};
 
 let c;
 try {
@@ -181,9 +221,11 @@ try {
   console.log(`FAIL ${e.message}`);
   failed++;
   // What the page and the bridge held when it stopped (the password itself left out).
-  const seen = await c?.ev(`(async () => { const f = ${form}; const r = await window.citadelDesktop?.savedLogin?.().catch((x) => String(x));
+  const seen = await c
+    ?.ev(`(async () => { const f = ${form}; const r = await window.citadelDesktop?.savedLogin?.().catch((x) => String(x));
     return { url: location.href, form: !!f, login: f?.login.value, password: f ? f.password.value.length : null, file: null,
-      bridge: r && (typeof r === 'string' ? r : { canSave: r.canSave, login: r.login?.login, password: r.login ? r.login.password.length : null }) }; })()`).catch((x) => String(x));
+      bridge: r && (typeof r === 'string' ? r : { canSave: r.canSave, login: r.login?.login, password: r.login ? r.login.password.length : null }) }; })()`)
+    .catch((x) => String(x));
   console.log('seen', JSON.stringify(seen), 'file', existsSync(file), 'state', JSON.stringify(await c?.ev(STATE).catch(() => null)));
   // The same page loaded fresh: does it fill then?
   await c?.send('Page.reload', {}).catch(() => {});

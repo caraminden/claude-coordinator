@@ -37,7 +37,18 @@ Ports for any other dev server, scratch server or browser --remote-debugging-por
 "Ports for dev servers and browsers" (a free random port checked with ss -ltn; never 8573; outside 8000-8999
 unless a person needs Tailscale).`;
 
-interface State { pid: number; started: string; holder: number; port: number; url: string; login: string; password: string; cookie: string; data: string; worktree: string }
+interface State {
+  pid: number;
+  started: string;
+  holder: number;
+  port: number;
+  url: string;
+  login: string;
+  password: string;
+  cookie: string;
+  data: string;
+  worktree: string;
+}
 
 const say = (s: string) => console.log(s);
 function refuse(why: string): never {
@@ -135,7 +146,10 @@ async function start(args: string[]): Promise<void> {
   // In a scope of its own in citadel-heavy.slice (#1298), bound to this turn, so a server that runs out of memory doesn't
   // end the turn. heavy-unit needs the user bus to start it; the server itself gets the preview's env without it.
   const holder = spawn(join(worktree, 'tools', 'heavy-unit'), ['--exec', '--what', 'dev copy', 'sh', '-c', 'unset XDG_RUNTIME_DIR; "$0" "$1" & echo $! > "$2"; wait $!', process.execPath, server, pidFile], {
-    cwd: worktree, env: { ...previewEnv(port, data, password, randomBytes(32).toString('hex')), IDLE_EXIT_MS: String(IDLE_EXIT_MS), ...(appsHosts && { APPS_DOMAIN: `citadel.localhost:${port}` }), XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR }, detached: true, stdio: ['ignore', log, log],
+    cwd: worktree,
+    env: { ...previewEnv(port, data, password, randomBytes(32).toString('hex')), IDLE_EXIT_MS: String(IDLE_EXIT_MS), ...(appsHosts && { APPS_DOMAIN: `citadel.localhost:${port}` }), XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR },
+    detached: true,
+    stdio: ['ignore', log, log],
   });
   closeSync(log);
   holder.unref();
@@ -157,9 +171,12 @@ async function start(args: string[]): Promise<void> {
   for (const deadline = Date.now() + BOOT_TIMEOUT_MS; ; await new Promise((r) => setTimeout(r, 200))) {
     if (!started(holder.pid!)) await fail('the server exited during boot');
     if (Date.now() > deadline) await fail(`the server did not answer within ${BOOT_TIMEOUT_MS / 1000} s`);
-    const health = await fetch(`${url}api/health`, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? (r.json() as Promise<{ preview?: boolean }>) : null), () => null);
+    const health = await fetch(`${url}api/health`, { signal: AbortSignal.timeout(2000) }).then(
+      (r) => (r.ok ? (r.json() as Promise<{ preview?: boolean }>) : null),
+      () => null,
+    );
     if (!health) continue;
-    if (health.preview !== true) await fail('this branch\'s server has no preview mode; rebase it onto main first');
+    if (health.preview !== true) await fail("this branch's server has no preview mode; rebase it onto main first");
     break;
   }
 

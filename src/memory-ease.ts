@@ -35,10 +35,17 @@ const RANK: Record<EaseLevel, number> = { ok: 0, easing: 1, tight: 2 };
 
 /** The lines (bytes, pages/s, bytes/s, ms). Starting values: see the header. */
 export const LINES = {
-  easeFree: 6 * GB, backFree: 8 * GB, tightFree: 3 * GB, untightFree: 4 * GB,
-  reclaimEase: 20_000, reclaimTight: 80_000, reclaimQuiet: 5_000,
-  swapEase: 20e6, swapQuiet: 5e6,
-  sustainMs: 30_000, calmMs: 60_000,
+  easeFree: 6 * GB,
+  backFree: 8 * GB,
+  tightFree: 3 * GB,
+  untightFree: 4 * GB,
+  reclaimEase: 20_000,
+  reclaimTight: 80_000,
+  reclaimQuiet: 5_000,
+  swapEase: 20e6,
+  swapQuiet: 5e6,
+  sustainMs: 30_000,
+  calmMs: 60_000,
 };
 export type Lines = typeof LINES;
 export const EASE_EVERY_MS = 5_000;
@@ -49,28 +56,59 @@ const MAX_GAP_MS = 60_000;
 const PAGE = 4096;
 
 /** One look at the box: MemAvailable in bytes, and the running counters (null where the file lacks them). */
-export interface RawMemory { at: number; avail: number | null; kswapd: number | null; pswpout: number | null }
+export interface RawMemory {
+  at: number;
+  avail: number | null;
+  kswapd: number | null;
+  pswpout: number | null;
+}
 /** A reading with rates: reclaim in pages/s, swap-out in bytes/s; null without two comparable readings. */
-export interface MemorySample { at: number; avail: number | null; reclaim: number | null; swapOut: number | null }
+export interface MemorySample {
+  at: number;
+  avail: number | null;
+  reclaim: number | null;
+  swapOut: number | null;
+}
 
 /** What is waiting on memory right now, for the Status page. */
-export interface EaseWaiting { starts: number; heavy: number; nested: number }
+export interface EaseWaiting {
+  starts: number;
+  heavy: number;
+  nested: number;
+}
 /** A turn held at its size by the growth stop. */
-export interface Slowed { unit: string; ticket: number | null; bytes: number; at: number }
+export interface Slowed {
+  unit: string;
+  ticket: number | null;
+  bytes: number;
+  at: number;
+}
 
 /** One stretch away from ok: going on (until null) or recorded. */
 export interface Episode {
-  since: number; until: number | null; peak: EaseLevel; why: string;
-  lowestFree: number | null; peakReclaim: number | null; peakSwapOut: number | null;
-  waited: EaseWaiting; slowed: { unit: string; ticket: number | null; bytes: number }[];
+  since: number;
+  until: number | null;
+  peak: EaseLevel;
+  why: string;
+  lowestFree: number | null;
+  peakReclaim: number | null;
+  peakSwapOut: number | null;
+  waited: EaseWaiting;
+  slowed: { unit: string; ticket: number | null; bytes: number }[];
 }
 
 /** What the Status page shows. */
 export interface EaseNow {
-  level: EaseLevel; since: number; why: string;
-  free: number | null; reclaim: number | null; swapOut: number | null;
+  level: EaseLevel;
+  since: number;
+  why: string;
+  free: number | null;
+  reclaim: number | null;
+  swapOut: number | null;
   lines: { easeFree: number; backFree: number; tightFree: number };
-  waiting: EaseWaiting; slowed: Slowed[]; episodeSince: number | null;
+  waiting: EaseWaiting;
+  slowed: Slowed[];
+  episodeSince: number | null;
 }
 
 /** MemAvailable, bytes, from /proc/meminfo's text; null when it isn't there. */
@@ -98,7 +136,9 @@ export function parseEpisode(detail: string): Episode | null {
   try {
     const e = JSON.parse(detail);
     return e && typeof e.since === 'number' && typeof e.why === 'string' ? e : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 export interface EaseDeps {
@@ -143,10 +183,14 @@ export class MemoryEase {
     this.since = this.now();
   }
 
-  private now() { return this.d.now?.() ?? Date.now(); }
+  private now() {
+    return this.d.now?.() ?? Date.now();
+  }
 
   /** The level now, and why (empty at ok). */
-  get(): { level: EaseLevel; why: string } { return { level: this.level, why: this.why }; }
+  get(): { level: EaseLevel; why: string } {
+    return { level: this.level, why: this.why };
+  }
 
   /** Folds one reading in: rates from the last one, the level, the episode. Returns the level. */
   step(raw: RawMemory): EaseLevel {
@@ -155,7 +199,15 @@ export class MemoryEase {
     const dt = prev ? raw.at - prev.at : 0;
     const ok = prev && dt > 0 && dt <= MAX_GAP_MS;
     const rate = (a: number | null, b: number | null) => (ok && a !== null && b !== null && a >= b ? ((a - b) * 1000) / dt : null);
-    const s: MemorySample = { at: raw.at, avail: raw.avail, reclaim: rate(raw.kswapd, prev?.kswapd ?? null), swapOut: (() => { const r = rate(raw.pswpout, prev?.pswpout ?? null); return r === null ? null : r * PAGE; })() };
+    const s: MemorySample = {
+      at: raw.at,
+      avail: raw.avail,
+      reclaim: rate(raw.kswapd, prev?.kswapd ?? null),
+      swapOut: (() => {
+        const r = rate(raw.pswpout, prev?.pswpout ?? null);
+        return r === null ? null : r * PAGE;
+      })(),
+    };
     this.sample = s;
     const L = this.L;
     // A run of readings over a rate line; a gap (no rate) breaks it.
@@ -169,27 +221,36 @@ export class MemoryEase {
     const free = s.avail;
     let target: EaseLevel = 'ok';
     let why = '';
-    if (free !== null && free < L.tightFree) { target = 'tight'; why = `${gb(free)} free (tight under ${gb(L.tightFree)})`; }
-    else if (reclaimTight) { target = 'tight'; why = `the kernel reclaiming ${pages(s.reclaim!)} for ${L.sustainMs / 1000} s`; }
-    else if (free !== null && free < L.easeFree) { target = 'easing'; why = `${gb(free)} free (eases under ${gb(L.easeFree)}, back over ${gb(L.backFree)})`; }
-    else if (reclaimEase) { target = 'easing'; why = `the kernel reclaiming ${pages(s.reclaim!)} for ${L.sustainMs / 1000} s`; }
-    else if (swapEase) { target = 'easing'; why = `swapping out ${mbs(s.swapOut!)} for ${L.sustainMs / 1000} s`; }
+    if (free !== null && free < L.tightFree) {
+      target = 'tight';
+      why = `${gb(free)} free (tight under ${gb(L.tightFree)})`;
+    } else if (reclaimTight) {
+      target = 'tight';
+      why = `the kernel reclaiming ${pages(s.reclaim!)} for ${L.sustainMs / 1000} s`;
+    } else if (free !== null && free < L.easeFree) {
+      target = 'easing';
+      why = `${gb(free)} free (eases under ${gb(L.easeFree)}, back over ${gb(L.backFree)})`;
+    } else if (reclaimEase) {
+      target = 'easing';
+      why = `the kernel reclaiming ${pages(s.reclaim!)} for ${L.sustainMs / 1000} s`;
+    } else if (swapEase) {
+      target = 'easing';
+      why = `swapping out ${mbs(s.swapOut!)} for ${L.sustainMs / 1000} s`;
+    }
 
     if (RANK[target] > RANK[this.level]) {
       this.set(target, why, s.at);
       this.calmSince = null;
     } else if (RANK[this.level] > 0) {
       // Calm for the level we're at: over its "back" line, and the rates that raised it quiet.
-      const calm = this.level === 'tight'
-        ? (free === null || free >= L.untightFree) && !(s.reclaim !== null && s.reclaim > L.reclaimTight)
-        : (free === null || free >= L.backFree) && !(s.reclaim !== null && s.reclaim > L.reclaimQuiet) && !(s.swapOut !== null && s.swapOut > L.swapQuiet);
+      const calm = this.level === 'tight' ? (free === null || free >= L.untightFree) && !(s.reclaim !== null && s.reclaim > L.reclaimTight) : (free === null || free >= L.backFree) && !(s.reclaim !== null && s.reclaim > L.reclaimQuiet) && !(s.swapOut !== null && s.swapOut > L.swapQuiet);
       if (!calm) {
         this.calmSince = null;
         if (target === this.level && why) this.why = why; // the newest reason, same level
       } else if (this.calmSince === null) this.calmSince = s.at;
       else if (s.at - this.calmSince >= L.calmMs) {
         const down: EaseLevel = this.level === 'tight' ? 'easing' : 'ok';
-        this.set(down, down === 'ok' ? '' : (why || `coming back from tight: ${free === null ? '' : `${gb(free)} free`}`.trim()), s.at);
+        this.set(down, down === 'ok' ? '' : why || `coming back from tight: ${free === null ? '' : `${gb(free)} free`}`.trim(), s.at);
         this.calmSince = null;
       }
     }
@@ -227,11 +288,19 @@ export class MemoryEase {
     if (!e) return;
     this.episode = null;
     e.until = at;
-    try { this.d.record?.(e.since, e); } catch (err: any) { console.error(`Recording a memory-easing stretch failed: ${err?.message ?? err}`); }
+    try {
+      this.d.record?.(e.since, e);
+    } catch (err: any) {
+      console.error(`Recording a memory-easing stretch failed: ${err?.message ?? err}`);
+    }
   }
 
   private waitingNow(): EaseWaiting {
-    try { return this.d.waiting?.() ?? NONE; } catch { return NONE; }
+    try {
+      return this.d.waiting?.() ?? NONE;
+    } catch {
+      return NONE;
+    }
   }
 
   /** The level file: the level, then why. Written by a rename so no reader sees half of it. */
@@ -264,10 +333,16 @@ export class MemoryEase {
     if (this.level === 'ok') return null;
     const s = this.sample;
     return {
-      level: this.level, since: this.since, why: this.why,
-      free: s?.avail ?? null, reclaim: s?.reclaim == null ? null : Math.round(s.reclaim), swapOut: s?.swapOut == null ? null : Math.round(s.swapOut),
+      level: this.level,
+      since: this.since,
+      why: this.why,
+      free: s?.avail ?? null,
+      reclaim: s?.reclaim == null ? null : Math.round(s.reclaim),
+      swapOut: s?.swapOut == null ? null : Math.round(s.swapOut),
       lines: { easeFree: this.L.easeFree, backFree: this.L.backFree, tightFree: this.L.tightFree },
-      waiting: this.waitingNow(), slowed: this.d.slowed?.() ?? [], episodeSince: this.episode?.since ?? null,
+      waiting: this.waitingNow(),
+      slowed: this.d.slowed?.() ?? [],
+      episodeSince: this.episode?.since ?? null,
     };
   }
 

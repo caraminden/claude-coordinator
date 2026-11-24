@@ -18,7 +18,8 @@ test('chips: a time, another minion, an event; dropped rows age out after 7 days
   const store = new Store(join(root, 'a.db'));
   const p = store.createProject('P', null);
   const mk = () => store.createTicket({ project_id: p.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
-  const a = mk(), b = mk();
+  const a = mk(),
+    b = mk();
   const add = (d: any) => store.addDelivery({ project_id: p.id, kind: 'k', to_kind: 'minion', to_id: a.id, set_by: 'minion:1', when_kind: 'at', ...d }, NOW);
   add({ when_arg: NOW + 14 * 3_600_000, due: NOW + 14 * 3_600_000, payload: { note: 'check' } }); // 02:00 next day PST
   add({ when_kind: 'live', when_arg: { ticket: b.id } });
@@ -27,7 +28,10 @@ test('chips: a time, another minion, an event; dropped rows age out after 7 days
   store.updateDelivery(old.id, { reason: 'cancelled' }, undefined, NOW - DROPPED_SHOWN_MS - 1);
   const gone = add({ when_kind: 'ci', state: 'dropped', reason: 'minion dismissed' });
   const rows = waitsFor(store, store.getTicket(a.id)!, () => [{ kind: 'chain', chip: '⇢ #9', what: 'x', set_by: 'c', since: null }], NOW);
-  assert.deepEqual(rows.slice(1).map((r) => r.chip), [`⇢ #${b.number}`, '⇢ CI', '⇢ #9', '⇢ CI']);
+  assert.deepEqual(
+    rows.slice(1).map((r) => r.chip),
+    [`⇢ #${b.number}`, '⇢ CI', '⇢ #9', '⇢ CI'],
+  );
   assert.match(rows[0].chip, /^⏱ (\w{3} )?\d\d:\d\d$/);
   assert.equal(rows[2].headline, 'Wakes when CI finishes', 'a kind with no words of its own never shows its internal name');
   assert.ok(rows[0].cancellable && !rows[3].cancellable, 'old-key waits have no Cancel');
@@ -39,7 +43,8 @@ test('a chain row (its held brief) shows its leader and has no Cancel: Start now
   const store = new Store(join(root, 'c.db'));
   const p = store.createProject('P', null);
   const mk = () => store.createTicket({ project_id: p.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
-  const a = mk(), lead = mk();
+  const a = mk(),
+    lead = mk();
   store.addDelivery({ project_id: p.id, kind: 'chain', to_kind: 'minion', to_id: a.id, set_by: 'Taskmaster', when_kind: 'merged', when_arg: { after: lead.id }, payload: { message: 'go', reason: 'its work' } }, NOW);
   const [row] = waitsFor(store, store.getTicket(a.id)!, () => [], NOW);
   assert.deepEqual([row.chip, row.what, row.cancellable], [`⇢ #${lead.number}`, 'its work', false]);
@@ -47,11 +52,12 @@ test('a chain row (its held brief) shows its leader and has no Cancel: Start now
 
 // #1512 (Cara, 2026-11-21: "a headline single sentence description, and then clicking it opens a few sentence summary";
 // she picked take A, Citadel builds it from the wait): a relay names its sender, not "event", and says what and when.
-test('a relay shows its sender\'s number and a headline; its words become the second line and the summary', () => {
+test("a relay shows its sender's number and a headline; its words become the second line and the summary", () => {
   const store = new Store(join(root, 'r.db'));
   const p = store.createProject('P', null);
   const mk = () => store.createTicket({ project_id: p.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
-  const to = mk(), from = mk();
+  const to = mk(),
+    from = mk();
   const text = "#824 here: main's windows-check is green again. crates/app/src/run/tests.rs now uses #808's CaptureError::Unsupported. Rebase onto main and hand off again.";
   store.addDelivery({ project_id: p.id, kind: 'relay', to_kind: 'minion', to_id: to.id, set_by: `minion:${from.id}`, when_kind: 'live', when_arg: 'fa4fb3f6d0000000000000000000000000000000', payload: { ticket: from.id, to: { minion: to.id, number: to.number }, text } }, NOW - 3_600_000);
   store.addDelivery({ project_id: p.id, kind: 'wake_at', to_kind: 'minion', to_id: to.id, set_by: 'minion:1', when_kind: 'at', when_arg: NOW + 1_800_000, due: NOW + 1_800_000, payload: { note: 'Check the run.', setBy: 'Taskmaster' } }, NOW);

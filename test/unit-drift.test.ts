@@ -7,11 +7,20 @@ import { checkUnits, problemKeys, summary } from '../src/unit-drift.ts';
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), 'unit-drift-'));
-  const deploy = join(root, 'deploy'), inst = join(root, 'inst');
+  const deploy = join(root, 'deploy'),
+    inst = join(root, 'inst');
   mkdirSync(join(deploy, 'a.service.d'), { recursive: true });
   mkdirSync(join(deploy, 'desktop'));
   mkdirSync(inst, { recursive: true });
-  for (const [f, t] of [['a.service', 'A'], ['b.slice', 'B'], ['c.timer', 'C'], ['a.service.d/w.conf', 'W'], ['notes.md', 'x'], ['desktop/z.service', 'Z']]) writeFileSync(join(deploy, f), t);
+  for (const [f, t] of [
+    ['a.service', 'A'],
+    ['b.slice', 'B'],
+    ['c.timer', 'C'],
+    ['a.service.d/w.conf', 'W'],
+    ['notes.md', 'x'],
+    ['desktop/z.service', 'Z'],
+  ])
+    writeFileSync(join(deploy, f), t);
   return { deploy, inst, root };
 }
 
@@ -20,7 +29,15 @@ test('installed, different and missing, with the fish command; symlinks and copi
   symlinkSync(join(deploy, 'a.service'), join(inst, 'a.service'));
   writeFileSync(join(inst, 'b.slice'), 'old');
   const rows = checkUnits(deploy, inst, root);
-  assert.deepEqual(rows.map((r) => [r.name, r.state]), [['a.service', 'installed'], ['a.service.d/w.conf', 'missing'], ['b.slice', 'different'], ['c.timer', 'missing']]);
+  assert.deepEqual(
+    rows.map((r) => [r.name, r.state]),
+    [
+      ['a.service', 'installed'],
+      ['a.service.d/w.conf', 'missing'],
+      ['b.slice', 'different'],
+      ['c.timer', 'missing'],
+    ],
+  );
   assert.equal(rows[0].fix, null);
   assert.match(rows[1].fix!, /^mkdir -p ~?.*a\.service\.d; ln -sf .*w\.conf .*; systemctl --user daemon-reload$/);
   assert.match(rows[3].fix!, /enable --now c\.timer$/);
@@ -31,7 +48,10 @@ test('installed, different and missing, with the fish command; symlinks and copi
 test('a unit marked not installed on purpose stops showing', () => {
   const { deploy, inst, root } = setup();
   writeFileSync(join(deploy, 'not-installed.txt'), '# why\nc.timer  # kept out\na.service\n');
-  assert.deepEqual(checkUnits(deploy, inst, root).map((r) => r.name), ['b.slice']);
+  assert.deepEqual(
+    checkUnits(deploy, inst, root).map((r) => r.name),
+    ['b.slice'],
+  );
 });
 
 test('the real deploy/ lists the watchdog and both slices as units', () => {

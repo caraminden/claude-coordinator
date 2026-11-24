@@ -6,10 +6,19 @@ import type { Project, Ticket } from './db.ts';
 import type { App } from './http.ts';
 import { added } from './rule-overlap.ts';
 
-const STOP = new Set(('the and for are but not you your with that this its from they them their was were has have had into out than '
-  + 'also can will just own until after before while every each when then only once who what which all any one new old see says said '
-  + 'should would could must may might there here how why yes too very more most less does did done get gets').split(' '));
-const words = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ');
+const STOP = new Set(
+  (
+    'the and for are but not you your with that this its from they them their was were has have had into out than ' +
+    'also can will just own until after before while every each when then only once who what which all any one new old see says said ' +
+    'should would could must may might there here how why yes too very more most less does did done get gets'
+  ).split(' '),
+);
+const words = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ');
 const keep = (w: string) => w.length >= 3 && !STOP.has(w) && !/^\d+$/.test(w);
 
 /** The word pairs (both kept words, side by side) of the paragraphs a save added, changed or took out. */
@@ -24,7 +33,12 @@ export function rulePhrases(before: string, after: string): Set<string> {
 
 /** Sealed minions of `projects` whose note names a changed phrase, and the chains behind them: id → why. */
 export function parksUnder(app: Pick<App, 'store' | 'runner' | 'waiters'>, project: Project, phrases: Set<string>): Map<number, string> {
-  const parked = new Map(app.store.listTickets(project.id).filter((t) => app.runner.parked(t)).map((t) => [t.id, t]));
+  const parked = new Map(
+    app.store
+      .listTickets(project.id)
+      .filter((t) => app.runner.parked(t))
+      .map((t) => [t.id, t]),
+  );
   const named = new Map<number, string>();
   for (const t of parked.values()) {
     const note = ` ${words(t.note ?? '').join(' ')} `;
@@ -32,7 +46,7 @@ export function parksUnder(app: Pick<App, 'store' | 'runner' | 'waiters'>, proje
     if (hit) named.set(t.id, `its note names "${hit}"`);
   }
   const chains = app.waiters.chains();
-  for (let grew = named.size > 0; grew;) {
+  for (let grew = named.size > 0; grew; ) {
     grew = false;
     for (const c of chains) {
       if (named.has(c.ticket) || !named.has(c.after) || !parked.has(c.ticket)) continue;
@@ -58,8 +72,11 @@ export function mailParksUnderOldRule(app: Pick<App, 'store' | 'runner' | 'waite
     for (const [tm, list] of byTm) {
       const lines = list.slice(0, 15).map((t) => `- #${t.number} ${t.title}: "${t.note ?? ''}" (${named.get(t.id)})`);
       if (list.length > 15) lines.push(`- and ${list.length - 15} more`);
-      app.runner.leaveMail(tm, 'Settings', `(check these) The ${where} instructions just changed, and these sealed minions may be waiting under the old wording:\n${lines.join('\n')}\n`
-        + 'Unpark each one sealed only because of the old rule (message_ticket with unpark: true), and keep real code chains (start_after on work it needs).');
+      app.runner.leaveMail(
+        tm,
+        'Settings',
+        `(check these) The ${where} instructions just changed, and these sealed minions may be waiting under the old wording:\n${lines.join('\n')}\n` + 'Unpark each one sealed only because of the old rule (message_ticket with unpark: true), and keep real code chains (start_after on work it needs).',
+      );
     }
   }
 }

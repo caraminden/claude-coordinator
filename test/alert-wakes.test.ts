@@ -237,12 +237,18 @@ test('saved batches move into the table on first boot with the old key emptied i
   assert.equal(store.getSetting('alert-wakes'), null, 'the old key is emptied');
   assert.deepEqual(store.getSetting('alert-told'), { '4:a': ['a'], '0:ci.open': ['x'] });
   // The overdue one went at boot; the other keeps its time.
-  assert.deepEqual(woken.map(([sc]) => sc), [0]);
+  assert.deepEqual(
+    woken.map(([sc]) => sc),
+    [0],
+  );
   assert.match(woken[0][1], /X down/);
   const [peekRow] = store.listDeliveries({ kind: 'alert', dedupe: '4', states: ['waiting'] });
   assert.equal(peekRow.due, NOON + 30 * SEC);
   await s.tick(NOON + 30 * SEC);
-  assert.deepEqual(woken.map(([sc]) => sc), [0, 4]);
+  assert.deepEqual(
+    woken.map(([sc]) => sc),
+    [0, 4],
+  );
   // Told came along: the same alert again is not news.
   s.wakes.raise({ from: peek, key: 'a', title: 'A failed', link: '/l', person: 'Cara' }, NOON + MIN);
   assert.deepEqual(store.listDeliveries({ kind: 'alert', states: ['waiting'] }), []);

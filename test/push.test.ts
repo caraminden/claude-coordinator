@@ -47,10 +47,7 @@ test('encryption matches the RFC 8291 example', () => {
     Buffer.from('DGv6ra1nlYgDCS1FRnbzlw', 'base64url'),
     Buffer.from('yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw', 'base64url'),
   );
-  assert.equal(
-    body.toString('base64url'),
-    'DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN',
-  );
+  assert.equal(body.toString('base64url'), 'DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN');
   const uaPrivate = Buffer.from('q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94', 'base64url');
   assert.equal(decrypt(body, uaPrivate, 'BTBZMqHH6r4Tts7J_aSIgg').toString(), 'When I grow up, I want to be a watermelon');
 });
@@ -169,8 +166,13 @@ test('notify skips whoever caused it, muted devices and people outside the schem
   assert.deepEqual(msg, { title: `#${t.number} Fix it`, body: 'Merged', tag: `thread-${t.id}`, url: `/c/#/p/${project.id}/t/${t.number}?e=latest` });
 
   // 404 and 410 mean the browser unsubscribed; anything else may be temporary. Outsiders' browsers stay, unsent.
-  assert.deepEqual(store.listPushSubscriptions().map((s) => s.endpoint).sort(),
-    [browsers.cara, browsers.cody, browsers.flaky, browsers.josh, browsers.olive, browsers.stranger].map((b) => b.endpoint).sort());
+  assert.deepEqual(
+    store
+      .listPushSubscriptions()
+      .map((s) => s.endpoint)
+      .sort(),
+    [browsers.cara, browsers.cody, browsers.flaky, browsers.josh, browsers.olive, browsers.stranger].map((b) => b.endpoint).sort(),
+  );
 
   // Nothing at all for a reply-like state.
   sent.length = 0;
@@ -183,7 +185,7 @@ test('notify skips whoever caused it, muted devices and people outside the schem
   assert.equal(store.getPushSubscription(browsers.cody.endpoint)!.muted, '[]');
 });
 
-test('a pinned-only device hears about the minions its person pinned, anyone\'s, while they can still see the scheme', async () => {
+test("a pinned-only device hears about the minions its person pinned, anyone's, while they can still see the scheme", async () => {
   const store = new Store(join(root, 'pinned.db'));
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
@@ -194,7 +196,7 @@ test('a pinned-only device hears about the minions its person pinned, anyone\'s,
   const mk = (project_id: number, title: string, created_by: string, kind: 'ticket' | 'coordinator' = 'ticket') => store.createTicket({ project_id, title, permission_mode: 'default', created_by, kind });
   const ownPinned = mk(p.id, 'Own, pinned', 'Josh');
   const ownUnpinned = mk(p.id, 'Own, not pinned', 'Josh');
-  const carasPinned = mk(p.id, 'Cara\'s, pinned by Josh', 'Cara');
+  const carasPinned = mk(p.id, "Cara's, pinned by Josh", 'Cara');
   const leftScheme = mk(q.id, 'In a scheme Josh left', 'Cara');
   for (const t of [ownPinned, carasPinned, leftScheme]) store.setTicketPinned('Josh', t.id, true);
   store.removeMember(q.id, josh.id);
@@ -258,7 +260,7 @@ test('a scheme someone hid sends them no pushes, and Unhide brings them back (#2
   store.db.close();
 });
 
-test('admin reach sends no pushes: only a scheme\'s owner and members hear about it (#674)', async () => {
+test("admin reach sends no pushes: only a scheme's owner and members hear about it (#674)", async () => {
   // Cara, 2026-11-14, on #674's card: pushes follow real membership, "Members only".
   const store = new Store(join(root, 'members-only.db'));
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
@@ -277,7 +279,11 @@ test('admin reach sends no pushes: only a scheme\'s owner and members hear about
   const fakeFetch = (async (url: string) => (sent.push(url), new Response('', { status: 201 }))) as unknown as typeof fetch;
   const pusher = new Pusher(store, loadVapidKeys(root), fakeFetch);
   await pusher.notify(t, { kind: 'state', state: 'blocked', note: 'stuck' });
-  assert.deepEqual(sent.map((url) => url.split('/').pop()), ['Josh'], 'neither the admin flag nor Citadel membership makes you a member');
+  assert.deepEqual(
+    sent.map((url) => url.split('/').pop()),
+    ['Josh'],
+    'neither the admin flag nor Citadel membership makes you a member',
+  );
   sent.length = 0;
   store.addMember(threadspace.id, alex.id);
   await pusher.notify(t, { kind: 'state', state: 'blocked', note: 'stuck' });
@@ -300,7 +306,10 @@ test('a card addressed to one person pings only their devices (#687)', async () 
   const pusher = new Pusher(store, loadVapidKeys(root), fakeFetch);
   await pusher.notify(t, { kind: 'question', questions: [{ question: 'Three slots?' }], to: 'Josh' });
   await pusher.notify(t, { kind: 'plan', summary: 'Three slots', to: 'josh' });
-  assert.deepEqual(sent.map((url) => url.split('/').pop()), ['Josh', 'Josh']);
+  assert.deepEqual(
+    sent.map((url) => url.split('/').pop()),
+    ['Josh', 'Josh'],
+  );
   sent.length = 0;
   await pusher.notify(t, { kind: 'question', questions: [{ question: 'Anyone?' }] });
   assert.deepEqual(sent.map((url) => url.split('/').pop()).sort(), ['Cara', 'Cody', 'Josh'], 'a card to everyone still pings everyone');
@@ -338,7 +347,7 @@ test('a minion with an owner pings its owner, whoever pinned it and devices set 
     return sent.map((url) => url.split('/').pop()).sort();
   };
 
-  const joshs = mk('Josh\'s', 'Josh');
+  const joshs = mk("Josh's", 'Josh');
   assert.deepEqual(await who(joshs), ['Cody', 'Josh'], 'the owner and the everything device');
   assert.deepEqual(await who(joshs, { kind: 'error', text: 'boom' }), ['Cody', 'Josh'], 'a failed turn too');
   assert.deepEqual(await who(joshs, { kind: 'question', questions: [{ question: 'Which?' }] }), ['Cody', 'Josh'], 'a card to no one in particular too');
@@ -351,14 +360,14 @@ test('a minion with an owner pings its owner, whoever pinned it and devices set 
   assert.deepEqual(await who(mk('By login', 'JOSH')), ['Cody', 'Josh']);
   // No owner and the Taskmaster: everyone, as before.
   const all = ['Ada', 'Cara', 'Cody', 'Josh'];
-  assert.deepEqual(await who(mk('Nobody\'s')), all);
+  assert.deepEqual(await who(mk("Nobody's")), all);
   const tm = mk('Taskmaster', 'Josh', 'coordinator');
   assert.deepEqual(await who(tm), all);
   // A split scheme's own Taskmasters (#919) ping their person, as their cards are in that person's Needs you alone.
   const joshTm = store.splitScheme(p.id, store.findUser('name', 'Josh')!.id);
   assert.deepEqual(await who(joshTm), ['Cody', 'Josh'], "Josh's Taskmaster");
   assert.deepEqual(await who(store.getTicket(tm.id)!), ['Cara', 'Cody'], "the old row is Cara's now");
-  assert.deepEqual(await who(store.getOverlord(p.id)!), all, 'the Overlord is everyone\'s');
+  assert.deepEqual(await who(store.getOverlord(p.id)!), all, "the Overlord is everyone's");
   assert.deepEqual(await who(joshTm, { kind: 'question', questions: [{ question: 'Ada?' }], to: 'Ada' }), ['Ada'], 'a card to Ada still goes to her');
   // An assignee who is nobody here, or who left the scheme, hands it to the scheme's owner, not everyone (#1449).
   assert.deepEqual(await who(mk('Gone', 'Someone')), ['Cara', 'Cody'], 'an owner who is nobody here');
@@ -376,7 +385,7 @@ test('a minion with an owner pings its owner, whoever pinned it and devices set 
   store.db.close();
 });
 
-test('a desktop app\'s device hears through its page, never a push service, and is kept when nobody is listening (#1186)', async () => {
+test("a desktop app's device hears through its page, never a push service, and is kept when nobody is listening (#1186)", async () => {
   const store = new Store(join(root, 'desktop.db'));
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const project = store.createProject('P', null, cara.id);

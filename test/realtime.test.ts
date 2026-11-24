@@ -14,7 +14,15 @@ const canRt = (() => {
 test('a failing chrt logs one line and the server carries on', async () => {
   const lines: string[] = [];
   let calls = 0;
-  const rt = startRealtime({ enabled: () => true, log: (l) => lines.push(l), run: async () => { calls++; throw new Error('Operation not permitted'); }, everyMs: 1e9 });
+  const rt = startRealtime({
+    enabled: () => true,
+    log: (l) => lines.push(l),
+    run: async () => {
+      calls++;
+      throw new Error('Operation not permitted');
+    },
+    everyMs: 1e9,
+  });
   await rt.tick();
   await rt.tick();
   rt.stop();
@@ -25,7 +33,14 @@ test('a failing chrt logs one line and the server carries on', async () => {
 
 test('off asks for nothing', async () => {
   let calls = 0;
-  const rt = startRealtime({ enabled: () => false, log: () => {}, run: async () => { calls++; }, everyMs: 1e9 });
+  const rt = startRealtime({
+    enabled: () => false,
+    log: () => {},
+    run: async () => {
+      calls++;
+    },
+    everyMs: 1e9,
+  });
   await rt.tick();
   rt.stop();
   assert.equal(calls, 0);

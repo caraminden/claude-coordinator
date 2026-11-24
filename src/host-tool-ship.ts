@@ -34,17 +34,21 @@ export async function approveHostTool(app: App, askingId: number, t: HostTool, b
     const chore = { ...store.getTicket(id)!, cwd };
     const file = join(cwd, MANIFEST);
     writeFileSync(file, manifestText(withTool(readManifest(file), { ...t, approved_by: by, approved_on: pacificDay(Date.now()), asked_by: `${scheme?.name ?? '?'} #${asking?.number ?? '?'}` })));
-    await git([...await identity(chore.cwd!), 'commit', '--quiet', '-m', `#${number}: list host tool ${label}, approved by ${by} for ${scheme?.name ?? '?'} #${asking?.number ?? '?'}`, '--', MANIFEST], cwd);
-    runner.emit(id, 'note', { text: `This minion ships one line: ${label} in ${MANIFEST}, which ${by} approved for ${scheme?.name ?? '?'} #${asking?.number ?? '?'} (${byHand ? 'an Arch package a person installs by hand' : 'installed already'}). Its commit is on this branch; if the ship fails, rebase onto main keeping every other line of the list, and hand it off again.` });
+    await git([...(await identity(chore.cwd!)), 'commit', '--quiet', '-m', `#${number}: list host tool ${label}, approved by ${by} for ${scheme?.name ?? '?'} #${asking?.number ?? '?'}`, '--', MANIFEST], cwd);
+    runner.emit(id, 'note', {
+      text: `This minion ships one line: ${label} in ${MANIFEST}, which ${by} approved for ${scheme?.name ?? '?'} #${asking?.number ?? '?'} (${byHand ? 'an Arch package a person installs by hand' : 'installed already'}). Its commit is on this branch; if the ship fails, rebase onto main keeping every other line of the list, and hand it off again.`,
+    });
     const handed = app.landings.handOff(id, cwd, runner.hostEnv(chore), [], { summary: `List host tool ${label}`, risk: 'low', reason: `one line in ${MANIFEST}; the tool is ${byHand ? 'installed by hand' : 'installed already'}`, deploy: false });
     if (handed) {
       store.updateTicket(id, { state: 'outside', note: landPhase('') });
       runner.broadcastTicket(id);
     }
     const ship = `Its line in the host tools list ships with ${citadel.name} #${number}.`;
-    tell(byHand
-      ? `Approved ${label}, but the server has no root, so it isn't installed yet: ask a person with a card (to: cara, who runs perigee) to run this in a fish shell on perigee:\n\`\`\`fish\n${installCommand(t)}\n\`\`\`\n${ship}`
-      : `Installed ${label} on the server (\`${installCommand(t)}\`): its command is on your PATH from your next turn. ${ship}`);
+    tell(
+      byHand
+        ? `Approved ${label}, but the server has no root, so it isn't installed yet: ask a person with a card (to: cara, who runs perigee) to run this in a fish shell on perigee:\n\`\`\`fish\n${installCommand(t)}\n\`\`\`\n${ship}`
+        : `Installed ${label} on the server (\`${installCommand(t)}\`): its command is on your PATH from your next turn. ${ship}`,
+    );
   } catch (err: any) {
     tell(`${label} was approved, but listing it failed: ${err?.message ?? err}. Tell your Taskmaster: the tool ${t.source === 'pacman' ? 'still needs a person to install it' : 'may be installed but is not listed'}.`);
   }

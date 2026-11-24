@@ -14,8 +14,30 @@ import { HttpError, type App } from './http.ts';
 import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
 
-export interface Card { questions: unknown[]; kind?: 'merge'; /** Set on a feeder's go card: the build it merges into (Merge, not Ship It). */ into?: number; /** A machine job's go card (#857): only its machine's owner or an admin answers it. */ job?: number; /** A kit sync's ship card (#1100): the kit commit; the server answers it, with no turn. */ kitSync?: string; /** Its recipe laid out on the card (#859): what runs, what it reads, inputs, why now. */ recipe?: object; to?: string; /** A plain ask_question card: later questions of the same turn join it (mergeCard). */ mergeable?: true; notice?: string; doc?: { path: string; title: string }; secret?: { name: string; scope: string; why?: string }; asker?: number; /** A minion's budget card past 10x (#1672): its Stop stops the turn. */ budget?: true; /** A start card (#1674): the brief's expected cost; the server acts on its answer. */ startCost?: number }
-export interface Armed { sha: string; at: number; /** Set once the card is posted, so a retry of the message doesn't post it again. */ cardPosted?: true; note?: string; card?: Card; coordinator?: { text: string; urgent: boolean; wake?: boolean; need?: string } }
+export interface Card {
+  questions: unknown[];
+  kind?: 'merge' /** Set on a feeder's go card: the build it merges into (Merge, not Ship It). */;
+  into?: number /** A machine job's go card (#857): only its machine's owner or an admin answers it. */;
+  job?: number /** A kit sync's ship card (#1100): the kit commit; the server answers it, with no turn. */;
+  kitSync?: string /** Its recipe laid out on the card (#859): what runs, what it reads, inputs, why now. */;
+  recipe?: object;
+  to?: string /** A plain ask_question card: later questions of the same turn join it (mergeCard). */;
+  mergeable?: true;
+  notice?: string;
+  doc?: { path: string; title: string };
+  secret?: { name: string; scope: string; why?: string };
+  asker?: number /** A minion's budget card past 10x (#1672): its Stop stops the turn. */;
+  budget?: true /** A start card (#1674): the brief's expected cost; the server acts on its answer. */;
+  startCost?: number;
+}
+export interface Armed {
+  sha: string;
+  at: number /** Set once the card is posted, so a retry of the message doesn't post it again. */;
+  cardPosted?: true;
+  note?: string;
+  card?: Card;
+  coordinator?: { text: string; urgent: boolean; wake?: boolean; need?: string };
+}
 
 /** The one line the waits readout shows for an armed row. */
 const armNote = (p: Pick<Armed, 'sha' | 'card' | 'coordinator'>) => `armed ${[p.card && 'card', p.coordinator && 'Taskmaster message'].filter(Boolean).join(' and ')} for CI on ${short(p.sha)}`;
@@ -28,7 +50,20 @@ export function postCard(app: App, ticket: Ticket, card: Card): { id: string; hr
   const { questions, kind, into, to, notice, doc, secret, asker, job, recipe, mergeable, kitSync, budget, startCost } = card;
   const id = randomBytes(6).toString('hex');
   const event = runner.emit(ticket.id, 'question', {
-    id, questions, ...(kind ? { kind } : {}), ...(into ? { into } : {}), ...(job ? { job, ...(recipe ? { recipe } : {}) } : {}), ...(kitSync ? { kitSync } : {}), ...(budget ? { budget } : {}), ...(startCost ? { startCost } : {}), ...(to ? { to } : {}), ...(mergeable ? { mergeable } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}), ...(asker ? { asker } : {}),
+    id,
+    questions,
+    ...(kind ? { kind } : {}),
+    ...(into ? { into } : {}),
+    ...(job ? { job, ...(recipe ? { recipe } : {}) } : {}),
+    ...(kitSync ? { kitSync } : {}),
+    ...(budget ? { budget } : {}),
+    ...(startCost ? { startCost } : {}),
+    ...(to ? { to } : {}),
+    ...(mergeable ? { mergeable } : {}),
+    ...(notice ? { notice } : {}),
+    ...(doc ? { doc } : {}),
+    ...(secret ? { secret } : {}),
+    ...(asker ? { asker } : {}),
   });
   runner.broadcastTicket(ticket.id);
   app.notify(ticket.id, { kind: 'question', questions: notice ? [{ question: notice }] : doc ? [{ question: `Make your picks on “${doc.title}”` }] : secret ? [{ question: `Save a secret as ${secret.name}` }] : questions, eventId: event.id, ...(to ? { to } : {}) });
@@ -49,10 +84,13 @@ export function mergeCard(app: App, chat: Ticket, asker: Ticket, card: Card): { 
   const started = runner.turnStartedAt(asker.id);
   if (started == null || !card.mergeable) return null;
   const from = asker.id === chat.id ? undefined : asker.id;
-  const open = store.eventsOfKinds(chat.id, ['question']).reverse().find((e) => {
-    const d = JSON.parse(e.data);
-    return d.mergeable && d.asker === from && d.to === card.to && e.created_at >= started;
-  });
+  const open = store
+    .eventsOfKinds(chat.id, ['question'])
+    .reverse()
+    .find((e) => {
+      const d = JSON.parse(e.data);
+      return d.mergeable && d.asker === from && d.to === card.to && e.created_at >= started;
+    });
   if (!open) return null;
   const data = JSON.parse(open.data);
   if (data.settled || data.questions.length + card.questions.length > CARD_MAX) return null;
@@ -142,7 +180,10 @@ export function registerCiArmed(getApp: () => App, store: Store, outbox: Outbox)
     migrate: () => {
       for (const { key, value } of store.settingsWithPrefix<Armed>('ci-armed:')) {
         const id = Number(key.slice('ci-armed:'.length));
-        if (!Number.isInteger(id) || !value?.sha) { store.deleteSetting(key); continue; }
+        if (!Number.isInteger(id) || !value?.sha) {
+          store.deleteSetting(key);
+          continue;
+        }
         try {
           store.importDeliveries(key, [newRow(id, value, `${key}:${createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16)}`)], outbox.clock());
         } catch (err) {

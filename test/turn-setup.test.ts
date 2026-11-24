@@ -41,7 +41,7 @@ test('pinned MCP copies live in the data dir, one folder per server, and stale o
   assert.ok(readdirSync(MCP_DIR).includes('appname.ts'));
 });
 
-test('the Citadel kit is pinned beside them, a copy of the repo\'s kit/ plugin', () => {
+test("the Citadel kit is pinned beside them, a copy of the repo's kit/ plugin", () => {
   assert.equal(KIT, join(MCP_DIR, 'kit'));
   const manifest = readFileSync(join(KIT, '.claude-plugin', 'plugin.json'), 'utf8');
   assert.equal(manifest, readFileSync(join(import.meta.dirname, '..', 'kit', '.claude-plugin', 'plugin.json'), 'utf8'));
@@ -91,7 +91,12 @@ console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false
 chmodSync(fake, 0o755);
 const store = new Store(join(root, 'test.db'));
 const errors: string[] = [];
-const runner = new Runner(store, () => {}, (t) => ({ COORDINATOR_API: 'http://127.0.0.1:8573', COORDINATOR_TOKEN: `token-${t.id}` }), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  (t) => ({ COORDINATOR_API: 'http://127.0.0.1:8573', COORDINATOR_TOKEN: `token-${t.id}` }),
+  fake,
+);
 runner.onTurnError = (_id, text) => errors.push(text);
 
 async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; workflow?: number } = {}, repoDir?: string, projectId?: number, props: Record<string, string> = {}) {
@@ -110,7 +115,10 @@ async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { mo
   while (runner.isRunning(t.id)) await wait(20);
   const run = JSON.parse(readFileSync(join(root, 'turn'), 'utf8'));
   const flag = (f: string) => (run.args.includes(f) ? run.args[run.args.indexOf(f) + 1] : null);
-  const events = store.listEvents(t.id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text);
+  const events = store
+    .listEvents(t.id)
+    .filter((e) => e.kind === 'error')
+    .map((e) => JSON.parse(e.data).text);
   return { ...run, id: t.id, flag, events };
 }
 
@@ -159,7 +167,7 @@ test("a Fable turn's Grunts default to Opus; other turns' Grunts inherit the ses
 
 test('a Taskmaster turn defaults to opus at high effort, and keeps a choice people made', async () => {
   const t = await turn('coordinator', 'connected');
-  assert.equal(t.settings.autoCompactWindow, 180000, "a Taskmaster compacts at its own window (#423)");
+  assert.equal(t.settings.autoCompactWindow, 180000, 'a Taskmaster compacts at its own window (#423)');
   assert.equal(t.flag('--model'), 'opus');
   assert.equal(t.flag('--effort'), 'high');
   const chosen = await turn('coordinator', 'connected', { model: 'sonnet', effort: 'medium' });
@@ -167,7 +175,7 @@ test('a Taskmaster turn defaults to opus at high effort, and keeps a choice peop
   assert.equal(chosen.flag('--effort'), 'medium');
 });
 
-test('every turn of every scheme loads its own pinned copy of the kit, and shares the compact window (a Taskmaster\'s smaller) and output cap', async () => {
+test("every turn of every scheme loads its own pinned copy of the kit, and shares the compact window (a Taskmaster's smaller) and output cap", async () => {
   const a = store.createProject(`Kit A ${Math.random()}`, null);
   const b = store.createProject(`Kit B ${Math.random()}`, null);
   store.setProjectSettings(b.id, { plugin_dirs: 'tools/mods/x' });
@@ -265,11 +273,15 @@ test("minion and Taskmaster turns both keep the Read tool out of the logins and 
     }
     // A folder-wide Read rule refuses every Bash read after an unresolved cd: ~/.ssh and the rest are guarded in test/tripwire.test.ts.
     assert.ok(!deny.some((r: string) => r.startsWith('Read(') && r.endsWith('/**)')), `${kind}: ${deny.join(' ')}`);
-    if (kind === 'coordinator') assert.ok(deny.some((r: string) => r.startsWith('Edit(')), 'the Taskmaster keeps its own Edit denies');
+    if (kind === 'coordinator')
+      assert.ok(
+        deny.some((r: string) => r.startsWith('Edit(')),
+        'the Taskmaster keeps its own Edit denies',
+      );
   }
 });
 
-test("a minion gets the servers and notes of the machines lent to its scheme, whatever the retired scheme switch says (#438); a Taskmaster gets none", async () => {
+test('a minion gets the servers and notes of the machines lent to its scheme, whatever the retired scheme switch says (#438); a Taskmaster gets none', async () => {
   runner.machines = () => [{ id: 1, name: 'perigee-godot', token_hash: '', created_by: 'Cara', created_at: 0, last_seen_at: 0, notes: 'Never restart it.', workspace_tools: 0, scoped: 0 }];
   try {
     const servers = (t: any) => Object.keys(t.mcp.mcpServers);
@@ -323,7 +335,10 @@ test("a Taskmaster launch past Claude Code's 2 MiB settings cap doesn't start, a
   mkdirSync(join(root, `ticket-${tm.id}`), { recursive: true });
   runner.send(tm.id, 'Cara', 'go');
   while (runner.isRunning(tm.id)) await wait(20);
-  const shown = store.listEvents(tm.id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text);
+  const shown = store
+    .listEvents(tm.id)
+    .filter((e) => e.kind === 'error')
+    .map((e) => JSON.parse(e.data).text);
   assert.equal(shown.length, 1);
   assert.match(shown[0], /^Could not start the turn: This turn's settings\.json would be \d+\.\d MiB, over Claude Code's 2 MiB cap, so it can't start: [\d,]+ allow rules, [\d,]+ of them read-only git rules for 1,001 folders \(1,000 open minions' worktrees in this scheme\)\./);
   const t = store.getTicket(tm.id)!;
@@ -343,7 +358,7 @@ test('every turn finds citadel-heavy first on its PATH, pinned, with the shared 
   assert.ok(!t.env.PATH.startsWith(MCP_DIR) && pinBin.endsWith('/pin/bin'), "the turn's own pinned copy, which outlives a restart");
   assert.equal(shims, join(pinBin, 'heavy'), 'the heavy-command shims before it (#1298)');
   assert.deepEqual(t.cargo.slice(0, 3), [join(shims, 'cargo'), '../heavy-shim', join(pinBin, 'heavy-unit')], 'a bare cargo is the shim, with heavy-unit pinned beside it');
-  assert.equal(t.env.CITADEL_HEAVY_DIR, join(root, 'projects', '.heavy'), "in the projects folder every container mounts");
+  assert.equal(t.env.CITADEL_HEAVY_DIR, join(root, 'projects', '.heavy'), 'in the projects folder every container mounts');
   assert.match(t.env.CITADEL_HEAVY_WHO, /^P[\d.]+ #\d+$/);
   assert.equal(t.env.CARGO_BUILD_JOBS, '4');
   // The land tool's land.sh on the host queues in the same slots, under the same name.
@@ -392,10 +407,12 @@ test('create_ticket lists properties but still starts a minion when a stale sess
   const bodies: any[] = [];
   const api = createServer((req, res) => {
     let body = '';
-    req.on('data', (d) => (body += d)).on('end', () => {
-      bodies.push(JSON.parse(body || '{}'));
-      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ id: 40, number: 12, title: 'X', status: 'new', created_by: 'Taskmaster' }));
-    });
+    req
+      .on('data', (d) => (body += d))
+      .on('end', () => {
+        bodies.push(JSON.parse(body || '{}'));
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ id: 40, number: 12, title: 'X', status: 'new', created_by: 'Taskmaster' }));
+      });
   });
   const apiPort = await tmp.serve(api);
   const mcp = tmp.spawn(process.execPath, [MCP_SERVER], {
@@ -433,21 +450,21 @@ test('create_ticket lists properties but still starts a minion when a stale sess
   }
 });
 
-test('a feature minion\'s first turn opens with the done-lines rule, moved out of every minion\'s prompt (#1574)', async () => {
+test("a feature minion's first turn opens with the done-lines rule, moved out of every minion's prompt (#1574)", async () => {
   const feature = await turn('ticket', 'connected', {}, undefined, undefined, { type: 'feature' });
   assert.match(feature.message, /Done lines \(#1115\): on a feature, before any code/);
   assert.doesNotMatch(feature.system, /Done lines \(#1115\)/);
   assert.doesNotMatch((await turn('ticket', 'connected', {}, undefined, undefined, { type: 'bug' })).message, /Done lines/);
 });
 
-test('a scheme with Fable off tells its turns, so the kit\'s tier line leaves Fable out (#1574)', async () => {
+test("a scheme with Fable off tells its turns, so the kit's tier line leaves Fable out (#1574)", async () => {
   assert.equal((await turn('ticket', 'connected')).env.CITADEL_FABLE_OFF, undefined);
   const p = store.createProject(`P${Math.random()}`, null);
   store.setProjectSettings(p.id, { fable_ok: 'off' });
   assert.equal((await turn('ticket', 'connected', {}, undefined, p.id)).env.CITADEL_FABLE_OFF, '1');
 });
 
-test("only the scheme whose code this server runs hears about deploys, pending-deploy and previews", async () => {
+test('only the scheme whose code this server runs hears about deploys, pending-deploy and previews', async () => {
   const repo = join(root, 'served-repo');
   mkdirSync(repo, { recursive: true });
   const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' }).trim();

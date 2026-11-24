@@ -15,14 +15,16 @@ const dotnet = existsSync(home) ? home : 'dotnet';
 const found = spawnSync(dotnet, ['--list-sdks'], { encoding: 'utf8' });
 const skip = found.error || !/^\d+\./m.test(found.stdout ?? '') ? 'no .NET SDK' : false;
 
-test('the launcher\'s trial rules pass their tests', { skip, timeout: 240_000 }, () => {
+test("the launcher's trial rules pass their tests", { skip, timeout: 240_000 }, () => {
   // Built in a copy, so the kit folder gets no obj/ or bin/.
   const tmp = mkdtempSync(join(tmpdir(), 'launcher-trial-'));
   try {
     cpSync(join(src, 'Trial.cs'), join(tmp, 'Trial.cs'));
     cpSync(join(src, 'tests'), join(tmp, 'tests'), { recursive: true, filter: (p) => !/[\\/](obj|bin)$/.test(p) });
     const r = spawnSync(dotnet, ['run', '--project', join(tmp, 'tests/TrialTests.csproj'), '-nologo', '-v', 'q'], {
-      cwd: tmp, encoding: 'utf8', timeout: 230_000,
+      cwd: tmp,
+      encoding: 'utf8',
+      timeout: 230_000,
       env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1', DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1' },
     });
     const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;

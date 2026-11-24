@@ -10,16 +10,37 @@ class El {
     Object.assign(this, { tag, children: [], attrs: {}, dataset: {}, listeners: {}, hidden: false, className: '', textContent: '' });
     this.classList = { add() {}, remove() {} };
   }
-  get firstChild() { return this.children[0] ?? null; }
-  append(...kids) { for (const k of kids) this.children.push(k); }
-  replaceChildren(...kids) { this.children = []; this.append(...kids); }
-  setAttribute(k, v) { this.attrs[k] = v; }
-  addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
-  removeEventListener(type, fn) { this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn); }
-  dispatch(type, props = {}) { for (const fn of this.listeners[type] ?? []) fn({ type, target: this, ...props }); }
-  querySelectorAll() { return []; }
-  contains() { return false; }
-  set innerHTML(_) { this.content = { firstElementChild: new El('div') }; }
+  get firstChild() {
+    return this.children[0] ?? null;
+  }
+  append(...kids) {
+    for (const k of kids) this.children.push(k);
+  }
+  replaceChildren(...kids) {
+    this.children = [];
+    this.append(...kids);
+  }
+  setAttribute(k, v) {
+    this.attrs[k] = v;
+  }
+  addEventListener(type, fn) {
+    (this.listeners[type] ??= []).push(fn);
+  }
+  removeEventListener(type, fn) {
+    this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
+  }
+  dispatch(type, props = {}) {
+    for (const fn of this.listeners[type] ?? []) fn({ type, target: this, ...props });
+  }
+  querySelectorAll() {
+    return [];
+  }
+  contains() {
+    return false;
+  }
+  set innerHTML(_) {
+    this.content = { firstElementChild: new El('div') };
+  }
 }
 
 /** A scroller with a height: `content` px of log in a box `clientHeight` tall. Like a browser, setting
@@ -29,14 +50,20 @@ class Scroller extends El {
     super('div');
     Object.assign(this, { content: 0, clientHeight: 400, top: 0, queued: false });
   }
-  get scrollHeight() { return Math.max(this.content, this.clientHeight); }
-  get scrollTop() { return this.top; }
+  get scrollHeight() {
+    return Math.max(this.content, this.clientHeight);
+  }
+  get scrollTop() {
+    return this.top;
+  }
   set scrollTop(v) {
     const top = Math.max(0, Math.min(v, this.scrollHeight - this.clientHeight));
     if (top !== this.top) this.queued = true;
     this.top = top;
   }
-  get atEnd() { return this.top === this.scrollHeight - this.clientHeight; }
+  get atEnd() {
+    return this.top === this.scrollHeight - this.clientHeight;
+  }
   /** A person scrolling to `top`: their gesture first, then the scroll. */
   scrollBy(dy, gesture = { type: 'wheel', deltaY: dy }) {
     (gesture.type === 'keydown' ? doc : this).dispatch(gesture.type, gesture); // keys reach document, focus being on body
@@ -53,13 +80,22 @@ globalThis.document = Object.assign(doc, { createElement: (tag) => new El(tag), 
 globalThis.requestAnimationFrame = (fn) => frames.push(fn);
 globalThis.cancelAnimationFrame = () => {};
 globalThis.ResizeObserver = class {
-  constructor(fn) { Object.assign(this, { fn, targets: new Set() }); observers.push(this); }
-  observe(t) { this.targets.add(t); }
-  disconnect() { this.targets.clear(); }
+  constructor(fn) {
+    Object.assign(this, { fn, targets: new Set() });
+    observers.push(this);
+  }
+  observe(t) {
+    this.targets.add(t);
+  }
+  disconnect() {
+    this.targets.clear();
+  }
 };
 Object.defineProperty(performance, 'now', { value: () => clock, configurable: true });
 /** Layout changed the size of `target`: its observers hear of it. */
-const resized = (target) => { for (const o of observers) if (o.targets.has(target)) o.fn([{ target }]); };
+const resized = (target) => {
+  for (const o of observers) if (o.targets.has(target)) o.fn([{ target }]);
+};
 
 const { mountChat } = await import('../public/ui/chat.js');
 let box;
@@ -88,7 +124,7 @@ function mount() {
   return { chat, log, latest };
 }
 
-test('a block that fills in after mounting keeps the log at the end, even when the kit\'s own scroll event arrives late', () => {
+test("a block that fills in after mounting keeps the log at the end, even when the kit's own scroll event arrives late", () => {
   const { chat, log, latest } = mount();
   // The history card's fetch lands: the log grows before the draw's scroll event is delivered.
   box.content = 1500;
@@ -116,7 +152,7 @@ test('a scroller that shrinks (an undo bar, a phone keyboard) stays at the end',
   chat.destroy();
 });
 
-test('only a person\'s gesture lets go of the end; coming back to it follows again', () => {
+test("only a person's gesture lets go of the end; coming back to it follows again", () => {
   const { chat, log, latest } = mount();
   // Wheeling down at the end while the log grows doesn't let go.
   box.content = 1100;
@@ -163,7 +199,7 @@ test('only a person\'s gesture lets go of the end; coming back to it follows aga
   chat.destroy();
 });
 
-test('a scroll that isn\'t a person\'s, while following, goes back to the end', () => {
+test("a scroll that isn't a person's, while following, goes back to the end", () => {
   const { chat, latest } = mount();
   clock += 5000;
   box.scrollTop = 100; // scroll anchoring, a layout jump: nobody asked to leave the end

@@ -9,14 +9,7 @@ export type NewMinionSpec = { title: string; props: Record<string, unknown>; mod
  * any failure after that deletes the row, so a refused property (an archived type) or a folder that can't be made
  * leaves nothing behind. The error that refused it is thrown as it was.
  */
-export async function makeMinion(
-  store: Store,
-  project: Project,
-  m: NewMinionSpec,
-  by: string,
-  makeDir: (id: number, number: number) => Promise<{ cwd: string; branch: string | null }>,
-  afterWrites: () => Promise<unknown> = async () => {},
-) {
+export async function makeMinion(store: Store, project: Project, m: NewMinionSpec, by: string, makeDir: (id: number, number: number) => Promise<{ cwd: string; branch: string | null }>, afterWrites: () => Promise<unknown> = async () => {}) {
   store.props.check(project.id, m.props);
   const { id, number } = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'bypassPermissions', created_by: by });
   try {

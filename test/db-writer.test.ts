@@ -12,7 +12,6 @@ import { attachEventsIfThere } from '../src/events-db.ts';
 import { atWholeStep } from '../src/reader.ts';
 import { until } from './wait.ts';
 
-
 // #795: with WAL and synchronous=NORMAL, the first write after a checkpoint fsyncs the WAL's new header on the
 // writer's thread, and on the event loop a stalled disk held the whole server (14.3 s, #791). The server's void
 // writes run on a worker of their own; `delayMs` stands in for the stalled fsync.
@@ -41,8 +40,12 @@ test('a write on a stalled disk never holds the event loop; reads go on, stale, 
   const t = ticket(store);
   const title = () => store.getTicket(t.id)!.title;
   w.drain();
-  let worst = 0, last = performance.now();
-  const tick = setInterval(() => { worst = Math.max(worst, performance.now() - last); last = performance.now(); }, 10);
+  let worst = 0,
+    last = performance.now();
+  const tick = setInterval(() => {
+    worst = Math.max(worst, performance.now() - last);
+    last = performance.now();
+  }, 10);
   const t0 = performance.now();
   for (let i = 0; i < 4; i++) store.updateTicket(t.id, { title: `new ${i}` }); // 1.6 s of writes on the worker
   // Sending didn't wait for the worker: the writes are still queued (and `worst` below shows no send held the loop).
@@ -94,7 +97,7 @@ test('a reader pinned at a whole step keeps the main, state and chat files as th
   assert.deepEqual([reader.getTicket(t.id)!.title, reader.listEvents(t.id).length, states()], ['later', before + 1, 1]);
 });
 
-test('a step the server\'s thread opened holds readers off until its last write has run, then they see all of it', async () => {
+test("a step the server's thread opened holds readers off until its last write has run, then they see all of it", async () => {
   const { store, w } = open(200);
   const t = ticket(store);
   await stepsClosed(w);
@@ -112,7 +115,9 @@ test('a step the server\'s thread opened holds readers off until its last write 
 test('a get-then-set of a setting on a stalled disk keeps every update', () => {
   const { store, w } = open(300);
   const push = (v: string) => store.setSetting('goes', [...(store.getSetting<string[]>('goes') ?? []), v]);
-  push('cara'); push('josh'); push('cody');
+  push('cara');
+  push('josh');
+  push('cody');
   assert.deepEqual(store.getSetting('goes'), ['cara', 'josh', 'cody'], 'read before they land');
   store.deleteSetting('goes');
   assert.equal(store.getSetting('goes'), null);
@@ -121,7 +126,7 @@ test('a get-then-set of a setting on a stalled disk keeps every update', () => {
   assert.deepEqual(store.getSetting('goes'), ['again'], 'and the file agrees once they land');
 });
 
-test('a card\'s cached row is dropped again when its change lands, not only when it is sent', async () => {
+test("a card's cached row is dropped again when its change lands, not only when it is sent", async () => {
   const { store, w } = open(150);
   const t = ticket(store);
   const e = store.addEvent(t.id, 'plan', { id: 'c1', status: 'pending' });
@@ -134,7 +139,7 @@ test('a card\'s cached row is dropped again when its change lands, not only when
   assert.equal(card(), 'approved');
 });
 
-test('a machine\'s or a job\'s write is read back at once even on a stalled disk: the code acts on it next (main red, Nov 21)', () => {
+test("a machine's or a job's write is read back at once even on a stalled disk: the code acts on it next (main red, Nov 21)", () => {
   const { store, w } = open(200);
   const id = store.createMachine('box', 'x', 'cara', null).id;
   w.drain();
@@ -145,7 +150,7 @@ test('a machine\'s or a job\'s write is read back at once even on a stalled disk
   assert.ok(store.jobKind(id, 'h'), 'a standing go is there for the start that follows it');
 });
 
-test('turning autocheckpoint off reaches the server\'s own connection at once', () => {
+test("turning autocheckpoint off reaches the server's own connection at once", () => {
   const { store } = open(200);
   const pragma = () => (store.db.prepare('PRAGMA wal_autocheckpoint').get() as { wal_autocheckpoint: number }).wal_autocheckpoint;
   store.autoCheckpoint(false);
@@ -154,7 +159,7 @@ test('turning autocheckpoint off reaches the server\'s own connection at once', 
   assert.equal(pragma(), 1000);
 });
 
-test('a write on the server\'s thread that can\'t wait out the queue is refused, not run ahead of it', () => {
+test("a write on the server's thread that can't wait out the queue is refused, not run ahead of it", () => {
   const { store, w } = open(300, 50);
   store.setSetting('k', 'queued');
   assert.throws(() => store.createProject('late', null), /refused.*1 writes behind/);
@@ -163,7 +168,7 @@ test('a write on the server\'s thread that can\'t wait out the queue is refused,
   assert.equal(store.getSetting('k'), 'queued');
 });
 
-test('a write on the server\'s thread that waits long for the queue is named in the health log (#1495)', () => {
+test("a write on the server's thread that waits long for the queue is named in the health log (#1495)", () => {
   const { store, w } = open(SLOW_DRAIN_MS + 200);
   store.setSetting('k', 'queued');
   store.createProject('late', null); // a VALUE_WRITES call: waits out the slow write ahead of it
@@ -219,7 +224,15 @@ test('addEvent hands out ids at once, past any row another connection wrote', ()
   const c = store.addEvent(t.id, 'note', { text: 'c' });
   assert.equal(c.id, b.id + 2);
   w.drain();
-  assert.deepEqual(store.listEvents(t.id).map((e) => [e.id, JSON.parse(e.data).text ?? null]), [[a.id, 'a'], [b.id, 'b'], [b.id + 1, null], [c.id, 'c']]);
+  assert.deepEqual(
+    store.listEvents(t.id).map((e) => [e.id, JSON.parse(e.data).text ?? null]),
+    [
+      [a.id, 'a'],
+      [b.id, 'b'],
+      [b.id + 1, null],
+      [c.id, 'c'],
+    ],
+  );
 });
 
 test('a write that returns a value waits for the queue, and what it writes inside runs with it', () => {
@@ -246,18 +259,30 @@ test('a read in a request still waits only READ_WAIT_MS; awaiting its own writes
   assert.ok(w.drain());
 });
 
-test('a response waits for its own request\'s writes, however slow, off the event loop (#1244)', async () => {
+test("a response waits for its own request's writes, however slow, off the event loop (#1244)", async () => {
   const { store, w } = open(READ_WAIT_MS * 3);
   const seen = () => {
     const other = new DatabaseSync(store.path, { readOnly: true });
-    try { return other.prepare("SELECT value FROM settings WHERE key = 'seen'").get()?.value; } finally { other.close(); }
+    try {
+      return other.prepare("SELECT value FROM settings WHERE key = 'seen'").get()?.value;
+    } finally {
+      other.close();
+    }
   };
-  store.setSetting('other', 'not this request\'s');
-  assert.equal(writes.request.run({ seq: 0 }, () => writes.landed!()), null, 'a request that wrote nothing waits for nothing');
+  store.setSetting('other', "not this request's");
+  assert.equal(
+    writes.request.run({ seq: 0 }, () => writes.landed!()),
+    null,
+    'a request that wrote nothing waits for nothing',
+  );
   await writes.request.run({ seq: 0 }, async () => {
     store.setSetting('seen', 'yes');
-    let worst = 0, last = performance.now();
-    const tick = setInterval(() => { worst = Math.max(worst, performance.now() - last); last = performance.now(); }, 10);
+    let worst = 0,
+      last = performance.now();
+    const tick = setInterval(() => {
+      worst = Math.max(worst, performance.now() - last);
+      last = performance.now();
+    }, 10);
     await writes.landed!();
     clearInterval(tick);
     assert.equal(seen(), '"yes"', 'a client reading the file sees it');
@@ -271,7 +296,16 @@ test('a response waits for its own request\'s writes, however slow, off the even
 test('a response whose own writes outlast the wait goes out once, without them (#1244)', async () => {
   const { store, w } = open(READ_WAIT_MS * 20, READ_WAIT_MS * 2);
   const sent: boolean[] = []; // was the write still queued when the reply went out
-  const res = { destroyed: false, headersSent: false, writeHead() { this.headersSent = true; }, end() { sent.push(!!w.queued()); } };
+  const res = {
+    destroyed: false,
+    headersSent: false,
+    writeHead() {
+      this.headersSent = true;
+    },
+    end() {
+      sent.push(!!w.queued());
+    },
+  };
   writes.request.run({ seq: 0 }, () => {
     store.setSetting('slow', 1);
     json(res as never, 200, { ok: true });
@@ -282,7 +316,7 @@ test('a response whose own writes outlast the wait goes out once, without them (
   assert.equal(sent.length, 1, 'sent once, never held again');
 });
 
-test('if the worker stops, writes run on the server\'s thread again', async () => {
+test("if the worker stops, writes run on the server's thread again", async () => {
   const { store, w } = open();
   await w.stop();
   const r = store.setSetting('k', 'inline');
@@ -295,7 +329,9 @@ test('writes still queued when the process exits are written first, and writes m
   const dir = join(root, 'exit');
   execFileSync('mkdir', ['-p', dir]);
   const script = join(dir, 'exit.ts');
-  writeFileSync(script, `
+  writeFileSync(
+    script,
+    `
     import { Store } from ${JSON.stringify(join(import.meta.dirname, '..', 'src', 'db.ts'))};
     import { writeOffThread } from ${JSON.stringify(join(import.meta.dirname, '..', 'src', 'db-writer.ts'))};
     const store = new Store(${JSON.stringify(join(dir, 'coordinator.db'))});
@@ -303,7 +339,8 @@ test('writes still queued when the process exits are written first, and writes m
     for (let i = 0; i < 10; i++) store.setSetting('k' + i, i);
     process.on('exit', () => store.setSetting('at exit', 1));
     process.exit(0);
-  `);
+  `,
+  );
   execFileSync(process.execPath, [script]);
   const db = new DatabaseSync(join(dir, 'coordinator.db'), { readOnly: true });
   assert.equal((db.prepare("SELECT count(*) AS n FROM settings WHERE key LIKE 'k%' OR key = 'at exit'").get() as { n: number }).n, 11);
@@ -314,26 +351,71 @@ test('writes still queued when the process exits are written first, and writes m
 // slow disk. Every method whose source runs a statement is in WRITES, VALUE_WRITES or here, with why.
 const STAYS_ON_THREAD: Record<string, string> = {
   // The constructor's one-time migrations: they run before the writer starts.
-  ...Object.fromEntries(['attachState', 'moveSharedViews', 'serverLoginOwnerOnly', 'groupByType', 'closedAtFromNotes', 'dropEarlyPeekAurasBuilds',
-    'shippingFromRules', 'lendingLists', 'numberTickets', 'settleBuilds', 'props.seed', 'props.insertSeed', 'schedules.fillTriggers'].map((m) => [m, 'boot'])),
+  ...Object.fromEntries(['attachState', 'moveSharedViews', 'serverLoginOwnerOnly', 'groupByType', 'closedAtFromNotes', 'dropEarlyPeekAurasBuilds', 'shippingFromRules', 'lendingLists', 'numberTickets', 'settleBuilds', 'props.seed', 'props.insertSeed', 'schedules.fillTriggers'].map((m) => [m, 'boot'])),
   // Helpers that run inside a listed write, with it.
   // The usage ledger batches counts in memory and flushes on the server's thread on a timer (#1306).
-  'usage.flush': 'the ledger\'s own timer', 'usage.prune': 'the ledger\'s own timer', 'usage.rows': 'an admin read that flushes first',
+  'usage.flush': "the ledger's own timer",
+  'usage.prune': "the ledger's own timer",
+  'usage.rows': 'an admin read that flushes first',
   dropAudit: 'inside sweepTurnAudit and deleteTurnAudit',
   'props.insertValue': 'inside props.registerValues and props.review',
   'props.putStage': 'inside props.statusChanged',
   'props.statusChanged': 'inside updateTicket',
-  'props.startStage': 'called by newMinion (src/new-minion.ts), which runs it with the ticket\'s other writes',
+  'props.startStage': "called by newMinion (src/new-minion.ts), which runs it with the ticket's other writes",
   // Not moved yet: rare, or they write only now and then and would wait for the queue on every call as a VALUE_WRITE.
-  ...Object.fromEntries(['putSecret', 'deleteSecret', 'splitScheme', 'putClaudeState', 'forgetJobKind', 'props.backfill', 'schedules.setBrief',
-    'schedules.categorize', 'reviews.ensureAgents', 'reviews.recordRun', 'reviews.recordVerdict', 'reviews.removeVerdict', 'reviews.recordRefutes',
-    'reviews.removeLesson', 'reviews.backfill', 'claims.take', 'claims.release', 'claims.releaseHeldBy', 'claims.setQueue', 'claims.passOn', 'lessons.add', 'lessons.take', 'ideas.upsert',
-    'ideas.restatus', 'ideas.restatusWith', 'ideas.warmUp', 'ideas.syncSteps', 'ideas.linkStarts', 'ideas.sync', 'ideas.laterNote', 'minionIndex.indexTicket', 'minionIndex.syncHandoffs',
-    'minionIndex.deleteTicket', 'memoryProposals.create', 'memoryProposals.decide', 'memoryProposals.restored', 'memoryProposals.prune', 'ideas.edit',
-    'ideas.linkHandoff', 'ideas.fromHandoff', 'ideas.join', 'ideas.readPage', 'ideas.now', 'ideas.fromChat', 'ideas.soon', 'minionIndex.indexClosed'].map((m) => [m, 'not moved yet'])),
+  ...Object.fromEntries(
+    [
+      'putSecret',
+      'deleteSecret',
+      'splitScheme',
+      'putClaudeState',
+      'forgetJobKind',
+      'props.backfill',
+      'schedules.setBrief',
+      'schedules.categorize',
+      'reviews.ensureAgents',
+      'reviews.recordRun',
+      'reviews.recordVerdict',
+      'reviews.removeVerdict',
+      'reviews.recordRefutes',
+      'reviews.removeLesson',
+      'reviews.backfill',
+      'claims.take',
+      'claims.release',
+      'claims.releaseHeldBy',
+      'claims.setQueue',
+      'claims.passOn',
+      'lessons.add',
+      'lessons.take',
+      'ideas.upsert',
+      'ideas.restatus',
+      'ideas.restatusWith',
+      'ideas.warmUp',
+      'ideas.syncSteps',
+      'ideas.linkStarts',
+      'ideas.sync',
+      'ideas.laterNote',
+      'minionIndex.indexTicket',
+      'minionIndex.syncHandoffs',
+      'minionIndex.deleteTicket',
+      'memoryProposals.create',
+      'memoryProposals.decide',
+      'memoryProposals.restored',
+      'memoryProposals.prune',
+      'ideas.edit',
+      'ideas.linkHandoff',
+      'ideas.fromHandoff',
+      'ideas.join',
+      'ideas.readPage',
+      'ideas.now',
+      'ideas.fromChat',
+      'ideas.soon',
+      'minionIndex.indexClosed',
+    ].map((m) => [m, 'not moved yet']),
+  ),
 };
 
-test('every Store method that writes is sent to the worker or listed as staying on the server\'s thread (#1285)', () => {
+test("every Store method that writes is sent to the worker or listed as staying on the server's thread (#1285)", () => {
   const store = new Store(join(root, 'lists.db')) as any;
   const listed = new Set<string>([...WRITES, ...VALUE_WRITES]);
   const runsSql = /\.run\(|\bdb\.exec\(|[`'"]\s*(INSERT|UPDATE|DELETE|REPLACE)\s/i;
@@ -349,7 +431,7 @@ test('every Store method that writes is sent to the worker or listed as staying 
     // A method writes if it runs a statement, or calls a method of its own object that does and is in neither list
     // (a listed one it calls is sent or waits by itself).
     const found = new Set([...src].filter(([, s]) => runsSql.test(s)).map(([k]) => k));
-    for (let grew = true; grew;) {
+    for (let grew = true; grew; ) {
       grew = false;
       const via = [...found].filter((w) => !listed.has(prefix + w));
       for (const [k, s] of src) if (!found.has(k) && via.some((w) => s.includes(`this.${w}(`))) found.add(k), (grew = true);
@@ -361,9 +443,9 @@ test('every Store method that writes is sent to the worker or listed as staying 
   for (const [k, v] of Object.entries(store)) {
     if (v && typeof v === 'object' && v !== store.db && !(v instanceof Map) && !(v instanceof Set) && Object.getPrototypeOf(v) !== Object.prototype) scan(v, `${k}.`);
   }
-  assert.ok(writers.includes('touch') && writers.includes('props.set'), 'the scan finds writes, its own and its parts\'');
+  assert.ok(writers.includes('touch') && writers.includes('props.set'), "the scan finds writes, its own and its parts'");
   const missed = writers.filter((m) => !listed.has(m) && !(m in STAYS_ON_THREAD));
   assert.deepEqual(missed, [], `these write but are in neither WRITES nor VALUE_WRITES (src/db-writer.ts): ${missed.join(', ')}. A void write goes in WRITES, one whose result its callers use in VALUE_WRITES.`);
   const stale = Object.keys(STAYS_ON_THREAD).filter((m) => !writers.includes(m) || listed.has(m));
-  assert.deepEqual(stale, [], 'listed as staying on the server\'s thread, but gone, no longer writing, or now in a list');
+  assert.deepEqual(stale, [], "listed as staying on the server's thread, but gone, no longer writing, or now in a list");
 });

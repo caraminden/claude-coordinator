@@ -17,8 +17,7 @@ testPins();
 const old = { base: ['# Rules', 'Ship it with hand_off_land.', 'Keep notes short.'], files: ['Link files by path.'] };
 const now = 10 * HOLD_CAP_MS;
 const recordOf = (sections = old, extra: Partial<HoldRecord> = {}): HoldRecord => ({ hash: promptHash(sections), since: now - 60_000, session: 's', sent: promptHash(sections), ...extra });
-const decide = (current: typeof old, o: Partial<Parameters<typeof decideHold>[0]> = {}) =>
-  decideHold({ record: recordOf(), held: old, current, session: 's', lastEnd: now - 60_000, now, ...o });
+const decide = (current: typeof old, o: Partial<Parameters<typeof decideHold>[0]> = {}) => decideHold({ record: recordOf(), held: old, current, session: 's', lastEnd: now - 60_000, now, ...o });
 const edited = { ...old, base: ['# Rules', 'Ship it with hand_off_land, risk label and all.', 'Keep notes short.'] };
 
 test('a warm session keeps its held prompt and gets the changed lines once', () => {
@@ -45,7 +44,10 @@ test('it takes the current prompt when cold, past the cap, on a new session, or 
   const longer = { ...old, base: [...old.base, 'x'.repeat(NOTE_MAX)] };
   const long = take({}, longer);
   assert.equal(long.reload, 'too-long');
-  for (const [d, want] of [[take({ lastEnd: null }), edited], [long, longer]] as const) {
+  for (const [d, want] of [
+    [take({ lastEnd: null }), edited],
+    [long, longer],
+  ] as const) {
     assert.equal(d.held, false);
     assert.deepEqual(d.system, want);
     assert.equal(d.note, null);
@@ -105,7 +107,9 @@ process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
 const seen = join(root, 'seen.jsonl');
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 const fs = require('node:fs');
 const system = fs.readFileSync(process.argv[process.argv.indexOf('--append-system-prompt-file') + 1], 'utf8');
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
@@ -114,11 +118,17 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done', session_id: 'sess', total_cost_usd: 0.01, usage: { input_tokens: 1, output_tokens: 1 } }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 const project = store.createProject('P', null);
 
 async function turn(id: number, text: string) {

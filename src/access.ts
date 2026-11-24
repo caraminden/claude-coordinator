@@ -64,7 +64,10 @@ export function turnPayer(store: Store, ticket: Ticket, project: Project, waitin
   // there (a card answer, R5, a plan verdict, a file comment, /backup) runs on their login. Relays and held mail name
   // no person, so they leave it on its person's.
   if (ticket.kind === 'coordinator' && ticket.coordinator_of != null) {
-    const starter = batch.filter((m) => !m.from).map(askOf).find((a) => a);
+    const starter = batch
+      .filter((m) => !m.from)
+      .map(askOf)
+      .find((a) => a);
     return inScheme(starter?.p ?? ticket.coordinator_of);
   }
   for (const m of msgs.length ? msgs : held) {
@@ -195,9 +198,7 @@ export function taskmasterTargets(store: Store, from: number, personId: number |
   const user = personId === null ? undefined : store.getUser(personId);
   const who = { uid: user?.id, admin: store.isAdmin(user) };
   const inFrom = store.canSee(who, from);
-  return store.listProjects().filter((p) => p.id !== from && (p.id === GLOBAL_OWNER
-    || (inFrom && store.canSee(who, p.id))
-    || (from === GLOBAL_OWNER && now - (store.getSetting<number>(askedCitadelKey(p.id)) ?? -Infinity) < CITADEL_REPLY_MS)));
+  return store.listProjects().filter((p) => p.id !== from && (p.id === GLOBAL_OWNER || (inFrom && store.canSee(who, p.id)) || (from === GLOBAL_OWNER && now - (store.getSetting<number>(askedCitadelKey(p.id)) ?? -Infinity) < CITADEL_REPLY_MS)));
 }
 
 /**
@@ -212,8 +213,10 @@ export function adminAskRefusal(store: Store, ticketId: number): string | null {
 }
 
 /** Whose ask a message is (src/runner.ts personOf): a person by name, or for a relay the asker of the turn that sent it. */
-export const messagePerson = (store: Store) => (author: string, from?: number): number | null => {
-  if (from) return store.turnAsker(from);
-  const u = store.findUser('name', author);
-  return u && !u.disabled_at ? u.id : null;
-};
+export const messagePerson =
+  (store: Store) =>
+  (author: string, from?: number): number | null => {
+    if (from) return store.turnAsker(from);
+    const u = store.findUser('name', author);
+    return u && !u.disabled_at ? u.id : null;
+  };

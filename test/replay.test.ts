@@ -21,7 +21,10 @@ test('the stub gives a repeat call its recorded results in order, the same tool 
       { name: 'mcp__app__get', input: { id: 1 }, ok: true, result: 'second' },
       { name: 'mcp__app__save', input: { id: 1, color: 'red' }, ok: false, result: 'nope' },
     ]),
-    turn(2, [{ name: 'mcp__app__get', input: { id: 2 }, ok: true, result: 'two' }, { name: 'mcp__app__find', input: { q: 'a' }, ok: true, result: 'in turn 2' }]),
+    turn(2, [
+      { name: 'mcp__app__get', input: { id: 2 }, ok: true, result: 'two' },
+      { name: 'mcp__app__find', input: { q: 'a' }, ok: true, result: 'in turn 2' },
+    ]),
     turn(3, [{ name: 'mcp__app__find', input: { q: 'b' }, ok: true, result: 'in turn 3' }]),
   ];
   const used = new Set<object>();
@@ -30,7 +33,7 @@ test('the stub gives a repeat call its recorded results in order, the same tool 
   assert.deepEqual(answer(chat, 1, 'mcp__app__get', { id: 1 }, used), { ok: true, text: 'second' }, 'past the recording: the last again');
   assert.deepEqual(answer(chat, 1, 'mcp__app__get', { id: 2 }, used), { ok: true, text: 'two' });
   assert.deepEqual(answer(chat, 1, 'mcp__app__save', { id: 1, color: 'blue' }, used), { ok: false, text: 'nope' }, 'other arguments: the closest call, error and all');
-  assert.equal(answer(chat, 3, 'mcp__app__find', { q: 'z' }, new Set()).text, 'in turn 3', 'equally unlike: the replayed turn\'s own');
+  assert.equal(answer(chat, 3, 'mcp__app__find', { q: 'z' }, new Set()).text, 'in turn 3', "equally unlike: the replayed turn's own");
   assert.equal(answer(chat, 2, 'mcp__app__find', { q: 'z' }, new Set()).text, 'in turn 2');
   const none = answer(chat, 1, 'mcp__app__delete', {}, used);
   assert.equal(none.ok, false);
@@ -40,7 +43,9 @@ test('the stub gives a repeat call its recorded results in order, the same tool 
 // A stand-in for claude: reads the turn's system text and MCP config as the real one would, calls the stub's get
 // tool over stdio, and replies with what it got. It keeps a transcript where claude does, for the run to delete.
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!/usr/bin/env node
+writeFileSync(
+  fake,
+  `#!/usr/bin/env node
 const fs = require('fs'), path = require('path'), { spawn } = require('child_process');
 const argv = process.argv.slice(2), opt = (k) => { const i = argv.indexOf(k); return i < 0 ? undefined : argv[i + 1]; };
 const system = fs.readFileSync(opt('--append-system-prompt-file'), 'utf8');
@@ -81,7 +86,8 @@ process.stdin.on('data', (d) => {
   rpc({ id: 2, method: 'tools/call', params: { name: 'get', arguments: { id: 1 } } });
 });
 process.stdin.on('end', () => process.exit(0));
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 test('a run reruns each kept chat on the old and new prompt, writes X and Y with the key outside, and leaves no transcripts', { timeout: 60_000 }, async () => {
@@ -108,7 +114,7 @@ test('a run reruns each kept chat on the old and new prompt, writes X and Y with
     const y = md.split('### Y')[1].split('### Originally')[0];
     assert.match(x, k.X === 'new' ? /NEW PROMPT/ : /OLD PROMPT/);
     assert.match(y, k.Y === 'new' ? /NEW PROMPT/ : /OLD PROMPT/);
-    assert.doesNotMatch(md.replace(/(NEW|OLD) PROMPT/g, ''), /\b(old|new)\b/i, 'nothing but the fake\'s echo says which side is which');
+    assert.doesNotMatch(md.replace(/(NEW|OLD) PROMPT/g, ''), /\b(old|new)\b/i, "nothing but the fake's echo says which side is which");
     assert.match(x, /tools get \| resumed false/);
     if (k.file.startsWith('a-')) {
       assert.match(md, /Make my aura blue\.[\s\S]*Brighter\./);

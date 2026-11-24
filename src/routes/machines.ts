@@ -26,7 +26,7 @@ const MAX_MACHINE_NOTES = 2000;
 function machineName(v: unknown): string {
   const name = typeof v === 'string' ? v.trim().toLowerCase() : '';
   if (!MACHINE_NAME.test(name)) throw new HttpError(400, 'Use 1 to 30 lowercase letters, digits and dashes, like godot-laptop');
-  if (RESERVED_NAMES.has(name)) throw new HttpError(400, 'That name is taken by the app\'s own tools');
+  if (RESERVED_NAMES.has(name)) throw new HttpError(400, "That name is taken by the app's own tools");
   if (name.endsWith(WS_SUFFIX)) throw new HttpError(400, `Names can't end in ${WS_SUFFIX}: that's how a machine's workspace tools are named`);
   return name;
 }
@@ -46,7 +46,7 @@ export function machineNotes(v: unknown): string {
 export async function patchMachine(app: Ctx['app'], session: Ctx['session'], machine: Machine, body: any) {
   if (!managesMachine(session, machine)) throw new HttpError(404, 'No such machine');
   const lend = body.lend === undefined ? undefined : cleanLend(body.lend);
-  if (lend === null) throw new HttpError(400, 'lend must be { server: a found MCP server\'s name or null, workspaces: [names] }');
+  if (lend === null) throw new HttpError(400, "lend must be { server: a found MCP server's name or null, workspaces: [names] }");
   let projects: number[] | undefined;
   if (body.projects !== undefined) {
     // A scheme the person can't see isn't theirs to add; one already on the list (an admin's doing) may stay.
@@ -87,7 +87,11 @@ async function machineUpload({ req, res, url, app }: Ctx, machine: Machine) {
   const ticketId = app.machines.workspaceTicket(machine, url.searchParams.get('session') ?? '');
   const ticket = ticketId === null ? undefined : app.store.getTicket(ticketId);
   if (!ticket) throw new HttpError(410, 'No such workspace session');
-  const name = basename((url.searchParams.get('name') ?? '').replace(/\\/g, '/')).replace(/[^\w.-]/g, '_').replace(/^\.+/, '').slice(0, 100) || 'file';
+  const name =
+    basename((url.searchParams.get('name') ?? '').replace(/\\/g, '/'))
+      .replace(/[^\w.-]/g, '_')
+      .replace(/^\.+/, '')
+      .slice(0, 100) || 'file';
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
@@ -113,7 +117,9 @@ async function machineUpload({ req, res, url, app }: Ctx, machine: Machine) {
 
 /** A route a machine's agent calls with its token, which reaches nothing else. */
 const agent = (method: string, path: string, handler: (ctx: Ctx, machine: Machine) => unknown): Route => ({
-  method, path, who: 'machine',
+  method,
+  path,
+  who: 'machine',
   handler(ctx) {
     const machine = ctx.app.machines.authenticate(ctx.req);
     if (!machine) throw new HttpError(401, 'Unknown machine token; make a new one in the Machines panel');
@@ -181,7 +187,9 @@ export const agentRoutes: Route[] = [
   // upload's does, and shows on its landing's wait and Releases. {done, total, file}: tools/progress-reporter.ts's lines; failed: the
   // files failed so far; phase 'rerun' while run-tests.sh reruns them alone, the counts then being the reruns'.
   {
-    method: 'POST', path: '/api/ci-tests', who: 'machine',
+    method: 'POST',
+    path: '/api/ci-tests',
+    who: 'machine',
     async handler({ req, res, app }) {
       const { claims } = await app.ciStore.caller(req);
       const body = await readJson(req, 10_000);
@@ -210,34 +218,39 @@ const managed = (handler: (ctx: Ctx) => unknown) => (ctx: Ctx) => {
   if (!managesMachine(ctx.session, ctx.machine)) throw new HttpError(404, 'No such machine');
   return handler(ctx);
 };
-const turns = { who: ['minion'], refuse: 'Only a minion\'s turn can use a machine' } as const;
+const turns = { who: ['minion'], refuse: "Only a minion's turn can use a machine" } as const;
 
 /** The machines this Taskmaster's turn may see (#307), each as the Machines page shows it plus whom it goes to. */
 function taskmasterMachines({ app, caller, project }: Ctx) {
   const asker = app.store.turnAsker(caller!.id);
-  return app.store.listMachines().filter((m) => taskmasterSeesMachine(app.store, m, project, asker)).map((m) => {
-    const view = app.machines.view(m);
-    return {
-      ...view,
-      owner_name: m.owner_id === null ? null : app.store.getUser(m.owner_id)?.name ?? null,
-      project_names: view.projects.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`),
-      // Whether a minion turn its asker starts here gets it (src/runner.ts): an admin sees more than that.
-      minions_get_it: lendsMachine(app.store, m, project, asker === null ? [] : [asker]),
-      // The machine on the Machines page (#1638), for tool replies and cards to link.
-      page: `#/p/${project.id}/machines/${m.name}`,
-    };
-  });
+  return app.store
+    .listMachines()
+    .filter((m) => taskmasterSeesMachine(app.store, m, project, asker))
+    .map((m) => {
+      const view = app.machines.view(m);
+      return {
+        ...view,
+        owner_name: m.owner_id === null ? null : (app.store.getUser(m.owner_id)?.name ?? null),
+        project_names: view.projects.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`),
+        // Whether a minion turn its asker starts here gets it (src/runner.ts): an admin sees more than that.
+        minions_get_it: lendsMachine(app.store, m, project, asker === null ? [] : [asker]),
+        // The machine on the Machines page (#1638), for tool replies and cards to link.
+        page: `#/p/${project.id}/machines/${m.name}`,
+      };
+    });
 }
 const taskmaster = { who: ['taskmaster'], refuse: 'Only a Taskmaster lists and checks machines here; people use the Machines page' } as const;
 
 /** A scheme's CI runners on the runner agent's PC (#328): members ask, from the page, a minion or the Taskmaster. */
-const runnerAskers = { who: ['person', 'minion', 'taskmaster'], refuse: 'Only a scheme\'s members, its minions and its Taskmaster change its CI runners' } as const;
+const runnerAskers = { who: ['person', 'minion', 'taskmaster'], refuse: "Only a scheme's members, its minions and its Taskmaster change its CI runners" } as const;
 /** Whose ask a call is: the person signed in, or the person whose turn a minion or Taskmaster runs. */
-const askerOf = ({ session, caller, app }: Ctx) => (caller ? app.store.turnAsker(caller.id) : session.uid ?? null);
+const askerOf = ({ session, caller, app }: Ctx) => (caller ? app.store.turnAsker(caller.id) : (session.uid ?? null));
 
 export const machineRoutes: Route[] = [
   {
-    method: 'POST', path: '/api/projects/:project/ci-runners', ...runnerAskers,
+    method: 'POST',
+    path: '/api/projects/:project/ci-runners',
+    ...runnerAskers,
     async handler(ctx) {
       const ask = runnerAsk(await readJson(ctx.req));
       return json(ctx.res, 202, await ctx.app.runnerJobs.start(ctx.project, askerOf(ctx), ask));
@@ -245,39 +258,74 @@ export const machineRoutes: Route[] = [
   },
   {
     // ?wait=<seconds, up to 50> holds the answer until a running job ends.
-    method: 'GET', path: '/api/projects/:project/ci-runners', ...runnerAskers,
+    method: 'GET',
+    path: '/api/projects/:project/ci-runners',
+    ...runnerAskers,
     async handler({ res, url, app, project }) {
       const wait = Math.min(50, Math.max(0, Number(url.searchParams.get('wait')) || 0));
       return json(res, 200, { job: await app.runnerJobs.wait(project.id, wait * 1000) });
     },
   },
   // On the app's own address only when machines have no address of their own (MACHINES_URL).
-  ...agentRoutes.map((r): Route => ({
-    ...r,
-    handler(ctx) {
-      if (ctx.app.machinesUrl) throw new HttpError(403, `Machines connect at ${ctx.app.machinesUrl.origin}, not here`);
-      if (ctx.app.preview) throw new HttpError(403, 'Machines connect to the live app, not a preview');
-      return r.handler(ctx);
-    },
-  })),
+  ...agentRoutes.map(
+    (r): Route => ({
+      ...r,
+      handler(ctx) {
+        if (ctx.app.machinesUrl) throw new HttpError(403, `Machines connect at ${ctx.app.machinesUrl.origin}, not here`);
+        if (ctx.app.preview) throw new HttpError(403, 'Machines connect to the live app, not a preview');
+        return r.handler(ctx);
+      },
+    }),
+  ),
 
   // The CI desktop's load (#534): each PC with a runner agent, for admins and the members of a scheme with runners there.
   {
-    method: 'GET', path: '/api/ci-desktop', ...people,
+    method: 'GET',
+    path: '/api/ci-desktop',
+    ...people,
     // Everyone signed in sees every PC (Cara, 2026-11-11: "they should know if and how much their work is affecting the CI machine").
     handler: ({ res, app }) => json(res, 200, { pcs: app.ciLoad.views() }),
   },
   // The CI page (#968): each scheme they can see with its runners, queue, verdicts, runs and open problems, plus the CI desktop's load.
   {
-    method: 'GET', path: '/api/ci', ...people,
+    method: 'GET',
+    path: '/api/ci',
+    ...people,
     handler: ({ res, app, session }) => {
       // Each red's fix minion as the minions list draws it (#1078): its state, step and note, read now.
-      const schemes = (app.ciHealth?.snapshot((id) => app.store.canSee(session, id)) ?? []).map((s) => ({ ...s, problems: s.problems.map((x) => {
-        const t = x.fixMinion && app.store.getTicketByNumber(s.id, x.fixMinion.number);
-        if (!t) return x;
-        const v = app.runner.view(t);
-        return { ...x, fixTicket: { id: v.id, number: v.number, project_id: v.project_id, title: v.title, status: v.status, state: v.state, note: v.note, last_activity: v.last_activity, created_at: v.created_at, updated_at: v.updated_at, closed_at: v.closed_at, steps: v.steps, step_track: v.step_track, wait: v.wait, open_cards: v.open_cards, approvals: v.approvals, server_work: v.server_work, closing: v.closing, queued: v.queued, ship: v.ship } };
-      }) }));
+      const schemes = (app.ciHealth?.snapshot((id) => app.store.canSee(session, id)) ?? []).map((s) => ({
+        ...s,
+        problems: s.problems.map((x) => {
+          const t = x.fixMinion && app.store.getTicketByNumber(s.id, x.fixMinion.number);
+          if (!t) return x;
+          const v = app.runner.view(t);
+          return {
+            ...x,
+            fixTicket: {
+              id: v.id,
+              number: v.number,
+              project_id: v.project_id,
+              title: v.title,
+              status: v.status,
+              state: v.state,
+              note: v.note,
+              last_activity: v.last_activity,
+              created_at: v.created_at,
+              updated_at: v.updated_at,
+              closed_at: v.closed_at,
+              steps: v.steps,
+              step_track: v.step_track,
+              wait: v.wait,
+              open_cards: v.open_cards,
+              approvals: v.approvals,
+              server_work: v.server_work,
+              closing: v.closing,
+              queued: v.queued,
+              ship: v.ship,
+            },
+          };
+        }),
+      }));
       json(res, 200, { schemes, pcs: app.ciLoad.views(), now: Date.now() });
     },
   },
@@ -285,7 +333,10 @@ export const machineRoutes: Route[] = [
   // scheme at once (not a message to the Taskmaster, as a Status tile's does), a bug on the model table's tier, its turns on the
   // presser's login; its brief is the red's run, link, failing tests and error lines, and the red names it at once.
   {
-    method: 'POST', path: '/api/projects/:project/ci/investigate', who: ['person'], refuse: 'Only people press Investigate',
+    method: 'POST',
+    path: '/api/projects/:project/ci/investigate',
+    who: ['person'],
+    refuse: 'Only people press Investigate',
     handler: async ({ req, res, app, project, session }) => {
       const body = await readJson(req);
       const workflow = Number(body.workflow);
@@ -310,7 +361,9 @@ export const machineRoutes: Route[] = [
   },
   // The Status page (#1123): Citadel's own health and each app's week, the apps scoped to the schemes they can see.
   {
-    method: 'GET', path: '/api/status', ...people,
+    method: 'GET',
+    path: '/api/status',
+    ...people,
     handler: async ({ res, app, session }) => {
       if (!app.status) return json(res, 200, null);
       json(res, 200, await app.status.read({ canSee: (id) => app.store.canSee(session, id), admin: !!session.admin, key: String(session.uid) }));
@@ -319,7 +372,10 @@ export const machineRoutes: Route[] = [
   // Investigate on a Status tile (#1273): the tile's numbers to the clicker's own Taskmaster in the tile's scheme (Cara picked
   // "Your own, in that scheme"), made for them as writing to it would. Only those who can see the scheme get a tile to press.
   {
-    method: 'POST', path: '/api/status/investigate', who: ['person'], refuse: 'Only people press Investigate',
+    method: 'POST',
+    path: '/api/status/investigate',
+    who: ['person'],
+    refuse: 'Only people press Investigate',
     handler: async ({ req, res, app, session }) => {
       if (!app.status) throw new HttpError(404, 'This server keeps no status');
       const body = await readJson(req);
@@ -329,8 +385,13 @@ export const machineRoutes: Route[] = [
       if (!Array.isArray(body.reasons) || body.reasons.length > 10) throw new HttpError(400, 'reasons must be a list of up to 10');
       const maybe = (v: unknown, field: string, max: number) => (v === undefined || v === null || v === '' ? '' : str(v, field, max));
       const sent = app.status.investigate({ canSee: (id) => app.store.canSee(session, id), admin: !!session.admin, key: String(session.uid) }, session.name, {
-        target, tile, title: str(body.title, 'Title', 60), value: str(body.value, 'Value', 200), sub: maybe(body.sub, 'Line', 400),
-        chart: maybe(body.chart, 'Chart', 2000), reasons: body.reasons.map((r: unknown) => str(r, 'Reason', 300)),
+        target,
+        tile,
+        title: str(body.title, 'Title', 60),
+        value: str(body.value, 'Value', 200),
+        sub: maybe(body.sub, 'Line', 400),
+        chart: maybe(body.chart, 'Chart', 2000),
+        reasons: body.reasons.map((r: unknown) => str(r, 'Reason', 300)),
       });
       if (!sent) throw new HttpError(404, 'No such tile you can see');
       const tm = await ensureCoordinatorFor(app, app.store.getProject(sent.scheme)!, session.uid);
@@ -342,10 +403,16 @@ export const machineRoutes: Route[] = [
   // Host load (#1060): citadel-heavy's slots, line and pressure gate, and a week's waits per scheme. Everyone signed in sees it, like the CI desktop's.
   // An app's jobs count under its home scheme (#1068: TWIReader and twireader were two rows).
   {
-    method: 'GET', path: '/api/host-load', ...people,
+    method: 'GET',
+    path: '/api/host-load',
+    ...people,
     handler: async ({ res, app, session }) => {
       if (!app.heavyDir) return json(res, 200, null);
-      const owners = appOwners(app.store.listContraptions(), (id) => app.store.canSee(session, id), (id) => app.store.getProject(id)?.name);
+      const owners = appOwners(
+        app.store.listContraptions(),
+        (id) => app.store.canSee(session, id),
+        (id) => app.store.getProject(id)?.name,
+      );
       const canSee = (id: number) => app.store.canSee(session, id);
       // What runs from which minion, and what closed minions left that was stopped this week (#1365, src/reaper.ts).
       const minions = app.reaper ? byMinion(await app.reaper.running(), app.store, canSee) : [];
@@ -357,7 +424,9 @@ export const machineRoutes: Route[] = [
   { method: 'GET', path: '/api/emulator-lease', ...people, handler: ({ res, app }) => json(res, 200, app.heavyDir ? readEmulatorLease(app.heavyDir) : null) },
   { method: 'GET', path: '/api/machines', ...people, handler: ({ res, app, session }) => json(res, 200, machinesFor(session, app.machines.list())) },
   {
-    method: 'POST', path: '/api/machines', ...people,
+    method: 'POST',
+    path: '/api/machines',
+    ...people,
     async handler({ req, res, app, session }) {
       const body = await readJson(req);
       // A person's machine is their own (#306). An admin's is shared, as before, unless they say it's theirs.
@@ -385,7 +454,9 @@ export const machineRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/machines/:machine/token', ...people,
+    method: 'POST',
+    path: '/api/machines/:machine/token',
+    ...people,
     handler: managed(async ({ req, res, app, machine }) => {
       // A new token locks out whoever holds the old one, the connected agent included.
       const token = app.machines.issueToken(machine.id);
@@ -399,7 +470,9 @@ export const machineRoutes: Route[] = [
   {
     // Its token again, to set up another tool on that computer without a relink (#1355). Only its owner's
     // (Cara, 2026-11-20, "Only its owner"): an admin who can relink a person's machine still can't read its token.
-    method: 'GET', path: '/api/machines/:machine/token', ...people,
+    method: 'GET',
+    path: '/api/machines/:machine/token',
+    ...people,
     handler: managed(({ req, res, app, machine, session }) => {
       if (!(machine.owner_id === null ? session.admin : machine.owner_id === session.uid)) throw new HttpError(403, 'Only its owner can show its token');
       const token = app.machines.shownToken(machine);
@@ -408,12 +481,16 @@ export const machineRoutes: Route[] = [
     }),
   },
   {
-    method: 'PATCH', path: '/api/machines/:machine', ...people,
+    method: 'PATCH',
+    path: '/api/machines/:machine',
+    ...people,
     handler: managed(async ({ req, res, app, machine, session }) => json(res, 200, await patchMachine(app, session, machine, await readJson(req)))),
   },
   {
     // Check now (#437): what the hourly check does, asked for; it answers once the check ends.
-    method: 'POST', path: '/api/machines/:machine/check', ...people,
+    method: 'POST',
+    path: '/api/machines/:machine/check',
+    ...people,
     handler: managed(async ({ res, app, machine }) => {
       if (!app.machines.isOnline(machine.id)) throw new HttpError(409, `${machine.name} is offline`);
       const results = await app.machines.check(machine.id);
@@ -421,7 +498,9 @@ export const machineRoutes: Route[] = [
     }),
   },
   {
-    method: 'DELETE', path: '/api/machines/:machine', ...people,
+    method: 'DELETE',
+    path: '/api/machines/:machine',
+    ...people,
     handler: managed(async ({ res, app, machine }) => {
       app.store.deleteMachine(machine.id);
       app.ciLoad.forget(machine.id);
@@ -434,18 +513,22 @@ export const machineRoutes: Route[] = [
 
   // A contraption turn's MCP proxy (#306): the same, for its person's own machines only, with its turn's token.
   {
-    method: 'GET', path: '/api/machines/:machineId/contraption-session', who: 'machine',
+    method: 'GET',
+    path: '/api/machines/:machineId/contraption-session',
+    who: 'machine',
     handler({ req, res, app, params }) {
       const turn = contraptionTurn(ctxToken(req), app);
       const id = Number(params.machineId);
       // The owner check too: a removed machine's id can come back as someone else's.
-      if (!turn.machines.includes(id) || app.store.getMachine(id)?.owner_id !== turn.person) throw new HttpError(403, 'That machine isn\'t this turn\'s person\'s, or the turn started without it');
+      if (!turn.machines.includes(id) || app.store.getMachine(id)?.owner_id !== turn.person) throw new HttpError(403, "That machine isn't this turn's person's, or the turn started without it");
       const who = `${app.store.getUser(turn.person)?.name ?? 'someone'} in ${app.store.listContraptions().find((c) => c.id === turn.contraption)?.title ?? 'a contraption'}`;
       if (!app.machines.openSession(id, { contraptionTurn: turn.id }, 'mcp', who, res)) throw new HttpError(503, 'That machine is offline', true);
     },
   },
   {
-    method: 'POST', path: '/api/machines/:machineId/contraption-session/:session', who: 'machine',
+    method: 'POST',
+    path: '/api/machines/:machineId/contraption-session/:session',
+    who: 'machine',
     async handler({ req, res, app, params }) {
       const turn = contraptionTurn(ctxToken(req), app);
       if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
@@ -457,19 +540,25 @@ export const machineRoutes: Route[] = [
 
   // The Taskmaster's look at the machines (#307): list them with their live state, and test one.
   {
-    method: 'GET', path: '/api/projects/:project/machines', ...taskmaster,
+    method: 'GET',
+    path: '/api/projects/:project/machines',
+    ...taskmaster,
     handler: (ctx) => {
       const machines = taskmasterMachines(ctx);
       // The names of the rest (#1638): one not lent here yet is what propose_machine_lend asks for.
       // Someone else's own machine stays out of sight, as it does everywhere (#306).
       const asker = ctx.app.store.turnAsker(ctx.caller!.id);
-      const others = ctx.app.store.listMachines().filter((m) => (m.owner_id === null || m.owner_id === asker) && !machines.some((x) => x.id === m.id) && !ctx.app.machines.view(m).runners)
-        .map((m) => ({ name: m.name, owner_name: m.owner_id === null ? null : ctx.app.store.getUser(m.owner_id)?.name ?? null }));
+      const others = ctx.app.store
+        .listMachines()
+        .filter((m) => (m.owner_id === null || m.owner_id === asker) && !machines.some((x) => x.id === m.id) && !ctx.app.machines.view(m).runners)
+        .map((m) => ({ name: m.name, owner_name: m.owner_id === null ? null : (ctx.app.store.getUser(m.owner_id)?.name ?? null) }));
       return json(ctx.res, 200, { machines, others });
     },
   },
   {
-    method: 'POST', path: '/api/projects/:project/machines/:name/check', ...taskmaster,
+    method: 'POST',
+    path: '/api/projects/:project/machines/:name/check',
+    ...taskmaster,
     async handler(ctx) {
       const { app, caller, project, res, params } = ctx;
       const name = params.name.toLowerCase();
@@ -483,7 +572,9 @@ export const machineRoutes: Route[] = [
 
   // A minion's MCP proxy: open a session to a machine (held open as a stream), then send it messages.
   {
-    method: 'GET', path: '/api/machines/:machineId/session', ...turns,
+    method: 'GET',
+    path: '/api/machines/:machineId/session',
+    ...turns,
     handler({ res, url, app, caller, params }) {
       const server = url.searchParams.get('server') === 'ws' ? 'ws' : 'mcp';
       const project = app.store.getProject(caller!.project_id);
@@ -492,19 +583,21 @@ export const machineRoutes: Route[] = [
       // which its owner asked for: never mid-turn, never for someone else's.
       // The owner check too: a removed machine's id can come back as someone else's.
       if (machine && machine.owner_id !== null && (!app.runner.ownedMachines(caller!.id).includes(machine.id) || machine.owner_id !== app.store.turnAsker(caller!.id))) {
-        throw new HttpError(403, 'That machine is someone else\'s, or this turn started without it');
+        throw new HttpError(403, "That machine is someone else's, or this turn started without it");
       }
       // A machine opens only for a minion in a scheme on its list (#438), as at its turn's start (src/runner.ts):
       // a scheme taken off the list mid-turn can't open it again.
       if (machine && (!project || caller!.kind === 'coordinator' || !app.store.machineGranted(machine.id, project.id))) {
-        throw new HttpError(403, 'That machine isn\'t lent to this scheme');
+        throw new HttpError(403, "That machine isn't lent to this scheme");
       }
       const who = `#${caller!.number} in ${project?.name ?? 'a scheme'}`;
       if (!app.machines.openSession(Number(params.machineId), { ticketId: caller!.id, projectId: caller!.project_id }, server, who, res)) throw new HttpError(503, server === 'ws' ? 'That machine is offline, or its workspace tools are off' : 'That machine is offline', true);
     },
   },
   {
-    method: 'POST', path: '/api/machines/:machineId/session/:session', ...turns,
+    method: 'POST',
+    path: '/api/machines/:machineId/session/:session',
+    ...turns,
     async handler({ req, res, app, caller, params }) {
       if (!/^[0-9a-f]{24}$/.test(params.session)) throw new HttpError(404, 'Not found');
       const body = await readJson(req, 50_000_000);

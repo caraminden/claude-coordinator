@@ -16,11 +16,42 @@ import { join } from 'node:path';
 export type Cause = 'flaky' | 'main' | 'change' | 'unknown';
 
 /** A CI run as GitHub lists it, the fields this reads. */
-export interface LandRun { id: number; head_branch: string; status: string; conclusion: string | null; created_at: string; updated_at?: string; html_url?: string }
+export interface LandRun {
+  id: number;
+  head_branch: string;
+  status: string;
+  conclusion: string | null;
+  created_at: string;
+  updated_at?: string;
+  html_url?: string;
+}
 /** One retro-log line: when, its kind (`ship train red`), the rest split on ` · `, and the run its link names. */
-export interface RetroLine { at: number; kind: string; parts: string[]; run: number | null }
-export interface Red { id: number; branch: string; at: string; url: string | null; cause: Cause; rider: boolean; why: string }
-export interface LandReds { partial?: boolean; since: number; runs: number; green: number; red: number; other: number; causes: Record<Cause, number>; riders: number; reds: Red[] }
+export interface RetroLine {
+  at: number;
+  kind: string;
+  parts: string[];
+  run: number | null;
+}
+export interface Red {
+  id: number;
+  branch: string;
+  at: string;
+  url: string | null;
+  cause: Cause;
+  rider: boolean;
+  why: string;
+}
+export interface LandReds {
+  partial?: boolean;
+  since: number;
+  runs: number;
+  green: number;
+  red: number;
+  other: number;
+  causes: Record<Cause, number>;
+  riders: number;
+  reds: Red[];
+}
 
 /** The window the Test health tab counts. */
 export const LAND_REDS_MS = 24 * 3_600_000;
@@ -66,7 +97,13 @@ export function causeOf(lead: string, own: RetroLine[], after: RetroLine[]): { c
     return { cause: 'change', rider: !ships.some((s) => sameShip(s, lead)), why: `failed alone with ${sure}` };
   }
   const burn = own.filter((l) => l.kind === 'burn-in red').flatMap((l) => l.parts.join(' · ').match(/failed in \d+ of \d+ copies/g) ?? []);
-  if (burn.some((b) => { const [, k, n] = b.match(/(\d+) of (\d+)/)!; return k === n; })) return { cause: 'change', rider: false, why: 'a new or changed test failed in every burn-in copy' };
+  if (
+    burn.some((b) => {
+      const [, k, n] = b.match(/(\d+) of (\d+)/)!;
+      return k === n;
+    })
+  )
+    return { cause: 'change', rider: false, why: 'a new or changed test failed in every burn-in copy' };
   if (burn.length) return { cause: 'flaky', rider: false, why: 'a new or changed test failed in only some burn-in copies (a race)' };
   if (of('known flake')) return { cause: 'flaky', rider: false, why: `known flake: ${(of('known flake')!.parts[1] ?? '').replace(/ \(seen [^)]*\)/g, '')}`.trim() };
   // A guess land.sh couldn't confirm alone: one suspect ship is still that ship's change; several stay unknown.
@@ -89,13 +126,18 @@ export function causeOf(lead: string, own: RetroLine[], after: RetroLine[]): { c
 
 /** The land runs created since `since`, counted, and each red one's cause from the retro log's lines. */
 export function landReds(runs: LandRun[], lines: RetroLine[], since: number): LandReds {
-  const land = runs.filter((r) => r.head_branch.startsWith('land/') && Date.parse(r.created_at) >= since)
-    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  const land = runs.filter((r) => r.head_branch.startsWith('land/') && Date.parse(r.created_at) >= since).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   const out: LandReds = { since, runs: land.length, green: 0, red: 0, other: 0, causes: { change: 0, flaky: 0, main: 0, unknown: 0 }, riders: 0, reds: [] };
   const sorted = [...lines].sort((a, b) => a.at - b.at);
   for (const [i, r] of land.entries()) {
-    if (r.status === 'completed' && r.conclusion === 'success') { out.green++; continue; }
-    if (r.status !== 'completed' || !RED.has(r.conclusion ?? '')) { out.other++; continue; }
+    if (r.status === 'completed' && r.conclusion === 'success') {
+      out.green++;
+      continue;
+    }
+    if (r.status !== 'completed' || !RED.has(r.conclusion ?? '')) {
+      out.other++;
+      continue;
+    }
     out.red++;
     const lead = r.head_branch.slice('land/'.length);
     const start = Date.parse(r.created_at);

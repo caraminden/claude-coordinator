@@ -15,12 +15,22 @@ const REPO = resolve(HERE, '../..');
 
 export type Check = { call?: string; noCall?: string; input?: string; before?: string; reply?: string; noText?: string; said?: string; why: string };
 export type Case = {
-  id: string; kind: 'strike' | 'correction' | 'rule'; source: string; role: 'minion' | 'taskmaster';
-  ticket: { number: number; title: string; type: string | null }; commit: string; work?: string; from: string; history: string; message: string;
-  facts: Fact[]; right: string; wrong: string; checks: Check[];
+  id: string;
+  kind: 'strike' | 'correction' | 'rule';
+  source: string;
+  role: 'minion' | 'taskmaster';
+  ticket: { number: number; title: string; type: string | null };
+  commit: string;
+  work?: string;
+  from: string;
+  history: string;
+  message: string;
+  facts: Fact[];
+  right: string;
+  wrong: string;
+  checks: Check[];
 };
-export type Brief = { id: string; source: string; ticket: { number: number; title: string; type: string | null }; from: string; message: string;
-  before: string; fix: string; tests: string[]; right: string };
+export type Brief = { id: string; source: string; ticket: { number: number; title: string; type: string | null }; from: string; message: string; before: string; fix: string; tests: string[]; right: string };
 export type Event = { call?: string; input?: string; text?: string };
 
 // ---- Scoring: pure, tested in test/prompt-evals.test.ts ----
@@ -30,7 +40,11 @@ export function events(stream: string): Event[] {
   const out: Event[] = [];
   for (const line of stream.split('\n')) {
     let m: ClaudeEvent;
-    try { m = JSON.parse(line); } catch { continue; }
+    try {
+      m = JSON.parse(line);
+    } catch {
+      continue;
+    }
     if (m?.type !== 'assistant' || m.parent_tool_use_id) continue;
     for (const b of (m.message?.content ?? []) as ContentBlock[]) {
       if (b.type === 'text' && b.text?.trim()) out.push({ text: b.text });
@@ -100,19 +114,25 @@ export function problems(raw: unknown, file?: string): string[] {
   if (c?.work !== undefined && !/^[0-9a-f]{7,40}$/.test(c.work as string)) out.push('work is a sha (a child of commit)');
   const compiles = (what: string, s: unknown) => {
     if (s === undefined) return;
-    try { if (typeof s !== 'string') throw new Error('not a string'); new RegExp(s, 'i'); } catch (e) { out.push(`${what}: ${thrown(e).message}`); }
+    try {
+      if (typeof s !== 'string') throw new Error('not a string');
+      new RegExp(s, 'i');
+    } catch (e) {
+      out.push(`${what}: ${thrown(e).message}`);
+    }
   };
   if (!Array.isArray(c?.facts)) out.push('facts is a list');
   for (const [i, f] of (c?.facts ?? []).entries()) {
     if (typeof f?.tool !== 'string' || typeof f?.result !== 'string') out.push(`facts[${i}] needs tool and result`);
-    compiles(`facts[${i}].tool`, f?.tool); compiles(`facts[${i}].match`, f?.match);
+    compiles(`facts[${i}].tool`, f?.tool);
+    compiles(`facts[${i}].match`, f?.match);
   }
   if (!Array.isArray(c?.checks) || !c.checks.length) out.push('checks needs at least one check');
   for (const [i, k] of (c?.checks ?? []).entries()) {
     const kinds = ['call', 'noCall', 'reply', 'noText', 'said'].filter((x) => k?.[x] !== undefined);
     if (kinds.length !== 1) out.push(`checks[${i}] needs exactly one of call, noCall, reply, noText, said`);
     if (typeof k?.why !== 'string' || !k.why) out.push(`checks[${i}] needs a why`);
-    if ((k?.before !== undefined) && k?.call === undefined) out.push(`checks[${i}]: before goes with call`);
+    if (k?.before !== undefined && k?.call === undefined) out.push(`checks[${i}]: before goes with call`);
     for (const x of ['call', 'noCall', 'reply', 'noText', 'said', 'input', 'before']) compiles(`checks[${i}].${x}`, k?.[x]);
   }
   return out;
@@ -132,12 +152,15 @@ export function briefProblems(raw: unknown, file?: string): string[] {
 
 export function load<T>(dir: string, check: (x: unknown, file: string) => string[]): T[] {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir).filter((f) => f.endsWith('.json')).sort().map((f) => {
-    const x = JSON.parse(readFileSync(join(dir, f), 'utf8'));
-    const bad = check(x, f);
-    if (bad.length) throw new Error(`${join(dir, f)}: ${bad.join('; ')}`);
-    return x as T;
-  });
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.json'))
+    .sort()
+    .map((f) => {
+      const x = JSON.parse(readFileSync(join(dir, f), 'utf8'));
+      const bad = check(x, f);
+      if (bad.length) throw new Error(`${join(dir, f)}: ${bad.join('; ')}`);
+      return x as T;
+    });
 }
 
 // ---- Running ----
@@ -149,8 +172,7 @@ const git = (...a: string[]) => execFileSync('git', a, { encoding: 'utf8', stdio
 const pst = () => new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles', dateStyle: 'medium', timeStyle: 'short' }) + ' PT';
 // A run's environment: the asker's Claude login and nothing of the turn's (no Citadel or GitHub tokens).
 const KEEP = /^(PATH|HOME|USER|LOGNAME|LANG|LC_\w+|TERM|SHELL|TZ|CLAUDE_CONFIG_DIR|ANTHROPIC_\w+)$/;
-const cleanEnv = (tmp: string) => ({ ...Object.fromEntries(Object.entries(process.env).filter(([k]) => KEEP.test(k))), TMPDIR: tmp, CLAUDE_CODE_TMPDIR: tmp,
-  GIT_AUTHOR_NAME: 'Replay', GIT_AUTHOR_EMAIL: 'replay@localhost', GIT_COMMITTER_NAME: 'Replay', GIT_COMMITTER_EMAIL: 'replay@localhost' });
+const cleanEnv = (tmp: string) => ({ ...Object.fromEntries(Object.entries(process.env).filter(([k]) => KEEP.test(k))), TMPDIR: tmp, CLAUDE_CODE_TMPDIR: tmp, GIT_AUTHOR_NAME: 'Replay', GIT_AUTHOR_EMAIL: 'replay@localhost', GIT_COMMITTER_NAME: 'Replay', GIT_COMMITTER_EMAIL: 'replay@localhost' });
 // As a real turn's (src/runner.ts): tools Citadel turns never get.
 const DISALLOWED = ['AskUserQuestion', 'Workflow', 'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger', 'ListAgents', 'ReportFindings'];
 
@@ -161,7 +183,14 @@ function version(ref: string | undefined, work: string): { dir: string; name: st
   const dir = join(work, `v-${sha.slice(0, 10)}`);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
-    const paths = ['src', 'kit', 'public', 'CLAUDE.md', '.claude'].filter((p) => { try { git('-C', REPO, 'cat-file', '-e', `${sha}:${p}`); return true; } catch { return false; } });
+    const paths = ['src', 'kit', 'public', 'CLAUDE.md', '.claude'].filter((p) => {
+      try {
+        git('-C', REPO, 'cat-file', '-e', `${sha}:${p}`);
+        return true;
+      } catch {
+        return false;
+      }
+    });
     execFileSync('bash', ['-c', 'git -C "$1" archive "$2" "${@:4}" | tar -x -C "$3"', '_', REPO, sha, dir, ...paths]);
   }
   return { dir, name: `${ref} (${sha.slice(0, 8)})` };
@@ -197,7 +226,8 @@ function workspace(c: Case, side: Side, work: string): string {
   git('-C', dir, 'add', '-A', '--', 'CLAUDE.md', '.claude');
   git('-C', dir, '-c', 'user.name=replay', '-c', 'user.email=replay@localhost', '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'Prompt files under test');
   git('-C', dir, 'branch', '-q', '-f', 'main', 'HEAD');
-  if (c.role === 'taskmaster') git('-C', dir, 'checkout', '-q', 'main'); // the Taskmaster works in the repo on main
+  if (c.role === 'taskmaster')
+    git('-C', dir, 'checkout', '-q', 'main'); // the Taskmaster works in the repo on main
   else {
     onTicketBranch(dir, c.ticket.number);
     // The minion's own finished work, for a moment that hinges on it (a ship): a child of `commit`, on the ticket branch.
@@ -215,14 +245,24 @@ function render(side: Side, role: Case['role'], ticket: Case['ticket'], dirs: ob
 function claude(args: string[], input: string, cwd: string, file: string, tmp: string, timeoutMs: number): Promise<{ stream: string; cost: number; error?: string }> {
   return new Promise((done) => {
     const p = spawn('claude', args, { cwd, env: cleanEnv(tmp), stdio: ['pipe', 'pipe', 'pipe'] });
-    let out = '', err = '';
+    let out = '',
+      err = '';
     const t = setTimeout(() => p.kill('SIGTERM'), timeoutMs);
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (err += d));
     p.on('close', (code) => {
       clearTimeout(t);
       writeFileSync(file, out);
-      const result = out.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).findLast((m) => m?.type === 'result');
+      const result = out
+        .split('\n')
+        .map((l) => {
+          try {
+            return JSON.parse(l);
+          } catch {
+            return null;
+          }
+        })
+        .findLast((m) => m?.type === 'result');
       const cost = Number(result?.total_cost_usd ?? 0);
       // A run that hit its turn or budget cap still made its moves: score it. Only no result at all is an error.
       if (!result) return done({ stream: out, cost, error: `claude exited ${code} with no result: ${err.trim().slice(-300)}` });
@@ -233,24 +273,31 @@ function claude(args: string[], input: string, cwd: string, file: string, tmp: s
 }
 
 /** The message a turn gets: the turn note and the history as System lines, then the person's words (as promptMessage frames them). */
-const opening = (turn: string, history: string, from: string, message: string) => [
-  turn && `[System]: ${turn}`,
-  history && `[System]: Earlier in this chat (a summary of what you knew; the replay starts at the next message): ${history}`,
-  `[${from}]: ${message}`,
-].filter(Boolean).join('\n\n');
+const opening = (turn: string, history: string, from: string, message: string) => [turn && `[System]: ${turn}`, history && `[System]: Earlier in this chat (a summary of what you knew; the replay starts at the next message): ${history}`, `[${from}]: ${message}`].filter(Boolean).join('\n\n');
 
 function transcriptText(ev: Event[]): string {
-  return ev.map((e) => (e.call ? `CALL ${e.call} ${e.input!.slice(0, 400)}` : `SAID ${e.text!.slice(0, 1500)}`)).join('\n').slice(0, 12_000);
+  return ev
+    .map((e) => (e.call ? `CALL ${e.call} ${e.input!.slice(0, 400)}` : `SAID ${e.text!.slice(0, 1500)}`))
+    .join('\n')
+    .slice(0, 12_000);
 }
 
 /** The Sonnet judge's one-line read of a rerun. It advises; the checks decide. */
 async function judge(c: Case, ev: Event[], dir: string, tmp: string): Promise<string> {
-  const ask = [`A ${c.role} in Citadel (a web app that runs Claude Code sessions for a small team) got this message from ${c.from}:`, c.message.slice(0, 3000),
-    `The right move: ${c.right}`, `What the original turn did wrong: ${c.wrong}`, 'What the rerun did (its tool calls and what it said):', transcriptText(ev),
-    'Did the rerun make the right move, and avoid the wrong one? Answer with PASS or FAIL, then a dash and one short sentence why.'].join('\n\n');
-  const r = await claude(['-p', '--model', 'sonnet', '--effort', 'low', '--tools', '', '--max-turns', '1', '--output-format', 'stream-json', '--verbose',
-    '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence'], ask, tmp, join(dir, 'judge.jsonl'), tmp, 120_000);
-  const text = events(r.stream).map((e) => e.text ?? '').join(' ').trim();
+  const ask = [
+    `A ${c.role} in Citadel (a web app that runs Claude Code sessions for a small team) got this message from ${c.from}:`,
+    c.message.slice(0, 3000),
+    `The right move: ${c.right}`,
+    `What the original turn did wrong: ${c.wrong}`,
+    'What the rerun did (its tool calls and what it said):',
+    transcriptText(ev),
+    'Did the rerun make the right move, and avoid the wrong one? Answer with PASS or FAIL, then a dash and one short sentence why.',
+  ].join('\n\n');
+  const r = await claude(['-p', '--model', 'sonnet', '--effort', 'low', '--tools', '', '--max-turns', '1', '--output-format', 'stream-json', '--verbose', '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence'], ask, tmp, join(dir, 'judge.jsonl'), tmp, 120_000);
+  const text = events(r.stream)
+    .map((e) => e.text ?? '')
+    .join(' ')
+    .trim();
   return r.error ? 'judge failed' : text.split('\n')[0].slice(0, 200);
 }
 
@@ -271,15 +318,38 @@ async function runCase(c: Case, side: Side, i: number, work: string, budget: num
   writeFileSync(join(dir, 'system.md'), p.system);
   writeFileSync(join(dir, 'tools.json'), JSON.stringify(p.tools));
   writeFileSync(join(dir, 'facts.json'), JSON.stringify(c.facts));
-  writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { [server]: { command: process.execPath, args: [join(HERE, 'stub.ts')],
-    env: { STUB_TOOLS: join(dir, 'tools.json'), STUB_FACTS: join(dir, 'facts.json'), STUB_ROLE: server } } } }));
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '.*',
-    hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'guard.ts')}'`, timeout: 10 }] }, ...bigRead(side.dir)] } }));
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions',
-    '--append-system-prompt-file', join(dir, 'system.md'), '--settings', join(dir, 'settings.json'), '--setting-sources', 'project',
-    '--plugin-dir', join(side.dir, 'kit'), '--model', side.model, '--effort', side.effort,
-    '--mcp-config', join(dir, 'mcp.json'), '--strict-mcp-config', '--max-turns', '25', '--max-budget-usd', String(budget),
-    '--no-session-persistence', '--disallowedTools', ...DISALLOWED];
+  writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { [server]: { command: process.execPath, args: [join(HERE, 'stub.ts')], env: { STUB_TOOLS: join(dir, 'tools.json'), STUB_FACTS: join(dir, 'facts.json'), STUB_ROLE: server } } } }));
+  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '.*', hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'guard.ts')}'`, timeout: 10 }] }, ...bigRead(side.dir)] } }));
+  const args = [
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--permission-mode',
+    'bypassPermissions',
+    '--append-system-prompt-file',
+    join(dir, 'system.md'),
+    '--settings',
+    join(dir, 'settings.json'),
+    '--setting-sources',
+    'project',
+    '--plugin-dir',
+    join(side.dir, 'kit'),
+    '--model',
+    side.model,
+    '--effort',
+    side.effort,
+    '--mcp-config',
+    join(dir, 'mcp.json'),
+    '--strict-mcp-config',
+    '--max-turns',
+    '25',
+    '--max-budget-usd',
+    String(budget),
+    '--no-session-persistence',
+    '--disallowedTools',
+    ...DISALLOWED,
+  ];
   const r = await claude(args, opening(p.turn, c.history, c.from, c.message), cwd, join(dir, 'transcript.jsonl'), tmp, 15 * 60_000);
   if (r.error) return { ok: false, error: r.error, failed: [], cost: r.cost, file: join(dir, 'transcript.jsonl') };
   const ev = events(r.stream);
@@ -290,9 +360,14 @@ async function runCase(c: Case, side: Side, i: number, work: string, budget: num
 async function pool<T>(jobs: number, tasks: (() => Promise<T>)[]): Promise<T[]> {
   const out: T[] = new Array(tasks.length);
   let next = 0;
-  await Promise.all(Array.from({ length: Math.min(jobs, tasks.length) }, async () => {
-    while (next < tasks.length) { const i = next++; out[i] = await tasks[i](); }
-  }));
+  await Promise.all(
+    Array.from({ length: Math.min(jobs, tasks.length) }, async () => {
+      while (next < tasks.length) {
+        const i = next++;
+        out[i] = await tasks[i]();
+      }
+    }),
+  );
   return out;
 }
 
@@ -300,14 +375,21 @@ function report(cases: Case[], sides: Side[], runs: Map<string, Run[]>, n: numbe
   const [now, base] = sides;
   const count = (id: string, s: Side) => (runs.get(`${id}|${s.label}`) ?? []).filter((r) => r.ok).length;
   const cost = [...runs.values()].flat().reduce((a, r) => a + r.cost, 0);
-  const rate = (s: Side) => { const p = cases.filter((c) => passes(count(c.id, s), n)).length; return `${p}/${cases.length} (${Math.round((100 * p) / cases.length)}%)`; };
+  const rate = (s: Side) => {
+    const p = cases.filter((c) => passes(count(c.id, s), n)).length;
+    return `${p}/${cases.length} (${Math.round((100 * p) / cases.length)}%)`;
+  };
   const fallen = base ? cases.filter((c) => fell(count(c.id, now), count(c.id, base))).map((c) => c.id) : [];
-  const lines = [`# Prompt eval, ${pst()}`, '',
+  const lines = [
+    `# Prompt eval, ${pst()}`,
+    '',
     ...sides.map((s) => `- **${s.label}:** ${s.name}, ${s.model} at ${s.effort}: ${rate(s)} of cases pass (most of ${n} runs).`),
-    ...(base ? [`- **Fell** (passing runs down by 2 or more): ${fallen.length ? fallen.join(', ') : 'none'}.${fallen.length >= 2 ? ' **2 or more fell: high risk, ships only on a member\'s go.**' : ''}`] : []),
-    `- Cost: $${cost.toFixed(2)}. Errors: ${[...runs.values()].flat().filter((r) => r.error).length}.`, '',
+    ...(base ? [`- **Fell** (passing runs down by 2 or more): ${fallen.length ? fallen.join(', ') : 'none'}.${fallen.length >= 2 ? " **2 or more fell: high risk, ships only on a member's go.**" : ''}`] : []),
+    `- Cost: $${cost.toFixed(2)}. Errors: ${[...runs.values()].flat().filter((r) => r.error).length}.`,
+    '',
     `| Case | Kind | ${sides.map((s) => s.label).join(' | ')} | Judge (${now.label}) | Failed checks (${now.label}) |`,
-    `|---|---|${sides.map(() => '---|').join('')}---|---|`];
+    `|---|---|${sides.map(() => '---|').join('')}---|---|`,
+  ];
   for (const c of cases) {
     const mine = runs.get(`${c.id}|${now.label}`) ?? [];
     const judged = mine.filter((r) => r.judge);
@@ -328,7 +410,9 @@ function testsPass(dir: string, b: Brief, tmp: string): boolean {
   try {
     execFileSync(process.execPath, ['--test', ...b.tests], { cwd: dir, env: cleanEnv(tmp), stdio: 'ignore', timeout: 300_000 });
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 async function runBrief(b: Brief, side: Side, i: number, work: string, budget: number): Promise<{ ok: boolean; cost: number; error?: string }> {
@@ -341,18 +425,43 @@ async function runBrief(b: Brief, side: Side, i: number, work: string, budget: n
   writeFileSync(join(dir, 'system.md'), p.system);
   writeFileSync(join(dir, 'tools.json'), JSON.stringify(p.tools));
   writeFileSync(join(dir, 'facts.json'), '[]');
-  writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { thread: { command: process.execPath, args: [join(HERE, 'stub.ts')],
-    env: { STUB_TOOLS: join(dir, 'tools.json'), STUB_FACTS: join(dir, 'facts.json'), STUB_ROLE: 'thread' } } } }));
+  writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { thread: { command: process.execPath, args: [join(HERE, 'stub.ts')], env: { STUB_TOOLS: join(dir, 'tools.json'), STUB_FACTS: join(dir, 'facts.json'), STUB_ROLE: 'thread' } } } }));
   // The tripwire every real turn gets (src/turn-launch.ts), so a rerun that writes can't reach the live app or data.
-  const trip = { home: homedir(), data: join(homedir(), '.local/share/claude-coordinator'), checkout: join(homedir(), 'claude-coordinator'), project: 2,
-    claudeConfig: process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), ask: false };
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$',
-    hooks: [{ type: 'command', command: [process.execPath, join(REPO, 'src/tripwire.ts'), JSON.stringify(trip)].map((s) => `'${s}'`).join(' '), timeout: 10 }] }, ...bigRead(side.dir)] } }));
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions',
-    '--append-system-prompt-file', join(dir, 'system.md'), '--settings', join(dir, 'settings.json'), '--setting-sources', 'project',
-    '--plugin-dir', join(side.dir, 'kit'), '--model', side.model, '--effort', side.effort,
-    '--mcp-config', join(dir, 'mcp.json'), '--strict-mcp-config', '--max-turns', '200', '--max-budget-usd', String(budget),
-    '--no-session-persistence', '--disallowedTools', ...DISALLOWED];
+  const trip = { home: homedir(), data: join(homedir(), '.local/share/claude-coordinator'), checkout: join(homedir(), 'claude-coordinator'), project: 2, claudeConfig: process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), ask: false };
+  writeFileSync(
+    join(dir, 'settings.json'),
+    JSON.stringify({ hooks: { PreToolUse: [{ matcher: '^(Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Skill)$', hooks: [{ type: 'command', command: [process.execPath, join(REPO, 'src/tripwire.ts'), JSON.stringify(trip)].map((s) => `'${s}'`).join(' '), timeout: 10 }] }, ...bigRead(side.dir)] } }),
+  );
+  const args = [
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--permission-mode',
+    'bypassPermissions',
+    '--append-system-prompt-file',
+    join(dir, 'system.md'),
+    '--settings',
+    join(dir, 'settings.json'),
+    '--setting-sources',
+    'project',
+    '--plugin-dir',
+    join(side.dir, 'kit'),
+    '--model',
+    side.model,
+    '--effort',
+    side.effort,
+    '--mcp-config',
+    join(dir, 'mcp.json'),
+    '--strict-mcp-config',
+    '--max-turns',
+    '200',
+    '--max-budget-usd',
+    String(budget),
+    '--no-session-persistence',
+    '--disallowedTools',
+    ...DISALLOWED,
+  ];
   const r = await claude(args, opening(p.turn, '', b.from, b.message), cwd, join(dir, 'transcript.jsonl'), tmp, 60 * 60_000);
   if (r.error) return { ok: false, cost: r.cost, error: r.error };
   return { ok: testsPass(cwd, b, tmp), cost: r.cost };
@@ -363,17 +472,28 @@ async function runBrief(b: Brief, side: Side, i: number, work: string, budget: n
 export function snapshot(text: string): { app: string; scheme: string } {
   const lines = text.split('\n');
   const at = (h: RegExp) => lines.findIndex((l) => h.test(l));
-  const app = at(/^# Citadel-wide instructions$/), scheme = at(/^# Scheme instructions for /);
+  const app = at(/^# Citadel-wide instructions$/),
+    scheme = at(/^# Scheme instructions for /);
   if (app < 0 || scheme < 0) throw new Error('no "# Citadel-wide instructions" or "# Scheme instructions for" heading');
   // Each section: its heading, one line on precedence, a blank, then the text. The scheme settings' own lines
   // (Fable, grilling, GitHub runners) sit after the Citadel-wide text; render.ts adds them back from the settings.
   let end = scheme;
   while (end > app && !/^## /.test(lines[end - 1] ?? '') && /\(set in its Minion rules|^$/.test(lines[end - 1])) end--;
-  const appText = lines.slice(app + 3, end).join('\n').trim();
+  const appText = lines
+    .slice(app + 3, end)
+    .join('\n')
+    .trim();
   let schemeEnd = lines.length;
   const next = lines.findIndex((l, i) => i > scheme && /^# /.test(l));
   if (next > 0) schemeEnd = next;
-  return { app: appText + '\n', scheme: lines.slice(scheme + 3, schemeEnd).join('\n').trim() + '\n' };
+  return {
+    app: appText + '\n',
+    scheme:
+      lines
+        .slice(scheme + 3, schemeEnd)
+        .join('\n')
+        .trim() + '\n',
+  };
 }
 
 const HELP = `Prompt evals (#1117): rerun frozen corrections against a prompt version or a tier. tools/prompt-evals/README.md.
@@ -398,8 +518,15 @@ Each run is a real Claude turn on your login: run it in the background, not thro
 async function main(argv: string[]) {
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === '--help' || cmd === '-h' || rest.includes('--help')) return console.log(HELP);
-  const arg = (k: string) => { const i = rest.indexOf(k); return i >= 0 ? rest[i + 1] : undefined; };
-  const num = (k: string, d: number) => { const v = Number(arg(k) ?? d); if (!(v > 0)) throw new Error(`${k} takes a number above 0`); return v; };
+  const arg = (k: string) => {
+    const i = rest.indexOf(k);
+    return i >= 0 ? rest[i + 1] : undefined;
+  };
+  const num = (k: string, d: number) => {
+    const v = Number(arg(k) ?? d);
+    if (!(v > 0)) throw new Error(`${k} takes a number above 0`);
+    return v;
+  };
   const cases = () => load<Case>(join(HERE, 'cases'), problems);
   const briefs = () => load<Brief>(join(HERE, 'briefs'), briefProblems);
 
@@ -415,9 +542,9 @@ async function main(argv: string[]) {
   const work = join(process.env.TMPDIR ?? '/tmp', `prompt-eval-${Date.now()}`);
   mkdirSync(join(work, 'shared'), { recursive: true });
   const fixture = (f: string) => readFileSync(join(HERE, 'fixture', f), 'utf8');
-  const side = (label: string, ref: string | undefined, model: string, effort: string, app = fixture('citadel-wide.md'), scheme = fixture('scheme.md')): Side =>
-    ({ label, ...version(ref, work), model, effort, app, scheme });
-  const model = arg('--model') ?? 'opus', effort = arg('--effort') ?? 'high';
+  const side = (label: string, ref: string | undefined, model: string, effort: string, app = fixture('citadel-wide.md'), scheme = fixture('scheme.md')): Side => ({ label, ...version(ref, work), model, effort, app, scheme });
+  const model = arg('--model') ?? 'opus',
+    effort = arg('--effort') ?? 'high';
   const only = arg('--case') ?? arg('--brief');
   try {
     if (cmd === 'check-briefs') {
@@ -435,7 +562,8 @@ async function main(argv: string[]) {
     }
     if (cmd === 'briefs') {
       const s = side('now', arg('--ref'), model, effort);
-      const n = num('--runs', 1), budget = num('--budget', 10);
+      const n = num('--runs', 1),
+        budget = num('--budget', 10);
       const list = briefs().filter((x) => !only || re(only).test(x.id));
       const tasks = list.flatMap((b) => Array.from({ length: n }, (_, i) => () => runBrief(b, s, i, work, budget)));
       const res = await pool(num('--jobs', 2), tasks);
@@ -453,18 +581,26 @@ async function main(argv: string[]) {
       return;
     }
     if (cmd !== 'run') throw new Error(`unknown command ${cmd}; --help`);
-    const n = num('--runs', 3), budget = num('--budget', 2);
+    const n = num('--runs', 3),
+      budget = num('--budget', 2);
     const now = side('now', arg('--ref'), model, effort, arg('--app') && readFileSync(arg('--app')!, 'utf8'), arg('--scheme') && readFileSync(arg('--scheme')!, 'utf8'));
-    if (arg('--drop')) { now.drop = JSON.parse(readFileSync(arg('--drop')!, 'utf8')); now.name += `, minus ${JSON.stringify(now.drop)}`; }
+    if (arg('--drop')) {
+      now.drop = JSON.parse(readFileSync(arg('--drop')!, 'utf8'));
+      now.name += `, minus ${JSON.stringify(now.drop)}`;
+    }
     const tier = arg('--base-model') || arg('--base-effort');
     const sides = arg('--base') || tier ? [now, side('base', arg('--base') ?? arg('--ref'), arg('--base-model') ?? model, arg('--base-effort') ?? effort)] : [now];
     const list = cases().filter((c) => !only || re(only).test(c.id));
     if (!list.length) throw new Error('no cases match');
-    const tasks = list.flatMap((c) => sides.flatMap((s) => Array.from({ length: n }, (_, i) => async () => {
-      const r = await runCase(c, s, i, work, budget, s === now && !rest.includes('--no-judge'));
-      process.stderr.write(`${c.id} ${s.label}-${i}: ${r.error ? 'error' : r.ok ? 'pass' : 'fail'}\n`);
-      return [`${c.id}|${s.label}`, r] as const;
-    })));
+    const tasks = list.flatMap((c) =>
+      sides.flatMap((s) =>
+        Array.from({ length: n }, (_, i) => async () => {
+          const r = await runCase(c, s, i, work, budget, s === now && !rest.includes('--no-judge'));
+          process.stderr.write(`${c.id} ${s.label}-${i}: ${r.error ? 'error' : r.ok ? 'pass' : 'fail'}\n`);
+          return [`${c.id}|${s.label}`, r] as const;
+        }),
+      ),
+    );
     const runs = new Map<string, Run[]>();
     for (const [k, r] of await pool(num('--jobs', 3), tasks)) runs.set(k, [...(runs.get(k) ?? []), r]);
     const { text } = report(list, sides, runs, n);
@@ -477,4 +613,8 @@ async function main(argv: string[]) {
   }
 }
 
-if (import.meta.main) main(process.argv.slice(2)).catch((e) => { console.error(String(e?.message ?? e)); process.exit(1); });
+if (import.meta.main)
+  main(process.argv.slice(2)).catch((e) => {
+    console.error(String(e?.message ?? e));
+    process.exit(1);
+  });

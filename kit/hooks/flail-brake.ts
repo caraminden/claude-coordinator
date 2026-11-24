@@ -18,8 +18,7 @@ import type { HookInput } from './hook-input.ts';
 /** Reds in a row that earn the line: a starting value. */
 export const FLAIL_AT = 3;
 
-export const FLAIL_LINE =
-  `[citadel flail brake] The same test command has gone red ${FLAIL_AT} times with no file edited in between. Stop re-running it: open citadel:diagnosing-bugs, read the failure and change something before you run it again.`;
+export const FLAIL_LINE = `[citadel flail brake] The same test command has gone red ${FLAIL_AT} times with no file edited in between. Stop re-running it: open citadel:diagnosing-bugs, read the failure and change something before you run it again.`;
 
 type State = { command: string; count: number; said: boolean };
 

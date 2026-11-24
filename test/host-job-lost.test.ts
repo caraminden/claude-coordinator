@@ -11,7 +11,8 @@ const root = mkdtempSync(join(tmpdir(), 'host-job-lost-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
 test('a job that ended with no exit code is heard once, and keeps reading as code -1', () => {
-  const heard: string[] = [], details: string[] = [];
+  const heard: string[] = [],
+    details: string[] = [];
   const before = jobLost.hear;
   jobLost.hear = (dir, detail) => (heard.push(dir), details.push(detail));
   try {
@@ -47,7 +48,12 @@ test("a lost unit's own journal says whether memory killed it: systemd-oomd, the
   assert.equal(await says('citadel-land-1.service: The kernel OOM killer killed some processes in this unit.'), true);
   assert.equal(await says("citadel-land-1.service: Failed with result 'oom-kill'."), true);
   assert.equal(await says("citadel-land-1.service: Failed with result 'signal'."), false);
-  assert.equal(await oomKilled('citadel-land-1', async () => { throw new Error('no journalctl'); }), false);
+  assert.equal(
+    await oomKilled('citadel-land-1', async () => {
+      throw new Error('no journalctl');
+    }),
+    false,
+  );
 });
 
 test("a job's TMPDIR is on disk in its folder, not perigee's RAM-backed /tmp; one already on disk is kept (#1339)", async () => {
@@ -64,7 +70,7 @@ test("a job's TMPDIR is on disk in its folder, not perigee's RAM-backed /tmp; on
   assert.match(await run('disk', { TMPDIR: onDisk }), new RegExp(`^${onDisk}\\s*$`));
 });
 
-test('look() reads a job as state() does, off the server\'s thread (#1463)', async () => {
+test("look() reads a job as state() does, off the server's thread (#1463)", async () => {
   const heard: string[] = [];
   const before = jobLost.hear;
   jobLost.hear = (dir) => heard.push(dir);

@@ -37,11 +37,14 @@ test('the stand-in executable leaves the Claude config path available as a direc
   writeFileSync(join(dir, 'src', 'db.ts'), `export * from ${JSON.stringify(join(repo, 'src', 'db.ts'))};\n`);
   const seen = join(dir, 'seen.txt');
   // Stop after inspecting the actual server environment: this test needs no browser or real launcher.
-  writeFileSync(join(dir, 'server.ts'), `import { mkdirSync, writeFileSync } from 'node:fs';
+  writeFileSync(
+    join(dir, 'server.ts'),
+    `import { mkdirSync, writeFileSync } from 'node:fs';
 mkdirSync(process.env.CLAUDE_CONFIG_DIR + '/projects/memory', { recursive: true });
 writeFileSync(${JSON.stringify(seen)}, 'config directory created');
 process.exit(1);
-`);
+`,
+  );
   await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), dir, db], { timeout: 50_000 }).catch(() => {});
   assert.equal(readFileSync(seen, 'utf8'), 'config directory created');
 });
@@ -62,8 +65,10 @@ test('the boot copy uses its stand-in Claude even when the server login has Code
   store.setSetting(`container_home:${admin.id}`, home);
   store.setSetting(`codex:on:user:${admin.id}`, true);
   store.db.close();
-  const run = await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), repo, db], { timeout: 190_000 })
-    .then(({ stderr }) => ({ ok: true, out: stderr }), (err) => ({ ok: false, out: String(err.stderr) }));
+  const run = await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), repo, db], { timeout: 190_000 }).then(
+    ({ stderr }) => ({ ok: true, out: stderr }),
+    (err) => ({ ok: false, out: String(err.stderr) }),
+  );
   assert.ok(run.ok, run.out);
   assert.match(run.out, /a Taskmaster turn started/);
   assert.match(run.out, /a minion turn started/);
@@ -73,7 +78,7 @@ test('the boot copy uses its stand-in Claude even when the server login has Code
   original.db.close();
 });
 
-test('a contraption whose service is down and whose keys don\'t open in the copy: the app still boots clean', { skip: !hasChromium && 'no headless Chromium (the boot check needs one)', timeout: 200_000 }, async () => {
+test("a contraption whose service is down and whose keys don't open in the copy: the app still boots clean", { skip: !hasChromium && 'no headless Chromium (the boot check needs one)', timeout: 200_000 }, async () => {
   const db = join(root, 'coordinator.db');
   const store = new Store(db);
   const admin = store.createUser({ name: 'Boot', login: 'boot', admin: true, server_login: true });
@@ -82,8 +87,10 @@ test('a contraption whose service is down and whose keys don\'t open in the copy
   store.setContraptionUser(row.id, admin.id, true, admin.id);
   store.db.close();
 
-  const run = await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), repo, db], { timeout: 190_000 })
-    .then(({ stdout }) => ({ ok: true, out: stdout }), (err) => ({ ok: false, out: `${err.stderr}` }));
+  const run = await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), repo, db], { timeout: 190_000 }).then(
+    ({ stdout }) => ({ ok: true, out: stdout }),
+    (err) => ({ ok: false, out: `${err.stderr}` }),
+  );
   assert.ok(run.ok, run.out.slice(0, 2000));
 });
 
@@ -134,8 +141,11 @@ describe('the smoke pass through the turn tools, the file viewer and the launch 
     writeFileSync(join(checkout, file), text.replace(from, to));
     return checkout;
   }
-  const bootCheck = (checkout: string) => promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), checkout, db], { timeout: 190_000 })
-    .then(({ stderr }) => ({ ok: true, out: `${stderr}` }), (err) => ({ ok: false, out: `${err.stderr}` }));
+  const bootCheck = (checkout: string) =>
+    promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), checkout, db], { timeout: 190_000 }).then(
+      ({ stderr }) => ({ ok: true, out: `${stderr}` }),
+      (err) => ({ ok: false, out: `${err.stderr}` }),
+    );
 
   test('a healthy checkout passes, reading the longest chat and the instructions', { timeout: 200_000 }, async () => {
     const run = await bootCheck(repo);
@@ -180,7 +190,7 @@ describe('the smoke pass through the turn tools, the file viewer and the launch 
   // #661: git rules for every minion's worktree, closed ones included, took the Citadel Taskmaster's every-scheme
   // settings.json past Claude Code's 2 MiB cap. Put back for other schemes, the 700 closed minions above pass the 1 MiB budget.
   test('a launch file that grows with closed minions fails it', { timeout: 200_000 }, async () => {
-    const checkout = brokenCheckout('closed-minions', 'src/runner.ts', ".filter((t) => t.status !== 'closed' && t.cwd).map((t) => t.cwd!)]))]", ".filter((t) => t.cwd).map((t) => t.cwd!)]))]");
+    const checkout = brokenCheckout('closed-minions', 'src/runner.ts', ".filter((t) => t.status !== 'closed' && t.cwd).map((t) => t.cwd!)]))]", '.filter((t) => t.cwd).map((t) => t.cwd!)]))]');
     const run = await bootCheck(checkout);
     assert.equal(run.ok, false);
     assert.match(run.out, /A Taskmaster turn started, but: The launch's settings\.json is \d+ bytes, over the 1024 KiB budget for a launch file \(Claude Code refuses a settings file past 2 MiB\)/);
@@ -212,13 +222,16 @@ test("the copy the checked server boots on has no running ultra review's record"
   mkdirSync(join(checkout, 'src'));
   writeFileSync(join(checkout, 'src', 'db.ts'), `export * from ${JSON.stringify(join(repo, 'src', 'db.ts'))};\n`);
   const seen = join(checkout, 'seen.txt');
-  writeFileSync(join(checkout, 'server.ts'), `import { DatabaseSync } from 'node:sqlite';
+  writeFileSync(
+    join(checkout, 'server.ts'),
+    `import { DatabaseSync } from 'node:sqlite';
 import { writeFileSync } from 'node:fs';
 const db = new DatabaseSync(process.env.DATA_DIR + '/coordinator.db', { readOnly: true });
 const row = db.prepare("SELECT value FROM settings WHERE key = 'ultrareview_running'").get();
 writeFileSync(${JSON.stringify(seen)}, row ? String(row.value) : 'none');
 process.exit(1);
-`);
+`,
+  );
   await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), checkout, db], { timeout: 50_000 }).catch(() => {});
   assert.equal(readFileSync(seen, 'utf8'), 'none');
 });

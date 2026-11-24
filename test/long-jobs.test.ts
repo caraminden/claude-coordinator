@@ -21,10 +21,11 @@ function setup(tickets: number[], o: { now: number; project?: (t: number) => num
   mkdirSync(join(dir, 'long'));
   for (const t of tickets) {
     const id = `j${t}-1700000000-abc`;
-    writeFileSync(join(dir, 'long', `${id}.json`), JSON.stringify({ id, ticket: t, slug: o.slug ?? `own/repo${o.project?.(t) ?? 1}`, sha: SHA,
-      command: 'npm test', what: 'npm test', who: `Scheme #${t} (cara)`, queued_at: 1700000000000 + t, state: 'queued' }));
+    writeFileSync(join(dir, 'long', `${id}.json`), JSON.stringify({ id, ticket: t, slug: o.slug ?? `own/repo${o.project?.(t) ?? 1}`, sha: SHA, command: 'npm test', what: 'npm test', who: `Scheme #${t} (cara)`, queued_at: 1700000000000 + t, state: 'queued' }));
   }
-  const calls: string[][] = [], wakes: [number, string, boolean][] = [], notes: string[] = [];
+  const calls: string[][] = [],
+    wakes: [number, string, boolean][] = [],
+    notes: string[] = [];
   const run = { status: 'queued', conclusion: null as string | null, log: '', down: false, dispatchFails: false };
   const deps: LongDeps = {
     dir,
@@ -57,7 +58,8 @@ function setup(tickets: number[], o: { now: number; project?: (t: number) => num
 
 test('a long job waits for 2am: not in the day, not early in job hours, not while the PC is paused', async () => {
   const s = setup([1], { now: NOON });
-  let now = NOON, paused = false;
+  let now = NOON,
+    paused = false;
   s.deps.now = () => now;
   s.deps.hours = () => ({ ...DEFAULT_SETTINGS, paused });
   for (const t of ['2026-11-19T12:00:00-0800', '2026-11-19T23:30:00-0800', '2026-11-20T01:59:00-0800', '2026-11-20T08:00:00-0800']) {
@@ -94,8 +96,7 @@ test('when the run ends, the minion that queued it is woken with the exit status
   await s.pump.pump(); // finds the run, then reads it running
   assert.equal(readLongJobs(s.dir)[0].state, 'running');
   assert.equal(s.wakes.length, 0);
-  Object.assign(s.run, { status: 'completed', conclusion: 'failure',
-    log: ['2026-11-20T09:00:00.0Z setup', `2026-11-20T09:00:01.0Z ${BEGIN}`, '2026-11-20T09:00:02.0Z 3 tests failed', `2026-11-20T09:00:03.0Z ${END}with 1 ===`].join('\n') });
+  Object.assign(s.run, { status: 'completed', conclusion: 'failure', log: ['2026-11-20T09:00:00.0Z setup', `2026-11-20T09:00:01.0Z ${BEGIN}`, '2026-11-20T09:00:02.0Z 3 tests failed', `2026-11-20T09:00:03.0Z ${END}with 1 ===`].join('\n') });
   await s.pump.pump();
   const j = readLongJobs(s.dir)[0];
   assert.equal(j.state, 'failed');
@@ -109,10 +110,16 @@ test('when the run ends, the minion that queued it is woken with the exit status
   assert.ok(text.includes('https://github.com/run/100'));
   assert.equal(light, false);
   assert.equal(readFileSync(log, 'utf8'), '3 tests failed\n');
-  assert.ok(s.calls.some((c) => c.includes('DELETE')), 'its snapshot ref is dropped');
+  assert.ok(
+    s.calls.some((c) => c.includes('DELETE')),
+    'its snapshot ref is dropped',
+  );
   await s.pump.pump();
   assert.equal(s.wakes.length, 1, 'an ended job wakes once');
-  assert.deepEqual(longView(readLongJobs(s.dir), NIGHT).map((v) => v.state), ['failed']);
+  assert.deepEqual(
+    longView(readLongJobs(s.dir), NIGHT).map((v) => v.state),
+    ['failed'],
+  );
 });
 
 test('a job whose minion is gone is lost without waking anyone', async () => {
@@ -128,9 +135,12 @@ test('a workflow on the default branch with a minutes input gets the long limit;
   const s = setup([7], { now: NIGHT, slug: 'Own/Repo1', workflow: 'on:\n  workflow_dispatch:\n    inputs:\n      minutes:\n        required: false\n' });
   await s.pump.pump();
   const post = s.dispatches()[0];
-  assert.ok(post, 'the job matched its scheme\'s lowercased repo and went out');
+  assert.ok(post, "the job matched its scheme's lowercased repo and went out");
   assert.ok(post.includes('inputs[minutes]=360'), post.join(' '));
-  assert.ok(s.calls.some((c) => c.some((a) => a.endsWith('/contents/.github/workflows/citadel-heavy.yml?ref=main'))), 'the workflow is read at the branch GitHub runs');
+  assert.ok(
+    s.calls.some((c) => c.some((a) => a.endsWith('/contents/.github/workflows/citadel-heavy.yml?ref=main'))),
+    'the workflow is read at the branch GitHub runs',
+  );
 });
 
 // #1592: on 2026-11-22 a long job held the side runner from 02:04 to about 07:30, and five flake proofs queued behind it.
@@ -190,7 +200,10 @@ test('a pass wakes lightly; GitHub down for an hour loses a running job, cancels
   assert.equal(readLongJobs(s.dir)[0].state, 'running', 'an outage under an hour is ridden out');
   await s.pump.pump();
   assert.equal(readLongJobs(s.dir)[0].state, 'lost');
-  assert.ok(s.calls.some((c) => c.some((a) => a.endsWith('/actions/runs/100/cancel'))), 'its run is cancelled');
+  assert.ok(
+    s.calls.some((c) => c.some((a) => a.endsWith('/actions/runs/100/cancel'))),
+    'its run is cancelled',
+  );
   assert.equal(s.wakes.length, 1);
   assert.match(s.wakes[0][1], /GitHub kept failing for an hour/);
 });
@@ -200,7 +213,9 @@ test('a job that ended but whose wake never went out (a restart in between) wake
   await s.pump.pump();
   Object.assign(s.run, { status: 'completed', conclusion: 'failure', log: `2026-11-20T09:00:00.0Z ${BEGIN}\n2026-11-20T09:00:00.0Z bad\n2026-11-20T09:00:00.0Z ${END}with 2 ===` });
   const wake = s.deps.wake;
-  s.deps.wake = () => { throw new Error('server stopped'); };
+  s.deps.wake = () => {
+    throw new Error('server stopped');
+  };
   await new LongJobs(s.deps).pump();
   const j = readLongJobs(s.dir)[0];
   assert.equal(j.state, 'failed');

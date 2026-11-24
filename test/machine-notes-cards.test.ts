@@ -14,7 +14,9 @@ const root = tmp.dir;
 after(() => tmp.teardown());
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -22,7 +24,8 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let base = '';
@@ -30,11 +33,13 @@ const cookies: Record<string, string> = {};
 const ids: Record<string, number> = {};
 
 let srv: Booted;
-const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) =>
-  ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
+const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
-const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
+const live = () =>
+  turns()
+    .filter((t) => t.token.startsWith(`${ticket.id}.`))
+    .at(-1).token;
 const idle = () => until('the turn to end', async () => (await call('Josh', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
 const events = async (kind: string) => (await call('Josh', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
 const propose = (machine: string, notes: string) => call('minion', `/api/tickets/${ticket.id}/machine-notes`, { method: 'POST', body: { machine, notes } });
@@ -69,15 +74,22 @@ before(async () => {
   await idle();
 });
 
-test('a minion proposes a lent machine\'s whole notes as a plan card with a diff; nobody else can, and bad notes are refused', async () => {
+test("a minion proposes a lent machine's whole notes as a plan card with a diff; nobody else can, and bad notes are refused", async () => {
   const { id, href, owner } = await propose('josh-box', 'New line\nKeep this');
   assert.equal(owner, 'Josh');
   assert.match(href, /\?e=\d+$/);
   const [card] = await events('plan');
   assert.deepEqual(card, {
-    id, summary: 'New notes for josh-box', plan: 'New line\nKeep this', status: 'pending',
-    machine: { id: box.id, name: 'josh-box', owner: 'Josh' }, old: 'Old line\nKeep this',
-    diff: [{ op: '-', text: 'Old line' }, { op: '+', text: 'New line' }],
+    id,
+    summary: 'New notes for josh-box',
+    plan: 'New line\nKeep this',
+    status: 'pending',
+    machine: { id: box.id, name: 'josh-box', owner: 'Josh' },
+    old: 'Old line\nKeep this',
+    diff: [
+      { op: '-', text: 'Old line' },
+      { op: '+', text: 'New line' },
+    ],
   });
   await assert.rejects(propose('unlent', 'x'), /404 No machine called unlent that this minion gets/);
   await assert.rejects(propose('nope', 'x'), /404/);
@@ -142,8 +154,13 @@ test('approving writes the notes through the PATCH path, unless they changed sin
 async function mcp(method: string, params: object, machines: string) {
   const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: base, COORDINATOR_TOKEN: live(), COORDINATOR_PROJECT: String(ticket.project_id),
-      COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: 'thread', COORDINATOR_MACHINES: machines,
+      ...process.env,
+      COORDINATOR_API: base,
+      COORDINATOR_TOKEN: live(),
+      COORDINATOR_PROJECT: String(ticket.project_id),
+      COORDINATOR_TICKET: String(ticket.id),
+      COORDINATOR_ROLE: 'thread',
+      COORDINATOR_MACHINES: machines,
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -156,11 +173,11 @@ async function mcp(method: string, params: object, machines: string) {
   }
 }
 
-test('the tool is listed for every minion with a free machine name (#878), refused for a machine the turn didn\'t get, and its call posts the card', async () => {
+test("the tool is listed for every minion with a free machine name (#878), refused for a machine the turn didn't get, and its call posts the card", async () => {
   const before = live();
   // Cara's approve started the last turn, and Josh's own machine goes only to his turns: he asks for this one.
   await call('Josh', `/api/tickets/${ticket.id}/messages`, { method: 'POST', body: { text: 'propose the notes again' } });
-  await until('Josh\'s turn', () => turns().length && live() !== before && live());
+  await until("Josh's turn", () => turns().length && live() !== before && live());
   await idle();
   const offered = async (machines: string) => (await mcp('tools/list', {}, machines)).tools.find((t: any) => t.name === 'propose_machine_notes');
   assert.deepEqual(await offered(''), await offered('josh-box'));

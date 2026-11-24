@@ -34,7 +34,12 @@ for (const [what, sql] of [
 test('a folder that cannot be made leaves no row either', async () => {
   const store = new Store(':memory:');
   const p = store.createProject('One', null);
-  await assert.rejects(makeMinion(store, p, { title: 't', props: { type: 'chore' } }, 'x', async () => { throw new Error('disk'); }), /Could not create working directory: .*disk/);
+  await assert.rejects(
+    makeMinion(store, p, { title: 't', props: { type: 'chore' } }, 'x', async () => {
+      throw new Error('disk');
+    }),
+    /Could not create working directory: .*disk/,
+  );
   assert.equal(count(store, p.id), 0);
 });
 

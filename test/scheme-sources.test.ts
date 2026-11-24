@@ -27,7 +27,9 @@ const ghCalls = () => lines(join(stub, 'calls'));
 // so they land in whichever test is running by then, and no test here is about them.
 mkdirSync(join(stub, 'bin'), { recursive: true });
 mkdirSync(join(stub, 'taken'));
-writeFileSync(join(stub, 'bin', 'gh'), `#!/bin/sh
+writeFileSync(
+  join(stub, 'bin', 'gh'),
+  `#!/bin/sh
 S=${JSON.stringify(stub)}
 [ "$1 $2" = "pr list" ] && exit 0
 [ "$1" = api ] && exit 0
@@ -44,16 +46,20 @@ if [ "$1 $2" = "repo create" ]; then
   git -C "$src" push --quiet -u origin HEAD
 fi
 exit 0
-`);
+`,
+);
 chmodSync(join(stub, 'bin', 'gh'), 0o755);
 // A git that logs whose token each clone ran with ("box" for the server's own login), and when and where each `cat-file`
 // asked for a commit (#1469), and runs the real one.
 const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
-writeFileSync(join(stub, 'bin', 'git'), `#!/bin/sh
+writeFileSync(
+  join(stub, 'bin', 'git'),
+  `#!/bin/sh
 [ "$1" = cat-file ] && echo "$(date +%s) $(pwd)" >> ${JSON.stringify(join(stub, 'cat-file'))}
 [ "$1" = clone ] && echo "\${GH_TOKEN:-box} \${GH_CONFIG_DIR:-box-config} $*" >> ${JSON.stringify(join(stub, 'clones'))}
 exec ${JSON.stringify(realGit)} "$@"
-`);
+`,
+);
 chmodSync(join(stub, 'bin', 'git'), 0o755);
 const asCalls = () => lines(join(stub, 'as'));
 const clones = () => lines(join(stub, 'clones'));
@@ -66,7 +72,10 @@ git(['clone', '--quiet', '--bare', seed, join(root, 'remote.git')]);
 // An empty GitHub repo, as a scheme cloned before anyone pushed to it (#181).
 git(['init', '--quiet', '--bare', '-b', 'main', join(root, 'empty.git')]);
 // The folder test's GitHub origin goes there too, so ticketBase's fetch stays offline.
-writeFileSync(join(root, '.gitconfig'), `[url "${join(root, 'remote.git')}"]\n\tinsteadOf = https://example.test/remote.git\n\tinsteadOf = git@github.com:someone/hub.git\n[url "${join(root, 'empty.git')}"]\n\tinsteadOf = https://example.test/empty.git\n[url "${join(root, 'nowhere.git')}"]\n\tinsteadOf = https://example.test/missing.git\n`);
+writeFileSync(
+  join(root, '.gitconfig'),
+  `[url "${join(root, 'remote.git')}"]\n\tinsteadOf = https://example.test/remote.git\n\tinsteadOf = git@github.com:someone/hub.git\n[url "${join(root, 'empty.git')}"]\n\tinsteadOf = https://example.test/empty.git\n[url "${join(root, 'nowhere.git')}"]\n\tinsteadOf = https://example.test/missing.git\n`,
+);
 
 let s: Booted;
 before(async () => {
@@ -96,8 +105,14 @@ async function minionStartsOnMain(projectId: number) {
   assert.equal(git(['rev-parse', 'HEAD'], t.cwd), git(['rev-parse', 'main'], project.repo_dir));
 }
 
-test('the GitHub owner defaults to the owner of Citadel\'s origin and can be set', async () => {
-  const origin = (() => { try { return git(['remote', 'get-url', 'origin'], REPO); } catch { return null; } })();
+test("the GitHub owner defaults to the owner of Citadel's origin and can be set", async () => {
+  const origin = (() => {
+    try {
+      return git(['remote', 'get-url', 'origin'], REPO);
+    } catch {
+      return null;
+    }
+  })();
   const r = await s.call('/api/app/settings');
   assert.equal(r.status, 200);
   assert.deepEqual(r.data, { github_owner: null, github_owner_default: repoSlug(origin)?.split('/')[0] ?? null });
@@ -106,7 +121,10 @@ test('the GitHub owner defaults to the owner of Citadel\'s origin and can be set
 });
 
 test('none, and no source with no URL: no repo, plain folders for minions', async () => {
-  for (const [name, body] of [['No code', { source: 'none' }], ['Old form', { repoUrl: '' }]] as const) {
+  for (const [name, body] of [
+    ['No code', { source: 'none' }],
+    ['Old form', { repoUrl: '' }],
+  ] as const) {
     const r = await create({ name, ...body });
     assert.equal(r.status, 201, JSON.stringify(r.data));
     assert.equal(r.data.repo_dir, null);
@@ -115,7 +133,10 @@ test('none, and no source with no URL: no repo, plain folders for minions', asyn
 });
 
 test('url clones as before, with or without source', async () => {
-  for (const [name, body] of [['From URL', { source: 'url', repoUrl: 'https://example.test/remote.git' }], ['From URL old', { repoUrl: 'https://example.test/remote.git' }]] as const) {
+  for (const [name, body] of [
+    ['From URL', { source: 'url', repoUrl: 'https://example.test/remote.git' }],
+    ['From URL old', { repoUrl: 'https://example.test/remote.git' }],
+  ] as const) {
     const r = await create({ name, ...body });
     assert.equal(r.status, 201, JSON.stringify(r.data));
     assert.equal(r.data.repo_url, 'https://example.test/remote.git');
@@ -150,7 +171,7 @@ test('a scheme cloned empty whose GitHub repo got commits since starts minions f
   assert.equal(git(['rev-parse', 'HEAD'], t.ticket?.cwd ?? t.cwd), git(['rev-parse', 'main'], seed));
 });
 
-test('a minion whose worktree can\'t be made says what git said', async () => {
+test("a minion whose worktree can't be made says what git said", async () => {
   const r = await create({ name: 'No git', source: 'url', repoUrl: 'https://example.test/remote.git' });
   rmSync(join(r.data.repo_dir, '.git'), { recursive: true, force: true });
   const t = await s.call(`/api/projects/${r.data.id}/tickets`, { message: 'try the repo' });
@@ -158,7 +179,7 @@ test('a minion whose worktree can\'t be made says what git said', async () => {
   assert.match(t.data.error, /^Could not create working directory: .*not a git repository/);
 });
 
-test('a locked repo config says so, not just git\'s hint', async () => {
+test("a locked repo config says so, not just git's hint", async () => {
   const r = await create({ name: 'Locked config', source: 'url', repoUrl: 'https://example.test/remote.git' });
   const lock = join(r.data.repo_dir, '.git', 'config.lock');
   writeFileSync(lock, '');
@@ -342,7 +363,10 @@ test('non-admins: New repo goes on their own GitHub with their token, or is refu
   assert.equal(r.data.repo_url, 'https://github.com/joshgh/josh-game');
   assert.equal(r.data.owner_id, josh.id);
   assert.deepEqual(asCalls().slice(-2), ['gho_josh repo view joshgh/josh-game --json name', `gho_josh repo create joshgh/josh-game --private --source ${r.data.repo_dir} --remote origin --push`]);
-  assert.ok(asCalls().every((c) => c.startsWith('gho_josh ')), 'never the box login');
+  assert.ok(
+    asCalls().every((c) => c.startsWith('gho_josh ')),
+    'never the box login',
+  );
 
   // Retry: any member may (#621), and it goes on the owner's GitHub with the owner's token, as an admin's does too.
   writeFileSync(join(stub, 'fail'), 'HTTP 502');
@@ -366,8 +390,7 @@ test('non-admins: New repo goes on their own GitHub with their token, or is refu
   const byAdmin = await s.call(`/api/projects/${later.data.id}/github`, {});
   assert.equal(byAdmin.status, 403);
   assert.match(byAdmin.data.error, /Link GitHub/);
-  assert.equal(asCalls().length, before, 'no gh call on anyone else\'s login');
-
+  assert.equal(asCalls().length, before, "no gh call on anyone else's login");
 });
 
 test('cloning by URL: an admin uses the box login; anyone else their own token or none, and https only', async () => {
@@ -377,11 +400,14 @@ test('cloning by URL: an admin uses the box login; anyone else their own token o
   new Credentials(store, SECRET).put(linked.id, 'github', 'gho_rae', { login: 'raegh', id: 8, name: null });
 
   const auth = new Auth(PASSWORD, SECRET);
-  const create = (u: { id: number; name: string } | null, body: object) => u
-    ? fetch(s.base + '/api/projects', { method: 'POST', headers: { Cookie: auth.issueCookie(u, false).split(';')[0], 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json() }))
-    : s.call('/api/projects', body);
+  const create = (u: { id: number; name: string } | null, body: object) =>
+    u ? fetch(s.base + '/api/projects', { method: 'POST', headers: { Cookie: auth.issueCookie(u, false).split(';')[0], 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json() })) : s.call('/api/projects', body);
   const url = 'https://example.test/remote.git';
-  for (const [who, name, token] of [[null, 'Admin clone', 'box'], [linked, 'Rae clone', 'gho_rae'], [unlinked, 'Uma clone', 'box']] as const) {
+  for (const [who, name, token] of [
+    [null, 'Admin clone', 'box'],
+    [linked, 'Rae clone', 'gho_rae'],
+    [unlinked, 'Uma clone', 'box'],
+  ] as const) {
     rmSync(join(stub, 'clones'), { force: true });
     const r = await create(who, { name, source: 'url', repoUrl: url });
     assert.equal(r.status, 201, JSON.stringify(r.data));
@@ -400,7 +426,7 @@ test('cloning by URL: an admin uses the box login; anyone else their own token o
 // #1469: no scheme here has the server's own commit, so the server's look for the scheme it runs finds none. Asking every
 // repo again on every call made 1,159 git calls in one run of this file and held a loaded runner's loop until the folder
 // test timed out; a repo that lacks the commit is asked again only after a minute.
-test('the server asks each scheme\'s repo for its own commit a few times, not on every call', () => {
+test("the server asks each scheme's repo for its own commit a few times, not on every call", () => {
   const asks = lines(join(stub, 'cat-file')).map((l) => [Number(l.slice(0, l.indexOf(' '))), l.slice(l.indexOf(' ') + 1)] as const);
   assert.ok(asks.length > 0, 'the server looked for its scheme');
   const minutes = (asks.at(-1)![0] - asks[0][0]) / 60;

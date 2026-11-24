@@ -5,7 +5,8 @@ export const pushQueries = {
   /** A phone's FCM token for a person and contraption (#1138); a token seen before moves here and is fresh again. */
   savePushDevice(this: Store, contraptionId: number, userId: number, token: string, platform: string) {
     const now = Date.now();
-    this.db.prepare(`INSERT INTO contraption_push_devices (token, contraption_id, user_id, platform, created_at, seen_at) VALUES (?, ?, ?, ?, ?, ?)
+    this.db
+      .prepare(`INSERT INTO contraption_push_devices (token, contraption_id, user_id, platform, created_at, seen_at) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(token) DO UPDATE SET contraption_id = excluded.contraption_id, user_id = excluded.user_id, platform = excluded.platform, seen_at = excluded.seen_at`)
       .run(token, contraptionId, userId, platform, now, now);
   },
@@ -18,8 +19,7 @@ export const pushQueries = {
   /** The tokens of these people's phones for a contraption. */
   pushDevices(this: Store, contraptionId: number, userIds: number[]): string[] {
     if (!userIds.length) return [];
-    return (this.db.prepare(`SELECT token FROM contraption_push_devices WHERE contraption_id = ? AND user_id IN (${userIds.map(() => '?').join(', ')}) ORDER BY id`)
-      .all(contraptionId, ...userIds) as { token: string }[]).map((r) => r.token);
+    return (this.db.prepare(`SELECT token FROM contraption_push_devices WHERE contraption_id = ? AND user_id IN (${userIds.map(() => '?').join(', ')}) ORDER BY id`).all(contraptionId, ...userIds) as { token: string }[]).map((r) => r.token);
   },
 
   listPushSubscriptions(this: Store): PushSubscriptionRow[] {

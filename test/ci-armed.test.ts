@@ -14,8 +14,7 @@ const root = mkdtempSync(join(tmpdir(), 'ci-armed-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
 const check = (name: string, status: Check['status']): Check => ({ name, status, url: `https://ci/${name}` });
-const pr = (headSha: string, fields: Partial<PrSnapshot> = {}): PrSnapshot =>
-  ({ number: 12, url: 'https://github.com/o/r/pull/12', state: 'OPEN', headSha, closedAt: null, closedBy: null, checks: [check('build', 'passed')], remarks: [], ...fields });
+const pr = (headSha: string, fields: Partial<PrSnapshot> = {}): PrSnapshot => ({ number: 12, url: 'https://github.com/o/r/pull/12', state: 'OPEN', headSha, closedAt: null, closedBy: null, checks: [check('build', 'passed')], remarks: [], ...fields });
 const card = { questions: [{ question: 'Merge PR #12?', multiSelect: false, options: [{ label: 'Merge it', recommended: true }, { label: 'Wait' }] }], kind: 'merge' as const };
 
 /** A minion on a branch in a repo whose CI runs on pull requests (`prCi`), with a fake runner that records what it's told. */
@@ -68,7 +67,7 @@ test('arming holds a card on HEAD, says to push, and a second arm on the same co
   assert.equal(log.events.length, 0, 'nothing posted yet');
 });
 
-test("arming is refused where PRs run no CI, or CI already failed on HEAD; CI already green means post now", async () => {
+test('arming is refused where PRs run no CI, or CI already failed on HEAD; CI already green means post now', async () => {
   const none = setup('nopr', false);
   await assert.rejects(armForCi(none.app, none.ticket, { card }), /doesn't run on pull requests/);
   const red = setup('red');
@@ -96,7 +95,11 @@ test('CI passing on the armed commit posts the card and tells the Taskmaster, wi
   assert.deepEqual(log.relays, ['PR #12 is green']);
   assert.equal(store.getTicket(ticket.id)!.state, null, "a card is people's turn");
   assert.match(store.getTicket(ticket.id)!.note!, /CI passed on \w{7}: card posted/);
-  assert.deepEqual(log.notified.filter((n) => n.kind === 'state'), [], "the card is the ping: no state ping, the state being null");
+  assert.deepEqual(
+    log.notified.filter((n) => n.kind === 'state'),
+    [],
+    'the card is the ping: no state ping, the state being null',
+  );
   assert.equal(await finish(s, pr(sha), 'passed'), null, 'used up');
   assert.equal(log.events.filter(([k]) => k === 'question').length, 1, 'still once');
 });
@@ -112,7 +115,7 @@ test('a message alone leaves the minion ready for a person, and pings them with 
   assert.deepEqual(log.notified, [{ kind: 'state', state: 'ready', note: row.note }]);
 });
 
-test("CI failing, CI on another head or a running turn drops what was armed and says so", async () => {
+test('CI failing, CI on another head or a running turn drops what was armed and says so', async () => {
   for (const [name, head, result, running, why] of [
     ['fail', null, 'failed', false, /CI failed/],
     ['moved', 'f00dfeed', 'passed', false, /head is now f00dfee/],
@@ -129,11 +132,15 @@ test("CI failing, CI on another head or a running turn drops what was armed and 
   }
 });
 
-test("the watcher sends a fired CI line as held mail and wakes for the rest; a dropped one wakes with the note", async () => {
+test('the watcher sends a fired CI line as held mail and wakes for the rest; a dropped one wakes with the note', async () => {
   const { sha, store, ticket } = setup('watch');
   let snapshot = pr(sha, { checks: [check('build', 'pending')] });
   const sent: { text: string; fyi: boolean; quiet?: boolean }[] = [];
-  const w = new GithubWatcher(store, (_id, text, fyi, quiet) => sent.push({ text, fyi, quiet }), async () => ({ pr: snapshot, self: 'cara' }));
+  const w = new GithubWatcher(
+    store,
+    (_id, text, fyi, quiet) => sent.push({ text, fyi, quiet }),
+    async () => ({ pr: snapshot, self: 'cara' }),
+  );
   let answer: { fired: boolean; note: string } | null = { fired: true, note: 'The card you armed is posted.' };
   w.onCi = async () => answer;
   await w.poll(ticket, root, 'o/r'); // the first look
@@ -156,7 +163,11 @@ test("the watcher sends a fired CI line as held mail and wakes for the rest; a d
 test('a fired arm on the first look at a PR still lands as held mail', async () => {
   const { sha, store, ticket } = setup('base');
   const sent: { text: string; quiet?: boolean }[] = [];
-  const w = new GithubWatcher(store, (_id, text, _fyi, quiet) => sent.push({ text, quiet }), async () => ({ pr: pr(sha), self: 'cara' }));
+  const w = new GithubWatcher(
+    store,
+    (_id, text, _fyi, quiet) => sent.push({ text, quiet }),
+    async () => ({ pr: pr(sha), self: 'cara' }),
+  );
   w.onCi = async () => ({ fired: true, note: 'The card you armed is posted.' });
   await w.poll(ticket, root, 'o/r');
   assert.deepEqual(sent, [{ text: 'The card you armed is posted.', quiet: true }]);
@@ -170,7 +181,7 @@ test('an armed held-mail message stays held mail when it goes out', async () => 
   assert.deepEqual(log.wakes, [false]);
 });
 
-test("a message the loop guard holds counts as sent (the guard keeps it): no retry, no second card", async () => {
+test('a message the loop guard holds counts as sent (the guard keeps it): no retry, no second card', async () => {
   const s = setup('heldmsg');
   const { sha, store, ticket, app, log } = s;
   log.held = true;
@@ -186,7 +197,10 @@ test("a message that throws is retried without posting the card again, and the m
   const { sha, store, ticket, app, log } = s;
   let fail = true;
   const relay = app.runner.relay;
-  app.runner.relay = (...a: any[]) => { if (fail) throw new Error('boom'); return relay(...a); };
+  app.runner.relay = (...a: any[]) => {
+    if (fail) throw new Error('boom');
+    return relay(...a);
+  };
   await armForCi(app, ticket, { card, coordinator: { text: 'm', urgent: false } });
   await finish(s, pr(sha), 'passed');
   const [row] = store.listDeliveries({ kind: 'ci_armed' });

@@ -45,7 +45,7 @@ test('reads per-case results from node TAP, vitest tap-flat, cargo and pytest', 
 
 test('finds the new and changed cases, not the untouched ones', () => {
   const base = "test('keeps', () => {\n  assert.equal(f(1), 1);\n});\n\ntest('edits', () => {\n  assert.equal(f(2), 2);\n});\n";
-  const head = base.replace('f(2), 2', 'f(2), 4') + "\nit(\"adds\", async () => {\n  assert.ok(g());\n});\n";
+  const head = base.replace('f(2), 2', 'f(2), 4') + '\nit("adds", async () => {\n  assert.ok(g());\n});\n';
   assert.deepEqual(changedCases(base, head, 'js'), ['edits', 'adds']);
   assert.deepEqual(changedCases(null, head, 'js'), ['keeps', 'edits', 'adds']);
   assert.deepEqual([...casesOf("t.test('it\\'s nested', () => {})", 'js').keys()], ["it's nested"]);
@@ -54,7 +54,7 @@ test('finds the new and changed cases, not the untouched ones', () => {
   assert.deepEqual([...casesOf('class T:\n    def test_a(self):\n        pass\ndef helper(): pass\ndef test_b(): pass\n', 'py').keys()], ['test_a', 'test_b']);
 });
 
-test('splices the branch\'s trailing Rust test module onto the base\'s code', () => {
+test("splices the branch's trailing Rust test module onto the base's code", () => {
   const base = 'pub fn f() -> u8 { 1 }\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn one() { assert_eq!(f(), 1); }\n}\n';
   const head = 'pub fn f() -> u8 { 2 }\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn one() { assert_eq!(f(), 2); }\n}\n';
   assert.equal(spliceRust(base, head), 'pub fn f() -> u8 { 1 }\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn one() { assert_eq!(f(), 2); }\n}\n');
@@ -62,7 +62,7 @@ test('splices the branch\'s trailing Rust test module onto the base\'s code', ()
   assert.equal(spliceRust(base, head.replace(/\n$/, '\n\npub fn g() {}\n')), null, 'code after the module: not one trailing module');
 });
 
-test('picks the runner\'s command and the cargo target', () => {
+test("picks the runner's command and the cargo target", () => {
   assert.deepEqual(nodeCommand('tools/citadel-node --test --test-concurrency=${N:-2} --test-global-setup=test/leak-guard.ts test/', 'test/a.test.ts'), ['tools/citadel-node', '--test', '--test-reporter=tap', '--test-global-setup=test/leak-guard.ts', 'test/a.test.ts']);
   assert.deepEqual(nodeCommand('node --test --test-concurrency=1 --test-timeout=120000 test/', 'test/a.test.ts'), ['node', '--test', '--test-reporter=tap', '--test-timeout=120000', 'test/a.test.ts']);
   assert.deepEqual(nodeCommand('', 'a.test.ts'), ['node', '--test', '--test-reporter=tap', 'a.test.ts']);
@@ -87,7 +87,7 @@ test('picks the runner\'s command and the cargo target', () => {
   mkdirSync(join(ws, 'crates', 'core', 'tests', 'fake'), { recursive: true });
   writeFileSync(join(ws, 'crates', 'core', 'tests', 'suite', 'main.rs'), 'mod copied;\n');
   writeFileSync(join(ws, 'crates', 'core', 'tests', 'fake.rs'), 'mod keep;\n');
-  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/suite/copied.rs', ['keeps_copy']), ['-p', 'peek-core', '--test', 'suite', '--', 'copied::keeps_copy'], 'qualified: another module\'s keeps_copy must not stand in');
+  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/suite/copied.rs', ['keeps_copy']), ['-p', 'peek-core', '--test', 'suite', '--', 'copied::keeps_copy'], "qualified: another module's keeps_copy must not stand in");
   assert.deepEqual(cargoArgs(ws, 'crates/core/tests/suite/deep/more.rs'), ['-p', 'peek-core', '--test', 'suite', '--', 'deep::more::']);
   assert.deepEqual(cargoArgs(ws, 'crates/core/tests/fake/keep.rs', ['k']), ['-p', 'peek-core', '--test', 'fake', '--', 'keep::k'], 'tests/fake.rs mods in tests/fake/');
   assert.equal(cargoTest(ws, 'crates/core/tests/suite/copied.rs'), true);
@@ -108,29 +108,63 @@ test('picks the runner\'s command and the cargo target', () => {
 test('judges a file: a case passing on the base is flagged; failing, not loading or skipped is not', () => {
   const run = (status: number, out: string) => ({ status, out, timedOut: false, parsed: true });
   const e = { path: 't.test.ts', cases: ['new', 'other'] };
-  assert.deepEqual(judge(e, run(1, 'ok 1 - new\nnot ok 2 - other')).map((v) => v.kind), ['flag', 'red']);
+  assert.deepEqual(
+    judge(e, run(1, 'ok 1 - new\nnot ok 2 - other')).map((v) => v.kind),
+    ['flag', 'red'],
+  );
   const load = judge(e, run(1, "# SyntaxError: The requested module '../m.ts' does not provide an export named 'g'\nnot ok 1 - t.test.ts\n  error: 'test failed'"));
   assert.deepEqual(load, [{ kind: 'red', label: 't.test.ts', detail: "didn't run on the base (2 new or changed cases): SyntaxError: The requested module '../m.ts' does not provide an export named 'g'" }], 'a file that never loaded: one line, with the cause');
-  assert.deepEqual(judge(e, run(0, 'ok 1 - new # SKIP\nok 2 - other')).map((v) => v.kind), ['skipped', 'flag']);
-  assert.deepEqual(judge(e, run(0, '')).map((v) => v.kind), ['skipped'], 'a run that reports nothing proves nothing');
-  assert.deepEqual(judge(e, { ...run(0, ''), timedOut: true }).map((v) => v.kind), ['skipped']);
-  assert.deepEqual(judge({ path: 't', cases: null }, { status: 0, out: 'whatever', timedOut: false, parsed: false }).map((v) => v.kind), ['flag'], 'a --cmd run with no parsed cases: the exit status decides');
+  assert.deepEqual(
+    judge(e, run(0, 'ok 1 - new # SKIP\nok 2 - other')).map((v) => v.kind),
+    ['skipped', 'flag'],
+  );
+  assert.deepEqual(
+    judge(e, run(0, '')).map((v) => v.kind),
+    ['skipped'],
+    'a run that reports nothing proves nothing',
+  );
+  assert.deepEqual(
+    judge(e, { ...run(0, ''), timedOut: true }).map((v) => v.kind),
+    ['skipped'],
+  );
+  assert.deepEqual(
+    judge({ path: 't', cases: null }, { status: 0, out: 'whatever', timedOut: false, parsed: false }).map((v) => v.kind),
+    ['flag'],
+    'a --cmd run with no parsed cases: the exit status decides',
+  );
   // A case the output never names wasn't judged: it may never have run (#1724). Never a pass, and never a guessed red.
-  assert.deepEqual(judge(e, run(0, 'ok 1 - other')), [{ kind: 'skipped', label: 't.test.ts › new', detail: "not named in the run's output, so it can't be judged (it may never have run): run it on the base by hand" }, { kind: 'flag', label: 't.test.ts › other', detail: '' }]);
-  assert.deepEqual(judge(e, run(1, 'not ok 1 - other')).map((v) => v.kind), ['skipped', 'red']);
-  assert.deepEqual(judge(e, { status: 0, out: 'all good', timedOut: false, parsed: false }).map((v) => v.kind), ['skipped', 'skipped'], 'a --cmd whose output names no case: exit 0 is no pass for a case');
+  assert.deepEqual(judge(e, run(0, 'ok 1 - other')), [
+    { kind: 'skipped', label: 't.test.ts › new', detail: "not named in the run's output, so it can't be judged (it may never have run): run it on the base by hand" },
+    { kind: 'flag', label: 't.test.ts › other', detail: '' },
+  ]);
+  assert.deepEqual(
+    judge(e, run(1, 'not ok 1 - other')).map((v) => v.kind),
+    ['skipped', 'red'],
+  );
+  assert.deepEqual(
+    judge(e, { status: 0, out: 'all good', timedOut: false, parsed: false }).map((v) => v.kind),
+    ['skipped', 'skipped'],
+    'a --cmd whose output names no case: exit 0 is no pass for a case',
+  );
   const unparsed = judge(e, { status: 1, out: 'boom\nfull output: /tmp/x.log', timedOut: false, parsed: false });
   assert.deepEqual(unparsed, [{ kind: 'red', label: 't.test.ts', detail: 'failed on the base, and its output names no case (2 new or changed cases): boom' }], 'a --cmd failure is not "didn\'t run"');
   assert.deepEqual(judge({ path: 't.test.ts', cases: [] }, run(0, 'ok 1 - old')), [{ kind: 'skipped', label: 't.test.ts', detail: 'no new or changed case found (only shared setup or helpers changed): judge it by hand' }], 'a file whose cases are all unchanged is not a finding');
 });
 
-test('reads citadel-test\'s output, which names only failures (#1724)', () => {
+test("reads citadel-test's output, which names only failures (#1724)", () => {
   const out = '✖ 31 passed, 1 failed (+4 repo-wide files) in 22.5 s\n\n✖ test/u.test.ts:193 › only a person can start one\n  Expected values to be strictly equal:\n\n✖ test/v.test.ts:9 › menus › opens\nfull output: /tmp/citadel-test.log\n';
-  assert.deepEqual(parseResults(out), [{ name: 'only a person can start one', ok: false }, { name: 'menus > opens', ok: false }]);
+  assert.deepEqual(parseResults(out), [
+    { name: 'only a person can start one', ok: false },
+    { name: 'menus > opens', ok: false },
+  ]);
   assert.deepEqual(parseResults(out, 'test/v.test.ts'), [{ name: 'menus > opens', ok: false }], "another file's failure is not this file's");
   assert.deepEqual(parseResults('✖ /tmp/t/test/v.test.ts:9 › opens\n', 'test/v.test.ts'), [{ name: 'opens', ok: false }], 'an absolute path');
   const e = { path: 'test/u.test.ts', cases: ['only a person can start one', 'other'] };
-  assert.deepEqual(judge(e, { status: 1, out, timedOut: false, parsed: true }).map((v) => v.kind), ['red', 'skipped'], 'a case it didn\'t list may have passed or never run');
+  assert.deepEqual(
+    judge(e, { status: 1, out, timedOut: false, parsed: true }).map((v) => v.kind),
+    ['red', 'skipped'],
+    "a case it didn't list may have passed or never run",
+  );
 });
 
 /** A repo with a little module and its test on main, and a branch on top. */
@@ -183,8 +217,8 @@ test('end to end: a fix whose new test fails on main is not flagged; a test that
 
   // A test file of a stack it can't name: said, never dropped.
   const ruby = repo('ruby');
-  writeFileSync(join(ruby, 'test', 'math_test.rb'), "assert true\n");
-  writeFileSync(join(ruby, 'test', 'helper.rb'), "# shared\n");
+  writeFileSync(join(ruby, 'test', 'math_test.rb'), 'assert true\n');
+  writeFileSync(join(ruby, 'test', 'helper.rb'), '# shared\n');
   git(ruby, 'add', '-A');
   commit(ruby);
   r = check(ruby);
@@ -201,7 +235,7 @@ test('end to end: a fix whose new test fails on main is not flagged; a test that
   assert.match(r.stdout, /nothing to check: the diff changes no test files/);
 });
 
-test('(a) a helper named self-test.ts is not a test file; a name the package\'s test script covers, and the usual names, still are', () => {
+test("(a) a helper named self-test.ts is not a test file; a name the package's test script covers, and the usual names, still are", () => {
   assert.equal(isTestPath('app/shared/self-test.ts', 'node --test test/', 'shared/self-test.ts'), false);
   assert.equal(isTestPath('app/shared/self-test.ts'), false);
   assert.equal(isTestPath('app/shared/self-test.ts', 'node --test shared/', 'shared/self-test.ts'), true, 'the script runs that folder');
@@ -216,8 +250,8 @@ test('(b) a tools/*-test.sh shell test is a test file, and its exit status judge
   const sh = repo('shell');
   writeFileSync(join(sh, 'math.ts'), 'export const double = (n: number) => n * 2;\nexport const half = (n: number) => n / 2;\n');
   mkdirSync(join(sh, 'tools'));
-  writeFileSync(join(sh, 'tools', 'half-test.sh'), "#!/bin/bash\ngrep -q half math.ts\n");
-  writeFileSync(join(sh, 'tools', 'double-test.sh'), "#!/bin/bash\ngrep -q double math.ts\n");
+  writeFileSync(join(sh, 'tools', 'half-test.sh'), '#!/bin/bash\ngrep -q half math.ts\n');
+  writeFileSync(join(sh, 'tools', 'double-test.sh'), '#!/bin/bash\ngrep -q double math.ts\n');
   git(sh, 'add', '-A');
   commit(sh);
   const r = check(sh);
@@ -257,14 +291,17 @@ test('changed fixtures reach the base as the same bytes and mode, and a non-ASCI
   const blob = Buffer.from([0xff, 0xfe, 0x00, 0x80, 0xc3, 0x28, 0x0a]);
   writeFileSync(join(dir, 'test', 'tést.bin'), blob);
   writeFileSync(join(dir, 'test', 'run.sh'), '#!/bin/sh\necho ok\n', { mode: 0o755 });
-  writeFileSync(join(dir, 'test', 'fixtures.test.ts'), `import assert from 'node:assert/strict';
+  writeFileSync(
+    join(dir, 'test', 'fixtures.test.ts'),
+    `import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 test('binary fixture is intact', () => assert.deepEqual([...readFileSync(new URL('./tést.bin', import.meta.url))], [255, 254, 0, 128, 195, 40, 10]));
 test('helper is executable', () => assert.equal(execFileSync(new URL('./run.sh', import.meta.url).pathname, { encoding: 'utf8' }), 'ok\\n'));
-`);
+`,
+  );
   git(dir, 'add', '-A');
   commit(dir);
   const r = check(dir);
@@ -277,7 +314,10 @@ test('a new case after a top-level await is judged red on the base, never passed
   // ended the file once the first test was done, before the new case was registered, and the unnamed case read as a pass.
   const dir = repo('await');
   writeFileSync(join(dir, 'math.ts'), 'export const double = (n: number) => n * 2 + 0;\n');
-  writeFileSync(join(dir, 'test', 'math.test.ts'), "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\nimport { double } from '../math.ts';\n\ntest('doubles', () => assert.equal(double(2), 4));\n\nconst s = (await import('node:http')).createServer();\nawait new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.close())));\n\ntest('negative zero doubles to zero', () => assert.ok(Object.is(double(-0), 0)));\n");
+  writeFileSync(
+    join(dir, 'test', 'math.test.ts'),
+    "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\nimport { double } from '../math.ts';\n\ntest('doubles', () => assert.equal(double(2), 4));\n\nconst s = (await import('node:http')).createServer();\nawait new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.close())));\n\ntest('negative zero doubles to zero', () => assert.ok(Object.is(double(-0), 0)));\n",
+  );
   commit(dir);
   const r = check(dir);
   assert.match(r.stdout, /^red +test\/math\.test\.ts › negative zero doubles to zero$/m, r.stdout + r.stderr);

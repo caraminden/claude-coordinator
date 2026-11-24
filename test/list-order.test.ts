@@ -29,14 +29,24 @@ let caraId = 0;
 before(async () => {
   const server = tmp.spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
+      ...process.env,
+      MACHINES_URL: undefined,
+      CITADEL_HOST_SIGNALS: 'fixed',
+      CITADEL_ZONE: TEST_ZONE,
+      PORT: '0',
+      DATA_DIR: join(root, 'data'),
+      CLAUDE_BIN: '/bin/false',
+      CLAUDE_CONFIG_DIR: join(root, 'claude'),
+      COORDINATOR_PASSWORD: 'test-password-123',
+      SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   const res = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
   });
   cookies.Cara = res.headers.get('set-cookie')!.split(';')[0];
   caraId = (await call('Cara', '/api/me')).data.id;
@@ -48,31 +58,52 @@ before(async () => {
 
 test('inOrder puts what the order names first, in its order, and the rest after as they came', () => {
   const items = ['a', 'b', 'c', 'd', 'e'];
-  assert.deepEqual(inOrder(items, (x: string) => x, ['d', 'b']), ['d', 'b', 'a', 'c', 'e']);
-  assert.deepEqual(inOrder(items, (x: string) => x, []), items, 'no saved order: the list\'s usual one');
-  assert.deepEqual(inOrder(items, (x: string) => x, ['gone', 'c']), ['c', 'a', 'b', 'd', 'e'], 'a key for something gone is skipped');
+  assert.deepEqual(
+    inOrder(items, (x: string) => x, ['d', 'b']),
+    ['d', 'b', 'a', 'c', 'e'],
+  );
+  assert.deepEqual(
+    inOrder(items, (x: string) => x, []),
+    items,
+    "no saved order: the list's usual one",
+  );
+  assert.deepEqual(
+    inOrder(items, (x: string) => x, ['gone', 'c']),
+    ['c', 'a', 'b', 'd', 'e'],
+    'a key for something gone is skipped',
+  );
   // Ids saved as numbers still match ids that come as numbers or strings.
-  assert.deepEqual(inOrder([{ id: 1 }, { id: 2 }], (p: { id: number }) => p.id, [2, 1]).map((p) => p.id), [2, 1]);
+  assert.deepEqual(
+    inOrder([{ id: 1 }, { id: 2 }], (p: { id: number }) => p.id, [2, 1]).map((p) => p.id),
+    [2, 1],
+  );
   assert.deepEqual(moved(['a', 'b', 'c', 'd'], 0, 2), ['b', 'c', 'a', 'd']);
   assert.deepEqual(moved(['a', 'b', 'c', 'd'], 3, 0), ['d', 'a', 'b', 'c']);
 });
 
 const names = async (who: string) => (await call(who, '/api/projects')).data.map((p: { name: string }) => p.name);
 
-test('a scheme order is the dragger\'s own, and a scheme they never placed goes at the end', async () => {
+test("a scheme order is the dragger's own, and a scheme they never placed goes at the end", async () => {
   const ids: Record<string, number> = {};
   for (const name of ['Alpha', 'Bravo', 'Charlie']) {
     ids[name] = (await call('Cara', '/api/projects', { method: 'POST', body: { name } })).data.id;
     assert.equal((await call('Cara', `/api/projects/${ids[name]}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
   }
   const usual = await names('Cara');
-  assert.deepEqual(usual.filter((n: string) => n in ids), ['Alpha', 'Bravo', 'Charlie']);
+  assert.deepEqual(
+    usual.filter((n: string) => n in ids),
+    ['Alpha', 'Bravo', 'Charlie'],
+  );
 
   assert.deepEqual(await call('Cara', '/api/me/order/schemes', { method: 'PUT', body: { keys: [ids.Charlie, ids.Alpha] } }), { status: 200, data: { keys: [ids.Charlie, ids.Alpha] } });
   const mine = await names('Cara');
   assert.deepEqual(mine.slice(0, 2), ['Charlie', 'Alpha']);
   assert.ok(mine.indexOf('Bravo') > 1, 'unplaced after the placed ones');
-  assert.deepEqual(await names('Josh'), usual.filter((n: string) => n in ids), 'Josh keeps the usual order');
+  assert.deepEqual(
+    await names('Josh'),
+    usual.filter((n: string) => n in ids),
+    'Josh keeps the usual order',
+  );
 
   // The shelf saves its whole list on a drop, so a scheme made after the drag goes at the end of it.
   const all = (await call('Cara', '/api/projects')).data.map((p: { id: number }) => p.id);
@@ -84,8 +115,12 @@ test('a scheme order is the dragger\'s own, and a scheme they never placed goes 
   assert.deepEqual((await names('Cara')).slice(0, 4), ['Aardvark', 'Bravo', 'Alpha', 'Charlie']);
 });
 
-test('an app order is the dragger\'s own and the rail\'s list follows it', async () => {
-  for (const [name, title, port] of [['zed', 'Zed', 9111], ['amber', 'Amber', 9112], ['moss', 'Moss', 9113]] as const) {
+test("an app order is the dragger's own and the rail's list follows it", async () => {
+  for (const [name, title, port] of [
+    ['zed', 'Zed', 9111],
+    ['amber', 'Amber', 9112],
+    ['moss', 'Moss', 9113],
+  ] as const) {
     assert.equal((await call('Cara', '/api/contraptions', { method: 'POST', body: { name, title, port } })).status, 201);
     for (const id of [caraId, joshId]) await call('Cara', `/api/contraptions/${name}/people/${id}`, { method: 'PUT', body: { enabled: true } });
   }

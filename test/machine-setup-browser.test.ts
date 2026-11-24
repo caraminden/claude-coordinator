@@ -103,7 +103,7 @@ test('a machine lends what is ticked in its row from what its agent found, with 
   writeFileSync(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { 'godot-ai': { command: process.execPath, args: [mcpServer], env: { KEY: 'sk-secret-123' } } } }));
   writeFileSync(join(dir, 'machine-agent.json'), JSON.stringify({ workspaces: { vault: { path: join(dir, 'vault') } } }));
   startMachineAgent({ base: srv.base, token, run: ['--config', join(dir, 'machine-agent.json')], env: { CLAUDE_CONFIG_DIR: dir } });
-  for (const end = Date.now() + 20_000; !(await machine('tick-box')).found?.length;) {
+  for (const end = Date.now() + 20_000; !(await machine('tick-box')).found?.length; ) {
     if (Date.now() > end) throw new Error('the agent never reported');
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -111,7 +111,7 @@ test('a machine lends what is ticked in its row from what its agent found, with 
   await wait('its line to ask for a tick', `/Lends nothing: nothing is ticked/.test(${row('tick-box')}?.textContent ?? '')`);
   await open('tick-box');
   const boxes = `[...${row('tick-box')}.querySelectorAll('.machine-lends label')]`;
-  assert.deepEqual(await page.eval<string[]>(`${boxes}.map((l) => l.textContent + ':' + l.querySelector('input').checked)`), ['godot-ai · from Claude Code\'s config:false', 'vault:false']);
+  assert.deepEqual(await page.eval<string[]>(`${boxes}.map((l) => l.textContent + ':' + l.querySelector('input').checked)`), ["godot-ai · from Claude Code's config:false", 'vault:false']);
   assert.doesNotMatch(await page.eval<string>('document.body.textContent'), /sk-secret-123/);
   const saved = ['(l) => l?.server === "godot-ai"', '(l) => !!l?.workspaces.includes("vault")'];
   for (const n of [0, 1]) {
@@ -120,7 +120,7 @@ test('a machine lends what is ticked in its row from what its agent found, with 
     // The box ticks at once and its save goes behind (optimistic): wait for the server to hold it, not the box.
     await wait(`tick ${n} to save`, `fetch('api/machines').then((r) => r.json()).then((l) => (${saved[n]})(l.find((m) => m.name === 'tick-box').lend))`);
   }
-  for (const end = Date.now() + 20_000; (await machine('tick-box')).status !== 'ready';) {
+  for (const end = Date.now() + 20_000; (await machine('tick-box')).status !== 'ready'; ) {
     if (Date.now() > end) throw new Error(`never Ready: ${JSON.stringify(await machine('tick-box'))}`);
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -133,7 +133,7 @@ test('a machine lends what is ticked in its row from what its agent found, with 
 test('a machine set up before ticks shows what it lends as set on that computer, with a way to reinstall', { skip }, async () => {
   const { machine: old, token } = (await srv.call('/api/machines', { name: 'old-box' })).data;
   startMachineAgent({ base: srv.base, token });
-  for (const end = Date.now() + 20_000; !(await machine('old-box')).online;) {
+  for (const end = Date.now() + 20_000; !(await machine('old-box')).online; ) {
     if (Date.now() > end) throw new Error('the old agent never connected');
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -147,7 +147,7 @@ test('a machine set up before ticks shows what it lends as set on that computer,
   // Reinstalling is a new token and the one install line; the confirm says what changes.
   const asked = await page.eval<string>(`(() => { let said = ''; window.confirm = (t) => { said = t; return true; }; [...${row('old-box')}.querySelectorAll('.machine-lends button')].find((b) => b.textContent === 'Reinstall to manage from here').click(); return said; })()`);
   assert.match(asked, /servers/);
-  await wait('old-box\'s install line', `document.querySelector('#machine-setup strong')?.textContent === 'Connect old-box'`);
+  await wait("old-box's install line", `document.querySelector('#machine-setup strong')?.textContent === 'Connect old-box'`);
   assert.match((await shown())[0], /--config machine-agent\.json --install old-box$/);
   assert.equal((await machine('old-box')).id, old.id, 'reinstalling kept the same machine');
 });
@@ -178,7 +178,7 @@ test('Who gets it is one list of scheme chips: + scheme adds one at once, × tak
   await wait('the machine list', '!!document.querySelector(".machine-row")');
   const row = `[...document.querySelectorAll('.machine-row')].find((r) => r.querySelector('.settings-row-title').textContent === 'chip-box')`;
   await page.eval(`${row}.open = true`);
-  await wait('chip-box\'s body', `!!${row}.querySelector('.machine-body')`);
+  await wait("chip-box's body", `!!${row}.querySelector('.machine-body')`);
   const chips = () => page.eval<string[]>(`[...${row}.querySelectorAll('.scheme-chip > span')].map((c) => c.textContent)`);
   const saved = async () => (await srv.call('/api/machines')).data.find((m: any) => m.id === machine.id).projects;
   assert.deepEqual(await chips(), []);

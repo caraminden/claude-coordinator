@@ -33,14 +33,14 @@ test('opening a view after going back drops what was forward, as a browser does'
   assert.equal(canGoForward(s), false);
 });
 
-test('a replaced address takes the current entry\'s place', () => {
+test("a replaced address takes the current entry's place", () => {
   let s = step(start, { hash: '#/p/2/t/5' });
   s = step(s, { hash: '#/p/2/t/5/x', replaced: true });
   assert.deepEqual(s.entries, ['#/p/2', '#/p/2/t/5/x']);
   assert.equal(s.idx, 1);
 });
 
-test('the stack keeps the newest 50 entries, and older entries\' places still find theirs', () => {
+test("the stack keeps the newest 50 entries, and older entries' places still find theirs", () => {
   let s = start;
   for (let i = 0; i < 80; i++) s = step(s, { hash: `#/p/2/t/${i}` });
   assert.equal(s.entries.length, 50);
@@ -67,23 +67,52 @@ test('in a page, links, replaces, back and reload keep the stack right', async (
   let at = 0;
   const store = new Map();
   const listeners = {};
-  const fire = () => { listeners.popstate?.(); listeners.hashchange?.(); };
+  const fire = () => {
+    listeners.popstate?.();
+    listeners.hashchange?.();
+  };
   const location = {
-    get hash() { return entries[at].hash; },
-    set hash(v) { entries.splice(at + 1, Infinity, { hash: v, state: null }); at++; fire(); },
-    get href() { return `https://x.test/${entries[at].hash}`; },
-    replace(v) { entries[at] = { hash: new URL(v, this.href).hash, state: null }; fire(); },
+    get hash() {
+      return entries[at].hash;
+    },
+    set hash(v) {
+      entries.splice(at + 1, Infinity, { hash: v, state: null });
+      at++;
+      fire();
+    },
+    get href() {
+      return `https://x.test/${entries[at].hash}`;
+    },
+    replace(v) {
+      entries[at] = { hash: new URL(v, this.href).hash, state: null };
+      fire();
+    },
   };
   const history = {
-    get state() { return entries[at].state; },
-    replaceState(st) { entries[at].state = st; },
-    back() { at--; fire(); },
-    forward() { at++; fire(); },
+    get state() {
+      return entries[at].state;
+    },
+    replaceState(st) {
+      entries[at].state = st;
+    },
+    back() {
+      at--;
+      fire();
+    },
+    forward() {
+      at++;
+      fire();
+    },
   };
   const buttons = { back: { disabled: null }, forward: { disabled: null } };
   Object.assign(globalThis, {
-    window: { addEventListener: (type, fn) => { listeners[type] = fn; } },
-    location, history,
+    window: {
+      addEventListener: (type, fn) => {
+        listeners[type] = fn;
+      },
+    },
+    location,
+    history,
     sessionStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) },
     document: { querySelectorAll: (sel) => [sel.includes('back') ? buttons.back : buttons.forward] },
   });
@@ -92,7 +121,10 @@ test('in a page, links, replaces, back and reload keep the stack right', async (
   location.hash = '#/p/2/t/5'; // a link or the sidebar
   location.hash = '#/t/202'; // an old address...
   nav.replaceHash('#/p/2/t/9'); // ...swapped for its new one
-  assert.deepEqual(entries.map((e) => e.hash), ['#/p/2', '#/p/2/t/5', '#/p/2/t/9']);
+  assert.deepEqual(
+    entries.map((e) => e.hash),
+    ['#/p/2', '#/p/2/t/5', '#/p/2/t/9'],
+  );
   assert.equal(buttons.back.disabled, false);
   assert.equal(buttons.forward.disabled, true);
   nav.goBack();

@@ -29,7 +29,11 @@ export const titleKey = (projectId: number, person: number, key: string) => `man
 /** Who has item `key` (with its minion number) open from this scheme: the people whose titles are kept for it. */
 function holders(store: App['store'], projectId: number, key: string): number[] {
   const prefix = `mandate-title:${projectId}:`; // titleKey's, up to the person
-  return store.settingKeys(prefix).map((k) => /^(\d+):(.*)$/s.exec(k.slice(prefix.length))).filter((m) => m && m[2] === key).map((m) => Number(m![1]));
+  return store
+    .settingKeys(prefix)
+    .map((k) => /^(\d+):(.*)$/s.exec(k.slice(prefix.length)))
+    .filter((m) => m && m[2] === key)
+    .map((m) => Number(m![1]));
 }
 
 /**
@@ -92,7 +96,9 @@ export async function callMandate(mandate: Pick<ContraptionRow, 'name' | 'title'
     const r = await fetch(`http://127.0.0.1:${mandate.port}/apps/${mandate.name}/app-api/items/${key}`, {
       method: body ? 'PUT' : 'DELETE',
       headers: { 'X-Citadel-Identity': identity, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      body: body && JSON.stringify(body), redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT_MS),
+      body: body && JSON.stringify(body),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const text = await r.text();
     try {

@@ -250,7 +250,10 @@ test('conflict prep: a ship that will conflict with a rider is told while the tr
   assert.equal(git(l.r.source, 'show', 'main:a.txt'), 'three\nfour');
   assert.equal(git(l.r.source, 'config', '--get', 'rerere.enabled'), 'false', "rerere stays land.sh's: rr-cache would turn it on for every command");
   const log = join(l.r.dir, 'shared', 'retro-log');
-  const lines = readFileSync(join(log, readdirSync(log)[0], 'land.md'), 'utf8').split('\n').filter((x) => x.includes(' · train prep ')).map((x) => x.replace(/^- \S+ · /, '').replace(/\(([0-9a-f]{7,})\)/, '(sha)'));
+  const lines = readFileSync(join(log, readdirSync(log)[0], 'land.md'), 'utf8')
+    .split('\n')
+    .filter((x) => x.includes(' · train prep '))
+    .map((x) => x.replace(/^- \S+ · /, '').replace(/\(([0-9a-f]{7,})\)/, '(sha)'));
   assert.deepEqual(lines, ["train prep conflict · ticket/4-x onto ticket/2-x's train (sha) · ticket/3-x: a.txt", 'train prep replayed · ticket/4-x onto main (sha)']);
   l.done();
 });
@@ -293,7 +296,7 @@ test('conflict prep off: <state>/prep-off, and no prep line is said (#1366)', as
   const done = await l.go();
   assert.equal(done[3].status, 1, 'the conflict is refused as before');
   assert.doesNotMatch(done[3].stderr, /land: prep:/);
-  assert.throws(() => git(l.r.source, 'config', '--get', 'rerere.enabled'), 'land.sh leaves the repo\'s rerere setting alone');
+  assert.throws(() => git(l.r.source, 'config', '--get', 'rerere.enabled'), "land.sh leaves the repo's rerere setting alone");
   l.done();
 });
 
@@ -301,7 +304,10 @@ test('conflict prep off: <state>/prep-off, and no prep line is said (#1366)', as
 // on its top and pushed to CI once that run has a runner. LAND_TRAIN_MAX=1: ship 2 takes ship 3, and ship 4 is next, with ship 5.
 const retro = (dir: string, what: string) => {
   const log = join(dir, 'shared', 'retro-log');
-  return readFileSync(join(log, readdirSync(log)[0], 'land.md'), 'utf8').split('\n').filter((x) => x.includes(what)).map((x) => x.replace(/^- \S+ · /, '').replace(/\(([0-9a-f]{7,})\)|[0-9a-f]{7,}$/g, 'sha'));
+  return readFileSync(join(log, readdirSync(log)[0], 'land.md'), 'utf8')
+    .split('\n')
+    .filter((x) => x.includes(what))
+    .map((x) => x.replace(/^- \S+ · /, '').replace(/\(([0-9a-f]{7,})\)|[0-9a-f]{7,}$/g, 'sha'));
 };
 
 test("early next train: the next ship's train is stacked and its CI started while the train ahead's CI runs, and its run counts (#1366, #1568)", async () => {
@@ -309,7 +315,7 @@ test("early next train: the next ship's train is stacked and its CI started whil
   const go = join(mkdtempSync(join(tmpdir(), 'early-go-')), 'go');
   const l = await line([{}, { env: { FAKE_CI_GATE: go } }, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1' }), pushLog);
   const all = l.go();
-  await until('the early push beside ship 2\'s run', () => /its CI starts now/.test(l.out[1]));
+  await until("the early push beside ship 2's run", () => /its CI starts now/.test(l.out[1]));
   assert.doesNotMatch(l.out[1], /CI passed on/, "ship 2's run is still going");
   writeFileSync(go, '');
   const done = await all;
@@ -337,7 +343,7 @@ test("early next train: the next ship's train is stacked and its CI started whil
 
 // The early run's train is the one its landing builds (#1568): a ship that would make it different (here ship 6, which
 // ship 4's own landing, allowed two riders, would take) waits for the train after it, so the early run still counts.
-test("early next train: the next landing rides only the riders its early run was stacked with, so it still counts (#1568)", async () => {
+test('early next train: the next landing rides only the riders its early run was stacked with, so it still counts (#1568)', async () => {
   const l = await line([{}, {}, {}, { env: { LAND_TRAIN_MAX: '2' } }, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1' }));
   const done = await l.go();
   done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
@@ -377,7 +383,11 @@ test("early next train: a record for a ship that wasn't next is dropped by the n
 test('early next train: with no free runner nothing is pushed early, and with LAND_EARLY=0 or <state>/early-off nothing is tried (#1366)', async () => {
   // The one runner is online, so each ship's CI waits for its run, but busy (a heavy job holds it), so never free.
   const runners = JSON.stringify({ runners: [{ status: 'online', busy: true, labels: [{ name: 'citadel-ci-linux' }] }] });
-  const l = await line([{}, {}, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1', FAKE_RUNNERS_FILE: join(d, 'runners') }), (r) => writeFileSync(join(r.dir, 'runners'), runners));
+  const l = await line(
+    [{}, {}, {}, {}, {}],
+    (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1', FAKE_RUNNERS_FILE: join(d, 'runners') }),
+    (r) => writeFileSync(join(r.dir, 'runners'), runners),
+  );
   const done = await l.go();
   done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
   assert.match(done[1].stderr, /land: early next train: no free citadel-ci-linux runner, so ticket\/4-x's CI waits for its turn/);
@@ -386,7 +396,10 @@ test('early next train: with no free runner nothing is pushed early, and with LA
   l.done();
   for (const how of ['env', 'file'] as const) {
     const off = await line([{}, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1', ...(how === 'env' ? { LAND_EARLY: '0' } : {}) }));
-    if (how === 'file') { mkdirSync(off.state, { recursive: true }); writeFileSync(join(off.state, 'early-off'), ''); }
+    if (how === 'file') {
+      mkdirSync(off.state, { recursive: true });
+      writeFileSync(join(off.state, 'early-off'), '');
+    }
     const offDone = await off.go();
     offDone.forEach((d, i) => assert.equal(d.status, 0, `${how}: ship ${i + 1}: ${d.stderr}`));
     assert.doesNotMatch(offDone.map((d) => d.stderr).join('\n'), /early next train/, how);
@@ -411,7 +424,7 @@ async function refusedBehind(change: [string, string], extra: Record<string, str
   return { l, d };
 }
 
-test("own check: green on the check runner, it joins the line and that run is its CI there, with no second run; alone in line, no check (#1567)", async () => {
+test('own check: green on the check runner, it joins the line and that run is its CI there, with no second run; alone in line, no check (#1567)', async () => {
   const l = await line([{}, {}], own, pushLog);
   const done = await l.go();
   done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
@@ -419,11 +432,17 @@ test("own check: green on the check runner, it joins the line and that run is it
   assert.match(done[1].stderr, /land: own check: its CI runs now on the check runner, on [0-9a-f]{7,} \(rebased onto main [0-9a-f]{7,}\), before it joins the line/);
   assert.match(done[1].stderr, /land: own check: green in \d+ s \(https:\/\/ci\/\d+\), so it joins the line/);
   const p = pushes(l.r.dir);
-  assert.ok(p.some((x) => x.endsWith(' refs/heads/check/ticket/2-x') && !/^0+ /.test(x)), `check/ticket/2-x pushed: ${p.join('; ')}`);
+  assert.ok(
+    p.some((x) => x.endsWith(' refs/heads/check/ticket/2-x') && !/^0+ /.test(x)),
+    `check/ticket/2-x pushed: ${p.join('; ')}`,
+  );
   assert.ok(!p.some((x) => x.endsWith(' refs/heads/land/ticket/2-x')), `no land run pushed for ship 2: ${p.join('; ')}`);
   assert.ok(!git(join(l.r.dir, 'hub.git'), 'for-each-ref', 'refs/heads/check/', 'refs/heads/check-base/'), 'no check branch is left on GitHub');
   assert.equal(l.runs(), 2, "ship 1's run and ship 2's check, which was its CI in line too");
-  assert.deepEqual(retro(l.r.dir, 'own check · ').map((x) => x.replace(/\d+s$/, 'Ns')), ['own check · ticket/2-x · green · Ns']);
+  assert.deepEqual(
+    retro(l.r.dir, 'own check · ').map((x) => x.replace(/\d+s$/, 'Ns')),
+    ['own check · ticket/2-x · green · Ns'],
+  );
   l.done();
 });
 
@@ -453,7 +472,10 @@ test('own check: a file that failed again alone in CI, and here fails with the s
   assert.equal(d.status, 1, d.stderr);
   assert.match(d.stderr, /own check: test\/p2\.test\.ts failed in its own CI run on its commit rebased onto main \(https:\/\/ci\/\d+\), and run alone here fail with this branch and pass on main, so it didn't join the line/);
   assert.match(d.stderr, /citadel-test test\/p2\.test\.ts/);
-  assert.deepEqual(retro(l.r.dir, 'own check · ').map((x) => x.replace(/\d+s$/, 'Ns')), ['own check · ticket/2-x · red: test/p2.test.ts · Ns']);
+  assert.deepEqual(
+    retro(l.r.dir, 'own check · ').map((x) => x.replace(/\d+s$/, 'Ns')),
+    ['own check · ticket/2-x · red: test/p2.test.ts · Ns'],
+  );
   l.done();
 });
 
@@ -501,10 +523,14 @@ function busyCheck(r: ReturnType<typeof setup>) {
   mkdirSync(state, { recursive: true });
   writeFileSync(join(state, 'own-check-run'), `${Math.floor(Date.now() / 1000)} ticket/9-x\n`);
   writeFileSync(join(state, 'own-check-secs'), '1000\n');
-  writeFileSync(join(r.dir, 'bin', 'fake-heavy'), `#!/usr/bin/env bash
+  writeFileSync(
+    join(r.dir, 'bin', 'fake-heavy'),
+    `#!/usr/bin/env bash
 { echo "pwd $(pwd)"; echo "head $(git rev-parse HEAD)"; echo "ship \${CITADEL_HEAVY_SHIP:-}"; echo "args $*"; echo "log $(git log --format=%s -3 | tr '\\n' '|')"; } >>"${join(r.dir, 'heavy-calls')}"
 printf '%b\\n' "\${FAKE_LIGHT_OUT:-light check: green}"
-`, { mode: 0o755 });
+`,
+    { mode: 0o755 },
+  );
   return spawn('flock', [join(state, 'own-check.lock'), 'cat'], { stdio: ['pipe', 'ignore', 'ignore'] });
 }
 const light = (d: string) => ({ ...own(d), FAKE_SIDE_RUNNERS: '1', LAND_LIGHT_CHECK_HEAVY: join(d, 'bin', 'fake-heavy') });
@@ -527,7 +553,10 @@ test("light check: with the check runner busy, a ship's own tests run on the sid
     assert.equal(got('args'), `bash tools/light-check-run.sh ${git(l.r.source, 'rev-parse', `${got('head')}^`)}`, 'against main, its base');
     assert.notEqual(got('pwd'), l.wts[1], "in a scratch worktree, not the ship's");
     assert.ok(!existsSync(got('pwd')), 'its scratch worktree is gone');
-    assert.deepEqual(retro(l.r.dir, 'light check · ').map((x) => x.replace(/\d+s$/, 'Ns')), ['light check · ticket/2-x · green · Ns']);
+    assert.deepEqual(
+      retro(l.r.dir, 'light check · ').map((x) => x.replace(/\d+s$/, 'Ns')),
+      ['light check · ticket/2-x · green · Ns'],
+    );
     l.done();
   } finally {
     holder?.stdin?.end();
@@ -537,7 +566,11 @@ test("light check: with the check runner busy, a ship's own tests run on the sid
 test("light check: a red that is the ship's own is refused before the line, with nobody waiting on it (#1620)", async () => {
   let holder: ReturnType<typeof spawn> | undefined;
   try {
-    const l = await line([{}], (d) => ({ ...light(d), FAKE_LIGHT_OUT: '✖ test/p2.test.ts:3 › breaks\\nlight check: red: test/p2.test.ts, test/p3.test.ts' }), (r) => (holder = busyCheck(r)));
+    const l = await line(
+      [{}],
+      (d) => ({ ...light(d), FAKE_LIGHT_OUT: '✖ test/p2.test.ts:3 › breaks\\nlight check: red: test/p2.test.ts, test/p3.test.ts' }),
+      (r) => (holder = busyCheck(r)),
+    );
     await until('the check lock is held', () => lockHeld(l.state));
     const wt = join(l.r.dir, 'wt2');
     git(l.r.source, 'worktree', 'add', '-q', '-b', 'ticket/2-x', wt);
@@ -548,9 +581,12 @@ test("light check: a red that is the ship's own is refused before the line, with
     assert.equal(d.status, 1, d.stderr);
     assert.match(d.stderr, /light check: test\/p2\.test\.ts, test\/p3\.test\.ts failed on CI's side runner, on its commit rebased onto main, and run alone there fail with this branch and pass on main \(or are new with it\), so it didn't join the line/);
     assert.match(d.stderr, /citadel-test test\/p2\.test\.ts test\/p3\.test\.ts\)/);
-    assert.match(d.stderr, /✖ test\/p2\.test\.ts:3 › breaks/, 'the run\'s output is shown');
+    assert.match(d.stderr, /✖ test\/p2\.test\.ts:3 › breaks/, "the run's output is shown");
     assert.doesNotMatch(d.stderr, /in line for the deploy lock/);
-    assert.deepEqual(retro(l.r.dir, 'light check · ').map((x) => x.replace(/\d+s$/, 'Ns')), ['light check · ticket/2-x · red: test/p2.test.ts, test/p3.test.ts · Ns']);
+    assert.deepEqual(
+      retro(l.r.dir, 'light check · ').map((x) => x.replace(/\d+s$/, 'Ns')),
+      ['light check · ticket/2-x · red: test/p2.test.ts, test/p3.test.ts · Ns'],
+    );
     assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1']);
     l.done();
   } finally {
@@ -567,13 +603,20 @@ test('light check: no verdict joins the line; with the side runner busy, or LAND
   ] as [Record<string, string>, RegExp | null, string[]][]) {
     let holder: ReturnType<typeof spawn> | undefined;
     try {
-      const l = await line([{}, {}], (d) => ({ ...light(d), ...extra }), (r) => (holder = busyCheck(r)));
+      const l = await line(
+        [{}, {}],
+        (d) => ({ ...light(d), ...extra }),
+        (r) => (holder = busyCheck(r)),
+      );
       await until('the check lock is held', () => lockHeld(l.state));
       const done = await l.go();
       done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
       if (said) assert.match(done[1].stderr, said);
       else assert.equal(heavyCalls(l.r.dir), '', 'no light check ran');
-      assert.deepEqual(retro(l.r.dir, 'light check · ').map((x) => x.replace(/\d+s$/, 'Ns')), logged);
+      assert.deepEqual(
+        retro(l.r.dir, 'light check · ').map((x) => x.replace(/\d+s$/, 'Ns')),
+        logged,
+      );
       assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2']);
       l.done();
     } finally {
@@ -584,7 +627,7 @@ test('light check: no verdict joins the line; with the side runner busy, or LAND
 
 // #1417: the front's restart held for a starved box (deploy.sh's <state>/hold) tells each rider when it expects to be
 // live, and an urgent fix riding the train (the land tool's outage: true) marks that restart to skip the hold.
-test("riders of a restart held for a starved box say when it expects to be live; only an urgent rider marks it to skip the hold (#1417)", async () => {
+test('riders of a restart held for a starved box say when it expects to be live; only an urgent rider marks it to skip the hold (#1417)', async () => {
   for (const urgent of [false, true]) {
     const l = await line([{}, { env: { FAKE_NOT_LIVE: '1' } }, { env: urgent ? { LAND_URGENT: '1' } : {} }, {}]);
     writeFileSync(join(l.state, 'hold'), `${Math.floor(Date.now() / 1000) + 600} CPU pressure 63%\n`);

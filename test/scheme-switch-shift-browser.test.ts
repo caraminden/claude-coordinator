@@ -62,7 +62,10 @@ test('switching schemes, there and back, keeps the minions list where it first d
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'Alpha to draw its strip and filters', `!!document.querySelector('.inbox-strip:not([hidden]) .inbox-toggle') && !!document.querySelector('#prop-filter .pf-toggle')`);
   // First visit to Beta (everything fetched, late), then back to Alpha (drawn from what the page kept).
-  for (const [to, name] of [['#/p/2', 'Beta'], ['#/p/1', 'Alpha']]) {
+  for (const [to, name] of [
+    ['#/p/2', 'Beta'],
+    ['#/p/1', 'Alpha'],
+  ]) {
     const positions = (await page.eval(watch(to, name))) as string[];
     assert.ok(positions.length > 0, `${name} drew`);
     assert.equal(positions.length, 1, `the list moved after ${name} drew: ${positions.join(' then ')}`);

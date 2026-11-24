@@ -16,37 +16,38 @@ after(() => scratch.teardown());
 const ticket = (o: Partial<LandTicket>): LandTicket => ({ seq: 1, proc: '1 1', got: 0, label: 'ticket/9-x', phase: 'waiting', mtime: 0, ...o });
 
 test('a ship can be stopped until main moves; a lone deploy and a train rider never', () => {
-  for (const phase of ['starting', 'rebasing onto main', 'waiting for CI since 12:01', 'running the tests since 12:03', 'boot check before CI since 12:00', 'waiting for CI on abc123 since 12:00', 'running the check since 12:00'])
-    assert.equal(cantStop({ label: 'ticket/9-x', phase }), null, phase);
-  for (const phase of ['deploying', 'deploying: running the tests since 12:05', 'deploying: going live', 'pushing main to origin', 'riding in #7\'s ship train'])
-    assert.ok(cantStop({ label: 'ticket/9-x', phase }), phase);
+  for (const phase of ['starting', 'rebasing onto main', 'waiting for CI since 12:01', 'running the tests since 12:03', 'boot check before CI since 12:00', 'waiting for CI on abc123 since 12:00', 'running the check since 12:00']) assert.equal(cantStop({ label: 'ticket/9-x', phase }), null, phase);
+  for (const phase of ['deploying', 'deploying: running the tests since 12:05', 'deploying: going live', 'pushing main to origin', "riding in #7's ship train"]) assert.ok(cantStop({ label: 'ticket/9-x', phase }), phase);
   assert.match(cantStop({ label: 'tools/deploy.sh', phase: 'starting' })!, /deploy on its own/);
 });
 
 test('the rows give the holder its time held and its words, and the waiters their places', () => {
-  const rows = shipRows([
-    ticket({ seq: 3, got: 1_700_000_000, phase: 'waiting for CI since 12:01', mtime: 5 }),
-    ticket({ seq: 4, label: 'ticket/10-y' }),
-    ticket({ seq: 5, label: 'tools/deploy.sh' }),
-  ], (label) => (label === 'ticket/9-x' ? { name: '#9', ticketId: 90 } : { name: label, ticketId: null }));
-  assert.deepEqual(rows.map((r) => [r.name, r.place, r.stage, r.text, r.heldSince]), [
-    ['#9', 'holds', 'test', 'waiting for CI', 1_700_000_000_000],
-    ['ticket/10-y', 'next', 'line', 'waiting', null],
-    ['tools/deploy.sh', '2nd', 'line', 'waiting', null],
-  ]);
+  const rows = shipRows([ticket({ seq: 3, got: 1_700_000_000, phase: 'waiting for CI since 12:01', mtime: 5 }), ticket({ seq: 4, label: 'ticket/10-y' }), ticket({ seq: 5, label: 'tools/deploy.sh' })], (label) => (label === 'ticket/9-x' ? { name: '#9', ticketId: 90 } : { name: label, ticketId: null }));
+  assert.deepEqual(
+    rows.map((r) => [r.name, r.place, r.stage, r.text, r.heldSince]),
+    [
+      ['#9', 'holds', 'test', 'waiting for CI', 1_700_000_000_000],
+      ['ticket/10-y', 'next', 'line', 'waiting', null],
+      ['tools/deploy.sh', '2nd', 'line', 'waiting', null],
+    ],
+  );
   assert.equal(rows[0].noStop, null);
   assert.ok(rows[2].noStop);
   // With nobody holding, the first waiter is next.
   assert.equal(shipRows([ticket({ seq: 4 })], () => ({ name: 'x', ticketId: null }))[0].place, 'next');
 });
 
-test('descendants walks each process\'s parent, names with spaces and all', () => {
+test("descendants walks each process's parent, names with spaces and all", () => {
   const proc = join(root, 'proc');
   const stat = (pid: number, ppid: number, comm = 'bash') => {
     mkdirSync(join(proc, String(pid)), { recursive: true });
     writeFileSync(join(proc, String(pid), 'stat'), `${pid} (${comm}) S ${ppid} 1 1 0`);
   };
-  stat(10, 1); stat(11, 10, 'gh run (watch)'); stat(12, 11); stat(13, 10); stat(20, 1);
+  stat(10, 1);
+  stat(11, 10, 'gh run (watch)');
+  stat(12, 11);
+  stat(13, 10);
+  stat(20, 1);
   mkdirSync(join(proc, 'self'), { recursive: true });
   assert.deepEqual(descendants(10, proc).sort(), [11, 12, 13]);
   assert.deepEqual(descendants(20, proc), []);
@@ -54,7 +55,14 @@ test('descendants walks each process\'s parent, names with spaces and all', () =
 
 test('signalTree sends TERM to the ship first, then to what it started, each woken with CONT', () => {
   const sent: string[] = [];
-  signalTree(10, (pid, sig) => { sent.push(`${pid} ${sig}`); if (pid === 12) throw new Error('ESRCH'); }, () => [11, 12]);
+  signalTree(
+    10,
+    (pid, sig) => {
+      sent.push(`${pid} ${sig}`);
+      if (pid === 12) throw new Error('ESRCH');
+    },
+    () => [11, 12],
+  );
   assert.deepEqual(sent, ['10 SIGTERM', '10 SIGCONT', '11 SIGTERM', '11 SIGCONT', '12 SIGTERM', '12 SIGCONT']);
 });
 
@@ -66,12 +74,33 @@ test('stopInLine reads the line afresh: a gone ticket and a deploying one are re
   const signalled: number[] = [];
   const noted: number[] = [];
   const alive = () => true;
-  const t = stopInLine(q, 4, 3, (x) => noted.push(x.seq), (pid) => signalled.push(pid), alive);
+  const t = stopInLine(
+    q,
+    4,
+    3,
+    (x) => noted.push(x.seq),
+    (pid) => signalled.push(pid),
+    alive,
+  );
   assert.equal(t.label, 'ticket/9-x');
   assert.deepEqual([noted, signalled], [[3], [111]]);
-  assert.throws(() => stopInLine(q, 4, 9, undefined, (pid) => signalled.push(pid), alive), (e) => e instanceof StopRefused && /no longer in line/.test(e.message));
+  assert.throws(
+    () => stopInLine(q, 4, 9, undefined, (pid) => signalled.push(pid), alive),
+    (e) => e instanceof StopRefused && /no longer in line/.test(e.message),
+  );
   writeFileSync(join(q, '0000000003'), '111 1\n1700000000\nticket/9-x\ndeploying: going live\n');
-  assert.throws(() => stopInLine(q, 4, 3, () => noted.push(0), (pid) => signalled.push(pid), alive), StopRefused);
+  assert.throws(
+    () =>
+      stopInLine(
+        q,
+        4,
+        3,
+        () => noted.push(0),
+        (pid) => signalled.push(pid),
+        alive,
+      ),
+    StopRefused,
+  );
   assert.deepEqual([noted, signalled], [[3], [111]], 'refused before the note and the signal');
 });
 
@@ -92,13 +121,16 @@ test('a ship hung on the real line lets go of the lock and leaves the line when 
   const ended = new Promise((r) => land.on('exit', (code, sig) => r(code ?? sig)));
   stopInLine(q, 4, line[0].seq);
   assert.equal(await ended, 'SIGTERM', 'it ended on the stop, not on its own');
-  assert.deepEqual(readdirSync(q).filter((n) => /^\d+$/.test(n)), [], 'its EXIT trap ran: its ticket is gone');
+  assert.deepEqual(
+    readdirSync(q).filter((n) => /^\d+$/.test(n)),
+    [],
+    'its EXIT trap ran: its ticket is gone',
+  );
   await until('its sleep is gone too', () => !existsSync(`/proc/${sleeper[0]}`) || /\) Z /.test(readFileSync(`/proc/${sleeper[0]}/stat`, 'utf8')));
   // The lock is free: the next one in line takes it at once.
   const next = scratch.spawn('bash', ['-c', `exec 9>${JSON.stringify(join(state, 'lock'))}; flock -n 9`], { stdio: 'ignore' });
   assert.equal(await new Promise((r) => next.on('exit', r)), 0, 'the lock is free');
 });
-
 
 // A fake app with two schemes: 1 ships on Citadel's own line (deploy-queue.sh, orderAt 4), 2 on its copy of the kit's
 // land template (<repo>/.git/land-queue, orderAt 7). Line tickets name this test's own process, so they read as alive.
@@ -129,7 +161,10 @@ function fakeApp() {
       ticketFor: (label: string) => Object.values(tickets).find((t) => t.branch === label)?.id ?? null,
     },
     store: {
-      listProjects: () => [{ id: 1, name: 'Citadel' }, { id: 2, name: 'Other' }],
+      listProjects: () => [
+        { id: 1, name: 'Citadel' },
+        { id: 2, name: 'Other' },
+      ],
       getProject: (id: number) => (id === 2 ? { id, repo_dir: repo } : { id, repo_dir: null }),
       getTicket: (id: number) => tickets[id],
       ticketByBranch: () => undefined,
@@ -150,8 +185,23 @@ test("shipLines reads each scheme's line, names minions only in their own scheme
   f.put(f.own, 3, ['1700000000', 'ticket/11-own', 'waiting for CI since 12:01', 'order']);
   f.put(f.own, 4, ['0', 'ticket/21-kit', 'waiting', 'order']); // scheme 2's minion's branch name, in Citadel's line
   const lines = shipLines(f.app, () => true);
-  assert.deepEqual(lines.map((l) => [l.scheme, l.rows.map((r) => [r.name, r.ticketId])]), [['Citadel', [['#7', 11], ['ticket/21-kit', null]]]]);
-  assert.deepEqual(shipLines(f.app, (id) => id === 2), [], 'a scheme you can\'t see is left out');
+  assert.deepEqual(
+    lines.map((l) => [l.scheme, l.rows.map((r) => [r.name, r.ticketId])]),
+    [
+      [
+        'Citadel',
+        [
+          ['#7', 11],
+          ['ticket/21-kit', null],
+        ],
+      ],
+    ],
+  );
+  assert.deepEqual(
+    shipLines(f.app, (id) => id === 2),
+    [],
+    "a scheme you can't see is left out",
+  );
   f.landing[11] = { output: '', code: null };
   const sig: number[] = [];
   assert.equal(stopShip(f.app, 1, 3, 'Josh', (pid) => sig.push(pid)).name, '#7');
@@ -169,7 +219,10 @@ test('a train rider can be stopped while its train is tested, and not once the t
   mkdirSync(train, { recursive: true });
   writeFileSync(join(train, '0000000004'), 'moving abc\n');
   const sig: number[] = [];
-  assert.throws(() => stopShip(f.app, 1, 4, 'Josh', (pid) => sig.push(pid)), (e) => e instanceof StopRefused && /moved main/.test(e.message));
+  assert.throws(
+    () => stopShip(f.app, 1, 4, 'Josh', (pid) => sig.push(pid)),
+    (e) => e instanceof StopRefused && /moved main/.test(e.message),
+  );
   writeFileSync(join(train, '0000000004'), 'riding\n');
   stopShip(f.app, 1, 4, 'Josh', (pid) => sig.push(pid));
   assert.deepEqual(sig, [process.pid], 'only the riding one was signalled');
@@ -207,5 +260,8 @@ test('stopping a minion stops its ship in line, or out of line before it joined,
   assert.deepEqual(sig, [process.pid, 555]);
   // No landing running: nothing to say.
   f.landing[11] = { output: '', code: 0, pid: 555 };
-  assert.equal(stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid)), null);
+  assert.equal(
+    stopMinionShip(f.app, 11, 'Cara', (pid) => sig.push(pid)),
+    null,
+  );
 });

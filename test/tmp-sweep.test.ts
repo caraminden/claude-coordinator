@@ -35,7 +35,7 @@ test('an orphaned lint, boot-check or ship-train folder goes; a live, young or f
   for (const d of [dead, boot, train, guard, heavy]) assert.equal(existsSync(d), false, d);
 });
 
-test('a folder a running process works inside stays, and another uid\'s is never touched', async () => {
+test("a folder a running process works inside stays, and another uid's is never touched", async () => {
   const busy = make('land-train.Busy01', 2 * HOUR);
   const mine = make('citadel-boot-check-other1', 2 * HOUR);
   const proc = join(root, 'fakeproc');

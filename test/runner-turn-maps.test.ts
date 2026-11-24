@@ -9,23 +9,30 @@ const src = readFileSync(new URL('../src/runner.ts', import.meta.url), 'utf8');
 
 /** In TurnState: saved by saveTurn, restored by recover() or reattach. */
 const SAVED: Record<string, string> = {
-  turns: 'dir', closing: 'closing', deployedMidTurn: 'deployed', turnFrom: 'from', parkedAs: 'parkedAs',
-  statuses: 'status', keepalives: 'keepalive', spends: 'spend', sentBack: 'sentBack',
+  turns: 'dir',
+  closing: 'closing',
+  deployedMidTurn: 'deployed',
+  turnFrom: 'from',
+  parkedAs: 'parkedAs',
+  statuses: 'status',
+  keepalives: 'keepalive',
+  spends: 'spend',
+  sentBack: 'sentBack',
 };
 /** Rebuilt from another saved row, or dropped on purpose, and why. */
 const OTHER: Record<string, string> = {
   progress: 'a cache, rebuilt from the plan: setting and the events',
   stepRatios: 'a cache by scheme, rebuilt on its next read',
   wakeNow: 'the net or kill wait it hurries is saved; after a restart its message waits for the probe or the kill line',
-  limitStarting: 'this server\'s token for a limit resume it started; the wait itself is saved (limit-resumes)',
-  killStarted: 'this server\'s note of kill resumes it started; the kill waits are saved and re-armed (armKillResumes)',
-  turnSecrets: 'read again on the turn\'s next line',
+  limitStarting: "this server's token for a limit resume it started; the wait itself is saved (limit-resumes)",
+  killStarted: "this server's note of kill resumes it started; the kill waits are saved and re-armed (armKillResumes)",
+  turnSecrets: "read again on the turn's next line",
   keepalivePending: 'keepalives are dropped on a restart (#862); the next sweep asks again',
   gateCounted: 'a count of the keepalive gates; a restart may count one window again',
-  contextSizes: 'set again by the turn\'s next usage line',
+  contextSizes: "set again by the turn's next usage line",
   contextShown: 'a broadcast throttle',
   refsLast: 'a throttle by scheme; every turn writes its own snapshot at its start',
-  mainModels: 'the context window keeps its last turn\'s value until the next init event',
+  mainModels: "the context window keeps its last turn's value until the next init event",
   strayWaits: 'a poll on a turn wrapper nothing here follows; liveTurn finds the stray turn folder again after a restart (#1464)',
 };
 /** Named before the branch that adds them ships, so the two can ride one ship train in either order; that branch drops it here. */

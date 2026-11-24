@@ -40,7 +40,7 @@ function keyBytes(b64) {
 
 /** Ask for permission (only ever from a click), subscribe this browser and register it for you. */
 async function pushOn() {
-  if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications are blocked for this site in the browser settings');
+  if ((await Notification.requestPermission()) !== 'granted') throw new Error('Notifications are blocked for this site in the browser settings');
   if (desktop) {
     const id = localStorage.getItem(DESKTOP_PUSH) ?? crypto.randomUUID();
     const state = await api('api/push/subscription', { method: 'PUT', body: { desktop: id } });
@@ -52,7 +52,14 @@ async function pushOn() {
   let sub = await reg.pushManager.getSubscription();
   // A subscription made with another key (an older data dir) can't be used; start over.
   const key = sub?.options?.applicationServerKey;
-  if (sub && key && btoa(String.fromCharCode(...new Uint8Array(key))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') !== publicKey) {
+  if (
+    sub &&
+    key &&
+    btoa(String.fromCharCode(...new Uint8Array(key)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '') !== publicKey
+  ) {
     await sub.unsubscribe();
     sub = null;
   }
@@ -84,20 +91,34 @@ export function notificationsPage() {
   const hint = h('span', { class: 'hint', hidden: true });
   const toggle = (box, text, title) => h('label', { class: 'toggle', title }, box, text);
   const row = (ic, hue, title, summary, ...body) => settingsRow({ icon: ic, hue, title, summary, open: true }, ...body)[0];
-  const onRow = row('bell', 'accent', 'Notify me on this device', 'This device only',
-    toggle(on, 'Notify me on this device', 'Questions for you, failed turns, and your minions that are ready or blocked'), hint,
-    settingsHelp('Questions for you, failed turns, and your minions that are ready or blocked, as a notification on this browser or app. Other devices are set up on their own.'));
+  const onRow = row(
+    'bell',
+    'accent',
+    'Notify me on this device',
+    'This device only',
+    toggle(on, 'Notify me on this device', 'Questions for you, failed turns, and your minions that are ready or blocked'),
+    hint,
+    settingsHelp('Questions for you, failed turns, and your minions that are ready or blocked, as a notification on this browser or app. Other devices are set up on their own.'),
+  );
   onRow.dataset.part = 'notify-this-device';
-  const pinnedRow = row('pin', 'held', 'Only my pinned minions', 'This device only',
-    toggle(pinned, 'Only my pinned minions', 'On this device, notify only about minions you pinned (other people\'s too) and the Taskmaster'),
-    settingsHelp('On this device, notify only about minions you pinned (other people\'s too) and the Taskmaster.'));
+  const pinnedRow = row(
+    'pin',
+    'held',
+    'Only my pinned minions',
+    'This device only',
+    toggle(pinned, 'Only my pinned minions', "On this device, notify only about minions you pinned (other people's too) and the Taskmaster"),
+    settingsHelp("On this device, notify only about minions you pinned (other people's too) and the Taskmaster."),
+  );
   // #690: a minion's pings go to its owner; this device can still hear every minion in the scheme.
-  const allRow = row('users', 'running', `Everything in ${project.name}`, `This device · scheme ${project.name}`,
+  const allRow = row(
+    'users',
+    'running',
+    `Everything in ${project.name}`,
+    `This device · scheme ${project.name}`,
     toggle(all, `Everything in ${project.name}`, 'On this device, hear about every minion in this scheme, not only yours, the ones you pinned and the unassigned ones'),
-    settingsHelp(`On this device, hear about every minion in ${project.name}, not only yours, the ones you pinned and the unassigned ones.`));
-  const muteRow = row('belloff', 'danger', `Mute ${project.name}`, `This device · scheme ${project.name}`,
-    toggle(mute, `Mute ${project.name} here`, 'Stop notifications from this scheme on this device'),
-    settingsHelp(`Stop notifications from ${project.name} on this device. Other schemes keep notifying.`));
+    settingsHelp(`On this device, hear about every minion in ${project.name}, not only yours, the ones you pinned and the unassigned ones.`),
+  );
+  const muteRow = row('belloff', 'danger', `Mute ${project.name}`, `This device · scheme ${project.name}`, toggle(mute, `Mute ${project.name} here`, 'Stop notifications from this scheme on this device'), settingsHelp(`Stop notifications from ${project.name} on this device. Other schemes keep notifying.`));
   // The scheme's heading goes with its rows, so a device that isn't subscribed shows no empty heading.
   const schemeBlock = h('div', { class: 'settings-block' }, ...settingsSection(`${project.name} on this device`, allRow, muteRow));
   const show = (state, err) => {
@@ -126,39 +147,50 @@ export function notificationsPage() {
   /** Show where this browser stands (and `err`, if a change just failed). */
   async function refresh(err) {
     const sub = await pushSubscription().catch(() => null);
-    const state = sub && await api('api/push/subscription', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => null);
+    const state = sub && (await api('api/push/subscription', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => null));
     show(state ?? { subscribed: false, muted: [] }, err);
   }
-  on.addEventListener('change', () => busy(async () => {
-    if (!on.checked) {
-      await pushOff();
-      return { subscribed: false, muted: [] };
-    }
-    return pushOn();
-  }));
-  mute.addEventListener('change', () => busy(async () => {
-    const sub = await pushSubscription();
-    return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, projectId: project.id, muted: mute.checked } });
-  }));
-  all.addEventListener('change', () => busy(async () => {
-    const sub = await pushSubscription();
-    return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, projectId: project.id, everything: all.checked } });
-  }));
-  pinned.addEventListener('change', () => busy(async () => {
-    const sub = await pushSubscription();
-    return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, onlyPinned: pinned.checked } });
-  }));
+  on.addEventListener('change', () =>
+    busy(async () => {
+      if (!on.checked) {
+        await pushOff();
+        return { subscribed: false, muted: [] };
+      }
+      return pushOn();
+    }),
+  );
+  mute.addEventListener('change', () =>
+    busy(async () => {
+      const sub = await pushSubscription();
+      return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, projectId: project.id, muted: mute.checked } });
+    }),
+  );
+  all.addEventListener('change', () =>
+    busy(async () => {
+      const sub = await pushSubscription();
+      return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, projectId: project.id, everything: all.checked } });
+    }),
+  );
+  pinned.addEventListener('change', () =>
+    busy(async () => {
+      const sub = await pushSubscription();
+      return api('api/push/subscription', { method: 'PATCH', body: { endpoint: sub.endpoint, onlyPinned: pinned.checked } });
+    }),
+  );
   show(pushState);
   if (pushSupported) refresh();
-  return h('section', { class: 'artifacts-main people-main' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+  return h(
+    'section',
+    { class: 'artifacts-main people-main' },
+    h(
+      'div',
+      { class: 'ticket-head' },
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
-      h('div', { class: 'meta' }, 'Notifications are set per browser or app, so each device has its own. Scheme settings say which scheme they are for.')),
-    pushSupported
-      ? [...settingsSection('This device', onRow, pinnedRow), schemeBlock]
-      : h('p', { class: 'muted' }, 'This browser can\'t show notifications. Install Citadel as an app, or use a browser that supports them.'));
+      h('div', { class: 'meta' }, 'Notifications are set per browser or app, so each device has its own. Scheme settings say which scheme they are for.'),
+    ),
+    pushSupported ? [...settingsSection('This device', onRow, pinnedRow), schemeBlock] : h('p', { class: 'muted' }, "This browser can't show notifications. Install Citadel as an app, or use a browser that supports them."),
+  );
 }
 
 // Clicking a notification while the app is open: the service worker asks this tab to show the thread.
@@ -210,12 +242,19 @@ function instructionAids(textarea, cap) {
     gauge.dataset.hue = hue;
     gauge.replaceChildren(toneChip(tone, word), meter(n / cap, `${count(n)} of ${count(cap)} characters (${Math.round((n / cap) * 100)}%)`), h('span', { class: 'muted small' }, 'Every turn reads all of it.'));
     const marks = [...text.matchAll(/^##[ \t]+(.+)$/gm)];
-    list.replaceChildren(...(marks.length ? marks.map((m, i) => {
-      const end = i + 1 < marks.length ? marks[i + 1].index : text.length;
-      const jump = h('button', { type: 'button', class: 'linklike' }, m[1].trim());
-      jump.onclick = () => { textarea.focus(); textarea.setSelectionRange(m.index, m.index + m[0].length); };
-      return h('li', {}, jump, h('span', { class: 'muted small' }, ` ${count(end - m.index)}`));
-    }) : [h('li', { class: 'muted small' }, 'No ## sections yet.')]));
+    list.replaceChildren(
+      ...(marks.length
+        ? marks.map((m, i) => {
+            const end = i + 1 < marks.length ? marks[i + 1].index : text.length;
+            const jump = h('button', { type: 'button', class: 'linklike' }, m[1].trim());
+            jump.onclick = () => {
+              textarea.focus();
+              textarea.setSelectionRange(m.index, m.index + m[0].length);
+            };
+            return h('li', {}, jump, h('span', { class: 'muted small' }, ` ${count(end - m.index)}`));
+          })
+        : [h('li', { class: 'muted small' }, 'No ## sections yet.')]),
+    );
   };
   textarea.addEventListener('input', update);
   update();
@@ -227,24 +266,28 @@ function repoSetupCard() {
   const p = view.project;
   const body = h('div', { class: 'repo-setup' }, h('p', { class: 'muted small' }, 'Reading the repo…'));
   // `code` and **bold** spans as elements; a value past 240 characters shows its start, the rest behind a toggle.
-  const inline = (t) => t.split(/(`[^`]+`|\*\*[^*]+\*\*)/).filter(Boolean).map((x) => (x[0] === '`' ? h('code', {}, x.slice(1, -1)) : x.startsWith('**') ? h('strong', {}, x.slice(2, -2)) : x));
+  const inline = (t) =>
+    t
+      .split(/(`[^`]+`|\*\*[^*]+\*\*)/)
+      .filter(Boolean)
+      .map((x) => (x[0] === '`' ? h('code', {}, x.slice(1, -1)) : x.startsWith('**') ? h('strong', {}, x.slice(2, -2)) : x));
   const long = (t) => (t.length <= 240 ? inline(t) : h('details', {}, h('summary', {}, ...inline(t.slice(0, 240).replace(/[`*]+[^`*]*$/, '')), '…'), h('div', {}, ...inline(t))));
   const kv = (rows) => h('dl', { class: 'repo-facts' }, ...rows.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, long(v))]));
-  api(`api/projects/${p.id}/repo-setup`).then((r) => {
-    const parts = [statTiles([r.facts ? r.facts.length : 0, 'project facts', r.facts ? 'done' : 'waiting'], [r.rules.length, 'rules', 'running'], [r.skills.length, 'own skills', 'teal'])];
-    if (!r.facts) parts.push(h('p', {}, toneChip('warn', 'No Project facts'), ' The kit\'s skills fall back to defaults. ', 'Use the Tune up button above to have the Taskmaster write them.'));
-    else parts.push(kv(r.facts.map((f) => [f.label, f.value])));
-    parts.push(h('h4', {}, `Rules (.claude/rules/, ${r.rules.length})`),
-      r.rules.length ? kv(r.rules.map((x) => [x.name, `${count(x.size)} chars · ${x.paths.length ? 'scoped to ' + x.paths.join(', ') : 'always loaded'}`
-        + (x.upstream ? ` · copied from ${x.upstream}${x.pin ? ` at ${x.pin}` : ''}` : '')])) : h('p', { class: 'muted small' }, 'None.'));
-    parts.push(h('h4', {}, `Its own skills (.claude/skills/, ${r.skills.length})`),
-      r.skills.length ? kv(r.skills.map((x) => [x.name, x.description])) : h('p', { class: 'muted small' }, 'None.'));
-    body.replaceChildren(...parts);
-  }, (err) => body.replaceChildren(h('p', { class: 'error' }, `Could not read the repo: ${err.message}`)));
-  return h('div', { class: 'settings-card settings-anchor', id: 'repo-setup' },
-    h('h3', { class: 'settings-label' }, 'How this scheme\'s repo is set up'),
-    h('div', { class: 'muted small' }, 'Read from CLAUDE.md and .claude/ in the repo each time you open this; change it by editing the repo or with a tune-up.'),
-    body);
+  api(`api/projects/${p.id}/repo-setup`).then(
+    (r) => {
+      const parts = [statTiles([r.facts ? r.facts.length : 0, 'project facts', r.facts ? 'done' : 'waiting'], [r.rules.length, 'rules', 'running'], [r.skills.length, 'own skills', 'teal'])];
+      if (!r.facts) parts.push(h('p', {}, toneChip('warn', 'No Project facts'), " The kit's skills fall back to defaults. ", 'Use the Tune up button above to have the Taskmaster write them.'));
+      else parts.push(kv(r.facts.map((f) => [f.label, f.value])));
+      parts.push(
+        h('h4', {}, `Rules (.claude/rules/, ${r.rules.length})`),
+        r.rules.length ? kv(r.rules.map((x) => [x.name, `${count(x.size)} chars · ${x.paths.length ? 'scoped to ' + x.paths.join(', ') : 'always loaded'}` + (x.upstream ? ` · copied from ${x.upstream}${x.pin ? ` at ${x.pin}` : ''}` : '')])) : h('p', { class: 'muted small' }, 'None.'),
+      );
+      parts.push(h('h4', {}, `Its own skills (.claude/skills/, ${r.skills.length})`), r.skills.length ? kv(r.skills.map((x) => [x.name, x.description])) : h('p', { class: 'muted small' }, 'None.'));
+      body.replaceChildren(...parts);
+    },
+    (err) => body.replaceChildren(h('p', { class: 'error' }, `Could not read the repo: ${err.message}`)),
+  );
+  return h('div', { class: 'settings-card settings-anchor', id: 'repo-setup' }, h('h3', { class: 'settings-label' }, "How this scheme's repo is set up"), h('div', { class: 'muted small' }, 'Read from CLAUDE.md and .claude/ in the repo each time you open this; change it by editing the repo or with a tune-up.'), body);
 }
 
 export function onProjectUpdate(project) {
@@ -286,9 +329,7 @@ export function onboardingStrip(project) {
       alert(e.message);
     });
   };
-  return h('div', { id: 'onboarding-strip', class: 'onboarding-strip' },
-    h('span', {}, project.onboarding_mode === 'tune-up' ? 'Tuning up' : 'Setting up'), ' · ',
-    h('span', {}, `${step[1]} (${step[0]} of 4)`), ' · ', skip);
+  return h('div', { id: 'onboarding-strip', class: 'onboarding-strip' }, h('span', {}, project.onboarding_mode === 'tune-up' ? 'Tuning up' : 'Setting up'), ' · ', h('span', {}, `${step[1]} (${step[0]} of 4)`), ' · ', skip);
 }
 
 /** "GitHub repo not created: <error> · Retry" in the minions panel while a new scheme's repo isn't on GitHub (#173). */
@@ -322,20 +363,23 @@ export function renderGithubStrip() {
 export function projectTitle(project) {
   const wrap = h('span', { class: 'project-title' });
   // Settings sits beside the scheme it belongs to (Josh, 2026-11-13); made once so a rename keeps its count.
-  const settings = h('a', { class: 'settings-link', href: `#/p/${project.id}/settings`, title: 'Members, your account, machines and usage; the scheme\'s instructions and rules are in Orders, beside Minions' },
-    'Settings');
+  const settings = h('a', { class: 'settings-link', href: `#/p/${project.id}/settings`, title: "Members, your account, machines and usage; the scheme's instructions and rules are in Orders, beside Minions" }, 'Settings');
   const show = () => {
     wrap.replaceChildren(
       schemeIcon(view.projects?.find((p) => p.id === project.id) ?? project),
       h('button', { type: 'button', class: 'label', 'data-project-name': project.id, title: 'Rename scheme (its repo stays as it is)', onclick: edit }, view.project.name),
       h('span', { class: 'divider', 'aria-hidden': 'true' }),
-      settings);
+      settings,
+    );
   };
   // Every label showing the name changes now; the server's broadcast confirms it, and a refusal puts the old name back.
   const rename = (name) => onProjectUpdate({ ...(view.projectId === project.id ? view.project : project), name });
   const edit = () => {
     const panel = wrap.closest('details');
-    if (panel && !panel.open) { panel.open = true; return; }
+    if (panel && !panel.open) {
+      panel.open = true;
+      return;
+    }
     const input = h('input', { class: 'rename-input', value: view.project.name, maxlength: '80', 'aria-label': 'Scheme name' });
     const save = () => {
       const name = input.value.trim(); // as the server stores it
@@ -351,27 +395,39 @@ export function projectTitle(project) {
       });
     };
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); save(); }
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); show(); }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        save();
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        show();
+      }
     });
     // A space let through to the <summary> would collapse the panel in some browsers.
-    input.addEventListener('keyup', (e) => { if (e.key === ' ') e.preventDefault(); });
+    input.addEventListener('keyup', (e) => {
+      if (e.key === ' ') e.preventDefault();
+    });
     input.addEventListener('blur', () => input.isConnected && show());
-    wrap.replaceChildren(input,
+    wrap.replaceChildren(
+      input,
       // mousedown kept from blurring the field, so the tap reaches save instead of cancelling.
-      h('button', { type: 'button', class: 'rename', 'aria-label': 'Save name', onmousedown: (e) => e.preventDefault(), onclick: save }, '✓'));
+      h('button', { type: 'button', class: 'rename', 'aria-label': 'Save name', onmousedown: (e) => e.preventDefault(), onclick: save }, '✓'),
+    );
     input.focus();
     input.select();
   };
   wrap.addEventListener('click', (e) => {
     // Clicks inside the title edit it; they don't collapse the panel or close the drawer.
-    if (e.target.closest('button, input')) { e.preventDefault(); e.stopPropagation(); }
-    else if (e.target.closest('a')) e.stopPropagation(); // Settings goes there without toggling the panel
+    if (e.target.closest('button, input')) {
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (e.target.closest('a')) e.stopPropagation(); // Settings goes there without toggling the panel
   });
   show();
   return wrap;
 }
-
 
 /** The Settings page's tabs; each is its own route, so old links to them still work. */
 // The side menu (#995, Cara picked "Side menu, rows that open"): groups, each its own hue, every page with an
@@ -390,24 +446,57 @@ const propsCount = (kind) => (kind === 'properties' ? h('span', { class: 'count 
 export function settingsTabs() {
   // An Orders page keeps the (hidden) menu so it shares the settings pages' layout; its menu is the panel's Orders tab.
   if (isOrdersPage(view.main)) return h('nav', { class: 'settings-tabs orders-tabs', 'aria-hidden': 'true' });
-  const nav = h('nav', { class: 'settings-tabs', 'aria-label': 'Settings' },
+  const nav = h(
+    'nav',
+    { class: 'settings-tabs', 'aria-label': 'Settings' },
     settingsGroups().map(([label, hue, items]) =>
-      h('div', { class: 'settings-group', 'data-hue': hue }, h('span', { class: 'settings-group-label' }, label === 'Scheme' ? gloss('scheme', label) : label),
+      h(
+        'div',
+        { class: 'settings-group', 'data-hue': hue },
+        h('span', { class: 'settings-group-label' }, label === 'Scheme' ? gloss('scheme', label) : label),
         items.map(({ kind, label: text, icon: ic }) =>
-          h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null },
-            icon(ic), h('span', { class: 'label' }, kind === 'contraptions' ? gloss('contraption', text) : text), propsCount(kind))))));
+          h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, 'aria-current': view.main === kind ? 'page' : null }, icon(ic), h('span', { class: 'label' }, kind === 'contraptions' ? gloss('contraption', text) : text), propsCount(kind)),
+        ),
+      ),
+    ),
+  );
   return nav;
 }
 
 /** The Minions panel's Orders tab (#1071): its pages in two groups; each opens in the main pane. */
 export function ordersMenu() {
-  return h('nav', { class: 'orders-pane', 'aria-label': 'Orders' }, ORDERS_GROUPS.map(([label, hue, items]) =>
-    h('div', { class: 'orders-group', 'data-hue': hue }, h('span', { class: 'orders-group-label' }, label),
-      items.map(({ kind, label: text, icon: ic, blurb: sum }) =>
-        h('a', { class: view.main === kind ? 'active' : '', href: `#/p/${view.projectId}/${kind}`, title: sum, 'aria-current': view.main === kind ? 'page' : null,
-          // Back from the schedules list to this menu changes no route, so Schedules again only shows the list (#1083).
-          onclick: kind === 'schedules' ? (e) => { if (view.main === 'schedules') e.currentTarget.closest('.sidebar')?.classList.add('show-schedules'); } : null },
-          icon(ic), h('span', { class: 'label' }, text), propsCount(kind))))));
+  return h(
+    'nav',
+    { class: 'orders-pane', 'aria-label': 'Orders' },
+    ORDERS_GROUPS.map(([label, hue, items]) =>
+      h(
+        'div',
+        { class: 'orders-group', 'data-hue': hue },
+        h('span', { class: 'orders-group-label' }, label),
+        items.map(({ kind, label: text, icon: ic, blurb: sum }) =>
+          h(
+            'a',
+            {
+              class: view.main === kind ? 'active' : '',
+              href: `#/p/${view.projectId}/${kind}`,
+              title: sum,
+              'aria-current': view.main === kind ? 'page' : null,
+              // Back from the schedules list to this menu changes no route, so Schedules again only shows the list (#1083).
+              onclick:
+                kind === 'schedules'
+                  ? (e) => {
+                      if (view.main === 'schedules') e.currentTarget.closest('.sidebar')?.classList.add('show-schedules');
+                    }
+                  : null,
+            },
+            icon(ic),
+            h('span', { class: 'label' }, text),
+            propsCount(kind),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 /** A settings or Orders page's title: its area beside the desktop menu; on a phone a back link to the list and the page's name. */
@@ -415,33 +504,48 @@ export function settingsTitle() {
   const orders = isOrdersPage(view.main);
   const page = (orders ? ORDERS_GROUPS : SETTINGS_GROUPS).flatMap(([, , items]) => items).find((r) => r.kind === view.main);
   const area = orders ? 'Orders' : 'Settings';
-  return [h('a', { class: 'settings-back', href: `#/p/${view.projectId}/${orders ? 'orders' : 'settings'}`, title: orders ? 'All of Orders' : 'All settings' }, icon('back'), area),
+  return [
+    h('a', { class: 'settings-back', href: `#/p/${view.projectId}/${orders ? 'orders' : 'settings'}`, title: orders ? 'All of Orders' : 'All settings' }, icon('back'), area),
     // An Orders page has no menu beside it, so its own name heads it on a desktop too.
-    h('h2', {}, h('span', { class: 'settings-title-wide' }, orders ? page?.label ?? area : area), h('span', { class: 'settings-title-narrow' }, page?.label ?? area))];
+    h('h2', {}, h('span', { class: 'settings-title-wide' }, orders ? (page?.label ?? area) : area), h('span', { class: 'settings-title-narrow' }, page?.label ?? area)),
+  ];
 }
 
 /** Settings on a phone (#1018): every page as a row in its group, each opening the page full screen. Orders' list is the same shape. */
 export function settingsHome(orders = false) {
   const title = orders ? 'Orders' : 'Settings';
-  return h('section', { class: 'artifacts-main settings-home' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, h('h2', {}, title), h('span', { class: 'spacer' }), tuneUpButton(),
-        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close')))),
-    h('nav', { 'aria-label': title }, (orders ? ORDERS_GROUPS : settingsGroups()).flatMap(([label, hue, items]) => [
-      h('h3', { class: 'settings-section', 'data-hue': hue }, label),
-      h('div', { class: 'settings-rows' }, items.map(({ kind, label: text, icon: ic, blurb: sum }) =>
-        h('a', { class: 'settings-row settings-page-link', 'data-hue': hue, href: `#/p/${view.projectId}/${kind}` },
-          h('span', { class: 'settings-tile' }, icon(ic)),
-          h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, text, propsCount(kind)), h('span', { class: 'settings-row-sum' }, sum)),
-          h('span', { class: 'settings-row-chev' }, icon('forward')))))])));
+  return h(
+    'section',
+    { class: 'artifacts-main settings-home' },
+    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, h('h2', {}, title), h('span', { class: 'spacer' }), tuneUpButton(), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close')))),
+    h(
+      'nav',
+      { 'aria-label': title },
+      (orders ? ORDERS_GROUPS : settingsGroups()).flatMap(([label, hue, items]) => [
+        h('h3', { class: 'settings-section', 'data-hue': hue }, label),
+        h(
+          'div',
+          { class: 'settings-rows' },
+          items.map(({ kind, label: text, icon: ic, blurb: sum }) =>
+            h(
+              'a',
+              { class: 'settings-row settings-page-link', 'data-hue': hue, href: `#/p/${view.projectId}/${kind}` },
+              h('span', { class: 'settings-tile' }, icon(ic)),
+              h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, text, propsCount(kind)), h('span', { class: 'settings-row-sum' }, sum)),
+              h('span', { class: 'settings-row-chev' }, icon('forward')),
+            ),
+          ),
+        ),
+      ]),
+    ),
+  );
 }
 
 /** "Tune up" (#175): the Taskmaster runs setup again as a diff on what the scheme has, then the chat opens on it. */
 export function tuneUpButton() {
   const p = view.project;
   const open = p.onboarding !== 'done' && p.onboarding !== 'skipped';
-  const b = h('button', { type: 'button', class: 'secondary tune-up', disabled: open,
-    title: open ? 'Setup is under way: see the Taskmaster\'s chat' : 'The Taskmaster asks what changed and posts a plan of edits for you to approve' }, 'Tune up');
+  const b = h('button', { type: 'button', class: 'secondary tune-up', disabled: open, title: open ? "Setup is under way: see the Taskmaster's chat" : 'The Taskmaster asks what changed and posts a plan of edits for you to approve' }, 'Tune up');
   b.onclick = async () => {
     if (!confirm(`Tune up ${p.name}? The Taskmaster starts a turn, asks what changed, and posts a plan of edits; nothing changes until someone approves it.`)) return;
     b.disabled = true;
@@ -465,11 +569,15 @@ function fastModeRow(p) {
   // the setting. If #1017's Nov 26 decision turns it on for Citadel, change this line to `const locked = false;` (or delete it).
   const locked = p.id === HOME_SCHEME;
   const on = h('input', { type: 'checkbox', id: 'land-mode', checked: !locked && p.land_mode === 'fast', disabled: locked });
-  const [row, sum] = settingsRow({ part: 'fast-mode', icon: 'spark', hue: 'running', title: 'Fast mode', summary: p.land_mode === 'fast' ? 'On' : 'Off' },
+  const [row, sum] = settingsRow(
+    { part: 'fast-mode', icon: 'spark', hue: 'running', title: 'Fast mode', summary: p.land_mode === 'fast' ? 'On' : 'Off' },
     h('label', { class: 'toggle', title: locked ? 'Off for Citadel itself' : 'Ship now, test behind' }, on, 'Ship now, test behind'),
     locked && h('p', { class: 'muted small settings-help' }, 'Off for Citadel itself: every scheme runs on it. Cara picked "Later" (Nov 18); it\'s decided around Nov 26 from the other schemes\' numbers.'),
-    settingsHelp('Low and medium changes ship live on the smoke check alone, and the full suite runs on main behind them.',
-      'A red reopens the minion whose change broke it, and goes to the Taskmaster if it isn\'t fixed in 30 minutes. Failures already known on main don\'t hold other changes up. High-risk changes and changes to the ship pipeline keep the full gate, and CI reds on main from fast ships send no Mandate alerts, except from watched workflows.'));
+    settingsHelp(
+      'Low and medium changes ship live on the smoke check alone, and the full suite runs on main behind them.',
+      "A red reopens the minion whose change broke it, and goes to the Taskmaster if it isn't fixed in 30 minutes. Failures already known on main don't hold other changes up. High-risk changes and changes to the ship pipeline keep the full gate, and CI reds on main from fast ships send no Mandate alerts, except from watched workflows.",
+    ),
+  );
   const shown = () => {
     on.checked = !locked && view.project?.land_mode === 'fast';
     sum.textContent = on.checked ? 'On' : 'Off';
@@ -507,7 +615,10 @@ function saveProject(p, mine, body, label, shown) {
     },
     label,
   });
-  result.then((project) => ours() && onProjectUpdate(project), () => {}); // a failure already said so in its toast
+  result.then(
+    (project) => ours() && onProjectUpdate(project),
+    () => {},
+  ); // a failure already said so in its toast
   return result;
 }
 
@@ -520,12 +631,12 @@ export function settingsRow({ icon: ic, hue, title, summary = '', open = false, 
   const sum = h('span', { class: 'settings-row-sum' }, summary);
   // `key`: a page that redraws (the CI page, every few seconds) keeps a row open that a person opened (#1068).
   // `part`: its name for "show me where" links (#1122, src/show-parts.ts).
-  const row = h('details', { class: 'settings-row', 'data-hue': hue, 'data-part': part ?? null, open: key && openRows.has(key) ? openRows.get(key) : open,
-    ontoggle: key ? (e) => openRows.set(key, e.currentTarget.open) : null },
-    h('summary', {}, h('span', { class: 'settings-tile' }, icon(ic)),
-      h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, title), sum),
-      h('span', { class: 'settings-row-chev' }, icon('forward'))),
-    h('div', { class: 'settings-row-body' }, ...body));
+  const row = h(
+    'details',
+    { class: 'settings-row', 'data-hue': hue, 'data-part': part ?? null, open: key && openRows.has(key) ? openRows.get(key) : open, ontoggle: key ? (e) => openRows.set(key, e.currentTarget.open) : null },
+    h('summary', {}, h('span', { class: 'settings-tile' }, icon(ic)), h('span', { class: 'settings-row-text' }, h('span', { class: 'settings-row-title' }, title), sum), h('span', { class: 'settings-row-chev' }, icon('forward'))),
+    h('div', { class: 'settings-row-body' }, ...body),
+  );
   return [row, sum];
 }
 
@@ -539,22 +650,43 @@ export const settingsSection = (title, ...rows) => [h('h3', { class: 'settings-s
  * hit the hash router, so each scrolls its target (an element with that id, which carries .settings-anchor) into view.
  */
 export function settingsJump(...links) {
-  return h('nav', { class: 'settings-jump', 'aria-label': 'On this page' }, links.map(([id, label]) =>
-    h('a', { href: `#/p/${view.projectId}/${view.main}`, onclick: (e) => {
-      e.preventDefault();
-      document.getElementById(id)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
-    } }, label)));
+  return h(
+    'nav',
+    { class: 'settings-jump', 'aria-label': 'On this page' },
+    links.map(([id, label]) =>
+      h(
+        'a',
+        {
+          href: `#/p/${view.projectId}/${view.main}`,
+          onclick: (e) => {
+            e.preventDefault();
+            document.getElementById(id)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+          },
+        },
+        label,
+      ),
+    ),
+  );
 }
 
 /** Help text cut to its first sentence, the rest behind More (Cara picked "Shorter help text"). */
 export function settingsHelp(first, ...rest) {
   if (!rest.length) return h('p', { class: 'muted small settings-help' }, first);
   const more = h('span', { class: 'settings-more', hidden: true }, ' ', ...rest);
-  const btn = h('button', { type: 'button', class: 'settings-more-btn', 'aria-expanded': 'false', onclick: () => {
-    more.hidden = !more.hidden;
-    btn.textContent = more.hidden ? 'More' : 'Less';
-    btn.setAttribute('aria-expanded', String(!more.hidden));
-  } }, 'More');
+  const btn = h(
+    'button',
+    {
+      type: 'button',
+      class: 'settings-more-btn',
+      'aria-expanded': 'false',
+      onclick: () => {
+        more.hidden = !more.hidden;
+        btn.textContent = more.hidden ? 'More' : 'Less';
+        btn.setAttribute('aria-expanded', String(!more.hidden));
+      },
+    },
+    'More',
+  );
   return h('p', { class: 'muted small settings-help' }, first, more, ' ', btn);
 }
 
@@ -582,7 +714,11 @@ function rulesReviewBanner() {
   const ok = h('button', { type: 'button' }, 'Looks right');
   const list = h('div', { class: 'hue-rows' });
   const summary = h('div', { class: 'row' });
-  const lines = (s) => (s ?? '').split('\n').map((l) => l.trim()).filter(Boolean).length;
+  const lines = (s) =>
+    (s ?? '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean).length;
   const draw = () => {
     box.hidden = !view.project.rules_review;
     const q = view.project;
@@ -599,14 +735,14 @@ function rulesReviewBanner() {
     summary.replaceChildren(toneChip(changed ? 'ok' : 'warn', changed ? `${changed} of ${rows.length} changed` : 'All starting values'), pips(changed, rows.length));
     list.replaceChildren(...rows.map(([what, value, dflt]) => hueRow({ hue: dflt ? 'muted' : 'done', meta: toneChip(dflt ? 'neutral' : 'ok', dflt ? 'starting value' : 'changed') }, h('b', {}, what), ' ', value)));
   };
-  box.append(
-    h('h3', {}, 'Setup is done: check these rules'), summary,
-    h('p', { class: 'muted small' }, 'Go through the rows below and change what is off; each pick saves at once. "Starting value" is what a new scheme begins with. "Looks right" clears this for every member.'),
-    list, h('div', { class: 'row' }, ok));
+  box.append(h('h3', {}, 'Setup is done: check these rules'), summary, h('p', { class: 'muted small' }, 'Go through the rows below and change what is off; each pick saves at once. "Starting value" is what a new scheme begins with. "Looks right" clears this for every member.'), list, h('div', { class: 'row' }, ok));
   box.addEventListener('settings-refresh', draw);
   ok.onclick = () => {
     ok.disabled = true;
-    saveProject(p, { rules_review: 0 }, { rules_review: false }, 'Marking the rules as checked', (done) => { if (!done) ok.disabled = false; draw(); });
+    saveProject(p, { rules_review: 0 }, { rules_review: false }, 'Marking the rules as checked', (done) => {
+      if (!done) ok.disabled = false;
+      draw();
+    });
   };
   draw();
   return box;
@@ -617,13 +753,17 @@ export function approvalsEditor() {
   const p = view.project;
   const rules = pickers({ settingsRow, settingsHelp, saveProject });
   const elsewhere = elsewhereRows(null);
-  const section = h('section', { class: 'artifacts-main instructions-main' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
-        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+  const section = h(
+    'section',
+    { class: 'artifacts-main instructions-main' },
+    h(
+      'div',
+      { class: 'ticket-head' },
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(), h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
       h('div', { class: 'meta' }, 'Minions in this scheme use these from their next turn. The Taskmaster reads Shipping too.'),
-      rulesReviewBanner()),
+      rulesReviewBanner(),
+    ),
     settingsSection('Approvals', rules.approvals()),
     settingsSection('Shipping', rules.ship(), rules.go(), fastModeRow(p), rules.tryFirst(), rules.builds(), rules.ghRunners()),
     // Plugins load code from any folder on the server, so only an admin changes them.
@@ -632,7 +772,8 @@ export function approvalsEditor() {
     settingsSection('Plugins', rules.plugins()),
     settingsSection('Checks', rules.shots()),
     settingsSection('CI', rules.ci()),
-    settingsSection('Elsewhere', ...elsewhere));
+    settingsSection('Elsewhere', ...elsewhere),
+  );
   loadRulesData(rules, elsewhere);
   return section;
 }
@@ -642,12 +783,10 @@ function renderInstructionsHead() {
   if (!el) return;
   const p = view.project;
   el.replaceChildren(
-    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
-      h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(), h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
-    h('div', { class: 'meta' },
-      'The Taskmaster and every minion get these in their system prompt, from their next turn.',
-      p.instructions_updated_by ? ` Last changed by ${p.instructions_updated_by} ${ago(p.instructions_updated_at)}.` : ''));
+    h('div', { class: 'meta' }, 'The Taskmaster and every minion get these in their system prompt, from their next turn.', p.instructions_updated_by ? ` Last changed by ${p.instructions_updated_by} ${ago(p.instructions_updated_at)}.` : ''),
+  );
 }
 
 /** The last few saves of some instructions, each with what it removed and added, and how to reload them. */
@@ -656,13 +795,19 @@ function recentChanges(url, restore) {
   const load = async () => {
     try {
       const { history: saves } = await api(url);
-      history.replaceChildren(...(saves.length ? [h('h3', { class: 'settings-label' }, 'Recent changes')] : []),
-        ...saves.map((s) => h('details', {},
-          h('summary', {}, `${s.by}, ${ago(s.at)} `,
-            h('span', { class: 'muted small' }, `+${s.diff.filter((d) => d.op === '+').length} −${s.diff.filter((d) => d.op === '-').length} lines`)),
-          h('pre', { class: 'instructions-diff' }, ...s.diff.map((d) => h('div', { class: d.op === '+' ? 'add' : d.op === '-' ? 'del' : 'gap' }, d.op === '…' ? '…' : `${d.op} ${d.text}`))),
-          // Fills the field with the text from before this save; nothing is saved until Save.
-          ...(restore && s.before !== undefined ? [h('button', { type: 'button', class: 'secondary', onclick: () => restore(s.before) }, 'Put the text from before this change in the field')] : []))));
+      history.replaceChildren(
+        ...(saves.length ? [h('h3', { class: 'settings-label' }, 'Recent changes')] : []),
+        ...saves.map((s) =>
+          h(
+            'details',
+            {},
+            h('summary', {}, `${s.by}, ${ago(s.at)} `, h('span', { class: 'muted small' }, `+${s.diff.filter((d) => d.op === '+').length} −${s.diff.filter((d) => d.op === '-').length} lines`)),
+            h('pre', { class: 'instructions-diff' }, ...s.diff.map((d) => h('div', { class: d.op === '+' ? 'add' : d.op === '-' ? 'del' : 'gap' }, d.op === '…' ? '…' : `${d.op} ${d.text}`))),
+            // Fills the field with the text from before this save; nothing is saved until Save.
+            ...(restore && s.before !== undefined ? [h('button', { type: 'button', class: 'secondary', onclick: () => restore(s.before) }, 'Put the text from before this change in the field')] : []),
+          ),
+        ),
+      );
     } catch (err) {
       history.replaceChildren(h('p', { class: 'muted small' }, `Could not load recent changes: ${err.message}`));
     }
@@ -682,7 +827,12 @@ export function myInstructionsEditor() {
   const drafts = {};
   let scope = 'everywhere';
   const textarea = h('textarea', {
-    id: 'my-instructions-text', 'data-part': 'my-instructions', class: 'instructions-text settings-anchor', spellcheck: 'false', disabled: true, 'aria-label': 'My instructions',
+    id: 'my-instructions-text',
+    'data-part': 'my-instructions',
+    class: 'instructions-text settings-anchor',
+    spellcheck: 'false',
+    disabled: true,
+    'aria-label': 'My instructions',
     placeholder: 'How you want your minions to work: tone, when to ask and when to go, previews before shipping, the model and effort they start on…',
   });
   const counter = h('span', { class: 'muted counter' });
@@ -695,7 +845,10 @@ export function myInstructionsEditor() {
   const sync = () => {
     const dirty = !textarea.disabled && textarea.value.trim() !== saved[scope].trim();
     textarea.toggleAttribute('data-draft', dirty);
-    hidden.value = Object.entries(drafts).filter(([k, v]) => k !== scope && v.trim() !== saved[k].trim()).map(([, v]) => v).join('\n');
+    hidden.value = Object.entries(drafts)
+      .filter(([k, v]) => k !== scope && v.trim() !== saved[k].trim())
+      .map(([, v]) => v)
+      .join('\n');
     hidden.toggleAttribute('data-draft', !!hidden.value.trim());
     const n = textarea.value.trim().length;
     counter.textContent = `${count(n)} / ${count(MAX_PERSONAL)}`;
@@ -711,12 +864,14 @@ export function myInstructionsEditor() {
   });
   const histories = { everywhere: recentChanges(`api/projects/${p.id}/my-instructions/history?scope=everywhere`), scheme: recentChanges(`api/projects/${p.id}/my-instructions/history?scope=scheme`) };
   const historySlot = h('div');
-  const scopes = [['everywhere', 'Everywhere'], ['scheme', `${p.name} only`]];
+  const scopes = [
+    ['everywhere', 'Everywhere'],
+    ['scheme', `${p.name} only`],
+  ];
   const switcher = h('div', { class: 'row my-scope', role: 'group', 'aria-label': 'Applies to' });
   const showScope = (next) => {
     scope = next;
-    switcher.replaceChildren(...scopes.map(([key, label]) =>
-      h('button', { type: 'button', class: `chip${key === scope ? ' on' : ''}`, 'aria-pressed': String(key === scope), onclick: () => showScope(key) }, label)));
+    switcher.replaceChildren(...scopes.map(([key, label]) => h('button', { type: 'button', class: `chip${key === scope ? ' on' : ''}`, 'aria-pressed': String(key === scope), onclick: () => showScope(key) }, label)));
     textarea.value = drafts[scope] ?? saved[scope];
     historySlot.replaceChildren(histories[scope][0]);
     histories[scope][1]();
@@ -745,13 +900,16 @@ export function myInstructionsEditor() {
         show(was, 'Not saved.');
       },
       label: 'save your instructions',
-    }).then((r) => {
-      histories[at][1]();
-      if (saved[at] !== text.trim()) return; // a later save changed it again
-      saved = { ...saved, [at]: r[at].text };
-      if (scope === at && textarea.value === text) textarea.value = r[at].text; // as the server keeps it
-      sync();
-    }, () => {});
+    }).then(
+      (r) => {
+        histories[at][1]();
+        if (saved[at] !== text.trim()) return; // a later save changed it again
+        saved = { ...saved, [at]: r[at].text };
+        if (scope === at && textarea.value === text) textarea.value = r[at].text; // as the server keeps it
+        sync();
+      },
+      () => {},
+    );
   };
   discard.onclick = () => {
     delete drafts[scope];
@@ -760,34 +918,46 @@ export function myInstructionsEditor() {
     sync();
   };
   const layer = (name, who, cls) => h('li', { class: cls }, h('strong', {}, name), h('span', { class: 'muted small' }, who));
-  const section = h('section', { class: 'artifacts-main instructions-main my-instructions' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
-        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+  const section = h(
+    'section',
+    { class: 'artifacts-main instructions-main my-instructions' },
+    h(
+      'div',
+      { class: 'ticket-head' },
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(), h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
-      h('div', { class: 'meta' }, 'Only you edit these. They load into the minions assigned to you, from their next turn.')),
+      h('div', { class: 'meta' }, 'Only you edit these. They load into the minions assigned to you, from their next turn.'),
+    ),
     settingsJump(['my-instructions-text', 'Your text'], ['my-instructions-recent', 'Recent changes'], ['my-instructions-order', 'What a minion reads']),
     h('h3', { class: 'settings-label' }, 'Applies to'),
     switcher,
     aids.el,
-    textarea, hidden,
+    textarea,
+    hidden,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
     h('div', { id: 'my-instructions-recent', class: 'settings-anchor' }, historySlot),
-    h('div', { class: 'settings-card settings-anchor', id: 'my-instructions-order' },
+    h(
+      'div',
+      { class: 'settings-card settings-anchor', id: 'my-instructions-order' },
       h('h3', { class: 'settings-label' }, 'What a minion of yours reads, in order'),
-      h('ol', { class: 'my-layers' },
-        layer('Citadel-wide', 'everyone, every scheme', 'l-app'),
-        layer('Scheme instructions', `everyone in ${p.name}`, 'l-scheme'),
-        layer('Yours: everywhere, then this scheme\'s', 'the minions assigned to you', 'l-mine')),
-      h('p', { class: 'muted small' }, 'The Taskmaster\'s prompt stays the same for everyone: it reads yours when it starts a minion for you. When someone else writes in your minion, it follows their way for their own asks.')),
-    h('div', { class: 'settings-card' },
+      h('ol', { class: 'my-layers' }, layer('Citadel-wide', 'everyone, every scheme', 'l-app'), layer('Scheme instructions', `everyone in ${p.name}`, 'l-scheme'), layer("Yours: everywhere, then this scheme's", 'the minions assigned to you', 'l-mine')),
+      h('p', { class: 'muted small' }, "The Taskmaster's prompt stays the same for everyone: it reads yours when it starts a minion for you. When someone else writes in your minion, it follows their way for their own asks."),
+    ),
+    h(
+      'div',
+      { class: 'settings-card' },
       h('h3', { class: 'settings-label' }, 'Yours wins over 1 and 2, except'),
-      h('ul', { class: 'my-limits' },
-        h('li', {}, 'secrets, logins, other people\'s files and deleting data'),
+      h(
+        'ul',
+        { class: 'my-limits' },
+        h('li', {}, "secrets, logins, other people's files and deleting data"),
         h('li', {}, 'the tripwire'),
         h('li', {}, 'how a change ships: tests, self-review and risk labels, the ship script, the pipeline lane'),
-        h('li', {}, 'shared names, the shared folder\'s layout and the decisions log'),
-        h('li', {}, 'another person\'s pick or decision'))));
+        h('li', {}, "shared names, the shared folder's layout and the decisions log"),
+        h('li', {}, "another person's pick or decision"),
+      ),
+    ),
+  );
   (async () => {
     try {
       const r = await api(`api/projects/${p.id}/my-instructions`);
@@ -814,11 +984,16 @@ async function checkRepeats(scope, text, box, status) {
   let found;
   try {
     ({ found } = await api(`api/projects/${view.projectId}/instructions/overlaps`, { method: 'POST', body: { scope, text } }));
-  } catch { return true; }
+  } catch {
+    return true;
+  }
   if (!found.length) return (box.hidden = true);
   status.textContent = '';
   return new Promise((done) => {
-    const close = (go) => () => { box.hidden = true; done(go); };
+    const close = (go) => () => {
+      box.hidden = true;
+      done(go);
+    };
     const where = (o) => {
       const name = `${o.label}${o.line ? `, line ${o.line}` : ''}`;
       return o.href ? h('a', { href: o.href, ...(/^https?:/.test(o.href) ? { target: '_blank', rel: 'noopener' } : {}) }, name) : h('strong', {}, name);
@@ -830,7 +1005,8 @@ async function checkRepeats(scope, text, box, status) {
       // The buttons sit above the list, so verdicts filling in below never move them (no reflow without input).
       h('div', { class: 'row' }, h('button', { type: 'button', onclick: close(true) }, 'Save anyway'), h('button', { type: 'button', class: 'secondary', onclick: close(false) }, 'Keep editing')),
       h('ul', {}, ...found.map((o, i) => h('li', {}, where(o), `: “${o.excerpt.replace(/\s+/g, ' ').trim()}” `, h('span', { class: 'muted' }, `It ${o.why}.`), marks[i]))),
-      note);
+      note,
+    );
     box.hidden = false;
     box.scrollIntoView({ block: 'nearest' });
     void fillVerdicts(scope, text, box, marks, note, found.map((o) => `${o.label}|${o.line}`).join('\n'));
@@ -858,9 +1034,7 @@ async function fillVerdicts(scope, text, box, marks, note, places) {
       m.textContent = v ? `Sonnet: ${VERDICT[v.verdict]}${v.why ? `. ${v.why}` : '.'}` : 'Sonnet: no verdict.';
     });
     const vs = r.verdicts;
-    note.textContent = vs.some((v) => v && v.verdict !== 'fine') ? 'Sonnet has read them: work in the ones it marks, or save anyway.'
-      : vs.every((v) => v) ? 'Sonnet found no real repeat here: saving anyway is fine.'
-        : "Sonnet left some without a verdict, so read those yourself before saving anyway.";
+    note.textContent = vs.some((v) => v && v.verdict !== 'fine') ? 'Sonnet has read them: work in the ones it marks, or save anyway.' : vs.every((v) => v) ? 'Sonnet found no real repeat here: saving anyway is fine.' : 'Sonnet left some without a verdict, so read those yourself before saving anyway.';
     return;
   }
   for (const m of marks) m.remove();
@@ -882,18 +1056,20 @@ function renderAppInstructionsHead() {
   if (!el) return;
   const a = appInstructions;
   el.replaceChildren(
-    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
-      h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+    h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     settingsTabs(),
-    h('div', { class: 'meta' },
-      'Every scheme\'s minions and Taskmaster get these, before their scheme\'s own.',
-      a?.by ? ` Last changed by ${a.by} ${ago(a.at)}.` : ''));
+    h('div', { class: 'meta' }, "Every scheme's minions and Taskmaster get these, before their scheme's own.", a?.by ? ` Last changed by ${a.by} ${ago(a.at)}.` : ''),
+  );
 }
 
 /** Main panel: edit the instructions every scheme shares. */
 export function appInstructionsEditor() {
   const textarea = h('textarea', {
-    id: 'app-instructions-text', 'data-part': 'citadel-wide-instructions', class: 'instructions-text', spellcheck: 'false', disabled: true,
+    id: 'app-instructions-text',
+    'data-part': 'citadel-wide-instructions',
+    class: 'instructions-text',
+    spellcheck: 'false',
+    disabled: true,
     placeholder: 'How people like to work in every scheme: tone, when to ask, how to hand work off…',
   });
   const counter = h('span', { class: 'muted counter' });
@@ -917,7 +1093,11 @@ export function appInstructionsEditor() {
     status.textContent = '';
     sync();
   });
-  const [history, loadHistory] = recentChanges('api/app/instructions/history', (t) => { textarea.value = t; textarea.dispatchEvent(new Event('input')); textarea.focus(); });
+  const [history, loadHistory] = recentChanges('api/app/instructions/history', (t) => {
+    textarea.value = t;
+    textarea.dispatchEvent(new Event('input'));
+    textarea.focus();
+  });
   const repeats = h('div', { class: 'instructions-repeats', role: 'alert', hidden: true });
   save.onclick = async () => {
     status.textContent = 'Checking for repeats…';
@@ -943,29 +1123,34 @@ export function appInstructionsEditor() {
       send: () => api('api/app/instructions', { method: 'PUT', body: { text: mine.text } }),
       undo: () => appInstructions === mine && show(was, 'Not saved.'), // unless a later save changed it again
       label: 'save the Citadel-wide instructions',
-    }).then((a) => {
-      loadHistory(); // even when the broadcast of this save beat the answer and replaced `mine`
-      if (appInstructions !== mine) return;
-      if (textarea.value === mine.text) textarea.value = a.text; // as the server keeps it
-      show(a, status.textContent);
-    }, () => {});
+    }).then(
+      (a) => {
+        loadHistory(); // even when the broadcast of this save beat the answer and replaced `mine`
+        if (appInstructions !== mine) return;
+        if (textarea.value === mine.text) textarea.value = a.text; // as the server keeps it
+        show(a, status.textContent);
+      },
+      () => {},
+    );
   };
   discard.onclick = () => {
     textarea.value = saved();
     status.textContent = '';
     sync();
   };
-  const section = h('section', { class: 'artifacts-main instructions-main' },
+  const section = h(
+    'section',
+    { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head', id: 'app-instructions-head' }),
     settingsJump(['app-instructions-text', 'Instructions'], ['app-instructions-recent', 'Recent changes'], ['github-owner-section', 'GitHub owner']),
-    settingsHelp('Rules for how people like to work in every scheme, read by each minion and Taskmaster from its next turn.',
-      'They come right before its scheme instructions, and a scheme instruction overrides one of these only where it names the rule it replaces.'),
+    settingsHelp('Rules for how people like to work in every scheme, read by each minion and Taskmaster from its next turn.', 'They come right before its scheme instructions, and a scheme instruction overrides one of these only where it names the rule it replaces.'),
     aids.el,
     textarea,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
     repeats,
     h('div', { id: 'app-instructions-recent', class: 'settings-anchor' }, history),
-    githubOwnerField());
+    githubOwnerField(),
+  );
   (async () => {
     try {
       appInstructions = await api('api/app/instructions');
@@ -1004,25 +1189,43 @@ function githubOwnerField() {
     const mine = input.value.trim();
     optimistic({
       key: 'github-owner',
-      apply: () => { saved = mine; status.textContent = 'Saved.'; },
+      apply: () => {
+        saved = mine;
+        status.textContent = 'Saved.';
+      },
       send: () => api('api/app/settings', { method: 'PUT', body: { github_owner: mine } }),
-      undo: () => { if (saved === mine) { saved = was; status.textContent = 'Not saved.'; } }, // unless a later save changed it again
+      undo: () => {
+        if (saved === mine) {
+          saved = was;
+          status.textContent = 'Not saved.';
+        }
+      }, // unless a later save changed it again
       label: `make ${mine || 'the default'} the GitHub owner`,
     });
   };
-  input.addEventListener('input', () => { status.textContent = ''; });
-  api('api/app/settings').then(show, (err) => { status.textContent = `Could not load it: ${err.message}`; });
-  return h('div', { class: 'github-owner settings-anchor', id: 'github-owner-section' },
+  input.addEventListener('input', () => {
+    status.textContent = '';
+  });
+  api('api/app/settings').then(show, (err) => {
+    status.textContent = `Could not load it: ${err.message}`;
+  });
+  return h(
+    'div',
+    { class: 'github-owner settings-anchor', id: 'github-owner-section' },
     h('h3', { class: 'settings-label' }, 'GitHub owner for new schemes'),
-    settingsHelp('A scheme started with a new repo gets a private GitHub repo under this account or organisation.', 'Blank uses the owner of Citadel\'s own repo.'),
-    h('div', { class: 'row' }, input, save, status));
+    settingsHelp('A scheme started with a new repo gets a private GitHub repo under this account or organisation.', "Blank uses the owner of Citadel's own repo."),
+    h('div', { class: 'row' }, input, save, status),
+  );
 }
 
 /** Main panel: edit the project's instructions, or import them from Claude Code. */
 export function instructionsEditor() {
   const p = view.project;
   const textarea = h('textarea', {
-    id: 'instructions-text', 'data-part': 'scheme-instructions', class: 'instructions-text settings-anchor', spellcheck: 'false',
+    id: 'instructions-text',
+    'data-part': 'scheme-instructions',
+    class: 'instructions-text settings-anchor',
+    spellcheck: 'false',
     placeholder: 'What the scheme is for, where the work happens (branches, PR names), how a minion checks its work, what needs a go-ahead first…',
   });
   textarea.value = p.instructions ?? '';
@@ -1059,7 +1262,10 @@ export function instructionsEditor() {
       status.textContent = saved ? `Saved. Minions pick this up on their next turn. ${instructionCost(instructions)}` : 'Not saved.';
       renderInstructionsHead();
       sync();
-    }).then(() => loadHistory(), () => {});
+    }).then(
+      () => loadHistory(),
+      () => {},
+    );
   };
   discard.onclick = () => {
     textarea.value = view.project.instructions ?? '';
@@ -1069,7 +1275,10 @@ export function instructionsEditor() {
 
   /** Put imported text at the end of what's there (or in place of it), then let people review and save. */
   const insert = (parts, replace) => {
-    const add = parts.map((x) => x.trim()).filter(Boolean).join('\n\n');
+    const add = parts
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .join('\n\n');
     if (!add) return;
     textarea.value = replace || !textarea.value.trim() ? add : `${textarea.value.trimEnd()}\n\n${add}`;
     textarea.focus();
@@ -1092,23 +1301,33 @@ export function instructionsEditor() {
     loadInstructionSources(picker, insert);
   };
 
-  const [history, loadHistory] = recentChanges(`api/projects/${p.id}/instructions/history`, (t) => { textarea.value = t; textarea.dispatchEvent(new Event('input')); textarea.focus(); });
+  const [history, loadHistory] = recentChanges(`api/projects/${p.id}/instructions/history`, (t) => {
+    textarea.value = t;
+    textarea.dispatchEvent(new Event('input'));
+    textarea.focus();
+  });
 
-  const section = h('section', { class: 'artifacts-main instructions-main' },
+  const section = h(
+    'section',
+    { class: 'artifacts-main instructions-main' },
     h('div', { class: 'ticket-head', id: 'instructions-head' }),
     settingsJump(['instructions-text', 'Instructions'], ['instructions-import', 'Import'], ['instructions-recent', 'Recent changes'], ['repo-setup', 'Repo setup']),
-    h('div', { class: 'instructions-tools', id: 'instructions-import' },
+    h(
+      'div',
+      { class: 'instructions-tools', id: 'instructions-import' },
       importButton,
       h('button', { type: 'button', class: 'secondary', onclick: () => fileInput.click() }, 'Import a file…'),
       fileInput,
-      h('span', { class: 'muted small' }, 'Or paste: from a Claude Code project at claude.ai/code, copy Project settings › Memory › Project instructions.')),
+      h('span', { class: 'muted small' }, 'Or paste: from a Claude Code project at claude.ai/code, copy Project settings › Memory › Project instructions.'),
+    ),
     picker,
     aids.el,
     textarea,
     h('div', { class: 'row instructions-actions' }, save, discard, status, h('span', { class: 'spacer' }), counter),
     repeats,
     h('div', { id: 'instructions-recent', class: 'settings-anchor' }, history),
-    repoSetupCard());
+    repoSetupCard(),
+  );
   sync();
   loadHistory();
   setTimeout(() => {
@@ -1149,15 +1368,30 @@ async function loadInstructionSources(el, insert) {
   replace.onclick = () => insert(chosen(), true);
   const groups = [...new Set(sources.map((s) => s.group))];
   el.replaceChildren(
-    ...groups.map((g) => h('div', { class: 'sub' }, h('h4', {}, g),
-      sources.filter((s) => s.group === g).map((s) => {
-        const box = h('input', { type: 'checkbox', onchange: () => { box.checked ? picked.add(s.id) : picked.delete(s.id); update(); } });
-        return h('details', { class: 'import-source' },
-          h('summary', {},
-            h('label', {}, box, h('span', { class: 'name' }, s.label)),
-            h('span', { class: 'meta' }, `${s.path} · ${count(s.content.length)} chars${s.truncated ? ' (cut short)' : ''}`),
-            s.note ? h('span', { class: 'meta hint' }, s.note) : ''),
-          h('pre', {}, s.content));
-      }))),
-    h('div', { class: 'row' }, add, replace, h('span', { class: 'muted small' }, 'Click a name to preview it.')));
+    ...groups.map((g) =>
+      h(
+        'div',
+        { class: 'sub' },
+        h('h4', {}, g),
+        sources
+          .filter((s) => s.group === g)
+          .map((s) => {
+            const box = h('input', {
+              type: 'checkbox',
+              onchange: () => {
+                box.checked ? picked.add(s.id) : picked.delete(s.id);
+                update();
+              },
+            });
+            return h(
+              'details',
+              { class: 'import-source' },
+              h('summary', {}, h('label', {}, box, h('span', { class: 'name' }, s.label)), h('span', { class: 'meta' }, `${s.path} · ${count(s.content.length)} chars${s.truncated ? ' (cut short)' : ''}`), s.note ? h('span', { class: 'meta hint' }, s.note) : ''),
+              h('pre', {}, s.content),
+            );
+          }),
+      ),
+    ),
+    h('div', { class: 'row' }, add, replace, h('span', { class: 'muted small' }, 'Click a name to preview it.')),
+  );
 }

@@ -10,7 +10,13 @@ import { join } from 'node:path';
 const dir = join(import.meta.dirname, '..', 'deploy', 'claude-coordinator.service.d');
 /** `Key=value` lines in the [Service] sections of the server unit and its drop-ins, last one winning as in systemd. */
 function serviceSettings(): Map<string, string> {
-  const files = [join(dir, '..', 'claude-coordinator.service'), ...readdirSync(dir).filter((f) => f.endsWith('.conf')).sort().map((f) => join(dir, f))];
+  const files = [
+    join(dir, '..', 'claude-coordinator.service'),
+    ...readdirSync(dir)
+      .filter((f) => f.endsWith('.conf'))
+      .sort()
+      .map((f) => join(dir, f)),
+  ];
   const out = new Map<string, string>();
   for (const file of files) {
     let section = '';

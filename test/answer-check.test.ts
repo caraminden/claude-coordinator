@@ -14,7 +14,11 @@ const call = (name: string, i: number) => [
 ];
 const say = (text: string) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
 const calls = (names: string[]) => names.flatMap((n, i) => call(n, i));
-const jsonl = (...entries: any[]) => entries.flat().map((e) => JSON.stringify(e)).join('\n') + '\n';
+const jsonl = (...entries: any[]) =>
+  entries
+    .flat()
+    .map((e) => JSON.stringify(e))
+    .join('\n') + '\n';
 const steer = (text: string) => ({ type: 'attachment', attachment: { type: 'queued_command', prompt: [{ type: 'text', text }] } });
 const notice = { type: 'attachment', attachment: { type: 'queued_command', prompt: '<task-notification>\n<task-id>a1</task-id>\n</task-notification>' } };
 
@@ -39,7 +43,7 @@ test('thin last message: a short answer to a quick question (few tool calls) is 
   assert.deepEqual(answerCheck(quick), []);
 });
 
-test('a turn a person steered mid-turn is not a hit; a Grunt\'s finish notice is no steer', () => {
+test("a turn a person steered mid-turn is not a hit; a Grunt's finish notice is no steer", () => {
   const steered = readTurn(jsonl(prompt('go'), calls(FIVE.slice(0, 3)), steer('[Cara]: stop, do the other one'), calls(FIVE.slice(0, 2)), say('Landing it.')), 'p1');
   assert.equal(steered.steered, true);
   assert.deepEqual(answerCheck(steered), []);
@@ -51,13 +55,13 @@ test('a turn a person steered mid-turn is not a hit; a Grunt\'s finish notice is
   assert.deepEqual(answerCheck(waiting), []);
   const taken = readTurn(jsonl(prompt('go'), calls(FIVE), say('Landing it.'), { type: 'queue-operation', operation: 'enqueue' }, { type: 'queue-operation', operation: 'dequeue' }), 'p1');
   assert.equal(taken.steered, false, 'an enqueue the turn took in at once (its own prompt) is no steer');
-  const limited = readTurn(jsonl(prompt('go'), calls(FIVE), { type: 'assistant', isApiErrorMessage: true, message: { model: '<synthetic>', content: [{ type: 'text', text: 'You\'ve hit your 5-hour limit' }] } }), 'p1');
+  const limited = readTurn(jsonl(prompt('go'), calls(FIVE), { type: 'assistant', isApiErrorMessage: true, message: { model: '<synthetic>', content: [{ type: 'text', text: "You've hit your 5-hour limit" }] } }), 'p1');
   assert.deepEqual(answerCheck(limited), [], 'a usage limit cut it short');
   const stopped = readTurn(jsonl(prompt('go'), calls(FIVE), { type: 'user', promptId: 'p1', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }), 'p1');
   assert.deepEqual(answerCheck(stopped), []);
 });
 
-test('only this prompt\'s turn counts: earlier turns\' tool calls and a compaction summary don\'t', () => {
+test("only this prompt's turn counts: earlier turns' tool calls and a compaction summary don't", () => {
   const t = jsonl(prompt('first'), calls(FIVE), say(ANSWER), prompt('[Cara]: and the colour?', 'p2'), call('Bash', 9), { type: 'user', promptId: 'p2', isCompactSummary: true, message: { content: 'This session is being continued…' } }, say('Done: it is teal now.'));
   assert.deepEqual(readTurn(t, 'p2').toolCalls, ['Bash']);
   assert.deepEqual(readTurn(t).toolCalls, ['Bash'], 'without a prompt id it starts at the last real prompt');
@@ -86,7 +90,7 @@ test('proposalLine reads headings, bold lines and lead-ins, not the words in pas
   assert.equal(proposalLine('Shipped the proposal card fix (#427). Risk low.'), null);
   assert.equal(proposalLine('Note: see https://example.com/next-steps'), null);
   assert.equal(proposalLine('[Proposal: account linking](/shared/specs/linking.md): the spec you asked for.'), null);
-  assert.equal(proposalLine('Worth a follow-up minion (I didn\'t do it here): the old run-back text.'), 'Worth a follow-up minion (I didn\'t do it here): the old run-back text.');
+  assert.equal(proposalLine("Worth a follow-up minion (I didn't do it here): the old run-back text."), "Worth a follow-up minion (I didn't do it here): the old run-back text.");
 });
 
 test('answer hook: logs each hit as a would-refuse line and refuses nothing; the job check runs it only on a stop it lets through', () => {
@@ -97,7 +101,13 @@ test('answer hook: logs each hit as a would-refuse line and refuses nothing; the
   const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_SHARED_DIR: shared };
   const lines = () => {
     try {
-      return readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).flatMap((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8').split('\n').filter((l) => l.includes('would refuse')));
+      return readdirSync(join(shared, 'retro-log'), { recursive: true })
+        .filter((f) => String(f).endsWith('.md'))
+        .flatMap((f) =>
+          readFileSync(join(shared, 'retro-log', String(f)), 'utf8')
+            .split('\n')
+            .filter((l) => l.includes('would refuse')),
+        );
     } catch {
       return [];
     }
@@ -139,7 +149,13 @@ test('process line: a Process: line at the start of a line is logged as a proces
   const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_SHARED_DIR: shared };
   const logged = () => {
     try {
-      return readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).flatMap((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8').split('\n').filter((l) => l.includes(' · process · ')));
+      return readdirSync(join(shared, 'retro-log'), { recursive: true })
+        .filter((f) => String(f).endsWith('.md'))
+        .flatMap((f) =>
+          readFileSync(join(shared, 'retro-log', String(f)), 'utf8')
+            .split('\n')
+            .filter((l) => l.includes(' · process · ')),
+        );
     } catch {
       return [];
     }
@@ -207,16 +223,16 @@ const STRUCK = [
   'Yes, you can reorder it: #1002 has been live since 20:18 PST.',
   "The runs from landings that already finished shouldn't still be in the queue; the landing tool is meant to cancel them.",
   "Josh's Taskmaster started that build and Build 6 (#1105), so it starts their feeders.",
-  'Still waiting on you: [#334\'s card](#/p/3/t/334?e=1).',
+  "Still waiting on you: [#334's card](#/p/3/t/334?e=1).",
 ];
 const NOT_LIVE = [
   'land.sh comes from the Citadel kit, so the fix belongs to Citadel.',
-  'Moving more work to Sonnet wouldn\'t save much: Sonnet\'s cache reads cost the same as Opus\'s.',
+  "Moving more work to Sonnet wouldn't save much: Sonnet's cache reads cost the same as Opus's.",
   'The overlay is click-through and never takes focus, so the game keeps your mouse.',
   'With a Library this big, I think the 500 cap is the wrong design.',
-  "#1002 is probably live by now.",
+  '#1002 is probably live by now.',
   'Is #1002 live?',
-  "I started #630 for the two bars.",
+  'I started #630 for the two bars.',
   'It shows #1073 instead of the closed #1066.',
   'The relay goes out after Build 4 is live.',
   '```bash\ngh run list # the run failed\n```',
@@ -233,7 +249,7 @@ const bash = (command: string) => [
   { type: 'user', promptId: 'p1', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'b1', content: 'ok' }] } },
 ];
 
-test('live-claim check: a claim in a turn that read nothing is a hit; a read, a run of gh or git, or the prompt\'s own report grounds it', () => {
+test("live-claim check: a claim in a turn that read nothing is a hit; a read, a run of gh or git, or the prompt's own report grounds it", () => {
   const claim = 'Yes: #1002 has been live since 20:18 PST.';
   const hit = liveClaimCheck(readTurn(jsonl(prompt('[Cara]: is #1002 live yet?'), calls(['Edit']), say(claim)), 'p1'));
   assert.deepEqual(hit, [`live-state claim without a read · "${claim}"`], "a person's question names #1002 but doesn't ground it");
@@ -249,12 +265,15 @@ test('live-claim check: a claim in a turn that read nothing is a hit; a read, a 
 test('live-claim check only counts: a hit is logged as a would-refuse line and never sends the stop back', () => {
   const shared = mkdtempSync(join(tmpdir(), 'answer-shared-'));
   const path = join(mkdtempSync(join(tmpdir(), 'answer-t-')), 't.jsonl');
-  writeFileSync(path, jsonl(prompt('[Josh]: anything for me?'), say('Still waiting on you: [#441\'s card](#/p/2/t/441?e=3), about citadel.zip.')));
+  writeFileSync(path, jsonl(prompt('[Josh]: anything for me?'), say("Still waiting on you: [#441's card](#/p/2/t/441?e=3), about citadel.zip.")));
   const out: { block?: string } = {};
   const hits = answerHook({ session_id: 's9', prompt_id: 'p1', transcript_path: path }, { COORDINATOR_ROLE: 'coordinator', COORDINATOR_SHARED_DIR: shared }, { stateDir: mkdtempSync(join(tmpdir(), 'answer-state-')), out });
   assert.deepEqual(hits, ['live-state claim without a read · "Still waiting on you: [#441\'s card](#/p/2/t/441?e=3), about citadel.zip."']);
   assert.equal(out.block, undefined);
-  const log = readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8')).join('');
+  const log = readdirSync(join(shared, 'retro-log'), { recursive: true })
+    .filter((f) => String(f).endsWith('.md'))
+    .map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8'))
+    .join('');
   assert.match(log, /would refuse · live-state claim without a read/);
 });
 
@@ -265,7 +284,10 @@ test('a stop sent back for a proposal logs no would-refuse line: the stop that e
   const out: { block?: string } = {};
   answerHook({ session_id: 's10', prompt_id: 'p1', transcript_path: path }, { COORDINATOR_ROLE: 'coordinator', COORDINATOR_SHARED_DIR: shared }, { stateDir: mkdtempSync(join(tmpdir(), 'answer-state-')), out });
   assert.ok(out.block);
-  const log = readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8')).join('');
+  const log = readdirSync(join(shared, 'retro-log'), { recursive: true })
+    .filter((f) => String(f).endsWith('.md'))
+    .map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8'))
+    .join('');
   assert.match(log, /refused stop · proposal without a card/);
   assert.doesNotMatch(log, /would refuse/);
 });
@@ -281,14 +303,13 @@ test('status line check: none, or one Citadel would ignore, is a hit; a readable
   assert.deepEqual(statusLineCheck(turn('Shipped it.')), ['no status line · "…Shipped it."']);
   assert.deepEqual(statusLineCheck(turn('Done.\n<!-- status: {state: ready} -->')), ['unreadable status line · "{state: ready}"']);
   assert.deepEqual(statusLineCheck(turn('Done.\n<!-- status: {"colour":"red"} -->')), ['unreadable status line · "{"colour":"red"}"']);
-  assert.deepEqual(statusLineCheck(turn('')), [], 'a turn with no closing text is the thin-message check\'s');
+  assert.deepEqual(statusLineCheck(turn('')), [], "a turn with no closing text is the thin-message check's");
   assert.match(statusLineCheck(turn('Quoted `<!-- status: {"state":"ready"} -->` mid-reply, then more words.'))[0], /^no status line/, 'only a trailer at the very end counts');
-  for (const ok of ['Done.\n<!-- status: {"state":"ready","note":"shipped"} -->', 'Card below.\n<!-- status: null -->', 'Done.\n`<!-- status: {"note":"x"} -->`\n'])
-    assert.deepEqual(statusLineCheck(turn(ok)), [], ok);
+  for (const ok of ['Done.\n<!-- status: {"state":"ready","note":"shipped"} -->', 'Card below.\n<!-- status: null -->', 'Done.\n`<!-- status: {"note":"x"} -->`\n']) assert.deepEqual(statusLineCheck(turn(ok)), [], ok);
   assert.deepEqual(statusLineCheck(readTurn(jsonl(prompt('go'), say('Half'), steer('[Cara]: stop')), 'p1')), [], 'a steered turn is skipped');
 });
 
-test('title check: a first turn that ends with the title still its prompt\'s opening words is a hit; setting a title or a later turn is not', () => {
+test("title check: a first turn that ends with the title still its prompt's opening words is a hit; setting a title or a later turn is not", () => {
   const first = '[System]: You are a minion.\n[Josh]: Fix the sidebar so it shows the phases of a turn and the counts';
   const title = 'Fix the sidebar so it shows the phases…';
   assert.deepEqual(titleCheck(readTurn(jsonl(prompt(first), calls(['Read']), say('Done.')), 'p1'), title), [`title still the opening words · "${title}"`]);
@@ -324,11 +345,13 @@ test('the minion checks run for minions only, and only count', () => {
   writeFileSync(path, jsonl(prompt('[Josh]: Fix the sidebar so it shows the phases of a turn'), tool('mcp__thread__hand_off_land', {}, 1), say('Handed off.')));
   const input = { hook_event_name: 'Stop', session_id: 'm1', prompt_id: 'p1', transcript_path: path };
   const env = { COORDINATOR_ROLE: 'thread', COORDINATOR_SHARED_DIR: shared, CITADEL_MINION_TITLE: 'Fix the sidebar so it shows the phases…' };
-  const out = { } as { block?: string };
-  assert.deepEqual(answerHook(input, env, { stateDir: mkdtempSync(join(tmpdir(), 'answer-state-')), out }), [
-    'no status line · "…Handed off."', 'title still the opening words · "Fix the sidebar so it shows the phases…"', 'ship with no self-review']);
+  const out = {} as { block?: string };
+  assert.deepEqual(answerHook(input, env, { stateDir: mkdtempSync(join(tmpdir(), 'answer-state-')), out }), ['no status line · "…Handed off."', 'title still the opening words · "Fix the sidebar so it shows the phases…"', 'ship with no self-review']);
   assert.equal(out.block, undefined, 'none sends the stop back');
-  const logged = readdirSync(join(shared, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8')).join('');
+  const logged = readdirSync(join(shared, 'retro-log'), { recursive: true })
+    .filter((f) => String(f).endsWith('.md'))
+    .map((f) => readFileSync(join(shared, 'retro-log', String(f)), 'utf8'))
+    .join('');
   assert.equal(logged.split('\n').filter((l) => l.includes(' · would refuse · ')).length, 3);
   assert.deepEqual(answerHook(input, { ...env, COORDINATOR_ROLE: 'coordinator' }), [], 'a Taskmaster has no status line, title or ship of its own');
 });

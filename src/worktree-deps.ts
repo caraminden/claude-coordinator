@@ -32,13 +32,29 @@ const HEAVY_UNIT = join(import.meta.dirname, '..', 'tools', 'heavy-unit');
 /** The folders (relative, '' for the root) holding a tracked npm lockfile, whose node_modules git ignores and isn't there yet. */
 export async function lockfileDirs(worktree: string): Promise<string[]> {
   const { stdout } = await run('git', ['ls-files', '-z', '--', ':(glob)**/package-lock.json', ':(glob)**/npm-shrinkwrap.json'], { cwd: worktree, timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
-  const dirs = [...new Set(stdout.split('\0').filter(Boolean).map((f) => (dirname(f) === '.' ? '' : dirname(f))))].sort();
+  const dirs = [
+    ...new Set(
+      stdout
+        .split('\0')
+        .filter(Boolean)
+        .map((f) => (dirname(f) === '.' ? '' : dirname(f))),
+    ),
+  ].sort();
   const out: string[] = [];
   for (const dir of dirs) {
     const modules = dir ? `${dir}/node_modules` : 'node_modules';
-    if (await access(join(worktree, modules)).then(() => true, () => false)) continue;
+    if (
+      await access(join(worktree, modules)).then(
+        () => true,
+        () => false,
+      )
+    )
+      continue;
     // Trailing slash: a `node_modules/` pattern matches only a folder, and this one doesn't exist yet. Not ignored, an install would leave thousands of files to commit.
-    const ignored = await run('git', ['check-ignore', '-q', `${modules}/`], { cwd: worktree, timeout: 30_000 }).then(() => true, () => false);
+    const ignored = await run('git', ['check-ignore', '-q', `${modules}/`], { cwd: worktree, timeout: 30_000 }).then(
+      () => true,
+      () => false,
+    );
     if (ignored) out.push(dir);
   }
   return out;
@@ -129,7 +145,10 @@ export function depsNote(r: DepsResult): string | null {
 
 /** The last useful line of a failed command: npm's own `npm error` line when it gave one. */
 function firstLine(err: any): string {
-  const text = String(err?.stderr || err?.message || err).trim().split('\n').filter(Boolean);
+  const text = String(err?.stderr || err?.message || err)
+    .trim()
+    .split('\n')
+    .filter(Boolean);
   const npmErr = text.find((l) => /^npm (error|ERR!)/.test(l) && !/A complete log|^npm error\s*$/.test(l));
   return (npmErr ?? text[0] ?? 'failed').slice(0, 300);
 }

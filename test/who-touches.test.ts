@@ -12,8 +12,7 @@ const dir = mkdtempSync(join(tmpdir(), 'who-touches-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
 const repo = join(dir, 'repo');
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' });
+const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8' });
 const lines = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `${tag} ${i}\n`).join('');
 
 execFileSync('git', ['init', '-q', '-b', 'main', repo]);

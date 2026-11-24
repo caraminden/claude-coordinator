@@ -152,13 +152,27 @@ export const CHECKS: Check[] = [
         for (const e of msgs.iterate(r.to_id, r.created_at) as Iterable<{ data: string }>) {
           if (!e.data.includes(tail)) continue;
           try {
-            if (String((JSON.parse(e.data) as { text?: string }).text ?? '').trimEnd().endsWith(tail)) n++;
-          } catch { /* not ours */ }
+            if (
+              String((JSON.parse(e.data) as { text?: string }).text ?? '')
+                .trimEnd()
+                .endsWith(tail)
+            )
+              n++;
+          } catch {
+            /* not ours */
+          }
         }
         if (n > 1) out.push({ check: 'fired-once', key: `fired-once:twice:${r.id}`, ticket: r.to_id, text: `${name(r.to_id)}: delivery #${r.id} arrived ${n} times.` });
       }
       // Schedules: a slot not fired (late, or its start failed), or fired twice.
-      for (const s of db.prepare('SELECT s.id, s.project_id, s.name, s.next_run_at, s.last_error, p.name AS scheme FROM schedules s LEFT JOIN projects p ON p.id = s.project_id WHERE s.paused = 0 AND ((s.next_run_at IS NOT NULL AND s.next_run_at < ?) OR s.last_error IS NOT NULL)').all(late) as { id: number; project_id: number; name: string; next_run_at: number | null; last_error: string | null; scheme: string | null }[]) {
+      for (const s of db.prepare('SELECT s.id, s.project_id, s.name, s.next_run_at, s.last_error, p.name AS scheme FROM schedules s LEFT JOIN projects p ON p.id = s.project_id WHERE s.paused = 0 AND ((s.next_run_at IS NOT NULL AND s.next_run_at < ?) OR s.last_error IS NOT NULL)').all(late) as {
+        id: number;
+        project_id: number;
+        name: string;
+        next_run_at: number | null;
+        last_error: string | null;
+        scheme: string | null;
+      }[]) {
         const which = `The schedule "${s.name}"${s.scheme ? ` (${s.scheme})` : ''}`;
         // A failed start moves next_run_at on, so the slot it missed is only in last_error (schedules.ts, ran).
         if (s.last_error) out.push({ check: 'fired-once', key: `fired-once:schedule-error:${s.id}`, ticket: null, project: s.project_id, text: `${which}: its last slot didn't start (${s.last_error.slice(0, 160)}).` });
@@ -177,7 +191,9 @@ export const CHECKS: Check[] = [
           let slot: number | null = null;
           try {
             slot = nextRun(sc.cron, a.created_at);
-          } catch { /* a cron that doesn't parse: no slot to tell them apart */ }
+          } catch {
+            /* a cron that doesn't parse: no slot to tell them apart */
+          }
           if (slot !== null && slot <= b.created_at) continue; // a schedule this frequent: two slots
           out.push({ check: 'fired-once', key: `fired-once:schedule-twice:${a.id}:${b.id}`, ticket: b.id, text: `The schedule "${sc.name}" started ${name(a.id)} and ${name(b.id)} ${minutes(b.created_at - a.created_at)} apart: one slot fired twice.` });
         }

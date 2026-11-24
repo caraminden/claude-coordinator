@@ -45,7 +45,9 @@ test('a trailer of plain null reads as state null, not an ignored line (#1154: t
 const root = mkdtempSync(join(tmpdir(), 'status-trailer-'));
 const replyFile = join(root, 'reply.txt');
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 const text = require('node:fs').readFileSync(${JSON.stringify(replyFile)}, 'utf8');
 process.stdin.once('data', () => {
   // Messages split on a line of ===, each its own assistant message.
@@ -53,7 +55,8 @@ process.stdin.once('data', () => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: text }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 let srv: Booted;
@@ -73,7 +76,14 @@ after(async () => {
 
 const ticket = async () => (await srv.call(`/api/tickets/${ticketId}`)).data.ticket;
 const events = async () => (await srv.call(`/api/tickets/${ticketId}/events?after=0`)).data as any[];
-const replies = async () => (await events()).filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'assistant').map((e) => JSON.parse(e.data).message.content.map((b: any) => b.text).join(''));
+const replies = async () =>
+  (await events())
+    .filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'assistant')
+    .map((e) =>
+      JSON.parse(e.data)
+        .message.content.map((b: any) => b.text)
+        .join(''),
+    );
 const notes = async () => (await events()).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
 const idle = () => until('the turn to end', async () => (await ticket()).status === 'idle');
 
@@ -81,8 +91,7 @@ async function turn(reply: string) {
   writeFileSync(replyFile, reply);
   const before = (await events()).filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'result').length;
   await srv.call(`/api/tickets/${ticketId}/messages`, { text: 'go on' });
-  await until('the turn to end', async () => (await ticket()).status === 'idle'
-    && (await events()).filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'result').length > before);
+  await until('the turn to end', async () => (await ticket()).status === 'idle' && (await events()).filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'result').length > before);
 }
 
 test('the reply is shown without its trailer, and the state, note and replies are set as the tool would', async () => {
@@ -121,7 +130,7 @@ test('an over-long note or reply is clipped to its limit, not refused', () => {
   const r = takeStatus(`<!-- status: {"state":"complete","note":"${'n'.repeat(87)}","replies":["${'r'.repeat(50)}"]} -->`);
   assert.equal((r.status!.note as string).length, 60);
   assert.ok((r.status!.note as string).endsWith('…'));
-  assert.equal(((r.status!.replies as string[])[0]).length, 40);
+  assert.equal((r.status!.replies as string[])[0].length, 40);
 });
 
 test('while a handed-off land is unreported, a turn start and the closing status line leave its landing state alone (#962)', async () => {
@@ -140,5 +149,5 @@ test('while a handed-off land is unreported, a turn start and the closing status
     rmSync(join(dir, 'handoff.json'));
   }
   await turn('Back to it.\n<!-- status: {"state":null} -->');
-  assert.equal((await ticket()).state, null, 'once reported, the state is the minion\'s again');
+  assert.equal((await ticket()).state, null, "once reported, the state is the minion's again");
 });

@@ -4,7 +4,7 @@ import { parseMerge, toInfo } from '../src/merge-card.ts';
 
 const call = (over = {}) => ({ target: '192', repo: null, method: 'squash', auto: false, admin: false, moved: false, ...over });
 
-test('parseMerge reads the merge in a pipe and ; chain like Delve\'s', () => {
+test("parseMerge reads the merge in a pipe and ; chain like Delve's", () => {
   const cmd = `gh pr merge 192 --squash --match-head-commit "$(git rev-parse 7b85b69d)" 2>&1 | tail -3; gh pr view 192 --json state,mergeCommit -q '.state+" "+(.mergeCommit.oid // "")[:8]'`;
   assert.deepEqual(parseMerge(cmd), call());
 });
@@ -55,13 +55,23 @@ test('parseMerge falls back to the plain card for anything else', () => {
     'GH_REPO=o/other gh pr merge 5 --squash',
     'export GH_REPO=o/other; gh pr merge 5 -s',
     'env GH_HOST=ghe.example.com gh pr merge 5 -s',
-  ]) assert.equal(parseMerge(cmd), null, cmd);
+  ])
+    assert.equal(parseMerge(cmd), null, cmd);
 });
 
-test('toInfo keeps what the card shows from gh pr view, and refuses what isn\'t a PR', () => {
+test("toInfo keeps what the card shows from gh pr view, and refuses what isn't a PR", () => {
   const info = toInfo({
-    number: 192, title: 'Port the guard', url: 'https://github.com/o/r/pull/192', state: 'OPEN', isDraft: false,
-    headRefName: 'ticket/77', baseRefName: 'main', additions: 344, deletions: 30, changedFiles: 4, commits: [{}, {}, {}],
+    number: 192,
+    title: 'Port the guard',
+    url: 'https://github.com/o/r/pull/192',
+    state: 'OPEN',
+    isDraft: false,
+    headRefName: 'ticket/77',
+    baseRefName: 'main',
+    additions: 344,
+    deletions: 30,
+    changedFiles: 4,
+    commits: [{}, {}, {}],
     statusCheckRollup: [
       { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
       { __typename: 'CheckRun', name: 'perf', status: 'COMPLETED', conclusion: 'SKIPPED' },

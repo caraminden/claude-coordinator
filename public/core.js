@@ -68,9 +68,11 @@ function fileCardHtml(ticketId, path, title) {
   if (!kind) return null;
   // An archive has nothing to preview: the card saves it.
   const href = kind === 'download' ? `${fileUrl(ticketId, path)}&download` : fileHref(ticketId, path);
-  return `<a class="file-card checking" data-file="${escapeHtml(path)}" href="${escapeHtml(href)}"${kind === 'download' ? ' download' : ''} title="${escapeHtml(path)}">`
-    + (kind === 'image' ? `<img src="${escapeHtml(fileUrl(ticketId, path))}" alt="" loading="lazy">` : `<span class="badge k-${kind}">${escapeHtml(fileExt(path))}</span>`)
-    + `<span class="text"><span class="name">${title}</span><span class="meta">${escapeHtml(shortPath(path))}</span></span></a>`;
+  return (
+    `<a class="file-card checking" data-file="${escapeHtml(path)}" href="${escapeHtml(href)}"${kind === 'download' ? ' download' : ''} title="${escapeHtml(path)}">` +
+    (kind === 'image' ? `<img src="${escapeHtml(fileUrl(ticketId, path))}" alt="" loading="lazy">` : `<span class="badge k-${kind}">${escapeHtml(fileExt(path))}</span>`) +
+    `<span class="text"><span class="name">${title}</span><span class="meta">${escapeHtml(shortPath(path))}</span></span></a>`
+  );
 }
 
 /** `![caption](path)` in a thread's reply: the image or video itself (a card for anything else). */
@@ -83,8 +85,7 @@ function filePreviewHtml(ticketId, path, caption) {
   // Muted and looping like a GIF; the file view has the controls.
   else if (kind === 'video') media = `<video src="${src}" muted autoplay loop playsinline preload="metadata"></video>`;
   else return fileCardHtml(ticketId, path, caption || escapeHtml(baseName(path)));
-  return `<a class="file-preview checking" data-file="${escapeHtml(path)}" href="${escapeHtml(fileHref(ticketId, path))}" title="${escapeHtml(path)}">${media}`
-    + `${caption ? `<span class="caption">${caption}</span>` : ''}</a>`;
+  return `<a class="file-preview checking" data-file="${escapeHtml(path)}" href="${escapeHtml(fileHref(ticketId, path))}" title="${escapeHtml(path)}">${media}` + `${caption ? `<span class="caption">${caption}</span>` : ''}</a>`;
 }
 
 // What the server found for each file a thread links, by "<thread> <path>": its details, null when
@@ -94,7 +95,9 @@ function fileLinkInfo(ticketId, path) {
   const key = `${ticketId} ${path}`;
   let info = linkInfo.get(key);
   if (!info) {
-    info = fetch(`${fileUrl(ticketId, path)}&info&fix`).then((res) => (res.ok ? res.json() : res.status === 404 ? null : undefined)).catch(() => undefined);
+    info = fetch(`${fileUrl(ticketId, path)}&info&fix`)
+      .then((res) => (res.ok ? res.json() : res.status === 404 ? null : undefined))
+      .catch(() => undefined);
     linkInfo.set(key, info);
     // A file that isn't there may be written soon, so ask again after a while.
     info.then((found) => found || setTimeout(() => linkInfo.delete(key), 30_000));
@@ -112,7 +115,7 @@ function checkFileLinks(root, ticketId) {
     holdPicSize(el.querySelector('img'));
     const path = el.dataset.file;
     const card = el.classList.contains('file-card');
-    const title = card ? el.querySelector('.name').innerHTML : el.querySelector('.caption')?.innerHTML ?? '';
+    const title = card ? el.querySelector('.name').innerHTML : (el.querySelector('.caption')?.innerHTML ?? '');
     fileLinkInfo(ticketId, path).then((info) => {
       const t = document.createElement('template');
       if (info?.fixed) t.innerHTML = card ? fileCardHtml(ticketId, info.abs, title) : filePreviewHtml(ticketId, info.abs, title);
@@ -135,10 +138,16 @@ function escapeHtml(s) {
  */
 function threadRefsHtml(html) {
   if (view?.kind !== 'project') return html;
-  return linkThreadRefs(html, view.projectId, (n) => {
-    for (const t of view.tickets.values()) if (t.number === n) return threadLabel(t);
-    return null;
-  }, view.projects, prRefRoute);
+  return linkThreadRefs(
+    html,
+    view.projectId,
+    (n) => {
+      for (const t of view.tickets.values()) if (t.number === n) return threadLabel(t);
+      return null;
+    },
+    view.projects,
+    prRefRoute,
+  );
 }
 
 /** Plain text as nodes, with its URLs, DOIs and "#12"s linked (see threadRefsHtml and linkUrls). */
@@ -181,9 +190,7 @@ export function markdownDoc(src, opts = {}) {
     const preview = ticketId != null && filePreviewHtml(ticketId, href, alt);
     if (preview) return preview;
     const url = imageUrl(href);
-    return url
-      ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img src="${escapeHtml(url)}" alt="${alt}" title="${alt}" loading="lazy"></a>`
-      : `<span class="muted">[image: ${alt}]</span>`;
+    return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img src="${escapeHtml(url)}" alt="${alt}" title="${alt}" loading="lazy"></a>` : `<span class="muted">[image: ${alt}]</span>`;
   };
   // Bare URLs and DOIs already came through `link` (ui/markdown.js), so only #N is left to link.
   const text = threadRefsHtml;
@@ -198,7 +205,9 @@ export function markdownDoc(src, opts = {}) {
     if (!a) return;
     e.preventDefault();
     let id = a.getAttribute('href').slice(1);
-    try { id = decodeURIComponent(id); } catch {}
+    try {
+      id = decodeURIComponent(id);
+    } catch {}
     div.querySelector(`[data-slug="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   return div;
@@ -212,17 +221,20 @@ const BOTTOM_SLACK = 24;
 export const chatScroller = () => document.querySelector('dialog.viewer[open] > .chat');
 const atBottom = () => {
   const el = chatScroller();
-  return el ? el.scrollTop + el.clientHeight >= el.scrollHeight - BOTTOM_SLACK
-    : window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - BOTTOM_SLACK;
+  return el ? el.scrollTop + el.clientHeight >= el.scrollHeight - BOTTOM_SLACK : window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - BOTTOM_SLACK;
 };
 export let followChat = true;
 // Captured, so the viewer's chat column (whose scroll events don't bubble) counts too.
-document.addEventListener('scroll', (e) => {
-  if (e.target !== document && e.target !== chatScroller()) return;
-  followChat = atBottom();
-  document.querySelector('.to-latest')?.toggleAttribute('hidden', followChat);
-  renderCardJump();
-}, { passive: true, capture: true });
+document.addEventListener(
+  'scroll',
+  (e) => {
+    if (e.target !== document && e.target !== chatScroller()) return;
+    followChat = atBottom();
+    document.querySelector('.to-latest')?.toggleAttribute('hidden', followChat);
+    renderCardJump();
+  },
+  { passive: true, capture: true },
+);
 export function scrollToBottom() {
   const el = chatScroller();
   if (el) el.scrollTop = el.scrollHeight;
@@ -230,11 +242,15 @@ export function scrollToBottom() {
   followChat = true;
 }
 // Images finish loading after they are added; stay pinned to the bottom if you were following.
-document.addEventListener('load', (e) => {
-  if (e.target.tagName !== 'IMG' || !e.target.closest('#log')) return;
-  if (e.target.naturalWidth) picSizes.set(e.target.getAttribute('src'), [e.target.naturalWidth, e.target.naturalHeight]);
-  if (followChat) scrollToBottom();
-}, true);
+document.addEventListener(
+  'load',
+  (e) => {
+    if (e.target.tagName !== 'IMG' || !e.target.closest('#log')) return;
+    if (e.target.naturalWidth) picSizes.set(e.target.getAttribute('src'), [e.target.naturalWidth, e.target.naturalHeight]);
+    if (followChat) scrollToBottom();
+  },
+  true,
+);
 
 // Chat pictures' sizes once one has loaded this session: drawn again (Load earlier, a chat reopened), it holds its box
 // before it loads, so nothing under it moves (#1531). shortcut: only seen ones; a size from the server would cover a first load.
@@ -250,12 +266,16 @@ export function holdPicSize(img) {
 /** Where each thread was scrolled to, so coming back lands in the same place. */
 function saveScroll() {
   if (view?.kind !== 'project' || !view.id) return;
-  try { sessionStorage.setItem(`cc-scroll:${view.id}`, JSON.stringify(followChat ? 'bottom' : window.scrollY)); } catch {}
+  try {
+    sessionStorage.setItem(`cc-scroll:${view.id}`, JSON.stringify(followChat ? 'bottom' : window.scrollY));
+  } catch {}
 }
 
 export function restoreScroll(ticketId) {
   let saved = 'bottom';
-  try { saved = JSON.parse(sessionStorage.getItem(`cc-scroll:${ticketId}`)) ?? 'bottom'; } catch {}
+  try {
+    saved = JSON.parse(sessionStorage.getItem(`cc-scroll:${ticketId}`)) ?? 'bottom';
+  } catch {}
   if (saved === 'bottom') scrollToBottom();
   else window.scrollTo(0, saved);
 }
@@ -305,11 +325,13 @@ function reconnecting(on) {
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
   if (on) {
-    reconnectTimer = setTimeout(() => {
-      reconnectChip = h('div', { class: 'cui-chip reconnecting', 'data-tone': 'warn', role: 'status' },
-        h('span', { class: 'cui-spin', 'aria-hidden': 'true' }), 'Reconnecting…');
-      document.body.append(reconnectChip);
-    }, Math.max(1500, quietUntil - Date.now()));
+    reconnectTimer = setTimeout(
+      () => {
+        reconnectChip = h('div', { class: 'cui-chip reconnecting', 'data-tone': 'warn', role: 'status' }, h('span', { class: 'cui-spin', 'aria-hidden': 'true' }), 'Reconnecting…');
+        document.body.append(reconnectChip);
+      },
+      Math.max(1500, quietUntil - Date.now()),
+    );
   } else {
     reconnectChip?.remove();
     reconnectChip = null;
@@ -323,8 +345,7 @@ let keptOpen = false; // the kept chat's answers are on screen: no stream (its e
 /** Open the app on the kept chat (base.js keptChat) while the live answers come; resolves once it's drawn. */
 export function startKept(kept) {
   reconnecting(false);
-  catchUpChip = h('div', { class: 'cui-chip reconnecting', 'data-tone': 'warn', role: 'status' },
-    h('span', { class: 'cui-spin', 'aria-hidden': 'true' }), 'Catching up…');
+  catchUpChip = h('div', { class: 'cui-chip reconnecting', 'data-tone': 'warn', role: 'status' }, h('span', { class: 'cui-spin', 'aria-hidden': 'true' }), 'Catching up…');
   document.body.append(catchUpChip);
   keptOpen = true;
   replayKept(kept);
@@ -355,7 +376,13 @@ let keepSoon = false;
 function keepOpenChatSoon() {
   if (keepSoon) return;
   keepSoon = true;
-  (window.requestIdleCallback ?? ((fn) => setTimeout(fn, 1500)))(() => { keepSoon = false; keepOpenChat(); }, { timeout: 5000 });
+  (window.requestIdleCallback ?? ((fn) => setTimeout(fn, 1500)))(
+    () => {
+      keepSoon = false;
+      keepOpenChat();
+    },
+    { timeout: 5000 },
+  );
 }
 
 /** Keep the open chat on the device for the next launch (base.js keepChat): the newest of its history and what opening it asked for. */
@@ -410,11 +437,17 @@ function connectStream(catchUp = false) {
         reloadPending = msg.version;
         reloadWhenIdle();
       } else if (msg.version) {
-        try { sessionStorage.removeItem('cc-stale'); } catch {}
+        try {
+          sessionStorage.removeItem('cc-stale');
+        } catch {}
       }
       assetVersion ??= msg.version;
       // Each connect's own hello (it carries usage; a deploy's broadcast one doesn't), so a reconnect catches up (#626).
-      if ('usage' in msg) loadReleases().then((rows) => { schedulePaintRefs(); if (rows && view?.kind === 'project') scheduleSidebar(); });
+      if ('usage' in msg)
+        loadReleases().then((rows) => {
+          schedulePaintRefs();
+          if (rows && view?.kind === 'project') scheduleSidebar();
+        });
       if (msg.stream) {
         presenceHello(msg.stream);
         if (view?.kind === 'project') scheduleSidebar();
@@ -455,7 +488,13 @@ function connectStream(catchUp = false) {
     if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
     if (msg.type === 'hidden') onHiddenChanged(msg.name);
     if (msg.type === 'claims') onClaims(msg);
-    if (msg.type === 'releases') Promise.resolve(onReleases(msg)).then((rows) => { if (rows && view?.kind === 'project') { scheduleSidebar(); schedulePaintRefs(); } });
+    if (msg.type === 'releases')
+      Promise.resolve(onReleases(msg)).then((rows) => {
+        if (rows && view?.kind === 'project') {
+          scheduleSidebar();
+          schedulePaintRefs();
+        }
+      });
     if (msg.type === 'presence' && onPresenceMsg(msg)) {
       scheduleSidebar();
       if (view.id) renderTicketHead();
@@ -463,7 +502,10 @@ function connectStream(catchUp = false) {
     if (msg.type === 'seen-items' && msg.name === me) onSeenItems(msg.projectId);
     if (msg.type === 'machines') onMachinesUpdate(msg.machines);
     if (msg.type === 'machine_job') onJobUpdate(msg.job);
-    if (msg.type === 'builds' && view?.kind === 'project' && view.projectId === msg.projectId) { view.builds = msg.builds; scheduleSidebar(); }
+    if (msg.type === 'builds' && view?.kind === 'project' && view.projectId === msg.projectId) {
+      view.builds = msg.builds;
+      scheduleSidebar();
+    }
     if (msg.type === 'branch' && view?.kind === 'project' && view.id === msg.ticketId) renderBranch(msg.status);
   };
   es.onerror = () => {
@@ -488,8 +530,20 @@ export function setSending(n) {
 }
 const QUIET_MS = 5000;
 
-document.addEventListener('input', () => { lastInputAt = Date.now(); }, true);
-document.addEventListener('keydown', () => { lastInputAt = Date.now(); }, true);
+document.addEventListener(
+  'input',
+  () => {
+    lastInputAt = Date.now();
+  },
+  true,
+);
+document.addEventListener(
+  'keydown',
+  () => {
+    lastInputAt = Date.now();
+  },
+  true,
+);
 
 /** What holds a new front end back, in the banner's words, or null when it can load now. */
 function unsentWork() {
@@ -512,7 +566,9 @@ export async function reloadNow(ev) {
   reloading = true;
   // Put the cursor back in the composer if that is where it was.
   if (document.activeElement?.matches('.composer textarea')) {
-    try { sessionStorage.setItem('cc-refocus', '1'); } catch {}
+    try {
+      sessionStorage.setItem('cc-refocus', '1');
+    } catch {}
   }
   // Only a ship waits on the worker; a ↻ reloads at once (the stream's hello catches a ship it missed).
   if (typeof reloadPending === 'string') {
@@ -520,7 +576,8 @@ export async function reloadNow(ev) {
     if (unsentWork()) return void (reloading = false); // something started while the worker fetched: wait for it (the dim comes off)
   }
   // ↻ passes its click; every other caller (a ship, the next navigation) is automatic and skips the splash.
-  if (ev instanceof Event) location.reload(); else reloadQuietly();
+  if (ev instanceof Event) location.reload();
+  else reloadQuietly();
 }
 
 /**
@@ -537,11 +594,12 @@ async function freshShell(to) {
     sessionStorage.setItem('cc-stale', to);
   } catch {}
   if (again) return Promise.all((await caches.keys()).filter((k) => k.startsWith('shell-')).map((k) => caches.delete(k)));
-  const settled = () => new Promise((done) => {
-    const w = reg.installing ?? reg.waiting;
-    if (!w) return done();
-    w.addEventListener('statechange', () => ['activated', 'redundant'].includes(w.state) && done());
-  });
+  const settled = () =>
+    new Promise((done) => {
+      const w = reg.installing ?? reg.waiting;
+      if (!w) return done();
+      w.addEventListener('statechange', () => ['activated', 'redundant'].includes(w.state) && done());
+    });
   await Promise.race([reg.update().then(settled), new Promise((done) => setTimeout(done, 8000))]);
 }
 
@@ -589,8 +647,7 @@ function syncUsageLinks() {
 addEventListener('hashchange', syncUsageLinks);
 
 /** A weekly-limit bar; one lives in the top bar and one in a project's side panel. */
-export const usageMeter = () => h('a', { class: 'usage', href: usageHref(), hidden: true },
-  h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })));
+export const usageMeter = () => h('a', { class: 'usage', href: usageHref(), hidden: true }, h('span', { class: 'label' }), h('span', { class: 'track' }, h('span', { class: 'fill' })));
 
 export { combineWindows };
 
@@ -599,10 +656,7 @@ export function pickLine(u, accounts) {
   const a = accounts.find((x) => x.n === u.account);
   if (!a) return 'No Claude account is ready for new minions.';
   const reset = a.usage?.weekly?.resetsAt > Date.now() ? ` (${new Date(a.usage.weekly.resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })})` : '';
-  const why = u.why === 'pinned' ? 'you pinned it'
-    : u.pinned ? `account ${u.pinned}, which you pinned, isn't ready`
-    : u.why === 'full' ? 'every account is close to its limit'
-    : `of the accounts with room, its week resets first${reset}`;
+  const why = u.why === 'pinned' ? 'you pinned it' : u.pinned ? `account ${u.pinned}, which you pinned, isn't ready` : u.why === 'full' ? 'every account is close to its limit' : `of the accounts with room, its week resets first${reset}`;
   return `New minions start on ${a.label}: ${why}. Running minions stay on their account while warm, until it's nearly out.`;
 }
 
@@ -626,14 +680,14 @@ export function renderUsage(next = usage) {
     const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
     const sess = (w) => `${Math.round(w.utilization * 100)}%${w.resetsAt ? `, resets ${when(w.resetsAt)}` : ''}`;
     el.title = [
-      accounts
-        ? `Weekly usage combined across ${accounts.length} Claude accounts: ${pct}%${week.resetsAt ? `, next reset ${when(week.resetsAt)}` : ''}`
-        : `Weekly usage of your Claude plan: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
+      accounts ? `Weekly usage combined across ${accounts.length} Claude accounts: ${pct}%${week.resetsAt ? `, next reset ${when(week.resetsAt)}` : ''}` : `Weekly usage of your Claude plan: ${pct}%${week.resetsAt ? `, resets ${when(week.resetsAt)}` : ''}`,
       session ? `5-hour window${accounts ? ' (combined)' : ''}: ${sess(session)}` : null,
       `As of the last turn, ${ago(usage.updatedAt)}`,
       // Several Claude accounts (#779): the bar combines them; the tooltip says where new minions start (#793) and lists each, ▸ on that one.
       ...(accounts ? ['', pickLine(usage, accounts), ...accounts.map((a) => accountLine(a, a.n === usage.account))] : []),
-    ].filter((line) => line != null).join('\n');
+    ]
+      .filter((line) => line != null)
+      .join('\n');
   }
   for (const el of document.querySelectorAll('.usage:not(.codex)')) renderCodexSwitch(el);
   for (const el of document.querySelectorAll('.codex-toggle')) syncToggle(el);
@@ -659,12 +713,19 @@ export function codexWindowsBlock() {
 function fillCodexWindows(el) {
   const ws = codexWindows(codex?.usage);
   if (!ws.length) return el.replaceChildren(h('p', { class: 'muted small' }, 'Codex usage: no usage yet. It fills in after your first Codex turn.'));
-  el.replaceChildren(h('dl', { class: 'kv' }, ...ws.flatMap((w) => {
-    const bar = codexBar();
-    bar.hidden = false;
-    setBar(bar, w.pct, `${w.pct}%`);
-    return [h('dt', {}, windowName(w.windowDurationMins)), h('dd', {}, bar, w.resetsAt && w.pct ? h('span', { class: 'muted' }, `resets ${when(w.resetsAt * 1000)}`) : '')];
-  })), h('p', { class: 'muted small' }, `Codex usage as of ${ago(codex.usage.updatedAt)}.`));
+  el.replaceChildren(
+    h(
+      'dl',
+      { class: 'kv' },
+      ...ws.flatMap((w) => {
+        const bar = codexBar();
+        bar.hidden = false;
+        setBar(bar, w.pct, `${w.pct}%`);
+        return [h('dt', {}, windowName(w.windowDurationMins)), h('dd', {}, bar, w.resetsAt && w.pct ? h('span', { class: 'muted' }, `resets ${when(w.resetsAt * 1000)}`) : '')];
+      }),
+    ),
+    h('p', { class: 'muted small' }, `Codex usage as of ${ago(codex.usage.updatedAt)}.`),
+  );
 }
 
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
@@ -672,14 +733,17 @@ const live = (w) => w && (!w.resetsAt || w.resetsAt > Date.now());
 /** A Claude window is past 90% (or out): the left panel offers the override then (Josh, 2026-11-05). */
 const high = (u) => [u?.session, u?.weekly].some((w) => live(w) && (w.status === 'rejected' || w.utilization >= 0.9));
 // With several Claude accounts (#779), only once every one of them is high: turns move to the next by themselves.
-const claudeHigh = () => usage?.accounts?.length > 1 ? usage.accounts.every((a) => high(a.usage)) : high(usage);
+const claudeHigh = () => (usage?.accounts?.length > 1 ? usage.accounts.every((a) => high(a.usage)) : high(usage));
 
 /** "Enable Codex override" (#337): runs the person's turns on Codex. Settings has one; the left panel shows one past 90%. */
 export function codexToggle() {
   const box = h('input', { type: 'checkbox', onchange: () => flipCodex(box) });
-  const el = h('span', { class: 'codex-toggle' },
+  const el = h(
+    'span',
+    { class: 'codex-toggle' },
     h('label', { class: 'toggle', title: 'Run your turns on Codex (OpenAI) instead of Claude: minions, Taskmasters and apps. A Claude model picked for a minion runs as the Codex model of the same tier.' }, box, 'Enable Codex override'),
-    h('span', { class: 'hint', hidden: true }));
+    h('span', { class: 'hint', hidden: true }),
+  );
   syncToggle(el);
   return el;
 }
@@ -735,8 +799,11 @@ async function flipCodex(box) {
 // minute whose stream spoke since it hid missed nothing, so it asks for nothing (#1528). Not on the stream's
 // readyState: a frozen phone page can show OPEN on a dead stream. A stream that broke and came back resyncs on
 // its open (connectStream), and a page the browser froze resyncs whatever the time.
-let hiddenAt = Date.now(), frozen = false;
-document.addEventListener('freeze', () => { frozen = true; });
+let hiddenAt = Date.now(),
+  frozen = false;
+document.addEventListener('freeze', () => {
+  frozen = true;
+});
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') return void ((hiddenAt = Date.now()), (frozen = false));
   if (!me) return;
@@ -760,11 +827,7 @@ async function resync() {
     held = hold;
   }
   try {
-    const [{ coordinator, tickets, dismissed, seen, person_notes, pins, builds }, artifacts, chat] = await Promise.all([
-      api(`api/projects/${view.projectId}?tickets=open`),
-      api(`api/projects/${view.projectId}/artifacts`),
-      view.id ? api(`api/tickets/${view.id}`) : null,
-    ]);
+    const [{ coordinator, tickets, dismissed, seen, person_notes, pins, builds }, artifacts, chat] = await Promise.all([api(`api/projects/${view.projectId}?tickets=open`), api(`api/projects/${view.projectId}/artifacts`), view.id ? api(`api/tickets/${view.id}`) : null]);
     if (view !== v) return; // you went to another view meanwhile; its own load is fresh
     view.coordinator = coordinator;
     view.tickets = mergeOpen(tickets, dismissed); // the dismissed rows already read stay (closedlist.js)
@@ -784,7 +847,8 @@ async function resync() {
     renderTicketHead();
     if (view.ticket.branch) refreshBranch(view.id);
     await catchUpEvents();
-  } catch {} finally {
+  } catch {
+  } finally {
     if (hold && !--hold.owed) releaseHeld(hold);
   }
 }
@@ -806,7 +870,7 @@ const EVENT_CACHE_THREADS = 12;
  * Where a chat's history comes from: a ticket id, or a merged Taskmaster view's URL (Mine and Everyone, #920,
  * thread.js mergedView) that pages several sessions as one. `query` is added to it.
  */
-const eventsUrl = (src, query = '') => typeof src === 'number' ? `api/tickets/${src}/events${query && `?${query}`}` : `${src}${query && `&${query}`}`;
+const eventsUrl = (src, query = '') => (typeof src === 'number' ? `api/tickets/${src}/events${query && `?${query}`}` : `${src}${query && `&${query}`}`);
 
 function remember(ticketId, page) {
   eventCache.delete(ticketId);
@@ -819,7 +883,7 @@ export async function loadEvents(ticketId) {
   // A prefetch already on its way is the head start: wait for it, then fetch only what came after.
   await prefetching.get(ticketId);
   const cached = eventCache.get(ticketId);
-  const page = cached ?? await api(eventsUrl(ticketId));
+  const page = cached ?? (await api(eventsUrl(ticketId)));
   if (cached) {
     const fresh = await api(eventsUrl(ticketId, `after=${page.events.at(-1)?.id ?? 0}`));
     // Another load, or live events, may have added some of these while this one was on its way.
@@ -844,13 +908,15 @@ export function cachedEvents(ticketId) {
 /** Add the page before the oldest loaded event to a thread's history; with `from`, reach back to that event. */
 export function loadEarlier(ticketId, page, from) {
   // One at a time per page (Load earlier and Find can both ask), each going on from where the last got to.
-  const load = (earlierLoads.get(page) ?? Promise.resolve()).catch(() => {}).then(async () => {
-    const first = page.events[0].id;
-    const older = await api(eventsUrl(ticketId, `before=${first}${from ? `&from=${from}` : ''}`));
-    Object.assign(page, { events: older.events.filter((e) => e.id < first).concat(page.events), more: older.more, tasks: older.tasks });
-    remember(ticketId, page);
-    return page;
-  });
+  const load = (earlierLoads.get(page) ?? Promise.resolve())
+    .catch(() => {})
+    .then(async () => {
+      const first = page.events[0].id;
+      const older = await api(eventsUrl(ticketId, `before=${first}${from ? `&from=${from}` : ''}`));
+      Object.assign(page, { events: older.events.filter((e) => e.id < first).concat(page.events), more: older.more, tasks: older.tasks });
+      remember(ticketId, page);
+      return page;
+    });
   earlierLoads.set(page, load);
   return load;
 }
@@ -865,7 +931,9 @@ const PREFETCH_ROWS = 2;
 function prefetchEvents(ticketId) {
   if (eventCache.has(ticketId) || prefetching.has(ticketId) || eventCache.size >= EVENT_CACHE_THREADS) return prefetching.get(ticketId) ?? Promise.resolve(); // always a promise: prefetchTopRows chains on it
   const p = api(eventsUrl(ticketId))
-    .then((page) => { if (!eventCache.has(ticketId) && eventCache.size < EVENT_CACHE_THREADS) eventCache.set(ticketId, page); })
+    .then((page) => {
+      if (!eventCache.has(ticketId) && eventCache.size < EVENT_CACHE_THREADS) eventCache.set(ticketId, page);
+    })
     .catch(() => {})
     .finally(() => prefetching.delete(ticketId));
   prefetching.set(ticketId, p);
@@ -874,10 +942,14 @@ function prefetchEvents(ticketId) {
 
 const rowTicketId = (el) => Number(el?.closest?.('a.thread-row[data-id]')?.dataset.id) || null;
 for (const type of ['pointerover', 'touchstart']) {
-  document.addEventListener(type, (e) => {
-    const id = rowTicketId(e.target);
-    if (id && id !== view?.id) prefetchEvents(id);
-  }, { passive: true });
+  document.addEventListener(
+    type,
+    (e) => {
+      const id = rowTicketId(e.target);
+      if (id && id !== view?.id) prefetchEvents(id);
+    },
+    { passive: true },
+  );
 }
 
 /** Once the page is idle, load the first two minions in the list. Not on data saver. */
@@ -886,7 +958,9 @@ export function prefetchTopRows() {
   const whenIdle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 1500));
   whenIdle(async () => {
     const ids = [...document.querySelectorAll('#threads > section a.thread-row[data-id]')]
-      .map(rowTicketId).filter((id) => id && id !== view?.id).slice(0, PREFETCH_ROWS);
+      .map(rowTicketId)
+      .filter((id) => id && id !== view?.id)
+      .slice(0, PREFETCH_ROWS);
     const next = () => (ids.length ? prefetchEvents(ids.shift()).then(next) : null);
     await Promise.all([next(), next()]);
   });
@@ -904,7 +978,11 @@ export async function catchUpEvents() {
     const events = await api(eventsUrl(v.merged?.src ?? v.id, `after=${v.lastEventId}`));
     if (view !== v) return 0; // another view (or chat) opened meanwhile: these aren't its events
     let added = 0;
-    for (const ev of events) if (ev.id > view.lastEventId) { appendEvent(ev); added++; }
+    for (const ev of events)
+      if (ev.id > view.lastEventId) {
+        appendEvent(ev);
+        added++;
+      }
     return added;
   } finally {
     if (!--hold.owed) releaseHeld(hold);
@@ -921,7 +999,10 @@ export function onTicketUpdate(ticket) {
     const tm = view.taskmasters?.find((t) => t.id === ticket.id);
     const before = tm?.ticket;
     if (tm) tm.ticket = ticket;
-    if (view.id === ticket.id) { view.ticket = ticket; renderTicketHead(); }
+    if (view.id === ticket.id) {
+      view.ticket = ticket;
+      renderTicketHead();
+    }
     return void inboxTicket(before, ticket);
   }
   const before = ticket.kind === 'coordinator' ? view.coordinator : view.tickets.get(ticket.id);
@@ -969,16 +1050,19 @@ export function markSeen(ticketId) {
     renderSidebar();
   }
   if (seenTimers.has(ticketId)) return;
-  seenTimers.set(ticketId, setTimeout(async () => {
-    seenTimers.delete(ticketId);
-    try {
-      const { seen_at } = await api(`api/tickets/${ticketId}/seen`, { method: 'POST', body: {} });
-      if (view?.kind !== 'project') return;
-      if (view.seen[ticketId] === seen_at) return; // nothing changed: no second redraw per update (#1532)
-      view.seen[ticketId] = seen_at;
-      scheduleSidebar();
-    } catch {}
-  }, 800));
+  seenTimers.set(
+    ticketId,
+    setTimeout(async () => {
+      seenTimers.delete(ticketId);
+      try {
+        const { seen_at } = await api(`api/tickets/${ticketId}/seen`, { method: 'POST', body: {} });
+        if (view?.kind !== 'project') return;
+        if (view.seen[ticketId] === seen_at) return; // nothing changed: no second redraw per update (#1532)
+        view.seen[ticketId] = seen_at;
+        scheduleSidebar();
+      } catch {}
+    }, 800),
+  );
 }
 
 /** You've left a thread (another page, a hidden tab, a closed page): a finished minion you had open at its last update closes (#811). */
@@ -1041,7 +1125,9 @@ async function route() {
     // A link into an app (extlinks.js appHash): the page it names, checked to be inside that app on Citadel's origin.
     let src = null;
     if (m[2] != null) {
-      try { src = appSrc(m[1], decodeURIComponent(m[2]), location.origin); } catch {}
+      try {
+        src = appSrc(m[1], decodeURIComponent(m[2]), location.origin);
+      } catch {}
     }
     showFrame(m[1], src ?? undefined);
     if (m[2] != null) replaceHash(`#/apps/${m[1]}`);
@@ -1063,8 +1149,13 @@ async function route() {
       return;
     }
     // Home (#1140): its overview, or a chat opened from its list with the list kept beside it.
-    if (hash === '#/home' || hash === '#/home/broken') { if (hash === '#/home/broken') openBroken(); const id = await homeScheme(); if (seq !== routeSeq) return; if (id == null) await openStartScheme(); else await showProject(id, { kind: 'home', home: true }); }
-    else if ((m = hash.match(/^#\/home\/p\/(\d+)(?:\/t\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'chat', number: m[2] ? Number(m[2]) : null, home: true });
+    if (hash === '#/home' || hash === '#/home/broken') {
+      if (hash === '#/home/broken') openBroken();
+      const id = await homeScheme();
+      if (seq !== routeSeq) return;
+      if (id == null) await openStartScheme();
+      else await showProject(id, { kind: 'home', home: true });
+    } else if ((m = hash.match(/^#\/home\/p\/(\d+)(?:\/t\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'chat', number: m[2] ? Number(m[2]) : null, home: true });
     else if ((m = hash.match(/^#\/p\/(\d+)$/))) await showProject(Number(m[1]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/artifacts$/))) await showProject(Number(m[1]), { kind: 'files', folder: '@minions' });
     // Settings and Orders open on their list of pages on a phone (#1018); on a desktop Settings opens on Members beside
@@ -1072,7 +1163,8 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/(settings|orders)$/))) await showProject(Number(m[1]), matchMedia('(max-width: 800px)').matches ? { kind: m[2] } : m[2] === 'settings' ? { kind: 'members' } : { kind: 'instructions', orders: true });
     // The Machines page at one machine (#1638): lending cards and list_machines link here; its row opens and scrolls into view.
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines\/([a-z0-9-]{1,30})$/))) await showProject(Number(m[1]), { kind: 'machines', machine: m[2] });
-    else if ((m = hash.match(PAGE_ROUTE))) await showProject(Number(m[1]), { kind: m[2] }); // every Settings and Orders page in the table (settings-pages.js)
+    else if ((m = hash.match(PAGE_ROUTE)))
+      await showProject(Number(m[1]), { kind: m[2] }); // every Settings and Orders page in the table (settings-pages.js)
     else if ((m = hash.match(/^#\/p\/(\d+)\/schedules(?:\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'schedules', schedule: Number(m[2]) || null });
     else if ((m = hash.match(/^#\/p\/(\d+)\/chains(?:\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'chains', focus: Number(m[2]) || null });
     // Releases, CI and Status are one page's tabs (#1423): their old addresses open it on their tab. CI's All (Home's) opens the
@@ -1084,8 +1176,7 @@ async function route() {
       const hl = /^\d+$/.test(m[3] ?? '') ? Number(m[3]) : null; // a change to highlight, else a tab's name
       const target = m[3]?.startsWith('target/') ? decodeURIComponent(m[3].slice(7)) : null; // a release target to scroll to (#1647)
       await showReleases(Number(m[1]), { scope: m[2] === 'all' ? 'all' : Number(m[2] ?? m[1]), tab: hl == null && target == null && m[3] ? m[3] : 'releases', hl, target });
-    }
-    else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
+    } else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
     else if ((m = hash.match(/^#\/s\/(\d+)\/(.+)$/))) await showSharedFile(Number(m[1]), decodeURIComponent(m[2]));
     else if ((m = hash.match(/^#\/f\/(\d+)\/(.+)$/))) await showFile(Number(m[1]), decodeURIComponent(m[2]));
     else if ((m = hash.match(/^#\/p\/(\d+)\/t\/(\d+)$/))) await showProject(Number(m[1]), { kind: 'chat', number: Number(m[2]) });
@@ -1096,10 +1187,32 @@ async function route() {
     if (err.message !== 'Not logged in' && seq === routeSeq) {
       // A notice with a way out, not a bare red line on a blank page.
       const scheme = hash.match(/^#\/[ps]\/(\d+)/)?.[1];
-      app.replaceChildren(h('div', { class: 'cui-notice route-error', role: 'alert', 'data-tone': 'danger' },
-        h('p', {}, err.message),
-        h('p', {}, scheme ? h('a', { href: `#/p/${scheme}` }, 'Back to the scheme') : null, scheme ? ' · ' : null,
-          h('a', { href: '#/' }, 'Home'), ' · ', h('a', { href: location.hash, onclick: (e) => { e.preventDefault(); route(); } }, 'Try again'))));
+      app.replaceChildren(
+        h(
+          'div',
+          { class: 'cui-notice route-error', role: 'alert', 'data-tone': 'danger' },
+          h('p', {}, err.message),
+          h(
+            'p',
+            {},
+            scheme ? h('a', { href: `#/p/${scheme}` }, 'Back to the scheme') : null,
+            scheme ? ' · ' : null,
+            h('a', { href: '#/' }, 'Home'),
+            ' · ',
+            h(
+              'a',
+              {
+                href: location.hash,
+                onclick: (e) => {
+                  e.preventDefault();
+                  route();
+                },
+              },
+              'Try again',
+            ),
+          ),
+        ),
+      );
       // The old view is gone from the page, so the next resync routes again instead of refreshing it in place.
       setView(null);
     }
@@ -1158,12 +1271,14 @@ let prsAt = 0;
 function loadPrs() {
   if (Date.now() - prsAt < 5 * 60_000) return;
   prsAt = Date.now();
-  api('api/prs').then((r) => {
-    prList = r;
-    prRepos = new Map(r.map((x) => [x.repo, x]));
-    linkPrRefs();
-    schedulePaintRefs();
-  }).catch(() => {});
+  api('api/prs')
+    .then((r) => {
+      prList = r;
+      prRepos = new Map(r.map((x) => [x.repo, x]));
+      linkPrRefs();
+      schedulePaintRefs();
+    })
+    .catch(() => {});
 }
 /** Where a GitHub PR link should go instead (see prOwnerRoute); null until api/prs has loaded. */
 const prUrlRoute = (href) => prOwnerRoute(prRepos, href);
@@ -1194,7 +1309,10 @@ function pointPrLink(a) {
 }
 watchRefs();
 for (const type of ['pointerover', 'focusin']) {
-  document.addEventListener(type, (e) => { const a = e.target.closest?.('a[href^="https://github.com/"]'); if (a) pointPrLink(a); });
+  document.addEventListener(type, (e) => {
+    const a = e.target.closest?.('a[href^="https://github.com/"]');
+    if (a) pointPrLink(a);
+  });
 }
 
 // ---------- login ----------
@@ -1206,7 +1324,8 @@ export function clearTopbarMeters() {
   const meters = document.querySelector('.topbar .meters');
   if (!meters) return;
   for (const el of meters.querySelectorAll('.usage, .ci-chip, .status-chip, .releases-chip')) {
-    if (el.matches('.usage')) el.hidden = true; // the markup's own bar stays, hidden, for renderUsage to show again
+    if (el.matches('.usage'))
+      el.hidden = true; // the markup's own bar stays, hidden, for renderUsage to show again
     else el.remove();
   }
 }
@@ -1223,7 +1342,10 @@ function renderLogin() {
   mountLoginMap(app);
   const form = document.getElementById('login-form');
   // A saved login that is really the site's address (filled in by a phone's password manager) is dropped.
-  try { const saved = localStorage.getItem('cc-login') || ''; form.login.value = /^https?\W|\//i.test(saved) ? '' : saved; } catch {}
+  try {
+    const saved = localStorage.getItem('cc-login') || '';
+    form.login.value = /^https?\W|\//i.test(saved) ? '' : saved;
+  } catch {}
   const desk = desktopLogin(form);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1232,7 +1354,9 @@ function renderLogin() {
     const sent = desk.sent(body); // what was sent, so an edit while it's on its way isn't what gets saved
     try {
       await api('api/login', { method: 'POST', body });
-      try { localStorage.setItem('cc-login', body.login.trim()); } catch {}
+      try {
+        localStorage.setItem('cc-login', body.login.trim());
+      } catch {}
       await sent.signedIn();
       // A contraption's page sent here by /apps/'s login gate (src/apps.ts) goes back to it.
       const next = new URLSearchParams(location.search).get('next');
@@ -1281,18 +1405,25 @@ function desktopLogin(form) {
     form.password.focus();
   });
   // Typing another login (a test account) unticks, so signing in as it neither saves over nor drops the saved one.
-  form.login.addEventListener('input', () => { if (saved && form.login.value.trim() !== saved) tick.checked = false; });
-  bridge.savedLogin().then((r) => {
-    if (!form.isConnected) return;
-    if (!r?.canSave) return void (row.hidden = true);
-    saved = r.login?.login || null;
-    forget.hidden = !saved;
-    // What she's already typing wins over the fill.
-    if (!saved || form.password.value || (form.login.value && form.login.value.trim() !== saved)) return;
-    form.login.value = saved;
-    form.password.value = filled = r.login.password;
-    tick.checked = true;
-  }, () => { row.hidden = true; });
+  form.login.addEventListener('input', () => {
+    if (saved && form.login.value.trim() !== saved) tick.checked = false;
+  });
+  bridge.savedLogin().then(
+    (r) => {
+      if (!form.isConnected) return;
+      if (!r?.canSave) return void (row.hidden = true);
+      saved = r.login?.login || null;
+      forget.hidden = !saved;
+      // What she's already typing wins over the fill.
+      if (!saved || form.password.value || (form.login.value && form.login.value.trim() !== saved)) return;
+      form.login.value = saved;
+      form.password.value = filled = r.login.password;
+      tick.checked = true;
+    },
+    () => {
+      row.hidden = true;
+    },
+  );
   return {
     sent({ login, password }) {
       const remember = !row.hidden && tick.checked;
@@ -1307,7 +1438,9 @@ function desktopLogin(form) {
         /** The saved password turned down (not a lockout or a network failure) is dropped; the form shows as usual. */
         refused(ex) {
           if (ex?.status !== 401 || !asSaved || filled === null || password !== filled) return;
-          drop().then((ok) => { if (ok && form.password.value === password) form.password.value = ''; });
+          drop().then((ok) => {
+            if (ok && form.password.value === password) form.password.value = '';
+          });
         },
       };
     },
@@ -1326,16 +1459,18 @@ export function renderInvite(token) {
   const who = document.getElementById('invite-who');
   const err = document.getElementById('invite-error');
   const path = `api/invite/${encodeURIComponent(token)}`;
-  api(path).then((r) => {
-    who.replaceChildren('This sets the password for ', h('strong', {}, r.name), ', who signs in as ', h('strong', {}, r.login), '.');
-    form.login.value = r.login;
-    form.querySelector('button').disabled = false;
-  }).catch((ex) => {
-    // A dead link: say so, and the way on is signing in (or asking for a new link), not a form that can't send.
-    for (const el of form.querySelectorAll('label, button')) el.remove();
-    who.replaceWith(h('p', { class: 'cui-notice', 'data-tone': 'danger', role: 'alert' }, ex.message));
-    form.append(h('a', { class: 'button secondary', href: location.pathname }, 'Go to sign in'));
-  });
+  api(path)
+    .then((r) => {
+      who.replaceChildren('This sets the password for ', h('strong', {}, r.name), ', who signs in as ', h('strong', {}, r.login), '.');
+      form.login.value = r.login;
+      form.querySelector('button').disabled = false;
+    })
+    .catch((ex) => {
+      // A dead link: say so, and the way on is signing in (or asking for a new link), not a form that can't send.
+      for (const el of form.querySelectorAll('label, button')) el.remove();
+      who.replaceWith(h('p', { class: 'cui-notice', 'data-tone': 'danger', role: 'alert' }, ex.message));
+      form.append(h('a', { class: 'button secondary', href: location.pathname }, 'Go to sign in'));
+    });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     err.hidden = true;
@@ -1346,7 +1481,9 @@ export function renderInvite(token) {
     }
     try {
       await api(path, { method: 'POST', body: { password: form.password.value } });
-      try { localStorage.setItem('cc-login', form.login.value); } catch {}
+      try {
+        localStorage.setItem('cc-login', form.login.value);
+      } catch {}
       history.replaceState(null, '', location.pathname);
       start(await api('api/me'));
     } catch (ex) {
@@ -1422,16 +1559,22 @@ document.addEventListener('click', (e) => {
   const own = marked?.querySelector('.cui-marks-toggle > input')?.checked ? parseMarks(marked.dataset.marks) : null;
   // Ready to draw on (#946), as an image waiting to send: Done puts the marked copy in this chat's message box.
   const chatId = view?.kind === 'project' && view.main === 'chat' && img.closest('#log') ? view.id : null;
-  const lb = lightbox([{ src, alt: img.alt || 'Picture' }], chatId == null || !drawable(src) ? {} : {
-    render: (item, stage) => annotator(stage, item.src, {
-      ...(own ? { marks: own.marks, size: { w: own.w, h: own.h } } : {}),
-      doneLabel: 'Add to message',
-      onDone: async (canvas) => {
-        lb.close();
-        if (canvas) attachImage(chatId, await canvasBlob(canvas));
-      },
-    }),
-  });
+  const lb = lightbox(
+    [{ src, alt: img.alt || 'Picture' }],
+    chatId == null || !drawable(src)
+      ? {}
+      : {
+          render: (item, stage) =>
+            annotator(stage, item.src, {
+              ...(own ? { marks: own.marks, size: { w: own.w, h: own.h } } : {}),
+              doneLabel: 'Add to message',
+              onDone: async (canvas) => {
+                lb.close();
+                if (canvas) attachImage(chatId, await canvasBlob(canvas));
+              },
+            }),
+        },
+  );
 });
 
 /** Minions whose Stop was clicked and that haven't stopped yet: the head and the row's menu say "Stopping…" until the status moves on (a stop takes up to 15 s on the server). */
@@ -1440,13 +1583,19 @@ export const stoppingIds = new Set();
 export function stopChat(t, redraw = () => {}) {
   return optimistic({
     sets: `stop:${t.id}`,
-    apply: () => { stoppingIds.add(t.id); redraw(); },
+    apply: () => {
+      stoppingIds.add(t.id);
+      redraw();
+    },
     send: async () => {
       const r = await api(`api/tickets/${t.id}/stop`, { method: 'POST', body: {} });
       if (r?.stopped === false) throw new Error('nothing was running');
       if (r?.ship) toast(r.ship, { ms: 8000 });
     },
-    undo: () => { stoppingIds.delete(t.id); redraw(); },
+    undo: () => {
+      stoppingIds.delete(t.id);
+      redraw();
+    },
     label: `stop #${t.number ?? t.id}`,
   }).catch(() => {});
 }

@@ -26,23 +26,30 @@ const SCRIPTS = ['drawers.js', 'rail.js'];
 /** The names a .d.ts exports as values (functions, consts, classes), not its types. */
 const declared = (dts: string) => [...dts.matchAll(/^export\s+(?:declare\s+)?(?:function|const|let|class)\s+([\w$]+)/gm)].map((m) => m[1]).sort();
 /** The CSS a module brings: a .css file's text, or a .js module's constructed sheet (its `const CSS = `...``). */
-const cssOf = (f: string) => (f.endsWith('.css') ? read(f) : /\bconst CSS = `([\s\S]*?)`;/.exec(read(f))?.[1] ?? '');
+const cssOf = (f: string) => (f.endsWith('.css') ? read(f) : (/\bconst CSS = `([\s\S]*?)`;/.exec(read(f))?.[1] ?? ''));
 /** A selector list split at its top-level commas (not those inside :where(), :is() or :not()). */
 function splitTop(sel: string) {
   const parts: string[] = [];
-  let depth = 0, start = 0;
+  let depth = 0,
+    start = 0;
   for (let i = 0; i < sel.length; i++) {
     if (sel[i] === '(') depth++;
     else if (sel[i] === ')') depth--;
-    else if (sel[i] === ',' && depth === 0) { parts.push(sel.slice(start, i)); start = i + 1; }
+    else if (sel[i] === ',' && depth === 0) {
+      parts.push(sel.slice(start, i));
+      start = i + 1;
+    }
   }
   return [...parts, sel.slice(start)];
 }
 /** What's left of a selector after its leading :where(...) groups: '' when it weighs nothing. */
 function outsideWhere(sel: string) {
   while (sel.startsWith(':where(')) {
-    let depth = 0, i = ':where'.length;
-    for (; i < sel.length; i++) if (sel[i] === '(') depth++; else if (sel[i] === ')' && --depth === 0) break;
+    let depth = 0,
+      i = ':where'.length;
+    for (; i < sel.length; i++)
+      if (sel[i] === '(') depth++;
+      else if (sel[i] === ')' && --depth === 0) break;
     sel = sel.slice(i + 1);
   }
   return sel;
@@ -56,7 +63,7 @@ const SAMPLES: [string, string, object?][] = [
   ['paragraphs and emphasis', 'One **bold**, one *em*, one `code`, one ~~gone~~.\nSame paragraph.\n\nNext.'],
   ['chat keeps line breaks', 'one\ntwo', { breaks: true }],
   ['escaped html', '<script>alert(1)</script> & <b>x</b><br>y'],
-  ['headings: a reply\'s # is an h3', '# Top\n## Next\n###### Deep'],
+  ["headings: a reply's # is an h3", '# Top\n## Next\n###### Deep'],
   ['headings: a document passes headingBase 1', '# Top\n## Top', { headingBase: 1 }],
   ['lists, nested and numbered', '1. one\n2. two\n   - a\n   - b\n3. three\n\n5. five\n6. six'],
   ['task list', '- [ ] todo\n- [x] done'],
@@ -82,14 +89,18 @@ const at = (s: number) => Date.UTC(2026, 10, 2, 12, 0, s);
 const ev = (type: string, data: object, s?: number) => ({ type, data, at: s === undefined ? undefined : at(s) });
 const RECORDED = [
   ev('text', { delta: 'Let me **check** Thursday.', parent: null, message: 'm1' }),
-  ev('tool', { id: 'a', name: 'mcp__mandate__list_todos', input: {}, parent: null }, 1), ev('tool_result', { id: 'a', ok: true, parent: null }, 2),
-  ev('tool', { id: 'b', name: 'mcp__mandate__move_todo', input: { title: 'Dry cleaning' }, parent: null }, 2), ev('tool_result', { id: 'b', ok: false, parent: null }, 3),
+  ev('tool', { id: 'a', name: 'mcp__mandate__list_todos', input: {}, parent: null }, 1),
+  ev('tool_result', { id: 'a', ok: true, parent: null }, 2),
+  ev('tool', { id: 'b', name: 'mcp__mandate__move_todo', input: { title: 'Dry cleaning' }, parent: null }, 2),
+  ev('tool_result', { id: 'b', ok: false, parent: null }, 3),
   ev('tool', { id: 'g', name: 'Agent', input: { description: 'Check the calendar' }, parent: null }, 3),
-  ev('tool', { id: 'g1', name: 'mcp__mandate__calendar', input: {}, parent: 'g' }, 4), ev('tool_result', { id: 'g1', ok: true, parent: 'g' }, 5),
-  ev('tool', { id: 'g2', name: 'mcp__mandate__search', input: {}, parent: 'g' }, 5), ev('tool_result', { id: 'g2', ok: true, parent: 'g' }, 9),
+  ev('tool', { id: 'g1', name: 'mcp__mandate__calendar', input: {}, parent: 'g' }, 4),
+  ev('tool_result', { id: 'g1', ok: true, parent: 'g' }, 5),
+  ev('tool', { id: 'g2', name: 'mcp__mandate__search', input: {}, parent: 'g' }, 5),
+  ev('tool_result', { id: 'g2', ok: true, parent: 'g' }, 9),
   ev('tool_result', { id: 'g', ok: true, parent: null }, 44),
   ev('text', { delta: 'Thursday is free.', parent: null, message: 'm2' }),
-  ev('error', { code: 'limit', message: 'You\'ve reached your usage limit.' }),
+  ev('error', { code: 'limit', message: "You've reached your usage limit." }),
 ];
 const stepLabel = (name: string, input: { title?: string }) => (name === 'mcp__mandate__move_todo' ? `Moving “${input.title}”` : undefined);
 const CHATS: [string, object[], object][] = [
@@ -97,18 +108,27 @@ const CHATS: [string, object[], object][] = [
   ['a recorded turn, its run open', [{ ask: 'Move my errands', events: RECORDED }], { stepLabel, now: at(50), open: ['0.1'] }],
   ['the same turn mid-flight', [{ ask: 'Move my errands', events: RECORDED.slice(0, 9) }], { stepLabel, now: at(7) }],
   // An app's markdown hooks (#286): Peek Auras draws key combos as <kbd>; its link hook replaces the kit's; breaks stay.
-  ['a reply with the app\'s markdown hooks', [{ ask: 'Which keys?', events: [ev('text', { delta: 'Press Ctrl+Alt+P\nthen [the notes](notes.md)', parent: null, message: 'm1' }), ev('end', {})] }],
-    { markdown: { text: (html: string) => html.replace(/\b(?:Ctrl|Alt|Shift)\+[\w+]+/g, (k) => `<kbd>${k}</kbd>`), link: (href: string, html: string) => `<a class="doc" href="#${href}">${html}</a>` }, now: at(0) }],
+  [
+    "a reply with the app's markdown hooks",
+    [{ ask: 'Which keys?', events: [ev('text', { delta: 'Press Ctrl+Alt+P\nthen [the notes](notes.md)', parent: null, message: 'm1' }), ev('end', {})] }],
+    { markdown: { text: (html: string) => html.replace(/\b(?:Ctrl|Alt|Shift)\+[\w+]+/g, (k) => `<kbd>${k}</kbd>`), link: (href: string, html: string) => `<a class="doc" href="#${href}">${html}</a>` }, now: at(0) },
+  ],
 ];
 
 function current() {
   const exports: Record<string, string[]> = {};
   const css: Record<string, string[]> = {};
-  return Promise.all(modules.map(async (f) => {
-    exports[f] = Object.keys(await import(join(ui, f))).sort();
-  }).concat(SCRIPTS.map(async (f) => {
-    exports[f] = Object.keys(await import(join(pub, f))).sort();
-  }))).then(() => {
+  return Promise.all(
+    modules
+      .map(async (f) => {
+        exports[f] = Object.keys(await import(join(ui, f))).sort();
+      })
+      .concat(
+        SCRIPTS.map(async (f) => {
+          exports[f] = Object.keys(await import(join(pub, f))).sort();
+        }),
+      ),
+  ).then(() => {
     for (const f of files.filter((f) => /\.(js|css)$/.test(f))) {
       const c = classes(cssOf(f));
       if (c.length) css[f] = c;
@@ -138,9 +158,9 @@ function current() {
 const now = await current();
 if (process.env.UPDATE_UI_CONTRACT) writeFileSync(contractFile, `${JSON.stringify(now, null, 2)}\n`);
 const stored = JSON.parse(readFileSync(contractFile, 'utf8'));
-const why = 'Citadel UI\'s contract changed. If on purpose: UPDATE_UI_CONTRACT=1 node --test test/ui-contract.test.ts, commit test/ui-contract.json with it, and self-review rates it medium (additive only; a break ships as a new file)';
+const why = "Citadel UI's contract changed. If on purpose: UPDATE_UI_CONTRACT=1 node --test test/ui-contract.test.ts, commit test/ui-contract.json with it, and self-review rates it medium (additive only; a break ships as a new file)";
 
-test('each ui module\'s exports match its .d.ts', async () => {
+test("each ui module's exports match its .d.ts", async () => {
   for (const f of modules) {
     const dts = f.replace(/\.js$/, '.d.ts');
     assert.ok(files.includes(dts), `public/ui/${f} has types beside it (${dts})`);
@@ -204,10 +224,21 @@ test('every ui file keeps the rules: standalone, no inline styles, cui-* classes
 // Every rule whose size depends on box-sizing (a width or height with padding or a border) declares
 // border-box, the value such a reset sets anyway, itself or on a base class of the same element (.cui-btn under .cui-btn.cui-small).
 test('every ui part keeps its size under a box-sizing reset: sized in border-box, never content-box', () => {
-  const rules = files.flatMap((f) => [...cssOf(f).replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}@]+?)\{([^{}]*)\}/g)].map((m) => {
-    const decl = new Map(m[2].split(';').map((d) => d.split(/:(.*)/s).map((x) => x?.trim() ?? '')).filter((d) => d[0]) as [string, string][]);
-    return { f, sel: m[1].trim(), decl };
-  }));
+  const rules = files.flatMap((f) =>
+    [
+      ...cssOf(f)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .matchAll(/([^{}@]+?)\{([^{}]*)\}/g),
+    ].map((m) => {
+      const decl = new Map(
+        m[2]
+          .split(';')
+          .map((d) => d.split(/:(.*)/s).map((x) => x?.trim() ?? ''))
+          .filter((d) => d[0]) as [string, string][],
+      );
+      return { f, sel: m[1].trim(), decl };
+    }),
+  );
   const borderBox = new Set(rules.filter((r) => r.decl.get('box-sizing') === 'border-box').map((r) => r.sel));
   for (const { f, sel, decl } of rules) {
     assert.notEqual(decl.get('box-sizing'), 'content-box', `${f}: "${sel}" sizes in content-box, which a page's reset overturns`);

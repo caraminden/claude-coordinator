@@ -25,7 +25,10 @@ export async function procsNaming(dir: string, self = process.pid): Promise<numb
  */
 export async function killNaming(dir: string) {
   for (const pid of await procsNaming(dir)) {
-    const signal = await readFile(`/proc/${pid}/cmdline`, 'utf8').then((c) => (supervisorHome(c.split('\0')) ? 'SIGTERM' : 'SIGKILL'), () => 'SIGKILL' as const);
+    const signal = await readFile(`/proc/${pid}/cmdline`, 'utf8').then(
+      (c) => (supervisorHome(c.split('\0')) ? 'SIGTERM' : 'SIGKILL'),
+      () => 'SIGKILL' as const,
+    );
     try {
       process.kill(-pid, signal);
     } catch {

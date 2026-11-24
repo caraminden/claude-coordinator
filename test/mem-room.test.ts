@@ -10,8 +10,7 @@ import { scriptEnv } from './script-env.ts';
 const bin = join(import.meta.dirname, '..', 'tools', 'mem-room');
 const root = mkdtempSync(join(tmpdir(), 'mem-room-'));
 after(() => rmSync(root, { recursive: true, force: true }));
-const run = (args: string[], env: Record<string, string | undefined>) =>
-  spawnSync(bin, args, { encoding: 'utf8', env: scriptEnv({ CITADEL_MEM_ROOM_MB: undefined, CITADEL_MEMINFO: undefined, CITADEL_HEAVY_CGROUP: undefined, CITADEL_TEST_MB_PER_WORKER: undefined, CITADEL_MEM_CORES: '16', ...env }) });
+const run = (args: string[], env: Record<string, string | undefined>) => spawnSync(bin, args, { encoding: 'utf8', env: scriptEnv({ CITADEL_MEM_ROOM_MB: undefined, CITADEL_MEMINFO: undefined, CITADEL_HEAVY_CGROUP: undefined, CITADEL_TEST_MB_PER_WORKER: undefined, CITADEL_MEM_CORES: '16', ...env }) });
 const workers = (room: number, extra: Record<string, string> = {}) => Number(run(['workers'], { CITADEL_MEM_ROOM_MB: String(room), ...extra }).stdout);
 
 test('workers are the room over 350 MB, at least 1 and at most half the cores', () => {
@@ -25,7 +24,7 @@ test('workers are the room over 350 MB, at least 1 and at most half the cores', 
   assert.equal(workers(600, { CITADEL_TEST_MB_PER_WORKER: '100' }), 6);
 });
 
-test('room is the smaller of MemAvailable and the heavy slice\'s headroom below its limit', () => {
+test("room is the smaller of MemAvailable and the heavy slice's headroom below its limit", () => {
   const info = join(root, 'meminfo');
   writeFileSync(info, 'MemTotal: 30000000 kB\nMemAvailable:    8388608 kB\n'); // 8192 MB
   assert.equal(run(['mb'], { CITADEL_MEMINFO: info, CITADEL_HEAVY_CGROUP: join(root, 'none') }).stdout.trim(), '8192');

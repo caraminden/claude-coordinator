@@ -27,7 +27,18 @@ const stub = createServer((req: IncomingMessage, res: ServerResponse) => {
   seen.push({ path: req.url!, headers: req.headers, identity });
   const path = req.url!.split('?')[0];
   // Its install files (#987): the page and the manifest answer the check as a person; icons and the standard manifest need no one.
-  const manifest = { name: 'Stub', display: 'standalone', start_url: '/apps/stub/', scope: '/apps/stub/', id: '/apps/stub/', icons: [{ src: 'i192.png', sizes: '192x192', type: 'image/png' }, { src: 'i512.png', sizes: '512x512', type: 'image/png' }, { src: '/apps/stub/api/not-an-image', sizes: '1x1' }] };
+  const manifest = {
+    name: 'Stub',
+    display: 'standalone',
+    start_url: '/apps/stub/',
+    scope: '/apps/stub/',
+    id: '/apps/stub/',
+    icons: [
+      { src: 'i192.png', sizes: '192x192', type: 'image/png' },
+      { src: 'i512.png', sizes: '512x512', type: 'image/png' },
+      { src: '/apps/stub/api/not-an-image', sizes: '1x1' },
+    ],
+  };
   if (identity && path === '/apps/stub/') return void res.writeHead(200, { 'Content-Type': 'text/html' }).end('<link rel="manifest" href="web/m.json">');
   if (path === '/apps/stub/web/m.json' || path === '/apps/stub/manifest.webmanifest') return void res.writeHead(200).end(JSON.stringify(manifest));
   if (path.startsWith('/apps/stub/web/i')) return void res.writeHead(200, { 'Content-Type': 'image/png' }).end('png');
@@ -69,7 +80,13 @@ const lastSeen = () => seen.at(-1)!;
 const ends = async (reader: ReadableStreamDefaultReader<Uint8Array>, ms: number) => {
   const timeout = new Promise<'open'>((r) => setTimeout(() => r('open'), ms).unref());
   for (;;) {
-    const r = await Promise.race([reader.read().then((x) => x.done, () => true), timeout]);
+    const r = await Promise.race([
+      reader.read().then(
+        (x) => x.done,
+        () => true,
+      ),
+      timeout,
+    ]);
     if (r !== false) return r === true;
   }
 };
@@ -106,7 +123,7 @@ after(async () => {
   stub.close();
 });
 
-test('an enabled person reaches the contraption with a signed identity and none of the client\'s X-Citadel headers', async () => {
+test("an enabled person reaches the contraption with a signed identity and none of the client's X-Citadel headers", async () => {
   const res = await get('/apps/stub/hello?q=1', asCara({ ...forged, Cookie: `${srv.cookie}; stub=7` }));
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { path: '/apps/stub/hello?q=1', size: 0, sub: cara });
@@ -115,7 +132,7 @@ test('an enabled person reaches the contraption with a signed identity and none 
   assert.equal(s.identity?.login, 'cara');
   assert.notEqual(s.headers['x-citadel-identity'], forged['X-Citadel-Identity']);
   assert.deepEqual(citadelHeaders(s.headers), []);
-  assert.equal(s.headers.cookie, 'stub=7', 'Citadel\'s session cookie never reaches the contraption; its own does');
+  assert.equal(s.headers.cookie, 'stub=7', "Citadel's session cookie never reaches the contraption; its own does");
   // What a contraption does with a forged, foreign or expired header: refuse it.
   assert.equal(verifyIdentity(forged['X-Citadel-Identity'], pub, 'stub'), null);
   assert.equal(verifyIdentity(s.headers['x-citadel-identity'] as string, pub, 'other'), null);
@@ -130,7 +147,7 @@ test('no session: a page goes to the login and back, anything else is refused, a
   assert.equal(page.status, 302);
   assert.equal(page.headers.get('location'), `/c/?next=${encodeURIComponent('/apps/stub/notes/1?x=2')}`);
   assert.equal((await get('/apps/stub/api/x', forged)).status, 401);
-  assert.equal((await get('/apps/stub/api/x', { Authorization: `Bearer ${agentToken(srv.data, 1)}` })).status, 401, 'a minion\'s token is no person');
+  assert.equal((await get('/apps/stub/api/x', { Authorization: `Bearer ${agentToken(srv.data, 1)}` })).status, 401, "a minion's token is no person");
   assert.equal((await get('/apps/stub/linkage')).status, 401, 'only the open path itself and what is under it are open');
   assert.equal((await get('/apps/stub/link/..%2F..%2Fsecret')).status, 401);
   assert.equal(seen.length, n);
@@ -255,7 +272,7 @@ test('a refused upload is read to its end, so a client that reads after sending 
   assert.equal(await uploadThenRead(20 * 1024 * 1024 + 1, false), 'HTTP/1.1 413 Payload Too Large');
 });
 
-test('a contraption can set its own cookies, never Citadel\'s session', async () => {
+test("a contraption can set its own cookies, never Citadel's session", async () => {
   const res = await get('/apps/stub/cookie', asCara());
   assert.deepEqual(res.headers.getSetCookie(), ['stub=1; Path=/apps/stub/']);
 });
@@ -279,7 +296,7 @@ test('using an app or the API with a session over 7 days old renews it; logout s
   const [renewed, ...more] = sessionCookies(page);
   assert.equal(more.length, 0);
   assert.match(renewed ?? '', /^cc_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=15552000$/);
-  assert.ok(page.headers.getSetCookie().includes('stub=1; Path=/apps/stub/'), 'the contraption\'s own cookies still go through');
+  assert.ok(page.headers.getSetCookie().includes('stub=1; Path=/apps/stub/'), "the contraption's own cookies still go through");
   assert.equal(lastSeen().headers.cookie, undefined, 'the contraption never sees the session, old or new');
   const me = await get('/api/me', { Cookie: renewed.split(';')[0] });
   assert.equal((await me.json()).id, cara, 'the fresh cookie signs Cara in');
@@ -339,7 +356,10 @@ test('the rail and drawers: their scripts are served to contraptions, and lists 
   assert.equal((await get('/apps/_citadel/theme.css', { 'If-None-Match': etag })).status, 304);
   assert.equal((await get('/apps/_citadel/theme.css', { 'If-None-Match': `"stale", W/${etag}` })).status, 304);
   assert.equal((await get('/apps/_citadel/theme.css', { 'If-None-Match': '"stale"' })).status, 200);
-  assert.deepEqual((await (await get('/api/contraptions/mine', asCara())).json()).map((c: { name: string }) => c.name), ['stub']);
+  assert.deepEqual(
+    (await (await get('/api/contraptions/mine', asCara())).json()).map((c: { name: string }) => c.name),
+    ['stub'],
+  );
   // Nothing enabled: an empty list, so no rail.
   assert.deepEqual(await (await get('/api/contraptions/mine', { Cookie: olive.cookie })).json(), []);
 });
@@ -350,7 +370,10 @@ test('a 5xx answer counts in the error digest, grouped by path with ids out and 
   await srv.settled();
   const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
   try {
-    const rows = db.prepare("SELECT kind, key, count FROM contraption_errors WHERE kind = 'http'").all().map((r) => ({ ...r }));
+    const rows = db
+      .prepare("SELECT kind, key, count FROM contraption_errors WHERE kind = 'http'")
+      .all()
+      .map((r) => ({ ...r }));
     assert.deepEqual(rows, [{ kind: 'http', key: '500 GET /apps/stub/boom/#', count: 2 }]);
   } finally {
     db.close();
@@ -392,7 +415,7 @@ test('isOpenPath matches the path or under it, never an encoded way round it', (
   assert.equal(isOpenPath([], '/link'), false);
 });
 
-test('keys that don\'t open: a page gets Citadel\'s styled panel with a Settings link and a way back, anything else the plain line', async () => {
+test("keys that don't open: a page gets Citadel's styled panel with a Settings link and a way back, anything else the plain line", async () => {
   const made = await srv.call('/api/contraptions', { name: 'locked', title: 'Locked', port: stubPort });
   assert.equal(made.status, 201, JSON.stringify(made.data));
   assert.equal((await srv.call(`/api/contraptions/locked/people/${cara}`, { enabled: true }, 'PUT')).status, 200);

@@ -41,13 +41,15 @@ if (pooled) {
 /** @type {import('node:child_process').ChildProcessWithoutNullStreams} */
 let child;
 try {
-  child = /** @type {any} */ (spawn(spec.command, spec.args, {
-    cwd: spec.cwd,
-    env: spec.env,
-    // Its own process group, as before units: stopping the turn signals the group, tool subprocesses too.
-    detached: true,
-    stdio: ['pipe', openSync(file('stream.jsonl'), 'a'), openSync(file('stderr.log'), 'a')],
-  }));
+  child = /** @type {any} */ (
+    spawn(spec.command, spec.args, {
+      cwd: spec.cwd,
+      env: spec.env,
+      // Its own process group, as before units: stopping the turn signals the group, tool subprocesses too.
+      detached: true,
+      stdio: ['pipe', openSync(file('stream.jsonl'), 'a'), openSync(file('stderr.log'), 'a')],
+    })
+  );
 } catch (err) {
   // Some failures (E2BIG: arguments too long) throw here rather than emit 'error'; without exit.json
   // the runner would wait out its start-up grace and report the turn as killed.

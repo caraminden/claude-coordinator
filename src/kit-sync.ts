@@ -33,7 +33,11 @@ export const TRAILER = 'Kit-Sync';
 
 export function git(cwd: string, args: string[], opts: { input?: string; env?: Record<string, string> } = {}): string {
   return execFileSync('git', args, {
-    cwd, encoding: 'utf8', input: opts.input, maxBuffer: 64 << 20, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd,
+    encoding: 'utf8',
+    input: opts.input,
+    maxBuffer: 64 << 20,
+    stdio: ['pipe', 'pipe', 'pipe'],
     env: opts.env ? { ...process.env, ...opts.env } : process.env,
   });
 }
@@ -104,9 +108,17 @@ export function pickBase(kitDir: string, history: { commit: string; blob: string
   // The newest commit touching the file that carries one: an edit of the scheme's own after a sync keeps that base.
   // git reads trailers only from a message's last paragraph, so a `Kit-Sync:` line anywhere else (a hand sync that put
   // it above a blank line and Co-Authored-By) is found by a body grep instead.
-  const log = (args: string[]) => (tryGit(schemeDir, ['log', '-n', '500', ...args, rev, '--', file.path]) ?? '');
-  const sha = log([`--format=%(trailers:key=${TRAILER},valueonly,separator=%x20)`]).split('\n').map((l) => l.trim()).find(Boolean)?.split(/\s+/)[0]
-    ?? log(['-E', `--grep=^${TRAILER}:`, '--format=%B']).split('\n').map((l) => l.match(new RegExp(`^${TRAILER}:\\s*(\\S+)`))?.[1]).find(Boolean);
+  const log = (args: string[]) => tryGit(schemeDir, ['log', '-n', '500', ...args, rev, '--', file.path]) ?? '';
+  const sha =
+    log([`--format=%(trailers:key=${TRAILER},valueonly,separator=%x20)`])
+      .split('\n')
+      .map((l) => l.trim())
+      .find(Boolean)
+      ?.split(/\s+/)[0] ??
+    log(['-E', `--grep=^${TRAILER}:`, '--format=%B'])
+      .split('\n')
+      .map((l) => l.match(new RegExp(`^${TRAILER}:\\s*(\\S+)`))?.[1])
+      .find(Boolean);
   let trailer: Base | null = null;
   if (sha && /^[0-9a-f]{7,64}$/.test(sha)) {
     const blob = blobAt(kitDir, sha, file.template);
@@ -140,7 +152,12 @@ export function pickBase(kitDir: string, history: { commit: string; blob: string
 export function merge3(ours: string, base: string, theirs: string): { text: string; conflict: boolean } {
   const dir = mkdtempSync(join(tmpdir(), 'kit-sync-'));
   try {
-    for (const [name, text] of [['ours', ours], ['base', base], ['theirs', theirs]] as const) writeFileSync(join(dir, name), text);
+    for (const [name, text] of [
+      ['ours', ours],
+      ['base', base],
+      ['theirs', theirs],
+    ] as const)
+      writeFileSync(join(dir, name), text);
     try {
       return { text: execFileSync('git', ['merge-file', '-p', '-L', 'scheme', '-L', 'kit base', '-L', 'kit', 'ours', 'base', 'theirs'], { cwd: dir, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] }), conflict: false };
     } catch (err) {
@@ -177,7 +194,10 @@ export function dupCaseLabels(text: string): string[] {
   const dupes = new Set<string>();
   for (const line of text.split('\n')) {
     if (/^\s*#/.test(line)) continue;
-    if (/^\s*esac\b/.test(line)) { frames.pop(); continue; }
+    if (/^\s*esac\b/.test(line)) {
+      frames.pop();
+      continue;
+    }
     const top = frames[frames.length - 1];
     const arm = top && line.match(/^\s*\(?\s*([A-Za-z0-9_*?.\/\-"'$\[\]]+(?:\s*\|\s*[A-Za-z0-9_*?.\/\-"'$\[\]]+)*)\s*\)(?:\s|$)/);
     if (arm) {
@@ -224,21 +244,23 @@ export function planScheme(kitDir: string, kitRev: string, histories: Record<str
 export function byHandNote(kitDir: string, kit: string, clashes: FileSync[]): string {
   const diffs = clashes.map((f) => {
     const template = KIT_FILES.find((k) => k.path === f.path)!.template;
-    return f.baseCommit ? `git -C ${kitDir} diff ${short(f.baseCommit)} ${short(kit)} -- ${template}${f.base === 'closest' ? '   (no trailer: this base is Citadel\'s best guess of the version the copy came from)' : ''}` : `${f.path}: no base found, so use the sha in the last "${TRAILER}" trailer of this scheme's sync commit as the first sha of the same diff`;
+    return f.baseCommit
+      ? `git -C ${kitDir} diff ${short(f.baseCommit)} ${short(kit)} -- ${template}${f.base === 'closest' ? "   (no trailer: this base is Citadel's best guess of the version the copy came from)" : ''}`
+      : `${f.path}: no base found, so use the sha in the last "${TRAILER}" trailer of this scheme's sync commit as the first sha of the same diff`;
   });
   const dupes = clashes.filter((f) => f.dupes?.length).map((f) => `${f.path} (${f.dupes!.map((l) => `${l})`).join(', ')})`);
-  return `Kit sync (kit ${short(kit)}): ${list(clashes.map((f) => f.path))} clash with this scheme's own edits, so no sync was made here, not even of the files that merge cleanly. A minion has to take the kit's change by hand:\n`
-    + `1. See only the kit's change, not this scheme's own edits mixed in: diff the template between the last sync and the kit (the sha is this scheme's last "${TRAILER}" trailer; mind that more than the notices named may have changed):\n${diffs.join('\n')}\n`
-    + `2. Apply those hunks by hand, keeping this scheme's lines.${dupes.length ? ` These merged cleanly but left a case label twice in one case, and bash runs only the first arm: ${dupes.join('; ')}. Merge the arms into one.` : ''} Before shipping, check the result for a case label that appears twice in one case.\n`
-    + `3. A fresh worktree has no node_modules: run \`npm ci\` before the scheme's tests. \`tools/guard.sh --self-test\` takes about 2 minutes (plain, then nested): run it in the background on its own, not in one call with other checks.\n`
-    + `4. Put "${TRAILER}: ${kit}" in the commit's final trailer block (right above Co-Authored-By, no blank line between them) and touch every file named above, so the next sync merges from there.`;
+  return (
+    `Kit sync (kit ${short(kit)}): ${list(clashes.map((f) => f.path))} clash with this scheme's own edits, so no sync was made here, not even of the files that merge cleanly. A minion has to take the kit's change by hand:\n` +
+    `1. See only the kit's change, not this scheme's own edits mixed in: diff the template between the last sync and the kit (the sha is this scheme's last "${TRAILER}" trailer; mind that more than the notices named may have changed):\n${diffs.join('\n')}\n` +
+    `2. Apply those hunks by hand, keeping this scheme's lines.${dupes.length ? ` These merged cleanly but left a case label twice in one case, and bash runs only the first arm: ${dupes.join('; ')}. Merge the arms into one.` : ''} Before shipping, check the result for a case label that appears twice in one case.\n` +
+    `3. A fresh worktree has no node_modules: run \`npm ci\` before the scheme's tests. \`tools/guard.sh --self-test\` takes about 2 minutes (plain, then nested): run it in the background on its own, not in one call with other checks.\n` +
+    `4. Put "${TRAILER}: ${kit}" in the commit's final trailer block (right above Co-Authored-By, no blank line between them) and touch every file named above, so the next sync merges from there.`
+  );
 }
 
 /** The scheme repos a round looks at: <projects>/<n>/repo with git, leaving out any repo holding the templates (Citadel's). */
 export function schemeRepos(projectsDir: string, ids: number[]): { project: number; dir: string }[] {
-  return ids
-    .map((project) => ({ project, dir: join(projectsDir, String(project), 'repo') }))
-    .filter(({ dir }) => tryGit(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']) !== null && !blobAt(dir, 'HEAD', KIT_FILES[0].template));
+  return ids.map((project) => ({ project, dir: join(projectsDir, String(project), 'repo') })).filter(({ dir }) => tryGit(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']) !== null && !blobAt(dir, 'HEAD', KIT_FILES[0].template));
 }
 
 // ---- The rounds -------------------------------------------------------------------------------------------------
@@ -411,7 +433,10 @@ export class KitSync {
     const histories = Object.fromEntries(KIT_FILES.map((f) => [f.template, templateHistory(this.d.kitDir, kit, f.template)]));
     const names = new Map(this.d.projects().map((p) => [p.id, p.name]));
     const round: Round = { kit, blobs, at: Date.now(), schemes: [] };
-    for (const { project, dir } of schemeRepos(this.d.projectsDir, [...names.keys()].filter((id) => id !== this.d.home()))) {
+    for (const { project, dir } of schemeRepos(
+      this.d.projectsDir,
+      [...names.keys()].filter((id) => id !== this.d.home()),
+    )) {
       // Each scheme's plan is a few hundred ms of git; between schemes the server answers again.
       await new Promise((ok) => setImmediate(ok));
       const name = names.get(project)!;
@@ -452,9 +477,13 @@ export class KitSync {
       sync.state = 'checking';
       const guard = merged.some((f) => f.path === KIT_FILES[1].path);
       this.d.jobs.start({
-        dir: this.jobDir(project, 'check'), cwd: this.worktree(project), argv: ['bash', '-c', CHECK_SCRIPT],
-        env: { ...this.d.env(null), KIT_SYNC_GUARD: guard ? '1' : '0' }, unit: `citadel-kit-sync-check-${project}-${Date.now()}`,
-        description: `Kit sync check for ${name}`, ticketId: 0,
+        dir: this.jobDir(project, 'check'),
+        cwd: this.worktree(project),
+        argv: ['bash', '-c', CHECK_SCRIPT],
+        env: { ...this.d.env(null), KIT_SYNC_GUARD: guard ? '1' : '0' },
+        unit: `citadel-kit-sync-check-${project}-${Date.now()}`,
+        description: `Kit sync check for ${name}`,
+        ticketId: 0,
       });
     }
     return round;
@@ -510,7 +539,11 @@ export class KitSync {
         x.state = job.code === 0 ? 'green' : 'red';
         if (x.state === 'red') {
           const chat = await this.d.chat(x.project);
-          if (chat) this.d.mail(chat, `Kit sync (kit ${short(round.kit)}): the sync of ${list(x.files)} fails this scheme's check (exit ${job.code}), so it won't ship. The branch is ${branchOf(round)} in ${this.worktree(x.project)}. A minion can fix it there and ship it; the next kit change replaces it. Its last lines:\n\`\`\`\n${tail}\n\`\`\``);
+          if (chat)
+            this.d.mail(
+              chat,
+              `Kit sync (kit ${short(round.kit)}): the sync of ${list(x.files)} fails this scheme's check (exit ${job.code}), so it won't ship. The branch is ${branchOf(round)} in ${this.worktree(x.project)}. A minion can fix it there and ship it; the next kit change replaces it. Its last lines:\n\`\`\`\n${tail}\n\`\`\``,
+            );
         }
         continue;
       }
@@ -558,14 +591,23 @@ export class KitSync {
       if (!chat) return;
       // Its own card's go couldn't push either: the card goes up again for a member whose login can.
       if (x.card) this.d.note(chat, `Kit sync: ${x.by!.name}'s GitHub login can't push to this repo either, so nothing shipped. The card is up again for a member whose login can.`);
-      else this.d.mail(chat, `Kit sync (kit ${short(round.kit)}): the sync of ${list(x.files)} is ready and its check passed. Citadel's go (${x.by!.name}) couldn't push to this repo, so it waits on this scheme's own card: any member can ship it, and the push goes out as them. Nothing for you to do but point a member at it.`);
+      else
+        this.d.mail(
+          chat,
+          `Kit sync (kit ${short(round.kit)}): the sync of ${list(x.files)} is ready and its check passed. Citadel's go (${x.by!.name}) couldn't push to this repo, so it waits on this scheme's own card: any member can ship it, and the push goes out as them. Nothing for you to do but point a member at it.`,
+        );
       x.card = { ticket: chat, question: this.d.postCard(chat, { questions: [schemeQuestion(round, x)], kind: 'merge', kitSync: round.kit }) };
       return;
     }
     x.state = 'shipping';
     this.d.jobs.start({
-      dir: this.jobDir(x.project, 'ship'), cwd: this.worktree(x.project), argv: [join(this.worktree(x.project), 'tools/land.sh')],
-      env, unit: `citadel-kit-sync-ship-${x.project}-${Date.now()}`, description: `Kit sync ship for ${x.name}`, ticketId: 0,
+      dir: this.jobDir(x.project, 'ship'),
+      cwd: this.worktree(x.project),
+      argv: [join(this.worktree(x.project), 'tools/land.sh')],
+      env,
+      unit: `citadel-kit-sync-ship-${x.project}-${Date.now()}`,
+      description: `Kit sync ship for ${x.name}`,
+      ticketId: 0,
     });
   }
 
@@ -578,7 +620,7 @@ export class KitSync {
       const s = this.d.load();
       const round = s?.round;
       const isHome = round?.card?.ticket === card.ticket && round.card.question === card.question;
-      const mine = isHome ? round!.schemes.filter((x) => x.state === 'green') : round?.schemes.filter((x) => x.card?.question === card.question && x.state === 'elsewhere') ?? [];
+      const mine = isHome ? round!.schemes.filter((x) => x.state === 'green') : (round?.schemes.filter((x) => x.card?.question === card.question && x.state === 'elsewhere') ?? []);
       if (!round || !mine.length) throw new Error('This kit sync is no longer waiting: a newer kit change replaced it, or it already shipped');
       for (const x of mine) {
         if (choice === SHIP) Object.assign(x, { state: 'queued', by });
@@ -602,7 +644,7 @@ function list(items: string[]): string {
 // Where each scheme stands, as the card groups them (people read it: no paths or hashes).
 const STANDING: [SchemeState, string][] = [
   ['green', 'Ready'],
-  ['red', "Check failed (its Taskmaster has the output)"],
+  ['red', 'Check failed (its Taskmaster has the output)'],
   ['conflict', "Clashes with the scheme's own edits (its Taskmaster has a note)"],
   ['pr', 'Ships by pull request, so not synced here'],
   ['failed', 'The sync could not be made (see the server log)'],
@@ -611,7 +653,8 @@ const STANDING: [SchemeState, string][] = [
 /** Citadel's card: every scheme that is behind and where it stands. */
 export function cardQuestion(round: Round) {
   const groups = STANDING.map(([state, label]) => [label, round.schemes.filter((x) => x.state === state).map((x) => x.name)] as const)
-    .filter(([, names]) => names.length).map(([label, names]) => `${label}: ${names.join(', ')}.`);
+    .filter(([, names]) => names.length)
+    .map(([label, names]) => `${label}: ${names.join(', ')}.`);
   const green = round.schemes.filter((x) => x.state === 'green').length;
   return {
     header: 'Kit sync',

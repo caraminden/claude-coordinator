@@ -15,7 +15,9 @@ const root = tmp.dir;
 
 // Each turn runs the calls in plan.json, then logs what came back.
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync, existsSync, readFileSync } = require('node:fs');
 require('node:readline').createInterface({ input: process.stdin }).once('line', async (prompt) => {
   const planFile = ${JSON.stringify(join(root, 'plan.json'))};
@@ -33,7 +35,8 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 const LIST = [{ name: 'today', description: "Today's items", input_schema: { type: 'object', properties: { day: { type: 'string' } } } }];
@@ -65,10 +68,11 @@ let mandateKey = '';
 let cara = 0;
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
-const idle = () => until('the turn to end', async () => {
-  const { ticket } = (await srv.call(`/api/tickets/${minion.id}`)).data;
-  return ticket.status !== 'running' && ticket.queued === 0;
-});
+const idle = () =>
+  until('the turn to end', async () => {
+    const { ticket } = (await srv.call(`/api/tickets/${minion.id}`)).data;
+    return ticket.status !== 'running' && ticket.queued === 0;
+  });
 /** Runs `plan` in the turn `start` begins; returns what the calls answered. */
 async function turn(plan: object[], start: () => Promise<unknown> = () => srv.call(`/api/tickets/${minion.id}/messages`, { text: 'what is on my list?' })) {
   writeFileSync(join(root, 'plan.json'), JSON.stringify(plan));
@@ -121,12 +125,7 @@ test("a turn answering Cara's typed message lists and runs Mandate's read comman
 });
 
 test("the app's refusals pass back; a big answer is cut at 64 KB; an app without reads answers 404", async () => {
-  const out = await turn([
-    { app: 'mandate', body: { command: 'tick', args: { key: 'k' } } },
-    { app: 'mandate', body: { command: 'nope' } },
-    { app: 'mandate', body: { command: 'big' } },
-    { app: 'peek' },
-  ]);
+  const out = await turn([{ app: 'mandate', body: { command: 'tick', args: { key: 'k' } } }, { app: 'mandate', body: { command: 'nope' } }, { app: 'mandate', body: { command: 'big' } }, { app: 'peek' }]);
   assert.deepEqual(out[0].data, { status: 403, answer: { error: 'not_read_only' } });
   assert.deepEqual(out[1].data, { status: 404, answer: { error: 'unknown_command' } });
   assert.equal(out[2].data.truncated, 64 * 1024);
@@ -136,25 +135,24 @@ test("the app's refusals pass back; a big answer is cut at 64 KB; an app without
 
 test("Citadel refuses before calling: a bad command or args, an app she hasn't enabled, one that isn't there", async () => {
   const n = seen.length;
-  const out = await turn([
-    { app: 'mandate', body: { command: '../items' } },
-    { app: 'mandate', body: { command: 'today', args: ['x'] } },
-    { app: 'mandate', body: { args: { day: 'x' } } },
-    { app: 'shut' },
-    { app: 'nothing-here' },
-    { app: 'Bad%20Name' },
-  ]);
-  assert.deepEqual(out.map((o: any) => o.status), [400, 400, 400, 403, 404, 400]);
+  const out = await turn([{ app: 'mandate', body: { command: '../items' } }, { app: 'mandate', body: { command: 'today', args: ['x'] } }, { app: 'mandate', body: { args: { day: 'x' } } }, { app: 'shut' }, { app: 'nothing-here' }, { app: 'Bad%20Name' }]);
+  assert.deepEqual(
+    out.map((o: any) => o.status),
+    [400, 400, 400, 403, 404, 400],
+  );
   assert.equal(out[3].data.error, "Cara doesn't have Shut enabled");
   assert.equal(seen.length, n, 'nothing reached Mandate');
 });
 
 test("a turn no one typed for (a [Mandate] post) can't read anyone's data", async () => {
   const n = seen.length;
-  const out = await turn([{ app: 'mandate' }], () => fetch(`${srv.base}/api/contraptions/relay/scheme-${project.id}/mandate-hook`, {
-    method: 'POST', body: JSON.stringify({ key: `${minion.number}.k`, event: 'ticked', at: '2026-11-04T08:00:00Z' }),
-    headers: { Authorization: `Bearer ${mandateKey}`, 'X-Citadel-Person': String(cara), 'Content-Type': 'application/json' },
-  }));
+  const out = await turn([{ app: 'mandate' }], () =>
+    fetch(`${srv.base}/api/contraptions/relay/scheme-${project.id}/mandate-hook`, {
+      method: 'POST',
+      body: JSON.stringify({ key: `${minion.number}.k`, event: 'ticked', at: '2026-11-04T08:00:00Z' }),
+      headers: { Authorization: `Bearer ${mandateKey}`, 'X-Citadel-Person': String(cara), 'Content-Type': 'application/json' },
+    }),
+  );
   assert.equal(out[0].status, 403);
   assert.match(out[0].data.error, /Only a turn answering a person's own typed message may read their data in mandate/);
   assert.equal(seen.length, n);

@@ -140,12 +140,13 @@ export function outcome(end: TurnEnd): Outcome {
   if (stopped) return { kind: 'stopped', followUps: [], ...base };
   const code = exit?.code ?? null;
   // Citadel only signals claude on a stop, so any other signal (143 is claude's own exit on SIGTERM) came from outside.
-  const killed = exit && (exit.signal || code === 143)
-    ? `Killed by ${exit.signal ?? 'SIGTERM (exit 143)'} from outside Citadel.\nNobody pressed Stop and turns have no time limit, so most likely ${end.ran.unit ? '' : 'the server restarted (this turn ran without a unit of its own) or '}one of the turn's own commands (a kill or pkill) hit claude's process.`
-    // Its wrapper went too, with no record of how: nobody pressed Stop, so it failed (#468 S03-4).
-    : !exit
-      ? `The turn's process was killed before it finished, with no record of how.\nNobody pressed Stop, so most likely its ${end.ran.container ? 'container' : end.ran.unit ? 'unit' : 'process group'} was killed from outside Citadel (out of memory, or stopped).`
-      : null;
+  const killed =
+    exit && (exit.signal || code === 143)
+      ? `Killed by ${exit.signal ?? 'SIGTERM (exit 143)'} from outside Citadel.\nNobody pressed Stop and turns have no time limit, so most likely ${end.ran.unit ? '' : 'the server restarted (this turn ran without a unit of its own) or '}one of the turn's own commands (a kill or pkill) hit claude's process.`
+      : // Its wrapper went too, with no record of how: nobody pressed Stop, so it failed (#468 S03-4).
+        !exit
+        ? `The turn's process was killed before it finished, with no record of how.\nNobody pressed Stop, so most likely its ${end.ran.container ? 'container' : end.ran.unit ? 'unit' : 'process group'} was killed from outside Citadel (out of memory, or stopped).`
+        : null;
   const sawResult = !!turn?.result;
   const resultError = turn?.result?.error ? turn.result.text : null;
   if (!killed && sawResult && code === 0 && !turn?.result?.error) {

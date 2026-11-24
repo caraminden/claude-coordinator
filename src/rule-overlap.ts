@@ -7,9 +7,25 @@ import { githubHref, norm } from './decisions.ts';
 import { PHRASE_HITS, RULE_HOMES, RUN_WORDS, type RuleHome } from './rule-homes.ts';
 
 /** One text to search: a file or a Settings text, whether it is code (each line its own paragraph), and its link (a GitHub file's gets the line). */
-export interface Source { label: string; text: string; code?: boolean; href?: string | null }
-export interface Para { text: string; line: number }
-export interface Copy { rule: string; title: string; label: string; line: number; phrases: string[]; run: string | null; excerpt: string }
+export interface Source {
+  label: string;
+  text: string;
+  code?: boolean;
+  href?: string | null;
+}
+export interface Para {
+  text: string;
+  line: number;
+}
+export interface Copy {
+  rule: string;
+  title: string;
+  label: string;
+  line: number;
+  phrases: string[];
+  run: string | null;
+  excerpt: string;
+}
 
 const LIST = /^\s{0,3}(?:[-*+]|\d+[.)])\s/;
 
@@ -18,7 +34,10 @@ export function paragraphs(text: string, code = false): Para[] {
   const out: Para[] = [];
   let cur: string[] = [];
   let start = 0;
-  const flush = () => { if (cur.length) out.push({ text: cur.join(' '), line: start }); cur = []; };
+  const flush = () => {
+    if (cur.length) out.push({ text: cur.join(' '), line: start });
+    cur = [];
+  };
   text.split('\n').forEach((l, i) => {
     // A comment in code speaks to maintainers, not agents.
     if (code && /^\s*(?:\/\/|\/?\*)/.test(l)) return;
@@ -108,7 +127,14 @@ export function findCopies(sources: Source[], homes: Map<string, string | null>,
 
 /** A paragraph elsewhere that speaks to the same thing as an edit's new words. */
 /** `rule`: the registered rule's id, on a registered-rule hit (whose excerpt is the new words, not the rule's home). */
-export interface Overlap { label: string; href: string | null; line: number; excerpt: string; why: string; rule?: string }
+export interface Overlap {
+  label: string;
+  href: string | null;
+  line: number;
+  excerpt: string;
+  why: string;
+  rule?: string;
+}
 
 /** Paragraphs of `text` that are new against `before` (an edit's added words). */
 export function added(before: string, text: string): Para[] {
@@ -124,7 +150,13 @@ export function added(before: string, text: string): Para[] {
 export function overlapsFor(news: Para[], sources: Source[], inHome: (rule: RuleHome, p: Para) => boolean, rules = RULE_HOMES): Overlap[] {
   const out: Overlap[] = [];
   const seen = new Set<string>();
-  const push = (o: Overlap) => { const k = `${o.label}|${o.line}|${o.why}`; if (!seen.has(k)) { seen.add(k); out.push(o); } };
+  const push = (o: Overlap) => {
+    const k = `${o.label}|${o.line}|${o.why}`;
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(o);
+    }
+  };
   const others = news.length ? sources.flatMap((s) => paragraphs(s.text, s.code).map((q) => ({ s, q, qn: norm(q.text), qr: runs(q.text) }))) : [];
   for (const p of news) {
     for (const rule of rules) {
@@ -136,7 +168,7 @@ export function overlapsFor(news: Para[], sources: Source[], inHome: (rule: Rule
     for (const { s, q, qn, qr } of others) {
       if (!qn || qn === pn) continue;
       const run = sharedRun(q.text, pr);
-      if (run) push({ label: s.label, href: s.href && /^https:/.test(s.href) ? `${s.href}?plain=1#L${q.line}` : s.href ?? null, line: q.line, excerpt: excerpt(q.text), why: `shares "${run}"` });
+      if (run) push({ label: s.label, href: s.href && /^https:/.test(s.href) ? `${s.href}?plain=1#L${q.line}` : (s.href ?? null), line: q.line, excerpt: excerpt(q.text), why: `shares "${run}"` });
     }
   }
   return out;
@@ -149,19 +181,36 @@ export function overlapsFor(news: Para[], sources: Source[], inHome: (rule: Rule
 export function mdFiles(repo: string, dir: string, depth = 6, re = /\.md$/i): string[] {
   if (depth < 0) return [];
   let names: string[];
-  try { names = readdirSync(join(repo, dir)); } catch { return []; }
+  try {
+    names = readdirSync(join(repo, dir));
+  } catch {
+    return [];
+  }
   return names.sort().flatMap((n) => {
     const rel = dir ? `${dir}/${n}` : n;
     let st;
     // Never through a link: a linked file or folder could pull lines from outside the repo (as src/memory-files.ts refuses).
-    try { st = lstatSync(join(repo, rel)); } catch { return []; }
+    try {
+      st = lstatSync(join(repo, rel));
+    } catch {
+      return [];
+    }
     return st.isDirectory() ? mdFiles(repo, rel, depth - 1, re) : re.test(n) ? [rel] : [];
   });
 }
 
-export const readIn = (root: string, f: string): string | null => { try { return lstatSync(join(root, f)).isFile() ? readFileSync(join(root, f), 'utf8') : null; } catch { return null; } };
+export const readIn = (root: string, f: string): string | null => {
+  try {
+    return lstatSync(join(root, f)).isFile() ? readFileSync(join(root, f), 'utf8') : null;
+  } catch {
+    return null;
+  }
+};
 const fileSources = (root: string, files: string[], href: (f: string) => string | null): Source[] =>
-  files.flatMap((f) => { const text = readIn(root, f); return text === null ? [] : [{ label: f, text, code: !f.endsWith('.md'), href: href(f) }]; });
+  files.flatMap((f) => {
+    const text = readIn(root, f);
+    return text === null ? [] : [{ label: f, text, code: !f.endsWith('.md'), href: href(f) }];
+  });
 
 /** Citadel's own files whose words reach every scheme's agents: the prompt, the tool descriptions, the tripwire line, the model table and the kit. */
 const CITADEL_FILES = ['src/prompts.ts', 'src/mcp.ts', 'src/tripwire-blocks.ts', 'public/model-table.js'];
@@ -207,16 +256,23 @@ export function inSettingsHome(scope: 'citadel' | 'scheme', text: string) {
 export function schemeRules(repo: string | null): RuleHome[] {
   if (!repo) return [];
   let list: unknown;
-  try { list = JSON.parse(readIn(repo, '.claude/rule-homes.json') ?? '[]'); } catch { return []; }
+  try {
+    list = JSON.parse(readIn(repo, '.claude/rule-homes.json') ?? '[]');
+  } catch {
+    return [];
+  }
   if (!Array.isArray(list)) return [];
   const text = (v: unknown) => typeof v === 'string' && v.trim() !== '';
   return list.flatMap((r: any): RuleHome[] => {
     if (!r || !text(r.id) || !text(r.title) || !text(r.pointer) || !Array.isArray(r.phrases)) return [];
     const h = r.home;
-    const home = h?.kind === 'scheme' && text(h.section) ? { kind: 'scheme' as const, section: h.section }
-      // Inside the repo only: no absolute path and no `..` (readIn already refuses a link).
-      : h?.kind === 'repo' && text(h.file) && !isAbsolute(h.file) && !h.file.split(/[\\/]/).includes('..') ? { kind: 'repo' as const, file: h.file, ...(text(h.section) ? { section: h.section } : text(h.anchor) ? { anchor: h.anchor } : {}) }
-      : null;
+    const home =
+      h?.kind === 'scheme' && text(h.section)
+        ? { kind: 'scheme' as const, section: h.section }
+        : // Inside the repo only: no absolute path and no `..` (readIn already refuses a link).
+          h?.kind === 'repo' && text(h.file) && !isAbsolute(h.file) && !h.file.split(/[\\/]/).includes('..')
+          ? { kind: 'repo' as const, file: h.file, ...(text(h.section) ? { section: h.section } : text(h.anchor) ? { anchor: h.anchor } : {}) }
+          : null;
     const phrases = r.phrases.filter((p: unknown) => typeof p === 'string' && norm(p) !== '').slice(0, 40);
     return home && phrases.length ? [{ id: r.id, title: r.title, home, pointer: r.pointer, phrases }] : [];
   });

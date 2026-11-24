@@ -17,7 +17,11 @@ export function repoSlug(repoUrl: string | null): string | null {
   return m ? `${m[1]}/${m[2]}`.toLowerCase() : null;
 }
 
-export interface Owner { id: number; number: number; title: string }
+export interface Owner {
+  id: number;
+  number: number;
+  title: string;
+}
 
 /** PR number → the minion whose branch it was opened from. */
 export function owners(prs: { number: number; headRefName: string }[], tickets: Ticket[]): Record<number, Owner> {
@@ -44,7 +48,14 @@ async function list<T>(kind: 'pr' | 'issue', slug: string, fields: string): Prom
 }
 
 /** `prs`: the PRs a minion owns; `pulls` and `issues`: every PR and issue number in the repo. */
-export interface RepoPrs { projectId: number; scheme: string; repo: string; prs: Record<number, Owner>; pulls: number[]; issues: number[] }
+export interface RepoPrs {
+  projectId: number;
+  scheme: string;
+  repo: string;
+  prs: Record<number, Owner>;
+  pulls: number[];
+  issues: number[];
+}
 
 type Listed = { prs: { number: number; headRefName: string }[] | null; issues: { number: number }[] | null };
 const cache = new Map<string, { at: number; lists: Promise<Listed> }>();
@@ -57,8 +68,7 @@ export async function prOwners(projects: Project[], ticketsOf: (projectId: numbe
     if (!repo) continue;
     let hit = cache.get(repo);
     if (!hit || Date.now() - hit.at > TTL_MS) {
-      const lists = Promise.all([list<{ number: number; headRefName: string }>('pr', repo, 'number,headRefName'), list<{ number: number }>('issue', repo, 'number')])
-        .then(([prs, issues]) => ({ prs, issues }));
+      const lists = Promise.all([list<{ number: number; headRefName: string }>('pr', repo, 'number,headRefName'), list<{ number: number }>('issue', repo, 'number')]).then(([prs, issues]) => ({ prs, issues }));
       cache.set(repo, (hit = { at: Date.now(), lists }));
     }
     const { prs, issues } = await hit.lists;

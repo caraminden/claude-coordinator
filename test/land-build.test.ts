@@ -311,7 +311,7 @@ test('--build refuses a build that carries a commit that came off main, and land
   assert.equal(has(r, 'refs/heads/build/3'), false);
 });
 
-test("the guard lets through a plain branch whose only shared commit with a build came off main, and the land leaves it behind", () => {
+test('the guard lets through a plain branch whose only shared commit with a build came off main, and the land leaves it behind', () => {
   const r = setup();
   build(r);
   const bwt = worktree(r, 'ticket/9-build');

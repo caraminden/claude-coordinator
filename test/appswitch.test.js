@@ -16,7 +16,13 @@ test('order: where you are first, then most recently used, then never used in ra
 test('remember moves an app to the front without repeats', () => {
   assert.deepEqual(remember(['a', 'b', 'c'], 'c'), ['c', 'a', 'b']);
   assert.deepEqual(remember([], ''), ['']);
-  assert.equal(remember(Array.from({ length: 40 }, (_, i) => String(i)), 'x').length, 30);
+  assert.equal(
+    remember(
+      Array.from({ length: 40 }, (_, i) => String(i)),
+      'x',
+    ).length,
+    30,
+  );
 });
 
 test('one quick Alt+` flips to the last app', () => {
@@ -81,5 +87,6 @@ test('Alt+` opens only with somewhere to go, and not with Ctrl (AltGr), Meta (Cm
     [key('Backquote', { isComposing: true }), ['a', 'b']],
     [key('Tab', { key: 'Tab', altKey: false }), ['a', 'b']],
     [{ ...key('Backquote'), type: 'keyup' }, ['a', 'b']],
-  ]) assert.deepEqual(switchKey(null, e, order), { state: null, act: null, consume: false });
+  ])
+    assert.deepEqual(switchKey(null, e, order), { state: null, act: null, consume: false });
 });

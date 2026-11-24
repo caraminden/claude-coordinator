@@ -19,7 +19,9 @@ async function run(label, saved) {
   const app = spawn(electron, [`--user-data-dir=${prof}`, `--remote-debugging-port=${dbg}`, path.join(repo, 'desktop')], { env: { ...process.env, CITADEL_URL: 'http://127.0.0.1:9/c/' }, stdio: 'ignore' });
   let page;
   for (let i = 0; i < 40 && !page; i++) {
-    try { page = (await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json()).find((t) => t.type === 'page'); } catch {}
+    try {
+      page = (await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json()).find((t) => t.type === 'page');
+    } catch {}
     if (!page) await sleep(500);
   }
   await sleep(2000);

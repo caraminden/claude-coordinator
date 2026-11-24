@@ -105,12 +105,6 @@ function render(block: Block, indent: string, aliases: boolean) {
 /** theme.css, from style.css's text. */
 export function themeCss(styleCss: string): string {
   citadelPalette(styleCss); // refuses a style.css without its colours
-  const blocks = rootBlocks(styleCss).map(({ media, block }, i) => (media
-    ? `@media ${media} {\n  :root {\n${render(block, '    ', /prefers-color-scheme/.test(media))}\n  }\n}`
-    : `:root {\n${render(block, '  ', i === 0)}\n}`));
-  return [
-    "/* Citadel's colours and design tokens, from its own style.css. What each is for: kit/skills/contraption-ui/SKILL.md and docs/design-system/. */",
-    ...blocks,
-    '',
-  ].join('\n');
+  const blocks = rootBlocks(styleCss).map(({ media, block }, i) => (media ? `@media ${media} {\n  :root {\n${render(block, '    ', /prefers-color-scheme/.test(media))}\n  }\n}` : `:root {\n${render(block, '  ', i === 0)}\n}`));
+  return ["/* Citadel's colours and design tokens, from its own style.css. What each is for: kit/skills/contraption-ui/SKILL.md and docs/design-system/. */", ...blocks, ''].join('\n');
 }

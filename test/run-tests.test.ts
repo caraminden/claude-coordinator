@@ -109,9 +109,7 @@ async function again(dir: string, extra: Record<string, string> = {}, logName = 
   const shared = join(dir, 'shared');
   const log = join(dir, logName);
   const { code, stderr } = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
-    const p = execFile('bash', [join(dir, 'tools', 'run-tests.sh'), log], { cwd: dir, encoding: 'utf8', timeout: 90_000, env: { ...env, COORDINATOR_SHARED_DIR: shared, ...extra } }, (err, _out, se) =>
-      resolve({ code: err ? ((err as any).code ?? null) : 0, stderr: se }),
-    );
+    const p = execFile('bash', [join(dir, 'tools', 'run-tests.sh'), log], { cwd: dir, encoding: 'utf8', timeout: 90_000, env: { ...env, COORDINATOR_SHARED_DIR: shared, ...extra } }, (err, _out, se) => resolve({ code: err ? ((err as any).code ?? null) : 0, stderr: se }));
     scratch.track(p).stdin?.end();
   });
   const day = new Date().toISOString().slice(0, 10);
@@ -141,7 +139,7 @@ test('a file that fails in the full run and passes alone is labelled a likely fl
 });
 
 // The drill's F7 (#553): the full run and its reruns were one phase, about 930 s at worst against the waiters' 900 s stall.
-test('the reruns are a phase of their own in the landing\'s place in line, so the waiters see the line move', async () => {
+test("the reruns are a phase of their own in the landing's place in line, so the waiters see the line move", async () => {
   const ticket = join(root, 'ticket');
   writeFileSync(ticket, `${process.pid} 1\n1700000000\nticket/1-x\nrunning the tests since 10:00\n`);
   const r = await run(['ok.test.mjs', 'once.test.mjs'], { DEPLOY_QUEUE_TICKET: ticket });
@@ -198,7 +196,7 @@ test('a file killed from outside when rerun alone is a lost rerun with no label,
 
 // #999: one test that hangs (a client waiting on a tool server that died) held the land line for the whole 10 minutes
 // and read as CI trouble. Each test now has its own limit, so the hang fails in a minute, by name.
-test('a test that hangs fails at its own time limit, by name, long before the whole run\'s limit', async () => {
+test("a test that hangs fails at its own time limit, by name, long before the whole run's limit", async () => {
   const r = await run(['ok.test.mjs', 'hang.test.mjs'], { CITADEL_TEST_TIMEOUT: '2', DEPLOY_TEST_TIMEOUT: '80' });
   assert.equal(r.code, 1, r.log);
   assert.match(r.log, /✖ hangs \(\d+(\.\d+)?ms\)[\s\S]*test timed out after 2000ms/);
@@ -294,7 +292,7 @@ test("a rerun alone is cut at CI's deadline, well before its own limit, and coun
 // (creation + 330 s), so every failed file was "not rerun: CI's answer is due" and a flake-only red counted as real.
 // In CI the reruns are a step of their own (DEPLOY_RERUN_LATER, then DEPLOY_RERUN_FROM) with a fresh deadline, which
 // land.sh sees and waits for.
-test("in CI the full run leaves its failed files to the next step and reruns none, whatever the old deadline says", async () => {
+test('in CI the full run leaves its failed files to the next step and reruns none, whatever the old deadline says', async () => {
   const r = await run(['once.test.mjs', 'ok.test.mjs'], { DEPLOY_RERUN_LATER: 'reruns', DEPLOY_RERUN_DEADLINE: inSeconds(-1) });
   assert.equal(r.code, 1, r.log);
   assert.match(r.log, /run-tests: 1 test file\(s\) failed; CI reruns each alone in its next step/);
@@ -316,7 +314,11 @@ test("CI's rerun step reruns the failed files alone with its own fresh deadline:
 test("the reruns keep counts of their own beside the log: done, of how many, the file rerunning, the full run's failed files, and rerun", async () => {
   const want = 'reruns.progress:0\n2\ntest/rerun-counts.test.mjs\ntest/always.test.mjs\ttest/rerun-counts.test.mjs\nrerun\n';
   const r = await run(['ok.test.mjs', 'always.test.mjs', 'rerun-counts.test.mjs'], { DEPLOY_RERUN_LATER: 'reruns' });
-  const order = readFileSync(join(r.dir, 'reruns'), 'utf8').split('\n').slice(1).filter(Boolean).map((l) => l.split('\t')[0]);
+  const order = readFileSync(join(r.dir, 'reruns'), 'utf8')
+    .split('\n')
+    .slice(1)
+    .filter(Boolean)
+    .map((l) => l.split('\t')[0]);
   const at = order.indexOf('test/rerun-counts.test.mjs');
   const r2 = await again(r.dir, { DEPLOY_RERUN_FROM: 'reruns' }, 'reruns.log');
   assert.equal(r2.code, 1, r2.log);
@@ -336,11 +338,14 @@ test("CI's rerun step still counts a file that fails again alone as a real red",
   assert.match(r2.log, /test\/always\.test\.mjs: failed again alone: a real failure/);
 });
 
-test("in CI a green full run, or one with too many failures, leaves no reruns for the next step", async () => {
+test('in CI a green full run, or one with too many failures, leaves no reruns for the next step', async () => {
   const g = await run(['ok.test.mjs'], { DEPLOY_RERUN_LATER: 'reruns' });
   assert.equal(g.code, 0, g.log);
   assert.equal(existsSync(join(g.dir, 'reruns')), false);
-  const many = await run([1, 2, 3, 4, 5, 6].map((i) => `always${i}.test.mjs`), { DEPLOY_RERUN_LATER: 'reruns' });
+  const many = await run(
+    [1, 2, 3, 4, 5, 6].map((i) => `always${i}.test.mjs`),
+    { DEPLOY_RERUN_LATER: 'reruns' },
+  );
   assert.equal(many.code, 1, many.log);
   assert.equal(existsSync(join(many.dir, 'reruns')), false);
   const none = await again(many.dir, { DEPLOY_RERUN_FROM: 'reruns' }, 'reruns.log');
@@ -365,8 +370,12 @@ test('without a shared folder the flake is still labelled in the output, and not
 });
 
 function peakOverlap(marks: string) {
-  let now = 0, peak = 0;
-  for (const c of marks) { now += c === '+' ? 1 : -1; peak = Math.max(peak, now); }
+  let now = 0,
+    peak = 0;
+  for (const c of marks) {
+    now += c === '+' ? 1 : -1;
+    peak = Math.max(peak, now);
+  }
   return peak;
 }
 
@@ -466,7 +475,11 @@ for (const [what, list] of [
   ['a list that ends in a file that is not a test (#1477)', `${TIER_LIST}.github/workflows/heavy.yml\n`],
 ] as const) {
   test(`a change that touches only product files leaves out the pipeline test files, and says so (#581): ${what}`, async () => {
-    const r = await run(['pipe.test.mjs', 'product.test.mjs'], {}, tierRepo((dir) => writeFileSync(join(dir, 'public', 'app.js'), 'v2\n'), 'main', list));
+    const r = await run(
+      ['pipe.test.mjs', 'product.test.mjs'],
+      {},
+      tierRepo((dir) => writeFileSync(join(dir, 'public', 'app.js'), 'v2\n'), 'main', list),
+    );
     assert.equal(r.code, 0, r.log);
     assert.deepEqual(ran(r.dir), ['product']);
     assert.match(r.log.split('\n')[0], /^run-tests: tier product \(the 1 pipeline test files left out\): this change touches nothing in tools\/pipeline-files\.txt$/);
@@ -539,11 +552,15 @@ function kitRepo(change?: (dir: string) => void) {
 const FOUR = ['pipe.test.mjs', 'product.test.mjs', 'kitname.test.mjs', 'viasrc.test.mjs'];
 
 test('a kit-only change runs only the test files that read the kit, and says how many (#753)', async () => {
-  const r = await run(FOUR, {}, kitRepo((dir) => {
-    writeFileSync(join(dir, 'kit', 'skills', 'x', 'SKILL.md'), 'v2\n');
-    mkdirSync(join(dir, 'docs'));
-    writeFileSync(join(dir, 'docs', 'note.md'), 'a light file beside it\n');
-  }));
+  const r = await run(
+    FOUR,
+    {},
+    kitRepo((dir) => {
+      writeFileSync(join(dir, 'kit', 'skills', 'x', 'SKILL.md'), 'v2\n');
+      mkdirSync(join(dir, 'docs'));
+      writeFileSync(join(dir, 'docs', 'note.md'), 'a light file beside it\n');
+    }),
+  );
   assert.equal(r.code, 0, r.log);
   assert.deepEqual(ranKit(r.dir), ['kitname', 'viasrc']);
   assert.match(r.log, /^run-tests: kit lane: only the 2 test file\(s\) that read the kit \(tools\/kit-tests\.ts\)$/m);
@@ -551,7 +568,10 @@ test('a kit-only change runs only the test files that read the kit, and says how
 
 test('a kit change with anything outside the kit lane runs them all (#753)', async () => {
   for (const change of [
-    (dir: string) => { writeFileSync(join(dir, 'kit', 'skills', 'x', 'SKILL.md'), 'v2\n'); writeFileSync(join(dir, 'public', 'app.js'), 'v2\n'); },
+    (dir: string) => {
+      writeFileSync(join(dir, 'kit', 'skills', 'x', 'SKILL.md'), 'v2\n');
+      writeFileSync(join(dir, 'public', 'app.js'), 'v2\n');
+    },
     (dir: string) => writeFileSync(join(dir, 'kit', 'templates', 'land.sh'), 'v2\n'), // a pipeline file, and full in the map
   ]) {
     const r = await run(FOUR, {}, kitRepo(change));

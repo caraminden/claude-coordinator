@@ -49,7 +49,12 @@ const project = store.createProject('Test', null);
 
 /** A runner as a freshly started server would make it. */
 function server() {
-  const r = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 'secret' }), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({ COORDINATOR_TOKEN: 'secret' }),
+    fake,
+  );
   r.resumeGapMs = 10;
   r.pollMs = 10;
   return r;
@@ -62,8 +67,16 @@ function newTicket() {
 }
 
 const texts = (id: number) =>
-  store.listEvents(id).filter((e) => e.kind === 'claude').flatMap((e) => JSON.parse(e.data).message?.content ?? []).map((b: any) => b.text);
-const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'claude')
+    .flatMap((e) => JSON.parse(e.data).message?.content ?? [])
+    .map((b: any) => b.text);
+const notes = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
 const turnDir = (r: Runner, id: number): string => (r as any).turns.get(id).dir;
 
 /** Start a turn and let it get going: its first line handled, so the old server has seen part of the stream. */
@@ -130,7 +143,10 @@ test('a card waiting through a restart still waits in the re-attached turn, and 
   assert.equal(next.approvals.decide(id, tripwire, false, 'Cara').state, 'denied');
   writeFileSync(release, '');
   await until('!next.isRunning(id)', () => !next.isRunning(id));
-  const results = store.listEvents(id).filter((e) => e.kind === 'approval_result').map((e) => JSON.parse(e.data).state);
+  const results = store
+    .listEvents(id)
+    .filter((e) => e.kind === 'approval_result')
+    .map((e) => JSON.parse(e.data).state);
   assert.deepEqual(results, ['allowed', 'denied'], 'no expiry from the restart');
 });
 

@@ -15,7 +15,9 @@ const skip = found.error ? 'no pwsh on PATH' : false;
 /** Runs `body` in pwsh after the script's own functions, with [CitadelCiJob]::SetRate recording "<job>=<rate>". */
 function pwsh(body: string, dir: string) {
   const file = join(dir, 'run.ps1');
-  writeFileSync(file, `$ErrorActionPreference = 'Stop'
+  writeFileSync(
+    file,
+    `$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3
 Add-Type 'public static class CitadelCiJob { public static System.Collections.Generic.List<string> Calls = new System.Collections.Generic.List<string>(); public static void SetRate(System.IntPtr job, int r) { Calls.Add(job.ToInt64() + "=" + r); } }'
 $t = $null; $e = $null
@@ -23,7 +25,8 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile('${script}', [r
 foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) { . ([scriptblock]::Create($f.Extent.Text)) }
 $CpuPercent = 75; $SqueezePercent = 30; $said = ''; $identity = @{}
 $shipsFile = '${join(dir, 'ships.json')}'
-${body}`);
+${body}`,
+  );
   const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', file], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   return JSON.parse(r.stdout.trim().split('\n').at(-1)!);
@@ -32,7 +35,8 @@ ${body}`);
 test('while a ship runs, every other slot shares 30% of the PC among those running a job; after, the shared cap alone', { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'keep-runners-'));
   try {
-    const out = pwsh(`
+    const out = pwsh(
+      `
 $slots = @{
   'C:\\a' = @{ Key = 'caraminden/claude-coordinator|desktop-g248ij8'; Job = [IntPtr]1; Rate = -1; Busy = $true; Inside = $true }
   'C:\\b' = @{ Key = 'caraminden/peek-auras|desktop-g248ij8'; Job = [IntPtr]2; Rate = -1; Busy = $true; Inside = $true }
@@ -50,7 +54,9 @@ $again = @([CitadelCiJob]::Calls)
 $ships = $null
 Set-SlotRate
 $lifted = @([CitadelCiJob]::Calls | Sort-Object)
-@{ squeezed = $squeezed; again = $again; lifted = $lifted } | ConvertTo-Json -Compress`, dir);
+@{ squeezed = $squeezed; again = $again; lifted = $lifted } | ConvertTo-Json -Compress`,
+      dir,
+    );
     // Three others run a job (b, c, e), so 10% of the PC each: inside the 75% shared job that is 10/75 of its cap
     // (1333 hundredths); e hangs in another job, so its 10% is of the PC (1000). The ship's slot has no cap of its own.
     assert.deepEqual(out.squeezed, ['1=0', '2=1333', '3=1333', '4=1333', '5=1000']);
@@ -66,7 +72,8 @@ test('ships.json counts until its expiry, and a missing, broken or expired file 
   const dir = mkdtempSync(join(tmpdir(), 'keep-runners-'));
   try {
     const later = Date.now() + 60_000;
-    const out = pwsh(`
+    const out = pwsh(
+      `
 $none = @(Read-Ship).Count
 Set-Content -LiteralPath $shipsFile -Value '{"until": ${later}, "ships": [{"repo": "CaraMinden/Peek-Auras", "runner": "DESKTOP-G248IJ8"}, {"repo": "caraminden/peek-auras", "runner": "desktop-g248ij8"}]}'
 $live = @(Read-Ship)
@@ -76,14 +83,16 @@ Set-Content -LiteralPath $shipsFile -Value '{"until": '
 $broken = @(Read-Ship).Count
 Set-Content -LiteralPath $shipsFile -Value '{"until": ${later}, "ships": []}'
 $empty = @(Read-Ship).Count
-@{ none = $none; live = $live; expired = $expired; broken = $broken; empty = $empty } | ConvertTo-Json -Compress`, dir);
+@{ none = $none; live = $live; expired = $expired; broken = $broken; empty = $empty } | ConvertTo-Json -Compress`,
+      dir,
+    );
     assert.deepEqual(out, { none: 0, live: ['caraminden/peek-auras|desktop-g248ij8'], expired: 0, broken: 0, empty: 0 });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('a runner is named from its .runner file (BOM and all) as Citadel names a ship\'s runner; an unconfigured one is not', { skip }, () => {
+test("a runner is named from its .runner file (BOM and all) as Citadel names a ship's runner; an unconfigured one is not", { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'keep-runners-'));
   try {
     writeFileSync(join(dir, '.runner'), '\uFEFF{"agentName": "DESKTOP-G248IJ8-2", "gitHubUrl": "https://github.com/CaraMinden/Peek-Auras", "workFolder": "_work"}');

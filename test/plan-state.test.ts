@@ -16,9 +16,17 @@ const root = mkdtempSync(join(tmpdir(), 'plan-state-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
-const restart = () => new Runner(store, () => {}, () => ({}), '/bin/false');
+const restart = () =>
+  new Runner(
+    store,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
 const newTicket = () => store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
-const feed = (runner: Runner, id: number, lines: object[]) => { for (const l of lines) (runner as any).handleLine(id, JSON.stringify(l), () => {}); };
+const feed = (runner: Runner, id: number, lines: object[]) => {
+  for (const l of lines) (runner as any).handleLine(id, JSON.stringify(l), () => {});
+};
 
 let n = 0;
 const init = { type: 'system', subtype: 'init', session_id: 's' };
@@ -31,16 +39,42 @@ const create = (taskId: number, subject: string) => {
   return [call('TaskCreate', { subject, activeForm: `Doing ${subject}` }, id), answer(id, `Task #${taskId} created successfully: ${subject}`)];
 };
 const update = (taskId: number, input: object) => call('TaskUpdate', { taskId: String(taskId), ...input });
-const work = () => { const c = call('Bash', { command: 'ls', description: 'List' }); return [c, answer(c.message.content[0].id, 'ok')]; };
+const work = () => {
+  const c = call('Bash', { command: 'ls', description: 'List' });
+  return [c, answer(c.message.content[0].id, 'ok')];
+};
 
 /** Three turns: a plan left half done over a turn's end, finished in the next, then a TodoWrite plan left mid-turn. */
 const HISTORY: object[] = [
-  init, ...create(1, 'Look'), ...create(2, 'Build'), ...create(3, 'Drop me'), update(1, { status: 'in_progress' }), ...work(), say('Looking.'),
-  update(1, { status: 'completed', metadata: { outcome: 'Found it' } }), update(3, { status: 'deleted' }), update(2, { status: 'in_progress' }), ...work(), result,
-  init, ...work(), update(2, { status: 'completed', subject: 'Built' }), say('Done.'), result,
-  init, call('TodoWrite', { todos: [{ content: 'A', activeForm: 'Doing A', status: 'completed' }, { content: 'B', activeForm: 'Doing B', status: 'in_progress' }] }), ...work(),
+  init,
+  ...create(1, 'Look'),
+  ...create(2, 'Build'),
+  ...create(3, 'Drop me'),
+  update(1, { status: 'in_progress' }),
+  ...work(),
+  say('Looking.'),
+  update(1, { status: 'completed', metadata: { outcome: 'Found it' } }),
+  update(3, { status: 'deleted' }),
+  update(2, { status: 'in_progress' }),
+  ...work(),
+  result,
+  init,
+  ...work(),
+  update(2, { status: 'completed', subject: 'Built' }),
+  say('Done.'),
+  result,
+  init,
+  call('TodoWrite', {
+    todos: [
+      { content: 'A', activeForm: 'Doing A', status: 'completed' },
+      { content: 'B', activeForm: 'Doing B', status: 'in_progress' },
+    ],
+  }),
+  ...work(),
   // A task whose result hasn't come back when the server restarts.
-  call('TaskCreate', { subject: 'Pending' }, 'late'), answer('late', 'Task #9 created successfully: Pending'), say('Still going.'),
+  call('TaskCreate', { subject: 'Pending' }, 'late'),
+  answer('late', 'Task #9 created successfully: Pending'),
+  say('Still going.'),
 ];
 
 const plain = (p: any) => JSON.parse(JSON.stringify({ ...p, pendingCreates: [...p.pendingCreates] }));
@@ -72,7 +106,11 @@ test('a restarted server reads only the events since the last turn ended', () =>
   const lastResult = store.listEvents(t.id).at(-1)!.id;
   const read: number[] = [];
   const planEvents = store.planEvents.bind(store);
-  store.planEvents = (...args: Parameters<Store['planEvents']>) => { const rows = planEvents(...args); read.push(...rows.map((r) => r.id)); return rows; };
+  store.planEvents = (...args: Parameters<Store['planEvents']>) => {
+    const rows = planEvents(...args);
+    read.push(...rows.map((r) => r.id));
+    return rows;
+  };
   try {
     const idle = restart();
     assert.deepEqual(idle.view(store.getTicket(t.id)!).steps, { done: 1, total: 2 });
@@ -134,7 +172,11 @@ test("a running minion's row gets its step's start and guess for the list's bar 
   assert.deepEqual(live.view(store.getTicket(t.id)!).steps, { done: 0, total: 2 });
   // Once steps have taken half their guesses (#571), the row's bar is scaled as the chat head's is.
   const done = newTicket();
-  store.addStepTimes(done.id, Array.from({ length: 30 }, (_, i) => ({ id: String(i), subject: 's', estimate: 10, startedAt: i, finishedAt: i, work: 5 * 60_000, model: null })), null);
+  store.addStepTimes(
+    done.id,
+    Array.from({ length: 30 }, (_, i) => ({ id: String(i), subject: 's', estimate: 10, startedAt: i, finishedAt: i, work: 5 * 60_000, model: null })),
+    null,
+  );
   store.updateTicket(t.id, { status: 'running' });
   const row = restart().view(store.getTicket(t.id)!);
   assert.equal(row.step_ratio, 0.5);

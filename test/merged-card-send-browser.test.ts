@@ -62,22 +62,26 @@ const open = async (opts: { width?: number; height?: number; route?: string } = 
 };
 
 // The minion's chat, and the Taskmaster's chat as a link with ?e= opens it (where Cara's card was).
-for (const [where, route] of [['a minion chat', '/t/7'], ["the Taskmaster's chat", '?e=1']]) test(`a merged 8-question card with pick-any questions sends all eight answers in ${where}`, { skip }, async () => {
-  const page = await open({ route });
-  assert.equal(await page.eval(`${sendBtn}.disabled`), true, 'nothing picked yet');
-  const progress = `document.querySelector('.qcard .progress').textContent`;
-  assert.equal(await page.eval(progress), '0 of 8 answered', 'a person sees why Send waits');
-  for (let n = 1; n <= 8; n++) {
-    await page.eval(`document.querySelector('.qcard [data-q="${n - 1}"] .opt[data-label="B${n}"]').click()`);
-    assert.equal(await page.eval(`${sendBtn}.disabled`), n < 8, `after ${n} picks`);
-    assert.equal(await page.eval(progress), n < 8 ? `${n} of 8 answered` : 'All answered');
-  }
-  await page.eval(`document.querySelector('.qcard [data-q="1"] .opt[data-label="C2"]').click()`);
-  await page.eval(`${sendBtn}.click()`);
-  const sent = (await page.eval('sent')) as any[];
-  assert.equal(sent[0].answers.length, 8);
-  assert.deepEqual(sent[0].answers[1], { selected: ['B2', 'C2'], other: '' });
-});
+for (const [where, route] of [
+  ['a minion chat', '/t/7'],
+  ["the Taskmaster's chat", '?e=1'],
+])
+  test(`a merged 8-question card with pick-any questions sends all eight answers in ${where}`, { skip }, async () => {
+    const page = await open({ route });
+    assert.equal(await page.eval(`${sendBtn}.disabled`), true, 'nothing picked yet');
+    const progress = `document.querySelector('.qcard .progress').textContent`;
+    assert.equal(await page.eval(progress), '0 of 8 answered', 'a person sees why Send waits');
+    for (let n = 1; n <= 8; n++) {
+      await page.eval(`document.querySelector('.qcard [data-q="${n - 1}"] .opt[data-label="B${n}"]').click()`);
+      assert.equal(await page.eval(`${sendBtn}.disabled`), n < 8, `after ${n} picks`);
+      assert.equal(await page.eval(progress), n < 8 ? `${n} of 8 answered` : 'All answered');
+    }
+    await page.eval(`document.querySelector('.qcard [data-q="1"] .opt[data-label="C2"]').click()`);
+    await page.eval(`${sendBtn}.click()`);
+    const sent = (await page.eval('sent')) as any[];
+    assert.equal(sent[0].answers.length, 8);
+    assert.deepEqual(sent[0].answers[1], { selected: ['B2', 'C2'], other: '' });
+  });
 
 test('the progress line sits centred on the footer row, level with the buttons', { skip }, async () => {
   const page = await open();

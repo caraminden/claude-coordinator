@@ -46,15 +46,32 @@ before(async () => {
 });
 after(() => tmp.teardown());
 
-test('picking an option brings the card\'s Send above the sticky composer on a phone', { skip }, async () => {
+test("picking an option brings the card's Send above the sticky composer on a phone", { skip }, async () => {
   const text = await new Promise<string>((ok) => {
-    const p = tmp.spawn(process.execPath, [tool, '--url', url, '--anon', '--out', tmp.dir, '--widths', '390',
-      '--step', 'wait .qcard .opt',
-      '--step', 'eval document.querySelector(".qcard").scrollIntoView({ block: "end" })',
-      '--step', 'eval document.querySelector(".qcard .opt").click()',
-      '--step', 'sleep 200',
-      '--step', 'eval const f = () => { const b = document.querySelector(".qcard .row button:not(.add-image)"); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return { enabled: !b.disabled, onTop: e === b }; }; return f()',
-    ], { env: { ...process.env, DEV_URL: '', DEV_COOKIE: '' } });
+    const p = tmp.spawn(
+      process.execPath,
+      [
+        tool,
+        '--url',
+        url,
+        '--anon',
+        '--out',
+        tmp.dir,
+        '--widths',
+        '390',
+        '--step',
+        'wait .qcard .opt',
+        '--step',
+        'eval document.querySelector(".qcard").scrollIntoView({ block: "end" })',
+        '--step',
+        'eval document.querySelector(".qcard .opt").click()',
+        '--step',
+        'sleep 200',
+        '--step',
+        'eval const f = () => { const b = document.querySelector(".qcard .row button:not(.add-image)"); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return { enabled: !b.disabled, onTop: e === b }; }; return f()',
+      ],
+      { env: { ...process.env, DEV_URL: '', DEV_COOKIE: '' } },
+    );
     let t = '';
     p.stdout.on('data', (d) => (t += d));
     p.stderr.on('data', (d) => (t += d));

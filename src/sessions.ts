@@ -61,7 +61,10 @@ export function mergeMemory(oldDir: string, memoryDir: string): number {
   }
   const target = join(memoryDir, 'MEMORY.md');
   const have = existsSync(target) ? readFileSync(target, 'utf8') : '';
-  const lines = index.split('\n').filter((l) => l.trim()).map((l) => renamed.reduce((s, [a, b]) => s.replaceAll(`](${a})`, `](${b})`), l));
+  const lines = index
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => renamed.reduce((s, [a, b]) => s.replaceAll(`](${a})`, `](${b})`), l));
   const missing = lines.filter((l) => !have.includes(l));
   if (missing.length) writeFileSync(target, `${have}${have && !have.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
   renameSync(oldDir, `${oldDir}-merged-${Date.now()}`);
@@ -121,7 +124,10 @@ async function listFiles(configDir: string, root: string): Promise<string[] | nu
  */
 export async function saveSession(store: Store, ticket: Ticket, project: Project, configDir: string, prunable: Set<string> | null) {
   const { ticketRoots, projectRoots } = scope(ticket, project);
-  for (const [roots, ticketId] of [[ticketRoots, ticket.id], [projectRoots, null]] as const) {
+  for (const [roots, ticketId] of [
+    [ticketRoots, ticket.id],
+    [projectRoots, null],
+  ] as const) {
     const seen = new Set<string>();
     const unread: string[] = [];
     const puts: Put[] = [];
@@ -233,13 +239,16 @@ type Job = { kind: 'restore'; configDir: string; paths: string[] } | { kind: 'pu
 
 /** Run a job on a worker thread of its own, with its own connection to state.db. */
 function sessionWorker(statePath: string, job: Job): Promise<unknown> {
-  return track(job.kind === 'put' ? 'session save threads' : 'session restore threads', new Promise((resolve, reject) => {
-    const worker = new Worker(new URL(import.meta.url), { workerData: { sessionJob: { statePath, job } } });
-    worker.once('message', resolve);
-    worker.once('error', reject);
-    // After a message this is a no-op; without one the worker died before it finished.
-    worker.once('exit', (code) => reject(new Error(`the session worker stopped (exit code ${code}) before it finished`)));
-  }));
+  return track(
+    job.kind === 'put' ? 'session save threads' : 'session restore threads',
+    new Promise((resolve, reject) => {
+      const worker = new Worker(new URL(import.meta.url), { workerData: { sessionJob: { statePath, job } } });
+      worker.once('message', resolve);
+      worker.once('error', reject);
+      // After a message this is a no-op; without one the worker died before it finished.
+      worker.once('exit', (code) => reject(new Error(`the session worker stopped (exit code ${code}) before it finished`)));
+    }),
+  );
 }
 
 if (!isMainThread && workerData?.sessionJob) {

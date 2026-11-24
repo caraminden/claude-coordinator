@@ -73,7 +73,7 @@ test('stop_hook_active lets the turn end, and so does a reply with no text', asy
   assert.equal(await check({}, cfg), null);
 });
 
-test('one nudge per prompt, counted by its own marker, not by another hook\'s stop_hook_active (#243)', async () => {
+test("one nudge per prompt, counted by its own marker, not by another hook's stop_hook_active (#243)", async () => {
   const nudged = join(root, 'turn-243', 'link-check-nudged');
   mkdirSync(join(root, 'turn-243'));
   const once = { ...cfg, nudged };
@@ -97,7 +97,10 @@ test('one nudge per prompt, counted by its own marker, not by another hook\'s st
 });
 
 test('the hook script prints a block decision, or nothing', () => {
-  const [node, script, config] = linkCheckHooks(cfg.roots).Stop[0].hooks[0].command.split(' ').slice(1).map((s: string) => s.slice(1, -1));
+  const [node, script, config] = linkCheckHooks(cfg.roots)
+    .Stop[0].hooks[0].command.split(' ')
+    .slice(1)
+    .map((s: string) => s.slice(1, -1));
   assert.equal(script, LINK_CHECK);
   assert.deepEqual(JSON.parse(config), cfg);
   const run = (input: object | string, c = config) => spawnSync(node, [script, c], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8' });
@@ -127,7 +130,11 @@ test('a linked page with its own clipboard or send button is sent back; a kit pa
   writeFileSync(join(mine, 'answers.js'), 'navigator.clipboard.writeText(t)');
   writeFileSync(join(mine, 'split.html'), '<script src="answers.js"></script>');
   assert.equal((await reply(`[takes](${mine}/split.html)`))?.decision, 'block');
-  for (const [name, js] of [['clip', 'navigator.clipboard.writeText(t)'], ['exec', "document.execCommand('copy')"], ['send', 'await window.citadel.send(picksText())']]) {
+  for (const [name, js] of [
+    ['clip', 'navigator.clipboard.writeText(t)'],
+    ['exec', "document.execCommand('copy')"],
+    ['send', 'await window.citadel.send(picksText())'],
+  ]) {
     writeFileSync(join(mine, `${name}.html`), `<button id="send">Send</button><script>${js}</script>`);
     const v = await reply(`[takes](${mine}/${name}.html) and [plan](docs/plan.md)`);
     assert.equal(v?.decision, 'block', name);
@@ -148,7 +155,7 @@ test('a linked page that copies with no click or key press to start it is named 
   assert.equal(v?.decision, 'block');
   assert.ok(v.reason.includes(`- ${join(mine, 'onload.html')}: copies with no click or key press to start it`), v.reason);
   assert.ok(v.reason.includes(`- ${join(mine, 'clicked.html')}\n`), 'a copy in a click handler is only the usual nudge');
-  assert.ok(v.reason.includes(`- ${join(mine, 'split-click.html')}\n`), "a click in the page and the copy in its script count together");
+  assert.ok(v.reason.includes(`- ${join(mine, 'split-click.html')}\n`), 'a click in the page and the copy in its script count together');
   assert.match(v.reason, /ClickFix/);
 });
 
@@ -193,7 +200,7 @@ test('a reply that asks a choice in prose with no card this turn is sent back; a
   assert.equal(await ask('Should I ship it?', tool('mcp__thread__ask_question'), result), null);
   assert.equal(await ask('Should I ship it?', tool('mcp__thread__propose_plan'), result), null);
   const meta = line({ type: 'user', isMeta: true, message: { role: 'user', content: 'Base directory for this skill' } });
-  assert.equal(await ask('Should I ship it?', tool('mcp__thread__ask_question'), meta), null, 'a skill\'s meta entry is no new prompt');
+  assert.equal(await ask('Should I ship it?', tool('mcp__thread__ask_question'), meta), null, "a skill's meta entry is no new prompt");
   // A card from an earlier turn does not.
   const earlier = [tool('mcp__thread__ask_question'), result, user];
   assert.equal((await ask('Should I ship it?', ...earlier))?.decision, 'block');
@@ -231,7 +238,7 @@ test('a reply that says the minion is closing is sent back unless close_self was
   assert.equal(v?.decision, 'block');
   assert.match(v.reason, /says this minion is closing/);
   assert.match(v.reason, /close_self/);
-  assert.equal((await ask('Merged.\n\nI\'ll close myself now.', use('mcp__thread__close_self', 'c1'), res('c1', true)))?.decision, 'block', 'a refused close_self');
+  assert.equal((await ask("Merged.\n\nI'll close myself now.", use('mcp__thread__close_self', 'c1'), res('c1', true)))?.decision, 'block', 'a refused close_self');
   assert.equal(await ask('Shipped.\n\nClosing this minion.', ...ok), null);
   assert.equal(await ask('Shipped. Closing this minion.\n<!-- status: {"state":null,"note":"merged"} -->', ...ok), null);
   // The status line applied after close_self cancels it (#18): the reply's words are false.
@@ -268,6 +275,14 @@ test('a reply that says something waits on a person with no card is sent back; a
   assert.equal(await send('Cara answered; it was waiting on you until now.'), null);
   // A card posted this turn covers it.
   const transcript_path = join(root, 't-1507.jsonl');
-  writeFileSync(transcript_path, [{ type: 'user', message: { role: 'user', content: 'hi' } }, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'mcp__thread__ask_question', input: {} }] } }].map((l) => JSON.stringify(l)).join('\n'));
+  writeFileSync(
+    transcript_path,
+    [
+      { type: 'user', message: { role: 'user', content: 'hi' } },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'mcp__thread__ask_question', input: {} }] } },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join('\n'),
+  );
   assert.equal(await check({ last_assistant_message: step, transcript_path }, cfg), null);
 });

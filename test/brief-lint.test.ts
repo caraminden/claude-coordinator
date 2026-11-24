@@ -56,10 +56,12 @@ test('create_ticket from the Taskmaster gets the warning in its notes; a person 
   try {
     const { data: p } = await s.call('/api/projects', { name: 'Scheme' });
     const tm = (await s.call(`/api/projects/${p.id}`)).data.coordinator;
-    const asTaskmaster = (body: object) => fetch(`${s.base}/api/projects/${p.id}/tickets`, {
-      method: 'POST', headers: { Authorization: `Bearer ${agentToken(s.data, tm.id)}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-5-5', effort: 'medium', properties: { type: 'feature' }, ...body }),
-    }).then(async (r) => ({ status: r.status, data: await r.json() }));
+    const asTaskmaster = (body: object) =>
+      fetch(`${s.base}/api/projects/${p.id}/tickets`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${agentToken(s.data, tm.id)}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-5-5', effort: 'medium', properties: { type: 'feature' }, ...body }),
+      }).then(async (r) => ({ status: r.status, data: await r.json() }));
 
     const bare = await asTaskmaster({ title: 'Retry', message: 'Add a retry button to failed uploads.' });
     assert.equal(bare.status, 201, JSON.stringify(bare.data));
@@ -68,18 +70,29 @@ test('create_ticket from the Taskmaster gets the warning in its notes; a person 
 
     const good = await asTaskmaster({ title: 'Retry two', message: complete });
     assert.equal(good.status, 201);
-    assert.deepEqual(good.data.notes.filter((n: string) => n.startsWith('Brief check')), []);
+    assert.deepEqual(
+      good.data.notes.filter((n: string) => n.startsWith('Brief check')),
+      [],
+    );
 
     // A handoff in the scheme's shared folder, named by a pointer brief, counts as the brief.
     const shared = join(s.data, 'projects', String(p.id), 'shared', 'project', 'handoffs');
     mkdirSync(shared, { recursive: true });
     writeFileSync(join(shared, 'handoff-retry.md'), complete);
     const pointer = await asTaskmaster({ title: 'Retry three', message: `Start from the handoff ${join(shared, 'handoff-retry.md')}.` });
-    assert.deepEqual(pointer.data.notes.filter((n: string) => n.startsWith('Brief check')), [], pointer.data.notes.join('\n'));
+    assert.deepEqual(
+      pointer.data.notes.filter((n: string) => n.startsWith('Brief check')),
+      [],
+      pointer.data.notes.join('\n'),
+    );
 
     const own = await s.call(`/api/projects/${p.id}/tickets`, { title: 'Mine', message: 'add a retry button' });
     assert.equal(own.status, 201);
-    assert.deepEqual((own.data.notes ?? []).filter((n: string) => n.startsWith('Brief check')), [], 'a person typing their own ask is already their words');
+    assert.deepEqual(
+      (own.data.notes ?? []).filter((n: string) => n.startsWith('Brief check')),
+      [],
+      'a person typing their own ask is already their words',
+    );
   } finally {
     await s.stop();
   }

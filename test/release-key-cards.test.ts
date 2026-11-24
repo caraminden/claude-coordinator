@@ -17,15 +17,20 @@ const home = join(root, 'home');
 const keyDir = join(home, '.config/citadel-android');
 const jdkBin = join(home, '.local/share/mise/installs/java/temurin-21/bin');
 mkdirSync(jdkBin, { recursive: true });
-writeFileSync(join(jdkBin, 'keytool'), `#!${process.execPath}
+writeFileSync(
+  join(jdkBin, 'keytool'),
+  `#!${process.execPath}
 const a = process.argv.slice(2);
 require('node:fs').appendFileSync(${JSON.stringify(join(root, 'keytool.jsonl'))}, JSON.stringify(a) + '\\n');
 require('node:fs').writeFileSync(a[a.indexOf('-keystore') + 1], 'jks');
-`);
+`,
+);
 chmodSync(join(jdkBin, 'keytool'), 0o755);
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -33,16 +38,19 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let base = '';
 const cookies: Record<string, string> = {};
 let srv: Booted;
-const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) =>
-  ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
+const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
-const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
+const live = () =>
+  turns()
+    .filter((t) => t.token.startsWith(`${ticket.id}.`))
+    .at(-1).token;
 const idle = () => until('the turn to end', async () => (await call('Cara', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
 const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
 const ask = (contraption: string) => call('minion', `/api/tickets/${ticket.id}/release-key`, { method: 'POST', body: { contraption } });
@@ -69,7 +77,8 @@ before(async () => {
   await call('Cara', `/api/projects/${project.id}/members`, { method: 'POST', body: { person: made.person.id } });
   const store = new Store(join(srv.data, 'coordinator.db'));
   let n = 0;
-  const app = (name: string, home_scheme: number) => store.createContraption({ name, title: name.toUpperCase(), icon: null, port: 39000 + n, home_scheme, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: `h${n++}`, keys_at: 0 });
+  const app = (name: string, home_scheme: number) =>
+    store.createContraption({ name, title: name.toUpperCase(), icon: null, port: 39000 + n, home_scheme, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: `h${n++}`, keys_at: 0 });
   for (const name of ['twi', 'later', 'pressed', 'unbuilt']) app(name, project.id);
   app('qapp', other.id);
   // Their builds found no key, as src/apk-build.ts marks it: only such an app is offered one. unbuilt's never got that far.
@@ -83,7 +92,7 @@ before(async () => {
   await idle();
 });
 
-test('a minion asks for a key: a card naming where it goes, never the password; only its own scheme\'s apps', async () => {
+test("a minion asks for a key: a card naming where it goes, never the password; only its own scheme's apps", async () => {
   const { id, href } = await ask('twi');
   assert.match(href, /\?e=\d+$/);
   const card = (await events('plan')).at(-1);
@@ -109,7 +118,7 @@ test('a plan card and a key card for another app leave it open; a newer one for 
   assert.deepEqual([status[first.id], status[again.id], status[later.id]], ['superseded', 'pending', 'pending']);
   await assert.rejects(verdict('Dana', first.id, 'approve'), /409 A newer card for this key replaced this one/);
   const store = new Store(join(dataDir, 'coordinator.db'));
-  assert.equal(JSON.parse(store.latestPlan(ticket.id)!.data).summary, 'A plan', 'a key card never stands in for the chat\'s plan (a setup round reads it)');
+  assert.equal(JSON.parse(store.latestPlan(ticket.id)!.data).summary, 'A plan', "a key card never stands in for the chat's plan (a setup round reads it)");
   store.db.close();
 });
 
@@ -133,7 +142,7 @@ test('a member approves: the key is made, mode 600, its password only in its fil
 test('a rejected key card makes nothing, with or without a reason', async () => {
   const later = (await events('plan')).filter((c: any) => c.releaseKey?.app === 'later').at(-1);
   await verdict('Dana', later.id, 'revise', 'Not yet');
-  assert.equal(await lastMessage(), "Rejected the release key card for LATER; no key was made.\n\nNot yet");
+  assert.equal(await lastMessage(), 'Rejected the release key card for LATER; no key was made.\n\nNot yet');
   assert.ok(!existsSync(join(keyDir, 'later-release.jks')));
   await assert.rejects(verdict('Cara', later.id, 'approve'), /409 Dana already rejected this key/);
   await idle();
@@ -173,8 +182,13 @@ test('approving and rejecting one key card at the same moment gives the minion o
 async function mcp(method: string, params: object) {
   const child = tmp.spawn(process.execPath, [join(import.meta.dirname, '..', 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: base, COORDINATOR_TOKEN: live(), COORDINATOR_PROJECT: String(ticket.project_id),
-      COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: 'thread', COORDINATOR_HOME_CONTRAPTIONS: 'later,twi',
+      ...process.env,
+      COORDINATOR_API: base,
+      COORDINATOR_TOKEN: live(),
+      COORDINATOR_PROJECT: String(ticket.project_id),
+      COORDINATOR_TICKET: String(ticket.id),
+      COORDINATOR_ROLE: 'thread',
+      COORDINATOR_HOME_CONTRAPTIONS: 'later,twi',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });

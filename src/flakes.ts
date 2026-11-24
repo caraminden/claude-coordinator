@@ -8,10 +8,12 @@ import { pacificStamp } from './pacific.ts';
 
 /** When `file`'s newest commit on main was made (ms), or null when git can't say. A sighting from before it was of the old file (#1219). */
 export function fileChangedAt(repoDir: string, file: string): Promise<number | null> {
-  return new Promise((done) => execFile('git', ['log', '-1', '--format=%ct', 'main', '--', file], { cwd: repoDir, timeout: 15_000 }, (err, out) => {
-    const sec = Number(String(out ?? '').trim());
-    done(err || !Number.isFinite(sec) || sec <= 0 ? null : sec * 1000);
-  }));
+  return new Promise((done) =>
+    execFile('git', ['log', '-1', '--format=%ct', 'main', '--', file], { cwd: repoDir, timeout: 15_000 }, (err, out) => {
+      const sec = Number(String(out ?? '').trim());
+      done(err || !Number.isFinite(sec) || sec <= 0 ? null : sec * 1000);
+    }),
+  );
 }
 
 /**
@@ -81,7 +83,10 @@ export function parseFlakes(output: string): { file: string; source: string; det
     if (FILE.test(file) && !seen.has(file)) seen.set(file, m[2] ?? 'run-tests');
   }
   return [...seen].map(([file, source]) => {
-    const lines = output.split('\n').filter((l) => l.includes(file) && !l.startsWith('land: flake:')).slice(0, 5);
+    const lines = output
+      .split('\n')
+      .filter((l) => l.includes(file) && !l.startsWith('land: flake:'))
+      .slice(0, 5);
     return { file, source: source.replace(/\s+/g, ' ').slice(0, 40), detail: lines.join('\n').slice(0, 400) };
   });
 }
@@ -120,10 +125,11 @@ export function flakeBrief(file: string, count: number, details: { at: number; d
   const outputs = details.length ? details.map((d) => `${when(d.at)}:\n\`\`\`\n${d.detail}\n\`\`\``).join('\n\n') : '(no failing output was kept for it)';
   return {
     title: `Flaky test: ${file}`,
-    message: `Fix the flaky test file ${file}. It failed in a full run and then passed alone ${count} time${count === 1 ? '' : 's'} in the last 14 days (the Test health tab on the CI page counts these).\n\n`
-      + `Open the citadel:diagnosing-bugs skill first: a flake has a cause (shared state, a fixed port, a timing assumption, load), and a longer wait or a retry is not the fix. Find the cause, fix it in the test or the code under test, and show the file passing repeatedly under load.\n\n`
-      + `**Prove the fix held before you ship it** (#1120): a fix counts only after ${PROOF_RUNS} clean runs of this file on the desktop runner, ${PROOF_BATCH} copies at once per batch (the crowd a flake fails in). Rebase your branch onto main (the run uses your branch's copy of the workflow, and main's keeps the ship runner free: #1240), push it and dispatch the \`flake-proof.yml\` workflow on it with \`file=${file}\` (\`gh workflow run flake-proof.yml --ref <your branch> -f file=${file}\`); the Test health tab shows its clean-run count, and the run's result wakes you. Ship only on a green run. Do not skip, quarantine or loosen the test (Cara, 2026-11-10: "Keep failing, log it").\n\n`
-      + seen
-      + `The last ${details.length || 'no'} failing output${details.length === 1 ? '' : 's'}:\n\n${outputs}\n`,
+    message:
+      `Fix the flaky test file ${file}. It failed in a full run and then passed alone ${count} time${count === 1 ? '' : 's'} in the last 14 days (the Test health tab on the CI page counts these).\n\n` +
+      `Open the citadel:diagnosing-bugs skill first: a flake has a cause (shared state, a fixed port, a timing assumption, load), and a longer wait or a retry is not the fix. Find the cause, fix it in the test or the code under test, and show the file passing repeatedly under load.\n\n` +
+      `**Prove the fix held before you ship it** (#1120): a fix counts only after ${PROOF_RUNS} clean runs of this file on the desktop runner, ${PROOF_BATCH} copies at once per batch (the crowd a flake fails in). Rebase your branch onto main (the run uses your branch's copy of the workflow, and main's keeps the ship runner free: #1240), push it and dispatch the \`flake-proof.yml\` workflow on it with \`file=${file}\` (\`gh workflow run flake-proof.yml --ref <your branch> -f file=${file}\`); the Test health tab shows its clean-run count, and the run's result wakes you. Ship only on a green run. Do not skip, quarantine or loosen the test (Cara, 2026-11-10: "Keep failing, log it").\n\n` +
+      seen +
+      `The last ${details.length || 'no'} failing output${details.length === 1 ? '' : 's'}:\n\n${outputs}\n`,
   };
 }

@@ -12,7 +12,10 @@ function marked(role: string) {
   const input = [{ jsonrpc: '2.0', id: 1, method: 'tools/list' }].map((m) => JSON.stringify(m)).join('\n') + '\n';
   const r = spawnSync(process.execPath, ['src/mcp.ts'], { input, encoding: 'utf8', env: { ...process.env, COORDINATOR_ROLE: role, COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_APP_INSTRUCTIONS: '' } });
   const tools = JSON.parse(r.stdout.split('\n')[0]).result.tools;
-  return tools.filter((t: any) => t._meta?.['anthropic/alwaysLoad']).map((t: any) => t.name).sort();
+  return tools
+    .filter((t: any) => t._meta?.['anthropic/alwaysLoad'])
+    .map((t: any) => t.name)
+    .sort();
 }
 
 // plan and hand_off_land since #1275: nearly every minion plans and ships, and fetching them was 1,124 and 711 ToolSearch calls a week.
@@ -26,13 +29,29 @@ test("a Taskmaster's always-loaded tools are these four", () => {
 
 // The plan tool's check and the readout's are twins (#1275: the pinned server can't import public/): a call one refuses, the other ignores.
 test('the plan tool refuses exactly the calls the readout ignores, with the same words', () => {
-  const calls = [null, {}, { steps: [] }, { steps: [{ n: 1 }] }, { steps: [{ n: 0 }] }, { steps: [{ n: 1.5 }] }, { steps: [{ step: 'x' }] },
-    { steps: [{ n: 1, step: 'A', doing: 'B', why: 'C', outcome: 'D', minutes: 3, status: 'doing' }] }, { steps: [{ n: 1, doing: 42 }] },
-    { steps: [{ n: 1, minutes: 'soon' }] }, { steps: [{ n: 1, minutes: -1 }] }, { steps: [{ n: 1, status: 'started' }] }, { steps: [{ n: 1, status: 'toString' }] },
-    { steps: [{ n: 1, status: 'dropped' }, { step: 'no number' }] }];
+  const calls = [
+    null,
+    {},
+    { steps: [] },
+    { steps: [{ n: 1 }] },
+    { steps: [{ n: 0 }] },
+    { steps: [{ n: 1.5 }] },
+    { steps: [{ step: 'x' }] },
+    { steps: [{ n: 1, step: 'A', doing: 'B', why: 'C', outcome: 'D', minutes: 3, status: 'doing' }] },
+    { steps: [{ n: 1, doing: 42 }] },
+    { steps: [{ n: 1, minutes: 'soon' }] },
+    { steps: [{ n: 1, minutes: -1 }] },
+    { steps: [{ n: 1, status: 'started' }] },
+    { steps: [{ n: 1, status: 'toString' }] },
+    { steps: [{ n: 1, status: 'dropped' }, { step: 'no number' }] },
+  ];
   for (const call of calls) {
     let refused = '';
-    try { planResult(call); } catch (e: any) { refused = e.message; }
+    try {
+      planResult(call);
+    } catch (e: any) {
+      refused = e.message;
+    }
     assert.equal(refused, planError(call), JSON.stringify(call));
   }
 });

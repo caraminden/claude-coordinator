@@ -21,20 +21,40 @@ import type { SchemeReleases } from './releases.ts';
  * (#1628). A route goes here once nothing it runs reads the main thread's memory or does more than read the database.
  */
 export const READER_ROUTES: readonly string[] = [
-  '/api/tickets/:ticket', '/api/tickets/:ticket/events', '/api/tickets/:ticket/events/:event',
-  '/api/projects/:project', '/api/projects/:project/memory', '/api/status',
+  '/api/tickets/:ticket',
+  '/api/tickets/:ticket/events',
+  '/api/tickets/:ticket/events/:event',
+  '/api/projects/:project',
+  '/api/projects/:project/memory',
+  '/api/status',
   // #1628: the rest that answer from the database and the snapshot. The main thread keeps the GETs that read its
   // memory or the disk, start a process (git), write, or reach a part a reader lacks once there are rows: /api/projects,
   // /api/me, /api/home, costs, releases, people, the me/* logins, machines, catalogue, ideas, recap, shared, spend,
   // memory-files, instructions/sources, schedules, app/settings, facts, push/key, secrets, welcome, a minion's jobs,
   // artifacts, the ci-files, ci-numbers and ci-runners, contraptions, reviews/schemes, and the Taskmaster-only GETs.
-  '/api/tickets/:ticket/commands', '/api/tickets/:ticket/ship-risk', '/api/ship-lines', '/api/app/instructions',
-  '/api/app/instructions/history', '/api/projects/:project/members', '/api/projects/:project/taskmaster-events',
-  '/api/projects/:project/instructions/history', '/api/projects/:project/my-instructions',
-  '/api/projects/:project/my-instructions/history', '/api/projects/:project/repo-setup', '/api/projects/:project/plugins',
-  '/api/projects/:project/properties', '/api/projects/:project/views', '/api/projects/:project/search',
-  '/api/projects/:project/past-minions', '/api/projects/:project/schedule-audits', '/api/projects/:project/ship-lessons',
-  '/api/projects/:project/claims', '/api/projects/:project/contraption-turns', '/api/ci', '/api/ci-desktop', '/api/units',
+  '/api/tickets/:ticket/commands',
+  '/api/tickets/:ticket/ship-risk',
+  '/api/ship-lines',
+  '/api/app/instructions',
+  '/api/app/instructions/history',
+  '/api/projects/:project/members',
+  '/api/projects/:project/taskmaster-events',
+  '/api/projects/:project/instructions/history',
+  '/api/projects/:project/my-instructions',
+  '/api/projects/:project/my-instructions/history',
+  '/api/projects/:project/repo-setup',
+  '/api/projects/:project/plugins',
+  '/api/projects/:project/properties',
+  '/api/projects/:project/views',
+  '/api/projects/:project/search',
+  '/api/projects/:project/past-minions',
+  '/api/projects/:project/schedule-audits',
+  '/api/projects/:project/ship-lessons',
+  '/api/projects/:project/claims',
+  '/api/projects/:project/contraption-turns',
+  '/api/ci',
+  '/api/ci-desktop',
+  '/api/units',
 ];
 /**
  * Their paths, with or without the front end's /c prefix. A parameter matches any segment: a reader matches the main
@@ -88,8 +108,11 @@ const gzipped = promisify(gzip);
  * what it has, while a ship's changed bytes are a new tag: never stale. Per variant, so the dark manifest and the off
  * switch's worker never answer a 304 for the other one.
  */
-export const readyFile = async (headers: Record<string, string>, body: Uint8Array): Promise<StaticFile> =>
-  ({ headers: { Vary: 'Accept-Encoding', ...headers, ETag: `"${createHash('sha256').update(body).digest('hex').slice(0, 16)}"` }, body, gz: body.length >= MIN_GZIP_BYTES ? await gzipped(body, { level: 6 }) : null });
+export const readyFile = async (headers: Record<string, string>, body: Uint8Array): Promise<StaticFile> => ({
+  headers: { Vary: 'Accept-Encoding', ...headers, ETag: `"${createHash('sha256').update(body).digest('hex').slice(0, 16)}"` },
+  body,
+  gz: body.length >= MIN_GZIP_BYTES ? await gzipped(body, { level: 6 }) : null,
+});
 
 /** The front-end file a request's URL names (Citadel UI's under /apps/_citadel/ too); null for anything else. */
 export function staticName(url: string, onAppHost: boolean): string | null {
@@ -102,7 +125,9 @@ export function staticName(url: string, onAppHost: boolean): string | null {
   try {
     path = new URL(own?.url ?? url, 'http://localhost').pathname;
     decodeURIComponent(path);
-  } catch { return null; }
+  } catch {
+    return null;
+  }
   return kit(path) ?? (path.startsWith('/api/') || path.startsWith('/apps/') ? null : path === '/' ? 'index.html' : path.slice(1));
 }
 
@@ -113,7 +138,9 @@ export function staticAnswer(s: Statics, name: string, req: IncomingHttpHeaders)
   if (name === 'sw.js' && shellOff(s.dataDir)) f = s.swOff;
   if (name === 'manifest.webmanifest' && /dark/.test(String(req['sec-ch-prefers-color-scheme'] ?? ''))) f = s.darkManifest;
   const headers = f.headers;
-  const asked = String(req['if-none-match'] ?? '').split(',').map((t) => t.trim().replace(/^W\//, ''));
+  const asked = String(req['if-none-match'] ?? '')
+    .split(',')
+    .map((t) => t.trim().replace(/^W\//, ''));
   if (asked.includes(headers.ETag) || asked.includes('*')) return { status: 304, headers, body: new Uint8Array() };
   if (f.gz && /\bgzip\b/.test(String(req['accept-encoding'] ?? ''))) return { status: 200, headers: { ...headers, 'Content-Encoding': 'gzip' }, body: f.gz };
   return { status: 200, headers, body: f.body };
@@ -162,7 +189,9 @@ export function applySnap(s: Snapshot, d: SnapDelta) {
 type Answer = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
 export type FrontOptions = {
   /** systemd's socket, fd 3, or else this host and port (0: any free one). */
-  fd?: number; host?: string; port?: number;
+  fd?: number;
+  host?: string;
+  port?: number;
   /** How many readers; 0 sends everything to the main thread. */
   readers: number;
   /** Start data for each reader (src/reader.ts): the database path, sign-in keys, the writer's shared counter. */
@@ -170,7 +199,8 @@ export type FrontOptions = {
   /** APPS_DOMAIN: a contraption's own host goes to the main thread whatever its path. */
   appsDomain: string | null;
   /** READER_ANSWER_MS and READER_STUCK_MS, turned down by a test server (test/front.test.ts). */
-  answerMs?: number; stuckMs?: number;
+  answerMs?: number;
+  stuckMs?: number;
 };
 
 /** Where the socket's folder goes: XDG_RUNTIME_DIR, else tmpdir(), else /tmp when that makes the path pass a unix socket's 107 bytes (a CI runner's long TMPDIR). */
@@ -277,7 +307,8 @@ const SMALL_BODY = 1024 * 1024;
 
 function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   const toMain = new Agent({ keepAlive: true });
-  const answerMs = opts.answerMs ?? READER_ANSWER_MS, stuckMs = opts.stuckMs ?? READER_STUCK_MS;
+  const answerMs = opts.answerMs ?? READER_ANSWER_MS,
+    stuckMs = opts.stuckMs ?? READER_STUCK_MS;
 
   /** The request's headers for the main thread: any client copy of its own two headers dropped, the connection's own addresses set. */
   const mainHeaders = (req: IncomingMessage, keepUpgrade = false) => {
@@ -303,14 +334,18 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
         req.resume();
         req.once('end', () => res.end());
       });
-      r.once('close', () => { if (!r.complete) res.destroy(); });
+      r.once('close', () => {
+        if (!r.complete) res.destroy();
+      });
     });
     up.on('error', () => {
       if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain' }).end('The server is restarting: try again in a moment');
       else res.destroy();
     });
     // A client that goes (a closed page's live stream) closes the main thread's side too.
-    res.once('close', () => { if (!res.writableFinished) up.destroy(); });
+    res.once('close', () => {
+      if (!res.writableFinished) up.destroy();
+    });
     // A small body goes with its head in one write: main may refuse from the head alone and close, and a body written
     // after that would fail the request here (a 502) before main's answer is read. Anything else streams, its head
     // sent at once, since main may answer from it alone (an upload refused by its size) before any body comes.
@@ -331,7 +366,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   let statics: Statics | null = null;
   // Every change main posted before this request is applied first: false if one is still on its way.
   const caughtUp = () => {
-    for (let m; Atomics.load(opts.posted, 0) !== applied && (m = receiveMessageOnPort(parentPort!));) fromMain(m.message);
+    for (let m; Atomics.load(opts.posted, 0) !== applied && (m = receiveMessageOnPort(parentPort!)); ) fromMain(m.message);
     return Atomics.load(opts.posted, 0) === applied;
   };
 
@@ -359,7 +394,10 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
         failures = 0;
         if (again) console.log('Reader thread started again: ready.');
       }
-      if (m.id !== undefined) { r.open.get(m.id)?.(m.answer ?? null); r.open.delete(m.id); }
+      if (m.id !== undefined) {
+        r.open.get(m.id)?.(m.answer ?? null);
+        r.open.delete(m.id);
+      }
       if (m.usage || m.setting) parentPort!.postMessage({ usage: m.usage, setting: m.setting });
     });
     r.worker.on('error', (err) => console.error(`Reader thread failed: ${err?.stack ?? err}`));
@@ -379,26 +417,25 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   for (let i = 0; i < opts.readers; i++) startReader();
   // A reader whose thread stopped answering (a read that never ends) is replaced; its requests already went to the main thread.
   setInterval(() => {
-    for (const r of readers) if (Date.now() - r.heard > stuckMs) {
-      // One that has never said it is ready is still evaluating its module, and terminating it then aborts the whole
-      // process (see Reader above), so it is left alone. Accepted: a thread wedged there (a database it can't open)
-      // answers nothing until the next restart and its reads go to the main thread, which beats what this did before
-      // (#1625), which was to kill the server. The message that says it is ready sets `heard` again, which puts it
-      // back under this watch.
-      if (!r.ready) {
-        console.error(`Reader thread hasn't started in ${Math.round((Date.now() - r.heard) / 1000)} s: leaving it to finish.`);
-        r.heard = Infinity; // said once
-        continue;
+    for (const r of readers)
+      if (Date.now() - r.heard > stuckMs) {
+        // One that has never said it is ready is still evaluating its module, and terminating it then aborts the whole
+        // process (see Reader above), so it is left alone. Accepted: a thread wedged there (a database it can't open)
+        // answers nothing until the next restart and its reads go to the main thread, which beats what this did before
+        // (#1625), which was to kill the server. The message that says it is ready sets `heard` again, which puts it
+        // back under this watch.
+        if (!r.ready) {
+          console.error(`Reader thread hasn't started in ${Math.round((Date.now() - r.heard) / 1000)} s: leaving it to finish.`);
+          r.heard = Infinity; // said once
+          continue;
+        }
+        console.error(`Reader thread silent for ${Math.round((Date.now() - r.heard) / 1000)} s: replacing it.`);
+        r.heard = Infinity; // terminated once
+        void r.worker.terminate();
       }
-      console.error(`Reader thread silent for ${Math.round((Date.now() - r.heard) / 1000)} s: replacing it.`);
-      r.heard = Infinity; // terminated once
-      void r.worker.terminate();
-    }
   }, 1000).unref();
 
-  const forReader = (req: IncomingMessage) => req.method === 'GET' && !req.headers.authorization && !req.headers.upgrade
-    && appHost(req, opts.appsDomain) === null
-    && READER_PATHS.test((req.url ?? '').split('?')[0]);
+  const forReader = (req: IncomingMessage) => req.method === 'GET' && !req.headers.authorization && !req.headers.upgrade && appHost(req, opts.appsDomain) === null && READER_PATHS.test((req.url ?? '').split('?')[0]);
 
   const ask = (req: IncomingMessage, res: ServerResponse) => {
     // So every change main posted reaches the reader before the request does.
@@ -406,8 +443,13 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     let best: Reader | null = null;
     for (const r of readers) if (r.ready && !r.late && r.heard !== Infinity && (!best || r.open.size < best.open.size)) best = r;
     if (!best) return pass(req, res);
-    const r = best, id = nextId++;
-    const timer = setTimeout(() => { r.late = true; r.open.get(id)?.(null); r.open.delete(id); }, answerMs);
+    const r = best,
+      id = nextId++;
+    const timer = setTimeout(() => {
+      r.late = true;
+      r.open.get(id)?.(null);
+      r.open.delete(id);
+    }, answerMs);
     r.open.set(id, (a) => {
       clearTimeout(timer);
       if (res.destroyed) return;
@@ -457,7 +499,10 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     socket.once('close', () => up.destroy());
   });
   front.requestTimeout = 30 * 60_000; // as the main thread's: a 200 MB attachment on a slow uplink
-  front.on('error', (err) => { console.error(`Front thread can't listen: ${err.message}`); process.exit(1); });
+  front.on('error', (err) => {
+    console.error(`Front thread can't listen: ${err.message}`);
+    process.exit(1);
+  });
   const listening = () => parentPort!.postMessage({ listening: (front.address() as { port: number }).port });
   if (opts.fd !== undefined) front.listen({ fd: opts.fd }, listening);
   else front.listen(opts.port ?? 0, opts.host, listening);

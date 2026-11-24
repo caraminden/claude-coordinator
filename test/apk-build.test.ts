@@ -34,12 +34,17 @@ function app(name: string, cap = true) {
   mkdirSync(join(live, 'node_modules'), { recursive: true });
   git(join(root, 'apps'), 'init', '-q', '-b', 'main', name);
   writeFileSync(join(live, '.gitignore'), 'node_modules\n');
-  commit(live, cap ? {
-    'capacitor.config.json': JSON.stringify({ appId: 'x', webDir: 'shell' }),
-    'shell/index.html': '<p>shell</p>',
-    'android/app/build.gradle': 'android { defaultConfig { versionCode 1\n versionName "1.0" } }',
-    'src/server.ts': '1',
-  } : { 'src/server.ts': '1' });
+  commit(
+    live,
+    cap
+      ? {
+          'capacitor.config.json': JSON.stringify({ appId: 'x', webDir: 'shell' }),
+          'shell/index.html': '<p>shell</p>',
+          'android/app/build.gradle': 'android { defaultConfig { versionCode 1\n versionName "1.0" } }',
+          'src/server.ts': '1',
+        }
+      : { 'src/server.ts': '1' },
+  );
   const row = { name, title: name.toUpperCase(), home_scheme: 10, repo: `o/${name}` } as ContraptionRow;
   return { live, row, data: join(root, 'data', name) };
 }
@@ -68,12 +73,18 @@ function builder(o: { ciRelease?: boolean; fail?: string; code?: number; oom?: b
     return 0;
   };
   const b = new ApkBuilds({
-    home, cacheDir: join(root, 'cache'), keyDir, heavy: '/bin/citadel-heavy',
-    folder: (row) => join(root, 'apps', row.name), dataDir: (row) => join(root, 'data', row.name),
+    home,
+    cacheDir: join(root, 'cache'),
+    keyDir,
+    heavy: '/bin/citadel-heavy',
+    folder: (row) => join(root, 'apps', row.name),
+    dataDir: (row) => join(root, 'data', row.name),
     ciRelease: () => !!o.ciRelease,
     published: (row, code, c) => published.push([row.name, code, c]),
     tell: (_row, text) => told.push(text),
-    run, certs: async () => ['k1'], oomKills: async () => ooms,
+    run,
+    certs: async () => ['k1'],
+    oomKills: async () => ooms,
     keytool: async (args) => writeFileSync(args[args.indexOf('-keystore') + 1], 'jks'),
   });
   return { b, calls, told, published, cwds };
@@ -108,7 +119,7 @@ test('the first deploy builds, signs and publishes build <commit count>; a chang
   const gradle = calls.find((c) => c.includes('assembleRelease'))!;
   assert.ok(gradle.includes('-Pcitadel.versionCode=1') && existsSync(gradle[gradle.indexOf('--init-script') + 1]), 'the versionCode goes in through the init script, the gradle file untouched');
   assert.equal(git(live, 'status', '--porcelain'), '', 'the live slot is left as it was');
-  assert.ok(existsSync(join(root, 'cache/reader/src/node_modules')), 'the build checkout uses the live slot\'s packages');
+  assert.ok(existsSync(join(root, 'cache/reader/src/node_modules')), "the build checkout uses the live slot's packages");
 
   commit(live, { 'src/server.ts': '2' });
   calls.length = 0;
@@ -125,7 +136,13 @@ test('the first deploy builds, signs and publishes build <commit count>; a chang
     commit(live, { 'android/app/x.txt': String(n) });
     assert.deepEqual(await b.check(row, 'auto-deploy'), { built: n });
   }
-  assert.deepEqual(readdirSync(join(data, 'android')).filter((f) => f.endsWith('.apk')).sort(), ['reader-4.apk', 'reader-5.apk', 'reader-6.apk'], 'the newest three are kept');
+  assert.deepEqual(
+    readdirSync(join(data, 'android'))
+      .filter((f) => f.endsWith('.apk'))
+      .sort(),
+    ['reader-4.apk', 'reader-5.apk', 'reader-6.apk'],
+    'the newest three are kept',
+  );
 });
 
 test('no release key: nothing builds, the home Taskmaster is told once for that commit, and the next commit tries again', async () => {
@@ -196,8 +213,8 @@ test('a build killed by a signal says so; a restart kill is retried at the next 
   key('killed');
   const term = builder({ fail: 'assembleRelease', code: 128 + 15 });
   assert.deepEqual(await term.b.check(row, 'auto-deploy'), { failed: 'gradlew assembleRelease was killed by SIGTERM (a Citadel restart stops its builds): the next check builds it again' });
-  assert.deepEqual(term.told, [], 'a restart kill is not the commit\'s fault: nothing to tell');
-  assert.equal((await builder().b.check(row, 'auto-deploy') as { built: number }).built, 1, 'the next check (the restarted server\'s) builds the same commit');
+  assert.deepEqual(term.told, [], "a restart kill is not the commit's fault: nothing to tell");
+  assert.equal(((await builder().b.check(row, 'auto-deploy')) as { built: number }).built, 1, "the next check (the restarted server's) builds the same commit");
 
   const big = app('big');
   key('big');
@@ -208,7 +225,7 @@ test('a build killed by a signal says so; a restart kill is retried at the next 
   assert.deepEqual(await builder().b.check(big.row, '#1'), { skipped: 'already failed at this commit' });
   const daemon = app('daemon');
   key('daemon');
-  assert.deepEqual(await builder({ fail: 'assembleRelease', code: 1, oom: true }).b.check(daemon.row, '#1'), { failed: 'gradlew assembleRelease ran out of memory: the kernel killed it (exit 1)' }, 'an OOM kill of Gradle\'s daemon leaves its client exiting 1');
+  assert.deepEqual(await builder({ fail: 'assembleRelease', code: 1, oom: true }).b.check(daemon.row, '#1'), { failed: 'gradlew assembleRelease ran out of memory: the kernel killed it (exit 1)' }, "an OOM kill of Gradle's daemon leaves its client exiting 1");
   assert.ok(!existsSync(join(big.data, 'android/latest.json')) && !existsSync(join(data, 'android/killed-0.apk')));
 });
 
@@ -302,7 +319,7 @@ test('a Capacitor project in a subfolder named in citadel-app.json is built from
   assert.equal(feed(data).versionName, '2.0');
   const cap = calls.find((c) => c.includes('sync'))!;
   assert.equal(cwds.get(cap.join(' ')), join(root, 'cache/sub/src/android'), 'cap sync runs in the Capacitor root');
-  assert.equal(readlinkSync(join(root, 'cache/sub/src/android/node_modules')), join(root, 'apps/sub/android/node_modules'), 'the Capacitor root\'s packages are linked, where cap sync and the Gradle files look');
+  assert.equal(readlinkSync(join(root, 'cache/sub/src/android/node_modules')), join(root, 'apps/sub/android/node_modules'), "the Capacitor root's packages are linked, where cap sync and the Gradle files look");
   const gradle = calls.find((c) => c.includes('assembleRelease'))!;
   assert.equal(cwds.get(gradle.join(' ')), join(root, 'cache/sub/src/android/native'), 'Gradle runs in the Android project');
   commit(live, { 'src/server.ts': '2' });

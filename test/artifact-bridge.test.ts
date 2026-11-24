@@ -39,7 +39,10 @@ writeFileSync(join(root, 'work-b', 'theirs.html'), '<p>theirs</p>');
 const shared = projectSharedDir(data, A.id);
 mkdirSync(shared, { recursive: true });
 writeFileSync(join(shared, 'board.html'), '<p>board</p>');
-store.syncArtifacts(M, ['picker.html', 'other.html', 'notes.md'].map((path) => ({ path, size: 1, mtime: 1 })));
+store.syncArtifacts(
+  M,
+  ['picker.html', 'other.html', 'notes.md'].map((path) => ({ path, size: 1, mtime: 1 })),
+);
 store.syncArtifacts(MB, [{ path: 'theirs.html', size: 1, mtime: 1 }]);
 const art = (p: string) => [...store.listArtifacts(A.id), ...store.listArtifacts(B.id)].find((a) => a.path === p)!;
 const [PICKER, OTHER, NOTES, THEIRS] = ['picker.html', 'other.html', 'notes.md', 'theirs.html'].map(art);
@@ -61,12 +64,12 @@ async function pageOf(id: number) {
   assert.equal(res.status, 302);
   return new URL(res.headers.get('location')!, `${srv.base}/api/artifacts/${id}/raw`).pathname.replace('/api/files/', '');
 }
-const bridge = (body: object, headers: Record<string, string> = { Cookie: srv.cookie }) =>
-  fetch(`${srv.base}/api/artifact-data`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    .then(async (r) => ({ status: r.status, data: await r.json() }));
+const bridge = (body: object, headers: Record<string, string> = { Cookie: srv.cookie }) => fetch(`${srv.base}/api/artifact-data`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json() }));
 const agent = (id: number, body: object) =>
   fetch(`${srv.base}/api/projects/${store.getTicket(id)!.project_id}/artifact-data`, {
-    method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   }).then(async (r) => ({ status: r.status, data: await r.json() }));
 
 test('the bridge goes in after the doctype, or first, and what it inlines cannot close its script', () => {
@@ -82,16 +85,16 @@ test('the bridge goes in after the doctype, or first, and what it inlines cannot
   assert.ok(!out.includes('\u2028') && out.includes('\\u003c/script>') && out.includes('\\u2028'));
 });
 
-test('a page\'s bare URLs and web addresses become new-tab links; its scripts, styles, links, code and fields stay as written (#440)', () => {
+test("a page's bare URLs and web addresses become new-tab links; its scripts, styles, links, code and fields stay as written (#440)", () => {
   const ext = (href: string, text = href) => `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
-  assert.equal(linkPageText('<p>Open <b>console.firebase.google.com</b>, then https://x.io/a.</p>'),
-    `<p>Open <b>${ext('https://console.firebase.google.com', 'console.firebase.google.com')}</b>, then ${ext('https://x.io/a')}.</p>`);
-  const untouched = '<!doctype html><head><title>x.com</title><style>a::after{content:"https://s.io"}</style></head>'
-    + '<!-- see https://c.io --><script>const u = "https://j.io"; if (a < b) go("x.com");</script>'
-    + '<a href="https://a.io">https://a.io</a><code>y.com</code><pre>https://p.io</pre><textarea>https://t.io</textarea>'
-    + '<button>z.com</button><svg><text>https://v.io</text></svg><img alt="https://i.io">'
+  assert.equal(linkPageText('<p>Open <b>console.firebase.google.com</b>, then https://x.io/a.</p>'), `<p>Open <b>${ext('https://console.firebase.google.com', 'console.firebase.google.com')}</b>, then ${ext('https://x.io/a')}.</p>`);
+  const untouched =
+    '<!doctype html><head><title>x.com</title><style>a::after{content:"https://s.io"}</style></head>' +
+    '<!-- see https://c.io --><script>const u = "https://j.io"; if (a < b) go("x.com");</script>' +
+    '<a href="https://a.io">https://a.io</a><code>y.com</code><pre>https://p.io</pre><textarea>https://t.io</textarea>' +
+    '<button>z.com</button><svg><text>https://v.io</text></svg><img alt="https://i.io">' +
     // A comment inside code or a link doesn't split it.
-    + '<pre>https://a.io<!-- note -->https://b.io</pre><a href="https://c.io">x<!-- n -->https://c.io</a>';
+    '<pre>https://a.io<!-- note -->https://b.io</pre><a href="https://c.io">x<!-- n -->https://c.io</a>';
   assert.equal(linkPageText(untouched), untouched);
   // Prose between the skipped parts still links, and the bridge goes in ahead of it all.
   assert.equal(linkPageText('<script>1</script>see x.com<style>p{}</style>'), `<script>1</script>see ${ext('https://x.com', 'x.com')}<style>p{}</style>`);
@@ -106,14 +109,25 @@ test('writes are checked: key length, value size, entries per write, keys and by
   assert.throws(() => cleanEntries([{ key: 'big', value: 'x'.repeat(LIMITS.valueBytes) }]), /over 64 KB/);
   assert.throws(() => cleanEntries(Array.from({ length: LIMITS.entries + 1 }, (_, i) => ({ key: `k${i}`, value: i }))), /At most 100/);
   assert.deepEqual(cleanEntries([{ key: 'a', value: { pick: 2 } }, { key: 'b', value: null }, { key: 'c' }]), [
-    { key: 'a', value: '{"pick":2}' }, { key: 'b', value: null }, { key: 'c', value: null },
+    { key: 'a', value: '{"pick":2}' },
+    { key: 'b', value: null },
+    { key: 'c', value: null },
   ]);
   const s = new Store(join(root, 'limits.db'));
   const p = s.createProject('L', null);
   for (let i = 0; i < LIMITS.keys; i += 100) writeStore(s, p.id, '/f.html', cleanEntries(Array.from({ length: 100 }, (_, j) => ({ key: `k${i + j}`, value: 1 }))), 'Cara');
   assert.throws(() => writeStore(s, p.id, '/f.html', cleanEntries([{ key: 'one-more', value: 1 }]), 'Cara'), /at most 2000 keys/);
   // Replacing and deleting keys is fine at the limit, and a refused write changes nothing.
-  writeStore(s, p.id, '/f.html', cleanEntries([{ key: 'k0', value: 2 }, { key: 'k1', value: null }]), 'Cara');
+  writeStore(
+    s,
+    p.id,
+    '/f.html',
+    cleanEntries([
+      { key: 'k0', value: 2 },
+      { key: 'k1', value: null },
+    ]),
+    'Cara',
+  );
   assert.equal(s.artifactData(p.id, '/f.html').length, LIMITS.keys - 1);
   const big = 'x'.repeat(60 * 1024);
   const fill = () => writeStore(s, p.id, '/g.html', cleanEntries(Array.from({ length: 40 }, (_, j) => ({ key: `b${j}`, value: big }))), 'Cara');
@@ -168,8 +182,12 @@ test("the viewer answers only its own frames' sandboxed pages, with well-formed 
 
 test('a write Citadel could not take while it restarts tells the page to try again, and holds a new front end until it lands (#821)', async (t) => {
   let onMessage: any = null;
-  (globalThis as any).addEventListener = (type: string, fn: any) => { if (type === 'message') onMessage = fn; };
-  t.after(() => { delete (globalThis as any).addEventListener; });
+  (globalThis as any).addEventListener = (type: string, fn: any) => {
+    if (type === 'message') onMessage = fn;
+  };
+  t.after(() => {
+    delete (globalThis as any).addEventListener;
+  });
   let fail: Error | null = new TypeError('Failed to fetch');
   const api = async () => {
     if (fail) throw fail;
@@ -180,7 +198,10 @@ test('a write Citadel could not take while it restarts tells the page to try aga
   const iframe = { isConnected: true, contentWindow: win };
   attachBridge(iframe, { open: { artifact: 9 }, name: 'p9.html', owner: 'Cara', api });
   // Taken out at the end, so the next test's viewer starts with no frames (and listens afresh).
-  t.after(() => { iframe.isConnected = false; onArtifactData('none'); });
+  t.after(() => {
+    iframe.isConnected = false;
+    onArtifactData('none');
+  });
   const write = (id: number) => onMessage({ source: win, origin: 'null', data: { bridge: TAG, id, op: 'write', page: 'p9', entries: [{ key: 'k', value: 1 }] } });
   const settle = () => new Promise((r) => setImmediate(r));
 
@@ -238,8 +259,12 @@ test('a frame writes in a burst of 40, then 20 a second', () => {
 test('a store changed elsewhere reaches the frames showing it, with what it holds now, and no other frame', async (t) => {
   // The viewer's window is the boundary: its message listener and each frame's postMessage are stand-ins.
   let onMessage: any = null;
-  (globalThis as any).addEventListener = (type: string, fn: any) => { if (type === 'message') onMessage = fn; };
-  t.after(() => { delete (globalThis as any).addEventListener; });
+  (globalThis as any).addEventListener = (type: string, fn: any) => {
+    if (type === 'message') onMessage = fn;
+  };
+  t.after(() => {
+    delete (globalThis as any).addEventListener;
+  });
   const held: Record<string, any[]> = { s1: [{ key: 'pick', value: 1 }], s2: [{ key: 'pick', value: 9 }] };
   const storeOf: Record<string, string> = { pa: 's1', pa2: 's1', pb: 's2' };
   const calls: any[] = [];
@@ -268,7 +293,14 @@ test('a store changed elsewhere reaches the frames showing it, with what it hold
   await settle();
   assert.deepEqual(a.posted, [{ bridge: TAG, op: 'changed', entries: [{ key: 'pick', value: 2 }] }]);
   assert.deepEqual(a2.posted, [{ bridge: TAG, op: 'changed', entries: [{ key: 'pick', value: 2 }] }], 'another page on the same store');
-  assert.deepEqual(calls, [['api/artifact-data', 'pa', 'list'], ['api/artifact-data', 'pa2', 'list']], 'each read as its own page');
+  assert.deepEqual(
+    calls,
+    [
+      ['api/artifact-data', 'pa', 'list'],
+      ['api/artifact-data', 'pa2', 'list'],
+    ],
+    'each read as its own page',
+  );
   assert.deepEqual(b.posted, [], 'a frame on another store');
   assert.deepEqual(gone.posted, [], 'a frame taken out of the page');
   assert.deepEqual(quiet.posted, [], 'a frame that never asked');
@@ -279,7 +311,10 @@ test('a served page carries the bridge and what it saved', async () => {
   const w = await bridge({ open: { artifact: PICKER.id }, page, op: 'write', entries: [{ key: 'db/picks/cleric', value: { pick: 3, note: '</script>' } }] });
   assert.equal(w.status, 200, JSON.stringify(w.data));
   assert.equal(w.data.person, 'Cara');
-  assert.deepEqual(w.data.entries.map((e: any) => [e.key, e.value, e.by]), [['db/picks/cleric', { pick: 3, note: '</script>' }, 'Cara']]);
+  assert.deepEqual(
+    w.data.entries.map((e: any) => [e.key, e.value, e.by]),
+    [['db/picks/cleric', { pick: 3, note: '</script>' }, 'Cara']],
+  );
   const res = await fetch(`${srv.base}/api/files/${page}`);
   assert.match(res.headers.get('content-security-policy')!, /allow-downloads/);
   const text = await res.text();
@@ -306,7 +341,10 @@ test('the server refuses a frame showing a different page from the one the viewe
   assert.equal((await bridge({ open: { artifact: NOTES.id }, page, ...write })).status, 404);
   assert.equal((await bridge({ open: { artifact: 99999 }, page, ...write })).status, 404);
   assert.equal((await bridge({ open: { project: A.id, path: join(root, 'work', 'picker.html') }, page, ...write })).status, 404);
-  assert.equal(store.artifactData(A.id, join(root, 'work', 'picker.html')).some((r) => r.key === 'x'), false);
+  assert.equal(
+    store.artifactData(A.id, join(root, 'work', 'picker.html')).some((r) => r.key === 'x'),
+    false,
+  );
   // A token that expired while the page stayed open still names its page.
   const expired = `${tokens.fileToken(`t${M.id}-0`, Date.now() - 13 * 3600_000)}/picker.html`;
   assert.equal((await bridge({ open: { ticket: M.id, path: 'picker.html' }, page: expired, op: 'list' })).status, 200);
@@ -324,16 +362,28 @@ test('a shared page saves under its own store, opened from the shared folder', a
   const w = await bridge({ open: { project: A.id, path: 'board.html' }, page, op: 'write', entries: [{ key: 'localStorage/zoom', value: '2' }] });
   assert.equal(w.status, 200, JSON.stringify(w.data));
   const r = await agent(TA.id, { path: 'scheme shared/board.html' });
-  assert.deepEqual(r.data.entries.map((e: any) => [e.key, e.value]), [['localStorage/zoom', '2']]);
+  assert.deepEqual(
+    r.data.entries.map((e: any) => [e.key, e.value]),
+    [['localStorage/zoom', '2']],
+  );
 });
 
 test("agents read and write their scheme's pages, by artifact or path, and no other scheme's", async () => {
   const byId = await agent(M.id, { artifact: PICKER.id });
   assert.equal(byId.status, 200, JSON.stringify(byId.data));
   assert.ok(byId.data.entries.some((e: any) => e.key === 'db/picks/cleric'));
-  const set = await agent(TA.id, { path: join(root, 'work', 'picker.html'), entries: [{ key: 'db/picks/rogue', value: { pick: 1 } }, { key: 'db/picks/cleric', value: null }] });
+  const set = await agent(TA.id, {
+    path: join(root, 'work', 'picker.html'),
+    entries: [
+      { key: 'db/picks/rogue', value: { pick: 1 } },
+      { key: 'db/picks/cleric', value: null },
+    ],
+  });
   assert.equal(set.status, 200, JSON.stringify(set.data));
-  assert.deepEqual(set.data.entries.map((e: any) => [e.key, e.by]), [['db/picks/rogue', 'Taskmaster']]);
+  assert.deepEqual(
+    set.data.entries.map((e: any) => [e.key, e.by]),
+    [['db/picks/rogue', 'Taskmaster']],
+  );
   const rel = await agent(M.id, { path: 'picker.html', entries: [{ key: 'storage/n', value: 5 }] });
   assert.deepEqual(rel.data.entries.find((e: any) => e.key === 'storage/n').by, `#${M.number}`);
   // Scheme B's page, by id and by path; a page that isn't HTML; a path out of every folder.
@@ -355,9 +405,16 @@ test('artifact_data is offered to minions and Taskmasters, and reads a page', as
     const names = (await call(role, { method: 'tools/list' })).result.tools.map((t: any) => t.name);
     assert.ok(names.includes('artifact_data'), role);
   }
-  const { result } = await call('thread', { method: 'tools/call', params: { name: 'artifact_data', arguments: { artifact: PICKER.id } } }, {
-    COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(M.id), COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(M.id),
-  });
+  const { result } = await call(
+    'thread',
+    { method: 'tools/call', params: { name: 'artifact_data', arguments: { artifact: PICKER.id } } },
+    {
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(M.id),
+      COORDINATOR_PROJECT: String(A.id),
+      COORDINATOR_TICKET: String(M.id),
+    },
+  );
   assert.equal(result.isError, undefined, result.content[0].text);
   assert.match(result.content[0].text, /picker\.html: \d+ keys?\./);
   assert.match(result.content[0].text, /^db\/picks\/rogue = \{"pick":1\} \(Taskmaster, \d{4}-\d\d-\d\dT\d\d:\d\dZ\)$/m);
@@ -365,10 +422,18 @@ test('artifact_data is offered to minions and Taskmasters, and reads a page', as
 
 // A choices card (#804): ask_question with doc names a mock kit page with pick bars, and the page's Send settles it.
 writeFileSync(join(root, 'work', 'choices.html'), '<!DOCTYPE html><title>Header takes</title><script src="mockkit.js"></script><div data-pick>A</div><script>mock.picks();</script>');
-const askDoc = (doc: string) => fetch(`${srv.base}/api/tickets/${M.id}/questions`, {
-  method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(M.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ doc }),
-}).then(async (r) => ({ status: r.status, data: await r.json() }));
-const cardData = (id: string) => store.listEvents(M.id).filter((e) => e.kind === 'question').map((e) => JSON.parse(e.data)).find((q) => q.id === id);
+const askDoc = (doc: string) =>
+  fetch(`${srv.base}/api/tickets/${M.id}/questions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokens.agentToken(M.id)}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ doc }),
+  }).then(async (r) => ({ status: r.status, data: await r.json() }));
+const cardData = (id: string) =>
+  store
+    .listEvents(M.id)
+    .filter((e) => e.kind === 'question')
+    .map((e) => JSON.parse(e.data))
+    .find((q) => q.id === id);
 let choicesCard = '';
 
 test('a choices card names a page with pick bars, and only such a page (#804)', async () => {
@@ -385,10 +450,13 @@ test('a choices card names a page with pick bars, and only such a page (#804)', 
 });
 
 // These start turns on M and the Taskmaster, which retires the nonce-less agent tokens the tests above use: keep them last.
-const sendPage = (body: object, headers: Record<string, string> = { Cookie: srv.cookie }) =>
-  fetch(`${srv.base}/api/artifact-send`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    .then(async (r) => ({ status: r.status, data: await r.json() }));
-const lastMessage = (id: number) => store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data)).at(-1);
+const sendPage = (body: object, headers: Record<string, string> = { Cookie: srv.cookie }) => fetch(`${srv.base}/api/artifact-send`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json() }));
+const lastMessage = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'user_message')
+    .map((e) => JSON.parse(e.data))
+    .at(-1);
 async function sharedPage(path: string) {
   const res = await fetch(`${srv.base}/api/projects/${A.id}/shared/file?path=${path}&raw=1`, { headers: { Cookie: srv.cookie }, redirect: 'manual' });
   return new URL(res.headers.get('location')!, `${srv.base}/api/projects/${A.id}/shared/file`).pathname.replace('/api/files/', '');
@@ -456,6 +524,12 @@ test("a choices page's Send settles its card in the chat that showed it (#804)",
   const r = await sendPage({ open: { ticket: M.id, path: 'choices.html' }, page, text: 'Picks on "Header takes":\n- A: Picked' });
   assert.equal(r.status, 202, JSON.stringify(r.data));
   assert.deepEqual(cardData(choicesCard).settled, { at: cardData(choicesCard).settled.at, by: 'Cara', sent: true });
-  assert.deepEqual(store.listEvents(M.id).filter((e) => e.kind === 'question_result').map((e) => JSON.parse(e.data).id), [choicesCard]);
+  assert.deepEqual(
+    store
+      .listEvents(M.id)
+      .filter((e) => e.kind === 'question_result')
+      .map((e) => JSON.parse(e.data).id),
+    [choicesCard],
+  );
   assert.equal(store.openCardsOf(M.id).length, 0);
 });

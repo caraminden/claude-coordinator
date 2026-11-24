@@ -22,7 +22,13 @@ const shared = () => mkdtempSync(join(tmpdir(), 'kit-shared-'));
 /** Every line of every retro log under a shared folder. */
 const logLines = (dir: string) => {
   try {
-    return readdirSync(join(dir, 'retro-log'), { recursive: true }).filter((f) => String(f).endsWith('.md')).flatMap((f) => readFileSync(join(dir, 'retro-log', String(f)), 'utf8').split('\n').filter((l) => l.startsWith('- ')));
+    return readdirSync(join(dir, 'retro-log'), { recursive: true })
+      .filter((f) => String(f).endsWith('.md'))
+      .flatMap((f) =>
+        readFileSync(join(dir, 'retro-log', String(f)), 'utf8')
+          .split('\n')
+          .filter((l) => l.startsWith('- ')),
+      );
   } catch {
     return [];
   }
@@ -30,7 +36,9 @@ const logLines = (dir: string) => {
 
 test('hooks.json is valid and every script it names exists in kit/hooks', () => {
   const { hooks } = JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'));
-  const commands = Object.values(hooks).flat().flatMap((m: any) => m.hooks.map((h: any) => h.command));
+  const commands = Object.values(hooks)
+    .flat()
+    .flatMap((m: any) => m.hooks.map((h: any) => h.command));
   for (const c of commands) {
     const file = c.match(/\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/([\w.-]+)/)?.[1];
     assert.ok(file && readdirSync(HOOKS).includes(file), c);
@@ -40,7 +48,7 @@ test('hooks.json is valid and every script it names exists in kit/hooks', () => 
   for (const c of commands.filter((c: string) => /\bnode /.test(c))) assert.ok(c.startsWith('NODE_COMPILE_CACHE="$CITADEL_HOOK_CACHE" node '), c);
 });
 
-test('job check: refuses a minion\'s stop while its background job runs, at most twice per prompt', () => {
+test("job check: refuses a minion's stop while its background job runs, at most twice per prompt", () => {
   assert.match(jobCheck(stop(), 'thread', 0)!, /still running.*b1 \(Run the test suite\), a Bash job/s);
   assert.match(jobCheck(stop(), 'thread', 0)!, /`citadel-wait pid <pid>`/, 'names a wait Claude Code lets through (#481)');
   assert.match(jobCheck(stop({ background_tasks: [{ ...running, pid: 4242 }] }), 'thread', 0)!, /`citadel-wait pid 4242`/, 'the pid when the task has it');
@@ -48,7 +56,20 @@ test('job check: refuses a minion\'s stop while its background job runs, at most
   // result (Claude Code's quiet background wait, probed on 2.1.323), so a refusal only cost a retry.
   const grunt = { id: 'a7', type: 'subagent', status: 'running', description: 'Review the diff', agent_type: 'citadel:reviewer' };
   assert.equal(jobCheck(stop({ background_tasks: [grunt] }), 'thread', 0), null, 'a Grunt alone: the stop goes through');
-  assert.equal(jobCheck(stop({ background_tasks: [{ ...grunt, type: 'local_agent' }, { ...grunt, id: 'a8' }] }), 'thread', 0), null, 'older type names, and several Grunts');
+  assert.equal(
+    jobCheck(
+      stop({
+        background_tasks: [
+          { ...grunt, type: 'local_agent' },
+          { ...grunt, id: 'a8' },
+        ],
+      }),
+      'thread',
+      0,
+    ),
+    null,
+    'older type names, and several Grunts',
+  );
   const both = jobCheck(stop({ background_tasks: [running, grunt] }), 'thread', 0)!;
   assert.match(both, /b1 \(Run the test suite\), a Bash job.*`citadel-wait pid <pid>`/s, 'a Bash job beside a Grunt is still refused');
   assert.doesNotMatch(both, /a7|Grunt|SendMessage/, 'and the refusal names only the Bash job');
@@ -74,7 +95,13 @@ test('job check: refuses a minion\'s stop while its background job runs, at most
   assert.equal(stopHook(stop({ prompt_id: 'p3', background_tasks: [grunt] }), env, dir), null, 'a stop with only a Grunt running goes through');
   assert.equal(logLines(env.COORDINATOR_SHARED_DIR).filter((l) => l.includes('refused stop')).length, 3, 'and logs no refused stop');
   stopHook(stop({ prompt_id: 'p4', background_tasks: [running, grunt] }), env, dir);
-  assert.doesNotMatch(logLines(env.COORDINATOR_SHARED_DIR).filter((l) => l.includes('refused stop')).at(-1)!, /a7/, 'a mixed stop logs only its Bash job');
+  assert.doesNotMatch(
+    logLines(env.COORDINATOR_SHARED_DIR)
+      .filter((l) => l.includes('refused stop'))
+      .at(-1)!,
+    /a7/,
+    'a mixed stop logs only its Bash job',
+  );
   // Without a prompt id, only a first stop is refused.
   assert.ok(stopHook(stop({ session_id: 's2', prompt_id: undefined }), env, dir));
   assert.equal(stopHook(stop({ session_id: 's2', prompt_id: undefined, stop_hook_active: true }), env, dir), null);
@@ -91,7 +118,7 @@ test('job check script prints the block for Claude Code, and fails open on bad i
   assert.equal(bad.stdout, '');
 });
 
-test('retro log: counts red tests from each runner\'s own summary line', () => {
+test("retro log: counts red tests from each runner's own summary line", () => {
   assert.equal(failedTests('ℹ tests 600\nℹ pass 598\nℹ fail 2\n'), 2);
   assert.equal(failedTests('# fail 1'), 1);
   assert.equal(failedTests('ℹ fail 0'), 0);
@@ -166,15 +193,27 @@ test('retro log: a red test or a failed push earns a line; a green run, a backgr
   assert.deepEqual(bashLines({ hook_event_name: 'PostToolUse', tool_input: { command: 'node --test', run_in_background: true }, tool_response: { stdout: 'ℹ fail 3' } }), []);
 });
 
-test('retro log: reads this prompt\'s tripwire and guard refusals from the transcript', () => {
-  const refusal = (promptId: string, id: string) => JSON.stringify({ type: 'user', promptId, message: { content: [{ type: 'tool_result', is_error: true, tool_use_id: id, content: `PreToolUse:Bash hook error: ['/usr/bin/node' '/x/tripwire.ts' '{"home":"/h"}']: [tripwire] ~/claude-coordinator is the live checkout.\n[tripwire] This guard stops known accidents in Citadel.\n` }] } });
-  const guard = JSON.stringify({ type: 'user', promptId: 'p1', message: { content: [{ type: 'tool_result', is_error: true, tool_use_id: 'g1', content: [{ type: 'text', text: 'PreToolUse:Bash hook error: ["$CLAUDE_PROJECT_DIR"/tools/guard.sh --hook bash]: [guard] Push to main refused.\n[guard] main only changes through a merged pull request.\n' }] }] } });
+test("retro log: reads this prompt's tripwire and guard refusals from the transcript", () => {
+  const refusal = (promptId: string, id: string) =>
+    JSON.stringify({
+      type: 'user',
+      promptId,
+      message: { content: [{ type: 'tool_result', is_error: true, tool_use_id: id, content: `PreToolUse:Bash hook error: ['/usr/bin/node' '/x/tripwire.ts' '{"home":"/h"}']: [tripwire] ~/claude-coordinator is the live checkout.\n[tripwire] This guard stops known accidents in Citadel.\n` }] },
+    });
+  const guard = JSON.stringify({
+    type: 'user',
+    promptId: 'p1',
+    message: { content: [{ type: 'tool_result', is_error: true, tool_use_id: 'g1', content: [{ type: 'text', text: 'PreToolUse:Bash hook error: ["$CLAUDE_PROJECT_DIR"/tools/guard.sh --hook bash]: [guard] Push to main refused.\n[guard] main only changes through a merged pull request.\n' }] }] },
+  });
   const transcript = [refusal('p0', 't0'), refusal('p1', 't1'), guard, JSON.stringify({ type: 'user', promptId: 'p1', message: { content: 'mentions [tripwire] PreToolUse: in prose' } }), 'not json [tripwire] PreToolUse:'].join('\n');
-  assert.deepEqual(refusals(transcript, 'p1'), [['t1', 'tripwire', 'Bash', '~/claude-coordinator is the live checkout.'], ['g1', 'guard', 'Bash', 'Push to main refused.']]);
-  assert.equal(refusals(transcript).length, 3, 'a subagent\'s transcript is read whole');
+  assert.deepEqual(refusals(transcript, 'p1'), [
+    ['t1', 'tripwire', 'Bash', '~/claude-coordinator is the live checkout.'],
+    ['g1', 'guard', 'Bash', 'Push to main refused.'],
+  ]);
+  assert.equal(refusals(transcript).length, 3, "a subagent's transcript is read whole");
 });
 
-test('retro log script: writes each line once, under the shared folder\'s retro-log/<date>/<session>.md', () => {
+test("retro log script: writes each line once, under the shared folder's retro-log/<date>/<session>.md", () => {
   const dir = shared();
   const transcript = join(mkdtempSync(join(tmpdir(), 'kit-tr-')), 't.jsonl');
   writeFileSync(transcript, JSON.stringify({ type: 'user', promptId: 'p1', message: { content: [{ type: 'tool_result', is_error: true, tool_use_id: 'u1', content: 'PreToolUse:Write hook error: [x]: [tripwire] Write of /x is blocked.\n' }] } }));
@@ -187,12 +226,15 @@ test('retro log script: writes each line once, under the shared folder\'s retro-
   const path = logPath(dir, 'sess', new Date());
   const log = readFileSync(path, 'utf8');
   assert.match(log, /^# Retro log: sess\n/);
-  assert.deepEqual(logLines(dir).map((l) => l.replace(/^- \S+ · /, '')), ['tripwire refusal · Write: Write of /x is blocked.', 'red test · 1 failed: node --test']);
+  assert.deepEqual(
+    logLines(dir).map((l) => l.replace(/^- \S+ · /, '')),
+    ['tripwire refusal · Write: Write of /x is blocked.', 'red test · 1 failed: node --test'],
+  );
   // No shared folder (a run outside Citadel): nothing written, nothing thrown.
   note({ session_id: 'x' }, 'red test', '1', {});
 });
 
-test('after-compact prints the branch and the working tree from the session\'s folder', () => {
+test("after-compact prints the branch and the working tree from the session's folder", () => {
   const out = spawnSync('bash', [join(HOOKS, 'after-compact.sh')], { cwd: join(import.meta.dirname, '..'), env: { ...process.env, CLAUDE_PROJECT_DIR: '' }, encoding: 'utf8' });
   assert.equal(out.status, 0);
   assert.match(out.stdout, /^\[after-compact\] This conversation was just compacted/);
@@ -203,7 +245,22 @@ test('test-first reminder: once per session on the first source edit, quiet afte
   const dir = mkdtempSync(join(tmpdir(), 'kit-test-first-'));
   const edit = (file: string, session = 's1') => testFirstHook({ hook_event_name: 'PostToolUse', tool_name: 'Edit', session_id: session, cwd: '/w', tool_input: { file_path: file } }, dir);
   const bash = (command: string, session: string, over: object = {}) => testFirstHook({ hook_event_name: 'PostToolUse', tool_name: 'Bash', session_id: session, cwd: '/w', tool_input: { command }, tool_response: { stdout: '', stderr: '' }, ...over }, dir);
-  for (const f of ['/w/test/a.test.ts', '/w/src/a.test.ts', '/w/crates/x/tests/busy.rs', '/w/ingest/tests/test_x.py', '/w/README.md', '/w/docs/adr/1.md', '/w/package.json', '/w/vite.config.ts', '/w/public/app.js', '/w/web/page.tsx', '/w/src/style.css', '/w/kit/skills/x/SKILL.md', '/tmp/scratch.ts', '/w/../other/src/a.ts']) {
+  for (const f of [
+    '/w/test/a.test.ts',
+    '/w/src/a.test.ts',
+    '/w/crates/x/tests/busy.rs',
+    '/w/ingest/tests/test_x.py',
+    '/w/README.md',
+    '/w/docs/adr/1.md',
+    '/w/package.json',
+    '/w/vite.config.ts',
+    '/w/public/app.js',
+    '/w/web/page.tsx',
+    '/w/src/style.css',
+    '/w/kit/skills/x/SKILL.md',
+    '/tmp/scratch.ts',
+    '/w/../other/src/a.ts',
+  ]) {
     assert.equal(edit(f, 'quiet'), null, f);
   }
   // A first source edit, after those: the reminder, as context, once.
@@ -231,8 +288,7 @@ test('test-first reminder: once per session on the first source edit, quiet afte
 
 test('flail brake: three identical red runs with no edit between give the line once; an edit, a green run or another command resets the count', () => {
   const dir = mkdtempSync(join(tmpdir(), 'kit-flail-'));
-  const run = (command: string, red: boolean, session: string) =>
-    flailBrakeHook({ hook_event_name: red ? 'PostToolUseFailure' : 'PostToolUse', tool_name: 'Bash', session_id: session, cwd: '/w', tool_input: { command }, ...(red ? { error: 'Exit code 1' } : { tool_response: { stdout: '', stderr: '' } }) }, dir);
+  const run = (command: string, red: boolean, session: string) => flailBrakeHook({ hook_event_name: red ? 'PostToolUseFailure' : 'PostToolUse', tool_name: 'Bash', session_id: session, cwd: '/w', tool_input: { command }, ...(red ? { error: 'Exit code 1' } : { tool_response: { stdout: '', stderr: '' } }) }, dir);
   const edit = (session: string, tool_name = 'Edit') => flailBrakeHook({ hook_event_name: 'PostToolUse', tool_name, session_id: session, cwd: '/w', tool_input: { file_path: '/w/src/a.ts' } }, dir);
   const cmd = 'node --test test/a.test.ts';
   // Three the same: quiet, quiet, the line; then quiet for the rest of the streak.
@@ -310,18 +366,43 @@ test('big-read guard: sends back whole reads and plain cat/sed of big files, let
   denied(read({ file_path: join(dir, 'wide.css') }), 'whole read, 40k chars');
   denied(read({ file_path: join(dir, 'big.ts'), offset: 100 }), 'offset with no limit still reads 800 lines');
   // Let through: a small file, a ranged read, allow_large, a short tail from an offset, binaries and missing paths.
-  for (const input of [{ file_path: join(dir, 'small.ts') }, { file_path: join(dir, 'big.ts'), offset: 1, limit: 200 }, { file_path: join(dir, 'big.ts'), limit: 800 }, { file_path: join(dir, 'big.ts'), allow_large: true }, { file_path: join(dir, 'big.ts'), offset: 700 }, { file_path: join(dir, 'pic.png') }, { file_path: join(dir, 'nope.ts') }, { file_path: dir }]) {
+  for (const input of [
+    { file_path: join(dir, 'small.ts') },
+    { file_path: join(dir, 'big.ts'), offset: 1, limit: 200 },
+    { file_path: join(dir, 'big.ts'), limit: 800 },
+    { file_path: join(dir, 'big.ts'), allow_large: true },
+    { file_path: join(dir, 'big.ts'), offset: 700 },
+    { file_path: join(dir, 'pic.png') },
+    { file_path: join(dir, 'nope.ts') },
+    { file_path: dir },
+  ]) {
     assert.equal(read(input), null, JSON.stringify(input));
   }
   // Bash: a plain cat or sed -n range over the bar is sent back, naming the cheaper way.
   assert.match(denied(bash('cat big.ts'), 'cat'), /sed -n|offset\/limit/);
   denied(bash(`cat -n "${join(dir, 'wide.css')}"`), 'cat -n, quoted absolute path');
-  denied(bash("git status; cat big.ts && echo done"), 'cat between other commands');
+  denied(bash('git status; cat big.ts && echo done'), 'cat between other commands');
   denied(bash("sed -n '1,800p' big.ts"), 'sed range of 800 lines');
   denied(bash("sed -n '50,$p' big.ts"), 'sed to the end');
   assert.match(denied(bash('cat small.ts big.ts'), 'two files'), /# allow_large/);
   // Let through: small files and ranges, pipes, redirects, expansions, a cd first, other commands, and the marker.
-  for (const c of ['cat small.ts', "sed -n '1,200p' big.ts", "sed -n '100,300p;400,500p' big.ts", 'cat big.ts | grep line1', 'cat big.ts > copy.ts', 'cat $F', 'cat *.ts', 'cd sub && cat big.ts', 'cat big.ts # allow_large', "sed -i 's/a/b/' big.ts", 'head -n 900 big.ts', 'cat nope.ts', 'cat pic.png', "echo 'cat big.ts'", 'grep -n line big.ts']) {
+  for (const c of [
+    'cat small.ts',
+    "sed -n '1,200p' big.ts",
+    "sed -n '100,300p;400,500p' big.ts",
+    'cat big.ts | grep line1',
+    'cat big.ts > copy.ts',
+    'cat $F',
+    'cat *.ts',
+    'cd sub && cat big.ts',
+    'cat big.ts # allow_large',
+    "sed -i 's/a/b/' big.ts",
+    'head -n 900 big.ts',
+    'cat nope.ts',
+    'cat pic.png',
+    "echo 'cat big.ts'",
+    'grep -n line big.ts',
+  ]) {
     assert.equal(bash(c), null, c);
   }
   // Other tools pass, and the script prints the deny for Claude Code and nothing on a broken input.
@@ -348,7 +429,8 @@ test('after-call runner: on a recorded session it says and logs exactly what the
     const dir = mkdtempSync(join(tmpdir(), `kit-run-${name}-`));
     return { tmp: join(dir, 'tmp'), shared: join(dir, 'shared') };
   };
-  const old = side('old'), now = side('new');
+  const old = side('old'),
+    now = side('new');
   const env = (s: { tmp: string; shared: string }) => ({ ...process.env, TMPDIR: s.tmp, COORDINATOR_SHARED_DIR: s.shared, COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '42', COORDINATOR_NUMBER: '42' });
   for (const s of [old, now]) mkdirSync(s.tmp, { recursive: true });
   const script = (file: string, input: string, s: { tmp: string; shared: string }) => spawnSync(process.execPath, [join(HOOKS, file)], { input, env: env(s), encoding: 'utf8' }).stdout;
@@ -368,7 +450,10 @@ test('after-call runner: on a recorded session it says and logs exactly what the
   for (const c of calls) {
     const input = JSON.stringify({ hook_event_name: 'PostToolUse', session_id: 'rec', cwd: '/w', ...c });
     const { hook_event_name: event, tool_name: tool } = JSON.parse(input);
-    const alone = Object.entries(OLD_POST[event]).filter(([m]) => exact(m).test(tool)).flatMap(([, files]) => files).map((f) => script(f, input, old));
+    const alone = Object.entries(OLD_POST[event])
+      .filter(([m]) => exact(m).test(tool))
+      .flatMap(([, files]) => files)
+      .map((f) => script(f, input, old));
     // hooks.json starts run.ts on exactly the calls the old entries took.
     const entries = (hooks[event] ?? []).filter((m: any) => exact(m.matcher).test(tool));
     assert.equal(entries.length, 1, `${event} ${tool}`);
@@ -378,12 +463,17 @@ test('after-call runner: on a recorded session it says and logs exactly what the
     else assert.deepEqual(lines([got]), lines(alone), `${event} ${tool}`);
     said += lines(alone).length;
   }
-  assert.ok(said >= 3, 'the session gave the batch, test-first and flail lines'); 
+  assert.ok(said >= 3, 'the session gave the batch, test-first and flail lines');
   const untimed = (dir: string) => logLines(dir).map((l) => l.replace(/^- \d\d:\d\d:\d\dZ · /, '- '));
   assert.deepEqual(untimed(now.shared), untimed(old.shared));
   assert.ok(logLines(old.shared).length > 0, 'the red runs were logged');
   // Calls no old entry took start nothing, and a broken input says nothing.
-  for (const [event, tool] of [['PostToolUse', 'Agent'], ['PostToolUseFailure', 'Read'], ['PostToolUseFailure', 'Edit']]) assert.ok(!(hooks[event] ?? []).some((m: any) => exact(m.matcher).test(tool)), `${event} ${tool}`);
+  for (const [event, tool] of [
+    ['PostToolUse', 'Agent'],
+    ['PostToolUseFailure', 'Read'],
+    ['PostToolUseFailure', 'Edit'],
+  ])
+    assert.ok(!(hooks[event] ?? []).some((m: any) => exact(m.matcher).test(tool)), `${event} ${tool}`);
   assert.equal(script('run.ts', 'not json', now), '');
 });
 
@@ -401,7 +491,17 @@ test('any nudge: an edit that adds an explicit any or @ts-ignore to a TypeScript
     assert.equal(call('Edit', 'a.ts', 'let a: any = 1; // any\nconst any = "any";\n', { old_string: 'let a: any = 1;', new_string: 'let a: any = 1; // any\nconst any = "any";' }), null);
     assert.match(said(call('Edit', 'b.ts', '// @ts-ignore\nf(1);\n', { old_string: 'f(1);', new_string: '// @ts-ignore\nf(1);', replace_all: true })) ?? '', /added 1 /);
     // A MultiEdit is undone edit by edit, last first.
-    assert.match(said(call('MultiEdit', 'c.tsx', 'const x = <div y={z as any} />;\nlet q: any[] = [];\n', { edits: [{ old_string: 'z', new_string: 'z as any' }, { old_string: 'let q = [];', new_string: 'let q: any[] = [];' }] })) ?? '', /added 2 .* to c\.tsx/);
+    assert.match(
+      said(
+        call('MultiEdit', 'c.tsx', 'const x = <div y={z as any} />;\nlet q: any[] = [];\n', {
+          edits: [
+            { old_string: 'z', new_string: 'z as any' },
+            { old_string: 'let q = [];', new_string: 'let q: any[] = [];' },
+          ],
+        }),
+      ) ?? '',
+      /added 2 .* to c\.tsx/,
+    );
     // A Write: what it replaced, or nothing for a new file.
     assert.match(said(call('Write', 'd.ts', 'let a: any;\n', {})) ?? '', /added 1 .* to d\.ts \(1 now\)/);
     assert.equal(anyNudgeHook({ hook_event_name: 'PostToolUse', tool_name: 'Write', cwd: dir, tool_input: { file_path: join(dir, 'd.ts') }, tool_response: { originalFile: 'let a: any;\n' } }), null);
@@ -429,7 +529,7 @@ test('grunt-model guard: sends back an Agent call with no deliberate model or ef
   const denied = (out: string | null) => out && JSON.parse(out).hookSpecificOutput.permissionDecision === 'deny';
   const reason = (out: string | null) => JSON.parse(out!).hookSpecificOutput.permissionDecisionReason as string;
   // A call it lets through runs, in the foreground when it didn't say (#1031).
-  const ran = (out: string | null) => !!out && (!JSON.parse(out).hookSpecificOutput.permissionDecision && JSON.parse(out).hookSpecificOutput.updatedInput.run_in_background === false);
+  const ran = (out: string | null) => !!out && !JSON.parse(out).hookSpecificOutput.permissionDecision && JSON.parse(out).hookSpecificOutput.updatedInput.run_in_background === false;
 
   // A bare call (general-purpose by default) and built-ins with half a choice are sent back, pointing at the table.
   for (const ti of [{}, { subagent_type: 'general-purpose' }, { subagent_type: 'Explore', effort: 'low' }, { subagent_type: 'Plan', effort: 'high' }, { subagent_type: 'Plan', model: 'opus' }]) assert.ok(denied(call(ti)), JSON.stringify(ti));
@@ -496,7 +596,7 @@ test('grunt-model table: every kit agent pins model and effort, and its frontmat
   }
 });
 
-test('writing-for-agents\' HOOKS.md names every hook: the kit\'s (kit/hooks/) and the ones each turn gets (src/turn-launch.ts) (#1154)', () => {
+test("writing-for-agents' HOOKS.md names every hook: the kit's (kit/hooks/) and the ones each turn gets (src/turn-launch.ts) (#1154)", () => {
   const catalogue = readFileSync(join(import.meta.dirname, '..', 'kit', 'skills', 'writing-for-agents', 'HOOKS.md'), 'utf8');
   const kit = readdirSync(HOOKS).filter((f) => /\.(?:ts|sh)$/.test(f));
   const launch = readFileSync(join(import.meta.dirname, '..', 'src', 'turn-launch.ts'), 'utf8');
@@ -554,14 +654,52 @@ test('heavy-nudge: says the citadel-heavy line on covered heavy builds, and noth
     const out = heavyNudgeHook({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: { command } });
     return out ? JSON.parse(out).hookSpecificOutput : null;
   };
-  for (const c of ['cargo build --workspace', 'cargo test --workspace --all-features', 'cargo check --all', 'cargo clippy --workspace -- -D warnings', 'cargo build --release', 'cargo +nightly test --release', 'cargo build --target aarch64-linux-android', 'cd app && cargo test --workspace', 'FOO=1 cargo test --workspace', 'npm test', 'npm run test', 'cd x; npm test 2>&1 | tail -5', 'npm test 2>/dev/null', 'npm test > log.txt', 'nice -n 10 cargo build --release', 'timeout -k 5 600 cargo test --workspace', "sh -c 'cargo test --workspace'", '(cargo clippy --workspace)']) {
+  for (const c of [
+    'cargo build --workspace',
+    'cargo test --workspace --all-features',
+    'cargo check --all',
+    'cargo clippy --workspace -- -D warnings',
+    'cargo build --release',
+    'cargo +nightly test --release',
+    'cargo build --target aarch64-linux-android',
+    'cd app && cargo test --workspace',
+    'FOO=1 cargo test --workspace',
+    'npm test',
+    'npm run test',
+    'cd x; npm test 2>&1 | tail -5',
+    'npm test 2>/dev/null',
+    'npm test > log.txt',
+    'nice -n 10 cargo build --release',
+    'timeout -k 5 600 cargo test --workspace',
+    "sh -c 'cargo test --workspace'",
+    '(cargo clippy --workspace)',
+  ]) {
     const h = ctx(c);
     assert.ok(h, `${c} is covered`);
     assert.equal(h.hookEventName, 'PreToolUse');
     assert.equal(h.additionalContext, HEAVY_NUDGE);
     assert.equal(h.permissionDecision, undefined, 'it never blocks');
   }
-  for (const c of ['cargo test -p one-crate', 'cargo check', 'cargo build', 'cargo run', 'cargo fmt --all', 'cargo test -- --release', 'npm test -- test/one.test.ts', 'npm run dev', 'npm run build', 'npm install', 'tools/land.sh', 'citadel-test test/a.test.ts', 'citadel-heavy cargo test --workspace', 'citadel-heavy --here cargo build --release', 'FOO=1 citadel-heavy npm test', 'git commit -m "cargo test --workspace"', 'ls']) assert.equal(ctx(c), null, `${c} is quiet`);
+  for (const c of [
+    'cargo test -p one-crate',
+    'cargo check',
+    'cargo build',
+    'cargo run',
+    'cargo fmt --all',
+    'cargo test -- --release',
+    'npm test -- test/one.test.ts',
+    'npm run dev',
+    'npm run build',
+    'npm install',
+    'tools/land.sh',
+    'citadel-test test/a.test.ts',
+    'citadel-heavy cargo test --workspace',
+    'citadel-heavy --here cargo build --release',
+    'FOO=1 citadel-heavy npm test',
+    'git commit -m "cargo test --workspace"',
+    'ls',
+  ])
+    assert.equal(ctx(c), null, `${c} is quiet`);
   assert.equal(ctx('cargo test --workspace', 'Read'), null);
   const run = (input: string) => spawnSync(process.execPath, [join(HOOKS, 'heavy-nudge.ts')], { input, encoding: 'utf8' });
   assert.match(run(JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'npm test' } })).stdout, /citadel-heavy/);

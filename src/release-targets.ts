@@ -77,14 +77,7 @@ export function buildOf(name: string, inside: string[] | null): { platform: stri
   const lower = name.toLowerCase();
   const has = (re: RegExp) => !!inside?.some((n) => re.test(n));
   // A Chrome extension zip has its manifest at the root (or in one folder); a Windows build, an .exe; an APK may come zipped.
-  const platform = /\.(apk|aab)$/.test(lower) ? 'Android'
-    : /\.xpi$/.test(lower) ? (has(/^manifest\.json$/) ? 'Firefox' : null)
-    : !/\.zip$/.test(lower) ? null
-    : has(/^([^/]+\/)?manifest\.json$/) ? 'Chrome'
-    : has(/\.exe$/i) ? 'Windows'
-    : has(/\.apk$/i) ? 'Android'
-    : has(/\.app\//) ? 'macOS'
-    : null;
+  const platform = /\.(apk|aab)$/.test(lower) ? 'Android' : /\.xpi$/.test(lower) ? (has(/^manifest\.json$/) ? 'Firefox' : null) : !/\.zip$/.test(lower) ? null : has(/^([^/]+\/)?manifest\.json$/) ? 'Chrome' : has(/\.exe$/i) ? 'Windows' : has(/\.apk$/i) ? 'Android' : has(/\.app\//) ? 'macOS' : null;
   if (!platform) return null;
   const version = /[-_ ]v?(\d+\.\d+(?:\.\d+)*)(?=[-_. ])/.exec(name)?.[1] ?? /-([0-9a-f]{7,40})(?=[-.])/.exec(name)?.[1] ?? name.replace(/\.[a-z0-9]+$/i, '');
   // Delve's windows-build.sh names a branch's build Delve-ticket-<n>-…-<sha>-windows.zip; a build's or main's isn't a minion's branch.
@@ -102,7 +95,9 @@ export async function zipNames(file: string): Promise<string[] | null> {
     await fh.read(tail, 0, tail.length, size - tail.length);
     const end = tail.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
     if (end < 0 || end + 22 > tail.length) return null;
-    const count = tail.readUInt16LE(end + 10), dirSize = tail.readUInt32LE(end + 12), dirAt = tail.readUInt32LE(end + 16);
+    const count = tail.readUInt16LE(end + 10),
+      dirSize = tail.readUInt32LE(end + 12),
+      dirAt = tail.readUInt32LE(end + 16);
     if (dirSize > 8_000_000 || dirAt + dirSize > size) return null;
     const dir = Buffer.alloc(dirSize);
     await fh.read(dir, 0, dirSize, dirAt);
@@ -170,7 +165,13 @@ function block(text: string, key: string): { inline: string; body: string } | nu
   if (i < 0) return null;
   let j = i + 1;
   while (j < lines.length && !/^[^\s#]/.test(lines[j])) j++;
-  return { inline: lines[i].replace(/^[^:]+:/, '').replace(/#.*/, '').trim(), body: lines.slice(i + 1, j).join('\n') };
+  return {
+    inline: lines[i]
+      .replace(/^[^:]+:/, '')
+      .replace(/#.*/, '')
+      .trim(),
+    body: lines.slice(i + 1, j).join('\n'),
+  };
 }
 
 /** The keys one level in (`  push:`, `  release:`), each with its lines; the level is the first key's indent, whatever its width. */
@@ -196,7 +197,14 @@ function children(body: string): Map<string, string> {
 export function shipsOn(text: string, branch: string): 'push' | 'dispatch' | null {
   const on = block(text, 'on');
   if (!on) return null;
-  const events = on.inline ? new Map(on.inline.replace(/[[\]]/g, '').split(',').map((e) => [e.trim(), ''] as [string, string])) : children(on.body);
+  const events = on.inline
+    ? new Map(
+        on.inline
+          .replace(/[[\]]/g, '')
+          .split(',')
+          .map((e) => [e.trim(), ''] as [string, string]),
+      )
+    : children(on.body);
   if (events.has('release')) return 'push';
   const push = events.get('push');
   if (push != null) {
@@ -215,7 +223,17 @@ export function pushPaths(text: string): string[] | null {
   const push = on && !on.inline ? children(on.body).get('push') : null;
   const list = push ? /\bpaths:([^\n]*(?:\n\s+-[^\n]*)*)/.exec(push)?.[1] : null;
   if (!list) return null;
-  const items = list.replace(/[[\]]/g, '').split(/[\n,]/).map((l) => l.replace(/^\s*-?\s*/, '').replace(/#.*/, '').trim().replace(/^(["'])(.*)\1$/, '$2')).filter(Boolean);
+  const items = list
+    .replace(/[[\]]/g, '')
+    .split(/[\n,]/)
+    .map((l) =>
+      l
+        .replace(/^\s*-?\s*/, '')
+        .replace(/#.*/, '')
+        .trim()
+        .replace(/^(["'])(.*)\1$/, '$2'),
+    )
+    .filter(Boolean);
   return items.length ? items : null;
 }
 
@@ -266,7 +284,13 @@ const RELEASE_JOB = /release|package|dist|publish|bundle|installer/i;
 
 /** A job's own `name:` (not a step's or an input's), unquoted, or null. */
 export function jobName(job: string): string | null {
-  return children(job).get('name')?.replace(/#.*/, '').trim().replace(/^(["'])(.*)\1$/, '$2') || null;
+  return (
+    children(job)
+      .get('name')
+      ?.replace(/#.*/, '')
+      .trim()
+      .replace(/^(["'])(.*)\1$/, '$2') || null
+  );
 }
 
 /** A job that hands people something: it publishes a GitHub Release, or uploads an artifact from a release-like job. */
@@ -346,8 +370,12 @@ export function detect(f: SchemeFacts): Found[] {
     const needs = t.kind === 'ci' ? needsOf(o?.release) : [];
     const desktop = t.kind === 'ci' ? desktopTargetOf(o?.desktop) : null;
     kept.push({
-      ...t, ...(typeof o?.name === 'string' && o.name.trim() ? { name: o.name.trim() } : {}), ...(typeof o?.link === 'string' ? { link: o.link } : {}),
-      ...(paths.length ? { paths } : {}), ...(numbering ? { numbering } : {}), ...(needs.length ? { needs } : {}),
+      ...t,
+      ...(typeof o?.name === 'string' && o.name.trim() ? { name: o.name.trim() } : {}),
+      ...(typeof o?.link === 'string' ? { link: o.link } : {}),
+      ...(paths.length ? { paths } : {}),
+      ...(numbering ? { numbering } : {}),
+      ...(needs.length ? { needs } : {}),
       ...(desktop ? { desktop } : {}),
     });
   }
@@ -365,7 +393,14 @@ function numberingOf(r: Override['release']): Target['numbering'] | null {
 /** An override's `release.needs`: workflow file names (".github/workflows/desktop.yml" or "desktop.yml"), as file names. */
 function needsOf(r: Override['release']): string[] {
   const list = r && typeof r === 'object' && Array.isArray(r.needs) ? r.needs : [];
-  return [...new Set(list.filter((w): w is string => typeof w === 'string').map((w) => w.trim().replace(/^.*\//, '')).filter((w) => /^[\w.-]+\.ya?ml$/.test(w)))];
+  return [
+    ...new Set(
+      list
+        .filter((w): w is string => typeof w === 'string')
+        .map((w) => w.trim().replace(/^.*\//, ''))
+        .filter((w) => /^[\w.-]+\.ya?ml$/.test(w)),
+    ),
+  ];
 }
 
 /** The overrides in a citadel-app.json's text: its `targets`, the well-formed entries only. */
@@ -383,7 +418,13 @@ export function overridesOf(text: string | null): Override[] {
 export function workdirOf(text: string | null): string | undefined {
   try {
     const w = text ? JSON.parse(text)?.workdir : null;
-    const dir = typeof w === 'string' ? w.trim().replace(/^\.?\/+/, '').replace(/\/+$/, '') : '';
+    const dir =
+      typeof w === 'string'
+        ? w
+            .trim()
+            .replace(/^\.?\/+/, '')
+            .replace(/\/+$/, '')
+        : '';
     return dir && dir !== '.' && !dir.startsWith('..') ? `${dir}/` : undefined;
   } catch {
     return undefined;
@@ -427,7 +468,10 @@ export class TargetFinder {
     this.seenBuilds.clear();
     for (const p of store.listProjects()) {
       seen.add(p.id);
-      const facts = await this.facts(p, apps.filter((c) => c.home_scheme === p.id));
+      const facts = await this.facts(
+        p,
+        apps.filter((c) => c.home_scheme === p.id),
+      );
       // A clone git can't read keeps what was found before, rather than its targets blinking out.
       if (facts) {
         const found = detect(facts);

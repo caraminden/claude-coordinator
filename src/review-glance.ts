@@ -22,12 +22,17 @@ export const folderOf = (p: string) => {
 /** The critics of a scheme's own that watch a diff: on, written for the scheme (not the kit's, not a repo agent file), with diff globs. A teacher runs only on a hand-off, so its globs watch nothing. */
 export const ownGlobs = (entries: ReviewEntry[]) => entries.filter((e) => e.enabled && e.kind !== 'teacher' && !fromFile(e) && e.triggers.diff?.length).flatMap((e) => e.triggers.diff!);
 
-export interface Coverage { changes: number; watched: number; gaps: { folder: string; changes: number }[] }
+export interface Coverage {
+  changes: number;
+  watched: number;
+  gaps: { folder: string; changes: number }[];
+}
 
 /** Each changed path (once per commit it changed in), less tests and docs, against the globs. Gaps: the unwatched folders, biggest first. */
 export function coverage(paths: string[], globs: string[]): Coverage {
   const gaps = new Map<string, number>();
-  let changes = 0, watched = 0;
+  let changes = 0,
+    watched = 0;
   for (const p of paths) {
     if (isTestOrDoc(p)) continue;
     changes++;
@@ -53,8 +58,10 @@ export function changedPaths(repoDir: string | null | undefined, now = Date.now(
 
 /** Minions closed in the last week and how many of them a judge recorded a run on; the scheme's last recorded run. */
 export function judged(db: DatabaseSync, projectId: number, now = Date.now()): { closed: number; judged: number; last: number | null } {
-  const w = db.prepare(`SELECT count(*) AS closed, coalesce(sum(EXISTS (SELECT 1 FROM review_runs r WHERE r.ticket_id = t.id)), 0) AS judged
-    FROM tickets t WHERE t.project_id = ? AND t.kind != 'coordinator' AND t.status = 'closed' AND t.closed_at >= ?`).get(projectId, now - 7 * DAY) as { closed: number; judged: number };
+  const w = db
+    .prepare(`SELECT count(*) AS closed, coalesce(sum(EXISTS (SELECT 1 FROM review_runs r WHERE r.ticket_id = t.id)), 0) AS judged
+    FROM tickets t WHERE t.project_id = ? AND t.kind != 'coordinator' AND t.status = 'closed' AND t.closed_at >= ?`)
+    .get(projectId, now - 7 * DAY) as { closed: number; judged: number };
   const l = db.prepare('SELECT max(r.at) AS at FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ?').get(projectId) as { at: number | null };
   return { closed: w.closed, judged: w.judged, last: l.at };
 }

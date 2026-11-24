@@ -13,22 +13,21 @@ const run = (...args: string[]) => spawnSync('node', [tool, ...args], { encoding
 const put = (root: string, rel: string, text: string, ageDays = 0) => {
   mkdirSync(dirname(join(root, rel)), { recursive: true });
   writeFileSync(join(root, rel), text);
-  if (ageDays) { const t = new Date(Date.now() - ageDays * 864e5); utimesSync(join(root, rel), t, t); }
+  if (ageDays) {
+    const t = new Date(Date.now() - ageDays * 864e5);
+    utimesSync(join(root, rel), t, t);
+  }
 };
 
 test('refs: dead paths are named with file and line; real, allowed, placeholder and fenced ones pass', () => {
   const repo = join(dir, 'repo');
   execFileSync('git', ['init', '-q', repo]);
   put(repo, 'tools/real.sh', '#!/bin/sh\n');
-  put(repo, 'CLAUDE.md', [
-    'Real `tools/real.sh --flag` and `real.sh` and `tools/` here.',
-    'Dead `docs/retros/` and `tools/gone.ts:12` and `specs/plan.md`.',
-    'Skipped: `tools/<name>.sh`, `https://x.dev/a/b.md`, `and/or`, `~/x/y.md`, `$HOME/a.md`.',
-    'Allowed `examples/foo.md`.',
-    '```',
-    '`tools/in-a-fence.sh`',
-    '```',
-  ].join('\n'));
+  put(
+    repo,
+    'CLAUDE.md',
+    ['Real `tools/real.sh --flag` and `real.sh` and `tools/` here.', 'Dead `docs/retros/` and `tools/gone.ts:12` and `specs/plan.md`.', 'Skipped: `tools/<name>.sh`, `https://x.dev/a/b.md`, `and/or`, `~/x/y.md`, `$HOME/a.md`.', 'Allowed `examples/foo.md`.', '```', '`tools/in-a-fence.sh`', '```'].join('\n'),
+  );
   put(repo, '.stale-docs-allow', 'examples/*  # an example folder\n');
   put(repo, 'docs/index.md', 'x\n');
   const r = run('refs', '--repo', repo);
@@ -45,7 +44,8 @@ test('refs --new-since: old dead paths pass, a newly added one fails; copied ski
   const git = (...a: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
   put(repo, 'tools/real.sh', 'x\n');
   put(repo, 'CLAUDE.md', 'Old debt `docs/gone.md`.\n');
-  git('add', '-A'); git('commit', '-qm', 'base');
+  git('add', '-A');
+  git('commit', '-qm', 'base');
   const base = git('rev-parse', 'HEAD').trim();
   assert.equal(run('refs', '--repo', repo, '--new-since', base).status, 0);
   put(repo, '.claude/skills/s/references/x.md', 'Live `tools/real.sh`, example `<scheme>/a.md`, dead `src/new-gone.ts`.\n');

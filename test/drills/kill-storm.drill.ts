@@ -38,7 +38,11 @@ test('5 kills in under a minute: each turn finishes once, none is resumed or wri
   assert.ok(stormEnd - stormStart < 60_000, `the storm took ${stormEnd - stormStart} ms`);
   for (const id of minions) {
     assert.equal(d.stream(id, 'result').length, 1, `#${id} took its reply once`);
-    assert.deepEqual(d.notes(id).filter((n) => /Resumed|interrupted|killed/.test(n)), [], `#${id}'s chat`);
+    assert.deepEqual(
+      d.notes(id).filter((n) => /Resumed|interrupted|killed/.test(n)),
+      [],
+      `#${id}'s chat`,
+    );
   }
   assert.equal(d.fake.turnsRun(), 3, 'three turns ran, no resumes beside them');
 });

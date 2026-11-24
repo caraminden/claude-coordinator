@@ -35,7 +35,9 @@ export function duration(ms) {
 
 /** The default step label: `mcp__mandate__move_todo` as "Move todo". */
 const defaultLabel = (name) => {
-  const short = String(name ?? '').replace(/^mcp__.+?__/, '').replace(/_/g, ' ');
+  const short = String(name ?? '')
+    .replace(/^mcp__.+?__/, '')
+    .replace(/_/g, ' ');
   return short.charAt(0).toUpperCase() + short.slice(1);
 };
 
@@ -118,9 +120,7 @@ export function chatModel(turns, opts = {}) {
 
 const STATE_WORD = { running: 'Running', done: 'Done', failed: 'Failed', stopped: 'Stopped' };
 const MARK = { done: '✓', failed: '✕', stopped: '–' };
-const markHtml = (state) => (state === 'running'
-  ? '<span class="cui-spin" role="img" aria-label="Running"></span>'
-  : `<span class="cui-mark" data-state="${esc(state)}" role="img" aria-label="${STATE_WORD[state] ?? esc(state)}">${MARK[state] ?? '·'}</span>`);
+const markHtml = (state) => (state === 'running' ? '<span class="cui-spin" role="img" aria-label="Running"></span>' : `<span class="cui-mark" data-state="${esc(state)}" role="img" aria-label="${STATE_WORD[state] ?? esc(state)}">${MARK[state] ?? '·'}</span>`);
 
 /** A step's or Grunt's clock: ticking from `data-since` while it runs, fixed once it ends, none without a start. */
 const clockHtml = (s, now) => {
@@ -148,12 +148,13 @@ function runHtml(b, o) {
   const failed = b.steps.filter((s) => s.state === 'failed').length;
   const grunts = b.steps.filter((s) => s.grunt).length;
   const state = now ? 'running' : failed ? 'failed' : b.steps.some((s) => s.state === 'stopped') ? 'stopped' : 'done';
-  const label = now
-    ? `<b>${esc(now.grunt ? gruntName(now.input) : labelOf(now, o.stepLabel))}…</b> · step ${n}`
-    : [plural(n, 'step'), grunts ? plural(grunts, 'Grunt') : '', failed ? `${failed} failed` : ''].filter(Boolean).join(' · ');
+  const label = now ? `<b>${esc(now.grunt ? gruntName(now.input) : labelOf(now, o.stepLabel))}…</b> · step ${n}` : [plural(n, 'step'), grunts ? plural(grunts, 'Grunt') : '', failed ? `${failed} failed` : ''].filter(Boolean).join(' · ');
   const body = open
     ? `<ul class="cui-steps">${b.steps.map((s) => (s.grunt ? `<li class="cui-step-grunt">${gruntHtml(s, o, true)}</li>` : stepHtml(s, o))).join('')}</ul>`
-    : b.steps.filter((s) => s.grunt && s.state === 'running').map((g) => gruntHtml(g, o, true)).join('');
+    : b.steps
+        .filter((s) => s.grunt && s.state === 'running')
+        .map((g) => gruntHtml(g, o, true))
+        .join('');
   return `<div class="cui-run" data-state="${state}" data-key="${esc(b.id)}"><button type="button" class="cui-run-head" aria-expanded="${open}">${markHtml(state)}<span class="cui-run-label">${label}</span><span class="cui-chev" aria-hidden="true">${open ? '▾' : '▸'}</span></button>${body}</div>`;
 }
 
@@ -162,10 +163,14 @@ export const RETRY_SAY = 'Your last turn was cut off before it finished. Carry o
 
 function blockHtml(b, o, streaming) {
   switch (b.kind) {
-    case 'text': return `<div class="cui-md">${renderMarkdown(b.text, mdOpts(o.markdown, streaming))}</div>`;
-    case 'steps': return runHtml(b, o);
-    case 'card': return '<div class="cui-card"></div>';
-    case 'stopped': return '<div class="cui-stopped">Stopped.</div>';
+    case 'text':
+      return `<div class="cui-md">${renderMarkdown(b.text, mdOpts(o.markdown, streaming))}</div>`;
+    case 'steps':
+      return runHtml(b, o);
+    case 'card':
+      return '<div class="cui-card"></div>';
+    case 'stopped':
+      return '<div class="cui-stopped">Stopped.</div>';
     case 'error': {
       const notice = `<div class="cui-notice" data-tone="danger"><b>Couldn't finish:</b> ${esc(b.message || b.code)}</div>`;
       // A live chat with onReply only: the tap sends RETRY_SAY as the person's message, in the same session.
@@ -186,7 +191,9 @@ const askHtml = (text) => (text == null ? '' : `<div class="cui-ask">${esc(text)
 /** The chat as HTML (no live parts: cards are empty slots, clocks read at `now`). For a server, a print view or a test. */
 export function renderChat(turns, opts = {}) {
   const o = { ...opts, now: opts.now ?? Date.now(), open: new Set(opts.open ?? []) };
-  return chatModel(turns, opts).items.map((t) => `<div class="cui-turn">${askHtml(t.ask)}<div class="cui-reply">${t.blocks.map((b, i) => blockHtml(b, o, t.running && i === t.blocks.length - 1)).join('')}</div></div>`).join('');
+  return chatModel(turns, opts)
+    .items.map((t) => `<div class="cui-turn">${askHtml(t.ask)}<div class="cui-reply">${t.blocks.map((b, i) => blockHtml(b, o, t.running && i === t.blocks.length - 1)).join('')}</div></div>`)
+    .join('');
 }
 
 /** A step's state as its mark: a spinner while running, else ✓, ✕ or – with its state as the label. */

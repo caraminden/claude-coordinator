@@ -20,16 +20,29 @@ const STALE_MS = 20_000;
 
 /** Each scheme's last read: { at, chains, error, loading, after }. The page and the chat head's link share it, and every caller's `after` runs when it lands. */
 const cache = new Map();
-let pageEl = null, pageProject = null, focus = null, drawnSig = '', entered = false;
+let pageEl = null,
+  pageProject = null,
+  focus = null,
+  drawnSig = '',
+  entered = false;
 
 function read(projectId, after) {
   const c = cache.get(projectId) ?? { at: 0, chains: null, after: [] };
   if (after) c.after.push(after);
   if (c.loading) return c.loading;
   c.loading = api(`api/projects/${projectId}/chains`)
-    .then(({ chains }) => { c.chains = chains; c.error = null; })
-    .catch((ex) => { c.error = ex.message; })
-    .finally(() => { c.at = Date.now(); c.loading = null; for (const f of c.after.splice(0)) f(); });
+    .then(({ chains }) => {
+      c.chains = chains;
+      c.error = null;
+    })
+    .catch((ex) => {
+      c.error = ex.message;
+    })
+    .finally(() => {
+      c.at = Date.now();
+      c.loading = null;
+      for (const f of c.after.splice(0)) f();
+    });
   cache.set(projectId, c);
   return c.loading;
 }
@@ -49,7 +62,10 @@ export function chainsPage(projectId, number) {
   const el = pageEl;
   let first = true; // the read above is this one: the page isn't attached yet, so the first tick only starts the wait
   poller(async () => {
-    if (first) { first = false; return true; }
+    if (first) {
+      first = false;
+      return true;
+    }
     if (!el.isConnected) return false;
     await read(projectId, () => draw(projectId));
   }, POLL_MS).now();
@@ -75,26 +91,50 @@ function draw(projectId) {
   const c = cache.get(projectId);
   const chains = c?.chains;
   // A redraw that would change nothing keeps what's on screen (and the hover a person is tracing).
-  const sig = JSON.stringify([c?.error, chains, chains?.flatMap((ch) => ch.nodes.map((n) => { const s = stateOf(n); return [s.word, s.label, s.fam, s.pulse]; }))]);
+  const sig = JSON.stringify([
+    c?.error,
+    chains,
+    chains?.flatMap((ch) =>
+      ch.nodes.map((n) => {
+        const s = stateOf(n);
+        return [s.word, s.label, s.fam, s.pulse];
+      }),
+    ),
+  ]);
   if (sig === drawnSig) return;
   drawnSig = sig;
-  const head = h('div', { class: 'ticket-head' },
-    h('div', { class: 'row' }, h('h2', {}, 'Chains'),
+  const head = h(
+    'div',
+    { class: 'ticket-head' },
+    h(
+      'div',
+      { class: 'row' },
+      h('h2', {}, 'Chains'),
       // A failed refresh keeps the last chains, marked in the head's free room so nothing below moves.
-      chains && c.error ? h('span', { class: 'chains-stale', title: c.error }, toneChip('danger', 'Not refreshed')) : '', h('span', { class: 'spacer' }),
-      h('a', { class: 'close-view', href: `#/p/${projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
-    h('p', { class: 'chains-lede' }, 'Who waits on whom: minions that start after another, wait on its work or a note from it, queue for a claim like the pipeline lane, or feed a build.'));
-  const body = !c || (!chains && !c.error) ? [loadingLine('Loading…')]
-    : !chains ? [h('p', { class: 'error' }, c.error)]
-    : !chains.length ? [emptyCard('No minion waits on another right now', 'When one starts after another, waits on its work, queues for the pipeline lane or feeds a build, its chain shows here.', { mark: '⛓' })]
-    : [summary(chains), legend(), ...chains.map((ch) => chainCard(ch))];
+      chains && c.error ? h('span', { class: 'chains-stale', title: c.error }, toneChip('danger', 'Not refreshed')) : '',
+      h('span', { class: 'spacer' }),
+      h('a', { class: 'close-view', href: `#/p/${projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close')),
+    ),
+    h('p', { class: 'chains-lede' }, 'Who waits on whom: minions that start after another, wait on its work or a note from it, queue for a claim like the pipeline lane, or feed a build.'),
+  );
+  const body =
+    !c || (!chains && !c.error)
+      ? [loadingLine('Loading…')]
+      : !chains
+        ? [h('p', { class: 'error' }, c.error)]
+        : !chains.length
+          ? [emptyCard('No minion waits on another right now', 'When one starts after another, waits on its work, queues for the pipeline lane or feeds a build, its chain shows here.', { mark: '⛓' })]
+          : [summary(chains), legend(), ...chains.map((ch) => chainCard(ch))];
   pageEl.replaceChildren(head, ...body);
   pageEl.classList.toggle('enter', !entered && !!chains?.length);
   if (chains?.length) entered = true;
   requestAnimationFrame(() => {
     for (const flow of pageEl.querySelectorAll('.chain-flow')) wire(flow);
     const hit = focus != null && pageEl.querySelector('.chain-card.focus');
-    if (hit && !hit.dataset.scrolled) { hit.dataset.scrolled = '1'; hit.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }
+    if (hit && !hit.dataset.scrolled) {
+      hit.dataset.scrolled = '1';
+      hit.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    }
   });
 }
 
@@ -102,12 +142,10 @@ function summary(chains) {
   // A build with no build minion is a node, not a minion: it counts in neither total.
   const waiting = new Set(chains.flatMap((c) => c.edges.map((e) => e.from)).filter((k) => !k.startsWith('build:')));
   const lane = chains.flatMap((c) => c.edges).filter((e) => e.kind === 'claim').length;
-  return statTiles([chains.length, chains.length === 1 ? 'chain' : 'chains', 'accent'], [waiting.size, waiting.size === 1 ? 'minion waiting' : 'minions waiting', 'waiting'],
-    lane ? [lane, 'in a claim queue', 'held'] : null);
+  return statTiles([chains.length, chains.length === 1 ? 'chain' : 'chains', 'accent'], [waiting.size, waiting.size === 1 ? 'minion waiting' : 'minions waiting', 'waiting'], lane ? [lane, 'in a claim queue', 'held'] : null);
 }
 
-const legend = () => h('div', { class: 'chain-legend', 'aria-hidden': 'true' },
-  ...Object.entries(KIND).map(([k, v]) => h('span', { class: 'chain-legend-item', 'data-kind': k }, h('i'), v.word)));
+const legend = () => h('div', { class: 'chain-legend', 'aria-hidden': 'true' }, ...Object.entries(KIND).map(([k, v]) => h('span', { class: 'chain-legend-item', 'data-kind': k }, h('i'), v.word)));
 
 function chainCard(ch) {
   const here = focus != null && ch.nodes.some((n) => n.number === focus && n.project === view.projectId);
@@ -116,26 +154,33 @@ function chainCard(ch) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'chain-wires');
   svg.setAttribute('aria-hidden', 'true');
-  const flow = h('div', { class: 'chain-flow' }, svg,
+  const flow = h(
+    'div',
+    { class: 'chain-flow' },
+    svg,
     ...treeOrder(ch).map((n) => {
       const r = (rowIn.get(n.col) ?? 0) + 1;
       rowIn.set(n.col, r);
       return node(n, ch, r, here && n.number === focus);
-    }));
+    }),
+  );
   flow.chain = ch;
   flow.style.setProperty('--cols', String(cols));
   const kinds = ch.kinds.map((k) => toneChip(KIND[k].tone, KIND[k].word));
-  return h('article', { class: `chain-card${here ? ' focus' : ''}`, 'data-hue': KIND[ch.kinds[0]]?.hue ?? 'running', 'data-key': ch.key },
-    h('header', { class: 'chain-head' }, h('span', { class: 'chain-tile', 'aria-hidden': 'true' }, '⛓'),
-      h('b', { class: 'chain-title' }, ch.title), ...kinds, h('span', { class: 'chain-count' }, minions(ch.nodes.filter((n) => n.id != null).length))),
-    flow);
+  return h(
+    'article',
+    { class: `chain-card${here ? ' focus' : ''}`, 'data-hue': KIND[ch.kinds[0]]?.hue ?? 'running', 'data-key': ch.key },
+    h('header', { class: 'chain-head' }, h('span', { class: 'chain-tile', 'aria-hidden': 'true' }, '⛓'), h('b', { class: 'chain-title' }, ch.title), ...kinds, h('span', { class: 'chain-count' }, minions(ch.nodes.filter((n) => n.id != null).length))),
+    flow,
+  );
 }
 
 const minions = (n) => `${n} minion${n === 1 ? '' : 's'}`;
 
 /** Each minion straight after the one it comes after, so a phone's indented list reads as a tree; the desktop grid places them by column either way. */
 function treeOrder(ch) {
-  const out = [], seen = new Set();
+  const out = [],
+    seen = new Set();
   const visit = (n) => {
     if (seen.has(n.key)) return;
     seen.add(n.key);
@@ -158,21 +203,35 @@ function node(n, ch, row, here) {
   }
   const after = [...byTo].map(([key, labels]) => {
     const to = ch.nodes.find((x) => x.key === key);
-    return `${to?.number ? `#${to.number}` : to?.title ?? '?'}${labels.length ? ` · ${labels.join(' · ')}` : ''}`;
+    return `${to?.number ? `#${to.number}` : (to?.title ?? '?')}${labels.length ? ` · ${labels.join(' · ')}` : ''}`;
   });
   const other = n.project !== view.projectId ? view.projects?.find((p) => p.id === n.project) : null;
   const tag = n.number ? 'a' : 'div';
-  const el = h(tag, {
-    class: `chain-node f-${s.fam}${here ? ' here' : ''}${n.status === 'closed' ? ' gone' : ''}`, href: n.number ? `#/p/${n.project}/t/${n.number}` : null,
-    'data-key': n.key, 'data-col': Math.min(n.col, 8), 'data-row': Math.min(row, 12), 'aria-current': here ? 'true' : null,
-    title: after.length ? `After ${after.join(', ')}` : 'Nobody in this chain is ahead of it',
-    onpointerenter: (e) => trace(e.currentTarget), onpointerleave: (e) => untrace(e.currentTarget),
-    onfocus: (e) => trace(e.currentTarget), onblur: (e) => untrace(e.currentTarget),
-  },
-  h('span', { class: 'chain-node-top' }, h('span', { class: 'num' }, n.number ? `#${n.number}` : '⑂'), other ? schemeTag(other.name) : '',
-    h('span', { class: 'chain-state', title: s.label ?? null, role: s.spoken ? 'img' : null, 'aria-label': s.spoken ?? null }, s.pulse ? phase(h('i', { class: 'pulse' }), 1600) : '', s.word)),
-  h('span', { class: 'chain-node-title' }, n.title),
-  after.length ? h('span', { class: 'chain-after' }, '↳ after ', after.join(', ')) : '');
+  const el = h(
+    tag,
+    {
+      class: `chain-node f-${s.fam}${here ? ' here' : ''}${n.status === 'closed' ? ' gone' : ''}`,
+      href: n.number ? `#/p/${n.project}/t/${n.number}` : null,
+      'data-key': n.key,
+      'data-col': Math.min(n.col, 8),
+      'data-row': Math.min(row, 12),
+      'aria-current': here ? 'true' : null,
+      title: after.length ? `After ${after.join(', ')}` : 'Nobody in this chain is ahead of it',
+      onpointerenter: (e) => trace(e.currentTarget),
+      onpointerleave: (e) => untrace(e.currentTarget),
+      onfocus: (e) => trace(e.currentTarget),
+      onblur: (e) => untrace(e.currentTarget),
+    },
+    h(
+      'span',
+      { class: 'chain-node-top' },
+      h('span', { class: 'num' }, n.number ? `#${n.number}` : '⑂'),
+      other ? schemeTag(other.name) : '',
+      h('span', { class: 'chain-state', title: s.label ?? null, role: s.spoken ? 'img' : null, 'aria-label': s.spoken ?? null }, s.pulse ? phase(h('i', { class: 'pulse' }), 1600) : '', s.word),
+    ),
+    h('span', { class: 'chain-node-title' }, n.title),
+    after.length ? h('span', { class: 'chain-after' }, '↳ after ', after.join(', ')) : '',
+  );
   // The grid's place, through the CSSOM (the CSP refuses style="").
   el.style.setProperty('--col', String(n.col + 1));
   el.style.setProperty('--row', String(row));
@@ -188,30 +247,35 @@ function wire(flow) {
   svg.setAttribute('width', String(flow.scrollWidth));
   svg.setAttribute('height', String(flow.scrollHeight));
   const ns = 'http://www.w3.org/2000/svg';
-  const paths = flow.chain.edges.map((e) => {
-    const a = at(e.to), b = at(e.from);
-    if (!a || !b) return null;
-    const x1 = a.right - box.left + flow.scrollLeft, y1 = a.top + a.height / 2 - box.top;
-    const x2 = b.left - box.left + flow.scrollLeft, y2 = b.top + b.height / 2 - box.top;
-    // A loop's back wire bows out under the nodes instead of crossing them.
-    const d = x2 > x1 ? `M${x1} ${y1} C${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}`
-      : `M${x1} ${y1} C${x1 + 40} ${y1 + 60}, ${x2 - 40} ${y2 + 60}, ${x2} ${y2}`;
-    const p = document.createElementNS(ns, 'path');
-    p.setAttribute('d', d);
-    p.setAttribute('class', 'chain-wire');
-    p.dataset.kind = e.kind;
-    p.dataset.from = e.from;
-    p.dataset.to = e.to;
-    const dot = document.createElementNS(ns, 'circle');
-    dot.setAttribute('cx', String(x2));
-    dot.setAttribute('cy', String(y2));
-    dot.setAttribute('r', '3');
-    dot.setAttribute('class', 'chain-wire-end');
-    dot.dataset.kind = e.kind;
-    dot.dataset.from = e.from;
-    dot.dataset.to = e.to;
-    return [p, dot];
-  }).filter(Boolean).flat();
+  const paths = flow.chain.edges
+    .map((e) => {
+      const a = at(e.to),
+        b = at(e.from);
+      if (!a || !b) return null;
+      const x1 = a.right - box.left + flow.scrollLeft,
+        y1 = a.top + a.height / 2 - box.top;
+      const x2 = b.left - box.left + flow.scrollLeft,
+        y2 = b.top + b.height / 2 - box.top;
+      // A loop's back wire bows out under the nodes instead of crossing them.
+      const d = x2 > x1 ? `M${x1} ${y1} C${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}` : `M${x1} ${y1} C${x1 + 40} ${y1 + 60}, ${x2 - 40} ${y2 + 60}, ${x2} ${y2}`;
+      const p = document.createElementNS(ns, 'path');
+      p.setAttribute('d', d);
+      p.setAttribute('class', 'chain-wire');
+      p.dataset.kind = e.kind;
+      p.dataset.from = e.from;
+      p.dataset.to = e.to;
+      const dot = document.createElementNS(ns, 'circle');
+      dot.setAttribute('cx', String(x2));
+      dot.setAttribute('cy', String(y2));
+      dot.setAttribute('r', '3');
+      dot.setAttribute('class', 'chain-wire-end');
+      dot.dataset.kind = e.kind;
+      dot.dataset.from = e.from;
+      dot.dataset.to = e.to;
+      return [p, dot];
+    })
+    .filter(Boolean)
+    .flat();
   svg.replaceChildren(...paths);
   fade(flow);
   if (!flow.watching) {
@@ -232,7 +296,12 @@ function trace(el) {
   const walk = (start, next) => {
     const seen = new Set([start]);
     const todo = [start];
-    while (todo.length) for (const k of next(todo.pop())) if (!seen.has(k)) { seen.add(k); todo.push(k); }
+    while (todo.length)
+      for (const k of next(todo.pop()))
+        if (!seen.has(k)) {
+          seen.add(k);
+          todo.push(k);
+        }
     return seen;
   };
   const k = el.dataset.key;
@@ -244,7 +313,7 @@ function trace(el) {
 
 function untrace(el) {
   const flow = el.closest('.chain-flow');
-  if (!flow || flow.contains(document.activeElement) && document.activeElement !== el) return;
+  if (!flow || (flow.contains(document.activeElement) && document.activeElement !== el)) return;
   flow.classList.remove('tracing');
   for (const x of flow.querySelectorAll('.lit')) x.classList.remove('lit');
 }
@@ -258,9 +327,11 @@ export function chainLink(t, redraw) {
   const c = cache.get(t.project_id);
   const find = () => cache.get(t.project_id)?.chains?.find((ch) => ch.nodes.some((n) => n.id === t.id));
   const had = find();
-  if (!c || (!c.loading && Date.now() - c.at > STALE_MS)) read(t.project_id, () => { if (!!find() !== !!had || find()?.nodes.length !== had?.nodes.length) redraw?.(); });
+  if (!c || (!c.loading && Date.now() - c.at > STALE_MS))
+    read(t.project_id, () => {
+      if (!!find() !== !!had || find()?.nodes.length !== had?.nodes.length) redraw?.();
+    });
   if (!had) return '';
   const n = had.nodes.length;
-  return h('a', { class: 'tag-chip chain-link', href: chainsHref(t.project_id, t.number), title: `${minions(n)} in ${had.title}: see who waits on whom` },
-    h('span', { 'aria-hidden': 'true' }, '⛓ '), `Chain · ${n}`);
+  return h('a', { class: 'tag-chip chain-link', href: chainsHref(t.project_id, t.number), title: `${minions(n)} in ${had.title}: see who waits on whom` }, h('span', { 'aria-hidden': 'true' }, '⛓ '), `Chain · ${n}`);
 }

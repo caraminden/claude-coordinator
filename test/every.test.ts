@@ -30,7 +30,11 @@ test('a throwing job is recorded, logged, and runs again on the next tick', asyn
   assert.equal(logged.length, 2);
   assert.match(String(logged[0][0]), /Background job "throws" failed/);
   job.stop();
-  assert.equal(jobList().some((j) => j.name === 'throws'), false, 'stop drops it from the list');
+  assert.equal(
+    jobList().some((j) => j.name === 'throws'),
+    false,
+    'stop drops it from the list',
+  );
   t.mock.timers.tick(5000);
   await settle();
   assert.equal(calls, 2, 'stop clears the timer');
@@ -68,7 +72,8 @@ test('a slow run finishing after a newer fast one keeps the newer duration', asy
 
 test('first: 0 runs now, a later first runs once before the period', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
-  let a = 0, b = 0;
+  let a = 0,
+    b = 0;
   const now = every('first-now', 60_000, () => void a++, 0);
   const soon = every('first-soon', 60_000, () => void b++, 20);
   assert.equal(a, 1);

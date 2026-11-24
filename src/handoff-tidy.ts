@@ -15,9 +15,17 @@ export const NOT_PICKED = 'handoffs/not-picked';
 export const isLoose = (rel: string) => /^handoffs\/[^/]+\.md$/.test(rel);
 
 /** A file that says up top it was not picked ("**Not picked (2026-11-12): …**"): it goes to not-picked/, not shipped/. */
-export const markedNotPicked = (text: string) => text.split('\n').filter((l) => l.trim()).slice(0, 6).some((l) => /^[\s>*_#-]*not picked\b/i.test(l));
+export const markedNotPicked = (text: string) =>
+  text
+    .split('\n')
+    .filter((l) => l.trim())
+    .slice(0, 6)
+    .some((l) => /^[\s>*_#-]*not picked\b/i.test(l));
 
-export interface Keep { rel: string; why: string }
+export interface Keep {
+  rel: string;
+  why: string;
+}
 
 /**
  * Why `rel` must stay put, or null when it may move: pinned, named by an open minion's brief or by any of
@@ -25,12 +33,18 @@ export interface Keep { rel: string; why: string }
  */
 export function whyKeep(store: Store, projectId: number, shared: string, rel: string, extraText: string[] = []): string | null {
   if (store.sharedPins(projectId).some((p) => p.path === rel || p.path === join(shared, rel))) return 'pinned';
-  const open = store.db.prepare(`SELECT t.number, (SELECT data FROM events e WHERE e.ticket_id = t.id AND e.kind = 'user_message' ORDER BY e.id LIMIT 1) AS first
-    FROM tickets t WHERE t.project_id = ? AND t.kind = 'ticket' AND t.status != 'closed'`).all(projectId) as { number: number; first: string | null }[];
+  const open = store.db
+    .prepare(`SELECT t.number, (SELECT data FROM events e WHERE e.ticket_id = t.id AND e.kind = 'user_message' ORDER BY e.id LIMIT 1) AS first
+    FROM tickets t WHERE t.project_id = ? AND t.kind = 'ticket' AND t.status != 'closed'`)
+    .all(projectId) as { number: number; first: string | null }[];
   for (const o of open) if (o.first?.includes(rel)) return `named by open #${o.number}'s brief`;
   if (extraText.some((t) => t.includes(rel) || t.includes(basename(rel)))) return 'named in memory';
   let src = '';
-  try { src = readFileSync(join(shared, rel), 'utf8'); } catch { return 'unreadable'; }
+  try {
+    src = readFileSync(join(shared, rel), 'utf8');
+  } catch {
+    return 'unreadable';
+  }
   const headed = findBriefs(src, basename(rel)).filter((b: { heading: string }) => b.heading);
   if (headed.length > 1) {
     return `${headed.length} of ${headed.length} briefs unstarted`;
@@ -56,7 +70,11 @@ export function tidyForClosed(store: Store, dataDir: string, projectId: number, 
   if (!rel || !isLoose(rel) || !existsSync(join(shared, rel))) return null;
   if (whyKeep(store, projectId, shared, rel, extraText)) return null;
   let text = '';
-  try { text = readFileSync(join(shared, rel), 'utf8'); } catch { return null; }
+  try {
+    text = readFileSync(join(shared, rel), 'utf8');
+  } catch {
+    return null;
+  }
   const to = moveFile(shared, rel, markedNotPicked(text) ? NOT_PICKED : SHIPPED);
   relocate(store, projectId, shared, rel, to);
   return to;
@@ -74,9 +92,15 @@ export function relocate(store: Store, projectId: number, shared: string, from: 
     const get = (id: number) => store.db.prepare('SELECT * FROM ideas WHERE id = ?').get(id) as Record<string, unknown>;
     const [l, t] = [get(loose.id), get(twin.id)];
     // Each group comes whole from one row, so a pick never mixes two people's decisions or a link two minions'.
-    const groups = [['pick', 'pick_label', 'decided_by', 'words', 'decided_at'], ['status_manual', 'manual_by', 'manual_at'], ['ticket_id', 'number', 'link_manual']];
+    const groups = [
+      ['pick', 'pick_label', 'decided_by', 'words', 'decided_at'],
+      ['status_manual', 'manual_by', 'manual_at'],
+      ['ticket_id', 'number', 'link_manual'],
+    ];
     const takeLoose = [t.pick == null && l.pick != null, t.status_manual == null && l.status_manual != null, l.link_manual === 1 || (t.ticket_id == null && l.ticket_id != null)];
-    groups.forEach((cols, i) => { if (takeLoose[i]) store.db.prepare(`UPDATE ideas SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...cols.map((c) => l[c] as string | number | null), twin.id); });
+    groups.forEach((cols, i) => {
+      if (takeLoose[i]) store.db.prepare(`UPDATE ideas SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...cols.map((c) => l[c] as string | number | null), twin.id);
+    });
     if (!t.title && l.title) store.db.prepare('UPDATE ideas SET title = ? WHERE id = ?').run(l.title as string, twin.id);
     store.db.prepare('DELETE FROM ideas WHERE id = ?').run(loose.id);
   }
@@ -102,6 +126,10 @@ export function reconcileMoved(store: Store, dataDir: string, projectId: number,
     const to = where(rel);
     if (!to) continue;
     // One file's failure must not skip the scheme's other files.
-    try { relocate(store, projectId, shared, rel, to); } catch (e) { console.error(`handoff tidy: ${rel}: ${(e as Error).message}`); }
+    try {
+      relocate(store, projectId, shared, rel, to);
+    } catch (e) {
+      console.error(`handoff tidy: ${rel}: ${(e as Error).message}`);
+    }
   }
 }

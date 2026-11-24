@@ -17,13 +17,12 @@ const propertyValue = (v) => (Array.isArray(v) ? v.join(', ') : String(v));
 export function propertyChip(t) {
   const count = Object.keys(t.properties ?? {}).length;
   const body = h('div', {});
-  const chip = h('details', { class: 'prop-chip' },
+  const chip = h(
+    'details',
+    { class: 'prop-chip' },
     h('summary', { class: 'tag-chip', title: 'Properties', 'aria-label': `${count} properties` }, icon('tag'), String(count)),
-    h('div', { class: 'prop-pop' },
-      h('h4', {}, 'Properties'),
-      body,
-      h('div', { class: 'foot' }, h('span', {}, 'Minions and the Taskmaster set these'), h('span', { class: 'spacer' }),
-        h('a', { href: `#/p/${t.project_id}/properties` }, 'All keys'))));
+    h('div', { class: 'prop-pop' }, h('h4', {}, 'Properties'), body, h('div', { class: 'foot' }, h('span', {}, 'Minions and the Taskmaster set these'), h('span', { class: 'spacer' }), h('a', { href: `#/p/${t.project_id}/properties` }, 'All keys'))),
+  );
   // Drawn on opening: which values the filter offers, and whether assigned exists, depend on the registry, which may load later.
   chip.addEventListener('toggle', () => {
     if (!chip.open) return;
@@ -45,7 +44,11 @@ function assignPicker(t) {
   const byLower = new Map();
   for (const n of [...[...view.tickets.values()].flatMap((m) => userKeys.flatMap((k) => m.properties?.[k] ?? [])), me]) if (n && !byLower.has(n.toLowerCase())) byLower.set(n.toLowerCase(), n);
   const names = [...byLower.values()].sort();
-  const list = h('datalist', { id: `assign-names-${t.id}` }, names.map((n) => h('option', { value: n })));
+  const list = h(
+    'datalist',
+    { id: `assign-names-${t.id}` },
+    names.map((n) => h('option', { value: n })),
+  );
   const note = h('span', { class: 'muted small', role: 'status' });
   const input = h('input', { type: 'text', class: 'assign-input', value: current, placeholder: 'Nobody', list: list.id, 'aria-label': 'Assigned to', maxlength: '60' });
   input.addEventListener('change', () => {
@@ -65,27 +68,51 @@ function assignPicker(t) {
       label: name ? `assign it to ${name}` : 'unassign it',
     });
   });
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') input.blur();
+  });
   // Handover (#690): typing a name hands it to them; this makes it yours in one tap.
-  const take = otherOwner(t) && me && h('button', { type: 'button', class: 'small', onclick: () => takeOver(t, (done) => {
-    current = input.value = done ? me : t.properties?.assigned ?? '';
-    take.hidden = done;
-    note.textContent = done ? 'Saved' : '';
-  }) }, 'Take it over');
+  const take =
+    otherOwner(t) &&
+    me &&
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'small',
+        onclick: () =>
+          takeOver(t, (done) => {
+            current = input.value = done ? me : (t.properties?.assigned ?? '');
+            take.hidden = done;
+            note.textContent = done ? 'Saved' : '';
+          }),
+      },
+      'Take it over',
+    );
   return [input, list, take || '', note];
 }
 
 /** A property's values, each a button that adds it to the minions list's filter when the filter offers it. */
 function filterLinks(t, key, value) {
-  const offered = propFilter.projectId === t.project_id
-    && filterChoices(propFilter.keys ?? [], [t]).find((c) => c.key === key)?.values;
+  const offered = propFilter.projectId === t.project_id && filterChoices(propFilter.keys ?? [], [t]).find((c) => c.key === key)?.values;
   if (!offered) return h('span', { class: 'pv' }, propertyValue(value));
-  return [value].flat().map((v) => offered.includes(v)
-    ? h('button', { type: 'button', class: 'pv pv-pick', title: `Filter the minions list by ${key}: ${v}`, onclick: (e) => {
-      e.currentTarget.closest('details').open = false;
-      pick(key, v, true);
-    } }, String(v))
-    : h('span', { class: 'pv' }, String(v)));
+  return [value].flat().map((v) =>
+    offered.includes(v)
+      ? h(
+          'button',
+          {
+            type: 'button',
+            class: 'pv pv-pick',
+            title: `Filter the minions list by ${key}: ${v}`,
+            onclick: (e) => {
+              e.currentTarget.closest('details').open = false;
+              pick(key, v, true);
+            },
+          },
+          String(v),
+        )
+      : h('span', { class: 'pv' }, String(v)),
+  );
 }
 
 /** Close a <details> popover on a click elsewhere. */
@@ -122,21 +149,30 @@ function readRegistry(projectId) {
   if (registryRead?.projectId !== projectId || (registryRead.at && Date.now() - registryRead.at > 5000)) {
     const entry = { projectId, at: 0, read: api(`api/projects/${projectId}/properties`) };
     registryRead = entry;
-    entry.read.then(() => { entry.at = Date.now(); }, () => { if (registryRead === entry) registryRead = null; });
+    entry.read.then(
+      () => {
+        entry.at = Date.now();
+      },
+      () => {
+        if (registryRead === entry) registryRead = null;
+      },
+    );
   }
   return registryRead.read;
 }
 
 /** Fetch a scheme's filter data before it is shown (project.js waits on it the first time); a scheme seen before shows its last and refreshes behind. */
 export function preparePropFilter(projectId) {
-  const load = Promise.all([readRegistry(projectId), api(`api/projects/${projectId}/views`).catch(() => null)]).then(([reg, views]) => {
-    const had = filterSeen.get(projectId);
-    filterSeen.set(projectId, { keys: reg.keys, views });
-    if (propFilter.projectId === projectId && had && JSON.stringify(had) !== JSON.stringify(filterSeen.get(projectId))) {
-      Object.assign(propFilter, { keys: reg.keys, views });
-      renderPropFilter();
-    }
-  }).catch(() => {});
+  const load = Promise.all([readRegistry(projectId), api(`api/projects/${projectId}/views`).catch(() => null)])
+    .then(([reg, views]) => {
+      const had = filterSeen.get(projectId);
+      filterSeen.set(projectId, { keys: reg.keys, views });
+      if (propFilter.projectId === projectId && had && JSON.stringify(had) !== JSON.stringify(filterSeen.get(projectId))) {
+        Object.assign(propFilter, { keys: reg.keys, views });
+        renderPropFilter();
+      }
+    })
+    .catch(() => {});
   return filterSeen.has(projectId) ? undefined : load;
 }
 
@@ -166,13 +202,42 @@ export async function renderPropFilter() {
   if (!choices.length && !picks.size) return el.replaceChildren();
   const ticked = [...picks.values()].reduce((n, set) => n + set.size, 0);
   el.replaceChildren(
-    h('button', { type: 'button', class: `tag-chip pf-toggle${ticked ? ' on' : ''}`, 'aria-expanded': String(propFilter.open), 'data-pf': 'toggle', onclick: () => {
-      propFilter.open = !propFilter.open;
-      renderPropFilter();
-    } }, ticked ? `Filters · ${ticked}` : 'Filters'),
+    h(
+      'button',
+      {
+        type: 'button',
+        class: `tag-chip pf-toggle${ticked ? ' on' : ''}`,
+        'aria-expanded': String(propFilter.open),
+        'data-pf': 'toggle',
+        onclick: () => {
+          propFilter.open = !propFilter.open;
+          renderPropFilter();
+        },
+      },
+      ticked ? `Filters · ${ticked}` : 'Filters',
+    ),
     ...[...picks].flatMap(([key, set]) => [...set].map((v) => h('button', { type: 'button', class: 'tag-chip pf-pick', title: `Stop filtering by ${key}: ${v}`, onclick: () => pick(key, v, false) }, `${key}: ${v} ×`))),
-    picks.size ? h('button', { type: 'button', class: 'secondary small pf-clear', onclick: () => { picks.clear(); renderSidebar(); } }, 'Clear') : '',
-    propFilter.open ? h('div', { class: 'pf-panel' }, choices.map((c) => filterSection(c, valueCounts(c.key, open, picks)))) : '',
+    picks.size
+      ? h(
+          'button',
+          {
+            type: 'button',
+            class: 'secondary small pf-clear',
+            onclick: () => {
+              picks.clear();
+              renderSidebar();
+            },
+          },
+          'Clear',
+        )
+      : '',
+    propFilter.open
+      ? h(
+          'div',
+          { class: 'pf-panel' },
+          choices.map((c) => filterSection(c, valueCounts(c.key, open, picks))),
+        )
+      : '',
   );
   if (focused) el.querySelector(`[data-pf="${CSS.escape(focused)}"]`)?.focus();
 }
@@ -190,14 +255,15 @@ function pick(key, v, on) {
 /** A key's collapsible checklist; each value shows how many open minions it would let through, given the other keys' picks. */
 function filterSection({ key, values }, counts) {
   const picked = propFilter.picks.get(key) ?? new Set();
-  const sec = h('details', { class: 'pf-key', open: propFilter.openKeys.get(key) ?? picked.size > 0 },
+  const sec = h(
+    'details',
+    { class: 'pf-key', open: propFilter.openKeys.get(key) ?? picked.size > 0 },
     h('summary', { 'data-pf': `key:${key}` }, key, picked.size ? h('span', { class: 'pf-n' }, String(picked.size)) : ''),
     values.map((v) => {
       const n = counts.get(v) ?? 0;
-      return h('label', { class: n ? 'pf-opt' : 'pf-opt none' },
-        h('input', { type: 'checkbox', checked: picked.has(v), 'data-pf': `value:${key}:${v}`, onchange: (e) => pick(key, v, e.target.checked) }),
-        String(v), h('span', { class: 'pf-n' }, String(n)));
-    }));
+      return h('label', { class: n ? 'pf-opt' : 'pf-opt none' }, h('input', { type: 'checkbox', checked: picked.has(v), 'data-pf': `value:${key}:${v}`, onchange: (e) => pick(key, v, e.target.checked) }), String(v), h('span', { class: 'pf-n' }, String(n)));
+    }),
+  );
   sec.addEventListener('toggle', () => propFilter.openKeys.set(key, sec.open));
   return sec;
 }
@@ -214,10 +280,12 @@ function renderSavedViews() {
   const chips = views.map((v) => {
     const vp = viewPicks(v.picks, keys);
     const on = picks.size > 0 && samePicks(picks, vp);
-    return h('span', { class: `tag-chip sv${on ? ' on' : ''}` },
-      h('button', { type: 'button', class: 'sv-name', 'aria-pressed': String(on), title: on ? 'Show every minion again' : 'Show only these minions',
-        onclick: () => apply(on ? new Map() : vp) }, v.name),
-      on ? h('button', { type: 'button', class: 'sv-del', title: `Delete the view ${v.name}`, 'aria-label': `Delete the view ${v.name}`, onclick: () => deleteView(v) }, '🗑') : '');
+    return h(
+      'span',
+      { class: `tag-chip sv${on ? ' on' : ''}` },
+      h('button', { type: 'button', class: 'sv-name', 'aria-pressed': String(on), title: on ? 'Show every minion again' : 'Show only these minions', onclick: () => apply(on ? new Map() : vp) }, v.name),
+      on ? h('button', { type: 'button', class: 'sv-del', title: `Delete the view ${v.name}`, 'aria-label': `Delete the view ${v.name}`, onclick: () => deleteView(v) }, '🗑') : '',
+    );
   });
   const unsaved = picks.size > 0 && !views.some((v) => samePicks(picks, viewPicks(v.picks, keys)));
   el.replaceChildren(...chips, unsaved ? h('button', { type: 'button', class: 'secondary small sv-save', onclick: saveView }, '＋ Save view') : '');
@@ -239,7 +307,10 @@ function changeViews(next, send, undo, label) {
     send: () => send(projectId),
     undo: () => propFilter.projectId === projectId && propFilter.views && show(undo(propFilter.views)),
     label,
-  }).then((views) => propFilter.views === mine && show(views), () => {});
+  }).then(
+    (views) => propFilter.views === mine && show(views),
+    () => {},
+  );
 }
 
 function saveView() {
@@ -261,7 +332,8 @@ function saveView() {
     },
     // Unless a later save or delete replaced it.
     (views) => (views.includes(mine) ? (replaced ? views.map((v) => (v === mine ? replaced : v)) : views.filter((v) => v !== mine)) : views),
-    `save the view "${name}"`);
+    `save the view "${name}"`,
+  );
 }
 
 function deleteView(v) {
@@ -276,7 +348,8 @@ function deleteView(v) {
     (projectId) => (v.id ? api(`api/projects/${projectId}/views/${v.id}`, { method: 'DELETE' }) : propFilter.views),
     // Back where it was, unless a later save under its name took its place or its own save never went through.
     (views) => (at < 0 || !v.id || views.some((x) => x.name === v.name) ? views : views.toSpliced(Math.min(at, views.length), 0, v)),
-    `delete the view "${v.name}"`);
+    `delete the view "${v.name}"`,
+  );
 }
 
 /** This person saved or deleted a view in this scheme, maybe in another tab. */
@@ -285,11 +358,14 @@ export function onViewsChanged(projectId, name) {
   if (!propFilter.views) return renderPropFilter(); // not loaded yet: it loads them
   // The chips stay as they are until the list comes, and a save or delete clicked meanwhile keeps its own.
   const before = propFilter.views;
-  api(`api/projects/${projectId}/views`).then((views) => {
-    if (propFilter.projectId !== projectId || propFilter.views !== before) return;
-    propFilter.views = views;
-    renderSavedViews();
-  }, () => {});
+  api(`api/projects/${projectId}/views`).then(
+    (views) => {
+      if (propFilter.projectId !== projectId || propFilter.views !== before) return;
+      propFilter.views = views;
+      renderSavedViews();
+    },
+    () => {},
+  );
 }
 
 /** Whether people on this scheme's page change a key: its own keys, and global ones only on Citadel's. */
@@ -297,10 +373,7 @@ const keyEditable = (reg, k) => k.scope === 'scheme' || reg.globalOwner === view
 
 /** What waits on a person: proposed keys and values, and values a Taskmaster added. */
 function toReview(reg) {
-  return reg.keys.filter((k) => keyEditable(reg, k)).flatMap((k) => [
-    ...(k.status === 'proposed' ? [k.key] : []),
-    ...k.values.filter((v) => v.status === 'proposed' || (v.status === 'active' && !v.reviewed)).map((v) => `${k.key}: ${v.value}`),
-  ]);
+  return reg.keys.filter((k) => keyEditable(reg, k)).flatMap((k) => [...(k.status === 'proposed' ? [k.key] : []), ...k.values.filter((v) => v.status === 'proposed' || (v.status === 'active' && !v.reviewed)).map((v) => `${k.key}: ${v.value}`)]);
 }
 
 async function loadProperties() {
@@ -337,13 +410,18 @@ export function onPropertiesChanged(projectId) {
 /** Main panel: the registry as this scheme sees it, with proposals to settle and forms to add to it. */
 export function propertiesPage() {
   const p = view.project;
-  const section = h('section', { class: 'artifacts-main props-main' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(),
-        h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+  const section = h(
+    'section',
+    { class: 'artifacts-main props-main' },
+    h(
+      'div',
+      { class: 'ticket-head' },
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), tuneUpButton(), h('a', { class: 'close-view', href: `#/p/${p.id}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
-      h('div', { class: 'meta' }, 'The keys and values minions and their files carry. Aliases resolve to their value.')),
-    h('div', { id: 'props-body', class: 'props-body' }, loadingLine('Loading…')));
+      h('div', { class: 'meta' }, 'The keys and values minions and their files carry. Aliases resolve to their value.'),
+    ),
+    h('div', { id: 'props-body', class: 'props-body' }, loadingLine('Loading…')),
+  );
   setTimeout(renderPropertiesPage);
   return section;
 }
@@ -392,34 +470,70 @@ async function renderPropertiesPage() {
     const archived = k.values.filter((v) => v.status === 'archived');
     const valueChip = (v) => {
       const flag = v.status === 'proposed' ? 'proposed' : !v.reviewed ? 'new' : '';
-      const actions = !edit ? [] : v.status === 'proposed'
-        ? [btn('Approve', `Make ${k.key}: ${v.value} usable`, () => review(k, v, 'approve')), btn('Reject', 'Drop the proposal', () => review(k, v, 'reject'))]
-        : [
-          flag ? btn('Approve', `Mark ${k.key}: ${v.value} as reviewed`, () => review(k, v, 'approve')) : '',
-          btn('Merge…', `Merge ${v.value} into another value: it becomes an alias, and what carries it moves over`, () => {
-            const into = prompt(`Merge ${k.key}: ${v.value} into which value?\n${values.filter((o) => o !== v && o.status === 'active').map((o) => o.value).join(', ')}`);
-            if (into) review(k, v, 'merge', { into: into.trim() });
-          }),
-          btn('Archive', 'Stop offering it; what has it keeps it', () => review(k, v, 'archive')),
-        ];
-      return h('div', { class: `pv-row${flag ? ` ${flag}` : ''}` },
+      const actions = !edit
+        ? []
+        : v.status === 'proposed'
+          ? [btn('Approve', `Make ${k.key}: ${v.value} usable`, () => review(k, v, 'approve')), btn('Reject', 'Drop the proposal', () => review(k, v, 'reject'))]
+          : [
+              flag ? btn('Approve', `Mark ${k.key}: ${v.value} as reviewed`, () => review(k, v, 'approve')) : '',
+              btn('Merge…', `Merge ${v.value} into another value: it becomes an alias, and what carries it moves over`, () => {
+                const into = prompt(
+                  `Merge ${k.key}: ${v.value} into which value?\n${values
+                    .filter((o) => o !== v && o.status === 'active')
+                    .map((o) => o.value)
+                    .join(', ')}`,
+                );
+                if (into) review(k, v, 'merge', { into: into.trim() });
+              }),
+              btn('Archive', 'Stop offering it; what has it keeps it', () => review(k, v, 'archive')),
+            ];
+      return h(
+        'div',
+        { class: `pv-row${flag ? ` ${flag}` : ''}` },
         h('span', { class: 'pv' }, v.value),
         v.aliases.length ? h('span', { class: 'muted small' }, `also ${v.aliases.join(', ')}`) : '',
         flag ? h('span', { class: 'pv-flag' }, flag === 'new' ? `new · ${v.created_by}` : `proposed · ${v.created_by}`) : '',
         v.description ? h('span', { class: 'muted small pv-desc' }, threadRefs(v.description)) : '',
-        h('span', { class: 'spacer' }), ...actions);
+        h('span', { class: 'spacer' }),
+        ...actions,
+      );
     };
     const addForm = () => {
       const value = h('input', { type: 'text', placeholder: 'new value', 'aria-label': `New ${k.key} value`, autocomplete: 'off' });
       const aliases = h('input', { type: 'text', placeholder: 'aliases, comma-separated', 'aria-label': 'Aliases', autocomplete: 'off' });
       const warn = h('div', { class: 'pv-warn' });
       const add = async (force) => {
-        const payload = { key: k.key, force, values: [{ value: value.value.trim(), aliases: aliases.value.split(',').map((a) => a.trim()).filter(Boolean) }] };
+        const payload = {
+          key: k.key,
+          force,
+          values: [
+            {
+              value: value.value.trim(),
+              aliases: aliases.value
+                .split(',')
+                .map((a) => a.trim())
+                .filter(Boolean),
+            },
+          ],
+        };
         const warnings = await run('values', payload, () => form.reset());
         warn.replaceChildren(...(warnings ? [h('span', {}, warnings.join(' ')), btn('Add anyway', 'It really is different', () => add(true))] : []));
       };
-      const form = h('form', { class: 'row pv-add', 'data-form': `values:${k.key}`, onsubmit: (e) => { e.preventDefault(); if (value.value.trim()) add(false); } },
-        value, aliases, h('button', { type: 'submit', class: 'small' }, 'Add'), warn);
+      const form = h(
+        'form',
+        {
+          class: 'row pv-add',
+          'data-form': `values:${k.key}`,
+          onsubmit: (e) => {
+            e.preventDefault();
+            if (value.value.trim()) add(false);
+          },
+        },
+        value,
+        aliases,
+        h('button', { type: 'submit', class: 'small' }, 'Add'),
+        warn,
+      );
       return form;
     };
     // Approving a key approves every value listed under it too.
@@ -427,12 +541,28 @@ async function renderPropertiesPage() {
     const approveKey = waiting ? `Approve key + ${waiting} value${waiting === 1 ? '' : 's'}` : 'Approve key';
     // A row that opens (#997); its open state outlives the redraw every registry change causes.
     const summary = [k.key, kind, k.status === 'proposed' ? `proposed by ${k.created_by}` : values.length ? `${values.length} value${values.length === 1 ? '' : 's'}` : '', waiting && k.status !== 'proposed' ? `${waiting} to review` : ''].filter(Boolean).join(' · ');
-    const [row] = settingsRow({ icon: 'tag', hue: k.status === 'proposed' || waiting ? 'waiting' : k.scope === 'global' ? 'ink' : 'accent', title: k.label || k.key, summary, open: openProps.has(k.key) },
-      edit && k.status === 'proposed' ? h('div', { class: 'row' }, btn(approveKey, waiting ? 'Make it and its values usable; archive or merge single values after' : 'Make it usable', () => review(k, null, 'approve')), btn('Reject', 'Drop the proposal', () => review(k, null, 'reject'))) : '',
+    const [row] = settingsRow(
+      { icon: 'tag', hue: k.status === 'proposed' || waiting ? 'waiting' : k.scope === 'global' ? 'ink' : 'accent', title: k.label || k.key, summary, open: openProps.has(k.key) },
+      edit && k.status === 'proposed'
+        ? h(
+            'div',
+            { class: 'row' },
+            btn(approveKey, waiting ? 'Make it and its values usable; archive or merge single values after' : 'Make it usable', () => review(k, null, 'approve')),
+            btn('Reject', 'Drop the proposal', () => review(k, null, 'reject')),
+          )
+        : '',
       k.description ? h('p', { class: 'muted small prop-desc' }, threadRefs(k.description)) : '',
       values.length ? h('div', { class: 'pv-list' }, values.map(valueChip)) : '',
-      archived.length ? h('p', { class: 'muted small' }, 'Archived: ', archived.map((v) => [v.value, ' ', edit ? btn('Restore', `Offer ${v.value} again`, () => review(k, v, 'restore')) : '', ' '])) : '',
-      edit && k.value_kind === 'enum' && k.status !== 'archived' ? keep(`values:${k.key}`, addForm) : '');
+      archived.length
+        ? h(
+            'p',
+            { class: 'muted small' },
+            'Archived: ',
+            archived.map((v) => [v.value, ' ', edit ? btn('Restore', `Offer ${v.value} again`, () => review(k, v, 'restore')) : '', ' ']),
+          )
+        : '',
+      edit && k.value_kind === 'enum' && k.status !== 'archived' ? keep(`values:${k.key}`, addForm) : '',
+    );
     row.classList.add('prop-key');
     row.addEventListener('toggle', () => openProps[row.open ? 'add' : 'delete'](k.key));
     return row;
@@ -442,7 +572,11 @@ async function renderPropertiesPage() {
     const key = h('input', { type: 'text', placeholder: 'camelCase key', 'aria-label': 'Key', autocomplete: 'off' });
     const label = h('input', { type: 'text', placeholder: 'Label', 'aria-label': 'Label', autocomplete: 'off' });
     const description = h('input', { type: 'text', placeholder: 'What it means and when to set it', 'aria-label': 'Description', autocomplete: 'off' });
-    const kind = h('select', { 'aria-label': 'Kind of value' }, ['enum', 'integer', 'user', 'text'].map((v) => h('option', { value: v }, { enum: 'a list of values', integer: 'a whole number', user: 'a login name', text: 'free text' }[v])));
+    const kind = h(
+      'select',
+      { 'aria-label': 'Kind of value' },
+      ['enum', 'integer', 'user', 'text'].map((v) => h('option', { value: v }, { enum: 'a list of values', integer: 'a whole number', user: 'a login name', text: 'free text' }[v])),
+    );
     const multi = h('input', { type: 'checkbox' });
     const global = h('input', { type: 'checkbox' });
     const warn = h('div', { class: 'pv-warn' });
@@ -450,11 +584,20 @@ async function renderPropertiesPage() {
       const warnings = await run('keys', { key: key.value.trim(), label: label.value, description: description.value, value_kind: kind.value, multi: multi.checked, global: global.checked, force }, () => form.reset());
       warn.replaceChildren(...(warnings ? [h('span', {}, warnings.join(' ')), btn('Add anyway', 'It really is different', () => add(true))] : []));
     };
-    const form = h('form', { class: 'prop-new-key', 'data-form': 'new-key', onsubmit: (e) => { e.preventDefault(); if (key.value.trim()) add(false); } },
-      h('div', { class: 'row pv-add' }, key, label, kind, h('label', { class: 'small' }, multi, ' several'),
-        reg.globalOwner === view.projectId ? h('label', { class: 'small' }, global, ' every scheme') : ''),
+    const form = h(
+      'form',
+      {
+        class: 'prop-new-key',
+        'data-form': 'new-key',
+        onsubmit: (e) => {
+          e.preventDefault();
+          if (key.value.trim()) add(false);
+        },
+      },
+      h('div', { class: 'row pv-add' }, key, label, kind, h('label', { class: 'small' }, multi, ' several'), reg.globalOwner === view.projectId ? h('label', { class: 'small' }, global, ' every scheme') : ''),
       h('div', { class: 'row pv-add' }, description, h('button', { type: 'submit', class: 'small' }, 'Add key')),
-      warn);
+      warn,
+    );
     return form;
   };
   const newKeyRow = () => {
@@ -467,15 +610,17 @@ async function renderPropertiesPage() {
   const live = (k) => k.status !== 'archived';
   const global = reg.keys.filter((k) => k.scope === 'global' && live(k));
   const own = reg.keys.filter((k) => k.scope === 'scheme' && live(k));
-  body.replaceChildren(...[
-    status,
-    h('h3', { class: 'settings-section' }, 'All schemes'),
-    reg.globalOwner === view.projectId ? '' : settingsHelp('These belong to the whole app; change them from the Citadel scheme.'),
-    h('div', { class: 'settings-rows' }, ...global.map(keyBlock)),
-    h('h3', { class: 'settings-section' }, view.project.name),
-    h('div', { class: 'settings-rows' }, ...(own.length ? own.map(keyBlock) : [h('p', { class: 'muted small settings-empty' }, 'No keys of its own yet.')])),
-    h('h3', { class: 'settings-section' }, 'Add'),
-    h('div', { class: 'settings-rows' }, newKeyRow()),
-  ].filter(Boolean));
+  body.replaceChildren(
+    ...[
+      status,
+      h('h3', { class: 'settings-section' }, 'All schemes'),
+      reg.globalOwner === view.projectId ? '' : settingsHelp('These belong to the whole app; change them from the Citadel scheme.'),
+      h('div', { class: 'settings-rows' }, ...global.map(keyBlock)),
+      h('h3', { class: 'settings-section' }, view.project.name),
+      h('div', { class: 'settings-rows' }, ...(own.length ? own.map(keyBlock) : [h('p', { class: 'muted small settings-empty' }, 'No keys of its own yet.')])),
+      h('h3', { class: 'settings-section' }, 'Add'),
+      h('div', { class: 'settings-rows' }, newKeyRow()),
+    ].filter(Boolean),
+  );
   if (focused?.isConnected && !body.contains(document.activeElement) && body.contains(focused)) focused.focus({ preventScroll: true });
 }

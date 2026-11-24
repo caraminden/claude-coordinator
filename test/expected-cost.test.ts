@@ -35,15 +35,17 @@ test('the marks scale from the larger of the usual cost and the estimate', () =>
   assert.doesNotMatch(turnLine(usual, 1), /brief/);
 });
 
-test('a Taskmaster brief over $30 waits for a person\'s start card; under it, or a person\'s own, starts as today', async () => {
+test("a Taskmaster brief over $30 waits for a person's start card; under it, or a person's own, starts as today", async () => {
   const s = await bootServer();
   try {
     const { data: p } = await s.call('/api/projects', { name: 'Delve' }); // any scheme
     const tm = (await s.call(`/api/projects/${p.id}`)).data.coordinator;
-    const asTaskmaster = (path: string, body: object) => fetch(`${s.base}${path}`, {
-      method: 'POST', headers: { Authorization: `Bearer ${agentToken(s.data, tm.id)}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).then(async (r) => ({ status: r.status, data: await r.json() }));
+    const asTaskmaster = (path: string, body: object) =>
+      fetch(`${s.base}${path}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${agentToken(s.data, tm.id)}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(async (r) => ({ status: r.status, data: await r.json() }));
     const create = (title: string, message: string, extra: object = {}) => asTaskmaster(`/api/projects/${p.id}/tickets`, { title, message, model: 'claude-opus-5-5', effort: 'high', properties: { type: 'feature' }, ...extra });
     const events = async (id: number) => (await s.call(`/api/tickets/${id}/events?after=0`)).data as { id: number; kind: string; data: string }[];
     const card = async (id: number) => (await events(id)).map((e) => ({ e, d: JSON.parse(e.data) })).find(({ e, d }) => e.kind === 'question' && d.startCost);
@@ -63,10 +65,16 @@ test('a Taskmaster brief over $30 waits for a person\'s start card; under it, or
     assert.match(big.data.note, /person's go.*start card/);
     assert.equal(big.data.budget.usd, 45, 'its marks scale from the estimate');
     const inbox = (await s.call(`/api/projects/${p.id}/inbox`)).data.items as { kind: string; ticketId: number }[];
-    assert.ok(inbox.some((i) => i.ticketId === id && i.kind === 'question'), `its start card is in Needs you: ${JSON.stringify(inbox)}`);
+    assert.ok(
+      inbox.some((i) => i.ticketId === id && i.kind === 'question'),
+      `its start card is in Needs you: ${JSON.stringify(inbox)}`,
+    );
     const held = await card(id);
     assert.ok(held, 'a start card in its chat');
-    assert.deepEqual(held.d.questions[0].options.map((o: { label: string }) => o.label), ['Start', 'Split first']);
+    assert.deepEqual(
+      held.d.questions[0].options.map((o: { label: string }) => o.label),
+      ['Start', 'Split first'],
+    );
     const brief = (await events(id)).find((e) => e.kind === 'user_message');
     assert.equal(JSON.parse(brief!.data).parked, true, 'its brief is held, no turn');
     assert.equal(JSON.parse(brief!.data).startHold, true, 'held for its start card, not a seal');
@@ -89,7 +97,10 @@ test('a Taskmaster brief over $30 waits for a person\'s start card; under it, or
     assert.equal(start.status, 202, JSON.stringify(start.data));
     await until('it starts', async () => (await s.call(`/api/tickets/${id}`)).data.ticket.status !== 'new');
     assert.equal((await s.call(`/api/tickets/${id}`)).data.ticket.start_hold, null, 'the hold is gone');
-    assert.ok((await events(id)).some((e) => e.kind === 'user_message' && JSON.parse(e.data).answer), 'its answer is recorded');
+    assert.ok(
+      (await events(id)).some((e) => e.kind === 'user_message' && JSON.parse(e.data).answer),
+      'its answer is recorded',
+    );
 
     // Split first: dismissed, and the Taskmaster is told to split the brief.
     const split = await create('Bigger', 'Do it all.\nExpected cost: $60');
@@ -137,10 +148,12 @@ test('a minion sealed on its start card before #1757 moves out of the seal at bo
   try {
     const { data: p } = await s.call('/api/projects', { name: 'Delve' });
     const tm = (await s.call(`/api/projects/${p.id}`)).data.coordinator;
-    const create = (title: string, message: string) => fetch(`${s.base}/api/projects/${p.id}/tickets`, {
-      method: 'POST', headers: { Authorization: `Bearer ${agentToken(s.data, tm.id)}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, message, model: 'claude-opus-5-5', effort: 'high', properties: { type: 'feature' } }),
-    }).then(async (r) => (await r.json()).id as number);
+    const create = (title: string, message: string) =>
+      fetch(`${s.base}/api/projects/${p.id}/tickets`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${agentToken(s.data, tm.id)}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, message, model: 'claude-opus-5-5', effort: 'high', properties: { type: 'feature' } }),
+      }).then(async (r) => (await r.json()).id as number);
     ids = [await create('Old big', 'Do it all.\nExpected cost: $35'), await create('Plain seal', 'Fix it.\nExpected cost: $5'), await create('Sealed later', 'Do it all.\nExpected cost: $40')];
   } finally {
     await s.stop();

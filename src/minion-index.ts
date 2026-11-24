@@ -25,8 +25,12 @@ const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s)
 
 /** A path as a reader would say it: worktree-relative, $TMPDIR/… for scratch, shared/… for the shared folder. */
 export function shortPath(p: string): string {
-  return p.replace(/^.*\/projects\/\d+\/tickets\/\d+\//, '').replace(/^.*\/projects\/\d+\/tmp\/\d+\//, '$TMPDIR/').replace(/^.*\/projects\/\d+\/shared\/project\//, 'shared/')
-    .replace(/^"?\$\{?TMPDIR\}?"?\//, '$TMPDIR/').replace(/"$/, '');
+  return p
+    .replace(/^.*\/projects\/\d+\/tickets\/\d+\//, '')
+    .replace(/^.*\/projects\/\d+\/tmp\/\d+\//, '$TMPDIR/')
+    .replace(/^.*\/projects\/\d+\/shared\/project\//, 'shared/')
+    .replace(/^"?\$\{?TMPDIR\}?"?\//, '$TMPDIR/')
+    .replace(/"$/, '');
 }
 
 /** Files a Bash command writes from a heredoc (`cat > x <<EOF`, `tee x <<EOF`): how most scratch scripts get made. */
@@ -39,11 +43,29 @@ export function heredocTargets(cmd: string): string[] {
 /** A person's or agent's words as an FTS5 query: every word quoted (no operators get through), all of them, or any with `any`. */
 export function ftsQuery(q: string, any = false): string {
   const words = q.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
-  return [...new Set(words)].slice(0, 24).map((w) => `"${w}"`).join(any ? ' OR ' : ' ');
+  return [...new Set(words)]
+    .slice(0, 24)
+    .map((w) => `"${w}"`)
+    .join(any ? ' OR ' : ' ');
 }
 
-export interface MinionHit { kind: 'minion'; ticket_id: number; number: number; title: string; type: string; status: string; closed_at: number; files: string; snippet: string }
-export interface HandoffHit { kind: 'handoff'; name: string; mtime: number; snippet: string }
+export interface MinionHit {
+  kind: 'minion';
+  ticket_id: number;
+  number: number;
+  title: string;
+  type: string;
+  status: string;
+  closed_at: number;
+  files: string;
+  snippet: string;
+}
+export interface HandoffHit {
+  kind: 'handoff';
+  name: string;
+  mtime: number;
+  snippet: string;
+}
 
 export class MinionIndex {
   private db: DatabaseSync;
@@ -60,9 +82,11 @@ export class MinionIndex {
   /** Index the scheme's minions closed since the last call, oldest first, at most `max`; returns how many. */
   indexClosed(projectId: number, max = PER_CALL): number {
     const [at, id] = this.store.getSetting<[number, number]>(this.markKey(projectId)) ?? [0, 0];
-    const rows = this.db.prepare(`SELECT id, number, title, coalesce(closed_at, updated_at) AS at FROM tickets
+    const rows = this.db
+      .prepare(`SELECT id, number, title, coalesce(closed_at, updated_at) AS at FROM tickets
       WHERE project_id = :p AND kind = 'ticket' AND status = 'closed' AND (coalesce(closed_at, updated_at) > :at OR (coalesce(closed_at, updated_at) = :at AND id > :id))
-      ORDER BY at, id LIMIT :max`).all({ p: projectId, at, id, max }) as { id: number; number: number; title: string; at: number }[];
+      ORDER BY at, id LIMIT :max`)
+      .all({ p: projectId, at, id, max }) as { id: number; number: number; title: string; at: number }[];
     for (const t of rows) {
       // One unreadable transcript is skipped, not retried: the mark must still pass it, or the scheme's index stops there.
       try {
@@ -96,7 +120,8 @@ export class MinionIndex {
       } catch {}
     }
     const files = new Set<string>();
-    const calls = this.db.prepare(`SELECT json_extract(c.value, '$.name') AS name, json_extract(c.value, '$.input.file_path') AS path, json_extract(c.value, '$.input.command') AS cmd
+    const calls = this.db
+      .prepare(`SELECT json_extract(c.value, '$.name') AS name, json_extract(c.value, '$.input.file_path') AS path, json_extract(c.value, '$.input.command') AS cmd
       FROM events e, json_each(e.data, '$.message.content') c
       WHERE e.ticket_id = ? AND e.kind = 'claude' AND e.data LIKE '%"tool_use"%' AND json_valid(e.data) AND json_extract(c.value, '$.type') = 'tool_use'
         AND (json_extract(c.value, '$.name') IN ('Write', 'Edit', 'MultiEdit', 'NotebookEdit') OR (json_extract(c.value, '$.name') = 'Bash' AND json_extract(c.value, '$.input.command') LIKE '%<<%'))`)
@@ -104,8 +129,7 @@ export class MinionIndex {
     for (const c of calls) for (const p of c.name === 'Bash' ? heredocTargets(c.cmd ?? '') : c.path ? [c.path] : []) files.add(shortPath(p));
     const type = String(this.store.props.forTarget('minion', t.id).type ?? '');
     this.db.prepare('DELETE FROM minion_index WHERE rowid = ?').run(t.id);
-    this.db.prepare('INSERT INTO minion_index (rowid, title, type, brief, said, files, project_id, closed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(t.id, t.title, type, cut(briefText, BRIEF_MAX), said.join('\n\n'), [...files].slice(0, 200).join('\n'), projectId, t.at);
+    this.db.prepare('INSERT INTO minion_index (rowid, title, type, brief, said, files, project_id, closed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(t.id, t.title, type, cut(briefText, BRIEF_MAX), said.join('\n\n'), [...files].slice(0, 200).join('\n'), projectId, t.at);
     return briefText;
   }
 
@@ -128,10 +152,15 @@ export class MinionIndex {
     // Filed handoffs (src/handoff-tidy.ts) stay searchable under their folder: "shipped/x.md", "not-picked/x.md".
     for (const sub of ['', 'shipped', 'not-picked']) {
       const looked = Date.now(); // before the stat: a stall after the listing must not make a racy listing look settled
-      const at = await stat(join(dir, sub)).then((s) => Math.floor(s.mtimeMs), () => null);
+      const at = await stat(join(dir, sub)).then(
+        (s) => Math.floor(s.mtimeMs),
+        () => null,
+      );
       if (at === null) continue; // no such folder
       const prefix = sub ? `${sub}/` : '';
-      const keep = () => { for (const [name, mtime] of seen?.files ?? []) if (name.startsWith(prefix) && (sub || !name.includes('/'))) files.set(name, mtime); };
+      const keep = () => {
+        for (const [name, mtime] of seen?.files ?? []) if (name.startsWith(prefix) && (sub || !name.includes('/'))) files.set(name, mtime);
+      };
       if (sub && seen?.dirs.get(sub) === at) {
         dirs.set(sub, at);
         keep();
@@ -151,7 +180,14 @@ export class MinionIndex {
       // A few stats at a time: the thread pool is shared with every other file call the server makes.
       for (let i = 0; i < names.length; i += 8) {
         const batch = names.slice(i, i + 8);
-        const times = await Promise.all(batch.map((n) => stat(join(dir, sub, n)).then((s) => Math.floor(s.mtimeMs), () => null)));
+        const times = await Promise.all(
+          batch.map((n) =>
+            stat(join(dir, sub, n)).then(
+              (s) => Math.floor(s.mtimeMs),
+              () => null,
+            ),
+          ),
+        );
         batch.forEach((n, j) => times[j] !== null && files.set(`${prefix}${n}`, times[j]!));
       }
     }
@@ -187,19 +223,32 @@ export class MinionIndex {
   search(projectId: number, query: string, opts: { since?: number; limit?: number } = {}): (MinionHit | HandoffHit)[] {
     const limit = Math.min(Math.max(Math.floor(opts.limit ?? 10), 1), 30);
     const since = opts.since ?? 0;
-    const minion = (match: string | null, n: number, skip: number[]) => this.db.prepare(`SELECT i.rowid AS ticket_id, t.number, t.title, i.type, t.status, i.closed_at, i.files,
-        ${match ? "snippet(minion_index, -1, '[', ']', '…', 20)" : "substr(i.said, -300)"} AS snippet
+    const minion = (match: string | null, n: number, skip: number[]) =>
+      this.db
+        .prepare(`SELECT i.rowid AS ticket_id, t.number, t.title, i.type, t.status, i.closed_at, i.files,
+        ${match ? "snippet(minion_index, -1, '[', ']', '…', 20)" : 'substr(i.said, -300)'} AS snippet
       FROM minion_index i JOIN tickets t ON t.id = i.rowid AND t.project_id = i.project_id
       WHERE ${match ? 'minion_index MATCH ? AND' : ''} i.project_id = ? AND i.closed_at >= ? ${skip.length ? `AND i.rowid NOT IN (${skip.map(Number).join(',')})` : ''}
       ORDER BY ${match ? 'bm25(minion_index, 5, 1, 2, 2, 3)' : 'i.closed_at DESC'} LIMIT ?`)
-      .all(...(match ? [match] : []), projectId, since, n).map((r: any) => ({ kind: 'minion' as const, ...r }));
+        .all(...(match ? [match] : []), projectId, since, n)
+        .map((r: any) => ({ kind: 'minion' as const, ...r }));
     const all = ftsQuery(query);
     if (!all) return minion(null, limit, []);
     const hits: (MinionHit | HandoffHit)[] = minion(all, limit, []);
-    if (hits.length < limit) hits.push(...minion(ftsQuery(query, true), limit - hits.length, hits.map((h) => (h as MinionHit).ticket_id)));
+    if (hits.length < limit)
+      hits.push(
+        ...minion(
+          ftsQuery(query, true),
+          limit - hits.length,
+          hits.map((h) => (h as MinionHit).ticket_id),
+        ),
+      );
     // Handoffs are live work, not history: since doesn't drop them, and a few at most ride along.
-    const handoffs = this.db.prepare(`SELECT name, mtime, snippet(handoff_index, 1, '[', ']', '…', 20) AS snippet FROM handoff_index
-      WHERE handoff_index MATCH ? AND project_id = ? ORDER BY bm25(handoff_index, 5, 1) LIMIT 3`).all(all, projectId).map((r: any) => ({ kind: 'handoff' as const, ...r }));
+    const handoffs = this.db
+      .prepare(`SELECT name, mtime, snippet(handoff_index, 1, '[', ']', '…', 20) AS snippet FROM handoff_index
+      WHERE handoff_index MATCH ? AND project_id = ? ORDER BY bm25(handoff_index, 5, 1) LIMIT 3`)
+      .all(all, projectId)
+      .map((r: any) => ({ kind: 'handoff' as const, ...r }));
     return [...hits, ...handoffs];
   }
 
@@ -217,7 +266,11 @@ export class MinionIndexer {
     this.store = store;
     this.dataDir = dataDir;
     store.minionIndex.onClosed = (projectId, briefText) => {
-      try { tidyForClosed(store, dataDir, projectId, briefText); } catch (e) { console.error(`handoff tidy: ${(e as Error).message}`); }
+      try {
+        tidyForClosed(store, dataDir, projectId, briefText);
+      } catch (e) {
+        console.error(`handoff tidy: ${(e as Error).message}`);
+      }
     };
   }
 
@@ -229,7 +282,11 @@ export class MinionIndexer {
         await new Promise((r) => setImmediate(r));
         while (this.store.minionIndex.indexClosed(p.id) > 0) await new Promise((r) => setImmediate(r));
         const has = await this.store.minionIndex.syncHandoffs(p.id, this.dataDir);
-        try { reconcileMoved(this.store, this.dataDir, p.id, has); } catch (e) { console.error(`handoff tidy: ${(e as Error).message}`); }
+        try {
+          reconcileMoved(this.store, this.dataDir, p.id, has);
+        } catch (e) {
+          console.error(`handoff tidy: ${(e as Error).message}`);
+        }
       }
     } finally {
       this.running = false;

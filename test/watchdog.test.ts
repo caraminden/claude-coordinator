@@ -68,7 +68,7 @@ test('one push covers everything down; one going away unwatched gets an all-clea
   const r = round(s, T, ['citadel', 'inactive'], ['mandate', 'port 3001 closed']);
   assert.equal(r.message?.title, 'Citadel, mandate down');
   const owner = new Set(['mandate']);
-  assert.deepEqual(r.messageFor(owner), { title: 'mandate down', body: 'Down: mandate 10 min (port 3001 closed).', tag: 'citadel-watchdog', url: '/c/' }, "an owner hears only theirs");
+  assert.deepEqual(r.messageFor(owner), { title: 'mandate down', body: 'Down: mandate 10 min (port 3001 closed).', tag: 'citadel-watchdog', url: '/c/' }, 'an owner hears only theirs');
   assert.equal(r.messageFor(new Set(['peek'])), null, 'nor about anyone else');
   s = r.sent;
   const gone = round(s, T + 5 * MIN, ['citadel', 'inactive']); // mandate's unit was disabled
@@ -91,7 +91,13 @@ test('check skips contraptions whose unit is not enabled, and probes only active
   };
   const probed: number[] = [];
   const found = await check(list, { unitState: async (u) => units[u], answer: async (p) => (probed.push((p as any).port), 'port 2 closed') });
-  assert.deepEqual([...found], [['citadel', { title: 'Citadel', finding: 'failed' }], ['app:a', { title: 'A', finding: 'port 2 closed' }]]);
+  assert.deepEqual(
+    [...found],
+    [
+      ['citadel', { title: 'Citadel', finding: 'failed' }],
+      ['app:a', { title: 'A', finding: 'port 2 closed' }],
+    ],
+  );
   assert.deepEqual(probed, [2]);
   const wedged = await check(list.slice(0, 2), { unitState: async (u) => (u === 'claude-coordinator.service' ? Promise.reject(new Error('bus timed out')) : units[u]), answer: async () => null });
   assert.deepEqual([...wedged.keys()].sort(), ['app:a', 'citadel'], 'one failing systemctl still lets every target through, probed');
@@ -101,7 +107,7 @@ const listen = (s: Server) => new Promise<number>((ok) => s.listen(0, '127.0.0.1
 
 test('answer: a 2xx is up, anything else says why', async () => {
   const hang: any[] = [];
-  const srv = createServer((req, res) => (req.url === '/hang' ? hang.push(res) : (res.statusCode = req.url === '/ok' ? 204 : 503, res.end())));
+  const srv = createServer((req, res) => (req.url === '/hang' ? hang.push(res) : ((res.statusCode = req.url === '/ok' ? 204 : 503), res.end())));
   const port = await listen(srv);
   after(() => (hang.forEach((r) => r.destroy()), srv.close()));
   assert.equal(await answer({ url: `http://127.0.0.1:${port}/ok` }), null);
@@ -129,11 +135,14 @@ test('targets and recipients come from the database', () => {
   mkdirSync(join(home, 'apps/mandate'), { recursive: true });
   writeFileSync(join(home, 'apps/mandate/citadel-app.json'), JSON.stringify({ start: ['node', 'server.ts'], health: '/health' }));
   const t = targets(db, home);
-  assert.deepEqual(t.map((x) => [x.key, x.unit, x.probe]), [
-    ['citadel', 'claude-coordinator.service', { url: 'http://127.0.0.1:8573/api/health' }],
-    ['app:mandate', 'citadel-app-mandate.service', { url: 'http://127.0.0.1:3001/health' }],
-    ['app:peek', 'citadel-app-peek.service', { port: 3002 }],
-  ]);
+  assert.deepEqual(
+    t.map((x) => [x.key, x.unit, x.probe]),
+    [
+      ['citadel', 'claude-coordinator.service', { url: 'http://127.0.0.1:8573/api/health' }],
+      ['app:mandate', 'citadel-app-mandate.service', { url: 'http://127.0.0.1:3001/health' }],
+      ['app:peek', 'citadel-app-peek.service', { port: 3002 }],
+    ],
+  );
   db.prepare("UPDATE users SET disabled_at = 1 WHERE name = 'Josh'").run();
   store.createUser({ name: 'Sam', login: 'sam', admin: true });
   store.savePushSubscription('sam', 'https://push.example/sam', 'k', 'a');
@@ -148,8 +157,15 @@ test('targets and recipients come from the database', () => {
   db.prepare("INSERT INTO contraptions (name, title, port, identity_public, identity_private, key_hash, keys_at, created_at, home_scheme) VALUES ('lees', 'Lees', 3003, 'p', 'q', 'h3', 0, 0, ?), ('joshs', 'Joshs', 3004, 'p', 'q', 'h4', 0, 0, ?)").run(leeScheme.id, joshScheme.id);
   db.prepare("UPDATE contraptions SET home_scheme = ? WHERE name IN ('peek', 'mandate')").run(patScheme.id);
   for (const u of [pat.id, josh.id]) db.prepare("INSERT INTO contraption_users (contraption_id, user_id, added_at) SELECT id, ?, 0 FROM contraptions WHERE name = 'mandate'").run(u);
-  assert.deepEqual(recipients(db).map((s) => [s.name, s.only && [...s.only]]), [['Cara', null], ['sam', null], ['Pat', ['app:mandate', 'app:peek']]],
-    'admins hear everything (not disabled ones, whatever the case of the name); an owner with Mandate on, their own; Lee has no Mandate, Josh is disabled');
+  assert.deepEqual(
+    recipients(db).map((s) => [s.name, s.only && [...s.only]]),
+    [
+      ['Cara', null],
+      ['sam', null],
+      ['Pat', ['app:mandate', 'app:peek']],
+    ],
+    'admins hear everything (not disabled ones, whatever the case of the name); an owner with Mandate on, their own; Lee has no Mandate, Josh is disabled',
+  );
   db.close();
 });
 
@@ -176,9 +192,19 @@ test('tools/watchdog.ts pushes the admins a readable message and saves its state
   writeFileSync(join(dir, 'backups', 'coordinator-2026-11-19.db'), 'x'); // a fresh night, so only Citadel is down
   const stateFile = join(dir, 'state.json');
   writeFileSync(stateFile, JSON.stringify({ citadel: { title: 'Citadel', since: Date.now() - 11 * MIN, why: 'failed', alerted: false } }));
-  const run = (env: object = {}) => new Promise<string>((ok, fail) => tmp.track(execFile(process.execPath, ['tools/watchdog.ts'], {
-    env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake, ...env },
-  }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out))))));
+  const run = (env: object = {}) =>
+    new Promise<string>((ok, fail) =>
+      tmp.track(
+        execFile(
+          process.execPath,
+          ['tools/watchdog.ts'],
+          {
+            env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake, ...env },
+          },
+          (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out))),
+        ),
+      ),
+    );
   const out = await run();
   assert.match(out, /2 watched, down: Citadel: failed/);
   assert.match(out, /Pushing to Cara: Citadel down: Down: Citadel 11 min \(failed\)\./);
@@ -227,9 +253,19 @@ test('tools/watchdog.ts pushes once when the newest backup is a day old, and nam
   const stateFile = join(dir, 'state.json');
   // It has been missing for 11 minutes already: the push is due now.
   writeFileSync(stateFile, JSON.stringify({ backup: { title: 'Nightly backup', since: Date.now() - 11 * MIN, why: 'x', alerted: false } }));
-  const run = () => new Promise<string>((ok, fail) => tmp.track(execFile(process.execPath, ['tools/watchdog.ts'], {
-    env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake, WATCHDOG_CITADEL_PORT: String(healthPort) },
-  }, (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out))))));
+  const run = () =>
+    new Promise<string>((ok, fail) =>
+      tmp.track(
+        execFile(
+          process.execPath,
+          ['tools/watchdog.ts'],
+          {
+            env: { PATH: process.env.PATH, HOME: dir, DATA_DIR: dir, WATCHDOG_STATE: stateFile, CITADEL_SYSTEMCTL: fake, WATCHDOG_CITADEL_PORT: String(healthPort) },
+          },
+          (err, out, errText) => (err ? fail(new Error(`${err.message}\n${errText}`)) : ok(String(out))),
+        ),
+      ),
+    );
   const out = await run();
   assert.match(out, /Nightly backup: the database backup is 30 h old/);
   assert.match(out, /Pushing to Cara: Nightly backup down/);

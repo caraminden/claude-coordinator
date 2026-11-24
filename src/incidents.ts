@@ -109,11 +109,15 @@ export function redTrigger(jobs: RedJob[], after: number, now: number): Trigger 
 }
 
 /** A health row as the stop and stall triggers read it. */
-export interface Row { at: number; detail: string }
+export interface Row {
+  at: number;
+  detail: string;
+}
 
 /** From the first row to the last of every `window`-long stretch (ending at a row) that `enough` passes; null with none. */
 function clusters(rows: Row[], window: number, enough: (inWindow: Row[]) => boolean): { from: number; last: number } | null {
-  let from = Infinity, last = -Infinity;
+  let from = Infinity,
+    last = -Infinity;
   for (let i = 0, j = 0; i < rows.length; i++) {
     while (rows[i].at - rows[j].at >= window) j++;
     const w = rows.slice(j, i + 1);
@@ -207,8 +211,7 @@ export function ciEntries(runs: CiRun[]): Entry[] {
   });
 }
 
-export const deployEntries = (deploys: Deploy[]): Entry[] =>
-  deploys.map((d) => ({ at: d.at, source: 'deploy' as const, text: `the live checkout moved to ${d.sha.slice(0, 8)} "${clip(d.subject, 120)}" (${d.how})`, key: `deploy ${d.sha}` }));
+export const deployEntries = (deploys: Deploy[]): Entry[] => deploys.map((d) => ({ at: d.at, source: 'deploy' as const, text: `the live checkout moved to ${d.sha.slice(0, 8)} "${clip(d.subject, 120)}" (${d.how})`, key: `deploy ${d.sha}` }));
 
 export function healthEntries(rows: { at: number; kind: string; detail: string }[]): Entry[] {
   return rows.map((r) => {
@@ -280,7 +283,14 @@ export function journalEntries(text: string): Entry[] {
 }
 
 /** One line per (source, key): the first time, how many, and the last time. Sorted by when each began. */
-export interface Group { first: Entry; n: number; last: number; branches: Map<string, number>; runners: Map<string, number>; /** The different numbers and hashes the merged lines carried (shape() blanks them), so "x ×81" can say they weren't one line repeated. */ variants: Set<string> }
+export interface Group {
+  first: Entry;
+  n: number;
+  last: number;
+  branches: Map<string, number>;
+  runners: Map<string, number> /** The different numbers and hashes the merged lines carried (shape() blanks them), so "x ×81" can say they weren't one line repeated. */;
+  variants: Set<string>;
+}
 /** The digits and hashes of a line, in order: what shape() takes out. */
 const vars = (s: string) => (s.match(/\b[0-9a-f]{7,40}\b|\d+(?:\.\d+)?/g) ?? []).join(',');
 /** What the numbers in a merged line count: the word before the first one ("Ticket 2869" is tickets), else "numbers". */
@@ -367,14 +377,28 @@ export function countWords(g: Group): string {
 }
 /** The group's text, its one branch swapped for the list when several branches hit it. */
 const textWithBranches = (g: Group, text: string) => {
-  if (g.runners.size > 1 && g.first.runner !== undefined) text = text.replace(` on ${g.first.runner}`, ` on ${[...g.runners].sort((a, b) => b[1] - a[1]).map(([r, c]) => `${r} ×${c}`).join(', ')}`);
+  if (g.runners.size > 1 && g.first.runner !== undefined)
+    text = text.replace(
+      ` on ${g.first.runner}`,
+      ` on ${[...g.runners]
+        .sort((a, b) => b[1] - a[1])
+        .map(([r, c]) => `${r} ×${c}`)
+        .join(', ')}`,
+    );
   const list = branchList(g.branches);
   if (!list) return text;
   const own = g.first.branch !== undefined ? ` (${g.first.branch})` : '';
   return own && text.endsWith(own) ? `${text.slice(0, -own.length)} (${list})` : `${text} (${list})`;
 };
 
-export interface Stall { start: number; end: number; heldS: number; cause: string; wait: string; running: string }
+export interface Stall {
+  start: number;
+  end: number;
+  heldS: number;
+  cause: string;
+  wait: string;
+  running: string;
+}
 /** A Pacific wall-clock time on `day` ("2026-11-21", "02:23:05") as epoch ms. */
 function pacificMs(day: string, hms: string): number {
   const guess = Date.parse(`${day}T${hms}Z`);
@@ -392,16 +416,24 @@ export function parseStall(text: string, at: number): Stall | null {
   const m = /held for (\d+(?:\.\d+)?) s(?: \((\d\d:\d\d:\d\d)(?: [A-Z]{3})? to (\d\d:\d\d:\d\d)(?: [A-Z]{3,4})?\))?/.exec(text);
   if (!m || !/event loop was held/.test(text)) return null;
   const heldS = Number(m[1]);
-  let start = at - heldS * 1000, end = at;
+  let start = at - heldS * 1000,
+    end = at;
   if (m[2]) {
     // The line's clock is the stall's: on the Pacific day it was written, or the day before when it crossed midnight.
     for (const day of [pacificDay(at), pacificDay(at - 86_400_000)]) {
       const e = pacificMs(day, m[3]);
-      if (e <= at + 1000) { end = e; start = pacificMs(day, m[2]); if (start > end) start = pacificMs(pacificDay(at - 86_400_000), m[2]); break; }
+      if (e <= at + 1000) {
+        end = e;
+        start = pacificMs(day, m[2]);
+        if (start > end) start = pacificMs(pacificDay(at - 86_400_000), m[2]);
+        break;
+      }
     }
   }
   return {
-    start, end, heldS,
+    start,
+    end,
+    heldS,
     cause: /Cause: ([a-z ]+?) \(/.exec(text)?.[1] ?? 'unclear',
     wait: /Main thread waited on: ([^.]*?)\./.exec(text)?.[1] ?? '',
     running: (/Running: (.*?)(?: Disk:| Also open on|$)/.exec(text)?.[1] ?? '').split('; ').slice(0, 2).join('; ').replace(/\.$/, ''),
@@ -430,12 +462,21 @@ export function render(incident: Open, from: number, to: number, g: Gathered, db
     const link = first.url ? ` [run](${first.url})` : '';
     return `- **${pacific(first.at)}** · ${SOURCE_NAME[first.source]} · ${textWithBranches(g, first.text).replace(/\n/g, ' ')}${more}${link}`;
   };
-  const biggest = groups.filter((x) => x.n > 1 && x.first.source !== 'trigger').sort((a, b) => b.n - a.n).slice(0, 5);
+  const biggest = groups
+    .filter((x) => x.n > 1 && x.first.source !== 'trigger')
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 5);
   const firstBad = groups.find((x) => x.first.source === 'ci' && / failed/.test(x.first.text));
   const stalls = biggestStalls(g.entries);
   const stallSection = stalls.length
-    ? ['## Biggest stalls', '', 'The five longest event-loop holds, each with its own start and end (not when its line was written), before any grouped count below.', '',
-      ...stalls.map((x) => `- **${pacific(x.start)}** to ${pacific(x.end).replace(/^.*?, /, '')} · ${x.heldS.toFixed(1)} s · ${x.cause}${x.wait ? ` · waited on ${x.wait}` : ''}${x.running ? ` · ${x.running}` : ''}`), '']
+    ? [
+        '## Biggest stalls',
+        '',
+        'The five longest event-loop holds, each with its own start and end (not when its line was written), before any grouped count below.',
+        '',
+        ...stalls.map((x) => `- **${pacific(x.start)}** to ${pacific(x.end).replace(/^.*?, /, '')} · ${x.heldS.toFixed(1)} s · ${x.cause}${x.wait ? ` · waited on ${x.wait}` : ''}${x.running ? ` · ${x.running}` : ''}`),
+        '',
+      ]
     : [];
   const sec = (ms: number) => Math.floor(ms / 1000);
   return [
@@ -452,7 +493,10 @@ export function render(incident: Open, from: number, to: number, g: Gathered, db
     '## At a glance',
     '',
     ...(firstBad ? [`- First failed CI run: ${line(firstBad).slice(2)}`] : []),
-    ...biggest.map((x) => `- Most repeated: ${/different/.test(countWords(x)) ? `${x.n} lines like` : `${x.n}×`} ${SOURCE_NAME[x.first.source]}: ${x.first.key && x.first.source === 'ci' ? `${x.first.key}${branchList(x.branches) ? ` (${branchList(x.branches)})` : ''}` : x.first.text}${/different/.test(countWords(x)) ? `, ${x.variants.size} different ${nounOf(x.first.text)}` : ''}, ${pacific(x.first.at)} to ${pacific(x.last)}`),
+    ...biggest.map(
+      (x) =>
+        `- Most repeated: ${/different/.test(countWords(x)) ? `${x.n} lines like` : `${x.n}×`} ${SOURCE_NAME[x.first.source]}: ${x.first.key && x.first.source === 'ci' ? `${x.first.key}${branchList(x.branches) ? ` (${branchList(x.branches)})` : ''}` : x.first.text}${/different/.test(countWords(x)) ? `, ${x.variants.size} different ${nounOf(x.first.text)}` : ''}, ${pacific(x.first.at)} to ${pacific(x.last)}`,
+    ),
     ...(firstBad || biggest.length ? [] : ['- Nothing repeated.']),
     '',
     ...stallSection,
@@ -615,7 +659,8 @@ export class Incidents {
 
   /** Gather, write and tell, for one incident. */
   async write(incident: Open, now = this.now()): Promise<string | null> {
-    const from = incident.from - LEAD_MS, to = Math.min(now, incident.last + TAIL_MS);
+    const from = incident.from - LEAD_MS,
+      to = Math.min(now, incident.last + TAIL_MS);
     const g = await gather(this.d.store, this.d.sources, from, to);
     const text = render(incident, from, to, g, this.d.sources.dbPath);
     const file = this.d.write(fileName(incident.from), text);

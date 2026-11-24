@@ -38,7 +38,13 @@ test('ten landings started together land in the order they arrived, each told it
   assert.match(done[9].stderr, /queue: 2nd in line for the deploy lock, about \d+ min \(ahead: ticket\/9-x, /);
   assert.match(done[9].stderr, /queue: got the deploy lock/);
   assert.deepEqual(tickets(state), [], 'every ticket is gone');
-  assert.equal(readFileSync(join(state, 'queue', '.took'), 'utf8').trim().split('\n').length, 5, 'the newest five landings were timed, for the estimate');
+  assert.equal(
+    readFileSync(join(state, 'queue', '.took'), 'utf8')
+      .trim()
+      .split('\n').length,
+    5,
+    'the newest five landings were timed, for the estimate',
+  );
   assert.equal(spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status, 0, 'the deploy lock is free');
 });
 
@@ -128,7 +134,13 @@ test('a waiter that is killed leaves the line, and the one behind it goes next',
 
 // A zombie: b's parent starts it, then becomes a sleep that never waits on it, so once b is killed its
 // /proc entry stays, start time and all, until the parent goes.
-const isZombie = (pid: number) => { try { return /\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+const isZombie = (pid: number) => {
+  try {
+    return /\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8'));
+  } catch {
+    return false;
+  }
+};
 
 test('a killed waiter whose parent never reaps it leaves the line too', async () => {
   const state = queueState();
@@ -208,7 +220,10 @@ test('the head of the line waits for a lock held outside it (the queued restart)
     assert.equal(await b.exit, 0, b.stderr());
     assert.deepEqual(order(state), ['a', 'b']);
     // Each noted how long it held the lock; a held it for a second or two.
-    const took = readFileSync(join(state, 'queue', '.took'), 'utf8').trim().split('\n').map(Number);
+    const took = readFileSync(join(state, 'queue', '.took'), 'utf8')
+      .trim()
+      .split('\n')
+      .map(Number);
     assert.equal(took.length, 4);
     assert.ok(took[2] >= 1 && took[2] <= 30, `a's time: ${took[2]}`);
   } finally {
@@ -255,7 +270,9 @@ test('a waiter that is frozen is passed over: the one behind it takes the lock, 
 function frozenWaiter(state: string, label: string) {
   const sleeper = spawn('sleep', ['60'], { stdio: 'ignore' });
   const pid = sleeper.pid!;
-  const start = readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /s, '').split(' ')[19];
+  const start = readFileSync(`/proc/${pid}/stat`, 'utf8')
+    .replace(/^.*\) /s, '')
+    .split(' ')[19];
   const cg = readFileSync(`/proc/${pid}/cgroup`, 'utf8').match(/^0::(.*)$/m)![1];
   const fake = join(state, 'cgroup');
   mkdirSync(join(fake, cg), { recursive: true });
@@ -327,13 +344,22 @@ test('a waiter behind a lock held from outside the line names the process that h
 test('a child of a waiter that ends while the holder is looked up is not named as the holder', { timeout: 60_000 }, () => {
   const state = queueState();
   mkdirSync(join(state, 'queue'));
-  const r = spawnSync('bash', ['-c', `
+  const r = spawnSync(
+    'bash',
+    [
+      '-c',
+      `
     exec 9>"$1/lock"
     ( for i in $(seq 400); do sleep 0.0$((RANDOM % 9 + 1)) & sleep 0.004; done; wait ) & w=$!
     exec 9>&-
     echo "$w 0" >"$1/queue/1"
     . "$0"
-    while kill -0 $w 2>/dev/null; do queue_outside "$1"; done`, queueLib, state], { encoding: 'utf8', env });
+    while kill -0 $w 2>/dev/null; do queue_outside "$1"; done`,
+      queueLib,
+      state,
+    ],
+    { encoding: 'utf8', env },
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.ok(r.stdout.includes('a queued restart'), 'it looked while the waiter ran');
   assert.doesNotMatch(r.stdout + r.stderr, /outside the line|cmdline/);
@@ -428,7 +454,11 @@ test('a queue/.seq that holds no number is named, and the next ticket still goes
     assert.equal(await b.exit, 0, bs());
     assert.deepEqual(order(state), ['a', 'b']);
     assert.equal(issued(state), 2);
-    assert.deepEqual(readdirSync(join(state, 'queue')).filter((f) => f.includes('.tmp')), [], 'no half-written tickets left');
+    assert.deepEqual(
+      readdirSync(join(state, 'queue')).filter((f) => f.includes('.tmp')),
+      [],
+      'no half-written tickets left',
+    );
   } finally {
     for (const w of [a, b]) w?.child.kill('SIGKILL');
   }
@@ -476,7 +506,10 @@ test('a waiter further back naps between looks and runs no subshell in a look, y
   const ws: ReturnType<typeof napper>[] = [];
   try {
     await until('a to hold the lock', () => order(state).length === 1);
-    const join1 = (label: string, pre = '') => { ws.push(napper(state, label, pre)); return until(`${label}'s ticket`, () => issued(state) === ws.length + 1); };
+    const join1 = (label: string, pre = '') => {
+      ws.push(napper(state, label, pre));
+      return until(`${label}'s ticket`, () => issued(state) === ws.length + 1);
+    };
     await join1('b');
     // c, d and e trace every command with its subshell depth: a $( ) or a pipe in a look shows as depth 1, and each nap
     // as "+0 sleep 1". Counting naps, not seconds, keeps a loaded box from failing it: a change made at any moment is
@@ -488,7 +521,11 @@ test('a waiter further back naps between looks and runs no subshell in a look, y
     const [b, c, d, e] = ws;
     const naps = (s: string) => (s.match(/^\+0 sleep 1$/gm) ?? []).length;
     // What a waiter traced from `from` up to where it first said `what`.
-    const upTo = (s: string, from: number, what: RegExp) => { const t = s.slice(from); const m = what.exec(t); return m ? t.slice(0, m.index) : t; };
+    const upTo = (s: string, from: number, what: RegExp) => {
+      const t = s.slice(from);
+      const m = what.exec(t);
+      return m ? t.slice(0, m.index) : t;
+    };
     await until('e to say its place', () => /5th in line/.test(e.stderr()));
     await until('c to nap twice', () => naps(c.stderr()) >= 2);
     const look = c.stderr().split(/^\+0 sleep 1$/m)[1];
@@ -496,7 +533,8 @@ test('a waiter further back naps between looks and runs no subshell in a look, y
     assert.doesNotMatch(c.stderr().split('3rd in line')[1], /^\+0 sleep 0\.05$/m, 'c, two back, never looked at the poll beat');
 
     const [, , , , te] = tickets(state);
-    let atC = c.stderr().length, atE = e.stderr().length;
+    let atC = c.stderr().length,
+      atE = e.stderr().length;
     writeFileSync(join(state, 'queue', '.order'), `# Cara moved #5 to the front\n${te}\n`);
     await until('e to see the reorder', () => /queue: 2nd in line .*\(ahead: a, starting\)/.test(e.stderr().slice(atE)));
     await until('c, further back, to see it too', () => /4th in line/.test(c.stderr().slice(atC)));

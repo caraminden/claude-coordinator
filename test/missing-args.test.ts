@@ -37,9 +37,14 @@ after(async () => {
 async function tool(ticket: { id: number }, role: 'coordinator' | 'thread', name: string, args: object, env: Record<string, string> = {}): Promise<{ isError?: boolean; text: string }> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(Citadel.id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: role,
-      COORDINATOR_APP_INSTRUCTIONS: '1', ...env,
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
+      COORDINATOR_PROJECT: String(Citadel.id),
+      COORDINATOR_TICKET: String(ticket.id),
+      COORDINATOR_ROLE: role,
+      COORDINATOR_APP_INSTRUCTIONS: '1',
+      ...env,
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -197,9 +202,15 @@ test('"is too long": the limit is in the schema, and the error names it', async 
   // Every string the server caps carries its cap: none of these tools' text arguments is left without one.
   const coord = await listTools('coordinator', TM);
   for (const [list, name, field] of [
-    [coord, 'message_ticket', 'text'], [coord, 'message_taskmaster', 'text'], [coord, 'create_ticket', 'message'],
-    [thread, 'message_coordinator', 'text'], [thread, 'propose_plan', 'summary'], [thread, 'propose_plan', 'plan'],
-    [thread, 'strike_text', 'text'], [thread, 'strike_text', 'reason'], [coord, 'set_project_instructions', 'instructions'],
+    [coord, 'message_ticket', 'text'],
+    [coord, 'message_taskmaster', 'text'],
+    [coord, 'create_ticket', 'message'],
+    [thread, 'message_coordinator', 'text'],
+    [thread, 'propose_plan', 'summary'],
+    [thread, 'propose_plan', 'plan'],
+    [thread, 'strike_text', 'text'],
+    [thread, 'strike_text', 'reason'],
+    [coord, 'set_project_instructions', 'instructions'],
   ] as const) {
     const p = (list as any[]).find((t) => t.name === name).inputSchema.properties[field];
     assert.ok(p.maxLength > 0, `${name}.${field} has no maxLength`);
@@ -210,14 +221,25 @@ test('"is too long": the limit is in the schema, and the error names it', async 
 test('"needs a recommended option": a recommendation written into the label or description counts', async () => {
   const card = (options: object[]) => tool(Minion, 'thread', 'ask_question', { questions: [{ question: 'Which?', options }], not_duplicate: true }); // the same question each time on purpose (#1508's twin check)
   for (const options of [
-    [{ label: 'Stitched (rec.)', description: 'Free.' }, { label: 'Written', description: 'Costs.' }],
-    [{ label: 'Exe', description: 'Recommended. Built here.' }, { label: 'CI', description: 'Slower.' }],
+    [
+      { label: 'Stitched (rec.)', description: 'Free.' },
+      { label: 'Written', description: 'Costs.' },
+    ],
+    [
+      { label: 'Exe', description: 'Recommended. Built here.' },
+      { label: 'CI', description: 'Slower.' },
+    ],
     [{ label: 'Exe', recommended: 'true' }, { label: 'CI' }],
   ]) {
     const r = await card(options);
     assert.ok(!r.isError, `${JSON.stringify(options)}: ${r.text}`);
   }
-  const q = JSON.parse(store.listEvents(Minion.id).filter((e) => e.kind === 'question').at(-2)!.data);
+  const q = JSON.parse(
+    store
+      .listEvents(Minion.id)
+      .filter((e) => e.kind === 'question')
+      .at(-2)!.data,
+  );
   assert.deepEqual(q.questions[0].options[0], { label: 'Exe', description: 'Built here.', recommended: true });
   // An explicit flag wins over the words; with neither, it is still refused.
   refused(await card([{ label: 'A' }, { label: 'B', description: 'Recommended for big ones' }]), /needs a recommended option/);

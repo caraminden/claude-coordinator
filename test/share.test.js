@@ -11,7 +11,14 @@ test('a share goes to Mandate, each field passed on as share_*, re-encoded', () 
   const url = new URL(to.src, 'https://citadel.test');
   assert.equal(url.pathname, '/apps/mandate/');
   // What Mandate reads back is exactly what was shared: &, =, # and non-ASCII survive the trip.
-  assert.deepEqual([...url.searchParams], [['share_title', 'Café & bar'], ['share_text', 'a=b #1'], ['share_url', 'https://ex.com/p?q=1&r=2']]);
+  assert.deepEqual(
+    [...url.searchParams],
+    [
+      ['share_title', 'Café & bar'],
+      ['share_text', 'a=b #1'],
+      ['share_url', 'https://ex.com/p?q=1&r=2'],
+    ],
+  );
   assert.doesNotMatch(to.src, /#/);
 });
 

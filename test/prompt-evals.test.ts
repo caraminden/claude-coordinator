@@ -20,8 +20,7 @@ test('every case and brief file is valid, with unique ids and regexes that compi
 });
 
 test('problems() names what is wrong with a case', () => {
-  const ok = { id: 'x', kind: 'rule', source: 's', role: 'minion', ticket: { number: 1, title: 't', type: null }, commit: 'abc1234', from: 'Cara',
-    history: '', message: 'm', facts: [], right: 'r', wrong: 'w', checks: [{ call: 'ask_question', why: 'y' }] };
+  const ok = { id: 'x', kind: 'rule', source: 's', role: 'minion', ticket: { number: 1, title: 't', type: null }, commit: 'abc1234', from: 'Cara', history: '', message: 'm', facts: [], right: 'r', wrong: 'w', checks: [{ call: 'ask_question', why: 'y' }] };
   assert.deepEqual(problems(ok, 'x.json'), []);
   assert.match(problems({ ...ok, checks: [{ call: 'a', noText: 'b', why: 'y' }] }).join(), /exactly one/);
   assert.match(problems({ ...ok, checks: [{ noText: '(', why: 'y' }] }).join(), /noText/);
@@ -33,9 +32,8 @@ const stream = (...blocks: object[]) => blocks.map((b) => JSON.stringify({ type:
 const said = (text: string) => ({ type: 'text', text });
 const called = (name: string, input: object) => ({ type: 'tool_use', name, input });
 
-test('events() keeps the top-level calls and text in order and skips a Grunt\'s own', () => {
-  const s = stream(said('Checking.'), called('mcp__thread__host_check', { sql: 'select 1' })) + '\n' +
-    JSON.stringify({ type: 'assistant', parent_tool_use_id: 'x', message: { content: [said('grunt')] } }) + '\nnot json';
+test("events() keeps the top-level calls and text in order and skips a Grunt's own", () => {
+  const s = stream(said('Checking.'), called('mcp__thread__host_check', { sql: 'select 1' })) + '\n' + JSON.stringify({ type: 'assistant', parent_tool_use_id: 'x', message: { content: [said('grunt')] } }) + '\nnot json';
   assert.deepEqual(events(s), [{ text: 'Checking.' }, { call: 'mcp__thread__host_check', input: '{"sql":"select 1"}' }]);
 });
 
@@ -52,7 +50,12 @@ test('checks: call, before, noCall, reply and noText', () => {
   assert.ok(holds({ reply: 'no card open', why: '' }, ev));
   assert.ok(!holds({ reply: 'let me', why: '' }, ev), 'reply is the last text only');
   assert.ok(!holds({ noText: 'LET ME', why: '' }, ev), 'case-insensitive');
-  const c = { checks: [{ noText: 'self-review', why: 'said it' }, { call: 'read_minion', why: 'looked' }] } as Case;
+  const c = {
+    checks: [
+      { noText: 'self-review', why: 'said it' },
+      { call: 'read_minion', why: 'looked' },
+    ],
+  } as Case;
   assert.deepEqual(failures(c, ev), ['said it']);
 });
 
@@ -61,8 +64,7 @@ test('checks: said matches any text or any call input', () => {
   assert.ok(holds({ said: 'let me', why: '' }, ev), 'an early text');
   assert.ok(holds({ said: 'when x, then y', why: '' }, ev), 'a call input');
   assert.ok(!holds({ said: 'nowhere', why: '' }, ev));
-  const ok = { id: 'x', kind: 'rule', source: 's', role: 'minion', ticket: { number: 1, title: 't', type: null }, commit: 'abc1234', from: 'Cara',
-    history: '', message: 'm', facts: [], right: 'r', wrong: 'w', checks: [{ said: 'a', why: 'y' }] };
+  const ok = { id: 'x', kind: 'rule', source: 's', role: 'minion', ticket: { number: 1, title: 't', type: null }, commit: 'abc1234', from: 'Cara', history: '', message: 'm', facts: [], right: 'r', wrong: 'w', checks: [{ said: 'a', why: 'y' }] };
   assert.deepEqual(problems(ok), []);
   assert.match(problems({ ...ok, work: 'not a sha' }).join(), /work is a sha/);
 });
@@ -73,7 +75,10 @@ test('scoring: most runs pass; a case fell only on a drop of 2 or more', () => {
 });
 
 test('the stub answers from the first matching fact, else a stock reply', () => {
-  const facts = [{ tool: 'host_check', match: 'ci_runs', result: 'run 7 waited 40 s' }, { tool: 'host_check|read_minion', result: 'any' }];
+  const facts = [
+    { tool: 'host_check', match: 'ci_runs', result: 'run 7 waited 40 s' },
+    { tool: 'host_check|read_minion', result: 'any' },
+  ];
   assert.equal(answer(facts, 'host_check', { sql: 'select * from ci_runs' }), 'run 7 waited 40 s');
   assert.equal(answer(facts, 'host_check', { sql: 'select 1' }), 'any');
   assert.match(answer([], 'ask_question', {}), /card is in the chat/);
@@ -83,7 +88,8 @@ test('the stub answers from the first matching fact, else a stock reply', () => 
 
 test('the stub serves a tool list and answers calls over stdio', async () => {
   const tmp = tempRoot('stub-tools-');
-  const tools = tmp.path('tools.json'), facts = tmp.path('facts.json');
+  const tools = tmp.path('tools.json'),
+    facts = tmp.path('facts.json');
   const { writeFileSync } = await import('node:fs');
   writeFileSync(tools, JSON.stringify([{ name: 'host_check', inputSchema: { type: 'object' } }]));
   writeFileSync(facts, JSON.stringify([{ tool: 'host_check', result: 'rows' }]));
@@ -91,15 +97,16 @@ test('the stub serves a tool list and answers calls over stdio', async () => {
   try {
     const got: any[] = [];
     let buf = '';
-    const done = new Promise<void>((ok) => p.stdout.on('data', (d) => {
-      buf += d;
-      const lines = buf.split('\n');
-      buf = lines.pop()!;
-      got.push(...lines.map((l) => JSON.parse(l)));
-      if (got.length === 3) ok();
-    }));
-    for (const m of [{ id: 1, method: 'initialize', params: {} }, { method: 'notifications/initialized' }, { id: 2, method: 'tools/list' },
-      { id: 3, method: 'tools/call', params: { name: 'host_check', arguments: {} } }]) p.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');
+    const done = new Promise<void>((ok) =>
+      p.stdout.on('data', (d) => {
+        buf += d;
+        const lines = buf.split('\n');
+        buf = lines.pop()!;
+        got.push(...lines.map((l) => JSON.parse(l)));
+        if (got.length === 3) ok();
+      }),
+    );
+    for (const m of [{ id: 1, method: 'initialize', params: {} }, { method: 'notifications/initialized' }, { id: 2, method: 'tools/list' }, { id: 3, method: 'tools/call', params: { name: 'host_check', arguments: {} } }]) p.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');
     await done;
     assert.equal(got[1].result.tools[0].name, 'host_check');
     assert.equal(got[2].result.content[0].text, 'rows');
@@ -108,7 +115,7 @@ test('the stub serves a tool list and answers calls over stdio', async () => {
   }
 });
 
-test('the replay guard refuses writes and today\'s live state, and lets Citadel\'s own (stubbed) tools through', () => {
+test("the replay guard refuses writes and today's live state, and lets Citadel's own (stubbed) tools through", () => {
   const decide = (tool_name: string, tool_input: object) => {
     const out = spawnSync(process.execPath, [join(dir, 'guard.ts')], { input: JSON.stringify({ tool_name, tool_input }), encoding: 'utf8' }).stdout.trim();
     return out ? JSON.parse(out).hookSpecificOutput.permissionDecision : 'allow';
@@ -123,9 +130,8 @@ test('the replay guard refuses writes and today\'s live state, and lets Citadel\
   assert.equal(decide('mcp__thread__host_check', { what: 'db', sql: 'select 1' }), 'allow');
 });
 
-test('snapshot() cuts the two instruction sections out of a turn\'s system prompt', () => {
-  const text = ['# Environment', 'x', '', '# Citadel-wide instructions', 'People set these…', '', '## Who', 'Cara runs it.', '',
-    'GitHub\'s own runners (set in its Minion rules): ask first.', '', '# Scheme instructions for "Citadel"', 'People set these…', '', '## Names', 'Old names stay.'].join('\n');
+test("snapshot() cuts the two instruction sections out of a turn's system prompt", () => {
+  const text = ['# Environment', 'x', '', '# Citadel-wide instructions', 'People set these…', '', '## Who', 'Cara runs it.', '', "GitHub's own runners (set in its Minion rules): ask first.", '', '# Scheme instructions for "Citadel"', 'People set these…', '', '## Names', 'Old names stay.'].join('\n');
   assert.deepEqual(snapshot(text), { app: '## Who\nCara runs it.\n', scheme: '## Names\nOld names stay.\n' });
   assert.ok(readFileSync(join(dir, 'fixture/citadel-wide.md'), 'utf8').includes('## Who and tone'));
 });
@@ -133,10 +139,16 @@ test('snapshot() cuts the two instruction sections out of a turn\'s system promp
 test('ablate() empties parts, removes lines and cuts tools to their first sentence, and refuses a drop that matches nothing (#1277)', async () => {
   const { ablate } = await import('../tools/prompt-evals/render.ts');
   const parts = { system: { base: ['keep me', 'drop me too'], files: ['f1', 'f2'] }, turn: { files: ['t1'], pr: ['p'] } };
-  const tools = [{ name: 'ask_question', description: 'Ask people a card. It has many more words. And more.' }, { name: 'other', description: 'Stays. Whole.' }];
+  const tools = [
+    { name: 'ask_question', description: 'Ask people a card. It has many more words. And more.' },
+    { name: 'other', description: 'Stays. Whole.' },
+  ];
   ablate(parts, tools, { parts: ['files'], lines: ['drop me'], tools: ['ask_question'] });
   assert.deepEqual(parts, { system: { base: ['keep me'], files: [] }, turn: { files: [], pr: ['p'] } });
-  assert.deepEqual(tools.map((t) => t.description), ['Ask people a card.', 'Stays. Whole.']);
+  assert.deepEqual(
+    tools.map((t) => t.description),
+    ['Ask people a card.', 'Stays. Whole.'],
+  );
   for (const bad of [{ parts: ['nope'] }, { lines: ['not there'] }, { tools: ['nope'] }]) assert.throws(() => ablate(parts, tools, bad), /drop: no/);
   assert.throws(() => ablate(parts, [{ name: 'one', description: 'Only one sentence.' }], { tools: ['one'] }), /one sentence already/, 'a cut that leaves the text whole tests nothing');
   for (const bad of [null, {}, { part: ['close'] }, { parts: 'close' }, { lines: [] }, { lines: [''] }]) assert.throws(() => ablate(parts, tools, bad as any), /drop: want/);

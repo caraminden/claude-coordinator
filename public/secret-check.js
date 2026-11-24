@@ -14,7 +14,9 @@ const RANDOM = /[A-Za-z0-9_+/=-]{24,}/g;
  * already written as $CITADEL_SECRET_<NAME> is fine.
  */
 export function looksSecret(text) {
-  const plain = String(text ?? '').replace(/`[^`]*`/g, ' ').replace(/\bhttps?:\/\/\S+/g, ' ');
+  const plain = String(text ?? '')
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/\bhttps?:\/\/\S+/g, ' ');
   const known = plain.match(KNOWN);
   if (known) return known[0];
   const said = plain.match(SAID);

@@ -19,7 +19,10 @@ test('newestRun takes the newer of the branch and land/ runs, and says whether i
   const old = await newestRun(async () => ({ status: 200, etag: null, body: { workflow_runs: [run({ head_sha: '99990000' })] } }), 'o/r', undefined, ['ticket/7-x'], 'abc12345');
   assert.equal(old?.onHead, false);
   assert.equal(await newestRun(async () => ({ status: 200, etag: null, body: { workflow_runs: [] } }), 'o/r', undefined, ['b'], null), null);
-  await assert.rejects(newestRun(async () => ({ status: 404, etag: null, body: {} }), 'o/r', undefined, ['b'], null), /404/);
+  await assert.rejects(
+    newestRun(async () => ({ status: 404, etag: null, body: {} }), 'o/r', undefined, ['b'], null),
+    /404/,
+  );
 });
 
 /** A fake app with one minion, as liveFacts reads it. */
@@ -54,7 +57,9 @@ test('liveFacts reads state, cards, park, branch, change and CI in one go, and f
 test('liveFacts says why CI could not be read, and a minion with no branch has no CI line', async () => {
   const project = { id: 3, name: 'Delve', repo_url: 'https://github.com/o/r.git', repo_dir: '/repo' };
   const broken = fakeApp({ id: 70, number: 7, title: 'T', project_id: 3, status: 'idle', state: null, branch: 'b' }, { open_cards: [] }, project, { tip: 'abc', pr: null });
-  const f = await liveFacts(broken, 70, async () => { throw new Error('gh: not logged in\nmore'); });
+  const f = await liveFacts(broken, 70, async () => {
+    throw new Error('gh: not logged in\nmore');
+  });
   assert.match(factsText(f), /newest CI run: couldn't read \(gh: not logged in\)/);
   assert.match(factsText(f), /cards waiting on people: none/);
   assert.match(factsText(f), /change: nothing committed on its branch/);

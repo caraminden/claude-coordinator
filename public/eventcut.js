@@ -15,14 +15,17 @@ export const TEXT_HEAD = 300;
 /** Smaller events are sent as stored: nothing in them is worth parsing to cut. */
 const SMALL = 2000;
 
-const textOf = (content) => typeof content === 'string' ? content
-  : Array.isArray(content) ? content.map((c) => typeof c?.text === 'string' ? c.text : c?.type === 'image' ? '[image]' : '').join('\n') : '';
+const textOf = (content) => (typeof content === 'string' ? content : Array.isArray(content) ? content.map((c) => (typeof c?.text === 'string' ? c.text : c?.type === 'image' ? '[image]' : '')).join('\n') : '');
 
 /** One stored event row ({ id, ticket_id, kind, data, created_at }) as a page sends it: the same row, or a copy with big fields cut. */
 export function cutEvent(row) {
   if (row.kind !== 'claude' || typeof row.data !== 'string' || row.data.length <= SMALL) return row;
   let data;
-  try { data = JSON.parse(row.data); } catch { return row; }
+  try {
+    data = JSON.parse(row.data);
+  } catch {
+    return row;
+  }
   const content = data?.message?.content;
   if (!Array.isArray(content)) return row;
   let changed = false;

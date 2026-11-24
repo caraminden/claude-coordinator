@@ -98,9 +98,27 @@ test('keeps what was only in the WAL when the server stopped without closing', (
 
 for (const [name, ops, marked] of [
   ['chattr +C does not take', () => fakeOps({ setNoCow: () => {} }), true],
-  ['chattr fails', () => fakeOps({ setNoCow: () => { throw new Error('chattr: Operation not supported'); } }), true],
+  [
+    'chattr fails',
+    () =>
+      fakeOps({
+        setNoCow: () => {
+          throw new Error('chattr: Operation not supported');
+        },
+      }),
+    true,
+  ],
   // VACUUM INTO refuses a file that isn't empty, so the copy itself fails.
-  ['the copy fails partway', () => { const o = fakeOps(); const set = o.setNoCow; o.setNoCow = (f) => (set(f), appendFileSync(f, 'junk')); return o; }, true],
+  [
+    'the copy fails partway',
+    () => {
+      const o = fakeOps();
+      const set = o.setNoCow;
+      o.setNoCow = (f) => (set(f), appendFileSync(f, 'junk'));
+      return o;
+    },
+    true,
+  ],
 ] as const) {
   test(`leaves the old file in place when ${name}, and stops trying`, () => {
     const db = stopped();
@@ -112,7 +130,10 @@ for (const [name, ops, marked] of [
     assert.match(r.note, /^left as it was/);
     assert.equal(statSync(db).ino, ino);
     assert.equal(settings(db), rows);
-    assert.deepEqual(files(db).filter((f) => f.includes('nocow-tmp') || f.includes('backup')), []);
+    assert.deepEqual(
+      files(db).filter((f) => f.includes('nocow-tmp') || f.includes('backup')),
+      [],
+    );
     assert.equal(existsSync(`${db}.nocow-failed`), marked);
     assert.match(moveToNoCow(db, fakeOps()).note, /an earlier try failed/);
     // A day on, it tries again.
@@ -139,7 +160,10 @@ test('kills a copy that runs past its budget, and leaves the old file in place',
   assert.match(r.note, /the copy took over 0.05 s/);
   assert.equal(statSync(db).ino, ino);
   assert.equal(settings(db), rows);
-  assert.deepEqual(files(db).filter((f) => f.includes('nocow-tmp') || f.includes('backup')), []);
+  assert.deepEqual(
+    files(db).filter((f) => f.includes('nocow-tmp') || f.includes('backup')),
+    [],
+  );
   assert.ok(existsSync(`${db}.nocow-failed`));
 });
 
@@ -186,7 +210,10 @@ test('clears what a start killed partway left: the temp copy and a backup link t
   linkSync(db, `${db}.backup-cow-20261114-000000`);
   const r = moveToNoCow(db, fakeOps(), { now: new Date('2026-11-15T18:01:02Z') });
   assert.equal(r.moved, true, r.note);
-  assert.deepEqual(files(db).filter((f) => f.includes('nocow-tmp') || f.includes('backup')), ['coordinator.db.backup-cow-20261115-180102']);
+  assert.deepEqual(
+    files(db).filter((f) => f.includes('nocow-tmp') || f.includes('backup')),
+    ['coordinator.db.backup-cow-20261115-180102'],
+  );
 });
 
 test('does nothing with no database, or on a filesystem without attributes', () => {

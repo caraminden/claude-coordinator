@@ -59,17 +59,24 @@ test('a closed minion is indexed with its brief, last words and the files it wro
   assert.equal(store.minionIndex.indexClosed(A.id), 2);
   assert.equal(store.minionIndex.indexClosed(A.id), 0, 'nothing new: no rebuild');
   const hits = store.minionIndex.search(A.id, 'seed script') as any[];
-  assert.deepEqual(hits.map((h) => h.number), [done.number], 'not the open minion, not B\'s');
+  assert.deepEqual(
+    hits.map((h) => h.number),
+    [done.number],
+    "not the open minion, not B's",
+  );
   assert.equal(hits[0].type, 'feature');
   assert.deepEqual(hits[0].files.split('\n'), ['$TMPDIR/seed.ts', '$TMPDIR/drive.mjs', 'public/phone.js']);
-  assert.ok(!JSON.stringify(store.db.prepare('SELECT * FROM minion_index').all()).includes('pineapples'), 'a Grunt\'s words stay out');
+  assert.ok(!JSON.stringify(store.db.prepare('SELECT * FROM minion_index').all()).includes('pineapples'), "a Grunt's words stay out");
   // A path finds it, and so does the brief.
   assert.equal((store.minionIndex.search(A.id, 'public/phone.js') as any[])[0]?.number, done.number);
   assert.equal((store.minionIndex.search(A.id, 'waiting card phone page') as any[])[0]?.number, done.number);
   // Any word fills up after every word: "usage" alone finds the other.
   assert.deepEqual((store.minionIndex.search(A.id, 'seed usage') as any[]).map((h) => h.number).sort(), [done.number, unrelated.number].sort());
   // Empty: the newest closed first.
-  assert.deepEqual((store.minionIndex.search(A.id, '') as any[]).map((h) => h.number), [unrelated.number, done.number]);
+  assert.deepEqual(
+    (store.minionIndex.search(A.id, '') as any[]).map((h) => h.number),
+    [unrelated.number, done.number],
+  );
 
   // Closing the open one indexes it on the next call; reopening and closing again replaces its row.
   store.updateTicket(open.id, { status: 'closed' });
@@ -78,7 +85,10 @@ test('a closed minion is indexed with its brief, last words and the files it wro
   store.updateTicket(open.id, { title: 'Seeding, renamed' });
   store.updateTicket(open.id, { status: 'closed' });
   assert.equal(store.minionIndex.indexClosed(A.id), 1);
-  assert.deepEqual((store.minionIndex.search(A.id, 'renamed') as any[]).map((h) => h.title), ['Seeding, renamed']);
+  assert.deepEqual(
+    (store.minionIndex.search(A.id, 'renamed') as any[]).map((h) => h.title),
+    ['Seeding, renamed'],
+  );
   assert.equal(store.db.prepare('SELECT count(*) AS n FROM minion_index WHERE rowid = ?').get(open.id)!.n, 1);
 
   // A transcript that breaks the indexer is skipped; the next closed minion still gets in.
@@ -107,7 +117,10 @@ test('a closed minion is indexed with its brief, last words and the files it wro
 
   // B's own search sees B's.
   store.minionIndex.indexClosed(B.id);
-  assert.deepEqual((store.minionIndex.search(B.id, 'seed script') as any[]).map((h) => h.ticket_id), [other.id]);
+  assert.deepEqual(
+    (store.minionIndex.search(B.id, 'seed script') as any[]).map((h) => h.ticket_id),
+    [other.id],
+  );
 
   store.deleteTicket(done.id);
   assert.ok(!(store.minionIndex.search(A.id, 'phone') as any[]).some((h) => h.ticket_id === done.id), 'a deleted minion leaves the index');
@@ -123,7 +136,10 @@ test('handoffs: in when written, changed when edited, out when deleted', async (
   const file = join(dir, 'handoff-scout.md');
   writeFileSync(file, '# Handoff: a scout Grunt\nSearch past minions.');
   await store.minionIndex.syncHandoffs(A.id, data);
-  assert.deepEqual((store.minionIndex.search(A.id, 'scout') as any[]).map((h) => [h.kind, h.name]), [['handoff', 'handoff-scout.md']]);
+  assert.deepEqual(
+    (store.minionIndex.search(A.id, 'scout') as any[]).map((h) => [h.kind, h.name]),
+    [['handoff', 'handoff-scout.md']],
+  );
   writeFileSync(file, '# Handoff: a lookout\nNothing else.');
   const later = new Date(Date.now() + 5000);
   utimesSync(file, later, later);
@@ -169,8 +185,14 @@ test('handoffs (#1463): a pass that finds nothing changed touches no table, a fi
   (store.db as any).prepare = prepare;
   assert.ok(sql > 0);
   assert.ok(after('handoffs/shipped/live.md') && !after('handoffs/live.md'));
-  assert.deepEqual((store.minionIndex.search(A.id, 'walrus') as any[]).map((h) => h.name), ['shipped/live.md']);
-  assert.deepEqual((store.minionIndex.search(A.id, 'narwhal') as any[]).map((h) => h.name), ['shipped/old.md']);
+  assert.deepEqual(
+    (store.minionIndex.search(A.id, 'walrus') as any[]).map((h) => h.name),
+    ['shipped/live.md'],
+  );
+  assert.deepEqual(
+    (store.minionIndex.search(A.id, 'narwhal') as any[]).map((h) => h.name),
+    ['shipped/old.md'],
+  );
   // #1483: a second file filed in the same mtime tick as that listing (a coarse clock, a 1 s filesystem) leaves the
   // folder's mtime where the pass saw it; putting it back pins that case. A folder listed moments after a change is listed again.
   writeFileSync(join(dir, 'shipped', 'late.md'), '# Handoff: dugong');
@@ -197,16 +219,22 @@ test('the route and search_minions: the server fills the index itself, and a min
   store.db.close();
   const srv = await bootServer({ root: boot, env: { CITADEL_MEMORY_EVERY_MS: '100' } });
   try {
-    const get = (project: number, q: string, id: number) => fetch(`${srv.base}/api/projects/${project}/past-minions?q=${encodeURIComponent(q)}`, { headers: { Authorization: `Bearer ${agentToken(data, id)}` } })
-      .then(async (r) => ({ status: r.status, data: await r.json() }));
+    const get = (project: number, q: string, id: number) => fetch(`${srv.base}/api/projects/${project}/past-minions?q=${encodeURIComponent(q)}`, { headers: { Authorization: `Bearer ${agentToken(data, id)}` } }).then(async (r) => ({ status: r.status, data: await r.json() }));
     let r = await get(A.id, 'seed script', me.id);
-    await until('the index to hold the minion', async () => {
-      if (r.data.hits?.length) return true;
-      r = await get(A.id, 'seed script', me.id);
-      return r.data.hits?.length > 0;
-    }, 10_000);
+    await until(
+      'the index to hold the minion',
+      async () => {
+        if (r.data.hits?.length) return true;
+        r = await get(A.id, 'seed script', me.id);
+        return r.data.hits?.length > 0;
+      },
+      10_000,
+    );
     assert.equal(r.status, 200);
-    assert.deepEqual(r.data.hits.map((h: any) => h.number), [done.number]);
+    assert.deepEqual(
+      r.data.hits.map((h: any) => h.number),
+      [done.number],
+    );
     assert.equal((await get(A.id, 'seed', them.id)).status, 403, "not another scheme's");
     assert.equal((await fetch(`${srv.base}/api/projects/${A.id}/past-minions?since=yesterday`, { headers: { Cookie: srv.cookie } })).status, 400);
 
@@ -223,7 +251,10 @@ test('the route and search_minions: the server fills the index itself, and a min
         child.kill();
       }
     };
-    assert.ok((await mcp('tools/list')).tools.some((t: any) => t.name === 'search_minions'), 'listed with chat search off too');
+    assert.ok(
+      (await mcp('tools/list')).tools.some((t: any) => t.name === 'search_minions'),
+      'listed with chat search off too',
+    );
     const said = (await mcp('tools/call', { name: 'search_minions', arguments: { query: 'seed script' } })).content[0].text;
     assert.match(said, new RegExp(`^#${done.number} Waiting card on phones · no type · closed \\d{4}-\\d\\d-\\d\\d\\n.*\\[seed\\].*\\nFiles: \\$TMPDIR/seed\\.ts, \\$TMPDIR/drive\\.mjs, public/phone\\.js$`));
   } finally {

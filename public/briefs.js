@@ -25,7 +25,15 @@ function headings(lines) {
 /** "Page the chat history (feature/perf, M)" → its title and the type its brackets open with. */
 function titleAndType(text) {
   const m = /\s*\(([^)]*)\)\s*$/.exec(text);
-  return { title: (m ? text.slice(0, m.index) : text).trim(), typeHint: m ? m[1].trim().split(/[\s/,;]+/)[0].toLowerCase() : '' };
+  return {
+    title: (m ? text.slice(0, m.index) : text).trim(),
+    typeHint: m
+      ? m[1]
+          .trim()
+          .split(/[\s/,;]+/)[0]
+          .toLowerCase()
+      : '',
+  };
 }
 
 /**
@@ -62,7 +70,5 @@ export function matchType(hint, types) {
 
 /** The new minion's first message: the brief verbatim, then where it came from, to read the rest. */
 export function briefMessage(brief, filePath) {
-  return brief.heading
-    ? `${brief.body}\n\n(Brief from ${filePath}; read the whole file for its context.)`
-    : `${brief.body}\n\n(Handoff file: ${filePath})`;
+  return brief.heading ? `${brief.body}\n\n(Brief from ${filePath}; read the whole file for its context.)` : `${brief.body}\n\n(Handoff file: ${filePath})`;
 }

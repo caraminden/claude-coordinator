@@ -91,8 +91,7 @@ export function statusSlotHtml(inner = '', opts = {}) {
 }
 
 /** One line of status text as HTML: cut off with an ellipsis, whole in its tip; a tone colours this text alone. */
-export const statusTextHtml = (text, opts = {}) =>
-  `<span class="cui-status-text"${toneAttr(opts.tone)} data-tip="${esc(text)}" data-tip-overflow>${esc(text)}</span>`;
+export const statusTextHtml = (text, opts = {}) => `<span class="cui-status-text"${toneAttr(opts.tone)} data-tip="${esc(text)}" data-tip-overflow>${esc(text)}</span>`;
 
 /** A spinner and what's running, as HTML for a status line. */
 export const statusWorkingHtml = (text = 'Working…') => `<span class="cui-spin" aria-hidden="true"></span>${statusTextHtml(text)}`;
@@ -115,7 +114,11 @@ let shown = 0; // which toast is the latest, for its hide()
 
 /** The topmost open modal dialog, or null (also where :modal isn't supported). */
 function topModal() {
-  try { return [...document.querySelectorAll('dialog:modal')].at(-1) ?? null; } catch { return null; }
+  try {
+    return [...document.querySelectorAll('dialog:modal')].at(-1) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // Ctrl-Z (Cmd-Z on a Mac) beside a toast's Undo (Josh, 2026-11-12: "We should support Ctrl-Z for undo in
@@ -211,11 +214,15 @@ export function toast(text, opts = {}) {
   if (pop.parentNode !== home) home.append(pop, say);
   // Out again as the dialog closes (before it may be removed), so the toast and its Retry outlive it.
   if (home !== document.body) {
-    home.addEventListener('close', () => {
-      if (pop.parentNode !== home) return;
-      document.body.append(pop, say); // moving it hides it
-      if (up) pop.showPopover();
-    }, { once: true, capture: true });
+    home.addEventListener(
+      'close',
+      () => {
+        if (pop.parentNode !== home) return;
+        document.body.append(pop, say); // moving it hides it
+        if (up) pop.showPopover();
+      },
+      { once: true, capture: true },
+    );
   }
   if (TONES.has(opts.tone)) pop.dataset.tone = opts.tone;
   else delete pop.dataset.tone;

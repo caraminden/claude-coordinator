@@ -23,20 +23,24 @@ const ON = { TURN_UNITS: '1', TURN_SUPERVISOR: '1' };
 
 /** The supervisor the server on `data` started: its pid and its unit, once it runs. */
 async function supervisorOf(data: string) {
-  return until('the turn supervisor to run in its unit', () => {
-    const root = join(data, 'run/turns/.supervisor');
-    for (const v of existsSync(root) ? readdirSync(root) : []) {
-      try {
-        const { pid } = JSON.parse(readFileSync(join(root, v, 'supervisor.json'), 'utf8'));
-        const unit = /\/(citadel-supervisor-[^/]+\.service)$/m.exec(readFileSync(`/proc/${pid}/cgroup`, 'utf8'))?.[1];
-        if (unit) {
-          units.add(unit);
-          return { pid: pid as number, unit };
-        }
-      } catch {} // not written yet, or not running yet
-    }
-    return null;
-  }, 60_000);
+  return until(
+    'the turn supervisor to run in its unit',
+    () => {
+      const root = join(data, 'run/turns/.supervisor');
+      for (const v of existsSync(root) ? readdirSync(root) : []) {
+        try {
+          const { pid } = JSON.parse(readFileSync(join(root, v, 'supervisor.json'), 'utf8'));
+          const unit = /\/(citadel-supervisor-[^/]+\.service)$/m.exec(readFileSync(`/proc/${pid}/cgroup`, 'utf8'))?.[1];
+          if (unit) {
+            units.add(unit);
+            return { pid: pid as number, unit };
+          }
+        } catch {} // not written yet, or not running yet
+      }
+      return null;
+    },
+    60_000,
+  );
 }
 
 /** Gone, or exited and waiting for whichever process it was re-parented to to reap it. */
@@ -54,14 +58,21 @@ const down = (s: string) => s === 'inactive';
 
 /** The unit stops for good: one waiting out Restart=on-failure's delay reads `activating`, not down. */
 async function goesAway(unit: string, what: string) {
-  await until(what, () => down(state(unit)), 30_000, () => `${unit} is ${state(unit)}`);
+  await until(
+    what,
+    () => down(state(unit)),
+    30_000,
+    () => `${unit} is ${state(unit)}`,
+  );
 }
 
 test('a test process killed with SIGKILL leaves no supervisor unit behind', { skip }, async () => {
   const root = tmp.path('killed');
   const out = tmp.path('killed.json');
   const file = tmp.path('killed.test.ts');
-  writeFileSync(file, `import { test } from 'node:test';
+  writeFileSync(
+    file,
+    `import { test } from 'node:test';
 import { writeFileSync } from 'node:fs';
 import { bootServer } from ${JSON.stringify(join(REPO, 'test/helpers.ts'))};
 test('boots, then waits to be killed', async () => {
@@ -69,7 +80,8 @@ test('boots, then waits to be killed', async () => {
   writeFileSync(${JSON.stringify(out)}, JSON.stringify({ server: s.proc.pid }));
   await new Promise(() => {});
 });
-`);
+`,
+  );
   // Run directly, not under --test, whose runner would put the file in a child of its own: this process is the test's.
   const run = tmp.spawn(process.execPath, [file], { stdio: 'ignore', env: { ...process.env, NODE_TEST_CONTEXT: undefined } });
   await until('the killed test’s server to boot', () => existsSync(out), 60_000);

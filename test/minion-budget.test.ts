@@ -77,7 +77,10 @@ test('past the 4x wake, the Taskmaster is woken again at each doubling, and past
   const card = budgetCard(dear, 81, 'fixing the flaky ship test');
   assert.match(card.question, /used about \$81, over 10x the usual \$8\.00 for a feature on Opus/);
   assert.match(card.question, /Its reason: “fixing the flaky ship test”/);
-  assert.deepEqual(card.options.map((o) => o.label), ['Carry on', 'Split', 'Stop']);
+  assert.deepEqual(
+    card.options.map((o) => o.label),
+    ['Carry on', 'Split', 'Stop'],
+  );
   assert.match(card.options[0].description!, /\$128/);
   assert.match(budgetCard(dear, 81, null).question, /It hasn't said why\./);
   // The reason is the minion's latest "Costing more:" line, however it's marked up.
@@ -123,7 +126,12 @@ chmodSync(fake, 0o755);
 test('a turn past 2x gets the ask once, in the chat and the turn; its Taskmaster hears past 4x and each doubling, its owner past 10x', async () => {
   const store = new Store(join(root, 'test.db'));
   const project = store.createProject('Delve', null); // any scheme: the medians pool every scheme's minions
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const wakes: { ticket: number; text: string }[] = [];
   runner.onBudgetWake = (ticket, text) => wakes.push({ ticket, text });
   const cards: { ticket: number; question: string }[] = [];
@@ -147,7 +155,12 @@ test('a turn past 2x gets the ask once, in the chat and the turn; its Taskmaster
   assert.deepEqual(budgetFor(store, store.getTicket(id)!), { usd: 5, n: 5, basis: 'a feature on Opus' });
   assert.deepEqual(runner.view(store.getTicket(id)!).budget, { usd: 5, n: 5, basis: 'a feature on Opus', ask: 10, wake: 20, card: 50 });
 
-  const notes = () => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string).filter((t) => t.startsWith('Budget:'));
+  const notes = () =>
+    store
+      .listEvents(id)
+      .filter((e) => e.kind === 'note')
+      .map((e) => JSON.parse(e.data).text as string)
+      .filter((t) => t.startsWith('Budget:'));
   rmSync(go, { force: true });
   writeFileSync(script, JSON.stringify({ before: 1, after: 2 }));
   runner.send(id, 'Josh', 'go');
@@ -160,7 +173,10 @@ test('a turn past 2x gets the ask once, in the chat and the turn; its Taskmaster
   writeFileSync(go, '');
   await until('the turn to end', () => !runner.isRunning(id));
   assert.equal(notes().length, 1);
-  assert.deepEqual(wakes.map((w) => w.ticket), [id]);
+  assert.deepEqual(
+    wakes.map((w) => w.ticket),
+    [id],
+  );
   assert.match(wakes[0].text, /used about \$20, over 4x the usual \$5\.00/);
   assert.deepEqual(Object.keys(store.getSetting(budgetKey(id)) as object).sort(), ['asked', 'wakes', 'woke']);
 
@@ -174,7 +190,10 @@ test('a turn past 2x gets the ask once, in the chat and the turn; its Taskmaster
   assert.equal(notes().length, 1);
   assert.equal(wakes.length, 2);
   assert.match(wakes[1].text, /over 8x the usual \$5\.00.*carry on lasts only until the next mark, \$80/);
-  assert.deepEqual(cards.map((c) => c.ticket), [id]);
+  assert.deepEqual(
+    cards.map((c) => c.ticket),
+    [id],
+  );
   assert.match(cards[0].question, /over 10x the usual \$5\.00.*Its reason: “a long test run”/);
 
   // Nor after a dismissal and a reopen (2R1): the marks outlive the close. $70 is short of 16x's $80.

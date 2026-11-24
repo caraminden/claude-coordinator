@@ -16,11 +16,14 @@ const REF = String.raw`(?<![\w&/#.:?=+-])#(?<n>\d{1,6})(?![\w#/-])`;
 /** Scheme names as the HTML has them, compared without case or spacing: "delve two" -> id. */
 const nameKey = (name) => name.trim().replace(/\s+/g, ' ').toLowerCase();
 /** A regex matching `name` in any case, with any run of spaces where it has one. */
-const namePattern = (name) => [...name].map((c) => {
-  if (/\s/.test(c)) return String.raw`\s+`;
-  const [lo, up] = [c.toLowerCase(), c.toUpperCase()];
-  return lo !== up && lo.length === 1 && up.length === 1 ? `[${lo}${up}]` : c.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-}).join('');
+const namePattern = (name) =>
+  [...name]
+    .map((c) => {
+      if (/\s/.test(c)) return String.raw`\s+`;
+      const [lo, up] = [c.toLowerCase(), c.toUpperCase()];
+      return lo !== up && lo.length === 1 && up.length === 1 ? `[${lo}${up}]` : c.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+    })
+    .join('');
 
 /** Where thread `number` of project `projectId` lives (see threadHref in app.js). */
 export const threadNumberHref = (projectId, number) => `#/p/${projectId}/t/${number}`;
@@ -49,11 +52,11 @@ export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = 
   if (projectId == null || !(html.includes('#') || (prRoute && /\b(?:PR|[Pp]ull [Rr]equest)\s\d/.test(html)))) return html;
   const ids = new Map(schemes.filter((p) => p.name?.trim()).map((p) => [nameKey(escapeAttr(p.name)), p.id]));
   // Longest first, so "Delve Two #3" isn't read as "Delve" + "Two #3".
-  const names = [...ids.keys()].sort((x, y) => y.length - x.length).map(namePattern).join('|');
-  const scheme = names
-    ? String.raw`(?<![\p{L}\p{N}_])(?<name>${names})(?:${POSSESSIVE})?\s+(?:(?<spr>${PR_LIST})|(?<sm>${SCHEME_MINIONS}))|`
-      + String.raw`(?<tm>${MINION_LIST})\s+in\s+(?<tname>${names})(?![\p{L}\p{N}_])|`
-    : '';
+  const names = [...ids.keys()]
+    .sort((x, y) => y.length - x.length)
+    .map(namePattern)
+    .join('|');
+  const scheme = names ? String.raw`(?<![\p{L}\p{N}_])(?<name>${names})(?:${POSSESSIVE})?\s+(?:(?<spr>${PR_LIST})|(?<sm>${SCHEME_MINIONS}))|` + String.raw`(?<tm>${MINION_LIST})\s+in\s+(?<tname>${names})(?![\p{L}\p{N}_])|` : '';
   const refs = new RegExp(`(?<issue>${ISSUE_LIST})|(?<pr>${PR_LIST})|${scheme}${REF}`, 'gu');
   const threadLink = (p) => (number, text) => {
     const title = p === projectId ? titleOf(number) : null;
@@ -79,9 +82,8 @@ export function linkThreadRefs(html, projectId, titleOf = () => null, schemes = 
 const linkList = (list, lead, link) => list.replace(/^\D*\d{1,6}|#\d{1,6}/g, (m, at) => link(Number(/\d+$/.exec(m)[0]), at ? m : lead + m));
 
 /** A PR mention as a link to `to` (from prNumberRoute), or a plain-looking span linkPrRefs can link later. */
-const prRefHtml = (projectId, number, text, to) => to?.hash ? `<a class="thread-ref" href="${escapeAttr(to.hash)}" title="${escapeAttr(to.title)}">${text}</a>`
-  : to?.url ? `<a href="${escapeAttr(to.url)}" target="_blank" rel="noopener" title="${escapeAttr(to.title)}">${text}</a>`
-  : `<span class="pr-ref" data-project="${projectId}" data-pr="${number}">${text}</span>`;
+const prRefHtml = (projectId, number, text, to) =>
+  to?.hash ? `<a class="thread-ref" href="${escapeAttr(to.hash)}" title="${escapeAttr(to.title)}">${text}</a>` : to?.url ? `<a href="${escapeAttr(to.url)}" target="_blank" rel="noopener" title="${escapeAttr(to.title)}">${text}</a>` : `<span class="pr-ref" data-project="${projectId}" data-pr="${number}">${text}</span>`;
 
 const escapeAttr = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -111,7 +113,11 @@ export function showParts(hash) {
 export function inAppHash(href, here) {
   if (/^#\//.test(href)) return href;
   let url;
-  try { url = new URL(href, here.href); } catch { return null; }
+  try {
+    url = new URL(href, here.href);
+  } catch {
+    return null;
+  }
   if (url.origin !== here.origin || url.pathname !== here.pathname || url.search !== here.search) return null;
   return /^#\/./.test(url.hash) || url.hash === '#/' ? url.hash : null;
 }
@@ -133,8 +139,10 @@ function trimUrl(url) {
   for (;;) {
     const c = url[end - 1];
     if (/[.,:;!?]/.test(c)) end--;
-    else if (closes[c] > opens[c]) { closes[c]--; end--; }
-    else return url.slice(0, end);
+    else if (closes[c] > opens[c]) {
+      closes[c]--;
+      end--;
+    } else return url.slice(0, end);
   }
 }
 
@@ -145,14 +153,17 @@ function trimUrl(url) {
  */
 export function linkUrls(html, here = null, prRoute = null) {
   if (!/https?:\/\//i.test(html)) return html;
-  return html.replace(/(<(a|code|pre)\b[\s\S]*?<\/\2>|<[^>]*>)|([^<]+)/gi, (all, tag, _name, text) => tag ? all
-    : text.replace(BARE_URL, (match) => {
-      const url = trimUrl(match);
-      if (/^https?:\/\/$/i.test(url)) return match;
-      const route = here && inAppHash(url.replace(/&amp;/g, '&'), here);
-      const open = route ? `<a href="${escapeAttr(route)}">` : prLinkOpen(url, prRoute?.(url)) ?? `<a href="${url}" target="_blank" rel="noopener">`;
-      return `${open}${url}</a>${match.slice(url.length)}`;
-    }));
+  return html.replace(/(<(a|code|pre)\b[\s\S]*?<\/\2>|<[^>]*>)|([^<]+)/gi, (all, tag, _name, text) =>
+    tag
+      ? all
+      : text.replace(BARE_URL, (match) => {
+          const url = trimUrl(match);
+          if (/^https?:\/\/$/i.test(url)) return match;
+          const route = here && inAppHash(url.replace(/&amp;/g, '&'), here);
+          const open = route ? `<a href="${escapeAttr(route)}">` : (prLinkOpen(url, prRoute?.(url)) ?? `<a href="${url}" target="_blank" rel="noopener">`);
+          return `${open}${url}</a>${match.slice(url.length)}`;
+        }),
+  );
 }
 
 /**

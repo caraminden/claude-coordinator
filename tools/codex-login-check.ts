@@ -68,7 +68,11 @@ function home(left: number): { dir: string; env: Record<string, string | undefin
 }
 
 /** A JSON-RPC reply from `codex app-server`: only the fields read. */
-interface Reply { id?: number; method?: string; error?: { message?: string } }
+interface Reply {
+  id?: number;
+  method?: string;
+  error?: { message?: string };
+}
 
 /** A `codex app-server` as a review starts it; `usage()` reads the account's usage (a backend call with the access token). */
 function appServer(env: Record<string, string | undefined>) {
@@ -115,16 +119,22 @@ test('without the login check, app-servers started together on a stale login reu
 test('with the login check, runs started together on a stale login make one refresh and all go on', { timeout: 90_000 }, async () => {
   const { dir, env } = home(60);
   delayMs = 300;
-  const results = await Promise.all([1, 2, 3, 4].map(async () => {
-    const gate = await codexLock(dir, () => {}, { env });
-    const s = appServer(env);
-    const usage = await s.usage();
-    await s.stop();
-    gate.unlock();
-    return { usage, serial: gate.serial };
-  }));
+  const results = await Promise.all(
+    [1, 2, 3, 4].map(async () => {
+      const gate = await codexLock(dir, () => {}, { env });
+      const s = appServer(env);
+      const usage = await s.usage();
+      await s.stop();
+      gate.unlock();
+      return { usage, serial: gate.serial };
+    }),
+  );
   assert.equal(seen.reused, 0);
   // Two when codex's own start-up refresh (under 5 minutes left) comes before the one asked for: the same process, one after the other.
   assert.ok(seen.accepted === 1 || seen.accepted === 2, `${seen.accepted} refreshes`);
-  assert.deepEqual(results, [1, 2, 3, 4].map(() => ({ usage: 'ok', serial: false })), 'none kept the lock, all read their usage on the new token');
+  assert.deepEqual(
+    results,
+    [1, 2, 3, 4].map(() => ({ usage: 'ok', serial: false })),
+    'none kept the lock, all read their usage on the new token',
+  );
 });

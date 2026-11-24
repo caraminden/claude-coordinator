@@ -83,10 +83,12 @@ test('a comment is a message labelled with its file, with a quote leading it', (
 
 test('a comment reaches Claude as "[Name on file]: text", other messages as "[Name]: text"', () => {
   const { about, text } = commentMessage('report.md', 'Looks good');
-  const prompt = JSON.parse(promptMessage([
-    { author: 'Cara', text, images: [], about },
-    { author: 'Josh', text: 'Agreed', images: [] },
-  ]));
+  const prompt = JSON.parse(
+    promptMessage([
+      { author: 'Cara', text, images: [], about },
+      { author: 'Josh', text: 'Agreed', images: [] },
+    ]),
+  );
   assert.deepEqual(prompt.message.content, [
     { type: 'text', text: '[Cara on report.md]: Looks good' },
     { type: 'text', text: '[Josh]: Agreed' },
@@ -118,7 +120,7 @@ test('a git worktree lists its committed and staged files as well as untracked o
   }
 });
 
-test('a file in another minion\'s shared folder shows a short path, never the server\'s absolute one', async () => {
+test("a file in another minion's shared folder shows a short path, never the server's absolute one", async () => {
   const { displayPath } = await import('../src/routes/files.ts');
   const app = { dataDir: '/data', sharedDir: (t: { id: number }) => `/data/projects/2/shared/${t.id}` } as never;
   const ticket = { id: 882, project_id: 2, cwd: '/work/t882' } as never;
@@ -145,7 +147,10 @@ test('a branch already in main still lists the files it added (#1345)', async ()
     g(origin, 'pull', '-q', work, 'ticket/77-thing'); // shipped: main now holds it
     g(work, 'fetch', '-q', 'origin');
     g(work, 'remote', 'set-head', 'origin', 'main');
-    assert.deepEqual((await findArtifacts(work, true)).map((f) => f.path), ['mine.md']);
+    assert.deepEqual(
+      (await findArtifacts(work, true)).map((f) => f.path),
+      ['mine.md'],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

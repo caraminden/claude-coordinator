@@ -41,15 +41,14 @@ export function othersIn(t) {
   return (byScheme.get(t.project_id)?.[t.id] ?? []).filter((n) => n !== me);
 }
 
-const hereText = (names) => names.length === 1 ? `${names[0]} is here` : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} are here`;
+const hereText = (names) => (names.length === 1 ? `${names[0]} is here` : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} are here`);
 
 /** The row's chip: a green dot and the first person's initial (+N for more); nothing when it's only you. */
 export function presenceChip(t) {
   const names = othersIn(t);
   if (!names.length) return '';
   const text = hereText(names);
-  return h('span', { class: 'presence', title: text, 'aria-label': text }, h('i', { class: 'presence-dot', 'aria-hidden': 'true' }),
-    names[0][0].toUpperCase(), names.length > 1 ? `+${names.length - 1}` : '');
+  return h('span', { class: 'presence', title: text, 'aria-label': text }, h('i', { class: 'presence-dot', 'aria-hidden': 'true' }), names[0][0].toUpperCase(), names.length > 1 ? `+${names.length - 1}` : '');
 }
 
 /** The chat header's line: "● Josh is here". */

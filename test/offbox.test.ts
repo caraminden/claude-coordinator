@@ -130,7 +130,7 @@ test('the chat log, in its own file, is backed up daily and weekly and goes off-
   const weekly = readdirSync(backups).find((f) => f.startsWith('events-weekly-'))!;
   // The weekly keeps the week's first daily (Sunday's wins), like the main file's, so on a re-run it is the earlier copy.
   const sunday = execFileSync('date', ['+%u'], { encoding: 'utf8' }).trim() === '7';
-  assert.equal(count(join(backups, weekly), 'events'), sunday ? rows : rows - 1, 'the weekly is the first run\'s daily, or Sunday\'s newest');
+  assert.equal(count(join(backups, weekly), 'events'), sunday ? rows : rows - 1, "the weekly is the first run's daily, or Sunday's newest");
   for (const name of [`events-${day}.db`, weekly]) {
     const file = join(backups, name);
     assert.equal(statSync(join(offbox, name)).ino, statSync(file).ino, `${name} goes off-box as a link`);
@@ -192,10 +192,11 @@ test("every registered app's newest nightly backups join the set as hard links, 
   assert.deepEqual(readdirSync(join(offbox, 'apps', 'mandate', nine[0])).sort(), ['1.db', '2.db']);
   assert.equal(statSync(join(offbox, 'apps', 'mandate', nine[0], '1.db')).ino, statSync(join(today, '1.db')).ino, 'a hard link, no extra disk');
   const sums = readFileSync(join(offbox, 'SHA256SUMS'), 'utf8');
-  for (const d of nine.slice(0, 7)) for (const f of ['1.db', '2.db']) {
-    const rel = `apps/mandate/${d}/${f}`;
-    assert.ok(sums.includes(`${sha(join(offbox, rel))}  ${rel}\n`), rel);
-  }
+  for (const d of nine.slice(0, 7))
+    for (const f of ['1.db', '2.db']) {
+      const rel = `apps/mandate/${d}/${f}`;
+      assert.ok(sums.includes(`${sha(join(offbox, rel))}  ${rel}\n`), rel);
+    }
   assert.doesNotMatch(sums, new RegExp(`${nine[7]}|wal|shm|tmp|hidden|sneaky|nested|transdata|users\\.db`));
 });
 
@@ -224,9 +225,20 @@ test("the backup key can fetch an app's backup, and only by a strict name", () =
   assert.equal(got.stdout.toString(), `alice ${d}`);
   symlinkSync(join(root, 'coordinator.db'), join(offbox, 'apps', 'mandate', d, 'planted.db'));
   for (const bad of [
-    'get apps/../coordinator.db', `get apps/mandate/${d}/../../../coordinator.db`, `get apps/mandate/../mandate/${d}/1.db`, `get apps/mandate/${d}/..`,
-    'get /etc/passwd', `get /apps/mandate/${d}/1.db`, `get apps/Mandate/${d}/1.db`, 'get apps/mandate/latest/1.db', `get apps/mandate/${d}/.hidden`,
-    `get apps/mandate/${d}/1.db-wal`, `get apps/mandate/${d}`, `get apps/mandate/${d}/planted.db`, `get apps/mandate/${d}/sub/1.db`, `get apps/mandate/${d}/1.db x`,
+    'get apps/../coordinator.db',
+    `get apps/mandate/${d}/../../../coordinator.db`,
+    `get apps/mandate/../mandate/${d}/1.db`,
+    `get apps/mandate/${d}/..`,
+    'get /etc/passwd',
+    `get /apps/mandate/${d}/1.db`,
+    `get apps/Mandate/${d}/1.db`,
+    'get apps/mandate/latest/1.db',
+    `get apps/mandate/${d}/.hidden`,
+    `get apps/mandate/${d}/1.db-wal`,
+    `get apps/mandate/${d}`,
+    `get apps/mandate/${d}/planted.db`,
+    `get apps/mandate/${d}/sub/1.db`,
+    `get apps/mandate/${d}/1.db x`,
   ]) {
     const r = serve(bad);
     assert.equal(r.status, 2, bad);
@@ -237,8 +249,17 @@ test("the backup key can fetch an app's backup, and only by a strict name", () =
 
 test("every Android app's release key and its password go off-box under keys/ as mode-600 hard links, and nothing else in that folder does (#837)", () => {
   mkdirSync(keyDir, { recursive: true, mode: 0o700 });
-  for (const [f, body] of [['twi-release.jks', 'twi keystore'], ['twi-release.pass', 'twi password'], ['voice-release.jks', 'voice keystore'], ['voice-release.pass', 'voice password'],
-    ['mandate-google-services.json', 'not a key'], ['Bad_Name-release.jks', 'x'], ['twi-release.jks.bak', 'x'], ['.twi-tmp-release.pass', 'x']]) writeFileSync(join(keyDir, f), body, { mode: 0o600 });
+  for (const [f, body] of [
+    ['twi-release.jks', 'twi keystore'],
+    ['twi-release.pass', 'twi password'],
+    ['voice-release.jks', 'voice keystore'],
+    ['voice-release.pass', 'voice password'],
+    ['mandate-google-services.json', 'not a key'],
+    ['Bad_Name-release.jks', 'x'],
+    ['twi-release.jks.bak', 'x'],
+    ['.twi-tmp-release.pass', 'x'],
+  ])
+    writeFileSync(join(keyDir, f), body, { mode: 0o600 });
   symlinkSync(join(root, 'coordinator.db'), join(keyDir, 'evil-release.jks'));
   mkdirSync(join(offbox, 'keys'), { recursive: true });
   writeFileSync(join(offbox, 'keys', 'stray-release.pass'), 'left from before');
@@ -259,8 +280,7 @@ test("every Android app's release key and its password go off-box under keys/ as
   const got = serve('get keys/twi-release.pass');
   assert.equal(got.status, 0);
   assert.equal(got.stdout.toString(), 'twi password');
-  for (const bad of ['get keys/../coordinator.db', 'get keys/mandate-google-services.json', 'get keys/Twi-release.jks', 'get keys/twi-release.jks x', 'get keys/twi-release.key',
-    'get keys/sub/twi-release.jks', 'get /keys/twi-release.jks', 'get keys/evil-release.jks', 'get keys/stray-release.pass']) {
+  for (const bad of ['get keys/../coordinator.db', 'get keys/mandate-google-services.json', 'get keys/Twi-release.jks', 'get keys/twi-release.jks x', 'get keys/twi-release.key', 'get keys/sub/twi-release.jks', 'get /keys/twi-release.jks', 'get keys/evil-release.jks', 'get keys/stray-release.pass']) {
     const r = serve(bad);
     assert.equal(r.status, 2, bad);
     assert.equal(r.stdout.length, 0, bad);

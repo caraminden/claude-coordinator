@@ -18,7 +18,7 @@ const kill = (pid: number) => {
 };
 // A1 (fixed in #1364): a turn whose process was killed while the server ran resumes once by itself.
 // A1: a turn whose process was killed while the server ran is written off (status error), never resumed.
-test("a turn whose wrapper is SIGKILLed is resumed and finishes", async () => {
+test('a turn whose wrapper is SIGKILLed is resumed and finishes', async () => {
   await d.boot();
   const p = await d.project();
   const id = await d.minion(p.id);
@@ -36,7 +36,7 @@ test("a turn whose wrapper is SIGKILLed is resumed and finishes", async () => {
 });
 
 // C8: at boot, a turn with no process and no exit.json is cleared without reading its stream.
-test("a turn that died while the server was down keeps the text it wrote meanwhile", async () => {
+test('a turn that died while the server was down keeps the text it wrote meanwhile', async () => {
   d.fake.setRelease(null);
   if (!d.srv) await d.boot();
   const p = await d.project('Vanished');

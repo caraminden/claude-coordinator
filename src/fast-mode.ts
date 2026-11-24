@@ -98,7 +98,13 @@ export function verifyResult(output: string): { verdict: 'green' } | { verdict: 
 }
 
 /** The last 40 lines of a run's output, without its verify: lines. */
-const tailOf = (output: string) => output.trim().split('\n').filter((l) => !/^verify: /.test(l)).slice(-40).join('\n');
+const tailOf = (output: string) =>
+  output
+    .trim()
+    .split('\n')
+    .filter((l) => !/^verify: /.test(l))
+    .slice(-40)
+    .join('\n');
 
 export class FastMode {
   /** The pass that runs now; a tick meanwhile asks it to go round again, and waits for it. */
@@ -127,10 +133,7 @@ export class FastMode {
   knownRed(projectId: number): string {
     const s = this.state(projectId);
     const who = (e: KnownRed) => (e.n ? `#${e.n} is fixing it` : 'the Taskmaster has it');
-    return [
-      ...s.reds.flatMap((e) => e.ids.map((id) => `${id}\t${who(e)}`)),
-      ...(s.pin?.ids ?? []).map((id) => `${id}\tCitadel is finding whose change broke it`),
-    ].join('\n');
+    return [...s.reds.flatMap((e) => e.ids.map((id) => `${id}\t${who(e)}`)), ...(s.pin?.ids ?? []).map((id) => `${id}\tCitadel is finding whose change broke it`)].join('\n');
   }
 
   /** What the Test health tab shows (#1063): the run's state, what is known red and when each red reaches the Taskmaster. */
@@ -138,7 +141,9 @@ export class FastMode {
     const s = this.state(projectId);
     return {
       state: s.running ? 'running' : s.pin ? 'pinning' : s.stuck && s.stuck !== s.verified ? 'stuck' : s.verified ? 'verified' : 'idle',
-      verified: s.verified ?? null, stuck: s.stuck ?? null, running: s.running ? { sha: s.running.sha, at: s.running.at } : null,
+      verified: s.verified ?? null,
+      stuck: s.stuck ?? null,
+      running: s.running ? { sha: s.running.sha, at: s.running.at } : null,
       pin: s.pin ? { ids: s.pin.ids, at: s.pin.at ?? null } : null,
       reds: s.reds.map((e) => ({ ids: e.ids, sha: e.sha, n: e.n ?? null, at: e.at, escalated: !!e.escalated, escalateAt: e.at + ESCALATE_MS })),
     };
@@ -224,7 +229,13 @@ export class FastMode {
     // Its own detached worktree, kept between runs so what the check installs (node_modules, a venv) stays.
     // A folder whose .git file points at an entry the repo no longer has (a prune that couldn't see the folder, as a
     // container turn can't) is no worktree: start it over, losing only what the check installed in it.
-    if (existsSync(join(wt, '.git')) && !(await this.git(wt, 'rev-parse', '--git-dir').then(() => true, () => false))) {
+    if (
+      existsSync(join(wt, '.git')) &&
+      !(await this.git(wt, 'rev-parse', '--git-dir').then(
+        () => true,
+        () => false,
+      ))
+    ) {
       moveAside(wt); // off the server's thread (a worktree with its installs is big), and never left half deleted by a restart (#1734)
       console.log(`Fast mode for scheme ${projectId}: its worktree had lost its git link; rebuilding it.`);
     }
@@ -326,11 +337,17 @@ export class FastMode {
     const tail = tailOf(output);
     const what = `The full suite went red on ${BRANCH} behind fast-mode ships, ${unpinned ?? `on ${sha.slice(0, 12)}, the first commit it fails on`}. New failing ids:\n${list}`;
     if (ticket != null) {
-      this.d.tell(ticket, `${what}\n\nIt's yours to fix: your change is the culprit. Each id is in the scheme's known-red ledger, so other ships that fail only on it go through and say you're fixing it; it clears once it passes on ${BRANCH}. Fix it on your branch and hand it off with hand_off_land. If nobody has fixed it in 30 minutes, the Taskmaster gets it.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`);
+      this.d.tell(
+        ticket,
+        `${what}\n\nIt's yours to fix: your change is the culprit. Each id is in the scheme's known-red ledger, so other ships that fail only on it go through and say you're fixing it; it clears once it passes on ${BRANCH}. Fix it on your branch and hand it off with hand_off_land. If nobody has fixed it in 30 minutes, the Taskmaster gets it.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`,
+      );
       return;
     }
     entry.escalated = true;
-    this.d.taskmaster(projectId, `${what}\n\n${pinned ? 'No minion could be found for that commit' : 'No one minion can be blamed'}, so it's yours: start a fix, or reopen whoever broke it. Each id is a known red until it passes on ${BRANCH}; until then lands that fail only on it go through.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`);
+    this.d.taskmaster(
+      projectId,
+      `${what}\n\n${pinned ? 'No minion could be found for that commit' : 'No one minion can be blamed'}, so it's yours: start a fix, or reopen whoever broke it. Each id is a known red until it passes on ${BRANCH}; until then lands that fail only on it go through.${tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''}`,
+    );
   }
 
   private escalate(projectId: number, s: FastState) {

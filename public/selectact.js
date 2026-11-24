@@ -9,7 +9,10 @@ const idOf = (el) => Number(el.dataset.replyEvent ?? el.dataset.event);
 
 /** A selection as a markdown quote: every line behind "> ", then a blank line to type below it. Pure, for tests. */
 export function quoteOf(text) {
-  const lines = text.trim().split(/\r?\n/).map((l) => `> ${l}`.trimEnd());
+  const lines = text
+    .trim()
+    .split(/\r?\n/)
+    .map((l) => `> ${l}`.trimEnd());
   return `${lines.join('\n')}\n\n`;
 }
 
@@ -49,17 +52,34 @@ export function selectionActions(s, form) {
   };
   const id = idOf(s.first);
   return [
-    { id: 'reply', label: 'Reply to this', short: 'Reply', title: 'Quote this in the chat box', icon: '❝', run: () => {
-      const q = quoteOf(s.text);
-      put(textarea.value.trim() ? `${textarea.value.replace(/\s+$/, '')}\n\n${q}` : q);
-    } },
+    {
+      id: 'reply',
+      label: 'Reply to this',
+      short: 'Reply',
+      title: 'Quote this in the chat box',
+      icon: '❝',
+      run: () => {
+        const q = quoteOf(s.text);
+        put(textarea.value.trim() ? `${textarea.value.replace(/\s+$/, '')}\n\n${q}` : q);
+      },
+    },
     // Aside is the composer's own (minions only); a selection across two messages offers only Reply.
     s.single && form.querySelector('.side-ask') && { id: 'aside', label: 'Ask on the side', title: 'Start a side question with this quote', icon: '💬', run: () => put(`/btw ${quoteOf(s.text)}`) },
-    s.single && id && { id: 'link', label: 'Copy link', title: 'Copy a link to this message', icon: '🔗', run: () => {
-      const url = new URL(jumpHref(view.ticket, id), location.href).href;
-      navigator.clipboard?.writeText(url).then(() => toast('Link to this message copied'), () => toast('Could not copy the link'));
-      done();
-    } },
+    s.single &&
+      id && {
+        id: 'link',
+        label: 'Copy link',
+        title: 'Copy a link to this message',
+        icon: '🔗',
+        run: () => {
+          const url = new URL(jumpHref(view.ticket, id), location.href).href;
+          navigator.clipboard?.writeText(url).then(
+            () => toast('Link to this message copied'),
+            () => toast('Could not copy the link'),
+          );
+          done();
+        },
+      },
   ].filter(Boolean);
 }
 
@@ -70,17 +90,39 @@ export function selectActions(log, form) {
   // The menu must not take the selection away when it is pressed.
   menu.addEventListener('mousedown', (e) => e.preventDefault());
   menu.addEventListener('pointerdown', (e) => e.preventDefault());
-  const hide = () => { menu.hidden = true; current = null; };
+  const hide = () => {
+    menu.hidden = true;
+    current = null;
+  };
   const show = () => {
     const s = readSelection(log);
     if (!s) return hide();
     current = s;
-    menu.replaceChildren(...selectionActions(s, form).map((a) => h('button', { type: 'button', class: 'small secondary', title: a.title, onclick: () => { a.run(); hide(); } }, a.short ?? a.label)));
+    menu.replaceChildren(
+      ...selectionActions(s, form).map((a) =>
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'small secondary',
+            title: a.title,
+            onclick: () => {
+              a.run();
+              hide();
+            },
+          },
+          a.short ?? a.label,
+        ),
+      ),
+    );
     menu.hidden = false;
     const narrow = matchMedia('(max-width: 800px)').matches;
     menu.classList.toggle('bar', narrow);
-    if (narrow) { // the phone's own copy menu sits by the selection: ours is a slim bar just above the chat box
-      menu.style.left = '0'; menu.style.right = '0'; menu.style.top = 'auto';
+    if (narrow) {
+      // the phone's own copy menu sits by the selection: ours is a slim bar just above the chat box
+      menu.style.left = '0';
+      menu.style.right = '0';
+      menu.style.top = 'auto';
       menu.style.bottom = `${Math.max(0, innerHeight - form.getBoundingClientRect().top)}px`;
     } else {
       const w = menu.offsetWidth;
@@ -92,7 +134,10 @@ export function selectActions(log, form) {
     }
   };
   let timer = 0;
-  const later = () => { clearTimeout(timer); timer = setTimeout(show, 120); };
+  const later = () => {
+    clearTimeout(timer);
+    timer = setTimeout(show, 120);
+  };
   const onSel = () => (getSelection()?.isCollapsed ? hide() : later());
   document.addEventListener('selectionchange', onSel);
   // The menu goes with the chat's scroll or a resize rather than drifting off the selection.
@@ -100,7 +145,12 @@ export function selectActions(log, form) {
   addEventListener('resize', hide);
   // Gone with the chat: a new chat mounts its own.
   const watch = new MutationObserver(() => {
-    if (!form.isConnected) { document.removeEventListener('selectionchange', onSel); removeEventListener('resize', hide); menu.remove(); watch.disconnect(); }
+    if (!form.isConnected) {
+      document.removeEventListener('selectionchange', onSel);
+      removeEventListener('resize', hide);
+      menu.remove();
+      watch.disconnect();
+    }
   });
   watch.observe(document.body, { childList: true, subtree: true });
 }

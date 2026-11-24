@@ -42,7 +42,7 @@ function world() {
   return { store, relay, box };
 }
 
-test('when a machine\'s MCP server exits, its proxy is told so before its stream ends, so it does not reconnect', () => {
+test("when a machine's MCP server exits, its proxy is told so before its stream ends, so it does not reconnect", () => {
   const { relay, box } = world();
   relay.connectAgent(box, stream(), { host: 'h', command: 'fake-mcp' });
   const proxy = stream();
@@ -53,14 +53,17 @@ test('when a machine\'s MCP server exits, its proxy is told so before its stream
   assert.deepEqual(proxy.sent.at(-1), { closed: true });
 });
 
-test('when the agent goes away, its proxies\' streams just end: they reconnect once it is back', () => {
+test("when the agent goes away, its proxies' streams just end: they reconnect once it is back", () => {
   const { relay, box } = world();
   relay.connectAgent(box, stream(), { host: 'h', command: 'fake-mcp' });
   const proxy = stream();
   relay.openSession(box.id, { ticketId: 1, projectId: 1 }, 'mcp', '#1', proxy);
   relay.disconnect(box.id);
   assert.equal(proxy.ended, true);
-  assert.deepEqual(proxy.sent.map((m) => Object.keys(m)), [['session']]);
+  assert.deepEqual(
+    proxy.sent.map((m) => Object.keys(m)),
+    [['session']],
+  );
 });
 
 test('an agent that beats and then goes quiet (a laptop asleep) is dropped within a couple of minutes; one that never beats is kept', () => {
@@ -99,7 +102,18 @@ test('the GPU jobs switch (#1175): off, run-gpu is refused before it reaches the
   const { relay, box } = world();
   const agent = stream();
   relay.connectAgent(box, agent, { host: 'h', command: '', managed: true });
-  relay.setInfo(box, { v: 2, workspaces: [{ name: 'w', tasks: [{ name: 'run-gpu', run: ['gpu.ps1'] }, { name: 'run', run: ['run.ps1'] }] }] });
+  relay.setInfo(box, {
+    v: 2,
+    workspaces: [
+      {
+        name: 'w',
+        tasks: [
+          { name: 'run-gpu', run: ['gpu.ps1'] },
+          { name: 'run', run: ['run.ps1'] },
+        ],
+      },
+    ],
+  });
   relay.setLend(box.id, { server: null, workspaces: ['w'] });
   const proxy = stream();
   assert.equal(relay.openSession(box.id, { ticketId: 1, projectId: 1 }, 'ws', '#1', proxy), true);
@@ -153,7 +167,7 @@ test('the GPU jobs switch (#1175): off, run-gpu is refused before it reaches the
   assert.deepEqual(agent.sent.find((m) => m.session === stopper.session && m.message?.method === 'tools/call').message.params, { name: 'stop_job', arguments: { id: '77aa0011' } });
 });
 
-test('a test box\'s beats carry who has its screen and who waits (#1422), cut to size, to the Machines page', () => {
+test("a test box's beats carry who has its screen and who waits (#1422), cut to size, to the Machines page", () => {
   const { relay, box } = world();
   relay.connectAgent(box, stream(), { host: 'h', command: 'fake-mcp' });
   assert.equal(relay.view(box).screen, null, 'nothing said yet');
@@ -191,8 +205,14 @@ test('ships (#1268) go to every runner agent at each look, and to one that conne
   const linux = stream();
   relay.connectAgent(wsl, linux, { host: 'wsl', command: 'citadel runner agent', runners: true, os: 'linux' });
   relay.sendShips([]);
-  assert.deepEqual(windows.sent.filter((m) => m.ships), [{ ships }, { ships: [] }]);
-  assert.deepEqual(linux.sent.filter((m) => m.ships), [{ ships }, { ships: [] }]);
+  assert.deepEqual(
+    windows.sent.filter((m) => m.ships),
+    [{ ships }, { ships: [] }],
+  );
+  assert.deepEqual(
+    linux.sent.filter((m) => m.ships),
+    [{ ships }, { ships: [] }],
+  );
   assert.ok(!lent.sent.some((m) => m.ships));
 });
 
@@ -236,11 +256,14 @@ const QUEUED = 'run in w is waiting in line for the screen (job ab12cd34), 50 s 
 const RUNNING = 'run in w is still running after 3 s (job ab12cd34). Call job with id "ab12cd34" to wait for it.';
 const ENDED = 'run in w FAILED (exit 2) after 40 s. Job ab12cd34; full log on that computer: C:\\jobs\\ab12cd34.log\n--- last 2 lines ---\nassert failed\nsee above';
 
-test('a minion whose job waits for the test box\'s screen can end its turn (#1425): Citadel keeps asking after it and messages its chat when it starts and when it ends', async () => {
+test("a minion whose job waits for the test box's screen can end its turn (#1425): Citadel keeps asking after it and messages its chat when it starts and when it ends", async () => {
   const { store, relay, minion, wakes, minionCalls, opened, answer } = followed();
   const reply = minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
   assert.match(reply, /^run in w is waiting in line.*\n\nCitadel is following job ab12cd34 for you.*you can end your turn now/s, 'the turn is told it can stop');
-  assert.deepEqual(relay.boxWatches().map((w) => [w.job, w.ticket, w.what]), [['ab12cd34', minion.id, 'run in w']]);
+  assert.deepEqual(
+    relay.boxWatches().map((w) => [w.job, w.ticket, w.what]),
+    [['ab12cd34', minion.id, 'run in w']],
+  );
   assert.equal((store.getSetting('box-watches') as any[]).length, 1, 'kept for a restart');
 
   const [init] = opened(/^Citadel, following job ab12cd34 for Peek #1$/);
@@ -265,7 +288,7 @@ test('a minion whose job waits for the test box\'s screen can end its turn (#142
   assert.deepEqual(store.getSetting('box-watches'), []);
 });
 
-test('a minion whose turn is stopped, or that is closed, takes its waiting job out of the screen\'s line (#1425)', async () => {
+test("a minion whose turn is stopped, or that is closed, takes its waiting job out of the screen's line (#1425)", async () => {
   for (const how of ['stopped', 'closed'] as const) {
     const { store, relay, minion, wakes, minionCalls, opened, answer } = followed();
     minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
@@ -317,13 +340,16 @@ test('a restart carries on following the jobs it was following (#1425)', async (
   next.setInfo(box, { v: 2, workspaces: [{ name: 'w', tasks: [{ name: 'run', run: ['run.ps1'] }] }] });
   next.setLend(box.id, { server: null, workspaces: ['w'] });
   next.watchBoxes(() => {});
-  assert.deepEqual(next.boxWatches().map((w) => [w.job, w.ticket]), [['ab12cd34', minion.id]]);
+  assert.deepEqual(
+    next.boxWatches().map((w) => [w.job, w.ticket]),
+    [['ab12cd34', minion.id]],
+  );
   assert.ok(agent.sent.some((m) => m.message?.method === 'initialize' && /^Citadel, following job ab12cd34/.test(m.who)));
   relay.minionStopped(minion.id);
   next.minionStopped(minion.id);
 });
 
-test('a job still in line when Citadel\'s 12 hours of following run out leaves the line, and its minion is told nothing ran (#1819)', async () => {
+test("a job still in line when Citadel's 12 hours of following run out leaves the line, and its minion is told nothing ran (#1819)", async () => {
   for (const started of [false, true]) {
     const { store, relay, box, minion, minionCalls } = followed();
     minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
@@ -355,14 +381,17 @@ test('a job still in line when Citadel\'s 12 hours of following run out leaves t
       assert.equal(stopper.length, 1, 'it leaves the line now');
       next.fromAgent(box, stopper[0].session, { message: { jsonrpc: '2.0', id: stopper[0].message.id, result: {} } });
       for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r));
-      assert.deepEqual(agent.sent.filter((m) => m.session === stopper[0].session && m.message?.params?.name).map((m) => m.message.params), [{ name: 'stop_job', arguments: { id: 'ab12cd34' } }]);
+      assert.deepEqual(
+        agent.sent.filter((m) => m.session === stopper[0].session && m.message?.params?.name).map((m) => m.message.params),
+        [{ name: 'stop_job', arguments: { id: 'ab12cd34' } }],
+      );
     }
     relay.minionStopped(minion.id);
     next.minionStopped(minion.id);
   }
 });
 
-test('a followed job ends on its report\'s head, not on box words its own output quotes; a box no longer lent to the scheme takes its job out of the line (#1425)', async () => {
+test("a followed job ends on its report's head, not on box words its own output quotes; a box no longer lent to the scheme takes its job out of the line (#1425)", async () => {
   const { relay, wakes, minionCalls, opened, answer } = followed();
   minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
   const [init] = opened(/^Citadel, following/);

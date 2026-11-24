@@ -54,7 +54,11 @@ export function editedFiles(block: any): string[] {
 }
 
 export type SignalKind = 'red-test' | 'file-churn' | 'failed-ships';
-export interface Signal { kind: SignalKind; what: string; evidence: string[] }
+export interface Signal {
+  kind: SignalKind;
+  what: string;
+  evidence: string[];
+}
 
 /** One minion's counts, kept in settings between events (stallKey). shortcut: kept after the minion closes (under 1 KB each); sweep them if settings grow. */
 export interface StallState {
@@ -140,7 +144,16 @@ export function shipFailed(s: StallState, kind: string): Signal[] {
 export const stallKey = (ticketId: number) => `stall:${ticketId}`;
 /** Every suggestion sent, newest last, for the two-week read (was it taken, did it help). */
 export const SUGGESTIONS_KEY = 'stall-suggestions';
-export interface Suggestion { ticket: number; project: number; number: number | null; at: number; kind: SignalKind; what: string; from: string; to: string | null }
+export interface Suggestion {
+  ticket: number;
+  project: number;
+  number: number | null;
+  at: number;
+  kind: SignalKind;
+  what: string;
+  from: string;
+  to: string | null;
+}
 
 export interface StallDeps {
   store: Store;
@@ -187,9 +200,11 @@ export class StallWatch {
     const now = tierLabel(model, effort);
     const step = next
       ? `The model table's next step from ${now} is ${tierLabel(next.model, next.effort)}: update_ticket with model ${next.model}, effort ${next.effort}.`
-      : !model ? `It runs with no model set, so the table names no step: set one by its kind of work.`
-      : /opus|fable/.test(model) ? `It already runs on ${now}, the top of the model table${fable ? '' : ' with Fable off'}: a step-up isn't there; diagnosis (citadel:diagnosing-bugs) or a person is.`
-      : `The model table names no step from ${now}: pick one by hand, or try diagnosis (citadel:diagnosing-bugs).`;
+      : !model
+        ? `It runs with no model set, so the table names no step: set one by its kind of work.`
+        : /opus|fable/.test(model)
+          ? `It already runs on ${now}, the top of the model table${fable ? '' : ' with Fable off'}: a step-up isn't there; diagnosis (citadel:diagnosing-bugs) or a person is.`
+          : `The model table names no step from ${now}: pick one by hand, or try diagnosis (citadel:diagnosing-bugs).`;
     const lines = signals.map((g) => `- ${g.what} (${g.evidence.join('; ')})`);
     const text = `Stall signal on #${t.number} ${t.title}:\n${lines.join('\n')}\n${step} A suggestion only: nothing was changed. Skip it when the cause isn't the model (a flake, CI or a runner, a merge conflict, a person's answer it waits on), and say which you did in one line.`;
     // No Taskmaster to tell (a scheme without one yet): nothing is recorded, so the minion's next tier isn't spent.

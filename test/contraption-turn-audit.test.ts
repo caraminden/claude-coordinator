@@ -12,7 +12,9 @@ const root = tmp.dir;
 after(() => tmp.teardown());
 // A stand-in for claude: takes the prompt, streams a short reply with a tool call, ends.
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 const out = (o) => console.log(JSON.stringify(o));
 require('node:readline').createInterface({ input: process.stdin }).once('line', (l) => {
   const prompt = JSON.parse(l).message.content.map((b) => b.text ?? '').join('');
@@ -25,7 +27,8 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   out({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', result: '', usage: { input_tokens: 1, output_tokens: 2 } });
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 test('an app posts its verdict on a turn, and only members of its home scheme read the audit', { timeout: 60_000 }, async () => {
@@ -75,7 +78,11 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
   // Josh, a member of Alpha, reads Alpha's turns: the payload as sent, the reply, blind, the verdict; no tool results.
   const read = await as(josh, `/api/projects/${alpha}/contraption-turns`);
   assert.equal(read.status, 200);
-  assert.deepEqual(read.data.turns.map((t: any) => t.id), [id], "only Alpha's apps");
+  assert.deepEqual(
+    read.data.turns.map((t: any) => t.id),
+    [id],
+    "only Alpha's apps",
+  );
   const row = read.data.turns[0];
   assert.equal(row.contraption, 'voice');
   assert.equal(row.person, 'Cara');
@@ -92,7 +99,10 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
   const byKey = await fetch(`${srv.base}/api/projects/${alpha}/contraption-turns`, { headers: { Authorization: `Bearer ${voice}` } });
   assert.notEqual(byKey.status, 200);
   // The admin reads Bravo's.
-  assert.deepEqual((await srv.call(`/api/projects/${bravo}/contraption-turns`)).data.turns.map((t: any) => t.id), [elsewhere]);
+  assert.deepEqual(
+    (await srv.call(`/api/projects/${bravo}/contraption-turns`)).data.turns.map((t: any) => t.id),
+    [elsewhere],
+  );
 
   // Alpha's Taskmaster reads Alpha's turns (Cara, 2026-11-16: "Taskmaster can read it"), not Bravo's; its minions don't.
   const tmOf = async (project: number) => {

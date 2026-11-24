@@ -50,7 +50,13 @@ export class WaitList<T extends { ticket: number }> {
 }
 
 /** One linked Claude account's limit: `here` is the one this minion's turn hit, `kind` what Claude called it ('weekly', '5-hour'). */
-export interface LimitedAccount { n: number; label: string; until: number; here?: boolean; kind?: string }
+export interface LimitedAccount {
+  n: number;
+  label: string;
+  until: number;
+  here?: boolean;
+  kind?: string;
+}
 
 /** Minions waiting for the usage limit to reset, in the settings table so the wait outlives a restart. */
 export interface LimitResume {

@@ -18,8 +18,7 @@ test('no file has more type errors or escapes than its baseline', async () => {
 test('tools/typecheck.ts is the kit template outside its config block', () => {
   const body = (path: string) => readFileSync(path, 'utf8').split('// --- end of config ---')[1];
   assert.ok(body(join(ROOT, 'tools', 'typecheck.ts')));
-  assert.equal(body(join(ROOT, 'tools', 'typecheck.ts')), body(join(ROOT, 'kit', 'skills', 'scheme-setup', 'templates', 'typecheck.ts')),
-    'a fix to tools/typecheck.ts goes into kit/skills/scheme-setup/templates/typecheck.ts too (other schemes copy it)');
+  assert.equal(body(join(ROOT, 'tools', 'typecheck.ts')), body(join(ROOT, 'kit', 'skills', 'scheme-setup', 'templates', 'typecheck.ts')), 'a fix to tools/typecheck.ts goes into kit/skills/scheme-setup/templates/typecheck.ts too (other schemes copy it)');
 });
 
 test('an any in a type counts; an any that is a value, a property, a comment or text does not', () => {
@@ -72,7 +71,10 @@ test('tsc runs and its errors are read per file', async () => {
     writeFileSync(join(dir, 'ok.ts'), 'export const n: number = 1;\n');
     writeFileSync(join(dir, 'bad.ts'), 'export const n: number = "one";\nexport function f(a) { return a; }\n');
     const errors = await tscErrors(dir);
-    assert.deepEqual(errors.map((e) => `${e.file}:${e.line} ${e.code}`), ['bad.ts:1 TS2322', 'bad.ts:2 TS7006']);
+    assert.deepEqual(
+      errors.map((e) => `${e.file}:${e.line} ${e.code}`),
+      ['bad.ts:1 TS2322', 'bad.ts:2 TS7006'],
+    );
     // A listed tsconfig that isn't there is a mistake, not zero errors (#1789 review); a scheme with none lists none.
     await assert.rejects(tscErrors(dir, ['tsconfig.json', 'tsconfig.typo.json']), /tsconfig\.typo\.json/);
     assert.deepEqual(await tscErrors(dir, []), []);
@@ -84,6 +86,12 @@ test('tsc runs and its errors are read per file', async () => {
 test('tsc output with follow-on lines folds them into the error before', () => {
   const out = 'src/a.ts(3,5): error TS2322: Type A is not B.\n  Property x is missing.\nerror TS5083: Cannot read file.\n';
   const errors = parseTsc(out, '/r');
-  assert.deepEqual(errors.map((e) => [e.file, e.line, e.code]), [['src/a.ts', 3, 'TS2322'], ['(global)', 0, 'TS5083']]);
+  assert.deepEqual(
+    errors.map((e) => [e.file, e.line, e.code]),
+    [
+      ['src/a.ts', 3, 'TS2322'],
+      ['(global)', 0, 'TS5083'],
+    ],
+  );
   assert.match(errors[0]!.text, /Property x is missing/);
 });

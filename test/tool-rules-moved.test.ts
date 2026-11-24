@@ -35,8 +35,13 @@ after(async () => {
 async function tool(ticket: { id: number }, name: string, args: object): Promise<{ isError?: boolean; text: string }> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(Citadel.id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: 'thread', COORDINATOR_APP_INSTRUCTIONS: '1',
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
+      COORDINATOR_PROJECT: String(Citadel.id),
+      COORDINATOR_TICKET: String(ticket.id),
+      COORDINATOR_ROLE: 'thread',
+      COORDINATOR_APP_INSTRUCTIONS: '1',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -159,7 +164,14 @@ test('the four descriptions are one sentence each, and "put it first" lives in t
   for (const name of ['ask_question', 'message_coordinator', 'hand_off_land', 'close_self']) {
     const d = tools.find((t: any) => t.name === name).description;
     // One sentence: its only full stop ends it (close_self's first sentence carries a parenthesis with a colon).
-    assert.equal(d.replace(/\([^)]*\)/g, '').split(/\.(\s|$)/).filter((x: string) => x.trim()).length, 1, `${name}: ${d}`);
+    assert.equal(
+      d
+        .replace(/\([^)]*\)/g, '')
+        .split(/\.(\s|$)/)
+        .filter((x: string) => x.trim()).length,
+      1,
+      `${name}: ${d}`,
+    );
   }
   const ask = tools.find((t: any) => t.name === 'ask_question');
   const option = ask.inputSchema.properties.questions.items.properties.options.items.properties;

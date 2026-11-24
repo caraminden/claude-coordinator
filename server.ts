@@ -228,13 +228,19 @@ async function loadAssets() {
   assets.set('theme.css', Buffer.from(themeCss(assets.get('style.css')!.toString('utf8'))));
   // Built before anything is swapped, so a bad manifest leaves the old front end whole.
   const dark = darkManifest(assets);
-  const version = createHash('sha256').update([...assets.values()].join('\0')).digest('hex').slice(0, 12);
+  const version = createHash('sha256')
+    .update([...assets.values()].join('\0'))
+    .digest('hex')
+    .slice(0, 12);
   // The page knows its own version (#1144): one the service worker kept from before a ship reloads into the new one.
   assets.set('index.html', Buffer.from(assets.get('index.html')!.toString('utf8').replace('%ASSET_VERSION%', version)));
   const hashes = new Map([...assets].map(([name, body]) => [name, createHash('sha256').update(body).digest('hex').slice(0, 16)]));
   const statics = await staticTable(assets, version, hashes, dark);
   // Swapped together after the last await: SIGHUP's caller sets liveCommit in the same tick, so /api/health never pairs the new version with the old commit (#1628).
-  ASSETS = assets; ASSET_VERSION = version; ASSET_HASHES = hashes; STATICS = statics;
+  ASSETS = assets;
+  ASSET_VERSION = version;
+  ASSET_HASHES = hashes;
+  STATICS = statics;
   throughFront?.statics(STATICS);
 }
 // The commit this server's code came from, so a deploy can tell whether the change it ships is
@@ -298,13 +304,18 @@ checkpointOffThread(store);
 // Reads the database into memory every 5 s on a worker, so the box can't evict it (#1560); the `db-warmer` setting turns it off.
 const dbWarmer = warmDatabase(store);
 // A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.
-const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '', {
-  get: (id) => {
-    const ticket = store.getTicket(id);
-    return ticket ? { ...(store.getSetting<Nonces>(`agent-nonce:${id}`) ?? { current: null, previous: null }), closed: ticket.status === 'closed' } : null;
+const auth = new Auth(
+  process.env.COORDINATOR_PASSWORD ?? '',
+  process.env.SESSION_SECRET ?? '',
+  {
+    get: (id) => {
+      const ticket = store.getTicket(id);
+      return ticket ? { ...(store.getSetting<Nonces>(`agent-nonce:${id}`) ?? { current: null, previous: null }), closed: ticket.status === 'closed' } : null;
+    },
+    set: (id, nonces) => store.setSetting(`agent-nonce:${id}`, nonces),
   },
-  set: (id, nonces) => store.setSetting(`agent-nonce:${id}`, nonces),
-}, store);
+  store,
+);
 // The first start with per-person logins (or any with no admin) makes the admin, whom COORDINATOR_PASSWORD
 // signs in until they set a password, and every scheme from before owners becomes theirs.
 if (!store.listUsers().some((u) => u.admin)) {
@@ -324,16 +335,19 @@ const outsideSpend = new OutsideSpend(store);
 // Passwords and keys people save from a secret card or Settings (#838).
 const secrets = new Secrets(store, process.env.SESSION_SECRET ?? '');
 // Only the live data dir writes the real key folders: a dev copy registering "mandate" mustn't overwrite the live one's files.
-const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '',
-  process.env.CITADEL_CONTRAPTIONS_DIR || (DATA_DIR === DEFAULT_DATA_DIR ? DEFAULT_CONTRAPTIONS_DIR : join(DATA_DIR, 'contraptions')));
+const contraptions = new Contraptions(store, process.env.SESSION_SECRET ?? '', process.env.CITADEL_CONTRAPTIONS_DIR || (DATA_DIR === DEFAULT_DATA_DIR ? DEFAULT_CONTRAPTIONS_DIR : join(DATA_DIR, 'contraptions')));
 // Contraptions' systemd user services (#266): only the live server touches systemd, never a boot check or preview.
-const services = new AppServices(serviceOptions(process.env, DATA_DIR === DEFAULT_DATA_DIR, BOOT_CHECK, {
-  keysDir: (name) => contraptions.folder(name),
-  citadelUrl: () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`,
-  logDir: join(DATA_DIR, 'contraption-deploys'),
-}));
+const services = new AppServices(
+  serviceOptions(process.env, DATA_DIR === DEFAULT_DATA_DIR, BOOT_CHECK, {
+    keysDir: (name) => contraptions.folder(name),
+    citadelUrl: () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`,
+    logDir: join(DATA_DIR, 'contraption-deploys'),
+  }),
+);
 const githubLink = new GithubLink(store, credentials, process.env.GITHUB_CLIENT_ID ?? '', process.env.GITHUB_CLIENT_SECRET ?? '', undefined, {
-  clientId: process.env.GITHUB_APP_CLIENT_ID ?? '', clientSecret: process.env.GITHUB_APP_CLIENT_SECRET ?? '', slug: process.env.GITHUB_APP_SLUG ?? '',
+  clientId: process.env.GITHUB_APP_CLIENT_ID ?? '',
+  clientSecret: process.env.GITHUB_APP_CLIENT_SECRET ?? '',
+  slug: process.env.GITHUB_APP_SLUG ?? '',
 });
 // A boot check or preview runs on a copy of the data: it leaves GitHub alone.
 const repoAccess = new RepoAccess(store, githubLink, !BOOT_CHECK);
@@ -454,7 +468,11 @@ const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticket
 runner.onTurnStart = (ticketId, eventIds) => {
   const held = store.listDeliveries({ to: ticketId, states: ['held'] }).some((r) => r.kind === 'wake_when_live' || r.kind === 'chain');
   outbox.turnStarted(ticketId, eventIds);
-  if (held) void outbox.poke({ type: 'reopened', ticket: ticketId }).then(() => waiters.check()).catch((err) => console.error('Checking waiters after a reopen failed:', err));
+  if (held)
+    void outbox
+      .poke({ type: 'reopened', ticket: ticketId })
+      .then(() => waiters.check())
+      .catch((err) => console.error('Checking waiters after a reopen failed:', err));
 };
 if (!BOOT_CHECK) void outbox.boot();
 // The scheme whose code this server runs (its repo has the live commit); checked again once a deploy moves the live commit.
@@ -475,7 +493,7 @@ function ownScheme(): Project | null {
       own.lacks.set(p.repo_dir, now);
     }
   }
-  return own.id === null ? null : store.getProject(own.id) ?? null;
+  return own.id === null ? null : (store.getProject(own.id) ?? null);
 }
 // The server reads a scheme's GitHub (PRs, merges, fetches) as its owner (#321): a private repo may let no one else in.
 const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, DATA_DIR);
@@ -490,16 +508,34 @@ services.githubAs = (c) => {
 };
 runner.liveHead = () => waiters.head;
 /** Where a log-only judge (#1503, src/judges.ts) notes what it would have done: the retro log of the scheme its act was for, else the home scheme's. */
-const judgeNote = <A extends unknown[]>(schemeOf: (...a: A) => number | null | undefined) => (line: string, ...a: A) => {
-  const id = schemeOf(...a) ?? ownScheme()?.id;
-  noteWould(id != null ? projectSharedDir(DATA_DIR, id) : null, line);
-};
+const judgeNote =
+  <A extends unknown[]>(schemeOf: (...a: A) => number | null | undefined) =>
+  (line: string, ...a: A) => {
+    const id = schemeOf(...a) ?? ownScheme()?.id;
+    noteWould(id != null ? projectSharedDir(DATA_DIR, id) : null, line);
+  };
 // After each deploy, compare health before and after it and wake the minions that shipped a regression (#724). No model.
 deployWatch = new DeployWatch({
-  store, dbPath: join(DATA_DIR, 'coordinator.db'), bootAt: BOOT_AT, head: () => waiters.head, scheme: ownScheme,
+  store,
+  dbPath: join(DATA_DIR, 'coordinator.db'),
+  bootAt: BOOT_AT,
+  head: () => waiters.head,
+  scheme: ownScheme,
   commits: gitCommits(import.meta.dirname),
-  wake: judged<[number, string], unknown>('deploy-watch', 'wake', (id, text) => runner.send(id, APP_NAME, text), () => {}, judgeNote((id) => store.getTicket(id)?.project_id)),
-  mail: judged<[number, string], unknown>('deploy-watch', 'mail', (id, text) => runner.leaveMail(id, APP_NAME, text), () => {}, judgeNote((id) => store.getTicket(id)?.project_id)),
+  wake: judged<[number, string], unknown>(
+    'deploy-watch',
+    'wake',
+    (id, text) => runner.send(id, APP_NAME, text),
+    () => {},
+    judgeNote((id) => store.getTicket(id)?.project_id),
+  ),
+  mail: judged<[number, string], unknown>(
+    'deploy-watch',
+    'mail',
+    (id, text) => runner.leaveMail(id, APP_NAME, text),
+    () => {},
+    judgeNote((id) => store.getTicket(id)?.project_id),
+  ),
 });
 // The last run was stopped by systemd's watchdog: a health event, with the last stall it recorded before (#1135).
 const watchdogAt = takeMark(DATA_DIR);
@@ -557,7 +593,8 @@ function settleCard(card: { ticket: number; question: string }, by: string, line
 // Jobs on a person's own machine (#857): the queue of record, its go cards in the asking minion's chat (a
 // contraption's in its home scheme's Taskmaster chat), and results in the scheme's shared folder or the app's DATA_DIR.
 const jobs = new MachineJobs({
-  store, broadcast,
+  store,
+  broadcast,
   send: (id, msg) => machines.sendJob(id, msg),
   online: (id) => machines.isOnline(id),
   postCard: (job, card) => {
@@ -566,9 +603,15 @@ const jobs = new MachineJobs({
   },
   settleCard: (card, by, line) => settleCard(card, by, line),
   wake: (id, text, light) => runner.send(id, APP_NAME, text, [], light ? { light } : {}),
-  note: (id, text) => { runner.emit(id, 'note', { text }); runner.broadcastTicket(id); },
+  note: (id, text) => {
+    runner.emit(id, 'note', { text });
+    runner.broadcastTicket(id);
+  },
   // The view rides along so the card draws at once, sized as it will stay; machine_job events keep it live after.
-  placed: (job, stage, view) => { runner.emit(job.ticket_id!, 'job', { job: job.id, stage, view }); runner.broadcastTicket(job.ticket_id!); },
+  placed: (job, stage, view) => {
+    runner.emit(job.ticket_id!, 'job', { job: job.id, stage, view });
+    runner.broadcastTicket(job.ticket_id!);
+  },
   resultsDir: (job) => {
     if (job.contraption_id === null) return join(projectSharedDir(DATA_DIR, job.project_id), 'jobs', String(job.id));
     const c = store.listContraptions().find((r) => r.id === job.contraption_id);
@@ -577,7 +620,11 @@ const jobs = new MachineJobs({
 });
 machines.jobHooks = { info: (m, known, since) => jobs.reconcile(m, known, since), offline: (id) => jobs.offline(id) };
 // A minion whose test-box job waits for the screen can end its turn: Citadel follows the job and messages its chat through the outbox (#1425).
-if (!BOOT_CHECK) machines.watchBoxes((id, text) => { const now = outbox.clock(); outbox.add({ project_id: store.getTicket(id)?.project_id ?? 0, kind: 'box_job', to_kind: 'minion', to_id: id, when_kind: 'at', when_arg: now, due: now, payload: { text }, set_by: 'server' }); });
+if (!BOOT_CHECK)
+  machines.watchBoxes((id, text) => {
+    const now = outbox.clock();
+    outbox.add({ project_id: store.getTicket(id)?.project_id ?? 0, kind: 'box_job', to_kind: 'minion', to_id: id, when_kind: 'at', when_arg: now, due: now, payload: { text }, set_by: 'server' });
+  });
 if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
 const ciNumbers = new CiNumbers(store);
@@ -613,9 +660,15 @@ services.drain = (row) => contraptionTurns.drain(row.id);
 contraptionTurns.machines = (person) => machines.online().filter((m) => m.owner_id !== null && m.servers.includes('mcp') && ownerAsked(store, m.owner_id, [person], null));
 contraptionTurns.apiUrl = () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`;
 const ultrareviews = new UltraReviews({
-  claudeBin: process.env.CLAUDE_BIN ?? 'claude', place: (uid) => claudeLink.place(uid), scratch: (uid) => claudeLink.turnsDir(uid),
-  emit: (ticketId, kind, data) => runner.emit(ticketId, kind, data), getSetting: <T>(k: string) => store.getSetting<T>(k) as T | undefined, setSetting: (k, v) => store.setSetting(k, v), hostEnv: turnEnv(process.env),
-  jobsDir: join(DATA_DIR, 'run', 'ultrareviews'), units: () => runner.units,
+  claudeBin: process.env.CLAUDE_BIN ?? 'claude',
+  place: (uid) => claudeLink.place(uid),
+  scratch: (uid) => claudeLink.turnsDir(uid),
+  emit: (ticketId, kind, data) => runner.emit(ticketId, kind, data),
+  getSetting: <T>(k: string) => store.getSetting<T>(k) as T | undefined,
+  setSetting: (k, v) => store.setSetting(k, v),
+  hostEnv: turnEnv(process.env),
+  jobsDir: join(DATA_DIR, 'run', 'ultrareviews'),
+  units: () => runner.units,
   // Draft PRs for ultra reviews (#1399) go out only as the person who asked, never the box's login or anyone else's.
   github: (uid) => {
     const person = store.getUser(uid);
@@ -632,7 +685,10 @@ if (!BOOT_CHECK) sideAsks.recover();
 const presence = new Presence({ projectOf: (id) => store.getTicket(id)?.project_id, broadcast });
 every('presence sweep', 15_000, () => presence.sweep());
 // The usage ledger (#1306) writes its counts once a minute, and prunes once a day; a stop writes what is left.
-if (!BOOT_CHECK && !PREVIEW) { every('usage ledger flush', 60_000, () => store.usage.flush()); every('usage ledger prune', 24 * 3600_000, () => store.usage.prune()); }
+if (!BOOT_CHECK && !PREVIEW) {
+  every('usage ledger flush', 60_000, () => store.usage.flush());
+  every('usage ledger prune', 24 * 3600_000, () => store.usage.prune());
+}
 claudeLink.busy = (container) => runner.inContainer(container) + contraptionTurns.inContainer(container) + ultrareviews.inContainer(container) + sideAsks.inContainer(container) + describesIn(container);
 // Landings run in units of their own when turns do (src/land.ts); only ones that fell back to the server's child count here.
 const landings = new Landings(DATA_DIR, () => runner.units);
@@ -649,9 +705,16 @@ const longJobs = new LongJobs({
   },
   hours: (slug) => {
     const lower = slug.toLowerCase();
-    const sample = store.runnerLoadSince(Date.now() - 10 * 60_000).reverse().find((r) => {
-      try { return (JSON.parse(r.data).runners ?? []).some((x: { repo?: string }) => x.repo?.toLowerCase() === lower); } catch { return false; }
-    });
+    const sample = store
+      .runnerLoadSince(Date.now() - 10 * 60_000)
+      .reverse()
+      .find((r) => {
+        try {
+          return (JSON.parse(r.data).runners ?? []).some((x: { repo?: string }) => x.repo?.toLowerCase() === lower);
+        } catch {
+          return false;
+        }
+      });
     // Remembered, so a PC that went quiet or off overnight keeps its own hours rather than the defaults.
     if (sample) longJobPc.set(lower, sample.machine_id);
     const m = longJobPc.has(lower) ? store.getMachine(longJobPc.get(lower)!) : null;
@@ -661,11 +724,26 @@ const longJobs = new LongJobs({
     ghTally.add(args.find((a) => !a.startsWith('-')) ?? '', 0); // its polls are plain reads: each one counts (#1722)
     const p = store.getProject(projectId);
     const env = { ...process.env, ...(p?.repo_dir ? githubOf(p.repo_dir) : {}) };
-    return new Promise((done, fail) => execFile('gh', ['api', ...args], { env, timeout: 120_000, maxBuffer: 256 << 20 }, (err, out, errOut) =>
-      err ? fail(new Error(String(errOut || err.message).trim().split('\n').pop())) : done(String(out))));
+    return new Promise((done, fail) =>
+      execFile('gh', ['api', ...args], { env, timeout: 120_000, maxBuffer: 256 << 20 }, (err, out, errOut) =>
+        err
+          ? fail(
+              new Error(
+                String(errOut || err.message)
+                  .trim()
+                  .split('\n')
+                  .pop(),
+              ),
+            )
+          : done(String(out)),
+      ),
+    );
   },
   wake: (id, text, light) => runner.send(id, APP_NAME, text, [], light ? { light } : {}),
-  note: (id, text) => { runner.emit(id, 'note', { text }); runner.broadcastTicket(id); },
+  note: (id, text) => {
+    runner.emit(id, 'note', { text });
+    runner.broadcastTicket(id);
+  },
 });
 if (!BOOT_CHECK && !PREVIEW) every('long heavy jobs', 60_000, () => longJobs.pump(), 30_000);
 // Contraption turns and app deploys run as the server's children: a restart waits for them. Ultra reviews
@@ -674,7 +752,10 @@ if (!BOOT_CHECK && !PREVIEW) every('long heavy jobs', 60_000, () => longJobs.pum
 // that is behind, checked there, and shipped on one go from Citadel's Taskmaster chat, pushed as whoever said go.
 const kitSyncJobs = new HostJobs(() => runner.units);
 const kitSync = new KitSync({
-  kitDir: import.meta.dirname, projectsDir: join(DATA_DIR, 'projects'), runDir: join(DATA_DIR, 'run', 'kit-sync'), jobs: kitSyncJobs,
+  kitDir: import.meta.dirname,
+  projectsDir: join(DATA_DIR, 'projects'),
+  runDir: join(DATA_DIR, 'run', 'kit-sync'),
+  jobs: kitSyncJobs,
   load: () => store.getSetting<KitSyncState>('kit-sync') ?? undefined,
   save: (state) => store.setSetting('kit-sync', state),
   projects: () => store.listProjects(),
@@ -685,7 +766,9 @@ const kitSync = new KitSync({
   },
   // Pushes and gh calls go out as the person who said go, with their own GitHub link (as a minion's land does, #911).
   env: (person) => ({
-    ...turnEnv(process.env), CITADEL_HEAVY_DIR: join(DATA_DIR, 'projects', '.heavy'), CITADEL_HEAVY_WHO: 'kit sync',
+    ...turnEnv(process.env),
+    CITADEL_HEAVY_DIR: join(DATA_DIR, 'projects', '.heavy'),
+    CITADEL_HEAVY_WHO: 'kit sync',
     ...(person === null ? {} : runner.githubFor?.(person, join(DATA_DIR, 'people', String(person)))?.env),
   }),
   canPush: async (repoDir, env) => {
@@ -718,7 +801,7 @@ runner.hostJobs = () => landings.running() + contraptionTurns.running() + servic
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = messagePerson(store);
 runner.mediaFor = (person) => openrouter.connected(person);
-runner.githubFor = (person, dir) => githubLink.forTurn(person ? store.getUser(person) ?? null : null, dir);
+runner.githubFor = (person, dir) => githubLink.forTurn(person ? (store.getUser(person) ?? null) : null, dir);
 runner.secretsFor = (project, person) => secrets.forTurn(project, person);
 
 // ---------- push notifications ----------
@@ -783,21 +866,33 @@ runner.wakesOn = (id) => {
 // A row added or changed re-sends its minion's view, so the chip never shows a wait that already went (a Taskmaster's waits have no chip).
 for (const fn of ['addDelivery', 'updateDelivery'] as const) {
   const orig = (store[fn] as (...a: unknown[]) => unknown).bind(store);
-  Object.assign(store, { [fn]: (...a: unknown[]) => {
-    const r = orig(...a);
-    const row = (fn === 'addDelivery' ? r : store.getDelivery(a[0] as number)) as Delivery | undefined;
-    if (row?.to_kind === 'minion') queueMicrotask(() => runner.broadcastTicket(row.to_id));
-    return r;
-  } });
+  Object.assign(store, {
+    [fn]: (...a: unknown[]) => {
+      const r = orig(...a);
+      const row = (fn === 'addDelivery' ? r : store.getDelivery(a[0] as number)) as Delivery | undefined;
+      if (row?.to_kind === 'minion') queueMicrotask(() => runner.broadcastTicket(row.to_id));
+      return r;
+    },
+  });
 }
-runner.outboxWaits = (t) => waitsFor(store, t, (id) => [
-  ...waiters.chains().filter((c) => c.ticket === id && c.id == null && !c.held).map((c) => {
-    const lead = store.getTicket(c.after), n = `#${lead?.number ?? c.after}`;
-    return { kind: 'chain', chip: `⇢ ${n}`, headline: `Starts when ${n} ${c.when === 'merged' ? 'ships' : 'is live'}`, link: lead ? { project: lead.project_id, number: lead.number! } : null, what: waiters.heldFor(id) ?? 'its leader', set_by: c.from, since: c.since ? c.since * 1000 : null };
-  }),
-  ...waiters.legacy().filter((w) => w.ticket === id).map((w) => ({ kind: 'wake_when_live', chip: '⇢ live', headline: w.commit ? `Wakes when ${w.commit.slice(0, 7)} is live` : 'Wakes after the next deploy', what: w.reason, set_by: `minion:${id}`, since: null })),
-  ...runnerWaiters(store).filter((w) => w.ticket === id).map((w) => ({ kind: 'runners_back', chip: '⇢ CI', what: w.reason, set_by: `minion:${id}`, since: null })),
-]);
+runner.outboxWaits = (t) =>
+  waitsFor(store, t, (id) => [
+    ...waiters
+      .chains()
+      .filter((c) => c.ticket === id && c.id == null && !c.held)
+      .map((c) => {
+        const lead = store.getTicket(c.after),
+          n = `#${lead?.number ?? c.after}`;
+        return { kind: 'chain', chip: `⇢ ${n}`, headline: `Starts when ${n} ${c.when === 'merged' ? 'ships' : 'is live'}`, link: lead ? { project: lead.project_id, number: lead.number! } : null, what: waiters.heldFor(id) ?? 'its leader', set_by: c.from, since: c.since ? c.since * 1000 : null };
+      }),
+    ...waiters
+      .legacy()
+      .filter((w) => w.ticket === id)
+      .map((w) => ({ kind: 'wake_when_live', chip: '⇢ live', headline: w.commit ? `Wakes when ${w.commit.slice(0, 7)} is live` : 'Wakes after the next deploy', what: w.reason, set_by: `minion:${id}`, since: null })),
+    ...runnerWaiters(store)
+      .filter((w) => w.ticket === id)
+      .map((w) => ({ kind: 'runners_back', chip: '⇢ CI', what: w.reason, set_by: `minion:${id}`, since: null })),
+  ]);
 // Its leader was dismissed without shipping: it stays parked, and people and the Taskmaster hear once.
 waiters.hold = (c, why) => {
   const t = store.getTicket(c.ticket);
@@ -825,7 +920,12 @@ if (!BOOT_CHECK) {
     const repoDir = store.getProject(store.getTicket(ticketId)?.project_id ?? -1)?.repo_dir;
     if (repoDir) catchUp(repoDir);
     // What it left running stops too (#1365), once its preview has: by folder and pid, never by name (src/reaper.ts).
-    return Promise.resolve(stopped).then(() => reaper.reap(ticketId)).then(() => {}, (err) => console.error(`Ticket ${ticketId}: reaping its processes failed:`, err));
+    return Promise.resolve(stopped)
+      .then(() => reaper.reap(ticketId))
+      .then(
+        () => {},
+        (err) => console.error(`Ticket ${ticketId}: reaping its processes failed:`, err),
+      );
   };
   // Anything a close missed (a restart mid-close, a container turn's job re-parented to the container's init), hourly;
   // and test servers' turn supervisors left in their units once their folder or their ship is gone (#1758).
@@ -833,7 +933,14 @@ if (!BOOT_CHECK) {
   liveOn(BOOT_COMMIT);
 }
 // Citadel's recovery promises, checked at boot and hourly, report only (#1415, src/standing-checks.ts): reads in a worker.
-const standingChecks = new StandingChecks({ store, dataDir: DATA_DIR, commit: BOOT_COMMIT ?? null, queued: (ids) => runner.queuedIds(ids), appTurns: () => contraptionTurns.liveIds(), procs: async () => (await reaper.owned()).map((x) => ({ pid: x.proc.pid, ticketId: x.ticketId, projectId: x.projectId, command: shownCommand(x.proc.argv) })) });
+const standingChecks = new StandingChecks({
+  store,
+  dataDir: DATA_DIR,
+  commit: BOOT_COMMIT ?? null,
+  queued: (ids) => runner.queuedIds(ids),
+  appTurns: () => contraptionTurns.liveIds(),
+  procs: async () => (await reaper.owned()).map((x) => ({ pid: x.proc.pid, ticketId: x.ticketId, projectId: x.projectId, command: shownCommand(x.proc.argv) })),
+});
 if (!BOOT_CHECK && !PREVIEW) every('standing checks', 3600_000, () => standingChecks.run(), 3 * 60_000);
 
 /**
@@ -857,8 +964,17 @@ async function newMinion(project: Project, m: NewMinionSpec, by: string) {
 // every half minute; a schedule that came due while the server was down runs once when it is back.
 const heldStarts = new HeldStarts({ store, runner, read: () => pressure.read(), broadcast, broadcastTicket: (id) => runner.broadcastTicket(id) });
 const scheduledRuns = new ScheduledRuns({
-  held: heldStarts, store, newMinion, runner, broadcast, by: APP_NAME, dataDir: DATA_DIR,
-  memoryTarget: (id) => { const t = curatorTarget(store.getProject(id)?.repo_dir ?? null, memoryLogins({ store, claude: claudeLink })); return t && { dir: t.folder.dir, notes: t.notes }; },
+  held: heldStarts,
+  store,
+  newMinion,
+  runner,
+  broadcast,
+  by: APP_NAME,
+  dataDir: DATA_DIR,
+  memoryTarget: (id) => {
+    const t = curatorTarget(store.getProject(id)?.repo_dir ?? null, memoryLogins({ store, claude: claudeLink }));
+    return t && { dir: t.folder.dir, notes: t.notes };
+  },
 });
 // Once per database (#799): the hand-made audits follow kit/schedules/, and each scheme gets the ones its repo fits.
 try {
@@ -923,26 +1039,34 @@ if (!BOOT_CHECK && !PREVIEW) {
     console.error('Could not write the Gradle build cache init script (#1153):', err);
   }
   // Then dismissed minions' whole worktrees past their grace, and leftover Grunt worktrees (#660).
-  const sweepBuild: Job = every('build output sweep', 24 * 60 * 60_000, async () => {
-    // Daily, so a skipped pass tries again in a minute; the gate lets it through after 10 minutes of skips.
-    if (!(await pressure.gate('worktree sweep'))) { setTimeout(() => void sweepBuild.run(), 60_000).unref(); return; }
-    await runner.sweepBuildOutput();
-    await runner.sweepWorktrees();
-    // Scratch a killed ship, lint or heavy command left in perigee's RAM-backed /tmp (#1339).
-    const orphans = await sweepOrphanTmp(['/tmp', join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'citadel-heavy-tmp')]);
-    if (orphans.length) console.log(`Removed ${orphans.length} orphaned scratch folder${orphans.length === 1 ? '' : 's'} (${orphans.map((d) => basename(d)).join(', ')}).`);
-    // The shared Gradle build cache (#1153) under its cap.
-    const t = await trimCache(gradleCacheDir(DATA_DIR), GRADLE_CACHE_CAP);
-    if (t.removed) console.log(`Gradle build cache: removed ${t.removed} least recently used entries (${size(t.freed)}), ${size(t.left)} left.`);
-    // The shared npm cache (#1649): emptied once over its cap, when no install is reading it; the next install fills it again.
-    // shortcut: all or nothing, as npm's content store has no oldest-first trim; trim it by its index if refills start to cost.
-    const npmCache = npmCacheDir(DATA_DIR);
-    const npmSize = await diskUsage([npmCache]); // 0 before the first install made it
-    if (npmSize > NPM_CACHE_CAP && !installsRunning()) {
-      await low(['rm', '-rf', '--one-file-system', '--', npmCache]);
-      console.log(`npm cache: emptied it at ${size(npmSize)}, over its ${size(NPM_CACHE_CAP)} cap.`);
-    }
-  }, 10 * 60_000);
+  const sweepBuild: Job = every(
+    'build output sweep',
+    24 * 60 * 60_000,
+    async () => {
+      // Daily, so a skipped pass tries again in a minute; the gate lets it through after 10 minutes of skips.
+      if (!(await pressure.gate('worktree sweep'))) {
+        setTimeout(() => void sweepBuild.run(), 60_000).unref();
+        return;
+      }
+      await runner.sweepBuildOutput();
+      await runner.sweepWorktrees();
+      // Scratch a killed ship, lint or heavy command left in perigee's RAM-backed /tmp (#1339).
+      const orphans = await sweepOrphanTmp(['/tmp', join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'citadel-heavy-tmp')]);
+      if (orphans.length) console.log(`Removed ${orphans.length} orphaned scratch folder${orphans.length === 1 ? '' : 's'} (${orphans.map((d) => basename(d)).join(', ')}).`);
+      // The shared Gradle build cache (#1153) under its cap.
+      const t = await trimCache(gradleCacheDir(DATA_DIR), GRADLE_CACHE_CAP);
+      if (t.removed) console.log(`Gradle build cache: removed ${t.removed} least recently used entries (${size(t.freed)}), ${size(t.left)} left.`);
+      // The shared npm cache (#1649): emptied once over its cap, when no install is reading it; the next install fills it again.
+      // shortcut: all or nothing, as npm's content store has no oldest-first trim; trim it by its index if refills start to cost.
+      const npmCache = npmCacheDir(DATA_DIR);
+      const npmSize = await diskUsage([npmCache]); // 0 before the first install made it
+      if (npmSize > NPM_CACHE_CAP && !installsRunning()) {
+        await low(['rm', '-rf', '--one-file-system', '--', npmCache]);
+        console.log(`npm cache: emptied it at ${size(npmSize)}, over its ${size(NPM_CACHE_CAP)} cap.`);
+      }
+    },
+    10 * 60_000,
+  );
   // Contraption turns' media files past 30 days (#732); first soon after boot, as deploys restart the server more often than daily.
   every('contraption media sweep', 24 * 60 * 60_000, async () => void sweepMedia(join(DATA_DIR, 'contraption-media')), 10 * 60_000);
   // Kept chats for replay past 30 days (#836), apps that stopped keeping included.
@@ -956,15 +1080,20 @@ if (!BOOT_CHECK) {
 // The ideas ledger (#1150): each scheme's pages, handoffs and starts re-read hourly, and the weekly held note to its
 // Taskmaster of Later ideas waiting over two weeks (never a wake). Not in previews or dev copies: their Taskmasters aren't real.
 if (!BOOT_CHECK && !PREVIEW) {
-  every('ideas ledger', 60 * 60_000, async () => {
-    if (!(await pressure.gate('ideas pass'))) return;
-    for (const p of store.listProjects()) {
-      await store.ideas.now(p.id, projectSharedDir(DATA_DIR, p.id));
-      const tm = store.getOverlord(p.id);
-      const note = tm && store.ideas.laterNote(p.id);
-      if (note) runner.leaveMail(tm.id, 'Ideas', note);
-    }
-  }, 15 * 60_000);
+  every(
+    'ideas ledger',
+    60 * 60_000,
+    async () => {
+      if (!(await pressure.gate('ideas pass'))) return;
+      for (const p of store.listProjects()) {
+        await store.ideas.now(p.id, projectSharedDir(DATA_DIR, p.id));
+        const tm = store.getOverlord(p.id);
+        const note = tm && store.ideas.laterNote(p.id);
+        if (note) runner.leaveMail(tm.id, 'Ideas', note);
+      }
+    },
+    15 * 60_000,
+  );
 }
 
 // Steps' times from before step_times (#571), once, a minute after boot.
@@ -972,10 +1101,16 @@ if (!BOOT_CHECK) setTimeout(() => void safely('step times backfill', () => runne
 
 // Embed what was said since the last pass, a little at a time, never in a request (src/memory.ts).
 const memoryIndexer = new MemoryIndexer(store, embed, EMBED_MODEL, memoryScheme);
-if (!BOOT_CHECK) every('memory', Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000, async () => { if (await pressure.gate('memory index')) await memoryIndexer.run(); });
+if (!BOOT_CHECK)
+  every('memory', Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000, async () => {
+    if (await pressure.gate('memory index')) await memoryIndexer.run();
+  });
 // Closed minions and handoffs into the full-text index search_minions reads (src/minion-index.ts, #1156).
 const minionIndexer = new MinionIndexer(store, DATA_DIR);
-if (!BOOT_CHECK) every('minion index', Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000, async () => { if (await pressure.gate('minion index')) await minionIndexer.run(); });
+if (!BOOT_CHECK)
+  every('minion index', Number(process.env.CITADEL_MEMORY_EVERY_MS) || 60_000, async () => {
+    if (await pressure.gate('minion index')) await minionIndexer.run();
+  });
 
 // ---------- artifacts, branch and ship status (src/artifact-scan.ts, src/ship-status.ts) ----------
 
@@ -999,7 +1134,15 @@ const deployState = (() => {
 const ciRuns = new CiRuns({ changed: (id) => waits.check(id) });
 let liveSlug: string | null = null;
 void originRepo(import.meta.dirname).then((slug) => (liveSlug = slug));
-const waits = new Waits({ store, deployState, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ship: ships.ship, interruptible: () => runner.interruptible(), changed: (id) => runner.broadcastTicket(id), ci: ciRuns, ciSlug: () => liveSlug,
+const waits = new Waits({
+  store,
+  deployState,
+  heavyDir: join(DATA_DIR, 'projects', '.heavy'),
+  ship: ships.ship,
+  interruptible: () => runner.interruptible(),
+  changed: (id) => runner.broadcastTicket(id),
+  ci: ciRuns,
+  ciSlug: () => liveSlug,
   // The land gate's alarm (#561), under the scheme whose repo the live checkout is.
   // Not before the live repo is known: a guess of no scheme would clear the alarm, and a restart would ring it again.
   early: (id) => earlyCi(readTail(landings.log(id))),
@@ -1011,8 +1154,16 @@ const waits = new Waits({ store, deployState, heavyDir: join(DATA_DIR, 'projects
 runner.wait = waits.wait;
 // The release monitor's data (#625, src/releases.ts): Citadel's own server as a target, every scheme's test copies.
 const citadelServer = new CitadelServer({
-  store, scheme: ownScheme, head: () => waiters.head, line: () => waits.line, ticketFor: (label) => waits.ticketFor(label),
-  wait: waits.wait, ship: ships.ship, usual: waits.usual, interruptible: () => runner.interruptible(), ciQueued: (id) => ciRuns.view(id)?.stage === 'queued',
+  store,
+  scheme: ownScheme,
+  head: () => waiters.head,
+  line: () => waits.line,
+  ticketFor: (label) => waits.ticketFor(label),
+  wait: waits.wait,
+  ship: ships.ship,
+  usual: waits.usual,
+  interruptible: () => runner.interruptible(),
+  ciQueued: (id) => ciRuns.view(id)?.stage === 'queued',
   news: (id, name) => landNews(readTail(landings.log(id)), name),
 });
 // Every other scheme's targets, found from what it has (#627, src/release-targets.ts), and a reader per kind.
@@ -1020,8 +1171,11 @@ const targetFinder = new TargetFinder({ store, own: ownScheme, apkFeed: (name) =
 const contraptionReader = new ContraptionReader({ store, finder: targetFinder, folder: (row) => services.folder(row), running: (name) => services.running(name), heavy: () => readHeavy(join(DATA_DIR, 'projects', '.heavy')) });
 // A Capacitor app's APK, built and published once a deploy carrying a change to it is live (#837, src/apk-build.ts).
 const apkBuilds = new ApkBuilds({
-  home: services.opts.home, folder: (row) => services.folder(row), dataDir: (row) => services.dataDir(row),
-  cacheDir: join(services.opts.home, '.cache/citadel-apk'), keyDir: join(services.opts.home, '.config/citadel-android'),
+  home: services.opts.home,
+  folder: (row) => services.folder(row),
+  dataDir: (row) => services.dataDir(row),
+  cacheDir: join(services.opts.home, '.cache/citadel-apk'),
+  keyDir: join(services.opts.home, '.config/citadel-android'),
   heavy: join(import.meta.dirname, 'tools/citadel-heavy'),
   ciRelease: (row) => targetFinder.list('apk').some((t) => t.contraption === row.name && !!t.workflow),
   published: (row, code, _commit, by) => {
@@ -1036,16 +1190,24 @@ services.onDeploy = (view) => {
   if (view.state === 'deployed') broadcast({ type: 'app-deployed', name: view.name });
   const live = view.state === 'deployed' && !services.opts.off ? store.getContraption(view.name) : undefined;
   if (live) void apkBuilds.schedule(live, view.by);
-  contraptionReader.record(view).catch((err) => console.error(`Recording ${view.name}'s deploy failed:`, err)).finally(() => void releases.refresh());
+  contraptionReader
+    .record(view)
+    .catch((err) => console.error(`Recording ${view.name}'s deploy failed:`, err))
+    .finally(() => void releases.refresh());
   const home = store.getContraption(view.name)?.home_scheme;
   if (home != null) rollback.deployEnded(home, `app:${view.name}`, view.state === 'deployed', view.to, view.said.at(-1) ?? view.state);
   // Nobody watches an auto-deploy (#629), so one that didn't go live is told to the app's home Taskmaster.
   const row = view.by === AUTO_BY && view.state !== 'deployed' ? store.getContraption(view.name) : undefined;
-  if (row?.home_scheme != null) tellHome(row.home_scheme, `Auto-deploy of ${row.title} (${row.name}) to ${view.to?.slice(0, 9) ?? 'its main'}: ${view.state}. ${view.said.at(-1) ?? ''}\n\nIt won't try that commit again by itself: the next landing on main, or Deploy on its card on the Releases page, deploys again. deploy_contraption's status has the whole log.`);
+  if (row?.home_scheme != null)
+    tellHome(
+      row.home_scheme,
+      `Auto-deploy of ${row.title} (${row.name}) to ${view.to?.slice(0, 9) ?? 'its main'}: ${view.state}. ${view.said.at(-1) ?? ''}\n\nIt won't try that commit again by itself: the next landing on main, or Deploy on its card on the Releases page, deploys again. deploy_contraption's status has the whole log.`,
+    );
   // The debounce watches the scheme's clone, the deploy fetches GitHub: a main not pushed yet ships the older commit, and auto-deploy won't try again at that head.
   const shipped = view.by === AUTO_BY && view.state === 'deployed' ? store.getContraption(view.name) : undefined;
   const meant = shipped?.home_scheme != null ? autoDeploy.triedAt(shipped.home_scheme, `app:${shipped.name}`) : null;
-  if (shipped?.home_scheme != null && meant && view.to && meant !== view.to) tellHome(shipped.home_scheme, `Auto-deploy of ${shipped.title} (${shipped.name}) went live at ${view.to.slice(0, 9)}, but your clone's ${view.branch} is at ${meant.slice(0, 9)}: GitHub didn't have it yet. Push ${view.branch}, then press Deploy on its card on the Releases page (or call deploy_contraption).`);
+  if (shipped?.home_scheme != null && meant && view.to && meant !== view.to)
+    tellHome(shipped.home_scheme, `Auto-deploy of ${shipped.title} (${shipped.name}) went live at ${view.to.slice(0, 9)}, but your clone's ${view.branch} is at ${meant.slice(0, 9)}: GitHub didn't have it yet. Push ${view.branch}, then press Deploy on its card on the Releases page (or call deploy_contraption).`);
 };
 /** A message from Citadel to a scheme's Taskmaster, if it has one. */
 // Scheme-wide news (auto-deploys, alerts) is nobody's in particular: the Overlord's (#921), the only Taskmaster before a split.
@@ -1060,7 +1222,10 @@ const actions = { workflowRuns: (p: Project, w: string, b: string) => ciHealth.w
 const chunked = new ChunkedUploads(DATA_DIR, process.env.UPLOAD_FLOOR_GB ? Number(process.env.UPLOAD_FLOOR_GB) * 1024 ** 3 : DISK_FLOOR);
 // Push to contraptions' Android apps (#1138); CITADEL_FCM_API points a test at a stub Firebase.
 const fcm = new Fcm(fcmKeyPath(), { api: process.env.CITADEL_FCM_API || undefined });
-const ciMirror = new CiMirror(ciStore, ghDownload((p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined)));
+const ciMirror = new CiMirror(
+  ciStore,
+  ghDownload((p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined)),
+);
 // Last green and the pins come from lastGreen below, read only once refreshes run.
 // Desktop apps' feeds (#1148): the launcher is built from the kit's source by perigee's .NET SDK, kept by its hash.
 const desktop = {
@@ -1068,17 +1233,25 @@ const desktop = {
   launchers: new Launchers({ src: join(import.meta.dirname, 'kit/desktop-launcher'), cache: join(homedir(), '.cache/citadel-desktop'), dotnet: join(homedir(), '.dotnet/dotnet'), log: (m) => console.error(m) }),
 };
 // Only the live server publishes what CI ships, like the APK reader: a dev copy's feed is its own to fill by hand.
-const desktopFromCi = services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR ? undefined : ciPublisher({
-  feeds: desktop.feeds, tell: tellHome, log: (m) => console.error(m),
-  file: async (projectId, run) => {
-    const f = store.ciFiles(projectId).find((x) => x.run_id === run && x.kind === 'release' && /\.(zip|tgz|tar\.gz|exe)$/i.test(x.name));
-    return f ? ciStore.plain(f).catch(() => null) : null;
-  },
-});
+const desktopFromCi =
+  services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR
+    ? undefined
+    : ciPublisher({
+        feeds: desktop.feeds,
+        tell: tellHome,
+        log: (m) => console.error(m),
+        file: async (projectId, run) => {
+          const f = store.ciFiles(projectId).find((x) => x.run_id === run && x.kind === 'release' && /\.(zip|tgz|tar\.gz|exe)$/i.test(x.name));
+          return f ? ciStore.plain(f).catch(() => null) : null;
+        },
+      });
 const ciPackageReader = new CiPackageReader({ store, finder: targetFinder, actions, mirror: ciMirror, contains: gitContains, lastGreen: { get: (id) => lastGreen.get(id), pinned: (id, t) => lastGreen.pinned(id, t) }, desktop: desktopFromCi, feeds: desktop.feeds });
 ciStore.keep = () => ciPackageReader.keeps();
 const apkReader = new ApkReader({
-  store, finder: targetFinder, actions, mirror: ciMirror,
+  store,
+  finder: targetFinder,
+  actions,
+  mirror: ciMirror,
   feed: async (name) => {
     const file = join(services.opts.home, '.local/share', name, 'android', 'latest.json');
     try {
@@ -1127,7 +1300,8 @@ async function publishRun(t: Found, run: Run, current: number, main: { code: num
 // Each minion's PR as the PR watcher last saw it, for Main's next release (#627).
 const prs = new Map<number, PrSnapshot>();
 const prDeps = {
-  store, pr: (id: number) => prs.get(id) ?? null,
+  store,
+  pr: (id: number) => prs.get(id) ?? null,
   ci: (id: number) => {
     const v = ciRuns.view(id);
     return v && !v.ended ? { since: v.since, usual: v.usual, text: v.text } : null;
@@ -1139,11 +1313,16 @@ const prsInFlight = new PrsInFlight(prDeps);
 const landsInFlight = new LandsInFlight({ store, finder: targetFinder, landings });
 // The other test copies (#627): minions' downloads, preview sites and debug APKs, read with the targets on the slow poll.
 const testCopyReader = new TestCopyReader({
-  store, finder: targetFinder, actions, mirror: ciMirror, sharedDir,
-  listening: (port) => new Promise((done) => {
-    const s = createConnection({ host: '127.0.0.1', port, timeout: 500 }, () => (s.destroy(), done(true)));
-    s.on('error', () => done(false)).on('timeout', () => (s.destroy(), done(false)));
-  }),
+  store,
+  finder: targetFinder,
+  actions,
+  mirror: ciMirror,
+  sharedDir,
+  listening: (port) =>
+    new Promise((done) => {
+      const s = createConnection({ host: '127.0.0.1', port, timeout: 500 }, () => (s.destroy(), done(true)));
+      s.on('error', () => done(false)).on('timeout', () => (s.destroy(), done(false)));
+    }),
 });
 // Roll back to last green (#1016, src/rollback.ts): each scheme's last green from CI health's reads, and the button on
 // a Releases card that can deploy a given commit: an app's two-slot deploy, or Citadel's own tools/deploy.sh --to.
@@ -1166,8 +1345,12 @@ function citadelRollingBack(current: string | null): boolean {
   return false;
 }
 const rollback = new Rollback({
-  lastGreen, repoDir: (id) => store.getProject(id)?.repo_dir ?? null, tell: tellHome, changed: () => releases.poll(),
-  get: (k) => store.getSetting(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
+  lastGreen,
+  repoDir: (id) => store.getProject(id)?.repo_dir ?? null,
+  tell: tellHome,
+  changed: () => releases.poll(),
+  get: (k) => store.getSetting(k) ?? undefined,
+  set: (k, v) => store.setSetting(k, v),
   // An APK Citadel builds after each deploy (#837: a feed, no release workflow) rolls back with its app (ADR 0012).
   follows: (tv) => {
     const t = tv.target.kind === 'apk' ? targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id) : null;
@@ -1210,17 +1393,29 @@ const rollback = new Rollback({
       if (!p?.repo_dir || p.id !== ownScheme()?.id) throw new HttpError(404, 'Only the scheme this server runs can roll it back');
       if ((services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR) && !process.env.DEPLOY_LIVE) throw new HttpError(409, "This copy of Citadel doesn't deploy, so it can't roll the server back");
       rollbackJobs.start({
-        dir: ROLLBACK_DIR, cwd: p.repo_dir, argv: ['bash', 'tools/deploy.sh', '--to', to], env: { ...turnEnv(process.env), ...deployEnv() },
-        unit: `citadel-rollback-${Date.now()}`, description: `tools/deploy.sh --to ${to.slice(0, 9)} (Roll back to last green)`, ticketId: 0,
+        dir: ROLLBACK_DIR,
+        cwd: p.repo_dir,
+        argv: ['bash', 'tools/deploy.sh', '--to', to],
+        env: { ...turnEnv(process.env), ...deployEnv() },
+        unit: `citadel-rollback-${Date.now()}`,
+        description: `tools/deploy.sh --to ${to.slice(0, 9)} (Roll back to last green)`,
+        ticketId: 0,
       });
     },
   },
 });
 const releases = new Releases({
-  store, readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader], broadcast, deploy: (tv) => autoDeploy.info(tv),
+  store,
+  readers: [citadelServer, contraptionReader, ciPackageReader, apkReader, new FileReader({ finder: targetFinder }), mainReader],
+  broadcast,
+  deploy: (tv) => autoDeploy.info(tv),
   rollback: (tv, views) => rollback.info(tv, views),
   // A keyless Capacitor app's card offers Make release key (#837): the app's own card, as it has no Android one until its first APK.
-  releaseKey: (tv) => { const name = tv.target.kind === 'contraption' ? /^app:(.+)$/.exec(tv.target.id)?.[1] : null; return name && apkBuilds.keyless(name) ? name : null; }, inFlight: (views) => {
+  releaseKey: (tv) => {
+    const name = tv.target.kind === 'contraption' ? /^app:(.+)$/.exec(tv.target.id)?.[1] : null;
+    return name && apkBuilds.keyless(name) ? name : null;
+  },
+  inFlight: (views) => {
     landsInFlight.attach(views);
     prsInFlight.attach(views);
     attachFailures(views, { store, landing: (id) => landings.hasHandoff(id), running: (id) => runner.isRunning(id) });
@@ -1237,7 +1432,10 @@ const releases = new Releases({
 });
 // Auto-deploy and the release cards' Deploy button (#629, src/auto-deploy.ts): each kind's release step.
 const autoDeploy = new AutoDeploy({
-  store, targets: () => targetFinder.list(), view: () => releases.view(() => true), held: lastGreen,
+  store,
+  targets: () => targetFinder.list(),
+  view: () => releases.view(() => true),
+  held: lastGreen,
   failed: (t, why) => tellHome(t.projectId, `Auto-deploy of ${t.name} couldn't start: ${why}`),
   enabled: () => !services.opts.off,
   // More is coming (#1736): a ship in the scheme's line, or a hand-off not reported yet (its land running, or its own deploy about to start).
@@ -1271,7 +1469,8 @@ const autoDeploy = new AutoDeploy({
         const w = apkReader.pending(t);
         const p = store.getProject(t.projectId);
         const slug = p && repoSlug(p.repo_url);
-        if (!w || !p?.repo_dir || !slug || !t.workflow || !t.contraption) throw new HttpError(409, `${t.name} has nothing to release: no signed APK newer than the published build is waiting, or a release run is still going. The Releases page reads CI every few minutes, so a run that just finished shows a little later.`);
+        if (!w || !p?.repo_dir || !slug || !t.workflow || !t.contraption)
+          throw new HttpError(409, `${t.name} has nothing to release: no signed APK newer than the published build is waiting, or a release run is still going. The Releases page reads CI every few minutes, so a run that just finished shows a little later.`);
         const as = githubOf(p.repo_dir);
         const release = async () => {
           await dispatch(slug, t.workflow!.replace(/^.*\//, ''), t.branch, as);
@@ -1329,33 +1528,38 @@ store.pruneArtifacts(isArtifact);
 // The vocabulary docs follow the registry; the first run replaces the hand-written ones (kept aside).
 if (!PREVIEW) writeVocabularies().catch((err) => console.error('Could not write the property vocabularies:', err));
 // A build a restart cut off, or a deploy from before #837: each Capacitor app's APK catches up with its live commit.
-if (!PREVIEW && !BOOT_CHECK && !services.opts.off) setTimeout(() => {
-  for (const c of store.listContraptions()) if (c.repo) void apkBuilds.schedule(c, AUTO_BY);
-}, 60_000).unref();
-if (!PREVIEW) void safely('startup sweep', async () => {
-  for (const p of store.listProjects()) {
-    for (const t of store.listTickets(p.id)) {
-      await artifacts.scan(t.id).catch((err) => console.error(`Artifact scan of ticket ${t.id} failed:`, err));
-    }
-  }
-  // Copy every open thread's Claude session into the database (only what changed since last time), so
-  // threads from before this existed are covered too; dismissed ones are skipped (#1486). Nothing is pruned here: this config dir may be
-  // a fresh one that hasn't had the sessions restored into it yet.
-  const configDir = claudeConfigDir(process.env);
-  for (const p of store.listProjects()) {
-    for (const t of store.listTickets(p.id)) {
-      if (!t.session_id || runner.isRunning(t.id)) continue;
-      // Threads from before the model picker: fill in what they last ran with.
-      if (!t.last_effort || !t.last_model) {
-        const init = store.listEvents(t.id).reverse().find((e) => e.kind === 'claude' && e.data.includes('"subtype":"init"'));
-        const model = t.last_model ?? (init ? JSON.parse(init.data).model ?? null : null);
-        store.updateTicketQuietly(t.id, { last_model: model, last_effort: t.last_effort ?? lastEffort(t, configDir) });
+if (!PREVIEW && !BOOT_CHECK && !services.opts.off)
+  setTimeout(() => {
+    for (const c of store.listContraptions()) if (c.repo) void apkBuilds.schedule(c, AUTO_BY);
+  }, 60_000).unref();
+if (!PREVIEW)
+  void safely('startup sweep', async () => {
+    for (const p of store.listProjects()) {
+      for (const t of store.listTickets(p.id)) {
+        await artifacts.scan(t.id).catch((err) => console.error(`Artifact scan of ticket ${t.id} failed:`, err));
       }
-      // On its lane, so a turn a message starts meanwhile waits for it (#259); errors are logged there.
-      await runner.saveIdleSession(t.id, configDir);
     }
-  }
-});
+    // Copy every open thread's Claude session into the database (only what changed since last time), so
+    // threads from before this existed are covered too; dismissed ones are skipped (#1486). Nothing is pruned here: this config dir may be
+    // a fresh one that hasn't had the sessions restored into it yet.
+    const configDir = claudeConfigDir(process.env);
+    for (const p of store.listProjects()) {
+      for (const t of store.listTickets(p.id)) {
+        if (!t.session_id || runner.isRunning(t.id)) continue;
+        // Threads from before the model picker: fill in what they last ran with.
+        if (!t.last_effort || !t.last_model) {
+          const init = store
+            .listEvents(t.id)
+            .reverse()
+            .find((e) => e.kind === 'claude' && e.data.includes('"subtype":"init"'));
+          const model = t.last_model ?? (init ? (JSON.parse(init.data).model ?? null) : null);
+          store.updateTicketQuietly(t.id, { last_model: model, last_effort: t.last_effort ?? lastEffort(t, configDir) });
+        }
+        // On its lane, so a turn a message starts meanwhile waits for it (#259); errors are logged there.
+        await runner.saveIdleSession(t.id, configDir);
+      }
+    }
+  });
 
 // Deploys happen in other minions' turns, so merged work that isn't live yet is looked at again every
 // SHIP_POLL_MS, and at startup every open minion's branch is, so the list has its badges.
@@ -1434,32 +1638,42 @@ const ciHealth = new CiHealth(store, {
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   // shortcut: compares against the clone's local branch, so a scheme whose clone lags GitHub's main gets its last green late; read origin's ref too if one does.
   green: (p, runs, branch) => {
-    if (p.repo_dir) lastGreen.note(p.id, p.repo_dir, `refs/heads/${branch}`, runs).then(() => releases.poll(), (err) => console.error(`Last green of ${p.name} failed:`, err));
+    if (p.repo_dir)
+      lastGreen.note(p.id, p.repo_dir, `refs/heads/${branch}`, runs).then(
+        () => releases.poll(),
+        (err) => console.error(`Last green of ${p.name} failed:`, err),
+      );
   },
   mandate: (from, person, key, title, quiet, link, parts) => mandateAlert('CI health', from, person, key, title, link, quiet, parts),
   wake: (ticketId, text, fyi) => runner.send(ticketId, APP_NAME, text, [], fyi ? { fyi, light: true } : {}),
   home: () => store.getProject(alertScheme(0)),
   // Wakes (a red on main, any trigger, #774/#968; a problem that rings, #983) or held mail (back to green) for the scheme's Taskmaster.
   // The CI-red judge's one act (#1503): log-only turns every Taskmaster wake and mail from CI health into a retro-log line.
-  tell: judged<[Project, string, boolean | undefined, number[] | undefined], boolean | number>('ci-red', 'tell', (project, text, wake, people) => {
-    const to = taskmastersFor(store, project.id, people);
-    if (!to.length) return false;
-    // One wake per problem (a cold context each, and each would start its own fix minion): the first person's Taskmaster; the others get held mail.
-    let sent = false;
-    to.forEach((coordinator, i) => {
-      try {
-        if (!wake || i > 0) runner.leaveMail(coordinator.id, APP_NAME, i > 0 ? `${text}\n(${store.getTicket(to[0].id)?.title ?? 'Another Taskmaster'} was woken for this; check list_tickets for a fix minion before starting one.)` : text);
-        else runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
-        if (i === 0) sent = true; // the wake itself; the others only get mail
-      } catch (err) {
-        console.error(`CI health: telling Taskmaster #${coordinator.id} failed:`, err);
-      }
-    });
-    if (!sent) return false;
-    if (!wake) return true;
-    // The chat entry the wake became (the CI page links to it, #992); true if it can't be found.
-    return store.eventsOfKinds(to[0].id, ['user_message']).at(-1)?.id ?? true;
-  }, () => true, judgeNote((project) => project.id)),
+  tell: judged<[Project, string, boolean | undefined, number[] | undefined], boolean | number>(
+    'ci-red',
+    'tell',
+    (project, text, wake, people) => {
+      const to = taskmastersFor(store, project.id, people);
+      if (!to.length) return false;
+      // One wake per problem (a cold context each, and each would start its own fix minion): the first person's Taskmaster; the others get held mail.
+      let sent = false;
+      to.forEach((coordinator, i) => {
+        try {
+          if (!wake || i > 0) runner.leaveMail(coordinator.id, APP_NAME, i > 0 ? `${text}\n(${store.getTicket(to[0].id)?.title ?? 'Another Taskmaster'} was woken for this; check list_tickets for a fix minion before starting one.)` : text);
+          else runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
+          if (i === 0) sent = true; // the wake itself; the others only get mail
+        } catch (err) {
+          console.error(`CI health: telling Taskmaster #${coordinator.id} failed:`, err);
+        }
+      });
+      if (!sent) return false;
+      if (!wake) return true;
+      // The chat entry the wake became (the CI page links to it, #992); true if it can't be found.
+      return store.eventsOfKinds(to[0].id, ['user_message']).at(-1)?.id ?? true;
+    },
+    () => true,
+    judgeNote((project) => project.id),
+  ),
   // A red's fix minion (#1074): its branch tip once its own commits (since it started) are in `sha`, GitHub's main.
   // shortcut: reads the scheme's clone, so a PR-merging scheme whose clone lacks GitHub's tip starts no re-run until it fetches; add a fetch if one does.
   shipped: (p, t, sha) => (p.repo_dir && t.branch ? fixShipped(p.repo_dir, t.branch, Math.floor(t.created_at / 1000), sha) : Promise.resolve(null)),
@@ -1490,44 +1704,77 @@ const recordFlakes = (projectId: number, ticketId: number | null, commit: string
 };
 const fastMode = new FastMode({
   flakes: (id, sha, output) => recordFlakes(id, null, sha, output),
-  schemes: () => store.listProjects().filter((p) => p.land_mode === 'fast' && p.repo_dir).map((p) => ({ id: p.id, repo: p.repo_dir! })),
-  get: (k) => store.getSetting<FastState>(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
-  jobs: new HostJobs(() => runner.units), dir: (id) => join(DATA_DIR, 'run', 'fast-mode', String(id)),
+  schemes: () =>
+    store
+      .listProjects()
+      .filter((p) => p.land_mode === 'fast' && p.repo_dir)
+      .map((p) => ({ id: p.id, repo: p.repo_dir! })),
+  get: (k) => store.getSetting<FastState>(k) ?? undefined,
+  set: (k, v) => store.setSetting(k, v),
+  jobs: new HostJobs(() => runner.units),
+  dir: (id) => join(DATA_DIR, 'run', 'fast-mode', String(id)),
   // As the lander's land ran (its person's GitHub login), with no Citadel token of its own: it calls no tools, and a fresh one would log a live turn out (#225).
   env: (id, ticketId) => {
     const t = (ticketId != null ? store.getTicket(ticketId) : null) ?? store.getOverlord(id);
     return t ? runner.hostEnv(t, '') : turnEnv(process.env);
   },
-  ticketOf: (id, n) => store.getTicketByNumber(id, n)?.id ?? null, numberOf: (id) => store.getTicket(id)?.number ?? null,
-  tell: (id, text) => runner.send(id, APP_NAME, text), taskmaster: tellHome,
+  ticketOf: (id, n) => store.getTicketByNumber(id, n)?.id ?? null,
+  numberOf: (id) => store.getTicket(id)?.number ?? null,
+  tell: (id, text) => runner.send(id, APP_NAME, text),
+  taskmaster: tellHome,
   green: (id, sha) => {
     const p = store.getProject(id);
-    if (p?.repo_dir) lastGreen.note(id, p.repo_dir, 'refs/heads/main', [{ head_sha: sha, workflow_id: 0, status: 'completed', conclusion: 'success', created_at: new Date().toISOString(), file: 'land.sh --verify' }])
-      .then(() => releases.poll(), (err) => console.error(`Last green of ${p.name} failed:`, err));
+    if (p?.repo_dir)
+      lastGreen.note(id, p.repo_dir, 'refs/heads/main', [{ head_sha: sha, workflow_id: 0, status: 'completed', conclusion: 'success', created_at: new Date().toISOString(), file: 'land.sh --verify' }]).then(
+        () => releases.poll(),
+        (err) => console.error(`Last green of ${p.name} failed:`, err),
+      );
   },
 });
 if (!BOOT_CHECK && !PREVIEW) every('fast mode', 30_000, () => fastMode.tick());
 // A flake fix has to prove it held (#1120, src/flake-fixes.ts): the retro log's flake lines counted, the third sighting in 7 days
 // starting one minion, and a fix held after 50 clean runs on the desktop. The minion runs for the scheme's owner, like a schedule's.
 const flakeFixes = new FlakeFixes({
-  store, sharedDir: (id) => projectSharedDir(DATA_DIR, id),
-  start: judged<Parameters<FlakeFixDeps['start']>, ReturnType<FlakeFixDeps['start']>>('flake-counter', 'start', async (project, brief) => {
-    const { id } = await newMinion(project, { title: brief.title, props: { type: 'bug' }, model: brief.model, effort: brief.effort }, APP_NAME);
-    store.updateTicket(id, { person_id: project.owner_id ?? null });
-    runner.emit(id, 'note', { text: 'Started by the flaky-test rule (a third sighting in 7 days, or a held fix that flaked again): the Test health tab shows its owner, age and clean runs.' });
-    await heldStarts.start({ ticket: id, from: APP_NAME, message: brief.message, opts: { brief: true } }, () => runner.send(id, APP_NAME, brief.message, [], { brief: true }));
-    return { id };
-  }, async () => ({ id: -1 }), judgeNote((project) => project.id)),
-  wake: judged<[Project, string], boolean>('flake-counter', 'wake', (p, text) => { tellHome(p.id, text); return !!store.getOverlord(p.id); }, () => true, judgeNote((p) => p.id)),
+  store,
+  sharedDir: (id) => projectSharedDir(DATA_DIR, id),
+  start: judged<Parameters<FlakeFixDeps['start']>, ReturnType<FlakeFixDeps['start']>>(
+    'flake-counter',
+    'start',
+    async (project, brief) => {
+      const { id } = await newMinion(project, { title: brief.title, props: { type: 'bug' }, model: brief.model, effort: brief.effort }, APP_NAME);
+      store.updateTicket(id, { person_id: project.owner_id ?? null });
+      runner.emit(id, 'note', { text: 'Started by the flaky-test rule (a third sighting in 7 days, or a held fix that flaked again): the Test health tab shows its owner, age and clean runs.' });
+      await heldStarts.start({ ticket: id, from: APP_NAME, message: brief.message, opts: { brief: true } }, () => runner.send(id, APP_NAME, brief.message, [], { brief: true }));
+      return { id };
+    },
+    async () => ({ id: -1 }),
+    judgeNote((project) => project.id),
+  ),
+  wake: judged<[Project, string], boolean>(
+    'flake-counter',
+    'wake',
+    (p, text) => {
+      tellHome(p.id, text);
+      return !!store.getOverlord(p.id);
+    },
+    () => true,
+    judgeNote((p) => p.id),
+  ),
   runs: (p, branch) => ciHealth.workflowRuns(p, 'flake-proof.yml', branch),
   jobs: (p, run) => ciHealth.runJobs(p, run),
   front: (p, ticketId, reason) => shipFirst({ store, releases, waits }, p.id, ticketId, { name: 'The broken-test rule', taskmaster: true }, reason),
-  evidence: async (p, branch, file, at) => { const slug = repoSlug(p.repo_url); return slug && p.repo_dir ? ciEvidence(slug, githubOf(p.repo_dir), branch, file, at) : null; },
+  evidence: async (p, branch, file, at) => {
+    const slug = repoSlug(p.repo_url);
+    return slug && p.repo_dir ? ciEvidence(slug, githubOf(p.repo_dir), branch, file, at) : null;
+  },
 });
 if (!BOOT_CHECK && !PREVIEW) every('flake fixes', 5 * 60_000, () => flakeFixes.tick(store.listProjects().filter((p) => p.repo_dir)));
 // The live probe (#1741): a big ship's own check of itself, run by the server once it is live (src/live-probe.ts).
 const liveProbes = new LiveProbes({
-  store: store as ConstructorParameters<typeof LiveProbes>[0]['store'], runner, from: APP_NAME, log: probeLog(DATA_DIR),
+  store: store as ConstructorParameters<typeof LiveProbes>[0]['store'],
+  runner,
+  from: APP_NAME,
+  log: probeLog(DATA_DIR),
   run: (id, p) => {
     const t = store.getTicket(id);
     const person = t?.person_id != null ? store.getUser(t.person_id) : null;
@@ -1549,9 +1796,15 @@ const liveProbes = new LiveProbes({
 });
 runner.probeHold = (id) => liveProbes.hold(id);
 const landHandoffs = new LandHandoffs({
-  landings, store, runner, from: APP_NAME,
+  landings,
+  store,
+  runner,
+  from: APP_NAME,
   probe: (id, probe, commit, when) => liveProbes.shipped(id, probe, commit, when),
-  flakes: (id, output) => { const t = store.getTicket(id); if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output); },
+  flakes: (id, output) => {
+    const t = store.getTicket(id);
+    if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output);
+  },
   failed: (id, kind) => {
     stallWatch.shipFailed(id, kind);
     const run = landings.get(id);
@@ -1587,7 +1840,10 @@ const landHandoffs = new LandHandoffs({
     if (!t || services.opts.off) return [];
     const dir = store.getProject(t.project_id)?.repo_dir;
     // An app make_app registered (#1136) waits for the ship that puts its folder on main.
-    return store.listContraptions().filter((c) => c.home_scheme === t.project_id && c.repo && (c.branch ?? 'main') === 'main' && (!c.subdir || (!!dir && manifestOn(dir, c.subdir)))).map((c) => c.name);
+    return store
+      .listContraptions()
+      .filter((c) => c.home_scheme === t.project_id && c.repo && (c.branch ?? 'main') === 'main' && (!c.subdir || (!!dir && manifestOn(dir, c.subdir))))
+      .map((c) => c.name);
   },
   deployOps: {
     running: (name) => !!services.running(name),
@@ -1618,7 +1874,10 @@ const landHandoffs = new LandHandoffs({
 });
 // The minions the server is landing for (#727): working, in the views. Synced again after the poll, since settling a
 // land sends its row before the hand-off is marked settled.
-const serverWork = serverWorkWatch(() => landings.handoffs(), (id) => runner.broadcastTicket(id));
+const serverWork = serverWorkWatch(
+  () => landings.handoffs(),
+  (id) => runner.broadcastTicket(id),
+);
 // A turn's start asks fresh: one stat on that minion's own folder, not the list.
 runner.serverWork = (id, fresh) => (fresh ? (landings.hasHandoff(id) ? { kind: 'land' as const } : null) : serverWork.of(id));
 if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await landHandoffs.poll(), serverWork.sync()));
@@ -1631,11 +1890,12 @@ if (!BOOT_CHECK) {
 // timeline per incident in Citadel's shared reports/, and an ask to the Taskmaster to start a research minion on it.
 const ownGithub = (p: Project) => (p.repo_dir ? githubOf(p.repo_dir) : undefined);
 const incidents = new Incidents({
-  store, bootAt: BOOT_AT,
+  store,
+  bootAt: BOOT_AT,
   line: () => waits.line,
   jobs: () => {
     const p = ownScheme();
-    return p ? ciHealth.recent.get(p.id) ?? [] : [];
+    return p ? (ciHealth.recent.get(p.id) ?? []) : [];
   },
   sources: {
     dbPath: join(DATA_DIR, 'coordinator.db'),
@@ -1675,14 +1935,24 @@ const artifactSweep = new ArtifactSweep(store, { as: (p) => (p.repo_dir ? github
 // The server's GitHub polls each 10 min (#1722: ghGet, ghPost and the long heavy jobs; not one-off calls such as the
 // artifact sweep's deletes): the login's hour is shared with land.sh and every turn, so the journal says what the
 // server spent when "API rate limit exceeded" comes back. Restarts are often, so not hourly, and SIGTERM logs the rest.
-const logGhTally = (when: string) => { const r = ghTally.report(); if (r) console.log(`github: ${when} ${r}`); };
+const logGhTally = (when: string) => {
+  const r = ghTally.report();
+  if (r) console.log(`github: ${when} ${r}`);
+};
 if (!BOOT_CHECK) every('github tally', 10 * 60_000, () => logGhTally('last 10 min'));
-if (!BOOT_CHECK) every('artifact sweep', 60 * 60_000, async () => { if (await pressure.gate('artifact sweep')) await artifactSweep.tick(); });
+if (!BOOT_CHECK)
+  every('artifact sweep', 60 * 60_000, async () => {
+    if (await pressure.gate('artifact sweep')) await artifactSweep.tick();
+  });
 // The CI desktop's load (#534): the runner agents' samples and CI health's jobs become a verdict per PC; one that
 // holds is a quiet Mandate item for every admin, cleared when it ends.
 const ciLoad = new CiLoad(store, {
   jobs: () => store.listProjects().map((project) => ({ project, jobs: ciHealth.recent.get(project.id) ?? [] })),
-  hosts: () => machines.list().filter((m) => m.runners && m.online).map((m) => m.host ?? ''),
+  hosts: () =>
+    machines
+      .list()
+      .filter((m) => m.runners && m.online)
+      .map((m) => m.host ?? ''),
   mandate: (project, person, key, title) => mandateAlert('CI load', project, person, key, title, undefined, true),
 });
 if (!BOOT_CHECK) ciLoad.start();
@@ -1690,7 +1960,14 @@ if (!BOOT_CHECK) ciLoad.start();
 // agent's PC go to the runner agents, which squeeze every other runner there while one runs (src/ci-ships.ts).
 const shipWatch = new ShipWatch({
   // The agents' samples name their runners' repos; a scheme whose self-hosted jobs ran today counts too, for an agent that sends none.
-  repos: () => [...ciLoad.runnerRepos(), ...store.listProjects().filter((p) => ciHealth.recent.get(p.id)?.some((j) => j.labels?.includes('self-hosted'))).map((p) => repoSlug(p.repo_url) ?? '')].filter(Boolean),
+  repos: () =>
+    [
+      ...ciLoad.runnerRepos(),
+      ...store
+        .listProjects()
+        .filter((p) => ciHealth.recent.get(p.id)?.some((j) => j.labels?.includes('self-hosted')))
+        .map((p) => repoSlug(p.repo_url) ?? ''),
+    ].filter(Boolean),
   as: (repo) => {
     const p = store.listProjects().find((x) => x.repo_dir && repoSlug(x.repo_url)?.toLowerCase() === repo);
     return p ? githubOf(p.repo_dir!) : null;
@@ -1722,11 +1999,19 @@ if (!BOOT_CHECK && !services.opts.off) timerAlerts.start();
 if (!BOOT_CHECK) services.watchDisk(() => store.listContraptions());
 // Apps with a database but no backup timer or disk_warn_gb are flagged to their scheme's Taskmaster, once each (#1383).
 if (!BOOT_CHECK) {
-  const flagRound = (oncePerDay: boolean) => void flagUnbacked({
-    apps: () => store.listContraptions(), dataDir: (a) => services.dataDir(a), manifest: (a) => services.manifest(a),
-    taskmaster: (scheme) => store.getCoordinator(scheme)?.id ?? null, mail: (id, text) => runner.leaveMail(id, APP_NAME, text),
-    getState: () => store.getSetting<Record<string, string>>(FLAG_KEY) ?? {}, setState: (s) => store.setSetting(FLAG_KEY, s),
-  }, { oncePerDay }).catch((err) => console.warn(`Checking the apps for backups failed: ${err.message}`));
+  const flagRound = (oncePerDay: boolean) =>
+    void flagUnbacked(
+      {
+        apps: () => store.listContraptions(),
+        dataDir: (a) => services.dataDir(a),
+        manifest: (a) => services.manifest(a),
+        taskmaster: (scheme) => store.getCoordinator(scheme)?.id ?? null,
+        mail: (id, text) => runner.leaveMail(id, APP_NAME, text),
+        getState: () => store.getSetting<Record<string, string>>(FLAG_KEY) ?? {},
+        setState: (s) => store.setSetting(FLAG_KEY, s),
+      },
+      { oncePerDay },
+    ).catch((err) => console.warn(`Checking the apps for backups failed: ${err.message}`));
   setTimeout(() => flagRound(true), 5 * 60_000).unref();
   setInterval(() => flagRound(false), 24 * 3_600_000).unref();
 }
@@ -1761,10 +2046,16 @@ ciStore.onFull = (project, text) => {
   if (coordinator) runner.emit(coordinator.id, 'note', { everyone: true, text });
 };
 // A step up in a scheme's CI numbers that held (#1369) wakes its Taskmaster, as a CI alert does (#983); never a gate.
-ciNumbers.onStep = judged('ci-numbers', 'wake', (project: Project, _step: CiNumberStep, text: string) => {
-  const coordinator = store.getOverlord(project.id);
-  if (coordinator) runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
-}, () => {}, judgeNote((project) => project.id));
+ciNumbers.onStep = judged(
+  'ci-numbers',
+  'wake',
+  (project: Project, _step: CiNumberStep, text: string) => {
+    const coordinator = store.getOverlord(project.id);
+    if (coordinator) runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
+  },
+  () => {},
+  judgeNote((project) => project.id),
+);
 if (!BOOT_CHECK && !PREVIEW) {
   every('ci store sweep', 24 * 60 * 60_000, () => (ciNumbers.sweep(), ciStore.sweep(true)), 15 * 60_000);
 }
@@ -1813,9 +2104,21 @@ function darkManifest(assets: Map<string, Buffer>) {
 }
 // The CI runner agent's installer and scripts (#328), which Cara's one-time install downloads: read from tools/ci-runner/
 // at each request, so they are always the deployed checkout's. Nothing in them is secret.
-const RUNNER_FILES = new Set(['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'sample-load.ps1',
+const RUNNER_FILES = new Set([
+  'install-runner-agent.ps1',
+  'add-runner.ps1',
+  'list-runners.ps1',
+  'remove-runner.ps1',
+  'start-runner.ps1',
+  'sample-load.ps1',
   // The Linux agent in WSL (#510).
-  'install-runner-agent.sh', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh', 'keep-wsl-up.ps1', 'keep-runners.ps1']);
+  'install-runner-agent.sh',
+  'add-runner.sh',
+  'list-runners.sh',
+  'remove-runner.sh',
+  'keep-wsl-up.ps1',
+  'keep-runners.ps1',
+]);
 // The same for the Android emulator's distro on that desktop (#533): deploy/desktop/android/setup.sh and what it downloads.
 const ANDROID_FILES: Record<string, string> = { 'setup.sh': 'deploy/desktop/android/setup.sh', 'citadel-android': 'tools/citadel-android', 'install-sdk.sh': 'tools/android/install-sdk.sh' };
 const SETUP_PATH = /^\/(ci-runner|android-desktop)\//;
@@ -1858,8 +2161,14 @@ const status = new StatusPage({
   warm: () => dbWarmer?.stats() ?? null,
   storms: () => memoryStorms.current(),
   easing: () => memoryEase.current(),
-  store, dataDir: DATA_DIR, bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', ownScheme: () => ownScheme()?.id ?? null,
-  ciSnapshot: (canSee) => ciHealth.snapshot(canSee), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row),
+  store,
+  dataDir: DATA_DIR,
+  bootAt: BOOT_AT,
+  commit: BOOT_COMMIT ?? '',
+  ownScheme: () => ownScheme()?.id ?? null,
+  ciSnapshot: (canSee) => ciHealth.snapshot(canSee),
+  desktops: () => ciLoad.views(),
+  diskUse: (row) => services.diskUse(row),
   unitStates: PREVIEW ? undefined : (units) => services.unitStates(units),
   tell: (projectId, text) => tellHome(projectId, text),
   answer: !BOOT_CHECK && !PREVIEW ? { probe: answerProbe, turns: () => runner.runningCount() } : undefined,
@@ -1873,23 +2182,83 @@ if (!BOOT_CHECK && !PREVIEW) {
 }
 /** What the route table (src/routes/) reaches of this server. */
 const app: App = {
-  usageKnown: () => [
-    ...routes.groups().map((name) => ({ kind: 'route' as const, name })),
-    ...store.schedules.allNames().map((n) => ({ kind: 'schedule' as const, name: usageName(n) })),
-    ...listSkills(KIT_DIR, null).map((i) => ({ kind: i.kind === 'agent' ? 'grunt' as const : 'skill' as const, name: i.name })),
-  ],
-  store, runner, auth, waiters, timedWakes, outbox, previews, releases, autoDeploy, rollback, fastMode, waits, apkBuilds, desktop, machines, jobs, pusher, clients, github: githubLink, repoAccess, runnerTokens, runnerJobs, ciLoad, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ciHealth, ciStore, ciNumbers, ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c), chunked, claude: claudeLink, codex: codexLink, openrouter, outsideSpend, secrets, contraptions, fcm, contraptionTurns, errorDigest, landings, status, kitSync, services, ultrareviews, sideAsks, presence,
+  usageKnown: () => [...routes.groups().map((name) => ({ kind: 'route' as const, name })), ...store.schedules.allNames().map((n) => ({ kind: 'schedule' as const, name: usageName(n) })), ...listSkills(KIT_DIR, null).map((i) => ({ kind: i.kind === 'agent' ? ('grunt' as const) : ('skill' as const), name: i.name }))],
+  store,
+  runner,
+  auth,
+  waiters,
+  timedWakes,
+  outbox,
+  previews,
+  releases,
+  autoDeploy,
+  rollback,
+  fastMode,
+  waits,
+  apkBuilds,
+  desktop,
+  machines,
+  jobs,
+  pusher,
+  clients,
+  github: githubLink,
+  repoAccess,
+  runnerTokens,
+  runnerJobs,
+  ciLoad,
+  heavyDir: join(DATA_DIR, 'projects', '.heavy'),
+  ciHealth,
+  ciStore,
+  ciNumbers,
+  ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c),
+  chunked,
+  claude: claudeLink,
+  codex: codexLink,
+  openrouter,
+  outsideSpend,
+  secrets,
+  contraptions,
+  fcm,
+  contraptionTurns,
+  errorDigest,
+  landings,
+  status,
+  kitSync,
+  services,
+  ultrareviews,
+  sideAsks,
+  presence,
   reaper,
   memory: { embed, model: EMBED_MODEL, indexed: memoryScheme },
-  dataDir: DATA_DIR, preview: PREVIEW, machinesUrl: MACHINES_URL, liveCommit: BOOT_COMMIT, health: { watch: deployWatch, clientErrors },
+  dataDir: DATA_DIR,
+  preview: PREVIEW,
+  machinesUrl: MACHINES_URL,
+  liveCommit: BOOT_COMMIT,
+  health: { watch: deployWatch, clientErrors },
   get assetVersion() {
     return ASSET_VERSION;
   },
-  broadcast, notify, newMinion, held: heldStarts, startChained: startChain, ticketBranch, builds, sharedFiles: artifacts.sharedFiles, sharedDir, registryChanged,
+  broadcast,
+  notify,
+  newMinion,
+  held: heldStarts,
+  startChained: startChain,
+  ticketBranch,
+  builds,
+  sharedFiles: artifacts.sharedFiles,
+  sharedDir,
+  registryChanged,
 };
 // Decisions (#1064): a reversal made in a repo commit reaches its Taskmaster without anyone opening the page. Off the boot's hot path, then daily.
 if (!BOOT_CHECK && !PREVIEW) {
-  every('decisions sweep', 24 * 60 * 60_000, async () => { for (const p of store.listProjects()) await loadDecisions(app, p).catch(() => {}); }, 15 * 60_000);
+  every(
+    'decisions sweep',
+    24 * 60 * 60_000,
+    async () => {
+      for (const p of store.listProjects()) await loadDecisions(app, p).catch(() => {});
+    },
+    15 * 60_000,
+  );
 }
 // A reply's status trailer (#711) goes through set_thread_status's checks; one they refuse is noted, and the state stays cleared.
 runner.onStatusTrailer = (id, fields) => {
@@ -1954,8 +2323,7 @@ services.act = (row, action) => (action === 'start' && apps.restarts.running(row
 apps.onServerError = (row, status, method, path, note) => void safely('error digest', () => errorDigest.httpError(row, status, method, path, note));
 // Installers fetch manifests and icons with no login (#987): read each older app's file paths once its service is up,
 // then again every so often for one that was down or had nobody enabled at the first read (rows already read are skipped).
-const readStatics = () => void safely('static paths', () => apps.backfillStatics())
-  .finally(() => setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_EVERY_MS ?? 15 * 60_000)).unref());
+const readStatics = () => void safely('static paths', () => apps.backfillStatics()).finally(() => setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_EVERY_MS ?? 15 * 60_000)).unref());
 setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_MS ?? 20_000)).unref();
 // Citadel UI's files for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
 
@@ -1969,96 +2337,99 @@ busySource(() => [...inFlight].filter(([res]) => !res.headersSent).map(([, what]
 const SETTLED_ROUTE = process.env.CITADEL_TEST_SETTLED === '1';
 
 // Only /apps/ requests and a contraption's own host are upgraded (contraptions' websockets), the same check as the front thread's; anything else asking is served as usual.
-const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS_DOMAIN) }, (req, res) => writes.request.run({ seq: 0 }, async () => {
-  stampServerTime(res);
-  if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
-  inFlight.set(res, `${req.method} ${(req.url ?? '').split('?')[0]}`);
-  res.once('close', () => inFlight.delete(res));
-  if (passingOn) return passOn(req, res);
-  try {
-    if (SETTLED_ROUTE && req.url?.startsWith('/api/test/settled')) {
-      inFlight.delete(res);
-      const busy = await settled(Math.min(Number(requestUrl(req).searchParams.get('ms')) || 30_000, 120_000));
-      return json(res, 200, { busy });
-    }
-    // test/front.test.ts: the main thread held busy, as a long timer holds it, to show reader routes still answer.
-    if (SETTLED_ROUTE && req.url?.startsWith('/api/test/block')) {
-      const until = Date.now() + Math.min(Number(requestUrl(req).searchParams.get('ms')) || 0, 5000);
-      while (Date.now() < until);
-      return json(res, 200, {});
-    }
-    // test/front.test.ts: one step of the main thread that writes, pauses, then writes again; no reader may see the half.
-    if (SETTLED_ROUTE && req.url?.startsWith('/api/test/half-step')) {
-      const q = requestUrl(req).searchParams, id = Number(q.get('ticket'));
-      store.updateTicket(id, { title: 'half' });
-      const until = Date.now() + Math.min(Number(q.get('ms')) || 0, 5000);
-      while (Date.now() < until);
-      store.updateTicket(id, { title: 'whole' });
-      return json(res, 200, {});
-    }
-    // test/front.test.ts: the client addresses this thread sees, which a client must not be able to set.
-    if (SETTLED_ROUTE && req.url?.startsWith('/api/test/peer')) return json(res, 200, connection(req));
-    // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.
-    if (apps.onAppHost(req)) {
-      const path = (req.url ?? '/').split('?')[0];
-      if (KIT_FILE.test(path) && (req.method === 'GET' || req.method === 'HEAD')) await serveStatic(req, res, path.slice('/apps/_citadel'.length));
-      else apps.serve(req, res);
-      return;
-    }
-    const own = ownPath(req.url ?? '/');
-    if (own && 'redirect' in own) {
-      if (req.method === 'GET' || req.method === 'HEAD') return void res.writeHead(302, { Location: own.redirect }).end();
-    } else if (own) req.url = own.url;
-    const url = requestUrl(req);
-    // /preview/<ticket id>/ or a build's /preview/build/<n>/: the id is digits only, so "build" never reads as one.
-    const preview = previews && /^\/preview\/(build\/)?(\d+)(\/.*)?$/.exec(url.pathname);
-    // The frozen backup chat with the Citadel scheme's (2) Taskmaster, ahead of everything else (src/backup.ts).
-    if (isBackupPath(url.pathname)) {
-      await serveBackup(app, BACKUP_SCHEME, req, res, url);
-    } else if (url.pathname.startsWith('/api/')) {
-      const session = auth.session(req);
-      // A route's own Set-Cookie (logout's clearing one) goes in writeHead, which wins over this.
-      const renewed = auth.renewal(session, isSecure(req));
-      if (renewed) res.setHeader('Set-Cookie', renewed);
-      await routes(app, req, res, url, session);
-    } else if (KIT_FILE.test(url.pathname)) {
-      // The app rail, phone drawers (and their types), the Alt+` switcher, drag to reorder and link handling (extlinks.js) the rail loads, colours and Citadel UI (public/ui/).
-      await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length));
-    } else if (url.pathname.startsWith('/apps/')) {
-      apps.serve(req, res);
-    } else if (preview) {
-      const session = auth.session(req);
-      // An HTML page's files under its file token come from a frame that sends no cookies; the preview checks the token.
-      const [, build, id, rest] = preview;
-      const tokened = /^\/(c\/)?api\/files\//.test(rest ?? '') && (req.method === 'GET' || req.method === 'HEAD');
-      // People only, signed in to the live app; a page load without a login goes to the login.
-      if (!tokened && (!session || session.agent !== undefined)) {
-        if (req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? ''))) return void res.writeHead(302, { Location: '/' }).end();
-        throw new HttpError(401, 'Not logged in');
+const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS_DOMAIN) }, (req, res) =>
+  writes.request.run({ seq: 0 }, async () => {
+    stampServerTime(res);
+    if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
+    inFlight.set(res, `${req.method} ${(req.url ?? '').split('?')[0]}`);
+    res.once('close', () => inFlight.delete(res));
+    if (passingOn) return passOn(req, res);
+    try {
+      if (SETTLED_ROUTE && req.url?.startsWith('/api/test/settled')) {
+        inFlight.delete(res);
+        const busy = await settled(Math.min(Number(requestUrl(req).searchParams.get('ms')) || 30_000, 120_000));
+        return json(res, 200, { busy });
       }
-      // Only for people in the minion's scheme, or for a build, the scheme whose code this server runs.
-      const shownIn = build ? previews.buildScheme()?.id : store.getTicket(Number(id))?.project_id;
-      if (session && session.agent === undefined && (shownIn === undefined || !store.canSee(session, shownIn))) throw new HttpError(404, build ? 'There is no preview for this build' : 'There is no preview for this minion');
-      // The front end's URLs are relative, so the page itself needs the trailing slash.
-      if (!rest) return void res.writeHead(302, { Location: `/${build ? buildPreviewPath(Number(id)) : previewPath(Number(id))}${url.search}` }).end();
-      const who = session?.agent === undefined ? session : null;
-      if (build) await previews.proxyBuild(req, res, Number(id), rest + url.search, who);
-      else await previews.proxy(req, res, Number(id), rest + url.search, who);
-    } else if (SETUP_PATH.test(url.pathname)) {
-      await serveRunnerFile(res, url.pathname);
-    } else {
-      await serveStatic(req, res, url.pathname);
+      // test/front.test.ts: the main thread held busy, as a long timer holds it, to show reader routes still answer.
+      if (SETTLED_ROUTE && req.url?.startsWith('/api/test/block')) {
+        const until = Date.now() + Math.min(Number(requestUrl(req).searchParams.get('ms')) || 0, 5000);
+        while (Date.now() < until);
+        return json(res, 200, {});
+      }
+      // test/front.test.ts: one step of the main thread that writes, pauses, then writes again; no reader may see the half.
+      if (SETTLED_ROUTE && req.url?.startsWith('/api/test/half-step')) {
+        const q = requestUrl(req).searchParams,
+          id = Number(q.get('ticket'));
+        store.updateTicket(id, { title: 'half' });
+        const until = Date.now() + Math.min(Number(q.get('ms')) || 0, 5000);
+        while (Date.now() < until);
+        store.updateTicket(id, { title: 'whole' });
+        return json(res, 200, {});
+      }
+      // test/front.test.ts: the client addresses this thread sees, which a client must not be able to set.
+      if (SETTLED_ROUTE && req.url?.startsWith('/api/test/peer')) return json(res, 200, connection(req));
+      // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.
+      if (apps.onAppHost(req)) {
+        const path = (req.url ?? '/').split('?')[0];
+        if (KIT_FILE.test(path) && (req.method === 'GET' || req.method === 'HEAD')) await serveStatic(req, res, path.slice('/apps/_citadel'.length));
+        else apps.serve(req, res);
+        return;
+      }
+      const own = ownPath(req.url ?? '/');
+      if (own && 'redirect' in own) {
+        if (req.method === 'GET' || req.method === 'HEAD') return void res.writeHead(302, { Location: own.redirect }).end();
+      } else if (own) req.url = own.url;
+      const url = requestUrl(req);
+      // /preview/<ticket id>/ or a build's /preview/build/<n>/: the id is digits only, so "build" never reads as one.
+      const preview = previews && /^\/preview\/(build\/)?(\d+)(\/.*)?$/.exec(url.pathname);
+      // The frozen backup chat with the Citadel scheme's (2) Taskmaster, ahead of everything else (src/backup.ts).
+      if (isBackupPath(url.pathname)) {
+        await serveBackup(app, BACKUP_SCHEME, req, res, url);
+      } else if (url.pathname.startsWith('/api/')) {
+        const session = auth.session(req);
+        // A route's own Set-Cookie (logout's clearing one) goes in writeHead, which wins over this.
+        const renewed = auth.renewal(session, isSecure(req));
+        if (renewed) res.setHeader('Set-Cookie', renewed);
+        await routes(app, req, res, url, session);
+      } else if (KIT_FILE.test(url.pathname)) {
+        // The app rail, phone drawers (and their types), the Alt+` switcher, drag to reorder and link handling (extlinks.js) the rail loads, colours and Citadel UI (public/ui/).
+        await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length));
+      } else if (url.pathname.startsWith('/apps/')) {
+        apps.serve(req, res);
+      } else if (preview) {
+        const session = auth.session(req);
+        // An HTML page's files under its file token come from a frame that sends no cookies; the preview checks the token.
+        const [, build, id, rest] = preview;
+        const tokened = /^\/(c\/)?api\/files\//.test(rest ?? '') && (req.method === 'GET' || req.method === 'HEAD');
+        // People only, signed in to the live app; a page load without a login goes to the login.
+        if (!tokened && (!session || session.agent !== undefined)) {
+          if (req.method === 'GET' && /text\/html/.test(String(req.headers.accept ?? ''))) return void res.writeHead(302, { Location: '/' }).end();
+          throw new HttpError(401, 'Not logged in');
+        }
+        // Only for people in the minion's scheme, or for a build, the scheme whose code this server runs.
+        const shownIn = build ? previews.buildScheme()?.id : store.getTicket(Number(id))?.project_id;
+        if (session && session.agent === undefined && (shownIn === undefined || !store.canSee(session, shownIn))) throw new HttpError(404, build ? 'There is no preview for this build' : 'There is no preview for this minion');
+        // The front end's URLs are relative, so the page itself needs the trailing slash.
+        if (!rest) return void res.writeHead(302, { Location: `/${build ? buildPreviewPath(Number(id)) : previewPath(Number(id))}${url.search}` }).end();
+        const who = session?.agent === undefined ? session : null;
+        if (build) await previews.proxyBuild(req, res, Number(id), rest + url.search, who);
+        else await previews.proxy(req, res, Number(id), rest + url.search, who);
+      } else if (SETUP_PATH.test(url.pathname)) {
+        await serveRunnerFile(res, url.pathname);
+      } else {
+        await serveStatic(req, res, url.pathname);
+      }
+    } catch (err) {
+      const status = err instanceof HttpError ? err.status : 500;
+      if (status === 500) console.error(err);
+      // Ids in the path would split one failing route into many readings.
+      if (countsAsServerFault(status, err)) deployWatch?.record('server-5xx', `${req.method} ${(req.url ?? '').split('?')[0].replace(/\d+/g, '#')}: ${String(thrown(err).message ?? err).slice(0, 200)}`);
+      // An HttpError's words were written for the caller, a 500 too; only an unexpected throw stays vague.
+      if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
+      else res.end();
     }
-  } catch (err) {
-    const status = err instanceof HttpError ? err.status : 500;
-    if (status === 500) console.error(err);
-    // Ids in the path would split one failing route into many readings.
-    if (countsAsServerFault(status, err)) deployWatch?.record('server-5xx', `${req.method} ${(req.url ?? '').split('?')[0].replace(/\d+/g, '#')}: ${String(thrown(err).message ?? err).slice(0, 200)}`);
-    // An HttpError's words were written for the caller, a 500 too; only an unexpected throw stays vague.
-    if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
-    else res.end();
-  }
-}));
+  }),
+);
 
 // Contraptions' websockets, which a restart ends (their pages reconnect): open ones never let server.close finish.
 const upgraded = new Set<Duplex>();
@@ -2066,7 +2437,9 @@ const upgraded = new Set<Duplex>();
 const IDLE_EXIT_MS = PREVIEW ? Number(process.env.IDLE_EXIT_MS) || 0 : 0;
 if (IDLE_EXIT_MS > 0) {
   let asked = Date.now();
-  const touch = () => { asked = Date.now(); };
+  const touch = () => {
+    asked = Date.now();
+  };
   server.on('request', touch);
   server.on('upgrade', touch);
   every('dev copy idle exit', Math.min(60_000, Math.max(1000, IDLE_EXIT_MS / 4)), () => {
@@ -2109,21 +2482,33 @@ const listened = (port: number) => {
 // CITADEL_FRONT=0 is the off switch: the main thread listens itself, as before.
 if (process.env.CITADEL_FRONT !== '0') {
   front.on = true;
-  throughFront = listenThroughFront(server, {
-    ...(onSocket ? { fd: 3 } : { host: HOST, port: PORT }),
-    readers: 2,
-    appsDomain: APPS_DOMAIN,
-    ...(SETTLED_ROUTE ? { answerMs: Number(process.env.CITADEL_READER_ANSWER_MS) || undefined, stuckMs: Number(process.env.CITADEL_READER_STUCK_MS) || undefined } : {}),
-    reader: { testHooks: SETTLED_ROUTE, bootWait: SETTLED_ROUTE ? process.env.CITADEL_READER_BOOT_WAIT : undefined, dbPath: store.path, ...signInKeys, shared: writer?.shared ?? null, embedUrl: EMBED_URL, embedModel: EMBED_MODEL, memorySchemes: MEMORY_SCHEMES ?? null, dataDir: DATA_DIR },
-  }, {
-    listening: listened,
-    usage: (args) => (store.usage.used as (...a: unknown[]) => void)(...args),
-    setting: (key, value) => { if (/^plan:\d+:page$/.test(key)) store.setSetting(key, value); },
-  });
+  throughFront = listenThroughFront(
+    server,
+    {
+      ...(onSocket ? { fd: 3 } : { host: HOST, port: PORT }),
+      readers: 2,
+      appsDomain: APPS_DOMAIN,
+      ...(SETTLED_ROUTE ? { answerMs: Number(process.env.CITADEL_READER_ANSWER_MS) || undefined, stuckMs: Number(process.env.CITADEL_READER_STUCK_MS) || undefined } : {}),
+      reader: { testHooks: SETTLED_ROUTE, bootWait: SETTLED_ROUTE ? process.env.CITADEL_READER_BOOT_WAIT : undefined, dbPath: store.path, ...signInKeys, shared: writer?.shared ?? null, embedUrl: EMBED_URL, embedModel: EMBED_MODEL, memorySchemes: MEMORY_SCHEMES ?? null, dataDir: DATA_DIR },
+    },
+    {
+      listening: listened,
+      usage: (args) => (store.usage.used as (...a: unknown[]) => void)(...args),
+      setting: (key, value) => {
+        if (/^plan:\d+:page$/.test(key)) store.setSetting(key, value);
+      },
+    },
+  );
   if (STATICS) throughFront.statics(STATICS);
   // What the minions list, a minion's page and Status show from this thread's memory, for the readers (#1590).
   publishLive({
-    publish: throughFront.publish, store, runner, builds: (id) => builds.get(id), ownScheme: () => ownScheme()?.id ?? null, previews: !!previews, status,
+    publish: throughFront.publish,
+    store,
+    runner,
+    builds: (id) => builds.get(id),
+    ownScheme: () => ownScheme()?.id ?? null,
+    previews: !!previews,
+    status,
     ships: () => ({ queue: waits.queue, releases: releases.view(() => true) }),
     statusInputs: { bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', probing: !BOOT_CHECK && !PREVIEW, lastMs: () => answerProbe.lastMs, readerMs: () => answerProbe.readerMs, storms: () => memoryStorms.current(), easing: () => memoryEase.current(), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row) },
     ...(SETTLED_ROUTE && Number(process.env.CITADEL_READER_SWEEP_MS) ? { sweepMs: Number(process.env.CITADEL_READER_SWEEP_MS) } : {}),
@@ -2134,25 +2519,34 @@ if (process.env.CITADEL_FRONT !== '0') {
   server.listen(PORT, HOST, () => listened((server.address() as AddressInfo).port));
 }
 // Contraption deploys a restart or crash cut short start again (#847), once: cut short twice, they're left for a person.
-server.on('listening', () => void services.interrupted().then((cut) => {
-  for (const d of cut) {
-    const row = store.getContraption(d.name);
-    if (!row) continue;
-    if (d.resumed) {
-      console.log(`${d.name}'s deploy was cut short by a restart twice: not starting it again.`);
-      // It may have died with the app stopped: start the units back up (a no-op when it runs).
-      void services.startAfterCut(row).then((started) => started && console.log(`${d.name}: started its service after the deploy was cut short twice.`),
-        (err) => console.error(`Couldn't start ${d.name} after its deploy was cut short twice:`, err.message));
-      continue;
-    }
-    try {
-      startDeploy(app, row, d.by, null, d.uid, true, d.to);
-      console.log(`${d.name}'s deploy, cut short by the restart, starts again.`);
-    } catch (err) {
-      console.error(`Couldn't start ${d.name}'s deploy again:`, thrown(err).message);
-    }
-  }
-}, (err) => console.error('Reading deploys cut short failed:', err)));
+server.on(
+  'listening',
+  () =>
+    void services.interrupted().then(
+      (cut) => {
+        for (const d of cut) {
+          const row = store.getContraption(d.name);
+          if (!row) continue;
+          if (d.resumed) {
+            console.log(`${d.name}'s deploy was cut short by a restart twice: not starting it again.`);
+            // It may have died with the app stopped: start the units back up (a no-op when it runs).
+            void services.startAfterCut(row).then(
+              (started) => started && console.log(`${d.name}: started its service after the deploy was cut short twice.`),
+              (err) => console.error(`Couldn't start ${d.name} after its deploy was cut short twice:`, err.message),
+            );
+            continue;
+          }
+          try {
+            startDeploy(app, row, d.by, null, d.uid, true, d.to);
+            console.log(`${d.name}'s deploy, cut short by the restart, starts again.`);
+          } catch (err) {
+            console.error(`Couldn't start ${d.name}'s deploy again:`, thrown(err).message);
+          }
+        }
+      },
+      (err) => console.error('Reading deploys cut short failed:', err),
+    ),
+);
 
 // A restart: running turns carry on in their units, and the next server re-attaches. Stop taking
 // requests, end the ones that never finish (event streams, approval long-polls, websockets; their
@@ -2202,7 +2596,10 @@ function closeDown(why: string) {
   });
   setTimeout(() => {
     server.getConnections((_err, n) => {
-      const open = [...inFlight].map(([res, what]) => `${what}${res.headersSent ? ' (answering)' : ''}`).slice(0, 10).join(', ');
+      const open = [...inFlight]
+        .map(([res, what]) => `${what}${res.headersSent ? ' (answering)' : ''}`)
+        .slice(0, 10)
+        .join(', ');
       console.log(`${why}: exiting with ${n} connection(s) still open after ${SHUTDOWN_GRACE_MS / 1000} s${open ? `: ${open}` : ''}`);
       void exit();
     });
@@ -2231,38 +2628,49 @@ function passOn(req: IncomingMessage, res: ServerResponse) {
 }
 // A deploy's warm handover (#1170, src/handover.ts): the new code boots beside this server, which lets go once it is
 // ready. Its streams stay open until the new one listens, so pages reconnect straight to it, with no "Reconnecting…".
-process.on('SIGUSR2', () => handOver({
-  quiesce() {
-    // Stop accepting; the socket's queue holds what comes in until the new server listens. net's close, not http's: that
-    // one also closes "idle" connections, which takes in one just accepted whose request isn't read yet (ECONNRESET).
-    if (throughFront) throughFront.release(); // the front thread owns the socket; the main thread's own stays open for it
-    else NetServer.prototype.close.call(server);
-    try { markStop({ SERVICE_RESULT: 'handover' }, DATA_DIR); } catch (err) { console.error('Handover: stop mark failed:', err); } // the new server's boot reads it as this server's stop
-    passingOn = true;
-    agentListener?.close();
-    stopAll();
-    watchdog?.stop();
-    stopWork();
-    writer?.drain(5000, 'handover'); // the new server reads what this one last wrote
-  },
-  finish: () => closeDown('Handover'),
-}, { schema: SCHEMA_VERSION, onSocket, env: bootEnv }));
+process.on('SIGUSR2', () =>
+  handOver(
+    {
+      quiesce() {
+        // Stop accepting; the socket's queue holds what comes in until the new server listens. net's close, not http's: that
+        // one also closes "idle" connections, which takes in one just accepted whose request isn't read yet (ECONNRESET).
+        if (throughFront)
+          throughFront.release(); // the front thread owns the socket; the main thread's own stays open for it
+        else NetServer.prototype.close.call(server);
+        try {
+          markStop({ SERVICE_RESULT: 'handover' }, DATA_DIR);
+        } catch (err) {
+          console.error('Handover: stop mark failed:', err);
+        } // the new server's boot reads it as this server's stop
+        passingOn = true;
+        agentListener?.close();
+        stopAll();
+        watchdog?.stop();
+        stopWork();
+        writer?.drain(5000, 'handover'); // the new server reads what this one last wrote
+      },
+      finish: () => closeDown('Handover'),
+    },
+    { schema: SCHEMA_VERSION, onSocket, env: bootEnv },
+  ),
+);
 
 // A kit/- or tools/-only deploy reaches turns that start from now on; running turns keep the pin they started with (#1416).
 // One at a time, so two quick SIGHUPs don't both re-pin; a failure rejects, so the SIGHUP leaves liveCommit alone and deploy.sh restarts.
 let repinning: Promise<void> = Promise.resolve();
 function repinIfChanged(head: string | null): Promise<void> {
-  const next = repinning.catch(() => {}).then(async () => {
-    if (!head || head === pinnedAt) return;
-    const changed = await new Promise<boolean>((done) =>
-      !pinnedAt ? done(true) : execFile('git', ['diff', '--name-only', pinnedAt, head, '--', 'kit/', 'tools/'], { cwd: import.meta.dirname }, (err, out) => done(!!err || out.trim() !== '')));
-    if (changed) {
-      pinTurnFiles(DATA_DIR); // about 20 ms (measured 2026-11-22): the copies are small, the 7 s stalls were per-turn copies under load
-      void fillPinSpares();
-      console.log(`Re-pinned turn files on SIGHUP at ${head.slice(0, 9)}`);
-    }
-    pinnedAt = head;
-  });
+  const next = repinning
+    .catch(() => {})
+    .then(async () => {
+      if (!head || head === pinnedAt) return;
+      const changed = await new Promise<boolean>((done) => (!pinnedAt ? done(true) : execFile('git', ['diff', '--name-only', pinnedAt, head, '--', 'kit/', 'tools/'], { cwd: import.meta.dirname }, (err, out) => done(!!err || out.trim() !== ''))));
+      if (changed) {
+        pinTurnFiles(DATA_DIR); // about 20 ms (measured 2026-11-22): the copies are small, the 7 s stalls were per-turn copies under load
+        void fillPinSpares();
+        console.log(`Re-pinned turn files on SIGHUP at ${head.slice(0, 9)}`);
+      }
+      pinnedAt = head;
+    });
   return (repinning = next);
 }
 
@@ -2270,38 +2678,42 @@ function repinIfChanged(head: string | null): Promise<void> {
 process.on('SIGHUP', () => {
   const before = ASSET_VERSION;
   // Re-pin first (#1416): deploy.sh calls a SIGHUP live once health shows the new commit or front end.
-  repinIfChanged(checkoutHead()).then(loadAssets).then(
-    () => {
-      console.log(`Reloaded public/ on SIGHUP: front end ${before} → ${ASSET_VERSION}`);
-      if (ASSET_VERSION !== before) broadcast({ type: 'hello', version: ASSET_VERSION });
-      // tools/deploy.sh sends SIGHUP only for a change to public/, light paths, test/ or (re-pinned) kit/ and tools/, so the checkout's
-      // HEAD is now live; deploy.sh waits for /api/health to report it.
-      app.liveCommit = checkoutHead();
-      if (!BOOT_CHECK) liveOn(app.liveCommit);
-      if (!BOOT_CHECK && !PREVIEW && app.liveCommit) recordLive(store, app.liveCommit, Date.now());
-    },
-    (err) => console.error('Reloading on SIGHUP failed (re-pinning turn files or public/); still serving the old commit, so deploy.sh restarts:', err),
-  );
+  repinIfChanged(checkoutHead())
+    .then(loadAssets)
+    .then(
+      () => {
+        console.log(`Reloaded public/ on SIGHUP: front end ${before} → ${ASSET_VERSION}`);
+        if (ASSET_VERSION !== before) broadcast({ type: 'hello', version: ASSET_VERSION });
+        // tools/deploy.sh sends SIGHUP only for a change to public/, light paths, test/ or (re-pinned) kit/ and tools/, so the checkout's
+        // HEAD is now live; deploy.sh waits for /api/health to report it.
+        app.liveCommit = checkoutHead();
+        if (!BOOT_CHECK) liveOn(app.liveCommit);
+        if (!BOOT_CHECK && !PREVIEW && app.liveCommit) recordLive(store, app.liveCommit, Date.now());
+      },
+      (err) => console.error('Reloading on SIGHUP failed (re-pinning turn files or public/); still serving the old commit, so deploy.sh restarts:', err),
+    );
 });
 
 // The machines-only listener: every agent route (connect, send, info, upload) and the agents' scripts, nothing else.
 if (MACHINES_URL) {
   const agentApi = router(agentRoutes);
-  const agents = createServer((req, res) => writes.request.run({ seq: 0 }, async () => {
-    try {
-      const url = requestUrl(req);
-      if (agentApi.knows(url.pathname)) await agentApi(app, req, res, url, null);
-      else if ((url.pathname === '/machine-agent.mjs' || url.pathname === '/runner-agent.mjs') && req.method === 'GET') await serveStatic(req, res, url.pathname);
-      else if (SETUP_PATH.test(url.pathname) && req.method === 'GET') await serveRunnerFile(res, url.pathname);
-      else throw new HttpError(404, 'Not found');
-    } catch (err) {
-      const status = err instanceof HttpError ? err.status : 500;
-      if (status === 500) console.error(err);
-      // An HttpError's words were written for the caller, a 500 too; only an unexpected throw stays vague.
-    if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
-      else res.end();
-    }
-  }));
+  const agents = createServer((req, res) =>
+    writes.request.run({ seq: 0 }, async () => {
+      try {
+        const url = requestUrl(req);
+        if (agentApi.knows(url.pathname)) await agentApi(app, req, res, url, null);
+        else if ((url.pathname === '/machine-agent.mjs' || url.pathname === '/runner-agent.mjs') && req.method === 'GET') await serveStatic(req, res, url.pathname);
+        else if (SETUP_PATH.test(url.pathname) && req.method === 'GET') await serveRunnerFile(res, url.pathname);
+        else throw new HttpError(404, 'Not found');
+      } catch (err) {
+        const status = err instanceof HttpError ? err.status : 500;
+        if (status === 500) console.error(err);
+        // An HttpError's words were written for the caller, a 500 too; only an unexpected throw stays vague.
+        if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
+        else res.end();
+      }
+    }),
+  );
   const port = Number(MACHINES_URL.port || 80);
   // The tailnet address may not be up yet at boot; keep trying rather than keep the app from starting.
   agentListener = agents;

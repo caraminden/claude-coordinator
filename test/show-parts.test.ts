@@ -13,7 +13,10 @@ const PUBLIC = join(import.meta.dirname, '..', 'public');
 const TMP = mkdtempSync(join(tmpdir(), 'show-parts-'));
 mkdirSync(join(TMP, 'projects', '5', 'tickets', '1060'), { recursive: true });
 after(() => rmSync(TMP, { recursive: true, force: true }));
-const frontEnd = readdirSync(PUBLIC).filter((f) => /\.(js|html)$/.test(f)).map((f) => readFileSync(join(PUBLIC, f), 'utf8')).join('\n');
+const frontEnd = readdirSync(PUBLIC)
+  .filter((f) => /\.(js|html)$/.test(f))
+  .map((f) => readFileSync(join(PUBLIC, f), 'utf8'))
+  .join('\n');
 
 /** The part named on an element: `part` (data-part, part:, dataset.part) and the quoted name on the same line. */
 const named = (name: string) => new RegExp(`(?:\\bpart|data-part)\\b[^\\n]{0,80}?['"\`]${name}['"\`]`).test(frontEnd);
@@ -51,7 +54,10 @@ test('a link opens the page in the scheme, a minion part in the minion given', (
 });
 
 test('a question finds its part', () => {
-  assert.deepEqual(findParts('where is the fast mode?').map((p) => p.name), ['fast-mode']);
+  assert.deepEqual(
+    findParts('where is the fast mode?').map((p) => p.name),
+    ['fast-mode'],
+  );
   assert.equal(findParts('where can I change the model')[0].name, 'model-picker');
   assert.deepEqual(findParts('flux capacitor'), []);
   assert.deepEqual(findParts('fast mode dark mode'), [], 'a word no part has: no link rather than the wrong one');

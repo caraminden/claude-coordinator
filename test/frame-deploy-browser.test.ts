@@ -43,7 +43,10 @@ const APP = `<!doctype html><meta charset="utf-8"><body><textarea id="t"></texta
   tell('loads', loads);
 </script>`;
 
-const apps = [{ name: 'peek', title: 'Peek', icon: '/icon.svg', up: true }, { name: 'toc', title: 'ToC', icon: '/icon.svg', up: true }];
+const apps = [
+  { name: 'peek', title: 'Peek', icon: '/icon.svg', up: true },
+  { name: 'toc', title: 'ToC', icon: '/icon.svg', up: true },
+];
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#f93"/></svg>';
 const TYPES: Record<string, string> = { '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 let server: Server;
@@ -101,11 +104,11 @@ async function twoFrames(query = ''): Promise<Page> {
 
 const offer = `document.querySelector('#frames .frame-update:not([hidden])')`;
 
-test('a deployed app\'s frame out of sight reloads itself onto the new version, at its own address; another app\'s frame is left alone', { skip }, async () => {
+test("a deployed app's frame out of sight reloads itself onto the new version, at its own address; another app's frame is left alone", { skip }, async () => {
   const page = await twoFrames('?deep=1');
   await page.eval(`appDeployed('peek')`);
   await waitFor(page, "peek's frame to reload", 'echo.peek.loads === 2');
-  assert.equal(await page.eval('echo.peek.href'), appUrl('peek', '?deep=1'), 'it reloads where its page was, not at the app\'s start');
+  assert.equal(await page.eval('echo.peek.href'), appUrl('peek', '?deep=1'), "it reloads where its page was, not at the app's start");
   assert.equal(await page.eval('echo.toc.loads'), 1, "toc didn't deploy: its frame is untouched");
   assert.equal(await page.eval(`!!${offer}`), false, 'nothing is offered over toc, which is on screen and current');
 });

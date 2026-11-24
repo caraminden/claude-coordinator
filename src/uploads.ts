@@ -16,7 +16,12 @@ export function safeFileName(raw: string): string {
   if (!base) return 'file';
   const ext = extname(base).slice(0, 20);
   const chars = Array.from(base); // by code point, so a cut never splits a letter in two
-  return chars.length <= 150 ? base : chars.slice(0, 150 - Array.from(ext).length).join('').trimEnd() + ext;
+  return chars.length <= 150
+    ? base
+    : chars
+        .slice(0, 150 - Array.from(ext).length)
+        .join('')
+        .trimEnd() + ext;
 }
 
 /**
@@ -24,8 +29,12 @@ export function safeFileName(raw: string): string {
  * file name is, none hidden, "." or "..", at most 8 deep. The top level is allowed (an empty path).
  */
 export function uploadFolder(raw: string): string[] {
-  const parts = raw.replace(/\\/g, '/').split('/').map((p) => p.trim()).filter(Boolean);
-  if (parts.some((p) => p.startsWith('.'))) throw new HttpError(400, 'Folder names can\'t start with a dot');
+  const parts = raw
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.some((p) => p.startsWith('.'))) throw new HttpError(400, "Folder names can't start with a dot");
   if (parts.length > 8) throw new HttpError(400, 'At most 8 folders deep');
   return parts.map(safeFileName);
 }

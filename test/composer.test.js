@@ -11,23 +11,56 @@ class El {
     const classes = new Set();
     this.classList = { toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)), contains: (c) => classes.has(c) };
   }
-  set className(v) { for (const c of v.split(' ')) this.classList.toggle(c, true); }
-  set textContent(v) { this.text = v; }
-  get textContent() { return this.text ?? this.children.map((c) => (typeof c === 'string' ? c : c.textContent)).join(''); }
-  append(...kids) { this.children.push(...kids); }
-  setAttribute(k, v) { this.attrs[k] = v; }
-  toggleAttribute(k, on) { if (on) this.attrs[k] = ''; else delete this.attrs[k]; }
-  addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
+  set className(v) {
+    for (const c of v.split(' ')) this.classList.toggle(c, true);
+  }
+  set textContent(v) {
+    this.text = v;
+  }
+  get textContent() {
+    return this.text ?? this.children.map((c) => (typeof c === 'string' ? c : c.textContent)).join('');
+  }
+  append(...kids) {
+    this.children.push(...kids);
+  }
+  setAttribute(k, v) {
+    this.attrs[k] = v;
+  }
+  toggleAttribute(k, on) {
+    if (on) this.attrs[k] = '';
+    else delete this.attrs[k];
+  }
+  addEventListener(type, fn) {
+    (this.listeners[type] ??= []).push(fn);
+  }
   dispatch(type, props = {}) {
-    const e = { type, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...props };
+    const e = {
+      type,
+      defaultPrevented: false,
+      preventDefault() {
+        this.defaultPrevented = true;
+      },
+      ...props,
+    };
     for (const fn of this.listeners[type] ?? []) fn(e);
     return e;
   }
-  closest(sel) { return sel.includes('dialog') && this.inDialog ? {} : null; }
-  matches(sel) { return sel.split(', ').some((s) => s.replace(/\[.*\]/, '') === this.tag); }
-  getClientRects() { return this.isConnected ? [{}] : []; }
-  focus(opts) { this.focusedWith = opts; document.activeElement = this; }
-  requestSubmit() { this.dispatch('submit'); }
+  closest(sel) {
+    return sel.includes('dialog') && this.inDialog ? {} : null;
+  }
+  matches(sel) {
+    return sel.split(', ').some((s) => s.replace(/\[.*\]/, '') === this.tag);
+  }
+  getClientRects() {
+    return this.isConnected ? [{}] : [];
+  }
+  focus(opts) {
+    this.focusedWith = opts;
+    document.activeElement = this;
+  }
+  requestSubmit() {
+    this.dispatch('submit');
+  }
   /** A click, then what the browser does after it: a submit button submits its form. */
   click(form) {
     const e = this.dispatch('click');
@@ -38,11 +71,16 @@ class El {
 let narrow = false;
 let coarse = false;
 const store = new Map();
-const on = (target) => Object.assign(target, {
-  listeners: {},
-  addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); },
-  fire(type, e = {}) { for (const fn of this.listeners[type] ?? []) fn(e); },
-});
+const on = (target) =>
+  Object.assign(target, {
+    listeners: {},
+    addEventListener(type, fn) {
+      (this.listeners[type] ??= []).push(fn);
+    },
+    fire(type, e = {}) {
+      for (const fn of this.listeners[type] ?? []) fn(e);
+    },
+  });
 const body = new El('body');
 globalThis.document = on({ createElement: (tag) => new El(tag), scrollingElement: null, adoptedStyleSheets: [], body, activeElement: body });
 globalThis.window = on({});
@@ -117,7 +155,11 @@ test('a failed send puts the text back ahead of what was typed since, and says s
   assert.equal(notice.hidden, false);
   assert.match(notice.textContent, /offline/);
   // A send that throws outright counts as failed too; the next submit clears the notice first.
-  const thrown = mount({ send: () => { throw new Error('nope'); } });
+  const thrown = mount({
+    send: () => {
+      throw new Error('nope');
+    },
+  });
   thrown.type('again');
   thrown.key();
   await tick();
@@ -161,7 +203,13 @@ test('send runs inside the submit, so state set just before requestSubmit() is s
 test('busy with stop: Send shows as Stop, typing stays, Enter waits, and Stop never sends', () => {
   let stops = 0;
   const { box, sent, type, key } = mount();
-  const s = mountComposer(new El('div'), { send: (t) => sent.push(t), stop: () => { stops++; s.busy(false); } });
+  const s = mountComposer(new El('div'), {
+    send: (t) => sent.push(t),
+    stop: () => {
+      stops++;
+      s.busy(false);
+    },
+  });
   s.busy(true);
   assert.equal(s.sendButton.textContent, 'Stop');
   assert.equal('data-busy' in s.form.attrs, true);
@@ -184,7 +232,14 @@ test('busy with stop: Send shows as Stop, typing stays, Enter waits, and Stop ne
 test('whileBusy send: Stop shows beside Send while busy, Send and Enter keep sending, Stop never sends', async () => {
   let stops = 0;
   const sent = [];
-  const s = mountComposer(new El('div'), { send: (t) => sent.push(t), stop: () => { stops++; s.busy(false); }, whileBusy: 'send' });
+  const s = mountComposer(new El('div'), {
+    send: (t) => sent.push(t),
+    stop: () => {
+      stops++;
+      s.busy(false);
+    },
+    whileBusy: 'send',
+  });
   assert.deepEqual(s.row.children, [s.stopButton, s.sendButton], 'Stop sits before Send');
   assert.equal(s.stopButton.hidden, true, 'hidden until busy');
   s.busy(true);
@@ -254,7 +309,10 @@ test('autofocus: as the chat opens, from the link or button that opened it, but 
 });
 
 test('autofocus: never on a phone-wide or touch-first screen, nor with autofocus: false', () => {
-  for (const [n, c] of [[true, false], [false, true]]) {
+  for (const [n, c] of [
+    [true, false],
+    [false, true],
+  ]) {
     document.activeElement = body;
     [narrow, coarse] = [n, c];
     const { box } = mount();
@@ -268,7 +326,11 @@ test('autofocus: never on a phone-wide or touch-first screen, nor with autofocus
 
 test('autofocus: back in the window or after a dialog closes, only when nothing has the caret', async () => {
   const t = shown();
-  for (const [target, type, e] of [[window, 'focus'], [document, 'close', { target: { tagName: 'DIALOG' } }], [document, 'citadel-drawer-close']]) {
+  for (const [target, type, e] of [
+    [window, 'focus'],
+    [document, 'close', { target: { tagName: 'DIALOG' } }],
+    [document, 'citadel-drawer-close'],
+  ]) {
     document.activeElement = body;
     target.fire(type, e);
     await tick();

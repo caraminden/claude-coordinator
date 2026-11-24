@@ -10,6 +10,9 @@ export function pastedFiles(data) {
   const files = [...(data?.files ?? [])];
   if (!files.length) return files;
   const text = data.getData('text/plain').trim();
-  const htmlText = data.getData('text/html').replace(/<[^>]*>/g, '').trim();
+  const htmlText = data
+    .getData('text/html')
+    .replace(/<[^>]*>/g, '')
+    .trim();
   return text && htmlText ? [] : files;
 }

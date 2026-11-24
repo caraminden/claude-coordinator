@@ -56,7 +56,10 @@ export function startUpload(endpoint: string, file: File, options?: UploadOption
 export function formatBytes(bytes: number): string;
 
 /** A dropped file with its path relative to what was dropped ("Japan 2026/day 1/IMG_1.jpg"). */
-export interface DroppedFile { file: File; path: string }
+export interface DroppedFile {
+  file: File;
+  path: string;
+}
 
 /**
  * The files a drop carries, dropped folders walked. Hidden files and folders (a dot first) come back in `skipped`, not

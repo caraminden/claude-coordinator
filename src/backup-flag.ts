@@ -24,8 +24,14 @@ export async function hasDatabase(dir: string, depth = 2): Promise<boolean> {
     if (depth === 2 && e.name === 'backups') continue;
     const p = join(dir, e.name);
     try {
-      if (e.isDirectory()) { if (depth > 1 && await hasDatabase(p, depth - 1)) return true; continue; }
-      if (DB_FILE.test(e.name)) { const st = await stat(p); if (st.isFile() && st.size > 0) return true; }
+      if (e.isDirectory()) {
+        if (depth > 1 && (await hasDatabase(p, depth - 1))) return true;
+        continue;
+      }
+      if (DB_FILE.test(e.name)) {
+        const st = await stat(p);
+        if (st.isFile() && st.size > 0) return true;
+      }
     } catch {} // gone between the listing and the stat
   }
   return false;
@@ -40,7 +46,11 @@ export function backupGaps(hasDb: boolean, manifest: { timers: Record<string, un
   return gaps;
 }
 
-export interface FlagApp { name: string; title: string; home_scheme: number | null }
+export interface FlagApp {
+  name: string;
+  title: string;
+  home_scheme: number | null;
+}
 export interface FlagDeps<A extends FlagApp = FlagApp> {
   apps(): A[];
   dataDir(app: A): string;
@@ -70,12 +80,18 @@ export async function flagUnbacked<A extends FlagApp>(d: FlagDeps<A>, opts: { on
     } catch {
       continue; // no readable manifest: not this check's to say
     }
-    if (!gaps.length) { delete state[app.name]; continue; } // fixed: a later regression flags again
+    if (!gaps.length) {
+      delete state[app.name];
+      continue;
+    } // fixed: a later regression flags again
     const sig = gaps.join('|');
     if (state[app.name] === sig || app.home_scheme == null) continue;
     const tm = d.taskmaster(app.home_scheme);
     if (tm == null) continue; // tried again next round
-    d.mail(tm, `${app.title} (${app.name}) keeps a database but has ${gaps.join(' and ')} in its citadel-app.json. Its data has no nightly backup or no disk-space warning until the app adopts the convention: the template's tools/backup.ts, a \`timers.backup\` entry and \`disk_warn_gb\` (kit skill contraption-ui, new-app template; Citadel #828). Flagged once; it flags again only if the gaps change.`);
+    d.mail(
+      tm,
+      `${app.title} (${app.name}) keeps a database but has ${gaps.join(' and ')} in its citadel-app.json. Its data has no nightly backup or no disk-space warning until the app adopts the convention: the template's tools/backup.ts, a \`timers.backup\` entry and \`disk_warn_gb\` (kit skill contraption-ui, new-app template; Citadel #828). Flagged once; it flags again only if the gaps change.`,
+    );
     state[app.name] = sig;
     flagged.push({ app: app.name, gaps });
   }

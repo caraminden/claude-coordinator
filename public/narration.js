@@ -21,11 +21,7 @@ export function isNarration(text) {
 
 // Tools that only keep the minion's own records (its status, properties, task list, cards), so
 // words followed by nothing else weren't narrating any work.
-const BOOKKEEPING = new Set([
-  'mcp__thread__set_thread_status', 'mcp__thread__set_properties', 'mcp__thread__settle_question',
-  'mcp__thread__strike_text', 'mcp__thread__close_self', 'mcp__thread__plan',
-  'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'ToolSearch',
-]);
+const BOOKKEEPING = new Set(['mcp__thread__set_thread_status', 'mcp__thread__set_properties', 'mcp__thread__settle_question', 'mcp__thread__strike_text', 'mcp__thread__close_self', 'mcp__thread__plan', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'ToolSearch']);
 
 /** Whether a tool call is bookkeeping rather than work, by its name. */
 export function isBookkeeping(name) {

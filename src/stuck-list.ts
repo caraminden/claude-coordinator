@@ -27,17 +27,21 @@ type Wait = { kind?: string; state?: string };
 /** Something will move it without a person: a turn running or queued, a wait in the outbox, a ship or land under way, a usage-limit resume, held mail on a timer. */
 function coming(t: Ticket, v: View): boolean {
   const waits = ((v.outbox_waits ?? []) as Wait[]).filter((w) => w.state === 'waiting' || w.state === 'sending' || (w.state === 'held' && w.kind !== 'chain'));
-  return t.status === 'running' || v.queued > 0 || waits.length > 0 || !!v.wakes_on || !!v.wait || !!v.server_work || v.limit_resume_at != null
-    || !!v.held_mail?.until || (v.approvals?.length ?? 0) > 0 || (!!v.ship && ['build', 'main', 'deploying'].includes(v.ship.stage));
+  return t.status === 'running' || v.queued > 0 || waits.length > 0 || !!v.wakes_on || !!v.wait || !!v.server_work || v.limit_resume_at != null || !!v.held_mail?.until || (v.approvals?.length ?? 0) > 0 || (!!v.ship && ['build', 'main', 'deploying'].includes(v.ship.stage));
 }
 
-interface Item { key: string; rank: number; waited: number; line: string }
+interface Item {
+  key: string;
+  rank: number;
+  waited: number;
+  line: string;
+}
 
 /** The minions `taskmaster` manages (its scheme's, reporting to it) that are stuck, oldest first within each kind. */
 export function stuckItems(store: Store, runner: Pick<Runner, 'view'>, taskmaster: Ticket, now = Date.now()): Item[] {
   const items: Item[] = [];
   // Its own cards too: a by-hand step put to a person on a card sits in the Taskmaster's chat.
-  const own = taskmaster.status === 'closed' ? [] : runner.view(taskmaster).open_cards ?? [];
+  const own = taskmaster.status === 'closed' ? [] : (runner.view(taskmaster).open_cards ?? []);
   const ownAt = new Map(store.openCardsOf(taskmaster.id).map((e) => [cardHref(taskmaster, e.id), e.created_at]));
   for (const c of own) {
     const waited = now - (ownAt.get(c.href) ?? now);

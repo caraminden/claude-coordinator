@@ -13,43 +13,52 @@
 const row = (kind, label, icon, blurb, module, page, extra = {}) => ({ kind, label, icon, blurb, module, page, ...extra });
 
 export const ORDERS_GROUPS = [
-  ['What minions read', 'running', [
-    row('instructions', 'Instructions', 'doc', 'What every minion reads', 'settings.js', 'instructionsEditor'),
-    row('approvals', 'Minion rules', 'shield', 'Approvals, plugins, list groups and CI', 'settings.js', 'approvalsEditor'),
-    row('skills', 'Skills', 'spark', 'What minions know how to do, and when', 'skills.js', 'skillsPage', { item: true }),
-    row('memory', 'Memory', 'doc', 'What the Taskmaster and minions remember', 'memory.js', 'memoryPage', { item: true }),
-    row('reviews', 'Reviewers and critics', 'check', 'What judges work: critics, reviewers, audits', 'reviews.js', 'reviewsPage', { item: true }),
-    row('decisions', 'Decisions', 'check', "Who decided what, and what's reversed", 'decisions.js', 'decisionsPage', { item: true }),
-    row('ideas', 'Ideas', 'spark', 'Every idea shown, its pick, handoff and minion', 'ideas.js', 'ideasPage')]],
-  ['How work runs', 'teal', [
-    row('properties', 'Properties', 'tag', 'Type, stage and your own keys', 'properties.js', 'propertiesPage'),
-    row('schedules', 'Schedules', 'rows', 'Minions that start on a timer', 'schedules.js', 'schedulesPage', { own: true })]],
+  [
+    'What minions read',
+    'running',
+    [
+      row('instructions', 'Instructions', 'doc', 'What every minion reads', 'settings.js', 'instructionsEditor'),
+      row('approvals', 'Minion rules', 'shield', 'Approvals, plugins, list groups and CI', 'settings.js', 'approvalsEditor'),
+      row('skills', 'Skills', 'spark', 'What minions know how to do, and when', 'skills.js', 'skillsPage', { item: true }),
+      row('memory', 'Memory', 'doc', 'What the Taskmaster and minions remember', 'memory.js', 'memoryPage', { item: true }),
+      row('reviews', 'Reviewers and critics', 'check', 'What judges work: critics, reviewers, audits', 'reviews.js', 'reviewsPage', { item: true }),
+      row('decisions', 'Decisions', 'check', "Who decided what, and what's reversed", 'decisions.js', 'decisionsPage', { item: true }),
+      row('ideas', 'Ideas', 'spark', 'Every idea shown, its pick, handoff and minion', 'ideas.js', 'ideasPage'),
+    ],
+  ],
+  ['How work runs', 'teal', [row('properties', 'Properties', 'tag', 'Type, stage and your own keys', 'properties.js', 'propertiesPage'), row('schedules', 'Schedules', 'rows', 'Minions that start on a timer', 'schedules.js', 'schedulesPage', { own: true })]],
 ];
 
 export const SETTINGS_GROUPS = [
-  ['Scheme', 'running', [
-    row('members', 'Members', 'users', 'Who works in this scheme', 'people.js', 'membersPage'),
-    row('orders', 'Orders', 'rows', 'Instructions, rules, skills, memory, properties: the tab beside Minions', 'settings.js', 'settingsHome', { own: true })]],
-  ['You', 'held', [
-    row('my-instructions', 'My instructions', 'pen', 'Yours, in every scheme', 'settings.js', 'myInstructionsEditor'),
-    row('account', 'Your account', 'user', 'Password, Claude and GitHub logins', 'people.js', 'accountPage'),
-    row('machines', 'Machines', 'monitor', 'Computers you lend to minions', 'settings-machines.js', 'machinesPage'),
-    row('notifications', 'Notifications', 'bell', 'Push, and what pings you', 'settings.js', 'notificationsPage'),
-    row('usage', 'Usage', 'chart', 'Claude and Codex spend', 'where.js', 'usagePage'),
-    row('help', 'How Citadel works', 'doc', 'Schemes, minions, cards and shipping in two minutes', 'help.js', 'helpPage')]],
-  ['Admin', 'teal', [
-    row('app-instructions', 'Citadel-wide', 'globe', 'Rules every scheme follows', 'settings.js', 'appInstructionsEditor', { crumb: 'Citadel-wide instructions' }),
-    row('people', 'People', 'people', 'Who can sign in', 'people.js', 'peoplePage'),
-    row('unused', 'Unused', 'chart', 'What nobody has used in 30 days', 'unused.js', 'unusedPage'),
-    row('contraptions', 'Contraptions', 'box', 'Apps that run inside Citadel', 'contraptions.js', 'contraptionsPage'),
-    row('units', 'Units', 'shield', 'Which deploy/ units are installed on this host', 'units.js', 'unitsPage')], true],
+  ['Scheme', 'running', [row('members', 'Members', 'users', 'Who works in this scheme', 'people.js', 'membersPage'), row('orders', 'Orders', 'rows', 'Instructions, rules, skills, memory, properties: the tab beside Minions', 'settings.js', 'settingsHome', { own: true })]],
+  [
+    'You',
+    'held',
+    [
+      row('my-instructions', 'My instructions', 'pen', 'Yours, in every scheme', 'settings.js', 'myInstructionsEditor'),
+      row('account', 'Your account', 'user', 'Password, Claude and GitHub logins', 'people.js', 'accountPage'),
+      row('machines', 'Machines', 'monitor', 'Computers you lend to minions', 'settings-machines.js', 'machinesPage'),
+      row('notifications', 'Notifications', 'bell', 'Push, and what pings you', 'settings.js', 'notificationsPage'),
+      row('usage', 'Usage', 'chart', 'Claude and Codex spend', 'where.js', 'usagePage'),
+      row('help', 'How Citadel works', 'doc', 'Schemes, minions, cards and shipping in two minutes', 'help.js', 'helpPage'),
+    ],
+  ],
+  [
+    'Admin',
+    'teal',
+    [
+      row('app-instructions', 'Citadel-wide', 'globe', 'Rules every scheme follows', 'settings.js', 'appInstructionsEditor', { crumb: 'Citadel-wide instructions' }),
+      row('people', 'People', 'people', 'Who can sign in', 'people.js', 'peoplePage'),
+      row('unused', 'Unused', 'chart', 'What nobody has used in 30 days', 'unused.js', 'unusedPage'),
+      row('contraptions', 'Contraptions', 'box', 'Apps that run inside Citadel', 'contraptions.js', 'contraptionsPage'),
+      row('units', 'Units', 'shield', 'Which deploy/ units are installed on this host', 'units.js', 'unitsPage'),
+    ],
+    true,
+  ],
 ];
 
 /** Every page row with its group's kind of home: { ...row, orders, admin }. */
-export const PAGES = [
-  ...ORDERS_GROUPS.flatMap(([, , rows, admin]) => rows.map((r) => ({ ...r, orders: true, admin: !!admin }))),
-  ...SETTINGS_GROUPS.flatMap(([, , rows, admin]) => rows.map((r) => ({ ...r, orders: false, admin: !!admin }))),
-];
+export const PAGES = [...ORDERS_GROUPS.flatMap(([, , rows, admin]) => rows.map((r) => ({ ...r, orders: true, admin: !!admin }))), ...SETTINGS_GROUPS.flatMap(([, , rows, admin]) => rows.map((r) => ({ ...r, orders: false, admin: !!admin })))];
 const BY_KIND = new Map(PAGES.map((p) => [p.kind, p]));
 
 /** The row for a URL kind, or undefined for a page that isn't a Settings or Orders page. */

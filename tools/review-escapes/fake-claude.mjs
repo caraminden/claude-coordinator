@@ -19,7 +19,13 @@ const args = process.argv.slice(2);
 const arg = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
 const env = { ticket: process.env.COORDINATOR_TICKET ?? null, number: process.env.COORDINATOR_NUMBER ?? null, role: process.env.COORDINATOR_ROLE ?? null };
 // boot.mjs --clock's offset: the server's clock, which reads a reset hour or a timestamp the fake writes.
-const OFFSET = (() => { try { return Number(readFileSync(join(DIR, 'clock-offset'), 'utf8')) || 0; } catch { return 0; } })();
+const OFFSET = (() => {
+  try {
+    return Number(readFileSync(join(DIR, 'clock-offset'), 'utf8')) || 0;
+  } catch {
+    return 0;
+  }
+})();
 const now = () => new Date(Date.now() + OFFSET);
 const out = (ev) => process.stdout.write(JSON.stringify(ev) + '\n');
 
@@ -40,16 +46,27 @@ function popQueue() {
   const lock = join(DIR, 'turns.lock');
   mkdirSync(DIR, { recursive: true });
   for (let i = 0; ; i++) {
-    try { mkdirSync(lock); break; } catch { if (i > 200) break; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25); }
+    try {
+      mkdirSync(lock);
+      break;
+    } catch {
+      if (i > 200) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
   }
   try {
     if (!existsSync(file)) return null;
-    const lines = readFileSync(file, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+    const lines = readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
     const spec = take(lines, env);
     if (spec) writeFileSync(file, lines.map((l) => JSON.stringify(l) + '\n').join(''));
     return spec;
   } finally {
-    try { rmdirSync(lock); } catch {}
+    try {
+      rmdirSync(lock);
+    } catch {}
   }
 }
 
@@ -62,9 +79,18 @@ async function callTool(tool) {
   if (!s || (s.type && s.type !== 'stdio')) throw new Error(`no stdio MCP server ${name} in --mcp-config`);
   const proc = spawn(s.command, s.args ?? [], { env: { ...process.env, ...(s.env ?? {}) }, stdio: ['pipe', 'pipe', 'inherit'] });
   const waiting = new Map();
-  createInterface({ input: proc.stdout }).on('line', (l) => { try { const m = JSON.parse(l); waiting.get(m.id)?.(m); } catch {} });
+  createInterface({ input: proc.stdout }).on('line', (l) => {
+    try {
+      const m = JSON.parse(l);
+      waiting.get(m.id)?.(m);
+    } catch {}
+  });
   let id = 0;
-  const rpc = (method, params) => new Promise((r) => { waiting.set(++id, r); proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
+  const rpc = (method, params) =>
+    new Promise((r) => {
+      waiting.set(++id, r);
+      proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    });
   try {
     await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake-claude', version: '1' } });
     proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
@@ -76,7 +102,7 @@ async function callTool(tool) {
 }
 
 async function turn(line) {
-  const blocks = line ? JSON.parse(line).message?.content ?? [] : [];
+  const blocks = line ? (JSON.parse(line).message?.content ?? []) : [];
   const prompt = Array.isArray(blocks) ? blocks.map((b) => b.text ?? '').join('\n') : String(blocks);
   const spec = popQueue() ?? {};
   const session = arg('--resume') ?? randomUUID();
@@ -89,7 +115,11 @@ async function turn(line) {
     const use = `toolu_fake_${i}`;
     out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: use, name: `mcp__${tool.server ?? env.role ?? 'thread'}__${tool.name}`, input: tool.arguments ?? {} }] }, session_id: session });
     let result;
-    try { result = await callTool(tool); } catch (e) { result = { isError: true, content: [{ type: 'text', text: String(e.message) }] }; }
+    try {
+      result = await callTool(tool);
+    } catch (e) {
+      result = { isError: true, content: [{ type: 'text', text: String(e.message) }] };
+    }
     log.tools.push({ name: tool.name, result });
     out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: use, content: result?.content ?? [], is_error: !!result?.isError }] }, session_id: session });
   }
@@ -113,10 +143,18 @@ async function turn(line) {
 }
 
 if (import.meta.main ?? process.argv[1] === new URL(import.meta.url).pathname) {
-  if (args.includes('--version')) { console.log('2.1.0 (Claude Code)'); process.exit(0); }
+  if (args.includes('--version')) {
+    console.log('2.1.0 (Claude Code)');
+    process.exit(0);
+  }
   let started = false;
   const rl = createInterface({ input: process.stdin });
-  rl.once('line', (l) => { started = true; turn(l); });
+  rl.once('line', (l) => {
+    started = true;
+    turn(l);
+  });
   // A prompt given with -p and no stdin.
-  rl.once('close', () => { if (!started) turn(JSON.stringify({ message: { content: [{ type: 'text', text: /^-/.test(args[args.indexOf('-p') + 1] ?? '-') ? '' : args[args.indexOf('-p') + 1] }] } })); });
+  rl.once('close', () => {
+    if (!started) turn(JSON.stringify({ message: { content: [{ type: 'text', text: /^-/.test(args[args.indexOf('-p') + 1] ?? '-') ? '' : args[args.indexOf('-p') + 1] }] } }));
+  });
 }

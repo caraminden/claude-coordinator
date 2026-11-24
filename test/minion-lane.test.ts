@@ -72,7 +72,12 @@ function gate() {
 }
 
 function makeRunner() {
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.pollMs = 10;
   r.resumeGapMs = 10;
   r.limitDelayMs = 0;
@@ -144,11 +149,16 @@ test('a step that runs another step on its idle lane at once keeps the lane busy
   const inner = gate();
   const log: string[] = [];
   // As the outbox does: its step on the minion's lane sends a message, and the send starts the turn's step at once.
-  await lanes.run(1, 'outer', () => void lanes.run(1, 'inner', async () => {
-    log.push('inner start');
-    await inner.wait;
-    log.push('inner end');
-  }));
+  await lanes.run(
+    1,
+    'outer',
+    () =>
+      void lanes.run(1, 'inner', async () => {
+        log.push('inner start');
+        await inner.wait;
+        log.push('inner end');
+      }),
+  );
   assert.deepEqual(log, ['inner start']);
   assert.ok(lanes.busy(1), 'the inner step still holds the lane after the outer one ends');
   assert.deepEqual(idle, [], 'the lane is not idle while the inner step runs');
@@ -187,7 +197,7 @@ test("a turn started from inside another lane step (the outbox's) holds the lane
   assert.match(second, /wake two/);
 });
 
-test("a minion whose turn still runs unfollowed (its wrapper is alive in its folder) starts no second turn until that one ends (#1464)", async () => {
+test('a minion whose turn still runs unfollowed (its wrapper is alive in its folder) starts no second turn until that one ends (#1464)', async () => {
   reset();
   const r = makeRunner();
   r.strayPollMs = 20;

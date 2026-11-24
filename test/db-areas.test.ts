@@ -251,13 +251,12 @@ function classMethods(): string[] {
   return names.filter((n) => n !== 'constructor');
 }
 
-test('no new query method lands in src/db.ts itself: it goes in its area\'s file under src/db/', () => {
+test("no new query method lands in src/db.ts itself: it goes in its area's file under src/db/", () => {
   const allowed = new Set(`${STAYS} ${NOT_MOVED_YET}`.split(/\s+/).filter(Boolean));
   const found = classMethods();
-  assert.ok(found.includes('getSetting') && found.includes('attachState'), 'the scan finds the class\'s methods');
+  assert.ok(found.includes('getSetting') && found.includes('attachState'), "the scan finds the class's methods");
   const added = found.filter((n) => !allowed.has(n));
-  assert.deepEqual(added, [], `new methods in src/db.ts's Store class: ${added.join(', ')}. Put a query in its area's file under src/db/ ` +
-    '(an object of methods taking `this: Store`, attached at the bottom of src/db.ts); start a new area file if none fits.');
+  assert.deepEqual(added, [], `new methods in src/db.ts's Store class: ${added.join(', ')}. Put a query in its area's file under src/db/ ` + '(an object of methods taking `this: Store`, attached at the bottom of src/db.ts); start a new area file if none fits.');
   const gone = [...allowed].filter((n) => !found.includes(n));
   assert.deepEqual(gone, [], 'moved out of src/db.ts or renamed: take them off the lists in this test');
 });

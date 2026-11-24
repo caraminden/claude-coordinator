@@ -75,13 +75,23 @@ const T = { plan: 475, cardsForJosh: 441, images: 464, ultra: 476, long: 466, ot
 export const SCREENS: Screen[] = [
   { name: 'login', anon: true, hash: '', about: 'The sign-in page: login and password form.' },
   { name: 'invite-bad', anon: true, hash: '#/invite/not-a-real-link', about: 'An invite link that is no longer valid: the set-a-password form says so.' },
-  { name: 'taskmaster', hash: `#/p/${S}`, about: 'A scheme\'s front page: the Taskmaster chat in the middle, the overview panel on the left, the minions list on the right (phone: the chat, with the panels as drawers).' },
+  { name: 'taskmaster', hash: `#/p/${S}`, about: "A scheme's front page: the Taskmaster chat in the middle, the overview panel on the left, the minions list on the right (phone: the chat, with the panels as drawers)." },
   { name: 'minions-list', hash: `#/p/${S}`, widths: [390], before: `await drawer('right');`, about: 'Phone: the minions list drawer, grouped by build and type, with the new-minion box, search and filters.' },
   { name: 'overview-drawer', hash: `#/p/${S}`, widths: [390], before: `await drawer('left');`, about: 'Phone: the overview drawer (shelf of artifacts, settings link and the like).' },
-  { name: 'minions-search', hash: `#/p/${S}`, before: `if (phone) await drawer('right'); const s = await until('.thread-search input, input.thread-search, .thread-search'); const i = s.matches('input') ? s : s.querySelector('input'); i.value = 'usage'; i.dispatchEvent(new Event('input', { bubbles: true })); await sleep(400);`, about: 'The minions list filtered by a search for "usage".' },
-  { name: 'minions-empty-search', hash: `#/p/${S}`, before: `if (phone) await drawer('right'); const s = await until('.thread-search input, input.thread-search, .thread-search'); const i = s.matches('input') ? s : s.querySelector('input'); i.value = 'zzqxnothing'; i.dispatchEvent(new Event('input', { bubbles: true })); await sleep(400);`, about: 'The minions list with a search that matches nothing: the empty state.' },
-  { name: 'prop-filter', hash: `#/p/${S}`, before: `if (phone) await drawer('right'); const f = await until('.prop-filter select, .prop-filter button'); f.click(); f.focus(); await sleep(300);`, about: 'The minions list\'s property filter, opened.' },
-  { name: 'schedules', hash: `#/p/${S}`, before: `if (phone) await drawer('right'); (await until('.schedules-btn')).click(); await sleep(500);`, about: 'The scheme\'s scheduled minions, shown in the minions panel in place of the list.' },
+  {
+    name: 'minions-search',
+    hash: `#/p/${S}`,
+    before: `if (phone) await drawer('right'); const s = await until('.thread-search input, input.thread-search, .thread-search'); const i = s.matches('input') ? s : s.querySelector('input'); i.value = 'usage'; i.dispatchEvent(new Event('input', { bubbles: true })); await sleep(400);`,
+    about: 'The minions list filtered by a search for "usage".',
+  },
+  {
+    name: 'minions-empty-search',
+    hash: `#/p/${S}`,
+    before: `if (phone) await drawer('right'); const s = await until('.thread-search input, input.thread-search, .thread-search'); const i = s.matches('input') ? s : s.querySelector('input'); i.value = 'zzqxnothing'; i.dispatchEvent(new Event('input', { bubbles: true })); await sleep(400);`,
+    about: 'The minions list with a search that matches nothing: the empty state.',
+  },
+  { name: 'prop-filter', hash: `#/p/${S}`, before: `if (phone) await drawer('right'); const f = await until('.prop-filter select, .prop-filter button'); f.click(); f.focus(); await sleep(300);`, about: "The minions list's property filter, opened." },
+  { name: 'schedules', hash: `#/p/${S}`, before: `if (phone) await drawer('right'); (await until('.schedules-btn')).click(); await sleep(500);`, about: "The scheme's scheduled minions, shown in the minions panel in place of the list." },
   { name: 'inbox-open', hash: `#/p/${S}`, before: `if (phone) await drawer('right'); const t = await until('.inbox-toggle'); t.click(); await sleep(400);`, about: 'The Needs-you inbox strip at the top of the minions list, opened: everything waiting on a person.' },
   { name: 'new-scheme', hash: `#/p/${S}`, before: `if (phone) await drawer('left'); (await until('#schemes-shelf .add')).click(); await sleep(400);`, about: 'The New scheme dialog.' },
   { name: 'chat-plan-open', hash: `#/p/${S}/t/${T.plan}`, before: `await until('.pcard'); await sleep(800); const c = $('.to-card:not([hidden])'); if (c) { c.click(); await sleep(800); } else await scrollChatTo('.pcard');`, about: 'A minion chat with a plan card waiting for Approve or Revise.' },
@@ -91,15 +101,20 @@ export const SCREENS: Screen[] = [
   { name: 'chat-table', hash: `#/p/${S}`, before: `await scrollChatTo('.msg table, table');`, about: 'The Taskmaster chat scrolled to a long markdown table in a reply.' },
   { name: 'chat-failed', hash: '#/p/1/t/111', before: `await scrollChatTo('.note.error');`, about: 'A minion chat (another scheme) where a turn failed with an API error.' },
   { name: 'chat-ultrareview', hash: `#/p/${S}/t/${T.ultra}`, about: 'A sealed minion waiting on ultra review runs.' },
-  { name: 'composer-typed', hash: `#/p/${S}/t/${T.plan}`, before: `const b = await until('.composer textarea'); b.focus(); b.value = 'A longer message that wraps onto a few lines so we can see how the composer grows.\\nSecond line\\nThird line'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(300);`, about: 'The composer under a chat, focused with a three-line message typed.' },
-  { name: 'ultra-review-dialog', hash: `#/p/${S}/t/${T.plan}`, before: `const b = await until(() => [...document.querySelectorAll('button')].find((x) => /^Ultra/.test(x.textContent.trim()))); b.click(); await sleep(500);`, about: 'The Ultra review dialog, opened from a minion chat\'s head.' },
-  { name: 'artifacts', hash: `#/p/${S}/artifacts`, about: 'The scheme\'s artifacts browser: files minions linked, with search and filters.' },
-  { name: 'shared-files', hash: `#/p/${S}/shared`, about: 'The scheme\'s shared files list.' },
+  {
+    name: 'composer-typed',
+    hash: `#/p/${S}/t/${T.plan}`,
+    before: `const b = await until('.composer textarea'); b.focus(); b.value = 'A longer message that wraps onto a few lines so we can see how the composer grows.\\nSecond line\\nThird line'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(300);`,
+    about: 'The composer under a chat, focused with a three-line message typed.',
+  },
+  { name: 'ultra-review-dialog', hash: `#/p/${S}/t/${T.plan}`, before: `const b = await until(() => [...document.querySelectorAll('button')].find((x) => /^Ultra/.test(x.textContent.trim()))); b.click(); await sleep(500);`, about: "The Ultra review dialog, opened from a minion chat's head." },
+  { name: 'artifacts', hash: `#/p/${S}/artifacts`, about: "The scheme's artifacts browser: files minions linked, with search and filters." },
+  { name: 'shared-files', hash: `#/p/${S}/shared`, about: "The scheme's shared files list." },
   { name: 'shared-handoff', hash: `#/s/${S}/handoffs%2Fburst-ui-flow-sweep.md`, about: 'A shared Markdown handoff opened in the file viewer, with its Start-as-minion button.' },
-  { name: 'settings-instructions', hash: `#/p/${S}/instructions`, about: 'Orders → the scheme\'s instructions editor.' },
+  { name: 'settings-instructions', hash: `#/p/${S}/instructions`, about: "Orders → the scheme's instructions editor." },
   { name: 'settings-app-instructions', hash: `#/p/${S}/app-instructions`, about: 'Settings → Citadel-wide instructions editor.' },
   { name: 'settings-approvals', hash: `#/p/${S}/approvals`, about: 'Orders → Minion rules: what the scheme asks a person before doing, plugins, list groups and CI.' },
-  { name: 'settings-properties', hash: `#/p/${S}/properties`, about: 'Orders → Properties: the scheme\'s property registry.' },
+  { name: 'settings-properties', hash: `#/p/${S}/properties`, about: "Orders → Properties: the scheme's property registry." },
   { name: 'settings-members', hash: `#/p/${S}/members`, about: 'Settings → Members of the scheme.' },
   { name: 'settings-people', hash: `#/p/${S}/people`, about: 'Settings → People (admins): everyone, invites and resets.' },
   { name: 'settings-contraptions', hash: `#/p/${S}/contraptions`, about: 'Settings → Contraptions (admins): personal apps, who each is enabled for.' },
@@ -108,11 +123,42 @@ export const SCREENS: Screen[] = [
   { name: 'not-found', hash: `#/p/${S}/t/999999`, about: 'A link to a minion that does not exist: the error state.' },
   { name: 'empty-scheme', hash: '#/p/__EMPTY__', before: `if (phone) await drawer('right');`, about: 'A brand-new scheme with no minions yet: the empty states of the chat and the minions list.' },
   // Flows: a click with the network slowed, shot after (rule 23: the result shows at once).
-  { name: 'flow-send', flow: true, widths: [1440], hash: `#/p/${S}/t/${T.other}`, before: `const b = await until('.composer textarea'); b.focus(); b.value = 'Looks good, build it.'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(200);`, click: '.composer button[type=submit], .composer .send', about: 'Flow: sending a message in a minion chat. Shot right after the click with a slow network.' },
-  { name: 'flow-send-phone', flow: true, widths: [390], hash: `#/p/${S}/t/${T.ultra}`, before: `const b = await until('.composer textarea'); b.focus(); b.value = 'Looks good, build it.'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(200);`, click: '.composer button[type=submit], .composer .send', about: 'Flow (phone): sending a message in a minion chat. Shot right after the click with a slow network.' },
-  { name: 'flow-answer-card', flow: true, hash: `#/p/${S}/t/${T.cardsForJosh}`, before: `await scrollChatTo('.qcard, .question-card');`, click: '.qcard button.opt, .qcard .options button, .question-card button', about: 'Flow: answering a question card by tapping an option. Shot right after the click with a slow network.' },
+  {
+    name: 'flow-send',
+    flow: true,
+    widths: [1440],
+    hash: `#/p/${S}/t/${T.other}`,
+    before: `const b = await until('.composer textarea'); b.focus(); b.value = 'Looks good, build it.'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(200);`,
+    click: '.composer button[type=submit], .composer .send',
+    about: 'Flow: sending a message in a minion chat. Shot right after the click with a slow network.',
+  },
+  {
+    name: 'flow-send-phone',
+    flow: true,
+    widths: [390],
+    hash: `#/p/${S}/t/${T.ultra}`,
+    before: `const b = await until('.composer textarea'); b.focus(); b.value = 'Looks good, build it.'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(200);`,
+    click: '.composer button[type=submit], .composer .send',
+    about: 'Flow (phone): sending a message in a minion chat. Shot right after the click with a slow network.',
+  },
+  {
+    name: 'flow-answer-card',
+    flow: true,
+    hash: `#/p/${S}/t/${T.cardsForJosh}`,
+    before: `await scrollChatTo('.qcard, .question-card');`,
+    click: '.qcard button.opt, .qcard .options button, .question-card button',
+    about: 'Flow: answering a question card by tapping an option. Shot right after the click with a slow network.',
+  },
   // Only one open plan in the live data, and approving settles it: one width.
-  { name: 'flow-approve-plan', flow: true, widths: [390], hash: `#/p/${S}/t/${T.plan}`, before: `await scrollChatTo('.pcard'); [...[...document.querySelectorAll('.pcard')].at(-1).querySelectorAll('button')].find((b) => b.textContent.trim() === 'Approve').dataset.sweep = 'go';`, click: '[data-sweep=go]', about: 'Flow (phone): approving a plan card. Shot right after the click with a slow network.' },
+  {
+    name: 'flow-approve-plan',
+    flow: true,
+    widths: [390],
+    hash: `#/p/${S}/t/${T.plan}`,
+    before: `await scrollChatTo('.pcard'); [...[...document.querySelectorAll('.pcard')].at(-1).querySelectorAll('button')].find((b) => b.textContent.trim() === 'Approve').dataset.sweep = 'go';`,
+    click: '[data-sweep=go]',
+    about: 'Flow (phone): approving a plan card. Shot right after the click with a slow network.',
+  },
 ];
 
 function args(argv: string[]) {
@@ -144,7 +190,9 @@ async function main() {
   // Plus an empty scheme for the empty states.
   const copy = new DatabaseSync(db);
   // The picked minions' own shared folders, so their chats' images load.
-  const ownShared = Object.values(T).map((n) => (copy.prepare('SELECT id FROM tickets WHERE project_id = ? AND number = ?').get(S, n) as { id: number } | undefined)?.id).filter(Boolean);
+  const ownShared = Object.values(T)
+    .map((n) => (copy.prepare('SELECT id FROM tickets WHERE project_id = ? AND number = ?').get(S, n) as { id: number } | undefined)?.id)
+    .filter(Boolean);
   const admin = copy.prepare('SELECT id, name FROM users WHERE admin = 1 ORDER BY id LIMIT 1').get() as { id: number; name: string };
   const emptyId = Number((copy.prepare("INSERT INTO projects (name, owner_id, created_at) VALUES ('Sweep empty', ?, datetime('now')) RETURNING id").get(admin.id) as { id: number })?.id ?? 0);
   copy.close();
@@ -167,13 +215,18 @@ async function main() {
   let log = '';
   server.stdout!.on('data', (d) => (log = (log + d).slice(-4000)));
   server.stderr!.on('data', (d) => (log = (log + d).slice(-4000)));
-  const stop = () => { if (server.exitCode === null) server.kill(); };
+  const stop = () => {
+    if (server.exitCode === null) server.kill();
+  };
   process.on('exit', stop);
   const base = `http://127.0.0.1:${port}/`;
   for (const end = Date.now() + 60_000; ; await new Promise((r) => setTimeout(r, 200))) {
     if (server.exitCode !== null) throw new Error(`server exited during boot:\n${log}`);
     if (Date.now() > end) throw new Error(`server did not answer in 60 s:\n${log}`);
-    const ok = await fetch(`${base}api/health`).then((r) => r.ok, () => false);
+    const ok = await fetch(`${base}api/health`).then(
+      (r) => r.ok,
+      () => false,
+    );
     if (ok) break;
   }
   const cookie = new Auth(password, secret).issueCookie(admin, false).split(';')[0];
@@ -190,14 +243,26 @@ async function main() {
     rmSync(shots, { recursive: true, force: true });
     const scheme = hash.match(/^#\/p\/(\d+)/)?.[1];
     if (scheme && !s.anon) await fetch(`${base}api/projects/${scheme}`, { headers: { cookie } }).catch(() => {});
-    const run = () => measure({
-      urls: [base + hash], widths: s.widths ?? [1440, 390], settle: 700, cookies: s.anon ? [] : [cookie], headers: [], ignore: [], dark: false,
-      // #app fills before a slow route finishes: wait it out, or the shot catches the page spinner.
-      shots, before: `${helpers}\nawait until(() => (document.body.classList.contains('navigating') ? null : document.body), 20000);\n${s.before ?? 'await sleep(300);'}`, click: s.click, sweep: false,
-      wait: s.anon ? 'form' : '#app > *',
-    });
+    const run = () =>
+      measure({
+        urls: [base + hash],
+        widths: s.widths ?? [1440, 390],
+        settle: 700,
+        cookies: s.anon ? [] : [cookie],
+        headers: [],
+        ignore: [],
+        dark: false,
+        // #app fills before a slow route finishes: wait it out, or the shot catches the page spinner.
+        shots,
+        before: `${helpers}\nawait until(() => (document.body.classList.contains('navigating') ? null : document.body), 20000);\n${s.before ?? 'await sleep(300);'}`,
+        click: s.click,
+        sweep: false,
+        wait: s.anon ? 'form' : '#app > *',
+      });
     // One retry: a busy box sometimes misses the 15 s load wait.
-    const r: Measured = await run().catch(() => run()).catch((e: Error) => ({ ok: false, error: e.message, pages: [], counts: {} }));
+    const r: Measured = await run()
+      .catch(() => run())
+      .catch((e: Error) => ({ ok: false, error: e.message, pages: [], counts: {} }));
     const pages = (r.pages ?? []).map((p) => {
       for (const k of ['shot', 'shot_after_click'] as const) {
         if (!p[k]) continue;
@@ -209,7 +274,17 @@ async function main() {
     });
     writeFileSync(join(o.out, `${s.name}.json`), JSON.stringify({ ...r, pages }, null, 1) + '\n');
     index.push({ name: s.name, about: s.about, flow: !!s.flow, hash, counts: r.counts, error: r.error, shots: pages.flatMap((p) => [p.shot, p.shot_after_click].filter((x): x is string => !!x)) });
-    console.log(`${s.name}: ${r.error ? `ERROR ${r.error}` : r.ok ? 'clean' : Object.entries(r.counts).map(([k, v]) => `${v} ${k}`).join(', ')}`);
+    console.log(
+      `${s.name}: ${
+        r.error
+          ? `ERROR ${r.error}`
+          : r.ok
+            ? 'clean'
+            : Object.entries(r.counts)
+                .map(([k, v]) => `${v} ${k}`)
+                .join(', ')
+      }`,
+    );
   }
   // --only re-shoots a few: keep the other screens' entries, in SCREENS order.
   const prev: IndexEntry[] = existsSync(join(o.out, 'index.json')) ? JSON.parse(readFileSync(join(o.out, 'index.json'), 'utf8')) : [];

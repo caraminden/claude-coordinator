@@ -11,7 +11,10 @@ test('WaitList puts, replaces, takes and deletes the setting when empty', () => 
   w.put({ ticket: 1, tries: 1 });
   w.put({ ticket: 2, tries: 1 });
   w.put({ ticket: 1, tries: 2 });
-  assert.deepEqual(w.all(), [{ ticket: 2, tries: 1 }, { ticket: 1, tries: 2 }]);
+  assert.deepEqual(w.all(), [
+    { ticket: 2, tries: 1 },
+    { ticket: 1, tries: 2 },
+  ]);
   assert.equal(w.get(1)?.tries, 2);
   assert.equal(w.take(9), null);
   assert.deepEqual(w.take(1), { ticket: 1, tries: 2 });

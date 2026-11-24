@@ -15,12 +15,17 @@ test('the template --self-test passes with LIVE_APPS set by env and written into
   try {
     const copy = join(dir, 'guard.sh');
     writeFileSync(copy, readFileSync(tpl, 'utf8').replace(/^LIVE_APPS=\(\)$/m, 'LIVE_APPS=(x)'));
-    for (const [path, env] of [[tpl, { ...process.env, GUARD_LIVE_APPS: 'x' }], [copy, process.env]] as const) {
+    for (const [path, env] of [
+      [tpl, { ...process.env, GUARD_LIVE_APPS: 'x' }],
+      [copy, process.env],
+    ] as const) {
       const r = spawnSync('bash', [path, '--self-test'], { encoding: 'utf8', env });
       assert.equal(r.status, 0, r.stdout + r.stderr);
       assert.match(r.stdout, /self-test: \d+ passed, 0 failed/);
     }
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 for (const file of ['tools/guard.sh', 'kit/skills/scheme-setup/templates/guard.sh']) {
@@ -60,10 +65,30 @@ for (const file of ['tools/guard.sh', 'kit/skills/scheme-setup/templates/guard.s
         assert.equal(r.status, 2, cmd);
         assert.match(r.stderr, /Write git push options out in full/, cmd);
       }
-      for (const cmd of ['git -c remote.origin.push=refs/heads/topic:refs/heads/main push origin', 'git -c push.default=matching push', 'git -c url.x.insteadOf=origin push origin topic', 'git -c branch.topic.merge=refs/heads/main push', 'git -c include.path=/tmp/x push origin topic', 'git -c includeIf.gitdir:/.path=/tmp/x push origin topic', 'git push origin topic:heads/main', 'git push origin heads/main']) {
+      for (const cmd of [
+        'git -c remote.origin.push=refs/heads/topic:refs/heads/main push origin',
+        'git -c push.default=matching push',
+        'git -c url.x.insteadOf=origin push origin topic',
+        'git -c branch.topic.merge=refs/heads/main push',
+        'git -c include.path=/tmp/x push origin topic',
+        'git -c includeIf.gitdir:/.path=/tmp/x push origin topic',
+        'git push origin topic:heads/main',
+        'git push origin heads/main',
+      ]) {
         assert.equal(hook(cmd).status, 2, cmd);
       }
-      for (const cmd of ['git push origin topic', 'git push -u origin topic', 'git push --set-upstream origin topic', 'git push --force-with-lease origin topic', 'git push --force-with-lease --force-if-includes origin topic', 'git push --force-with-l origin topic', 'git push --tags origin', 'git push', 'git push origin HEAD', 'git -c push.default=current status']) {
+      for (const cmd of [
+        'git push origin topic',
+        'git push -u origin topic',
+        'git push --set-upstream origin topic',
+        'git push --force-with-lease origin topic',
+        'git push --force-with-lease --force-if-includes origin topic',
+        'git push --force-with-l origin topic',
+        'git push --tags origin',
+        'git push',
+        'git push origin HEAD',
+        'git -c push.default=current status',
+      ]) {
         const r = hook(cmd);
         assert.equal(r.status, 0, cmd + r.stderr);
       }

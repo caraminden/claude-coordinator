@@ -22,7 +22,7 @@ const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\brunner\.send
  */
 const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 40 },
-  'src/exit-with-parent.ts': { why: 'kills only its own test server\'s processes when the parent test exits; judges nothing', calls: 2 },
+  'src/exit-with-parent.ts': { why: "kills only its own test server's processes when the parent test exits; judges nothing", calls: 2 },
   'src/worktree-deps.ts': { why: 'stops its own npm install past its time limit; judges nothing', calls: 1 },
   'src/ci-armed.ts': { why: "tellTaskmaster itself and the minion's own message tool", calls: 3 },
   'src/routes/tickets.ts': { why: "messages a minion or person sends on purpose, and tracking notes, and a person's Split first on a start card (#1674)", calls: 11 },
@@ -34,7 +34,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'src/held-starts.ts': { why: 'delivers a brief held for the box', calls: 1 },
   'src/wake.ts': { why: 'delivers a chained start once its leader is done, and the held brief of a minion taken off its chain (#1823)', calls: 3 },
   'src/schedules.ts': { why: "a schedule's run brief, on the clock a person set", calls: 1 },
-  'src/host-tool-ship.ts': { why: "tells the asking minion a person approved its host tool", calls: 1 },
+  'src/host-tool-ship.ts': { why: 'tells the asking minion a person approved its host tool', calls: 1 },
   'src/make-app.ts': { why: "a new app minion's brief, from a person's make-app", calls: 1 },
   'src/relay.ts': { why: 'relays a Mandate event a person made', calls: 1 },
   'src/routes/contraptions.ts': { why: "an app's deploy notes and a person's ask from an app", calls: 4 },
@@ -42,7 +42,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'src/routes/machines.ts': { why: 'a minion or message a person started from a machine tile', calls: 2 },
   'src/minion-relay.ts': { why: 'leaveMail itself', calls: 1 },
   'src/rule-parks.ts': { why: "held mail (no wake) after a person's Settings save, listing parks for the Taskmaster to check; it refuses, wakes and stops nothing", calls: 1 },
-  'src/exec.ts': { why: "stops its own child on its own timeout", calls: 2 },
+  'src/exec.ts': { why: 'stops its own child on its own timeout', calls: 2 },
   'src/contraption-turns.ts': { why: "stops its own turn's process", calls: 1 },
   'src/codex-lock.ts': { why: 'signal 0: is a pid alive', calls: 1 },
   'src/tmp-sweep.ts': { why: 'signal 0: is a pid alive', calls: 1 },
@@ -82,8 +82,7 @@ test('every pinned symbol is found, and every judge with a replay matches its la
     if (j.replay !== true) continue;
     const rec = records[j.id];
     assert.ok(rec, `${j.id} has a replay but none is recorded: run node tools/judge-replay.ts ${j.id} --record`);
-    assert.equal(rec.hash, judgeHash(j, ROOT),
-      `${j.name}'s code changed since its last replay (${rec.at}; pinned code: ${j.pins.map((p) => p.path).join(' ')}). Run node tools/judge-replay.ts ${j.id}, read what it would do now beside what it did, then add --record and commit test/judge-replays.json`);
+    assert.equal(rec.hash, judgeHash(j, ROOT), `${j.name}'s code changed since its last replay (${rec.at}; pinned code: ${j.pins.map((p) => p.path).join(' ')}). Run node tools/judge-replay.ts ${j.id}, read what it would do now beside what it did, then add --record and commit test/judge-replays.json`);
   }
 });
 
@@ -126,7 +125,10 @@ test('every hook is a registered judge or named as not one', () => {
 
 test('every standing check is registered', () => {
   const src = readFileSync(join(ROOT, 'src/standing-checks.ts'), 'utf8');
-  const checks = symbolLines(src, 'CHECKS')!.join('\n').match(/^ {4}name: '([\w-]+)'/gm)!.map((l) => l.split("'")[1]);
+  const checks = symbolLines(src, 'CHECKS')!
+    .join('\n')
+    .match(/^ {4}name: '([\w-]+)'/gm)!
+    .map((l) => l.split("'")[1]);
   assert.ok(checks.length >= 8, 'found the CHECKS names');
   for (const c of checks) assert.ok(registered.has(`standing-check:${c}`), `standing check ${c} isn't in src/judges.ts: add standing-check:${c} to the standing-checks judge's callers`);
   for (const c of registered) if (c.startsWith('standing-check:')) assert.ok(checks.includes(c.slice(15)), `${c} is registered but no such check exists`);
@@ -150,13 +152,30 @@ test('judged(): log-only notes what it would do and acts not; act passes the act
   const done: string[] = [];
   const notes: [string, string][] = [];
   const act = (who: string, text: string) => (done.push(`${who}:${text}`), true);
-  const quiet = judged('deploy-watch', 'mail', act, () => false, (line, who) => notes.push([line, who]), 'log-only');
+  const quiet = judged(
+    'deploy-watch',
+    'mail',
+    act,
+    () => false,
+    (line, who) => notes.push([line, who]),
+    'log-only',
+  );
   assert.equal(quiet('tm', 'deploy got worse'), false);
   assert.deepEqual(done, []);
   assert.equal(notes.length, 1);
-  assert.equal(notes[0][1], 'tm', 'the note gets the act\'s arguments, to find its scheme');
+  assert.equal(notes[0][1], 'tm', "the note gets the act's arguments, to find its scheme");
   assert.match(notes[0][0], /^- \d\d:\d\d:\d\dZ · would · deploy-watch · mail · tm · deploy got worse$/);
-  assert.equal(judged('deploy-watch', 'mail', act, () => false, () => {}, 'act'), act);
+  assert.equal(
+    judged(
+      'deploy-watch',
+      'mail',
+      act,
+      () => false,
+      () => {},
+      'act',
+    ),
+    act,
+  );
   assert.throws(() => judged('no-such-judge', 'x', act, act, () => {}), /no judge no-such-judge/);
   assert.match(wouldLine('a', 'b', 'two\n lines', 0), /· two lines$/);
 });
@@ -180,9 +199,19 @@ test('a replay store reads the real database, keeps its own writes, and shows mi
     let now = 200;
     const fake = { id: -1, project_id: p.id, title: 'replay started it', status: 'new' } as Ticket;
     minionsAsOf(store, () => now, [fake]);
-    assert.deepEqual(store.listTickets(p.id).map((x) => [x.id, x.status]), [[-1, 'new'], [early.id, 'working']], 'at 200: the early one still open, the late one not made');
+    assert.deepEqual(
+      store.listTickets(p.id).map((x) => [x.id, x.status]),
+      [
+        [-1, 'new'],
+        [early.id, 'working'],
+      ],
+      'at 200: the early one still open, the late one not made',
+    );
     now = 400;
-    assert.deepEqual(store.listTickets(p.id).map((x) => x.id), [-1, early.id]);
+    assert.deepEqual(
+      store.listTickets(p.id).map((x) => x.id),
+      [-1, early.id],
+    );
     assert.equal(store.getTicket(early.id)?.status, 'closed');
     assert.equal(store.getTicket(late.id), undefined);
     now = 600;

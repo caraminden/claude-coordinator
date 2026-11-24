@@ -40,9 +40,7 @@ export const MIN_EXPLANATION = 20;
 const ASK = 'If a person really wants this, they can run it themselves.';
 
 function deployNote(cfg: TripwireConfig): string {
-  return hasDeployScript(cfg)
-    ? 'Deploys go through tools/deploy.sh: run it from your worktree once your change is on main.'
-    : `Deploy with \`git pull --ff-only\` there (the one change allowed until tools/deploy.sh lands) and the cc-restart-when-idle unit.`;
+  return hasDeployScript(cfg) ? 'Deploys go through tools/deploy.sh: run it from your worktree once your change is on main.' : `Deploy with \`git pull --ff-only\` there (the one change allowed until tools/deploy.sh lands) and the cc-restart-when-idle unit.`;
 }
 function hasDeployScript(cfg: TripwireConfig): boolean {
   return cfg.deployScript ?? existsSync(join(cfg.checkout, 'tools/deploy.sh'));
@@ -113,14 +111,23 @@ const ENVIRON_WHY = "A process's environment can hold the live service's passwor
 const GH_TOKEN_WHY = "That is Cara's GitHub login; gh and git use it on their own.";
 // Each turn gets its person's GitHub token, or none (#182); these would reach another account's login.
 const GH_VARS = /^(GH_TOKEN|GITHUB_TOKEN|GH_CONFIG_DIR|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|GH_HOST)$/;
-const GH_ENV_WHY = "Each turn's GitHub login is set for the person it runs for (GH_TOKEN, with an empty GH_CONFIG_DIR so no other login is in reach), so pushes and pull requests go out under their name. Leave it as it is: if this turn's person hasn't linked GitHub, commit on your branch and tell them they can link it in Settings → Your account.";
+const GH_ENV_WHY =
+  "Each turn's GitHub login is set for the person it runs for (GH_TOKEN, with an empty GH_CONFIG_DIR so no other login is in reach), so pushes and pull requests go out under their name. Leave it as it is: if this turn's person hasn't linked GitHub, commit on your branch and tell them they can link it in Settings → Your account.";
 // The same read with the pid in a variable or a $(…), where the lexer leaves an unknown `/proc//environ`.
 const ENVIRON_HIDDEN = /^\/proc\/[^/]*(\/task\/[^/]*)?\/environ$/;
 
 const ENV_FILE = /^\.env(\..+)?$/;
 const ENV_FILE_WHY = "A scheme's or contraption's .env file holds its secrets (keys, passwords); a Taskmaster reads code and notes, never those.";
 /** Whether a glob from an exclude option covers both `.env` and `.env.<x>`. */
-const globCovers = (globs: string[], name: string) => globs.some((g) => new RegExp(`^${g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`).test(name));
+const globCovers = (globs: string[], name: string) =>
+  globs.some((g) =>
+    new RegExp(
+      `^${g
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '.*')
+        .replace(/\?/g, '.')}$`,
+    ).test(name),
+  );
 const coversEnv = (globs: string[]) => globCovers(globs, '.env') && globCovers(globs, '.env.local');
 
 /**
@@ -128,21 +135,29 @@ const coversEnv = (globs: string[]) => globCovers(globs, '.env') && globCovers(g
  * skip dotfiles unless told to search hidden files, and rg's `-g '!…'` can leave them out again.
  */
 function searchesEnv(name: string, args: Word[]): boolean {
-  const values = (opt: RegExp) => args.flatMap((w, k) => {
-    const m = /^(--?[\w-]+)=(.*)$/.exec(w.text);
-    if (m && opt.test(m[1])) return [m[2]];
-    return opt.test(w.text) && args[k + 1] ? [args[k + 1].text] : [];
-  });
+  const values = (opt: RegExp) =>
+    args.flatMap((w, k) => {
+      const m = /^(--?[\w-]+)=(.*)$/.exec(w.text);
+      if (m && opt.test(m[1])) return [m[2]];
+      return opt.test(w.text) && args[k + 1] ? [args[k + 1].text] : [];
+    });
   if (name === 'rg') {
     const hidden = args.some((w) => /^(--hidden|-\.|--no-ignore-hidden)$/.test(w.text)) || args.filter((w) => /^-[a-zA-Z.]+$/.test(w.text)).reduce((n, w) => n + (w.text.match(/u/g)?.length ?? 0), 0) >= 2;
-    return hidden && !coversEnv(values(/^(-g|--glob|--iglob)$/).filter((g) => g.startsWith('!')).map((g) => g.slice(1)));
+    return (
+      hidden &&
+      !coversEnv(
+        values(/^(-g|--glob|--iglob)$/)
+          .filter((g) => g.startsWith('!'))
+          .map((g) => g.slice(1)),
+      )
+    );
   }
   if (name === 'ag') return args.some((w) => /^(--hidden|-u|--unrestricted)$/.test(w.text)) && !coversEnv(values(/^--ignore$/));
   const only = values(/^--include$/);
   return !coversEnv(values(/^--exclude$/)) && !(only.length && !globCovers(only, '.env') && !globCovers(only, '.env.local'));
 }
 /** Whether a recursive search follows symlinks it meets below its root: grep -R, ugrep -S and --dereference(-files), rg -L, ag -f. */
-const follows = (name: string, args: Word[]) => args.some((w) => name === 'rg' ? /^(-L|--follow)$|^-[a-zA-Z]*L/.test(w.text) : name === 'ag' ? /^(-f|--follow)$|^-[a-zA-Z]*f/.test(w.text) : /^-[a-zA-Z]*[RS]|^--deref/.test(w.text));
+const follows = (name: string, args: Word[]) => args.some((w) => (name === 'rg' ? /^(-L|--follow)$|^-[a-zA-Z]*L/.test(w.text) : name === 'ag' ? /^(-f|--follow)$|^-[a-zA-Z]*f/.test(w.text) : /^-[a-zA-Z]*[RS]|^--deref/.test(w.text)));
 /** Whether a search opens archives (ugrep and ag -z, rg --search-zip), whose insides the .env walk can't see. */
 const opensArchives = (args: Word[]) => args.some((w) => /^-[a-zA-Z]*z|^--(decompress|search-zip)\b/.test(w.text));
 
@@ -156,8 +171,10 @@ function optionValues(args: Word[], opt: string): string[] {
     const t = args[k].text;
     if (t === '--') break;
     if (t.startsWith(opt + '=')) out.push(t.slice(opt.length + 1));
-    else if (t === opt) { if (args[k + 1]) out.push(args[k + 1].text); k++; }
-    else if (SEARCH_VALUE.test(t)) k++;
+    else if (t === opt) {
+      if (args[k + 1]) out.push(args[k + 1].text);
+      k++;
+    } else if (SEARCH_VALUE.test(t)) k++;
   }
   return out.map((g) => g.replace(/^['"]|['"]$/g, ''));
 }
@@ -184,8 +201,16 @@ export function envBelow(roots: string[], cfg: TripwireConfig, follow: boolean, 
         if (!start) continue;
         let st;
         // Nothing there: grep finds nothing either.
-        try { st = statSync(start); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT' || (e as NodeJS.ErrnoException).code === 'ENOTDIR') continue; return `${start}, which it could not check`; }
-        if (!st.isDirectory()) { if (ENV_FILE.test(basename(start))) return start; continue; }
+        try {
+          st = statSync(start);
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code === 'ENOENT' || (e as NodeJS.ErrnoException).code === 'ENOTDIR') continue;
+          return `${start}, which it could not check`;
+        }
+        if (!st.isDirectory()) {
+          if (ENV_FILE.test(basename(start))) return start;
+          continue;
+        }
         todo.push(start);
       }
     }
@@ -194,7 +219,9 @@ export function envBelow(roots: string[], cfg: TripwireConfig, follow: boolean, 
   while (todo.length) {
     const dir = todo.pop()!;
     let d;
-    try { d = opendirSync(dir); } catch (e) {
+    try {
+      d = opendirSync(dir);
+    } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'ENOENT') continue;
       return `${dir}, which it could not read`;
     }
@@ -207,13 +234,19 @@ export function envBelow(roots: string[], cfg: TripwireConfig, follow: boolean, 
           if (follow) return `a symlink it would follow, ${path}`;
           // Some greps follow a link to a file even without -R (ugrep -S); one to a .env counts as the file.
           let real = '';
-          try { real = realpathSync(path); } catch { /* a broken link reads nothing */ }
+          try {
+            real = realpathSync(path);
+          } catch {
+            /* a broken link reads nothing */
+          }
           if (ENV_FILE.test(basename(real))) return `${path}, a link to ${real}`;
           continue;
         }
         if (e.isDirectory() && !(e.name === 'objects' && dir.split('/').includes('.git')) && !globCovers(skip, e.name)) todo.push(path);
       }
-    } finally { d.closeSync(); }
+    } finally {
+      d.closeSync();
+    }
   }
   return null;
 }
@@ -227,17 +260,31 @@ export function envBelow(roots: string[], cfg: TripwireConfig, follow: boolean, 
  */
 function globRoot(glob: string, closed: string[], budget: { seen: number; limit: number }): string[] | string {
   const reaches = (p: string) => closed.some((r) => under(p, r) || under(r, p));
-  const keep = (ps: string[]) => ps.flatMap((p) => { let real = p; try { real = realpathSync(p); } catch { /* missing: grep finds nothing */ } return (real === p ? [p] : [p, real]).filter(reaches); });
+  const keep = (ps: string[]) =>
+    ps.flatMap((p) => {
+      let real = p;
+      try {
+        real = realpathSync(p);
+      } catch {
+        /* missing: grep finds nothing */
+      }
+      return (real === p ? [p] : [p, real]).filter(reaches);
+    });
   let paths = ['/'];
   for (const part of glob.split('/').filter(Boolean)) {
-    if (!/[*?[(]/.test(part)) { paths = paths.map((p) => join(p, part)); continue; }
+    if (!/[*?[(]/.test(part)) {
+      paths = paths.map((p) => join(p, part));
+      continue;
+    }
     // shortcut: a folder outside the closed ones is walked without links, so a link below it into one is missed; upgrade if a Taskmaster's ** ever runs through such links.
     if (/\*\*|[(){}|~^#<>]|\[[:=.]/.test(part)) return keep(paths);
     const re = globRe(part);
     const next: string[] = [];
     for (const dir of paths) {
       let d;
-      try { d = opendirSync(dir); } catch (e) {
+      try {
+        d = opendirSync(dir);
+      } catch (e) {
         // The shell can't list it either, so it matches nothing there; still refused at or around a closed folder.
         if ((e as NodeJS.ErrnoException).code === 'ENOENT' || (e as NodeJS.ErrnoException).code === 'ENOTDIR' || !reaches(dir)) continue;
         return `${dir}, which it could not read`;
@@ -247,7 +294,9 @@ function globRoot(glob: string, closed: string[], budget: { seen: number; limit:
           if (++budget.seen > budget.limit) return `more than ${budget.limit} files to check for them`;
           if (re.test(e.name)) next.push(join(dir, e.name));
         }
-      } finally { d.closeSync(); }
+      } finally {
+        d.closeSync();
+      }
     }
     paths = next;
   }
@@ -256,10 +305,22 @@ function globRoot(glob: string, closed: string[], budget: { seen: number; limit:
 
 /** For a recursive search: a secret readReason guards that lies inside this folder, or null. */
 function secretInside(root: string, cfg: TripwireConfig): string | null {
-  const secrets = [join(cfg.home, '.ssh'), join(cfg.claudeConfig, '.credentials.json'), join(cfg.home, '.claude/.credentials.json'), join(cfg.home, '.claude-2/.credentials.json'), join(cfg.home, '.claude-3/.credentials.json'), join(cfg.data, 'claude-accounts'), join(cfg.home, CODEX_LOGIN), join(cfg.home, '.config/claude-coordinator'), join(cfg.home, '.config/gh/hosts.yml'), join(cfg.home, '.config/citadel-claude'), join(cfg.home, CONTAINER_STORAGE)];
+  const secrets = [
+    join(cfg.home, '.ssh'),
+    join(cfg.claudeConfig, '.credentials.json'),
+    join(cfg.home, '.claude/.credentials.json'),
+    join(cfg.home, '.claude-2/.credentials.json'),
+    join(cfg.home, '.claude-3/.credentials.json'),
+    join(cfg.data, 'claude-accounts'),
+    join(cfg.home, CODEX_LOGIN),
+    join(cfg.home, '.config/claude-coordinator'),
+    join(cfg.home, '.config/gh/hosts.yml'),
+    join(cfg.home, '.config/citadel-claude'),
+    join(cfg.home, CONTAINER_STORAGE),
+  ];
   const homes = dirname(cfg.home);
   if (homes !== '/' && under(homes, root)) return `other people's home folders in ${homes}`;
-  if (under(root, join(cfg.data, 'claude-accounts'))) return 'the Claude logins of the server login\'s extra accounts';
+  if (under(root, join(cfg.data, 'claude-accounts'))) return "the Claude logins of the server login's extra accounts";
   return secrets.find((x) => x !== root && under(x, root)) ?? null;
 }
 /** The end of a search's secrets refusal: the folders inside its root to search instead (#1718), or a plain "search elsewhere". */
@@ -336,8 +397,7 @@ function searchRoots(args: Word[]): Word[] {
   return given ? plain : plain.slice(1);
 }
 
-const LIVE_DB = ['coordinator.db', 'coordinator.db-wal', 'coordinator.db-shm', 'coordinator.db-journal', 'state.db', 'state.db-wal', 'state.db-shm', 'state.db-journal',
-  'events.db', 'events.db-wal', 'events.db-shm', 'events.db-journal']; // the chat log, in its own file since #1169
+const LIVE_DB = ['coordinator.db', 'coordinator.db-wal', 'coordinator.db-shm', 'coordinator.db-journal', 'state.db', 'state.db-wal', 'state.db-shm', 'state.db-journal', 'events.db', 'events.db-wal', 'events.db-shm', 'events.db-journal']; // the chat log, in its own file since #1169
 
 /** Whether a person may approve this write once, rather than it being a hard block. */
 function askable(p: string, cmd: string, cfg: TripwireConfig): boolean {
@@ -668,10 +728,21 @@ function mktempPath(src: string, home: string): string | null {
   return `${dir || `\0${MKTEMP_DIR}\0`}/${template}`;
 }
 
-interface Segment { words: Word[]; redirects: { op: string; target: Word }[] }
+interface Segment {
+  words: Word[];
+  redirects: { op: string; target: Word }[];
+}
 /** What the command has done so far: its folder, and the variables it set, with the values they can take where known (a loop variable takes several). */
 // saves: the diffs the hook writes before the call runs, when the whole call passes (#1716).
-interface State { cwd: string | null; vars: Set<string>; values: Map<string, string[]>; committed?: boolean; moved?: boolean; maybe?: boolean; saves?: Save[] }
+interface State {
+  cwd: string | null;
+  vars: Set<string>;
+  values: Map<string, string[]>;
+  committed?: boolean;
+  moved?: boolean;
+  maybe?: boolean;
+  saves?: Save[];
+}
 
 // Only these commands count as writes. Anything else is taken as a read, so an interpreter or tool
 // that names a protected path (`node -e … coordinator.db`, `curl`) goes through: few false alarms,
@@ -684,7 +755,36 @@ const METADATA = new Set(['ls', 'stat', 'test', '[', '[[', 'du', 'find', 'namei'
 const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'time', 'timeout', 'stdbuf', 'xargs', 'ionice', 'chrt', 'flock', 'systemd-run', 'setsid', 'citadel-heavy', 'heavy-unit']);
 // systemd-run's options that take the next word as their value (`--unit x`, `-p K=V`, `-qu x`, `--uni x`: getopt takes a
 // long option's prefix; one that's ambiguous makes systemd-run refuse, so skipping a word for it is harmless; #513).
-const SYSTEMD_RUN_LONG = ['host', 'machine', 'capsule', 'unit', 'property', 'description', 'slice', 'expand-environment', 'service-type', 'uid', 'gid', 'nice', 'working-directory', 'root-directory', 'setenv', 'output', 'json', 'job-mode', 'background', 'path-property', 'socket-property', 'timer-property', 'on-active', 'on-boot', 'on-startup', 'on-unit-active', 'on-unit-inactive', 'on-calendar'];
+const SYSTEMD_RUN_LONG = [
+  'host',
+  'machine',
+  'capsule',
+  'unit',
+  'property',
+  'description',
+  'slice',
+  'expand-environment',
+  'service-type',
+  'uid',
+  'gid',
+  'nice',
+  'working-directory',
+  'root-directory',
+  'setenv',
+  'output',
+  'json',
+  'job-mode',
+  'background',
+  'path-property',
+  'socket-property',
+  'timer-property',
+  'on-active',
+  'on-boot',
+  'on-startup',
+  'on-unit-active',
+  'on-unit-inactive',
+  'on-calendar',
+];
 const systemdRunValue = (opt: string) => /^-[^-HMCupE]*[HMCupE]$/.test(opt) || (/^--[a-z-]+$/.test(opt) && SYSTEMD_RUN_LONG.some((o) => `--${o}`.startsWith(opt)));
 const KEYWORDS = new Set(['!', '{', '}', 'then', 'do', 'else', 'if', 'while', 'until', 'elif', 'fi', 'done', 'esac']);
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']);
@@ -699,8 +799,10 @@ const APP_UNITS = /^(claude-coordinator|perigee-godot[\w-]*|citadel-claude[\w-]*
 const APP_UNIT_NAMES = ['claude-coordinator', 'perigee-godot', 'perigee-godot-x', 'citadel-claude', 'citadel-claude-x'];
 const STOP_VERBS = new Set(['restart', 'stop', 'kill', 'try-restart', 'reload-or-restart', 'try-reload-or-restart', 'condrestart', 'force-reload', 'freeze']);
 const UNIT_FILE_VERBS = new Set(['enable', 'disable', 'reenable', 'mask', 'unmask', 'link', 'edit', 'revert', 'preset', 'add-wants', 'add-requires', 'set-property']);
-const GIT_READ = new Set(`status log diff show blame rev-parse rev-list ls-files ls-tree ls-remote cat-file describe shortlog grep fetch help version
-whatchanged show-ref for-each-ref merge-base name-rev count-objects check-ignore var cherry range-diff format-patch archive merge-tree`.split(/\s+/));
+const GIT_READ = new Set(
+  `status log diff show blame rev-parse rev-list ls-files ls-tree ls-remote cat-file describe shortlog grep fetch help version
+whatchanged show-ref for-each-ref merge-base name-rev count-objects check-ignore var cherry range-diff format-patch archive merge-tree`.split(/\s+/),
+);
 
 // The turn's variables never fill in a path when their names suggest a secret.
 const SECRET_VAR = /TOKEN|SECRET|PASSW|KEY|COOKIE|CREDENTIAL/i;
@@ -827,15 +929,28 @@ function writeTargets(name: string, args: Word[]): Word[] {
   const a = args.map((w) => w.text);
   const plain = args.filter((w) => !w.text.startsWith('-'));
   switch (name) {
-    case 'rm': case 'rmdir': case 'mv': case 'unlink': case 'shred': case 'touch': case 'mkdir': case 'tee': case 'truncate': case 'patch':
+    case 'rm':
+    case 'rmdir':
+    case 'mv':
+    case 'unlink':
+    case 'shred':
+    case 'touch':
+    case 'mkdir':
+    case 'tee':
+    case 'truncate':
+    case 'patch':
       return args;
-    case 'cp': case 'rsync': case 'install': case 'ln': {
+    case 'cp':
+    case 'rsync':
+    case 'install':
+    case 'ln': {
       const t = a.findIndex((x) => x === '-t' || x === '--target-directory');
       return t >= 0 ? args.slice(t + 1, t + 2) : [...args.filter((w) => w.text.startsWith('--target-directory=')), ...plain.slice(-1)];
     }
     case 'dd':
       return args.filter((w) => w.text.startsWith('of='));
-    case 'sed': case 'perl': {
+    case 'sed':
+    case 'perl': {
       // perl's -M, -m and -I take the rest of the word (`-Mstrict` is no -i; #468 S01-14).
       const cut = (t: string) => (name === 'perl' ? t.replace(/^(-[a-zA-Z]*?)[MmI].*$/, '$1') : t);
       if (!a.some((t) => /^-[a-zA-Z]*i/.test(cut(t)) || t.startsWith('--in-place'))) return [];
@@ -848,7 +963,8 @@ function writeTargets(name: string, args: Word[]): Word[] {
       }
       return script ? files : files.slice(1);
     }
-    case 'awk': case 'gawk':
+    case 'awk':
+    case 'gawk':
       return a.some((t) => t.includes('inplace')) ? args : [];
     case 'sort':
       return a.some((t) => /^-[a-zA-Z]*o/.test(t) || t.startsWith('--output')) ? args : [];
@@ -937,7 +1053,9 @@ function blindReason(w: Word, st: State, cfg: TripwireConfig, name: string): Ver
   const unknowns = [...new Set([...tmpl.matchAll(/\0([A-Za-z_]\w*)?\0/g)].map((m) => (m[1] ? varShown(m[1]) : '$(…)')))].join(' and ');
   if (!dirs.length || dirs.some((d) => under(cfg.data, d))) {
     // #1030: lead with what passes. Shell variables don't carry between Bash calls, so one set in an earlier call is empty here.
-    return hard(`${shown(w)}: the tripwire can't tell what ${unknowns} holds, so this could reach ${cfg.data}, the live data dir (the database, its backups and every scheme's folders). Write the path out in full, or set the variable in this same command (\`d=/abs/path; rm -rf "$d/out"\`: a variable from an earlier call is empty here), or keep scratch under $TMPDIR, which the tripwire knows.${/db\b|sqlite/i.test(w.text) || /^(cp|rsync|sqlite3)$/.test(name) ? ` ${SCRATCH}` : ''}`);
+    return hard(
+      `${shown(w)}: the tripwire can't tell what ${unknowns} holds, so this could reach ${cfg.data}, the live data dir (the database, its backups and every scheme's folders). Write the path out in full, or set the variable in this same command (\`d=/abs/path; rm -rf "$d/out"\`: a variable from an earlier call is empty here), or keep scratch under $TMPDIR, which the tripwire knows.${/db\b|sqlite/i.test(w.text) || /^(cp|rsync|sqlite3)$/.test(name) ? ` ${SCRATCH}` : ''}`,
+    );
   }
   for (const d of dirs) {
     const p = join(d, '…');
@@ -955,7 +1073,7 @@ function schemeFolder(p: string, cfg: TripwireConfig): boolean {
   return p === own || (under(p, own) && !p.slice(own.length + 1).includes('/'));
 }
 
-const ENV_WHY = "Check one variable with `[ -n \"$NAME\" ] && echo set`, list the names alone with `env | cut -d= -f1`, or print a harmless one with `echo \"$PATH\"`: a turn's environment can hold its tokens.";
+const ENV_WHY = 'Check one variable with `[ -n "$NAME" ] && echo set`, list the names alone with `env | cut -d= -f1`, or print a harmless one with `echo "$PATH"`: a turn\'s environment can hold its tokens.';
 const ENV_ALL = `\`env\` with no command prints the whole environment, values and all. ${ENV_WHY}`;
 
 /**
@@ -968,7 +1086,10 @@ function envDump(name: string, args: Word[]): string | null {
   const cmd = [name, ...args.map(shown)].join(' ');
   // `local -` saves the shell's options (bash); it prints nothing.
   if (args.some((w) => w.text === '-')) return null;
-  const flags = args.filter((w) => /^[-+]/.test(w.text)).map((w) => w.text).join('');
+  const flags = args
+    .filter((w) => /^[-+]/.test(w.text))
+    .map((w) => w.text)
+    .join('');
   const names = args.filter((w) => !/^[-+]/.test(w.text));
   if (/[fF]/.test(flags)) return null;
   if (!names.length) return `\`${cmd}\` with no name prints every variable, values and all. ${ENV_WHY}`;
@@ -977,10 +1098,10 @@ function envDump(name: string, args: Word[]): string | null {
   // A word with = in it assigns (`declare "$k=$v"`), whatever its variables hold.
   const read = names.filter((w) => !(w.tmpl ?? w.text).includes('='));
   const risky = read.find((w) => w.unknown || SECRET_VAR.test(w.text) || GH_VARS.test(w.text) || (/m/.test(flags) && /[*?[]/.test(w.text)));
-  return risky ? `\`${cmd}\` would print ${risky.unknown ? 'a variable the tripwire can\'t read' : risky.text}, which may hold a token. ${ENV_WHY}` : null;
+  return risky ? `\`${cmd}\` would print ${risky.unknown ? "a variable the tripwire can't read" : risky.text}, which may hold a token. ${ENV_WHY}` : null;
 }
 
-/** A filter that keeps only the names of `env`'s NAME=value lines: `cut -d= -f1`, `awk -F= '{print $1}'`, `sed 's/=.*//'` (#485). */
+/** A filter that keeps only the names of `env`'s NAME=value lines: `cut -d= -f1`, `awk -F= '{print $1}'`, `sed 's/=.*/ /'` (#485). */;
 function namesOnly(ws: string[]): boolean {
   const [name, ...a] = ws;
   const opts = a.join(' ').replace(/\s+/g, ' ');
@@ -1006,7 +1127,7 @@ function sqliteReason(args: Word[], st: State, cfg: TripwireConfig): string | nu
   if (!p) return null;
   const readonly = a.some((t) => t === '-readonly' || t === '--readonly' || t.includes('mode=ro'));
   if (/^state\b/.test(basename(p)) && !readonly) return `${basename(p)} holds every minion's Claude session. Open it with \`sqlite3 -readonly\`.`;
-  if (!sqlShown(args)) return "SQL piped in, from a heredoc or read from a file can't be checked for the credentials table. Pass it as an argument instead, several statements in one quoted string or one argument each: `sqlite3 -readonly <db> \"select …; select …\"`.";
+  if (!sqlShown(args)) return 'SQL piped in, from a heredoc or read from a file can\'t be checked for the credentials table. Pass it as an argument instead, several statements in one quoted string or one argument each: `sqlite3 -readonly <db> "select …; select …"`.';
   const shown = [...sql, ...args.filter((_, k) => /^--?cmd$/.test(a[k - 1] ?? ''))].map((w) => w.text);
   if (shown.some((t) => /\b(credentials|stored_secrets)\b/i.test(t) || /^\s*\.dump\s*$/m.test(t))) return "The credentials and stored_secrets tables hold people's linked accounts and saved secrets; nothing here needs to read them. Name the tables you need (`.dump tickets`, or `.schema` for every table's columns).";
   return null;
@@ -1053,7 +1174,13 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
   }
   // A commit or tag message is text, not a path (#468 S01-12).
   const message = textOperands('git', args.slice(j + 1));
-  const targets = sub === 'clone' ? args.slice(j + 1).filter((w) => !w.text.startsWith('-')).slice(1) : args.slice(j + 1).filter((w) => !message.has(w));
+  const targets =
+    sub === 'clone'
+      ? args
+          .slice(j + 1)
+          .filter((w) => !w.text.startsWith('-'))
+          .slice(1)
+      : args.slice(j + 1).filter((w) => !message.has(w));
   // Relative paths after -C are relative to that folder.
   for (const w of targets) {
     for (const p of pathsOf(w, { ...st, cwd: dir }, cfg)) {
@@ -1115,7 +1242,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
         const opt = words[i++].text;
         if (name === 'systemd-run') {
           if (opt === '--') break;
-          const env = /^(--setenv|-E)$/.test(opt) ? words[i]?.text ?? '' : /^(--setenv=|-E)/.test(opt) ? opt.replace(/^(--setenv=|-E)/, '') : '';
+          const env = /^(--setenv|-E)$/.test(opt) ? (words[i]?.text ?? '') : /^(--setenv=|-E)/.test(opt) ? opt.replace(/^(--setenv=|-E)/, '') : '';
           const m = /^([A-Za-z_]\w*)=/.exec(env);
           if (m) runEnv.add(m[1]);
           if (systemdRunValue(opt)) i++;
@@ -1164,7 +1291,17 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   // Variables set from what the command reads or loops over: their values can't be known.
   if (name === 'for' || name === 'select') {
     // `for f in a b`: f takes each listed value, when they're all known.
-    if (/^[A-Za-z_]\w*$/.test(args[0]?.text ?? '')) setVar(st, args[0].text, args[1]?.text === 'in' ? known(args.slice(2).flatMap((w) => expand(w, st, cfg)), cfg)?.flatMap(braces) : undefined);
+    if (/^[A-Za-z_]\w*$/.test(args[0]?.text ?? ''))
+      setVar(
+        st,
+        args[0].text,
+        args[1]?.text === 'in'
+          ? known(
+              args.slice(2).flatMap((w) => expand(w, st, cfg)),
+              cfg,
+            )?.flatMap(braces)
+          : undefined,
+      );
   } else if (/^(read|mapfile|readarray|getopts)$/.test(name)) {
     const names = name === 'getopts' ? args.slice(1, 2) : args.filter((w, k) => !w.text.startsWith('-') && !/^-[a-zA-Z]*[pdnNtuaC]$/.test(args[k - 1]?.text ?? ''));
     for (const w of names) if (/^[A-Za-z_]\w*$/.test(w.text)) setVar(st, w.text, undefined);
@@ -1268,7 +1405,13 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
   // The deploy script is the sanctioned way to touch the live checkout and restart the service: running
   // it (itself, through systemd-run, or as a shell's script) is fine, naming it to rm, cp or git is not (#468 S01-2).
   const deploy = join(cfg.checkout, 'tools/deploy.sh');
-  const fromOperand = (ws: Word[]) => ws.slice(Math.max(0, ws.findIndex((w) => !w.text.startsWith('-'))));
+  const fromOperand = (ws: Word[]) =>
+    ws.slice(
+      Math.max(
+        0,
+        ws.findIndex((w) => !w.text.startsWith('-')),
+      ),
+    );
   let run = [cmd, ...args];
   if (run[0] && SHELLS.has(basename(run[0].text))) run = fromOperand(run.slice(1));
   if (run[0] && !run[0].text.startsWith('-') && pathsOf(run[0], st, cfg).includes(deploy)) return null;
@@ -1282,7 +1425,9 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     const [verb, ...units] = plain;
     const appUnit = (u: string) => APP_UNITS.test(u) || (/[*?[]/.test(u) && APP_UNIT_NAMES.some((n) => globRe(u).test(n) || globRe(u).test(`${n}.service`)));
     if (STOP_VERBS.has(verb) && units.some(appUnit)) {
-      return hard(`systemctl ${verb} of ${units.join(' ')} is blocked: it cuts off every running turn (or the shared Godot editor, or a person's Claude container and their turns). Deploy with ${hasDeployScript(cfg) ? 'tools/deploy.sh, which restarts without stopping running turns' : 'the cc-restart-when-idle unit'}, or ask a person.`);
+      return hard(
+        `systemctl ${verb} of ${units.join(' ')} is blocked: it cuts off every running turn (or the shared Godot editor, or a person's Claude container and their turns). Deploy with ${hasDeployScript(cfg) ? 'tools/deploy.sh, which restarts without stopping running turns' : 'the cc-restart-when-idle unit'}, or ask a person.`,
+      );
     }
     // `systemctl edit` opens an editor, which would hang a headless turn.
     if (UNIT_FILE_VERBS.has(verb)) return { reason: `systemctl ${verb} changes the box's unit files. Put units in the repo (deploy/) and ask Cara to install them.`, ask: verb !== 'edit' };
@@ -1310,7 +1455,9 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     (runner >= 0 && !own.some((w) => w.text === '--check' || w.text === '-c') && own.some((w) => basename(w.text) === 'server.ts' || /\b(import|require)\s*\(\s*['"`][^'"`]*server\.ts['"`]/.test(w.text))) ||
     (npmStart && !!st.cwd && existsSync(join(st.cwd, 'package.json')) && readFileSync(join(st.cwd, 'package.json'), 'utf8').includes('server.ts'));
   if (runsServer && !(vars.has('DATA_DIR') && vars.has('PORT'))) {
-    return hard('Running server.ts without both DATA_DIR and PORT set points it at the live database and port (its schema changes would run on live data). For a dev copy of Citadel, run `citadel-dev-copy start` (a copy of the live data, `--data empty` for none) and `citadel-dev-copy stop`. Otherwise use `DATA_DIR=$(mktemp -d) PORT=<free port> node server.ts` (copy the DB in if you need data), or `node --check server.ts` for a syntax check.');
+    return hard(
+      'Running server.ts without both DATA_DIR and PORT set points it at the live database and port (its schema changes would run on live data). For a dev copy of Citadel, run `citadel-dev-copy start` (a copy of the live data, `--data empty` for none) and `citadel-dev-copy stop`. Otherwise use `DATA_DIR=$(mktemp -d) PORT=<free port> node server.ts` (copy the DB in if you need data), or `node --check server.ts` for a syntax check.',
+    );
   }
 
   if (name === 'git') return gitReason(args, st, cfg);
@@ -1368,8 +1515,12 @@ function wholeListing({ name, args }: { name: string; args: Word[] }): number {
 
 /** The allowed way to stop your own server, named in every kill-by-name refusal (Mandate #86's logs: 4 sessions retried). */
 const STOP_BY_PID = "Stop your own server by its pid: `kill <pid>` with the pid it printed when it started (`citadel-dev-copy start` prints one, and `citadel-dev-copy stop` stops it), `$!` right after you start it in the background, or the pid `ss -ltnp 'sport = :<your port>'` shows for your own port, written out.";
-const LISTING_KILL_WHY = "That `kill` takes its pids from the whole socket table narrowed by grep or awk, so a pattern that comes out empty or loose kills every server on the account: on 2026-11-03 `kill $(ss -ltnp | grep \":$P \" …)` with an empty $P took Citadel and every contraption down for 7½ hours (#299). " + STOP_BY_PID;
-const PROCESS_KILL_WHY = "That `kill` takes its pids from a process listing (ps or pgrep) picked by a pattern, which is `pkill -f` spelled out: every turn, Citadel, its contraptions and other people's dev servers run as the one account, so it reaches them all (on 2026-11-03 `pkill -f app/dev/dev.ts` killed two minions' shells, #299). " + STOP_BY_PID + " To go through matches, check each one first: `[ \"$(readlink /proc/$p/cwd)\" = \"$PWD\" ] && kill $p`.";
+const LISTING_KILL_WHY =
+  'That `kill` takes its pids from the whole socket table narrowed by grep or awk, so a pattern that comes out empty or loose kills every server on the account: on 2026-11-03 `kill $(ss -ltnp | grep ":$P " …)` with an empty $P took Citadel and every contraption down for 7½ hours (#299). ' + STOP_BY_PID;
+const PROCESS_KILL_WHY =
+  "That `kill` takes its pids from a process listing (ps or pgrep) picked by a pattern, which is `pkill -f` spelled out: every turn, Citadel, its contraptions and other people's dev servers run as the one account, so it reaches them all (on 2026-11-03 `pkill -f app/dev/dev.ts` killed two minions' shells, #299). " +
+  STOP_BY_PID +
+  ' To go through matches, check each one first: `[ "$(readlink /proc/$p/cwd)" = "$PWD" ] && kill $p`.';
 
 /**
  * The functions a command defines (`f() { … }`, `function f() { … }`) whose every call it can see: run
@@ -1405,7 +1556,14 @@ function traceableFunctions(toks: Tok[]): Set<string> {
   });
   if (words.length) named.push(...words.map((w) => w.tmpl ?? w.text));
   const edge = '[\\s;&|(){}`\'"]';
-  return new Set(blind ? [] : [...defined].filter(([, n]) => n === 1).map(([f]) => f).filter((f) => called.has(f) && /^[A-Za-z_][\w-]*$/.test(f) && !named.some((t) => new RegExp(`(^|${edge})${f}($|${edge})`).test(t))));
+  return new Set(
+    blind
+      ? []
+      : [...defined]
+          .filter(([, n]) => n === 1)
+          .map(([f]) => f)
+          .filter((f) => called.has(f) && /^[A-Za-z_][\w-]*$/.test(f) && !named.some((t) => new RegExp(`(^|${edge})${f}($|${edge})`).test(t))),
+  );
 }
 
 /** Where the `}` that closes the body opened at toks[from - 1] is, or -1. */

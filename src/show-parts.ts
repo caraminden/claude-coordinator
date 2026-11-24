@@ -63,8 +63,56 @@ export function partLink(part: Part, scheme: number | string, minion?: number | 
 }
 
 // The words of a question ("where is the fast mode?") that name no part.
-const STOP = new Set(['where', 'is', 'are', 'the', 'a', 'an', 'my', 'i', 'can', 'do', 'how', 'to', 'find', 'it', 'its', 'out', 'point', 'me', 'show', 'of', 'in', 'on', 'for', 'button', 'setting', 'settings', 'change', 'turn', 'set',
-  'them', 'they', 'this', 'that', 'what', 'which', 'with', 'from', 'at', 'you', 'your', 'we', 'our', 'there', 'see', 'get', 'go', 'thing', 'option']);
+const STOP = new Set([
+  'where',
+  'is',
+  'are',
+  'the',
+  'a',
+  'an',
+  'my',
+  'i',
+  'can',
+  'do',
+  'how',
+  'to',
+  'find',
+  'it',
+  'its',
+  'out',
+  'point',
+  'me',
+  'show',
+  'of',
+  'in',
+  'on',
+  'for',
+  'button',
+  'setting',
+  'settings',
+  'change',
+  'turn',
+  'set',
+  'them',
+  'they',
+  'this',
+  'that',
+  'what',
+  'which',
+  'with',
+  'from',
+  'at',
+  'you',
+  'your',
+  'we',
+  'our',
+  'there',
+  'see',
+  'get',
+  'go',
+  'thing',
+  'option',
+]);
 
 /** The parts that match `query`, best first: every word must hit the name, label, where or words, so a stray word finds nothing rather than the wrong part. */
 export function findParts(query: string): Part[] {
@@ -92,19 +140,22 @@ Prints a markdown link that opens Citadel's page and outlines the part people as
   --all       every named part`;
 
 function main(argv: string[]): number {
-  let scheme: string | null = null, minion: string | null = null, all = false;
+  let scheme: string | null = null,
+    minion: string | null = null,
+    all = false;
   const words: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--help' || a === '-h') return void console.log(USAGE), 0;
+    if (a === '--help' || a === '-h') return (void console.log(USAGE), 0);
     if (a === '--all') all = true;
     else if (a === '--scheme' || a === '--minion') {
       const v = argv[++i];
-      if (!/^\d+$/.test(v ?? '')) return void console.error(`${a} takes a number\n${USAGE}`), 2;
-      if (a === '--scheme') scheme = v; else minion = v;
+      if (!/^\d+$/.test(v ?? '')) return (void console.error(`${a} takes a number\n${USAGE}`), 2);
+      if (a === '--scheme') scheme = v;
+      else minion = v;
     } else words.push(a);
   }
-  if (!all && !words.length) return void console.error(USAGE), 2;
+  if (!all && !words.length) return (void console.error(USAGE), 2);
   const place = turnPlace(process.cwd());
   scheme ??= place.scheme;
   const hits = all ? PARTS : findParts(words.join(' '));

@@ -41,7 +41,7 @@ test('a flake: the second red whose files all passed alone', () => {
   assert.equal(kind(killed), null);
 });
 
-test('a burn-in red (#1443) is the ship\'s own, even when the failing copy quotes a passed-alone line', () => {
+test("a burn-in red (#1443) is the ship's own, even when the failing copy quotes a passed-alone line", () => {
   const out = `burn-in: test/real.test.ts, copy 3 of 10 (its output from the failing tests on):\n✖ test/real.test.ts › races › on a shared path (12ms)\nrun-tests: test/old.test.ts: failed in the full run, passed alone: likely load\nburn-in: test/real.test.ts: failed in 3 of 10 copies at once (copies 2 3 7), in 19 s\nland: refused: a new or changed test failed its burn-in in CI (https://x/4): test/real.test.ts failed in 3 of 10 copies at once, so it never reached the full suite`;
   const c = classifyLandFailure(out);
   assert.equal(c?.kind, 'burn-in');
@@ -54,7 +54,7 @@ test('after a retry in place (#1360), only the second attempt is read: its real 
   assert.equal(kind(`${first}\nland: back at the front\nrun-tests: test/a.test.ts: failed in the full run, passed alone: likely load\nland: refused by the pipeline again`), 'passed-alone');
 });
 
-test('a repo-wide snapshot or budget test, and the change\'s own test', () => {
+test("a repo-wide snapshot or budget test, and the change's own test", () => {
   const head = (f: string) => `✖ test/${f} › something › case (12ms)\nland: tests failed on the rebased branch (full log: /x), so main is untouched`;
   for (const f of ['prompt-budget.test.ts', 'access-matrix.test.ts', 'schema-compat.test.ts']) assert.equal(kind(head(f)), 'always-test');
   const own = classifyLandFailure(`land: smoke: ✖ test/land-units.test.ts › a › b (4ms)\nland: smoke: tests failed (exit 1), before the line (30 s), so nothing landed`);
@@ -62,7 +62,7 @@ test('a repo-wide snapshot or budget test, and the change\'s own test', () => {
   assert.match(own!.line, /land-units\.test\.ts/);
 });
 
-test('anything else is unknown (null), so the wake keeps today\'s text', () => {
+test("anything else is unknown (null), so the wake keeps today's text", () => {
   assert.equal(kind('land: tools/land.sh exited 1\nsomething odd'), null);
   assert.equal(kind(''), null);
 });
@@ -71,9 +71,9 @@ test('a file land.sh would not call passed alone makes the red real, whatever el
   const ok = 'run-tests: test/a.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 9.1)';
   const end = 'land: tests failed on the rebased branch in CI (https://x/4), so main is untouched';
   for (const bad of [
-    'run-tests: test/b.test.ts: rerun alone stopped after 40s, when CI\'s answer was due: counts as a real failure',
-    'run-tests: test/b.test.ts: not rerun: the reruns\' 300s ran out',
-    'run-tests: test/b.test.ts: not rerun: CI\'s answer is due (land.sh stops waiting then), so the run counts as a real red',
+    "run-tests: test/b.test.ts: rerun alone stopped after 40s, when CI's answer was due: counts as a real failure",
+    "run-tests: test/b.test.ts: not rerun: the reruns' 300s ran out",
+    "run-tests: test/b.test.ts: not rerun: CI's answer is due (land.sh stops waiting then), so the run counts as a real red",
     'run-tests: test/b.test.ts: not rerun: a real failure already makes this run red',
   ])
     assert.notEqual(kind(`${ok}\n${bad}\n${end}`), 'passed-alone', bad);

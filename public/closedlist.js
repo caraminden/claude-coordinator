@@ -22,7 +22,10 @@ export function setClosedTotal(list, total) {
 }
 
 /** What a scheme left in the page cache carries back with it: the pages read so far. */
-export const closedSnapshot = (list) => { const { total, cursor, more } = closedState(list); return { total, cursor, more }; };
+export const closedSnapshot = (list) => {
+  const { total, cursor, more } = closedState(list);
+  return { total, cursor, more };
+};
 export function restoreClosed(list, snap) {
   if (snap) Object.assign(closedState(list), snap);
 }
@@ -37,7 +40,10 @@ export const closedCount = (list = view.tickets) => Math.max(closedState(list).t
 export function noteTicketChange(before, ticket) {
   const s = closedState();
   // A minion the page never read, now open and not just created: it was dismissed and reopened, so the count drops (a new minion is minutes old).
-  if (!before) { if (ticket.status !== 'closed' && ticket.created_at < Date.now() - 300_000) s.total = Math.max(0, s.total - 1); return; }
+  if (!before) {
+    if (ticket.status !== 'closed' && ticket.created_at < Date.now() - 300_000) s.total = Math.max(0, s.total - 1);
+    return;
+  }
   if (before.status !== 'closed' && ticket.status === 'closed') s.total++;
   else if (before.status === 'closed' && ticket.status !== 'closed') s.total = Math.max(0, s.total - 1);
 }
@@ -61,30 +67,47 @@ export function loadMoreClosed(list = view.tickets) {
   if (!s.more) return Promise.resolve(true);
   const { projectId } = view;
   const q = new URLSearchParams({ tickets: 'closed', limit: String(CLOSED_PAGE) });
-  if (s.cursor) { q.set('before', s.cursor.t); q.set('before_id', s.cursor.id); }
+  if (s.cursor) {
+    q.set('before', s.cursor.t);
+    q.set('before_id', s.cursor.id);
+  }
   s.failed = false;
-  const run = (s.busy = api(`api/projects/${projectId}?${q}`).then((r) => {
-    if (view?.kind !== 'project' || view.tickets !== list) return false; // another scheme's load owns the page now
-    // The stream may have brought a fresher copy meanwhile (one reopened, say): that one stays.
-    for (const t of r.tickets) if (!list.has(t.id)) list.set(t.id, t);
-    const last = r.tickets.at(-1);
-    if (last) s.cursor = { t: last.updated_at, id: last.id };
-    s.more = !!r.more;
-    if (typeof r.dismissed === 'number') s.total = r.dismissed;
-    return true;
-  }, () => { s.failed = true; return false; }).finally(() => { if (s.busy === run) s.busy = null; }));
+  const run = (s.busy = api(`api/projects/${projectId}?${q}`)
+    .then(
+      (r) => {
+        if (view?.kind !== 'project' || view.tickets !== list) return false; // another scheme's load owns the page now
+        // The stream may have brought a fresher copy meanwhile (one reopened, say): that one stays.
+        for (const t of r.tickets) if (!list.has(t.id)) list.set(t.id, t);
+        const last = r.tickets.at(-1);
+        if (last) s.cursor = { t: last.updated_at, id: last.id };
+        s.more = !!r.more;
+        if (typeof r.dismissed === 'number') s.total = r.dismissed;
+        return true;
+      },
+      () => {
+        s.failed = true;
+        return false;
+      },
+    )
+    .finally(() => {
+      if (s.busy === run) s.busy = null;
+    }));
   return run;
 }
 
 /** Read pages until `done()` or none are left; false if one failed. */
 async function loadUntil(list, done) {
   const s = closedState(list);
-  while (s.more && !done()) if (!await loadMoreClosed(list)) return false;
+  while (s.more && !done()) if (!(await loadMoreClosed(list))) return false;
   return true;
 }
 
 /** Every dismissed minion updated after `since` (the recap's). */
-export const loadClosedSince = (since) => loadUntil(view.tickets, () => { const c = closedState().cursor; return c && c.t <= since; });
+export const loadClosedSince = (since) =>
+  loadUntil(view.tickets, () => {
+    const c = closedState().cursor;
+    return c && c.t <= since;
+  });
 /** All of them (a property filter has to look at every row). */
 export const loadAllClosed = () => loadUntil(view.tickets, () => false);
 

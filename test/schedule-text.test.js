@@ -14,12 +14,11 @@ test('the summary is the first paragraph that is not a heading, cut at a sentenc
 });
 
 test('the skills are the kit and repo skills its brief names, each once', () => {
-  assert.deepEqual(briefSkills('Use citadel:research, then citadel:research again and .claude/skills/every-scheme/SKILL.md. Not citadel: alone.'),
-    ['citadel:research', 'every-scheme']);
+  assert.deepEqual(briefSkills('Use citadel:research, then citadel:research again and .claude/skills/every-scheme/SKILL.md. Not citadel: alone.'), ['citadel:research', 'every-scheme']);
   assert.deepEqual(briefSkills('No skills here.'), []);
 });
 
-test('standard audits come first, then the scheme\'s own split by category with Other last, paused last', () => {
+test("standard audits come first, then the scheme's own split by category with Other last, paused last", () => {
   const rows = [
     { id: 1, template: 'code-health', category: 'Code', paused: 0, next_run_at: 50 },
     { id: 2, template: null, category: '', paused: 0, next_run_at: 10 },
@@ -30,7 +29,14 @@ test('standard audits come first, then the scheme\'s own split by category with 
   const shape = groupSchedules(rows).map(([title, , cats]) => [title, cats.map(([c, xs]) => [c, xs.map((s) => s.id)])]);
   assert.deepEqual(shape, [
     ['Standard audits', [['Code', [1]]]],
-    ["This scheme's own", [['Apps', [5]], ['Ideas', [4, 3]], ['Other', [2]]]],
+    [
+      "This scheme's own",
+      [
+        ['Apps', [5]],
+        ['Ideas', [4, 3]],
+        ['Other', [2]],
+      ],
+    ],
   ]);
   assert.deepEqual(groupSchedules([]), []);
 });

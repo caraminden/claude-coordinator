@@ -22,14 +22,17 @@ process.env.CLAUDE_CONFIG_DIR = join(root, 'host-claude');
 const bin = join(root, 'bin');
 mkdirSync(bin);
 // A fake podman whose exec runs on the host, as in person-switch-session.test.ts.
-writeFileSync(join(bin, 'podman'), `#!${process.execPath}
+writeFileSync(
+  join(bin, 'podman'),
+  `#!${process.execPath}
 const { spawn } = require('node:child_process');
 const args = process.argv.slice(2);
 if (args[0] !== 'exec') process.exit(0);
 require('node:fs').appendFileSync(${JSON.stringify(join(root, 'seen.jsonl'))}, JSON.stringify({ who: 'podman', args }) + '\\n');
 const [cmd, ...rest] = args.slice(3);
 spawn(cmd === 'node' ? process.execPath : cmd, rest, { detached: true, stdio: 'ignore' }).unref();
-`);
+`,
+);
 chmodSync(join(bin, 'podman'), 0o755);
 
 // What each turn got: claude's args and prompt, codex's requests.
@@ -37,7 +40,9 @@ const seen = join(root, 'seen.jsonl');
 const mode = join(root, 'mode');
 const record = (who: string) => `(m) => require('node:fs').appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ who: ${JSON.stringify(who)}, ...m }) + '\\n')`;
 const claude = join(root, 'claude-fake');
-writeFileSync(claude, `#!${process.execPath}
+writeFileSync(
+  claude,
+  `#!${process.execPath}
 const { appendFileSync, existsSync, mkdirSync, readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const record = ${record('claude')};
@@ -65,9 +70,12 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done', session_id: id }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(claude, 0o755);
-writeFileSync(join(bin, 'codex'), `#!${process.execPath}
+writeFileSync(
+  join(bin, 'codex'),
+  `#!${process.execPath}
 const { existsSync, readFileSync } = require('node:fs');
 const record = ${record('codex')};
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
@@ -89,7 +97,8 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   note('item/completed', { item: { type: 'agentMessage', id: 'm1', text: 'CODEX REPLY' } });
   note('turn/completed', { turn: { id: 'tu1', status: 'completed' } });
 });
-`);
+`,
+);
 chmodSync(join(bin, 'codex'), 0o755);
 process.env.PATH = `${bin}:${process.env.PATH}`;
 
@@ -109,7 +118,12 @@ const caraPlace = { host: false as const, container: 'citadel-claude-test-cara',
 let caraContainer = true;
 
 function runner() {
-  const r = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 'secret' }), claude);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({ COORDINATOR_TOKEN: 'secret' }),
+    claude,
+  );
   r.pollMs = 10;
   r.limitDelayMs = 0;
   r.personOf = (author) => (author === 'Josh' ? josh.id : author === 'Cara' ? cara.id : null);
@@ -119,7 +133,11 @@ function runner() {
   return r;
 }
 const calls = () => jsonLines(seen);
-const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+const notes = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
 const turnStarts = () => calls().filter((c) => c.who === 'claude' || c.method === 'turn/start');
 function minion(n: number) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Josh' });
@@ -163,7 +181,10 @@ test('the switch moves a minion to Codex with its Claude conversation, keeps the
   const resumed = calls().filter((c) => c.method === 'thread/resume');
   assert.equal(resumed.length, 1);
   assert.equal(resumed[0].params.threadId, 'th1');
-  const third = calls().filter((c) => c.method === 'turn/start')[1].params.input.map((i: any) => i.text).join('\n');
+  const third = calls()
+    .filter((c) => c.method === 'turn/start')[1]
+    .params.input.map((i: any) => i.text)
+    .join('\n');
   assert.doesNotMatch(third, /<conversation>/, 'a resumed thread needs no hand-over');
 
   assert.equal(r.setCodexSwitch(josh.id, false), null);
@@ -177,7 +198,7 @@ test('the switch moves a minion to Codex with its Claude conversation, keeps the
   assert.equal(store.getSetting(codexThreadKey(t.id)), null, 'Claude has the Codex turns now');
 });
 
-test("a hand-back Claude turn that fails keeps the Codex turns but not their thread, so Codex starts afresh from the hand-over", async () => {
+test('a hand-back Claude turn that fails keeps the Codex turns but not their thread, so Codex starts afresh from the hand-over', async () => {
   rmSync(seen, { force: true });
   rmSync(mode, { force: true });
   const t = minion(4);
@@ -192,7 +213,7 @@ test("a hand-back Claude turn that fails keeps the Codex turns but not their thr
   r.send(t.id, 'Josh', 'back on claude');
   await until('turnStarts().length === 2 && idle(t.id)()', () => turnStarts().length === 2 && idle(t.id)());
   const kept = store.getSetting<CodexThread>(codexThreadKey(t.id))!;
-  assert.equal(kept.thread, null, "its thread never saw the Claude turn");
+  assert.equal(kept.thread, null, 'its thread never saw the Claude turn');
   assert.match(kept.log, /on codex/);
   r.cancelLimitWait(t.id);
 
@@ -202,7 +223,10 @@ test("a hand-back Claude turn that fails keeps the Codex turns but not their thr
   await until('turnStarts().length === 3 && idle(t.id)()', () => turnStarts().length === 3 && idle(t.id)());
   assert.equal(calls().filter((c) => c.method === 'thread/resume').length, 0);
   assert.equal(calls().filter((c) => c.method === 'thread/start').length, 2);
-  const said = calls().filter((c) => c.method === 'turn/start')[1].params.input.map((i: any) => i.text).join('\n');
+  const said = calls()
+    .filter((c) => c.method === 'turn/start')[1]
+    .params.input.map((i: any) => i.text)
+    .join('\n');
   assert.match(said, /<conversation>[\s\S]*on codex[\s\S]*<\/conversation>[\s\S]*codex again/);
   r.setCodexSwitch(josh.id, false);
 });
@@ -217,7 +241,7 @@ test("a Codex pick by someone without Codex runs on Claude's default, saying why
   await until('turnStarts().length === 1 && idle(t.id)()', () => turnStarts().length === 1 && idle(t.id)());
   signedIn = true;
   assert.equal(turnStarts()[0].who, 'claude');
-  assert.equal(turnStarts()[0].model, null, "no Codex model reaches claude");
+  assert.equal(turnStarts()[0].model, null, 'no Codex model reaches claude');
   assert.equal(turnStarts()[0].codexImages, null, 'no Codex images without a Codex sign-in');
   assert.ok(notes(t.id).some((n) => n.includes('set to GPT-6 Luna, but you are not signed in to Codex')));
 });
@@ -238,14 +262,22 @@ test('the server login runs its Codex turns in its own container, from its Claud
   const exec = calls().find((c) => c.who === 'podman')!.args;
   assert.deepEqual(exec.slice(0, 3), ['exec', '-d', caraPlace.container]);
   assert.ok(exec.at(-1).startsWith(caraPlace.turnsDir + '/'), `its turn folder is the one her container mounts: ${exec.at(-1)}`);
-  const said = calls().find((c) => c.method === 'turn/start').params.input.map((i: any) => i.text).join('\n');
+  const said = calls()
+    .find((c) => c.method === 'turn/start')
+    .params.input.map((i: any) => i.text)
+    .join('\n');
   assert.match(said, /\[Message\] \[Cara\]: first ask[\s\S]*\[Claude\] CLAUDE REPLY/, 'the hand-over is her host Claude conversation');
 
   r.setCodexSwitch(cara.id, false);
   r.send(t.id, 'Cara', 'third ask');
   await until('turnStarts().length === 3 && idle(t.id)()', () => turnStarts().length === 3 && idle(t.id)());
   assert.equal(calls().filter((c) => c.who === 'podman').length, 1, 'back on Claude, on the host');
-  assert.match(calls().filter((c) => c.who === 'claude').at(-1).text, /CODEX REPLY/);
+  assert.match(
+    calls()
+      .filter((c) => c.who === 'claude')
+      .at(-1).text,
+    /CODEX REPLY/,
+  );
 });
 
 test("the server login's Codex turn runs on Claude, saying why, until its container is there; never Codex on the host", async () => {
@@ -279,7 +311,10 @@ test("switching on carries a minion waiting out Claude's limit on at once, on Co
   writeFileSync(mode, 'codex-limit');
   assert.equal(r.setCodexSwitch(josh.id, true), null);
   await until("calls().some((c) => c.method === 'turn/start') && idle(t.id)() && ...", () => calls().some((c) => c.method === 'turn/start') && idle(t.id)() && store.getTicket(t.id)!.state === 'limited');
-  const said = calls().find((c) => c.method === 'turn/start').params.input.map((i: any) => i.text).join('\n');
+  const said = calls()
+    .find((c) => c.method === 'turn/start')
+    .params.input.map((i: any) => i.text)
+    .join('\n');
   assert.match(said, /switched to Codex/);
   assert.ok(notes(t.id).includes('Resumed on Codex: its person switched to Codex'));
   // Codex's window resets in two hours (the fake's), not at Claude's stated reset, five to six hours out.

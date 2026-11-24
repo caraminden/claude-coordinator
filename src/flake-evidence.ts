@@ -54,7 +54,10 @@ export function failuresIn(rawLog: string): { file: string; name: string; messag
     const body: string[] = [];
     for (let j = i + 1; j < lines.length && !/^test at /.test(lines[j]); j++) {
       const l = lines[j];
-      if (!name && /^✖ /.test(l)) { name = l.slice(2).replace(/\s*\([\d.]+ms\)\s*$/, ''); continue; }
+      if (!name && /^✖ /.test(l)) {
+        name = l.slice(2).replace(/\s*\([\d.]+ms\)\s*$/, '');
+        continue;
+      }
       if (/^\s+at /.test(l) || (l.trim() && !/^\s/.test(l))) break; // the stack, or the run's own next line
       body.push(l);
     }
@@ -67,7 +70,11 @@ export function failuresIn(rawLog: string): { file: string; name: string; messag
 
 type Gh = (path: string) => Promise<string | null>;
 export const ghText: (as: GithubEnv) => Gh = (as) => async (path) => {
-  try { return (await run('gh', ['api', '--allow-escape-sequences', path], { env: asEnv(as), timeout: 60_000, maxBuffer: 32 * 1024 * 1024 })).stdout; } catch { return null; }
+  try {
+    return (await run('gh', ['api', '--allow-escape-sequences', path], { env: asEnv(as), timeout: 60_000, maxBuffer: 32 * 1024 * 1024 })).stdout;
+  } catch {
+    return null;
+  }
 };
 
 /**
@@ -78,12 +85,19 @@ export async function ciEvidence(slug: string, as: GithubEnv, branch: string, fi
   const runs: { id: number; created_at: string; conclusion: string | null }[] = [];
   for (const b of [`land/${branch}`, branch]) {
     const body = await get(`repos/${slug}/actions/runs?branch=${encodeURIComponent(b)}&per_page=10`);
-    try { runs.push(...(JSON.parse(body ?? '{}').workflow_runs ?? [])); } catch {}
+    try {
+      runs.push(...(JSON.parse(body ?? '{}').workflow_runs ?? []));
+    } catch {}
   }
-  const red = runs.filter((r) => r.conclusion === 'failure' && Date.parse(r.created_at) <= at).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 3);
+  const red = runs
+    .filter((r) => r.conclusion === 'failure' && Date.parse(r.created_at) <= at)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+    .slice(0, 3);
   for (const r of red) {
     let jobs: { id: number; conclusion: string | null }[] = [];
-    try { jobs = JSON.parse((await get(`repos/${slug}/actions/runs/${r.id}/jobs`)) ?? '{}').jobs ?? []; } catch {}
+    try {
+      jobs = JSON.parse((await get(`repos/${slug}/actions/runs/${r.id}/jobs`)) ?? '{}').jobs ?? [];
+    } catch {}
     for (const j of jobs.filter((x) => x.conclusion === 'failure')) {
       const log = await get(`repos/${slug}/actions/jobs/${j.id}/logs`);
       const found = log && failureIn(log, file);

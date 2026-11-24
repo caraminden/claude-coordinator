@@ -82,9 +82,15 @@ export async function trimCache(dir: string, cap: number): Promise<{ removed: nu
   entries.sort((a, b) => a.used - b.used);
   for (const e of entries) {
     if (out.left <= cap) break;
-    const err = await unlink(e.path).then(() => null, (x: NodeJS.ErrnoException) => x);
+    const err = await unlink(e.path).then(
+      () => null,
+      (x: NodeJS.ErrnoException) => x,
+    );
     if (err && err.code !== 'ENOENT') continue; // still there, so it still counts
-    if (!err) { out.removed++; out.freed += e.size; }
+    if (!err) {
+      out.removed++;
+      out.freed += e.size;
+    }
     out.left -= e.size;
   }
   return out;

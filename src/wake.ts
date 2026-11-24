@@ -57,10 +57,17 @@ export function groupRelays(rs: Relay[]): Relay[][] {
 export function relayDests(rs: Relay[]): string {
   const nums = [...new Set(rs.flatMap((r) => ('minion' in r.to ? [r.to.number] : [])))].sort((a, b) => a - b);
   const runs: string[] = [];
-  for (let i = 0; i < nums.length;) {
+  for (let i = 0; i < nums.length; ) {
     let j = i;
     while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
-    runs.push(j - i >= 2 ? `#${nums[i]}–#${nums[j]}` : nums.slice(i, j + 1).map((n) => `#${n}`).join(', '));
+    runs.push(
+      j - i >= 2
+        ? `#${nums[i]}–#${nums[j]}`
+        : nums
+            .slice(i, j + 1)
+            .map((n) => `#${n}`)
+            .join(', '),
+    );
     i = j + 1;
   }
   return [...runs, ...new Set(rs.flatMap((r) => ('scheme' in r.to ? [r.to.scheme] : [])))].join(', ');
@@ -163,8 +170,7 @@ export function githubPrs(as: (repo: string) => GithubEnv = () => undefined, mis
   };
   return {
     // Keyed by the tip too: a new commit on the branch may mean a new PR.
-    branch: (repo, branch, tip) => ask(repo, `${repo}\0${branch}\0${tip}`,
-      ['pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', 'number,state,headRefOid,mergeCommit'], mergedPr),
+    branch: (repo, branch, tip) => ask(repo, `${repo}\0${branch}\0${tip}`, ['pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', 'number,state,headRefOid,mergeCommit'], mergedPr),
     commit: (repo, commit) => ask(repo, `${repo}\0${commit}`, ['api', `repos/{owner}/{repo}/commits/${commit}/pulls`], mergedPrOf),
     forget: () => {
       forgets++;
@@ -211,8 +217,11 @@ async function git(dir: string, args: string[]): Promise<string | null> {
 export async function within(repo: string, ref: string, tip: string): Promise<string | null> {
   if ((await git(repo, ['merge-base', '--is-ancestor', tip, ref])) !== null) return tip;
   // Each side's commits that change something, as '=' (has a twin) or '+' and the hash: empty commits all share one patch id.
-  const marks = async (side: string) => ((await git(repo, ['log', '--cherry-mark', side, '--no-merges', '--topo-order', '--raw', '--format=%x00%m%H', `${ref}...${tip}`])) ?? '')
-    .split('\0').filter((c) => c.includes('\n:')).map((c) => c.slice(0, c.indexOf('\n')));
+  const marks = async (side: string) =>
+    ((await git(repo, ['log', '--cherry-mark', side, '--no-merges', '--topo-order', '--raw', '--format=%x00%m%H', `${ref}...${tip}`])) ?? '')
+      .split('\0')
+      .filter((c) => c.includes('\n:'))
+      .map((c) => c.slice(0, c.indexOf('\n')));
   const own = await marks('--right-only');
   if (!own.length || own.some((m) => !m.startsWith('='))) return null;
   return (await marks('--left-only')).find((m) => m.startsWith('='))?.slice(1) ?? null;
@@ -238,11 +247,14 @@ export async function touchedSince(repo: string, branch: string, files: string[]
   for (const ref of [`refs/heads/${branch}`, `refs/remotes/origin/${branch}`]) if ((await git(repo, ['rev-parse', '-q', '--verify', `${ref}^{commit}`])) !== null) refs.push(ref);
   if (!refs.length || !files.length) return [];
   const out = await git(repo, ['log', '--no-merges', '-n', '10', `--since=@${Math.floor(since / 1000)}`, '--format=%x00%H%x09%s', '--name-only', ...refs, '--', ...files]);
-  return (out ?? '').split('\0').filter(Boolean).map((c) => {
-    const [head, ...names] = c.split('\n');
-    const [sha, subject = ''] = head.split('\t');
-    return { sha, subject, files: names.filter((n) => files.includes(n)) };
-  });
+  return (out ?? '')
+    .split('\0')
+    .filter(Boolean)
+    .map((c) => {
+      const [head, ...names] = c.split('\n');
+      const [sha, subject = ''] = head.split('\t');
+      return { sha, subject, files: names.filter((n) => files.includes(n)) };
+    });
 }
 
 /** Whether the server running `head` runs this scheme's code: that commit is in the scheme's repo. */
@@ -325,8 +337,15 @@ export class LiveWaiters {
   }
 
   private chainOf = (r: Delivery): Chain => ({
-    ticket: r.to_id, after: r.when_arg.after, when: r.when_kind as Chain['when'], message: r.payload.message, from: r.payload.from, base: r.when_arg.base ?? null,
-    ...(r.when_arg.since != null ? { since: r.when_arg.since } : {}), ...(r.payload.told ? { held: true } : {}), id: r.id,
+    ticket: r.to_id,
+    after: r.when_arg.after,
+    when: r.when_kind as Chain['when'],
+    message: r.payload.message,
+    from: r.payload.from,
+    base: r.when_arg.base ?? null,
+    ...(r.when_arg.since != null ? { since: r.when_arg.since } : {}),
+    ...(r.payload.told ? { held: true } : {}),
+    id: r.id,
   });
 
   private chainRow(c: Chain, origin?: string): NewDelivery {
@@ -353,7 +372,11 @@ export class LiveWaiters {
     // A follower the table already has (a dev seed wrote the key again) keeps its row; a deleted follower's chain goes, as the old check dropped it.
     const live = new Set(this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held', 'sending'] }).map((r) => r.to_id));
     const move = [...new Map(old.map((c) => [c.ticket, c])).values()].filter((c) => !live.has(c.ticket) && this.store.getTicket(c.ticket));
-    this.store.importDeliveries(CHAINS, move.map((c) => this.chainRow(c, `${CHAINS}:${createHash('sha256').update(JSON.stringify(c)).digest('hex').slice(0, 16)}`)), this.outbox.clock());
+    this.store.importDeliveries(
+      CHAINS,
+      move.map((c) => this.chainRow(c, `${CHAINS}:${createHash('sha256').update(JSON.stringify(c)).digest('hex').slice(0, 16)}`)),
+      this.outbox.clock(),
+    );
   }
 
   /** The outbox's send of met chain rows, on the follower's lane: each start's brief event, or retry (a dismissed follower is then held by the outbox). */
@@ -401,7 +424,11 @@ export class LiveWaiters {
   private migrateRelays() {
     const old = this.store.getSetting<Relay[]>(RELAYS);
     if (!old?.length || !this.outbox) return;
-    this.store.importDeliveries(RELAYS, old.map((r) => this.relayRow(r, createHash('sha256').update(JSON.stringify(r)).digest('hex').slice(0, 16))), this.outbox.clock());
+    this.store.importDeliveries(
+      RELAYS,
+      old.map((r) => this.relayRow(r, createHash('sha256').update(JSON.stringify(r)).digest('hex').slice(0, 16))),
+      this.outbox.clock(),
+    );
   }
 
   private relayRow(r: Relay, hash?: string): NewDelivery {
@@ -454,13 +481,20 @@ export class LiveWaiters {
    */
   chains(): Chain[] {
     // Read once in a request's read scope (src/read-scope.ts): a scheme's list asked four times a minion (#1527).
-    return [...scoped(this.store.db, 'wake:chains', () => {
-      const old = this.store.getSetting<Chain[]>(CHAINS) ?? [];
-      const rows = this.outbox ? this.store.listDeliveries({ kind: 'chain', states: ['waiting', 'held', 'sending'] }).filter((r) => r.state !== 'sending' || r.event_id == null).map(this.chainOf) : [];
-      const all = [...old.filter((c) => !rows.some((r) => r.ticket === c.ticket)), ...rows];
-      this.store.warmTickets(all.map((c) => c.after)); // the leaders chainWhat names, in one read
-      return all;
-    })];
+    return [
+      ...scoped(this.store.db, 'wake:chains', () => {
+        const old = this.store.getSetting<Chain[]>(CHAINS) ?? [];
+        const rows = this.outbox
+          ? this.store
+              .listDeliveries({ kind: 'chain', states: ['waiting', 'held', 'sending'] })
+              .filter((r) => r.state !== 'sending' || r.event_id == null)
+              .map(this.chainOf)
+          : [];
+        const all = [...old.filter((c) => !rows.some((r) => r.ticket === c.ticket)), ...rows];
+        this.store.warmTickets(all.map((c) => c.after)); // the leaders chainWhat names, in one read
+        return all;
+      }),
+    ];
   }
 
   /** The repo of `ticket`'s scheme, when this server doesn't run its code: there live means merged. */
@@ -641,7 +675,11 @@ export class LiveWaiters {
   release(ticket: number): Chain | null {
     const all = this.chains();
     const c = all.find((o) => o.ticket === ticket) ?? null;
-    if (c) this.store.setSetting(CHAINS, all.filter((o) => o !== c));
+    if (c)
+      this.store.setSetting(
+        CHAINS,
+        all.filter((o) => o !== c),
+      );
     return c;
   }
 
@@ -744,7 +782,10 @@ export class LiveWaiters {
     const old = this.store.getSetting<Relay[]>(RELAYS) ?? [];
     const o = old.find((x) => x.id === id && x.ticket === ticket);
     if (o) {
-      this.store.setSetting(RELAYS, old.filter((x) => x !== o));
+      this.store.setSetting(
+        RELAYS,
+        old.filter((x) => x !== o),
+      );
       return o;
     }
     const row = this.outbox && this.store.listDeliveries({ kind: 'relay', states: ['waiting', 'held'] }).find((d) => d.id === id && d.payload.ticket === ticket);
@@ -778,7 +819,10 @@ export class LiveWaiters {
     const now = old();
     const go = ready.filter((r) => now.some((o) => o.id === r.id));
     if (!go.length) return;
-    this.store.setSetting(RELAYS, now.filter((r) => !go.some((o) => o.id === r.id)));
+    this.store.setSetting(
+      RELAYS,
+      now.filter((r) => !go.some((o) => o.id === r.id)),
+    );
     for (const r of go) {
       try {
         this.deliver(r);
@@ -870,10 +914,20 @@ export class LiveWaiters {
     } while (w.since !== this.head);
     if (this.outbox) {
       const t = this.store.getTicket(ticket);
-      this.store.setSetting(KEY, this.legacy().filter((o) => o.ticket !== ticket || o.commit !== commit)); // a re-add replaces an unmigrated one
+      this.store.setSetting(
+        KEY,
+        this.legacy().filter((o) => o.ticket !== ticket || o.commit !== commit),
+      ); // a re-add replaces an unmigrated one
       this.outbox.add({
-        project_id: t?.project_id ?? 0, kind: 'wake_when_live', to_kind: 'minion', to_id: ticket, when_kind: (await this.elsewhere(ticket)) ? 'merged' : 'live', when_arg: commit,
-        payload: { reason, since: w.since, ...(light ? { light: true } : {}) }, set_by: `minion:${ticket}`, dedupe_key: `${ticket}:${commit ?? ''}`,
+        project_id: t?.project_id ?? 0,
+        kind: 'wake_when_live',
+        to_kind: 'minion',
+        to_id: ticket,
+        when_kind: (await this.elsewhere(ticket)) ? 'merged' : 'live',
+        when_arg: commit,
+        payload: { reason, since: w.since, ...(light ? { light: true } : {}) },
+        set_by: `minion:${ticket}`,
+        dedupe_key: `${ticket}:${commit ?? ''}`,
       });
       return true;
     }
@@ -904,9 +958,7 @@ export class LiveWaiters {
   private async checkNow(): Promise<number> {
     const head = this.head;
     const short = (c: string) => c.slice(0, 7);
-    const text = async (w: Waiter) =>
-      w.commit && (await this.elsewhere(w.ticket)) ? `\`${short(w.commit)}\` is on the scheme's main now: ${w.reason}`
-      : `${w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now'} (the server runs \`${short(head!)}\`): ${w.reason}`;
+    const text = async (w: Waiter) => (w.commit && (await this.elsewhere(w.ticket)) ? `\`${short(w.commit)}\` is on the scheme's main now: ${w.reason}` : `${w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now'} (the server runs \`${short(head!)}\`): ${w.reason}`);
     // The table's waits: the check finds one live, the outbox sends it (and retries a send that throws). A wait of a dismissed minion is the outbox's to hold.
     let met = 0;
     for (const r of this.rows()) {
@@ -1037,7 +1089,13 @@ export const MAX_WAKES = 20;
 export const MAX_AHEAD_MS = 90 * 86_400_000;
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
-export interface TimedWake { id: number; ticket: number; at: number; note: string; setBy: string }
+export interface TimedWake {
+  id: number;
+  ticket: number;
+  at: number;
+  note: string;
+  setBy: string;
+}
 
 /** `ms` as "Tue 18 Nov, 09:00 PST": every time people read is Pacific. */
 export const pacificTime = pacificWeekday;
@@ -1075,10 +1133,7 @@ export class TimedWakes {
         rows.map((r) => {
           const at = Number(r.when_arg);
           // A retry isn't late from downtime: the boot only says so for a wake never tried before it.
-          const late =
-            r.reason === 'target closed' ? ' (it came due while this minion was dismissed)'
-            : r.attempts === 0 && at < ctx.bootAt && ctx.now - at >= 60_000 ? ` (${span(ctx.now - at)} late: the server was down when it came due)`
-            : '';
+          const late = r.reason === 'target closed' ? ' (it came due while this minion was dismissed)' : r.attempts === 0 && at < ctx.bootAt && ctx.now - at >= 60_000 ? ` (${span(ctx.now - at)} late: the server was down when it came due)` : '';
           return ctx.send(r, `Wake you set for ${pacificTime(at)}${late}: ${r.payload.note}`);
         }),
     });

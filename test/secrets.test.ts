@@ -34,7 +34,9 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 // A stand-in `claude -p`: records each turn's prompt, its token and a hash of every CITADEL_SECRET_* it was given
 // (never the value), and, asked to "echo it", says the value out loud, as a careless minion might.
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createHash } = require('node:crypto');
 const { createInterface } = require('node:readline');
@@ -55,7 +57,8 @@ createInterface({ input: process.stdin }).once('line', (line) => {
   } else console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 // People made before the server starts, on its database; the scheme and a contraption once it runs.
@@ -66,7 +69,6 @@ const Dana = store.createUser({ name: 'Dana', login: 'dana' });
 for (const u of [Josh, Dana]) store.updateUser(u.id, { password_hash: await hashPassword(PASSWORD) });
 let P: any;
 let KEY = '';
-
 
 let base = '';
 const cookies: Record<string, string> = {};
@@ -110,7 +112,9 @@ before(async () => {
   base = srv.base;
   cookies.Cara = srv.cookie;
   procs.push(srv.proc);
-  srv.proc.stdout!.on('data', (b) => { out += b; });
+  srv.proc.stdout!.on('data', (b) => {
+    out += b;
+  });
   for (const name of ['Josh', 'Dana']) {
     const res = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ login: name.toLowerCase(), password: PASSWORD }) });
     cookies[name] = res.headers.get('set-cookie')!.split(';')[0];
@@ -142,7 +146,7 @@ test('a saved secret never reaches the chat, the events, the files or the prompt
 
   const turn = turns().at(-1);
   const prompt = JSON.stringify(turn.prompt);
-  assert.ok(!prompt.includes(VALUE), 'the value is in the turn\'s prompt');
+  assert.ok(!prompt.includes(VALUE), "the value is in the turn's prompt");
   assert.match(prompt, /saved as `SITE_PW`/);
   assert.match(prompt, /\$CITADEL_SECRET_SITE_PW/);
   assert.equal(turn.secrets.CITADEL_SECRET_SITE_PW, sha(VALUE), 'the turn got the value in its env');
@@ -169,7 +173,7 @@ test('a secret said out loud in a turn is hidden in the chat', async () => {
   assert.ok(!out.includes(VALUE), 'the server printed the value said in a turn');
 });
 
-test('a failed turn\'s stderr in the chat has its secrets hidden', async () => {
+test("a failed turn's stderr in the chat has its secrets hidden", async () => {
   const before = turns().length;
   await ok(`/api/tickets/${ticket.id}/messages`, { body: { text: 'fail loudly' } });
   await until('the failing turn', () => turns().length > before);
@@ -179,9 +183,9 @@ test('a failed turn\'s stderr in the chat has its secrets hidden', async () => {
   assert.ok(!events.includes(VALUE), 'the stderr quoted in the chat holds the value');
 });
 
-test('a person\'s own secrets go only to turns they sent themselves; a minion\'s message gets the scheme\'s alone', async () => {
+test("a person's own secrets go only to turns they sent themselves; a minion's message gets the scheme's alone", async () => {
   const other = await ok(`/api/projects/${P.id}/tickets`, { body: { message: 'another minion' } });
-  await until('the other minion\'s turn', () => turns().some((t) => t.token === agentToken(data, other.id)));
+  await until("the other minion's turn", () => turns().some((t) => t.token === agentToken(data, other.id)));
   await until('it to end', async () => (await ok(`/api/tickets/${other.id}`)).ticket.status !== 'running');
   const before = turns().length;
   await ok(`/api/tickets/${other.id}/minion-message`, { token: agentToken(data, other.id), body: { to: ticket.number, text: 'a relay from another minion' } });
@@ -189,7 +193,7 @@ test('a person\'s own secrets go only to turns they sent themselves; a minion\'s
   await idle();
   const turn = turns().at(-1);
   assert.match(JSON.stringify(turn.prompt), /a relay from another minion/);
-  assert.equal(turn.secrets.CITADEL_SECRET_SITE_PW, undefined, 'a minion\'s message carried Cara\'s own secret');
+  assert.equal(turn.secrets.CITADEL_SECRET_SITE_PW, undefined, "a minion's message carried Cara's own secret");
   assert.equal(turn.secrets.CITADEL_SECRET_AZURE_KEY, sha(SCHEME_VALUE));
   assert.equal(turn.names, 'AZURE_KEY');
 });
@@ -200,11 +204,17 @@ test('a secret card can go to one person; NAMES is taken', async () => {
   assert.equal((await call('/api/secrets', { method: 'PUT', body: { scope: 'person', name: 'names', value: 'x' } })).status, 400);
 });
 
-test('people list, replace and delete their own secrets; a scheme\'s are its members\'', async () => {
+test("people list, replace and delete their own secrets; a scheme's are its members'", async () => {
   const mine = await ok('/api/secrets');
   assert.ok(!JSON.stringify(mine).includes(VALUE) && !JSON.stringify(mine).includes(SCHEME_VALUE), 'a list holds a value');
-  assert.deepEqual(mine.person.map((s: any) => s.name), ['SITE_PW']);
-  assert.deepEqual(mine.schemes.map((s: any) => [s.project, s.name]), [[P.id, 'AZURE_KEY']]);
+  assert.deepEqual(
+    mine.person.map((s: any) => s.name),
+    ['SITE_PW'],
+  );
+  assert.deepEqual(
+    mine.schemes.map((s: any) => [s.project, s.name]),
+    [[P.id, 'AZURE_KEY']],
+  );
   // Cara's own is hers alone; the scheme's is Josh's too, and not Dana's.
   const josh = await ok('/api/secrets', { as: 'Josh' });
   assert.deepEqual([josh.person, josh.schemes.map((s: any) => s.name)], [[], ['AZURE_KEY']]);
@@ -227,13 +237,16 @@ test('people list, replace and delete their own secrets; a scheme\'s are its mem
   await ok('/api/secrets', { method: 'PUT', body: { scope: 'person', name: 'SITE_PW', value: VALUE } });
 });
 
-test('one secret name saved by two people, or for two schemes, stays each owner\'s: reads and deletes never cross', () => {
+test("one secret name saved by two people, or for two schemes, stays each owner's: reads and deletes never cross", () => {
   // Its own database, so the server's rows don't mix in.
   const own = new Store(join(root, 'owners.db'));
   const secrets = new Secrets(own, SECRET);
   const a = own.createUser({ name: 'Ann', login: 'ann' });
   const b = own.createUser({ name: 'Bo', login: 'bo' });
-  for (const [scope, x, y] of [['person', a.id, b.id], ['scheme', 1001, 1002]] as const) {
+  for (const [scope, x, y] of [
+    ['person', a.id, b.id],
+    ['scheme', 1001, 1002],
+  ] as const) {
     // x saves first, so a lookup that ignores the owner finds x's row for y.
     secrets.put(scope, x, 'SHARED_NAME', 'x-value-1', null);
     secrets.put(scope, y, 'SHARED_NAME', 'y-value-2', null);
@@ -243,7 +256,10 @@ test('one secret name saved by two people, or for two schemes, stays each owner\
     assert.equal(secrets.remove(scope, y, 'SHARED_NAME'), true);
     assert.equal(secrets.get(scope, y, 'SHARED_NAME'), null);
     assert.equal(secrets.get(scope, x, 'SHARED_NAME'), 'x-value-1', `${scope}: deleting one owner's secret deleted the other's`);
-    assert.deepEqual(secrets.list(scope, x).map((s) => s.name), ['SHARED_NAME']);
+    assert.deepEqual(
+      secrets.list(scope, x).map((s) => s.name),
+      ['SHARED_NAME'],
+    );
   }
   // A person's and a scheme's with the same owner id and name are separate rows too.
   secrets.put('scheme', a.id, 'SHARED_NAME', 'scheme-value', null);
@@ -252,7 +268,7 @@ test('one secret name saved by two people, or for two schemes, stays each owner\
   assert.equal(secrets.get('person', a.id, 'SHARED_NAME'), 'x-value-1');
 });
 
-test('a contraption reads a secret by name for one of its people: theirs first, then its home scheme\'s', async () => {
+test("a contraption reads a secret by name for one of its people: theirs first, then its home scheme's", async () => {
   const read = (name: string, person: number) => call(`/api/contraptions/secrets/${name}?person=${person}`, { bearer: KEY });
   await ok('/api/secrets', { method: 'PUT', as: 'Josh', body: { scope: 'person', name: 'AZURE_KEY', value: 'joshs-own-key' } });
   assert.deepEqual((await read('AZURE_KEY', Josh.id)).body, { name: 'AZURE_KEY', scope: 'person', value: 'joshs-own-key' });

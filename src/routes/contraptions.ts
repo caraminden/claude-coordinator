@@ -36,14 +36,29 @@ import { isAppTurnsRun } from '../schedules.ts';
 /** A contraption as Settings → Contraptions shows it: never a key. */
 function view(app: App, c: ContraptionRow) {
   return {
-    name: c.name, title: c.title, icon: c.icon, port: c.port, home_scheme: c.home_scheme, open_paths: JSON.parse(c.open_paths) as string[],
+    name: c.name,
+    title: c.title,
+    icon: c.icon,
+    port: c.port,
+    home_scheme: c.home_scheme,
+    open_paths: JSON.parse(c.open_paths) as string[],
     relay_paths: JSON.parse(c.relay_paths) as string[],
     disk: app.services.diskUse(c), // DATA_DIR size from the background measure (#847)
-    default_model: c.default_model, turn_cap: c.turn_cap, keys_at: c.keys_at, keys_dir: app.contraptions.folder(c.name),
-    restart_risk: c.restart_risk, restart_note: c.restart_note, runs: app.store.contraptionRuns(c.id, 5),
-    repo: c.repo, branch: c.branch, folder: c.folder, // as set: null means main and ~/apps/<name>
+    default_model: c.default_model,
+    turn_cap: c.turn_cap,
+    keys_at: c.keys_at,
+    keys_dir: app.contraptions.folder(c.name),
+    restart_risk: c.restart_risk,
+    restart_note: c.restart_note,
+    runs: app.store.contraptionRuns(c.id, 5),
+    repo: c.repo,
+    branch: c.branch,
+    folder: c.folder, // as set: null means main and ~/apps/<name>
     people: app.store.contraptionUsers(c.id),
-    logins: app.store.contraptionUsers(c.id).map((id) => app.store.getUser(id)?.login).filter(Boolean),
+    logins: app.store
+      .contraptionUsers(c.id)
+      .map((id) => app.store.getUser(id)?.login)
+      .filter(Boolean),
   };
 }
 
@@ -66,7 +81,6 @@ function path(v: unknown, what: string): string {
   return v;
 }
 
-
 /** The registry fields a body sets; on create, the required ones must be there. */
 function fields(app: App, body: any, creating: boolean) {
   const out: Partial<Omit<ContraptionRow, 'id' | 'name' | 'created_at'>> = {};
@@ -85,7 +99,10 @@ function fields(app: App, body: any, creating: boolean) {
     if (id !== null && !app.store.getProject(id)) throw new HttpError(400, 'No such scheme');
     out.home_scheme = id;
   }
-  for (const [key, list, one] of [['open_paths', 'Open paths', 'An open path'], ['relay_paths', 'Relay paths', 'A relay path']] as const) {
+  for (const [key, list, one] of [
+    ['open_paths', 'Open paths', 'An open path'],
+    ['relay_paths', 'Relay paths', 'A relay path'],
+  ] as const) {
     if (body[key] === undefined) continue;
     if (!Array.isArray(body[key]) || body[key].length > 20) throw new HttpError(400, `${list} must be a list of at most 20 paths`);
     out[key] = JSON.stringify(body[key].map((p: unknown) => path(p, one)));
@@ -122,7 +139,9 @@ function fields(app: App, body: any, creating: boolean) {
  * schemes' Taskmasters ask that one.
  */
 const admin = (route: Pick<Route, 'method' | 'path' | 'handler'>): Route => ({
-  ...route, who: ['person', 'taskmaster'], access: 'admin',
+  ...route,
+  who: ['person', 'taskmaster'],
+  access: 'admin',
   handler(ctx) {
     const { app, caller } = ctx;
     if (!caller) return route.handler(ctx);
@@ -162,7 +181,7 @@ export async function deployTodo(app: Pick<App, 'store' | 'runner' | 'dataDir'>,
   if (lastTodo.get(at) === key || (caller?.kind === 'coordinator' && caller.project_id === scheme.id)) return;
   const text = `To do for ${c.title} (${c.name}): it deployed, but it still lacks what every contraption ships with, a rail icon and a web manifest that installs it as its own app:\n${todo.map((t) => `- ${t}`).join('\n')}\n\nIf no minion is on it yet, start one: the citadel:contraption-ui skill's references/installing.md and its starter's icon files say how. Then deploy again, which checks.`;
   // The deployer's own Taskmaster there once split (#919), else the Overlord.
-  const taskmaster = app.store.coordinatorFor(scheme.id, asker) ?? await ensureCoordinator(app as App, scheme);
+  const taskmaster = app.store.coordinatorFor(scheme.id, asker) ?? (await ensureCoordinator(app as App, scheme));
   app.runner.send(taskmaster.id, APP_NAME, text, [], { asker });
   lastTodo.set(at, key);
 }
@@ -171,7 +190,7 @@ export async function deployTodo(app: Pick<App, 'store' | 'runner' | 'dataDir'>,
 export async function deployUnchecked(app: Pick<App, 'store' | 'runner' | 'dataDir'>, c: ContraptionRow, asker: number | null, line: string) {
   const scheme = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme);
   if (!scheme) return;
-  const taskmaster = app.store.coordinatorFor(scheme.id, asker) ?? await ensureCoordinator(app as App, scheme);
+  const taskmaster = app.store.coordinatorFor(scheme.id, asker) ?? (await ensureCoordinator(app as App, scheme));
   app.runner.send(taskmaster.id, APP_NAME, line, [], { asker });
 }
 
@@ -231,13 +250,16 @@ const askTimes = new Map<string, number[]>();
 
 /** A turn API route: 'contraption' routes get the calling contraption (src/contraptions.ts caller) as ctx.contraption. */
 const fromContraption = (method: string | readonly string[], path: string, handler: (ctx: Ctx, c: ContraptionRow) => unknown): Route => ({
-  method, path, who: 'contraption', handler: (ctx) => handler(ctx, ctx.contraption),
+  method,
+  path,
+  who: 'contraption',
+  handler: (ctx) => handler(ctx, ctx.contraption),
 });
 
 /** The `person` a sessions call names, who must have the contraption enabled. */
 function enabledPerson(app: App, c: ContraptionRow, url: URL): number {
   const person = Number(url.searchParams.get('person'));
-  if (!Number.isInteger(person) || person < 1) throw new HttpError(400, 'person must be a person\'s id');
+  if (!Number.isInteger(person) || person < 1) throw new HttpError(400, "person must be a person's id");
   if (!app.contraptions.enabled(c.name, person)) throw new HttpError(403, 'not_enabled');
   return person;
 }
@@ -262,8 +284,16 @@ function memberHome(app: App, c: ContraptionRow, url: URL) {
 function minionProgress(app: App, t: Ticket) {
   const card = t.status === 'closed' ? null : app.store.openCardAt(t.id);
   return {
-    number: t.number, title: t.title, status: t.status, state: t.state, note: t.note, ...app.runner.progressOf(t),
-    activity_at: t.updated_at, card_waiting: card !== null, card_since: card, link: `/c/#/p/${t.project_id}/t/${t.number}`,
+    number: t.number,
+    title: t.title,
+    status: t.status,
+    state: t.state,
+    note: t.note,
+    ...app.runner.progressOf(t),
+    activity_at: t.updated_at,
+    card_waiting: card !== null,
+    card_since: card,
+    link: `/c/#/p/${t.project_id}/t/${t.number}`,
   };
 }
 
@@ -301,12 +331,18 @@ function eventStream(req: IncomingMessage, res: Ctx['res']) {
 export const contraptionRoutes: Route[] = [
   // make_app (#1136): a scheme's Taskmaster, on a member's turn, makes an app in its own repo (src/make-app.ts).
   {
-    method: 'POST', path: '/api/projects/:project/apps', who: ['taskmaster'], refuse: "Only a scheme's Taskmaster makes an app",
+    method: 'POST',
+    path: '/api/projects/:project/apps',
+    who: ['taskmaster'],
+    refuse: "Only a scheme's Taskmaster makes an app",
     handler: async ({ req, res, app, project, caller, session }) => json(res, 201, await makeApp(app, project, caller!, session.name, await readJson(req))),
   },
   // adopt_app (#1624): the same Taskmaster, on a member's turn, registers an app already on its repo's main and starts its deploy.
   {
-    method: 'POST', path: '/api/projects/:project/apps/adopt', who: ['taskmaster'], refuse: "Only a scheme's Taskmaster adopts an app",
+    method: 'POST',
+    path: '/api/projects/:project/apps/adopt',
+    who: ['taskmaster'],
+    refuse: "Only a scheme's Taskmaster adopts an app",
     async handler({ req, res, app, project, caller, session }) {
       const adopted = await adoptApp(app, project, caller!, await readJson(req));
       // A deploy that can't start (services off, say) leaves the registration: deploy_contraption retries it.
@@ -323,7 +359,10 @@ export const contraptionRoutes: Route[] = [
   },
   // Its member switch: the home scheme's Taskmaster, on a member's turn, switches one of its apps on or off for a person.
   {
-    method: 'PUT', path: '/api/projects/:project/apps/:name/people/:person', who: ['taskmaster'], refuse: "Only a scheme's Taskmaster switches its apps for people",
+    method: 'PUT',
+    path: '/api/projects/:project/apps/:name/people/:person',
+    who: ['taskmaster'],
+    refuse: "Only a scheme's Taskmaster switches its apps for people",
     async handler({ req, res, app, project, caller, params }) {
       const c = contraption(app, params.name);
       if (c.home_scheme !== project.id) throw new HttpError(403, `${c.name} isn't one of ${project.name}'s apps: ask the ${APP_NAME} scheme's ${AGENT_NAME}`);
@@ -335,7 +374,13 @@ export const contraptionRoutes: Route[] = [
       if (!person) throw new HttpError(404, 'No such person');
       app.store.setContraptionUser(c.id, person.id, body.enabled, asker);
       await ownWrites(); // the reply lists who it is enabled for (#1244)
-      return json(res, 200, { name: c.name, people: app.store.contraptionUsers(c.id).map((id) => app.store.getUser(id)?.login).filter(Boolean) });
+      return json(res, 200, {
+        name: c.name,
+        people: app.store
+          .contraptionUsers(c.id)
+          .map((id) => app.store.getUser(id)?.login)
+          .filter(Boolean),
+      });
     },
   },
   // First, so a relayed path like /people/5 never reads as an admin route on a contraption called relay (reserved anyway).
@@ -359,8 +404,7 @@ export const contraptionRoutes: Route[] = [
   }),
   // Push to people's phones (#1138, src/fcm.ts): a notification and/or silent data to the Android app of each
   // person named who has this contraption enabled.
-  fromContraption('POST', '/api/contraptions/push', async ({ req, res, app }, c) =>
-    json(res, 200, await pushToPeople(app.store, (name, uid) => app.contraptions.enabled(name, uid), app.fcm, c, await readJson(req, 64 * 1024)))),
+  fromContraption('POST', '/api/contraptions/push', async ({ req, res, app }, c) => json(res, 200, await pushToPeople(app.store, (name, uid) => app.contraptions.enabled(name, uid), app.fcm, c, await readJson(req, 64 * 1024)))),
   // #421: whether a person is a member of the app's home scheme, and its minions' progress for members.
   fromContraption('GET', '/api/contraptions/home', ({ res, app, url }, c) => {
     const { scheme, member } = homeOf(app, c, enabledPerson(app, c, url));
@@ -400,7 +444,14 @@ export const contraptionRoutes: Route[] = [
     const body = await readJson(req, 4_000_000);
     // Before the stream opens, so a refused image is a plain HTTP 400 or 413 (#834).
     // A body parseTurn refuses is reported on the stream below, without spending any magick runs.
-    const valid = (() => { try { parseTurn(body, c); return true; } catch { return false; } })();
+    const valid = (() => {
+      try {
+        parseTurn(body, c);
+        return true;
+      } catch {
+        return false;
+      }
+    })();
     const imageBlocks = valid && body.images !== undefined ? await loadImages(body.images, app.services.dataDir(c)) : [];
     const emit = eventStream(req, res);
     // The contraption hung up: stop its turn rather than run it for nobody.
@@ -414,13 +465,18 @@ export const contraptionRoutes: Route[] = [
       if (turn !== null) app.contraptionTurns.cancel(c.id, turn);
     });
     try {
-      await app.contraptionTurns.run(c, { ...parseTurn(body, c), imageBlocks }, (event, data) => {
-        if (event === 'start') {
-          turn = (data as { turn: number }).turn;
-          if (gone) app.contraptionTurns.cancel(c.id, turn);
-        }
-        emit(event, data);
-      }, hungUp.signal);
+      await app.contraptionTurns.run(
+        c,
+        { ...parseTurn(body, c), imageBlocks },
+        (event, data) => {
+          if (event === 'start') {
+            turn = (data as { turn: number }).turn;
+            if (gone) app.contraptionTurns.cancel(c.id, turn);
+          }
+          emit(event, data);
+        },
+        hungUp.signal,
+      );
     } catch (err) {
       if (!(err instanceof TurnError)) throw err;
       emit('error', { code: err.code, message: err.message });
@@ -460,7 +516,9 @@ export const contraptionRoutes: Route[] = [
   }),
   // The `citadel` MCP server a media turn's agent calls (streamable HTTP, JSON answers), with the turn's own token.
   {
-    method: ['POST', 'GET', 'DELETE'], path: '/api/contraption-media/mcp', who: 'anyone',
+    method: ['POST', 'GET', 'DELETE'],
+    path: '/api/contraption-media/mcp',
+    who: 'anyone',
     handler: async ({ req, res, app }) => {
       const token = (req.headers.authorization ?? '').match(/^Bearer (cmt_[\w-]+)$/)?.[1];
       const turn = token ? app.contraptionTurns.mediaTurn(token) : null;
@@ -481,15 +539,22 @@ export const contraptionRoutes: Route[] = [
   // app turns check's latest run (kit/schedules/app-turns.md). Members and admins may read it too; no other minion, no app.
   // `?before=<turn id>` pages, `?app=` filters.
   {
-    method: 'GET', path: '/api/projects/:project/contraption-turns', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/projects/:project/contraption-turns',
+    who: ['person', 'taskmaster', 'minion'],
     handler({ res, app, project, url, caller }) {
       if (caller && caller.kind !== 'coordinator' && !isAppTurnsRun(app.store, caller)) throw new HttpError(403, "Only the scheme's Taskmaster and its app turns check read the turn audit");
       const before = url.searchParams.get('before');
       const turns = app.store.schemeTurnAudit(project.id, { before: before ? Number(before) || 0 : undefined, contraption: url.searchParams.get('app') || undefined, limit: AUDIT_PAGE + 1 });
-      const apps = app.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => ({ name: c.name, title: c.title }));
+      const apps = app.store
+        .listContraptions()
+        .filter((c) => c.home_scheme === project.id)
+        .map((c) => ({ name: c.name, title: c.title }));
       return json(res, 200, {
         turns: turns.slice(0, AUDIT_PAGE).map(({ turn_id, ...t }) => ({ id: turn_id, ...t, blind: !!t.blind })),
-        more: turns.length > AUDIT_PAGE, apps, keep_days: AUDIT_DAYS,
+        more: turns.length > AUDIT_PAGE,
+        apps,
+        keep_days: AUDIT_DAYS,
       });
     },
   },
@@ -511,11 +576,11 @@ export const contraptionRoutes: Route[] = [
   // the id), or { steered: false, reason: 'ended' | 'replied' }, when the app sends it as the next turn.
   fromContraption('POST', '/api/contraptions/turns/:turn/messages', async ({ req, res, app, params }, c) => {
     const body = await readJson(req, 4_000_000);
-    if (!Number.isInteger(body?.person) || body.person < 1) throw new HttpError(400, 'person must be a person\'s id');
+    if (!Number.isInteger(body?.person) || body.person < 1) throw new HttpError(400, "person must be a person's id");
     if (typeof body.text !== 'string' || !body.text.trim()) throw new HttpError(400, 'text is required');
     const out = app.contraptionTurns.steer(c.id, Number(params.turn), body.person, body.text);
     if (!out) throw new HttpError(404, 'No such turn');
-    if (out === 'other_person') throw new HttpError(403, 'Only the turn\'s own person can steer it');
+    if (out === 'other_person') throw new HttpError(403, "Only the turn's own person can steer it");
     return json(res, 200, out);
   }),
   fromContraption('GET', '/api/contraptions/sessions', ({ res, app, url }, c) => {
@@ -535,13 +600,25 @@ export const contraptionRoutes: Route[] = [
   }),
   {
     // The rail's list: the contraptions enabled for you, in the order you dragged them into (#649), and whether each is up. Empty for most people.
-    method: 'GET', path: '/api/contraptions/mine', who: ['person'],
+    method: 'GET',
+    path: '/api/contraptions/mine',
+    who: ['person'],
     handler: async ({ res, app, session }) => json(res, 200, typeof session.uid !== 'number' ? [] : await app.contraptions.mine(session.uid)),
   },
-  admin({ method: 'GET', path: '/api/contraptions', handler: ({ res, app }) => json(res, 200, app.store.listContraptions().map((c) => view(app, c))) }),
+  admin({
+    method: 'GET',
+    path: '/api/contraptions',
+    handler: ({ res, app }) =>
+      json(
+        res,
+        200,
+        app.store.listContraptions().map((c) => view(app, c)),
+      ),
+  }),
   admin({
     // Register: its key files are written now, for its own service to read.
-    method: 'POST', path: '/api/contraptions',
+    method: 'POST',
+    path: '/api/contraptions',
     async handler({ req, res, app }) {
       const body = await readJson(req);
       const name = typeof body.name === 'string' ? body.name.trim() : '';
@@ -551,8 +628,18 @@ export const contraptionRoutes: Route[] = [
       if (app.store.getContraption(name)) throw new HttpError(409, `There is already a contraption called ${name}`);
       const f = fields(app, body, true);
       const c = app.contraptions.register({
-        name, title: f.title!, port: f.port!, icon: f.icon ?? null, home_scheme: f.home_scheme ?? null, open_paths: f.open_paths ?? '[]', relay_paths: f.relay_paths ?? '[]',
-        default_model: f.default_model ?? null, turn_cap: f.turn_cap ?? null, repo: f.repo ?? null, branch: f.branch ?? null, folder: f.folder ?? null,
+        name,
+        title: f.title!,
+        port: f.port!,
+        icon: f.icon ?? null,
+        home_scheme: f.home_scheme ?? null,
+        open_paths: f.open_paths ?? '[]',
+        relay_paths: f.relay_paths ?? '[]',
+        default_model: f.default_model ?? null,
+        turn_cap: f.turn_cap ?? null,
+        repo: f.repo ?? null,
+        branch: f.branch ?? null,
+        folder: f.folder ?? null,
       });
       void app.releases.refresh(true); // its App row shows up at once (#627)
       if (c.home_scheme !== null) addAppTurnsCheck(app.store, app.dataDir, c.home_scheme);
@@ -561,7 +648,8 @@ export const contraptionRoutes: Route[] = [
   }),
   admin({
     // Its name stays: it is in its paths and its key folder.
-    method: 'PATCH', path: '/api/contraptions/:name',
+    method: 'PATCH',
+    path: '/api/contraptions/:name',
     async handler({ req, res, app, params }) {
       const c = contraption(app, params.name);
       app.store.updateContraption(c.name, fields(app, await readJson(req), false));
@@ -574,7 +662,8 @@ export const contraptionRoutes: Route[] = [
   }),
   admin({
     // Enable or disable it for one person, by id or @login; disabling takes at their next request.
-    method: 'PUT', path: '/api/contraptions/:name/people/:person',
+    method: 'PUT',
+    path: '/api/contraptions/:name/people/:person',
     async handler({ req, res, app, params, session, caller }) {
       const c = contraption(app, params.name);
       const body = await readJson(req);
@@ -590,7 +679,8 @@ export const contraptionRoutes: Route[] = [
   }),
   admin({
     // Rotate: new identity key pair and contraption key, both files rewritten. Its service restarts to read them.
-    method: 'POST', path: '/api/contraptions/:name/keys',
+    method: 'POST',
+    path: '/api/contraptions/:name/keys',
     handler({ res, app, params }) {
       const c = contraption(app, params.name);
       app.contraptions.rotate(c.name);
@@ -599,14 +689,16 @@ export const contraptionRoutes: Route[] = [
   }),
   // Its systemd user service (#266): what it is doing, install (writes its units from its manifest), start, stop, restart, and its journal.
   admin({
-    method: 'GET', path: '/api/contraptions/:name/service',
+    method: 'GET',
+    path: '/api/contraptions/:name/service',
     handler: async ({ res, app, params }) => {
       const c = contraption(app, params.name);
-      return json(res, 200, { ...await service(() => app.services.status(c)), restart_risk: c.restart_risk, restart_note: c.restart_note });
+      return json(res, 200, { ...(await service(() => app.services.status(c))), restart_risk: c.restart_risk, restart_note: c.restart_note });
     },
   }),
   admin({
-    method: 'POST', path: '/api/contraptions/:name/service',
+    method: 'POST',
+    path: '/api/contraptions/:name/service',
     async handler({ req, res, app, params, session, caller }) {
       const c = contraption(app, params.name);
       const body = await readJson(req);
@@ -620,7 +712,7 @@ export const contraptionRoutes: Route[] = [
         if (body.confirm !== c.name) throw new HttpError(409, `${why} A person must type the name first; then send it as confirm.`);
       }
       const asker = session.uid ?? (caller ? app.store.turnAsker(caller.id) : null);
-      const who = asker ? app.store.getUser(asker)?.login ?? `user ${asker}` : 'unknown';
+      const who = asker ? (app.store.getUser(asker)?.login ?? `user ${asker}`) : 'unknown';
       const by = session.uid || !caller ? who : `Taskmaster for ${who}`;
       const log = (ok: boolean, said: string) => risky && app.store.addContraptionRun({ contraption_id: c.id, at: Date.now(), action, risk, by, ok: ok ? 1 : 0, said: said.slice(0, 500) });
       const said = await service(async () => {
@@ -641,16 +733,20 @@ export const contraptionRoutes: Route[] = [
     },
   }),
   admin({
-    method: 'GET', path: '/api/contraptions/:name/service/logs',
+    method: 'GET',
+    path: '/api/contraptions/:name/service/logs',
     handler: async ({ res, app, params, url }) => json(res, 200, { log: await service(() => app.services.logs(contraption(app, params.name), Number(url.searchParams.get('lines')) || 100)) }),
   }),
   // Deploy it from its repo (#266): admins, Citadel's Taskmaster on an admin's turn, and its home scheme's
   // Taskmaster and minions, for that one contraption. Starts it and answers at once; GET follows it.
   {
-    method: 'POST', path: '/api/contraptions/:name/deploy', who: ['person', 'taskmaster', 'minion'], access: 'admin',
+    method: 'POST',
+    path: '/api/contraptions/:name/deploy',
+    who: ['person', 'taskmaster', 'minion'],
+    access: 'admin',
     handler({ res, app, params, session, caller }) {
       const c = deployable(app, params.name, caller);
-      const by = caller ? (caller.kind === 'coordinator' ? `${app.store.getProject(caller.project_id)?.name ?? 'a'} Taskmaster` : `#${caller.number}`) : app.store.getUser(session.uid as number)?.name ?? 'an admin';
+      const by = caller ? (caller.kind === 'coordinator' ? `${app.store.getProject(caller.project_id)?.name ?? 'a'} Taskmaster` : `#${caller.number}`) : (app.store.getUser(session.uid as number)?.name ?? 'an admin');
       // The install check reads the app's page as the person deploying (a turn's: whoever asked for it).
       const uid = session.uid ?? (caller ? app.store.turnAsker(caller.id) : null);
       // Rolled back to last green (#1016): a turn's deploy waits for the fix; an admin's ships it and ends the hold.
@@ -664,7 +760,10 @@ export const contraptionRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/contraptions/:name/deploy', who: ['person', 'taskmaster', 'minion'], access: 'admin',
+    method: 'GET',
+    path: '/api/contraptions/:name/deploy',
+    who: ['person', 'taskmaster', 'minion'],
+    access: 'admin',
     handler: async ({ res, app, params, caller }) => {
       const c = deployable(app, params.name, caller);
       return json(res, 200, await service(() => app.services.lastDeploy(c.name)));
@@ -675,10 +774,12 @@ export const contraptionRoutes: Route[] = [
     // scheme's shared folder, the ask to its Taskmaster, waking it. A data ask (#318) only files: its files
     // and a sidecar holding its words, with no message and no wake. With `minion`, a member's ask goes
     // straight to that minion instead (#416).
-    method: 'POST', path: '/api/contraptions/asks', who: 'contraption',
+    method: 'POST',
+    path: '/api/contraptions/asks',
+    who: 'contraption',
     async handler({ req, res, app, contraption: c }) {
       // Base64 is 4/3 of the files, plus room for the text.
-      const body = (await readJson(req, Math.ceil(ASK_FILES_MAX * 4 / 3) + 1_000_000)) ?? {};
+      const body = (await readJson(req, Math.ceil((ASK_FILES_MAX * 4) / 3) + 1_000_000)) ?? {};
       const person = Number.isInteger(body.person) ? app.store.getUser(body.person) : undefined;
       if (!person || !app.contraptions.enabled(c.name, person.id)) throw new HttpError(403, `${c.title} isn't enabled for that person`);
       const kind = oneOf(body.kind, ['bug', 'feature', 'data'], 'Kind') as 'bug' | 'feature' | 'data' | null;
@@ -724,7 +825,7 @@ export const contraptionRoutes: Route[] = [
         return json(res, 202, { scheme: scheme.name, minion: t.number, member, proposal: false, files: paths });
       }
       // The asker's own Taskmaster there once split (#919), else the Overlord: an ask never splits a scheme.
-      const taskmaster = app.store.coordinatorFor(scheme.id, person.id) ?? await ensureCoordinator(app, scheme);
+      const taskmaster = app.store.coordinatorFor(scheme.id, person.id) ?? (await ensureCoordinator(app, scheme));
       askTimes.set(key, [...recent, Date.now()]);
       const paths = saveAskFiles(shared, c.name, person.login, files);
       const ask = askMessage(c, scheme, person, member, kind, text!, paths, item);

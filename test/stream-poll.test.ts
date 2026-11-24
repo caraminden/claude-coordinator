@@ -22,7 +22,12 @@ const project = store.createProject('Poll', null);
 
 /** A Runner whose turns are polled by hand: lines and ends are recorded instead of handled. */
 function setup() {
-  const runner = new Runner(store, () => {}, () => ({}), join(root, 'no-claude'));
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    join(root, 'no-claude'),
+  );
   runner.pollMs = 1e9; // no timer fires: the test ticks
   const lines = new Map<number, string[]>();
   const ended = new Map<number, unknown>();
@@ -185,12 +190,14 @@ test('a turn that stops being followed closes its files', async () => {
   writeFileSync(join(t.dir, 'exit.json'), JSON.stringify({ code: 0, signal: null }));
   s.tick(t.id);
   assert.ok(s.ended.has(t.id));
-  await until('both are closed', async () => [streamFd, dirFd].every((fd) => {
-    try {
-      fs.fstatSync(fd);
-      return false;
-    } catch (err: any) {
-      return err.code === 'EBADF';
-    }
-  }));
+  await until('both are closed', async () =>
+    [streamFd, dirFd].every((fd) => {
+      try {
+        fs.fstatSync(fd);
+        return false;
+      } catch (err: any) {
+        return err.code === 'EBADF';
+      }
+    }),
+  );
 });

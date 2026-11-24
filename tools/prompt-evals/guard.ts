@@ -14,7 +14,7 @@ try {
     const why = sideGuard(input);
     // A session's own saved long outputs (tool-results/) live under .claude/projects/ too, and are not today's state (#1505).
     const call = JSON.stringify(input?.tool_input ?? {}).replace(/\.claude\/projects\/[^/"]+\/[0-9a-f-]{36}\/tool-results\/[\w-][\w.-]*(?![\w./])/g, '');
-    if (LIVE.test(call)) deny('This turn is a replay of a past moment: today\'s shared folder, database, live checkout and memory are out of reach. Work from the chat.');
+    if (LIVE.test(call)) deny("This turn is a replay of a past moment: today's shared folder, database, live checkout and memory are out of reach. Work from the chat.");
     else if (why) deny(`This turn is read-only (a replay): ${why.replace(/^.*?(read-only copy of the minion's session\.?|anything)\s*/, '')}`);
   }
 } catch {

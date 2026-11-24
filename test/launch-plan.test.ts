@@ -22,10 +22,24 @@ mkdirSync(dir);
 const container = { host: false as const, container: 'box', configDir: '/vol/.claude', home: '/vol', turnsDir: '/vol/turns', env: { HOME: '/vol', CLAUDE_CONFIG_DIR: '/vol/.claude' }, ensure: async () => {} };
 
 const base: TurnFacts = {
-  project, ticket: minion, dir, pins, place: { host: true }, machines: [], model: null, effort: null, codex: null, codexReview: null,
+  project,
+  ticket: minion,
+  dir,
+  pins,
+  place: { host: true },
+  machines: [],
+  model: null,
+  effort: null,
+  codex: null,
+  codexReview: null,
   folders: { files: null, shared: null, memory: null, tmp: null, tickets: join(root, 'tickets'), data: root },
   env: { server: { PATH: '/usr/bin', HOME: '/home/server', CLAUDE_CONFIG_DIR: '/srv/claude', ANTHROPIC_API_KEY: 'server-key', SECRET_OF_THE_SERVER: 'x' }, coordinator: { COORDINATOR_TOKEN: 'tok' }, heavy: {}, github: null },
-  deploys: false, memory: false, typer: null, homeContraptions: [], claudeBin: process.execPath, unit: null,
+  deploys: false,
+  memory: false,
+  typer: null,
+  homeContraptions: [],
+  claudeBin: process.execPath,
+  unit: null,
 };
 const plan = (over: Partial<TurnFacts> = {}) => launchPlan({ ...base, ...over });
 const file = (p: LaunchPlan, name: string) => JSON.parse(p.files.find((f) => f.name === name)!.text);
@@ -34,7 +48,14 @@ const flag = (p: LaunchPlan, name: string) => (p.args.includes(name) ? p.args[p.
 test('a plan is data: it writes nothing into the turn folder and never resumes by itself', () => {
   const p = plan({ ticket: { ...minion, session_id: 'abc' } });
   assert.deepEqual(readdirSync(dir), []);
-  assert.deepEqual(p.files.map((f) => [f.name, f.mode]), [['mcp.json', undefined], ['codex-tripwire.json', 0o444], ['settings.json', undefined]]);
+  assert.deepEqual(
+    p.files.map((f) => [f.name, f.mode]),
+    [
+      ['mcp.json', undefined],
+      ['codex-tripwire.json', 0o444],
+      ['settings.json', undefined],
+    ],
+  );
   assert.equal(p.args.includes('--resume'), false);
   assert.equal(flag(p, '--settings'), join(dir, 'settings.json'));
   assert.equal(flag(p, '--mcp-config'), join(dir, 'mcp.json'));
@@ -68,7 +89,16 @@ const adds: [string, Partial<TurnFacts>, Record<string, string>][] = [
   ['the typer', { typer: { id: 7, login: 'josh' } }, { CITADEL_PERSON_ID: '7', CITADEL_PERSON_LOGIN: 'josh' }],
   ['home contraptions', { homeContraptions: ['a', 'b'] }, { COORDINATOR_HOME_CONTRAPTIONS: 'a,b' }],
   // A minion turn that got machines is offered propose_machine_notes for them (#617).
-  ['lent machines', { machines: [{ id: 3, name: 'perigee-godot', owner_id: null, servers: ['mcp'] }, { id: 4, name: 'josh-box', owner_id: 2, servers: ['mcp'] }] as TurnFacts['machines'] }, { COORDINATOR_MACHINES: 'perigee-godot,josh-box' }],
+  [
+    'lent machines',
+    {
+      machines: [
+        { id: 3, name: 'perigee-godot', owner_id: null, servers: ['mcp'] },
+        { id: 4, name: 'josh-box', owner_id: 2, servers: ['mcp'] },
+      ] as TurnFacts['machines'],
+    },
+    { COORDINATOR_MACHINES: 'perigee-godot,josh-box' },
+  ],
   ['a GitHub login', { env: { ...base.env, github: { GH_TOKEN: 'gh' } } }, { GH_TOKEN: 'gh' }],
   ['citadel-heavy', { env: { ...base.env, heavy: { CITADEL_HEAVY_URL: 'u' } } }, { CITADEL_HEAVY_URL: 'u' }],
   ['a temp folder', { folders: { ...base.folders, tmp: '/t' } }, { TMPDIR: '/t', TMP: '/t', TEMP: '/t', CLAUDE_CODE_TMPDIR: '/t' }],
@@ -102,7 +132,10 @@ test('a host turn is a unit when it has one and a child when not, with the same 
 });
 
 test("a host Taskmaster turn runs in the Taskmasters' slice, kept off oomd's list; a minion's in the turns' slice; the tools pool beside the Taskmasters (#1280)", () => {
-  const run = (p: ReturnType<typeof plan>) => { assert.equal(p.spawn.how, 'unit'); return p.spawn.how === 'unit' ? p.spawn.systemdRun : []; };
+  const run = (p: ReturnType<typeof plan>) => {
+    assert.equal(p.spawn.how, 'unit');
+    return p.spawn.how === 'unit' ? p.spawn.systemdRun : [];
+  };
   const minionRun = run(plan({ unit: 'citadel-turn-x' }));
   const tmRun = run(plan({ unit: 'citadel-turn-y', ticket: taskmaster }));
   assert.ok(minionRun.includes('--slice=citadel-turns.slice') && !minionRun.includes('ManagedOOMPreference=omit'), minionRun.join(' '));
@@ -140,7 +173,7 @@ test('a lent machine is an MCP server of the turn, allowed by name, and never in
   assert.equal(p.args.join(' ').includes('perigee'), false);
 });
 
-test('a pooled turn reaches its place\'s shared tool server by HTTP, with its own helpers as the fallback; a Codex turn never pools (#1259)', () => {
+test("a pooled turn reaches its place's shared tool server by HTTP, with its own helpers as the fallback; a Codex turn never pools (#1259)", () => {
   const machines = [{ id: 3, name: 'perigee godot', owner_id: null, servers: ['mcp', 'ws'] } as TurnFacts['machines'][number]];
   const own = plan({ machines });
   const p = plan({ machines, pool: true });
@@ -152,7 +185,10 @@ test('a pooled turn reaches its place\'s shared tool server by HTTP, with its ow
   assert.deepEqual(http.thread, { type: 'http', url: 'http://127.0.0.1:${CITADEL_POOL_PORT}/mcp', headers: { Authorization: 'Bearer ${COORDINATOR_TOKEN}' }, timeout: own.files.length && file(own, 'mcp.json').mcpServers.thread.timeout });
   assert.equal(http['perigee godot-ws'].url, 'http://127.0.0.1:${CITADEL_POOL_PORT}/machine/3/ws?name=perigee%20godot-ws');
   // The token only travels in the env, never in a file.
-  assert.equal(p.files.some((f) => f.text.includes('tok')), false);
+  assert.equal(
+    p.files.some((f) => f.text.includes('tok')),
+    false,
+  );
   assert.deepEqual(p.args, own.args);
   assert.equal(own.pool, undefined);
   assert.equal(p.pool!.dir, join(root, '.pool', pins.POOL_VERSION));
@@ -165,10 +201,13 @@ test('a pooled turn reaches its place\'s shared tool server by HTTP, with its ow
   assert.equal(plan({ pool: true, place: container, unit: 'never-used' }).pool!.systemdRun, undefined);
   const codex = plan({ pool: true, codex: { thread: null } });
   assert.equal(codex.pool, undefined);
-  assert.equal(codex.files.some((f) => f.name === 'mcp-stdio.json'), false);
+  assert.equal(
+    codex.files.some((f) => f.name === 'mcp-stdio.json'),
+    false,
+  );
 });
 
-test('a Codex turn runs the shim in claude\'s place, on its thread when it has one, checked in turn mode', () => {
+test("a Codex turn runs the shim in claude's place, on its thread when it has one, checked in turn mode", () => {
   const claude = plan();
   const fresh = plan({ codex: { thread: null } });
   const resumed = plan({ codex: { thread: 'th-1' } });

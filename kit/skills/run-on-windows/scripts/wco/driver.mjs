@@ -40,25 +40,36 @@ const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', 
 const psQ = [];
 readline.createInterface({ input: ps.stdout }).on('line', (l) => psQ.shift()?.(l.trim()));
 /** One mouse.ps1 command; resolves with its answer line. */
-const mouse = (cmd) => new Promise((r) => { psQ.push(r); ps.stdin.write(cmd + '\n'); });
+const mouse = (cmd) =>
+  new Promise((r) => {
+    psQ.push(r);
+    ps.stdin.write(cmd + '\n');
+  });
 
-let id = 0, buf = '';
+let id = 0,
+  buf = '';
 const pending = new Map();
 edge.stdio[4].on('data', (d) => {
   buf += d;
   for (let k; (k = buf.indexOf('\0')) >= 0; buf = buf.slice(k + 1)) {
     const m = JSON.parse(buf.slice(0, k));
     const p = pending.get(m.id);
-    if (p) { pending.delete(m.id); m.error ? p.rej(new Error(`${p.method}: ${m.error.message}`)) : p.res(m.result); }
+    if (p) {
+      pending.delete(m.id);
+      m.error ? p.rej(new Error(`${p.method}: ${m.error.message}`)) : p.res(m.result);
+    }
   }
 });
 /** A CDP command, on a page's session when given. */
-const send = (method, params = {}, sessionId) => new Promise((res, rej) => {
-  const i = ++id;
-  pending.set(i, { res, rej, method });
-  setTimeout(() => { if (pending.delete(i)) rej(new Error(`timeout: ${method}`)); }, 20_000);
-  edge.stdio[3].write(JSON.stringify({ id: i, method, params, sessionId }) + '\0');
-});
+const send = (method, params = {}, sessionId) =>
+  new Promise((res, rej) => {
+    const i = ++id;
+    pending.set(i, { res, rej, method });
+    setTimeout(() => {
+      if (pending.delete(i)) rej(new Error(`timeout: ${method}`));
+    }, 20_000);
+    edge.stdio[3].write(JSON.stringify({ id: i, method, params, sessionId }) + '\0');
+  });
 const sessions = new Map();
 /** The first page whose URL contains `match`, attached: { s: its session, targetId }. */
 async function session(match) {
@@ -114,7 +125,10 @@ async function install(route) {
   // Edge then offers to pin the app and make shortcuts; decline it all (cleanup.ps1 removes what slips through).
   for (let i = 0; i < 10; i++) {
     const r = await mouse(`uia-click ${cfg.decline ?? "^(Not now|Don't allow|No thanks)$"}`);
-    if (r.startsWith('clicked')) { log(r); break; }
+    if (r.startsWith('clicked')) {
+      log(r);
+      break;
+    }
     await sleep(500);
   }
   for (let i = 0; i < 40; i++) {
@@ -140,25 +154,40 @@ try {
   // CITADEL_WCO_TAB=1 (or an install that never gets its dialog) keeps the page in an Edge tab: no title bar overlay,
   // but the same prompts and the same real clicks, for checks that don't need the overlay (#988's links).
   let app;
-  try { if (process.env.CITADEL_WCO_TAB) throw new Error('tab mode'); app = await install(cfg.route); }
-  catch (e) { log('no installed app, using the tab:', String(e.message).slice(0, 80)); app = (await session('/c/').catch(async () => {
-    const { targetId } = await send('Target.createTarget', { url: `${origin}/c/#${cfg.route.replace(/^#/, '')}` });
-    await sleep(2000);
-    return { targetId };
-  })).targetId; }
+  try {
+    if (process.env.CITADEL_WCO_TAB) throw new Error('tab mode');
+    app = await install(cfg.route);
+  } catch (e) {
+    log('no installed app, using the tab:', String(e.message).slice(0, 80));
+    app = (
+      await session('/c/').catch(async () => {
+        const { targetId } = await send('Target.createTarget', { url: `${origin}/c/#${cfg.route.replace(/^#/, '')}` });
+        await sleep(2000);
+        return { targetId };
+      })
+    ).targetId;
+  }
   log('installed; app window target', app, 'origin', origin);
   await fetch(`${base}/ready`, { method: 'POST' });
-  for (let after = 0, last = Date.now(); !quit && Date.now() - last < IDLE_MS;) {
+  for (let after = 0, last = Date.now(); !quit && Date.now() - last < IDLE_MS; ) {
     const r = await fetch(`${base}/next?after=${after}`).catch(() => null);
-    if (!r || r.status !== 200) { await sleep(r ? 0 : 3000); continue; }
+    if (!r || r.status !== 200) {
+      await sleep(r ? 0 : 3000);
+      continue;
+    }
     const cmd = await r.json();
     after = cmd.id;
     last = Date.now();
     let out;
-    if (cmd.code === 'quit') { quit = true; out = { ok: true, text: 'quit' }; }
-    else {
-      try { out = { ok: true, text: String(await new AsyncFunction(...Object.keys(HELPERS), cmd.code)(...Object.values(HELPERS)) ?? '') }; }
-      catch (e) { out = { ok: false, text: String(e?.stack ?? e) }; }
+    if (cmd.code === 'quit') {
+      quit = true;
+      out = { ok: true, text: 'quit' };
+    } else {
+      try {
+        out = { ok: true, text: String((await new AsyncFunction(...Object.keys(HELPERS), cmd.code)(...Object.values(HELPERS))) ?? '') };
+      } catch (e) {
+        out = { ok: false, text: String(e?.stack ?? e) };
+      }
     }
     log(cmd.id, out.ok ? 'ok' : 'error', out.text.slice(0, 2000));
     await fetch(`${base}/result/${cmd.id}`, { method: 'POST', body: JSON.stringify(out) }).catch(() => {});
@@ -168,12 +197,23 @@ try {
   await fetch(`${base}/ready`, { method: 'POST', body: String(e?.stack ?? e) }).catch(() => {});
 } finally {
   // Edge's own uninstall takes the app's shortcuts and uninstall entry with it; cleanup.ps1 gets any left.
-  try { await send('PWA.uninstall', { manifestId: `${origin}/` }); log('uninstalled the app'); } catch (e) { log(String(e.message)); }
-  try { await send('Browser.close'); } catch {}
+  try {
+    await send('PWA.uninstall', { manifestId: `${origin}/` });
+    log('uninstalled the app');
+  } catch (e) {
+    log(String(e.message));
+  }
+  try {
+    await send('Browser.close');
+  } catch {}
   await sleep(1500);
-  try { edge.kill(); } catch {}
+  try {
+    edge.kill();
+  } catch {}
   ps.stdin.end();
   fwd.close();
-  try { fs.rmSync(prof, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(prof, { recursive: true, force: true });
+  } catch {}
   process.exit(0);
 }

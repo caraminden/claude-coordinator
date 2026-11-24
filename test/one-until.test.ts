@@ -54,7 +54,7 @@ test('the inline-poll guard flags sleep loops and leaves look-alikes alone', () 
   const poll = 'for (let i = 0; i < 500 && !cond(); i++) await new Promise((r) => setTimeout(r, 20));';
   assert.deepEqual(inlinePolls('a.ts', `${poll}\n  while (!ok()) await new Promise((r) => setTimeout(r, 5));\nfor (const end = 1; !ok() && Date.now() < end;) await new Promise((r) => setTimeout(r, 5));`), ['a.ts:1', 'a.ts:2', 'a.ts:3']);
   // a single fixed sleep, a loop that asserts on timeout, a block body, and a marked deliberate poll
-  assert.deepEqual(inlinePolls('a.ts', "await new Promise((r) => setTimeout(r, 200));\nfor (const end = 1; !ok(); await new Promise((r) => setTimeout(r, 50))) assert.ok(Date.now() < end);\nfor (let i = 0; i < 9; i++) {\n  await new Promise((r) => setTimeout(r, 5));\n}\nfor (const f of fs) await run(f);"), []);
+  assert.deepEqual(inlinePolls('a.ts', 'await new Promise((r) => setTimeout(r, 200));\nfor (const end = 1; !ok(); await new Promise((r) => setTimeout(r, 50))) assert.ok(Date.now() < end);\nfor (let i = 0; i < 9; i++) {\n  await new Promise((r) => setTimeout(r, 5));\n}\nfor (const f of fs) await run(f);'), []);
   assert.deepEqual(inlinePolls('a.ts', `// poll-ok: nothing should happen\n${poll}\n${poll} // poll-ok: still nothing`), []);
 });
 
@@ -67,7 +67,7 @@ test('the inline-poll guard flags sleep loops and leaves look-alikes alone', () 
 export const FLAKE_RULES: Record<string, { re: (row: string) => boolean; why: string }> = {
   sleep: {
     re: (r) => /\bawait\b.*\bsetTimeout\b|\bawait\s+(?:sleep|delay|nap|pause)\w*\(\s*\d/.test(r),
-    why: 'a bare sleep guesses how long the thing takes. Wait on its done signal: until(\'<what>\', () => cond) from ./wait.ts; to show nothing happens, use holds(\'<what>\', () => stillTrue, { after: () => secondActionSeen }) from ./holds.ts.',
+    why: "a bare sleep guesses how long the thing takes. Wait on its done signal: until('<what>', () => cond) from ./wait.ts; to show nothing happens, use holds('<what>', () => stillTrue, { after: () => secondActionSeen }) from ./holds.ts.",
   },
   elapsed: {
     re: (r) => /\bassert\b.*(?:(?:Date|performance).now\(\)\s*-(?!\s*(?:Date\.parse|new Date))|\belapsed\w*|\btook\w*|\bwaitedMs\b|\bduration\w*|\.ms\b)[^;]*?<=?\s*\d/.test(r),
@@ -110,7 +110,7 @@ export function flakeHits(text: string): Hits {
       if (name === 'rmTemp' && !boots) continue;
       if (!rule.re(row)) continue;
       const escaped = TIMING_OK.test(row) || TIMING_OK.test(rows[i - 1] ?? '');
-      ((out[name] ??= { bare: [], ok: [] })[escaped ? 'ok' : 'bare']).push(i + 1);
+      (out[name] ??= { bare: [], ok: [] })[escaped ? 'ok' : 'bare'].push(i + 1);
     }
   });
   return out;
@@ -126,8 +126,7 @@ function flakeScan(): Record<string, Hits> {
   return all;
 }
 
-const toCounts = (all: Record<string, Hits>): Record<string, Counts> =>
-  Object.fromEntries(Object.entries(all).map(([f, h]) => [f, Object.fromEntries(Object.entries(h).map(([p, v]) => [p, { n: v.bare.length, ok: v.ok.length }]))]));
+const toCounts = (all: Record<string, Hits>): Record<string, Counts> => Object.fromEntries(Object.entries(all).map(([f, h]) => [f, Object.fromEntries(Object.entries(h).map(([p, v]) => [p, { n: v.bare.length, ok: v.ok.length }]))]));
 
 /** Rises only: a count over the baseline names its rows. A drop or a changed escape count is a `note`, never a failure. */
 export function flakeProblems(all: Record<string, Hits>, base: Record<string, Counts>, notes: string[] = []): string[] {
@@ -169,17 +168,21 @@ test('the flake guard finds each pattern, honours timing-ok, and holds the numbe
     "await until('x', () => ok(), 5_000);",
     'rmSync(root, { recursive: true, force: true });',
     "await until('x', () => buf.slice(0, 200).includes('a'));",
-    "assert.ok(Date.now() - Date.parse(r.at) < 60_000);",
+    'assert.ok(Date.now() - Date.parse(r.at) < 60_000);',
     '// timing-ok: the sleep is the thing under test',
     'await new Promise((r) => setTimeout(r, 50));',
     "await until('x', () => a.slice(0, 2));",
     "await until('x', () => ok(), 60_000);",
-    "// await new Promise((r) => setTimeout(r, 50));",
+    '// await new Promise((r) => setTimeout(r, 50));',
   ].join('\n');
   assert.deepEqual(flakeHits('rmSync(d, { recursive: true, force: true });'), {}, 'a file with no bootServer may clean its own temp dir');
   const h = flakeHits(`${text}\n// a file that uses bootServer`);
   assert.deepEqual(Object.fromEntries(Object.entries(h).map(([p, v]) => [p, [v.bare, v.ok]])), {
-    sleep: [[1], [9]], elapsed: [[2], []], freePort: [[3], []], shortUntil: [[4], []], rmTemp: [[5], []],
+    sleep: [[1], [9]],
+    elapsed: [[2], []],
+    freePort: [[3], []],
+    shortUntil: [[4], []],
+    rmTemp: [[5], []],
   });
   const base = toCounts({ 'a.ts': h });
   assert.deepEqual(flakeProblems({ 'a.ts': h }, base), []);

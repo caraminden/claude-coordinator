@@ -113,7 +113,14 @@ test('land_fallback decides when CI gives no answer: 0 lands, 75 parks, anything
     assert.match(a.stderr(), /no runner has started CI on [0-9a-f]{12} within 1 min \(.*\): land\.local\.sh's land_fallback decides in CI's place/);
     assert.match(a.stderr(), /land_fallback passed [0-9a-f]{12} in CI's place/);
     const ta = c.mainAt();
-    assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n').map((l) => l.split(' ').map((s) => s.slice(0, 12))), [[ta, ta]], 'given the commit, and sitting on it');
+    assert.deepEqual(
+      readFileSync(log, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => l.split(' ').map((s) => s.slice(0, 12))),
+      [[ta, ta]],
+      'given the commit, and sitting on it',
+    );
     writeFileSync(join(c.ci, 'fallback-rc'), '1\n');
     const b = c.land(2, { LAND_CI_START: '1' });
     assert.equal(await b.exit, 1, b.stderr());

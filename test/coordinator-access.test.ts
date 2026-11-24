@@ -89,12 +89,18 @@ function parts(command: string): string[] | null {
   for (let i = 0; i < cmd.length; i++) {
     const c = cmd[i];
     if (q) {
-      if (c === '\\' && q === '"') { cur += c + (cmd[++i] ?? ''); continue; }
+      if (c === '\\' && q === '"') {
+        cur += c + (cmd[++i] ?? '');
+        continue;
+      }
       if (c === q) q = '';
       cur += c;
       continue;
     }
-    if (c === '\\') { cur += c + (cmd[++i] ?? ''); continue; }
+    if (c === '\\') {
+      cur += c + (cmd[++i] ?? '');
+      continue;
+    }
     if (c === "'" || c === '"') q = c;
     if (c === '`' || (c === '$' && cmd[i + 1] === '(') || c === '>' || c === '<') return null;
     if (c === ';' || c === '|' || c === '&' || c === '\n') {
@@ -119,11 +125,13 @@ test('the rule matcher reads rules the way Claude Code did in real runs', () => 
   assert.ok(bashAllowed('sort /tmp/a | uniq -c | sort -rn'));
   assert.ok(!bashAllowed("curl -s http://127.0.0.1:8573/api/health -w '%output{/tmp/x}'"), 'curl only as the exact health check');
   assert.ok(bashAllowed(`git -C ${live} merge-base --is-ancestor HEAD HEAD && echo LIVE || echo NOT-LIVE`));
-  for (const c of ['curl -X POST http://127.0.0.1:1/', 'curl -s -X POST http://127.0.0.1:1/', 'gh api -f x=1 rate_limit', 'sort -o /tmp/s /tmp/a', 'find -delete', 'journalctl --user --rotate', 'echo hi > /tmp/x', 'ss -ltn | awk \'{print $4}\'']) assert.ok(!bashAllowed(c), c);
+  for (const c of ['curl -X POST http://127.0.0.1:1/', 'curl -s -X POST http://127.0.0.1:1/', 'gh api -f x=1 rate_limit', 'sort -o /tmp/s /tmp/a', 'find -delete', 'journalctl --user --rotate', 'echo hi > /tmp/x', "ss -ltn | awk '{print $4}'"]) assert.ok(!bashAllowed(c), c);
 });
 
 // The calls, with the box's paths moved under this test's folders; calls cut at 500 characters are left out.
-const fixture = readFileSync(new URL('taskmaster-denied-calls.txt', import.meta.url), 'utf8').split('\n').filter((l) => l.includes('\t') && !/…\[\+\d+ chars\]$/.test(l))
+const fixture = readFileSync(new URL('taskmaster-denied-calls.txt', import.meta.url), 'utf8')
+  .split('\n')
+  .filter((l) => l.includes('\t') && !/…\[\+\d+ chars\]$/.test(l))
   .map((l) => l.split('\t')[1].replaceAll('/home/cara/.local/share/claude-coordinator', data).replaceAll('/home/cara/claude-coordinator', live).replaceAll('/home/cara/.local/share/mise/installs', mise));
 /** Whether a Taskmaster turn now makes this fixture call without a prompt. */
 function nowAllowed(call: string): boolean {
@@ -147,7 +155,11 @@ const STILL_DENIED: [RegExp, string][] = [
 
 test("most of the Taskmaster's denied calls now run; the rest write, cd, or are shell Claude Code can't match by rule", () => {
   const passed = fixture.filter(nowAllowed);
-  for (const c of fixture.filter((c) => !nowAllowed(c))) assert.ok(STILL_DENIED.some(([re]) => re.test(c)), `still denied, unexpectedly: ${c.slice(0, 200)}`);
+  for (const c of fixture.filter((c) => !nowAllowed(c)))
+    assert.ok(
+      STILL_DENIED.some(([re]) => re.test(c)),
+      `still denied, unexpectedly: ${c.slice(0, 200)}`,
+    );
   for (const c of [
     'Bash: systemctl --user status claude-coordinator --no-pager -n 20',
     'Bash: ps -eo pid,user,pcpu,pmem,rss,etime,comm --sort=-pcpu | head -25',
@@ -157,38 +169,89 @@ test("most of the Taskmaster's denied calls now run; the rest write, cd, or are 
     `Bash: git -C ${data}/projects/2/tickets/141 branch --show-current`,
     `Bash: ls ${mise}`,
     `Read: ${data}/projects/2/shared/191/scheme-instructions.diff`,
-  ]) assert.ok(passed.includes(c), c);
+  ])
+    assert.ok(passed.includes(c), c);
 });
 
 test('writes stay denied: cp, sed -i, python, curl -X POST, gh api -X, sqlite3 without -readonly -safe, git push, rm, find -exec', () => {
   for (const c of [
-    `cp /etc/hostname ${data}/x`, `sed -i s/a/b/ ${data}/x`, `python3 -c "open('/tmp/x','w').write('x')"`,
-    'curl -s -X POST http://127.0.0.1:8573/api/x', 'curl -d x=1 http://127.0.0.1:8573/api/x', 'curl --json {} http://127.0.0.1:8573/api/x',
-    'gh api -X DELETE repos/a/b', 'gh api repos/a/b/issues -f title=x', `sqlite3 ${data}/coordinator.db "delete from tickets"`,
-    `sqlite3 -readonly ${data}/coordinator.db ".shell rm -rf /tmp/x"`, `git -C ${data}/projects/2/repo push`, `git -C ${data}/projects/2/repo -c core.pager=x log`,
-    `rm ${data}/x`, `find ${data} -name x -delete`, `find ${data} -exec rm {} ;`, `find ${data} -fprint /tmp/x`, `grep -c a ${data}/x > /tmp/y`,
-    `cd ${data}/projects/2/repo && git log -1`, 'journalctl --user --vacuum-time=1s', 'journalctl --user --vac=1s', 'journalctl --user --cursor-file=/tmp/c',
-    'sort -o /tmp/a /tmp/b', 'sort --o=/tmp/a /tmp/b', 'sort --compress-program=sh -S 1K /tmp/a', 'sort --co=sh -S 1K /tmp/a', 'uniq /tmp/a /tmp/b',
+    `cp /etc/hostname ${data}/x`,
+    `sed -i s/a/b/ ${data}/x`,
+    `python3 -c "open('/tmp/x','w').write('x')"`,
+    'curl -s -X POST http://127.0.0.1:8573/api/x',
+    'curl -d x=1 http://127.0.0.1:8573/api/x',
+    'curl --json {} http://127.0.0.1:8573/api/x',
+    'gh api -X DELETE repos/a/b',
+    'gh api repos/a/b/issues -f title=x',
+    `sqlite3 ${data}/coordinator.db "delete from tickets"`,
+    `sqlite3 -readonly ${data}/coordinator.db ".shell rm -rf /tmp/x"`,
+    `git -C ${data}/projects/2/repo push`,
+    `git -C ${data}/projects/2/repo -c core.pager=x log`,
+    `rm ${data}/x`,
+    `find ${data} -name x -delete`,
+    `find ${data} -exec rm {} ;`,
+    `find ${data} -fprint /tmp/x`,
+    `grep -c a ${data}/x > /tmp/y`,
+    `cd ${data}/projects/2/repo && git log -1`,
+    'journalctl --user --vacuum-time=1s',
+    'journalctl --user --vac=1s',
+    'journalctl --user --cursor-file=/tmp/c',
+    'sort -o /tmp/a /tmp/b',
+    'sort --o=/tmp/a /tmp/b',
+    'sort --compress-program=sh -S 1K /tmp/a',
+    'sort --co=sh -S 1K /tmp/a',
+    'uniq /tmp/a /tmp/b',
     // Review findings: -nonce turns -safe off; curl writes, reads files, POSTs and reaches other hosts; ss -D writes.
-    `sqlite3 -readonly -safe -nonce x ${data}/c.db '.nonce x' '.shell rm -rf /tmp/x'`, `sqlite3 -readonly -safe -unsafe-testing ${data}/c.db '.shell x'`,
-    'curl -s http://127.0.0.1:8573/ -o /tmp/x', 'curl -s -o /dev/null http://127.0.0.1:8573/', 'curl -sSo /tmp/x http://127.0.0.1:8573/', 'curl -s -D /tmp/h http://127.0.0.1:8573/',
-    'curl -s file:///home/u/.ssh/id_ed25519', 'curl -s http://127.0.0.1:8573/ FILE:///etc/passwd', 'curl -s http://127.0.0.1:8573/ file:/etc/passwd', 'curl -s http://127.0.0.1:8573/ -w @/home/u/.ssh/id_ed25519',
-    'curl -s http://127.0.0.1:8573@example.com/', 'curl -s https://example.com/', 'curl -s --unix-socket /run/user/1/podman/podman.sock http://127.0.0.1:1/x',
-    'curl -s http://127.0.0.1:8573/ --connect-to 127.0.0.1:8573:example.com:80', 'curl -s http://127.0.0.1:8573/api/health --expand-output /tmp/x',
-    'curl -s http://127.0.0.1:8573/api/health https://example.com/', "curl -s http://127.0.0.1:8573/api/health -w '%output{/tmp/x}x'", 'curl -s http://127.0.0.1:8573/api/health -so /tmp/x', `ss -ltn -D ${data}/coordinator.db`, `ss -ltn --diag=${data}/x`,
-  ]) assert.ok(!bashAllowed(c), c);
+    `sqlite3 -readonly -safe -nonce x ${data}/c.db '.nonce x' '.shell rm -rf /tmp/x'`,
+    `sqlite3 -readonly -safe -unsafe-testing ${data}/c.db '.shell x'`,
+    'curl -s http://127.0.0.1:8573/ -o /tmp/x',
+    'curl -s -o /dev/null http://127.0.0.1:8573/',
+    'curl -sSo /tmp/x http://127.0.0.1:8573/',
+    'curl -s -D /tmp/h http://127.0.0.1:8573/',
+    'curl -s file:///home/u/.ssh/id_ed25519',
+    'curl -s http://127.0.0.1:8573/ FILE:///etc/passwd',
+    'curl -s http://127.0.0.1:8573/ file:/etc/passwd',
+    'curl -s http://127.0.0.1:8573/ -w @/home/u/.ssh/id_ed25519',
+    'curl -s http://127.0.0.1:8573@example.com/',
+    'curl -s https://example.com/',
+    'curl -s --unix-socket /run/user/1/podman/podman.sock http://127.0.0.1:1/x',
+    'curl -s http://127.0.0.1:8573/ --connect-to 127.0.0.1:8573:example.com:80',
+    'curl -s http://127.0.0.1:8573/api/health --expand-output /tmp/x',
+    'curl -s http://127.0.0.1:8573/api/health https://example.com/',
+    "curl -s http://127.0.0.1:8573/api/health -w '%output{/tmp/x}x'",
+    'curl -s http://127.0.0.1:8573/api/health -so /tmp/x',
+    `ss -ltn -D ${data}/coordinator.db`,
+    `ss -ltn --diag=${data}/x`,
+  ])
+    assert.ok(!bashAllowed(c), c);
 });
 
 test('#621: file, sandboxed sed, more gh reads and plain fetches in the repo run; their writing forms stay denied', () => {
   const repo = `${data}/projects/2/repo`;
   const wt = `${data}/projects/2/tickets/141`;
-  for (const c of ['gh repo view caraminden/peek-auras --json visibility',
-    'gh release list -R a/b', 'gh workflow view tests.yml -R a/b', 'citadel-where fast mode', 'citadel-where --minion 12 model', `git -C ${repo} fetch`, `git -C ${repo} fetch origin`, `git -C ${repo} fetch --prune`, `git -C ${wt} log -1`]) assert.ok(bashAllowed(c), c);
-  for (const c of [`sed -n 1,20p ${data}/x`, `sed --sandbox -i s/a/b/ ${data}/x`, `sed --sandbox -ni s/a/b/p ${data}/x`, `sed --sandbox --in-place s/a/b/ ${data}/x`,
-    `sed --sandbox -n 1,20p ${data}/x`, `sed --sandbox -nsi s/a/b/p ${data}/x`, `file ${data}/x`, `file -bC -m ${data}/magic`, `file -C -m ${data}/magic`, `git -C ${repo} fetch origin main:main`, `git -C ${repo} fetch --upload-pack=sh origin`, `git -C ${repo} fetch origin +main:main`,
-    `git -C ${live} fetch`, 'gh repo view a/b --web', 'gh release download v1 -R a/b',
+  for (const c of ['gh repo view caraminden/peek-auras --json visibility', 'gh release list -R a/b', 'gh workflow view tests.yml -R a/b', 'citadel-where fast mode', 'citadel-where --minion 12 model', `git -C ${repo} fetch`, `git -C ${repo} fetch origin`, `git -C ${repo} fetch --prune`, `git -C ${wt} log -1`])
+    assert.ok(bashAllowed(c), c);
+  for (const c of [
+    `sed -n 1,20p ${data}/x`,
+    `sed --sandbox -i s/a/b/ ${data}/x`,
+    `sed --sandbox -ni s/a/b/p ${data}/x`,
+    `sed --sandbox --in-place s/a/b/ ${data}/x`,
+    `sed --sandbox -n 1,20p ${data}/x`,
+    `sed --sandbox -nsi s/a/b/p ${data}/x`,
+    `file ${data}/x`,
+    `file -bC -m ${data}/magic`,
+    `file -C -m ${data}/magic`,
+    `git -C ${repo} fetch origin main:main`,
+    `git -C ${repo} fetch --upload-pack=sh origin`,
+    `git -C ${repo} fetch origin +main:main`,
+    `git -C ${live} fetch`,
+    'gh repo view a/b --web',
+    'gh release download v1 -R a/b',
     // A worktree shares the repo's refs, so the repo's fetch is its fetch; per-worktree fetch rules filled the 2 MiB settings cap (#661).
-    `git -C ${wt} fetch`, `git -C ${wt} fetch origin`]) assert.ok(!bashAllowed(c), c);
+    `git -C ${wt} fetch`,
+    `git -C ${wt} fetch origin`,
+  ])
+    assert.ok(!bashAllowed(c), c);
 });
 
 test("the data folder and mise's installs are readable, not added: acceptEdits can't write there", () => {
@@ -197,14 +260,20 @@ test("the data folder and mise's installs are readable, not added: acceptEdits c
   assert.ok(!tmAllow.some((r) => /^(Edit|Write)\(/.test(r)));
 });
 
-test("the tripwire still refuses secrets, environments, the credentials table and writable state.db on calls the rules now allow", () => {
+test('the tripwire still refuses secrets, environments, the credentials table and writable state.db on calls the rules now allow', () => {
   const box = '/home/u/.local/share/claude-coordinator';
   const cfg: TripwireConfig = { home: '/home/u', data: box, checkout: '/home/u/claude-coordinator', project: 2, claudeConfig: '/home/u/.claude', ask: false, deployScript: false, env: { PATH: '/usr/bin:/bin' } };
   const cwd = `${box}/projects/2/coordinator`;
   for (const command of [
-    'grep -r token /home/u/.config/gh', 'cat /home/u/.ssh/id_ed25519', 'grep -rl x /home/u', 'cat /home/u/.config/claude-coordinator/env',
-    'cat /proc/1/environ', 'ps eww -p 1', `sqlite3 -readonly -safe ${box}/coordinator.db "select * from credentials"`,
-    `sqlite3 -readonly -safe ${box}/coordinator.db ".dump"`, 'cat /home/u/.claude/.credentials.json',
+    'grep -r token /home/u/.config/gh',
+    'cat /home/u/.ssh/id_ed25519',
+    'grep -rl x /home/u',
+    'cat /home/u/.config/claude-coordinator/env',
+    'cat /proc/1/environ',
+    'ps eww -p 1',
+    `sqlite3 -readonly -safe ${box}/coordinator.db "select * from credentials"`,
+    `sqlite3 -readonly -safe ${box}/coordinator.db ".dump"`,
+    'cat /home/u/.claude/.credentials.json',
   ]) {
     assert.ok(bashAllowed(command), `the rules let it through, so the tripwire is what stops it: ${command}`);
     const v = tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, cfg);
@@ -232,14 +301,36 @@ test("#661: the Citadel Taskmaster's every-scheme settings.json stays under 1 Mi
     return launchPlan({
       project: { id: GLOBAL_OWNER, repo_dir: `${base}/2/repo`, approval_rules: '', plugin_dirs: '', optional_plugin_dirs: '' } as any,
       ticket: { id: 1, kind: 'coordinator', permission_mode: 'default', cwd: `${base}/2/repo`, plugin_dirs: '' } as any,
-      dir: turnDir, pins, place: { host: true }, machines: [], model: null, effort: null, codex: null, codexReview: null, deploys: false, memory: false, typer: null, homeContraptions: [], claudeBin: 'claude', unit: null,
+      dir: turnDir,
+      pins,
+      place: { host: true },
+      machines: [],
+      model: null,
+      effort: null,
+      codex: null,
+      codexReview: null,
+      deploys: false,
+      memory: false,
+      typer: null,
+      homeContraptions: [],
+      claudeBin: 'claude',
+      unit: null,
       env: { server: { HOME: '/home/cara', PATH: '/usr/bin' }, coordinator: {}, heavy: {}, github: null },
-      folders: { files: null, shared: `${base}/2/shared/project`, memory: null, tmp: null, tickets: `${base}/2/tickets`, data: '/home/cara/.local/share/claude-coordinator',
+      folders: {
+        files: null,
+        shared: `${base}/2/shared/project`,
+        memory: null,
+        tmp: null,
+        tickets: `${base}/2/tickets`,
+        data: '/home/cara/.local/share/claude-coordinator',
         // Ids no minion has, so the running checkout (CHECKOUT, a worktree like 2/tickets/1673) never collides with one.
-        openTickets: Array.from({ length: own }, (_, i) => `${base}/2/tickets/${900000 + i}`) },
+        openTickets: Array.from({ length: own }, (_, i) => `${base}/2/tickets/${900000 + i}`),
+      },
       everyScheme: {
         gitDirs: Array.from({ length: schemes }, (_, s) => [`${base}/${s + 10}/repo`, ...Array.from({ length: perScheme }, (_, i) => `${base}/${s + 10}/tickets/${1500 + i}`)]).flat(),
-        apps: Array.from({ length: 10 }, (_, i) => `/home/cara/apps/contraption-${i}`), data: '/home/cara/.local/share/claude-coordinator', keysDir: '/home/cara/.local/share/claude-coordinator/contraptions',
+        apps: Array.from({ length: 10 }, (_, i) => `/home/cara/apps/contraption-${i}`),
+        data: '/home/cara/.local/share/claude-coordinator',
+        keysDir: '/home/cara/.local/share/claude-coordinator/contraptions',
       },
     });
   };
@@ -247,12 +338,18 @@ test("#661: the Citadel Taskmaster's every-scheme settings.json stays under 1 Mi
   const grown = launch(30, 10, 25);
   const settings = grown.files.find((f) => f.name === 'settings.json')!.text;
   assert.ok(Buffer.byteLength(settings) < 1024 * 1024, `settings.json at 3x is ${Buffer.byteLength(settings)} bytes`);
-  assert.ok(JSON.parse(settings).permissions.allow.includes(`Bash(git -C ${base}/19/tickets/1524 log:*)`), "the every-scheme rules are in it");
+  assert.ok(JSON.parse(settings).permissions.allow.includes(`Bash(git -C ${base}/19/tickets/1524 log:*)`), 'the every-scheme rules are in it');
   for (const f of grown.files) assert.ok(Buffer.byteLength(f.text) < 1024 * 1024, `${f.name} is ${Buffer.byteLength(f.text)} bytes`);
   // 200 open in each of 11 schemes is far past the cap: the launch says why, not Claude Code's bare "Settings file exceeds the 2MiB limit".
-  assert.throws(() => launch(200, 10, 200), (err: Error) => {
-    assert.match(err.message, /^This turn's settings\.json would be \d+\.\d MiB, over Claude Code's 2 MiB cap, so it can't start: [\d,]+ allow rules, [\d,]+ of them read-only git rules for 2,222 folders \(200 open minions' worktrees in this scheme, 2,010 folders in other schemes and 10 contraptions' \(every-scheme reads\)\)\. /);
-    return true;
-  });
+  assert.throws(
+    () => launch(200, 10, 200),
+    (err: Error) => {
+      assert.match(
+        err.message,
+        /^This turn's settings\.json would be \d+\.\d MiB, over Claude Code's 2 MiB cap, so it can't start: [\d,]+ allow rules, [\d,]+ of them read-only git rules for 2,222 folders \(200 open minions' worktrees in this scheme, 2,010 folders in other schemes and 10 contraptions' \(every-scheme reads\)\)\. /,
+      );
+      return true;
+    },
+  );
   assert.equal(SETTINGS_CAP, 2 * 1024 * 1024);
 });

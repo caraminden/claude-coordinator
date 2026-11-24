@@ -52,7 +52,11 @@ function adoptStyles() {
 }
 
 const loadDraft = (key) => {
-  try { return JSON.parse(localStorage.getItem(key)) ?? null; } catch { return null; }
+  try {
+    return JSON.parse(localStorage.getItem(key)) ?? null;
+  } catch {
+    return null;
+  }
 };
 const saveDraft = (key, value) => {
   try {
@@ -66,13 +70,13 @@ export function fitHeight(box) {
   // Text only got longer (a key typed): the box can only grow, so one read says whether it must, with no collapse.
   // That keeps typing to one layout a key in a long chat (#1531: 154 layouts for 49 keys before).
   // shortcut: a longer paste over lines it removes leaves the box tall until the text next gets shorter.
-  const len = box.value.length, grew = len > (box.fitLen ?? Infinity);
+  const len = box.value.length,
+    grew = len > (box.fitLen ?? Infinity);
   box.fitLen = len;
   if (grew && box.style.height && box.scrollHeight <= box.clientHeight) return;
   // Collapsing to 'auto' can shorten the page for a moment and move the scroll: put it back after,
   // and keep a chat that was at its end there, so the growing box doesn't cover the last message.
-  const scrolled = [document.scrollingElement, box.closest('.chat')].filter(Boolean)
-    .map((el) => [el, el.scrollTop, el.scrollTop >= el.scrollHeight - el.clientHeight - 2]);
+  const scrolled = [document.scrollingElement, box.closest('.chat')].filter(Boolean).map((el) => [el, el.scrollTop, el.scrollTop >= el.scrollHeight - el.clientHeight - 2]);
   box.style.height = 'auto';
   // Not laid out (a collapsed panel, or a phone's drawer still tucked away): keep the CSS height.
   if (!box.scrollHeight) box.style.height = '';
@@ -160,7 +164,9 @@ function caretIsFree(opening) {
 const takesCaret = (t) => t.isConnected && !t.disabled && !t.closest('[inert]') && t.getClientRects().length > 0;
 
 /** Put the caret in the newest box that can take it, if it is free. */
-const dropGone = () => { for (let i = live.length - 1; i >= 0; i--) if (!live[i].isConnected && live[i].dataset.cuiSeen !== undefined) live.splice(i, 1); };
+const dropGone = () => {
+  for (let i = live.length - 1; i >= 0; i--) if (!live[i].isConnected && live[i].dataset.cuiSeen !== undefined) live.splice(i, 1);
+};
 
 function autofocus(opening = false) {
   dropGone();
@@ -279,20 +285,22 @@ export function mountComposer(el, opts) {
     } catch (err) {
       sent = Promise.reject(err);
     }
-    sent.catch((err) => {
-      // Not sent: put it back, ahead of anything typed since.
-      textarea.value = textarea.value.trim() ? `${text}\n${textarea.value}` : text;
-      fit();
-      save();
-      if (opts.onError) opts.onError(err);
-      else {
-        error.textContent = `Not sent: ${err?.message || err}. Your message is back in the box.`;
-        error.hidden = false;
-      }
-    }).finally(() => {
-      sending--;
-      render();
-    });
+    sent
+      .catch((err) => {
+        // Not sent: put it back, ahead of anything typed since.
+        textarea.value = textarea.value.trim() ? `${text}\n${textarea.value}` : text;
+        fit();
+        save();
+        if (opts.onError) opts.onError(err);
+        else {
+          error.textContent = `Not sent: ${err?.message || err}. Your message is back in the box.`;
+          error.hidden = false;
+        }
+      })
+      .finally(() => {
+        sending--;
+        render();
+      });
   });
   render();
   if (opts.autofocus !== false) {
@@ -303,7 +311,12 @@ export function mountComposer(el, opts) {
   }
 
   return {
-    form, textarea, row, sendButton, stopButton, fit,
+    form,
+    textarea,
+    row,
+    sendButton,
+    stopButton,
+    fit,
     busy(on) {
       busy = !!on;
       render();

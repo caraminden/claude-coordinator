@@ -79,8 +79,7 @@ export const SECURITY_HEADERS = {
 
 /** With APPS_DOMAIN (src/apps.ts): Citadel's pages frame contraptions on their own hosts, and a contraption's installed window frames Citadel's. */
 export function framedWithApps(domain: string) {
-  SECURITY_HEADERS['Content-Security-Policy'] = SECURITY_HEADERS['Content-Security-Policy']
-    .replace("frame-ancestors 'self'", `frame-src 'self' *.${domain}; frame-ancestors 'self' *.${domain}`);
+  SECURITY_HEADERS['Content-Security-Policy'] = SECURITY_HEADERS['Content-Security-Policy'].replace("frame-ancestors 'self'", `frame-src 'self' *.${domain}; frame-ancestors 'self' *.${domain}`);
 }
 
 // Responses to browsers that accept gzip. Caddy passes bodies through as they are, and a long
@@ -102,7 +101,9 @@ export const writes = {
   settle: null as (() => void) | null,
 };
 /** Wait for this request's own DB writes: a handler that answers from a re-read of rows it just wrote awaits this first. */
-export const ownWrites = async () => { await writes.landed?.(); };
+export const ownWrites = async () => {
+  await writes.landed?.();
+};
 /**
  * Run `f` once no one's DB writes are queued: for a read-then-write of a row another request may have just written
  * (two strikes on one message, sent at once). The last check and `f` run with no await between, so two of these never
@@ -110,7 +111,7 @@ export const ownWrites = async () => { await writes.landed?.(); };
  */
 export const afterAllWrites = async <T>(f: () => T): Promise<T> => {
   const until = Date.now() + 30_000;
-  for (let p; (p = writes.landed?.(true));) {
+  for (let p; (p = writes.landed?.(true)); ) {
     if (Date.now() >= until) throw new HttpError(503, 'The database is still writing: try again in a moment');
     await p;
   }
@@ -526,7 +527,11 @@ function checkScope(store: Store, route: Route, caller: Ticket, method: string, 
 
 /** A route's group for the usage ledger (#1306): its path without the parameters, at most four segments (`/api/projects/:project/tickets` is `/api/projects/tickets`). */
 export function routeGroup(path: string): string {
-  return `/${path.split('/').filter((s) => s && !/^[:*]/.test(s)).slice(0, 4).join('/')}`;
+  return `/${path
+    .split('/')
+    .filter((s) => s && !/^[:*]/.test(s))
+    .slice(0, 4)
+    .join('/')}`;
 }
 
 /**
@@ -537,8 +542,16 @@ export function router(routes: Route[]) {
   const table = routes.map((route) => ({
     route,
     methods: typeof route.method === 'string' ? [route.method] : route.method,
-    names: route.path.split('/').filter((s) => /^[:*]/.test(s)).map((s) => s.slice(1)),
-    re: new RegExp(`^${route.path.split('/').map((s) => (s.startsWith(':') ? (NUMERIC.has(s.slice(1)) ? '(\\d+)' : '([^/]+)') : s.startsWith('*') ? '(.+)' : s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('/')}$`),
+    names: route.path
+      .split('/')
+      .filter((s) => /^[:*]/.test(s))
+      .map((s) => s.slice(1)),
+    re: new RegExp(
+      `^${route.path
+        .split('/')
+        .map((s) => (s.startsWith(':') ? (NUMERIC.has(s.slice(1)) ? '(\\d+)' : '([^/]+)') : s.startsWith('*') ? '(.+)' : s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+        .join('/')}$`,
+    ),
   }));
   const dispatch = async (app: App, req: IncomingMessage, res: ServerResponse, url: URL, session: Session | null) => {
     const method = req.method ?? 'GET';
@@ -546,7 +559,11 @@ export function router(routes: Route[]) {
     const hit = onPath.find((r) => r.methods.includes(method));
     const { route } = hit ?? {};
     const ctx = { req, res, url, app, session, caller: null, params: {} } as unknown as Ctx;
-    if (hit) hit.re.exec(url.pathname)!.slice(1).forEach((v, i) => (ctx.params[hit.names[i]] = v));
+    if (hit)
+      hit.re
+        .exec(url.pathname)!
+        .slice(1)
+        .forEach((v, i) => (ctx.params[hit.names[i]] = v));
     if (route?.who === 'anyone' || route?.who === 'machine') return route.handler(ctx);
     if (route?.who === 'contraption') {
       ctx.contraption = app.contraptions.caller(req);
@@ -592,8 +609,12 @@ export function router(routes: Route[]) {
       if (!ctx.caller && project !== undefined && !app.store.canSee(session, project)) throw new HttpError(404, GONE[name]);
     }
     if (ctx.caller) checkScope(app.store, route, ctx.caller, method, project, ctx.ticket?.id);
-    else if (route.access === 'owner' && !session.admin && app.store.getProject(project!)?.owner_id !== session.uid) throw new HttpError(403, 'Only the scheme\'s owner can do that');
-    try { app.store.usage.used('route', routeGroup(route.path), session.uid ?? session.name); } catch { /* counting never fails a request */ }
+    else if (route.access === 'owner' && !session.admin && app.store.getProject(project!)?.owner_id !== session.uid) throw new HttpError(403, "Only the scheme's owner can do that");
+    try {
+      app.store.usage.used('route', routeGroup(route.path), session.uid ?? session.name);
+    } catch {
+      /* counting never fails a request */
+    }
     return route.handler(ctx);
   };
   // Whether the table has a path at all, for a listener that serves more than its table.

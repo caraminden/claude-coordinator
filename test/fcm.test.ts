@@ -41,7 +41,12 @@ test('the FCM message is data-only: the app data, then citadel_* keys, all strin
 });
 
 test('the send body is checked: recipients, lengths, the open path and data keys', () => {
-  const bad = (b: unknown, re: RegExp) => assert.throws(() => parsePush('mandate', b), (e: any) => e instanceof HttpError && e.status === 400 && re.test(e.message), JSON.stringify(b));
+  const bad = (b: unknown, re: RegExp) =>
+    assert.throws(
+      () => parsePush('mandate', b),
+      (e: any) => e instanceof HttpError && e.status === 400 && re.test(e.message),
+      JSON.stringify(b),
+    );
   bad({ title: 'x' }, /to/);
   bad({ to: [], title: 'x' }, /to/);
   bad({ to: Array.from({ length: 101 }, (_, i) => `p${i}`), title: 'x' }, /to/);
@@ -81,7 +86,10 @@ test('the access token is cached until a minute before it ends, and a dead token
   const fcm = new Fcm(account(join(root, 'unit'), 'https://oauth.test/token'), { fetch: fakeFetch, clock: () => now });
   assert.equal(await fcm.send('t1', fcmMessage('a', 't1', { title: 'x' })), 'sent');
   assert.equal(await fcm.send('t2', fcmMessage('a', 't2', { title: 'x' })), 'sent');
-  assert.deepEqual(calls.map((c) => c.url), ['https://oauth.test/token', 'https://fcm.googleapis.com/v1/projects/proj-1/messages:send', 'https://fcm.googleapis.com/v1/projects/proj-1/messages:send']);
+  assert.deepEqual(
+    calls.map((c) => c.url),
+    ['https://oauth.test/token', 'https://fcm.googleapis.com/v1/projects/proj-1/messages:send', 'https://fcm.googleapis.com/v1/projects/proj-1/messages:send'],
+  );
   assert.equal(calls[0].body.grant_type, 'urn:ietf:params:oauth:grant-type:jwt-bearer');
   const claims = JSON.parse(Buffer.from(calls[0].body.assertion.split('.')[1], 'base64url').toString());
   assert.deepEqual([claims.iss, claims.scope, claims.aud, claims.exp - claims.iat], ['push@proj-1.iam.gserviceaccount.com', 'https://www.googleapis.com/auth/firebase.messaging', 'https://oauth.test/token', 3600]);
@@ -108,7 +116,10 @@ test('the access token is cached until a minute before it ends, and a dead token
 
 test('with no key file, Fcm says where it goes', () => {
   const fcm = new Fcm(join(root, 'none', 'fcm-service-account.json'), { fetch: (() => assert.fail('no fetch')) as typeof fetch });
-  assert.throws(() => fcm.account(), (e: any) => e.status === 503 && e.message.includes(join(root, 'none', 'fcm-service-account.json')));
+  assert.throws(
+    () => fcm.account(),
+    (e: any) => e.status === 503 && e.message.includes(join(root, 'none', 'fcm-service-account.json')),
+  );
 });
 
 // ---- The real server: registration on both hosts, and the send API against a stub Firebase ----
@@ -154,7 +165,9 @@ function ask(host: string, method: string, path: string, headers: Record<string,
       res.on('data', (d) => (text += d));
       res.on('end', () => {
         let parsed: any = text;
-        try { parsed = JSON.parse(text); } catch {}
+        try {
+          parsed = JSON.parse(text);
+        } catch {}
         resolve({ status: res.statusCode!, body: parsed });
       });
     });
@@ -185,14 +198,17 @@ after(async () => {
 
 /** A cc_app cookie for Cara on the stub's host, through the real handoff. */
 async function appCookie(): Promise<Record<string, string>> {
-  const header = (host: string, path: string, headers: Record<string, string>, name: string) => new Promise<string>((resolve, reject) => {
-    request({ host: '127.0.0.1', port, path, headers: { Host: host, ...headers } }, (res) => (res.resume(), resolve(String(res.headers[name])))).on('error', reject).end();
-  });
+  const header = (host: string, path: string, headers: Record<string, string>, name: string) =>
+    new Promise<string>((resolve, reject) => {
+      request({ host: '127.0.0.1', port, path, headers: { Host: host, ...headers } }, (res) => (res.resume(), resolve(String(res.headers[name]))))
+        .on('error', reject)
+        .end();
+    });
   const to = new URL(await header(citadel(), '/apps/stub/', { Accept: 'text/html', Cookie: srv.cookie }, 'location'));
   return { Cookie: (await header(APP, to.pathname + to.search, {}, 'set-cookie')).split(';')[0] };
 }
 
-test('a phone registers on the app host or on Citadel\'s, and only for a signed-in, enabled person', async () => {
+test("a phone registers on the app host or on Citadel's, and only for a signed-in, enabled person", async () => {
   const app = await appCookie();
   const reg = '/apps/_citadel/push/stub';
   assert.equal((await ask(APP, 'POST', reg, {}, { token: 'phone-1', platform: 'android' })).status, 401, 'signed out');
@@ -222,7 +238,10 @@ test('a phone registers on the app host or on Citadel\'s, and only for a signed-
   assert.equal((await ask(APP, 'DELETE', reg, app, { token: 'phone-2' })).status, 204);
   sent.length = 0;
   assert.deepEqual((await pushApi({ to: 'cara', data: { s: '1' } })).body, { devices: 1, sent: 1, dropped: 0, skipped: [] });
-  assert.deepEqual(sent.map((m) => m.message.token), ['phone-1']);
+  assert.deepEqual(
+    sent.map((m) => m.message.token),
+    ['phone-1'],
+  );
   assert.equal(tokenCalls, 1, 'the access token is reused');
 });
 

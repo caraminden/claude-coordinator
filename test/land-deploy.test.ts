@@ -26,7 +26,7 @@ let running = '';
 const lightLand = (r: ReturnType<typeof setup>) => {
   copyFileSync(join(import.meta.dirname, '..', 'tools', 'lane.sh'), join(r.source, 'tools', 'lane.sh'));
   writeFileSync(join(r.source, 'tools', 'lanes'), 'light docs/*\n');
-  writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "process.exit(1);\n"); // would refuse, if it ran
+  writeFileSync(join(r.source, 'tools', 'boot-check.ts'), 'process.exit(1);\n'); // would refuse, if it ran
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'the map');
   git(r.live, 'pull', '-q', '--ff-only');
@@ -36,53 +36,62 @@ const lightLand = (r: ReturnType<typeof setup>) => {
   r.commit(r.wt, 'docs/a.md', 'mine\n');
 };
 test('a light land runs no tests and no boot check, and goes live without a restart (#753)', () =>
-  withRealDeploy(async (r, run, runs) => {
-    lightLand(r);
-    const res = await run(land, r.wt);
-    assert.match(res.stderr, /lane: light \(tools\/lanes; the path that decided it: docs\/a\.md\)/);
-    assert.match(res.stderr, /no tests and no CI/);
-    assert.doesNotMatch(res.stderr, /CI FALLBACK|running the tests|boot check: the new code/);
-    assert.match(res.stderr, /live now: docs and config only, nothing to reload\. No restart\./);
-    assert.deepEqual(runs(), [], 'no test ran anywhere');
-    assert.equal(readFileSync(join(r.dir, 'sighups'), 'utf8').trim().split('\n').length, 1);
-    assert.ok(!existsSync(join(r.dir, 'restarted')), 'no restart was queued');
-    assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.wt, 'rev-parse', 'HEAD'));
-  }, (hup) => ({ reload: 'sighup', version: 'v1', ...(running && !hup && { commit: running }) })));
+  withRealDeploy(
+    async (r, run, runs) => {
+      lightLand(r);
+      const res = await run(land, r.wt);
+      assert.match(res.stderr, /lane: light \(tools\/lanes; the path that decided it: docs\/a\.md\)/);
+      assert.match(res.stderr, /no tests and no CI/);
+      assert.doesNotMatch(res.stderr, /CI FALLBACK|running the tests|boot check: the new code/);
+      assert.match(res.stderr, /live now: docs and config only, nothing to reload\. No restart\./);
+      assert.deepEqual(runs(), [], 'no test ran anywhere');
+      assert.equal(readFileSync(join(r.dir, 'sighups'), 'utf8').trim().split('\n').length, 1);
+      assert.ok(!existsSync(join(r.dir, 'restarted')), 'no restart was queued');
+      assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.wt, 'rev-parse', 'HEAD'));
+    },
+    (hup) => ({ reload: 'sighup', version: 'v1', ...(running && !hup && { commit: running }) }),
+  ));
 
 // The front end's version doesn't move on a light change, so only the live commit says the reload took: a server still
 // on the old commit after the SIGHUP gets a restart, never a "live now" (#753 review).
 test("a light land whose SIGHUP the server doesn't take queues a restart rather than calling it live (#753)", () =>
-  withRealDeploy(async (r, run) => {
-    lightLand(r);
-    const res = await run(land, r.wt);
-    assert.match(res.stderr, /the server did not pick up the new commit on SIGHUP; queuing a restart instead/);
-    assert.doesNotMatch(res.stderr, /live now: docs and config only/);
-    assert.match(res.stderr, /live now: the server restarted on/);
-  }, () => ({ reload: 'sighup', version: 'v1', ...(running && { commit: running }) })));
+  withRealDeploy(
+    async (r, run) => {
+      lightLand(r);
+      const res = await run(land, r.wt);
+      assert.match(res.stderr, /the server did not pick up the new commit on SIGHUP; queuing a restart instead/);
+      assert.doesNotMatch(res.stderr, /live now: docs and config only/);
+      assert.match(res.stderr, /live now: the server restarted on/);
+    },
+    () => ({ reload: 'sighup', version: 'v1', ...(running && { commit: running }) }),
+  ));
 
 // A land touching only test/ (#1416) is a full land, tested as ever, and the real deploy.sh skips the boot check and
 // goes live by SIGHUP with no restart. Run by hand, with no DEPLOY_TESTED, the deploy still runs the tests.
 test('a test-only land is tested but needs no boot check and no restart; deploy.sh by hand still tests it (#1416)', () =>
-  withRealDeploy(async (r, run, runs) => {
-    lightLand(r);
-    git(r.wt, 'reset', '-q', '--hard', 'main');
-    r.commit(r.wt, 'test/a.test.ts', '// mine\n');
-    const res = await run(land, r.wt);
-    assert.match(res.stderr, /deploy: deploying \w+ .*\(tests change\)/);
-    assert.doesNotMatch(res.stderr, /boot check: the new code/);
-    assert.match(res.stderr, /live now: tests, docs and config only, nothing to reload\. No restart\./);
-    assert.deepEqual(runs(), [r.wt], 'the suite ran once, in the worktree');
-    assert.ok(!existsSync(join(r.dir, 'restarted')), 'no restart was queued');
-    running = git(r.live, 'rev-parse', 'HEAD'); // the server runs the land's commit, until the next SIGHUP
-    rmSync(join(r.dir, 'sighups'));
-    mkdirSync(join(r.source, 'test'), { recursive: true });
-    r.commit(r.source, 'test/b.test.ts', '// by hand\n');
-    const byHand = await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source);
-    assert.match(byHand.stderr, /running the tests/);
-    assert.doesNotMatch(byHand.stderr, /boot check: the new code/);
-    assert.match(byHand.stderr, /No restart\./);
-    assert.ok(!existsSync(join(r.dir, 'restarted')), 'no restart was queued');
-  }, (hup) => ({ reload: 'sighup', version: 'v1', ...(running && !hup && { commit: running }) })));
+  withRealDeploy(
+    async (r, run, runs) => {
+      lightLand(r);
+      git(r.wt, 'reset', '-q', '--hard', 'main');
+      r.commit(r.wt, 'test/a.test.ts', '// mine\n');
+      const res = await run(land, r.wt);
+      assert.match(res.stderr, /deploy: deploying \w+ .*\(tests change\)/);
+      assert.doesNotMatch(res.stderr, /boot check: the new code/);
+      assert.match(res.stderr, /live now: tests, docs and config only, nothing to reload\. No restart\./);
+      assert.deepEqual(runs(), [r.wt], 'the suite ran once, in the worktree');
+      assert.ok(!existsSync(join(r.dir, 'restarted')), 'no restart was queued');
+      running = git(r.live, 'rev-parse', 'HEAD'); // the server runs the land's commit, until the next SIGHUP
+      rmSync(join(r.dir, 'sighups'));
+      mkdirSync(join(r.source, 'test'), { recursive: true });
+      r.commit(r.source, 'test/b.test.ts', '// by hand\n');
+      const byHand = await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source);
+      assert.match(byHand.stderr, /running the tests/);
+      assert.doesNotMatch(byHand.stderr, /boot check: the new code/);
+      assert.match(byHand.stderr, /No restart\./);
+      assert.ok(!existsSync(join(r.dir, 'restarted')), 'no restart was queued');
+    },
+    (hup) => ({ reload: 'sighup', version: 'v1', ...(running && !hup && { commit: running }) }),
+  ));
 
 // A killed deploy must not leave its test run or boot check holding the lock (ultra review A4), and the boot check
 // runs under a name ananicy's node rule doesn't match (A5b).
@@ -91,7 +100,10 @@ test("deploy.sh's test run and boot check don't get the deploy lock's fd 9 or th
     const fd9 = join(r.dir, 'fd9');
     writeFileSync(join(r.source, 'tools', 'run-tests.sh'), '#!/usr/bin/env bash\n{ [ -e /proc/self/fd/9 ] || [ -e /proc/self/fd/7 ]; } && echo tests open >>"$FD9_NOTE" || echo tests closed >>"$FD9_NOTE"\n');
     // node opens descriptors of its own, so the boot check looks at what its fd 9 is.
-    writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "import { appendFileSync, readlinkSync } from 'node:fs';\nimport { basename } from 'node:path';\nlet fd9 = '', fd7 = '';\ntry { fd9 = readlinkSync('/proc/self/fd/9'); } catch {}\ntry { fd7 = readlinkSync('/proc/self/fd/7'); } catch {}\nappendFileSync(process.env.FD9_NOTE, `boot ${fd9.endsWith('/cc-deploy/lock') || fd7.endsWith('/cc-deploy/restart.lock') ? 'open' : 'closed'} ${basename(process.argv0)}\\n`);\nconsole.log('v1');\n");
+    writeFileSync(
+      join(r.source, 'tools', 'boot-check.ts'),
+      "import { appendFileSync, readlinkSync } from 'node:fs';\nimport { basename } from 'node:path';\nlet fd9 = '', fd7 = '';\ntry { fd9 = readlinkSync('/proc/self/fd/9'); } catch {}\ntry { fd7 = readlinkSync('/proc/self/fd/7'); } catch {}\nappendFileSync(process.env.FD9_NOTE, `boot ${fd9.endsWith('/cc-deploy/lock') || fd7.endsWith('/cc-deploy/restart.lock') ? 'open' : 'closed'} ${basename(process.argv0)}\\n`);\nconsole.log('v1');\n",
+    );
     git(r.source, 'commit', '-qam', 'stand-ins that look for fd 9');
     const res = await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source, { FD9_NOTE: fd9 });
     assert.match(res.stderr, /live now: the server restarted on/);
@@ -162,14 +174,17 @@ test('a land killed while the deploy tests the live checkout puts the checkout a
   for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   // Run in the live checkout (the deploy's own test run), it says so and waits for the test to write the release file,
   // so a slow box can't finish it before the SIGTERM.
-  writeFileSync(join(r.source, 'test', 'slow.test.mjs'), `import { existsSync, realpathSync, writeFileSync } from 'node:fs';
+  writeFileSync(
+    join(r.source, 'test', 'slow.test.mjs'),
+    `import { existsSync, realpathSync, writeFileSync } from 'node:fs';
 if (process.env.KILL_MARK && realpathSync(process.cwd()) === realpathSync(process.env.DEPLOY_LIVE)) {
   writeFileSync(process.env.KILL_MARK + '.started', '');
   // poll-ok: this runs in a fixture child in a temp dir and can't import ./wait.ts
   for (const end = Date.now() + 60000; !existsSync(process.env.KILL_MARK + '.release') && Date.now() < end;) await new Promise((r) => setTimeout(r, 50));
   writeFileSync(process.env.KILL_MARK + '.done', '');
 }
-`);
+`,
+  );
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real deploy.sh');
   git(r.live, 'pull', '-q', '--ff-only');
@@ -183,13 +198,21 @@ if (process.env.KILL_MARK && realpathSync(process.cwd()) === realpathSync(proces
   writeFileSync(join(bin, 'systemd-run'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   const mark = join(r.dir, 'kill');
   const child = spawn('bash', [land], {
-    cwd: r.wt, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
+    cwd: r.wt,
+    detached: true,
+    stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...env, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_URL: 'http://127.0.0.1:9', DEPLOY_DB: join(r.dir, 'none.db'), DEPLOY_REMOTE: '', KILL_MARK: mark },
   });
   let stderr = '';
   child.stderr!.on('data', (d) => (stderr += d));
   const exited = new Promise((ok) => child.once('exit', ok));
-  const reach = (file: string) => until(`${file}`, () => existsSync(file), 60_000, () => stderr);
+  const reach = (file: string) =>
+    until(
+      `${file}`,
+      () => existsSync(file),
+      60_000,
+      () => stderr,
+    );
   await reach(`${mark}.started`);
   assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'), 'main had moved');
   assert.equal(git(r.live, 'rev-parse', 'HEAD'), git(r.wt, 'rev-parse', 'HEAD'), 'the live checkout had pulled it');
@@ -211,7 +234,10 @@ test("a restart that can't be queued says to run deploy.sh again, and leaves nob
     mkdirSync(failing);
     writeFileSync(join(failing, 'systemd-run'), '#!/bin/sh\necho "Failed to start transient service unit: Access denied" >&2\nexit 1\n', { mode: 0o755 });
     r.commit(r.wt, 'b.txt', 'mine\n');
-    const err = await run(land, r.wt, { PATH: `${failing}:${join(r.dir, 'bin')}:${process.env.PATH}`, COORDINATOR_TICKET: '7', COORDINATOR_TOKEN: 'tok', COORDINATOR_API: 'http://127.0.0.1:1' }).then(() => assert.fail('the landing should fail'), (e) => e);
+    const err = await run(land, r.wt, { PATH: `${failing}:${join(r.dir, 'bin')}:${process.env.PATH}`, COORDINATOR_TICKET: '7', COORDINATOR_TOKEN: 'tok', COORDINATOR_API: 'http://127.0.0.1:1' }).then(
+      () => assert.fail('the landing should fail'),
+      (e) => e,
+    );
     assert.equal(err.code, 1, err.stderr);
     assert.match(err.stderr, /deploy: could not queue the restart \(Failed to start transient service unit: Access denied\), so nothing restarted: the live checkout is at \w+ "b\.txt: mine", but the server still runs \w+\. Run tools\/deploy\.sh again to queue it/);
     assert.match(err.stderr.trimEnd().split('\n').at(-1)!, /land: the deploy failed after main moved; main keeps \w+\. The deploy's lines above say why and what to do$/);
@@ -225,7 +251,10 @@ test("deploy.sh's test run that can't write its temp file says no test ran, and 
     const before = git(r.live, 'rev-parse', 'HEAD');
     const tmp = join(r.dir, 'ro-tmp');
     mkdirSync(tmp, { mode: 0o555 });
-    const err = await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source, { TMPDIR: tmp }).then(() => assert.fail('the deploy should fail'), (e) => e);
+    const err = await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source, { TMPDIR: tmp }).then(
+      () => assert.fail('the deploy should fail'),
+      (e) => e,
+    );
     assert.match(err.stderr, /run-tests: could not make a temp file in \S+ro-tmp/);
     assert.match(err.stderr, /deploy: no test ran: the test run could not write its files \(the run-tests line above says which\); nothing deployed/);
     assert.doesNotMatch(err.stderr, /tests failed/);
@@ -246,7 +275,10 @@ test('deploy.sh --to rolls the server back to an older commit of main, with the 
     const broken = git(r.source, 'rev-parse', 'main');
     r.commit(r.wt, 'mine.txt', 'mine\n');
     const offMain = git(r.wt, 'rev-parse', 'HEAD');
-    const refused = await run(deploy, r.source, {}, ['--to', offMain]).then(() => assert.fail('a commit off main should be refused'), (e) => e);
+    const refused = await run(deploy, r.source, {}, ['--to', offMain]).then(
+      () => assert.fail('a commit off main should be refused'),
+      (e) => e,
+    );
     assert.match(refused.stderr, /isn't on main; nothing changed/);
     assert.equal(git(r.live, 'rev-parse', 'HEAD'), broken);
     const ran = runs().length;
@@ -265,12 +297,19 @@ test('deploy.sh --to rolls the server back to an older commit of main, with the 
 // restart unit (active while it runs; a second unit is refused as already there), and a restart has the server run the
 // live checkout's HEAD. hold.turns: the turns /api/health says a restart would cut off; hold.down: commits whose server
 // doesn't come up. The server runs `broken` (src/broken.ts) at the start, and green, before it, is last green.
-async function withRealRestart(body: (x: {
-  r: ReturnType<typeof setup>; green: string; broken: string; hold: { turns: number; down: Set<string> };
-  deploy: (args?: string[], extra?: Record<string, string>) => Promise<{ code: number; stderr: string }>;
-  start: (args: string[]) => { err: () => string; done: Promise<number> };
-  running: () => string; state: string; active: string;
-}) => Promise<void>) {
+async function withRealRestart(
+  body: (x: {
+    r: ReturnType<typeof setup>;
+    green: string;
+    broken: string;
+    hold: { turns: number; down: Set<string> };
+    deploy: (args?: string[], extra?: Record<string, string>) => Promise<{ code: number; stderr: string }>;
+    start: (args: string[]) => { err: () => string; done: Promise<number> };
+    running: () => string;
+    state: string;
+    active: string;
+  }) => Promise<void>,
+) {
   const r = setup();
   for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
@@ -288,27 +327,37 @@ async function withRealRestart(body: (x: {
   const active = join(r.dir, 'active');
   const bin = join(r.dir, 'bin');
   mkdirSync(bin);
-  writeFileSync(join(bin, 'systemctl'), `#!/usr/bin/env bash
+  writeFileSync(
+    join(bin, 'systemctl'),
+    `#!/usr/bin/env bash
 case "$*" in
   *' kill -s HUP '*|*' restart '*) git -C "$DEPLOY_LIVE" rev-parse HEAD >${JSON.stringify(running)} ;;
   *' is-active -q cc-restart-when-idle') [ -e ${JSON.stringify(active)} ]; exit ;;
   *' show '*) echo 100 ;;
 esac
 exit 0
-`);
-  writeFileSync(join(bin, 'systemd-run'), `#!/usr/bin/env bash
+`,
+  );
+  writeFileSync(
+    join(bin, 'systemd-run'),
+    `#!/usr/bin/env bash
 echo "$*" >>${JSON.stringify(join(r.dir, 'systemd-run.args'))}
 [ ! -e ${JSON.stringify(active)} ] || { echo "Failed to start transient service unit: Unit cc-restart-when-idle.service already exists." >&2; exit 1; }
 envs=()
 while [ $# -gt 0 ]; do case $1 in --setenv=*) envs+=("\${1#--setenv=}") ;; --*) ;; *) break ;; esac; shift; done
 touch ${JSON.stringify(active)}
 (env "\${envs[@]}" "$@" >>${JSON.stringify(join(r.dir, 'restart.log'))} 2>&1; rm -f ${JSON.stringify(active)}) </dev/null >/dev/null 2>&1 9>&- 7>&- &
-`);
+`,
+  );
   for (const f of ['systemctl', 'systemd-run']) chmodSync(join(bin, f), 0o755);
   const hold = { turns: 0, down: new Set<string>() };
   const server = createServer((_, res) => {
     const commit = readFileSync(running, 'utf8').trim();
-    if (hold.down.has(commit)) { res.statusCode = 503; res.end(); return; }
+    if (hold.down.has(commit)) {
+      res.statusCode = 503;
+      res.end();
+      return;
+    }
     res.end(JSON.stringify({ ok: true, commit, interruptible: hold.turns, reload: 'sighup', version: 'v1' }));
   });
   await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
@@ -316,12 +365,17 @@ touch ${JSON.stringify(active)}
   const script = join(import.meta.dirname, '..', 'tools', 'deploy.sh');
   const fast = { DEPLOY_IDLE_POLL: '0.2', DEPLOY_HEALTHY_WAIT: '1', DEPLOY_SETTLE: '0.3', DEPLOY_TEST_HEALTH_POLL: '0.1', DEPLOY_TEST_LIVE_GRACE: '1' };
   const envOf = (extra: Record<string, string> = {}) => ({ ...env, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_URL: url, DEPLOY_DB: join(r.dir, 'none.db'), DEPLOY_REMOTE: '', ...fast, ...extra });
-  const deploy = (args: string[] = [], extra: Record<string, string> = {}) => promisify(execFile)('bash', [script, ...args], { cwd: r.source, encoding: 'utf8', env: envOf(extra) })
-    .then((o) => ({ code: 0, stderr: o.stderr }), (e) => ({ code: e.code as number, stderr: e.stderr as string }));
+  const deploy = (args: string[] = [], extra: Record<string, string> = {}) =>
+    promisify(execFile)('bash', [script, ...args], { cwd: r.source, encoding: 'utf8', env: envOf(extra) }).then(
+      (o) => ({ code: 0, stderr: o.stderr }),
+      (e) => ({ code: e.code as number, stderr: e.stderr as string }),
+    );
   const start = (args: string[]) => {
     const child = spawn('bash', [script, ...args], { cwd: r.source, env: envOf(), stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
-    child.stderr.on('data', (d) => { err += d; });
+    child.stderr.on('data', (d) => {
+      err += d;
+    });
     return { err: () => err, done: new Promise<number>((ok) => child.on('close', (code) => ok(code ?? -1))) };
   };
   try {
@@ -352,8 +406,10 @@ test("while a roll back's restart waits for turns, no deploy or land moves the c
     const main = git(r.source, 'rev-parse', 'main');
     git(r.wt, 'rebase', '-q', 'main');
     r.commit(r.wt, 'b.txt', 'mine\n');
-    const landed = await promisify(execFile)('bash', [land], { cwd: r.wt, encoding: 'utf8', env: { ...env, PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_REMOTE: '', LAND_FIX: '1' } })
-      .then(() => assert.fail('the land should be refused'), (e) => e);
+    const landed = await promisify(execFile)('bash', [land], { cwd: r.wt, encoding: 'utf8', env: { ...env, PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_REMOTE: '', LAND_FIX: '1' } }).then(
+      () => assert.fail('the land should be refused'),
+      (e) => e,
+    );
     assert.match(landed.stderr, /a member pressed Roll back to last green, and its restart onto [0-9a-f]{7} "real deploy\.sh" waits to go live/);
     assert.equal(git(r.source, 'rev-parse', 'main'), main, 'nothing landed');
     const now = await deploy(['--now']); // the turns still run: only --now lets it go
@@ -366,7 +422,8 @@ test("while a roll back's restart waits for turns, no deploy or land moves the c
     assert.equal(git(r.live, 'rev-parse', 'last-good'), green);
     assert.match(readFileSync(join(state, 'bad'), 'utf8'), new RegExp(`^${broken} ${green} \\d+ ${broken} rollback\\n$`), 'the hold names the broken commit and last green');
     assert.ok(!existsSync(join(state, 'rolling-back')), 'the marker went with the restart');
-  }));
+  }),
+);
 
 // E2 (#1271): deploy.sh --to stopped watching after 105 s and ended "not live yet" with exit 0, so a restart that failed
 // later never showed on the Releases card (the server reads the job's exit), and the pin stayed.
@@ -382,4 +439,5 @@ test("a roll back whose restart fails after the deploy's first wait still ends f
     assert.equal(git(r.live, 'rev-parse', 'HEAD'), broken);
     assert.equal(running(), broken);
     assert.ok(!existsSync(join(state, 'bad')), 'a failed roll back holds nothing');
-  }));
+  }),
+);

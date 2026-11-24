@@ -33,7 +33,10 @@ export interface RunnerToken {
 
 /** A scheme's runner label: its name in lowercase with dashes, then -ci ("Peek Auras" → peek-auras-ci, "Delve" → delve-ci); '' when its name has no a-z or 0-9. */
 export function runnerLabel(schemeName: string): string {
-  const slug = schemeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const slug = schemeName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
   return slug ? `${slug}-ci` : '';
 }
 
@@ -114,7 +117,7 @@ export class RunnerTokens {
     const project = findScheme(this.store, schemeRef);
     if (!project || !mayFetch(this.store, machine, project)) throw new HttpError(404, `No scheme "${String(schemeRef ?? '')}" that machine ${machine.name} may remove a runner for`);
     // Only ever compared with the names GitHub lists, never put in a URL: GitHub's own limit is 64 characters.
-    if (typeof name !== 'string' || !/^[^\p{Cc}]{1,64}$/u.test(name)) throw new HttpError(400, 'name must be the runner\'s name, 1 to 64 characters');
+    if (typeof name !== 'string' || !/^[^\p{Cc}]{1,64}$/u.test(name)) throw new HttpError(400, "name must be the runner's name, 1 to 64 characters");
     const { slug, owner, ownerToken, hint } = this.repoOf(project);
     const own = schemeLabels(project.name);
     if (typeof label !== 'string' || !own.includes(label)) throw new HttpError(400, `label must be one of ${own.join(', ')}: the label the runner being removed carries`);
@@ -147,9 +150,7 @@ export class RunnerTokens {
     const r = await this.github(ownerToken, 'GET', `/repos/${slug}/actions/runners?per_page=100`);
     if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
     const body = (await r.json().catch(() => ({}))) as { runners?: any[] };
-    return (Array.isArray(body.runners) ? body.runners : [])
-      .filter((x) => Array.isArray(x?.labels) && x.labels.some((l: any) => l?.name === label))
-      .map((x) => ({ name: String(x.name), status: String(x.status), busy: x.busy === true }));
+    return (Array.isArray(body.runners) ? body.runners : []).filter((x) => Array.isArray(x?.labels) && x.labels.some((l: any) => l?.name === label)).map((x) => ({ name: String(x.name), status: String(x.status), busy: x.busy === true }));
   }
 
   /** The scheme's repo, owner, owner's GitHub token and runner label; throws an HttpError saying what's missing. */
@@ -158,9 +159,9 @@ export class RunnerTokens {
     const slug = repoSlug(project.repo_url);
     if (!slug) throw new HttpError(409, `${project.name} has no GitHub repo, so it has nothing to register a runner with; set its repo in the scheme's settings first.`);
     const owner = this.store.getUser(project.owner_id ?? -1);
-    if (!this.link.configured) throw new HttpError(409, 'Citadel has no GitHub linking set up, so it holds no one\'s GitHub login to ask with.');
+    if (!this.link.configured) throw new HttpError(409, "Citadel has no GitHub linking set up, so it holds no one's GitHub login to ask with.");
     const ownerToken = owner ? this.link.token(owner) : null;
-    if (!owner || !ownerToken) throw new HttpError(409, `${owner?.name ?? 'The scheme\'s owner'} (who owns ${project.name}) hasn't linked a working GitHub in Settings → Your account, so Citadel can't ask GitHub for a runner token for ${slug}.`);
+    if (!owner || !ownerToken) throw new HttpError(409, `${owner?.name ?? "The scheme's owner"} (who owns ${project.name}) hasn't linked a working GitHub in Settings → Your account, so Citadel can't ask GitHub for a runner token for ${slug}.`);
     const label = runnerLabel(project.name);
     if (!label) throw new HttpError(409, `${project.name}'s name has no letters a-z or digits to make a runner label from; rename the scheme first.`);
     // Two schemes with one label would share runs-on, and one's jobs could run on the other's runner.
@@ -172,7 +173,8 @@ export class RunnerTokens {
   private async github(token: string, method: string, path: string): Promise<Response> {
     try {
       return await this.fetch(`${API}${path}`, {
-        method, signal: AbortSignal.timeout(GITHUB_WAIT_MS),
+        method,
+        signal: AbortSignal.timeout(GITHUB_WAIT_MS),
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' },
       });
     } catch (err: any) {
@@ -289,7 +291,10 @@ export class RunnerJobs {
     if (!machines.length) {
       const where = ask.os === 'linux' ? 'Linux CI runner agent (the one in WSL)' : 'CI runner agent';
       const install = ask.os === 'linux' ? '"Linux runners in WSL"' : '"Install the runner agent"';
-      throw new HttpError(409, `No ${where} that may act for ${project.name} is online. Cara installs it once on her desktop (tools/ci-runner/README.md, ${install}); if it is installed, that PC is off or asleep${ask.os === 'linux' ? ', WSL is stopped' : ''}, or an admin hasn't added ${project.name} to it under Settings → Machines.`);
+      throw new HttpError(
+        409,
+        `No ${where} that may act for ${project.name} is online. Cara installs it once on her desktop (tools/ci-runner/README.md, ${install}); if it is installed, that PC is off or asleep${ask.os === 'linux' ? ', WSL is stopped' : ''}, or an admin hasn't added ${project.name} to it under Settings → Machines.`,
+      );
     }
     const machine = machines.find((m) => !this.busy.has(m.id));
     if (!machine) throw new HttpError(409, `The runner agent on ${machines[0].name} is busy with another scheme's job; try again in a few minutes.`);
@@ -304,7 +309,10 @@ export class RunnerJobs {
       .catch((err) => Object.assign(view, { ok: false, text: `Citadel failed while following the job: ${err?.message ?? err}`, finished_at: Date.now() }))
       .then(() => this.note(project, view))
       .catch((err) => console.error(`Couldn't note ${project.name}'s runner job:`, err))
-      .finally(() => { this.busy.delete(machine.id); this.tokenNotes.delete(project.id); }) as Promise<void>;
+      .finally(() => {
+        this.busy.delete(machine.id);
+        this.tokenNotes.delete(project.id);
+      }) as Promise<void>;
     this.jobs.set(project.id, { view, done });
     return { ...view };
   }
@@ -338,9 +346,7 @@ export class RunnerJobs {
     if (view.op === 'list') return;
     const linux = view.os === 'linux' ? 'Linux ' : '';
     const what = view.op === 'add' ? `${view.count} ${linux}CI runner${view.count === 1 ? '' : 's'} for ${project.name}` : `${project.name}'s ${linux}CI runners`;
-    const words = view.ok
-      ? `✓ ${view.by} ${view.op === 'add' ? 'added' : 'removed'} ${what} on ${view.machine}`
-      : `✗ ${view.by} tried to ${view.op} ${what} on ${view.machine}, and it failed: ${why(view.text)}`;
+    const words = view.ok ? `✓ ${view.by} ${view.op === 'add' ? 'added' : 'removed'} ${what} on ${view.machine}` : `✗ ${view.by} tried to ${view.op} ${what} on ${view.machine}, and it failed: ${why(view.text)}`;
     const lines = view.text.split('\n');
     const kept = lines.length > NOTE_LINES ? [`(${lines.length - NOTE_LINES} earlier lines left out)`, ...lines.slice(-NOTE_LINES)] : lines;
     this.onNote(project, words, [...(this.tokenNotes.get(project.id)?.lines ?? []), ...kept].join('\n'));
@@ -370,7 +376,12 @@ export class RunnerJobs {
     if (!job) return null;
     if (job.view.ok === null && waitMs > 0) {
       let timer: NodeJS.Timeout | undefined;
-      await Promise.race([job.done, new Promise((r) => { timer = setTimeout(r, waitMs); })]);
+      await Promise.race([
+        job.done,
+        new Promise((r) => {
+          timer = setTimeout(r, waitMs);
+        }),
+      ]);
       clearTimeout(timer);
     }
     return { ...job.view };

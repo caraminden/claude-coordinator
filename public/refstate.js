@@ -23,9 +23,13 @@ export function paintRefs(root = document) {
     const bucket = t?.status === 'closed' && !releasesLoaded() ? 'neutral' : refBucket(release ? { ...t, release } : t);
     if (a.dataset.baseTitle === undefined) a.dataset.baseTitle = a.getAttribute('title') ?? '';
     const word = REF_WORDS[bucket];
-    if (word) { if (a.dataset.refState !== bucket) a.dataset.refState = bucket; } else delete a.dataset.refState;
+    if (word) {
+      if (a.dataset.refState !== bucket) a.dataset.refState = bucket;
+    } else delete a.dataset.refState;
     const title = refTitle(a.dataset.baseTitle, m[2], word);
-    if (title) { if (a.getAttribute('title') !== title) a.setAttribute('title', title); } else a.removeAttribute('title');
+    if (title) {
+      if (a.getAttribute('title') !== title) a.setAttribute('title', title);
+    } else a.removeAttribute('title');
   }
 }
 
@@ -34,7 +38,10 @@ let queued = false;
 export function schedulePaintRefs() {
   if (queued) return;
   queued = true;
-  requestAnimationFrame(() => { queued = false; paintRefs(); });
+  requestAnimationFrame(() => {
+    queued = false;
+    paintRefs();
+  });
 }
 
 /** Paint links as chats draw them, and again whenever `schedulePaintRefs` is asked (core.js, on each ticket update). */

@@ -58,7 +58,9 @@ export async function mountUpdate(parent = document.body, opts = {}) {
   button.className = 'cui-btn cui-small cui-primary';
   button.textContent = opts.button ?? 'Update the app';
   button.addEventListener('click', () => {
-    void Promise.resolve((opts.open ?? openOutside)(update.url)).catch(() => { location.href = update.url; });
+    void Promise.resolve((opts.open ?? openOutside)(update.url)).catch(() => {
+      location.href = update.url;
+    });
   });
   banner.append(say, ' ', button);
   parent.prepend(banner);

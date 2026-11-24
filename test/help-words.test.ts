@@ -6,7 +6,9 @@ import { test } from 'node:test';
 
 const PUBLIC = join(import.meta.dirname, '..', 'public');
 const { WORDS } = await import(join(PUBLIC, 'help-words.js'));
-const sources = readdirSync(PUBLIC).filter((f) => f.endsWith('.js') && f !== 'help-words.js').map((f) => [f, readFileSync(join(PUBLIC, f), 'utf8')] as const);
+const sources = readdirSync(PUBLIC)
+  .filter((f) => f.endsWith('.js') && f !== 'help-words.js')
+  .map((f) => [f, readFileSync(join(PUBLIC, f), 'utf8')] as const);
 
 test('the nine starting words are defined, each in a sentence or two', () => {
   assert.deepEqual(Object.keys(WORDS).sort(), ['card', 'contraption', 'grunt', 'minion', 'parked', 'scheme', 'ship', 'taskmaster', 'turn']);
@@ -19,7 +21,11 @@ test('the nine starting words are defined, each in a sentence or two', () => {
 test('every label that asks for a word asks for one that is defined', () => {
   const used = new Set<string>();
   for (const [f, src] of sources) for (const m of src.matchAll(/\bgloss\('([a-z]+)'/g)) used.add(m[1]);
-  assert.deepEqual([...used].filter((k) => !(k in WORDS)), [], 'a gloss names a word help-words.js lacks');
+  assert.deepEqual(
+    [...used].filter((k) => !(k in WORDS)),
+    [],
+    'a gloss names a word help-words.js lacks',
+  );
 });
 
 test('the page reads the same file and its pictures exist', () => {

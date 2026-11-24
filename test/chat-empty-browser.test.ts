@@ -31,7 +31,10 @@ after(async () => {
   await app?.close();
 });
 
-for (const [name, width] of [['desktop', 1000], ['phone', 390]] as const) {
+for (const [name, width] of [
+  ['desktop', 1000],
+  ['phone', 390],
+] as const) {
   test(`the chat's empty line goes away once turns load, and the emptyState card still shows (${name})`, { skip }, async () => {
     const page = await browser.page(app.base, { width, height: 700 });
     const display = `getComputedStyle(document.querySelector('#chat > .cui-empty')).display`;

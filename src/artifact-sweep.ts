@@ -154,7 +154,8 @@ export class ArtifactSweep {
         if (r.status === 204) {
           res.deleted++;
           res.bytes += a.size_in_bytes;
-        } else if (r.status === 404) continue; // already gone
+        } else if (r.status === 404)
+          continue; // already gone
         else {
           // 403 (no rights, or a rate limit) or 429: more asks would only repeat it, so this repo's round ends here.
           res.failed++;

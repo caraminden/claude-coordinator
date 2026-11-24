@@ -49,7 +49,8 @@ test('readGroups reads citadel.slice, its slices and containers, not the server;
 async function run(steps: [number, number][]) {
   const recorded: { at: number; storm: Storm }[] = [];
   let t = 1_000_000;
-  let high = 0, someUs = 0;
+  let high = 0,
+    someUs = 0;
   const g = (): Map<string, GroupReading> => new Map([['/c/citadel-turns.slice', { name: 'citadel-turns.slice', high, someUs, current: 10, limit: 20 }]]);
   const s = new MemoryStorms({ dir: '/c', now: () => t, read: async () => g(), largest: async () => ({ unit: 'citadel-land-x.service', bytes: 4 }), record: (at, storm) => recorded.push({ at, storm }) });
   await s.tick();
@@ -63,20 +64,59 @@ async function run(steps: [number, number][]) {
 }
 
 test('a storm is high events with stalls at or over the line; it is recorded once, when it ends, with its largest unit', async () => {
-  const { recorded } = await run([[0, 0], [500, 9], [800, 12], [300, 6], [0, 0], [0, 0]]);
+  const { recorded } = await run([
+    [0, 0],
+    [500, 9],
+    [800, 12],
+    [300, 6],
+    [0, 0],
+    [0, 0],
+  ]);
   assert.equal(recorded.length, 1);
   assert.equal(recorded[0].at, 1_000_000 + 15_000, 'from the reading before its first stormy one');
   assert.deepEqual(recorded[0].storm, { group: 'citadel-turns.slice', seconds: 45, stalled: 27, highs: 1600, peak: 0.8, limit: 20, unit: 'citadel-land-x.service', unitBytes: 4 });
 });
 
 test('stalls without high events, high events without stalls, and blips under MIN_STALL_S are not storms', async () => {
-  assert.equal((await run([[0, 14], [0, 14], [0, 0]])).recorded.length, 0, 'memory pressure from elsewhere (host-wide), not this limit');
-  assert.equal((await run([[900, 0.5], [900, 0.5], [0, 0]])).recorded.length, 0, 'at the limit but nobody stalled much: under the line');
-  assert.equal((await run([[100, 3], [0, 0]])).recorded.length, 0, 'one short blip');
+  assert.equal(
+    (
+      await run([
+        [0, 14],
+        [0, 14],
+        [0, 0],
+      ])
+    ).recorded.length,
+    0,
+    'memory pressure from elsewhere (host-wide), not this limit',
+  );
+  assert.equal(
+    (
+      await run([
+        [900, 0.5],
+        [900, 0.5],
+        [0, 0],
+      ])
+    ).recorded.length,
+    0,
+    'at the limit but nobody stalled much: under the line',
+  );
+  assert.equal(
+    (
+      await run([
+        [100, 3],
+        [0, 0],
+      ])
+    ).recorded.length,
+    0,
+    'one short blip',
+  );
 });
 
 test('stop records a storm still going; current() shows it meanwhile', async () => {
-  const { recorded, s } = await run([[500, 9], [500, 9]]);
+  const { recorded, s } = await run([
+    [500, 9],
+    [500, 9],
+  ]);
   assert.equal(recorded.length, 0);
   assert.equal(s.current()[0].stalled, 18);
   s.stop();
@@ -87,11 +127,21 @@ test('stop records a storm still going; current() shows it meanwhile', async () 
 });
 
 test('a stop that comes while a reading waits still records the storm that reading opens', async () => {
-  let t = 0, high = 0, someUs = 0;
+  let t = 0,
+    high = 0,
+    someUs = 0;
   const recorded: Storm[] = [];
   let s!: MemoryStorms;
-  s = new MemoryStorms({ dir: '/c', now: () => t, read: async () => new Map([['/c/citadel-turns.slice', { name: 'citadel-turns.slice', high, someUs, current: 1, limit: 2 }]]),
-    largest: async () => { s.stop(); return { unit: 'u.service', bytes: 1 }; }, record: (_at, storm) => recorded.push(storm) });
+  s = new MemoryStorms({
+    dir: '/c',
+    now: () => t,
+    read: async () => new Map([['/c/citadel-turns.slice', { name: 'citadel-turns.slice', high, someUs, current: 1, limit: 2 }]]),
+    largest: async () => {
+      s.stop();
+      return { unit: 'u.service', bytes: 1 };
+    },
+    record: (_at, storm) => recorded.push(storm),
+  });
   await s.tick();
   [t, high, someUs] = [15_000, 900, 9e6];
   await s.tick();

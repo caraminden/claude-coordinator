@@ -43,13 +43,12 @@ export function renderBranch(status) {
     parts.push(
       // data-github: this chip is the way to the PR on GitHub, so pointPrLink leaves it be (as the merge card's).
       h('a', { href: pr.url, target: '_blank', rel: 'noopener', title: pr.title, 'data-github': '', onclick: (e) => e.stopPropagation() }, `PR #${pr.number}`),
-      h('span', { class: `state ${state === done ? 'merged' : state}` }, state));
+      h('span', { class: `state ${state === done ? 'merged' : state}` }, state),
+    );
     if (pr.state === 'OPEN' && status.merged) parts.push(h('span', { title: `Shipped to ${status.base}` }, '✓ in main'));
   } else if (status && !status.empty) {
     parts.push(h('span', { class: 'branch', title: status.branch }, status.branch));
-    parts.push(status.merged
-      ? h('span', { class: 'state merged', title: `Shipped to ${status.base}` }, 'shipped')
-      : h('span', { class: 'state open', title: `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}` }, `${status.ahead} not shipped`));
+    parts.push(status.merged ? h('span', { class: 'state merged', title: `Shipped to ${status.base}` }, 'shipped') : h('span', { class: 'state open', title: `${status.ahead} commit${status.ahead === 1 ? '' : 's'} not in ${status.base}` }, `${status.ahead} not shipped`));
   }
   // Where its change is on the way to release (#626, take F); releases.js redraws the slot as that moves.
   const chip = releaseChip(view.ticket);
@@ -71,8 +70,11 @@ const kTokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n
 function contextMeter(t) {
   const used = t.context_live ?? t.context_tokens;
   const full = used && t.context_window ? used / t.context_window : 0;
-  return h('span', { class: `ctx-meter muted${full >= 0.9 ? ' hot' : ''}`, title: used ? `${used.toLocaleString()} of ${t.context_window.toLocaleString()} tokens of context in use` : 'Context size shows after its first turn' },
-    used ? `${kTokens(used)} / ${kTokens(t.context_window)}` : `– / ${kTokens(t.context_window || 200000)}`);
+  return h(
+    'span',
+    { class: `ctx-meter muted${full >= 0.9 ? ' hot' : ''}`, title: used ? `${used.toLocaleString()} of ${t.context_window.toLocaleString()} tokens of context in use` : 'Context size shows after its first turn' },
+    used ? `${kTokens(used)} / ${kTokens(t.context_window)}` : `– / ${kTokens(t.context_window || 200000)}`,
+  );
 }
 
 export function renderTicketHead() {
@@ -90,7 +92,7 @@ export function renderTicketHead() {
   // Whose chat it is, so you know at a glance who you're talking to (#360, style.css).
   chat?.classList.toggle('role-taskmaster', coord);
   chat?.classList.toggle('role-minion', !coord);
-  const bubbles = [...chat?.querySelectorAll('.log [data-event]') ?? []];
+  const bubbles = [...(chat?.querySelectorAll('.log [data-event]') ?? [])];
   const lastHeld = bubbles.findLast((b) => b.heldData && t.held_ids?.includes(Number(b.dataset.event)));
   for (const bubble of bubbles) {
     markQueued(bubble, t);
@@ -114,12 +116,13 @@ export function renderTicketHead() {
     const unparkSlot = form.querySelector('.unpark-slot');
     if (unparkSlot) {
       const parked = (t.parked_for || t.state === 'parked') && !coord && t.status !== 'closed' && t.status !== 'running';
-      const title = t.parked_for ? 'Start it now with its held brief and the messages left for it, without waiting for its leader\'s work' : 'Wake it now: it reads the messages left for it while sealed';
+      const title = t.parked_for ? "Start it now with its held brief and the messages left for it, without waiting for its leader's work" : 'Wake it now: it reads the messages left for it while sealed';
       unparkSlot.hidden = !parked;
-      unparkSlot.replaceChildren(...(parked ? [
-        h('button', { type: 'button', class: 'secondary act-unpark', title, onclick: () => unpark(t) }, 'Unseal'),
-        h('button', { type: 'button', class: 'secondary act-send-unpark', title: 'Send your message and unseal it, so it reads the message now', onclick: () => form.sendAndUnpark?.() }, 'Send and unseal'),
-      ] : []));
+      unparkSlot.replaceChildren(
+        ...(parked
+          ? [h('button', { type: 'button', class: 'secondary act-unpark', title, onclick: () => unpark(t) }, 'Unseal'), h('button', { type: 'button', class: 'secondary act-send-unpark', title: 'Send your message and unseal it, so it reads the message now', onclick: () => form.sendAndUnpark?.() }, 'Send and unseal')]
+          : []),
+      );
     }
     const hint = form.querySelector('.parked-hint');
     if (hint) {
@@ -131,13 +134,13 @@ export function renderTicketHead() {
   const actions = [];
   // The minion's branch, running on a copy of the data (start_preview, src/previews.ts).
   if (t.preview && t.status !== 'closed') {
-    actions.push(h('button', { class: 'secondary', title: 'Open this minion\'s preview in a new tab', onclick: () => window.open(`../preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
+    actions.push(h('button', { class: 'secondary', title: "Open this minion's preview in a new tab", onclick: () => window.open(`../preview/${t.id}/`, '_blank', 'noopener') }, 'Preview'));
   }
   if (t.status !== 'running' && !t.limit_resume_at) stoppingIds.delete(t.id); // it has stopped
   // Waiting on the usage limit, Stop ends the wait (src/runner.ts, stop).
   if (t.status === 'running' || t.limit_resume_at) {
     const stopping = stoppingIds.has(t.id);
-    actions.push(h('button', { class: 'secondary act-stop', disabled: stopping, title: t.limit_resume_at ? 'Don\'t resume after the usage limit resets' : undefined, onclick: () => stopChat(t, renderTicketHead) }, stopping ? 'Stopping…' : 'Stop'));
+    actions.push(h('button', { class: 'secondary act-stop', disabled: stopping, title: t.limit_resume_at ? "Don't resume after the usage limit resets" : undefined, onclick: () => stopChat(t, renderTicketHead) }, stopping ? 'Stopping…' : 'Stop'));
   } else if (coord) {
     // The coordinator stays open for the life of the project; its Claude session can start fresh (#406).
     if (t.session_id && !t.fresh_pending) {
@@ -146,10 +149,21 @@ export function renderTicketHead() {
   } else if (t.status === 'closed') {
     actions.push(h('button', { class: 'secondary act-reopen', onclick: () => setStatus(t, 'idle') }, 'Reopen minion'));
   } else {
-    actions.push(h('button', { class: 'secondary act-dismiss', onclick: () => {
-      setStatus(t, 'closed');
-      location.hash = `#/p/${t.project_id}`;
-    }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
+    actions.push(
+      h(
+        'button',
+        {
+          class: 'secondary act-dismiss',
+          onclick: () => {
+            setStatus(t, 'closed');
+            location.hash = `#/p/${t.project_id}`;
+          },
+          title: 'Dismiss minion',
+        },
+        'Dismiss',
+        h('span', { class: 'wide-only' }, ' minion'),
+      ),
+    );
   }
   // Sleep (#1636) took Leave's place (Cara, 2026-11-22, "Replace Leave with Sleep"); /leave itself stays for the Taskmaster's routing.
   if (!coord && t.status !== 'closed') actions.unshift(sleepButton(t));
@@ -158,17 +172,23 @@ export function renderTicketHead() {
   // Titled too, since a narrow line may cut it short. While it works (its turn or the server, #727),
   // a cut-short state shows dots that count up instead of "Thi…".
   const working = !!workingBy(t);
-  const stateLabel = h('span', { class: 'muted head-state', title: t.status === 'closed' && t.closed_at ? `Dismissed ${dismissedWhen(t.closed_at).full}` : state }, h('span', { class: 'state-text' }, state),
-    working ? h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')) : '');
+  const stateLabel = h(
+    'span',
+    { class: 'muted head-state', title: t.status === 'closed' && t.closed_at ? `Dismissed ${dismissedWhen(t.closed_at).full}` : state },
+    h('span', { class: 'state-text' }, state),
+    working ? h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')) : '',
+  );
   const phone = narrow.matches;
   // Leaves the thread as it is and goes back to the project's coordinator, or to Home for a chat opened from it (#1140).
-  const close = view?.home ? h('a', { class: 'close-view', href: '#/home', title: 'Back to Home', 'aria-label': 'Back to Home' }, icon('close'))
-    : coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close'));
-  const nav = h('span', { class: 'head-nav' },
+  const close = view?.home ? h('a', { class: 'close-view', href: '#/home', title: 'Back to Home', 'aria-label': 'Back to Home' }, icon('close')) : coord ? '' : h('a', { class: 'close-view', href: `#/p/${t.project_id}`, title: 'Back to the Taskmaster', 'aria-label': 'Back to the Taskmaster' }, icon('close'));
+  const nav = h(
+    'span',
+    { class: 'head-nav' },
     // Through the views opened in this tab, never off the site (public/navstack.js).
     h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
     h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
-    phone ? '' : close);
+    phone ? '' : close,
+  );
   // Wider screens: the title's line keeps who it is; the line under it takes the state, where the change
   // is, the tools, the buttons, Find and the way out.
   // Phones (#492): two rows. Title, ⋯ and ×; then the state or the progress line beside the one button
@@ -178,28 +198,61 @@ export function renderTicketHead() {
   const main = phone ? actions.findLast((a) => a && /\bact-(stop|dismiss|reopen)\b/.test(a.className)) : null;
   // A search in progress keeps the menu open: its box is in there.
   const menuOpen = phone && (menuFor === t.id || !!view.findEl?.querySelector('.chat-find')?.value);
-  const more = h('button', { type: 'button', class: 'nav-btn head-more', 'data-part': 'minion-menu', title: 'More', 'aria-label': 'More', 'aria-expanded': String(menuOpen), onclick: () => {
-    menuFor = menuOpen ? null : t.id;
-    renderTicketHead();
-  } }, '⋯');
+  const more = h(
+    'button',
+    {
+      type: 'button',
+      class: 'nav-btn head-more',
+      'data-part': 'minion-menu',
+      title: 'More',
+      'aria-label': 'More',
+      'aria-expanded': String(menuOpen),
+      onclick: () => {
+        menuFor = menuOpen ? null : t.id;
+        renderTicketHead();
+      },
+    },
+    '⋯',
+  );
   // ‹ › × sit right of Find (Josh, 2026-11-13); on phones × stays on the title's line.
-  const sub = h('div', { class: 'head-sub', hidden: phone && !menuOpen, 'data-part': phone ? null : 'minion-menu', 'data-part-opener': phone ? 'minion-menu' : null }, phone ? '' : stateLabel, shipLine(t), coord ? '' : personNoteButton(t), coord ? '' : pinButton(t), coord ? '' : propertyChip(t), coord ? '' : chainLink(t, renderTicketHead), budgetChip(t),
-    h('span', { class: 'spacer' }), ...actions.filter((a) => a !== main), view.findEl ?? '', nav);
-  patchParts(el, [
-    h('div', { class: phone ? 'row head-top' : 'row' },
-      h('span', { class: `dot ${working ? 'running' : t.status}` }),
-      h('h2', coord ? {} : { title: threadFullName(t) }, threadTitleParts(t)),
-      presenceHead(t),
-      contextMeter(t),
-      coord && view.merged ? tmViewSwitch() : '',
-      phone ? h('span', { class: 'spacer' }) : '',
-      phone ? more : '',
-      phone ? close : ''),
-    coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
-    coord && view.merged?.mode === 'mine' ? tmBanner() : '',
-    phone ? h('div', { class: 'head-line' }, stateLabel, view.progressEl, main ?? '') : '',
-    sub,
-    phone ? '' : view.progressEl], new Set([view.findEl, view.progressEl, noteEdit?.el]));
+  const sub = h(
+    'div',
+    { class: 'head-sub', hidden: phone && !menuOpen, 'data-part': phone ? null : 'minion-menu', 'data-part-opener': phone ? 'minion-menu' : null },
+    phone ? '' : stateLabel,
+    shipLine(t),
+    coord ? '' : personNoteButton(t),
+    coord ? '' : pinButton(t),
+    coord ? '' : propertyChip(t),
+    coord ? '' : chainLink(t, renderTicketHead),
+    budgetChip(t),
+    h('span', { class: 'spacer' }),
+    ...actions.filter((a) => a !== main),
+    view.findEl ?? '',
+    nav,
+  );
+  patchParts(
+    el,
+    [
+      h(
+        'div',
+        { class: phone ? 'row head-top' : 'row' },
+        h('span', { class: `dot ${working ? 'running' : t.status}` }),
+        h('h2', coord ? {} : { title: threadFullName(t) }, threadTitleParts(t)),
+        presenceHead(t),
+        contextMeter(t),
+        coord && view.merged ? tmViewSwitch() : '',
+        phone ? h('span', { class: 'spacer' }) : '',
+        phone ? more : '',
+        phone ? close : '',
+      ),
+      coord ? (view.project ? onboardingStrip(view.project) : '') : personNoteLine(t),
+      coord && view.merged?.mode === 'mine' ? tmBanner() : '',
+      phone ? h('div', { class: 'head-line' }, stateLabel, view.progressEl, main ?? '') : '',
+      sub,
+      phone ? '' : view.progressEl,
+    ],
+    new Set([view.findEl, view.progressEl, noteEdit?.el]),
+  );
   stateFit?.disconnect();
   if (working) stateFit?.observe(el.querySelector('.head-state'));
   if (had?.isConnected && document.activeElement !== had) had.focus({ preventScroll: true });
@@ -249,7 +302,8 @@ function patchParts(parent, want, live, rows = true) {
       for (const { name, value } of c.attributes) if (at.getAttribute(name) !== value) at.setAttribute(name, value);
       patchParts(at, [...c.childNodes], live, false);
       return void (at.sig = sig);
-    } else if (sigs.includes(at.sig, i + 1)) parent.insertBefore(c, at); // a part added before one that's kept
+    } else if (sigs.includes(at.sig, i + 1))
+      parent.insertBefore(c, at); // a part added before one that's kept
     else at.replaceWith(c);
     c.sig = sig;
   });
@@ -258,7 +312,6 @@ function patchParts(parent, want, live, rows = true) {
 
 /** The chat whose ⋯ menu is open on a phone: the head redraws often, so it is kept here. */
 let menuFor = null;
-
 
 /** Take the ticket the server returned after a send or a card's answer, if that chat is still open. */
 export function adoptTicket(ticketId, ticket) {
@@ -313,10 +366,13 @@ function freshSession(t) {
 
 // Squeezed is measured against the text's own width, taken while it shows (the label itself may have
 // grown into spare room): once the dots are in, the label is narrower than its text for as long as the room stays short.
-const stateFit = typeof ResizeObserver === 'function' ? new ResizeObserver(([{ target: el }]) => {
-  if (!el.classList.contains('squeezed')) el.need = el.firstChild.offsetWidth;
-  el.classList.toggle('squeezed', el.clientWidth < el.need);
-}) : null;
+const stateFit =
+  typeof ResizeObserver === 'function'
+    ? new ResizeObserver(([{ target: el }]) => {
+        if (!el.classList.contains('squeezed')) el.need = el.firstChild.offsetWidth;
+        el.classList.toggle('squeezed', el.clientWidth < el.need);
+      })
+    : null;
 
 // ---------- people's note (#146) ----------
 
@@ -327,8 +383,7 @@ let noteEdit = null;
 /** "✎ Note" after the ship status, under the title, while a minion has no note and none is being written. */
 function personNoteButton(t) {
   if (view.personNotes?.[t.id] || noteEdit?.id === t.id) return '';
-  return h('button', { type: 'button', class: 'note-btn', 'data-part': 'minion-note', title: 'Add a note only people see', 'aria-label': 'Add a note', onclick: () => editPersonNote(t) },
-    '✎', h('span', { class: 'wide-only' }, 'Note'));
+  return h('button', { type: 'button', class: 'note-btn', 'data-part': 'minion-note', title: 'Add a note only people see', 'aria-label': 'Add a note', onclick: () => editPersonNote(t) }, '✎', h('span', { class: 'wide-only' }, 'Note'));
 }
 
 /** The note under the title, a click away from editing it, or its editor while someone writes it. */
@@ -336,9 +391,19 @@ function personNoteLine(t) {
   if (noteEdit?.id === t.id) return noteEdit.el;
   const note = view.personNotes?.[t.id];
   if (!note) return '';
-  return h('div', { class: 'pnote', title: 'Only people see this note. Click to edit it.', onclick: (e) => { if (!e.target.closest('a')) editPersonNote(t); } },
-    h('span', { class: 'pen', 'aria-hidden': 'true' }, '✎'), h('span', { class: 'text' }, threadRefs(note.text)),
-    h('span', { class: 'who' }, `${note.by} · ${ago(note.at)}`));
+  return h(
+    'div',
+    {
+      class: 'pnote',
+      title: 'Only people see this note. Click to edit it.',
+      onclick: (e) => {
+        if (!e.target.closest('a')) editPersonNote(t);
+      },
+    },
+    h('span', { class: 'pen', 'aria-hidden': 'true' }, '✎'),
+    h('span', { class: 'text' }, threadRefs(note.text)),
+    h('span', { class: 'who' }, `${note.by} · ${ago(note.at)}`),
+  );
 }
 
 function editPersonNote(t) {
@@ -370,13 +435,26 @@ function editPersonNote(t) {
     });
   };
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); save(); }
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      save();
+    }
     if (e.key === 'Escape') done();
   });
-  const el = h('form', { class: 'pnote editing', onsubmit: (e) => { e.preventDefault(); save(); } },
-    h('span', { class: 'pen', 'aria-hidden': 'true' }, '✎'), input,
+  const el = h(
+    'form',
+    {
+      class: 'pnote editing',
+      onsubmit: (e) => {
+        e.preventDefault();
+        save();
+      },
+    },
+    h('span', { class: 'pen', 'aria-hidden': 'true' }, '✎'),
+    input,
     h('button', { type: 'submit', class: 'small' }, 'Save'),
-    h('button', { type: 'button', class: 'secondary small', onclick: done }, 'Cancel'));
+    h('button', { type: 'button', class: 'secondary small', onclick: done }, 'Cancel'),
+  );
   noteEdit = { id: t.id, el };
   renderTicketHead();
   input.focus();
@@ -389,15 +467,20 @@ function pinButton(t) {
   const pinned = view.pins?.includes(t.id);
   // The stream says so too, maybe later; a click after this one redraws first, so it unpins again.
   const show = (on) => onTicketPin({ name: me, projectId: t.project_id, ticketId: t.id, pinned: on });
-  const toggle = () => optimistic({
-    sets: `pin:${t.id}`,
-    apply: () => show(!pinned),
-    send: () => api(`api/tickets/${t.id}/pin`, { method: 'PUT', body: { pinned: !pinned } }),
-    undo: () => !!view.pins?.includes(t.id) !== pinned && show(pinned), // unless something else changed it since
-    label: `${pinned ? 'unpin' : 'pin'} ${threadLabel(t)}`,
-  });
-  return h('button', { type: 'button', 'data-part': 'pin-minion', class: `note-btn pin-btn${pinned ? ' on' : ''}`, title: pinned ? 'Unpin from the top of your list' : 'Pin to the top of your list (only you see your pins)', 'aria-label': pinned ? 'Unpin' : 'Pin', 'aria-pressed': String(!!pinned), onclick: toggle },
-    icon('pin'), h('span', { class: 'wide-only' }, pinned ? 'Pinned' : 'Pin'));
+  const toggle = () =>
+    optimistic({
+      sets: `pin:${t.id}`,
+      apply: () => show(!pinned),
+      send: () => api(`api/tickets/${t.id}/pin`, { method: 'PUT', body: { pinned: !pinned } }),
+      undo: () => !!view.pins?.includes(t.id) !== pinned && show(pinned), // unless something else changed it since
+      label: `${pinned ? 'unpin' : 'pin'} ${threadLabel(t)}`,
+    });
+  return h(
+    'button',
+    { type: 'button', 'data-part': 'pin-minion', class: `note-btn pin-btn${pinned ? ' on' : ''}`, title: pinned ? 'Unpin from the top of your list' : 'Pin to the top of your list (only you see your pins)', 'aria-label': pinned ? 'Unpin' : 'Pin', 'aria-pressed': String(!!pinned), onclick: toggle },
+    icon('pin'),
+    h('span', { class: 'wide-only' }, pinned ? 'Pinned' : 'Pin'),
+  );
 }
 
 /** "$14 of about $6.50" (#1114): what the minion has cost against what its kind of work usually does; amber once past the ask. */
@@ -406,17 +489,21 @@ function budgetChip(t) {
   if (!b) return '';
   const usd = (n) => `$${n >= 10 ? Math.round(n) : n.toFixed(2)}`;
   const cost = t.cost ?? 0;
-  return h('span', { class: `tag-chip budget-chip${cost >= b.ask ? ' over' : ''}`,
-    title: `${b.basis} has usually cost about ${usd(b.usd)} (median of ${b.n} minions, last 4 weeks). Past ${usd(b.ask)} the minion is asked to say why or split the work; past ${usd(b.wake)} its Taskmaster hears, and again at ${usd(b.wake * 2)} and each doubling after; past ${usd(b.card)} its owner gets a card to carry on, split or stop. Nothing stops it unless its owner picks Stop.` },
-  `${usd(cost)} of about ${usd(b.usd)}`);
+  return h(
+    'span',
+    {
+      class: `tag-chip budget-chip${cost >= b.ask ? ' over' : ''}`,
+      title: `${b.basis} has usually cost about ${usd(b.usd)} (median of ${b.n} minions, last 4 weeks). Past ${usd(b.ask)} the minion is asked to say why or split the work; past ${usd(b.wake)} its Taskmaster hears, and again at ${usd(b.wake * 2)} and each doubling after; past ${usd(b.card)} its owner gets a card to carry on, split or stop. Nothing stops it unless its owner picks Stop.`,
+    },
+    `${usd(cost)} of about ${usd(b.usd)}`,
+  );
 }
 
 /** Where the minion's change is, branch to live, in a word or two; the full line and why it is stuck are on hover (src/branch.ts). */
 function shipLine(t) {
   const stage = !isCoordinator(t) && SHIP[t.ship?.stage];
   if (!stage) return '';
-  return h('span', { class: `ship f-${stage.fam}`, title: `${t.ship.detail ?? t.ship.text} · ${t.ship.commit}` },
-    h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, gloss('ship', stage.badge || 'on branch')));
+  return h('span', { class: `ship f-${stage.fam}`, title: `${t.ship.detail ?? t.ship.text} · ${t.ship.commit}` }, h('i', { class: 'ship-dot' }), h('span', { class: 'text' }, gloss('ship', stage.badge || 'on branch')));
 }
 
 /**
@@ -439,25 +526,27 @@ export function markHeld(bubble, ticket, last = true) {
   for (const old of (host ?? bubble).querySelectorAll('.held-act')) if (old.dataset.for === String(bubble.dataset.event)) old.remove();
   if (line.waiting) {
     bubble.querySelector('.who .held-tag')?.remove();
-    if (!row) bubble.append(row = h('div', { class: 'held-line', role: 'status' }));
+    if (!row) bubble.append((row = h('div', { class: 'held-line', role: 'status' })));
     const parked = ticket.parked_for || ticket.state === 'parked';
     // Waiting on its start card (#1757): only the card's answer starts it, so no Deliver.
     const startHold = !parked && !!ticket.start_hold;
-    row.replaceChildren(h('span', { class: 'held-text' }, parked ? "Not sent yet: this minion is sealed, so it reads this when it's unsealed."
-      : startHold ? 'Not sent yet: it reads this once a person starts it on its start card.' : line.text));
+    row.replaceChildren(h('span', { class: 'held-text' }, parked ? "Not sent yet: this minion is sealed, so it reads this when it's unsealed." : startHold ? 'Not sent yet: it reads this once a person starts it on its start card.' : line.text));
     if (last && !startHold) {
-      const btn = parked
-        ? h('button', { type: 'button', class: 'secondary small held-act', title: 'Wake it now: it reads the messages left for it' }, 'Unseal and send')
-        : h('button', { type: 'button', class: 'secondary small held-act', title: 'Run a turn now that reads all the held mail' }, 'Deliver');
+      const btn = parked ? h('button', { type: 'button', class: 'secondary small held-act', title: 'Wake it now: it reads the messages left for it' }, 'Unseal and send') : h('button', { type: 'button', class: 'secondary small held-act', title: 'Run a turn now that reads all the held mail' }, 'Deliver');
       btn.dataset.for = bubble.dataset.event;
-      btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); if (parked) unpark(ticket); else deliverMail(ticket, btn); };
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (parked) unpark(ticket);
+        else deliverMail(ticket, btn);
+      };
       (act ?? row).append(btn);
     }
     return;
   }
   row?.remove();
   let tag = bubble.querySelector('.held-tag');
-  if (!tag) bubble.querySelector('.who')?.append(tag = h('span', { class: 'msg-tag held-tag' }));
+  if (!tag) bubble.querySelector('.who')?.append((tag = h('span', { class: 'msg-tag held-tag' })));
   tag?.replaceChildren(line.queued ? 'not sent yet' : line.tag);
   tag?.setAttribute('title', line.queued ? line.text : line.title);
 }
@@ -467,12 +556,18 @@ function deliverMail(t, btn) {
   const was = btn.textContent;
   optimistic({
     key: `deliver:${t.id}`,
-    apply: () => { btn.disabled = true; btn.textContent = 'Delivering…'; },
+    apply: () => {
+      btn.disabled = true;
+      btn.textContent = 'Delivering…';
+    },
     send: async () => {
       const r = await api(`api/tickets/${t.id}/deliver-mail`, { method: 'POST', body: {} });
       if (!r?.delivered) throw new Error("its Claude can't run a turn right now");
     },
-    undo: () => { btn.disabled = false; btn.textContent = was; },
+    undo: () => {
+      btn.disabled = false;
+      btn.textContent = was;
+    },
     label: 'deliver the held mail',
   });
 }

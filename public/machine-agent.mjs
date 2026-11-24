@@ -222,7 +222,11 @@ export function claudeServerNames(env = process.env) {
     return [];
   }
   const scopes = [config?.mcpServers, ...Object.values(config?.projects ?? {}).map((p) => p?.mcpServers)];
-  const names = scopes.flatMap((s) => Object.entries(s ?? {}).filter(([name, e]) => SERVER_NAME.test(name) && typeof e?.command === 'string' && e.command).map(([name]) => name));
+  const names = scopes.flatMap((s) =>
+    Object.entries(s ?? {})
+      .filter(([name, e]) => SERVER_NAME.test(name) && typeof e?.command === 'string' && e.command)
+      .map(([name]) => name),
+  );
   return [...new Set(names)].sort();
 }
 
@@ -230,17 +234,19 @@ const TOOLS = [
   { name: 'workspaces', description: 'The workspaces on this computer: folder, what is checked out, local changes, the tasks you can run, and whether a job holds it. Call this first.', inputSchema: { type: 'object', properties: {} } },
   {
     name: 'git_sync',
-    description: 'git fetch origin, then check out origin/<ref> (a pushed branch) or a commit, detached. Local changes that don\'t conflict carry over; if they would be overwritten it stops and changes nothing. Never resets, cleans, stashes or pushes. Refused in a workspace whose owner switched it off (the workspaces tool says so).',
+    description:
+      "git fetch origin, then check out origin/<ref> (a pushed branch) or a commit, detached. Local changes that don't conflict carry over; if they would be overwritten it stops and changes nothing. Never resets, cleans, stashes or pushes. Refused in a workspace whose owner switched it off (the workspaces tool says so).",
     inputSchema: { type: 'object', properties: { workspace: { type: 'string' }, ref: { type: 'string', description: 'Branch name on origin, or a commit sha' } }, required: ['workspace', 'ref'] },
   },
   {
     name: 'run_task',
-    description: 'Run one of the workspace\'s tasks (listed by the workspaces tool) in its folder. Waits up to `wait` seconds (default and most 50), then returns the result, or a job id to pass to the job tool. One job per workspace at a time. A task marked "takes arguments" appends `args` to its command (no shell); others refuse them.',
+    description:
+      'Run one of the workspace\'s tasks (listed by the workspaces tool) in its folder. Waits up to `wait` seconds (default and most 50), then returns the result, or a job id to pass to the job tool. One job per workspace at a time. A task marked "takes arguments" appends `args` to its command (no shell); others refuse them.',
     inputSchema: { type: 'object', properties: { workspace: { type: 'string' }, task: { type: 'string' }, wait: { type: 'number' }, args: { type: 'array', items: { type: 'string' }, description: 'Extra arguments, only for a task that takes them' } }, required: ['workspace', 'task'] },
   },
   {
     name: 'job',
-    description: 'A task job\'s state, exit code and last output lines; waits up to `wait` seconds (default and most 50) for it to finish.',
+    description: "A task job's state, exit code and last output lines; waits up to `wait` seconds (default and most 50) for it to finish.",
     inputSchema: { type: 'object', properties: { id: { type: 'string' }, wait: { type: 'number' }, lines: { type: 'number', description: 'How many output lines to show, default 60' } }, required: ['id'] },
   },
   {
@@ -260,13 +266,14 @@ const TOOLS = [
   },
   {
     name: 'fetch_file',
-    description: 'Copy a file (up to 20 MB, any kind: a zip, a save, a log) from a workspace or its read folders to the app\'s server, into your files folder there, and return its path. The bytes don\'t pass through this conversation.',
+    description: "Copy a file (up to 20 MB, any kind: a zip, a save, a log) from a workspace or its read folders to the app's server, into your files folder there, and return its path. The bytes don't pass through this conversation.",
     inputSchema: { type: 'object', properties: { workspace: { type: 'string' }, path: { type: 'string' } }, required: ['workspace', 'path'] },
   },
   {
     name: 'screenshot',
-    description: 'Take a PNG of this computer\'s screen, or of the first visible window whose title contains `window`, after `delay` seconds (most 30), and copy it to your files folder on the app\'s server; returns its path, which you can open to look at. Only on a computer whose owner turned screenshots on (a test box). While someone else has the screen it waits up to 50 s and keeps no place in line; take it while your own run_task job has the screen.',
-    inputSchema: { type: 'object', properties: { window: { type: 'string', description: 'Part of the window\'s title; leave out for the whole screen' }, delay: { type: 'number' } } },
+    description:
+      "Take a PNG of this computer's screen, or of the first visible window whose title contains `window`, after `delay` seconds (most 30), and copy it to your files folder on the app's server; returns its path, which you can open to look at. Only on a computer whose owner turned screenshots on (a test box). While someone else has the screen it waits up to 50 s and keeps no place in line; take it while your own run_task job has the screen.",
+    inputSchema: { type: 'object', properties: { window: { type: 'string', description: "Part of the window's title; leave out for the whole screen" }, delay: { type: 'number' } } },
   },
 ];
 
@@ -337,7 +344,11 @@ async function killTree(child) {
     signalGroup(child.pid, 'SIGKILL');
     return;
   }
-  return new Promise((done) => spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('close', done).on('error', done));
+  return new Promise((done) =>
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+      .on('close', done)
+      .on('error', done),
+  );
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms).unref?.());
@@ -458,7 +469,9 @@ export function screenLine(file) {
   const dir = screenLineDir(file);
   let names;
   try {
-    names = readdirSync(dir).filter((n) => n.endsWith('.json')).sort();
+    names = readdirSync(dir)
+      .filter((n) => n.endsWith('.json'))
+      .sort();
   } catch {
     return [];
   }
@@ -719,11 +732,7 @@ export class WorkspaceHost {
   }
 
   async checkout(w) {
-    const [head, branch, status] = await Promise.all([
-      this.git(w, ['log', '-1', '--format=%h %s']),
-      this.git(w, ['symbolic-ref', '--short', '-q', 'HEAD']),
-      this.git(w, ['status', '--porcelain']),
-    ]);
+    const [head, branch, status] = await Promise.all([this.git(w, ['log', '-1', '--format=%h %s']), this.git(w, ['symbolic-ref', '--short', '-q', 'HEAD']), this.git(w, ['status', '--porcelain'])]);
     const changes = status.out ? status.out.split('\n') : [];
     return {
       at: `${branch.code ? 'detached' : `branch ${branch.out}`} at ${head.out}`,
@@ -733,9 +742,12 @@ export class WorkspaceHost {
 
   async call(tool, args = {}, who = 'a minion', upload) {
     switch (tool) {
-      case 'workspaces': return this.list();
-      case 'git_sync': return this.sync(this.workspace(args.workspace), String(args.ref ?? '').replace(/^origin\//, ''), who);
-      case 'run_task': return this.runTask(this.workspace(args.workspace), String(args.task ?? ''), who, waitFor(args.wait), args.args);
+      case 'workspaces':
+        return this.list();
+      case 'git_sync':
+        return this.sync(this.workspace(args.workspace), String(args.ref ?? '').replace(/^origin\//, ''), who);
+      case 'run_task':
+        return this.runTask(this.workspace(args.workspace), String(args.task ?? ''), who, waitFor(args.wait), args.args);
       case 'job': {
         const job = this.jobs.get(String(args.id ?? ''));
         if (!job) throw new ToolError(`No job ${args.id} here. Jobs are forgotten when the agent restarts; their logs stay in ${this.jobsDir}.`);
@@ -749,11 +761,16 @@ export class WorkspaceHost {
         if (!job.ended) await job.stop(`Stopped by ${who}`);
         return this.report(job, 0, 60);
       }
-      case 'screenshot': return this.screenshot(String(args.window ?? ''), Number(args.delay) || 0, who, upload);
-      case 'read_file': return this.read(this.workspace(args.workspace), args.path, Number(args.offset) || 1, Number(args.limit) || 400);
-      case 'list_files': return this.listFiles(this.workspace(args.workspace), args.path);
-      case 'fetch_file': return this.fetch(this.workspace(args.workspace), args.path, upload);
-      default: throw new ToolError(`No tool ${tool}`);
+      case 'screenshot':
+        return this.screenshot(String(args.window ?? ''), Number(args.delay) || 0, who, upload);
+      case 'read_file':
+        return this.read(this.workspace(args.workspace), args.path, Number(args.offset) || 1, Number(args.limit) || 400);
+      case 'list_files':
+        return this.listFiles(this.workspace(args.workspace), args.path);
+      case 'fetch_file':
+        return this.fetch(this.workspace(args.workspace), args.path, upload);
+      default:
+        throw new ToolError(`No tool ${tool}`);
     }
   }
 
@@ -763,25 +780,31 @@ export class WorkspaceHost {
     for (const w of this.workspaces.values()) {
       const c = await this.checkout(w);
       const b = this.busy.get(w.name);
-      parts.push([
-        `## ${w.name}`,
-        `Folder: ${w.path}`,
-        w.read.length ? `Read folders: ${w.read.join(', ')}` : '',
-        `Checked out: ${c.at}`,
-        w.gitSync ? '' : 'git_sync: off (its owner keeps it on a branch)',
-        `Local changes:\n${c.changes}`,
-        `Busy: ${b ? `${b.what} for ${b.who}, ${secondsSince(b.since)} s${b.job ? ` (job ${b.job.id})` : ''}` : 'no'}`,
-        'Tasks:',
-        ...[...w.tasks].map(([name, t]) => `- ${name}: ${t.run.join(' ')}${t.args ? ' …takes arguments' : ''}${t.about ? ` (${t.about})` : ''}`),
-      ].filter(Boolean).join('\n'));
+      parts.push(
+        [
+          `## ${w.name}`,
+          `Folder: ${w.path}`,
+          w.read.length ? `Read folders: ${w.read.join(', ')}` : '',
+          `Checked out: ${c.at}`,
+          w.gitSync ? '' : 'git_sync: off (its owner keeps it on a branch)',
+          `Local changes:\n${c.changes}`,
+          `Busy: ${b ? `${b.what} for ${b.who}, ${secondsSince(b.since)} s${b.job ? ` (job ${b.job.id})` : ''}` : 'no'}`,
+          'Tasks:',
+          ...[...w.tasks].map(([name, t]) => `- ${name}: ${t.run.join(' ')}${t.args ? ' …takes arguments' : ''}${t.about ? ` (${t.about})` : ''}`),
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      );
     }
     if (this.screenLock) {
       const { holder, line } = screenState(this.screenLock);
-      parts.push([
-        `Screen: ${holder ? `busy, ${holder.what} for ${holder.who}` : 'free'}; ${line.length ? `${line.length} in line` : 'nobody in line'}.`,
-        ...line.map((x, i) => `${i + 1}. ${x.what} for ${x.who}`),
-        'Tasks that use it and screenshots join one line with this computer\'s CI desktop jobs, served in arrival order.',
-      ].join('\n'));
+      parts.push(
+        [
+          `Screen: ${holder ? `busy, ${holder.what} for ${holder.who}` : 'free'}; ${line.length ? `${line.length} in line` : 'nobody in line'}.`,
+          ...line.map((x, i) => `${i + 1}. ${x.what} for ${x.who}`),
+          "Tasks that use it and screenshots join one line with this computer's CI desktop jobs, served in arrival order.",
+        ].join('\n'),
+      );
     }
     if (this.screenshots) parts.push('Screenshots: on (the screenshot tool).');
     if (this.problems.length) parts.push(`Problems in this computer's config (left out above):\n${this.problems.join('\n')}`);
@@ -804,10 +827,15 @@ export class WorkspaceHost {
       if (target.code) throw new ToolError(`origin has no branch ${ref}${SHA.test(ref) ? ' and this clone has no such commit' : ''}. Push it first. Nothing was changed.`);
       const out = await this.git(w, ['checkout', '--detach', target.out]);
       if (out.code) {
-        const files = (out.out.match(/would be overwritten by checkout:\n((?:\s+.+\n?)+)/)?.[1] ?? '').trim().split(/\s*\n\s*/).filter(Boolean);
-        throw new ToolError(files.length
-          ? `Stopped: checking out ${ref} would overwrite local changes on this computer in:\n${files.join('\n')}\nNothing was changed. Those changes belong to the computer's owner: don't discard, stash or commit them; tell them and let them decide.`
-          : `git checkout failed; nothing was changed.\n${out.out}`);
+        const files = (out.out.match(/would be overwritten by checkout:\n((?:\s+.+\n?)+)/)?.[1] ?? '')
+          .trim()
+          .split(/\s*\n\s*/)
+          .filter(Boolean);
+        throw new ToolError(
+          files.length
+            ? `Stopped: checking out ${ref} would overwrite local changes on this computer in:\n${files.join('\n')}\nNothing was changed. Those changes belong to the computer's owner: don't discard, stash or commit them; tell them and let them decide.`
+            : `git checkout failed; nothing was changed.\n${out.out}`,
+        );
       }
       const after = await this.checkout(w);
       // Whose sync left which commit: run_task refuses a caller whose own sync another one has since moved (MA5).
@@ -838,7 +866,10 @@ export class WorkspaceHost {
     const mine = w.syncs?.get(who);
     if (mine && commit && commit !== mine.sha) {
       this.release(w, lock);
-      const by = [...w.syncs].filter(([k, v]) => k !== who && v.sha === commit && v.at > mine.at).map(([k]) => k).at(-1);
+      const by = [...w.syncs]
+        .filter(([k, v]) => k !== who && v.sha === commit && v.at > mine.at)
+        .map(([k]) => k)
+        .at(-1);
       throw new ToolError(`Not run: ${w.name} has moved since your git_sync. You checked out ${mine.sha.slice(0, 10)}; it is now at ${commit.slice(0, 10)}${by ? `, synced since by ${by}` : ', changed on that computer'}. Run git_sync again, then run_task.`);
     }
     let ticket = null;
@@ -955,7 +986,9 @@ export class WorkspaceHost {
     }
     if (job.line) {
       const { holder, ahead, waiting } = job.line;
-      return { text: `${job.name} in ${job.workspace} is waiting in line for the screen (job ${job.id}), ${secondsSince(job.started)} s so far: ${holderText(holder)}; ${ahead ? `${ahead} ahead of it` : 'it is next'}, ${waiting} in line. Nothing has started yet. It keeps its place while you wait: call job with id "${job.id}" (each call waits up to ${WAIT_MAX} s). If nobody calls job for it for ${LINE_ABSENT_MS / 60_000} minutes when its turn comes, it leaves the line; stop_job leaves it now.` };
+      return {
+        text: `${job.name} in ${job.workspace} is waiting in line for the screen (job ${job.id}), ${secondsSince(job.started)} s so far: ${holderText(holder)}; ${ahead ? `${ahead} ahead of it` : 'it is next'}, ${waiting} in line. Nothing has started yet. It keeps its place while you wait: call job with id "${job.id}" (each call waits up to ${WAIT_MAX} s). If nobody calls job for it for ${LINE_ABSENT_MS / 60_000} minutes when its turn comes, it leaves the line; stop_job leaves it now.`,
+      };
     }
     const tail = job.tail.slice(-Math.min(Math.max(1, lines), TAIL_LINES)).join('\n');
     if (!job.ended) return { text: `${job.name} in ${job.workspace} is still running after ${secondsSince(job.started)} s (job ${job.id}). Call job with id "${job.id}" to wait for it.\n--- latest output ---\n${job.tail.slice(-20).join('\n')}` };
@@ -969,7 +1002,10 @@ export class WorkspaceHost {
   prune() {
     for (const [id, j] of this.jobs) if (this.jobs.size > 50 && j.ended) this.jobs.delete(id);
     try {
-      const logs = readdirSync(this.jobsDir).filter((f) => f.endsWith('.log')).map((f) => ({ f, t: statSync(join(this.jobsDir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
+      const logs = readdirSync(this.jobsDir)
+        .filter((f) => f.endsWith('.log'))
+        .map((f) => ({ f, t: statSync(join(this.jobsDir, f)).mtimeMs }))
+        .sort((a, b) => b.t - a.t);
       for (const { f } of logs.slice(KEEP_LOGS)) rmSync(join(this.jobsDir, f), { force: true });
     } catch {}
   }
@@ -1036,7 +1072,9 @@ export class WorkspaceHost {
         if (turn.lock) return turn.lock;
         if (Date.now() >= until) {
           const others = turn.waiting - 1;
-          throw new ToolError(`The screen is busy: ${holderText(turn.holder)}${others > 0 ? `, and ${others} other${others === 1 ? ' is' : 's are'} in line (${turn.ahead} ahead of this)` : ''}. Waited ${this.screenWaitS} s; nothing was taken. A screenshot waits only inside its own call. To see your app, start it with run_task: a screen task keeps its place in line and starts on its own, and Citadel messages you when it has the screen. Take the screenshot while it runs.`);
+          throw new ToolError(
+            `The screen is busy: ${holderText(turn.holder)}${others > 0 ? `, and ${others} other${others === 1 ? ' is' : 's are'} in line (${turn.ahead} ahead of this)` : ''}. Waited ${this.screenWaitS} s; nothing was taken. A screenshot waits only inside its own call. To see your app, start it with run_task: a screen task keeps its place in line and starts on its own, and Citadel messages you when it has the screen. Take the screenshot while it runs.`,
+          );
         }
         await sleep(Math.max(0, Math.min(this.linePollMs, until - Date.now())));
       }
@@ -1202,22 +1240,41 @@ export function podmanRunArgs(job, block, resume) {
   const dir = join(block.dir, job.id);
   const mount = (src, dst, ro) => ['--mount', `type=bind,src=${src},dst=${dst}${ro ? ',ro' : ''}`];
   return [
-    'run', '-d', '--name', `citadel-job-${job.id}`, '--label', `citadel.job=${job.id}`,
-    '--cap-drop', 'all', '--security-opt', 'no-new-privileges', '--security-opt', 'label=disable',
+    'run',
+    '-d',
+    '--name',
+    `citadel-job-${job.id}`,
+    '--label',
+    `citadel.job=${job.id}`,
+    '--cap-drop',
+    'all',
+    '--security-opt',
+    'no-new-privileges',
+    '--security-opt',
+    'label=disable',
     // The owner's own uid inside, never root; rootless podman maps it to the owner outside too.
-    '--userns', 'keep-id', '-e', 'HOME=/tmp', '-e', 'XDG_CACHE_HOME=/cache',
+    '--userns',
+    'keep-id',
+    '-e',
+    'HOME=/tmp',
+    '-e',
+    'XDG_CACHE_HOME=/cache',
     ...(job.kind.network ? [] : ['--network', 'none']),
     ...(job.kind.gpu && block.gpu ? ['--device', 'nvidia.com/gpu=all'] : []),
     ...(resume ? ['-e', 'CITADEL_JOB_RESUME=1'] : []),
     // podman writes the log itself, so it keeps growing while the agent is down.
-    '--log-driver', 'k8s-file', '--log-opt', `path=${join(dir, 'job.log')}`,
+    '--log-driver',
+    'k8s-file',
+    '--log-opt',
+    `path=${join(dir, 'job.log')}`,
     ...mount(join(dir, 'in'), '/in', true),
     ...mount(join(dir, 'out'), '/out'),
     ...mount(join(dir, 'state'), '/state'),
     // Model downloads, kept between jobs of the same kind so only the first run needs the network.
     ...mount(join(block.dir, 'cache', cacheName(job.kind.name)), '/cache'),
     ...job.kind.reads.flatMap((name) => mount(block.folders.get(name), `/private/${name}`, true)),
-    job.kind.image, ...job.kind.command,
+    job.kind.image,
+    ...job.kind.command,
   ];
 }
 
@@ -1266,7 +1323,9 @@ export class JobRunner {
     this.timer = setInterval(() => {
       if (this.ticking) return;
       this.ticking = true;
-      this.tick().catch((err) => this.log(`Jobs: ${err.message}`)).finally(() => (this.ticking = false));
+      this.tick()
+        .catch((err) => this.log(`Jobs: ${err.message}`))
+        .finally(() => (this.ticking = false));
     }, tickMs);
     this.timer.unref();
     this.block = null;
@@ -1289,7 +1348,10 @@ export class JobRunner {
 
   /** The jobs this agent holds and hasn't finished telling the app about, for the app's reconcile on connect. */
   known() {
-    return [...this.jobs.values()].filter((j) => !j.final_sent).slice(0, 100).map((j) => ({ id: Number(j.id), state: j.state }));
+    return [...this.jobs.values()]
+      .filter((j) => !j.final_sent)
+      .slice(0, 100)
+      .map((j) => ({ id: Number(j.id), state: j.state }));
   }
 
   /** For the owner's Machines page: job folders holding results the app never took, which nothing here deletes (MA3). */
@@ -1311,7 +1373,9 @@ export class JobRunner {
     if (!left.length) return [];
     const mb = Math.ceil(left.reduce((n, l) => n + l.bytes, 0) / 1024 ** 2);
     const ids = left.map((l) => l.id).sort((a, b) => Number(a) - Number(b));
-    return [`jobs: ${left.length} job folder${left.length === 1 ? '' : 's'} (${mb} MB) in the jobs folder hold results Citadel never took: ${ids.slice(0, 8).join(', ')}${ids.length > 8 ? ` and ${ids.length - 8} more` : ''}. They count against max_disk_gb and are never deleted for you: copy what you need from each one's out folder, then delete it.`];
+    return [
+      `jobs: ${left.length} job folder${left.length === 1 ? '' : 's'} (${mb} MB) in the jobs folder hold results Citadel never took: ${ids.slice(0, 8).join(', ')}${ids.length > 8 ? ` and ${ids.length - 8} more` : ''}. They count against max_disk_gb and are never deleted for you: copy what you need from each one's out folder, then delete it.`,
+    ];
   }
 
   close() {
@@ -1348,7 +1412,10 @@ export class JobRunner {
 
   save(job) {
     const file = this.dir(job, 'job.json');
-    writeFileSync(`${file}.new`, JSON.stringify(job, (k, v) => (k.startsWith('_') || k === 'home' ? undefined : v)));
+    writeFileSync(
+      `${file}.new`,
+      JSON.stringify(job, (k, v) => (k.startsWith('_') || k === 'home' ? undefined : v)),
+    );
     renameSync(`${file}.new`, file);
   }
 
@@ -1367,8 +1434,13 @@ export class JobRunner {
   async report(job) {
     const g = job._gpu;
     const body = {
-      id: Number(job.id), state: job.state, run_s: this.runS(job), gpu_busy_s: Math.round(job.gpu_busy_s),
-      gpu_pct: g?.pct ?? null, vram_mb: g?.vram ?? null, log_tail: cleanLog(fileTail(this.dir(job, 'job.log'), JOB_LOG_TAIL * 2)).slice(-JOB_LOG_TAIL),
+      id: Number(job.id),
+      state: job.state,
+      run_s: this.runS(job),
+      gpu_busy_s: Math.round(job.gpu_busy_s),
+      gpu_pct: g?.pct ?? null,
+      vram_mb: g?.vram ?? null,
+      log_tail: cleanLog(fileTail(this.dir(job, 'job.log'), JOB_LOG_TAIL * 2)).slice(-JOB_LOG_TAIL),
       ...(job.state === 'paused' && job.paused === 'frozen' && g ? { held_vram_mb: g.vram } : {}),
       ...(job.outputs.length ? { outputs: job.outputs.map(({ path, size, uploaded, why }) => ({ path, size, uploaded, ...(why && !uploaded ? { why } : {}) })) } : {}),
       ...(JOB_ENDED.includes(job.state) ? { exit_code: job.final.exit_code, ...(job.final.error ? { error: job.final.error } : {}) } : {}),
@@ -1433,9 +1505,20 @@ export class JobRunner {
     if (why) return this.refuse(msg, why);
     const { name, image, command, gpu, network, reads, resumable } = msg.kind;
     const job = {
-      id: msg.id, home: block.dir, kind: { name, image, command, gpu: gpu === true, network: network === true, reads, resumable: resumable === true },
-      limit_s: msg.limit_s, inputs: msg.inputs.map(({ name: n, size, sha256 }) => ({ name: n, size, sha256 })),
-      state: 'starting', run_ms: 0, since: null, gpu_busy_s: 0, started_at: Date.now(), paused: null, outputs: [], final: null, final_sent: false,
+      id: msg.id,
+      home: block.dir,
+      kind: { name, image, command, gpu: gpu === true, network: network === true, reads, resumable: resumable === true },
+      limit_s: msg.limit_s,
+      inputs: msg.inputs.map(({ name: n, size, sha256 }) => ({ name: n, size, sha256 })),
+      state: 'starting',
+      run_ms: 0,
+      since: null,
+      gpu_busy_s: 0,
+      started_at: Date.now(),
+      paused: null,
+      outputs: [],
+      final: null,
+      final_sent: false,
     };
     this.jobs.set(job.id, job);
     for (const d of ['in', 'out', 'state']) mkdirSync(this.dir(job, d), { recursive: true });
@@ -1477,14 +1560,18 @@ export class JobRunner {
     let size = 0;
     const file = this.dir(job, 'in', f.name);
     try {
-      await pipeline(res, async function* (source) {
-        for await (const chunk of source) {
-          size += chunk.length;
-          if (size > f.size) throw Object.assign(new Error(`${f.name} is bigger than the ${f.size} bytes it should be`), { final: true });
-          hash.update(chunk);
-          yield chunk;
-        }
-      }, createWriteStream(file, { flags: 'wx' }));
+      await pipeline(
+        res,
+        async function* (source) {
+          for await (const chunk of source) {
+            size += chunk.length;
+            if (size > f.size) throw Object.assign(new Error(`${f.name} is bigger than the ${f.size} bytes it should be`), { final: true });
+            hash.update(chunk);
+            yield chunk;
+          }
+        },
+        createWriteStream(file, { flags: 'wx' }),
+      );
       if (size !== f.size) throw new Error(`${f.name} came to ${size} bytes, not ${f.size}`);
       if (hash.digest('hex') !== f.sha256) throw Object.assign(new Error(`${f.name} doesn't match its sha256`), { final: true });
     } catch (err) {
@@ -1516,18 +1603,20 @@ export class JobRunner {
 
   /** Waits on the job's container in the background; its end finishes the job, or completes a pause. */
   watch(job) {
-    this.exec(this.podman, ['wait', this.name(job)]).then(async ({ code, stdout }) => {
-      if (this.jobs.get(job.id) !== job || job.final || this.closed) return;
-      if (code !== 0) {
-        // podman wait itself failed: only a container that is really gone ends the job.
-        const r = await this.exec(this.podman, ['inspect', '--format', '{{.State.Status}}', this.name(job)]);
-        if (['running', 'paused', 'stopping'].includes(r.stdout)) return void setTimeout(() => this.watch(job), this.tickMs).unref();
-      }
-      const exit = code === 0 ? Number.parseInt(stdout.split('\n').pop(), 10) : NaN;
-      if (job.stopping) return this.finish(job, job.stopping.state, job.stopping.error, Number.isInteger(exit) ? exit : null);
-      if (job.pausing) return this.paused(job);
-      return this.finish(job, exit === 0 ? 'done' : 'failed', exit === 0 ? null : `it exited with ${Number.isInteger(exit) ? `code ${exit}` : 'no exit code'}`, Number.isInteger(exit) ? exit : null);
-    }).catch((err) => this.log(`Job ${job.id}: ${err.message}`));
+    this.exec(this.podman, ['wait', this.name(job)])
+      .then(async ({ code, stdout }) => {
+        if (this.jobs.get(job.id) !== job || job.final || this.closed) return;
+        if (code !== 0) {
+          // podman wait itself failed: only a container that is really gone ends the job.
+          const r = await this.exec(this.podman, ['inspect', '--format', '{{.State.Status}}', this.name(job)]);
+          if (['running', 'paused', 'stopping'].includes(r.stdout)) return void setTimeout(() => this.watch(job), this.tickMs).unref();
+        }
+        const exit = code === 0 ? Number.parseInt(stdout.split('\n').pop(), 10) : NaN;
+        if (job.stopping) return this.finish(job, job.stopping.state, job.stopping.error, Number.isInteger(exit) ? exit : null);
+        if (job.pausing) return this.paused(job);
+        return this.finish(job, exit === 0 ? 'done' : 'failed', exit === 0 ? null : `it exited with ${Number.isInteger(exit) ? `code ${exit}` : 'no exit code'}`, Number.isInteger(exit) ? exit : null);
+      })
+      .catch((err) => this.log(`Job ${job.id}: ${err.message}`));
   }
 
   /** A resumable job's container has stopped for a pause: all its VRAM is free; its folders stay. */
@@ -1713,7 +1802,7 @@ export class JobRunner {
       const res = await this.call('POST', `/api/machines/job-upload?job=${job.id}&path=${encodeURIComponent(f.path)}`, { headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(f.size) }, body: createReadStream(f.real) });
       const body = await readBody(res);
       if (res.statusCode === 201) o.uploaded = true;
-      this.log(`Job ${job.id}: fetch of ${f.path}: ${res.statusCode === 201 ? 'sent' : body.error ?? res.statusCode}`);
+      this.log(`Job ${job.id}: fetch of ${f.path}: ${res.statusCode === 201 ? 'sent' : (body.error ?? res.statusCode)}`);
       this.save(job);
     } catch (err) {
       this.log(`Job ${job.id}: fetch of ${f.path} failed: ${err.message}`);
@@ -1759,7 +1848,9 @@ export class JobRunner {
       // Not waited for: a report the app leaves unanswered must not hold the next tick's limits. One per job at a time.
       if (j._reporting) continue;
       j._reporting = true;
-      this.report(j).catch((err) => this.log(`Jobs: ${err.message}`)).finally(() => (j._reporting = false));
+      this.report(j)
+        .catch((err) => this.log(`Jobs: ${err.message}`))
+        .finally(() => (j._reporting = false));
     }
   }
 
@@ -1910,7 +2001,9 @@ ${strings(args)}
   <string>${xml(dir)}</string>
   <key>EnvironmentVariables</key>
   <dict>
-${Object.entries(vars).map(([k, v]) => `    <key>${k}</key>\n    <string>${xml(v)}</string>`).join('\n')}
+${Object.entries(vars)
+  .map(([k, v]) => `    <key>${k}</key>\n    <string>${xml(v)}</string>`)
+  .join('\n')}
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -1923,7 +2016,9 @@ ${Object.entries(vars).map(([k, v]) => `    <key>${k}</key>\n    <string>${xml(v
 `;
     const target = `gui/${uid}`;
     return {
-      file, log, text,
+      file,
+      log,
+      text,
       // bootout first so a new token takes; it fails when the agent wasn't loaded, which is fine.
       before: [['launchctl', 'bootout', `${target}/${label}`]],
       start: [['launchctl', 'bootstrap', target, file]],
@@ -1940,7 +2035,9 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=${dir.replace(/%/g, '%%')}
-${Object.entries(vars).map(([k, v]) => `Environment=${unitQuote(`${k}=${v}`)}`).join('\n')}
+${Object.entries(vars)
+  .map(([k, v]) => `Environment=${unitQuote(`${k}=${v}`)}`)
+  .join('\n')}
 ExecStart=${args.map(unitWord).join(' ')}
 Restart=always
 RestartSec=30
@@ -1949,9 +2046,15 @@ RestartSec=30
 WantedBy=default.target
 `;
   return {
-    file, log, text,
+    file,
+    log,
+    text,
     before: [],
-    start: [['systemctl', '--user', 'daemon-reload'], ['systemctl', '--user', 'enable', unit], ['systemctl', '--user', 'restart', unit]],
+    start: [
+      ['systemctl', '--user', 'daemon-reload'],
+      ['systemctl', '--user', 'enable', unit],
+      ['systemctl', '--user', 'restart', unit],
+    ],
     stop: `systemctl --user stop ${unit}`,
     remove: `systemctl --user disable --now ${unit}; rm ${file}`,
     startAgain: `systemctl --user start ${unit}`,
@@ -1961,7 +2064,7 @@ WantedBy=default.target
 
 /** Writes the background service, (re)starts it, and waits to see it connect, printing what it logged. */
 async function installService(name, argv) {
-  if (!/^[a-z0-9][a-z0-9-]{0,29}$/.test(name ?? '')) throw new Error('--install needs the machine\'s name, as the Machines page shows it');
+  if (!/^[a-z0-9][a-z0-9-]{0,29}$/.test(name ?? '')) throw new Error("--install needs the machine's name, as the Machines page shows it");
   if (process.platform !== 'darwin' && process.platform !== 'linux') throw new Error('--install sets up macOS and Linux; on Windows, use the PowerShell lines from the Machines page');
   const s = backgroundService({ platform: process.platform, home: homedir(), uid: process.getuid(), name, argv, env: process.env });
   mkdirSync(dirname(s.file), { recursive: true });
@@ -1973,10 +2076,12 @@ async function installService(name, argv) {
   for (const [cmd, ...args] of s.start) {
     const run = spawnSync(cmd, args, { encoding: 'utf8' });
     if (run.status !== 0) {
-      throw new Error(`${cmd} ${args.join(' ')} failed${run.error ? `: ${run.error.message}` : `:\n${run.stderr.trim()}`}\n` +
-        (cmd === 'systemctl'
-          ? 'This computer has no systemd user session: run the same line without --install and the name, in a terminal you leave open, instead.'
-          : 'launchd needs this Mac\'s own login (not SSH): run this in Terminal on the Mac, or run the same line without --install and the name in a terminal you leave open.'));
+      throw new Error(
+        `${cmd} ${args.join(' ')} failed${run.error ? `: ${run.error.message}` : `:\n${run.stderr.trim()}`}\n` +
+          (cmd === 'systemctl'
+            ? 'This computer has no systemd user session: run the same line without --install and the name, in a terminal you leave open, instead.'
+            : "launchd needs this Mac's own login (not SSH): run this in Terminal on the Mac, or run the same line without --install and the name in a terminal you leave open."),
+      );
     }
   }
   console.log(`Installed ${s.file}. Waiting for the agent to connect…`);
@@ -1989,14 +2094,18 @@ async function installService(name, argv) {
   }
   if (said.trim()) console.log(said.trimEnd());
   const ok = /Connected to /.test(said);
-  console.log([
-    '',
-    ok ? 'It runs in the background now, also after you close this window, and starts again at every login.' : 'It has not connected yet: the lines above say why (nothing above means it did not start).',
-    s.linger,
-    `Its output: tail -f ${s.log}`,
-    `Stop it: ${s.stop}   (start it again: ${s.startAgain})`,
-    `Remove it: ${s.remove}`,
-  ].filter(Boolean).join('\n'));
+  console.log(
+    [
+      '',
+      ok ? 'It runs in the background now, also after you close this window, and starts again at every login.' : 'It has not connected yet: the lines above say why (nothing above means it did not start).',
+      s.linger,
+      `Its output: tail -f ${s.log}`,
+      `Stop it: ${s.stop}   (start it again: ${s.startAgain})`,
+      `Remove it: ${s.remove}`,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  );
   process.exit(ok ? 0 : 1);
 }
 
@@ -2013,7 +2122,7 @@ async function main() {
   };
   const claudeMcp = option('--claude-mcp');
   const configArg = option('--config');
-  const installName = opts.includes('--install') ? option('--install') ?? '' : null;
+  const installName = opts.includes('--install') ? (option('--install') ?? '') : null;
   const logFile = option('--log');
   const [appUrl, argToken] = opts;
   const token = argToken ?? process.env.CC_MACHINE_TOKEN;
@@ -2053,7 +2162,11 @@ async function main() {
     } catch (err) {
       throw new Error(`could not read ${file}: ${err.message}`);
     }
-    const entry = config.mcpServers?.[name] ?? Object.values(config.projects ?? {}).map((p) => p?.mcpServers?.[name]).find(Boolean);
+    const entry =
+      config.mcpServers?.[name] ??
+      Object.values(config.projects ?? {})
+        .map((p) => p?.mcpServers?.[name])
+        .find(Boolean);
     if (!entry?.command) throw new Error(`${file} has no stdio MCP server named "${name}"`);
     return { command: entry.command, args: entry.args ?? [], env: entry.env ?? {} };
   }
@@ -2103,13 +2216,25 @@ async function main() {
   /** The MCP servers found here, by name: the config file's own first, then Claude Code's. */
   function found() {
     const own = [...host.servers.keys()];
-    return [...own.map((name) => ({ name, from: 'file' })), ...claudeServerNames().filter((n) => !own.includes(n)).map((name) => ({ name, from: 'claude' }))];
+    return [
+      ...own.map((name) => ({ name, from: 'file' })),
+      ...claudeServerNames()
+        .filter((n) => !own.includes(n))
+        .map((name) => ({ name, from: 'claude' })),
+    ];
   }
   const describeWorkspaces = () => {
     if (!host) return;
     for (const p of host.problems) log(`Config problem: ${p}`);
     log(host.all.size ? `Workspaces from ${configFile}: ${[...host.all.keys()].join(', ')}` : `No workspaces in ${configFile}${existsSync(configFile) ? '' : ' (no such file yet)'}`);
-    if (managed) log(`MCP servers found here: ${found().map((f) => f.name).join(', ') || 'none'}`);
+    if (managed)
+      log(
+        `MCP servers found here: ${
+          found()
+            .map((f) => f.name)
+            .join(', ') || 'none'
+        }`,
+      );
   };
   describeWorkspaces();
   // GPU jobs (#858): made even without a jobs block, so a job sent here is refused out loud.
@@ -2125,10 +2250,12 @@ async function main() {
       headers: { ...auth, 'Content-Type': 'application/json' },
       // v says which agent this is: the app shows one without it as set up the old way.
       body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}), problems: [...(host?.summary().problems ?? []), ...runner.leftover()], ...(jobs ? { jobs } : {}), known_jobs: runner.known() }),
-    }).then(async (res) => {
-      // fetch doesn't throw on a refusal; a silent one hid #301's 404.
-      if (!res.ok) log(`The app refused this computer's workspaces: ${res.status} ${(await res.json().catch(() => ({}))).error ?? ''}`);
-    }).catch((err) => log(`Could not tell the app about workspaces: ${err.message}`));
+    })
+      .then(async (res) => {
+        // fetch doesn't throw on a refusal; a silent one hid #301's 404.
+        if (!res.ok) log(`The app refused this computer's workspaces: ${res.status} ${(await res.json().catch(() => ({}))).error ?? ''}`);
+      })
+      .catch((err) => log(`Could not tell the app about workspaces: ${err.message}`));
   }
   if (host) {
     watchFile(configFile, { interval: 3000 }, () => {
@@ -2232,15 +2359,21 @@ async function main() {
   }
 
   function send(s, id, body) {
-    s.chain = s.chain.then(async () => {
-      const res = await sendRetrying(() => fetch(new URL('/api/machines/send', appUrl), {
-        method: 'POST',
-        headers: { ...auth, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: id, ...body }),
-      }), (err) => log(`Send to the app failed, trying again: ${err.message}`));
-      // The thread's turn ended: nobody is listening to this server any more.
-      if (res.status === 410) stopServer(id);
-    }).catch((err) => log(`Could not send to the app: ${err.message}`));
+    s.chain = s.chain
+      .then(async () => {
+        const res = await sendRetrying(
+          () =>
+            fetch(new URL('/api/machines/send', appUrl), {
+              method: 'POST',
+              headers: { ...auth, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session: id, ...body }),
+            }),
+          (err) => log(`Send to the app failed, trying again: ${err.message}`),
+        );
+        // The thread's turn ended: nobody is listening to this server any more.
+        if (res.status === 410) stopServer(id);
+      })
+      .catch((err) => log(`Could not send to the app: ${err.message}`));
   }
 
   /** Server-sent events from a fetch body, one parsed JSON message per event; heard() on every chunk, pings too. */
@@ -2254,7 +2387,11 @@ async function main() {
       while ((end = buf.indexOf('\n\n')) >= 0) {
         const block = buf.slice(0, end);
         buf = buf.slice(end + 2);
-        const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
+        const data = block
+          .split('\n')
+          .filter((l) => l.startsWith('data:'))
+          .map((l) => l.slice(5).trimStart())
+          .join('\n');
         if (data) yield JSON.parse(data);
       }
     }

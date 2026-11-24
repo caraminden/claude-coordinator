@@ -89,10 +89,19 @@ export function cleanJob(raw: any): LongJob | null {
 export function readLongJobs(heavyDir: string): LongJob[] {
   const root = join(heavyDir, 'long');
   let names: string[] = [];
-  try { names = readdirSync(root).filter((n) => n.endsWith('.json')); } catch { return []; }
+  try {
+    names = readdirSync(root).filter((n) => n.endsWith('.json'));
+  } catch {
+    return [];
+  }
   const jobs: LongJob[] = [];
   for (const n of names) {
-    try { const j = cleanJob(JSON.parse(readFileSync(join(root, n), 'utf8'))); if (j && n === `${j.id}.json`) jobs.push(j); } catch { /* half written or not a job */ }
+    try {
+      const j = cleanJob(JSON.parse(readFileSync(join(root, n), 'utf8')));
+      if (j && n === `${j.id}.json`) jobs.push(j);
+    } catch {
+      /* half written or not a job */
+    }
   }
   return jobs.sort((a, b) => a.queued_at - b.queued_at);
 }
@@ -105,10 +114,16 @@ export class LongJobs {
     this.d = d;
     this.root = join(d.dir, 'long');
   }
-  private now() { return this.d.now?.() ?? Date.now(); }
-  logPath(id: string) { return join(this.root, `${id}.log`); }
+  private now() {
+    return this.d.now?.() ?? Date.now();
+  }
+  logPath(id: string) {
+    return join(this.root, `${id}.log`);
+  }
 
-  list(): LongJob[] { return readLongJobs(this.d.dir); }
+  list(): LongJob[] {
+    return readLongJobs(this.d.dir);
+  }
 
   private save(j: LongJob) {
     const tmp = join(this.root, `.${j.id}.server.tmp`);
@@ -125,19 +140,38 @@ export class LongJobs {
       const held = new Set(jobs.filter((j) => ACTIVE.includes(j.state)).map((j) => j.slug.toLowerCase()));
       for (const j of jobs) {
         const s = this.d.scheme(j.ticket);
-        if (ENDED.includes(j.state)) { if (j.woke === false && s) this.tell(j); continue; }
-        if (!s) { this.finish(j, 'lost', null, 'the minion that queued it is gone', null); continue; }
-        if (!same(s.slug, j.slug)) { this.finish(j, 'lost', null, `its repo ${j.slug} isn't its scheme's (${s.slug ?? 'none'})`, s.projectId); continue; }
+        if (ENDED.includes(j.state)) {
+          if (j.woke === false && s) this.tell(j);
+          continue;
+        }
+        if (!s) {
+          this.finish(j, 'lost', null, 'the minion that queued it is gone', null);
+          continue;
+        }
+        if (!same(s.slug, j.slug)) {
+          this.finish(j, 'lost', null, `its repo ${j.slug} isn't its scheme's (${s.slug ?? 'none'})`, s.projectId);
+          continue;
+        }
         try {
-          if (j.state === 'queued' && !held.has(j.slug.toLowerCase())) { if (await this.start(j, s.projectId)) held.add(j.slug.toLowerCase()); }
-          else if (ACTIVE.includes(j.state)) await this.watch(j, s.projectId);
-          if (j.misses && !ENDED.includes(j.state)) { j.misses = 0; this.save(j); }
+          if (j.state === 'queued' && !held.has(j.slug.toLowerCase())) {
+            if (await this.start(j, s.projectId)) held.add(j.slug.toLowerCase());
+          } else if (ACTIVE.includes(j.state)) await this.watch(j, s.projectId);
+          if (j.misses && !ENDED.includes(j.state)) {
+            j.misses = 0;
+            this.save(j);
+          }
         } catch (e) {
           j.misses = (j.misses ?? 0) + 1;
           j.why = (e as Error).message.slice(0, 300);
-          if (j.misses < MAX_MISSES) { this.save(j); continue; }
+          if (j.misses < MAX_MISSES) {
+            this.save(j);
+            continue;
+          }
           // A run GitHub may still be running is cancelled, so a requeued copy never runs beside it.
-          if (j.run_id) this.d.gh(s.projectId, ['-X', 'POST', `repos/${j.slug}/actions/runs/${j.run_id}/cancel`]).catch(() => { /* GitHub is down anyway */ });
+          if (j.run_id)
+            this.d.gh(s.projectId, ['-X', 'POST', `repos/${j.slug}/actions/runs/${j.run_id}/cancel`]).catch(() => {
+              /* GitHub is down anyway */
+            });
           this.finish(j, 'lost', null, `GitHub kept failing for an hour (${j.why})`, s.projectId);
         }
       }
@@ -149,7 +183,8 @@ export class LongJobs {
 
   /** Dispatch a queued job from 2am until its PC's job hours end; false when it waits. */
   private async start(j: LongJob, projectId: number): Promise<boolean> {
-    const hours = this.d.hours(j.slug), now = this.now();
+    const hours = this.d.hours(j.slug),
+      now = this.now();
     // A paused machine (its GPU jobs' pause) holds long jobs too.
     if (hours.paused || !hoursOpen(hours, now) || !hoursOpen({ ...hours, start: LONG_START, until: null }, now)) return false;
     const branch = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}`])).default_branch;
@@ -163,8 +198,7 @@ export class LongJobs {
     // never took goes back in line there once it shows no run, so the command can't run twice.
     Object.assign(j, { state: 'dispatched', dispatched_at: this.now(), tries: (j.tries ?? 0) + 1 });
     this.save(j);
-    await this.d.gh(projectId, ['-X', 'POST', `repos/${j.slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`,
-      '-f', `inputs[sha]=${j.sha}`, '-f', `inputs[command]=${j.command}`, '-f', `inputs[id]=${j.id}`, ...minutes]);
+    await this.d.gh(projectId, ['-X', 'POST', `repos/${j.slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`, '-f', `inputs[sha]=${j.sha}`, '-f', `inputs[command]=${j.command}`, '-f', `inputs[id]=${j.id}`, ...minutes]);
     this.d.note(j.ticket, `Long job ${j.id} (${j.what}) went to ${j.slug}'s CI for the night.`);
     return true;
   }
@@ -176,7 +210,10 @@ export class LongJobs {
       const run = runs.find((r: any) => r.display_title === `heavy ${j.id}`);
       if (!run) {
         if (this.now() - (j.dispatched_at ?? 0) < NO_RUN_MS) return;
-        if ((j.tries ?? 0) >= MAX_TRIES) { this.finish(j, 'lost', null, `GitHub showed no run for any of its ${j.tries} dispatches${j.why ? ` (last error: ${j.why})` : ''}`, projectId); return; }
+        if ((j.tries ?? 0) >= MAX_TRIES) {
+          this.finish(j, 'lost', null, `GitHub showed no run for any of its ${j.tries} dispatches${j.why ? ` (last error: ${j.why})` : ''}`, projectId);
+          return;
+        }
         Object.assign(j, { state: 'queued', dispatched_at: undefined });
         this.save(j);
         return;
@@ -186,12 +223,18 @@ export class LongJobs {
     }
     const run = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}/actions/runs/${j.run_id}`]));
     if (run.status !== 'completed') {
-      if (j.state === 'dispatched' && run.status === 'in_progress') { Object.assign(j, { state: 'running', started_at: this.now() }); this.save(j); }
+      if (j.state === 'dispatched' && run.status === 'in_progress') {
+        Object.assign(j, { state: 'running', started_at: this.now() });
+        this.save(j);
+      }
       return;
     }
     const job = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}/actions/runs/${j.run_id}/jobs`])).jobs?.[0];
     // shortcut: a run no runner took for GitHub's 24 hours ends here as lost; requeue it instead if desktops are often off that long.
-    if (!job?.runner_name) { this.finish(j, 'lost', null, `the CI run ended ${run.conclusion} before a runner took it`, projectId); return; }
+    if (!job?.runner_name) {
+      this.finish(j, 'lost', null, `the CI run ended ${run.conclusion} before a runner took it`, projectId);
+      return;
+    }
     // Loaded on use: a server copy with only server.ts, src/ and public/ still boots (test/boot-imports.test.ts).
     const { commandOutput } = await import('../tools/heavy-ci.ts');
     const out = commandOutput(await this.d.gh(projectId, ['--allow-escape-sequences', `repos/${j.slug}/actions/jobs/${job.id}/logs`]));
@@ -205,7 +248,9 @@ export class LongJobs {
     Object.assign(j, { state, code, why, ended_at: this.now(), woke: projectId === null });
     this.save(j);
     if (projectId === null) return;
-    this.d.gh(projectId, ['-X', 'DELETE', `repos/${j.slug}/git/refs/citadel-heavy/${j.id}`]).catch(() => { /* a stray ref costs nothing */ });
+    this.d.gh(projectId, ['-X', 'DELETE', `repos/${j.slug}/git/refs/citadel-heavy/${j.id}`]).catch(() => {
+      /* a stray ref costs nothing */
+    });
     this.tell(j);
   }
 
@@ -215,9 +260,10 @@ export class LongJobs {
     const ran = j.started_at ? ` after ${dur((j.ended_at ?? this.now()) - j.started_at)}` : '';
     const log = existsSync(this.logPath(j.id)) ? this.logPath(j.id) : null;
     const run = j.url ? ` CI run: ${j.url}` : '';
-    const text = state === 'lost'
-      ? `Long job ${j.id} (${j.what}) was lost: ${why}.${log ? ` What it printed: ${log}.` : ''}${run} Nothing more runs; queue it again with citadel-heavy --long if it still needs to run.`
-      : `Long job ${j.id} (${j.what}) ${state === 'done' ? 'passed' : 'failed'} with exit ${code}${ran}. Output: ${log}.${run}`;
+    const text =
+      state === 'lost'
+        ? `Long job ${j.id} (${j.what}) was lost: ${why}.${log ? ` What it printed: ${log}.` : ''}${run} Nothing more runs; queue it again with citadel-heavy --long if it still needs to run.`
+        : `Long job ${j.id} (${j.what}) ${state === 'done' ? 'passed' : 'failed'} with exit ${code}${ran}. Output: ${log}.${run}`;
     this.d.wake(j.ticket, text, state === 'done');
     j.woke = true;
     this.save(j);
@@ -231,14 +277,26 @@ export class LongJobs {
     }
     try {
       for (const n of readdirSync(this.root)) if (n.endsWith('.tmp') && now - statSync(join(this.root, n)).mtimeMs > 24 * 3600_000) rmSync(join(this.root, n), { force: true });
-    } catch { /* none */ }
+    } catch {
+      /* none */
+    }
   }
 }
 
 /** What the CI page's host load shows: queued and running long jobs, and those that ended in the last day. */
 export function longView(jobs: LongJob[], now = Date.now()) {
-  return jobs.filter((j) => !j.ended_at || now - j.ended_at < 24 * 3600_000).map((j) => ({
-    id: j.id, who: j.who, what: j.what, slug: j.slug, state: j.state, since: j.ended_at ?? j.started_at ?? j.dispatched_at ?? j.queued_at,
-    queuedAt: j.queued_at, url: j.url ?? null, code: j.code ?? null, why: j.why ?? null,
-  }));
+  return jobs
+    .filter((j) => !j.ended_at || now - j.ended_at < 24 * 3600_000)
+    .map((j) => ({
+      id: j.id,
+      who: j.who,
+      what: j.what,
+      slug: j.slug,
+      state: j.state,
+      since: j.ended_at ?? j.started_at ?? j.dispatched_at ?? j.queued_at,
+      queuedAt: j.queued_at,
+      url: j.url ?? null,
+      code: j.code ?? null,
+      why: j.why ?? null,
+    }));
 }

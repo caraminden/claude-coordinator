@@ -85,7 +85,13 @@ export function openSpend(spend: SpendState | undefined): { stage: number; usd: 
   return spend?.alert && !spend.muted ? { ...spend.alert, usd: Math.round(num(spend.usd)) } : null;
 }
 
-interface Message { input: number; outPrice: number; snapshot: number; chars: number; cost: number }
+interface Message {
+  input: number;
+  outPrice: number;
+  snapshot: number;
+  chars: number;
+  cost: number;
+}
 
 /**
  * A turn's running cost. Each content block streams as its own event under the same message id with the

@@ -11,11 +11,18 @@ import { keepTitles } from '../src/workspace.ts';
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
 process.env.GIT_CONFIG_NOSYSTEM = '1';
 // A runner has no identity of its own, and the rebase's own commit (not only ours) needs one.
-for (const who of ['AUTHOR', 'COMMITTER']) { process.env[`GIT_${who}_NAME`] = 't'; process.env[`GIT_${who}_EMAIL`] = 't@t'; }
+for (const who of ['AUTHOR', 'COMMITTER']) {
+  process.env[`GIT_${who}_NAME`] = 't';
+  process.env[`GIT_${who}_EMAIL`] = 't@t';
+}
 const root = mkdtempSync(join(tmpdir(), 'titles-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8', env: { ...process.env, GIT_EDITOR: 'true' } }).trim();
-const put = (cwd: string, text: string, msg: string) => { writeFileSync(join(cwd, 'f'), text); git(cwd, 'add', 'f'); git(cwd, 'commit', '-q', '-m', msg); };
+const put = (cwd: string, text: string, msg: string) => {
+  writeFileSync(join(cwd, 'f'), text);
+  git(cwd, 'add', 'f');
+  git(cwd, 'commit', '-q', '-m', msg);
+};
 
 /** A repo whose branch conflicts with main, rebased, resolved and continued the way minions do. Returns the branch's subjects. */
 async function conflicted(name: string, fix: boolean): Promise<{ cwd: string; subjects: string }> {

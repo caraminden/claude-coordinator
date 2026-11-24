@@ -43,9 +43,7 @@ export const ciNumberQueries = {
   },
 
   addCiNumberStep(this: Store, s: Omit<CiNumberStep, 'id'>) {
-    this.db
-      .prepare('INSERT INTO ci_number_steps (project_id, name, ref, run_id, sha, created_at, baseline, level, flagged_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(s.project_id, s.name, s.ref, s.run_id, s.sha, s.created_at, s.baseline, s.level, s.flagged_at);
+    this.db.prepare('INSERT INTO ci_number_steps (project_id, name, ref, run_id, sha, created_at, baseline, level, flagged_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(s.project_id, s.name, s.ref, s.run_id, s.sha, s.created_at, s.baseline, s.level, s.flagged_at);
   },
 
   /** One series' steps on one ref since `since`, oldest first. */

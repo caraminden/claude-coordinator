@@ -98,9 +98,7 @@ export function landNews(output: string, name: (branch: string) => string): News
       news.push({ tone: 'bad', text: `${short(m[1])} is a broken test, not a flake: red in ${m[2]}` }); // #1487
     } else if ((m = s.match(/^failed in the full run but passed alone \(([^)]*)\)(.*)$/))) {
       const files = m[1].split(', ').map(short);
-      news.push(/stays red/.test(m[2])
-        ? { tone: 'bad', text: `${list(files)} failed in the full suite but passed alone, but a fresh CI run couldn't start, so it stays red` }
-        : { tone: 'warn', text: `${list(files)} failed in the full suite but passed alone: one fresh CI run` });
+      news.push(/stays red/.test(m[2]) ? { tone: 'bad', text: `${list(files)} failed in the full suite but passed alone, but a fresh CI run couldn't start, so it stays red` } : { tone: 'warn', text: `${list(files)} failed in the full suite but passed alone: one fresh CI run` });
     } else if ((m = s.match(/^suspects: (.*): CI is red on the ship train \(/))) {
       slow = null;
       done();

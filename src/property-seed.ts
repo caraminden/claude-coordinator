@@ -55,14 +55,15 @@ export const GLOBAL_SEED: SeedKey[] = [
   {
     key: 'assigned',
     label: 'Assigned to',
-    description: "Who the minion is assigned to: a person's login name (e.g. Cara). Starts as whoever started it (a minion the Taskmaster starts for another minion takes that one's); set when a person asks to assign it (\"assign this to Josh\"); null unassigns it.",
+    description: 'Who the minion is assigned to: a person\'s login name (e.g. Cara). Starts as whoever started it (a minion the Taskmaster starts for another minion takes that one\'s); set when a person asks to assign it ("assign this to Josh"); null unassigns it.',
     multi: false,
     value_kind: 'user',
   },
   {
     key: 'effortName',
     label: 'Effort',
-    description: "The multi-minion effort the minion belongs to: one goal worked by several minions (e.g. `CI speed-up`). Name it when starting an effort's first minion; minions started after it (start_after) or from it (parent) carry it by themselves, and an unnamed start_after chain gets `chain from #N`. When every minion of an effort has closed (3 or more, 4 for an unnamed chain, and not mostly one major build), the server starts its retro (#1751).",
+    description:
+      "The multi-minion effort the minion belongs to: one goal worked by several minions (e.g. `CI speed-up`). Name it when starting an effort's first minion; minions started after it (start_after) or from it (parent) carry it by themselves, and an unnamed start_after chain gets `chain from #N`. When every minion of an effort has closed (3 or more, 4 for an unnamed chain, and not mostly one major build), the server starts its retro (#1751).",
     multi: false,
     value_kind: 'text',
   },
@@ -113,16 +114,7 @@ export const DELVE_SEED: SeedKey[] = [
     description: 'What kind of asset; mainly on artifacts.',
     multi: true,
     value_kind: 'enum',
-    values: [
-      { value: 'concept', aliases: ['concept-art'] },
-      { value: 'sprite' },
-      { value: 'animation', aliases: ['anim'] },
-      { value: 'vfx', aliases: ['fx', 'effects'] },
-      { value: 'icon' },
-      { value: 'ui' },
-      { value: 'audio' },
-      { value: 'doc' },
-    ],
+    values: [{ value: 'concept', aliases: ['concept-art'] }, { value: 'sprite' }, { value: 'animation', aliases: ['anim'] }, { value: 'vfx', aliases: ['fx', 'effects'] }, { value: 'icon' }, { value: 'ui' }, { value: 'audio' }, { value: 'doc' }],
   },
   {
     key: 'area',
@@ -157,4 +149,3 @@ export const DELVE_SEED: SeedKey[] = [
     value_kind: 'integer',
   },
 ];
-

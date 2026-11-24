@@ -53,8 +53,12 @@ const as = (id: number, method = 'GET', body?: object) =>
 async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, appTools: boolean): Promise<any> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(ticket.project_id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: 'coordinator',
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
+      COORDINATOR_PROJECT: String(ticket.project_id),
+      COORDINATOR_TICKET: String(ticket.id),
+      COORDINATOR_ROLE: 'coordinator',
       COORDINATOR_APP_INSTRUCTIONS: appTools ? '1' : undefined,
     },
     stdio: ['pipe', 'pipe', 'inherit'],
@@ -92,7 +96,7 @@ test('empty text adds no section; set, it comes right before the scheme instruct
   assert.equal(prompt.indexOf('# Scheme instructions'), prompt.lastIndexOf('# Scheme instructions'));
 });
 
-test('only the Citadel scheme\'s Taskmaster prompt names set_app_instructions as its own', () => {
+test("only the Citadel scheme's Taskmaster prompt names set_app_instructions as its own", () => {
   const own = systemPrompt(store.getProject(Citadel.id)!, store.getTicket(CitadelTM.id)!, null, null, root, null);
   const other = systemPrompt(store.getProject(Delve.id)!, store.getTicket(DelveTM.id)!, null, null, root, null);
   assert.match(own, /set_app_instructions/);
@@ -114,7 +118,7 @@ test('people save it with a history row; the store keeps who and when', async ()
   assert.deepEqual(history[0].diff, [{ op: '+', text: 'One rule.' }]);
 });
 
-test('the Citadel scheme\'s Taskmaster reads and sets it; another scheme\'s Taskmaster and a minion are refused', async () => {
+test("the Citadel scheme's Taskmaster reads and sets it; another scheme's Taskmaster and a minion are refused", async () => {
   assert.equal((await as(CitadelTM.id, 'PUT', { text: 'Two rules.' })).status, 200);
   assert.equal((await (await as(CitadelTM.id)).json()).text, 'Two rules.');
 
@@ -127,7 +131,7 @@ test('the Citadel scheme\'s Taskmaster reads and sets it; another scheme\'s Task
   assert.equal((await srv.call('/api/app/instructions')).data.text, 'Two rules.');
 });
 
-test('the MCP tools: listed only for the Citadel scheme\'s Taskmaster, and refused for another scheme\'s if called anyway', async () => {
+test("the MCP tools: listed only for the Citadel scheme's Taskmaster, and refused for another scheme's if called anyway", async () => {
   const names = async (t: typeof DelveTM, on: boolean) => (await mcp(t, 'tools/list', {}, on)).tools.map((x: any) => x.name);
   assert.ok((await names(CitadelTM, true)).includes('set_app_instructions'));
   assert.ok(!(await names(DelveTM, false)).includes('set_app_instructions'));

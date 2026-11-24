@@ -18,14 +18,21 @@ export const DEFAULT_SOURCES = ['web/public/icon.svg', 'assets/icon/icon.svg', '
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 const LOCK = '.citadel-icons.sha256';
 
-const inside = (root, p) => { const r = relative(root, resolve(root, p)); return !!r && !r.startsWith('..') && !isAbsolute(r); };
+const inside = (root, p) => {
+  const r = relative(root, resolve(root, p));
+  return !!r && !r.startsWith('..') && !isAbsolute(r);
+};
 
 /** Which file feeds each role: { source, background, webDir, androidRes, roles: {role: repo-relative path} }. Throws with a reason for a bad config. */
 export function resolveIcons(dir) {
   const root = realpathSync(dir);
   let cfg = {};
   if (existsSync(join(root, 'citadel-app.json'))) {
-    try { cfg = JSON.parse(readFileSync(join(root, 'citadel-app.json'), 'utf8')).icon ?? {}; } catch (e) { throw new Error(`citadel-app.json: ${e.message}`); }
+    try {
+      cfg = JSON.parse(readFileSync(join(root, 'citadel-app.json'), 'utf8')).icon ?? {};
+    } catch (e) {
+      throw new Error(`citadel-app.json: ${e.message}`);
+    }
   }
   if (typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error('citadel-app.json: icon must be an object');
   const file = (p, what) => {
@@ -48,7 +55,8 @@ export function resolveIcons(dir) {
     if (v === undefined) return d;
     if (typeof v !== 'string' || !inside(root, v)) throw new Error(`icon ${what} must be a folder inside the repo`);
     // a folder that exists must not be a link out of the repo (the generator writes and deletes in it)
-    let up = join(root, v); while (!existsSync(up) && up !== root) up = dirname(up);
+    let up = join(root, v);
+    while (!existsSync(up) && up !== root) up = dirname(up);
     if (!(realpathSync(up) + '/').startsWith(root + '/')) throw new Error(`icon ${what} ${v} points outside the repo`);
     return v;
   };
@@ -57,15 +65,23 @@ export function resolveIcons(dir) {
 
 /** Marks and background of an SVG: its viewBox, the first full-size <rect>'s fill, and the rest of its content. */
 function parseSvg(text) {
-  const vb = (text.match(/viewBox="([^"]+)"/)?.[1] ?? '0 0 512 512').trim().split(/[\s,]+/).map(Number);
+  const vb = (text.match(/viewBox="([^"]+)"/)?.[1] ?? '0 0 512 512')
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
   const [, , w, h] = vb;
   let inner = text.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
   let bg;
   // The background is the first <rect> that covers the whole viewBox (100%, or the viewBox's own width and height).
   inner = inner.replace(/<rect\b([^>]*)\/>/g, (m, a) => {
-    const f = a.match(/fill="(#[0-9a-fA-F]{3,8})"/), at = (n) => a.match(new RegExp(`\\b${n}="([^"]*)"`))?.[1];
-    const covers = (v, full) => v === '100%' || Number(v) === full, zero = (v) => v === undefined || Number(v) === 0;
-    if (f && !bg && covers(at('width'), w) && covers(at('height'), h) && zero(at('x')) && zero(at('y'))) { bg = f[1]; return ''; }
+    const f = a.match(/fill="(#[0-9a-fA-F]{3,8})"/),
+      at = (n) => a.match(new RegExp(`\\b${n}="([^"]*)"`))?.[1];
+    const covers = (v, full) => v === '100%' || Number(v) === full,
+      zero = (v) => v === undefined || Number(v) === 0;
+    if (f && !bg && covers(at('width'), w) && covers(at('height'), h) && zero(at('x')) && zero(at('y'))) {
+      bg = f[1];
+      return '';
+    }
     return m;
   });
   const paths = [...inner.matchAll(/<path\s+([^>]*?)\/?>/g)].map((m) => Object.fromEntries([...m[1].matchAll(/([\w-]+)="([^"]*)"/g)].map((x) => [x[1], x[2]])));
@@ -84,9 +100,12 @@ export function buildIcons(dir) {
   const rsvg = (svg, w, h) => execFileSync('rsvg-convert', ['-w', String(w), '-h', String(h)], { input: svg, maxBuffer: 64 << 20 });
   const wrap = (w, h, body) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`;
   // The art centred in a w×h canvas so its half-width (80% of the viewBox's short half-side) is `frac` of the canvas's.
-  const place = (s, w, h, frac) => `<g transform="translate(${w / 2} ${h / 2}) scale(${(Math.min(w, h) / 2 * frac) / (Math.min(s.w, s.h) / 2 * 0.8)}) translate(${-s.w / 2} ${-s.h / 2})">${s.inner}</g>`;
+  const place = (s, w, h, frac) => `<g transform="translate(${w / 2} ${h / 2}) scale(${((Math.min(w, h) / 2) * frac) / ((Math.min(s.w, s.h) / 2) * 0.8)}) translate(${-s.w / 2} ${-s.h / 2})">${s.inner}</g>`;
   // A whole icon (its own background) at w×h, for the web set.
-  const full = (role, px) => { const s = svgOf(role); return rsvg(wrap(px, px, `<rect width="${px}" height="${px}" fill="${s.bg ?? BG}"/>${place(s, px, px, 0.8)}`), px, px); };
+  const full = (role, px) => {
+    const s = svgOf(role);
+    return rsvg(wrap(px, px, `<rect width="${px}" height="${px}" fill="${s.bg ?? BG}"/>${place(s, px, px, 0.8)}`), px, px);
+  };
   const webDir = cfg.webDir;
   out[`${webDir}/favicon-32.png`] = full('small', 32);
   out[`${webDir}/icon-192.png`] = full('scheme', 192);
@@ -97,15 +116,17 @@ export function buildIcons(dir) {
     const vector = (role, colorOf) => {
       const s = svgOf(role);
       if (!s.paths.length || s.other.length) throw new Error(`${cfg.roles[role]}: Android's ${role} layer is built from <path> elements only (after the background <rect>); found ${s.other.length ? '<' + s.other.join('>, <') + '>' : 'no paths'}. Convert shapes to paths.`);
-      const k = 30 / (Math.min(s.w, s.h) / 2 * 0.8); // adaptive layers are 108dp; content stays in a 30dp radius
-      const body = s.paths.map((p) => {
-        for (const c of [p.fill, p.stroke]) if (c && c !== 'none' && !HEX.test(c)) throw new Error(`${cfg.roles[role]}: colour "${c}" must be #rgb or #rrggbb for Android`);
-        const f = p.fill ?? (p.stroke ? 'none' : '#000000'); // SVG's default fill is black
-        const fill = f !== 'none' ? `\n        android:fillColor="${colorOf(f)}"` : '';
-        const stroke = p.stroke ? `\n        android:strokeColor="${colorOf(p.stroke)}"\n        android:strokeWidth="${p['stroke-width'] ?? 1}"\n        android:strokeLineCap="round"` : '';
-        return `    <path${fill}${stroke}\n        android:pathData="${esc(p.d ?? '')}"/>`;
-      }).join('\n');
-      return `<?xml version="1.0" encoding="utf-8"?>\n<!-- Generated by citadel:android-app's gen-icons.mjs from ${cfg.roles[role]} -->\n<vector xmlns:android="http://schemas.android.com/apk/res/android"\n    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">\n  <group android:translateX="${(54 - s.w / 2 * k).toFixed(3)}" android:translateY="${(54 - s.h / 2 * k).toFixed(3)}"\n      android:scaleX="${k.toFixed(5)}" android:scaleY="${k.toFixed(5)}">\n${body}\n  </group>\n</vector>\n`;
+      const k = 30 / ((Math.min(s.w, s.h) / 2) * 0.8); // adaptive layers are 108dp; content stays in a 30dp radius
+      const body = s.paths
+        .map((p) => {
+          for (const c of [p.fill, p.stroke]) if (c && c !== 'none' && !HEX.test(c)) throw new Error(`${cfg.roles[role]}: colour "${c}" must be #rgb or #rrggbb for Android`);
+          const f = p.fill ?? (p.stroke ? 'none' : '#000000'); // SVG's default fill is black
+          const fill = f !== 'none' ? `\n        android:fillColor="${colorOf(f)}"` : '';
+          const stroke = p.stroke ? `\n        android:strokeColor="${colorOf(p.stroke)}"\n        android:strokeWidth="${p['stroke-width'] ?? 1}"\n        android:strokeLineCap="round"` : '';
+          return `    <path${fill}${stroke}\n        android:pathData="${esc(p.d ?? '')}"/>`;
+        })
+        .join('\n');
+      return `<?xml version="1.0" encoding="utf-8"?>\n<!-- Generated by citadel:android-app's gen-icons.mjs from ${cfg.roles[role]} -->\n<vector xmlns:android="http://schemas.android.com/apk/res/android"\n    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">\n  <group android:translateX="${(54 - (s.w / 2) * k).toFixed(3)}" android:translateY="${(54 - (s.h / 2) * k).toFixed(3)}"\n      android:scaleX="${k.toFixed(5)}" android:scaleY="${k.toFixed(5)}">\n${body}\n  </group>\n</vector>\n`;
     };
     out[`${res}/drawable/ic_launcher_foreground.xml`] = vector('foreground', (c) => c);
     out[`${res}/drawable/ic_launcher_monochrome.xml`] = vector('monochrome', () => '#000000');
@@ -113,7 +134,9 @@ export function buildIcons(dir) {
     const adaptive = `<?xml version="1.0" encoding="utf-8"?>\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n    <background android:drawable="@color/ic_launcher_background"/>\n    <foreground android:drawable="@drawable/ic_launcher_foreground"/>\n    <monochrome android:drawable="@drawable/ic_launcher_monochrome"/>\n</adaptive-icon>\n`;
     out[`${res}/mipmap-anydpi-v26/ic_launcher.xml`] = adaptive;
     out[`${res}/mipmap-anydpi-v26/ic_launcher_round.xml`] = adaptive;
-    const leg = svgOf('legacy'), rnd = svgOf('round'), spl = svgOf('splash');
+    const leg = svgOf('legacy'),
+      rnd = svgOf('round'),
+      spl = svgOf('splash');
     for (const [d, px] of Object.entries({ mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 })) {
       out[`${res}/mipmap-${d}/ic_launcher.png`] = rsvg(wrap(px, px, `<rect width="${px}" height="${px}" rx="${px * 0.22}" fill="${leg.bg ?? BG}"/>${place(leg, px, px, 0.78)}`), px, px);
       out[`${res}/mipmap-${d}/ic_launcher_round.png`] = rsvg(wrap(px, px, `<circle cx="${px / 2}" cy="${px / 2}" r="${px / 2}" fill="${rnd.bg ?? BG}"/>${place(rnd, px, px, 0.7)}`), px, px);
@@ -123,7 +146,11 @@ export function buildIcons(dir) {
     out[`${res}/drawable/splash.png`] = splash(480, 320);
     const sizes = { mdpi: [320, 480], hdpi: [480, 800], xhdpi: [720, 1280], xxhdpi: [960, 1600], xxxhdpi: [1280, 1920] };
     for (const [d, [a, b]] of Object.entries(sizes)) {
-      for (const [kind, w, h] of [['port', a, b], ['land', b, a]]) if (existsSync(join(root, `${res}/drawable-${kind}-${d}`))) out[`${res}/drawable-${kind}-${d}/splash.png`] = splash(w, h);
+      for (const [kind, w, h] of [
+        ['port', a, b],
+        ['land', b, a],
+      ])
+        if (existsSync(join(root, `${res}/drawable-${kind}-${d}`))) out[`${res}/drawable-${kind}-${d}/splash.png`] = splash(w, h);
     }
   }
   return out;
@@ -143,7 +170,10 @@ function inputsHash(root) {
 export function generateIcons(dir) {
   const root = realpathSync(dir);
   const files = buildIcons(root);
-  for (const [p, data] of Object.entries(files)) { mkdirSync(dirname(join(root, p)), { recursive: true }); writeFileSync(join(root, p), data); }
+  for (const [p, data] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, p)), { recursive: true });
+    writeFileSync(join(root, p), data);
+  }
   const cfg = resolveIcons(root);
   if (existsSync(join(root, 'android'))) {
     for (const d of ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']) rmSync(join(root, cfg.androidRes, `mipmap-${d}/ic_launcher_foreground.png`), { force: true });
@@ -167,8 +197,15 @@ if (import.meta.main) {
   const check = args.includes('--check');
   const dir = args.find((a) => !a.startsWith('--')) ?? '.';
   try {
-    if (check) { const bad = checkIcons(dir); for (const b of bad) console.error(b); process.exit(bad.length ? 1 : 0); }
+    if (check) {
+      const bad = checkIcons(dir);
+      for (const b of bad) console.error(b);
+      process.exit(bad.length ? 1 : 0);
+    }
     const written = generateIcons(dir);
     console.log(`wrote ${written.length} icon files`);
-  } catch (e) { console.error(e.message); process.exit(1); }
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
 }

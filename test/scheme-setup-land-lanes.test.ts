@@ -41,19 +41,25 @@ function laneSetup(files: string[], { lanes = LANES, extra = '', builtin = false
   };
   // What a landing sent to CI, oldest first: "<commit> <scratch branch>".
   const sent = (l: L) => [...l.stderr().matchAll(/waiting for CI on ([0-9a-f]{12}) \(origin's (\S+)\)/g)].map((m) => `${m[1]} ${m[2]}`);
-  const tip = async (l: L) => { await until(`a CI run: ${l.stderr()}`, () => sent(l).length > 0); return sent(l)[0].split(' ')[0]; };
+  const tip = async (l: L) => {
+    await until(`a CI run: ${l.stderr()}`, () => sent(l).length > 0);
+    return sent(l)[0].split(' ')[0];
+  };
   const verdict = (sha: string, code: number) => writeFileSync(join(ci, sha), `${code}\n`);
   const read = (f: string) => (existsSync(f) ? readFileSync(f, 'utf8') : '');
   const asked = () => read(join(ci, 'status.log'));
   const checked = () => read(checks);
   const mainAt = () => git(q.main, 'rev-parse', 'main').slice(0, 12);
   const parent = (sha: string) => git(q.main, 'rev-parse', `${sha}^`).slice(0, 12);
-  const stop = () => { for (const l of started) if (l.child.exitCode === null && l.child.signalCode === null) l.child.kill('SIGKILL'); };
+  const stop = () => {
+    for (const l of started) if (l.child.exitCode === null && l.child.signalCode === null) l.child.kill('SIGKILL');
+  };
   return { ...q, ci, land, lands, sent, tip, verdict, asked, checked, mainAt, parent, stop };
 }
-const GREEN = 0, RED = 1;
+const GREEN = 0,
+  RED = 1;
 
-test('lanes: --lane prints the lane and the path that decided it, by main\'s map, never the commit\'s', () => {
+test("lanes: --lane prints the lane and the path that decided it, by main's map, never the commit's", () => {
   const c = laneSetup(['docs/a.md']);
   const lane = (...args: string[]) => {
     // main's land.sh, run in the worktree: the commits below edit the worktree's own
@@ -61,7 +67,10 @@ test('lanes: --lane prints the lane and the path that decided it, by main\'s map
     assert.equal(r.status, 0, r.stderr);
     return r.stdout.trim();
   };
-  const next = (file: string, text = 'x\n') => { c.commit(c.wt, file, text); return lane('HEAD', 'HEAD~1'); };
+  const next = (file: string, text = 'x\n') => {
+    c.commit(c.wt, file, text);
+    return lane('HEAD', 'HEAD~1');
+  };
   assert.equal(lane(), 'light docs/a.md', 'every path light: light');
   assert.equal(next('src/x.txt'), 'fast src/x.txt');
   assert.equal(lane(), 'fast src/x.txt', 'light and one partial lane: that lane');
@@ -105,7 +114,7 @@ test('lanes: a light landing runs no check and no CI and pushes nothing; a parti
     assert.equal(c.checked(), '', 'neither CHECK nor any other check ran');
     const b = c.land(2);
     assert.equal(await b.exit, 0, b.stderr());
-    assert.equal(c.checked(), 'android\n', "CHECK_ANDROID, not CHECK");
+    assert.equal(c.checked(), 'android\n', 'CHECK_ANDROID, not CHECK');
     assert.deepEqual([c.sent(a), c.sent(b)], [[], []]);
     assert.equal(c.asked(), '', 'CI was never asked');
     assert.deepEqual(c.landed().slice(1), ['docs/a.md: 1', 'app/y.txt: 2']);
@@ -151,13 +160,21 @@ test('lanes: when the run ahead of a stacked light landing goes red, it builds a
     assert.match(b.stderr(), /rebasing ticket\/2-x onto main/);
     assert.deepEqual(c.landed().slice(1), ['docs/b.md: 2']);
     assert.deepEqual(c.sent(b), []);
-    assert.equal(c.asked().trim().split('\n').every((l) => l === `2 ${ta} fast`), true, `CI_STATUS gets the lane, and only the fast run was asked about: ${c.asked()}`);
+    assert.equal(
+      c
+        .asked()
+        .trim()
+        .split('\n')
+        .every((l) => l === `2 ${ta} fast`),
+      true,
+      `CI_STATUS gets the lane, and only the fast run was asked about: ${c.asked()}`,
+    );
   } finally {
     c.stop();
   }
 });
 
-test("lanes: a partial lane runs its own check, pushes to land/<lane>/, waits only for its workflows and may skip its jobs; full waits for all", async () => {
+test('lanes: a partial lane runs its own check, pushes to land/<lane>/, waits only for its workflows and may skip its jobs; full waits for all', async () => {
   const c = laneSetup(['src/x.txt', 'other.txt'], { builtin: true, extra: "CI_WORKFLOWS_FAST='ci.yml'\nCI_SKIPS_FAST='bench'\n" });
   const run = (workflow: string, id: number, state: string) => `.github/workflows/${workflow}\t${id}\t${state}\thttps://ci.test/${id}\n`;
   try {

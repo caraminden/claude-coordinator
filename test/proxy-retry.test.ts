@@ -128,7 +128,9 @@ async function files(app: Server, headers: Record<string, string>, path = '/x') 
     request({ port: portOf(s), host: '127.0.0.1', path: '/x', headers }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (d) => chunks.push(d)).on('end', () => ok({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }));
-    }).on('error', fail).end();
+    })
+      .on('error', fail)
+      .end();
   });
   await close(s);
   return got;
@@ -161,7 +163,13 @@ test('an app that already compresses or sets its own cache headers keeps them; A
   const own = await listen(createServer((_q, res) => res.writeHead(200, { 'content-type': 'text/css', 'content-length': Buffer.byteLength(big), 'cache-control': 'max-age=3600', etag: '"mine"' }).end(big)));
   const gz = await listen(createServer((_q, res) => res.writeHead(200, { 'content-type': 'text/css', 'content-encoding': 'br', 'content-length': 3 }).end('abc')));
   const stream = await listen(createServer((_q, res) => (res.writeHead(200, { 'content-type': 'text/event-stream' }), res.write('data: 1\n\n'))));
-  const noLen = await listen(createServer((_q, res) => { res.writeHead(200, { 'content-type': 'text/javascript' }); res.write(big); res.end(); }));
+  const noLen = await listen(
+    createServer((_q, res) => {
+      res.writeHead(200, { 'content-type': 'text/javascript' });
+      res.write(big);
+      res.end();
+    }),
+  );
   try {
     const a = await files(own, { 'accept-encoding': 'gzip' });
     assert.equal(a.headers['cache-control'], 'max-age=3600');

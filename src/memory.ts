@@ -58,7 +58,10 @@ export function spokenText(kind: string, data: any): string {
   if (kind === 'user_message') return typeof data?.text === 'string' ? data.text : '';
   // A reply the link check sent back that its rewrite replaced (#281) isn't in the chat to jump to.
   if (data?.type !== 'assistant' || data.replaced) return '';
-  return (data.message?.content ?? []).filter((b: any) => b?.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
+  return (data.message?.content ?? [])
+    .filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
+    .map((b: any) => b.text)
+    .join('\n');
 }
 
 // About 600 tokens a chunk at most: embedding costs about 7 CPU-seconds per 500 tokens on perigee (#331's benchmark).
@@ -82,7 +85,7 @@ const cut = (s: string, n: number) => {
 };
 
 /** Qwen3-Embedding wants an instruction on the query side only (its model card: 1-5% better retrieval). */
-const QUERY_INSTRUCT = 'Instruct: Given a question about past work, decisions and conversations in a software team\'s chats with its AI agents, retrieve the passages that answer it\nQuery: ';
+const QUERY_INSTRUCT = "Instruct: Given a question about past work, decisions and conversations in a software team's chats with its AI agents, retrieve the passages that answer it\nQuery: ";
 
 /** An Embed backed by llama-server's OpenAI-style /v1/embeddings. */
 export function llamaEmbed(url: string, timeoutMs = 120_000): Embed {
@@ -135,7 +138,12 @@ export class Memory {
     const key = (p: Pending) => `${p.source_kind}:${p.source_id}`;
     const todo = turns.chunks.filter((p) => !this.skipped.has(key(p)));
     await this.loadTicketTexts();
-    if (todo.length < max) todo.push(...this.pendingTickets(projectId).filter((p) => !this.skipped.has(key(p))).slice(0, max - todo.length));
+    if (todo.length < max)
+      todo.push(
+        ...this.pendingTickets(projectId)
+          .filter((p) => !this.skipped.has(key(p)))
+          .slice(0, max - todo.length),
+      );
     if (todo.length < max) todo.push(...this.staleRows(projectId, model, max - todo.length));
     const put = this.db.prepare(`INSERT INTO memory_chunks (project_id, ticket_id, person_id, source_kind, source_id, ts, text, vec, model)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -186,11 +194,20 @@ export class Memory {
     // The ids first, from the covering index, then the 200 rows' text: the one query sorted every message past the mark with its
     // text in the sorter, 0.7 s of the loop a pass when the mark sat behind a running turn (#1125).
     // CROSS JOIN keeps events_asks (it carries ticket_id) in the lead (#1251): led by tickets it seeked into every minion of the scheme and sorted.
-    const ids = (this.db.prepare(`SELECT e.id FROM events e CROSS JOIN tickets t ON t.id = e.ticket_id
-      WHERE t.project_id = ? AND e.kind = 'user_message' AND e.id > ? AND e.id <= ? ORDER BY e.id LIMIT 200`).all(projectId, after, top) as { id: number }[]).map((r) => r.id);
-    const msgs = (ids.length ? this.db.prepare(`SELECT e.id, e.ticket_id, e.data, e.created_at, EXISTS (SELECT 1 FROM memory_chunks m WHERE m.source_kind = 'turn' AND m.source_id = e.id AND m.ticket_id = e.ticket_id AND m.ts = e.created_at) AS done
-      FROM events e WHERE e.id IN (${ids.map(() => '?').join(',')})`).all(...ids) as { id: number; ticket_id: number; data: string; created_at: number; done: number }[] : [])
-      .sort((x, y) => x.id - y.id);
+    const ids = (
+      this.db
+        .prepare(`SELECT e.id FROM events e CROSS JOIN tickets t ON t.id = e.ticket_id
+      WHERE t.project_id = ? AND e.kind = 'user_message' AND e.id > ? AND e.id <= ? ORDER BY e.id LIMIT 200`)
+        .all(projectId, after, top) as { id: number }[]
+    ).map((r) => r.id);
+    const msgs = (
+      ids.length
+        ? (this.db
+            .prepare(`SELECT e.id, e.ticket_id, e.data, e.created_at, EXISTS (SELECT 1 FROM memory_chunks m WHERE m.source_kind = 'turn' AND m.source_id = e.id AND m.ticket_id = e.ticket_id AND m.ts = e.created_at) AS done
+      FROM events e WHERE e.id IN (${ids.map(() => '?').join(',')})`)
+            .all(...ids) as { id: number; ticket_id: number; data: string; created_at: number; done: number }[])
+        : []
+    ).sort((x, y) => x.id - y.id);
     const chunks: Pending[] = [];
     let mark: number | null = null;
     let held = false; // a message before this one is still running or left over: the mark stays behind it
@@ -217,8 +234,12 @@ export class Memory {
     if (!asked || NOT_ASKS.has(msg.author)) return null;
     // Its turn's result: the first after it, or for a message that waited for the turn before it to end,
     // the first of a turn that started after it was sent (a steer joins the running turn instead).
-    const result = (this.db.prepare(`SELECT MIN(event_id) AS id FROM turns WHERE ticket_id = ? AND event_id > ? AND side IS NULL
-      ${msg.steered ? '' : 'AND (duration_ms IS NULL OR ended_at - duration_ms >= ?)'}`).get(m.ticket_id, m.id, ...(msg.steered ? [] : [m.created_at])) as { id: number | null }).id;
+    const result = (
+      this.db
+        .prepare(`SELECT MIN(event_id) AS id FROM turns WHERE ticket_id = ? AND event_id > ? AND side IS NULL
+      ${msg.steered ? '' : 'AND (duration_ms IS NULL OR ended_at - duration_ms >= ?)'}`)
+        .get(m.ticket_id, m.id, ...(msg.steered ? [] : [m.created_at])) as { id: number | null }
+    ).id;
     let end = result !== null ? result + 1 : Infinity;
     if (end === Infinity) {
       // No result (refused, or the turn died): once it's stuck, its reply is what came before the next message.
@@ -230,8 +251,7 @@ export class Memory {
     }
     // The turn's last words that aren't a Grunt's: its reply.
     // Row by row (#1251): the reply is nearly always the newest, and all() read the turn's last 300 rows every time.
-    const rows = this.db.prepare("SELECT data FROM events WHERE ticket_id = ? AND id > ? AND id < ? AND kind = 'claude' ORDER BY id DESC LIMIT 300")
-      .iterate(m.ticket_id, m.id, Number.isFinite(end) ? end : Number.MAX_SAFE_INTEGER) as Iterable<{ data: string }>;
+    const rows = this.db.prepare("SELECT data FROM events WHERE ticket_id = ? AND id > ? AND id < ? AND kind = 'claude' ORDER BY id DESC LIMIT 300").iterate(m.ticket_id, m.id, Number.isFinite(end) ? end : Number.MAX_SAFE_INTEGER) as Iterable<{ data: string }>;
     let reply = '';
     for (const r of rows) {
       try {
@@ -240,9 +260,13 @@ export class Memory {
       } catch {}
       if (reply) break;
     }
-    const person = typeof msg.author === 'string' ? this.store.findUser('name', msg.author)?.id ?? null : null;
+    const person = typeof msg.author === 'string' ? (this.store.findUser('name', msg.author)?.id ?? null) : null;
     return {
-      ticket_id: m.ticket_id, person_id: person, source_kind: 'turn', source_id: m.id, ts: m.created_at,
+      ticket_id: m.ticket_id,
+      person_id: person,
+      source_kind: 'turn',
+      source_id: m.id,
+      ts: m.created_at,
       text: `${msg.author ?? 'Someone'}: ${cut(asked, USER_MAX)}${reply ? `\n\nReply: ${cut(reply, REPLY_MAX)}` : ''}`,
     };
   }
@@ -265,17 +289,16 @@ export class Memory {
   /** Minions (not the Taskmaster) whose title and note aren't indexed as they read now. */
   private pendingTickets(projectId: number): Pending[] {
     const indexed = this.ticketTexts ?? new Map<number, string>();
-    const rows = this.db.prepare(`SELECT id, number, title, note, person_id, updated_at FROM tickets
-      WHERE project_id = ? AND kind = 'ticket' ORDER BY id`).all(projectId) as { id: number; number: number; title: string; note: string | null; person_id: number | null; updated_at: number }[];
-    return rows
-      .map((t) => ({ project_id: projectId, ticket_id: t.id, person_id: t.person_id, source_kind: 'ticket' as const, source_id: t.id, ts: t.updated_at, text: `#${t.number} ${t.title}${t.note ? `\n${t.note}` : ''}` }))
-      .filter((t) => t.text !== indexed.get(t.ticket_id));
+    const rows = this.db
+      .prepare(`SELECT id, number, title, note, person_id, updated_at FROM tickets
+      WHERE project_id = ? AND kind = 'ticket' ORDER BY id`)
+      .all(projectId) as { id: number; number: number; title: string; note: string | null; person_id: number | null; updated_at: number }[];
+    return rows.map((t) => ({ project_id: projectId, ticket_id: t.id, person_id: t.person_id, source_kind: 'ticket' as const, source_id: t.id, ts: t.updated_at, text: `#${t.number} ${t.title}${t.note ? `\n${t.note}` : ''}` })).filter((t) => t.text !== indexed.get(t.ticket_id));
   }
 
   /** Rows embedded by another model, to embed again with this one. */
   private staleRows(projectId: number, model: string, max: number): Pending[] {
-    return this.db.prepare('SELECT project_id, ticket_id, person_id, source_kind, source_id, ts, text FROM memory_chunks WHERE project_id = ? AND model != ? LIMIT ?')
-      .all(projectId, model, max) as unknown as Pending[];
+    return this.db.prepare('SELECT project_id, ticket_id, person_id, source_kind, source_id, ts, text FROM memory_chunks WHERE project_id = ? AND model != ? LIMIT ?').all(projectId, model, max) as unknown as Pending[];
   }
 
   /**

@@ -145,8 +145,14 @@ test('waits saved in the old key move into the table at boot, none dropped', asy
   assert.equal(s.waiters.list().length, 2, 'the dual read sees them before the move');
   await s.outbox.boot();
   assert.equal(store.getSetting('wake-when-live') ?? null, null);
-  assert.deepEqual(rows(a).map((r) => [r.payload.reason, r.when_arg]), [['one', c]]);
-  assert.deepEqual(rows(b).map((r) => [r.payload.reason, r.payload.light]), [['two', true]]);
+  assert.deepEqual(
+    rows(a).map((r) => [r.payload.reason, r.when_arg]),
+    [['one', c]],
+  );
+  assert.deepEqual(
+    rows(b).map((r) => [r.payload.reason, r.payload.light]),
+    [['two', true]],
+  );
   await s.outbox.poke({ type: 'tick' });
   assert.equal(rows(a).length + rows(b).length, 2, 'a second pass adds none');
 });
@@ -166,8 +172,7 @@ test('a re-add while the row is sending leaves one row, and the retry or boot le
   assert.equal(await t.waiters.check(), 1);
   await t.outbox.poke({ type: 'tick' });
   assert.equal(rows(id)[0].state, 'sending'); // handed to the runner, its turn not started
-  const add = (to: number, reason: string) =>
-    t.outbox.add({ project_id: project.id, kind: 'wake_when_live', to_kind: 'minion', to_id: to, when_kind: 'live', when_arg: pending, payload: { reason, since: pending }, set_by: `minion:${to}`, dedupe_key: `${to}:${pending}` });
+  const add = (to: number, reason: string) => t.outbox.add({ project_id: project.id, kind: 'wake_when_live', to_kind: 'minion', to_id: to, when_kind: 'live', when_arg: pending, payload: { reason, since: pending }, set_by: `minion:${to}`, dedupe_key: `${to}:${pending}` });
   add(id, 'second'); // a fresh waiting twin of the sending row
   add(other, 'other');
   assert.equal(rows(id).length, 2);
@@ -178,6 +183,13 @@ test('a re-add while the row is sending leaves one row, and the retry or boot le
   (t.outbox as any).opts.log = (m: string) => errors.push(m);
   await t.outbox.poke({ type: 'tick' });
   assert.deepEqual(errors, []);
-  assert.deepEqual(rows(id).map((r) => r.state), ['dropped', 'sending']); // the old row is the twin's duplicate; the twin was handed to the runner
-  assert.equal(t.r.sent.some((x) => x.id === other), true, 'the other due row in the pass is still sent');
+  assert.deepEqual(
+    rows(id).map((r) => r.state),
+    ['dropped', 'sending'],
+  ); // the old row is the twin's duplicate; the twin was handed to the runner
+  assert.equal(
+    t.r.sent.some((x) => x.id === other),
+    true,
+    'the other due row in the pass is still sent',
+  );
 });

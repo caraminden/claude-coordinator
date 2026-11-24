@@ -36,20 +36,24 @@ export interface TimerAlertDeps {
 
 /** Blank out what looks like a secret in a journal line: key=value or key: value for secret-ish keys, bearer tokens, long opaque runs. */
 export function redact(line: string): string {
-  return line
-    .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 [hidden]')
-    .replace(/\b([\w-]*(?:token|secret|passw(?:or)?d|api[_-]?key|auth\w*|cookie|session|credential)[\w-]*)(["']?\s*[:=]\s*)("[^"]*"?|'[^']*'?|[^\s"',;&]+)/gi,
-      (_, key, sep, value) => `${key}${sep}${/^["']/.test(value) ? `${value[0]}[hidden]${value[0]}` : '[hidden]'}`)
-    // Long runs of letters and digits both, like keys and hashes; not paths (no slash) or plain words.
-    .replace(/\b(?=[\w+=-]*\d)(?=[\w+=-]*[A-Za-z])[\w+=-]{32,}\b/g, '[hidden]')
-    .replace(/:\/\/[^\s/:@]+:[^\s/@]+@/g, '://[hidden]@');
+  return (
+    line
+      .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 [hidden]')
+      .replace(/\b([\w-]*(?:token|secret|passw(?:or)?d|api[_-]?key|auth\w*|cookie|session|credential)[\w-]*)(["']?\s*[:=]\s*)("[^"]*"?|'[^']*'?|[^\s"',;&]+)/gi, (_, key, sep, value) => `${key}${sep}${/^["']/.test(value) ? `${value[0]}[hidden]${value[0]}` : '[hidden]'}`)
+      // Long runs of letters and digits both, like keys and hashes; not paths (no slash) or plain words.
+      .replace(/\b(?=[\w+=-]*\d)(?=[\w+=-]*[A-Za-z])[\w+=-]{32,}\b/g, '[hidden]')
+      .replace(/:\/\/[^\s/:@]+:[^\s/@]+@/g, '://[hidden]@')
+  );
 }
 
 /** The item's words: app, job, when and how it failed, then its last lines, within Mandate's 500 characters. */
 export function alertTitle(run: TimerRun, lines: string[], now: number): string {
   const how = run.result === 'exit-code' ? `exit ${run.status}` : run.result || 'failed';
   const head = `${run.app.title}'s ${run.job} timer failed ${clock(run.exitAt ?? now)} (${how})`;
-  const tail = lines.slice(-5).map((l) => redact(l.trim()).slice(0, 200)).join(' | ');
+  const tail = lines
+    .slice(-5)
+    .map((l) => redact(l.trim()).slice(0, 200))
+    .join(' | ');
   const s = tail ? `${head}. Last lines: ${tail}` : `${head}. Its journal: contraption_service logs.`;
   return s.length > 500 ? `${s.slice(0, 499)}…` : s;
 }
@@ -146,10 +150,19 @@ export class TimerAlerts {
 export function timerBroken(store: Store, canSee: (projectId: number) => boolean, now = Date.now()): BrokenRow[] {
   const out = store.getSetting<Out>(OUT) ?? {};
   // shortcut: an app with no home scheme (sender 0) is left out; give it a row for admins if one turns up.
-  return Object.entries(out).filter(([, o]) => o.from.id && canSee(o.from.id)).map(([unit, o]) => {
-    const ringing = now >= ringsAt(o);
-    return { scheme: o.from.name, schemeId: o.from.id, key: `timer:${unit}`, what: o.title.split(/\. (Last lines|Its journal)/)[0], since: o.since ?? null, ringing,
-      ...(!ringing && { ringsAt: ringsAt(o) }),
-      who: ringing ? { kind: 'person' as const, label: 'Needs you', href: `#/p/${o.from.id}` } : { kind: 'taskmaster' as const, label: 'Taskmaster looking', href: `#/p/${o.from.id}` } };
-  });
+  return Object.entries(out)
+    .filter(([, o]) => o.from.id && canSee(o.from.id))
+    .map(([unit, o]) => {
+      const ringing = now >= ringsAt(o);
+      return {
+        scheme: o.from.name,
+        schemeId: o.from.id,
+        key: `timer:${unit}`,
+        what: o.title.split(/\. (Last lines|Its journal)/)[0],
+        since: o.since ?? null,
+        ringing,
+        ...(!ringing && { ringsAt: ringsAt(o) }),
+        who: ringing ? { kind: 'person' as const, label: 'Needs you', href: `#/p/${o.from.id}` } : { kind: 'taskmaster' as const, label: 'Taskmaster looking', href: `#/p/${o.from.id}` },
+      };
+    });
 }

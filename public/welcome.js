@@ -36,15 +36,15 @@ export function welcomePanel(pid, schemes) {
   const ring = h('div', { class: 'welcome-ring', role: 'img' }, h('span', { 'aria-hidden': 'true' }));
   const sub = h('span', { class: 'welcome-sub muted' });
   let folded = false;
-  try { folded = localStorage.getItem(HIDDEN) === '1'; } catch {}
+  try {
+    folded = localStorage.getItem(HIDDEN) === '1';
+  } catch {}
   const fold = h('button', { type: 'button', class: 'small secondary welcome-fold' });
   const close = h('button', { type: 'button', class: 'small secondary welcome-close', title: "Don't show this again", 'aria-label': 'Dismiss the welcome for good' }, '×');
   const rows = list.map((s) => {
     const box = h('span', { class: 'welcome-box', 'aria-hidden': 'true' }, '✓');
     const text = h('span', { class: 'welcome-text' }, h('b', {}, s.title), h('span', { class: 'welcome-step-sub muted' }, s.sub));
-    const row = s.href ? h('a', { class: 'welcome-step', href: s.href }, box, text)
-      : s.key === 'card' ? h('button', { type: 'button', class: 'welcome-step' }, box, text)
-        : h('div', { class: 'welcome-step' }, box, text);
+    const row = s.href ? h('a', { class: 'welcome-step', href: s.href }, box, text) : s.key === 'card' ? h('button', { type: 'button', class: 'welcome-step' }, box, text) : h('div', { class: 'welcome-step' }, box, text);
     return { s, row, text };
   });
   const practice = practiceCard();
@@ -57,15 +57,16 @@ export function welcomePanel(pid, schemes) {
   });
   const yours = schemes.length ? `You're in ${schemes.join(' and ')}.` : "You're not in one yet.";
   // Open beside the steps on a wide screen; on a phone, under them behind a toggle, so the steps fit the screen.
-  const words = h('details', { class: 'welcome-words', open: !matchMedia('(max-width: 800px)').matches },
+  const words = h(
+    'details',
+    { class: 'welcome-words', open: !matchMedia('(max-width: 800px)').matches },
     h('summary', {}, 'What the words mean'),
     h('p', {}, h('b', {}, WORDS.scheme.word), ': ', WORDS.scheme.def, ' ', yours),
     h('p', {}, h('b', {}, WORDS.taskmaster.word), ': ', WORDS.taskmaster.def),
-    h('p', {}, h('b', {}, WORDS.minion.word), ': ', WORDS.minion.def));
+    h('p', {}, h('b', {}, WORDS.minion.word), ': ', WORDS.minion.def),
+  );
   const body = h('div', { class: 'welcome-body' }, h('div', { class: 'welcome-steps' }, ...rows.map((r) => r.row), practice), words);
-  const el = h('section', { class: 'welcome', 'aria-label': 'Welcome to Citadel' },
-    h('div', { class: 'welcome-head' }, ring, h('div', { class: 'welcome-title' }, h('h3', {}, `Welcome, ${me}`), sub), fold, close),
-    body);
+  const el = h('section', { class: 'welcome', 'aria-label': 'Welcome to Citadel' }, h('div', { class: 'welcome-head' }, ring, h('div', { class: 'welcome-title' }, h('h3', {}, `Welcome, ${me}`), sub), fold, close), body);
 
   const draw = (w) => {
     const n = list.filter((s) => w.steps[s.key]).length;
@@ -82,7 +83,9 @@ export function welcomePanel(pid, schemes) {
     body.hidden = f;
     fold.textContent = f ? 'Show' : 'Hide';
     fold.setAttribute('aria-expanded', String(!f));
-    try { f ? localStorage.setItem(HIDDEN, '1') : localStorage.removeItem(HIDDEN); } catch {}
+    try {
+      f ? localStorage.setItem(HIDDEN, '1') : localStorage.removeItem(HIDDEN);
+    } catch {}
   };
   fold.addEventListener('click', () => setFolded(!folded));
   close.addEventListener('click', () => {
@@ -104,24 +107,25 @@ export function welcomePanel(pid, schemes) {
   /** The practice card: the three answers as buttons, your pick shown on its button. */
   function practiceCard() {
     const buttons = OPTIONS.map((o) => h('button', { type: 'button', class: 'small secondary', 'data-option': o }, o));
-    const card = h('div', { class: 'welcome-card', hidden: true },
-      h('p', {}, h('b', {}, 'Practice card. '), 'What would you like to do first? Nothing ships, whichever you pick.'),
-      h('div', { class: 'welcome-options' }, ...buttons));
+    const card = h('div', { class: 'welcome-card', hidden: true }, h('p', {}, h('b', {}, 'Practice card. '), 'What would you like to do first? Nothing ships, whichever you pick.'), h('div', { class: 'welcome-options' }, ...buttons));
     card.answer = (picked) => {
       for (const b of buttons) b.setAttribute('aria-pressed', String(b.dataset.option === picked));
     };
-    for (const b of buttons) b.addEventListener('click', () => {
-      const o = b.dataset.option;
-      if (!account.welcome || account.welcome.card) return; // answered, or finished: it's a practice card, not a setting
-      const before = account.welcome;
-      account.welcome = { ...before, card: o, steps: { ...before.steps, card: true } };
-      draw(account.welcome);
-      api('api/welcome', { method: 'POST', body: { card: o } }).then((r) => welcomeLooked(r.welcome)).catch(() => {
-        account.welcome = before;
-        draw(before);
-        toast("Couldn't send your answer. Pick it again.", { tone: 'danger' });
+    for (const b of buttons)
+      b.addEventListener('click', () => {
+        const o = b.dataset.option;
+        if (!account.welcome || account.welcome.card) return; // answered, or finished: it's a practice card, not a setting
+        const before = account.welcome;
+        account.welcome = { ...before, card: o, steps: { ...before.steps, card: true } };
+        draw(account.welcome);
+        api('api/welcome', { method: 'POST', body: { card: o } })
+          .then((r) => welcomeLooked(r.welcome))
+          .catch(() => {
+            account.welcome = before;
+            draw(before);
+            toast("Couldn't send your answer. Pick it again.", { tone: 'danger' });
+          });
       });
-    });
     return card;
   }
 }
@@ -132,14 +136,20 @@ function welcomeLooked(w) {
   account.welcome = w?.done ? null : w;
   if (!live?.el.isConnected) return;
   if (w) live.draw(w);
-  else { live.el.remove(); live = null; } // finished or dismissed elsewhere (another tab, your phone)
+  else {
+    live.el.remove();
+    live = null;
+  } // finished or dismissed elsewhere (another tab, your phone)
 }
 
 let asking = null;
 /** Ask the server again (on mount, on focus, after you write): a step done elsewhere ticks here. */
 export function refreshWelcome() {
   if (!account?.welcome || asking) return;
-  asking = api('api/welcome').then((r) => welcomeLooked(r.welcome)).catch(() => {}).finally(() => (asking = null));
+  asking = api('api/welcome')
+    .then((r) => welcomeLooked(r.welcome))
+    .catch(() => {})
+    .finally(() => (asking = null));
 }
 
 /** The welcome for the chat open now: only over your Taskmaster's chat, in a scheme you're in. */

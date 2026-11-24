@@ -8,7 +8,11 @@ import { tempRoot } from './helpers.ts';
 // A waiting job's newest output lines (#1681): what src/wait-tail.ts reads from the tail of an output file.
 const tmp = tempRoot('wait-tail-');
 after(async () => tmp.teardown());
-const file = (name: string, text: string) => { const f = join(tmp.dir, name); writeFileSync(f, text); return f; };
+const file = (name: string, text: string) => {
+  const f = join(tmp.dir, name);
+  writeFileSync(f, text);
+  return f;
+};
 
 test('the last lines, newest last, a trailing newline adds none', async () => {
   assert.deepEqual(await readTail(file('a', 'one\ntwo\nthree\n'), 2), ['two', 'three']);

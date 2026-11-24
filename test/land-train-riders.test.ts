@@ -20,19 +20,28 @@ import { until } from './wait.ts';
 const oneUntil = `test/${'one-until'}.test.ts`;
 function guarded(r: ReturnType<typeof setup>) {
   mkdirSync(join(r.source, 'test'), { recursive: true });
-  writeFileSync(join(r.source, 'tools', 'citadel-test'), `#!/usr/bin/env bash
+  writeFileSync(
+    join(r.source, 'tools', 'citadel-test'),
+    `#!/usr/bin/env bash
 case " $* " in *" ${oneUntil} "*) ;; *) exit 0 ;; esac
 rc=0
 ! grep -qs sleep test/loop-lag.test.ts || { echo "✖ ${oneUntil}:22 › loop-lag.test.ts has 5 \\\`sleep\\\` hits, the baseline allows 3"; echo "full output: /somewhere/citadel-test.log"; rc=1; }
 echo "guard $(git rev-parse HEAD) $rc" >>"$GUARD_LOG"
 exit $rc
-`, { mode: 0o755 });
+`,
+    { mode: 0o755 },
+  );
   writeFileSync(join(r.source, oneUntil), '');
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'guard tools');
 }
 const guardEnv = (extra: Record<string, string>) => (dir: string) => ({ GUARD_LOG: join(dir, 'gh-calls'), LAND_SMOKE: '0', ...extra });
-const guardRuns = (l: { c: { calls: () => string } }) => l.c.calls().split('\n').filter((s) => s.startsWith('guard ')).map((s) => s.split(' ').slice(1));
+const guardRuns = (l: { c: { calls: () => string } }) =>
+  l.c
+    .calls()
+    .split('\n')
+    .filter((s) => s.startsWith('guard '))
+    .map((s) => s.split(' ').slice(1));
 
 test('a rider that breaks a guard test is refused on the guard run on the train, before any CI run, and the riders after it still ride (#1479)', async () => {
   const l = await line([{}, {}, {}, { change: ['test/loop-lag.test.ts', '// sleep\n'] }, {}], guardEnv({ FAKE_RED_PATH: 'test/loop-lag.test.ts' }), guarded);
@@ -45,7 +54,9 @@ test('a rider that breaks a guard test is refused on the guard run on the train,
   for (const i of [1, 2, 3, 5]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   for (const i of [3, 5]) shipped(l, done[i - 1], i, 2, 3);
   assert.equal(l.runs(), 2, "ship 1's and the train's: none on a commit with ship 4's change");
-  const red = guardRuns(l).filter(([, rc]) => rc === '1').map(([c]) => c);
+  const red = guardRuns(l)
+    .filter(([, rc]) => rc === '1')
+    .map(([c]) => c);
   assert.ok(red.length > 0, 'the guards ran on a commit with ship 4 on it');
   for (const c of red) assert.doesNotMatch(l.c.calls(), new RegExp(`head_sha=${c}`), 'CI was never asked about a guard-red commit');
   l.done();
@@ -71,11 +82,15 @@ test("each step of a red train's bisect runs the guard tests before asking CI, a
   assert.match(done[3].stderr, /the guard tests failed on ticket\/2-x's ship train in test\/one-until\.test\.ts with ticket\/4-x on it/);
   for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   shipped(l, done[2], 3, 2, 2);
-  const red = guardRuns(l).filter(([, rc]) => rc === '1').map(([c]) => c);
-  assert.equal(red.length, 1, 'one guard red: ship 4\'s bisect step');
+  const red = guardRuns(l)
+    .filter(([, rc]) => rc === '1')
+    .map(([c]) => c);
+  assert.equal(red.length, 1, "one guard red: ship 4's bisect step");
   assert.doesNotMatch(l.c.calls(), new RegExp(`head_sha=${red[0]}`), "CI was never asked about ship 4's step");
   const log = l.c.calls();
-  const asked = guardRuns(l).map(([c]) => c).filter((c) => log.includes(`head_sha=${c}`));
+  const asked = guardRuns(l)
+    .map(([c]) => c)
+    .filter((c) => log.includes(`head_sha=${c}`));
   assert.ok(new Set(asked).size >= 3, `the front, the train's top and ship 3's step: ${asked.join(' ')}`);
   for (const c of asked) assert.ok(log.indexOf(`guard ${c} `) < log.indexOf(`head_sha=${c}`), `the guards ran on ${c} before CI was asked`);
   l.done();
@@ -121,8 +136,11 @@ test("a train's red of flakes only is unchanged: one fresh run, and a ship that 
 test("a train's red of known flakes only ships every rider on that one run; one a rider touched gets the fresh run", async () => {
   for (const touched of [false, true]) {
     let shared = '';
-    const l = await line([{}, {}, touched ? { change: ['test/slow.test.ts', 'x\n'] } : {}, {}], (dir) => ({ FAKE_FLAKY_PATH: touched ? 'test/slow.test.ts' : 'f2.txt', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: join(dir, 'shared') }),
-      (r) => seen(shared = join(r.dir, 'shared'), ['test/busy.test.ts', 'test/slow.test.ts']));
+    const l = await line(
+      [{}, {}, touched ? { change: ['test/slow.test.ts', 'x\n'] } : {}, {}],
+      (dir) => ({ FAKE_FLAKY_PATH: touched ? 'test/slow.test.ts' : 'f2.txt', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: join(dir, 'shared') }),
+      (r) => seen((shared = join(r.dir, 'shared')), ['test/busy.test.ts', 'test/slow.test.ts']),
+    );
     const done = await l.go();
     done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
     if (touched) {
@@ -133,7 +151,9 @@ test("a train's red of known flakes only ships every rider on that one run; one 
       assert.doesNotMatch(done[1].stderr, /running CI once more/);
       for (const i of [1, 2, 3]) assert.match(done[i].stderr, /^land: shipped past known flakes test\/busy\.test\.ts \(seen on 1 other branch in 14 days\), test\/slow\.test\.ts \(seen on 1 other branch in 14 days\)$/m, `ship ${i + 1}`);
       // The train's sighting names its riders, so none of them ships past it later as "another branch's" flake.
-      const log = readdirSync(join(shared, 'retro-log')).map((d) => readFileSync(join(shared, 'retro-log', d, 'land.md'), 'utf8')).join('');
+      const log = readdirSync(join(shared, 'retro-log'))
+        .map((d) => readFileSync(join(shared, 'retro-log', d, 'land.md'), 'utf8'))
+        .join('');
       assert.match(log, /· flake · test\/busy\.test\.ts · load [\d.]+ · \S+ · in CI · with \S+ \S+$/m);
     }
     assert.equal(l.runs(), 2, "ship 1's and the train's");
@@ -171,7 +191,7 @@ test('a bisect run killed from outside twice before any test failed refuses nobo
 });
 
 // #1393: a rerun alone killed from outside gives that file no label, but the confirmed failure still names its suspect.
-test('a file whose rerun alone was killed from outside names no suspect: only the confirmed failure\'s ship is refused', async () => {
+test("a file whose rerun alone was killed from outside names no suspect: only the confirmed failure's ship is refused", async () => {
   const l = await line([{}, {}, { change: ['test/busy.test.ts', 'x\n'] }, { change: ['test/real.test.ts', '// red\n'] }], { FAKE_RED_PATH: 'test/real.test.ts', FAKE_LOG: 'killed-rerun' });
   const done = await l.go();
   assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\): CI is red/);
@@ -212,7 +232,11 @@ test('CI gives no answer on a train: the riders go back in line, and each lands 
 // runner to come back while perigee is busy, and they go back only when the gate gives up for good. 1 s stands for the
 // 90 s bound, and the few seconds the job sits queued for a 3-min wait.
 test('a train keeps its riders while a busy runner takes its time to start the job, and ships them in one CI run', async () => {
-  const l = await line([{}, {}, {}], (dir) => ({ FAKE_CI_FILE: join(dir, 'ci-state'), LAND_CI_START: '1', LAND_CI_START_ONLINE: '60' }), (r) => writeFileSync(join(r.dir, 'ci-state'), 'green'));
+  const l = await line(
+    [{}, {}, {}],
+    (dir) => ({ FAKE_CI_FILE: join(dir, 'ci-state'), LAND_CI_START: '1', LAND_CI_START_ONLINE: '60' }),
+    (r) => writeFileSync(join(r.dir, 'ci-state'), 'green'),
+  );
   const file = join(l.r.dir, 'ci-state');
   writeFileSync(file, 'queued');
   const all = l.go();
@@ -228,14 +252,23 @@ test('a train keeps its riders while a busy runner takes its time to start the j
 });
 
 test('a train keeps its riders while perigee is busy and CI gives no answer, and ships them once CI answers', async () => {
-  const l = await line([{}, {}, {}], (dir) => {
-    const proc = quietProc(join(dir, 'proc'));
-    return { FAKE_CI_FILE: join(dir, 'ci-state'), LAND_QUIET_POLL: '0.2', LAND_QUIET_PROC: proc, CITADEL_HEAVY_PRESSURE: join(proc, 'pressure', 'cpu'), CITADEL_HEAVY_DIR: join(dir, 'heavy') };
-  }, (r) => writeFileSync(join(r.dir, 'ci-state'), 'green'));
+  const l = await line(
+    [{}, {}, {}],
+    (dir) => {
+      const proc = quietProc(join(dir, 'proc'));
+      return { FAKE_CI_FILE: join(dir, 'ci-state'), LAND_QUIET_POLL: '0.2', LAND_QUIET_PROC: proc, CITADEL_HEAVY_PRESSURE: join(proc, 'pressure', 'cpu'), CITADEL_HEAVY_DIR: join(dir, 'heavy') };
+    },
+    (r) => writeFileSync(join(r.dir, 'ci-state'), 'green'),
+  );
   writeFileSync(join(l.r.dir, 'ci-state'), 'down');
   quietProc(join(l.r.dir, 'proc'), { load: 999 });
   const all = l.go();
-  await until('the train waits on a busy perigee', () => /ship train: ticket\/2-x takes the 1 ships/.test(l.out[1]) && /CI: GitHub didn't answer, but perigee is busy/.test(l.out[1]), 30_000, () => l.out[1]);
+  await until(
+    'the train waits on a busy perigee',
+    () => /ship train: ticket\/2-x takes the 1 ships/.test(l.out[1]) && /CI: GitHub didn't answer, but perigee is busy/.test(l.out[1]),
+    30_000,
+    () => l.out[1],
+  );
   await new Promise((ok) => setTimeout(ok, 1000));
   writeFileSync(join(l.r.dir, 'ci-state'), 'green');
   const done = await all;
@@ -252,7 +285,12 @@ test("a red train's bisect keeps its riders while CI gives no answer on a busy p
     return { FAKE_RED_PATH: 'red.txt', FAKE_CI_DOWN_AT: '3', FAKE_CI_UP: join(dir, 'ci-up'), LAND_QUIET_POLL: '0.2', LAND_QUIET_PROC: proc, CITADEL_HEAVY_PRESSURE: join(proc, 'pressure', 'cpu'), CITADEL_HEAVY_DIR: join(dir, 'heavy') };
   });
   const all = l.go();
-  await until('the bisect waits on a busy perigee', () => /finding the first ship that turned it red/.test(l.out[1]) && /CI: GitHub didn't answer, but perigee is busy/.test(l.out[1]), 30_000, () => l.out[1]);
+  await until(
+    'the bisect waits on a busy perigee',
+    () => /finding the first ship that turned it red/.test(l.out[1]) && /CI: GitHub didn't answer, but perigee is busy/.test(l.out[1]),
+    30_000,
+    () => l.out[1],
+  );
   await new Promise((ok) => setTimeout(ok, 1000));
   writeFileSync(join(l.r.dir, 'ci-up'), '');
   const done = await all;
@@ -266,12 +304,18 @@ test("a red train's bisect keeps its riders while CI gives no answer on a busy p
 
 test('a rider stopped while its train is tested: the train ships up to the ship before it, and the rest go back in line', async () => {
   const gate = (r: ReturnType<typeof setup>) => join(r.dir, 'ci-gate');
-  const l = await line([{}, {}, {}, {}, {}], (dir) => ({ FAKE_CI_GATE: join(dir, 'ci-gate') }), (r) => writeFileSync(gate(r), ''));
+  const l = await line(
+    [{}, {}, {}, {}, {}],
+    (dir) => ({ FAKE_CI_GATE: join(dir, 'ci-gate') }),
+    (r) => writeFileSync(gate(r), ''),
+  );
   rmSync(gate(l.r)); // the train's run stays in progress until the rider is gone
   const all = l.go();
   await until('the train', () => /ship train: ticket\/2-x takes the 3 ships/.test(l.out[1]));
   await until('ship 5 riding', () => /land: riding/.test(l.out[4]));
-  const ticket = tickets(l.state).map((t) => readFileSync(join(l.state, 'queue', t), 'utf8').split('\n')).find((t) => t[2] === 'ticket/4-x')!;
+  const ticket = tickets(l.state)
+    .map((t) => readFileSync(join(l.state, 'queue', t), 'utf8').split('\n'))
+    .find((t) => t[2] === 'ticket/4-x')!;
   process.kill(-Number(ticket[0].split(' ')[0]), 'SIGKILL');
   writeFileSync(gate(l.r), '');
   const done = await all;
@@ -286,11 +330,7 @@ test('a rider stopped while its train is tested: the train ships up to the ship 
 });
 
 test('the train passes over a ship that conflicts with it, one that changes the pipeline, and one landed with LAND_TRAIN=0', async () => {
-  const l = await line(
-    [{}, {}, { change: ['a.txt', 'three\n'] }, { change: ['a.txt', 'four\n'] }, { change: ['tools/pipe.sh', 'x\n'] }, {}, { env: { LAND_TRAIN: '0' } }],
-    {},
-    (r) => r.commit(r.source, 'tools/pipeline-files.txt', '# the pipeline\ntools/pipe.sh\n'),
-  );
+  const l = await line([{}, {}, { change: ['a.txt', 'three\n'] }, { change: ['a.txt', 'four\n'] }, { change: ['tools/pipe.sh', 'x\n'] }, {}, { env: { LAND_TRAIN: '0' } }], {}, (r) => r.commit(r.source, 'tools/pipeline-files.txt', '# the pipeline\ntools/pipe.sh\n'));
   const done = await l.go();
   assert.match(done[1].stderr, /ship train: ticket\/4-x stays in line \(it doesn't rebase cleanly onto the train\)/);
   assert.match(done[1].stderr, /ship train: ticket\/5-x stays in line \(it changes the ship pipeline, which ships alone\)/);
@@ -338,7 +378,7 @@ test("a rider that gets the lock while its train's restart is judged waits outsi
   l.done();
 });
 
-test("a train whose restart is rolled back: its riders go back in line and land on their own", async () => {
+test('a train whose restart is rolled back: its riders go back in line and land on their own', async () => {
   const { l, done } = await restart(true);
   assert.equal(done[1].status, 1, done[1].stderr);
   for (const i of [3, 4]) {
@@ -359,7 +399,10 @@ const busy = (): Record<string, string> => {
 };
 const retried = (l: Awaited<ReturnType<typeof line>>) => {
   const log = join(l.r.dir, 'shared', 'retro-log');
-  return readFileSync(join(log, readdirSync(log)[0], 'land.md'), 'utf8').split('\n').filter((x) => x.includes(' · retry in place · ')).map((x) => x.replace(/^- \S+ /, ''));
+  return readFileSync(join(log, readdirSync(log)[0], 'land.md'), 'utf8')
+    .split('\n')
+    .filter((x) => x.includes(' · retry in place · '))
+    .map((x) => x.replace(/^- \S+ /, ''));
 };
 
 test("a front refused by the pipeline keeps its ticket and rides the next ship's train as its first rider, never ahead of it (#1360)", async () => {

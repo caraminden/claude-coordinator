@@ -50,14 +50,17 @@ async function run(text) {
   box.busy(true);
   status.working('Writing a sample reply…');
   let n = 0;
-  tick = setInterval(() => {
-    const [type, data] = SAMPLE[n++];
-    chat.push({ type, data });
-    if (type === 'end') {
-      finish();
-      chat.replies([{ label: 'Add one more', recommended: true }, { label: 'That\'s all' }]);
-    }
-  }, document.getElementById('quick').checked ? 100 : 400);
+  tick = setInterval(
+    () => {
+      const [type, data] = SAMPLE[n++];
+      chat.push({ type, data });
+      if (type === 'end') {
+        finish();
+        chat.replies([{ label: 'Add one more', recommended: true }, { label: "That's all" }]);
+      }
+    },
+    document.getElementById('quick').checked ? 100 : 400,
+  );
 }
 const box = mountComposer(document.getElementById('compose'), {
   placeholder: 'Ask something…',

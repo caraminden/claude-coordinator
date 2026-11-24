@@ -33,7 +33,11 @@ before(async () => {
   base = srv.base;
   cookie = srv.cookie;
   procs.push(srv.proc);
-  await until('the machines listener', () => fetch(`${agentBase}/machine-agent.mjs`).then((r) => r.ok).catch(() => false));
+  await until('the machines listener', () =>
+    fetch(`${agentBase}/machine-agent.mjs`)
+      .then((r) => r.ok)
+      .catch(() => false),
+  );
 });
 
 test('agents connect only at the machines URL, which the setup is given', async () => {
@@ -62,7 +66,12 @@ test('every route the agent calls is served at the machines URL, and refused at 
   const { token } = await call('/api/machines', { method: 'POST', body: { name: 'desk' } });
   const auth = { Authorization: `Bearer ${token}` };
   // Every path machine-agent.mjs calls; a 404 here means the listener drops it before its handler.
-  for (const [method, path] of [['GET', '/api/machines/connect'], ['POST', '/api/machines/send'], ['POST', '/api/machines/info'], ['POST', '/api/machines/upload']]) {
+  for (const [method, path] of [
+    ['GET', '/api/machines/connect'],
+    ['POST', '/api/machines/send'],
+    ['POST', '/api/machines/info'],
+    ['POST', '/api/machines/upload'],
+  ]) {
     assert.equal((await fetch(agentBase + path, { method })).status, 401, `${path} at the machines URL`);
     const here = await fetch(base + path, { method, headers: auth });
     assert.equal(here.status, 403, `${path} at the app address`);

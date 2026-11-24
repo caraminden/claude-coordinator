@@ -34,8 +34,7 @@ function strip(words: string[]): string[] {
     else if (w === 'nice' || w === 'timeout') {
       i++;
       while (words[i] !== undefined && (words[i].startsWith('-') || /^\d+[smhd]?$/.test(words[i]))) i++;
-    }
-    else break;
+    } else break;
   }
   return words.slice(i);
 }

@@ -12,8 +12,7 @@ const d = new Drill('app-turn-crash');
 after(() => d.cleanup());
 let key = '';
 let me = 0;
-const turn = (base: string, prompt: string) =>
-  fetch(`${base}/api/contraptions/turns`, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ person: me, session: 'drill', prompt }) });
+const turn = (base: string, prompt: string) => fetch(`${base}/api/contraptions/turns`, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ person: me, session: 'drill', prompt }) });
 // The app turn's claude: the fake, run by the server with no turn folder, so found by its own path.
 const claudes = () => [...procsUnder([d.fake.fake]).keys()];
 
@@ -42,7 +41,10 @@ before(async () => {
 test("after a crash, the app's session takes a new turn, and the cut-off turn's claude ends", async () => {
   d.fake.setRelease('ok');
   const res = await turn(d.srv!.base, 'again');
-  const events = (await res.text()).trim().split('\n\n').map((b) => b.split('\n')[0].replace('event: ', ''));
+  const events = (await res.text())
+    .trim()
+    .split('\n\n')
+    .map((b) => b.split('\n')[0].replace('event: ', ''));
   assert.ok(events.includes('end'), `the new turn ran: ${events.join(', ')}`);
   // The orphan writes its reply to a pipe nobody reads, and dies of it.
   await until('no app claude left', () => claudes().length === 0, 20_000);
@@ -50,6 +52,6 @@ test("after a crash, the app's session takes a new turn, and the cut-off turn's 
 
 // C6: nothing closes an app turn's row the crash cut off: it stays open (no end, no outcome) for good.
 test("the cut-off app turn's row is closed", gap('C6'), () => {
-  const open = d.rows("SELECT id FROM contraption_turns WHERE ended_at IS NULL OR outcome IS NULL");
+  const open = d.rows('SELECT id FROM contraption_turns WHERE ended_at IS NULL OR outcome IS NULL');
   assert.equal(open.length, 0, `C6: ${open.length} app turn row(s) left open after the crash`);
 });

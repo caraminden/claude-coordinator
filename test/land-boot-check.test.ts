@@ -8,7 +8,11 @@ import { tools, git, until, pipe, land, subjects } from './land-recover-fixture.
 // Each ticket's phase in the deploy line (its 4th line, tools/deploy-queue.sh).
 const phases = (state: string) => {
   const q = join(state, 'queue');
-  return existsSync(q) ? readdirSync(q).filter((f) => /^\d+$/.test(f)).map((f) => readFileSync(join(q, f), 'utf8').split('\n')[3] ?? '') : [];
+  return existsSync(q)
+    ? readdirSync(q)
+        .filter((f) => /^\d+$/.test(f))
+        .map((f) => readFileSync(join(q, f), 'utf8').split('\n')[3] ?? '')
+    : [];
 };
 
 // F1: land.sh said "landed" (or "live now") and left before the restart's own check could fail.
@@ -167,7 +171,7 @@ test('while the boot check fails on every commit, the next ship holds its place 
   assert.equal(git(p.source, 'rev-parse', 'main'), p.base);
   assert.equal(git(p.live, 'rev-parse', 'HEAD'), p.base);
   assert.ok(p.lockFree(), 'a held ship lets go of the lock');
-  assert.equal(readFileSync(refusing, 'utf8'), left, 'the first refusal\'s time stays');
+  assert.equal(readFileSync(refusing, 'utf8'), left, "the first refusal's time stays");
 
   // The box is fixed: main's recheck passes, the held ship starts over from its rebase, and ships; the note goes.
   rmSync(broken);
@@ -186,7 +190,7 @@ test('while the boot check fails on every commit, the next ship holds its place 
   assert.doesNotMatch(after.stderr, /deploy has been refusing|boot check passes on/, 'with no note, a landing runs no boot check of its own');
 });
 
-test('a boot check that failed for one landing\'s own change does not stop the next', { timeout: 200_000 }, async (t) => {
+test("a boot check that failed for one landing's own change does not stop the next", { timeout: 200_000 }, async (t) => {
   const p = await pipe(t, 2);
   const mark = join(p.dir, 'test-runs');
   p.commit(p.wts[0], 'BOOT_BAD', 'fails the boot check\n');

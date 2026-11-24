@@ -21,8 +21,7 @@ export type Actor =
   | { kind: 'coordinator'; name: string; projectId: number; ticketId: number; setupPlan?: string };
 
 /** Whether a Taskmaster registers a name its approved setup plan lists: that plan was the person's review (#180). */
-const inSetupPlan = (actor: Actor, name: string) =>
-  actor.kind === 'coordinator' && !!actor.setupPlan && new RegExp(`(?<![\\w-])${name}(?![\\w-])`, 'i').test(actor.setupPlan);
+const inSetupPlan = (actor: Actor, name: string) => actor.kind === 'coordinator' && !!actor.setupPlan && new RegExp(`(?<![\\w-])${name}(?![\\w-])`, 'i').test(actor.setupPlan);
 
 export class PropertyError extends HttpError {
   constructor(message: string, status = 400) {
@@ -117,7 +116,11 @@ const KEY_NAME = /^[a-z][a-zA-Z0-9]{1,39}$/;
 const VALUE_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,59}$/;
 
 /** How a written value is compared: case, spaces and underscores don't count ("In Progress" = in-progress). */
-const norm = (s: string) => s.trim().toLowerCase().replace(/[\s_]+/g, '-');
+const norm = (s: string) =>
+  s
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-');
 /** Looser still, for near-duplicate checks: letters and digits only. */
 const loose = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -161,8 +164,7 @@ export class Registry {
 
   /** Fill an empty registry from the old docs, and give existing minions a stage once. */
   seed() {
-    const has = (scope: number | null) =>
-      this.db.prepare('SELECT 1 FROM property_keys WHERE scope IS ?').get(scope) !== undefined;
+    const has = (scope: number | null) => this.db.prepare('SELECT 1 FROM property_keys WHERE scope IS ?').get(scope) !== undefined;
     this.db.exec('BEGIN');
     try {
       // A global key added to the seed later (assigned, 2026-10-28) joins a registry that lacks it, once.
@@ -183,12 +185,8 @@ export class Registry {
 
   private insertSeed(scope: number | null, k: SeedKey) {
     const now = Date.now();
-    const r = this.db
-      .prepare('INSERT INTO property_keys (scope, key, label, description, multi, value_kind, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(scope, k.key, k.label, k.description, k.multi ? 1 : 0, k.value_kind, 'seed', now);
-    const insert = this.db.prepare(
-      'INSERT INTO property_values (key_id, value, label, description, aliases, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    );
+    const r = this.db.prepare('INSERT INTO property_keys (scope, key, label, description, multi, value_kind, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(scope, k.key, k.label, k.description, k.multi ? 1 : 0, k.value_kind, 'seed', now);
+    const insert = this.db.prepare('INSERT INTO property_values (key_id, value, label, description, aliases, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
     for (const v of k.values ?? []) insert.run(r.lastInsertRowid, v.value, v.label ?? '', v.description ?? '', JSON.stringify(v.aliases ?? []), 'seed', now);
   }
 
@@ -197,9 +195,7 @@ export class Registry {
     const tickets = this.db.prepare("SELECT id, status FROM tickets WHERE kind = 'ticket'").all() as { id: number; status: string }[];
     const stage = this.globalKey('stage');
     if (!stage) return;
-    const put = this.db.prepare(
-      "INSERT OR IGNORE INTO properties (target_type, target_id, key_id, value, set_by, set_at) VALUES ('minion', ?, ?, ?, 'migration', ?)",
-    );
+    const put = this.db.prepare("INSERT OR IGNORE INTO properties (target_type, target_id, key_id, value, set_by, set_at) VALUES ('minion', ?, ?, ?, 'migration', ?)");
     const now = Date.now();
     for (const t of tickets) {
       if (!this.valuesFor('minion', t.id, stage.id).length) put.run(t.id, stage.id, t.status === 'closed' ? 'done' : 'in-progress', now);
@@ -247,7 +243,10 @@ export class Registry {
     if (found && (!opts.activeOnly || found.status === 'active')) return found;
     if (found) throw new PropertyError(`${code(found.key)} is proposed and not approved yet, so it can't be set`);
     const near = keys.filter((k) => k.status === 'active' && nearDuplicate(k.key, name)).map((k) => code(k.key));
-    const known = keys.filter((k) => k.status === 'active').map((k) => code(k.key)).join(', ');
+    const known = keys
+      .filter((k) => k.status === 'active')
+      .map((k) => code(k.key))
+      .join(', ');
     throw new PropertyError(`There is no property ${code(name.trim())}${near.length ? `; did you mean ${near.join(' or ')}?` : '.'} Keys: ${known}.`);
   }
 
@@ -282,7 +281,10 @@ export class Registry {
   /** Inside a read scope (src/read-scope.ts): forTarget of every one of `ids` in one read. */
   warmTargets(type: TargetType, ids: number[]) {
     if (!inScope(this.db) || !ids.length) return;
-    warm(this.db, [...this.forTargets(type, ids)].map(([id, r]) => [`props:${type}:${id}`, r]));
+    warm(
+      this.db,
+      [...this.forTargets(type, ids)].map(([id, r]) => [`props:${type}:${id}`, r]),
+    );
   }
 
   /** forTarget for many targets in one query (a minions list, #1029): each id's record, {} when it has none. */
@@ -323,9 +325,11 @@ export class Registry {
   }
 
   private personNameRead(raw: string): string | null {
-    const row = this.db.prepare(`SELECT u.name FROM users u LEFT JOIN credentials c ON c.user_id = u.id AND c.kind = 'github'
+    const row = this.db
+      .prepare(`SELECT u.name FROM users u LEFT JOIN credentials c ON c.user_id = u.id AND c.kind = 'github'
       WHERE lower(u.name) = lower(?1) OR lower(u.login) = lower(?1) OR lower(json_extract(c.meta, '$.login')) = lower(?1)
-      ORDER BY lower(u.name) = lower(?1) DESC, lower(u.login) = lower(?1) DESC LIMIT 1`).get(raw.trim()) as { name: string } | undefined;
+      ORDER BY lower(u.name) = lower(?1) DESC, lower(u.login) = lower(?1) DESC LIMIT 1`)
+      .get(raw.trim()) as { name: string } | undefined;
     return row?.name ?? null;
   }
 
@@ -344,9 +348,7 @@ export class Registry {
       const person = this.personName(raw);
       if (person) return person;
       // One person, one spelling: "josh" becomes the "Josh" already in use on any person key, this one first.
-      const seen = this.db
-        .prepare("SELECT p.value FROM properties p JOIN property_keys k ON k.id = p.key_id WHERE k.value_kind = 'user' AND lower(p.value) = lower(?) ORDER BY p.key_id = ? DESC LIMIT 1")
-        .get(raw.trim(), k.id) as { value: string } | undefined;
+      const seen = this.db.prepare("SELECT p.value FROM properties p JOIN property_keys k ON k.id = p.key_id WHERE k.value_kind = 'user' AND lower(p.value) = lower(?) ORDER BY p.key_id = ? DESC LIMIT 1").get(raw.trim(), k.id) as { value: string } | undefined;
       return seen?.value ?? raw.trim();
     }
     const values = this.valuesOf(k.id);
@@ -356,10 +358,7 @@ export class Registry {
     if (hit) throw new PropertyError(`${code(`${k.key}: ${hit.value}`)} is ${hit.status === 'proposed' ? 'proposed and not approved yet' : 'archived'}, so it can't be set`);
     const active = values.filter((v) => v.status === 'active');
     const near = active.filter((v) => [v.value, ...aliasesOf(v)].some((s) => nearDuplicate(s, raw))).map((v) => code(v.value));
-    throw new PropertyError(
-      `${code(raw.trim())} isn't one of the ${code(k.key)} values${near.length ? `; did you mean ${near.join(' or ')}?` : '.'} Values: ${active.map((v) => code(v.value)).join(', ')}.` +
-        ' If none fits, ask the Taskmaster to add a value instead of picking a near-duplicate.',
-    );
+    throw new PropertyError(`${code(raw.trim())} isn't one of the ${code(k.key)} values${near.length ? `; did you mean ${near.join(' or ')}?` : '.'} Values: ${active.map((v) => code(v.value)).join(', ')}.` + ' If none fits, ask the Taskmaster to add a value instead of picking a near-duplicate.');
   }
 
   private plan(projectId: number, input: unknown): { k: KeyRow; values: string[] }[] {
@@ -487,10 +486,7 @@ export class Registry {
     if (!KEY_NAME.test(name)) throw new PropertyError('key must be camelCase letters and digits, 2 to 40 characters, e.g. playerClass');
     const scope = input.global ? null : projectId;
     if (!this.mayEdit(scope, actor)) {
-      throw new PropertyError(
-        actor.kind === 'thread' ? 'Minions ask the Taskmaster to add keys' : scope === null ? "Only the Citadel scheme's Taskmaster or a person can add global keys" : 'Outside this scheme',
-        403,
-      );
+      throw new PropertyError(actor.kind === 'thread' ? 'Minions ask the Taskmaster to add keys' : scope === null ? "Only the Citadel scheme's Taskmaster or a person can add global keys" : 'Outside this scheme', 403);
     }
     const kind = input.value_kind ?? 'enum';
     if (!VALUE_KINDS.includes(kind)) throw new PropertyError(`value_kind must be one of: ${VALUE_KINDS.join(', ')}`);
@@ -511,13 +507,11 @@ export class Registry {
       }
     }
     this.checkValues(values, []);
-    const status = (actor.kind === 'person' || inSetupPlan(actor, name)) ? 'active' : 'proposed';
+    const status = actor.kind === 'person' || inSetupPlan(actor, name) ? 'active' : 'proposed';
     const now = Date.now();
     this.db.exec('BEGIN');
     try {
-      const r = this.db
-        .prepare('INSERT INTO property_keys (scope, key, label, description, multi, value_kind, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(scope, name, label, description || input.reason || '', input.multi ? 1 : 0, kind, status, actor.name, now);
+      const r = this.db.prepare('INSERT INTO property_keys (scope, key, label, description, multi, value_kind, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(scope, name, label, description || input.reason || '', input.multi ? 1 : 0, kind, status, actor.name, now);
       for (const v of values) this.insertValue(Number(r.lastInsertRowid), v, 'active', actor);
       this.db.exec('COMMIT');
     } catch (err) {
@@ -588,9 +582,7 @@ export class Registry {
           continue;
         }
         const aliases = [...new Set([...aliasesOf(own), ...(v.aliases ?? []).map((a) => a.trim())])];
-        this.db
-          .prepare("UPDATE property_values SET aliases = ?, label = ?, description = ?, status = CASE status WHEN 'archived' THEN 'active' ELSE status END WHERE id = ?")
-          .run(JSON.stringify(aliases), v.label?.trim().slice(0, 60) ?? own.label, v.description?.trim().slice(0, 1000) ?? own.description, own.id);
+        this.db.prepare("UPDATE property_values SET aliases = ?, label = ?, description = ?, status = CASE status WHEN 'archived' THEN 'active' ELSE status END WHERE id = ?").run(JSON.stringify(aliases), v.label?.trim().slice(0, 60) ?? own.label, v.description?.trim().slice(0, 1000) ?? own.description, own.id);
         updated.push(own.value);
       }
       this.db.exec('COMMIT');
@@ -661,7 +653,7 @@ export class Registry {
         this.db.prepare('UPDATE property_values SET aliases = ? WHERE id = ?').run(JSON.stringify(aliases), into.id);
         this.db.prepare('DELETE FROM property_values WHERE id = ?').run(v.id);
         // The scheme's promoted list group (#253) follows the value it named.
-        const scheme = k.scope === null ? null : this.db.prepare('SELECT list_groups FROM projects WHERE id = ?').get(k.scope) as { list_groups: string } | undefined;
+        const scheme = k.scope === null ? null : (this.db.prepare('SELECT list_groups FROM projects WHERE id = ?').get(k.scope) as { list_groups: string } | undefined);
         if (scheme) {
           const groups: string[] = JSON.parse(scheme.list_groups);
           const moved = [...new Set(groups.map((g) => (g === `${k.key}: ${v.value}` ? `${k.key}: ${into.value}` : g)))];

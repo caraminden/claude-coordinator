@@ -36,9 +36,12 @@ writeFileSync(join(sdk, 'platform-tools', 'adb'), adb);
 chmodSync(join(sdk, 'platform-tools', 'adb'), 0o755);
 mkdirSync(join(sdk, 'emulator'));
 // The clean snapshot's boot (-wipe-data, #943) keeps its own files, so emu.pid is always the phone turns use.
-writeFileSync(join(sdk, 'emulator', 'emulator'), `#!/bin/sh
+writeFileSync(
+  join(sdk, 'emulator', 'emulator'),
+  `#!/bin/sh
 case "$*" in *-wipe-data*) echo "$*" >'${sdk}/emu.make.args'; echo $$ >'${sdk}/emu.make.pid'; echo 'INFO | Boot completed in 1 ms'; exec sleep 60 ;; esac
-echo "$*" >'${sdk}/emu.args'\necho $$ >'${sdk}/emu.pid'\nexec sleep 60\n`);
+echo "$*" >'${sdk}/emu.args'\necho $$ >'${sdk}/emu.pid'\nexec sleep 60\n`,
+);
 chmodSync(join(sdk, 'emulator', 'emulator'), 0o755);
 // The helper only checks that something listens where the adb server would.
 const server = createServer((s) => s.end());
@@ -46,9 +49,17 @@ let env: NodeJS.ProcessEnv;
 before(async () => {
   await tmp.serve(server);
   // Port 1 for the starter: nothing listens there, and the real one on this box would start the real emulator.
-  env = { ...process.env, ANDROID_HOME: sdk, ANDROID_ADB_SERVER_PORT: String((server.address() as AddressInfo).port), CITADEL_HEAVY_DIR: join(root, 'locks'), CITADEL_ANDROID_STARTER: '1',
+  env = {
+    ...process.env,
+    ANDROID_HOME: sdk,
+    ANDROID_ADB_SERVER_PORT: String((server.address() as AddressInfo).port),
+    CITADEL_HEAVY_DIR: join(root, 'locks'),
+    CITADEL_ANDROID_STARTER: '1',
     // No real AVD, and nothing on port 1 to save a clean snapshot: serve's attempt fails at once and it boots anyway.
-    ANDROID_AVD_HOME: join(root, 'avd'), CITADEL_ANDROID_CLEAN_PORT: '1', CITADEL_ANDROID_SETTLE: '0' };
+    ANDROID_AVD_HOME: join(root, 'avd'),
+    CITADEL_ANDROID_CLEAN_PORT: '1',
+    CITADEL_ANDROID_SETTLE: '0',
+  };
 });
 after(() => tmp.teardown());
 const run = (who: string, ...args: string[]) => spawnSync(helper, args, { env: { ...env, CITADEL_HEAVY_WHO: who }, encoding: 'utf8' });
@@ -121,7 +132,14 @@ function serve(locks: string) {
   child.stdout!.on('data', (d) => (out += d));
   return { child, out: () => out, done: new Promise<number | null>((r) => child.on('close', r)) };
 }
-const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 async function emulatorPid() {
   // The pid, not the file: the stub's `>` makes it empty a moment before it writes, and Number('') is 0, the whole group (#1586).
   const read = () => (existsSync(join(sdk, 'emu.pid')) ? Number(readFileSync(join(sdk, 'emu.pid'), 'utf8')) : 0);
@@ -189,8 +207,10 @@ async function stubConsole(onLine: (line: string) => void = () => {}) {
         buf = buf.slice(i + 2);
         got.push(line);
         if (line === 'quit') s.end();
-        else if (line === 'auth sekrit') { authed = true; s.write('OK\r\n'); }
-        else s.write(authed ? 'OK\r\n' : 'KO: unknown command\r\n');
+        else if (line === 'auth sekrit') {
+          authed = true;
+          s.write('OK\r\n');
+        } else s.write(authed ? 'OK\r\n' : 'KO: unknown command\r\n');
         if (authed) onLine(line);
       }
     });
@@ -202,7 +222,16 @@ async function stubConsole(onLine: (line: string) => void = () => {}) {
 // Console steps (#442): the turn's side checks its words, serve checks them again and talks to the console.
 test('sms refuses a bad sender or text without touching the emulator', () => {
   rmSync(calls, { force: true });
-  for (const [from, text] of [['abc', 'hi'], ['+', 'hi'], ['12;reboot', 'hi'], ['1'.repeat(21), 'hi'], ['555', ''], ['555', 'hi\r\nkill'], ['555', 'tab\there'], ['555', 'x'.repeat(501)]]) {
+  for (const [from, text] of [
+    ['abc', 'hi'],
+    ['+', 'hi'],
+    ['12;reboot', 'hi'],
+    ['1'.repeat(21), 'hi'],
+    ['555', ''],
+    ['555', 'hi\r\nkill'],
+    ['555', 'tab\there'],
+    ['555', 'x'.repeat(501)],
+  ]) {
     const r = run('a', 'sms', from, text);
     assert.equal(r.status, 2, `${from} ${JSON.stringify(text)}: ${r.stderr}`);
   }
@@ -244,7 +273,13 @@ test('sms goes through serve to the console with the host token, and serve refus
     // without repeating it, and a link planted where the answer goes is replaced, not written through.
     const answer = async (id: string) => {
       // A planted link already "exists": wait for the plain file serve leaves in its place.
-      const isAnswer = () => { try { return lstatSync(join(locks, `android.out.${id}`)).isFile(); } catch { return false; } };
+      const isAnswer = () => {
+        try {
+          return lstatSync(join(locks, `android.out.${id}`)).isFile();
+        } catch {
+          return false;
+        }
+      };
       await until('the answer', async () => isAnswer(), 5000);
       return readFileSync(join(locks, `android.out.${id}`), 'utf8');
     };
@@ -295,7 +330,9 @@ test('up says the desktop is not connected when no starter answers, at once or a
 
   // A tunnel whose desktop went to sleep: the port still takes connections and never answers.
   const open = new Set<import('node:net').Socket>();
-  const asleep = createServer((s) => { open.add(s); });
+  const asleep = createServer((s) => {
+    open.add(s);
+  });
   await tmp.serve(asleep);
   try {
     const t1 = Date.now();
@@ -312,7 +349,10 @@ test('up says the desktop is not connected when no starter answers, at once or a
 test('shot of a stopped far emulator says to run up and does not start it', async () => {
   rmSync(join(sdk, 'far-up'), { force: true });
   let asked = 0;
-  const starter = createServer((s) => { asked++; s.end('asked\n'); });
+  const starter = createServer((s) => {
+    asked++;
+    s.end('asked\n');
+  });
   await tmp.serve(starter);
   try {
     const r = await runAsync(['shot', join(root, 'far.png')], { CITADEL_HEAVY_DIR: join(root, 'far-shot'), ADB_STUB_FAR: '1', CITADEL_ANDROID_STARTER: String((starter.address() as AddressInfo).port) });
@@ -337,7 +377,10 @@ test('up starts the far emulator through the starter and points the adb server h
   // emulator already up and rightly skipped the nudge, so the server heard nothing (#1420).
   let told = '';
   const adbServer = createServer((s) => {
-    s.on('data', (d) => { told += d; if (/host:emulator:5555/.test(told)) writeFileSync(join(sdk, 'far-up'), ''); });
+    s.on('data', (d) => {
+      told += d;
+      if (/host:emulator:5555/.test(told)) writeFileSync(join(sdk, 'far-up'), '');
+    });
     s.on('error', () => {});
     setTimeout(() => s.end('OKAY'), 20);
   });
@@ -345,8 +388,10 @@ test('up starts the far emulator through the starter and points the adb server h
   await tmp.serve(adbServer);
   try {
     const r = await runAsync(['up'], {
-      CITADEL_HEAVY_DIR: join(root, 'far-up-locks'), ADB_STUB_FAR: '1',
-      CITADEL_ANDROID_STARTER: String((starter.address() as AddressInfo).port), ANDROID_ADB_SERVER_PORT: String((adbServer.address() as AddressInfo).port),
+      CITADEL_HEAVY_DIR: join(root, 'far-up-locks'),
+      ADB_STUB_FAR: '1',
+      CITADEL_ANDROID_STARTER: String((starter.address() as AddressInfo).port),
+      ANDROID_ADB_SERVER_PORT: String((adbServer.address() as AddressInfo).port),
     });
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stderr, /asked the desktop to start/);
@@ -366,7 +411,9 @@ test('on the desktop serve starts no adb server and stops the idle emulator thro
   const home = join(root, 'home-desktop');
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, '.emulator_console_auth_token'), 'sekrit\n');
-  const { got, consoleServer, port } = await stubConsole((line) => { if (line === 'kill') process.kill(Number(readFileSync(join(sdk, 'emu.pid'), 'utf8'))); });
+  const { got, consoleServer, port } = await stubConsole((line) => {
+    if (line === 'kill') process.kill(Number(readFileSync(join(sdk, 'emu.pid'), 'utf8')));
+  });
   for (const f of [join(sdk, 'emu.pid'), join(sdk, 'killed'), calls]) rmSync(f, { force: true });
   const s = tmp.spawn(helper, ['serve'], { env: { ...env, HOME: home, CITADEL_HEAVY_DIR: join(root, 'serve-desktop'), CITADEL_ANDROID_IDLE: '1', CITADEL_ANDROID_ROLE: 'desktop', CITADEL_ANDROID_CONSOLE_PORT: port }, stdio: 'ignore' });
   const done = new Promise<number | null>((r) => s.on('close', r));
@@ -390,7 +437,9 @@ test('serve makes the clean snapshot once, on a port turns cannot reach, then bo
   // The AVD's folder is there before serve runs, as a real one is (config.ini).
   mkdirSync(join(avd, 'citadel.avd'), { recursive: true });
   writeFileSync(join(home, '.emulator_console_auth_token'), 'sekrit\n');
-  const killer = (f: string) => (line: string) => { if (line === 'kill') process.kill(Number(readFileSync(join(sdk, f), 'utf8'))); };
+  const killer = (f: string) => (line: string) => {
+    if (line === 'kill') process.kill(Number(readFileSync(join(sdk, f), 'utf8')));
+  };
   const maker = await stubConsole((line) => {
     if (line === 'avd snapshot save clean') mkdirSync(join(avd, 'citadel.avd', 'snapshots', 'clean'), { recursive: true });
     killer('emu.make.pid')(line);
@@ -479,7 +528,9 @@ test('a lease keeps the screen from another caller until it is released, then th
   let err = '';
   b.stderr!.on('data', (d) => (err += d));
   const done = new Promise<number | null>((r) => b.on('close', r));
-  await until("B to say who has it", async () => /A #1 \(josh\) has it leased for "checking the login page"/.test(err), 5000).catch((e) => { throw new Error(`${e.message}: ${err}`); });
+  await until('B to say who has it', async () => /A #1 \(josh\) has it leased for "checking the login page"/.test(err), 5000).catch((e) => {
+    throw new Error(`${e.message}: ${err}`);
+  });
   // Someone else's release does nothing; the holder's frees it.
   runIn(locks, 'B', 'release');
   assert.match(runIn(locks, 'C', 'status').stderr, /leased by A/);
@@ -510,13 +561,21 @@ test('an interrupted mic step ends its lease renewer and its play, and lets go o
   // Nothing on the stub opens the mic, so play waits for a recording until it is stopped.
   const m = tmp.spawn(helper, ['mic', wav], { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: 'M', CITADEL_ANDROID_RENEW: '1' }, stdio: ['ignore', 'ignore', 'pipe'] });
   const done = new Promise<number | null>((r) => m.on('exit', r));
-  const left = () => spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' }).stdout.split('\n').filter((l) => l.includes(wav) && !l.includes(' ps '));
+  const left = () =>
+    spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' })
+      .stdout.split('\n')
+      .filter((l) => l.includes(wav) && !l.includes(' ps '));
   // The play itself, not just three processes naming the wav: bash's own subshells in take_screen and up name it too,
   // and a signal there never reached the play (#1586). The renewer is forked before the play, so it runs by then.
-  await until('the play and its renewer to run', async () => { const l = left(); return l.length >= 3 && l.some((x) => x.includes('citadel-android-mic.ts play')); });
+  await until('the play and its renewer to run', async () => {
+    const l = left();
+    return l.length >= 3 && l.some((x) => x.includes('citadel-android-mic.ts play'));
+  });
   m.kill('SIGTERM');
   await done;
-  await until('the renewer and the play to end', async () => left().length === 0).catch(() => { throw new Error(`still running:\n${left().join('\n')}`); });
+  await until('the renewer and the play to end', async () => left().length === 0).catch(() => {
+    throw new Error(`still running:\n${left().join('\n')}`);
+  });
   assert.equal(readFileSync(join(locks, 'android.who'), 'utf8'), '', 'the screen is free at once');
   // The renewer (a fork naming the wav) is gone, so nothing takes it back: another caller's step goes straight through.
   assert.equal(runIn(locks, 'N', 'shot', join(root, 'mic-1.png')).status, 0);
@@ -529,8 +588,13 @@ test('a mic step interrupted while it brings the emulator up lets go of the scre
   // A starter that never answers holds the step inside up(), the window where SIGTERM used to find no trap and
   // leave the screen held for the lease's two minutes (the CI flake: bash's own subshells there named the wav).
   const open: import('node:net').Socket[] = [];
-  let asked = false, gone = false;
-  const starter = createServer((s) => { asked = true; open.push(s); s.on('close', () => (gone = true)).resume(); });
+  let asked = false,
+    gone = false;
+  const starter = createServer((s) => {
+    asked = true;
+    open.push(s);
+    s.on('close', () => (gone = true)).resume();
+  });
   await tmp.serve(starter);
   try {
     const m = tmp.spawn(helper, ['mic', wav], { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: 'M', CITADEL_ANDROID_STARTER: String((starter.address() as AddressInfo).port) }, stdio: 'ignore' });

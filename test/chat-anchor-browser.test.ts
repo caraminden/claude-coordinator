@@ -76,13 +76,16 @@ const shot = async (page: any, name: string) => {
 };
 const frame = (page: any) => page.eval(`new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)))`);
 
-for (const [name, size] of [['desktop', { width: 1280, height: 800 }], ['phone', { width: 390, height: 780 }]] as const) {
+for (const [name, size] of [
+  ['desktop', { width: 1280, height: 800 }],
+  ['phone', { width: 390, height: 780 }],
+] as const) {
   test(`${name}: a long reply at the bottom lands with its first line under the thread bar; a short one shows in full`, { skip }, async () => {
     const page = await browser.page(`${base}#/p/1/t/7`, size);
     await waitFor(page, 'the chat to draw', `document.getElementById('log').textContent.includes('History line 29')`);
     await wheel(page);
     await wheel(page);
-  await page.eval(`scrollTo(0, document.documentElement.scrollHeight)`);
+    await page.eval(`scrollTo(0, document.documentElement.scrollHeight)`);
     await frame(page);
     await page.eval(`push(${JSON.stringify('LONGREPLY\n\n' + LONG)})`);
     await frame(page);

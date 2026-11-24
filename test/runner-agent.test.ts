@@ -28,10 +28,11 @@ test('it accepts add, list and remove with exactly their fields, and refuses eve
     { id: ID, op: 'list', scheme: 1 },
     { id: 'x', op: 'list' },
     null,
-  ]) assert.throws(() => checkJob(bad), undefined, JSON.stringify(bad));
+  ])
+    assert.throws(() => checkJob(bad), undefined, JSON.stringify(bad));
 });
 
-test('each op runs its own script from the agent\'s folder in Windows PowerShell, with numbers for arguments', () => {
+test("each op runs its own script from the agent's folder in Windows PowerShell, with numbers for arguments", () => {
   const dir = 'C:\\ProgramData\\citadel-runner-agent';
   const ps = 'C:\\Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
   const add = jobCommand({ op: 'add', scheme: 3, count: 2 }, dir, 'http://perigee:8574', 'C:\\Windows', 'windows');
@@ -40,12 +41,16 @@ test('each op runs its own script from the agent\'s folder in Windows PowerShell
   assert.match(add.args[5], /add-runner\.ps1$/);
   assert.deepEqual(add.args.slice(6), ['-Scheme', '3', '-CitadelUrl', 'http://perigee:8574', '-Count', '2']);
   assert.match(jobCommand({ op: 'remove', scheme: 3 }, dir, 'u', 'C:\\Windows', 'windows').args[5], /remove-runner\.ps1$/);
-  assert.deepEqual(jobCommand({ op: 'list' }, dir, 'u', 'C:\\Windows', 'windows').args.slice(5).map((a: string) => a.replace(/.*[\\/]/, '')), ['list-runners.ps1']);
+  assert.deepEqual(
+    jobCommand({ op: 'list' }, dir, 'u', 'C:\\Windows', 'windows')
+      .args.slice(5)
+      .map((a: string) => a.replace(/.*[\\/]/, '')),
+    ['list-runners.ps1'],
+  );
 });
 
 test('the Linux agent (#510) runs the bash twin of each script from its folder, with the same checked numbers as arguments', () => {
-  assert.deepEqual(jobCommand({ op: 'add', scheme: 3, count: 2 }, '/opt/citadel-runner-agent', 'http://perigee:8574', undefined, 'linux'),
-    { command: '/bin/bash', args: ['/opt/citadel-runner-agent/add-runner.sh', '3', 'http://perigee:8574', '2'] });
+  assert.deepEqual(jobCommand({ op: 'add', scheme: 3, count: 2 }, '/opt/citadel-runner-agent', 'http://perigee:8574', undefined, 'linux'), { command: '/bin/bash', args: ['/opt/citadel-runner-agent/add-runner.sh', '3', 'http://perigee:8574', '2'] });
   assert.deepEqual(jobCommand({ op: 'remove', scheme: 3 }, '/a', 'u', undefined, 'linux').args, ['/a/remove-runner.sh', '3', 'u']);
   assert.deepEqual(jobCommand({ op: 'list' }, '/a', 'u', undefined, 'linux').args, ['/a/list-runners.sh']);
 });
@@ -61,7 +66,9 @@ test('one job at a time: the script gets the machine token in its environment, a
   let release!: () => void;
   const run = (cmd: any, env: any) => {
     calls.push({ cmd, token: env.CC_MACHINE_TOKEN });
-    return new Promise((r) => { release = () => r({ code: 0, output: 'Done. --token AABCDEFGHIJKLMNOPQRSTUVWXYZ12' }); });
+    return new Promise((r) => {
+      release = () => r({ code: 0, output: 'Done. --token AABCDEFGHIJKLMNOPQRSTUVWXYZ12' });
+    });
   };
   const jobs = new JobRunner({ dir: '/agent', appUrl: 'http://citadel', token: 'ccm_1_x', run });
   const first = jobs.handle({ id: ID, op: 'add', scheme: 2, count: 1 });
@@ -80,7 +87,7 @@ test('one job at a time: the script gets the machine token in its environment, a
   assert.deepEqual(failed, { id: ID, ok: false, output: 'add-runner: Citadel refused' });
 });
 
-test('a script\'s output is collected, and one that runs too long is stopped', async () => {
+test("a script's output is collected, and one that runs too long is stopped", async () => {
   const ok = await runCommand({ command: process.execPath, args: ['-e', 'console.log("out"); console.error("err"); process.exit(3)'] }, process.env);
   assert.equal(ok.code, 3);
   assert.match(ok.output, /out/);
@@ -93,7 +100,7 @@ test('a script\'s output is collected, and one that runs too long is stopped', a
   assert.match(missing.output, /could not start/);
 });
 
-test('end to end: the agent connects as a runner agent, a member\'s list runs its script, and Citadel serves the install files', async () => {
+test("end to end: the agent connects as a runner agent, a member's list runs its script, and Citadel serves the install files", async () => {
   const srv = await bootServer();
   const agentFile = join(import.meta.dirname, '..', 'public', 'runner-agent.mjs');
   let agent: ReturnType<typeof spawn> | undefined;
@@ -102,7 +109,17 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     const ps = join(srv.root, 'win', 'System32', 'WindowsPowerShell', 'v1.0');
     mkdirSync(ps, { recursive: true });
     // For sample-load.ps1 it prints a line like the real one's: a runner with a child, two threads waiting, Cara at the PC.
-    const line = JSON.stringify({ procs: [[10, 1, 'C:\\actions-runner-vault\\bin\\Runner.Listener.exe', 1, 1000], [11, 10, 'C:\\cargo\\rustc.exe', 5, 2000]], queue: 2, quser: [' USERNAME SESSIONNAME ID STATE IDLE TIME LOGON TIME', '>cara console 1 Active 3 11/10/2026 8:01 AM'], hv: null, temp: null, restarts: ['2026-10-30T13:34:00.0000000Z'] });
+    const line = JSON.stringify({
+      procs: [
+        [10, 1, 'C:\\actions-runner-vault\\bin\\Runner.Listener.exe', 1, 1000],
+        [11, 10, 'C:\\cargo\\rustc.exe', 5, 2000],
+      ],
+      queue: 2,
+      quser: [' USERNAME SESSIONNAME ID STATE IDLE TIME LOGON TIME', '>cara console 1 Active 3 11/10/2026 8:01 AM'],
+      hv: null,
+      temp: null,
+      restarts: ['2026-10-30T13:34:00.0000000Z'],
+    });
     writeFileSync(join(srv.root, 'sample.json'), line);
     writeFileSync(join(ps, 'powershell.exe'), `#!/bin/sh\ncase "$*" in *sample-load.ps1*) cat '${join(srv.root, 'sample.json')}'; exit 0;; *keep-runners.ps1*) echo "holding: $*"; exit 0;; esac\necho "fake ps: $*"\necho "token was $CC_MACHINE_TOKEN"\n`);
     chmodSync(join(ps, 'powershell.exe'), 0o755);
@@ -150,8 +167,7 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
     const laptop = await srv.call('/api/machines', { name: 'a-laptop' });
     assert.equal((await post(laptop.data.token, { os: 'windows', host: 'x', cores: 1, cpu: 5, mem_total: 1, mem_free: 1, runners: [] })).status, 403);
 
-    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'sample-load.ps1', 'keep-wsl-up.ps1', 'keep-runners.ps1',
-      'install-runner-agent.sh', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh']) {
+    for (const name of ['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'sample-load.ps1', 'keep-wsl-up.ps1', 'keep-runners.ps1', 'install-runner-agent.sh', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh']) {
       assert.equal((await fetch(`${srv.base}/ci-runner/${name}`)).status, 200, name);
     }
     assert.match(await (await fetch(`${srv.base}/runner-agent.mjs`)).text(), /Citadel's CI runner agent/);
@@ -166,7 +182,7 @@ test('end to end: the agent connects as a runner agent, a member\'s list runs it
   }
 });
 
-test('who is at the PC, from quser: the least idle active session, nobody, or can\'t tell', () => {
+test("who is at the PC, from quser: the least idle active session, nobody, or can't tell", () => {
   const head = ' USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME';
   assert.equal(personIdle([head, '>cara                  console             1  Active      none   11/10/2026 8:01 AM']), 0);
   assert.equal(personIdle([head, '>cara                  console             1  Active         .   11/10/2026 8:01 AM']), 0);
@@ -179,7 +195,7 @@ test('who is at the PC, from quser: the least idle active session, nobody, or ca
   assert.equal(personIdle([' BENUTZERNAME SITZUNGSNAME ID STATUS LEERLAUF ANMELDEZEIT', ' cara console eins Aktiv keine 10.11.2026 08:01']), null, 'lines it can\'t read are "can\'t tell", which Citadel reads as someone there');
 });
 
-test('a runner\'s use is its Runner.Listener and everything under it, as CPU since the last look', () => {
+test("a runner's use is its Runner.Listener and everything under it, as CPU since the last look", () => {
   const procs = [
     { pid: 10, ppid: 1, path: 'C:\\actions-runner-peek-auras-2\\bin\\Runner.Listener.exe', cpu: 3, mem: 100 },
     { pid: 11, ppid: 10, path: 'C:\\actions-runner-peek-auras-2\\bin\\Runner.Worker.exe', cpu: 4, mem: 200 },
@@ -189,31 +205,56 @@ test('a runner\'s use is its Runner.Listener and everything under it, as CPU sin
     { pid: 31, ppid: 30, path: null, cpu: 1, mem: 1 },
   ];
   const first = runnerUse(procs, null);
-  assert.deepEqual(first.runners, [{ dir: 'C:\\actions-runner-peek-auras-2', cpu: null, mem: 600 }, { dir: '/opt/actions-runner-claude-coordinator', cpu: null, mem: 10 }]);
+  assert.deepEqual(first.runners, [
+    { dir: 'C:\\actions-runner-peek-auras-2', cpu: null, mem: 600 },
+    { dir: '/opt/actions-runner-claude-coordinator', cpu: null, mem: 10 },
+  ]);
   // 30 seconds on: cargo used 20 more and a new rustc (pid 13) used 25 since it began.
   const next = [...procs.map((p) => (p.pid === 12 ? { ...p, cpu: 70 } : p)), { pid: 13, ppid: 12, path: 'rustc.exe', cpu: 25, mem: 400 }];
-  assert.deepEqual(runnerUse(next, first.seen).runners, [{ dir: 'C:\\actions-runner-peek-auras-2', cpu: 45, mem: 1000 }, { dir: '/opt/actions-runner-claude-coordinator', cpu: 0, mem: 10 }]);
+  assert.deepEqual(runnerUse(next, first.seen).runners, [
+    { dir: 'C:\\actions-runner-peek-auras-2', cpu: 45, mem: 1000 },
+    { dir: '/opt/actions-runner-claude-coordinator', cpu: 0, mem: 10 },
+  ]);
   // A pid used again that points a process at its own child doesn't loop.
   assert.equal(runnerUse([{ ...procs[0], ppid: 11 }, procs[1]], first.seen).runners.length, 1);
   // A Linux runner that updated itself runs from bin.<version> (bin is a symlink to it, and /proc/<pid>/exe resolves it).
   assert.deepEqual(runnerUse([{ pid: 40, ppid: 1, path: '/opt/actions-runner-twireader/bin.2.330.0/Runner.Listener', cpu: 1, mem: 7 }], null).runners, [{ dir: '/opt/actions-runner-twireader', cpu: null, mem: 7 }]);
 });
 
-test('CPU of a child that started and ended between two looks still counts, through its parent\'s reaped-children time', () => {
+test("CPU of a child that started and ended between two looks still counts, through its parent's reaped-children time", () => {
   const root = { pid: 10, ppid: 1, path: '/opt/actions-runner-peek/bin/Runner.Listener', cpu: 1, mem: 1 };
   const worker = { pid: 11, ppid: 10, path: '/opt/actions-runner-peek/bin/Runner.Worker', cpu: 2, mem: 1, reaped: 0 };
   const first = runnerUse([{ ...root, reaped: 0 }, worker], null);
   // rustc (pid 12) lived and died inside the 30 s, 40 CPU seconds, taken into the worker's reaped time; the worker used 1 more itself.
-  const next = runnerUse([{ ...root, reaped: 0 }, { ...worker, cpu: 3, reaped: 40 }], first.seen);
+  const next = runnerUse(
+    [
+      { ...root, reaped: 0 },
+      { ...worker, cpu: 3, reaped: 40 },
+    ],
+    first.seen,
+  );
   assert.equal(next.runners[0].cpu, 41);
   // A child seen at one look and gone at the next is not counted twice.
-  const seenKid = runnerUse([{ ...root, reaped: 0 }, { ...worker, cpu: 3, reaped: 0 }, { pid: 12, ppid: 11, path: 'rustc', cpu: 10, mem: 1 }], first.seen);
-  const gone = runnerUse([{ ...root, reaped: 0 }, { ...worker, cpu: 3, reaped: 25 }], seenKid.seen);
+  const seenKid = runnerUse(
+    [
+      { ...root, reaped: 0 },
+      { ...worker, cpu: 3, reaped: 0 },
+      { pid: 12, ppid: 11, path: 'rustc', cpu: 10, mem: 1 },
+    ],
+    first.seen,
+  );
+  const gone = runnerUse(
+    [
+      { ...root, reaped: 0 },
+      { ...worker, cpu: 3, reaped: 25 },
+    ],
+    seenKid.seen,
+  );
   assert.equal(seenKid.runners[0].cpu, 11);
   assert.equal(gone.runners[0].cpu, 15);
 });
 
-test('linuxProcs reads the time of a process\'s reaped children', () => {
+test("linuxProcs reads the time of a process's reaped children", () => {
   const dir = mkdtempSync(join(tmpdir(), 'proc-'));
   mkdirSync(join(dir, '77'));
   // fields after the command: state ppid ... utime(14) stime(15) cutime(16) cstime(17)
@@ -221,7 +262,7 @@ test('linuxProcs reads the time of a process\'s reaped children', () => {
   assert.equal(linuxProcs(dir)[0].reaped, 4);
 });
 
-test('a sample: nothing on the first look, then percentages of the whole PC, named from each runner\'s .runner file', async () => {
+test("a sample: nothing on the first look, then percentages of the whole PC, named from each runner's .runner file", async () => {
   let t = 1_000_000;
   let procs = [{ pid: 10, ppid: 1, path: '/opt/actions-runner-vault/bin/Runner.Listener', cpu: 2, mem: 100 }];
   let times = { idle: 1000, total: 2000 };
@@ -279,7 +320,10 @@ function linuxRunners() {
   let clock = 0;
   let working = ['/opt/r/actions-runner-claude-coordinator-2', '/opt/r/actions-runner-twireader'];
   const squeeze = new LinuxSqueeze({
-    units, cores: 16, identity: (dir: string) => who[dir], now: () => clock,
+    units,
+    cores: 16,
+    identity: (dir: string) => who[dir],
+    now: () => clock,
     procs: () => working.map((d, i) => ({ pid: i, ppid: 1, path: `${d}/bin/Runner.Worker`, cpu: 0, mem: 0 })),
     run: async ({ args }: { args: string[] }) => (calls.push(`${args[2]} ${args[3]}`), { code: 0, output: '' }),
   });
@@ -291,12 +335,7 @@ test('Linux: while a ship runs, every other runner unit gets a CPUQuota sharing 
   try {
     await squeeze.update(cleanShips([{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux-2' }]));
     // 16 cores: 30% is 480% of one core; one other unit (twireader's first) runs a job, so each other unit may use all of it.
-    assert.deepEqual(calls.sort(), [
-      'citadel-runner-caraminden-claude-coordinator-2.service CPUQuota=',
-      'citadel-runner-caraminden-claude-coordinator.service CPUQuota=480%',
-      'citadel-runner-caraminden-twireader-2.service CPUQuota=480%',
-      'citadel-runner-caraminden-twireader.service CPUQuota=480%',
-    ]);
+    assert.deepEqual(calls.sort(), ['citadel-runner-caraminden-claude-coordinator-2.service CPUQuota=', 'citadel-runner-caraminden-claude-coordinator.service CPUQuota=480%', 'citadel-runner-caraminden-twireader-2.service CPUQuota=480%', 'citadel-runner-caraminden-twireader.service CPUQuota=480%']);
   } finally {
     rmSync(units, { recursive: true, force: true });
   }
@@ -313,11 +352,17 @@ test('Linux: a quota changes only when its share does, and the squeeze lifts whe
     work(['/opt/r/actions-runner-claude-coordinator-2', '/opt/r/actions-runner-twireader', '/opt/r/actions-runner-twireader-2']);
     await squeeze.update(ship);
     assert.equal(calls.length, 3);
-    assert.ok(calls.every((c) => c.endsWith('CPUQuota=240%')), calls.join('; '));
+    assert.ok(
+      calls.every((c) => c.endsWith('CPUQuota=240%')),
+      calls.join('; '),
+    );
     calls.length = 0;
     await squeeze.update([]);
     assert.equal(calls.length, 3);
-    assert.ok(calls.every((c) => c.endsWith('CPUQuota=')), calls.join('; '));
+    assert.ok(
+      calls.every((c) => c.endsWith('CPUQuota=')),
+      calls.join('; '),
+    );
     await squeeze.update(ship);
     calls.length = 0;
     tick(SHIP_HOLD_MS - 1);
@@ -331,12 +376,15 @@ test('Linux: a quota changes only when its share does, and the squeeze lifts whe
   }
 });
 
-test('Linux: a new agent clears every unit\'s quota at its first look, as one before it may have died mid-ship', async () => {
+test("Linux: a new agent clears every unit's quota at its first look, as one before it may have died mid-ship", async () => {
   const { squeeze, calls, units } = linuxRunners();
   try {
     await squeeze.next();
     assert.equal(calls.length, 4);
-    assert.ok(calls.every((c) => c.endsWith('CPUQuota=')), calls.join('; '));
+    assert.ok(
+      calls.every((c) => c.endsWith('CPUQuota=')),
+      calls.join('; '),
+    );
     calls.length = 0;
     await squeeze.update([]);
     assert.deepEqual(calls, [], 'once cleared, an empty list sets nothing');

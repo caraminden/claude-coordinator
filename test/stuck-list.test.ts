@@ -66,7 +66,7 @@ test('a park whose own change is live is listed after an hour, first', () => {
   assert.match(got[0], new RegExp(`^#${shipped.number} Shipped and parked .*: sealed, but its own change is live`));
 });
 
-test("a park whose leader was dismissed without its work (a held chain: nothing wakes it) is listed with what it was on", () => {
+test('a park whose leader was dismissed without its work (a held chain: nothing wakes it) is listed with what it was on', () => {
   const w = world();
   w.minion('Follower', 2, { parked_for: "#4 Leader's work is live, and #4 Leader was dismissed without it, so only Unpark starts you", wakes_on: null }, { state: 'parked' });
   assert.match(lines(w)[0], /sealed on #4 Leader's work is live, and #4 Leader was dismissed without it/);
@@ -146,13 +146,16 @@ test("the block rides on a Taskmaster turn a person started, not on one a minion
   process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
   const prompts = join(root, 'prompts.jsonl');
   const fake = join(root, 'claude-fake');
-  writeFileSync(fake, `#!${process.execPath}
+  writeFileSync(
+    fake,
+    `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   require('node:fs').appendFileSync(${JSON.stringify(prompts)}, input + '\\n');
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+  );
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'stuck.db'));
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
@@ -162,7 +165,12 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   const old = store.createTicket({ project_id: p, title: 'Forgotten work', permission_mode: 'default', created_by: 'Cara' });
   store.updateTicket(old.id, { status: 'idle' });
   store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(Date.now() - 30 * H, old.id);
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const texts = () => jsonLines(prompts).map((l) => l.message.content.map((c: any) => c.text).join('\n'));
   runner.send(tm.id, `#${old.number} Forgotten work`, 'an update', [], { from: old.id });
   await until('the minion-started turn', () => texts().length === 1 && !runner.isRunning(tm.id));

@@ -92,7 +92,9 @@ async function observe(base: string, key: string, p: Probe) {
     return { status: res.status, stream: events.map((e) => (e.event === 'error' ? `error:${e.data.code}` : e.event)) };
   }
   let body: unknown = text;
-  try { body = JSON.parse(text); } catch {}
+  try {
+    body = JSON.parse(text);
+  } catch {}
   const keysOf = (v: any): unknown => (Array.isArray(v) ? v.slice(0, 1).map(keysOf) : v && typeof v === 'object' ? Object.keys(v).sort() : typeof v);
   return { status: res.status, keys: keysOf(body) };
 }
@@ -120,7 +122,9 @@ test('a scripted turn plays back the events the real stream has, in order', asyn
   });
   after(() => fake.close());
   const res = await fetch(`${fake.url}/api/contraptions/turns`, {
-    method: 'POST', headers: { Authorization: `Bearer ${fake.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ person: 1, session: 's', prompt: 'find fire' }),
+    method: 'POST',
+    headers: { Authorization: `Bearer ${fake.key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ person: 1, session: 's', prompt: 'find fire' }),
   });
   const events = [...(await res.text()).matchAll(/^event: (.+)$/gm)].map((m) => m[1]);
   assert.deepEqual(events, ['start', 'text', 'tool', 'tool_result', 'text', 'tool', 'text', 'tool_result', 'end']);
@@ -141,25 +145,38 @@ test('the identity header it signs verifies the way api.md says to', async () =>
 test('a relayed call reaches the other app signed for it, with from and fromTitle', async () => {
   const { createServer } = await import('node:http');
   let seen = '';
-  const other = createServer((req, res) => { seen = String(req.headers['x-citadel-identity']); res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}'); }).listen(0, '127.0.0.1');
+  const other = createServer((req, res) => {
+    seen = String(req.headers['x-citadel-identity']);
+    res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
+  }).listen(0, '127.0.0.1');
   await new Promise((r) => other.once('listening', r));
   const fake = await startFakeCitadel({
     app: 'mandate',
     apps: { ledger: { title: 'Ledger', relayPaths: ['/app-api/'], origin: () => `http://127.0.0.1:${(other.address() as import('node:net').AddressInfo).port}` } },
     people: [{ id: 1, login: 't', name: 'T', apps: ['mandate', 'ledger'] }],
   });
-  after(() => { other.close(); return fake.close(); });
+  after(() => {
+    other.close();
+    return fake.close();
+  });
   const call = (path: string) => fetch(`${fake.url}/api/contraptions/relay/ledger${path}`, { headers: { Authorization: `Bearer ${fake.key}`, 'X-Citadel-Person': '1' } });
   assert.equal((await call('/app-api/x')).status, 200);
   const claims = JSON.parse(Buffer.from(seen.split('.')[1], 'base64url').toString());
   assert.deepEqual([claims.app, claims.from, claims.sub], ['ledger', 'mandate', 1]);
   assert.equal((await call('/private')).status, 404); // not under relay_paths
 });
-test('a push reaches each enabled person\'s one phone, and the fake records it with the logins it skipped', async () => {
-  const fake = await startFakeCitadel({ app: 'peek-auras', people: [{ id: 1, login: 'tester', name: 'T' }, { id: 2, login: 'off', name: 'O', apps: [] }] });
+test("a push reaches each enabled person's one phone, and the fake records it with the logins it skipped", async () => {
+  const fake = await startFakeCitadel({
+    app: 'peek-auras',
+    people: [
+      { id: 1, login: 'tester', name: 'T' },
+      { id: 2, login: 'off', name: 'O', apps: [] },
+    ],
+  });
   after(() => fake.close());
   const res = await fetch(`${fake.url}/api/contraptions/push`, {
-    method: 'POST', headers: { Authorization: `Bearer ${fake.key}`, 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { Authorization: `Bearer ${fake.key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ to: ['tester', 'off', 'nobody', 'tester'], title: 'Hi', open: '/apps/peek-auras/x', data: { k: 'v' } }),
   });
   assert.deepEqual([res.status, await res.json()], [200, { devices: 1, sent: 1, dropped: 0, skipped: ['off', 'nobody'] }]);

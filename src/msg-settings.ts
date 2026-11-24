@@ -40,7 +40,8 @@ export function msgFromEnv(v: string | undefined): MsgSettings {
 export function cleanMsgSettings(body: Record<string, unknown>): Row {
   const out: Row = {};
   for (const k of Object.keys(MSG_COLUMNS) as (keyof MsgSettings)[]) {
-    const col = MSG_COLUMNS[k], v = body[col];
+    const col = MSG_COLUMNS[k],
+      v = body[col];
     if (v === undefined) continue;
     const [lo, hi] = MSG_BOUNDS[k];
     if (!Number.isInteger(v) || (v as number) < lo || (v as number) > hi) throw new Error(`${col} must be a whole number from ${lo} to ${hi}`);
@@ -54,8 +55,7 @@ export function cleanMsgSettings(body: Record<string, unknown>): Row {
  * a sealed receiver and the loop guard still hold it. Stored comma-separated in projects.msg_never_hold.
  */
 export const NEVER_HOLD_KINDS = [...NEEDS, 'note'] as const;
-export const neverHold = (project?: { msg_never_hold?: string } | null): Set<string> =>
-  new Set((project?.msg_never_hold ?? '').split(',').filter((k) => (NEVER_HOLD_KINDS as readonly string[]).includes(k)));
+export const neverHold = (project?: { msg_never_hold?: string } | null): Set<string> => new Set((project?.msg_never_hold ?? '').split(',').filter((k) => (NEVER_HOLD_KINDS as readonly string[]).includes(k)));
 /** A PATCH body's msg_never_hold: a list of kinds, refused if any isn't one; stored sorted and deduped. */
 export function cleanNeverHold(v: unknown): string {
   if (!Array.isArray(v) || v.some((k) => !(NEVER_HOLD_KINDS as readonly string[]).includes(k))) throw new Error(`msg_never_hold must be a list of ${NEVER_HOLD_KINDS.join(', ')}`);

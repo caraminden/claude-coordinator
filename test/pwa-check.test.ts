@@ -5,13 +5,17 @@ import { installCheck, installProblems } from '../src/pwa-check.ts';
 /** A contraption serving these paths and its two icons (others 404). */
 const app = (files: Record<string, string | object>) => async (path: string) => {
   files = { '/apps/toc/i192.png': 'png', '/apps/toc/i512.png': 'png', ...files };
-  return path in files ? new Response(typeof files[path] === 'string' ? files[path] as string : JSON.stringify(files[path])) : new Response('no', { status: 404 });
+  return path in files ? new Response(typeof files[path] === 'string' ? (files[path] as string) : JSON.stringify(files[path])) : new Response('no', { status: 404 });
 };
 const page = (link: string) => `<!doctype html><head><meta charset="utf-8">${link}<title>x</title></head>`;
 /** What Chrome needs besides identity: a name, an installable display, 192 and 512 px PNG icons. */
 const installable = {
-  name: 'ToC', display: 'standalone',
-  icons: [{ src: '/apps/toc/i192.png', sizes: '192x192', type: 'image/png' }, { src: '/apps/toc/i512.png', sizes: '512x512', type: 'image/png' }],
+  name: 'ToC',
+  display: 'standalone',
+  icons: [
+    { src: '/apps/toc/i192.png', sizes: '192x192', type: 'image/png' },
+    { src: '/apps/toc/i512.png', sizes: '512x512', type: 'image/png' },
+  ],
 };
 const good = { ...installable, id: '/apps/toc/', start_url: '/apps/toc/', scope: '/apps/toc/' };
 
@@ -51,7 +55,7 @@ test('no manifest link, a page or manifest that fails, or a manifest that is not
   assert.match((await installProblems('toc', app({ '/apps/toc/': page('<link rel="manifest" href="m.json">'), '/apps/toc/m.json': '{nope' })))[0], /isn't JSON/);
 });
 
-test("what else Chrome needs to offer Install: a name, an installable display, and 192 and 512 px PNG icons that load", async () => {
+test('what else Chrome needs to offer Install: a name, an installable display, and 192 and 512 px PNG icons that load', async () => {
   const withManifest = (m: object, files = {}) => installProblems('toc', app({ '/apps/toc/': page('<link rel="manifest" href="m.json">'), '/apps/toc/m.json': m, ...files }));
   // Theory of Crafting before its PNGs (2026-11-05): one SVG, sizes "any". Android offers no Install for it.
   const svgOnly = await withManifest({ ...good, icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml' }] });
@@ -74,7 +78,13 @@ test('the check also names the icon to register: its first PNG icon that loads, 
   // Only the manifest and image files under the app: not an icon that's a route, nor one served from elsewhere.
   assert.deepEqual((await check({ ...good, icons: [{ src: '/apps/toc/api/x', sizes: '192x192' }, { src: '/apps/other/i.png', sizes: '192x192' }, { src: 'i.svg' }] })).statics, ['/m.json', '/i.svg']);
   // The 192 doesn't load: the 512 serves, and the 192's problem stays.
-  const gone = await check({ ...good, icons: [{ src: 'gone.png', sizes: '192x192' }, { src: 'i512.png', sizes: '512x512' }] });
+  const gone = await check({
+    ...good,
+    icons: [
+      { src: 'gone.png', sizes: '192x192' },
+      { src: 'i512.png', sizes: '512x512' },
+    ],
+  });
   assert.equal(gone.icon, '/i512.png');
   assert.match(gone.problems.join('\n'), /192 px icon \/apps\/toc\/gone\.png answered 404/);
   // An SVG alone, an icon served elsewhere, or no manifest: nothing to register.

@@ -64,7 +64,11 @@ function call(port, method, path, headers = {}, body) {
   return new Promise((done, fail) => {
     const req = request({ host: '127.0.0.1', port, method, path, headers, timeout: 3000 }, (res) => {
       let text = '';
-      res.setEncoding('utf8').on('data', (c) => (text += c)).on('end', () => done({ status: res.statusCode ?? 0, text })).on('error', fail);
+      res
+        .setEncoding('utf8')
+        .on('data', (c) => (text += c))
+        .on('end', () => done({ status: res.statusCode ?? 0, text }))
+        .on('error', fail);
     });
     req.on('timeout', () => req.destroy(new Error('timed out'))).on('error', fail);
     req.end(body);
@@ -124,7 +128,9 @@ function start(spec) {
     const env = Object.entries(spec.env).flatMap(([k, v]) => ['-E', `${k}=${v}`]);
     spawn('systemd-run', [...spec.systemdRun, ...env, ...argv], { stdio: 'ignore' }).on('error', () => {});
   } else {
-    spawn(argv[0], argv.slice(1), { detached: true, stdio: 'ignore', env: spec.env }).on('error', () => {}).unref();
+    spawn(argv[0], argv.slice(1), { detached: true, stdio: 'ignore', env: spec.env })
+      .on('error', () => {})
+      .unref();
   }
 }
 

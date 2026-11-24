@@ -22,7 +22,11 @@ function scan(file: string): void {
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (!line.includes('"tool_use"')) continue;
     let ev: any;
-    try { ev = JSON.parse(line); } catch { continue; }
+    try {
+      ev = JSON.parse(line);
+    } catch {
+      continue;
+    }
     if (!(Date.parse(ev.timestamp) >= cutoff) || !Array.isArray(ev.message?.content)) continue;
     for (const c of ev.message.content) {
       if (c?.type !== 'tool_use' || seen.has(c.id)) continue;

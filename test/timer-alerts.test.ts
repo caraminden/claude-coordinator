@@ -29,8 +29,7 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   for (const u of [cara, josh, amy]) store.setContraptionUser(mandate.id, u.id, true, cara.id);
 
   let runs: TimerRun[] = [];
-  const run = (active: string, unit = 'citadel-app-mandate-backup.service', job = 'backup'): TimerRun =>
-    ({ app: store.getContraption('mandate')!, job, unit, active, result: active === 'failed' ? 'exit-code' : 'success', status: active === 'failed' ? '1' : '0', exitAt: AT });
+  const run = (active: string, unit = 'citadel-app-mandate-backup.service', job = 'backup'): TimerRun => ({ app: store.getContraption('mandate')!, job, unit, active, result: active === 'failed' ? 'exit-code' : 'success', status: active === 'failed' ? '1' : '0', exitAt: AT });
   const calls: { who: string; key: string; title: string | null; from: string; link?: string }[] = [];
   let down = '';
   let journalReads = 0;
@@ -50,14 +49,18 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   runs = [run('failed')];
   await alerts.tick(AT);
   assert.deepEqual(calls, [], 'no phone rings yet');
-  assert.deepEqual(wakes.map((x) => x.from), ['Mandate'], "the home scheme's Taskmaster is woken at once");
+  assert.deepEqual(
+    wakes.map((x) => x.from),
+    ['Mandate'],
+    "the home scheme's Taskmaster is woken at once",
+  );
   assert.match(wakes[0].text, /^Mandate's backup timer failed .*\nStart a fix minion for it now.*If it's still failing at Nov 11, \d\d:00 PST, people's phones ring\.$/s);
   await alerts.tick(AT + H - 300_000);
   assert.deepEqual([calls.length, wakes.length], [0, 1], 'woken once, and still quiet just short of the hour');
   await alerts.tick(AT + H);
   assert.deepEqual(calls.map((x) => x.who).sort(), ['Cara', 'Josh'], 'still failing an hour on: it rings');
   assert.equal(calls[0].from, 'Mandate', "from the app's home scheme");
-  assert.equal(calls[0].link, '/c/#/home/broken', 'the ring opens Home\'s Broken now list');
+  assert.equal(calls[0].link, '/c/#/home/broken', "the ring opens Home's Broken now list");
   assert.equal(calls[0].key, 'timer.citadel-app-mandate-backup');
   assert.match(calls[0].title!, /^Mandate's backup timer failed Nov 11, \d\d:00 PST \(exit 1\), and is still failing an hour on; its Taskmaster was asked to fix it\. Last lines: Copying data for 3 people \| copy failed for josh: EACCES token=\[hidden\] \| Backup failed: 1 of 3 files$/);
 
@@ -65,7 +68,11 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   calls.length = 0;
   await alerts.tick(AT + H + 300_000);
   await alerts.tick(AT + H + 600_000);
-  assert.deepEqual(calls.map((x) => x.who), ['Josh'], "still failing: only Josh, whose Mandate didn't answer, is tried again, once");
+  assert.deepEqual(
+    calls.map((x) => x.who),
+    ['Josh'],
+    "still failing: only Josh, whose Mandate didn't answer, is tried again, once",
+  );
   assert.equal(journalReads, 1, 'the words are fixed at the first failure: one item, not one per run');
 
   calls.length = 0;
@@ -76,11 +83,22 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   down = 'Cara';
   runs = [run('inactive')];
   await alerts.tick(AT + H + 1_200_000);
-  assert.deepEqual(calls.map((x) => [x.who, x.title]).sort(), [['Cara', null], ['Josh', null]], 'a good run clears it for everyone who has it');
+  assert.deepEqual(
+    calls.map((x) => [x.who, x.title]).sort(),
+    [
+      ['Cara', null],
+      ['Josh', null],
+    ],
+    'a good run clears it for everyone who has it',
+  );
   down = '';
   calls.length = 0;
   await alerts.tick(AT + H + 1_500_000);
-  assert.deepEqual(calls.map((x) => [x.who, x.title]), [['Cara', null]], "Cara's clear Mandate missed is tried again");
+  assert.deepEqual(
+    calls.map((x) => [x.who, x.title]),
+    [['Cara', null]],
+    "Cara's clear Mandate missed is tried again",
+  );
   calls.length = 0;
   await alerts.tick(AT + H + 1_800_000);
   assert.deepEqual(calls, [], 'then nothing is left');
@@ -92,14 +110,23 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   calls.length = 0;
   runs = [run('failed')];
   await alerts.tick(AT + 2 * H + 2_400_000);
-  assert.deepEqual(calls.map((x) => [x.key, x.title]).sort(), [['timer.citadel-app-mandate-prune', null], ['timer.citadel-app-mandate-prune', null]], 'a job that is gone is cleared');
+  assert.deepEqual(
+    calls.map((x) => [x.key, x.title]).sort(),
+    [
+      ['timer.citadel-app-mandate-prune', null],
+      ['timer.citadel-app-mandate-prune', null],
+    ],
+    'a job that is gone is cleared',
+  );
 
   calls.length = 0;
   runs = [run('unknown')];
   await alerts.tick(AT + 2 * H + 2_550_000);
   assert.deepEqual(calls, [], "a job whose state couldn't be read is neither raised nor cleared");
   calls.length = 0;
-  alerts['deps'].runs = async () => { throw new Error('systemd is not answering'); };
+  alerts['deps'].runs = async () => {
+    throw new Error('systemd is not answering');
+  };
   await assert.rejects(alerts.tick(AT + 2 * H + 2_700_000));
   assert.deepEqual(calls, [], 'a round that cannot read the runs clears nothing');
 });
@@ -134,16 +161,25 @@ test('a job fixed inside the hour rings no one; one failing 2-9 AM Pacific wakes
   assert.deepEqual([wakes, calls], [['Peek'], []], 'not woken in quiet hours, nor ringing an hour on');
   const nine = Date.UTC(2026, 10, 12, 17, 0); // 9 AM PST
   const row = () => timerBroken(store, (id) => id === scheme.id, nine + 60_000);
-  assert.deepEqual(row().map((r) => [r.scheme, r.what, r.ringing, r.ringsAt, r.who.label]),
-    [['Peek', "Peek's sync timer failed Nov 11, 11:00 PST (exit 1)", false, nine + H, 'Taskmaster looking']]);
-  assert.deepEqual(timerBroken(store, () => false, nine), [], "hidden from who can't see its scheme");
+  assert.deepEqual(
+    row().map((r) => [r.scheme, r.what, r.ringing, r.ringsAt, r.who.label]),
+    [['Peek', "Peek's sync timer failed Nov 11, 11:00 PST (exit 1)", false, nine + H, 'Taskmaster looking']],
+  );
+  assert.deepEqual(
+    timerBroken(store, () => false, nine),
+    [],
+    "hidden from who can't see its scheme",
+  );
   await alerts.tick(nine);
   assert.deepEqual([wakes, calls], [['Peek', 'Peek'], []], 'woken at 9');
   await alerts.tick(nine + H - 60_000);
   assert.equal(calls.length, 0);
   await alerts.tick(nine + H);
   assert.equal(calls.length, 1, 'rings at 10');
-  assert.deepEqual(timerBroken(store, () => true, nine + H).map((r) => [r.ringing, r.who.label]), [[true, 'Needs you']]);
+  assert.deepEqual(
+    timerBroken(store, () => true, nine + H).map((r) => [r.ringing, r.who.label]),
+    [[true, 'Needs you']],
+  );
 
   active = 'inactive';
   await alerts.tick(nine + H + 60_000);

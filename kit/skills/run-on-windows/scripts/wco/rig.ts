@@ -23,7 +23,22 @@ const DIR = join(process.env.TMPDIR || tmpdir(), 'wco-rig');
 const STATE = join(DIR, 'state.json');
 const SHOTS = join(DIR, 'shots');
 const TOPBAR_ROUTE = '#/p/99999'; // a route error: Citadel shows its own .topbar there
-interface State { token: string; host: string; rigPort: number; fwdPort: number; devPort: number; devPid: number; cookie: string; login: string; password: string; data: string; serverPid: number; scheme: string; minion: string; artifact: string }
+interface State {
+  token: string;
+  host: string;
+  rigPort: number;
+  fwdPort: number;
+  devPort: number;
+  devPid: number;
+  cookie: string;
+  login: string;
+  password: string;
+  data: string;
+  serverPid: number;
+  scheme: string;
+  minion: string;
+  artifact: string;
+}
 
 const state = (): State => {
   if (!existsSync(STATE)) die('no rig running from this $TMPDIR: node rig.ts up first');
@@ -35,7 +50,14 @@ function die(msg: string): never {
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const local = (s: State, p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${s.rigPort}/${s.token}/${p}`, init);
-const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 const devCopy = (...args: string[]) => execFileSync('citadel-dev-copy', args, { encoding: 'utf8', env: { ...process.env, ...(args[0] === 'seed' ? { WCO_FIXTURE_PORT: String(state().rigPort) } : {}) } });
 
 /** Listens on a random free port in 8100-8999 on every interface: the tailnet reaches 8000-8999 on perigee. */
@@ -55,7 +77,12 @@ async function up() {
   if (existsSync(STATE) && alive(state().serverPid)) die('a rig is already up from this $TMPDIR: node rig.ts down first');
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(SHOTS, { recursive: true });
-  console.log(devCopy('start', '--data', 'empty').split('\n').filter((l) => !/password|cookie/i.test(l)).join('\n'));
+  console.log(
+    devCopy('start', '--data', 'empty')
+      .split('\n')
+      .filter((l) => !/password|cookie/i.test(l))
+      .join('\n'),
+  );
   const dev = JSON.parse(devCopy('status', '--json'));
   // RIG_HOST (perigee.tail59477f.ts.net) for a turn with no tailscale command, such as one in a container.
   const host = process.env.RIG_HOST ?? (JSON.parse(execFileSync('tailscale', ['status', '--json'], { encoding: 'utf8' })).Self.DNSName as string).replace(/\.$/, '');
@@ -75,8 +102,14 @@ async function up() {
   writeFileSync(STATE, JSON.stringify(s));
   const u = `http://${s.host}:${s.rigPort}/${s.token}`;
   console.log(`\nRig up: fixture at /apps/wco-fixture/, routes ${s.scheme} ${TOPBAR_ROUTE} ${s.artifact}. On the box, start the driver (it holds the screen):`);
-  console.log(JSON.stringify({ task: 'run', wait: 5, args: [`$u = '${u}'; $d = Join-Path $env:TEMP 'citadel-wco'; New-Item -ItemType Directory -Force $d | Out-Null; foreach ($f in 'driver.mjs','mouse.ps1','cleanup.ps1') { Invoke-WebRequest -UseBasicParsing \"$u/$f\" -OutFile (Join-Path $d $f) }; node (Join-Path $d 'driver.mjs') $u`] }));
-  console.log('Then: node rig.ts status (installs in about 20 s), node rig.ts run topbar; node rig.ts down prints the box\'s cleanup.');
+  console.log(
+    JSON.stringify({
+      task: 'run',
+      wait: 5,
+      args: [`$u = '${u}'; $d = Join-Path $env:TEMP 'citadel-wco'; New-Item -ItemType Directory -Force $d | Out-Null; foreach ($f in 'driver.mjs','mouse.ps1','cleanup.ps1') { Invoke-WebRequest -UseBasicParsing \"$u/$f\" -OutFile (Join-Path $d $f) }; node (Join-Path $d 'driver.mjs') $u`],
+    }),
+  );
+  console.log("Then: node rig.ts status (installs in about 20 s), node rig.ts run topbar; node rig.ts down prints the box's cleanup.");
 }
 
 async function serve() {
@@ -85,11 +118,12 @@ async function serve() {
   const results = new Map<number, string>();
   const waiters: (() => void)[] = [];
   const wake = () => waiters.splice(0).forEach((w) => w());
-  const until = (ok: () => boolean, ms: number) => new Promise<void>((res) => {
-    const t = setTimeout(res, ms);
-    const check = () => (ok() ? (clearTimeout(t), res()) : waiters.push(check));
-    check();
-  });
+  const until = (ok: () => boolean, ms: number) =>
+    new Promise<void>((res) => {
+      const t = setTimeout(res, ms);
+      const check = () => (ok() ? (clearTimeout(t), res()) : waiters.push(check));
+      check();
+    });
   let driver = { ready: false, error: '', polled: 0 };
   const types: Record<string, string> = { html: 'text/html', js: 'text/javascript', mjs: 'text/javascript', ps1: 'text/plain', css: 'text/css', svg: 'image/svg+xml' };
   const file = (res: ServerResponse, f: string) => {
@@ -97,7 +131,11 @@ async function serve() {
     res.writeHead(200, { 'content-type': types[f.split('.').pop()!] ?? 'application/octet-stream', 'cache-control': 'no-store' });
     createReadStream(f).pipe(res);
   };
-  const body = (req: import('node:http').IncomingMessage) => new Promise<Buffer>((res) => { const b: Buffer[] = []; req.on('data', (c) => b.push(c)).on('end', () => res(Buffer.concat(b))); });
+  const body = (req: import('node:http').IncomingMessage) =>
+    new Promise<Buffer>((res) => {
+      const b: Buffer[] = [];
+      req.on('data', (c) => b.push(c)).on('end', () => res(Buffer.concat(b)));
+    });
   const http = httpServer(async (req, res) => {
     const url = new URL(req.url!, 'http://x');
     // The dev copy proxies /apps/wco-fixture/<path> here as it is.
@@ -107,9 +145,17 @@ async function serve() {
     if (token !== s.token) return res.writeHead(404).end();
     if (['driver.mjs', 'mouse.ps1', 'cleanup.ps1'].includes(what)) return file(res, join(HERE, what));
     if (what === 'config') return res.writeHead(200).end(JSON.stringify({ upstream: `${s.host}:${state().fwdPort}`, cookie: s.cookie, login: s.login, password: s.password, route: state().scheme }));
-    if (what === 'ready') { const e = (await body(req)).toString(); driver = { ...driver, ready: !e, error: e }; wake(); return res.end('ok'); }
+    if (what === 'ready') {
+      const e = (await body(req)).toString();
+      driver = { ...driver, ready: !e, error: e };
+      wake();
+      return res.end('ok');
+    }
     if (what === 'status') return res.end(JSON.stringify({ ...driver, polledAgo: driver.polled ? Date.now() - driver.polled : null, queued: queue.length }));
-    if (what === 'shot') { writeFileSync(join(SHOTS, `${decodeURIComponent(arg).replace(/[^\w .-]/g, '_')}.png`), await body(req)); return res.end('ok'); }
+    if (what === 'shot') {
+      writeFileSync(join(SHOTS, `${decodeURIComponent(arg).replace(/[^\w .-]/g, '_')}.png`), await body(req));
+      return res.end('ok');
+    }
     if (what === 'cmd' && req.method === 'POST') {
       const cmd = { id: (queue.at(-1)?.id ?? 0) + 1, code: (await body(req)).toString() };
       queue.push(cmd);
@@ -124,7 +170,11 @@ async function serve() {
       const next = queue.find((c) => c.id > after);
       return next ? res.writeHead(200).end(JSON.stringify(next)) : res.writeHead(204).end();
     }
-    if (what === 'result' && req.method === 'POST') { results.set(+arg, (await body(req)).toString()); wake(); return res.end('ok'); }
+    if (what === 'result' && req.method === 'POST') {
+      results.set(+arg, (await body(req)).toString());
+      wake();
+      return res.end('ok');
+    }
     if (what === 'result') {
       await until(() => results.has(+arg), 25_000);
       return results.has(+arg) ? res.end(results.get(+arg)) : res.writeHead(204).end();
@@ -142,16 +192,19 @@ async function serve() {
   writeFileSync(STATE, JSON.stringify({ ...state(), rigPort, fwdPort, serverPid: process.pid }));
   console.log(`rig server: fixture and box queue on ${rigPort}, dev copy forward on ${fwdPort}`);
   // Ends with the dev copy it fronts.
-  setInterval(() => { if (!alive(s.devPid)) process.exit(0); }, 5000);
+  setInterval(() => {
+    if (!alive(s.devPid)) process.exit(0);
+  }, 5000);
 }
 
 async function queue(code: string): Promise<{ ok: boolean; text: string }> {
   const s = state();
   const st = JSON.parse(await (await local(s, 'status')).text());
   if (st.error) die(`the box driver stopped: ${st.error}`);
-  if (!st.polledAgo || st.polledAgo > 60_000) die('the box driver isn\'t polling: start it with the run_task line rig.ts up printed, then node rig.ts status');
+  if (!st.polledAgo || st.polledAgo > 60_000) die("the box driver isn't polling: start it with the run_task line rig.ts up printed, then node rig.ts status");
   const id = await (await local(s, 'cmd', { method: 'POST', body: code })).text();
-  for (let i = 0; i < 40; i++) { // 40 long polls of 25 s: a check gets about 16 minutes
+  for (let i = 0; i < 40; i++) {
+    // 40 long polls of 25 s: a check gets about 16 minutes
     const r = await local(s, `result/${id}`);
     if (r.status === 200) return r.json();
   }

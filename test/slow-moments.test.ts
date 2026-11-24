@@ -12,20 +12,35 @@ const moment = (over: Record<string, unknown> = {}) => ({ kind: 'request', what:
 
 test('a report keeps checked, clipped rows and names the scheme from the page', () => {
   const rows = slowRows({ device: 'Windows · Edge · app', tab: 'ab12', moments: [moment()] }, 'Cara', 60, NOW);
-  assert.deepEqual(rows, [{
-    at: NOW - 5000, person: 'Cara', device: 'Windows · Edge · app', tab: 'ab12', kind: 'request', what: 'GET /api/projects/2',
-    page: '#/p/2/t/394', project_id: 2, total_ms: 20_100, server_ms: 100, network_ms: 200, tab_ms: 19_800,
-  }]);
+  assert.deepEqual(rows, [
+    {
+      at: NOW - 5000,
+      person: 'Cara',
+      device: 'Windows · Edge · app',
+      tab: 'ab12',
+      kind: 'request',
+      what: 'GET /api/projects/2',
+      page: '#/p/2/t/394',
+      project_id: 2,
+      total_ms: 20_100,
+      server_ms: 100,
+      network_ms: 200,
+      tab_ms: 19_800,
+    },
+  ]);
 });
 
 test('malformed, stale, future and unknown moments are dropped; numbers are clamped; room caps the count', () => {
-  const rows = slowRows({
-    device: 'x\u0000'.repeat(100), tab: 7, moments: [
-      moment({ kind: 'nap' }), moment({ total: 'long' }), moment({ at: NOW - 2 * 86_400_000 }), moment({ at: NOW + 3_600_000 }),
-      moment({ kind: 'freeze', what: '', page: '#/', server: null, network: -5, total: 1e12, tab_ms: Infinity, tab: "row1" }),
-      moment(), moment(),
-    ],
-  }, 'Josh', 2, NOW);
+  const rows = slowRows(
+    {
+      device: 'x\u0000'.repeat(100),
+      tab: 7,
+      moments: [moment({ kind: 'nap' }), moment({ total: 'long' }), moment({ at: NOW - 2 * 86_400_000 }), moment({ at: NOW + 3_600_000 }), moment({ kind: 'freeze', what: '', page: '#/', server: null, network: -5, total: 1e12, tab_ms: Infinity, tab: 'row1' }), moment(), moment()],
+    },
+    'Josh',
+    2,
+    NOW,
+  );
   assert.equal(rows.length, 2);
   const [freeze] = rows;
   assert.equal(freeze.device, 'x'.repeat(60));
@@ -46,7 +61,10 @@ test('the table keeps only the newest SLOW_KEEP rows and lists newest first', ()
   const n = (store.db.prepare('SELECT COUNT(*) AS n FROM slow_moments').get() as { n: number }).n;
   assert.equal(n, SLOW_KEEP);
   const newest = store.slowMoments(0, 3);
-  assert.deepEqual(newest.map((r) => r.at), [NOW + SLOW_KEEP + 29, NOW + SLOW_KEEP + 28, NOW + SLOW_KEEP + 27]);
+  assert.deepEqual(
+    newest.map((r) => r.at),
+    [NOW + SLOW_KEEP + 29, NOW + SLOW_KEEP + 28, NOW + SLOW_KEEP + 27],
+  );
   assert.deepEqual(store.slowMoments(NOW + SLOW_KEEP + 29), [newest[0]]);
 });
 
@@ -57,6 +75,12 @@ test("the Status page lists the day's moments the viewer may see: another scheme
   const view = slowView(store, { canSee: (id: number) => id === 1 } as any, NOW);
   assert.equal(view.count, 2);
   assert.equal(view.longest, 4000, "scheme 2's minute and the day-old 90 s are not this viewer's");
-  assert.deepEqual(view.rows.map((r) => [r.at, r.total_ms]), [[NOW - 1000, 4000], [NOW - 3000, 2500]]);
+  assert.deepEqual(
+    view.rows.map((r) => [r.at, r.total_ms]),
+    [
+      [NOW - 1000, 4000],
+      [NOW - 3000, 2500],
+    ],
+  );
   assert.ok(view.rows.every((r) => !('project_id' in r) && !('id' in r)));
 });

@@ -19,7 +19,9 @@ import { byUrgency, mentions } from './threadstate.js';
 const CACHE = 'cc-home'; // the last /api/home answer, for the next first paint
 
 let data = null; // the last answer: { items, tickets, seen, schemes, since, days, broken, me }, only ever drawn for the person it was fetched for
-try { data = JSON.parse(localStorage.getItem(CACHE)); } catch {}
+try {
+  data = JSON.parse(localStorage.getItem(CACHE));
+} catch {}
 if (!Array.isArray(data?.days)) data = null; // an answer cached before the bars (#1217) can't draw them
 let failed = false; // the last fetch failed: the list says so, with a retry, rather than "Loading…" for good
 // This visit: each list's ids in the order shown, the ones there when it opened (the rest are "new"), and the rows as last seen.
@@ -33,10 +35,14 @@ let brokenOpen = false; // its list is open (#/home/broken, the address the alar
 // Schemes folded shut on Home, by id, kept in this browser (their rows stay in the list; only the drawing folds).
 const FOLDED = 'cc-home-folded';
 const folded = new Set();
-try { for (const id of JSON.parse(localStorage.getItem(FOLDED)) ?? []) folded.add(Number(id)); } catch {}
+try {
+  for (const id of JSON.parse(localStorage.getItem(FOLDED)) ?? []) folded.add(Number(id));
+} catch {}
 function toggleFolded(id) {
   folded[folded.has(id) ? 'delete' : 'add'](id);
-  try { localStorage.setItem(FOLDED, JSON.stringify([...folded])); } catch {}
+  try {
+    localStorage.setItem(FOLDED, JSON.stringify([...folded]));
+  } catch {}
   drawPanel();
 }
 
@@ -45,7 +51,10 @@ export const homeHash = (hash) => (hash.startsWith('#/p/') ? `#/home${hash.slice
 
 /** The shelf says whether it shows the Home line, for the next start. */
 export function rememberHomeLine(shown) {
-  try { if (shown) localStorage.setItem(HOME_LINE, '1'); else localStorage.removeItem(HOME_LINE); } catch {}
+  try {
+    if (shown) localStorage.setItem(HOME_LINE, '1');
+    else localStorage.removeItem(HOME_LINE);
+  } catch {}
 }
 
 /** A new visit to Home (from anywhere but Home): rows start in the server's order again, with nothing ticked or new. */
@@ -75,7 +84,9 @@ export function homeOverview(list = null) {
 }
 
 /** Open the "Broken now" list (core.js, for #/home/broken). */
-export function openBroken() { brokenOpen = true; }
+export function openBroken() {
+  brokenOpen = true;
+}
 
 /** Fetch Home again (a burst of news fetches once). */
 export function refreshHomeSoon() {
@@ -90,7 +101,9 @@ export async function refreshHome() {
   failed = !got;
   if (!got) return void drawPanel();
   data = { ...got, me };
-  try { localStorage.setItem(CACHE, JSON.stringify(data)); } catch {}
+  try {
+    localStorage.setItem(CACHE, JSON.stringify(data));
+  } catch {}
   // The first answer of a visit sorts it as the server does; the cached paint before it was only a stand-in.
   if (!visit.fresh) Object.assign(visit, { rows: [], first: null, fresh: true });
   drawPanel();
@@ -102,9 +115,10 @@ export async function refreshHome() {
 export function homeEvent(event) {
   if (!view?.home || event.ticket_id !== view.id) return;
   let d = {};
-  try { d = JSON.parse(event.data); } catch {}
-  const who = event.kind === 'user_message' && d.answer ? d.author : ['plan_result', 'approval_result'].includes(event.kind) ? d.by
-    : event.kind === 'question_result' ? d.settled?.by : null; // a notice's "Got it" and a page's Send settle this way
+  try {
+    d = JSON.parse(event.data);
+  } catch {}
+  const who = event.kind === 'user_message' && d.answer ? d.author : ['plan_result', 'approval_result'].includes(event.kind) ? d.by : event.kind === 'question_result' ? d.settled?.by : null; // a notice's "Got it" and a page's Send settle this way
   if (who && me && String(who).toLowerCase() === me.toLowerCase()) {
     next = event.ticket_id;
     refreshHomeSoon();
@@ -117,7 +131,9 @@ export function homeEvent(event) {
 const stable = (shown, ids) => [...shown, ...ids.filter((id) => !shown.includes(id))];
 
 /** Forget an answer fetched for someone else (a sign-out and in on this browser doesn't reload the page). */
-const own = () => { if (data && data.me !== me) data = null; };
+const own = () => {
+  if (data && data.me !== me) data = null;
+};
 
 /** Each waiting minion's items, by ticket id. */
 function groups() {
@@ -153,8 +169,7 @@ function drawPanel() {
   if (view) for (const [id, at] of Object.entries(data?.seen ?? {})) if (!(view.seen?.[id] >= at)) (view.seen ??= {})[id] = at;
   for (const [id, m] of mentionMap(data?.items ?? [])) if (!mentions.has(id)) mentions.set(id, m);
   // The first answer of a visit sorts each scheme as its own list does: Taskmaster first, then by urgency.
-  const order = [...rows.keys()].filter((id) => tickets.has(id))
-    .sort((a, b) => Number(isCoordinator(tickets.get(b))) - Number(isCoordinator(tickets.get(a))) || byUrgency(tickets.get(a), tickets.get(b), usage));
+  const order = [...rows.keys()].filter((id) => tickets.has(id)).sort((a, b) => Number(isCoordinator(tickets.get(b))) - Number(isCoordinator(tickets.get(a))) || byUrgency(tickets.get(a), tickets.get(b), usage));
   visit.rows = stable(visit.rows, order);
   visit.first ??= new Set(order);
   for (const id of order) visit.last.set(id, { t: tickets.get(id), items: rows.get(id) });
@@ -164,26 +179,46 @@ function drawPanel() {
     if (t && !names.some((s) => s.id === t.project_id)) names.push({ id: t.project_id, name: view?.projects?.find((p) => p.id === t.project_id)?.name ?? '' });
   }
   visit.shown = []; // the rows top to bottom, scheme by scheme, for moveOn
-  const sections = names.map((s) => {
-    const all = visit.rows.filter((id) => visit.last.get(id)?.t.project_id === s.id);
-    visit.shown.push(...all); // gone ones too: moveOn needs the answered row's place
-    // A row that left Home's list (answered, a mention opened, withdrawn) is gone at once; Josh, 2026-11-20: "these should just be gone once done".
-    const ids = all.filter((id) => rows.has(id));
-    if (!ids.length) return null;
-    const shut = folded.has(s.id);
-    const fold = h('button', { type: 'button', class: 'home-fold', 'aria-expanded': String(!shut), title: shut ? `Expand ${s.name}` : `Collapse ${s.name}`, 'aria-label': shut ? `Expand ${s.name}` : `Collapse ${s.name}`, onclick: () => toggleFolded(s.id) }, shut ? '▸' : '▾');
-    return h('section', { class: 'thread-group home-group', 'data-cat': schemeHue(s.name) }, h('h3', {}, s.name, shut ? h('span', { class: 'home-folded-count' }, String(ids.length)) : '', h('span', { class: 'spacer' }), fold), ...(shut ? [] : ids).map((id) => {
-      const t = tickets.get(id), items = rows.get(id);
-      // The row's card and spend badges open on Home too, not in the scheme.
-      const row = threadRow({ ...t, open_cards: t.open_cards?.map((c) => ({ ...c, href: homeHash(c.href) })), spend_alert: t.spend_alert && { ...t.spend_alert, href: homeHash(t.spend_alert.href) } }, rowHref(t, items));
-      if (visit.fresh && !visit.first.has(id)) row.querySelector('.name')?.prepend(h('span', { class: 'new-tag' }, 'new'));
-      return row;
-    }));
-  }).filter(Boolean);
-  const retry = h('button', { type: 'button', class: 'link', onclick: () => { failed = false; drawPanel(); refreshHome(); } }, 'Try again');
-  panel.replaceChildren(...(sections.length ? sections
-    : [failed && !data ? emptyCard('Couldn\'t load Home', h('span', {}, 'What waits on you didn\'t load. ', retry), { mark: '!', hue: 'danger' })
-      : emptyCard('Nothing needs you', data ? 'Minions in any of your schemes that wait on you show here.' : 'Loading what waits on you…')]));
+  const sections = names
+    .map((s) => {
+      const all = visit.rows.filter((id) => visit.last.get(id)?.t.project_id === s.id);
+      visit.shown.push(...all); // gone ones too: moveOn needs the answered row's place
+      // A row that left Home's list (answered, a mention opened, withdrawn) is gone at once; Josh, 2026-11-20: "these should just be gone once done".
+      const ids = all.filter((id) => rows.has(id));
+      if (!ids.length) return null;
+      const shut = folded.has(s.id);
+      const fold = h('button', { type: 'button', class: 'home-fold', 'aria-expanded': String(!shut), title: shut ? `Expand ${s.name}` : `Collapse ${s.name}`, 'aria-label': shut ? `Expand ${s.name}` : `Collapse ${s.name}`, onclick: () => toggleFolded(s.id) }, shut ? '▸' : '▾');
+      return h(
+        'section',
+        { class: 'thread-group home-group', 'data-cat': schemeHue(s.name) },
+        h('h3', {}, s.name, shut ? h('span', { class: 'home-folded-count' }, String(ids.length)) : '', h('span', { class: 'spacer' }), fold),
+        ...(shut ? [] : ids).map((id) => {
+          const t = tickets.get(id),
+            items = rows.get(id);
+          // The row's card and spend badges open on Home too, not in the scheme.
+          const row = threadRow({ ...t, open_cards: t.open_cards?.map((c) => ({ ...c, href: homeHash(c.href) })), spend_alert: t.spend_alert && { ...t.spend_alert, href: homeHash(t.spend_alert.href) } }, rowHref(t, items));
+          if (visit.fresh && !visit.first.has(id)) row.querySelector('.name')?.prepend(h('span', { class: 'new-tag' }, 'new'));
+          return row;
+        }),
+      );
+    })
+    .filter(Boolean);
+  const retry = h(
+    'button',
+    {
+      type: 'button',
+      class: 'link',
+      onclick: () => {
+        failed = false;
+        drawPanel();
+        refreshHome();
+      },
+    },
+    'Try again',
+  );
+  panel.replaceChildren(
+    ...(sections.length ? sections : [failed && !data ? emptyCard("Couldn't load Home", h('span', {}, "What waits on you didn't load. ", retry), { mark: '!', hue: 'danger' }) : emptyCard('Nothing needs you', data ? 'Minions in any of your schemes that wait on you show here.' : 'Loading what waits on you…')]),
+  );
 }
 
 function drawOverview() {
@@ -197,11 +232,10 @@ function drawOverview() {
   const top = Math.max(1, ...schemes.flatMap((s) => s.daily));
   const since = data?.since;
   overview.replaceChildren(
-    statTiles([sum('waiting'), 'waiting on you', 'waiting'], [sum('working'), 'working now', 'running'],
-      [sum('shipped'), since ? `shipped since ${when(since)}` : 'shipped since your last visit', 'done']),
+    statTiles([sum('waiting'), 'waiting on you', 'waiting'], [sum('working'), 'working now', 'running'], [sum('shipped'), since ? `shipped since ${when(since)}` : 'shipped since your last visit', 'done']),
     h('h3', { class: 'settings-section', 'data-hue': 'accent' }, 'Your schemes', h('span', { class: 'home-days muted' }, `minions shipped each day, last ${days.length || 14} days`)),
-    schemes.length ? h('div', { class: 'hue-rows' }, ...schemes.map((s) => schemeRow(s, days, top)))
-      : emptyCard(data ? 'No schemes yet' : 'Loading', data ? 'The schemes you\'re in show here, with what\'s going on in each.' : 'Counting what\'s going on…', { mark: '·', hue: 'held' }));
+    schemes.length ? h('div', { class: 'hue-rows' }, ...schemes.map((s) => schemeRow(s, days, top))) : emptyCard(data ? 'No schemes yet' : 'Loading', data ? "The schemes you're in show here, with what's going on in each." : "Counting what's going on…", { mark: '·', hue: 'held' }),
+  );
 }
 
 /**
@@ -213,9 +247,18 @@ function brokenStrip(rows) {
   if (!rows.length) return '';
   const needs = rows.filter((r) => r.who.kind === 'person').length;
   const state = needs ? `${needs} need${needs === 1 ? 's' : ''} you` : rows.length === 1 ? 'being fixed' : 'all being fixed';
-  const box = h('details', { class: 'home-broken', 'data-hue': needs ? 'danger' : 'waiting', ontoggle: () => { brokenOpen = box.open; } },
+  const box = h(
+    'details',
+    {
+      class: 'home-broken',
+      'data-hue': needs ? 'danger' : 'waiting',
+      ontoggle: () => {
+        brokenOpen = box.open;
+      },
+    },
     h('summary', {}, h('span', { class: 'home-broken-mark', 'aria-hidden': 'true' }, '!'), h('b', {}, `${rows.length} broken`), h('span', {}, ` · ${state}`)),
-    h('div', { class: 'home-broken-rows' }, ...rows.map(brokenRow)));
+    h('div', { class: 'home-broken-rows' }, ...rows.map(brokenRow)),
+  );
   box.open = brokenOpen;
   return box;
 }
@@ -224,30 +267,36 @@ function brokenStrip(rows) {
 function brokenRow(r) {
   const meta = [r.since ? `since ${when(r.since)}` : '', !r.ringing && r.ringsAt ? `rings ${when(r.ringsAt)} if still broken` : ''].filter(Boolean).join(' · ');
   const tone = { person: 'danger', taskmaster: 'warn', minion: 'info' }[r.who.kind];
-  return h('div', { class: 'home-broken-row', 'data-cat': schemeHue(r.scheme) },
+  return h(
+    'div',
+    { class: 'home-broken-row', 'data-cat': schemeHue(r.scheme) },
     h('div', { class: 'home-broken-what' }, schemeTag(r.scheme), h('span', {}, r.what)),
     r.next ? h('div', { class: 'home-broken-next muted' }, r.next) : '',
-    h('div', { class: 'home-broken-meta' }, h('a', { href: homeHash(r.who.href) }, toneChip(tone, r.who.label)), meta ? h('span', { class: 'muted' }, meta) : ''));
+    h('div', { class: 'home-broken-meta' }, h('a', { href: homeHash(r.who.href) }, toneChip(tone, r.who.label)), meta ? h('span', { class: 'muted' }, meta) : ''),
+  );
 }
 
 /** A scheme's line: its tag, what's going on in it as chips, and its last days' ships as bars; it opens the scheme. */
 function schemeRow(s, days, top) {
   // Always the three counts, in fixed slots (dim at zero), so the line's height doesn't change when a count does.
-  const slot = (n, tone, text) => { const c = toneChip(n ? tone : 'neutral', text); c.classList.add('home-count'); if (!n) c.classList.add('zero'); return c; };
-  const chips = [
-    slot(s.waiting, 'warn', `${s.waiting} need${s.waiting === 1 ? 's' : ''} you`),
-    slot(s.working, 'info', `${s.working} working`),
-    slot(s.shipped, 'ok', `${s.shipped} shipped`),
-  ];
+  const slot = (n, tone, text) => {
+    const c = toneChip(n ? tone : 'neutral', text);
+    c.classList.add('home-count');
+    if (!n) c.classList.add('zero');
+    return c;
+  };
+  const chips = [slot(s.waiting, 'warn', `${s.waiting} need${s.waiting === 1 ? 's' : ''} you`), slot(s.working, 'info', `${s.working} working`), slot(s.shipped, 'ok', `${s.shipped} shipped`)];
   const total = s.daily.reduce((a, b) => a + b, 0);
-  const bars = h('span', { class: 'home-bars', role: 'img', 'aria-label': `${total} shipped in the last ${s.daily.length} days` }, ...s.daily.map((n, i) => {
-    const bar = h('i', { title: `${dayLabel(days[i])}: ${n} shipped`, class: n ? null : 'none' });
-    bar.style.setProperty('--v', String(n / top));
-    return bar;
-  }));
-  return h('a', { class: 'hue-row home-scheme', href: `#/p/${s.id}`, 'data-cat': schemeHue(s.name) },
-    h('span', { class: 'hue-row-text' }, schemeTag(s.name), h('span', { class: 'home-counts' }, ...chips)),
-    h('span', { class: 'hue-row-meta' }, bars));
+  const bars = h(
+    'span',
+    { class: 'home-bars', role: 'img', 'aria-label': `${total} shipped in the last ${s.daily.length} days` },
+    ...s.daily.map((n, i) => {
+      const bar = h('i', { title: `${dayLabel(days[i])}: ${n} shipped`, class: n ? null : 'none' });
+      bar.style.setProperty('--v', String(n / top));
+      return bar;
+    }),
+  );
+  return h('a', { class: 'hue-row home-scheme', href: `#/p/${s.id}`, 'data-cat': schemeHue(s.name) }, h('span', { class: 'hue-row-text' }, schemeTag(s.name), h('span', { class: 'home-counts' }, ...chips)), h('span', { class: 'hue-row-meta' }, bars));
 }
 
 /** A Pacific day key ("2026-11-18") as "Tue Nov 18". */
@@ -277,5 +326,7 @@ function moveOn() {
   const t = (data?.tickets ?? []).find((x) => x.id === after);
   if (!t) return;
   // Long enough to see the card settle (Josh's "Move to the next card"); a row you click meanwhile wins.
-  setTimeout(() => { if (view?.home && view.id === from) location.hash = rowHref(t, rows.get(after)); }, 800);
+  setTimeout(() => {
+    if (view?.home && view.id === from) location.hash = rowHref(t, rows.get(after));
+  }, 800);
 }

@@ -27,10 +27,14 @@ import { labelTicket } from './waits.ts';
 import type { Ticket } from './db.ts';
 
 export type ReaderData = {
-  dbPath: string; password: string; secret: string;
+  dbPath: string;
+  password: string;
+  secret: string;
   /** The write worker's counter (src/db-writer.ts): [0] the last write run, [1] its state, [2] the last write sent. */
   shared: BigInt64Array | null;
-  embedUrl: string; embedModel: string; memorySchemes: number[] | null;
+  embedUrl: string;
+  embedModel: string;
+  memorySchemes: number[] | null;
   /** DATA_DIR, where the Status page reads backups from. */
   dataDir: string;
   /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang` or `=slow` in a query ends, hangs or slows (500 ms) this thread mid-request, and `=main` sends it to the main thread. */
@@ -44,7 +48,19 @@ const taken = (r: Route) => [r.method].flat().includes('GET') && READER_ROUTES.i
 /** The routes readers answer: the GETs READER_ROUTES names. */
 export const readerRoutes = () => apiRoutes.filter(taken);
 /** The main thread's table with every other route's handler handing the request back, so a path is never answered by a route main wouldn't run. */
-const readerTable = () => router(apiRoutes.map((r) => (taken(r) ? r : { ...r, handler: () => { throw new Error('The main thread answers this one'); } })));
+const readerTable = () =>
+  router(
+    apiRoutes.map((r) =>
+      taken(r)
+        ? r
+        : {
+            ...r,
+            handler: () => {
+              throw new Error('The main thread answers this one');
+            },
+          },
+    ),
+  );
 
 /**
  * The Runner a reader's views run on: the real view() and views(), their database reads on this thread's connection,
@@ -53,7 +69,10 @@ const readerTable = () => router(apiRoutes.map((r) => (taken(r) ? r : { ...r, ha
  */
 export function readerRunner(store: Store, snap: Snapshot): Runner {
   return Object.assign(Object.create(Runner.prototype), {
-    store, queue: new MinionQueue(store), resumes: { limit: new WaitList(store, LIMIT_RESUMES) }, onLive: () => {},
+    store,
+    queue: new MinionQueue(store),
+    resumes: { limit: new WaitList(store, LIMIT_RESUMES) },
+    onLive: () => {},
     // Unused: live() below carries main's ratio as step_ratio, so a reader keeps no cache of its own.
     stepRatio: () => 1,
     live: (t: Ticket) => {
@@ -68,22 +87,47 @@ export function readerRunner(store: Store, snap: Snapshot): Runner {
 export function readerStatus(store: Store, snap: Snapshot, dataDir: string): () => StatusPage | null {
   let page: StatusPage | null = null;
   const s = () => snap.status!;
-  return () => snap.status && (page ??= new StatusPage({
-    store, dataDir, bootAt: s().bootAt, commit: s().commit, cores: s().cores, ownScheme: () => snap.ownScheme,
-    ciSnapshot: (canSee) => CiHealth.prototype.snapshot.call({ store } as unknown as CiHealth, canSee),
-    desktops: () => s().desktops, storms: () => s().storms, easing: () => s().easing, diskUse: (row) => s().disk[row.name] ?? null,
-    unitsNow: () => s().units, jobs: () => s().jobs,
-    answer: s().probing ? { probe: { get lastMs() { return s().lastMs; }, get readerMs() { return s().readerMs; }, take: () => null }, turns: () => 0 } : undefined,
-  }));
+  return () =>
+    snap.status &&
+    (page ??= new StatusPage({
+      store,
+      dataDir,
+      bootAt: s().bootAt,
+      commit: s().commit,
+      cores: s().cores,
+      ownScheme: () => snap.ownScheme,
+      ciSnapshot: (canSee) => CiHealth.prototype.snapshot.call({ store } as unknown as CiHealth, canSee),
+      desktops: () => s().desktops,
+      storms: () => s().storms,
+      easing: () => s().easing,
+      diskUse: (row) => s().disk[row.name] ?? null,
+      unitsNow: () => s().units,
+      jobs: () => s().jobs,
+      answer: s().probing
+        ? {
+            probe: {
+              get lastMs() {
+                return s().lastMs;
+              },
+              get readerMs() {
+                return s().readerMs;
+              },
+              take: () => null,
+            },
+            turns: () => 0,
+          }
+        : undefined,
+    }));
 }
 
 /** `o`, but reading a part it lacks throws (the request goes to the main thread) instead of giving undefined. */
-export const mainOnly = <T extends object>(o: T): T => new Proxy(o, {
-  get: (t, k, r) => {
-    if (typeof k === 'string' && !(k in t)) throw new Error(`app.${k} is the main thread's`);
-    return Reflect.get(t, k, r);
-  },
-});
+export const mainOnly = <T extends object>(o: T): T =>
+  new Proxy(o, {
+    get: (t, k, r) => {
+      if (typeof k === 'string' && !(k in t)) throw new Error(`app.${k} is the main thread's`);
+      return Reflect.get(t, k, r);
+    },
+  });
 
 /** The steps the main thread has opened (src/db-writer.ts); 0 with no write worker (then readers answer nothing). */
 export const stepsOpened = (shared: BigInt64Array | null) => (shared && Atomics.load(shared, 1) === 1n ? Atomics.load(shared, 4) : 0n);
@@ -101,7 +145,8 @@ export function atWholeStep(db: DatabaseSync, shared: BigInt64Array | null, ms =
   if (!shared || Atomics.load(shared, 1) !== 1n) return null;
   const until = Date.now() + ms;
   for (;;) {
-    const opened = Atomics.load(shared, 4), closed = Atomics.load(shared, 3);
+    const opened = Atomics.load(shared, 4),
+      closed = Atomics.load(shared, 3);
     if (closed >= opened) {
       pin();
       // No step opened while it pinned, so nothing committed since the check.
@@ -123,9 +168,16 @@ class Collect {
   private status = 200;
   private headers: Record<string, string | string[]> = {};
   private done: (a: Answer) => void;
-  constructor(done: (a: Answer) => void) { this.done = done; }
-  setHeader(k: string, v: string | string[]) { this.headers[k.toLowerCase()] = v; return this; }
-  getHeader(k: string) { return this.headers[k.toLowerCase()]; }
+  constructor(done: (a: Answer) => void) {
+    this.done = done;
+  }
+  setHeader(k: string, v: string | string[]) {
+    this.headers[k.toLowerCase()] = v;
+    return this;
+  }
+  getHeader(k: string) {
+    return this.headers[k.toLowerCase()];
+  }
   writeHead(status: number, headers: Record<string, string | number | string[]> = {}) {
     this.status = status;
     for (const [k, v] of Object.entries(headers)) this.headers[k.toLowerCase()] = typeof v === 'number' ? String(v) : v;
@@ -134,7 +186,7 @@ class Collect {
   }
   end(body?: string | Uint8Array) {
     this.headersSent = true;
-    this.done({ status: this.status, headers: this.headers, body: typeof body === 'string' ? Buffer.from(body) : body ?? new Uint8Array() });
+    this.done({ status: this.status, headers: this.headers, body: typeof body === 'string' ? Buffer.from(body) : (body ?? new Uint8Array()) });
     return this;
   }
 }
@@ -148,7 +200,11 @@ export async function answer(app: App, auth: Auth, routes: ReturnType<typeof rou
   if (own && 'redirect' in own) return null;
   if (own) req.url = own.url;
   let url: URL;
-  try { url = requestUrl(req); } catch { return null; }
+  try {
+    url = requestUrl(req);
+  } catch {
+    return null;
+  }
   if (!routes.knows(url.pathname)) return null;
   let resolve!: (a: Answer) => void;
   const answered = new Promise<Answer>((r) => (resolve = r));
@@ -181,7 +237,7 @@ if (workerData?.reader) {
     // Blocking, like the real work here (opening the database, the sign-in keys): it holds this thread mid-start.
     console.log('Reader test hook: starting slowly');
     const idle = new Int32Array(new SharedArrayBuffer(4));
-    for (const until = Date.now() + 30_000; !existsSync(data.bootWait) && Date.now() < until;) Atomics.wait(idle, 0, 0, 50);
+    for (const until = Date.now() + 30_000; !existsSync(data.bootWait) && Date.now() < until; ) Atomics.wait(idle, 0, 0, 50);
   }
   const store = new Store(data.dbPath, { reader: true });
   const auth = new Auth(data.password, data.secret, undefined, store);
@@ -200,7 +256,10 @@ if (workerData?.reader) {
   const schemes = data.memorySchemes;
   const snap = workerData.snap as Snapshot;
   const status = readerStatus(store, snap, data.dataDir);
-  const ships = () => { if (!snap.ships) throw new Error('No ship lines snapshot yet'); return snap.ships; };
+  const ships = () => {
+    if (!snap.ships) throw new Error('No ship lines snapshot yet');
+    return snap.ships;
+  };
   // No dataDir on purpose: a scheme's first open makes its Taskmaster's folder and row (ensureCoordinator), which throws here and the main thread does.
   // Any other part of the main thread's App throws too (mainOnly), so a route never quietly takes another branch here.
   const app = mainOnly({
@@ -210,12 +269,22 @@ if (workerData?.reader) {
     builds: { get: (id: number) => snap.builds[id] ?? [] },
     // The ship lines' (/api/ship-lines): main's queue folder and releases, the queue's files read here.
     releases: { view: (visible: (id: number) => boolean) => ships().releases.filter((s) => visible(s.projectId)) },
-    waits: { get queue() { return ships().queue; }, ticketFor: (label: string) => labelTicket(store, label)?.id ?? null },
+    waits: {
+      get queue() {
+        return ships().queue;
+      },
+      ticketFor: (label: string) => labelTicket(store, label)?.id ?? null,
+    },
     // The Members page's: a member's repo invite, from the database.
     repoAccess: { view: (projectId: number, userId: number) => RepoAccess.prototype.view.call({ store } as unknown as RepoAccess, projectId, userId) },
     // The CI page's (/api/ci, /api/ci-desktop): CI health is in the database, the desktops' load in the Status snapshot.
     ciHealth: { snapshot: (canSee: (id: number) => boolean) => CiHealth.prototype.snapshot.call({ store } as unknown as CiHealth, canSee) },
-    ciLoad: { views: () => { if (!snap.status) throw new Error('No Status snapshot yet'); return snap.status.desktops; } },
+    ciLoad: {
+      views: () => {
+        if (!snap.status) throw new Error('No Status snapshot yet');
+        return snap.status.desktops;
+      },
+    },
     // None in a preview server, as main has none there.
     previews: { buildScheme: () => (!snap.previews || snap.ownScheme == null ? null : { id: snap.ownScheme }) },
     // None yet: main answers (its own would never be missing).
@@ -255,7 +324,11 @@ if (workerData?.reader) {
       held = false;
       if (--mine.refs === 0) {
         if (tx === mine) tx = null;
-        try { store.db.exec('ROLLBACK'); } catch { /* already ended */ }
+        try {
+          store.db.exec('ROLLBACK');
+        } catch {
+          /* already ended */
+        }
         mine.end();
       }
     };

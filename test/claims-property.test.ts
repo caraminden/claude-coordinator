@@ -11,13 +11,7 @@ const seed = Number(process.env.FC_SEED ?? 20261122);
 const NAME = 'pipeline-lane';
 const ticket = fc.integer({ min: 1, max: 5 });
 
-type Cmd =
-  | { op: 'take'; t: number }
-  | { op: 'queue'; ts: number[] }
-  | { op: 'release' }
-  | { op: 'passOn'; how: 'live' | 'released' | 'dismissed' }
-  | { op: 'releaseHeldBy'; t: number }
-  | { op: 'staleRelease'; saw: number };
+type Cmd = { op: 'take'; t: number } | { op: 'queue'; ts: number[] } | { op: 'release' } | { op: 'passOn'; how: 'live' | 'released' | 'dismissed' } | { op: 'releaseHeldBy'; t: number } | { op: 'staleRelease'; saw: number };
 
 const cmd: fc.Arbitrary<Cmd> = fc.oneof(
   fc.record({ op: fc.constant('take' as const), t: ticket }),

@@ -13,10 +13,13 @@ export function struckSource(text, strikes) {
   for (const { text: quote } of strikes ?? []) {
     const at = text.indexOf(quote);
     if (at < 0) continue;
-    const wrapped = quote.split('\n').map((line) => {
-      const [, start, words, end] = LINE_START.exec(line);
-      return words ? `${start}~~${words}~~${end}` : line;
-    }).join('\n');
+    const wrapped = quote
+      .split('\n')
+      .map((line) => {
+        const [, start, words, end] = LINE_START.exec(line);
+        return words ? `${start}~~${words}~~${end}` : line;
+      })
+      .join('\n');
     text = text.slice(0, at) + wrapped + text.slice(at + quote.length);
   }
   return text;

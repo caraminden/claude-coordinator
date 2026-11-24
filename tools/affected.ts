@@ -20,7 +20,13 @@ export function globRe(glob: string): RegExp {
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
     if (c === '*' && glob[i + 1] === '*') {
-      if (glob[i + 2] === '/') { re += '(?:.*/)?'; i += 2; } else { re += '.*'; i += 1; }
+      if (glob[i + 2] === '/') {
+        re += '(?:.*/)?';
+        i += 2;
+      } else {
+        re += '.*';
+        i += 1;
+      }
     } else if (c === '*') re += '[^/]*';
     else if (c === '?') re += '[^/]';
     else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
@@ -30,7 +36,9 @@ export function globRe(glob: string): RegExp {
 
 export function parseMap(text: string): Map {
   const map: Map = { tests: [], fallback: 'always', rules: [], sameName: [], imports: [] };
-  const fail = (n: number, why: string): never => { throw new Error(`map line ${n}: ${why}`); };
+  const fail = (n: number, why: string): never => {
+    throw new Error(`map line ${n}: ${why}`);
+  };
   text.split('\n').forEach((raw, i) => {
     const n = i + 1;
     const line = raw.trim();
@@ -38,11 +46,19 @@ export function parseMap(text: string): Map {
     // Rule lines end in text that may hold a trailing note after two spaces and a `#`; the spec has no inline comments, so none are cut.
     if (line.startsWith('@')) {
       const [name, ...vals] = line.slice(1).split(/\s+/);
-      if (name === 'tests') { if (!vals.length) fail(n, '@tests needs a glob'); map.tests.push(...vals.map(globRe)); }
-      else if (name === 'samename') { if (!vals.length) fail(n, '@samename needs a glob'); map.sameName.push(...vals.map(globRe)); }
-      else if (name === 'imports') { if (!vals.length) fail(n, '@imports needs a glob'); map.imports.push(...vals.map(globRe)); }
-      else if (name === 'fallback') { if (vals.length !== 1 || !['always', 'full'].includes(vals[0])) fail(n, '@fallback is "always" or "full"'); map.fallback = vals[0] as 'always' | 'full'; }
-      else fail(n, `unknown directive @${name}`);
+      if (name === 'tests') {
+        if (!vals.length) fail(n, '@tests needs a glob');
+        map.tests.push(...vals.map(globRe));
+      } else if (name === 'samename') {
+        if (!vals.length) fail(n, '@samename needs a glob');
+        map.sameName.push(...vals.map(globRe));
+      } else if (name === 'imports') {
+        if (!vals.length) fail(n, '@imports needs a glob');
+        map.imports.push(...vals.map(globRe));
+      } else if (name === 'fallback') {
+        if (vals.length !== 1 || !['always', 'full'].includes(vals[0])) fail(n, '@fallback is "always" or "full"');
+        map.fallback = vals[0] as 'always' | 'full';
+      } else fail(n, `unknown directive @${name}`);
       return;
     }
     const m = line.match(/^(\S+):(?:\s+(.*))?$/);
@@ -70,7 +86,11 @@ export function changedPaths(root: string, base: string): string[] {
 // The repo paths a test file imports directly with a relative specifier (from, import(), require()); `./x.ts` from test/ is test/x.ts.
 export function directImports(root: string, file: string): string[] {
   let text: string;
-  try { text = readFileSync(join(root, file), 'utf8'); } catch { return []; }
+  try {
+    text = readFileSync(join(root, file), 'utf8');
+  } catch {
+    return [];
+  }
   const out = new Set<string>();
   for (const m of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\(\s*)['"](\.{1,2}\/[^'"]+)['"]/g)) out.add(normalize(join(dirname(file), m[1])));
   return [...out];
@@ -80,7 +100,11 @@ export type Answer = { run: { test: string; why: string[] }[]; unmapped: string[
 
 export function affected(map: Map, changed: string[], tracked: string[], root: string): Answer {
   const picked = new Map<string, string[]>();
-  const add = (test: string, why: string) => { const w = picked.get(test) ?? []; if (!w.includes(why)) w.push(why); picked.set(test, w); };
+  const add = (test: string, why: string) => {
+    const w = picked.get(test) ?? [];
+    if (!w.includes(why)) w.push(why);
+    picked.set(test, w);
+  };
   const unmapped: string[] = [];
   let imports: globalThis.Map<string, string[]> | undefined;
   for (const p of changed) {
@@ -101,13 +125,20 @@ export function affected(map: Map, changed: string[], tracked: string[], root: s
       for (const t of tracked) {
         if (!map.tests.some((re) => re.test(t))) continue;
         const b = t.slice(t.lastIndexOf('/') + 1);
-        if (b === `${stem}.test.ts` || b === `${stem}.test.js`) { add(t, `name ${p}`); covered = true; }
+        if (b === `${stem}.test.ts` || b === `${stem}.test.js`) {
+          add(t, `name ${p}`);
+          covered = true;
+        }
       }
     }
     // @imports: a changed source file also runs every tracked test file that imports it directly (#1809).
     if (!isTest && map.imports.some((re) => re.test(p))) {
       imports ??= new Map(tracked.filter((t) => map.tests.some((re) => re.test(t))).map((t) => [t, directImports(root, t)]));
-      for (const [t, deps] of imports) if (deps.includes(p)) { add(t, `imports ${p}`); covered = true; }
+      for (const [t, deps] of imports)
+        if (deps.includes(p)) {
+          add(t, `imports ${p}`);
+          covered = true;
+        }
     }
     if (!covered) unmapped.push(p);
   }
@@ -117,14 +148,21 @@ export function affected(map: Map, changed: string[], tracked: string[], root: s
 
 if (import.meta.main) {
   const argv = process.argv.slice(2);
-  let root = resolve(import.meta.dirname, '..'), mapFile = '', base = 'main';
+  let root = resolve(import.meta.dirname, '..'),
+    mapFile = '',
+    base = 'main';
   let paths: string[] | null = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--root') root = resolve(argv[++i]);
     else if (argv[i] === '--map') mapFile = argv[++i];
     else if (argv[i] === '--base') base = argv[++i];
-    else if (argv[i] === '--paths') { paths = argv.slice(i + 1); break; }
-    else { console.error(`affected: unknown argument ${argv[i]}`); process.exit(2); }
+    else if (argv[i] === '--paths') {
+      paths = argv.slice(i + 1);
+      break;
+    } else {
+      console.error(`affected: unknown argument ${argv[i]}`);
+      process.exit(2);
+    }
   }
   try {
     mapFile ||= [join(root, 'tools', 'affected-map.txt'), join(root, 'affected-map.txt')].find(existsSync) ?? '';
@@ -135,7 +173,10 @@ if (import.meta.main) {
     if (a.empty) console.log('empty');
     for (const r of a.run) console.log(`run\t${r.test}\t${r.why.join(', ')}`);
     for (const u of a.unmapped) console.log(`unmapped\t${u}`);
-    if (a.full) { console.log('full'); process.exit(3); }
+    if (a.full) {
+      console.log('full');
+      process.exit(3);
+    }
   } catch (e) {
     console.error(`affected: ${(e as Error).message}`);
     process.exit(2);

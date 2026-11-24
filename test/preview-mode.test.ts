@@ -59,8 +59,18 @@ before(async () => {
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     cwd: repo,
     env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: data, PREVIEW: '1', CITADEL_RESUME_GAP_MS: '200', CLAUDE_BIN: fakeClaude,
-      CLAUDE_CONFIG_DIR: join(root, 'claude-config'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40),
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      CITADEL_HOST_SIGNALS: 'fixed',
+      CITADEL_ZONE: TEST_ZONE,
+      PORT: '0',
+      DATA_DIR: data,
+      PREVIEW: '1',
+      CITADEL_RESUME_GAP_MS: '200',
+      CLAUDE_BIN: fakeClaude,
+      CLAUDE_CONFIG_DIR: join(root, 'claude-config'),
+      COORDINATOR_PASSWORD: PASSWORD,
+      SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
@@ -68,7 +78,9 @@ before(async () => {
   server.stdout!.pipe(process.stdout);
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   const res = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
   });
   cookie = res.headers.get('set-cookie')!.split(';')[0];
 });
@@ -95,7 +107,9 @@ test('no new minions, schemes or machine connections', async () => {
 
 test('a state change pushes to nobody', async () => {
   const res = await fetch(`${base}/api/tickets/${ticket.id}`, {
-    method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: 'blocked', note: 'stuck' }),
+    method: 'PATCH',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ state: 'blocked', note: 'stuck' }),
   });
   assert.equal(res.status, 200);
   await holds('a state change pushes to nobody', () => pushHits === 0, { ms: 500 });
@@ -113,11 +127,22 @@ test('nothing resumes the copied mid-turn minion, and no claude ever ran', async
 test('a preview exits once the server that started it is gone', async () => {
   const dir = mkdtempSync(join(root, 'orphan-'));
   // A stand-in for the live server: it starts the preview, then dies without cleaning up.
-  const parent = spawn(process.execPath, ['-e', `require('node:child_process').spawn(process.execPath, [${JSON.stringify(join(repo, 'server.ts'))}], { stdio: ['ignore', 'inherit', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: ${JSON.stringify(TEST_ZONE)}, PORT: '0', DATA_DIR: ${JSON.stringify(dir)}, PREVIEW: '1', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: ${JSON.stringify(join(dir, 'claude'))}, COORDINATOR_PASSWORD: '${PASSWORD}', SESSION_SECRET: '${'x'.repeat(40)}' } }); setInterval(() => {}, 1000);`], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const parent = spawn(
+    process.execPath,
+    [
+      '-e',
+      `require('node:child_process').spawn(process.execPath, [${JSON.stringify(join(repo, 'server.ts'))}], { stdio: ['ignore', 'inherit', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: ${JSON.stringify(TEST_ZONE)}, PORT: '0', DATA_DIR: ${JSON.stringify(dir)}, PREVIEW: '1', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: ${JSON.stringify(join(dir, 'claude'))}, COORDINATOR_PASSWORD: '${PASSWORD}', SESSION_SECRET: '${'x'.repeat(40)}' } }); setInterval(() => {}, 1000);`,
+    ],
+    { stdio: ['ignore', 'pipe', 'ignore'] },
+  );
   tmp.track(parent);
   // The preview's stdout is the stand-in's, so its listening line says where it is.
   const port = await listeningPort(parent);
-  const up = () => fetch(`http://127.0.0.1:${port}/api/health`).then((r) => r.ok, () => false);
+  const up = () =>
+    fetch(`http://127.0.0.1:${port}/api/health`).then(
+      (r) => r.ok,
+      () => false,
+    );
   assert.equal(await up(), true);
   parent.kill('SIGKILL');
   await until('the preview to notice its parent is gone', async () => !(await up()), 10_000);
@@ -125,7 +150,11 @@ test('a preview exits once the server that started it is gone', async () => {
 
 test('a dev copy exits by itself once nobody has asked it anything for IDLE_EXIT_MS', async () => {
   const dir = mkdtempSync(join(root, 'idle-'));
-  const p = spawn(process.execPath, [join(repo, 'server.ts')], { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: dir, PREVIEW: '1', IDLE_EXIT_MS: '1500', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40) } });
+  const p = spawn(process.execPath, [join(repo, 'server.ts')], {
+    cwd: repo,
+    stdio: ['ignore', 'pipe', 'ignore'],
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: dir, PREVIEW: '1', IDLE_EXIT_MS: '1500', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40) },
+  });
   tmp.track(p);
   const port = await listeningPort(p);
   assert.equal((await fetch(`http://127.0.0.1:${port}/api/health`)).ok, true);

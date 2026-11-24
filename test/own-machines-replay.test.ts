@@ -26,7 +26,12 @@ test("a batch with Josh asking and Dana's ride-along message gets Josh's machine
   mkdirSync(cwd);
   store.setTicketDir(t.id, cwd, null);
   const asked: number[][] = [];
-  const r = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 'secret' }), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({ COORDINATOR_TOKEN: 'secret' }),
+    fake,
+  );
   r.pollMs = 10;
   r.personOf = (author) => [eve, josh, dana].find((u) => u.name === author)?.id ?? null;
   r.machines = (_project, askers) => (asked.push(askers), []);

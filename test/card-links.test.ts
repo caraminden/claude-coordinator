@@ -19,12 +19,11 @@ testPins();
 const root = mkdtempSync(join(tmpdir(), 'card-links-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-const card = (minion: number | null, event: number, kind: CardLink['kind'] = 'question'): CardLink =>
-  ({ minion, kind, label: 'Layout', href: `${minion == null ? '#/p/2' : `#/p/2/t/${minion}`}?e=${event}` });
+const card = (minion: number | null, event: number, kind: CardLink['kind'] = 'question'): CardLink => ({ minion, kind, label: 'Layout', href: `${minion == null ? '#/p/2' : `#/p/2/t/${minion}`}?e=${event}` });
 const cards = [card(394, 11), card(400, 22, 'plan'), card(null, 33)];
 const missing = (text: string, self: number | null = 400) => unlinkedCards(text, cards, self).map((g) => g.map((c) => c.href));
 
-test('cardHref opens a minion\'s or the Taskmaster\'s chat at the card (base.js jumpHref)', () => {
+test("cardHref opens a minion's or the Taskmaster's chat at the card (base.js jumpHref)", () => {
   assert.equal(cardHref({ project_id: 2, kind: 'ticket', number: 394, id: 9 }, 11), '#/p/2/t/394?e=11');
   assert.equal(cardHref({ project_id: 2, kind: 'coordinator', number: null, id: 1 }, 33), '#/p/2?e=33');
   assert.equal(cardLabel('plan', { summary: 'Build it this way' }), 'Build it this way');
@@ -33,7 +32,7 @@ test('cardHref opens a minion\'s or the Taskmaster\'s chat at the card (base.js 
   assert.equal(cardLabel('question', { questions: [], doc: { path: '/w/takes.html', title: 'Header takes' } }), 'picks on “Header takes”');
 });
 
-test('flags a card mentioned without its link: another minion\'s by #N, else this chat\'s own', () => {
+test("flags a card mentioned without its link: another minion's by #N, else this chat's own", () => {
   // The Taskmaster relaying (the Transdata case).
   assert.deepEqual(missing('#394 has a card waiting on your pick.', null), [['#/p/2/t/394?e=11']]);
   assert.deepEqual(missing("#394's card is still open.", null), [['#/p/2/t/394?e=11']]);
@@ -56,13 +55,14 @@ test('lets through linked cards, other senses with no card waiting, and code', (
     'The fix is in `card.ts`.',
     // Cardinal, discard: not the word.
     'Discard the cardinal sins.',
-  ]) assert.deepEqual(missing(ok), [], ok);
+  ])
+    assert.deepEqual(missing(ok), [], ok);
   // No card waiting here at all.
   assert.deepEqual(missing('The card spacing is fixed.', 395), []);
   assert.deepEqual(unlinkedCards('#394 has a card.', [], null), []);
 });
 
-test('the link check sends a reply back once with the card\'s link, then lets the rewrite through', async () => {
+test("the link check sends a reply back once with the card's link, then lets the rewrite through", async () => {
   const dir = join(root, 'turn');
   mkdirSync(dir, { recursive: true });
   const refs: SchemeRefs = { scheme: 'Citadel', others: [], minions: {}, self: null, cards };
@@ -78,13 +78,18 @@ test('the link check sends a reply back once with the card\'s link, then lets th
   assert.equal(await check({ last_assistant_message: '#394 has a card.', prompt_id: 'p2' }, cfg), null);
 });
 
-test('a minion\'s view lists its waiting cards with links, and a card posted mid-turn reaches running turns\' snapshots', async () => {
+test("a minion's view lists its waiting cards with links, and a card posted mid-turn reaches running turns' snapshots", async () => {
   const fake = join(root, 'claude');
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db.sqlite'));
   store.typedHandlesUpTo = 0;
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const clock = new FakeClock();
   runner.clock = clock;
   const p = store.createProject('Citadel', null);
@@ -95,10 +100,13 @@ test('a minion\'s view lists its waiting cards with links, and a card posted mid
   const approval = store.listEvents(minion.id).find((e) => e.kind === 'approval')!;
   const view = runner.view(store.getTicket(minion.id)!);
   const at = `#/p/${p.id}/t/${minion.number}`;
-  assert.deepEqual(view.open_cards.map((c) => [c.kind, c.label, c.href]), [
-    ['question', 'Layout', `${at}?e=${q.id}`],
-    ['approval', 'Bash: List', `${at}?e=${approval.id}`],
-  ]);
+  assert.deepEqual(
+    view.open_cards.map((c) => [c.kind, c.label, c.href]),
+    [
+      ['question', 'Layout', `${at}?e=${q.id}`],
+      ['approval', 'Bash: List', `${at}?e=${approval.id}`],
+    ],
+  );
 
   // Another minion's turn is running: a plan posted now lands in its snapshot, with it as `self`.
   const dir = join(root, 'tm-turn');
@@ -121,13 +129,18 @@ test('a minion\'s view lists its waiting cards with links, and a card posted mid
   (runner as any).turns.delete(tm.id);
 });
 
-test('a scheme\'s snapshots refresh at most once per 2 s, from one open-cards query however many minions it has (#1562)', async () => {
+test("a scheme's snapshots refresh at most once per 2 s, from one open-cards query however many minions it has (#1562)", async () => {
   const fake = join(root, 'claude-1562');
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db-1562.sqlite'));
   store.typedHandlesUpTo = 0;
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const clock = new FakeClock();
   runner.clock = clock;
   const p = store.createProject('Busy', null);
@@ -140,7 +153,8 @@ test('a scheme\'s snapshots refresh at most once per 2 s, from one open-cards qu
     (runner as any).turns.set(m.id, { dir });
     return join(dir, 'scheme-refs.json');
   });
-  let perMinion = 0, perScheme = 0;
+  let perMinion = 0,
+    perScheme = 0;
   const { openCardsOf, openCards } = store;
   store.openCardsOf = (id) => (perMinion++, openCardsOf.call(store, id));
   store.openCards = (id) => (perScheme++, openCards.call(store, id));
@@ -154,13 +168,19 @@ test('a scheme\'s snapshots refresh at most once per 2 s, from one open-cards qu
   for (let i = 0; i < 5; i++) runner.emit(minions[11 + i].id, 'question', { id: `b${i}`, questions: [{ header: 'B', question: '?' }] });
   assert.deepEqual(await counts(), [1, 1, 1]);
   assert.equal(perScheme, 1);
-  assert.deepEqual(clock.pending().map((t) => t.in), [2_000]);
+  assert.deepEqual(
+    clock.pending().map((t) => t.in),
+    [2_000],
+  );
   // A running minion's own card reaches its own snapshot at once, gap or not: its reply's link check may read it now.
   clock.advance(1_000);
   runner.emit(minions[1].id, 'question', { id: 'own', questions: [{ header: 'O', question: '?' }] });
   assert.deepEqual(await counts(), [1, 7, 1]);
   assert.equal(perScheme, 2);
-  assert.deepEqual(clock.pending().map((t) => t.in), [1_000]);
+  assert.deepEqual(
+    clock.pending().map((t) => t.in),
+    [1_000],
+  );
   clock.advance(1_000);
   assert.deepEqual(await counts(), [7, 7, 7]);
   assert.deepEqual([perScheme, perMinion], [3, 0]);
@@ -180,7 +200,7 @@ const held = { minion: 6, kind: 'question', label: 'Crossref mailto', href: '#/p
 const earlier = { minion: 6, kind: 'plan', label: 'Build it', href: '#/p/7/t/6?e=300', below: false } satisfies CardLink;
 const wrong = (text: string, list: CardLink[] = [held, earlier]) => misplacedCards(text, list, 6).map((w) => [w.card.href, w.said]);
 
-test('flags a direction word that contradicts where this chat\'s card sits', () => {
+test("flags a direction word that contradicts where this chat's card sits", () => {
   assert.deepEqual(wrong(transdata6), [['#/p/7/t/6?e=349108', 'above']]);
   // The word right after the link counts too.
   assert.deepEqual(wrong('Answer [the card](#/p/7/t/6?e=349108) above.'), [['#/p/7/t/6?e=349108', 'above']]);
@@ -188,15 +208,10 @@ test('flags a direction word that contradicts where this chat\'s card sits', () 
   assert.deepEqual(wrong('[The plan card below](#/p/7/t/6?e=300) still waits.'), [['#/p/7/t/6?e=300', 'below']]);
 });
 
-test('lets through the right word, no word, other chats\' cards and snapshots without positions', () => {
-  for (const ok of [
-    transdata6.replace('above', 'below'),
-    '[The plan card above](#/p/7/t/6?e=300) still waits.',
-    'Answer [the card](#/p/7/t/6?e=349108) when you can.',
-    '`[the card above](#/p/7/t/6?e=349108)`',
-  ]) assert.deepEqual(wrong(ok), [], ok);
+test("lets through the right word, no word, other chats' cards and snapshots without positions", () => {
+  for (const ok of [transdata6.replace('above', 'below'), '[The plan card above](#/p/7/t/6?e=300) still waits.', 'Answer [the card](#/p/7/t/6?e=349108) when you can.', '`[the card above](#/p/7/t/6?e=349108)`']) assert.deepEqual(wrong(ok), [], ok);
   // Another minion's card: no direction relative to this reply.
-  assert.deepEqual(misplacedCards('[#394\'s card above](#/p/7/t/394?e=11)', [{ ...held, minion: 394, href: '#/p/7/t/394?e=11' }], 6), []);
+  assert.deepEqual(misplacedCards("[#394's card above](#/p/7/t/394?e=11)", [{ ...held, minion: 394, href: '#/p/7/t/394?e=11' }], 6), []);
   const { below: _, ...unknown } = held;
   assert.deepEqual(wrong(transdata6, [unknown]), []);
 });
@@ -212,13 +227,18 @@ test('the link check sends back the Transdata #6 reply, saying the card is below
   assert.equal(await check({ last_assistant_message: transdata6.replace('above', 'below'), prompt_id: 'p2' }, cfg), null);
 });
 
-test('a turn\'s snapshot marks its own cards below until a person writes or the turn ends', () => {
+test("a turn's snapshot marks its own cards below until a person writes or the turn ends", () => {
   const fake = join(root, 'claude-412');
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db-412.sqlite'));
   store.typedHandlesUpTo = 0;
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const p = store.createProject('Transdata', null);
   const minion = store.createTicket({ project_id: p.id, title: 'Citations', permission_mode: 'bypassPermissions', created_by: 'Cara' });
   const other = store.createTicket({ project_id: p.id, title: 'Other', permission_mode: 'bypassPermissions', created_by: 'Cara' });
@@ -236,10 +256,16 @@ test('a turn\'s snapshot marks its own cards below until a person writes or the 
   // The turn ended: the next turn's words go under it.
   runner.emit(minion.id, 'claude', { type: 'result', subtype: 'success', is_error: false });
   runner.emit(minion.id, 'plan', { id: 'p1', summary: 'Build it', plan: 'x', status: 'pending' });
-  assert.deepEqual(snap(), [[minion.number, 'question', false], [minion.number, 'plan', true]]);
+  assert.deepEqual(snap(), [
+    [minion.number, 'question', false],
+    [minion.number, 'plan', true],
+  ]);
   // A message mid-turn lets go of it too (a person's would answer it; the Taskmaster's leaves it waiting).
   runner.emit(minion.id, 'user_message', { author: 'Taskmaster', text: 'Also check PubMed' });
-  assert.deepEqual(snap(), [[minion.number, 'question', false], [minion.number, 'plan', false]]);
+  assert.deepEqual(snap(), [
+    [minion.number, 'question', false],
+    [minion.number, 'plan', false],
+  ]);
 });
 
 // Links to answered cards (#531; Cara, 2026-11-11: "This is like the third time you told me something was
@@ -250,25 +276,27 @@ const flagged = (text: string) => staleCards(text, [answered]).map((c) => c.href
 
 test('flags a link to an answered card that the reply still calls waiting', () => {
   for (const bad of [
-    'Still waiting on you: the root step on [#523\'s card](#/p/2/t/523?e=50).',
-    'Waiting on you:\n\n- #520 is green.\n- The root step on [#523\'s card](#/p/2/t/523?e=50)',
-    '**Needs you**\n1. [#523\'s card](#/p/2/t/523?e=50): the root step',
-    'Tap Done on [#523\'s card](#/p/2/t/523?e=50) when you have run it.',
-  ]) assert.deepEqual(flagged(bad), ['#/p/2/t/523?e=50'], bad);
+    "Still waiting on you: the root step on [#523's card](#/p/2/t/523?e=50).",
+    "Waiting on you:\n\n- #520 is green.\n- The root step on [#523's card](#/p/2/t/523?e=50)",
+    "**Needs you**\n1. [#523's card](#/p/2/t/523?e=50): the root step",
+    "Tap Done on [#523's card](#/p/2/t/523?e=50) when you have run it.",
+  ])
+    assert.deepEqual(flagged(bad), ['#/p/2/t/523?e=50'], bad);
 });
 
 test('lets through open cards, links that say the card is answered, neutral mentions and code', () => {
   for (const ok of [
     'You answered [the card](#/p/2/t/523?e=50) at 2:31, so nothing waits on you.',
-    'Waiting on you: [#394\'s card](#/p/2/t/394?e=11).',
-    'Per [#523\'s card](#/p/2/t/523?e=50), I ran the root step.',
-    'Waiting on you: nothing.\n\nI ran the root step from [#523\'s card](#/p/2/t/523?e=50).',
-    'Already answered:\n- [#523\'s card](#/p/2/t/523?e=50), still waiting on CI meanwhile',
-    '`Waiting on you: [#523\'s card](#/p/2/t/523?e=50)`',
-    'No need to answer [#523\'s card](#/p/2/t/523?e=50) any more.',
-    'CI is pending.\n\n- Reference: [#523\'s card](#/p/2/t/523?e=50)',
-  ]) assert.deepEqual(flagged(ok), [], ok);
-  assert.deepEqual(staleCards('Waiting on you: [#523\'s card](#/p/2/t/523?e=50)', []), []);
+    "Waiting on you: [#394's card](#/p/2/t/394?e=11).",
+    "Per [#523's card](#/p/2/t/523?e=50), I ran the root step.",
+    "Waiting on you: nothing.\n\nI ran the root step from [#523's card](#/p/2/t/523?e=50).",
+    "Already answered:\n- [#523's card](#/p/2/t/523?e=50), still waiting on CI meanwhile",
+    "`Waiting on you: [#523's card](#/p/2/t/523?e=50)`",
+    "No need to answer [#523's card](#/p/2/t/523?e=50) any more.",
+    "CI is pending.\n\n- Reference: [#523's card](#/p/2/t/523?e=50)",
+  ])
+    assert.deepEqual(flagged(ok), [], ok);
+  assert.deepEqual(staleCards("Waiting on you: [#523's card](#/p/2/t/523?e=50)", []), []);
 });
 
 test('the link check sends back a link to an answered card once, saying what happened to it', async () => {
@@ -276,7 +304,7 @@ test('the link check sends back a link to an answered card once, saying what hap
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'scheme-refs.json'), JSON.stringify({ scheme: 'Citadel', others: [], minions: {}, self: null, cards, settled: [answered] } satisfies SchemeRefs));
   const cfg = { cwd: dir, roots: [dir], nudged: join(dir, 'nudged'), refs: join(dir, 'scheme-refs.json') };
-  const text = 'Waiting on you: the root step on [#523\'s card](#/p/2/t/523?e=50).';
+  const text = "Waiting on you: the root step on [#523's card](#/p/2/t/523?e=50).";
   const verdict = await check({ last_assistant_message: text, prompt_id: 'p1' }, cfg);
   assert.equal(verdict?.decision, 'block');
   assert.ok(verdict!.reason.startsWith(SENT_BACK));
@@ -284,16 +312,21 @@ test('the link check sends back a link to an answered card once, saying what hap
   // The second try goes through as it is.
   assert.equal(await check({ last_assistant_message: text, prompt_id: 'p1' }, cfg), null);
   // A link to an open card in the same words passes.
-  assert.equal(await check({ last_assistant_message: 'Waiting on you: [#394\'s card](#/p/2/t/394?e=11).', prompt_id: 'p2' }, cfg), null);
+  assert.equal(await check({ last_assistant_message: "Waiting on you: [#394's card](#/p/2/t/394?e=11).", prompt_id: 'p2' }, cfg), null);
 });
 
-test('a turn\'s snapshot lists the scheme\'s recently settled cards with who settled them, when and how', () => {
+test("a turn's snapshot lists the scheme's recently settled cards with who settled them, when and how", () => {
   const fake = join(root, 'claude-531');
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db-531.sqlite'));
   store.typedHandlesUpTo = 0;
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const p = store.createProject('Citadel', null);
   const tm = store.createTicket({ project_id: p.id, title: 'Watcher', permission_mode: 'bypassPermissions', created_by: 'Cara' });
   const a = store.createTicket({ project_id: p.id, title: 'Asker', permission_mode: 'bypassPermissions', created_by: 'Cara' });
@@ -319,14 +352,20 @@ test('a turn\'s snapshot lists the scheme\'s recently settled cards with who set
   (runner as any).writeRefs(file, store.getTicket(tm.id)!, undefined, true);
   const snap = JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs;
   const at = (t: typeof a, e: { id: number }) => `#/p/${p.id}/t/${t.number}?e=${e.id}`;
-  assert.deepEqual(snap.cards!.map((c) => c.href), [at(a, open)]);
-  assert.deepEqual(snap.settled!.map((c) => [c.href, c.kind, c.label, c.how]), [
-    [at(a, clicked), 'question', 'Root step', `answered by Cara at ${clockTime(click.created_at)}: Done, I ran it`],
-    [at(a, plan), 'plan', 'Build it', `approved by Josh at ${clockTime(1_000)}`],
-    [at(b, typed), 'question', 'Name', `answered by Josh at ${clockTime(reply.created_at)}: Call it Keep`],
-    [at(b, dropped), 'question', 'Colour', `#${b.number} was dismissed`],
-    [at(a, approval), 'approval', 'Bash: List', `allowed by Cara at ${clockTime(allowed.created_at)}`],
-  ]);
+  assert.deepEqual(
+    snap.cards!.map((c) => c.href),
+    [at(a, open)],
+  );
+  assert.deepEqual(
+    snap.settled!.map((c) => [c.href, c.kind, c.label, c.how]),
+    [
+      [at(a, clicked), 'question', 'Root step', `answered by Cara at ${clockTime(click.created_at)}: Done, I ran it`],
+      [at(a, plan), 'plan', 'Build it', `approved by Josh at ${clockTime(1_000)}`],
+      [at(b, typed), 'question', 'Name', `answered by Josh at ${clockTime(reply.created_at)}: Call it Keep`],
+      [at(b, dropped), 'question', 'Colour', `#${b.number} was dismissed`],
+      [at(a, approval), 'approval', 'Bash: List', `allowed by Cara at ${clockTime(allowed.created_at)}`],
+    ],
+  );
 });
 
 test('a later snapshot sees replies and results that came after the last one, and still not clicks on other cards (#622)', () => {
@@ -335,7 +374,12 @@ test('a later snapshot sees replies and results that came after the last one, an
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db-622.sqlite'));
   store.typedHandlesUpTo = 0;
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const p = store.createProject('Citadel', null);
   const tm = store.createTicket({ project_id: p.id, title: 'Watcher', permission_mode: 'bypassPermissions', created_by: 'Cara' });
   const a = store.createTicket({ project_id: p.id, title: 'Asker', permission_mode: 'bypassPermissions', created_by: 'Cara' });
@@ -368,7 +412,7 @@ test('a later snapshot sees replies and results that came after the last one, an
   assert.ok(q1.id < q2.id);
 });
 
-test('cardWhat: a merge go, a tripwire approval, or the card\'s own kind (#575)', () => {
+test("cardWhat: a merge go, a tripwire approval, or the card's own kind (#575)", () => {
   assert.equal(cardWhat('question', { questions: [], kind: 'merge' }), 'ship');
   assert.equal(cardWhat('approval', { tool: 'Bash', merge: { repo: 'o/r' } }), 'ship');
   assert.equal(cardWhat('question', { questions: [], kind: 'merge', into: 5 }), 'merge', "a feeder's go card merges into its build");
@@ -380,8 +424,11 @@ test('cardWhat: a merge go, a tripwire approval, or the card\'s own kind (#575)'
   assert.equal(cardWhat('plan', { summary: 's' }), 'plan');
 });
 
-test('a choices card settled by its page\'s Send reads as picks sent (#804)', () => {
-  assert.equal(settledHow('question', { doc: { path: '/w/t.html', title: 'T' }, settled: { at: 1, by: 'Cara', sent: true } }, null, null, null, () => '2:31am'), 'picks sent by Cara at 2:31am');
+test("a choices card settled by its page's Send reads as picks sent (#804)", () => {
+  assert.equal(
+    settledHow('question', { doc: { path: '/w/t.html', title: 'T' }, settled: { at: 1, by: 'Cara', sent: true } }, null, null, null, () => '2:31am'),
+    'picks sent by Cara at 2:31am',
+  );
 });
 
 test('an unrelated message does not settle a card; its own answer does, and is the one reported (#812)', () => {
@@ -390,7 +437,12 @@ test('an unrelated message does not settle a card; its own answer does, and is t
   chmodSync(fake, 0o755);
   const store = new Store(join(root, 'db-812.sqlite'));
   store.typedHandlesUpTo = 0;
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const p = store.createProject('Citadel', null);
   const tm = store.createTicket({ project_id: p.id, title: 'Watcher', permission_mode: 'bypassPermissions', created_by: 'Cara' });
   const a = store.createTicket({ project_id: p.id, title: 'Asker', permission_mode: 'bypassPermissions', created_by: 'Cara' });
@@ -403,13 +455,16 @@ test('an unrelated message does not settle a card; its own answer does, and is t
   };
   assert.equal(snap().cards!.length, 1, 'still waiting after an unrelated message');
   assert.deepEqual(snap().settled, []);
-  assert.deepEqual(store.openCardsOf(a.id).map((e) => e.id), [card.id]);
+  assert.deepEqual(
+    store.openCardsOf(a.id).map((e) => e.id),
+    [card.id],
+  );
   const click = runner.emit(a.id, 'user_message', { author: 'Cara', text: 'My answers…', answer: { questionId: 'q1', answers: [{ selected: ['Yes'] }] } });
   assert.equal(snap().cards!.length, 0);
   assert.equal(snap().settled![0].how, `answered by Cara at ${clockTime(click.created_at)}: Yes`);
 });
 
-test('a secret card is a secret card in the minions list and the tools\' waiting lines, naming only the secret', () => {
+test("a secret card is a secret card in the minions list and the tools' waiting lines, naming only the secret", () => {
   const data = { id: 'x', questions: [], secret: { name: 'BRAVE_SEARCH_KEY', scope: 'scheme' } };
   assert.equal(cardWhat('question', data), 'secret');
   const c = { minion: 3, kind: 'question' as const, what: cardWhat('question', data), label: cardLabel('question', data), href: '#/p/2/t/3?e=9' };

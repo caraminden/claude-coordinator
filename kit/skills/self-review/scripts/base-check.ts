@@ -59,7 +59,10 @@ export function isTestPath(p: string, script = '', rel = p): boolean {
   if (parts.slice(0, -1).some((s) => ['test', 'tests', '__tests__', 'spec', 'testdata', 'fixtures'].includes(s))) return true;
   if (JS_DASH_TEST.test(name) && !/\.(?:test|spec)\./.test(name)) {
     const d = dirname(rel);
-    return script.split(/\s+/).map((a) => a.replace(/^['"]|['"]$/g, '')).some((a) => a === rel || globs(rel, a) || (d !== '.' && (a.replace(/\/$/, '') === d || a.startsWith(d + '/'))));
+    return script
+      .split(/\s+/)
+      .map((a) => a.replace(/^['"]|['"]$/g, ''))
+      .some((a) => a === rel || globs(rel, a) || (d !== '.' && (a.replace(/\/$/, '') === d || a.startsWith(d + '/'))));
   }
   return SH_TEST.test(name) || JS_TEST.test(name) || PY_TEST.test(name) || /(?:^|\/|_)tests?\.rs$/.test(p) || /_test\.go$/.test(name) || /Tests?\.cs$/.test(name);
 }
@@ -107,7 +110,10 @@ export function casesOf(text: string, lang: 'js' | 'rs' | 'py'): Map<string, str
   const out = new Map<string, string>();
   hits.forEach((m, k) => {
     const name = lang === 'js' ? m[2].replace(/\\(.)/g, '$1') : m[1];
-    const body = text.slice(m.index, hits[k + 1]?.index ?? text.length).replace(/(?:\n[ \t]*[})\];,]*[ \t]*)+$/, '').trimEnd();
+    const body = text
+      .slice(m.index, hits[k + 1]?.index ?? text.length)
+      .replace(/(?:\n[ \t]*[})\];,]*[ \t]*)+$/, '')
+      .trimEnd();
     out.set(name, (out.get(name) ?? '') + body);
   });
   return out;
@@ -363,7 +369,10 @@ export function cargoArgs(root: string, path: string, cases: string[] = []): str
   // module's test of the same name can't stand in for one that never ran).
   m = /^tests\/([^/]+)\/(.+)\.rs$/.exec(rel);
   if (m) {
-    const mod = m[2].split('/').filter((s) => s !== 'mod').join('::');
+    const mod = m[2]
+      .split('/')
+      .filter((s) => s !== 'mod')
+      .join('::');
     return ['-p', pkg, '--test', m[1], '--', ...(cases.length ? cases.map((c) => `${mod}::${c}`) : [`${mod}::`])];
   }
   m = /^src\/(.*)\.rs$/.exec(rel);
@@ -372,7 +381,10 @@ export function cargoArgs(root: string, path: string, cases: string[] = []): str
   if (m[1] === 'main' || m[1].startsWith('bin/')) return ['-p', pkg, '--bins', ...(cases.length ? ['--', ...cases] : [])];
   // A crate with no library has only binaries: its src/ modules belong to the bin target, and `--lib` would fail with "no library targets found".
   if (!existsSync(join(root, dir, 'src', 'lib.rs'))) return ['-p', pkg, '--bins', ...(cases.length ? ['--', ...cases] : [])];
-  const mod = m[1].split('/').filter((s) => s !== 'mod' && s !== 'lib').join('::');
+  const mod = m[1]
+    .split('/')
+    .filter((s) => s !== 'mod' && s !== 'lib')
+    .join('::');
   return ['-p', pkg, '--lib', '--', ...(cases.length ? cases : mod ? [`${mod}::`] : [])];
 }
 
@@ -391,7 +403,12 @@ function main(argv: string[]): number {
     else if (a === '--cmd') cmd = argv[++i];
     else if (a === '--timeout') limit = Number(argv[++i]);
     else if (a === '-h' || a === '--help') {
-      console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\nimport ')[0].replace(/^#!.*\n/, '').replace(/^\/\/ ?/gm, ''));
+      console.log(
+        readFileSync(fileURLToPath(import.meta.url), 'utf8')
+          .split('\nimport ')[0]
+          .replace(/^#!.*\n/, '')
+          .replace(/^\/\/ ?/gm, ''),
+      );
       return 0;
     } else {
       console.error(`base-check: unknown argument ${a} (--help)`);
@@ -406,7 +423,7 @@ function main(argv: string[]): number {
   try {
     root = git(process.cwd(), 'rev-parse', '--show-toplevel').trim();
   } catch {
-    console.error('base-check: run it inside the branch\'s worktree');
+    console.error("base-check: run it inside the branch's worktree");
     return 2;
   }
   const ref = baseRef ?? ['main', 'origin/main'].find((r) => spawnSync('git', ['rev-parse', '--verify', '-q', r], { cwd: root }).status === 0);
@@ -459,7 +476,7 @@ function main(argv: string[]): number {
       const r = runOne(root, tree, e, cmd, Math.min(limit, left), links);
       if (typeof r === 'string') verdicts.push({ kind: 'skipped', label: e.path, detail: r });
       else {
-        console.log(`  ran ${e.path}${e.spliced ? ' (HEAD\'s test module on the base\'s code)' : ''}: ${r.shown}`);
+        console.log(`  ran ${e.path}${e.spliced ? " (HEAD's test module on the base's code)" : ''}: ${r.shown}`);
         verdicts.push(...judge(e, r));
       }
     }

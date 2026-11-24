@@ -35,7 +35,7 @@ export function parseFixProof(raw: unknown): FixProof {
   const test = text('test', 300);
   if (isAbsolute(test) || normalize(test).startsWith('..')) throw new Error('fix_proof.test is a path inside your worktree, relative to it');
   const redOn = text('red_on', 40);
-  if (!/^[0-9a-f]{7,40}$/i.test(redOn)) throw new Error("fix_proof.red_on is the main commit the test ran red on, as a sha");
+  if (!/^[0-9a-f]{7,40}$/i.test(redOn)) throw new Error('fix_proof.red_on is the main commit the test ran red on, as a sha');
   const redOutput = text('red_output', 2000);
   const review = text('review', 200);
   if (!/^clean\b/i.test(review)) throw new Error('fix_proof.review starts with "clean": a deep review with findings left takes the go route');
@@ -68,7 +68,11 @@ export function dataOrAuth(files: string[], addedByFile: Map<string, string[]>):
     const hit = DATA_SQL.exec(text);
     if (!hit) continue;
     const from = text.lastIndexOf('\n', hit.index) + 1;
-    return `${file} adds \`${text.slice(from, from + 160).replace(/\s+/g, ' ').trim().slice(0, 80)}\`, which rewrites or deletes data`;
+    return `${file} adds \`${text
+      .slice(from, from + 160)
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80)}\`, which rewrites or deletes data`;
   }
   return null;
 }
@@ -109,7 +113,10 @@ export async function fixProofProblem(cwd: string, proof: FixProof, type: unknow
   const names = await git(cwd, ['diff', '--name-only', '--no-renames', `${base}...HEAD`]);
   const diff = await git(cwd, ['diff', '-U0', '--no-color', '--no-renames', `${base}...HEAD`]);
   if (!names.ok || !diff.ok) return `couldn't read your branch's diff from ${base}`;
-  const files = names.out.split('\n').map((f) => f.trim()).filter(Boolean);
+  const files = names.out
+    .split('\n')
+    .map((f) => f.trim())
+    .filter(Boolean);
   if (!files.includes(proof.test) && !TEST_PATH.test(proof.test)) return `fix_proof.test ${proof.test} is neither changed by your branch nor a test file`;
   const why = dataOrAuth(files, addedLines(diff.out));
   return why ? `${why}: data and auth changes always wait for a person's go` : null;

@@ -4,8 +4,7 @@ import { systemPrompt, turnContext } from '../src/prompts.ts';
 
 const project = { id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' } as any;
 const tm = { id: 1, number: 1, title: 'Taskmaster', kind: 'coordinator' } as any;
-const prompt = (role: 'person' | 'overlord' | null, builds = true) =>
-  systemPrompt(project, tm, '/s/1', '/s/p', '/t', '/m', [], true, '', null, [], null, builds, null, null, false, role);
+const prompt = (role: 'person' | 'overlord' | null, builds = true) => systemPrompt(project, tm, '/s/1', '/s/p', '/t', '/m', [], true, '', null, [], null, builds, null, null, false, role);
 
 test('a scheme with one Taskmaster gets no role line', () => {
   const p = prompt(null);
@@ -27,7 +26,7 @@ test("the Overlord's job is the narrow list and it is not a relay hub", () => {
   assert.ok(p.includes('Builds: a big feature'));
 });
 
-test('a minion names its owner\'s Taskmaster', () => {
+test("a minion names its owner's Taskmaster", () => {
   const m = systemPrompt(project, { ...tm, kind: 'ticket', number: 5 }, '/s/1', '/s/p', '/t', '/m');
   assert.match(m, /the session of the person who owns you/);
 });
@@ -47,7 +46,7 @@ test('only an advisor-trial model gets the consult lines (#954)', () => {
   assert.ok(!turn(null).includes('advisor'));
 });
 
-test('every scheme\'s Taskmaster, whatever its role, is told once to start everything and limit heavy work (#1488)', () => {
+test("every scheme's Taskmaster, whatever its role, is told once to start everything and limit heavy work (#1488)", () => {
   for (const role of [null, 'person', 'overlord'] as const) {
     const p = systemPrompt({ ...project, id: 9, name: 'Delve' }, tm, '/s/1', '/s/p', '/t', '/m', [], true, '', null, [], null, true, null, null, false, role);
     assert.equal(p.split('limit heavy work (citadel-heavy), not starts').length, 2, `${role}: the line once`);

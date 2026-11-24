@@ -35,7 +35,7 @@ test('a sqlite3 that errors on the audit probe still gets the audit stripped fro
   const copy = readdirSync(join(data, 'backups')).find((f) => /^coordinator-\d{4}-\d\d-\d\d\.db$/.test(f));
   assert.ok(copy, `the daily copy was made: ${r.stderr}`);
   const file = join(data, 'backups', copy);
-  assert.ok(!readFileSync(file).includes(WORDS), 'no trace of the players\' words in the copy');
+  assert.ok(!readFileSync(file).includes(WORDS), "no trace of the players' words in the copy");
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     assert.equal((db.prepare('SELECT count(*) AS n FROM contraption_turn_audit').get() as { n: number }).n, 0, 'the copy holds no turn audit');

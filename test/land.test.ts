@@ -21,7 +21,7 @@ test('rebases onto main, tests, fast-forwards main, and deploys holding the lock
   assert.equal(r.note(), 'locked=1 held=yes');
 });
 
-test("a rebase that changes land.sh hands over to the rebased copy, which keeps the lock and lands (#500)", () => {
+test('a rebase that changes land.sh hands over to the rebased copy, which keeps the lock and lands (#500)', () => {
   const r = setup();
   // The worktree runs its own tools/land.sh, as a minion does; main's newer one says it is the one running.
   for (const f of ['land.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
@@ -91,16 +91,24 @@ test("a red run's full log is kept under the branch's name, so the next landing 
 // F12a: a test run that can't write its temp file or its log never ran a test, but read "tests failed on the rebased branch".
 test("a test run that can't write its temp file or its log says so and that no test ran", async (t) => {
   const cases: [string, (r: ReturnType<typeof setup>, state: string) => Record<string, string>, RegExp][] = [
-    ['a read-only TMPDIR', (r) => {
-      const tmp = join(r.dir, 'ro-tmp');
-      mkdirSync(tmp, { mode: 0o555 });
-      return { TMPDIR: tmp };
-    }, /run-tests: could not make a temp file in .*ro-tmp/],
-    ['an unwritable land-test.log', (_, state) => {
-      mkdirSync(state, { recursive: true, mode: 0o700 });
-      writeFileSync(join(state, 'land-test.log'), '', { mode: 0o444 });
-      return {};
-    }, /run-tests: could not write the log .*land-test\.log/],
+    [
+      'a read-only TMPDIR',
+      (r) => {
+        const tmp = join(r.dir, 'ro-tmp');
+        mkdirSync(tmp, { mode: 0o555 });
+        return { TMPDIR: tmp };
+      },
+      /run-tests: could not make a temp file in .*ro-tmp/,
+    ],
+    [
+      'an unwritable land-test.log',
+      (_, state) => {
+        mkdirSync(state, { recursive: true, mode: 0o700 });
+        writeFileSync(join(state, 'land-test.log'), '', { mode: 0o444 });
+        return {};
+      },
+      /run-tests: could not write the log .*land-test\.log/,
+    ],
   ];
   for (const [name, prep, said] of cases) {
     await t.test(name, () => {
@@ -180,7 +188,11 @@ test('a light land asks GitHub nothing and runs no test; kit, unlisted paths and
   assert.equal(c.calls(), '', 'not a word to GitHub');
   assert.equal(c.localRuns(), 0);
   assert.equal(r.note(), 'locked=1 held=yes', 'and it deployed');
-  for (const [file, lane] of [['kit/x.md', /lane: kit \(/], ['b.txt', null], ['tools/lanes', null]] as const) {
+  for (const [file, lane] of [
+    ['kit/x.md', /lane: kit \(/],
+    ['b.txt', null],
+    ['tools/lanes', null],
+  ] as const) {
     r.commit(r.wt, file, file === 'tools/lanes' ? 'light *\n' : 'two\n');
     const before = c.calls().length;
     res = c.run();
@@ -196,7 +208,10 @@ test('a light land asks GitHub nothing and runs no test; kit, unlisted paths and
 });
 
 // #565: one line per landing with how long each phase took, landed or refused.
-const timings = (shared: string) => landLog(shared).split('\n').filter((l) => l.includes(' · timing · '));
+const timings = (shared: string) =>
+  landLog(shared)
+    .split('\n')
+    .filter((l) => l.includes(' · timing · '));
 test('a landing leaves one timing line with every phase; CI that answers fills the CI fields', () => {
   const r = setup();
   const c = ci(r);
@@ -206,7 +221,11 @@ test('a landing leaves one timing line with every phase; CI that answers fills t
   assert.equal(res.status, 0, res.stderr);
   assert.match(landLog(shared), /^# Retro log: land\.sh\n\nWritten by .*`timing` line per landing.*`restart` line per queued restart/s, 'the header names the new lines');
   // Whichever writer makes the day's file writes the header, so the three copies are one text.
-  const header = (f: string) => readFileSync(join(import.meta.dirname, '..', 'tools', f), 'utf8').split('\n').find((l) => l.includes("'# Retro log: land.sh'"))?.trim();
+  const header = (f: string) =>
+    readFileSync(join(import.meta.dirname, '..', 'tools', f), 'utf8')
+      .split('\n')
+      .find((l) => l.includes("'# Retro log: land.sh'"))
+      ?.trim();
   assert.ok(header('land.sh'));
   assert.equal(header('deploy.sh'), header('land.sh'));
   assert.equal(header('run-tests.sh'), header('land.sh'));
@@ -214,9 +233,13 @@ test('a landing leaves one timing line with every phase; CI that answers fills t
   assert.match(timings(shared)[0], /^- \d\d:\d\d:\d\dZ · timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy \d+ · live \d+ · landed$/);
   // #1722: each CI wait says what is left of the login's GitHub hour, and the landing logs its gh calls beside it.
   assert.match(res.stderr, /land: waiting for CI on \S+: .*\. GitHub calls left this hour: 4321\/5000, resets in 25 min\n/);
-  const githubLines = landLog(shared).split('\n').filter((l) => l.includes(' · github · '));
+  const githubLines = landLog(shared)
+    .split('\n')
+    .filter((l) => l.includes(' · github · '));
   assert.equal(githubLines.length, 1);
-  const counted = readFileSync(join(r.live, '.git', 'cc-deploy', 'gh-calls'), 'utf8').trim().split('\n').length;
+  const counted = readFileSync(join(r.live, '.git', 'cc-deploy', 'gh-calls'), 'utf8')
+    .trim()
+    .split('\n').length;
   assert.ok(counted >= 3, `the runners check, a push and the polls are counted: ${counted}`);
   assert.match(githubLines[0], new RegExp(`^- \\S+ · github · ticket/1-x · ${counted} gh calls · left 4321/5000 as CI began$`));
   // A deploy whose restart isn't live by the time it ends.
@@ -225,7 +248,11 @@ test('a landing leaves one timing line with every phase; CI that answers fills t
   assert.equal(res.status, 0, res.stderr);
   assert.match(timings(shared)[1], /· fallback - · deploy \d+ · live - · landed, not live yet$/);
   const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
-  assert.deepEqual(readdirSync(state).filter((f) => f.startsWith('times-')), [], "deploy.sh's times file goes at the end");
+  assert.deepEqual(
+    readdirSync(state).filter((f) => f.startsWith('times-')),
+    [],
+    "deploy.sh's times file goes at the end",
+  );
 });
 
 test('a landing stopped while it waits for CI is logged as stopped there, not landed', async () => {
@@ -233,7 +260,11 @@ test('a landing stopped while it waits for CI is logged as stopped there, not la
   const c = ci(r);
   r.commit(r.wt, 'b.txt', 'mine\n');
   const shared = join(r.dir, 'shared');
-  const child = spawn('bash', [land], { cwd: r.wt, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), COORDINATOR_SHARED_DIR: shared, PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', FAKE_CI: 'running', LAND_CI_TIMEOUT: '60' }, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn('bash', [land], {
+    cwd: r.wt,
+    env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), COORDINATOR_SHARED_DIR: shared, PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', FAKE_CI: 'running', LAND_CI_TIMEOUT: '60' },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
   let stderr = '';
   child.stderr!.on('data', (d) => (stderr += d));
   const done = new Promise((ok) => child.once('close', ok));
@@ -274,7 +305,14 @@ test("a retro log that can't be written changes neither a landing's output nor i
     writeFileSync(blocker, 'a file, not a folder\n');
     const res = r.run({ COORDINATOR_SHARED_DIR: shared && blocker });
     assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
-    return { status: res.status, stderr: res.stderr.replace(/\b[0-9a-f]{7,40}\b/g, 'H').replace(/\d\d:\d\d/g, 'T').replace(/\/\d+\//g, '/N/').replace(/(passed in) \d+ s/g, '$1 N s') };
+    return {
+      status: res.status,
+      stderr: res.stderr
+        .replace(/\b[0-9a-f]{7,40}\b/g, 'H')
+        .replace(/\d\d:\d\d/g, 'T')
+        .replace(/\/\d+\//g, '/N/')
+        .replace(/(passed in) \d+ s/g, '$1 N s'),
+    };
   });
   assert.deepEqual(runs[1], runs[0]);
   assert.equal(runs[0].status, 0);
@@ -299,7 +337,13 @@ test('a run of this very commit that is already green lands at once; one that wa
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /CI passed on .*ci\/7/);
   assert.equal(c2.localRuns(), 0);
-  assert.ok(c2.calls().split('\n').filter((l) => l.includes('head_sha')).length >= 4, 'it polled past the old run');
+  assert.ok(
+    c2
+      .calls()
+      .split('\n')
+      .filter((l) => l.includes('head_sha')).length >= 4,
+    'it polled past the old run',
+  );
 });
 
 test('red CI refuses with main untouched, shows the failed log, and never falls back to a run here', () => {
@@ -315,7 +359,14 @@ test('red CI refuses with main untouched, shows the failed log, and never falls 
   assert.match(res.stderr, /the red test's output \(run 7\)\n.*real\.test\.ts: failed again alone.*\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);
   assert.doesNotMatch(res.stderr, /CI FALLBACK|once more/);
   assert.doesNotMatch(landLog(shared), /· flake rerun ·/, 'a real failure gets no fresh run');
-  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1, 'one run only');
+  assert.equal(
+    c
+      .calls()
+      .split('\n')
+      .filter((l) => l.includes('/actions/runners ')).length,
+    1,
+    'one run only',
+  );
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   assert.equal(c.localRuns(), 0);
   assert.equal(c.refs(), '');
@@ -334,7 +385,14 @@ test("a red whose reruns alone were cut at CI's deadline is a real red: refused,
   assert.equal(res.status, 1);
   assert.match(res.stderr, /busy\.test\.ts: not rerun: CI's answer is due.*\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);
   assert.doesNotMatch(res.stderr, /CI FALLBACK|once more/);
-  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1, 'one run only');
+  assert.equal(
+    c
+      .calls()
+      .split('\n')
+      .filter((l) => l.includes('/actions/runners ')).length,
+    1,
+    'one run only',
+  );
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   assert.equal(c.localRuns(), 0);
 });
@@ -353,7 +411,14 @@ test('a red of flakes only gets one fresh CI run, and lands when that run is gre
   // src/flakes.ts parses these lines (a pipeline test can't import it; test/flakes.test.ts pins the same format).
   assert.match(res.stderr, /^land: flake: test\/busy\.test\.ts · in CI$/m);
   assert.match(res.stderr, /^land: flake: test\/slow\.test\.ts · in CI$/m);
-  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 2, 'a second push, so a new run');
+  assert.equal(
+    c
+      .calls()
+      .split('\n')
+      .filter((l) => l.includes('/actions/runners ')).length,
+    2,
+    'a second push, so a new run',
+  );
   assert.match(landLog(shared), /· flake rerun · ticket\/1-x · test\/busy\.test\.ts, test\/slow\.test\.ts · green$/m);
   assert.match(landLog(shared), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy \d+ · live \d+ · landed$/m);
   assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
@@ -372,7 +437,14 @@ test('a red of flakes only whose fresh run is red again refuses, whatever its la
   const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared, LAND_FLAKE_KEPT: '2' });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /running CI once more.*the red test's output \(run 8\).*tests failed on the rebased branch in CI again \(https:\/\/ci\/8\), on the one fresh run after a red whose files all passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\), so main is untouched/s);
-  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 2, 'two runs, never three');
+  assert.equal(
+    c
+      .calls()
+      .split('\n')
+      .filter((l) => l.includes('/actions/runners ')).length,
+    2,
+    'two runs, never three',
+  );
   assert.equal(res.stderr.match(/once more/g)!.length, 1);
   assert.match(landLog(shared), /· flake rerun · ticket\/1-x · test\/busy\.test\.ts, test\/slow\.test\.ts · red$/m);
   assert.doesNotMatch(res.stderr, /CI FALLBACK/);
@@ -390,9 +462,19 @@ test("a red of flakes only stays red when the scratch branch can't be deleted fo
   const shared = join(r.dir, 'shared');
   const res = c.run({ FAKE_CI: 'red', FAKE_CI_RERUN: 'green', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 1);
-  assert.match(res.stderr, /failed in the full run but passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\), but deleting land\/ticket\/1-x on GitHub to start a fresh run failed \(.*deletes refused.*\), so this stays red\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);
+  assert.match(
+    res.stderr,
+    /failed in the full run but passed alone \(test\/busy\.test\.ts, test\/slow\.test\.ts\), but deleting land\/ticket\/1-x on GitHub to start a fresh run failed \(.*deletes refused.*\), so this stays red\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s,
+  );
   assert.doesNotMatch(res.stderr, /CI FALLBACK|once more/);
-  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1, 'no second run asked for');
+  assert.equal(
+    c
+      .calls()
+      .split('\n')
+      .filter((l) => l.includes('/actions/runners ')).length,
+    1,
+    'no second run asked for',
+  );
   assert.match(landLog(shared), /· flake rerun · ticket\/1-x · .* · not started$/m);
   assert.equal(c.localRuns(), 0);
 });
@@ -404,7 +486,13 @@ test('a red with no rerun labels (too many files failed) refuses at once, and a 
   let res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'many' });
   assert.equal(res.status, 1);
   assert.doesNotMatch(res.stderr, /once more/);
-  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1);
+  assert.equal(
+    c
+      .calls()
+      .split('\n')
+      .filter((l) => l.includes('/actions/runners ')).length,
+    1,
+  );
 
   const r2 = setup();
   const c2 = ci(r2);
@@ -429,7 +517,13 @@ test('a run cut off before any test failed is no verdict: one fresh run decides,
   assert.match(res.stderr, /the CI run on \w+ was cut off before any test failed \(https:\/\/ci\/7\), so it says nothing about this commit: running CI once more\n.*CI passed on \w+ in \d+s \(https:\/\/ci\/8\)/s);
   assert.doesNotMatch(res.stderr, /CI FALLBACK|tests failed/);
   assert.match(landLog(shared), /· cut-off rerun · ticket\/1-x · https:\/\/ci\/7 · green$/m);
-  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 2);
+  assert.equal(
+    c
+      .calls()
+      .split('\n')
+      .filter((l) => l.includes('/actions/runners ')).length,
+    2,
+  );
   assert.equal(c.localRuns(), 0);
   assert.equal(c.refs(), '');
 
@@ -443,7 +537,14 @@ test('a run cut off before any test failed is no verdict: one fresh run decides,
   assert.match(res.stderr, /CI FALLBACK: CI was cut off twice before any test failed \(https:\/\/ci\/7, https:\/\/ci\/8\)/);
   assert.doesNotMatch(res.stderr, /tests failed/);
   assert.match(landLog(shared2), /· cut-off rerun · ticket\/1-x · https:\/\/ci\/7 · no answer$/m);
-  assert.equal(c2.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 2, 'never a third run');
+  assert.equal(
+    c2
+      .calls()
+      .split('\n')
+      .filter((l) => l.includes('/actions/runners ')).length,
+    2,
+    'never a third run',
+  );
   assert.equal(c2.localRuns(), 1, 'the fallback suite here had to pass');
 });
 
@@ -456,7 +557,13 @@ test('a hang run-tests.sh stopped prints the same interrupt but is a real red: r
   assert.equal(res.status, 1);
   assert.match(res.stderr, /a test hung.*\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);
   assert.doesNotMatch(res.stderr, /cut off|once more|CI FALLBACK/);
-  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1);
+  assert.equal(
+    c
+      .calls()
+      .split('\n')
+      .filter((l) => l.includes('/actions/runners ')).length,
+    1,
+  );
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
 });
 
@@ -484,7 +591,13 @@ test('a CI run killed from outside after a test had failed is a real red: refuse
   assert.equal(res.status, 1, res.stderr);
   assert.match(res.stderr, /land: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/);
   assert.doesNotMatch(res.stderr, /cut off|once more|CI FALLBACK/);
-  assert.equal(c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length, 1);
+  assert.equal(
+    c
+      .calls()
+      .split('\n')
+      .filter((l) => l.includes('/actions/runners ')).length,
+    1,
+  );
 });
 
 test('when CI cannot answer, it says so loudly, logs it, runs the suite here and lands', async (t) => {
@@ -499,7 +612,7 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
     ['GitHub stops answering while CI runs (#1655)', { FAKE_CI: 'running', FAKE_CI_FAIL_AFTER: '2', LAND_CI_TIMEOUT: '4' }, /CI FALLBACK: GitHub didn't answer since \d\d:\d\d \(\d+ polls failed in a row\) \(gh: API rate limit exceeded.*, so it isn't known whether CI finished/],
     ['the run was cancelled', { FAKE_CI: 'cancelled' }, /ended as cancelled/],
     ['the run failed before the tests', { FAKE_CI: 'red', FAKE_STEP: "the runner user's systemd" }, /failed in its setup step "the runner user's systemd", before any test ran/],
-    ['the runner\'s clock stayed skewed', { FAKE_CI: 'red', FAKE_STEP: "the runner's clock" }, /CI FALLBACK: runner clock: the CI runner's clock stayed skewed for 2 min, so no test ran/],
+    ["the runner's clock stayed skewed", { FAKE_CI: 'red', FAKE_STEP: "the runner's clock" }, /CI FALLBACK: runner clock: the CI runner's clock stayed skewed for 2 min, so no test ran/],
     ['LAND_CI=0', { LAND_CI: '0' }, /LAND_CI=0 was set/],
   ];
   for (const [name, extra, why] of cases) {
@@ -516,7 +629,13 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
       assert.match(landLog(shared), /^- \d\d:\d\d:\d\dZ · ci fallback · ticket\/1-x · /m);
       // #1722: once GitHub was asked at all, the fallback line ends with what was left of the hour.
       const left = extra.FAKE_QUOTA === 'down' ? 'unknown' : '4321/5000, resets in 25 min';
-      if (extra.LAND_CI !== '0') assert.ok(landLog(shared).split('\n').some((l) => l.includes(' · ci fallback · ticket/1-x · ') && l.endsWith(` · GitHub calls left: ${left}`)), landLog(shared));
+      if (extra.LAND_CI !== '0')
+        assert.ok(
+          landLog(shared)
+            .split('\n')
+            .some((l) => l.includes(' · ci fallback · ticket/1-x · ') && l.endsWith(` · GitHub calls left: ${left}`)),
+          landLog(shared),
+        );
       assert.match(landLog(shared), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue - · ci-run - · fallback \d+\+\d+ · deploy \d+ · live \d+ · landed$/m);
       assert.equal(c.localRuns(), 1);
       assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
@@ -567,9 +686,22 @@ test('a refused landing lets go of the deploy lock before it cleans up on GitHub
   let stderr = '';
   let ended = false;
   const landing = landAsync(r.wt, { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', FAKE_CI: 'red' }, 50_000, (e) => (stderr = e)).finally(() => (ended = true));
-  t.after(async () => { writeFileSync(gate, ''); await landing; }); // a failed wait below still lets the hook, and the landing, end
-  await until('the refusal', () => /tests failed on the rebased branch in CI/.test(stderr), 30_000, () => stderr);
-  await until('the lock to be free', () => spawnSync('flock', ['-n', lock, 'true']).status === 0, 4_000, () => stderr);
+  t.after(async () => {
+    writeFileSync(gate, '');
+    await landing;
+  }); // a failed wait below still lets the hook, and the landing, end
+  await until(
+    'the refusal',
+    () => /tests failed on the rebased branch in CI/.test(stderr),
+    30_000,
+    () => stderr,
+  );
+  await until(
+    'the lock to be free',
+    () => spawnSync('flock', ['-n', lock, 'true']).status === 0,
+    4_000,
+    () => stderr,
+  );
   assert.ok(!ended, 'freed while the cleanup still runs');
   writeFileSync(gate, '');
   const res = await landing;
@@ -607,7 +739,7 @@ const procAt = (r: ReturnType<typeof setup>, o?: Parameters<typeof quietProc>[1]
   const proc = quietProc(join(r.dir, 'proc'), o);
   return { LAND_QUIET_PROC: proc, CITADEL_HEAVY_PRESSURE: join(proc, 'pressure', 'cpu'), CITADEL_HEAVY_DIR: join(r.dir, 'heavy') };
 };
-test('on a quiet perigee the fallback runs the suite in citadel-heavy\'s slot, named, and lands', () => {
+test("on a quiet perigee the fallback runs the suite in citadel-heavy's slot, named, and lands", () => {
   const r = setup();
   const c = ci(r);
   r.commit(r.wt, 'b.txt', 'mine\n');
@@ -625,15 +757,30 @@ test('on a quiet perigee the fallback runs the suite in citadel-heavy\'s slot, n
 });
 
 // Each flips its world (CI answers, a runner comes back, perigee goes quiet) only once land.sh has said perigee is busy.
-const once = (act: () => void) => { let done = false; return (s: string) => { if (!done && /perigee is busy/.test(s)) { done = true; act(); } }; };
+const once = (act: () => void) => {
+  let done = false;
+  return (s: string) => {
+    if (!done && /perigee is busy/.test(s)) {
+      done = true;
+      act();
+    }
+  };
+};
 
 test('on a busy perigee the ship keeps waiting for CI, and lands on its answer without running the suite here', async () => {
-  for (const [name, o] of [['CPU pressure', { psi: 60 }], ['load', { load: 999 }], ['memory', { freePct: 5 }]] as const) {
+  for (const [name, o] of [
+    ['CPU pressure', { psi: 60 }],
+    ['load', { load: 999 }],
+    ['memory', { freePct: 5 }],
+  ] as const) {
     const r = setup();
     const c = ci(r);
     r.commit(r.wt, 'b.txt', 'mine\n');
     const gate = join(r.dir, 'ci-gate');
-    const res = await c.runAsync({ FAKE_CI: 'green', FAKE_CI_GATE: gate, LAND_CI_TIMEOUT: '1', LAND_QUIET_POLL: '0.2', ...procAt(r, o) }, once(() => writeFileSync(gate, '')));
+    const res = await c.runAsync(
+      { FAKE_CI: 'green', FAKE_CI_GATE: gate, LAND_CI_TIMEOUT: '1', LAND_QUIET_POLL: '0.2', ...procAt(r, o) },
+      once(() => writeFileSync(gate, '')),
+    );
     assert.equal(res.status, 0, `${name}: ${res.stderr}`);
     assert.match(res.stderr, /waiting for CI or a quiet perigee: CI: CI didn't finish within 1s of starting, but perigee is busy \(.+\), so this keeps asking CI/, name);
     assert.match(res.stderr, /CI passed/, name);
@@ -678,7 +825,7 @@ test("a run still in its full suite at CI's limit falls back then, as before: th
   }
 });
 
-test("reruns alone that outlast their window fall back at its end, once: the window is never extended again", () => {
+test('reruns alone that outlast their window fall back at its end, once: the window is never extended again', () => {
   const r = setup();
   const c = ci(r);
   r.commit(r.wt, 'b.txt', 'mine\n');
@@ -695,7 +842,10 @@ test('with no runner online and a busy perigee, the ship asks CI again until a r
   r.commit(r.wt, 'b.txt', 'mine\n');
   const runners = join(r.dir, 'runners');
   writeFileSync(runners, '0');
-  const res = await c.runAsync({ FAKE_RUNNERS_FILE: runners, LAND_QUIET_POLL: '0.2', ...procAt(r, { load: 999 }) }, once(() => writeFileSync(runners, '1')));
+  const res = await c.runAsync(
+    { FAKE_RUNNERS_FILE: runners, LAND_QUIET_POLL: '0.2', ...procAt(r, { load: 999 }) },
+    once(() => writeFileSync(runners, '1')),
+  );
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /CI: no citadel-ci-linux runner is online.*but perigee is busy/);
   assert.match(res.stderr, /CI passed/);
@@ -709,7 +859,10 @@ test('a busy perigee that turns quiet runs the suite then, whether CI was waited
     const c = ci(r);
     r.commit(r.wt, 'b.txt', 'mine\n');
     const p = procAt(r, { psi: 60 });
-    const res = await c.runAsync({ ...extra, ...p, LAND_QUIET_POLL: '0.2' }, once(() => quietProc(p.LAND_QUIET_PROC)));
+    const res = await c.runAsync(
+      { ...extra, ...p, LAND_QUIET_POLL: '0.2' },
+      once(() => quietProc(p.LAND_QUIET_PROC)),
+    );
     assert.equal(res.status, 0, res.stderr);
     assert.match(res.stderr, /but perigee is busy \(CPU pressure 60% \(quiet is under 20%\)\).*CI FALLBACK/s);
     assert.equal(c.localRuns(), 1);
@@ -763,15 +916,21 @@ test('CI with no answer and a perigee busy past the limit refuse the ship: main 
       assert.doesNotMatch(res.stderr, /CI FALLBACK/);
       assert.equal(c.localRuns(), 0);
       assert.equal(git(r.source, 'rev-parse', 'main'), main);
-    } finally { holder.kill(); }
+    } finally {
+      holder.kill();
+    }
   }
 });
 
 // #1360 (Cara, 2026-11-20, "Refused ships keep their place"): a refusal by the pipeline, not the ship's change, keeps its
 // ticket and goes again once; alone in line it goes again at once (no ship to let by: land-train-riders.test.ts has the line).
-const retries = (shared: string) => landLog(shared).split('\n').filter((l) => l.includes(' · retry in place · '));
+const retries = (shared: string) =>
+  landLog(shared)
+    .split('\n')
+    .filter((l) => l.includes(' · retry in place · '));
 // A test file that fails on the runs FLAKY_FAIL names (1,3: the 1st and 3rd), counted in FLAKY_COUNT.
-const flaky = "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.FLAKY_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if ((process.env.FLAKY_FAIL ?? '').split(',').includes(String(n))) throw new Error('flaky');\n}\n";
+const flaky =
+  "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.FLAKY_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if ((process.env.FLAKY_FAIL ?? '').split(',').includes(String(n))) throw new Error('flaky');\n}\n";
 
 test('a ship refused because CI and perigee were both busy keeps its ticket, goes again, and lands on that run (#1360)', async () => {
   const r = setup();
@@ -781,7 +940,10 @@ test('a ship refused because CI and perigee were both busy keeps its ticket, goe
   const p = procAt(r, { load: 999 });
   let flipped = false;
   const res = await c.runAsync({ LAND_CI: '0', ...p, LAND_QUIET_LIMIT: '1', LAND_QUIET_POLL: '0.2', COORDINATOR_SHARED_DIR: shared }, (s) => {
-    if (!flipped && /not your change/.test(s)) { flipped = true; quietProc(p.LAND_QUIET_PROC); }
+    if (!flipped && /not your change/.test(s)) {
+      flipped = true;
+      quietProc(p.LAND_QUIET_PROC);
+    }
   });
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /refused by the pipeline \(CI and perigee both busy for 0 min\), not your change: keeping its place in line and riding the next train, once/);
@@ -790,7 +952,10 @@ test('a ship refused because CI and perigee were both busy keeps its ticket, goe
   assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
   const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
   assert.equal(issued(state), 1, 'the same ticket, not a new one at the back');
-  assert.deepEqual(retries(shared).map((l) => l.replace(/^- \S+ /, '')), ['· retry in place · ticket/1-x · CI and perigee both busy for 0 min · landed']);
+  assert.deepEqual(
+    retries(shared).map((l) => l.replace(/^- \S+ /, '')),
+    ['· retry in place · ticket/1-x · CI and perigee both busy for 0 min · landed'],
+  );
   assert.equal(timings(shared).length, 1, 'one landing, one timing line');
 });
 
@@ -802,7 +967,11 @@ test('a retry in place that then conflicts with main is refused, and its retro l
   const p = procAt(r, { load: 999 });
   let moved = false;
   const res = await c.runAsync({ LAND_CI: '0', LAND_SMOKE: '0', ...p, LAND_QUIET_LIMIT: '1', LAND_QUIET_POLL: '0.2', COORDINATOR_SHARED_DIR: shared }, (s) => {
-    if (!moved && /not your change/.test(s)) { moved = true; r.commit(r.source, 'a.txt', 'theirs\n'); quietProc(p.LAND_QUIET_PROC); }
+    if (!moved && /not your change/.test(s)) {
+      moved = true;
+      r.commit(r.source, 'a.txt', 'theirs\n');
+      quietProc(p.LAND_QUIET_PROC);
+    }
   });
   assert.equal(res.status, 1, res.stderr);
   assert.match(res.stderr, /back at the front after its retry in place.*rebase onto main failed/s);
@@ -819,7 +988,9 @@ test("a ship whose suite couldn't start because the heavy slot was taken goes ag
   // A deploy build going first holds citadel-heavy up without quiet() seeing it, as one that takes the slot after it looked.
   const first = join(p.CITADEL_HEAVY_DIR, 'first');
   writeFileSync(first, 'deploy build: npm ci\n');
-  const fresh = setInterval(() => { if (existsSync(first)) writeFileSync(first, 'deploy build: npm ci\n'); }, 200);
+  const fresh = setInterval(() => {
+    if (existsSync(first)) writeFileSync(first, 'deploy build: npm ci\n');
+  }, 200);
   try {
     const res = await c.runAsync({ LAND_CI: '0', ...p, LAND_HEAVY_MAX_WAIT: '1', COORDINATOR_SHARED_DIR: shared }, (s) => {
       if (/not your change/.test(s)) rmSync(first, { force: true });
@@ -828,12 +999,15 @@ test("a ship whose suite couldn't start because the heavy slot was taken goes ag
     assert.match(res.stderr, /refused by the pipeline \(perigee's heavy slot was taken\), not your change/);
     assert.equal(c.localRuns(), 1);
     assert.match(retries(shared)[0], /· retry in place · ticket\/1-x · perigee's heavy slot was taken · landed$/);
-  } finally { clearInterval(fresh); }
+  } finally {
+    clearInterval(fresh);
+  }
 });
 
 // #1393: the suite here killed from outside before any test failed is the pipeline's, not the change's: it keeps its
 // place and goes again once, as a red of flakes only does.
-const killer = "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.KILL_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if ((process.env.KILL_ON ?? '').split(',').includes(String(n))) { process.kill(process.ppid, 'SIGKILL'); await new Promise(() => {}); }\n}\n";
+const killer =
+  "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.KILL_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if ((process.env.KILL_ON ?? '').split(',').includes(String(n))) { process.kill(process.ppid, 'SIGKILL'); await new Promise(() => {}); }\n}\n";
 
 test('a perigee run killed from outside before any test failed goes again once, and lands on a green run (#1393)', () => {
   const r = setup();
@@ -849,7 +1023,10 @@ test('a perigee run killed from outside before any test failed goes again once, 
 });
 
 test('a perigee red of flakes only goes again once: green lands, red again refuses for good (#1360)', () => {
-  for (const [fails, status, outcome] of [['1', 0, 'landed'], ['1,3', 1, 'refused']] as const) {
+  for (const [fails, status, outcome] of [
+    ['1', 0, 'landed'],
+    ['1,3', 1, 'refused'],
+  ] as const) {
     const r = setup();
     const c = ci(r);
     r.commit(r.wt, 'test/flaky.test.mjs', flaky);
@@ -879,7 +1056,13 @@ function newerLandOnMain(r: ReturnType<typeof setup>) {
   const script = join(r.source, 'tools', 'land.sh');
   writeFileSync(script, readFileSync(script, 'utf8') + '# newer\n');
   git(r.source, 'commit', '-qam', 'newer land.sh');
-  return (extra: Record<string, string>) => spawnSync('bash', [join(r.wt, 'tools', 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', TEST_RUNS: join(r.dir, 'test-runs'), ...extra } });
+  return (extra: Record<string, string>) =>
+    spawnSync('bash', [join(r.wt, 'tools', 'land.sh')], {
+      cwd: r.wt,
+      encoding: 'utf8',
+      timeout: 90_000,
+      env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', TEST_RUNS: join(r.dir, 'test-runs'), ...extra },
+    });
 }
 
 test('the copy a rebase hands over to counts its gh calls and keeps the flake keeps the hand-off has used', () => {
@@ -916,8 +1099,17 @@ test('the copy that starts over after main moved under the restart ahead keeps t
   newerLandOnMain(r);
   // Its first run moves main on (as a restart ahead rolled back does), so the gate's commit is stale and land.sh starts
   // over from the rebase; its second full run fails on a flake, which passes alone.
-  r.commit(r.wt, 'test/move.test.mjs', "import { execFileSync } from 'node:child_process';\nimport { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.MOVE_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if (n === 1) execFileSync('git', ['-C', process.env.MOVE_MAIN, 'commit', '-q', '--allow-empty', '-m', 'someone else']);\n  if (n === 2) throw new Error('flaky');\n}\n");
-  const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), LAND_CI: '0', LAND_SMOKE: '0', MOVE_COUNT: join(r.dir, 'count'), MOVE_MAIN: r.source, LAND_RETRIED: 'an earlier refusal', COORDINATOR_SHARED_DIR: join(r.dir, 'shared') } });
+  r.commit(
+    r.wt,
+    'test/move.test.mjs',
+    "import { execFileSync } from 'node:child_process';\nimport { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.MOVE_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if (n === 1) execFileSync('git', ['-C', process.env.MOVE_MAIN, 'commit', '-q', '--allow-empty', '-m', 'someone else']);\n  if (n === 2) throw new Error('flaky');\n}\n",
+  );
+  const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh')], {
+    cwd: r.wt,
+    encoding: 'utf8',
+    timeout: 90_000,
+    env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), LAND_CI: '0', LAND_SMOKE: '0', MOVE_COUNT: join(r.dir, 'count'), MOVE_MAIN: r.source, LAND_RETRIED: 'an earlier refusal', COORDINATOR_SHARED_DIR: join(r.dir, 'shared') },
+  });
   assert.equal(res.status, 1, res.stderr);
   assert.match(res.stderr, /while this waited \(the restart ahead was rolled back\): rebasing ticket\/1-x onto it and testing again/);
   assert.match(res.stderr, /refused by the pipeline again \(failed in the full run but passed alone on perigee: test\/move\.test\.mjs\), after its one retry in place \(an earlier refusal\)/);
@@ -933,7 +1125,10 @@ test('a CI fallback moves its phase on while it waits for a heavy slot and runs,
   const queue = join(r.live, '.git', 'cc-deploy', 'queue');
   const phases = new Set<string>();
   const look = setInterval(() => {
-    for (const f of tickets(join(r.live, '.git', 'cc-deploy'))) try { phases.add(readFileSync(join(queue, f), 'utf8').split('\n')[3]); } catch {}
+    for (const f of tickets(join(r.live, '.git', 'cc-deploy')))
+      try {
+        phases.add(readFileSync(join(queue, f), 'utf8').split('\n')[3]);
+      } catch {}
   }, 50);
   try {
     // A box citadel-heavy calls busy (any pressure at all), for 3 s before it starts anyway.
@@ -941,9 +1136,14 @@ test('a CI fallback moves its phase on while it waits for a heavy slot and runs,
     const res = await c.runAsync({ LAND_CI: '0', LAND_SMOKE: '0', CITADEL_HEAVY_DIR: join(r.dir, 'heavy'), CITADEL_HEAVY_MAX_PRESSURE: '0', CITADEL_HEAVY_LOAD_WAIT: '3', CITADEL_HEAVY_POLL: '0.2', LAND_PHASE_EVERY: '0.5' }, () => {});
     assert.equal(res.status, 0, res.stderr);
     assert.match(res.stderr, /the box is busy/);
-  } finally { clearInterval(look); }
+  } finally {
+    clearInterval(look);
+  }
   const during = [...phases].filter((p) => p.startsWith('running the tests since'));
-  assert.ok(during.some((p) => / min so far/.test(p)), `the phase moved on while it waited: ${[...phases].join(' | ')}`);
+  assert.ok(
+    during.some((p) => / min so far/.test(p)),
+    `the phase moved on while it waited: ${[...phases].join(' | ')}`,
+  );
 });
 
 test("a CI fallback's phase ticker leaves the reruns' phase alone once they start, so the line behind reads their counts", async () => {
@@ -954,16 +1154,19 @@ test("a CI fallback's phase ticker leaves the reruns' phase alone once they star
   const queue = join(r.live, '.git', 'cc-deploy', 'queue');
   const seen: string[] = [];
   const look = setInterval(() => {
-    for (const f of tickets(join(r.live, '.git', 'cc-deploy'))) try {
-      const p = readFileSync(join(queue, f), 'utf8').split('\n')[3];
-      if (p && p !== seen.at(-1)) seen.push(p);
-    } catch {}
+    for (const f of tickets(join(r.live, '.git', 'cc-deploy')))
+      try {
+        const p = readFileSync(join(queue, f), 'utf8').split('\n')[3];
+        if (p && p !== seen.at(-1)) seen.push(p);
+      } catch {}
   }, 50);
   try {
     const res = await c.runAsync({ LAND_CI: '0', LAND_SMOKE: '0', FLAKY_COUNT: join(r.dir, 'count'), FLAKY_FAIL: '1', LAND_PHASE_EVERY: '0.3' }, () => {});
     assert.equal(res.status, 0, res.stderr);
     assert.match(res.stderr, /slow-flake\.test\.mjs: failed in the full run, passed alone/);
-  } finally { clearInterval(look); }
+  } finally {
+    clearInterval(look);
+  }
   const rerun = seen.findIndex((p) => p.startsWith('rerunning 1 failed test file since'));
   assert.ok(rerun >= 0, `the reruns set their phase: ${seen.join(' | ')}`);
   // What follows is the land's own next step (a flake goes again from the rebase), never the ticker's count.
@@ -1037,7 +1240,7 @@ test('run from a subfolder of the worktree, it tests and lands the same', () => 
   assert.equal(r.note(), 'locked=1 held=yes');
 });
 
-test("a stale squash, which reverts what landed since the branch started, is refused until it names each undo (#677)", () => {
+test('a stale squash, which reverts what landed since the branch started, is refused until it names each undo (#677)', () => {
   const r = setup();
   const lines = (who: string) => [1, 2, 3, 4, 5].map((k) => `${who} landed this, line ${k}\n`).join('');
   r.commit(r.wt, 'b.txt', 'mine\n');
@@ -1107,7 +1310,10 @@ test('a conflict is logged to the retro-log with its files, and the refusal name
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   const log = landLog(shared);
   assert.match(log, new RegExp(`^- \\d\\d:\\d\\d:\\d\\dZ · land conflict · ticket/1-x onto ${main.slice(0, 7)}: a\\.txt$`, 'm'));
-  assert.deepEqual(timings(shared).map((l) => l.replace(/^- \S+ · /, '').replace(/\d+/g, 'N')), ['timing · ticket/N-x · line N · rebase N · ci-queue - · ci-run - · fallback - · deploy - · live - · refused at rebase']);
+  assert.deepEqual(
+    timings(shared).map((l) => l.replace(/^- \S+ · /, '').replace(/\d+/g, 'N')),
+    ['timing · ticket/N-x · line N · rebase N · ci-queue - · ci-run - · fallback - · deploy - · live - · refused at rebase'],
+  );
 });
 
 test('a rebase that cannot start logs no conflicted files', () => {
@@ -1149,10 +1355,13 @@ test('a conflict still refuses the same when there is no shared dir or it cannot
 function guardSetup() {
   const r = setup();
   const c = ci(r);
-  writeFileSync(join(r.source, 'tools', 'citadel-test'), `#!/usr/bin/env bash
+  writeFileSync(
+    join(r.source, 'tools', 'citadel-test'),
+    `#!/usr/bin/env bash
 echo "\${CITADEL_TEST_ALWAYS:-} $*" >>"$GUARD_ARGS"
 [ -z "\${GUARD_EXIT:-}" ] || { echo "✖ test/schema-compat.test.ts:40 › each schema number is used once"; echo "  SCHEMA_HISTORY 212 is taken twice"; echo "full output: /somewhere/citadel-test.log"; exit "$GUARD_EXIT"; }
-`);
+`,
+  );
   chmodSync(join(r.source, 'tools', 'citadel-test'), 0o755);
   // Built, not quoted: a quoted test file's name reads as a dependency to test/pipeline-files.test.ts.
   for (const g of ['schema-compat', 'ui-contract']) writeFileSync(join(r.source, 'test', `${g}.test.ts`), '');
@@ -1198,12 +1407,15 @@ test('guard tests that pass, or cannot decide, let the land go on to CI (#1240)'
 function smokeSetup() {
   const r = setup();
   writeFileSync(join(r.source, 'tools', 'always-tests.txt'), '# repo-wide\n\ntest/always.test.ts\n');
-  writeFileSync(join(r.source, 'tools', 'citadel-test'), `#!/usr/bin/env bash
+  writeFileSync(
+    join(r.source, 'tools', 'citadel-test'),
+    `#!/usr/bin/env bash
 echo "\${CITADEL_TEST_ALWAYS:+alone }$*" >>"$SMOKE_ARGS"
 sleep "\${SMOKE_SLEEP:-0}"
 code=\${SMOKE_EXIT:-}; [ -z "\${CITADEL_TEST_ALWAYS:-}" ] || code=\${SMOKE_ALONE_EXIT-$code}
 [ -z "$code" ] || [ "$code" = 0 ] || { echo "✖ test/always.test.ts:3 › a snapshot"; echo "full output: /somewhere/citadel-test.log"; exit "$code"; }
-`);
+`,
+  );
   chmodSync(join(r.source, 'tools', 'citadel-test'), 0o755);
   writeFileSync(join(r.source, 'test', 'always.test.ts'), '');
   writeFileSync(join(r.source, 'test', 'gone.test.ts'), '');
@@ -1256,7 +1468,7 @@ test("the smoke check runs the always-tests and the branch's changed test files,
   assert.match(landLog(r.shared), /· smoke · ticket\/1-x · tests failed \(exit 1\) · \d+s$/m);
 });
 
-test("the smoke check adds the route test only when the affected map picks it for what the branch changed (#1544)", () => {
+test('the smoke check adds the route test only when the affected map picks it for what the branch changed (#1544)', () => {
   const route = 'access-matrix';
   const run = (changed: string) => {
     const r = smokeSetup();
@@ -1365,7 +1577,7 @@ test('--check leaves behind a commit that came off main, as the rebase does, and
   res = r.run({}, ['--check', '--into', 'build/1', 'test/ok.test.mjs']);
   assert.equal(res.status, 0, res.stderr);
   git(r.source, 'checkout', '-q', 'build/1');
-  r.commit(r.source, 'b.txt', 'the build\'s\n');
+  r.commit(r.source, 'b.txt', "the build's\n");
   git(r.source, 'checkout', '-q', 'main');
   res = r.run({}, ['--check', '--into', 'build/1', 'test/ok.test.mjs']);
   assert.equal(res.status, 3);
@@ -1408,7 +1620,9 @@ test('two landings both land on CI while other jobs hold every heavy slot', asyn
     }
     assert.deepEqual(git(r.source, 'log', '--format=%s', 'main').split('\n').sort(), ['b.txt: one', 'base', 'c.txt: two']);
   } finally {
-    try { process.kill(-build.pid!, 'SIGKILL'); } catch {}
+    try {
+      process.kill(-build.pid!, 'SIGKILL');
+    } catch {}
   }
 });
 
@@ -1445,7 +1659,10 @@ const startsLater = (file: string, ms = 2500) => {
   return (s: string) => {
     if (done || !/runner is online but hasn't started the job/.test(s)) return;
     done = true;
-    setTimeout(() => { writeFileSync(file, 'running'); setTimeout(() => writeFileSync(file, 'green'), 500); }, ms);
+    setTimeout(() => {
+      writeFileSync(file, 'running');
+      setTimeout(() => writeFileSync(file, 'green'), 500);
+    }, ms);
   };
 };
 const ciDown = (r: ReturnType<typeof setup>) => join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'ci-down');
@@ -1483,7 +1700,10 @@ test('a busy perigee: the busy limit counts no time while a runner is online and
 });
 
 test('a late start or a slow run falls back on a quiet perigee but leaves no ci-down, so the next ship asks CI; no runner online leaves one', () => {
-  for (const [name, extra] of [['late start', { FAKE_CI: 'queued', LAND_CI_START: '0', LAND_CI_START_ONLINE: '1' }], ['slow run', { FAKE_CI: 'running', LAND_CI_TIMEOUT: '1' }]] as const) {
+  for (const [name, extra] of [
+    ['late start', { FAKE_CI: 'queued', LAND_CI_START: '0', LAND_CI_START_ONLINE: '1' }],
+    ['slow run', { FAKE_CI: 'running', LAND_CI_TIMEOUT: '1' }],
+  ] as const) {
     const r = setup();
     const c = ci(r);
     r.commit(r.wt, 'b.txt', 'one\n');

@@ -177,14 +177,20 @@ export class Contraptions {
    * `deployed`: when its last deploy went live (ms), so a frame open across a dropped stream still catches up (#1690, frames.js deploysSince).
    */
   mine(uid: number) {
-    return Promise.all(inOrder(this.store.contraptionsFor(uid), (c) => c.name, this.store.listOrder(uid, 'apps'))
-      .map(async (c) => {
+    return Promise.all(
+      inOrder(this.store.contraptionsFor(uid), (c) => c.name, this.store.listOrder(uid, 'apps')).map(async (c) => {
         const deployed = this.store.listContraptionDeploys(c.name, 1, 'deployed')[0]?.finished_at;
         return {
-          name: c.name, title: c.title, icon: c.icon, up: await this.up(c), ...(this.appsDomain ? { url: this.appUrl(c.name) } : {}),
-          ...(await this.clipboard(c) ? { clipboard: true } : {}), ...(deployed ? { deployed } : {}),
+          name: c.name,
+          title: c.title,
+          icon: c.icon,
+          up: await this.up(c),
+          ...(this.appsDomain ? { url: this.appUrl(c.name) } : {}),
+          ...((await this.clipboard(c)) ? { clipboard: true } : {}),
+          ...(deployed ? { deployed } : {}),
         };
-      }));
+      }),
+    );
   }
 
   /** Whether an app's live manifest asks for clipboard writes in its frame; an app with no readable manifest doesn't. */
@@ -211,7 +217,9 @@ export class Contraptions {
         s.destroy();
         ok(v);
       };
-      s.once('connect', () => done(true)).once('error', () => done(false)).once('timeout', () => done(false));
+      s.once('connect', () => done(true))
+        .once('error', () => done(false))
+        .once('timeout', () => done(false));
     });
   }
 

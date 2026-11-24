@@ -76,9 +76,20 @@ async function tool(t: { id: number; project_id: number }, name: string, args: o
 const db = () => new Store(join(srv.data, 'coordinator.db'));
 /** Trips' Taskmaster on a turn for `person`. */
 async function turnFor<T>(person: number, work: () => Promise<T>): Promise<T> {
-  const set = (id: number) => { const s = db(); try { s.updateTicket(TripsTM.id, { person_id: id }); } finally { s.db.close(); } };
+  const set = (id: number) => {
+    const s = db();
+    try {
+      s.updateTicket(TripsTM.id, { person_id: id });
+    } finally {
+      s.db.close();
+    }
+  };
   set(person);
-  try { return await work(); } finally { set(josh.id); }
+  try {
+    return await work();
+  } finally {
+    set(josh.id);
+  }
 }
 
 test('make_app: one call starts a minion whose branch holds the app, registers it in its folder and turns it on for the members', async () => {
@@ -104,7 +115,10 @@ test('make_app: one call starts a minion whose branch holds the app, registers i
     assert.ok(files.includes('apps/trip-notes/server.ts') && files.includes('.github/workflows/app-trip-notes.yml'), files.join(' '));
     assert.equal(git(m.cwd!, 'status', '--porcelain'), '', 'nothing left uncommitted');
     assert.match(readFileSync(join(m.cwd!, '.github/workflows/app-trip-notes.yml'), 'utf8'), /trips-ci/);
-    const brief = s.listEvents(m.id).map((e) => e.data).join('\n');
+    const brief = s
+      .listEvents(m.id)
+      .map((e) => e.data)
+      .join('\n');
     assert.match(brief, /> shared with the group\./);
   } finally {
     s.db.close();
@@ -117,7 +131,12 @@ test('make_app: one call starts a minion whose branch holds the app, registers i
 test('make_app refuses a turn for someone outside the scheme, a bad name or title, and a scheme with no GitHub repo; no runner, no workflow', async () => {
   const outsider = await turnFor(olive.id, () => tool(TripsTM, 'make_app', { name: 'olives', title: 'Olives', idea: 'x' }));
   assert.ok(outsider.isError && /member of Trips/.test(outsider.text), outsider.text);
-  for (const [args, says] of [[{ name: 'Bad Name', title: 'T', idea: 'x' }, /short slug/], [{ name: 'relay', title: 'T', idea: 'x' }, /short slug/], [{ name: 'ok', title: '<b>', idea: 'x' }, /title/], [{ name: 'ok', title: 'T', idea: '' }, /idea/]] as const) {
+  for (const [args, says] of [
+    [{ name: 'Bad Name', title: 'T', idea: 'x' }, /short slug/],
+    [{ name: 'relay', title: 'T', idea: 'x' }, /short slug/],
+    [{ name: 'ok', title: '<b>', idea: 'x' }, /title/],
+    [{ name: 'ok', title: 'T', idea: '' }, /idea/],
+  ] as const) {
     const r = await tool(TripsTM, 'make_app', args);
     assert.ok(r.isError && says.test(r.text), r.text);
   }

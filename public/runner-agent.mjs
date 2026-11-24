@@ -32,7 +32,9 @@ const LINUX_SCRIPTS = { add: 'add-runner.sh', list: 'list-runners.sh', remove: '
 
 /** The job Citadel sent, checked field by field: anything else is refused, so the scripts only ever get a number or two. */
 export function checkJob(job) {
-  const keys = Object.keys(job ?? {}).sort().join(',');
+  const keys = Object.keys(job ?? {})
+    .sort()
+    .join(',');
   if (typeof job?.id !== 'string' || !/^[0-9a-f]{24}$/.test(job.id)) throw new Error('a job needs its id');
   const scheme = (v) => {
     if (!Number.isInteger(v) || v < 1 || v > 1e9) throw new Error('scheme must be a scheme id');
@@ -100,7 +102,12 @@ export function runCommand({ command, args }, env, limitMs = JOB_LIMIT_MS) {
     const timer = setTimeout(() => {
       keep(`\nStopped after ${Math.round(limitMs / 60_000)} minutes.`);
       if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-      else try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill(); }
+      else
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          child.kill();
+        }
     }, limitMs);
     child.on('error', (err) => keep(`\ncould not start ${command}: ${err.message}`));
     child.on('close', (code) => {
@@ -234,7 +241,9 @@ export function linuxProcs(proc = '/proc') {
       // The command sits in brackets and may hold spaces and brackets: the fields start after its last one.
       const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
       let path = '';
-      try { path = readlinkSync(join(proc, name, 'exe')); } catch {}
+      try {
+        path = readlinkSync(join(proc, name, 'exe'));
+      } catch {}
       // utime and stime in ticks of 1/100 s, rss in 4 KB pages: what every Linux the runners use has.
       out.push({ pid: Number(name), ppid: Number(f[1]), path, cpu: (Number(f[11]) + Number(f[12])) / 100, mem: Number(f[21]) * 4096, reaped: (Number(f[13]) + Number(f[14])) / 100 });
     } catch {}
@@ -246,7 +255,12 @@ export function linuxProcs(proc = '/proc') {
 function runnerIdentity(dir, read = readFileSync) {
   try {
     const conf = JSON.parse(String(read(join(dir, '.runner'), 'utf8')).replace(/^\uFEFF/, ''));
-    return { name: String(conf.agentName ?? ''), repo: String(conf.gitHubUrl ?? '').replace(/^https:\/\/github\.com\//i, '').toLowerCase() };
+    return {
+      name: String(conf.agentName ?? ''),
+      repo: String(conf.gitHubUrl ?? '')
+        .replace(/^https:\/\/github\.com\//i, '')
+        .toLowerCase(),
+    };
   } catch {
     return { name: '', repo: '' };
   }
@@ -262,7 +276,9 @@ export class Sampler {
   async platform() {
     if (this.os === 'linux') {
       let pressure = null;
-      try { pressure = Number(/some avg10=\S+ avg60=([\d.]+)/.exec(readFileSync('/proc/pressure/cpu', 'utf8'))?.[1] ?? NaN); } catch {}
+      try {
+        pressure = Number(/some avg10=\S+ avg60=([\d.]+)/.exec(readFileSync('/proc/pressure/cpu', 'utf8'))?.[1] ?? NaN);
+      } catch {}
       return { procs: this.procs(), pressure: Number.isFinite(pressure) ? pressure : null };
     }
     const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(this.dir, 'sample-load.ps1')];
@@ -273,7 +289,10 @@ export class Sampler {
     const raw = JSON.parse(output.split('\n').at(-1));
     return {
       procs: (raw.procs ?? []).map(([pid, ppid, path, cpu, mem]) => ({ pid, ppid, path, cpu, mem })),
-      queue: raw.queue ?? null, idle_sec: personIdle(raw.quser), hv: raw.hv ?? null, temp: raw.temp ?? null,
+      queue: raw.queue ?? null,
+      idle_sec: personIdle(raw.quser),
+      hv: raw.hv ?? null,
+      temp: raw.temp ?? null,
       ...(Array.isArray(raw.restarts) ? { restarts: raw.restarts } : {}),
     };
   }
@@ -296,13 +315,19 @@ export class Sampler {
       disk = { disk_total: fs.blocks * fs.bsize, disk_free: fs.bavail * fs.bsize };
     } catch {}
     return {
-      at, host: hostname(), os: this.os, cores,
+      at,
+      host: hostname(),
+      os: this.os,
+      cores,
       cpu: total > 0 ? Math.round((1 - (times.idle - last.times.idle) / total) * 1000) / 10 : 0,
-      mem_total: totalmem(), mem_free: freemem(), ...disk, ...rest,
+      mem_total: totalmem(),
+      mem_free: freemem(),
+      ...disk,
+      ...rest,
       runners: runners.map((r) => {
         if (!this.names.has(r.dir)) this.names.set(r.dir, this.identity(r.dir));
         // Its share of the whole PC: CPU seconds used, over the seconds every core had.
-        return { ...this.names.get(r.dir), dir: r.dir, cpu: Math.round((r.cpu / ((at - last.at) / 1000 * cores)) * 1000) / 10, mem: r.mem };
+        return { ...this.names.get(r.dir), dir: r.dir, cpu: Math.round((r.cpu / (((at - last.at) / 1000) * cores)) * 1000) / 10, mem: r.mem };
       }),
     };
   }
@@ -326,7 +351,7 @@ export function keeperCommand(dir, pid = process.pid, systemRoot = process.env.S
 /** Starts keep-runners.ps1, logs what it says, and starts it again a minute after it ever ends. */
 export function keepRunners(dir, log, again = KEEPER_AGAIN_MS) {
   if (!existsSync(join(dir, 'keep-runners.ps1'))) {
-    log('keep-runners.ps1 is not in the agent\'s folder, so CI is not capped (#552): install the agent again.');
+    log("keep-runners.ps1 is not in the agent's folder, so CI is not capped (#552): install the agent again.");
     return;
   }
   const { command, args } = keeperCommand(dir);
@@ -351,7 +376,10 @@ export const SHIP_HOLD_MS = 2 * 60_000;
 /** Citadel's list, kept to well-formed entries, names and repos lowercase. */
 export function cleanShips(raw) {
   const text = (v) => (typeof v === 'string' && v.length <= 200 ? v.toLowerCase() : '');
-  return (Array.isArray(raw) ? raw : []).map((s) => ({ repo: text(s?.repo), runner: text(s?.runner) })).filter((s) => s.repo && s.runner).slice(0, 200);
+  return (Array.isArray(raw) ? raw : [])
+    .map((s) => ({ repo: text(s?.repo), runner: text(s?.runner) }))
+    .filter((s) => s.repo && s.runner)
+    .slice(0, 200);
 }
 
 /** Windows: the list for keep-runners.ps1, which reads ships.json beside it every 2 seconds, with its expiry. */
@@ -373,7 +401,9 @@ export class LinuxSqueeze {
   /** Each Citadel runner unit with its runner's repo and name, from the unit add-runner.sh wrote and its .runner. */
   runners() {
     let names = [];
-    try { names = readdirSync(this.units).filter((f) => /^citadel-runner-.+\.service$/.test(f)); } catch {}
+    try {
+      names = readdirSync(this.units).filter((f) => /^citadel-runner-.+\.service$/.test(f));
+    } catch {}
     return names.flatMap((unit) => {
       try {
         const dir = /^ExecStart=\/bin\/bash (.+)\/bin\/runsvc\.sh$/m.exec(readFileSync(join(this.units, unit), 'utf8'))?.[1];
@@ -408,7 +438,11 @@ export class LinuxSqueeze {
     const onShip = (r) => this.ships.some((s) => s.repo === r.repo.toLowerCase() && s.runner === r.name.toLowerCase());
     const runners = this.runners();
     const others = this.ships.length ? runners.filter((r) => !onShip(r)) : [];
-    const working = new Set(this.procs().map((p) => /^(.*)\/bin\/Runner\.Worker$/.exec(p.path)?.[1]).filter(Boolean));
+    const working = new Set(
+      this.procs()
+        .map((p) => /^(.*)\/bin\/Runner\.Worker$/.exec(p.path)?.[1])
+        .filter(Boolean),
+    );
     const busy = Math.max(1, others.filter((r) => working.has(r.dir)).length);
     const quota = Math.max(10, Math.round((this.cores * SQUEEZE_PERCENT) / busy));
     for (const r of runners) {
@@ -435,7 +469,11 @@ async function* events(body) {
     while ((end = buf.indexOf('\n\n')) >= 0) {
       const block = buf.slice(0, end);
       buf = buf.slice(end + 2);
-      const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
+      const data = block
+        .split('\n')
+        .filter((l) => l.startsWith('data:'))
+        .map((l) => l.slice(5).trimStart())
+        .join('\n');
       if (data) yield JSON.parse(data);
     }
   }
@@ -466,7 +504,10 @@ async function main() {
   const log = (...a) => {
     const line = `${new Date().toISOString()} ${a.join(' ')}`;
     console.log(line);
-    if (logFile) try { appendFileSync(logFile, `${line}\n`); } catch {}
+    if (logFile)
+      try {
+        appendFileSync(logFile, `${line}\n`);
+      } catch {}
   };
   const auth = { Authorization: `Bearer ${token}` };
   const jobs = new JobRunner({ dir: dirname(realpathSync(process.argv[1])), appUrl, token, log, os });

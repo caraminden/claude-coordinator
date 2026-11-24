@@ -3,7 +3,11 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export interface EmulatorLease { who: string; what: string; until: number }
+export interface EmulatorLease {
+  who: string;
+  what: string;
+  until: number;
+}
 
 /** The current lease (until in ms), or null when there is none or it has run out. */
 export function readEmulatorLease(dir: string, now = Date.now()): EmulatorLease | null {

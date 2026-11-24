@@ -56,8 +56,7 @@ test('every module under src, src/routes, src/db, public and tools has a row in 
 test('a Layout row names no path that is gone', () => {
   const tokens = layoutTokens(readFileSync(join(root, 'README.md'), 'utf8'));
   const all = modules();
-  const stale = tokens.filter((t) => /^(server\.ts|src|public|tools|kit|deploy)\//.test(t) || t === 'server.ts')
-    .filter((t) => (t.includes('*') ? !all.some((m) => covers(t, m)) : !existsSync(join(root, t))));
+  const stale = tokens.filter((t) => /^(server\.ts|src|public|tools|kit|deploy)\//.test(t) || t === 'server.ts').filter((t) => (t.includes('*') ? !all.some((m) => covers(t, m)) : !existsSync(join(root, t))));
   assert.deepEqual(stale, []);
 });
 

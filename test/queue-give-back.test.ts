@@ -34,7 +34,12 @@ chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 runner.pollMs = 10;
 
 function minion(withDir: boolean) {
@@ -47,7 +52,7 @@ function minion(withDir: boolean) {
 const seen = (dir: string) => lines(join(dir, 'seen.txt'));
 const idle = (id: number) => until('the turn and its save to end', () => !runner.isRunning(id) && !(runner as any).lanes.busy(id));
 
-test("a minion with no folder runs no turn, and keeps the message for the turn once it has one", async () => {
+test('a minion with no folder runs no turn, and keeps the message for the turn once it has one', async () => {
   const t = minion(false);
   // As when Citadel can't make its worktree again (a repo that's gone, git failing).
   const restore = (runner as any).restoreDir;
@@ -59,7 +64,11 @@ test("a minion with no folder runs no turn, and keeps the message for the turn o
     (runner as any).restoreDir = restore;
   }
   assert.equal(runner.isRunning(t.id), false);
-  assert.deepEqual(runner.queue.heldMail(t.id).map((m) => m.text), ['first'], 'held, so the freed lane asks for no turn again');
+  assert.deepEqual(
+    runner.queue.heldMail(t.id).map((m) => m.text),
+    ['first'],
+    'held, so the freed lane asks for no turn again',
+  );
   store.setTicketDir(t.id, t.dir, null);
   runner.send(t.id, 'Cara', 'second');
   await until('the turn', () => seen(t.dir).length === 2);
@@ -71,7 +80,9 @@ test("a minion with no folder runs no turn, and keeps the message for the turn o
 test("a launch that can't be built fails the turn, and its message rides along with the next one", async () => {
   const t = minion(true);
   const build = runner.buildLaunch;
-  runner.buildLaunch = () => { throw new Error('settings file too big'); };
+  runner.buildLaunch = () => {
+    throw new Error('settings file too big');
+  };
   try {
     runner.send(t.id, 'Cara', 'first');
     await idle(t.id);
@@ -79,7 +90,10 @@ test("a launch that can't be built fails the turn, and its message rides along w
     runner.buildLaunch = build;
   }
   assert.equal(store.getTicket(t.id)!.status, 'error');
-  assert.deepEqual(runner.queue.heldMail(t.id).map((m) => m.text), ['first']);
+  assert.deepEqual(
+    runner.queue.heldMail(t.id).map((m) => m.text),
+    ['first'],
+  );
   runner.send(t.id, 'Cara', 'second');
   await until('the turn', () => seen(t.dir).length === 2);
   assert.deepEqual(seen(t.dir), ['[Cara]: second', '[Cara]: first']);
@@ -132,7 +146,10 @@ test('a turn cut off before its first line reruns its batch as a plain turn, run
     runner.recover();
     await until('the rerun', () => seen(t.dir).includes('[Cara]: build it'));
     await idle(t.id);
-    const notes = store.listEvents(t.id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+    const notes = store
+      .listEvents(t.id)
+      .filter((e) => e.kind === 'note')
+      .map((e) => JSON.parse(e.data).text as string);
     assert.ok(!notes.some((n) => n.startsWith('Resumed')), `${status}: ${notes.join(' | ')}`);
     assert.equal(store.getSetting(`turn:${t.id}`), null, status);
     assert.equal(store.getSetting(`minion-queue:${t.id}`), null, status);

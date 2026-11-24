@@ -38,7 +38,10 @@ export function commandLine(argv: string[]): string {
 
 /** The command's output and status from a job log: the lines between the markers, timestamps cut. No end marker: code null. */
 export function commandOutput(log: string): { lines: string[]; code: number | null } {
-  const lines = log.replace(/\r/g, '').split('\n').map((l) => l.replace(/^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?/, ''));
+  const lines = log
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((l) => l.replace(/^﻿?\d{4}-\d\d-\d\dT[\d:.]+Z ?/, ''));
   const from = lines.findIndex((l) => l === BEGIN);
   if (from < 0) return { lines: [], code: null };
   // The marker can share its line with output that had no newline at its end (CB3, #1519): the workflow prints a newline
@@ -62,9 +65,16 @@ const sleepSync = (s: number) => Atomics.wait(new Int32Array(new SharedArrayBuff
  *  that starts something (the dispatch) passes 1, since a try that timed out may have started it. */
 function retried<T>(what: string, tries: number, call: () => T): T {
   for (let n = 1; ; n++) {
-    try { return call(); }
-    catch (e: any) {
-      if (n >= tries) throw new Error(`${what}: ${String(e.stderr || e.message).trim().split('\n').pop()}`);
+    try {
+      return call();
+    } catch (e: any) {
+      if (n >= tries)
+        throw new Error(
+          `${what}: ${String(e.stderr || e.message)
+            .trim()
+            .split('\n')
+            .pop()}`,
+        );
       sleepSync(pollSeconds());
     }
   }
@@ -83,10 +93,18 @@ function ghText(path: string, what: string): string {
 /** The repo's slug when it can take heavy jobs on CI; a Fallback says why not. */
 function repo(): string {
   let root: string;
-  try { root = git('rev-parse', '--show-toplevel'); } catch { throw new Fallback('this is not a git checkout'); }
+  try {
+    root = git('rev-parse', '--show-toplevel');
+  } catch {
+    throw new Fallback('this is not a git checkout');
+  }
   if (!existsSync(join(root, '.github', 'workflows', WORKFLOW))) throw new Fallback(`this repo has no .github/workflows/${WORKFLOW} (the kit's scheme-setup template citadel-heavy.yml shows how to add one)`);
   let url = '';
-  try { url = git('config', '--get', 'remote.origin.url'); } catch { /* none */ }
+  try {
+    url = git('config', '--get', 'remote.origin.url');
+  } catch {
+    /* none */
+  }
   const slug = slugOf(url);
   if (!slug) throw new Fallback(`its origin (${url || 'none'}) is not on github.com`);
   return slug;
@@ -101,7 +119,11 @@ function snapshot(): string {
   try {
     const index = join(tmp, 'index');
     // A copy of the real index, so git add only hashes what changed.
-    try { copyFileSync(git('rev-parse', '--path-format=absolute', '--git-path', 'index'), index); } catch { /* none yet */ }
+    try {
+      copyFileSync(git('rev-parse', '--path-format=absolute', '--git-path', 'index'), index);
+    } catch {
+      /* none yet */
+    }
     const env = { ...process.env, GIT_INDEX_FILE: index };
     const run = (...args: string[]) => execFileSync('git', args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
     run('add', '-A', '--', ':/', ...SECRETS.map((g) => `:(top,exclude,glob)${g}`));
@@ -121,7 +143,9 @@ function shipRuns(slug: string): number {
     try {
       const runs = gh([`repos/${slug}/actions/runs?status=${status}&per_page=50`], 'reading the ship runs').workflow_runs ?? [];
       n += runs.filter((r: any) => String(r.head_branch || '').startsWith('land/') && Date.parse(r.created_at) >= since).length;
-    } catch { /* unread: the job goes ahead rather than wait on a blip */ }
+    } catch {
+      /* unread: the job goes ahead rather than wait on a blip */
+    }
   }
   return n;
 }
@@ -136,8 +160,14 @@ async function waitForShips(slug: string, poll: number) {
   const from = Date.now();
   let told = 0;
   for (let n = shipRuns(slug); n > 0; n = shipRuns(slug)) {
-    if (Date.now() - from >= limit * 1000) { say(`a ship's CI run is still going after ${Math.round(limit / 60)} min; starting anyway`); return; }
-    if (Date.now() - told >= 300_000) { say(`waiting for ${n} ship run(s) on CI to finish first (${Math.round((Date.now() - from) / 60000)} min)`); told = Date.now(); }
+    if (Date.now() - from >= limit * 1000) {
+      say(`a ship's CI run is still going after ${Math.round(limit / 60)} min; starting anyway`);
+      return;
+    }
+    if (Date.now() - told >= 300_000) {
+      say(`waiting for ${n} ship run(s) on CI to finish first (${Math.round((Date.now() - from) / 60000)} min)`);
+      told = Date.now();
+    }
     await sleep(poll);
   }
 }
@@ -160,26 +190,49 @@ export const longDir = (env: NodeJS.ProcessEnv = process.env) => join(env.CITADE
  */
 function queueLong(argv: string[]): number {
   const ticket = Number(process.env.COORDINATOR_TICKET);
-  if (!Number.isInteger(ticket) || ticket <= 0) { say('--long is for a minion\'s turn (it needs COORDINATOR_TICKET): the minion that queues it is woken when it ends'); return 2; }
+  if (!Number.isInteger(ticket) || ticket <= 0) {
+    say("--long is for a minion's turn (it needs COORDINATOR_TICKET): the minion that queues it is woken when it ends");
+    return 2;
+  }
   const command = remoteCommand(argv);
   // The server drops a job file it can't trust (src/long-jobs.ts cleanJob), so a job it would drop is refused here instead.
-  if (command.length > 20_000) { say(`the command is ${command.length} characters; a long job takes at most 20000: put it in a script`); return 2; }
+  if (command.length > 20_000) {
+    say(`the command is ${command.length} characters; a long job takes at most 20000: put it in a script`);
+    return 2;
+  }
   let slug: string;
-  try { slug = repo(); } catch (e) { say(`a long job runs only on the scheme's CI, and ${(e as Error).message}; run it without --long`); return 2; }
+  try {
+    slug = repo();
+  } catch (e) {
+    say(`a long job runs only on the scheme's CI, and ${(e as Error).message}; run it without --long`);
+    return 2;
+  }
   const id = newId();
   let sha: string;
   try {
     sha = snapshot();
     git('push', '-q', '--no-verify', 'origin', `${sha}:refs/citadel-heavy/${id}`);
   } catch (e: any) {
-    say(`pushing the snapshot to GitHub failed (${String(e.stderr || e.message).trim().split('\n').pop()}), so nothing is queued`);
+    say(
+      `pushing the snapshot to GitHub failed (${String(e.stderr || e.message)
+        .trim()
+        .split('\n')
+        .pop()}), so nothing is queued`,
+    );
     return 1;
   }
   const what = (process.env.CITADEL_HEAVY_WHAT || argv.join(' ')).slice(0, 100);
   const job = { id, ticket, slug, sha, command, what, who: (process.env.CITADEL_HEAVY_WHO || 'someone').slice(0, 200), queued_at: Date.now(), state: 'queued' };
   const dir = longDir();
   // Open to every account: turns in people's containers write here, and the server rewrites the files as jobs move.
-  if (!existsSync(dir)) { mkdirSync(dir, { recursive: true }); try { chmodSync(dir, 0o777); } catch { /* not ours */ } }
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+    try {
+      chmodSync(dir, 0o777);
+    } catch {
+      /* not ours */
+    }
+  }
   writeFileSync(join(dir, `.${id}.tmp`), JSON.stringify(job) + '\n', { mode: 0o666 });
   renameSync(join(dir, `.${id}.tmp`), join(dir, `${id}.json`));
   process.stdout.write(`${id}\n`);
@@ -201,9 +254,20 @@ async function main(argv: string[]): Promise<number> {
     // --no-verify: a repo's own pre-push hook (Peek's runs its whole check) is for its branches, not this scratch ref (#1254).
     git('push', '-q', '--no-verify', 'origin', `${sha}:${ref}`);
   } catch (e: any) {
-    throw new Fallback(`pushing the snapshot to GitHub failed (${String(e.stderr || e.message).trim().split('\n').pop()})`);
+    throw new Fallback(
+      `pushing the snapshot to GitHub failed (${String(e.stderr || e.message)
+        .trim()
+        .split('\n')
+        .pop()})`,
+    );
   }
-  const unref = () => { try { git('push', '-q', '--no-verify', 'origin', `:${ref}`); } catch { /* a stray ref costs nothing */ } };
+  const unref = () => {
+    try {
+      git('push', '-q', '--no-verify', 'origin', `:${ref}`);
+    } catch {
+      /* a stray ref costs nothing */
+    }
+  };
   let runId: number | null = null;
   let dispatched = false;
   let started = false;
@@ -218,13 +282,25 @@ async function main(argv: string[]): Promise<number> {
    *  dispatched but not found yet is looked for a while first, so a stop or a fallback can't leave it to start later (CB4). */
   const cancel = () => {
     for (let n = 0; dispatched && !runId && n < 15; n++) {
-      try { runId = findRun(1); } catch { /* looked again below: one try each, so a stop waits about 30 s, not minutes */ }
+      try {
+        runId = findRun(1);
+      } catch {
+        /* looked again below: one try each, so a stop waits about 30 s, not minutes */
+      }
       if (!runId) sleepSync(Math.min(2, poll));
     }
     if (dispatched && !runId) return false;
     if (!runId || cancelled) return true;
-    try { gh(['-X', 'POST', `repos/${slug}/actions/runs/${runId}/cancel`], 'cancel'); return (cancelled = true); }
-    catch { try { return gh([`repos/${slug}/actions/runs/${runId}`], 'reading the run').status === 'completed'; } catch { return false; } }
+    try {
+      gh(['-X', 'POST', `repos/${slug}/actions/runs/${runId}/cancel`], 'cancel');
+      return (cancelled = true);
+    } catch {
+      try {
+        return gh([`repos/${slug}/actions/runs/${runId}`], 'reading the run').status === 'completed';
+      } catch {
+        return false;
+      }
+    }
   };
   const stop = (signal: number) => {
     say(`stopped; cancelling the CI run`);
@@ -240,15 +316,18 @@ async function main(argv: string[]): Promise<number> {
       const branch = gh([`repos/${slug}`], 'reading the repo').default_branch;
       // From here a run may exist even if the call failed (it timed out after GitHub took it), so it is looked for.
       dispatched = true;
-      gh(['-X', 'POST', `repos/${slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`,
-        '-f', `inputs[sha]=${sha}`, '-f', `inputs[command]=${command}`, '-f', `inputs[id]=${id}`], 'starting the workflow', 1);
+      gh(['-X', 'POST', `repos/${slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`, '-f', `inputs[sha]=${sha}`, '-f', `inputs[command]=${command}`, '-f', `inputs[id]=${id}`], 'starting the workflow', 1);
     } catch (e: any) {
       // GitHub answering 4xx refused it outright: no run to look for.
       if (/HTTP 4\d\d/.test(e.message)) dispatched = false;
       throw new Fallback(`${e.message} (is ${WORKFLOW} on the default branch yet?)`);
     }
-    for (const from = Date.now(); !runId;) {
-      try { runId = findRun(); } catch { /* a blip: looked again until the limit */ }
+    for (const from = Date.now(); !runId; ) {
+      try {
+        runId = findRun();
+      } catch {
+        /* a blip: looked again until the limit */
+      }
       if (!runId && Date.now() - from >= findLimit * 1000) throw new Fallback(`GitHub took the workflow but showed no run for it in ${findLimit} s`);
       if (!runId) await sleep(Math.min(2, poll));
     }
@@ -260,12 +339,19 @@ async function main(argv: string[]): Promise<number> {
     say(`running on ${slug}'s CI, not here: ${run.html_url}`);
     let told = 0;
     for (;;) {
-      if (run.status === 'completed') { completed = true; break; }
+      if (run.status === 'completed') {
+        completed = true;
+        break;
+      }
       if (!started && run.status !== 'queued' && run.status !== 'waiting' && run.status !== 'pending' && run.status !== 'requested') {
         started = true;
         // Only for the runner's name: an unread answer here must not cancel a run a runner just took.
         let job: any;
-        try { job = gh([`repos/${slug}/actions/runs/${runId}/jobs`], 'reading the job').jobs?.[0]; } catch { /* named nowhere, that's all */ }
+        try {
+          job = gh([`repos/${slug}/actions/runs/${runId}/jobs`], 'reading the job').jobs?.[0];
+        } catch {
+          /* named nowhere, that's all */
+        }
         say(`a runner took it${job?.runner_name ? ` (${job.runner_name})` : ''}; its output comes when it ends`);
       }
       if (!started && Date.now() - queued >= queueLimit * 1000) {
@@ -274,11 +360,17 @@ async function main(argv: string[]): Promise<number> {
         if (gh([`repos/${slug}/actions/runs?status=in_progress&per_page=1`], 'reading the runs').total_count > 0) {
           queued = Date.now();
         } else {
-          if (!cancel()) { say(`no runner took the job and GitHub wouldn't cancel the run (${run.html_url}); nothing runs here`); return 1; }
+          if (!cancel()) {
+            say(`no runner took the job and GitHub wouldn't cancel the run (${run.html_url}); nothing runs here`);
+            return 1;
+          }
           throw new Fallback(`no runner took the job in ${Math.round(queueLimit / 60)} min and nothing else ran on CI (the desktop may be off), so the CI run is cancelled`);
         }
       }
-      if (Date.now() - told >= 300_000) { if (told) say(`still ${started ? 'running' : 'waiting for a runner'} (${Math.round((Date.now() - asked) / 60000)} min)`); told = Date.now(); }
+      if (Date.now() - told >= 300_000) {
+        if (told) say(`still ${started ? 'running' : 'waiting for a runner'} (${Math.round((Date.now() - asked) / 60000)} min)`);
+        told = Date.now();
+      }
       await sleep(poll);
       run = await read();
     }
@@ -300,7 +392,10 @@ async function main(argv: string[]): Promise<number> {
     // CI (a run can go from queued to completed between two looks, leaving `started` false: CB1, #1519).
     if (e instanceof Fallback || (!started && !completed)) {
       // A run still queued must not start after this runs here.
-      if (!cancel()) { say(`${(e as Error).message}, and GitHub wouldn't cancel the CI run, or it couldn't be found yet; nothing runs here: look for "heavy ${id}" in ${slug}'s Actions and cancel it there`); return 1; }
+      if (!cancel()) {
+        say(`${(e as Error).message}, and GitHub wouldn't cancel the CI run, or it couldn't be found yet; nothing runs here: look for "heavy ${id}" in ${slug}'s Actions and cancel it there`);
+        return 1;
+      }
       throw e instanceof Fallback ? e : new Fallback(String((e as Error).message));
     }
     say(`${(e as Error).message}; the CI run is cancelled and nothing more runs here`);
@@ -320,15 +415,25 @@ if (import.meta.main) {
   if (argv[0] === '--long') {
     process.exitCode = argv.length > 1 ? queueLong(argv.slice(1)) : (say('usage: citadel-heavy --long <command> [args...]'), 2);
   } else if (argv[0] === '--repo') {
-    try { process.stdout.write(repo() + '\n'); } catch (e) { say(`not on CI: ${(e as Error).message}`); fallback((e as Error).message); }
+    try {
+      process.stdout.write(repo() + '\n');
+    } catch (e) {
+      say(`not on CI: ${(e as Error).message}`);
+      fallback((e as Error).message);
+    }
   } else if (!argv.length) {
     say('usage: heavy-ci.ts --repo | <command> [args...]');
     process.exit(2);
   } else {
     // exitCode, not exit(): a long log piped to the caller is written out in full first.
-    main(argv).then((code) => { process.exitCode = code; }, (e) => {
-      say(`not on CI: ${(e as Error).message}; running it here in perigee's small slot`);
-      fallback((e as Error).message);
-    });
+    main(argv).then(
+      (code) => {
+        process.exitCode = code;
+      },
+      (e) => {
+        say(`not on CI: ${(e as Error).message}; running it here in perigee's small slot`);
+        fallback((e as Error).message);
+      },
+    );
   }
 }

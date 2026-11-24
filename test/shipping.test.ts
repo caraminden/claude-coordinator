@@ -11,10 +11,22 @@ import { MERGE_RULES, needsGo, SHIP_PATHS, shippingGate, values } from '../publi
 // prompt line, and the one-off move of the schemes whose merges already waited for a person.
 
 test('needsGo: a label at or above the threshold waits, and no threshold means high', () => {
-  assert.deepEqual(['low', 'medium', 'high'].map((r) => needsGo('high', r)), [false, false, true]);
-  assert.deepEqual(['low', 'medium', 'high'].map((r) => needsGo('medium', r)), [false, true, true]);
-  assert.deepEqual(['low', 'medium', 'high'].map((r) => needsGo('all', r)), [true, true, true]);
-  assert.deepEqual(['low', 'medium', 'high'].map((r) => needsGo('never', r)), [false, false, false]);
+  assert.deepEqual(
+    ['low', 'medium', 'high'].map((r) => needsGo('high', r)),
+    [false, false, true],
+  );
+  assert.deepEqual(
+    ['low', 'medium', 'high'].map((r) => needsGo('medium', r)),
+    [false, true, true],
+  );
+  assert.deepEqual(
+    ['low', 'medium', 'high'].map((r) => needsGo('all', r)),
+    [true, true, true],
+  );
+  assert.deepEqual(
+    ['low', 'medium', 'high'].map((r) => needsGo('never', r)),
+    [false, false, false],
+  );
   assert.equal(needsGo(undefined, 'high'), true);
 });
 
@@ -65,13 +77,18 @@ test('a scheme whose merges already waited for a person starts on pr-person once
   try {
     const path = join(dir, 'coordinator.db');
     let store = new Store(path);
-    const waits = store.createProject('Waits', null), half = store.createProject('Half', null), plain = store.createProject('Plain', null);
+    const waits = store.createProject('Waits', null),
+      half = store.createProject('Half', null),
+      plain = store.createProject('Plain', null);
     store.setProjectSettings(waits.id, { approval_rules: `Edit(CLAUDE.md)\n${MERGE_RULES.join('\n')}` });
     store.setProjectSettings(half.id, { approval_rules: 'Bash(gh pr merge:*)' });
     store.setSetting('schema_version', 72);
     store.db.close();
     store = new Store(path);
-    const got = (id: number) => { const p = store.getProject(id)!; return [p.ship_path, p.go_from, p.try_first]; };
+    const got = (id: number) => {
+      const p = store.getProject(id)!;
+      return [p.ship_path, p.go_from, p.try_first];
+    };
     assert.deepEqual(got(waits.id), ['pr-person', 'all', 'never']);
     assert.deepEqual(got(half.id), ['citadel', 'high', 'never'], 'only both merge rules mean every merge waits');
     assert.deepEqual(got(plain.id), ['citadel', 'high', 'never']);

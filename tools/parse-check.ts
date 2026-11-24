@@ -8,7 +8,9 @@ import { stripTypeScriptTypes } from 'node:module';
 
 let files: string[];
 try {
-  files = execFileSync('git', ['ls-files', '-z', '--', '*.ts', ':!:*.d.ts'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\0').filter(Boolean);
+  files = execFileSync('git', ['ls-files', '-z', '--', '*.ts', ':!:*.d.ts'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    .split('\0')
+    .filter(Boolean);
 } catch {
   process.exit(0);
 }

@@ -18,8 +18,7 @@ const inboxSeen = new Map();
 const ticketOf = (id) => itemTicket(view, id);
 // A ready/complete/try minion you've opened since it changed goes faint and stops counting; cards count until answered.
 // A mention (#1149) goes once you've opened its chat since it came.
-const faded = (item) => (item.kind === 'replies' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 }))
-  || (item.kind === 'mention' && (view?.seen?.[item.ticketId] ?? 0) >= item.at);
+const faded = (item) => (item.kind === 'replies' && isSeen(ticketOf(item.ticketId) ?? { id: item.ticketId, updated_at: 0 })) || (item.kind === 'mention' && (view?.seen?.[item.ticketId] ?? 0) >= item.at);
 
 /** The newest mention of you in each minion's chat, as its row shows it (#1149). */
 export function mentionMap(items) {
@@ -27,7 +26,11 @@ export function mentionMap(items) {
   for (const i of items) if (i.kind === 'mention' && !(out.get(i.ticketId)?.at > i.at)) out.set(i.ticketId, { by: i.card.by, at: i.at });
   return out;
 }
-const mentionKeys = (map) => [...map].map(([id, m]) => `${id}:${m.at}`).sort().join();
+const mentionKeys = (map) =>
+  [...map]
+    .map(([id, m]) => `${id}:${m.at}`)
+    .sort()
+    .join();
 
 /**
  * A card was answered here (#1409): the strip, the pill, the app badge and the minion's row chip drop it now, not
@@ -102,15 +105,20 @@ let countsOwed = false; // other schemes' news a hidden tab put off (countsSoon)
 /** Fetch every scheme's count again and redraw their pills; the open scheme's pill stays the badge's own. */
 export function refreshSchemeCounts() {
   countsOwed = false;
-  return api('api/projects').then((projects) => {
-    if (view?.kind === 'project') view.projects = projects;
-    for (const p of projects) {
-      for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
-      // A favicon a merge added or changed since the page drew it.
-      for (const el of document.querySelectorAll(`[data-scheme-icon="${p.id}"]`)) if (el.getAttribute('src') !== iconSrc(p)) el.replaceWith(schemeIcon(p));
-    }
-    updateBadge();
-  }, () => {}).then(refreshInbox);
+  return api('api/projects')
+    .then(
+      (projects) => {
+        if (view?.kind === 'project') view.projects = projects;
+        for (const p of projects) {
+          for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
+          // A favicon a merge added or changed since the page drew it.
+          for (const el of document.querySelectorAll(`[data-scheme-icon="${p.id}"]`)) if (el.getAttribute('src') !== iconSrc(p)) el.replaceWith(schemeIcon(p));
+        }
+        updateBadge();
+      },
+      () => {},
+    )
+    .then(refreshInbox);
 }
 
 /**
@@ -182,10 +190,13 @@ export function schemeCount(p) {
   pillTips ??= mountTips(document.body, { selector: '.scheme-count[data-tip]', acts: '.scheme-count' });
   // The scheme you're in is marked by what this page saw of it (#548), not the server's word, which another tab writes too.
   const { need, busy, working, shipping, fresh, label } = schemePill(openPill(p, view?.projectId, seenHere));
-  return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy && !shipping, role: label ? 'img' : null, 'data-tip': label || null, 'aria-label': label || null },
+  return h(
+    'span',
+    { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy && !shipping, role: label ? 'img' : null, 'data-tip': label || null, 'aria-label': label || null },
     busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, phase(h('i'), 900), working ? h('b', {}, working) : null) : null,
     shipping ? h('span', { class: 'ship', 'aria-hidden': 'true' }, h('b', {}, shipping), h('i', { style: `--ship-delay: -${Date.now() % 1500}ms` }, h('u', {}, '.'), h('u', {}, '.'), h('u', {}, '.'))) : null,
-    need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null);
+    need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null,
+  );
 }
 
 let pillTips = null;
@@ -208,7 +219,9 @@ function markItemsSeen(projectId, keys) {
   if (!p || seenSent.get(projectId) === sig) return;
   seenSent.set(projectId, sig);
   // A failed write tries again at the next redraw.
-  api(`api/projects/${projectId}/seen-items`, { method: 'PUT', body: { keys } }).catch(() => { if (seenSent.get(projectId) === sig) seenSent.delete(projectId); });
+  api(`api/projects/${projectId}/seen-items`, { method: 'PUT', body: { keys } }).catch(() => {
+    if (seenSent.get(projectId) === sig) seenSent.delete(projectId);
+  });
 }
 
 /**
@@ -270,13 +283,18 @@ export function renderInbox() {
     if (!rows.has(i.ticketId)) rows.set(i.ticketId, []);
     rows.get(i.ticketId).push(i);
   }
-  const toggle = h('button', { type: 'button', class: 'inbox-toggle', 'aria-expanded': String(open), title: open ? 'Minimize' : 'Show what waits on you' },
+  const toggle = h(
+    'button',
+    { type: 'button', class: 'inbox-toggle', 'aria-expanded': String(open), title: open ? 'Minimize' : 'Show what waits on you' },
     h('span', { class: 'label' }, 'Needs you'),
     shown ? h('span', { class: 'count' }, shown) : h('span', { class: 'muted' }, 'all seen'),
     h('span', { class: 'spacer' }),
-    h('span', { class: 'chev', 'aria-hidden': 'true' }, open ? '▾' : '▸'));
+    h('span', { class: 'chev', 'aria-hidden': 'true' }, open ? '▾' : '▸'),
+  );
   toggle.addEventListener('click', () => {
-    try { localStorage.setItem(OPEN_KEY, open ? '0' : '1'); } catch {}
+    try {
+      localStorage.setItem(OPEN_KEY, open ? '0' : '1');
+    } catch {}
     renderInbox();
   });
   strip.classList.toggle('open', open);
@@ -293,7 +311,11 @@ export function renderInbox() {
 
 /** The strip as you last left it: opened (its rows showing) or shut. */
 function stripOpen() {
-  try { return localStorage.getItem(OPEN_KEY) === '1'; } catch { return false; }
+  try {
+    return localStorage.getItem(OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 /** A scheme whose items haven't come yet: the shut strip's one line, so nothing below moves when they do (#1533). */
@@ -312,11 +334,10 @@ let inboxTips = null;
 export function inboxRow(items) {
   const { from } = items[0];
   // A minion the page hasn't heard of yet still gets a row, by its id, until its first update names it.
-  const t = ticketOf(items[0].ticketId) ?? (from ? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title }
-    : { id: items[0].ticketId, project_id: view.projectId, number: null, kind: 'ticket', title: '' });
+  const t = ticketOf(items[0].ticketId) ?? (from ? { id: items[0].ticketId, project_id: from.projectId, number: from.number, kind: from.kind, title: from.title } : { id: items[0].ticketId, project_id: view.projectId, number: null, kind: 'ticket', title: '' });
   const asks = new Map();
   for (const i of items) {
-    const ask = i.kind === 'spend' ? `💸 Over $${i.card.stage}` : ASKS[i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.card?.secret ? 'secret' : i.kind] ?? i.kind;
+    const ask = i.kind === 'spend' ? `💸 Over $${i.card.stage}` : (ASKS[i.card?.notice ? 'notice' : i.card?.doc ? 'doc' : i.card?.secret ? 'secret' : i.kind] ?? i.kind);
     // The chip's popover says why it's here (#906): the newest of its kind.
     const was = asks.get(ask);
     asks.set(ask, { n: (was?.n ?? 0) + 1, why: was && was.at > i.at ? was.why : askWhy(i, t), at: Math.max(was?.at ?? 0, i.at) });
@@ -327,11 +348,23 @@ export function inboxRow(items) {
   const target = rowTarget(items);
   // Another person's Taskmaster (#919) shows only in Everyone: its card addressed to you opens there (#1400).
   const everyone = view.taskmasters?.some((x) => x.id === t.id && x.person_id != null && x.id !== view.coordinator?.id);
-  const open = everyone ? () => { try { localStorage.setItem(TM_VIEW, 'everyone'); } catch {} } : null;
-  return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t), onclick: open },
-    h('span', { class: 'name' }, from ? `${from.scheme} ` : '',
-      isCoordinator(t) ? (from ? 'Taskmaster' : taskmasterLabel(t.project_id)) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
-    h('span', { class: 'asks' }, [...asks].map(([ask, { n, why }]) => h('span', { class: 'chip', tabindex: 0, 'data-tip': why, 'data-tip-row': t.id }, n > 1 ? `${ask} ×${n}` : ask))),
+  const open = everyone
+    ? () => {
+        try {
+          localStorage.setItem(TM_VIEW, 'everyone');
+        } catch {}
+      }
+    : null;
+  return h(
+    'a',
+    { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t), onclick: open },
+    h('span', { class: 'name' }, from ? `${from.scheme} ` : '', isCoordinator(t) ? (from ? 'Taskmaster' : taskmasterLabel(t.project_id)) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
+    h(
+      'span',
+      { class: 'asks' },
+      [...asks].map(([ask, { n, why }]) => h('span', { class: 'chip', tabindex: 0, 'data-tip': why, 'data-tip-row': t.id }, n > 1 ? `${ask} ×${n}` : ask)),
+    ),
     // No one-tap replies on these rows (#130): a stray tap on "Merge it" would ship work nobody opened.
-    h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))));
+    h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))),
+  );
 }

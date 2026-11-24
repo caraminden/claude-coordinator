@@ -17,7 +17,10 @@ export const SHIP_BRANCH = /^land\//;
 /** An early next train's run (#1568, tools/land.sh's early_next): low priority beside a ship's, so squeezed while one runs. */
 const EARLY_BRANCH = /^early\//;
 
-export interface Ship { repo: string; runner: string }
+export interface Ship {
+  repo: string;
+  runner: string;
+}
 
 export interface ShipWatchDeps {
   /** owner/name, lowercase, of every repo with runners on a runner agent's PC (repeats are fine). */
@@ -102,7 +105,9 @@ export class ShipWatch {
     const out: Ship[] = [];
     const on = (re: RegExp) => runs.filter((r) => re.test(String(r?.head_branch ?? '')) && Number.isInteger(r?.id));
     // With no land/ run going, the oldest early one is a train's own CI (its early run counted): the next train's is younger.
-    const early = on(EARLY_BRANCH).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))).slice(0, 1);
+    const early = on(EARLY_BRANCH)
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+      .slice(0, 1);
     const land = on(SHIP_BRANCH);
     for (const r of land.length ? land : early) {
       const jobs: any[] = (await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used))?.jobs ?? [];

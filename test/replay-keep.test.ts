@@ -28,7 +28,7 @@ test('deleting a session takes its files only, not those of a session whose name
   assert.deepEqual(readdirSync(dir).sort(), [ab, other].sort());
 });
 
-test('an opt-out takes everything of the person\'s in every scheme\'s folders, unregistered apps included, and nobody else\'s', () => {
+test("an opt-out takes everything of the person's in every scheme's folders, unregistered apps included, and nobody else's", () => {
   const one = dirOf(3, 'live-app');
   const gone = dirOf(4, 'removed-app');
   put(one, 7, 's1');

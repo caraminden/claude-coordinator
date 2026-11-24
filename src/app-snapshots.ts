@@ -43,7 +43,7 @@ export async function sizeOf(dir: string): Promise<number> {
   return n;
 }
 
-export const human = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(0.1, bytes / 1024 ** 2).toFixed(1)} MB`;
+export const human = (bytes: number) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(0.1, bytes / 1024 ** 2).toFixed(1)} MB`);
 const when = (ms: number) => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z');
 
 /** An app's snapshots, newest first. A `.part` folder (a copy cut short) isn't one, and is left for a person. */
@@ -52,7 +52,10 @@ export async function listSnapshots(root: string): Promise<Snapshot[]> {
   const out: Snapshot[] = [];
   for (const id of names) {
     if (id.endsWith('.part')) continue;
-    const meta = await readFile(join(root, id, META), 'utf8').then((t) => JSON.parse(t), () => null);
+    const meta = await readFile(join(root, id, META), 'utf8').then(
+      (t) => JSON.parse(t),
+      () => null,
+    );
     if (!meta || typeof meta.commit !== 'string' || typeof meta.taken_at !== 'number') continue;
     out.push({ id, dir: join(root, id), commit: meta.commit, taken_at: meta.taken_at, why: String(meta.why ?? ''), bytes: Number(meta.bytes) || 0, failed: meta.failed === true });
   }
@@ -158,7 +161,11 @@ export async function prune(root: string, protect: string[], cap = { keep: KEEP,
   for (const s of gone) await rm(s.dir, { recursive: true, force: true }).catch((err) => stuck.set(s.id, String(err?.code ?? err?.message ?? err)));
   if (!gone.length) return [];
   const removed = gone.filter((s) => !stuck.has(s.id));
-  const byAge = (list: Snapshot[]) => [...list].sort((a, b) => b.taken_at - a.taken_at).map((s) => s.id).join(', ');
+  const byAge = (list: Snapshot[]) =>
+    [...list]
+      .sort((a, b) => b.taken_at - a.taken_at)
+      .map((s) => s.id)
+      .join(', ');
   return [
     `${removed.length ? `Removed ${removed.length} older snapshot${removed.length > 1 ? 's' : ''} past the cap (${cap.keep} kept, ${human(cap.maxBytes)} at most): ${byAge(removed)}.` : `Over the snapshots' cap (${cap.keep} kept, ${human(cap.maxBytes)} at most).`}${stuck.size ? ` Couldn't remove ${[...stuck].map(([id, why]) => `${id} (${why})`).join(', ')}: a person can.` : ''} Kept: ${byAge(kept)}.`,
   ];

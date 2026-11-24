@@ -55,7 +55,10 @@ export const FLOORS: Record<Series['kind'], { rise: number; share: number }> = {
 };
 
 /** One app server's reading in host_samples.app_mem: its memory and when its unit's cgroup was made (its run). */
-export interface AppMem { mem: number; since: number }
+export interface AppMem {
+  mem: number;
+  since: number;
+}
 
 /** One thing watched: its readings, oldest first, from its run's start plus WARMUP_MS. */
 export interface Series {
@@ -91,7 +94,10 @@ export function seriesOf(rows: HostSample[], bootAt: number): Series[] {
   const out: Series[] = [];
   const serverFrom = bootAt + WARMUP_MS;
   const col = (kind: Series['kind'], name: string, pick: (r: HostSample) => number | null | undefined, from: number) => {
-    const points = rows.flatMap((r): [number, number][] => { const v = pick(r); return r.at >= from && v != null ? [[r.at, v]] : []; });
+    const points = rows.flatMap((r): [number, number][] => {
+      const v = pick(r);
+      return r.at >= from && v != null ? [[r.at, v]] : [];
+    });
     out.push({ kind, key: kind === 'rss' || kind === 'fds' ? `${kind}@${bootAt}` : kind, name, points });
   };
   col('rss', "the server's memory", (r) => r.rss, serverFrom);
@@ -100,7 +106,10 @@ export function seriesOf(rows: HostSample[], bootAt: number): Series[] {
   col('tmp', '/tmp', (r) => r.tmp_used, 0);
   const latest = parseApps(rows.at(-1)?.app_mem);
   for (const [app, now] of Object.entries(latest)) {
-    const points = rows.flatMap((r): [number, number][] => { const a = parseApps(r.app_mem)[app]; return a && a.since === now.since && r.at >= now.since + WARMUP_MS ? [[r.at, a.mem]] : []; });
+    const points = rows.flatMap((r): [number, number][] => {
+      const a = parseApps(r.app_mem)[app];
+      return a && a.since === now.since && r.at >= now.since + WARMUP_MS ? [[r.at, a.mem]] : [];
+    });
     out.push({ kind: 'app', key: `app:${app}@${now.since}`, name: app, points });
   }
   return out;
@@ -117,7 +126,16 @@ export function parseApps(json: string | null | undefined): Record<string, AppMe
 }
 
 /** One alarm that rang (a 'growth' health event's detail, JSON). */
-export interface Growth { key: string; kind: Series['kind'] | 'bound'; what: string; from?: number; to: number; line?: number; app?: string; scheme?: string | null }
+export interface Growth {
+  key: string;
+  kind: Series['kind'] | 'bound';
+  what: string;
+  from?: number;
+  to: number;
+  line?: number;
+  app?: string;
+  scheme?: string | null;
+}
 
 const size = (kind: string, v: number) => (kind === 'rss' || kind === 'tmp' || kind === 'app' ? `${Math.round(v / MB)} MB` : String(Math.round(v)));
 
@@ -183,7 +201,10 @@ export function checkGrowth(d: GrowthDeps, now: number): Growth[] {
   const own = d.ownScheme();
   const unheard = Object.entries(open).filter(([, o]) => !o.woke);
   if (unheard.length && own != null && d.tell && store.getOverlord(own) && quietUntil(now) === null) {
-    d.tell(own, `Growth alarm on perigee: ${unheard.length === 1 ? 'something keeps' : 'some things keep'} growing.\n${unheard.map(([, o]) => `- ${o.what}`).join('\n')}\n\nThe 5-minute host_samples rows have the readings (rss, open_fds, supervisors, tmp_used, app_mem); 'growth' health events record each. A leak leaves these behind: leftover units, /tmp entries, open files (shared/project/reports/leak-hunt-2026-11.md). Find what's growing; an app's alarm goes to its scheme's Taskmaster to look into. Each rings once until it has been quiet for ${QUIET_AFTER_MS / 3_600_000} hours.`);
+    d.tell(
+      own,
+      `Growth alarm on perigee: ${unheard.length === 1 ? 'something keeps' : 'some things keep'} growing.\n${unheard.map(([, o]) => `- ${o.what}`).join('\n')}\n\nThe 5-minute host_samples rows have the readings (rss, open_fds, supervisors, tmp_used, app_mem); 'growth' health events record each. A leak leaves these behind: leftover units, /tmp entries, open files (shared/project/reports/leak-hunt-2026-11.md). Find what's growing; an app's alarm goes to its scheme's Taskmaster to look into. Each rings once until it has been quiet for ${QUIET_AFTER_MS / 3_600_000} hours.`,
+    );
     for (const [, o] of unheard) o.woke = true;
   }
   store.setSetting(OPEN, open);
@@ -191,7 +212,12 @@ export function checkGrowth(d: GrowthDeps, now: number): Growth[] {
 }
 
 /** The new readings host_samples takes each 5 minutes (#1762); each null where it can't be read. Never throws. */
-export interface GrowthReading { open_fds: number | null; supervisors: number | null; tmp_used: number | null; app_mem: string | null }
+export interface GrowthReading {
+  open_fds: number | null;
+  supervisors: number | null;
+  tmp_used: number | null;
+  app_mem: string | null;
+}
 
 export interface ReadDeps {
   /** citadel.slice's cgroup dir (memory-storms' citadelSliceDir), or null where there is none. */
@@ -203,24 +229,35 @@ export interface ReadDeps {
 }
 
 export async function readGrowth(d: ReadDeps): Promise<GrowthReading> {
-  const open_fds = await readdir(d.fdDir ?? '/proc/self/fd').then((l) => l.length, () => null);
-  const tmp_used = await statfs(d.tmp ?? '/tmp').then((s) => (s.blocks - s.bfree) * s.bsize, () => null);
+  const open_fds = await readdir(d.fdDir ?? '/proc/self/fd').then(
+    (l) => l.length,
+    () => null,
+  );
+  const tmp_used = await statfs(d.tmp ?? '/tmp').then(
+    (s) => (s.blocks - s.bfree) * s.bsize,
+    () => null,
+  );
   let supervisors: number | null = null;
   let app_mem: string | null = null;
   if (d.slice) {
-    supervisors = await readdir(join(d.slice, 'citadel-taskmasters.slice')).then((l) => l.filter((n) => /^citadel-supervisor-.*\.service$/.test(n)).length, () => null);
+    supervisors = await readdir(join(d.slice, 'citadel-taskmasters.slice')).then(
+      (l) => l.filter((n) => /^citadel-supervisor-.*\.service$/.test(n)).length,
+      () => null,
+    );
     const apps: Record<string, AppMem> = {};
     const dir = join(dirname(d.slice), 'contraptions.slice');
-    await Promise.all(d.apps.map(async (name) => {
-      const unit = join(dir, `citadel-app-${name}.service`);
-      try {
-        const [mem, st] = await Promise.all([readFile(join(unit, 'memory.current'), 'utf8'), stat(unit)]);
-        // The cgroup is made when the unit starts, so its ctime marks the run.
-        if (Number.isFinite(Number(mem.trim()))) apps[name] = { mem: Number(mem.trim()), since: Math.round(st.ctimeMs) };
-      } catch {
-        // Not running, or no such unit: left out.
-      }
-    }));
+    await Promise.all(
+      d.apps.map(async (name) => {
+        const unit = join(dir, `citadel-app-${name}.service`);
+        try {
+          const [mem, st] = await Promise.all([readFile(join(unit, 'memory.current'), 'utf8'), stat(unit)]);
+          // The cgroup is made when the unit starts, so its ctime marks the run.
+          if (Number.isFinite(Number(mem.trim()))) apps[name] = { mem: Number(mem.trim()), since: Math.round(st.ctimeMs) };
+        } catch {
+          // Not running, or no such unit: left out.
+        }
+      }),
+    );
     app_mem = Object.keys(apps).length ? JSON.stringify(apps) : null;
   }
   return { open_fds, supervisors, tmp_used, app_mem };

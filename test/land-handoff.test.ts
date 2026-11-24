@@ -38,26 +38,62 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
   const waits: { commit: string | null; text: string }[] = [];
   const deps: HandoffDeps = {
     landings,
-    store: { getTicket: (id: number) => (id === 1 ? ticket : { number: 9, title: 'The build', status: 'idle', state: opts.ownerState ?? null }), updateTicket: (_id, f) => { Object.assign(ticket, f); did.push(`state ${f.state}`); } },
+    store: {
+      getTicket: (id: number) => (id === 1 ? ticket : { number: 9, title: 'The build', status: 'idle', state: opts.ownerState ?? null }),
+      updateTicket: (_id, f) => {
+        Object.assign(ticket, f);
+        did.push(`state ${f.state}`);
+      },
+    },
     runner: {
-      emit: (_id, _kind, data: any) => { notes.push(data.text); },
-      send: (_id, _from, text, _images, extra) => { sent.push(text); light.push(!!extra?.light); fyi.push(!!extra?.fyi); },
-      unpark: (id, by) => { did.push(`unpark ${id} by ${by}`); return true; },
-      relayMinion: (from, to, author, text, urgent, wake, unparked) => { owned.push({ from, to, author, text, urgent, wake, unparked }); return false; },
-      close: async (_id, text) => { ticket.status = 'closed'; did.push(`close: ${text}`); },
-      closeAfterTurn: () => { did.push('closeAfterTurn'); return true; },
+      emit: (_id, _kind, data: any) => {
+        notes.push(data.text);
+      },
+      send: (_id, _from, text, _images, extra) => {
+        sent.push(text);
+        light.push(!!extra?.light);
+        fyi.push(!!extra?.fyi);
+      },
+      unpark: (id, by) => {
+        did.push(`unpark ${id} by ${by}`);
+        return true;
+      },
+      relayMinion: (from, to, author, text, urgent, wake, unparked) => {
+        owned.push({ from, to, author, text, urgent, wake, unparked });
+        return false;
+      },
+      close: async (_id, text) => {
+        ticket.status = 'closed';
+        did.push(`close: ${text}`);
+      },
+      closeAfterTurn: () => {
+        did.push('closeAfterTurn');
+        return true;
+      },
       keptOpen: () => opts.kept ?? null,
       isRunning: () => !!opts.running,
       queued: () => 0,
-      deployPending: () => { did.push('deployPending'); },
-      deployLive: () => { did.push('deployLive'); return true; },
+      deployPending: () => {
+        did.push('deployPending');
+      },
+      deployLive: () => {
+        did.push('deployLive');
+        return true;
+      },
       broadcastTicket: () => {},
     },
     from: 'Citadel',
     buildOwner: () => (opts.owner === undefined ? 2 : opts.owner),
-    runnersBack: (_id, reason) => { did.push(`runnersBack: ${reason}`); return opts.runners ?? true; },
+    runnersBack: (_id, reason) => {
+      did.push(`runnersBack: ${reason}`);
+      return opts.runners ?? true;
+    },
     liveAlready: async () => !!opts.liveAlready,
-    wakeWhenLive: async (_id, commit, text) => { if (opts.liveAtWait) return false; waits.push({ commit, text }); return true; },
+    wakeWhenLive: async (_id, commit, text) => {
+      if (opts.liveAtWait) return false;
+      waits.push({ commit, text });
+      return true;
+    },
     ...(opts.deployOps ? { apps: () => opts.apps ?? [], deployOps: opts.deployOps } : {}),
   };
   const land = async (out: string, code = 0, h: object = H, args: string[] = []) => {
@@ -88,7 +124,10 @@ test('a clean land that is live now posts the shipped line and dismisses the min
   await s.handoffs.poll();
   assert.deepEqual(s.notes, ['Shipped abc1234 "#9: usage bar": Usage bar in the top bar. Risk low: front end only. Live now.']);
   assert.equal(s.sent.length, 0, 'no model call');
-  assert.ok(s.did.some((d) => d.startsWith('close: Shipped and live')), s.did.join('\n'));
+  assert.ok(
+    s.did.some((d) => d.startsWith('close: Shipped and live')),
+    s.did.join('\n'),
+  );
   assert.deepEqual(s.landings.handoffs(), [], 'reported once');
   await s.handoffs.poll();
   assert.equal(s.notes.length, 1, 'a second poll reports nothing again');
@@ -114,7 +153,9 @@ test('a clean land waiting for the restart sets pending-deploy, and a restart al
 // #1417: a restart held for a starved box says when it expects to be live, in the shipped line and the minion's note.
 test('a land whose restart is held for a starved box says when it expects to be live, and still waits for the restart', async () => {
   const s = setup('restart-held');
-  await s.land('land: main is now at def5678 "#9: server bit"\ndeploy: restart queued as citadel-restart: running turns carry on through it, and it reports here\ndeploy: not live yet: the box is starved (CPU pressure 63%), so the restart waits for it to ease, live by about 14:05 PST at the latest, and reports here when it is live\n');
+  await s.land(
+    'land: main is now at def5678 "#9: server bit"\ndeploy: restart queued as citadel-restart: running turns carry on through it, and it reports here\ndeploy: not live yet: the box is starved (CPU pressure 63%), so the restart waits for it to ease, live by about 14:05 PST at the latest, and reports here when it is live\n',
+  );
   await s.handoffs.poll();
   assert.match(s.notes[0], /^Shipped def5678 "#9: server bit": .* Waiting for the restart, held while the box is starved \(CPU pressure 63%\): live by about 14:05 PST at the latest\.$/);
   assert.equal(s.ticket.state, 'pending-deploy', 'dismissed only once its restart is live');
@@ -208,7 +249,7 @@ test('stay_open does not change a failed land: it wakes the minion with the outp
 
 test('a failed land leads its wake with the kind of red (#1013), and an unknown one keeps the plain text', async () => {
   const a = setup('kind-parse');
-  await a.land("land: smoke: a .ts file does not parse, before the line (2 s), so nothing landed\n", 1);
+  await a.land('land: smoke: a .ts file does not parse, before the line (2 s), so nothing landed\n', 1);
   await a.handoffs.poll();
   assert.match(a.sent[0], /^Kind: parse error/);
   assert.match(a.sent[0], /Your handed-off land didn't go through/);
@@ -252,7 +293,8 @@ test('each kind of failed land wakes the minion with the end of its output, and 
 
 test('a land whose branch moved but whose push to origin failed says it landed locally and what to do, never that it did not go through (#911)', async () => {
   const s = setup('unpushed');
-  const out = 'land: CI passed on d1a5c2f6\nland: master is now at d1a5c2f "#15: seed the tree"\nland: master moved, but the push to origin failed: remote: Repository not found.\nfatal: repository \'https://github.com/o/r.git/\' not found\nland: the next landing retries it; if origin\'s master moved on its own (rejected as non-fast-forward), a person merges it into /repo first\n';
+  const out =
+    "land: CI passed on d1a5c2f6\nland: master is now at d1a5c2f \"#15: seed the tree\"\nland: master moved, but the push to origin failed: remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found\nland: the next landing retries it; if origin's master moved on its own (rejected as non-fast-forward), a person merges it into /repo first\n";
   await s.land(out, 1);
   await s.handoffs.poll();
   assert.equal(s.sent.length, 1, 'woken once');
@@ -260,10 +302,13 @@ test('a land whose branch moved but whose push to origin failed says it landed l
   assert.match(s.sent[0], /Once they say it's fixed, hand it off again with hand_off_land/);
   assert.match(s.sent[0], /master moved locally to d1a5c2f "#15: seed the tree"/);
   assert.match(s.sent[0], /push to origin failed: remote: Repository not found\.\nfatal: repository 'https:\/\/github\.com\/o\/r\.git\/' not found/);
-  assert.doesNotMatch(s.sent[0], /git push/, "never tells it to push the main branch: the guard, pre-push and the tripwire refuse that (KT1)");
+  assert.doesNotMatch(s.sent[0], /git push/, 'never tells it to push the main branch: the guard, pre-push and the tripwire refuse that (KT1)');
   assert.match(s.sent[0], /tell a person/i, 'a lasting failure goes to a person');
   assert.match(s.sent[0], /fails the same way/, 'says shipping again would not help');
-  assert.ok(s.notes.some((n) => n.startsWith('Shipped d1a5c2f "#15: seed the tree"') && /not pushed to origin/i.test(n)), 'the shipped line says it landed but is not pushed');
+  assert.ok(
+    s.notes.some((n) => n.startsWith('Shipped d1a5c2f "#15: seed the tree"') && /not pushed to origin/i.test(n)),
+    'the shipped line says it landed but is not pushed',
+  );
   assert.equal(s.ticket.state, null, 'left open for the minion to push');
   assert.ok(!s.did.some((d) => d.startsWith('close')), 'not dismissed');
   assert.equal(landResult('land: master moved, but the push to origin failed: error: one\n\nhint: two\n', 1).error, 'error: one\n\nhint: two', "a blank line in git's output doesn't cut it short");
@@ -330,7 +375,8 @@ test('every command a ship wake quotes gets past the tripwire and the kit guard 
   const commands = new Set<string>();
   for (const t of texts) for (const m of t.matchAll(/`([^`\n]+)`/g)) if (/^(git|tools\/|bash|npm|node)\b/.test(m[1])) commands.add(m[1]);
   assert.ok(commands.size >= 2, `found the quoted commands: ${[...commands].join(' | ')}`);
-  const home = '/home/u', data = `${home}/.local/share/claude-coordinator`;
+  const home = '/home/u',
+    data = `${home}/.local/share/claude-coordinator`;
   const cfg: TripwireConfig = { home, data, checkout: `${home}/claude-coordinator`, project: 2, claudeConfig: `${home}/.claude`, deployScript: false, env: { TMPDIR: `${data}/projects/2/tmp/9`, PATH: '/usr/bin:/bin' } };
   const worktree = `${data}/projects/2/tickets/9`;
   const guard = join(process.cwd(), 'kit/skills/scheme-setup/templates/guard.sh');
@@ -469,18 +515,28 @@ test('a clean land in a scheme with an app deploys it, waits, and says it went l
   assert.deepEqual(d.started, ['peek-auras for 1']);
   assert.deepEqual(s.notes, ['Shipped abc1234 "#9: aura fix": Usage bar in the top bar. Risk low: front end only. Shipped. Deployed peek-auras at abc1234ff, healthy.']);
   assert.equal(s.sent.length, 0, 'no model call');
-  assert.ok(s.did.some((x) => x.startsWith('close: Shipped')), s.did.join('\n'));
+  assert.ok(
+    s.did.some((x) => x.startsWith('close: Shipped')),
+    s.did.join('\n'),
+  );
 });
 
 test('deploy: false, a merge into a build, or a scheme with no app deploys nothing', async () => {
-  for (const [name, h, args, apps] of [['app-off', { deploy: false }, [], ['peek-auras']], ['app-build', {}, ['--into', 'build/3', 'test/a.test.ts'], ['peek-auras']], ['app-none', {}, [], []]] as const) {
+  for (const [name, h, args, apps] of [
+    ['app-off', { deploy: false }, [], ['peek-auras']],
+    ['app-build', {}, ['--into', 'build/3', 'test/a.test.ts'], ['peek-auras']],
+    ['app-none', {}, [], []],
+  ] as const) {
     const d = fakeDeploys(() => ({ state: 'deployed', to: 'abc1234' }));
     const s = setup(name, { apps: [...apps], deployOps: d.ops });
     await s.land(APP_LAND, 0, h, [...args]);
     await s.handoffs.poll();
     assert.deepEqual(d.started, [], name);
     assert.doesNotMatch(s.notes[0], /Deployed/, name);
-    assert.ok(s.did.some((x) => x.startsWith('close: ')), name);
+    assert.ok(
+      s.did.some((x) => x.startsWith('close: ')),
+      name,
+    );
   }
 });
 
@@ -488,19 +544,33 @@ test('deploy: false, a merge into a build, or a scheme with no app deploys nothi
 test('a ship with a live probe hands it over with when it is live, and a fail keeps the minion open', async () => {
   const probe = { kind: 'http' as const, path: '/api/skills', status: 200 };
   const calls: string[] = [];
-  const cases = [['probe-live', LIVE, [], undefined, 'live'], ['probe-restart', RESTART, [], undefined, 'later'], ['probe-app', APP_LAND, [], ['peek-auras'], 'live'], ['probe-landed', APP_LAND, [], [], 'nowhere']] as const;
+  const cases = [
+    ['probe-live', LIVE, [], undefined, 'live'],
+    ['probe-restart', RESTART, [], undefined, 'later'],
+    ['probe-app', APP_LAND, [], ['peek-auras'], 'live'],
+    ['probe-landed', APP_LAND, [], [], 'nowhere'],
+  ] as const;
   for (const [name, out, args, apps, when] of cases) {
     const s = setup(name, apps ? { apps: [...apps], deployOps: fakeDeploys(() => ({ state: 'deployed', to: 'abc1234ffff0000' })).ops } : {});
-    s.deps.probe = async (id, p, commit, w) => { calls.push(`${name}: ${id} ${p.kind} ${commit} ${w}`); return false; };
+    s.deps.probe = async (id, p, commit, w) => {
+      calls.push(`${name}: ${id} ${p.kind} ${commit} ${w}`);
+      return false;
+    };
     await s.land(out, 0, { probe }, [...args]);
     await s.handoffs.poll();
     assert.equal(calls.at(-1)?.split(' ').at(-1), when, name);
-    assert.ok(s.did.some((x) => x.startsWith(when === 'later' ? 'deployPending' : 'close: ')), `${name}: a pass changes nothing: ${s.did.join(', ')}`);
+    assert.ok(
+      s.did.some((x) => x.startsWith(when === 'later' ? 'deployPending' : 'close: ')),
+      `${name}: a pass changes nothing: ${s.did.join(', ')}`,
+    );
   }
   assert.deepEqual(calls.slice(0, 2), ['probe-live: 1 http abc1234 live', 'probe-restart: 1 http def5678 later']);
 
   const into = setup('probe-into');
-  into.deps.probe = async () => { calls.push('into'); return false; };
+  into.deps.probe = async () => {
+    calls.push('into');
+    return false;
+  };
   writeFileSync(join(into.cwd, 'tools', 'land.sh'), "echo 'land: merged into build/3'\n");
   assert.ok(into.landings.handOff(1, into.cwd, { PATH: process.env.PATH! }, ['--into', 'build/3', 'test/a.test.ts'], { ...H, probe }));
   await until('land.sh ends', () => into.landings.get(1)?.code !== null);
@@ -562,7 +632,14 @@ test('deployApps waits behind a running deploy, retries a refused start once, an
   assert.match(r.line, /deployed 0ld0ld0aa, which doesn't hold the landed abc1234: GitHub's main didn't have it yet/);
 
   // A start refused for good (no repo, services off) fails after its one retry, with its reason.
-  const refused: DeployOps = { running: () => false, start: async () => { throw new Error('Mandate has no repo set'); }, last: async () => null, sleep: async () => {} };
+  const refused: DeployOps = {
+    running: () => false,
+    start: async () => {
+      throw new Error('Mandate has no repo set');
+    },
+    last: async () => null,
+    sleep: async () => {},
+  };
   assert.deepEqual(await deployApps(5, ['mandate'], 'abc1234', refused), [{ name: 'mandate', ok: false, line: "mandate's deploy couldn't start: Mandate has no repo set" }]);
 });
 
@@ -591,46 +668,49 @@ test('deployApps counts a deploy of a newer main as shipped, and skips an app al
 // server would read as merely landed (no live, no restart) fails here.
 test("landResult reads the real deploy.sh's lines: live, already live, and a restart still to come", { timeout: 120_000 }, () => {
   let running = '';
-  return withRealDeploy(async (r, run) => {
-    const deploy = join(import.meta.dirname, '..', 'tools', 'deploy.sh');
-    // Each status line on its own too, so one regex alternative can't stand in for another.
-    const as = async (what: string, bin: string | null, lines: RegExp[], kind: string, extra: Record<string, string> = {}) => {
-      r.commit(r.source, `${what}.txt`, `${what}\n`);
-      const res = await run(deploy, r.source, { ...(bin && { PATH: `${bin}:${join(r.dir, 'bin')}:${process.env.PATH}` }), ...extra });
-      assert.equal(landResult(res.stderr, 0).kind, kind, `${what}: ${res.stderr}`);
-      for (const re of lines) {
-        const line = res.stderr.split('\n').find((l) => re.test(l));
-        assert.ok(line, `${what}: no line like ${re}: ${res.stderr}`);
-        assert.equal(landResult(`${line}\n`, 0).kind, kind, `${what}: ${line}`);
-      }
-    };
-    await as('restarted', null, [/^deploy: live now: the server restarted on/], 'live');
-    const again = await run(deploy, r.source);
-    assert.match(again.stderr, /^deploy: nothing to deploy: the server already runs/m);
-    assert.equal(landResult(again.stderr, 0).kind, 'live');
-    running = git(r.live, 'rev-parse', 'HEAD'); // from here the server stays on it, so each deploy has a change
-    const fake = (name: string, script: string) => {
-      const bin = join(r.dir, name);
-      mkdirSync(bin);
-      writeFileSync(join(bin, 'systemd-run'), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
-      return bin;
-    };
-    await as('queued', fake('idle-bin', 'exit 0'), [/^deploy: restart queued as /, /^deploy: not live yet after 1 s/], 'restart', { DEPLOY_HEALTHY_WAIT: '0', DEPLOY_SETTLE: '0', DEPLOY_TEST_LIVE_GRACE: '1' });
-    await as('joined', fake('joined-bin', 'echo "Failed to start transient service unit: Unit cc-restart-when-idle.service already exists." >&2; exit 1'), [/^deploy: a restart is already queued as/], 'restart');
-    // #1417: a restart held for a starved box (its note in <state>/hold) says when it expects to go, in the words the
-    // shipped line reads (src/land.ts's held).
-    const hold = join(r.live, '.git', 'cc-deploy', 'hold');
-    await as('held', fake('held-bin', `echo "$(( $(date +%s) + 600 )) CPU pressure 63%" >'${hold}'; exit 0`), [/^deploy: not live yet: the box is starved \(CPU pressure 63%\), so the restart waits for it to ease, live by about \d\d?:\d\d P[SD]T at the latest/], 'restart');
-    // An urgent fix's deploy (the land tool's outage: true) marks the restart it queues or rides to skip the hold.
-    rmSync(hold);
-    const urgent = join(r.live, '.git', 'cc-deploy', 'urgent');
-    assert.equal(existsSync(urgent), false);
-    await as('urgent', fake('urgent-bin', 'exit 0'), [/^deploy: restart queued as /], 'restart', { LAND_URGENT: '1', DEPLOY_HEALTHY_WAIT: '0', DEPLOY_SETTLE: '0', DEPLOY_TEST_LIVE_GRACE: '1' });
-    assert.equal(existsSync(urgent), true, 'LAND_URGENT marks the restart');
-  }, () => (running ? { commit: running } : {}));
+  return withRealDeploy(
+    async (r, run) => {
+      const deploy = join(import.meta.dirname, '..', 'tools', 'deploy.sh');
+      // Each status line on its own too, so one regex alternative can't stand in for another.
+      const as = async (what: string, bin: string | null, lines: RegExp[], kind: string, extra: Record<string, string> = {}) => {
+        r.commit(r.source, `${what}.txt`, `${what}\n`);
+        const res = await run(deploy, r.source, { ...(bin && { PATH: `${bin}:${join(r.dir, 'bin')}:${process.env.PATH}` }), ...extra });
+        assert.equal(landResult(res.stderr, 0).kind, kind, `${what}: ${res.stderr}`);
+        for (const re of lines) {
+          const line = res.stderr.split('\n').find((l) => re.test(l));
+          assert.ok(line, `${what}: no line like ${re}: ${res.stderr}`);
+          assert.equal(landResult(`${line}\n`, 0).kind, kind, `${what}: ${line}`);
+        }
+      };
+      await as('restarted', null, [/^deploy: live now: the server restarted on/], 'live');
+      const again = await run(deploy, r.source);
+      assert.match(again.stderr, /^deploy: nothing to deploy: the server already runs/m);
+      assert.equal(landResult(again.stderr, 0).kind, 'live');
+      running = git(r.live, 'rev-parse', 'HEAD'); // from here the server stays on it, so each deploy has a change
+      const fake = (name: string, script: string) => {
+        const bin = join(r.dir, name);
+        mkdirSync(bin);
+        writeFileSync(join(bin, 'systemd-run'), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+        return bin;
+      };
+      await as('queued', fake('idle-bin', 'exit 0'), [/^deploy: restart queued as /, /^deploy: not live yet after 1 s/], 'restart', { DEPLOY_HEALTHY_WAIT: '0', DEPLOY_SETTLE: '0', DEPLOY_TEST_LIVE_GRACE: '1' });
+      await as('joined', fake('joined-bin', 'echo "Failed to start transient service unit: Unit cc-restart-when-idle.service already exists." >&2; exit 1'), [/^deploy: a restart is already queued as/], 'restart');
+      // #1417: a restart held for a starved box (its note in <state>/hold) says when it expects to go, in the words the
+      // shipped line reads (src/land.ts's held).
+      const hold = join(r.live, '.git', 'cc-deploy', 'hold');
+      await as('held', fake('held-bin', `echo "$(( $(date +%s) + 600 )) CPU pressure 63%" >'${hold}'; exit 0`), [/^deploy: not live yet: the box is starved \(CPU pressure 63%\), so the restart waits for it to ease, live by about \d\d?:\d\d P[SD]T at the latest/], 'restart');
+      // An urgent fix's deploy (the land tool's outage: true) marks the restart it queues or rides to skip the hold.
+      rmSync(hold);
+      const urgent = join(r.live, '.git', 'cc-deploy', 'urgent');
+      assert.equal(existsSync(urgent), false);
+      await as('urgent', fake('urgent-bin', 'exit 0'), [/^deploy: restart queued as /], 'restart', { LAND_URGENT: '1', DEPLOY_HEALTHY_WAIT: '0', DEPLOY_SETTLE: '0', DEPLOY_TEST_LIVE_GRACE: '1' });
+      assert.equal(existsSync(urgent), true, 'LAND_URGENT marks the restart');
+    },
+    () => (running ? { commit: running } : {}),
+  );
 });
 
-test('landResult reads deploy.sh\'s lines; outputTail keeps the last lines', () => {
+test("landResult reads deploy.sh's lines; outputTail keeps the last lines", () => {
   assert.deepEqual(landResult(LIVE, 0), { kind: 'live', commit: 'abc1234', subject: '#9: usage bar' });
   assert.equal(landResult(RESTART, 0).kind, 'restart');
   assert.equal(landResult(`${RESTART}deploy: live now: the server restarted on def5678 and stayed healthy\n`, 0).kind, 'live');
@@ -646,9 +726,9 @@ test('landResult reads deploy.sh\'s lines; outputTail keeps the last lines', () 
 });
 
 // #1320: the kit template's last line decides when it is there; without it (Citadel's land.sh for now), the lines above.
-test("landResult reads the ship line when there is one: its own commit, the subject only from a line naming that commit, refused as failed", () => {
+test('landResult reads the ship line when there is one: its own commit, the subject only from a line naming that commit, refused as failed', () => {
   assert.deepEqual(landResult('land: main is now at abc1234 "#9: usage bar"\nship: landed abc1234def0 batch 1 of 1 deploy none\n', 0), { kind: 'landed', commit: 'abc1234def0', subject: '#9: usage bar' });
-  assert.deepEqual(landResult('land: landed in a batch with ticket/1-x, on its own CI run (main is now 999999999999)\nship: landed abc1234def0 batch 2 of 2 deploy none\n', 0), { kind: 'landed', commit: 'abc1234def0' }, "a batch member: its own commit, which no subject line names");
+  assert.deepEqual(landResult('land: landed in a batch with ticket/1-x, on its own CI run (main is now 999999999999)\nship: landed abc1234def0 batch 2 of 2 deploy none\n', 0), { kind: 'landed', commit: 'abc1234def0' }, 'a batch member: its own commit, which no subject line names');
   assert.deepEqual(landResult(`${LIVE}ship: landed abc1234def0 batch 1 of 1 deploy none\n`, 0), { kind: 'landed', commit: 'abc1234def0', subject: '#9: usage bar' }, 'the ship line, not prose, says what deployed');
   assert.equal(landResult('ship: landed abc1234def0 batch 1 of 1 deploy live\n', 0).kind, 'live');
   assert.equal(landResult('ship: landed abc1234def0 batch 1 of 1 deploy restart\n', 0).kind, 'restart');
@@ -665,7 +745,7 @@ test("landConflict reads only land.sh --check's exit 3 as a conflict: an older l
   const script = (body: string) => writeFileSync(join(cwd, 'tools', 'land.sh'), body);
   const env = { PATH: process.env.PATH! };
   script('echo "land: $1 $2" >&2; echo "land: conflicted files: a.txt" >&2; exit 3\n');
-  assert.equal(await landConflict(cwd, env, ['--into', 'build/2']), '--check --into\nconflicted files: a.txt', 'its lines, with --check before the land\'s own arguments');
+  assert.equal(await landConflict(cwd, env, ['--into', 'build/2']), '--check --into\nconflicted files: a.txt', "its lines, with --check before the land's own arguments");
   script('echo "land: takes no arguments" >&2; exit 1\n');
   assert.equal(await landConflict(cwd, env, []), null, 'a land.sh from before --check');
   script('exit 0\n');
@@ -704,7 +784,7 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     assert.match((await high.json()).error, /go/);
     store.setProjectSettings(project.id, { go_from: 'all' });
     const low = await handOff(body);
-    assert.equal(low.status, 400, "a scheme whose every change needs a go refuses a low one without it (#1043)");
+    assert.equal(low.status, 400, 'a scheme whose every change needs a go refuses a low one without it (#1043)');
     assert.match((await low.json()).error, /every change ships only on a person's go/);
     assert.match((await (await handOff({ ...body, into: 'build/2', deploy: 'no' })).json()).error, /^deploy must be/, "a feeder's merge into its build is covered by the build's go card");
     store.setProjectSettings(project.id, { go_from: 'never' });
@@ -733,8 +813,10 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     assert.equal(store.getTicket(minion.id)!.state, 'outside');
     assert.equal(store.getTicket(minion.id)!.note, 'landing: starting', 'the list says it is landing (#962)');
     await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed', 20_000);
-    assert.ok(store.listEvents(minion.id).some((e) => String(e.data).includes('Shipped abc1234')), 'the shipped line is in its chat');
-
+    assert.ok(
+      store.listEvents(minion.id).some((e) => String(e.data).includes('Shipped abc1234')),
+      'the shipped line is in its chat',
+    );
   } finally {
     await srv.stop();
   }
@@ -776,7 +858,10 @@ test('the hand-off route makes a 600-line ship name a probe, refuses one that is
     assert.equal((await handOff({ ...body, probe: { kind: 'http', path: '/api/health', text: 'ok' } })).status, 202);
     await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed');
     const said = store.listEvents(minion.id).map((e) => String(e.data));
-    assert.ok(said.some((d) => d.includes('Live probe passed: GET /api/health answers 200 with \\"ok\\"')), said.join('\n'));
+    assert.ok(
+      said.some((d) => d.includes('Live probe passed: GET /api/health answers 200 with \\"ok\\"')),
+      said.join('\n'),
+    );
     assert.match(readFileSync(join(srv.data, 'live-probes.jsonl'), 'utf8'), /"kind":"http","result":"pass"/, "the trial's log has the row");
 
     // Another scheme (its repo doesn't hold the code this server runs): asked only while it has an app this ship deploys.
@@ -877,7 +962,10 @@ test('a high bug fix with fix_proof ships without a go and its line says so; wit
     assert.equal((await handOff(body)).status, 202, 'a high bug fix with its proof ships with no go');
     await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed', 20_000);
     const line = `Shipped as a fix without a go: test/guard.test.ts (red on ${main.slice(0, 7)})`;
-    assert.ok(store.listEvents(minion.id).some((e) => String(e.data).includes(line)), 'the shipped line says it shipped without a go');
+    assert.ok(
+      store.listEvents(minion.id).some((e) => String(e.data).includes(line)),
+      'the shipped line says it shipped without a go',
+    );
     assert.ok(store.lastShippedNote(minion.id)?.includes(line), 'Releases reads the line from the newest shipped line');
   } finally {
     await srv.stop();
@@ -928,7 +1016,10 @@ test("a feeder's merge into a build wakes the build's parked owner with one mess
   const m = s.owned[0];
   assert.deepEqual([m.from, m.to, m.urgent, m.wake, m.unparked], [1, 2, true, true, true], 'urgent and waking, so a cold owner still wakes');
   assert.equal(m.text, '#7 Wake the owner merged into build/3: Usage bar in the top bar. Risk low: front end only.');
-  assert.ok(s.did.some((d) => d.startsWith('unpark 2 by #7')), 'unparked first');
+  assert.ok(
+    s.did.some((d) => d.startsWith('unpark 2 by #7')),
+    'unparked first',
+  );
 
   const none = setup('owner-none', { owner: null });
   mkdirSync(join(none.cwd, 'test'), { recursive: true });
@@ -947,14 +1038,14 @@ test("a feeder's merge into a build wakes the build's parked owner with one mess
 // #962: while a handed-off land runs, the minions list shows it landing (state outside), whatever cleared the state
 // meanwhile (the minion's own closing status line, a turn a person started, a restart), with the phase it is in; each
 // way the land ends replaces that with its own end state, so none is left in outside.
-test('landPhase reads the phase from land.sh\'s newest phase line', () => {
+test("landPhase reads the phase from land.sh's newest phase line", () => {
   assert.equal(landPhase(''), 'landing: starting');
   assert.equal(landPhase('queue: 2nd in line (ahead: #12 "x")\n'), 'landing: in line');
   assert.equal(landPhase('land: CI passed\nland: master is now at d1a5c2f "x"\n'), 'landing: deploying', 'any default branch (KT2)');
   assert.equal(landPhase('land: waiting for CI on abc\nland: build/3 is now at d1a5c2f "x"; master is untouched\n'), 'landing: waiting on CI', 'a build merge is not a deploy');
   assert.equal(landPhase('queue: 2nd in line (ahead: #12)\nqueue: got the deploy lock\nland: rebasing ticket/1-x onto main (abc "y")\n'), 'landing: rebasing');
   assert.equal(landPhase('land: rebasing a onto main\nland: running test/a.test.ts on abc1234\nok 1\n'), 'landing: running tests');
-  assert.equal(landPhase('land: rebasing a onto main\nland: waiting for CI on abc1234: the full suite on Cara\'s desktop (at most 6 min, then it runs here)\n'), 'landing: waiting on CI');
+  assert.equal(landPhase("land: rebasing a onto main\nland: waiting for CI on abc1234: the full suite on Cara's desktop (at most 6 min, then it runs here)\n"), 'landing: waiting on CI');
   assert.equal(landPhase('land: waiting for CI on abc\nland: failed in the full run but passed alone (x); running CI once more on abc, the land needs a fully green run\n'), 'landing: waiting on CI');
   assert.equal(landPhase('land: waiting for CI on abc\nland: CI FALLBACK: no runner. Running the full suite on perigee instead.\n'), 'landing: running tests');
   assert.equal(landPhase('land: waiting for CI on abc\nland: waiting for CI or a quiet perigee: CI: no runner, but perigee is busy (load 40.00 on 16 cores (quiet is under half)), so this keeps asking CI\n'), 'landing: waiting for CI or a quiet perigee');
@@ -1061,7 +1152,9 @@ test('handoffs() answers from memory: it does not read the landings folder again
 // Conflict prep (#1366): land.sh says a ship waiting in line will conflict once the train ahead ships; the server wakes
 // its minion once per train top with the steps to record the fix (git rerere in a scratch worktree), and leaves its land running.
 test('a prep line from a running land wakes the minion once, with the scratch-worktree steps, and the land keeps running', async () => {
-  const top = 'a'.repeat(40), base = 'b'.repeat(40), head = 'c'.repeat(40);
+  const top = 'a'.repeat(40),
+    base = 'b'.repeat(40),
+    head = 'c'.repeat(40);
   const line = `land: prep: ticket/7-x will conflict with ticket/3-y once ticket/2-z's ship train ships; conflicted files: a.txt, src/b.ts; record the fix against ${top} from ${base} to ${head}`;
   assert.deepEqual(prepConflict(`queue: 2nd in line\n${line}\n`), { branch: 'ticket/7-x', cause: 'ticket/3-y', front: 'ticket/2-z', files: 'a.txt, src/b.ts', top, base, head, train: true });
   // The kit's template (#1571): the one ship ahead, no train, and its own "resolves it" line.
@@ -1083,7 +1176,7 @@ test('a prep line from a running land wakes the minion once, with the scratch-wo
   assert.match(s.sent[0], new RegExp(`git worktree add --detach "\\$TMPDIR/train-prep" ${top}`));
   assert.match(s.sent[0], new RegExp(`-c rerere\\.enabled=true cherry-pick ${base}\\.\\.${head}`));
   assert.match(s.sent[0], /Don't hand it off again/);
-  assert.match(s.sent[0], /cherry-pick --skip/, 'and what to do when the fix keeps the train\'s side whole');
+  assert.match(s.sent[0], /cherry-pick --skip/, "and what to do when the fix keeps the train's side whole");
   assert.deepEqual(s.fyi, [true], "not someone writing while it waits in line: a clean ship still closes it (Runner.send's onMessage → Landings.talked)");
   assert.equal(s.ticket.state, 'outside', 'still landing');
   assert.deepEqual(s.landings.handoffs(), [1]);
@@ -1094,14 +1187,23 @@ test('a prep line from a running land wakes the minion once, with the scratch-wo
 test('a land stopped from the Status page says who stopped it and that nothing landed, not "fix the cause", and counts no failure (#1168)', async () => {
   const s = setup('stopped');
   const failed: number[] = [];
-  s.deps.failed = (id) => { failed.push(id); };
+  s.deps.failed = (id) => {
+    failed.push(id);
+  };
   writeFileSync(join(s.cwd, 'tools', 'land.sh'), `echo 'land: rebasing onto main'\nsleep 300\n`);
   assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
   let pid: number | null = null;
   await until('land.sh runs', () => (pid = s.landings.landPid(1)) !== null);
   const cmd = (p: number) => (p === 5 ? 'mv\0pid.tmp\0pid' : 'bash\0tools/land.sh\0');
-  assert.equal(s.landings.landPid(1, () => '5\n', cmd), null, "the wrapper's mv, just after its pid file appears, is not the ship");
-  assert.equal(s.landings.landPid(1, () => '5 6\n', cmd), 6);
+  assert.equal(
+    s.landings.landPid(1, () => '5\n', cmd),
+    null,
+    "the wrapper's mv, just after its pid file appears, is not the ship",
+  );
+  assert.equal(
+    s.landings.landPid(1, () => '5 6\n', cmd),
+    6,
+  );
   s.landings.markStopped(1, 'Josh', Date.UTC(2026, 10, 20, 21, 5));
   signalTree(pid!);
   await until('land.sh ends', () => s.landings.get(1)?.code !== null);
@@ -1142,11 +1244,26 @@ test('a report cut off after its shipped line finishes once: no second line, dep
   const getTicket = s.deps.store.getTicket;
   const deps: HandoffDeps = {
     ...s.deps,
-    flakes: () => { counts.flakes++; },
-    learned: () => { counts.learned++; },
-    landed: () => { counts.landed++; },
+    flakes: () => {
+      counts.flakes++;
+    },
+    learned: () => {
+      counts.learned++;
+    },
+    landed: () => {
+      counts.landed++;
+    },
     // The first read after the shipped line throws, as a kill there would stop it.
-    store: { ...s.deps.store, getTicket: (id: number) => { if (id === 1 && cut && s.notes.length) { cut = false; throw new Error('cut off'); } return getTicket(id); } },
+    store: {
+      ...s.deps.store,
+      getTicket: (id: number) => {
+        if (id === 1 && cut && s.notes.length) {
+          cut = false;
+          throw new Error('cut off');
+        }
+        return getTicket(id);
+      },
+    },
   };
   await s.land(APP_LAND);
   await new LandHandoffs(deps).poll();
@@ -1156,7 +1273,10 @@ test('a report cut off after its shipped line finishes once: no second line, dep
   assert.equal(s.notes.length, 1, `C2: the shipped line was posted ${s.notes.length} times`);
   assert.deepEqual(d.started, ['peek-auras for 1'], 'the app deployed once');
   assert.deepEqual(counts, { flakes: 1, learned: 1, landed: 1 }, 'one flake, lesson and landed mark each');
-  assert.ok(s.did.some((x) => x.startsWith('close: Shipped')), s.did.join('\n'));
+  assert.ok(
+    s.did.some((x) => x.startsWith('close: Shipped')),
+    s.did.join('\n'),
+  );
   // The next hand-off starts afresh: its report runs every step again.
   s.ticket.status = 'idle';
   await s.land(APP_LAND);

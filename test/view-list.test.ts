@@ -27,7 +27,12 @@ test('views() gives each row what view() does, reading the scheme, the waits, th
   store.addMember(project.id, josh.id); // a gone assignee isn't touching it (#1449)
   store.setSetting('net-resumes', [{ ticket: tickets[3].id, queued: [{ id: 7, author: 'Cara', text: 'x', images: [] }] }]);
   store.setSetting('limit-resumes', [{ ticket: tickets[6].id, at: 123, accounts: null }]);
-  const runner = new Runner(store, () => {}, () => ({}), 'true');
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    'true',
+  );
 
   const one = tickets.map((t) => runner.view(t));
   assert.ok(one.some((v) => (v.properties as any).type === 'bug') && one.some((v) => v.payer?.name === 'Josh'));

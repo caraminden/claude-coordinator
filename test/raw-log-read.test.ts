@@ -44,11 +44,11 @@ test('the guard sees raw reads in the shapes the tests use, and lets annotated o
     "const b = readFileSync(log, 'utf8').split('\\n').map(JSON.parse);",
     "const c = JSON.parse(readFileSync(log, 'utf8').trim().split('\\n').at(-1)!);",
     "const d = readFileSync(log, 'utf8')",
-    "  .trim()",
+    '  .trim()',
     "  .split('\\n')",
-    "  .map((l) => JSON.parse(l));",
+    '  .map((l) => JSON.parse(l));',
   ];
   assert.deepEqual(rawReads('x.test.ts', raw.join('\n')), ['x.test.ts:1', 'x.test.ts:2', 'x.test.ts:3', 'x.test.ts:4']);
   assert.deepEqual(rawReads('x.test.ts', raw[0] + ' // raw-read-ok: the test wrote it'), []);
-  assert.deepEqual(rawReads('x.test.ts', "const e = jsonLines(log);\nconst f = lines(log).length;"), []);
+  assert.deepEqual(rawReads('x.test.ts', 'const e = jsonLines(log);\nconst f = lines(log).length;'), []);
 });

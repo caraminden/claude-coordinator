@@ -20,7 +20,9 @@ const node = process.execPath;
 const fakes = join(root, 'fakes');
 mkdirSync(fakes);
 const fakePodman = join(root, 'podman.mjs');
-writeFileSync(fakePodman, `
+writeFileSync(
+  fakePodman,
+  `
 import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const [dir, cmd, ...args] = process.argv.slice(2);
@@ -59,19 +61,23 @@ if (cmd === 'run') {
 } else if (cmd === 'unpause') {
   set(name, { status: 'running' });
 }
-`);
+`,
+);
 const fakeSmi = join(root, 'nvidia-smi.mjs');
 writeFileSync(fakeSmi, `console.log('42, 5120\\n');`);
 // A GPU sample that takes as long as a test says: it logs its start to the folder it is given, then waits there for a `go` file.
 const slowSmi = join(root, 'slow-smi.mjs');
-writeFileSync(slowSmi, `
+writeFileSync(
+  slowSmi,
+  `
 import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 const dir = process.argv[2];
 appendFileSync(join(dir, 'smi.log'), '"sample"\\n');
 const look = () => (existsSync(join(dir, 'go')) ? console.log('42, 5120') : setTimeout(look, 20));
 look();
-`);
+`,
+);
 
 const box = (id: number) => join(fakes, `citadel-job-${id}.json`);
 const container = (id: number) => (existsSync(box(id)) ? JSON.parse(readFileSync(box(id), 'utf8')) : null);
@@ -118,10 +124,13 @@ const server = createServer(async (req, res) => {
   }
   if (url.pathname === '/api/machines/job-upload') {
     const job = Number(url.searchParams.get('job'));
-    if (url.searchParams.get('log')) return app.logs.set(job, body.toString()), send(201, { ok: true });
+    if (url.searchParams.get('log')) return (app.logs.set(job, body.toString()), send(201, { ok: true }));
     const path = url.searchParams.get('path') ?? '';
     if (path.startsWith('huge')) return send(413, { error: 'over the cap' });
-    if (app.uploadStatus !== 201) { app.rejected++; return send(app.uploadStatus, { error: 'the app is restarting' }); }
+    if (app.uploadStatus !== 201) {
+      app.rejected++;
+      return send(app.uploadStatus, { error: 'the app is restarting' });
+    }
     app.uploads.set(`${job}/${path}`, body);
     return send(201, { ok: true });
   }
@@ -157,7 +166,11 @@ function start(over: object = {}, kind: object = {}) {
   const data = Buffer.from(`audio for ${id}`);
   app.inputs.set(`${id}/clip.wav`, data);
   return {
-    type: 'job.start', id, limit_s: 3600, input_token: 'tok', resume: false,
+    type: 'job.start',
+    id,
+    limit_s: 3600,
+    input_token: 'tok',
+    resume: false,
     inputs: [{ name: 'clip.wav', size: data.length, sha256: createHash('sha256').update(data).digest('hex') }],
     kind: { name: 'whisperx', image: IMAGE, command: ['whisperx', '/in/clip.wav'], gpu: true, network: false, reads: ['voice'], resumable: false, ...kind },
     ...over,
@@ -208,18 +221,45 @@ test('the podman argv: the whole wall, for a GPU kind and a plain one', () => {
   const job = { id: '7', kind: { name: 'whisper x', image: IMAGE, command: ['whisperx', '/in/a.wav'], gpu: true, network: false, reads: ['voice'] } };
   const d = join(jobsDir, '7');
   assert.deepEqual(podmanRunArgs(job, block(), false), [
-    'run', '-d', '--name', 'citadel-job-7', '--label', 'citadel.job=7',
-    '--cap-drop', 'all', '--security-opt', 'no-new-privileges', '--security-opt', 'label=disable',
-    '--userns', 'keep-id', '-e', 'HOME=/tmp', '-e', 'XDG_CACHE_HOME=/cache',
-    '--network', 'none',
-    '--device', 'nvidia.com/gpu=all',
-    '--log-driver', 'k8s-file', '--log-opt', `path=${d}/job.log`,
-    '--mount', `type=bind,src=${d}/in,dst=/in,ro`,
-    '--mount', `type=bind,src=${d}/out,dst=/out`,
-    '--mount', `type=bind,src=${d}/state,dst=/state`,
-    '--mount', `type=bind,src=${jobsDir}/cache/whisper_x,dst=/cache`,
-    '--mount', `type=bind,src=${voice},dst=/private/voice,ro`,
-    IMAGE, 'whisperx', '/in/a.wav',
+    'run',
+    '-d',
+    '--name',
+    'citadel-job-7',
+    '--label',
+    'citadel.job=7',
+    '--cap-drop',
+    'all',
+    '--security-opt',
+    'no-new-privileges',
+    '--security-opt',
+    'label=disable',
+    '--userns',
+    'keep-id',
+    '-e',
+    'HOME=/tmp',
+    '-e',
+    'XDG_CACHE_HOME=/cache',
+    '--network',
+    'none',
+    '--device',
+    'nvidia.com/gpu=all',
+    '--log-driver',
+    'k8s-file',
+    '--log-opt',
+    `path=${d}/job.log`,
+    '--mount',
+    `type=bind,src=${d}/in,dst=/in,ro`,
+    '--mount',
+    `type=bind,src=${d}/out,dst=/out`,
+    '--mount',
+    `type=bind,src=${d}/state,dst=/state`,
+    '--mount',
+    `type=bind,src=${jobsDir}/cache/whisper_x,dst=/cache`,
+    '--mount',
+    `type=bind,src=${voice},dst=/private/voice,ro`,
+    IMAGE,
+    'whisperx',
+    '/in/a.wav',
   ]);
   // A kind with the network, no GPU and no folders, resumed; and a GPU kind on a block that withholds the GPU.
   const plain = podmanRunArgs({ id: '8', kind: { ...job.kind, gpu: false, network: true, reads: [] } }, block(), true);
@@ -242,7 +282,17 @@ test('every refusal reports failed with why, and makes no folder and no containe
     ['a time limit over the block', { limit_s: 12 * 3600 + 1 }, {}, /over this machine's 12 h/],
     ['an input path', { inputs: [{ name: '../escape.wav', size: 1, sha256: 'a'.repeat(64) }] }, {}, /plain file name/],
     ['a hidden input', { inputs: [{ name: '.bashrc', size: 1, sha256: 'a'.repeat(64) }] }, {}, /plain file name/],
-    ['a duplicate input', { inputs: [{ name: 'a.wav', size: 1, sha256: 'a'.repeat(64) }, { name: 'a.wav', size: 1, sha256: 'a'.repeat(64) }] }, {}, /plain file name/],
+    [
+      'a duplicate input',
+      {
+        inputs: [
+          { name: 'a.wav', size: 1, sha256: 'a'.repeat(64) },
+          { name: 'a.wav', size: 1, sha256: 'a'.repeat(64) },
+        ],
+      },
+      {},
+      /plain file name/,
+    ],
     ['an input with no sha256', { inputs: [{ name: 'a.wav', size: 1, sha256: 'x' }] }, {}, /sha256/],
     ['inputs over 2 GB', { inputs: [{ name: 'a.wav', size: 2 ** 31 + 1, sha256: 'a'.repeat(64) }] }, {}, /2 GB/],
     ['no input token', { input_token: '' }, {}, /token/],
@@ -354,7 +404,13 @@ test('outFiles never follows a folder link, and lists a broken link', () => {
   const out = mkdtempSync(join(root, 'out-'));
   symlinkSync(join(root, 'missing'), join(out, 'broken'));
   symlinkSync(root, join(out, 'up'));
-  assert.deepEqual(outFiles(out).map((f: any) => [f.path, f.why]), [['broken', 'a broken link'], ['up', 'a link to outside /out']]);
+  assert.deepEqual(
+    outFiles(out).map((f: any) => [f.path, f.why]),
+    [
+      ['broken', 'a broken link'],
+      ['up', 'a link to outside /out'],
+    ],
+  );
 });
 
 test('a failed input check fails the job and deletes the file', async () => {
@@ -476,7 +532,16 @@ test('a new agent re-attaches to a running job, and fails one whose container is
 
   const second = runner();
   await second.ready;
-  assert.deepEqual(second.known().filter((k: any) => [msg.id, lost.id].includes(k.id)).sort((a: any, b: any) => a.id - b.id), [{ id: msg.id, state: 'running' }, { id: lost.id, state: 'running' }]);
+  assert.deepEqual(
+    second
+      .known()
+      .filter((k: any) => [msg.id, lost.id].includes(k.id))
+      .sort((a: any, b: any) => a.id - b.id),
+    [
+      { id: msg.id, state: 'running' },
+      { id: lost.id, state: 'running' },
+    ],
+  );
   await second.connected();
   await until('the lost one failed', () => lastState(lost.id)?.state === 'failed', undefined, statesTail);
   assert.match(lastState(lost.id)!.error!, /machine restarted/);
@@ -570,10 +635,16 @@ test('room for a new job deletes the oldest finished folders only, and none when
   await r.ready;
   // Needs 40 KB: even deleting all three wouldn't do it, so none goes.
   assert.equal(r.makeRoom(40_000), false);
-  assert.deepEqual(['1', '2', '3'].filter((id) => existsSync(join(dir, id))), ['1', '2', '3']);
+  assert.deepEqual(
+    ['1', '2', '3'].filter((id) => existsSync(join(dir, id))),
+    ['1', '2', '3'],
+  );
   // Needs 5 KB: the oldest one is enough.
   assert.equal(r.makeRoom(5000), true);
-  assert.deepEqual(['1', '2', '3'].filter((id) => existsSync(join(dir, id))), ['2', '3']);
+  assert.deepEqual(
+    ['1', '2', '3'].filter((id) => existsSync(join(dir, id))),
+    ['2', '3'],
+  );
 });
 
 test('an upload the app answers with a 5xx is tried again without a reconnect', async () => {
@@ -637,7 +708,7 @@ test('a pause asked while the job starts pauses it once it runs (MA2)', async ()
   await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
 });
 
-test('a resume during a pause\'s grace runs the job again once the pause ends (MA9)', async () => {
+test("a resume during a pause's grace runs the job again once the pause ends (MA9)", async () => {
   const r = runner();
   const msg = start({}, { resumable: true });
   await r.handle(msg);
@@ -677,7 +748,10 @@ test('a final report the app refuses as too big is not marked sent (MA7)', async
     const tries = statesOf(msg.id).filter((s) => s.state === 'done');
     assert.equal((tries.at(-1) as any).log_tail, '', 'the second try leaves the log tail out');
     assert.equal(r.jobs.get(String(msg.id))?.final_sent, false);
-    assert.ok(r.known().some((k: any) => k.id === msg.id), 'it still holds the job, to report again');
+    assert.ok(
+      r.known().some((k: any) => k.id === msg.id),
+      'it still holds the job, to report again',
+    );
   } finally {
     app.stateStatus = 202;
   }
@@ -685,13 +759,21 @@ test('a final report the app refuses as too big is not marked sent (MA7)', async
 
 test('a reply the agent cannot POST is tried again; a 4xx is the answer (MA6)', async () => {
   let n = 0;
-  const flaky = async () => { if (++n === 1) throw new Error('fetch failed'); return { status: n === 2 ? 502 : 200 }; };
+  const flaky = async () => {
+    if (++n === 1) throw new Error('fetch failed');
+    return { status: n === 2 ? 502 : 200 };
+  };
   const res = await sendRetrying(flaky, () => {}, [0, 0, 0]);
   assert.deepEqual([res.status, n], [200, 3]);
   n = 0;
   assert.equal((await sendRetrying(async () => (++n, { status: 410 }), () => {}, [0, 0])).status, 410);
   assert.equal(n, 1);
-  await assert.rejects(sendRetrying(async () => { throw new Error('down'); }, () => {}, [0, 0]), /down/);
+  await assert.rejects(
+    sendRetrying(async () => {
+      throw new Error('down');
+    }, () => {}, [0, 0]),
+    /down/,
+  );
 });
 
 // ---------- slow ticks (#1550) ----------

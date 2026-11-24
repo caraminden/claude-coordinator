@@ -12,7 +12,9 @@ import { bootServer, jsonLines, type Booted } from './helpers.ts';
 const root = mkdtempSync(join(tmpdir(), 'instr-verdicts-'));
 const prompts = join(root, 'prompts.log');
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const fs = require('node:fs');
 let input = '';
 process.stdin.on('data', (d) => (input += d));
@@ -23,7 +25,8 @@ process.stdin.on('end', () => {
   const result = JSON.stringify({ verdicts: [{ n: 1, verdict: 'repeats', why: 'Same card rule, said again.' }, { n: 7, verdict: 'fine', why: 'not a place' }] });
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result }));
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let srv: Booted;
@@ -79,7 +82,7 @@ test('no linked login: no check, and it says to link one', async () => {
   assert.equal(r.status, 200);
   assert.equal(r.data.verdicts, undefined);
   assert.match(r.data.unlinked, /Your account/);
-  assert.equal(calls().length, before, 'never on another person\'s login');
+  assert.equal(calls().length, before, "never on another person's login");
 });
 
 test('a failed check says so and gives no verdicts', async () => {

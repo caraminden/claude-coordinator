@@ -100,7 +100,7 @@ test('opening the Dismissed list builds its rows, each with when it was dismisse
 
 test('a link to a dismissed minion opens the Dismissed list at its row', { skip }, async () => {
   const page = await browser.page(`${app.base}#/p/1/t/500`, { width: 1280, height: 800 });
-  await waitFor(page, 'the dismissed minion\'s row', `document.querySelector('#threads details.g-closed[open] .thread-row.active')`);
+  await waitFor(page, "the dismissed minion's row", `document.querySelector('#threads details.g-closed[open] .thread-row.active')`);
   assert.match(await page.eval<string>(`document.querySelector('#threads .thread-row.active').textContent`), /Dismissed minion 498/);
 });
 
@@ -126,9 +126,9 @@ test('a redraw reuses the Dismissed rows whose minion did not change, and rebuil
   assert.match(await page.eval<string>(`document.querySelectorAll('#threads details.g-closed .thread-row')[0].textContent + document.querySelector('#threads details.g-closed').textContent`), /Renamed/);
 });
 
-test('searching a number shows the minion\'s full row, not a bare link', { skip }, async () => {
+test("searching a number shows the minion's full row, not a bare link", { skip }, async () => {
   const page = await browser.page(`${app.base}#/p/1`, { width: 1280, height: 800 });
-  await waitFor(page, 'the minion\'s row', `document.querySelector('#threads .thread-row.s-running')`);
+  await waitFor(page, "the minion's row", `document.querySelector('#threads .thread-row.s-running')`);
   await page.eval(`(() => { const i = document.querySelector('.thread-search'); i.value = '1'; i.dispatchEvent(new Event('input')); })()`);
   await waitFor(page, 'the result row', `document.querySelector('#threads .thread-row')`);
   assert.match(await page.eval<string>(`document.querySelector('#threads .thread-row').textContent`), /A running minion/);

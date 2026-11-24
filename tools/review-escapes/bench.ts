@@ -26,7 +26,13 @@ const PARTS: Record<string, (root: string) => string> = {
 };
 const read = (root: string, file: string) => (existsSync(join(root, file)) ? readFileSync(join(root, file), 'utf8') : '');
 // Trailing spaces and runs of blank lines don't change what a reviewer reads.
-const norm = (t: string) => t.split('\n').map((l) => l.trimEnd()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+const norm = (t: string) =>
+  t
+    .split('\n')
+    .map((l) => l.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 const h = (t: string) => createHash('sha256').update(norm(t)).digest('hex').slice(0, 16);
 
 /** The reviewer's hash and each part's, from the files under `root`. */
@@ -51,7 +57,14 @@ export function staleReasons(rec: BenchRecord | null, root = ROOT, lessons?: str
   if (!rec) return ['no benchmark has been recorded'];
   const now = benchHash(root);
   const out: string[] = [];
-  if (now.hash !== rec.hash) out.push(`the reviewer changed since the run of ${rec.at}: ${Object.keys(now.parts).filter((k) => now.parts[k] !== rec.parts[k]).join(', ') || 'its parts'}`);
+  if (now.hash !== rec.hash)
+    out.push(
+      `the reviewer changed since the run of ${rec.at}: ${
+        Object.keys(now.parts)
+          .filter((k) => now.parts[k] !== rec.parts[k])
+          .join(', ') || 'its parts'
+      }`,
+    );
   const fresh = lessons ? newLessons(rec.lessons, lessons) : [];
   if (fresh.length >= NEW_LESSONS) out.push(`${fresh.length} lessons were added since ${rec.at} (${fresh.join('; ')})`);
   return out;
@@ -84,7 +97,10 @@ function scores(summaries: Record<string, Record<string, Tally>>[], arm: string,
 
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
-  const flag = (k: string) => { const i = rest.indexOf(k); return i >= 0 ? rest.splice(i, 2)[1] : undefined; };
+  const flag = (k: string) => {
+    const i = rest.indexOf(k);
+    return i >= 0 ? rest.splice(i, 2)[1] : undefined;
+  };
   const rec = readRecord();
   if (cmd === 'status') {
     const lessons = await liveLessons(Number(flag('--project') ?? 2));
@@ -100,7 +116,8 @@ async function main() {
     if (outs.length < 2) throw new Error('give one run.ts --out dir per pass (two passes)');
     const sums = outs.map((o) => JSON.parse(readFileSync(join(resolve(o), 'summary.json'), 'utf8')));
     const arm = 'sonnet';
-    const planted = scores(sums, arm, 'planted'), escapes = scores(sums, arm, 'escapes');
+    const planted = scores(sums, arm, 'planted'),
+      escapes = scores(sums, arm, 'escapes');
     const cost = sums.reduce((n, s) => n + (['planted', 'escapes'] as const).reduce((m, g) => m + s[arm][g].cost + s[arm][g].judgeCost, 0), 0);
     const now = benchHash();
     const model = read(ROOT, 'kit/agents/reviewer.md').match(/^model: (.+)$/m)?.[1] + '/' + read(ROOT, 'kit/agents/reviewer.md').match(/^effort: (.+)$/m)?.[1];

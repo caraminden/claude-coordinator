@@ -66,11 +66,12 @@ export async function launch(bin: string, args: string[] = []): Promise<Browser>
       else p.ok(m.result);
     }
   });
-  const send = (method: string, params: object = {}, sessionId?: string) => new Promise<any>((ok, no) => {
-    if (gone) return no(gone);
-    pending.set(++next, { ok, no });
-    input.write(JSON.stringify({ id: next, method, params, sessionId }) + '\0');
-  });
+  const send = (method: string, params: object = {}, sessionId?: string) =>
+    new Promise<any>((ok, no) => {
+      if (gone) return no(gone);
+      pending.set(++next, { ok, no });
+      input.write(JSON.stringify({ id: next, method, params, sessionId }) + '\0');
+    });
 
   return {
     async page(url, { width = 600, height = 400, touch = false, dark = false, scale = 1 } = {}) {

@@ -21,7 +21,10 @@ const service = createServer((req, res) => {
 await new Promise<void>((r) => service.listen(0, '127.0.0.1', r));
 const port = (service.address() as { port: number }).port;
 const store = new Store(join(root, 'coordinator.db'));
-after(() => { service.close(); rmSync(root, { recursive: true, force: true }); });
+after(() => {
+  service.close();
+  rmSync(root, { recursive: true, force: true });
+});
 let n = 0;
 function home(name: string, icon: string, open: string[]) {
   const p = store.createProject(name, null);
@@ -41,7 +44,7 @@ test('an icon on an open path is fetched with no identity', async () => {
 test('a gated icon is fetched with the identity of the person asking', async () => {
   store.updateContraption('gated', { name: 'x' });
   const id = home('Gated', '/apps/gated/secret.svg', []);
-  assert.ok('missing' in await readIcon(id, NO_REPO, store), 'no identity: 401, no icon');
+  assert.ok('missing' in (await readIcon(id, NO_REPO, store)), 'no identity: 401, no icon');
   const got = await readIcon(id, NO_REPO, store, () => 'good');
   assert.ok('body' in got, JSON.stringify(got));
 });

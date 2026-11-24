@@ -42,9 +42,14 @@ test('each person and scope keeps its own text, every save a history row, and an
   assert.equal(store.personalInstructions(Josh.id, null).text, 'Short replies.\nNo emoji.');
   assert.equal(store.personalInstructions(Josh.id, Peek.id).text, 'Run the plan back first.');
   assert.deepEqual(store.personalInstructions(Josh.id, Delve.id), { text: '', at: null });
-  assert.deepEqual(store.personalInstructions(Cara.id, null), { text: '', at: null }, 'one person\'s text is not another\'s');
-  assert.deepEqual(store.personalInstructionHistory(Josh.id, null, 5).map((r) => [r.old_text, r.new_text]),
-    [['Short replies.', 'Short replies.\nNo emoji.'], ['', 'Short replies.']]);
+  assert.deepEqual(store.personalInstructions(Cara.id, null), { text: '', at: null }, "one person's text is not another's");
+  assert.deepEqual(
+    store.personalInstructionHistory(Josh.id, null, 5).map((r) => [r.old_text, r.new_text]),
+    [
+      ['Short replies.', 'Short replies.\nNo emoji.'],
+      ['', 'Short replies.'],
+    ],
+  );
 });
 
 test("a minion loads its owner's layer last, everywhere then the scheme's; the Taskmaster and an unowned minion never do", () => {
@@ -57,8 +62,11 @@ test("a minion loads its owner's layer last, everywhere then the scheme's; the T
   store.setProjectInstructions(Peek.id, 'Peek rule.', 'Cara');
   const prompt = systemPrompt(store.getProject(Peek.id)!, store.getTicket(m.id)!, null, null, root, null, [], false, 'App rule.', null, [], null, false, null, layer);
   const order = ['App rule.', 'Peek rule.', "# Josh's own instructions", 'No emoji.', 'Run the plan back first.'].map((s) => prompt.indexOf(s));
-  assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), `layers in order: ${order}`);
-  assert.match(prompt, /the tripwire;/, 'the list it can\'t change sits beside the text');
+  assert.ok(
+    order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])),
+    `layers in order: ${order}`,
+  );
+  assert.match(prompt, /the tripwire;/, "the list it can't change sits beside the text");
   assert.ok(prompt.trimEnd().endsWith('Run the plan back first.'), 'the personal layer is the last word');
 
   assert.equal(store.personalLayer(store.getTicket(DelveTM.id)!), null, 'never for the Taskmaster');
@@ -79,15 +87,22 @@ test('My instructions: GET and PUT your own text per scope, capped at 4,000 char
   assert.equal(got.data.everywhere.text, 'Be brief.');
   assert.equal(got.data.scheme.text, '', "another scheme's text is its own");
   const h = await srv.call(`/api/projects/${Delve.id}/my-instructions/history?scope=scheme`);
-  assert.deepEqual(h.data.history.map((x: any) => [x.by, x.diff]), [['Cara', [{ op: '+', text: 'Delve only.' }]]]);
+  assert.deepEqual(
+    h.data.history.map((x: any) => [x.by, x.diff]),
+    [['Cara', [{ op: '+', text: 'Delve only.' }]]],
+  );
 });
 
 /** One tools/call through the real MCP server, as Delve's Taskmaster. */
 async function mcpCall(name: string, args: object): Promise<any> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(DelveTM.id),
-      COORDINATOR_PROJECT: String(Delve.id), COORDINATOR_TICKET: String(DelveTM.id), COORDINATOR_ROLE: 'coordinator',
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(DelveTM.id),
+      COORDINATOR_PROJECT: String(Delve.id),
+      COORDINATOR_TICKET: String(DelveTM.id),
+      COORDINATOR_ROLE: 'coordinator',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });

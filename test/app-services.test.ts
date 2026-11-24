@@ -32,7 +32,7 @@ const MANIFEST = {
   timers: { backup: { command: ['/usr/bin/node', 'deploy/backup.ts', '${DATA_DIR}'], on_calendar: '*-*-* 03:30:00' } },
   health: '/health',
 };
-const row = (name: string, port: number) => ({ id: 1, name, title: name[0].toUpperCase() + name.slice(1), port } as ContraptionRow);
+const row = (name: string, port: number) => ({ id: 1, name, title: name[0].toUpperCase() + name.slice(1), port }) as ContraptionRow;
 
 test('a manifest is checked: what an app may set, and nothing Citadel sets', () => {
   const m = parseManifest(JSON.stringify(MANIFEST));
@@ -56,7 +56,8 @@ test('a manifest is checked: what an app may set, and nothing Citadel sets', () 
     [{ start: ['node'], health: 'health' }, /health must be a path/],
     [{ start: ['node'], clipboard: 'read' }, /clipboard must be "write"/],
     [{ start: ['node'], clipboard: true }, /clipboard must be "write"/],
-  ] as const) assert.throws(() => parseManifest(typeof bad === 'string' ? bad : JSON.stringify(bad)), says, JSON.stringify(bad));
+  ] as const)
+    assert.throws(() => parseManifest(typeof bad === 'string' ? bad : JSON.stringify(bad)), says, JSON.stringify(bad));
 });
 
 test('the units come from the registry and the manifest, quoted so nothing is a specifier', () => {
@@ -74,18 +75,18 @@ test('the units come from the registry and the manifest, quoted so nothing is a 
   assert.match(main, /^Restart=always$/m);
   assert.match(main, /^Slice=contraptions\.slice$/m, 'the app unit runs in contraptions.slice (#1238)');
   assert.match(main, /^RestartSec=5$/m);
-  assert.match(main, /^MemoryTHP=madvise$/m, 'huge pages only on request: systemd starts it, so it doesn\'t inherit the server\'s (#1458)');
+  assert.match(main, /^MemoryTHP=madvise$/m, "huge pages only on request: systemd starts it, so it doesn't inherit the server's (#1458)");
   assert.match(main, /^WantedBy=default.target$/m);
   const job = files.get('citadel-app-mandate-backup.service')!;
   assert.match(job, /^Type=oneshot$/m);
   assert.match(job, /^MemoryTHP=madvise$/m, 'and the job units too (#1458)');
   assert.match(job, /^Slice=contraptions\.slice$/m, 'the job unit runs in contraptions.slice (#1238)');
   assert.match(job, /^ExecStart=\/usr\/bin\/node "deploy\/backup.ts" "\$\{DATA_DIR\}"$/m, '${VAR} left for systemd to expand');
-  assert.ok(job.includes('Environment="PORT=7341"'), 'jobs get the app\'s environment');
+  assert.ok(job.includes('Environment="PORT=7341"'), "jobs get the app's environment");
   assert.match(files.get('citadel-app-mandate-backup.timer')!, /^OnCalendar=\*-\*-\* 03:30:00$/m);
 });
 
-test('units run with the build\'s toolchain: the app\'s .mise.toml trusted and a bare program found on mise\'s shims first', () => {
+test("units run with the build's toolchain: the app's .mise.toml trusted and a bare program found on mise's shims first", () => {
   const manifest = parseManifest(JSON.stringify({ start: ['node', 'server.ts'], timers: { tick: { command: ['/usr/bin/true'], on_calendar: 'daily' } } }));
   const files = unitFiles({ row: row('toc', 22255), manifest, folder: '/h/apps/toc', keysDir: '/h/keys/toc', citadelUrl: 'http://127.0.0.1:8573', home: '/h' });
   const search = 'ExecSearchPath=/h/.local/share/mise/shims:/h/.local/bin:/usr/local/bin:/usr/bin:/bin';
@@ -97,10 +98,10 @@ test('units run with the build\'s toolchain: the app\'s .mise.toml trusted and a
   assert.match(files.get('citadel-app-toc.service')!, /^ExecStart=node "server.ts"$/m, 'a bare name stays bare for ExecSearchPath to find');
   assert.match(files.get('citadel-app-toc-tick.service')!, /^ExecStart=\/usr\/bin\/true$/m, 'an absolute path stays as it is');
   const own = unitFiles({ row: row('toc', 22255), manifest: parseManifest(JSON.stringify({ start: ['node'], env: { MISE_TRUSTED_CONFIG_PATHS: '~/other' } })), folder: '/h/apps/toc', keysDir: '', citadelUrl: '', home: '/h' });
-  assert.ok(own.get('citadel-app-toc.service')!.includes('Environment="MISE_TRUSTED_CONFIG_PATHS=/h/apps/toc:/h/other"'), 'an app\'s own trusted paths are kept');
+  assert.ok(own.get('citadel-app-toc.service')!.includes('Environment="MISE_TRUSTED_CONFIG_PATHS=/h/apps/toc:/h/other"'), "an app's own trusted paths are kept");
 });
 
-test('units stop mise at the app folder\'s parent, so a repo-root mise.toml above a subfolder app is never read', () => {
+test("units stop mise at the app folder's parent, so a repo-root mise.toml above a subfolder app is never read", () => {
   const manifest = parseManifest(JSON.stringify({ start: ['node', 'server.ts'], timers: { backup: { command: ['node', 'b.ts'], on_calendar: 'daily' } } }));
   const files = unitFiles({ row: row('cantrips', 7350), manifest, folder: '/h/apps/.cantrips/a/apps/cantrips', keysDir: '', citadelUrl: '', home: '/h' });
   for (const unit of ['citadel-app-cantrips.service', 'citadel-app-cantrips-backup.service']) {
@@ -124,9 +125,20 @@ let unitDir: string;
 let fake: ReturnType<typeof fakeSystemd>;
 let services: AppServices;
 const opts = (): ServiceOptions => ({
-  off: null, unitDir, systemctl: fake.bin, journalctl: fake.journal, home, keysDir: (x) => join(home, 'keys', x), citadelUrl: () => 'http://127.0.0.1:8573',
-  logDir: join(home, 'deploy-logs'), healthMs: 3000, installRetryMs: 150, minuteMs: 300, gitUrl: (repo) => `file://${join(root, 'remotes', repo)}.git`,
-  systemdRun: fake.run, heavy: join(import.meta.dirname, '..', 'tools', 'citadel-heavy'),
+  off: null,
+  unitDir,
+  systemctl: fake.bin,
+  journalctl: fake.journal,
+  home,
+  keysDir: (x) => join(home, 'keys', x),
+  citadelUrl: () => 'http://127.0.0.1:8573',
+  logDir: join(home, 'deploy-logs'),
+  healthMs: 3000,
+  installRetryMs: 150,
+  minuteMs: 300,
+  gitUrl: (repo) => `file://${join(root, 'remotes', repo)}.git`,
+  systemdRun: fake.run,
+  heavy: join(import.meta.dirname, '..', 'tools', 'citadel-heavy'),
 });
 const appFolder = (name: string, manifest: object = MANIFEST) => {
   mkdirSync(join(home, 'apps', name), { recursive: true });
@@ -165,18 +177,22 @@ test('install writes its units, reloads, enables and (re)starts them; start, sto
   const m = row('mandate', 7341);
   await assert.rejects(services.act(m, 'start'), /install it first/);
   const said = await services.install(m);
-  assert.ok(said.some((s) => /Wrote citadel-app-mandate.service, citadel-app-mandate-backup.service, citadel-app-mandate-backup.timer/.test(s)), said.join(' '));
-  assert.deepEqual(fake.calls().filter((c) => !c.includes(' show ')), [
-    '--user daemon-reload',
-    '--user enable citadel-app-mandate.service citadel-app-mandate-backup.timer',
-    '--user restart citadel-app-mandate.service',
-    '--user start citadel-app-mandate-backup.timer',
-  ]);
+  assert.ok(
+    said.some((s) => /Wrote citadel-app-mandate.service, citadel-app-mandate-backup.service, citadel-app-mandate-backup.timer/.test(s)),
+    said.join(' '),
+  );
+  assert.deepEqual(
+    fake.calls().filter((c) => !c.includes(' show ')),
+    ['--user daemon-reload', '--user enable citadel-app-mandate.service citadel-app-mandate-backup.timer', '--user restart citadel-app-mandate.service', '--user start citadel-app-mandate-backup.timer'],
+  );
   const s = await services.status(m);
   assert.equal(s.installed, true);
   assert.equal(s.service.active, 'active');
   assert.equal(s.service.enabled, 'enabled');
-  assert.deepEqual(s.timers.map((t) => t.unit), ['citadel-app-mandate-backup.timer']);
+  assert.deepEqual(
+    s.timers.map((t) => t.unit),
+    ['citadel-app-mandate-backup.timer'],
+  );
   assert.equal(s.manifestError, null);
   assert.equal(s.health, '/health');
   assert.equal((await services.act(m, 'stop')).active, 'inactive');
@@ -226,7 +242,7 @@ test('install creates a missing DATA_DIR at 0700 and leaves an existing one exac
   assert.equal(existsSync(join(home, '.local/share/fresh2')), false);
 });
 
-test('a timer the manifest drops is removed; a unit Citadel didn\'t write is never rewritten or removed', async () => {
+test("a timer the manifest drops is removed; a unit Citadel didn't write is never rewritten or removed", async () => {
   appFolder('mandate');
   const m = row('mandate', 7341);
   await services.install(m);
@@ -235,7 +251,10 @@ test('a timer the manifest drops is removed; a unit Citadel didn\'t write is nev
   writeFileSync(join(unitDir, 'citadel-app-mandate-old.service'), other);
   appFolder('mandate', { ...MANIFEST, timers: {} });
   const said = await services.install(m);
-  assert.ok(said.some((s) => /Removed citadel-app-mandate-backup.service, citadel-app-mandate-backup.timer/.test(s)), said.join(' '));
+  assert.ok(
+    said.some((s) => /Removed citadel-app-mandate-backup.service, citadel-app-mandate-backup.timer/.test(s)),
+    said.join(' '),
+  );
   assert.ok(!existsSync(join(unitDir, 'citadel-app-mandate-backup.timer')));
   assert.equal(readFileSync(join(unitDir, 'citadel-app-mandate-old.service'), 'utf8'), other);
   // A hand-written file under Citadel's name is left alone and stops the install, before it stops anything.
@@ -245,7 +264,13 @@ test('a timer the manifest drops is removed; a unit Citadel didn\'t write is nev
   const calls = fake.calls().length;
   await assert.rejects(services.install(m, { replace: true }), /Citadel didn't write it/);
   assert.equal(readFileSync(join(unitDir, 'citadel-app-mandate.service'), 'utf8'), hand);
-  assert.ok(!fake.calls().slice(calls).some((c) => /disable|stop/.test(c)), 'nothing stopped');
+  assert.ok(
+    !fake
+      .calls()
+      .slice(calls)
+      .some((c) => /disable|stop/.test(c)),
+    'nothing stopped',
+  );
   assert.ok(fake.state('citadel-app-mandate.service.active'));
 });
 
@@ -265,11 +290,17 @@ test('start, stop and restart are refused while an install (or deploy) of the sa
   const [installed, stopped] = await Promise.allSettled([services.install(m), services.act(m, 'stop')]);
   assert.equal(installed.status, 'fulfilled');
   assert.match(String((stopped as PromiseRejectedResult).reason), /being installed or deployed already/);
-  assert.ok(!fake.calls().slice(calls).some((c) => / stop /.test(c)), 'nothing stopped');
+  assert.ok(
+    !fake
+      .calls()
+      .slice(calls)
+      .some((c) => / stop /.test(c)),
+    'nothing stopped',
+  );
   assert.equal((await services.act(m, 'stop')).active, 'inactive', 'and once it is done, it goes');
 });
 
-test('a timer whose unit name is another contraption\'s is refused', async () => {
+test("a timer whose unit name is another contraption's is refused", async () => {
   appFolder('mandate');
   await assert.rejects(services.install(row('mandate', 7341), { all: [row('mandate-backup', 7400)] }), /share its unit name/);
   assert.ok(!existsSync(join(unitDir, 'citadel-app-mandate.service')));
@@ -290,9 +321,22 @@ test('a hand-installed unit is reported, and replaced (stopped and disabled, fil
 
   const m = row('mandate', 7341);
   const hand = await services.handInstalled(m);
-  assert.deepEqual(hand.map((u) => [u.unit, u.why]), [['mandate-backup.service', `runs from ${join(home, 'apps/mandate')}`], ['mandate-backup.timer', 'starts mandate-backup.service'], ['mandate.service', 'port 7341']]);
-  assert.deepEqual((await services.handInstalled(row('peek-auras', 9142))).map((u) => u.unit), ['peek-auras.service']);
-  assert.deepEqual((await services.status(m)).hand.map((u) => u.unit), ['mandate-backup.service', 'mandate-backup.timer', 'mandate.service']);
+  assert.deepEqual(
+    hand.map((u) => [u.unit, u.why]),
+    [
+      ['mandate-backup.service', `runs from ${join(home, 'apps/mandate')}`],
+      ['mandate-backup.timer', 'starts mandate-backup.service'],
+      ['mandate.service', 'port 7341'],
+    ],
+  );
+  assert.deepEqual(
+    (await services.handInstalled(row('peek-auras', 9142))).map((u) => u.unit),
+    ['peek-auras.service'],
+  );
+  assert.deepEqual(
+    (await services.status(m)).hand.map((u) => u.unit),
+    ['mandate-backup.service', 'mandate-backup.timer', 'mandate.service'],
+  );
 
   await assert.rejects(services.install(m), /Hand-installed units run mandate already: mandate-backup.timer \(inactive, enabled; starts mandate-backup.service\); mandate.service \(active, enabled; port 7341\)/);
   assert.ok(!existsSync(join(unitDir, 'citadel-app-mandate.service')), 'nothing written');
@@ -362,7 +406,7 @@ async function done(name: string) {
 const appManifest = (build: string[], extra = {}) => JSON.stringify({ start: ['/usr/bin/node', 'server.ts'], build, ...extra });
 let repoN = 0;
 
-test('a first deploy clones, builds without Citadel\'s environment, installs and checks it is up', async () => {
+test("a first deploy clones, builds without Citadel's environment, installs and checks it is up", async () => {
   const name = `app${++repoN}`;
   const r = remote(`cara/${name}`);
   const head = r.push({ '.gitignore': 'out.txt\nenv.txt\n', 'citadel-app.json': appManifest(['echo built > out.txt', 'env > env.txt', 'echo to the log']) });
@@ -380,7 +424,7 @@ test('a first deploy clones, builds without Citadel\'s environment, installs and
     assert.equal(git(folder, 'rev-parse', 'HEAD'), head);
     assert.equal(readFileSync(join(folder, 'out.txt'), 'utf8'), 'built\n');
     const env = readFileSync(join(folder, 'env.txt'), 'utf8');
-    assert.match(env, new RegExp(`^PATH=${join(home, '.local/share/mise/shims')}:`, 'm'), 'mise\'s toolchains on PATH');
+    assert.match(env, new RegExp(`^PATH=${join(home, '.local/share/mise/shims')}:`, 'm'), "mise's toolchains on PATH");
     for (const v of ['PORT', 'DATA_DIR', 'SESSION_SECRET', 'COORDINATOR_TOKEN', 'NODE_TEST_CONTEXT']) assert.doesNotMatch(env, new RegExp(`^${v}=`, 'm'), v);
     assert.match(d.tail, /to the log/);
     assert.ok(existsSync(join(unitDir, `citadel-app-${name}.service`)));
@@ -388,8 +432,14 @@ test('a first deploy clones, builds without Citadel\'s environment, installs and
     // Each step in its own unit, out of Citadel's cgroup, and in a heavy slot named for the app (#847).
     assert.equal(fake.calls().filter((x) => x.startsWith(`run --user --wait --collect --unit=citadel-build-${name}.service `)).length, 3);
     assert.equal(fake.calls().filter((x) => x.startsWith('run ') && x.includes('--slice=contraptions.slice ')).length, 3, 'each build step runs in contraptions.slice (#1238)');
-    assert.equal(heavyHistory().split('\n').filter((l) => l.split('\t')[1] === `${name} deploy`).length, 1, `one hold for all three steps (#885): ${heavyHistory()}`);
-    assert.match(env, /^CITADEL_HEAVY_HELD=1$/m, 'a step that calls citadel-heavy itself runs in the deploy\'s slot');
+    assert.equal(
+      heavyHistory()
+        .split('\n')
+        .filter((l) => l.split('\t')[1] === `${name} deploy`).length,
+      1,
+      `one hold for all three steps (#885): ${heavyHistory()}`,
+    );
+    assert.match(env, /^CITADEL_HEAVY_HELD=1$/m, "a step that calls citadel-heavy itself runs in the deploy's slot");
     assert.ok(!existsSync(join(home, 'deploy-logs', name, 'deploying.json')), 'its marker goes when it ends');
   } finally {
     svc.close();
@@ -422,8 +472,17 @@ test("a deploy build holds one heavy slot for all its steps and goes ahead of mi
     services.deploy({ ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow, 'Cara');
     // Only the finished wait-<pid>-<n>: citadel-heavy writes it as .tmp and moves it in place, and a .tmp seen
     // before its mv left the second look with nothing (CI, 2026-11-17).
-    const deployWait = () => readdirSync(heavyDir).filter((f) => /^wait-[0-9-]+$/.test(f)).map((f) => join(heavyDir, f))
-      .find((p) => { try { return readFileSync(p, 'utf8').startsWith(`${name} deploy\n`); } catch { return false; } });
+    const deployWait = () =>
+      readdirSync(heavyDir)
+        .filter((f) => /^wait-[0-9-]+$/.test(f))
+        .map((f) => join(heavyDir, f))
+        .find((p) => {
+          try {
+            return readFileSync(p, 'utf8').startsWith(`${name} deploy\n`);
+          } catch {
+            return false;
+          }
+        });
     await until('the deploy waiting for the slot', () => !!deployWait());
     // A whole look at the slots with the deploy still in line: the waiting job touches its file at each one.
     const waitFile = deployWait()!;
@@ -468,7 +527,10 @@ test('a deploy waits for a build an earlier deploy left running, so two never bu
     await until('the deploy to say it waits', async () => (await services.lastDeploy(name))?.said.some((l) => /still running in citadel-build-/.test(l)));
     const mid = await services.lastDeploy(name);
     assert.equal(mid!.state, 'running');
-    assert.ok(mid!.said.some((l) => /still running in citadel-build-.*waiting for it to end/.test(l)), mid!.said.join('\n'));
+    assert.ok(
+      mid!.said.some((l) => /still running in citadel-build-.*waiting for it to end/.test(l)),
+      mid!.said.join('\n'),
+    );
     assert.ok(!fake.calls().some((x) => x.startsWith('run ')), 'nothing built meanwhile');
     assert.deepEqual(JSON.parse(readFileSync(join(home, 'deploy-logs', name, 'deploying.json'), 'utf8')), { by: 'Cara', uid: 7, resumed: false, log: mid!.log });
     rmSync(left);
@@ -504,7 +566,7 @@ test('a deploy a restart cut short is found once, its log saying so; one started
 const liveSlot = (name: string) => realpathSync(join(home, 'apps', name));
 const unitDirOf = (name: string) => realpathSync(/^WorkingDirectory=(.*)$/m.exec(readFileSync(join(unitDir, `citadel-app-${name}.service`), 'utf8'))![1]);
 
-test('a deploy builds beside the running app: until its restart the app\'s folder still holds the old commit (#801)', async () => {
+test("a deploy builds beside the running app: until its restart the app's folder still holds the old commit (#801)", async () => {
   const name = `app${++repoN}`;
   const r = remote(`cara/${name}`);
   const folder = join(home, 'apps', name);
@@ -547,8 +609,11 @@ test('deploys take turns between the two slots, and refuse local changes in the 
       assert.equal((await done(name)).state, 'deployed');
       live.push(liveSlot(name));
     }
-    assert.deepEqual(live, [join(slots, 'a'), join(slots, 'b'), join(slots, 'a')].map((p) => realpathSync(p)));
-    writeFileSync(join(slots, 'b', 'stray.txt'), 'someone\'s work');
+    assert.deepEqual(
+      live,
+      [join(slots, 'a'), join(slots, 'b'), join(slots, 'a')].map((p) => realpathSync(p)),
+    );
+    writeFileSync(join(slots, 'b', 'stray.txt'), "someone's work");
     const head = git(join(slots, 'b'), 'rev-parse', 'HEAD');
     r.push({ 'later.txt': 'x' });
     services.deploy(c, 'Cara');
@@ -556,7 +621,7 @@ test('deploys take turns between the two slots, and refuse local changes in the 
     assert.equal(d.state, 'failed');
     assert.match(d.said.join('\n'), /has local changes, so nothing was built[\s\S]*stray\.txt/);
     assert.equal(git(join(slots, 'b'), 'rev-parse', 'HEAD'), head, 'the idle slot untouched');
-    assert.equal(readFileSync(join(slots, 'b', 'stray.txt'), 'utf8'), 'someone\'s work');
+    assert.equal(readFileSync(join(slots, 'b', 'stray.txt'), 'utf8'), "someone's work");
     assert.equal(liveSlot(name), live[2]);
   } finally {
     svc.close();
@@ -607,13 +672,13 @@ test('an unhealthy deploy rolls back by pointing at the old slot again, with no 
     assert.equal(d.state, 'rolled back', d.said.join('\n'));
     assert.equal(liveSlot(name), old);
     assert.equal(unitDirOf(name), old);
-    assert.equal(readFileSync(builds, 'utf8'), 'built\nbuilt\n', 'the old commit wasn\'t built again');
+    assert.equal(readFileSync(builds, 'utf8'), 'built\nbuilt\n', "the old commit wasn't built again");
   } finally {
     svc.close();
   }
 });
 
-test('a deploy moves an app\'s plain folder into its first slot, keeping its ignored files and leaving DATA_DIR alone (#801)', async () => {
+test("a deploy moves an app's plain folder into its first slot, keeping its ignored files and leaving DATA_DIR alone (#801)", async () => {
   const name = `app${++repoN}`;
   const r = remote(`cara/${name}`);
   const first = r.push({ '.gitignore': 'node_modules/\n', 'citadel-app.json': appManifest([]) });
@@ -708,7 +773,7 @@ function drainSpy(said: string | null, ms = 200) {
   return seen;
 }
 
-test('a deploy waits for its contraption\'s turns before restarting it, says so, and lets held turns go once it is healthy (#319)', async () => {
+test("a deploy waits for its contraption's turns before restarting it, says so, and lets held turns go once it is healthy (#319)", async () => {
   const name = `app${++repoN}`;
   const r = remote(`cara/${name}`);
   r.push({ 'citadel-app.json': appManifest([]) });
@@ -744,14 +809,17 @@ test('a deploy that rolls back drains again before its second restart, and relea
     services.deploy(c, 'Cara');
     const d = await done(name);
     assert.equal(d.state, 'rolled back', d.said.join('\n'));
-    assert.deepEqual(seen.filter((x) => !x.startsWith('drained')), ['drain at 1 restarts', 'drain at 2 restarts', 'released at 3 restarts', 'released at 3 restarts']);
+    assert.deepEqual(
+      seen.filter((x) => !x.startsWith('drained')),
+      ['drain at 1 restarts', 'drain at 2 restarts', 'released at 3 restarts', 'released at 3 restarts'],
+    );
     assert.ok(!d.said.some((l) => /^Waited/.test(l)), 'nothing to say with no turns running');
   } finally {
     svc.close();
   }
 });
 
-test('stop and restart drain the contraption\'s turns first and say how long they waited; start doesn\'t (#319)', async () => {
+test("stop and restart drain the contraption's turns first and say how long they waited; start doesn't (#319)", async () => {
   appFolder('mandate');
   const m = row('mandate', 7341);
   await services.install(m);
@@ -762,10 +830,10 @@ test('stop and restart drain the contraption\'s turns first and say how long the
   assert.equal((await services.act(m, 'stop')).active, 'inactive');
   assert.equal(seen.length, 6);
   assert.equal((await services.act(m, 'start')).waited, null);
-  assert.equal(seen.length, 6, 'start cuts nothing, so it doesn\'t wait');
+  assert.equal(seen.length, 6, "start cuts nothing, so it doesn't wait");
 });
 
-test('a deploy that doesn\'t come up healthy rolls back, and says so when the roll back doesn\'t either', async () => {
+test("a deploy that doesn't come up healthy rolls back, and says so when the roll back doesn't either", async () => {
   const name = `app${++repoN}`;
   const r = remote(`cara/${name}`);
   r.push({ 'citadel-app.json': appManifest([], { health: '/health' }) });
@@ -785,8 +853,14 @@ test('a deploy that doesn\'t come up healthy rolls back, and says so when the ro
     services.deploy(c, 'Cara');
     const d = await done(name);
     assert.equal(d.state, 'failed', d.said.join('\n'));
-    assert.ok(d.said.some((l) => /Not healthy after/.test(l)), d.said.join('\n'));
-    assert.ok(d.said.some((l) => /Rolling back failed too: Not healthy/.test(l)), d.said.join('\n'));
+    assert.ok(
+      d.said.some((l) => /Not healthy after/.test(l)),
+      d.said.join('\n'),
+    );
+    assert.ok(
+      d.said.some((l) => /Rolling back failed too: Not healthy/.test(l)),
+      d.said.join('\n'),
+    );
   } finally {
     svc.close();
     svc.closeAllConnections();
@@ -809,8 +883,14 @@ test("a deploy checks, as the person deploying, that the app installs as its own
     services.deploy(c, 'Cara', [], () => 'v1.signed.header');
     const d = await done(name);
     assert.equal(d.state, 'deployed', 'a warning, never a failure');
-    assert.ok(d.said.some((l) => /^To do: .*points outside/.test(l)), d.said.join('\n'));
-    assert.ok(d.todo.some((l) => /points outside/.test(l)), 'a to-do, listed apart from the steps');
+    assert.ok(
+      d.said.some((l) => /^To do: .*points outside/.test(l)),
+      d.said.join('\n'),
+    );
+    assert.ok(
+      d.todo.some((l) => /points outside/.test(l)),
+      'a to-do, listed apart from the steps',
+    );
     assert.ok(seen.includes('v1.signed.header'));
     // Without an identity (no person to read its page as) it isn't checked.
     seen.length = 0;
@@ -828,7 +908,17 @@ test('an install check that cannot run is no to-do and no "no rail icon": it is 
   r.push({ 'citadel-app.json': appManifest([]) });
   const home = `/apps/${name}/`;
   let slow = true;
-  const manifest = { id: home, start_url: home, scope: home, name: 'App', display: 'standalone', icons: [{ src: 'icon-192.png', sizes: '192x192', type: 'image/png' }, { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }] };
+  const manifest = {
+    id: home,
+    start_url: home,
+    scope: home,
+    name: 'App',
+    display: 'standalone',
+    icons: [
+      { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+  };
   const svc = createHttpServer((req, res) => {
     if (slow && req.url === home) return void res.writeHead(503).end('busy');
     if (req.url === home) return res.end('<link rel="manifest" href="manifest.webmanifest">');
@@ -838,7 +928,9 @@ test('an install check that cannot run is no to-do and no "no rail icon": it is 
   await tmp.serve(svc);
   try {
     const c = { ...row(name, (svc.address() as any).port), icon: null, repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
-    const icons: string[] = [], todos: string[][] = [], notes: string[] = [];
+    const icons: string[] = [],
+      todos: string[][] = [],
+      notes: string[] = [];
     const hooks = { setIcon: (i: string) => (icons.push(i), true), todo: (t: string[]) => todos.push(t), unchecked: (l: string) => notes.push(l) };
     // Both tries fail: one plain line, no to-do, no rail icon complaint.
     services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks);
@@ -855,7 +947,10 @@ test('an install check that cannot run is no to-do and no "no rail icon": it is 
     let calls = 0;
     const orig = svc.listeners('request')[0] as any;
     svc.removeAllListeners('request');
-    svc.on('request', (q, s) => { if (q.url === home && calls++ === 0) return void s.writeHead(503).end('x'); orig(q, s); });
+    svc.on('request', (q, s) => {
+      if (q.url === home && calls++ === 0) return void s.writeHead(503).end('x');
+      orig(q, s);
+    });
     services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks);
     await settled();
     assert.deepEqual([icons, notes, todos], [['/icon-192.png'], [], [[]]]);
@@ -894,7 +989,17 @@ test('a deploy fills an empty rail icon from its manifest, and hands back what i
     assert.deepEqual(todos, [d.todo]);
     assert.deepEqual(icons, [], 'nothing to fill it from');
     // With an installable manifest, the empty icon is filled from it and nothing is left to do.
-    manifest = { id: home, start_url: home, scope: home, name: 'App', display: 'standalone', icons: [{ src: 'icon-192.png', sizes: '192x192', type: 'image/png' }, { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }] };
+    manifest = {
+      id: home,
+      start_url: home,
+      scope: home,
+      name: 'App',
+      display: 'standalone',
+      icons: [
+        { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+        { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
+      ],
+    };
     todos.length = 0;
     services.deploy(c, 'Cara', [], () => 'v1.signed.header', hooks(true));
     d = await done(name);
@@ -922,7 +1027,10 @@ test('a build past its time is stopped, and counts as failing', async () => {
   const d = await done(name);
   assert.equal(existsSync(marker), false, 'stopped before the sleep ended');
   assert.equal(d.state, 'failed');
-  assert.ok(d.said.some((l) => /ran past its 1 minutes at: sleep 30; touch /.test(l)), d.said.join('\n'));
+  assert.ok(
+    d.said.some((l) => /ran past its 1 minutes at: sleep 30; touch /.test(l)),
+    d.said.join('\n'),
+  );
   assert.ok(d.said.some((l) => /Nothing to roll back to/.test(l)));
 });
 
@@ -1024,8 +1132,10 @@ test('an app in a folder of its repo (#1136) reads its manifest, builds and runs
   try {
     const c = { ...row(name, svc.port), repo: `cara/${name}`, branch: null, folder: null, subdir: 'apps/notes' } as ContraptionRow;
     r.push({
-      'README.md': 'the scheme\'s own repo', '.gitignore': 'out.txt\n',
-      'apps/notes/citadel-app.json': appManifest(['pwd > out.txt'], { migrations: ['migrations'] }), 'apps/notes/migrations/0001.sql': 'a',
+      'README.md': "the scheme's own repo",
+      '.gitignore': 'out.txt\n',
+      'apps/notes/citadel-app.json': appManifest(['pwd > out.txt'], { migrations: ['migrations'] }),
+      'apps/notes/migrations/0001.sql': 'a',
     });
     services.deploy(c, 'Cara');
     const d = await done(name);
@@ -1035,7 +1145,7 @@ test('an app in a folder of its repo (#1136) reads its manifest, builds and runs
     assert.equal((await services.status(c)).manifestError, null);
 
     // The repo's own migrations folder isn't the app's: no snapshot.
-    r.push({ 'migrations/0001.sql': 'the scheme\'s, not the app\'s' });
+    r.push({ 'migrations/0001.sql': "the scheme's, not the app's" });
     services.deploy(c, 'Cara');
     assert.doesNotMatch((await done(name)).said.join('\n'), /Snapshotted its data/);
     r.push({ 'apps/notes/migrations/0002.sql': 'b' });
@@ -1053,13 +1163,16 @@ async function migratingApp() {
   const r = remote(`cara/${name}`);
   const data = join(home, '.local/share', name);
   const wrapper = join(root, `systemctl-${name}`);
-  writeFileSync(wrapper, `#!/bin/sh
+  writeFileSync(
+    wrapper,
+    `#!/bin/sh
 "${fake.bin}" "$@" || exit $?
 case "$2" in start|restart) [ "$3" = "citadel-app-${name}.service" ] || exit 0
   wd=$(sed -n 's/^WorkingDirectory=//p' "${unitDir}/$3")
   [ -f "$wd/migrate.sh" ] && cd "${data}" && sh "$wd/migrate.sh";; esac
 exit 0
-`);
+`,
+  );
   chmodSync(wrapper, 0o755);
   services = new AppServices({ ...opts(), systemctl: wrapper });
   const svc = createHttpServer((req, res) => {
@@ -1175,10 +1288,18 @@ test('snapshots keep the newest few within a size cap, never the ones a step jus
   writeFileSync(join(data, 'f'), Buffer.alloc(1000));
   const cap = { keep: 2, maxBytes: 2500 };
   for (let i = 1; i <= 3; i++) await takeSnapshot(data, snaps, { commit: `c${i}`.padEnd(40, '0'), why: 'test' }, cap, i * 1000);
-  assert.deepEqual((await listSnapshots(snaps)).map((s) => s.commit.slice(0, 2)), ['c3', 'c2'], 'the oldest past the count goes');
+  assert.deepEqual(
+    (await listSnapshots(snaps)).map((s) => s.commit.slice(0, 2)),
+    ['c3', 'c2'],
+    'the oldest past the count goes',
+  );
   writeFileSync(join(data, 'f'), Buffer.alloc(2000));
   const { said } = await takeSnapshot(data, snaps, { commit: 'c4'.padEnd(40, '0'), why: 'test' }, cap, 4000);
-  assert.deepEqual((await listSnapshots(snaps)).map((s) => s.commit.slice(0, 2)), ['c4'], 'past the size cap too (2000 + 1000 > 2500), but the new one stays');
+  assert.deepEqual(
+    (await listSnapshots(snaps)).map((s) => s.commit.slice(0, 2)),
+    ['c4'],
+    'past the size cap too (2000 + 1000 > 2500), but the new one stays',
+  );
   assert.match(said.join('\n'), /Removed 2 older snapshots past the cap .*c3.*c20+\. Kept: .*c4/);
   assert.deepEqual(await prune(snaps, []), [], 'under the default cap nothing goes');
   const big = await takeSnapshot(data, snaps, { commit: 'c5'.padEnd(40, '0'), why: 'test' }, { keep: 2, maxBytes: 100 }, 5000);
@@ -1191,9 +1312,17 @@ test('snapshots keep the newest few within a size cap, never the ones a step jus
   // only ever picks the newest of a commit, so repeated tries of one deploy can't push out the snapshot an older commit needs.
   const dup = join(home, 'snaps-dup');
   const wide = { keep: 3, maxBytes: 1e9 };
-  for (const [c, t] of [['d1', 1000], ['d2', 2000], ['d2', 3000]] as const) await takeSnapshot(data, dup, { commit: c.padEnd(40, '0'), why: 'test' }, wide, t);
+  for (const [c, t] of [
+    ['d1', 1000],
+    ['d2', 2000],
+    ['d2', 3000],
+  ] as const)
+    await takeSnapshot(data, dup, { commit: c.padEnd(40, '0'), why: 'test' }, wide, t);
   await takeSnapshot(data, dup, { commit: 'd3'.padEnd(40, '0'), why: 'test' }, wide, 4000);
-  assert.deepEqual((await listSnapshots(dup)).map((s) => `${s.commit.slice(0, 2)}@${s.taken_at}`), ['d3@4000', 'd2@3000', 'd1@1000']);
+  assert.deepEqual(
+    (await listSnapshots(dup)).map((s) => `${s.commit.slice(0, 2)}@${s.taken_at}`),
+    ['d3@4000', 'd2@3000', 'd1@1000'],
+  );
 });
 
 // #915: a member's private repo is out of the box's login's reach; only their own GitHub link gets in.
@@ -1219,10 +1348,10 @@ test("a deploy clones and fetches with its home scheme owner's GitHub link, whic
     d = await done(name);
     assert.equal(d.state, 'deployed', d.said.join('\n'));
     assert.equal(d.to, git(join(root, 'work', `alex/${name}`), 'rev-parse', 'HEAD'), 'the fetch went through too');
-    assert.deepEqual(asked, [9, 9], 'asked for the home scheme owner\'s link on each deploy');
+    assert.deepEqual(asked, [9, 9], "asked for the home scheme owner's link on each deploy");
     const slots = join(home, 'apps', `.${name}`);
     const env = readFileSync(join(liveSlot(name), 'env.txt'), 'utf8');
-    assert.doesNotMatch(env, /GH_TOKEN|GIT_CONFIG_/, 'the build never sees the owner\'s login');
+    assert.doesNotMatch(env, /GH_TOKEN|GIT_CONFIG_/, "the build never sees the owner's login");
     for (const slot of ['a', 'b']) assert.ok(!git(join(slots, slot), 'config', '--list', '--show-origin').includes(token), `${slot}'s git config`);
     assert.ok(!readFileSync(join(slots, 'a', '.git', 'config'), 'utf8').includes(token));
     for (const f of readdirSync(join(home, 'deploy-logs', name))) assert.ok(!readFileSync(join(home, 'deploy-logs', name, f), 'utf8').includes(token), f);
@@ -1253,7 +1382,7 @@ test("a deploy whose owner's link can't reach the repo tries again with the box'
   }
 });
 
-test('a deploy won\'t run over a hand-installed unit until an admin replaces it', async () => {
+test("a deploy won't run over a hand-installed unit until an admin replaces it", async () => {
   const name = `app${++repoN}`;
   remote(`cara/${name}`).push({ 'citadel-app.json': appManifest([]) });
   writeFileSync(join(unitDir, `${name}.service`), `[Service]\nWorkingDirectory=%h/apps/${name}\n`);
@@ -1265,7 +1394,7 @@ test('a deploy won\'t run over a hand-installed unit until an admin replaces it'
   assert.ok(!existsSync(join(home, 'apps', name)), 'nothing cloned');
 });
 
-test("a folder app (#1136): a ship that changes nothing in its folder holds its deploy, and it deploys only once its manifest is on main", async () => {
+test('a folder app (#1136): a ship that changes nothing in its folder holds its deploy, and it deploys only once its manifest is on main', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'folder-app-'));
   const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
   try {
@@ -1297,7 +1426,8 @@ test('a deploy started while a stop or restart drains the app is refused, not st
   const m = { ...row('mandate', 7341), repo: 'cara/mandate' } as ContraptionRow;
   await services.install(m);
   // The drain is held open until the deploy has been tried: a fixed sleep raced act()'s awaits before the drain under load.
-  let draining = false, open = () => {};
+  let draining = false,
+    open = () => {};
   const gate = new Promise<void>((r) => (open = r));
   services.drain = async () => ((draining = true), await gate, { said: null, release: () => {} });
   const acting = services.act(m, 'restart');
@@ -1311,7 +1441,7 @@ test('a deploy started while a stop or restart drains the app is refused, not st
   }
 });
 
-test('startAfterCut starts an installed app\'s service, and says no for one never installed (C2)', async () => {
+test("startAfterCut starts an installed app's service, and says no for one never installed (C2)", async () => {
   appFolder('mandate');
   const m = row('mandate', 7341);
   assert.equal(await services.startAfterCut(m), false);
@@ -1319,5 +1449,10 @@ test('startAfterCut starts an installed app\'s service, and says no for one neve
   await services.act(m, 'stop');
   const calls = fake.calls().length;
   assert.equal(await services.startAfterCut(m), true);
-  assert.ok(fake.calls().slice(calls).some((c) => c.includes('start citadel-app-mandate.service')));
+  assert.ok(
+    fake
+      .calls()
+      .slice(calls)
+      .some((c) => c.includes('start citadel-app-mandate.service')),
+  );
 });

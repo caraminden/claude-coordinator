@@ -24,7 +24,11 @@ function scheme(t, over = {}) {
     return { ok: false, status: 500, json: async () => ({}) };
   };
   setView({ kind: 'project', projectId: 2, coordinator: taskmaster, tickets: new Map([[minion.id, minion]]), ...over });
-  t.after(() => { globalThis.fetch = realFetch; setView(null); forgetOtherSchemes(); });
+  t.after(() => {
+    globalThis.fetch = realFetch;
+    setView(null);
+    forgetOtherSchemes();
+  });
   return fetched;
 }
 
@@ -42,7 +46,7 @@ test('a card opened or settled in this scheme refetches its items once the burst
   t.mock.timers.tick(1);
   assert.deepEqual(fetched, [ITEMS], 'one fetch for the burst');
   t.mock.timers.tick(2000);
-  assert.deepEqual(fetched, [ITEMS], 'and no other scheme\'s counts: the Taskmaster is this scheme\'s');
+  assert.deepEqual(fetched, [ITEMS], "and no other scheme's counts: the Taskmaster is this scheme's");
 });
 
 test('a typed answer settles a card; other chat news fetches nothing', (t) => {
@@ -115,7 +119,9 @@ test("another scheme's minion refetches the counts when it is new or its count o
 test("a hidden tab leaves another scheme's spinner news until it is shown, but still fetches news that moves a count", async (t) => {
   const fetched = scheme(t);
   globalThis.document = { hidden: true };
-  t.after(() => { delete globalThis.document; });
+  t.after(() => {
+    delete globalThis.document;
+  });
   const other = { ...minion, id: 5000, project_id: 1 };
   inboxOtherTicket(other);
   t.mock.timers.tick(2000);

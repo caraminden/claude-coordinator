@@ -10,7 +10,10 @@ const root = mkdtempSync(join(tmpdir(), 'backup-flag-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const data = (name: string, files: Record<string, string>) => {
   const d = join(root, name);
-  for (const [f, body] of Object.entries(files)) { mkdirSync(join(d, f, '..'), { recursive: true }); writeFileSync(join(d, f), body); }
+  for (const [f, body] of Object.entries(files)) {
+    mkdirSync(join(d, f, '..'), { recursive: true });
+    writeFileSync(join(d, f), body);
+  }
   mkdirSync(d, { recursive: true });
 };
 data('bare', { 'app.db': 'x' });
@@ -19,7 +22,10 @@ data('ok', { 'sub/store.sqlite': 'x' });
 data('onlycopy', { 'backups/2026-11-19/app.db': 'x' });
 const full = { timers: { backup: {} }, disk_warn_gb: 5 };
 const manifests: Record<string, { timers: Record<string, unknown>; disk_warn_gb: number | null }> = {
-  bare: { timers: {}, disk_warn_gb: null }, nodb: { timers: {}, disk_warn_gb: null }, ok: full, onlycopy: { timers: {}, disk_warn_gb: null },
+  bare: { timers: {}, disk_warn_gb: null },
+  nodb: { timers: {}, disk_warn_gb: null },
+  ok: full,
+  onlycopy: { timers: {}, disk_warn_gb: null },
 };
 
 test('a database is found in the data dir, but a backup copy is not one', async () => {
@@ -42,12 +48,22 @@ test('flags once per app and gap set, per its own scheme, and again after a chan
   let state: Record<string, string> = {};
   const mails: { id: number; text: string }[] = [];
   const deps = {
-    apps: () => apps, dataDir: (a: FlagApp) => join(root, a.name), manifest: async (a: FlagApp) => manifests[a.name],
-    taskmaster: (s: number) => s + 100, mail: (id: number, text: string) => mails.push({ id, text }),
-    getState: () => state, setState: (s: Record<string, string>) => { state = s; },
+    apps: () => apps,
+    dataDir: (a: FlagApp) => join(root, a.name),
+    manifest: async (a: FlagApp) => manifests[a.name],
+    taskmaster: (s: number) => s + 100,
+    mail: (id: number, text: string) => mails.push({ id, text }),
+    getState: () => state,
+    setState: (s: Record<string, string>) => {
+      state = s;
+    },
   };
   const first = await flagUnbacked(deps);
-  assert.deepEqual(first.map((f) => f.app), ['bare'], 'only the app with a DB and no convention');
+  assert.deepEqual(
+    first.map((f) => f.app),
+    ['bare'],
+    'only the app with a DB and no convention',
+  );
   assert.equal(mails.length, 1);
   assert.equal(mails[0].id, 107, "its own scheme's Taskmaster, not Citadel's");
   assert.match(mails[0].text, /no `backup` timer and no `disk_warn_gb`/);
@@ -64,8 +80,15 @@ test('an app whose scheme has no Taskmaster is tried again next round', async ()
   let tm: number | null = null;
   const mails: number[] = [];
   const deps = {
-    apps: () => [{ name: 'bare', title: 'Bare', home_scheme: 3 }], dataDir: () => join(root, 'bare'), manifest: async () => ({ timers: {}, disk_warn_gb: null }),
-    taskmaster: () => tm, mail: (id: number) => mails.push(id), getState: () => state, setState: (s: Record<string, string>) => { state = s; },
+    apps: () => [{ name: 'bare', title: 'Bare', home_scheme: 3 }],
+    dataDir: () => join(root, 'bare'),
+    manifest: async () => ({ timers: {}, disk_warn_gb: null }),
+    taskmaster: () => tm,
+    mail: (id: number) => mails.push(id),
+    getState: () => state,
+    setState: (s: Record<string, string>) => {
+      state = s;
+    },
   };
   assert.deepEqual(await flagUnbacked(deps), []);
   tm = 9;
@@ -77,8 +100,18 @@ test('a restart skips the round when one ran today, and an old row without a day
   let state: Record<string, string> = {};
   let rounds = 0;
   const deps = {
-    apps: () => { rounds++; return []; }, dataDir: () => root, manifest: async () => full,
-    taskmaster: () => 1, mail: () => {}, getState: () => state, setState: (s: Record<string, string>) => { state = s; },
+    apps: () => {
+      rounds++;
+      return [];
+    },
+    dataDir: () => root,
+    manifest: async () => full,
+    taskmaster: () => 1,
+    mail: () => {},
+    getState: () => state,
+    setState: (s: Record<string, string>) => {
+      state = s;
+    },
   };
   const noon = Date.UTC(2026, 10, 23, 20);
   await flagUnbacked(deps, { oncePerDay: true, now: noon });

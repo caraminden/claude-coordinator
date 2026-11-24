@@ -30,7 +30,7 @@ function fakeGithub(tokens: Record<string, string>) {
       const set = collaborators.get(slug) ?? new Set();
       collaborators.set(slug, set);
       if (method === 'GET') return new Response(null, { status: set.has(login) ? 204 : 404, headers });
-      if (method === 'DELETE') return set.delete(login), new Response(null, { status: 204, headers });
+      if (method === 'DELETE') return (set.delete(login), new Response(null, { status: 204, headers }));
       if (opts.scopes && !opts.scopes.includes('repo')) return Response.json({ message: 'Must have admin rights to Repository.' }, { status: 403, headers });
       if (opts.orgRefuses) return Response.json({ message: 'Outside collaborators are not allowed' }, { status: 403, headers });
       const id = next++;
@@ -69,7 +69,7 @@ function world(live = true) {
   return { store, creds, link, cara, josh, olive, scheme, gh, linkGithub, access };
 }
 
-test('a linked member is invited with the owner\'s token and accepted with their own', async () => {
+test("a linked member is invited with the owner's token and accepted with their own", async () => {
   const w = world();
   w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
   w.store.addMember(w.scheme.id, w.josh.id);
@@ -113,7 +113,7 @@ test('a member whose link stopped working is left with an invite to accept on Gi
   assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'added');
 });
 
-test('an invite stays Citadel\'s through a failed check, so after it is accepted leaving still takes them off (#468 S02-4)', async () => {
+test("an invite stays Citadel's through a failed check, so after it is accepted leaving still takes them off (#468 S02-4)", async () => {
   const w = world();
   w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
   w.creds.fail(w.josh.id, 'github');
@@ -137,14 +137,14 @@ test('an invite stays Citadel\'s through a failed check, so after it is accepted
   assert.ok(!w.gh.collaborators.get('caraminden/peek-auras')!.has('KatzMeIfYouCan'));
 });
 
-test('a collaborator Citadel added, left with an error, stays Citadel\'s when synced again (#468 S02-4)', async () => {
+test("a collaborator Citadel added, left with an error, stays Citadel's when synced again (#468 S02-4)", async () => {
   const w = world();
   w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
   w.store.addMember(w.scheme.id, w.josh.id);
   await w.access.sync(w.scheme.id, w.josh.id);
   const row = w.store.getRepoCollaborator(w.scheme.id, w.josh.id)!;
   assert.equal(row.state, 'added');
-  w.store.putRepoCollaborator({ ...row, error: 'Couldn\'t take @KatzMeIfYouCan off caraminden/peek-auras: GitHub was down' });
+  w.store.putRepoCollaborator({ ...row, error: "Couldn't take @KatzMeIfYouCan off caraminden/peek-auras: GitHub was down" });
   await w.access.sync(w.scheme.id, w.josh.id);
   assert.equal(w.access.view(w.scheme.id, w.josh.id)?.state, 'added');
   // Unlinked GitHub: waiting, but still Citadel's collaborator to take off.
@@ -165,7 +165,7 @@ test('leaving takes off only a collaborator Citadel added', async () => {
     await w.access.sync(w.scheme.id, p.id);
   }
   assert.equal(w.access.view(w.scheme.id, w.olive.id)?.state, 'existing');
-  assert.ok(!w.gh.calls.some((c) => c.startsWith('PUT') && c.includes('olive-gh')), 'Olive wasn\'t invited again');
+  assert.ok(!w.gh.calls.some((c) => c.startsWith('PUT') && c.includes('olive-gh')), "Olive wasn't invited again");
   for (const p of [w.josh, w.olive]) {
     w.store.removeMember(w.scheme.id, p.id);
     assert.equal(await w.access.remove(w.scheme.id, p.id), null);
@@ -190,7 +190,7 @@ test('a pending invite is withdrawn when they leave; a refusal stays for the nex
   assert.equal(w.store.listRepoCollaborators().length, 0);
 });
 
-test('a removed person\'s invites are withdrawn by tidy', async () => {
+test("a removed person's invites are withdrawn by tidy", async () => {
   const w = world();
   w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
   w.store.addMember(w.scheme.id, w.josh.id);
@@ -200,14 +200,14 @@ test('a removed person\'s invites are withdrawn by tidy', async () => {
   assert.equal(w.gh.collaborators.get('caraminden/peek-auras')!.size, 0);
 });
 
-test('errors are kept and said: no owner link, missing scope, an org that refuses, a repo that isn\'t theirs', async () => {
+test("errors are kept and said: no owner link, missing scope, an org that refuses, a repo that isn't theirs", async () => {
   const w = world();
   w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
   w.store.addMember(w.scheme.id, w.josh.id);
 
   w.creds.remove(w.cara.id, 'github');
   await w.access.sync(w.scheme.id, w.josh.id);
-  assert.deepEqual([w.access.view(w.scheme.id, w.josh.id)?.state, w.access.view(w.scheme.id, w.josh.id)?.error], ['failed', 'Cara hasn\'t linked a working GitHub in Settings → Your account, so Citadel can\'t invite @KatzMeIfYouCan to caraminden/peek-auras.']);
+  assert.deepEqual([w.access.view(w.scheme.id, w.josh.id)?.state, w.access.view(w.scheme.id, w.josh.id)?.error], ['failed', "Cara hasn't linked a working GitHub in Settings → Your account, so Citadel can't invite @KatzMeIfYouCan to caraminden/peek-auras."]);
   w.linkGithub(w.cara.id, 'gho_cara', 'caraminden');
 
   w.gh.opts.scopes = 'read:user';
@@ -246,7 +246,7 @@ test('a boot check or preview, or a server with no OAuth App, leaves GitHub alon
   assert.equal(w.store.listRepoCollaborators().length, 0);
 });
 
-test('an invite GitHub made stays Citadel\'s when accepting it fails, so leaving withdraws it', async () => {
+test("an invite GitHub made stays Citadel's when accepting it fails, so leaving withdraws it", async () => {
   const w = world();
   w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
   w.store.addMember(w.scheme.id, w.josh.id);
@@ -286,7 +286,7 @@ test('members of a scheme whose repo moved are invited to the new one at the swe
   assert.deepEqual(w.access.view(w.scheme.id, w.josh.id), { state: 'added', slug: 'caraminden/peek-auras-2', error: null });
 });
 
-test('a collaborator Citadel added stays Citadel\'s when a transfer carries them to the moved repo (#456)', async () => {
+test("a collaborator Citadel added stays Citadel's when a transfer carries them to the moved repo (#456)", async () => {
   const w = world();
   w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
   w.store.addMember(w.scheme.id, w.josh.id);
@@ -302,7 +302,7 @@ test('a collaborator Citadel added stays Citadel\'s when a transfer carries them
   assert.ok(!w.gh.collaborators.get('caraminden/peek-auras-2')!.has('KatzMeIfYouCan'), 'leaving takes off the access Citadel gave');
 });
 
-test('an owner\'s limited link that can\'t reach the repo says the App isn\'t installed there (#464)', async () => {
+test("an owner's limited link that can't reach the repo says the App isn't installed there (#464)", async () => {
   const w = world();
   // Cara's link is the limited kind, and GitHub answers as if the repo weren't hers: the App isn't on it.
   w.creds.put(w.cara.id, 'github', 'gho_cara', { login: 'caraminden', id: 1, name: null, app: true });
@@ -315,7 +315,7 @@ test('an owner\'s limited link that can\'t reach the repo says the App isn\'t in
   assert.match(v.error!, /limited kind, which reaches caraminden\/peek-auras only once its owner has installed Citadel's GitHub App/);
 });
 
-test('leaving through an owner\'s limited link that can\'t see the repo keeps the row, so the collaborator isn\'t forgotten (#464)', async () => {
+test("leaving through an owner's limited link that can't see the repo keeps the row, so the collaborator isn't forgotten (#464)", async () => {
   const w = world();
   w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
   w.store.addMember(w.scheme.id, w.josh.id);

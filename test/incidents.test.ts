@@ -4,10 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import {
-  ALIVE_KEY, ciEntries, DOWN_MS, group, Incidents, journalEntries, loadEntries, QUIET_MS, readCiRuns, readDeploys, RED_COUNT, redTrigger,
-  render, stallTrigger, STATE_KEY, step, STILL_MS, stopsTrigger, type CiRun, type IncidentState, type InLine, type RedJob, type Sources,
-} from '../src/incidents.ts';
+import { ALIVE_KEY, ciEntries, DOWN_MS, group, Incidents, journalEntries, loadEntries, QUIET_MS, readCiRuns, readDeploys, RED_COUNT, redTrigger, render, stallTrigger, STATE_KEY, step, STILL_MS, stopsTrigger, type CiRun, type IncidentState, type InLine, type RedJob, type Sources } from '../src/incidents.ts';
 import { stopEvent } from '../src/sd-watchdog.ts';
 import { git, makeRepo } from './git.ts';
 
@@ -37,9 +34,17 @@ function setup(bootAt = T0 - 60 * MIN) {
   };
   const make = () =>
     new Incidents({
-      store, sources, bootAt, now: () => clock.now,
-      line: () => line, jobs: () => jobs,
-      write: (name, text) => { if (crash) throw new Error('the server stopped mid-write'); files.push({ name, text }); return `/shared/reports/${name}`; },
+      store,
+      sources,
+      bootAt,
+      now: () => clock.now,
+      line: () => line,
+      jobs: () => jobs,
+      write: (name, text) => {
+        if (crash) throw new Error('the server stopped mid-write');
+        files.push({ name, text });
+        return `/shared/reports/${name}`;
+      },
       tell: (text) => (told.push(text), true),
     });
   return { store, clock, told, files, make, setLine: (l: InLine[]) => (line = l), setJobs: (j: RedJob[]) => (jobs = j), setCi: (c: CiRun[]) => (ci = c), setCrash: (c: boolean) => (crash = c) };
@@ -83,7 +88,8 @@ test('a burst after an incident closed is a new one', async () => {
   const s = setup();
   const inc = s.make();
   const burst = (start: number) => Array.from({ length: RED_COUNT }, (_, i) => ({ run_id: start + i, conclusion: 'failure', completed_at: new Date(start + i * MIN).toISOString() }));
-  const first = burst(T0), second = burst(T0 + 3 * 60 * MIN);
+  const first = burst(T0),
+    second = burst(T0 + 3 * 60 * MIN);
   for (let t = T0; t <= T0 + 5 * 60 * MIN; t += MIN) {
     s.clock.now = t;
     s.setJobs([...first, ...second].filter((j) => Date.parse(j.completed_at) <= t));
@@ -175,7 +181,10 @@ test('a second watchdog restart while an incident is open joins it, not a new on
 test('the ship line standing still for 15 minutes is an incident; a moving one is not', async () => {
   const s = setup(T0);
   const inc = s.make();
-  s.setLine([{ seq: 7, got: 1, label: '#866', phase: 'ci' }, { seq: 8, got: 0, label: '#867', phase: '' }]);
+  s.setLine([
+    { seq: 7, got: 1, label: '#866', phase: 'ci' },
+    { seq: 8, got: 0, label: '#867', phase: '' },
+  ]);
   for (let t = T0; t < T0 + STILL_MS; t += MIN) {
     s.clock.now = t;
     await inc.tick();
@@ -201,7 +210,14 @@ test('the ship line standing still for 15 minutes is an incident; a moving one i
 test('step: a trigger while one is open widens it; an old sign never reopens a closed one', () => {
   let st: IncidentState = { open: null, after: 0, done: [] };
   st = step(st, [{ from: 100, last: 200, why: 'a' }], 200).state;
-  st = step(st, [{ from: 50, last: 300, why: 'b' }, { from: 60, last: 250, why: 'a' }], 300).state;
+  st = step(
+    st,
+    [
+      { from: 50, last: 300, why: 'b' },
+      { from: 60, last: 250, why: 'a' },
+    ],
+    300,
+  ).state;
   assert.deepEqual(st.open, { from: 50, last: 300, why: ['a', 'b'] });
   const r = step(st, [], 300 + QUIET_MS);
   assert.deepEqual(r.close, { from: 50, last: 300, why: ['a', 'b'] });
@@ -220,12 +236,14 @@ test('redTrigger: five failed runs in half an hour, counted once each, after the
 });
 
 test('journal, load and grouping read what they should', () => {
-  const lines = journalEntries([
-    '1763372640.500000 perigee node[42]: The event loop was held for 1.2 s: Running: 70% listTickets',
-    '1763372700.000000 perigee node[42]: The event loop was held for 0.7 s: Running: 70% listTickets',
-    '1763372760.000000 perigee systemd[1]: claude-coordinator.service: Main process exited, code=killed',
-    'garbage',
-  ].join('\n'));
+  const lines = journalEntries(
+    [
+      '1763372640.500000 perigee node[42]: The event loop was held for 1.2 s: Running: 70% listTickets',
+      '1763372700.000000 perigee node[42]: The event loop was held for 0.7 s: Running: 70% listTickets',
+      '1763372760.000000 perigee systemd[1]: claude-coordinator.service: Main process exited, code=killed',
+      'garbage',
+    ].join('\n'),
+  );
   assert.equal(lines.length, 3);
   assert.equal(lines[0].at, 1763372640500);
   const g = group(lines);
@@ -235,12 +253,10 @@ test('journal, load and grouping read what they should', () => {
 
   const s = (at: number, d: object) => ({ machine_id: 6, at, data: JSON.stringify({ host: 'DESKTOP', cpu: 5, mem_total: 100, mem_free: 50, ...d }) });
   const load = loadEntries([s(T0, {}), s(T0 + MIN, { cpu: 95 }), s(T0 + 2 * MIN, { cpu: 97 }), s(T0 + 3 * MIN, {}), s(T0 + 20 * MIN, { restarts: [T0 + 18 * MIN, T0 - 99 * MIN] }), s(T0 + 21 * MIN, { mem_free: 2, restarts: [T0 + 18 * MIN] })], T0 - MIN, T0 + 30 * MIN);
-  assert.deepEqual(load.map((e) => e.text), [
-    "DESKTOP's CPU at 90% or more for 2 min",
-    "DESKTOP's load agent sent nothing for 17 min",
-    'DESKTOP came back from a restart with no clean shutdown',
-    'DESKTOP had under 5% memory free',
-  ]);
+  assert.deepEqual(
+    load.map((e) => e.text),
+    ["DESKTOP's CPU at 90% or more for 2 min", "DESKTOP's load agent sent nothing for 17 min", 'DESKTOP came back from a restart with no clean shutdown', 'DESKTOP had under 5% memory free'],
+  );
 });
 
 test('ciEntries and render: a green and a red read plainly, and the read-more lines name the window', () => {
@@ -270,13 +286,48 @@ test('readCiRuns: the window as GitHub asks for it, and each failed run its fail
   const asked: string[] = [];
   const get = async (path: string) => {
     asked.push(path);
-    if (path.includes('/jobs')) return { status: 200, etag: null, body: { jobs: [{ name: 'test', conclusion: 'failure', runner_name: 'R2', steps: [{ name: 'checkout', conclusion: 'success' }, { name: "the runner's clock", conclusion: 'failure' }] }] } };
-    return { status: 200, etag: null, body: { workflow_runs: [{ id: 5, name: 'tests', head_branch: 'land/x', conclusion: 'failure', created_at: '2026-11-17T09:43:59Z', updated_at: '2026-11-17T09:44:11Z', html_url: 'u5' }, { id: 6, name: 'tests', head_branch: 'main', conclusion: 'success', created_at: '2026-11-17T09:40:00Z', updated_at: '2026-11-17T09:42:00Z' }] } };
+    if (path.includes('/jobs'))
+      return {
+        status: 200,
+        etag: null,
+        body: {
+          jobs: [
+            {
+              name: 'test',
+              conclusion: 'failure',
+              runner_name: 'R2',
+              steps: [
+                { name: 'checkout', conclusion: 'success' },
+                { name: "the runner's clock", conclusion: 'failure' },
+              ],
+            },
+          ],
+        },
+      };
+    return {
+      status: 200,
+      etag: null,
+      body: {
+        workflow_runs: [
+          { id: 5, name: 'tests', head_branch: 'land/x', conclusion: 'failure', created_at: '2026-11-17T09:43:59Z', updated_at: '2026-11-17T09:44:11Z', html_url: 'u5' },
+          { id: 6, name: 'tests', head_branch: 'main', conclusion: 'success', created_at: '2026-11-17T09:40:00Z', updated_at: '2026-11-17T09:42:00Z' },
+        ],
+      },
+    };
   };
   const runs = await readCiRuns(get, 'o/r', undefined, T0 - 30 * MIN, T0 + 30 * MIN);
   assert.equal(asked[0], 'repos/o/r/actions/runs?created=2026-11-17T09:14:00Z..2026-11-17T10:14:00Z&per_page=100&page=1');
-  assert.deepEqual(runs.map((r) => [r.id, r.failed ?? null, r.runner ?? null]), [[6, null, null], [5, "test › the runner's clock", 'R2']]);
-  await assert.rejects(readCiRuns(async () => ({ status: 403, etag: null, body: null }), 'o/r', undefined, 0, 1), /403/);
+  assert.deepEqual(
+    runs.map((r) => [r.id, r.failed ?? null, r.runner ?? null]),
+    [
+      [6, null, null],
+      [5, "test › the runner's clock", 'R2'],
+    ],
+  );
+  await assert.rejects(
+    readCiRuns(async () => ({ status: 403, etag: null, body: null }), 'o/r', undefined, 0, 1),
+    /403/,
+  );
 });
 
 test("readDeploys: the live checkout's reflog, oldest first, inside the window", async () => {
@@ -288,7 +339,10 @@ test("readDeploys: the live checkout's reflog, oldest first, inside the window",
   writeFileSync(join(dir, 'a'), '2');
   git(dir, 'commit', '-qam', '#866: second');
   const all = await readDeploys(dir, 0, Date.now() + MIN);
-  assert.deepEqual(all.map((d) => d.subject), ['first', '#866: second']);
+  assert.deepEqual(
+    all.map((d) => d.subject),
+    ['first', '#866: second'],
+  );
   assert.equal(all[1].how, 'commit');
   assert.deepEqual(await readDeploys(dir, Date.now() + 10 * MIN, Date.now() + 20 * MIN), []);
 });
@@ -299,8 +353,7 @@ const stopRow = (s: ReturnType<typeof setup>, at: number, result: string, newCod
   const e = stopEvent({ at, result, code: result === 'success' ? 'exited' : 'killed', status: result === 'success' ? '0' : 'KILL' }, newCode, at);
   s.store.addHealthEvent('stop', e.at, null, e.detail);
 };
-const stall = (s: ReturnType<typeof setup>, at: number, held: number, kind = 'loop-lag') =>
-  s.store.addHealthEvent(kind, at, null, `The event loop was held for ${held.toFixed(1)} s: the server answered nobody meanwhile.`);
+const stall = (s: ReturnType<typeof setup>, at: number, held: number, kind = 'loop-lag') => s.store.addHealthEvent(kind, at, null, `The event loop was held for ${held.toFixed(1)} s: the server answered nobody meanwhile.`);
 
 test('replay 10:44 to 10:47 on Nov 20: systemd-oomd stopped the server 11 times, one incident', async () => {
   const s = setup(pst('10:00:00'));
@@ -381,10 +434,15 @@ test('a merged CI line names every branch it hit, in the timeline, the first-fai
 test("a standing check's promise broken since before the window is named in the timeline (#1415)", async () => {
   const s = setup(T0);
   const inc = s.make();
-  s.store.setSetting('standing-checks', { ranAt: T0, integrityAt: null, error: null, findings: [
-    { check: 'shipped-live', key: 'shipped-live:9', ticket: 9, text: '#9 (Citadel) has waited 90 min for its ship to go live, and nothing has told it why not.', since: T0 - 45 * MIN },
-    { check: 'turn-record', key: 'turn-record:8', ticket: 8, text: '#8 (Citadel) shows running but has no turn record.', since: T0 + MIN },
-  ] });
+  s.store.setSetting('standing-checks', {
+    ranAt: T0,
+    integrityAt: null,
+    error: null,
+    findings: [
+      { check: 'shipped-live', key: 'shipped-live:9', ticket: 9, text: '#9 (Citadel) has waited 90 min for its ship to go live, and nothing has told it why not.', since: T0 - 45 * MIN },
+      { check: 'turn-record', key: 'turn-record:8', ticket: 8, text: '#8 (Citadel) shows running but has no turn record.', since: T0 + MIN },
+    ],
+  });
   await inc.write({ from: T0, last: T0 + 5 * MIN, why: ['test'] }, T0 + 60 * MIN);
   assert.match(s.files[0].text, /standing-check \(broken since [^)]+\): shipped-live: #9 \(Citadel\) has waited 90 min/);
   // One first seen inside the window has its own health row there; it isn't named twice.
@@ -412,7 +470,10 @@ test('an incident lists its five biggest stalls, with their own times and top fr
   const text = render({ from: pst('02:23:00'), last: pst('02:25:00'), why: ['x'] }, pst('02:22:00'), pst('02:26:00'), { entries, read: {} }, '/db');
   const at = text.indexOf('## Biggest stalls');
   assert.ok(at > 0 && at < text.indexOf('## Timeline'), text);
-  const section = text.slice(at, text.indexOf('## Timeline')).split('\n').filter((l) => l.startsWith('- '));
+  const section = text
+    .slice(at, text.indexOf('## Timeline'))
+    .split('\n')
+    .filter((l) => l.startsWith('- '));
   assert.equal(section.length, 5);
   assert.match(section[0], /Nov 20, 02:23 PST\*\* to 02:23 PST · 13\.2 s · unclear · waited on D folio_wait_bit_common ×7 · 60% readFileSync \(src\/db\.ts:9\); 20% \(garbage collector\)/);
   assert.match(section[0], /02:23 PST/, 'the stall started at 02:23:05, not 02:23:32 when its line was written');

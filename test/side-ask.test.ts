@@ -75,7 +75,12 @@ const project = store.createProject('Test', null);
 const cara = store.createUser({ name: 'Cara', login: 'cara', server_login: true });
 const josh = store.createUser({ name: 'Josh', login: 'josh' });
 const sent: any[] = [];
-const runner = new Runner(store, (m) => sent.push(m), () => ({}), fake);
+const runner = new Runner(
+  store,
+  (m) => sent.push(m),
+  () => ({}),
+  fake,
+);
 runner.resumeGapMs = 10;
 runner.pollMs = 10;
 runner.personOf = (author) => (author === 'Cara' ? cara.id : author === 'Josh' ? josh.id : null);
@@ -83,7 +88,11 @@ runner.placeFor = () => ({ host: true });
 const sides = new SideAsks(store, runner, (m) => sent.push(m), 10);
 
 const runs = () => jsonLines(seen);
-const answers = (id: number) => store.listEvents(id).filter((e) => e.kind === 'side_answer').map((e) => JSON.parse(e.data));
+const answers = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'side_answer')
+    .map((e) => JSON.parse(e.data));
 
 async function minion() {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
@@ -110,11 +119,11 @@ test("a side question leaves the minion's session, history and next turn untouch
   assert.equal(readFileSync(main, 'utf8'), before, "the minion's transcript is byte for byte as it was");
   const fork = runs().at(-1);
   assert.equal(fork.resume, m.session);
-  assert.equal(fork.fork, true, 'the minion\'s session is forked, never resumed');
+  assert.equal(fork.fork, true, "the minion's session is forked, never resumed");
   assert.match(fork.prompt, /\[Josh\]: .*side question.*what is going on\?/s);
 
   assert.equal(store.getTicket(m.id)!.session_id, m.session);
-  assert.equal(store.listEvents(m.id).filter((e) => !e.kind.startsWith('side')).length, events, 'no chat entry but the side thread\'s own');
+  assert.equal(store.listEvents(m.id).filter((e) => !e.kind.startsWith('side')).length, events, "no chat entry but the side thread's own");
 
   // Its cost is Josh's, marked as a side question, and kept out of the minion's own turns.
   const row = store.db.prepare('SELECT * FROM turns WHERE ticket_id = ? AND side = 1').get(m.id) as any;
@@ -171,12 +180,22 @@ test('it answers while the minion is mid-turn, and the fork runs with the read-o
   const fork = runs().find((r) => r.fork);
   // Every PreToolUse check runs in one process (src/hook-run.ts, #1296): the side guard is on when its config says side.
   const side = /"side":true/;
-  assert.ok(fork.hooks.some((c: string) => side.test(c)), 'the fork runs with the side guard');
-  assert.ok(!runs().filter((r) => !r.fork).some((r) => r.hooks.some((c: string) => side.test(c))));
+  assert.ok(
+    fork.hooks.some((c: string) => side.test(c)),
+    'the fork runs with the side guard',
+  );
+  assert.ok(
+    !runs()
+      .filter((r) => !r.fork)
+      .some((r) => r.hooks.some((c: string) => side.test(c))),
+  );
   const refused = (results: { status: number; stderr: string }[]) => results.find((r) => r.status === 2);
   assert.match(refused(fork.write)?.stderr ?? '', /\[side question\].*read-only/, JSON.stringify(fork.write));
   assert.ok(refused(fork.rm), JSON.stringify(fork.rm));
-  assert.ok(fork.read.every((r: any) => r.status === 0), JSON.stringify(fork.read));
+  assert.ok(
+    fork.read.every((r: any) => r.status === 0),
+    JSON.stringify(fork.read),
+  );
   assert.ok(!existsSync(join(m.cwd, 'x')));
 });
 test('refuses a minion with no session, a thread that ended, and a second ask while one is answering', () => {

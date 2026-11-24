@@ -7,10 +7,5 @@
  * `ask` is `{ kind: 'bug'|'feature', contraption, person, member, item?, summary }`.
  */
 export function askHeader(ask) {
-  return [
-    ask.kind === 'bug' ? 'Bug report' : 'Feature ask',
-    ask.contraption,
-    ask.member ? ask.person : `${ask.person}, not a member`,
-    ask.item ? `about “${ask.item}”` : '',
-  ].filter(Boolean).join(' · ');
+  return [ask.kind === 'bug' ? 'Bug report' : 'Feature ask', ask.contraption, ask.member ? ask.person : `${ask.person}, not a member`, ask.item ? `about “${ask.item}”` : ''].filter(Boolean).join(' · ');
 }

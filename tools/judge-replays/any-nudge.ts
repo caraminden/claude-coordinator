@@ -9,7 +9,13 @@ const TS = /\.(?:[cm]?ts|tsx)$/;
 
 export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
   const git = (...args: string[]) => execFileSync('git', args, { cwd: ctx.repo, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
-  const show = (rev: string, path: string) => { try { return git('show', `${rev}:${path}`); } catch { return null; } };
+  const show = (rev: string, path: string) => {
+    try {
+      return git('show', `${rev}:${path}`);
+    } catch {
+      return null;
+    }
+  };
   const since = new Date(ctx.now - ctx.days * 86_400_000).toISOString();
   const log = git('log', `--since=${since}`, '--no-merges', '--format=@%H %ct %s', '--name-only', 'HEAD');
   const hits: Act[] = [];
@@ -36,9 +42,6 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     inputs: `${files} TypeScript file changes in ${commits} commits`,
     hits,
     real: [],
-    limits: [
-      'it reads commits, not edits: a rise undone before the commit was a nudge too, and one commit with a rise may have been several edits',
-      "this repo's commits only, not the other schemes' the kit's hook also runs in",
-    ],
+    limits: ['it reads commits, not edits: a rise undone before the commit was a nudge too, and one commit with a rise may have been several edits', "this repo's commits only, not the other schemes' the kit's hook also runs in"],
   };
 }

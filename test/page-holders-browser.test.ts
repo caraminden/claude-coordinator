@@ -36,8 +36,7 @@ async function measure(page: Page, protoExpr: string) {
   const group = 'leak-measure';
   const proto = await page.send('Runtime.evaluate', { expression: protoExpr, objectGroup: group });
   const all = await page.send('Runtime.queryObjects', { prototypeObjectId: proto.result.objectId, objectGroup: group });
-  const off = await page.send('Runtime.callFunctionOn', { objectId: all.objects.objectId, returnByValue: true, objectGroup: group,
-    functionDeclaration: 'function () { return this.filter((t) => { try { return !t.isConnected; } catch { return false; } }).length; }' });
+  const off = await page.send('Runtime.callFunctionOn', { objectId: all.objects.objectId, returnByValue: true, objectGroup: group, functionDeclaration: 'function () { return this.filter((t) => { try { return !t.isConnected; } catch { return false; } }).length; }' });
   await page.send('Runtime.releaseObjectGroup', { objectGroup: group });
   const { metrics } = await page.send('Performance.getMetrics');
   return { detached: off.result.value as number, listeners: metrics.find((m: any) => m.name === 'JSEventListeners').value as number };

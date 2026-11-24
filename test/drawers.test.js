@@ -40,10 +40,18 @@ class FakeEl extends EventTarget {
     Object.assign(this, { id, attrs: {}, style: {}, hidden: false, isConnected: true, inert: false });
     this.classList = { add: (...c) => c.forEach((x) => classes.add(x)), remove: (...c) => c.forEach((x) => classes.delete(x)), toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)) };
   }
-  setAttribute(k, v) { this.attrs[k] = v; }
-  removeAttribute(k) { delete this.attrs[k]; }
-  getBoundingClientRect() { return { top: 0, width: 300 }; }
-  contains(x) { return x === this; }
+  setAttribute(k, v) {
+    this.attrs[k] = v;
+  }
+  removeAttribute(k) {
+    delete this.attrs[k];
+  }
+  getBoundingClientRect() {
+    return { top: 0, width: 300 };
+  }
+  contains(x) {
+    return x === this;
+  }
   focus() {}
   append() {}
   remove() {}
@@ -55,8 +63,13 @@ test('a drawer fires citadel-drawer-open as it comes out and citadel-drawer-clos
   Object.assign(globalThis, {
     Element: FakeEl,
     HTMLDetailsElement: class extends FakeEl {},
-    CSSStyleSheet: class { replaceSync() {} },
-    MutationObserver: class { observe() {} disconnect() {} },
+    CSSStyleSheet: class {
+      replaceSync() {}
+    },
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
     matchMedia: (q) => ({ matches: q.includes('max-width'), addEventListener() {} }),
     requestAnimationFrame: (fn) => fn(),
     window: Object.assign(new EventTarget(), { innerWidth: 390, scrollBy() {} }),
@@ -73,19 +86,27 @@ test('a drawer fires citadel-drawer-open as it comes out and citadel-drawer-clos
   window.dispatchEvent(new Event('hashchange'));
   side.dispatchEvent(new Event('transitionend'));
   t.mock.timers.tick(400);
-  assert.deepEqual(seen, [['citadel-drawer-open', 'right', 'side'], ['citadel-drawer-close', 'right', 'side']]);
+  assert.deepEqual(seen, [
+    ['citadel-drawer-open', 'right', 'side'],
+    ['citadel-drawer-close', 'right', 'side'],
+  ]);
   drawers.destroy();
   for (const k of ['Element', 'HTMLDetailsElement', 'CSSStyleSheet', 'MutationObserver', 'matchMedia', 'requestAnimationFrame', 'window', 'document']) delete globalThis[k];
 });
 
-test('a link in a drawer panel\'s bar is followed, not swallowed by the bar\'s close', (t) => {
+test("a link in a drawer panel's bar is followed, not swallowed by the bar's close", (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const body = new FakeEl('body');
   Object.assign(globalThis, {
     Element: FakeEl,
     HTMLDetailsElement: class extends FakeEl {},
-    CSSStyleSheet: class { replaceSync() {} },
-    MutationObserver: class { observe() {} disconnect() {} },
+    CSSStyleSheet: class {
+      replaceSync() {}
+    },
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
     matchMedia: (q) => ({ matches: q.includes('max-width'), addEventListener() {} }),
     requestAnimationFrame: (fn) => fn(),
     window: Object.assign(new EventTarget(), { innerWidth: 390, scrollBy() {} }),

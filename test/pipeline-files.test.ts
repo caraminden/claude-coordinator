@@ -7,7 +7,10 @@ import { test } from 'node:test';
 // of those must be unable to break from anything else: no import from outside test/ (src/, public/, a tools/ module),
 // directly or through its fixtures, and every fixture and tools/ file it uses is on the list, so changing one runs it.
 const repo = resolve(import.meta.dirname, '..');
-const entries = readFileSync(join(repo, 'tools', 'pipeline-files.txt'), 'utf8').split('\n').map((l) => l.replace(/\s*#.*/, '').trim()).filter(Boolean);
+const entries = readFileSync(join(repo, 'tools', 'pipeline-files.txt'), 'utf8')
+  .split('\n')
+  .map((l) => l.replace(/\s*#.*/, '').trim())
+  .filter(Boolean);
 const gated = entries.filter((e) => /^test\/.*\.test\./.test(e));
 // run-tests.sh counts a change to the list itself as a pipeline change.
 const listed = (path: string) => path === 'tools/pipeline-files.txt' || entries.some((e) => e === path || (e.endsWith('/') && path.startsWith(e)));
@@ -57,5 +60,5 @@ test("node --test test/ runs exactly run-tests.sh's test/*.test.* glob, so leavi
   const nodeRuns = /(^|\/)(test|test-[^/]*|[^/]*[._-]test)\.[cm]?[jt]s$/;
   const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(join(dir, d.name)) : [relative(repo, join(dir, d.name))]));
   const odd = walk(join(repo, 'test')).filter((f) => nodeRuns.test(f.slice('test/'.length)) && !/^test\/[^/]+\.test\.[cm]?[jt]s$/.test(f));
-  assert.deepEqual(odd, [], 'node runs these but run-tests.sh\'s product tier would not: name them test/<name>.test.ts, or widen its glob');
+  assert.deepEqual(odd, [], "node runs these but run-tests.sh's product tier would not: name them test/<name>.test.ts, or widen its glob");
 });

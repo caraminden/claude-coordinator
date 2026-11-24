@@ -29,8 +29,7 @@ const folded = new Set();
 let pickedFolder = null;
 
 /** Why a note needs tidying, or '' when it doesn't. */
-export const tidyReason = (n) => (!n.inIndex ? 'Not in MEMORY.md, so sessions never find it'
-  : n.flags.datesPast.length ? `Date passed: ${n.flags.datesPast.join(', ')}` : '');
+export const tidyReason = (n) => (!n.inIndex ? 'Not in MEMORY.md, so sessions never find it' : n.flags.datesPast.length ? `Date passed: ${n.flags.datesPast.join(', ')}` : '');
 
 // The curator's changes (#1111): each kind's chip tone and word.
 const ACTION = { edit: ['info', 'Edit'], add: ['ok', 'New note'], delete: ['danger', 'Delete'], index: ['violet', 'Index line'], flag: ['warn', 'Flag'] };
@@ -50,52 +49,101 @@ function tidyReview(p, changed) {
       const o = d.open;
       const ticks = new Map();
       const apply = h('button', { type: 'button' });
-      const count = () => { const n = [...ticks.values()].filter((t) => t.checked).length; apply.textContent = `Apply ${n} ticked`; apply.disabled = !n; };
+      const count = () => {
+        const n = [...ticks.values()].filter((t) => t.checked).length;
+        apply.textContent = `Apply ${n} ticked`;
+        apply.disabled = !n;
+      };
       const items = o.changes.map((c) => {
         const [tone, word] = ACTION[c.action];
         const tick = c.action === 'flag' ? null : h('input', { type: 'checkbox', checked: c.action !== 'delete' && !c.drifted, disabled: c.drifted, 'aria-label': `${word} ${c.file}`, onchange: count });
         if (tick) ticks.set(c.id, tick);
-        const diff = c.diff.length ? h('details', { class: 'memory-change-diff' }, h('summary', {}, 'Show the change'),
-          h('pre', { class: 'instructions-diff' }, ...c.diff.map((x) => h('div', { class: x.op === '+' ? 'add' : x.op === '-' ? 'del' : 'gap' }, x.op === '…' ? '…' : `${x.op} ${x.text}`)))) : null;
-        return h('div', { class: 'memory-change', 'data-hue': c.action === 'delete' ? 'danger' : c.action === 'flag' ? 'waiting' : 'running' },
-          h('label', { class: 'memory-change-head' }, tick ?? h('span', { class: 'memory-change-notick', 'aria-hidden': 'true' }, '!'),
-            toneChip(tone, word), h('code', {}, c.file), c.drifted ? toneChip('neutral', 'Changed since') : null),
-          h('div', { class: 'memory-change-why' }, c.reason), diff);
+        const diff = c.diff.length ? h('details', { class: 'memory-change-diff' }, h('summary', {}, 'Show the change'), h('pre', { class: 'instructions-diff' }, ...c.diff.map((x) => h('div', { class: x.op === '+' ? 'add' : x.op === '-' ? 'del' : 'gap' }, x.op === '…' ? '…' : `${x.op} ${x.text}`)))) : null;
+        return h(
+          'div',
+          { class: 'memory-change', 'data-hue': c.action === 'delete' ? 'danger' : c.action === 'flag' ? 'waiting' : 'running' },
+          h('label', { class: 'memory-change-head' }, tick ?? h('span', { class: 'memory-change-notick', 'aria-hidden': 'true' }, '!'), toneChip(tone, word), h('code', {}, c.file), c.drifted ? toneChip('neutral', 'Changed since') : null),
+          h('div', { class: 'memory-change-why' }, c.reason),
+          diff,
+        );
       });
       count();
       const status = h('span', { class: 'muted', role: 'status' });
       const buttons = [apply, h('button', { type: 'button', class: 'secondary' }, 'Turn it all down')];
-      const decide = (ids) => optimistic({
-        key: `memory-tidy:${o.id}`,
-        apply: () => { for (const b of buttons) b.disabled = true; status.textContent = ids.length ? 'Applying…' : 'Turning it down…'; },
-        send: () => api(`${url}/${o.id}/decide`, { method: 'POST', body: { apply: ids } }),
-        undo: () => { for (const b of buttons) b.disabled = false; count(); status.textContent = ''; },
-        label: ids.length ? 'apply the memory tidy' : 'turn the memory tidy down',
-      }).then((r) => { draw(r.view); changed(); }, () => {});
+      const decide = (ids) =>
+        optimistic({
+          key: `memory-tidy:${o.id}`,
+          apply: () => {
+            for (const b of buttons) b.disabled = true;
+            status.textContent = ids.length ? 'Applying…' : 'Turning it down…';
+          },
+          send: () => api(`${url}/${o.id}/decide`, { method: 'POST', body: { apply: ids } }),
+          undo: () => {
+            for (const b of buttons) b.disabled = false;
+            count();
+            status.textContent = '';
+          },
+          label: ids.length ? 'apply the memory tidy' : 'turn the memory tidy down',
+        }).then(
+          (r) => {
+            draw(r.view);
+            changed();
+          },
+          () => {},
+        );
       apply.onclick = () => decide([...ticks].filter(([, t]) => t.checked).map(([id]) => id));
       buttons[1].onclick = () => decide([]);
-      const kinds = Object.keys(ACTION).map((a) => [a, o.changes.filter((c) => c.action === a).length]).filter(([, n]) => n);
-      const [row] = settingsRow({ icon: 'doc', hue: 'waiting', title: `Proposed tidy${o.ticket ? ` from #${o.ticket}` : ''} · ${day(o.created_at)}`,
-        summary: o.approved_by ? `${o.approved_by} approved it on the card: the curator applies it all, deletes too, in its next turn` : `${plural(o.changes.length, 'change')} waiting: nothing changes until you apply`, open: true },
+      const kinds = Object.keys(ACTION)
+        .map((a) => [a, o.changes.filter((c) => c.action === a).length])
+        .filter(([, n]) => n);
+      const [row] = settingsRow(
+        {
+          icon: 'doc',
+          hue: 'waiting',
+          title: `Proposed tidy${o.ticket ? ` from #${o.ticket}` : ''} · ${day(o.created_at)}`,
+          summary: o.approved_by ? `${o.approved_by} approved it on the card: the curator applies it all, deletes too, in its next turn` : `${plural(o.changes.length, 'change')} waiting: nothing changes until you apply`,
+          open: true,
+        },
         statTiles(...kinds.map(([a, n]) => [String(n), ACTION[a][1].toLowerCase() + (n === 1 ? '' : 's'), a === 'delete' ? 'danger' : a === 'flag' ? 'waiting' : 'running'])),
         showFirst({ key: `memory-tidy:${o.id}`, items: items, n: 8, noun: 'changes', wrap: (xs) => h('div', { class: 'memory-changes' }, ...xs) }),
         h('div', { class: 'memory-actions' }, status, h('span', { class: 'spacer' }), ...buttons),
-        h('p', { class: 'muted small look-prose' }, 'Deletes start unticked: tick each one you want gone. Flags are for you to judge and change nothing. A note edited since the proposal is skipped.'));
+        h('p', { class: 'muted small look-prose' }, 'Deletes start unticked: tick each one you want gone. Flags are for you to judge and change nothing. A note edited since the proposal is skipped.'),
+      );
       rows.push(row);
     }
     for (const k of d.kept) {
-      const back = h('button', { type: 'button', class: 'secondary', onclick: () => {
-        if (!confirm(`Put back every note this tidy changed, as it was on ${day(k.decided_at)}? Edits made since to those notes are lost.`)) return;
-        optimistic({
-          key: `memory-tidy:${k.id}`,
-          apply: () => { back.disabled = true; },
-          send: () => api(`${url}/${k.id}/restore`, { method: 'POST' }),
-          undo: () => { back.disabled = false; },
-          label: 'put the memory tidy back',
-        }).then((r) => { draw(r.view); changed(); }, () => {});
-      } }, 'Put back');
-      const [row] = settingsRow({ icon: 'doc', hue: 'done', title: `Tidy applied by ${k.decided_by} · ${day(k.decided_at)}`, summary: `${k.counts || 'nothing took'} · can be put back until ${day(k.until)}` },
-        h('div', { class: 'memory-actions' }, h('span', { class: 'muted' }, `Its old notes are kept until ${day(k.until)}.`), h('span', { class: 'spacer' }), back));
+      const back = h(
+        'button',
+        {
+          type: 'button',
+          class: 'secondary',
+          onclick: () => {
+            if (!confirm(`Put back every note this tidy changed, as it was on ${day(k.decided_at)}? Edits made since to those notes are lost.`)) return;
+            optimistic({
+              key: `memory-tidy:${k.id}`,
+              apply: () => {
+                back.disabled = true;
+              },
+              send: () => api(`${url}/${k.id}/restore`, { method: 'POST' }),
+              undo: () => {
+                back.disabled = false;
+              },
+              label: 'put the memory tidy back',
+            }).then(
+              (r) => {
+                draw(r.view);
+                changed();
+              },
+              () => {},
+            );
+          },
+        },
+        'Put back',
+      );
+      const [row] = settingsRow(
+        { icon: 'doc', hue: 'done', title: `Tidy applied by ${k.decided_by} · ${day(k.decided_at)}`, summary: `${k.counts || 'nothing took'} · can be put back until ${day(k.until)}` },
+        h('div', { class: 'memory-actions' }, h('span', { class: 'muted' }, `Its old notes are kept until ${day(k.until)}.`), h('span', { class: 'spacer' }), back),
+      );
       rows.push(row);
     }
     box.replaceChildren(...settingsSection('Curator', ...rows));
@@ -129,49 +177,137 @@ export function memoryPage() {
     const body = h('pre', { class: 'memory-text' }, n.text);
     const edit = h('textarea', { class: 'memory-edit', rows: 14, hidden: true, spellcheck: false, 'aria-label': `Edit ${n.name}` });
     edit.value = n.text;
-    const editing = (on) => { edit.hidden = save.hidden = cancel.hidden = !on; body.hidden = editBtn.hidden = on; };
-    const save = h('button', { type: 'button', hidden: true, onclick: () => {
-      const text = edit.value;
-      const was = n.text;
-      optimistic({
-        key: `memory:${p.id}:${key}`,
-        apply: () => { n.text = text; body.textContent = text; editing(false); },
-        send: () => api(url, { method: 'PUT', body: { folder: f.id, file: n.file, text } }),
-        undo: () => { n.text = was; body.textContent = was; edit.value = text; editing(true); },
-        label: `save ${n.name}`,
-      }).then((d) => sync(f, d), () => {});
-    } }, 'Save');
-    const cancel = h('button', { type: 'button', class: 'secondary', hidden: true, onclick: () => { edit.value = n.text; editing(false); } }, 'Cancel');
-    const editBtn = h('button', { type: 'button', class: 'secondary', onclick: () => { editing(true); edit.focus(); } }, 'Edit');
-    const del = h('button', { type: 'button', class: 'danger', onclick: () => {
-      if (!confirm(`Delete "${n.name}"? Its line leaves MEMORY.md too.`)) return;
-      optimistic({
-        key: `memory:${p.id}:${key}`,
-        apply: () => { n.gone = true; refresh(); },
-        send: () => api(`${url}?folder=${f.id}&file=${encodeURIComponent(n.file)}`, { method: 'DELETE' }),
-        undo: () => { n.gone = false; refresh(); },
-        label: `delete ${n.name}`,
-      }).then((d) => sync(f, d), () => {});
-    } }, 'Delete');
-    const addBtn = h('button', { type: 'button', onclick: () => {
-      optimistic({
-        key: `memory:${p.id}:${key}`,
-        apply: () => { n.inIndex = true; mark(); refresh(); },
-        send: () => api(url, { method: 'PUT', body: { folder: f.id, file: n.file, index: true } }),
-        undo: () => { n.inIndex = false; mark(); refresh(); },
-        label: `add ${n.name} to the index`,
-      }).then((d) => sync(f, d), () => {});
-    } }, 'Add to the index');
+    const editing = (on) => {
+      edit.hidden = save.hidden = cancel.hidden = !on;
+      body.hidden = editBtn.hidden = on;
+    };
+    const save = h(
+      'button',
+      {
+        type: 'button',
+        hidden: true,
+        onclick: () => {
+          const text = edit.value;
+          const was = n.text;
+          optimistic({
+            key: `memory:${p.id}:${key}`,
+            apply: () => {
+              n.text = text;
+              body.textContent = text;
+              editing(false);
+            },
+            send: () => api(url, { method: 'PUT', body: { folder: f.id, file: n.file, text } }),
+            undo: () => {
+              n.text = was;
+              body.textContent = was;
+              edit.value = text;
+              editing(true);
+            },
+            label: `save ${n.name}`,
+          }).then(
+            (d) => sync(f, d),
+            () => {},
+          );
+        },
+      },
+      'Save',
+    );
+    const cancel = h(
+      'button',
+      {
+        type: 'button',
+        class: 'secondary',
+        hidden: true,
+        onclick: () => {
+          edit.value = n.text;
+          editing(false);
+        },
+      },
+      'Cancel',
+    );
+    const editBtn = h(
+      'button',
+      {
+        type: 'button',
+        class: 'secondary',
+        onclick: () => {
+          editing(true);
+          edit.focus();
+        },
+      },
+      'Edit',
+    );
+    const del = h(
+      'button',
+      {
+        type: 'button',
+        class: 'danger',
+        onclick: () => {
+          if (!confirm(`Delete "${n.name}"? Its line leaves MEMORY.md too.`)) return;
+          optimistic({
+            key: `memory:${p.id}:${key}`,
+            apply: () => {
+              n.gone = true;
+              refresh();
+            },
+            send: () => api(`${url}?folder=${f.id}&file=${encodeURIComponent(n.file)}`, { method: 'DELETE' }),
+            undo: () => {
+              n.gone = false;
+              refresh();
+            },
+            label: `delete ${n.name}`,
+          }).then(
+            (d) => sync(f, d),
+            () => {},
+          );
+        },
+      },
+      'Delete',
+    );
+    const addBtn = h(
+      'button',
+      {
+        type: 'button',
+        onclick: () => {
+          optimistic({
+            key: `memory:${p.id}:${key}`,
+            apply: () => {
+              n.inIndex = true;
+              mark();
+              refresh();
+            },
+            send: () => api(url, { method: 'PUT', body: { folder: f.id, file: n.file, index: true } }),
+            undo: () => {
+              n.inIndex = false;
+              mark();
+              refresh();
+            },
+            label: `add ${n.name} to the index`,
+          }).then(
+            (d) => sync(f, d),
+            () => {},
+          );
+        },
+      },
+      'Add to the index',
+    );
     const unlisted = h('div', { class: 'memory-warn' }, h('span', {}, "Not listed in MEMORY.md, so sessions don't know it exists."), addBtn);
     const past = h('div', { class: 'memory-warn' });
     const soon = h('p', { class: 'muted small' });
     const closed = n.flags.closed.length ? h('p', { class: 'muted small' }, `Names ${plural(n.flags.closed.length, 'closed minion')} (${n.flags.closed.map((x) => `#${x}`).join(', ')}): history, not a warning.`) : '';
     const dot = h('span', { class: 'memory-dot' });
-    const [row] = settingsRow({ icon: 'doc', hue: KINDS.find(([k]) => k === kindOf(n))[2], title: n.name, summary: `${n.description ? `${n.description} · ` : ''}${day(n.modified)}`, open: openRows.has(key) },
+    const [row] = settingsRow(
+      { icon: 'doc', hue: KINDS.find(([k]) => k === kindOf(n))[2], title: n.name, summary: `${n.description ? `${n.description} · ` : ''}${day(n.modified)}`, open: openRows.has(key) },
       statTiles([kb(n.bytes), 'size', 'accent'], [day(n.modified), 'last changed', 'done']),
-      unlisted, past, soon, closed, body, edit,
+      unlisted,
+      past,
+      soon,
+      closed,
+      body,
+      edit,
       h('div', { class: 'memory-actions' }, editBtn, save, cancel, del),
-      h('p', { class: 'muted small look-prose' }, `${n.file}. ${n.inIndex ? 'Reached from MEMORY.md; sessions read it when it matters.' : ''}`));
+      h('p', { class: 'muted small look-prose' }, `${n.file}. ${n.inIndex ? 'Reached from MEMORY.md; sessions read it when it matters.' : ''}`),
+    );
     row.querySelector('summary').insertBefore(dot, row.querySelector('.settings-row-chev'));
     const mark = () => {
       const why = tidyReason(n);
@@ -192,9 +328,7 @@ export function memoryPage() {
 
   const group = (f, kind, label, hue, blurb, notes) => {
     const count = h('span', { class: 'memory-group-count' });
-    const g = h('details', { class: 'memory-group', 'data-hue': hue, open: !folded.has(kind) },
-      h('summary', {}, icon('forward'), h('span', { class: 'memory-group-name' }, label), count, h('span', { class: 'memory-group-why' }, blurb)),
-      h('div', { class: 'settings-rows' }, ...notes.map((n) => note(f, n))));
+    const g = h('details', { class: 'memory-group', 'data-hue': hue, open: !folded.has(kind) }, h('summary', {}, icon('forward'), h('span', { class: 'memory-group-name' }, label), count, h('span', { class: 'memory-group-why' }, blurb)), h('div', { class: 'settings-rows' }, ...notes.map((n) => note(f, n))));
     g.addEventListener('toggle', () => folded[g.open ? 'delete' : 'add'](kind));
     groups.push({ g, f, kind, count });
     return g;
@@ -203,33 +337,64 @@ export function memoryPage() {
   // The header says what's true: the index is what loads, the notes wait until a session reads them.
   const header = () => {
     const f = current();
-    if (!f?.reachable) { meta.textContent = 'Not reachable: this login has no memory folder for the scheme yet.'; return; }
+    if (!f?.reachable) {
+      meta.textContent = 'Not reachable: this login has no memory folder for the scheme yet.';
+      return;
+    }
     const ns = live(f);
-    if (!ns.length && !f.index) { meta.textContent = 'No memory notes yet. The Taskmaster and minions add them as they work.'; return; }
+    if (!ns.length && !f.index) {
+      meta.textContent = 'No memory notes yet. The Taskmaster and minions add them as they work.';
+      return;
+    }
     const lines = f.index ? f.index.replace(/\n$/, '').split('\n').length : 0;
     const bytes = new TextEncoder().encode(f.index).length;
     const used = Math.max(lines / INDEX_LINES, bytes / INDEX_BYTES);
-    meta.replaceChildren(h('b', {}, 'MEMORY.md loads at every start'),
+    meta.replaceChildren(
+      h('b', {}, 'MEMORY.md loads at every start'),
       h('span', { class: 'memory-meter', 'data-hue': used > 0.8 ? 'waiting' : 'running' }, meter(used, `${lines} of ${INDEX_LINES} lines · ${kb(bytes)} of 25 KB`)),
-      h('span', { class: 'memory-rest' }, h('b', {}, plural(ns.length, 'note')), ` (${kb(ns.reduce((s, n) => s + n.bytes, 0))}) are read when needed`));
+      h('span', { class: 'memory-rest' }, h('b', {}, plural(ns.length, 'note')), ` (${kb(ns.reduce((s, n) => s + n.bytes, 0))}) are read when needed`),
+    );
   };
 
-  const stat = (key, n, label, hue) => h('button', { type: 'button', class: `memory-stat${filterBy === key ? ' on' : ''}`, 'data-hue': hue, 'aria-pressed': String(filterBy === key),
-    onclick: () => { filterBy = filterBy === key && key !== 'all' ? 'all' : key; refresh(); } }, h('b', {}, String(n)), h('span', {}, label));
+  const stat = (key, n, label, hue) =>
+    h(
+      'button',
+      {
+        type: 'button',
+        class: `memory-stat${filterBy === key ? ' on' : ''}`,
+        'data-hue': hue,
+        'aria-pressed': String(filterBy === key),
+        onclick: () => {
+          filterBy = filterBy === key && key !== 'all' ? 'all' : key;
+          refresh();
+        },
+      },
+      h('b', {}, String(n)),
+      h('span', {}, label),
+    );
 
   const refresh = () => {
     const f = current();
     header();
     folderBar.hidden = folders.length < 2;
-    folderBar.replaceChildren(tabs({ items: folders.map((x) => [x.id, x.reachable ? `${x.label} · ${live(x).length}` : x.label]), current: f.id, label: 'Memory folders',
-      className: 'memory-folders', onSelect: (id, how) => { pickedFolder = id; refresh(); if (how?.keyboard) folderBar.querySelector('[aria-selected="true"]')?.focus(); } }).element);
+    folderBar.replaceChildren(
+      tabs({
+        items: folders.map((x) => [x.id, x.reachable ? `${x.label} · ${live(x).length}` : x.label]),
+        current: f.id,
+        label: 'Memory folders',
+        className: 'memory-folders',
+        onSelect: (id, how) => {
+          pickedFolder = id;
+          refresh();
+          if (how?.keyboard) folderBar.querySelector('[aria-selected="true"]')?.focus();
+        },
+      }).element,
+    );
     for (const [id, el] of blocks) el.hidden = id !== f.id;
     const ns = f.reachable ? live(f) : [];
     if (filterBy !== 'all' && filterBy !== 'tidy' && !ns.some((n) => kindOf(n) === filterBy)) filterBy = 'all';
     stats.hidden = !ns.length;
-    stats.replaceChildren(stat('all', ns.length, ns.length === 1 ? 'note' : 'notes', 'ink'),
-      ...KINDS.filter(([k]) => ns.some((n) => kindOf(n) === k)).map(([k, label, hue]) => stat(k, ns.filter((n) => kindOf(n) === k).length, label, hue)),
-      stat('tidy', ns.filter(tidyReason).length, 'need tidying', 'waiting'));
+    stats.replaceChildren(stat('all', ns.length, ns.length === 1 ? 'note' : 'notes', 'ink'), ...KINDS.filter(([k]) => ns.some((n) => kindOf(n) === k)).map(([k, label, hue]) => stat(k, ns.filter((n) => kindOf(n) === k).length, label, hue)), stat('tidy', ns.filter(tidyReason).length, 'need tidying', 'waiting'));
     search.hidden = !ns.length;
     filter();
   };
@@ -241,7 +406,11 @@ export function memoryPage() {
     f.index = fresh.index;
     for (const r of rows) {
       const m = r.f === f && fresh.notes.find((x) => x.file === r.n.file);
-      if (m) { r.n.flags = m.flags; r.n.inIndex = m.inIndex; r.mark(); }
+      if (m) {
+        r.n.flags = m.flags;
+        r.n.inIndex = m.inIndex;
+        r.mark();
+      }
     }
     refresh();
   };
@@ -250,8 +419,7 @@ export function memoryPage() {
     if (!folders) return;
     const q = search.value.trim().toLowerCase();
     for (const { row, n } of rows) {
-      row.hidden = !!n.gone || (filterBy === 'tidy' ? !tidyReason(n) : filterBy !== 'all' && kindOf(n) !== filterBy)
-        || (!!q && !`${n.name} ${n.description} ${n.text}`.toLowerCase().includes(q));
+      row.hidden = !!n.gone || (filterBy === 'tidy' ? !tidyReason(n) : filterBy !== 'all' && kindOf(n) !== filterBy) || (!!q && !`${n.name} ${n.description} ${n.text}`.toLowerCase().includes(q));
     }
     const f = current();
     let shown = 0;
@@ -267,27 +435,48 @@ export function memoryPage() {
   const render = () => {
     rows.length = groups.length = 0;
     blocks.clear();
-    list.replaceChildren(...folders.map((f) => {
-      const el = h('div', { class: 'memory-folder' },
-        !f.reachable ? emptyCard('Not reachable', 'This login has no memory folder for the scheme yet.', { mark: '!', hue: 'held' })
-          : !f.notes.length ? emptyCard('No notes in this folder', 'The Taskmaster and minions add them as they work.', { mark: '∅', hue: 'accent' })
-          : KINDS.map(([k, label, hue, blurb]) => {
-            const ns = f.notes.filter((n) => kindOf(n) === k);
-            return ns.length ? group(f, k, label, hue, blurb, ns) : '';
-          }));
-      blocks.set(f.id, el);
-      return el;
-    }), empty);
+    list.replaceChildren(
+      ...folders.map((f) => {
+        const el = h(
+          'div',
+          { class: 'memory-folder' },
+          !f.reachable
+            ? emptyCard('Not reachable', 'This login has no memory folder for the scheme yet.', { mark: '!', hue: 'held' })
+            : !f.notes.length
+              ? emptyCard('No notes in this folder', 'The Taskmaster and minions add them as they work.', { mark: '∅', hue: 'accent' })
+              : KINDS.map(([k, label, hue, blurb]) => {
+                  const ns = f.notes.filter((n) => kindOf(n) === k);
+                  return ns.length ? group(f, k, label, hue, blurb, ns) : '';
+                }),
+        );
+        blocks.set(f.id, el);
+        return el;
+      }),
+      empty,
+    );
     refresh();
   };
-  const load = () => api(url).then((d) => { folders = d.folders; if (folders.length) render(); else meta.textContent = 'No memory folder yet: the scheme has no repo or no login.'; },
-    (err) => { meta.textContent = `Couldn't read the notes: ${err.message}`; });
+  const load = () =>
+    api(url).then(
+      (d) => {
+        folders = d.folders;
+        if (folders.length) render();
+        else meta.textContent = 'No memory folder yet: the scheme has no repo or no login.';
+      },
+      (err) => {
+        meta.textContent = `Couldn't read the notes: ${err.message}`;
+      },
+    );
   load();
   const review = tidyReview(p, load);
-  return h('section', { class: 'artifacts-main people-main memory-main' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
-      settingsTabs(), meta),
-    review, folderBar, stats, search, list);
+  return h(
+    'section',
+    { class: 'artifacts-main people-main memory-main' },
+    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))), settingsTabs(), meta),
+    review,
+    folderBar,
+    stats,
+    search,
+    list,
+  );
 }

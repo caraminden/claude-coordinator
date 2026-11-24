@@ -11,7 +11,7 @@ import { bootServer, until, type Booted } from './helpers.ts';
 import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
 import { holds } from './holds.ts';
 
-test('a sendId is sent once per chat; a repeat shares the first one\'s outcome; a failed one is forgotten', async () => {
+test("a sendId is sent once per chat; a repeat shares the first one's outcome; a failed one is forgotten", async () => {
   assert.equal(sendIdOf(''), undefined);
   assert.equal(sendIdOf(7), undefined);
   assert.equal(sendIdOf('x'.repeat(101)), undefined);
@@ -63,10 +63,9 @@ async function minion(title: string) {
   return t;
 }
 
-const texts = async (id: number) => (await srv.call(`/api/tickets/${id}/events?after=0`)).data
-  .filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data).text);
+const texts = async (id: number) => (await srv.call(`/api/tickets/${id}/events?after=0`)).data.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data).text);
 
-test('a retry of a message the server already took doesn\'t send it twice', async () => {
+test("a retry of a message the server already took doesn't send it twice", async () => {
   const t = await minion('Dedupe');
   for (let i = 0; i < 2; i++) assert.equal((await srv.call(`/api/tickets/${t.id}/messages`, { text: 'once', sendId: 'abc' })).status, 202);
   await srv.call(`/api/tickets/${t.id}/messages`, { text: 'twice' });
@@ -98,7 +97,8 @@ async function open(width: number, t: { id: number; number: number }) {
   return page;
 }
 
-const type = (page: Page, text: string) => page.eval(`(() => {
+const type = (page: Page, text: string) =>
+  page.eval(`(() => {
   const box = document.querySelector('.composer textarea');
   box.value = ${JSON.stringify(text)};
   box.dispatchEvent(new Event('input'));
@@ -114,7 +114,10 @@ async function shoot(page: Page, name: string) {
   writeFileSync(join(shots, name), Buffer.from(data, 'base64'));
 }
 
-for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
+for (const [width, label] of [
+  [1280, 'desktop'],
+  [390, 'phone'],
+] as const) {
   test(`three quick sends at ${label} width go in order, one failing, and Send never locks (#392)`, { skip }, async () => {
     const t = await minion(`Queue ${label}`);
     const page = await open(width, t);
@@ -134,7 +137,7 @@ for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
     await page.eval('held[2].go()');
     await until('the server to have one and three', async () => (await texts(t.id)).length === 3);
     assert.deepEqual(await texts(t.id), ['hi', 'one', 'three']);
-    await waitFor(page, 'the server\'s copies swapped in', 'document.querySelectorAll("#log .msg.user.pending").length === 0');
+    await waitFor(page, "the server's copies swapped in", 'document.querySelectorAll("#log .msg.user.pending").length === 0');
     assert.equal(await page.eval('document.querySelectorAll("#log .msg.user.not-sent").length'), 1);
     assert.equal(await page.eval(`${bubble('three')}.compareDocumentPosition(${bubble('two')}) === Node.DOCUMENT_POSITION_FOLLOWING`), true, 'the unsent one stays below what the server has');
     await shoot(page, `${label}-not-sent.png`);
@@ -180,7 +183,7 @@ test('a message the server took after its send was cut off is marked sent, and i
   await waitFor(page, 'the send', 'held.length === 1');
   await page.eval('held[0].lose()');
   await until('the server to have it', async () => (await texts(t.id)).length === 2);
-  await waitFor(page, 'the server\'s copy swapped in', 'document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length === 0');
+  await waitFor(page, "the server's copy swapped in", 'document.querySelectorAll("#log .msg.user.pending, #log .msg.user.not-sent").length === 0');
   assert.equal(await page.eval(sending), 0, 'nothing left sending, so the page can reload when idle');
   // The device comes back online: the wait ends with nothing to send again.
   await page.eval(`dispatchEvent(new Event('online'))`);
@@ -193,7 +196,10 @@ test('a message the server took after its send was cut off is marked sent, and i
   assert.deepEqual(await texts(t.id), ['hi', 'lost']);
 });
 
-for (const [width, label] of [[1440, 'desktop'], [390, 'phone']] as const) {
+for (const [width, label] of [
+  [1440, 'desktop'],
+  [390, 'phone'],
+] as const) {
   test(`at ${label} width, messages sent with no connection wait to send, in order, and go once it's back (#1144)`, { skip }, async () => {
     const t = await minion(`Offline ${label}`);
     const page = await open(width, t);

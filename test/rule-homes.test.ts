@@ -13,7 +13,10 @@ const root = join(import.meta.dirname, '..');
 
 test('no registered rule has a second copy in the repo', () => {
   const copies = findCopies(repoSources(root), repoHomes(root));
-  assert.deepEqual(copies.map((c) => `${c.title}: ${c.label}:${c.line} (${c.phrases.join(', ') || c.run}) ${c.excerpt}`), []);
+  assert.deepEqual(
+    copies.map((c) => `${c.title}: ${c.label}:${c.line} (${c.phrases.join(', ') || c.run}) ${c.excerpt}`),
+    [],
+  );
 });
 
 test('every repo home is where the registry says', () => {
@@ -27,16 +30,21 @@ test('a planted second copy is found, by phrases or by a run of words', () => {
   const planted: Source[] = [
     { label: 'kit/planted.md', text: `# Notes\n\nThe tripwire stops ${tripwire.slice(tripwire.indexOf('rm or mv'), tripwire.indexOf('rm or mv') + 200)}\n` },
     { label: 'kit/cards.md', text: 'Any choice for people gets a card: a go, A or B, or an offer of work ("want me to…").\n' },
-    { label: 'src/x.ts', text: "  'Close once nothing is left for a person; never leave it open for an \"are we good?\".',\n", code: true },
+    { label: 'src/x.ts', text: '  \'Close once nothing is left for a person; never leave it open for an "are we good?".\',\n', code: true },
   ];
-  const got = findCopies(planted, homes).map((c) => `${c.rule} ${c.label}`).sort();
+  const got = findCopies(planted, homes)
+    .map((c) => `${c.rule} ${c.label}`)
+    .sort();
   assert.deepEqual(got, ['cards kit/cards.md', 'closing src/x.ts', 'tripwire kit/planted.md']);
 });
 
 test('one phrase alone is a pointer, not a copy; code comments are skipped', () => {
   const homes = repoHomes(root);
   assert.deepEqual(findCopies([{ label: 'a.md', text: 'Ask with a card, as the card rule says ("want me to…" counts).' }], homes), []);
-  assert.deepEqual(paragraphs("// a go, A or B, want me to\nconst x = 'y';\n * offer of work, never paste\n", true).map((p) => p.text), ["const x = 'y';"]);
+  assert.deepEqual(
+    paragraphs("// a go, A or B, want me to\nconst x = 'y';\n * offer of work, never paste\n", true).map((p) => p.text),
+    ["const x = 'y';"],
+  );
 });
 
 test('an edit that repeats a rule or another place lists what already says it', () => {
@@ -46,8 +54,14 @@ test('an edit that repeats a rule or another place lists what already says it', 
   assert.equal(news.length, 2);
   const others: Source[] = [{ label: 'kit/skills/x/SKILL.md', href: null, text: 'Cost is model calls times context size: keep big jobs in small contexts and keep noisy work out of the session.\n' }];
   const got = overlapsFor(news, others, () => false);
-  assert.ok(got.some((o) => o.label === 'Registered rule: When to use a card'), JSON.stringify(got));
-  assert.ok(got.some((o) => o.label === 'kit/skills/x/SKILL.md'), JSON.stringify(got));
+  assert.ok(
+    got.some((o) => o.label === 'Registered rule: When to use a card'),
+    JSON.stringify(got),
+  );
+  assert.ok(
+    got.some((o) => o.label === 'kit/skills/x/SKILL.md'),
+    JSON.stringify(got),
+  );
   // In its own home the rule's phrases belong there.
   assert.ok(!overlapsFor(news, [], () => true).length);
 });
@@ -57,7 +71,10 @@ test('an edit that repeats a rule or another place lists what already says it', 
 test('sharing most words without a run of them is not a repeat', () => {
   const news = added('', 'Session context size times model calls is the cost, so jobs stay small and noisy work stays outside.');
   const others: Source[] = [{ label: 'kit/skills/x/SKILL.md', href: null, text: 'Cost is model calls times context size: keep big jobs in small contexts and keep noisy work out of the session.\n' }];
-  assert.deepEqual(overlapsFor(news, others, () => false), []);
+  assert.deepEqual(
+    overlapsFor(news, others, () => false),
+    [],
+  );
 });
 
 // #1211: another scheme registers its own rules in its repo's .claude/rule-homes.json; every save of its text (Settings,
@@ -68,19 +85,25 @@ test("a scheme's own registered rule is checked on its saves, outside its home s
     mkdirSync(join(repo, '.claude'));
     mkdirSync(join(repo, 'docs'));
     writeFileSync(join(repo, 'docs', 'art.md'), '# Art\n\n## Palette\n\nEvery sprite uses the sixteen colour dusk palette, outlined in deep plum, with no pure black anywhere in a frame.\n');
-    writeFileSync(join(repo, '.claude', 'rule-homes.json'), JSON.stringify([
-      { id: 'lunch', title: 'Lunch on Fridays', home: { kind: 'scheme', section: 'Lunch' }, pointer: 'the Lunch section', phrases: ['pizza from marios', 'noon sharp'] },
-      { id: 'palette', title: 'The sprite palette', home: { kind: 'repo', file: 'docs/art.md', section: 'Palette' }, pointer: 'the palette (docs/art.md)', phrases: ['dusk palette', 'deep plum'] },
-      { id: 'bad', title: 'Escapes the repo', home: { kind: 'repo', file: '../outside.md' }, pointer: 'nowhere', phrases: ['dusk palette', 'deep plum'] },
-      { id: 'empty', title: 'No phrases', home: { kind: 'scheme', section: 'X' }, pointer: 'x', phrases: ['', '  '] },
-      'not a rule',
-    ]));
+    writeFileSync(
+      join(repo, '.claude', 'rule-homes.json'),
+      JSON.stringify([
+        { id: 'lunch', title: 'Lunch on Fridays', home: { kind: 'scheme', section: 'Lunch' }, pointer: 'the Lunch section', phrases: ['pizza from marios', 'noon sharp'] },
+        { id: 'palette', title: 'The sprite palette', home: { kind: 'repo', file: 'docs/art.md', section: 'Palette' }, pointer: 'the palette (docs/art.md)', phrases: ['dusk palette', 'deep plum'] },
+        { id: 'bad', title: 'Escapes the repo', home: { kind: 'repo', file: '../outside.md' }, pointer: 'nowhere', phrases: ['dusk palette', 'deep plum'] },
+        { id: 'empty', title: 'No phrases', home: { kind: 'scheme', section: 'X' }, pointer: 'x', phrases: ['', '  '] },
+        'not a rule',
+      ]),
+    );
     const project = { id: 7, name: 'Delve', instructions: '', repo_dir: repo, repo_url: null } as any;
     const store = { appInstructions: () => ({ text: '' }), getProject: () => undefined } as any;
     const check = (text: string, scope: 'scheme' | 'citadel' = 'scheme') => settingsOverlaps({ store }, project, scope, '', text);
 
     const lunch = check('## Food\n\nOn Fridays we order pizza from Marios and eat at noon sharp in the big room.');
-    assert.deepEqual(lunch.map((o) => o.label), ['Registered rule: Lunch on Fridays']);
+    assert.deepEqual(
+      lunch.map((o) => o.label),
+      ['Registered rule: Lunch on Fridays'],
+    );
     assert.match(lunch[0].why, /one home is the Lunch section/);
     // In its own home section, the same words are the rule itself.
     assert.deepEqual(check('## Lunch\n\nOn Fridays we order pizza from Marios and eat at noon sharp in the big room.'), []);

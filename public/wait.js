@@ -3,7 +3,14 @@
 import { h } from './base.js';
 
 /** A landing's stages in order (src/waits.ts TRACK): a wait at one of these shows the track. */
-export const TRACK = [['line', 'Ship line', 'Line'], ['rebase', 'Rebase'], ['test', 'Test'], ['deploy', 'Deploy'], ['restart', 'Restart'], ['live', 'Live']];
+export const TRACK = [
+  ['line', 'Ship line', 'Line'],
+  ['rebase', 'Rebase'],
+  ['test', 'Test'],
+  ['deploy', 'Deploy'],
+  ['restart', 'Restart'],
+  ['live', 'Live'],
+];
 const OWN = { slot: 'Heavy slot', run: 'Heavy run' };
 /** Running over the usual by more than this turns the bar amber. */
 export const LATE = 1.15;
@@ -11,8 +18,7 @@ export const LATE = 1.15;
 export const COUNT_CAP = 97;
 
 /** Doing (blue) while its own landing or run is under way, waiting (violet) in a line, a CI queue or on the restart; a CI run that ended green or red, or grey with every job skipped (#558). */
-export const waitFam = (w) => (w.stage === 'passed' ? 'done' : w.stage === 'failed' || w.stage === 'cancelled' ? 'broken' : w.stage === 'skipped' ? 'idle'
-  : ['rebase', 'test', 'deploy', 'run', 'jobs'].includes(w.stage) ? 'work' : 'wait');
+export const waitFam = (w) => (w.stage === 'passed' ? 'done' : w.stage === 'failed' || w.stage === 'cancelled' ? 'broken' : w.stage === 'skipped' ? 'idle' : ['rebase', 'test', 'deploy', 'run', 'jobs'].includes(w.stage) ? 'work' : 'wait');
 /** How long it has gone on: a CI run's stops when it ended. */
 const took = (w, now) => (w.ended ?? now) - w.since;
 export const waitLate = (w, now = Date.now()) => !!w.usual && !w.ended && took(w, now) > w.usual * 1000 * LATE;
@@ -40,7 +46,8 @@ export function waitTime(w, now = Date.now()) {
  */
 export function waitBar(w, cls = 'wait-bar', cap = 100) {
   if (!w.usual && !w.total) return '';
-  const now = Date.now(), fam = waitFam(w);
+  const now = Date.now(),
+    fam = waitFam(w);
   // A counted bar moves when the wait is sent again with new counts, not on the ticker.
   const clock = w.total ? {} : { 'data-since': w.since, 'data-usual': w.usual, 'data-ended': w.ended ?? '', ...(cap < 100 ? { 'data-cap': cap } : {}) };
   const fill = h('i');
@@ -67,14 +74,17 @@ export function segSizes(sizes) {
  */
 export function segTrack(segs, { cls = '', cap = 90, labels = false, label = '' } = {}) {
   const grow = segSizes(segs.map((s) => s.size));
-  return h('ol', { class: `seg-track${cls ? ` ${cls}` : ''}`, ...(label ? { 'aria-label': label } : { 'aria-hidden': 'true' }) }, segs.map((s, i) => {
-    const now = s.state === 'now';
-    const bar = (now && !s.waits && s.clock && waitBar(s.clock, 'wait-bar', cap)) || h('span', { class: 'wait-bar' }, h('i'));
-    const li = h('li', { class: `${s.state ?? ''}${now && s.waits ? ' waits' : ''}`, ...(s.title ? { title: s.title } : {}) },
-      bar, labels ? h('span', { class: 'lbl' }, s.name ?? '') : '');
-    li.style.flexGrow = String(grow[i]); // the page's CSP drops style attributes, not the style property
-    return li;
-  }));
+  return h(
+    'ol',
+    { class: `seg-track${cls ? ` ${cls}` : ''}`, ...(label ? { 'aria-label': label } : { 'aria-hidden': 'true' }) },
+    segs.map((s, i) => {
+      const now = s.state === 'now';
+      const bar = (now && !s.waits && s.clock && waitBar(s.clock, 'wait-bar', cap)) || h('span', { class: 'wait-bar' }, h('i'));
+      const li = h('li', { class: `${s.state ?? ''}${now && s.waits ? ' waits' : ''}`, ...(s.title ? { title: s.title } : {}) }, bar, labels ? h('span', { class: 'lbl' }, s.name ?? '') : '');
+      li.style.flexGrow = String(grow[i]); // the page's CSP drops style attributes, not the style property
+      return li;
+    }),
+  );
 }
 
 /** A wait that draws a bar: one with a count or a usual time, or a landing at a known stage. */
@@ -101,7 +111,7 @@ export function progressPieces({ track, since, usual, wait }) {
     // Nothing in the track or the wait ties a wait to a step, so the first step underway owns it (a guess): only it fills
     // by the clock or hatches; any other step underway shows as underway with a sliver.
     const owner = track.findIndex(([, st]) => st === 'i');
-    return { segs: track.map(([g, st], i) => st === 'c' ? piece('done', g) : st === 'i' ? (i === owner ? piece('now', g, wClock ?? (usual ? { since, usual } : null)) : { ...piece('now', g), waits: false }) : piece('', g)), label: '' };
+    return { segs: track.map(([g, st], i) => (st === 'c' ? piece('done', g) : st === 'i' ? (i === owner ? piece('now', g, wClock ?? (usual ? { since, usual } : null)) : { ...piece('now', g), waits: false }) : piece('', g))), label: '' };
   }
   if (!w) return null;
   const { at } = stageOf(w);
@@ -112,7 +122,7 @@ export function progressPieces({ track, since, usual, wait }) {
 /** The wait's stage name and where it is on a landing's track. */
 function stageOf(w) {
   const at = TRACK.findIndex(([key]) => key === w.stage);
-  return { at, label: at >= 0 ? TRACK[at][1] : w.kind === 'ci' ? 'CI' : OWN[w.stage] ?? w.stage };
+  return { at, label: at >= 0 ? TRACK[at][1] : w.kind === 'ci' ? 'CI' : (OWN[w.stage] ?? w.stage) };
 }
 
 /** The wait in plain words, for a list row's subtitle (#551): what is happening, with the server's detail. */
@@ -127,7 +137,7 @@ export function waitWords(w) {
  */
 export function waitNow(w, full = false) {
   const { at, label } = stageOf(w);
-  return [h('b', { class: `f-${waitFam(w)}` }, label), at >= 0 ? ` ${at + 1}/${TRACK.length}` : '', ` · ${full ? w.text : w.brief ?? w.text}`];
+  return [h('b', { class: `f-${waitFam(w)}` }, label), at >= 0 ? ` ${at + 1}/${TRACK.length}` : '', ` · ${full ? w.text : (w.brief ?? w.text)}`];
 }
 
 /** waitNow's short line as plain text, for the list row's subtitle, so the row and the chat say the same (#630). */
@@ -144,8 +154,13 @@ export function waitClock(w, cls = 'wait-time') {
 /** A landing's whole track, for the opened readout; none for a wait that isn't a landing. */
 export function waitTrack(w) {
   const { at } = stageOf(w);
-  return at < 0 ? '' : h('ol', { class: 'wait-track' }, TRACK.map(([, name, short = name], i) =>
-    h('li', { class: i < at ? 'done' : i === at ? 'now' : '' }, h('i'), h('span', {}, short))));
+  return at < 0
+    ? ''
+    : h(
+        'ol',
+        { class: 'wait-track' },
+        TRACK.map(([, name, short = name], i) => h('li', { class: i < at ? 'done' : i === at ? 'now' : '' }, h('i'), h('span', {}, short))),
+      );
 }
 
 /** Moves every wait's bar and elapsed time on, without rebuilding rows. */
@@ -156,8 +171,7 @@ function tick() {
     if (el.classList.contains('wait-time')) {
       el.textContent = waitTime(w, now);
       if (el.closest('.progress-cap')) el.classList.toggle('late', waitLate(w, now)); // the step's own time goes amber with its bar (#630)
-    }
-    else {
+    } else {
       el.firstChild.style.width = `${Math.min(Number(el.dataset.cap) || 100, waitPct(w, now))}%`;
       el.classList.toggle('late', waitLate(w, now));
     }

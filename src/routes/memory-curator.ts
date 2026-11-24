@@ -46,10 +46,8 @@ export function decideTidy(app: App, project: Project, p: Proposal, apply: numbe
   if (p.status !== 'open') throw new HttpError(409, p.status === 'superseded' ? 'A newer tidy replaced this one' : `${p.decided_by} already decided this tidy`);
   const folder = folderOf(app, project, p.folder);
   if (!folder && apply.length) throw new HttpError(409, 'The memory folder this tidy was for is gone');
-  const { changes, backup } = folder
-    ? applyChanges(folder.dir, p.changes, new Set(apply), (file) => app.store.deleteClaudeState(join(folder.rel, file)))
-    : { changes: p.changes.map((c) => ({ ...c, outcome: c.action === 'flag' ? 'noted' : 'turned down' })), backup: [] };
-  const status = apply.length ? 'applied' as const : 'dismissed' as const;
+  const { changes, backup } = folder ? applyChanges(folder.dir, p.changes, new Set(apply), (file) => app.store.deleteClaudeState(join(folder.rel, file))) : { changes: p.changes.map((c) => ({ ...c, outcome: c.action === 'flag' ? 'noted' : 'turned down' })), backup: [] };
+  const status = apply.length ? ('applied' as const) : ('dismissed' as const);
   if (!app.store.memoryProposals.decide(p.id, { status, changes, backup, by })) throw new HttpError(409, 'Someone decided this tidy just now');
   const applied = changes.filter((c) => c.outcome === 'applied');
   const skipped = changes.filter((c) => c.outcome === 'changed since' || c.outcome?.startsWith('failed'));
@@ -60,7 +58,7 @@ export function decideTidy(app: App, project: Project, p: Proposal, apply: numbe
 /** One change as the page shows it: its diff, and whether its note moved on since. */
 const shown = (c: Change & { drifted?: boolean }) => ({
   ...c,
-  diff: c.action === 'index' ? lineDiff(c.wasLine ?? '', c.line ?? '') : c.action === 'flag' ? [] : lineDiff(c.was ?? '', c.action === 'delete' ? '' : c.text ?? ''),
+  diff: c.action === 'index' ? lineDiff(c.wasLine ?? '', c.line ?? '') : c.action === 'flag' ? [] : lineDiff(c.was ?? '', c.action === 'delete' ? '' : (c.text ?? '')),
 });
 
 function view(app: App, project: Project) {
@@ -71,13 +69,19 @@ function view(app: App, project: Project) {
   const card = open && tidyCard(app, open)?.card;
   return {
     open: open && {
-      id: open.id, created_at: open.created_at, ticket: open.ticket_id === null ? null : app.store.getTicket(open.ticket_id)?.number ?? null,
+      id: open.id,
+      created_at: open.created_at,
+      ticket: open.ticket_id === null ? null : (app.store.getTicket(open.ticket_id)?.number ?? null),
       // Approved on its card (#1803) and waiting for the run to apply it: the page says so, and its ticks still work.
       approved_by: (card?.status === 'approved' && card.by) || null,
       changes: (dir ? withDrift(dir, open.changes) : open.changes).map(shown),
     },
     kept: memoryProposals.kept(project.id).map((p) => ({
-      id: p.id, status: p.status, decided_by: p.decided_by, decided_at: p.decided_at, until: (p.decided_at ?? 0) + KEEP_MS,
+      id: p.id,
+      status: p.status,
+      decided_by: p.decided_by,
+      decided_at: p.decided_at,
+      until: (p.decided_at ?? 0) + KEEP_MS,
       counts: countLine(p.changes.filter((c) => c.outcome === 'applied')),
     })),
   };
@@ -86,14 +90,20 @@ function view(app: App, project: Project) {
 export const memoryCuratorRoutes: Route[] = [
   {
     // propose_memory: a curator run's tidy, checked against the folder now. Nothing is written until a member decides.
-    method: 'POST', path: '/api/tickets/:ticket/memory-proposal', who: ['minion'], refuse: 'Only the curator run itself can propose a memory tidy in its chat',
+    method: 'POST',
+    path: '/api/tickets/:ticket/memory-proposal',
+    who: ['minion'],
+    refuse: 'Only the curator run itself can propose a memory tidy in its chat',
     async handler({ req, res, app, ticket }) {
       const project = app.store.getProject(ticket.project_id)!;
       const t = curatorTarget(project.repo_dir, memoryLogins(app));
       if (!t) throw new HttpError(404, 'This scheme has no memory folder Citadel can reach, so there is nothing to tidy: say so in one line and close yourself');
       const body = await readJson(req);
       if (Array.isArray(body.changes) && !body.changes.length) throw new HttpError(400, 'Nothing to propose: say so in one line and close yourself with close_self');
-      const changes = checkChanges(readFolder(t.folder, () => false), body.changes);
+      const changes = checkChanges(
+        readFolder(t.folder, () => false),
+        body.changes,
+      );
       const { proposal, superseded } = app.store.memoryProposals.create({ project_id: project.id, ticket_id: ticket.id, folder: t.folder.id, changes });
       for (const old of superseded) settleCard(app, old, 'superseded', 'Citadel', `A newer memory tidy (from #${ticket.number}) replaced this one; nothing of yours was applied. Close yourself with close_self.`);
       const counts = countLine(changes);
@@ -106,34 +116,40 @@ export const memoryCuratorRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project/memory-proposals', who: ['person'],
+    method: 'GET',
+    path: '/api/projects/:project/memory-proposals',
+    who: ['person'],
     handler: ({ res, app, project }) => json(res, 200, view(app, project)),
   },
   {
     // Apply the ticked changes and turn down the rest; none ticked turns the whole tidy down (Josh, 2026-11-19: "Any scheme member").
-    method: 'POST', path: '/api/projects/:project/memory-proposals/:id/decide', who: ['person'],
+    method: 'POST',
+    path: '/api/projects/:project/memory-proposals/:id/decide',
+    who: ['person'],
     async handler({ req, res, app, project, params, session }) {
       // The body first: from the status check to decide() nothing awaits, so a tidy superseded or decided meanwhile can't be written.
       const body = await readJson(req);
       const p = app.store.memoryProposals.get(Number(params.id));
       if (!p || p.project_id !== project.id) throw new HttpError(404, 'No such memory tidy');
-      if (!Array.isArray(body.apply) || body.apply.some((n: unknown) => !Number.isInteger(n))) throw new HttpError(400, 'apply must list the ticked changes\' ids');
+      if (!Array.isArray(body.apply) || body.apply.some((n: unknown) => !Number.isInteger(n))) throw new HttpError(400, "apply must list the ticked changes' ids");
       const { changes, status, line } = decideTidy(app, project, p, body.apply, session.name);
-      settleCard(app, p, status === 'applied' ? 'approved' : 'rejected', session.name, status === 'applied'
-        ? `${line} Nothing more to do: close yourself with close_self.`
-        : `${session.name} turned the memory tidy down; nothing changed. Close yourself with close_self.`);
+      settleCard(app, p, status === 'applied' ? 'approved' : 'rejected', session.name, status === 'applied' ? `${line} Nothing more to do: close yourself with close_self.` : `${session.name} turned the memory tidy down; nothing changed. Close yourself with close_self.`);
       return json(res, 200, { changes, view: view(app, project) });
     },
   },
   {
     // apply_memory (#1803; Cara, 2026-11-24: "We should make it something a minion can do with approval"): the run applies
     // its own tidy once a member pressed Approve on its card, through the same decideTidy as the page's ticks.
-    method: 'POST', path: '/api/tickets/:ticket/memory-proposal/apply', who: ['minion'], refuse: 'Only the curator run itself applies its approved tidy',
+    method: 'POST',
+    path: '/api/tickets/:ticket/memory-proposal/apply',
+    who: ['minion'],
+    refuse: 'Only the curator run itself applies its approved tidy',
     handler({ res, app, ticket }) {
       const project = app.store.getProject(ticket.project_id)!;
       const p = app.store.memoryProposals.latestOf(ticket.id);
       if (!p) throw new HttpError(404, 'This minion has proposed no memory tidy');
-      if (p.status !== 'open') throw new HttpError(409, p.status === 'superseded' ? 'A newer tidy replaced yours; nothing of yours was applied. Close yourself with close_self.' : `${p.decided_by} already ${p.status === 'applied' ? 'applied' : 'turned down'} this tidy; nothing more to apply. Report that and close yourself with close_self.`);
+      if (p.status !== 'open')
+        throw new HttpError(409, p.status === 'superseded' ? 'A newer tidy replaced yours; nothing of yours was applied. Close yourself with close_self.' : `${p.decided_by} already ${p.status === 'applied' ? 'applied' : 'turned down'} this tidy; nothing more to apply. Report that and close yourself with close_self.`);
       const card = tidyCard(app, p)?.card;
       if (card?.status !== 'approved') throw new HttpError(409, 'Not approved: a member approves the tidy on its card (or ticks it on the Memory page), and the answer comes as a message. Apply nothing yourself; end your turn in state ready.');
       const { changes, applied, skipped } = decideTidy(app, project, p, approveAll(p.changes), card.by);
@@ -143,7 +159,9 @@ export const memoryCuratorRoutes: Route[] = [
   },
   {
     // Put back: every note an applied tidy touched goes back as it was, while its copy is kept (30 days).
-    method: 'POST', path: '/api/projects/:project/memory-proposals/:id/restore', who: ['person'],
+    method: 'POST',
+    path: '/api/projects/:project/memory-proposals/:id/restore',
+    who: ['person'],
     async handler({ res, app, project, params, session }) {
       app.store.memoryProposals.prune();
       const p = app.store.memoryProposals.get(Number(params.id));

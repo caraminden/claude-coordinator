@@ -32,9 +32,16 @@ test("Citadel's own page, a frame at another path or no frame is not an app", ()
 test('every file the desktop app requires or preloads is one build.sh copies into the app', async () => {
   const { readFileSync, readdirSync } = await import('node:fs');
   const dir = new URL('../desktop/', import.meta.url);
-  const list = readFileSync(new URL('build.sh', dir), 'utf8').match(/cp "\$here"\/\{([^}]+)\} "\$work\/Citadel\/resources\/app\/"/)?.[1].split(',');
+  const list = readFileSync(new URL('build.sh', dir), 'utf8')
+    .match(/cp "\$here"\/\{([^}]+)\} "\$work\/Citadel\/resources\/app\/"/)?.[1]
+    .split(',');
   assert.ok(list, "build.sh's copy line is where this test looks for it");
-  const needed = readdirSync(dir).filter((f) => f.endsWith('.cjs')).flatMap((f) => [...readFileSync(new URL(f, dir), 'utf8').matchAll(/require\('\.\/([^']+)'\)|'(preload\.cjs)'/g)].map((m) => m[1] ?? m[2]));
+  const needed = readdirSync(dir)
+    .filter((f) => f.endsWith('.cjs'))
+    .flatMap((f) => [...readFileSync(new URL(f, dir), 'utf8').matchAll(/require\('\.\/([^']+)'\)|'(preload\.cjs)'/g)].map((m) => m[1] ?? m[2]));
   assert.ok(needed.includes('route.cjs'), 'the scan finds main.cjs requires');
-  assert.deepEqual(needed.filter((f) => !list.includes(f)), []);
+  assert.deepEqual(
+    needed.filter((f) => !list.includes(f)),
+    [],
+  );
 });

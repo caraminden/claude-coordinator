@@ -22,7 +22,9 @@ function stream() {
       for (const line of String(chunk).split('\n')) if (line.startsWith('data: ')) res.sent.push(JSON.parse(line.slice(6)));
       return true;
     },
-    end() { res.emit('close'); },
+    end() {
+      res.emit('close');
+    },
   });
   return res;
 }
@@ -65,7 +67,10 @@ function world(idleMs = 10_000) {
   const jobs = new RunnerJobs(store, tokens, relay, idleMs, 10);
   const notes: string[] = [];
   const details: string[] = [];
-  jobs.onNote = (p, words, detail) => { notes.push(`${p.name}: ${words}`); details.push(detail); };
+  jobs.onNote = (p, words, detail) => {
+    notes.push(`${p.name}: ${words}`);
+    details.push(detail);
+  };
   const pc = store.createMachine('cara-desktop-runners', 'x', 'Cara', cara.id);
   const agent = stream();
   relay.connectAgent(pc, agent, { host: 'DESKTOP-G248IJ8', command: 'citadel runner agent', runners: true });
@@ -96,11 +101,14 @@ test('a runner agent is never offered to turns as an MCP machine, and whatever i
   assert.deepEqual(w.relay.online(), []);
   w.relay.setInfo(w.pc, { servers: ['mcp', 'ws'] });
   assert.deepEqual(w.relay.online(), []);
-  assert.deepEqual(w.relay.runnerMachines().map((m) => m.name), ['cara-desktop-runners']);
+  assert.deepEqual(
+    w.relay.runnerMachines().map((m) => m.name),
+    ['cara-desktop-runners'],
+  );
   assert.equal(w.relay.view(w.pc).runners, true);
 });
 
-test('a member\'s add goes to the agent, waits for GitHub to show the runners Idle, and posts one note when it ends', async () => {
+test("a member's add goes to the agent, waits for GitHub to show the runners Idle, and posts one note when it ends", async () => {
   const w = world();
   const started = await w.jobs.start(w.scheme, w.josh.id, { op: 'add', count: 2, os: 'windows' });
   assert.equal(started.ok, null);
@@ -118,7 +126,10 @@ test('a member\'s add goes to the agent, waits for GitHub to show the runners Id
   assert.match(done.text, /Done: 2 runners\n\nOn GitHub \(label peek-auras-ci\): DESKTOP-G248IJ8 Idle, DESKTOP-G248IJ8-2 Idle$/);
   assert.deepEqual(w.notes, ['Peek Auras: ✓ Josh added 2 CI runners for Peek Auras on cara-desktop-runners']);
   assert.equal(w.details[0], done.text, 'the output goes under the note, line breaks kept');
-  assert.ok(w.gh.calls.every((c) => !/token/.test(c)), 'Citadel itself mints nothing: the scripts on the PC do');
+  assert.ok(
+    w.gh.calls.every((c) => !/token/.test(c)),
+    'Citadel itself mints nothing: the scripts on the PC do',
+  );
 });
 
 test('an add whose runners never show Idle on GitHub fails, saying what GitHub showed', async () => {
@@ -195,7 +206,7 @@ test('a list notes nothing; a remove notes once, failed or not; a token its scri
   // The PC's remove script fetches a removal token with the agent's key while the job runs: no note of its own.
   assert.equal(w.jobs.absorb(w.scheme, w.pc, 'Machine cara-desktop-runners fetched a CI runner removal token'), true);
   const stranger = w.store.createMachine('olive-pc', 'y', 'Olive', w.olive.id);
-  assert.equal(w.jobs.absorb(w.scheme, stranger, 'other'), false, 'another machine\'s token is noted as before');
+  assert.equal(w.jobs.absorb(w.scheme, stranger, 'other'), false, "another machine's token is noted as before");
   assert.equal(w.jobs.absorb(w.other, w.pc, 'other'), false, 'so is one for a scheme with no job running');
   w.answer(true, 'Removed actions.runner.a\nRemoved actions.runner.b');
   await w.jobs.wait(w.scheme.id, 1000);
@@ -218,8 +229,15 @@ test('a Linux ask (#510) goes only to the Linux agent in WSL, waits for the -ci-
   const wsl = w.store.createMachine('cara-desktop-linux', 'y', 'Cara', w.cara.id);
   const agent = stream();
   w.relay.connectAgent(wsl, agent, { host: 'DESKTOP-G248IJ8', command: 'citadel runner agent', runners: true, os: 'linux' });
-  assert.deepEqual(w.relay.runnerMachines('linux').map((m) => m.name), ['cara-desktop-linux']);
-  assert.deepEqual(w.relay.runnerMachines().map((m) => m.name), ['cara-desktop-runners'], 'a Windows ask never reaches the Linux agent');
+  assert.deepEqual(
+    w.relay.runnerMachines('linux').map((m) => m.name),
+    ['cara-desktop-linux'],
+  );
+  assert.deepEqual(
+    w.relay.runnerMachines().map((m) => m.name),
+    ['cara-desktop-runners'],
+    'a Windows ask never reaches the Linux agent',
+  );
 
   const started = await w.jobs.start(w.scheme, w.josh.id, { op: 'add', count: 1, os: 'linux' });
   assert.equal(started.machine, 'cara-desktop-linux');

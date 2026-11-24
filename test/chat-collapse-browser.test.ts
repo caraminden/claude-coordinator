@@ -75,23 +75,11 @@ const LOG = `[...document.querySelectorAll('#log > *')].map((el) => el.matches('
 test('only the newest line of a running turn stays out; the ones above collapse as newer lines arrive', { skip }, async () => {
   const page = await browser.page(`${base}#/p/1/t/7`, { width: 1280, height: 800 });
   await waitFor(page, 'the chat to draw', `document.getElementById('log').textContent.includes('Line four')`);
-  assert.deepEqual(await page.eval(LOG), [
-    'message',
-    '[2 updates: Line two: writing the fix.]',
-    'message',
-    '[1 update: Line three: tests pass.]',
-    'Line four: landing after #576.',
-  ]);
+  assert.deepEqual(await page.eval(LOG), ['message', '[2 updates: Line two: writing the fix.]', 'message', '[1 update: Line three: tests pass.]', 'Line four: landing after #576.']);
   // A newer line: the one above it joins its stretch's row, not a new one.
   await page.eval(`push('Line five: live.')`);
   await waitFor(page, 'the new line', `document.getElementById('log').textContent.includes('Line five')`);
-  assert.deepEqual(await page.eval(LOG), [
-    'message',
-    '[2 updates: Line two: writing the fix.]',
-    'message',
-    '[2 updates: Line four: landing after #576.]',
-    'Line five: live.',
-  ]);
+  assert.deepEqual(await page.eval(LOG), ['message', '[2 updates: Line two: writing the fix.]', 'message', '[2 updates: Line four: landing after #576.]', 'Line five: live.']);
 });
 
 test('a jump link to a collapsed line opens its row and flashes the line', { skip }, async () => {

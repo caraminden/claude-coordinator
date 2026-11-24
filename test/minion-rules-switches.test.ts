@@ -33,7 +33,10 @@ test('Grill adds a line naming the Citadel-wide rule only off the default', () =
 });
 
 test("GitHub's runners: each value has its own line", () => {
-  const line = (v: string) => minionRulesLines({ ...base, gh_runners: v }).filter((l) => /runners/.test(l)).join('');
+  const line = (v: string) =>
+    minionRulesLines({ ...base, gh_runners: v })
+      .filter((l) => /runners/.test(l))
+      .join('');
   assert.match(line('ask'), /ask a person first/);
   assert.match(line('ok'), /needs no one/);
   assert.match(line('never'), /never use them/);

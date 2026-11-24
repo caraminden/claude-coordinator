@@ -11,7 +11,21 @@ export const MODEL_REQUIRED = (tool: string) => `${tool} needs a model and an ef
 
 /** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
 export function scheduleFields(app: App, projectId: number, body: any, all: boolean, taskmaster = false, row: Schedule | null = null) {
-  const out: { name?: string; cron?: string; brief?: string; type?: string; model?: string | null; effort?: string | null; min_minions?: number | null; gate_scope?: 'scheme' | 'all'; once?: boolean; category?: string; trigger_kind?: TriggerKind | null; trigger_count?: number | null; trigger_gap_hours?: number | null } = {};
+  const out: {
+    name?: string;
+    cron?: string;
+    brief?: string;
+    type?: string;
+    model?: string | null;
+    effort?: string | null;
+    min_minions?: number | null;
+    gate_scope?: 'scheme' | 'all';
+    once?: boolean;
+    category?: string;
+    trigger_kind?: TriggerKind | null;
+    trigger_count?: number | null;
+    trigger_gap_hours?: number | null;
+  } = {};
   if (all || body.name !== undefined) out.name = str(body.name, 'Name', 80);
   if (all || body.cron !== undefined) out.cron = str(body.cron, 'cron', 100);
   if (all || body.brief !== undefined) out.brief = str(body.brief, 'Brief', 100_000);
@@ -43,7 +57,7 @@ export function scheduleFields(app: App, projectId: number, body: any, all: bool
     if (body.trigger_gap_hours !== null && !(Number.isInteger(body.trigger_gap_hours) && body.trigger_gap_hours >= 1 && body.trigger_gap_hours <= 720)) throw new HttpError(400, 'trigger_gap_hours must be a whole number of hours from 1 to 720, or null for a day');
     out.trigger_gap_hours = body.trigger_gap_hours;
   }
-  const count = out.trigger_count !== undefined ? out.trigger_count : row?.trigger_count ?? null;
+  const count = out.trigger_count !== undefined ? out.trigger_count : (row?.trigger_count ?? null);
   if (count != null && !(out.trigger_kind !== undefined ? out.trigger_kind : row?.trigger_kind)) throw new HttpError(400, 'A trigger needs trigger_kind: ships (to main) or minions (made)');
   // Its group on the Schedules page (#1083); '' is Other, and left out of a create it is guessed from the name.
   if (body.category !== undefined && body.category !== null) {
@@ -94,9 +108,18 @@ export function scheduleView(app: App, s: Schedule) {
   const brief = t ? renderTemplate(t, s.notes, templateVars(app.store, app.dataDir, s.project_id)) : s.brief;
   const runs = app.store.schedules.runs(s.id).map((r) => ({ at: r.at, skip: r.skip, ...(run(r.ticket_id) ?? {}) }));
   return {
-    ...s, brief, when: describeCron(s.cron), last_number: last?.number ?? null, last_state: last?.state ?? null, last_status: last?.status ?? null,
-    last_note: last?.note ?? null, last_cost: last?.cost ?? null, runs, skips14: app.store.schedules.skipsSince(s.id, Date.now() - 14 * 864e5),
+    ...s,
+    brief,
+    when: describeCron(s.cron),
+    last_number: last?.number ?? null,
+    last_state: last?.state ?? null,
+    last_status: last?.status ?? null,
+    last_note: last?.note ?? null,
+    last_cost: last?.cost ?? null,
+    runs,
+    skips14: app.store.schedules.skipsSince(s.id, Date.now() - 14 * 864e5),
     // Its trigger's count since the last real run (#1798), what the hourly check compares with trigger_count.
-    trigger_text: describeTrigger(s), trigger_so_far: s.trigger_count == null ? null : s.trigger_kind === 'ships' ? app.store.schedules.shipsSince(s) : app.store.schedules.minionsSince(s, APP_NAME),
+    trigger_text: describeTrigger(s),
+    trigger_so_far: s.trigger_count == null ? null : s.trigger_kind === 'ships' ? app.store.schedules.shipsSince(s) : app.store.schedules.minionsSince(s, APP_NAME),
   };
 }

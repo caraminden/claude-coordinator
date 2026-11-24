@@ -18,9 +18,22 @@ export const keyFiles = (keyDir: string, app: string) => ({ jks: join(keyDir, `$
 /** Whether `app` has a release key: either file counts, so a half-made one is never made over. */
 export const hasKey = (keyDir: string, app: string) => Object.values(keyFiles(keyDir, app)).some((f) => existsSync(f));
 
-const realKeytool = (home: string): Keytool => (args) => new Promise((ok, no) =>
-  execFile(join(home, ANDROID_JDK, 'bin', 'keytool'), args, { timeout: 120_000 }, (err, _out, stderr) =>
-    err ? no(new Error(`keytool failed: ${String(stderr || err.message).trim().slice(0, 300)}`)) : ok()));
+const realKeytool =
+  (home: string): Keytool =>
+  (args) =>
+    new Promise((ok, no) =>
+      execFile(join(home, ANDROID_JDK, 'bin', 'keytool'), args, { timeout: 120_000 }, (err, _out, stderr) =>
+        err
+          ? no(
+              new Error(
+                `keytool failed: ${String(stderr || err.message)
+                  .trim()
+                  .slice(0, 300)}`,
+              ),
+            )
+          : ok(),
+      ),
+    );
 
 /**
  * Make `app`'s release key in `keyDir`: RSA 4096, valid about 27 years, PKCS12 with one alias (the app's name), so
@@ -38,8 +51,7 @@ export async function makeReleaseKey(keyDir: string, app: string, o: { home: str
     const pass = join(tmp, 'pass');
     const jks = join(tmp, 'jks');
     await writeFile(pass, `${randomBytes(24).toString('base64url')}\n`, { mode: 0o600, flag: 'wx' });
-    await (o.keytool ?? realKeytool(o.home))(['-genkeypair', '-noprompt', '-keystore', jks, '-storetype', 'PKCS12', '-alias', app,
-      '-keyalg', 'RSA', '-keysize', '4096', '-validity', '10000', '-dname', `CN=${app}, O=Citadel`, '-storepass:file', pass, '-keypass:file', pass]);
+    await (o.keytool ?? realKeytool(o.home))(['-genkeypair', '-noprompt', '-keystore', jks, '-storetype', 'PKCS12', '-alias', app, '-keyalg', 'RSA', '-keysize', '4096', '-validity', '10000', '-dname', `CN=${app}, O=Citadel`, '-storepass:file', pass, '-keypass:file', pass]);
     if (!existsSync(jks)) throw new Error('keytool made no keystore');
     await chmod(jks, 0o600);
     await link(pass, out.pass);

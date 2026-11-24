@@ -271,8 +271,7 @@ export class Outbox {
   private deliverTarget(toKind: string, toId: number): void | Promise<void> {
     if (this.stopped) return;
     const now = this.now();
-    const dueRows = (state: 'waiting' | 'sending') =>
-      this.store.listDeliveries({ to: toId, toKind, states: [state] }).filter((r) => this.kinds.has(r.kind) && r.due != null && r.due <= now);
+    const dueRows = (state: 'waiting' | 'sending') => this.store.listDeliveries({ to: toId, toKind, states: [state] }).filter((r) => this.kinds.has(r.kind) && r.due != null && r.due <= now);
     const repeats = new Set<number>();
     for (const r of dueRows('sending')) {
       const left = this.leftover.delete(r.id);

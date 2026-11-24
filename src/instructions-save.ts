@@ -14,10 +14,21 @@ import type { Project } from './db.ts';
 const ROOT = join(import.meta.dirname, '..');
 
 export type Scope = 'citadel' | 'scheme';
-export interface FindReplace { find: string; replace: string }
+export interface FindReplace {
+  find: string;
+  replace: string;
+}
 
 /** What a held edit's card carries, so Save anyway can save exactly what was shown. */
-export interface HeldEdit { scope: Scope; project: number; old: string; text: string; edits: FindReplace[]; by: string; count: number }
+export interface HeldEdit {
+  scope: Scope;
+  project: number;
+  old: string;
+  text: string;
+  edits: FindReplace[];
+  by: string;
+  count: number;
+}
 
 /** Save through Settings' own setters and history, then tell the chat, the Taskmasters and open pages. */
 export async function saveInstructions(app: App, ticketId: number, held: Omit<HeldEdit, 'count'>, by = held.by): Promise<void> {
@@ -33,7 +44,10 @@ export async function saveInstructions(app: App, ticketId: number, held: Omit<He
   const shown = held.edits.map((e, i) => `${i + 1}. Before: ${cut(e.find)}\n   After: ${cut(e.replace)}`).join('\n');
   runner.emit(ticketId, 'note', { text: `Saved the ${where} Settings text as ${by}; it applies from each minion's next turn.\n${shown}` });
   const note = `${by} ${held.text ? 'updated' : 'cleared'} the ${where} instructions; they apply from each minion's next turn.`;
-  const tell = (pid: number) => { const c = store.getOverlord(pid); if (c) runner.emit(c.id, 'note', { everyone: true, text: note }); };
+  const tell = (pid: number) => {
+    const c = store.getOverlord(pid);
+    if (c) runner.emit(c.id, 'note', { everyone: true, text: note });
+  };
   if (citadel) {
     for (const p of store.listProjects()) tell(p.id);
     app.broadcast({ type: 'app-instructions', instructions: store.appInstructions() });
@@ -55,14 +69,17 @@ export function settingsOverlaps(app: Pick<App, 'store'>, project: Project, scop
   const lines = text.split('\n');
   const touched = new Set(news.map((p) => sectionStart(lines, p.line)));
   const rest = lines.map((l, i) => (touched.has(sectionStart(lines, i + 1)) ? '' : l)).join('\n');
-  const other = scope === 'citadel' ? project.instructions ?? '' : store.appInstructions().text;
+  const other = scope === 'citadel' ? (project.instructions ?? '') : store.appInstructions().text;
   const sources = settingsSources({ root: ROOT, citadelUrl: store.getProject(GLOBAL_OWNER)?.repo_url ?? null, pid: project.id, repo: project.repo_dir, repoUrl: project.repo_url, scope, text: rest, other });
   // The shared rules, and on a save of a scheme's own text its own (#1211), read fresh each time.
   return overlapsFor(news, sources, inSettingsHome(scope, text), scope === 'scheme' ? [...RULE_HOMES, ...schemeRules(project.repo_dir)] : RULE_HOMES);
 }
 
 /** Sonnet's word on one matcher hit (#1211): whether the new words really repeat it, contradict it, or only share wording. */
-export interface Verdict { verdict: 'repeats' | 'conflicts' | 'fine'; why: string }
+export interface Verdict {
+  verdict: 'repeats' | 'conflicts' | 'fine';
+  why: string;
+}
 
 /** A registered rule's home as it reads now: Citadel's own rules from this repo, a scheme's from its repo or its Settings text. */
 export function ruleHome(app: Pick<App, 'store'>, project: Project, id: string): string | null {
@@ -89,7 +106,9 @@ export function verdictPrompt(scope: Scope, before: string, text: string, found:
   const where = scope === 'citadel' ? `the ${APP_NAME}-wide instructions` : "a scheme's instructions";
   return [
     `A person is saving an edit to ${where}, the standing rules every agent in it reads. A word matcher flagged places that already say something like the new words. Judge each place against the new words: "repeats" when it states the same rule, so the rule would be written twice; "conflicts" when it says something different about the same thing, so agents get two answers; "fine" when they only share wording and speak to different things.`,
-    `The new words:\n<new>\n${added(before, text).map((p) => p.text).join('\n\n')}\n</new>`,
+    `The new words:\n<new>\n${added(before, text)
+      .map((p) => p.text)
+      .join('\n\n')}\n</new>`,
     `The places (a registered rule's place quotes the new words; judge them against the rule's home):\n<places>\n${found.map(place).join('\n')}\n</places>`,
     'Reply with JSON only, no fences: {"verdicts": [{"n": <the place\'s number>, "verdict": "repeats" | "conflicts" | "fine", "why": "<one plain line for the person>"}]}, one for each place.',
   ].join('\n\n');
@@ -99,7 +118,11 @@ export function verdictPrompt(scope: Scope, before: string, text: string, found:
 export function readVerdicts(reply: string, count: number): (Verdict | null)[] {
   const t = reply.trim();
   let data: any;
-  try { data = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); } catch { throw new Error("Sonnet's answer wasn't the verdicts it should be"); }
+  try {
+    data = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1));
+  } catch {
+    throw new Error("Sonnet's answer wasn't the verdicts it should be");
+  }
   const out: (Verdict | null)[] = Array(count).fill(null);
   for (const v of Array.isArray(data?.verdicts) ? data.verdicts : []) {
     if (Number.isInteger(v?.n) && v.n >= 1 && v.n <= count && ['repeats', 'conflicts', 'fine'].includes(v.verdict)) out[v.n - 1] = { verdict: v.verdict, why: typeof v.why === 'string' ? v.why.trim().slice(0, 300) : '' };

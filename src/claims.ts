@@ -73,7 +73,9 @@ const ESTIMATE_OF = 10;
 
 /** "pipeline-lane", "release-train": lowercase words joined by hyphens, so two Taskmasters can't spell one duty two ways. */
 export function claimName(raw: unknown): string {
-  const name = String(raw ?? '').trim().toLowerCase();
+  const name = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || name.length > 40) throw new HttpError(400, 'A claim name is lowercase words joined by hyphens, at most 40 characters, e.g. pipeline-lane');
   return name;
 }
@@ -112,13 +114,14 @@ export class Claims {
 
   /** `name`'s queue: this run's past holders by when they finished, then the waiting in order. */
   queue(projectId: number, name: string): QueueRow[] {
-    return this.db.prepare('SELECT ticket, pos, added_by, added_at, done_at, how FROM claim_queue WHERE project_id = ? AND name = ? ORDER BY done_at IS NULL, done_at, pos')
-      .all(projectId, name) as unknown as QueueRow[];
+    return this.db.prepare('SELECT ticket, pos, added_by, added_at, done_at, how FROM claim_queue WHERE project_id = ? AND name = ? ORDER BY done_at IS NULL, done_at, pos').all(projectId, name) as unknown as QueueRow[];
   }
 
   /** The tickets waiting for `name`, in order. */
   waiting(projectId: number, name: string): number[] {
-    return this.queue(projectId, name).filter((r) => r.done_at == null).map((r) => r.ticket);
+    return this.queue(projectId, name)
+      .filter((r) => r.done_at == null)
+      .map((r) => r.ticket);
   }
 
   /**
@@ -128,7 +131,11 @@ export class Claims {
   setQueue(projectId: number, name: string, tickets: number[], by: string, now = Date.now()): void {
     const holder = this.get(projectId, name)?.holder;
     const order = [...new Set(tickets)].filter((t) => t !== holder);
-    const had = new Map(this.queue(projectId, name).filter((r) => r.done_at == null).map((r) => [r.ticket, r]));
+    const had = new Map(
+      this.queue(projectId, name)
+        .filter((r) => r.done_at == null)
+        .map((r) => [r.ticket, r]),
+    );
     this.db.exec('BEGIN');
     try {
       this.db.prepare('DELETE FROM claim_queue WHERE project_id = ? AND name = ? AND done_at IS NULL').run(projectId, name);
@@ -161,7 +168,7 @@ export class Claims {
         this.db.prepare('DELETE FROM claims WHERE project_id = ? AND name = ?').run(projectId, name);
         this.db.prepare('DELETE FROM claim_queue WHERE project_id = ? AND name = ?').run(projectId, name);
       } else {
-        this.db.prepare('UPDATE claims SET holder = ?, note = \'\', since = ? WHERE project_id = ? AND name = ?').run(next, now, projectId, name);
+        this.db.prepare("UPDATE claims SET holder = ?, note = '', since = ? WHERE project_id = ? AND name = ?").run(next, now, projectId, name);
         this.db.prepare('DELETE FROM claim_queue WHERE project_id = ? AND name = ? AND ticket IN (?, ?)').run(projectId, name, next, from.holder);
         this.db.prepare('INSERT INTO claim_queue (project_id, name, ticket, pos, added_by, added_at, done_at, how) VALUES (?, ?, ?, -1, ?, ?, ?, ?)').run(projectId, name, from.holder, from.taken_by, from.since, now, how);
       }
@@ -193,8 +200,7 @@ export class Claims {
    * the page hides its estimate then. Dismissed holders don't count: they say nothing about how long the work takes.
    */
   estimate(projectId: number, name: string): { median: number; of: number } | null {
-    const spans = (this.db.prepare("SELECT until - since AS ms FROM claim_spans WHERE project_id = ? AND name = ? AND how != 'dismissed' ORDER BY until DESC LIMIT ?")
-      .all(projectId, name, ESTIMATE_OF) as { ms: number }[]).map((r) => r.ms).sort((a, b) => a - b);
+    const spans = (this.db.prepare("SELECT until - since AS ms FROM claim_spans WHERE project_id = ? AND name = ? AND how != 'dismissed' ORDER BY until DESC LIMIT ?").all(projectId, name, ESTIMATE_OF) as { ms: number }[]).map((r) => r.ms).sort((a, b) => a - b);
     if (spans.length < ESTIMATE_MIN) return null;
     const mid = spans.length >> 1;
     return { median: spans.length % 2 ? spans[mid] : (spans[mid - 1] + spans[mid]) / 2, of: spans.length };

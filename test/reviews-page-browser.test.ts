@@ -45,4 +45,3 @@ test('the page shows the shared loading line, then its head and both tabs in the
   assert.deepEqual(await page.eval(`[...document.querySelectorAll('.reviews-main .rv-tabs button')].map((b) => b.textContent)`), ['This scheme', 'Every scheme']);
   assert.equal(await page.eval<number>(`document.querySelector('.reviews-main .rv-head').getBoundingClientRect().top`), top, 'the head did not move');
 });
-

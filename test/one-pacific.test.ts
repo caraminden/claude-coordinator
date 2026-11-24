@@ -16,13 +16,10 @@ export function pacificCopies(file: string, text: string): string[] {
   return text.split('\n').flatMap((row, i) => (ZONE.test(row) && !OK.test(row) ? [`${file}:${i + 1}`] : []));
 }
 
-const walk = (dir: string): string[] =>
-  readdirSync(join(root, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : /\.(ts|js)$/.test(e.name) ? [join(dir, e.name)] : []));
+const walk = (dir: string): string[] => readdirSync(join(root, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : /\.(ts|js)$/.test(e.name) ? [join(dir, e.name)] : []));
 
 test('no source file spells out America/Los_Angeles outside the two homes', () => {
-  const hits = [...walk('src'), ...walk('public'), 'server.ts']
-    .filter((f) => !HOMES.has(f))
-    .flatMap((f) => pacificCopies(f, readFileSync(join(root, f), 'utf8')));
+  const hits = [...walk('src'), ...walk('public'), 'server.ts'].filter((f) => !HOMES.has(f)).flatMap((f) => pacificCopies(f, readFileSync(join(root, f), 'utf8')));
   assert.deepEqual(hits, [], `${hits.join(', ')}: Pacific formats live in src/pacific.ts (server) and public/base.js (front end). Import a variant, or add one there; a deliberate use says \`// pacific-ok: <why>\`.`);
 });
 

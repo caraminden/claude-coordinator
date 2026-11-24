@@ -17,7 +17,18 @@ export async function line(ships: Ship[], extra: Record<string, string> | ((dir:
   const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
   before?.(r);
   const deploys = join(r.dir, 'deploys');
-  const env = { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), FAKE_DEPLOY_GATE: join(r.dir, 'gate'), FAKE_DEPLOY_LOG: deploys, DEPLOY_QUEUE_POLL: '0.05', PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', ...(typeof extra === 'function' ? extra(r.dir) : extra) };
+  const env = {
+    DEPLOY_LIVE: r.live,
+    DEPLOY_SOURCE: r.source,
+    DEPLOY_NOTE: join(r.dir, 'note'),
+    FAKE_DEPLOY_GATE: join(r.dir, 'gate'),
+    FAKE_DEPLOY_LOG: deploys,
+    DEPLOY_QUEUE_POLL: '0.05',
+    PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`,
+    LAND_CI: '1',
+    LAND_CI_POLL: '0.1',
+    ...(typeof extra === 'function' ? extra(r.dir) : extra),
+  };
   const wts = [r.wt];
   for (let i = 2; i <= ships.length; i++) {
     wts.push(join(r.dir, `wt${i}`));
@@ -61,7 +72,6 @@ export function shipped(l: Awaited<ReturnType<typeof line>>, d: { status: number
   assert.equal([...d.stderr.matchAll(/main is now at ([0-9a-f]{7,40}) "(.*)"/g)].pop()?.slice(1).join(' '), `${tip.slice(0, 7)} ${subject}`);
   assert.match(d.stderr, /^deploy: live now:/m);
 }
-
 
 export const bad = (n: number) => ({ change: [`test/p${n}.test.ts`, `throw new Error('bad ${n}');\n`] });
 export const realOf = (...ns: number[]) => ns.map((n) => `test/p${n}.test.ts=test/p${n}.test.ts`).join(' ');

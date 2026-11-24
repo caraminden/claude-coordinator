@@ -19,30 +19,49 @@ const HISTORY = 2000;
 
 /** Every Claude login's config dir, labelled: the one list the Memory page and this page read memory folders from. */
 export function memoryLogins(app: Pick<App, 'store' | 'claude'>): MemoryLogin[] {
-  return app.store.listUsers().flatMap((u) => (u.server_login ? (app.claude.accounts(u.id)?.accounts ?? []).flatMap((a) => {
-    const configDir = app.claude.configDir(u.id, a.n);
-    return configDir ? [{ label: a.n === 1 ? "The server's own login" : `${u.name}'s account ${a.n}`, configDir }] : [];
-  }) : []));
+  return app.store.listUsers().flatMap((u) =>
+    u.server_login
+      ? (app.claude.accounts(u.id)?.accounts ?? []).flatMap((a) => {
+          const configDir = app.claude.configDir(u.id, a.n);
+          return configDir ? [{ label: a.n === 1 ? "The server's own login" : `${u.name}'s account ${a.n}`, configDir }] : [];
+        })
+      : [],
+  );
 }
 
-const read = (path: string): string => { try { return lstatSync(path).isFile() ? readFileSync(path, 'utf8') : ''; } catch { return ''; } };
+const read = (path: string): string => {
+  try {
+    return lstatSync(path).isFile() ? readFileSync(path, 'utf8') : '';
+  } catch {
+    return '';
+  }
+};
 
 /** A repo's files as Docs, with their git history and links to GitHub when the repo is there. */
 async function repoDocs(repo: string, repoUrl: string | null, groups: { kind: SourceKind; files: string[]; paths: string[]; adr?: (f: string) => boolean }[]): Promise<Doc[]> {
   const branch = (await gitOut(['rev-parse', '--abbrev-ref', 'HEAD'], repo))?.trim() || 'main';
-  const edits = await gitEdits(repo, groups.flatMap((g) => g.paths), (file, sha) => githubHref(repoUrl, sha, file));
-  return groups.flatMap((g) => g.files.map((file) => ({
-    kind: g.kind,
-    place: { label: file, file, href: githubHref(repoUrl, branch, file) },
-    text: read(join(repo, file)),
-    adr: g.adr?.(file),
-    edits: edits.get(file),
-  })));
+  const edits = await gitEdits(
+    repo,
+    groups.flatMap((g) => g.paths),
+    (file, sha) => githubHref(repoUrl, sha, file),
+  );
+  return groups.flatMap((g) =>
+    g.files.map((file) => ({
+      kind: g.kind,
+      place: { label: file, file, href: githubHref(repoUrl, branch, file) },
+      text: read(join(repo, file)),
+      adr: g.adr?.(file),
+      edits: edits.get(file),
+    })),
+  );
 }
 
 /** Instruction history rows (newest first, as the store keeps them) as edits in order. */
 const historyEdits = (rows: { by: string; at: number; old_text: string; new_text: string }[], href: string): Edit[] =>
-  rows.slice().reverse().map((r) => ({ before: r.old_text ?? '', after: r.new_text ?? '', at: r.at, by: r.by, href }));
+  rows
+    .slice()
+    .reverse()
+    .map((r) => ({ before: r.old_text ?? '', after: r.new_text ?? '', at: r.at, by: r.by, href }));
 
 const cache = new Map<number, { hash: string; list: DecisionList }>();
 
@@ -62,17 +81,25 @@ export async function loadDecisions(app: App, project: Project): Promise<Decisio
     const rules = ['CLAUDE.md', 'AGENTS.md'].filter((f) => existsSync(join(repo, f))).concat(mdFiles(repo, '.claude/rules'));
     // A README in the ADR folder is its index, not a decision.
     const adrs = mdFiles(repo, adr.replace(/\/$/, ''), 0).filter((f) => !/readme|template/i.test(f));
-    docs.push(...await repoDocs(repo, project.repo_url, [
-      { kind: 'repo', files: rules, paths: ['CLAUDE.md', 'AGENTS.md', '.claude/rules'] },
-      { kind: 'adr', files: adrs, paths: [adr], adr: () => true },
-    ]));
+    docs.push(
+      ...(await repoDocs(repo, project.repo_url, [
+        { kind: 'repo', files: rules, paths: ['CLAUDE.md', 'AGENTS.md', '.claude/rules'] },
+        { kind: 'adr', files: adrs, paths: [adr], adr: () => true },
+      ])),
+    );
   }
   const citadelUrl = store.getProject(GLOBAL_OWNER)?.repo_url ?? null;
-  docs.push(...await repoDocs(ROOT, citadelUrl, [{ kind: 'kit', files: mdFiles(ROOT, 'kit'), paths: ['kit'] }]));
+  docs.push(...(await repoDocs(ROOT, citadelUrl, [{ kind: 'kit', files: mdFiles(ROOT, 'kit'), paths: ['kit'] }])));
   const seen = new Set<string>();
   for (const f of memoryFolders(project.repo_dir, memoryLogins(app))) {
     let files: string[] = [];
-    try { files = readdirSync(f.dir).filter((n) => /\.md$/.test(n) && n !== 'MEMORY.md').sort(); } catch { continue; }
+    try {
+      files = readdirSync(f.dir)
+        .filter((n) => /\.md$/.test(n) && n !== 'MEMORY.md')
+        .sort();
+    } catch {
+      continue;
+    }
     for (const file of files) {
       const text = read(join(f.dir, file));
       // Two logins can hold the same note; list it once.
@@ -89,7 +116,7 @@ export async function loadDecisions(app: App, project: Project): Promise<Decisio
     const text = `- ${r.title}: ${r.pick_label ?? r.pick ?? r.status} (${r.decided_by}, ${day(r.decided_at)}: "${r.words.replace(/"/g, "'")}")`;
     docs.push({ kind: 'ideas', place: { label: 'Ideas ledger', file: r.card, href: `#/p/${pid}/ideas` }, text, title: r.title });
   }
-  const staleKinds: SourceKind[] = ['scheme', 'repo', 'memory', ...(pid === GLOBAL_OWNER ? ['kit', 'citadel'] as SourceKind[] : [])];
+  const staleKinds: SourceKind[] = ['scheme', 'repo', 'memory', ...(pid === GLOBAL_OWNER ? (['kit', 'citadel'] as SourceKind[]) : [])];
   const h = createHash('sha1');
   for (const d of names) h.update(d + '\0');
   for (const d of docs) h.update(`${d.kind}|${d.place.file ?? d.place.label}|${d.text}|${d.edits?.length ?? 0}|${d.edits?.at(-1)?.at ?? 0}\0`);
@@ -123,7 +150,11 @@ export function tellStale(app: App, project: Project, list: DecisionList) {
     const where = d.reversed!.stale.map((p) => `${p.label}${p.file && p.file !== p.label ? ` ${p.file}` : ''}${p.line ? `:${p.line}` : ''}`).join(', ');
     return `- ${d.rule}${d.quote ? `: "${d.quote}"` : ''} (${d.who}, ${d.date}) was reversed by ${now}. Still written in: ${where}.`;
   });
-  app.runner.leaveMail(tm.id, 'Decisions', `(nothing to do unless you choose to) A newer decision reversed ${fresh.length === 1 ? 'one' : fresh.length} that ${fresh.length === 1 ? 'is' : 'are'} still written elsewhere in this scheme. Offer the members a card to clean up the old copies, or start a chore minion for it; the Decisions page (Orders → Decisions) has a Clean up button too.\n${lines.join('\n')}`);
+  app.runner.leaveMail(
+    tm.id,
+    'Decisions',
+    `(nothing to do unless you choose to) A newer decision reversed ${fresh.length === 1 ? 'one' : fresh.length} that ${fresh.length === 1 ? 'is' : 'are'} still written elsewhere in this scheme. Offer the members a card to clean up the old copies, or start a chore minion for it; the Decisions page (Orders → Decisions) has a Clean up button too.\n${lines.join('\n')}`,
+  );
 }
 
 /** After an instructions save: re-read in the background, so a reversal it made reaches the Taskmaster. */

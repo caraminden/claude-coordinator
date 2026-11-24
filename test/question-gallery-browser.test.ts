@@ -18,7 +18,12 @@ const CARDS: Record<number, { questions: unknown[]; answered?: string[] }> = {
   7: { questions: [{ header: 'Palette', question: 'Which direction?', options: opts(3) }] },
   8: { questions: [{ header: 'Palette', question: 'Which direction?', options: opts(2) }], answered: ['Forest'] },
   9: { questions: [{ header: 'Layout', question: 'Tabs or list?', options: [{ label: 'Tabs', recommended: true }, { label: 'List' }] }] },
-  10: { questions: [{ header: 'Palette', question: 'Which direction?', options: opts(2) }, { header: 'Size', question: 'How big?', options: [{ label: 'Small', recommended: true }, { label: 'Large' }] }] },
+  10: {
+    questions: [
+      { header: 'Palette', question: 'Which direction?', options: opts(2) },
+      { header: 'Size', question: 'How big?', options: [{ label: 'Small', recommended: true }, { label: 'Large' }] },
+    ],
+  },
   11: { questions: [{ header: 'Palette', question: 'Which direction?', options: [...opts(2), { label: 'Garden, darker', image: 'takes/garden.svg' }] }] },
   12: { questions: [{ header: 'Palette', question: 'Which ones?', multiSelect: true, options: opts(2) }] },
 };
@@ -120,7 +125,7 @@ test('a click anywhere on a picture tile selects it, opens it in the viewer and 
   }
 });
 
-test('a picked picture option\'s button unpicks it in place on a one-pick card; its thumbnail keeps it', { skip }, async () => {
+test("a picked picture option's button unpicks it in place on a one-pick card; its thumbnail keeps it", { skip }, async () => {
   const page = await chat(7);
   await click(page, '.tile .opt');
   await waitFor(page, 'the viewer', viewerOpen);
@@ -134,7 +139,7 @@ test('a picked picture option\'s button unpicks it in place on a one-pick card; 
   assert.equal(await page.eval(viewerOpen), false);
 });
 
-test('the viewer steps between the card\'s pictures, and Pick this picks without sending', { skip }, async () => {
+test("the viewer steps between the card's pictures, and Pick this picks without sending", { skip }, async () => {
   const page = await chat(7);
   await click(page, '.tile:nth-child(2) .opt');
   await waitFor(page, 'the viewer', viewerOpen);
@@ -206,7 +211,10 @@ test('a picture card with a second question waits for Send with both answers', {
   await click(page, '[data-q="1"] .opt');
   assert.equal(await page.eval('sent.length'), 0);
   await page.eval(`${sendBtn}.click()`);
-  assert.deepEqual(await page.eval('sent[0].answers'), [{ selected: ['Garden'], other: '' }, { selected: ['Small'], other: '' }]);
+  assert.deepEqual(await page.eval('sent[0].answers'), [
+    { selected: ['Garden'], other: '' },
+    { selected: ['Small'], other: '' },
+  ]);
 });
 
 test('two options with one picture each get their own place in the viewer and their own pick', { skip }, async () => {
@@ -232,7 +240,7 @@ test('a card settled while its picture is open turns the viewer read-only', { sk
   assert.equal(await page.eval(`!!document.querySelector('.gallery-controls .pick')`), false);
 });
 
-test('on a pick-any question a tile click adds the option, a second look at its picture keeps it, and its button or the viewer\'s takes it off', { skip }, async () => {
+test("on a pick-any question a tile click adds the option, a second look at its picture keeps it, and its button or the viewer's takes it off", { skip }, async () => {
   const page = await chat(12);
   await click(page, '.tile:nth-child(1) .opt');
   await waitFor(page, 'the viewer', viewerOpen);
@@ -245,7 +253,7 @@ test('on a pick-any question a tile click adds the option, a second look at its 
   await waitFor(page, 'the viewer', viewerOpen);
   assert.deepEqual(await page.eval(picked), ['Garden', 'Forest'], 'a second look keeps it');
   await click(page, '.gallery-controls .pick');
-  assert.deepEqual(await page.eval(picked), ['Forest'], 'the viewer\'s button takes it off');
+  assert.deepEqual(await page.eval(picked), ['Forest'], "the viewer's button takes it off");
   await closeViewer(page);
   // Like a checkbox (Cara, 2026-11-14: "Multi select image cards cant be unselected"): the picked option's own button unpicks it, in place.
   await click(page, '.tile:nth-child(2) .opt .label');
@@ -256,7 +264,10 @@ test('on a pick-any question a tile click adds the option, a second look at its 
 
 // The three states Cara asked to see, at desktop and phone widths: nothing picked, one picked waiting for Send,
 // and the viewer open. GALLERY_SHOTS=<dir> saves them.
-for (const [label, size] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844, touch: true }]] as const) {
+for (const [label, size] of [
+  ['desktop', { width: 1440, height: 900 }],
+  ['phone', { width: 390, height: 844, touch: true }],
+] as const) {
   test(`${label}: the bar fits, with even padding, and nothing scrolls sideways`, { skip }, async () => {
     const page = await chat(7, size);
     const shot = async (name: string) => {
@@ -285,7 +296,10 @@ for (const [label, size] of [['desktop', { width: 1440, height: 900 }], ['phone'
     assert.equal(bar.padTop, bar.padBottom, 'Pick this has equal room above and below');
     if (size.width <= 800) assert.ok(bar.pickH >= 32, `Pick this is a phone tap target: ${bar.pickH}`);
     assert.equal(bar.wide, false);
-    assert.ok(bar.heights.every((x: number) => Math.abs(x - bar.heights[0]) < 0.5), `the bar's buttons are one height: ${bar.heights}`);
+    assert.ok(
+      bar.heights.every((x: number) => Math.abs(x - bar.heights[0]) < 0.5),
+      `the bar's buttons are one height: ${bar.heights}`,
+    );
     // A phone's chat under the picture is mostly its message box: the bar's ✓ Picked says it there.
     if (size.width > 800) assert.ok(bar.tileShown, 'the chat beside the picture keeps the card in sight');
     // Cara, 2026-11-14: "the "Picked" text moves the left and right buttons": they stay put as Pick this turns ✓ Picked.
@@ -296,7 +310,7 @@ for (const [label, size] of [['desktop', { width: 1440, height: 900 }], ['phone'
     const before = await page.eval<number[]>(arrows);
     await click(page, '.gallery-controls .pick');
     assert.equal(await page.eval(`document.querySelector('.gallery-controls .pick').textContent`), '✓ Picked');
-    assert.deepEqual(await page.eval(arrows), before, 'the bar\'s ‹ › stay put');
+    assert.deepEqual(await page.eval(arrows), before, "the bar's ‹ › stay put");
     await click(page, '.gallery-controls a[aria-label="Previous option"]');
     await waitFor(page, 'back to Garden', `${title} === 'Garden'`);
     await click(page, '.gallery-controls .pick');

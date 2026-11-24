@@ -153,8 +153,7 @@ export function machineStatus(f: StatusFacts): MachineStatus {
     return f.finds ? s('fix', 'Lends nothing: nothing is ticked', 'tick') : s('fix', 'Found nothing to lend on that computer', 'tick');
   }
   if (!f.offers.length) {
-    return f.wsOff ? s('fix', 'Lends nothing: workspace tools are off', 'workspace_tools')
-      : s('fix', 'Lends nothing: no MCP server or folder on that computer', 'token');
+    return f.wsOff ? s('fix', 'Lends nothing: workspace tools are off', 'workspace_tools') : s('fix', 'Lends nothing: no MCP server or folder on that computer', 'token');
   }
   const results = f.offers.map((server) => f.check?.results.find((r) => r.server === server));
   if (results.some((r) => !r)) return s('checking', 'Checking its tools…');
@@ -218,10 +217,14 @@ export function cleanScreen(v: unknown): ScreenState | null {
   type Raw = { what?: unknown; who?: unknown; since?: unknown } | null | undefined;
   const s = v as { holder?: Raw; line?: Raw[] } | null;
   if (!s || typeof s !== 'object' || !Array.isArray(s.line)) return null;
-  const user = (u: Raw): ScreenUser | null => (u && typeof u === 'object'
-    ? { what: String(u.what ?? '').slice(0, 200), who: String(u.who ?? '').slice(0, 200), since: Number.isFinite(u.since) ? u.since as number : null }
-    : null);
-  return { holder: user(s.holder), line: s.line.slice(0, 50).map(user).filter((u: ScreenUser | null): u is ScreenUser => !!u) };
+  const user = (u: Raw): ScreenUser | null => (u && typeof u === 'object' ? { what: String(u.what ?? '').slice(0, 200), who: String(u.who ?? '').slice(0, 200), since: Number.isFinite(u.since) ? (u.since as number) : null } : null);
+  return {
+    holder: user(s.holder),
+    line: s.line
+      .slice(0, 50)
+      .map(user)
+      .filter((u: ScreenUser | null): u is ScreenUser => !!u),
+  };
 }
 
 /** One job for a CI runner agent (#328): add, list or remove one scheme's runners on its PC. */
@@ -285,9 +288,11 @@ const replyHead = (text: string): string => text.split('\n--- ')[0];
 const watchKey = (w: Pick<BoxWatch, 'machine' | 'job'>) => `${w.machine}:${w.job}`;
 
 function cleanWatches(v: unknown): BoxWatch[] {
-  return (Array.isArray(v) ? v : []).flatMap((w: { machine?: number; ticket?: number; job?: string; what?: unknown; since?: number; started?: unknown } | null) => (Number.isInteger(w?.machine) && Number.isInteger(w?.ticket) && typeof w?.job === 'string' && /^[0-9a-f]{1,32}$/.test(w.job) && Number.isFinite(w?.since)
-    ? [{ machine: w!.machine!, job: w!.job, ticket: w!.ticket!, what: String(w!.what ?? 'a task').slice(0, 200), since: w!.since!, ...(w.started ? { started: true as const } : {}) }]
-    : []));
+  return (Array.isArray(v) ? v : []).flatMap((w: { machine?: number; ticket?: number; job?: string; what?: unknown; since?: number; started?: unknown } | null) =>
+    Number.isInteger(w?.machine) && Number.isInteger(w?.ticket) && typeof w?.job === 'string' && /^[0-9a-f]{1,32}$/.test(w.job) && Number.isFinite(w?.since)
+      ? [{ machine: w!.machine!, job: w!.job, ticket: w!.ticket!, what: String(w!.what ?? 'a task').slice(0, 200), since: w!.since!, ...(w.started ? { started: true as const } : {}) }]
+      : [],
+  );
 }
 
 /** `p`, or a throw once `ms` pass without it. */
@@ -328,10 +333,7 @@ function lentServers(m: Machine, agent: Agent): MachineServer[] {
   if (!agent.managed) return agent.servers.filter((s) => s === 'mcp' || m.workspace_tools);
   const lend = storedLend(m);
   if (!lend) return [];
-  return [
-    ...(lend.server && agent.found.some((f) => f.name === lend.server) ? ['mcp' as const] : []),
-    ...(agent.workspaces.some((w) => lend.workspaces.includes(w.name)) ? ['ws' as const] : []),
-  ];
+  return [...(lend.server && agent.found.some((f) => f.name === lend.server) ? ['mcp' as const] : []), ...(agent.workspaces.some((w) => lend.workspaces.includes(w.name)) ? ['ws' as const] : [])];
 }
 
 const holderKey = (h: SessionHolder) => ('ticketId' in h ? `t${h.ticketId}` : 'contraptionTurn' in h ? `c${h.contraptionTurn}` : `k${h.check}`);
@@ -407,13 +409,24 @@ export class MachineRelay {
     // the ones its owner is in (and only the turns they ask for).
     const projects = this.store.machineProjects(machine.id);
     const owner = machine.owner_id === null ? [] : [machine.owner_id];
-    const gets = this.store.listProjects().filter((p) => lendsMachine(this.store, machine, p, owner)).map((p) => p.id);
+    const gets = this.store
+      .listProjects()
+      .filter((p) => lendsMachine(this.store, machine, p, owner))
+      .map((p) => p.id);
     const offers = this.online().find((m) => m.id === machine.id)?.servers ?? [];
     const st = machineStatus({
-      now: Date.now(), startedAt: this.startedAt, online: !!agent, runners: agent ? agent.runners : !!check?.runners,
-      alwaysOn: !!machine.always_on, createdAt: machine.created_at, lastSeenAt: machine.last_seen_at,
-      offers, wsOff: !machine.workspace_tools && !!agent?.servers.includes('ws'), check,
-      managed: !!agent?.managed, finds: !!(agent?.found.length || agent?.workspaces.length),
+      now: Date.now(),
+      startedAt: this.startedAt,
+      online: !!agent,
+      runners: agent ? agent.runners : !!check?.runners,
+      alwaysOn: !!machine.always_on,
+      createdAt: machine.created_at,
+      lastSeenAt: machine.last_seen_at,
+      offers,
+      wsOff: !machine.workspace_tools && !!agent?.servers.includes('ws'),
+      check,
+      managed: !!agent?.managed,
+      finds: !!(agent?.found.length || agent?.workspaces.length),
       lent: projects.length,
     });
     return {
@@ -507,7 +520,10 @@ export class MachineRelay {
     this.store.updateMachine(machine.id, { last_seen_at: agent.since, ...(info.runners ? { last_check: JSON.stringify({ at: agent.since, results: [], runners: true }) } : {}) });
     this.onChange();
     if (!info.runners) {
-      agent.timers.push(setTimeout(() => this.checkIfDue(machine.id), CHECK_UNASKED_MS), setInterval(() => this.checkIfDue(machine.id), CHECK_EVERY_MS));
+      agent.timers.push(
+        setTimeout(() => this.checkIfDue(machine.id), CHECK_UNASKED_MS),
+        setInterval(() => this.checkIfDue(machine.id), CHECK_EVERY_MS),
+      );
       for (const t of agent.timers) t.unref();
     }
     const ping = setInterval(() => {
@@ -560,16 +576,13 @@ export class MachineRelay {
     agent.managed = body.v === 2;
     agent.found = agent.managed ? cleanFound(body.found) : [];
     agent.workspaces = cleanWorkspaces(body.workspaces);
-    agent.servers = agent.managed ? [...(agent.found.length ? ['mcp' as const] : []), ...(agent.workspaces.length ? ['ws' as const] : [])]
-      : (['mcp', 'ws'] as const).filter((s) => Array.isArray(body.servers) && body.servers.includes(s));
+    agent.servers = agent.managed ? [...(agent.found.length ? ['mcp' as const] : []), ...(agent.workspaces.length ? ['ws' as const] : [])] : (['mcp', 'ws'] as const).filter((s) => Array.isArray(body.servers) && body.servers.includes(s));
     agent.problems = (Array.isArray(body.problems) ? body.problems : []).slice(0, 50).map((p) => String(p).slice(0, 500));
     // Its owner's jobs block (#857), or none, and the jobs it holds, which the queue reconciles. An agent lists them even
     // with no block (a typo in its config still leaves them running there); with no list at all nothing is taken as lost (MA1).
     const offer = cleanOffer(body.jobs);
     this.store.updateMachine(machine.id, { jobs: offer ? JSON.stringify(offer) : null });
-    const known = Array.isArray(body.known_jobs)
-      ? body.known_jobs.slice(0, 100).flatMap((k: { id?: unknown; state?: unknown } | null) => (Number.isInteger(k?.id) && typeof k!.state === 'string' ? [{ id: k!.id as number, state: k!.state.slice(0, 20) as string }] : []))
-      : null;
+    const known = Array.isArray(body.known_jobs) ? body.known_jobs.slice(0, 100).flatMap((k: { id?: unknown; state?: unknown } | null) => (Number.isInteger(k?.id) && typeof k!.state === 'string' ? [{ id: k!.id as number, state: k!.state.slice(0, 20) as string }] : [])) : null;
     if (offer || machine.jobs || known) this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since);
     if (agent.managed) {
       // Its first report as a managed agent: the ticks start from what it lent before, so a reinstall changes nothing a minion gets.
@@ -632,7 +645,10 @@ export class MachineRelay {
 
   /** Machines whose CI runner agent for `os` (#510) is connected now (#328). */
   runnerMachines(os: 'windows' | 'linux' = 'windows'): Machine[] {
-    return this.store.listMachines().filter((m) => { const a = this.agents.get(m.id); return a?.runners && a.os === os; });
+    return this.store.listMachines().filter((m) => {
+      const a = this.agents.get(m.id);
+      return a?.runners && a.os === os;
+    });
   }
 
   /** The runners on a ship run's job now (#1268), sent to every runner agent at each look and to one as it connects. */
@@ -818,9 +834,12 @@ export class MachineRelay {
       // Still in line at the cap: it leaves now and says so, rather than wait on unfollowed and leave later unseen.
       this.unwatch(w, 'capped');
       const hours = WATCH_MAX_MS / 3_600_000;
-      this.tell(w, w.started
-        ? `Citadel stopped following your job ${w.job} on ${this.machineName(w.machine)} (${w.what}) after ${hours} hours. Call job with id "${w.job}" there to see where it is.`
-        : `Your job ${w.job} on ${this.machineName(w.machine)} (${w.what}) waited ${hours} hours in line for the screen without getting it, so Citadel took it out of the line: nothing was started. Run run_task again if you still need it.`);
+      this.tell(
+        w,
+        w.started
+          ? `Citadel stopped following your job ${w.job} on ${this.machineName(w.machine)} (${w.what}) after ${hours} hours. Call job with id "${w.job}" there to see where it is.`
+          : `Your job ${w.job} on ${this.machineName(w.machine)} (${w.what}) waited ${hours} hours in line for the screen without getting it, so Citadel took it out of the line: nothing was started. Run run_task again if you still need it.`,
+      );
       return true;
     }
     return false;
@@ -929,10 +948,11 @@ export class MachineRelay {
       };
       const timer = setTimeout(() => finish(false, [], `no answer in ${Math.round(timeoutMs / 1000)}s`), timeoutMs);
       const send = (message: object) => this.fromSession(session, holder, { jsonrpc: '2.0', ...message }) || finish(false, [], 'the machine went offline');
-      const ask = (id: number, method: string, params: object) => new Promise<RpcReply>((res) => {
-        waiting.set(id, res);
-        send({ id, method, params });
-      });
+      const ask = (id: number, method: string, params: object) =>
+        new Promise<RpcReply>((res) => {
+          waiting.set(id, res);
+          send({ id, method, params });
+        });
       if (!this.openSession(machineId, holder, server, who, sink as unknown as ServerResponse)) {
         return finish(false, [], server === 'ws' ? 'offline, or its workspace tools are off' : 'offline');
       }

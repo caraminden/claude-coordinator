@@ -6,7 +6,6 @@ import { emptyBranch } from './branch.ts';
 import { buildOwnerKey, type Store } from './db.ts';
 import { gitOut } from './git.ts';
 
-
 export interface BuildSummary {
   build: number;
   /** Feeders whose work build/<n> has: a git fact, so dismissed ones count too. */
@@ -50,9 +49,7 @@ export async function buildSummaries(store: Store, projectId: number): Promise<B
     let open = 0;
     for (const t of tickets) {
       if (t.build !== n || t.id === owner) continue;
-      const folded = !!t.branch && await git(['rev-parse', '--verify', '--quiet', `refs/heads/${t.branch}`], repoDir) !== null
-        && !await emptyBranch(repoDir, t.branch, t.created_at)
-        && await git(['merge-base', '--is-ancestor', `refs/heads/${t.branch}`, ref], repoDir) !== null;
+      const folded = !!t.branch && (await git(['rev-parse', '--verify', '--quiet', `refs/heads/${t.branch}`], repoDir)) !== null && !(await emptyBranch(repoDir, t.branch, t.created_at)) && (await git(['merge-base', '--is-ancestor', `refs/heads/${t.branch}`, ref], repoDir)) !== null;
       if (folded) merged++;
       else if (t.status !== 'closed') open++;
     }

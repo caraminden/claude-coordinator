@@ -19,7 +19,9 @@ const bin = join(root, 'bin');
 mkdirSync(bin);
 const execs = join(root, 'execs.log');
 writeFileSync(execs, '');
-writeFileSync(join(bin, 'podman'), `#!${process.execPath}
+writeFileSync(
+  join(bin, 'podman'),
+  `#!${process.execPath}
 require('node:fs').appendFileSync(${JSON.stringify(execs)}, process.argv.slice(2).join(' ') + '\\n');
 const mode = process.env.FAKE_PODMAN;
 if (mode === 'silent') setInterval(() => {}, 1000);
@@ -27,7 +29,8 @@ if (mode === 'link-then-exit') {
   console.log('Open https://claude.ai/oauth/authorize?x=1 to sign in');
   setTimeout(() => process.exit(0), 100);
 }
-`);
+`,
+);
 chmodSync(join(bin, 'podman'), 0o755);
 writeFileSync(join(bin, 'claude'), '', { mode: 0o755 });
 process.env.PATH = `${bin}:${process.env.PATH}`;
@@ -81,10 +84,14 @@ test('a sign-in that ends while waiting for the code says so instead of waiting 
   const { link, uid } = newLink();
   link.ensure = async () => {};
   assert.equal((await link.link(uid)).state, 'waiting for code');
-  const status = await until('the sign-in to end', () => {
-    const s = link.status(uid);
-    return s.state !== 'waiting for code' && s;
-  }, 5000);
+  const status = await until(
+    'the sign-in to end',
+    () => {
+      const s = link.status(uid);
+      return s.state !== 'waiting for code' && s;
+    },
+    5000,
+  );
   assert.equal(status.state, 'not linked');
   assert.match(status.error ?? '', /ended/);
 });
@@ -215,7 +222,10 @@ test('unlinking one of several accounts removes its sign-in and meters, keeps th
   await link.unlink(uid, 2);
   assert.equal(existsSync(join(home, '.claude-2')), false);
   assert.equal(store.getSetting(`usage:user:${uid}:account:2`) ?? null, null);
-  assert.deepEqual(link.accounts(uid)?.accounts.map((a) => a.n), [1, 3]);
+  assert.deepEqual(
+    link.accounts(uid)?.accounts.map((a) => a.n),
+    [1, 3],
+  );
   assert.equal(link.accounts(uid)?.inUse, 1, 'turns move off the account that went');
   // Account 1's meter keeps the key it had before there were several (account-pick.ts accountUsageKey), and goes too (#1270 C4).
   store.setSetting(`usage:user:${uid}`, { weekly: null, session: null, updatedAt: 1 });
@@ -223,7 +233,10 @@ test('unlinking one of several accounts removes its sign-in and meters, keeps th
   assert.equal(store.getSetting(`usage:user:${uid}`) ?? null, null, "account 1's meter goes with it");
   assert.equal(existsSync(join(home, '.claude', '.credentials.json')), false, "account 1's login goes");
   assert.ok(existsSync(join(home, '.claude', 'settings.json')), "the container's other Claude files stay");
-  assert.deepEqual(link.accounts(uid)?.accounts.map((a) => a.n), [3]);
+  assert.deepEqual(
+    link.accounts(uid)?.accounts.map((a) => a.n),
+    [3],
+  );
 });
 
 test("unlinking every account clears each one's meter, so a fresh account linked in its place starts at zero (#1270 C4)", async () => {
@@ -266,10 +279,16 @@ test('two account folders signed in to one Claude organization say so; one email
     // Read behind the answer (the server's one thread, #1463): the note shows on a later call.
     const accounts = () => link.accountList(user.id)?.accounts;
     await until('the same organization is noted', () => accounts()?.[1]?.same);
-    assert.deepEqual(accounts(), [{ n: 1, label: "the server's own login" }, { n: 2, label: 'cara@x', same: "the server's own login" }]);
+    assert.deepEqual(accounts(), [
+      { n: 1, label: "the server's own login" },
+      { n: 2, label: 'cara@x', same: "the server's own login" },
+    ]);
     signIn(two, 'org-b');
     await until('a re-login is read again', () => accounts()?.[1] && !accounts()![1].same);
-    assert.deepEqual(accounts(), [{ n: 1, label: "the server's own login" }, { n: 2, label: 'cara@x' }]);
+    assert.deepEqual(accounts(), [
+      { n: 1, label: "the server's own login" },
+      { n: 2, label: 'cara@x' },
+    ]);
   } finally {
     if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = was;

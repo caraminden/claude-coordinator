@@ -57,18 +57,27 @@ es.onerror = () => console.log('error ' + es.readyState);`;
   const child = tmp.spawn(process.execPath, ['--experimental-eventsource', '--no-warnings', '-e', script], { stdio: ['ignore', 'pipe', 'inherit'] });
   const lines: string[] = [];
   child.stdout!.setEncoding('utf8').on('data', (d: string) => lines.push(...d.split('\n').filter(Boolean)));
-  await until('the first run\'s event', () => lines.includes('message run 1'), 10_000);
+  await until("the first run's event", () => lines.includes('message run 1'), 10_000);
 
   // The app goes away mid-stream (a deploy, a crash), for longer than the proxy holds a stream's request.
   first.closeAllConnections();
   await new Promise<void>((ok) => first.close(() => ok()));
-  await until('the proxy to tell the stream to come back', () => lines.filter((l) => l === 'open').length >= 2, 15_000, () => lines.join(' | '));
+  await until(
+    'the proxy to tell the stream to come back',
+    () => lines.filter((l) => l === 'open').length >= 2,
+    15_000,
+    () => lines.join(' | '),
+  );
   rebound.push(await listen(appServer(2), appPort));
-  await until('the second run\'s event', () => lines.includes('message run 2'), 15_000);
+  await until("the second run's event", () => lines.includes('message run 2'), 15_000);
 
   // readyState 2 is CLOSED: what a 502 does to an EventSource, which then never asks again.
-  assert.deepEqual(lines.filter((l) => l === 'error 2'), [], lines.join('\n'));
-  assert.deepEqual(failed, [], 'a stream told to come back is nobody\'s error');
+  assert.deepEqual(
+    lines.filter((l) => l === 'error 2'),
+    [],
+    lines.join('\n'),
+  );
+  assert.deepEqual(failed, [], "a stream told to come back is nobody's error");
 });
 
 test('a stream to an app that is down gets an empty 200 stream with retry once the hold is up, not a 502', async () => {
@@ -92,7 +101,7 @@ test('a stream to an app still warming up (it answers 503) is told to come back 
   assert.deepEqual(failed, ['503 ']);
 });
 
-test('the down page: the kit\'s look, Retry, Back, and it checks again by itself', () => {
+test("the down page: the kit's look, Retry, Back, and it checks again by itself", () => {
   const html = appDown('Peek <Auras>', 'https://citadel.example');
   assert.match(html, /<link rel="stylesheet" href="\/apps\/_citadel\/theme\.css">/);
   assert.match(html, /<link rel="stylesheet" href="\/apps\/_citadel\/ui\/base\.css">/);
@@ -103,7 +112,7 @@ test('the down page: the kit\'s look, Retry, Back, and it checks again by itself
   assert.match(html, /'X-Citadel-Down-Check':'1'/);
 });
 
-test('through Citadel: a page load of an app that isn\'t answering gets the down page, a script\'s fetch still a 502', async () => {
+test("through Citadel: a page load of an app that isn't answering gets the down page, a script's fetch still a 502", async () => {
   const fake = fakeSystemd(join(root, 'systemd'));
   const home = join(root, 'home');
   const units = join(home, '.config', 'systemd', 'user');
@@ -133,7 +142,10 @@ test('through Citadel: a page load of an app that isn\'t answering gets the down
   const rows = () => {
     const db = new DatabaseSync(join(srv!.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
     try {
-      return db.prepare("SELECT key, count FROM contraption_errors WHERE kind = 'http'").all().map((r) => ({ ...r }));
+      return db
+        .prepare("SELECT key, count FROM contraption_errors WHERE kind = 'http'")
+        .all()
+        .map((r) => ({ ...r }));
     } finally {
       db.close();
     }

@@ -9,11 +9,16 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { bootServer, stopTurns, until, ok } from './helpers.ts';
 
-const TURNS = 100, WINDOW_S = 15, LIVE_S = 40;
+const TURNS = 100,
+  WINDOW_S = 15,
+  LIVE_S = 40;
 const budgetFile = join(import.meta.dirname, 'turn-cost.json');
 const root = mkdtempSync(join(tmpdir(), 'turn-cost-'));
 // timing-ok: stopTurns ends every child first
-after(async () => { await stopTurns(root); rmSync(root, { recursive: true, force: true }); });
+after(async () => {
+  await stopTurns(root);
+  rmSync(root, { recursive: true, force: true });
+});
 
 /** The main thread's CPU so far in ms: utime + stime of /proc/<pid>/task/<pid>, in 10 ms ticks. */
 function mainCpuMs(pid: number): number {
@@ -25,7 +30,9 @@ function mainCpuMs(pid: number): number {
 test('a running turn costs the main thread under its budget of CPU per turn-second', { skip: process.platform !== 'linux', timeout: 180_000 }, async () => {
   const started = join(root, 'started');
   const fake = join(root, 'claude-fake');
-  writeFileSync(fake, `#!${process.execPath}
+  writeFileSync(
+    fake,
+    `#!${process.execPath}
 const { writeFileSync, mkdirSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 mkdirSync(${JSON.stringify(started)}, { recursive: true });
@@ -35,7 +42,8 @@ createInterface({ input: process.stdin }).once('line', () => {
   const timer = setInterval(say, 500);
   setTimeout(() => { clearInterval(timer); console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' })); process.exit(0); }, ${LIVE_S * 1000});
 });
-`);
+`,
+  );
   chmodSync(fake, 0o755);
   const srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
   try {
@@ -54,9 +62,13 @@ createInterface({ input: process.stdin }).once('line', () => {
   }
 });
 
-test('the budget never rises past main\'s', { skip: !existsSync(join(import.meta.dirname, '..', '.git')) }, async () => {
+test("the budget never rises past main's", { skip: !existsSync(join(import.meta.dirname, '..', '.git')) }, async () => {
   const { execFileSync } = await import('node:child_process');
   let was: string;
-  try { was = execFileSync('git', ['show', 'main:test/turn-cost.json'], { cwd: import.meta.dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return; } // not on main yet, or no main here
+  try {
+    was = execFileSync('git', ['show', 'main:test/turn-cost.json'], { cwd: import.meta.dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return;
+  } // not on main yet, or no main here
   assert.ok(JSON.parse(readFileSync(budgetFile, 'utf8')).msPerTurnSecond <= JSON.parse(was).msPerTurnSecond, 'test/turn-cost.json may only fall');
 });

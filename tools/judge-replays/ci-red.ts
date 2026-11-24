@@ -63,7 +63,10 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     const repo = await gh(`repos/${slug}`);
     const branch: string = repo?.default_branch ?? 'main';
     const runs = repo && (await runsOn(slug, branch, start - LEAD_MS));
-    if (!runs) { unread.push(p.name); continue; }
+    if (!runs) {
+      unread.push(p.name);
+      continue;
+    }
     // A re-run shows only its last attempt: read the first, so a red that a re-run later cleared is red when it was.
     const firsts = new Map<number, Run>();
     for (const r of runs.filter((r) => (r.run_attempt ?? 1) > 1 && Date.parse(r.updated_at ?? r.created_at) > start)) {
@@ -103,9 +106,12 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     }
   }
   const ids = new Set(projects.map((p) => p.id));
-  const real = (store.db.prepare(`SELECT e.created_at AS at, e.data, t.project_id FROM events e JOIN tickets t ON t.id = e.ticket_id
+  const real = (
+    store.db
+      .prepare(`SELECT e.created_at AS at, e.data, t.project_id FROM events e JOIN tickets t ON t.id = e.ticket_id
       WHERE e.id >= ? AND e.kind = 'user_message' AND e.data LIKE '{"author":"Citadel","text":"%' AND (e.data LIKE '%went red: %' OR e.data LIKE '%: CI: %')`)
-    .all(store.eventIdAt(start)) as { at: number; data: string; project_id: number }[])
+      .all(store.eventIdAt(start)) as { at: number; data: string; project_id: number }[]
+  )
     .filter((r) => ids.has(r.project_id) && r.at >= start)
     .flatMap((r) => {
       const text = String(JSON.parse(r.data).text);
@@ -116,7 +122,8 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     });
   return {
     inputs: `${projects.length - unread.length} schemes' runs on main (gh, read-only) and their minions' chats`,
-    hits, real,
+    hits,
+    real,
     limits: [
       ...(unread.length ? [`gh couldn't read ${unread.join(', ')}`] : []),
       "Citadel's own re-runs after a fix ships (#1074) aren't made, so a red stays red until the next green run or a re-run a person made",

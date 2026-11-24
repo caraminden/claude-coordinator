@@ -63,8 +63,18 @@ export function publishLive(d: LiveDeps) {
     const s = d.statusInputs;
     if (!units || Date.now() - units.at >= UNITS_MS) units = { at: Date.now(), rows: await d.status.unitRows(store.listContraptions()) };
     const status = {
-      bootAt: s.bootAt, commit: s.commit, cores: cores(), probing: s.probing, lastMs: s.lastMs(), readerMs: s.readerMs(), storms: s.storms(), easing: s.easing(), desktops: s.desktops(),
-      disk: Object.fromEntries(store.listContraptions().map((r) => [r.name, s.diskUse(r)])), units: units.rows, jobs: jobList(),
+      bootAt: s.bootAt,
+      commit: s.commit,
+      cores: cores(),
+      probing: s.probing,
+      lastMs: s.lastMs(),
+      readerMs: s.readerMs(),
+      storms: s.storms(),
+      easing: s.easing(),
+      desktops: s.desktops(),
+      disk: Object.fromEntries(store.listContraptions().map((r) => [r.name, s.diskUse(r)])),
+      units: units.rows,
+      jobs: jobList(),
     };
     const projects = store.listProjects();
     const delta: SnapDelta = { status, ships: d.ships(), builds: Object.fromEntries(projects.map((p) => [p.id, d.builds(p.id)])), ownScheme: d.ownScheme(), previews: d.previews };
@@ -80,7 +90,8 @@ export function publishLive(d: LiveDeps) {
     await others();
     const ids = store.listProjects().flatMap((p) => store.listTickets(p.id).map((t) => t.id));
     // The longest stretch it held the main thread, which is what people's other requests wait behind.
-    let longest = 0, from = performance.now();
+    let longest = 0,
+      from = performance.now();
     for (let i = 0; i < ids.length; i++) {
       liveOf(ids[i]);
       if (i % 50 === 49) {
@@ -107,7 +118,12 @@ export function publishLive(d: LiveDeps) {
       await others();
       for (const id of runner.runningIds()) liveOf(id);
       if (++tick % SWEEP_ALL === 0) {
-        const open = store.listProjects().flatMap((p) => store.listTickets(p.id).filter((t) => t.status !== 'closed').map((t) => t.id));
+        const open = store.listProjects().flatMap((p) =>
+          store
+            .listTickets(p.id)
+            .filter((t) => t.status !== 'closed')
+            .map((t) => t.id),
+        );
         for (let i = 0; i < open.length; i++) {
           liveOf(open[i]);
           if (i % 50 === 49) await new Promise((r) => setImmediate(r));

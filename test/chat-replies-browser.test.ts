@@ -44,10 +44,11 @@ after(async () => {
 });
 
 /** Each chip as "label:on" or "label:off", in order, after the next frame has drawn. */
-const chips = (page: Page) => page.eval<string[]>(`new Promise((r) => requestAnimationFrame(() => setTimeout(() =>
+const chips = (page: Page) =>
+  page.eval<string[]>(`new Promise((r) => requestAnimationFrame(() => setTimeout(() =>
   r([...document.querySelectorAll('.cui-choice')].map((c) => c.textContent + (c.disabled ? ':off' : ':on'))), 0)))`);
 
-test('chips given while a turn runs come alive once it ends; a tapped one and older turns\' stay off', { skip }, async () => {
+test("chips given while a turn runs come alive once it ends; a tapped one and older turns' stay off", { skip }, async () => {
   const page = await browser.page(base, { width: 600, height: 500 });
   await page.eval(`chat.ask('go'); chat.push({ type: 'text', data: { text: 'Pick one' } }); chat.replies([{ label: 'A' }, { label: 'B' }])`);
   assert.deepEqual(await chips(page), ['A:off', 'B:off'], 'disabled while the turn runs');
@@ -76,6 +77,6 @@ test('a turn cut off by a restart shows Retry, which sends RETRY_SAY and goes on
   assert.deepEqual(await chips(page), ['Retry:off', 'Skip it:off']);
   // The app sends it as the person's message: the cut turn's Retry goes. Cut again: no Retry (one per cut).
   await page.eval(`chat.ask(said[0]); ${cut(false)}`);
-  assert.deepEqual(await chips(page), ['Skip it:off'], 'Retry goes; the older reply chip stays off, as older turns\' do');
+  assert.deepEqual(await chips(page), ['Skip it:off'], "Retry goes; the older reply chip stays off, as older turns' do");
   assert.match(await page.eval<string>(`document.querySelector('.cui-turn:last-child .cui-notice').textContent`), /cut this turn off/);
 });

@@ -147,7 +147,11 @@ export function initDrawers({ left, right, main } = {}) {
     if (open) {
       const other = panelFor(d.side === 'left' ? 'right' : 'left');
       // Not anything holding the drawer itself, which would go inert with it.
-      for (const el of [...mains(), other]) if (el && !el.contains(d.el) && !el.inert) { el.inert = true; d.inerted.push(el); }
+      for (const el of [...mains(), other])
+        if (el && !el.contains(d.el) && !el.inert) {
+          el.inert = true;
+          d.inerted.push(el);
+        }
       if (!d.el.contains(document.activeElement)) d.el.focus({ preventScroll: true });
     }
     const animate = !instant && !reduceMotion.matches && d.el.isConnected;
@@ -211,52 +215,77 @@ export function initDrawers({ left, right, main } = {}) {
 
   // ---- the gesture ----
 
-  document.addEventListener('touchstart', (e) => {
-    if (!narrow.matches || e.touches.length !== 1) {
-      // A second finger mid-drag ends the drag where it began (as touchcancel does), not half out.
-      if (touch?.mode === 'drag' && drawer) settle(touch.from === 1);
-      touch = null;
-      return;
-    }
-    const t = e.touches[0];
-    if (drawer) {
-      // A drag across an open drawer or its backdrop, toward its edge, pushes it back.
-      if (!drawer.el.contains(e.target) && e.target !== backdrop) return;
-      touch = { id: t.identifier, x0: t.clientX, y0: t.clientY, dir: drawer.side === 'left' ? -1 : 1, mode: 'wait', from: 1, target: e.target, samples: [] };
-      return;
-    }
-    let side = edgeSide(t.clientX, window.innerWidth);
-    if (side === 'left' && !panelFor(side) && hasRail()) side = 'rail';
-    if (!side || (side !== 'rail' && !panelFor(side))) { touch = null; return; }
-    touch = { id: t.identifier, x0: t.clientX, y0: t.clientY, side, dir: side === 'right' ? -1 : 1, mode: 'wait', from: 0, target: e.target, samples: [] };
-  }, { passive: true, signal });
+  document.addEventListener(
+    'touchstart',
+    (e) => {
+      if (!narrow.matches || e.touches.length !== 1) {
+        // A second finger mid-drag ends the drag where it began (as touchcancel does), not half out.
+        if (touch?.mode === 'drag' && drawer) settle(touch.from === 1);
+        touch = null;
+        return;
+      }
+      const t = e.touches[0];
+      if (drawer) {
+        // A drag across an open drawer or its backdrop, toward its edge, pushes it back.
+        if (!drawer.el.contains(e.target) && e.target !== backdrop) return;
+        touch = { id: t.identifier, x0: t.clientX, y0: t.clientY, dir: drawer.side === 'left' ? -1 : 1, mode: 'wait', from: 1, target: e.target, samples: [] };
+        return;
+      }
+      let side = edgeSide(t.clientX, window.innerWidth);
+      if (side === 'left' && !panelFor(side) && hasRail()) side = 'rail';
+      if (!side || (side !== 'rail' && !panelFor(side))) {
+        touch = null;
+        return;
+      }
+      touch = { id: t.identifier, x0: t.clientX, y0: t.clientY, side, dir: side === 'right' ? -1 : 1, mode: 'wait', from: 0, target: e.target, samples: [] };
+    },
+    { passive: true, signal },
+  );
 
-  document.addEventListener('touchmove', (e) => {
-    if (!touch) return;
-    const t = [...e.changedTouches].find((c) => c.identifier === touch.id);
-    if (!t) return;
-    const dx = t.clientX - touch.x0;
-    const dy = t.clientY - touch.y0;
-    if (touch.mode === 'wait') {
-      const kind = classify(dx, dy, touch.dir);
-      if (kind === 'wait') return;
-      // Past the left drawer, or from an edge with none: the app switcher, which slides out by itself.
-      const pastLeft = kind === 'ignore' && drawer?.side === 'left' && hasRail() && classify(dx, dy, 1) === 'swipe';
-      if (pastLeft && !scrollsSideways(touch.target, 1, drawer.el)) { touch = null; openRail(); return; }
-      if (kind === 'ignore' || scrollsSideways(touch.target, touch.dir, drawer?.el ?? document.body)) { touch = null; return; }
-      if (touch.side === 'rail') { touch = null; openRail(); return; }
-      if (!drawer && !mount(touch.side)) { touch = null; return; }
-      touch.mode = 'drag';
-      touch.x0 = t.clientX; // follow from here, so the drawer doesn't jump by the slop
-      drawer.el.classList.remove('citadel-drawer-settling');
-      backdrop.classList.remove('citadel-drawer-settling');
-    }
-    if (e.cancelable) e.preventDefault(); // the swipe is ours: no scrolling or history swipe
-    const moved = (t.clientX - touch.x0) * (drawer.side === 'left' ? 1 : -1);
-    setProgress(touch.from + moved / drawer.width);
-    touch.samples.push([e.timeStamp, t.clientX]);
-    if (touch.samples.length > 5) touch.samples.shift();
-  }, { passive: false, signal });
+  document.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!touch) return;
+      const t = [...e.changedTouches].find((c) => c.identifier === touch.id);
+      if (!t) return;
+      const dx = t.clientX - touch.x0;
+      const dy = t.clientY - touch.y0;
+      if (touch.mode === 'wait') {
+        const kind = classify(dx, dy, touch.dir);
+        if (kind === 'wait') return;
+        // Past the left drawer, or from an edge with none: the app switcher, which slides out by itself.
+        const pastLeft = kind === 'ignore' && drawer?.side === 'left' && hasRail() && classify(dx, dy, 1) === 'swipe';
+        if (pastLeft && !scrollsSideways(touch.target, 1, drawer.el)) {
+          touch = null;
+          openRail();
+          return;
+        }
+        if (kind === 'ignore' || scrollsSideways(touch.target, touch.dir, drawer?.el ?? document.body)) {
+          touch = null;
+          return;
+        }
+        if (touch.side === 'rail') {
+          touch = null;
+          openRail();
+          return;
+        }
+        if (!drawer && !mount(touch.side)) {
+          touch = null;
+          return;
+        }
+        touch.mode = 'drag';
+        touch.x0 = t.clientX; // follow from here, so the drawer doesn't jump by the slop
+        drawer.el.classList.remove('citadel-drawer-settling');
+        backdrop.classList.remove('citadel-drawer-settling');
+      }
+      if (e.cancelable) e.preventDefault(); // the swipe is ours: no scrolling or history swipe
+      const moved = (t.clientX - touch.x0) * (drawer.side === 'left' ? 1 : -1);
+      setProgress(touch.from + moved / drawer.width);
+      touch.samples.push([e.timeStamp, t.clientX]);
+      if (touch.samples.length > 5) touch.samples.shift();
+    },
+    { passive: false, signal },
+  );
 
   const release = (e) => {
     if (!touch) return;
@@ -277,54 +306,92 @@ export function initDrawers({ left, right, main } = {}) {
   // ---- other ways to close ----
 
   // Edge handles: the same drawers with a tap, where the browser's back/forward swipe wins the edge.
-  const handles = Object.keys(sides).filter((side) => sides[side]).map((side) => {
-    const handle = document.createElement('button');
-    handle.type = 'button';
-    handle.className = `citadel-drawer-handle ${side}`;
-    handle.setAttribute('aria-label', `Open ${sides[side].label.toLowerCase()}`);
-    handle.title = sides[side].label;
-    handle.addEventListener('click', () => open(side, handle));
-    document.body.append(handle);
-    return handle;
-  });
+  const handles = Object.keys(sides)
+    .filter((side) => sides[side])
+    .map((side) => {
+      const handle = document.createElement('button');
+      handle.type = 'button';
+      handle.className = `citadel-drawer-handle ${side}`;
+      handle.setAttribute('aria-label', `Open ${sides[side].label.toLowerCase()}`);
+      handle.title = sides[side].label;
+      handle.addEventListener('click', () => open(side, handle));
+      document.body.append(handle);
+      return handle;
+    });
 
   backdrop.addEventListener('click', () => close());
-  document.addEventListener('keydown', (e) => {
-    if (!drawer) return;
-    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
-    if (e.key !== 'Tab') return;
-    // Keep Tab inside the open drawer.
-    const items = [...drawer.el.querySelectorAll(FOCUSABLE)].filter((x) => x.offsetParent !== null || x === document.activeElement);
-    if (!items.length) return;
-    const [first, last] = [items[0], items.at(-1)];
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === drawer.el)) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-  }, { signal });
-  document.addEventListener('click', (e) => {
-    if (!drawer || !drawer.el.contains(e.target)) return;
-    // A <details> panel's own bar collapses it in the page; in a drawer it closes the drawer. A button or
-    // field or link in the bar (the project's rename ✎, its Settings link) does its own thing instead; a link
-    // then puts the drawer away below.
-    const summary = e.target.closest('summary');
-    if (summary?.parentElement === drawer.el && !e.target.closest('button, input, a[href]')) { e.preventDefault(); close(); return; }
-    // Following a link (a thread, project or artifact, or a contraption's own view) puts the drawer away.
-    const a = e.target.closest('a[href]');
-    if (a && !e.defaultPrevented) {
-      drawer.wasOpen = false;
-      close();
-    }
-  }, { capture: true, signal });
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (!drawer) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      // Keep Tab inside the open drawer.
+      const items = [...drawer.el.querySelectorAll(FOCUSABLE)].filter((x) => x.offsetParent !== null || x === document.activeElement);
+      if (!items.length) return;
+      const [first, last] = [items[0], items.at(-1)];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === drawer.el)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    },
+    { signal },
+  );
+  document.addEventListener(
+    'click',
+    (e) => {
+      if (!drawer || !drawer.el.contains(e.target)) return;
+      // A <details> panel's own bar collapses it in the page; in a drawer it closes the drawer. A button or
+      // field or link in the bar (the project's rename ✎, its Settings link) does its own thing instead; a link
+      // then puts the drawer away below.
+      const summary = e.target.closest('summary');
+      if (summary?.parentElement === drawer.el && !e.target.closest('button, input, a[href]')) {
+        e.preventDefault();
+        close();
+        return;
+      }
+      // Following a link (a thread, project or artifact, or a contraption's own view) puts the drawer away.
+      const a = e.target.closest('a[href]');
+      if (a && !e.defaultPrevented) {
+        drawer.wasOpen = false;
+        close();
+      }
+    },
+    { capture: true, signal },
+  );
   // Going anywhere else (a new thread started from the drawer, say) puts the drawer away; a new view
   // may also replace the element, so don't leave a drawer of the old one over it.
-  window.addEventListener('hashchange', () => {
-    if (!drawer) return;
-    if (!drawer.el.isConnected) { settle(false, { instant: true }); return; }
-    drawer.wasOpen = false;
-    close();
-  }, { signal });
+  window.addEventListener(
+    'hashchange',
+    () => {
+      if (!drawer) return;
+      if (!drawer.el.isConnected) {
+        settle(false, { instant: true });
+        return;
+      }
+      drawer.wasOpen = false;
+      close();
+    },
+    { signal },
+  );
   // Watches the page only while a drawer is out.
-  const watch = new MutationObserver(() => { if (drawer && !drawer.el.isConnected) settle(false, { instant: true }); });
-  narrow.addEventListener('change', () => { if (!narrow.matches && drawer) settle(false, { instant: true }); }, { signal });
+  const watch = new MutationObserver(() => {
+    if (drawer && !drawer.el.isConnected) settle(false, { instant: true });
+  });
+  narrow.addEventListener(
+    'change',
+    () => {
+      if (!narrow.matches && drawer) settle(false, { instant: true });
+    },
+    { signal },
+  );
 
   return {
     open: (side) => open(side),

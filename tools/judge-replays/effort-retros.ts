@@ -42,9 +42,6 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     inputs: `${efforts} named or chained efforts in ${projects.length} schemes, checked hourly over ${ctx.days} days`,
     hits,
     real,
-    limits: [
-      'effortName is read as it is now: a name changed during the window reads as the new one',
-      'A real act marked "would" was log-only; one marked "skip" was a build retro skip, also a hit here',
-    ],
+    limits: ['effortName is read as it is now: a name changed during the window reads as the new one', 'A real act marked "would" was log-only; one marked "skip" was a build retro skip, also a hit here'],
   };
 }

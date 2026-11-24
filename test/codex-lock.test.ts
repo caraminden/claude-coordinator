@@ -24,7 +24,9 @@ function home(left?: number, life = 10 * DAY): string {
 // Stands in for `codex app-server`: on account/read with refreshToken it takes FAKE_MS, then writes a login
 // with a new 10-day token (unless FAKE=fail), logging each refresh's start and end.
 const fake = join(root, 'fake-codex.mjs');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const home = process.env.CODEX_HOME;
@@ -49,7 +51,9 @@ process.stdin.on('data', (c) => {
   }
 });
 process.stdin.on('end', () => process.exit(0));
-`, { mode: 0o755 });
+`,
+  { mode: 0o755 },
+);
 const refreshes = (dir: string) => (existsSync(join(dir, 'refreshes')) ? readFileSync(join(dir, 'refreshes'), 'utf8').trim().split('\n') : []);
 const opts = (dir: string, extra: Record<string, string> = {}) => ({ bin: fake, env: { PATH: process.env.PATH, CODEX_HOME: dir, ...extra } });
 const locked = (dir: string) => existsSync(join(dir, 'citadel-turn.lock'));

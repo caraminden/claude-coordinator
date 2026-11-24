@@ -98,7 +98,7 @@ async function chain(w: LiveWaiters, leader: number, when: Chain['when'] = 'merg
 }
 const rows = (id?: number) => store.listDeliveries({ kind: 'chain', ...(id != null ? { to: id } : {}) });
 
-test('a chain is a row: met once the leader\'s work is in, and the outbox starts the follower with its brief, caught up', async () => {
+test("a chain is a row: met once the leader's work is in, and the outbox starts the follower with its brief, caught up", async () => {
   const s = server();
   await s.outbox.boot();
   const leader = minion();
@@ -109,14 +109,21 @@ test('a chain is a row: met once the leader\'s work is in, and the outbox starts
   assert.equal(row.payload.message, 'build part two');
   assert.equal(store.getSetting('chained-minions'), null, 'nothing in the old key');
   assert.match(s.waiters.heldFor(follower.id)!, /^#\d+ T's work has shipped$/);
-  assert.equal(await s.waiters.check(), 0, 'nothing of the leader\'s yet');
+  assert.equal(await s.waiters.check(), 0, "nothing of the leader's yet");
 
   work(leader.branch);
   merge(leader.branch);
   assert.equal(await s.waiters.check(), 1);
   await s.outbox.poke({ type: 'tick' });
-  assert.deepEqual(s.r.sent.map((x) => [x.id, x.text, x.brief]), [[follower.id, 'build part two', true]], 'the brief, plain, once');
-  assert.deepEqual(s.r.notes.map((x) => x.text), [`#${leader.number}'s work has shipped, so this minion started.`]);
+  assert.deepEqual(
+    s.r.sent.map((x) => [x.id, x.text, x.brief]),
+    [[follower.id, 'build part two', true]],
+    'the brief, plain, once',
+  );
+  assert.deepEqual(
+    s.r.notes.map((x) => x.text),
+    [`#${leader.number}'s work has shipped, so this minion started.`],
+  );
   assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: follower.dir, encoding: 'utf8' }).trim(), git('rev-parse', 'main'), 'caught up to main first');
   assert.equal(s.waiters.heldFor(follower.id), null, 'handed: no longer held');
   assert.equal(rows(follower.id)[0].state, 'sending', 'not sent until its turn starts');
@@ -140,8 +147,14 @@ test('a kill after sending starts the follower once, with the possible-repeat li
   const s2 = server();
   s2.now.t = T0 + 60_000;
   await s2.outbox.boot();
-  assert.deepEqual(s2.r.sent.map((x) => [x.id, x.text, x.brief]), [[follower.id, `build part two\n\n(The server restarted while sending this, so it may repeat delivery #${row.id}.)`, true]]);
-  assert.deepEqual(s2.r.notes.map((x) => x.text), [`#${leader.number}'s work has shipped, so this minion started.`]);
+  assert.deepEqual(
+    s2.r.sent.map((x) => [x.id, x.text, x.brief]),
+    [[follower.id, `build part two\n\n(The server restarted while sending this, so it may repeat delivery #${row.id}.)`, true]],
+  );
+  assert.deepEqual(
+    s2.r.notes.map((x) => x.text),
+    [`#${leader.number}'s work has shipped, so this minion started.`],
+  );
   s2.outbox.turnStarted(follower.id, [s2.r.sent[0].event]);
   assert.equal(await s2.waiters.check(), 0);
   await s2.outbox.poke({ type: 'tick' });
@@ -149,7 +162,7 @@ test('a kill after sending starts the follower once, with the possible-repeat li
   assert.equal(rows(follower.id)[0].state, 'sent');
 });
 
-test('a kill after the brief\'s turn started sends nothing again', async () => {
+test("a kill after the brief's turn started sends nothing again", async () => {
   const s1 = server();
   await s1.outbox.boot();
   const leader = minion();
@@ -197,7 +210,10 @@ test('a held chain stays held across a restart, told once, and starts if the wor
   merge(leader.branch);
   assert.equal(await s2.waiters.check(), 1);
   await s2.outbox.poke({ type: 'tick' });
-  assert.deepEqual(s2.r.sent.map((x) => [x.id, x.text]), [[follower.id, 'build part two']]);
+  assert.deepEqual(
+    s2.r.sent.map((x) => [x.id, x.text]),
+    [[follower.id, 'build part two']],
+  );
 });
 
 test('the old chained-minions key moves into the table in one go, held flags and every leader kept', async () => {
@@ -216,17 +232,24 @@ test('the old chained-minions key moves into the table in one go, held flags and
   // The dual read: before the move, the readers see the old key.
   const before = open.map((id) => [s.waiters.heldFor(id), s.waiters.heldBrief(id)?.text]);
   assert.match(String(before[1][0]), /so only Unseal starts you$/);
-  assert.deepEqual(before.map((b) => b[1]), ['one', 'two']);
+  assert.deepEqual(
+    before.map((b) => b[1]),
+    ['one', 'two'],
+  );
 
   await s.outbox.boot();
   assert.equal(store.getSetting('chained-minions'), null, 'emptied');
-  assert.deepEqual(open.map((id) => [s.waiters.heldFor(id), s.waiters.heldBrief(id)?.text]), before, 'no parked minion loses its leader');
+  assert.deepEqual(
+    open.map((id) => [s.waiters.heldFor(id), s.waiters.heldBrief(id)?.text]),
+    before,
+    'no parked minion loses its leader',
+  );
   const strip = (c: Chain) => ({ ticket: c.ticket, after: c.after, when: c.when, message: c.message, from: c.from, base: c.base, since: c.since, held: !!c.held });
-  assert.deepEqual(s.waiters.chains().map(strip), old.slice(0, 3).map(strip), 'each chain kept, a missing follower\'s dropped as the old check did');
+  assert.deepEqual(s.waiters.chains().map(strip), old.slice(0, 3).map(strip), "each chain kept, a missing follower's dropped as the old check did");
   const [a, b, c] = rows();
   assert.equal(a.state, 'waiting');
   assert.equal(b.state, 'held', 'held for its leader');
-  assert.equal(c.state, 'held', 'a dismissed follower\'s: the 3-day rule');
+  assert.equal(c.state, 'held', "a dismissed follower's: the 3-day rule");
   assert.equal(c.reason, 'target closed');
   assert.equal(s.r.held.length, 0, 'the held one was told before: not again');
 
@@ -251,7 +274,7 @@ test('Start now takes the row: the brief goes once, a check meanwhile leaves it,
   assert.equal(await s.waiters.check(), 0, 'a start runs: the check leaves it');
 
   s.r.fail = true;
-  await assert.rejects(s.start(c!, 'Cara started it before its leader\'s work was in'), /send failed/);
+  await assert.rejects(s.start(c!, "Cara started it before its leader's work was in"), /send failed/);
   assert.equal(rows(follower.id)[0].state, 'waiting', 'put back');
   assert.ok(s.waiters.heldFor(follower.id));
   s.r.notes.length = 0; // the start note goes just before the send, as it did before the outbox: a send that throws leaves it
@@ -259,9 +282,15 @@ test('Start now takes the row: the brief goes once, a check meanwhile leaves it,
   s.r.fail = false;
   const again = s.waiters.claim(follower.id);
   assert.ok(again);
-  await s.start(again!, 'Cara started it before its leader\'s work was in');
-  assert.deepEqual(s.r.sent.map((x) => [x.id, x.text, x.brief]), [[follower.id, 'build part two', true]]);
-  assert.deepEqual(s.r.notes.map((x) => x.text), ['Cara started it before its leader\'s work was in, so this minion started.']);
+  await s.start(again!, "Cara started it before its leader's work was in");
+  assert.deepEqual(
+    s.r.sent.map((x) => [x.id, x.text, x.brief]),
+    [[follower.id, 'build part two', true]],
+  );
+  assert.deepEqual(
+    s.r.notes.map((x) => x.text),
+    ["Cara started it before its leader's work was in, so this minion started."],
+  );
   assert.equal(s.waiters.heldFor(follower.id), null);
   assert.equal(s.waiters.heldBrief(follower.id), null);
   assert.equal(await s.waiters.check(), 0);
@@ -269,7 +298,7 @@ test('Start now takes the row: the brief goes once, a check meanwhile leaves it,
   assert.equal(s.r.sent.length, 1, 'once');
 });
 
-test('a dismissed follower\'s chain is held 3 days and goes on after a reopen, then dropped if none', async () => {
+test("a dismissed follower's chain is held 3 days and goes on after a reopen, then dropped if none", async () => {
   const s = server();
   await s.outbox.boot();
   const leader = minion();

@@ -28,7 +28,11 @@ writeFileSync(refsFile, JSON.stringify({ scheme: 'Citadel', others: ['Peek Auras
 const big = join(root, 'big.ts');
 writeFileSync(big, Array.from({ length: 900 }, (_, i) => `const line${i} = ${i};`).join('\n'));
 
-interface Out { stdout: string; stderr: string; code: number }
+interface Out {
+  stdout: string;
+  stderr: string;
+  code: number;
+}
 const run = (command: string, input: string): Out => {
   const r = spawnSync('bash', ['-c', command], { input, encoding: 'utf8' });
   return { stdout: r.stdout, stderr: r.stderr, code: r.status ?? -1 };
@@ -65,7 +69,7 @@ function same(call: object, side = false, label = JSON.stringify(call).slice(0, 
   const entries = runner.filter((e) => new RegExp(e.matcher).test(tool));
   assert.equal(entries.length, outs.length > 0 ? 1 : 0, `${label}: the runner starts exactly when some old hook did, once`);
   // Block on failure exactly where a hard check (tripwire, side guard) read the call before, as before.
-  const hardBefore = alone.some((h) => (h.hard && new RegExp(h.matcher).test(tool)));
+  const hardBefore = alone.some((h) => h.hard && new RegExp(h.matcher).test(tool));
   if (entries.length) assert.equal(entries[0].hooks[0].onFailure === 'block', hardBefore, `${label}: blocks on failure only where a hard check did`);
   const got = run(runner[0].hooks[0].command, input);
   const blocked = outs.filter((o) => o.code === 2);
@@ -133,7 +137,7 @@ test('a side question: the read-only guard refuses writes first, every tool goes
   assert.equal(hookRunMatcher(true), '.*');
 });
 
-test('the runner keeps the tripwire\'s 10 s limit and its block on failure (#817), and pins every file it loads', () => {
+test("the runner keeps the tripwire's 10 s limit and its block on failure (#817), and pins every file it loads", () => {
   const { runner } = setup(false, 'shape');
   const [hard, soft] = runner;
   assert.equal(runner.length, 2);
@@ -152,7 +156,7 @@ test('the runner keeps the tripwire\'s 10 s limit and its block on failure (#817
   for (const f of ['hook-run.ts', 'hook-matchers.ts', 'pre-tool-hook.ts', 'tripwire.ts', 'side-guard.ts', 'wording.ts', 'scheme-refs.ts']) assert.ok(readFileSync(join(pins.MCP_DIR, f)), f);
 });
 
-test('a check that can\'t load blocks or passes as its own hook did: the tripwire and side guard block, the rest pass', () => {
+test("a check that can't load blocks or passes as its own hook did: the tripwire and side guard block, the rest pass", () => {
   const copy = (missing: string) => {
     const dir = join(root, `pin-no-${missing}`);
     rmSync(dir, { recursive: true, force: true });

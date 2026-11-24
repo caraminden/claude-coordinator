@@ -26,7 +26,12 @@ const B = store.createProject('B', null);
 // A scheme with a repo whose build/5 branch exists: its feeder's go card merges, its build minion's and a plain minion's ship.
 const gitRepo = join(root, 'repo');
 mkdirSync(gitRepo);
-for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x'], ['branch', 'build/5']]) execFileSync('git', a, { cwd: gitRepo });
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x'],
+  ['branch', 'build/5'],
+])
+  execFileSync('git', a, { cwd: gitRepo });
 const C = store.createProject('C', null);
 store.setProjectRepoDir(C.id, gitRepo);
 const minion = (p: number, title: string) => store.createTicket({ project_id: p, kind: 'ticket', title, permission_mode: 'default', created_by: 'Cara' });
@@ -58,8 +63,12 @@ before(async () => {
 async function tool(name: string, args: object): Promise<{ text: string; error: boolean }> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(M1.id),
-      COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(M1.id), COORDINATOR_ROLE: 'thread',
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(M1.id),
+      COORDINATOR_PROJECT: String(A.id),
+      COORDINATOR_TICKET: String(M1.id),
+      COORDINATOR_ROLE: 'thread',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -103,9 +112,7 @@ test("the route gives a minion only the line's fields, and refuses another schem
   assert.equal(res.status, 200);
   const { tickets } = await res.json();
   assert.deepEqual(tickets.map((t: any) => t.title).sort(), ['Asker', 'Sibling']);
-  assert.deepEqual(Object.keys(tickets[0]).sort(), [
-    'branch', 'build', 'closing', 'created_by', 'effort', 'last_activity', 'model', 'note', 'number', 'open_cards', 'parent', 'plugin_dirs', 'properties', 'queued', 'state', 'status', 'title', 'workflow',
-  ]);
+  assert.deepEqual(Object.keys(tickets[0]).sort(), ['branch', 'build', 'closing', 'created_by', 'effort', 'last_activity', 'model', 'note', 'number', 'open_cards', 'parent', 'plugin_dirs', 'properties', 'queued', 'state', 'status', 'title', 'workflow']);
   const cross = await get(`/api/projects/${B.id}/tickets`, M1.id);
   assert.equal(cross.status, 403);
   assert.equal((await get(`/api/projects/${B.id}/tickets`, OTHER.id)).status, 200);
@@ -128,8 +135,15 @@ test('a question card asked with kind merge reads as a ship card on the list; an
   assert.equal(asked.error, false, asked.text);
   const { data: scheme } = await srv.call(`/api/projects/${A.id}`);
   const cards = scheme.tickets.find((t: any) => t.title === 'Asker').open_cards;
-  assert.deepEqual(cards.map((c: any) => [c.kind, c.what]), [['question', 'ship']]);
-  assert.deepEqual(scheme.tickets.find((t: any) => t.title === 'Sibling').open_cards.map((c: any) => c.what), ['question'], 'a plain question stays a question');
+  assert.deepEqual(
+    cards.map((c: any) => [c.kind, c.what]),
+    [['question', 'ship']],
+  );
+  assert.deepEqual(
+    scheme.tickets.find((t: any) => t.title === 'Sibling').open_cards.map((c: any) => c.what),
+    ['question'],
+    'a plain question stays a question',
+  );
   const bad = await fetch(`${srv.base}/api/tickets/${M1.id}/questions`, { method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(M1.id)}`, 'content-type': 'application/json' }, body: JSON.stringify({ questions: q, kind: 'deploy' }) });
   assert.equal(bad.status, 400);
   // "ship" is the word people read (Cara, 2026-11-19, on #1020's card), and an older "land" still counts: asked with
@@ -139,7 +153,10 @@ test('a question card asked with kind merge reads as a ship card on the list; an
     assert.equal(r.status, 201, await r.text());
   }
   const { data: after } = await srv.call(`/api/projects/${A.id}`);
-  assert.deepEqual(after.tickets.find((t: any) => t.id === M1.id).open_cards.map((c: any) => c.what), ['ship', 'ship', 'ship']);
+  assert.deepEqual(
+    after.tickets.find((t: any) => t.id === M1.id).open_cards.map((c: any) => c.what),
+    ['ship', 'ship', 'ship'],
+  );
 });
 
 test("a feeder's go card says merge, a build owner's and a plain minion's say ship", async () => {

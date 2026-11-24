@@ -44,8 +44,15 @@ export interface CiNow {
 }
 
 const at = (s: string | null | undefined) => (s ? Date.parse(s) : NaN);
-const passed = (j: Job) => { const s = ciState(j.status, j.conclusion); return s === 'pass' || s === 'skip'; };
-interface Step { name: string; status: string; conclusion: string | null }
+const passed = (j: Job) => {
+  const s = ciState(j.status, j.conclusion);
+  return s === 'pass' || s === 'skip';
+};
+interface Step {
+  name: string;
+  status: string;
+  conclusion: string | null;
+}
 
 /** A job's place in its steps: the one running (or next), of how many. */
 function stepOf(j: Job): { n: number; of: number; name: string } {
@@ -69,10 +76,19 @@ export function ciNow(jobs: Job[], over = true): CiNow | null {
     // Every job skipped or neutral (a draft's PR CI, #558) tested nothing: not green.
     const stage = !failed.length ? (jobs.some((j) => j.conclusion === 'success') ? 'passed' : 'skipped') : failed.every((j) => j.conclusion === 'cancelled') ? 'cancelled' : 'failed';
     const bad = failed.filter((j) => j.conclusion !== 'cancelled');
-    const text = stage === 'passed' ? `passed, ${jobs.length === 1 ? 'its job' : `all ${jobs.length} jobs`} green`
-      : stage === 'skipped' ? `ran nothing, ${jobs.length === 1 ? 'its job' : `all ${jobs.length} jobs`} skipped`
-      : stage === 'cancelled' ? 'cancelled'
-        : `failed in ${bad.map((j) => { const s = ((j.steps ?? []) as Step[]).find((x) => x.conclusion === 'failure'); return s ? `${j.name} (${s.name})` : j.name; }).join(', ')}`;
+    const text =
+      stage === 'passed'
+        ? `passed, ${jobs.length === 1 ? 'its job' : `all ${jobs.length} jobs`} green`
+        : stage === 'skipped'
+          ? `ran nothing, ${jobs.length === 1 ? 'its job' : `all ${jobs.length} jobs`} skipped`
+          : stage === 'cancelled'
+            ? 'cancelled'
+            : `failed in ${bad
+                .map((j) => {
+                  const s = ((j.steps ?? []) as Step[]).find((x) => x.conclusion === 'failure');
+                  return s ? `${j.name} (${s.name})` : j.name;
+                })
+                .join(', ')}`;
     return { stage, short: stage, text, since, ended: Number.isFinite(ended) ? ended : undefined };
   }
   const running = jobs.filter((j) => j.status === 'in_progress');
@@ -96,7 +112,10 @@ export function ciNow(jobs: Job[], over = true): CiNow | null {
 
 /** The Actions runs a PR's pending checks belong to, by their details links. */
 export function pendingRuns(pr: PrSnapshot): number[] {
-  const ids = pr.checks.filter((c) => c.status === 'pending').map((c) => /\/actions\/runs\/(\d+)\//.exec(c.url ?? '')?.[1]).filter(Boolean);
+  const ids = pr.checks
+    .filter((c) => c.status === 'pending')
+    .map((c) => /\/actions\/runs\/(\d+)\//.exec(c.url ?? '')?.[1])
+    .filter(Boolean);
   return [...new Set(ids.map(Number))];
 }
 
@@ -330,7 +349,8 @@ export class CiRuns {
 
   /** The median length of a run's workflow's last five green runs, s; the workflow's read at most hourly. */
   private async usual(w: Watch, runId: number): Promise<number | null> {
-    let body, key = '';
+    let body,
+      key = '';
     try {
       const workflow = (await this.read(`repos/${w.slug}/actions/runs/${runId}`, w.as))?.workflow_id;
       if (!workflow) return null;

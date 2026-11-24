@@ -26,7 +26,9 @@ export const menu = {
 };
 
 const shorten = (t, n = 60) => {
-  const s = String(t ?? '').replace(/\s+/g, ' ').trim();
+  const s = String(t ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 };
 const copy = (text, what) => copyText(text).then((ok) => toast(ok ? `${what} copied` : `Could not copy the ${what.toLowerCase()}`));
@@ -36,7 +38,9 @@ function ownMatch(t) {
   let best = null;
   for (const a of added) {
     let el = null;
-    try { el = t.closest(a.selector); } catch {} // a bad selector matches nothing
+    try {
+      el = t.closest(a.selector);
+    } catch {} // a bad selector matches nothing
     if (el && (!best || best.el === el || best.el.contains(el))) best = { a, el };
   }
   return best;
@@ -51,12 +55,8 @@ export function appMenuFor(target, e, ctx) {
   if (target.closest('.citadel-rail, .citadel-layer')) return null;
   const title = ctx.title();
   const desktop = ctx.desktop();
-  const foot = desktop || matchMedia('(pointer: coarse)').matches ? undefined : 'Shift+right-click: the browser\'s own menu';
-  const point = (el, label = 'Point at this') => (ctx.framed ? [
-    { label, icon: '📍', point: true, run: () => pointAt(el, ctx) },
-    { label: 'Point and draw…', icon: '✎', point: true, run: () => pointAt(el, ctx, true) },
-    '-',
-  ] : []);
+  const foot = desktop || matchMedia('(pointer: coarse)').matches ? undefined : "Shift+right-click: the browser's own menu";
+  const point = (el, label = 'Point at this') => (ctx.framed ? [{ label, icon: '📍', point: true, run: () => pointAt(el, ctx) }, { label: 'Point and draw…', icon: '✎', point: true, run: () => pointAt(el, ctx, true) }, '-'] : []);
   const [x, y] = e?.clientX || e?.clientY ? [e.clientX, e.clientY] : centre(target);
   const inspect = { label: 'Inspect', icon: '⌕', keys: 'Ctrl+Shift+I', run: () => ctx.post('inspect', { x, y }) };
   const reload = { label: `Reload ${title}`, icon: '↻', keys: 'Ctrl+R', run: () => location.reload() };
@@ -74,25 +74,26 @@ export function appMenuFor(target, e, ctx) {
   if (own) {
     const items = (own.a.items(own.el, e) ?? []).map((it) => (it && it !== '-' ? { ...it, from: title } : it));
     const text = own.el.innerText?.trim();
-    return { kind: own.a.kind ?? `${title} item`, ...appTone, name: shorten(own.a.name?.(own.el) ?? text, 50), foot, items: [
-      ...point(own.el), ...items, text && '-', text && { label: 'Copy text', icon: '⧉', run: () => copy(text, 'Text') }, ...tail,
-    ] };
+    return { kind: own.a.kind ?? `${title} item`, ...appTone, name: shorten(own.a.name?.(own.el) ?? text, 50), foot, items: [...point(own.el), ...items, text && '-', text && { label: 'Copy text', icon: '⧉', run: () => copy(text, 'Text') }, ...tail] };
   }
   const link = target.closest('a[href]');
   if (link) {
-    return { kind: 'Link', tone: 'info', name: shorten(link.textContent) || link.href, foot, items: [
-      ...point(link),
-      { label: 'Open', icon: '→', run: () => link.click() },
-      // The desktop app sends a new tab to the browser or back into its one window itself (desktop/main.cjs).
-      !desktop && { label: 'Open in a new tab', icon: '↗', run: () => window.open(link.href, '_blank', 'noopener') },
-      { label: 'Copy link address', icon: '🔗', run: () => copy(link.href, 'Link') },
-      ...tail,
-    ] };
+    return {
+      kind: 'Link',
+      tone: 'info',
+      name: shorten(link.textContent) || link.href,
+      foot,
+      items: [
+        ...point(link),
+        { label: 'Open', icon: '→', run: () => link.click() },
+        // The desktop app sends a new tab to the browser or back into its one window itself (desktop/main.cjs).
+        !desktop && { label: 'Open in a new tab', icon: '↗', run: () => window.open(link.href, '_blank', 'noopener') },
+        { label: 'Copy link address', icon: '🔗', run: () => copy(link.href, 'Link') },
+        ...tail,
+      ],
+    };
   }
-  const page = [
-    { label: `Copy link to ${title}`, icon: '🔗', run: () => copy(location.href, 'Link') },
-    reload,
-  ];
+  const page = [{ label: `Copy link to ${title}`, icon: '🔗', run: () => copy(location.href, 'Link') }, reload];
   const end = desktop ? ['-', inspect] : [];
   const part = target.closest(PICKABLE);
   if (part && part !== document.body) return { kind: 'Part', tone: 'neutral', name: describePart(part, title, '').label.split(' · ')[0], foot, items: [...point(part), ...page, ...end] };
@@ -132,5 +133,8 @@ export function mountAppMenu(ctx) {
   noCallout.replaceSync('a[href] { -webkit-touch-callout: none; }');
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, noCallout];
   const off = mountMenus({ menuFor: (t, e) => appMenuFor(t, e, ctx), longPress: (t) => pressable(t) });
-  return () => { off(); document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== noCallout); };
+  return () => {
+    off();
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== noCallout);
+  };
 }

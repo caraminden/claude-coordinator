@@ -5,7 +5,8 @@ import { basename, join, resolve } from 'node:path';
 import { hard, under, type TripwireConfig, type Verdict, type Word } from './tripwire-base.ts';
 
 // CLAUDE.md's "commit before you move", ported from Delve's git guard (tools/mods/delve/hooks, judgeGit).
-const NEVER_PATH = 'A folder, a pattern or another commit\'s version checked out or restored over uncommitted work throws it away. Files named one by one, from HEAD or the index (`git checkout -- path`, `git checkout HEAD -- path`, `git restore path`), pass: the tripwire saves their diff under $TMPDIR first. To see an old version, use `git show <ref>:path` or `git diff`; to take files from another commit or a whole folder back, commit first (a WIP commit is fine).';
+const NEVER_PATH =
+  "A folder, a pattern or another commit's version checked out or restored over uncommitted work throws it away. Files named one by one, from HEAD or the index (`git checkout -- path`, `git checkout HEAD -- path`, `git restore path`), pass: the tripwire saves their diff under $TMPDIR first. To see an old version, use `git show <ref>:path` or `git diff`; to take files from another commit or a whole folder back, commit first (a WIP commit is fine).";
 const STASH_WHY = 'The stash stack is shared by every worktree of the repo, so another session can pop your entry, or you theirs. Commit work in progress instead (a WIP commit is fine), and use `git show HEAD:path` or `git diff` to see the old version.';
 const PROTECTED = /^(main|master)$/;
 const MAIN_WHY = "main changes only through the scheme's own route (tools/land.sh and tools/deploy.sh, or a merged pull request), never a push from a minion's worktree. Push your minion branch.";
@@ -42,7 +43,12 @@ function conflicted(dir: string, paths: Word[]): boolean {
   const top = git(dir, 'rev-parse', '--show-toplevel');
   const u = git(dir, 'diff', '--name-only', '--diff-filter=U');
   if (top?.status !== 0 || u?.status !== 0) return false;
-  const open = new Set(u.out.split('\n').filter(Boolean).map((f) => resolve(top.out.trim(), f)));
+  const open = new Set(
+    u.out
+      .split('\n')
+      .filter(Boolean)
+      .map((f) => resolve(top.out.trim(), f)),
+  );
   return paths.every((w) => open.has(resolve(dir, w.text)));
 }
 
@@ -134,7 +140,9 @@ export function gitHabitReason(sub: string, args: Word[], dir: string | null, cf
         if ((dd < 0 || dd === words.length - 1) && ref.length === 1 && !ref[0].unknown) return staleSquashReason(ref[0].text, words, dir);
       }
       break;
-    case 'rebase': case 'pull': case 'cherry-pick':
+    case 'rebase':
+    case 'pull':
+    case 'cherry-pick':
       if (!has('--abort', '--continue', '--quit', '--skip')) move = `git ${sub}`;
       break;
     case 'push':
@@ -144,13 +152,23 @@ export function gitHabitReason(sub: string, args: Word[], dir: string | null, cf
   }
   if (!move || !dir || committed) return null;
   const st = git(dir, 'status', '--porcelain', '--untracked-files=no');
-  const dirty = st?.status === 0 ? st.out.split('\n').map((l) => l.slice(3)).filter(Boolean) : [];
+  const dirty =
+    st?.status === 0
+      ? st.out
+          .split('\n')
+          .map((l) => l.slice(3))
+          .filter(Boolean)
+      : [];
   if (!dirty.length) return null;
   return hard(`Commit first: \`${move}\` with ${dirty.length} uncommitted tracked file(s) (${dirty.slice(0, 5).join(', ')}${dirty.length > 5 ? ', …' : ''}) can lose them. Commit (a WIP commit is fine) before any checkout, merge, rebase or reset; to see another version of a file, use \`git show <ref>:path\`.`);
 }
 
 /** Files whose uncommitted changes the hook saves under the turn's TMPDIR before a checkout or restore throws them away (#1716); `head`: from HEAD, so staged changes go too. */
-export interface Save { dir: string; head: boolean; paths: string[] }
+export interface Save {
+  dir: string;
+  head: boolean;
+  paths: string[];
+}
 
 // Raw and from the repo's top whatever the config: a textconv, an external diff, colour, noprefix or diff.relative would make a patch `git apply` can't take.
 const RAW = ['--binary', '--no-color', '--no-ext-diff', '--no-textconv', '--no-relative', '--src-prefix=a/', '--dst-prefix=b/'];
@@ -211,7 +229,9 @@ function staleSquashReason(target: string, words: string[], dir: string): Verdic
   // Only a commit on some branch is other work: the commit before an amend (HEAD@{1}) is on none, and undoing an amend reverts nothing.
   const on = git(dir, 'for-each-ref', '--count=1', '--contains', sha.out.trim(), '--format=%(refname)', 'refs/heads', 'refs/remotes');
   if (on?.status !== 0 || !on.out.trim()) return null;
-  return hard(`\`git reset ${words.join(" ")}\` keeps this branch's files but puts it on ${target}, which has commits this branch doesn't: the next commit would revert them (Peek Auras #309 undid a landing that way, and land saw a clean fast-forward). To squash, rebase first (\`git rebase ${target}\`) and then reset, or squash where the branch started: \`git reset --soft $(git merge-base HEAD ${target})\`. To move a branch with no work of its own up to ${target}, use \`git reset --keep ${target}\`.`);
+  return hard(
+    `\`git reset ${words.join(' ')}\` keeps this branch's files but puts it on ${target}, which has commits this branch doesn't: the next commit would revert them (Peek Auras #309 undid a landing that way, and land saw a clean fast-forward). To squash, rebase first (\`git rebase ${target}\`) and then reset, or squash where the branch started: \`git reset --soft $(git merge-base HEAD ${target})\`. To move a branch with no work of its own up to ${target}, use \`git reset --keep ${target}\`.`,
+  );
 }
 
 /** Why a `git push` from a minion's worktree is blocked: it reaches main, or forces without a lease. With dir null, the current branch is unknown. */

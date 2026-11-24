@@ -32,8 +32,12 @@ before(async () => {
 async function tool(from: number, name: string, args: object): Promise<{ text: string; error: boolean }> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(from),
-      COORDINATOR_PROJECT: String(A.id), COORDINATOR_TICKET: String(from), COORDINATOR_ROLE: 'thread',
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(from),
+      COORDINATOR_PROJECT: String(A.id),
+      COORDINATOR_TICKET: String(from),
+      COORDINATOR_ROLE: 'thread',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -53,7 +57,11 @@ test('unpark: true with wake: false still unparks and delivers the message, not 
   const r = await tool(M1.id, 'message_minion', { ticket_id: P.number, text: 'my work is on main, go ahead', unpark: true, wake: false });
   assert.equal(r.error, false, r.text);
   assert.doesNotMatch(r.text, /held mail/i, 'the reply does not say it was left as held mail');
-  const msg = store.listEvents(P.id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data)).find((m) => m.text === 'my work is on main, go ahead');
+  const msg = store
+    .listEvents(P.id)
+    .filter((e) => e.kind === 'user_message')
+    .map((e) => JSON.parse(e.data))
+    .find((m) => m.text === 'my work is on main, go ahead');
   assert.ok(msg, 'the message reached its chat');
   assert.notEqual(msg.mail, true, 'it went in as a message that starts the turn, not as held mail');
   assert.notEqual(store.getTicket(P.id)!.state, 'parked', 'the unparked minion does not stay parked');

@@ -60,7 +60,10 @@ after(async () => {
 const drawn = `[...document.querySelectorAll('#log .msg')].some((el) => el.textContent.includes('drawn'))`;
 const dimmed = `document.body.classList.contains('navigating')`;
 
-for (const [who, hash] of [['a Taskmaster', '#/p/1'], ['a minion', '#/p/1/t/7']]) {
+for (const [who, hash] of [
+  ['a Taskmaster', '#/p/1'],
+  ['a minion', '#/p/1/t/7'],
+]) {
   test(`${who}'s chat isn't dimmed once it's drawn, while the catch-up and recap are still on their way`, { skip }, async () => {
     const page = await browser.page(`${base}${hash}`, { width: 1280, height: 800 });
     await waitFor(page, 'the chat to draw', drawn);

@@ -16,9 +16,12 @@ export const PICKABLE = '[data-part], button, a[href], input, select, textarea, 
 /** The part plus its margin, kept inside the window, in the window's CSS pixels; null when there's too little or too much of it. */
 export function cropBox(target) {
   const box = target.getBoundingClientRect();
-  const x0 = Math.max(box.left - MARGIN, 0), y0 = Math.max(box.top - MARGIN, 0);
-  const x1 = Math.min(box.right + MARGIN, innerWidth), y1 = Math.min(box.bottom + MARGIN, innerHeight);
-  const w = Math.round(x1 - x0), h = Math.round(y1 - y0);
+  const x0 = Math.max(box.left - MARGIN, 0),
+    y0 = Math.max(box.top - MARGIN, 0);
+  const x1 = Math.min(box.right + MARGIN, innerWidth),
+    y1 = Math.min(box.bottom + MARGIN, innerHeight);
+  const w = Math.round(x1 - x0),
+    h = Math.round(y1 - y0);
   return w < 4 || h < 4 || w > MAX_SIDE * 2 || h > MAX_SIDE * 2 ? null : { left: Math.round(x0), top: Math.round(y0), width: w, height: h };
 }
 
@@ -28,9 +31,12 @@ export async function cropPart(target) {
     const host = frameFor(target, box);
     const hr = host.getBoundingClientRect();
     // The crop: the part plus a margin, kept inside the viewport; past the host's edge is its background.
-    const x0 = Math.max(box.left - MARGIN, 0), y0 = Math.max(box.top - MARGIN, 0);
-    const x1 = Math.min(box.right + MARGIN, innerWidth), y1 = Math.min(box.bottom + MARGIN, innerHeight);
-    const w = Math.round(x1 - x0), h = Math.round(y1 - y0);
+    const x0 = Math.max(box.left - MARGIN, 0),
+      y0 = Math.max(box.top - MARGIN, 0);
+    const x1 = Math.min(box.right + MARGIN, innerWidth),
+      y1 = Math.min(box.bottom + MARGIN, innerHeight);
+    const w = Math.round(x1 - x0),
+      h = Math.round(y1 - y0);
     if (w < 4 || h < 4 || w > MAX_SIDE * 2 || h > MAX_SIDE * 2) return null;
     if (host.getElementsByTagName('*').length > MAX_NODES) return null;
     // The host's copy sits where the host is, shifted so the crop's corner is the picture's corner.
@@ -189,10 +195,7 @@ export function describePart(el, page, where) {
   const theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   const what = name ? `${kind} "${name}"` : kind;
   const label = [name || part || kind, page, `${size} ${theme}`].join(' · ');
-  const text = [
-    `📍 Pointed at: ${what}${part ? ` (part ${part})` : ''}${within ? `, inside part ${within}` : ''}`,
-    `On: ${page} (${where}) · window ${size} · ${theme} theme`,
-  ].join('\n');
+  const text = [`📍 Pointed at: ${what}${part ? ` (part ${part})` : ''}${within ? `, inside part ${within}` : ''}`, `On: ${page} (${where}) · window ${size} · ${theme} theme`].join('\n');
   return { label, text };
 }
 
@@ -209,6 +212,5 @@ function kindOf(el) {
   const role = el.getAttribute('role');
   if (role) return role;
   const tag = el.tagName.toLowerCase();
-  return { a: 'link', button: 'button', input: 'field', textarea: 'text box', select: 'dropdown', summary: 'section toggle', li: 'list item', tr: 'table row', label: 'label' }[tag]
-    ?? (/^h\d$/.test(tag) ? 'heading' : el.classList.contains('thread-row') ? 'minion row' : el.classList.contains('msg') ? 'message' : tag);
+  return { a: 'link', button: 'button', input: 'field', textarea: 'text box', select: 'dropdown', summary: 'section toggle', li: 'list item', tr: 'table row', label: 'label' }[tag] ?? (/^h\d$/.test(tag) ? 'heading' : el.classList.contains('thread-row') ? 'minion row' : el.classList.contains('msg') ? 'message' : tag);
 }

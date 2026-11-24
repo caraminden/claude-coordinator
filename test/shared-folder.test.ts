@@ -28,7 +28,10 @@ test('the coordinator adds the shared and memory folders without denying edits t
   const { addDirs, settings } = coordinatorAccess(repo, tickets, shared, memory) as any;
   assert.deepEqual(addDirs, [repo, tickets, shared, memory]);
   const { deny, allow } = settings.permissions;
-  assert.deepEqual(deny.filter((r: string) => r.startsWith('Edit(')), [`Edit(/${repo}/**)`, `Edit(/${tickets}/**)`]);
+  assert.deepEqual(
+    deny.filter((r: string) => r.startsWith('Edit(')),
+    [`Edit(/${repo}/**)`, `Edit(/${tickets}/**)`],
+  );
   assert.ok(!deny.some((r: string) => r.includes(shared) || r.includes(memory)));
   // Still no writing shell: besides the web tools (#210), the only rules are read-only Bash and Read ones (#483).
   const bash = allow.filter((r: string) => r !== 'WebSearch' && r !== 'WebFetch');
@@ -93,5 +96,8 @@ test('the walk counts only the files it keeps toward its cap, so a folder full o
   mkdirSync(join(dir, 'a'), { recursive: true });
   for (let i = 0; i < 5; i++) writeFileSync(join(dir, 'a', `data-${i}.json`), 'x');
   writeFileSync(join(dir, 'z.md'), 'x');
-  assert.deepEqual((await findArtifacts(dir, false, sharedListable, 1)).map((f) => f.path), ['z.md']);
+  assert.deepEqual(
+    (await findArtifacts(dir, false, sharedListable, 1)).map((f) => f.path),
+    ['z.md'],
+  );
 });

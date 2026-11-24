@@ -15,7 +15,6 @@ const tmp = tempRoot('preview-build-test-');
 const root = tmp.dir;
 after(() => tmp.teardown());
 
-
 // The scheme's repo: it holds the commit this server runs (so it is this server's own scheme), and build/7 at it.
 const scheme = join(root, 'scheme');
 mkdirSync(scheme);
@@ -42,8 +41,16 @@ before(async () => {
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     cwd: repo,
     env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      CITADEL_HOST_SIGNALS: 'fixed',
+      CITADEL_ZONE: TEST_ZONE,
+      PORT: '0',
+      DATA_DIR: data,
+      CLAUDE_BIN: '/bin/false',
+      CLAUDE_CONFIG_DIR: join(root, 'claude'),
+      COORDINATOR_PASSWORD: PASSWORD,
+      SESSION_SECRET: SECRET,
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
@@ -51,7 +58,9 @@ before(async () => {
   server.stdout!.pipe(process.stdout);
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   const res = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
   });
   cookie = res.headers.get('set-cookie')!.split(';')[0];
 });

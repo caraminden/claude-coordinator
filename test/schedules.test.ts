@@ -81,7 +81,10 @@ test('schedules are stored per scheme with their next run', () => {
   const p = store.createProject('One', null).id;
   const s = store.schedules.create({ project_id: p, name: 'Nightly', cron: '0 3 * * *', brief: 'Is main healthy?', type: 'chore', created_by: 'Cara' }, at(2026, 10, 28, 12));
   assert.equal(s.next_run_at, at(2026, 10, 29, 3, 0));
-  assert.deepEqual(store.schedules.list(p).map((x) => x.name), ['Nightly']);
+  assert.deepEqual(
+    store.schedules.list(p).map((x) => x.name),
+    ['Nightly'],
+  );
   assert.throws(() => store.schedules.create({ project_id: p, name: 'x', cron: 'nope', brief: 'x', type: 'chore', created_by: 'Cara' }), /five cron fields/);
 });
 
@@ -113,7 +116,10 @@ test('a schedule pauses, resumes from now, comes due once, and records its runs'
   assert.equal(store.schedules.update(s.id, { paused: false, cron: '0 9 * * *' }, t1).next_run_at, at(2026, 10, 31, 9, 0));
   // Down for three days: due once, and the next run counts from the run.
   const late = at(2026, 11, 3, 10);
-  assert.deepEqual(store.schedules.due(late).map((x) => x.id), [s.id]);
+  assert.deepEqual(
+    store.schedules.due(late).map((x) => x.id),
+    [s.id],
+  );
   assert.deepEqual(store.schedules.due(at(2026, 10, 31, 8, 59)), []);
   const minion = store.createTicket({ project_id: p, title: 'Renamed', permission_mode: 'bypassPermissions', created_by: 'Citadel' }).id;
   store.schedules.ran(s.id, { ticketId: minion }, late);
@@ -178,10 +184,20 @@ test("a run starts with its schedule's model and effort; a schedule from before 
   const cheap = store.schedules.create({ ...base, model: 'claude-sonnet-5-5', effort: 'medium' });
   assert.deepEqual(runMinion(cheap, { name: 'Cara', disabled_at: null }), { title: 'Upstream check', model: 'claude-sonnet-5-5', effort: 'medium', props: { type: 'chore', assigned: 'Cara' } });
   assert.deepEqual(runMinion(plain, undefined), { title: 'Upstream check', model: 'claude-sonnet-5-5', effort: 'medium', props: { type: 'chore' } });
-  assert.deepEqual([runMinion({ ...plain, type: 'other' }, undefined)].map((m) => [m.model, m.effort]), [['claude-opus-5-5', 'medium']], 'no type to go by: the fallback');
+  assert.deepEqual(
+    [runMinion({ ...plain, type: 'other' }, undefined)].map((m) => [m.model, m.effort]),
+    [['claude-opus-5-5', 'medium']],
+    'no type to go by: the fallback',
+  );
   // A change to one leaves the other; null goes back to the default.
-  assert.deepEqual([store.schedules.update(cheap.id, { effort: 'low' })].map((s) => [s.model, s.effort]), [['claude-sonnet-5-5', 'low']]);
-  assert.deepEqual([store.schedules.update(cheap.id, { model: null })].map((s) => [s.model, s.effort]), [[null, 'low']]);
+  assert.deepEqual(
+    [store.schedules.update(cheap.id, { effort: 'low' })].map((s) => [s.model, s.effort]),
+    [['claude-sonnet-5-5', 'low']],
+  );
+  assert.deepEqual(
+    [store.schedules.update(cheap.id, { model: null })].map((s) => [s.model, s.effort]),
+    [[null, 'low']],
+  );
 });
 
 test('a schedules table from before model and effort gets both columns, its rows keeping the defaults (#387)', () => {
@@ -200,13 +216,25 @@ test('a schedules table from before model and effort gets both columns, its rows
 test('a schedule with no category chosen gets one from its template or name; the backfill fills only empty ones, once (#1083)', () => {
   // Real names from the live schemes, and where each lands.
   const cases: [string, string | null, string][] = [
-    ['Code health', 'code-health', 'Code'], ['Upstream skills check', 'upstream-check', 'Skills and docs'], ['App turns check', 'app-turns', 'Apps'],
-    ['Monthly retro', 'monthly-retro', 'Process'], ['Test audit', null, 'Tests'], ['Heavy-slot history read-back', null, 'Read-backs'],
-    ['Monthly model-usage review', null, 'Models and usage'], ['Anthropic guidance check', null, 'Models and usage'],
-    ['Weekly contraption error review', null, 'Apps'], ['Monthly architecture check', null, 'Code'], ['Kit docs drift run', null, 'Skills and docs'],
-    ['Quarterly skill stocktake', null, 'Skills and docs'], ['Monthly ideation from use', null, 'Ideas'], ['Weekly glyph review', null, 'Data and feedback'],
-    ['Nightly records export', null, 'Data and feedback'], ['Daily pipeline check', null, 'Process'], ['Weekly land batching check', null, 'Process'],
-    ['Housekeeping, all schemes', null, 'Process'], ['January refresh of the rules', null, ''],
+    ['Code health', 'code-health', 'Code'],
+    ['Upstream skills check', 'upstream-check', 'Skills and docs'],
+    ['App turns check', 'app-turns', 'Apps'],
+    ['Monthly retro', 'monthly-retro', 'Process'],
+    ['Test audit', null, 'Tests'],
+    ['Heavy-slot history read-back', null, 'Read-backs'],
+    ['Monthly model-usage review', null, 'Models and usage'],
+    ['Anthropic guidance check', null, 'Models and usage'],
+    ['Weekly contraption error review', null, 'Apps'],
+    ['Monthly architecture check', null, 'Code'],
+    ['Kit docs drift run', null, 'Skills and docs'],
+    ['Quarterly skill stocktake', null, 'Skills and docs'],
+    ['Monthly ideation from use', null, 'Ideas'],
+    ['Weekly glyph review', null, 'Data and feedback'],
+    ['Nightly records export', null, 'Data and feedback'],
+    ['Daily pipeline check', null, 'Process'],
+    ['Weekly land batching check', null, 'Process'],
+    ['Housekeeping, all schemes', null, 'Process'],
+    ['January refresh of the rules', null, ''],
   ];
   for (const [name, template, want] of cases) assert.equal(guessCategory({ name, template }), want, name);
 
@@ -224,7 +252,7 @@ test('a schedule with no category chosen gets one from its template or name; the
   assert.deepEqual([store.schedules.get(bare.id)!.category, store.schedules.get(odd.id)!.category, store.schedules.get(chosen.id)!.category], ['Models and usage', '', 'Ops']);
 });
 
-test('opening a database from before schema 82 fills its schedules\' categories once; a later clear survives a restart (#1083)', () => {
+test("opening a database from before schema 82 fills its schedules' categories once; a later clear survives a restart (#1083)", () => {
   const file = join(mkdtempSync(join(tmpdir(), 'sched-cat-')), 'c.db');
   let store = new Store(file);
   const p = store.createProject('One', null).id;
@@ -236,7 +264,7 @@ test('opening a database from before schema 82 fills its schedules\' categories 
   store.schedules.update(row.id, { category: '' });
   store.db.close();
   store = new Store(file);
-  assert.equal(store.schedules.get(row.id)!.category, '', 'a person\'s clear stays cleared after a restart');
+  assert.equal(store.schedules.get(row.id)!.category, '', "a person's clear stays cleared after a restart");
   store.db.close();
 });
 
@@ -262,7 +290,7 @@ test("a run's brief reads its start time in Pacific with the zone, whatever the 
 
 // C3 (#1406): a server killed after a run made its minion and before the slot's "ran" mark left the slot due. The next
 // server finds that minion and finishes its start (the ran mark, the brief), rather than starting a second one.
-test("a slot whose minion was made before a kill finishes with that minion, not a second one (C3)", async () => {
+test('a slot whose minion was made before a kill finishes with that minion, not a second one (C3)', async () => {
   const store = new Store(':memory:');
   const p = store.createProject('One', null);
   const sent: { id: number; text: string }[] = [];
@@ -290,7 +318,11 @@ test("a slot whose minion was made before a kill finishes with that minion, not 
   assert.equal(made, 0, 'no second minion for the slot');
   assert.equal(store.schedules.get(s.id)!.last_ticket_id, orphan.id, "the slot's ran mark names the minion the killed run made");
   assert.ok(store.schedules.get(s.id)!.next_run_at! > now, 'the slot is handled');
-  assert.deepEqual(sent.map((m) => m.id), [orphan.id], 'its brief goes to that minion');
+  assert.deepEqual(
+    sent.map((m) => m.id),
+    [orphan.id],
+    'its brief goes to that minion',
+  );
   // The next slot starts its own minion as usual.
   await new ScheduledRuns(deps).run(store.schedules.get(s.id)!, store.schedules.get(s.id)!.next_run_at!);
   assert.equal(made, 1, 'the next slot makes a fresh minion');

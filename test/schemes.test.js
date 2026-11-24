@@ -22,7 +22,10 @@ test('no schemes: nothing to open', () => {
 test("a scheme's favicon comes from one batched request for every version the page lacks; none without an icon (#1543)", async () => {
   const asked = [];
   globalThis.document = { querySelectorAll: () => [] };
-  globalThis.fetch = async (url) => { asked.push(url); return { ok: true, json: async () => ({ icons: { '1.5': 'data:a', '2.6': null } }) }; };
+  globalThis.fetch = async (url) => {
+    asked.push(url);
+    return { ok: true, json: async () => ({ icons: { 1.5: 'data:a', 2.6: null } }) };
+  };
   assert.equal(iconSrc({ id: 1, icon: null }), null);
   assert.equal(iconSrc({ id: 1, icon: 5 }), null); // not here yet: it is asked for
   assert.equal(iconSrc({ id: 2, icon: 6 }), null);

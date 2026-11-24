@@ -71,7 +71,13 @@ test('a relay is a row; its commit going live delivers it once and the sender ge
   assert.equal(await s.waiters.check(before), 0);
   await s.waiters.check(pending);
   await s.outbox.poke({ type: 'tick' });
-  assert.deepEqual(s.r.delivered.map((x) => x.to), [{ minion: a.id, number: a.number }, { minion: b.id, number: b.number }]);
+  assert.deepEqual(
+    s.r.delivered.map((x) => x.to),
+    [
+      { minion: a.id, number: a.number },
+      { minion: b.id, number: b.number },
+    ],
+  );
   assert.equal(s.r.notes.length, 1, 'one note for the pair');
   assert.equal(s.r.notes[0].length, 2);
   assert.equal(s.waiters.relays().length, 0);
@@ -130,7 +136,13 @@ test('relays in the old key move into the table at boot, none dropped, and cance
   assert.equal(s.waiters.relays().length, 2, 'the dual read sees them before the move');
   await s.outbox.boot();
   assert.equal(store.getSetting('relay-when-live') ?? null, null);
-  assert.deepEqual(rows().map((r) => [r.id, r.to_kind, r.payload.text]), [[7, 'minion', 'one'], [9, 'taskmaster', 'two']]);
+  assert.deepEqual(
+    rows().map((r) => [r.id, r.to_kind, r.payload.text]),
+    [
+      [7, 'minion', 'one'],
+      [9, 'taskmaster', 'two'],
+    ],
+  );
   await s.outbox.poke({ type: 'tick' });
   assert.equal(rows().length, 2, 'a second pass adds none');
   await s.waiters.check(c); // its commit is live already: sent

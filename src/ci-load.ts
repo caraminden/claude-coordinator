@@ -40,7 +40,13 @@ export const TELL_AFTER_MS = 30 * MIN;
 /** The first look at each PC's verdict after a start. */
 const FIRST_TICK_MS = 60_000;
 
-export interface RunnerUse { name: string; repo: string; dir: string; cpu: number; mem: number }
+export interface RunnerUse {
+  name: string;
+  repo: string;
+  dir: string;
+  cpu: number;
+  mem: number;
+}
 /** One look at a PC, as its agent sent it and cleanSample checked it. Percentages are of the whole PC. */
 export interface Sample {
   at: number;
@@ -83,17 +89,29 @@ export function cleanSample(body: any, now: number): Sample {
   let hv: Sample['hv'] = null;
   if (body.hv && typeof body.hv === 'object' && typeof body.hv.total === 'number') {
     const vms: Record<string, number> = {};
-    for (const [name, pct] of Object.entries(body.hv.vms && typeof body.hv.vms === 'object' ? body.hv.vms : {}).slice(0, 32)) vms[text(name, 100) || 'vm'] = num(pct, 'a VM\'s CPU', 1e5);
+    for (const [name, pct] of Object.entries(body.hv.vms && typeof body.hv.vms === 'object' ? body.hv.vms : {}).slice(0, 32)) vms[text(name, 100) || 'vm'] = num(pct, "a VM's CPU", 1e5);
     hv = { total: num(body.hv.total, 'hv.total', 100), vms };
   }
-  const restarts = (Array.isArray(body.restarts) ? body.restarts : []).slice(0, 50).map((r: unknown) => Date.parse(String(r))).filter((t: number) => Number.isFinite(t) && t <= now);
+  const restarts = (Array.isArray(body.restarts) ? body.restarts : [])
+    .slice(0, 50)
+    .map((r: unknown) => Date.parse(String(r)))
+    .filter((t: number) => Number.isFinite(t) && t <= now);
   return {
-    at: now, host, os: body.os, cores: num(body.cores, 'cores', 4096, 1), cpu: num(body.cpu, 'cpu', 100),
-    mem_total: num(body.mem_total, 'mem_total', 1e15), mem_free: num(body.mem_free, 'mem_free', 1e15),
-    disk_total: maybe(body.disk_total, 'disk_total', 1e18), disk_free: maybe(body.disk_free, 'disk_free', 1e18),
-    queue: maybe(body.queue, 'queue', 1e6), pressure: maybe(body.pressure, 'pressure', 100), idle_sec: maybe(body.idle_sec, 'idle_sec', 1e9),
-    temp: maybe(body.temp, 'temp', 200, -100), hv,
-    runners: body.runners.map((r: any) => ({ name: text(r?.name, 100), repo: text(r?.repo, 200).toLowerCase(), dir: text(r?.dir, 300), cpu: num(r?.cpu, 'a runner\'s cpu', 100), mem: num(r?.mem, 'a runner\'s mem', 1e15) })),
+    at: now,
+    host,
+    os: body.os,
+    cores: num(body.cores, 'cores', 4096, 1),
+    cpu: num(body.cpu, 'cpu', 100),
+    mem_total: num(body.mem_total, 'mem_total', 1e15),
+    mem_free: num(body.mem_free, 'mem_free', 1e15),
+    disk_total: maybe(body.disk_total, 'disk_total', 1e18),
+    disk_free: maybe(body.disk_free, 'disk_free', 1e18),
+    queue: maybe(body.queue, 'queue', 1e6),
+    pressure: maybe(body.pressure, 'pressure', 100),
+    idle_sec: maybe(body.idle_sec, 'idle_sec', 1e9),
+    temp: maybe(body.temp, 'temp', 200, -100),
+    hv,
+    runners: body.runners.map((r: any) => ({ name: text(r?.name, 100), repo: text(r?.repo, 200).toLowerCase(), dir: text(r?.dir, 300), cpu: num(r?.cpu, "a runner's cpu", 100), mem: num(r?.mem, "a runner's mem", 1e15) })),
     restarts,
   };
 }
@@ -107,11 +125,26 @@ const mins = (ms: number) => `${Math.max(1, Math.round(ms / MIN))} min`;
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 /** A job with its repo, and its times as ms (NaN where GitHub has none yet). */
-export interface LoadJob { repo: string; name: string; status: string; runner: string; labels: string; created: number; started: number; ended: number }
+export interface LoadJob {
+  repo: string;
+  name: string;
+  status: string;
+  runner: string;
+  labels: string;
+  created: number;
+  started: number;
+  ended: number;
+}
 export function loadJob(repo: string, j: CiJob): LoadJob {
   return {
-    repo, name: j.name, status: j.status, runner: j.runner_name ?? '', labels: (j.labels ?? []).filter((l) => l !== 'self-hosted').join(','),
-    created: at(j.created_at), started: j.runner_name ? at(j.started_at) : NaN, ended: at(j.completed_at),
+    repo,
+    name: j.name,
+    status: j.status,
+    runner: j.runner_name ?? '',
+    labels: (j.labels ?? []).filter((l) => l !== 'self-hosted').join(','),
+    created: at(j.created_at),
+    started: j.runner_name ? at(j.started_at) : NaN,
+    ended: at(j.completed_at),
   };
 }
 
@@ -136,14 +169,23 @@ export interface Pool {
 }
 
 export type Kind = 'none' | 'fine' | 'more' | 'over' | 'crash' | 'full';
-export interface Verdict { kind: Kind; text: string; pool: string | null }
+export interface Verdict {
+  kind: Kind;
+  text: string;
+  pool: string | null;
+}
 
 /** The pools of runners on a PC, from the jobs GitHub knows and the runners the agents saw. */
 export function pools(host: string, jobs: LoadJob[], recent: Sample[], projects: Pick<Project, 'id' | 'name' | 'repo_url'>[], now: number): Pool[] {
   // A runner's name is its own only within its repo: two schemes' runners on one PC can both be called <PC>.
   const sampled = new Map<string, { name: string; repo: string }>();
   const names = new Set<string>();
-  for (const s of recent) for (const r of s.runners) if (r.name) { sampled.set(`${r.repo}/${r.name}`, r); names.add(r.name); }
+  for (const s of recent)
+    for (const r of s.runners)
+      if (r.name) {
+        sampled.set(`${r.repo}/${r.name}`, r);
+        names.add(r.name);
+      }
   // GitHub names a runner after its PC unless told otherwise, and Citadel's scripts keep that: <PC>, <PC>-2, <PC>-linux.
   const here = (name: string) => !!name && (names.has(name) || name.toLowerCase().startsWith(host.toLowerCase()));
   const out = new Map<string, Pool>();
@@ -230,10 +272,12 @@ export function verdict(samples: Sample[], all: Pool[], jobs: LoadJob[], now: nu
   // One hot sample just after an agent starts is not a busy quarter of an hour.
   const share = Math.max(4, window.length * OVER_SHARE);
   if (hot >= share || queued >= share || lowMem) {
-    const why = lowMem ? `only ${Math.round((latest.mem_free / latest.mem_total) * 100)}% of its memory is free`
-      : hot >= share ? `CPU was at ${OVER_CPU}% or more for ${mins((hot / window.length) * WINDOW_MS)} of the last ${mins(WINDOW_MS)} with someone at the PC`
+    const why = lowMem
+      ? `only ${Math.round((latest.mem_free / latest.mem_total) * 100)}% of its memory is free`
+      : hot >= share
+        ? `CPU was at ${OVER_CPU}% or more for ${mins((hot / window.length) * WINDOW_MS)} of the last ${mins(WINDOW_MS)} with someone at the PC`
         : `more threads waited for a core than it has (${latest.queue} now) with someone at the PC`;
-    return { kind: 'over', pool: top?.key ?? null, text: `Overloading: ${why}.${top ? ` ${top.title} uses the most (${Math.round(top.cpu!)}% of the PC): take a runner from it.` : ' CI isn\'t the cause: no runner is busy.'}` };
+    return { kind: 'over', pool: top?.key ?? null, text: `Overloading: ${why}.${top ? ` ${top.title} uses the most (${Math.round(top.cpu!)}% of the PC): take a runner from it.` : " CI isn't the cause: no runner is busy."}` };
   }
 
   const stuck = all.filter((p) => p.waiting && p.oldest_ms >= WAIT_MS && p.busy >= p.runners.length).sort((a, b) => b.oldest_ms - a.oldest_ms)[0];
@@ -249,10 +293,20 @@ export interface PcView {
   /** The schemes with runners here, for who may see it. */
   projects: number[];
   now: null | {
-    at: number; cores: number; cpu: number; mem_total: number; mem_free: number; disk_total: number | null; disk_free: number | null;
-    queue: number | null; idle_sec: number | null; temp: number | null;
+    at: number;
+    cores: number;
+    cpu: number;
+    mem_total: number;
+    mem_free: number;
+    disk_total: number | null;
+    disk_free: number | null;
+    queue: number | null;
+    idle_sec: number | null;
+    temp: number | null;
     /** Shares of the PC's CPU: its CI runners, WSL as a whole, and each Hyper-V guest. */
-    runners: number; wsl: number | null; vms: Record<string, number>;
+    runners: number;
+    wsl: number | null;
+    vms: Record<string, number>;
   };
   /** The last 24 hours in 5-minute steps: [time, average CPU % or null, peak, jobs running, jobs waiting]. */
   series: [number, number | null, number | null, number, number][];
@@ -281,15 +335,22 @@ export function pcView(host: string, samples: Sample[], jobs: LoadJob[], project
   for (let t = start; t <= now; t += BUCKET_MS) {
     const mid = Math.min(now, t + BUCKET_MS / 2);
     const cpu = buckets.get(t);
-    series.push([t, cpu ? round(avg(cpu)) : null, cpu ? round(Math.max(...cpu)) : null,
-      mine.filter((j) => j.started <= mid && !(j.ended <= mid) && (j.status !== 'queued')).length,
-      mine.filter((j) => j.created <= mid && !(j.started <= mid) && !(j.ended <= mid)).length]);
+    series.push([t, cpu ? round(avg(cpu)) : null, cpu ? round(Math.max(...cpu)) : null, mine.filter((j) => j.started <= mid && !(j.ended <= mid) && j.status !== 'queued').length, mine.filter((j) => j.created <= mid && !(j.started <= mid) && !(j.ended <= mid)).length]);
   }
   return {
-    host, projects: [...new Set(all.map((p) => p.project).filter((id): id is number => id !== null))],
+    host,
+    projects: [...new Set(all.map((p) => p.project).filter((id): id is number => id !== null))],
     now: fresh && {
-      at: fresh.at, cores: fresh.cores, cpu: round(trueCpu(fresh)), mem_total: fresh.mem_total, mem_free: fresh.mem_free, disk_total: fresh.disk_total, disk_free: fresh.disk_free,
-      queue: fresh.queue, idle_sec: fresh.idle_sec, temp: fresh.temp,
+      at: fresh.at,
+      cores: fresh.cores,
+      cpu: round(trueCpu(fresh)),
+      mem_total: fresh.mem_total,
+      mem_free: fresh.mem_free,
+      disk_total: fresh.disk_total,
+      disk_free: fresh.disk_free,
+      queue: fresh.queue,
+      idle_sec: fresh.idle_sec,
+      temp: fresh.temp,
       runners: round(fresh.runners.reduce((a, r) => a + r.cpu, 0) + (lastWsl && now - lastWsl.at <= STALE_MS ? lastWsl.runners.reduce((a, r) => a + r.cpu, 0) * (lastWsl.cores / fresh.cores) : 0)),
       wsl: lastWsl && now - lastWsl.at <= STALE_MS ? round(lastWsl.cpu * (lastWsl.cores / fresh.cores)) : null,
       vms: Object.fromEntries(Object.entries(fresh.hv?.vms ?? {}).map(([name, pct]) => [name, round(pct / fresh.cores)])),
@@ -371,7 +432,14 @@ export class CiLoad {
 
   /** The repos (owner/name, lowercase) whose runners an agent's newest sample in the last 10 minutes lists (#1268). */
   runnerRepos(now = Date.now()): string[] {
-    return [...new Set([...this.latest.values()].filter((s) => now - s.at < 10 * MIN).flatMap((s) => s.runners.map((r) => r.repo)).filter(Boolean))];
+    return [
+      ...new Set(
+        [...this.latest.values()]
+          .filter((s) => now - s.at < 10 * MIN)
+          .flatMap((s) => s.runners.map((r) => r.repo))
+          .filter(Boolean),
+      ),
+    ];
   }
 
   /** A deleted machine's samples go with it (its rows cascade). */
@@ -390,7 +458,12 @@ export class CiLoad {
       const repo = repoSlug(project.repo_url);
       return repo ? jobs.map((j) => loadJob(repo, j)) : [];
     });
-    const byHost = new Map<string, Sample[]>(this.deps.hosts().filter(Boolean).map((h) => [h.toLowerCase(), []]));
+    const byHost = new Map<string, Sample[]>(
+      this.deps
+        .hosts()
+        .filter(Boolean)
+        .map((h) => [h.toLowerCase(), []]),
+    );
     const since = now - DAY_MS;
     if (!this.recent) this.flush(); // the read below must see them
     this.recent ??= this.store.runnerLoadSince(since).map((r) => ({ machine: r.machine_id, at: r.at, s: JSON.parse(r.data) as Sample }));

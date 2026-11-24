@@ -29,22 +29,24 @@ after(async () => {
   await app?.close();
 });
 
-for (const [name, width] of [['desktop', 1000], ['phone', 390]] as const) {
+for (const [name, width] of [
+  ['desktop', 1000],
+  ['phone', 390],
+] as const) {
   test(`the upload zone hides its empty total row and its pickers are control-h tall (${name})`, { skip }, async () => {
     const page = await browser.page(app.base, { width, height: 700 });
     assert.equal(await page.eval(`getComputedStyle(document.querySelector('.cui-upload-total')).display`), 'none');
-    const heights = await page.eval(`(() => {
+    const heights = (await page.eval(`(() => {
       const control = parseFloat(getComputedStyle(document.querySelector('.cui-upload-drop')).getPropertyValue('--citadel-control-h') || getComputedStyle(document.documentElement).getPropertyValue('--citadel-control-h'));
       return { control, buttons: [...document.querySelectorAll('.cui-upload-pick .cui-btn')].map((b) => b.getBoundingClientRect().height) };
-    })()`) as { control: number; buttons: number[] };
+    })()`)) as { control: number; buttons: number[] };
     assert.ok(heights.control > 30, 'the control height resolved');
     for (const h of heights.buttons) assert.ok(h >= heights.control, `button ${h}px is at least control-h ${heights.control}px`);
   });
 }
 
 // #902: a page whose uploads never finish (fetch never answers), so a row stays "sending" until the test moves it.
-const HANG = PAGE.replace("mountUpload(document.getElementById('root'), { endpoint: '/none' });",
-  "window.fetch = () => new Promise(() => {}); window.up = mountUpload(document.getElementById('root'), { endpoint: '/none' });");
+const HANG = PAGE.replace("mountUpload(document.getElementById('root'), { endpoint: '/none' });", "window.fetch = () => new Promise(() => {}); window.up = mountUpload(document.getElementById('root'), { endpoint: '/none' });");
 const states = `[...document.querySelectorAll('.cui-upload-file')].map((li) => li.dataset.state)`;
 const files = (...names: string[]) => `up.add([${names.map((n) => `{ file: new File(['x'], '${n}'), path: '${n}' }`).join(',')}])`;
 
@@ -58,7 +60,9 @@ test('a file cancelled before its turn is cleared with the finished rows when th
     assert.deepEqual(await page.eval(states), ['sending', 'cancelled']);
     await page.eval(files('c.bin'));
     assert.deepEqual(await page.eval(states), ['sending', 'waiting']);
-  } finally { await hang.close(); }
+  } finally {
+    await hang.close();
+  }
 });
 
 test('Resume on a paused file while another is sending waits its turn: one file at a time', { skip }, async () => {
@@ -74,5 +78,7 @@ test('Resume on a paused file while another is sending waits its turn: one file 
     assert.deepEqual((await page.eval<string[]>(states)).filter((s) => s === 'sending').length, 1);
     await page.eval(`document.querySelectorAll('.cui-upload-file')[1].querySelector('.cui-btn').click()`); // pause b: a gets its turn
     assert.deepEqual(await page.eval(states), ['sending', 'paused']);
-  } finally { await hang.close(); }
+  } finally {
+    await hang.close();
+  }
 });

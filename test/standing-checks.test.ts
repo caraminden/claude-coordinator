@@ -29,7 +29,10 @@ const check = (store: Store, dataDir: string, s: Partial<Snapshot> = {}, integri
 const only = (found: { check: string }[], name: string) => found.filter((f) => f.check === name);
 
 test('the named list holds the eight checks', () => {
-  assert.deepEqual(CHECKS.map((c) => c.name), ['turn-record', 'one-place', 'fired-once', 'handoff-process', 'shipped-live', 'app-turn-ended', 'closed-processes', 'db-integrity']);
+  assert.deepEqual(
+    CHECKS.map((c) => c.name),
+    ['turn-record', 'one-place', 'fired-once', 'handoff-process', 'shipped-live', 'app-turn-ended', 'closed-processes', 'db-integrity'],
+  );
 });
 
 test('a clean store gives no findings, the weekly integrity check included', () => {
@@ -115,7 +118,10 @@ test('4: a hand-off with no ship process, or a result never reported, is named',
   utimesSync(join(dir(b), 'code'), new Date(NOW - 20 * MIN), new Date(NOW - 20 * MIN));
   writeFileSync(join(dir(c), 'started'), String(NOW - 10_000)); // still starting
   const found = only(check(store, dataDir), 'handoff-process');
-  assert.deepEqual(found.map((f) => f.ticket), [a.id, b.id]);
+  assert.deepEqual(
+    found.map((f) => f.ticket),
+    [a.id, b.id],
+  );
   assert.match(found[0].text, /no ship process runs and none has ended/);
   assert.match(found[1].text, /its ship ended 20 min ago and was never reported/);
 });
@@ -132,7 +138,10 @@ test('5: "shipped, not live yet" for over an hour with nothing said is named', (
   store.addEvent(chatty.id, 'user_message', { author: 'Cara', text: 'how is it going?' });
   store.addEvent(told.id, 'note', { text: 'The deploy is live, but a question card is still open, so this minion stays open.' });
   const found = only(check(store, dataDir), 'shipped-live');
-  assert.deepEqual(found.map((f) => f.ticket), [old.id, chatty.id]);
+  assert.deepEqual(
+    found.map((f) => f.ticket),
+    [old.id, chatty.id],
+  );
   assert.match(found[0].text, /has waited 120 min for its ship to go live/);
 });
 
@@ -144,7 +153,10 @@ test('6: an app turn row left open with no process is named', () => {
   store.db.prepare('UPDATE contraption_turns SET started_at = ? WHERE id IN (?, ?)').run(NOW - 5 * MIN, gone, live);
   store.db.prepare('UPDATE contraption_turns SET started_at = ? WHERE id = ?').run(NOW - 10_000, young);
   const found = only(check(store, dataDir, { appTurns: [live] }), 'app-turn-ended');
-  assert.deepEqual(found.map((f) => f.key), [`app-turn-ended:${gone}`]);
+  assert.deepEqual(
+    found.map((f) => f.key),
+    [`app-turn-ended:${gone}`],
+  );
   assert.match(found[0].text, new RegExp(`App turn ${gone} \\(voice${n}\\) is still open, but no process runs it`));
 });
 
@@ -152,7 +164,10 @@ test("7: a process in a closed minion's folders is named; an open minion's is no
   const { store, project, dataDir, minion } = setup();
   const [closed, open] = [minion('closed'), minion('open')];
   store.updateTicket(closed.id, { status: 'closed' });
-  const procs = [{ pid: 4242, ticketId: closed.id, projectId: project.id, command: 'npm run dev' }, { pid: 4343, ticketId: open.id, projectId: project.id, command: 'vite' }];
+  const procs = [
+    { pid: 4242, ticketId: closed.id, projectId: project.id, command: 'npm run dev' },
+    { pid: 4343, ticketId: open.id, projectId: project.id, command: 'vite' },
+  ];
   const found = only(check(store, dataDir, { procs }), 'closed-processes');
   assert.equal(found.length, 1);
   assert.match(found[0].text, /is closed, but pid 4242 still runs in its folders: npm run dev/);
@@ -161,7 +176,7 @@ test("7: a process in a closed minion's folders is named; an open minion's is no
 test('8: a database that fails quick_check is named, only on an integrity pass', () => {
   const file = join(root, 'broken.sqlite');
   const db = new DatabaseSync(file);
-  db.exec("PRAGMA journal_mode = DELETE; CREATE TABLE t (a TEXT); CREATE INDEX t_a ON t(a);");
+  db.exec('PRAGMA journal_mode = DELETE; CREATE TABLE t (a TEXT); CREATE INDEX t_a ON t(a);');
   const ins = db.prepare('INSERT INTO t VALUES (?)');
   for (let i = 0; i < 2000; i++) ins.run(`row ${i} ${'x'.repeat(50)}`);
   db.close();
@@ -204,7 +219,10 @@ test('a run confirms in a worker, writes one health row per broken promise, keep
   const rows = () => store.healthEventsSince([HEALTH_KIND], 0);
   await checks.run();
   await checks.settled();
-  assert.deepEqual(keptChecks(store)!.findings.map((f) => f.check), ['shipped-live']);
+  assert.deepEqual(
+    keptChecks(store)!.findings.map((f) => f.check),
+    ['shipped-live'],
+  );
   assert.equal(rows().length, 1);
   assert.match(rows()[0].detail, /^shipped-live\n#\d+ \(p\d+\) has waited/);
   await checks.run();
@@ -226,8 +244,14 @@ test("the Status tile shows a viewer only their schemes' findings, and Citadel's
   const f = (check: string, ticket: number | null, projectId?: number) => ({ check, key: `${check}:${ticket}:${projectId}`, ticket, project: projectId ?? null, text: check, since: NOW });
   store.setSetting('standing-checks', { ranAt: NOW, integrityAt: null, error: 'boom', findings: [f('shipped-live', mine.id), f('shipped-live', theirs.id), f('fired-once', null, other.id), f('db-integrity', null)] });
   const seen = (citadel: boolean) => standingStatus(store, (id) => id === project.id, citadel).last!;
-  assert.deepEqual(seen(false).findings.map((x) => x.ticket), [mine.id]);
+  assert.deepEqual(
+    seen(false).findings.map((x) => x.ticket),
+    [mine.id],
+  );
   assert.equal(seen(false).error, null);
-  assert.deepEqual(seen(true).findings.map((x) => x.check), ['shipped-live', 'db-integrity']);
+  assert.deepEqual(
+    seen(true).findings.map((x) => x.check),
+    ['shipped-live', 'db-integrity'],
+  );
   assert.equal(seen(true).error, 'boom');
 });

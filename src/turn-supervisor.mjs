@@ -240,27 +240,30 @@ const server = createServer((req, res) => {
   if (req.headers['x-supervisor-key'] !== key) return reply(403, { error: 'wrong key' });
   if (req.method !== 'POST' || req.url !== '/start') return reply(404, { error: 'not found' });
   let body = '';
-  req.setEncoding('utf8').on('data', (c) => (body += c)).on('end', () => {
-    if (closing) return reply(503, { error: 'closing' });
-    let dir;
-    let scope;
-    try {
-      ({ dir, scope } = JSON.parse(body));
-    } catch {
-      return reply(400, { error: 'bad JSON' });
-    }
-    if (typeof dir !== 'string' || dirname(dir) !== turnsDir || !Array.isArray(scope) || !scope.every((a) => typeof a === 'string')) return reply(400, { error: 'bad turn' });
-    // Taken here, before the answer: the runner starts the wrapper when it gets none, and only one of them can claim it.
-    let taken;
-    try {
-      taken = takeSpec(dir);
-    } catch {
-      return reply(400, { error: "spec.json can't be read" });
-    }
-    if (!taken) return reply(409, { error: 'no spec.json' });
-    reply(200, { ok: true });
-    void run(dir, scope, taken.spec, taken.file);
-  });
+  req
+    .setEncoding('utf8')
+    .on('data', (c) => (body += c))
+    .on('end', () => {
+      if (closing) return reply(503, { error: 'closing' });
+      let dir;
+      let scope;
+      try {
+        ({ dir, scope } = JSON.parse(body));
+      } catch {
+        return reply(400, { error: 'bad JSON' });
+      }
+      if (typeof dir !== 'string' || dirname(dir) !== turnsDir || !Array.isArray(scope) || !scope.every((a) => typeof a === 'string')) return reply(400, { error: 'bad turn' });
+      // Taken here, before the answer: the runner starts the wrapper when it gets none, and only one of them can claim it.
+      let taken;
+      try {
+        taken = takeSpec(dir);
+      } catch {
+        return reply(400, { error: "spec.json can't be read" });
+      }
+      if (!taken) return reply(409, { error: 'no spec.json' });
+      reply(200, { ok: true });
+      void run(dir, scope, taken.spec, taken.file);
+    });
 });
 server.listen(0, '127.0.0.1', () => {
   const addr = /** @type {import('node:net').AddressInfo} */ (server.address());

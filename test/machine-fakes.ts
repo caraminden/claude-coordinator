@@ -14,7 +14,9 @@ import { jsonLines, REPO } from './helpers.ts';
 export function machineFakes(root: string, procs: ChildProcess[] = []) {
   // A tiny MCP server with one tool that says which process answered.
   const mcpServer = join(root, 'fake-mcp.mjs');
-  writeFileSync(mcpServer, `
+  writeFileSync(
+    mcpServer,
+    `
 import { createInterface } from 'node:readline';
 const out = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
 createInterface({ input: process.stdin }).on('line', (line) => {
@@ -23,12 +25,15 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (m.method === 'tools/list') out({ jsonrpc: '2.0', id: m.id, result: { tools: [{ name: 'whoami', inputSchema: { type: 'object' } }] } });
   if (m.method === 'tools/call') out({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: 'pid ' + process.pid }] } });
 });
-`);
+`,
+  );
 
   // Stands in for claude: records its arguments, talks to each machine server it was given, writes
   // what came back, then ends the turn.
   const fakeClaude = join(root, 'claude-fake');
-  writeFileSync(fakeClaude, `#!${process.execPath}
+  writeFileSync(
+    fakeClaude,
+    `#!${process.execPath}
 const { spawn } = require('node:child_process');
 const { createInterface } = require('node:readline');
 const { appendFileSync, readFileSync } = require('node:fs');
@@ -72,7 +77,8 @@ process.stdin.resume();
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 })().catch((err) => { report({ args, error: String(err) }); process.exit(1); });
-`);
+`,
+  );
   chmodSync(fakeClaude, 0o755);
 
   /** `run` is the agent's command line after the token (default: the stand-in MCP server); `env` is added to the process environment. */

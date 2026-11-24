@@ -17,14 +17,23 @@ test('every instructions save keeps a history row of who changed them from what'
   store.setProjectInstructions(other.id, 'elsewhere', 'Josh');
   store.setProjectInstructions(p.id, 'one\ntwo', 'Taskmaster');
   const rows = store.instructionHistory(p.id, 5);
-  assert.deepEqual(rows.map((r) => [r.by, r.old_text, r.new_text]), [['Taskmaster', 'one', 'one\ntwo'], ['Cara', '', 'one']]);
+  assert.deepEqual(
+    rows.map((r) => [r.by, r.old_text, r.new_text]),
+    [
+      ['Taskmaster', 'one', 'one\ntwo'],
+      ['Cara', '', 'one'],
+    ],
+  );
   assert.equal(rows[0].at, store.getProject(p.id)!.instructions_updated_at);
   assert.equal(store.instructionHistory(p.id, 1).length, 1);
 });
 
 test('lineDiff lists removed and added lines, with … for unchanged runs between them', () => {
   assert.deepEqual(lineDiff('a\nb\nc\nd', 'a\nB\nc\nd\ne'), [
-    { op: '-', text: 'b' }, { op: '+', text: 'B' }, { op: '…', text: '' }, { op: '+', text: 'e' },
+    { op: '-', text: 'b' },
+    { op: '+', text: 'B' },
+    { op: '…', text: '' },
+    { op: '+', text: 'e' },
   ]);
   assert.deepEqual(lineDiff('', 'x'), [{ op: '+', text: 'x' }]);
   assert.deepEqual(lineDiff('x', ''), [{ op: '-', text: 'x' }]);

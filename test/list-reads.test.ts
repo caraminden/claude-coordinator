@@ -22,7 +22,10 @@ function seed(n: number): string {
   const store = new Store(join(root, 'data', 'coordinator.db'));
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   const now = Date.now();
-  for (const [name, count] of [['A', n], ['B', 3]] as const) {
+  for (const [name, count] of [
+    ['A', n],
+    ['B', 3],
+  ] as const) {
     const p = store.createProject(name, null);
     store.addMember(p.id, josh.id);
     store.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Cara' });
@@ -73,13 +76,15 @@ async function get(s: Booted, path: string): Promise<{ n: number; body: string }
 
 const scheme = async (s: Booted) => ((await (await fetch(`${s.base}/api/projects`, { headers: { Cookie: s.cookie } })).json()) as { id: number; name: string }[]).find((p) => p.name === 'A')!.id;
 
-test('a scheme\'s open list and the scheme list run as many statements for 60 open minions as for 10', async () => {
+test("a scheme's open list and the scheme list run as many statements for 60 open minions as for 10", async () => {
   const [a10, a60] = [await scheme(s10), await scheme(s60)];
-  const open10 = await get(s10, `/api/projects/${a10}?tickets=open`), open60 = await get(s60, `/api/projects/${a60}?tickets=open`);
+  const open10 = await get(s10, `/api/projects/${a10}?tickets=open`),
+    open60 = await get(s60, `/api/projects/${a60}?tickets=open`);
   assert.equal(JSON.parse(open60.body).tickets.length, 60);
   assert.ok(open10.n > 0, 'the counter is loaded');
   assert.equal(open60.n, open10.n, `?tickets=open: ${open10.n} statements for 10 open minions, ${open60.n} for 60`);
-  const list10 = await get(s10, '/api/projects'), list60 = await get(s60, '/api/projects');
+  const list10 = await get(s10, '/api/projects'),
+    list60 = await get(s60, '/api/projects');
   assert.equal(list60.n, list10.n, `/api/projects: ${list10.n} statements for 10 open minions, ${list60.n} for 60`);
 });
 

@@ -10,7 +10,10 @@ const verb = process.argv[2];
 if (verb === 'install') {
   let failed = 0;
   for (const t of list) {
-    if (t.source === 'pacman') { console.log(`by hand: ${installCommand(t)}`); continue; }
+    if (t.source === 'pacman') {
+      console.log(`by hand: ${installCommand(t)}`);
+      continue;
+    }
     const r = await installTool(t);
     console.log(`${r.ok ? 'installed' : 'FAILED'} ${toolLabel(t)}${r.ok ? '' : `\n${r.output}`}`);
     if (!r.ok) failed++;
@@ -19,7 +22,13 @@ if (verb === 'install') {
 } else if (verb === 'check') {
   const home = homedir();
   const mise: MiseList = list.some((t) => t.source !== 'pacman') ? JSON.parse(execFileSync(miseBin(home), ['ls', '--json'], { cwd: home, env: installEnv(home), encoding: 'utf8' })) : {};
-  const pacman = (pkg: string) => { try { return execFileSync('pacman', ['-Q', pkg], { encoding: 'utf8' }).trim().split(' ')[1] ?? ''; } catch { return null; } };
+  const pacman = (pkg: string) => {
+    try {
+      return execFileSync('pacman', ['-Q', pkg], { encoding: 'utf8' }).trim().split(' ')[1] ?? '';
+    } catch {
+      return null;
+    }
+  };
   const problems = manifestProblems(list, mise, pacman);
   console.log(problems.length ? problems.join('\n') : `all ${list.length} host tools are installed`);
   process.exit(problems.length ? 1 : 0);

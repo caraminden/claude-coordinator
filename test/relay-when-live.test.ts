@@ -46,7 +46,11 @@ const M2 = mk('Receiver');
 store.setTicketDir(M1.id, repo, 'ticket/1-sender');
 store.setSetting('relay-when-live', []);
 
-const mail = (id: number) => store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data));
+const mail = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'user_message')
+    .map((e) => JSON.parse(e.data));
 
 test('in process: nothing is delivered before the commit is live, then once, and a restart keeps it pending', async () => {
   const got: Relay[] = [];
@@ -65,10 +69,17 @@ test('in process: nothing is delivered before the commit is live, then once, and
   await w.check();
   assert.equal(got.length, 0, 'not live yet');
   const restarted = mkw(head);
-  assert.deepEqual(restarted.relays().map((r) => r.id), [relay.id], 'survives a restart');
+  assert.deepEqual(
+    restarted.relays().map((r) => r.id),
+    [relay.id],
+    'survives a restart',
+  );
   git('merge', '-q', '--ff-only', 'work');
   await restarted.check(git('rev-parse', 'HEAD'));
-  assert.deepEqual(got.map((r) => r.text), ['hello']);
+  assert.deepEqual(
+    got.map((r) => r.text),
+    ['hello'],
+  );
   assert.equal(restarted.relays().length, 0);
   await restarted.check();
   assert.equal(got.length, 1, 'sent once');
@@ -96,13 +107,19 @@ test('addRelay asks again when a deploy went live while its check ran (late, not
   let calls = 0;
   w.live = async () => {
     // The first check runs against the old head and says no; the head moves before it returns.
-    if (++calls === 1) { w.head = 'head-2'; return false; }
+    if (++calls === 1) {
+      w.head = 'head-2';
+      return false;
+    }
     return true;
   };
   const { queued } = await w.addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number! }, text: 'late', commit: 'abc' });
   assert.equal(calls, 2);
   assert.equal(queued, false);
-  assert.deepEqual(got.map((r) => r.text), ['late']);
+  assert.deepEqual(
+    got.map((r) => r.text),
+    ['late'],
+  );
   assert.equal(w.relays().length, 0);
 });
 

@@ -109,19 +109,32 @@ export async function largestUnit(dir: string): Promise<{ unit: string; bytes: n
   let best: { unit: string; bytes: number } | null = null;
   const walk = async (at: string, depth: number): Promise<void> => {
     const kids = await readdir(at, { withFileTypes: true }).catch(() => []);
-    await Promise.all(kids.filter((e) => e.isDirectory()).map(async (e) => {
-      const k = join(at, e.name);
-      if (e.name.endsWith('.slice')) return depth < 4 ? walk(k, depth + 1) : undefined;
-      if (!/\.(service|scope)$/.test(e.name)) return;
-      const bytes = await size(k);
-      if (!best || bytes > best.bytes) best = { unit: e.name, bytes };
-    }));
+    await Promise.all(
+      kids
+        .filter((e) => e.isDirectory())
+        .map(async (e) => {
+          const k = join(at, e.name);
+          if (e.name.endsWith('.slice')) return depth < 4 ? walk(k, depth + 1) : undefined;
+          if (!/\.(service|scope)$/.test(e.name)) return;
+          const bytes = await size(k);
+          if (!best || bytes > best.bytes) best = { unit: e.name, bytes };
+        }),
+    );
   };
   await walk(dir, 0);
   return best;
 }
 
-interface Open { start: number; end: number; stalledUs: number; highs: number; peak: number; limit: number | null; unit: string | null; unitBytes: number | null }
+interface Open {
+  start: number;
+  end: number;
+  stalledUs: number;
+  highs: number;
+  peak: number;
+  limit: number | null;
+  unit: string | null;
+  unitBytes: number | null;
+}
 
 export interface StormDeps {
   /** citadel.slice's cgroup dir, or null to look it up from this process's cgroup. */

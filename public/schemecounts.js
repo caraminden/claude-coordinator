@@ -8,8 +8,15 @@ const CARD_EVENTS = new Set(['question', 'question_result', 'plan', 'plan_result
 export const cardEvent = (event) => CARD_EVENTS.has(event.kind) || (event.kind === 'user_message' && !!JSON.parse(event.data).answer);
 
 /** A minion moved into or out of ready/complete/try, offered or lost its replies, was dismissed or reopened, changed hands, raised or cleared a spend alert, or had the loop guard hold or release messages (or is new to us). */
-export const countMoved = (before, after) => !before || before.state !== after.state || !before.asleep !== !after.asleep || !before.replies?.length !== !after.replies?.length || (before.status === 'closed') !== (after.status === 'closed')
-  || before.properties?.assigned !== after.properties?.assigned || before.spend_alert?.event !== after.spend_alert?.event || !before.loop_hold !== !after.loop_hold;
+export const countMoved = (before, after) =>
+  !before ||
+  before.state !== after.state ||
+  !before.asleep !== !after.asleep ||
+  !before.replies?.length !== !after.replies?.length ||
+  (before.status === 'closed') !== (after.status === 'closed') ||
+  before.properties?.assigned !== after.properties?.assigned ||
+  before.spend_alert?.event !== after.spend_alert?.event ||
+  !before.loop_hold !== !after.loop_hold;
 
 /**
  * A minion or Taskmaster whose turn is doing work, for the spinner and its number (#248, #278). A turn
@@ -54,8 +61,7 @@ export function schemePill(p) {
  * source of that colour). A plain dot, not a count: purple is per scheme, so a number would be ambiguous (#980).
  * `projects` as api/projects sends them; the open scheme's `fresh` is this page's own (`seen`, as inbox.js holds it).
  */
-export const wantsBadge = (projects, openId, seen) =>
-  (projects || []).some((p) => !p.hidden && schemePill(openPill(p, openId, seen)).fresh);
+export const wantsBadge = (projects, openId, seen) => (projects || []).some((p) => !p.hidden && schemePill(openPill(p, openId, seen)).fresh);
 
 /**
  * The scheme you're in, as this page saw it (`seen`: inbox.js's seenHere): its strip's count and spinner (`seen.pill`) and
@@ -81,8 +87,7 @@ export function syncBadge(want, state, nav = globalThis.navigator) {
  * are actively looking at the minion that is now asking for something and until you move minions"). Opening a chat
  * (`moved`) sees all of it; staying put, you see only what the chat you're on asks, and the rest is new to you.
  */
-export const seenInScheme = (seen, waiting, chatId, moved) =>
-  new Set(waiting.filter((i) => moved || seen.has(i.key) || i.ticketId === chatId).map((i) => i.key));
+export const seenInScheme = (seen, waiting, chatId, moved) => new Set(waiting.filter((i) => moved || seen.has(i.key) || i.ticketId === chatId).map((i) => i.key));
 
 /**
  * Other schemes' minions as the stream last showed them: `ticket` and `event` call `refetch(badge)` when

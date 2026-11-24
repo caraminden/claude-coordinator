@@ -80,9 +80,5 @@ export function inNativeApp(win?: unknown): boolean;
  * `name` its text. Returns a function that removes them. Docs: kit/skills/contraption-ui/references/menu.md.
  */
 export const menu: {
-  add(
-    selector: string,
-    items: (el: Element, event: Event) => Array<MenuItem | '-' | null | undefined | false>,
-    options?: { kind?: string; name?: (el: Element) => string },
-  ): () => void;
+  add(selector: string, items: (el: Element, event: Event) => Array<MenuItem | '-' | null | undefined | false>, options?: { kind?: string; name?: (el: Element) => string }): () => void;
 };

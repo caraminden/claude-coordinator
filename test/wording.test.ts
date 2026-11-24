@@ -14,12 +14,13 @@ import { checkCall, explain, misusedWords } from '../src/wording.ts';
 
 const flagged = (text: string) => misusedWords(text).map((f) => f.word);
 
-test('flags fold in every sense, the old gos included: Peek Auras #34\'s handoff, and the brief that asked for this check', () => {
+test("flags fold in every sense, the old gos included: Peek Auras #34's handoff, and the brief that asked for this check", () => {
   assert.deepEqual(flagged('**Folding in (core tooling)**'), ['Folding in']);
   assert.deepEqual(flagged('The Taskmaster starts a fold-in minion.'), ['fold-in']);
   assert.deepEqual(flagged('Then refit everything in the fold.'), ['fold']);
   assert.deepEqual(flagged('the fold'), ['fold']);
-  const brief = "1. **A turn's final reply.** There's already a Stop hook that sends a reply back once when its file links won't open: src/link-check.ts, added in runner.ts `linkCheckHooks`. Follow that pattern, or fold this check into the same hook if that's cleaner. The `SENT_BACK` / `Runner.replaceSentBack` handling has to keep working.";
+  const brief =
+    "1. **A turn's final reply.** There's already a Stop hook that sends a reply back once when its file links won't open: src/link-check.ts, added in runner.ts `linkCheckHooks`. Follow that pattern, or fold this check into the same hook if that's cleaner. The `SENT_BACK` / `Runner.replaceSentBack` handling has to keep working.";
   assert.deepEqual(flagged(brief), ['fold']);
   assert.equal(misusedWords(brief)[0].sentence, "Follow that pattern, or fold this check into the same hook if that's cleaner.");
   assert.deepEqual(flagged('It folds the old notes in. Then we folded them again.'), ['folds', 'folded']);
@@ -29,43 +30,68 @@ test('flags fold in every sense, the old gos included: Peek Auras #34\'s handoff
 });
 
 test('leaves fold alone in words that only contain it, quoted, or as code', () => {
-  for (const ok of [
-    'the folder', 'scaffold the page', 'casefold the names', 'case-fold the names', 'unfold, manifold, twofold',
-    'Use `fold` here.', 'Before:\n```\nthe fold\n```\nafter.', 'Open src/fold-panel.ts and ticket/313-check-for-misused-fold.',
-    '"Fold" is retired.', 'The word \'fold\' is retired.',
-  ]) assert.deepEqual(flagged(ok), [], ok);
+  for (const ok of ['the folder', 'scaffold the page', 'casefold the names', 'case-fold the names', 'unfold, manifold, twofold', 'Use `fold` here.', 'Before:\n```\nthe fold\n```\nafter.', 'Open src/fold-panel.ts and ticket/313-check-for-misused-fold.', '"Fold" is retired.', "The word 'fold' is retired."])
+    assert.deepEqual(flagged(ok), [], ok);
 });
 
 test('flags merge said of main: gos, "to main", "ready to merge", merged PRs and the merge card', () => {
   for (const [text, word] of [
-    ['Merge it?', 'Merge it'], ['So merge this.', 'merge this'], ['Merge #196 when ready.', 'Merge #196'], ['merge PR 12 now', 'merge PR 12'],
-    ['Ready to merge.', 'Ready to merge'], ['Merge 196.', 'Merge 196'], ['PR #12 merged.', 'PR #12 merged'], ['PR 12 was merged an hour ago.', 'PR 12 was merged'],
-    ['It was merged to main yesterday.', 'merged to main'], ['I merged the fix into main.', 'merged the fix into main'],
-    ['Review this, then merge it into main.', 'merge it into main'], ['Only merged PRs count.', 'merged PRs'], ['It asks with a merge card.', 'merge card'],
-  ]) assert.deepEqual(flagged(text), [word], text);
+    ['Merge it?', 'Merge it'],
+    ['So merge this.', 'merge this'],
+    ['Merge #196 when ready.', 'Merge #196'],
+    ['merge PR 12 now', 'merge PR 12'],
+    ['Ready to merge.', 'Ready to merge'],
+    ['Merge 196.', 'Merge 196'],
+    ['PR #12 merged.', 'PR #12 merged'],
+    ['PR 12 was merged an hour ago.', 'PR 12 was merged'],
+    ['It was merged to main yesterday.', 'merged to main'],
+    ['I merged the fix into main.', 'merged the fix into main'],
+    ['Review this, then merge it into main.', 'merge it into main'],
+    ['Only merged PRs count.', 'merged PRs'],
+    ['It asks with a merge card.', 'merge card'],
+  ])
+    assert.deepEqual(flagged(text), [word], text);
 });
 
-test('leaves merge alone for a build, git, and every shape that can\'t be told from git\'s', () => {
+test("leaves merge alone for a build, git, and every shape that can't be told from git's", () => {
   for (const ok of [
-    'Merge it into Build 3.', 'PR #12 merged into the build.', 'Merged into Build 3, not live until the build ships',
-    'Merge it, the feeder is green.', 'Merge them with git.', 'There was a merge conflict.', 'merged the branches', 'the merge commit',
-    'Ship it.', 'Ready to ship.', 'PR #12 shipped.', '`merge it`', '"merge it" still counts as a go.',
-  ]) assert.deepEqual(flagged(ok), [], ok);
+    'Merge it into Build 3.',
+    'PR #12 merged into the build.',
+    'Merged into Build 3, not live until the build ships',
+    'Merge it, the feeder is green.',
+    'Merge them with git.',
+    'There was a merge conflict.',
+    'merged the branches',
+    'the merge commit',
+    'Ship it.',
+    'Ready to ship.',
+    'PR #12 shipped.',
+    '`merge it`',
+    '"merge it" still counts as a go.',
+  ])
+    assert.deepEqual(flagged(ok), [], ok);
 });
 
-test('flags land said of main: a change going onto main ships (Cara, 2026-11-19, on #1020\'s card)', () => {
+test("flags land said of main: a change going onto main ships (Cara, 2026-11-19, on #1020's card)", () => {
   for (const [text, word] of [
-    ['Land it?', 'Land it'], ['Should I land #12?', 'land #12'], ['land PR 41 now', 'land PR 41'], ['Ready to land.', 'Ready to land'],
-    ['It landed on main an hour ago.', 'landed on main'], ['#12 has landed.', '#12 has landed'], ['PR #40 landed.', 'PR #40 landed'],
-    ['Only landed PRs count.', 'landed PRs'], ['Land 196 now.', 'Land 196'], ['It asks with a land card.', 'land card'], ['It waits in the land line.', 'land line'],
-  ]) assert.deepEqual(flagged(text), [word], text);
+    ['Land it?', 'Land it'],
+    ['Should I land #12?', 'land #12'],
+    ['land PR 41 now', 'land PR 41'],
+    ['Ready to land.', 'Ready to land'],
+    ['It landed on main an hour ago.', 'landed on main'],
+    ['#12 has landed.', '#12 has landed'],
+    ['PR #40 landed.', 'PR #40 landed'],
+    ['Only landed PRs count.', 'landed PRs'],
+    ['Land 196 now.', 'Land 196'],
+    ['It asks with a land card.', 'land card'],
+    ['It waits in the land line.', 'land line'],
+  ])
+    assert.deepEqual(flagged(text), [word], text);
 });
 
 test('leaves land alone in code, tool and file names and its other senses', () => {
-  for (const ok of [
-    'Ship it.', '#12 has shipped.', 'Call hand_off_land now.', 'tools/land.sh refused it.', 'Its branch is land/ticket-12.',
-    '`land it`', '"land it" still counts as a go.', 'The findings land in this chat.', 'Retries until the write lands.', 'The fix lands in main.py.',
-  ]) assert.deepEqual(flagged(ok), [], ok);
+  for (const ok of ['Ship it.', '#12 has shipped.', 'Call hand_off_land now.', 'tools/land.sh refused it.', 'Its branch is land/ticket-12.', '`land it`', '"land it" still counts as a go.', 'The findings land in this chat.', 'Retries until the write lands.', 'The fix lands in main.py.'])
+    assert.deepEqual(flagged(ok), [], ok);
 });
 
 test('nearby means the same sentence or within 8 words, not further', () => {
@@ -77,7 +103,10 @@ test('nearby means the same sentence or within 8 words, not further', () => {
 
 test('HTML: tags, scripts and code are not prose', () => {
   assert.deepEqual(misusedWords('<details class="fold"><summary>More</summary><code>fold</code><script>fold()</script></details>', true), []);
-  assert.deepEqual(misusedWords('<p>Hidden in the <b>fold</b>.</p>', true).map((f) => f.word), ['fold']);
+  assert.deepEqual(
+    misusedWords('<p>Hidden in the <b>fold</b>.</p>', true).map((f) => f.word),
+    ['fold'],
+  );
 });
 
 const root = mkdtempSync(join(tmpdir(), 'wording-'));
@@ -119,7 +148,7 @@ test('only .md and .html writes into a shared folder are checked', () => {
   assert.equal(checkCall({ tool_name: 'Bash', tool_input: { command: 'echo the fold' } }, cfg), null);
 });
 
-test('the final reply is sent back in the link check\'s send-back, so the rewrite replaces it', async () => {
+test("the final reply is sent back in the link check's send-back, so the rewrite replaces it", async () => {
   const v = await check({ last_assistant_message: 'Done. The legend now sits in a fold.' }, { cwd: root, roots: [root] });
   assert.equal(v?.decision, 'block');
   assert.ok(v!.reason.startsWith(SENT_BACK), v!.reason);
@@ -132,7 +161,10 @@ test('the hook script prints a deny decision, or nothing', () => {
   assert.equal(entry.matcher, WORDING_MATCHER);
   for (const t of ['mcp__thread__message_coordinator', 'mcp__coordinator__message_ticket', 'mcp__thread__propose_plan', 'Write', 'Edit']) assert.match(t, new RegExp(WORDING_MATCHER));
   assert.doesNotMatch('mcp__thread__set_properties', new RegExp(WORDING_MATCHER));
-  const [node, script, config] = entry.hooks[0].command.split(' ').slice(1).map((s: string) => s.slice(1, -1));
+  const [node, script, config] = entry.hooks[0].command
+    .split(' ')
+    .slice(1)
+    .map((s: string) => s.slice(1, -1));
   assert.equal(script, WORDING);
   const run = (input: object | string, c = config) => spawnSync(node, [script, c], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8' });
   const bad = { hook_event_name: 'PreToolUse', tool_name: 'mcp__thread__propose_plan', tool_input: { summary: 'Plan', plan: 'Fold the new data into the templates.' } };

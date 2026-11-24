@@ -64,9 +64,20 @@ const VERBS = ['click', 'hover', 'type', 'fill', 'key', 'wait', 'text', 'sleep',
 
 type Step = { verb: string; arg: string; text?: string };
 interface Opts {
-  routes: string[]; widths: number[]; themes: string[]; steps: Step[]; media: { name: string; value: string }[];
-  titlebar?: [number, number, number]; safeArea?: [number, number]; before?: string; wait?: string; timeout: number; anon: boolean;
-  url?: string; cookie?: string; out: string;
+  routes: string[];
+  widths: number[];
+  themes: string[];
+  steps: Step[];
+  media: { name: string; value: string }[];
+  titlebar?: [number, number, number];
+  safeArea?: [number, number];
+  before?: string;
+  wait?: string;
+  timeout: number;
+  anon: boolean;
+  url?: string;
+  cookie?: string;
+  out: string;
 }
 
 /** One step a line; blank lines and # comments are skipped. */
@@ -82,7 +93,8 @@ export function parseSteps(src: string): Step[] {
     // The text after ' | ' is kept as written; a trailing ' |' (trimmed to ' |') is an empty fill.
     const bar = arg.includes(' | ') ? arg.indexOf(' | ') : arg.endsWith(' |') ? arg.length - 2 : -1;
     if ((verb === 'type' || verb === 'fill') && bar < 0) throw new Error(`step "${line}": ${verb} <selector> | <text>`);
-    if ((verb === 'type' || verb === 'fill' || verb === 'wait') && bar >= 0) steps.push({ verb, arg: arg.slice(0, bar).trim(), text: arg.slice(bar + 3) }); else if (verb === 'sleep' && !(Number(arg) >= 0)) throw new Error(`step "${line}": sleep takes ms`);
+    if ((verb === 'type' || verb === 'fill' || verb === 'wait') && bar >= 0) steps.push({ verb, arg: arg.slice(0, bar).trim(), text: arg.slice(bar + 3) });
+    else if (verb === 'sleep' && !(Number(arg) >= 0)) throw new Error(`step "${line}": sleep takes ms`);
     else if (verb === 'shot' && !/^[\w-]+$/.test(arg)) throw new Error(`step "${line}": a shot's name is letters, digits, - and _`);
     else steps.push({ verb, arg });
   }
@@ -90,7 +102,18 @@ export function parseSteps(src: string): Step[] {
 }
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): Opts {
-  const o: Opts = { routes: [], widths: env.COORDINATOR_SHOT_WIDTHS?.match(/^\d+(,\d+)*$/) ? env.COORDINATOR_SHOT_WIDTHS.split(',').map(Number) : [1440, 390], themes: env.COORDINATOR_SHOT_THEMES?.match(/^(light|dark)(,(light|dark))*$/) ? env.COORDINATOR_SHOT_THEMES.split(',') : ['light'], steps: [], media: [], timeout: TIMEOUT_MS, anon: false, url: env.DEV_URL || undefined, cookie: env.DEV_COOKIE || undefined, out: join(env.TMPDIR || tmpdir(), 'ui-shot') };
+  const o: Opts = {
+    routes: [],
+    widths: env.COORDINATOR_SHOT_WIDTHS?.match(/^\d+(,\d+)*$/) ? env.COORDINATOR_SHOT_WIDTHS.split(',').map(Number) : [1440, 390],
+    themes: env.COORDINATOR_SHOT_THEMES?.match(/^(light|dark)(,(light|dark))*$/) ? env.COORDINATOR_SHOT_THEMES.split(',') : ['light'],
+    steps: [],
+    media: [],
+    timeout: TIMEOUT_MS,
+    anon: false,
+    url: env.DEV_URL || undefined,
+    cookie: env.DEV_COOKIE || undefined,
+    out: join(env.TMPDIR || tmpdir(), 'ui-shot'),
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const val = () => {
@@ -120,8 +143,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     else if (a === '--timeout') {
       o.timeout = Number(val()) * 1000;
       if (!(o.timeout > 0)) throw new Error('--timeout takes seconds, like 5');
-    }
-    else if (a === '--anon') o.anon = true;
+    } else if (a === '--anon') o.anon = true;
     else if (a === '--url') o.url = val();
     else if (a === '--cookie') o.cookie = val();
     else if (a === '--out') o.out = resolve(val());
@@ -141,7 +163,11 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
 
 /** The file name for one shot: the route's words, the width, then the theme, media and step's name when given. */
 export function shotName(route: string, width: number, theme: string, media: Opts['media'], step = ''): string {
-  const slug = route.replace(/^#\/?/, '').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'front';
+  const slug =
+    route
+      .replace(/^#\/?/, '')
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-|-$/g, '') || 'front';
   return [slug, width, theme === 'dark' ? 'dark' : '', ...media.map((m) => m.value), step].filter(Boolean).join('-') + '.png';
 }
 
@@ -169,7 +195,12 @@ export function emulation(mode: string | undefined, titlebar: [number, number, n
 })();`;
 }
 
-interface Server { url: string; cookie?: string; pid?: number; log?: string }
+interface Server {
+  url: string;
+  cookie?: string;
+  pid?: number;
+  log?: string;
+}
 
 /** This worktree's dev copy: the running one, or one started now (on a copy of the live data when this turn can see it). */
 function devCopy(): Server {
@@ -233,7 +264,9 @@ async function step(page: Page, st: Step, ms: number, shoot: (name: string) => P
   else if (st.verb === 'type' || st.verb === 'fill') {
     await there();
     // fill selects what is there, so the typed text (or a delete, for none) replaces it with real input events; type goes to the end.
-    await page.evaluate(`(() => { const e = document.querySelector(${q}); e.focus(); if (${st.verb === 'fill'}) { if (typeof e.select === 'function') e.select(); else getSelection().selectAllChildren(e); } else if (typeof e.setSelectionRange === 'function') { try { e.setSelectionRange(e.value.length, e.value.length); } catch {} } else if (e.isContentEditable) getSelection().selectAllChildren(e), getSelection().collapseToEnd(); })()`);
+    await page.evaluate(
+      `(() => { const e = document.querySelector(${q}); e.focus(); if (${st.verb === 'fill'}) { if (typeof e.select === 'function') e.select(); else getSelection().selectAllChildren(e); } else if (typeof e.setSelectionRange === 'function') { try { e.setSelectionRange(e.value.length, e.value.length); } catch {} } else if (e.isContentEditable) getSelection().selectAllChildren(e), getSelection().collapseToEnd(); })()`,
+    );
     if (st.text) await page.s('Input.insertText', { text: st.text });
     else if (st.verb === 'fill') await page.evaluate(`document.execCommand('delete')`);
   } else if (st.verb === 'key') {
@@ -279,8 +312,13 @@ async function openRoute(browser: Pick<Browser, 'send'>, server: Server, o: Opts
   const emulate = !!(mode || o.titlebar);
   const opening = openPage(browser.send, server.url + route, width, {
     init: emulate ? emulation(mode, o.titlebar) : undefined,
-    cookies: o.anon || !server.cookie ? [] : [server.cookie], headers: [], dark: theme === 'dark', media: o.media.filter((m) => m.name !== 'display-mode'), settle: 0,
-    wait: o.wait ?? (o.anon ? 'body > *' : '#app > *'), before: `${READY}\n${emulate ? 'window.__uiShotEmulate();' : ''}\n${o.before ?? ''}\n${FRAME}`,
+    cookies: o.anon || !server.cookie ? [] : [server.cookie],
+    headers: [],
+    dark: theme === 'dark',
+    media: o.media.filter((m) => m.name !== 'display-mode'),
+    settle: 0,
+    wait: o.wait ?? (o.anon ? 'body > *' : '#app > *'),
+    before: `${READY}\n${emulate ? 'window.__uiShotEmulate();' : ''}\n${o.before ?? ''}\n${FRAME}`,
   });
   opening.then(onPage, () => {});
   const page = await within(opening, TIMEOUT_MS * 2);
@@ -315,7 +353,17 @@ export async function open(route = '/', { width = 1440, args = [] as string[] } 
       /** Run step lines, as --step takes them; what text and eval print comes back. */
       async do(lines: string) {
         const said: string[] = [];
-        for (const st of parseSteps(lines)) await within(step(page, st, o.timeout, async (n) => void (await shoot(n)), (l) => said.push(l)), stepTime(st, o.timeout));
+        for (const st of parseSteps(lines))
+          await within(
+            step(
+              page,
+              st,
+              o.timeout,
+              async (n) => void (await shoot(n)),
+              (l) => said.push(l),
+            ),
+            stepTime(st, o.timeout),
+          );
         return said;
       },
       shot: shoot,
@@ -355,7 +403,10 @@ async function main() {
             page = await openRoute(browser, server, o, route, width, theme, (p) => (page = p));
             for (const [i, st] of o.steps.entries()) {
               at = `step ${i + 1}, ${st.verb} ${st.arg}${st.text === undefined ? '' : ` | ${st.text}`}`;
-              await within(step(page, st, o.timeout, shoot, (s) => console.log(`  ${label}: ${s}`)), stepTime(st, o.timeout));
+              await within(
+                step(page, st, o.timeout, shoot, (s) => console.log(`  ${label}: ${s}`)),
+                stepTime(st, o.timeout),
+              );
             }
             if (!o.steps.some((s) => s.verb === 'shot')) await shoot();
           } catch (e) {
@@ -376,7 +427,8 @@ async function main() {
   if (failed) process.exitCode = 1;
 }
 
-if (import.meta.main) await main().catch((e) => {
-  console.error(`ui-shot: ${e.message}`);
-  process.exit(2);
-});
+if (import.meta.main)
+  await main().catch((e) => {
+    console.error(`ui-shot: ${e.message}`);
+    process.exit(2);
+  });

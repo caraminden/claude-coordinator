@@ -31,7 +31,13 @@ test('checkChanges refuses bad changes and keeps what each note was', () => {
     [[{ action: 'flag', file: '../a.md', reason: 'r' }], /file name/],
     [[{ action: 'delete', file: 'MEMORY.md', reason: 'r' }], /MEMORY\.md only with flag/],
     [[{ action: 'flag', file: 'a.md', reason: '' }], /reason/],
-    [[{ action: 'flag', file: 'a.md', reason: 'r' }, { action: 'delete', file: 'a.md', reason: 'r' }], /two changes/],
+    [
+      [
+        { action: 'flag', file: 'a.md', reason: 'r' },
+        { action: 'delete', file: 'a.md', reason: 'r' },
+      ],
+      /two changes/,
+    ],
     [[{ action: 'delete', file: 'zz.md', reason: 'r' }], /no note/],
     [[{ action: 'add', file: 'a.md', text: 'x', line: '- [A](a.md)', reason: 'r' }], /already exists/],
     [[{ action: 'edit', file: 'a.md', text: A, reason: 'r' }], /as it is now/],
@@ -73,14 +79,20 @@ test('nothing changes until approve, and only the ticked changes apply', () => {
   assert.deepEqual(snapshot(dir), before, 'checking a proposal writes nothing');
   const gone: string[] = [];
   const { changes: out, backup } = applyChanges(dir, changes, new Set([1, 3, 4]), (f) => gone.push(f));
-  assert.deepEqual(out.map((c) => c.outcome), ['applied', 'turned down', 'applied', 'applied']);
+  assert.deepEqual(
+    out.map((c) => c.outcome),
+    ['applied', 'turned down', 'applied', 'applied'],
+  );
   assert.equal(readFileSync(join(dir, 'a.md'), 'utf8'), 'merged a+b\n');
   assert.equal(readFileSync(join(dir, 'b.md'), 'utf8'), B, 'an unticked delete leaves the note');
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- [A](a.md) — a and b\n- [B](b.md) — second\n- [C](c.md) — unindexed\n- [D](d.md) — new\n');
   assert.deepEqual(gone, []);
   assert.equal(backup.length, 3);
   // Put back restores every note and line, and removes the note the proposal added.
-  assert.deepEqual(restoreSaved(dir, backup, (f) => gone.push(f)), { restored: 3, failed: [] });
+  assert.deepEqual(
+    restoreSaved(dir, backup, (f) => gone.push(f)),
+    { restored: 3, failed: [] },
+  );
   assert.deepEqual(snapshot(dir), before);
   assert.deepEqual(gone, ['d.md']);
 });
@@ -125,9 +137,15 @@ test('a note changed since the proposal is skipped, and the page sees it first',
   writeFileSync(join(dir, 'a.md'), 'someone edited it\n');
   writeFileSync(join(dir, 'MEMORY.md'), '- [A](a.md) — first\n- [B](b.md) — second\n- [C](c.md) — by hand\n');
   writeFileSync(join(dir, 'd.md'), 'made by hand\n');
-  assert.deepEqual(withDrift(dir, changes).map((c) => c.drifted), [true, true, true, false]);
+  assert.deepEqual(
+    withDrift(dir, changes).map((c) => c.drifted),
+    [true, true, true, false],
+  );
   const { changes: out, backup } = applyChanges(dir, changes, new Set([1, 2, 3, 4]));
-  assert.deepEqual(out.map((c) => c.outcome), ['changed since', 'changed since', 'changed since', 'noted']);
+  assert.deepEqual(
+    out.map((c) => c.outcome),
+    ['changed since', 'changed since', 'changed since', 'noted'],
+  );
   assert.equal(readFileSync(join(dir, 'a.md'), 'utf8'), 'someone edited it\n');
   assert.equal(readFileSync(join(dir, 'd.md'), 'utf8'), 'made by hand\n');
   assert.deepEqual(backup, []);
@@ -158,7 +176,10 @@ test('the store supersedes an open proposal, decides once, and drops old notes a
   const one = s.create({ project_id: 1, ticket_id: 10, folder: 'f', changes: [] }, 1000).proposal;
   s.create({ project_id: 2, ticket_id: 20, folder: 'f', changes: [] }, 1000);
   const { proposal: two, superseded } = s.create({ project_id: 1, ticket_id: 11, folder: 'f', changes: [] }, 2000);
-  assert.deepEqual(superseded.map((p) => p.id), [one.id]);
+  assert.deepEqual(
+    superseded.map((p) => p.id),
+    [one.id],
+  );
   assert.equal(s.get(one.id)!.status, 'superseded');
   assert.equal(s.open(1)!.id, two.id);
   assert.equal(s.open(2)!.ticket_id, 20, 'another scheme keeps its own');
@@ -166,7 +187,10 @@ test('the store supersedes an open proposal, decides once, and drops old notes a
   assert.equal(s.decide(one.id, { status: 'applied', changes: [], backup, by: 'josh' }), false, 'a superseded one can no longer be decided');
   assert.equal(s.decide(two.id, { status: 'applied', changes: [], backup, by: 'josh' }, 3000), true);
   assert.equal(s.decide(two.id, { status: 'dismissed', changes: [], backup: [], by: 'cara' }), false, 'decided once');
-  assert.deepEqual(s.kept(1).map((p) => p.backup), [backup]);
+  assert.deepEqual(
+    s.kept(1).map((p) => p.backup),
+    [backup],
+  );
   assert.equal(s.prune(3000 + KEEP_MS - 1), 0);
   assert.equal(s.prune(3000 + KEEP_MS + 1), 1);
   assert.deepEqual(s.kept(1), []);

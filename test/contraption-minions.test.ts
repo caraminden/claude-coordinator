@@ -37,10 +37,24 @@ const HOMELESS_KEY = readFileSync(join(data, 'contraptions', 'homeless', 'contra
 const minion = (title: string, project_id = ToC.id) => store.createTicket({ project_id, title, permission_mode: 'bypassPermissions', created_by: 'Cara' });
 // #1: two steps planned, the second under way, a reply line (chat text) as last_activity, and a question card waiting.
 const acolyte = minion('Rune tooltips');
-store.addEvent(acolyte.id, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'TodoWrite', input: { todos: [
-  { content: 'Read the tooltip code', activeForm: 'Reading the tooltip code', status: 'completed' },
-  { content: 'Show the rune cost', activeForm: 'Showing the rune cost', status: 'in_progress' },
-] } }] } });
+store.addEvent(acolyte.id, 'claude', {
+  type: 'assistant',
+  message: {
+    content: [
+      {
+        type: 'tool_use',
+        id: 't1',
+        name: 'TodoWrite',
+        input: {
+          todos: [
+            { content: 'Read the tooltip code', activeForm: 'Reading the tooltip code', status: 'completed' },
+            { content: 'Show the rune cost', activeForm: 'Showing the rune cost', status: 'in_progress' },
+          ],
+        },
+      },
+    ],
+  },
+});
 store.updateTicket(acolyte.id, { status: 'idle', state: 'try', note: 'ready to try', last_activity: 'Secret words from my reply' });
 store.addEvent(acolyte.id, 'question', { id: 'q1', questions: [{ question: 'Tabs or list?', options: [] }] });
 // #2: dismissed, no plan.
@@ -72,9 +86,17 @@ test('GET /api/contraptions/home and /minions (#421): membership, progress, erro
   const card = r.body.card_since;
   assert.equal(typeof card, 'number');
   assert.deepEqual(r.body, {
-    number: 1, title: 'Rune tooltips', status: 'idle', state: 'try', note: 'ready to try',
-    line: 'Paused at: Show the rune cost · 1 of 2 done', step: { n: 2, of: 2, done: 1, label: 'Showing the rune cost' },
-    activity_at: store.getTicket(acolyte.id)!.updated_at, card_waiting: true, card_since: card, link: `/c/#/p/${ToC.id}/t/1`,
+    number: 1,
+    title: 'Rune tooltips',
+    status: 'idle',
+    state: 'try',
+    note: 'ready to try',
+    line: 'Paused at: Show the rune cost · 1 of 2 done',
+    step: { n: 2, of: 2, done: 1, label: 'Showing the rune cost' },
+    activity_at: store.getTicket(acolyte.id)!.updated_at,
+    card_waiting: true,
+    card_since: card,
+    link: `/c/#/p/${ToC.id}/t/1`,
   });
   assert.doesNotMatch(JSON.stringify(r.body), /Secret words/);
 
@@ -112,7 +134,10 @@ test('GET /api/contraptions/home and /minions (#421): membership, progress, erro
   // The list form: the numbers that exist, in order asked, deduplicated, with its own ETag.
   r = await get(`minions?person=${Rachel.id}&n=2,1,3,1`);
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body.minions.map((m: { number: number }) => m.number), [2, 1]);
+  assert.deepEqual(
+    r.body.minions.map((m: { number: number }) => m.number),
+    [2, 1],
+  );
   assert.equal((await get(`minions?person=${Rachel.id}&n=2,1,3,1`, { 'If-None-Match': r.etag! })).status, 304);
   assert.equal((await get(`minions?person=${Josh.id}&n=1`)).status, 403);
   for (const bad of ['', '1,x', '0', Array.from({ length: 51 }, (_, i) => i + 1).join(',')]) assert.equal((await get(`minions?person=${Rachel.id}&n=${bad}`)).status, 400, bad);

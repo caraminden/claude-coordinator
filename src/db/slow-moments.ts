@@ -5,14 +5,22 @@ import type { Store } from '../db.ts';
 export const SLOW_KEEP = 500;
 
 export type SlowMoment = {
-  id: number; at: number; person: string; device: string; tab: string;
+  id: number;
+  at: number;
+  person: string;
+  device: string;
+  tab: string;
   /** 'request', 'open' (opening a page inside Citadel), 'load' (opening Citadel) or 'freeze' (the tab blocked with nothing asked). */
   kind: string;
   /** The request (`GET /api/projects/2`; for an opening, its slowest), or '' for a load, a freeze or an opening with none. */
   what: string;
   /** The page's address then (`#/p/2/t/394`), and its scheme when it names one. */
-  page: string; project_id: number | null;
-  total_ms: number; server_ms: number | null; network_ms: number; tab_ms: number;
+  page: string;
+  project_id: number | null;
+  total_ms: number;
+  server_ms: number | null;
+  network_ms: number;
+  tab_ms: number;
 };
 
 export const slowMomentQueries = {
@@ -26,7 +34,12 @@ export const slowMomentQueries = {
       this.db.prepare('DELETE FROM slow_moments WHERE id <= (SELECT MAX(id) FROM slow_moments) - ?').run(SLOW_KEEP);
       if (!nested) this.db.exec('COMMIT');
     } catch (err) {
-      if (!nested) try { this.db.exec('ROLLBACK'); } catch { /* no transaction was open */ }
+      if (!nested)
+        try {
+          this.db.exec('ROLLBACK');
+        } catch {
+          /* no transaction was open */
+        }
       throw err;
     }
   },

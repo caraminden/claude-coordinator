@@ -27,7 +27,9 @@ after(async () => {
 });
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -35,7 +37,8 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 // Before boot: the admin, the scheme, and two contraptions homed in it.
@@ -64,18 +67,25 @@ async function raw(path: string, opts: { method?: string; body?: unknown; who?: 
   });
 }
 let srv: Booted;
-const call = async (who: string, path: string, body?: unknown, method?: string) =>
-  ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, body || undefined, method));
+const call = async (who: string, path: string, body?: unknown, method?: string) => ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, body || undefined, method));
 const app = async (name: string, path: string, body?: unknown) => ok(await srv.as({ token: KEY(name) })(path, body || undefined));
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
-const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
+const live = () =>
+  turns()
+    .filter((t) => t.token.startsWith(`${ticket.id}.`))
+    .at(-1).token;
 const idle = () => until('the turn to end', async () => (await call('Cara', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
 const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
 const job = (id: number) => call('Josh', `/api/jobs/${id}`);
 
 /** A fake machine agent: its stream's messages, and its own calls with the machine's key. */
-interface Agent { msgs: any[]; jobs(type?: string): any[]; close(): void; post(path: string, body: unknown): Promise<Response> }
+interface Agent {
+  msgs: any[];
+  jobs(type?: string): any[];
+  close(): void;
+  post(path: string, body: unknown): Promise<Response>;
+}
 async function connect(token: string, info: object): Promise<Agent> {
   const ctrl = new AbortController();
   const res = await fetch(`${base}/api/machines/connect?v=2&host=fake`, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal });
@@ -87,7 +97,10 @@ async function connect(token: string, info: object): Promise<Agent> {
     for await (const chunk of res.body as any) {
       buf += dec.decode(chunk, { stream: true });
       for (let i; (i = buf.indexOf('\n\n')) >= 0; buf = buf.slice(i + 2)) {
-        const line = buf.slice(0, i).split('\n').find((l) => l.startsWith('data: '));
+        const line = buf
+          .slice(0, i)
+          .split('\n')
+          .find((l) => l.startsWith('data: '));
         if (line) msgs.push(JSON.parse(line.slice(6)));
       }
     }
@@ -111,7 +124,10 @@ async function answer(who: string, jobId: number, label: string) {
   assert.ok(card, `job #${jobId} has a go card`);
   return call(who, `/api/tickets/${ticket.id}/answer`, { questionId: card.id, answers: [{ selected: [label] }] });
 }
-const hhmm = (min: number) => { const m = ((min % 1440) + 1440) % 1440; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
+const hhmm = (min: number) => {
+  const m = ((min % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+};
 const hours = (open: boolean) => {
   const now = pacificClock(Date.now(), srv.zone).minutes; // the server's zone, not Pacific's (#1536)
   return call('Josh', `/api/machines/${box.id}/job-settings`, open ? { start: hhmm(now - 60), end: hhmm(now + 120) } : { start: hhmm(now + 120), end: hhmm(now + 180) }, 'PATCH');
@@ -125,10 +141,11 @@ async function wakes<T>(fn: () => Promise<T>): Promise<T> {
   return out;
 }
 /** End a job as done, so the next test starts with the machine free; the minion is woken with its result. */
-const finish = (id: number) => wakes(async () => {
-  assert.equal((await state(id, 'done', { exit_code: 0 })).status, 202);
-  await until(`job #${id} to end`, async () => (await job(id)).state === 'done');
-});
+const finish = (id: number) =>
+  wakes(async () => {
+    assert.equal((await state(id, 'done', { exit_code: 0 })).status, 202);
+    await until(`job #${id} to end`, async () => (await job(id)).state === 'done');
+  });
 
 before(async () => {
   srv = await bootServer({ root, env: { CLAUDE_BIN: fakeClaude, HOME: join(root, 'home') } });
@@ -152,7 +169,7 @@ before(async () => {
   await idle();
 });
 
-test('job hours wrap midnight, a one-off window opens them, and a kind\'s hash ignores its name', () => {
+test("job hours wrap midnight, a one-off window opens them, and a kind's hash ignores its name", () => {
   const at = (h: number, m = 0) => Date.UTC(2026, 10, 16, h + 8, m); // Pacific standard time is UTC-8 in November
   const night = { start: '23:00', end: '08:00', until: null, paused: false };
   assert.equal(hoursOpen(night, at(23, 30)), true);
@@ -171,12 +188,15 @@ test('only a minion whose scheme has a machine with a jobs block gets the job to
   assert.equal(turns()[0].jobs, 'josh-gpu');
 });
 
-test('no job.start without its owner\'s go: someone else\'s answer is refused, the owner\'s starts it', async () => {
+test("no job.start without its owner's go: someone else's answer is refused, the owner's starts it", async () => {
   const j = await queue({ inputs: [join(shared, 'chapter.wav')] });
   assert.equal(j.state, 'needs-go');
   const card = (await events('question')).find((q) => q.job === j.id);
-  assert.equal(card.to, 'Josh', 'the card is the owner\'s');
-  assert.deepEqual(card.questions[0].options.map((o: any) => o.label), ['Run in job hours', 'Run now', 'Always allow this kind', 'No']);
+  assert.equal(card.to, 'Josh', "the card is the owner's");
+  assert.deepEqual(
+    card.questions[0].options.map((o: any) => o.label),
+    ['Run in job hours', 'Run now', 'Always allow this kind', 'No'],
+  );
   assert.match(card.questions[0].question, /whisperx.*josh-gpu[\s\S]*Reads models; GPU yes; network no; limit 2 h[\s\S]*chapter\.wav/);
   // The live job card sits in the chat right after the go card, and the view says whose go it needs (#859).
   const chat = await call('Cara', `/api/tickets/${ticket.id}/events?after=0`);
@@ -192,7 +212,12 @@ test('no job.start without its owner\'s go: someone else\'s answer is refused, t
   // An admin (any Citadel scheme member) is not the owner: the go is Josh's alone (spec 6), review finding.
   await assert.rejects(answer('Cara', j.id, 'Run in job hours'), /403/);
   await assert.rejects(call('Cara', `/api/jobs/${j.id}/go`, { choice: 'now' }), /403/);
-  await assert.rejects(raw(`/api/jobs/${j.id}/go`, { who: 'minion', body: { choice: 'now' } }).then((r) => { if (!r.ok) throw new Error(String(r.status)); }), /403/);
+  await assert.rejects(
+    raw(`/api/jobs/${j.id}/go`, { who: 'minion', body: { choice: 'now' } }).then((r) => {
+      if (!r.ok) throw new Error(String(r.status));
+    }),
+    /403/,
+  );
   assert.deepEqual(agent.jobs('job.start'), [], 'nothing starts without a go');
   await answer('Josh', j.id, 'Run in job hours');
   const [start] = await until('job.start', () => agent.jobs('job.start').length && agent.jobs('job.start'));
@@ -208,7 +233,10 @@ test('no job.start without its owner\'s go: someone else\'s answer is refused, t
   assert.equal((await job(j.id)).state, 'running');
   // Starting doesn't move the card; running does, once, however often the agent reports (#859, "the card follows the bottom").
   await state(j.id, 'running', { gpu_pct: 80 });
-  assert.deepEqual((await events('job')).filter((e) => e.job === j.id).map((e) => e.stage), ['waiting', 'running']);
+  assert.deepEqual(
+    (await events('job')).filter((e) => e.job === j.id).map((e) => e.stage),
+    ['waiting', 'running'],
+  );
 });
 
 test('one job at a time: a second one with its go waits behind the first', async () => {
@@ -270,11 +298,16 @@ test('"Always allow" is a standing go for job hours; a changed digest asks again
   await wakes(() => call('Josh', `/api/jobs/${now.id}/go`, { choice: 'no' }));
 });
 
-test('only the owner (or an admin) pauses, resumes and stops; paused time is the owner\'s', async () => {
+test("only the owner (or an admin) pauses, resumes and stops; paused time is the owner's", async () => {
   const [j] = (await call('Josh', `/api/machines/${box.id}/jobs`)).jobs.filter((x: any) => x.state === 'starting');
   await state(j.id, 'running');
   for (const action of ['pause', 'resume', 'stop']) await assert.rejects(call('Dana', `/api/jobs/${j.id}/${action}`, {}), /403/);
-  await assert.rejects(raw(`/api/jobs/${j.id}/pause`, { who: 'minion', body: {} }).then((r) => { if (!r.ok) throw new Error(String(r.status)); }), /403/);
+  await assert.rejects(
+    raw(`/api/jobs/${j.id}/pause`, { who: 'minion', body: {} }).then((r) => {
+      if (!r.ok) throw new Error(String(r.status));
+    }),
+    /403/,
+  );
   assert.equal((await call('Josh', `/api/jobs/${j.id}/pause`, {})).state, 'paused');
   await until('job.pause', () => agent.jobs('job.pause').some((s) => s.id === j.id));
   assert.equal((await call('Cara', `/api/jobs/${j.id}/resume`, {})).state, 'running', 'an admin may too');
@@ -284,25 +317,29 @@ test('only the owner (or an admin) pauses, resumes and stops; paused time is the
   await wakes(() => state(j.id, 'stopped'));
   assert.equal((await job(j.id)).state, 'stopped');
   // The job's chat card moves to 'ended' after its state is saved (the server places it, then the minion is woken): wait for it, don't read the instant the state flips.
-  const stages = await until('the ended card', async () => { const st = (await events('job')).filter((e) => e.job === j.id).map((e) => e.stage); return st.at(-1) === 'ended' && st; });
+  const stages = await until('the ended card', async () => {
+    const st = (await events('job')).filter((e) => e.job === j.id).map((e) => e.stage);
+    return st.at(-1) === 'ended' && st;
+  });
   assert.deepEqual(stages, ['waiting', 'running', 'paused', 'running', 'ended']);
 });
 
-test('results upload under the job\'s and the scheme\'s caps', async () => {
+test("results upload under the job's and the scheme's caps", async () => {
   await hours(true);
   const j = await queue({});
   await until('job.start', () => agent.jobs('job.start').some((s) => s.id === j.id));
   await state(j.id, 'running');
-  const upload = (path: string, body: string | null, length?: number) => new Promise<number>((resolve, reject) => {
-    const req = request(`${base}/api/machines/job-upload?job=${j.id}&${path === 'LOG' ? 'log=1' : `path=${encodeURIComponent(path)}`}`, { method: 'POST', headers: { Authorization: `Bearer ${boxToken}`, ...(length !== undefined ? { 'Content-Length': String(length) } : {}) } }, (res) => {
-      res.resume();
-      resolve(res.statusCode!);
-      req.destroy();
+  const upload = (path: string, body: string | null, length?: number) =>
+    new Promise<number>((resolve, reject) => {
+      const req = request(`${base}/api/machines/job-upload?job=${j.id}&${path === 'LOG' ? 'log=1' : `path=${encodeURIComponent(path)}`}`, { method: 'POST', headers: { Authorization: `Bearer ${boxToken}`, ...(length !== undefined ? { 'Content-Length': String(length) } : {}) } }, (res) => {
+        res.resume();
+        resolve(res.statusCode!);
+        req.destroy();
+      });
+      req.on('error', (err: any) => (err.code === 'ECONNRESET' ? undefined : reject(err)));
+      if (body !== null) req.end(body);
+      else req.flushHeaders();
     });
-    req.on('error', (err: any) => (err.code === 'ECONNRESET' ? undefined : reject(err)));
-    if (body !== null) req.end(body);
-    else req.flushHeaders();
-  });
   assert.equal(await upload('words/ch4.json', '{"ok":true}'), 201);
   assert.equal(readFileSync(join(shared, 'jobs', String(j.id), 'words', 'ch4.json'), 'utf8'), '{"ok":true}');
   assert.equal(await upload('../escape.json', 'x'), 400);
@@ -322,7 +359,7 @@ test('results upload under the job\'s and the scheme\'s caps', async () => {
   assert.equal(await upload('LOG', 'the whole log\n'), 201, 'the log may come once the job has ended');
   assert.equal(await upload('late.txt', 'x'), 409, 'results may not');
   assert.equal(readFileSync(join(shared, 'jobs', String(j.id), '.job.log'), 'utf8'), 'the whole log\n');
-  assert.equal(store.getMachineJob(j.id)!.upload_bytes, 5 + 11, 'the log doesn\'t count against the job');
+  assert.equal(store.getMachineJob(j.id)!.upload_bytes, 5 + 11, "the log doesn't count against the job");
   assert.match(JSON.stringify(turns().at(-1).prompt), new RegExp(`Job #${j.id} .*jobs/${j.id}/ in the scheme's shared folder`));
 });
 
@@ -363,7 +400,9 @@ test('a config edit that breaks the jobs block leaves a running job alone: the r
   const jobsDir = join(pc, 'jobs');
   const models = join(pc, 'models');
   for (const d of [bin, jobsDir, models]) mkdirSync(d, { recursive: true });
-  writeFileSync(join(bin, 'podman'), `#!${process.execPath}
+  writeFileSync(
+    join(bin, 'podman'),
+    `#!${process.execPath}
 const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
 const [cmd, ...args] = process.argv.slice(2);
 appendFileSync(${JSON.stringify(join(pc, 'podman.log'))}, JSON.stringify([cmd, ...args]) + '\\n');
@@ -373,7 +412,8 @@ if (cmd === 'run') writeFileSync(state, 'running');
 else if (cmd === 'rm') writeFileSync(state, 'gone');
 else if (cmd === 'inspect') { if (read() === 'gone') process.exit(125); console.log(read().startsWith('exited') ? 'exited ' + read().split(' ')[1] : read()); }
 else if (cmd === 'wait') { const t = setInterval(() => { const s = read(); if (s === 'gone') process.exit(125); if (s.startsWith('exited')) { clearInterval(t); console.log(s.split(' ')[1]); } }, 50); }
-`);
+`,
+  );
   chmodSync(join(bin, 'podman'), 0o755);
   const config = join(pc, 'machine-agent.json');
   const good = { jobs: { dir: jobsDir, folders: { models }, max_limit_h: 12, max_disk_gb: 1, gpu: true } };
@@ -384,7 +424,8 @@ else if (cmd === 'wait') { const t = setInterval(() => { const s = read(); if (s
   let out = '';
   const startAgent = () => {
     const proc = spawn(process.execPath, [join(import.meta.dirname, '..', 'public/machine-agent.mjs'), base, token, '--config', config], {
-      stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MACHINES_URL: undefined, HOME: pc, CLAUDE_CONFIG_DIR: pc, PATH: `${bin}:${process.env.PATH}` },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, MACHINES_URL: undefined, HOME: pc, CLAUDE_CONFIG_DIR: pc, PATH: `${bin}:${process.env.PATH}` },
     });
     procs.push(proc);
     proc.stdout!.on('data', (d) => (out += d));
@@ -393,36 +434,66 @@ else if (cmd === 'wait') { const t = setInterval(() => { const s = read(); if (s
   };
   let proc = startAgent();
   const store = new Store(join(data, 'coordinator.db'));
-  await until('the agent offers jobs', () => store.getMachine(m.id)!.jobs !== null, undefined, () => out);
+  await until(
+    'the agent offers jobs',
+    () => store.getMachine(m.id)!.jobs !== null,
+    undefined,
+    () => out,
+  );
   const j = await queue({ machine: 'josh-pc' });
   await answer('Josh', j.id, 'Run now');
-  await until('the job to run on the real agent', async () => (await job(j.id)).state === 'running', undefined, () => out);
+  await until(
+    'the job to run on the real agent',
+    async () => (await job(j.id)).state === 'running',
+    undefined,
+    () => out,
+  );
   // The agent restarts (an update, a reboot of WSL): it finds the job on disk and names it on connect, so the job
   // now started before this connection, the case the server's "lost" pass looks at.
   proc.kill();
   await until('the machine offline', async () => (await call('Josh', '/api/machines')).find((x: any) => x.id === m.id).status !== 'ready');
   store.updateMachine(m.id, { jobs: null });
   proc = startAgent();
-  await until('the agent back with its jobs block', () => store.getMachine(m.id)!.jobs !== null, undefined, () => out);
+  await until(
+    'the agent back with its jobs block',
+    () => store.getMachine(m.id)!.jobs !== null,
+    undefined,
+    () => out,
+  );
   assert.equal((await job(j.id)).state, 'running', 'the agent named the job it found on disk');
   // The owner saves a typo: the jobs block is gone from the agent's config, and its info says so.
   writeFileSync(config, JSON.stringify({ jobs: { dir: join(pc, 'no-such-folder') } }));
-  await until('the agent to tell the app it has no jobs block', () => store.getMachine(m.id)!.jobs === null, undefined, () => out);
+  await until(
+    'the agent to tell the app it has no jobs block',
+    () => store.getMachine(m.id)!.jobs === null,
+    undefined,
+    () => out,
+  );
   // Its next report is where a "lost" job's 409 makes the agent remove the container: wait for it, or for that.
   const heard = store.getMachineJob(j.id)!.live_at!;
-  await until('the agent\'s next report', () => store.getMachineJob(j.id)!.live_at! > heard || jsonLines(join(pc, 'podman.log')).some((a) => a[0] === 'rm'), undefined, () => out);
+  await until(
+    "the agent's next report",
+    () => store.getMachineJob(j.id)!.live_at! > heard || jsonLines(join(pc, 'podman.log')).some((a) => a[0] === 'rm'),
+    undefined,
+    () => out,
+  );
   assert.equal((await job(j.id)).state, 'running', 'the job the agent still holds is not "lost"');
   assert.equal(readFileSync(join(pc, 'container'), 'utf8'), 'running');
   assert.ok(!jsonLines(join(pc, 'podman.log')).some((a) => a[0] === 'rm'), 'nothing removed its container');
   // It runs to its end as it would have: the result reaches the app, the minion hears it.
   await wakes(async () => {
     writeFileSync(join(pc, 'container'), 'exited 0');
-    await until('the job to end done', async () => (await job(j.id)).state === 'done', undefined, () => out);
+    await until(
+      'the job to end done',
+      async () => (await job(j.id)).state === 'done',
+      undefined,
+      () => out,
+    );
   });
   proc.kill();
 });
 
-test('a contraption queues on its home scheme\'s machine, and can\'t read or stop another app\'s job', async () => {
+test("a contraption queues on its home scheme's machine, and can't read or stop another app's job", async () => {
   const j = await app('appa', '/api/contraptions/jobs', { machine: 'josh-gpu', kind: KIND, when: 'now', reason: 'render tonight' });
   assert.equal(j.state, 'needs-go');
   assert.equal(j.asked_by, 'APPA');
@@ -438,7 +509,10 @@ test('the owner removes an always-allowed kind: the next one asks again; nobody 
   const hash = kinds.find((k: any) => k.name === 'whisperx').hash;
   await assert.rejects(call('Dana', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), /403/);
   assert.deepEqual(await call('Josh', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), { ok: true });
-  assert.equal((await call('Josh', `/api/machines/${box.id}/jobs`)).kinds.some((k: any) => k.hash === hash), false);
+  assert.equal(
+    (await call('Josh', `/api/machines/${box.id}/jobs`)).kinds.some((k: any) => k.hash === hash),
+    false,
+  );
   await assert.rejects(call('Josh', `/api/machines/${box.id}/job-kinds/${hash}`, undefined, 'DELETE'), /404/);
   const asks = await queue({});
   assert.equal(asks.state, 'needs-go', 'no standing go any more');
@@ -458,8 +532,16 @@ test('on the clock: hours pause and resume a job, a late "running" keeps the pau
   const sent: any[] = [];
   const cards: any[] = [];
   const jobs = new MachineJobs({
-    store, send: (_m, msg) => (sent.push(msg), true), online: () => true, broadcast() {}, postCard: (_j, c) => (cards.push(c), null), settleCard() {}, wake() {}, note() {},
-    resultsDir: (j) => join(dir, 'jobs', String(j.id)), now: () => t,
+    store,
+    send: (_m, msg) => (sent.push(msg), true),
+    online: () => true,
+    broadcast() {},
+    postCard: (_j, c) => (cards.push(c), null),
+    settleCard() {},
+    wake() {},
+    note() {},
+    resultsDir: (j) => join(dir, 'jobs', String(j.id)),
+    now: () => t,
   });
   const m = () => store.getMachine(id0)!;
   const setHours = (open: boolean) => {
@@ -524,7 +606,7 @@ test('on the clock: hours pause and resume a job, a late "running" keeps the pau
   store.db.close();
 });
 
-test('with the DB writes behind on their worker, a job\'s card still moves for each state it reaches (main red, Nov 21)', async () => {
+test("with the DB writes behind on their worker, a job's card still moves for each state it reaches (main red, Nov 21)", async () => {
   // A loaded box: every write waits 200 ms on the worker, past the 50 ms a read waits for it. The card for a state
   // must still follow the write of that state, not a read that gave up and saw the one before.
   const dir = join(root, 'slow-writes');
@@ -541,8 +623,16 @@ test('with the DB writes behind on their worker, a job\'s card still moves for e
     w.drain();
     const stages: string[] = [];
     const jobs = new MachineJobs({
-      store, send: () => true, online: () => true, broadcast() {}, postCard: () => null, settleCard() {}, wake() {}, note() {},
-      placed: (_j, stage) => stages.push(stage), resultsDir: (j) => join(dir, 'jobs', String(j.id)),
+      store,
+      send: () => true,
+      online: () => true,
+      broadcast() {},
+      postCard: () => null,
+      settleCard() {},
+      wake() {},
+      note() {},
+      placed: (_j, stage) => stages.push(stage),
+      resultsDir: (j) => join(dir, 'jobs', String(j.id)),
     });
     const m = () => store.getMachine(id0)!;
     const kind: JobKind = { name: 'k', image: `docker.io/x/y@sha256:${'a'.repeat(64)}`, command: ['run'], reads: [], gpu: true, network: false, resumable: true, max_limit_s: 3600 };
@@ -560,7 +650,13 @@ test('with the DB writes behind on their worker, a job\'s card still moves for e
 });
 
 test('the wake names results the server did not take, with where they are on the machine (MA3)', () => {
-  const job = { id: 7, outputs: JSON.stringify([{ path: 'a.json', size: 1, uploaded: true }, { path: 'huge.bin', size: 9, uploaded: false, why: 'HTTP 413: over the cap' }]) } as any;
+  const job = {
+    id: 7,
+    outputs: JSON.stringify([
+      { path: 'a.json', size: 1, uploaded: true },
+      { path: 'huge.bin', size: 9, uploaded: false, why: 'HTTP 413: over the cap' },
+    ]),
+  } as any;
   const line = notTaken(job, 'gpu-box');
   assert.match(line, /huge\.bin \(HTTP 413: over the cap\)/);
   assert.match(line, /gpu-box, in job folder 7\/out\//);
@@ -581,8 +677,16 @@ test('a failed pause on the machine shows as running with why; a job silent in "
   const sent: any[] = [];
   const woke: string[] = [];
   const jobs = new MachineJobs({
-    store, send: (_m, msg) => (sent.push(msg), true), online: () => true, broadcast() {}, postCard: () => null, settleCard() {}, wake: (_t, text) => woke.push(text), note() {},
-    resultsDir: (j) => join(dir, 'jobs', String(j.id)), now: () => t,
+    store,
+    send: (_m, msg) => (sent.push(msg), true),
+    online: () => true,
+    broadcast() {},
+    postCard: () => null,
+    settleCard() {},
+    wake: (_t, text) => woke.push(text),
+    note() {},
+    resultsDir: (j) => join(dir, 'jobs', String(j.id)),
+    now: () => t,
   });
   const m = () => store.getMachine(id0)!;
   const kind: JobKind = { name: 'k', image: `docker.io/x/y@sha256:${'a'.repeat(64)}`, command: ['run'], reads: [], gpu: true, network: false, resumable: false, max_limit_s: 3600 };
@@ -611,7 +715,10 @@ test('a failed pause on the machine shows as running with why; a job silent in "
   jobs.tickAll();
   assert.equal(store.getMachineJob(b.id)!.state, 'failed');
   assert.ok(sent.some((x) => x.type === 'job.stop' && x.id === b.id));
-  assert.ok(woke.some((w) => w.includes(`Job #${b.id}`) && /starting/.test(w)), 'the minion that asked is told');
+  assert.ok(
+    woke.some((w) => w.includes(`Job #${b.id}`) && /starting/.test(w)),
+    'the minion that asked is told',
+  );
   assert.equal(store.getMachineJob(c.id)!.state, 'starting', 'the next job starts');
   store.db.close();
 });

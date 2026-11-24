@@ -11,7 +11,15 @@ export function gruntOf(kind, data) {
 /** A Grunt report's one line: its "Verdict:" line if it has one, else its first line of text, without Markdown. */
 export function gist(text) {
   // Only Markdown's markers go: test_foo.py keeps its underscore.
-  const lines = String(text ?? '').split('\n').map((l) => l.replace(/\*\*|~~|`/g, '').replace(/^[\s#>]*(?:[-+*]\s+)?/, '').trim()).filter(Boolean);
+  const lines = String(text ?? '')
+    .split('\n')
+    .map((l) =>
+      l
+        .replace(/\*\*|~~|`/g, '')
+        .replace(/^[\s#>]*(?:[-+*]\s+)?/, '')
+        .trim(),
+    )
+    .filter(Boolean);
   const line = lines.find((l) => /^verdict\b/i.test(l)) ?? lines[0] ?? '';
   return line.length > 160 ? `${line.slice(0, 159)}…` : line;
 }

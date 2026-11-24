@@ -7,9 +7,14 @@ import { tmpdir } from 'node:os';
 const gone = `${tmpdir()}/leak-guard-test-gone-${process.pid}/x`;
 const pidOf = (marker: string) => Number(spawnSync('pgrep', ['-f', marker], { encoding: 'utf8' }).stdout.trim().split('\n')[0]);
 // The shell and the sleep it waits on (#1763: killing the shell alone left the sleep running).
-const stop = (pid: number) => { spawnSync('pkill', ['-KILL', '-P', String(pid)]); try { process.kill(pid, 'SIGKILL'); } catch {} };
+const stop = (pid: number) => {
+  spawnSync('pkill', ['-KILL', '-P', String(pid)]);
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {}
+};
 
-test('a process that is not this run\'s, with a live parent of its own, is left alone (#1223)', async () => {
+test("a process that is not this run's, with a live parent of its own, is left alone (#1223)", async () => {
   // A detached shell (reparented to init) starts a child: the child's chain never reaches this run.
   // The parent's own command line splits the marker (a$b), so only the child matches it.
   const marker = `unrelated-${process.pid}`;
@@ -20,10 +25,12 @@ test('a process that is not this run\'s, with a live parent of its own, is left 
   try {
     assert.ok(pid > 0, 'the unrelated process started');
     assert.equal(ownedByRun(pid), false);
-  } finally { stop(pid); }
+  } finally {
+    stop(pid);
+  }
 });
 
-test('a child of this run, and an orphan it left behind, are this run\'s (#271)', async () => {
+test("a child of this run, and an orphan it left behind, are this run's (#271)", async () => {
   const marker = `child-${process.pid}`;
   const kid = spawn('sh', ['-c', `sleep 30; : ${marker} ${gone}`], { stdio: 'ignore' });
   const marker2 = `orphan-${process.pid}`;
@@ -33,7 +40,10 @@ test('a child of this run, and an orphan it left behind, are this run\'s (#271)'
   try {
     assert.equal(ownedByRun(kid.pid!), true);
     assert.equal(ownedByRun(orphan, process.pid, 'mine'), true);
-  } finally { stop(kid.pid!); stop(orphan); }
+  } finally {
+    stop(kid.pid!);
+    stop(orphan);
+  }
 });
 
 test('two runs on one box each own only the orphan that carries their own id', async () => {
@@ -51,5 +61,8 @@ test('two runs on one box each own only the orphan that carries their own id', a
     assert.equal(ownedByRun(b, process.pid, 'runA'), false, "run A must not claim run B's leftover");
     assert.equal(ownedByRun(b, process.pid, 'runB'), true);
     assert.equal(ownedByRun(a, process.pid, 'runB'), false);
-  } finally { stop(a); stop(b); }
+  } finally {
+    stop(a);
+    stop(b);
+  }
 });

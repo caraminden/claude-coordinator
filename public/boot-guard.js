@@ -4,7 +4,7 @@
 document.querySelector('script[src="app.js"]').addEventListener('error', () => {
   const retry = () => location.reload();
   document.querySelector('.topbar .refresh-btn').addEventListener('click', retry);
-  const msg = Object.assign(document.createElement('p'), { className: 'error', textContent: 'Couldn\'t open Citadel: part of the page didn\'t load. Try again in a moment.' });
+  const msg = Object.assign(document.createElement('p'), { className: 'error', textContent: "Couldn't open Citadel: part of the page didn't load. Try again in a moment." });
   const btn = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Try again', onclick: retry });
   document.getElementById('app').replaceChildren(msg, btn);
 });

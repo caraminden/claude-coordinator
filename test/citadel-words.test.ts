@@ -32,7 +32,7 @@ test('the glossary has its terms and its retired words', () => {
   for (const r of retired) assert.match(r.body, /_\((?:retired|restricted)\)_:.*\b(?:say|is ship|only)\b/, `${r.terms}: name its replacement`);
 });
 
-test("every help-page word is a glossary term, under its own key or its code name", () => {
+test('every help-page word is a glossary term, under its own key or its code name', () => {
   for (const [key, w] of Object.entries<{ word: string }>(WORDS)) {
     const e = words.find((x) => x.terms.includes(w.word.toLowerCase()));
     assert.ok(e, `help-words.js defines "${w.word}", which the glossary (kit/skills/citadel-words/SKILL.md) lacks: add it there`);
@@ -43,11 +43,18 @@ test("every help-page word is a glossary term, under its own key or its code nam
 
 test('every word the wording check sends back is a retired or restricted word in the glossary', () => {
   for (const r of RESERVED) {
-    assert.ok(retired.some((x) => x.terms.includes(r.term.toLowerCase())), `wording.ts sends back "${r.term}", which the glossary's retired words lack: add it there`);
+    assert.ok(
+      retired.some((x) => x.terms.includes(r.term.toLowerCase())),
+      `wording.ts sends back "${r.term}", which the glossary's retired words lack: add it there`,
+    );
   }
 });
 
-test("every state a minion can be in is a glossary term, under its code name", async () => {
+test('every state a minion can be in is a glossary term, under its code name', async () => {
   const { TICKET_STATES } = await import('../src/db.ts');
-  for (const st of TICKET_STATES) assert.ok(words.some((e) => e.code.includes(st)), `src/db.ts has the state "${st}", which no glossary entry names on its Code line`);
+  for (const st of TICKET_STATES)
+    assert.ok(
+      words.some((e) => e.code.includes(st)),
+      `src/db.ts has the state "${st}", which no glossary entry names on its Code line`,
+    );
 });

@@ -82,11 +82,20 @@ test('a person sees the schemes they own or are in; an admin sees all', () => {
   assert.deepEqual([...store.visibleProjects(as(olive))!], []);
   store.addMember(games.id, olive.id);
   assert.ok(store.canSee(as(olive), games.id) && !store.canSee(as(olive), citadel.id));
-  assert.deepEqual(store.listMembers(games.id).map((m) => [m.name, m.owner]), [['Josh', true], ['Olive', false]]);
+  assert.deepEqual(
+    store.listMembers(games.id).map((m) => [m.name, m.owner]),
+    [
+      ['Josh', true],
+      ['Olive', false],
+    ],
+  );
   // Removing Josh hands his schemes to the admin; Olive's membership stays.
   store.deleteUser(josh.id, cara.id);
   assert.equal(store.getProject(games.id)?.owner_id, cara.id);
-  assert.deepEqual(store.listMembers(games.id).map((m) => m.name), ['Cara', 'Olive']);
+  assert.deepEqual(
+    store.listMembers(games.id).map((m) => m.name),
+    ['Cara', 'Olive'],
+  );
 });
 
 test("the stream carries a scheme's news to its people, and admin-only news to admins", () => {
@@ -118,14 +127,17 @@ test("turns run for people allowed on the server's login; anyone else's message 
   assert.equal(turnRefusal(store, his, 'Josh'), null);
   // His own Claude (#213): linked runs, expired waits with its own words.
   store.updateUser(josh.id, { server_login: 0 });
-  assert.equal(turnRefusal(store, his, 'Josh', (uid) => (uid === josh.id ? 'linked' : null)), null);
+  assert.equal(
+    turnRefusal(store, his, 'Josh', (uid) => (uid === josh.id ? 'linked' : null)),
+    null,
+  );
   assert.match(turnRefusal(store, his, 'Josh', (uid) => (uid === josh.id ? 'expired' : null))!, /Josh's Claude sign-in expired/);
   assert.match(turnRefusal(store, his, 'GitHub', () => null)!, /its owner, Josh, links/);
   assert.ok(adminOwned(store, citadel) && !adminOwned(store, games));
 });
 
 // The check is on the Claude the turn would run on (runner.ts turnPerson), not always the owner's (#468 S02-2).
-test("a message from no person is checked against the person its turn would run for", () => {
+test('a message from no person is checked against the person its turn would run for', () => {
   const { store, josh, olive, games } = world();
   store.addMember(games.id, olive.id);
   const linked = (ids: number[]) => (uid: number) => (ids.includes(uid) ? ('linked' as const) : null);
@@ -165,12 +177,21 @@ const payerWorld = (file: string) => {
   w.store.addMember(w.games.id, w.olive.id);
   const made = w.store.createTicket({ project_id: w.games.id, title: 'T', permission_mode: 'default', created_by: 'Olive' });
   w.store.updateTicket(made.id, { person_id: w.olive.id });
-  const runner = new Runner(w.store, () => {}, () => ({}), '/bin/false');
+  const runner = new Runner(
+    w.store,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   runner.personOf = messagePerson(w.store);
   const asked: (number | null)[] = [];
   return { ...w, runner, asked, hers: w.store.getTicket(made.id)! };
 };
-const notes = (store: Store, id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+const notes = (store: Store, id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
 
 test("a member taken out of a scheme stops paying for their old minions' automatic turns; its owner does (#1270 C1)", async () => {
   const { store, runner, asked, hers, josh, olive, games } = payerWorld('payer-removed.db');
@@ -179,7 +200,7 @@ test("a member taken out of a scheme stops paying for their old minions' automat
   store.removeMember(games.id, olive.id);
   // The check before a CI result queues asks the owner's link, as the turn will run on it.
   assert.equal(turnRefusal(store, hers, 'GitHub', linked([josh.id])), null, "the owner's link lets a CI result through");
-  assert.match(turnRefusal(store, hers, 'GitHub', linked([olive.id]))!, /its owner, Josh, links/, "her link no longer counts");
+  assert.match(turnRefusal(store, hers, 'GitHub', linked([olive.id]))!, /its owner, Josh, links/, 'her link no longer counts');
   // A CI result's queued start, held mail and a restart resume each run on the owner's Claude.
   runner.send(hers.id, 'GitHub', 'CI passed');
   await until('the queued start asks for a place', () => asked.length === 1);
@@ -232,7 +253,10 @@ test("a disabled person's minion runs no turn on any start path, not only a new 
   await until('her queued message is refused', () => notes(store, hers.id).filter((n) => /Olive's login is disabled/.test(n)).length === 3);
   assert.equal(runner.isRunning(hers.id), false);
   // Refused, it is dropped, not kept as held mail: kept, it would pick her to pay for every later batch and refuse it too (#1378).
-  assert.deepEqual(runner.queue.peek(hers.id).map((m) => m.text), ['fyi']);
+  assert.deepEqual(
+    runner.queue.peek(hers.id).map((m) => m.text),
+    ['fyi'],
+  );
   // And it jams nothing: the next sender's message gets its turn, on their own login (#1509).
   const started = stubStarts(runner);
   runner.send(hers.id, 'Josh', 'over to me');
@@ -258,17 +282,20 @@ test('who pays: what woke the turn decides, held mail only when nothing else wai
   const olivesTm = store.splitScheme(games.id, olive.id);
   const project = store.getProject(games.id)!;
   const personOf = messagePerson(store);
-  const wake = { author: APP_NAME }, fromJosh = { author: 'Josh' }, fromCara = { author: 'Cara' }, relay = { author: 'Held mail from #4 Work' };
+  const wake = { author: APP_NAME },
+    fromJosh = { author: 'Josh' },
+    fromCara = { author: 'Cara' },
+    relay = { author: 'Held mail from #4 Work' };
   // Josh is disabled only for the rows that say so.
   const rows: [string, { msgs: { author: string }[]; held: { author: string }[] } | { author: string }[], number | null, { ticket?: typeof hers; resuming?: boolean; joshOff?: boolean }?][] = [
-    ['a wake with a person\'s held mail: the minion\'s person', { msgs: [wake], held: [fromJosh] }, olive.id],
-    ['a person\'s message with another\'s held mail: the sender', { msgs: [fromCara], held: [fromJosh] }, cara.id],
-    ['Deliver now, a person\'s held mail: that person', { msgs: [], held: [fromJosh] }, josh.id],
-    ['Deliver now, held mail from no person: the minion\'s person', { msgs: [], held: [relay] }, olive.id],
-    ['a wake with a disabled person\'s held mail: them, so it is refused', { msgs: [wake], held: [fromJosh] }, josh.id, { joshOff: true }],
-    ['Deliver now, a disabled person\'s held mail: them, refused', { msgs: [], held: [fromJosh] }, josh.id, { joshOff: true }],
-    ['a person\'s message with a disabled person\'s held mail: the disabled one, refused (the runner drops theirs first)', { msgs: [fromCara], held: [fromJosh] }, josh.id, { joshOff: true }],
-    ['a restart resume: the interrupted turn\'s person, held mail or not', { msgs: [wake], held: [fromJosh] }, olive.id, { resuming: true }],
+    ["a wake with a person's held mail: the minion's person", { msgs: [wake], held: [fromJosh] }, olive.id],
+    ["a person's message with another's held mail: the sender", { msgs: [fromCara], held: [fromJosh] }, cara.id],
+    ["Deliver now, a person's held mail: that person", { msgs: [], held: [fromJosh] }, josh.id],
+    ["Deliver now, held mail from no person: the minion's person", { msgs: [], held: [relay] }, olive.id],
+    ["a wake with a disabled person's held mail: them, so it is refused", { msgs: [wake], held: [fromJosh] }, josh.id, { joshOff: true }],
+    ["Deliver now, a disabled person's held mail: them, refused", { msgs: [], held: [fromJosh] }, josh.id, { joshOff: true }],
+    ["a person's message with a disabled person's held mail: the disabled one, refused (the runner drops theirs first)", { msgs: [fromCara], held: [fromJosh] }, josh.id, { joshOff: true }],
+    ["a restart resume: the interrupted turn's person, held mail or not", { msgs: [wake], held: [fromJosh] }, olive.id, { resuming: true }],
     ['a plain list is all what woke it: its first person', [wake, fromJosh], josh.id],
     ['her own Taskmaster: a held ask from someone else still runs on theirs', { msgs: [wake], held: [fromJosh] }, josh.id, { ticket: olivesTm }],
     ['her own Taskmaster: a wake and held mail from no person run on hers', { msgs: [wake], held: [relay] }, olive.id, { ticket: olivesTm }],
@@ -293,7 +320,10 @@ test("a disabled person's held mail is dropped with a line, and never decides or
   await until('her message starts a turn', () => started.length === 1);
   assert.deepEqual(started, [{ person: olive.id, texts: ['Unsealed you'] }]);
   assert.deepEqual(asked, [olive.id], 'his disabled login is never asked for a place');
-  assert.ok(notes(store, hers.id).some((n) => /Josh's login is disabled/.test(n) && /dropped/.test(n)), 'the chat says his message was dropped');
+  assert.ok(
+    notes(store, hers.id).some((n) => /Josh's login is disabled/.test(n) && /dropped/.test(n)),
+    'the chat says his message was dropped',
+  );
   assert.ok(!runner.queue.peek(hers.id).length && !runner.queue.get(hers.id).taken?.some((m) => m.text === 'from josh'));
   // "Deliver now" on only his held mail starts nothing, on anyone's login: it is dropped too (#1270 C3).
   store.setSetting(`minion-queue:${hers.id}`, { held: [{ author: 'Josh', text: 'again', images: [], parked: '2026-11-21 20:05' }] });
@@ -318,7 +348,7 @@ test("a disabled person's held mail is dropped with a line, and never decides or
 test("a wake from no person runs on the minion's own person, not on another person's held mail, signed in or lapsed (#1509 2C2)", async () => {
   const { store, runner, hers, josh, olive, games } = payerWorld('payer-held-wake.db');
   let joshSignedIn = false;
-  const link = { place: (uid: number) => (uid === olive.id || joshSignedIn ? { host: true as const } : null), linked: (uid: number) => (uid === olive.id || joshSignedIn ? 'linked' as const : 'expired' as const) };
+  const link = { place: (uid: number) => (uid === olive.id || joshSignedIn ? { host: true as const } : null), linked: (uid: number) => (uid === olive.id || joshSignedIn ? ('linked' as const) : ('expired' as const)) };
   const asked: (number | null)[] = [];
   runner.placeFor = (person, warm) => (asked.push(person), turnPlace(store, link, person, warm));
   const started = stubStarts(runner);
@@ -343,10 +373,10 @@ test("a wake from no person runs on the minion's own person, not on another pers
   assert.deepEqual(started[2], { person: josh.id, texts: ['just mine'] });
 });
 
-test('a machine goes to exactly the schemes on its list, even a non-admin\'s, and a new one to none (#303, #438)', () => {
+test("a machine goes to exactly the schemes on its list, even a non-admin's, and a new one to none (#303, #438)", () => {
   const { store, citadel, games } = world();
   const vault = store.createMachine('vault', '', 'Cara');
-  assert.ok(!lendsMachine(store, vault, citadel) && !lendsMachine(store, vault, games), 'a new machine is lent to no scheme, an admin\'s included');
+  assert.ok(!lendsMachine(store, vault, citadel) && !lendsMachine(store, vault, games), "a new machine is lent to no scheme, an admin's included");
   store.setMachineProjects(vault.id, [games.id]);
   assert.ok(lendsMachine(store, vault, games) && !lendsMachine(store, vault, citadel));
   assert.deepEqual(store.machineProjects(vault.id), [games.id]);
@@ -357,13 +387,16 @@ test('a machine goes to exactly the schemes on its list, even a non-admin\'s, an
 // ---------- the real server ----------
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
   console.log(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { seven_day: { utilization: 0.41 } } } }));
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let srv: Booted;
@@ -400,7 +433,10 @@ test('people make their own schemes, add others to them, and see nothing else', 
   const cara = (await as('Cara', '/api/projects', { name: 'Caras' })).data;
   const josh = await as('Josh', '/api/projects', { name: 'Joshs' });
   assert.equal(josh.status, 201);
-  assert.deepEqual((await as('Josh', '/api/projects')).data.map((p: any) => [p.name, p.owner]), [['Joshs', 'Josh']]);
+  assert.deepEqual(
+    (await as('Josh', '/api/projects')).data.map((p: any) => [p.name, p.owner]),
+    [['Joshs', 'Josh']],
+  );
   assert.deepEqual((await as('Olive', '/api/projects')).data, []);
   assert.equal((await as('Olive', `/api/projects/${josh.data.id}`)).status, 404);
   assert.equal((await as('Josh', `/api/projects/${cara.id}`)).status, 404);
@@ -418,10 +454,16 @@ test('people make their own schemes, add others to them, and see nothing else', 
 
   // Josh adds Olive: she sees it, and as a member changes its settings and members like its owner (#621).
   assert.equal((await as('Olive', `/api/projects/${josh.data.id}/members`, { person: people.Josh.id })).status, 404);
-  assert.deepEqual((await as('Josh', `/api/projects/${josh.data.id}/members`, { person: people.Olive.id })).data.map((m: any) => m.name), ['Josh', 'Olive']);
-  assert.deepEqual((await as('Olive', '/api/projects')).data.map((p: any) => p.name), ['Joshs']);
+  assert.deepEqual(
+    (await as('Josh', `/api/projects/${josh.data.id}/members`, { person: people.Olive.id })).data.map((m: any) => m.name),
+    ['Josh', 'Olive'],
+  );
+  assert.deepEqual(
+    (await as('Olive', '/api/projects')).data.map((p: any) => p.name),
+    ['Joshs'],
+  );
   assert.equal((await as('Olive', `/api/projects/${josh.data.id}`, { instructions: 'x' }, 'PATCH')).status, 200);
-  assert.equal((await as('Olive', `/api/projects/${josh.data.id}`, { plugin_dirs: '/home' }, 'PATCH')).status, 403, 'plugin folders stay an admin\'s');
+  assert.equal((await as('Olive', `/api/projects/${josh.data.id}`, { plugin_dirs: '/home' }, 'PATCH')).status, 403, "plugin folders stay an admin's");
   assert.equal((await as('Olive', `/api/projects/${josh.data.id}/members/${people.Olive.id}`, undefined, 'DELETE')).status, 200);
   assert.equal((await as('Josh', `/api/projects/${josh.data.id}/members`, { person: people.Olive.id })).status, 200);
   assert.equal((await as('Josh', `/api/projects/${josh.data.id}`, { instructions: 'Be kind' }, 'PATCH')).status, 200);
@@ -459,7 +501,10 @@ test('schema 17 leaves the server login to its owner, the first admin, once (#21
     const ann = store.createUser({ name: 'Ann', login: 'ann', admin: true, server_login: true });
     store.setSetting('schema_version', 16);
     store = new Store(path);
-    assert.deepEqual([cara, josh, ann].map((u) => store.getUser(u.id)!.server_login), [1, 0, 0]);
+    assert.deepEqual(
+      [cara, josh, ann].map((u) => store.getUser(u.id)!.server_login),
+      [1, 0, 0],
+    );
     assert.equal(store.serverLoginOwner(), cara.id);
     // Only once: a later grant (by hand, in the DB) stays.
     store.updateUser(josh.id, { server_login: 1 });
@@ -477,12 +522,21 @@ test("Josh's message waits until he links his own Claude; the server's login is 
   await until('the waiting note', async () => (await notes()).some((n: string) => /Turns for Josh start once/.test(n)));
   assert.notEqual((await as('Josh', `/api/tickets/${t.id}`)).data.ticket.status, 'running');
 
-  assert.match((await notes()).find((n: string) => /Turns for Josh start once/.test(n)), /Settings → Your account/);
+  assert.match(
+    (await notes()).find((n: string) => /Turns for Josh start once/.test(n)),
+    /Settings → Your account/,
+  );
   const refused = await as('Cara', `/api/people/${people.Josh.id}`, { server_login: true }, 'PATCH');
   assert.equal(refused.status, 400);
   assert.match(refused.data.error, /Only the server login's owner/);
   const list = (await as('Cara', '/api/people')).data;
-  assert.deepEqual(list.map((u: any) => [u.name, u.server_login, u.server_login_owner, u.claude]).filter(([n]: any) => n === 'Cara' || n === 'Josh'), [['Cara', true, true, null], ['Josh', false, false, null]]);
+  assert.deepEqual(
+    list.map((u: any) => [u.name, u.server_login, u.server_login_owner, u.claude]).filter(([n]: any) => n === 'Cara' || n === 'Josh'),
+    [
+      ['Cara', true, true, null],
+      ['Josh', false, false, null],
+    ],
+  );
 });
 
 test("the stream doesn't carry other schemes' news; disabling someone ends theirs", async () => {
@@ -515,14 +569,16 @@ test("the stream doesn't carry other schemes' news; disabling someone ends their
 function listen(cookie: string) {
   const ctl = new AbortController();
   const out = { seen: '', stop: () => ctl.abort() };
-  void fetch(`${srv.base}/api/stream`, { headers: { Cookie: cookie }, signal: ctl.signal }).then(async (res) => {
-    const reader = res.body!.getReader();
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) return;
-      out.seen += new TextDecoder().decode(value);
-    }
-  }).catch(() => {});
+  void fetch(`${srv.base}/api/stream`, { headers: { Cookie: cookie }, signal: ctl.signal })
+    .then(async (res) => {
+      const reader = res.body!.getReader();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        out.seen += new TextDecoder().decode(value);
+      }
+    })
+    .catch(() => {});
   return out;
 }
 
@@ -545,7 +601,10 @@ test("each person's meter shows their own plan: the stream's hello and usage new
   assert.match(cara.seen, /"type":"usage".*"utilization":0\.41/);
   assert.ok(!josh.seen.includes('"type":"usage"'));
   assert.equal((await as('Josh', '/api/me/claude')).data.usage.weekly.utilization, 0.22);
-  assert.deepEqual((await as('Cara', '/api/people')).data.filter((u: any) => u.name === 'Cara' || u.name === 'Josh').map((u: any) => u.week?.utilization), [0.41, 0.22]);
+  assert.deepEqual(
+    (await as('Cara', '/api/people')).data.filter((u: any) => u.name === 'Cara' || u.name === 'Josh').map((u: any) => u.week?.utilization),
+    [0.41, 0.22],
+  );
   cara.stop();
   josh.stop();
 });
@@ -559,8 +618,8 @@ test("Codex news goes to its own person, the server login's owner too, whose pay
   await until("Cara's Codex news", () => cara.seen.includes('"type":"codex"'));
   await as('Josh', '/api/me/codex/switch', { on: false }, 'PUT');
   await until("Josh's Codex news", () => josh.seen.includes('"type":"codex"'));
-  assert.equal(cara.seen.split('"type":"codex"').length, 2, "Cara gets only her own");
-  assert.equal(josh.seen.split('"type":"codex"').length, 2, "Josh gets only his own");
+  assert.equal(cara.seen.split('"type":"codex"').length, 2, 'Cara gets only her own');
+  assert.equal(josh.seen.split('"type":"codex"').length, 2, 'Josh gets only his own');
   cara.stop();
   josh.stop();
 });
@@ -594,6 +653,7 @@ test('publicOrigin: citadel.zip by default, CITADEL_PUBLIC_URL overrides, a prev
     process.env.CITADEL_PUBLIC_URL = 'https://example.test/';
     assert.equal(publicOrigin(req, true), 'https://example.test');
   } finally {
-    if (old === undefined) delete process.env.CITADEL_PUBLIC_URL; else process.env.CITADEL_PUBLIC_URL = old;
+    if (old === undefined) delete process.env.CITADEL_PUBLIC_URL;
+    else process.env.CITADEL_PUBLIC_URL = old;
   }
 });

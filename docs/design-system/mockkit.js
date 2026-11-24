@@ -30,7 +30,11 @@
   // Where picks go: the bridge's db in Citadel's viewer, else this tab only.
   const store = (async () => {
     let db = null;
-    try { db = window.claude?.use ? await window.claude.use('db') : null; } catch { db = null; }
+    try {
+      db = window.claude?.use ? await window.claude.use('db') : null;
+    } catch {
+      db = null;
+    }
     const info = db && window.citadel ? await window.citadel.info().catch(() => null) : null;
     return { db, person: info?.person ?? null };
   })();
@@ -71,7 +75,10 @@
     function add(id, host, title) {
       const note = el('input', { type: 'text', placeholder: 'Note (optional)', 'aria-label': `Note on ${title}`, maxlength: 2000 });
       let timer = null;
-      const keep = () => { clearTimeout(timer); save(id, stamp({ ...docs.get(id), note: note.value.trim() })); };
+      const keep = () => {
+        clearTimeout(timer);
+        save(id, stamp({ ...docs.get(id), note: note.value.trim() }));
+      };
       note.addEventListener('input', () => {
         clearTimeout(timer);
         timer = setTimeout(keep, 400);
@@ -94,7 +101,7 @@
         for (const b of it.buttons) b.setAttribute('aria-pressed', String(b.dataset.v === d.v));
         if (document.activeElement !== it.note) it.note.value = d.note ?? '';
         const o = opts.find((x) => x.v === d.v);
-        const what = d.v ? o?.done ?? o?.label ?? d.v : d.note ? 'Noted' : '';
+        const what = d.v ? (o?.done ?? o?.label ?? d.v) : d.note ? 'Noted' : '';
         it.bar.querySelector('.mk-who').textContent = what ? `${what}${d.by ? ` by ${d.by}` : ''}${d.at ? ` · ${ago(d.at)}` : ''}` : '';
         it.host.classList.toggle('picked', !!d.v && !['cut', 'no'].includes(d.v));
         if (d.v) it.host.dataset.mkV = d.v;
@@ -104,13 +111,20 @@
     }
 
     const set = {
-      collection, opts, docs, items, add,
-      lines: () => [...items].filter(([id]) => docs.has(id)).map(([id, it]) => {
-        const d = docs.get(id);
-        const o = opts.find((x) => x.v === d.v);
-        const label = d.v ? o?.done ?? o?.label ?? d.v : 'note only';
-        return `- ${it.title}: ${label}${d.note ? `. "${d.note}"` : ''}`;
-      }),
+      collection,
+      opts,
+      docs,
+      items,
+      add,
+      lines: () =>
+        [...items]
+          .filter(([id]) => docs.has(id))
+          .map(([id, it]) => {
+            const d = docs.get(id);
+            const o = opts.find((x) => x.v === d.v);
+            const label = d.v ? (o?.done ?? o?.label ?? d.v) : 'note only';
+            return `- ${it.title}: ${label}${d.note ? `. "${d.note}"` : ''}`;
+          }),
     };
     sets.push(set);
 
@@ -118,11 +132,12 @@
 
     store.then((s) => {
       ({ db, person } = s);
-      if (db) db.collection(collection).onSnapshot((snap) => {
-        docs.clear();
-        for (const d of snap.docs) docs.set(d.id, d.data());
-        paint();
-      });
+      if (db)
+        db.collection(collection).onSnapshot((snap) => {
+          docs.clear();
+          for (const d of snap.docs) docs.set(d.id, d.data());
+          paint();
+        });
       dock.mount(!!db);
     });
     return set;
@@ -136,7 +151,10 @@
     const close = el('button', { type: 'button', class: 'mk-btn', 'aria-label': 'Dismiss' }, '×');
     toastNode = el('div', { class: 'mk-toast', role: 'alert' }, el('span', {}, message), again, close);
     const node = toastNode;
-    again.addEventListener('click', () => { node.remove(); retry(); });
+    again.addEventListener('click', () => {
+      node.remove();
+      retry();
+    });
     close.addEventListener('click', () => node.remove());
     document.body.append(node);
   }
@@ -201,12 +219,14 @@
         if (!node) return;
         let picked = 0;
         let notes = 0;
-        for (const s of sets) for (const d of s.docs.values()) { if (d.v) picked++; if (d.note) notes++; }
+        for (const s of sets)
+          for (const d of s.docs.values()) {
+            if (d.v) picked++;
+            if (d.note) notes++;
+          }
         const where = saving ? 'saved for the minion to read' : 'not saved or sent: open this page from Citadel to send';
         node.classList.toggle('stuck', picked + notes > 0);
-        text.innerHTML = picked || notes
-          ? `<b>${picked}</b> picked${notes ? `, <b>${notes}</b> with notes` : ''} · ${where}`
-          : `Nothing picked yet · ${saving ? 'picks save as you make them' : where}`;
+        text.innerHTML = picked || notes ? `<b>${picked}</b> picked${notes ? `, <b>${notes}</b> with notes` : ''} · ${where}` : `Nothing picked yet · ${saving ? 'picks save as you make them' : where}`;
       },
     };
   })();
@@ -244,20 +264,26 @@
         screen.style.setProperty('--mk-h', `${sz.h}px`);
         new ResizeObserver(() => screen.style.setProperty('--mk-zoom', Math.min(1, stage.clientWidth / sz.w))).observe(stage);
       }
-      const card = el('article', { class: `mk-board${b.rec ? ' rec' : ''}`, id: `board-${b.id}` },
-        el('header', {},
-          el('div', { class: 'mk-board-title' }, el('span', { class: 'mk-board-id' }, b.label ?? b.id), el('span', {}, b.title ?? '')),
-          b.note ? el('p', {}, b.note) : null),
-        stage);
+      const card = el('article', { class: `mk-board${b.rec ? ' rec' : ''}`, id: `board-${b.id}` }, el('header', {}, el('div', { class: 'mk-board-title' }, el('span', { class: 'mk-board-id' }, b.label ?? b.id), el('span', {}, b.title ?? '')), b.note ? el('p', {}, b.note) : null), stage);
       wrap.append(card);
-      const entry = { b, s, screen, draw: () => { screen.innerHTML = render(b, s); } };
+      const entry = {
+        b,
+        s,
+        screen,
+        draw: () => {
+          screen.innerHTML = render(b, s);
+        },
+      };
       live.set(b.id, entry);
       entry.draw();
       for (const type of EVENTS) {
         screen.addEventListener(type, (ev) => {
           const hit = ev.target.closest?.('[data-on]');
           if (!hit || !screen.contains(hit)) return;
-          const name = hit.dataset.on.split(/\s+/).map((p) => p.split(':')).find(([t]) => t === type)?.[1];
+          const name = hit.dataset.on
+            .split(/\s+/)
+            .map((p) => p.split(':'))
+            .find(([t]) => t === type)?.[1];
           if (!name || !on[name]) return;
           const before = JSON.stringify(s);
           const patch = on[name](s, { arg: hit.dataset.arg, value: hit.value, checked: hit.checked, el: hit, ev, board: b });
@@ -278,14 +304,21 @@
       const back = [...entry.screen.querySelectorAll('[data-on]')].find((n) => (n.dataset.key ?? `${n.dataset.on}|${n.dataset.arg}`) === key);
       if (!back) return;
       back.focus();
-      if (caret) try { back.setSelectionRange(...caret); } catch {}
+      if (caret)
+        try {
+          back.setSelectionRange(...caret);
+        } catch {}
     }
 
     return {
       state: (id) => live.get(id)?.s,
       /** Patch one board's state (or every board's, with id '*') from a control outside the boards. */
       set(id, patch) {
-        for (const [bid, e] of live) if (id === '*' || bid === id) { Object.assign(e.s, patch); redraw(e); }
+        for (const [bid, e] of live)
+          if (id === '*' || bid === id) {
+            Object.assign(e.s, patch);
+            redraw(e);
+          }
       },
     };
   }
@@ -295,7 +328,11 @@
     const nav = $(target);
     if (!nav) return;
     for (const h of document.querySelectorAll('.mk-page h2')) {
-      h.id ||= h.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      h.id ||= h.textContent
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
       nav.append(el('a', { href: `#${h.id}` }, h.textContent.trim()));
     }
   }

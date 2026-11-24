@@ -5,7 +5,13 @@
 import type { Ticket } from './db.ts';
 
 /** One wait as the minions list's chip has it (src/waits-readout.ts WaitRow): the minion it names, if any. */
-export interface WaitLink { kind: string; state: string; chip: string; headline?: string; link: { project: number; number: number } | null }
+export interface WaitLink {
+  kind: string;
+  state: string;
+  chip: string;
+  headline?: string;
+  link: { project: number; number: number } | null;
+}
 
 export type EdgeKind = 'start_after' | 'wait' | 'claim' | 'build';
 

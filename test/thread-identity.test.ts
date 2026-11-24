@@ -52,7 +52,8 @@ const apiPort = await tmp.serve(api);
 
 const mcp = tmp.spawn(process.execPath, [join(import.meta.dirname, '../src/mcp.ts')], {
   env: {
-    ...process.env, MACHINES_URL: undefined,
+    ...process.env,
+    MACHINES_URL: undefined,
     COORDINATOR_API: `http://127.0.0.1:${apiPort}`,
     COORDINATOR_TOKEN: `${ID}.sig`,
     COORDINATOR_PROJECT: '2',
@@ -84,12 +85,12 @@ test('a thread token may read, relabel, ask and close only its own internal id',
   assert.ok(await mayCall('POST', `/api/tickets/${ID}/close`));
   assert.ok(await mayCall('POST', `/api/tickets/${ID}/coordinator`));
   assert.ok(await mayCall('POST', `/api/tickets/${ID}/strike`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/strike`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/coordinator`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/close`));
-  assert.ok(!await mayCall('PATCH', `/api/tickets/${NUMBER}`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${ID}/status`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${ID}/messages`));
+  assert.ok(!(await mayCall('POST', `/api/tickets/${NUMBER}/strike`)));
+  assert.ok(!(await mayCall('POST', `/api/tickets/${NUMBER}/coordinator`)));
+  assert.ok(!(await mayCall('POST', `/api/tickets/${NUMBER}/close`)));
+  assert.ok(!(await mayCall('PATCH', `/api/tickets/${NUMBER}`)));
+  assert.ok(!(await mayCall('POST', `/api/tickets/${ID}/status`)));
+  assert.ok(!(await mayCall('POST', `/api/tickets/${ID}/messages`)));
 });
 
 test('close_self and set_thread_status address the internal id, whatever the model passes', async () => {
@@ -100,7 +101,10 @@ test('close_self and set_thread_status address the internal id, whatever the mod
   assert.ok(!closed.isError, closed.content[0].text);
   const labelled = await tool('set_thread_status', { note: 'ok' });
   assert.ok(!labelled.isError, labelled.content[0].text);
-  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/close`, `PATCH /api/tickets/${ID}`]);
+  assert.deepEqual(
+    calls.map((c) => `${c.method} ${c.path}`),
+    [`POST /api/tickets/${ID}/close`, `PATCH /api/tickets/${ID}`],
+  );
   for (const c of calls) assert.ok(await mayCall(c.method, c.path), `${c.method} ${c.path} passes the guard`);
 });
 
@@ -108,7 +112,10 @@ test('message_coordinator posts to its own internal id', async () => {
   calls.length = 0;
   const r = await tool('message_coordinator', { text: 'Send #28 the handoff', ticket_id: 7 });
   assert.ok(!r.isError, r.content[0].text);
-  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/coordinator`]);
+  assert.deepEqual(
+    calls.map((c) => `${c.method} ${c.path}`),
+    [`POST /api/tickets/${ID}/coordinator`],
+  );
 });
 
 test('wake_when_live posts to its own internal id, which its token may do', async () => {
@@ -117,9 +124,12 @@ test('wake_when_live posts to its own internal id, which its token may do', asyn
   const r = await tool('wake_when_live', { commit: 'aaaaaaa', reason: 'retry', ticket_id: 7 });
   assert.ok(!r.isError, r.content[0].text);
   assert.match(r.content[0].text, /Waiting for `aaaaaaa`/);
-  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/wake`]);
+  assert.deepEqual(
+    calls.map((c) => `${c.method} ${c.path}`),
+    [`POST /api/tickets/${ID}/wake`],
+  );
   assert.ok(await mayCall('POST', `/api/tickets/${ID}/wake`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/wake`));
+  assert.ok(!(await mayCall('POST', `/api/tickets/${NUMBER}/wake`)));
 });
 
 test('wake_when_runners_back posts to its own internal id, which its token may do (#541)', async () => {
@@ -128,24 +138,35 @@ test('wake_when_runners_back posts to its own internal id, which its token may d
   const r = await tool('wake_when_runners_back', { reason: 'run land again' });
   assert.ok(!r.isError, r.content[0].text);
   assert.match(r.content[0].text, /citadel-ci or citadel-ci-linux/);
-  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/wake-runners`]);
+  assert.deepEqual(
+    calls.map((c) => `${c.method} ${c.path}`),
+    [`POST /api/tickets/${ID}/wake-runners`],
+  );
   assert.ok(await mayCall('POST', `/api/tickets/${ID}/wake-runners`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/wake-runners`));
+  assert.ok(!(await mayCall('POST', `/api/tickets/${NUMBER}/wake-runners`)));
 });
 
 test('prep_ultra_reviews posts to its own internal id and lists what waits for the Start (#1399)', async () => {
   calls.length = 0;
   respond = () => [200, { for: 'Josh', rows: [{ name: 'Land', state: 'ready', size: { lines: 120, files: 3 }, pr: { number: 7, url: 'https://github.com/o/r/pull/7' } }], refused: [{ index: 1, name: 'Big', error: '9,000 lines in 40 files: over the limit' }] }];
-  const r = await tool('prep_ultra_reviews', { areas: [{ name: 'Land', paths: ['tools/land.sh'] }, { name: 'Big', paths: ['src'] }] });
+  const r = await tool('prep_ultra_reviews', {
+    areas: [
+      { name: 'Land', paths: ['tools/land.sh'] },
+      { name: 'Big', paths: ['src'] },
+    ],
+  });
   assert.ok(!r.isError, r.content[0].text);
   assert.match(r.content[0].text, /^Prepped for Josh: .*You cannot start one\.$/m);
   assert.match(r.content[0].text, /^Refused Big: 9,000 lines/m);
   assert.match(r.content[0].text, /^Land: ready, draft PR #7 https:\/\/github\.com\/o\/r\/pull\/7 \(120 lines, 3 files\)$/m);
   await tool('prep_ultra_reviews', {});
-  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/ultrareview/batch`, `GET /api/tickets/${ID}/ultrareview/batch`]);
+  assert.deepEqual(
+    calls.map((c) => `${c.method} ${c.path}`),
+    [`POST /api/tickets/${ID}/ultrareview/batch`, `GET /api/tickets/${ID}/ultrareview/batch`],
+  );
   assert.ok(await mayCall('POST', `/api/tickets/${ID}/ultrareview/batch`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/ultrareview/batch`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${ID}/ultrareview/batch/x/start`), 'the Start stays a person\'s');
+  assert.ok(!(await mayCall('POST', `/api/tickets/${NUMBER}/ultrareview/batch`)));
+  assert.ok(!(await mayCall('POST', `/api/tickets/${ID}/ultrareview/batch/x/start`)), "the Start stays a person's");
 });
 
 test('wake_at posts to its own internal id, which its token may do (#722)', async () => {
@@ -154,9 +175,12 @@ test('wake_at posts to its own internal id, which its token may do (#722)', asyn
   const r = await tool('wake_at', { at: '2026-11-18 09:00', note: 'start it' });
   assert.ok(!r.isError, r.content[0].text);
   assert.match(r.content[0].text, /Wake set for Wed 18 Nov, 09:00 PST/);
-  assert.deepEqual(calls.map((c) => `${c.method} ${c.path}`), [`POST /api/tickets/${ID}/wake-at`]);
+  assert.deepEqual(
+    calls.map((c) => `${c.method} ${c.path}`),
+    [`POST /api/tickets/${ID}/wake-at`],
+  );
   assert.ok(await mayCall('POST', `/api/tickets/${ID}/wake-at`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/wake-at`));
+  assert.ok(!(await mayCall('POST', `/api/tickets/${NUMBER}/wake-at`)));
 });
 
 test('close_self says when it cleared state ready (#480)', async () => {

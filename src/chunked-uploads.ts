@@ -28,8 +28,20 @@ const ID = /^[0-9a-f]{32}$/;
 
 /** Where a finished upload goes: a scheme's shared folder, or a contraption's DATA_DIR/uploads/<login>/. */
 export type Target = { kind: 'shared'; project: number } | { kind: 'app'; app: string };
-export interface Uploader { uid: number; login: string }
-export interface Meta { id: string; uid: number; login: string; target: Target; name: string; folder: string[]; size: number; created: number }
+export interface Uploader {
+  uid: number;
+  login: string;
+}
+export interface Meta {
+  id: string;
+  uid: number;
+  login: string;
+  target: Target;
+  name: string;
+  folder: string[];
+  size: number;
+  created: number;
+}
 /** Moves the finished .part into place and says what it became. */
 export type Finish = (meta: Meta, part: string) => Promise<Record<string, unknown>>;
 
@@ -58,8 +70,8 @@ export class ChunkedUploads {
   /** Begin an upload of `size` bytes, refused when it would take the disk below the floor. */
   async start(who: Uploader, target: Target, body: any): Promise<{ id: string; offset: number; size: number; chunk: number }> {
     const size = body?.size;
-    if (!Number.isSafeInteger(size) || size < 0) throw new HttpError(400, 'size must be the file\'s size in bytes');
-    if (typeof body?.name !== 'string' || !body.name.trim() || body.name.length > 1000) throw new HttpError(400, 'name must be the file\'s name');
+    if (!Number.isSafeInteger(size) || size < 0) throw new HttpError(400, "size must be the file's size in bytes");
+    if (typeof body?.name !== 'string' || !body.name.trim() || body.name.length > 1000) throw new HttpError(400, "name must be the file's name");
     const folder = uploadFolder(typeof body.folder === 'string' ? body.folder.slice(0, 2000) : '');
     await mkdir(this.dir, { recursive: true, mode: 0o700 });
     const open = await this.sweep();

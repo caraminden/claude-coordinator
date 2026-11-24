@@ -56,9 +56,18 @@ const caraCodex = { host: false as const, container: 'citadel-claude-test-cara',
 // Never run: a container turn resolves it to a real path, so it has to exist.
 const claude = join(bin, 'claude');
 writeFileSync(claude, '');
-interface Spawned { how: string; dir: string; wrapper: string[] }
+interface Spawned {
+  how: string;
+  dir: string;
+  wrapper: string[];
+}
 let spawned: Spawned[] = [];
-const runner = new Runner(store, () => {}, (t) => ({ COORDINATOR_API: 'http://127.0.0.1:8573', COORDINATOR_TOKEN: `token-${t.id}`, COORDINATOR_PROJECT: String(t.project_id) }), claude);
+const runner = new Runner(
+  store,
+  () => {},
+  (t) => ({ COORDINATOR_API: 'http://127.0.0.1:8573', COORDINATOR_TOKEN: `token-${t.id}`, COORDINATOR_PROJECT: String(t.project_id) }),
+  claude,
+);
 runner.pollMs = 10;
 runner.personOf = (author) => (author === 'Josh' ? josh.id : author === 'Cara' ? cara.id : null);
 runner.placeFor = (uid) => (uid === josh.id ? joshPlace : { host: true });
@@ -73,12 +82,26 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Paths, ids and times that differ per run, by name. Longest first, so a folder inside another keeps its own name. */
 function scrub(value: unknown): any {
   let text = JSON.stringify(value);
-  const names: [string, string][] = [[join(import.meta.dirname, '..'), '<CHECKOUT>'], [root, '<ROOT>'], [root.replace(/[^a-zA-Z0-9]/g, '-'), '<ROOT-AS-SLUG>'], [process.execPath, '<NODE>'], [PATH, '<PATH>']];
+  const names: [string, string][] = [
+    [join(import.meta.dirname, '..'), '<CHECKOUT>'],
+    [root, '<ROOT>'],
+    [root.replace(/[^a-zA-Z0-9]/g, '-'), '<ROOT-AS-SLUG>'],
+    [process.execPath, '<NODE>'],
+    [PATH, '<PATH>'],
+  ];
   for (const [path, name] of names.sort((a, b) => b[0].length - a[0].length)) text = text.replaceAll(JSON.stringify(path).slice(1, -1), name);
   return JSON.parse(text.replace(/-\d{13}\b/g, '-<TIME>').replace(/citadel-turn-[0-9a-f]{8}-/g, 'citadel-turn-<TAG>-'));
 }
 
-interface Case { kind?: 'ticket' | 'coordinator'; project?: number; author?: string; set?: Record<string, unknown>; before?: (ticket: number, project: number) => void; units?: boolean; peek?: (dir: string) => void | Promise<void> }
+interface Case {
+  kind?: 'ticket' | 'coordinator';
+  project?: number;
+  author?: string;
+  set?: Record<string, unknown>;
+  before?: (ticket: number, project: number) => void;
+  units?: boolean;
+  peek?: (dir: string) => void | Promise<void>;
+}
 /** Start one turn and return everything it was launched with, then end it. */
 async function launch(c: Case) {
   const project = c.project ? store.getProject(c.project)! : store.createProject(`P${store.listProjects().length + 1}`, null);
@@ -93,14 +116,30 @@ async function launch(c: Case) {
   runner.units = !!c.units;
   runner.send(t.id, c.author ?? 'Cara', 'go');
   for (let i = 0; i < 500 && !spawned.length && !lines(units).length && runner.isRunning(t.id); i++) await wait(10);
-  const notes = store.listEvents(t.id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+  const notes = store
+    .listEvents(t.id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
   const turn = store.getSetting<{ dir: string }>(`turn:${t.id}`);
   if (!turn) return scrub({ launched: false, notes });
   const dir = turn.dir;
   const read = (f: string) => (existsSync(join(dir, f)) ? JSON.parse(readFileSync(join(dir, f), 'utf8')) : null);
-  const files = readdirSync(dir).filter((f) => f !== 'pin').sort().map((f) => `${f} ${(statSync(join(dir, f)).mode & 0o777).toString(8)}`);
-  const got = { launched: true, notes, spec: read('spec.json'), settings: read('settings.json'), mcp: read('mcp.json'), codexTripwire: read('codex-tripwire.json'), files, pinned: readdirSync(join(dir, 'pin')).length > 0,
-    spawned: spawned.map(({ how, wrapper }) => ({ how, wrapper })), unit: existsSync(units) ? jsonLines(units) : null };
+  const files = readdirSync(dir)
+    .filter((f) => f !== 'pin')
+    .sort()
+    .map((f) => `${f} ${(statSync(join(dir, f)).mode & 0o777).toString(8)}`);
+  const got = {
+    launched: true,
+    notes,
+    spec: read('spec.json'),
+    settings: read('settings.json'),
+    mcp: read('mcp.json'),
+    codexTripwire: read('codex-tripwire.json'),
+    files,
+    pinned: readdirSync(join(dir, 'pin')).length > 0,
+    spawned: spawned.map(({ how, wrapper }) => ({ how, wrapper })),
+    unit: existsSync(units) ? jsonLines(units) : null,
+  };
   await c.peek?.(dir);
   // End it: the wrapper that would have run it never started.
   writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: 0, signal: null }));
@@ -211,7 +250,7 @@ test('every kind of turn is launched with exactly what the snapshot says', async
 });
 
 // Claude Code's date line is in the turn's zone: UTC flips it at 4 PM PST, mid keepalive hours (#862). The server stays UTC.
-test('every turn runs on Pacific time, whatever the server\'s TZ is', () => {
+test("every turn runs on Pacific time, whatever the server's TZ is", () => {
   for (const tz of [undefined, 'UTC', 'Asia/Tokyo']) assert.equal(turnEnv({ ...process.env, TZ: tz }).TZ, 'America/Los_Angeles', String(tz));
 });
 
@@ -235,7 +274,7 @@ test('--exclude-dynamic-system-prompt-sections is off for every scheme while EXC
 
 // The advisor trial (#817): a minion set to Sonnet with an Opus advisor launches as Sonnet and gets
 // --advisor; a plain model never does, and a Taskmaster set to it runs without the advisor.
-test('--advisor is passed only when the minion\'s model carries one, and never to a Taskmaster', async () => {
+test("--advisor is passed only when the minion's model carries one, and never to a Taskmaster", async () => {
   const flags = async (c: Case) => {
     const args: string[] = ((await launch(c)) as any).spec.args;
     const at = (f: string) => (args.includes(f) ? args[args.indexOf(f) + 1] : null);
@@ -288,7 +327,9 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
   const appPort = await tmp.serve(app);
   const standIn = join(root, 'stand-in-claude.mjs');
   const out = join(root, 'stand-in-claude.json');
-  writeFileSync(standIn, `
+  writeFileSync(
+    standIn,
+    `
     import { readFileSync, writeFileSync } from 'node:fs';
     const fill = (s) => s.replace(/\\$\\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\\}/g, (m, k, d) => process.env[k] ?? d ?? m);
     const config = JSON.parse(readFileSync(process.argv[process.argv.indexOf('--mcp-config') + 1], 'utf8'));
@@ -312,7 +353,8 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
       } catch (e) { servers[name] = { status: 'failed', error: e.message }; }
     }
     writeFileSync(${JSON.stringify(out)}, JSON.stringify(servers));
-    console.log(JSON.stringify({ type: 'result' }));`);
+    console.log(JSON.stringify({ type: 'result' }));`,
+  );
   let pool: { pid: number } | null = null;
   let seen: any = null;
   let exit: { code: number | null } | null = null;
@@ -345,7 +387,10 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
     });
   } finally {
     runner.pool = false;
-    if (pool) try { process.kill(pool!.pid, 'SIGKILL'); } catch {}
+    if (pool)
+      try {
+        process.kill(pool!.pid, 'SIGKILL');
+      } catch {}
     app.close();
   }
   assert.equal(exit?.code, 0, 'the wrapper saw the stand-in exit cleanly');
@@ -359,7 +404,10 @@ test('a pooled turn in a unit hands its wrapper the pool too, to start in a unit
   try {
     const got = await launch({ units: true });
     assert.match(got.spec.pool.script, /\/mcp-pool\.ts$/);
-    assert.ok(got.spec.pool.systemdRun.some((a: string) => a.startsWith('--unit=citadel-mcp-pool-')), JSON.stringify(got.spec.pool));
+    assert.ok(
+      got.spec.pool.systemdRun.some((a: string) => a.startsWith('--unit=citadel-mcp-pool-')),
+      JSON.stringify(got.spec.pool),
+    );
     assert.match(got.mcp.mcpServers.thread.url, /\$\{CITADEL_POOL_PORT\}/);
   } finally {
     runner.pool = false;

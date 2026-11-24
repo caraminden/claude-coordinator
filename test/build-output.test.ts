@@ -52,13 +52,15 @@ test('finds only wholly ignored target/ and node_modules/ folders, never tracked
   const outside = join(root, 'find-outside');
   checkout(dir, outside);
   // src/target is ignored by the bare `target` pattern too, and holds nothing tracked: it counts.
-  assert.deepEqual(await findBuildOutput(dir), ['src/target', 'target', 'web/node_modules'].map((p) => join(dir, p)));
+  assert.deepEqual(
+    await findBuildOutput(dir),
+    ['src/target', 'target', 'web/node_modules'].map((p) => join(dir, p)),
+  );
   const r = await clearBuildOutput(dir);
   assert.equal(r.dirs, 3);
   assert.ok(r.bytes > 0);
   for (const gone of ['target', 'web/node_modules', 'src/target']) assert.ok(!existsSync(join(dir, gone)), gone);
-  for (const kept of ['src/main.rs', 'kept/target/tracked.txt', 'kept/target/junk', 'build/node_modules/x', '.git', 'web'])
-    assert.ok(existsSync(join(dir, kept)), kept);
+  for (const kept of ['src/main.rs', 'kept/target/tracked.txt', 'kept/target/junk', 'build/node_modules/x', '.git', 'web']) assert.ok(existsSync(join(dir, kept)), kept);
   assert.ok(existsSync(join(outside, 'precious')) && existsSync(join(outside, 'deep', 'target', 'precious')), 'nothing behind a symlink');
   assert.equal(git(dir, 'status', '--porcelain', '--untracked-files=no').toString(), '', 'no tracked file touched');
   assert.deepEqual(await clearBuildOutput(dir), { dirs: 0, bytes: 0 });
@@ -74,7 +76,10 @@ test("a Gradle project's build/ and .gradle/ go too, only beside a Gradle build 
   git(dir, 'add', '.');
   git(dir, 'commit', '-qm', 'init');
   for (const f of ['android/build/x', 'android/.gradle/x', 'android/app/build/outputs/a.apk', 'web/build/x', 'build/x']) put(join(dir, f));
-  assert.deepEqual(await findBuildOutput(dir), ['android/.gradle', 'android/app/build', 'android/build'].map((p) => join(dir, p)));
+  assert.deepEqual(
+    await findBuildOutput(dir),
+    ['android/.gradle', 'android/app/build', 'android/build'].map((p) => join(dir, p)),
+  );
 });
 
 test("a folder inside another repo isn't a checkout of its own", async () => {
@@ -89,7 +94,12 @@ test("dismissing a minion clears its worktree's build output; the sweep catches 
   const data = join(root, 'data');
   mkdirSync(data);
   const store = new Store(join(data, 'test.db'));
-  const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   const project = store.createProject('Test', null);
   const minion = (kind?: 'coordinator', cwd?: string) => {
     const id = store.createTicket({ project_id: project.id, kind, title: 'T', permission_mode: 'default', created_by: 'Cara' }).id;

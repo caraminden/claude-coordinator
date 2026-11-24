@@ -20,7 +20,10 @@ export const env = { ...scriptEnv({ COORDINATOR_CONTAINER: undefined, COORDINATO
 
 // The timing lines in a log folder (#1320), every day's land.md: a run may cross midnight UTC.
 export const timingLines = (dir: string) =>
-  readdirSync(dir).sort().flatMap((day) => readFileSync(join(dir, day, 'land.md'), 'utf8').split('\n')).filter((l) => l.includes(' · timing · '));
+  readdirSync(dir)
+    .sort()
+    .flatMap((day) => readFileSync(join(dir, day, 'land.md'), 'utf8').split('\n'))
+    .filter((l) => l.includes(' · timing · '));
 
 export let n = 0;
 // local: the scheme's tools/land.local.sh, which the template sources (none: no such file).
@@ -61,8 +64,7 @@ export function setup(check = 'test ! -e red', config: Record<string, string> = 
   return { dir, main, origin, wt, commit, run };
 }
 
-export const landLockFree = (r: ReturnType<typeof setup>) =>
-  spawnSync('flock', ['-n', join(git(r.main, 'rev-parse', '--absolute-git-dir'), 'land.lock'), 'true']).status === 0;
+export const landLockFree = (r: ReturnType<typeof setup>) => spawnSync('flock', ['-n', join(git(r.main, 'rev-parse', '--absolute-git-dir'), 'land.lock'), 'true']).status === 0;
 // The line for the land lock (the queue_* functions in the template, from Citadel's tools/deploy-queue.sh,
 // #502). The kernel grants a flock in no order, so several landings waiting on it at once (2026-11-10)
 // meant some lost every round and timed out. Fake work: the check waits for a file named in $GATE.
@@ -76,9 +78,20 @@ export function queueSetup(branches: number, check = gated, config: Record<strin
   const wts = [r.wt];
   for (let i = 2; i <= branches; i++) git(r.main, 'worktree', 'add', '-q', '-b', `ticket/${i}-x`, wts[wts.push(join(r.dir, `wt${i}`)) - 1]);
   wts.forEach((wt, i) => r.commit(wt, files(i + 1), `${i + 1}\n`));
-  const tickets = () => (existsSync(join(state, 'land-queue')) ? readdirSync(join(state, 'land-queue')).filter((f) => /^\d+$/.test(f)).sort() : []);
+  const tickets = () =>
+    existsSync(join(state, 'land-queue'))
+      ? readdirSync(join(state, 'land-queue'))
+          .filter((f) => /^\d+$/.test(f))
+          .sort()
+      : [];
   const issued = () => (existsSync(join(state, 'land-queue', '.seq')) ? Number(readFileSync(join(state, 'land-queue', '.seq'), 'utf8')) : 0);
-  const phase = (ticket: string) => { try { return readFileSync(join(state, 'land-queue', ticket), 'utf8').split('\n')[3]; } catch { return ''; } };
+  const phase = (ticket: string) => {
+    try {
+      return readFileSync(join(state, 'land-queue', ticket), 'utf8').split('\n')[3];
+    } catch {
+      return '';
+    }
+  };
   // Landing i (from 1), started and left running.
   const land = (i: number, extra: Record<string, string> = {}) => {
     const child = spawn('bash', [join(wts[i - 1], 'tools', 'land.sh')], { cwd: wts[i - 1], stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, GATE: gate, LAND_QUEUE_POLL: '0.05', ...extra } });
@@ -87,7 +100,10 @@ export function queueSetup(branches: number, check = gated, config: Record<strin
     // A landing that never ends fails its test by name instead of hanging the whole run (#560).
     const exit = new Promise<number | null>((ok, no) => {
       const late = setTimeout(() => no(new Error(`land.sh was still running after 60 s:\n${stderr}`)), 60_000);
-      child.on('close', (code) => { clearTimeout(late); ok(code); });
+      child.on('close', (code) => {
+        clearTimeout(late);
+        ok(code);
+      });
     });
     exit.catch(() => {}); // for a test that had already failed on something else
     return { child, exit, stderr: () => stderr };
@@ -106,7 +122,15 @@ export const rebasedHook = `land_rebased() {
   git commit -qm "rebased on $1"
 }
 `;
-export const rebasedCalls = (main: string) => { try { return readFileSync(join(git(main, 'rev-parse', '--absolute-git-dir'), 'rebased.log'), 'utf8').trim().split('\n'); } catch { return []; } };
+export const rebasedCalls = (main: string) => {
+  try {
+    return readFileSync(join(git(main, 'rev-parse', '--absolute-git-dir'), 'rebased.log'), 'utf8')
+      .trim()
+      .split('\n');
+  } catch {
+    return [];
+  }
+};
 
 // The CI gate and the stack (#537), for scheme-setup-land-ci.test.ts and the hooks' tests. CI is faked two ways: a CI_STATUS command that answers from a file named after
 // the commit (its exit code; no file: not started; "<code> once": that answer one time, then not started), and for
@@ -120,7 +144,11 @@ export function ciSetup(branches: number, { stack = '', batch = '', check = 'tru
   const bin = join(q.dir, 'bin');
   mkdirSync(ci);
   mkdirSync(bin);
-  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in "api rate_limit "*) echo "${FAKE_QUOTA:-4321 5000 $(($(date +%s) + 1500))}" ;; *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; *skipped*) cat "$CI_DIR/skipped-jobs" 2>/dev/null || echo 0 ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; *branch=*) cat "$CI_DIR/branch-runs" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
+  writeFileSync(
+    join(bin, 'gh'),
+    '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in "api rate_limit "*) echo "${FAKE_QUOTA:-4321 5000 $(($(date +%s) + 1500))}" ;; *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; *skipped*) cat "$CI_DIR/skipped-jobs" 2>/dev/null || echo 0 ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; *branch=*) cat "$CI_DIR/branch-runs" 2>/dev/null ;; esac\nexit 0\n',
+    { mode: 0o755 },
+  );
   writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\nf=$CI_DIR/${1:0:12}\nread -r code once <"$f" 2>/dev/null || code=3\n[ -z "$once" ] || rm "$f"\nexit "$code"\n', { mode: 0o755 });
   const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_BATCH: batch === 'default' ? '' : batch || '1' }; // no batch: off, so a test of one landing's run isn't batched by the template's default (4)
   const started: ReturnType<typeof q.land>[] = [];
@@ -129,13 +157,22 @@ export function ciSetup(branches: number, { stack = '', batch = '', check = 'tru
   // The commits a landing sent to CI, oldest first, as land.sh names them (12 characters).
   const sent = (l: L) => [...l.stderr().matchAll(/waiting for CI on ([0-9a-f]{12}) \(origin/g)].map((m) => m[1]);
   /** Waits until the landing has sent its nth commit to CI, and returns it. */
-  const tip = async (l: L, nth = 1) => { await until(`CI run ${nth}: ${l.stderr()}`, () => sent(l).length >= nth); return sent(l)[nth - 1]; };
+  const tip = async (l: L, nth = 1) => {
+    await until(`CI run ${nth}: ${l.stderr()}`, () => sent(l).length >= nth);
+    return sent(l)[nth - 1];
+  };
   const verdict = (sha: string, code: number, once = false) => writeFileSync(join(ci, sha), `${code}${once ? ' once' : ''}\n`);
   const parent = (sha: string) => git(q.main, 'rev-parse', `${sha}^`).slice(0, 12);
   const mainAt = () => git(q.main, 'rev-parse', 'main').slice(0, 12);
-  const scratch = () => git(q.origin, 'for-each-ref', '--format=%(refname:short) %(objectname)', 'refs/heads/land').split('\n').filter(Boolean).map((l) => l.replace(/^(\S+ .{12}).*/, '$1'));
+  const scratch = () =>
+    git(q.origin, 'for-each-ref', '--format=%(refname:short) %(objectname)', 'refs/heads/land')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => l.replace(/^(\S+ .{12}).*/, '$1'));
   const on = (i: number) => git(q.wts[i - 1], 'branch', '--show-current');
-  const stop = () => { for (const l of started) if (l.child.exitCode === null && l.child.signalCode === null) l.child.kill('SIGKILL'); };
+  const stop = () => {
+    for (const l of started) if (l.child.exitCode === null && l.child.signalCode === null) l.child.kill('SIGKILL');
+  };
   /** Starts these landings one after another, so their places in line are the order given. */
   const lands = async (...is: number[]) => {
     const out: L[] = [];
@@ -148,4 +185,6 @@ export function ciSetup(branches: number, { stack = '', batch = '', check = 'tru
   };
   return { ...q, ci, land, lands, sent, tip, verdict, parent, mainAt, scratch, on, stop };
 }
-export const GREEN = 0, RED = 1, LOST = 4;
+export const GREEN = 0,
+  RED = 1,
+  LOST = 4;

@@ -103,14 +103,21 @@ test('a landing and its restart each leave a timing line in the retro log, lande
   const shared = join(p.dir, 'shared');
   const lines = () => {
     const day = join(shared, 'retro-log');
-    return existsSync(day) ? readFileSync(join(day, readdirSync(day)[0], 'land.md'), 'utf8').split('\n').filter((l) => / · (timing|restart) · /.test(l)) : [];
+    return existsSync(day)
+      ? readFileSync(join(day, readdirSync(day)[0], 'land.md'), 'utf8')
+          .split('\n')
+          .filter((l) => / · (timing|restart) · /.test(l))
+      : [];
   };
   const good = p.commit(p.wts[0], 'b.txt', 'fine\n');
   let res = await p.run(land, p.wts[0], { COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 0, res.stderr);
   await p.restarts(1);
   // Two processes write them, the restart and land.sh, so either can come first.
-  const kind = (k: string, from = 0) => lines().slice(from).filter((l) => l.includes(` · ${k} · `));
+  const kind = (k: string, from = 0) =>
+    lines()
+      .slice(from)
+      .filter((l) => l.includes(` · ${k} · `));
   assert.equal(lines().length, 2, lines().join('\n'));
   assert.match(kind('restart')[0], /^- \d\d:\d\d:\d\dZ · restart · [0-9a-f]{7} · idle-wait \d+ · backup \d+ · healthy \d+ · settle \d+ · restart · live$/);
   assert.ok(kind('restart')[0].includes(` · ${good.slice(0, 7)} · `), kind('restart')[0]);

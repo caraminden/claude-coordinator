@@ -42,14 +42,20 @@ let stack = null;
 let replacing = null; // the hash replaceHash is going to, until its hashchange arrives
 
 function load() {
-  try { return JSON.parse(sessionStorage.getItem(KEY)) ?? {}; } catch { return {}; }
+  try {
+    return JSON.parse(sessionStorage.getItem(KEY)) ?? {};
+  } catch {
+    return {};
+  }
 }
 
 function save(stacks) {
   stacks[stack.id] = { ...stack, at: Date.now() };
   const ids = Object.keys(stacks).sort((a, b) => stacks[b].at - stacks[a].at);
   for (const id of ids.slice(KEEP)) delete stacks[id];
-  try { sessionStorage.setItem(KEY, JSON.stringify(stacks)); } catch {}
+  try {
+    sessionStorage.setItem(KEY, JSON.stringify(stacks));
+  } catch {}
 }
 
 /** Note where the tab is now, after a page load or any move. */
@@ -64,7 +70,9 @@ function sync() {
   // A fresh load, or an entry whose stack was dropped: start again here, with nothing to go back to.
   else stack = { id: Math.random().toString(36).slice(2, 10), entries: [hash], idx: 0, base: 0 };
   replacing = null;
-  try { history.replaceState({ ...history.state, ccNav: { id: stack.id, pos: stack.base + stack.idx } }, ''); } catch {}
+  try {
+    history.replaceState({ ...history.state, ccNav: { id: stack.id, pos: stack.base + stack.idx } }, '');
+  } catch {}
   save(stacks);
   updateButtons();
 }
@@ -79,8 +87,12 @@ export function replaceHash(hash) {
 export const canBack = () => canGoBack(stack);
 export const canForward = () => canGoForward(stack);
 /** Never off the site: with nothing earlier in Citadel, Back does nothing. */
-export function goBack() { if (canBack()) history.back(); }
-export function goForward() { if (canForward()) history.forward(); }
+export function goBack() {
+  if (canBack()) history.back();
+}
+export function goForward() {
+  if (canForward()) history.forward();
+}
 
 /** The thread bar's buttons are rebuilt often; between rebuilds, keep them in step with moves. */
 function updateButtons() {

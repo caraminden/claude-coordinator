@@ -32,9 +32,7 @@ function fit() {
   document.documentElement.classList.toggle('frame-topbar', !!bar);
   const name = frame.dataset.app;
   const entry = railEntry(name);
-  strip.replaceChildren(
-    h('img', { src: entry?.querySelector('img')?.src ?? `/apps/_citadel/icon/${name}`, alt: '' }),
-    h('b', {}, appTitle(frame)));
+  strip.replaceChildren(h('img', { src: entry?.querySelector('img')?.src ?? `/apps/_citadel/icon/${name}`, alt: '' }), h('b', {}, appTitle(frame)));
   // In the installed app the window controls take the bar's colour (under a modal's backdrop), or the strip's.
   tintTitleBar(bar && got.color, got?.backdrop);
   mirrorBar(got, frame);
@@ -102,7 +100,11 @@ function ownView() {
   const back = document.querySelector('.citadel-rail a[data-app=""]');
   if (back) return new URL(back.href).hash || '#/';
   const key = `citadel-last-view:${new URL('./', import.meta.url).pathname}`; // rail.js viewKey
-  try { return sessionStorage.getItem(key) ?? localStorage.getItem(key) ?? '#/'; } catch { return '#/'; }
+  try {
+    return sessionStorage.getItem(key) ?? localStorage.getItem(key) ?? '#/';
+  } catch {
+    return '#/';
+  }
 }
 
 /** Leave the contraption for Citadel's last own view. */
@@ -122,8 +124,7 @@ export const opensOnCitadel = ({ phoneApp, hash, away }) => phoneApp && /^#\/app
 
 if (typeof window !== 'undefined') {
   const ua = navigator.userAgent;
-  const phoneApp = matchMedia('(display-mode: standalone)').matches
-    && (/Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)); // rail.js isAndroid, isIOS
+  const phoneApp = matchMedia('(display-mode: standalone)').matches && (/Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)); // rail.js isAndroid, isIOS
   // Before core.js routes: no frame is made, and Back doesn't lead into it.
   if (opensOnCitadel({ phoneApp, hash: location.hash })) replaceHash(ownView());
   let hiddenAt = 0;
@@ -169,15 +170,20 @@ let asked = false;
 function askClipboard() {
   if (asked) return;
   asked = true;
-  api('api/contraptions/mine').then((mine) => {
-    clipboardApps = new Set((mine ?? []).flatMap((c) => (c?.clipboard ? [c.name] : [])));
-    for (const [name, frame] of frames) {
-      const allow = frameAllow(appClipboard(name));
-      if (frame.allow === allow) continue;
-      frame.allow = allow;
-      frame.src = frame.src;
-    }
-  }, () => { asked = false; }); // no answer: the next frame asks again
+  api('api/contraptions/mine').then(
+    (mine) => {
+      clipboardApps = new Set((mine ?? []).flatMap((c) => (c?.clipboard ? [c.name] : [])));
+      for (const [name, frame] of frames) {
+        const allow = frameAllow(appClipboard(name));
+        if (frame.allow === allow) continue;
+        frame.allow = allow;
+        frame.src = frame.src;
+      }
+    },
+    () => {
+      asked = false;
+    },
+  ); // no answer: the next frame asks again
 }
 
 /** Show contraption `name` (its frame made on first visit), at address `src` if given: an open frame reloads there. */
@@ -189,10 +195,13 @@ export function showFrame(name, src) {
     probe = h('div', { class: 'frame-probe', 'aria-hidden': 'true' });
     strip = h('div', { class: 'frame-strip' });
     // The chat header's ‹ › × (thread.js renderTicketHead): its buttons, icons and history.
-    nav = h('span', { class: 'frame-nav' },
+    nav = h(
+      'span',
+      { class: 'frame-nav' },
       h('button', { type: 'button', class: 'nav-btn nav-back', title: 'Back', 'aria-label': 'Back', disabled: !canBack(), onclick: goBack }, icon('back')),
       h('button', { type: 'button', class: 'nav-btn nav-forward', title: 'Forward', 'aria-label': 'Forward', disabled: !canForward(), onclick: goForward }, icon('forward')),
-      h('button', { type: 'button', class: 'close-view', title: 'Close', 'aria-label': 'Close', onclick: leave }, icon('close')));
+      h('button', { type: 'button', class: 'close-view', title: 'Close', 'aria-label': 'Close', onclick: leave }, icon('close')),
+    );
     drag = h('div', { class: 'frame-drag', 'aria-hidden': 'true', hidden: true });
     box.append(probe, strip, drag, nav);
     document.body.append(box);
@@ -306,10 +315,26 @@ function showOffer() {
   }
   if (offer?.dataset.app === name) return;
   offer?.remove();
-  offer = h('div', { class: 'cui-notice frame-update', 'data-tone': 'info', 'data-app': name, role: 'status' },
+  offer = h(
+    'div',
+    { class: 'cui-notice frame-update', 'data-tone': 'info', 'data-app': name, role: 'status' },
     h('span', {}, `${appTitle(frame)} has a new version`),
     h('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => reloadFrame(frame) }, 'Reload'),
-    h('button', { type: 'button', class: 'cui-btn cui-ghost', 'aria-label': 'Later', 'data-tip': 'Later: it reloads by itself once you leave it, unless it holds unsent text', onclick: () => { dismissed.add(name); showOffer(); } }, '✕'));
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'cui-btn cui-ghost',
+        'aria-label': 'Later',
+        'data-tip': 'Later: it reloads by itself once you leave it, unless it holds unsent text',
+        onclick: () => {
+          dismissed.add(name);
+          showOffer();
+        },
+      },
+      '✕',
+    ),
+  );
   box.append(offer);
 }
 

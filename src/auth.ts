@@ -36,7 +36,10 @@ export interface Session {
 export const AGENT_NAME = 'Taskmaster';
 
 /** A thread's turn-token nonces: its current turn's and the one before. */
-export interface Nonces { current: string | null; previous: string | null }
+export interface Nonces {
+  current: string | null;
+  previous: string | null;
+}
 /** Where Auth keeps them. `get` returns null for a thread that is gone; a closed one's tokens only report deploys. */
 export interface NonceStore {
   get(ticketId: number): (Nonces & { closed?: boolean }) | null;
@@ -57,7 +60,10 @@ export function looksLikeUrl(name: string): boolean {
  * of the same name for the whole domain, which may come first, so readers try each and keep the first that verifies.
  */
 function cookies(req: IncomingMessage, name: string): string[] {
-  return (req.headers.cookie ?? '').split(/;\s*/).filter((c) => c.startsWith(`${name}=`)).map((c) => c.slice(name.length + 1));
+  return (req.headers.cookie ?? '')
+    .split(/;\s*/)
+    .filter((c) => c.startsWith(`${name}=`))
+    .map((c) => c.slice(name.length + 1));
 }
 
 function sha256(s: string): Buffer {

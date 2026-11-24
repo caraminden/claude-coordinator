@@ -26,16 +26,18 @@ import { markHeld, refreshBranch, renderTicketHead, unpark } from './thread-head
 
 // Mine or Everyone (#920): how this device opens your Taskmaster in a scheme with several.
 export function tmViewMode() {
-  try { return localStorage.getItem(TM_VIEW) === 'everyone' ? 'everyone' : 'mine'; } catch { return 'mine'; }
+  try {
+    return localStorage.getItem(TM_VIEW) === 'everyone' ? 'everyone' : 'mine';
+  } catch {
+    return 'mine';
+  }
 }
 
 /** Mine and Everyone, in your Taskmaster's title row: the pick shows at once and the history follows. */
 export function tmViewSwitch() {
   const now = view.merged.mode;
   const pick = (mode, label, title) => h('button', { type: 'button', class: `chip${mode === now ? ' on' : ''}`, 'aria-pressed': String(mode === now), title, onclick: () => mode !== now && setTmView(mode) }, label);
-  return h('span', { class: 'tm-views', role: 'group', 'aria-label': 'Which Taskmaster chats' },
-    pick('mine', 'Mine', 'Your Taskmaster, with the Overlord\'s cards and alerts for everyone'),
-    pick('everyone', 'Everyone', 'Every Taskmaster in this scheme and the Overlord, in time order'));
+  return h('span', { class: 'tm-views', role: 'group', 'aria-label': 'Which Taskmaster chats' }, pick('mine', 'Mine', "Your Taskmaster, with the Overlord's cards and alerts for everyone"), pick('everyone', 'Everyone', 'Every Taskmaster in this scheme and the Overlord, in time order'));
 }
 
 /** Mine's line under the title (board C): whose chats it leaves out, and a way there. */
@@ -44,19 +46,20 @@ export function tmBanner() {
   const names = rest.filter((t) => t.person_id != null).map((t) => `${t.person_name ?? 'Someone'}'s`);
   const whose = names.length ? `${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)} Taskmasters` : `${names[0]} Taskmaster`}` : '';
   const said = [whose, rest.some((t) => t.person_id == null) ? 'the Overlord' : ''].filter(Boolean).join(' and ');
-  return said && h('div', { class: 'tm-banner' }, `${said} ${rest.length > 1 ? 'are' : 'is'} in `,
-    h('button', { type: 'button', class: 'link', onclick: () => setTmView('everyone') }, 'Everyone'), '.');
+  return said && h('div', { class: 'tm-banner' }, `${said} ${rest.length > 1 ? 'are' : 'is'} in `, h('button', { type: 'button', class: 'link', onclick: () => setTmView('everyone') }, 'Everyone'), '.');
 }
 
 async function setTmView(mode) {
   const v = view;
   const before = v.merged.mode;
-  try { localStorage.setItem(TM_VIEW, mode); } catch {}
+  try {
+    localStorage.setItem(TM_VIEW, mode);
+  } catch {}
   v.merged = mergedView(v.projectId, v.id, v.taskmasters, mode);
   renderTicketHead();
   const { src } = v.merged;
   try {
-    const page = cachedEvents(src) ?? await loadEvents(src);
+    const page = cachedEvents(src) ?? (await loadEvents(src));
     if (view !== v || v.merged.src !== src) return; // another view, or another flip, overtook this one
     v.page = page;
     renderHistory();
@@ -64,7 +67,9 @@ async function setTmView(mode) {
     await catchUpEvents();
   } catch {
     if (view !== v || v.merged.src !== src) return;
-    try { localStorage.setItem(TM_VIEW, before); } catch {}
+    try {
+      localStorage.setItem(TM_VIEW, before);
+    } catch {}
     v.merged = mergedView(v.projectId, v.id, v.taskmasters, before);
     renderTicketHead();
     toast(`Couldn't load ${mode === 'everyone' ? 'Everyone' : 'Mine'}. Try again in a moment.`, { tone: 'warn' });
@@ -74,7 +79,9 @@ async function setTmView(mode) {
 /** Per-thread state for the chat in the main panel; empty when the main panel shows something else. */
 export function chatView(chatId, ticket, merged = null) {
   return {
-    id: chatId, ticket, lastEventId: 0,
+    id: chatId,
+    ticket,
+    lastEventId: 0,
     merged, // your Taskmaster's chat as Mine or Everyone, several sessions in one log (#920, mine.js mergedView)
     progress: createProgress(),
     progressEl: h('div', { class: 'progress', hidden: true }), // lives in the thread bar
@@ -115,12 +122,16 @@ function watchYourScrolling() {
   if (watching) return;
   watching = true;
   for (const type of USER_SCROLL) {
-    addEventListener(type, (e) => {
-      if (!view?.page) return;
-      view.scrolledByYou = true;
-      const button = document.querySelector('#log > .load-earlier > button');
-      if (type === 'wheel' && e.deltaY < 0 && e.target.closest?.('#log') && button?.inView && !button.disabled) showEarlier(button);
-    }, { capture: true, passive: true });
+    addEventListener(
+      type,
+      (e) => {
+        if (!view?.page) return;
+        view.scrolledByYou = true;
+        const button = document.querySelector('#log > .load-earlier > button');
+        if (type === 'wheel' && e.deltaY < 0 && e.target.closest?.('#log') && button?.inView && !button.disabled) showEarlier(button);
+      },
+      { capture: true, passive: true },
+    );
   }
 }
 
@@ -140,7 +151,7 @@ export async function mountChat(chatId, ticket, page, fromCache) {
   // Open at the first thing you haven't seen, marked New; a minion you've never opened, at the top of
   // what's loaded. Unread from before the loaded page also opens there, under "Load earlier".
   const place = async () => {
-    const jumped = jump && await jumpToEvent(jump);
+    const jumped = jump && (await jumpToEvent(jump));
     if (view?.id !== chatId || jumped) return;
     const divider = document.querySelector('#log > .unread-divider');
     if (!divider) restoreScroll(chatId);
@@ -190,18 +201,32 @@ function renderHistory() {
   const page = view.page;
   const recap = document.getElementById('recap');
   Object.assign(view, {
-    lastEventId: 0, progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
-    actions: new Map(), turnActions: [], cards: new Map(), sideThreads: new Map(), lastPlan: null, heldCards: [], gruntStarts: new Map(),
+    lastEventId: 0,
+    progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
+    actions: new Map(),
+    turnActions: [],
+    cards: new Map(),
+    sideThreads: new Map(),
+    lastPlan: null,
+    heldCards: [],
+    gruntStarts: new Map(),
     // The session started on an earlier page, if there is one.
-    sawInit: page.more, latestReply: null, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, folds: [], pendingRequest: [], turnRequest: undefined,
+    sawInit: page.more,
+    latestReply: null,
+    turnNote: null,
+    turnInitAt: undefined,
+    narration: narrationSorter(),
+    narrationEl: null,
+    folds: [],
+    pendingRequest: [],
+    turnRequest: undefined,
   });
   if (view.merged) Object.assign(view.merged, { states: new Map(), last: view.id });
   const earlier = page.more && h('button', { type: 'button', class: 'small secondary', onclick: (e) => showEarlier(e.currentTarget) }, 'Load earlier');
   log.replaceChildren(...(earlier ? [h('div', { class: 'load-earlier' }, earlier)] : []));
   if (earlier) loadWhenReached(earlier);
   if (isCoordinator(view.ticket) && !page.events.length) {
-    log.append(h('div', { class: 'note' },
-      'This is the Taskmaster for this scheme. It keeps track of the minions on the left and can create, message, rename and dismiss them for you.'));
+    log.append(h('div', { class: 'note' }, 'This is the Taskmaster for this scheme. It keeps track of the minions on the left and can create, message, rename and dismiss them for you.'));
   }
   for (const ev of page.events) appendEvent(ev, false);
   renderCardJump();
@@ -215,7 +240,9 @@ function renderHistory() {
 /** Keep `el` at `top` px down the screen as what's above it lays out, until you scroll yourself. */
 function holdInPlace(el, top) {
   const scroller = chatScroller() ?? document.scrollingElement;
-  const align = () => { scroller.scrollTop += el.getBoundingClientRect().top - top; };
+  const align = () => {
+    scroller.scrollTop += el.getBoundingClientRect().top - top;
+  };
   align();
   const settle = new ResizeObserver(align);
   const stop = () => {
@@ -306,12 +333,10 @@ export function chatSection(chatId, ticket) {
   view.typingEl.onclick = openReadout;
   // Opening at the first unread message leaves the newest out of sight; this takes you there.
   // It sits in the composer's button row at every width, where it covers no chat words.
-  const latest = h('button', { type: 'button', class: 'small secondary to-latest', title: 'Jump to the latest', 'aria-label': 'Jump to the latest', hidden: true },
-    h('span', { 'aria-hidden': 'true' }, '↓'), h('span', { class: 'wide-only' }, ' Latest'));
+  const latest = h('button', { type: 'button', class: 'small secondary to-latest', title: 'Jump to the latest', 'aria-label': 'Jump to the latest', hidden: true }, h('span', { 'aria-hidden': 'true' }, '↓'), h('span', { class: 'wide-only' }, ' Latest'));
   latest.addEventListener('click', scrollToBottom);
   // A card still waiting on people, out of sight (#382): this takes you to it, oldest first.
-  const toCard = h('button', { type: 'button', class: 'small secondary to-card', title: 'Jump to a card waiting on you', 'aria-label': 'Jump to a card waiting on you', hidden: true },
-    h('span', { 'aria-hidden': 'true' }, '↑'), ' Card');
+  const toCard = h('button', { type: 'button', class: 'small secondary to-card', title: 'Jump to a card waiting on you', 'aria-label': 'Jump to a card waiting on you', hidden: true }, h('span', { 'aria-hidden': 'true' }, '↑'), ' Card');
   toCard.addEventListener('click', jumpToOpenCard);
   form.querySelector('.row > .add-image').after(latest, toCard);
   // A parked minion's Unpark sits just left of Send (#726), filled by renderTicketHead.
@@ -328,7 +353,6 @@ export function chatSection(chatId, ticket) {
   // A new person's first-day welcome (#1151), over their Taskmaster's chat only.
   return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), chatWelcome(ticket), log, view.typingEl, form);
 }
-
 
 /** Find in the open conversation: highlights every match, Enter / ↓ for the next, Shift+Enter / ↑ for the previous. */
 function chatFindBox() {
@@ -398,7 +422,9 @@ function chatFindBox() {
 }
 
 // Phones put ‹ › × on the line under the title, so turning a tablet across the breakpoint redraws the bar.
-narrow.addEventListener('change', () => { if (view?.ticket) renderTicketHead(); });
+narrow.addEventListener('change', () => {
+  if (view?.ticket) renderTicketHead();
+});
 
 // Mine and Everyone (#920): each other Taskmaster session's drawing state, swapped into `view` while one of
 // its events is drawn, so its turns fold, hold cards and count actions on their own. Yours stays in `view`.
@@ -408,8 +434,23 @@ const sessionState = (o) => Object.fromEntries(SESSION_STATE.map((k) => [k, o[k]
 function newSessionState(part) {
   const ticket = view.taskmasters?.find((t) => t.id === part.id)?.ticket ?? { id: part.id, kind: 'coordinator', project_id: view.projectId, status: 'idle' };
   return {
-    ticket, part, progress: createProgress(), actions: new Map(), turnActions: [], lastPlan: null, heldCards: [], gruntStarts: new Map(),
-    sawInit: true, latestReply: null, turnNote: null, turnInitAt: undefined, narration: narrationSorter(), narrationEl: null, folds: [], pendingRequest: [], turnRequest: undefined,
+    ticket,
+    part,
+    progress: createProgress(),
+    actions: new Map(),
+    turnActions: [],
+    lastPlan: null,
+    heldCards: [],
+    gruntStarts: new Map(),
+    sawInit: true,
+    latestReply: null,
+    turnNote: null,
+    turnInitAt: undefined,
+    narration: narrationSorter(),
+    narrationEl: null,
+    folds: [],
+    pendingRequest: [],
+    turnRequest: undefined,
   };
 }
 
@@ -546,7 +587,12 @@ function drawEvent(event, scroll) {
     // line pointing back up when messages below have pushed the card out of the way.
     const card = view.cards.get(data.answer?.questionId ?? (data.plan?.verdict === 'approve' ? data.plan.planId : null));
     // A secret card's answer (#838) carries only the name it was saved as; its question_result shuts the card.
-    if (data.answer?.answers) card?.markAnswered(data.answer.answers, data.author, (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`));
+    if (data.answer?.answers)
+      card?.markAnswered(
+        data.answer.answers,
+        data.author,
+        (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
+      );
     if (card) {
       if (messagesBelow(card.el)) nodes.push(stamped(answerRef(card.el, data), event));
       // Someone else's answer counts as new, so the unread divider can still land on the card.
@@ -555,11 +601,14 @@ function drawEvent(event, scroll) {
       // The card is in history not loaded yet.
       nodes.push(stamped(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), data.answer.secret ? h('div', { class: 'answer-lines' }, `→ saved the secret as ${data.answer.secret}`) : answerSummary(data.answer.answers)), event));
     } else {
-      const bubble = userBubble(data.author, data.text,
+      const bubble = userBubble(
+        data.author,
+        data.text,
         (data.images ?? []).map((name) => `api/tickets/${event.ticket_id}/images/${encodeURIComponent(name)}`),
         data.comment ? { ticketId: event.ticket_id, path: data.comment.path, name: baseName(data.comment.about) } : null,
         { id: event.id, strikes: data.strikes, brief: data.brief, schedule: data.schedule, ask: data.ask, mentions: data.mentions },
-        (data.files ?? []).map((f) => ({ ...f, href: uploadUrl(event.ticket_id, f.name) })));
+        (data.files ?? []).map((f) => ({ ...f, href: uploadUrl(event.ticket_id, f.name) })),
+      );
       bubble.dataset.event = event.id;
       // What its ✎ puts back in the message box while it waits in the queue (markQueued); a comment on a file would lose its file.
       if (data.author === me && !data.comment) bubble.sent = { text: data.text ?? '', images: data.images ?? [], files: data.files ?? [] };
@@ -689,7 +738,15 @@ function drawEvent(event, scroll) {
     else if (short != null) nodes.push(h('div', { class: 'note', title: short === data.text ? null : data.text }, threadRefs(short)));
   } else if (event.kind === 'fresh') {
     // A Taskmaster's or a minion's fresh Claude session (#406, #937), with the handoff it starts from behind the toggle.
-    nodes.push(h('details', { class: 'note detail fresh', title: data.why ? `Why: ${data.why}` : null }, h('summary', {}, h('span', { class: 'rule' }), data.why ? `Started fresh: ${data.why}` : 'Started fresh', h('span', { class: 'rule' })), h('div', { class: 'fresh-from' }, 'The handoff it started from:'), markdown(data.summary, event.ticket_id)));
+    nodes.push(
+      h(
+        'details',
+        { class: 'note detail fresh', title: data.why ? `Why: ${data.why}` : null },
+        h('summary', {}, h('span', { class: 'rule' }), data.why ? `Started fresh: ${data.why}` : 'Started fresh', h('span', { class: 'rule' })),
+        h('div', { class: 'fresh-from' }, 'The handoff it started from:'),
+        markdown(data.summary, event.ticket_id),
+      ),
+    );
   } else if (event.kind === 'error') {
     nodes.push(h('div', { class: 'note error' }, threadRefs(data.text)));
   } else if (grunt && data.type === 'assistant') {
@@ -725,9 +782,7 @@ function drawEvent(event, scroll) {
       if (data.duration_ms) bits.push(shortDuration(data.duration_ms));
       if (acts.length) bits.push(`${acts.length} action${acts.length === 1 ? '' : 's'}`);
       const title = [data.is_error ? 'Turn failed' : 'Turn finished', ...bits, data.total_cost_usd ? `$${data.total_cost_usd.toFixed(2)}` : ''].filter(Boolean).join(' · ');
-      const summary = [view.branchEl, h('span', { class: 'bits', title },
-        h('span', { class: data.is_error ? 'fail' : 'ok', 'aria-label': data.is_error ? 'Turn failed' : 'Turn finished' }, data.is_error ? '✗' : '✓'),
-        ` ${bits.join(' · ')}`)];
+      const summary = [view.branchEl, h('span', { class: 'bits', title }, h('span', { class: data.is_error ? 'fail' : 'ok', 'aria-label': data.is_error ? 'Turn failed' : 'Turn finished' }, data.is_error ? '✗' : '✓'), ` ${bits.join(' · ')}`)];
       // The branch status rides on the newest turn's line, so it moves down as turns finish.
       if (acts.length) {
         const end = h('details', { class: 'turn-end' }, h('summary', {}, ...summary));
@@ -747,11 +802,12 @@ function drawEvent(event, scroll) {
   // What a jump link (#236) finds it by.
   for (const n of nodes) n.dataset.eid = event.id;
   // Another session's items in Mine or Everyone (#920): the Overlord's on a purple band, each named by whose it is.
-  if (view.part) for (const n of nodes) {
-    n.classList.toggle('ovl', !!view.part.overlord);
-    n.dataset.session = view.part.label;
-    if (n.matches('.msg.user')) n.querySelector('.who')?.append(h('span', { class: 'msg-tag' }, `to ${view.part.label}`));
-  }
+  if (view.part)
+    for (const n of nodes) {
+      n.classList.toggle('ovl', !!view.part.overlord);
+      n.dataset.session = view.part.label;
+      if (n.matches('.msg.user')) n.querySelector('.who')?.append(h('span', { class: 'msg-tag' }, `to ${view.part.label}`));
+    }
   // A for-everyone card a person's Taskmaster asked through the Overlord (#921) says whose it was.
   const asker = data.asker && view.taskmasters?.find((t) => t.id === data.asker);
   if (asker?.person_name && (event.kind === 'question' || event.kind === 'plan')) for (const n of nodes) n.querySelector('.who')?.append(h('span', { class: 'msg-tag' }, `asked by ${asker.person_name}'s Taskmaster`));
@@ -836,9 +892,12 @@ function addGruntText(log, id, text, data, event) {
     line.querySelector('.grunt-body').append(body);
   } else {
     const name = gruntName(view.actions.get(id)?.block.input);
-    line = h('details', { class: 'msg coord grunt', 'data-grunt': id, 'data-at': event.created_at },
+    line = h(
+      'details',
+      { class: 'msg coord grunt', 'data-grunt': id, 'data-at': event.created_at },
       h('summary', {}, stepMark('done'), h('span', { class: 'who' }, h('span', { class: 'name' }, `Grunt · ${name}`)), h('span', { class: 'preview' }), h('span', { class: 'dur' })),
-      h('div', { class: 'msg grunt-body' }, body));
+      h('div', { class: 'msg grunt-body' }, body),
+    );
     // Not `name`: on a <details> that makes same-named lines one group, opening one closing the rest.
     Object.assign(line, { start, gruntLabel: name });
   }
@@ -855,9 +914,7 @@ function addGruntText(log, id, text, data, event) {
   }
   if (!line.isConnected) group.lastChild.append(line);
   const all = [...group.lastChild.children];
-  group.firstChild.replaceChildren(
-    h('span', { class: 'who' }, groupTitle(all.length, Math.max(...all.map((l) => l.end)) - Math.min(...all.map((l) => l.start)), shortDuration)),
-    h('span', { class: 'preview' }, all.map((l) => l.gruntLabel).join(', ')));
+  group.firstChild.replaceChildren(h('span', { class: 'who' }, groupTitle(all.length, Math.max(...all.map((l) => l.end)) - Math.min(...all.map((l) => l.start)), shortDuration)), h('span', { class: 'preview' }, all.map((l) => l.gruntLabel).join(', ')));
 }
 
 /** An empty group row for copies of minion-to-minion messages; addMinionCopy fills it. */
@@ -871,11 +928,14 @@ function addMinionCopy(group, data, event) {
   const sender = data.author?.replace(/^#\d+\s*/, '') ?? '';
   const who = `${data.unparked ? 'unsealed' : '→'} #${data.to}`;
   list.append(h('div', { class: 'mc-row', 'data-eid': event.id }, h('span', { class: 'mc-who' }, `${data.from ? '#' + data.from : data.author} ${who}`), h('span', { class: 'mc-text', title: sender }, data.text)));
-  const nums = new Set((group.dataset.nums ? group.dataset.nums.split(',').map(Number) : []));
+  const nums = new Set(group.dataset.nums ? group.dataset.nums.split(',').map(Number) : []);
   for (const n of [data.from, data.to]) if (n) nums.add(n);
   group.dataset.nums = [...nums].join(',');
   const count = list.children.length;
-  const all = [...nums].sort((a, b) => a - b).map((n) => `#${n}`).join(', ');
+  const all = [...nums]
+    .sort((a, b) => a - b)
+    .map((n) => `#${n}`)
+    .join(', ');
   group.querySelector('.who').textContent = `${count} message${count === 1 ? '' : 's'} between ${all}`;
   group.dataset.at ??= event.created_at;
   return group;
@@ -919,9 +979,7 @@ function stamped(el, event) {
   const now = new Date();
   const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   // Today: just the time. This week: the weekday too. Older: the date.
-  const text = d.toDateString() === now.toDateString() ? time
-    : now - d < 6 * 86_400_000 ? `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`
-    : `${d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' })}, ${time}`;
+  const text = d.toDateString() === now.toDateString() ? time : now - d < 6 * 86_400_000 ? `${d.toLocaleDateString([], { weekday: 'short' })} ${time}` : `${d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' })}, ${time}`;
   el.querySelector('.who')?.append(h('time', { class: 'stamp', datetime: d.toISOString(), title: d.toLocaleString([], { dateStyle: 'full', timeStyle: 'short' }) }, text));
   return el;
 }
@@ -951,9 +1009,7 @@ function narrationSummary(row) {
   const bodies = row.querySelectorAll(':scope > .notes > .note-text > [data-body]');
   const n = bodies.length;
   const last = bodies[n - 1];
-  row.querySelector('summary').replaceChildren(
-    h('span', { class: 'who' }, h('span', { class: 'name' }, `${n} update${n === 1 ? '' : 's'}`)),
-    h('span', { class: 'preview' }, last ? previewNodes(last.source, last.strikes) : ''));
+  row.querySelector('summary').replaceChildren(h('span', { class: 'who' }, h('span', { class: 'name' }, `${n} update${n === 1 ? '' : 's'}`)), h('span', { class: 'preview' }, last ? previewNodes(last.source, last.strikes) : ''));
 }
 
 /**
@@ -970,23 +1026,31 @@ export function syncHeldBrief() {
   if (old?.dataset.key === key) return;
   old?.remove();
   const body = markdown(b.text, view.ticket.id);
-  const el = h('div', { class: `msg user held-brief ${senderTone(b.from)}`.trim(), 'data-key': key },
-    h('div', { class: 'who' }, h('span', { class: 'name' }, b.from), h('span', { class: 'msg-tag' }, threadRefs(`Brief, held until #${b.leader} ${b.is ?? (b.when === 'live' ? 'is live' : 'has shipped')}`))),
-    body);
+  const el = h('div', { class: `msg user held-brief ${senderTone(b.from)}`.trim(), 'data-key': key }, h('div', { class: 'who' }, h('span', { class: 'name' }, b.from), h('span', { class: 'msg-tag' }, threadRefs(`Brief, held until #${b.leader} ${b.is ?? (b.when === 'live' ? 'is live' : 'has shipped')}`))), body);
   if (b.text.length > 500 || b.text.split('\n').length > 8) {
     el.classList.add('clamped');
-    el.append(h('button', { type: 'button', class: 'show-all small secondary', onclick: (e) => {
-      const open = el.classList.toggle('clamped');
-      e.currentTarget.textContent = open ? 'Show more' : 'Show less';
-    } }, 'Show more'));
+    el.append(
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'show-all small secondary',
+          onclick: (e) => {
+            const open = el.classList.toggle('clamped');
+            e.currentTarget.textContent = open ? 'Show more' : 'Show less';
+          },
+        },
+        'Show more',
+      ),
+    );
   }
   // Above the messages left for it, which come after the brief.
   const first = [...log.children].find((c) => c.classList.contains('user') && c.heldData?.parked);
   const after = log.querySelector(':scope > #recap, :scope > .pending');
-  if (first) first.before(el); else if (after) after.before(el); else log.append(el);
+  if (first) first.before(el);
+  else if (after) after.before(el);
+  else log.append(el);
 }
-
-
 
 /** Whether the running turn is under way here: its init event has arrived (initSeen). */
 function turnLive() {
@@ -1027,14 +1091,11 @@ export function renderTyping() {
   if (!show) return;
   const lead = t.approvals ? 'Waiting for someone to approve or deny' : running ? workingLabel(t) : view.sendingTo === t.id ? workingLabel(t, 'thinking…') : rowState(t, usage).label;
   // Held mail counts as queued while it works (#1067): it has no card then, and its bubble may be above the loaded history.
-  const queued = (t.queued ?? 0) + (running ? t.held_mail?.items?.length ?? 0 : 0);
+  const queued = (t.queued ?? 0) + (running ? (t.held_mail?.items?.length ?? 0) : 0);
   const key = `${lead}|${queued}`;
   if (el.dataset.key !== key) {
     el.dataset.key = key;
-    el.replaceChildren(
-      h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
-      h('span', { class: 'lead' }, lead),
-      ...(queued ? [h('span', { class: 'sep' }, '·'), h('span', { class: 'queued', title: `${queued} message${queued === 1 ? '' : 's'} queued for the next turn` }, `${queued} queued`)] : []));
+    el.replaceChildren(h('span', { class: 'dots' }, h('i'), h('i'), h('i')), h('span', { class: 'lead' }, lead), ...(queued ? [h('span', { class: 'sep' }, '·'), h('span', { class: 'queued', title: `${queued} message${queued === 1 ? '' : 's'} queued for the next turn` }, `${queued} queued`)] : []));
   }
   if (wasHidden && followChat) scrollToBottom();
 }
@@ -1060,7 +1121,6 @@ setInterval(() => {
   const est = left && planEstimate(view.progress, view.ticket?.status === 'running', Date.now(), view.ticket?.step_ratio);
   if (left && (!est || left.textContent !== leftText(est))) scheduleProgress();
 }, 1000);
-
 
 /** A push note's line (#996): one push says it as stored; mergePushNotes counts it up when more follow back to back. */
 function pushLine(text) {

@@ -13,7 +13,7 @@ const root = tmp.dir;
 after(() => tmp.teardown());
 const SHIM = join(import.meta.dirname, '..', 'src', 'codex-turn.ts');
 
-test('a Claude pick maps to the Codex model of the same tier, a Codex pick stays, none is Codex\'s default', () => {
+test("a Claude pick maps to the Codex model of the same tier, a Codex pick stays, none is Codex's default", () => {
   assert.equal(codexModelFor(null), 'gpt-6.1-sol');
   assert.equal(codexModelFor('claude-opus-5-5'), 'gpt-6-astra');
   assert.equal(codexModelFor('claude-fable-5-1'), 'gpt-6-astra');
@@ -32,12 +32,18 @@ test("Claude's argv reads as flags and their values, -p and all", () => {
 });
 
 test('MCP servers go to Codex with their secrets moved into the environment, named, never in its config', () => {
-  const m = mcpServers({ mcpServers: {
-    thread: { type: 'stdio', command: 'node', args: ['mcp.ts'], timeout: 86_400_000 },
-    box: { type: 'stdio', command: 'node', args: ['m.ts'], env: { COORDINATOR_TOKEN: 'sekrit' } },
-    app: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: 'Bearer apptoken' } },
-    'bad name!': { command: 'x' },
-  } }, { COORDINATOR_TOKEN: 't', COORDINATOR_TICKET: '9', GH_TOKEN: 'gh', PATH: '/bin' }, 600);
+  const m = mcpServers(
+    {
+      mcpServers: {
+        thread: { type: 'stdio', command: 'node', args: ['mcp.ts'], timeout: 86_400_000 },
+        box: { type: 'stdio', command: 'node', args: ['m.ts'], env: { COORDINATOR_TOKEN: 'sekrit' } },
+        app: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: 'Bearer apptoken' } },
+        'bad name!': { command: 'x' },
+      },
+    },
+    { COORDINATOR_TOKEN: 't', COORDINATOR_TICKET: '9', GH_TOKEN: 'gh', PATH: '/bin' },
+    600,
+  );
   assert.deepEqual(m.names, ['thread', 'box', 'app']);
   assert.deepEqual(m.config['mcp_servers.thread'], { command: 'node', args: ['mcp.ts'], env_vars: ['COORDINATOR_TOKEN', 'COORDINATOR_TICKET'], tool_timeout_sec: 86_400 });
   assert.equal(JSON.stringify(m.config).includes('sekrit') || JSON.stringify(m.config).includes('apptoken'), false, 'no secret in the config');
@@ -49,7 +55,16 @@ test('MCP servers go to Codex with their secrets moved into the environment, nam
 
 test("a user line's text and images become Codex input", () => {
   assert.deepEqual(codexInput('hi'), [{ type: 'text', text: 'hi', text_elements: [] }]);
-  assert.deepEqual(codexInput([{ type: 'text', text: 'a' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QQ==' } }]), [{ type: 'text', text: 'a', text_elements: [] }, { type: 'image', url: 'data:image/png;base64,QQ==' }]);
+  assert.deepEqual(
+    codexInput([
+      { type: 'text', text: 'a' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QQ==' } },
+    ]),
+    [
+      { type: 'text', text: 'a', text_elements: [] },
+      { type: 'image', url: 'data:image/png;base64,QQ==' },
+    ],
+  );
 });
 
 test("Codex's usage limit reads as Claude's, with the reset of the window that's full", () => {
@@ -66,8 +81,26 @@ test('the hand-over log starts at the last compaction, keeps the summary and eve
     l({ type: 'user', message: { role: 'user', content: 'before the compaction' } }),
     l({ type: 'system', subtype: 'compact_boundary' }),
     l({ type: 'user', isCompactSummary: true, message: { role: 'user', content: 'SUMMARY of earlier' } }),
-    l({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Josh]: fix it' }, { type: 'image', source: {} }] } }),
-    l({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'hmm' }, { type: 'text', text: 'On it.' }, { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'npm test' } }] } }),
+    l({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: '[Josh]: fix it' },
+          { type: 'image', source: {} },
+        ],
+      },
+    }),
+    l({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'thinking', thinking: 'hmm' },
+          { type: 'text', text: 'On it.' },
+          { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'npm test' } },
+        ],
+      },
+    }),
     l({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: [{ type: 'text', text: 'ok 1 pass' }] }] } }),
     l({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'GRUNT inner step' }] } }),
     l({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/x' } }] } }),
@@ -88,7 +121,9 @@ test('a hand-over too big for the guard cuts its biggest outputs first, keeping 
 // A stand-in for `codex app-server`: logs what it gets, and plays the turn FAKE names.
 const fakeLog = join(root, 'fake.jsonl');
 const fake = join(root, 'codex');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const log = (m) => appendFileSync(${JSON.stringify(fakeLog)}, JSON.stringify(m) + '\\n');
 log({ argv: process.argv.slice(2), env: { COORDINATOR_TOKEN: process.env.COORDINATOR_TOKEN ?? null } });
@@ -155,7 +190,8 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   };
   send({ id: 77, method: 'item/commandExecution/requestApproval', params: {} });
 });
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 type Run = { code: number | null; events: any[]; calls: any[] };
@@ -200,14 +236,16 @@ function run(args: string[], opts: { cwd?: string; fake?: string; lines?: object
   for (const l of opts.lines ?? [{ type: 'user', message: { role: 'user', content: '[Josh]: go' } }]) child.stdin.write(JSON.stringify(l) + '\n');
   if (opts.killAfterMs) setTimeout(() => child.kill('SIGKILL'), opts.killAfterMs).unref();
   // 'close', not 'exit': the shim's last lines can still be in its stdout pipe when it exits.
-  return new Promise((resolve) => child.on('close', (code) => {
-    clearTimeout(giveUp);
-    const calls = jsonLines(fakeLog); // the fake may still be logging its SIGTERM as the shim exits
-    resolve({ code, events, calls });
-  }));
+  return new Promise((resolve) =>
+    child.on('close', (code) => {
+      clearTimeout(giveUp);
+      const calls = jsonLines(fakeLog); // the fake may still be logging its SIGTERM as the shim exits
+      resolve({ code, events, calls });
+    }),
+  );
 }
 
-test("a Codex turn reads as a Claude turn: init, words, Bash, patches, MCP, tripwire blocks, a plan and the result", async () => {
+test('a Codex turn reads as a Claude turn: init, words, Bash, patches, MCP, tripwire blocks, a plan and the result', async () => {
   const dir = join(root, 't1');
   mkdirSync(dir);
   writeFileSync(join(dir, 'system.md'), 'CITADEL SYSTEM PROMPT');
@@ -219,13 +257,16 @@ test("a Codex turn reads as a Claude turn: init, words, Bash, patches, MCP, trip
   assert.deepEqual([init.type, init.subtype, init.model, init.codex_thread, init.session_id], ['system', 'init', 'gpt-6-astra', 'th1', undefined]);
   assert.deepEqual(init.mcp_servers, [{ name: 'thread', status: 'connected' }]);
   // The rate-limit read races the thread's start, so its line can come anywhere.
-  const types = r.events.filter((e) => e.type !== 'codex_rate_limits').map((e) => e.type === 'assistant' ? `a:${e.message.content.map((b: any) => b.name ?? b.type).join()}` : e.type === 'user' ? `u:${e.message.content[0].is_error}` : e.type);
+  const types = r.events.filter((e) => e.type !== 'codex_rate_limits').map((e) => (e.type === 'assistant' ? `a:${e.message.content.map((b: any) => b.name ?? b.type).join()}` : e.type === 'user' ? `u:${e.message.content[0].is_error}` : e.type));
   assert.deepEqual(types, ['system', 'stream_event', 'stream_event', 'a:text', 'a:Bash', 'u:true', 'a:apply_patch', 'u:false', 'a:mcp__thread__set_thread_status', 'u:false', 'a:Tripwire', 'u:true', 'a:TodoWrite', 'a:text', 'result']);
   assert.equal(r.events.filter((e) => e.type === 'codex_rate_limits').length, 1);
   const bash = r.events.find((e) => e.message?.content?.[0]?.name === 'Bash');
   assert.deepEqual(bash.message.content[0].input, { command: 'npm test' });
   const todo = r.events.find((e) => e.message?.content?.[0]?.name === 'TodoWrite').message.content[0].input.todos;
-  assert.deepEqual(todo.map((t: any) => t.status), ['in_progress', 'pending']);
+  assert.deepEqual(
+    todo.map((t: any) => t.status),
+    ['in_progress', 'pending'],
+  );
   const result = r.events.at(-1);
   assert.deepEqual([result.is_error, result.result, result.usage.input_tokens, result.usage.cache_read_input_tokens, result.total_cost_usd], [false, 'Done 1.', 40, 60, undefined]);
   // Codex got the system prompt and the Codex note as developer instructions, the servers in config, the token by name only.
@@ -235,7 +276,10 @@ test("a Codex turn reads as a Claude turn: init, words, Bash, patches, MCP, trip
   assert.equal([start.approvalPolicy, start.sandbox].join(), 'never,danger-full-access');
   const turn = r.calls.find((c) => c.method === 'turn/start').params;
   assert.deepEqual([turn.model, turn.effort, turn.input[0].text], ['gpt-6-astra', 'xhigh', '[Josh]: go']);
-  assert.ok(r.calls.some((c) => c.id === 77 && c.result?.decision === 'decline'), 'an approval request is declined');
+  assert.ok(
+    r.calls.some((c) => c.id === 77 && c.result?.decision === 'decline'),
+    'an approval request is declined',
+  );
   const argv = r.calls[0].argv.join(' ');
   assert.match(argv, /project_doc_fallback_filenames=\["CLAUDE.md"\]/);
   assert.match(argv, /features\.goals=false/);
@@ -245,16 +289,22 @@ test("a Codex turn reads as a Claude turn: init, words, Bash, patches, MCP, trip
 });
 
 test('a message mid-turn steers it, and one replayed comes back marked as taken', async () => {
-  const r = await run(['--replay-user-messages'], { fake: 'steer', steer: { type: 'user', uuid: 'u2', message: { role: 'user', content: 'also this' } }, lines: [{ type: 'user', uuid: 'u1', message: { role: 'user', content: 'go' } }] , sigterm: false });
+  const r = await run(['--replay-user-messages'], { fake: 'steer', steer: { type: 'user', uuid: 'u2', message: { role: 'user', content: 'also this' } }, lines: [{ type: 'user', uuid: 'u1', message: { role: 'user', content: 'go' } }], sigterm: false });
   const steer = r.calls.find((c) => c.method === 'turn/steer');
   assert.deepEqual([steer.params.threadId, steer.params.expectedTurnId, steer.params.input[0].text], ['th1', 'tu1', 'also this']);
-  assert.deepEqual(r.events.filter((e) => e.isReplay).map((e) => e.uuid), ['u1', 'u2']);
-}, );
+  assert.deepEqual(
+    r.events.filter((e) => e.isReplay).map((e) => e.uuid),
+    ['u1', 'u2'],
+  );
+});
 
 test('a steer refused because the turn just ended starts the next turn, rather than waiting out the quiet timer (#468 S04-2)', async () => {
   const r = await run([], { fake: 'late-steer', env: { CITADEL_CODEX_QUIET_MS: '3000' }, steer: { type: 'user', message: { role: 'user', content: 'also this' } } });
   const starts = r.calls.filter((c) => c.method === 'turn/start');
-  assert.deepEqual(starts.map((c) => c.params.input.at(-1).text), ['[Josh]: go', 'also this']);
+  assert.deepEqual(
+    starts.map((c) => c.params.input.at(-1).text),
+    ['[Josh]: go', 'also this'],
+  );
   assert.equal(r.code, 0);
   const last = r.events.at(-1);
   assert.deepEqual([last.type, last.is_error, last.result], ['result', false, 'Done 2.']);
@@ -286,7 +336,7 @@ test("a Codex turn that waits a while for the person's Codex lock says so, then 
   assert.equal(r.events.at(-1).is_error, false);
 });
 
-test("a lock whose pid now belongs to another process (a reused pid) is stale, and the turn runs (#468 S04-7)", async () => {
+test('a lock whose pid now belongs to another process (a reused pid) is stale, and the turn runs (#468 S04-7)', async () => {
   // This test process stands in for the unrelated process that got the dead shim's pid: alive, but started at another time.
   const r = await run([], { lockPid: `${process.pid} 1`, killAfterMs: 8000 });
   assert.equal(r.events.filter((e) => e.type === 'codex_waiting').length, 0, 'not waiting on it');
@@ -348,9 +398,15 @@ test("Codex's generated images show as GenerateImage and are copied into the wor
   mkdirSync(dir);
   const r = await run(['-p'], { fake: 'image', cwd: dir } as any);
   const uses = r.events.filter((e) => e.message?.content?.[0]?.name === 'GenerateImage');
-  assert.deepEqual(uses.map((e) => e.message.content[0].input.prompt), ['a red dot', '', '']);
+  assert.deepEqual(
+    uses.map((e) => e.message.content[0].input.prompt),
+    ['a red dot', '', ''],
+  );
   const results = r.events.filter((e) => e.message?.content?.[0]?.type === 'tool_result').map((e) => e.message.content[0]);
-  assert.deepEqual(results.map((x) => x.is_error), [false, false, true]);
+  assert.deepEqual(
+    results.map((x) => x.is_error),
+    [false, false, true],
+  );
   assert.match(results[0].content, /generated\/gen\.png$/);
   assert.equal(readFileSync(join(dir, 'generated', 'gen.png'), 'utf8'), 'PNG');
   assert.equal(readFileSync(join(dir, 'generated', 'g2.png'), 'utf8'), 'B64');

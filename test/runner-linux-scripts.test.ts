@@ -20,14 +20,18 @@ const USER = `ci-theory-of-crafting-${createHash('sha256').update('caraminden/th
 const asked: any[] = [];
 const server = createServer((req, res) => {
   let body = '';
-  req.on('data', (c) => { body += c; }).on('end', () => {
-    if (req.url !== '/api/machines/runner-token' || req.headers.authorization !== `Bearer ${TOKEN}`) return res.writeHead(401).end('{"error":"no"}');
-    const ask = JSON.parse(body);
-    asked.push(ask);
-    if (ask.scheme === 99) return res.writeHead(404, { 'Content-Type': 'application/json' }).end('{"error":"No scheme 99"}');
-    res.writeHead(ask.mint ? 201 : 200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ scheme: 'Theory of Crafting', repo: 'caraminden/theory-of-crafting', label: 'theory-of-crafting-ci', token: ask.mint ? REG : null, expires_at: null }));
-  });
+  req
+    .on('data', (c) => {
+      body += c;
+    })
+    .on('end', () => {
+      if (req.url !== '/api/machines/runner-token' || req.headers.authorization !== `Bearer ${TOKEN}`) return res.writeHead(401).end('{"error":"no"}');
+      const ask = JSON.parse(body);
+      asked.push(ask);
+      if (ask.scheme === 99) return res.writeHead(404, { 'Content-Type': 'application/json' }).end('{"error":"No scheme 99"}');
+      res.writeHead(ask.mint ? 201 : 200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ scheme: 'Theory of Crafting', repo: 'caraminden/theory-of-crafting', label: 'theory-of-crafting-ci', token: ask.mint ? REG : null, expires_at: null }));
+    });
 });
 
 function stub(dir: string, name: string, body: string) {
@@ -58,7 +62,9 @@ before(async () => {
   stub(join(pkg, 'bin'), 'runsvc.sh', 'exit 0');
   stub(pkg, 'config.sh', 'if [ "$1" = remove ]; then rm -f .runner; else echo "{}" > .runner; fi');
   execFileSync('tar', ['-czf', join(tmp, 'runner.tar.gz'), '-C', pkg, '.']);
-  sha = createHash('sha256').update(readFileSync(join(tmp, 'runner.tar.gz'))).digest('hex');
+  sha = createHash('sha256')
+    .update(readFileSync(join(tmp, 'runner.tar.gz')))
+    .digest('hex');
   process.env.PATH_FOR_SCRIPTS = `${bin}:${process.env.PATH}`;
   base = `http://127.0.0.1:${await scratch.serve(server)}`;
 });
@@ -70,8 +76,12 @@ function run(script: string, args: string[], env: Record<string, string> = {}): 
       env: { PATH: process.env.PATH_FOR_SCRIPTS!, HOME: tmp, CC_MACHINE_TOKEN: TOKEN, CITADEL_RUNNER_ROOT: root, CITADEL_RUNNER_UNITS: units, USERS: join(tmp, 'users'), RUNNER_SHA256: sha, RUNNER_NAME: 'DESK', CITADEL_RUNNER_SETTLE: '0', FAKE_TARBALL: join(tmp, 'runner.tar.gz'), LOG: log, ...env },
     });
     let out = '';
-    child.stdout.on('data', (c) => { out += c; });
-    child.stderr.on('data', (c) => { out += c; });
+    child.stdout.on('data', (c) => {
+      out += c;
+    });
+    child.stderr.on('data', (c) => {
+      out += c;
+    });
     child.on('close', (code) => resolve({ code: code ?? -1, out }));
   });
 }
@@ -80,14 +90,17 @@ const marker = (dir: string) => JSON.parse(readFileSync(join(root, dir, '.citade
 
 const unitOf = (suffix: string) => join(units, `citadel-runner-caraminden-theory-of-crafting${suffix}.service`);
 
-test('add, add again, list, remove: the whole life of a scheme\'s Linux runners', async () => {
+test("add, add again, list, remove: the whole life of a scheme's Linux runners", async () => {
   const add = await run('add-runner.sh', ['7', `${base}/`, '2']);
   assert.equal(add.code, 0, add.out);
-  for (const [suffix, name] of [['', 'DESK-linux'], ['-2', 'DESK-linux-2']]) {
+  for (const [suffix, name] of [
+    ['', 'DESK-linux'],
+    ['-2', 'DESK-linux-2'],
+  ]) {
     const dir = join(root, `actions-runner-theory-of-crafting${suffix}`);
     assert.deepEqual({ ...marker(`actions-runner-theory-of-crafting${suffix}`), added_at: undefined, unit: undefined }, { repo: 'caraminden/theory-of-crafting', label: 'theory-of-crafting-ci-linux', name, mode: 'linux', added_at: undefined, unit: undefined });
     assert.match(readFileSync(join(dir, '.env'), 'utf8'), new RegExp(`^HOME=${dir}/home$`, 'm'), 'a home of its own');
-    assert.equal(statSync(dir).mode & 0o777, 0o700, 'other schemes\' users can\'t read it');
+    assert.equal(statSync(dir).mode & 0o777, 0o700, "other schemes' users can't read it");
     // The registration token only in config.sh's environment: never an argument, and no machine token beside it.
     assert.ok(logged().includes(`as ${USER} HOME=${dir}/home token=${REG} machine=none: ./config.sh --unattended --url https://github.com/caraminden/theory-of-crafting --name ${name} --labels theory-of-crafting-ci-linux${suffix ? ',theory-of-crafting-ci-linux-side' : ''} --work _work\n`), logged());
     // #1240: the second runner also takes the side label, so flake proofs and the nightly leave the first free for ships.
@@ -95,12 +108,19 @@ test('add, add again, list, remove: the whole life of a scheme\'s Linux runners'
     assert.match(unit, /^# citadel-repo=caraminden\/theory-of-crafting\n/);
     assert.match(unit, new RegExp(`^ExecStart=/bin/bash ${dir}/bin/runsvc.sh\nUser=${USER}\nWorkingDirectory=${dir}\n`, 'm'));
     assert.ok(existsSync(join(dir, 'bin', 'runsvc.sh')), 'the unit runs a file the tarball has');
-    assert.ok(logged().includes(`chown -R ${USER}: ${dir}\n`), 'the scheme\'s user owns it');
+    assert.ok(logged().includes(`chown -R ${USER}: ${dir}\n`), "the scheme's user owns it");
     assert.ok(logged().includes(`systemctl enable --now citadel-runner-caraminden-theory-of-crafting${suffix}.service\n`), logged());
   }
-  assert.doesNotMatch(logged(), /--token|svc\.sh/, 'no token on a command line; root never runs the runner\'s svc.sh');
+  assert.doesNotMatch(logged(), /--token|svc\.sh/, "no token on a command line; root never runs the runner's svc.sh");
   assert.equal(logged().match(/^useradd /gm)?.length, 1, 'one user for the scheme');
-  assert.deepEqual(asked.map((a) => [a.scheme, a.mint, a.kind]), [[7, false, 'register'], [7, true, 'register']], 'names first, then one token for both');
+  assert.deepEqual(
+    asked.map((a) => [a.scheme, a.mint, a.kind]),
+    [
+      [7, false, 'register'],
+      [7, true, 'register'],
+    ],
+    'names first, then one token for both',
+  );
   assert.doesNotMatch(add.out, new RegExp(`${REG}|${TOKEN}`), 'no token in what it prints');
   assert.match(add.out, /label {2}theory-of-crafting-ci-linux/);
 
@@ -108,7 +128,11 @@ test('add, add again, list, remove: the whole life of a scheme\'s Linux runners'
   const again = await run('add-runner.sh', ['7', base, '2']);
   assert.equal(again.code, 0, again.out);
   assert.match(again.out, /already has 2 Linux runner\(s\) here, so nothing changed/);
-  assert.deepEqual(asked.map((a) => a.mint), [false], 'nothing to add mints no token');
+  assert.deepEqual(
+    asked.map((a) => a.mint),
+    [false],
+    'nothing to add mints no token',
+  );
 
   // Another repo's runner (repo theory-of-crafting-3's first has the same names as this one's third).
   mkdirSync(join(root, 'actions-runner-theory-of-crafting-3'));
@@ -131,10 +155,16 @@ test('add, add again, list, remove: the whole life of a scheme\'s Linux runners'
   writeFileSync(log, '');
   const remove = await run('remove-runner.sh', ['7', base]);
   assert.equal(remove.code, 0, remove.out);
-  assert.deepEqual(asked.map((a) => [a.mint, a.kind]), [[false, 'remove'], [true, 'remove']]);
+  assert.deepEqual(
+    asked.map((a) => [a.mint, a.kind]),
+    [
+      [false, 'remove'],
+      [true, 'remove'],
+    ],
+  );
   assert.ok(!existsSync(join(root, 'actions-runner-theory-of-crafting')) && !existsSync(join(root, 'actions-runner-theory-of-crafting-2')));
   assert.ok(!existsSync(unitOf('')) && !existsSync(unitOf('-2')));
-  assert.ok(existsSync(join(root, 'actions-runner-theory-of-crafting-3')) && existsSync(unitOf('-3')), 'another repo\'s runner stays');
+  assert.ok(existsSync(join(root, 'actions-runner-theory-of-crafting-3')) && existsSync(unitOf('-3')), "another repo's runner stays");
   assert.ok(existsSync(join(root, 'actions-runner-other')), 'a forged marker removes nothing');
   assert.ok(logged().includes('systemctl disable --now citadel-runner-caraminden-theory-of-crafting.service\n'), logged());
   assert.ok(logged().includes(`as ${USER} HOME=${root}/actions-runner-theory-of-crafting/home token=${REG} machine=none: ./config.sh remove\n`), logged());
@@ -167,7 +197,7 @@ test('an add cut off before config.sh leaves a unit remove can find; a unit poin
   rmSync(join(tmp, 'users', USER), { force: true });
 });
 
-test('a download whose SHA-256 is wrong installs nothing; Citadel\'s refusal and bad arguments stop it before anything', async () => {
+test("a download whose SHA-256 is wrong installs nothing; Citadel's refusal and bad arguments stop it before anything", async () => {
   const bad = await run('add-runner.sh', ['7', base, '1'], { RUNNER_SHA256: '0'.repeat(64) });
   assert.equal(bad.code, 1);
   assert.match(bad.out, /SHA-256 is [0-9a-f]{64}, not 0{64}/);

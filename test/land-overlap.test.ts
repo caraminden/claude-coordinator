@@ -84,7 +84,8 @@ test('when the restart ahead is rolled back, the landing behind rebases without 
     await until("the second's test run to start", () => lines(mark) === 1);
     writeFileSync(down, '');
     assert.equal(git(p.wts[1], 'merge-base', 'HEAD', bad), bad, `${lander}: the second sits on the first's commit`);
-    if (lander === 'was killed outright') process.kill(a.pid, 'SIGKILL'); // its deploy.sh lives on, and nothing runs main_back
+    if (lander === 'was killed outright')
+      process.kill(a.pid, 'SIGKILL'); // its deploy.sh lives on, and nothing runs main_back
     else assert.match((await a.done).stderr, /main is back at/);
     assert.deepEqual(await p.restarts(1), ['1'], lander);
     writeFileSync(gate, '');

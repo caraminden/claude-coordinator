@@ -229,8 +229,14 @@ const places = {
 };
 // The server's own environment: what must and mustn't reach a turn.
 const serverEnv = {
-  PATH: process.env.PATH, HOME: homedir(), CLAUDE_CONFIG_DIR: claudeDir, ANTHROPIC_API_KEY: 'server-key', COORDINATOR_TOKEN: 'service-token',
-  SESSION_SECRET: 'nope', SSH_AUTH_SOCK: '/tmp/agent.sock', LANG: 'C.UTF-8',
+  PATH: process.env.PATH,
+  HOME: homedir(),
+  CLAUDE_CONFIG_DIR: claudeDir,
+  ANTHROPIC_API_KEY: 'server-key',
+  COORDINATOR_TOKEN: 'service-token',
+  SESSION_SECRET: 'nope',
+  SSH_AUTH_SOCK: '/tmp/agent.sock',
+  LANG: 'C.UTF-8',
 };
 const turns = new ContraptionTurns(store, contraptions, places, { dataDir: data, claudeBin: fake, podman, env: serverEnv });
 
@@ -247,9 +253,10 @@ async function turn(c: typeof mandate, body: object): Promise<Ev[]> {
 }
 const errorOf = (evs: Ev[]) => evs.find((e) => e.event === 'error')?.data.code;
 
-test('a turn has only the contraption\'s MCP and no built-in tools, settings, CLAUDE.md or memory of anyone\'s', async () => {
+test("a turn has only the contraption's MCP and no built-in tools, settings, CLAUDE.md or memory of anyone's", async () => {
   const evs = await turn(mandate, {
-    system: 'You are the Acolyte.', mcp: [{ name: 'mandate', path: '/mcp', headers: { Authorization: 'Bearer per-turn-token' } }],
+    system: 'You are the Acolyte.',
+    mcp: [{ name: 'mandate', path: '/mcp', headers: { Authorization: 'Bearer per-turn-token' } }],
   });
   const run = lastRun();
   // Built-in tools: none. Only these settings, MCP config and permissions, in an empty scratch folder.
@@ -258,7 +265,7 @@ test('a turn has only the contraption\'s MCP and no built-in tools, settings, CL
   assert.ok(run.argv.includes('--strict-mcp-config'));
   assert.ok(run.argv.includes('--disable-slash-commands'));
   assert.equal(argAfter(run.argv, '--permission-mode'), 'dontAsk');
-  assert.equal(argAfter(run.argv, '--model'), 'haiku', 'the registry\'s default model');
+  assert.equal(argAfter(run.argv, '--model'), 'haiku', "the registry's default model");
   for (const flag of ['--plugin-dir', '--add-dir', '--dangerously-skip-permissions', '--allowedTools', '--allowed-tools']) assert.ok(!run.argv.includes(flag), flag);
   assert.equal(run.argv.filter((a: string) => a === '--mcp-config').length, 1);
   assert.deepEqual(JSON.parse(run.mcp), { mcpServers: { mandate: { type: 'http', url: 'http://127.0.0.1:9101/mcp', headers: { Authorization: 'Bearer per-turn-token' } } } });
@@ -286,27 +293,55 @@ test('a turn has only the contraption\'s MCP and no built-in tools, settings, CL
   assert.equal(start.data.session, 'acolyte');
   assert.match(start.data.claudeSession, /^[0-9a-f-]{36}$/);
   assert.equal(start.data.provider, 'claude');
-  assert.equal(start.data.model, 'haiku', 'what it runs, as asked: here the registry\'s default');
-  assert.equal(evs.filter((e) => e.event === 'text').map((e) => e.data.delta).join(''), 'Moved it to Thursday.');
+  assert.equal(start.data.model, 'haiku', "what it runs, as asked: here the registry's default");
+  assert.equal(
+    evs
+      .filter((e) => e.event === 'text')
+      .map((e) => e.data.delta)
+      .join(''),
+    'Moved it to Thursday.',
+  );
   // Each piece names its message, streamed or not, so an app can split "Moved it" from " to Thursday.".
-  assert.deepEqual(evs.filter((e) => e.event === 'text').map((e) => [e.data.message, e.data.delta]), [['m1', 'Moved '], ['m1', 'it'], ['m2', ' to Thursday.']]);
-  assert.deepEqual(evs.filter((e) => e.event !== 'start' && e.event !== 'text'), [
-    { event: 'tool', data: { id: 'tu1', name: 'mcp__mandate__move', input: { to: 'Thursday' }, parent: null } },
-    { event: 'tool_result', data: { id: 'tu1', ok: true, parent: null } },
-    { event: 'compacted', data: {} },
-    { event: 'end', data: { stop: 'end_turn', usage: { input: 10, output: 5, cacheRead: 100, cacheWrite: 20 }, provider: 'claude', model: 'claude-haiku-test' } },
-  ]);
+  assert.deepEqual(
+    evs.filter((e) => e.event === 'text').map((e) => [e.data.message, e.data.delta]),
+    [
+      ['m1', 'Moved '],
+      ['m1', 'it'],
+      ['m2', ' to Thursday.'],
+    ],
+  );
+  assert.deepEqual(
+    evs.filter((e) => e.event !== 'start' && e.event !== 'text'),
+    [
+      { event: 'tool', data: { id: 'tu1', name: 'mcp__mandate__move', input: { to: 'Thursday' }, parent: null } },
+      { event: 'tool_result', data: { id: 'tu1', ok: true, parent: null } },
+      { event: 'compacted', data: {} },
+      { event: 'end', data: { stop: 'end_turn', usage: { input: 10, output: 5, cacheRead: 100, cacheWrite: 20 }, provider: 'claude', model: 'claude-haiku-test' } },
+    ],
+  );
   // The turn's folder (prompt, system prompt, MCP token) is gone once it ends.
   assert.deepEqual(readdirSync(join(data, 'run', 'contraption-turns')), []);
   // The meter: who, which session, tokens and time.
   const row = store.getContraptionTurn(start.data.turn)!;
-  assert.deepEqual({ ...row, started_at: 0, ended_at: 0 }, {
-    id: start.data.turn, contraption_id: mandate.id, user_id: cara.id, session: 'acolyte', started_at: 0, ended_at: 0, outcome: 'end',
-    input_tokens: 10, output_tokens: 5, cache_read_tokens: 100, cache_write_tokens: 20,
-  });
+  assert.deepEqual(
+    { ...row, started_at: 0, ended_at: 0 },
+    {
+      id: start.data.turn,
+      contraption_id: mandate.id,
+      user_id: cara.id,
+      session: 'acolyte',
+      started_at: 0,
+      ended_at: 0,
+      outcome: 'end',
+      input_tokens: 10,
+      output_tokens: 5,
+      cache_read_tokens: 100,
+      cache_write_tokens: 20,
+    },
+  );
 });
 
-test('with agents allowed, the turn gets Agent and nothing more, its model, and the cap\'s hook', async () => {
+test("with agents allowed, the turn gets Agent and nothing more, its model, and the cap's hook", async () => {
   await turn(mandate, { session: 'agents', agents: { max: 2, model: 'haiku' }, model: 'sonnet', compactWindow: 90_000, mcp: [{ name: 'mandate', path: '/mcp' }] });
   const run = lastRun();
   assert.equal(argAfter(run.argv, '--tools'), 'Agent');
@@ -351,14 +386,18 @@ test('effort passes --effort and toolSearch adds ToolSearch to the tools and the
 });
 
 test('a call to a tool the agent does not have sends the agent a did-you-mean note into its turn, and a far one gets the plain list (#1174)', async () => {
-  const said = (evs: Ev[]) => evs.filter((e) => e.event === 'text').map((e) => e.data.delta).join('');
+  const said = (evs: Ev[]) =>
+    evs
+      .filter((e) => e.event === 'text')
+      .map((e) => e.data.delta)
+      .join('');
   const near = await turn(mandate, { session: 'phantom-near', prompt: 'phantom call' });
   assert.match(said(near), /Note: mandate_move is not one of your tools\. Did you mean mcp__mandate__move\?/);
   const far = await turn(mandate, { session: 'phantom-far', prompt: 'phantom far call' });
   assert.match(said(far), /Note: show_regions is not one of your tools\. Your tools are: Read, mcp__mandate__move, mcp__mandate__list\./);
 });
 
-test('a failed tool call\'s result carries the error the agent saw, cut to TOOL_ERROR_MAX (#624), and goes to the error digest with its tool (#835)', async () => {
+test("a failed tool call's result carries the error the agent saw, cut to TOOL_ERROR_MAX (#624), and goes to the error digest with its tool (#835)", async () => {
   const digest: string[] = [];
   turns.onToolError = (c, tool, error) => digest.push(`${c.name} ${tool} ${error.slice(0, 40)}`);
   const evs = await turn(mandate, { session: 'refused', prompt: 'Get refused.', mcp: [{ name: 'mandate', path: '/mcp' }] });
@@ -372,26 +411,28 @@ test('a failed tool call\'s result carries the error the agent saw, cut to TOOL_
   assert.deepEqual(results[1], { id: 'r2', ok: false, parent: null, error: 'No such tool available: mcp__mandate__list' });
 });
 
-test('a Grunt\'s tool calls and results carry its Agent call\'s id, the top level\'s carry null, and its words never stream', async () => {
+test("a Grunt's tool calls and results carry its Agent call's id, the top level's carry null, and its words never stream", async () => {
   const evs = await turn(mandate, { session: 'grunts', prompt: 'Use grunts.', agents: { max: 2 }, mcp: [{ name: 'mandate', path: '/mcp' }] });
-  assert.deepEqual(evs.filter((e) => e.event === 'tool' || e.event === 'tool_result' || e.event === 'text'), [
-    { event: 'text', data: { delta: 'Asking. ', parent: null, message: 'm1' } },
-    { event: 'tool', data: { id: 'ag1', name: 'Agent', input: { prompt: 'look' }, parent: null } },
-    { event: 'tool', data: { id: 'gt1', name: 'mcp__mandate__list', input: {}, parent: 'ag1' } },
-    { event: 'tool_result', data: { id: 'gt1', ok: false, parent: 'ag1', error: 'x' } },
-    { event: 'tool', data: { id: 'ag2', name: 'Agent', input: { prompt: 'deeper' }, parent: 'ag1' } },
-    { event: 'tool_result', data: { id: 'ag2', ok: true, parent: 'ag1' } },
-    { event: 'tool_result', data: { id: 'ag1', ok: true, parent: null } },
-    { event: 'text', data: { delta: 'Done.', parent: null, message: 'm2' } },
-  ]);
+  assert.deepEqual(
+    evs.filter((e) => e.event === 'tool' || e.event === 'tool_result' || e.event === 'text'),
+    [
+      { event: 'text', data: { delta: 'Asking. ', parent: null, message: 'm1' } },
+      { event: 'tool', data: { id: 'ag1', name: 'Agent', input: { prompt: 'look' }, parent: null } },
+      { event: 'tool', data: { id: 'gt1', name: 'mcp__mandate__list', input: {}, parent: 'ag1' } },
+      { event: 'tool_result', data: { id: 'gt1', ok: false, parent: 'ag1', error: 'x' } },
+      { event: 'tool', data: { id: 'ag2', name: 'Agent', input: { prompt: 'deeper' }, parent: 'ag1' } },
+      { event: 'tool_result', data: { id: 'ag2', ok: true, parent: 'ag1' } },
+      { event: 'tool_result', data: { id: 'ag1', ok: true, parent: null } },
+      { event: 'text', data: { delta: 'Done.', parent: null, message: 'm2' } },
+    ],
+  );
   assert.ok(!JSON.stringify(evs).includes('GRUNT'), 'no Grunt prompt or words');
 });
 
 test('the Agent cap lets `max` agents run at once, nested ones included, and frees a slot when one ends', () => {
   const slots = join(root, 'slots');
   mkdirSync(slots);
-  const hook = (event: string, id: string) =>
-    execFileSync(process.execPath, [join(import.meta.dirname, '..', 'src', 'contraption-agent-cap.ts'), slots, '2'], { input: JSON.stringify({ hook_event_name: event, tool_name: 'Agent', tool_use_id: id }) }).toString();
+  const hook = (event: string, id: string) => execFileSync(process.execPath, [join(import.meta.dirname, '..', 'src', 'contraption-agent-cap.ts'), slots, '2'], { input: JSON.stringify({ hook_event_name: event, tool_name: 'Agent', tool_use_id: id }) }).toString();
   assert.equal(hook('PreToolUse', 'a'), '');
   assert.equal(hook('PreToolUse', 'b'), '');
   assert.equal(JSON.parse(hook('PreToolUse', 'c')).hookSpecificOutput.permissionDecision, 'deny');
@@ -402,12 +443,12 @@ test('the Agent cap lets `max` agents run at once, nested ones included, and fre
   assert.deepEqual(readdirSync(slots), []);
 });
 
-test('a turn for someone the contraption isn\'t enabled for is refused, and so is one with no linked plan', async () => {
+test("a turn for someone the contraption isn't enabled for is refused, and so is one with no linked plan", async () => {
   const before = store.contraptionTurnsSince(mandate.id, josh.id, 0);
   store.setContraptionUser(mandate.id, josh.id, false, cara.id);
   assert.equal(errorOf(await turn(mandate, { person: josh.id })), 'not_enabled');
   store.setContraptionUser(mandate.id, josh.id, true, cara.id);
-  assert.equal(store.contraptionTurnsSince(mandate.id, josh.id, 0), before, 'a refused turn isn\'t metered');
+  assert.equal(store.contraptionTurnsSince(mandate.id, josh.id, 0), before, "a refused turn isn't metered");
   // No fallback to anyone else's plan.
   const n = runs().length;
   assert.equal(errorOf(await turn(mandate, { person: olive.id })), 'no_plan');
@@ -415,7 +456,7 @@ test('a turn for someone the contraption isn\'t enabled for is refused, and so i
   assert.equal(errorOf(await turn(mandate, { person: 999 })), 'not_enabled');
 });
 
-test('a turn whose start can\'t be recorded leaves its name free, not busy until a restart (#468 S04-8)', async () => {
+test("a turn whose start can't be recorded leaves its name free, not busy until a restart (#468 S04-8)", async () => {
   const start = store.startContraptionTurn;
   store.startContraptionTurn = () => {
     throw new Error('database is locked');
@@ -442,14 +483,14 @@ test('a name resumes its own Claude session; fresh starts another; other contrap
   assert.equal(argAfter(lastRun().argv, '--session-id'), fresh);
   assert.equal(store.contraptionSession(mandate.id, cara.id, 'resume-me')!.claude_session, fresh);
   const caraMandate = join(claudeDir, 'projects', join(data, 'contraption-scratch', 'mandate', String(cara.id)).replace(/[^a-zA-Z0-9]/g, '-'));
-  assert.ok(!existsSync(join(caraMandate, `${first}.jsonl`)), 'the session it left can\'t be resumed again, so its transcript is gone');
+  assert.ok(!existsSync(join(caraMandate, `${first}.jsonl`)), "the session it left can't be resumed again, so its transcript is gone");
   assert.ok(existsSync(join(caraMandate, `${fresh}.jsonl`)));
   // The same name in another contraption, or for another person, is another session in another folder.
   const peeks = (await turn(peek, { session: 'resume-me' }))[0].data.claudeSession;
   assert.ok(lastRun().argv.includes('--session-id'));
   assert.notEqual(peeks, fresh);
   assert.equal(lastRun().cwd, join(data, 'contraption-scratch', 'peek-auras', String(cara.id)));
-  assert.ok(!lastRun().argv.includes('--model'), 'no model in the registry or the request: claude\'s default');
+  assert.ok(!lastRun().argv.includes('--model'), "no model in the registry or the request: claude's default");
   const joshs = (await turn(mandate, { person: josh.id, session: 'resume-me' }))[0].data.claudeSession;
   assert.ok(![first, fresh, peeks].includes(joshs));
   // A transcript that's gone (a relinked Claude) starts afresh under the same name.
@@ -485,9 +526,19 @@ test('two names run at once, a second turn on a busy name gets busy, and cancel 
   assert.equal(errorOf(await turn(mandate, { session: 'aura-1' })), 'busy');
   const other = await turn(mandate, { session: 'aura-2' });
   assert.equal(other.at(-1)!.event, 'end', 'another name runs meanwhile');
-  assert.deepEqual(turns.sessions(mandate.id, cara.id).filter((s) => s.name.startsWith('aura-')).map((s) => [s.name, s.busy]).sort(), [['aura-1', true], ['aura-2', false]]);
+  assert.deepEqual(
+    turns
+      .sessions(mandate.id, cara.id)
+      .filter((s) => s.name.startsWith('aura-'))
+      .map((s) => [s.name, s.busy])
+      .sort(),
+    [
+      ['aura-1', true],
+      ['aura-2', false],
+    ],
+  );
   assert.equal(turns.deleteSession(mandate, cara.id, 'aura-1'), 'busy');
-  assert.equal(turns.cancel(peek.id, started.data.turn), false, 'another contraption can\'t cancel it');
+  assert.equal(turns.cancel(peek.id, started.data.turn), false, "another contraption can't cancel it");
   assert.equal(turns.running(), 1);
   assert.equal(turns.cancel(mandate.id, started.data.turn), true);
   await slow;
@@ -507,7 +558,10 @@ test('a stopped turn that ignores SIGTERM is killed and frees its session within
   try {
     turns.cancel(mandate.id, started.data.turn);
     // SIGTERM is ignored, so only the SIGKILL timer can free it: armed within a few seconds, and nothing frees it before it fires.
-    assert.deepEqual(clock.pending().map((x) => x.ms), [KILL_AFTER_MS]);
+    assert.deepEqual(
+      clock.pending().map((x) => x.ms),
+      [KILL_AFTER_MS],
+    );
     assert.ok(KILL_AFTER_MS <= 3000, 'a few seconds');
     assert.ok(!evs.some((e) => e.event === 'end' || e.event === 'error'), 'still running until SIGKILL');
     clock.advance(KILL_AFTER_MS);
@@ -519,14 +573,14 @@ test('a stopped turn that ignores SIGTERM is killed and frees its session within
   assert.equal(turns.sessions(mandate.id, cara.id).find((s) => s.name === 'stub')!.busy, false);
 });
 
-test('a drain waits for the contraption\'s running turns, holds its new ones until released, and leaves others alone (#319)', async () => {
+test("a drain waits for the contraption's running turns, holds its new ones until released, and leaves others alone (#319)", async () => {
   const lingering: Ev[] = [];
   const first = turns.run(mandate, parseTurn({ person: cara.id, session: 'drain-1', prompt: 'linger' }, mandate), (event, data) => lingering.push({ event, data }));
   await until('the lingering turn', () => lingering.find((e) => e.event === 'start'));
   const drained = turns.drain(mandate.id, 10_000);
   const held: Ev[] = [];
   const second = turns.run(mandate, parseTurn({ person: cara.id, session: 'drain-2', prompt: 'Move my dentist to Thursday.' }, mandate), (event, data) => held.push({ event, data }));
-  assert.equal((await turn(peek, { session: 'drain-3' })).at(-1)!.event, 'end', 'another contraption\'s turns run meanwhile');
+  assert.equal((await turn(peek, { session: 'drain-3' })).at(-1)!.event, 'end', "another contraption's turns run meanwhile");
   const { said, release } = await drained;
   await first;
   assert.match(said!, /^Waited \d+ s for 1 running turn to end\.$/);
@@ -540,7 +594,7 @@ test('a drain waits for the contraption\'s running turns, holds its new ones unt
   assert.equal(held.at(-1)!.event, 'end', 'and runs once released');
 });
 
-test('a drain stops waiting at its cap and names the turns it will cut; with none running it doesn\'t wait (#319)', async () => {
+test("a drain stops waiting at its cap and names the turns it will cut; with none running it doesn't wait (#319)", async () => {
   const clock = new FakeClock();
   turns.clock = clock;
   let idle;
@@ -567,7 +621,10 @@ test('a drain stops waiting at its cap and names the turns it will cut; with non
   await slow;
   capped.release();
   await asked;
-  assert.deepEqual(dropped.map((e) => [e.event, e.data.code]), [['error', 'canceled']]);
+  assert.deepEqual(
+    dropped.map((e) => [e.event, e.data.code]),
+    [['error', 'canceled']],
+  );
   assert.ok(!runs().some((r) => r.prompt === 'hi'), 'its claude never ran');
 });
 
@@ -584,7 +641,7 @@ test('a running turn takes a message from its own person, says when claude took 
   assert.deepEqual(evs[taken].data, { id: out.id }, 'one taken event, for the message');
   assert.equal(evs.filter((e) => e.event === 'taken').length, 1, 'not for the prompt');
   assert.ok(evs.findIndex((e) => e.event === 'text' && e.data.delta === 'Heard: Make it Friday.') > taken, 'claude read it after taking it in');
-  assert.deepEqual(evs.at(-1), { event: 'end', data: { stop: 'end_turn', usage: { input: 4, output: 6, cacheRead: 5, cacheWrite: 0 }, provider: 'claude', model: 'claude-haiku-test' } }, 'both replies\' usage');
+  assert.deepEqual(evs.at(-1), { event: 'end', data: { stop: 'end_turn', usage: { input: 4, output: 6, cacheRead: 5, cacheWrite: 0 }, provider: 'claude', model: 'claude-haiku-test' } }, "both replies' usage");
   assert.deepEqual(turns.steer(mandate.id, id, cara.id, 'Too late.'), { steered: false, reason: 'ended' });
   assert.equal(turns.steer(mandate.id, id, josh.id, 'Too late.'), 'other_person');
   assert.equal(turns.steer(mandate.id, 99_999, cara.id, 'Hi.'), null);
@@ -643,30 +700,31 @@ test('a turn past its timeout is stopped', async () => {
   assert.equal(errorOf(evs), 'timeout');
 });
 
-test('the turn_cap and the plan\'s own limit both answer limit; a crash says failed', async () => {
+test("the turn_cap and the plan's own limit both answer limit; a crash says failed", async () => {
   store.updateContraption('peek-auras', { turn_cap: 2 });
   const capped = store.getContraption('peek-auras')!;
   const used = store.contraptionTurnsSince(capped.id, josh.id, 0);
   for (let i = used; i < 2; i++) assert.equal((await turn(capped, { person: josh.id, session: `cap-${i}` })).at(-1)!.event, 'end');
   assert.equal(errorOf(await turn(capped, { person: josh.id, session: 'cap-3' })), 'limit');
   store.updateContraption('peek-auras', { turn_cap: null });
-  const lim = await turn(mandate, { session: 'limits', prompt: 'plan limit' }); assert.equal(errorOf(lim), 'limit', JSON.stringify(lim.at(-1)));
+  const lim = await turn(mandate, { session: 'limits', prompt: 'plan limit' });
+  assert.equal(errorOf(lim), 'limit', JSON.stringify(lim.at(-1)));
   const crash = await turn(mandate, { session: 'crash', prompt: 'crash' });
   assert.equal(errorOf(crash), 'failed');
   assert.match(crash.at(-1)!.data.message, /exit 3.*boom/);
 });
 
-test('a container turn runs in the person\'s own container, on their own sign-in, at its own scratch folder', async () => {
+test("a container turn runs in the person's own container, on their own sign-in, at its own scratch folder", async () => {
   rmSync(podmanLog, { force: true });
   await turn(mandate, { person: josh.id, session: 'in-container', mcp: [{ name: 'mandate', path: '/mcp' }] });
   const call = jsonLines(podmanLog)[0];
   assert.deepEqual(call.slice(0, 4), ['exec', '-i', '-w', join(homedir(), '.citadel', 'contraption-scratch', 'mandate')]);
   const envs = call.filter((_: string, i: number) => call[i - 1] === '-e');
   assert.ok(envs.includes(`CLAUDE_CONFIG_DIR=${join(vol, '.claude')}`));
-  assert.ok(!envs.some((e: string) => e.startsWith('ANTHROPIC_API_KEY=')), 'never the server\'s login');
+  assert.ok(!envs.some((e: string) => e.startsWith('ANTHROPIC_API_KEY=')), "never the server's login");
   assert.ok(!envs.some((e: string) => e.startsWith('COORDINATOR_')));
   assert.ok(call.includes('citadel-claude-t-2'));
-  assert.ok(existsSync(join(vol, '.citadel', 'contraption-scratch', 'mandate')), 'made in the person\'s volume');
+  assert.ok(existsSync(join(vol, '.citadel', 'contraption-scratch', 'mandate')), "made in the person's volume");
   assert.equal(argAfter(lastRun().argv, '--tools'), '');
   // Its private files sit in the person's own volume, never under run/turns (every container mounts that).
   const mcpFile = argAfter(call, '--mcp-config');
@@ -682,7 +740,7 @@ test('a container turn runs in the person\'s own container, on their own sign-in
 // A blind turn (VoiceAnalyzer #26): nothing in what the model is started with names the person, the login, the home or the app.
 // The test's own temp folder (root) may sit under any home, so it's masked: the server's real config dir is the one thing a blind turn keeps, for its sign-in.
 const leaks = (what: object, names: string[]) => names.filter((n) => JSON.stringify(what).replaceAll(root, '<root>').includes(n));
-test('a blind turn runs in a neutral folder with the app\'s text as the whole system prompt, and nothing names who or which app', async () => {
+test("a blind turn runs in a neutral folder with the app's text as the whole system prompt, and nothing names who or which app", async () => {
   store.setSetting(codexSwitchKey(cara.id), true); // the Codex override doesn't move a blind turn
   const evs = await turn(mandate, { blind: true, session: 'blind-h', system: 'Word feedback neutrally.', mcp: [{ name: 'tools', path: '/mcp' }] });
   store.deleteSetting(codexSwitchKey(cara.id));
@@ -704,7 +762,7 @@ test('a blind turn runs in a neutral folder with the app\'s text as the whole sy
   assert.equal(store.contraptionSession(mandate.id, cara.id, 'blind-h'), undefined, 'no session kept');
 });
 
-test('a blind turn is always fresh, never carries the person\'s machines, and refuses a Codex model', async () => {
+test("a blind turn is always fresh, never carries the person's machines, and refuses a Codex model", async () => {
   assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'x', blind: true, model: 'gpt-6-astra' }, mandate), /Claude only/);
   assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'x', blind: 'yes' }, mandate), /blind must be true or false/);
   const r = parseTurn({ person: 1, session: 's', prompt: 'x', blind: true, machines: true, fresh: false }, mandate);
@@ -740,7 +798,7 @@ test("a stream's session id that isn't one is never stored, and one stored befor
 });
 
 // Kept chats (#836): an app's `keep: true` turns, the session's first KEEP_TURNS, in its home scheme's shared folder.
-test('a kept turn writes the prompt, tool calls and reply to the home scheme\'s .replay folder, first five turns only', async () => {
+test("a kept turn writes the prompt, tool calls and reply to the home scheme's .replay folder, first five turns only", async () => {
   const home = store.createProject('Peek', null);
   const app = contraptions.register({ name: 'kept-app', ...fields, home_scheme: home.id });
   store.setContraptionUser(app.id, cara.id, true, cara.id);
@@ -751,7 +809,7 @@ test('a kept turn writes the prompt, tool calls and reply to the home scheme\'s 
   assert.match(files[0], /^[0-9a-f]{12}-k1-[0-9a-f]{8}\.jsonl$/, 'named by a hashed person, the session and its Claude session');
   const [t] = jsonLines(join(dir, files[0]));
   assert.equal(t.n, 1);
-  assert.equal(typeof t.turn, 'number', 'the turn id, the key #844\'s audit rows share');
+  assert.equal(typeof t.turn, 'number', "the turn id, the key #844's audit rows share");
   assert.equal(t.prompt, 'Move my dentist to Thursday.');
   assert.deepEqual(t.calls, [{ name: 'mcp__mandate__move', input: { to: 'Thursday' }, ok: true, result: 'SECRET TOOL OUTPUT' }]);
   assert.match(t.text, /Moved it[\s\S]*to Thursday\./);
@@ -780,7 +838,10 @@ test('a person who opts out while a kept turn runs has nothing of it kept', asyn
   const app = contraptions.register({ name: 'kept-race', ...fields, home_scheme: home.id });
   store.setContraptionUser(app.id, cara.id, true, cara.id);
   const dir = join(data, 'projects', String(home.id), 'shared', 'project', '.replay', 'kept-race');
-  const seen = () => readFileSync(log, 'utf8').split('\n').filter((l) => l.includes('linger then opt out')).length;
+  const seen = () =>
+    readFileSync(log, 'utf8')
+      .split('\n')
+      .filter((l) => l.includes('linger then opt out')).length;
   const before = seen();
   const running = turn(app, { session: 'r1', keep: true, prompt: 'linger then opt out' });
   await until('the kept turn to start', () => seen() !== before);
@@ -809,7 +870,7 @@ test("a Codex pick the person can't run falls back to the app's default, or Clau
   assert.equal(own.at(-1)!.data.model, 'claude-default-test', 'end names it in full, from claude');
 });
 
-test('a turn gets the person\'s online machines and a note on them, unless it asks for machines: false (#306, #409)', async () => {
+test("a turn gets the person's online machines and a note on them, unless it asks for machines: false (#306, #409)", async () => {
   turns.machines = () => [{ id: 7, name: 'perigee-godot', token_hash: '', created_by: 'Cara', created_at: 0, last_seen_at: 0, notes: 'Never restart it.', workspace_tools: 0, scoped: 0 }];
   try {
     await turn(mandate, { session: 'with-machines', system: 'You grade.', mcp: [{ name: 'mandate', path: '/mcp' }] });
@@ -828,7 +889,7 @@ test('a turn gets the person\'s online machines and a note on them, unless it as
   }
 });
 
-test('a turn that asks for media (#732) gets Citadel\'s own media server with its turn token; others never see it', async () => {
+test("a turn that asks for media (#732) gets Citadel's own media server with its turn token; others never see it", async () => {
   turns.apiUrl = () => 'http://127.0.0.1:4321'; // server.ts sets Citadel's own address
   await turn(mandate, { session: 'media', mcp: [{ name: 'mandate', path: '/mcp' }], media: true, machines: false });
   turns.apiUrl = () => '';
@@ -847,7 +908,7 @@ test('a turn that asks for media (#732) gets Citadel\'s own media server with it
   assert.deepEqual(JSON.parse(run.settings).permissions.allow, ['mcp__mandate']);
 });
 
-test('a media turn offers Codex images only where the person\'s Codex can run: their container, or the server login\'s Codex container', () => {
+test("a media turn offers Codex images only where the person's Codex can run: their container, or the server login's Codex container", () => {
   const at = (uid: number) => (turns as any).codexAt(uid, places.place(uid));
   assert.equal(at(josh.id), null, "codexWhy says Codex isn't set up");
   turns.codexWhy = () => null;
@@ -865,7 +926,11 @@ test('a media turn offers Codex images only where the person\'s Codex can run: t
 });
 
 test('requests are checked before anything runs', () => {
-  const bad = (body: object) => assert.throws(() => parseTurn({ person: 1, session: 's', prompt: 'p', ...body }, mandate), (e: any) => e.code === 'bad_request');
+  const bad = (body: object) =>
+    assert.throws(
+      () => parseTurn({ person: 1, session: 's', prompt: 'p', ...body }, mandate),
+      (e: any) => e.code === 'bad_request',
+    );
   bad({ person: 'one' });
   bad({ session: 'has spaces' });
   bad({ prompt: '' });
@@ -873,7 +938,12 @@ test('requests are checked before anything runs', () => {
   bad({ mcp: [{ name: 'a b', path: '/mcp' }] });
   bad({ mcp: [{ name: 'a', path: 'http://elsewhere/mcp' }] });
   bad({ mcp: [{ name: 'a', path: '/mcp', headers: { 'X-A': 'one\r\nX-B: two' } }] });
-  bad({ mcp: [{ name: 'a', path: '/mcp' }, { name: 'a', path: '/other' }] });
+  bad({
+    mcp: [
+      { name: 'a', path: '/mcp' },
+      { name: 'a', path: '/other' },
+    ],
+  });
   bad({ agents: { max: 50 } });
   bad({ webSearch: 'yes' });
   bad({ machines: 'no' });
@@ -898,7 +968,7 @@ test('requests are checked before anything runs', () => {
 
 // #844 reverses the old rule (Cara, 2026-11-16, VoiceAnalyzer #41's "Build (C4)"): turn text is kept, in the audit
 // table only, for AUDIT_DAYS. Outside it there is none, and once the audit is swept there is none anywhere, files included.
-test('Citadel\'s database holds no turn text outside the audit, and none at all once the audit is swept', () => {
+test("Citadel's database holds no turn text outside the audit, and none at all once the audit is swept", () => {
   const audit = JSON.stringify(store.db.prepare('SELECT * FROM contraption_turn_audit').all());
   assert.ok(audit.includes('dentist') && !audit.includes('SECRET TOOL OUTPUT'), 'the audit holds prompts, never tool output');
   for (const t of ['contraption_turns', 'contraption_sessions']) assert.ok(!JSON.stringify(store.db.prepare(`SELECT * FROM ${t}`).all()).includes('dentist'), t);
@@ -918,15 +988,14 @@ test('Citadel\'s database holds no turn text outside the audit, and none at all 
   assert.ok(store.contraptionTurnsSince(mandate.id, cara.id, 0) > 0, 'the meter did record turns');
 });
 
-test('the API is only for a contraption\'s own server on this machine, with its key, and streams events', { timeout: 60_000 }, async () => {
+test("the API is only for a contraption's own server on this machine, with its key, and streams events", { timeout: 60_000 }, async () => {
   const srv = await bootServer({ env: { CLAUDE_BIN: fake } });
   after(() => srv.stop());
   const made = await srv.call('/api/contraptions', { name: 'mandate', title: 'Mandate', port: 9101, default_model: 'haiku' });
   assert.equal(made.status, 201);
   const key = readFileSync(join(made.data.keys_dir, 'contraption.key'), 'utf8');
   const me = (await srv.call('/api/me')).data;
-  const api = (path: string, init: RequestInit & { headers?: Record<string, string> } = {}) =>
-    fetch(srv.base + path, { ...init, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...init.headers } });
+  const api = (path: string, init: RequestInit & { headers?: Record<string, string> } = {}) => fetch(srv.base + path, { ...init, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...init.headers } });
   const body = JSON.stringify({ person: me.id, session: 'acolyte', prompt: 'hello' });
   assert.equal((await api('/api/contraptions/turns', { method: 'POST', body, headers: { 'X-Forwarded-For': '100.64.0.1' } })).status, 403, 'not through Caddy');
   assert.equal((await api('/api/contraptions/turns', { method: 'POST', body, headers: { Cookie: srv.cookie } })).status, 403, 'not from a browser');
@@ -938,10 +1007,19 @@ test('the API is only for a contraption\'s own server on this machine, with its 
   assert.match(await res.text(), /^event: error\ndata: \{"code":"not_enabled"/);
   assert.equal((await srv.call(`/api/contraptions/mandate/people/${me.id}`, { enabled: true }, 'PUT')).status, 200);
   res = await api('/api/contraptions/turns', { method: 'POST', body });
-  const events = (await res.text()).trim().split('\n\n').map((b) => b.split('\n')[0].replace('event: ', ''));
-  assert.deepEqual(events.filter((e) => e !== 'text'), ['start', 'tool', 'tool_result', 'compacted', 'end']);
+  const events = (await res.text())
+    .trim()
+    .split('\n\n')
+    .map((b) => b.split('\n')[0].replace('event: ', ''));
+  assert.deepEqual(
+    events.filter((e) => e !== 'text'),
+    ['start', 'tool', 'tool_result', 'compacted', 'end'],
+  );
   const sessions = await (await api(`/api/contraptions/sessions?person=${me.id}`)).json();
-  assert.deepEqual(sessions.map((s: any) => [s.name, s.busy]), [['acolyte', false]]);
+  assert.deepEqual(
+    sessions.map((s: any) => [s.name, s.busy]),
+    [['acolyte', false]],
+  );
   assert.equal((await api('/api/contraptions/sessions?person=999')).status, 403);
   assert.equal((await api('/api/contraptions/turns/12345/cancel', { method: 'POST', body: '{}' })).status, 404);
   const steer = (body: object) => api('/api/contraptions/turns/12345/messages', { method: 'POST', body: JSON.stringify(body) });
@@ -952,20 +1030,36 @@ test('the API is only for a contraption\'s own server on this machine, with its 
   assert.deepEqual(await (await api(`/api/contraptions/sessions?person=${me.id}`)).json(), []);
   // Media (#732): a person with no OpenRouter gets the coded refusal in the stream and the agent's text; nothing is written.
   res = await api('/api/contraptions/turns', { method: 'POST', body: JSON.stringify({ person: me.id, session: 'artist', prompt: 'draw', media: true }) });
-  const blocks = (await res.text()).trim().split('\n\n').map((b) => ({ event: b.split('\n')[0].replace('event: ', ''), data: JSON.parse(b.split('\n')[1].replace('data: ', '')) }));
+  const blocks = (await res.text())
+    .trim()
+    .split('\n\n')
+    .map((b) => ({ event: b.split('\n')[0].replace('event: ', ''), data: JSON.parse(b.split('\n')[1].replace('data: ', '')) }));
   const media = blocks.filter((b) => b.event === 'media');
   assert.equal(media.length, 1);
-  assert.deepEqual(blocks.map((b) => b.event).filter((e) => e === 'media' || e === 'tool_result'), ['media', 'tool_result'], 'the app hears of the call before its result');
+  assert.deepEqual(
+    blocks.map((b) => b.event).filter((e) => e === 'media' || e === 'tool_result'),
+    ['media', 'tool_result'],
+    'the app hears of the call before its result',
+  );
   assert.equal(media[0].data.ok, false);
   assert.equal(media[0].data.code, 'openrouter_not_connected');
-  assert.match(blocks.filter((b) => b.event === 'text').map((b) => b.data.delta).join(''), /^202 openrouter_not_connected: /);
+  assert.match(
+    blocks
+      .filter((b) => b.event === 'text')
+      .map((b) => b.data.delta)
+      .join(''),
+    /^202 openrouter_not_connected: /,
+  );
   assert.deepEqual(await (await api(`/api/contraptions/media?person=${me.id}`)).json(), { files: [] });
   assert.equal((await api(`/api/contraptions/media/frost.png?person=${me.id}`)).status, 404);
   const folder = join(srv.data, 'contraption-media', 'mandate', String(me.id), 'auras');
   mkdirSync(folder, { recursive: true });
   writeFileSync(join(folder, 'glow.png'), 'GLOW');
   writeFileSync(join(folder, 'glow.png.json'), '{"model":"m"}');
-  assert.deepEqual((await (await api(`/api/contraptions/media?person=${me.id}`)).json()).files.map((f: any) => f.path), ['auras/glow.png']);
+  assert.deepEqual(
+    (await (await api(`/api/contraptions/media?person=${me.id}`)).json()).files.map((f: any) => f.path),
+    ['auras/glow.png'],
+  );
   const got = await api(`/api/contraptions/media/auras/glow.png?person=${me.id}`);
   assert.equal(got.headers.get('content-type'), 'image/png');
   assert.equal(await got.text(), 'GLOW');
@@ -990,7 +1084,9 @@ test('the API is only for a contraption\'s own server on this machine, with its 
 // A fake codex app-server, for Codex turns (#337): it logs the hook config it got and its requests.
 const codexLog = join(root, 'codex.jsonl');
 const codexBin = join(root, 'codex-fake');
-writeFileSync(codexBin, `#!${process.execPath}
+writeFileSync(
+  codexBin,
+  `#!${process.execPath}
 const fs = require('node:fs');
 const record = (m) => fs.appendFileSync(${JSON.stringify(codexLog)}, JSON.stringify(m) + '\\n');
 // The fake podman maps the container's ~/.citadel in argv only.
@@ -1012,7 +1108,8 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   note('item/completed', { item: { type: 'agentMessage', id: 'm1', text: 'CODEX MOVED IT' } });
   note('turn/completed', { turn: { id: 'tu1', status: 'completed' } });
 });
-`);
+`,
+);
 chmodSync(codexBin, 0o755);
 
 test("on Codex (#337) a contraption turn runs the shim in its own mode with only the app's tools, and its Codex turns go back to Claude, never through Citadel's database", async () => {
@@ -1035,7 +1132,7 @@ test("on Codex (#337) a contraption turn runs the shim in its own mode with only
     const calls = jsonLines(codexLog);
     assert.equal(calls[0].tripwire.mode, 'contraption');
     assert.deepEqual(calls[0].tripwire.mcp, ['mandate']);
-    assert.equal(calls[0].loads, 'function', "the staged tripwire loads: CODEX_FILES holds every file it imports");
+    assert.equal(calls[0].loads, 'function', 'the staged tripwire loads: CODEX_FILES holds every file it imports');
     assert.ok(calls[0].argv.includes('features.shell_tool=false'), 'no shell for an app turn');
     assert.equal(calls.find((c) => c.method === 'thread/start').params.model, 'gpt-6-luna', "the app's haiku maps to Codex's fast model");
     // Again on the same name: the thread carries on.
@@ -1064,8 +1161,13 @@ test("the server login's Codex app turns run in its own Codex-only container, ha
   rmSync(codexLog, { force: true });
   const volCara = join(root, 'vol-cara');
   caraCodex = {
-    host: false, container: 'citadel-claude-t-cara', configDir: claudeDir, home: volCara, turnsDir: join(root, 'run', 'turns', `person-${cara.id}`),
-    env: { HOME: homedir(), CLAUDE_CONFIG_DIR: join(volCara, '.claude'), DISABLE_AUTOUPDATER: '1', CITADEL_CODEX_BIN: codexBin, CODEX_HOME: join(root, 'codex-home') }, ensure: async () => {},
+    host: false,
+    container: 'citadel-claude-t-cara',
+    configDir: claudeDir,
+    home: volCara,
+    turnsDir: join(root, 'run', 'turns', `person-${cara.id}`),
+    env: { HOME: homedir(), CLAUDE_CONFIG_DIR: join(volCara, '.claude'), DISABLE_AUTOUPDATER: '1', CITADEL_CODEX_BIN: codexBin, CODEX_HOME: join(root, 'codex-home') },
+    ensure: async () => {},
   };
   turns.codexWhy = () => null;
   const ask = { person: cara.id, session: 'cara-codex', mcp: [{ name: 'mandate', path: '/mcp' }] };
@@ -1085,7 +1187,10 @@ test("the server login's Codex app turns run in its own Codex-only container, ha
     assert.ok(!exec.some((a: string) => a.startsWith('ANTHROPIC_API_KEY=')), "never the server's Claude key");
     const calls = jsonLines(codexLog);
     assert.equal(calls[0].tripwire.mode, 'contraption');
-    const said = calls.find((c) => c.method === 'turn/start').params.input.map((i: any) => i.text).join('\n');
+    const said = calls
+      .find((c) => c.method === 'turn/start')
+      .params.input.map((i: any) => i.text)
+      .join('\n');
     assert.match(said, /HOST CLAUDE ASK/, 'the hand-over is her Claude conversation on the host');
 
     store.deleteSetting(codexSwitchKey(cara.id));
@@ -1133,21 +1238,33 @@ test("an app turn's plan meter goes to the account it ran on (#793)", async () =
 });
 
 test('a limit on the first Claude account marks it and the turn finishes on the second, session and all (#785)', async () => {
-  caraOn = 1; caraLimits = []; caraSpare = true;
+  caraOn = 1;
+  caraLimits = [];
+  caraSpare = true;
   await turn(mandate, { session: 'move', prompt: 'hello' });
   const evs = await turn(mandate, { session: 'move', prompt: 'first account limited' });
-  assert.deepEqual(evs.map((e) => e.event).filter((e) => e === 'start' || e === 'error' || e === 'end'), ['start', 'end'], 'one start, no error');
-  assert.deepEqual(caraLimits.map((l) => l.n), [1]);
+  assert.deepEqual(
+    evs.map((e) => e.event).filter((e) => e === 'start' || e === 'error' || e === 'end'),
+    ['start', 'end'],
+    'one start, no error',
+  );
+  assert.deepEqual(
+    caraLimits.map((l) => l.n),
+    [1],
+  );
   // The first turn's transcript came along, so the resumed session on account 2 still has it.
   const dirs = readdirSync(join(root, 'claude2', 'projects'));
   const text = dirs.flatMap((d) => readdirSync(join(root, 'claude2', 'projects', d)).map((f) => readFileSync(join(root, 'claude2', 'projects', d, f), 'utf8'))).join('');
   assert.match(text, /hello/);
   assert.match(text, /first account limited/);
-  caraOn = 1; caraSpare = false;
+  caraOn = 1;
+  caraSpare = false;
 });
 
 test('every Claude account limited: the turn fails with limit and says which resets first (#785)', async () => {
-  caraOn = 1; caraLimits = []; caraSpare = false;
+  caraOn = 1;
+  caraLimits = [];
+  caraSpare = false;
   const evs = await turn(mandate, { session: 'all-limited', prompt: 'first account limited' });
   assert.equal(errorOf(evs), 'limit');
   assert.match(evs.at(-1)!.data.message, /Another of this person's Claude accounts resets first/);
@@ -1155,7 +1272,9 @@ test('every Claude account limited: the turn fails with limit and says which res
 });
 
 test('a limit after output is marked but not retried: the app never sees a reply twice; the next turn resumes on the other account (#785)', async () => {
-  caraOn = 1; caraLimits = []; caraSpare = true;
+  caraOn = 1;
+  caraLimits = [];
+  caraSpare = true;
   await turn(mandate, { session: 'half', prompt: 'hello again' });
   const evs = await turn(mandate, { session: 'half', prompt: 'limited after text' });
   assert.equal(errorOf(evs), 'limit');
@@ -1164,15 +1283,21 @@ test('a limit after output is marked but not retried: the app never sees a reply
   assert.equal(caraOn, 2, 'turns moved on');
   const next = await turn(mandate, { session: 'half', prompt: 'carry on' });
   assert.equal(next.at(-1)!.event, 'end');
-  const text = readdirSync(join(root, 'claude2', 'projects')).flatMap((d) => readdirSync(join(root, 'claude2', 'projects', d)).map((f) => readFileSync(join(root, 'claude2', 'projects', d, f), 'utf8'))).join('');
+  const text = readdirSync(join(root, 'claude2', 'projects'))
+    .flatMap((d) => readdirSync(join(root, 'claude2', 'projects', d)).map((f) => readFileSync(join(root, 'claude2', 'projects', d, f), 'utf8')))
+    .join('');
   assert.match(text, /hello again/, 'the session came along');
-  caraOn = 1; caraSpare = false;
+  caraOn = 1;
+  caraSpare = false;
 });
 
 test('a turn cut off by SIGTERM ends interrupted with one retry, not failed; a second cut in a row offers none (#1382)', async () => {
   const outcome = (evs: Ev[]) => store.getContraptionTurn(evs.find((e) => e.event === 'start')!.data.turn)!.outcome;
   const cut = await turn(peek, { session: 'cut', prompt: 'cut off' });
-  assert.deepEqual(cut.map((e) => e.event), ['start', 'tool', 'error']);
+  assert.deepEqual(
+    cut.map((e) => e.event),
+    ['start', 'tool', 'error'],
+  );
   assert.equal(errorOf(cut), 'interrupted');
   assert.equal(cut.at(-1)!.data.retry, true, 'the first cut offers a retry');
   assert.match(cut.at(-1)!.data.message, /cut off/);

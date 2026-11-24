@@ -13,12 +13,21 @@ const { savedLogin, fromCitadel } = createRequire(import.meta.url)('../desktop/s
 const box = (available = true) => ({
   isEncryptionAvailable: () => available,
   encryptString: (s: string) => Buffer.from(s, 'utf8').map((b) => b ^ 0x5a),
-  decryptString: (b: Buffer) => Buffer.from(b).map((x) => x ^ 0x5a).toString('utf8'),
+  decryptString: (b: Buffer) =>
+    Buffer.from(b)
+      .map((x) => x ^ 0x5a)
+      .toString('utf8'),
 });
 const made: string[] = [];
-const dir = () => { const d = mkdtempSync(join(tmpdir(), 'saved-login-')); made.push(d); return d; };
+const dir = () => {
+  const d = mkdtempSync(join(tmpdir(), 'saved-login-'));
+  made.push(d);
+  return d;
+};
 // timing-ok: own temp dir
-after(() => { for (const d of made) rmSync(d, { recursive: true, force: true }); });
+after(() => {
+  for (const d of made) rmSync(d, { recursive: true, force: true });
+});
 
 test('a saved sign-in comes back, and the file on disk holds no clear password', () => {
   const d = dir();
@@ -39,7 +48,7 @@ test('forget deletes it and says so; forgetting twice is fine', () => {
   assert.equal(s.forget(), true); // nothing there is already forgotten
 });
 
-test('forget says false when the file can\'t be deleted, so the page doesn\'t claim it was', () => {
+test("forget says false when the file can't be deleted, so the page doesn't claim it was", () => {
   const d = dir();
   mkdirSync(join(d, 'saved-login.bin')); // a folder where the file goes: deleting it fails
   assert.equal(savedLogin(d, box()).forget(), false);
@@ -56,7 +65,12 @@ test('no Windows encryption: nothing is saved, never in the clear', () => {
 test('a file another account wrote, or a damaged one, reads as nothing saved', () => {
   const d = dir();
   savedLogin(d, box()).save('cara', 'pw-1234567890');
-  const other = { ...box(), decryptString: () => { throw new Error('Error while decrypting the ciphertext provided to safeStorage.decryptString.'); } };
+  const other = {
+    ...box(),
+    decryptString: () => {
+      throw new Error('Error while decrypting the ciphertext provided to safeStorage.decryptString.');
+    },
+  };
   assert.equal(savedLogin(d, other).get(), null);
 });
 
@@ -68,7 +82,7 @@ test('bad input is refused rather than saved', () => {
   assert.equal(s.save('cara', 'x'.repeat(1001)), false);
 });
 
-test('only Citadel\'s own top page may ask, never an app\'s frame or another site', () => {
+test("only Citadel's own top page may ask, never an app's frame or another site", () => {
   const start = new URL('https://citadel.zip/c/');
   const main = { url: 'https://citadel.zip/c/#/', parent: null };
   assert.equal(fromCitadel(main, start), true);

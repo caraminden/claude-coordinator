@@ -5,7 +5,11 @@ import { api, h, icon, view, pacificDate } from './base.js';
 import { settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { toast } from './ui/status.js';
 
-const SCOPES = [['scheme', 'This scheme'], ['citadel', 'Citadel-wide'], ['all', 'All']];
+const SCOPES = [
+  ['scheme', 'This scheme'],
+  ['citadel', 'Citadel-wide'],
+  ['all', 'All'],
+];
 const day = pacificDate;
 const external = (href) => /^https?:/.test(href);
 let scope = 'scheme';
@@ -36,12 +40,26 @@ export function decisionsPage() {
   const search = h('input', { type: 'search', placeholder: 'Search decisions', 'aria-label': 'Search decisions', oninput: () => filter() });
   const list = h('div', { class: 'settings-rows decision-list' });
   const empty = h('p', { class: 'muted', hidden: true }, 'No decision matches.');
-  const pick = h('div', { class: 'range-pick decision-scope', role: 'group', 'aria-label': 'Which decisions' },
-    SCOPES.map(([key, label]) => h('button', { type: 'button', 'data-scope': key, 'aria-pressed': String(key === scope), onclick: () => {
-      scope = key;
-      for (const b of pick.children) b.setAttribute('aria-pressed', String(b.dataset.scope === key));
-      filter();
-    } }, label)));
+  const pick = h(
+    'div',
+    { class: 'range-pick decision-scope', role: 'group', 'aria-label': 'Which decisions' },
+    SCOPES.map(([key, label]) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          'data-scope': key,
+          'aria-pressed': String(key === scope),
+          onclick: () => {
+            scope = key;
+            for (const b of pick.children) b.setAttribute('aria-pressed', String(b.dataset.scope === key));
+            filter();
+          },
+        },
+        label,
+      ),
+    ),
+  );
   const rows = [];
 
   const row = (d, byId) => {
@@ -50,31 +68,48 @@ export function decisionsPage() {
       ev.preventDefault();
       const target = rows.find((r) => r.d.id === id);
       if (!target) return;
-      if (!shows(target.d)) { pick.querySelector('[data-scope="all"]').click(); }
+      if (!shows(target.d)) {
+        pick.querySelector('[data-scope="all"]').click();
+      }
       search.value = '';
       filter();
       const el = rows.find((r) => r.d.id === id).row;
       el.open = true;
       el.scrollIntoView({ block: 'center' });
     };
-    const body = [
-      d.quote ? h('blockquote', { class: 'decision-quote' }, `“${d.quote}”`) : '',
-      h('p', { class: 'decision-text' }, d.text),
-      d.places.length ? h('p', { class: 'small decision-places' }, 'Written in: ', ...d.places.flatMap((pl, i) => [i ? ', ' : '', placeLink(pl)])) : '',
-    ];
+    const body = [d.quote ? h('blockquote', { class: 'decision-quote' }, `“${d.quote}”`) : '', h('p', { class: 'decision-text' }, d.text), d.places.length ? h('p', { class: 'small decision-places' }, 'Written in: ', ...d.places.flatMap((pl, i) => [i ? ', ' : '', placeLink(pl)])) : ''];
     if (d.reversed) {
       const stale = d.reversed.stale;
       const clean = stale.length ? h('button', { type: 'button', class: 'secondary', onclick: () => cleanUp(d, by, clean) }, 'Clean up the old copies') : '';
-      body.push(h('div', { class: 'decision-reversed' },
-        h('p', {}, h('span', { class: 'chip warn' }, 'Reversed'), ' by ',
-          by ? h('a', { href: '#', onclick: jump(by.id) }, `${by.rule} (${by.who}, ${day(by.date)})`) : d.reversed.byText,
-          d.reversed.href ? [' · ', h('a', { href: d.reversed.href, ...(external(d.reversed.href) ? { target: '_blank', rel: 'noopener' } : {}) }, 'the edit')] : ''),
-        stale.length ? h('p', { class: 'small' }, 'Still written in: ', ...stale.flatMap((pl, i) => [i ? ', ' : '', placeLink(pl)])) : '',
-        clean));
+      body.push(
+        h(
+          'div',
+          { class: 'decision-reversed' },
+          h(
+            'p',
+            {},
+            h('span', { class: 'chip warn' }, 'Reversed'),
+            ' by ',
+            by ? h('a', { href: '#', onclick: jump(by.id) }, `${by.rule} (${by.who}, ${day(by.date)})`) : d.reversed.byText,
+            d.reversed.href ? [' · ', h('a', { href: d.reversed.href, ...(external(d.reversed.href) ? { target: '_blank', rel: 'noopener' } : {}) }, 'the edit')] : '',
+          ),
+          stale.length ? h('p', { class: 'small' }, 'Still written in: ', ...stale.flatMap((pl, i) => [i ? ', ' : '', placeLink(pl)])) : '',
+          clean,
+        ),
+      );
     }
     if (d.reverses.length) {
-      body.push(h('p', { class: 'small' }, 'Reverses: ', ...d.reverses.map((id) => byId.get(id)).filter(Boolean)
-        .flatMap((o, i) => [i ? ', ' : '', h('a', { href: '#', onclick: jump(o.id) }, `${o.rule} (${o.who}, ${day(o.date)})`)])));
+      body.push(
+        h(
+          'p',
+          { class: 'small' },
+          'Reverses: ',
+          ...d.reverses
+            .map((id) => byId.get(id))
+            .filter(Boolean)
+            .flatMap((o, i) => [i ? ', ' : '', h('a', { href: '#', onclick: jump(o.id) }, `${o.rule} (${o.who}, ${day(o.date)})`)]),
+        ),
+      );
     }
     const summary = `${d.reversed ? 'Reversed · ' : ''}${d.quote ? `“${d.quote.length > 90 ? `${d.quote.slice(0, 90)}…` : d.quote}” · ` : ''}${d.who}, ${day(d.date)} · ${sourceName(d) || 'no longer written'}`;
     const [el] = settingsRow({ icon: d.reversed ? 'close' : 'doc', hue: d.reversed ? 'held' : d.scope === 'citadel' ? 'teal' : 'running', title: d.rule || d.quote || 'Untitled', summary, open: openRows.has(d.id) }, ...body);
@@ -89,13 +124,14 @@ export function decisionsPage() {
     const was = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Starting a minion…';
-    api(`api/projects/${p.id}/tickets`, { method: 'POST', body: { title: `Clean up copies of a reversed decision: ${d.rule}`.slice(0, 120), message: cleanupBrief(d, by), properties: { type: 'chore' } } })
-      .then((t) => btn.replaceWith(h('a', { href: `#/p/${p.id}/t/${t.number}` }, `Started #${t.number}`)),
-        (err) => {
-          btn.disabled = false;
-          btn.textContent = was;
-          toast(`Couldn't start the cleanup minion: ${err.message}`, { action: { label: 'Retry', run: () => cleanUp(d, by, btn) } });
-        });
+    api(`api/projects/${p.id}/tickets`, { method: 'POST', body: { title: `Clean up copies of a reversed decision: ${d.rule}`.slice(0, 120), message: cleanupBrief(d, by), properties: { type: 'chore' } } }).then(
+      (t) => btn.replaceWith(h('a', { href: `#/p/${p.id}/t/${t.number}` }, `Started #${t.number}`)),
+      (err) => {
+        btn.disabled = false;
+        btn.textContent = was;
+        toast(`Couldn't start the cleanup minion: ${err.message}`, { action: { label: 'Retry', run: () => cleanUp(d, by, btn) } });
+      },
+    );
   };
 
   const filter = () => {
@@ -120,16 +156,29 @@ export function decisionsPage() {
     rows.length = 0;
     const byId = new Map(data.decisions.map((d) => [d.id, d]));
     list.replaceChildren(...data.decisions.map((d) => row(d, byId)));
-    counts.replaceChildren('Read from: ', ...data.counts.flatMap((c, i) => [i ? ' · ' : '', h('span', { class: c.count ? '' : 'decision-gap', title: c.count ? '' : 'Nothing parsed here: if this source has decisions, the parser misses their format' }, `${c.label} ${c.count}${c.files > 1 ? ` in ${c.files} files` : ''}`)]));
+    counts.replaceChildren(
+      'Read from: ',
+      ...data.counts.flatMap((c, i) => [i ? ' · ' : '', h('span', { class: c.count ? '' : 'decision-gap', title: c.count ? '' : 'Nothing parsed here: if this source has decisions, the parser misses their format' }, `${c.label} ${c.count}${c.files > 1 ? ` in ${c.files} files` : ''}`)]),
+    );
     filter();
   };
-  api(`api/projects/${p.id}/decisions?scope=all`).then((d) => { data = d; render(); }, (err) => { meta.textContent = `Couldn't read the decisions: ${err.message}`; });
+  api(`api/projects/${p.id}/decisions?scope=all`).then(
+    (d) => {
+      data = d;
+      render();
+    },
+    (err) => {
+      meta.textContent = `Couldn't read the decisions: ${err.message}`;
+    },
+  );
 
-  return h('section', { class: 'artifacts-main people-main decisions-main' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
-      settingsTabs(), meta),
+  return h(
+    'section',
+    { class: 'artifacts-main people-main decisions-main' },
+    h('div', { class: 'ticket-head' }, h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))), settingsTabs(), meta),
     h('div', { class: 'row decision-tools' }, search, pick, h('a', { href: `#/p/${p.id}/ideas`, class: 'small' }, 'Ideas ledger')),
-    counts, list, empty);
+    counts,
+    list,
+    empty,
+  );
 }

@@ -102,11 +102,15 @@ test('a call in flight when the app restarts is answered with an error, and one 
   const answered = await until('the call answered', () => p.out.find((m) => m.id === 'call-7'));
   assert.match(answered.error.message, /^box: /);
   await until('a new session', () => app.state.gets === 2 && app.posts.length === 4);
-  assert.deepEqual(p.out.map((m) => m.id), [1, 'call-7'], 'one reply each, none for the notification');
+  assert.deepEqual(
+    p.out.map((m) => m.id),
+    [1, 'call-7'],
+    'one reply each, none for the notification',
+  );
   assert.equal(p.code(), undefined);
 });
 
-test('when the machine\'s server exits, the proxy answers the call in flight and exits instead of starting it again', async () => {
+test("when the machine's server exits, the proxy answers the call in flight and exits instead of starting it again", async () => {
   const app = await fakeApp(['open', 'open', 'open']);
   const p = startProxy(app.base);
   p.send(init);

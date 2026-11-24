@@ -35,7 +35,8 @@ function world() {
   let clock = 1_000_000;
   const fm = new FastMode({
     schemes: () => [{ id: PEEK, repo }],
-    get: (k) => kv.get(k), set: (k, v) => kv.set(k, structuredClone(v)),
+    get: (k) => kv.get(k),
+    set: (k, v) => kv.set(k, structuredClone(v)),
     jobs: {
       start: (j) => {
         runs.push({ sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: j.cwd, encoding: 'utf8' }).trim(), env: j.env });
@@ -45,9 +46,13 @@ function world() {
     },
     dir: (p) => join(repo + '-run', String(p)),
     env: (_p, t) => ({ WHO: String(t) }),
-    ticketOf: (_p, n) => n + 1000, numberOf: (t) => t * 10,
-    tell: (ticket, text) => told.push({ ticket, text }), taskmaster: (_p, text) => tm.push(text),
-    green: (_p, sha) => greens.push(sha), flakes: (_p, sha) => flakes.push(sha), now: () => clock,
+    ticketOf: (_p, n) => n + 1000,
+    numberOf: (t) => t * 10,
+    tell: (ticket, text) => told.push({ ticket, text }),
+    taskmaster: (_p, text) => tm.push(text),
+    green: (_p, sha) => greens.push(sha),
+    flakes: (_p, sha) => flakes.push(sha),
+    now: () => clock,
   });
   /** The running job ends with `output`, and the next tick reads it. */
   const finish = async (output: string, code = output.includes('verify: green') ? 0 : 1) => {
@@ -211,7 +216,9 @@ test("each id is pinned on the first commit failing it: the run reruns only the 
   w.commit('one');
   await w.tick();
   await w.finish(GREEN);
-  const c2 = w.commit('two'), c3 = w.commit('three'), c4 = w.commit('four');
+  const c2 = w.commit('two'),
+    c3 = w.commit('three'),
+    c4 = w.commit('four');
   w.fm.landed(PEEK, 2, c2.slice(0, 9)); // land.sh's "landed" line gives a short sha
   w.fm.landed(PEEK, 4, c4);
   await w.tick();
@@ -221,12 +228,20 @@ test("each id is pinned on the first commit failing it: the run reruns only the 
   assert.equal(w.fm.knownRed(PEEK), 'a\tCitadel is finding whose change broke it\nb\tCitadel is finding whose change broke it');
   w.wait(ESCALATE_MS / 2);
   await w.finish(red('a'));
-  assert.deepEqual(w.told.map((t) => t.ticket), [2], 'a is two\'s, found by its short sha');
+  assert.deepEqual(
+    w.told.map((t) => t.ticket),
+    [2],
+    "a is two's, found by its short sha",
+  );
   assert.doesNotMatch(w.told[0].text, /- b/);
   assert.equal(w.runs.at(-1)!.sha, c3);
   assert.equal(w.runs.at(-1)!.env.LAND_VERIFY_IDS, 'b', 'b goes on alone');
   await w.finish(GREEN);
-  assert.deepEqual(w.told.map((t) => t.ticket), [2, 4], "b passed on three, so it's four's: the head's own");
+  assert.deepEqual(
+    w.told.map((t) => t.ticket),
+    [2, 4],
+    "b passed on three, so it's four's: the head's own",
+  );
   assert.equal(w.fm.knownRed(PEEK), 'a\t#20 is fixing it\nb\t#40 is fixing it');
   assert.equal(w.tm.length, 0);
   w.wait(ESCALATE_MS / 2 + 1);
@@ -270,7 +285,9 @@ test("a pinning run with no verdict, or red only on what it can't name, is no pa
     w.commit('one');
     await w.tick();
     await w.finish(GREEN);
-    const c2 = w.commit('two'), c3 = w.commit('three'), c4 = w.commit('four');
+    const c2 = w.commit('two'),
+      c3 = w.commit('three'),
+      c4 = w.commit('four');
     w.fm.landed(PEEK, 2, c2), w.fm.landed(PEEK, 3, c3), w.fm.landed(PEEK, 4, c4);
     await w.tick();
     await w.finish(red('test/a.test.ts'));
@@ -292,30 +309,43 @@ test("a pinning run with no verdict, or red only on what it can't name, is no pa
   m.commit('one');
   await m.tick();
   await m.finish(GREEN);
-  const m2 = m.commit('two'), m3 = m.commit('three'), m4 = m.commit('four');
+  const m2 = m.commit('two'),
+    m3 = m.commit('three'),
+    m4 = m.commit('four');
   m.fm.landed(PEEK, 2, m2), m.fm.landed(PEEK, 3, m3), m.fm.landed(PEEK, 4, m4);
   await m.tick();
   await m.finish(red('the check', 'test/a.test.ts'));
   await m.finish(red('the check'));
-  assert.deepEqual(m.told.map((t) => t.ticket), [2], 'the check is two\'s');
+  assert.deepEqual(
+    m.told.map((t) => t.ticket),
+    [2],
+    "the check is two's",
+  );
   assert.equal(m.runs.at(-1)!.sha, m2, 'test/a is run on two again');
   assert.equal(m.runs.at(-1)!.env.LAND_VERIFY_IDS, 'test/a.test.ts');
   await m.finish(GREEN);
   assert.equal(m.runs.at(-1)!.sha, m3);
   await m.finish(red('test/a.test.ts'));
-  assert.deepEqual(m.told.map((t) => t.ticket), [2, 3]);
+  assert.deepEqual(
+    m.told.map((t) => t.ticket),
+    [2, 3],
+  );
   // A retry that gives a verdict goes on as usual.
   const w = world();
   w.commit('one');
   await w.tick();
   await w.finish(GREEN);
-  const c2 = w.commit('two'), c3 = w.commit('three');
+  const c2 = w.commit('two'),
+    c3 = w.commit('three');
   w.fm.landed(PEEK, 2, c2), w.fm.landed(PEEK, 3, c3);
   await w.tick();
   await w.finish(red('a'));
   await w.finish('verify: no verdict\n');
   await w.finish(red('a'));
-  assert.deepEqual(w.told.map((t) => t.ticket), [2]);
+  assert.deepEqual(
+    w.told.map((t) => t.ticket),
+    [2],
+  );
 });
 
 test("a reset while a pass awaits git sticks: the pass doesn't write its old state back, and the run it started stays known (R3)", async () => {
@@ -351,7 +381,7 @@ test("a reset while a pass awaits git sticks: the pass doesn't write its old sta
   assert.equal(w.fm.knownRed(PEEK), '');
 });
 
-test("a fast-mode worktree whose git link is gone is rebuilt on the next tick, and the run goes on", async () => {
+test('a fast-mode worktree whose git link is gone is rebuilt on the next tick, and the run goes on', async () => {
   const w = world();
   w.commit('one');
   await w.tick();
@@ -366,7 +396,7 @@ test("a fast-mode worktree whose git link is gone is rebuilt on the next tick, a
   assert.match(list, /locked/, 'locked, so a prune from elsewhere leaves it alone');
 });
 
-test("a pass that throws after reading a finished red run tells its culprit once and writes its flake rows once (2R3)", async () => {
+test('a pass that throws after reading a finished red run tells its culprit once and writes its flake rows once (2R3)', async () => {
   const w = world();
   w.commit('one');
   await w.tick();
@@ -394,7 +424,7 @@ test("a pass that throws after reading a finished red run tells its culprit once
   rmSync(lock);
 });
 
-test("a failure that repeats is said once, and said again when it changes or after it clears", async () => {
+test('a failure that repeats is said once, and said again when it changes or after it clears', async () => {
   const w = world();
   w.commit('one');
   const said: string[] = [];
@@ -408,7 +438,10 @@ test("a failure that repeats is said once, and said again when it changes or aft
     assert.equal(said.filter((m) => /failed/.test(m)).length, 1, 'three ticks, one line');
     writeFileSync(broken, good);
     await w.tick();
-    assert.ok(said.some((m) => /works again|recovered/.test(m)), 'it says when it recovers');
+    assert.ok(
+      said.some((m) => /works again|recovered/.test(m)),
+      'it says when it recovers',
+    );
     await w.finish(GREEN);
     writeFileSync(broken, 'garbage\n');
     await w.tick();

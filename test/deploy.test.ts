@@ -89,7 +89,7 @@ test('SIGHUP swaps the served front end and its fingerprint, and tells open tabs
   await reader.cancel();
 });
 
-test("after a SIGHUP reload /api/health reports the checkout's new commit, so a revert of it is not \"nothing to deploy\" (#468 S10-1)", async () => {
+test('after a SIGHUP reload /api/health reports the checkout\'s new commit, so a revert of it is not "nothing to deploy" (#468 S10-1)', async () => {
   const gitRoot = join(root, 'git-app');
   const gitApp = join(gitRoot, 'app');
   for (const d of ['server.ts', 'src', 'public']) cpSync(join(repo, d), join(gitApp, d), { recursive: true });
@@ -127,9 +127,12 @@ test('a SIGHUP with a broken public/ keeps serving the old front end', async () 
 });
 
 test('a minion reports its deploy: failures show as errors, only for its own chat', async () => {
-  const post = (id: number, body: object) => fetch(`${base}/api/tickets/${id}/deploy`, {
-    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  });
+  const post = (id: number, body: object) =>
+    fetch(`${base}/api/tickets/${id}/deploy`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
   assert.equal((await post(ticket.id, { ok: true, text: 'Deployed abc1234' })).status, 201);
   assert.equal((await post(ticket.id, { ok: false, text: 'Deploy of def5678 failed; rolled back' })).status, 201);
   assert.equal((await post(ticket.id + 1, { ok: true, text: 'not mine' })).status, 403);
@@ -141,9 +144,12 @@ test('a minion reports its deploy: failures show as errors, only for its own cha
 });
 
 test('an ok report dismisses a minion in pending-deploy; a failed one leaves it be', async () => {
-  const post = (ok: boolean) => fetch(`${base}/api/tickets/${ticket.id}/deploy`, {
-    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ok, text: 'x' }),
-  }).then((r) => r.json());
+  const post = (ok: boolean) =>
+    fetch(`${base}/api/tickets/${ticket.id}/deploy`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok, text: 'x' }),
+    }).then((r) => r.json());
   store.updateTicket(ticket.id, { status: 'idle', state: 'pending-deploy' });
   assert.deepEqual(await post(false), { dismissed: false });
   assert.equal(store.getTicket(ticket.id)!.state, 'pending-deploy');
@@ -156,7 +162,8 @@ test('a warning (live, but not pushed to GitHub) shows as an error and still dis
   store.updateTicket(t.id, { status: 'idle', state: 'pending-deploy' });
   const text = 'Deployed abc1234. Not pushed to GitHub: rejected. The next deploy will retry.';
   const res = await fetch(`${base}/api/tickets/${t.id}/deploy`, {
-    method: 'POST', headers: { Authorization: `Bearer ${agentToken(data, t.id)}`, 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { Authorization: `Bearer ${agentToken(data, t.id)}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ ok: true, warn: true, text }),
   });
   assert.deepEqual(await res.json(), { dismissed: true });
@@ -186,8 +193,7 @@ test('deploy.sh tells front-end-only changes from the rest', () => {
   const b = commit('public/app.js');
   const c = commit('public/style.css');
   const d = commit('server.ts');
-  const kind = (from: string, to: string) =>
-    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'change-kind', join(root, 'g'), from, to], { encoding: 'utf8', env: hostEnv }).trim();
+  const kind = (from: string, to: string) => execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'change-kind', join(root, 'g'), from, to], { encoding: 'utf8', env: hostEnv }).trim();
   assert.equal(kind(a, c), 'frontend');
   assert.equal(kind(b, c), 'frontend');
   assert.equal(kind(a, d), 'server', 'any change outside public/ restarts');
@@ -196,7 +202,7 @@ test('deploy.sh tells front-end-only changes from the rest', () => {
   assert.equal(kind('', c), 'server', 'an unknown running commit restarts');
 });
 
-test("deploy.sh tells a light change (tools/lanes, as the running commit has it) from the rest, and needs no restart for it (#753)", () => {
+test('deploy.sh tells a light change (tools/lanes, as the running commit has it) from the rest, and needs no restart for it (#753)', () => {
   const g = join(root, 'light');
   const git = (...args: string[]) => execFileSync('git', ['-C', g, ...args], { encoding: 'utf8' }).trim();
   mkdirSync(join(g, 'tools'), { recursive: true });
@@ -217,8 +223,7 @@ test("deploy.sh tells a light change (tools/lanes, as the running commit has it)
   const docs = commit('docs/a.md');
   const front = commit('public/app.js');
   const both = commit('docs/b.md');
-  const kind = (from: string, to: string) =>
-    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'change-kind', g, from, to], { encoding: 'utf8', env: hostEnv }).trim();
+  const kind = (from: string, to: string) => execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'change-kind', g, from, to], { encoding: 'utf8', env: hostEnv }).trim();
   assert.equal(kind(mapped, docs), 'light');
   assert.equal(kind(docs, front), 'frontend');
   assert.equal(kind(mapped, both), 'server', 'light with public/ is not light, and restarts as before');
@@ -250,8 +255,7 @@ test('deploy.sh restarts nothing for a change to test/ alone, and judges test/ w
   cpSync(join(repo, 'tools', 'lane.sh'), join(g, 'tools', 'lane.sh'));
   writeFileSync(join(g, 'tools', 'lanes'), 'light docs/*\nkit kit/*\n');
   const base = commit('src/a.ts');
-  const kind = (to: string, from = base) =>
-    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'change-kind', g, from, to], { encoding: 'utf8', env: hostEnv }).trim();
+  const kind = (to: string, from = base) => execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'change-kind', g, from, to], { encoding: 'utf8', env: hostEnv }).trim();
   const at = (...files: string[]) => {
     git('checkout', '-q', '--detach', base);
     return commit(...files);
@@ -280,7 +284,10 @@ test('deploy.sh restarts nothing for a change to test/ alone, and judges test/ w
 });
 
 test("deploy.sh's SERVER_HELD names every kit/ and tools/ file the server imports itself (#1416)", () => {
-  const held = /^SERVER_HELD="([^"]*)"/m.exec(readFileSync(join(repo, 'tools', 'deploy.sh'), 'utf8'))![1].split(' ').sort();
+  const held = /^SERVER_HELD="([^"]*)"/m
+    .exec(readFileSync(join(repo, 'tools', 'deploy.sh'), 'utf8'))![1]
+    .split(' ')
+    .sort();
   const found = new Set<string>();
   const scan = (dir: string) => {
     for (const e of readdirSync(join(repo, dir), { withFileTypes: true })) {
@@ -314,7 +321,9 @@ test('deploy.sh waits only for turns a restart would cut off; a server from befo
   const noted = join(root, 'count-bin');
   const curls = noting(noted, 'curl', join(root, 'count-curl.log'));
   const count = async (url: string, path = '') =>
-    (await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'interruptible'], { encoding: 'utf8', env: { ...hostEnv, PATH: `${path}${noted}:${process.env.PATH}`, DEPLOY_URL: url, DEPLOY_DB: join(data, 'coordinator.db'), DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_TEST_HEALTH_TIMEOUT: '0.3' } })).stdout.trim();
+    (
+      await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'interruptible'], { encoding: 'utf8', env: { ...hostEnv, PATH: `${path}${noted}:${process.env.PATH}`, DEPLOY_URL: url, DEPLOY_DB: join(data, 'coordinator.db'), DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_TEST_HEALTH_TIMEOUT: '0.3' } })
+    ).stdout.trim();
   assert.equal(await count(base), '0');
   assert.equal(await count('http://127.0.0.1:9'), '0', 'a server that is down has no turns to cut off');
   // One that doesn't answer while its unit is up is slow or stuck, not down: keep waiting (#468 S10-6).
@@ -350,7 +359,11 @@ test('deploy.sh waits only for turns a restart would cut off; a server from befo
 test('/api/health gives the ids of the turns a restart would cut off, and deploy.sh names them; an older server keeps the count', async () => {
   // Ids only: /api/health answers without a login, and a minion's title is for its scheme's members.
   assert.deepEqual((await (await fetch(`${base}/api/health`)).json()).interruptibleTurns, []);
-  const r = new Runner(store, () => {}, () => ({}));
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+  );
   const minion = store.createTicket({ project_id: project.id, title: 'Usage bar\nin the top bar', permission_mode: 'default', created_by: 'Cara' });
   const tm = store.createTicket({ project_id: project.id, title: 'Coordinator', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' });
   const turns = (r as any).turns as Map<number, unknown>;
@@ -373,15 +386,20 @@ test('/api/health gives the ids of the turns a restart would cut off, and deploy
   assert.equal(await say({ ok: true, interruptible: 4, interruptibleTurns: [minion.id, tm.id] }), `4 running turns (${named}, Test Taskmaster, 2 server jobs)`);
   assert.equal(await say({ ok: true, interruptible: 1, interruptibleTurns: [tm.id] }), '1 running turn (Test Taskmaster)');
   const more = Array.from({ length: 6 }, (_, i) => store.createTicket({ project_id: project.id, title: `More ${i}`, permission_mode: 'default', created_by: 'Cara' }).id);
-  assert.equal(await say({ ok: true, interruptible: 8, interruptibleTurns: [minion.id, ...more, 99999] }),
-    `8 running turns (${named}, ${[0, 1, 2, 3].map((i) => `Test #${store.getTicket(more[i])!.number} More ${i}`).join(', ')}, 3 more)`, 'at most 5 named; the rest, and one gone from the database, as how many more');
+  assert.equal(await say({ ok: true, interruptible: 8, interruptibleTurns: [minion.id, ...more, 99999] }), `8 running turns (${named}, ${[0, 1, 2, 3].map((i) => `Test #${store.getTicket(more[i])!.number} More ${i}`).join(', ')}, 3 more)`, 'at most 5 named; the rest, and one gone from the database, as how many more');
   assert.equal(await say({ ok: true, interruptible: 2 }), '2 running turns', 'a server from before the ids keeps the count');
   assert.equal(await say({ ok: true, interruptible: 2, interruptibleTurns: [] }), '2 running turns (2 server jobs)', 'what the count holds besides turns');
 });
 
 test("deploy.sh names the same turn units as the runner, so a rollback stops only this server's", () => {
   const units = execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'turn-units'], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_DB: join(data, 'coordinator.db') } }).trim();
-  const tag = (new Runner(store, () => {}, () => ({})) as any).unitTag;
+  const tag = (
+    new Runner(
+      store,
+      () => {},
+      () => ({}),
+    ) as any
+  ).unitTag;
   assert.equal(units, `citadel-turn-${tag}-*`);
 });
 
@@ -405,7 +423,9 @@ test('deploy.sh pushes the live commit to main, never forced, and a failed push 
   // Status 1 makes the deploy report a warning; the deploy itself carries on.
   const push = (sha: string, to = remote) => {
     const r = spawnSync('bash', [join(repo, 'tools', 'deploy.sh'), 'push-github', sha], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...env, DEPLOY_REMOTE: to },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...env, DEPLOY_REMOTE: to },
     });
     return { status: r.status, out: r.stdout.trimEnd() };
   };
@@ -434,9 +454,14 @@ test('deploy.sh pushes the live commit to main, never forced, and a failed push 
   writeFileSync(join(denied, 'hooks', 'pre-receive'), '#!/bin/sh\necho "Permission denied to someone." >&2\nexit 1\n', { mode: 0o755 });
   assert.match(push(c, denied).out, /The next deploy will retry\. GitHub refused the login: run gh auth status/);
 
-  assert.deepEqual(spawnSync('bash', [join(repo, 'tools', 'deploy.sh'), 'push-github', c], {
-    encoding: 'utf8', env: { ...env, DEPLOY_REMOTE: '' },
-  }).stdout, '', 'an empty DEPLOY_REMOTE skips the push');
+  assert.deepEqual(
+    spawnSync('bash', [join(repo, 'tools', 'deploy.sh'), 'push-github', c], {
+      encoding: 'utf8',
+      env: { ...env, DEPLOY_REMOTE: '' },
+    }).stdout,
+    '',
+    'an empty DEPLOY_REMOTE skips the push',
+  );
 });
 
 test('deploy.sh copies the database before a restart, keeps a copy already there, and rotates to 3', () => {
@@ -457,8 +482,7 @@ test('deploy.sh copies the database before a restart, keeps a copy already there
     execFileSync('git', ['-C', live, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', String(n)]);
     return execFileSync('git', ['-C', live, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
   });
-  const deploySh = (args: string[], db = file) =>
-    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), ...args], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: db } }).trim();
+  const deploySh = (args: string[], db = file) => execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), ...args], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: db } }).trim();
   for (const [i, c] of commits.entries()) {
     const out = deploySh(['backup-db', c]);
     assert.equal(out, join(dir, 'backups', `pre-deploy-${c}.db`));
@@ -469,15 +493,28 @@ test('deploy.sh copies the database before a restart, keeps a copy already there
   db.createProject('After the deploy', null);
   deploySh(['backup-db', commits[0]]);
   const kept = new Store(first);
-  assert.deepEqual(kept.listProjects().map((p) => p.name), ['Saved'], 'a retry keeps the clean copy');
+  assert.deepEqual(
+    kept.listProjects().map((p) => p.name),
+    ['Saved'],
+    'a retry keeps the clean copy',
+  );
   assert.equal(kept.db.prepare('SELECT count(*) AS n FROM contraption_turn_audit').get()!.n, 0, 'the copy holds no turn audit');
   assert.ok(db.turnAudit(turn), 'the live database keeps its audit');
   assert.ok(!readFileSync(first).includes(words.slice(0, 40)), 'nor any trace of it');
   kept.db.close();
 
   deploySh(['rotate-backups']);
-  const saved = readdirSync(join(dir, 'backups')).filter((f) => f.startsWith('pre-deploy-') && f.endsWith('.db')).sort(); // opening a copy adds its state.db and its own chat log, <copy>.events (#1169)
-  assert.deepEqual(saved, commits.slice(1).map((c) => `pre-deploy-${c}.db`).sort(), 'the oldest copy goes');
+  const saved = readdirSync(join(dir, 'backups'))
+    .filter((f) => f.startsWith('pre-deploy-') && f.endsWith('.db'))
+    .sort(); // opening a copy adds its state.db and its own chat log, <copy>.events (#1169)
+  assert.deepEqual(
+    saved,
+    commits
+      .slice(1)
+      .map((c) => `pre-deploy-${c}.db`)
+      .sort(),
+    'the oldest copy goes',
+  );
   assert.equal(statSync(join(dir, 'backups', saved[0])).mode & 0o777, 0o600);
   assert.equal(deploySh(['backup-db', commits[0]], join(dir, 'missing.db')), '', 'no database, nothing to copy');
   assert.ok(!existsSync(join(dir, 'missing.db')), 'and none is created');
@@ -538,7 +575,8 @@ test("each minion's report of a restart names its own commit when the restart ca
     cpSync(join(repo, 'tools', 'deploy.sh'), copy);
     await promisify(execFile)('bash', [copy, 'restart'], { encoding: 'utf8', env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: join(dir, 'coordinator.db'), DEPLOY_NOW: '1', DEPLOY_URL: 'http://127.0.0.1:1', DEPLOY_SERVICE: 'no-such-citadel-unit', DEPLOY_REMOTE: '' } }).catch((e) => e);
     const text = (t: string) => JSON.parse(srv.seen.find((s) => s.url === `/api/tickets/${t}/deploy`)!.body).text as string;
-    const s7 = mine.slice(0, 7), s8 = theirs.slice(0, 7);
+    const s7 = mine.slice(0, 7),
+      s8 = theirs.slice(0, 7);
     assert.match(text('7'), new RegExp(`^Could not copy the database .* This restart was for your ${s7}\\w* "mine" and the newer commits up to ${s8}\\w* "theirs"\\.$`));
     assert.doesNotMatch(text('8'), /This restart was for your/, 'the tip is its own');
     assert.ok(!existsSync(join(live, '.git', 'cc-deploy', 'reporter-commits')), 'gone with reporters');
@@ -582,12 +620,11 @@ test('deploy.sh copies the database while the live server keeps writing it (#497
   const commit = execFileSync('git', ['-C', live, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
   const file = join(dir, 'coordinator.db');
   const db = new DatabaseSync(file);
-  db.exec("PRAGMA journal_mode = WAL; CREATE TABLE events (id INTEGER PRIMARY KEY, data TEXT); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000) INSERT INTO events (data) SELECT randomblob(1000) FROM n");
+  db.exec('PRAGMA journal_mode = WAL; CREATE TABLE events (id INTEGER PRIMARY KEY, data TEXT); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000) INSERT INTO events (data) SELECT randomblob(1000) FROM n');
   const write = db.prepare('INSERT INTO events (data) VALUES (randomblob(100))');
   // A stepped copy (sqlite3's .backup) restarts on every write from another connection, so it never ends.
   const writer = setInterval(() => write.run(), 1);
-  const out = await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'backup-db', commit], { encoding: 'utf8', timeout: 20_000, env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: file } })
-    .finally(() => clearInterval(writer));
+  const out = await promisify(execFile)('bash', [join(repo, 'tools', 'deploy.sh'), 'backup-db', commit], { encoding: 'utf8', timeout: 20_000, env: { ...hostEnv, DEPLOY_LIVE: live, DEPLOY_DB: file } }).finally(() => clearInterval(writer));
   db.close();
   const saved = out.stdout.trim();
   assert.equal(saved, join(dir, 'backups', `pre-deploy-${commit}.db`));
@@ -605,17 +642,26 @@ async function standIn(answer: (req: import('node:http').IncomingMessage, body: 
   const seen: { url: string; body: string; at: number }[] = [];
   const srv = createHttpServer((req, res) => {
     let body = '';
-    req.on('data', (d) => (body += d)).on('end', async () => {
-      seen.push({ url: req.url ?? '', body, at: performance.now() });
-      const a = await answer(req, body);
-      if (a === 'reset') return req.socket.destroy();
-      if (a === 'hang') return;
-      if (typeof a === 'number') return res.writeHead(a).end('{}');
-      res.writeHead(200, { 'Content-Type': 'application/json' }).end(a);
-    });
+    req
+      .on('data', (d) => (body += d))
+      .on('end', async () => {
+        seen.push({ url: req.url ?? '', body, at: performance.now() });
+        const a = await answer(req, body);
+        if (a === 'reset') return req.socket.destroy();
+        if (a === 'hang') return;
+        if (typeof a === 'number') return res.writeHead(a).end('{}');
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end(a);
+      });
   });
   await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  return { url: `http://127.0.0.1:${(srv.address() as any).port}`, seen, close: () => { srv.closeAllConnections(); srv.close(); } };
+  return {
+    url: `http://127.0.0.1:${(srv.address() as any).port}`,
+    seen,
+    close: () => {
+      srv.closeAllConnections();
+      srv.close();
+    },
+  };
 }
 
 test('deploy.sh retries a report the server never got, but not one it may already have (#520)', { timeout: 60_000 }, async () => {
@@ -637,7 +683,7 @@ test('deploy.sh retries a report the server never got, but not one it may alread
     const r = await post(flaky.url);
     assert.equal(flaky.seen.length, 3);
     assert.deepEqual(auth, Array(3).fill('Bearer tok-secret'), 'the token still reaches the server');
-    assert.ok(!existsSync(leaked), 'and is not on curl\'s command line');
+    assert.ok(!existsSync(leaked), "and is not on curl's command line");
     assert.ok(flaky.seen.every((s) => s.url === '/api/tickets/7/deploy' && JSON.parse(s.body).text === 'Deployed abc1234'));
     assert.doesNotMatch(r.stderr, /could not post/);
     assert.deepEqual(sleeps(), ['0.1', '0.1'], 'paused DEPLOY_TEST_REPORT_PAUSE s between tries, not the 1, 2 s backoff');
@@ -710,12 +756,20 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
   const held: (() => void)[] = [];
   let together = true;
   const srv = await standIn((req) => {
-    try { phases.add(readFileSync(join(state, 'restart'), 'utf8').split('\n')[1]); } catch {}
+    try {
+      phases.add(readFileSync(join(state, 'restart'), 'utf8').split('\n')[1]);
+    } catch {}
     if (req.url === '/api/health') return health(Number(restarts()), ++n, { good, target, pidFile });
     lockHeldAtReport.push(spawnSync('flock', ['-n', join(state, 'restart.lock'), 'true']).status !== 0);
     return new Promise<string>((ok) => {
-      const late = setTimeout(() => { together = false; ok('{}'); }, 5000);
-      held.push(() => { clearTimeout(late); ok('{}'); });
+      const late = setTimeout(() => {
+        together = false;
+        ok('{}');
+      }, 5000);
+      held.push(() => {
+        clearTimeout(late);
+        ok('{}');
+      });
       if (held.length === 3) for (const go of held) go();
     });
   });
@@ -726,11 +780,42 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
   try {
     const r = await promisify(execFile)('bash', [copy, 'restart'], {
       encoding: 'utf8',
-      env: { ...hostEnv, PATH: `${bin}:${process.env.PATH}`, DEPLOY_LIVE: live, DEPLOY_DB: join(root, `${name}-no.db`), DEPLOY_NOW: '1', DEPLOY_URL: srv.url, DEPLOY_SERVICE: 'citadel-test', DEPLOY_REMOTE: '', DEPLOY_HEALTHY_WAIT: '3', DEPLOY_TEST_HEALTH_POLL: '0.1', DEPLOY_SETTLE: '0.5', ...(typeof extra === 'function' ? extra({ good, target }) : extra) },
-    }).then((o) => ({ status: 0, stderr: o.stderr }), (e) => ({ status: e.code as number, stderr: e.stderr as string }));
+      env: {
+        ...hostEnv,
+        PATH: `${bin}:${process.env.PATH}`,
+        DEPLOY_LIVE: live,
+        DEPLOY_DB: join(root, `${name}-no.db`),
+        DEPLOY_NOW: '1',
+        DEPLOY_URL: srv.url,
+        DEPLOY_SERVICE: 'citadel-test',
+        DEPLOY_REMOTE: '',
+        DEPLOY_HEALTHY_WAIT: '3',
+        DEPLOY_TEST_HEALTH_POLL: '0.1',
+        DEPLOY_SETTLE: '0.5',
+        ...(typeof extra === 'function' ? extra({ good, target }) : extra),
+      },
+    }).then(
+      (o) => ({ status: 0, stderr: o.stderr }),
+      (e) => ({ status: e.code as number, stderr: e.stderr as string }),
+    );
     const reports = srv.seen.filter((s) => s.url === '/api/tickets/9/deploy').map((s) => ({ ...JSON.parse(s.body), at: s.at }));
     const healthAt = srv.seen.filter((s) => s.url === '/api/health').map((s) => s.at);
-    return { ...r, good, target, reports, healthAt, phases: [...phases], lockHeldAtReport, together: () => together, noteLeft: existsSync(join(state, 'restart')), head: git('rev-parse', 'HEAD'), lastGood: git('rev-parse', 'last-good'), restarts: Number(restarts()), sleeps: sleeps(), systemctl: existsSync(log) ? readFileSync(log, 'utf8') : '' };
+    return {
+      ...r,
+      good,
+      target,
+      reports,
+      healthAt,
+      phases: [...phases],
+      lockHeldAtReport,
+      together: () => together,
+      noteLeft: existsSync(join(state, 'restart')),
+      head: git('rev-parse', 'HEAD'),
+      lastGood: git('rev-parse', 'last-good'),
+      restarts: Number(restarts()),
+      sleeps: sleeps(),
+      systemctl: existsSync(log) ? readFileSync(log, 'utf8') : '',
+    };
   } finally {
     srv.close();
   }
@@ -814,7 +899,7 @@ test('a server that is only slow at the second check is not rolled back, and the
 // Roll back to last green (#1016): deploy.sh --to's restart carries DEPLOY_PIN, the commit it rolled back from. Healthy,
 // it holds lands with <state>/bad until the fix (tools/land.sh bad_check, tagged "rollback" for its message) and pushes
 // nothing; failed, it goes back to what ran, which main still holds, so there's nothing to hold.
-test('a roll back\'s healthy restart holds lands until the fix, and a failed one holds nothing', { timeout: 60_000 }, async () => {
+test("a roll back's healthy restart holds lands until the fix, and a failed one holds nothing", { timeout: 60_000 }, async () => {
   const health = (commit: string) => JSON.stringify({ ok: true, commit });
   const from = 'f'.repeat(40);
   const bad = (name: string) => join(root, `${name}-live`, '.git', 'cc-deploy', 'bad');
@@ -834,7 +919,11 @@ test('a roll back\'s healthy restart holds lands until the fix, and a failed one
 test("a roll back's restart goes back to the commit it was queued for when the checkout moved under it", { timeout: 60_000 }, async () => {
   const health = (commit: string) => JSON.stringify({ ok: true, commit });
   const from = 'f'.repeat(40);
-  const r = await restartWith('pinned-moved', (_restarts, _n, { good }) => health(good), ({ good }) => ({ DEPLOY_PIN: from, DEPLOY_TARGET: good }));
+  const r = await restartWith(
+    'pinned-moved',
+    (_restarts, _n, { good }) => health(good),
+    ({ good }) => ({ DEPLOY_PIN: from, DEPLOY_TARGET: good }),
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, /the checkout moved to [0-9a-f]{7} "target" while this roll back's restart waited; putting it back on [0-9a-f]{7} "good"/);
   assert.equal(r.head, r.good);
@@ -847,7 +936,13 @@ test("a roll back's restart goes back to the commit it was queued for when the c
 // before when it is off, refused, too slow, or the server predates it.
 test('a deploy hands over warm, and restarts as before when the handover is off, refused, slow or unknown (#1170)', { timeout: 120_000 }, async () => {
   const health = (commit: string, handover?: string) => JSON.stringify({ ok: true, commit, handover });
-  const killed = (name: string) => { try { return readFileSync(join(root, `${name}-systemctl.log`), 'utf8').includes('kill -s USR2 --kill-whom=main citadel-test'); } catch { return false; } };
+  const killed = (name: string) => {
+    try {
+      return readFileSync(join(root, `${name}-systemctl.log`), 'utf8').includes('kill -s USR2 --kill-whom=main citadel-test');
+    } catch {
+      return false;
+    }
+  };
 
   // Taken: the new process answers from the target, and nothing restarts.
   const taken = await restartWith('warm', (_restarts, _n, { good, target, pidFile }) => {
@@ -860,10 +955,14 @@ test('a deploy hands over warm, and restarts as before when the handover is off,
   assert.equal(taken.lastGood, taken.target);
 
   // Refused (the copy's schema differs): restart at once, with the reason.
-  const refused = await restartWith('warm-refused', (restarts, _n, { good, target }) => {
-    if (restarts >= 1) return health(target, 'ready');
-    return health(good, killed('warm-refused') ? `refused ${Date.now()} the new code changes the database schema` : 'ready');
-  }, { DEPLOY_HANDOVER_WAIT: '60' });
+  const refused = await restartWith(
+    'warm-refused',
+    (restarts, _n, { good, target }) => {
+      if (restarts >= 1) return health(target, 'ready');
+      return health(good, killed('warm-refused') ? `refused ${Date.now()} the new code changes the database schema` : 'ready');
+    },
+    { DEPLOY_HANDOVER_WAIT: '60' },
+  );
   assert.equal(refused.status, 0, refused.stderr);
   assert.match(refused.stderr, /warm handover refused: the new code changes the database schema, so restarting/);
   assert.equal(refused.restarts, 1);
@@ -875,10 +974,14 @@ test('a deploy hands over warm, and restarts as before when the handover is off,
   assert.equal(slow.restarts, 1);
 
   // Off: one file in the deploy's state folder.
-  const off = await restartWith('warm-off', (restarts, _n, { good, target }) => health(restarts >= 1 ? target : good, 'ready'), () => {
-    writeFileSync(join(root, 'warm-off-live', '.git', 'cc-deploy', 'no-handover'), '');
-    return {};
-  });
+  const off = await restartWith(
+    'warm-off',
+    (restarts, _n, { good, target }) => health(restarts >= 1 ? target : good, 'ready'),
+    () => {
+      writeFileSync(join(root, 'warm-off-live', '.git', 'cc-deploy', 'no-handover'), '');
+      return {};
+    },
+  );
   assert.equal(off.status, 0, off.stderr);
   assert.match(off.stderr, /warm handover is off/);
   assert.equal(killed('warm-off'), false);
@@ -893,15 +996,19 @@ test('a deploy hands over warm, and restarts as before when the handover is off,
   assert.equal(killed('warm-env'), false);
   assert.equal(edited.restarts, 1);
   // ...and one older than that restart hands over.
-  const kept = await restartWith('warm-env-old', (_restarts, _n, { good, target, pidFile }) => {
-    if (!killed('warm-env-old')) return health(good, 'ready');
-    writeFileSync(pidFile, '200');
-    return health(target, 'ready');
-  }, () => {
-    utimesSync(envf, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
-    writeFileSync(join(root, 'warm-env-old-live', '.git', 'cc-deploy', 'cold-restart'), '');
-    return { TEST_ENVF: envf };
-  });
+  const kept = await restartWith(
+    'warm-env-old',
+    (_restarts, _n, { good, target, pidFile }) => {
+      if (!killed('warm-env-old')) return health(good, 'ready');
+      writeFileSync(pidFile, '200');
+      return health(target, 'ready');
+    },
+    () => {
+      utimesSync(envf, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+      writeFileSync(join(root, 'warm-env-old-live', '.git', 'cc-deploy', 'cold-restart'), '');
+      return { TEST_ENVF: envf };
+    },
+  );
   assert.equal(kept.status, 0, kept.stderr);
   assert.equal(kept.restarts, 0, kept.systemctl);
 
@@ -928,7 +1035,10 @@ test('a restart waits for a starved box at most its hold, then goes anyway and s
   const state = (name: string) => join(root, `${name}-live`, '.git', 'cc-deploy');
   const waiting = { DEPLOY_NOW: '', DEPLOY_IDLE_POLL: '0.2', DEPLOY_TEST_IDLE_RECHECK: '0' };
   const health = (restarts: number, { good, target }: { good: string; target: string }) => JSON.stringify({ ok: true, commit: restarts >= 1 ? target : good, interruptible: 0 });
-  const restartLine = (name: string) => readdirSync(join(shared(name), 'retro-log')).flatMap((d) => readFileSync(join(shared(name), 'retro-log', d, 'land.md'), 'utf8').split('\n')).filter((l) => l.includes(' · restart · '));
+  const restartLine = (name: string) =>
+    readdirSync(join(shared(name), 'retro-log'))
+      .flatMap((d) => readFileSync(join(shared(name), 'retro-log', d, 'land.md'), 'utf8').split('\n'))
+      .filter((l) => l.includes(' · restart · '));
 
   // Starved past the hold: it goes anyway, and the report and the ship log say so.
   const anyway = await restartWith('starved', (restarts, _n, c) => health(restarts, c), { ...waiting, ...psi('starved', 63), DEPLOY_PRESSURE_HOLD: '1', COORDINATOR_SHARED_DIR: shared('starved') });
@@ -943,14 +1053,18 @@ test('a restart waits for a starved box at most its hold, then goes anyway and s
 
   // The box eases during the hold: it goes then, before the hold is out. The hold note says when it would go at the latest.
   let latest = 0;
-  const eased = await restartWith('eased', (restarts, _n, c) => {
-    const hold = join(state('eased'), 'hold');
-    if (!latest && existsSync(hold)) {
-      latest = Number(readFileSync(hold, 'utf8').split(' ')[0]);
-      writeFileSync(join(root, 'eased-psi-cpu'), 'some avg10=5.00 avg60=5.00 avg300=1.00 total=1\n');
-    }
-    return health(restarts, c);
-  }, { ...waiting, ...psi('eased', 63), DEPLOY_PRESSURE_HOLD: '600', COORDINATOR_SHARED_DIR: shared('eased') });
+  const eased = await restartWith(
+    'eased',
+    (restarts, _n, c) => {
+      const hold = join(state('eased'), 'hold');
+      if (!latest && existsSync(hold)) {
+        latest = Number(readFileSync(hold, 'utf8').split(' ')[0]);
+        writeFileSync(join(root, 'eased-psi-cpu'), 'some avg10=5.00 avg60=5.00 avg300=1.00 total=1\n');
+      }
+      return health(restarts, c);
+    },
+    { ...waiting, ...psi('eased', 63), DEPLOY_PRESSURE_HOLD: '600', COORDINATOR_SHARED_DIR: shared('eased') },
+  );
   assert.equal(eased.status, 0, eased.stderr);
   assert.ok(latest > Date.now() / 1000 + 500, `the hold note names its latest go, 600 s on: ${latest}`);
   assert.doesNotMatch(eased.stderr, /restarting anyway/);
@@ -962,16 +1076,20 @@ test('a restart waits for a starved box at most its hold, then goes anyway and s
   // and the report counts only the starved wait. The box eases while the turn runs, and it restarts once the turn ends.
   let phase = 0;
   let noteDuringTurn: boolean | undefined;
-  const turned = await restartWith('turned', (restarts, _n, c) => {
-    const hold = join(state('turned'), 'hold');
-    if (restarts === 0 && phase === 0 && existsSync(hold)) phase = 1;
-    else if (phase === 1) {
-      noteDuringTurn = existsSync(hold);
-      writeFileSync(join(root, 'turned-psi-cpu'), 'some avg10=5.00 avg60=5.00 avg300=1.00 total=1\n');
-      phase = 2;
-    } else if (phase === 2) phase = 3;
-    return restarts === 0 && (phase === 1 || phase === 2) ? JSON.stringify({ ok: true, commit: c.good, interruptible: 1 }) : health(restarts, c);
-  }, { ...waiting, ...psi('turned', 63), DEPLOY_PRESSURE_HOLD: '600', COORDINATOR_SHARED_DIR: shared('turned') });
+  const turned = await restartWith(
+    'turned',
+    (restarts, _n, c) => {
+      const hold = join(state('turned'), 'hold');
+      if (restarts === 0 && phase === 0 && existsSync(hold)) phase = 1;
+      else if (phase === 1) {
+        noteDuringTurn = existsSync(hold);
+        writeFileSync(join(root, 'turned-psi-cpu'), 'some avg10=5.00 avg60=5.00 avg300=1.00 total=1\n');
+        phase = 2;
+      } else if (phase === 2) phase = 3;
+      return restarts === 0 && (phase === 1 || phase === 2) ? JSON.stringify({ ok: true, commit: c.good, interruptible: 1 }) : health(restarts, c);
+    },
+    { ...waiting, ...psi('turned', 63), DEPLOY_PRESSURE_HOLD: '600', COORDINATOR_SHARED_DIR: shared('turned') },
+  );
   assert.equal(turned.status, 0, turned.stderr);
   assert.equal(noteDuringTurn, false, 'the hold note goes once a turn starts');
   assert.match(turned.stderr, /waiting for 1 running turn a restart would cut off/);
@@ -982,8 +1100,13 @@ test('a restart waits for a starved box at most its hold, then goes anyway and s
   // starts another, but HOLD caps the stretches together, so it still goes anyway (ultra review 2026-11-23, fix B). Before,
   // each stretch got a fresh HOLD and held polls didn't count toward IDLE_TRIES, so it waited until the turn polls ran
   // out and gave up with nothing live.
-  const flicker = await restartWith('flicker', (restarts, n, c) => (restarts === 0 && n % 4 === 0 ? JSON.stringify({ ok: true, commit: c.good, interruptible: 1 }) : health(restarts, c)),
-    { ...waiting, ...psi('flicker', 63), DEPLOY_PRESSURE_HOLD: '2', DEPLOY_IDLE_TRIES: '30', COORDINATOR_SHARED_DIR: shared('flicker') });
+  const flicker = await restartWith('flicker', (restarts, n, c) => (restarts === 0 && n % 4 === 0 ? JSON.stringify({ ok: true, commit: c.good, interruptible: 1 }) : health(restarts, c)), {
+    ...waiting,
+    ...psi('flicker', 63),
+    DEPLOY_PRESSURE_HOLD: '2',
+    DEPLOY_IDLE_TRIES: '30',
+    COORDINATOR_SHARED_DIR: shared('flicker'),
+  });
   assert.equal(flicker.status, 0, flicker.stderr);
   assert.doesNotMatch(flicker.stderr, /Gave up/);
   assert.match(flicker.stderr, /the box is still starved \(CPU pressure 63%\) after [2-9] s in all: restarting anyway/);
@@ -997,10 +1120,14 @@ test('a restart waits for a starved box at most its hold, then goes anyway and s
 
   // Never held: under the line, a roll back, a fix's restart, a restart while lands wait for a fix.
   const quiet = async (name: string, cpu: number, extra: Record<string, string> = {}, file?: string) => {
-    const r = await restartWith(name, (restarts, _n, c) => health(restarts, c), () => {
-      if (file) writeFileSync(join(state(name), file), file === 'bad' ? `${'e'.repeat(40)} x 1 y\n` : '');
-      return { ...waiting, ...psi(name, cpu), DEPLOY_PRESSURE_HOLD: '600', ...extra };
-    });
+    const r = await restartWith(
+      name,
+      (restarts, _n, c) => health(restarts, c),
+      () => {
+        if (file) writeFileSync(join(state(name), file), file === 'bad' ? `${'e'.repeat(40)} x 1 y\n` : '');
+        return { ...waiting, ...psi(name, cpu), DEPLOY_PRESSURE_HOLD: '600', ...extra };
+      },
+    );
     assert.equal(r.status, 0, `${name}: ${r.stderr}`);
     assert.doesNotMatch(r.stderr, /starved/, name);
     assert.equal(r.restarts, 1, name);

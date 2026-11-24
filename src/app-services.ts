@@ -55,9 +55,20 @@ export interface Manifest {
 }
 
 /** An app's DATA_DIR size, from the last background measure (#847). */
-export interface DiskUse { data_bytes: number | null; measured_at: string; warn_gb: number | null }
+export interface DiskUse {
+  data_bytes: number | null;
+  measured_at: string;
+  warn_gb: number | null;
+}
 /** One line of `journalctl -o json`, the fields read. */
-interface JournalLine { __CURSOR?: unknown; __REALTIME_TIMESTAMP?: unknown; MESSAGE?: unknown; USER_UNIT?: unknown; _SYSTEMD_USER_UNIT?: unknown; PRIORITY?: unknown }
+interface JournalLine {
+  __CURSOR?: unknown;
+  __REALTIME_TIMESTAMP?: unknown;
+  MESSAGE?: unknown;
+  USER_UNIT?: unknown;
+  _SYSTEMD_USER_UNIT?: unknown;
+  PRIORITY?: unknown;
+}
 
 /** The environment Citadel sets on every app's units; a manifest can't. */
 export const CITADEL_ENV = ['PORT', 'DATA_DIR', 'CITADEL_KEYS', 'CITADEL_URL', 'BASE_PATH', 'PATH', 'CITADEL_HEAVY'];
@@ -196,24 +207,33 @@ export function unitFiles({ row, manifest, folder, keysDir, citadelUrl, home }: 
   const dir = (rel: string) => `WorkingDirectory=${(rel === '.' ? folder : join(folder, rel)).replace(/%/g, '%%')}`;
   const head = [OWNED(row.name), `# Citadel rewrites it on install and deploy: change the app's ${MANIFEST} or its entry in Settings → Contraptions, not this file.`];
   const files = new Map<string, string>();
-  files.set(`${unitName(row.name)}.service`, [
-    ...head,
-    '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')} (Citadel contraption)`, 'After=network.target', 'StartLimitIntervalSec=0', '',
-    '[Service]', dir(manifest.workdir), `ExecStart=${execLine(manifest.start, home)}`, search, ...envLines, 'Restart=always', 'RestartSec=5', SLICE, THP_LINE, '',
-    '[Install]', 'WantedBy=default.target', '',
-  ].join('\n'));
+  files.set(
+    `${unitName(row.name)}.service`,
+    [
+      ...head,
+      '[Unit]',
+      `Description=${row.title.replace(/[%\\]/g, '')} (Citadel contraption)`,
+      'After=network.target',
+      'StartLimitIntervalSec=0',
+      '',
+      '[Service]',
+      dir(manifest.workdir),
+      `ExecStart=${execLine(manifest.start, home)}`,
+      search,
+      ...envLines,
+      'Restart=always',
+      'RestartSec=5',
+      SLICE,
+      THP_LINE,
+      '',
+      '[Install]',
+      'WantedBy=default.target',
+      '',
+    ].join('\n'),
+  );
   for (const [job, t] of Object.entries(manifest.timers)) {
-    files.set(`${unitName(row.name, job)}.service`, [
-      ...head,
-      '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')}: ${job} (Citadel contraption job)`, '',
-      '[Service]', 'Type=oneshot', dir(t.workdir), `ExecStart=${execLine(t.command, home)}`, search, ...envLines, SLICE, THP_LINE, '',
-    ].join('\n'));
-    files.set(`${unitName(row.name, job)}.timer`, [
-      ...head,
-      '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')}: ${job} timer`, '',
-      '[Timer]', `OnCalendar=${t.on_calendar.replace(/%/g, '%%')}`, 'Persistent=true', '',
-      '[Install]', 'WantedBy=timers.target', '',
-    ].join('\n'));
+    files.set(`${unitName(row.name, job)}.service`, [...head, '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')}: ${job} (Citadel contraption job)`, '', '[Service]', 'Type=oneshot', dir(t.workdir), `ExecStart=${execLine(t.command, home)}`, search, ...envLines, SLICE, THP_LINE, ''].join('\n'));
+    files.set(`${unitName(row.name, job)}.timer`, [...head, '[Unit]', `Description=${row.title.replace(/[%\\]/g, '')}: ${job} timer`, '', '[Timer]', `OnCalendar=${t.on_calendar.replace(/%/g, '%%')}`, 'Persistent=true', '', '[Install]', 'WantedBy=timers.target', ''].join('\n'));
   }
   return files;
 }
@@ -329,7 +349,12 @@ async function lastLines(log: string, from: number): Promise<string> {
     const start = Math.max(from, size - 8192);
     const buf = Buffer.alloc(size - start);
     await f.read(buf, 0, buf.length, start);
-    const lines = buf.toString('utf8').split('\n').map((l) => l.trimEnd()).filter(Boolean).slice(-12);
+    const lines = buf
+      .toString('utf8')
+      .split('\n')
+      .map((l) => l.trimEnd())
+      .filter(Boolean)
+      .slice(-12);
     return lines.length ? `\nIts last lines:\n${lines.map((l) => `  ${l.slice(0, 300)}`).join('\n')}` : '\nIt printed nothing.';
   } finally {
     await f.close();
@@ -387,9 +412,7 @@ export interface ServiceOptions {
 export function serviceOptions(env: NodeJS.ProcessEnv, liveData: boolean, bootCheck: boolean, rest: Pick<ServiceOptions, 'keysDir' | 'citadelUrl' | 'logDir'>): ServiceOptions {
   const home = homedir();
   const stand = !!env.CITADEL_SYSTEMCTL && !!env.XDG_CONFIG_HOME;
-  const off = bootCheck ? 'A boot check or a preview never touches app services.'
-    : !liveData && !stand ? "Only the live Citadel manages app services: a dev copy needs CITADEL_SYSTEMCTL and XDG_CONFIG_HOME pointing somewhere else."
-    : null;
+  const off = bootCheck ? 'A boot check or a preview never touches app services.' : !liveData && !stand ? 'Only the live Citadel manages app services: a dev copy needs CITADEL_SYSTEMCTL and XDG_CONFIG_HOME pointing somewhere else.' : null;
   return {
     off,
     unitDir: join(env.XDG_CONFIG_HOME || join(home, '.config'), 'systemd', 'user'),
@@ -456,7 +479,10 @@ export class AppServices {
 
   /** Measure 2 min after boot, then every 30 min after each round ends. */
   watchDisk(rows: () => Pick<ContraptionRow, 'name' | 'folder'>[]): void {
-    const round = () => void this.measureDisk(rows()).catch((err) => console.warn(`Measuring the apps' disk use failed: ${err.message}`)).finally(() => setTimeout(round, 30 * 60_000).unref());
+    const round = () =>
+      void this.measureDisk(rows())
+        .catch((err) => console.warn(`Measuring the apps' disk use failed: ${err.message}`))
+        .finally(() => setTimeout(round, 30 * 60_000).unref());
     setTimeout(round, 2 * 60_000).unref();
   }
 
@@ -540,9 +566,7 @@ export class AppServices {
       const text = await readFile(join(this.opts.unitDir, f), 'utf8').catch(() => '');
       if (!text || ownedBy(text) !== null) continue;
       const plain = text.replace(/%h/g, this.opts.home).replace(/^\s*#.*$/gm, '');
-      const why = new RegExp(`\\bPORT=${row.port}\\b`).test(plain) ? `port ${row.port}`
-        : plain.split('\n').some((l) => /^\s*(WorkingDirectory|ExecStart)\s*=/.test(l) && (l.includes(`${folder}/`) || new RegExp(`${folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|"|$)`).test(l))) ? `runs from ${folder}`
-        : null;
+      const why = new RegExp(`\\bPORT=${row.port}\\b`).test(plain) ? `port ${row.port}` : plain.split('\n').some((l) => /^\s*(WorkingDirectory|ExecStart)\s*=/.test(l) && (l.includes(`${folder}/`) || new RegExp(`${folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|"|$)`).test(l))) ? `runs from ${folder}` : null;
       if (!why) continue;
       const base = f.replace(/\.service$/, '');
       found.push({ ...(await this.state(f)), path: join(this.opts.unitDir, f), why });
@@ -562,11 +586,21 @@ export class AppServices {
       manifestError = thrown(err).message!;
     }
     const owned = await this.owned(row.name);
-    const timers = await Promise.all(owned.filter((f) => f.endsWith('.timer')).sort().map((f) => this.state(f)));
+    const timers = await Promise.all(
+      owned
+        .filter((f) => f.endsWith('.timer'))
+        .sort()
+        .map((f) => this.state(f)),
+    );
     return {
-      unit: `${unitName(row.name)}.service`, folder, manifestError, health,
+      unit: `${unitName(row.name)}.service`,
+      folder,
+      manifestError,
+      health,
       installed: owned.includes(`${unitName(row.name)}.service`),
-      service: await this.state(`${unitName(row.name)}.service`), timers, hand: await this.handInstalled(row),
+      service: await this.state(`${unitName(row.name)}.service`),
+      timers,
+      hand: await this.handInstalled(row),
     };
   }
 
@@ -598,7 +632,7 @@ export class AppServices {
    */
   private async installNow(row: ContraptionRow, opts: { replace?: boolean; all?: ContraptionRow[]; holds?: (() => void)[]; stage?: (stage: string) => void; slot?: string; data?: () => Promise<void> }): Promise<string[]> {
     // Units run from the real folder, never through the link, so a running app never sees a deploy's flip (#801).
-    const folder = opts.slot ?? await realpath(this.folder(row)).catch(() => this.folder(row));
+    const folder = opts.slot ?? (await realpath(this.folder(row)).catch(() => this.folder(row)));
     const manifest = await this.manifest(row, folder);
     const files = unitFiles(this.inputs(row, manifest, folder));
     // citadel-app-<name>-<job> mustn't be another contraption's own unit.
@@ -757,7 +791,10 @@ export class AppServices {
     for (const name of await readdir(this.opts.logDir).catch(() => [] as string[])) {
       if (this.busy.has(name)) continue;
       const file = join(this.opts.logDir, name, DEPLOYING);
-      const m = await readFile(file, 'utf8').then((t) => JSON.parse(t), () => null);
+      const m = await readFile(file, 'utf8').then(
+        (t) => JSON.parse(t),
+        () => null,
+      );
       if (!m || typeof m !== 'object') continue;
       await rm(file, { force: true });
       if (typeof m.log === 'string' && dirname(m.log) === join(this.opts.logDir, name)) {
@@ -819,26 +856,32 @@ export class AppServices {
     const log = join(this.opts.logDir, row.name, `${new Date(started).toISOString().replace(/[:.]/g, '-')}.log`);
     const view: DeployView = { name: row.name, state: 'running', by, repo: row.repo, branch: row.branch ?? 'main', from: null, to: null, started_at: started, finished_at: null, said: [], todo: [], log, stages: { build: started } };
     this.deploys.set(row.name, view);
-    void track('app deploys', this.deployNow(row, view, all, identity, hooks)
-      .catch((err) => {
-        view.said.push(`Failed: ${err.message}`);
-        view.state = 'failed';
-      })
-      .finally(async () => {
-        await appendFile(log, `== ${view.state} at ${new Date().toISOString()}\n`).catch(() => {});
-        if (this.stopping) await appendFile(log, '== Citadel is restarting: this deploy starts again once it is back.\n').catch(() => {});
-        else await rm(join(this.opts.logDir, row.name, DEPLOYING), { force: true }).catch(() => {});
-        this.busy.delete(row.name);
-        view.finished_at = Date.now();
-        this.safely(view);
-        await this.pruneLogs(row.name).catch(() => {});
-      }));
+    void track(
+      'app deploys',
+      this.deployNow(row, view, all, identity, hooks)
+        .catch((err) => {
+          view.said.push(`Failed: ${err.message}`);
+          view.state = 'failed';
+        })
+        .finally(async () => {
+          await appendFile(log, `== ${view.state} at ${new Date().toISOString()}\n`).catch(() => {});
+          if (this.stopping) await appendFile(log, '== Citadel is restarting: this deploy starts again once it is back.\n').catch(() => {});
+          else await rm(join(this.opts.logDir, row.name, DEPLOYING), { force: true }).catch(() => {});
+          this.busy.delete(row.name);
+          view.finished_at = Date.now();
+          this.safely(view);
+          await this.pruneLogs(row.name).catch(() => {});
+        }),
+    );
     return view;
   }
 
   private async pruneLogs(name: string) {
     const dir = join(this.opts.logDir, name);
-    const old = (await readdir(dir)).filter((f) => f.endsWith('.log')).sort().slice(0, -20);
+    const old = (await readdir(dir))
+      .filter((f) => f.endsWith('.log'))
+      .sort()
+      .slice(0, -20);
     for (const f of old) await rm(join(dir, f), { force: true });
   }
 
@@ -931,7 +974,10 @@ export class AppServices {
         try {
           await symlink(link, folder);
         } catch (err) {
-          const back = await rename(a, folder).then(() => 'so it was moved back', (e) => `and moving it back failed too (${e.message}): the next deploy links it`);
+          const back = await rename(a, folder).then(
+            () => 'so it was moved back',
+            (e) => `and moving it back failed too (${e.message}): the next deploy links it`,
+          );
           throw new Error(`Couldn't link ${folder} to ${a}, ${back}: ${thrown(err).message}`);
         }
         await say(`Moved ${folder} to ${a} and linked it there: from now on a deploy builds in a second folder beside it.`);
@@ -950,12 +996,18 @@ export class AppServices {
       await say(`Fetching ${repo} ${view.branch}.`);
       if (await network(['git', 'fetch', '--quiet', 'origin', view.branch], next)) throw new Error(`Fetching ${repo} failed: see the log.`);
       let to = await git(next, 'rev-parse', 'FETCH_HEAD');
-      const inBranch = (ancestor: string, commit: string) => git(next, 'merge-base', '--is-ancestor', ancestor, commit).then(() => true, () => false);
+      const inBranch = (ancestor: string, commit: string) =>
+        git(next, 'merge-base', '--is-ancestor', ancestor, commit).then(
+          () => true,
+          () => false,
+        );
       if (hooks.to) {
         // A roll back (#1016) goes to an older commit of the branch, never one off it; nor past a change to the data's shape.
         if (!(await inBranch(hooks.to, to))) throw new Error(`${short(hooks.to)} isn't on ${repo}'s ${view.branch}, so nothing changed.`);
         // Both ends' migrations: the commit it goes back to may list a path the live one dropped.
-        const there = await git(next, 'show', `${hooks.to}:${repoPath(row, MANIFEST)}`).then(parseManifest).catch(() => null);
+        const there = await git(next, 'show', `${hooks.to}:${repoPath(row, MANIFEST)}`)
+          .then(parseManifest)
+          .catch(() => null);
         const paths = [...new Set([...((await this.manifest(row, old).catch(() => null))?.migrations ?? []), ...(there?.migrations ?? [])])].map((p) => repoPath(row, p));
         const moved = paths.length ? (await git(next, 'diff', '--name-only', hooks.to, prev, '--', ...paths)).split('\n').filter(Boolean) : [];
         if (moved.length) {
@@ -963,7 +1015,10 @@ export class AppServices {
           const changed = `Its migrations changed since ${short(hooks.to)} (${moved.slice(0, 5).join(', ')}${moved.length > 5 ? `, ${moved.length - 5} more` : ''})`;
           for (const snap of await listSnapshots(snapshotsDir(this.opts.home, row.name))) {
             if (snap.failed) continue; // what a failed start left: its code ran on it, but it's the shape that failed
-            const same = await git(next, 'diff', '--name-only', snap.commit, hooks.to, '--', ...paths).then((out) => !out, () => false);
+            const same = await git(next, 'diff', '--name-only', snap.commit, hooks.to, '--', ...paths).then(
+              (out) => !out,
+              () => false,
+            );
             if (same) {
               restore = snap;
               break;
@@ -1007,7 +1062,9 @@ export class AppServices {
             const heavyEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('CITADEL_HEAVY_') && k !== 'CITADEL_HEAVY_HELD'));
             const fd = openSync(view.log, 'a');
             holder = spawn(this.opts.heavy, ['sh', '-c', 'echo; exec cat >/dev/null'], {
-              cwd: appRoot(row, next), env: { ...env, ...heavyEnv, CITADEL_HEAVY_WHO: who, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHAT: `build: ${m.build.join('; ')}` }, stdio: ['pipe', 'pipe', fd],
+              cwd: appRoot(row, next),
+              env: { ...env, ...heavyEnv, CITADEL_HEAVY_WHO: who, CITADEL_HEAVY_PRIORITY: '1', CITADEL_HEAVY_WHAT: `build: ${m.build.join('; ')}` },
+              stdio: ['pipe', 'pipe', fd],
             });
             closeSync(fd);
             holder.stdin!.on('error', () => {}); // it may be gone already when the build ends
@@ -1031,8 +1088,21 @@ export class AppServices {
             const stepEnv = { ...env, CITADEL_HEAVY_HELD: '1', CITADEL_HEAVY_WHO: who };
             const unit = buildUnit(row.name);
             const argv = this.opts.systemdRun
-              ? [this.opts.systemdRun, '--user', '--wait', '--collect', `--unit=${unit}`, '--slice=contraptions.slice', `--working-directory=${appRoot(row, next)}`, `--property=StandardOutput=append:${view.log}`,
-                `--property=StandardError=append:${view.log}`, ...thpProps(), ...Object.entries(stepEnv).map(([k, v]) => `--setenv=${k}=${v}`), '--', ...inner]
+              ? [
+                  this.opts.systemdRun,
+                  '--user',
+                  '--wait',
+                  '--collect',
+                  `--unit=${unit}`,
+                  '--slice=contraptions.slice',
+                  `--working-directory=${appRoot(row, next)}`,
+                  `--property=StandardOutput=append:${view.log}`,
+                  `--property=StandardError=append:${view.log}`,
+                  ...thpProps(),
+                  ...Object.entries(stepEnv).map(([k, v]) => `--setenv=${k}=${v}`),
+                  '--',
+                  ...inner,
+                ]
               : inner;
             // A backstop past timeout's own kill: the unit is stopped too (stopping systemd-run alone leaves it running).
             const code = await sh(argv, appRoot(row, next), secs * 1000 + 15_000, stepEnv);
@@ -1063,16 +1133,16 @@ export class AppServices {
       }
       const data = snapWhy
         ? async () => {
-          const r = await takeSnapshot(dataDir, snapRoot, { commit: prev!, why: `${short(prev)}'s data, ${snapWhy}` });
-          taken = r.snap;
-          for (const line of r.said) await say(line);
-        }
-        : restore
-          ? async () => {
-            const r = await restoreSnapshot(dataDir, snapRoot, restore!, { commit: prev!, why: `${short(prev)}'s data, kept when ${view.by} rolled back to ${short(view.to)}` });
-            taken = r.kept;
+            const r = await takeSnapshot(dataDir, snapRoot, { commit: prev!, why: `${short(prev)}'s data, ${snapWhy}` });
+            taken = r.snap;
             for (const line of r.said) await say(line);
           }
+        : restore
+          ? async () => {
+              const r = await restoreSnapshot(dataDir, snapRoot, restore!, { commit: prev!, why: `${short(prev)}'s data, kept when ${view.by} rolled back to ${short(view.to)}` });
+              taken = r.kept;
+              for (const line of r.said) await say(line);
+            }
           : undefined;
       try {
         await start(next, m, data);
@@ -1089,9 +1159,15 @@ export class AppServices {
         await say(`Rolling back to ${short(prev)}, built as it was in ${old}${taken ? `, and its data to ${restore ? 'what it had before' : 'the snapshot taken before this deploy'}` : ''}.`);
         const back: Snapshot | null = taken;
         try {
-          await start(old, await this.manifest(row, old), back ? async () => {
-            for (const line of (await restoreSnapshot(dataDir, snapRoot, back, { commit: view.to!, why: `the data ${short(view.to)} left when its deploy failed and rolled back`, failed: true })).said) await say(line);
-          } : undefined);
+          await start(
+            old,
+            await this.manifest(row, old),
+            back
+              ? async () => {
+                  for (const line of (await restoreSnapshot(dataDir, snapRoot, back, { commit: view.to!, why: `the data ${short(view.to)} left when its deploy failed and rolled back`, failed: true })).said) await say(line);
+                }
+              : undefined,
+          );
           view.state = 'rolled back';
           await say(`Rolled back: ${short(prev)} runs again.`);
         } catch (again) {
@@ -1129,40 +1205,53 @@ export class AppServices {
     const first = await check(5000);
     if (!first.unchecked) return finish(first);
     await say(`Couldn't check how it installs: ${first.unchecked}. Trying again shortly.`);
-    void track('install check retries', new Promise<void>((done) => {
-      setTimeout(async () => {
-        try {
-          const again = await check(20_000);
-          if (!again.unchecked) return await finish(again);
-          const line = `Couldn't check how ${row.name} installs: ${again.unchecked}. Nothing to do unless it repeats.`;
-          await say(line);
-          hooks.unchecked?.(line);
-        } catch (err) {
-          console.error(`${row.name}'s install check retry failed:`, err);
-        } finally {
-          done();
-        }
-      }, this.opts.installRetryMs).unref();
-    }));
+    void track(
+      'install check retries',
+      new Promise<void>((done) => {
+        setTimeout(async () => {
+          try {
+            const again = await check(20_000);
+            if (!again.unchecked) return await finish(again);
+            const line = `Couldn't check how ${row.name} installs: ${again.unchecked}. Nothing to do unless it repeats.`;
+            await say(line);
+            hooks.unchecked?.(line);
+          } catch (err) {
+            console.error(`${row.name}'s install check retry failed:`, err);
+          } finally {
+            done();
+          }
+        }, this.opts.installRetryMs).unref();
+      }),
+    );
   }
 
   /** Wait for its service to be active and its health path (or port) to answer, twice, a few seconds apart. */
   private async healthy(row: ContraptionRow, health: string | null) {
     const main = `${unitName(row.name)}.service`;
     const until = Date.now() + this.opts.healthMs;
-    const probe = async () => (health
-      ? fetch(`http://127.0.0.1:${row.port}${health}`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok, () => false)
-      : new Promise<boolean>((ok) => {
-        const sock = connect({ host: '127.0.0.1', port: row.port, timeout: 1000 });
-        const done = (v: boolean) => { sock.destroy(); ok(v); };
-        sock.once('connect', () => done(true)).once('error', () => done(false)).once('timeout', () => done(false));
-      }));
+    const probe = async () =>
+      health
+        ? fetch(`http://127.0.0.1:${row.port}${health}`, { signal: AbortSignal.timeout(3000) }).then(
+            (r) => r.ok,
+            () => false,
+          )
+        : new Promise<boolean>((ok) => {
+            const sock = connect({ host: '127.0.0.1', port: row.port, timeout: 1000 });
+            const done = (v: boolean) => {
+              sock.destroy();
+              ok(v);
+            };
+            sock
+              .once('connect', () => done(true))
+              .once('error', () => done(false))
+              .once('timeout', () => done(false));
+          });
     let seen = '';
     // Polls scale with healthMs (1 s at most), so a short healthMs isn't spent asleep (#377).
     const poll = Math.min(1000, this.opts.healthMs / 10);
     for (let first = true; Date.now() < until; await new Promise((r) => setTimeout(r, poll))) {
       const state = (await this.state(main)).active;
-      const ok = state === 'active' && await probe();
+      const ok = state === 'active' && (await probe());
       if (!ok) {
         seen = `${main} ${state}${state === 'active' ? `, ${health ?? `port ${row.port}`} not answering` : ''}`;
         first = true;

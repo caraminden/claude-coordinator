@@ -77,7 +77,7 @@ test('a minion in a build branches from build/<n> once it exists, and from main 
   assert.equal(buildBranch(null, 7), null);
 });
 
-test("a build branch that only origin has is the base too", async () => {
+test('a build branch that only origin has is the base too', async () => {
   const pushed = join(root, 'pushed-build');
   git(['clone', '--quiet', remote, pushed], root);
   commit(pushed, 'on build 9');
@@ -105,7 +105,11 @@ test("main catches up: only a fast-forward, only on a clean main, never when it'
   git(['clone', '--quiet', remote, r], root);
   git(['pull', '--quiet', '--ff-only', remote, 'main'], seed);
   const main = () => git(['rev-parse', 'main'], r);
-  const pushFromSeed = (m: string) => { commit(seed, m); git(['push', '--quiet', remote, 'main'], seed); git(['fetch', '--quiet', 'origin'], r); };
+  const pushFromSeed = (m: string) => {
+    commit(seed, m);
+    git(['push', '--quiet', remote, 'main'], seed);
+    git(['fetch', '--quiet', 'origin'], r);
+  };
 
   // Level, or main ahead (a scheme whose base is local main, as land.sh keeps Citadel's): untouched.
   assert.equal(await catchUpMain(r), null);
@@ -126,7 +130,7 @@ test("main catches up: only a fast-forward, only on a clean main, never when it'
   writeFileSync(join(r, 'tracked.txt'), 'x');
   git(['add', 'tracked.txt'], r);
   const before = main();
-  assert.match(await catchUpMain(r) ?? '', /uncommitted changes/);
+  assert.match((await catchUpMain(r)) ?? '', /uncommitted changes/);
   assert.equal(main(), before);
   git(['reset', '--quiet'], r);
   rmSync(join(r, 'tracked.txt'));
@@ -137,14 +141,14 @@ test("main catches up: only a fast-forward, only on a clean main, never when it'
   pushFromSeed('merged while elsewhere');
   git(['switch', '--quiet', '-c', 'side'], r);
   const stale = main();
-  assert.match(await catchUpMain(r) ?? '', /on side, not main/);
+  assert.match((await catchUpMain(r)) ?? '', /on side, not main/);
   assert.equal(main(), stale);
   git(['switch', '--quiet', 'main'], r);
 
   // Diverged: skipped, never forced.
   commit(r, 'local only');
   const local = main();
-  assert.match(await catchUpMain(r) ?? '', /diverged/);
+  assert.match((await catchUpMain(r)) ?? '', /diverged/);
   assert.equal(main(), local);
 });
 
@@ -154,7 +158,10 @@ test('a stuck main is reported once per reason, and once more when it is level a
   git(['pull', '--quiet', '--ff-only', remote, 'main'], seed);
   const told: (string | null)[] = [];
   const was = mainSync.stuck;
-  mainSync.stuck = (_dir, why) => { told.push(why); throw new Error('a broken reporter must not fail the sync'); };
+  mainSync.stuck = (_dir, why) => {
+    told.push(why);
+    throw new Error('a broken reporter must not fail the sync');
+  };
   try {
     await syncMain(r);
     commit(seed, 'merged on GitHub');
@@ -199,7 +206,13 @@ test('a fetch from a remote that stalls gives up after its own limit, and main i
   // gone. Its stderr goes away so a sleep that outlives git can't hold the fetch open.
   const ssh = join(root, 'ssh-stall');
   const pidFile = join(root, 'ssh-stall.pid');
-  const sshPid = () => { try { return Number(readFileSync(pidFile, 'utf8')) > 0 ? Number(readFileSync(pidFile, 'utf8')) : 0; } catch { return 0; } }; // never 0: kill(0) is our own group
+  const sshPid = () => {
+    try {
+      return Number(readFileSync(pidFile, 'utf8')) > 0 ? Number(readFileSync(pidFile, 'utf8')) : 0;
+    } catch {
+      return 0;
+    }
+  }; // never 0: kill(0) is our own group
   writeFileSync(ssh, `#!/bin/sh\necho $$ > ${pidFile}\nexec sleep 30 2>/dev/null\n`, { mode: 0o755 });
   git(['config', 'core.sshCommand', ssh], r);
   git(['remote', 'set-url', 'origin', 'ssh://stall.invalid/x.git'], r);
@@ -215,6 +228,9 @@ test('a fetch from a remote that stalls gives up after its own limit, and main i
   } finally {
     mainSync.fetchMs = was;
     const pid = sshPid();
-    if (pid) try { process.kill(pid, 'SIGKILL'); } catch {}
+    if (pid)
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
   }
 });

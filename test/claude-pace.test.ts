@@ -27,7 +27,10 @@ function box(text: string | null) {
   const dir = join(root, `heavy-${n++}`);
   mkdirSync(dir);
   const file = join(dir, 'memory-level');
-  const level = (t: string) => { writeFileSync(`${file}.tmp`, t); renameSync(`${file}.tmp`, file); };
+  const level = (t: string) => {
+    writeFileSync(`${file}.tmp`, t);
+    renameSync(`${file}.tmp`, file);
+  };
   if (text !== null) level(text);
   const env = (more: Record<string, string> = {}) => scriptEnv({ PATH, CLAUDECODE: '1', CITADEL_HEAVY_DIR: dir, CITADEL_HEAVY_WHO: 'Delve #4', CITADEL_PACE_POLL: '0.1', CITADEL_PACE_SPACING: '600', CITADEL_PACE_HOLD: '600', ...more });
   return { dir, file, level, env };
@@ -35,7 +38,8 @@ function box(text: string | null) {
 const runNow = (env: NodeJS.ProcessEnv) => spawnSync('claude', ['-p', 'hi'], { env, encoding: 'utf8', timeout: 20_000 });
 function start(env: NodeJS.ProcessEnv) {
   const child = spawn('claude', ['-p', 'hi'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-  let out = '', err = '';
+  let out = '',
+    err = '';
   child.stdout!.on('data', (b) => (out += b));
   child.stderr!.on('data', (b) => (err += b));
   return { out: () => out, err: () => err, done: new Promise<number | null>((r) => child.on('close', r)) };

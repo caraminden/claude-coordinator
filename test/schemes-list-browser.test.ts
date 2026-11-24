@@ -101,7 +101,7 @@ test('going back to a scheme draws it as you left it at once, with a ring by Min
 
 // #674 (Cara, 2026-11-14: "it shows him as if he is in every scheme"): admin reach still opens a scheme you aren't in,
 // but it sits under Other schemes, quiet and collapsed, not among yours; it opens out while you're in it.
-test('a scheme you can open but aren\'t a member of is listed apart under Other schemes, not among yours', { skip }, async () => {
+test("a scheme you can open but aren't a member of is listed apart under Other schemes, not among yours", { skip }, async () => {
   const page = await browser.page(`${base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the schemes list', `document.querySelectorAll('#schemes-shelf .scheme-row').length === 2`);
   await page.eval(`titles[3] = 'Gamma one'; schemes.push({ id: 3, name: 'Gamma', inbox: 2, icon: null, member: false });

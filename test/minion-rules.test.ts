@@ -11,7 +11,10 @@ test('approvals: ticking adds the rules, unticking removes only them, and hand r
   let stored = 'Bash(tools/deploy.sh:*)';
   stored = toggleApproval(stored, 'merge', true);
   assert.deepEqual(stored.split('\n'), ['Bash(tools/deploy.sh:*)', 'Bash(gh pr merge:*)', 'mcp__*__merge_pull_request']);
-  assert.deepEqual(ticked(stored.split('\n')).map((a: any) => a.id), ['merge']);
+  assert.deepEqual(
+    ticked(stored.split('\n')).map((a: any) => a.id),
+    ['merge'],
+  );
   assert.deepEqual(handRules(stored), ['Bash(tools/deploy.sh:*)']);
   assert.equal(toggleApproval(stored, 'merge', false), 'Bash(tools/deploy.sh:*)');
   assert.equal(toggleApproval(stored, 'merge', true), stored, 'ticking twice adds nothing');
@@ -50,7 +53,12 @@ test('CI alerts: off joins ci_quiet and leaves ci_watch, on leaves ci_quiet', ()
 test('findPlugins lists folders with a plugin manifest, skips kit/ and reads name and description', async () => {
   const root = mkdtempSync(join(tmpdir(), 'plugin-scan-'));
   try {
-    for (const [dir, manifest] of [['tools/plugins/devtools', '{"name":"devtools","description":"Console"}'], ['kit/skills', '{"name":"kit"}'], ['tools/mods/odd', '{broken'], ['tools/mods/nul', 'null']] as const) {
+    for (const [dir, manifest] of [
+      ['tools/plugins/devtools', '{"name":"devtools","description":"Console"}'],
+      ['kit/skills', '{"name":"kit"}'],
+      ['tools/mods/odd', '{broken'],
+      ['tools/mods/nul', 'null'],
+    ] as const) {
       mkdirSync(join(root, dir, '.claude-plugin'), { recursive: true });
       writeFileSync(join(root, dir, '.claude-plugin', 'plugin.json'), manifest);
     }

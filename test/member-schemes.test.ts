@@ -34,14 +34,24 @@ async function person(name: string, password: string): Promise<number> {
 before(async () => {
   const server = tmp.spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
+      ...process.env,
+      MACHINES_URL: undefined,
+      CITADEL_HOST_SIGNALS: 'fixed',
+      CITADEL_ZONE: TEST_ZONE,
+      PORT: '0',
+      DATA_DIR: join(root, 'data'),
+      CLAUDE_BIN: '/bin/false',
+      CLAUDE_CONFIG_DIR: join(root, 'claude'),
+      COORDINATOR_PASSWORD: 'test-password-123',
+      SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   const res = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
   });
   cookies.Cara = res.headers.get('set-cookie')!.split(';')[0];
 });
@@ -51,7 +61,7 @@ const mine = async (who: string) => Object.fromEntries((await call(who, '/api/pr
 test('a Citadel member in one other scheme has those two as theirs; the rest are listed apart, still open to them', async () => {
   const schemes: Record<string, number> = {};
   for (const name of ['Delve', 'Citadel', 'Genesis']) schemes[name] = (await call('Cara', '/api/projects', { method: 'POST', body: { name } })).data.id;
-  assert.equal(schemes.Citadel, GLOBAL_OWNER, 'the fixture\'s second scheme is the Citadel scheme');
+  assert.equal(schemes.Citadel, GLOBAL_OWNER, "the fixture's second scheme is the Citadel scheme");
   const alex = await person('Alex', 'alex-password-1');
   const josh = await person('Josh', 'josh-password-1');
   for (const name of ['Citadel', 'Genesis']) assert.equal((await call('Cara', `/api/projects/${schemes[name]}/members`, { method: 'POST', body: { person: alex } })).status, 200);

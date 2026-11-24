@@ -53,8 +53,11 @@ after(async () => {
 async function tool(ticket: { id: number; project_id: number; kind: string }, name: string, args: object): Promise<{ text: string; error: boolean }> {
   const child = scratch.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(ticket.project_id), COORDINATOR_TICKET: String(ticket.id),
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
+      COORDINATOR_PROJECT: String(ticket.project_id),
+      COORDINATOR_TICKET: String(ticket.id),
       COORDINATOR_ROLE: ticket.kind === 'coordinator' ? 'coordinator' : 'thread',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
@@ -112,7 +115,10 @@ test('only files the Shared list shows can be pinned', async () => {
   assert.equal((await pin('link.md', true)).status, 404); // a symlink out of the folder
   assert.equal((await pin('nothing.md', true)).status, 404);
   assert.equal((await pin('specs/../handoff.md', true)).status, 200); // same file, already pinned
-  assert.deepEqual((await shared()).filter((f) => f.pinned_at).map((f) => f.path), ['handoff.md']);
+  assert.deepEqual(
+    (await shared()).filter((f) => f.pinned_at).map((f) => f.path),
+    ['handoff.md'],
+  );
 });
 
 test('list_artifacts shows shared files, marked as shared, with their pins', async () => {
@@ -124,8 +130,7 @@ test('list_artifacts shows shared files, marked as shared, with their pins', asy
 });
 
 test('people upload into the shared folder: the bytes as sent, a cleaned name, never overwriting, never outside it (#676)', async () => {
-  const put = (q: string, body: Buffer | string, headers: Record<string, string> = { Cookie: srv.cookie }) =>
-    fetch(`${srv.base}/api/projects/${A.id}/shared/upload?${q}`, { method: 'PUT', headers, body });
+  const put = (q: string, body: Buffer | string, headers: Record<string, string> = { Cookie: srv.cookie }) => fetch(`${srv.base}/api/projects/${A.id}/shared/upload?${q}`, { method: 'PUT', headers, body });
   // Not valid UTF-8, so any re-encoding on the way would show.
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x00, 0x80]);
   const r = await put('name=snap.png', png);

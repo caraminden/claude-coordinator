@@ -40,7 +40,7 @@ test("a contraption's ask to the Taskmaster runs on its asker's login, not the T
   // A non-member's ask runs on the owner's, as a non-member's relay does (#255), never on the last person's.
   assert.equal(turnPayer(store, store.getTicket(tm.id)!, project, [askFrom(dana, false)], personOf), cara.id);
   // The refusal checks the same person: Josh, who hasn't linked Claude, not Olive, who has.
-  const linked = (uid: number) => (uid === olive.id ? 'linked' as const : null);
+  const linked = (uid: number) => (uid === olive.id ? ('linked' as const) : null);
   assert.match(turnRefusal(store, store.getTicket(tm.id)!, askFrom(josh).author, linked, undefined, josh.id) ?? '', /^Turns for Josh start once/);
   // Split, and Josh has no Taskmaster of his own: the Overlord takes his ask, on his login, not the owner's.
   store.splitScheme(scheme.id, olive.id);
@@ -61,7 +61,7 @@ function assignedMinion(store: Store, projectId: number, who: string, title = 'L
   return store.getTicket(t.id)!;
 }
 
-test('a minion whose assignee left the scheme, or was disabled, is its owner\'s for push, Needs-you and its Taskmaster alike (P3)', async () => {
+test("a minion whose assignee left the scheme, or was disabled, is its owner's for push, Needs-you and its Taskmaster alike (P3)", async () => {
   const store = new Store(join(root, 'p3.db'));
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
@@ -99,8 +99,20 @@ test('a minion whose assignee left the scheme, or was disabled, is its owner\'s 
   assert.equal(store.ownerCoordinator(t)?.id, joshTm.id);
 
   for (const [how, undo] of [
-    ['removed', () => { store.removeMember(p, josh.id); return () => store.addMember(p, josh.id); }],
-    ['disabled', () => { store.updateUser(josh.id, { disabled_at: Date.now() }); return () => store.updateUser(josh.id, { disabled_at: null }); }],
+    [
+      'removed',
+      () => {
+        store.removeMember(p, josh.id);
+        return () => store.addMember(p, josh.id);
+      },
+    ],
+    [
+      'disabled',
+      () => {
+        store.updateUser(josh.id, { disabled_at: Date.now() });
+        return () => store.updateUser(josh.id, { disabled_at: null });
+      },
+    ],
   ] as const) {
     const back = undo();
     // Push, the Needs-you list and the routing all land on the owner, Cara: not everyone, not no one, and never Josh's Taskmaster.

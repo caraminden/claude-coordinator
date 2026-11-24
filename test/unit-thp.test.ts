@@ -13,13 +13,20 @@ const SERVICE = /'--user',\s*('--wait',\s*)?'--collect'/g;
 
 test('every file that starts a service unit with systemd-run gives it thpProps()', () => {
   const count = (text: string, re: RegExp) => text.match(re)?.length ?? 0;
-  const starts = readdirSync(SRC).filter((f) => /\.(ts|mjs)$/.test(f)).map((f) => {
-    const text = readFileSync(join(SRC, f), 'utf8');
-    return { f, starts: count(text, SERVICE), given: count(text, /\.\.\.thpProps\(\)/g) };
-  }).filter((s) => s.starts);
+  const starts = readdirSync(SRC)
+    .filter((f) => /\.(ts|mjs)$/.test(f))
+    .map((f) => {
+      const text = readFileSync(join(SRC, f), 'utf8');
+      return { f, starts: count(text, SERVICE), given: count(text, /\.\.\.thpProps\(\)/g) };
+    })
+    .filter((s) => s.starts);
   assert.ok(starts.length >= 5, `found only ${starts.map((s) => s.f).join(', ')}: the pattern no longer matches how units start`);
   // One spread per start: the import alone, or one start of two given it, isn't enough.
-  assert.deepEqual(starts.filter((s) => s.given < s.starts), [], 'these start more service units than they give thpProps() (src/unit-thp.ts)');
+  assert.deepEqual(
+    starts.filter((s) => s.given < s.starts),
+    [],
+    'these start more service units than they give thpProps() (src/unit-thp.ts)',
+  );
 });
 
 test("systemd's version: MemoryTHP= only from 260, since an older systemd-run refuses the whole unit", () => {
@@ -32,7 +39,10 @@ test("the boot probe asks this systemd-run, and gives no property where it's old
   const dir = mkdtempSync(join(tmpdir(), 'thp-'));
   const path = process.env.PATH;
   try {
-    const fake = (v: string) => { writeFileSync(join(dir, 'systemd-run'), `#!/bin/sh\necho "systemd ${v} (x)"\n`); chmodSync(join(dir, 'systemd-run'), 0o755); };
+    const fake = (v: string) => {
+      writeFileSync(join(dir, 'systemd-run'), `#!/bin/sh\necho "systemd ${v} (x)"\n`);
+      chmodSync(join(dir, 'systemd-run'), 0o755);
+    };
     process.env.PATH = `${dir}:${path}`;
     fake('262');
     await probeThp();

@@ -139,7 +139,7 @@ export const RULE_HOMES: RuleHome[] = [
     id: 'shared-folder',
     title: 'How the shared folder is sorted',
     home: { kind: 'repo', file: 'kit/skills/briefing/SKILL.md', section: 'The shared folder' },
-    pointer: "the shared folder's layout (citadel:briefing, \"The shared folder\")",
+    pointer: 'the shared folder\'s layout (citadel:briefing, "The shared folder")',
     phrases: ['sorted by kind', 'what the schemes readme adds', 'read the readme before adding files', 'raw runs or secrets'],
   },
 ];

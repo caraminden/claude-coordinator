@@ -42,11 +42,7 @@ test("Claude's words are never cut; its user-side text (a compacted summary) is"
 });
 
 test('small events, other kinds and bad JSON go as stored', () => {
-  for (const r of [
-    row({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a', content: big(1500) }] } }),
-    row({ text: big(10_000) }, 'user_message'),
-    { id: 1, ticket_id: 1, kind: 'claude', data: `{${big(5000)}`, created_at: 1 },
-  ]) assert.equal(cutEvent(r), r);
+  for (const r of [row({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a', content: big(1500) }] } }), row({ text: big(10_000) }, 'user_message'), { id: 1, ticket_id: 1, kind: 'claude', data: `{${big(5000)}`, created_at: 1 }]) assert.equal(cutEvent(r), r);
 });
 
 test('an action is cut when its input or its result was', () => {

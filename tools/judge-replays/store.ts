@@ -14,7 +14,10 @@ export function replayStore(path: string, shadow: string[], seed: Record<string,
   const db = new DatabaseSync(path, { readOnly: true });
   db.exec('PRAGMA query_only = 0; PRAGMA temp_store = MEMORY;');
   // The chat log and the state live in their own files beside the main one (#1169): attach them read-only, as the app does.
-  for (const [name, file] of [['state', 'state.db'], ['chat', 'events.db']]) {
+  for (const [name, file] of [
+    ['state', 'state.db'],
+    ['chat', 'events.db'],
+  ]) {
     const other = join(dirname(path), file);
     if (existsSync(other)) db.prepare('ATTACH DATABASE ? AS ' + name).run(`file:${other}?mode=ro`);
   }
@@ -35,8 +38,7 @@ export function replayStore(path: string, shadow: string[], seed: Record<string,
  * Each scheme's list is read once per `now`: a judge may list them per file it checks.
  */
 export function minionsAsOf(store: Store, now: () => number, extra: Ticket[] = [], hide = new Set<number>()) {
-  const then = (t: Ticket): Ticket | undefined =>
-    t.created_at > now() || hide.has(t.id) ? undefined : t.status === 'closed' && (t.closed_at ?? 0) > now() ? ({ ...t, status: 'working' } as Ticket) : t;
+  const then = (t: Ticket): Ticket | undefined => (t.created_at > now() || hide.has(t.id) ? undefined : t.status === 'closed' && (t.closed_at ?? 0) > now() ? ({ ...t, status: 'working' } as Ticket) : t);
   const list = store.listTickets.bind(store);
   const get = store.getTicket.bind(store);
   const read = new Map<number, { at: number; rows: Ticket[] }>();
@@ -44,5 +46,10 @@ export function minionsAsOf(store: Store, now: () => number, extra: Ticket[] = [
     if (read.get(pid)?.at !== now()) read.set(pid, { at: now(), rows: list(pid).flatMap((t) => then(t) ?? []) });
     return [...extra.filter((t) => t.project_id === pid), ...read.get(pid)!.rows];
   };
-  store.getTicket = (id: number) => extra.find((t) => t.id === id) ?? (() => { const t = get(id); return t && then(t); })();
+  store.getTicket = (id: number) =>
+    extra.find((t) => t.id === id) ??
+    (() => {
+      const t = get(id);
+      return t && then(t);
+    })();
 }

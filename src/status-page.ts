@@ -68,7 +68,11 @@ export function rateTone(failed: number, total: number): Tone {
   return share >= RATE_BAD ? 'bad' : share >= RATE_WARN ? 'warn' : 'ok';
 }
 /** tiles[i] is the tile reasons[i] comes from (#1273), whose look (who is on it) the page shows beside it. */
-export interface Verdict { tone: Tone; reasons: string[]; tiles: string[] }
+export interface Verdict {
+  tone: Tone;
+  reasons: string[];
+  tiles: string[];
+}
 type Reason = [Tone, string, string];
 
 /** The last STATUS_DAYS Pacific days, oldest first, as 2026-11-19. */
@@ -77,7 +81,6 @@ export function lastDays(now: number): string[] {
   const noon = Date.parse(`${pacificDay(now)}T12:00:00Z`);
   return Array.from({ length: STATUS_DAYS }, (_, i) => new Date(noon - (STATUS_DAYS - 1 - i) * DAY_MS).toISOString().slice(0, 10));
 }
-
 
 const worst = (reasons: Reason[]): Verdict => {
   const shown = [...reasons.filter(([t]) => t === 'bad'), ...reasons.filter(([t]) => t === 'warn')];
@@ -88,7 +91,11 @@ const worst = (reasons: Reason[]): Verdict => {
 export const lookTag = (target: string, tile: string) => `status:${target}/${tile}`;
 
 /** Who is on a tile (#1273): the newest Investigate click on it, and the minion that quotes its tag, the first open one, else the newest. */
-export interface Look { sentAt: number | null; by: string | null; minion: { project: number; number: number; title: string; closed: boolean } | null }
+export interface Look {
+  sentAt: number | null;
+  by: string | null;
+  minion: { project: number; number: number; title: string; closed: boolean } | null;
+}
 
 /** Each tile of `target` someone pressed Investigate on in the last LOOK_MS, with its minion; CI's fix minion wins on Citadel's CI tile. */
 export function looksFor(store: Store, scheme: number | null, target: string, now: number): Record<string, Look> {
@@ -109,7 +116,8 @@ export function looksFor(store: Store, scheme: number | null, target: string, no
   // Quoted from a minute before the first click on (a brief written as the click lands), by one of this scheme's minions.
   for (const [tile, from] of first) {
     const named = [...new Set((quoted.get(tile) ?? []).filter((q) => q.at >= from - 60_000).map((q) => q.id))]
-      .map((id) => store.getTicket(id)).filter((t) => t && t.project_id === scheme && t.kind !== 'coordinator' && t.number != null)
+      .map((id) => store.getTicket(id))
+      .filter((t) => t && t.project_id === scheme && t.kind !== 'coordinator' && t.number != null)
       .sort((a, b) => a!.created_at - b!.created_at);
     const t = named.find((x) => x!.status !== 'closed') ?? named.at(-1);
     if (t) out[tile].minion = { project: scheme, number: t.number!, title: t.title, closed: t.status === 'closed' };
@@ -148,9 +156,7 @@ export function recordBoot(store: Store, commit: string, at: number, stop?: Stop
   // A 'live' row (a SIGHUP reload) is code that went live without a start: a crash restart after it is on the same code.
   const last = store.healthEventsSince(['boot', 'live'], 0).at(-1);
   const newCode = !!(last?.commit_sha && commit && last.commit_sha !== commit);
-  const reason = !last ? 'first start on record'
-    : newCode ? `a ship: new code ${commit.slice(0, 8)}`
-    : 'a restart on the same code: a crash, the watchdog or by hand';
+  const reason = !last ? 'first start on record' : newCode ? `a ship: new code ${commit.slice(0, 8)}` : 'a restart on the same code: a crash, the watchdog or by hand';
   if (last && stop !== undefined) {
     // A mark already recorded is an old one: this stop left none (ExecStopPost didn't run, e.g. the box went down).
     const fresh = stop && store.healthEventsSince(['stop'], stop.at).some((e) => e.at === stop.at) ? null : stop;
@@ -209,10 +215,22 @@ export interface StatusDeps {
 }
 
 /** One tile as a person saw it when they pressed Investigate (#1273): what the Taskmaster is sent. */
-export interface InvestigateTile { target: string; tile: string; title: string; value: string; sub: string; chart: string; reasons: string[] }
+export interface InvestigateTile {
+  target: string;
+  tile: string;
+  title: string;
+  value: string;
+  sub: string;
+  chart: string;
+  reasons: string[];
+}
 
 /** Who reads the page: canSee is the store's for their session; admin sees apps with no home scheme too. */
-export interface Viewer { canSee: (projectId: number) => boolean; admin: boolean; key: string }
+export interface Viewer {
+  canSee: (projectId: number) => boolean;
+  admin: boolean;
+  key: string;
+}
 
 /** One hour of the host chart: its time, memory used %, disk used %, highest load, highest CPU and memory pressure % (null without PSI, #1301). */
 export type HostPoint = [number, number, number, number, number | null, number | null];
@@ -235,10 +253,13 @@ export class StatusPage {
   async sample(): Promise<HostSample | null> {
     try {
       const mem = await (this.deps.mem ?? readMem)();
-      const disk = await (this.deps.disk ?? (async (dir) => {
-        const s = await statfs(dir);
-        return { total: s.blocks * s.bsize, free: s.bavail * s.bsize };
-      }))(this.deps.dataDir);
+      const disk = await (
+        this.deps.disk ??
+        (async (dir) => {
+          const s = await statfs(dir);
+          return { total: s.blocks * s.bsize, free: s.bavail * s.bsize };
+        })
+      )(this.deps.dataDir);
       const psi = await pressure.read();
       const ledger = await (this.deps.cpuLedger ?? readLedger)().catch(() => null);
       const at = this.now();
@@ -247,9 +268,20 @@ export class StatusPage {
       const w = this.deps.warm?.() ?? null;
       const g = await this.deps.growth?.read().catch(() => null);
       const s: HostSample = {
-        ...cache, ...g, ...(w && w.mb > 0 ? { warm_ms: w.ms, warm_mb: w.mb, warm_backoffs: w.backoffs } : {}), at, mem_total: mem.total, mem_avail: Number.isFinite(mem.avail) ? mem.avail : 0,
-        disk_total: disk.total, disk_free: disk.free, load1: loadavg()[0], rss: process.memoryUsage.rss(), cpu_psi: psi.cpu, mem_psi: psi.mem,
-        io_psi: psi.io, swap_used: Number.isFinite(mem.swap) ? mem.swap : null,
+        ...cache,
+        ...g,
+        ...(w && w.mb > 0 ? { warm_ms: w.ms, warm_mb: w.mb, warm_backoffs: w.backoffs } : {}),
+        at,
+        mem_total: mem.total,
+        mem_avail: Number.isFinite(mem.avail) ? mem.avail : 0,
+        disk_total: disk.total,
+        disk_free: disk.free,
+        load1: loadavg()[0],
+        rss: process.memoryUsage.rss(),
+        cpu_psi: psi.cpu,
+        mem_psi: psi.mem,
+        io_psi: psi.io,
+        swap_used: Number.isFinite(mem.swap) ? mem.swap : null,
         cpu_ledger: ledger ? JSON.stringify(ledger) : null,
         answer_time: ((w) => (w ? JSON.stringify(w) : null))(this.deps.answer?.probe.take(loadavg()[0], this.deps.answer.turns())),
       };
@@ -306,8 +338,22 @@ export class StatusPage {
 
   /** The Answer time tile's numbers: each window of the last day, the newest probe, the line and the target. */
   answerData(samples: HostSample[], now: number) {
-    const rows = samples.filter((r) => r.at >= now - DAY_MS).flatMap((r) => { const w = parseWindow(r.answer_time); return w ? [[r.at, w] as [number, AnswerWindow]] : []; });
-    return { rows: rows.map(([at, w]) => [at, w.p50, w.p95, w.p99, w.max, w.over, w.load, w.turns]), latest: rows.at(-1) ? { at: rows.at(-1)![0], ...rows.at(-1)![1] } : null, now: this.deps.answer?.probe.lastMs ?? null, reader: this.deps.answer?.probe.readerMs ?? null, probing: !!this.deps.answer, line: this.answerLine(), target: TARGET, alert: this.deps.store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1)?.kind === 'answer-slow' };
+    const rows = samples
+      .filter((r) => r.at >= now - DAY_MS)
+      .flatMap((r) => {
+        const w = parseWindow(r.answer_time);
+        return w ? [[r.at, w] as [number, AnswerWindow]] : [];
+      });
+    return {
+      rows: rows.map(([at, w]) => [at, w.p50, w.p95, w.p99, w.max, w.over, w.load, w.turns]),
+      latest: rows.at(-1) ? { at: rows.at(-1)![0], ...rows.at(-1)![1] } : null,
+      now: this.deps.answer?.probe.lastMs ?? null,
+      reader: this.deps.answer?.probe.readerMs ?? null,
+      probing: !!this.deps.answer,
+      line: this.answerLine(),
+      target: TARGET,
+      alert: this.deps.store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1)?.kind === 'answer-slow',
+    };
   }
 
   start() {
@@ -333,7 +379,10 @@ export class StatusPage {
       const mark = `${t.key}|${day}`;
       if (p90 == null || p90 <= SLOW_P90_S || told.has(mark) || t.scheme == null) continue;
       store.addHealthEvent('ship-slow', now, null, `${mark}\n${t.title}: p90 ${Math.round(p90)} s`);
-      tell?.(t.scheme, `Ships to ${t.title} are slow today: the slowest tenth took ${Math.round(p90 / 60)} min or more from asked to live (the median ${Math.round((t.median.at(-1) ?? 0) / 60)} min, ${t.counts.at(-1)} ships), over the ${SLOW_P90_S / 60} min line. The Status page's Time to ship chart shows each ship's steps. This is the one nudge for ${t.title} today.`);
+      tell?.(
+        t.scheme,
+        `Ships to ${t.title} are slow today: the slowest tenth took ${Math.round(p90 / 60)} min or more from asked to live (the median ${Math.round((t.median.at(-1) ?? 0) / 60)} min, ${t.counts.at(-1)} ships), over the ${SLOW_P90_S / 60} min line. The Status page's Time to ship chart shows each ship's steps. This is the one nudge for ${t.title} today.`,
+      );
       sent++;
     }
     return sent;
@@ -370,7 +419,10 @@ export class StatusPage {
     const open = (app ? looksFor(store, scheme, tile.target, now) : this.citadelLooks(viewer, scheme, now, true))[tile.tile];
     const before = open && (!open.minion || !open.minion.closed) ? open : null;
     // Recorded by the caller once the Taskmaster has it, so a failed send shows no look nobody heard of.
-    const record = () => { store.addHealthEvent('investigate', now, null, `${tag}\n${who}`); this.built.clear(); };
+    const record = () => {
+      store.addHealthEvent('investigate', now, null, `${tag}\n${who}`);
+      this.built.clear();
+    };
     const where = app ? app.title : 'Citadel';
     const lines = [
       `[Status page] ${who} pressed Investigate on ${where}'s ${tile.title} tile.`,
@@ -510,7 +562,7 @@ export class StatusPage {
       if (x.db_size == null || !x.db_size) continue;
       const h = Math.floor(x.at / 3_600_000) * 3_600_000;
       const pct = Math.round(((x.db_cached ?? 0) / x.db_size) * 1000) / 10;
-      const mb = (pages: number | null | undefined) => Math.round(((pages ?? 0) * 4) / 1024 * 10) / 10;
+      const mb = (pages: number | null | undefined) => Math.round((((pages ?? 0) * 4) / 1024) * 10) / 10;
       const p = cacheHours.get(h);
       cacheHours.set(h, p ? [h, Math.min(p[1], pct), Math.max(p[2], mb(x.kswapd_rate)), Math.max(p[3], mb(x.refault_rate))] : [h, pct, mb(x.kswapd_rate), mb(x.refault_rate)]);
     }
@@ -545,18 +597,22 @@ export class StatusPage {
     // Enough main runs: by failure share. Too few (tests.yml on main is daily): main's newest verdict red is yellow, as before.
     const enough = done.length >= RATE_MIN_RUNS;
     const ciTone: Tone = enough ? rateTone(done.length - done.filter((r) => r.conclusion === 'success').length, done.length) : redWorkflows.length ? 'warn' : 'ok';
-    const ci = view ? {
-      tone: ciTone,
-      at: view.at, url: `https://github.com/${view.slug}/actions`,
-      workflows: view.workflows.filter((w) => !w.quiet).map((w) => ({ name: w.name, conclusion: w.verdict?.conclusion ?? null, status: w.verdict?.status ?? null, at: w.verdict?.at ?? null, url: w.verdict?.url ?? null })),
-      runs: done.length, green: done.filter((r) => r.conclusion === 'success').length,
-    } : null;
+    const ci = view
+      ? {
+          tone: ciTone,
+          at: view.at,
+          url: `https://github.com/${view.slug}/actions`,
+          workflows: view.workflows.filter((w) => !w.quiet).map((w) => ({ name: w.name, conclusion: w.verdict?.conclusion ?? null, status: w.verdict?.status ?? null, at: w.verdict?.at ?? null, url: w.verdict?.url ?? null })),
+          runs: done.length,
+          green: done.filter((r) => r.conclusion === 'success').length,
+        }
+      : null;
     const citadelUnits = (units ?? []).filter((u) => CITADEL_UNITS.includes(u.unit));
     const desktops = (this.deps.desktops?.() ?? []).map((pc) => ({ host: pc.host, verdict: pc.verdict, now: pc.now, restarts: pc.restarts, seen: pc.series.some((s) => s[1] !== null) }));
     // The verdict: bad on a failed unit; warn on a restart that wasn't a ship, a long stall, low memory or disk; CI by its share of failed runs.
     const reasons: Reason[] = [];
     for (const u of citadelUnits) if (u.active === 'failed') reasons.push(['bad', `${u.unit} failed`, 'services']);
-    if (units === null) reasons.push(['warn', 'its services couldn\'t be read', 'services']);
+    if (units === null) reasons.push(['warn', "its services couldn't be read", 'services']);
     const dayAgo = now - DAY_MS;
     const oddBoots = boots.filter((b) => b.at >= dayAgo && b.detail.startsWith('a restart'));
     if (oddBoots.length) reasons.push(['warn', `${oddBoots.length} restart${oddBoots.length > 1 ? 's' : ''} without a ship in the last day`, 'uptime']);
@@ -583,9 +639,34 @@ export class StatusPage {
       verdict: worst(reasons),
       looks,
       canInvestigate: ciVisible,
-      uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
-      stalls: { counts: days.map((d) => stallCount[d]), afterBoot: days.map((d) => stallBoot[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), work: stallWorkOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
-      host: { answer: this.answerData(samples, now), series, cache: [...cacheHours.values()], latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(cpuSteps), groups: CPU_GROUPS } },
+      uptime: {
+        bootAt,
+        commit: this.deps.commit,
+        reason: lastBoot?.detail ?? null,
+        restarts: days.map((d) => restarts[d]),
+        boots: boots
+          .slice(-10)
+          .reverse()
+          .map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })),
+      },
+      stalls: {
+        counts: days.map((d) => stallCount[d]),
+        afterBoot: days.map((d) => stallBoot[d]),
+        longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10),
+        last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), work: stallWorkOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null,
+      },
+      host: {
+        answer: this.answerData(samples, now),
+        series,
+        cache: [...cacheHours.values()],
+        latest: latest && { ...latest, cpu_ledger: null },
+        sampledFrom: samples[0]?.at ?? null,
+        cores,
+        cpuWarn: cores * CPU_WARN_PER_CORE,
+        cpuWarnMin: CPU_WARN_MS / 60_000,
+        peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 },
+        cpu: { windows: cpuWindows, hours: cpuHours(cpuSteps), groups: CPU_GROUPS },
+      },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       easing: { counts: days.map((d) => easeCount[d]), minutes: days.map((d) => easeMinutes[d]), last: eased.at(-1) ?? null, now: easeNow && { ...easeNow, slowed: easeNow.slowed.map((x) => ({ ...x, minion: this.minionLabel(x.ticket, viewer) })) } },
       ciVisible,
@@ -610,8 +691,9 @@ export function slowView(store: Store, viewer: Viewer, now: number): CitadelStat
   // A moment on a scheme's page shows only to those who may see that scheme; opening Citadel or a frozen Home, to everyone.
   const seen = store.slowMoments(now - DAY_MS, SLOW_KEEP).filter((m) => m.project_id == null || viewer.canSee(m.project_id));
   return {
-    count: seen.length, longest: seen.reduce((w, m) => Math.max(w, m.total_ms), 0),
-    rows: seen.slice(0, SLOW_SHOWN).map(({ id: _id, project_id, ...m }) => ({ ...m, scheme: project_id != null ? store.getProject(project_id)?.name ?? null : null })),
+    count: seen.length,
+    longest: seen.reduce((w, m) => Math.max(w, m.total_ms), 0),
+    rows: seen.slice(0, SLOW_SHOWN).map(({ id: _id, project_id, ...m }) => ({ ...m, scheme: project_id != null ? (store.getProject(project_id)?.name ?? null) : null })),
   };
 }
 const SLOW_SHOWN = 30;
@@ -655,7 +737,10 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
     const prev = keys.get(k);
     keys.set(k, prev ? { ...prev, count: prev.count + e.count, last_at: Math.max(prev.last_at, e.last_at) } : { ...e });
   }
-  const top = [...keys.values()].sort((x, y) => y.count - x.count).slice(0, 5).map(({ kind, count, sample, last_at }) => ({ kind, count, sample, last_at }));
+  const top = [...keys.values()]
+    .sort((x, y) => y.count - x.count)
+    .slice(0, 5)
+    .map(({ kind, count, sample, last_at }) => ({ kind, count, sample, last_at }));
   // The last day's errors: today's and yesterday's rows whose last one fell in the last 24 hours (a day's rows only say when its last error was).
   const lastDay = errs.filter((e) => e.last_at >= now - DAY_MS).reduce((n, e) => n + e.count, 0);
   // Agent turns
@@ -682,11 +767,21 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
   const backup = appBackup(join(home, '.local/share', a.name), now);
   if (backup.day && !backup.ok) reasons.push(['warn', `its last backup was ${backup.day}`, 'backup']);
   return {
-    name: a.name, title: a.title, icon: a.icon, scheme: a.home_scheme,
+    name: a.name,
+    title: a.title,
+    icon: a.icon,
+    scheme: a.home_scheme,
     verdict: worst(reasons),
     looks: looksFor(store, a.home_scheme, `app:${a.name}`, now),
     service: unit ? { unit: unit.unit, active: unit.active, sub: unit.sub, installed: unit.load !== 'not-found' } : null,
-    deploys: { tone: deployTone, counts: dCount, failed: dFailed, median: median(took), longest: took.length ? Math.max(...took) : null, last: lastDeploy ? { at: lastDeploy.started_at, outcome: lastDeploy.outcome, by: lastDeploy.by, sha: lastDeploy.to_sha?.slice(0, 8) ?? null, took: lastDeploy.finished_at ? (lastDeploy.finished_at - lastDeploy.started_at) / 1000 : null } : null },
+    deploys: {
+      tone: deployTone,
+      counts: dCount,
+      failed: dFailed,
+      median: median(took),
+      longest: took.length ? Math.max(...took) : null,
+      last: lastDeploy ? { at: lastDeploy.started_at, outcome: lastDeploy.outcome, by: lastDeploy.by, sha: lastDeploy.to_sha?.slice(0, 8) ?? null, took: lastDeploy.finished_at ? (lastDeploy.finished_at - lastDeploy.started_at) / 1000 : null } : null,
+    },
     errors: { counts: eCount, kinds, top, lastDay },
     turns: { counts: tCount, tokens: tTokens, people: [...people.entries()].sort((x, y) => y[1] - x[1]).map(([name, turns]) => ({ name, turns })) },
     disk: disk ? { bytes: disk.data_bytes, at: Date.parse(disk.measured_at), warn_gb: disk.warn_gb } : null,
@@ -703,9 +798,19 @@ export interface CitadelStatus {
   uptime: { bootAt: number; commit: string; reason: string | null; restarts: number[]; boots: { at: number; reason: string; commit: string | null }[] };
   stalls: { counts: number[]; afterBoot: number[]; longest: number[]; last: { at: number; seconds: number | null; cause: string | null; work: string | null; afterBoot: boolean; detail: string } | null };
   /** series: [hour, memory used %, disk used %, load], the hour's worst; peak: today's highest load. */
-  host: { answer: ReturnType<StatusPage['answerData']>; series: HostPoint[]; /** Hourly [time, least % of the database in memory, highest discard MB/s, highest re-read MB/s] (#1501). */ cache: [number, number, number, number][]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null;
+  host: {
+    answer: ReturnType<StatusPage['answerData']>;
+    series: HostPoint[] /** Hourly [time, least % of the database in memory, highest discard MB/s, highest re-read MB/s] (#1501). */;
+    cache: [number, number, number, number][];
+    latest: HostSample | null;
+    sampledFrom: number | null;
+    cores: number;
+    cpuWarn: number;
+    cpuWarnMin: number;
+    peak: { at: number; load1: number } | null;
     /** CPU by source (#1332): the last hour, day and week as a table, and the week by hour for the stacked chart. */
-    cpu: { windows: { hour: CpuWindow; day: CpuWindow; week: CpuWindow }; hours: CpuHour[]; groups: { key: string; label: string }[] } };
+    cpu: { windows: { hour: CpuWindow; day: CpuWindow; week: CpuWindow }; hours: CpuHour[]; groups: { key: string; label: string }[] };
+  };
   /** Memory-limit storms (#1280): per day, their count and seconds stalled; the last that ended; those going now. */
   storms: { counts: number[]; stalled: number[]; last: (Storm & { at: number }) | null; now: Storm[] };
   /** Memory easing (#1748): per day, its stretches and minutes; the last that ended; one going now. A held turn's minion is "#12" or "Delve #12". */

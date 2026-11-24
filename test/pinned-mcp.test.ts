@@ -56,13 +56,15 @@ test('importing the runner writes nothing; the pins are made by one call and swe
       console.log(JSON.stringify([said(turnPins), said(() => tripwireHooks(1, '/c'))]));`);
     for (const said of JSON.parse(before)) assert.match(said, /pinTurnFiles/, 'a launch without pins fails by name, not with a missing tripwire');
     assert.deepEqual(readdirSync(scratch), [], 'no data dir, no run folder, nothing under HOME');
-    const made = JSON.parse(run(`
+    const made = JSON.parse(
+      run(`
       import { existsSync, readdirSync } from 'node:fs';
       const { pinTurnFiles, turnPins } = await import('./src/turn-launch.ts');
       const pins = pinTurnFiles(process.env.DATA_DIR);
       await (await import('./src/pin-spares.ts')).fillPinSpares();
       const spares = process.env.DATA_DIR + '/run/turns/.pin-spares';
-      console.log(JSON.stringify({ dir: pins.MCP_DIR, same: turnPins() === pins, tripwire: existsSync(pins.TRIPWIRE), run: readdirSync(process.env.DATA_DIR + '/run'), spares: readdirSync(spares + '/' + readdirSync(spares)[0]).length }));`));
+      console.log(JSON.stringify({ dir: pins.MCP_DIR, same: turnPins() === pins, tripwire: existsSync(pins.TRIPWIRE), run: readdirSync(process.env.DATA_DIR + '/run'), spares: readdirSync(spares + '/' + readdirSync(spares)[0]).length }));`),
+    );
     assert.equal(made.same, true);
     assert.equal(made.tripwire, true);
     assert.deepEqual(made.run.sort(), [made.dir.split('/').pop(), 'turns']);
@@ -78,7 +80,13 @@ test('importing the runner writes nothing; the pins are made by one call and swe
 test('a re-pin makes a new folder and spares for new turns, keeps the old one for running turns, and both go at exit (#1416)', () => {
   const scratch = mkdtempSync(join(tmpdir(), 'pins-repin-'));
   try {
-    const made = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
+    const made = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `
       import { existsSync, readdirSync } from 'node:fs';
       const { pinTurnFiles, turnPins } = await import('./src/turn-launch.ts');
       const { fillPinSpares } = await import('./src/pin-spares.ts');
@@ -87,20 +95,23 @@ test('a re-pin makes a new folder and spares for new turns, keeps the old one fo
       const second = pinTurnFiles(process.env.DATA_DIR);
       await fillPinSpares();
       const spares = process.env.DATA_DIR + '/run/turns/.pin-spares';
-      console.log(JSON.stringify({ first: first.MCP_DIR, second: second.MCP_DIR, now: turnPins().MCP_DIR, kept: existsSync(first.TRIPWIRE), spares: readdirSync(spares).sort() }));`],
-      { cwd: join(import.meta.dirname, '..'), env: { ...process.env, HOME: scratch, DATA_DIR: join(scratch, 'data') }, encoding: 'utf8' }));
+      console.log(JSON.stringify({ first: first.MCP_DIR, second: second.MCP_DIR, now: turnPins().MCP_DIR, kept: existsSync(first.TRIPWIRE), spares: readdirSync(spares).sort() }));`,
+        ],
+        { cwd: join(import.meta.dirname, '..'), env: { ...process.env, HOME: scratch, DATA_DIR: join(scratch, 'data') }, encoding: 'utf8' },
+      ),
+    );
     assert.notEqual(made.second, made.first);
     assert.equal(made.now, made.second, 'turns that start now take the new pins');
     assert.equal(made.kept, true, 'the old pins stay for turns already running');
     assert.match(made.second, /mcp-\d+\.1$/);
-    assert.equal(made.spares.length, 1, 'the old pins\' spares go at once: nothing can take them');
+    assert.equal(made.spares.length, 1, "the old pins' spares go at once: nothing can take them");
     assert.deepEqual(readdirSync(join(scratch, 'data', 'run')), ['turns'], 'every pin folder goes when its process does');
   } finally {
     rmSync(scratch, { recursive: true, force: true }); // timing-ok: own temp dir
   }
 });
 
-test('a turn\'s pin copy links the files instead of copying their bytes, so a launch is not a 7 s stall', async () => {
+test("a turn's pin copy links the files instead of copying their bytes, so a launch is not a 7 s stall", async () => {
   const { copyPinned } = await import('../src/turn-launch.ts');
   const { mkdirSync, mkdtempSync: mk, statSync, writeFileSync } = await import('node:fs');
   const d = mk(join(tmpdir(), 'pincopy-'));
@@ -129,13 +140,15 @@ test('a turn start takes a spare copy made off the loop: one rename, links for a
   assert.equal(readySpares('link').length, SPARES.link);
   assert.equal(readySpares('copy').length, SPARES.copy);
   const turns = join(pins.dataDir, 'run', 'turns');
-  const [hostSpare] = readySpares('link'), [boxSpare] = readySpares('copy');
+  const [hostSpare] = readySpares('link'),
+    [boxSpare] = readySpares('copy');
   for (const spare of [hostSpare, boxSpare]) {
     assert.ok(spare.startsWith(join(turns, '.pin-spares') + '/'), 'beside the turns, on their filesystem');
     assert.doesNotMatch(spare, /person-\d+/, 'outside every container mount');
   }
   const made = { host: statSync(hostSpare).ino, box: statSync(boxSpare).ino };
-  const host = join(turns, '5-1', 'pin'), box = join(turns, 'person-7', '5-2', 'pin');
+  const host = join(turns, '5-1', 'pin'),
+    box = join(turns, 'person-7', '5-2', 'pin');
   mkdirSync(dirname(host), { recursive: true });
   mkdirSync(dirname(box), { recursive: true });
   copyPinned(pins.MCP_DIR, host, true);
@@ -154,7 +167,7 @@ test('a turn start takes a spare copy made off the loop: one rename, links for a
   assert.ok(!readySpares('link').includes(hostSpare));
 });
 
-test('the pinned files are read-only, so a write through a turn\'s linked copy fails instead of reaching the server\'s', async () => {
+test("the pinned files are read-only, so a write through a turn's linked copy fails instead of reaching the server's", async () => {
   const { statSync } = await import('node:fs');
   const pins = testPins();
   assert.equal(statSync(pins.TRIPWIRE).mode & 0o222, 0);

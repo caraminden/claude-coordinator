@@ -60,7 +60,13 @@ export function withEstimate(b: Budget | null, estimate: number | undefined): Bu
  * Which marks a minion has passed and been told about (a setting, so a restart keeps it): when it was asked, first woken
  * and carded, and `wakes`, the doubling level of its last wake (1 at 4x, 2 at 8x…; missing with `woke` set means 1).
  */
-export interface BudgetState { asked?: number; woke?: number; wakes?: number; carded?: number; /** Its brief's expected cost in dollars (#1674), set at its start. */ estimate?: number }
+export interface BudgetState {
+  asked?: number;
+  woke?: number;
+  wakes?: number;
+  carded?: number /** Its brief's expected cost in dollars (#1674), set at its start. */;
+  estimate?: number;
+}
 export const budgetKey = (ticketId: number) => `minion_budget:${ticketId}`;
 
 const FAMILIES = ['fable', 'sonnet', 'haiku', 'opus'] as const;
@@ -103,7 +109,7 @@ const CACHE_MS = 3_600_000;
 /** A minion's budget now: its `type` property and the model it is set to or last ran on. `props`: its properties, when the caller has read them. */
 export function budgetFor(store: Store, ticket: { id: number; model: string | null; last_model?: string | null }, now = Date.now(), props?: Record<string, unknown>): Budget | null {
   let c = cache.get(store);
-  if (!c || now - c.at > CACHE_MS) cache.set(store, c = { at: now, table: medians(store.minionCosts(now - WINDOW_MS)) });
+  if (!c || now - c.at > CACHE_MS) cache.set(store, (c = { at: now, table: medians(store.minionCosts(now - WINDOW_MS)) }));
   const type = (props ?? store.props.forTarget('minion', ticket.id)).type;
   const usual = budgetFrom(c.table, typeof type === 'string' ? type : null, ticket.model ?? ticket.last_model);
   // A Codex minion's turns aren't priced: no budget, estimate or not.
@@ -144,8 +150,7 @@ const base = (b: Budget) => (b.estimate ? `its brief's expected ${usd(b.usd)}` :
 /** The line at the top of each turn (Josh, "Yes, each turn"): the usual cost, spend so far, and that it isn't a cap. */
 export function turnLine(b: Budget, spent: number): string {
   const median = `the median of ${b.n} minions in the last 4 weeks, every scheme`;
-  const said = !b.estimate ? `${b.basis} has usually cost about ${usd(b.usd)} (${median})`
-    : `its brief expected about ${usd(b.usd)}${b.usual ? ` (${b.basis} has usually cost about ${usd(b.usual)}, ${median})` : ''}`;
+  const said = !b.estimate ? `${b.basis} has usually cost about ${usd(b.usd)} (${median})` : `its brief expected about ${usd(b.usd)}${b.usual ? ` (${b.basis} has usually cost about ${usd(b.usual)}, ${median})` : ''}`;
   const head = `Budget: ${said}; this minion has used ${usd(spent)} so far. It is not a cap and quality comes first.`;
   // Past the mark, the line carries the ask too: a turn that ended before it could read the ask still gets it.
   return spent >= markOf(b, ASK)
@@ -215,9 +220,5 @@ export const CARD_STOP = 'Stop';
 /** The marks spend has newly passed: the ask and the card once ever per minion, the wake once per doubling; a jump past several gives each kind once. Saves nothing: the caller records it. */
 export function passed(b: Budget, spent: number, state: BudgetState): ('ask' | 'wake' | 'card')[] {
   const woken = state.wakes ?? (state.woke ? 1 : 0);
-  return [
-    ...(!state.asked && spent >= markOf(b, ASK) ? ['ask' as const] : []),
-    ...(spent >= nextWake(b, woken) ? ['wake' as const] : []),
-    ...(!state.carded && spent >= markOf(b, CARD) ? ['card' as const] : []),
-  ];
+  return [...(!state.asked && spent >= markOf(b, ASK) ? ['ask' as const] : []), ...(spent >= nextWake(b, woken) ? ['wake' as const] : []), ...(!state.carded && spent >= markOf(b, CARD) ? ['card' as const] : [])];
 }

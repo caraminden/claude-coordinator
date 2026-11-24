@@ -110,7 +110,8 @@ test('a baseline lets a file leave as many as it allows, fails one more, and ask
 test('a test process that is not a test file of a guarded run loads the counter but does nothing', () => {
   // A plain node with the counter preloaded and no runner above it: no temp folder of its own, no exit check.
   const r = spawnSync(process.execPath, ['--import', join(import.meta.dirname, 'leak-file.ts'), '-e', 'console.log(process.env.TMPDIR ?? "", process.env.CITADEL_LEAK_FILE ?? "none")'], {
-    encoding: 'utf8', env: { ...process.env, CITADEL_LEAK_FILES: '1', TMPDIR: '/tmp' },
+    encoding: 'utf8',
+    env: { ...process.env, CITADEL_LEAK_FILES: '1', TMPDIR: '/tmp' },
   });
   assert.equal(r.stdout.trim(), `/tmp ${process.env.CITADEL_LEAK_FILE ?? 'none'}`, r.stderr);
 });

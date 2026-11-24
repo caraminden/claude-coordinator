@@ -59,5 +59,8 @@ export function openMentions(store: Store, projectId: number, person: string, se
 export function clearMentions(store: Store, person: string, ticketId: number) {
   const list = store.getSetting<Mention[]>(key(person));
   if (!list?.some((m) => m.ticketId === ticketId)) return;
-  store.setSetting(key(person), list.filter((m) => m.ticketId !== ticketId));
+  store.setSetting(
+    key(person),
+    list.filter((m) => m.ticketId !== ticketId),
+  );
 }

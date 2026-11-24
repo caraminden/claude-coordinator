@@ -23,10 +23,7 @@ test('the report counts what cost quota and what came back 304, busiest first, a
   t.add('repos/o/r/actions/runs/6/jobs', 404);
   t.add('repos/o/r/actions/workflows', 304);
   t.add('repos/o/r/actions/workflows', 304);
-  assert.equal(
-    t.report(),
-    '5 counted, 3 free (304): repos/o/r/actions/runs?status 3+1 free, repos/o/r/actions/runs/N/jobs 2, repos/o/r/actions/workflows 0+2 free',
-  );
+  assert.equal(t.report(), '5 counted, 3 free (304): repos/o/r/actions/runs?status 3+1 free, repos/o/r/actions/runs/N/jobs 2, repos/o/r/actions/workflows 0+2 free');
   assert.equal(t.report(), null, 'a report starts the next one empty');
 });
 
@@ -37,15 +34,18 @@ test('a report names at most its busiest few paths', () => {
   assert.match(r, /^78 counted, 0 free \(304\): repos\/o\/r\/p11 12, repos\/o\/r\/p10 11, repos\/o\/r\/p9 10, and 9 more paths 45$/);
 });
 
-test('the server\'s reads and posts land in its tally: a 304 free, every other answer counted', async () => {
+test("the server's reads and posts land in its tally: a 304 free, every other answer counted", async () => {
   const bin = mkdtempSync(join(tmpdir(), 'gh-tally-'));
   try {
-    writeFileSync(join(bin, 'gh'), `#!/bin/sh
+    writeFileSync(
+      join(bin, 'gh'),
+      `#!/bin/sh
 case "$*" in
   *If-None-Match*) printf 'HTTP/2.0 304 Not Modified\\r\\n\\r\\n'; exit 1 ;;
   *) printf 'HTTP/2.0 200 OK\\r\\n\\r\\n{}' ;;
 esac
-`);
+`,
+    );
     chmodSync(join(bin, 'gh'), 0o755);
     const as = { PATH: `${bin}:${process.env.PATH}` };
     ghTally.report();

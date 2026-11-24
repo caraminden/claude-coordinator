@@ -20,7 +20,7 @@ test('a booted server reads no host signal, and its day and hour in the zone the
   try {
     const srv = await bootServer({ root: tmp.dir, log: serverLog, env: { NODE_OPTIONS: `--import=${join(import.meta.dirname, 'host-signal-trap.ts')}`, HOST_SIGNAL_TRAP: log } });
     try {
-    // The status page's first host sample (memory, load, pressure, the CPU ledger) is taken at boot; the host-load page reads pressure.
+      // The status page's first host sample (memory, load, pressure, the CPU ledger) is taken at boot; the host-load page reads pressure.
       await until('the first host sample', async () => ok(await srv.call('/api/status')).citadel?.host?.latest);
       ok(await srv.call('/api/host-load'));
       await srv.settled();
@@ -30,15 +30,27 @@ test('a booted server reads no host signal, and its day and hour in the zone the
     const lines = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [];
     // An empty zone line means the server ended without its exit hook (a signal, a crash): say how, and what it printed last (03:34 on Nov 22).
     const ended = `the server ended with ${srv.proc.signalCode ? `signal ${srv.proc.signalCode}` : `exit code ${srv.proc.exitCode}`}; its last output:\n${(existsSync(serverLog) ? readFileSync(serverLog, 'utf8') : '').split('\n').slice(-30).join('\n')}`;
-    assert.deepEqual(lines.filter((l) => !l.startsWith('zone ')), [], `reads that reached the real box (${ended})`);
-    assert.deepEqual(lines.filter((l) => l.startsWith('zone ')), [`zone ${TEST_ZONE}`], `the local clock runs in the zone the test handed over (${ended})`);
+    assert.deepEqual(
+      lines.filter((l) => !l.startsWith('zone ')),
+      [],
+      `reads that reached the real box (${ended})`,
+    );
+    assert.deepEqual(
+      lines.filter((l) => l.startsWith('zone ')),
+      [`zone ${TEST_ZONE}`],
+      `the local clock runs in the zone the test handed over (${ended})`,
+    );
   } finally {
     await tmp.teardown();
   }
 });
 
-test('the fixed zone keeps Pacific\'s date and an afternoon hour', () => {
-  const at = (iso: string) => { const ms = Date.parse(iso), zone = dayZone(ms); return [zone, new Date(ms).toLocaleString('en-CA', { timeZone: zone, hourCycle: 'h23' })]; };
+test("the fixed zone keeps Pacific's date and an afternoon hour", () => {
+  const at = (iso: string) => {
+    const ms = Date.parse(iso),
+      zone = dayZone(ms);
+    return [zone, new Date(ms).toLocaleString('en-CA', { timeZone: zone, hourCycle: 'h23' })];
+  };
   assert.deepEqual(at('2026-11-21T08:30:00Z'), ['Etc/GMT-4', '2026-11-21, 12:30:00'], '00:30 PST');
   assert.deepEqual(at('2026-11-21T20:00:00Z'), ['Etc/GMT+8', '2026-11-21, 12:00:00'], 'noon PST');
   assert.deepEqual(at('2026-11-22T07:45:00Z'), ['Etc/GMT+12', '2026-11-21, 19:45:00'], '23:45 PST: still the 21st');
@@ -47,7 +59,10 @@ test('the fixed zone keeps Pacific\'s date and an afternoon hour', () => {
 });
 
 test('every hour of a Pacific day gets a zone that reads back under its own name, as the local clock does', () => {
-  for (const [day, utcOffset] of [['2026-11-21', '-08:00'], ['2026-07-01', '-07:00']]) {
+  for (const [day, utcOffset] of [
+    ['2026-11-21', '-08:00'],
+    ['2026-07-01', '-07:00'],
+  ]) {
     for (let h = 0; h < 24; h++) {
       const ms = Date.parse(`${day}T00:00:00${utcOffset}`) + h * 3_600_000 + 30 * 60_000;
       const zone = dayZone(ms);
@@ -81,7 +96,7 @@ test('a server booted just after midnight reads that day: restarts before it cou
     try {
       const status = ok(await srv.call('/api/status'));
       assert.deepEqual(status.days.slice(-2), [zoneDay(midnight - 60_000, zone), zoneDay(midnight, zone)], `the last two days in ${zone}`);
-      assert.deepEqual(status.citadel.uptime.restarts.slice(-2), [1, 2], 'yesterday\'s restart, then today\'s two (the one at midnight and this boot)');
+      assert.deepEqual(status.citadel.uptime.restarts.slice(-2), [1, 2], "yesterday's restart, then today's two (the one at midnight and this boot)");
       await srv.settled();
     } finally {
       await srv.stop();

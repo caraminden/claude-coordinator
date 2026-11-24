@@ -19,12 +19,24 @@ const { Runner } = await import('../src/runner.ts');
 testPins();
 
 const DAY = 86_400_000;
-const has = (repo: string, ref: string) => { try { git(repo, 'rev-parse', '--verify', '--quiet', ref); return true; } catch { return false; } };
+const has = (repo: string, ref: string) => {
+  try {
+    git(repo, 'rev-parse', '--verify', '--quiet', ref);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const data = join(root, 'data');
 mkdirSync(data);
 const store = new Store(join(data, 'test.db'));
-const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  '/bin/false',
+);
 
 function scheme(name: string, repo?: string) {
   const p = store.createProject(name, null);
@@ -55,9 +67,18 @@ function minion(s: { id: number; repo: string }, dismissedDaysAgo: number | null
   return { id: t.id, number: t.number, dir, branch };
 }
 
-const dailyNote = (id: number) => JSON.parse(store.listEvents(id).filter((e) => e.kind === 'note' && /today/.test(JSON.parse(e.data).text)).at(-1)!.data) as { text: string; detail: string };
-const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
-
+const dailyNote = (id: number) =>
+  JSON.parse(
+    store
+      .listEvents(id)
+      .filter((e) => e.kind === 'note' && /today/.test(JSON.parse(e.data).text))
+      .at(-1)!.data,
+  ) as { text: string; detail: string };
+const notes = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
 
 test('dismissed past the grace: removed with its branch kept, saving uncommitted work first; inside the grace, open or locked: kept', async () => {
   const s = scheme('Sweep');
@@ -177,7 +198,7 @@ test('a removal cut short leaves nothing a reopen trips on: .removing-* folders 
   assert.equal(git(half.dir, 'branch', '--show-current'), half.branch, 'and a reopen recreates it');
 });
 
-test('a detached HEAD\'s commit is saved in the ref', async () => {
+test("a detached HEAD's commit is saved in the ref", async () => {
   const s = scheme('Detached');
   const t = minion(s, 4);
   git(t.dir, 'checkout', '-q', '--detach');
@@ -285,10 +306,14 @@ test('one cleanup note per scheme per Pacific day: a second sweep the same day a
   const s = scheme('Daily');
   const day1 = Date.parse('2026-11-19T20:00:00Z');
   const count = () => store.listEvents(s.coordinator).filter((e) => e.kind === 'note' && /today/.test(JSON.parse(e.data).text)).length;
-  const a = minion(s, null); store.updateTicket(a.id, { status: 'closed' }); store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(day1 - 4 * DAY, a.id);
+  const a = minion(s, null);
+  store.updateTicket(a.id, { status: 'closed' });
+  store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(day1 - 4 * DAY, a.id);
   await runner.sweepWorktrees(day1);
   assert.equal(count(), 1);
-  const b = minion(s, null); store.updateTicket(b.id, { status: 'closed' }); store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(day1 - 4 * DAY, b.id);
+  const b = minion(s, null);
+  store.updateTicket(b.id, { status: 'closed' });
+  store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(day1 - 4 * DAY, b.id);
   await runner.sweepWorktrees(day1 + 3_600_000);
   assert.equal(count(), 1, 'same day: still one note');
   const note = dailyNote(s.coordinator);
@@ -296,7 +321,9 @@ test('one cleanup note per scheme per Pacific day: a second sweep the same day a
   assert.equal(store.listEvents(s.coordinator).filter((e) => e.kind === 'note_edit').length, 1, 'open chats get the edit live');
   assert.match(note.detail, new RegExp(`#${a.number} `));
   assert.match(note.detail, new RegExp(`#${b.number} `));
-  const c = minion(s, null); store.updateTicket(c.id, { status: 'closed' }); store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(day1 + DAY - 4 * DAY, c.id);
+  const c = minion(s, null);
+  store.updateTicket(c.id, { status: 'closed' });
+  store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(day1 + DAY - 4 * DAY, c.id);
   await runner.sweepWorktrees(day1 + DAY);
   assert.equal(count(), 2, 'next day: a new note');
   assert.match(dailyNote(s.coordinator).text, /^Cleaned up 1 worktree today/);

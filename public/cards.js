@@ -77,19 +77,15 @@ export function approvalCard(ticketId, card) {
   const approve = h('button', { type: 'button', class: m ? 'go' : 'small' }, m ? (intoBuild(m) ? 'Merge into the build' : 'Ship It') : 'Approve');
   const deny = h('button', { type: 'button', class: 'small secondary' }, 'Deny');
   const desc = typeof input.description === 'string' ? h('div', { class: 'desc' }, card.tripwire ? `Why: ${input.description}` : input.description) : '';
-  const call = [
-    h('pre', { class: 'acmd' }, lead ? input[lead] : JSON.stringify(input, null, 2)),
-    Object.keys(rest).length ? h('pre', { class: 'acmd extra' }, JSON.stringify(rest, null, 2)) : '',
-  ];
-  const el = h('div', { class: `qcard acard${m ? ' mcard' : ''}` },
-    ...(m ? mergeHead(m, desc, call) : [
-      h('div', { class: 'who' }, speaker('asks to run')),
-      h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, card.tripwire ? 'Tripwire' : 'Needs approval'), toolTitle(card.tool)),
-      desc, ...call,
-    ]),
+  const call = [h('pre', { class: 'acmd' }, lead ? input[lead] : JSON.stringify(input, null, 2)), Object.keys(rest).length ? h('pre', { class: 'acmd extra' }, JSON.stringify(rest, null, 2)) : ''];
+  const el = h(
+    'div',
+    { class: `qcard acard${m ? ' mcard' : ''}` },
+    ...(m ? mergeHead(m, desc, call) : [h('div', { class: 'who' }, speaker('asks to run')), h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, card.tripwire ? 'Tripwire' : 'Needs approval'), toolTitle(card.tool)), desc, ...call]),
     card.tripwire ? h('div', { class: 'anote' }, `Blocked because: ${card.tripwire.reason}`) : '',
     h('div', { class: 'anote' }, `Approve runs this one call once. If the turn ends first, it expires and doesn't run.`),
-    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), deny, approve));
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), deny, approve),
+  );
   let settled = false;
   // Shown as decided at once; the server's outcome (settle) replaces it, and a refusal opens the card again.
   const decide = (allow) => {
@@ -112,7 +108,10 @@ export function approvalCard(ticketId, card) {
         status.textContent = '';
       },
       label: allow ? 'approve that call' : 'deny that call',
-    }).then(() => view?.id === ticketId && catchUpEvents().catch(() => {}), () => {});
+    }).then(
+      () => view?.id === ticketId && catchUpEvents().catch(() => {}),
+      () => {},
+    );
   };
   approve.addEventListener('click', () => decide(true));
   deny.addEventListener('click', () => decide(false));
@@ -156,20 +155,30 @@ function mergeHead(m, desc, call) {
   ].filter(Boolean);
   return [
     h('div', { class: 'who' }, speaker(intoBuild(m) ? 'asks to merge into the build' : 'asks to ship')),
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, intoBuild(m) ? 'Merge' : 'Ship It'),
+    h(
+      'div',
+      { class: 'qtitle' },
+      h('span', { class: 'chip' }, intoBuild(m) ? 'Merge' : 'Ship It'),
       pr?.url ? h('a', { class: 'mnum', href: pr.url, target: '_blank', rel: 'noopener', 'data-github': '' }, name) : h('span', { class: 'mnum' }, name),
-      pr ? ` ${pr.title}` : m.repo ? h('span', { class: 'muted' }, ` in ${m.repo}`) : ''),
+      pr ? ` ${pr.title}` : m.repo ? h('span', { class: 'muted' }, ` in ${m.repo}`) : '',
+    ),
     pr?.head ? h('div', { class: 'mbranch' }, h('code', {}, pr.head), ' → ', h('code', {}, pr.base)) : '',
-    h('div', { class: 'mmeta' },
+    h(
+      'div',
+      { class: 'mmeta' },
       h('span', { class: 'mmethod' }, MERGE_METHOD[m.method] ?? 'Method not set'),
-      pr ? [
-        h('span', {}, h('span', { class: 'ok' }, `+${pr.additions}`), ' ', h('span', { class: 'bad' }, `−${pr.deletions}`)),
-        h('span', {}, `${pr.files} ${pr.files === 1 ? 'file' : 'files'}`),
-        h('span', {}, `${pr.commits} ${pr.commits === 1 ? 'commit' : 'commits'}`),
-        checks ? h('span', { class: checks[0] }, checks[1]) : '',
-      ] : ''),
+      pr
+        ? [
+            h('span', {}, h('span', { class: 'ok' }, `+${pr.additions}`), ' ', h('span', { class: 'bad' }, `−${pr.deletions}`)),
+            h('span', {}, `${pr.files} ${pr.files === 1 ? 'file' : 'files'}`),
+            h('span', {}, `${pr.commits} ${pr.commits === 1 ? 'commit' : 'commits'}`),
+            checks ? h('span', { class: checks[0] }, checks[1]) : '',
+          ]
+        : '',
+    ),
     ...warn.map((w) => h('div', { class: 'mwarn' }, w)),
-    toggle, shown,
+    toggle,
+    shown,
   ];
 }
 
@@ -184,11 +193,19 @@ function dismissButton(ticketId, card, shut, reopen) {
     let unanswer = () => {}; // #1409: the lists drop it at the click
     optimistic({
       key: `card:${card.id}`,
-      apply: () => { unanswer = answerNow(ticketId, card.id); shut(); },
+      apply: () => {
+        unanswer = answerNow(ticketId, card.id);
+        shut();
+      },
       send: () => api(`api/tickets/${ticketId}/dismiss`, { method: 'POST', body: { cardId: card.id } }),
-      undo: () => { if (reopen() !== false) unanswer(); }, // a card the server already settled stays shut
+      undo: () => {
+        if (reopen() !== false) unanswer();
+      }, // a card the server already settled stays shut
       label: 'dismiss the card',
-    }).then((ticket) => adoptTicket(ticketId, ticket), () => {}); // a failure already said so in its toast
+    }).then(
+      (ticket) => adoptTicket(ticketId, ticket),
+      () => {},
+    ); // a failure already said so in its toast
   });
   return btn;
 }
@@ -224,8 +241,7 @@ function lendBody(card) {
   const after = ml.after ?? { server: null, workspaces: [] };
   return [
     h('pre', { class: 'instructions-diff' }, ...ml.lines.map((l) => h('div', { class: l.startsWith('+') ? 'add' : 'del' }, l))),
-    h('div', { class: 'small' }, h('span', { class: 'muted' }, 'After this it lends: '),
-      [after.server ? `the ${after.server} MCP server` : '', after.workspaces.length ? `workspaces ${after.workspaces.join(', ')}` : 'no workspaces'].filter(Boolean).join('; ')),
+    h('div', { class: 'small' }, h('span', { class: 'muted' }, 'After this it lends: '), [after.server ? `the ${after.server} MCP server` : '', after.workspaces.length ? `workspaces ${after.workspaces.join(', ')}` : 'no workspaces'].filter(Boolean).join('; ')),
     ml.why ? h('div', { class: 'small' }, ml.why) : '',
     h('div', { class: 'small' }, h('a', { href: ml.page }, `${ml.name} on the Machines page`)),
   ];
@@ -260,14 +276,10 @@ function memoryBody(card, ticketId) {
 function revisionBody(card, prev, ticketId) {
   const c = planChanges(prev.plan, card.plan, prev.summary, card.summary);
   const row = (op, text) => h('div', { class: op === '+' ? 'add' : op === '-' ? 'del' : 'same' }, `${op === ' ' ? '\u00a0' : op} ${text}`);
-  const runs = collapseRuns(c.ops).map((r) => r.gap
-    ? h('details', { class: 'gap' }, h('summary', {}, `${r.gap.length} unchanged line${r.gap.length === 1 ? '' : 's'}`), ...r.gap.map((o) => row(' ', o.text)))
-    : row(r.op, r.text));
+  const runs = collapseRuns(c.ops).map((r) => (r.gap ? h('details', { class: 'gap' }, h('summary', {}, `${r.gap.length} unchanged line${r.gap.length === 1 ? '' : 's'}`), ...r.gap.map((o) => row(' ', o.text))) : row(r.op, r.text)));
   return [
     h('div', { class: 'rev-head' }, h('b', {}, 'Changed since the last version'), ` · ${changesLine(c)}`),
-    h('details', { class: 'rev-changes' }, h('summary', {}, 'Show what changed'),
-      c.summaryChanged ? h('div', { class: 'rev-summary' }, h('s', {}, prev.summary), ' → ', card.summary) : null,
-      h('div', { class: 'instructions-diff rev-diff' }, ...runs)),
+    h('details', { class: 'rev-changes' }, h('summary', {}, 'Show what changed'), c.summaryChanged ? h('div', { class: 'rev-summary' }, h('s', {}, prev.summary), ' → ', card.summary) : null, h('div', { class: 'instructions-diff rev-diff' }, ...runs)),
     h('div', {}, markdown(card.plan, ticketId)),
   ];
 }
@@ -306,30 +318,43 @@ export function planCard(ticketId, card, opts = {}) {
   const prev = fixed || ins || view.lastPlan?.handle.status === 'approved' ? null : view.lastPlan;
   const mine = { plan: card.plan ?? '', summary: card.summary ?? '', handle: null };
   if (!fixed && !ins) view.lastPlan = mine;
-  const head = whoLine(m ? 'proposes machine notes' : ml ? 'asks to change machine lending' : k ? 'asks for a release key' : t ? 'asks for a host tool' : mem ? 'proposes a memory tidy' : ins ? (card.to ? 'held an instructions edit for' : 'held an instructions edit') : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
-  const dismiss = dismissButton(ticketId, card, () => {
-    deciding = true;
-    editing(false);
-    approve.hidden = revise.hidden = drop.hidden = dismiss.hidden = true;
-    el.classList.add('answered');
-    why.hidden = true;
-    status.textContent = `Dismissed by ${me}`;
-  }, () => {
-    deciding = false;
-    if (rank) return false;
-    el.classList.remove('answered');
-    approve.hidden = revise.hidden = false;
-    drop.hidden = !ins;
-    dismiss.hidden = !!(card.memory);
-    why.hidden = !hint;
-    status.textContent = '';
-  });
-  const el = h('div', { class: 'qcard pcard' },
+  const head = whoLine(
+    m ? 'proposes machine notes' : ml ? 'asks to change machine lending' : k ? 'asks for a release key' : t ? 'asks for a host tool' : mem ? 'proposes a memory tidy' : ins ? (card.to ? 'held an instructions edit for' : 'held an instructions edit') : card.to ? 'proposes a plan to' : 'proposes a plan',
+    card,
+    opts,
+  );
+  const dismiss = dismissButton(
+    ticketId,
+    card,
+    () => {
+      deciding = true;
+      editing(false);
+      approve.hidden = revise.hidden = drop.hidden = dismiss.hidden = true;
+      el.classList.add('answered');
+      why.hidden = true;
+      status.textContent = `Dismissed by ${me}`;
+    },
+    () => {
+      deciding = false;
+      if (rank) return false;
+      el.classList.remove('answered');
+      approve.hidden = revise.hidden = false;
+      drop.hidden = !ins;
+      dismiss.hidden = !!card.memory;
+      why.hidden = !hint;
+      status.textContent = '';
+    },
+  );
+  const el = h(
+    'div',
+    { class: 'qcard pcard' },
     head.el,
     h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : ml ? 'Machine lending' : k ? 'Release key' : t ? 'Host tool' : mem ? 'Memory' : ins ? 'Instructions' : 'Plan'), card.summary),
     h('div', { class: 'pbody' }, m ? notesBody(card) : ml ? lendBody(card) : mem ? memoryBody(card, ticketId) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
-    notes, why,
-    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), dismiss, drop, revise, approve, cancel, sendNotes));
+    notes,
+    why,
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), dismiss, drop, revise, approve, cancel, sendNotes),
+  );
   let rank = 0;
   const editing = (on) => {
     notes.hidden = cancel.hidden = sendNotes.hidden = !on;
@@ -370,17 +395,43 @@ export function planCard(ticketId, card, opts = {}) {
         status.textContent = '';
         if (verdict === 'revise') editing(true);
       },
-      label: ins ? (verdict === 'approve' ? 'save the instructions edit' : verdict === 'reject' ? 'cancel the instructions edit' : 'send the edit back') : m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : ml ? `${verdict === 'approve' ? 'approve' : 'reject'} the lending change for ${ml.name}` : t ? `${verdict === 'approve' ? 'approve' : 'reject'} installing ${t.package}` : mem ? `${verdict === 'approve' ? 'approve' : 'reject'} the memory tidy` : k ? `${verdict === 'approve' ? 'make' : 'reject'} ${k.title}'s release key` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
-    }).then((ticket) => adoptTicket(ticketId, ticket), () => {}); // a failure already said so in its toast
+      label: ins
+        ? verdict === 'approve'
+          ? 'save the instructions edit'
+          : verdict === 'reject'
+            ? 'cancel the instructions edit'
+            : 'send the edit back'
+        : m
+          ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}`
+          : ml
+            ? `${verdict === 'approve' ? 'approve' : 'reject'} the lending change for ${ml.name}`
+            : t
+              ? `${verdict === 'approve' ? 'approve' : 'reject'} installing ${t.package}`
+              : mem
+                ? `${verdict === 'approve' ? 'approve' : 'reject'} the memory tidy`
+                : k
+                  ? `${verdict === 'approve' ? 'make' : 'reject'} ${k.title}'s release key`
+                  : verdict === 'approve'
+                    ? `approve the plan "${card.summary}"`
+                    : `send the revision notes`,
+    }).then(
+      (ticket) => adoptTicket(ticketId, ticket),
+      () => {},
+    ); // a failure already said so in its toast
   };
   approve.addEventListener('click', () => decide('approve'));
   revise.addEventListener('click', () => editing(true));
   cancel.addEventListener('click', () => editing(false));
   sendNotes.addEventListener('click', () => decide('revise'));
   drop.addEventListener('click', () => decide('reject'));
-  notes.addEventListener('input', () => { sendNotes.disabled = !fixed && !ins && !notes.value.trim(); });
+  notes.addEventListener('input', () => {
+    sendNotes.disabled = !fixed && !ins && !notes.value.trim();
+  });
   notes.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (fixed || ins || notes.value.trim())) { e.preventDefault(); decide('revise'); }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (fixed || ins || notes.value.trim())) {
+      e.preventDefault();
+      decide('revise');
+    }
   });
   const handle = {
     el,
@@ -408,24 +459,24 @@ export function planCard(ticketId, card, opts = {}) {
 export function loopCard(data) {
   const status = h('span', { class: 'muted', role: 'status' });
   const go = h('button', { type: 'button', class: 'small' }, 'Continue');
-  go.addEventListener('click', () => optimistic({
-    key: `continue:${data.minion}`,
-    apply: () => {
-      go.closest('.qcard').classList.add('answered');
-      go.hidden = true;
-      status.textContent = 'Continued';
-    },
-    send: () => api(`api/tickets/${data.minion}/continue`, { method: 'POST' }),
-    undo: () => {
-      go.closest('.qcard').classList.remove('answered');
-      go.hidden = false;
-      status.textContent = '';
-    },
-    label: 'let that message through',
-  }));
-  return h('div', { class: 'qcard lcard', 'data-minion': data.minion },
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Needs a person'), threadRefs(data.text)),
-    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), go));
+  go.addEventListener('click', () =>
+    optimistic({
+      key: `continue:${data.minion}`,
+      apply: () => {
+        go.closest('.qcard').classList.add('answered');
+        go.hidden = true;
+        status.textContent = 'Continued';
+      },
+      send: () => api(`api/tickets/${data.minion}/continue`, { method: 'POST' }),
+      undo: () => {
+        go.closest('.qcard').classList.remove('answered');
+        go.hidden = false;
+        status.textContent = '';
+      },
+      label: 'let that message through',
+    }),
+  );
+  return h('div', { class: 'qcard lcard', 'data-minion': data.minion }, h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, 'Needs a person'), threadRefs(data.text)), h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), go));
 }
 
 /**
@@ -437,24 +488,23 @@ export function spendCard(data, ticketId, current) {
   const status = h('span', { class: 'muted', role: 'status' });
   const stop = h('button', { type: 'button', class: 'small secondary' }, 'Stop');
   const keep = h('button', { type: 'button', class: 'small' }, 'Keep going');
-  const el = h('div', { class: `qcard scard${data.turn === current ? '' : ' stale'}`, 'data-turn': data.turn },
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, `Over $${data.stage}`), data.text),
-    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), stop, keep));
-  const act = (word, path, label) => optimistic({
-    key: `spend:${path}:${ticketId}:${data.turn}`,
-    apply: () => {
-      el.classList.add('answered');
-      stop.hidden = keep.hidden = true;
-      status.textContent = word;
-    },
-    send: () => api(`api/tickets/${ticketId}/${path}`, { method: 'POST', body: { turn: data.turn } }),
-    undo: () => {
-      el.classList.remove('answered');
-      stop.hidden = keep.hidden = false;
-      status.textContent = '';
-    },
-    label,
-  });
+  const el = h('div', { class: `qcard scard${data.turn === current ? '' : ' stale'}`, 'data-turn': data.turn }, h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, `Over $${data.stage}`), data.text), h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), stop, keep));
+  const act = (word, path, label) =>
+    optimistic({
+      key: `spend:${path}:${ticketId}:${data.turn}`,
+      apply: () => {
+        el.classList.add('answered');
+        stop.hidden = keep.hidden = true;
+        status.textContent = word;
+      },
+      send: () => api(`api/tickets/${ticketId}/${path}`, { method: 'POST', body: { turn: data.turn } }),
+      undo: () => {
+        el.classList.remove('answered');
+        stop.hidden = keep.hidden = false;
+        status.textContent = '';
+      },
+      label,
+    });
   stop.addEventListener('click', () => act('Stopping…', 'spend-stop', 'stop the turn'));
   keep.addEventListener('click', () => act('Keeping going: no more alerts this turn', 'spend-mute', 'mute the spend alerts'));
   return el;
@@ -476,8 +526,11 @@ const cardText = (text, ticketId) => (/^ {0,3}(```|~~~)/m.test(text) || /\]\(#\/
 
 /** "→ Tabs · keep both" lines for an answer message: the picks, then any text typed with them. */
 export function answerSummary(answers) {
-  return h('div', { class: 'answer-lines' }, answers.map((a) =>
-    h('div', {}, '→ ', [...a.selected, ...(a.other ? [a.other] : [])].join(' · ') || '(attachment only)')));
+  return h(
+    'div',
+    { class: 'answer-lines' },
+    answers.map((a) => h('div', {}, '→ ', [...a.selected, ...(a.other ? [a.other] : [])].join(' · ') || '(attachment only)')),
+  );
 }
 
 /** Whether any message or card sits below this card in the chat. */
@@ -494,10 +547,19 @@ export function answerRef(cardEl, data) {
 }
 
 function answerRefButton(cardEl, text) {
-  return h('div', { class: 'answer-ref' }, h('button', {
-    type: 'button', title: 'Show the card',
-    onclick: () => cardEl.scrollIntoView({ block: 'center', behavior: 'smooth' }),
-  }, `${text} ↑`));
+  return h(
+    'div',
+    { class: 'answer-ref' },
+    h(
+      'button',
+      {
+        type: 'button',
+        title: 'Show the card',
+        onclick: () => cardEl.scrollIntoView({ block: 'center', behavior: 'smooth' }),
+      },
+      `${text} ↑`,
+    ),
+  );
 }
 
 /**
@@ -517,7 +579,11 @@ export function questionCard(ticketId, card, opts = {}) {
   if (card.notice) return noticeCard(ticketId, card, opts);
   if (card.doc) return docCard(ticketId, card, opts);
   if (card.secret) return secretCard(ticketId, card, opts);
-  if (!cardPicks.has(card.id)) cardPicks.set(card.id, card.questions.map(() => ({ selected: new Set(), other: '' })));
+  if (!cardPicks.has(card.id))
+    cardPicks.set(
+      card.id,
+      card.questions.map(() => ({ selected: new Set(), other: '' })),
+    );
   const picks = cardPicks.get(card.id);
   while (picks.length < card.questions.length) picks.push({ selected: new Set(), other: '' }); // a card that grew since it was last drawn
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;
@@ -530,7 +596,10 @@ export function questionCard(ticketId, card, opts = {}) {
     });
     // Kept from the moment a picture starts coming in, so a card drawn again meanwhile finds this strip.
     const add = atts.add;
-    atts.add = (...args) => { cardPictures.set(card.id, atts); return add(...args); };
+    atts.add = (...args) => {
+      cardPictures.set(card.id, atts);
+      return add(...args);
+    };
   }
   atts.onChange = () => refresh();
   const sendBtn = h('button', { type: 'button', class: 'small qsend', disabled: true }, single ? 'Send' : 'Send answers');
@@ -596,7 +665,10 @@ export function questionCard(ticketId, card, opts = {}) {
         refresh();
       },
       label: 'send your answer',
-    }).then((ticket) => adoptTicket(ticketId, ticket), () => {}); // a failure already said so in its toast
+    }).then(
+      (ticket) => adoptTicket(ticketId, ticket),
+      () => {},
+    ); // a failure already said so in its toast
   };
   sendBtn.addEventListener('click', send);
 
@@ -609,7 +681,10 @@ export function questionCard(ticketId, card, opts = {}) {
       refresh();
     });
     other.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); }
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        send();
+      }
     });
     const choose = (o) => {
       if (answered) return;
@@ -631,54 +706,93 @@ export function questionCard(ticketId, card, opts = {}) {
       // Selects, never unselects: a second look at a picked option on a pick-any question keeps it.
       if (!picks[i].selected.has(o.label)) choose(o);
       setViewerGallery({
-        ticketId, at: pictured.indexOf(o), answered: () => answered,
+        ticketId,
+        at: pictured.indexOf(o),
+        answered: () => answered,
         options: pictured.map((o) => ({
-          path: o.image, label: o.label, picked: () => picks[i].selected.has(o.label), pick: () => { if (q.multiSelect || !picks[i].selected.has(o.label)) choose(o); },
+          path: o.image,
+          label: o.label,
+          picked: () => picks[i].selected.has(o.label),
+          pick: () => {
+            if (q.multiSelect || !picks[i].selected.has(o.label)) choose(o);
+          },
         })),
       });
     };
     // A picture option's button selects it and opens its picture, as its thumbnail does; the rest only pick.
     // A picked option's button unpicks it in place, like a checkbox (Cara, 2026-11-14:
     // "Multi select image cards cant be unselected"); its thumbnail still only looks.
-    const pickBtn = (o, thumb) => h('button', {
-      type: 'button', class: `opt${thumb ? ' pic' : ''}${o.recommended ? ' suggested' : ''}`, 'data-label': o.label,
-      onclick: (e) => {
-        if (e.target.closest?.('pre')) return; // a command in the description: Copy and selecting it don't pick
-        const unpick = !answered && picks[i].selected.has(o.label);
-        thumb && !unpick ? thumb.click() : choose(o);
-      },
-    }, h('span', { class: 'label' }, o.label, o.recommended ? h('span', { class: 'rec' }, ' (Recommended)') : ''), o.description ? h('span', { class: 'desc' }, cardText(o.description, ticketId)) : '');
+    const pickBtn = (o, thumb) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: `opt${thumb ? ' pic' : ''}${o.recommended ? ' suggested' : ''}`,
+          'data-label': o.label,
+          onclick: (e) => {
+            if (e.target.closest?.('pre')) return; // a command in the description: Copy and selecting it don't pick
+            const unpick = !answered && picks[i].selected.has(o.label);
+            thumb && !unpick ? thumb.click() : choose(o);
+          },
+        },
+        h('span', { class: 'label' }, o.label, o.recommended ? h('span', { class: 'rec' }, ' (Recommended)') : ''),
+        o.description ? h('span', { class: 'desc' }, cardText(o.description, ticketId)) : '',
+      );
     // With pictures, the options are a gallery of tiles, each a thumbnail over its label.
     const gallery = q.options.some((o) => o.image);
-    return h('div', { class: 'q', 'data-q': i },
+    return h(
+      'div',
+      { class: 'q', 'data-q': i },
       // A job's go card lays its recipe out whole (#859) in place of the question's 500-character summary.
-      h('div', { class: 'qtitle' }, card.kind === 'merge' || q.header ? h('span', { class: 'chip' }, card.kind === 'merge' ? (card.into ? 'Merge' : 'Ship It') : q.header) : '', card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : cardText(q.question, ticketId),
-        q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : ''),
+      h(
+        'div',
+        { class: 'qtitle' },
+        card.kind === 'merge' || q.header ? h('span', { class: 'chip' }, card.kind === 'merge' ? (card.into ? 'Merge' : 'Ship It') : q.header) : '',
+        card.recipe && i === 0 ? `Run job #${card.job} (${card.recipe.kind.name}) on ${card.recipe.machine}?` : cardText(q.question, ticketId),
+        q.multiSelect ? h('span', { class: 'muted' }, ' (pick any)') : '',
+      ),
       card.recipe && i === 0 ? jobRecipe(card.recipe) : '',
       gallery
-        ? h('div', { class: 'opts gallery' }, q.options.map((o) => {
-          const thumb = o.image && optionThumb(ticketId, o, browse(o));
-          return h('div', { class: 'tile' }, thumb || h('div', { class: 'thumb none' }, 'No picture'), pickBtn(o, thumb));
-        }))
-        : h('div', { class: 'opts' }, q.options.map((o) => pickBtn(o))),
-      other);
+        ? h(
+            'div',
+            { class: 'opts gallery' },
+            q.options.map((o) => {
+              const thumb = o.image && optionThumb(ticketId, o, browse(o));
+              return h('div', { class: 'tile' }, thumb || h('div', { class: 'thumb none' }, 'No picture'), pickBtn(o, thumb));
+            }),
+          )
+        : h(
+            'div',
+            { class: 'opts' },
+            q.options.map((o) => pickBtn(o)),
+          ),
+      other,
+    );
   };
   // No accept filter, as in the composer: a phone offers its files too.
   const picker = h('input', { type: 'file', multiple: true, hidden: true });
-  picker.addEventListener('change', () => { atts.add(picker.files); picker.value = ''; });
+  picker.addEventListener('change', () => {
+    atts.add(picker.files);
+    picker.value = '';
+  });
   const attach = h('button', { type: 'button', class: 'secondary small add-image', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() }, h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach'));
   attach.hidden = !!card.job; // a machine job's go card answers with its pick only
-  const dismiss = dismissButton(ticketId, card, () => {
-    lock(true);
-    dismiss.hidden = true;
-    status.textContent = `Dismissed by ${me}`;
-  }, () => {
-    if (confirmed) return false;
-    lock(false);
-    dismiss.hidden = false;
-    status.textContent = '';
-    refresh();
-  });
+  const dismiss = dismissButton(
+    ticketId,
+    card,
+    () => {
+      lock(true);
+      dismiss.hidden = true;
+      status.textContent = `Dismissed by ${me}`;
+    },
+    () => {
+      if (confirmed) return false;
+      lock(false);
+      dismiss.hidden = false;
+      status.textContent = '';
+      refresh();
+    },
+  );
   const row = h('div', { class: 'row' }, attach, status, h('span', { class: 'spacer' }), progress, dismiss, sendBtn);
   el.addEventListener('paste', (e) => {
     const files = e.target.closest?.('.other') ? pastedFiles(e.clipboardData) : [];
@@ -686,7 +800,9 @@ export function questionCard(ticketId, card, opts = {}) {
     e.preventDefault();
     atts.add(files);
   });
-  el.addEventListener('dragover', (e) => { if (!answered && e.dataTransfer.types.includes('Files')) e.preventDefault(); });
+  el.addEventListener('dragover', (e) => {
+    if (!answered && e.dataTransfer.types.includes('Files')) e.preventDefault();
+  });
   el.addEventListener('drop', (e) => {
     if (answered || !e.dataTransfer.files.length) return;
     e.preventDefault();
@@ -759,8 +875,7 @@ function noticeCard(ticketId, card, opts) {
   const head = whoLine('tells', card, opts);
   const status = h('span', { class: 'muted' });
   const got = h('button', { type: 'button', class: 'small' }, 'Got it');
-  const el = h('div', { class: 'qcard notice' }, head.el, h('div', { class: 'qtitle' }, card.notice),
-    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), got));
+  const el = h('div', { class: 'qcard notice' }, head.el, h('div', { class: 'qtitle' }, card.notice), h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), got));
   let seen = false;
   const handle = {
     el,
@@ -777,11 +892,26 @@ function noticeCard(ticketId, card, opts) {
     let unanswer = () => {}; // #1409: the lists drop it at the click
     optimistic({
       key: `card:${card.id}`,
-      apply: () => { unanswer = answerNow(ticketId, card.id); seen = true; got.hidden = true; el.classList.add('answered'); head.done(`seen by ${me}`); },
+      apply: () => {
+        unanswer = answerNow(ticketId, card.id);
+        seen = true;
+        got.hidden = true;
+        el.classList.add('answered');
+        head.done(`seen by ${me}`);
+      },
       send: () => api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id } }),
-      undo: () => { unanswer(); seen = false; got.hidden = false; el.classList.remove('answered'); head.done(`waiting on ${card.to === me ? 'you' : card.to}`); },
+      undo: () => {
+        unanswer();
+        seen = false;
+        got.hidden = false;
+        el.classList.remove('answered');
+        head.done(`waiting on ${card.to === me ? 'you' : card.to}`);
+      },
       label: 'mark the notice seen',
-    }).then((ticket) => adoptTicket(ticketId, ticket), () => {});
+    }).then(
+      (ticket) => adoptTicket(ticketId, ticket),
+      () => {},
+    );
   });
   view.cards.set(card.id, handle);
   if (card.settled) handle.markSettled(card.settled);
@@ -800,41 +930,54 @@ function secretCard(ticketId, card, opts) {
   const save = h('button', { type: 'button', class: 'small', disabled: true }, 'Save');
   const status = h('span', { class: 'muted' }, scope === 'scheme' ? 'Every turn in this scheme gets it' : 'Saved as yours: turns that run as you get it');
   // Its own form, so a manager doesn't pair this password field with another text box as a login (#934).
-  const dismiss = dismissButton(ticketId, card, () => {
-    done = true;
-    save.disabled = input.disabled = dismiss.hidden = true;
-    el.classList.add('answered');
-    status.textContent = `Dismissed by ${me}`;
-  }, () => {
-    done = false;
-    input.disabled = dismiss.hidden = false;
-    save.disabled = !input.value;
-    el.classList.remove('answered');
-    status.textContent = scope === 'scheme' ? 'Every turn in this scheme gets it' : 'Saved as yours: turns that run as you get it';
-  });
+  const dismiss = dismissButton(
+    ticketId,
+    card,
+    () => {
+      done = true;
+      save.disabled = input.disabled = dismiss.hidden = true;
+      el.classList.add('answered');
+      status.textContent = `Dismissed by ${me}`;
+    },
+    () => {
+      done = false;
+      input.disabled = dismiss.hidden = false;
+      save.disabled = !input.value;
+      el.classList.remove('answered');
+      status.textContent = scope === 'scheme' ? 'Every turn in this scheme gets it' : 'Saved as yours: turns that run as you get it';
+    },
+  );
   const field = h('form', { class: 'row secret-row', autocomplete: 'off', onsubmit: (e) => e.preventDefault() }, input, save);
-  const el = h('div', { class: 'qcard secret' }, head.el,
-    h('div', { class: 'qtitle' }, 'A secret, saved as ', h('code', {}, name), why ? h('div', { class: 'desc' }, why) : ''),
-    field, h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), dismiss));
+  const el = h('div', { class: 'qcard secret' }, head.el, h('div', { class: 'qtitle' }, 'A secret, saved as ', h('code', {}, name), why ? h('div', { class: 'desc' }, why) : ''), field, h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), dismiss));
   let done = false;
-  input.addEventListener('input', () => { save.disabled = done || !input.value; });
+  input.addEventListener('input', () => {
+    save.disabled = done || !input.value;
+  });
   const submit = () => {
     if (done || !input.value) return;
     done = true;
     save.disabled = input.disabled = true;
     status.textContent = 'Saving…';
-    api(`api/tickets/${ticketId}/secret`, { method: 'POST', body: { questionId: card.id, value: input.value } }).then((ticket) => {
-      input.value = '';
-      adoptTicket(ticketId, ticket);
-    }, (err) => {
-      done = false;
-      input.disabled = false;
-      save.disabled = !input.value;
-      status.textContent = `Not saved: ${err.message}`;
-    });
+    api(`api/tickets/${ticketId}/secret`, { method: 'POST', body: { questionId: card.id, value: input.value } }).then(
+      (ticket) => {
+        input.value = '';
+        adoptTicket(ticketId, ticket);
+      },
+      (err) => {
+        done = false;
+        input.disabled = false;
+        save.disabled = !input.value;
+        status.textContent = `Not saved: ${err.message}`;
+      },
+    );
   };
   save.addEventListener('click', submit);
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submit(); } });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      submit();
+    }
+  });
   const handle = {
     el,
     markAnswered() {},
@@ -865,17 +1008,21 @@ function docCard(ticketId, card, opts) {
   const open = h('a', { class: 'button doc-open', href }, 'Open the choices');
   // The page's top (#821, src/doc-preview.ts), its box kept from the start so the chat doesn't jump when
   // it loads; a page that can't be shot drops it and the card is just the button.
-  const preview = h('a', { class: 'doc-preview', href, tabindex: '-1', 'aria-hidden': 'true' },
-    h('img', { src: `api/tickets/${ticketId}/doc-preview?path=${encodeURIComponent(card.doc.path)}`, alt: '', onerror: () => preview.remove() }));
-  const dismiss = dismissButton(ticketId, card, () => {
-    dismiss.hidden = true;
-    el.classList.add('answered');
-    status.textContent = `Dismissed by ${me}`;
-  }, () => {
-    dismiss.hidden = false;
-    el.classList.remove('answered');
-    status.textContent = 'Pick on the page, then press Send there';
-  });
+  const preview = h('a', { class: 'doc-preview', href, tabindex: '-1', 'aria-hidden': 'true' }, h('img', { src: `api/tickets/${ticketId}/doc-preview?path=${encodeURIComponent(card.doc.path)}`, alt: '', onerror: () => preview.remove() }));
+  const dismiss = dismissButton(
+    ticketId,
+    card,
+    () => {
+      dismiss.hidden = true;
+      el.classList.add('answered');
+      status.textContent = `Dismissed by ${me}`;
+    },
+    () => {
+      dismiss.hidden = false;
+      el.classList.remove('answered');
+      status.textContent = 'Pick on the page, then press Send there';
+    },
+  );
   const el = h('div', { class: 'qcard doc' }, head.el, h('div', { class: 'qtitle' }, card.doc.title), preview, open, status, h('div', { class: 'row' }, h('span', { class: 'spacer' }), dismiss));
   const handle = {
     el,

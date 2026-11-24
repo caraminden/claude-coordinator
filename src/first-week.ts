@@ -23,8 +23,5 @@ export function scheduleFirstWeek(store: Store, projectId: number, now = Date.no
   // Minute hour day-of-month month *: the server's local time, 09:00 on the seventh day; `once` removes it after the run.
   const cron = `0 9 ${when.getDate()} ${when.getMonth() + 1} *`;
   const owner = project.owner_id ? store.getUser(project.owner_id) : null;
-  return store.schedules.create(
-    { project_id: projectId, name: FIRST_WEEK_NAME, cron, brief: FIRST_WEEK_BRIEF, type: 'chore', model: 'claude-sonnet-5-5', effort: 'medium', created_by: owner?.name ?? 'Citadel', once: true },
-    now,
-  );
+  return store.schedules.create({ project_id: projectId, name: FIRST_WEEK_NAME, cron, brief: FIRST_WEEK_BRIEF, type: 'chore', model: 'claude-sonnet-5-5', effort: 'medium', created_by: owner?.name ?? 'Citadel', once: true }, now);
 }

@@ -26,7 +26,7 @@ const start = async (title: string, message: string, extra: object = {}) => {
   return srv.as({ token: agentToken(srv.data, tm.id) })(`/api/projects/${p.id}/tickets`, { title, message, model: 'claude-sonnet-5-5', effort: 'medium', properties: { type: 'chore' }, ...extra });
 };
 
-test('a second start from the same handoff is refused naming the first; not_duplicate and a person\'s start go through', async () => {
+test("a second start from the same handoff is refused naming the first; not_duplicate and a person's start go through", async () => {
   const a = await start('A', `Your brief is ${shared}/handoffs/x.md`);
   assert.equal(a.status, 201, JSON.stringify(a.data));
   const b = await start('B', 'Start from the handoff handoffs/x.md, please.');
@@ -39,7 +39,7 @@ test('a second start from the same handoff is refused naming the first; not_dupl
   assert.equal((await srv.call(`/api/projects/${p.id}/tickets`, { title: 'By hand', message: `Your brief is ${shared}/handoffs/x.md` })).status, 201);
 });
 
-test('a chained minion\'s held brief counts, and a minion closed over 3 days ago does not', async () => {
+test("a chained minion's held brief counts, and a minion closed over 3 days ago does not", async () => {
   const leader = (await start('Leader', 'no handoff here')).data;
   const held = await start('Held', `Your brief is ${shared}/handoffs/z.md`, { start_after: leader.number });
   assert.equal(held.status, 201, JSON.stringify(held.data));

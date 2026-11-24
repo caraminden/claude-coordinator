@@ -35,22 +35,28 @@ async function heldSocket(): Promise<{ server: NetServer; fd: number; port: numb
 
 // A copy that does what the server's copy does (server.ts): standby, then live once "listening".
 const COPY = join(tmp.dir, 'copy.mjs');
-writeFileSync(COPY, `import { standby } from ${JSON.stringify(join(REPO, 'src/handover.ts'))};
+writeFileSync(
+  COPY,
+  `import { standby } from ${JSON.stringify(join(REPO, 'src/handover.ts'))};
 if (process.env.COPY_MODE === 'exit') process.exit(1);
 if (process.env.COPY_MODE === 'hang') setInterval(() => {}, 1000);
 else { const h = await standby(Number(process.env.COPY_SCHEMA)); console.log('copy got go'); if (process.env.COPY_MODE === 'die') process.exit(3); h.live(); }
-`);
+`,
+);
 
 // The old server's side in a process of its own, for the endings where it exits.
 const OLD = join(tmp.dir, 'old.mjs');
-writeFileSync(OLD, `import { createServer } from 'node:net';
+writeFileSync(
+  OLD,
+  `import { createServer } from 'node:net';
 import { handOver } from ${JSON.stringify(join(REPO, 'src/handover.ts'))};
 const held = createServer();
 held.listen(0, '127.0.0.1', () => handOver(
   { quiesce: () => console.log('quiesce'), finish: () => console.log('finish') },
   { schema: 7, onSocket: true, env: process.env, argv: [${JSON.stringify(COPY)}], socketFd: held._handle.fd },
 ));
-`);
+`,
+);
 
 function oldSide(env: Record<string, string>, opts: { readyMs?: number; onSocket?: boolean } = {}) {
   const lines: string[] = [];
@@ -58,10 +64,7 @@ function oldSide(env: Record<string, string>, opts: { readyMs?: number; onSocket
   return {
     lines,
     order,
-    run: (fd: number) => handOver(
-      { quiesce: () => order.push('quiesce'), finish: () => order.push('finish') },
-      { schema: 7, onSocket: opts.onSocket ?? true, env: { ...process.env, ...env }, argv: [COPY], socketFd: fd, readyMs: opts.readyMs, log: (l) => lines.push(l) },
-    ),
+    run: (fd: number) => handOver({ quiesce: () => order.push('quiesce'), finish: () => order.push('finish') }, { schema: 7, onSocket: opts.onSocket ?? true, env: { ...process.env, ...env }, argv: [COPY], socketFd: fd, readyMs: opts.readyMs, log: (l) => lines.push(l) }),
   };
 }
 
@@ -159,7 +162,9 @@ test('the real server hands over under a request loop with no failed request and
   // bootServer spawns before its first await, so the server has its copy of the socket when this process closes its
   // own, before it ever accepts: listening here too, it took some connections (sign-in among them) and never answered.
   const booting = bootServer({
-    root, log, fds: [held.fd],
+    root,
+    log,
+    fds: [held.fd],
     // systemd's way: LISTEN_PID is the server's own pid.
     wrap: ['sh', '-c', 'export LISTEN_PID=$$; exec "$0" "$@"'],
     env: { TURN_UNITS: '0', PORT: String(held.port), LISTEN_FDS: '1', PATH: notify.PATH, NOTIFY_SOCKET: notify.NOTIFY_SOCKET, CITADEL_EXIT_WITH_PARENT: '0' },
@@ -168,7 +173,10 @@ test('the real server hands over under a request loop with no failed request and
   const booted = await booting;
   let newPid = 0;
   after(() => {
-    if (newPid) try { process.kill(newPid, 'SIGKILL'); } catch {}
+    if (newPid)
+      try {
+        process.kill(newPid, 'SIGKILL');
+      } catch {}
   });
   const { base, cookie, proc } = booted;
   assert.equal((await (await fetch(`${base}/api/health`)).json()).handover, 'ready');
@@ -177,7 +185,10 @@ test('the real server hands over under a request loop with no failed request and
   const stream = await new Promise<IncomingMessage>((r) => get({ host: '127.0.0.1', port: held.port, path: '/api/stream', agent: false, headers: { Cookie: cookie } }, r));
   let streamed = '';
   let streamEnded = false;
-  stream.setEncoding('utf8').on('data', (d) => (streamed += d)).on('close', () => (streamEnded = true));
+  stream
+    .setEncoding('utf8')
+    .on('data', (d) => (streamed += d))
+    .on('close', () => (streamEnded = true));
 
   const answers: string[] = [];
   let looping = true;
@@ -190,13 +201,17 @@ test('the real server hands over under a request loop with no failed request and
   const serverLog = () => readFileSync(log, 'utf8').slice(-3000);
   // A kept-alive connection, as Caddy holds them, opened before the swap.
   const keep = new Agent({ keepAlive: true, maxSockets: 1 });
-  const onKept = () => new Promise<{ reused: boolean; handover: string }>((r, j) => {
-    const q = get({ host: '127.0.0.1', port: held.port, path: '/api/health', agent: keep, timeout: 20_000 }, (res) => {
-      let body = '';
-      res.setEncoding('utf8').on('data', (d) => (body += d)).on('end', () => r({ reused: q.reusedSocket, handover: JSON.parse(body).handover }));
-    }).on('error', j);
-    q.on('timeout', () => q.destroy(new Error('the kept-alive request had no answer in 20 s')));
-  });
+  const onKept = () =>
+    new Promise<{ reused: boolean; handover: string }>((r, j) => {
+      const q = get({ host: '127.0.0.1', port: held.port, path: '/api/health', agent: keep, timeout: 20_000 }, (res) => {
+        let body = '';
+        res
+          .setEncoding('utf8')
+          .on('data', (d) => (body += d))
+          .on('end', () => r({ reused: q.reusedSocket, handover: JSON.parse(body).handover }));
+      }).on('error', j);
+      q.on('timeout', () => q.destroy(new Error('the kept-alive request had no answer in 20 s')));
+    });
   assert.equal((await onKept()).handover, 'ready');
   proc.kill('SIGUSR2');
   await until('the old server lets go', () => /handing it the socket/.test(readFileSync(log, 'utf8')), undefined, serverLog);
@@ -210,11 +225,23 @@ test('the real server hands over under a request loop with no failed request and
   // Its last words tell the page the next server is up: come back in 0.2 s, and no "Reconnecting…" chip.
   assert.match(streamed, /retry: 200\ndata: \{"type":"handover"\}\n\n$/);
   const at = answers.length;
-  await until('answers from the new server', () => answers.length >= at + 5, undefined, () => `${answers.slice(-5)}\n${serverLog()}`);
+  await until(
+    'answers from the new server',
+    () => answers.length >= at + 5,
+    undefined,
+    () => `${answers.slice(-5)}\n${serverLog()}`,
+  );
   looping = false;
   await loop;
-  assert.deepEqual(answers.filter((a) => a !== '200'), [], 'every request was answered');
-  assert.deepEqual(notify.calls().filter((c) => c.startsWith('MAINPID')), [`MAINPID=${newPid}`]);
+  assert.deepEqual(
+    answers.filter((a) => a !== '200'),
+    [],
+    'every request was answered',
+  );
+  assert.deepEqual(
+    notify.calls().filter((c) => c.startsWith('MAINPID')),
+    [`MAINPID=${newPid}`],
+  );
   // The old server noted its own stop, so the new one's boot logs a handover, not "no stop was noted" (an unplanned one).
   assert.equal(JSON.parse(readFileSync(join(booted.data, STOP_MARK), 'utf8')).result, 'handover');
   // The page's next stream opens on the new server.
@@ -224,6 +251,13 @@ test('the real server hands over under a request loop with no failed request and
   const out = readFileSync(log, 'utf8');
   assert.doesNotMatch(out, /still open after/, 'the old server sat out its grace');
   process.kill(newPid, 'SIGTERM');
-  await until('the new server exits', () => { try { process.kill(newPid, 0); return false; } catch { return true; } });
+  await until('the new server exits', () => {
+    try {
+      process.kill(newPid, 0);
+      return false;
+    } catch {
+      return true;
+    }
+  });
   newPid = 0;
 });

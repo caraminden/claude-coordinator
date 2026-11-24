@@ -20,13 +20,16 @@ after(async () => {
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 process.stdin.resume();
 process.stdin.on('end', () => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 const reply = (text: string) => ({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
@@ -37,7 +40,12 @@ test('strikes the newest reply or relayed message holding the words, with a note
   const coordinator = store.createTicket({ project_id: project.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
   const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
   for (const t of [coordinator, minion]) store.setTicketDir(t.id, root, null);
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   runner.now = () => 5;
 
   const old = store.addEvent(minion.id, 'claude', reply('#12 is **not** merged yet.'));
@@ -50,7 +58,13 @@ test('strikes the newest reply or relayed message holding the words, with a note
   assert.deepEqual(JSON.parse(relayed.data).strikes, [{ text: '#12 is **not** merged yet', reason: 'git log main shows it.', at: 5 }]);
   assert.equal(JSON.parse(store.listEvents(minion.id).find((e) => e.id === old.id)!.data).strikes, undefined);
   // The chat showing the message redraws it; both chats get the note.
-  assert.deepEqual(store.listEvents(coordinator.id).filter((e) => e.kind === 'strike').map((e) => JSON.parse(e.data).event), [relayed.id]);
+  assert.deepEqual(
+    store
+      .listEvents(coordinator.id)
+      .filter((e) => e.kind === 'strike')
+      .map((e) => JSON.parse(e.data).event),
+    [relayed.id],
+  );
   // The note in the minion's own chat says which chat shows the message; the one beside it needn't.
   const note = (id: number) => JSON.parse(store.listEvents(id).find((e) => e.kind === 'note')!.data);
   assert.deepEqual(note(coordinator.id).strike, { quote: '#12 is not merged yet', reason: 'git log main shows it.', chat: null });
@@ -64,7 +78,15 @@ test('strikes the newest reply or relayed message holding the words, with a note
   assert.throws(() => runner.strike(minion.id, 'never said this', 'x'), /Quote it exactly/);
   // The Taskmaster strikes its own message in the minion's chat.
   assert.deepEqual(runner.strike(coordinator.id, 'It is merged', 'It was reverted.'), { ticketId: minion.id });
-  assert.deepEqual(JSON.parse(store.listEvents(coordinator.id).filter((e) => e.kind === 'note').at(-1)!.data).strike.chat, { project: project.id, number: minion.number });
+  assert.deepEqual(
+    JSON.parse(
+      store
+        .listEvents(coordinator.id)
+        .filter((e) => e.kind === 'note')
+        .at(-1)!.data,
+    ).strike.chat,
+    { project: project.id, number: minion.number },
+  );
   runner.detachAll();
 });
 
@@ -73,7 +95,12 @@ test('searches only the newest 500 replies, counting replies with text, not tool
   const project = store.createProject('P', null);
   const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(minion.id, root, null);
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   store.addEvent(minion.id, 'claude', reply('The old wrong claim.'));
   store.addEvent(minion.id, 'claude', reply('The newer wrong claim.'));
   // Tool calls and results show no words, so 600 of them don't push either claim out of reach.
@@ -90,7 +117,12 @@ test('on a stalled disk, two strikes on one message sent at once both stick, and
   const project = store.createProject('P', null);
   const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(minion.id, root, null);
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const said = store.addEvent(minion.id, 'claude', reply('The deploy failed. And #12 is not merged.'));
   const w = writeOffThread(store, { delayMs: 300 })!;
   try {

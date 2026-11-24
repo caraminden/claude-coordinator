@@ -84,7 +84,11 @@ test('a scheme favicon goes to its people only, inert, and is left out when ther
   assert.equal((await fetch(`${srv.base}/api/icons?ids=x`, { headers: { Cookie: member.cookie } })).status, 400);
 
   // No file, a file too big, and a symlink out of the repo all answer 404; the list says there is none.
-  for (const [p, why] of [[plain, 'has no'], [huge, 'is over 256 KB'], [linked, 'points outside']] as const) {
+  for (const [p, why] of [
+    [plain, 'has no'],
+    [huge, 'is over 256 KB'],
+    [linked, 'points outside'],
+  ] as const) {
     const r = await get(p.id, srv.cookie);
     assert.equal(r.status, 404, p.name);
     assert.match((await r.json()).error, new RegExp(why), p.name);
@@ -121,12 +125,12 @@ test('citadel-app.json names the scheme icon: its override, else its source, ahe
   writeFileSync(join(repo, 'web/public/icon.svg'), SVG);
   writeFileSync(join(repo, 'art/logo.svg'), SVG + ' ');
   writeFileSync(join(repo, 'art/small.svg'), SVG + '  ');
-  assert.match((await findIcon(repo) as any).file, /web\/public\/icon\.svg$/);
+  assert.match(((await findIcon(repo)) as any).file, /web\/public\/icon\.svg$/);
   writeFileSync(join(repo, 'citadel-app.json'), JSON.stringify({ icon: { source: 'art/logo.svg' } }));
-  assert.match((await findIcon(repo) as any).file, /art\/logo\.svg$/);
+  assert.match(((await findIcon(repo)) as any).file, /art\/logo\.svg$/);
   writeFileSync(join(repo, 'citadel-app.json'), JSON.stringify({ icon: { source: 'art/logo.svg', overrides: { scheme: 'art/small.svg' } } }));
-  assert.match((await findIcon(repo) as any).file, /art\/small\.svg$/);
+  assert.match(((await findIcon(repo)) as any).file, /art\/small\.svg$/);
   writeFileSync(join(root, 'repos', 'x.svg'), SVG + '   ');
   writeFileSync(join(repo, 'citadel-app.json'), JSON.stringify({ icon: { source: '../x.svg', overrides: { scheme: join(root, 'repos', 'x.svg') } } }));
-  assert.match((await findIcon(repo) as any).file, /web\/public\/icon\.svg$/);
+  assert.match(((await findIcon(repo)) as any).file, /web\/public\/icon\.svg$/);
 });

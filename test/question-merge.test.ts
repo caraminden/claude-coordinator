@@ -18,7 +18,9 @@ after(async () => {
 });
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync, existsSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -31,7 +33,8 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
     process.exit(0);
   }, 50);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let base = '';
@@ -44,7 +47,10 @@ const call = async (path: string, opts: { method?: string; body?: unknown; token
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 let ticket: any;
-const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
+const live = () =>
+  turns()
+    .filter((t) => t.token.startsWith(`${ticket.id}.`))
+    .at(-1).token;
 const end = async () => {
   const n = turns().length;
   writeFileSync(join(root, `go-${n}`), '');
@@ -71,7 +77,10 @@ test('two asks in one turn make one card, answered in one message; other kinds, 
   assert.equal(second.href, first.href);
   assert.equal(second.merged, true);
   const stored = (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'question').map((e: any) => JSON.parse(e.data));
-  assert.deepEqual(stored.filter((c: any) => c.id === first.id).map((c: any) => c.questions.length), [3]);
+  assert.deepEqual(
+    stored.filter((c: any) => c.id === first.id).map((c: any) => c.questions.length),
+    [3],
+  );
   assert.equal((await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'question_more').length, 1);
   // A doc-less merge card, a to, and when_ci_passes never join it.
   const merge = await ask(q('m'), { kind: 'merge' });
@@ -92,7 +101,7 @@ test('two asks in one turn make one card, answered in one message; other kinds, 
   assert.equal(after.merged, undefined);
   await end();
   // A later turn never joins an earlier turn's open card.
-  await until('the answer\'s own turn', () => turns().length >= 2); // it waited for the first turn to end
+  await until("the answer's own turn", () => turns().length >= 2); // it waited for the first turn to end
   const next = await ask(q('d'));
   assert.notEqual(next.id, after.id);
   await end();
@@ -142,7 +151,10 @@ test("a Taskmaster's for-everyone cards merge with the same asker's, never anoth
   assert.equal(merged?.id, first.id);
   assert.equal(mergeCard(app, lord, b, card(b, 'c')), null, "another Taskmaster's card never joins it");
   const kinds = store.eventsOfKinds(lord.id, ['question', 'question_more']);
-  assert.deepEqual(kinds.map((e) => e.kind), ['question', 'question_more']);
+  assert.deepEqual(
+    kinds.map((e) => e.kind),
+    ['question', 'question_more'],
+  );
   assert.equal(JSON.parse(kinds[0].data).questions.length, 2);
   assert.equal(JSON.parse(kinds[0].data).everyone, true, 'the card keeps its everyone mark');
   // Mine lets question_more through to every member's page, as it does the card's results.

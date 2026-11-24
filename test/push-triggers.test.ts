@@ -22,13 +22,16 @@ after(async () => {
 });
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   const fail = input.includes('fail');
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: fail, result: fail ? 'API Error: overloaded' : 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let base = '';
@@ -60,7 +63,11 @@ function decrypt(name: string, body: Buffer) {
   const data = body.subarray(21 + body[20]);
   const d = createDecipheriv('aes-128-gcm', cek, nonce);
   d.setAuthTag(data.subarray(-16));
-  return JSON.parse(Buffer.concat([d.update(data.subarray(0, -16)), d.final()]).subarray(0, -1).toString());
+  return JSON.parse(
+    Buffer.concat([d.update(data.subarray(0, -16)), d.final()])
+      .subarray(0, -1)
+      .toString(),
+  );
 }
 
 /** A new stand-in browser called `name`, as a PUT body; its keys are kept for decrypt(). */
@@ -79,16 +86,32 @@ async function subscribe(who: string, name: string) {
 /** Pushes that arrived since `from`, as { browser: message }, once `count` have. */
 async function pushes(from: number, count: number) {
   // On a timeout, say what did arrive and what the server said about pushes (a failed send is logged, not retried).
-  await until(`${count} pushes`, () => received.length >= from + count, undefined, () => `got ${received.slice(from).map((r) => r.path).join(', ') || 'none'}; `
-    + `the server's push lines: ${readFileSync(join(root, 'server.log'), 'utf8').split('\n').filter((l) => /push/i.test(l)).slice(-10).join(' | ') || 'none'}`);
+  await until(
+    `${count} pushes`,
+    () => received.length >= from + count,
+    undefined,
+    () =>
+      `got ${
+        received
+          .slice(from)
+          .map((r) => r.path)
+          .join(', ') || 'none'
+      }; ` +
+      `the server's push lines: ${
+        readFileSync(join(root, 'server.log'), 'utf8')
+          .split('\n')
+          .filter((l) => /push/i.test(l))
+          .slice(-10)
+          .join(' | ') || 'none'
+      }`,
+  );
   // timing-ok: a settle window for the rest of a burst that arrives with the counted pushes (more can legitimately come; callers assert who got one)
   await new Promise((r) => setTimeout(r, 200));
   return Object.fromEntries(received.slice(from).map((r) => [r.path.slice(1), decrypt(r.path.slice(1), r.body)]));
 }
 
 before(async () => {
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1', '-subj', '/CN=127.0.0.1',
-    '-keyout', join(root, 'key.pem'), '-out', join(root, 'cert.pem')], { stdio: 'ignore' });
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1', '-subj', '/CN=127.0.0.1', '-keyout', join(root, 'key.pem'), '-out', join(root, 'cert.pem')], { stdio: 'ignore' });
   pushService = createHttpsServer({ key: readFileSync(join(root, 'key.pem')), cert: readFileSync(join(root, 'cert.pem')) }, (req, res) => {
     const chunks: Buffer[] = [];
     req.on('data', (c) => chunks.push(c));
@@ -113,7 +136,9 @@ before(async () => {
   const invite = await call('Cara', '/api/people', { method: 'POST', body: { name: 'Josh' } });
   joshId = invite.person.id;
   const josh = await fetch(`${base}/api/invite/${invite.token}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'joshs-own-password' }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: 'joshs-own-password' }),
   });
   cookies.Josh = josh.headers.get('set-cookie')!.split(';')[0];
 });
@@ -141,9 +166,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   let got = await pushes(n, 3);
   // Clicking it opens the chat at the card (#236).
   // An event's own row can still be in the server's write queue when its push arrives (src/db-writer.ts), so wait for it.
-  const eventOf = async (ticketId: number, kind: string, match = (_: any) => true) =>
-    (await until(`a ${kind} event on #${ticketId}`, async () =>
-      (await call('Cara', `/api/tickets/${ticketId}/events`)).events.filter((e: any) => e.kind === kind && match(JSON.parse(e.data))).at(-1))).id;
+  const eventOf = async (ticketId: number, kind: string, match = (_: any) => true) => (await until(`a ${kind} event on #${ticketId}`, async () => (await call('Cara', `/api/tickets/${ticketId}/events`)).events.filter((e: any) => e.kind === kind && match(JSON.parse(e.data))).at(-1))).id;
   const card = await eventOf(t.id, 'question', (d) => d.id === asked.id);
   assert.deepEqual(got.cara, { title: '#1 Build it', body: 'Tabs or list?', tag: `thread-${t.id}`, url: `${url}?e=${card}` });
   assert.deepEqual(got.josh, got.cara);
@@ -155,7 +178,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   await call(`agent:${t.id}`, `/api/tickets/${t.id}`, { method: 'PATCH', body: { state: 'ready', note: 'PR open' } });
   got = await pushes(n, 2);
   assert.deepEqual(Object.keys(got).sort(), ['cara', 'josh']);
-  assert.equal(got.cara.url, `${url}?e=latest`, 'a state opens at the minion\'s latest reply');
+  assert.equal(got.cara.url, `${url}?e=latest`, "a state opens at the minion's latest reply");
   n = received.length;
   await call('Josh', `/api/tickets/${t.id}`, { method: 'PATCH', body: { state: 'blocked', note: 'needs a key' } });
   got = await pushes(n, 1);
@@ -182,8 +205,7 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   assert.equal(got.josh.url, `${url}?e=${await eventOf(t.id, 'error')}`, 'a failed turn opens at its error');
 
   // Josh mutes the project on his browser; the coordinator's question then reaches only Cara.
-  assert.deepEqual(await call('Josh', '/api/push/subscription', { method: 'PATCH', body: { endpoint: browsers.josh.endpoint, projectId: project.id, muted: true } }),
-    { subscribed: true, muted: [project.id], everything: [project.id], onlyPinned: false });
+  assert.deepEqual(await call('Josh', '/api/push/subscription', { method: 'PATCH', body: { endpoint: browsers.josh.endpoint, projectId: project.id, muted: true } }), { subscribed: true, muted: [project.id], everything: [project.id], onlyPinned: false });
   n = received.length;
   await call(`agent:${coordinator.id}`, `/api/tickets/${coordinator.id}/questions`, { method: 'POST', body: { questions: [{ question: 'Which first?', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } });
   got = await pushes(n, 1);
@@ -210,7 +232,7 @@ test('only people subscribe, and only https push services', async () => {
   assert.deepEqual(await call('Cara', '/api/push/subscription', { method: 'POST', body: { endpoint: browsers.cara.endpoint } }), { subscribed: false, muted: [], everything: [], onlyPinned: false });
 });
 
-test('taking a minion over or handing it on says so in its chat and the Taskmaster\'s, and its pings follow the owner (#690)', async () => {
+test("taking a minion over or handing it on says so in its chat and the Taskmaster's, and its pings follow the owner (#690)", async () => {
   const project = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Handover' } });
   await call('Cara', `/api/projects/${project.id}/members`, { method: 'POST', body: { person: joshId } });
   const { coordinator } = await call('Cara', `/api/projects/${project.id}`);
@@ -301,7 +323,9 @@ test("a state ping says the state and note just set, with the server's DB writes
     const cara = slow.as({ cookie: slow.cookie });
     const invite = ok(await cara('/api/people', { name: 'Josh' }, 'POST'));
     const signup = await fetch(`${slow.base}/api/invite/${invite.token}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'joshs-own-password' }),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'joshs-own-password' }),
     });
     const josh = slow.as({ cookie: signup.headers.get('set-cookie')!.split(';')[0] });
     const project = ok(await cara('/api/projects', { name: 'Slow' }, 'POST'));

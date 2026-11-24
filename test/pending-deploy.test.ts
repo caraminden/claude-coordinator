@@ -43,7 +43,12 @@ chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 
 function newTicket(state: any = 'pending-deploy', note: string | null = null) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });

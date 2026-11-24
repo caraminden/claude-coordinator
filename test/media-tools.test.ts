@@ -45,7 +45,10 @@ const both = { COORDINATOR_MEDIA: '1', COORDINATOR_CODEX_IMAGES: '1' };
 
 test('the generative media tools are offered, in order', async () => {
   const media = (await tools(both)).filter((t) => /^generate_|^edit_image$/.test(t.name));
-  assert.deepEqual(media.map((t) => t.name), ['generate_image', 'edit_image', 'generate_audio', 'generate_speech', 'generate_image_codex']);
+  assert.deepEqual(
+    media.map((t) => t.name),
+    ['generate_image', 'edit_image', 'generate_audio', 'generate_speech', 'generate_image_codex'],
+  );
 });
 
 test('every generative media tool opens with the made-by-code rule (Cara, 2026-11-14)', async () => {

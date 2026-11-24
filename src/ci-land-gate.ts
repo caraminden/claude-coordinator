@@ -83,7 +83,11 @@ export function landStep(s: LandState, seen: LandSeen[], now: number): LandState
     }
   }
   let left = false;
-  for (const key of Object.keys(s.lands)) if (!here.has(key)) { delete s.lands[key]; left = true; }
+  for (const key of Object.keys(s.lands))
+    if (!here.has(key)) {
+      delete s.lands[key];
+      left = true;
+    }
   // The head is the lowest seq in the line: it holds the lock, and each phase or CI run it passes through is progress.
   const first = seen.filter((x) => x.name !== 'tools/deploy.sh').sort((a, b) => a.seq - b.seq)[0];
   const head = first ? `${first.seq}/${first.phase}/${first.ci ?? ''}/${first.run ?? ''}` : '';
@@ -102,27 +106,43 @@ export function landProblems(s: LandState, now: number): Problem[] {
   if (n >= LAND_STREAK) {
     const named = s.fellBack.slice(-3).map((f) => `${f.name} (${f.why}${f.run ? `, run ${f.run}` : ''})`);
     const whys = [...new Set(s.fellBack.slice(-3).map((f) => f.why))];
-    out.push(held({
-      key: 'land:fallback',
-      plain: { what: `the last ${n} ships skipped CI and ran the whole test suite on perigee instead`, next: whys.some((w) => /runner/.test(w)) ? "Check the desktop's Linux runners are online (the CI page's Runners tab); shipping goes back to CI by itself" : 'Open the fallen-back runs on the CI page and fix what stopped them; the next ship with a green gate clears this' },
-      title: `CI: the ship gate fell back to perigee on ${n} ships in a row: ${n > 3 ? `${n - 3} more, then ` : ''}${named.join(', ')}`,
-      why: `${whys.join('; ')}, so each ship ran the full suite on perigee instead of waiting on CI`,
-      fix: whys.some((w) => /runner/.test(w)) ? "check the desktop's Linux runners are online (the CI page's Runners tab); shipping goes back to CI by itself"
-        : 'open the fallen-back runs on the CI page and fix what stopped them; the next ship with a green gate clears this',
-    }, s.fellBack[LAND_STREAK - 1].at ?? now, now));
+    out.push(
+      held(
+        {
+          key: 'land:fallback',
+          plain: {
+            what: `the last ${n} ships skipped CI and ran the whole test suite on perigee instead`,
+            next: whys.some((w) => /runner/.test(w)) ? "Check the desktop's Linux runners are online (the CI page's Runners tab); shipping goes back to CI by itself" : 'Open the fallen-back runs on the CI page and fix what stopped them; the next ship with a green gate clears this',
+          },
+          title: `CI: the ship gate fell back to perigee on ${n} ships in a row: ${n > 3 ? `${n - 3} more, then ` : ''}${named.join(', ')}`,
+          why: `${whys.join('; ')}, so each ship ran the full suite on perigee instead of waiting on CI`,
+          fix: whys.some((w) => /runner/.test(w)) ? "check the desktop's Linux runners are online (the CI page's Runners tab); shipping goes back to CI by itself" : 'open the fallen-back runs on the CI page and fix what stopped them; the next ship with a green gate clears this',
+        },
+        s.fellBack[LAND_STREAK - 1].at ?? now,
+        now,
+      ),
+    );
   }
   // Ringing needs a line that is still non-empty and has not moved: a deep line whose head keeps changing is just busy.
-  const line = Object.entries(s.lands).sort((a, b) => Number(a[0]) - Number(b[0])).map(([, l]) => l);
+  const line = Object.entries(s.lands)
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([, l]) => l);
   const since = s.moved ?? now;
   if (line.length && now - since >= LAND_SLOW_MS) {
     const behind = line.length - 1;
-    out.push(held({
-      key: 'land:slow',
-      plain: { what: `shipping is stuck: nothing has moved in the ship line since ${clock(since)}, with ${line[0].name} first of ${line.length}`, next: "Read the first minion's ship output; if nothing has moved for 15 more minutes, tell the Citadel Taskmaster shipping is jammed" },
-      title: `CI: the ship line has been still since ${clock(since)} (over 20 min): ${line[0].name} is first of ${line.length}${behind ? `, ${behind} waiting behind` : ''}`,
-      why: 'the first ship, its step and the ships in the line have not changed, though each ship normally takes under 15 min, so its CI run, the suite or the deploy is stuck',
-      fix: "read the first minion's land.sh output for its last queue: line; if nothing has moved for 15 min, tell the Citadel Taskmaster shipping is jammed",
-    }, since + LAND_SLOW_MS, now));
+    out.push(
+      held(
+        {
+          key: 'land:slow',
+          plain: { what: `shipping is stuck: nothing has moved in the ship line since ${clock(since)}, with ${line[0].name} first of ${line.length}`, next: "Read the first minion's ship output; if nothing has moved for 15 more minutes, tell the Citadel Taskmaster shipping is jammed" },
+          title: `CI: the ship line has been still since ${clock(since)} (over 20 min): ${line[0].name} is first of ${line.length}${behind ? `, ${behind} waiting behind` : ''}`,
+          why: 'the first ship, its step and the ships in the line have not changed, though each ship normally takes under 15 min, so its CI run, the suite or the deploy is stuck',
+          fix: "read the first minion's land.sh output for its last queue: line; if nothing has moved for 15 min, tell the Citadel Taskmaster shipping is jammed",
+        },
+        since + LAND_SLOW_MS,
+        now,
+      ),
+    );
   }
   return out;
 }

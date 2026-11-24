@@ -20,9 +20,11 @@ export function decodePng(buf: Buffer): { width: number; height: number; rgba: B
 
 function decode(buf: Buffer): { width: number; height: number; rgba: Buffer } | null {
   if (buf.length < 33 || !buf.subarray(0, 8).equals(SIGNATURE)) return null;
-  let width = 0, height = 0, channels = 0;
+  let width = 0,
+    height = 0,
+    channels = 0;
   const idat: Buffer[] = [];
-  for (let i = 8; i + 12 <= buf.length;) {
+  for (let i = 8; i + 12 <= buf.length; ) {
     const len = buf.readUInt32BE(i);
     const type = buf.toString('latin1', i + 4, i + 8);
     const data = buf.subarray(i + 8, i + 8 + len);
@@ -54,9 +56,11 @@ function decode(buf: Buffer): { width: number; height: number; rgba: Buffer } | 
       const a = x >= channels ? px[out + x - channels] : 0;
       const b = y ? px[out - stride + x] : 0;
       const c = y && x >= channels ? px[out - stride + x - channels] : 0;
-      const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
-      const pred = filter === 0 ? 0 : filter === 1 ? a : filter === 2 ? b : filter === 3 ? (a + b) >> 1
-        : filter === 4 ? (pa <= pb && pa <= pc ? a : pb <= pc ? b : c) : -1;
+      const p = a + b - c,
+        pa = Math.abs(p - a),
+        pb = Math.abs(p - b),
+        pc = Math.abs(p - c);
+      const pred = filter === 0 ? 0 : filter === 1 ? a : filter === 2 ? b : filter === 3 ? (a + b) >> 1 : filter === 4 ? (pa <= pb && pa <= pc ? a : pb <= pc ? b : c) : -1;
       if (pred < 0) return null;
       px[out + x] = (line[x] + pred) & 0xff;
     }

@@ -14,7 +14,16 @@ const root = mkdtempSync(join(tmpdir(), 'replies-'));
 const procs: ChildProcess[] = [];
 // The server writes into root until it exits, and its exit handler deletes its run/mcp-<pid> folder, so wait for that.
 after(async () => {
-  await Promise.all(procs.map((p) => p.exitCode !== null || p.signalCode !== null ? undefined : new Promise((r) => { p.once('exit', r); p.kill(); })));
+  await Promise.all(
+    procs.map((p) =>
+      p.exitCode !== null || p.signalCode !== null
+        ? undefined
+        : new Promise((r) => {
+            p.once('exit', r);
+            p.kill();
+          }),
+    ),
+  );
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
@@ -23,7 +32,12 @@ test('a new turn clears the replies, whoever started it', async () => {
   process.env.CLAUDE_CONFIG_DIR = join(root, 'claude-unit');
   const store = new Store(join(root, 'unit.db'));
   const project = store.createProject('Unit', null);
-  const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
   store.updateTicket(t.id, { status: 'idle', replies: JSON.stringify(['Merge it']) });
@@ -78,5 +92,5 @@ test('replies are checked, shown as a list, and go once someone writes', async (
   assert.equal(sent.status, 202);
   assert.deepEqual((await call(`/api/tickets/${t.id}`)).data.ticket.replies, []);
   // That message started a turn; let it end before after() deletes the folder it runs in.
-  await until('the message\'s turn to end', async () => (await call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
+  await until("the message's turn to end", async () => (await call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
 });

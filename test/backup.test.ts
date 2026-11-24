@@ -28,7 +28,10 @@ test('the backup page loads nothing from outside itself', () => {
   assert.doesNotMatch(page, /\bimport\s*[({'"*]|\bimportScripts\b/, 'no module imports');
   assert.doesNotMatch(page, /<(iframe|img|object|embed)\b/i, 'no embedded files');
   // The only link out is to the main app; every fetch goes to its own routes, or sign-in.
-  assert.deepEqual([...page.matchAll(/\b(?:src|href)\s*=\s*["']([^"']*)/gi)].map((m) => m[1]), ['/c/']);
+  assert.deepEqual(
+    [...page.matchAll(/\b(?:src|href)\s*=\s*["']([^"']*)/gi)].map((m) => m[1]),
+    ['/c/'],
+  );
   assert.deepEqual([...new Set([...page.matchAll(/call\('([^'?]+)/g)].map((m) => m[1]))].sort(), ['/api/login', '/backup/messages', '/backup/send']);
 });
 
@@ -64,21 +67,38 @@ test('chat lines: messages, notes, errors and reply text only, as plain text', (
     store.addEvent(t.id, 'user_message', { author: 'Cara', text: 'fix it' }).id,
     store.addEvent(t.id, 'claude', { type: 'system', subtype: 'init' }).id,
     store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'a', name: 'Bash', input: {} }] } }).id,
-    store.addEvent(t.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'On **it**' }, { type: 'tool_use', id: 'b', name: 'Bash', input: {} }] } }).id,
+    store.addEvent(t.id, 'claude', {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'On **it**' },
+          { type: 'tool_use', id: 'b', name: 'Bash', input: {} },
+        ],
+      },
+    }).id,
     store.addEvent(t.id, 'note', { text: 'Josh renamed it' }).id,
     store.addEvent(t.id, 'error', { text: 'Turn failed' }).id,
     store.addEvent(t.id, 'claude', { type: 'result', subtype: 'success' }).id,
   ];
   const lines = store.chatTextEvents(t.id, 0, 10).map(chatLine);
-  assert.deepEqual(lines.map(({ id, author, text, kind }) => ({ id, author, text, kind })), [
-    { id: ids[0], kind: 'user_message', author: 'Cara', text: 'fix it' },
-    { id: ids[3], kind: 'claude', author: 'Taskmaster', text: 'On **it**' },
-    { id: ids[4], kind: 'note', author: 'Note', text: 'Josh renamed it' },
-    { id: ids[5], kind: 'error', author: 'Error', text: 'Turn failed' },
-  ]);
+  assert.deepEqual(
+    lines.map(({ id, author, text, kind }) => ({ id, author, text, kind })),
+    [
+      { id: ids[0], kind: 'user_message', author: 'Cara', text: 'fix it' },
+      { id: ids[3], kind: 'claude', author: 'Taskmaster', text: 'On **it**' },
+      { id: ids[4], kind: 'note', author: 'Note', text: 'Josh renamed it' },
+      { id: ids[5], kind: 'error', author: 'Error', text: 'Turn failed' },
+    ],
+  );
   // The newest `limit`, oldest first; and only after the cursor.
-  assert.deepEqual(store.chatTextEvents(t.id, 0, 2).map((e) => e.id), [ids[4], ids[5]]);
-  assert.deepEqual(store.chatTextEvents(t.id, ids[3], 10).map((e) => e.id), [ids[4], ids[5]]);
+  assert.deepEqual(
+    store.chatTextEvents(t.id, 0, 2).map((e) => e.id),
+    [ids[4], ids[5]],
+  );
+  assert.deepEqual(
+    store.chatTextEvents(t.id, ids[3], 10).map((e) => e.id),
+    [ids[4], ids[5]],
+  );
   // A row that isn't JSON still makes a line rather than failing the whole read.
   assert.equal(chatLine({ id: 9, ticket_id: t.id, kind: 'note', data: '{oops', created_at: 0 }).text, '');
 });
@@ -123,7 +143,10 @@ test('/backup serves the page and sends to and reads from the Citadel scheme (2)
   assert.ok(events.some((e: any) => e.kind === 'user_message' && JSON.parse(e.data).text === 'The front end is broken, please fix it'));
   // Polling from the newest line returns nothing new. The turn (CLAUDE_BIN is /bin/false) ends with its own error line, whenever
   // the box gets to it: let it land first, so it can't arrive between the two reads.
-  const settled = await until('the turn ends', async () => { const m = await srv.call('/backup/messages'); return m.data.lines.some((l: any) => l.kind === 'error') && m.data; });
+  const settled = await until('the turn ends', async () => {
+    const m = await srv.call('/backup/messages');
+    return m.data.lines.some((l: any) => l.kind === 'error') && m.data;
+  });
   assert.deepEqual((await srv.call(`/backup/messages?after=${settled.last}`)).data.lines, []);
 
   // Refusals: an empty message, a cross-site post, a body that isn't JSON, an unknown path.

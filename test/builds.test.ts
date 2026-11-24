@@ -61,7 +61,7 @@ test('a build branch counts its feeders merged in and open, not its owner, and h
   assert.deepEqual(await buildSummaries(store, p.id), [{ build: 7, merged: 2, open: 2, behind: 2, owner: owner.id }]);
 });
 
-test('Builds broadcasts a scheme\'s headers when they change, and only then', async () => {
+test("Builds broadcasts a scheme's headers when they change, and only then", async () => {
   const sent: any[] = [];
   const b = new Builds({ store, broadcast: (m) => sent.push(m) });
   await b.poll();

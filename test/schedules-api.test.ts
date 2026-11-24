@@ -13,8 +13,7 @@ let cookie = '';
 
 /** A request as Cara, or as the minion or Taskmaster `as` (a ticket id) with its token. */
 let srv: Booted;
-const call = (path: string, opts: { method?: string; body?: unknown; as?: number } = {}) =>
-  (opts.as === undefined ? srv.call : srv.as({ token: agentToken(join(root, 'data'), opts.as) }))(path, opts.body || undefined, opts.method ?? 'GET');
+const call = (path: string, opts: { method?: string; body?: unknown; as?: number } = {}) => (opts.as === undefined ? srv.call : srv.as({ token: agentToken(join(root, 'data'), opts.as) }))(path, opts.body || undefined, opts.method ?? 'GET');
 
 before(async () => {
   srv = await bootServer({ root, stdout: true });
@@ -79,7 +78,10 @@ test('people and the Taskmaster manage schedules; minions and other schemes cann
   assert.deepEqual([paused.status, paused.data.paused, paused.data.next_run_at], [200, 1, null]);
   assert.equal((await call(`/api/schedules/${tm.data.id}`, { method: 'DELETE', as: page.coordinator.id })).status, 200);
   const { data: list } = await call(url);
-  assert.deepEqual(list.schedules.map((s: any) => s.name), ['Nightly']);
+  assert.deepEqual(
+    list.schedules.map((s: any) => s.name),
+    ['Nightly'],
+  );
 });
 
 test("the Taskmaster's schedule tools", async () => {
@@ -88,8 +90,13 @@ test("the Taskmaster's schedule tools", async () => {
   for (const s of (await call(`/api/projects/${p.id}/schedules`)).data.schedules) await call(`/api/schedules/${s.id}`, { method: 'DELETE' });
   const mcp = scratch.spawn(process.execPath, [join(repo, 'src/mcp.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), page.coordinator.id),
-      COORDINATOR_PROJECT: String(p.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: String(page.coordinator.id),
+      ...process.env,
+      MACHINES_URL: undefined,
+      COORDINATOR_API: base,
+      COORDINATOR_TOKEN: agentToken(join(root, 'data'), page.coordinator.id),
+      COORDINATOR_PROJECT: String(p.id),
+      COORDINATOR_ROLE: 'coordinator',
+      COORDINATOR_TICKET: String(page.coordinator.id),
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -100,10 +107,11 @@ test("the Taskmaster's schedule tools", async () => {
     replies.get(r.id)?.(r);
   });
   let rid = 0;
-  const tool = (name: string, args: object) => new Promise<string>((r) => {
-    replies.set(++rid, (x) => r(x.result.content[0].text));
-    mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: rid, method: 'tools/call', params: { name, arguments: args } }) + '\n');
-  });
+  const tool = (name: string, args: object) =>
+    new Promise<string>((r) => {
+      replies.set(++rid, (x) => r(x.result.content[0].text));
+      mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: rid, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+    });
   assert.equal(await tool('list_schedules', {}), 'Nothing scheduled.');
   assert.match(await tool('schedule_minion', { name: 'Nightly', cron: '@daily', brief: 'Check main', model: 'claude-sonnet-5-5' }), /schedule_minion needs a model and an effort/);
   assert.match(await tool('schedule_minion', { name: 'Nightly', cron: '@daily', brief: 'Check main', model: 'claude-sonnet-5-5', effort: 'low' }), /^Scheduled\. \[\d+\] Nightly: Every day at 00:00 \(`@daily`\), type chore, model claude-sonnet-5-5, effort low; next /);

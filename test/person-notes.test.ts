@@ -44,8 +44,12 @@ async function asAgent(id: number, path: string, body?: object, method = body ? 
 async function tool(name: string, args: object): Promise<string> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(TM.id),
-      COORDINATOR_PROJECT: String(P.id), COORDINATOR_TICKET: String(TM.id), COORDINATOR_ROLE: 'coordinator',
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(TM.id),
+      COORDINATOR_PROJECT: String(P.id),
+      COORDINATOR_TICKET: String(TM.id),
+      COORDINATOR_ROLE: 'coordinator',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });

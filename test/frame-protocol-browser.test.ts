@@ -91,7 +91,10 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 </script>`;
 
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#f93"/></svg>';
-const apps = [{ name: 'peek', title: 'Peek', icon: '/icon.svg', up: true }, { name: 'toc', title: 'ToC', icon: '/icon.svg', up: true }];
+const apps = [
+  { name: 'peek', title: 'Peek', icon: '/icon.svg', up: true },
+  { name: 'toc', title: 'ToC', icon: '/icon.svg', up: true },
+];
 const TYPES: Record<string, string> = { '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 let server: Server;
 let browser: Browser;
@@ -138,8 +141,7 @@ after(async () => {
   await new Promise((r) => (server ? server.close(r) : r(null)));
 });
 
-const framer = (opts: { width: number; height?: number; touch?: boolean }, query = '', framerQuery = '') =>
-  browser.page(`${citadel()}/c/framer?src=${encodeURIComponent(`${contraption()}/apps/peek/${query}`)}${framerQuery}`, opts);
+const framer = (opts: { width: number; height?: number; touch?: boolean }, query = '', framerQuery = '') => browser.page(`${citadel()}/c/framer?src=${encodeURIComponent(`${contraption()}/apps/peek/${query}`)}${framerQuery}`, opts);
 
 test("the frame is another origin: Citadel can't read the contraption's page", { skip }, async () => {
   const page = await framer({ width: 1000, height: 600 });
@@ -151,14 +153,14 @@ test("the frame is another origin: Citadel can't read the contraption's page", {
 test("the frame carries the allow list, so the mic works on the contraption's own host (#892)", { skip }, async () => {
   const page = await framer({ width: 1000, height: 600 });
   await waitFor(page, "the contraption's page in the frame", `'handle' in window.echo`);
-  const allow = await page.eval(`document.querySelector('#frames iframe').allow`) as string;
+  const allow = (await page.eval(`document.querySelector('#frames iframe').allow`)) as string;
   for (const f of ['microphone', 'camera', 'fullscreen']) assert.match(allow, new RegExp(`(^|; )${f} \\*(;|$)`));
   // No clipboard unless the app's citadel-app.json asks (#1086): this one doesn't.
   for (const f of ['clipboard-read', 'clipboard-write']) assert.match(allow, new RegExp(`(^|; )${f} 'none'(;|$)`));
   assert.equal(await page.eval(`document.querySelector('#frames iframe').contentWindow.document`).catch(() => 'cross'), 'cross');
 });
 
-test("an app whose citadel-app.json asks for clipboard writes gets them in its frame, and only writes (#1086)", { skip }, async () => {
+test('an app whose citadel-app.json asks for clipboard writes gets them in its frame, and only writes (#1086)', { skip }, async () => {
   (apps[0] as Record<string, unknown>).clipboard = true;
   try {
     const page = await framer({ width: 1000, height: 600 });
@@ -182,12 +184,12 @@ test("a contraption's top bar runs up into Citadel's title bar strip, with a dra
 
 test("while a modal dialog is open over a contraption's top bar, its drag box drops its holes for the strip above, and gets them back as it closes", { skip }, async () => {
   const page = await framer({ width: 1000, height: 600 }, '?modal');
-  await waitFor(page, 'the hole over the bar\'s button', `document.querySelectorAll('.frame-drag > div').length === 1`);
+  await waitFor(page, "the hole over the bar's button", `document.querySelectorAll('.frame-drag > div').length === 1`);
   await waitFor(page, 'the strip-only drag box under the modal', `!document.querySelector('.frame-drag').hidden && document.querySelectorAll('.frame-drag > div').length === 0`);
   await waitFor(page, 'the hole back once it closes', `document.querySelectorAll('.frame-drag > div').length === 1`);
 });
 
-test("a top bar a contraption adds on a resize after its load is fitted too", { skip }, async () => {
+test('a top bar a contraption adds on a resize after its load is fitted too', { skip }, async () => {
   const page = await framer({ width: 1200, height: 800 }, '?late');
   await waitFor(page, "the contraption's handle report (the frame is up)", `'handle' in window.echo`);
   assert.equal(await page.eval<boolean>(`document.documentElement.classList.contains('frame-topbar')`), false, 'no bar yet');
@@ -220,7 +222,8 @@ test("on a phone, the contraption's handle opens Citadel's rail", { skip }, asyn
   await waitFor(page, "Citadel's rail open", `!!document.querySelector('.citadel-rail.open')`);
 });
 
-const layer = (page: Page) => page.eval<string>(`(() => {
+const layer = (page: Page) =>
+  page.eval<string>(`(() => {
   const l = document.querySelector('.citadel-layer');
   return l ? (l.hidden ? 'hidden' : 'shown ' + l.querySelector('iframe').src) + (document.body.inert ? ' inert' : '') : 'none';
 })()`);
@@ -256,9 +259,9 @@ test("a framed app's own links stay in it; another app and Citadel's domain go u
     await waitFor(page, `click ${id}`, `'click:${id}' in window.echo`);
     return page.eval(`window.echo['click:${id}']`);
   };
-  assert.equal(await click('same'), false, "its own link is left to the page");
+  assert.equal(await click('same'), false, 'its own link is left to the page');
   assert.equal(await click('other'), true);
-  assert.equal(await click('out'), false, 'an outside link is the browser\'s');
+  assert.equal(await click('out'), false, "an outside link is the browser's");
   assert.equal(await click('zip'), true);
   assert.deepEqual(await page.eval(`window.upward`), ['app http://voice.test/apps/voice/rate/', 'go-url https://docs.citadel.zip/']);
 });
@@ -283,10 +286,14 @@ test("on a phone, a long press on an app's item opens the sheet with Point and t
     return page.eval<string | null>(`window.echo.menu`);
   };
   // Citadel's state, with the app's title, has to reach the frame before the menu can name it.
-  await until('a sheet naming Peek', async () => {
-    await pressAt('header button');
-    return /From Peek/.test(String(await told()));
-  }, 10_000);
+  await until(
+    'a sheet naming Peek',
+    async () => {
+      await pressAt('header button');
+      return /From Peek/.test(String(await told()));
+    },
+    10_000,
+  );
   assert.equal(await told(), 'Peek item | Menu | Point at this | Point and draw… | - | From Peek | Mark done | - | Copy text');
   assert.equal(await page.eval(`document.querySelector('#frames iframe').contentDocument`), null);
   await ask({ menu: 'Mark done' });
@@ -304,13 +311,17 @@ test("right-click in a framed app gets Citadel's menu with the app's own items u
   await waitFor(page, "the button's place in the frame", `!!window.echo.where`);
   const at = await page.eval<{ x: number; y: number }>(`(() => { const f = document.querySelector('#frames iframe').getBoundingClientRect(); return { x: f.left + window.echo.where.x, y: f.top + window.echo.where.y }; })()`);
   // Citadel's state, with the app's title, has to reach the frame before the menu can name it.
-  await until('a menu naming Peek', async () => {
-    for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'right', buttons: type === 'mousePressed' ? 2 : 0, clickCount: 1 });
-    await page.eval(`delete window.echo.menu`);
-    await ask({ menu: '' });
-    await waitFor(page, 'the menu told', `'menu' in window.echo`);
-    return /From Peek/.test(await page.eval<string>(`String(window.echo.menu)`));
-  }, 10_000);
+  await until(
+    'a menu naming Peek',
+    async () => {
+      for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'right', buttons: type === 'mousePressed' ? 2 : 0, clickCount: 1 });
+      await page.eval(`delete window.echo.menu`);
+      await ask({ menu: '' });
+      await waitFor(page, 'the menu told', `'menu' in window.echo`);
+      return /From Peek/.test(await page.eval<string>(`String(window.echo.menu)`));
+    },
+    10_000,
+  );
   assert.equal(await page.eval(`window.echo.menu`), 'Peek item | Menu | Point at this | Point and draw… | - | From Peek | Mark done | - | Copy text');
   await ask({ menu: 'Mark done' });
   await waitFor(page, "the app's own item run", `window.echo.marked === true`);
@@ -327,12 +338,16 @@ test("in the desktop app, Citadel's menu on an app's own item still ends with Re
   await ask({ where: 'header button' });
   await waitFor(page, "the button's place in the frame", `!!window.echo.where`);
   const at = await page.eval<{ x: number; y: number }>(`(() => { const f = document.querySelector('#frames iframe').getBoundingClientRect(); return { x: f.left + window.echo.where.x, y: f.top + window.echo.where.y }; })()`);
-  await until('a menu with Inspect', async () => {
-    for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'right', buttons: type === 'mousePressed' ? 2 : 0, clickCount: 1 });
-    await page.eval(`delete window.echo.menu`);
-    await ask({ menu: '' });
-    await waitFor(page, 'the menu told', `'menu' in window.echo`);
-    return /From Peek.*Inspect/.test(await page.eval<string>(`String(window.echo.menu)`));
-  }, 10_000);
+  await until(
+    'a menu with Inspect',
+    async () => {
+      for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'right', buttons: type === 'mousePressed' ? 2 : 0, clickCount: 1 });
+      await page.eval(`delete window.echo.menu`);
+      await ask({ menu: '' });
+      await waitFor(page, 'the menu told', `'menu' in window.echo`);
+      return /From Peek.*Inspect/.test(await page.eval<string>(`String(window.echo.menu)`));
+    },
+    10_000,
+  );
   assert.equal(await page.eval(`window.echo.menu`), 'Peek item | Menu | Point at this | Point and draw… | - | From Peek | Mark done | - | Copy text | - | Reload Peek | Inspect');
 });

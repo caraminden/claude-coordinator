@@ -18,7 +18,9 @@ after(async () => {
 });
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -26,19 +28,22 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let base = '';
 let cookie = '';
 
 let srv: Booted;
-const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) =>
-  ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
+const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) => ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 // The token the minion's latest turn holds: each turn's token dies when the next turn starts.
-const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
+const live = () =>
+  turns()
+    .filter((t) => t.token.startsWith(`${ticket.id}.`))
+    .at(-1).token;
 const idle = (id: number) => until('the turn to end', async () => (await call(`/api/tickets/${id}`)).ticket.status !== 'running');
 
 let ticket: any;
@@ -83,8 +88,17 @@ test('Revise needs notes, sends them to the minion, and the next plan supersedes
   await assert.rejects(call(`/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId: id, verdict: 'approve' } }), /409 Cara already asked for changes/);
 
   const second = await propose('Second plan');
-  assert.deepEqual((await plans()).map((p: any) => p.status), ['superseded', 'pending']);
-  assert.deepEqual((await results()).map((r: any) => [r.id, r.status]), [[id, 'revising'], [id, 'superseded']]);
+  assert.deepEqual(
+    (await plans()).map((p: any) => p.status),
+    ['superseded', 'pending'],
+  );
+  assert.deepEqual(
+    (await results()).map((r: any) => [r.id, r.status]),
+    [
+      [id, 'revising'],
+      [id, 'superseded'],
+    ],
+  );
   await assert.rejects(call(`/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId: id, verdict: 'approve' } }), /409 A newer plan replaced this one/);
   assert.ok(second.id);
 });
@@ -106,10 +120,13 @@ test('Approve sends the go once and records who and when', async () => {
   await idle(ticket.id);
   // An approved plan stays approved when a later one arrives.
   await propose('Third plan');
-  assert.deepEqual((await plans()).map((p: any) => p.status), ['superseded', 'approved', 'pending']);
+  assert.deepEqual(
+    (await plans()).map((p: any) => p.status),
+    ['superseded', 'approved', 'pending'],
+  );
 });
 
-test('a dismissed minion\'s token stops working, except for its deploy report', async () => {
+test("a dismissed minion's token stops working, except for its deploy report", async () => {
   const token = live();
   await call(`/api/tickets/${ticket.id}`, { token });
   await call(`/api/tickets/${ticket.id}/status`, { method: 'POST', body: { status: 'closed' } });
@@ -118,7 +135,7 @@ test('a dismissed minion\'s token stops working, except for its deploy report', 
   await call(`/api/tickets/${ticket.id}/deploy`, { method: 'POST', token, body: { ok: true, text: 'Live.' } });
 });
 
-test('dismissing a dismissed minion, or reopening one that isn\'t, changes nothing (#468 S07-3)', async () => {
+test("dismissing a dismissed minion, or reopening one that isn't, changes nothing (#468 S07-3)", async () => {
   const notes = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'note').map((e: any) => JSON.parse(e.data).text);
   const count = async (re: RegExp) => (await notes()).filter((t: string) => re.test(t)).length;
   assert.equal(await count(/dismissed this minion/), 1);

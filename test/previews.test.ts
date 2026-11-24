@@ -17,7 +17,14 @@ const tmp = tempRoot('previews-test-');
 const root = tmp.dir;
 after(async () => {
   // The server's last writes land before it is stopped and its folder deleted (#1437, CITADEL_TEST_SETTLED below).
-  const busy: string[] = base ? await fetch(`${base}/api/test/settled`).then((r) => r.json()).then((r) => r.busy, () => []) : [];
+  const busy: string[] = base
+    ? await fetch(`${base}/api/test/settled`)
+        .then((r) => r.json())
+        .then(
+          (r) => r.busy,
+          () => [],
+        )
+    : [];
   await tmp.teardown(); // children, then the turns they started (#271), then the folder
   assert.deepEqual(busy, [], 'the server was still busy when the test stopped it');
 });
@@ -41,9 +48,12 @@ const old = store.createTicket({ project_id: project.id, title: 'Old branch', pe
 const oldDir = join(root, 'old');
 mkdirSync(oldDir);
 execFileSync('git', ['init', '-q'], { cwd: oldDir });
-writeFileSync(join(oldDir, 'server.ts'), `import { createServer } from 'node:http';
+writeFileSync(
+  join(oldDir, 'server.ts'),
+  `import { createServer } from 'node:http';
 createServer((req, res) => res.end(JSON.stringify({ ok: true }))).listen(Number(process.env.PORT), '127.0.0.1');
-`);
+`,
+);
 store.setTicketDir(old.id, oldDir, 'ticket/2-old');
 store.savePushSubscription('Josh', 'https://push.example/x', 'k', 'a');
 store.db.close();
@@ -57,8 +67,17 @@ before(async () => {
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     cwd: repo,
     env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET, CITADEL_TEST_SETTLED: '1',
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      CITADEL_HOST_SIGNALS: 'fixed',
+      CITADEL_ZONE: TEST_ZONE,
+      PORT: '0',
+      DATA_DIR: data,
+      CLAUDE_BIN: '/bin/false',
+      CLAUDE_CONFIG_DIR: join(root, 'claude'),
+      COORDINATOR_PASSWORD: PASSWORD,
+      SESSION_SECRET: SECRET,
+      CITADEL_TEST_SETTLED: '1',
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
@@ -66,7 +85,9 @@ before(async () => {
   server.stdout!.pipe(process.stdout);
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   const res = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Cara', password: PASSWORD }),
   });
   cookie = res.headers.get('set-cookie')!.split(';')[0];
   // What a page load through Caddy would record as the app's address.
@@ -225,9 +246,12 @@ test('a minion dismissed while its preview boots keeps no preview and no offer (
   const wt = join(root, 'slow-boot');
   mkdirSync(wt);
   // A preview that takes a moment to answer, long enough to dismiss the minion meanwhile.
-  writeFileSync(join(wt, 'server.ts'), `import { createServer } from 'node:http';
+  writeFileSync(
+    join(wt, 'server.ts'),
+    `import { createServer } from 'node:http';
 setTimeout(() => createServer((req, res) => res.end(JSON.stringify({ ok: true, preview: true }))).listen(Number(process.env.PORT), '127.0.0.1'), 600);
-`);
+`,
+  );
   s4.setTicketDir(t.id, wt, 'ticket/4-slow-boot');
   const previews = new Previews(s4, d4);
   try {
@@ -251,7 +275,9 @@ test('a preview whose health check hangs is asked again, not waited on for minut
   mkdirSync(wt);
   // Accepts the first request and never answers it; answers the ones after. It notes when each one came.
   const hits = join(wt, 'hits');
-  writeFileSync(join(wt, 'server.ts'), `import { appendFileSync, writeFileSync } from 'node:fs';
+  writeFileSync(
+    join(wt, 'server.ts'),
+    `import { appendFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 writeFileSync(${JSON.stringify(join(wt, 'pid'))}, String(process.pid));
 let n = 0;
@@ -259,15 +285,31 @@ createServer((req, res) => {
   appendFileSync(${JSON.stringify(hits)}, Date.now() + '\\n');
   if (n++) res.end(JSON.stringify({ ok: true, preview: true }));
 }).listen(Number(process.env.PORT), '127.0.0.1');
-`);
+`,
+  );
   s5.setTicketDir(t.id, wt, 'ticket/5-hung');
   const previews = new Previews(s5, d5);
   const t0 = Date.now();
   let booted = 0;
   let failed: unknown;
-  const boot = previews.start(s5.getTicket(t.id)!).then(() => void (booted = Date.now()), (e) => void (failed = e ?? new Error('failed')));
-  const seen = () => (existsSync(hits) ? readFileSync(hits, 'utf8').trim().split('\n').map((x) => `+${Number(x) - t0} ms`) : []);
-  const alive = () => { try { return process.kill(Number(readFileSync(join(wt, 'pid'), 'utf8')), 0) && 'running'; } catch { return 'gone'; } };
+  const boot = previews.start(s5.getTicket(t.id)!).then(
+    () => void (booted = Date.now()),
+    (e) => void (failed = e ?? new Error('failed')),
+  );
+  const seen = () =>
+    existsSync(hits)
+      ? readFileSync(hits, 'utf8')
+          .trim()
+          .split('\n')
+          .map((x) => `+${Number(x) - t0} ms`)
+      : [];
+  const alive = () => {
+    try {
+      return process.kill(Number(readFileSync(join(wt, 'pid'), 'utf8')), 0) && 'running';
+    } catch {
+      return 'gone';
+    }
+  };
   const what = () => `requests at ${seen().join(', ') || 'none'} after start; ${booted ? `booted at +${booted - t0} ms` : 'not booted'}; the server is ${alive()}`;
   try {
     // Timed from the hung request, not from start(): copying the data and starting the server aren't what this checks (#973).
@@ -293,7 +335,9 @@ test('stopping a preview waits for its process to exit before deleting its copy'
   const t = s3.createTicket({ project_id: s3.createProject('Three', null).id, title: 'Stubborn', permission_mode: 'default', created_by: 'Cara' });
   const wt = join(root, 'stubborn');
   mkdirSync(wt);
-  writeFileSync(join(wt, 'server.ts'), `import { mkdirSync, writeFileSync } from 'node:fs';
+  writeFileSync(
+    join(wt, 'server.ts'),
+    `import { mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 const dir = process.env.DATA_DIR!;
@@ -303,7 +347,8 @@ process.on('SIGTERM', () => setInterval(() => {
   writeFileSync(join(dir, 'run', String(Date.now())), 'x');
 }, 1));
 createServer((req, res) => res.end(JSON.stringify({ ok: true, preview: true }))).listen(Number(process.env.PORT), '127.0.0.1');
-`);
+`,
+  );
   s3.setTicketDir(t.id, wt, 'ticket/3-stubborn');
   const previews = new Previews(s3, d3);
   const dir = join(previews.root, String(t.id));
@@ -337,23 +382,27 @@ test('copyData finishes while another connection keeps writing the source (#1204
   const src = join(dir, 'coordinator.db');
   const db = new DatabaseSync(src);
   db.exec('PRAGMA journal_mode=WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v BLOB); CREATE TABLE push_subscriptions (id INTEGER); CREATE TABLE settings (key TEXT, value TEXT)');
-  db.exec("INSERT INTO t (v) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<8000) SELECT randomblob(4000) FROM n");
+  db.exec('INSERT INTO t (v) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<8000) SELECT randomblob(4000) FROM n');
   const writer = new DatabaseSync(src);
   let stop = false;
   const spin = (async () => {
-    while (!stop) { writer.exec("UPDATE t SET v = randomblob(4000) WHERE id % 50 = 0"); await new Promise((r) => setImmediate(r)); }
+    while (!stop) {
+      writer.exec('UPDATE t SET v = randomblob(4000) WHERE id % 50 = 0');
+      await new Promise((r) => setImmediate(r));
+    }
   })();
   const to = join(dir, 'copy.db');
   try {
-    await Promise.race([
-      copyData(src, to),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('copy did not finish while the source was written')), 20000)),
-    ]);
+    await Promise.race([copyData(src, to), new Promise((_, rej) => setTimeout(() => rej(new Error('copy did not finish while the source was written')), 20000))]);
     const copy = new DatabaseSync(to);
     assert.equal(copy.prepare('SELECT count(*) AS n FROM t').get()!.n, 8000);
     copy.close();
   } finally {
-    stop = true; await spin; writer.close(); db.close(); rmSync(dir, { recursive: true, force: true });
+    stop = true;
+    await spin;
+    writer.close();
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

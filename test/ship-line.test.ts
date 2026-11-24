@@ -46,16 +46,34 @@ function scheme(name: string) {
   }
   const found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', numbering: { name: 'Build {n}', number: 'run' } };
   const lands = new LandsInFlight({ store, finder: { list: () => [found] } as never, landings: { handoffs: () => ids, get: () => ({ output: 'queue: next in line\n', code: null }) }, now: () => 1000 });
-  const reader = { read: () => { const vs = [{ target: { id: found.id, projectId: p.id, name: 'Windows', kind: 'ci', link: null }, current: null, next: null, line: [], recent: [] }] as unknown as TargetView[]; lands.attach(vs); return vs; } };
+  const reader = {
+    read: () => {
+      const vs = [{ target: { id: found.id, projectId: p.id, name: 'Windows', kind: 'ci', link: null }, current: null, next: null, line: [], recent: [] }] as unknown as TargetView[];
+      lands.attach(vs);
+      return vs;
+    },
+  };
   const releases = new Releases({ store, readers: [reader as never], testCopies: () => new Map(), broadcast: () => {} });
   releases.poll();
   const app = { store, releases, waits: undefined };
-  const order = () => readFileSync(join(q, '.order'), 'utf8').split('\n').filter((l) => /^\d{10}$/.test(l)).map(Number);
+  const order = () =>
+    readFileSync(join(q, '.order'), 'utf8')
+      .split('\n')
+      .filter((l) => /^\d{10}$/.test(l))
+      .map(Number);
   const line = () => releases.view(() => true)[0].targets.flatMap((t) => t.line);
   return { app, p, order, line, q, ids };
 }
 
-const refused = (fn: () => unknown) => { try { fn(); } catch (e) { assert.ok(e instanceof HttpError); return e.message; } assert.fail('should have been refused'); };
+const refused = (fn: () => unknown) => {
+  try {
+    fn();
+  } catch (e) {
+    assert.ok(e instanceof HttpError);
+    return e.message;
+  }
+  assert.fail('should have been refused');
+};
 
 test("a Taskmaster moves a waiting ship with its reason, by the drag's own write, and the reason shows on the line", () => {
   const { app, p, order, line, q } = scheme('Peek Auras');
@@ -77,8 +95,14 @@ test("a person's move pins its ship: a Taskmaster can't move it or pass it, and 
   moveShip(app, p.id, 3, [3, 2, 4, 5], CARA);
   assert.deepEqual(order(), [3, 2, 4, 5]);
   assert.equal(line().find((x) => x.name === '#3')?.placed?.taskmaster, false);
-  assert.match(refused(() => moveShip(app, p.id, 3, seqsFor(line(), 3, 5), TM, 'x')), /#3 was placed by Cara on .* until it ships/);
-  assert.match(refused(() => moveShip(app, p.id, 4, seqsFor(line(), 4), TM, 'x')), /move #4 past #3, which Cara placed on/);
+  assert.match(
+    refused(() => moveShip(app, p.id, 3, seqsFor(line(), 3, 5), TM, 'x')),
+    /#3 was placed by Cara on .* until it ships/,
+  );
+  assert.match(
+    refused(() => moveShip(app, p.id, 4, seqsFor(line(), 4), TM, 'x')),
+    /move #4 past #3, which Cara placed on/,
+  );
   assert.deepEqual(order(), [3, 2, 4, 5], 'nothing moved');
   // Moves that stay on one side of the pin are fine.
   moveShip(app, p.id, 5, seqsFor(line(), 5, 2), TM, 'smaller');
@@ -99,11 +123,19 @@ test("a person's move pins its ship: a Taskmaster can't move it or pass it, and 
 
 test("a ship whose land script is too old to move still can't be moved by a Taskmaster, and says why", () => {
   const { app, p, q, line } = scheme('Peek Auras');
-  writeFileSync(join(q, '0000000002'), readFileSync(join(q, '0000000002'), 'utf8').replace('\norder\n', '\n').replace(/\norder$/, ''));
+  writeFileSync(
+    join(q, '0000000002'),
+    readFileSync(join(q, '0000000002'), 'utf8')
+      .replace('\norder\n', '\n')
+      .replace(/\norder$/, ''),
+  );
   app.releases.poll();
   const two = line().find((x) => x.name === '#2')!;
   assert.equal(two.movable, false);
-  assert.match(refused(() => moveShip(app, p.id, 2, [2, 3], TM, 'x')), /#2: Can't move/);
+  assert.match(
+    refused(() => moveShip(app, p.id, 2, [2, 3], TM, 'x')),
+    /#2: Can't move/,
+  );
 });
 
 // Whose line a call may reach is the router's (src/http.ts checkScope; test/access-matrix: another scheme's Taskmaster gets a 403,
@@ -111,13 +143,16 @@ test("a ship whose land script is too old to move still can't be moved by a Task
 test("a scheme with no ship line can't be ordered, and a pin lives in its own scheme's setting", () => {
   const a = scheme('Peek Auras');
   const none = a.app.store.createProject('Other Scheme', 'https://github.com/o/y');
-  assert.match(refused(() => moveShip(a.app, none.id, 3, [3], TM, 'x')), /no ship line/);
+  assert.match(
+    refused(() => moveShip(a.app, none.id, 3, [3], TM, 'x')),
+    /no ship line/,
+  );
   moveShip(a.app, a.p.id, 3, [3, 2, 4, 5], CARA);
   assert.ok(a.app.store.getSetting(`ship-line:${a.p.id}`));
   assert.equal(a.app.store.getSetting(`ship-line:${none.id}`), null);
 });
 
-test('order_ship_line is on the Taskmaster tool list and not on a minion\'s', () => {
+test("order_ship_line is on the Taskmaster tool list and not on a minion's", () => {
   const tools = (role: string) => {
     const input = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n';
     const r = spawnSync(process.execPath, ['src/mcp.ts'], { input, encoding: 'utf8', env: { ...process.env, COORDINATOR_ROLE: role, COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_APP_INSTRUCTIONS: '' } });

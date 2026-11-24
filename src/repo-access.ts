@@ -35,7 +35,8 @@ export class RepoAccess {
 
   private async api(method: string, path: string, token: string, body?: unknown): Promise<Response> {
     return this.fetch(`${API}${path}`, {
-      method, signal: AbortSignal.timeout(GITHUB_WAIT_MS),
+      method,
+      signal: AbortSignal.timeout(GITHUB_WAIT_MS),
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel', ...(body ? { 'Content-Type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
@@ -73,14 +74,12 @@ export class RepoAccess {
     // An invite or collaborator Citadel made here stays Citadel's through a failure, so leaving still undoes it.
     const ours = prev?.slug === slug && (prev.state === 'invited' || prev.state === 'added') ? prev : null;
     const put = (state: RepoCollaborator['state'], fields: Partial<Pick<RepoCollaborator, 'login' | 'invitation_id' | 'error'>> = {}) =>
-      this.store.putRepoCollaborator(ours && (state === 'failed' || state === 'waiting')
-        ? { ...ours, error: fields.error ?? null }
-        : { project_id: projectId, user_id: userId, slug, login: null, invitation_id: null, error: null, state, ...fields });
+      this.store.putRepoCollaborator(ours && (state === 'failed' || state === 'waiting') ? { ...ours, error: fields.error ?? null } : { project_id: projectId, user_id: userId, slug, login: null, invitation_id: null, error: null, state, ...fields });
     if (!login) return put('waiting');
     const owner = this.store.getUser(project.owner_id ?? -1);
     const ownerToken = owner ? this.link.token(owner) : null;
     if (!ownerToken) {
-      return put('failed', { login, error: `${owner?.name ?? 'The scheme\'s owner'} hasn't linked a working GitHub in Settings → Your account, so Citadel can't invite @${login} to ${slug}.` });
+      return put('failed', { login, error: `${owner?.name ?? "The scheme's owner"} hasn't linked a working GitHub in Settings → Your account, so Citadel can't invite @${login} to ${slug}.` });
     }
     const hint = this.link.installHint(ownerToken.limited, slug);
     const repoOwner = slug.split('/')[0];
@@ -97,7 +96,7 @@ export class RepoAccess {
       const invite = await this.api('PUT', `/repos/${slug}/collaborators/${login}`, ownerToken.secret, { permission: 'push' });
       if (invite.status === 204) return put('added', { login });
       if (invite.status !== 201) return put('failed', { login, error: await explain(invite, ownerToken.login, login, slug, hint) });
-      const id = invited = Number(((await invite.json().catch(() => ({}))) as { id?: number }).id) || null;
+      const id = (invited = Number(((await invite.json().catch(() => ({}))) as { id?: number }).id) || null);
       const memberToken = this.link.token(member);
       if (!id || !memberToken || memberToken.login.toLowerCase() !== login.toLowerCase()) return put('invited', { login, invitation_id: id });
       const accept = await this.api('PATCH', `/user/repository_invitations/${id}`, memberToken.secret);
@@ -137,7 +136,7 @@ export class RepoAccess {
       this.store.putRepoCollaborator({ ...r, error });
       return error;
     };
-    if (!ownerToken) return fail(`@${r.login} is still a collaborator on ${r.slug}: ${owner?.name ?? 'the scheme\'s owner'} hasn't linked a working GitHub, so Citadel couldn't take them off. They can remove @${r.login} on GitHub.`);
+    if (!ownerToken) return fail(`@${r.login} is still a collaborator on ${r.slug}: ${owner?.name ?? "the scheme's owner"} hasn't linked a working GitHub, so Citadel couldn't take them off. They can remove @${r.login} on GitHub.`);
     try {
       // A limited link (#464) gets 404 for a repo the App isn't installed on, which would read as "gone already"
       // below and leave the collaborator on GitHub: only go on when the token can see the repo.

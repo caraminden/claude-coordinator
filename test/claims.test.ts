@@ -29,7 +29,10 @@ test('a claim has one holder; the same holder retakes it, another is told who ha
   assert.equal(again.claim.since, 1000, 'retaking keeps the original since');
   // Schemes don't share claims.
   assert.equal(claims.take(2, 'pipeline-lane', 700, 'Cara').held, undefined);
-  assert.deepEqual(claims.list(1).map((c) => c.holder), [580]);
+  assert.deepEqual(
+    claims.list(1).map((c) => c.holder),
+    [580],
+  );
 });
 
 test('release frees a claim whoever holds it; a dismissed holder frees all of its', () => {
@@ -39,7 +42,10 @@ test('release frees a claim whoever holds it; a dismissed holder frees all of it
   claims.take(1, 'db-migrations', 600, 'Cara');
   assert.equal(claims.release(1, 'db-migrations')?.holder, 600);
   assert.equal(claims.release(1, 'db-migrations'), undefined, 'releasing a free claim is a no-op');
-  assert.deepEqual(claims.releaseHeldBy(580).map((p) => p.from.name), ['pipeline-lane', 'release-train']);
+  assert.deepEqual(
+    claims.releaseHeldBy(580).map((p) => p.from.name),
+    ['pipeline-lane', 'release-train'],
+  );
   assert.deepEqual(claims.list(1), []);
 });
 
@@ -52,20 +58,41 @@ test('a claim passes to the first in its queue on release or dismissal, and is f
   claims.setQueue(1, 'pipeline-lane', [601, 580, 602, 601], 'Cara', 1500);
   assert.deepEqual(claims.waiting(1, 'pipeline-lane'), [601, 602], 'the holder and repeats are left out');
   claims.setQueue(1, 'pipeline-lane', [602, 601, 603], 'Josh', 1600);
-  assert.deepEqual(claims.queue(1, 'pipeline-lane').map((r) => [r.ticket, r.added_by]), [[602, 'Cara'], [601, 'Cara'], [603, 'Josh']], 'a reorder keeps who queued each');
+  assert.deepEqual(
+    claims.queue(1, 'pipeline-lane').map((r) => [r.ticket, r.added_by]),
+    [
+      [602, 'Cara'],
+      [601, 'Cara'],
+      [603, 'Josh'],
+    ],
+    'a reorder keeps who queued each',
+  );
 
   // Release: 602 holds it from now with a clear note; 580 is this run's first done step.
   const r = claims.passOn(1, 'pipeline-lane', 'released', 5000)!;
   assert.equal(r.from.holder, 580);
   assert.deepEqual([r.to!.holder, r.to!.since, r.to!.note], [602, 5000, '']);
-  assert.deepEqual(claims.queue(1, 'pipeline-lane').map((q) => [q.ticket, q.done_at]), [[580, 5000], [601, null], [603, null]]);
+  assert.deepEqual(
+    claims.queue(1, 'pipeline-lane').map((q) => [q.ticket, q.done_at]),
+    [
+      [580, 5000],
+      [601, null],
+      [603, null],
+    ],
+  );
 
   // A waiting minion that is dismissed leaves the line; a dismissed holder passes it on.
   assert.deepEqual(claims.releaseHeldBy(601, 'dismissed', 6000), [], 'it held nothing');
   assert.deepEqual(claims.waiting(1, 'pipeline-lane'), [603]);
   const d = claims.releaseHeldBy(602, 'dismissed', 7000);
-  assert.deepEqual(d.map((p) => [p.from.holder, p.to?.holder]), [[602, 603]]);
-  assert.deepEqual(claims.queue(1, 'pipeline-lane').map((q) => q.ticket), [580, 602]);
+  assert.deepEqual(
+    d.map((p) => [p.from.holder, p.to?.holder]),
+    [[602, 603]],
+  );
+  assert.deepEqual(
+    claims.queue(1, 'pipeline-lane').map((q) => q.ticket),
+    [580, 602],
+  );
 
   // Nobody waiting: free, and the run's rows go, so a new run starts at 0 done.
   assert.equal(claims.passOn(1, 'pipeline-lane', 'live', 9000)!.to, undefined);
@@ -106,11 +133,20 @@ test('a holder whose work shipped passes its claim on as shipped when dismissed,
   const dir = scratch.dir;
   try {
     const store = new Store(join(dir, 'test.db'));
-    const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+    const runner = new Runner(
+      store,
+      () => {},
+      () => ({}),
+      '/bin/false',
+    );
     const p = store.createProject('Shipped', null).id;
     const mk = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'default', created_by: 'Cara' });
     const [a, b, c, other] = [mk('A'), mk('B'), mk('C, chained'), mk('Not a holder')];
-    const how = () => new DatabaseSync(join(dir, 'test.db'), { readOnly: true }).prepare('SELECT holder, how FROM claim_spans ORDER BY rowid').all().map((r: any) => [r.holder, r.how]);
+    const how = () =>
+      new DatabaseSync(join(dir, 'test.db'), { readOnly: true })
+        .prepare('SELECT holder, how FROM claim_spans ORDER BY rowid')
+        .all()
+        .map((r: any) => [r.holder, r.how]);
     store.claims.take(p, 'pipeline-lane', a.id, 'Cara');
     runner.holderShipped(a.id);
     runner.holderShipped(other.id);
@@ -119,12 +155,15 @@ test('a holder whose work shipped passes its claim on as shipped when dismissed,
     store.claims.take(p, 'pipeline-lane', b.id, 'Cara');
     // C waits in the queue and on a start_after chain: the claim line waits with its brief, so the chain's start is its one wake.
     store.claims.setQueue(p, 'pipeline-lane', [c.id], 'Cara');
-    runner.heldFor = (id) => (id === c.id ? '#2 B\'s work is live' : null);
+    runner.heldFor = (id) => (id === c.id ? "#2 B's work is live" : null);
     await runner.close(b.id, 'Cara dismissed this minion.');
     assert.equal(store.claims.get(p, 'pipeline-lane')?.holder, c.id);
-    assert.match(JSON.stringify((store.getSetting<any>(`minion-queue:${c.id}`)?.held ?? null)), /You hold the pipeline-lane claim now/);
+    assert.match(JSON.stringify(store.getSetting<any>(`minion-queue:${c.id}`)?.held ?? null), /You hold the pipeline-lane claim now/);
     assert.equal(runner.isRunning(c.id), false, 'no turn of its own');
-    assert.deepEqual(how(), [[a.id, 'live'], [b.id, 'dismissed']]);
+    assert.deepEqual(how(), [
+      [a.id, 'live'],
+      [b.id, 'dismissed'],
+    ]);
     assert.ok(!store.getSetting(`claim-shipped:${a.id}`), 'the mark goes with the dismissal');
   } finally {
     await scratch.teardown();
@@ -137,8 +176,7 @@ after(() => tmp.teardown());
 let base = '';
 let cookie = '';
 let srv: Booted;
-const call = (path: string, opts: { method?: string; body?: unknown; as?: number } = {}) =>
-  (opts.as === undefined ? srv.call : srv.as({ token: agentToken(join(root, 'data'), opts.as) }))(path, opts.body || undefined, opts.method ?? 'GET');
+const call = (path: string, opts: { method?: string; body?: unknown; as?: number } = {}) => (opts.as === undefined ? srv.call : srv.as({ token: agentToken(join(root, 'data'), opts.as) }))(path, opts.body || undefined, opts.method ?? 'GET');
 before(async () => {
   srv = await bootServer({ root, stdout: true });
   base = srv.base;
@@ -169,11 +207,15 @@ test('the Taskmaster claims the lane for a minion; minions only read; dismissing
   // Its holder's dismissal frees it, and the Taskmaster hears so as held mail.
   // Its first turn (CLAUDE_BIN is /bin/false) has to end before it can be dismissed.
   let dismissed = await call(`/api/tickets/${a.id}/status`, { method: 'POST', body: { status: 'closed' } });
-  await until('its first turn to end so it can be dismissed', async () => {
-    if (dismissed.status !== 409) return true;
-    dismissed = await call(`/api/tickets/${a.id}/status`, { method: 'POST', body: { status: 'closed' } });
-    return dismissed.status !== 409;
-  }, 10_000);
+  await until(
+    'its first turn to end so it can be dismissed',
+    async () => {
+      if (dismissed.status !== 409) return true;
+      dismissed = await call(`/api/tickets/${a.id}/status`, { method: 'POST', body: { status: 'closed' } });
+      return dismissed.status !== 409;
+    },
+    10_000,
+  );
   assert.equal(dismissed.status, 200, JSON.stringify(dismissed.data));
   assert.deepEqual((await call(url, { as: tm })).data.claims, []);
   const { data: tmEvents } = await call(`/api/tickets/${tm}/events?after=0`);
@@ -208,24 +250,40 @@ test('a queued claim passes to the next minion with one chat line when its holde
   assert.equal(took.status, 201, JSON.stringify(took.data));
   assert.equal(took.data.claim.holder_number, a.number);
   assert.equal(await said(a.id), 1, 'the first holder hears it');
-  assert.deepEqual(took.data.claim.queue.map((q: any) => q.number), [b.number]);
+  assert.deepEqual(
+    took.data.claim.queue.map((q: any) => q.number),
+    [b.number],
+  );
   assert.deepEqual([took.data.claim.done, took.data.claim.total, took.data.claim.estimate], [0, 2, null], 'no history: no estimate');
   // The page reorders the line; a minion can't.
   assert.equal((await call(`${url}/pipeline-lane/queue`, { method: 'PUT', body: { queue: [c.number, b.number] } })).status, 200);
   assert.equal((await call(`${url}/pipeline-lane/queue`, { method: 'PUT', body: { queue: [] }, as: b.id })).status, 403);
-  assert.deepEqual((await call(url)).data.claims[0].queue.map((q: any) => q.number), [c.number, b.number]);
+  assert.deepEqual(
+    (await call(url)).data.claims[0].queue.map((q: any) => q.number),
+    [c.number, b.number],
+  );
 
   // Dismissing the holder passes it to the first in line, who hears it once; the Taskmaster gets held mail.
   let dismissed = await call(`/api/tickets/${a.id}/status`, { method: 'POST', body: { status: 'closed' } });
-  await until('its first turn to end so it can be dismissed', async () => {
-    if (dismissed.status !== 409) return true;
-    dismissed = await call(`/api/tickets/${a.id}/status`, { method: 'POST', body: { status: 'closed' } });
-    return dismissed.status !== 409;
-  }, 10_000);
+  await until(
+    'its first turn to end so it can be dismissed',
+    async () => {
+      if (dismissed.status !== 409) return true;
+      dismissed = await call(`/api/tickets/${a.id}/status`, { method: 'POST', body: { status: 'closed' } });
+      return dismissed.status !== 409;
+    },
+    10_000,
+  );
   assert.equal(dismissed.status, 200, JSON.stringify(dismissed.data));
   const now = (await call(url)).data.claims[0];
   assert.equal(now.holder_number, c.number);
-  assert.deepEqual(now.queue.map((q: any) => [q.number, q.state]), [[a.number, 'done'], [b.number, now.queue[1].state]]);
+  assert.deepEqual(
+    now.queue.map((q: any) => [q.number, q.state]),
+    [
+      [a.number, 'done'],
+      [b.number, now.queue[1].state],
+    ],
+  );
   assert.equal(now.queue[0].how, 'dismissed', 'dismissed before it shipped');
   assert.deepEqual([now.done, now.total], [1, 3]);
   assert.equal(await said(c.id), 1, 'the new holder gets one line');
@@ -245,7 +303,7 @@ test('a queued claim passes to the next minion with one chat line when its holde
   assert.deepEqual((await call(url)).data.claims, []);
 });
 
-test('the Taskmaster\'s claim, release and list_claims tools, and list_tickets showing claims', async () => {
+test("the Taskmaster's claim, release and list_claims tools, and list_tickets showing claims", async () => {
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Tools' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
   const { data: m } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'fix land.sh', title: 'Fix land.sh', properties: { type: 'chore' } } });
@@ -254,13 +312,17 @@ test('the Taskmaster\'s claim, release and list_claims tools, and list_tickets s
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   const replies = new Map<number, (r: any) => void>();
-  createInterface({ input: mcp.stdout! }).on('line', (l) => { const r = JSON.parse(l); replies.get(r.id)?.(r); });
-  let next = 1;
-  const tool = (name: string, args: object = {}) => new Promise<string>((resolve) => {
-    const id = next++;
-    replies.set(id, (r) => resolve(r.result.content[0].text));
-    mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+  createInterface({ input: mcp.stdout! }).on('line', (l) => {
+    const r = JSON.parse(l);
+    replies.get(r.id)?.(r);
   });
+  let next = 1;
+  const tool = (name: string, args: object = {}) =>
+    new Promise<string>((resolve) => {
+      const id = next++;
+      replies.set(id, (r) => resolve(r.result.content[0].text));
+      mcp.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+    });
   assert.equal(await tool('list_claims'), 'No claims: every duty is free.');
   assert.match(await tool('claim', { name: 'pipeline-lane', minion: m.number, note: 'land retry' }), new RegExp(`^Claimed: pipeline-lane: #${m.number} .*since .* ${RegExp.escape(zoneLabel(srv.zone))} \\(land retry\\)$`)); // the server's zone (#1536)
   assert.match(await tool('claim', { name: 'pipeline-lane' }), /^Error: pipeline-lane is held by #/);

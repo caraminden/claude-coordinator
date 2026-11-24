@@ -42,11 +42,14 @@ const framedIn = typeof window === 'object' && window.parent !== window ? window
 
 // Inside Citadel's frame (frames.js): Citadel's rail is the rail, and this page's switcher opens it. Its state comes from Citadel.
 let hostState = { hasRail: false, own: [], apps: {}, domain: null, title: null, desktop: false };
-const host = inContraption && framedIn ? {
-  openRail: () => post(framedIn, 'rail', { open: true }),
-  closeRail: () => post(framedIn, 'rail', { open: false }),
-  hasRail: () => hostState.hasRail,
-} : null;
+const host =
+  inContraption && framedIn
+    ? {
+        openRail: () => post(framedIn, 'rail', { open: true }),
+        closeRail: () => post(framedIn, 'rail', { open: false }),
+        hasRail: () => hostState.hasRail,
+      }
+    : null;
 /** The contraption showing: this page's own, or in Citadel the one framed (null in Citadel's own views). */
 const showing = () => (inContraption ? location.pathname.match(/\/apps\/([^/]+)\//) : location.hash.match(/^#\/apps\/([^/]+)$/))?.[1] ?? null;
 
@@ -114,7 +117,10 @@ let layerOpener = null;
 function openLayer(item) {
   closeRail();
   // Citadel's entry goes back to Citadel's last own view, as its own rail's does: Citadel's page knows which (go).
-  const go = (f) => { post(f.contentWindow, 'layer', { app: showing() }); post(f.contentWindow, 'go', { app: item.name }); };
+  const go = (f) => {
+    post(f.contentWindow, 'layer', { app: showing() });
+    post(f.contentWindow, 'go', { app: item.name });
+  };
   const frame = layer?.firstChild;
   if (!frame) {
     layer = document.createElement('div');
@@ -244,8 +250,7 @@ export function installMode({ own, standalone, prompt, installed, android, ios }
 }
 
 /** An Android link that opens `url` in Chrome itself, or as a plain link where Chrome isn't there. */
-export const chromeIntent = (url) =>
-  `intent://${url.host}${url.pathname}${url.search}#Intent;scheme=${url.protocol.slice(0, -1)};package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(url.href)};end`;
+export const chromeIntent = (url) => `intent://${url.host}${url.pathname}${url.search}#Intent;scheme=${url.protocol.slice(0, -1)};package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(url.href)};end`;
 
 const INSTALL_TIPS = {
   prompt: (t) => `Install ${t} as its own app`,
@@ -259,8 +264,19 @@ const isIOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator
 let installPrompt = null; // beforeinstallprompt, kept for the button: a contraption's own page only
 // Shared by Citadel and every app on the origin, so Citadel's rail knows an app's page saw itself installed.
 const installedKey = (name) => `citadel-installed:${name}`;
-const knownInstalled = (name) => { try { return localStorage.getItem(installedKey(name)) === '1'; } catch { return false; } };
-const markInstalled = (name, on) => { try { if (on) localStorage.setItem(installedKey(name), '1'); else localStorage.removeItem(installedKey(name)); } catch {} };
+const knownInstalled = (name) => {
+  try {
+    return localStorage.getItem(installedKey(name)) === '1';
+  } catch {
+    return false;
+  }
+};
+const markInstalled = (name, on) => {
+  try {
+    if (on) localStorage.setItem(installedKey(name), '1');
+    else localStorage.removeItem(installedKey(name));
+  } catch {}
+};
 // Framed in Citadel, a contraption's page shares what its own window saw (hello), since its storage is its origin's.
 if (typeof window === 'object' && host) post(framedIn, 'hello', { installed: knownInstalled(showing()) });
 if (typeof window === 'object' && inContraption && !host) {
@@ -279,7 +295,10 @@ if (typeof window === 'object' && inContraption && !host) {
   });
 }
 // Citadel's rail: an app installed from the tab its button opened hides the button here too.
-if (typeof window === 'object' && !inContraption) addEventListener('storage', (e) => { if (e.key?.startsWith('citadel-installed:')) syncInstall(); });
+if (typeof window === 'object' && !inContraption)
+  addEventListener('storage', (e) => {
+    if (e.key?.startsWith('citadel-installed:')) syncInstall();
+  });
 
 function installButton() {
   const b = document.createElement('button');
@@ -301,7 +320,8 @@ function installButton() {
       } catch {}
       syncInstall();
     } else if (mode === 'intent') location.href = chromeIntent(url);
-    else if (mode === 'tab') open(shortUrls.get(name) ?? url, '_blank', 'noopener'); // a person sees the app's own host when there is one (#827)
+    else if (mode === 'tab')
+      open(shortUrls.get(name) ?? url, '_blank', 'noopener'); // a person sees the app's own host when there is one (#827)
     else if (mode === 'ios') showHint(`To add ${b.dataset.title} to your Home Screen: in Safari, tap Share, then Add to Home Screen.`);
   });
   return b;
@@ -331,7 +351,11 @@ function showHint(text) {
   hint.setAttribute('role', 'status');
   hint.textContent = text;
   document.body.append(hint);
-  const gone = () => { hint?.remove(); hint = null; removeEventListener('pointerdown', gone, true); };
+  const gone = () => {
+    hint?.remove();
+    hint = null;
+    removeEventListener('pointerdown', gone, true);
+  };
   setTimeout(() => addEventListener('pointerdown', gone, true), 0);
   setTimeout(gone, 10_000);
 }
@@ -341,7 +365,13 @@ function showHint(text) {
 // reload on a frame (a deploy's front-end reload) still goes back there, and in localStorage for a phone app the system
 // restarted or a contraption's own window; #/ (the start scheme) only when neither holds one.
 const viewKey = `citadel-last-view:${root.pathname}`;
-const storedView = () => { try { return sessionStorage.getItem(viewKey) ?? localStorage.getItem(viewKey); } catch { return null; } };
+const storedView = () => {
+  try {
+    return sessionStorage.getItem(viewKey) ?? localStorage.getItem(viewKey);
+  } catch {
+    return null;
+  }
+};
 let lastView = (!inContraption && storedView()) || '#/';
 
 /** In Citadel: mark the view showing (Citadel or a framed contraption), and point Citadel's entry back at its last own view. */
@@ -349,8 +379,12 @@ function syncRail() {
   if (inContraption || !nav) return;
   const now = showing();
   // Not a share's address (#/share?…), which only passes through on its way to a frame.
-  if (!now && !location.hash.startsWith('#/share') && lastView !== (lastView = location.hash || '#/')) { // never a bare root: that link would reload Citadel, frames and all
-    try { sessionStorage.setItem(viewKey, lastView); localStorage.setItem(viewKey, lastView); } catch {}
+  if (!now && !location.hash.startsWith('#/share') && lastView !== (lastView = location.hash || '#/')) {
+    // never a bare root: that link would reload Citadel, frames and all
+    try {
+      sessionStorage.setItem(viewKey, lastView);
+      localStorage.setItem(viewKey, lastView);
+    } catch {}
   }
   for (const a of nav.querySelectorAll('a[data-app]')) {
     const here = (a.dataset.app || null) === now;
@@ -368,7 +402,10 @@ export function hideRail() {
   // Citadel signing out: the next person starts afresh. Not a framed contraption's rail, which hides itself as it loads.
   if (!inContraption) {
     lastView = '#/';
-    try { sessionStorage.removeItem(viewKey); localStorage.removeItem(viewKey); } catch {}
+    try {
+      sessionStorage.removeItem(viewKey);
+      localStorage.removeItem(viewKey);
+    } catch {}
   }
   clearRail();
 }
@@ -458,7 +495,10 @@ function retryIcon(pic, tile, tries = 1) {
 
 /** Fetch your contraptions and draw the rail, or take it away when there are none. */
 export async function showRail() {
-  if (inNativeApp()) { hideRail(); return false; } // an app's own shell: no rail, handle or Alt+` switcher
+  if (inNativeApp()) {
+    hideRail();
+    return false;
+  } // an app's own shell: no rail, handle or Alt+` switcher
   if (host) {
     // Framed in Citadel: no rail of its own, just the phone's way to Citadel's switcher.
     hideRail();
@@ -483,7 +523,10 @@ let switching = false;
 function startSwitch() {
   if (switching || !inContraption || host || !person) return;
   switching = true;
-  import('./appswitch.js').then((m) => m.initAppSwitch(person), () => (switching = false));
+  import('./appswitch.js').then(
+    (m) => m.initAppSwitch(person),
+    () => (switching = false),
+  );
 }
 
 function drawRail(items) {
@@ -502,7 +545,10 @@ function drawRail(items) {
     a.href = item.href;
     a.dataset.app = item.name ?? '';
     a.title = item.down ? `${item.title} (unavailable)` : item.title;
-    if (item.current) { a.className = 'current'; a.setAttribute('aria-current', 'page'); }
+    if (item.current) {
+      a.className = 'current';
+      a.setAttribute('aria-current', 'page');
+    }
     if (item.down) a.classList.add('down');
     const tile = document.createElement('span');
     tile.className = 'tile';
@@ -512,10 +558,14 @@ function drawRail(items) {
       pic = document.createElement('img');
       pic.src = item.icon;
       pic.alt = '';
-      pic.addEventListener('error', () => {
-        pic.replaceWith(tile);
-        retryIcon(pic, tile);
-      }, { once: true });
+      pic.addEventListener(
+        'error',
+        () => {
+          pic.replaceWith(tile);
+          retryIcon(pic, tile);
+        },
+        { once: true },
+      );
     }
     const label = document.createElement('span');
     label.className = 'label';
@@ -559,7 +609,11 @@ let drops = 0; // counts drops: each saves the whole list, so an older one's Ret
 
 /** Move an app from `from` to `to`: on the rail at once, saved behind; a failed save puts it back. */
 function reorderApps(from, to) {
-  const keys = moved(appLinks().map((a) => a.dataset.app), from, to);
+  const keys = moved(
+    appLinks().map((a) => a.dataset.app),
+    from,
+    to,
+  );
   const drop = ++drops;
   let before = null; // the order just before this drop showed, to put back if its save fails
   let stale = false; // a Retry once a newer drop has been made: that one's order stands, so this does nothing
@@ -575,7 +629,7 @@ function reorderApps(from, to) {
       stale = drop !== drops;
       if (stale || !nav) return;
       before = appLinks().map((a) => a.dataset.app);
-      show(dragged = keys);
+      show((dragged = keys));
     },
     send: async () => {
       if (stale) return;
@@ -588,26 +642,35 @@ function reorderApps(from, to) {
       show(before);
     },
     label: 'save the order of your apps',
-  }).then(() => dragged === keys && (dragged = null), () => {});
+  }).then(
+    () => dragged === keys && (dragged = null),
+    () => {},
+  );
 }
 
 // Closing: Escape, a swipe back left across it, or a new view in Citadel.
 if (typeof document !== 'undefined') {
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || !nav?.classList.contains('open')) return;
-    e.preventDefault();
-    e.stopImmediatePropagation(); // just the switcher: a drawer under it stays
-    closeRail();
-  }, true);
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key !== 'Escape' || !nav?.classList.contains('open')) return;
+      e.preventDefault();
+      e.stopImmediatePropagation(); // just the switcher: a drawer under it stays
+      closeRail();
+    },
+    true,
+  );
   let swipe = null;
-  document.addEventListener('touchstart', (e) => {
-    const t = e.touches[0];
-    const open = nav?.classList.contains('open');
-    // Open: a drag on it or its backdrop. Shut, in a contraption without drawers.js or a slot: one from the left edge.
-    swipe = (nav || host) && !nav?.classList.contains('placed') && narrow.matches && e.touches.length === 1
-      && (open ? nav.contains(e.target) || e.target === backdrop : inContraption && !slot && !edgeTaken && t.clientX <= EDGE)
-      ? { x: t.clientX, y: t.clientY, open } : null;
-  }, { passive: true });
+  document.addEventListener(
+    'touchstart',
+    (e) => {
+      const t = e.touches[0];
+      const open = nav?.classList.contains('open');
+      // Open: a drag on it or its backdrop. Shut, in a contraption without drawers.js or a slot: one from the left edge.
+      swipe = (nav || host) && !nav?.classList.contains('placed') && narrow.matches && e.touches.length === 1 && (open ? nav.contains(e.target) || e.target === backdrop : inContraption && !slot && !edgeTaken && t.clientX <= EDGE) ? { x: t.clientX, y: t.clientY, open } : null;
+    },
+    { passive: true },
+  );
   document.addEventListener('touchend', (e) => {
     if (!swipe) return;
     const t = e.changedTouches[0];
@@ -629,7 +692,10 @@ if (typeof document !== 'undefined') {
       if (isMessage(e, frame?.contentWindow)) {
         const name = frame.dataset.app;
         if (d.type === 'hello') {
-          if (name && typeof d.installed === 'boolean' && d.installed !== knownInstalled(name)) { markInstalled(name, d.installed); syncInstall(); }
+          if (name && typeof d.installed === 'boolean' && d.installed !== knownInstalled(name)) {
+            markInstalled(name, d.installed);
+            syncInstall();
+          }
           tellFrames([e.source]);
         } else if (d.type === 'rail') d.open ? openRail() : closeRail();
         else if (d.type === 'go-url' && typeof d.url === 'string') {
@@ -678,7 +744,15 @@ if (typeof document !== 'undefined') {
 }
 
 let typedAt = 0;
-if (typeof document === 'object' && host) for (const t of ['input', 'keydown']) document.addEventListener(t, () => { typedAt = Date.now(); }, true);
+if (typeof document === 'object' && host)
+  for (const t of ['input', 'keydown'])
+    document.addEventListener(
+      t,
+      () => {
+        typedAt = Date.now();
+      },
+      true,
+    );
 const TYPING_MS = 5000; // as Citadel's own reload waits (core.js QUIET_MS)
 const TEXT_FIELDS = 'textarea, input:not([type]), input[type=text], input[type=search], input[type=email], input[type=url], input[type=tel], input[type=number], [contenteditable]:not([contenteditable=false])';
 /**
@@ -703,7 +777,10 @@ let barQueued = false;
  */
 function reportBar() {
   const bar = document.querySelector('.cui-topbar');
-  const box = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; };
+  const box = (el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  };
   // A modal dialog over the bar (#772): its backdrop's colour, so Citadel stops dragging by the bar and tints the strip under it.
   const modal = document.querySelector(':modal');
   post(framedIn, 'bar', {
@@ -731,7 +808,10 @@ function reportBar() {
 function reportSoon() {
   if (barQueued) return;
   barQueued = true;
-  requestAnimationFrame(() => { barQueued = false; reportBar(); });
+  requestAnimationFrame(() => {
+    barQueued = false;
+    reportBar();
+  });
 }
 
 /** A framed contraption: Alt+` and the keys that follow while Alt is held are Citadel's switcher's (appswitch.js), so they go to it. */
@@ -748,7 +828,10 @@ function forwardKeys() {
   };
   addEventListener('keydown', on, true);
   addEventListener('keyup', on, true);
-  addEventListener('blur', () => { switching = false; post(framedIn, 'blur'); });
+  addEventListener('blur', () => {
+    switching = false;
+    post(framedIn, 'blur');
+  });
 }
 
 /** The switcher as a list (a phone, or a wide slot), for the rail matched by `r`. */
@@ -818,7 +901,16 @@ html.has-citadel-rail { --citadel-rail: calc(56px + env(safe-area-inset-left, 0p
 
 // Links: Citadel's own pages act on a click; a framed contraption sends the address up to Citadel.
 if (typeof document !== 'undefined' && !inContraption) {
-  mountLinkHandler({ own: ownHosts, apps: appHosts, domain: appsDomain, self: () => null, openWindow: (url) => location.assign(url), openApp: (link) => { location.hash = appHash(link); } });
+  mountLinkHandler({
+    own: ownHosts,
+    apps: appHosts,
+    domain: appsDomain,
+    self: () => null,
+    openWindow: (url) => location.assign(url),
+    openApp: (link) => {
+      location.hash = appHash(link);
+    },
+  });
 }
 if (typeof document !== 'undefined' && host) {
   // classifyLink (extlinks.js) decides, from this page's own app and Citadel's lists as they are: never trimmed here.

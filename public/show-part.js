@@ -13,7 +13,9 @@ let pending = null;
 export function showPart(name, ready) {
   const mine = (pending = {});
   // The person clicked or typed elsewhere while the page loaded: theirs wins, nothing gets outlined (or opened) later.
-  const stop = () => { if (pending === mine) pending = null; };
+  const stop = () => {
+    if (pending === mine) pending = null;
+  };
   for (const type of ['pointerdown', 'keydown']) addEventListener(type, stop, { capture: true, once: true });
   const until = Date.now() + WAIT_MS;
   let opened = false;

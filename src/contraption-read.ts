@@ -24,12 +24,16 @@ export async function contraptionRead({ req, res, app, params, caller }: Ctx) {
   if (args !== undefined && (command === undefined || !args || typeof args !== 'object' || Array.isArray(args))) throw new HttpError(400, 'args must be a JSON object, and only with a command');
 
   const { contraption: c, identity } = typedPersonFor(app, caller!, params.app, `read their data in ${params.app}`);
-  let status: number, answer: unknown, truncated = false;
+  let status: number,
+    answer: unknown,
+    truncated = false;
   try {
     const r = await fetch(`http://127.0.0.1:${c.port}/apps/${c.name}/app-api/read${command ? `/${command}` : ''}`, {
       method: command ? 'POST' : 'GET',
       headers: { 'X-Citadel-Identity': identity, Accept: 'application/json', ...(command ? { 'Content-Type': 'application/json' } : {}) },
-      body: command ? JSON.stringify(args ?? {}) : undefined, redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT_MS),
+      body: command ? JSON.stringify(args ?? {}) : undefined,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     status = r.status;
     const body = await capped(r);

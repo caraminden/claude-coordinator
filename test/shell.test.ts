@@ -101,12 +101,17 @@ test('the server fills in the worker: its version and the page plus its scripts,
   assert.throws(() => shellWorker('const SHELL = {};', 'v', NAMES, false), /lost its line/);
 });
 
-test('a worker keeps its version\'s files and opens the app from them with no network; anything else is left to the network', async () => {
+test("a worker keeps its version's files and opens the app from them with no network; anything else is left to the network", async () => {
   const b = browser(net('v1'));
   const w = worker(shellWorker(SOURCE, 'v1', H('v1'), false), b);
   await w.lifecycle('install');
   await w.lifecycle('activate');
-  const offline = worker(shellWorker(SOURCE, 'v1', H('v1'), false), { ...b, fetch: async () => { throw new TypeError('Failed to fetch'); } } as any);
+  const offline = worker(shellWorker(SOURCE, 'v1', H('v1'), false), {
+    ...b,
+    fetch: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+  } as any);
   assert.equal(await offline.request('/c/', 'navigate'), 'v1 /c/');
   assert.equal(await offline.request('/c/index.html', 'navigate'), 'v1 /c/');
   assert.equal(await offline.request('/c/app.js'), 'v1 /c/app.js');
@@ -155,7 +160,8 @@ test('a ship fetches only the files whose content changed; the rest are copied f
   // v2 changes app.js (and so the page, which names the version) only.
   const same = (u: string) => ({ version: 'v2', body: `v1 ${u}` });
   const n2 = { ...net('v2'), '/c/icon.svg': same('/c/icon.svg'), '/c/style.css': same('/c/style.css'), '/c/ui/chat.js': same('/c/ui/chat.js') };
-  const hashes = new Map(H('v2')); for (const n of ['icon.svg', 'style.css', 'ui/chat.js']) hashes.set(n, `v1 /c/${n}`);
+  const hashes = new Map(H('v2'));
+  for (const n of ['icon.svg', 'style.css', 'ui/chat.js']) hashes.set(n, `v1 /c/${n}`);
   const b2 = browser(n2);
   const v2 = worker(shellWorker(SOURCE, 'v2', hashes, false), { ...b, fetch: b2.fetch } as any);
   await v2.lifecycle('install');

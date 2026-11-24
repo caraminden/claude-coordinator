@@ -25,22 +25,26 @@ const josh = store.createUser({ name: 'Josh', login: 'josh', server_login: true 
 const creds = new Credentials(store, 'secret one');
 const KEY = 'sk-or-v1-0123456789abcdef0123456789abcdef';
 
-const KLEIN = [{
-  supported_parameters: { resolution: { type: 'enum', values: ['768', '1K', '1.5K', '2K', '4K'] }, n: { type: 'range', min: 1, max: 1 }, input_references: { type: 'range', min: 0, max: 10 }, output_format: { type: 'enum', values: ['jpeg', 'png'] } },
-  pricing: [
-    { billable: 'output_image', unit: 'image', cost_usd: 0.008, variant: '768' },
-    { billable: 'output_image', unit: 'image', cost_usd: 0.009, variant: '1k' },
-    { billable: 'output_image', unit: 'image', cost_usd: 0.036, variant: '4k' },
-  ],
-}];
-const GPT_IMAGE = [{
-  supported_parameters: { n: { type: 'range', min: 1, max: 10 }, input_references: { type: 'range', min: 0, max: 16 } },
-  pricing: [
-    { billable: 'input_image', unit: 'token', cost_usd: 8e-6 },
-    { billable: 'input_text', unit: 'token', cost_usd: 5e-6 },
-    { billable: 'output_image', unit: 'token', cost_usd: 3e-5 },
-  ],
-}];
+const KLEIN = [
+  {
+    supported_parameters: { resolution: { type: 'enum', values: ['768', '1K', '1.5K', '2K', '4K'] }, n: { type: 'range', min: 1, max: 1 }, input_references: { type: 'range', min: 0, max: 10 }, output_format: { type: 'enum', values: ['jpeg', 'png'] } },
+    pricing: [
+      { billable: 'output_image', unit: 'image', cost_usd: 0.008, variant: '768' },
+      { billable: 'output_image', unit: 'image', cost_usd: 0.009, variant: '1k' },
+      { billable: 'output_image', unit: 'image', cost_usd: 0.036, variant: '4k' },
+    ],
+  },
+];
+const GPT_IMAGE = [
+  {
+    supported_parameters: { n: { type: 'range', min: 1, max: 10 }, input_references: { type: 'range', min: 0, max: 16 } },
+    pricing: [
+      { billable: 'input_image', unit: 'token', cost_usd: 8e-6 },
+      { billable: 'input_text', unit: 'token', cost_usd: 5e-6 },
+      { billable: 'output_image', unit: 'token', cost_usd: 3e-5 },
+    ],
+  },
+];
 const MODEL_LIST = [
   { id: 'bytedance-seed/seed-audio-1-0', pricing: { prompt: '0', completion: '0.0025' }, description: 'Seed Audio' },
   { id: 'google/lyria-3-clip-preview', pricing: { prompt: '0', completion: '0' }, description: '30 second duration clips are priced at $0.04 per clip. Lyria 3...', supported_parameters: ['seed'] },
@@ -148,7 +152,10 @@ test('an image is written with a note of how it was made, and the ledger keeps i
   const post = fake.calls.find((c) => c.url === '/images')!;
   assert.equal(post.auth, `Bearer ${KEY}`);
   assert.equal(post.body.output_format, 'png');
-  assert.deepEqual(rows().map((x) => [x.status, x.estimate_usd, x.cost_usd, x.kind, x.ticket_id]), [['ok', 0.009, 0.0091, 'image', 7]]);
+  assert.deepEqual(
+    rows().map((x) => [x.status, x.estimate_usd, x.cost_usd, x.kind, x.ticket_id]),
+    [['ok', 0.009, 0.0091, 'image', 7]],
+  );
   // The same name again is refused before anything is spent, unless overwrite is set.
   await assert.rejects(or.tool('generate_image', { prompt: 'again', out: 'art/knight.png' }, ctx), (e: HttpError) => e.status === 409);
   assert.equal(rows().length, 1);
@@ -161,10 +168,7 @@ test('a call that could pass the cap is refused before any request, and two at o
   await assert.rejects(or.tool('generate_image', { prompt: 'big', out: 'a.png', resolution: '4K' }, ctx), (e: HttpError) => e.status === 402 && /cap/.test(e.message));
   assert.ok(!fake.calls.some((c) => c.url === '/images'));
   // Each 768 image could cost $0.008: the first books it, the second would make $0.016.
-  const both = await Promise.allSettled([
-    or.tool('generate_image', { prompt: 'one', out: 'one.png', resolution: '768' }, ctx),
-    or.tool('generate_image', { prompt: 'two', out: 'two.png', resolution: '768' }, ctx),
-  ]);
+  const both = await Promise.allSettled([or.tool('generate_image', { prompt: 'one', out: 'one.png', resolution: '768' }, ctx), or.tool('generate_image', { prompt: 'two', out: 'two.png', resolution: '768' }, ctx)]);
   assert.deepEqual(both.map((b) => b.status).sort(), ['fulfilled', 'rejected']);
   assert.equal(fake.calls.filter((c) => c.url === '/images').length, 1);
 });
@@ -185,7 +189,10 @@ test('OpenRouter refusing the key marks it failed; its own limit reads as the ca
   await assert.rejects(or.tool('generate_image', { prompt: 'x', out: 'x.png', resolution: '1K' }, ctx), (e: HttpError) => e.status === 403 && /refused the key/.test(e.message));
   assert.equal(or.connected(cara.id), false);
   assert.equal(or.status(cara.id).failed, true);
-  assert.deepEqual(rows().map((r) => [r.status, r.cost_usd]), [['failed', 0]]);
+  assert.deepEqual(
+    rows().map((r) => [r.status, r.cost_usd]),
+    [['failed', 0]],
+  );
   await assert.rejects(or.tool('generate_image', { prompt: 'x', out: 'y.png' }, ctx), /connect it again/);
 
   ({ or, ctx } = await setup({ answer: { '/images': () => Response.json({ error: { message: 'Key limit exceeded' } }, { status: 403 }) } }));
@@ -194,7 +201,10 @@ test('OpenRouter refusing the key marks it failed; its own limit reads as the ca
 
   ({ or, ctx } = await setup({ answer: { '/images': () => Promise.reject(new TypeError('fetch failed')) } }));
   await assert.rejects(or.tool('generate_image', { prompt: 'x', out: 'x.png', resolution: '1K' }, ctx), (e: HttpError) => e.status === 502);
-  assert.deepEqual(rows().map((r) => r.status), ['unknown']);
+  assert.deepEqual(
+    rows().map((r) => r.status),
+    ['unknown'],
+  );
   assert.equal(or.status(cara.id).spent_usd, 0.009);
 });
 
@@ -218,7 +228,13 @@ test('a sound effect is costed by its length; music comes from the stream with i
   assert.equal(readFileSync(song.paths[0], 'utf8'), 'fake music bytes');
   assert.equal(song.cost_usd, 0.04);
   assert.equal(fake.calls.find((c) => c.url === '/chat/completions')!.body.stream, true);
-  assert.deepEqual(rows().map((r) => [r.kind, r.status, r.estimate_usd]), [['effect', 'ok', 0.15], ['music', 'ok', 0.04]]);
+  assert.deepEqual(
+    rows().map((r) => [r.kind, r.status, r.estimate_usd]),
+    [
+      ['effect', 'ok', 0.15],
+      ['music', 'ok', 0.04],
+    ],
+  );
 });
 
 test('a speech model priced per token is refused; a clip longer than a minute is booked at its full length', async () => {
@@ -230,7 +246,7 @@ test('a speech model priced per token is refused; a clip longer than a minute is
   assert.ok(Math.abs(fx.cost_usd - 0.225) < 1e-9);
 });
 
-test('outputs and inputs stay inside the minion\'s folders', async () => {
+test("outputs and inputs stay inside the minion's folders", async () => {
   const { or, cwd, ctx } = await setup();
   await assert.rejects(or.tool('generate_image', { prompt: 'x', out: '../escape.png' }, ctx), /inside your working directory/);
   await assert.rejects(or.tool('generate_image', { prompt: 'x', out: 'x.exe' }, ctx), /out ends in/);
@@ -250,7 +266,7 @@ test('outputs and inputs stay inside the minion\'s folders', async () => {
   assert.equal(rows().length, 1);
 });
 
-test('worst-case prices: per image by resolution, per token, per clip; an MP3\'s length from its frames', () => {
+test("worst-case prices: per image by resolution, per token, per clip; an MP3's length from its frames", () => {
   assert.equal(imageEstimate(KLEIN, { resolution: '1K', n: 1, refs: 0, promptChars: 10 }), 0.009);
   assert.equal(imageEstimate(KLEIN, { n: 1, refs: 0, promptChars: 10 }), 0.036);
   assert.ok(Math.abs(imageEstimate(GPT_IMAGE, { n: 1, refs: 2, promptChars: 100 })! - (0.24 + 0.032 + 0.0005)) < 1e-9);
@@ -318,7 +334,10 @@ test('through the server: a person connects on their account page and their mini
     assert.ok(!JSON.stringify((await srv.call('/api/me/openrouter')).data).includes(KEY.slice(-12)), 'the key never comes back out');
 
     const names = async (media: boolean) => (await mcp(media, 'tools/list')).tools.map((t: any) => t.name);
-    assert.deepEqual((await names(true)).filter((n: string) => /^(generate_image|edit_image|generate_audio|generate_speech)$/.test(n)), ['generate_image', 'edit_image', 'generate_audio', 'generate_speech']);
+    assert.deepEqual(
+      (await names(true)).filter((n: string) => /^(generate_image|edit_image|generate_audio|generate_speech)$/.test(n)),
+      ['generate_image', 'edit_image', 'generate_audio', 'generate_speech'],
+    );
     // Listed whatever the turn's person has, so one scheme's minions share a tool list (#878); the call refuses instead.
     assert.deepEqual(await names(false), await names(true));
     const unlinked = await mcp(false, 'tools/call', { name: 'generate_image', arguments: { prompt: 'a cat', out: 'art/cat.png' } });
@@ -327,7 +346,7 @@ test('through the server: a person connects on their account page and their mini
     const made = await mcp(true, 'tools/call', { name: 'generate_image', arguments: { prompt: 'a cat', out: 'art/cat.png', resolution: '1K' } });
     assert.match(made.content[0].text, /^Wrote .*art\/cat\.png with black-forest-labs\/flux-3-image-klein for \$0\.0091; \$2\.99 left this month\.$/);
     assert.deepEqual(readFileSync(join(wt, 'art', 'cat.png')), PNG);
-    assert.equal((await srv.call(`/api/tickets/${minion.id}/openrouter`, { tool: 'generate_image', args: { prompt: 'x', out: 'y.png' } })).status, 403, 'a person can\'t call it as the minion');
+    assert.equal((await srv.call(`/api/tickets/${minion.id}/openrouter`, { tool: 'generate_image', args: { prompt: 'x', out: 'y.png' } })).status, 403, "a person can't call it as the minion");
 
     await srv.call('/api/me/openrouter', undefined, 'DELETE');
     const gone = await mcp(true, 'tools/call', { name: 'generate_image', arguments: { prompt: 'a dog', out: 'dog.png' } });
@@ -408,17 +427,22 @@ test('refusals carry a stable code for apps; a call with no minion or scheme is 
 
   ({ or, ctx } = await setup());
   await or.tool('generate_image', { prompt: 'x', out: 'x.png' }, { ...ctx, ticketId: null, projectId: null });
-  assert.deepEqual(rows().map((r) => [r.ticket_id, r.project_id, r.status]), [[null, null, 'ok']]);
+  assert.deepEqual(
+    rows().map((r) => [r.ticket_id, r.project_id, r.status]),
+    [[null, null, 'ok']],
+  );
 });
 
 // generate_speech (#808): text read aloud, for TWIReader's voice bake-off and its server.
 const PHONEMES = 'Then  <|phoneme_start|>klˈɛbkɪtʃ<|phoneme_end|> said: <speak><phoneme alphabet="ipa" ph="ˈɹɛ.lən">Relc</phoneme> &amp; "quotes"</speak>\t— 日本 🐉\n';
 
 test('speech input reaches OpenRouter byte for byte: phoneme tags, SSML, IPA and whitespace untouched', async () => {
-  const { or, fake, ctx } = await setup({ answer: {
-    '/audio/speech': () => new Response(MP3, { headers: { 'content-type': 'audio/mpeg', 'x-generation-id': 'gen-s' } }),
-    '/generation?id=gen-s': () => Response.json({ data: { total_cost: 0.0012 } }),
-  } });
+  const { or, fake, ctx } = await setup({
+    answer: {
+      '/audio/speech': () => new Response(MP3, { headers: { 'content-type': 'audio/mpeg', 'x-generation-id': 'gen-s' } }),
+      '/generation?id=gen-s': () => Response.json({ data: { total_cost: 0.0012 } }),
+    },
+  });
   const r = await or.tool('generate_speech', { model: 'fish-audio/drama-3', input: PHONEMES, voice: 'narrator-1', instructions: 'calm, low', speed: 0.9, out: 'voice/klebkitch.mp3' }, ctx);
   const sent = fake.calls.find((c) => c.url === '/audio/speech')!;
   assert.equal(sent.body.input, PHONEMES);
@@ -431,7 +455,10 @@ test('speech input reaches OpenRouter byte for byte: phoneme tags, SSML, IPA and
   assert.equal(note.tool, 'generate_speech');
   assert.equal(r.cost_usd, 0.0012);
   // Booked at its worst case first: Fish's $10/M per UTF-8 byte, never fewer than the characters.
-  assert.deepEqual(rows().map((x) => [x.kind, x.model, x.status, x.cost_usd]), [['speech', 'fish-audio/drama-3', 'ok', 0.0012]]);
+  assert.deepEqual(
+    rows().map((x) => [x.kind, x.model, x.status, x.cost_usd]),
+    [['speech', 'fish-audio/drama-3', 'ok', 0.0012]],
+  );
   assert.ok(Math.abs(rows()[0].estimate_usd - Buffer.byteLength(PHONEMES + 'calm, low') * 1e-5) < 1e-12);
 });
 
@@ -449,7 +476,7 @@ test('a speech price with no unit is bounded per UTF-8 byte; output per token up
   assert.equal(speechEstimate({ id: 'x/variable', pricing: { prompt: '-1', completion: '0' } }, bytes), null);
 });
 
-test('a speech model\'s input limit comes from what OpenRouter documents, else the longest any model takes', () => {
+test("a speech model's input limit comes from what OpenRouter documents, else the longest any model takes", () => {
   const model = (id: string) => MODEL_LIST.find((m) => m.id === id)!;
   assert.equal(speechLimit(model('elevenlabs/eleven-v3')), 5000);
   assert.equal(speechLimit({ id: 'x/y', description: 'and has a 40,000-character request limit.' }), 40000);
@@ -457,11 +484,10 @@ test('a speech model\'s input limit comes from what OpenRouter documents, else t
   assert.equal(speechLimit(model('fish-audio/drama-3')), 40000);
 });
 
-test('generate_speech refuses over the model\'s limit, over $0.50 and unpriced models before anything is sent', async () => {
+test("generate_speech refuses over the model's limit, over $0.50 and unpriced models before anything is sent", async () => {
   const { or, fake, ctx } = await setup();
   const said = (n: number) => 'a'.repeat(n);
-  await assert.rejects(or.tool('generate_speech', { model: 'bytedance-seed/seed-audio-1-0', input: said(3001), out: 'a.mp3' }, ctx),
-    (e: HttpError) => e.status === 400 && /3,001 characters/.test(e.message) && /3,000/.test(e.message) && /split/.test(e.message));
+  await assert.rejects(or.tool('generate_speech', { model: 'bytedance-seed/seed-audio-1-0', input: said(3001), out: 'a.mp3' }, ctx), (e: HttpError) => e.status === 400 && /3,001 characters/.test(e.message) && /3,000/.test(e.message) && /split/.test(e.message));
   await assert.rejects(or.tool('generate_speech', { model: 'elevenlabs/eleven-v3', input: '🐉'.repeat(5001), out: 'a.mp3' }, ctx), /5,000/);
   await assert.rejects(or.tool('generate_speech', { model: 'minimax/speech-2.8-hd', input: said(6000), out: 'a.mp3' }, ctx), (e: HttpError) => mediaCode(e) === 'over_call_limit');
   await assert.rejects(or.tool('generate_speech', { model: 'google/some-tts', input: 'hi', out: 'a.mp3' }, ctx), /no price/);
@@ -486,6 +512,6 @@ test('generate_speech checks its arguments: model and input required, the format
   assert.ok(!fake.calls.some((c) => c.url === '/audio/speech'));
   const r = await go({ out: 'raw/a.pcm' });
   assert.equal(fake.calls.find((c) => c.url === '/audio/speech')!.body.response_format, 'pcm');
-  assert.ok(!('voice' in fake.calls.find((c) => c.url === '/audio/speech')!.body), 'no voice sent when none was asked: the provider\'s default');
+  assert.ok(!('voice' in fake.calls.find((c) => c.url === '/audio/speech')!.body), "no voice sent when none was asked: the provider's default");
   assert.match(r.paths[0], /raw\/a\.pcm$/);
 });

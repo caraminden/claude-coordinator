@@ -87,7 +87,7 @@ export const CHOICES: { choice: Choice; label: string; description: string }[] =
   { choice: 'hours', label: 'Run in job hours', description: 'Queue it; it starts once job hours open.' },
   { choice: 'now', label: 'Run now', description: "Start it as soon as the machine is free, outside job hours too; job hours ending won't pause it." },
   { choice: 'always', label: 'Always allow this kind', description: 'Run this one in job hours, and let this exact recipe run in job hours from now on without asking. A changed image, command, folder, GPU, network or limit asks again.' },
-  { choice: 'no', label: 'No', description: "Refuse it; the minion that asked is told." },
+  { choice: 'no', label: 'No', description: 'Refuse it; the minion that asked is told.' },
 ];
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,59}$/;
@@ -116,8 +116,13 @@ export function cleanKind(raw: any): JobKind {
   const hours = Number(raw.max_limit_h);
   if (!Number.isFinite(hours) || hours <= 0 || hours > 48) throw new HttpError(400, 'kind.max_limit_h must be a number of hours, at most 48');
   return {
-    name, image, command: raw.command.slice(), reads: [...new Set(reads as string[])].sort(),
-    gpu: bool(raw.gpu, 'gpu', true), network: bool(raw.network, 'network', false), resumable: bool(raw.resumable, 'resumable', false),
+    name,
+    image,
+    command: raw.command.slice(),
+    reads: [...new Set(reads as string[])].sort(),
+    gpu: bool(raw.gpu, 'gpu', true),
+    network: bool(raw.network, 'network', false),
+    resumable: bool(raw.resumable, 'resumable', false),
     max_limit_s: Math.round(hours * 3600),
   };
 }
@@ -125,7 +130,9 @@ export function cleanKind(raw: any): JobKind {
 /** The recipe's hash: everything but its name, so any change to what runs, what it reads or its top limit is a new kind. */
 export function kindHash(k: JobKind): string {
   const { image, command, reads, gpu, network, resumable, max_limit_s } = k;
-  return createHash('sha256').update(JSON.stringify({ image, command, reads: [...reads].sort(), gpu, network, resumable, max_limit_s })).digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify({ image, command, reads: [...reads].sort(), gpu, network, resumable, max_limit_s }))
+    .digest('hex');
 }
 
 /** What an agent's info says about jobs, or null when it has no jobs block. */
@@ -138,11 +145,19 @@ export function cleanOffer(v: any): JobsOffer | null {
 }
 
 export function storedOffer(m: Pick<Machine, 'jobs'>): JobsOffer | null {
-  try { return m.jobs ? cleanOffer(JSON.parse(m.jobs)) : null; } catch { return null; }
+  try {
+    return m.jobs ? cleanOffer(JSON.parse(m.jobs)) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function storedSettings(m: Pick<Machine, 'job_settings'>): JobSettings {
-  try { return { ...DEFAULT_SETTINGS, ...(m.job_settings ? JSON.parse(m.job_settings) : {}) }; } catch { return { ...DEFAULT_SETTINGS }; }
+  try {
+    return { ...DEFAULT_SETTINGS, ...(m.job_settings ? JSON.parse(m.job_settings) : {}) };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
 }
 
 /** New settings from a PATCH body over the old; throws a 400. */
@@ -181,7 +196,13 @@ export function hoursOpen(s: JobSettings, now = Date.now()): boolean {
 
 /** A job's public fields: what the UI, the minion's job_status and a contraption's GET read. */
 export function jobView(j: MachineJob, extra: { machine?: string; waits?: string | null; decider?: number | null; ticketNumber?: number | null } = {}) {
-  const parse = (s: string | null, d: unknown) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
+  const parse = (s: string | null, d: unknown) => {
+    try {
+      return s ? JSON.parse(s) : d;
+    } catch {
+      return d;
+    }
+  };
   const kind = parse(j.kind, {}) as JobKind;
   const live = parse(j.live, {}) as Record<string, unknown>;
   return {
@@ -234,10 +255,15 @@ const PAUSE_FAILED = "Pause didn't take, still running: ";
 /** The results a job's machine kept because the server didn't take them, named with where they are there (MA3). */
 export function notTaken(job: MachineJob, machine: string): string {
   let all: unknown = [];
-  try { all = job.outputs ? JSON.parse(job.outputs) : []; } catch {}
+  try {
+    all = job.outputs ? JSON.parse(job.outputs) : [];
+  } catch {}
   const left = ((Array.isArray(all) ? all : []) as { path: string; uploaded: boolean; why?: string }[]).filter((o) => !o.uploaded);
   if (!left.length) return '';
-  const names = left.slice(0, 5).map((o) => `${o.path}${o.why ? ` (${o.why})` : ''}`).join(', ');
+  const names = left
+    .slice(0, 5)
+    .map((o) => `${o.path}${o.why ? ` (${o.why})` : ''}`)
+    .join(', ');
   return ` Not taken, so still only on ${machine}, in job folder ${job.id}/out/ of its jobs folder: ${names}${left.length > 5 ? ` and ${left.length - 5} more` : ''}. Its owner has them; nothing fetches them from here.`;
 }
 
@@ -293,12 +319,19 @@ export class MachineJobs {
     this.d = deps;
   }
 
-  private now() { return this.d.now ? this.d.now() : Date.now(); }
-  private get store() { return this.d.store; }
+  private now() {
+    return this.d.now ? this.d.now() : Date.now();
+  }
+  private get store() {
+    return this.d.store;
+  }
 
   /** Every minute: open or close job hours, enforce limits; every 6 hours: sweep old results. */
   start() {
-    this.timers.push(every('machine jobs', 60_000, () => this.tickAll()), every('machine job results sweep', 6 * 3600_000, () => this.sweep(), 5 * 60_000));
+    this.timers.push(
+      every('machine jobs', 60_000, () => this.tickAll()),
+      every('machine job results sweep', 6 * 3600_000, () => this.sweep(), 5 * 60_000),
+    );
   }
 
   stop() {
@@ -323,7 +356,7 @@ export class MachineJobs {
 
   machineOf(job: MachineJob): Machine {
     const m = this.store.getMachine(job.machine_id);
-    if (!m) throw new HttpError(404, 'That job\'s machine is gone');
+    if (!m) throw new HttpError(404, "That job's machine is gone");
     return m;
   }
 
@@ -343,7 +376,7 @@ export class MachineJobs {
 
   view(job: MachineJob): JobView {
     const m = this.store.getMachine(job.machine_id);
-    return jobView(job, { machine: m?.name, waits: m ? this.waits(job, m) : null, decider: m ? this.ownerOf(m)?.id ?? null : null, ticketNumber: job.ticket_id === null ? null : this.store.getTicket(job.ticket_id)?.number ?? null });
+    return jobView(job, { machine: m?.name, waits: m ? this.waits(job, m) : null, decider: m ? (this.ownerOf(m)?.id ?? null) : null, ticketNumber: job.ticket_id === null ? null : (this.store.getTicket(job.ticket_id)?.number ?? null) });
   }
 
   /** Tell the job's viewers what changed: the scheme's people, and its machine's owner wherever they are. */
@@ -366,7 +399,11 @@ export class MachineJobs {
     const shown = job.state === 'starting' ? 'waiting' : stage;
     let last = this.stages.get(job.id);
     if (last === undefined) {
-      const ev = this.store.eventsOfKinds(job.ticket_id, ['job']).map((e) => JSON.parse(e.data)).filter((d) => d.job === job.id).at(-1);
+      const ev = this.store
+        .eventsOfKinds(job.ticket_id, ['job'])
+        .map((e) => JSON.parse(e.data))
+        .filter((d) => d.job === job.id)
+        .at(-1);
       last = ev ? (ev.stage ?? 'waiting') : undefined;
     }
     if (last !== shown) this.d.placed(job, shown, view);
@@ -388,10 +425,7 @@ export class MachineJobs {
    * Queue a job. Inputs are already checked and hashed by the caller (paths it may read). A kind its owner always
    * allows goes straight to the queue for job hours; anything else, run-now included, waits on its owner's card.
    */
-  queue(q: {
-    machine: Machine; projectId: number; ticketId: number | null; contraptionId: number | null; askedBy: string;
-    kind: JobKind; inputs: { name: string; size: number; sha256: string; path: string }[]; limitS: number; when: 'hours' | 'now'; reason: string;
-  }): MachineJob {
+  queue(q: { machine: Machine; projectId: number; ticketId: number | null; contraptionId: number | null; askedBy: string; kind: JobKind; inputs: { name: string; size: number; sha256: string; path: string }[]; limitS: number; when: 'hours' | 'now'; reason: string }): MachineJob {
     const offer = storedOffer(q.machine);
     if (!offer) throw new HttpError(409, `${q.machine.name}'s agent has no jobs block: its owner sets one up in machine-agent.json first`);
     const missing = q.kind.reads.filter((r) => !offer.folders.includes(r));
@@ -403,9 +437,20 @@ export class MachineJobs {
     const hash = kindHash(q.kind);
     const standing = q.when === 'hours' && !!this.store.jobKind(q.machine.id, hash);
     const job = this.store.addMachineJob({
-      machine_id: q.machine.id, project_id: q.projectId, ticket_id: q.ticketId, contraption_id: q.contraptionId, asked_by: q.askedBy,
-      kind_name: q.kind.name, kind: JSON.stringify(q.kind), kind_hash: hash, inputs: JSON.stringify(q.inputs), limit_s: q.limitS,
-      run_when: q.when, reason: q.reason, state: standing ? 'queued' : 'needs-go', created_at: this.now(),
+      machine_id: q.machine.id,
+      project_id: q.projectId,
+      ticket_id: q.ticketId,
+      contraption_id: q.contraptionId,
+      asked_by: q.askedBy,
+      kind_name: q.kind.name,
+      kind: JSON.stringify(q.kind),
+      kind_hash: hash,
+      inputs: JSON.stringify(q.inputs),
+      limit_s: q.limitS,
+      run_when: q.when,
+      reason: q.reason,
+      state: standing ? 'queued' : 'needs-go',
+      created_at: this.now(),
       ...(standing ? { go: 'standing' as const, go_by: this.store.jobKind(q.machine.id, hash)!.allowed_by } : {}),
     });
     if (!standing) this.askOwner(job, q.machine);
@@ -417,7 +462,7 @@ export class MachineJobs {
   /** The go card: to the machine's owner, showing what runs, what it reads, GPU, network, limit, inputs and who asked. */
   private askOwner(job: MachineJob, m: Machine) {
     const k = JSON.parse(job.kind) as JobKind;
-    const inputs = (JSON.parse(job.inputs) as { name: string; size: number }[]);
+    const inputs = JSON.parse(job.inputs) as { name: string; size: number }[];
     const mb = (n: number) => `${(n / 1e6).toFixed(n < 1e7 ? 1 : 0)} MB`;
     const h = (s: number) => (s % 3600 ? `${Math.round(s / 60)} min` : `${s / 3600} h`);
     const line = {
@@ -432,7 +477,10 @@ export class MachineJobs {
     let over = Object.values(line).join('\n').length - 500;
     for (const key of ['inputs', 'command', 'who'] as const) {
       const cut = Math.min(over, line[key].length - 40);
-      if (cut > 0) { line[key] = `${line[key].slice(0, line[key].length - cut - 1)}…`; over -= cut; }
+      if (cut > 0) {
+        line[key] = `${line[key].slice(0, line[key].length - cut - 1)}…`;
+        over -= cut;
+      }
     }
     let question = [line.who, line.reads, line.image, line.command, line.inputs].join('\n');
     if (question.length > 500) question = `${question.slice(0, 499)}…`;
@@ -461,7 +509,7 @@ export class MachineJobs {
     const m = this.machineOf(job);
     if (!this.isOwner(who, m)) throw new HttpError(403, `Only ${this.ownerOf(m)?.name ?? 'its owner'} (${m.name}'s owner) can give this job its go`);
     if (job.state !== 'needs-go') throw new HttpError(409, `Job #${id} isn't waiting on a go (it is ${job.state})`);
-    const card = job.card ? JSON.parse(job.card) as { ticket: number; question: string } : null;
+    const card = job.card ? (JSON.parse(job.card) as { ticket: number; question: string }) : null;
     const said = CHOICES.find((c) => c.choice === choice)!.label;
     if (card && !fromCard) this.d.settleCard(card, who.name, `${who.name} answered job #${id}'s go on the Machines page: ${said}`);
     if (choice === 'no') {
@@ -537,7 +585,7 @@ export class MachineJobs {
     const by = 'asker' in who ? job.asked_by : who.name;
     if ((ENDED as readonly string[]).includes(job.state)) throw new HttpError(409, `Job #${id} already ended (${job.state})`);
     if (job.state === 'needs-go' || job.state === 'queued') {
-      const card = job.card ? JSON.parse(job.card) as { ticket: number; question: string } : null;
+      const card = job.card ? (JSON.parse(job.card) as { ticket: number; question: string }) : null;
       if (card) this.d.settleCard(card, by, `Job #${id} was stopped by ${by} before its go`);
       this.store.updateMachineJob(id, { state: 'stopped', ended_at: this.now(), card: null, error: `${why} by ${by}` });
       this.ended(id, `Job #${id} (${job.kind_name}) on ${m.name} was stopped by ${by} before it started.`, 'asker' in who);
@@ -600,7 +648,10 @@ export class MachineJobs {
       return;
     }
     if (s.paused) return;
-    const next = this.store.machineJobs({ machine: machineId, states: ['queued'] }, 1000).reverse().find((j) => j.go !== null && (j.go === 'now' || open));
+    const next = this.store
+      .machineJobs({ machine: machineId, states: ['queued'] }, 1000)
+      .reverse()
+      .find((j) => j.go !== null && (j.go === 'now' || open));
     if (!next) return;
     this.startJob(next);
   }
@@ -684,7 +735,9 @@ export class MachineJobs {
       ? body.outputs.slice(0, JOB_CAPS.outputs).flatMap((o: any) => (typeof o?.path === 'string' && num(o.size) !== null ? [{ path: o.path.slice(0, 500), size: num(o.size), uploaded: o.uploaded === true, ...(o.uploaded !== true && typeof o.why === 'string' ? { why: o.why.slice(0, 300) } : {}) }] : []))
       : undefined;
     const live = {
-      gpu_pct: num(body.gpu_pct), vram_mb: num(body.vram_mb), held_vram_mb: num(body.held_vram_mb),
+      gpu_pct: num(body.gpu_pct),
+      vram_mb: num(body.vram_mb),
+      held_vram_mb: num(body.held_vram_mb),
       log_tail: typeof body.log_tail === 'string' ? body.log_tail.slice(-LOG_TAIL) : '',
     };
     const ended = (ENDED as readonly string[]).includes(state);
@@ -694,8 +747,12 @@ export class MachineJobs {
     const pauseFailed = typeof body.pause_failed === 'string' ? body.pause_failed.slice(0, 500) : null;
     const held = job.state === 'paused' && (state === 'running' || state === 'starting') && !pauseFailed;
     this.store.updateMachineJob(id, {
-      state: held ? 'paused' : state, live: JSON.stringify(live), live_at: now,
-      run_s: Math.round(num(body.run_s) ?? job.run_s), server_run_s: Math.round(job.server_run_s + gap), gpu_busy_s: Math.round(num(body.gpu_busy_s) ?? job.gpu_busy_s),
+      state: held ? 'paused' : state,
+      live: JSON.stringify(live),
+      live_at: now,
+      run_s: Math.round(num(body.run_s) ?? job.run_s),
+      server_run_s: Math.round(job.server_run_s + gap),
+      gpu_busy_s: Math.round(num(body.gpu_busy_s) ?? job.gpu_busy_s),
       ...(state === 'paused' && !job.paused_by ? { paused_by: 'owner' } : {}),
       ...(state !== 'paused' && !held ? { paused_by: null } : {}),
       ...(outputs ? { outputs: JSON.stringify(outputs) } : {}),
@@ -722,12 +779,13 @@ export class MachineJobs {
    */
   reconcile(m: Machine, known: { id: number; state: string }[] | null, since: number) {
     const knows = new Map((known ?? []).map((k) => [k.id, k.state]));
-    if (known) for (const j of this.store.machineJobs({ machine: m.id, states: ACTIVE }, 50)) {
-      // One started on this connection may not be in the agent's list yet: only one from before it can be lost.
-      if (knows.has(j.id) || (j.started_at ?? 0) >= since) continue;
-      this.store.updateMachineJob(j.id, { state: 'failed', ended_at: this.now(), input_token_hash: null, error: 'the machine restarted' });
-      this.ended(j.id, `Job #${j.id} (${j.kind_name}) on ${m.name} failed: the machine restarted and lost it.`);
-    }
+    if (known)
+      for (const j of this.store.machineJobs({ machine: m.id, states: ACTIVE }, 50)) {
+        // One started on this connection may not be in the agent's list yet: only one from before it can be lost.
+        if (knows.has(j.id) || (j.started_at ?? 0) >= since) continue;
+        this.store.updateMachineJob(j.id, { state: 'failed', ended_at: this.now(), input_token_hash: null, error: 'the machine restarted' });
+        this.ended(j.id, `Job #${j.id} (${j.kind_name}) on ${m.name} failed: the machine restarted and lost it.`);
+      }
     for (const [id, state] of knows) {
       const j = this.store.getMachineJob(id);
       const ours = j && j.machine_id === m.id;
@@ -751,7 +809,7 @@ export class MachineJobs {
     const given = String(req.headers['x-job-token'] ?? url.searchParams.get('token') ?? '');
     const expected = job.input_token_hash ? Buffer.from(job.input_token_hash, 'hex') : null;
     const got = Buffer.from(tokenHash(given), 'hex');
-    if (!expected || !given || !timingSafeEqual(expected, got) || !(ACTIVE as readonly string[]).includes(job.state)) throw new HttpError(403, 'Wrong input token, or the job isn\'t running');
+    if (!expected || !given || !timingSafeEqual(expected, got) || !(ACTIVE as readonly string[]).includes(job.state)) throw new HttpError(403, "Wrong input token, or the job isn't running");
     const name = url.searchParams.get('name') ?? '';
     const file = (JSON.parse(job.inputs) as { name: string; size: number; path: string }[]).find((f) => f.name === name);
     if (!file) throw new HttpError(404, `Job #${id} has no input called ${name}`);
@@ -772,9 +830,9 @@ export class MachineJobs {
     if (!ok) throw new HttpError(409, `Job #${id} is ${job.state}; results upload while it runs or uploads`);
     const rel = log ? '.job.log' : safeRelPath(url.searchParams.get('path') ?? '');
     const dir = this.d.resultsDir(job);
-    if (!dir) throw new HttpError(410, 'Nowhere to keep this job\'s results: whoever queued it is gone');
+    if (!dir) throw new HttpError(410, "Nowhere to keep this job's results: whoever queued it is gone");
     const declared = Number(req.headers['content-length']);
-    const room = () => log ? JOB_CAPS.logBytes : Math.min(JOB_CAPS.jobBytes - this.store.getMachineJob(id)!.upload_bytes, JOB_CAPS.schemeBytes - this.store.jobResultBytes(job.project_id));
+    const room = () => (log ? JOB_CAPS.logBytes : Math.min(JOB_CAPS.jobBytes - this.store.getMachineJob(id)!.upload_bytes, JOB_CAPS.schemeBytes - this.store.jobResultBytes(job.project_id)));
     if (Number.isFinite(declared) && declared > room()) throw new HttpError(413, `Over the cap: a job keeps ${JOB_CAPS.jobBytes / 1024 ** 3} GB here and a scheme ${JOB_CAPS.schemeBytes / 1024 ** 3} GB; the file stays on the machine`);
     const dest = join(dir, rel);
     await fs.mkdir(dirname(dest), { recursive: true });
@@ -782,15 +840,22 @@ export class MachineJobs {
     const limit = room();
     let size = 0;
     try {
-      await pipeline(req, async function* (source: AsyncIterable<Buffer>) {
-        for await (const chunk of source) {
-          size += chunk.length;
-          if (size > limit) throw new HttpError(413, `Over the cap: a job keeps ${JOB_CAPS.jobBytes / 1024 ** 3} GB here and a scheme ${JOB_CAPS.schemeBytes / 1024 ** 3} GB; the file stays on the machine`);
-          yield chunk;
-        }
-      }, createWriteStream(tmp, { flags: 'wx' }));
+      await pipeline(
+        req,
+        async function* (source: AsyncIterable<Buffer>) {
+          for await (const chunk of source) {
+            size += chunk.length;
+            if (size > limit) throw new HttpError(413, `Over the cap: a job keeps ${JOB_CAPS.jobBytes / 1024 ** 3} GB here and a scheme ${JOB_CAPS.schemeBytes / 1024 ** 3} GB; the file stays on the machine`);
+            yield chunk;
+          }
+        },
+        createWriteStream(tmp, { flags: 'wx' }),
+      );
       // A file sent again replaces its first copy, which no longer counts.
-      const old = await fs.stat(dest).then((s) => s.size, () => 0);
+      const old = await fs.stat(dest).then(
+        (s) => s.size,
+        () => 0,
+      );
       await fs.rename(tmp, dest);
       if (!log) this.store.updateMachineJob(id, { upload_bytes: this.store.getMachineJob(id)!.upload_bytes - old + size });
     } catch (err) {
@@ -813,7 +878,10 @@ export class MachineJobs {
 
 /** An output's path as the agent sends it, relative to /out: segments of safe names, no `..`, no absolute paths. */
 export function safeRelPath(p: string): string {
-  const parts = p.replace(/\\/g, '/').split('/').filter((s) => s && s !== '.');
+  const parts = p
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter((s) => s && s !== '.');
   if (!parts.length || parts.length > 20 || isAbsolute(p) || /^[A-Za-z]:/.test(p)) throw new HttpError(400, 'path must be a relative path inside /out');
   for (const s of parts) if (s === '..' || !/^[\w][\w .-]{0,199}$/.test(s) || s.endsWith('.part')) throw new HttpError(400, `path segment "${s.slice(0, 40)}" isn't allowed: letters, digits, spaces, dots, dashes and underscores`);
   return parts.join(sep);
@@ -852,5 +920,8 @@ export async function jobInputs(paths: unknown, roots: string[]): Promise<{ name
 
 /** The machines a scheme's minions may queue jobs on: granted to it, not a CI runner host, with a jobs block. */
 export function jobMachinesFor(store: Store, projectId: number): string[] {
-  return store.listMachines().filter((m) => storedOffer(m) && !m.last_check?.includes('"runners":true') && store.machineGranted(m.id, projectId)).map((m) => m.name);
+  return store
+    .listMachines()
+    .filter((m) => storedOffer(m) && !m.last_check?.includes('"runners":true') && store.machineGranted(m.id, projectId))
+    .map((m) => m.name);
 }

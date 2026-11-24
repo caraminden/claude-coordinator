@@ -25,17 +25,25 @@ after(async () => {
 });
 process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 const NOW = Date.UTC(2026, 10, 8, 14, 5);
 const store = new Store(join(root, 'test.db'));
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 runner.now = () => NOW;
 
 let n = 0;
@@ -75,8 +83,12 @@ test('the bounds: each edge saves, one past refuses, and out-of-range stored val
   assert.equal(MSG_BOUNDS.coldMin[1], 55, 'cold stays at or under 55 minutes: the prompt cache lapses past an hour');
   const client = readFileSync(new URL('../public/minion-rules.js', import.meta.url), 'utf8');
   const cols = Object.values(MSG_COLUMNS);
-  const bounds = Object.entries(MSG_BOUNDS).map(([k, b]) => `${MSG_COLUMNS[k as keyof typeof MSG_COLUMNS]}: [${b.join(", ")}]`).join(', ');
-  const defaults = Object.entries(MSG_DEFAULTS).map(([k, v]) => `${MSG_COLUMNS[k as keyof typeof MSG_COLUMNS]}: ${v}`).join(', ');
+  const bounds = Object.entries(MSG_BOUNDS)
+    .map(([k, b]) => `${MSG_COLUMNS[k as keyof typeof MSG_COLUMNS]}: [${b.join(', ')}]`)
+    .join(', ');
+  const defaults = Object.entries(MSG_DEFAULTS)
+    .map(([k, v]) => `${MSG_COLUMNS[k as keyof typeof MSG_COLUMNS]}: ${v}`)
+    .join(', ');
   assert.ok(client.includes(`{ ${bounds} }`) && client.includes(`{ ${defaults} }`) && cols.length === 4, "public/minion-rules.js's copy of the bounds and defaults matches");
 });
 
@@ -97,7 +109,11 @@ test("a scheme's own loop count and window hold the next message; the chat's row
   const hold = runner.view(store.getTicket(minion.id)!).loop_hold;
   assert.deepEqual(hold, { n: 1, at: NOW, text: 'one too many' });
   const loops = inboxItems(store, new Approvals(() => {}), minion.project_id, 'Cara').filter((i) => i.kind === 'loop');
-  assert.deepEqual(loops.map((i) => [i.ticketId, i.at]), [[minion.id, NOW]], 'one Needs-you item, in the chat whose Continue sends it');
+  assert.deepEqual(
+    loops.map((i) => [i.ticketId, i.at]),
+    [[minion.id, NOW]],
+    'one Needs-you item, in the chat whose Continue sends it',
+  );
   assert.equal(runner.continueLoop(minion.id, 'Cara'), 1);
   assert.equal(runner.view(store.getTicket(minion.id)!).loop_hold, null);
   assert.equal(inboxItems(store, new Approvals(() => {}), minion.project_id, 'Cara').filter((i) => i.kind === 'loop').length, 0);
@@ -117,10 +133,20 @@ test("two minions' held loop shows in both chats, so dismissing the receiver lea
   const { minion: a } = scheme({});
   const b = store.createTicket({ project_id: a.project_id, title: 'B', permission_mode: 'default', created_by: 'Cara' });
   store.setSetting(minionPairKey(a.id, b.id), { sent: [NOW], held: [{ to: b.id, author: 'A', text: 'over to you', from: a.id, at: NOW }] });
-  assert.deepEqual([a.id, b.id].map((id) => runner.view(store.getTicket(id)!).loop_hold), [{ n: 1, at: NOW, text: 'over to you' }, { n: 1, at: NOW, text: 'over to you' }]);
+  assert.deepEqual(
+    [a.id, b.id].map((id) => runner.view(store.getTicket(id)!).loop_hold),
+    [
+      { n: 1, at: NOW, text: 'over to you' },
+      { n: 1, at: NOW, text: 'over to you' },
+    ],
+  );
   store.updateTicket(b.id, { status: 'closed' });
   const loops = () => inboxItems(store, new Approvals(() => {}), a.project_id, 'Cara').filter((i) => i.kind === 'loop' && [a.id, b.id].includes(i.ticketId));
-  assert.deepEqual(loops().map((i) => i.ticketId), [a.id], 'the open sender still lists it in Needs you');
+  assert.deepEqual(
+    loops().map((i) => i.ticketId),
+    [a.id],
+    'the open sender still lists it in Needs you',
+  );
   assert.equal(runner.continueLoop(a.id, 'Cara'), 1, "the sender's Continue lets it through");
   assert.equal(loops().length, 0);
 });
@@ -130,12 +156,16 @@ test("the chat's card lists mail held cold before #1603 until Deliver now sends 
   (runner as any).relays.mail(minion.id, 'Taskmaster', `rebase onto main with ghp_${'a'.repeat(36)}`, undefined, true, 'ask');
   const held = runner.view(store.getTicket(minion.id)!).held_mail!;
   assert.equal(held.until, NOW + 3 * 3_600_000, 'cold mail goes by the hold cap at the latest');
-  assert.deepEqual(held.items.map((i) => [i.author, i.need, i.note, i.parked, i.text]), [['Taskmaster', 'ask', false, false, 'rebase onto main with [GitHub token hidden]']], 'the card shows the chat\'s copy, its token hidden');
+  assert.deepEqual(
+    held.items.map((i) => [i.author, i.need, i.note, i.parked, i.text]),
+    [['Taskmaster', 'ask', false, false, 'rebase onto main with [GitHub token hidden]']],
+    "the card shows the chat's copy, its token hidden",
+  );
   assert.equal(runner.releaseMail(store.getTicket(minion.id)!, project, 'Cara'), 1);
   await until('the delivered turn', async () => !runner.isRunning(minion.id) && !runner.view(store.getTicket(minion.id)!).held_mail);
 });
 
-test("never hold (#1067): a kind the scheme never holds wakes its reader, even a fyi or wake: false; other kinds still wait", async () => {
+test('never hold (#1067): a kind the scheme never holds wakes its reader, even a fyi or wake: false; other kinds still wait', async () => {
   assert.throws(() => cleanNeverHold('fyi'), /list/);
   assert.throws(() => cleanNeverHold(['fyi', 'shout']), /must be a list of/);
   assert.equal(cleanNeverHold(['note', 'fyi', 'fyi']), 'fyi,note');
@@ -152,6 +182,10 @@ test("never hold (#1067): a kind the scheme never holds wakes its reader, even a
   await until('the note turn', async () => !runner.isRunning(tm.id));
   const plain = scheme({});
   runner.leaveMail(plain.tm.id, 'Citadel', 'a red scheduled run');
-  assert.deepEqual(runner.view(store.getTicket(plain.tm.id)!).held_mail!.items.map((i) => [i.note, i.text]), [[true, 'a red scheduled run']], 'by default a note is held, marked as one');
+  assert.deepEqual(
+    runner.view(store.getTicket(plain.tm.id)!).held_mail!.items.map((i) => [i.note, i.text]),
+    [[true, 'a red scheduled run']],
+    'by default a note is held, marked as one',
+  );
   assert.deepEqual(CLIENT_KINDS, NEVER_HOLD_KINDS, "public/heldmsg.js's copy of the kinds matches");
 });

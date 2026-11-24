@@ -38,7 +38,10 @@ writeFileSync(join(MB.cwd, 'theirs.md'), '# Theirs');
 const reply = (text: string) => ({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
 store.addEvent(M1.id, 'claude', reply('[Glossary](glossary.html) and [old](gone.md)'));
 store.addEvent(MB.id, 'claude', reply('[Theirs](theirs.md)'));
-store.syncArtifacts(M1, [{ path: 'glossary.html', size: 1, mtime: 1 }, { path: 'gone.md', size: 1, mtime: 1 }]);
+store.syncArtifacts(M1, [
+  { path: 'glossary.html', size: 1, mtime: 1 },
+  { path: 'gone.md', size: 1, mtime: 1 },
+]);
 store.syncArtifacts(MB, [{ path: 'theirs.md', size: 1, mtime: 1 }]);
 const art = (projectId: number, path: string) => store.listArtifacts(projectId).find((a) => a.path === path)!;
 const GLOSSARY = art(A.id, 'glossary.html');
@@ -55,8 +58,11 @@ before(async () => {
 async function tool(ticket: { id: number; project_id: number; kind: string }, name: string, args: object): Promise<{ text: string; error: boolean }> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(ticket.project_id), COORDINATOR_TICKET: String(ticket.id),
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
+      COORDINATOR_PROJECT: String(ticket.project_id),
+      COORDINATOR_TICKET: String(ticket.id),
       COORDINATOR_ROLE: ticket.kind === 'coordinator' ? 'coordinator' : 'thread',
     },
     stdio: ['pipe', 'pipe', 'inherit'],

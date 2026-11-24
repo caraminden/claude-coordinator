@@ -25,9 +25,20 @@ const DATA_MAX_BYTES = 4096;
 const PARALLEL = 8;
 
 /** The fields of a Firebase service account key file that signing in uses. */
-export interface ServiceAccount { project_id: string; client_email: string; private_key: string; token_uri: string }
+export interface ServiceAccount {
+  project_id: string;
+  client_email: string;
+  private_key: string;
+  token_uri: string;
+}
 /** What an app asked to send: a notification (title) and/or silent data. */
-export interface PushSend { title?: string; body?: string; open?: string; tag?: string; data?: Record<string, string> }
+export interface PushSend {
+  title?: string;
+  body?: string;
+  open?: string;
+  tag?: string;
+  data?: Record<string, string>;
+}
 
 const bad = (msg: string) => new HttpError(400, msg);
 const optional = (v: unknown, field: string, max: number, min = 0): string | undefined => {
@@ -136,9 +147,11 @@ export class Fcm {
         const unsigned = `${part({ alg: 'RS256', typ: 'JWT' })}.${part({ iss: a.client_email, scope: SCOPE, aud: a.token_uri, iat, exp: iat + 3600 })}`;
         const assertion = `${unsigned}.${sign('sha256', Buffer.from(unsigned), a.private_key).toString('base64url')}`;
         const res = await this.fetch(a.token_uri, {
-          method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }).toString(),
-          redirect: 'manual', signal: AbortSignal.timeout(15_000),
+          redirect: 'manual',
+          signal: AbortSignal.timeout(15_000),
         });
         const j = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number };
         if (!res.ok || !j.access_token) throw new HttpError(502, `Firebase sign-in answered ${res.status}`);
@@ -158,10 +171,13 @@ export class Fcm {
     const at = await this.accessToken();
     try {
       const res = await this.fetch(`${this.api}/v1/projects/${encodeURIComponent(this.account().project_id)}/messages:send`, {
-        method: 'POST', headers: { authorization: `Bearer ${at}`, 'content-type': 'application/json' },
-        body: JSON.stringify(message), redirect: 'manual', signal: AbortSignal.timeout(15_000),
+        method: 'POST',
+        headers: { authorization: `Bearer ${at}`, 'content-type': 'application/json' },
+        body: JSON.stringify(message),
+        redirect: 'manual',
+        signal: AbortSignal.timeout(15_000),
       });
-      if (res.ok) return void (await res.body?.cancel()), 'sent';
+      if (res.ok) return (void (await res.body?.cancel()), 'sent');
       const body = await res.json().catch(() => null);
       if (res.status === 401) this.access = null;
       if (deadToken(res.status, body)) return 'gone';
@@ -174,7 +190,12 @@ export class Fcm {
   }
 }
 
-export interface PushReply { devices: number; sent: number; dropped: number; skipped: string[] }
+export interface PushReply {
+  devices: number;
+  sent: number;
+  dropped: number;
+  skipped: string[];
+}
 
 /**
  * POST /api/contraptions/push for contraption `c`: to the phones of the named people it is enabled for now. An unknown
@@ -194,15 +215,17 @@ export async function pushToPeople(store: Store, enabled: (name: string, uid: nu
   if (tokens.length) await fcm.accessToken(); // a refused sign-in is the call's error, not every phone's
   const reply: PushReply = { devices: tokens.length, sent: 0, dropped: 0, skipped };
   const queue = [...tokens];
-  await Promise.all(Array.from({ length: Math.min(PARALLEL, queue.length) }, async () => {
-    for (let t = queue.shift(); t !== undefined; t = queue.shift()) {
-      const r = await fcm.send(t, fcmMessage(c.name, t, send));
-      if (r === 'sent') reply.sent++;
-      else if (r === 'gone') {
-        reply.dropped++;
-        await store.deletePushDevice(t);
+  await Promise.all(
+    Array.from({ length: Math.min(PARALLEL, queue.length) }, async () => {
+      for (let t = queue.shift(); t !== undefined; t = queue.shift()) {
+        const r = await fcm.send(t, fcmMessage(c.name, t, send));
+        if (r === 'sent') reply.sent++;
+        else if (r === 'gone') {
+          reply.dropped++;
+          await store.deletePushDevice(t);
+        }
       }
-    }
-  }));
+    }),
+  );
   return reply;
 }

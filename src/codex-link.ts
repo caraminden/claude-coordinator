@@ -75,7 +75,7 @@ export class CodexLink {
       const expire = setTimeout(() => child.kill(), DEVICE_CODE_MS);
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
-          login.error ??= 'Codex\'s sign-in didn\'t show a code within 60 seconds.';
+          login.error ??= "Codex's sign-in didn't show a code within 60 seconds.";
           child.kill();
           resolve();
         }, 60_000);
@@ -195,9 +195,22 @@ export function deviceCode(out: string): { url: string; code: string } | null {
 
 function signInError(code: number | null, out: string): string {
   if (code === 127 || /executable file .*not found|codex: not found/i.test(out)) return 'Your container is from before Codex was added: it updates once no turns run in it. Try again then.';
-  return `Codex's sign-in ended (${code === null ? 'stopped' : `exit ${code}`}) without signing in: ${lastLines(out.split('\n').filter((l) => !/https:\/\/|one-time code|^\s*[A-Z0-9]{3,}-[A-Z0-9-]{3,}\s*$/.test(l)).join('\n'))}`;
+  return `Codex's sign-in ended (${code === null ? 'stopped' : `exit ${code}`}) without signing in: ${lastLines(
+    out
+      .split('\n')
+      .filter((l) => !/https:\/\/|one-time code|^\s*[A-Z0-9]{3,}-[A-Z0-9-]{3,}\s*$/.test(l))
+      .join('\n'),
+  )}`;
 }
 
 function lastLines(out: string): string {
-  return out.trim().split('\n').filter((l) => l.trim()).slice(-3).join(' ').slice(-300) || '(no output)';
+  return (
+    out
+      .trim()
+      .split('\n')
+      .filter((l) => l.trim())
+      .slice(-3)
+      .join(' ')
+      .slice(-300) || '(no output)'
+  );
 }

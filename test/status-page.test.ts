@@ -69,7 +69,10 @@ test('a member of another scheme sees only their own apps; an admin sees all, th
   const { store, josh, mia } = setup('scope');
   const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'abc', ownScheme: () => null });
   const mine = await page.build(viewer(store, mia.id));
-  assert.deepEqual(mine.apps.map((a) => a.name), ['peek-auras']);
+  assert.deepEqual(
+    mine.apps.map((a) => a.name),
+    ['peek-auras'],
+  );
   const all = await page.build(viewer(store, josh.id, true));
   assert.deepEqual(all.apps.map((a) => a.name).sort(), ['calm', 'orphan', 'peek-auras']);
 });
@@ -85,11 +88,14 @@ test("an app's week: deploys, errors, turns and who ran them, per day, and its v
   store.addContraptionError(peek.id, today, 'tool', 'search', 'no tool', now - 60_000);
   const t = store.startContraptionTurn(peek.id, mia.id, 's1');
   store.endContraptionTurn(t, 'done', { input: 10, output: 5, cacheRead: 100, cacheWrite: 0 });
-  const page = new StatusPage({ store, dataDir: root, bootAt: now, commit: 'abc', ownScheme: () => null, now: () => now,
-    unitStates: async (units) => units.map((unit) => ({ unit, load: 'loaded', active: 'active', sub: 'running', enabled: 'enabled' })) });
+  const page = new StatusPage({ store, dataDir: root, bootAt: now, commit: 'abc', ownScheme: () => null, now: () => now, unitStates: async (units) => units.map((unit) => ({ unit, load: 'loaded', active: 'active', sub: 'running', enabled: 'enabled' })) });
   const app = (await page.build(viewer(store, mia.id))).apps[0];
   assert.equal(app.deploys.counts.at(-1), 1);
-  assert.equal(app.deploys.counts.reduce((x, y) => x + y), 2, 'the deploy a month ago is outside the week');
+  assert.equal(
+    app.deploys.counts.reduce((x, y) => x + y),
+    2,
+    'the deploy a month ago is outside the week',
+  );
   assert.equal(app.deploys.failed.at(-1), 1);
   assert.equal(app.deploys.median, 90);
   assert.equal(app.deploys.longest, 120);
@@ -104,10 +110,9 @@ test("an app's week: deploys, errors, turns and who ran them, per day, and its v
   assert.deepEqual(app.verdict.reasons, ['its last deploy failed', `${APP_ERRORS_WARN + 1} errors in the last day`]);
 });
 
-test("an app whose service stopped is bad; a quiet one is ok", async () => {
+test('an app whose service stopped is bad; a quiet one is ok', async () => {
   const { store, mia } = setup('service');
-  const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'abc', ownScheme: () => null,
-    unitStates: async (units) => units.map((unit) => ({ unit, load: 'loaded', active: unit.includes('peek') ? 'failed' : 'active', sub: '', enabled: '' })) });
+  const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'abc', ownScheme: () => null, unitStates: async (units) => units.map((unit) => ({ unit, load: 'loaded', active: unit.includes('peek') ? 'failed' : 'active', sub: '', enabled: '' })) });
   const app = (await page.build(viewer(store, mia.id))).apps[0];
   assert.equal(app.verdict.tone, 'bad');
   assert.deepEqual(app.verdict.reasons, ['its service is failed']);
@@ -148,9 +153,17 @@ test("Citadel's stalls per day with the longest, ships per day with their median
   store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 'v1'.padEnd(40, '0'), changes: '[{"number":12,"title":"A fix"}]', started_at: now - 30 * 60_000, live_at: now - 28 * 60_000, outcome: 'live', stages: '{}' });
   store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 'v3'.padEnd(40, '0'), changes: '[]', started_at: now - 5 * 60_000, live_at: null, outcome: 'failed', stages: '{}' });
   let mem = { total: 100, avail: 50 };
-  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now,
-    mem: async () => mem, disk: async () => ({ total: 1000, free: 50 }),
-    unitStates: async (units) => units.map((unit) => ({ unit, load: unit === 'citadel-android-adb.service' ? 'not-found' : 'loaded', active: unit === 'claude-coordinator-prune.timer' ? 'failed' : 'active', sub: '', enabled: '' })) });
+  const page = new StatusPage({
+    store,
+    dataDir: root,
+    bootAt: now - DAY,
+    commit: 'c',
+    ownScheme: () => citadel.id,
+    now: () => now,
+    mem: async () => mem,
+    disk: async () => ({ total: 1000, free: 50 }),
+    unitStates: async (units) => units.map((unit) => ({ unit, load: unit === 'citadel-android-adb.service' ? 'not-found' : 'loaded', active: unit === 'claude-coordinator-prune.timer' ? 'failed' : 'active', sub: '', enabled: '' })),
+  });
   await page.sample();
   mem = { total: 100, avail: 5 };
   await page.sample(); // same `at`: replaces the first
@@ -196,8 +209,20 @@ test('memory easing (#1748): spells per day and their minutes, the last with its
   const { store, josh, citadel, peekScheme } = setup('easing');
   const now = sameDayNow();
   const mk = (project: number) => store.createTicket({ project_id: project, title: 'A turn', permission_mode: 'bypass', created_by: 'josh' } as any);
-  const ours = mk(citadel.id), theirs = mk(peekScheme.id);
-  const episode = (since: number, minutes: number, slowed: number[]) => JSON.stringify({ since, until: since + minutes * 60_000, peak: slowed.length ? 'tight' : 'easing', why: '5.0 GB free', lowestFree: 2.5e9, peakReclaim: 90_000, peakSwapOut: 3e7, waited: { starts: 1, heavy: 2, nested: 3 }, slowed: slowed.map((t) => ({ unit: `citadel-turn-ab-${t}-1.scope`, ticket: t, bytes: 4e9 })) });
+  const ours = mk(citadel.id),
+    theirs = mk(peekScheme.id);
+  const episode = (since: number, minutes: number, slowed: number[]) =>
+    JSON.stringify({
+      since,
+      until: since + minutes * 60_000,
+      peak: slowed.length ? 'tight' : 'easing',
+      why: '5.0 GB free',
+      lowestFree: 2.5e9,
+      peakReclaim: 90_000,
+      peakSwapOut: 3e7,
+      waited: { starts: 1, heavy: 2, nested: 3 },
+      slowed: slowed.map((t) => ({ unit: `citadel-turn-ab-${t}-1.scope`, ticket: t, bytes: 4e9 })),
+    });
   store.addHealthEvent('memory-easing', now - 60 * 60_000, 'x', episode(now - 60 * 60_000, 4, []));
   store.addHealthEvent('memory-easing', now - 20 * 60_000, 'x', episode(now - 20 * 60_000, 6, [ours.id, theirs.id]));
   store.addHealthEvent('memory-easing', now - 9 * 60_000, 'x', 'not json');
@@ -206,16 +231,40 @@ test('memory easing (#1748): spells per day and their minutes, the last with its
   let c = (await page.build(viewer(store, josh.id, true))).citadel;
   assert.equal(c.easing.counts.at(-1), 2);
   assert.equal(c.easing.minutes.at(-1), 10);
-  assert.deepEqual(c.easing.last?.slowed.map((x) => x.minion), [`#${ours.number}`, `Peek Auras #${theirs.number}`]);
+  assert.deepEqual(
+    c.easing.last?.slowed.map((x) => x.minion),
+    [`#${ours.number}`, `Peek Auras #${theirs.number}`],
+  );
   assert.equal(c.easing.now, null);
   assert.deepEqual(c.verdict.reasons, [], 'spells that ended are history, not a warning');
-  going = { level: 'easing', since: now - 5 * 60_000, why: '4.2 GB free (eases under 6.0 GB, back over 8.0 GB)', free: 4.2e9, reclaim: 300, swapOut: 0, lines: { easeFree: 6e9, backFree: 8e9, tightFree: 3e9 }, waiting: { starts: 2, heavy: 1, nested: 0 }, slowed: [{ unit: 'u', ticket: theirs.id, bytes: 3e9, at: now }], episodeSince: now - 5 * 60_000 };
+  going = {
+    level: 'easing',
+    since: now - 5 * 60_000,
+    why: '4.2 GB free (eases under 6.0 GB, back over 8.0 GB)',
+    free: 4.2e9,
+    reclaim: 300,
+    swapOut: 0,
+    lines: { easeFree: 6e9, backFree: 8e9, tightFree: 3e9 },
+    waiting: { starts: 2, heavy: 1, nested: 0 },
+    slowed: [{ unit: 'u', ticket: theirs.id, bytes: 3e9, at: now }],
+    episodeSince: now - 5 * 60_000,
+  };
   c = (await page.build(viewer(store, josh.id, true), now + 1)).citadel;
   assert.deepEqual(c.verdict.reasons, [`easing off memory since ${pacificStamp(now - 5 * 60_000)}: 4.2 GB free (eases under 6.0 GB, back over 8.0 GB)`]);
-  assert.deepEqual(c.easing.now?.slowed.map((x) => x.minion), [`Peek Auras #${theirs.number}`]);
+  assert.deepEqual(
+    c.easing.now?.slowed.map((x) => x.minion),
+    [`Peek Auras #${theirs.number}`],
+  );
   const outside = (await page.build({ canSee: (id) => id === citadel.id, admin: false, key: 'o' }, now + 2)).citadel;
-  assert.deepEqual(outside.easing.last?.slowed.map((x) => x.minion), [`#${ours.number}`, null], "another scheme's minion isn't named to someone outside it");
-  assert.deepEqual(outside.easing.now?.slowed.map((x) => x.minion), [null]);
+  assert.deepEqual(
+    outside.easing.last?.slowed.map((x) => x.minion),
+    [`#${ours.number}`, null],
+    "another scheme's minion isn't named to someone outside it",
+  );
+  assert.deepEqual(
+    outside.easing.now?.slowed.map((x) => x.minion),
+    [null],
+  );
 });
 
 test("a reader thread's Status page shows easing from main's snapshot (#1748): readers answer /api/status", async () => {
@@ -223,8 +272,7 @@ test("a reader thread's Status page shows easing from main's snapshot (#1748): r
   const { readerStatus } = await import('../src/reader.ts');
   const now = sameDayNow();
   const going = { level: 'easing', since: now - 60_000, why: '5.0 GB free', free: 5e9, reclaim: 0, swapOut: 0, lines: { easeFree: 6e9, backFree: 8e9, tightFree: 3e9 }, waiting: { starts: 0, heavy: 0, nested: 0 }, slowed: [], episodeSince: now - 60_000 };
-  const snap = { ready: true, live: {}, builds: {}, ownScheme: citadel.id, previews: false, ships: null,
-    status: { bootAt: now - DAY, commit: 'c', cores: 4, probing: false, lastMs: null, readerMs: null, storms: [], easing: going, desktops: [], disk: {}, units: [], jobs: [] } };
+  const snap = { ready: true, live: {}, builds: {}, ownScheme: citadel.id, previews: false, ships: null, status: { bootAt: now - DAY, commit: 'c', cores: 4, probing: false, lastMs: null, readerMs: null, storms: [], easing: going, desktops: [], disk: {}, units: [], jobs: [] } };
   const c = (await readerStatus(store, snap, root)()!.build(viewer(store, josh.id, true), now)).citadel;
   assert.equal(c.easing.now?.why, '5.0 GB free');
 });
@@ -232,22 +280,21 @@ test("a reader thread's Status page shows easing from main's snapshot (#1748): r
 test('a viewer outside Citadel sees its health but not its CI', async () => {
   const { store, mia, citadel } = setup('ci');
   const view = { at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [{ name: 'tests', file: 't.yml', verdict: { id: 1, name: 'tests', branch: 'main', status: 'completed', conclusion: 'failure', at: '', url: 'u' }, skipped: [] }], runs: [] };
-  const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id,
-    ciSnapshot: (canSee) => (canSee(citadel.id) ? [{ id: citadel.id, view: view as any }] : []) });
+  const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, ciSnapshot: (canSee) => (canSee(citadel.id) ? [{ id: citadel.id, view: view as any }] : []) });
   store.addRelease({ project_id: citadel.id, target: 'citadel-server', version: 'v1'.padEnd(40, '0'), changes: '[{"number":12,"title":"A private fix"}]', started_at: Date.now() - 60_000, live_at: Date.now() - 30_000, outcome: 'live', stages: '{}' });
   const outside = (await page.build(viewer(store, mia.id))).citadel;
-  assert.deepEqual(outside.ships.last?.changes, [], 'what shipped is only for people who can see Citadel\'s scheme');
+  assert.deepEqual(outside.ships.last?.changes, [], "what shipped is only for people who can see Citadel's scheme");
   assert.equal(outside.ci, null);
   assert.equal(outside.ciVisible, false, 'the page says "not yours to see", not "no reading yet"');
   const admin = (await page.build({ canSee: () => true, admin: true, key: 'a' })).citadel;
   assert.equal(admin.ci?.workflows[0].conclusion, 'failure');
   assert.equal(admin.ciVisible, true);
   assert.equal(admin.ships.last?.changes.length, 1);
-  assert.deepEqual(admin.verdict.reasons, ['CI red on main: tests'], 'too few main runs to rate: main\'s newest red verdict is yellow, as it was');
+  assert.deepEqual(admin.verdict.reasons, ['CI red on main: tests'], "too few main runs to rate: main's newest red verdict is yellow, as it was");
   assert.equal(admin.ci?.tone, 'warn');
 });
 
-test('the CI share counts only main\'s runs of workflows that ring, not other branches or quiet workflows', async () => {
+test("the CI share counts only main's runs of workflows that ring, not other branches or quiet workflows", async () => {
   const { store, citadel } = setup('cishare');
   const run = (id: number, branch: string, conclusion: string, name = 'tests') => ({ id, name, branch, status: 'completed', conclusion, at: '', url: 'u' });
   const verdict = (conclusion: string) => ({ id: 1, name: 'tests', branch: 'main', status: 'completed', conclusion, at: '', url: 'u' });
@@ -260,15 +307,23 @@ test('the CI share counts only main\'s runs of workflows that ring, not other br
   const lands = Array.from({ length: 9 }, (_, i) => run(10 + i, `land/b${i}`, 'failure'));
   const green = await build([{ ...tests, verdict: verdict('success') }], [...lands, ...[1, 2, 3, 4, 5].map((i) => run(i, 'main', 'success'))]);
   assert.equal(green.ci?.tone, 'ok');
-  assert.equal(green.ci?.runs, 5, 'only main\'s runs');
+  assert.equal(green.ci?.runs, 5, "only main's runs");
   assert.equal(green.verdict.tone, 'ok');
-  const quiet = await build([{ ...tests, verdict: verdict('success') }, { name: 'nightly', file: 'n.yml', skipped: [], quiet: true, verdict: null }],
-    [...[1, 2, 3, 4, 5].map((i) => run(i, 'main', 'success')), ...[6, 7, 8, 9, 10].map((i) => run(i, 'main', 'failure', 'nightly'))]);
-  assert.equal(quiet.ci?.runs, 5, 'a quiet workflow\'s runs are left out');
+  const quiet = await build(
+    [
+      { ...tests, verdict: verdict('success') },
+      { name: 'nightly', file: 'n.yml', skipped: [], quiet: true, verdict: null },
+    ],
+    [...[1, 2, 3, 4, 5].map((i) => run(i, 'main', 'success')), ...[6, 7, 8, 9, 10].map((i) => run(i, 'main', 'failure', 'nightly'))],
+  );
+  assert.equal(quiet.ci?.runs, 5, "a quiet workflow's runs are left out");
   assert.equal(quiet.ci?.tone, 'ok');
   const few = await build([{ ...tests, verdict: verdict('failure') }], [run(1, 'main', 'failure'), run(2, 'main', 'success'), ...lands]);
   assert.equal(few.ci?.tone, 'warn', 'under 5 main runs, newest red: yellow');
-  const many = await build([{ ...tests, verdict: verdict('success') }], [1, 2, 3, 4, 5, 6, 7].map((i) => run(i, 'main', i <= 3 ? 'failure' : 'success')));
+  const many = await build(
+    [{ ...tests, verdict: verdict('success') }],
+    [1, 2, 3, 4, 5, 6, 7].map((i) => run(i, 'main', i <= 3 ? 'failure' : 'success')),
+  );
   assert.equal(many.ci?.tone, 'bad', '3 of 7 is over 30%');
 });
 
@@ -279,14 +334,16 @@ test('health readings and host samples are kept a week and a day', () => {
   const s = { mem_total: 1, mem_avail: 1, disk_total: 1, disk_free: 1, load1: 0, rss: 1 };
   store.addHostSample({ at: 1000, ...s });
   store.addHostSample({ at: 1000 + 9 * DAY, ...s });
-  assert.deepEqual(store.hostSamples(0).map((r) => r.at), [1000 + 9 * DAY]);
+  assert.deepEqual(
+    store.hostSamples(0).map((r) => r.at),
+    [1000 + 9 * DAY],
+  );
 });
 
 test('a failed nightly backup run shows (B1): the backup service is read, not only its timer, which stays active', async () => {
   const { store, josh, citadel } = setup('backup-unit');
   const now = Date.now();
-  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now,
-    unitStates: async (units) => units.map((unit) => ({ unit, load: 'loaded', active: unit === 'claude-coordinator-backup.service' ? 'failed' : 'active', sub: '', enabled: '' })) });
+  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now, unitStates: async (units) => units.map((unit) => ({ unit, load: 'loaded', active: unit === 'claude-coordinator-backup.service' ? 'failed' : 'active', sub: '', enabled: '' })) });
   const c = (await page.build(viewer(store, josh.id, true))).citadel;
   assert.equal(c.verdict.tone, 'bad');
   assert.ok(c.verdict.reasons.includes('claude-coordinator-backup.service failed'), c.verdict.reasons.join('; '));
@@ -296,8 +353,18 @@ test('a failed read of the units warns and is asked again, not cached as "none r
   const { store, josh, citadel } = setup('units');
   let fail = true;
   let now = Date.now();
-  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now,
-    unitStates: async (units) => { if (fail) throw new Error('systemctl: no bus'); return units.map((unit) => ({ unit, load: 'loaded', active: 'failed', sub: 'failed', enabled: '' })); } });
+  const page = new StatusPage({
+    store,
+    dataDir: root,
+    bootAt: now - DAY,
+    commit: 'c',
+    ownScheme: () => citadel.id,
+    now: () => now,
+    unitStates: async (units) => {
+      if (fail) throw new Error('systemctl: no bus');
+      return units.map((unit) => ({ unit, load: 'loaded', active: 'failed', sub: 'failed', enabled: '' }));
+    },
+  });
   const first = (await page.build(viewer(store, josh.id, true))).citadel;
   assert.equal(first.unitsFailed, true);
   assert.ok(first.verdict.reasons.includes("its services couldn't be read"));
@@ -328,13 +395,20 @@ test('time to ship (#1132): per-day median and p90 per target, for Citadel and f
   const main = all.shipTimes.find((t) => t.key === `release:${citadel.id}:citadel-server`)!;
   assert.equal(main.counts.at(-2) + main.counts.at(-1) >= 10, true);
   assert.equal(main.p90.at(-1), 540, 'nearest-rank p90 of 10 ships: the 9th');
-  assert.equal(main.ships.some((s) => s.took === 5000), true, 'the slow one is in the ships a click opens');
+  assert.equal(
+    main.ships.some((s) => s.took === 5000),
+    true,
+    'the slow one is in the ships a click opens',
+  );
   assert.deepEqual(main.ships.at(-1)!.stages, { line: 10, test: 50 });
   const peek = all.shipTimes.find((t) => t.key === 'app:peek-auras')!;
   assert.equal(peek.median.at(-1), 90);
   assert.deepEqual(peek.ships[0].stages, { build: 30, restart: 60 });
   const mine = await page.build(viewer(store, mia.id));
-  assert.deepEqual(mine.shipTimes.map((t) => t.key).filter((k) => k.startsWith('app:')), ['app:peek-auras']);
+  assert.deepEqual(
+    mine.shipTimes.map((t) => t.key).filter((k) => k.startsWith('app:')),
+    ['app:peek-auras'],
+  );
 });
 
 test('time to ship (#1132): a slow day sends exactly one nudge per target per day, none for a quick one', async () => {
@@ -380,8 +454,7 @@ test('CI with one failed run in twenty leaves the verdict green; six in twenty i
   const { store, citadel } = setup('cirate');
   const mk = (bad: number) => ({ at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [], runs: Array.from({ length: 20 }, (_, i) => ({ name: 'tests', branch: 'main', status: 'completed', conclusion: i < bad ? 'failure' : 'success' })) });
   let bad = 1;
-  const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, now: () => Date.now() + bad * 60_000,
-    ciSnapshot: () => [{ id: citadel.id, view: mk(bad) as any }] });
+  const page = new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'c', ownScheme: () => citadel.id, now: () => Date.now() + bad * 60_000, ciSnapshot: () => [{ id: citadel.id, view: mk(bad) as any }] });
   const admin = { canSee: () => true, admin: true, key: 'a' };
   assert.equal((await page.build(admin)).citadel.verdict.tone, 'ok');
   bad = 6;
@@ -403,7 +476,10 @@ test('the CPU tile (#1273) reads load1 from host_samples against the cores, and 
   assert.equal(c.host.cpuWarn, 8);
   assert.equal(c.host.latest?.load1, 3);
   assert.deepEqual(c.host.peak, { at: now - 40 * 60_000, load1: 12.3 });
-  assert.ok(c.host.series.some((r) => r[3] === 12.3), 'the hour series carries its highest load');
+  assert.ok(
+    c.host.series.some((r) => r[3] === 12.3),
+    'the hour series carries its highest load',
+  );
   assert.ok(!c.verdict.tiles.includes('cpu'), 'one high reading in the window is not "stays high"');
   store.addHostSample({ at: now - 60_000, ...s, load1: 9 });
   store.addHostSample({ at: now - 5 * 60_000, ...s, load1: 8.5 });
@@ -453,14 +529,22 @@ test('Investigate (#1273): an app tile goes to its home scheme, and the minion q
   assert.match(page.investigate(viewer(store, mia.id), 'Mia', tile)!.text, /Quote the tag/);
 });
 
-test('Investigate (#1273): a Citadel tile goes to Citadel, its reason carries its tile key, and CI\'s tile adds to the CI page\'s fix minion', async () => {
+test("Investigate (#1273): a Citadel tile goes to Citadel, its reason carries its tile key, and CI's tile adds to the CI page's fix minion", async () => {
   const { store, josh, mia, citadel } = setup('investigate-citadel');
   const now = sameDayNow();
   const fixer = store.createTicket({ project_id: citadel.id, title: 'Fix the red tests', permission_mode: 'default', created_by: josh.id });
   const view = { at: 1, slug: 'o/r', branch: 'main', runners: null, waiting: [], workflows: [{ name: 'tests', file: 't.yml', verdict: { id: 1, name: 'tests', branch: 'main', status: 'completed', conclusion: 'failure', at: '', url: 'u' }, skipped: [] }], runs: [] };
-  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now,
-    mem: async () => ({ total: 100, avail: 5 }), disk: async () => ({ total: 100, free: 50 }),
-    ciSnapshot: (canSee) => (canSee(citadel.id) ? [{ id: citadel.id, view: view as any, problems: [{ fixMinion: { number: fixer.number!, closed: false } }] }] : []) });
+  const page = new StatusPage({
+    store,
+    dataDir: root,
+    bootAt: now - DAY,
+    commit: 'c',
+    ownScheme: () => citadel.id,
+    now: () => now,
+    mem: async () => ({ total: 100, avail: 5 }),
+    disk: async () => ({ total: 100, free: 50 }),
+    ciSnapshot: (canSee) => (canSee(citadel.id) ? [{ id: citadel.id, view: view as any, problems: [{ fixMinion: { number: fixer.number!, closed: false } }] }] : []),
+  });
   await page.sample();
   const c = (await page.build(viewer(store, josh.id, true))).citadel;
   assert.equal(c.verdict.tiles[c.verdict.reasons.indexOf('under 10% of memory free')], 'memory');
@@ -484,13 +568,18 @@ test('host samples keep the CPU, memory and IO pressure (#1301, #1325) and swap 
   store.addHostSample({ ...base, at: 1000, cpu_psi: 63, mem_psi: 4, io_psi: 16, swap_used: 2 ** 33 });
   store.addHostSample({ ...base, at: 2000 });
   const rows = store.hostSamples(0);
-  assert.deepEqual(rows.map((r) => [r.cpu_psi, r.mem_psi, r.io_psi, r.swap_used]), [[63, 4, 16, 2 ** 33], [null, null, null, null]]);
+  assert.deepEqual(
+    rows.map((r) => [r.cpu_psi, r.mem_psi, r.io_psi, r.swap_used]),
+    [
+      [63, 4, 16, 2 ** 33],
+      [null, null, null, null],
+    ],
+  );
 });
 
 test('a sample stores the swap the memory reading says is in use (#1325)', async () => {
   const { store, citadel } = setup('swap-sample');
-  const page = new StatusPage({ store, dataDir: root, bootAt: 0, commit: 'c', ownScheme: () => citadel.id, now: () => 5000,
-    mem: async () => ({ total: 100, avail: 50, swap: 7 }), disk: async () => ({ total: 100, free: 50 }) });
+  const page = new StatusPage({ store, dataDir: root, bootAt: 0, commit: 'c', ownScheme: () => citadel.id, now: () => 5000, mem: async () => ({ total: 100, avail: 50, swap: 7 }), disk: async () => ({ total: 100, free: 50 }) });
   assert.equal((await page.sample())!.swap_used, 7);
   assert.equal(store.hostSamples(0).at(-1)!.swap_used, 7);
 });
@@ -506,13 +595,24 @@ test('a boot records why the last process ended (#1325): a ship, by hand, out of
   recordBoot(store, 'bbbb2222', 8000, { at: 6000, result: 'oom-kill', code: 'killed', status: 'KILL' }); // recorded already: this stop left none
   recordBoot(store, 'bbbb2222', 9000, null);
   recordBoot(store, 'bbbb2222', 11000); // a caller that can't read marks (a preview) records no stop
-  assert.deepEqual(stops(), [[2000, 'deploy', 'aaaa1111'], [4000, 'by-hand', 'bbbb2222'], [6000, 'out-of-memory', 'bbbb2222'], [8000, 'unknown', 'bbbb2222'], [9000, 'unknown', 'bbbb2222']]);
+  assert.deepEqual(stops(), [
+    [2000, 'deploy', 'aaaa1111'],
+    [4000, 'by-hand', 'bbbb2222'],
+    [6000, 'out-of-memory', 'bbbb2222'],
+    [8000, 'unknown', 'bbbb2222'],
+    [9000, 'unknown', 'bbbb2222'],
+  ]);
 });
 
 test('the last stall says its cause in words, and a stall just after a boot is shown, marked (P2)', async () => {
   const { store, josh, citadel } = setup('stall-cause');
   const now = sameDayNow();
-  store.addHealthEvent('loop-lag', now - 20 * 60_000, 'x', 'The event loop was held for 1.5 s: the server answered nobody meanwhile. Cause: waited for disk (0.1 s on CPU of 1.6 s; 0.0 s for CPU, 1.2 s for disk, 0.0 s for memory; 2 major faults, 3 voluntary and 4 involuntary switches; 5 writes queued on the write worker).');
+  store.addHealthEvent(
+    'loop-lag',
+    now - 20 * 60_000,
+    'x',
+    'The event loop was held for 1.5 s: the server answered nobody meanwhile. Cause: waited for disk (0.1 s on CPU of 1.6 s; 0.0 s for CPU, 1.2 s for disk, 0.0 s for memory; 2 major faults, 3 voluntary and 4 involuntary switches; 5 writes queued on the write worker).',
+  );
   store.addHealthEvent(BOOT_STALL, now - 5 * 60_000, 'x', 'The event loop was held for 2.5 s: the server answered nobody meanwhile. Cause: own work (2.4 s on CPU of 2.6 s; ...).');
   const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now });
   const c = (await page.build(viewer(store, josh.id, true))).citadel;
@@ -526,20 +626,39 @@ test('the last stall says its cause in words, and a stall just after a boot is s
 
 test('answer time (#1559): each sample stores its window; three slow ones in a row tell the scheme once, three good ones clear it', async () => {
   const { store, citadel, josh } = setup('answer');
-  let p95 = 900, now = Date.now() - 3_600_000;
+  let p95 = 900,
+    now = Date.now() - 3_600_000;
   const win = () => ({ v: 1, n: 300, fail: 0, p50: 5, p95, p99: p95 * 2, max: p95 * 3, over: 0.1, split: null, load: 20, turns: 4 });
   const told: string[] = [];
-  const page = new StatusPage({ store, dataDir: root, bootAt: now, commit: 'abc', ownScheme: () => citadel.id, now: () => now, tell: (_id, text) => told.push(text),
-    cpuLedger: async () => null, cache: async () => ({}) as any, mem: async () => ({ total: 8e9, avail: 4e9 }), disk: async () => ({ total: 1e11, free: 5e10 }),
-    answer: { probe: { take: () => win() as any, lastMs: 12, readerMs: 3 }, turns: () => 4 } });
-  const next = async (v: number) => { p95 = v; now += 300_000; await page.sample(); };
-  await next(900); await next(900);
+  const page = new StatusPage({
+    store,
+    dataDir: root,
+    bootAt: now,
+    commit: 'abc',
+    ownScheme: () => citadel.id,
+    now: () => now,
+    tell: (_id, text) => told.push(text),
+    cpuLedger: async () => null,
+    cache: async () => ({}) as any,
+    mem: async () => ({ total: 8e9, avail: 4e9 }),
+    disk: async () => ({ total: 1e11, free: 5e10 }),
+    answer: { probe: { take: () => win() as any, lastMs: 12, readerMs: 3 }, turns: () => 4 },
+  });
+  const next = async (v: number) => {
+    p95 = v;
+    now += 300_000;
+    await page.sample();
+  };
+  await next(900);
+  await next(900);
   assert.equal(told.length, 0, 'two are not enough');
-  await next(900); await next(900);
+  await next(900);
+  await next(900);
   assert.equal(told.length, 1, 'once, not once per sample');
   assert.match(told[0], /p95 900 ms/);
   assert.equal((await page.build(viewer(store, josh.id, true))).citadel.host.answer.alert, true);
-  await next(50); await next(50);
+  await next(50);
+  await next(50);
   assert.equal((await page.build(viewer(store, josh.id, true))).citadel.host.answer.alert, true, 'two good ones do not clear it');
   await next(50);
   const a = (await page.build(viewer(store, josh.id, true))).citadel.host.answer;
@@ -551,8 +670,7 @@ test('answer time (#1559): each sample stores its window; three slow ones in a r
 test("an app's disk reading reaches the page as a timestamp in ms, and a failed measurement doesn't warn", async () => {
   const { store, mia } = setup('disk');
   const at = Date.now() - 3 * 60_000;
-  const build = async (data_bytes: number | null) => (await new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'abc', ownScheme: () => null,
-    diskUse: () => ({ data_bytes, measured_at: new Date(at).toISOString(), warn_gb: 1 }) }).build(viewer(store, mia.id))).apps[0];
+  const build = async (data_bytes: number | null) => (await new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'abc', ownScheme: () => null, diskUse: () => ({ data_bytes, measured_at: new Date(at).toISOString(), warn_gb: 1 }) }).build(viewer(store, mia.id))).apps[0];
   const big = await build(2e9);
   assert.equal(big.disk?.at, at);
   assert.ok(big.verdict.reasons.includes('its data is over 1 GB'));

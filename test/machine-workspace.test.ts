@@ -41,34 +41,43 @@ symlinkSync(outside, join(clone, 'escape'));
 
 const node = process.execPath;
 const configFile = join(root, 'machine-agent.json');
-writeFileSync(configFile, JSON.stringify({
-  workspaces: {
-    delve: {
-      path: clone,
-      read: [logs, join(root, 'missing')],
-      tasks: {
-        ok: { run: [node, '-e', 'console.log("built fine")'], about: 'says hi' },
-        nogodot: { run: [node, '-e', 'process.exit(2)'], hints: [{ exit: 2, say: 'Unzip Godot into Downloads or set GODOT.' }] },
-        locked: { run: [node, '-e', 'console.log("error MSB3027: being used by another process"); process.exit(1)'], hints: [{ match: 'MSB3027|used by another process', say: 'Close the game and the Delve Editor, then retry.' }] },
-        slow: { run: [node, '-e', 'setTimeout(() => console.log("done"), 1500)'] },
-        unset: { run: ['%CITADEL_NOT_SET%'] },
-        'bad task!': { run: ['x'] },
-        empty: { run: [] },
+writeFileSync(
+  configFile,
+  JSON.stringify({
+    workspaces: {
+      delve: {
+        path: clone,
+        read: [logs, join(root, 'missing')],
+        tasks: {
+          ok: { run: [node, '-e', 'console.log("built fine")'], about: 'says hi' },
+          nogodot: { run: [node, '-e', 'process.exit(2)'], hints: [{ exit: 2, say: 'Unzip Godot into Downloads or set GODOT.' }] },
+          locked: { run: [node, '-e', 'console.log("error MSB3027: being used by another process"); process.exit(1)'], hints: [{ match: 'MSB3027|used by another process', say: 'Close the game and the Delve Editor, then retry.' }] },
+          slow: { run: [node, '-e', 'setTimeout(() => console.log("done"), 1500)'] },
+          unset: { run: ['%CITADEL_NOT_SET%'] },
+          'bad task!': { run: ['x'] },
+          empty: { run: [] },
+        },
       },
+      gone: { path: join(root, 'nowhere') },
+      vault: { path: vault, git_sync: false },
+      typo: { path: vault, git_sync: 'no' },
     },
-    gone: { path: join(root, 'nowhere') },
-    vault: { path: vault, git_sync: false },
-    typo: { path: vault, git_sync: 'no' },
-  },
-}));
+  }),
+);
 const host = new WorkspaceHost({ configFile, jobsDir: join(root, 'jobs') });
 const call = (tool: string, args: object = {}) => host.call(tool, args, '#90 in Citadel', async (name: string, bytes: Buffer) => `/srv/${name}:${bytes.length}`);
 const refused = (p: Promise<unknown>, re: RegExp) => assert.rejects(p, (err: Error) => re.test(err.message));
 
 test('the config keeps good workspaces and tasks and says what it left out', () => {
   assert.deepEqual([...host.workspaces.keys()], ['delve', 'vault', 'typo']);
-  assert.deepEqual([...host.workspaces.values()].map((w) => w.gitSync), [true, false, false]);
-  assert.deepEqual(host.summary().workspaces.map((w: any) => w.git_sync), [true, false, false]);
+  assert.deepEqual(
+    [...host.workspaces.values()].map((w) => w.gitSync),
+    [true, false, false],
+  );
+  assert.deepEqual(
+    host.summary().workspaces.map((w: any) => w.git_sync),
+    [true, false, false],
+  );
   assert.deepEqual([...host.workspaces.get('delve').tasks.keys()], ['ok', 'nogodot', 'locked', 'slow', 'unset']);
   const problems = host.problems.join('\n');
   assert.match(problems, /gone: .*does not exist/);
@@ -171,7 +180,10 @@ test('run_task names the commit it ran, and refuses a caller whose own git_sync 
 
 test('the MCP side lists the tools and answers calls and unknown methods', async () => {
   const list = await workspaceReply(host, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, 'x');
-  assert.deepEqual(list.result.tools.map((t: any) => t.name), ['workspaces', 'git_sync', 'run_task', 'job', 'stop_job', 'read_file', 'list_files', 'fetch_file']);
+  assert.deepEqual(
+    list.result.tools.map((t: any) => t.name),
+    ['workspaces', 'git_sync', 'run_task', 'job', 'stop_job', 'read_file', 'list_files', 'fetch_file'],
+  );
   const bad = await workspaceReply(host, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'run_task', arguments: { workspace: 'delve', task: 'nope' } } }, 'x');
   assert.equal(bad.result.isError, true);
   assert.equal((await workspaceReply(host, { jsonrpc: '2.0', id: 3, method: 'resources/list' }, 'x')).error.code, -32601);
@@ -180,28 +192,34 @@ test('the MCP side lists the tools and answers calls and unknown methods', async
   const vaultOnly = join(root, 'vault-only.json');
   writeFileSync(vaultOnly, JSON.stringify({ workspaces: { vault: { path: vault, git_sync: false } } }));
   const offered = await workspaceReply(new WorkspaceHost({ configFile: vaultOnly, jobsDir: join(root, 'jobs') }), { jsonrpc: '2.0', id: 4, method: 'tools/list' }, 'x');
-  assert.deepEqual(offered.result.tools.map((t: any) => t.name), ['workspaces', 'run_task', 'job', 'stop_job', 'read_file', 'list_files', 'fetch_file']);
+  assert.deepEqual(
+    offered.result.tools.map((t: any) => t.name),
+    ['workspaces', 'run_task', 'job', 'stop_job', 'read_file', 'list_files', 'fetch_file'],
+  );
 });
 
 // A Windows test box (#369): tasks that take a minion's arguments, a stoppable app, one screen
 // lock shared with the box's CI desktop jobs, and screenshots.
 const lockFile = join(root, 'screen.lock');
 const boxFile = join(root, 'box.json');
-writeFileSync(boxFile, JSON.stringify({
-  screen_lock: lockFile,
-  screenshots: true,
-  workspaces: {
-    peek: {
-      path: clone,
-      tasks: {
-        shell: { run: [node, '-e', 'console.log(JSON.stringify(process.argv.slice(1)))'], args: true },
-        build: { run: [node, '-e', 'console.log("built")'], screen: false },
-        app: { run: [node, '-e', 'console.log("window up"); setInterval(() => {}, 1000)'] },
-        typo: { run: ['x'], args: 'yes' },
+writeFileSync(
+  boxFile,
+  JSON.stringify({
+    screen_lock: lockFile,
+    screenshots: true,
+    workspaces: {
+      peek: {
+        path: clone,
+        tasks: {
+          shell: { run: [node, '-e', 'console.log(JSON.stringify(process.argv.slice(1)))'], args: true },
+          build: { run: [node, '-e', 'console.log("built")'], screen: false },
+          app: { run: [node, '-e', 'console.log("window up"); setInterval(() => {}, 1000)'] },
+          typo: { run: ['x'], args: 'yes' },
+        },
       },
     },
-  },
-}));
+  }),
+);
 const shots: string[] = [];
 const box = new WorkspaceHost({
   configFile: boxFile,
@@ -268,7 +286,7 @@ test('stop_job also ends what the task started, off Windows (a shell running a l
   }
 });
 
-test('a task whose jobs folder can\'t be made fails without leaving its workspace busy', async () => {
+test("a task whose jobs folder can't be made fails without leaving its workspace busy", async () => {
   const file = join(root, 'nojobs.json');
   const jobsFile = join(root, 'jobs-is-a-file');
   writeFileSync(jobsFile, 'x');
@@ -290,7 +308,7 @@ const ciWaiter = (pid: number, since: number, token = `ci-${pid}`) => {
 };
 const jobId = (text: string) => text.match(/\(job (\w+)\)/)[1];
 
-test('the screen\'s line (#1422): behind a live holder a screen task gets a place in line, not a refusal, and starts once the screen is free', async () => {
+test("the screen's line (#1422): behind a live holder a screen task gets a place in line, not a refusal, and starts once the screen is free", async () => {
   holdLock(process.ppid);
   // A build doesn't touch the screen, so it runs beside a CI desktop job.
   assert.match((await boxCall('run_task', { workspace: 'peek', task: 'build' })).text, /succeeded/);
@@ -302,7 +320,10 @@ test('the screen\'s line (#1422): behind a live holder a screen task gets a plac
   const listed = (await boxCall('workspaces')).text;
   assert.match(listed, /Screen: busy, desktop CI job for GitHub Actions \(peek-auras\)/);
   assert.match(listed, /1 in line[\s\S]*1\. task shell in peek for #121 in Peek Auras/);
-  assert.deepEqual(screenState(lockFile).line.map((w: any) => w.who), ['#121 in Peek Auras']);
+  assert.deepEqual(
+    screenState(lockFile).line.map((w: any) => w.who),
+    ['#121 in Peek Auras'],
+  );
   assert.match((await boxCall('job', { id, wait: 0.2 })).text, /waiting in line for the screen.*it is next, 1 in line/);
 
   rmSync(lockFile); // the CI job ends
@@ -311,7 +332,7 @@ test('the screen\'s line (#1422): behind a live holder a screen task gets a plac
   assert.deepEqual(readdirSync(lineDir), [], 'and out of the line');
 });
 
-test('the screen\'s line serves CI jobs before minion tasks, each kind in arrival order', async () => {
+test("the screen's line serves CI jobs before minion tasks, each kind in arrival order", async () => {
   const ci = ciWaiter(process.ppid, Date.now() - 1000);
   const first = await boxCall('run_task', { workspace: 'peek', task: 'shell', wait: 0.2 });
   assert.match(first.text, /nobody has the screen this moment; 1 ahead of it, 2 in line/, 'the screen is free, but the CI job came first');
@@ -321,7 +342,10 @@ test('the screen\'s line serves CI jobs before minion tasks, each kind in arriva
   const second = joinScreenLine(lockFile, 'a screenshot', 'someone');
   const order = screenLine(lockFile).map((w: any) => w.what);
   assert.deepEqual(order.slice(0, 2), ['desktop CI job ci-' + process.ppid, 'desktop CI job ci-later']);
-  assert.deepEqual(order.slice(2).map((w) => w.replace(/ in peek$/, '').replace(/^task shell.*/, 'task')), ['task', 'a screenshot']);
+  assert.deepEqual(
+    order.slice(2).map((w) => w.replace(/ in peek$/, '').replace(/^task shell.*/, 'task')),
+    ['task', 'a screenshot'],
+  );
   // Both CI jobs take the screen in turn and leave; the first task is then next, and a running task isn't pre-empted.
   holdLock(process.ppid, { what: 'desktop CI job ci-1', who: 'GitHub Actions (caraminden/peek-auras)' });
   rmSync(ci);
@@ -332,7 +356,7 @@ test('the screen\'s line serves CI jobs before minion tasks, each kind in arriva
   assert.match((await boxCall('job', { id, wait: 10 })).text, /succeeded/);
 });
 
-test('the screen\'s line drops waiters that died or went quiet, and keeps a fresh one it can\'t read yet', () => {
+test("the screen's line drops waiters that died or went quiet, and keeps a fresh one it can't read yet", () => {
   const old = (Date.now() - 2 * 60_000) / 1000;
   const live = ciWaiter(process.ppid, 3);
   const dead = ciWaiter(deadPid, 1);
@@ -343,7 +367,10 @@ test('the screen\'s line drops waiters that died or went quiet, and keeps a fres
   const broken = join(lineDir, '000000000000005-broken.json');
   writeFileSync(broken, 'nope');
   utimesSync(broken, old, old);
-  assert.deepEqual(screenLine(lockFile).map((w: any) => w.token), [`ci-${process.ppid}`]);
+  assert.deepEqual(
+    screenLine(lockFile).map((w: any) => w.token),
+    [`ci-${process.ppid}`],
+  );
   assert.deepEqual(readdirSync(lineDir).sort(), [live, writing].map((p) => p.slice(lineDir.length + 1)).sort());
   rmSync(live);
   rmSync(writing);
@@ -365,7 +392,7 @@ test('a queued task leaves the line when stopped, or when its turn comes and nob
   assert.deepEqual(readdirSync(lineDir), []);
 });
 
-test('Citadel reads the agent\'s own words for a job waiting, running, ended and forgotten (#1425): the box never updates itself, so they must keep matching', async () => {
+test("Citadel reads the agent's own words for a job waiting, running, ended and forgotten (#1425): the box never updates itself, so they must keep matching", async () => {
   holdLock(process.ppid);
   const id = JOB_WORDS.queued.exec((await boxCall('run_task', { workspace: 'peek', task: 'app', wait: 0 })).text)?.[1];
   assert.ok(id, 'waiting in line');
@@ -395,7 +422,10 @@ test('screenshots: off unless the owner turns them on, shared with the screen lo
   const whole = await boxCall('screenshot', { delay: 0 });
   assert.match(whole.text, /Took the whole screen, 2400x1350 \(1 KB\) and copied it to \/srv\/machine-files\/screenshot-[\d-TZ]+\.png:4 /);
   assert.equal(existsSync(lockFile), false);
-  assert.deepEqual(readdirSync(join(root, 'box-jobs')).filter((f) => f.endsWith('.png')), []);
+  assert.deepEqual(
+    readdirSync(join(root, 'box-jobs')).filter((f) => f.endsWith('.png')),
+    [],
+  );
 
   // The minion whose app holds the screen can look at it; another minion waits.
   const started = await boxCall('run_task', { workspace: 'peek', task: 'app', wait: 0 });
@@ -411,6 +441,9 @@ test('screenshots: off unless the owner turns them on, shared with the screen lo
   assert.ok(offered.result.tools.some((t: any) => t.name === 'screenshot'));
   if (process.platform !== 'win32') {
     const real = new WorkspaceHost({ configFile: boxFile, jobsDir: join(root, 'box-jobs') });
-    await refused(real.call('screenshot', {}, 'x', async () => ''), /only on a Windows computer/);
+    await refused(
+      real.call('screenshot', {}, 'x', async () => ''),
+      /only on a Windows computer/,
+    );
   }
 });

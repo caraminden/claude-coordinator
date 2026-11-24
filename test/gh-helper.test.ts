@@ -46,7 +46,7 @@ test('no run folder set: every read goes through gh, and nothing starts', async 
   assert.equal(live(h).length, 0);
 });
 
-test('a read starts the login\'s helper without waiting for it; later reads come from it, as that login, with the etag', async () => {
+test("a read starts the login's helper without waiting for it; later reads come from it, as that login, with the etag", async () => {
   const h = make();
   assert.equal(await h.get('repos/a/b/actions/runs?per_page=5', null, { GH_TOKEN: 'tok-a' }), null, 'the first read goes through gh');
   const a = await helped(h, 'repos/a/b/actions/runs?per_page=5', null, { GH_TOKEN: 'tok-a' });
@@ -70,7 +70,7 @@ test('two logins get two helpers, and each read reaches GitHub as its own login'
   assert.equal(seen.at(-1)!.headers.authorization, 'token tok-b');
 });
 
-test('the token is not in the helper\'s env', async () => {
+test("the token is not in the helper's env", async () => {
   const h = make();
   await helped(h, 'x', null, { GH_TOKEN: 'tok-env' });
   assert.ok(!live(h)[0].proc.spawnargs.join(' ').includes('tok-env'));
@@ -123,7 +123,7 @@ test('GitHub failing mid-read: that read goes through gh, and the helper stays u
   assert.equal(live(h)[0].proc.pid, first.proc.pid, 'the same helper');
 });
 
-test('a token GitHub refuses (401): gh reads it instead, and the login\'s helper stops and rests', async () => {
+test("a token GitHub refuses (401): gh reads it instead, and the login's helper stops and rests", async () => {
   const h = make();
   await helped(h, 'x', null, { GH_TOKEN: 'tok-old' });
   const [first] = live(h);

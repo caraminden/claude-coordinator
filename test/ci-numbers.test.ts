@@ -12,7 +12,7 @@ import { Store } from '../src/db.ts';
 const root = mkdtempSync(join(tmpdir(), 'ci-numbers-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-test('a step up flags only once it has held for three runs, over 5% and past the series\' noise', () => {
+test("a step up flags only once it has held for three runs, over 5% and past the series' noise", () => {
   const steady = [100, 101, 99, 100, 102, 98, 100, 101, 99, 100];
   assert.equal(stepUp(steady), null);
   // One noisy run, then two: never three in a row.
@@ -38,13 +38,26 @@ test('a step up flags only once it has held for three runs, over 5% and past the
 });
 
 test('an upload is a few named numbers with units, and big or odd ones are refused', () => {
-  assert.deepEqual(parseNumbers({ numbers: [{ name: 'startup', value: 412, unit: 'ms' }, { name: 'apk-size', value: 12.5, unit: 'MB' }, { name: 'tests', value: 3 }] }), [
-    { name: 'startup', value: 412, unit: 'ms' },
-    { name: 'apk-size', value: 12.5, unit: 'MB' },
-    { name: 'tests', value: 3, unit: '' },
-  ]);
+  assert.deepEqual(
+    parseNumbers({
+      numbers: [
+        { name: 'startup', value: 412, unit: 'ms' },
+        { name: 'apk-size', value: 12.5, unit: 'MB' },
+        { name: 'tests', value: 3 },
+      ],
+    }),
+    [
+      { name: 'startup', value: 412, unit: 'ms' },
+      { name: 'apk-size', value: 12.5, unit: 'MB' },
+      { name: 'tests', value: 3, unit: '' },
+    ],
+  );
   const refused = (body: unknown, status: number, why: RegExp) =>
-    assert.throws(() => parseNumbers(body), (err: any) => err.status === status && why.test(err.message), String(why));
+    assert.throws(
+      () => parseNumbers(body),
+      (err: any) => err.status === status && why.test(err.message),
+      String(why),
+    );
   refused({}, 400, /numbers/);
   refused({ numbers: [] }, 400, /numbers/);
   refused({ numbers: Array.from({ length: LIMITS.perUpload + 1 }, (_, i) => ({ name: `n${i}`, value: 1 })) }, 413, /at most/);
@@ -52,7 +65,16 @@ test('an upload is a few named numbers with units, and big or odd ones are refus
   refused({ numbers: [{ name: 'x', value: '12' }] }, 400, /value/);
   refused({ numbers: [{ name: 'x', value: Infinity }] }, 400, /value/);
   refused({ numbers: [{ name: 'x', value: 1, unit: 'a very long unit indeed' }] }, 400, /unit/);
-  refused({ numbers: [{ name: 'x', value: 1 }, { name: 'x', value: 2 }] }, 400, /twice/);
+  refused(
+    {
+      numbers: [
+        { name: 'x', value: 1 },
+        { name: 'x', value: 2 },
+      ],
+    },
+    400,
+    /twice/,
+  );
 });
 
 const claims = (runId: number, ref = 'refs/heads/main'): RunClaims => ({ repository: 'caraminden/peek-auras', workflow: 'bench.yml', runId, runAttempt: 1, sha: `${runId}`.padStart(40, 'a'), ref });
@@ -66,7 +88,12 @@ test('a deliberate slowdown sent run by run is kept past 7 days, shows as a step
   numbers.onStep = (p, step, words) => told.push(`${p.name} ${step.name}: ${words}`);
   const send = (run: number, frame: number, ref?: string) => {
     t += 6 * 60 * 60_000;
-    return numbers.take(peek, claims(run, ref), { numbers: [{ name: 'frame-p95', value: frame, unit: 'ms' }, { name: 'binary', value: 30, unit: 'MB' }] });
+    return numbers.take(peek, claims(run, ref), {
+      numbers: [
+        { name: 'frame-p95', value: frame, unit: 'ms' },
+        { name: 'binary', value: 30, unit: 'MB' },
+      ],
+    });
   };
   const steady = [16.0, 16.1, 15.9, 16.0, 16.2, 15.8, 16.0, 16.1, 15.9, 16.0];
   steady.forEach((v, i) => send(100 + i, v));
@@ -121,11 +148,20 @@ test('a scheme can only start so many series', () => {
   }
   // Old series still take numbers; a new one is refused, and nothing of that upload is kept.
   numbers.take(p, claims(900), { numbers: [{ name: 's0', value: 2 }] });
-  assert.throws(() => numbers.take(p, claims(901), { numbers: [{ name: 's1', value: 2 }, { name: 'brand-new', value: 1 }] }), (err: any) => err.status === 413 && /series/.test(err.message));
+  assert.throws(
+    () =>
+      numbers.take(p, claims(901), {
+        numbers: [
+          { name: 's1', value: 2 },
+          { name: 'brand-new', value: 1 },
+        ],
+      }),
+    (err: any) => err.status === 413 && /series/.test(err.message),
+  );
   assert.equal(store.ciNumbers(p.id, 's1').length, 1);
 });
 
-test('a ship\'s land/ run counts as main, a branch line never flags, and a further step flags again', () => {
+test("a ship's land/ run counts as main, a branch line never flags, and a further step flags again", () => {
   const store = new Store(join(root, 'steps.db'));
   const p = store.createProject('Peek', 'https://github.com/caraminden/peek-auras', null);
   let t = Date.UTC(2026, 10, 1);
@@ -133,9 +169,15 @@ test('a ship\'s land/ run counts as main, a branch line never flags, and a furth
   const told: string[] = [];
   numbers.onStep = (_p, step) => told.push(`${step.ref} ${step.level}`);
   let run = 1;
-  const send = (v: number, ref = 'refs/heads/main') => { t += 60_000; numbers.take(p, claims(run++, ref), { numbers: [{ name: 'boot', value: v, unit: 'ms' }] }); };
+  const send = (v: number, ref = 'refs/heads/main') => {
+    t += 60_000;
+    numbers.take(p, claims(run++, ref), { numbers: [{ name: 'boot', value: v, unit: 'ms' }] });
+  };
   for (let i = 0; i < 14; i++) send(100, i % 2 ? 'refs/heads/land/ticket/9-fast' : 'refs/heads/main');
-  assert.deepEqual(store.ciNumbers(p.id, 'boot').map((n) => n.ref), Array(14).fill('refs/heads/main'));
+  assert.deepEqual(
+    store.ciNumbers(p.id, 'boot').map((n) => n.ref),
+    Array(14).fill('refs/heads/main'),
+  );
   // A branch's line, fewer runs than main's, is never the charted one, so its step never wakes anyone.
   for (let i = 0; i < 13; i++) send(i < 10 ? 50 : 90, 'refs/heads/try');
   assert.deepEqual(told, []);

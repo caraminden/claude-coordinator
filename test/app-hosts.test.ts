@@ -56,7 +56,9 @@ function ask(host: string, path: string, headers: Record<string, string> = {}, m
 function upgrade(host: string, path: string, headers: Record<string, string> = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const s = connect(port, '127.0.0.1', () => {
-      const extra = Object.entries(headers).map(([k, v]) => `${k}: ${v}\r\n`).join('');
+      const extra = Object.entries(headers)
+        .map(([k, v]) => `${k}: ${v}\r\n`)
+        .join('');
       s.write(`GET ${path} HTTP/1.1\r\nHost: ${host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n${extra}\r\n`);
     });
     let got = '';
@@ -197,7 +199,7 @@ test("a contraption's host serves only that contraption: none of Citadel, nor an
   assert.equal((await ask(APP, '/c/?next=%2Fapps%2Fstub%2F', page)).headers.location, `http://${DOMAIN}/c/?next=%2Fapps%2Fstub%2F`);
   assert.equal((await ask(APP, '/apps/other/x?y=1', { ...page, Cookie: `${jar}; ${cara}` })).headers.location, `http://${DOMAIN}/apps/other/x?y=1`);
   assert.equal((await ask(APP, '/c/api/me', { Cookie: `${jar}; ${cara}` })).status, 404, 'a fetch is no page');
-  assert.equal((await ask(APP, '/c/', { ...page, 'Upgrade': 'websocket' })).status, 404, 'nor an upgrade');
+  assert.equal((await ask(APP, '/c/', { ...page, Upgrade: 'websocket' })).status, 404, 'nor an upgrade');
   assert.equal((await ask(`nope.${DOMAIN}`, '/apps/nope/', page)).status, 404);
   // Citadel's cookie alone: a page signs in through Citadel's host (its apex), anything else is refused.
   assert.equal((await ask(APP, '/apps/stub/hello', { ...page, Cookie: cara })).headers.location, `http://${DOMAIN}/apps/stub/hello`);

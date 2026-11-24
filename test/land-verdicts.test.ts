@@ -26,11 +26,7 @@ const tmp = tempRoot('land-verdicts-');
 after(() => tmp.teardown());
 
 // The functions that judge a red, and the helpers they call. A missing one fails here: rename it here too.
-const BENCHED = [
-  'cut_off', 'flake_only', 'burn_lines', 'train_labels', 'train_real', 'train_failing', 'train_main_red', 'train_suspects_of', 'rule_on',
-  'rule_would', 'train_guess', 'train_imports', 'train_hub', 'train_label', 'train_at', 'known_flakes',
-  'train_pin', 'train_alone',
-];
+const BENCHED = ['cut_off', 'flake_only', 'burn_lines', 'train_labels', 'train_real', 'train_failing', 'train_main_red', 'train_suspects_of', 'rule_on', 'rule_would', 'train_guess', 'train_imports', 'train_hub', 'train_label', 'train_at', 'known_flakes', 'train_pin', 'train_alone'];
 // Functions that read $failed but decide nobody's fault themselves: each says why.
 const NOT_VERDICTS: Record<string, string> = {
   ci_failed: 'fetches the log and writes its flake lines',
@@ -58,12 +54,15 @@ const tools = tmp.path('tools');
 mkdirSync(tools);
 symlinkSync(join(root, 'tools/known-flakes.ts'), join(tools, 'known-flakes.ts'));
 // The fake citadel-node: a test file run alone fails at the commits in FAILS_AT (the scratch worktree's .at says which).
-writeFileSync(join(tools, 'citadel-node'), `#!/usr/bin/env bash
+writeFileSync(
+  join(tools, 'citadel-node'),
+  `#!/usr/bin/env bash
 case " $* " in *known-flakes.ts*) exec "$NODE_BIN" "$@" ;; esac
 at=$(cat .at)
 for c in $FAILS_AT; do [ "$c" != "$at" ] || { echo "✖ fails at $at"; exit 1; }; done
 echo "✔ passes at $at"
-`);
+`,
+);
 chmodSync(join(tools, 'citadel-node'), 0o755);
 
 const preamble = `set -euo pipefail
@@ -99,8 +98,17 @@ function run(c: Case): { out: string; log: string } {
     cwd: root,
     encoding: 'utf8',
     env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: out, OUT: out, TOOLS: tools, FIX: fixtures, NODE_BIN: process.execPath,
-      RED: c.red ?? '', FAILS_AT: c.failsAt ?? '', LAND_RULES: c.rules ?? shipped ?? '', COORDINATOR_SHARED_DIR: c.shared ?? '',
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      TMPDIR: out,
+      OUT: out,
+      TOOLS: tools,
+      FIX: fixtures,
+      NODE_BIN: process.execPath,
+      RED: c.red ?? '',
+      FAILS_AT: c.failsAt ?? '',
+      LAND_RULES: c.rules ?? shipped ?? '',
+      COORDINATOR_SHARED_DIR: c.shared ?? '',
       DEPLOY_DB: join(out, 'none.db'),
     },
   });
@@ -110,9 +118,18 @@ function run(c: Case): { out: string; log: string } {
 const log = (run: string) => `failed=$(cat "$FIX/${run}.log")`;
 // Each ship's commits on main, as each train had them.
 const S = {
-  1356: 'caa15be4', 1384: 'b5ee0201', 1358: 'd327b6ff 932efac3 d862b703', 1394: '642e3fa9', 1369: 'b063dd7a', 1383: '48c03a82',
-  1382: '0c3a233c', 1355: '3e5aa0fd', 1365: 'e3f0f41d', 1385: 'ff09fd26 7db26285 96ad1f03',
-  1415: 'cbf4d366 e6c5dbc3 982f0b50', 1366: '13f0f719 143a160c e3bbb05b',
+  1356: 'caa15be4',
+  1384: 'b5ee0201',
+  1358: 'd327b6ff 932efac3 d862b703',
+  1394: '642e3fa9',
+  1369: 'b063dd7a',
+  1383: '48c03a82',
+  1382: '0c3a233c',
+  1355: '3e5aa0fd',
+  1365: 'e3f0f41d',
+  1385: 'ff09fd26 7db26285 96ad1f03',
+  1415: 'cbf4d366 e6c5dbc3 982f0b50',
+  1366: '13f0f719 143a160c e3bbb05b',
 };
 // <front> <riders...>: the train's globals, with each member's commits for train_chg.
 function train(tip: string, old: string, ...ships: (keyof typeof S)[]): string {
@@ -144,7 +161,10 @@ test('A: a run killed with no failing test is no verdict', () => {
 // (3147c858), and #1414's train of 6 behind it. Before #1430 the suspects refused #1356 and #1378 for it. Verdict: main
 // red, nobody refused. Since #1478 (Cara, "Ship through"), the first, whose only failure is main's, ships through main's
 // red; the second also has wake-when-live "not rerun", which may be the train's own, so the riders go back in line.
-for (const [ci, through] of [['44884401354', true], ['44884849606', false]] as const) {
+for (const [ci, through] of [
+  ['44884401354', true],
+  ['44884849606', false],
+] as const) {
   test(`B: a red main's tip also fails refuses nobody (run ${ci})`, () => {
     const t = `${log(ci)}\ntip=3147c858 old=3147c858 own=own1414 branch=ticket/1414-x label=ticket/1414-x train_n=(2 3 4 5 6 7) SHIPS=()\ntrain_real`;
     assert.equal(run({ script: t }).out, 'test/status-page.test.ts\n', 'wake-when-live, "not rerun", is no real failure');
@@ -210,7 +230,11 @@ test('D2: the same red with two wrong guesses goes to the bisect either way', ()
 // E: #1366 alone, runs 44882481868 (Nov 21 00:01 PST, citadel-android) and 44888201563 (01:17 PST, auto-resume), report
 // 0019; and 44858022381 (Nov 20 18:50 PST, citadel-heavy, #1367's known flake), report 1840. Each failed file passed
 // alone, and each had flaked on other ships. Verdict: ship (known flakes, #1419), unless only its own branch saw it.
-for (const [ci, file] of [['44882481868', 'test/citadel-android.test.ts'], ['44888201563', 'test/auto-resume.test.ts'], ['44858022381', 'test/citadel-heavy.test.ts']]) {
+for (const [ci, file] of [
+  ['44882481868', 'test/citadel-android.test.ts'],
+  ['44888201563', 'test/auto-resume.test.ts'],
+  ['44858022381', 'test/citadel-heavy.test.ts'],
+]) {
   test(`E: a flake-only red on known flakes ships (run ${ci})`, () => {
     const shared = tmp.path(`shared-${ci}`);
     const day = new Date().toISOString().slice(0, 10);

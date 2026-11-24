@@ -69,9 +69,28 @@ export type HandOverHooks = {
  * its secrets and systemd's watchdog variables out of process.env, and the copy needs them. Tests set `argv` (the
  * copy's script and arguments; this server's own by default) and `socketFd`.
  */
-export function handOver(hooks: HandOverHooks, { schema, onSocket, env, argv = process.argv.slice(1), socketFd = 3, readyMs = 90_000, liveMs = 60_000, log = console.log }: {
-  schema: number; onSocket: boolean; env: Env; argv?: string[]; socketFd?: number; readyMs?: number; liveMs?: number; log?: (line: string) => void;
-}): void {
+export function handOver(
+  hooks: HandOverHooks,
+  {
+    schema,
+    onSocket,
+    env,
+    argv = process.argv.slice(1),
+    socketFd = 3,
+    readyMs = 90_000,
+    liveMs = 60_000,
+    log = console.log,
+  }: {
+    schema: number;
+    onSocket: boolean;
+    env: Env;
+    argv?: string[];
+    socketFd?: number;
+    readyMs?: number;
+    liveMs?: number;
+    log?: (line: string) => void;
+  },
+): void {
   if (state === 'busy') return log('Handover: one is already under way.');
   let stage: 'booting' | 'go' | 'live' | 'refused' = 'booting';
   const refuse = (why: string) => {
@@ -105,7 +124,7 @@ export function handOver(hooks: HandOverHooks, { schema, onSocket, env, argv = p
       try {
         hooks.quiesce();
       } catch (err) {
-        console.error('Handover: letting go of this server\'s work threw; going on:', err);
+        console.error("Handover: letting go of this server's work threw; going on:", err);
       }
       ctl.write('go\n');
       timer = setTimeout(() => (child.kill('SIGKILL'), failAfterGo(`the new server wasn't live in ${liveMs / 1000} s`)), liveMs);

@@ -9,7 +9,8 @@ export const windowName = (mins) => (mins === 300 ? '5-hour window' : mins === 1
 
 /** Its windows, shortest first, with a window past its reset counted as 0% used. */
 export function codexWindows(usage, now = Date.now()) {
-  return [usage?.primary, usage?.secondary].filter(Boolean)
+  return [usage?.primary, usage?.secondary]
+    .filter(Boolean)
     .map((w) => ({ ...w, pct: w.resetsAt && w.resetsAt * 1000 <= now ? 0 : Math.round(Math.min(100, Math.max(0, w.usedPercent))) }))
     .sort((a, b) => (a.windowDurationMins ?? Infinity) - (b.windowDurationMins ?? Infinity));
 }

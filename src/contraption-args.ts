@@ -46,19 +46,32 @@ export function builtins(req: TurnRequest): string[] {
 /** The `claude` arguments for a turn: only the contraption's MCP servers and (maybe) Agent and web search, nothing of the user's or Citadel's. */
 export function args(req: TurnRequest, dir: string, claudeSession: string, resume: boolean): string[] {
   const a = [
-    '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--include-partial-messages',
     // Messages in as minion turns take them, so the app can steer the turn; each is echoed back once claude takes it in.
-    '--input-format', 'stream-json', '--replay-user-messages',
+    '--input-format',
+    'stream-json',
+    '--replay-user-messages',
     // No user, project or local settings: no CLAUDE.md, hooks, plugins, permissions or MCP servers of theirs.
-    '--setting-sources', '',
+    '--setting-sources',
+    '',
     // The built-in tools: Agent, web search and tool search if asked for, else none. Subagents get no more than this.
-    '--tools', builtins(req).join(','),
-    '--strict-mcp-config', '--mcp-config', join(dir, 'mcp.json'),
-    '--settings', join(dir, 'settings.json'),
-    '--permission-mode', 'dontAsk',
+    '--tools',
+    builtins(req).join(','),
+    '--strict-mcp-config',
+    '--mcp-config',
+    join(dir, 'mcp.json'),
+    '--settings',
+    join(dir, 'settings.json'),
+    '--permission-mode',
+    'dontAsk',
     '--disable-slash-commands',
     // A resumed session gets this turn's system text, not its first one's (#618).
-    '--system-prompt-snapshot', 'off',
+    '--system-prompt-snapshot',
+    'off',
   ];
   // Blind: the app's text is the whole prompt, not an addition to Claude Code's own.
   if (req.system) a.push(req.blind ? '--system-prompt-file' : '--append-system-prompt-file', join(dir, 'system.md'));
@@ -94,4 +107,5 @@ export function settings(req: TurnRequest, hook: { node: string; script: string;
 }
 
 /** One message as claude's stream-json input takes it; claude echoes `uuid` back once it takes it in. */
-export const userLine = (text: string, uuid?: string, images: ImageBlock[] = []) => JSON.stringify({ type: 'user', ...(uuid ? { uuid } : {}), message: { role: 'user', content: [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.media_type, data: i.data } })), { type: 'text', text }] } }) + '\n';
+export const userLine = (text: string, uuid?: string, images: ImageBlock[] = []) =>
+  JSON.stringify({ type: 'user', ...(uuid ? { uuid } : {}), message: { role: 'user', content: [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.media_type, data: i.data } })), { type: 'text', text }] } }) + '\n';

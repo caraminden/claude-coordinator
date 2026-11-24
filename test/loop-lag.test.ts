@@ -23,7 +23,11 @@ test('a stall of the event loop is logged with its length, and a free loop logs 
     await new Promise((r) => setTimeout(r, 100));
     // A loaded box can keep the loop waiting for the CPU past the threshold: a real stall, rightly logged (#1424).
     // What a free loop never logs is a stall of its own work.
-    assert.deepEqual(logged.filter((l) => /Cause: own work/.test(l)), [], 'nothing in the process held it');
+    assert.deepEqual(
+      logged.filter((l) => /Cause: own work/.test(l)),
+      [],
+      'nothing in the process held it',
+    );
     const before = logged.length;
     spin(400);
     await waitFor(() => logged.length > before, logged);
@@ -42,7 +46,9 @@ test('with the sampler on, a stall names the code that held the loop (#609)', as
   const watch = watchLoopLag((text) => logged.push(text), 10, 150, { profile: true });
   try {
     await new Promise((r) => setTimeout(r, 200)); // the sampler starts
-    function holdTheLoopForTest() { spin(600); }
+    function holdTheLoopForTest() {
+      spin(600);
+    }
     holdTheLoopForTest();
     // On a loaded box other real stalls get lines too (waiting for the CPU, the sampler's own start): this one is
     // the line that names the function that held the loop, and it gets exactly one (#1424).
@@ -55,7 +61,7 @@ test('with the sampler on, a stall names the code that held the loop (#609)', as
   }
 });
 
-test('namedStacks counts only the window, leaf first then the repo\'s own callers outward', () => {
+test("namedStacks counts only the window, leaf first then the repo's own callers outward", () => {
   const root = new URL('..', import.meta.url).href;
   const frame = (functionName: string, url = '', lineNumber = 0) => ({ functionName, url, lineNumber });
   const profile = {
@@ -78,7 +84,7 @@ test('namedStacks counts only the window, leaf first then the repo\'s own caller
   assert.equal(namedStacks([profile, next], 1015, 1060), '56% all (node:sqlite) < listTickets (src/db.ts:1201) < handler (src/routes/projects.ts:411); 44% (garbage collector)'); // weighted by time: 25 of 45
 });
 
-test('ioStalledUs reads the box\'s full I/O stall from PSI, and null without it (#622)', () => {
+test("ioStalledUs reads the box's full I/O stall from PSI, and null without it (#622)", () => {
   const dir = mkdtempSync(join(tmpdir(), 'psi-'));
   try {
     writeFileSync(join(dir, 'io'), 'some avg10=0.30 avg60=0.85 avg300=1.26 total=8868426449\nfull avg10=0.25 avg60=0.64 avg300=0.86 total=4769907761\n');
@@ -97,7 +103,10 @@ test('openersOf names the other processes with a database open, its -wal include
   try {
     await new Promise((r) => child.stdout!.once('data', r));
     const who = await openersOf([db, join(dir, 'state.db')]);
-    assert.deepEqual(who.filter((w) => w.startsWith(`${child.pid} `)), [`${child.pid} ${process.execPath.split('/').at(-1)} -e`]);
+    assert.deepEqual(
+      who.filter((w) => w.startsWith(`${child.pid} `)),
+      [`${child.pid} ${process.execPath.split('/').at(-1)} -e`],
+    );
     assert.ok(!who.some((w) => w.startsWith(`${process.pid} `)));
   } finally {
     child.kill();
@@ -180,14 +189,21 @@ test('a hold of the main thread is sampled from /proc by a worker: the line name
 test('namedStacks weights by time, so a gap with no samples counts for the frame after it, and outer names the job', () => {
   const cf = (functionName: string, lineNumber: number) => ({ functionName, url: new URL('../src/x.ts', import.meta.url).href, lineNumber });
   const profile = {
-    nodes: [{ id: 1, callFrame: cf('', 0), children: [2] }, { id: 2, callFrame: cf('job', 4), children: [3, 4] }, { id: 3, callFrame: cf('fast', 9) }, { id: 4, callFrame: cf('slowRead', 19) }],
-    startTime: 0, samples: [3, 4], timeDeltas: [10_000, 90_000],
+    nodes: [
+      { id: 1, callFrame: cf('', 0), children: [2] },
+      { id: 2, callFrame: cf('job', 4), children: [3, 4] },
+      { id: 3, callFrame: cf('fast', 9) },
+      { id: 4, callFrame: cf('slowRead', 19) },
+    ],
+    startTime: 0,
+    samples: [3, 4],
+    timeDeltas: [10_000, 90_000],
   };
   assert.equal(namedStacks([profile], 0, 100_000), '90% slowRead (src/x.ts:20) < job (src/x.ts:5) < (anonymous) (src/x.ts:1); 10% fast (src/x.ts:10) < job (src/x.ts:5) < (anonymous) (src/x.ts:1)');
   assert.equal(namedStacks([profile], 0, 100_000, 3, true), '100% job (src/x.ts:5)');
 });
 
-test('a stall that is mostly the recorder\'s own roll is its own, so it sets off no take (#1572)', () => {
+test("a stall that is mostly the recorder's own roll is its own, so it sets off no take (#1572)", () => {
   assert.equal(mostlyRecorder([[1000, 1600]], 1000, 1700), true);
   assert.equal(mostlyRecorder([[1000, 1100]], 1000, 1700), false, 'a roll inside a longer real stall');
   assert.equal(mostlyRecorder([], 1000, 1700), false);
@@ -209,7 +225,8 @@ test('console profiles handed over overlapping give each window its profile with
     spin(60);
     console.profile('t2');
     console.profileEnd('t1');
-    const a = done.get('t0'), b = done.get('t1');
+    const a = done.get('t0'),
+      b = done.get('t1');
     assert.ok(a.samples.length > 0 && b.samples.length > 0);
     assert.ok(b.startTime <= a.endTime, 'the next profile starts before the last ends: no gap');
     console.profileEnd('t2');

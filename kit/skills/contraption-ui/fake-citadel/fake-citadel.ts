@@ -47,16 +47,21 @@ export interface TurnRequest {
  * - error: ends the turn with an `error` event of that code.
  * - wait: holds the stream open until the promise settles (to press Stop, say).
  */
-export type Step =
-  | { text: string }
-  | { tool: string; input?: Record<string, unknown>; ok?: boolean; error?: string; run?: () => unknown | Promise<unknown> }
-  | { media: Record<string, unknown> }
-  | { grunt: string; steps: Step[] }
-  | { error: string; message?: string }
-  | { wait: Promise<unknown> };
+export type Step = { text: string } | { tool: string; input?: Record<string, unknown>; ok?: boolean; error?: string; run?: () => unknown | Promise<unknown> } | { media: Record<string, unknown> } | { grunt: string; steps: Step[] } | { error: string; message?: string } | { wait: Promise<unknown> };
 
-export interface FakePerson { id: number; login: string; name: string; apps?: string[]; member?: boolean }
-export interface FakeApp { key?: string; title?: string; origin?: () => string; relayPaths?: string[] }
+export interface FakePerson {
+  id: number;
+  login: string;
+  name: string;
+  apps?: string[];
+  member?: boolean;
+}
+export interface FakeApp {
+  key?: string;
+  title?: string;
+  origin?: () => string;
+  relayPaths?: string[];
+}
 
 export interface FakeOptions {
   /** Your app's name (the `app` claim; `/apps/<app>`). */
@@ -101,8 +106,7 @@ export interface FakeCitadel {
 }
 
 const ASK_KINDS = ['bug', 'feature', 'data'];
-const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) =>
-  void res.writeHead(status, { 'content-type': 'application/json', ...headers }).end(JSON.stringify(body));
+const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => void res.writeHead(status, { 'content-type': 'application/json', ...headers }).end(JSON.stringify(body));
 const fail = (res: ServerResponse, status: number, error: string) => json(res, status, { error });
 const under = (path: string, entry: string) => path === entry || path.startsWith(entry.endsWith('/') ? entry : `${entry}/`);
 const whole = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1;
@@ -111,7 +115,12 @@ const whole = (v: unknown): v is number => typeof v === 'number' && Number.isInt
 function pushProblem(app: string, b: any): string | null {
   const to = typeof b?.to === 'string' ? [b.to] : b?.to;
   if (!Array.isArray(to) || !to.length || to.length > 100 || to.some((l) => typeof l !== 'string' || !l || l.length > 200)) return 'to must be a login, or a list of 1 to 100 logins';
-  for (const [k, max, min] of [['title', 200, 1], ['body', 2000, 0], ['open', 1000, 0], ['tag', 100, 0]] as const) {
+  for (const [k, max, min] of [
+    ['title', 200, 1],
+    ['body', 2000, 0],
+    ['open', 1000, 0],
+    ['tag', 100, 0],
+  ] as const) {
     if (b[k] !== undefined && (typeof b[k] !== 'string' || b[k].length < min || b[k].length > max)) return `${k} must be a string of at most ${max} characters`;
   }
   if (b.title === undefined && (b.body !== undefined || b.open !== undefined || b.tag !== undefined)) return 'body, open and tag go with a title';
@@ -152,14 +161,31 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
   };
 
   const f: FakeCitadel = {
-    url: '', keysDir, key, publicKey: keys.publicKey,
+    url: '',
+    keysDir,
+    key,
+    publicKey: keys.publicKey,
     identity: (person = people[0].id, extra = {}) => {
       const p = people.find((x) => x.id === person);
       if (!p) throw new Error(`fake Citadel: no person ${person}`);
       return sign1(extra.app ?? opts.app, keys.privateKey, p, extra);
     },
-    turns: [], canceled: [], messages: [], verdicts: [], asks: [], spend: [], pushes: [], relayed: [],
-    close: () => new Promise((r) => { server.closeAllConnections(); server.close(() => { rmSync(keysDir, { recursive: true, force: true }); r(); }); }),
+    turns: [],
+    canceled: [],
+    messages: [],
+    verdicts: [],
+    asks: [],
+    spend: [],
+    pushes: [],
+    relayed: [],
+    close: () =>
+      new Promise((r) => {
+        server.closeAllConnections();
+        server.close(() => {
+          rmSync(keysDir, { recursive: true, force: true });
+          r();
+        });
+      }),
   };
 
   const sessions = new Map<string, { person: number; name: string; lastUsed: number; busy: boolean }>();
@@ -176,7 +202,11 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
       if (size > max) return void fail(res, 413, 'Too large');
       chunks.push(c);
     }
-    try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return void fail(res, 400, 'Invalid JSON'); }
+    try {
+      return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    } catch {
+      return void fail(res, 400, 'Invalid JSON');
+    }
   };
   // The person a call acts for: enabled for this app, else 403 not_enabled; bad id, 400.
   const enabled = (res: ServerResponse, raw: unknown) => {
@@ -215,7 +245,7 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
         if (t[2] === 'messages') {
           if (!whole(b.person) || typeof b.text !== 'string' || !b.text.trim()) return fail(res, 400, 'person and text are required');
           if (!state) return fail(res, 404, 'No such turn');
-          if (b.person !== state.person) return fail(res, 403, 'Not the turn\'s person');
+          if (b.person !== state.person) return fail(res, 403, "Not the turn's person");
           f.messages.push({ turn: t[1], person: b.person, text: b.text });
           if (state.ended) return json(res, 200, { steered: false, reason: 'ended' });
           if (state.replied) return json(res, 200, { steered: false, reason: 'replied' });
@@ -230,7 +260,14 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
       if (path === '/api/contraptions/sessions' && m === 'GET') {
         const p = enabled(res, q.get('person'));
         if (!p) return;
-        return json(res, 200, [...sessions.values()].filter((s) => s.person === p.id).sort((a, b) => b.lastUsed - a.lastUsed).map(({ name, lastUsed, busy }) => ({ name, lastUsed, busy })));
+        return json(
+          res,
+          200,
+          [...sessions.values()]
+            .filter((s) => s.person === p.id)
+            .sort((a, b) => b.lastUsed - a.lastUsed)
+            .map(({ name, lastUsed, busy }) => ({ name, lastUsed, busy })),
+        );
       }
       t = /^\/api\/contraptions\/sessions\/([^/]+)$/.exec(path);
       if (t && m === 'DELETE') {
@@ -327,7 +364,10 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
     // From here on, like Citadel, every outcome is an event on a 200 stream.
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     const send = (event: string, data: unknown) => void res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    const refuse = (code: string, message: string) => { send('error', { code, message }); res.end(); };
+    const refuse = (code: string, message: string) => {
+      send('error', { code, message });
+      res.end();
+    };
     const bad = badTurn(b);
     if (bad) return refuse('bad_request', bad);
     const p = people.find((x) => x.id === b.person);
@@ -341,14 +381,28 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
     turnState.set(id, state);
     let canceled = false;
     let stopWaiting = () => {};
-    running.set(id, () => { canceled = true; stopWaiting(); });
-    res.on('close', () => { if (!state.ended) { canceled = true; stopWaiting(); } });
+    running.set(id, () => {
+      canceled = true;
+      stopWaiting();
+    });
+    res.on('close', () => {
+      if (!state.ended) {
+        canceled = true;
+        stopWaiting();
+      }
+    });
     send('start', { turn: id, session: b.session, claudeSession: `fake-session-${id}`, provider: 'claude', model: b.model ?? null });
     let message = 1;
     const run = async (steps: Step[], parent: string | null): Promise<boolean> => {
       for (const step of steps) {
         if (canceled) return false;
-        if ('wait' in step) await Promise.race([step.wait, new Promise<void>((r) => { stopWaiting = r; })]);
+        if ('wait' in step)
+          await Promise.race([
+            step.wait,
+            new Promise<void>((r) => {
+              stopWaiting = r;
+            }),
+          ]);
         else if ('text' in step) send('text', { delta: step.text, parent, message: `${id}-m${message}` });
         else if ('media' in step) send('media', step.media);
         else if ('error' in step) {
@@ -366,7 +420,12 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
           send('tool', { id: callId, name: step.tool, input: step.input ?? {}, parent });
           let ok = step.ok ?? true;
           let error = step.error;
-          try { await step.run?.(); } catch (err) { ok = false; error = (err as Error).message; }
+          try {
+            await step.run?.();
+          } catch (err) {
+            ok = false;
+            error = (err as Error).message;
+          }
           send('tool_result', { id: callId, ok, parent, ...(ok ? {} : { error: error ?? 'The tool failed' }) });
         }
       }
@@ -377,8 +436,10 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
       const ok = await run(await script(b), null);
       state.replied = true;
       if (canceled) send('error', { code: 'canceled', message: 'The turn was canceled' });
-      else if (ok) { send('end', { stop: 'end_turn', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, provider: 'claude', model: b.model ?? null }); ended = true; }
-      else ended = true; // an error step already sent its event
+      else if (ok) {
+        send('end', { stop: 'end_turn', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, provider: 'claude', model: b.model ?? null });
+        ended = true;
+      } else ended = true; // an error step already sent its event
     } catch (err) {
       send('error', { code: 'failed', message: (err as Error).message });
     } finally {
@@ -386,7 +447,10 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
       state.ended = true;
       running.delete(id);
       const s = sessions.get(key);
-      if (s) { s.busy = false; s.lastUsed = Date.now(); }
+      if (s) {
+        s.busy = false;
+        s.lastUsed = Date.now();
+      }
       res.end();
     }
   }
@@ -432,11 +496,15 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
     if (/%2e|%2f|%5c|\/\.\.?(\/|$)/i.test(sub) || !(target.relayPaths ?? []).some((e) => under(sub, e))) return fail(res, 404, 'no_route');
     const chunks: Buffer[] = [];
     let size = 0;
-    for await (const c of req) { size += c.length; if (size > 64 * 1024) return fail(res, 413, 'too_large'); chunks.push(c); }
+    for await (const c of req) {
+      size += c.length;
+      if (size > 64 * 1024) return fail(res, 413, 'too_large');
+      chunks.push(c);
+    }
     const type = req.headers['content-type'];
     if (size && !/^application\/json\b/.test(type ?? '')) return fail(res, 415, 'send application/json');
     if (size && req.method === 'GET') return fail(res, 400, 'a GET has no body');
-    const identity = sign1(to, appKeys.get(to)!.priv, p, { from: caller, fromTitle: caller === opts.app ? opts.app : others[caller]?.title ?? caller });
+    const identity = sign1(to, appKeys.get(to)!.priv, p, { from: caller, fromTitle: caller === opts.app ? opts.app : (others[caller]?.title ?? caller) });
     f.relayed.push({ to, method: req.method ?? 'GET', path: sub, identity });
     if (!target.origin) return fail(res, 502, `${target.title ?? to} is not answering`);
     try {

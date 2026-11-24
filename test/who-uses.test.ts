@@ -57,12 +57,16 @@ const run = (...args: string[]) => {
   assert.equal(r.status, 0, r.stderr);
   return r.stdout;
 };
-const section = (out: string, label: string) => out.split('\n').filter((l, i, all) => {
-  const start = all.findIndex((x) => x.includes(label));
-  if (start < 0 || i < start) return false;
-  const next = all.findIndex((x, j) => j > start && /^ {2}\S/.test(x));
-  return next < 0 || i < next;
-}).join('\n');
+const section = (out: string, label: string) =>
+  out
+    .split('\n')
+    .filter((l, i, all) => {
+      const start = all.findIndex((x) => x.includes(label));
+      if (start < 0 || i < start) return false;
+      const next = all.findIndex((x, j) => j > start && /^ {2}\S/.test(x));
+      return next < 0 || i < next;
+    })
+    .join('\n');
 
 test('a TypeScript file: direct tests, tests through other files credited to the narrowest, path namers and docs', () => {
   const out = run('src/store.ts');

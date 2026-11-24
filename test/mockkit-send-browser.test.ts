@@ -46,7 +46,10 @@ before(async () => {
   if (skip) return;
   app = await serve((path, res) => {
     // A separate page, so its extra pictures don't change the dock test's page height (a scrollbar moves the dock).
-    if (path === '/modal') return void res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE.replace('</main>', '<p><img alt="Header shot" src="/shot.png" width="40" height="40"> <a href="/shot.png"><img alt="Linked shot" src="/shot.png" width="40" height="40"></a> <a href="/other.html"><img alt="Page link" src="/shot.png" width="40" height="40"></a></p></main>'));
+    if (path === '/modal')
+      return void res
+        .writeHead(200, { 'content-type': 'text/html' })
+        .end(PAGE.replace('</main>', '<p><img alt="Header shot" src="/shot.png" width="40" height="40"> <a href="/shot.png"><img alt="Linked shot" src="/shot.png" width="40" height="40"></a> <a href="/other.html"><img alt="Page link" src="/shot.png" width="40" height="40"></a></p></main>'));
     if (path === '/') return void res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
     if (path === '/mockkit.js' || path === '/mockkit.css') {
       return void res.writeHead(200, { 'content-type': path.endsWith('js') ? 'text/javascript' : 'text/css' }).end(readFileSync(join(starter, path)));
@@ -64,7 +67,12 @@ after(async () => {
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // A person scrolls a button into view before pressing it; the sticky dock covers the bottom of the 400 px viewport.
-const click = async (page: Page, sel: string) => { await page.eval(`document.querySelector(${JSON.stringify(sel)}).scrollIntoView({ block: 'center' })`); const c = await page.centre(sel); await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: c.x, y: c.y, button: 'left', clickCount: 1 }); await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: c.x, y: c.y, button: 'left', clickCount: 1 }); };
+const click = async (page: Page, sel: string) => {
+  await page.eval(`document.querySelector(${JSON.stringify(sel)}).scrollIntoView({ block: 'center' })`);
+  const c = await page.centre(sel);
+  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: c.x, y: c.y, button: 'left', clickCount: 1 });
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: c.x, y: c.y, button: 'left', clickCount: 1 });
+};
 const posts = (page: Page) => page.eval<string[]>('window.posts');
 const send = (page: Page) => click(page, '.mk-dock > button');
 const label = (page: Page) => page.eval<string>('document.querySelector(".mk-dock > button").textContent');
@@ -142,15 +150,21 @@ for (const width of [1200, 700, 390]) {
     // The button's box inside the dock (x, y from the dock's top, size) plus the dock's own height.
     const box = () => page.eval<string>(`(() => { const d = document.querySelector('.mk-dock'), b = d.querySelector('button'), r = b.getBoundingClientRect(), q = d.getBoundingClientRect(); return [r.left, r.top - q.top, r.width, r.height, q.height].map((n) => Math.round(n)).join(','); })()`);
     const seen: Record<string, string> = {};
-    const snap = async (name: string) => { seen[name] = await box(); };
+    const snap = async (name: string) => {
+      seen[name] = await box();
+    };
     await snap('empty');
     await click(page, '[data-pick="a"] [data-v="pick"]');
     await snap('one picked');
     await click(page, '[data-pick="b"] [data-v="pick"]');
-    await page.eval(`window.setSave('saving')`); await snap('saving');
-    await page.eval(`window.setSave('retrying')`); await snap('retrying');
-    await page.eval(`window.setSave('saved')`); await snap('saved');
-    await page.eval(`document.querySelector('.mk-dock .mk-sent').textContent = 'Sent to #419 ✓ and a long line that goes on and on to prove it cannot push anything around'`); await snap('sent line');
+    await page.eval(`window.setSave('saving')`);
+    await snap('saving');
+    await page.eval(`window.setSave('retrying')`);
+    await snap('retrying');
+    await page.eval(`window.setSave('saved')`);
+    await snap('saved');
+    await page.eval(`document.querySelector('.mk-dock .mk-sent').textContent = 'Sent to #419 ✓ and a long line that goes on and on to prove it cannot push anything around'`);
+    await snap('sent line');
     await page.eval(`document.querySelector('.mk-dock .mk-sent').textContent = ''`);
     await send(page);
     await waitFor(page, 'the post', 'window.posts.length > 0');
@@ -172,7 +186,7 @@ test('a picture drawn on shows marked, counts in the dock and goes with Send; ta
   await click(page, 'img[alt="Header shot"]');
   await click(page, '.mk-viewer-draw');
   await waitFor(page, 'the marked copy', 'document.querySelector("img[alt=\\"Header shot\\"]").src.startsWith("data:")');
-  assert.deepEqual(await page.eval('window.drawn'), [new URL("/shot.png", base).href]);
+  assert.deepEqual(await page.eval('window.drawn'), [new URL('/shot.png', base).href]);
   assert.match(await page.eval<string>('document.querySelector(".mk-dock-text").textContent'), /1 picture marked/);
   await send(page);
   await waitFor(page, 'the post', 'window.posts.length > 0');
@@ -183,19 +197,19 @@ test('a picture drawn on shows marked, counts in the dock and goes with Send; ta
   await click(page, 'img[alt="Header shot"]');
   await click(page, '.mk-viewer-draw');
   await waitFor(page, 'the clean picture', 'document.querySelector("img[alt=\\"Header shot\\"]").src.endsWith("/shot.png")');
-  assert.deepEqual(await page.eval('window.drawn'), [new URL("/shot.png", base).href, new URL("/shot.png", base).href]);
+  assert.deepEqual(await page.eval('window.drawn'), [new URL('/shot.png', base).href, new URL('/shot.png', base).href]);
   assert.doesNotMatch(await page.eval<string>('document.querySelector(".mk-dock-text").textContent'), /marked/);
 });
 
 test('a click on a picture, linked to its file or not, opens a modal that closes by X, outside or Esc, and never navigates', { skip }, async () => {
-  const page = await browser.page(new URL("/modal", base).href);
+  const page = await browser.page(new URL('/modal', base).href);
   await waitFor(page, 'the page', 'window.ready');
   const open = () => page.eval<boolean>('!!document.querySelector("dialog.mk-viewer[open]")');
   const key = (k: string) => page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: k, windowsVirtualKeyCode: 27 });
   for (const alt of ['Header shot', 'Linked shot']) {
     await click(page, `img[alt="${alt}"]`);
     assert.equal(await open(), true, `${alt} opens the modal`);
-    assert.equal(await page.eval("location.pathname"), "/modal", `${alt} stays on the page`);
+    assert.equal(await page.eval('location.pathname'), '/modal', `${alt} stays on the page`);
     await click(page, '.mk-viewer-x');
     assert.equal(await open(), false, 'X closes it');
     await click(page, `img[alt="${alt}"]`);

@@ -8,7 +8,10 @@ import { systemPrompt, turnContext } from '../src/prompts.ts';
 // Budgets are characters (minion 36,400 on 2026-11-18: #975 added the finishing-work lines, AG-01; Taskmaster 39,500 on 2026-11-19: #1030 added the .env grep habit; 39,700 the same day: #1056 added the design-brief ambition line; minion 37,000 and Taskmaster 40,100 the same day: #1043 added the Shipping line both read, path, go threshold and try-first, in place of each scheme's own shipping paragraph; Taskmaster 40,800 on 2026-11-19: #1154 added the rule-to-hook trigger) (about 4 per token), today's size plus 10% on 2026-11-08, lowered by each cut since (#760; Build 2, 2026-11-17). Raising one is a
 // one-line edit here with the reason in the commit message; then refresh the baseline with
 // PROMPT_BASELINE=write node --test test/prompt-budget.test.ts
-const BUDGET = { minion: 34_900 /* +250 on 2026-11-22 for the callers-and-twins and no-multi-file-dump lines (#1644);  -1,096 on 2026-11-22: the citadel-heavy line moved to the kit's heavy-nudge hook (#1577); +450 on 2026-11-19 for the done-lines rule (#1115); +50 for the citadel-where line (#1122, Build 5); -1,750 on 2026-11-22: seven lines moved to their homes (#1574) */, taskmaster: 41_850 /* +150 on 2026-11-24 for the dated, commit-cited memory line (#1806); +200 on 2026-11-24 for the effortName line, which marks a multi-minion goal for its retro (#1751); +100 for the ship-lessons line (#1119), +300 for the rule-to-hook trigger (#1154), +400 for the ship-line ordering rule (#1358), +100 for the proven-fix clause in the Shipping line (#1398), +200 for the start-everything line (#1488) */ };
+const BUDGET = {
+  minion: 34_900 /* +250 on 2026-11-22 for the callers-and-twins and no-multi-file-dump lines (#1644);  -1,096 on 2026-11-22: the citadel-heavy line moved to the kit's heavy-nudge hook (#1577); +450 on 2026-11-19 for the done-lines rule (#1115); +50 for the citadel-where line (#1122, Build 5); -1,750 on 2026-11-22: seven lines moved to their homes (#1574) */,
+  taskmaster: 41_850 /* +150 on 2026-11-24 for the dated, commit-cited memory line (#1806); +200 on 2026-11-24 for the effortName line, which marks a multi-minion goal for its retro (#1751); +100 for the ship-lessons line (#1119), +300 for the rule-to-hook trigger (#1154), +400 for the ship-line ordering rule (#1358), +100 for the proven-fix clause in the Shipping line (#1398), +200 for the start-everything line (#1488) */,
+};
 
 // Today's longest instructions: the Citadel-wide text (11,664) and Delve's scheme text (10,123).
 const app = 'x'.repeat(11_664);
@@ -48,12 +51,15 @@ function growth(was: Record<string, number>, now: Record<string, number>): strin
 for (const role of ['minion', 'taskmaster'] as const) {
   test(`a ${role}'s starting prompt stays within its budget`, () => {
     const size = prompts[role].length;
-    assert.ok(size <= BUDGET[role], [
-      `A ${role}'s starting prompt is ${size} characters, over its budget of ${BUDGET[role]} (about ${Math.round((size - BUDGET[role]) / 4)} tokens over).`,
-      'Each 1k tokens in it costs about $27 a week. Trim it, or raise the budget in this file with the reason in the commit message.',
-      'What grew since test/prompt-baseline.json:',
-      ...growth(baseline[role], lineSizes(prompts[role])),
-    ].join('\n'));
+    assert.ok(
+      size <= BUDGET[role],
+      [
+        `A ${role}'s starting prompt is ${size} characters, over its budget of ${BUDGET[role]} (about ${Math.round((size - BUDGET[role]) / 4)} tokens over).`,
+        'Each 1k tokens in it costs about $27 a week. Trim it, or raise the budget in this file with the reason in the commit message.',
+        'What grew since test/prompt-baseline.json:',
+        ...growth(baseline[role], lineSizes(prompts[role])),
+      ].join('\n'),
+    );
   });
 }
 
@@ -93,16 +99,21 @@ test("the kit's skill and agent descriptions stay within their budget", () => {
   const kit = new URL('../kit/', import.meta.url);
   const files = [
     ...readdirSync(new URL('skills/', kit)).map((d) => new URL(`skills/${d}/SKILL.md`, kit)),
-    ...readdirSync(new URL('agents/', kit)).filter((f) => f.endsWith('.md')).map((f) => new URL(`agents/${f}`, kit)),
+    ...readdirSync(new URL('agents/', kit))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => new URL(`agents/${f}`, kit)),
   ].filter((f) => existsSync(f));
   const sizes = files.map((f) => ({ f: f.pathname.split('/kit/')[1], n: listing(f.pathname).length })).sort((a, b) => b.n - a.n);
   const total = sizes.reduce((s, x) => s + x.n, 0);
-  assert.ok(total <= KIT_BUDGET, [
-    `The kit's skill and agent descriptions are ${total} characters, over their budget of ${KIT_BUDGET} (about ${Math.round((total - KIT_BUDGET) / 4)} tokens over).`,
-    'Every minion API call re-reads them; each 1k tokens costs about $27 a week (#699: reads plus rewrites, measured by #1263). A longer description is a deliberate choice: raise KIT_BUDGET in this file with the reason in the commit message.',
-    'Longest now:',
-    ...sizes.slice(0, 5).map((x) => `  ${x.n} ${x.f}`),
-  ].join('\n'));
+  assert.ok(
+    total <= KIT_BUDGET,
+    [
+      `The kit's skill and agent descriptions are ${total} characters, over their budget of ${KIT_BUDGET} (about ${Math.round((total - KIT_BUDGET) / 4)} tokens over).`,
+      'Every minion API call re-reads them; each 1k tokens costs about $27 a week (#699: reads plus rewrites, measured by #1263). A longer description is a deliberate choice: raise KIT_BUDGET in this file with the reason in the commit message.',
+      'Longest now:',
+      ...sizes.slice(0, 5).map((x) => `  ${x.n} ${x.f}`),
+    ].join('\n'),
+  );
 });
 
 // The tool definitions loaded up front (src/mcp.ts ALWAYS_LOAD) sit in the same prefix: characters of name, description and
@@ -123,11 +134,10 @@ test("a minion's always-loaded tool definitions stay within their budget", () =>
     const added = sizes.filter((x: any) => x.name === 'plan' || x.name === 'hand_off_land').reduce((s: number, x: any) => s + x.n, 0);
     const lines = sizes.sort((a: any, b: any) => b.n - a.n).map((x: any) => `  ${x.n} ${x.name}`);
     assert.ok(added <= ADDED_BUDGET, [`plan and hand_off_land (${JSON.stringify(env)}) are ${added} characters, over the ${ADDED_BUDGET} (1k tokens) #1275 added them for. Trim them.`, ...lines].join('\n'));
-    assert.ok(total <= TOOLS_BUDGET, [
-      `A minion's always-loaded tools (${JSON.stringify(env)}) are ${total} characters, over their budget of ${TOOLS_BUDGET}.`,
-      'Every minion API call re-reads them; each 1k tokens costs about $22 a week. Trim, or raise TOOLS_BUDGET with the reason in the commit message.',
-      ...lines,
-    ].join('\n'));
+    assert.ok(
+      total <= TOOLS_BUDGET,
+      [`A minion's always-loaded tools (${JSON.stringify(env)}) are ${total} characters, over their budget of ${TOOLS_BUDGET}.`, 'Every minion API call re-reads them; each 1k tokens costs about $22 a week. Trim, or raise TOOLS_BUDGET with the reason in the commit message.', ...lines].join('\n'),
+    );
   }
 });
 

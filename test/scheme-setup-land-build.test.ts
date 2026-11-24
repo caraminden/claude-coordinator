@@ -14,8 +14,7 @@ function buildSetup(config: Record<string, string> = {}, local?: string) {
   git(q.main, 'branch', 'build/1', 'main');
   const ran = join(q.dir, 'ran');
   writeFileSync(ran, '');
-  const run = (i: number, ...args: string[]) =>
-    spawnSync('bash', [join(q.wts[i - 1], 'tools', 'land.sh'), ...args], { cwd: q.wts[i - 1], encoding: 'utf8', timeout: 90_000, env: { ...env, RAN: ran, LAND_CI_POLL: '0', LAND_CI_GRACE: '0' } });
+  const run = (i: number, ...args: string[]) => spawnSync('bash', [join(q.wts[i - 1], 'tools', 'land.sh'), ...args], { cwd: q.wts[i - 1], encoding: 'utf8', timeout: 90_000, env: { ...env, RAN: ran, LAND_CI_POLL: '0', LAND_CI_GRACE: '0' } });
   const at = (ref: string, where = q.main) => git(where, 'rev-parse', '-q', '--verify', ref);
   const has = (ref: string, where = q.main) => spawnSync('git', ['rev-parse', '-q', '--verify', ref], { cwd: where }).status === 0;
   const ranFiles = () => readFileSync(ran, 'utf8').split('\n').filter(Boolean);
@@ -81,7 +80,7 @@ test('--check --into: a conflict with the build exits 3, and one with main alone
   assert.equal(b.run(3, '--check', '--into', 'build/1', 'f3.txt').status, 0);
 });
 
-test('the guard: a plain land of a branch on the build\'s commits is refused; one off main still lands', () => {
+test("the guard: a plain land of a branch on the build's commits is refused; one off main still lands", () => {
   const b = buildSetup();
   assert.equal(b.run(1, '--into', 'build/1', 'f1.txt').status, 0);
   const main = b.at('main');
@@ -104,7 +103,7 @@ test('--into --full: refuses a build the branch lacks (merge, not rebase), then 
   const head = git(b.wts[2], 'rev-parse', 'HEAD');
   const res = b.run(3, '--into', 'build/1', '--full');
   assert.equal(res.status, 0, res.stderr);
-  assert.equal(b.at('build/1'), head, 'the build is at the build minion\'s merge, not rebased');
+  assert.equal(b.at('build/1'), head, "the build is at the build minion's merge, not rebased");
   assert.deepEqual(b.ranFiles(), ['f1.txt', 'full'], 'the full check ran, not the files');
 });
 
@@ -157,7 +156,13 @@ test('--build: main comes in by merge, the build ships through the gate, and bui
   assert.match(res.stderr, /deleted build\/1, which is on main now/);
   const tip = b.at('main');
   assert.equal(git(b.main, 'rev-list', '--parents', '-n', '1', 'main').split(' ').length, 3, 'main got a merge, not a rebase');
-  assert.deepEqual(git(b.main, 'log', '--format=%s', 'main').split('\n').filter((s) => /^(f|c)\d?/.test(s)).sort(), ['c.txt: someone else', 'f1.txt: 1', 'f3.txt: 3']);
+  assert.deepEqual(
+    git(b.main, 'log', '--format=%s', 'main')
+      .split('\n')
+      .filter((s) => /^(f|c)\d?/.test(s))
+      .sort(),
+    ['c.txt: someone else', 'f1.txt: 1', 'f3.txt: 3'],
+  );
   assert.equal(b.at('main', b.origin), tip, 'pushed');
   assert.equal(b.has('refs/heads/build/1'), false, 'deleted here');
   assert.equal(b.has('refs/heads/build/1', b.origin), false, 'and on origin');
@@ -185,7 +190,7 @@ test('--build ships a build whose commits mix "#N:" and plain titles; a plain sh
   assert.match(plain.run(1).stderr, /lost its #N: title/);
 });
 
-test('--build refuses a branch not at a build\'s tip, and one a merge of main ahead of it', () => {
+test("--build refuses a branch not at a build's tip, and one a merge of main ahead of it", () => {
   const b = buildSetup();
   const main = b.at('main');
   assert.match(b.run(3, '--build').stderr, /ticket\/3-x is not at the tip of a build branch/);
@@ -259,7 +264,7 @@ test("claims (#1159): a feeder that writes another feeder's claimed file is refu
   assert.match(b.run(3, '--build').stderr, /build-claims\.md, the build's claims, is still on ticket\/3-x and would ship to main: git rm it/);
 });
 
-test('claims (#1159): the template and Citadel\'s land.sh carry the same claims_check, so the rules tested on Citadel\'s hold here', () => {
+test("claims (#1159): the template and Citadel's land.sh carry the same claims_check, so the rules tested on Citadel's hold here", () => {
   const fn = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf8').match(/^claims_check\(\) \{\n[\s\S]*?\n\}\n/m)?.[0];
   const kit = fn('kit/skills/scheme-setup/templates/land.sh');
   assert.ok(kit);
@@ -375,9 +380,14 @@ function buildCi(config: Record<string, string>, dispatched = '') {
   const bin = join(b.dir, 'bin');
   mkdirSync(ci);
   mkdirSync(bin);
-  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *dispatches*) [ ! -e "$CI_DIR/blip" ] || { rm "$CI_DIR/blip"; echo "HTTP 502: Bad Gateway" >&2; exit 1; }; [ ! -e "$CI_DIR/refuse" ] || { echo "HTTP 422: no workflow_dispatch trigger" >&2; exit 1; }; cat "$CI_DIR/dispatched.tsv" "$CI_DIR/runs.tsv" >"$CI_DIR/r" 2>/dev/null; mv "$CI_DIR/r" "$CI_DIR/runs.tsv" ;; *head_sha=*) echo >>"$CI_DIR/reads"; [ ! -e "$CI_DIR/later.tsv" ] || [ "$(wc -l <"$CI_DIR/reads")" -lt 4 ] || mv "$CI_DIR/later.tsv" "$CI_DIR/runs.tsv"; cat "$CI_DIR/runs.tsv" 2>/dev/null ;; *skipped*) echo 0 ;; */jobs*) echo "1 1" ;; esac\nexit 0\n', { mode: 0o755 });
+  writeFileSync(
+    join(bin, 'gh'),
+    '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *dispatches*) [ ! -e "$CI_DIR/blip" ] || { rm "$CI_DIR/blip"; echo "HTTP 502: Bad Gateway" >&2; exit 1; }; [ ! -e "$CI_DIR/refuse" ] || { echo "HTTP 422: no workflow_dispatch trigger" >&2; exit 1; }; cat "$CI_DIR/dispatched.tsv" "$CI_DIR/runs.tsv" >"$CI_DIR/r" 2>/dev/null; mv "$CI_DIR/r" "$CI_DIR/runs.tsv" ;; *head_sha=*) echo >>"$CI_DIR/reads"; [ ! -e "$CI_DIR/later.tsv" ] || [ "$(wc -l <"$CI_DIR/reads")" -lt 4 ] || mv "$CI_DIR/later.tsv" "$CI_DIR/runs.tsv"; cat "$CI_DIR/runs.tsv" 2>/dev/null ;; *skipped*) echo 0 ;; */jobs*) echo "1 1" ;; esac\nexit 0\n',
+    { mode: 0o755 },
+  );
   writeFileSync(join(ci, 'dispatched.tsv'), dispatched ? `.github/workflows/${dispatched}\t7\tcompleted\t${dispatched.endsWith(' red') ? 'failure' : 'success'}\thttps://x/7\n`.replace(/ (red|green)\t/, '\t') : '');
-  const full = (more: Record<string, string> = {}) => spawnSync('bash', [join(b.wts[2], 'tools', 'land.sh'), '--into', 'build/1', '--full'], { cwd: b.wts[2], encoding: 'utf8', timeout: 90_000, env: { ...env, RAN: join(b.dir, 'ran'), CI_DIR: ci, PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', ...more } });
+  const full = (more: Record<string, string> = {}) =>
+    spawnSync('bash', [join(b.wts[2], 'tools', 'land.sh'), '--into', 'build/1', '--full'], { cwd: b.wts[2], encoding: 'utf8', timeout: 90_000, env: { ...env, RAN: join(b.dir, 'ran'), CI_DIR: ci, PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', ...more } });
   const ghLog = () => (existsSync(join(ci, 'gh.log')) ? readFileSync(join(ci, 'gh.log'), 'utf8') : '');
   return { ...b, full, ghLog };
 }
@@ -454,7 +464,7 @@ test('BUILD_WORKFLOWS: a run that started on the push is waited for, not dispatc
   assert.match(pushedRed.stderr, /waiting for CI on/);
 });
 
-test('BUILD_WORKFLOWS: <file>:<paths file> runs the workflow only when the build changes a path main\'s file names', () => {
+test("BUILD_WORKFLOWS: <file>:<paths file> runs the workflow only when the build changes a path main's file names", () => {
   const b = buildCi({ BUILD_WORKFLOWS: 'desktop.yml:tools/desktop-run/paths' }, 'desktop.yml green');
   // On main only, after the branch forked: the list is main's, not the branch's.
   b.commit(b.main, 'tools/desktop-run/paths', '# the desktop harness\n!ci-win/setup.ps1 # run by hand\nci-win/*\n.github/workflows/desktop.yml\n');

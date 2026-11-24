@@ -18,7 +18,9 @@ const root = tmp.dir;
 
 // Each turn runs the calls in plan-<ticket id>.json, then logs what came back.
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync, existsSync, readFileSync } = require('node:fs');
 require('node:readline').createInterface({ input: process.stdin }).once('line', async (prompt) => {
   const planFile = ${JSON.stringify(root)} + '/plan-' + process.env.COORDINATOR_TICKET + '.json';
@@ -36,7 +38,8 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 // The stand-in Mandate: a key ending in "off" is switched off; anything else is taken.
@@ -64,26 +67,39 @@ let peekKey = '';
 let cara = 0;
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
-const idle = (id: number) => until('the turn to end', async () => {
-  const { ticket } = (await srv.call(`/api/tickets/${id}`)).data;
-  return ticket.status !== 'running' && ticket.queued === 0;
-});
+const idle = (id: number) =>
+  until('the turn to end', async () => {
+    const { ticket } = (await srv.call(`/api/tickets/${id}`)).data;
+    return ticket.status !== 'running' && ticket.queued === 0;
+  });
 /** Cara types a message to the minion; the turn it starts runs `plan`. Returns what the calls answered. */
 async function typed(plan: object[], text = 'please') {
   writeFileSync(join(root, `plan-${minion.id}.json`), JSON.stringify(plan));
   const n = turns().length;
   assert.equal((await srv.call(`/api/tickets/${minion.id}/messages`, { text })).status, 202);
-  const t = await until('the turn', () => turns().length > n && turns().slice(n).find((t: any) => t.ticket === minion.id));
+  const t = await until(
+    'the turn',
+    () =>
+      turns().length > n &&
+      turns()
+        .slice(n)
+        .find((t: any) => t.ticket === minion.id),
+  );
   writeFileSync(join(root, `plan-${minion.id}.json`), '[]');
   await idle(minion.id);
   return t.out;
 }
 const hook = (scheme: string, body: unknown, key = mandateKey, person = cara) =>
   fetch(`${srv.base}/api/contraptions/relay/${scheme}/mandate-hook`, {
-    method: 'POST', body: JSON.stringify(body), headers: { Authorization: `Bearer ${key}`, 'X-Citadel-Person': String(person), 'Content-Type': 'application/json' },
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: { Authorization: `Bearer ${key}`, 'X-Citadel-Person': String(person), 'Content-Type': 'application/json' },
   });
-const said = async (id: number) => ((await srv.call(`/api/tickets/${id}/events?after=0`)).data as any[])
-  .map((e) => e.kind === 'user_message' && JSON.parse(e.data)).filter((d) => d && d.author === 'Mandate').map((d) => d.text);
+const said = async (id: number) =>
+  ((await srv.call(`/api/tickets/${id}/events?after=0`)).data as any[])
+    .map((e) => e.kind === 'user_message' && JSON.parse(e.data))
+    .filter((d) => d && d.author === 'Mandate')
+    .map((d) => d.text);
 
 before(async () => {
   const port = await tmp.serve(mandate);
@@ -158,21 +174,37 @@ test('an item the chat put can be cleared on any turn, for the person it was put
   // Every turn of this test with what it was sent and what its calls answered, and Mandate's last requests, on a
   // failure below. On Nov 22 a CI run had `never-put` reach Mandate, which only a turn answering Cara's typed message
   // can do; 22 forced runs here didn't show which turn that was (#1656), so the next red names it.
-  const ran = () => `turns: ${JSON.stringify(turns().slice(first).map((x: any) => ({ prompt: JSON.stringify(x.prompt).slice(-300), out: x.out })))}\nMandate saw: ${JSON.stringify(seen.slice(-6).map((x) => [x.method, x.path]))}`;
+  const ran = () =>
+    `turns: ${JSON.stringify(
+      turns()
+        .slice(first)
+        .map((x: any) => ({ prompt: JSON.stringify(x.prompt).slice(-300), out: x.out })),
+    )}\nMandate saw: ${JSON.stringify(seen.slice(-6).map((x) => [x.method, x.path]))}`;
   assert.equal(put[0].data.status, 200, ran());
   // The next turn is Mandate's own hook (no one typed it), as a GitHub message or a wake would be.
-  writeFileSync(join(root, `plan-${minion.id}.json`), JSON.stringify([{ method: 'DELETE', key: 'ci-red' }, { method: 'DELETE', key: 'never-put' }, { method: 'PUT', key: 'ci-red', body: { title: 'again' } }]));
+  writeFileSync(
+    join(root, `plan-${minion.id}.json`),
+    JSON.stringify([
+      { method: 'DELETE', key: 'ci-red' },
+      { method: 'DELETE', key: 'never-put' },
+      { method: 'PUT', key: 'ci-red', body: { title: 'again' } },
+    ]),
+  );
   const n = turns().length;
   const res = await hook(`scheme-${project.id}`, { key: `${minion.number}.ci-red`, event: 'ticked', at: '2026-11-02T08:14:00Z' });
   assert.equal(res.status, 200);
-  const t = await until('the turn', () => turns().slice(n).find((x: any) => x.ticket === minion.id));
+  const t = await until('the turn', () =>
+    turns()
+      .slice(n)
+      .find((x: any) => x.ticket === minion.id),
+  );
   writeFileSync(join(root, `plan-${minion.id}.json`), '[]');
   await idle(minion.id);
   assert.deepEqual(t.out[0], { status: 200, data: { status: 200, answer: { key: `${minion.number}.ci-red`, state: 'cleared' } } });
   const s = seen.findLast((x) => x.method === 'DELETE')!;
   assert.equal(s.path, `/apps/mandate/app-api/items/${minion.number}.ci-red`, `Mandate's last DELETE was ${s.path}\n${ran()}`);
   assert.equal(verifyIdentity(s.headers['x-citadel-identity'] as string, mandatePub, 'mandate')?.sub, cara, "cleared from Cara's Mandate");
-  assert.equal(t.out[1].status, 403, 'a key this chat never put is still the typed person\'s only');
+  assert.equal(t.out[1].status, 403, "a key this chat never put is still the typed person's only");
   assert.equal(t.out[2].status, 403, 'and so is every put');
 });
 
@@ -183,9 +215,17 @@ test("only Mandate's hook, for a person on the scheme, reaches a minion; a close
     return [res.status, (await res.json()).error];
   };
   assert.deepEqual(await status(hook(`scheme-${project.id}`, body, peekKey)), [404, 'no_route'], 'only Mandate');
-  assert.deepEqual(await status(fetch(`${srv.base}/api/contraptions/relay/scheme-${project.id}/other`, {
-    method: 'POST', body: JSON.stringify(body), headers: { Authorization: `Bearer ${mandateKey}`, 'X-Citadel-Person': String(cara), 'Content-Type': 'application/json' },
-  })), [404, 'no_route'], 'only /mandate-hook');
+  assert.deepEqual(
+    await status(
+      fetch(`${srv.base}/api/contraptions/relay/scheme-${project.id}/other`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+        headers: { Authorization: `Bearer ${mandateKey}`, 'X-Citadel-Person': String(cara), 'Content-Type': 'application/json' },
+      }),
+    ),
+    [404, 'no_route'],
+    'only /mandate-hook',
+  );
   assert.deepEqual(await status(hook('scheme-999', body)), [404, 'no_route']);
   assert.deepEqual((await status(hook(`scheme-${project.id}`, { ...body, event: 'eaten' })))[0], 400);
   assert.deepEqual((await status(hook(`scheme-${project.id}`, { ...body, key: 'no-number' })))[0], 400);
@@ -222,13 +262,15 @@ test('scheme-<number> names are kept for schemes', async () => {
 });
 
 // Which turns may post (Runner.typedBy): only one answering one person's own typed message.
-test('typedBy: a typed message is its person\'s; GitHub, relays, contraption asks and two typists are no one\'s; a typed steer counts', async () => {
+test("typedBy: a typed message is its person's; GitHub, relays, contraption asks and two typists are no one's; a typed steer counts", async () => {
   const typed = tempRoot('typed-by-');
   const dir = typed.dir;
   after(() => typed.teardown());
   // Turn n replies once release-<n> is in its folder, and exits at the end of its input.
   const hold = join(dir, 'claude-hold');
-  writeFileSync(hold, `#!${process.execPath}
+  writeFileSync(
+    hold,
+    `#!${process.execPath}
 const fs = require('node:fs');
 const n = (fs.existsSync('count') ? Number(fs.readFileSync('count', 'utf8')) : 0) + 1;
 fs.writeFileSync('count', String(n));
@@ -240,7 +282,8 @@ setInterval(() => {
   if (!replied && fs.existsSync('release-' + n)) { replied = true; console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' })); }
   if (replied && closed) process.exit(0);
 }, 20);
-`);
+`,
+  );
   chmodSync(hold, 0o755);
   const store = new Store(join(dir, 'coordinator.db'));
   const Cara = store.createUser({ name: 'Cara', login: 'cara', admin: true, server_login: true });
@@ -256,10 +299,21 @@ setInterval(() => {
   mkdirSync(cwd);
   store.setTicketDir(t.id, cwd, null);
   store.updateTicket(t.id, { person_id: Cara.id });
-  const r = new Runner(store, () => {}, () => ({}), hold);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    hold,
+  );
   r.pollMs = 10;
   r.personOf = messagePerson(store);
-  const count = () => { try { return Number(readFileSync(join(cwd, 'count'), 'utf8')); } catch { return 0; } };
+  const count = () => {
+    try {
+      return Number(readFileSync(join(cwd, 'count'), 'utf8'));
+    } catch {
+      return 0;
+    }
+  };
   const turn = (k: number) => until(`turn ${k}`, () => count() === k && r.isRunning(t.id));
   const release = (k: number) => writeFileSync(join(cwd, `release-${k}`), '');
   const idle = () => until('the end', () => !r.isRunning(t.id) && r.queued(t.id) === 0);
@@ -291,7 +345,35 @@ setInterval(() => {
   assert.equal(await during([['Cara', { typed: true }]], { steer: ['Josh', { typed: true }] }), Cara.id, "Josh can't steer into Cara's typed turn");
   assert.equal(await during([['Taskmaster', { from: tm.id }]]), null, 'a relay');
   assert.equal(await during([['Contraption Peek, for Josh', { asker: Josh.id }]]), null, "a contraption's ask");
-  assert.equal(await during([['GitHub', {}]], { queue: [['Cara', { typed: true }], ['GitHub', {}]] }), Cara.id, 'Cara typed, with GitHub in the same turn');
-  assert.equal(await during([['GitHub', {}]], { queue: [['Cara', { typed: true }], ['Josh', { typed: true }]] }), null, 'two people typed');
-  assert.equal(await during([['GitHub', {}]], { queue: [['Josh', { typed: true }], ['Rachel', { typed: true }]], steer: ['Josh', { typed: true }] }), null, 'a steer after two typists leaves it no one\'s');
+  assert.equal(
+    await during([['GitHub', {}]], {
+      queue: [
+        ['Cara', { typed: true }],
+        ['GitHub', {}],
+      ],
+    }),
+    Cara.id,
+    'Cara typed, with GitHub in the same turn',
+  );
+  assert.equal(
+    await during([['GitHub', {}]], {
+      queue: [
+        ['Cara', { typed: true }],
+        ['Josh', { typed: true }],
+      ],
+    }),
+    null,
+    'two people typed',
+  );
+  assert.equal(
+    await during([['GitHub', {}]], {
+      queue: [
+        ['Josh', { typed: true }],
+        ['Rachel', { typed: true }],
+      ],
+      steer: ['Josh', { typed: true }],
+    }),
+    null,
+    "a steer after two typists leaves it no one's",
+  );
 });

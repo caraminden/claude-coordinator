@@ -40,7 +40,11 @@ export interface Leftovers {
 export type Kind = 'procs' | 'units' | 'ports' | 'tmp';
 export const KINDS: Kind[] = ['procs', 'units', 'ports', 'tmp'];
 
-interface Proc { pid: number; ppid: number; args: string[] }
+interface Proc {
+  pid: number;
+  ppid: number;
+  args: string[];
+}
 
 function readProcs(): Proc[] {
   const uid = process.getuid!();
@@ -71,7 +75,11 @@ function listeners(): Map<string, number> {
   const out = new Map<string, number>();
   for (const f of ['/proc/net/tcp', '/proc/net/tcp6']) {
     let text = '';
-    try { text = readFileSync(f, 'utf8'); } catch { continue; }
+    try {
+      text = readFileSync(f, 'utf8');
+    } catch {
+      continue;
+    }
     for (const line of text.split('\n').slice(1)) {
       const c = line.trim().split(/\s+/);
       if (c[3] === '0A') out.set(c[9], parseInt(c[1].split(':').at(-1)!, 16));
@@ -107,10 +115,18 @@ export function leftovers(o: { self: number; id: string; dir: string }): Leftove
   if (socks.size) {
     for (const p of procs) {
       let fds: string[] = [];
-      try { fds = readdirSync(`/proc/${p.pid}/fd`); } catch { continue; }
+      try {
+        fds = readdirSync(`/proc/${p.pid}/fd`);
+      } catch {
+        continue;
+      }
       for (const fd of fds) {
         let to = '';
-        try { to = readlinkSync(`/proc/${p.pid}/fd/${fd}`); } catch { continue; }
+        try {
+          to = readlinkSync(`/proc/${p.pid}/fd/${fd}`);
+        } catch {
+          continue;
+        }
         const port = to.startsWith('socket:[') ? socks.get(to.slice(8, -1)) : undefined;
         if (port !== undefined && !ports.some(([q]) => q === port)) ports.push([port, p.pid]);
       }
@@ -118,7 +134,11 @@ export function leftovers(o: { self: number; id: string; dir: string }): Leftove
   }
   let tmp: string[] = [];
   // tools/citadel-node's link to node and its compile cache: caches it makes in any TMPDIR, gone with the folder.
-  try { tmp = readdirSync(o.dir).filter((e) => !/^citadel-node-(\d+|cache)$/.test(e)).sort(); } catch {}
+  try {
+    tmp = readdirSync(o.dir)
+      .filter((e) => !/^citadel-node-(\d+|cache)$/.test(e))
+      .sort();
+  } catch {}
   return { procs: procs.map((p) => [p.pid, p.args.join(' ')]), units, ports, tmp };
 }
 
@@ -186,14 +206,18 @@ export function judge(file: string, left: Leftovers, allowed: Partial<Record<Kin
 export function cleanUp(left: Leftovers, dir: string) {
   const units = left.units.filter((u) => /^(citadel-|run-)/.test(u));
   if (units.length) {
-    try { execFileSync('systemctl', ['--user', 'stop', ...units], { stdio: 'ignore', timeout: 15_000 }); } catch {}
+    try {
+      execFileSync('systemctl', ['--user', 'stop', ...units], { stdio: 'ignore', timeout: 15_000 });
+    } catch {}
   }
   for (const [pid] of left.procs) {
     if (units.includes(leaf(pid))) continue;
     try {
       process.kill(-pid, 'SIGKILL'); // a process may lead a group with children of its own
     } catch {
-      try { process.kill(pid, 'SIGKILL'); } catch {}
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
     }
   }
   rmSync(dir, { recursive: true, force: true }); // timing-ok: the guard's own last step, after the file's teardown
@@ -216,7 +240,8 @@ function install() {
       try {
         const left = settledLeftovers({ self: process.pid, id, dir });
         const allowed = readBaseline()[file];
-        if (allowed || KINDS.some((k) => left[k].length)) { // a baselined file that left nothing still hears to lower it
+        if (allowed || KINDS.some((k) => left[k].length)) {
+          // a baselined file that left nothing still hears to lower it
           const { fail, text } = judge(file, left, allowed);
           if (text) process.stderr.write(`\n${text}\n`);
           if (fail && !process.exitCode) process.exitCode = 1;

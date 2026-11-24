@@ -34,7 +34,8 @@ export const minionQueries = {
 
   /** A scheme's minions open now or closed since `since` (ms), each with its first message's data (its brief, if posted), for the duplicate-start check (#1488). */
   briefsSince(this: Store, projectId: number, since: number): { id: number; number: number; title: string; status: string; data: string | null }[] {
-    return this.db.prepare(`SELECT t.id, t.number, t.title, t.status,
+    return this.db
+      .prepare(`SELECT t.id, t.number, t.title, t.status,
       (SELECT data FROM events e WHERE e.ticket_id = t.id AND e.kind = 'user_message' ORDER BY e.id LIMIT 1) AS data
       FROM tickets t WHERE t.project_id = ? AND t.kind = 'ticket' AND (t.status != 'closed' OR t.closed_at >= ?) ORDER BY t.number`)
       .all(projectId, since) as { id: number; number: number; title: string; status: string; data: string | null }[];
@@ -44,9 +45,7 @@ export const minionQueries = {
   listTickets(this: Store, projectId: number): Ticket[] {
     // In a read scope (#1527) the rows are shared, not copied: copying Citadel's 1,500 rows per call cost more than the
     // read saved. Only read-only code runs in a scope; each caller still gets its own array to filter or sort.
-    return [...scoped(this.db, `tickets:${projectId}`, () => this.db
-      .prepare('SELECT * FROM tickets WHERE project_id = ? ORDER BY updated_at DESC')
-      .all(projectId) as unknown as Ticket[])];
+    return [...scoped(this.db, `tickets:${projectId}`, () => this.db.prepare('SELECT * FROM tickets WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as unknown as Ticket[])];
   },
 
   /** Open tickets whose last turn hit the usage limit, in every project. */
@@ -69,14 +68,15 @@ export const minionQueries = {
 
   /** A person's own Taskmaster in a scheme, else the Overlord (#919). */
   coordinatorFor(this: Store, projectId: number, userId: number | null): Ticket | undefined {
-    return this.db.prepare("SELECT * FROM tickets WHERE project_id = ? AND kind = 'coordinator' AND (coordinator_of = ? OR coordinator_of IS NULL) ORDER BY coordinator_of IS NULL LIMIT 1")
-      .get(projectId, userId) as unknown as Ticket | undefined;
+    return this.db.prepare("SELECT * FROM tickets WHERE project_id = ? AND kind = 'coordinator' AND (coordinator_of = ? OR coordinator_of IS NULL) ORDER BY coordinator_of IS NULL LIMIT 1").get(projectId, userId) as unknown as Ticket | undefined;
   },
 
   /** Every Taskmaster of a scheme: the owner's, the Overlord, then the others by age. */
   listCoordinators(this: Store, projectId: number): Ticket[] {
-    return this.db.prepare(`SELECT t.* FROM tickets t JOIN projects p ON p.id = t.project_id WHERE t.project_id = ? AND t.kind = 'coordinator'
-      ORDER BY t.coordinator_of IS p.owner_id DESC, t.coordinator_of IS NULL DESC, t.id`).all(projectId) as unknown as Ticket[];
+    return this.db
+      .prepare(`SELECT t.* FROM tickets t JOIN projects p ON p.id = t.project_id WHERE t.project_id = ? AND t.kind = 'coordinator'
+      ORDER BY t.coordinator_of IS p.owner_id DESC, t.coordinator_of IS NULL DESC, t.id`)
+      .all(projectId) as unknown as Ticket[];
   },
 
   /** Whether a second person has written to the scheme's Taskmaster (#919, R3): it has one per person since. */
@@ -101,8 +101,10 @@ export const minionQueries = {
       if (!first) throw new Error(`scheme ${projectId} has no Taskmaster to split`);
       const insert = (title: string, of: number | null) => {
         const now = Date.now();
-        const r = this.db.prepare(`INSERT INTO tickets (project_id, kind, number, title, status, cwd, permission_mode, created_by, created_at, updated_at, coordinator_of, person_id)
-          VALUES (?, 'coordinator', NULL, ?, 'new', ?, ?, ?, ?, ?, ?, ?)`).run(projectId, title, first.cwd, first.permission_mode, first.created_by, now, now, of, of);
+        const r = this.db
+          .prepare(`INSERT INTO tickets (project_id, kind, number, title, status, cwd, permission_mode, created_by, created_at, updated_at, coordinator_of, person_id)
+          VALUES (?, 'coordinator', NULL, ?, 'new', ?, ?, ?, ?, ?, ?, ?)`)
+          .run(projectId, title, first.cwd, first.permission_mode, first.created_by, now, now, of, of);
         return Number(r.lastInsertRowid);
       };
       if (!this.isSplit(projectId)) {
@@ -137,8 +139,7 @@ export const minionQueries = {
    * scheme; when it names someone who doesn't (taken out of it, disabled, or nobody), the scheme's owner if they
    * do; else null, as for a minion assigned to no one: everyone's. Push, the Needs-you list and minionOwner all ask this.
    */
-  minionPerson(this: Store, ticket: Pick<Ticket, 'id'> & Partial<Pick<Ticket, 'project_id'>>, key = 'assigned',
-    props: Record<string, string | number | string[]> = this.props.forTarget('minion', ticket.id), hears = (id: number, pid: number) => this.hearsScheme(id, pid)): number | null {
+  minionPerson(this: Store, ticket: Pick<Ticket, 'id'> & Partial<Pick<Ticket, 'project_id'>>, key = 'assigned', props: Record<string, string | number | string[]> = this.props.forTarget('minion', ticket.id), hears = (id: number, pid: number) => this.hearsScheme(id, pid)): number | null {
     const raw = props[key];
     if (!String(raw ?? '').trim()) return null;
     const projectId = ticket.project_id ?? this.getTicket(ticket.id)?.project_id;
@@ -169,19 +170,16 @@ export const minionQueries = {
 
   /** A person touched a minion (#919): wrote in it, answered its card, asked for it or took it. Rejoins one they left. */
   touch(this: Store, ticketId: number, userId: number) {
-    this.db.prepare('INSERT INTO ticket_touches (ticket_id, user_id, at) VALUES (?, ?, ?) ON CONFLICT (ticket_id, user_id) DO UPDATE SET left_at = NULL')
-      .run(ticketId, userId, Date.now());
+    this.db.prepare('INSERT INTO ticket_touches (ticket_id, user_id, at) VALUES (?, ?, ?) ON CONFLICT (ticket_id, user_id) DO UPDATE SET left_at = NULL').run(ticketId, userId, Date.now());
   },
 
   /** A person leaves a minion: its updates stop reaching their Taskmaster until they touch it again. */
   leaveTouched(this: Store, ticketId: number, userId: number) {
-    this.db.prepare('INSERT INTO ticket_touches (ticket_id, user_id, at, left_at) VALUES (?, ?, ?, ?) ON CONFLICT (ticket_id, user_id) DO UPDATE SET left_at = excluded.left_at')
-      .run(ticketId, userId, Date.now(), Date.now());
+    this.db.prepare('INSERT INTO ticket_touches (ticket_id, user_id, at, left_at) VALUES (?, ?, ?, ?) ON CONFLICT (ticket_id, user_id) DO UPDATE SET left_at = excluded.left_at').run(ticketId, userId, Date.now(), Date.now());
   },
 
   /** Everyone touching a minion: the recorded ones plus its requester and assignee, less those who left it or the scheme (#1449). */
-  touchedBy(this: Store, ticket: Pick<Ticket, 'id'> & Partial<Pick<Ticket, 'project_id'>>, props: Record<string, string | number | string[]> = this.props.forTarget('minion', ticket.id),
-    hears = (id: number, pid: number) => this.hearsScheme(id, pid)): number[] {
+  touchedBy(this: Store, ticket: Pick<Ticket, 'id'> & Partial<Pick<Ticket, 'project_id'>>, props: Record<string, string | number | string[]> = this.props.forTarget('minion', ticket.id), hears = (id: number, pid: number) => this.hearsScheme(id, pid)): number[] {
     const rows = scoped(this.db, `touches:${ticket.id}`, () => this.db.prepare('SELECT user_id, left_at FROM ticket_touches WHERE ticket_id = ?').all(ticket.id) as { user_id: number; left_at: number | null }[]);
     const left = new Set(rows.filter((r) => r.left_at != null).map((r) => r.user_id));
     const ids = [...rows.map((r) => r.user_id), this.personId(props.requestedBy), this.personId(props.assigned)];
@@ -196,7 +194,10 @@ export const minionQueries = {
     const rows = this.db.prepare('SELECT ticket_id, user_id, left_at FROM ticket_touches WHERE ticket_id IN (SELECT value FROM json_each(?))').all(JSON.stringify(ids)) as { ticket_id: number; user_id: number; left_at: number | null }[];
     const by = new Map<number, { user_id: number; left_at: number | null }[]>(ids.map((id) => [id, []]));
     for (const r of rows) by.get(r.ticket_id)!.push({ user_id: r.user_id, left_at: r.left_at });
-    warm(this.db, [...by].map(([id, rs]) => [`touches:${id}`, rs]));
+    warm(
+      this.db,
+      [...by].map(([id, rs]) => [`touches:${id}`, rs]),
+    );
   },
 
   /** A line for the scheme's other Taskmasters' digests (#919). Lines older than a week go. */
@@ -215,8 +216,7 @@ export const minionQueries = {
     // The bound first, so the mark can't pass a line the query below didn't see (one committed between the two reads).
     const last = (this.db.prepare('SELECT max(id) AS id FROM taskmaster_digest WHERE project_id = ?').get(t.project_id) as { id: number | null }).id;
     if (last == null || last <= since) return [];
-    const rows = this.db.prepare('SELECT id, text FROM taskmaster_digest WHERE project_id = ? AND id > ? AND id <= ? AND by_ticket != ? ORDER BY id DESC LIMIT 10')
-      .all(t.project_id, since, last, coordinatorId) as { id: number; text: string }[];
+    const rows = this.db.prepare('SELECT id, text FROM taskmaster_digest WHERE project_id = ? AND id > ? AND id <= ? AND by_ticket != ? ORDER BY id DESC LIMIT 10').all(t.project_id, since, last, coordinatorId) as { id: number; text: string }[];
     this.setSetting(key, last);
     return rows.reverse().map((r) => r.text);
   },
@@ -226,7 +226,10 @@ export const minionQueries = {
     if (!inScope(this.db) || !ids.length) return;
     const rows = this.db.prepare('SELECT * FROM tickets WHERE id IN (SELECT value FROM json_each(?))').all(JSON.stringify(ids)) as unknown as Ticket[];
     const got = new Map(rows.map((t) => [t.id, t]));
-    warm(this.db, ids.map((id) => [`ticket:${id}`, got.get(id)]));
+    warm(
+      this.db,
+      ids.map((id) => [`ticket:${id}`, got.get(id)]),
+    );
   },
 
   getTicket(this: Store, id: number): Ticket | undefined {
@@ -352,10 +355,12 @@ export const minionQueries = {
     const upTo = Math.min(atMost, (this.db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1').get() as { id: number } | undefined)?.id ?? 0);
     if (!needles.length || upTo <= afterId) return { ids: [], upTo: Math.max(upTo, afterId) };
     const like = needles.map((n) => `%${n.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-    const rows = this.db.prepare(`SELECT DISTINCT e.ticket_id AS id FROM events e JOIN tickets t ON t.id = e.ticket_id
+    const rows = this.db
+      .prepare(`SELECT DISTINCT e.ticket_id AS id FROM events e JOIN tickets t ON t.id = e.ticket_id
       WHERE e.id > ? AND e.id <= ? AND t.project_id = ? AND t.kind = 'ticket'
         AND (e.kind = 'user_message' OR (e.kind = 'claude' AND e.data LIKE '{"type":"assistant"%'))
-        AND (${like.map(() => `e.data LIKE ? ESCAPE '\\'`).join(' OR ')})`).all(Math.max(0, afterId - 500), upTo, projectId, ...like) as { id: number }[];
+        AND (${like.map(() => `e.data LIKE ? ESCAPE '\\'`).join(' OR ')})`)
+      .all(Math.max(0, afterId - 500), upTo, projectId, ...like) as { id: number }[];
     return { ids: rows.map((r) => r.id), upTo };
   },
 

@@ -39,11 +39,13 @@ async function read(path: string): Promise<{ content: string; truncated: boolean
 
 async function markdownFiles(dir: string): Promise<string[]> {
   try {
-    return (await readdir(dir, { withFileTypes: true }))
-      .filter((e) => e.isFile() && e.name.endsWith('.md'))
-      .map((e) => e.name)
-      // The index first, then the notes it points to.
-      .sort((a, b) => (a === 'MEMORY.md' ? -1 : b === 'MEMORY.md' ? 1 : a.localeCompare(b)));
+    return (
+      (await readdir(dir, { withFileTypes: true }))
+        .filter((e) => e.isFile() && e.name.endsWith('.md'))
+        .map((e) => e.name)
+        // The index first, then the notes it points to.
+        .sort((a, b) => (a === 'MEMORY.md' ? -1 : b === 'MEMORY.md' ? 1 : a.localeCompare(b)))
+    );
   } catch {
     return [];
   }
@@ -84,7 +86,10 @@ export async function instructionSources(project: Project, configDir: string, da
   const dataSlug = projectSlug(dataDir);
   let slugs: string[] = [];
   try {
-    slugs = (await readdir(join(configDir, 'projects'), { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+    slugs = (await readdir(join(configDir, 'projects'), { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
   } catch {
     // No projects folder yet.
   }

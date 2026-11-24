@@ -119,12 +119,12 @@ export class RunTokens {
     if (head?.alg !== 'RS256' || typeof head.kid !== 'string') throw bad('not signed the way GitHub signs');
     const jwk = await this.key(head.kid);
     if (!jwk && this.failed) throw new HttpError(503, `Citadel couldn't read GitHub's signing keys (${this.failed}), so it couldn't check the run token; try again in a minute`);
-    if (!jwk) throw bad('signed with a key GitHub doesn\'t list');
+    if (!jwk) throw bad("signed with a key GitHub doesn't list");
     let ok = false;
     try {
       ok = verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), createPublicKey({ key: jwk, format: 'jwk' }), Buffer.from(parts[2], 'base64url'));
     } catch {}
-    if (!ok) throw bad('the signature doesn\'t match');
+    if (!ok) throw bad("the signature doesn't match");
     const now = this.now() / 1000;
     if (claims?.iss !== ISSUER) throw bad('not issued by GitHub Actions');
     if (claims.aud !== AUDIENCE) throw bad('asked for with another audience');
@@ -295,7 +295,7 @@ export class CiStore {
   /** The job a request comes from, by its run token alone: 401 without a good one, 403 when no scheme has its repo. */
   async caller(req: Pick<IncomingMessage, 'headers'>): Promise<{ project: Project; claims: RunClaims }> {
     const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
-    if (!token) throw new HttpError(401, 'Send the job\'s GitHub run token as Authorization: Bearer');
+    if (!token) throw new HttpError(401, "Send the job's GitHub run token as Authorization: Bearer");
     const claims = await this.tokens.check(token);
     return { project: this.schemeOf(claims), claims };
   }
@@ -503,7 +503,7 @@ const gib = (bytes: number) => `${+(bytes / GIB).toFixed(1)} GiB`;
 
 /** What an upload's query asks for, checked. */
 export function uploadAsk(name: string, query: URLSearchParams): Upload {
-  if (!NAME.test(name)) throw new HttpError(400, 'A file\'s name is 1 to 150 letters, digits and . _ + -, starting with a letter or digit');
+  if (!NAME.test(name)) throw new HttpError(400, "A file's name is 1 to 150 letters, digits and . _ + -, starting with a letter or digit");
   const kind = query.get('kind') ?? '';
   if (!(KINDS as readonly string[]).includes(kind)) throw new HttpError(400, `kind must be one of ${KINDS.join(', ')}`);
   const target = query.get('target') ?? '';

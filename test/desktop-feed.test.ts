@@ -55,7 +55,10 @@ test(`it keeps the newest ${KEEP} builds and deletes the rest`, async () => {
   for (let i = 1; i <= KEEP + 2; i++) await feeds.publish({ projectId: 1, app: 'app', file: await build('b.zip', { 'A.exe': `v${i}` }) });
   const index = (await feeds.index(1, 'app'))!;
   assert.equal(index.current, KEEP + 2);
-  assert.deepEqual(index.builds.map((b) => b.build), [5, 4, 3]);
+  assert.deepEqual(
+    index.builds.map((b) => b.build),
+    [5, 4, 3],
+  );
   assert.deepEqual((await readdir(join(root, 'd2/projects/1/desktop/app'))).filter((n) => n.endsWith('.zip')).sort(), ['app-3.zip', 'app-4.zip', 'app-5.zip']);
   assert.equal(await feeds.zip(1, 'app', 'app-1.zip'), null);
 });
@@ -97,7 +100,7 @@ test('publishing a source again by hand applies a new title and names the settin
   assert.equal(again.already, true);
   assert.deepEqual(again.ignored, ['exe', 'started', 'version'], 'the build is already made: its exe, start signal and version stay');
   const index = (await feeds.index(1, 'app'))!;
-  assert.equal(index.title, 'New name', 'the title is the feed\'s, so it applies');
+  assert.equal(index.title, 'New name', "the title is the feed's, so it applies");
   assert.deepEqual([index.builds[0].exe, index.builds[0].started, index.builds[0].version], ['A.exe', 'file', '1.0']);
 });
 
@@ -115,7 +118,12 @@ test('the first-install zip holds the launcher as <app>.exe, its config and the 
   await writeFile(launcher, 'MZlauncher');
   const l = { path: launcher, version: 1, sha256: sha(Buffer.from('MZlauncher')), size: 10 };
   const zip = (await feeds.install(2, 'app', 'http://citadel.test/api/desktop/2/app/feed.json', l))!;
-  assert.deepEqual(zipNames(zip).filter((n) => !n.endsWith('/')).sort(), ['app/app.exe', 'app/launcher.json', 'app/state.json', 'app/versions/1/bin/App.exe', 'app/versions/1/bin/data.txt']);
+  assert.deepEqual(
+    zipNames(zip)
+      .filter((n) => !n.endsWith('/'))
+      .sort(),
+    ['app/app.exe', 'app/launcher.json', 'app/state.json', 'app/versions/1/bin/App.exe', 'app/versions/1/bin/data.txt'],
+  );
   const out = await mkdtemp(join(root, 'inst-'));
   execFileSync('python3', ['-I', '-m', 'zipfile', '-e', zip, out]);
   assert.deepEqual(JSON.parse(await readFile(join(out, 'app/launcher.json'), 'utf8')), { app: 'app', feed: 'http://citadel.test/api/desktop/2/app/feed.json', title: 'App' });
@@ -131,7 +139,9 @@ test('the launcher is built once per source, with its version from the source; a
   let builds = 0;
   let fail = false;
   const launchers = new Launchers({
-    src, cache: join(root, 'lcache'), dotnet: 'dotnet',
+    src,
+    cache: join(root, 'lcache'),
+    dotnet: 'dotnet',
     build: async (_d, dir, out) => {
       assert.equal(await readFile(join(dir, 'Trial.cs'), 'utf8'), '// rules', 'every source is copied into the build folder');
       builds++;
@@ -164,7 +174,10 @@ test('the launcher build copies every file Launcher.csproj compiles', async () =
 test("CI's publisher publishes a run's build once and tells the Taskmaster, waits for a missing file, and reports a failure once", async () => {
   const feeds = new DesktopFeeds(join(root, 'd6'));
   const told: string[] = [];
-  const files = new Map<number, string>([[11, await build('b.zip', { 'A.exe': 'v1' })], [12, await build('b.zip', { 'A.exe': 'x', 'B.exe': 'y' })]]);
+  const files = new Map<number, string>([
+    [11, await build('b.zip', { 'A.exe': 'v1' })],
+    [12, await build('b.zip', { 'A.exe': 'x', 'B.exe': 'y' })],
+  ]);
   let asked = 0;
   const publish = ciPublisher({ feeds, tell: (_p, t) => told.push(t), file: async (_p, run) => (asked++, files.get(run) ?? null) });
   const t = { projectId: 3, name: 'Windows', desktop: { app: 'app' } };

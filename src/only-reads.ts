@@ -16,7 +16,9 @@ export const refusals = () => count;
 export const refusal = (what: string) => (count++, new Error(`A reader thread doesn't ${what}`));
 
 export function onlyReads() {
-  const refuse = (what: string) => () => { throw refusal(what); };
+  const refuse = (what: string) => () => {
+    throw refusal(what);
+  };
   for (const n of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork'] as const) (childProcess as any)[n] = refuse(`run ${n}`);
   for (const n of ['writeFileSync', 'writeFile', 'appendFileSync', 'appendFile', 'mkdirSync', 'mkdir', 'renameSync', 'rename', 'rmSync', 'rm', 'unlinkSync', 'unlink', 'copyFileSync', 'copyFile', 'cpSync', 'cp', 'createWriteStream', 'symlinkSync', 'symlink']) (fs as any)[n] = refuse(`write files (${n})`);
   for (const n of ['writeFile', 'appendFile', 'mkdir', 'rename', 'rm', 'unlink', 'copyFile', 'cp', 'symlink'] as const) (fs.promises as any)[n] = refuse(`write files (${n})`);

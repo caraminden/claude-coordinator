@@ -3,7 +3,9 @@
 
 /** `handoffs` lists the minions whose handed-off land isn't settled yet (Landings.handoffs); `changed` re-sends a row. */
 export function serverWorkWatch(handoffs: () => number[], changed: (id: number) => void, now = () => Date.now()) {
-  let current = new Set<number>(), readAt = -Infinity, shown = new Set<number>();
+  let current = new Set<number>(),
+    readAt = -Infinity,
+    shown = new Set<number>();
   // Each row of a list asks: read the landings' folder at most once a second.
   const read = (fresh = false) => {
     if (fresh || now() - readAt > 1000) [current, readAt] = [new Set(handoffs()), now()];

@@ -52,5 +52,11 @@ test('turns count by the model they ran on, consults by turn, and escalations ap
   assert.deepEqual(n.trial, { minions: 2, turns: 3, cost: 1, consults: 3, over3: 0 });
   assert.deepEqual(n.escalated, { minions: 1, turns: 1, cost: 2, consults: 0, over3: 0 });
   assert.deepEqual(n.baseline, { minions: 1, turns: 1, cost: 0.2, consults: 0, over3: 0 });
-  assert.deepEqual(n.perMinion.map((m) => [m.id, m.consults, m.max, m.escalated]), [[advised, 2, 2, false], [moved, 1, 1, true]]);
+  assert.deepEqual(
+    n.perMinion.map((m) => [m.id, m.consults, m.max, m.escalated]),
+    [
+      [advised, 2, 2, false],
+      [moved, 1, 1, true],
+    ],
+  );
 });

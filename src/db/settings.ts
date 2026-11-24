@@ -14,7 +14,12 @@ export const settingQueries = {
       for (const k of del) drop.run(k);
       if (!nested) this.db.exec('COMMIT');
     } catch (err) {
-      if (!nested) try { this.db.exec('ROLLBACK'); } catch { /* no transaction was open */ }
+      if (!nested)
+        try {
+          this.db.exec('ROLLBACK');
+        } catch {
+          /* no transaction was open */
+        }
       throw err;
     }
   },

@@ -193,7 +193,7 @@ export function codexInput(content: ClaudeMessage['content']): CodexInput[] {
   return out;
 }
 
-const errorKind = (info: unknown): string => (typeof info === 'string' ? info : info && typeof info === 'object' ? Object.keys(info)[0] ?? '' : '');
+const errorKind = (info: unknown): string => (typeof info === 'string' ? info : info && typeof info === 'object' ? (Object.keys(info)[0] ?? '') : '');
 
 /** Claude Code's words for a usage limit, which the runner's USAGE_LIMIT wait already handles. */
 export function limitWords(limits: CodexLimits | null | undefined, now = Date.now(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): string {
@@ -268,7 +268,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
   const mode = one('--codex-mode') === 'contraption' ? 'contraption' : 'turn';
   const model = codexModelFor(one('--model'));
   // Codex's efforts stop at xhigh: Claude's max asks for the most it has.
-  const effort = one('--effort') === 'max' ? 'xhigh' : one('--effort') ?? null;
+  const effort = one('--effort') === 'max' ? 'xhigh' : (one('--effort') ?? null);
   const partial = flags.has('--include-partial-messages');
   const replay = flags.has('--replay-user-messages');
   const web = (flags.get('--tools') ?? []).join(',').includes('WebSearch') || mode === 'turn';
@@ -301,7 +301,10 @@ export async function main(argv: string[], env: Record<string, string | undefine
   const codexArgs = [
     'app-server',
     // The login stays a file (no keyring in a container); no history file; no goal tools; give up on a dead connection.
-    ...c('cli_auth_credentials_store', 'file'), ...c('history.persistence', 'none'), ...c('features.goals', false), ...c('features.unbounded_connection_retries', false),
+    ...c('cli_auth_credentials_store', 'file'),
+    ...c('history.persistence', 'none'),
+    ...c('features.goals', false),
+    ...c('features.unbounded_connection_retries', false),
     ...c('web_search', web ? 'live' : 'disabled'),
     ...(mode === 'turn'
       ? // The repo's CLAUDE.md as its project doc; the shell gets the turn's env as Claude's Bash does (GH_TOKEN included).
@@ -364,7 +367,13 @@ export async function main(argv: string[], env: Record<string, string | undefine
   };
   const startTurn = async (q: QueuedLine) => {
     busy = true;
-    const text = typeof q.content === 'string' ? q.content : (q.content ?? []).filter((b) => b?.type === 'text' && !isTurnNote(String(b.text ?? ''))).map((b) => b.text).join('\n');
+    const text =
+      typeof q.content === 'string'
+        ? q.content
+        : (q.content ?? [])
+            .filter((b) => b?.type === 'text' && !isTurnNote(String(b.text ?? '')))
+            .map((b) => b.text)
+            .join('\n');
     log(`[Message] ${text}`);
     const input = [...(preamble ? [{ type: 'text', text: preamble, text_elements: [] }] : []), ...codexInput(q.content)];
     preamble = null;
@@ -381,7 +390,15 @@ export async function main(argv: string[], env: Record<string, string | undefine
     steering++;
     try {
       await call('turn/steer', { threadId, input: codexInput(q.content), expectedTurnId: turnId });
-      log(`[Message] ${typeof q.content === 'string' ? q.content : codexInput(q.content).map((i) => i.text ?? '[image]').join('\n')}`);
+      log(
+        `[Message] ${
+          typeof q.content === 'string'
+            ? q.content
+            : codexInput(q.content)
+                .map((i) => i.text ?? '[image]')
+                .join('\n')
+        }`,
+      );
       taken(q);
     } catch {
       // The turn ended while the steer was on its way: nothing else would start the next turn.
@@ -607,7 +624,10 @@ export async function main(argv: string[], env: Record<string, string | undefine
     heard();
     await call('initialize', { clientInfo: { name: 'citadel-codex-turn', version: '1' }, capabilities: { experimentalApi: true, requestAttestation: false } });
     send({ method: 'initialized' });
-    call('account/rateLimits/read', {}).then((r) => limits(r?.rateLimits), () => {});
+    call('account/rateLimits/read', {}).then(
+      (r) => limits(r?.rateLimits),
+      () => {},
+    );
     const thread = { cwd, model, approvalPolicy: 'never', sandbox: 'danger-full-access', config: mcp.config, developerInstructions };
     const resume = one('--codex-thread');
     let fresh = !resume;

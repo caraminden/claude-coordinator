@@ -22,8 +22,7 @@ store.setSetting('wake-when-live', [1]);
 store.createMachine('box', 'MACHINEHASH', 'Cara', null);
 store.db.prepare("INSERT INTO contraptions (name, title, port, identity_public, identity_private, key_hash, keys_at, created_at) VALUES ('mandate', 'Mandate', 9100, 'PUB', 'PRIVKEY', 'KEYHASH', 1, 1)").run();
 // Every column whose name says secret, in the schema the code makes today.
-const secretish = (store.db.prepare("SELECT m.name AS t, p.name AS c FROM sqlite_schema m, pragma_table_info(m.name) p WHERE m.type = 'table'").all() as { t: string; c: string }[])
-  .filter(({ c }) => /hash|secret|private|password|nonce|p256dh|^auth$|^endpoint$|^meta$|^token$/.test(c)).map(({ t, c }) => `${t}.${c}`);
+const secretish = (store.db.prepare("SELECT m.name AS t, p.name AS c FROM sqlite_schema m, pragma_table_info(m.name) p WHERE m.type = 'table'").all() as { t: string; c: string }[]).filter(({ c }) => /hash|secret|private|password|nonce|p256dh|^auth$|^endpoint$|^meta$|^token$/.test(c)).map(({ t, c }) => `${t}.${c}`);
 store.db.close();
 
 // Stand-ins that print what they were asked.
@@ -45,11 +44,18 @@ test('the database reads as sqlite3 prints it, with every secret [hidden]', asyn
 });
 
 test('the real tables, writes, ATTACH and setting pragmas are refused', async () => {
-  for (const q of ['SELECT password_hash FROM main.users', 'SELECT * FROM main.credentials', "SELECT value FROM main.settings WHERE key = 'agent-nonce:7'",
-    'WITH x AS (SELECT * FROM main.users) SELECT * FROM x', 'SELECT (SELECT secret FROM main.credentials)', 'SELECT identity_private FROM main.contraptions',
+  for (const q of [
+    'SELECT password_hash FROM main.users',
+    'SELECT * FROM main.credentials',
+    "SELECT value FROM main.settings WHERE key = 'agent-nonce:7'",
+    'WITH x AS (SELECT * FROM main.users) SELECT * FROM x',
+    'SELECT (SELECT secret FROM main.credentials)',
+    'SELECT identity_private FROM main.contraptions',
     // A CTE named like a masking view must not pass for it (#621 review).
-    'WITH settings AS (SELECT key, value FROM main.settings) SELECT * FROM settings', 'WITH users AS (SELECT key, value FROM main.settings) SELECT * FROM users',
-  ]) assert.match(await sql(q), /prohibited|not authorized/, q);
+    'WITH settings AS (SELECT key, value FROM main.settings) SELECT * FROM settings',
+    'WITH users AS (SELECT key, value FROM main.settings) SELECT * FROM users',
+  ])
+    assert.match(await sql(q), /prohibited|not authorized/, q);
   assert.doesNotMatch(await sql("SELECT group_concat(value) FROM settings, (SELECT 1) WHERE key LIKE 'agent-nonce:%'"), /NONCE/);
   for (const q of ["ATTACH '/etc/hostname' AS x", 'DELETE FROM tickets', 'UPDATE main.users SET admin = 1', 'PRAGMA journal_mode = DELETE', 'CREATE TABLE x (a)']) {
     assert.match(await sql(q), /not authorized|readonly|view/, q);
@@ -60,15 +66,21 @@ test('the real tables, writes, ATTACH and setting pragmas are refused', async ()
 
 test('every column named like a secret is masked, so a new one fails here until it is listed', () => {
   assert.ok(secretish.length >= 10, secretish.join(' '));
-  assert.deepEqual(secretish.filter((tc) => !SECRET[tc.split('.')[0]]?.includes(tc.split('.')[1])), []);
+  assert.deepEqual(
+    secretish.filter((tc) => !SECRET[tc.split('.')[0]]?.includes(tc.split('.')[1])),
+    [],
+  );
 });
 
 test('journal, status and units run the fixed commands; bad arguments say what to send', async () => {
-  assert.equal(await hostCheck(opts, { what: 'journal', unit: 'claude-coordinator.service', lines: 5, since: '1 hour ago', grep: 'boot' }),
-    'echo-args --user --no-pager -o short-iso -n 5 -u claude-coordinator.service --since 1 hour ago -g boot');
+  assert.equal(await hostCheck(opts, { what: 'journal', unit: 'claude-coordinator.service', lines: 5, since: '1 hour ago', grep: 'boot' }), 'echo-args --user --no-pager -o short-iso -n 5 -u claude-coordinator.service --since 1 hour ago -g boot');
   assert.equal(await hostCheck(opts, { what: 'status', unit: 'claude-coordinator' }), 'echo-args --user status --no-pager --lines=20 -- claude-coordinator');
   assert.equal(await hostCheck(opts, { what: 'units', unit: 'citadel-*' }), 'echo-args --user list-units --no-pager --all --plain -- citadel-*');
   for (const body of [{ what: 'status' }, { what: 'status', unit: 'x; rm -rf /' }, { what: 'journal', lines: 0 }, { what: 'journal', since: '$(id)' }, { what: 'db', sql: '' }, { what: 'shell' }]) {
-    assert.throws(() => hostCheck(opts, body), (err: any) => err.status === 400, JSON.stringify(body));
+    assert.throws(
+      () => hostCheck(opts, body),
+      (err: any) => err.status === 400,
+      JSON.stringify(body),
+    );
   }
 });

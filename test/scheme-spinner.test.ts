@@ -10,7 +10,9 @@ import { agentToken, bootServer, until } from './helpers.ts';
 const root = mkdtempSync(join(tmpdir(), 'scheme-spinner-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 const { existsSync } = require('node:fs');
 process.stdin.resume();
 const t = setInterval(() => {
@@ -19,7 +21,8 @@ const t = setInterval(() => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 }, 20);
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 test('api/projects: a turn waiting on an approval card is not working until someone answers it', async () => {

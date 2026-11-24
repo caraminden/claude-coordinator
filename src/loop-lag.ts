@@ -16,10 +16,23 @@ const FRESH_MS = 10 * 60_000;
 /** Frames from this repo (server.ts, src/, tools/) are the ones a stall's line names. */
 const ROOT = new URL('..', import.meta.url).href;
 
-interface CallFrame { functionName: string; url: string; lineNumber: number }
-interface ProfileNode { id: number; callFrame: CallFrame; children?: number[] }
+interface CallFrame {
+  functionName: string;
+  url: string;
+  lineNumber: number;
+}
+interface ProfileNode {
+  id: number;
+  callFrame: CallFrame;
+  children?: number[];
+}
 /** The part of a V8 CPU profile read here; its times are microseconds on process.hrtime's clock. */
-export interface Profile { nodes: ProfileNode[]; startTime: number; samples: number[]; timeDeltas: number[] }
+export interface Profile {
+  nodes: ProfileNode[];
+  startTime: number;
+  samples: number[];
+  timeDeltas: number[];
+}
 
 function frameName(f: CallFrame): string {
   const where = f.url.startsWith(ROOT) ? `${f.url.slice(ROOT.length)}:${f.lineNumber + 1}` : f.url.startsWith('node:') ? f.url : '';
@@ -73,7 +86,11 @@ export function namedStacks(profiles: Profile[], from: number, to: number, top =
       total += weight;
     }
   }
-  return [...counts].sort((a, b) => b[1] - a[1]).slice(0, top).map(([key, n]) => `${Math.round((100 * n) / total)}% ${key}`).join('; ');
+  return [...counts]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, top)
+    .map(([key, n]) => `${Math.round((100 * n) / total)}% ${key}`)
+    .join('; ');
 }
 
 /** Microseconds the box has spent with every task stalled on disk I/O since boot (Linux PSI), or null where it can't say. */
@@ -144,12 +161,16 @@ function clockParts(ms: number): { time: string; zone: string } {
 }
 /** "02:23:05 to 02:23:18 PST", the stall's own start and end, measured when it was detected (not when the line was written). */
 export function stallSpan(startMs: number, endMs: number): string {
-  const a = clockParts(startMs), b = clockParts(endMs);
+  const a = clockParts(startMs),
+    b = clockParts(endMs);
   return a.zone === b.zone ? `${a.time} to ${b.time} ${b.zone}` : `${a.time} ${a.zone} to ${b.time} ${b.zone}`;
 }
 
 /** One look at the held thread: its kernel state letter (R, S, D...) and what it waits on in the kernel ("" or "0" when nothing). */
-export interface WaitSample { state: string; wchan: string }
+export interface WaitSample {
+  state: string;
+  wchan: string;
+}
 /** "D folio_wait_bit_common ×7, S futex_wait_queue ×2", commonest first; empty with no samples. */
 export function summarizeWaits(samples: WaitSample[]): string {
   const count = new Map<string, number>();
@@ -157,10 +178,15 @@ export function summarizeWaits(samples: WaitSample[]): string {
     const w = s.wchan && s.wchan !== '0' ? ` ${s.wchan}` : '';
     count.set(`${s.state}${w}`, (count.get(`${s.state}${w}`) ?? 0) + 1);
   }
-  return [...count].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${k} ×${n}`).join(', ');
+  return [...count]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([k, n]) => `${k} ×${n}`)
+    .join(', ');
 }
 
-const SLOTS = 64, SLOT_BYTES = 40;
+const SLOTS = 64,
+  SLOT_BYTES = 40;
 /** The worker's code: while the main thread's heartbeat is older than `over` ms it samples that thread's state and wchan from /proc into the shared slots. */
 const WAIT_WORKER = `
 const { workerData } = require('node:worker_threads');
@@ -191,12 +217,18 @@ setInterval(() => {
 export function startWaitSampler(over: number): { drain(): WaitSample[]; beat(): void; stop(): void } | null {
   if (process.platform !== 'linux') return null;
   try {
-    const hb = new SharedArrayBuffer(8), slots = new SharedArrayBuffer(SLOTS * SLOT_BYTES), count = new SharedArrayBuffer(4);
-    const beatAt = new Float64Array(hb), n = new Int32Array(count), bytes = new Uint8Array(slots);
+    const hb = new SharedArrayBuffer(8),
+      slots = new SharedArrayBuffer(SLOTS * SLOT_BYTES),
+      count = new SharedArrayBuffer(4);
+    const beatAt = new Float64Array(hb),
+      n = new Int32Array(count),
+      bytes = new Uint8Array(slots);
     const worker = new Worker(WAIT_WORKER, { eval: true, workerData: { over, pid: process.pid, hb, slots, count, slotBytes: SLOT_BYTES, max: SLOTS } });
     worker.on('error', () => {});
     worker.unref();
-    const beat = () => { beatAt[0] = Number(process.hrtime.bigint() / 1000000n); };
+    const beat = () => {
+      beatAt[0] = Number(process.hrtime.bigint() / 1000000n);
+    };
     beat();
     return {
       beat,
@@ -211,7 +243,9 @@ export function startWaitSampler(over: number): { drain(): WaitSample[]; beat():
         Atomics.store(n, 0, 0);
         return out;
       },
-      stop() { void worker.terminate(); },
+      stop() {
+        void worker.terminate();
+      },
     };
   } catch {
     return null;
@@ -235,14 +269,17 @@ export function stallCause(a: Reading, b: Reading, wallMs: number): { cause: Cau
   const wallUs = wallMs * 1000;
   const cpuUs = b.cpuUs - a.cpuUs;
   const wait = (x: number | null, y: number | null) => (x != null && y != null ? y - x : null);
-  const mem = wait(a.memWaitUs, b.memWaitUs), io = wait(a.ioWaitUs, b.ioWaitUs), cpuWait = wait(a.cpuWaitUs, b.cpuWaitUs);
+  const mem = wait(a.memWaitUs, b.memWaitUs),
+    io = wait(a.ioWaitUs, b.ioWaitUs),
+    cpuWait = wait(a.cpuWaitUs, b.cpuWaitUs);
   const s = (us: number | null) => (us == null ? '?' : (us / 1e6).toFixed(1));
   let cause: Cause = 'unclear';
   if (mem != null && mem >= WAIT_SHARE * wallUs) cause = 'waited for memory';
   else if (io != null && io >= WAIT_SHARE * wallUs) cause = 'waited for disk';
   else if (cpuUs >= OWN_SHARE * wallUs) cause = 'own work';
   else if (cpuWait != null && cpuWait >= WAIT_SHARE * wallUs) cause = 'waited for CPU';
-  const text = `${s(cpuUs)} s on CPU of ${(wallMs / 1000).toFixed(1)} s; waited ${s(cpuWait)} s for CPU, ${s(io)} s for disk, ${s(mem)} s for memory; ` +
+  const text =
+    `${s(cpuUs)} s on CPU of ${(wallMs / 1000).toFixed(1)} s; waited ${s(cpuWait)} s for CPU, ${s(io)} s for disk, ${s(mem)} s for memory; ` +
     `${b.majorFaults - a.majorFaults} major faults, ${b.voluntarySwitches - a.voluntarySwitches} voluntary and ${b.involuntarySwitches - a.involuntarySwitches} involuntary switches`;
   return { cause, text };
 }
@@ -260,7 +297,15 @@ export async function openersOf(files: string[]): Promise<string[]> {
       const to = await readlink(`/proc/${pid}/fd/${fd}`).catch(() => '');
       if (!files.some((f) => to.startsWith(f))) continue;
       const args = (await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '')).split('\0');
-      out.push([pid, ...args.slice(0, 2).filter(Boolean).map((a) => basename(a))].join(' '));
+      out.push(
+        [
+          pid,
+          ...args
+            .slice(0, 2)
+            .filter(Boolean)
+            .map((a) => basename(a)),
+        ].join(' '),
+      );
       break;
     }
   }
@@ -334,7 +379,10 @@ class Sampler {
       try {
         const old = this.title;
         this.title = `loop-lag-${++this.count}`;
-        this.timed(() => { console.profile(this.title); console.profileEnd(old); });
+        this.timed(() => {
+          console.profile(this.title);
+          console.profileEnd(old);
+        });
         const profile = this.finished.get(old) ?? null;
         this.finished.delete(old);
         if (!profile) throw new Error('V8 gave no profile');
@@ -393,7 +441,7 @@ export function watchLoopLag(log: (text: string) => void = console.warn, every =
     const to = Number(now / 1000n);
     // A stall that is the recorder's own work (its start or a roll) gets its line but no take of its own.
     const own = !!sampler && mostlyRecorder(sampler.spans, from, to);
-    void Promise.all([own ? [] : sampler?.take() ?? [], held >= 2000 && files.length ? openersOf(files) : []]).then(([ps, who]) => {
+    void Promise.all([own ? [] : (sampler?.take() ?? []), held >= 2000 && files.length ? openersOf(files) : []]).then(([ps, who]) => {
       const ran = namedStacks(ps, from, to);
       const inWork = own ? `mostly the freeze recorder's own roll (src/loop-lag.ts)` : namedStacks(ps, from, to, 3, true);
       log(`${line}${inWork ? ` In: ${inWork}.` : ''}${ran ? ` Running: ${ran}` : ''}${disk}${who.length ? ` Also open on the database: ${who.join('; ')}.` : ''}`);

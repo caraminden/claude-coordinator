@@ -45,7 +45,9 @@ test('on a real runner the timer delivers, a wake due mid-turn waits behind the 
   const { Runner } = await import('../src/runner.ts');
   const { chmodSync, writeFileSync } = await import('node:fs');
   const fake = join(root, 'claude-fake');
-  writeFileSync(fake, `#!${process.execPath}
+  writeFileSync(
+    fake,
+    `#!${process.execPath}
 const release = ${JSON.stringify(join(root, 'release'))};
 require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
   // The turn runs until the test releases it, so "mid-turn" doesn't depend on how long anything takes.
@@ -55,9 +57,15 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
     process.exit(0);
   }, 20);
 });
-`);
+`,
+  );
   chmodSync(fake, 0o755);
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   let queued = false; // the outbox handed the due wake to the minion's lane
   const onLane = runner.onLane.bind(runner);
   runner.onLane = ((ticket: number, name: string, step: () => Promise<unknown>) => ((queued = queued || name === 'outbox'), onLane(ticket, name, step))) as typeof runner.onLane;
@@ -80,7 +88,10 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   await until('the wake to be sent', async () => store.getDelivery(w.id)!.state === 'sent');
   await until('the turn to stop', async () => !runner.isRunning(id));
   outbox.stop();
-  const said = store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data).text);
+  const said = store
+    .listEvents(id)
+    .filter((e) => e.kind === 'user_message')
+    .map((e) => JSON.parse(e.data).text);
   assert.equal(said.length, 2);
   assert.match(said[1], /mid-turn wake/);
   assert.match(said[1], new RegExp(`\\(delivery #${w.id}\\)`));

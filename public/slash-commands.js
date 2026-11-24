@@ -30,7 +30,9 @@ export function matchCommands(list, query) {
     if (n.includes(':') && n.split(':')[1].startsWith(q)) return 1;
     return n.includes(q) ? 2 : -1;
   };
-  return list.map((c) => ({ c, r: rank(c.name) })).filter(({ r }) => r >= 0)
+  return list
+    .map((c) => ({ c, r: rank(c.name) }))
+    .filter(({ r }) => r >= 0)
     .sort((a, b) => a.r - b.r || (b.c.citadel ? 1 : 0) - (a.c.citadel ? 1 : 0) || a.c.name.localeCompare(b.c.name))
     .map(({ c }) => c);
 }

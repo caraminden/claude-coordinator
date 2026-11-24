@@ -26,18 +26,21 @@ test('arguments: defaults, the front door, and refusals', () => {
 });
 
 test('steps: one a line, comments skipped, type splits at " | "', () => {
-  assert.deepEqual(parseSteps(`
+  assert.deepEqual(
+    parseSteps(`
     # send a message
     type .composer textarea | Looks good | build it
     key Enter
     wait .msg:last-child
     shot sent
-  `), [
-    { verb: 'type', arg: '.composer textarea', text: 'Looks good | build it' },
-    { verb: 'key', arg: 'Enter' },
-    { verb: 'wait', arg: '.msg:last-child' },
-    { verb: 'shot', arg: 'sent' },
-  ]);
+  `),
+    [
+      { verb: 'type', arg: '.composer textarea', text: 'Looks good | build it' },
+      { verb: 'key', arg: 'Enter' },
+      { verb: 'wait', arg: '.msg:last-child' },
+      { verb: 'shot', arg: 'sent' },
+    ],
+  );
   // fill and wait take text the same way; a bare trailing | is an empty fill, and wait's text is optional.
   assert.deepEqual(parseSteps('fill #name |\nwait .toast | Saved | done\nwait .toast\nhover .tip'), [
     { verb: 'fill', arg: '#name', text: '' },
@@ -112,7 +115,13 @@ test('env(titlebar-area-*) becomes the strip, fallbacks and all', () => {
 test("--widths and --themes default to the turn's scheme's from the env, and a flag still wins (#1044)", () => {
   const env = { COORDINATOR_SHOT_WIDTHS: '1024,390', COORDINATOR_SHOT_THEMES: 'light,dark' };
   const o = parseArgs([], env);
-  assert.deepEqual([o.widths, o.themes], [[1024, 390], ['light', 'dark']]);
+  assert.deepEqual(
+    [o.widths, o.themes],
+    [
+      [1024, 390],
+      ['light', 'dark'],
+    ],
+  );
   assert.deepEqual(parseArgs(['--widths', '768'], env).widths, [768]);
   assert.deepEqual(parseArgs([], { COORDINATOR_SHOT_WIDTHS: 'x' }).widths, [1440, 390]);
   assert.deepEqual(parseArgs([], {}).themes, ['light']);

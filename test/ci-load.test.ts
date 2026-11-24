@@ -27,8 +27,21 @@ const names = [PC, `${PC}-2`, `${PC}-3`, `${PC}-4`];
 function sample(msAgo: number, fields: Partial<Sample> = {}): Sample {
   const cpu = fields.cpu ?? 30;
   return {
-    at: NOW - msAgo, host: PC, os: 'windows', cores: 32, cpu, mem_total: 192e9, mem_free: 150e9, disk_total: 2e12, disk_free: 1e12, queue: 0, pressure: null,
-    idle_sec: 10, temp: null, hv: null, restarts: [],
+    at: NOW - msAgo,
+    host: PC,
+    os: 'windows',
+    cores: 32,
+    cpu,
+    mem_total: 192e9,
+    mem_free: 150e9,
+    disk_total: 2e12,
+    disk_free: 1e12,
+    queue: 0,
+    pressure: null,
+    idle_sec: 10,
+    temp: null,
+    hv: null,
+    restarts: [],
     runners: names.map((name) => ({ name, repo: PEEK, dir: `C:\\actions-runner-peek-auras-${name}`, cpu: cpu / 5, mem: 2e9 })),
     ...fields,
   };
@@ -44,10 +57,17 @@ const running = (runner: string) => job({ status: 'in_progress', runner, created
 const queued = (msAgo: number) => job({ status: 'queued', runner: '', created: NOW - msAgo, started: NaN, ended: NaN });
 const full = () => names.map(running);
 
-test('a pool is a repo\'s runners with the same labels: its runners, who is busy, what waits, and the day\'s waits', () => {
-  const jobs = [...full(), queued(14 * MIN), queued(3 * MIN), job({ started: NOW - 60 * MIN + 6 * MIN }), job(),
+test("a pool is a repo's runners with the same labels: its runners, who is busy, what waits, and the day's waits", () => {
+  const jobs = [
+    ...full(),
+    queued(14 * MIN),
+    queued(3 * MIN),
+    job({ started: NOW - 60 * MIN + 6 * MIN }),
+    job(),
     // Peek's test-box runner is another PC's (a VM), and a hosted job is nobody's.
-    job({ runner: 'CITADEL-BOX-desktop', labels: 'peek-auras-desktop' }), job({ runner: 'GitHub Actions 12', labels: 'ubuntu-latest' })];
+    job({ runner: 'CITADEL-BOX-desktop', labels: 'peek-auras-desktop' }),
+    job({ runner: 'GitHub Actions 12', labels: 'ubuntu-latest' }),
+  ];
   const [p, ...rest] = pools(PC, jobs, window(), projects, NOW);
   assert.deepEqual(rest, []);
   assert.deepEqual({ title: p.title, project: p.project, labels: p.labels, runners: p.runners, busy: p.busy, waiting: p.waiting }, { title: 'Peek Auras', project: 7, labels: 'peek-auras-ci', runners: names, busy: 4, waiting: 2 });
@@ -59,26 +79,51 @@ test('a pool is a repo\'s runners with the same labels: its runners, who is busy
   assert.deepEqual(pools(PC, jobs, [], projects, NOW)[0].runners, names);
   // Two repos' runners can share a name (each scheme's first is the PC's): each stays in its own pool, with its own CPU.
   const VAULT = 'caraminden/vault';
-  const shared = window({ runners: [{ name: PC, repo: PEEK, dir: 'C:\\a', cpu: 20, mem: 1 }, { name: PC, repo: VAULT, dir: 'C:\\b', cpu: 3, mem: 1 }] });
+  const shared = window({
+    runners: [
+      { name: PC, repo: PEEK, dir: 'C:\\a', cpu: 20, mem: 1 },
+      { name: PC, repo: VAULT, dir: 'C:\\b', cpu: 3, mem: 1 },
+    ],
+  });
   const two = pools(PC, [running(PC), job({ repo: VAULT, labels: 'vault-ci' }), job({ repo: VAULT, labels: 'vault-ci', status: 'queued', runner: '', created: NOW - 5 * MIN, started: NaN, ended: NaN })], shared, projects, NOW);
-  assert.deepEqual(two.map((x) => [x.repo, x.runners, x.busy, x.waiting, x.cpu]), [[VAULT, [PC], 0, 1, 3], [PEEK, [PC], 1, 0, 20]]);
+  assert.deepEqual(
+    two.map((x) => [x.repo, x.runners, x.busy, x.waiting, x.cpu]),
+    [
+      [VAULT, [PC], 0, 1, 3],
+      [PEEK, [PC], 1, 0, 20],
+    ],
+  );
   // A runner the agent saw that has run nothing yet stands under its repo.
   const idle = sample(0, { runners: [{ name: `${PC}-linux`, repo: 'caraminden/claude-coordinator', dir: '/opt/actions-runner', cpu: 0, mem: 1 }] });
-  assert.deepEqual(pools(PC, [], [idle], projects, NOW).map((x) => [x.title, x.runners]), [['caraminden/claude-coordinator', [`${PC}-linux`]]]);
+  assert.deepEqual(
+    pools(PC, [], [idle], projects, NOW).map((x) => [x.title, x.runners]),
+    [['caraminden/claude-coordinator', [`${PC}-linux`]]],
+  );
 });
 
-test('a runner that takes two pools\' jobs (a side label, #1240) is in both pools, so neither pool drops out', () => {
+test("a runner that takes two pools' jobs (a side label, #1240) is in both pools, so neither pool drops out", () => {
   const CC = 'caraminden/claude-coordinator';
   const side = `${PC}-linux-2`;
-  const got = pools(PC, [job({ repo: CC, runner: `${PC}-linux`, labels: 'citadel-ci-linux' }), job({ repo: CC, runner: side, labels: 'citadel-ci-linux' }),
-    job({ repo: CC, runner: side, labels: 'citadel-ci-linux,citadel-ci-linux-side', status: 'in_progress', created: NOW - MIN, started: NOW - MIN, ended: NaN })], [], projects, NOW);
-  assert.deepEqual(got.map((x) => [x.labels, x.runners, x.busy]), [['citadel-ci-linux', [`${PC}-linux`, side], 0], ['citadel-ci-linux,citadel-ci-linux-side', [side], 1]]);
+  const got = pools(
+    PC,
+    [job({ repo: CC, runner: `${PC}-linux`, labels: 'citadel-ci-linux' }), job({ repo: CC, runner: side, labels: 'citadel-ci-linux' }), job({ repo: CC, runner: side, labels: 'citadel-ci-linux,citadel-ci-linux-side', status: 'in_progress', created: NOW - MIN, started: NOW - MIN, ended: NaN })],
+    [],
+    projects,
+    NOW,
+  );
+  assert.deepEqual(
+    got.map((x) => [x.labels, x.runners, x.busy]),
+    [
+      ['citadel-ci-linux', [`${PC}-linux`, side], 0],
+      ['citadel-ci-linux,citadel-ci-linux-side', [side], 1],
+    ],
+  );
 });
 
 test('the rule: fine, could do more, full, overloading, and no samples', () => {
   const v = (samples: Sample[], jobs: LoadJob[]) => verdict(samples, pools(PC, jobs, samples, projects, NOW), jobs, NOW);
   assert.match(v(window(), full()).text, /^Fine: CPU averaged 30% over the last 15 min, nothing is waiting\.$/);
-  assert.equal(v(window(), [...full(), queued(MIN)]).kind, 'fine', 'a job that has waited a minute isn\'t stuck yet');
+  assert.equal(v(window(), [...full(), queued(MIN)]).kind, 'fine', "a job that has waited a minute isn't stuck yet");
 
   const more = v(window({ cpu: 35 }), [...full(), queued(14 * MIN), queued(3 * MIN)]);
   assert.equal(more.kind, 'more');
@@ -94,7 +139,7 @@ test('the rule: fine, could do more, full, overloading, and no samples', () => {
   const over = v(window({ cpu: 95 }), full());
   assert.equal(over.kind, 'over');
   assert.equal(over.text, 'Overloading: CPU was at 90% or more for 15 min of the last 15 min with someone at the PC. Peek Auras uses the most (76% of the PC): take a runner from it.');
-  assert.equal(v(window({ cpu: 95, idle_sec: null }), full()).kind, 'over', 'an agent that can\'t tell assumes someone is there');
+  assert.equal(v(window({ cpu: 95, idle_sec: null }), full()).kind, 'over', "an agent that can't tell assumes someone is there");
   const some = [...window({ cpu: 95 }).slice(0, 12), ...window().slice(12)];
   assert.equal(v(some, full()).kind, 'fine', '6 of 15 minutes is a burst, not overload');
   // Hyper-V's count is the true one: the host's own leaves its guests out.
@@ -116,7 +161,7 @@ test('a hard restart with CI jobs running is "crashed under load" for a day, and
   const jobs = [...killed, ...full(), queued(14 * MIN)];
   const got = verdict(samples, pools(PC, jobs, samples, projects, NOW), jobs, NOW);
   assert.equal(got.kind, 'crash');
-  assert.equal(got.text, 'Crashed under load: the PC restarted without a clean shutdown at about Nov 11, 05:29 PST, with 4 CI jobs running (Peek Auras). Add no runners until that\'s explained.');
+  assert.equal(got.text, "Crashed under load: the PC restarted without a clean shutdown at about Nov 11, 05:29 PST, with 4 CI jobs running (Peek Auras). Add no runners until that's explained.");
   // The same restart with nothing running isn't CI's: the queue rule speaks.
   const quiet = [...full(), queued(14 * MIN)];
   assert.equal(verdict(samples, pools(PC, quiet, samples, projects, NOW), quiet, NOW).kind, 'more');
@@ -125,7 +170,7 @@ test('a hard restart with CI jobs running is "crashed under load" for a day, and
   assert.equal(verdict(later, pools(PC, jobs, later, projects, NOW), jobs, NOW).kind, 'more');
 });
 
-test('a PC\'s view: now with WSL\'s and the VM\'s shares, 24 hours in 5-minute steps, restarts, and who may see it', () => {
+test("a PC's view: now with WSL's and the VM's shares, 24 hours in 5-minute steps, restarts, and who may see it", () => {
   const wsl: Sample = { ...sample(0, { cpu: 50, os: 'linux', cores: 16 }), runners: [{ name: `${PC}-linux`, repo: 'caraminden/claude-coordinator', dir: '/opt/r', cpu: 40, mem: 1e9 }] };
   const samples = [...window({ cpu: 40, hv: { total: 62, vms: { 'citadel-test-box': 256 } }, temp: 71.5, restarts: [NOW - 30 * MIN] }), wsl];
   const view = pcView(PC, samples, [...full(), queued(4 * MIN)], projects, NOW);
@@ -133,7 +178,7 @@ test('a PC\'s view: now with WSL\'s and the VM\'s shares, 24 hours in 5-minute s
   assert.equal(view.now!.cpu, 62);
   assert.equal(view.now!.wsl, 25, 'half of 16 cores is a quarter of 32');
   assert.deepEqual(view.now!.vms, { 'citadel-test-box': 8 });
-  assert.equal(view.now!.runners, 52, 'four Windows runners at 8% each, and WSL\'s at 40% of half the cores');
+  assert.equal(view.now!.runners, 52, "four Windows runners at 8% each, and WSL's at 40% of half the cores");
   assert.equal(view.now!.temp, 71.5);
   assert.deepEqual(view.restarts, [NOW - 30 * MIN]);
   assert.equal(view.series.length, 288);
@@ -145,20 +190,32 @@ test('a PC\'s view: now with WSL\'s and the VM\'s shares, 24 hours in 5-minute s
   assert.equal(pcView(PC, [wsl], [], projects, NOW).now!.cpu, 50);
 });
 
-test('a sample is checked field by field and stamped with the server\'s clock', () => {
+test("a sample is checked field by field and stamped with the server's clock", () => {
   const raw = { ...sample(0), at: 5, restarts: ['2026-11-11T13:34:00.0000000Z', 'soon', '2999-01-01T00:00:00Z'], extra: 'dropped' };
   const s = cleanSample(raw, NOW);
   assert.equal(s.at, NOW);
   assert.deepEqual(s.restarts, [Date.parse('2026-11-11T13:34:00Z')]);
   assert.equal('extra' in s, false);
   assert.equal(cleanSample({ ...raw, host: 'a\nb', queue: undefined, hv: { total: 50, vms: { box: 120 } } }, NOW).host, 'ab');
-  for (const bad of [null, [], { ...raw, os: 'mac' }, { ...raw, cpu: 101 }, { ...raw, cpu: '5' }, { ...raw, cores: 0 }, { ...raw, host: '' }, { ...raw, mem_free: NaN },
-    { ...raw, runners: 'all' }, { ...raw, runners: Array(65).fill(raw.runners[0]) }, { ...raw, runners: [{ name: 'x', cpu: -1, mem: 0 }] }, { ...raw, hv: { total: 500 } }]) {
+  for (const bad of [
+    null,
+    [],
+    { ...raw, os: 'mac' },
+    { ...raw, cpu: 101 },
+    { ...raw, cpu: '5' },
+    { ...raw, cores: 0 },
+    { ...raw, host: '' },
+    { ...raw, mem_free: NaN },
+    { ...raw, runners: 'all' },
+    { ...raw, runners: Array(65).fill(raw.runners[0]) },
+    { ...raw, runners: [{ name: 'x', cpu: -1, mem: 0 }] },
+    { ...raw, hv: { total: 500 } },
+  ]) {
     assert.throws(() => cleanSample(bad, NOW), /must be|is required|is an object/, JSON.stringify(bad)?.slice(0, 80));
   }
 });
 
-test('GitHub\'s job becomes a job with times: one that never got a runner has no start', () => {
+test("GitHub's job becomes a job with times: one that never got a runner has no start", () => {
   const gh: Job = { id: 1, run_id: 1, name: 'bench', status: 'queued', conclusion: null, created_at: '2026-11-11T13:52:28Z', started_at: '2026-11-11T13:52:28Z', completed_at: null, runner_name: null, labels: ['self-hosted', 'peek-auras-ci'] };
   const j = loadJob(PEEK, gh);
   assert.deepEqual([j.labels, j.runner, Number.isNaN(j.started), Number.isNaN(j.ended)], ['peek-auras-ci', '', true, true]);
@@ -180,33 +237,44 @@ test('a verdict that holds for 30 minutes is one quiet Mandate item per admin, c
   const load = new CiLoad(store, {
     jobs: () => [{ project: store.getProject(project.id)!, jobs: ghJobs }],
     hosts: () => [PC],
-    mandate: async (p, u, key, title) => { if (!down) sent.push([`${p.name}/${u.name}/${key}`, title]); return !down; },
+    mandate: async (p, u, key, title) => {
+      if (!down) sent.push([`${p.name}/${u.name}/${key}`, title]);
+      return !down;
+    },
   });
   const iso = (t: number) => new Date(t).toISOString();
   const gh = (j: LoadJob, i: number): Job => ({ id: i, run_id: 1, name: j.name, status: j.status, conclusion: null, created_at: iso(j.created), started_at: iso(Number.isNaN(j.started) ? j.created : j.started), completed_at: null, runner_name: j.runner || null, labels: ['self-hosted', j.labels] });
   let now = NOW;
-  const feed = () => { for (let i = 29; i >= 0; i--) load.add(machine.id, sample(0, { cpu: 35 }), now - i * 30_000); };
-  const stuck = () => { ghJobs = [...names.map((runner) => job({ status: 'in_progress', runner, created: now - 10 * MIN, started: now - 10 * MIN, ended: NaN })), job({ status: 'queued', runner: '', created: now - 14 * MIN, started: NaN, ended: NaN })].map(gh); };
+  const feed = () => {
+    for (let i = 29; i >= 0; i--) load.add(machine.id, sample(0, { cpu: 35 }), now - i * 30_000);
+  };
+  const stuck = () => {
+    ghJobs = [...names.map((runner) => job({ status: 'in_progress', runner, created: now - 10 * MIN, started: now - 10 * MIN, ended: NaN })), job({ status: 'queued', runner: '', created: now - 14 * MIN, started: NaN, ended: NaN })].map(gh);
+  };
 
   store.addRunnerLoad(machine.id, NOW - KEEP_MS - MIN, JSON.stringify(sample(0)));
-  feed(); stuck();
+  feed();
+  stuck();
   await load.tick(now);
   assert.equal(store.runnerLoadSince(0)[0].at, NOW - 29 * 30_000, 'the 14-day-old sample is gone');
   assert.equal(load.views(now)[0].verdict.kind, 'more');
   assert.deepEqual(sent, [], 'not yet: it has only just started');
   now += TELL_AFTER_MS;
-  feed(); stuck();
+  feed();
+  stuck();
   await load.tick(now);
   assert.equal(sent.length, 1);
   assert.equal(sent[0][0], 'Peek Auras/Cara/ciload.desktop-g248ij8');
   assert.match(sent[0][1]!, /^CI desktop DESKTOP-G248IJ8: Could do more: 1 Peek Auras job waited up to 14 min/);
   now += 5 * MIN;
-  feed(); stuck();
+  feed();
+  stuck();
   await load.tick(now);
   assert.equal(sent.length, 1, 'said once while it holds');
   now += 5 * MIN;
   // Mandate is away as the verdict ends: the item is taken back on a later look, not left there.
-  feed(); ghJobs = [];
+  feed();
+  ghJobs = [];
   down = true;
   await load.tick(now);
   assert.equal(sent.length, 1);
@@ -225,13 +293,28 @@ test('views keep up with samples as they come in, and drop a deleted machine and
   const lab = store.createMachine('lab', '', 'Cara');
   const DAY = 24 * 60 * MIN;
   load.add(desk.id, sample(0, { host: 'DESK' }), NOW - DAY + MIN);
-  assert.deepEqual(load.views(NOW).map((v) => v.host), ['DESK'], 'read from the database once');
+  assert.deepEqual(
+    load.views(NOW).map((v) => v.host),
+    ['DESK'],
+    'read from the database once',
+  );
   load.add(lab.id, sample(0, { host: 'LAB' }), NOW + 1);
-  assert.deepEqual(load.views(NOW + 1).map((v) => v.host), ['DESK', 'LAB'], 'a sample after the first read shows');
+  assert.deepEqual(
+    load.views(NOW + 1).map((v) => v.host),
+    ['DESK', 'LAB'],
+    'a sample after the first read shows',
+  );
   store.deleteMachine(lab.id); // as DELETE /api/machines/:machine does
   load.forget(lab.id);
-  assert.deepEqual(load.views(NOW + 2).map((v) => v.host), ['DESK']);
-  assert.deepEqual(load.views(NOW + 2 * MIN).map((v) => v.host), [], 'over a day old');
+  assert.deepEqual(
+    load.views(NOW + 2).map((v) => v.host),
+    ['DESK'],
+  );
+  assert.deepEqual(
+    load.views(NOW + 2 * MIN).map((v) => v.host),
+    [],
+    'over a day old',
+  );
   assert.deepEqual(new CiLoad(store, { jobs: () => [], hosts: () => [], mandate: async () => true }).views(NOW + 2 * MIN), [], 'the same as a fresh read');
   store.db.close();
 });
@@ -251,8 +334,14 @@ test('samples wait in memory and are written together, with nothing lost to a re
   assert.deepEqual(saved(), []);
   assert.throws(() => load.add(desk.id, null, NOW), 'a bad sample is still refused as it arrives');
   // The first read loads from the database: the waiting samples are written first, so it sees them.
-  assert.deepEqual(load.views(NOW + 1).map((v) => v.host), ['DESK', 'LAB']);
-  assert.deepEqual(saved(), [[desk.id, NOW], [lab.id, NOW + 1]]);
+  assert.deepEqual(
+    load.views(NOW + 1).map((v) => v.host),
+    ['DESK', 'LAB'],
+  );
+  assert.deepEqual(saved(), [
+    [desk.id, NOW],
+    [lab.id, NOW + 1],
+  ]);
   load.add(desk.id, sample(0, { host: 'DESK' }), NOW + 2);
   load.add(lab.id, sample(0, { host: 'LAB' }), NOW + 3);
   assert.equal(load.views(NOW + 3).length, 2, 'a waiting sample already shows');
@@ -261,14 +350,23 @@ test('samples wait in memory and are written together, with nothing lost to a re
   store.deleteMachine(lab.id);
   load.forget(lab.id);
   load.flush();
-  assert.deepEqual(saved(), [[desk.id, NOW], [desk.id, NOW + 2]]);
-  store.addRunnerLoads([{ machine: lab.id, at: NOW + 4, data: '{}' }, { machine: desk.id, at: NOW + 5, data: JSON.stringify(sample(0, { host: 'DESK' })) }]);
+  assert.deepEqual(saved(), [
+    [desk.id, NOW],
+    [desk.id, NOW + 2],
+  ]);
+  store.addRunnerLoads([
+    { machine: lab.id, at: NOW + 4, data: '{}' },
+    { machine: desk.id, at: NOW + 5, data: JSON.stringify(sample(0, { host: 'DESK' })) },
+  ]);
   assert.deepEqual(saved().at(-1), [desk.id, NOW + 5]);
   assert.equal(saved().length, 3);
   // Stopping (the server's SIGTERM) writes what is left, so the next server reads it.
   load.add(desk.id, sample(0, { host: 'DESK' }), NOW + 6);
   load.stop();
   assert.equal(saved().length, 4);
-  assert.deepEqual(new CiLoad(store, quiet).views(NOW + 6).map((v) => v.host), ['DESK']);
+  assert.deepEqual(
+    new CiLoad(store, quiet).views(NOW + 6).map((v) => v.host),
+    ['DESK'],
+  );
   store.db.close();
 });

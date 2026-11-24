@@ -34,8 +34,14 @@ export function placeMenu(x, y, w, h, vw, vh) {
   let top = y + 2;
   let flipX = false;
   let flipY = false;
-  if (left + w > vw - EDGE) { left = x - w - 2; flipX = true; }
-  if (top + hh > vh - EDGE) { top = y - hh - 2; flipY = true; }
+  if (left + w > vw - EDGE) {
+    left = x - w - 2;
+    flipX = true;
+  }
+  if (top + hh > vh - EDGE) {
+    top = y - hh - 2;
+    flipY = true;
+  }
   left = Math.max(EDGE, Math.min(left, vw - w - EDGE));
   top = Math.max(EDGE, Math.min(top, vh - hh - EDGE));
   return { left, top, maxHeight, flipX, flipY };
@@ -78,14 +84,19 @@ export function openMenu(spec, x, y) {
     // The dim behind the sheet, closed by a tap. Ignored for a moment so the finger still down from the press can't close it.
     scrim = el('div', 'cui-menu-scrim');
     const born = Date.now();
-    scrim.addEventListener('click', () => { if (Date.now() - born > 350) close(true); });
+    scrim.addEventListener('click', () => {
+      if (Date.now() - born > 350) close(true);
+    });
     home.append(scrim);
   }
   const head = el('div', 'cui-menu-head');
   if (spec.sheet) head.append(el('span', 'cui-menu-grab'));
   const chip = el('span', 'cui-chip cui-menu-kind', spec.kind ?? 'Page');
   if (spec.tone) chip.dataset.tone = spec.tone;
-  else if (spec.hue) { chip.dataset.tone = 'custom'; chip.style.setProperty('--cui-tone', spec.hue); }
+  else if (spec.hue) {
+    chip.dataset.tone = 'custom';
+    chip.style.setProperty('--cui-tone', spec.hue);
+  }
   head.append(chip);
   if (spec.name) {
     const name = el('span', 'cui-menu-name', spec.name);
@@ -134,7 +145,10 @@ export function openMenu(spec, x, y) {
   } else {
     // Swipe down on the head to close: it follows the finger, and past 60 px (or let go) it closes or springs back.
     let drag = null;
-    head.addEventListener('pointerdown', (e) => { drag = { y: e.clientY, id: e.pointerId, dy: 0 }; head.setPointerCapture?.(e.pointerId); });
+    head.addEventListener('pointerdown', (e) => {
+      drag = { y: e.clientY, id: e.pointerId, dy: 0 };
+      head.setPointerCapture?.(e.pointerId);
+    });
     head.addEventListener('pointermove', (e) => {
       if (!drag || e.pointerId !== drag.id) return;
       drag.dy = Math.max(0, e.clientY - drag.y);
@@ -161,15 +175,31 @@ export function openMenu(spec, x, y) {
   const onKey = (e) => {
     const list = buttons();
     const i = list.indexOf(document.activeElement);
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); focusAt(i + 1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); focusAt(i < 0 ? -1 : i - 1); }
-    else if (e.key === 'Home') { e.preventDefault(); focusAt(0); }
-    else if (e.key === 'End') { e.preventDefault(); focusAt(-1); }
-    else if (e.key === 'Tab') { e.preventDefault(); close(true); }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      close(true);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      focusAt(i + 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      focusAt(i < 0 ? -1 : i - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      focusAt(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      focusAt(-1);
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      close(true);
+    }
   };
   // On a sheet the dim handles its own tap (a pointerdown that closed it would let the click fall through).
-  const onPress = (e) => { if (!menu.contains(e.target) && e.target !== scrim) close(false); };
+  const onPress = (e) => {
+    if (!menu.contains(e.target) && e.target !== scrim) close(false);
+  };
   // A scroll that moves what the menu is about (or the page) closes it; a redraw's scroll elsewhere (a list
   // rebuilt by a live update) doesn't, or menus would vanish in a busy scheme. A wheel always does.
   const onScroll = (e) => {
@@ -177,10 +207,14 @@ export function openMenu(spec, x, y) {
     if (s instanceof Node && menu.contains(s)) return;
     if (!(s instanceof Element) || s === document.documentElement || !returnTo?.isConnected || s.contains(returnTo)) close(false);
   };
-  const onWheel = (e) => { if (!menu.contains(e.target)) close(false); };
+  const onWheel = (e) => {
+    if (!menu.contains(e.target)) close(false);
+  };
   // A phone's address bar sliding away resizes the window's height: that isn't a reason to close a sheet.
   const width = innerWidth;
-  const onResize = () => { if (!spec.sheet || innerWidth !== width) close(false); };
+  const onResize = () => {
+    if (!spec.sheet || innerWidth !== width) close(false);
+  };
   const onBlur = () => close(false);
   menu.addEventListener('keydown', onKey);
   addEventListener('pointerdown', onPress, true);
@@ -205,13 +239,20 @@ export function openMenu(spec, x, y) {
   };
   open = { el: menu, close };
   // A touch sheet has no use for a focus ring on its first row: focus the sheet, and the arrows still work from there.
-  if (spec.sheet) { menu.tabIndex = -1; menu.focus({ preventScroll: true }); } else focusAt(0);
+  if (spec.sheet) {
+    menu.tabIndex = -1;
+    menu.focus({ preventScroll: true });
+  } else focusAt(0);
   return menu;
 }
 
 /** The topmost open modal dialog, or null (also where :modal isn't supported). */
 function topModal() {
-  try { return [...document.querySelectorAll('dialog:modal')].at(-1) ?? null; } catch { return null; }
+  try {
+    return [...document.querySelectorAll('dialog:modal')].at(-1) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** The element a redraw put in place of `gone`: same tag, same id or data-id. Null when there's none to tell by. */
@@ -256,7 +297,12 @@ export function mountMenus({ root = document, menuFor, longPress = false } = {})
     openMenu({ returnTo: t instanceof HTMLElement ? t : undefined, ...spec, sheet: true, foot: undefined }, 0, 0);
     navigator.vibrate?.(10);
   };
-  const cancelPress = () => { if (press && !press.fired) { clearTimeout(press.timer); press = null; } };
+  const cancelPress = () => {
+    if (press && !press.fired) {
+      clearTimeout(press.timer);
+      press = null;
+    }
+  };
   const onDown = (e) => {
     if (e.pointerType === 'mouse' || !longPress || !e.isPrimary) return;
     const t = e.target instanceof Element ? e.target : null;
@@ -271,7 +317,9 @@ export function mountMenus({ root = document, menuFor, longPress = false } = {})
     }, PRESS_MS);
     press = p;
   };
-  const onMove = (e) => { if (press && !press.fired && Math.hypot(e.clientX - press.x, e.clientY - press.y) > SLOP) cancelPress(); };
+  const onMove = (e) => {
+    if (press && !press.fired && Math.hypot(e.clientX - press.x, e.clientY - press.y) > SLOP) cancelPress();
+  };
   // The tap that ends a fired press must not act on the thing underneath.
   const onClick = (e) => {
     if (!press?.fired) return;
@@ -280,17 +328,30 @@ export function mountMenus({ root = document, menuFor, longPress = false } = {})
     press = null;
   };
   const onMenu = (e) => {
-    if (press?.fired) { e.preventDefault(); return; } // Android's contextmenu, after our timer already opened the sheet
+    if (press?.fired) {
+      e.preventDefault();
+      return;
+    } // Android's contextmenu, after our timer already opened the sheet
     // Android Chrome's own long press, where the timer didn't (a moved finger, a page without longPress): a sheet if wanted.
     if (longPress && e.pointerType === 'touch' && e.target instanceof Element) {
       const spec = sheetFor(e.target);
-      if (spec) { e.preventDefault(); showSheet(e.target, spec); }
+      if (spec) {
+        e.preventDefault();
+        showSheet(e.target, spec);
+      }
       return;
     }
-    if (Date.now() - keyed < 800) { keyed = 0; e.preventDefault(); return; }
+    if (Date.now() - keyed < 800) {
+      keyed = 0;
+      e.preventDefault();
+      return;
+    }
     const t = e.target instanceof Element ? e.target : e.target?.parentElement;
     if (!t) return;
-    if (t.closest('.cui-menu')) { e.preventDefault(); return; }
+    if (t.closest('.cui-menu')) {
+      e.preventDefault();
+      return;
+    }
     // A keyboard's contextmenu event (no pointer) when the keydown below didn't see the key.
     const keyboard = e.button !== 2 && !e.clientX && !e.clientY;
     if (!keyboard && e.shiftKey) return;
@@ -303,14 +364,24 @@ export function mountMenus({ root = document, menuFor, longPress = false } = {})
     const t = document.activeElement instanceof Element ? document.activeElement : document.body;
     if (t.closest('.cui-menu') || t.closest(EDITABLE) || !root.contains(t)) return;
     const [x, y] = t === document.body ? [innerWidth / 3, innerHeight / 3] : at(t);
-    if (show(t, e, x, y)) { e.preventDefault(); keyed = Date.now(); }
+    if (show(t, e, x, y)) {
+      e.preventDefault();
+      keyed = Date.now();
+    }
   };
   root.addEventListener('contextmenu', onMenu);
   root.addEventListener('keydown', onKey);
   root.addEventListener('pointerdown', onDown);
   root.addEventListener('pointermove', onMove);
   // A fired press waits for its click; one whose click never comes (the finger slid off) is forgotten shortly.
-  const onUp = () => { cancelPress(); const p = press; if (p?.fired) setTimeout(() => { if (press === p) press = null; }, 600); };
+  const onUp = () => {
+    cancelPress();
+    const p = press;
+    if (p?.fired)
+      setTimeout(() => {
+        if (press === p) press = null;
+      }, 600);
+  };
   root.addEventListener('pointerup', onUp);
   root.addEventListener('pointercancel', cancelPress);
   root.addEventListener('click', onClick, true);

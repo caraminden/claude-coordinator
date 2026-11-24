@@ -57,12 +57,25 @@ store.addMember(peek.id, alex.id);
 const appDir = join(root, 'apps', 'peek-auras');
 mkdirSync(appDir, { recursive: true });
 new Contraptions(store, SECRET, join(data, 'contraptions')).register({
-  name: 'peek-auras', title: 'Peek Auras', port: 1, icon: null, home_scheme: peek.id, open_paths: '[]', default_model: null, turn_cap: null, folder: appDir,
+  name: 'peek-auras',
+  title: 'Peek Auras',
+  port: 1,
+  icon: null,
+  home_scheme: peek.id,
+  open_paths: '[]',
+  default_model: null,
+  turn_cap: null,
+  folder: appDir,
 });
 const askedBy = (ticket: { id: number }, uid: number) => store.setSetting(askerKey(ticket.id), uid);
 
 test('the runner opens every scheme only to the Citadel Taskmaster, on a Citadel member or admin ask', () => {
-  const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   const every = runner.everySchemeFor(citadel, tmCitadel, josh.id)!;
   assert.ok(every, 'a Citadel member');
   assert.ok(runner.everySchemeFor(citadel, tmCitadel, cara.id), 'an admin');
@@ -91,7 +104,7 @@ test('its launch reads the contraption folders and other repos, never writes or 
   }
   assert.ok(allow.includes(`Bash(git -C ${citadel.repo_dir} fetch)`), 'its own repo still fetches');
   for (const f of [`${appDir}/**/.env`, `${appDir}/**/.env.*`, `${data}/**/.env`, `${data}/contraptions/*/contraption.key`]) assert.ok(deny.includes(`Read(/${f})`), f);
-  assert.ok(plain.settings.permissions.deny.includes(`Read(/${data}/**/.env)`), 'every Taskmaster, not only this one, is kept from the data folder\'s .env files');
+  assert.ok(plain.settings.permissions.deny.includes(`Read(/${data}/**/.env)`), "every Taskmaster, not only this one, is kept from the data folder's .env files");
 });
 
 test('the tripwire keeps a Taskmaster from .env files, named or found by a recursive search, and lets other searches through', () => {
@@ -100,7 +113,8 @@ test('the tripwire keeps a Taskmaster from .env files, named or found by a recur
   const cfg: TripwireConfig = { home: root, data, checkout: join(root, 'live'), project: 2, claudeConfig: join(root, '.claude'), deployScript: true, envFiles: [data, appDir] };
   const bash = (command: string, c = cfg) => tripwire({ tool_name: 'Bash', tool_input: { command, description: 'read another scheme' }, cwd: join(data, 'projects/2/coordinator') }, c)?.reason ?? null;
   const repo = join(data, 'projects/3/repo');
-  for (const cmd of [`cat ${repo}/sub/.env`, `head ${repo}/*/.env`, `cat ${appDir}/.env.local`, `grep -rn SECRET ${repo}`, `grep -rn SECRET ${data}/projects`, `grep -rn SECRET --exclude=.env ${repo}`, `rg --hidden SECRET ${repo}`, `rg -uu SECRET ${repo}`, `cd ${repo} && grep -r SECRET .`]) assert.match(bash(cmd) ?? '', /\.env/, cmd);
+  for (const cmd of [`cat ${repo}/sub/.env`, `head ${repo}/*/.env`, `cat ${appDir}/.env.local`, `grep -rn SECRET ${repo}`, `grep -rn SECRET ${data}/projects`, `grep -rn SECRET --exclude=.env ${repo}`, `rg --hidden SECRET ${repo}`, `rg -uu SECRET ${repo}`, `cd ${repo} && grep -r SECRET .`])
+    assert.match(bash(cmd) ?? '', /\.env/, cmd);
   for (const cmd of [`grep -rn SECRET --exclude='.env*' ${repo}`, `grep -rn SECRET --include='*.ts' ${repo}`, `rg SECRET ${repo}`, `rg --hidden -g '!.env*' SECRET ${repo}`, `cat ${repo}/sub/notes.txt`, `grep -rn SECRET ${join(root, 'elsewhere')}`]) assert.equal(bash(cmd), null, cmd);
   assert.equal(bash(`grep -rn SECRET ${repo}`, { ...cfg, envFiles: undefined }), null, 'minions are as before');
   const grepTool = (input: object) => tripwire({ tool_name: 'Grep', tool_input: { pattern: 'SECRET', ...input }, cwd: data }, cfg)?.reason ?? null;
@@ -146,8 +160,7 @@ test("list_tickets and read_ticket read another scheme for the Citadel Taskmaste
   const srv = await bootServer({ root });
   after(() => srv.stop());
   const tokens = new Auth(PASSWORD, SECRET);
-  const api = (as: { id: number }, method: string, path: string) =>
-    fetch(srv.base + path, { method, headers: { Authorization: `Bearer ${tokens.agentToken(as.id)}`, 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : '{}' }).then((r) => r.status);
+  const api = (as: { id: number }, method: string, path: string) => fetch(srv.base + path, { method, headers: { Authorization: `Bearer ${tokens.agentToken(as.id)}`, 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : '{}' }).then((r) => r.status);
   async function tool(as: { id: number; project_id: number }, name: string, args: object, citadelTools: boolean) {
     const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
       env: { ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(as.id), COORDINATOR_PROJECT: String(as.project_id), COORDINATOR_TICKET: String(as.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_APP_INSTRUCTIONS: citadelTools ? '1' : undefined },
@@ -176,8 +189,21 @@ test("list_tickets and read_ticket read another scheme for the Citadel Taskmaste
   const facts = await tool(tmCitadel, 'live_facts', { scheme: peek.id, ticket_id: peekMinion.number }, true);
   assert.ok(!facts.isError && facts.text.includes('Aura timers (scheme Peek)'), facts.text);
   // Reads only: writes and routes not marked everyScheme still stop at its own scheme.
-  for (const [method, path] of [['GET', `/api/projects/${peek.id}/tickets`], ['GET', `/api/tickets/${peekMinion.id}`], ['GET', `/api/tickets/${peekMinion.id}/events?after=0`], ['GET', `/api/projects/${peek.id}?number=1`]]) assert.equal(await api(tmCitadel, method, path), 200, path);
-  for (const [method, path] of [['PATCH', `/api/tickets/${peekMinion.id}`], ['POST', `/api/tickets/${peekMinion.id}/messages`], ['POST', `/api/tickets/${peekMinion.id}/stop`], ['PATCH', `/api/projects/${peek.id}`], ['POST', `/api/projects/${peek.id}/tickets`], ['GET', `/api/projects/${peek.id}/artifacts`]]) {
+  for (const [method, path] of [
+    ['GET', `/api/projects/${peek.id}/tickets`],
+    ['GET', `/api/tickets/${peekMinion.id}`],
+    ['GET', `/api/tickets/${peekMinion.id}/events?after=0`],
+    ['GET', `/api/projects/${peek.id}?number=1`],
+  ])
+    assert.equal(await api(tmCitadel, method, path), 200, path);
+  for (const [method, path] of [
+    ['PATCH', `/api/tickets/${peekMinion.id}`],
+    ['POST', `/api/tickets/${peekMinion.id}/messages`],
+    ['POST', `/api/tickets/${peekMinion.id}/stop`],
+    ['PATCH', `/api/projects/${peek.id}`],
+    ['POST', `/api/projects/${peek.id}/tickets`],
+    ['GET', `/api/projects/${peek.id}/artifacts`],
+  ]) {
     assert.equal(await api(tmCitadel, method, path), 403, `${method} ${path}`);
   }
   // A non-member's relay: refused, with the reason.

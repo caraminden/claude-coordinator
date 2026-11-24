@@ -26,13 +26,19 @@ function resultString(result) {
 function actionEl(action) {
   const { block, result } = action;
   const state = !result ? 'pending' : result.is_error ? 'err' : 'ok';
-  const why = state === 'err' ? resultString(result).replace(/<\/?tool_use_error>/g, '').trim().split('\n')[0].slice(0, 120) : '';
-  const el = h('details', { class: `act ${state}` },
-    h('summary', {},
-      stepMark({ pending: 'running', err: 'failed', ok: 'done' }[state]),
-      h('span', { class: 'what' }, threadRefs(actionLabel(block))),
-      why ? h('span', { class: 'why' }, ` — failed: ${why}`) : '',
-      ticketActionRef(action) ? [' → ', ...threadRefs(`#${ticketActionRef(action).number}`)] : ''));
+  const why =
+    state === 'err'
+      ? resultString(result)
+          .replace(/<\/?tool_use_error>/g, '')
+          .trim()
+          .split('\n')[0]
+          .slice(0, 120)
+      : '';
+  const el = h(
+    'details',
+    { class: `act ${state}` },
+    h('summary', {}, stepMark({ pending: 'running', err: 'failed', ok: 'done' }[state]), h('span', { class: 'what' }, threadRefs(actionLabel(block))), why ? h('span', { class: 'why' }, ` — failed: ${why}`) : '', ticketActionRef(action) ? [' → ', ...threadRefs(`#${ticketActionRef(action).number}`)] : ''),
+  );
   el.addEventListener('toggle', () => {
     if (!el.open || el.querySelector('.body')) return;
     const body = h('div', { class: 'body' });
@@ -79,8 +85,12 @@ async function fullAction(body, action) {
 function ticketActionLinks(acts) {
   const refs = acts.map(ticketActionRef).filter(Boolean);
   if (!refs.length) return null;
-  return h('li', { class: 'thread-refs' }, h('span', { class: 'st' }, '→'),
-    refs.flatMap((r, i) => [i ? ' · ' : '', `${r.verb} `, ...threadRefs(`#${r.number}`)]));
+  return h(
+    'li',
+    { class: 'thread-refs' },
+    h('span', { class: 'st' }, '→'),
+    refs.flatMap((r, i) => [i ? ' · ' : '', `${r.verb} `, ...threadRefs(`#${r.number}`)]),
+  );
 }
 
 /** Claude's own words from while a step was underway, shortened to a couple of lines. */
@@ -108,10 +118,12 @@ export function phaseRows(acts, running) {
     if (cmds.open && !cmds.querySelector('.actions')) cmds.append(actionList(acts));
   });
   return [
-    h('ul', { class: 'phases' }, phases.map((ph) => h('li', { class: ph.ongoing ? 'ongoing' : '' },
-      stepMark(ph.ongoing ? 'running' : 'done'), ph.text,
-      h('span', { class: 'muted' }, ` · ${ph.count} action${ph.count === 1 ? '' : 's'}${ph.failed ? `, ${ph.failed} failed along the way` : ''}`))),
-      ticketActionLinks(acts)),
+    h(
+      'ul',
+      { class: 'phases' },
+      phases.map((ph) => h('li', { class: ph.ongoing ? 'ongoing' : '' }, stepMark(ph.ongoing ? 'running' : 'done'), ph.text, h('span', { class: 'muted' }, ` · ${ph.count} action${ph.count === 1 ? '' : 's'}${ph.failed ? `, ${ph.failed} failed along the way` : ''}`))),
+      ticketActionLinks(acts),
+    ),
     cmds,
   ];
 }
@@ -126,14 +138,14 @@ function planStep(t, acts, running) {
   if (t.status === 'completed') line = t.outcome || (t.note && firstSentence(t.note)) || t.description || phases.map((ph) => ph.text).join(', ');
   else if (now) line = live ? (phases.length ? `Now: ${phases[phases.length - 1].text.toLowerCase()}` : 'Just started') : 'Paused here when the turn ended';
   else line = t.description || 'Not started yet';
-  const el = h('details', { class: `step ${t.status}${now && !running ? ' paused' : ''}`, open: view.ui.openSteps.has(t.id) || null },
-    h('summary', {},
-      h('span', { class: 'icon' }, STEP_ICON[t.status] ?? '○'),
-      h('span', { class: 'subject' }, t.subject),
-      h('span', { class: 'recap' }, firstSentence(line, 220))),
+  const el = h(
+    'details',
+    { class: `step ${t.status}${now && !running ? ' paused' : ''}`, open: view.ui.openSteps.has(t.id) || null },
+    h('summary', {}, h('span', { class: 'icon' }, STEP_ICON[t.status] ?? '○'), h('span', { class: 'subject' }, t.subject), h('span', { class: 'recap' }, firstSentence(line, 220))),
     t.description && line !== t.description ? h('p', { class: 'step-desc' }, h('span', { class: 'muted' }, 'Plan: '), t.description) : '',
     t.note && !t.outcome ? stepNote(t.note) : '',
-    acts.length ? phaseRows(acts, live) : '');
+    acts.length ? phaseRows(acts, live) : '',
+  );
   el.addEventListener('toggle', () => (el.open ? view.ui.openSteps.add(t.id) : view.ui.openSteps.delete(t.id)));
   return el;
 }
@@ -141,19 +153,24 @@ function planStep(t, acts, running) {
 /** Work done outside any plan step, told as phases. */
 function looseWork(acts, running, onlyWork) {
   const phases = workPhases(acts, running);
-  const el = h('details', { class: 'step loose', open: (view.ui.looseOpen ?? onlyWork) || null },
-    h('summary', {}, h('span', { class: 'icon' }, '⋯'),
-      h('span', { class: 'subject' }, !onlyWork ? 'Other work this turn' : running ? 'Work so far' : 'Work last turn'),
-      h('span', { class: 'recap' }, phases.map((ph) => ph.text).join(' → '))),
+  const el = h(
+    'details',
+    { class: 'step loose', open: (view.ui.looseOpen ?? onlyWork) || null },
+    h('summary', {}, h('span', { class: 'icon' }, '⋯'), h('span', { class: 'subject' }, !onlyWork ? 'Other work this turn' : running ? 'Work so far' : 'Work last turn'), h('span', { class: 'recap' }, phases.map((ph) => ph.text).join(' → '))),
     view.turnNote ? stepNote(view.turnNote) : '',
-    phaseRows(acts, running));
+    phaseRows(acts, running),
+  );
   el.addEventListener('toggle', () => (view.ui.looseOpen = el.open));
   return el;
 }
 
 let progressFrame = 0;
 export function scheduleProgress() {
-  if (!progressFrame) progressFrame = requestAnimationFrame(() => { progressFrame = 0; renderProgress(); });
+  if (!progressFrame)
+    progressFrame = requestAnimationFrame(() => {
+      progressFrame = 0;
+      renderProgress();
+    });
 }
 
 export function renderProgress() {
@@ -192,18 +209,28 @@ export function renderProgress() {
   const time = w ? waitClock(w, 'time wait-time of-wait') : running && !est && view.ticket.turnStartedAt ? waitClock({ since: view.ticket.turnStartedAt }, 'time wait-time') : '';
   const left = est && h('span', { class: 'left', title: view.ticket.step_ratio && view.ticket.step_ratio !== 1 ? `The minion's guesses for the steps left, times ${view.ticket.step_ratio.toFixed(2)}: what steps have really taken against their guesses` : "The minion's own guess for the steps left" }, leftText(est));
 
-  const bar = h('button', { class: 'progress-line', 'aria-expanded': String(view.ui.open), onclick: () => {
-    view.ui.open = !view.ui.open;
-    renderProgress();
-  } },
+  const bar = h(
+    'button',
+    {
+      class: 'progress-line',
+      'aria-expanded': String(view.ui.open),
+      onclick: () => {
+        view.ui.open = !view.ui.open;
+        renderProgress();
+      },
+    },
     // No dot of its own: the title's dot just above says the same (Josh, 2026-11-13: "we've duplicated the dots").
-    h('span', { class: 'text' },
+    h(
+      'span',
+      { class: 'text' },
       server ? h('span', { class: 'stepname' }, h('b', { class: 'f-work' }, 'Server'), w ? '' : ' · shipping…') : step ? h('span', { class: 'stepname' }, step) : '',
       (step || server) && now ? h('span', { class: 'arrow', 'aria-hidden': 'true' }, ' › ') : '',
-      now ? h('span', { class: 'doing', 'data-doing': doing }, now) : ''),
+      now ? h('span', { class: 'doing', 'data-doing': doing }, now) : '',
+    ),
     count ? h('span', { class: 'count', title: count.includes('/') ? `${done} of ${total} steps done` : '' }, count) : '',
     time,
-    h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'));
+    h('span', { class: 'chev' }, view.ui.open ? '▴' : '▾'),
+  );
   // With no plan the meter keeps its room, hidden, so a plan arriving doesn't push the chat (rule 13); while it works, an
   // empty track shows the line before the plan exists (#696).
   // The plan as a track of its steps (#630), the one underway filling against its guess or by the wait; with no step
@@ -211,12 +238,12 @@ export function renderProgress() {
   const meter = progressTrack({ track: total && (running || !w) ? planTrack(p) : running && !w ? EMPTY_TRACK : null, since: est?.since, usual: est?.usual, wait: w || null }, 'big') || h('progress', { class: 'meter blank', max: 1, value: 0 });
   // Which time is which (#630, Cara's pick "1"): the step's against its guess under the bar's left, the whole plan's at its end.
   const stepClock = est && waitClock({ since: est.since, usual: est.usual }, `wait-time${waitLate(est) ? ' late' : ''}`);
-  const caption = est ? h('div', { class: 'progress-cap' },
-    h('span', { class: 'cap-step' }, 'This step: ', stepClock),
-    h('span', { class: 'cap-plan' }, h('b', {}, h('span', { class: 'wide' }, 'Whole plan:'), h('span', { class: 'narrow' }, 'Plan')), ' ',
-      h('span', { class: 'wide' }, waitClock({ since: est.planSince }), ' in · '), left))
-    // Until a step with a guess is underway, its caption's line is held empty, so the head doesn't grow when it starts (#696).
-    : running && !w ? h('div', { class: 'progress-cap blank', 'aria-hidden': 'true' }, h('span', { class: 'cap-step' }, '\u00a0')) : '';
+  const caption = est
+    ? h('div', { class: 'progress-cap' }, h('span', { class: 'cap-step' }, 'This step: ', stepClock), h('span', { class: 'cap-plan' }, h('b', {}, h('span', { class: 'wide' }, 'Whole plan:'), h('span', { class: 'narrow' }, 'Plan')), ' ', h('span', { class: 'wide' }, waitClock({ since: est.planSince }), ' in · '), left))
+    : // Until a step with a guess is underway, its caption's line is held empty, so the head doesn't grow when it starts (#696).
+      running && !w
+      ? h('div', { class: 'progress-cap blank', 'aria-hidden': 'true' }, h('span', { class: 'cap-step' }, '\u00a0'))
+      : '';
 
   const prevDetail = progressEl.querySelector('.progress-detail');
   const scrollTop = prevDetail?.scrollTop ?? 0;
@@ -226,26 +253,39 @@ export function renderProgress() {
     const groups = { completed: [], in_progress: [], pending: [] };
     for (const t of p.tasks) (groups[t.status] ?? groups.pending).push(t);
     // A step an earlier turn left underway reads as paused until this turn moves the plan.
-    const stepEl = (t) => planStep(t, all.filter((a) => a.taskId === t.id), running && !!current);
+    const stepEl = (t) =>
+      planStep(
+        t,
+        all.filter((a) => a.taskId === t.id),
+        running && !!current,
+      );
     const section = (title, tasks) => (tasks.length ? h('section', { class: 'plan-group' }, h('h4', {}, title), tasks.map(stepEl)) : '');
     const loose = view.turnActions.filter((a) => a.taskId == null || !p.tasks.some((t) => t.id === a.taskId));
     const req = view.turnRequest;
-    detail = h('div', { class: 'progress-detail' },
+    detail = h(
+      'div',
+      { class: 'progress-detail' },
       // The wait in full, its words uncut, with a landing's whole track above it.
       w ? h('div', { class: 'wait-line' }, waitTrack(w), h('p', { class: 'wait-full' }, waitNow(w, true), ' · ', waitClock(w))) : '',
-      req?.length ? h('p', { class: 'request' }, h('span', { class: 'muted' }, running ? 'Working on ' : 'Last worked on '),
-        req.flatMap((m, n) => [n ? ' and ' : '', `${m.author}'s request: `, h('q', {}, firstSentence(m.text, 160))])) : '',
+      req?.length
+        ? h(
+            'p',
+            { class: 'request' },
+            h('span', { class: 'muted' }, running ? 'Working on ' : 'Last worked on '),
+            req.flatMap((m, n) => [n ? ' and ' : '', `${m.author}'s request: `, h('q', {}, firstSentence(m.text, 160))]),
+          )
+        : '',
       section('Done', groups.completed),
       section(running && current ? 'Now' : 'Stopped at', groups.in_progress),
       section('Up next', groups.pending),
       loose.length ? looseWork(loose, running, !p.tasks.length) : '',
-      !p.tasks.length && !loose.length ? h('p', { class: 'muted empty' }, 'Nothing has run yet.') : '');
+      !p.tasks.length && !loose.length ? h('p', { class: 'muted empty' }, 'Nothing has run yet.') : '',
+    );
   }
   progressEl.replaceChildren(bar, meter, caption, w ? waitTail(view.ticket.id, w) : '', detail);
   if (detail) detail.scrollTop = scrollTop;
   progressEl.hidden = false;
 }
-
 
 /** "~26 min left" of the plan's guesses, "~1h 5m left", or past them. */
 export function leftText(est) {

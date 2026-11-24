@@ -57,11 +57,13 @@ before(async () => {
     if (path === '/c/api/me/order/apps' && req.method === 'PUT') {
       let body = '';
       req.on('data', (d) => (body += d));
-      req.on('end', () => setTimeout(() => {
-        if (orders.fail) return res.writeHead(500, { 'content-type': 'application/json' }).end('{"error":"disk full"}');
-        orders.saved.push(JSON.parse(body).keys);
-        res.writeHead(200, { 'content-type': 'application/json' }).end(body);
-      }, orders.delay));
+      req.on('end', () =>
+        setTimeout(() => {
+          if (orders.fail) return res.writeHead(500, { 'content-type': 'application/json' }).end('{"error":"disk full"}');
+          orders.saved.push(JSON.parse(body).keys);
+          res.writeHead(200, { 'content-type': 'application/json' }).end(body);
+        }, orders.delay),
+      );
       return;
     }
     // Citadel's list (its own page) and the kit's (a contraption's page: who is signed in, and Citadel's address
@@ -96,7 +98,8 @@ after(async () => {
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** ToC's entry: 'img', 'tile' or 'none' (no rail), and whether the rail is still the element first drawn. */
-const toc = (page: Page) => page.eval<string>(`(() => {
+const toc = (page: Page) =>
+  page.eval<string>(`(() => {
   const a = document.querySelector('.citadel-rail a[data-app="toc"]');
   return a ? (a.querySelector('img') ? 'img' : 'tile') : 'none';
 })()`);
@@ -161,7 +164,8 @@ test('an icon that fails to load comes back in place, without redrawing the rail
   assert.ok(await sameRail(page), 'the same rail, so focus on it stays put');
 });
 
-const layer = (page: Page) => page.eval<string>(`(() => {
+const layer = (page: Page) =>
+  page.eval<string>(`(() => {
   const l = document.querySelector('.citadel-layer');
   return l ? (l.hidden ? 'hidden' : 'shown ' + l.querySelector('iframe').contentWindow.location.hash) + (document.body.inert ? ' inert' : '') : 'none';
 })()`);
@@ -281,7 +285,14 @@ test('a mouse drag moves an app at once, saves the order, and opens nothing; two
   const top = await page.centre('.citadel-rail a[data-app="toc"]');
   await mouseDrag(page, 'peek', top.y - 15);
   assert.deepEqual(await appOrder(page), ['', 'peek', 'toc']);
-  assert.deepEqual(await saves(2), [['toc', 'peek'], ['peek', 'toc']], 'both saved, in the order dropped');
+  assert.deepEqual(
+    await saves(2),
+    [
+      ['toc', 'peek'],
+      ['peek', 'toc'],
+    ],
+    'both saved, in the order dropped',
+  );
   // A slow click (held half a second, not moved) still opens the app: a mouse drags only once it moves.
   const at = await page.centre('.citadel-rail a[data-app="toc"]');
   const mouse = (type: string) => page.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 });
@@ -333,11 +344,21 @@ test("an older drop's Retry, after a newer drop saved, leaves the newer order al
   await mouseDrag(page, 'toc', peek.y - 15);
   const peekNow = await page.centre('.citadel-rail a[data-app="peek"]');
   await mouseDrag(page, 'toc', peekNow.y + 15);
-  assert.deepEqual(await saves(2), [['toc', 'peek'], ['peek', 'toc']]);
+  assert.deepEqual(await saves(2), [
+    ['toc', 'peek'],
+    ['peek', 'toc'],
+  ]);
   await page.eval(`[...document.querySelectorAll('.cui-toast button')].find((b) => b.textContent === 'Retry')?.click()`);
   await wait(200);
   assert.deepEqual(await appOrder(page), ['', 'peek', 'toc'], 'the newest drop stands');
-  assert.deepEqual(orders.saved, [['toc', 'peek'], ['peek', 'toc']], 'and nothing older is sent');
+  assert.deepEqual(
+    orders.saved,
+    [
+      ['toc', 'peek'],
+      ['peek', 'toc'],
+    ],
+    'and nothing older is sent',
+  );
 });
 
 test('on a touch screen a held press drags, and a swipe that moves at once does not', { skip }, async () => {

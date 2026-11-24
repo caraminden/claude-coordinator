@@ -11,7 +11,11 @@ import { addMention, clearMentions, MAX_MENTIONS, mentionedIn } from '../src/men
 const root = mkdtempSync(join(tmpdir(), 'mentions-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-const members = [{ name: 'Cara', login: 'cara-gh' }, { name: 'Josh', login: 'katz' }, { name: 'Cara Lee', login: 'clee' }];
+const members = [
+  { name: 'Cara', login: 'cara-gh' },
+  { name: 'Josh', login: 'katz' },
+  { name: 'Cara Lee', login: 'clee' },
+];
 
 test('mentionedIn: members by name, any case, once each, never the sender (#1149)', () => {
   assert.deepEqual(mentionedIn('@Josh can you look at this', members, 'Cara'), ['Josh']);
@@ -22,7 +26,7 @@ test('mentionedIn: members by name, any case, once each, never the sender (#1149
   assert.deepEqual(mentionedIn('mail josh@x.com, @Joshua, @nobody, @', members, 'Cara'), [], 'an address, a longer word and a non-member are no one');
 });
 
-test('a mention is in its person\'s Needs you and counts, whoever the minion is assigned to, until they open the chat (#1149)', () => {
+test("a mention is in its person's Needs you and counts, whoever the minion is assigned to, until they open the chat (#1149)", () => {
   const store = new Store(join(root, 'db.sqlite'));
   store.typedHandlesUpTo = 0;
   const approvals = new Approvals(() => {});
@@ -38,16 +42,33 @@ test('a mention is in its person\'s Needs you and counts, whoever the minion is 
   store.updateTicket(gone, { status: 'closed' });
 
   const items = inboxItems(store, approvals, p, 'Josh').filter((i) => i.kind === 'mention');
-  assert.deepEqual(items.map((i) => [i.ticketId, i.eventId, (i.card as any).by]), [[t, e.id, 'Cara']], 'a dismissed minion\'s is gone');
+  assert.deepEqual(
+    items.map((i) => [i.ticketId, i.eventId, (i.card as any).by]),
+    [[t, e.id, 'Cara']],
+    "a dismissed minion's is gone",
+  );
   assert.equal(inboxCount(store, approvals, p, 'Josh', store.seenTimes('Josh', p)), 1);
-  assert.deepEqual(inboxItems(store, approvals, other, 'Josh').filter((i) => i.kind === 'mention'), [], 'only in its own scheme');
-  assert.deepEqual(inboxItems(store, approvals, p, 'Cara').filter((i) => i.kind === 'mention'), []);
+  assert.deepEqual(
+    inboxItems(store, approvals, other, 'Josh').filter((i) => i.kind === 'mention'),
+    [],
+    'only in its own scheme',
+  );
+  assert.deepEqual(
+    inboxItems(store, approvals, p, 'Cara').filter((i) => i.kind === 'mention'),
+    [],
+  );
 
   // Opening the chat clears it, by its seen time even before the list is tidied.
   store.markSeen('Josh', t);
-  assert.deepEqual(inboxItems(store, approvals, p, 'Josh').filter((i) => i.kind === 'mention'), []);
+  assert.deepEqual(
+    inboxItems(store, approvals, p, 'Josh').filter((i) => i.kind === 'mention'),
+    [],
+  );
   clearMentions(store, 'Josh', t);
-  assert.deepEqual(store.getSetting<unknown[]>('mentions:josh')!.map((m: any) => m.ticketId), [gone]);
+  assert.deepEqual(
+    store.getSetting<unknown[]>('mentions:josh')!.map((m: any) => m.ticketId),
+    [gone],
+  );
 
   // The list keeps the newest MAX_MENTIONS.
   for (let i = 0; i < MAX_MENTIONS + 5; i++) addMention(store, 'Josh', { ticketId: t, projectId: p, eventId: 1000 + i, at: Date.now() + 10_000, by: 'Cara', text: 'x'.repeat(1000) });

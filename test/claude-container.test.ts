@@ -108,7 +108,12 @@ const volume = join(root, 'josh-volume');
 mkdirSync(join(volume, '.claude'), { recursive: true });
 
 function runner(place: NonNullable<Runner['placeFor']>) {
-  const r = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 'secret' }), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({ COORDINATOR_TOKEN: 'secret' }),
+    fake,
+  );
   r.resumeGapMs = 10;
   r.pollMs = 10;
   r.personOf = () => josh.id;
@@ -122,9 +127,17 @@ function newTicket() {
   store.setTicketDir(t.id, root, null);
   return t.id;
 }
-const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+const notes = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
 const status = (id: number) => store.getTicket(id)!.status;
-const errors = (id: number) => store.listEvents(id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text as string);
+const errors = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'error')
+    .map((e) => JSON.parse(e.data).text as string);
 
 test("a linked person's turn runs in their container, on their login, and keeps its usage apart", async () => {
   const id = newTicket();
@@ -194,13 +207,16 @@ test("a container turn's exec runs in a scope of its own under the turns slice, 
   const scope = execs.findLast((c) => c[0] === 'systemd-run');
   assert.ok(scope, 'the exec starts through systemd-run');
   assert.ok(scope.includes('--user') && scope.includes('--scope') && scope.includes('--collect') && scope.includes(`--slice=${TURN_SLICE}`), scope.join(' '));
-  assert.ok(scope.some((a: string) => new RegExp(`^--unit=citadel-turn-[0-9a-f]{8}-${id}-\\d+$`).test(a)), scope.join(' '));
+  assert.ok(
+    scope.some((a: string) => new RegExp(`^--unit=citadel-turn-[0-9a-f]{8}-${id}-\\d+$`).test(a)),
+    scope.join(' '),
+  );
   const cmd = scope.slice(scope.findIndex((a: string) => a === 'podman'));
   assert.deepEqual(cmd.slice(0, 4), ['podman', 'exec', '-d', 'citadel-claude-test-2']);
   assert.ok(notes(id).every((n) => !/citadel-claude-test-2:/.test(n)));
 });
 
-test("a container turn still runs when systemd-run fails, with a plain podman exec (#258)", async () => {
+test('a container turn still runs when systemd-run fails, with a plain podman exec (#258)', async () => {
   const id = newTicket();
   const r = runner(inContainer);
   r.units = true;
@@ -212,7 +228,10 @@ test("a container turn still runs when systemd-run fails, with a plain podman ex
     const execs = jsonLines(calls).slice(before);
     const failed = execs.findIndex((c) => c[0] === 'systemd-run');
     assert.ok(failed >= 0, 'it tried the scope first');
-    assert.ok(execs.slice(failed + 1).some((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === 'citadel-claude-test-2'), 'then ran podman exec itself');
+    assert.ok(
+      execs.slice(failed + 1).some((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === 'citadel-claude-test-2'),
+      'then ran podman exec itself',
+    );
     assert.ok(notes(id).every((n) => !/citadel-claude-test-2:/.test(n)));
   } finally {
     delete process.env.FAKE_SYSTEMD_RUN_FAILS;
@@ -231,7 +250,7 @@ test('turns that fall back to the server, on the host or in a container, are cou
     onHost.units = true;
     onHost.send(host, 'Josh', 'build it');
     await until("status(host) === 'idle'", () => status(host) === 'idle');
-    assert.equal(fallbacks.count, count + 1, 'the host turn ran as the server\'s child, and counts');
+    assert.equal(fallbacks.count, count + 1, "the host turn ran as the server's child, and counts");
     assert.equal(alerts.length, 1);
     assert.equal(alerts[0].ticketId, host);
     assert.match(alerts[0].error, /Unit citadel-turns\.slice not found/);
@@ -323,14 +342,27 @@ test('a container turn whose wrapper process is gone and whose heartbeat stopped
   const old = new Date(Date.now() - 60_000);
   utimesSync(join(dir, 'beat'), old, old);
   await until('the turn is cut off', () => status(id) !== 'running');
-  assert.ok(notes(id).some((e) => /killed before it finished[\s\S]*its container was killed/.test(e)), 'named as killed');
+  assert.ok(
+    notes(id).some((e) => /killed before it finished[\s\S]*its container was killed/.test(e)),
+    'named as killed',
+  );
   // A first kill is resumed by the server (#1364); the resume's prompt has no hold, so it ends well.
   await until('the resume ends', () => status(id) === 'idle' && !r.isRunning(id) && !r.killWait(id));
   assert.deepEqual(errors(id), []);
 });
 
 test('podman run arguments: keep-id, host network, a :U volume, binds at their own path, the spec label', () => {
-  const spec = { name: 'citadel-claude-1', image: 'localhost/citadel-claude:abc', mounts: [{ src: 'citadel-claude-1', dst: '/home/u', volume: true }, { src: '/data/projects', dst: '/data/projects' }, { src: '/opt/claude', dst: '/opt/claude', ro: true }], env: { HOME: '/home/u' }, memory: { high: '10G', max: '12G', swap: '4G' } };
+  const spec = {
+    name: 'citadel-claude-1',
+    image: 'localhost/citadel-claude:abc',
+    mounts: [
+      { src: 'citadel-claude-1', dst: '/home/u', volume: true },
+      { src: '/data/projects', dst: '/data/projects' },
+      { src: '/opt/claude', dst: '/opt/claude', ro: true },
+    ],
+    env: { HOME: '/home/u' },
+    memory: { high: '10G', max: '12G', swap: '4G' },
+  };
   const args = runArgs(spec);
   // The memory caps sit on the systemd unit: podman's --memory never reached a cgroup with a memory controller (#1214).
   assert.ok(!args.includes('--memory') && !args.includes('--cpus'));
@@ -363,13 +395,19 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   assert.ok(!spec.mounts.some((m) => !m.volume && m.src === join(home, '.claude')), "the server's own Claude folder stays out");
   // Codex's hook comes from the code the server runs, not the image's copy, so a long-running container gets a deployed fix (#748).
   const hook = join(import.meta.dirname, '..', 'deploy', 'claude-container', 'codex');
-  assert.deepEqual(spec.mounts.filter((m) => m.dst === '/etc/codex'), [{ src: hook, dst: '/etc/codex', ro: true }]);
+  assert.deepEqual(
+    spec.mounts.filter((m) => m.dst === '/etc/codex'),
+    [{ src: hook, dst: '/etc/codex', ro: true }],
+  );
   assert.ok(existsSync(join(hook, 'citadel-hook.mjs')));
   // The code the server runs is readable, never writable (#621).
   const checkout = join(import.meta.dirname, '..');
   // A test tree with devDependencies installed (fast-check's node_modules, #1657) has too many ignored files to cover, so it isn't mounted: the spec follows checkoutMounts.
   const covered = checkoutMounts(checkout);
-  assert.deepEqual(spec.mounts.filter((m) => m.src === checkout), covered ? [{ src: checkout, dst: checkout, ro: true }] : []);
+  assert.deepEqual(
+    spec.mounts.filter((m) => m.src === checkout),
+    covered ? [{ src: checkout, dst: checkout, ro: true }] : [],
+  );
   // Files git ignores there can hold secrets: each is covered, read-only, and a checkout git can't list isn't mounted.
   const live = mkdtempSync(join(root, 'live-'));
   execFileSync('git', ['init', '-q', live]);
@@ -377,8 +415,11 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   writeFileSync(join(live, '.env'), 'TOKEN=x');
   writeFileSync(join(live, 'c.db'), '');
   writeFileSync(join(live, 'code.ts'), '');
-  assert.deepEqual(checkoutMounts(live), [{ src: live, dst: live, ro: true },
-    { src: '/dev/null', dst: join(live, '.env'), ro: true }, { src: '/dev/null', dst: join(live, 'c.db'), ro: true }]);
+  assert.deepEqual(checkoutMounts(live), [
+    { src: live, dst: live, ro: true },
+    { src: '/dev/null', dst: join(live, '.env'), ro: true },
+    { src: '/dev/null', dst: join(live, 'c.db'), ro: true },
+  ]);
   assert.equal(checkoutMounts(join(root, 'not-a-repo')), null);
   assert.equal(link.place(josh.id), null);
   assert.equal(link.linked(josh.id), null);
@@ -478,7 +519,10 @@ test("a host turn wakes the server login's stopped Codex container for its revie
   assert.ok(!log.some((c) => c[0] === 'systemd-run' || c.includes('stop') || c.includes('rm')), `a running one is left alone, though its spec is stale: ${JSON.stringify(log)}`);
   running = 'false';
   await link.wakeCodex(owner.id);
-  assert.ok(log.some((c) => c[0] === 'systemd-run'), 'a stopped one is started again');
+  assert.ok(
+    log.some((c) => c[0] === 'systemd-run'),
+    'a stopped one is started again',
+  );
   await link.wakeCodex(josh.id);
 });
 
@@ -520,7 +564,10 @@ test("a person's container mounts their own turns' files, never another person's
 test("a container turn has the host's tools: the image installs what schemes' scripts call, host toolchains are mounted, the image's own win (#247)", () => {
   // Tools Delve's, Peek Auras' and Mandate's scripts and the kit call, by the image package that brings each.
   const containerfile = readFileSync(join(import.meta.dirname, '..', 'deploy', 'claude-container', 'Containerfile'), 'utf8');
-  const apt = containerfile.match(/apt-get install -y --no-install-recommends ([^&]+)/)![1].split(/[\s\\]+/).filter(Boolean);
+  const apt = containerfile
+    .match(/apt-get install -y --no-install-recommends ([^&]+)/)![1]
+    .split(/[\s\\]+/)
+    .filter(Boolean);
   for (const pkg of ['graphviz', 'xvfb', 'xauth', 'ffmpeg', 'chromium', 'sqlite3', 'socat', 'jq', 'ripgrep', 'python3']) assert.ok(apt.includes(pkg), `the image installs ${pkg}`);
   assert.match(containerfile, /bin\/gh \/usr\/local\/bin\/gh/);
   // Host toolchains sit in the person's home, read-only: dotnet, Godot, mise and rustup's rust, Playwright's Chromium.
@@ -533,7 +580,10 @@ test("a container turn has the host's tools: the image installs what schemes' sc
     const link = new ClaudeLink(store, creds, join(root, 'data'), fake, new Containers(async () => ({ code: 0, stdout: '', stderr: '' })), 'citadel-claude-tools-');
     const mounts = link.spec(josh.id).mounts;
     for (const d of ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright', '.local/share/android-sdk']) {
-      assert.ok(mounts.some((m) => m.src === join(home, d) && m.dst === join(home, d) && m.ro), `${d} is mounted read-only`);
+      assert.ok(
+        mounts.some((m) => m.src === join(home, d) && m.dst === join(home, d) && m.ro),
+        `${d} is mounted read-only`,
+      );
     }
     // The crate cache and the rest of the home stay the person's own.
     assert.ok(!mounts.some((m) => !m.volume && (m.src === join(home, '.cargo') || m.src === join(home, '.ssh') || m.src === home)));
@@ -570,7 +620,10 @@ test("the host's Android toolchain (#379): turns get ANDROID_HOME and JAVA_HOME 
   process.env.HOME = home;
   try {
     const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), fake, new Containers(fakeRun), 'citadel-claude-android-');
-    assert.ok(link.spec(josh.id).mounts.some((m) => m.src === sdk && m.dst === sdk && m.ro), 'the SDK is mounted read-only');
+    assert.ok(
+      link.spec(josh.id).mounts.some((m) => m.src === sdk && m.dst === sdk && m.ro),
+      'the SDK is mounted read-only',
+    );
     await link.ensure(josh.id);
     assert.equal(readFileSync(join(vol, GRADLE_PROPS), 'utf8'), 'org.gradle.daemon=false\n');
   } finally {
@@ -621,10 +674,9 @@ test("a restart sweeps container turns' dead folders in each person's folder, an
   assert.ok(!existsSync(join(person, '8-1')), 'a dead turn goes');
   assert.ok(existsSync(join(person, '8-2')), 'a running one stays');
   assert.ok(existsSync(join(person, '8-3')), 'a stalled one stays');
-  assert.ok(existsSync(join(person, '8-4')), "a stalled one from before the wrapper was plain JS stays");
+  assert.ok(existsSync(join(person, '8-4')), 'a stalled one from before the wrapper was plain JS stays');
   assert.ok(existsSync(person), "the person's folder stays mounted");
 });
-
 
 test('a podman exec that never returns fails the turn after its time limit, not never (C6)', async () => {
   const id = newTicket();
@@ -665,7 +717,14 @@ test('Stop ends a container turn whose claude has not started, and never will (C
     const pid = Number(readFileSync(hungPid, 'utf8'));
     assert.ok(pid > 0);
     process.kill(pid, 'SIGKILL');
-    await until('the exec is gone', () => { try { process.kill(pid, 0); return false; } catch { return true; } });
+    await until('the exec is gone', () => {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    });
     await holds('nothing is written, said or thrown', () => !existsSync(turnDir) && errors(id).length === 0, { ms: 300 });
     assert.ok(!existsSync(turnDir));
     assert.deepEqual(errors(id), []);
@@ -695,7 +754,12 @@ test("a container turn's claude that starts just after the stop is still signall
   const patient = join(root, 'claude-patient');
   writeFileSync(patient, `#!${process.execPath}\nprocess.on('SIGINT', () => process.exit(130));\nsetInterval(() => {}, 1000);\n`);
   chmodSync(patient, 0o755);
-  const r = new Runner(store, () => {}, () => ({ COORDINATOR_TOKEN: 'secret' }), patient);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({ COORDINATOR_TOKEN: 'secret' }),
+    patient,
+  );
   r.personOf = () => josh.id;
   r.placeFor = inContainer;
   r.pollMs = 3_600_000; // polled by hand below, to put the stop between the exec and claude's start
@@ -725,12 +789,12 @@ test("a container turn's claude that starts just after the stop is still signall
 });
 
 test("the sign-in link is read from the terminal's output", () => {
-  assert.equal(signInUrl('Browser didn\'t open? Use the url below:\nhttps://claude.ai/oauth/authorize?code=true&client_id=x&state=y\n\nPaste code here'), 'https://claude.ai/oauth/authorize?code=true&client_id=x&state=y');
+  assert.equal(signInUrl("Browser didn't open? Use the url below:\nhttps://claude.ai/oauth/authorize?code=true&client_id=x&state=y\n\nPaste code here"), 'https://claude.ai/oauth/authorize?code=true&client_id=x&state=y');
   assert.equal(signInUrl('Opening browser…'), null);
 });
 
 test("a failed sign-in says Claude's own last words, without the link or the pasted code", () => {
-  const out = 'Opening browser to sign in...\nIf the browser didn\'t open, visit: https://claude.com/cai/oauth/authorize?code=true&' + 'x'.repeat(400) + '\nPaste code here if prompted > abc#def\n\nLogin failed: Request failed with status code 400\n';
+  const out = "Opening browser to sign in...\nIf the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&" + 'x'.repeat(400) + '\nPaste code here if prompted > abc#def\n\nLogin failed: Request failed with status code 400\n';
   const said = signInOutcome(out, 'abc#def');
   assert.equal(said, 'Paste code here if prompted > [code] Login failed: Request failed with status code 400');
 });

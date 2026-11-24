@@ -68,7 +68,10 @@ const gap = `(() => {
   return d ? Math.round(d.getBoundingClientRect().top - document.getElementById('ticket-head').getBoundingClientRect().bottom) : null;
 })()`;
 
-for (const [what, size] of [['desktop', { width: 1280, height: 800 }], ['phone', { width: 390, height: 844, touch: true }]] as const) {
+for (const [what, size] of [
+  ['desktop', { width: 1280, height: 800 }],
+  ['phone', { width: 390, height: 844, touch: true }],
+] as const) {
   test(`on ${what}, a chat whose unread fits on screen keeps its New line under the head bar as more lays out below`, { skip }, async () => {
     const page = await browser.page(`${base}#/p/1/t/7`, size);
     await waitFor(page, 'the New line', `document.querySelector('#log > .unread-divider')`);

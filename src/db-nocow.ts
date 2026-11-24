@@ -83,7 +83,12 @@ function fsyncPath(path: string) {
 }
 
 /** A Pacific-free, sortable stamp for the backup's name: 20261115-180102. */
-const stamp = (now: Date) => now.toISOString().replace(/\.\d+Z$/, '').replace(/[-:]/g, '').replace('T', '-');
+const stamp = (now: Date) =>
+  now
+    .toISOString()
+    .replace(/\.\d+Z$/, '')
+    .replace(/[-:]/g, '')
+    .replace('T', '-');
 
 /** The most the copy may take: the server isn't listening yet, and tools/deploy.sh rolls back a restart that isn't healthy in 30 s. */
 export const COPY_BUDGET_MS = 20_000;
@@ -146,7 +151,10 @@ function move(db: string, ops: NoCowOps, now: Date, budgetMs: number): NoCowResu
     // In a process of its own, so a cold disk can't hold the start past deploy's health wait: it's killed instead.
     const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), db, tmp], {
       argv0: 'citadel-server', // ananicy runs anything called node at idle priority (deploy/priority.md)
-      timeout: budgetMs, killSignal: 'SIGKILL', encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: budgetMs,
+      killSignal: 'SIGKILL',
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     if (r.error || r.signal) throw new Error(r.signal ? `the copy took over ${budgetMs / 1000} s` : `the copy could not start: ${r.error!.message}`);
     if (r.status === BUSY) {

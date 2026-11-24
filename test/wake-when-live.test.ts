@@ -113,14 +113,22 @@ test('resolve accepts hashes the live checkout or the scheme repo knows, and not
 
 test('wake messages go through the runner without counting toward or being held by the loop guard', async () => {
   const fake = join(root, 'claude-fake');
-  writeFileSync(fake, `#!${process.execPath}
+  writeFileSync(
+    fake,
+    `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+  );
   chmodSync(fake, 0o755);
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const id = minion();
   store.setTicketDir(id, root, null);
   const w = new LiveWaiters(store, repo, git('rev-parse', 'HEAD'), (t, text) => runner.send(t, APP_NAME, text));
@@ -129,7 +137,10 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
     await w.check(commit());
     await until('the turn to stop', async () => !runner.isRunning(id));
   }
-  const said = store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data));
+  const said = store
+    .listEvents(id)
+    .filter((e) => e.kind === 'user_message')
+    .map((e) => JSON.parse(e.data));
   assert.equal(said.length, 10);
   assert.ok(said.every((m) => m.author === APP_NAME));
   assert.equal(store.getSetting(`loop:${id}`), null);
@@ -367,10 +378,17 @@ test('checks run one at a time, and a waiter added while one runs is kept (#526)
     assert.equal(asked, 2, 'which waits for the first to end');
     answer();
     assert.equal(await first, 0);
-    assert.deepEqual(w.list().map((o) => o.ticket), [slow, late], 'the first check kept the waiter added while it ran');
+    assert.deepEqual(
+      w.list().map((o) => o.ticket),
+      [slow, late],
+      'the first check kept the waiter added while it ran',
+    );
     assert.equal(await second, 0);
     assert.equal(await w.check(commit()), 1, 'and the next deploy wakes it');
-    assert.deepEqual(sent.map((s) => s.id), [late]);
+    assert.deepEqual(
+      sent.map((s) => s.id),
+      [late],
+    );
   } finally {
     store.setSetting('wake-when-live', []);
   }

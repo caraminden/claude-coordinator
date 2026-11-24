@@ -39,7 +39,9 @@ export function cardHref(ticket: { project_id: number; kind: string; number: num
 }
 
 const clip = (s: unknown, n = 80) => {
-  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  const t = String(s ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 };
 
@@ -64,7 +66,13 @@ export function cardLabel(kind: string, data: any): string {
   if (kind === 'question' && data?.notice) return clip(data.notice);
   if (kind === 'question' && data?.doc) return clip(`picks on “${data.doc.title}”`);
   if (kind === 'question' && data?.secret) return clip(`a secret to save as ${data.secret.name}`);
-  if (kind === 'question') return clip((data?.questions ?? []).map((q: any) => q?.header || q?.question).filter(Boolean).join(', '));
+  if (kind === 'question')
+    return clip(
+      (data?.questions ?? [])
+        .map((q: any) => q?.header || q?.question)
+        .filter(Boolean)
+        .join(', '),
+    );
   return clip(typeof data?.input?.description === 'string' ? `${data.tool}: ${data.input.description}` : data?.tool);
 }
 
@@ -143,9 +151,11 @@ export function explainMisplaced(wrong: { card: CardLink; said: 'above' | 'below
   const lines = ['Your reply points the wrong way to a card:'];
   for (const { card, said } of wrong) {
     const name = `${card.kind} card${card.label ? ` "${card.label}"` : ''} (${card.href})`;
-    lines.push(card.below
-      ? `- It calls ${name} "${said}", but it sits below this reply: the chat keeps this turn's question and plan cards under the turn's words until someone writes or the turn ends, however early you asked. Say "below".`
-      : `- It calls ${name} "${said}", but it sits above this reply: it was posted before this turn's words (an earlier turn, or before someone wrote). Say "above".`);
+    lines.push(
+      card.below
+        ? `- It calls ${name} "${said}", but it sits below this reply: the chat keeps this turn's question and plan cards under the turn's words until someone writes or the turn ends, however early you asked. Say "below".`
+        : `- It calls ${name} "${said}", but it sits above this reply: it was posted before this turn's words (an earlier turn, or before someone wrote). Say "above".`,
+    );
   }
   return lines.join('\n');
 }
@@ -221,9 +231,11 @@ export function waitingNoCard(text: string): string | null {
 
 /** The send-back's line for a waiting claim with no card. */
 export function explainWaiting(sentence: string): string {
-  return `Your reply says something waits on a person ("${sentence.slice(0, 120)}") but links no open card. A by-hand step or a prose ask has no object they can answer. `
-    + 'Do one of: link the open card that holds it ([the card](its link)); put the step on a card with ask_question, to that person (Done / Later), and link it; or drop the line. '
-    + 'If nothing really waits on them, answer KEEP.';
+  return (
+    `Your reply says something waits on a person ("${sentence.slice(0, 120)}") but links no open card. A by-hand step or a prose ask has no object they can answer. ` +
+    'Do one of: link the open card that holds it ([the card](its link)); put the step on a card with ask_question, to that person (Done / Later), and link it; or drop the line. ' +
+    'If nothing really waits on them, answer KEEP.'
+  );
 }
 
 /** The send-back's lines for links to settled cards: each card and what happened to it. */

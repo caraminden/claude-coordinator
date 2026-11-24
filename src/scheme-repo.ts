@@ -32,7 +32,11 @@ async function git(args: string[], cwd?: string, as?: GithubEnv): Promise<string
   const { stdout } = await run('git', args, { cwd, env: asEnv(as), maxBuffer: 16 * 1024 * 1024, timeout: TIMEOUT_MS });
   return stdout.trim();
 }
-const gitOk = (args: string[], cwd?: string) => git(args, cwd).then(() => true, () => false);
+const gitOk = (args: string[], cwd?: string) =>
+  git(args, cwd).then(
+    () => true,
+    () => false,
+  );
 
 /** A failed command's own words: git and gh put them on stderr. git's hints follow its error, so they go. */
 export function errorText(err: any): string {
@@ -53,12 +57,16 @@ export async function citadelOwner(): Promise<string | null> {
 
 /** A GitHub repo name from a scheme name: lowercase letters, digits, dots and dashes; '' if nothing is left. */
 export function repoName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 100);
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 100);
 }
 
 /** git commits as the machine's configured user, or as Citadel where none is set. */
 export async function identity(cwd: string): Promise<string[]> {
-  return await gitOk(['config', 'user.email'], cwd) ? [] : ['-c', `user.name=${APP_NAME}`, '-c', 'user.email=citadel@localhost'];
+  return (await gitOk(['config', 'user.email'], cwd)) ? [] : ['-c', `user.name=${APP_NAME}`, '-c', 'user.email=citadel@localhost'];
 }
 
 /** `git init -b main` in `dir` with one commit: a README from the name and about text, and a .gitignore. */
@@ -67,7 +75,7 @@ export async function initRepo(dir: string, name: string, about: string): Promis
   await writeFile(join(dir, 'README.md'), `# ${name}\n${about ? `\n${about}\n` : ''}`);
   await writeFile(join(dir, '.gitignore'), 'node_modules/\n.env\n.env.*\n.DS_Store\n*.log\n');
   await git(['add', 'README.md', '.gitignore'], dir);
-  await git([...await identity(dir), 'commit', '--quiet', '-m', `Start ${name}`], dir);
+  await git([...(await identity(dir)), 'commit', '--quiet', '-m', `Start ${name}`], dir);
 }
 
 /** Whether `owner/name` already exists on GitHub: true, false, or null when gh couldn't tell (offline, signed out). */
@@ -92,7 +100,7 @@ export async function pushToGithub(dir: string, slug: string, checked: boolean, 
   if (await gitOk(['remote', 'get-url', 'origin'], dir)) {
     await git(['push', '--quiet', '-u', 'origin', 'main'], dir, as);
   } else {
-    if (!checked && await githubRepoExists(slug, as)) throw new Error(`GitHub repo ${slug} already exists`);
+    if (!checked && (await githubRepoExists(slug, as))) throw new Error(`GitHub repo ${slug} already exists`);
     await run('gh', ['repo', 'create', slug, '--private', '--source', dir, '--remote', 'origin', '--push'], { cwd: dir, env: asEnv(as), timeout: TIMEOUT_MS });
   }
   // A push sets no origin/HEAD; with it, ticketBase notices when a push elsewhere puts origin ahead.
@@ -121,11 +129,16 @@ export async function checkFolder(folder: string, dataDir: string): Promise<{ pa
   const data = await realpath(dataDir).catch(() => dataDir);
   if (within(path, data) || within(data, path)) return { error: `${folder} is ${APP_NAME}'s own data folder or inside it; pick the original folder instead` };
   const bare = (await git(['rev-parse', '--is-bare-repository'], path).catch(() => '')) === 'true';
-  const top = bare ? path : await git(['rev-parse', '--show-toplevel'], path).then((t) => realpath(t), () => null);
+  const top = bare
+    ? path
+    : await git(['rev-parse', '--show-toplevel'], path).then(
+        (t) => realpath(t),
+        () => null,
+      );
   if (top !== path) {
     return { error: top ? `${folder} is inside the git repo at ${top}; give that folder instead` : `${folder} isn't a git repo (no .git); run git init there and commit, or pick another folder` };
   }
-  if (!await gitOk(['rev-parse', '--verify', '--quiet', 'HEAD'], path)) return { error: `${folder} is a git repo with no commits yet; commit something first` };
+  if (!(await gitOk(['rev-parse', '--verify', '--quiet', 'HEAD'], path))) return { error: `${folder} is a git repo with no commits yet; commit something first` };
   return { path };
 }
 

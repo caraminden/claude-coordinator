@@ -16,7 +16,10 @@ const KEY = 'held-starts';
 export const HOLD_MAX_MS = 10 * 60_000;
 
 export interface HeldStart {
-  ticket: number; from: string; message: string; since: number;
+  ticket: number;
+  from: string;
+  message: string;
+  since: number;
   /** The brief's send options (a schedule's name, `brief: true`). */
   opts: Record<string, unknown>;
   /** The schedule that made it, so its run log can say how long it was held. */
@@ -36,11 +39,19 @@ export class HeldStarts {
   private d: HeldStartsDeps;
   private ticking = false;
 
-  constructor(d: HeldStartsDeps) { this.d = d; }
+  constructor(d: HeldStartsDeps) {
+    this.d = d;
+  }
 
-  private now() { return (this.d.now ?? Date.now)(); }
-  list(): HeldStart[] { return this.d.store.getSetting<HeldStart[]>(KEY) ?? []; }
-  has(ticket: number): boolean { return this.list().some((h) => h.ticket === ticket); }
+  private now() {
+    return (this.d.now ?? Date.now)();
+  }
+  list(): HeldStart[] {
+    return this.d.store.getSetting<HeldStart[]>(KEY) ?? [];
+  }
+  has(ticket: number): boolean {
+    return this.list().some((h) => h.ticket === ticket);
+  }
 
   /**
    * Send a freshly made minion's brief now, or hold it when the box is starved. `send` is what the caller would have
@@ -48,8 +59,15 @@ export class HeldStarts {
    */
   async start(h: Omit<HeldStart, 'since'>, send: () => void): Promise<boolean> {
     let r: PressureReading | null = null;
-    try { r = await this.d.read(); } catch { /* an unreadable box is not starved */ }
-    if (!r?.starved) { send(); return false; }
+    try {
+      r = await this.d.read();
+    } catch {
+      /* an unreadable box is not starved */
+    }
+    if (!r?.starved) {
+      send();
+      return false;
+    }
     const since = this.now();
     this.d.store.setSetting(KEY, [...this.list().filter((o) => o.ticket !== h.ticket), { ...h, since }]);
     this.d.store.updateTicket(h.ticket, { state: 'parked', note: `Waiting for the box (${r.why.replace(' pressure', '')}), starts by ${clockTime(since + HOLD_MAX_MS)}` });
@@ -69,7 +87,10 @@ export class HeldStarts {
     const all = this.list();
     const h = all.find((o) => o.ticket === ticket);
     if (!h) return null;
-    this.d.store.setSetting(KEY, all.filter((o) => o !== h));
+    this.d.store.setSetting(
+      KEY,
+      all.filter((o) => o !== h),
+    );
     return h;
   }
 
@@ -98,12 +119,18 @@ export class HeldStarts {
       const held = this.list();
       if (!held.length) return;
       let starved = true;
-      try { starved = (await this.d.read()).starved; } catch { starved = false; }
+      try {
+        starved = (await this.d.read()).starved;
+      } catch {
+        starved = false;
+      }
       const now = this.now();
       for (const h of held) {
         if (!starved) this.release(h.ticket, 'the box has room');
         else if (now - h.since >= HOLD_MAX_MS) this.release(h.ticket, `it waited ${HOLD_MAX_MS / 60_000} minutes`);
       }
-    } finally { this.ticking = false; }
+    } finally {
+      this.ticking = false;
+    }
   }
 }

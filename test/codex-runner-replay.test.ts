@@ -15,7 +15,12 @@ const root = mkdtempSync(join(resolve(tmpdir()), 'codex-log-cap-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
-const runner = new Runner(store, () => {}, () => ({}), '/bin/true');
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  '/bin/true',
+);
 
 test('appending a Codex turn past the log cap keeps only its newest lines, at most 2 * HANDOVER_MAX characters', () => {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Josh' });
@@ -30,6 +35,13 @@ test('appending a Codex turn past the log cap keeps only its newest lines, at mo
   assert.ok(kept.log.length <= 2 * HANDOVER_MAX, `the log is ${kept.log.length} characters, over ${2 * HANDOVER_MAX}`);
   assert.ok(kept.log.endsWith(line(999999)), 'the newest turn is kept');
   assert.ok(!kept.log.startsWith(line(0)), 'the oldest lines went');
-  assert.equal(kept.log.split('\n').filter(Boolean).every((l) => JSON.parse(l).pad), true, 'cut at a line, no half line left');
+  assert.equal(
+    kept.log
+      .split('\n')
+      .filter(Boolean)
+      .every((l) => JSON.parse(l).pad),
+    true,
+    'cut at a line, no half line left',
+  );
   assert.equal(kept.thread, 'th1');
 });

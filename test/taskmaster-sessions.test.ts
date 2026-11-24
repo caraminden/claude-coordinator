@@ -49,10 +49,13 @@ test('a one-person scheme keeps its one Taskmaster, which every lookup returns',
   for (const t of [store.getCoordinator(p.id), store.getOverlord(p.id), store.coordinatorFor(p.id, Cara.id), store.coordinatorFor(p.id, Josh.id), store.coordinatorFor(p.id, null)]) {
     assert.equal(t?.id, tm.id);
   }
-  assert.deepEqual(store.listCoordinators(p.id).map((t) => t.id), [tm.id]);
+  assert.deepEqual(
+    store.listCoordinators(p.id).map((t) => t.id),
+    [tm.id],
+  );
 });
 
-test('the split: the old row becomes the owner\'s with its session, a fresh Overlord and the writer\'s, exactly once', () => {
+test("the split: the old row becomes the owner's with its session, a fresh Overlord and the writer's, exactly once", () => {
   const { store, Cara, Josh, Rachel } = people('split.db');
   const p = store.createProject('Shared', null, Cara.id);
   const old = coordinator(store, p.id);
@@ -79,11 +82,14 @@ test('the split: the old row becomes the owner\'s with its session, a fresh Over
   const rachel = store.splitScheme(p.id, Rachel.id);
   assert.equal(store.listTickets(p.id).length, before + 3);
 
-  assert.equal(store.getCoordinator(p.id)!.id, old.id, 'getCoordinator stays the owner\'s (backup.ts)');
+  assert.equal(store.getCoordinator(p.id)!.id, old.id, "getCoordinator stays the owner's (backup.ts)");
   assert.equal(store.coordinatorFor(p.id, Josh.id)!.id, josh.id);
   assert.equal(store.coordinatorFor(p.id, Rachel.id)!.id, rachel.id);
   assert.equal(store.coordinatorFor(p.id, 9999)!.id, overlord.id, 'no Taskmaster of their own: the Overlord');
-  assert.deepEqual(store.listCoordinators(p.id).map((t) => t.id), [old.id, overlord.id, josh.id, rachel.id]);
+  assert.deepEqual(
+    store.listCoordinators(p.id).map((t) => t.id),
+    [old.id, overlord.id, josh.id, rachel.id],
+  );
   // The index still keeps one per person and one Overlord.
   assert.throws(() => store.db.prepare("INSERT INTO tickets (project_id, kind, title, status, cwd, permission_mode, created_by, created_at, updated_at, coordinator_of) VALUES (?, 'coordinator', 'x', 'new', '', 'default', 'x', 0, 0, ?)").run(p.id, Josh.id));
   assert.throws(() => store.db.prepare("INSERT INTO tickets (project_id, kind, title, status, cwd, permission_mode, created_by, created_at, updated_at, coordinator_of) VALUES (?, 'coordinator', 'x', 'new', '', 'default', 'x', 0, 0, NULL)").run(p.id));
@@ -153,7 +159,12 @@ test("a minion's owner: assigned, else requestedBy, else nobody; its touched set
   assert.equal(store.ownerCoordinator(lead)!.id, store.getOverlord(p.id)!.id);
   assert.equal(store.ownerCoordinator(feeder)!.id, josh.id);
   // The page's view carries the touched set, for its Leave item (#920).
-  const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   assert.deepEqual(sorted(runner.view(store.getTicket(assigned.id)!).touched), sorted([Josh.id, Lee.id, Rachel.id]));
 });
 
@@ -166,7 +177,7 @@ test('the digest: up to ten lines other Taskmasters logged since this one last r
   const elsewhere = coordinator(store, other.id);
   assert.deepEqual(store.digestFor(cara.id), []);
   store.noteDigest(p.id, josh.id, "Josh's Taskmaster started #4 Lairs");
-  store.noteDigest(p.id, cara.id, 'Cara\'s own line');
+  store.noteDigest(p.id, cara.id, "Cara's own line");
   store.noteDigest(other.id, elsewhere.id, 'another scheme');
   assert.deepEqual(store.digestFor(cara.id), ["Josh's Taskmaster started #4 Lairs"]);
   assert.deepEqual(store.digestFor(cara.id), [], 'read once');
@@ -189,11 +200,16 @@ test('the digest never marks a line read that it did not return (2D1)', () => {
   (store.db as { prepare: unknown }).prepare = (sql: string) => {
     const st = real(sql);
     if (!sql.includes('FROM taskmaster_digest') || sql.startsWith('DELETE')) return st;
-    const wrap = (m: 'get' | 'all') => (...a: unknown[]) => {
-      const out = (st[m] as (...x: unknown[]) => unknown)(...a);
-      if (!injected) { injected = true; real('INSERT INTO taskmaster_digest (project_id, by_ticket, at, text) VALUES (?, ?, ?, ?)').run(p.id, josh.id, Date.now(), 'between'); }
-      return out;
-    };
+    const wrap =
+      (m: 'get' | 'all') =>
+      (...a: unknown[]) => {
+        const out = (st[m] as (...x: unknown[]) => unknown)(...a);
+        if (!injected) {
+          injected = true;
+          real('INSERT INTO taskmaster_digest (project_id, by_ticket, at, text) VALUES (?, ?, ?, ?)').run(p.id, josh.id, Date.now(), 'between');
+        }
+        return out;
+      };
     return { get: wrap('get'), all: wrap('all') } as unknown as typeof st;
   };
   store.digestFor(cara.id);
@@ -207,7 +223,12 @@ test("a personal Taskmaster's turns run for its person; a card answer from someo
   coordinator(store, p.id);
   store.addMember(p.id, Josh.id);
   const josh = store.splitScheme(p.id, Josh.id);
-  const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   runner.personOf = (author) => store.findUser('name', author)?.id ?? null;
   const turnPerson = (t: any, batch: any[]) => (runner as any).turnPerson(t, store.getProject(p.id), batch);
   assert.equal(turnPerson(josh, []), Josh.id);
@@ -226,19 +247,27 @@ test("the digest rides at the head of a Taskmaster's next turn, once", async () 
   process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
   const prompts = join(root, 'prompts.jsonl');
   const fake = join(root, 'claude-fake');
-  writeFileSync(fake, `#!${process.execPath}
+  writeFileSync(
+    fake,
+    `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   require('node:fs').appendFileSync(${JSON.stringify(prompts)}, input + '\\n');
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+  );
   chmodSync(fake, 0o755);
   const { store, Cara, Josh } = people('digest-turn.db');
   const p = store.createProject('Shared', null, Cara.id);
   const cara = coordinator(store, p.id);
   const josh = store.splitScheme(p.id, Josh.id);
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   store.noteDigest(p.id, josh.id, "Josh's Taskmaster started #4 Lairs");
   const texts = () => jsonLines(prompts).map((l) => l.message.content.map((c: any) => c.text).join('\n'));
   runner.send(cara.id, 'Cara', 'hello');
@@ -289,9 +318,14 @@ function describeServer() {
       headers: { 'Content-Type': 'application/json', ...(auth.cookie ? { Cookie: auth.cookie } : {}), ...(auth.bearer ? { Authorization: `Bearer ${auth.bearer}` } : {}) },
       body: JSON.stringify(body),
     });
-    return { status: res.status, data: await res.json().catch(() => null) as any };
+    return { status: res.status, data: (await res.json().catch(() => null)) as any };
   };
-  const said = (ticketId: number, text: string) => db.listEvents(ticketId).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data)).find((m) => String(m.text).includes(text));
+  const said = (ticketId: number, text: string) =>
+    db
+      .listEvents(ticketId)
+      .filter((e) => e.kind === 'user_message')
+      .map((e) => JSON.parse(e.data))
+      .find((m) => String(m.text).includes(text));
 
   test("a second member's first message splits the scheme and lands in their own Taskmaster", async () => {
     const r = await post(`/api/tickets/${sharedTm.id}/messages`, { text: 'hello from Josh', after: true }, { cookie: cookies(Josh) });
@@ -348,13 +382,19 @@ function describeServer() {
     assert.equal(said(db.getOverlord(Shared.id)!.id, 'status: tests green'), undefined);
   });
 
-  test('handing a minion over leaves a held-mail line in both owners\' Taskmasters, and its reports follow', async () => {
+  test("handing a minion over leaves a held-mail line in both owners' Taskmasters, and its reports follow", async () => {
     const res = await fetch(`${srv.base}/api/tickets/${work.id}/properties`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json', Cookie: cookies(Cara) }, body: JSON.stringify({ properties: { assigned: 'Josh' } }),
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Cookie: cookies(Cara) },
+      body: JSON.stringify({ properties: { assigned: 'Josh' } }),
     });
     assert.equal(res.status, 200, await res.text());
     const josh = db.coordinatorFor(Shared.id, Josh.id)!;
-    const line = (id: number) => db.listEvents(id).map((e) => JSON.parse(e.data)).find((d) => d.mail && /handed #\d+ to Josh/.test(String(d.text)));
+    const line = (id: number) =>
+      db
+        .listEvents(id)
+        .map((e) => JSON.parse(e.data))
+        .find((d) => d.mail && /handed #\d+ to Josh/.test(String(d.text)));
     assert.ok(line(sharedTm.id), "Cara's Taskmaster gets the handover line");
     assert.ok(line(josh.id), "Josh's Taskmaster gets the handover line");
     await post(`/api/tickets/${work.id}/coordinator`, { text: 'after handover', need: 'ask' }, { bearer: tokens.agentToken(work.id) });
@@ -386,8 +426,14 @@ function describeServer() {
     assert.equal(r.status, 201, JSON.stringify(r.data));
     await stopTurns(dir);
     const lines = db.digestFor(sharedTm.id);
-    assert.ok(lines.some((l) => l === `Josh's Taskmaster started #${r.data.number} Lairs`), JSON.stringify(lines));
-    assert.ok(lines.some((l) => /handed #\d+ to Josh/.test(l)), 'the earlier handover too');
+    assert.ok(
+      lines.some((l) => l === `Josh's Taskmaster started #${r.data.number} Lairs`),
+      JSON.stringify(lines),
+    );
+    assert.ok(
+      lines.some((l) => /handed #\d+ to Josh/.test(l)),
+      'the earlier handover too',
+    );
     assert.ok(!db.digestFor(josh.id).some((l) => l.includes('Lairs')), 'not in its own');
   });
 

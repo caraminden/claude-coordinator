@@ -63,11 +63,12 @@ export function greenShas(runs: GreenRun[], quiet: Set<string> = new Set()): str
 /** `git merge-base --is-ancestor a b` in `dir`: true, false, or null when git can't tell (a commit it doesn't have). */
 export type Contains = (dir: string, ancestor: string, commit: string) => Promise<boolean | null>;
 
-export const gitContains: Contains = (dir, ancestor, commit) => new Promise((done) => {
-  execFile('git', ['merge-base', '--is-ancestor', ancestor, commit], { cwd: dir, timeout: 15_000 }, (err) => {
-    done(!err ? true : (err as { code?: unknown }).code === 1 ? false : null);
+export const gitContains: Contains = (dir, ancestor, commit) =>
+  new Promise((done) => {
+    execFile('git', ['merge-base', '--is-ancestor', ancestor, commit], { cwd: dir, timeout: 15_000 }, (err) => {
+      done(!err ? true : (err as { code?: unknown }).code === 1 ? false : null);
+    });
   });
-});
 
 const GREEN = (projectId: number) => `last-green:${projectId}`;
 const PINS = 'last-green:pins';

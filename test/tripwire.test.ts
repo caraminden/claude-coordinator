@@ -13,7 +13,7 @@ const { TRIPWIRE } = testPins();
 
 const home = '/home/u';
 const data = `${home}/.local/share/claude-coordinator`;
-const cfg: TripwireConfig = { home, data, checkout: `${home}/claude-coordinator`, project: 2, claudeConfig: `${home}/.claude`, deployScript: false, env: { TMPDIR: `${data}/projects/2/tmp/9`, PATH: "/usr/bin:/bin" } };
+const cfg: TripwireConfig = { home, data, checkout: `${home}/claude-coordinator`, project: 2, claudeConfig: `${home}/.claude`, deployScript: false, env: { TMPDIR: `${data}/projects/2/tmp/9`, PATH: '/usr/bin:/bin' } };
 const worktree = `${data}/projects/2/tickets/9`;
 
 const WHY = 'Delete the DB copies Cara approved in #54';
@@ -101,9 +101,9 @@ const BLOCKED: [string, string?][] = [
   ['killall node'],
   ['bash -c "pkill -f dev.ts"'],
   // a kill fed by grep over the whole socket table: an empty $P matched every listener (#299)
-  ['U=$(grep -o "http://[^ ]*" $TMPDIR/dev.log); P=$(echo $U | grep -o \':[0-9]*/\' | tr -d \':/\'); kill $(ss -ltnp | grep ":$P " | grep -o \'pid=[0-9]*\' | cut -d= -f2); sleep 1'],
+  ["U=$(grep -o \"http://[^ ]*\" $TMPDIR/dev.log); P=$(echo $U | grep -o ':[0-9]*/' | tr -d ':/'); kill $(ss -ltnp | grep \":$P \" | grep -o 'pid=[0-9]*' | cut -d= -f2); sleep 1"],
   ['kill `ss -ltnp | grep 8080 | grep -o "pid=[0-9]*" | cut -d= -f2`'],
-  ["ss -ltnp | grep \":$P \" | grep -oP 'pid=\\K[0-9]+' | xargs -r kill"],
+  ['ss -ltnp | grep ":$P " | grep -oP \'pid=\\K[0-9]+\' | xargs -r kill'],
   ["netstat -tlnp | awk '/:8080/ {print $7}' | cut -d/ -f1 | xargs kill -9"],
   ['lsof -iTCP -sTCP:LISTEN -t | xargs kill'],
   ['kill $(lsof -t -i | grep node)'],
@@ -575,7 +575,7 @@ const ALLOWED = [
   'sqlite3 app.db .dump',
   "sqlite3 dev.db 'select * from credentials'",
   "sqlite3 state.db 'create table t(x)'",
-  "sqlite3 \"$TMPDIR/state.db\" 'select 1'",
+  'sqlite3 "$TMPDIR/state.db" \'select 1\'',
   // #468 S01-9: after a lost cd, a push of a named branch, or of HEAD (its branch unknown)
   'cd "$WT" && git push -u origin ticket/9',
   'cd "$WT" && git push --force-with-lease origin HEAD',
@@ -755,7 +755,10 @@ test('a soft or mixed reset onto a commit the branch lacks is refused: the next 
   const tmp = mkdtempSync(join(tmpdir(), 'tripwire-squash-'));
   const c = { ...cfg, home: join(tmp, 'home/me'), data: tmp }; // a home of its own: with $HOME's, a TMPDIR beside it (burn-in's RUNNER_TEMP) reads as another person's home
   const wt = join(tmp, 'projects/2/tickets/9');
-  const sh = (cmd: string) => execSync(cmd, { cwd: wt, stdio: 'pipe', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).toString().trim();
+  const sh = (cmd: string) =>
+    execSync(cmd, { cwd: wt, stdio: 'pipe', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } })
+      .toString()
+      .trim();
   try {
     mkdirSync(wt, { recursive: true });
     // A default branch called trunk: nothing here may lean on the name main.
@@ -796,7 +799,7 @@ test('once tools/deploy.sh exists, it is still allowed', () => {
 test('a Taskmaster in its own scheme folder can work; one in another scheme cannot write', () => {
   assert.equal(bash('echo x > notes.md', `${data}/projects/2/coordinator`), null);
   assert.ok(bash('echo x > notes.md', `${data}/projects/1/coordinator`));
-  assert.ok(tripwire({ tool_name: 'Bash', tool_input: { command: 'touch x' } , cwd: `${data}/projects/2/coordinator` }, { ...cfg, project: 1 }));
+  assert.ok(tripwire({ tool_name: 'Bash', tool_input: { command: 'touch x' }, cwd: `${data}/projects/2/coordinator` }, { ...cfg, project: 1 }));
 });
 
 test('an ask is a hard block without an explanation, in a Taskmaster turn, or from a file tool', () => {
@@ -866,7 +869,11 @@ test('reasons say why and what to do instead', () => {
 });
 
 test('the hook script blocks with exit 2, asks in a minion turn, and lets other calls through', () => {
-  const hook = (ask: boolean) => tripwireHooks(2, `${home}/.claude`, ask).PreToolUse[0].hooks[0].command.split(' ').slice(1).map((s: string) => s.slice(1, -1));
+  const hook = (ask: boolean) =>
+    tripwireHooks(2, `${home}/.claude`, ask)
+      .PreToolUse[0].hooks[0].command.split(' ')
+      .slice(1)
+      .map((s: string) => s.slice(1, -1));
   const [node, script, config] = hook(true);
   assert.equal(script, TRIPWIRE);
   const run = (input: object, c = config) => spawnSync(node, [script, c], { input: JSON.stringify(input), encoding: 'utf8' });
@@ -961,7 +968,17 @@ test("a minion can write in its TMPDIR, its scheme's tmp folder (#218)", () => {
 });
 
 test('no turn launches an ultra review: it is billed to a person, so only their click starts one (#432)', () => {
-  for (const command of ['claude ultrareview', 'claude ultrareview main --json --trust-workspace', 'cd /tmp && claude ultrareview 12', 'claude -p "/code-review ultra"', "claude -p '/ultrareview main'", '/home/cara/.local/bin/claude ultrareview', 'a=ultrareview; claude "$a" main --trust-workspace', 'claude "$(echo ultrareview)"', 'claude $UNKNOWN_SUB']) {
+  for (const command of [
+    'claude ultrareview',
+    'claude ultrareview main --json --trust-workspace',
+    'cd /tmp && claude ultrareview 12',
+    'claude -p "/code-review ultra"',
+    "claude -p '/ultrareview main'",
+    '/home/cara/.local/bin/claude ultrareview',
+    'a=ultrareview; claude "$a" main --trust-workspace',
+    'claude "$(echo ultrareview)"',
+    'claude $UNKNOWN_SUB',
+  ]) {
     const v = verdict(command);
     assert.ok(v && !v.ask, command);
     assert.match(v.reason, /ultra review is billed/, command);
@@ -982,7 +999,7 @@ test('a target the tripwire can now pin down: a function argument bound at its c
   const allowed: [string, string?][] = [
     // #709 and #717: a function writing to its argument, called with literal names
     ['cd "$TMPDIR" && mkdir -p src && cd src\nf(){ gh api "repos/$1/contents/$2?ref=$3" -H "Accept: application/vnd.github.raw" > "$4" 2>"$4.err" || { echo "FAIL $1 $2"; cat "$4.err"; }; }\nf obra/superpowers skills/writing-skills/SKILL.md 22f0b46 sp-writing.md\nf obra/superpowers skills/x/SKILL.md 22f0b46 sp-x.md'],
-    ["get(){ gh api \"repos/$1/contents/$2?ref=$3\" -H 'Accept: application/vnd.github.raw' > \"$4\"; }; get jame581/GodotPrompter skills/csharp-godot/SKILL.md d7b26cd cg.md"],
+    ['get(){ gh api "repos/$1/contents/$2?ref=$3" -H \'Accept: application/vnd.github.raw\' > "$4"; }; get jame581/GodotPrompter skills/csharp-godot/SKILL.md d7b26cd cg.md'],
     ['function save() { rm -f "${1}.old"; mv "$1" "$1.old"; }; save notes.md'],
     ['f() { rm -f "$1"; }; for x in a.txt b.txt; do f "$x"; done', tmp],
     ['cd "$TMPDIR" && f(){ gh api "repos/$1" > "$2"; }; f a/b out.md; f c/d out2.md'],
@@ -1048,17 +1065,15 @@ test('a target the tripwire can now pin down: a function argument bound at its c
 });
 
 test('env: names only pass, values stay refused, and the message says how to check one (#485)', () => {
-  for (const command of ['env | cut -d= -f1', "env | cut -d '=' -f 1 | sort", "env | awk -F= '{print $1}' | grep -i node", "env | sed 's/=.*//'", 'env | cut -f1 -d='])
-    assert.equal(bash(command), null, command);
-  for (const command of ['env', 'env | grep NAME', 'env | cut -d= -f2', 'env | cut -d= -f1-', 'env | cut -d= -f1,2', 'env | sort', 'env | sort | cut -d= -f1', "env | awk '{print}'", 'env > e.txt | cut -d= -f1', 'env; cut -d= -f1 x'])
-    assert.ok(verdict(command), command);
+  for (const command of ['env | cut -d= -f1', "env | cut -d '=' -f 1 | sort", "env | awk -F= '{print $1}' | grep -i node", "env | sed 's/=.*//'", 'env | cut -f1 -d=']) assert.equal(bash(command), null, command);
+  for (const command of ['env', 'env | grep NAME', 'env | cut -d= -f2', 'env | cut -d= -f1-', 'env | cut -d= -f1,2', 'env | sort', 'env | sort | cut -d= -f1', "env | awk '{print}'", 'env > e.txt | cut -d= -f1', 'env; cut -d= -f1 x']) assert.ok(verdict(command), command);
   // a value with a line break would put its later lines through as names
   assert.ok(tripwire({ tool_name: 'Bash', tool_input: { command: 'env | cut -d= -f1' }, cwd: '/tmp' }, { ...cfg, env: { X: 'a\nTOKEN=s' } }));
   assert.match(bash('env | grep NAME')!, /^`env`[^.]*\. Check one variable with `\[ -n "\$NAME" \]/);
   assert.match(bash('env | grep NAME')!, /env \| cut -d= -f1/);
 });
 
-test('git: --ours and --theirs mid-merge, and any checkout in a clone under the turn\'s TMPDIR (#485)', () => {
+test("git: --ours and --theirs mid-merge, and any checkout in a clone under the turn's TMPDIR (#485)", () => {
   const tmp = mkdtempSync(join(tmpdir(), 'tripwire-485-'));
   const c = { ...cfg, home: join(tmp, 'home/me'), data: tmp, env: { TMPDIR: join(tmp, 'projects/2/tmp/9') } };
   const wt = join(tmp, 'projects/2/tickets/9');
@@ -1076,8 +1091,7 @@ test('git: --ours and --theirs mid-merge, and any checkout in a clone under the 
     for (const ok of ['git checkout --ours a.txt', 'git checkout --theirs -- a.txt', `git checkout --ours -- ${wt}/a.txt`]) assert.equal(at(ok), null, ok);
     // --ours on a file with no open conflict, or on a folder or glob, stays refused; so does a folder without it.
     writeFileSync(join(wt, 'b.txt'), 'changed');
-    for (const no of ['git checkout -- .', 'git restore .', 'git checkout --ours b.txt', 'git checkout --ours -- a.txt b.txt', 'git checkout --ours -- .', "git checkout --theirs '*.txt'", 'git checkout --ours "$F"'])
-      assert.ok(at(no), no);
+    for (const no of ['git checkout -- .', 'git restore .', 'git checkout --ours b.txt', 'git checkout --ours -- a.txt b.txt', 'git checkout --ours -- .', "git checkout --theirs '*.txt'", 'git checkout --ours "$F"']) assert.ok(at(no), no);
     sh('git checkout -q -- b.txt');
     sh('git merge --abort');
 
@@ -1116,20 +1130,15 @@ test('systemd-run is a wrapper: the command it runs is checked past its options 
     "ss -ltnp | grep 8573 | awk '{print}' | systemd-run --user -P xargs -p kill",
   ])
     assert.ok(verdict(command), command);
-  for (const command of ['systemd-run --user --unit=x sleep 5', 'systemd-run --user --unit x -p MemoryMax=1G --collect sleep 5', 'systemd-run --user -P --wait -- ls /tmp'])
-    assert.equal(bash(command), null, command);
+  for (const command of ['systemd-run --user --unit=x sleep 5', 'systemd-run --user --unit x -p MemoryMax=1G --collect sleep 5', 'systemd-run --user -P --wait -- ls /tmp']) assert.equal(bash(command), null, command);
 });
 
 test('systemd-run --setenv counts for server.ts, a grep pattern is not a path, and the refusals name citadel-dev-copy (#485)', () => {
-  for (const command of ['systemd-run --user --setenv=DATA_DIR=/tmp/d --setenv=PORT=19999 node server.ts', 'systemd-run --user -E DATA_DIR=/tmp/d -E PORT=19999 --unit=dev node server.ts', 'systemd-run --user --setenv DATA_DIR=/tmp/d --setenv PORT=19999 node server.ts'])
-    assert.equal(bash(command), null, command);
-  for (const command of ['systemd-run --user --setenv=PORT=19999 node server.ts', 'systemd-run --user node server.ts', 'systemd-run --user --setenv=DATA_DIR=/tmp/d -- node server.ts --setenv=PORT=1'])
-    assert.ok(verdict(command), command);
+  for (const command of ['systemd-run --user --setenv=DATA_DIR=/tmp/d --setenv=PORT=19999 node server.ts', 'systemd-run --user -E DATA_DIR=/tmp/d -E PORT=19999 --unit=dev node server.ts', 'systemd-run --user --setenv DATA_DIR=/tmp/d --setenv PORT=19999 node server.ts']) assert.equal(bash(command), null, command);
+  for (const command of ['systemd-run --user --setenv=PORT=19999 node server.ts', 'systemd-run --user node server.ts', 'systemd-run --user --setenv=DATA_DIR=/tmp/d -- node server.ts --setenv=PORT=1']) assert.ok(verdict(command), command);
   // #827, #825, #366: a pattern grep searches for, never a file it reads
-  for (const command of ["podman images --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep citadel-claude | head -3", "podman ps -a --format '{{.Names}} {{.Status}}' 2>&1 | grep citadel-claude", 'grep -rn citadel-claude src/'])
-    assert.equal(bash(command), null, command);
-  for (const command of ['podman inspect citadel-claude-1', 'cat ~/.config/citadel-claude/settings.json', 'grep -f ~/.config/citadel-claude/x src'])
-    assert.ok(verdict(command), command);
+  for (const command of ["podman images --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep citadel-claude | head -3", "podman ps -a --format '{{.Names}} {{.Status}}' 2>&1 | grep citadel-claude", 'grep -rn citadel-claude src/']) assert.equal(bash(command), null, command);
+  for (const command of ['podman inspect citadel-claude-1', 'cat ~/.config/citadel-claude/settings.json', 'grep -f ~/.config/citadel-claude/x src']) assert.ok(verdict(command), command);
   assert.match(bash('node server.ts')!, /citadel-dev-copy start/);
   assert.match(bash('pkill -f server.ts')!, /citadel-dev-copy/);
 });
@@ -1140,13 +1149,19 @@ test('the six folders turns no longer deny by Read rule stay refused here, for e
   const dirs = [`${home}/.ssh`, `${home}/.config/claude-coordinator`, `${home}/.config/citadel-claude`, `${home}/.local/share/containers/storage`, '/run/user/1000/podman', '/run/user/1000/containers'];
   for (const d of dirs) {
     const f = `${d}/id_ed25519`;
-    for (const [tool, input] of [['Read', { file_path: f }], ['Grep', { pattern: 'x', path: d }], ['Grep', { pattern: 'x', path: f }], ['Glob', { pattern: '*', path: d }], ['Glob', { pattern: `${d}/**` }]] as const)
+    for (const [tool, input] of [
+      ['Read', { file_path: f }],
+      ['Grep', { pattern: 'x', path: d }],
+      ['Grep', { pattern: 'x', path: f }],
+      ['Glob', { pattern: '*', path: d }],
+      ['Glob', { pattern: `${d}/**` }],
+    ] as const)
       assert.ok(t(tool, input), `${tool} ${JSON.stringify(input)}`);
     for (const command of [`cat ${f}`, `grep -r x ${d}`, `head ${f}`, `cd ${d} && cat id_ed25519`]) assert.ok(bash(command), command);
   }
 });
 
-test('a Taskmaster\'s recursive search passes when no .env sits below its root, and is refused when one does or the walk runs out (#1030)', () => {
+test("a Taskmaster's recursive search passes when no .env sits below its root, and is refused when one does or the walk runs out (#1030)", () => {
   const tmp = mkdtempSync(join(tmpdir(), 'tripwire-env-'));
   try {
     const d = join(tmp, 'data');
@@ -1161,7 +1176,7 @@ test('a Taskmaster\'s recursive search passes when no .env sits below its root, 
     const grepTool = (path: string) => tripwire({ tool_name: 'Grep', tool_input: { pattern: 'SECRET', path }, cwd: d }, c)?.reason ?? null;
     for (const cmd of [`grep -rn SECRET ${repo}/src`, `grep -rn SECRET --exclude='.env*' ${repo}`, `rg --hidden SECRET ${repo}/src`, `cd ${repo}/src && grep -r SECRET .`, `grep -rn SECRET ${repo}/src ${repo}/web`]) assert.equal(run(cmd), null, cmd);
     assert.equal(grepTool(join(repo, 'src')), null);
-    assert.equal(run(`grep -rn SECRET ${repo}/tool`), null, 'git\'s object store holds files named by hash, so it is skipped');
+    assert.equal(run(`grep -rn SECRET ${repo}/tool`), null, "git's object store holds files named by hash, so it is skipped");
     assert.match(run(`grep -rn SECRET ${repo}/kit`) ?? '', /kit\/\.git\/\.env/, 'the rest of .git is walked: GNU grep searches it');
     // Only options grep reads as options count: a pattern that looks like one excludes nothing.
     assert.match(run(`grep -rn -e --exclude-dir=app -e SECRET ${repo}/app`) ?? '', /\.env\.local/);
@@ -1182,7 +1197,11 @@ test('a Taskmaster\'s recursive search passes when no .env sits below its root, 
     // A folder it can't read refuses rather than passes.
     mkdirSync(join(repo, 'src/locked'));
     chmodSync(join(repo, 'src/locked'), 0o000);
-    try { if (process.getuid?.() !== 0) assert.match(run(`grep -rn SECRET ${repo}/src`) ?? '', /could not read/); } finally { chmodSync(join(repo, 'src/locked'), 0o755); }
+    try {
+      if (process.getuid?.() !== 0) assert.match(run(`grep -rn SECRET ${repo}/src`) ?? '', /could not read/);
+    } finally {
+      chmodSync(join(repo, 'src/locked'), 0o755);
+    }
     // A search that follows symlinks can't be walked safely, so a link below it refuses (a pnpm workspace link in node_modules too); plain -r doesn't follow them.
     symlinkSync(join(repo, 'app'), join(repo, 'src/linked'));
     assert.equal(run(`grep -rn SECRET ${repo}/src`), null);
@@ -1203,7 +1222,9 @@ test('a Taskmaster\'s recursive search passes when no .env sits below its root, 
     assert.equal(envBelow([src], c, false, [], 9), null);
     assert.match(envBelow([src, src], c, false, [], 9) ?? '', /more than 9/, 'one budget for the whole search');
     assert.equal(envBelow([join(tmp, 'elsewhere')], c, false, [], 1), null, 'outside the closed folders nothing is walked');
-  } finally { rmSync(tmp, { recursive: true, force: true }); }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('a search refused for the credentials below its root names the folders to search instead, and those pass (#1718)', () => {
@@ -1223,14 +1244,14 @@ test('a search refused for the credentials below its root names the folders to s
       assert.ok(named.includes(`${data}/projects/2/repo`) && named.includes(`${data}/projects/2/shared/project`), `${command}: ${named}`);
     }
   }
-  assert.doesNotMatch(bash(`grep -rn token ${data}`) ?? '', /\.env/, 'a minion\'s turn never closes .env files (#656), so its refusal leaves them out');
+  assert.doesNotMatch(bash(`grep -rn token ${data}`) ?? '', /\.env/, "a minion's turn never closes .env files (#656), so its refusal leaves them out");
   assert.ok(instead('grep -rn token ~/.claude').includes(`${home}/.claude/projects`));
   assert.ok(instead('grep -rn token ~/.claude-3').includes(`${home}/.claude-3/projects`));
   const grepTool = tripwire({ tool_name: 'Grep', tool_input: { pattern: 'token', path: data }, cwd: worktree }, cfg)?.reason ?? '';
   assert.match(grepTool, new RegExp(`would read .*\`${data}/projects/2/repo\``));
 });
 
-test('a Taskmaster\'s search of a glob root expands it and checks each match, refusing on a .env, an unreadable folder or a fan-out past the budget (#1729)', () => {
+test("a Taskmaster's search of a glob root expands it and checks each match, refusing on a .env, an unreadable folder or a fan-out past the budget (#1729)", () => {
   const tmp = mkdtempSync(join(tmpdir(), 'tripwire-envglob-'));
   try {
     const d = join(tmp, 'data');
@@ -1240,12 +1261,10 @@ test('a Taskmaster\'s search of a glob root expands it and checks each match, re
     const c: TripwireConfig = { ...cfg, home: tmp, data: d, checkout: join(tmp, 'live'), envFiles: [d] };
     const run = (command: string, cwd = join(d, 'projects/2/coordinator')) => tripwire({ tool_name: 'Bash', tool_input: { command, description: 'read the schemes' }, cwd }, c)?.reason ?? null;
     // No .env below any match: passes, the brief's roots included.
-    for (const cmd of [`grep -rn X ${d}/projects/2/repo/src/*.ts`, `grep -rn X ${d}/projects/*/repo/tools/land.sh`, `grep -rn X '${d}/projects/*/repo/src'`, `grep -rn X ${d}/projects/[26]/repo`, `grep -rn X ${d}/projects/?/repo/tools`, `grep -rn X ${d}/nothing/*/here`])
-      assert.equal(run(cmd), null, cmd);
+    for (const cmd of [`grep -rn X ${d}/projects/2/repo/src/*.ts`, `grep -rn X ${d}/projects/*/repo/tools/land.sh`, `grep -rn X '${d}/projects/*/repo/src'`, `grep -rn X ${d}/projects/[26]/repo`, `grep -rn X ${d}/projects/?/repo/tools`, `grep -rn X ${d}/nothing/*/here`]) assert.equal(run(cmd), null, cmd);
     assert.equal(run('grep -rn X projects/*/repo/tools/land.sh', d), null, 'relative to the folder the turn is in');
     // A match with a .env, or a .env the glob itself matches (dotfiles count), refuses.
-    for (const cmd of [`grep -rn X ${d}/projects/*/repo`, `grep -rn X ${d}/projects/12/repo/*`, `grep -rn X ${d}/projects/1?/repo`, `grep -rn X ${d}/projects/*/repo/.e*`])
-      assert.match(run(cmd) ?? '', /projects\/12\/repo\/\.env/, cmd);
+    for (const cmd of [`grep -rn X ${d}/projects/*/repo`, `grep -rn X ${d}/projects/12/repo/*`, `grep -rn X ${d}/projects/1?/repo`, `grep -rn X ${d}/projects/*/repo/.e*`]) assert.match(run(cmd) ?? '', /projects\/12\/repo\/\.env/, cmd);
     // A glob before the closed folder (here only one repo is closed) is expanded and walked.
     const one: TripwireConfig = { ...c, envFiles: [join(d, 'projects/12/repo')] };
     assert.match(tripwire({ tool_name: 'Bash', tool_input: { command: `grep -rn X ${d}/projects/*/repo`, description: 'x' }, cwd: d }, one)?.reason ?? '', /projects\/12\/repo\/\.env/);
@@ -1264,7 +1283,11 @@ test('a Taskmaster\'s search of a glob root expands it and checks each match, re
     rmSync(join(d, 'projects/2/repo/cfg'));
     // A folder far from the closed ones that can't be listed matches nothing for the shell either, so it passes.
     mkdirSync(join(tmp, 'shut'), { mode: 0o000 });
-    try { assert.equal(envBelow([`${tmp}/shut/*/x`], c, false), null); } finally { chmodSync(join(tmp, 'shut'), 0o755); }
+    try {
+      assert.equal(envBelow([`${tmp}/shut/*/x`], c, false), null);
+    } finally {
+      chmodSync(join(tmp, 'shut'), 0o755);
+    }
     // zsh's ** and qualifiers, and POSIX classes: the expansion stops there and the folder above is walked whole.
     for (const g of [`${d}/projects/**/src`, `${d}/projects/1*/**/*.ts`, `${d}/projects/*(/)`, `${d}/projects/[[:digit:]]*/repo`]) assert.match(envBelow([g], c, false) ?? '', /projects\/12\/repo\/\.env/, g);
     assert.equal(envBelow([`${d}/projects/2/**/*.ts`], c, false), null);
@@ -1275,8 +1298,14 @@ test('a Taskmaster\'s search of a glob root expands it and checks each match, re
     assert.match(envBelow([`${d}/projects/2/repo/src/lib/*/x.ts`, `${d}/projects/2/repo/src/lib/d*`], c, false, [], 40) ?? '', /more than 40 files/, 'one budget for expanding and walking every root');
     // A folder on the glob's way that can't be read refuses.
     chmodSync(join(d, 'projects/6/repo'), 0o000);
-    try { if (process.getuid?.() !== 0) assert.match(envBelow([`${d}/projects/6/repo/*/x`], c, false) ?? '', /could not read/); } finally { chmodSync(join(d, 'projects/6/repo'), 0o755); }
-  } finally { rmSync(tmp, { recursive: true, force: true }); }
+    try {
+      if (process.getuid?.() !== 0) assert.match(envBelow([`${d}/projects/6/repo/*/x`], c, false) ?? '', /could not read/);
+    } finally {
+      chmodSync(join(d, 'projects/6/repo'), 0o755);
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('the path-in-a-variable and piped-SQL refusals name a command that passes (#1030)', () => {
@@ -1291,38 +1320,103 @@ test('the path-in-a-variable and piped-SQL refusals name a command that passes (
 });
 
 test('every way to print the whole environment is refused like env; one named harmless variable passes (#1317 T1)', () => {
-  for (const command of ['export', 'export -p', 'export -p | grep -i token', 'declare', 'declare -p', 'declare -x', 'declare -px', 'typeset', 'typeset -x', 'typeset -p', 'local', 'set', 'set | grep TOKEN', 'set -e; set', 'bash -c "export -p"', 'declare -p GH_TOKEN', 'typeset -p CITADEL_SECRET_X', 'typeset GITHUB_TOKEN', 'declare -p $V', "typeset -m '*'"]) {
+  for (const command of [
+    'export',
+    'export -p',
+    'export -p | grep -i token',
+    'declare',
+    'declare -p',
+    'declare -x',
+    'declare -px',
+    'typeset',
+    'typeset -x',
+    'typeset -p',
+    'local',
+    'set',
+    'set | grep TOKEN',
+    'set -e; set',
+    'bash -c "export -p"',
+    'declare -p GH_TOKEN',
+    'typeset -p CITADEL_SECRET_X',
+    'typeset GITHUB_TOKEN',
+    'declare -p $V',
+    "typeset -m '*'",
+  ]) {
     const v = verdict(command);
     assert.ok(v, command);
     assert.equal(v.ask, false, `${command}: a hard block`);
     assert.match(v.reason, /cut -d= -f1/, `${command}: says how to list names`);
   }
-  for (const command of ['declare -p PATH', 'typeset -p HOME', 'export PATH', 'export FOO=1 BAR=2', 'declare -x FOO=1', 'declare -f', 'declare -F', 'typeset -f my_fn', 'local x=1', 'local x', 'set -e', 'set -euo pipefail', 'set -o', 'set -- a b', 'set +x', 'f() { local -; set -e; }', 'declare "$k=$v"', 'declare -p "$k=$v"', 'export -p PATH'])
+  for (const command of [
+    'declare -p PATH',
+    'typeset -p HOME',
+    'export PATH',
+    'export FOO=1 BAR=2',
+    'declare -x FOO=1',
+    'declare -f',
+    'declare -F',
+    'typeset -f my_fn',
+    'local x=1',
+    'local x',
+    'set -e',
+    'set -euo pipefail',
+    'set -o',
+    'set -- a b',
+    'set +x',
+    'f() { local -; set -e; }',
+    'declare "$k=$v"',
+    'declare -p "$k=$v"',
+    'export -p PATH',
+  ])
     assert.equal(bash(command), null, command);
 });
 
 test('citadel-heavy and setsid are wrappers: the command they run is checked (#1317 T4)', () => {
   const db = `${data}/coordinator.db`;
-  for (const command of [`citadel-heavy --here rm -f ${db}`, `citadel-heavy rm -f ${db}`, `setsid rm -f ${db}`, `setsid -f -w rm -f ${db}`, 'setsid pkill node', 'citadel-heavy --here env', 'setsid env', 'setsid node server.ts', 'citadel-heavy --here node server.ts', 'heavy-unit --what dev node server.ts', `tools/heavy-unit --exec rm -f ${db}`, 'ss -ltnp | grep 8080 | grep -o "pid=[0-9]*" | cut -d= -f2 | setsid xargs kill'])
+  for (const command of [
+    `citadel-heavy --here rm -f ${db}`,
+    `citadel-heavy rm -f ${db}`,
+    `setsid rm -f ${db}`,
+    `setsid -f -w rm -f ${db}`,
+    'setsid pkill node',
+    'citadel-heavy --here env',
+    'setsid env',
+    'setsid node server.ts',
+    'citadel-heavy --here node server.ts',
+    'heavy-unit --what dev node server.ts',
+    `tools/heavy-unit --exec rm -f ${db}`,
+    'ss -ltnp | grep 8080 | grep -o "pid=[0-9]*" | cut -d= -f2 | setsid xargs kill',
+  ])
     assert.ok(verdict(command), command);
-  for (const command of ['citadel-heavy cargo test --workspace', 'citadel-heavy --here npm test', 'setsid -f sleep 5', 'citadel-heavy env FOO=1 cargo test', 'setsid env DATA_DIR=/tmp/d PORT=19998 node server.ts'])
-    assert.equal(bash(command), null, command);
+  for (const command of ['citadel-heavy cargo test --workspace', 'citadel-heavy --here npm test', 'setsid -f sleep 5', 'citadel-heavy env FOO=1 cargo test', 'setsid env DATA_DIR=/tmp/d PORT=19998 node server.ts']) assert.equal(bash(command), null, command);
 });
 
 test('server.ts is only refused when node (or a launcher) runs it, not when a search names node (#1317 T2)', () => {
-  for (const command of ['grep -n node src/server.ts', 'rg node server.ts', 'git log -S node -- src/server.ts', 'grep -rn "tsx" server.ts', 'cat node server.ts'])
-    assert.equal(bash(command), null, command);
-  for (const command of ['node server.ts', 'nohup node server.ts &', 'time node server.ts', 'npx tsx server.ts', 'npm exec -- tsx server.ts', 'pnpm exec node server.ts', 'bunx tsx server.ts', 'mise exec -- node server.ts', 'xargs node server.ts', '/usr/bin/node src/server.ts', 'taskset -c 0 node server.ts', 'strace -f node server.ts', 'tools/heavy-unit node server.ts'])
+  for (const command of ['grep -n node src/server.ts', 'rg node server.ts', 'git log -S node -- src/server.ts', 'grep -rn "tsx" server.ts', 'cat node server.ts']) assert.equal(bash(command), null, command);
+  for (const command of [
+    'node server.ts',
+    'nohup node server.ts &',
+    'time node server.ts',
+    'npx tsx server.ts',
+    'npm exec -- tsx server.ts',
+    'pnpm exec node server.ts',
+    'bunx tsx server.ts',
+    'mise exec -- node server.ts',
+    'xargs node server.ts',
+    '/usr/bin/node src/server.ts',
+    'taskset -c 0 node server.ts',
+    'strace -f node server.ts',
+    'tools/heavy-unit node server.ts',
+  ])
     assert.ok(verdict(command), command);
 });
 
 test('a push to heads/main is refused like refs/heads/main: git completes it (#1317 T3)', () => {
-  for (const command of ['git push origin heads/main', 'git push origin ticket/9:heads/main', 'git push origin HEAD:heads/master'])
-    assert.ok(verdict(command), command);
+  for (const command of ['git push origin heads/main', 'git push origin ticket/9:heads/main', 'git push origin HEAD:heads/master']) assert.ok(verdict(command), command);
   assert.equal(bash('git push origin ticket/9:heads-up'), null);
 });
 
-test('a dirty file checked out or restored: its diff is saved under the turn\'s TMPDIR, then the call runs (#1716)', async () => {
+test("a dirty file checked out or restored: its diff is saved under the turn's TMPDIR, then the call runs (#1716)", async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'tripwire-1716-'));
   const turnTmp = join(tmp, 'projects/2/tmp/9');
   const c = { ...cfg, home: join(tmp, 'home/me'), data: tmp, env: { TMPDIR: turnTmp } };
@@ -1363,7 +1457,19 @@ test('a dirty file checked out or restored: its diff is saved under the turn\'s 
     assert.equal(readFileSync(join(wt, 'a.txt'), 'utf8'), 'mine\n');
 
     // Every single-file form, from HEAD or the index, saves first.
-    for (const ok of ['git checkout HEAD -- a.txt', 'git checkout a.txt', 'git checkout HEAD a.txt', 'git checkout -q -- a.txt b.txt', 'git restore a.txt', 'git restore -- a.txt', 'git restore --staged --worktree a.txt', 'git restore --source=HEAD a.txt', `git -C ${wt} checkout -- a.txt`, 'bash -c "git checkout -- a.txt"', 'git checkout -- a.txt || git show HEAD:./a.txt > a.txt'])
+    for (const ok of [
+      'git checkout HEAD -- a.txt',
+      'git checkout a.txt',
+      'git checkout HEAD a.txt',
+      'git checkout -q -- a.txt b.txt',
+      'git restore a.txt',
+      'git restore -- a.txt',
+      'git restore --staged --worktree a.txt',
+      'git restore --source=HEAD a.txt',
+      `git -C ${wt} checkout -- a.txt`,
+      'bash -c "git checkout -- a.txt"',
+      'git checkout -- a.txt || git show HEAD:./a.txt > a.txt',
+    ])
       saved(ok);
     writeFileSync(join(wt, 'sub/c.txt'), 'mine\n');
     assert.match(readFileSync(saved('git checkout -- c.txt', join(wt, 'sub')), 'utf8'), /^\+mine$/m);
@@ -1379,7 +1485,12 @@ test('a dirty file checked out or restored: its diff is saved under the turn\'s 
     assert.equal(sh('git diff --cached --name-only'), 'a.txt\n');
     assert.equal(readFileSync(join(wt, 'a.txt'), 'utf8'), 'mine again\n');
     // From the index, only the unstaged part goes.
-    assert.deepEqual(savedAll('git checkout -- a.txt').map((f) => readFileSync(f, 'utf8')).join(''), readFileSync(unstaged, 'utf8'));
+    assert.deepEqual(
+      savedAll('git checkout -- a.txt')
+        .map((f) => readFileSync(f, 'utf8'))
+        .join(''),
+      readFileSync(unstaged, 'utf8'),
+    );
     // A staged edit whose file is back at HEAD in the worktree: `git diff HEAD` is empty, the staged patch isn't.
     writeFileSync(join(wt, 'a.txt'), 'a\n');
     const [only] = savedAll('git checkout HEAD -- a.txt');
@@ -1405,7 +1516,25 @@ test('a dirty file checked out or restored: its diff is saved under the turn\'s 
     assert.equal(patches(), before);
 
     // Still refused: a folder, a pattern, an unknown path, another commit's version, -f, a branch switch over the edit, stash, reset --hard.
-    for (const no of ['git checkout -- .', 'git checkout .', 'git checkout -- sub', 'git restore sub', 'git restore .', "git checkout -- '*.txt'", 'git checkout -- "$F"', 'git checkout -- {a,b}.txt', 'git checkout -- :/a.txt', 'git checkout other -- a.txt', 'git checkout other a.txt', 'git restore --source=other a.txt', 'git checkout -f -- a.txt', 'git checkout -p -- a.txt', 'git checkout other', 'git stash', 'git reset --hard'])
+    for (const no of [
+      'git checkout -- .',
+      'git checkout .',
+      'git checkout -- sub',
+      'git restore sub',
+      'git restore .',
+      "git checkout -- '*.txt'",
+      'git checkout -- "$F"',
+      'git checkout -- {a,b}.txt',
+      'git checkout -- :/a.txt',
+      'git checkout other -- a.txt',
+      'git checkout other a.txt',
+      'git restore --source=other a.txt',
+      'git checkout -f -- a.txt',
+      'git checkout -p -- a.txt',
+      'git checkout other',
+      'git stash',
+      'git reset --hard',
+    ])
       assert.ok(at(no), no);
     // A refusal later in the same call writes no patch.
     assert.equal(run('git checkout -- a.txt && git stash').code, 2);

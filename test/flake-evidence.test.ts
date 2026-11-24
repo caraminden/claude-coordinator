@@ -34,12 +34,28 @@ test('an error line quoting a secret keeps no secret', () => {
 });
 
 const LOG = [
-  'run-tests: 2 test file(s) failed', '✔ fine (1ms)', '✖ failing tests:', '',
-  'test at test/other.test.ts:5:1', '✖ other case (3ms)', '  Error: nope', '      at X (file:///w/_work/r/r/test/other.test.ts:6:1)', '',
-  'test at test/citadel-heavy.test.ts:324:1', '✖ a job that ran appends one line (2684.7ms)',
-  "  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:", '  + actual - expected', '', "    +   '1',", "    -   '0',",
-  '      at TestContext.<anonymous> (file:///w/_work/r/r/test/citadel-heavy.test.ts:334:10)', '    code: ERR_ASSERTION', 'run-tests: after',
-].map((l) => T + l).join('\n');
+  'run-tests: 2 test file(s) failed',
+  '✔ fine (1ms)',
+  '✖ failing tests:',
+  '',
+  'test at test/other.test.ts:5:1',
+  '✖ other case (3ms)',
+  '  Error: nope',
+  '      at X (file:///w/_work/r/r/test/other.test.ts:6:1)',
+  '',
+  'test at test/citadel-heavy.test.ts:324:1',
+  '✖ a job that ran appends one line (2684.7ms)',
+  '  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:',
+  '  + actual - expected',
+  '',
+  "    +   '1',",
+  "    -   '0',",
+  '      at TestContext.<anonymous> (file:///w/_work/r/r/test/citadel-heavy.test.ts:334:10)',
+  '    code: ERR_ASSERTION',
+  'run-tests: after',
+]
+  .map((l) => T + l)
+  .join('\n');
 
 test('a CI log gives the failing test of the file, its first error lines and no stack', () => {
   const f = failureIn(LOG, 'test/citadel-heavy.test.ts')!;
@@ -55,7 +71,13 @@ test('the evidence comes from the newest red run before the flake line, its fail
   const asked: string[] = [];
   const get = async (path: string) => {
     asked.push(path);
-    if (path.includes('/runs?branch=land')) return JSON.stringify({ workflow_runs: [{ id: 9, created_at: '2026-11-21T09:30:00Z', conclusion: 'failure' }, { id: 8, created_at: '2026-11-21T09:00:00Z', conclusion: 'failure' }] });
+    if (path.includes('/runs?branch=land'))
+      return JSON.stringify({
+        workflow_runs: [
+          { id: 9, created_at: '2026-11-21T09:30:00Z', conclusion: 'failure' },
+          { id: 8, created_at: '2026-11-21T09:00:00Z', conclusion: 'failure' },
+        ],
+      });
     if (path.includes('/runs?')) return '{}';
     if (path.endsWith('/runs/8/jobs')) return JSON.stringify({ jobs: [{ id: 80, conclusion: 'failure' }] });
     if (path.endsWith('/jobs/80/logs')) return LOG;
@@ -74,20 +96,33 @@ test('ingest stores the message and class of a CI sighting, none for others, and
   const at = Date.now() - 3_600_000;
   const d = new Date(at).toISOString();
   mkdirSync(join(dir, 'shared', 'retro-log', d.slice(0, 10)), { recursive: true });
-  writeFileSync(join(dir, 'shared', 'retro-log', d.slice(0, 10), 'land.md'), [
-    `- ${d.slice(11, 19)}Z · flake · test/a.test.ts · load 9.0 · ticket/1-x · in CI`,
-    `- ${d.slice(11, 19)}Z · flake · test/b.test.ts · load 9.0 · ticket/1-x · in CI`,
-    `- ${d.slice(11, 19)}Z · flake · test/c.test.ts · smoke · ticket/1-x`,
-  ].join('\n') + '\n');
+  writeFileSync(
+    join(dir, 'shared', 'retro-log', d.slice(0, 10), 'land.md'),
+    [`- ${d.slice(11, 19)}Z · flake · test/a.test.ts · load 9.0 · ticket/1-x · in CI`, `- ${d.slice(11, 19)}Z · flake · test/b.test.ts · load 9.0 · ticket/1-x · in CI`, `- ${d.slice(11, 19)}Z · flake · test/c.test.ts · smoke · ticket/1-x`].join('\n') + '\n',
+  );
   const fx = new FlakeFixes({
-    store: st, sharedDir: () => join(dir, 'shared'), start: async () => ({ id: 0 }), runs: async () => [], jobs: async () => [],
+    store: st,
+    sharedDir: () => join(dir, 'shared'),
+    start: async () => ({ id: 0 }),
+    runs: async () => [],
+    jobs: async () => [],
     evidence: async (_p, _b, file) => (file === 'test/a.test.ts' ? { name: 'case', message: 'Timed out waiting for x' } : null),
   });
   await fx.ingest(project, Date.now());
   const rows = st.db.prepare('SELECT file, test_name, message, class FROM flake_events ORDER BY file').all() as any[];
-  assert.deepEqual(rows.map((r) => [r.file, r.message, r.class]), [['test/a.test.ts', 'Timed out waiting for x', 'timed out waiting'], ['test/b.test.ts', '', ''], ['test/c.test.ts', '', '']]);
+  assert.deepEqual(
+    rows.map((r) => [r.file, r.message, r.class]),
+    [
+      ['test/a.test.ts', 'Timed out waiting for x', 'timed out waiting'],
+      ['test/b.test.ts', '', ''],
+      ['test/c.test.ts', '', ''],
+    ],
+  );
   const m = st.flakeMessages(project.id, 'test/a.test.ts', 0);
-  assert.deepEqual(m.messages.map((x) => [x.count, x.cls, x.test]), [[1, 'timed out waiting', 'case']]);
+  assert.deepEqual(
+    m.messages.map((x) => [x.count, x.cls, x.test]),
+    [[1, 'timed out waiting', 'case']],
+  );
   assert.equal(st.flakeMessages(project.id, 'test/b.test.ts', 0).none, 1, 'a sighting with no message is counted as "no message kept"');
   assert.match(flakeBrief('test/a.test.ts', 1, [], m.messages).message, /Timed out waiting for x/);
 });

@@ -7,11 +7,7 @@
  * (machine-agent.mjs --install), from its own folder, logging there. Any shell: fish too.
  */
 export function machineSetupPosix(url, name, token) {
-  return [
-    'mkdir -p ~/coordinator-agent && cd ~/coordinator-agent &&',
-    `curl -fsSLO ${url}/machine-agent.mjs &&`,
-    `node machine-agent.mjs ${url} ${token} --config machine-agent.json --install ${name}`,
-  ].join('\n');
+  return ['mkdir -p ~/coordinator-agent && cd ~/coordinator-agent &&', `curl -fsSLO ${url}/machine-agent.mjs &&`, `node machine-agent.mjs ${url} ${token} --config machine-agent.json --install ${name}`].join('\n');
 }
 
 /** Where a background agent logs, as the page shows it. */

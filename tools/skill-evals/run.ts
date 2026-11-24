@@ -27,7 +27,11 @@ export function firstSkill(stream: string): string {
   for (const line of stream.split('\n')) {
     if (!line.startsWith('{')) continue;
     let ev: ClaudeEvent;
-    try { ev = JSON.parse(line); } catch { continue; }
+    try {
+      ev = JSON.parse(line);
+    } catch {
+      continue;
+    }
     if (ev.type !== 'assistant') continue;
     for (const part of (ev.message?.content ?? []) as ContentBlock[]) {
       if (part.type === 'tool_use' && part.name === 'Skill' && typeof part.input?.skill === 'string') {
@@ -49,14 +53,19 @@ export function score(cases: Case[], results: Result[]): { rows: SkillRow[]; hit
   const byId = new Map(results.map((r) => [r.id, r.fired]));
   const rows = new Map<string, SkillRow>();
   const row = (skill: string) => rows.get(skill) ?? rows.set(skill, { skill, cases: 0, hits: 0, runs: 0, falseFires: 0 }).get(skill)!;
-  let hits = 0, total = 0;
+  let hits = 0,
+    total = 0;
   for (const c of cases) {
     const fired = (byId.get(c.id) ?? []).filter((f) => f !== 'error');
     const r = row(c.expect);
     r.cases++;
     for (const f of fired) {
-      total++; r.runs++;
-      if (ok(c, f)) { hits++; r.hits++; } else row(f).falseFires++;
+      total++;
+      r.runs++;
+      if (ok(c, f)) {
+        hits++;
+        r.hits++;
+      } else row(f).falseFires++;
     }
   }
   return { rows: [...rows.values()].sort((a, b) => a.skill.localeCompare(b.skill)), hits, total };
@@ -68,8 +77,7 @@ export function table(cases: Case[], results: Result[], skills: string[]): strin
   const { rows, hits, total } = score(cases, results);
   const byName = new Map(rows.map((r) => [r.skill, r]));
   const names = [...new Set([...skills, ...rows.map((r) => r.skill)])].sort();
-  const out = [`Overall: ${hits}/${total} runs fired an acceptable first skill (${pct(hits, total)}).`, '',
-    '| Skill | Cases | Hit rate | False fires |', '|---|---:|---:|---:|'];
+  const out = [`Overall: ${hits}/${total} runs fired an acceptable first skill (${pct(hits, total)}).`, '', '| Skill | Cases | Hit rate | False fires |', '|---|---:|---:|---:|'];
   for (const n of names) {
     const r = byName.get(n) ?? { cases: 0, hits: 0, runs: 0, falseFires: 0 };
     out.push(`| ${n} | ${r.cases} | ${r.cases ? `${pct(r.hits, r.runs)} (${r.hits}/${r.runs})` : 'no case'} | ${r.falseFires} |`);
@@ -86,37 +94,38 @@ export function table(cases: Case[], results: Result[], skills: string[]): strin
 
 // The cases whose picks changed between two result sets, an acceptable pick swapped for another included.
 export function flips(cases: Case[], before: Result[], after: Result[]): string {
-  const b = new Map(before.map((r) => [r.id, r.fired])), a = new Map(after.map((r) => [r.id, r.fired]));
+  const b = new Map(before.map((r) => [r.id, r.fired])),
+    a = new Map(after.map((r) => [r.id, r.fired]));
   const key = (f: string[] = []) => [...f].sort().join();
-  const lines = cases.filter((c) => key(b.get(c.id)) !== key(a.get(c.id)))
-    .map((c) => `| ${c.id} | ${[c.expect, ...(c.also ?? [])].join(' / ')} | ${(b.get(c.id) ?? []).join(', ')} | ${(a.get(c.id) ?? []).join(', ')} |`);
+  const lines = cases.filter((c) => key(b.get(c.id)) !== key(a.get(c.id))).map((c) => `| ${c.id} | ${[c.expect, ...(c.also ?? [])].join(' / ')} | ${(b.get(c.id) ?? []).join(', ')} | ${(a.get(c.id) ?? []).join(', ')} |`);
   return lines.length ? ['| Case | Expect | Before | After |', '|---|---|---|---|', ...lines].join('\n') : 'No case changed.';
 }
 
 export function kitSkills(kitDir: string): string[] {
-  return execFileSync('ls', [join(kitDir, 'skills')], { encoding: 'utf8' }).split('\n').filter((s) => s && !s.includes('.'));
+  return execFileSync('ls', [join(kitDir, 'skills')], { encoding: 'utf8' })
+    .split('\n')
+    .filter((s) => s && !s.includes('.'));
 }
 
 // Without a frame the model sits in an empty folder and treats "why didn't I get a notification" as small talk.
 // The frame is the same for every case and names no skill, so the descriptions stay the only variable.
-export const frame = (c: Case) => `You are a coding agent working in the git repository of the project "${c.source.replace(/ ?(#\d+|\(.*\))$/g, '')}", `
-  + 'one of several apps and tools a small group of friends builds with Claude Code. The next message comes from one of its people '
-  + 'or from the coordinating agent that briefs you. Start on it.';
+export const frame = (c: Case) =>
+  `You are a coding agent working in the git repository of the project "${c.source.replace(/ ?(#\d+|\(.*\))$/g, '')}", ` + 'one of several apps and tools a small group of friends builds with Claude Code. The next message comes from one of its people ' + 'or from the coordinating agent that briefs you. Start on it.';
 
 function runCase(kitDir: string, c: Case, model: string): Promise<string> {
   // An empty folder per run: what sits in the working folder sways the pick (a scratch folder full of files cut critique from 5/5 to 0/4).
   const cwd = mkdtempSync(join(tmpdir(), 'skill-eval-case-'));
   return new Promise((done) => {
-    const p = spawn('claude', ['-p', '--model', model, '--plugin-dir', kitDir, '--tools', 'Skill', '--max-turns', '1',
-      '--output-format', 'stream-json', '--verbose', '--setting-sources', '', '--no-session-persistence',
-      '--append-system-prompt', frame(c), c.text],
-    { cwd, stdio: ['ignore', 'pipe', 'ignore'] });
+    const p = spawn('claude', ['-p', '--model', model, '--plugin-dir', kitDir, '--tools', 'Skill', '--max-turns', '1', '--output-format', 'stream-json', '--verbose', '--setting-sources', '', '--no-session-persistence', '--append-system-prompt', frame(c), c.text], { cwd, stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     // The 120 s starts at claude's first output, not at spawn: tools/claude-pace can hold a nested session while memory
     // is low (#1748), and that wait isn't the case's. The outer 20 min only stops a claude that never says anything.
     let t = setTimeout(() => p.kill(), 20 * 60_000);
     p.stdout.on('data', (d) => {
-      if (!out) { clearTimeout(t); t = setTimeout(() => p.kill(), 120_000); }
+      if (!out) {
+        clearTimeout(t);
+        t = setTimeout(() => p.kill(), 120_000);
+      }
       out += d;
     });
     p.on('close', () => {
@@ -135,12 +144,14 @@ async function runAll(kitDir: string, cases: Case[], runs: number, jobs: number,
   const fired = new Map(cases.map((c) => [c.id, [] as string[]]));
   const queue = cases.flatMap((c) => Array.from({ length: runs }, () => c));
   let done = 0;
-  await Promise.all(Array.from({ length: jobs }, async () => {
-    for (let c = queue.shift(); c; c = queue.shift()) {
-      fired.get(c.id)!.push(await runCase(kitDir, c, model));
-      if (++done % 10 === 0 || done === cases.length * runs) process.stderr.write(`${label}: ${done}/${cases.length * runs}\n`);
-    }
-  }));
+  await Promise.all(
+    Array.from({ length: jobs }, async () => {
+      for (let c = queue.shift(); c; c = queue.shift()) {
+        fired.get(c.id)!.push(await runCase(kitDir, c, model));
+        if (++done % 10 === 0 || done === cases.length * runs) process.stderr.write(`${label}: ${done}/${cases.length * runs}\n`);
+      }
+    }),
+  );
   return cases.map((c) => ({ id: c.id, fired: fired.get(c.id)! }));
 }
 
@@ -163,16 +174,23 @@ Runs each case in tools/skill-evals/cases.json as one Sonnet turn with the kit l
   --out <file>    also write the report there`;
 
 async function main(argv: string[]) {
-  const arg = (k: string) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
+  const arg = (k: string) => {
+    const i = argv.indexOf(k);
+    return i >= 0 ? argv[i + 1] : undefined;
+  };
   if (argv.includes('--help') || argv.includes('-h')) return console.log(HELP);
   let cases = loadCases();
-  const skill = arg('--skill'), only = arg('--case');
+  const skill = arg('--skill'),
+    only = arg('--case');
   if (skill) cases = cases.filter((c) => c.expect === skill || (c.also ?? []).includes(skill));
   if (only) cases = cases.filter((c) => only.split(',').includes(c.id));
   if (!cases.length) throw new Error('no case matches');
-  const runs = Number(arg('--runs') ?? 1), jobs = Number(arg('--jobs') ?? 4), model = arg('--model') ?? 'sonnet';
+  const runs = Number(arg('--runs') ?? 1),
+    jobs = Number(arg('--jobs') ?? 4),
+    model = arg('--model') ?? 'sonnet';
   if (!(Number.isInteger(runs) && runs > 0 && Number.isInteger(jobs) && jobs > 0)) throw new Error('--runs and --jobs take a whole number above 0');
-  const ref = arg('--ref'), base = arg('--base');
+  const ref = arg('--ref'),
+    base = arg('--base');
   const after = ref ? kitAt(ref) : { dir: join(REPO, 'kit'), cleanup: () => {} };
   const label = ref ?? 'working tree';
   const failed: string[] = [];
@@ -189,9 +207,13 @@ async function main(argv: string[]) {
         errs(then);
         parts.push(`## Before (${base})`, '', table(cases, then, kitSkills(before.dir)), '');
         parts.push(`## After (${label})`, '', table(cases, now, skills), '', '## Cases that changed', '', flips(cases, then, now));
-      } finally { before.cleanup(); }
+      } finally {
+        before.cleanup();
+      }
     } else parts.push(`## ${label}`, '', table(cases, now, skills));
-  } finally { after.cleanup(); }
+  } finally {
+    after.cleanup();
+  }
   const report = parts.join('\n') + '\n';
   process.stdout.write(report);
   const out = arg('--out');
@@ -199,4 +221,8 @@ async function main(argv: string[]) {
   if (failed.length) throw new Error(`${failed.length} run(s) failed and were left out of the score (is claude logged in?): ${[...new Set(failed)].join(', ')}`);
 }
 
-if (import.meta.main) main(process.argv.slice(2)).catch((e) => { console.error(String(e?.message ?? e)); process.exit(1); });
+if (import.meta.main)
+  main(process.argv.slice(2)).catch((e) => {
+    console.error(String(e?.message ?? e));
+    process.exit(1);
+  });

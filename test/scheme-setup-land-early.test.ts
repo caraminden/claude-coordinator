@@ -14,7 +14,12 @@ const on = (check: string) => ({ EARLY_CHECK: '1', CHECK_LIGHT: check });
 const count = (dir: string) => (existsSync(join(dir, 'count')) ? readFileSync(join(dir, 'count'), 'utf8').split('\n').filter(Boolean).length : 0);
 const state = (r: { main: string }) => git(r.main, 'rev-parse', '--absolute-git-dir');
 // The line before land.sh's own last one (its refusal; the ship: line after it is dropped): the check's tail (this check prints one line).
-const tail = (stderr: string) => stderr.trimEnd().replace(/\nship: .*$/, '').split('\n').at(-2);
+const tail = (stderr: string) =>
+  stderr
+    .trimEnd()
+    .replace(/\nship: .*$/, '')
+    .split('\n')
+    .at(-2);
 
 test('a branch whose rebase onto main fails the check is refused before the line, with the last lines a red at the front gets, and never takes a ticket', () => {
   const runs: Record<string, ReturnType<ReturnType<typeof setup>['run']>> = {};
@@ -111,7 +116,7 @@ test('an early red only on known reds goes on into the line and says so; a new f
   assert.match(nr.stderr, /^land: smoke: the check failed on the rebased branch/m);
 });
 
-test("with lanes, a branch whose lane runs CHECK or CHECK_LIGHT runs CHECK_LIGHT early, and a lane with a check of its own runs none", () => {
+test('with lanes, a branch whose lane runs CHECK or CHECK_LIGHT runs CHECK_LIGHT early, and a lane with a check of its own runs none', () => {
   const local = `LANES=tools/lanes\nCHECK_LIGHT='echo light >>"$COUNT"; test ! -e docs/red'\nCHECK_ART=''\n`;
   const r = setup('echo full >>"$COUNT"', { EARLY_CHECK: '1' }, local);
   r.commit(r.main, 'tools/lanes', 'light docs/*\nart art/*\n');

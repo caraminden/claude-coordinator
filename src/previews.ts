@@ -62,8 +62,7 @@ const gitAsync = promisify(execFile);
 
 /** The commit build/<n> points at in a repo, the local branch first, else origin's; null when there is none. */
 export function buildTip(repoDir: string, n: number): string | null {
-  return git(['rev-parse', '--verify', '--quiet', `refs/heads/build/${n}^{commit}`], repoDir)
-    ?? git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/build/${n}^{commit}`], repoDir);
+  return git(['rev-parse', '--verify', '--quiet', `refs/heads/build/${n}^{commit}`], repoDir) ?? git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/build/${n}^{commit}`], repoDir);
 }
 
 const buildKey = (n: number) => `build-${n}`;
@@ -77,13 +76,18 @@ function health(port: number, ms = 3000): Promise<any> {
   return new Promise((resolve) => {
     const req = get({ host: '127.0.0.1', port, path: '/api/health' }, (res) => {
       let body = '';
-      res.setEncoding('utf8').on('data', (d) => (body += d)).on('error', () => resolve(null)).on('close', () => resolve(null)).on('end', () => {
-        try {
-          resolve(res.statusCode! >= 200 && res.statusCode! < 300 ? JSON.parse(body) : null);
-        } catch {
-          resolve(null);
-        }
-      });
+      res
+        .setEncoding('utf8')
+        .on('data', (d) => (body += d))
+        .on('error', () => resolve(null))
+        .on('close', () => resolve(null))
+        .on('end', () => {
+          try {
+            resolve(res.statusCode! >= 200 && res.statusCode! < 300 ? JSON.parse(body) : null);
+          } catch {
+            resolve(null);
+          }
+        });
     });
     const timer = setTimeout(() => req.destroy(), ms);
     req.on('error', () => resolve(null)).on('close', () => (clearTimeout(timer), resolve(null)));
@@ -127,9 +131,18 @@ export function scrub(to: string): void {
  */
 export function previewEnv(port: number, dir: string, password: string, secret: string): NodeJS.ProcessEnv {
   return {
-    PATH: process.env.PATH, HOME: process.env.HOME, LANG: process.env.LANG,
-    HOST: '127.0.0.1', PORT: String(port), DATA_DIR: dir, PREVIEW: '1', BOOT_CHECK: '1', CLAUDE_BIN: '/bin/false',
-    CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: password, SESSION_SECRET: secret,
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    LANG: process.env.LANG,
+    HOST: '127.0.0.1',
+    PORT: String(port),
+    DATA_DIR: dir,
+    PREVIEW: '1',
+    BOOT_CHECK: '1',
+    CLAUDE_BIN: '/bin/false',
+    CLAUDE_CONFIG_DIR: join(dir, 'claude'),
+    COORDINATOR_PASSWORD: password,
+    SESSION_SECRET: secret,
     CITADEL_HOST_SIGNALS: process.env.CITADEL_HOST_SIGNALS, // a test server's preview stays pinned (#1485); unset live
     CITADEL_ZONE: process.env.CITADEL_ZONE, // and in its test's zone (#1536); unset live
   };
@@ -312,7 +325,7 @@ export class Previews {
       const answer = await health(port);
       if (!answer) continue;
       // A branch from before preview mode would serve with turns and pushes switched on.
-      if (answer.preview !== true) throw await fail('This branch\'s server has no preview mode; rebase it onto main first');
+      if (answer.preview !== true) throw await fail("This branch's server has no preview mode; rebase it onto main first");
       break;
     }
     this.running.set(key, r);

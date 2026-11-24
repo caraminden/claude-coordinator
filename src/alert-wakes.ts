@@ -22,7 +22,11 @@ const TOLD = 'alert-told';
 const KIND = 'alert';
 
 /** A problem inside an alert: CI health's one alert holds several. `facts`: what the Taskmaster needs that the title lacks. */
-export interface AlertPart { id: string; title: string; facts?: string }
+export interface AlertPart {
+  id: string;
+  title: string;
+  facts?: string;
+}
 export interface Raised {
   /** Who the Mandate item is from: a scheme, or id 0 for Citadel-wide senders. */
   from: { id: number; name: string };
@@ -34,9 +38,21 @@ export interface Raised {
   /** Its problems; the alert itself is the one problem when left out. */
   parts?: AlertPart[];
 }
-interface Queued { sender: string; title: string; link: string; to: string[]; parts: AlertPart[] | null }
+interface Queued {
+  sender: string;
+  title: string;
+  link: string;
+  to: string[];
+  parts: AlertPart[] | null;
+}
 /** An `alert` row's payload. `note`: the line the waits readout shows. */
-interface Batch { first: number; last: number; alerts: Record<string, Queued>; note?: string; held?: boolean }
+interface Batch {
+  first: number;
+  last: number;
+  alerts: Record<string, Queued>;
+  note?: string;
+  held?: boolean;
+}
 type Told = Record<string, string[]>;
 
 export interface AlertWakeDeps {

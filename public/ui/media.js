@@ -213,8 +213,7 @@ export function scrubber(video, opts = {}) {
   if (endBtn) acts.append(endBtn);
   if (startBtn || endBtn) acts.append(clearButton);
   const retry = el('button', { type: 'button', class: 'cui-btn cui-small' }, 'Try again');
-  const fail = el('div', { class: 'cui-notice cui-scrub-fail', 'data-tone': 'danger', role: 'alert', hidden: true },
-    "This video won't play here: this browser can't decode it, or the file is missing. ", retry);
+  const fail = el('div', { class: 'cui-notice cui-scrub-fail', 'data-tone': 'danger', role: 'alert', hidden: true }, "This video won't play here: this browser can't decode it, or the file is missing. ", retry);
   const root = el('div', { class: 'cui-scrubber' }, play, main, acts, fail);
 
   const at = (frac) => frac * dur;
@@ -254,7 +253,10 @@ export function scrubber(video, opts = {}) {
     const band = n ? frames.offsetHeight : 0; // 34 px, 40 on a phone
     if (pins.start != null && band) marks.append(svg('rect', { x: 0, y: top, width: pct(pins.start), height: band }));
     if (pins.end != null && band) marks.append(svg('rect', { x: pct(pins.end), y: top, width: `${100 - parseFloat(pct(pins.end))}%`, height: band }));
-    for (const [which, name] of [['start', 'Start'], ['end', 'End']]) {
+    for (const [which, name] of [
+      ['start', 'Start'],
+      ['end', 'End'],
+    ]) {
       const v = pins[which];
       if (v == null) continue;
       const x = pct(v);
@@ -290,7 +292,12 @@ export function scrubber(video, opts = {}) {
     const t = video.currentTime || 0;
     const over = pins.end != null ? stopAtEnd && t >= pins.end / 1000 - 0.05 : pins.start != null && !!dur && t >= dur - 0.05;
     if (over) video.currentTime = (pins.start ?? 0) / 1000;
-    video.play()?.catch?.((e) => { if (e?.name === 'NotSupportedError') { broken = true; draw(); } }); // AbortError: a pause cut it short
+    video.play()?.catch?.((e) => {
+      if (e?.name === 'NotSupportedError') {
+        broken = true;
+        draw();
+      }
+    }); // AbortError: a pause cut it short
     if (user) opts.onUser?.('play');
   }
   const step = (sec, user = false) => seek((video.currentTime || 0) + sec, user);
@@ -309,8 +316,14 @@ export function scrubber(video, opts = {}) {
     (which === 'start' ? opts.onStart : opts.onEnd)?.(v);
   }
   function clear() {
-    if (pins.start != null && opts.onStart) { pins.start = null; opts.onStart(null); }
-    if (pins.end != null && opts.onEnd) { pins.end = null; opts.onEnd(null); }
+    if (pins.start != null && opts.onStart) {
+      pins.start = null;
+      opts.onStart(null);
+    }
+    if (pins.end != null && opts.onEnd) {
+      pins.end = null;
+      opts.onEnd(null);
+    }
     draw();
   }
 
@@ -320,7 +333,9 @@ export function scrubber(video, opts = {}) {
       for (const cv of [c.small, c.big]) {
         cv.width = Math.max(1, Math.round(90 * (sw / sh)));
         cv.height = 90;
-        try { cv.getContext('2d')?.drawImage(source, sx, sy, sw, sh, 0, 0, cv.width, cv.height); } catch {}
+        try {
+          cv.getContext('2d')?.drawImage(source, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+        } catch {}
       }
     };
   }
@@ -345,7 +360,7 @@ export function scrubber(video, opts = {}) {
     if (video.crossOrigin != null) capture.crossOrigin = video.crossOrigin;
     let i = 0;
     const next = () => {
-      if (i >= n || !root.isConnected && i > 0) return void capture.removeAttribute('src');
+      if (i >= n || (!root.isConnected && i > 0)) return void capture.removeAttribute('src');
       if (!Number.isFinite(capture.duration)) return; // a live stream has no length to cut frames from
       capture.currentTime = Math.min(capture.duration - 0.05, ((i + 0.5) * capture.duration) / n);
     };
@@ -372,18 +387,40 @@ export function scrubber(video, opts = {}) {
     }
     draw();
   };
-  const onError = () => { broken = true; draw(); };
+  const onError = () => {
+    broken = true;
+    draw();
+  };
   const onClick = () => toggle(true);
-  const listeners = [['loadedmetadata', onMeta], ['durationchange', onMeta], ['timeupdate', onTime], ['seeked', draw], ['play', draw], ['pause', draw], ['ended', draw], ['volumechange', draw], ['error', onError], ['click', onClick]];
+  const listeners = [
+    ['loadedmetadata', onMeta],
+    ['durationchange', onMeta],
+    ['timeupdate', onTime],
+    ['seeked', draw],
+    ['play', draw],
+    ['pause', draw],
+    ['ended', draw],
+    ['volumechange', draw],
+    ['error', onError],
+    ['click', onClick],
+  ];
   for (const [ev, fn] of listeners) video.addEventListener(ev, fn);
   // A <source> child that fails says so on itself, not on the video.
   for (const s of video.querySelectorAll('source')) s.addEventListener('error', onError);
 
   play.addEventListener('click', () => toggle(true));
-  mute.addEventListener('click', () => { video.muted = !video.muted; });
+  mute.addEventListener('click', () => {
+    video.muted = !video.muted;
+  });
   range.addEventListener('input', () => seek(Number(range.value), true));
-  range.addEventListener('pointerdown', () => { held = true; });
-  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) range.addEventListener(type, () => { held = false; draw(); });
+  range.addEventListener('pointerdown', () => {
+    held = true;
+  });
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture'])
+    range.addEventListener(type, () => {
+      held = false;
+      draw();
+    });
   range.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault();
@@ -391,7 +428,11 @@ export function scrubber(video, opts = {}) {
       step((e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 5 : 1), true);
     }
   });
-  retry.addEventListener('click', () => { broken = false; draw(); video.load(); });
+  retry.addEventListener('click', () => {
+    broken = false;
+    draw();
+    video.load();
+  });
   if (startBtn) startBtn.addEventListener('click', () => setPin('start'));
   if (endBtn) endBtn.addEventListener('click', () => setPin('end'));
   clearButton.addEventListener('click', clear);
@@ -407,11 +448,19 @@ export function scrubber(video, opts = {}) {
     frames.setPointerCapture?.(e.pointerId);
     toPointer(e);
   });
-  frames.addEventListener('pointermove', (e) => { if (dragging) toPointer(e); });
-  const stop = () => { dragging = false; };
+  frames.addEventListener('pointermove', (e) => {
+    if (dragging) toPointer(e);
+  });
+  const stop = () => {
+    dragging = false;
+  };
   frames.addEventListener('pointerup', stop);
   frames.addEventListener('pointercancel', stop);
-  cells.forEach((c, i) => c.b.addEventListener('click', (e) => { if (e.detail === 0) seek(at(i / n), true); }));
+  cells.forEach((c, i) =>
+    c.b.addEventListener('click', (e) => {
+      if (e.detail === 0) seek(at(i / n), true);
+    }),
+  );
   // Keys while focus is in the bar: Space plays, , and . step a frame, M mutes, S and E (pinKeys) pin.
   root.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
@@ -453,7 +502,12 @@ export function scrubber(video, opts = {}) {
 
 // ———————————————————————————————————————————————————————— the panner
 
-const DIRS = [['auto', 'Pan: there and back'], ['ltr', 'Pan: left to right'], ['rtl', 'Pan: right to left'], ['off', 'Pan: off']];
+const DIRS = [
+  ['auto', 'Pan: there and back'],
+  ['ltr', 'Pan: left to right'],
+  ['rtl', 'Pan: right to left'],
+  ['off', 'Pan: off'],
+];
 
 /**
  * A panorama in its box: it pans end to end and back (16 s a way), with a mini-map of the window, Pause, a
@@ -508,7 +562,10 @@ export function panner(img, opts = {}) {
   let set = -1; // the scrollLeft this part last set, so a person's own scroll can be told apart
   function place(pos) {
     const room = view.scrollWidth - view.clientWidth;
-    if (room > 0) { set = Math.round(pos * room); view.scrollLeft = set; }
+    if (room > 0) {
+      set = Math.round(pos * room);
+      view.scrollLeft = set;
+    }
     const w = Number(win.getAttribute('width'));
     const x = pos * (1000 - w);
     win.setAttribute('x', String(x));
@@ -517,7 +574,10 @@ export function panner(img, opts = {}) {
     shadeR.setAttribute('width', String(Math.max(0, 1000 - x - w)));
     look.value = String(Math.round(pos * 1000));
   }
-  const posOf = () => { const p = phase < 1 ? phase : 2 - phase; return (1 - Math.cos(Math.PI * p)) / 2; };
+  const posOf = () => {
+    const p = phase < 1 ? phase : 2 - phase;
+    return (1 - Math.cos(Math.PI * p)) / 2;
+  };
   function drawPause() {
     pause.textContent = paused ? '▶' : '❚❚';
     pause.setAttribute('aria-label', paused ? 'Pan' : 'Pause the pan');
@@ -541,13 +601,18 @@ export function panner(img, opts = {}) {
   let seen = false;
   let legs = 0;
   function tick(now) {
-    if (!root.isConnected) { if (seen) return; } else seen = true; // dropped from the page: stop
+    if (!root.isConnected) {
+      if (seen) return;
+    } else seen = true; // dropped from the page: stop
     if (!paused && !fits && last) {
       const next = phase + (now - last) / ms;
       if (Math.floor(next) > Math.floor(phase)) {
         // A leg (0→1, 1→2) ended: once, it stops on the end.
         opts.onLeg?.(++legs);
-        if (opts.once) { phase = Math.floor(next) % 2; setPaused(true); } else phase = next % 2;
+        if (opts.once) {
+          phase = Math.floor(next) % 2;
+          setPaused(true);
+        } else phase = next % 2;
       } else phase = next;
       opts.onProgress?.(phase % 1 || (paused ? 1 : 0));
     }
@@ -557,8 +622,14 @@ export function panner(img, opts = {}) {
   }
   const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(fit) : null;
   ro?.observe(view);
-  img.addEventListener('load', () => { sync(); fit(); });
-  if (img.complete) { sync(); fit(); }
+  img.addEventListener('load', () => {
+    sync();
+    fit();
+  });
+  if (img.complete) {
+    sync();
+    fit();
+  }
   view.addEventListener('scroll', () => {
     if (set >= 0 && Math.abs(view.scrollLeft - set) <= 1) return;
     const room = view.scrollWidth - view.clientWidth;
@@ -573,14 +644,27 @@ export function panner(img, opts = {}) {
     const w = Number(win.getAttribute('width')) / 1000;
     if (r.width) lookAt(((e.clientX - r.left) / r.width - w / 2) / Math.max(0.001, 1 - w), true);
   };
-  map.addEventListener('pointerdown', (e) => { dragging = true; map.setPointerCapture?.(e.pointerId); toPointer(e); });
-  map.addEventListener('pointermove', (e) => { if (dragging) toPointer(e); });
-  map.addEventListener('pointerup', () => { dragging = false; });
-  map.addEventListener('pointercancel', () => { dragging = false; });
+  map.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    map.setPointerCapture?.(e.pointerId);
+    toPointer(e);
+  });
+  map.addEventListener('pointermove', (e) => {
+    if (dragging) toPointer(e);
+  });
+  map.addEventListener('pointerup', () => {
+    dragging = false;
+  });
+  map.addEventListener('pointercancel', () => {
+    dragging = false;
+  });
   pick?.addEventListener('change', () => {
     dir = pick.value;
     if (dir === 'off') lookAt(0.5);
-    else { phase = dir === 'rtl' ? 1 : 0; setPaused(reduceMotion()); }
+    else {
+      phase = dir === 'rtl' ? 1 : 0;
+      setPaused(reduceMotion());
+    }
     opts.onPan(dir);
   });
   root.addEventListener('keydown', (e) => {
@@ -595,7 +679,9 @@ export function panner(img, opts = {}) {
     el: root,
     img,
     overlay,
-    get fits() { return fits; },
+    get fits() {
+      return fits;
+    },
     toggle: () => setPaused(!paused),
     play: () => setPaused(false),
     pause: () => setPaused(true),
@@ -653,9 +739,7 @@ export function lightbox(items, opts = {}) {
   const thumbs = items.map((item, i) => {
     const video = kindOf(item) === 'video';
     const name = item.alt ?? item.caption ?? (video ? 'Video' : 'Picture');
-    const pic = video && !item.thumb && !item.poster
-      ? el('video', { src: `${item.src}#t=0.1`, preload: 'metadata', muted: true, playsinline: true, 'aria-hidden': 'true' })
-      : el('img', { src: item.thumb ?? item.poster ?? item.src, alt: '', loading: 'lazy', class: item.rotate ? `cui-r${item.rotate}` : null });
+    const pic = video && !item.thumb && !item.poster ? el('video', { src: `${item.src}#t=0.1`, preload: 'metadata', muted: true, playsinline: true, 'aria-hidden': 'true' }) : el('img', { src: item.thumb ?? item.poster ?? item.src, alt: '', loading: 'lazy', class: item.rotate ? `cui-r${item.rotate}` : null });
     const b = el('button', { type: 'button', class: 'cui-lb-thumb', 'aria-label': `${i + 1}: ${name}` }, pic, video ? el('span', { class: 'cui-lb-badge', 'aria-hidden': 'true', text: '▶' }) : '');
     b.addEventListener('click', () => move(i));
     strip.append(el('li', {}, b));
@@ -668,7 +752,15 @@ export function lightbox(items, opts = {}) {
   if (opts.into) opts.into.append(root);
   else {
     // The kit dialog (#872), which also closes it on a backdrop click.
-    dialog = openDialog({ title: '', className: 'cui-lightbox', body: root, onClose: () => { stop(); opts.onClose?.(); } });
+    dialog = openDialog({
+      title: '',
+      className: 'cui-lightbox',
+      body: root,
+      onClose: () => {
+        stop();
+        opts.onClose?.();
+      },
+    });
     title = dialog.querySelector('.cui-dialog-head > h2');
   }
 
@@ -722,7 +814,9 @@ export function lightbox(items, opts = {}) {
 
   // A swipe across the stage on a touch screen steps; the panner's own swipe looks around instead.
   let swipe = null;
-  stage.addEventListener('pointerdown', (e) => { swipe = e.pointerType === 'touch' && !e.target.closest?.('.cui-pan-view, .cui-scrubber') ? { x: e.clientX, y: e.clientY } : null; });
+  stage.addEventListener('pointerdown', (e) => {
+    swipe = e.pointerType === 'touch' && !e.target.closest?.('.cui-pan-view, .cui-scrubber') ? { x: e.clientX, y: e.clientY } : null;
+  });
   stage.addEventListener('pointerup', (e) => {
     const s = swipe;
     swipe = null;
@@ -734,8 +828,12 @@ export function lightbox(items, opts = {}) {
   go(at);
   return {
     el: dialog ?? root,
-    get at() { return at; },
-    get current() { return current; },
+    get at() {
+      return at;
+    },
+    get current() {
+      return current;
+    },
     go,
     next: () => go(at + 1),
     prev: () => go(at - 1),

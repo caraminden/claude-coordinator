@@ -20,7 +20,9 @@ after(async () => {
 });
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -28,7 +30,8 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 // mise: records each call; a package called "broken" fails as a missing one would.
 const miseLog = join(root, 'mise.log');
@@ -54,19 +57,22 @@ const ids: Record<string, number> = {};
 let ticket: any;
 
 let srv: Booted;
-const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) =>
-  ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
+const call = async (who: string, path: string, opts: { method?: string; body?: unknown } = {}) => ok(await srv.as(who === 'minion' ? { token: live() } : { cookie: cookies[who] })(path, opts.body || undefined, opts.method ?? 'GET'));
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
-const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
+const live = () =>
+  turns()
+    .filter((t) => t.token.startsWith(`${ticket.id}.`))
+    .at(-1).token;
 // Nothing queued too: a message that came in during a turn waits out its save with the minion not running, and the
 // next turn's token would log out the one live() last saw.
 // The status is the runner's live turns (#1618), not the row's, which on a loaded box still said idle for a minion
 // whose turn -- and whose only working token -- had started.
-const idle = () => until('the turn to end', async () => {
-  const { ticket: t } = await call('Cara', `/api/tickets/${ticket.id}`);
-  return t.status !== 'running' && t.queued === 0;
-});
+const idle = () =>
+  until('the turn to end', async () => {
+    const { ticket: t } = await call('Cara', `/api/tickets/${ticket.id}`);
+    return t.status !== 'running' && t.queued === 0;
+  });
 const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
 const propose = (body: object) => call('minion', `/api/tickets/${ticket.id}/host-tool`, { method: 'POST', body });
 const verdict = (who: string, planId: string, v: 'approve' | 'revise', notes?: string) => call(who, `/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId, verdict: v, notes } });
@@ -85,7 +91,10 @@ before(async () => {
   const store = new Store(join(srv.data, 'coordinator.db'));
   store.setProjectRepoDir(citadel.id, repo);
   // Josh is in the Citadel scheme only; Dana is in Delve only, and asks for the minion that proposes.
-  for (const [name, scheme] of [['Josh', citadel.id], ['Dana', delve.id]] as const) {
+  for (const [name, scheme] of [
+    ['Josh', citadel.id],
+    ['Dana', delve.id],
+  ] as const) {
     const made = await call('Cara', '/api/people', { method: 'POST', body: { name } });
     ids[name] = made.person.id;
     const res = await fetch(`${base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: `${name}-password-1` }) });

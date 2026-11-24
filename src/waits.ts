@@ -51,15 +51,51 @@ export const median = (xs: number[]): number | null => {
 };
 
 export const ordinal = (n: number) => (n === 1 ? 'next' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);
-const read = (f: string) => { try { return readFileSync(f, 'utf8'); } catch { return null; } };
-const stat = (f: string) => { try { return statSync(f); } catch { return null; } };
+const read = (f: string) => {
+  try {
+    return readFileSync(f, 'utf8');
+  } catch {
+    return null;
+  }
+};
+const stat = (f: string) => {
+  try {
+    return statSync(f);
+  } catch {
+    return null;
+  }
+};
 const mtime = (f: string) => stat(f)?.mtimeMs ?? null;
-const files = (dir: string) => { try { return readdirSync(dir); } catch { return []; } };
+const files = (dir: string) => {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+};
 // The same reads off the server's thread, for the poll that runs every 2 s (#1807): a blocking call waited up to 0.7 s on a busy disk.
-const readA = async (f: string) => { try { return await readFile(f, 'utf8'); } catch { return null; } };
-const statA = async (f: string) => { try { return await statFile(f); } catch { return null; } };
+const readA = async (f: string) => {
+  try {
+    return await readFile(f, 'utf8');
+  } catch {
+    return null;
+  }
+};
+const statA = async (f: string) => {
+  try {
+    return await statFile(f);
+  } catch {
+    return null;
+  }
+};
 const mtimeA = async (f: string) => (await statA(f))?.mtimeMs ?? null;
-const filesA = async (dir: string) => { try { return await readdir(dir); } catch { return []; } };
+const filesA = async (dir: string) => {
+  try {
+    return await readdir(dir);
+  } catch {
+    return [];
+  }
+};
 
 /** A line ticket's minion by its label: a branch, or "<scheme> #N" (a ship from another scheme's line). */
 export function labelTicket(store: Store, label: string) {
@@ -84,7 +120,13 @@ export function procAlive(pidStart: string): boolean {
 
 /** A test run's files done, of how many, and the newest one running (tools/progress-reporter.ts). */
 /** `failed`: files failed so far; `rerun`: the counts are the failed files' reruns, each alone. */
-export interface TestCounts { done: number; total: number; file: string; failed?: string[]; rerun?: boolean }
+export interface TestCounts {
+  done: number;
+  total: number;
+  file: string;
+  failed?: string[];
+  rerun?: boolean;
+}
 
 /** The counts in a progress file written since `since` (ms): an older one is a run before this one. */
 export function readTestCounts(f: string, since: number): TestCounts | null {
@@ -105,7 +147,8 @@ export function testCounts(done: unknown, total: unknown, file: unknown = '', fa
   const ok = (n: unknown) => (typeof n === 'number' && Number.isSafeInteger(n) && n >= 0) || (typeof n === 'string' && /^\d{1,9}$/.test(n));
   if (!ok(done) || !ok(total) || typeof file !== 'string') return null;
   if (!Array.isArray(failed) || failed.some((f) => typeof f !== 'string') || (phase !== 'suite' && phase !== 'rerun')) return null;
-  const d = Number(done), t = Number(total);
+  const d = Number(done),
+    t = Number(total);
   if (!(t > 0 && d <= t)) return null;
   const c: TestCounts = { done: d, total: t, file: file.slice(0, 200) };
   if (failed.length) c.failed = failed.slice(0, 20).map((f: string) => f.slice(0, 200));
@@ -116,11 +159,28 @@ export function testCounts(done: unknown, total: unknown, file: unknown = '', fa
 const countsText = (c: TestCounts) => `${c.done} of ${c.total} ${c.rerun ? 'failed files rerun alone' : 'files'}${c.file ? ` · ${c.file}` : ''}`;
 
 /** `orders`: its landing follows queue/.order (deploy-queue.sh's 5th ticket line, #1002); one from an older branch doesn't. */
-export interface LandTicket { seq: number; proc: string; got: number; label: string; phase: string; mtime: number; orders?: boolean; tests?: TestCounts | null }
+export interface LandTicket {
+  seq: number;
+  proc: string;
+  got: number;
+  label: string;
+  phase: string;
+  mtime: number;
+  orders?: boolean;
+  tests?: TestCounts | null;
+}
 
 /** The waiting tickets' numbers in the order people set on the Releases page (#1002): queue/.order, as deploy-queue.sh reads it. */
-const orderFrom = (text: string | null) => (text ?? '').split('\n').filter((l) => /^\d{10}$/.test(l)).map(Number);
-const tookFrom = (text: string | null) => (text ?? '').split('\n').filter((l) => /^\d+$/.test(l)).map(Number);
+const orderFrom = (text: string | null) =>
+  (text ?? '')
+    .split('\n')
+    .filter((l) => /^\d{10}$/.test(l))
+    .map(Number);
+const tookFrom = (text: string | null) =>
+  (text ?? '')
+    .split('\n')
+    .filter((l) => /^\d+$/.test(l))
+    .map(Number);
 
 /**
  * The land line in order, its gone processes left out, and the last landings' lengths in s: the holder first, then the
@@ -139,9 +199,11 @@ export function readLandLine(stateDir: string, alive = procAlive): { line: LandT
 export async function readLandLineA(stateDir: string, alive = procAlive): Promise<{ line: LandTicket[]; took: number[] }> {
   const q = join(stateDir, 'queue');
   const [line, took] = await Promise.all([readQueueA(q, 4, alive), readA(join(q, '.took'))]);
-  await Promise.all(line.map(async (t) => {
-    for (const log of testsLogs(t)) if ((t.tests = await readTestCountsA(join(stateDir, `${log}.progress`), t.mtime))) break;
-  }));
+  await Promise.all(
+    line.map(async (t) => {
+      for (const log of testsLogs(t)) if ((t.tests = await readTestCountsA(join(stateDir, `${log}.progress`), t.mtime))) break;
+    }),
+  );
   return { line, took: tookFrom(took) };
 }
 
@@ -159,14 +221,22 @@ function testsLogs(t: LandTicket): string[] {
  * core's tickets in deploy-queue.sh's queue/ (Citadel shipping on the core, #1323) keep theirs on the 8th line too.
  */
 export function readQueue(q: string, orderAt: number, alive = procAlive): LandTicket[] {
-  const tickets = files(q).filter((n) => /^\d+$/.test(n)).sort().map((name) => ({ name, text: read(join(q, name)), at: mtime(join(q, name)) }));
+  const tickets = files(q)
+    .filter((n) => /^\d+$/.test(n))
+    .sort()
+    .map((name) => ({ name, text: read(join(q, name)), at: mtime(join(q, name)) }));
   return queueFrom(orderFrom(read(join(q, '.order'))), tickets, orderAt, alive);
 }
 
 /** readQueue with every file read off the server's thread (#1807). */
 export async function readQueueA(q: string, orderAt: number, alive = procAlive): Promise<LandTicket[]> {
   const [order, names] = await Promise.all([readA(join(q, '.order')), filesA(q)]);
-  const tickets = await Promise.all(names.filter((n) => /^\d+$/.test(n)).sort().map(async (name) => ({ name, text: await readA(join(q, name)), at: await mtimeA(join(q, name)) })));
+  const tickets = await Promise.all(
+    names
+      .filter((n) => /^\d+$/.test(n))
+      .sort()
+      .map(async (name) => ({ name, text: await readA(join(q, name)), at: await mtimeA(join(q, name)) })),
+  );
   return queueFrom(orderFrom(order), tickets, orderAt, alive);
 }
 
@@ -204,7 +274,8 @@ export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: 
   const waiting = line.filter((t) => t.got === 0 && t.orders && !behindOld(line, t)).map((t) => t.seq);
   const order = moved != null && waiting.includes(moved) ? moveIn(waiting, seqs, moved) : [...new Set([...seqs.filter((n) => waiting.includes(n)), ...waiting])];
   if (!order.length) throw new Error('Nothing is waiting in line to reorder');
-  const f = join(q, '.order'), tmp = `${f}.tmp${process.pid}`;
+  const f = join(q, '.order'),
+    tmp = `${f}.tmp${process.pid}`;
   // By a rename, as the queue scripts write their tickets, so a waiter never reads half of it.
   writeFileSync(tmp, `# ${(typeof note === 'string' ? note : note(order)).replace(/[\x00-\x1f]+/g, ' ')}\n${order.map((n) => String(n).padStart(10, '0')).join('\n')}\n`);
   renameSync(tmp, f);
@@ -217,9 +288,13 @@ export function writeOrder(q: string, line: LandTicket[], seqs: number[], note: 
  * or where it was when neither still waits).
  */
 export function moveIn(line: number[], seqs: number[], moved: number): number[] {
-  const rest = line.filter((n) => n !== moved), at = seqs.indexOf(moved);
+  const rest = line.filter((n) => n !== moved),
+    at = seqs.indexOf(moved);
   const after = seqs.slice(at + 1).find((n) => rest.includes(n));
-  const before = seqs.slice(0, Math.max(at, 0)).reverse().find((n) => rest.includes(n));
+  const before = seqs
+    .slice(0, Math.max(at, 0))
+    .reverse()
+    .find((n) => rest.includes(n));
   const i = at <= 0 ? 0 : after != null ? rest.indexOf(after) : before != null ? rest.indexOf(before) + 1 : line.indexOf(moved);
   return [...rest.slice(0, i), moved, ...rest.slice(i)];
 }
@@ -240,7 +315,8 @@ export function landPhase(phase: string): { stage: string; word: string; key: st
   // tools/run-tests.sh's reruns of the failed files, each alone (#553), on perigee: land.sh's run or deploy.sh's.
   if (/^rerunning \d+ failed test files?$/.test(p)) return { stage: 'test', word: 'reruns', key: 'reruns', text: 'rerunning the failed test files alone on perigee', label: 'Reruns' };
   // The red train's bisect: its trial runs (#1366) and its search.
-  if (/^(finding the ship that turned the train red|testing the train again without its likely causes)/.test(p)) return { stage: 'test', word: 'bisect', key: 'bisect', text: p === 'finding the ship that turned the train red' ? 'the train went red in CI: finding the ship that turned it red' : 'the train went red in CI: testing it again without its likely causes', label: 'Bisect' };
+  if (/^(finding the ship that turned the train red|testing the train again without its likely causes)/.test(p))
+    return { stage: 'test', word: 'bisect', key: 'bisect', text: p === 'finding the ship that turned the train red' ? 'the train went red in CI: finding the ship that turned it red' : 'the train went red in CI: testing it again without its likely causes', label: 'Bisect' };
   // The kit core's own phases (Citadel on the core, #1323): its check, CI on a batch, and a member waiting on its head's deploy.
   if (/^(running the check|waiting to run the check|running the guards|running land_preflight)/.test(p)) return { stage: 'test', word: 'check', key: 'check', text: p, label: 'Check' };
   if (/^(CI is red|CI passed|checked \S+: CI runs on its batch's top)/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: p, label: 'CI' };
@@ -285,13 +361,22 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
   let forming = 0; // waiters past the train, in line order: they fill the next trains
   line.forEach((t, i) => {
     if (t.got > 0) {
-      const ph = landPhase(t.phase), c = t.tests, e = ph.key === 'ci' && early(t.label);
+      const ph = landPhase(t.phase),
+        c = t.tests,
+        e = ph.key === 'ci' && early(t.label);
       const size = riders.length ? `Train of ${members.length} (${members.join(', ')}) · ` : '';
-      const brief = e ? 'waiting for that run' : BRIEF[ph.key] ?? (riders.length ? ph.text : undefined);
+      const brief = e ? 'waiting for that run' : (BRIEF[ph.key] ?? (riders.length ? ph.text : undefined));
       out.set(t.label, {
-        kind: 'land', stage: ph.stage, since: t.mtime, usual: usual(`land:${ph.key}`), label: e ? EARLY_CI.label : ph.label,
-        chip: `ship · ${c ? `${c.done}/${c.total}` : e ? EARLY_CI.word : ph.word}`, text: `${size}${c ? `${ph.text}: ${countsText(c)}` : e ? EARLY_CI.text : ph.text}`,
-        ...(brief && { brief: riders.length ? `train of ${members.length} · ${brief}` : brief }), ...(c && { done: c.done, total: c.total }), ...(c?.failed && { failed: c.failed }),
+        kind: 'land',
+        stage: ph.stage,
+        since: t.mtime,
+        usual: usual(`land:${ph.key}`),
+        label: e ? EARLY_CI.label : ph.label,
+        chip: `ship · ${c ? `${c.done}/${c.total}` : e ? EARLY_CI.word : ph.word}`,
+        text: `${size}${c ? `${ph.text}: ${countsText(c)}` : e ? EARLY_CI.text : ph.text}`,
+        ...(brief && { brief: riders.length ? `train of ${members.length} · ${brief}` : brief }),
+        ...(c && { done: c.done, total: c.total }),
+        ...(c?.failed && { failed: c.failed }),
         ...(riders.length && { train: train('front') }),
       });
       return;
@@ -299,8 +384,14 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
     if (holder && riders.includes(t)) {
       const hp = landPhase(holder.phase);
       out.set(t.label, {
-        kind: 'land', stage: hp.stage, label: hp.label, since: holder.mtime, usual: usual(`land:${hp.key}`), chip: 'ship · riding',
-        text: `riding in ${name(holder.label)}'s train (${members.join(', ')}): ${hp.text}`, brief: `riding in ${name(holder.label)}'s train`,
+        kind: 'land',
+        stage: hp.stage,
+        label: hp.label,
+        since: holder.mtime,
+        usual: usual(`land:${hp.key}`),
+        chip: 'ship · riding',
+        text: `riding in ${name(holder.label)}'s train (${members.join(', ')}): ${hp.text}`,
+        brief: `riding in ${name(holder.label)}'s train`,
         train: train('rider'),
       });
       return;
@@ -314,11 +405,13 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
     const ahead = line.slice(0, i).filter((a) => !riders.includes(a) && !heldOf(a.phase));
     const place = ordinal(ahead.length + 1);
     const label = trainLabel(Math.floor(forming++ / TRAIN_SHIPS));
-    let text: string, usualS: number | null = null;
+    let text: string,
+      usualS: number | null = null;
     if (!ahead.length) {
       text = 'next in line, waiting for a queued restart or an older ship to let go of the lock';
     } else {
-      const head = ahead[0], word = head.got > 0 ? HEAD_WORD[landPhase(head.phase).key] : 'waiting';
+      const head = ahead[0],
+        word = head.got > 0 ? HEAD_WORD[landPhase(head.phase).key] : 'waiting';
       text = `${place} in line, behind ${name(head.label)} (${word})${ahead.length > 1 ? ` and ${ahead.length - 1} more` : ''}`;
       // From when it joined: what was left of the holder's landing then, and a whole one for each other waiter
       // ahead. Fixed while the line stands, so a holder running long turns the bar amber.
@@ -331,7 +424,14 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
   return out;
 }
 
-export interface HeavyJob { who: string; what: string; since: number; reason?: string; slot?: number; tests?: TestCounts | null }
+export interface HeavyJob {
+  who: string;
+  what: string;
+  since: number;
+  reason?: string;
+  slot?: number;
+  tests?: TestCounts | null;
+}
 
 /**
  * The inodes holding a flock(1) lock, from the kernel's list (/proc/locks: "1: FLOCK  ADVISORY  WRITE <pid> <maj>:<min>:<inode> 0 EOF");
@@ -348,8 +448,7 @@ export function flockedInodes(text = read('/proc/locks')): Set<number> | null {
 export function slotHeld(file: string, locked = flockedInodes()): boolean {
   return heldIn(locked, stat(file)?.ino);
 }
-const heldIn = (locked: Set<number> | null, ino: number | undefined) =>
-  !locked || (ino !== undefined && locked.has(ino)); // no lock list at all: trust the file; no lock file: nobody holds its lock
+const heldIn = (locked: Set<number> | null, ino: number | undefined) => !locked || (ino !== undefined && locked.has(ino)); // no lock list at all: trust the file; no lock file: nobody holds its lock
 
 /** heldSlots with the lock list and each slot's file read off the server's thread (#1807). */
 export function heldSlotsA(): (file: string) => Promise<boolean> {
@@ -371,11 +470,14 @@ const STALE_WAITER_MS = 60_000; // citadel-heavy freshens a waiter's file at lea
  * suite gets its counts from slot-N.progress, which citadel-heavy has tools/citadel-node write.
  */
 export function readHeavy(dir: string, now = Date.now(), held = heldSlots()): { holders: HeavyJob[]; waiters: HeavyJob[] } {
-  const holders: HeavyJob[] = [], waiters: HeavyJob[] = [];
+  const holders: HeavyJob[] = [],
+    waiters: HeavyJob[] = [];
   for (const name of files(dir)) {
-    const f = join(dir, name), m = name.match(/^slot-(\d+)\.who$/);
+    const f = join(dir, name),
+      m = name.match(/^slot-(\d+)\.who$/);
     if (m) {
-      const w = holderOf(read(f)?.trim()), at = mtime(f);
+      const w = holderOf(read(f)?.trim()),
+        at = mtime(f);
       if (w && at != null && held(join(dir, `slot-${m[1]}`))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, tests: readTestCounts(join(dir, `slot-${m[1]}.progress`), at) });
     } else if (/^wait-\d+-\d+$/.test(name) && now - (mtime(f) ?? 0) < STALE_WAITER_MS) {
       const w = waiterOf(read(f));
@@ -387,18 +489,22 @@ export function readHeavy(dir: string, now = Date.now(), held = heldSlots()): { 
 
 /** readHeavy with every file read off the server's thread (#1807); `held` may answer later. */
 export async function readHeavyA(dir: string, now = Date.now(), held: (slotFile: string) => boolean | Promise<boolean> = heldSlotsA()): Promise<{ holders: HeavyJob[]; waiters: HeavyJob[] }> {
-  const holders: HeavyJob[] = [], waiters: HeavyJob[] = [];
-  await Promise.all((await filesA(dir)).map(async (name) => {
-    const f = join(dir, name), m = name.match(/^slot-(\d+)\.who$/);
-    if (m) {
-      const [text, at] = await Promise.all([readA(f), mtimeA(f)]);
-      const w = holderOf(text?.trim());
-      if (w && at != null && await held(join(dir, `slot-${m[1]}`))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, tests: await readTestCountsA(join(dir, `slot-${m[1]}.progress`), at) });
-    } else if (/^wait-\d+-\d+$/.test(name) && now - ((await mtimeA(f)) ?? 0) < STALE_WAITER_MS) {
-      const w = waiterOf(await readA(f));
-      if (w) waiters.push(w);
-    }
-  }));
+  const holders: HeavyJob[] = [],
+    waiters: HeavyJob[] = [];
+  await Promise.all(
+    (await filesA(dir)).map(async (name) => {
+      const f = join(dir, name),
+        m = name.match(/^slot-(\d+)\.who$/);
+      if (m) {
+        const [text, at] = await Promise.all([readA(f), mtimeA(f)]);
+        const w = holderOf(text?.trim());
+        if (w && at != null && (await held(join(dir, `slot-${m[1]}`)))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, tests: await readTestCountsA(join(dir, `slot-${m[1]}.progress`), at) });
+      } else if (/^wait-\d+-\d+$/.test(name) && now - ((await mtimeA(f)) ?? 0) < STALE_WAITER_MS) {
+        const w = waiterOf(await readA(f));
+        if (w) waiters.push(w);
+      }
+    }),
+  );
   holders.sort((a, b) => a.slot! - b.slot!); // reads finish in any order
   return { holders, waiters: waiters.sort((a, b) => a.since - b.since) };
 }
@@ -413,11 +519,16 @@ function waiterOf(text: string | null): HeavyJob | null {
 export function heavyWaits({ holders, waiters }: ReturnType<typeof readHeavy>, usual: (key: string) => number | null, name: (who: string) => string): Map<string, Wait> {
   const out = new Map<string, Wait>();
   for (const h of holders) {
-    const c = h.tests, text = `running in heavy slot ${h.slot}: ${h.what}`;
+    const c = h.tests,
+      text = `running in heavy slot ${h.slot}: ${h.what}`;
     out.set(h.who, {
-      kind: 'heavy', stage: 'run', since: h.since, usual: usual(`heavy:run:${h.what}`),
+      kind: 'heavy',
+      stage: 'run',
+      since: h.since,
+      usual: usual(`heavy:run:${h.what}`),
       // Only a Node suite run through tools/citadel-node has counts; any other run shows elapsed against usual alone.
-      chip: c ? `tests ${c.done}/${c.total}` : 'heavy run', text: c ? `${text}: ${countsText(c)}` : text,
+      chip: c ? `tests ${c.done}/${c.total}` : 'heavy run',
+      text: c ? `${text}: ${countsText(c)}` : text,
       ...(c && { done: c.done, total: c.total }),
     });
   }
@@ -426,16 +537,19 @@ export function heavyWaits({ holders, waiters }: ReturnType<typeof readHeavy>, u
     if (w.reason !== 'ease' || out.has(w.who)) continue;
     out.set(w.who, { kind: 'heavy', stage: 'slot', chip: 'session · easing off memory', text: 'a nested Claude session waits while Citadel eases off memory: about one starts a minute per turn, and the ones running carry on', since: w.since, usual: null });
   }
-  waiters.filter((w) => w.reason !== 'ease').forEach((w, i) => {
-    const place = ordinal(i + 1);
-    const busy = holders.map((h) => name(h.who)).join(', ');
-    const text = w.reason === 'load'
-      ? 'a heavy slot is free, but the box is busy: it starts when the load eases, or within 5 min'
-      : w.reason === 'memory'
-      ? 'a heavy slot is free, but memory is short: it starts when room frees up, or within 5 min, with fewer workers'
-      : `${place} in line for a heavy slot${busy ? `, all held (${busy})` : ''}`;
-    out.set(w.who, { kind: 'heavy', stage: 'slot', chip: w.reason === 'load' ? 'slot · busy box' : w.reason === 'memory' ? 'slot · short on memory' : `slot · ${place}`, text, since: w.since, usual: usual('heavy:slot') });
-  });
+  waiters
+    .filter((w) => w.reason !== 'ease')
+    .forEach((w, i) => {
+      const place = ordinal(i + 1);
+      const busy = holders.map((h) => name(h.who)).join(', ');
+      const text =
+        w.reason === 'load'
+          ? 'a heavy slot is free, but the box is busy: it starts when the load eases, or within 5 min'
+          : w.reason === 'memory'
+            ? 'a heavy slot is free, but memory is short: it starts when room frees up, or within 5 min, with fewer workers'
+            : `${place} in line for a heavy slot${busy ? `, all held (${busy})` : ''}`;
+      out.set(w.who, { kind: 'heavy', stage: 'slot', chip: w.reason === 'load' ? 'slot · busy box' : w.reason === 'memory' ? 'slot · short on memory' : `slot · ${place}`, text, since: w.since, usual: usual('heavy:slot') });
+    });
   return out;
 }
 
@@ -449,7 +563,14 @@ export function landCi(w: Wait, ci: CiView): Wait {
   const text = ci.stage === 'queued' ? `waiting for CI: ${ci.text}; if none starts it soon, the suite runs on perigee` : `waiting for CI: ${ci.text}`;
   // The line keeps one counter, the landing's stage (Cara: "are the tests on step 3/6 or 10/13?"): CI's steps fill its piece.
   const train = w.train?.role === 'front';
-  return { ...w, chip: `ship · ${short}`, text: train ? `Train of ${w.train!.size} (${w.train!.members!.join(', ')}) · ${text}` : text, brief: `${train ? `train of ${w.train!.size} · ` : ''}CI: ${ci.step ?? ci.short}`, ...(ci.total ? { done: ci.done, total: ci.total } : {}), ...(ci.failed?.length ? { failed: ci.failed } : {}) };
+  return {
+    ...w,
+    chip: `ship · ${short}`,
+    text: train ? `Train of ${w.train!.size} (${w.train!.members!.join(', ')}) · ${text}` : text,
+    brief: `${train ? `train of ${w.train!.size} · ` : ''}CI: ${ci.step ?? ci.short}`,
+    ...(ci.total ? { done: ci.done, total: ci.total } : {}),
+    ...(ci.failed?.length ? { failed: ci.failed } : {}),
+  };
 }
 
 /** A minion's PR waiting on its CI run. */
@@ -544,7 +665,10 @@ export class Waits {
     }
     const n = this.d.interruptible();
     return {
-      kind: 'restart', stage: 'restart', since: at, usual: this.usual('restart'),
+      kind: 'restart',
+      stage: 'restart',
+      since: at,
+      usual: this.usual('restart'),
       chip: n ? `restart · ${n} turn${n === 1 ? '' : 's'}` : 'restart',
       text: n ? `the restart waits for ${n} running turn${n === 1 ? '' : 's'} to end` : 'restarting',
     };
@@ -596,10 +720,7 @@ export class Waits {
   /** Read the land line and heavy folder with no blocking file call (#1807), then apply them. */
   async poll() {
     const gen = ++this.reads;
-    const [land, heavy] = await Promise.all([
-      this.d.deployState ? readLandLineA(this.d.deployState, this.d.alive) : null,
-      readHeavyA(this.d.heavyDir, this.now(), this.d.held),
-    ]);
+    const [land, heavy] = await Promise.all([this.d.deployState ? readLandLineA(this.d.deployState, this.d.alive) : null, readHeavyA(this.d.heavyDir, this.now(), this.d.held)]);
     if (gen === this.reads) this.apply(land, heavy); // a newer poll or setOrder read since: this snapshot is old
   }
   private reads = 0;
@@ -617,11 +738,17 @@ export class Waits {
       const { line, took } = land;
       this.line = line;
       // Before ci.landings below lets go of a landing that left its CI wait, so its run's last stage is still there.
-      this.d.landLine?.(line.map((t) => {
-        const id = this.ticketFor(t.label);
-        return { seq: t.seq, name: t.label === 'tools/deploy.sh' ? t.label : this.name(t.label), phase: t.got > 0 ? landPhase(t.phase).key : 'line', ci: id != null ? this.d.ci?.view(id)?.stage ?? null : null, run: id != null ? this.d.ci?.runOf(id) ?? null : null };
-      }), now);
-      for (const [label, w] of landWaits(line, took, now, this.usual, this.name, (l) => { const i = this.ticketFor(l); return i != null && !!this.d.early?.(i); })) {
+      this.d.landLine?.(
+        line.map((t) => {
+          const id = this.ticketFor(t.label);
+          return { seq: t.seq, name: t.label === 'tools/deploy.sh' ? t.label : this.name(t.label), phase: t.got > 0 ? landPhase(t.phase).key : 'line', ci: id != null ? (this.d.ci?.view(id)?.stage ?? null) : null, run: id != null ? (this.d.ci?.runOf(id) ?? null) : null };
+        }),
+        now,
+      );
+      for (const [label, w] of landWaits(line, took, now, this.usual, this.name, (l) => {
+        const i = this.ticketFor(l);
+        return i != null && !!this.d.early?.(i);
+      })) {
         const id = this.ticketFor(label);
         const holder = line.find((t) => t.label === label && t.got > 0);
         if (id != null) next.set(id, { ...w, key: holder ? `land:${landPhase(holder.phase).key}` : undefined });
@@ -640,8 +767,7 @@ export class Waits {
     for (const [id, old] of this.current) {
       const now2 = next.get(id);
       if (!old.key || (now2 && now2.stage === old.stage && now2.since === old.since)) continue;
-      const movedOn = now2 ? TRACK.indexOf(now2.stage) > TRACK.indexOf(old.stage) || old.kind === 'heavy'
-        : old.kind === 'heavy' ? this.d.store.getTicket(id)?.status === 'running' : old.stage === 'deploy';
+      const movedOn = now2 ? TRACK.indexOf(now2.stage) > TRACK.indexOf(old.stage) || old.kind === 'heavy' : old.kind === 'heavy' ? this.d.store.getTicket(id)?.status === 'running' : old.stage === 'deploy';
       if (movedOn) this.record(old.key, (now - old.since) / 1000);
     }
     const ids = new Set([...this.current.keys(), ...next.keys()]);

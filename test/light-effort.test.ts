@@ -53,7 +53,12 @@ function minion() {
   const dir = join(root, `t${t.id}`);
   mkdirSync(dir);
   store.setTicketDir(t.id, dir, null);
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.pollMs = 10;
   return { id: t.id, dir, r, efforts: () => lines(join(dir, 'effort.txt')), seen: () => lines(join(dir, 'seen.txt')) };
 }

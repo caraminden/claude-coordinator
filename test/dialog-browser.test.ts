@@ -54,7 +54,10 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
 }
 const frame = 'new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))';
 
-for (const [label, opts] of [['desktop', { width: 1000, height: 600 }], ['phone, dark', { width: 390, height: 700, touch: true, dark: true }]] as const) {
+for (const [label, opts] of [
+  ['desktop', { width: 1000, height: 600 }],
+  ['phone, dark', { width: 390, height: 700, touch: true, dark: true }],
+] as const) {
   test(`${label}: a long body scrolled to its end keeps the head and ✕ at the top, inside the window`, { skip }, async () => {
     const page = await browser.page(base, opts);
     await page.eval(`(open(), d.scrollTop = d.scrollHeight, ${frame})`);

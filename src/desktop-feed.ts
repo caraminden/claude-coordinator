@@ -126,8 +126,17 @@ export class DesktopFeeds {
     const b = index.builds.find((x) => x.build === index.current);
     if (!b) return null;
     return {
-      app: index.app, ...(index.title ? { title: index.title } : {}), build: b.build, exe: b.exe, started: b.started, zip: b.zip, sha256: b.sha256, size: b.size,
-      ...(b.version ? { version: b.version } : {}), ...(b.commit ? { commit: b.commit } : {}), at: b.at,
+      app: index.app,
+      ...(index.title ? { title: index.title } : {}),
+      build: b.build,
+      exe: b.exe,
+      started: b.started,
+      zip: b.zip,
+      sha256: b.sha256,
+      size: b.size,
+      ...(b.version ? { version: b.version } : {}),
+      ...(b.commit ? { commit: b.commit } : {}),
+      at: b.at,
       ...(launcher ? { launcher: { version: launcher.version, file: 'launcher.exe', sha256: launcher.sha256, size: launcher.size } } : {}),
     };
   }
@@ -186,9 +195,17 @@ export class DesktopFeeds {
       const { sha256, size } = await digest(join(tmp, zip));
       await rename(join(tmp, zip), join(dir, zip));
       const entry: DesktopBuild = {
-        build, exe, started, zip, sha256, size, at: Date.now(),
-        ...(ask.version ? { version: String(ask.version).slice(0, 40) } : {}), ...(ask.commit ? { commit: String(ask.commit).slice(0, 40) } : {}),
-        ...(ask.source ? { source: ask.source } : { source: `file:${basename(ask.file)}` }), ...(ask.by ? { by: ask.by } : {}),
+        build,
+        exe,
+        started,
+        zip,
+        sha256,
+        size,
+        at: Date.now(),
+        ...(ask.version ? { version: String(ask.version).slice(0, 40) } : {}),
+        ...(ask.commit ? { commit: String(ask.commit).slice(0, 40) } : {}),
+        ...(ask.source ? { source: ask.source } : { source: `file:${basename(ask.file)}` }),
+        ...(ask.by ? { by: ask.by } : {}),
       };
       const builds = [entry, ...index.builds];
       const kept = builds.slice(0, KEEP);
@@ -236,7 +253,10 @@ export class DesktopFeeds {
 
   private queued<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const next = (this.queues.get(key) ?? Promise.resolve()).then(fn, fn);
-    this.queues.set(key, next.catch(() => {}));
+    this.queues.set(
+      key,
+      next.catch(() => {}),
+    );
     return next;
   }
 }
@@ -266,7 +286,11 @@ async function unpack(file: string, into: string): Promise<string> {
     else throw new DesktopError('A build is a .zip, .tar.gz or .tgz of its folder, or the .exe alone');
   } catch (err) {
     if (err instanceof DesktopError) throw err;
-    throw new DesktopError(`Couldn't unpack ${basename(file)}: ${String((err as { stderr?: string }).stderr || (err as Error).message).trim().slice(0, 300)}`);
+    throw new DesktopError(
+      `Couldn't unpack ${basename(file)}: ${String((err as { stderr?: string }).stderr || (err as Error).message)
+        .trim()
+        .slice(0, 300)}`,
+    );
   }
   let count = 0;
   const walk = async (d: string): Promise<void> => {
@@ -366,7 +390,9 @@ export function desktopTargetOf(x: unknown): DesktopTarget | null {
   const o = x as Record<string, unknown>;
   if (typeof o.app !== 'string' || !DESKTOP_APP.test(o.app)) return null;
   return {
-    app: o.app, ...(exeName(o.exe) ? { exe: o.exe } : {}), ...((STARTED as readonly unknown[]).includes(o.started) ? { started: o.started as Started } : {}),
+    app: o.app,
+    ...(exeName(o.exe) ? { exe: o.exe } : {}),
+    ...((STARTED as readonly unknown[]).includes(o.started) ? { started: o.started as Started } : {}),
     ...(typeof o.title === 'string' && o.title.trim() ? { title: o.title.trim().slice(0, 80) } : {}),
   };
 }

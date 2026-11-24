@@ -20,9 +20,18 @@ const paint = (el) => {
 export function waitTail(ticketId, w) {
   if (!w || w.kind !== 'heavy' || w.stage !== 'run') return '';
   const s = state.get(ticketId) ?? state.set(ticketId, { lines: [], open: false }).get(ticketId);
-  const el = h('div', { class: 'wait-tail', 'data-ticket': ticketId, 'aria-label': 'Latest output of the run' },
+  const el = h(
+    'div',
+    { class: 'wait-tail', 'data-ticket': ticketId, 'aria-label': 'Latest output of the run' },
     h('pre', {}),
-    h('button', { type: 'button', onclick: () => { s.open = !s.open; paint(el); } }));
+    h('button', {
+      type: 'button',
+      onclick: () => {
+        s.open = !s.open;
+        paint(el);
+      },
+    }),
+  );
   paint(el);
   if (typeof document !== 'undefined') loop.now();
   return el;
@@ -38,7 +47,12 @@ async function refresh() {
     try {
       const { lines } = await api(`api/tickets/${id}/wait-tail`);
       const s = state.get(id);
-      if (s) { s.lines = lines; paint(el); }
-    } catch { /* the next look tries again */ }
+      if (s) {
+        s.lines = lines;
+        paint(el);
+      }
+    } catch {
+      /* the next look tries again */
+    }
   }
 }

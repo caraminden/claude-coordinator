@@ -9,7 +9,11 @@ export function unknownToolName(error: string): string | null {
 
 /** The part of a tool's name after any mcp__server__ prefix. */
 const bare = (name: string) => name.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '');
-const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+const words = (s: string) =>
+  s
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 3);
 
 function distance(a: string, b: string): number {
   let row = Array.from({ length: b.length + 1 }, (_, j) => j);

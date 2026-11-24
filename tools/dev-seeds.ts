@@ -27,7 +27,12 @@ import { addMention } from '../src/mentions.ts';
 import { heldPlan, settingsOverlaps } from '../src/instructions-save.ts';
 import { lendAfter, lendLines, type LendChange } from '../src/machine-lend.ts';
 
-export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
+export interface SeedCtx {
+  store: Store;
+  project: Project;
+  dataDir: string;
+  who: string;
+}
 
 /** The "Seeded" scheme, made once, with `login` (the copy's signed-in admin) a member. */
 export function seedScheme(store: Store, dataDir: string, login: string): SeedCtx {
@@ -65,8 +70,7 @@ function taskmaster(c: SeedCtx): Ticket {
 function chat(c: SeedCtx, t: Ticket, steps: number) {
   let at = Date.now() - steps * 7000;
   let n = 0;
-  const put = (kind: string, data: unknown) =>
-    Number(c.store.db.prepare('INSERT INTO events (ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?)').run(t.id, kind, JSON.stringify(data), (at += 7000)).lastInsertRowid);
+  const put = (kind: string, data: unknown) => Number(c.store.db.prepare('INSERT INTO events (ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?)').run(t.id, kind, JSON.stringify(data), (at += 7000)).lastInsertRowid);
   const claude = (data: object) => put('claude', data);
   const said = (text: string) => claude({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
   /** A tool call and, unless `result` is null, its result. */
@@ -77,7 +81,9 @@ function chat(c: SeedCtx, t: Ticket, steps: number) {
     return id;
   };
   return {
-    put, said, call,
+    put,
+    said,
+    call,
     asked: (text: string) => put('user_message', { author: c.who, text }),
     init: () => claude({ type: 'system', subtype: 'init', session_id: `seed-${t.id}`, model: 'claude-opus-5-5' }),
     done: (text: string) => claude({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: `seed-${t.id}`, total_cost_usd: 0.42, duration_ms: 95_000 }),
@@ -98,10 +104,20 @@ const route = (c: SeedCtx, t: Ticket, eventId?: number) => `#/p/${c.project.id}/
 
 /** A claim's queue (#1334): `past` holders an hour apart, a holder mid-plan, and waiting, chained and new minions. */
 function claimQueue(c: SeedCtx, past: number): string {
-  const name = past >= 3 ? 'pipeline-lane' : 'release-lane', now = Date.now(), hour = 3_600_000;
+  const name = past >= 3 ? 'pipeline-lane' : 'release-lane',
+    now = Date.now(),
+    hour = 3_600_000;
   const done = Array.from({ length: past }, (_, i) => minion(c, `Lane fix ${i + 1}`, { status: 'closed' }));
   const holder = minion(c, 'Ship trains for every scheme', { status: 'running', last_activity: 'Self-review and ship… 2/4' });
-  chat(c, holder, 6).plan([['Read the land queue', 3], ['Batch the ships', 8], ['Run the tests', 6], ['Self-review and ship', 12]], 1);
+  chat(c, holder, 6).plan(
+    [
+      ['Read the land queue', 3],
+      ['Batch the ships', 8],
+      ['Run the tests', 6],
+      ['Self-review and ship', 12],
+    ],
+    1,
+  );
   const next = minion(c, 'Rollback before fast mode');
   const leader = minion(c, 'CI runner labels');
   const chained = minion(c, 'Fast mode lands', { state: 'parked', note: `starts when #${leader.number} is live` });
@@ -109,9 +125,21 @@ function claimQueue(c: SeedCtx, past: number): string {
   const fresh = minion(c, 'Deploy dry run', { status: 'new' });
   let at = now - (past + 1.5) * hour;
   c.store.claims.take(c.project.id, name, done[0].id, 'Taskmaster', '', at);
-  c.store.claims.setQueue(c.project.id, name, [...done.slice(1), holder].map((t) => t.id), 'Taskmaster', at);
+  c.store.claims.setQueue(
+    c.project.id,
+    name,
+    [...done.slice(1), holder].map((t) => t.id),
+    'Taskmaster',
+    at,
+  );
   for (let i = 0; i < past; i++) c.store.claims.passOn(c.project.id, name, 'live', (at += hour - i * 600_000));
-  c.store.claims.setQueue(c.project.id, name, [next, chained, fresh].map((t) => t.id), 'Taskmaster', at);
+  c.store.claims.setQueue(
+    c.project.id,
+    name,
+    [next, chained, fresh].map((t) => t.id),
+    'Taskmaster',
+    at,
+  );
   if (past < 3) return `#/p/${c.project.id}/releases/${c.project.id}`;
   const old = minion(c, 'Rotate the backup keys');
   c.store.claims.take(c.project.id, 'backup-keys', old.id, 'Taskmaster', 'until the new key is in every copy', now - 40 * 60_000);
@@ -171,7 +199,7 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
   'welcome-new': { about: "you on your first day: the welcome over Seeded's Taskmaster chat, only the password ticked (#1151)", seed: (c) => firstDay(c, 1) },
   'welcome-half': { about: 'you halfway through the welcome: password, Claude and phone ticked (#1151)', seed: (c) => firstDay(c, 3) },
   'welcome-no-scheme': {
-    about: "Rin, invited but in no scheme (#1151): the welcome over the New scheme page says how to get in; sign in by POSTing a password to /api/invite/welcomeseedwelcomeseedwelcome001",
+    about: 'Rin, invited but in no scheme (#1151): the welcome over the New scheme page says how to get in; sign in by POSTing a password to /api/invite/welcomeseedwelcomeseedwelcome001',
     seed(c) {
       const rin = c.store.listUsers().find((u) => u.login === 'rin') ?? c.store.createUser({ name: 'Rin', login: 'rin' });
       c.store.updateUser(rin.id, { invite_hash: inviteHash('welcomeseedwelcomeseedwelcome001'), invite_expires: Date.now() + 7 * 24 * 3_600_000 });
@@ -183,14 +211,26 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
   'outbox-waits': {
     about: 'minions with waits in the outbox (#1387): a timed wake with a note from another minion and a long Taskmaster wake beside it (#1512), a wait on another minion, a wait on an event, a dropped wait, and one with none',
     seed(c) {
-      const now = Date.now(), at = (h: number) => now + h * 3_600_000;
+      const now = Date.now(),
+        at = (h: number) => now + h * 3_600_000;
       const lead = minion(c, 'Ship line fix');
       const row = (t: Ticket, d: Partial<Parameters<Store['addDelivery']>[0]>) => c.store.addDelivery({ project_id: c.project.id, kind: 'wake_at', to_kind: 'minion', to_id: t.id, when_kind: 'at', set_by: `minion:${t.id}`, ...d });
       const timed = minion(c, 'Check the nightly run', { state: 'parked', note: 'waking at 06:00' });
       row(timed, { when_arg: at(9), due: at(9), payload: { note: 'check the nightly run' } });
       // #1512: a note from another minion once its change is live (Peek's #830, 2026-11-21), and a long wake the Taskmaster set.
-      row(timed, { kind: 'relay', when_kind: 'live', when_arg: 'fa4fb3f6d0c1e2b3a4f5e6d7c8b9a0f1e2d3c4b5', set_by: `minion:${lead.id}`, payload: { ticket: lead.id, to: { minion: timed.id, number: timed.number }, text: `#${lead.number} here: main's windows-check is green again. crates/app/src/run/tests.rs now uses #808's CaptureError::Unsupported (the windows.yml red 44946655531 on 905663b). Rebase onto main and hand off again.` } });
-      row(timed, { when_arg: at(1.5), due: at(1.5), set_by: 'Taskmaster', payload: { setBy: 'Taskmaster', note: "Check whether main's windows-check is fixed: git fetch, then git grep UnsupportedWindows origin/main -- crates/app must come back empty. If it's fixed, rebase on origin/main and hand_off_land the registry edit again. If it isn't, set another wake_at 40 minutes out." } });
+      row(timed, {
+        kind: 'relay',
+        when_kind: 'live',
+        when_arg: 'fa4fb3f6d0c1e2b3a4f5e6d7c8b9a0f1e2d3c4b5',
+        set_by: `minion:${lead.id}`,
+        payload: { ticket: lead.id, to: { minion: timed.id, number: timed.number }, text: `#${lead.number} here: main's windows-check is green again. crates/app/src/run/tests.rs now uses #808's CaptureError::Unsupported (the windows.yml red 44946655531 on 905663b). Rebase onto main and hand off again.` },
+      });
+      row(timed, {
+        when_arg: at(1.5),
+        due: at(1.5),
+        set_by: 'Taskmaster',
+        payload: { setBy: 'Taskmaster', note: "Check whether main's windows-check is fixed: git fetch, then git grep UnsupportedWindows origin/main -- crates/app must come back empty. If it's fixed, rebase on origin/main and hand_off_land the registry edit again. If it isn't, set another wake_at 40 minutes out." },
+      });
       const chained = minion(c, 'Follow-up docs', { state: 'parked' });
       row(chained, { kind: 'chain', when_kind: 'live', when_arg: { after: lead.id, base: null }, set_by: 'Taskmaster', dedupe_key: String(chained.id), payload: { message: 'Write the follow-up docs', from: 'Taskmaster', reason: `#${lead.number} Ship line fix's work is live` } });
       const ev = minion(c, 'Land when runners return', { state: 'parked' });
@@ -210,16 +250,36 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       w.init();
       w.call('Read', { file_path: `${t.cwd}/public/sidebar.css` }, '.badge { background: var(--accent); }');
       w.said('Two ways to fix the contrast; which do you want? To check the build first, run this in an admin window:\n\n```powershell-admin\nicacls "C:\\citadel" /grant Users:F\n```\n\nthen this in plain PowerShell:\n\n```powershell\nGet-ChildItem C:\\citadel\n```\n\nand this in WSL:\n\n```wsl\nls ~/citadel\n```');
-      const e = w.put('question', { id: hex(), questions: [{ question: 'How should unread badges look in dark mode?', header: 'Badge style', multiSelect: false, options: [
-        { label: 'Solid accent', description: 'A filled accent-coloured pill with white text: 7.1:1 contrast.', recommended: true },
-        { label: 'Outlined', description: 'A 1px accent outline with accent text: quieter, 4.6:1 contrast.' },
-        { label: 'Leave as is', description: 'Keep today\'s look.' },
-      ] }] });
-      w.put('question', { id: hex(), questions: [{ question: 'Run this first, in an admin PowerShell window, then say which places should reach the new badge?\n\n```powershell-admin\nicacls "C:\\citadel" /grant Users:F\n```\n\nOr in WSL:\n\n```wsl\nls ~/citadel\n```', header: 'Where', multiSelect: true, options: [
-        { label: 'Sidebar', description: 'The minions list.', recommended: true },
-        { label: 'Tab title', description: 'The (3) in the browser tab.' },
-        { label: 'Phone drawer', description: 'The drawer handle on phones.', recommended: true },
-      ] }] });
+      const e = w.put('question', {
+        id: hex(),
+        questions: [
+          {
+            question: 'How should unread badges look in dark mode?',
+            header: 'Badge style',
+            multiSelect: false,
+            options: [
+              { label: 'Solid accent', description: 'A filled accent-coloured pill with white text: 7.1:1 contrast.', recommended: true },
+              { label: 'Outlined', description: 'A 1px accent outline with accent text: quieter, 4.6:1 contrast.' },
+              { label: 'Leave as is', description: "Keep today's look." },
+            ],
+          },
+        ],
+      });
+      w.put('question', {
+        id: hex(),
+        questions: [
+          {
+            question: 'Run this first, in an admin PowerShell window, then say which places should reach the new badge?\n\n```powershell-admin\nicacls "C:\\citadel" /grant Users:F\n```\n\nOr in WSL:\n\n```wsl\nls ~/citadel\n```',
+            header: 'Where',
+            multiSelect: true,
+            options: [
+              { label: 'Sidebar', description: 'The minions list.', recommended: true },
+              { label: 'Tab title', description: 'The (3) in the browser tab.' },
+              { label: 'Phone drawer', description: 'The drawer handle on phones.', recommended: true },
+            ],
+          },
+        ],
+      });
       w.done('Asked which badge style to use.');
       return route(c, t, e);
     },
@@ -232,14 +292,35 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       w.asked('Rotate the session cookies every week.');
       w.init();
       w.said('Done and reviewed: risk high, since it touches sign-in. It ships only on a go.');
-      w.put('approval', { id: hex(), tool: 'Bash', input: { command: 'gh pr merge 41 --squash', description: 'Ship PR 41' }, merge: {
-        target: '41', repo: null, method: 'squash', auto: false, admin: false, moved: false,
-        pr: { number: 41, title: 'Rotate session cookies weekly', url: 'https://github.com/example/seeded/pull/41', state: 'OPEN', draft: false, head: 'ticket/41-cookies', base: 'main', checks: 'passed', additions: 48, deletions: 6, files: 3, commits: 2 },
-      } });
-      const e = w.put('question', { id: hex(), kind: 'merge', questions: [{ question: 'Ship this high-risk change? It changes how sign-in cookies rotate.', header: 'Ship It', multiSelect: false, options: [
-        { label: 'Ship It', description: 'It goes onto main and goes live after the restart.', recommended: true },
-        { label: 'Hold', description: 'It waits on its branch.' },
-      ] }] });
+      w.put('approval', {
+        id: hex(),
+        tool: 'Bash',
+        input: { command: 'gh pr merge 41 --squash', description: 'Ship PR 41' },
+        merge: {
+          target: '41',
+          repo: null,
+          method: 'squash',
+          auto: false,
+          admin: false,
+          moved: false,
+          pr: { number: 41, title: 'Rotate session cookies weekly', url: 'https://github.com/example/seeded/pull/41', state: 'OPEN', draft: false, head: 'ticket/41-cookies', base: 'main', checks: 'passed', additions: 48, deletions: 6, files: 3, commits: 2 },
+        },
+      });
+      const e = w.put('question', {
+        id: hex(),
+        kind: 'merge',
+        questions: [
+          {
+            question: 'Ship this high-risk change? It changes how sign-in cookies rotate.',
+            header: 'Ship It',
+            multiSelect: false,
+            options: [
+              { label: 'Ship It', description: 'It goes onto main and goes live after the restart.', recommended: true },
+              { label: 'Hold', description: 'It waits on its branch.' },
+            ],
+          },
+        ],
+      });
       w.done('Asked for the go to ship.');
       return route(c, t, e);
     },
@@ -252,10 +333,22 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       w.asked('Add the board column.');
       w.init();
       w.said('Done and reviewed: risk high. It merges into Build 5 only on a go.');
-      const e = w.put('question', { id: hex(), kind: 'merge', into: 5, questions: [{ question: 'Merge this high-risk change into Build 5?', header: 'Merge', multiSelect: false, options: [
-        { label: 'Merge', description: 'It goes into build/5, live when the build ships.', recommended: true },
-        { label: 'Hold', description: 'It waits on its branch.' },
-      ] }] });
+      const e = w.put('question', {
+        id: hex(),
+        kind: 'merge',
+        into: 5,
+        questions: [
+          {
+            question: 'Merge this high-risk change into Build 5?',
+            header: 'Merge',
+            multiSelect: false,
+            options: [
+              { label: 'Merge', description: 'It goes into build/5, live when the build ships.', recommended: true },
+              { label: 'Hold', description: 'It waits on its branch.' },
+            ],
+          },
+        ],
+      });
       w.done('Asked for the go to merge.');
       return route(c, t, e);
     },
@@ -269,12 +362,30 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       w.init();
       w.call('Grep', { pattern: 'closed_at', path: 'src' }, 'src/db.ts:1412: closed_at INTEGER');
       w.said('Here is the plan; nothing is changed until you approve it.');
-      const e = w.put('plan', { id: hex(), status: 'pending', summary: 'Archive dismissed minions after 30 days: hidden from the list, kept in the database, back with one click', plan: [
-        '## What changes', '', '- A nightly sweep marks minions dismissed **more than 30 days** ago as archived.',
-        '- The minions list hides them; a *Show archived* toggle brings them back.', '- Nothing is deleted: their chats, files and branches stay.', '',
-        '## Numbers', '', '| Scheme | Dismissed | Over 30 days |', '| --- | ---: | ---: |', '| Citadel | 612 | 431 |', '| Delve | 150 | 98 |', '',
-        '## Not doing', '', '1. Deleting worktrees (a separate cleanup).', '2. Archiving open minions.',
-      ].join('\n') });
+      const e = w.put('plan', {
+        id: hex(),
+        status: 'pending',
+        summary: 'Archive dismissed minions after 30 days: hidden from the list, kept in the database, back with one click',
+        plan: [
+          '## What changes',
+          '',
+          '- A nightly sweep marks minions dismissed **more than 30 days** ago as archived.',
+          '- The minions list hides them; a *Show archived* toggle brings them back.',
+          '- Nothing is deleted: their chats, files and branches stay.',
+          '',
+          '## Numbers',
+          '',
+          '| Scheme | Dismissed | Over 30 days |',
+          '| --- | ---: | ---: |',
+          '| Citadel | 612 | 431 |',
+          '| Delve | 150 | 98 |',
+          '',
+          '## Not doing',
+          '',
+          '1. Deleting worktrees (a separate cleanup).',
+          '2. Archiving open minions.',
+        ].join('\n'),
+      });
       w.done('Posted the plan for approval.');
       return route(c, t, e);
     },
@@ -296,8 +407,7 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       w.init();
       w.said('Checked what already says it, then made the edit.');
       const by = `#${t.number} for ${c.who}`;
-      const e = w.put('plan', { id: hex(), status: 'pending', to: c.who, summary: `Edit to the scheme instructions repeats ${found.length + 1} places`,
-        plan: heldPlan('scheme', found, fromGrunt, edits), instructions: { scope: 'scheme', project: project.id, old, text, edits, by, count: found.length + 1 } });
+      const e = w.put('plan', { id: hex(), status: 'pending', to: c.who, summary: `Edit to the scheme instructions repeats ${found.length + 1} places`, plan: heldPlan('scheme', found, fromGrunt, edits), instructions: { scope: 'scheme', project: project.id, old, text, edits, by, count: found.length + 1 } });
       w.done('Nothing saved yet: the card asks whether to save anyway, work it in or cancel.');
       return route(c, t, e);
     },
@@ -309,10 +419,29 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       const w = chat(c, t, 10);
       w.asked('Run the plan back to me before you change anything.');
       w.init();
-      const v1 = ['## What changes', '', '- A nightly sweep archives minions dismissed more than 30 days ago.', '- The minions list hides them.', '- Nothing is deleted.', '', '## Numbers', '', '- Citadel: 431 over 30 days', '- Delve: 98 over 30 days', '', '## Not doing', '', '1. Deleting worktrees.', '2. Archiving open minions.'];
+      const v1 = [
+        '## What changes',
+        '',
+        '- A nightly sweep archives minions dismissed more than 30 days ago.',
+        '- The minions list hides them.',
+        '- Nothing is deleted.',
+        '',
+        '## Numbers',
+        '',
+        '- Citadel: 431 over 30 days',
+        '- Delve: 98 over 30 days',
+        '',
+        '## Not doing',
+        '',
+        '1. Deleting worktrees.',
+        '2. Archiving open minions.',
+      ];
       w.put('plan', { id: hex(), status: 'superseded', summary: 'Archive dismissed minions after 30 days', plan: v1.join('\n') });
       w.asked('Make the window 60 days, and add a toggle to show them.');
-      const v2 = v1.map((l) => l.replace('30 days ago', '60 days ago').replace('over 30 days', 'over 60 days')).filter((l) => !l.startsWith('- Delve')).flatMap((l) => (l === '- The minions list hides them.' ? [l, '- A *Show archived* toggle brings them back.'] : [l]));
+      const v2 = v1
+        .map((l) => l.replace('30 days ago', '60 days ago').replace('over 30 days', 'over 60 days'))
+        .filter((l) => !l.startsWith('- Delve'))
+        .flatMap((l) => (l === '- The minions list hides them.' ? [l, '- A *Show archived* toggle brings them back.'] : [l]));
       const e = w.put('plan', { id: hex(), status: 'pending', summary: 'Archive dismissed minions after 60 days, with a show-archived toggle', plan: v2.join('\n') });
       w.done('Posted the revised plan.');
       return route(c, t, e);
@@ -325,11 +454,16 @@ export const SCENARIOS: Record<string, { about: string; seed: (c: SeedCtx) => st
       const kit = join(import.meta.dirname, '..', 'kit', 'skills', 'docs-and-mocks', 'starter');
       for (const f of ['mockkit.js', 'mockkit.css']) copyFileSync(join(kit, f), join(t.cwd!, f));
       // A screenshot on the page, to draw on before Send (#946).
-      writeFileSync(join(t.cwd!, 'header-today.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="120"><rect width="960" height="120" fill="#f5f2ec"/>'
-        + '<circle cx="40" cy="60" r="10" fill="#c2410c"/><text x="64" y="70" font-family="sans-serif" font-size="28" fill="#222">2 FEATURE: Header layout</text>'
-        + '<rect x="620" y="40" width="140" height="40" rx="8" fill="none" stroke="#999"/><rect x="780" y="40" width="140" height="40" rx="8" fill="none" stroke="#999"/></svg>');
+      writeFileSync(
+        join(t.cwd!, 'header-today.svg'),
+        '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="120"><rect width="960" height="120" fill="#f5f2ec"/>' +
+          '<circle cx="40" cy="60" r="10" fill="#c2410c"/><text x="64" y="70" font-family="sans-serif" font-size="28" fill="#222">2 FEATURE: Header layout</text>' +
+          '<rect x="620" y="40" width="140" height="40" rx="8" fill="none" stroke="#999"/><rect x="780" y="40" width="140" height="40" rx="8" fill="none" stroke="#999"/></svg>',
+      );
       const page = join(t.cwd!, 'header-takes.html');
-      writeFileSync(page, `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+      writeFileSync(
+        page,
+        `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Header layout takes</title><link rel="stylesheet" href="mockkit.css"></head><body class="mk"><main class="mk-page">
 <h1>Header layout takes</h1><p>Three ways to lay out the chat header. Pick one, then press Send.</p>
 <p><img alt="Today's header" src="header-today.svg" width="480"></p><div id="takes"></div></main>
@@ -339,7 +473,8 @@ mock.boards('#takes', { boards: [
   { id: 'B', title: 'Two rows', note: 'Title on top, chips under it.' },
   { id: 'C', title: 'Chips in a menu', note: 'One line; chips behind a button.' },
 ], render: (b) => '<div style="padding:12px;border:1px solid #8884;border-radius:8px">' + mock.esc(b.title) + '</div>' });
-</script></body></html>`);
+</script></body></html>`,
+      );
       const w = chat(c, t, 8);
       w.asked('Mock up a few header layouts for me to pick from.');
       w.init();
@@ -356,10 +491,10 @@ mock.boards('#takes', { boards: [
       const w = chat(c, t, 6);
       w.asked('Log in to the reader site and fetch the latest chapter.');
       w.init();
-      w.said('The site wants a password. Save it on the card below and I\'ll use it from the env.');
+      w.said("The site wants a password. Save it on the card below and I'll use it from the env.");
       const settled = { at: Date.now() - 3_600_000, by: 'Josh', saved: 'READER_USER', scope: 'scheme' };
       w.put('question', { id: hex(), questions: [], secret: { name: 'READER_USER', scope: 'scheme', why: 'The username for the reader site.' }, settled });
-      const e = w.put('question', { id: hex(), questions: [], secret: { name: 'READER_SITE_PW', scope: 'person', why: 'The reader site\'s password, for logging in as you.' } });
+      const e = w.put('question', { id: hex(), questions: [], secret: { name: 'READER_SITE_PW', scope: 'person', why: "The reader site's password, for logging in as you." } });
       w.done('Asked with a secret card.');
       return route(c, t, e);
     },
@@ -387,8 +522,7 @@ mock.boards('#takes', { boards: [
       c.store.setProjectSettings(other.id, { onboarding: 'skipped' });
       const me = c.store.findUser('name', c.who);
       if (me) c.store.addMember(other.id, me.id);
-      const tm = c.store.listTickets(other.id).find((x) => x.kind === 'coordinator')
-        ?? c.store.createTicket({ project_id: other.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: c.who });
+      const tm = c.store.listTickets(other.id).find((x) => x.kind === 'coordinator') ?? c.store.createTicket({ project_id: other.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: c.who });
       c.store.addEvent(tm.id, 'plan', { id: hex(), status: 'pending', to: c.who, summary: 'Move the nightly backup to 3 am PST', plan: '- Change the timer to 03:00 PST.\n- Nothing else moves.' });
       return route(c, t, e);
     },
@@ -400,7 +534,16 @@ mock.boards('#takes', { boards: [
       const w = chat(c, t, 30);
       w.asked('The minions list takes two seconds to load on Citadel. Find out why and fix it.');
       w.init();
-      w.plan([['Measure the slow load', 3], ['Find the slow query', 5], ['Add the index', 4], ['Run the tests', 8], ['Self-review and land', 12]], 2);
+      w.plan(
+        [
+          ['Measure the slow load', 3],
+          ['Find the slow query', 5],
+          ['Add the index', 4],
+          ['Run the tests', 8],
+          ['Self-review and land', 12],
+        ],
+        2,
+      );
       w.said('Cause: `listTickets` reads every event for the last-activity line, 56k rows for Citadel. An index on `(ticket_id, kind, id)` takes it to 40 ms.');
       w.call('Edit', { file_path: `${t.cwd}/src/db.ts`, old_string: 'CREATE INDEX', new_string: 'CREATE INDEX IF NOT EXISTS' }, 'The file has been updated.');
       w.call('Bash', { command: 'tools/citadel-node --test test/list-tickets.test.ts', description: 'Run the minions list tests' }, null);
@@ -408,13 +551,13 @@ mock.boards('#takes', { boards: [
     },
   },
   'spend-alert': {
-    about: 'a minion mid-turn whose turn passed $25: the spend alert card with Stop and Keep going (#723); no real turn runs, so its buttons stay hidden as on an earlier turn; Needs you lists it, the row\'s red badge needs a live turn',
+    about: "a minion mid-turn whose turn passed $25: the spend alert card with Stop and Keep going (#723); no real turn runs, so its buttons stay hidden as on an earlier turn; Needs you lists it, the row's red badge needs a live turn",
     seed(c) {
       const t = minion(c, 'Rework the land queue', { status: 'running', last_activity: 'Reviewing the diff… 4/5' });
       const w = chat(c, t, 12);
-      w.asked('Rework the land queue so two lands never wait on each other\'s tests.');
+      w.asked("Rework the land queue so two lands never wait on each other's tests.");
       w.init();
-      w.said('Three Grunts are reviewing the queue code in parallel; I\'ll merge what they find.');
+      w.said("Three Grunts are reviewing the queue code in parallel; I'll merge what they find.");
       w.call('Agent', { description: 'Review the land queue', prompt: 'Review tools/land.sh…' }, null);
       const turn = Date.now() - 48 * 60_000;
       const e = w.put('spend', { text: 'This turn has used about $26 in 48 min.', usd: 26, stage: 25, turn });
@@ -450,7 +593,7 @@ mock.boards('#takes', { boards: [
     },
   },
   'start-card': {
-    about: "a minion the Taskmaster started whose brief expects $35: not sealed, its start card in Needs you, its brief held (#1757)",
+    about: 'a minion the Taskmaster started whose brief expects $35: not sealed, its start card in Needs you, its brief held (#1757)',
     seed(c) {
       const t = minion(c, 'Turns ease off as memory fills', { status: 'new', note: startNote(35) }, 'feature');
       c.store.setSetting(startHoldKey(t.id), { usd: 35, card: 'seed-start' });
@@ -467,10 +610,20 @@ mock.boards('#takes', { boards: [
       w.asked('Fix the unread badges in dark mode.');
       w.init();
       w.said('Two ways to fix the contrast; which do you want?');
-      const e = w.put('question', { id: hex(), questions: [{ question: 'How should unread badges look in dark mode?', header: 'Badge style', multiSelect: false, options: [
-        { label: 'Solid accent', description: 'A filled pill: 7.1:1 contrast.', recommended: true },
-        { label: 'Outlined', description: 'A 1px outline: 4.6:1 contrast.' },
-      ] }] });
+      const e = w.put('question', {
+        id: hex(),
+        questions: [
+          {
+            question: 'How should unread badges look in dark mode?',
+            header: 'Badge style',
+            multiSelect: false,
+            options: [
+              { label: 'Solid accent', description: 'A filled pill: 7.1:1 contrast.', recommended: true },
+              { label: 'Outlined', description: 'A 1px outline: 4.6:1 contrast.' },
+            ],
+          },
+        ],
+      });
       w.done('Asked which badge style to use.');
       c.store.setSetting(sleepKey(t.id), { at: Date.now() - 3 * 3600_000, by: c.who });
       const t2 = minion(c, 'Docs page rewrite, asleep', { state: 'ready', note: 'ready to ship' }, 'chore');
@@ -496,9 +649,18 @@ mock.boards('#takes', { boards: [
       w.asked('Carry on with the build.');
       w.init();
       const now = Date.now();
-      c.store.setSetting('limit-resumes', [{ ticket: t.id, at: now + 2 * 3_600_000, tries: 1, tz: 'America/Los_Angeles', accounts: [
-        { n: 1, label: 'one@example.com', until: now + 2 * 3_600_000 - 180_000 },
-        { n: 2, label: 'two@example.com', until: now + 5 * 86_400_000, here: true, kind: 'weekly' }] }]);
+      c.store.setSetting('limit-resumes', [
+        {
+          ticket: t.id,
+          at: now + 2 * 3_600_000,
+          tries: 1,
+          tz: 'America/Los_Angeles',
+          accounts: [
+            { n: 1, label: 'one@example.com', until: now + 2 * 3_600_000 - 180_000 },
+            { n: 2, label: 'two@example.com', until: now + 5 * 86_400_000, here: true, kind: 'weekly' },
+          ],
+        },
+      ]);
       return route(c, t);
     },
   },
@@ -516,11 +678,15 @@ mock.boards('#takes', { boards: [
   },
   'claim-queue': {
     about: 'a claim with a queue on the Releases page (#1334): three past holders for the estimate, a holder on step 2 of 4, then one waiting, one chained and one not started; plus an old claim with a note and no queue',
-    seed(c) { return claimQueue(c, 3); },
+    seed(c) {
+      return claimQueue(c, 3);
+    },
   },
   'claim-queue-new': {
     about: 'a claim with a queue and too little history for a time estimate (#1334)',
-    seed(c) { return claimQueue(c, 1); },
+    seed(c) {
+      return claimQueue(c, 1);
+    },
   },
   landing: {
     about: 'a minion whose turn ended on hand_off_land while the server ships it: working, by the server (#727)',
@@ -529,7 +695,14 @@ mock.boards('#takes', { boards: [
       const w = chat(c, t, 24);
       w.asked('Minions whose land the server runs look idle. Show them as working.');
       w.init();
-      w.plan([['Expose server work', 4], ['Show it as working', 6], ['Self-review and land', 10]], 3);
+      w.plan(
+        [
+          ['Expose server work', 4],
+          ['Show it as working', 6],
+          ['Self-review and land', 10],
+        ],
+        3,
+      );
       w.call('mcp__thread__hand_off_land', { summary: 'server work shows as working', risk: 'low', reason: 'front end and one view field' }, 'Handed off: the server runs tools/land.sh.');
       w.done('Handed off the land; the server reports how it goes.');
       // Only the hand-off, no started file: the landing reads as not begun, so LandHandoffs leaves it pending.
@@ -540,7 +713,8 @@ mock.boards('#takes', { boards: [
     },
   },
   'ship-line': {
-    about: "Seeded gets a scratch repo with the kit's land.sh, whose check hangs (sleep 300), and two minions with worktrees: run `bash tools/land.sh` in each worktree it prints (the first holds the line, the second waits) for the Status page's ship line panel and its Stop (#1168). Its stop ends a real land.sh: never press Stop on a copy of the live data, whose lines are the real ones",
+    about:
+      "Seeded gets a scratch repo with the kit's land.sh, whose check hangs (sleep 300), and two minions with worktrees: run `bash tools/land.sh` in each worktree it prints (the first holds the line, the second waits) for the Status page's ship line panel and its Stop (#1168). Its stop ends a real land.sh: never press Stop on a copy of the live data, whose lines are the real ones",
     seed(c) {
       const repo = join(c.dataDir, 'ship-line-repo');
       const git = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, stdio: 'pipe' });
@@ -579,13 +753,27 @@ mock.boards('#takes', { boards: [
         w.asked(i === 1 ? 'How much did each scheme use in October? Break it down by model.' : `Follow-up ${i}: can you split that by week, and say what drove the peak?`);
         w.init();
         w.call('Bash', { command: `sqlite3 -readonly coordinator.db "SELECT … week ${i}"`, description: 'Sum usage by scheme and model' }, 'Citadel|opus|412.50\nDelve|sonnet|88.10');
-        w.said([
-          `## Week ${i}`, '', `Citadel used **${40 + i * 7}%** of the week's meter; Delve *${20 - i}%*.`, '',
-          '| Scheme | Opus | Sonnet | Fable |', '| --- | ---: | ---: | ---: |', `| Citadel | ${300 + i * 12} | 41 | ${i * 9} |`, `| Delve | 61 | ${80 + i} | 0 |`, '',
-          '- Peaks follow land jams: each retry re-reads the whole context.', '- Grunts were **18%** of the total.', '',
-          '```sql', 'SELECT project_id, model, SUM(cost_usd) FROM turns GROUP BY 1, 2;', '```', '',
-          ...(i === 6 ? [`![Usage by week](${t.cwd}/chart.png)`, '', `[The full report](${report})`] : []),
-        ].join('\n'));
+        w.said(
+          [
+            `## Week ${i}`,
+            '',
+            `Citadel used **${40 + i * 7}%** of the week's meter; Delve *${20 - i}%*.`,
+            '',
+            '| Scheme | Opus | Sonnet | Fable |',
+            '| --- | ---: | ---: | ---: |',
+            `| Citadel | ${300 + i * 12} | 41 | ${i * 9} |`,
+            `| Delve | 61 | ${80 + i} | 0 |`,
+            '',
+            '- Peaks follow land jams: each retry re-reads the whole context.',
+            '- Grunts were **18%** of the total.',
+            '',
+            '```sql',
+            'SELECT project_id, model, SUM(cost_usd) FROM turns GROUP BY 1, 2;',
+            '```',
+            '',
+            ...(i === 6 ? [`![Usage by week](${t.cwd}/chart.png)`, '', `[The full report](${report})`] : []),
+          ].join('\n'),
+        );
         w.done(`Week ${i} summarised.`);
       }
       return route(c, t);
@@ -596,9 +784,20 @@ mock.boards('#takes', { boards: [
     seed(c) {
       const t = minion(c, 'Where do I start a fresh session?', { state: 'ready', note: 'pointed at the button' });
       const [w, h] = [1280, 800];
-      const png = pngOf(w, h, [[0, 0, 1280, 64, 0x2b2e34], [24, 20, 160, 24, 0x5a5f69], [960, 14, 150, 36, 0x3d7bd9], [1130, 14, 126, 36, 0x3a3e46],
-        [0, 64, 260, 736, 0x24272c], [24, 96, 210, 30, 0x3a3e46], [24, 140, 210, 30, 0x31343a], [24, 184, 210, 30, 0x31343a],
-        [300, 104, 940, 120, 0x2b2e34], [300, 248, 700, 120, 0x2b2e34], [300, 392, 940, 120, 0x2b2e34], [300, 690, 940, 80, 0x31343a]]);
+      const png = pngOf(w, h, [
+        [0, 0, 1280, 64, 0x2b2e34],
+        [24, 20, 160, 24, 0x5a5f69],
+        [960, 14, 150, 36, 0x3d7bd9],
+        [1130, 14, 126, 36, 0x3a3e46],
+        [0, 64, 260, 736, 0x24272c],
+        [24, 96, 210, 30, 0x3a3e46],
+        [24, 140, 210, 30, 0x31343a],
+        [24, 184, 210, 30, 0x31343a],
+        [300, 104, 940, 120, 0x2b2e34],
+        [300, 248, 700, 120, 0x2b2e34],
+        [300, 392, 940, 120, 0x2b2e34],
+        [300, 690, 940, 80, 0x31343a],
+      ]);
       const name = `${hex()}${hex()}.png`;
       const uploads = join(projectDir(c.dataDir, c.project.id), 'uploads', String(t.id));
       const shared = join(projectDir(c.dataDir, c.project.id), 'shared', String(t.id));
@@ -617,16 +816,13 @@ mock.boards('#takes', { boards: [
       const ch = chat(c, t, 1);
       ch.put('user_message', { author: c.who, text: 'Where do I click to start a fresh session?', images: [name] });
       ch.call('mcp__thread__mark_image', { image: join(uploads, name), alt: 'Where Fresh session is', marks: [] }, 'Put this line in your reply as it is.');
-      ch.said([
-        'It\'s the blue button at the top right (**1**). The yellow box is the minion you\'re on.', '',
-        `![Where Fresh session is](${join(shared, name)} "${title}")`,
-      ].join('\n'));
+      ch.said(["It's the blue button at the top right (**1**). The yellow box is the minion you're on.", '', `![Where Fresh session is](${join(shared, name)} "${title}")`].join('\n'));
       ch.done('Pointed.');
       return route(c, t);
     },
   },
   'media-chat': {
-    about: 'a minion whose reply links a clip, a panorama and two screenshots, for the viewer\'s lightbox, scrubber and panner (#833)',
+    about: "a minion whose reply links a clip, a panorama and two screenshots, for the viewer's lightbox, scrubber and panner (#833)",
     seed(c) {
       const t = minion(c, 'Record the onboarding flow', { state: 'complete', note: 'clips and screens in the chat' });
       // Code-made media from the design-system demo (docs/design-system/media), never a real app's.
@@ -634,11 +830,7 @@ mock.boards('#takes', { boards: [
       for (const f of ['clip.webm', 'panorama.svg', 'screen-1.svg', 'screen-2.svg']) copyFileSync(join(media, f), join(t.cwd, f));
       const w = chat(c, t, 1);
       w.asked('Can you record the onboarding flow and grab the screens?');
-      w.said([
-        'Recorded it, and the two screens it passes through:', '',
-        `![The flow, 8 s](${t.cwd}/clip.webm)`, '', `![The view from the top](${t.cwd}/panorama.svg)`, '',
-        `![Settings](${t.cwd}/screen-1.svg)`, `![Minions](${t.cwd}/screen-2.svg)`,
-      ].join('\n'));
+      w.said(['Recorded it, and the two screens it passes through:', '', `![The flow, 8 s](${t.cwd}/clip.webm)`, '', `![The view from the top](${t.cwd}/panorama.svg)`, '', `![Settings](${t.cwd}/screen-1.svg)`, `![Minions](${t.cwd}/screen-2.svg)`].join('\n'));
       w.done('Recorded.');
       return route(c, t);
     },
@@ -697,7 +889,10 @@ mock.boards('#takes', { boards: [
       const user = c.store.listUsers().find((u) => u.name === c.who);
       const delve = c.store.listProjects().find((x) => x.name === 'Delve') ?? c.store.createProject('Delve', null, user?.id ?? null);
       c.store.setProjectSettings(delve.id, { onboarding: 'skipped' });
-      for (const p of [c.project.id, delve.id]) { c.store.addMember(p, josh.id); if (user) c.store.addMember(p, user.id); }
+      for (const p of [c.project.id, delve.id]) {
+        c.store.addMember(p, josh.id);
+        if (user) c.store.addMember(p, user.id);
+      }
       const card = (s: SeedCtx, title: string, note: string, to?: string) => {
         const t = minion(s, title, { note });
         if (to) s.store.props.set('minion', t.id, s.project.id, { assigned: to }, s.who);
@@ -723,7 +918,7 @@ mock.boards('#takes', { boards: [
     },
   },
   home: {
-    about: 'Home (#1140): waiting-on-you\'s two schemes plus a Taskmaster card in Delve, a minion working in each, three ships since yesterday and two weeks of past ones; open #/home',
+    about: "Home (#1140): waiting-on-you's two schemes plus a Taskmaster card in Delve, a minion working in each, three ships since yesterday and two weeks of past ones; open #/home",
     seed(c) {
       SCENARIOS['waiting-on-you'].seed(c);
       const delve = c.store.listProjects().find((x) => x.name === 'Delve')!;
@@ -738,8 +933,7 @@ mock.boards('#takes', { boards: [
       // Two weeks of ships for Home's activity bars (#1217); a follow-up ship of the same minion counts once a day.
       const past = (s: SeedCtx, title: string, daysAgo: number[]) => {
         const t = minion(s, title, { status: 'closed' });
-        for (const n of daysAgo) c.store.db.prepare('INSERT INTO events (ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?)')
-          .run(t.id, 'note', JSON.stringify({ text: `Shipped ${hex().slice(0, 7)}: ${title}. Risk low: x.` }), Date.now() - n * 86_400_000);
+        for (const n of daysAgo) c.store.db.prepare('INSERT INTO events (ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?)').run(t.id, 'note', JSON.stringify({ text: `Shipped ${hex().slice(0, 7)}: ${title}. Risk low: x.` }), Date.now() - n * 86_400_000);
       };
       [[1, 1], [2], [3, 5], [5], [6, 9], [9], [12], [4]].forEach((days, i) => past(c, `Past fix ${i + 1}`, days));
       [[2], [3], [3], [7, 8], [10], [11, 13]].forEach((days, i) => past(d, `Past level ${i + 1}`, days));
@@ -747,7 +941,7 @@ mock.boards('#takes', { boards: [
     },
   },
   mentions: {
-    about: '@mentions (#1149): Josh, a member of Seeded, mentions you in a minion\'s chat; your Needs you shows it, and typing @ in a chat box opens the member picker',
+    about: "@mentions (#1149): Josh, a member of Seeded, mentions you in a minion's chat; your Needs you shows it, and typing @ in a chat box opens the member picker",
     seed(c) {
       const josh = c.store.findUser('name', 'Josh') ?? c.store.createUser({ name: 'Josh', login: 'josh' });
       c.store.addMember(c.project.id, josh.id);
@@ -777,7 +971,7 @@ mock.boards('#takes', { boards: [
     },
   },
   'busy-scheme': {
-    about: 'a scheme as big as Citadel\'s own (#1077): a long Taskmaster chat, 20 open minions with 5 running, and 1,244 dismissed ones, for tools/typing-lag.ts and the closed-list checks (#1330)',
+    about: "a scheme as big as Citadel's own (#1077): a long Taskmaster chat, 20 open minions with 5 running, and 1,244 dismissed ones, for tools/typing-lag.ts and the closed-list checks (#1330)",
     seed(c) {
       const tm = taskmaster(c);
       const w = chat(c, tm, 400);
@@ -794,7 +988,7 @@ mock.boards('#takes', { boards: [
     },
   },
   'taskmaster-split': {
-    about: 'a scheme split into per-person Taskmasters (#919, #920): yours, Josh\'s and the Overlord, each with a chat, an Overlord alert and a card for everyone; to see his side, sign Josh in with an invite link: the copy\'s password signs in admins only',
+    about: "a scheme split into per-person Taskmasters (#919, #920): yours, Josh's and the Overlord, each with a chat, an Overlord alert and a card for everyone; to see his side, sign Josh in with an invite link: the copy's password signs in admins only",
     seed(c) {
       const tm = taskmaster(c);
       const josh = c.store.findUser('name', 'Josh') ?? c.store.createUser({ name: 'Josh', login: 'josh' });
@@ -808,7 +1002,7 @@ mock.boards('#takes', { boards: [
       const ovl = c.store.getOverlord(c.project.id)!;
       for (const t of [own, ovl]) c.store.updateTicket(t.id, { status: 'idle' });
       const j = chat(c, own, 6);
-      j.put('user_message', { author: 'Josh', text: 'Start a minion for the runner box\'s third slot.' });
+      j.put('user_message', { author: 'Josh', text: "Start a minion for the runner box's third slot." });
       j.init();
       j.said('Started #15 for the third runner slot.');
       j.done('Started.');
@@ -818,13 +1012,19 @@ mock.boards('#takes', { boards: [
       o.put('note', { text: 'Cleaned up 4 worktrees today, 504 MiB freed', detail: 'ticket/1001-a  120 MiB\nticket/1002-b  384 MiB', everyone: true });
       o.put('note', { text: '📋 Taskmaster updated the Citadel-wide instructions', everyone: true });
       const opts = [{ label: 'Wait for the desktop', recommended: true }, { label: 'Run on perigee' }];
-      o.put('question', { id: hex(), everyone: true, reply: 'The desktop runner is offline. It stopped answering after the last Windows update, and the queue behind it has grown to a dozen runs, so every ship now falls back to perigee and waits its turn there. The service is set to start by itself, but the update turned it off. Nothing is lost: the queued runs start again as soon as it answers. To bring it back, open Windows PowerShell on the desktop and run:\n\n```powershell\nStart-Service citadel-runner\nGet-Service citadel-runner\n```\n\nThen tell me whether it shows Running.', questions: [{ question: 'Hold lands until the desktop runner is back?', header: 'CI', multiSelect: false, options: opts }] });
+      o.put('question', {
+        id: hex(),
+        everyone: true,
+        reply:
+          'The desktop runner is offline. It stopped answering after the last Windows update, and the queue behind it has grown to a dozen runs, so every ship now falls back to perigee and waits its turn there. The service is set to start by itself, but the update turned it off. Nothing is lost: the queued runs start again as soon as it answers. To bring it back, open Windows PowerShell on the desktop and run:\n\n```powershell\nStart-Service citadel-runner\nGet-Service citadel-runner\n```\n\nThen tell me whether it shows Running.',
+        questions: [{ question: 'Hold lands until the desktop runner is back?', header: 'CI', multiSelect: false, options: opts }],
+      });
       o.put('question', { id: hex(), everyone: true, reply: 'The heavy queue is backed up. '.repeat(25), questions: [{ question: 'Drain the heavy queue now?', header: 'Heavy', multiSelect: false, options: opts }] }); // a long reply with no code block (#1630)
       return `#/p/${c.project.id}`;
     },
   },
   'agent-relays': {
-    about: 'a minion and the Taskmaster messaging each other: a brief, relays both ways, held mail from another scheme\'s Taskmaster, collapsed and shortened replies, and a person\'s messages (#693)',
+    about: "a minion and the Taskmaster messaging each other: a brief, relays both ways, held mail from another scheme's Taskmaster, collapsed and shortened replies, and a person's messages (#693)",
     seed(c) {
       const tm = taskmaster(c);
       const t = minion(c, 'Sidebar badge colours', { note: 'tested, risk low; landing' });
@@ -851,7 +1051,7 @@ mock.boards('#takes', { boards: [
     },
   },
   'minion-copies': {
-    about: 'the Taskmaster chat with a run of copies of minion-to-minion messages (one grouped row), a person\'s message, then a second run (#924)',
+    about: "the Taskmaster chat with a run of copies of minion-to-minion messages (one grouped row), a person's message, then a second run (#924)",
     seed(c) {
       const tm = taskmaster(c);
       const [a, b, d] = [1, 2, 3].map((i) => minion(c, `Feeder ${i}`));
@@ -885,13 +1085,13 @@ mock.boards('#takes', { boards: [
     },
   },
   'held-mail': {
-    about: 'a minion with held mail waiting for its next turn (#1067, #1252): a cold hold from two senders, one a loop-guard hold, so its chat shows the held rows with a small Deliver, the loop hold\'s Continue card, and the list its loop badge',
+    about: "a minion with held mail waiting for its next turn (#1067, #1252): a cold hold from two senders, one a loop-guard hold, so its chat shows the held rows with a small Deliver, the loop hold's Continue card, and the list its loop badge",
     seed(c) {
       const tm = taskmaster(c);
       const other = minion(c, 'Rail settings page');
       const t = minion(c, 'Sidebar badge colours', { note: 'waiting on its next turn' });
       const m = chat(c, t, 12);
-      m.asked('Fix the unread badges\' contrast in dark mode.');
+      m.asked("Fix the unread badges' contrast in dark mode.");
       m.init();
       m.said('Fixed the contrast; checking phones next.');
       m.done('Fixed.');
@@ -906,10 +1106,13 @@ mock.boards('#takes', { boards: [
       ];
       c.store.setSetting(queueKey(t.id), { held: mail, coldAt: Date.now() - 40 * 60_000 });
       const now = Date.now();
-      const loop: LoopState = { sent: Array.from({ length: 8 }, (_, i) => now - (20 - i) * 60_000), held: [
-        { to: t.id, author: 'Taskmaster', text: 'Run the badge tests again and report the counts.', from: tm.id, at: now - 5 * 60_000 },
-        { to: t.id, author: 'Taskmaster', text: 'And screenshot the dark sidebar.', from: tm.id, at: now - 4 * 60_000 },
-      ] };
+      const loop: LoopState = {
+        sent: Array.from({ length: 8 }, (_, i) => now - (20 - i) * 60_000),
+        held: [
+          { to: t.id, author: 'Taskmaster', text: 'Run the badge tests again and report the counts.', from: tm.id, at: now - 5 * 60_000 },
+          { to: t.id, author: 'Taskmaster', text: 'And screenshot the dark sidebar.', from: tm.id, at: now - 4 * 60_000 },
+        ],
+      };
       c.store.setSetting(loopKey(t.id), loop);
       return route(c, t);
     },
@@ -934,11 +1137,11 @@ mock.boards('#takes', { boards: [
     },
   },
   'side-thread': {
-    about: 'a minion mid-turn with side threads (#932): yours answered with a follow-up, and Josh\'s still looking; and an idle minion whose Ask on the side shows the cold cost first',
+    about: "a minion mid-turn with side threads (#932): yours answered with a follow-up, and Josh's still looking; and an idle minion whose Ask on the side shows the cold cost first",
     seed(c) {
       const t = minion(c, 'Speed up the land queue', { status: 'running', last_activity: 'Running tests… 3/5', session_id: 'seed-side-1' });
       const w = chat(c, t, 12);
-      w.asked('Make lands stop waiting on each other\'s tests.');
+      w.asked("Make lands stop waiting on each other's tests.");
       w.init();
       w.said('Running the land tests now; this takes a few minutes.');
       w.call('Bash', { command: 'citadel-test test/land.test.ts', description: 'Run the land tests' }, null);
@@ -955,12 +1158,30 @@ mock.boards('#takes', { boards: [
     },
   },
   'wco-fixture': {
-    about: 'the run-on-windows WCO rig\'s fixture contraption (open, at port $WCO_FIXTURE_PORT) and a minion with an artifact',
+    about: "the run-on-windows WCO rig's fixture contraption (open, at port $WCO_FIXTURE_PORT) and a minion with an artifact",
     seed(c) {
       const port = Number(process.env.WCO_FIXTURE_PORT) || 1;
       // Open paths only, so the identity keys are never used: placeholders, not a real key pair.
       if (c.store.getContraption('wco-fixture')) c.store.updateContraption('wco-fixture', { port });
-      else c.store.createContraption({ name: 'wco-fixture', title: 'WCO fixture', icon: null, port, home_scheme: c.project.id, open_paths: '["/"]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: '', identity_private: '', key_hash: `wco-fixture-${hex()}`, keys_at: Date.now() });
+      else
+        c.store.createContraption({
+          name: 'wco-fixture',
+          title: 'WCO fixture',
+          icon: null,
+          port,
+          home_scheme: c.project.id,
+          open_paths: '["/"]',
+          relay_paths: '[]',
+          repo: null,
+          branch: null,
+          folder: null,
+          default_model: null,
+          turn_cap: null,
+          identity_public: '',
+          identity_private: '',
+          key_hash: `wco-fixture-${hex()}`,
+          keys_at: Date.now(),
+        });
       const t = minion(c, 'WCO rig artifact');
       const page = '<!doctype html><title>WCO artifact</title><p>An artifact under the frame.</p>';
       const file = join(t.cwd!, 'wco-artifact.html');
@@ -987,7 +1208,9 @@ mock.boards('#takes', { boards: [
       const why = 'The sprite renders run in the cantrips folder on the box, and this scheme has no machine yet.';
       const page = `#/p/${c.project.id}/machines/${name}`;
       const e = c.store.addEvent(t.id, 'plan', {
-        id: hex(), status: 'pending', summary: `Lend ${name} to ${c.project.name}`,
+        id: hex(),
+        status: 'pending',
+        summary: `Lend ${name} to ${c.project.name}`,
         plan: [...lines, '', `After this it lends: the godot-ai MCP server; workspaces ${after.workspaces.join(', ')}.`, '', why, '', `[${name} on the Machines page](${page})`].join('\n'),
         machineLend: { id: m.id, name, owner: null, scheme, change, lines, after, why, page },
       });
@@ -995,7 +1218,7 @@ mock.boards('#takes', { boards: [
     },
   },
   'gpu-jobs': {
-    about: 'a minion\'s GPU jobs on a seeded desktop in every state (needs go, queued outside hours, running, paused resumable and frozen, done, failed), and that desktop on the Machines page (#859)',
+    about: "a minion's GPU jobs on a seeded desktop in every state (needs go, queued outside hours, running, paused resumable and frozen, done, failed), and that desktop on the Machines page (#859)",
     seed(c) {
       const owner = c.store.listUsers().find((u) => u.name === c.who);
       const m = c.store.createMachine(`seeded-desktop-${hex().slice(0, 4)}`, hex(), c.who, owner?.id ?? null);
@@ -1011,22 +1234,78 @@ mock.boards('#takes', { boards: [
       };
       c.store.allowJobKind(m.id, kindHash(kinds.whisperx), 'whisperx', JSON.stringify(kinds.whisperx), c.who);
       const add = (kind: JobKind, state: string, fields: Parameters<Store['updateMachineJob']>[1], ago: number, when: 'hours' | 'now' = 'hours', reason = '') => {
-        const j = c.store.addMachineJob({ machine_id: m.id, project_id: c.project.id, ticket_id: t.id, contraption_id: null, asked_by: `#${t.number} ${t.title}`, kind_name: kind.name, kind: JSON.stringify(kind), kind_hash: kindHash(kind), inputs: JSON.stringify([{ name: 'chapter-07.wav', size: 412_000_000, sha256: hex(), path: '/dev/null' }]), limit_s: 2 * 3600, run_when: when, reason, state, created_at: now - ago });
+        const j = c.store.addMachineJob({
+          machine_id: m.id,
+          project_id: c.project.id,
+          ticket_id: t.id,
+          contraption_id: null,
+          asked_by: `#${t.number} ${t.title}`,
+          kind_name: kind.name,
+          kind: JSON.stringify(kind),
+          kind_hash: kindHash(kind),
+          inputs: JSON.stringify([{ name: 'chapter-07.wav', size: 412_000_000, sha256: hex(), path: '/dev/null' }]),
+          limit_s: 2 * 3600,
+          run_when: when,
+          reason,
+          state,
+          created_at: now - ago,
+        });
         c.store.updateMachineJob(j.id, fields);
         return c.store.getMachineJob(j.id)!;
       };
       const log = (lines: string[]) => lines.join('\n');
       const jobs = [
-        add(kinds.whisperx, 'done', { go: 'standing', go_by: c.who, started_at: now - 5 * 3600e3, ended_at: now - 4.2 * 3600e3, run_s: 2830, gpu_busy_s: 2510, outputs: JSON.stringify([{ path: 'chapter-05.srt', size: 48_210, uploaded: true }, { path: 'chapter-05.json', size: 912_400, uploaded: true }]), upload_bytes: 960_610, live: JSON.stringify({ log_tail: log(['[whisperx] aligning 1,204 segments', '[whisperx] wrote /out/chapter-05.srt', 'done in 47:10']) }), exit_code: 0 }, 5.2 * 3600e3),
-        add(kinds.tts, 'failed', { go: 'hours', go_by: c.who, started_at: now - 3 * 3600e3, ended_at: now - 2.9 * 3600e3, run_s: 312, gpu_busy_s: 290, exit_code: 137, error: 'Out of GPU memory (exit 137)', live: JSON.stringify({ log_tail: log(['loading xtts v2…', 'torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB', 'Killed']) }) }, 3.1 * 3600e3),
+        add(
+          kinds.whisperx,
+          'done',
+          {
+            go: 'standing',
+            go_by: c.who,
+            started_at: now - 5 * 3600e3,
+            ended_at: now - 4.2 * 3600e3,
+            run_s: 2830,
+            gpu_busy_s: 2510,
+            outputs: JSON.stringify([
+              { path: 'chapter-05.srt', size: 48_210, uploaded: true },
+              { path: 'chapter-05.json', size: 912_400, uploaded: true },
+            ]),
+            upload_bytes: 960_610,
+            live: JSON.stringify({ log_tail: log(['[whisperx] aligning 1,204 segments', '[whisperx] wrote /out/chapter-05.srt', 'done in 47:10']) }),
+            exit_code: 0,
+          },
+          5.2 * 3600e3,
+        ),
+        add(
+          kinds.tts,
+          'failed',
+          {
+            go: 'hours',
+            go_by: c.who,
+            started_at: now - 3 * 3600e3,
+            ended_at: now - 2.9 * 3600e3,
+            run_s: 312,
+            gpu_busy_s: 290,
+            exit_code: 137,
+            error: 'Out of GPU memory (exit 137)',
+            live: JSON.stringify({ log_tail: log(['loading xtts v2…', 'torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB', 'Killed']) }),
+          },
+          3.1 * 3600e3,
+        ),
         add(kinds.tts, 'needs-go', {}, 40 * 60e3, 'now', 'The narrator wants chapter 8 by tomorrow morning'),
         add(kinds.whisperx, 'queued', { go: 'standing', go_by: c.who }, 25 * 60e3),
         add(kinds.tts, 'paused', { go: 'now', go_by: c.who, paused_by: 'owner', started_at: now - 70 * 60e3, run_s: 1460, gpu_busy_s: 1300, live: JSON.stringify({ held_vram_mb: 14_200, log_tail: log(['rendering sentence 412/1,880']) }), live_at: now - 9 * 60e3 }, 75 * 60e3),
         add(kinds.whisperx, 'paused', { go: 'standing', go_by: c.who, paused_by: 'hours', started_at: now - 9 * 3600e3, run_s: 1700, gpu_busy_s: 1500, live: JSON.stringify({ log_tail: log(['[whisperx] transcribing 61%']) }), live_at: now - 7 * 3600e3 }, 10 * 3600e3),
-        add(kinds.whisperx, 'running', { go: 'now', go_by: c.who, started_at: now - 34 * 60e3, run_s: 2010, gpu_busy_s: 1880, live: JSON.stringify({ gpu_pct: 87, vram_mb: 9_830, log_tail: log(['[whisperx] loading large-v3', '[whisperx] transcribing chapter-07.wav', '[whisperx] 42% (1:12:04 of 2:51:30)']) }), live_at: now - 20e3 }, 36 * 60e3, 'now', 'Cara asked for chapter 7 tonight'),
+        add(
+          kinds.whisperx,
+          'running',
+          { go: 'now', go_by: c.who, started_at: now - 34 * 60e3, run_s: 2010, gpu_busy_s: 1880, live: JSON.stringify({ gpu_pct: 87, vram_mb: 9_830, log_tail: log(['[whisperx] loading large-v3', '[whisperx] transcribing chapter-07.wav', '[whisperx] 42% (1:12:04 of 2:51:30)']) }), live_at: now - 20e3 },
+          36 * 60e3,
+          'now',
+          'Cara asked for chapter 7 tonight',
+        ),
       ];
-      const waits = (j: typeof jobs[number]) => (j.state === 'queued' ? 'outside job hours (opens 11:00 PM PST)' : null);
-      const viewOf = (j: typeof jobs[number]) => jobView(j, { machine: machine.name, waits: waits(j), decider: owner?.id ?? null, ticketNumber: t.number });
+      const waits = (j: (typeof jobs)[number]) => (j.state === 'queued' ? 'outside job hours (opens 11:00 PM PST)' : null);
+      const viewOf = (j: (typeof jobs)[number]) => jobView(j, { machine: machine.name, waits: waits(j), decider: owner?.id ?? null, ticketNumber: t.number });
       w.asked('Transcribe chapters 5 to 8 on my desktop, and render chapter 8 with the narrator voice.');
       w.init();
       w.said('Queuing them on the desktop as GPU jobs; each shows below as it goes.');
@@ -1034,12 +1313,24 @@ mock.boards('#takes', { boards: [
       for (const j of jobs) {
         if (j.state === 'needs-go') {
           const k = JSON.parse(j.kind) as JobKind;
-          w.put('question', { id: hex(), job: j.id, to: c.who, questions: [{ header: 'GPU job go', question: `#${t.number} wants to run job #${j.id} "${k.name}" on ${machine.name} NOW.`, options: [
-            { label: 'Run in job hours', description: 'Queue it; it starts once job hours open.' },
-            { label: 'Run now', description: "Start it as soon as the machine is free, outside job hours too; job hours ending won't pause it.", recommended: true },
-            { label: 'Always allow this kind', description: 'Run this one in job hours, and let this exact recipe run in job hours from now on without asking.' },
-            { label: 'No', description: 'Refuse it; the minion that asked is told.' },
-          ] }], recipe: { machine: machine.name, asked_by: j.asked_by, when: j.run_when, reason: j.reason, limit_s: j.limit_s, kind: k, inputs: [{ name: 'chapter-08.wav', size: 398_000_000 }] } });
+          w.put('question', {
+            id: hex(),
+            job: j.id,
+            to: c.who,
+            questions: [
+              {
+                header: 'GPU job go',
+                question: `#${t.number} wants to run job #${j.id} "${k.name}" on ${machine.name} NOW.`,
+                options: [
+                  { label: 'Run in job hours', description: 'Queue it; it starts once job hours open.' },
+                  { label: 'Run now', description: "Start it as soon as the machine is free, outside job hours too; job hours ending won't pause it.", recommended: true },
+                  { label: 'Always allow this kind', description: 'Run this one in job hours, and let this exact recipe run in job hours from now on without asking.' },
+                  { label: 'No', description: 'Refuse it; the minion that asked is told.' },
+                ],
+              },
+            ],
+            recipe: { machine: machine.name, asked_by: j.asked_by, when: j.run_when, reason: j.reason, limit_s: j.limit_s, kind: k, inputs: [{ name: 'chapter-08.wav', size: 398_000_000 }] },
+          });
         }
         // A paused or ended job's card moved down once already: its first place keeps the note.
         if (j.state !== 'needs-go' && j.state !== 'queued') w.put('job', { job: j.id, stage: 'waiting', view: { ...viewOf(j), state: 'queued' } });
@@ -1108,7 +1399,13 @@ mock.boards('#takes', { boards: [
         ['perigee-shell', 'Perigee shell is fish', 'Hand people fish syntax or bash -c', 'A bash for-loop just hangs waiting for `end`.', 'reference', false],
       ];
       for (const [file, name, description, body, kind] of notes) writeFileSync(join(dir, `${file}.md`), `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: ${kind}\n---\n\n${body}\n`);
-      writeFileSync(join(dir, 'MEMORY.md'), notes.filter((n) => n[5]).map(([file, name, description]) => `- [${name}](${file}.md) — ${description}`).join('\n') + '\n');
+      writeFileSync(
+        join(dir, 'MEMORY.md'),
+        notes
+          .filter((n) => n[5])
+          .map(([file, name, description]) => `- [${name}](${file}.md) — ${description}`)
+          .join('\n') + '\n',
+      );
       return `#/p/${c.project.id}/memory (Orders → Memory in "${c.project.name}")`;
     },
   },
@@ -1119,11 +1416,20 @@ mock.boards('#takes', { boards: [
       const repo = c.store.getProject(c.project.id)!.repo_dir!;
       const folder = memoryFolders(repo, [{ label: 'server', configDir: join(c.dataDir, 'claude') }])[0];
       const view = readFolder(folder, () => false);
-      const old = c.store.memoryProposals.create({ project_id: c.project.id, ticket_id: null, folder: folder.id, changes: checkChanges(view, [{ action: 'index', file: 'perigee-shell.md', line: '- [Perigee shell is fish](perigee-shell.md) — hand people fish syntax', reason: 'Not in the index, so no session finds it' }]) }, Date.now() - 6 * 86_400_000).proposal;
+      const old = c.store.memoryProposals.create(
+        { project_id: c.project.id, ticket_id: null, folder: folder.id, changes: checkChanges(view, [{ action: 'index', file: 'perigee-shell.md', line: '- [Perigee shell is fish](perigee-shell.md) — hand people fish syntax', reason: 'Not in the index, so no session finds it' }]) },
+        Date.now() - 6 * 86_400_000,
+      ).proposal;
       c.store.memoryProposals.decide(old.id, { status: 'applied', changes: old.changes.map((x) => ({ ...x, outcome: 'applied' })), backup: [{ file: 'perigee-shell.md', text: readFileSync(join(folder.dir, 'perigee-shell.md'), 'utf8'), line: null }], by: c.who }, Date.now() - 6 * 86_400_000);
       const run = minion(c, 'Memory curator', {}, 'chore');
       const changes = checkChanges(view, [
-        { action: 'edit', file: 'released-means-released.md', text: '---\nname: Released means released\ndescription: A target is live only when its people can get that version; ship, not land\nmetadata:\n  type: feedback\n---\n\nCara 2026-11-18: say "released" only once people can get the build.\nIn everything people read, a change going onto main is "shipping" (merged in from ship-not-land).\n', line: '- [Released means released](released-means-released.md) — live only when people can get it; ship, not land', reason: 'ship-not-land says the same kind of thing: merged into this note' },
+        {
+          action: 'edit',
+          file: 'released-means-released.md',
+          text: '---\nname: Released means released\ndescription: A target is live only when its people can get that version; ship, not land\nmetadata:\n  type: feedback\n---\n\nCara 2026-11-18: say "released" only once people can get the build.\nIn everything people read, a change going onto main is "shipping" (merged in from ship-not-land).\n',
+          line: '- [Released means released](released-means-released.md) — live only when people can get it; ship, not land',
+          reason: 'ship-not-land says the same kind of thing: merged into this note',
+        },
         { action: 'delete', file: 'ship-not-land.md', reason: 'Merged into released-means-released' },
         { action: 'index', file: 'perigee-shell.md', line: '- [Perigee shell is fish](perigee-shell.md) — hand people fish syntax or bash -c', reason: 'Not in the index, so no session finds it' },
         { action: 'delete', file: 'fable-burst.md', reason: 'Its recheck date passed five days ago' },
@@ -1135,14 +1441,17 @@ mock.boards('#takes', { boards: [
     },
   },
   decisions: {
-    about:"Orders → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying \"land\", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions' Land then Ship edit of Nov 19 in their history",
+    about: 'Orders → Decisions (#1064): the memory scenario plus a git repo for the Seeded scheme (CLAUDE.md, a rule still saying "land", two ADRs, the second reversing the first by name), scheme instructions, and the Citadel-wide instructions\' Land then Ship edit of Nov 19 in their history',
     seed(c) {
       SCENARIOS.memory.seed(c);
       if (!c.store.listUsers().some((u) => u.name === 'Josh')) c.store.createUser({ name: 'Josh', login: 'josh' });
       const repo = c.store.getProject(c.project.id)!.repo_dir!;
       const env = { ...process.env, GIT_AUTHOR_NAME: 'Seed', GIT_AUTHOR_EMAIL: 'seed@example.invalid', GIT_COMMITTER_NAME: 'Seed', GIT_COMMITTER_EMAIL: 'seed@example.invalid' };
       const sh = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe', env });
-      const put = (path: string, text: string) => { mkdirSync(join(repo, path, '..'), { recursive: true }); writeFileSync(join(repo, path), text); };
+      const put = (path: string, text: string) => {
+        mkdirSync(join(repo, path, '..'), { recursive: true });
+        writeFileSync(join(repo, path), text);
+      };
       // A second seed starts the repo over, so ADR 0002 is its own commit again.
       for (const d of ['.git', 'docs', '.claude']) rmSync(join(repo, d), { recursive: true, force: true });
       execFileSync('git', ['init', '-q', '-b', 'main', repo]);
@@ -1156,7 +1465,8 @@ mock.boards('#takes', { boards: [
       sh('commit', '-qm', 'ADR 0002');
       c.store.setProjectUpstream(c.project.id, 'https://github.com/caraminden/seeded', null);
       c.store.setProjectInstructions(c.project.id, '## Shipping\nShip small fixes without asking (Cara, 2026-10-27: "move fast").\n\n## Pictures\nImages by code (Cara, 2026-11-14: "image via code should ABSOLUTELY be the default").\n', c.who);
-      const land = 'Land, not merge (Cara, 2026-11-19, picked "Land" and, for `fold`, "Retire it": "fold was just for major builds"). A change going onto main is "landing".\n\n- No reflow without input (Cara, 2026-11-16: "UI reflowing without a user input should be avoided").\n- Fable only for the hardest work (Josh, 2026-11-13: "only for really complex or high risk things").\n';
+      const land =
+        'Land, not merge (Cara, 2026-11-19, picked "Land" and, for `fold`, "Retire it": "fold was just for major builds"). A change going onto main is "landing".\n\n- No reflow without input (Cara, 2026-11-16: "UI reflowing without a user input should be avoided").\n- Fable only for the hardest work (Josh, 2026-11-13: "only for really complex or high risk things").\n';
       const ship = land.replace(/^Land, not merge \([^\n]*/, 'Ship, not land or merge (Cara, 2026-11-19: she first picked "Land", then later that day, on #1020\'s card, picked `Ship` over keeping "land"; for `fold` she picked "Retire it": "fold was just for major builds"). A change going onto main is "shipping".');
       c.store.setAppInstructions(land, c.who);
       c.store.setAppInstructions(ship, 'Taskmaster');
@@ -1174,16 +1484,25 @@ mock.boards('#takes', { boards: [
       writeFileSync(page, "<!doctype html><title>Ideas</title><h1>Ideas</h1><script>const opts = [{ v: 'go', label: 'Build it' }, { v: 'later', label: 'Later' }, { v: 'skip', label: 'Cut' }];\nmock.picks({ collection: 'ideas', options: opts });</script>");
       const day = 86_400_000;
       const at = (ago: number) => new Date(Date.now() - ago * day).toISOString();
-      c.store.writeArtifactData(c.project.id, page, [
-        { key: 'db/ideas/A1', value: JSON.stringify({ v: 'go', by: 'Josh', at: at(3), note: 'One page for every sound, please' }) },
-        { key: 'db/ideas/A2', value: JSON.stringify({ v: 'go', by: 'Josh', at: at(3) }) },
-        { key: 'db/ideas/B1', value: JSON.stringify({ v: 'later', by: 'Josh', at: at(20), note: 'After the audio work' }) },
-        { key: 'db/ideas/B2', value: JSON.stringify({ v: 'later', by: 'Josh', at: at(3) }) },
-        { key: 'db/ideas/C1', value: JSON.stringify({ v: 'skip', by: 'Josh', at: at(3) }) },
-        { key: 'db/ideas/C2', value: JSON.stringify({ v: 'go', by: 'Josh', at: at(3), note: 'Small one, do it first' }) },
-      ], 'Josh');
+      c.store.writeArtifactData(
+        c.project.id,
+        page,
+        [
+          { key: 'db/ideas/A1', value: JSON.stringify({ v: 'go', by: 'Josh', at: at(3), note: 'One page for every sound, please' }) },
+          { key: 'db/ideas/A2', value: JSON.stringify({ v: 'go', by: 'Josh', at: at(3) }) },
+          { key: 'db/ideas/B1', value: JSON.stringify({ v: 'later', by: 'Josh', at: at(20), note: 'After the audio work' }) },
+          { key: 'db/ideas/B2', value: JSON.stringify({ v: 'later', by: 'Josh', at: at(3) }) },
+          { key: 'db/ideas/C1', value: JSON.stringify({ v: 'skip', by: 'Josh', at: at(3) }) },
+          { key: 'db/ideas/C2', value: JSON.stringify({ v: 'go', by: 'Josh', at: at(3), note: 'Small one, do it first' }) },
+        ],
+        'Josh',
+      );
       const idea = minion(c, 'Ideas for the audio pass');
-      c.store.addEvent(idea.id, 'user_message', { author: 'Josh', text: 'Picks on "Ideas":\n- A1 A sound board: Build it. "One page for every sound, please"\n- A2 Quieter footsteps: Build it\n- B1 A music mixer: Later. "After the audio work"\n- B2 Voice lines per room: Later\n- C1 Random ambience: Cut\n- C2 A mute key: Build it. "Small one, do it first"', comment: { path: page, about: 'Ideas' } });
+      c.store.addEvent(idea.id, 'user_message', {
+        author: 'Josh',
+        text: 'Picks on "Ideas":\n- A1 A sound board: Build it. "One page for every sound, please"\n- A2 Quieter footsteps: Build it\n- B1 A music mixer: Later. "After the audio work"\n- B2 Voice lines per room: Later\n- C1 Random ambience: Cut\n- C2 A mute key: Build it. "Small one, do it first"',
+        comment: { path: page, about: 'Ideas' },
+      });
       const handoff = (name: string, title: string, card: string) => {
         writeFileSync(join(shared, 'handoffs', name), `# Handoff: ${title} (${card})\n\nFrom #${idea.number}'s ideas page, card ${card}: \`${page}\`.\n**Pick (Josh):** Build it.\n`);
         return join(shared, 'handoffs', name);
@@ -1198,7 +1517,8 @@ mock.boards('#takes', { boards: [
     },
   },
   ci: {
-    about: 'the CI page (#968): the Seeded scheme with CI on GitHub, a ringing problem and a quiet one, verdicts (one green that skipped a job), the Broken now strip on Home at #/home/broken (#1662), a queue, runs and runners with what they run, desktop load, each run linking its minion (#1019), a quieted workflow with a red verdict, greyed (#990), the queued jobs of the landing minion as one row (#1019); the CI chip turns red',
+    about:
+      'the CI page (#968): the Seeded scheme with CI on GitHub, a ringing problem and a quiet one, verdicts (one green that skipped a job), the Broken now strip on Home at #/home/broken (#1662), a queue, runs and runners with what they run, desktop load, each run linking its minion (#1019), a quieted workflow with a red verdict, greyed (#990), the queued jobs of the landing minion as one row (#1019); the CI chip turns red',
     seed(c) {
       c.store.setProjectUpstream(c.project.id, 'https://github.com/caraminden/seeded', null);
       c.store.setProjectSettings(c.project.id, { ci_quiet: 'pilot.yml' });
@@ -1211,15 +1531,30 @@ mock.boards('#takes', { boards: [
       c.store.setSetting(`fast-mode:${c.project.id}`, { verified: 'a1b2c3d4e5f6a7b8', reds: [{ ids: ['test/aura-outline.test.ts'], sha: '9f8e7d6c5b4a3210', ticket: null, n: 12, at: now - 11 * 60_000 }], landed: {} });
       const onIt = minion(c, 'Flaky test: test/previews.test.ts');
       const seen = minion(c, 'Port the overlay', { status: 'closed' });
-      for (const [file, n, src] of [['test/apps.test.ts', 17, 'in CI'], ['test/previews.test.ts', 12, 'smoke'], ['test/machines.test.ts', 9, 'run-tests'], ['test/checkpoint.test.ts', 4, 'in CI']] as const)
-        for (let i = 0; i < n; i++) c.store.addFlakeEvents(c.project.id, i === 0 ? seen.id : null, 'a1b2c3d', now - (i * 20 + 3) * 3_600_000 / 2, [{ file, source: src, detail: `✖ ${file} › case ${i} (timed out after 5000ms)`, ...(i < 9 && file !== 'test/checkpoint.test.ts' ? { testName: `case ${i % 3}`, message: i % 3 ? 'Error: Timed out waiting for the app to answer' : 'AssertionError: Expected values to be strictly deep-equal', cls: i % 3 ? 'timed out waiting' : 'wrong value' } : {}) }]);
+      for (const [file, n, src] of [
+        ['test/apps.test.ts', 17, 'in CI'],
+        ['test/previews.test.ts', 12, 'smoke'],
+        ['test/machines.test.ts', 9, 'run-tests'],
+        ['test/checkpoint.test.ts', 4, 'in CI'],
+      ] as const)
+        for (let i = 0; i < n; i++)
+          c.store.addFlakeEvents(c.project.id, i === 0 ? seen.id : null, 'a1b2c3d', now - ((i * 20 + 3) * 3_600_000) / 2, [
+            {
+              file,
+              source: src,
+              detail: `✖ ${file} › case ${i} (timed out after 5000ms)`,
+              ...(i < 9 && file !== 'test/checkpoint.test.ts' ? { testName: `case ${i % 3}`, message: i % 3 ? 'Error: Timed out waiting for the app to answer' : 'AssertionError: Expected values to be strictly deep-equal', cls: i % 3 ? 'timed out waiting' : 'wrong value' } : {}),
+            },
+          ]);
       // #1120: a fix with 30 of its 50 proving runs clean, and a held one that flaked again (reopened).
       c.store.addFlakeFix(c.project.id, 'test/apps.test.ts', onIt.id, now - 26 * 3_600_000, { clean_runs: 30 });
       c.store.addFlakeFix(c.project.id, 'test/machines.test.ts', seen.id, now - 80 * 3_600_000, { reopened: 1 });
       const [review, landing, landed] = [minion(c, 'Sound tab in settings'), minion(c, 'Drag panels between monitors', { status: 'closed' }), minion(c, 'Aura vanishes when its outline is removed', { status: 'closed' }, 'bug')];
       const run = (id: number, name: string, branch: string, min: number, status: string, conclusion: string | null, event = 'push', who: Ticket | null = null) => ({ id, name, branch, event, status, conclusion, at: iso(min), url: url(id), minion: who?.number ?? null });
       c.store.setSetting(`ci-health:view:${c.project.id}`, {
-        at: now - 2 * 60_000, slug: 'caraminden/seeded', branch: 'main',
+        at: now - 2 * 60_000,
+        slug: 'caraminden/seeded',
+        branch: 'main',
         runners: [
           { name: 'DESKTOP-G248IJ8-desktop', status: 'offline', busy: false, labels: ['self-hosted', 'Windows', 'seeded-ci'], job: null, offlineSince: now - 42 * 60_000 },
           { name: 'DESKTOP-G248IJ8-linux', status: 'online', busy: true, labels: ['self-hosted', 'Linux', 'seeded-ci-linux'], job: 'tests (linux)', offlineSince: null },
@@ -1257,11 +1592,30 @@ mock.boards('#takes', { boards: [
       });
       // #1019: CI desktop load on Overview, collapsed to a line of CPU and memory: the PC's agent sampled every 30 s for 20 min.
       const pc = c.store.createMachine(`seeded-ci-pc-${hex().slice(0, 4)}`, hex(), c.who);
-      c.store.addRunnerLoads(Array.from({ length: 40 }, (_, i) => ({ machine: pc.id, at: now - (39 - i) * 30_000, data: JSON.stringify({
-        at: now - (39 - i) * 30_000, host: 'DESKTOP-G248IJ8', os: 'windows', cores: 32, cpu: 40 + (i % 7) * 5, mem_total: 64 * 2 ** 30, mem_free: 22 * 2 ** 30,
-        disk_total: 2e12, disk_free: 6e11, queue: 1, pressure: null, idle_sec: 900, temp: null, hv: null, restarts: [],
-        runners: [{ name: 'DESKTOP-G248IJ8-linux', repo: 'caraminden/seeded', dir: 'C:\\actions-runner-seeded-linux', cpu: 20, mem: 3 * 2 ** 30 }],
-      }) })));
+      c.store.addRunnerLoads(
+        Array.from({ length: 40 }, (_, i) => ({
+          machine: pc.id,
+          at: now - (39 - i) * 30_000,
+          data: JSON.stringify({
+            at: now - (39 - i) * 30_000,
+            host: 'DESKTOP-G248IJ8',
+            os: 'windows',
+            cores: 32,
+            cpu: 40 + (i % 7) * 5,
+            mem_total: 64 * 2 ** 30,
+            mem_free: 22 * 2 ** 30,
+            disk_total: 2e12,
+            disk_free: 6e11,
+            queue: 1,
+            pressure: null,
+            idle_sec: 900,
+            temp: null,
+            hv: null,
+            restarts: [],
+            runners: [{ name: 'DESKTOP-G248IJ8-linux', repo: 'caraminden/seeded', dir: 'C:\\actions-runner-seeded-linux', cpu: 20, mem: 3 * 2 ** 30 }],
+          }),
+        })),
+      );
       // #992: the red has a fix minion; the stuck one links to the Taskmaster's wake entry.
       // #1078: three reds: a fix minion at work (with its re-run), one closed with the red still open, and none yet.
       const fix = minion(c, 'Fix the red drift run 9090', { status: 'running', last_activity: 'Finding the cause… · 2 of 4 done', note: 'the drift check reads a stale fixture' }, 'bug');
@@ -1269,12 +1623,47 @@ mock.boards('#takes', { boards: [
       const heard = c.store.addEvent(taskmaster(c).id, 'user_message', { author: 'Citadel', text: 'Seeded: CI: 1 job on self-hosted, seeded-ci has waited for a runner. Start a fix minion now.' });
       c.store.setSetting('ci-health:wake-at', { [`${c.project.id}:stuck:self-hosted,seeded-ci`]: { project: c.project.id, entry: heard.id } });
       c.store.setSetting(`ci-health:${c.project.id}`, {
-        offline: {}, sent: {},
+        offline: {},
+        sent: {},
         problems: [
-          { key: 'stuck:self-hosted,seeded-ci', title: 'CI, Seeded: 1 job on self-hosted, seeded-ci has waited for a runner since 31 min ago.', why: 'every runner that serves self-hosted, seeded-ci (DESKTOP-G248IJ8-desktop) is offline, since 42 min ago', fix: 'turn on or wake DESKTOP-G248IJ8, or start its runner service', since: now - 31 * 60_000, plain: { what: "1 CI job can't start: DESKTOP-G248IJ8 is offline (since 42 min ago)", next: 'Turn on or wake DESKTOP-G248IJ8, or start its runner service; this clears once a runner takes the job' } },
-          { key: 'red:301', title: 'CI, Seeded: drift.yml is red on main (run 9090).', why: 'the newest drift.yml verdict on main is red; its Taskmaster heard 3 h ago', fix: `the Taskmaster starts a fix minion naming run 9090; fix minion #${fix.number} started`, quiet: true, fixMinion: { number: fix.number!, closed: false }, rerun: { sha: 'a1b2c3d', url: 'https://github.com/caraminden/seeded/actions/runs/9120', state: 'running' }, since: now - 190 * 60_000, plain: { what: `drift.yml is red on main; #${fix.number}'s fix shipped and is being re-tested`, next: `This clears when the re-run passes; if it fails, #${fix.number} is woken again` } },
-          { key: 'red:302', title: 'CI, Seeded: lint.yml is still red on main, and is still red after fix minion #' + gone.number + ' closed', why: 'run 9095 on main, made after it closed, failed too, so the fix did not hold', fix: `reopen #${gone.number} or start another fix minion naming run 9095`, fixMinion: { number: gone.number!, closed: true }, since: now - 300 * 60_000, plain: { what: `lint.yml is red on main, and still is after #${gone.number} closed, so its fix didn't hold`, next: `Reopen #${gone.number} or start another fix minion` } },
-          { key: 'red:303', title: 'CI: nightly.yml failed on main (run 9096, at 4e5f6a7)', why: 'the newest nightly.yml verdict on main is red; its Taskmaster heard 12 min ago', fix: 'the Taskmaster starts a fix minion naming run 9096', quiet: true, noFix: { ringsAt: now + 48 * 60_000, late: false }, since: now - 14 * 60_000, plain: { what: 'nightly.yml is red on main', next: 'If no fix minion has started within the hour, this rings' } },
+          {
+            key: 'stuck:self-hosted,seeded-ci',
+            title: 'CI, Seeded: 1 job on self-hosted, seeded-ci has waited for a runner since 31 min ago.',
+            why: 'every runner that serves self-hosted, seeded-ci (DESKTOP-G248IJ8-desktop) is offline, since 42 min ago',
+            fix: 'turn on or wake DESKTOP-G248IJ8, or start its runner service',
+            since: now - 31 * 60_000,
+            plain: { what: "1 CI job can't start: DESKTOP-G248IJ8 is offline (since 42 min ago)", next: 'Turn on or wake DESKTOP-G248IJ8, or start its runner service; this clears once a runner takes the job' },
+          },
+          {
+            key: 'red:301',
+            title: 'CI, Seeded: drift.yml is red on main (run 9090).',
+            why: 'the newest drift.yml verdict on main is red; its Taskmaster heard 3 h ago',
+            fix: `the Taskmaster starts a fix minion naming run 9090; fix minion #${fix.number} started`,
+            quiet: true,
+            fixMinion: { number: fix.number!, closed: false },
+            rerun: { sha: 'a1b2c3d', url: 'https://github.com/caraminden/seeded/actions/runs/9120', state: 'running' },
+            since: now - 190 * 60_000,
+            plain: { what: `drift.yml is red on main; #${fix.number}'s fix shipped and is being re-tested`, next: `This clears when the re-run passes; if it fails, #${fix.number} is woken again` },
+          },
+          {
+            key: 'red:302',
+            title: 'CI, Seeded: lint.yml is still red on main, and is still red after fix minion #' + gone.number + ' closed',
+            why: 'run 9095 on main, made after it closed, failed too, so the fix did not hold',
+            fix: `reopen #${gone.number} or start another fix minion naming run 9095`,
+            fixMinion: { number: gone.number!, closed: true },
+            since: now - 300 * 60_000,
+            plain: { what: `lint.yml is red on main, and still is after #${gone.number} closed, so its fix didn't hold`, next: `Reopen #${gone.number} or start another fix minion` },
+          },
+          {
+            key: 'red:303',
+            title: 'CI: nightly.yml failed on main (run 9096, at 4e5f6a7)',
+            why: 'the newest nightly.yml verdict on main is red; its Taskmaster heard 12 min ago',
+            fix: 'the Taskmaster starts a fix minion naming run 9096',
+            quiet: true,
+            noFix: { ringsAt: now + 48 * 60_000, late: false },
+            since: now - 14 * 60_000,
+            plain: { what: 'nightly.yml is red on main', next: 'If no fix minion has started within the hour, this rings' },
+          },
         ],
       });
       // #1491: the reds' marks, keyed by workflow id like real ones: the nightly red has no fix minion, so it shows Investigate with its failing tests.
@@ -1292,18 +1681,43 @@ mock.boards('#takes', { boards: [
       c.store.setProjectUpstream(c.project.id, 'https://github.com/caraminden/seeded', null);
       const now = Date.now();
       c.store.setSetting(`ci-health:view:${c.project.id}`, {
-        at: now - 60_000, slug: 'caraminden/seeded', branch: 'main',
+        at: now - 60_000,
+        slug: 'caraminden/seeded',
+        branch: 'main',
         runners: [{ name: 'DESKTOP-G248IJ8-linux', status: 'online', busy: false, labels: ['self-hosted', 'Linux', 'seeded-ci-linux'], job: null, offlineSince: null }],
-        running: [], queues: [], waiting: [], workflows: [], runs: [],
+        running: [],
+        queues: [],
+        waiting: [],
+        workflows: [],
+        runs: [],
       });
       c.store.setSetting(`ci-health:${c.project.id}`, { offline: {}, sent: {}, problems: [] });
       const pc = c.store.createMachine(`seeded-ci-pc-${hex().slice(0, 4)}`, hex(), c.who);
       // Someone is at the PC (idle_sec 0) and the CPU sits at 90% or more: the rule's "Overloading".
-      c.store.addRunnerLoads(Array.from({ length: 40 }, (_, i) => ({ machine: pc.id, at: now - (39 - i) * 30_000, data: JSON.stringify({
-        at: now - (39 - i) * 30_000, host: 'DESKTOP-G248IJ8', os: 'windows', cores: 32, cpu: 92 + (i % 5), mem_total: 64 * 2 ** 30, mem_free: 22 * 2 ** 30,
-        disk_total: 2e12, disk_free: 6e11, queue: 12, pressure: null, idle_sec: 0, temp: null, hv: null, restarts: [],
-        runners: [{ name: 'DESKTOP-G248IJ8-linux', repo: 'caraminden/seeded', dir: 'C:\\actions-runner-seeded-linux', cpu: 20, mem: 3 * 2 ** 30 }],
-      }) })));
+      c.store.addRunnerLoads(
+        Array.from({ length: 40 }, (_, i) => ({
+          machine: pc.id,
+          at: now - (39 - i) * 30_000,
+          data: JSON.stringify({
+            at: now - (39 - i) * 30_000,
+            host: 'DESKTOP-G248IJ8',
+            os: 'windows',
+            cores: 32,
+            cpu: 92 + (i % 5),
+            mem_total: 64 * 2 ** 30,
+            mem_free: 22 * 2 ** 30,
+            disk_total: 2e12,
+            disk_free: 6e11,
+            queue: 12,
+            pressure: null,
+            idle_sec: 0,
+            temp: null,
+            hv: null,
+            restarts: [],
+            runners: [{ name: 'DESKTOP-G248IJ8-linux', repo: 'caraminden/seeded', dir: 'C:\\actions-runner-seeded-linux', cpu: 20, mem: 3 * 2 ** 30 }],
+          }),
+        })),
+      );
       return `#/p/${c.project.id}/ci`;
     },
   },
@@ -1331,7 +1745,13 @@ mock.boards('#takes', { boards: [
       const one = `1 ${stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[19]}`;
       const q = join(repo, '.git', 'land-queue');
       mkdirSync(q, { recursive: true });
-      const lands: [string, boolean][] = [['Tell the agent a rule was taken out', true], ['Windows installer icon', true], ['Overlay fades on focus loss', true], ['Companion log rotation', true], ['Old branch: tray menu', false]];
+      const lands: [string, boolean][] = [
+        ['Tell the agent a rule was taken out', true],
+        ['Windows installer icon', true],
+        ['Overlay fades on focus loss', true],
+        ['Companion log rotation', true],
+        ['Old branch: tray menu', false],
+      ];
       const made: Ticket[] = [];
       lands.forEach(([title, orders], i) => {
         const t = minion(c, title, { note: 'landing' });
@@ -1354,10 +1774,13 @@ mock.boards('#takes', { boards: [
       writeFileSync(join(q, '.order'), `# ${c.who} moved #4 to land next\n0000000004\n0000000002\n0000000003\n`);
       // Who placed them (#1358): the person's drag of the 4th pins it; the Taskmaster moved the 2nd, with its reason.
       const at = Date.now();
-      c.store.setSetting(`ship-line:${c.project.id}`, { history: [], placed: {
-        [`t${made[3].id}`]: { by: c.who, at: at - 40 * 60_000, taskmaster: false },
-        [`t${made[1].id}`]: { by: `${c.project.name} Taskmaster`, at: at - 5 * 60_000, taskmaster: true, reason: 'a fix for the Windows build that is red on main' },
-      } });
+      c.store.setSetting(`ship-line:${c.project.id}`, {
+        history: [],
+        placed: {
+          [`t${made[3].id}`]: { by: c.who, at: at - 40 * 60_000, taskmaster: false },
+          [`t${made[1].id}`]: { by: `${c.project.name} Taskmaster`, at: at - 5 * 60_000, taskmaster: true, reason: 'a fix for the Windows build that is red on main' },
+        },
+      });
       return `#/p/${c.project.id}/releases/${c.project.id}`;
     },
   },
@@ -1397,7 +1820,8 @@ mock.boards('#takes', { boards: [
     },
   },
   'review-set': {
-    about: "the Seeded scheme's Reviewers and critics page (#1054): a Taste panel of two critics and its referee, a blocking critic that always fails and holds a minion's ship, an order, hand-offs, run dots, a pass rate and two recorded verdicts; an art critic handing off to its own Art professor teacher, and the kit's Professor under the others, each with fixes that held or didn't (#1089)",
+    about:
+      "the Seeded scheme's Reviewers and critics page (#1054): a Taste panel of two critics and its referee, a blocking critic that always fails and holds a minion's ship, an order, hand-offs, run dots, a pass rate and two recorded verdicts; an art critic handing off to its own Art professor teacher, and the kit's Professor under the others, each with fixes that held or didn't (#1089)",
     seed(c) {
       const r = c.store.reviews;
       const id = c.project.id;
@@ -1406,7 +1830,13 @@ mock.boards('#takes', { boards: [
       mk('layout-critic', 'Layout critic', 'critic', { panel: 'Taste' });
       mk('colour-critic', 'Colour critic', 'critic', { panel: 'Taste' });
       mk('taste-referee', 'Taste referee', 'referee', { panel: 'Taste' });
-      mk('copy-critic', 'Copy critic', 'critic', { gate: 'block', on_fail: [{ after: 1, to: 'layout-critic' }, { after: 3, to: 'person' }] });
+      mk('copy-critic', 'Copy critic', 'critic', {
+        gate: 'block',
+        on_fail: [
+          { after: 1, to: 'layout-critic' },
+          { after: 3, to: 'person' },
+        ],
+      });
       mk('a11y-checker', 'Accessibility checker', 'checker', { stage: 'ship', context: { requester: true } });
       r.ensureBuiltIns(id);
       // The scheme's own agent files (#1089): a shader critic read from its repo, its text live, and a sound one since deleted.
@@ -1420,12 +1850,35 @@ mock.boards('#takes', { boards: [
       rmSync(join(repo, '.claude', 'agents', 'sound-critic.md'));
       r.save(id, 'shader-critic', { body: 'Our water shader foams at the shore: judge the foam line too.\n' }, c.who, 'Edited by hand');
       mk('art-professor', 'Art professor', 'teacher', { triggers: {}, body: '## For fixes\n\nRead the palette ramp first; name a tone, a pixel size and a frame range.\n' });
-      mk('art-critic', 'Art critic', 'critic', { triggers: { creative: 'new or changed art' }, on_fail: [{ after: 2, to: 'art-professor' }, { after: 3, to: 'person' }] });
+      mk('art-critic', 'Art critic', 'critic', {
+        triggers: { creative: 'new or changed art' },
+        on_fail: [
+          { after: 2, to: 'art-professor' },
+          { after: 3, to: 'person' },
+        ],
+      });
       const now = Date.now();
       // Teacher runs (#1089): the critic's round after each fix, pass when the fix held.
-      ([['art-professor', 3, 'pass'], ['art-professor', 3, 'pass'], ['art-professor', 3, 'fail'], ['art-professor', 3, 'pass'], ['professor', 3, 'fail'], ['professor', 3, 'pass']] as const)
-        .forEach(([slug, round, verdict], i) => r.recordRun(id, slug, { ticketId: t.id, minion: `#${t.number}`, round, verdict }, now - (6 - i) * 5_400_000));
-      const runs: [string, number, string][] = [['layout-critic', 1, 'pass'], ['layout-critic', 1, 'fail'], ['layout-critic', 2, 'pass'], ['layout-critic', 1, 'pass'], ['colour-critic', 1, 'fail'], ['colour-critic', 1, 'pass'], ['taste-referee', 1, 'pass'], ['a11y-checker', 1, 'ask']];
+      (
+        [
+          ['art-professor', 3, 'pass'],
+          ['art-professor', 3, 'pass'],
+          ['art-professor', 3, 'fail'],
+          ['art-professor', 3, 'pass'],
+          ['professor', 3, 'fail'],
+          ['professor', 3, 'pass'],
+        ] as const
+      ).forEach(([slug, round, verdict], i) => r.recordRun(id, slug, { ticketId: t.id, minion: `#${t.number}`, round, verdict }, now - (6 - i) * 5_400_000));
+      const runs: [string, number, string][] = [
+        ['layout-critic', 1, 'pass'],
+        ['layout-critic', 1, 'fail'],
+        ['layout-critic', 2, 'pass'],
+        ['layout-critic', 1, 'pass'],
+        ['colour-critic', 1, 'fail'],
+        ['colour-critic', 1, 'pass'],
+        ['taste-referee', 1, 'pass'],
+        ['a11y-checker', 1, 'ask'],
+      ];
       runs.forEach(([slug, round, verdict], i) => r.recordRun(id, slug, { ticketId: t.id, minion: `#${t.number}`, round, verdict }, now - (runs.length - i) * 3_600_000));
       for (let i = 0; i < 6; i++) r.recordRun(id, 'copy-critic', { ticketId: t.id, minion: `#${t.number}`, round: 1, verdict: 'fail' }, now - (6 - i) * 1_800_000);
       r.recordVerdict(id, 'colour-critic', { person: 'Josh', words: 'The muted grey on the empty state is fine: it is meant to be quiet.', ticketId: t.id, minion: `#${t.number}` }, now - 3_000_000);
@@ -1449,7 +1902,10 @@ mock.boards('#takes', { boards: [
       r.recordRun(id, 'layout-critic', { ticketId: judged.id, minion: `#${judged.number}`, round: 1, verdict: 'pass' }, now - 900_000);
       minion(c, 'Save file fix', { status: 'closed' });
       const user = c.store.findUser('name', c.who);
-      for (const [name, critic] of [['Seeded two', true], ['Seeded quiet', false]] as const) {
+      for (const [name, critic] of [
+        ['Seeded two', true],
+        ['Seeded quiet', false],
+      ] as const) {
         const p = c.store.listProjects().find((x) => x.name === name) ?? c.store.createProject(name, null, user?.id ?? null);
         if (user) c.store.addMember(p.id, user.id);
         if (!critic || r.get(p.id, 'map-critic')) continue;
@@ -1460,7 +1916,8 @@ mock.boards('#takes', { boards: [
     },
   },
   'kit-sync': {
-    about: "kit files sync themselves (#1100): Seeded runs Citadel's code, and Green, Red and Elsewhere carry the kit's land.sh from one change back (Red's check fails, Elsewhere's GitHub origin can't be pushed). A dev copy is a preview, whose kit sync timer is off (on copied data it would branch real schemes' repos): lift server.ts's guard on it in an edit you don't commit, start the copy, seed within 20 s, and one kit sync card lands in Seeded's Taskmaster chat",
+    about:
+      "kit files sync themselves (#1100): Seeded runs Citadel's code, and Green, Red and Elsewhere carry the kit's land.sh from one change back (Red's check fails, Elsewhere's GitHub origin can't be pushed). A dev copy is a preview, whose kit sync timer is off (on copied data it would branch real schemes' repos): lift server.ts's guard on it in an edit you don't commit, start the copy, seed within 20 s, and one kit sync card lands in Seeded's Taskmaster chat",
     seed(c) {
       const kit = join(import.meta.dirname, '..');
       const template = 'kit/skills/scheme-setup/templates/land.sh';
@@ -1510,7 +1967,7 @@ mock.boards('#takes', { boards: [
     seed(c) {
       SCENARIOS.ci.seed(c);
       const now = Date.now();
-      const frame = (i: number) => (i === 18 ? 19.2 : i >= 30 ? 17.6 + (i % 3) * 0.1 : 16 + ((i * 7) % 5 - 2) * 0.1);
+      const frame = (i: number) => (i === 18 ? 19.2 : i >= 30 ? 17.6 + (i % 3) * 0.1 : 16 + (((i * 7) % 5) - 2) * 0.1);
       for (let i = 0; i < 40; i++) {
         const at = now - (40 - i) * 8 * 3_600_000;
         const row = (name: string, value: number, unit: string) => ({ project_id: c.project.id, name, value, unit, workflow: 'bench.yml', run_id: 1000 + i, run_attempt: 1, sha: `${(1000 + i).toString(16)}${'5e7a'.repeat(10)}`.slice(0, 40), ref: 'refs/heads/main', created_at: at });
@@ -1530,7 +1987,8 @@ mock.boards('#takes', { boards: [
     },
   },
   status: {
-    about: 'the Status page (#1123): a week of memory and disk samples, boots (one a crash), stalls and ships on this copy\'s own scheme, and two apps with deploys (one failed), errors and turns; one app sits in a second scheme whose only member is Mia, signed in by POSTing a password to /api/invite/statusseedstatusseedstatusseed01, to see the page as a member of another scheme',
+    about:
+      "the Status page (#1123): a week of memory and disk samples, boots (one a crash), stalls and ships on this copy's own scheme, and two apps with deploys (one failed), errors and turns; one app sits in a second scheme whose only member is Mia, signed in by POSTing a password to /api/invite/statusseedstatusseedstatusseed01, to see the page as a member of another scheme",
     seed(c) {
       const now = Date.now();
       const HOUR = 3_600_000;
@@ -1539,26 +1997,65 @@ mock.boards('#takes', { boards: [
       c.store.setProjectRepoDir(c.project.id, process.cwd());
       const cum: Record<string, number> = {};
       const rate: Record<string, number> = { server: 0.33, turns: 1.0, taskmasters: 0.15, 'container:2': 0.4, builds: 0.6, godot: 1.1, embed: 0.2, contraptions: 0.1, apps: 0.1, mine: 0.3, others: 0.8 };
-      let forks = 0, busy = 0;
+      let forks = 0,
+        busy = 0;
       for (let t = now - 8 * 24 * HOUR; t <= now; t += 15 * 60_000) {
         const wave = Math.sin(t / (6 * HOUR));
         for (const k of Object.keys(rate)) cum[k] = (cum[k] ?? 0) + rate[k] * (1 + 0.6 * wave) * 15 * 60e6;
-        forks += 900 * 8; busy += 4.6 * 900 * 1000;
-        c.store.addHostSample({ at: t, mem_total: 64e9, mem_avail: Math.round(64e9 * (0.42 + 0.12 * wave)), disk_total: 2e12, disk_free: Math.round(2e12 * (0.31 - 0.04 * ((t - now) / (8 * 24 * HOUR) + 1))), load1: 2 + wave, rss: 450e6, db_size: 2e9, db_cached: Math.round(2e9 * (t > now - 30 * HOUR && t < now - 20 * HOUR ? 0.08 : 0.93)), kswapd_rate: 4000 * (1 + wave), refault_rate: 1500 * (1 + wave), server_refault_rate: 90, pgpgin_rate: 20000, thp_fallback_rate: 12, cpu_ledger: JSON.stringify({ v: 1, s: Object.fromEntries(Object.entries(cum).map(([k, v]) => [k, [Math.round(v), Math.round(v * 0.3)]])), h: [Math.round(busy), Math.round(busy * 0.26), Math.round(busy * 0.03), forks] }) });
+        forks += 900 * 8;
+        busy += 4.6 * 900 * 1000;
+        c.store.addHostSample({
+          at: t,
+          mem_total: 64e9,
+          mem_avail: Math.round(64e9 * (0.42 + 0.12 * wave)),
+          disk_total: 2e12,
+          disk_free: Math.round(2e12 * (0.31 - 0.04 * ((t - now) / (8 * 24 * HOUR) + 1))),
+          load1: 2 + wave,
+          rss: 450e6,
+          db_size: 2e9,
+          db_cached: Math.round(2e9 * (t > now - 30 * HOUR && t < now - 20 * HOUR ? 0.08 : 0.93)),
+          kswapd_rate: 4000 * (1 + wave),
+          refault_rate: 1500 * (1 + wave),
+          server_refault_rate: 90,
+          pgpgin_rate: 20000,
+          thp_fallback_rate: 12,
+          cpu_ledger: JSON.stringify({ v: 1, s: Object.fromEntries(Object.entries(cum).map(([k, v]) => [k, [Math.round(v), Math.round(v * 0.3)]])), h: [Math.round(busy), Math.round(busy * 0.26), Math.round(busy * 0.03), forks] }),
+        });
       }
       const sha = (n: number) => `${n}`.repeat(40).slice(0, 40);
       c.store.addHealthEvent('boot', now - 6 * 24 * HOUR, sha(1), 'a ship: new code 11111111');
       c.store.addHealthEvent('boot', now - 3 * 24 * HOUR, sha(2), 'a ship: new code 22222222');
       c.store.addHealthEvent('boot', now - 3 * 24 * HOUR + 4 * HOUR, sha(2), 'a restart on the same code: a crash, the watchdog or by hand');
       c.store.addHealthEvent('boot', now - 9 * HOUR, sha(3), 'a ship: new code 33333333');
-      for (const [ago, s] of [[5, 0.8], [30, 1.4], [50, 6.2], [100, 2.1], [140, 0.6], [150, 0.9], [175, 3.3]] as const)
+      for (const [ago, s] of [
+        [5, 0.8],
+        [30, 1.4],
+        [50, 6.2],
+        [100, 2.1],
+        [140, 0.6],
+        [150, 0.9],
+        [175, 3.3],
+      ] as const)
         c.store.addHealthEvent('loop-lag', now - ago * HOUR, sha(3), `The event loop was held for ${s} s: sqlite`);
       for (let i = 0; i < 22; i++) {
         const start = now - (i * 8.3 + 2) * HOUR;
-        c.store.addRelease({ project_id: c.project.id, target: 'citadel-server', version: sha(i % 9), changes: JSON.stringify([{ title: `#${1100 + i}: a seeded change` }]), started_at: start, live_at: start + (240 + (i % 5) * 90) * 1000, outcome: 'live', stages: JSON.stringify({ line: 40 + (i % 3) * 20, rebase: 12, test: 130 + (i % 5) * 60, deploy: 40, restart: 18 }) });
+        c.store.addRelease({
+          project_id: c.project.id,
+          target: 'citadel-server',
+          version: sha(i % 9),
+          changes: JSON.stringify([{ title: `#${1100 + i}: a seeded change` }]),
+          started_at: start,
+          live_at: start + (240 + (i % 5) * 90) * 1000,
+          outcome: 'live',
+          stages: JSON.stringify({ line: 40 + (i % 3) * 20, rebase: 12, test: 130 + (i % 5) * 60, deploy: 40, restart: 18 }),
+        });
       }
       // A slow day (#1132): three ships two days ago whose tail is well past 10 minutes, so the chart's spike and the waterfall show.
-      for (const [ago, line, test] of [[50, 700, 380], [48, 90, 1100], [46, 60, 200]] as const) {
+      for (const [ago, line, test] of [
+        [50, 700, 380],
+        [48, 90, 1100],
+        [46, 60, 200],
+      ] as const) {
         const start = now - ago * HOUR;
         c.store.addRelease({ project_id: c.project.id, target: 'citadel-server', version: sha(7), changes: '[]', started_at: start, live_at: start + (line + 12 + test + 58) * 1000, outcome: 'live', stages: JSON.stringify({ line, rebase: 12, test, deploy: 40, restart: 18 }) });
       }
@@ -1571,11 +2068,24 @@ mock.boards('#takes', { boards: [
       c.store.addMember(peekScheme.id, mia.id);
       const me = c.store.listUsers().find((u) => u.name === c.who) ?? mia;
       c.store.addMember(peekScheme.id, me.id);
-      const app = (name: string, title: string, home: number, port: number) => c.store.getContraption(name) ?? (c.store.createContraption({ name, title, icon: null, port, home_scheme: home, open_paths: '["/"]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: '', identity_private: '', key_hash: `${name}-${hex()}`, keys_at: now }), c.store.getContraption(name)!);
+      const app = (name: string, title: string, home: number, port: number) =>
+        c.store.getContraption(name) ??
+        (c.store.createContraption({ name, title, icon: null, port, home_scheme: home, open_paths: '["/"]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: '', identity_private: '', key_hash: `${name}-${hex()}`, keys_at: now }),
+        c.store.getContraption(name)!);
       const peek = app('peek-auras', 'Peek Auras', peekScheme.id, 29_311);
       const ledger = app('ledger', 'Ledger', c.project.id, 29_312);
-      const deploy = (name: string, ago: number, took: number, outcome: string) => c.store.addContraptionDeploy({ name, from_sha: null, to_sha: hex().padEnd(40, '0'), by: 'Mia', started_at: now - ago * HOUR, finished_at: now - ago * HOUR + took * 1000, outcome, stages: JSON.stringify({ build: Math.round(took * 0.6), restart: Math.round(took * 0.4) }), changes: '[]' });
-      for (const [ago, took, out] of [[150, 70, 'deployed'], [120, 95, 'deployed'], [74, 64, 'deployed'], [50, 180, 'failed'], [49, 88, 'deployed'], [26, 72, 'deployed'], [3, 81, 'deployed']] as const) deploy('peek-auras', ago, took, out);
+      const deploy = (name: string, ago: number, took: number, outcome: string) =>
+        c.store.addContraptionDeploy({ name, from_sha: null, to_sha: hex().padEnd(40, '0'), by: 'Mia', started_at: now - ago * HOUR, finished_at: now - ago * HOUR + took * 1000, outcome, stages: JSON.stringify({ build: Math.round(took * 0.6), restart: Math.round(took * 0.4) }), changes: '[]' });
+      for (const [ago, took, out] of [
+        [150, 70, 'deployed'],
+        [120, 95, 'deployed'],
+        [74, 64, 'deployed'],
+        [50, 180, 'failed'],
+        [49, 88, 'deployed'],
+        [26, 72, 'deployed'],
+        [3, 81, 'deployed'],
+      ] as const)
+        deploy('peek-auras', ago, took, out);
       deploy('ledger', 30, 140, 'deployed');
       deploy('ledger', 2, 210, 'failed');
       const err = (id: number, ago: number, kind: string, key: string, sample: string) => c.store.addContraptionError(id, pacificDay(now - ago * HOUR), kind, key, sample, now - ago * HOUR);

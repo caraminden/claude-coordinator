@@ -20,10 +20,18 @@ export function origin(req: Ctx['req'], preview = false): string {
 
 async function send(ctx: Ctx, file: string | null, type: string, name: string) {
   // lstat: a link planted in the desktop folder (it sits on a writable mount) is never followed.
-  const size = file && (await lstat(file).then((s) => (s.isFile() ? s.size : null), () => null));
+  const size =
+    file &&
+    (await lstat(file).then(
+      (s) => (s.isFile() ? s.size : null),
+      () => null,
+    ));
   if (!file || size === null) throw new HttpError(404, 'Not found');
   ctx.res.writeHead(200, {
-    'Content-Type': type, 'Content-Length': size, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache',
+    'Content-Type': type,
+    'Content-Length': size,
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'no-cache',
     'Content-Disposition': `attachment; filename="${name}"`,
   });
   if (ctx.req.method === 'HEAD') return ctx.res.end();
@@ -33,7 +41,9 @@ async function send(ctx: Ctx, file: string | null, type: string, name: string) {
 export const desktopRoutes: Route[] = [
   {
     // feed.json, launcher.exe, install.zip and the builds' <app>-<n>.zip.
-    method: ['GET', 'HEAD'], path: '/api/desktop/:project/:app/:file', who: 'anyone',
+    method: ['GET', 'HEAD'],
+    path: '/api/desktop/:project/:app/:file',
+    who: 'anyone',
     async handler(ctx) {
       const { app, res, params } = ctx;
       const d = desktop(app);
@@ -55,7 +65,7 @@ export const desktopRoutes: Route[] = [
       if (params.file === 'launcher.exe') return send(ctx, (await d.launchers.get())?.path ?? null, 'application/octet-stream', 'launcher.exe');
       if (params.file === 'install.zip') {
         const launcher = await d.launchers.get();
-        if (!launcher) throw new HttpError(503, 'The launcher can\'t be built on this server right now');
+        if (!launcher) throw new HttpError(503, "The launcher can't be built on this server right now");
         const feedUrl = `${origin(ctx.req, ctx.app.preview)}/api/desktop/${projectId}/${params.app}/feed.json`;
         return send(ctx, await d.feeds.install(projectId, params.app, feedUrl, launcher), 'application/zip', `${params.app}.zip`);
       }
@@ -64,8 +74,10 @@ export const desktopRoutes: Route[] = [
   },
   {
     // A build a minion made, or one in the scheme's CI store, published by hand (the publish_desktop tool).
-    method: 'POST', path: '/api/projects/:project/desktop/publish', who: ['person', 'minion', 'taskmaster'],
-    refuse: 'Only a scheme\'s members, its minions and its Taskmaster publish its desktop builds',
+    method: 'POST',
+    path: '/api/projects/:project/desktop/publish',
+    who: ['person', 'minion', 'taskmaster'],
+    refuse: "Only a scheme's members, its minions and its Taskmaster publish its desktop builds",
     async handler(ctx) {
       const { app, res, project, caller, session } = ctx;
       const d = desktop(app);
@@ -86,10 +98,18 @@ export const desktopRoutes: Route[] = [
         const found = await resolveTicketFile(app, caller, str('path')!);
         file = found?.file ?? null;
       } else throw new HttpError(400, 'Give path (a build you made) or ci_file (a file in the CI store)');
-      if (!file) throw new HttpError(404, 'That file isn\'t there, or is outside the folders you can share from');
+      if (!file) throw new HttpError(404, "That file isn't there, or is outside the folders you can share from");
       const ask: PublishAsk = {
-        projectId: project.id, app: str('app') ?? '', file, exe: str('exe'), started: str('started') as PublishAsk['started'], title: str('title'),
-        version: str('version'), commit, source, by: caller ? `#${caller.number ?? caller.id}` : session.name,
+        projectId: project.id,
+        app: str('app') ?? '',
+        file,
+        exe: str('exe'),
+        started: str('started') as PublishAsk['started'],
+        title: str('title'),
+        version: str('version'),
+        commit,
+        source,
+        by: caller ? `#${caller.number ?? caller.id}` : session.name,
       };
       try {
         const out = await d.feeds.publish(ask);

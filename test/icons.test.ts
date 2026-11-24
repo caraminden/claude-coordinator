@@ -2,13 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { versionIcons } from '../src/icons.ts';
 
-const make = (png: string) => new Map<string, Buffer>([
-  ['icon-192.png', Buffer.from(png)],
-  ['icon.svg', Buffer.from('<svg/>')],
-  ['manifest.webmanifest', Buffer.from('{"icons":[{"src":"/icon-192.png"}]}')],
-  ['index.html', Buffer.from('<link href="icon.svg"><link href="icon-192.png">')],
-  ['sw.js', Buffer.from("icon: '/icon-192.png'")],
-]);
+const make = (png: string) =>
+  new Map<string, Buffer>([
+    ['icon-192.png', Buffer.from(png)],
+    ['icon.svg', Buffer.from('<svg/>')],
+    ['manifest.webmanifest', Buffer.from('{"icons":[{"src":"/icon-192.png"}]}')],
+    ['index.html', Buffer.from('<link href="icon.svg"><link href="icon-192.png">')],
+    ['sw.js', Buffer.from("icon: '/icon-192.png'")],
+  ]);
 
 test('icon URLs carry a hash of the file, which changes with its content', () => {
   const a = make('orange');

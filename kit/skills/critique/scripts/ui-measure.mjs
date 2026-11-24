@@ -69,7 +69,11 @@ function args(argv) {
   if (!o.urls.length) throw new Error('give at least one url');
   if (o.widths.some((w) => !(w > 0))) throw new Error('--widths takes numbers, like 1440,390');
   if (!(o.settle >= 0) || (o.minTap !== undefined && !(o.minTap > 0))) throw new Error('--settle and --min-tap take numbers');
-  for (const [k, sep] of [['cookies', '='], ['headers', ':'], ['ignore', ':']]) {
+  for (const [k, sep] of [
+    ['cookies', '='],
+    ['headers', ':'],
+    ['ignore', ':'],
+  ]) {
     const bad = o[k].find((v) => !v.includes(sep));
     if (bad) throw new Error(`--${k === 'cookies' ? 'cookie' : k === 'headers' ? 'header' : k} ${bad}: needs a "${sep}"`);
   }
@@ -119,11 +123,12 @@ export function launch(bin, wrap = []) {
       else p.ok(m.result);
     }
   });
-  const send = (method, params = {}, sessionId) => new Promise((ok, no) => {
-    if (gone) return no(gone);
-    pending.set(++next, { ok, no });
-    input.write(JSON.stringify({ id: next, method, params, sessionId }) + '\0');
-  });
+  const send = (method, params = {}, sessionId) =>
+    new Promise((ok, no) => {
+      if (gone) return no(gone);
+      pending.set(++next, { ok, no });
+      input.write(JSON.stringify({ id: next, method, params, sessionId }) + '\0');
+    });
   const close = async () => {
     if (chrome.exitCode === null && chrome.signalCode === null) {
       chrome.kill();
@@ -210,11 +215,25 @@ export async function openPage(send, url, width, o) {
       })()`).catch(() => true);
       quiet = calm && (!network || !inflight.size) ? quiet + 50 : 0;
       if (quiet >= 300) break;
-      if (Date.now() > end) { ok = false; break; }
+      if (Date.now() > end) {
+        ok = false;
+        break;
+      }
     }
     return ok;
   };
-  return { s, evaluate, settle, phone, width, height, close: () => { unlisten?.(); return send('Target.disposeBrowserContext', { browserContextId }); } };
+  return {
+    s,
+    evaluate,
+    settle,
+    phone,
+    width,
+    height,
+    close: () => {
+      unlisten?.();
+      return send('Target.disposeBrowserContext', { browserContextId });
+    },
+  };
 }
 
 // What a person sees first, at the window's size: a full-page capture misplaces fixed bars and makes a
@@ -242,8 +261,16 @@ function inPage(opts) {
   const sel = (el) => {
     const parts = [];
     for (let e = el; e && e.nodeType === 1 && parts.length < 4; e = e.parentElement) {
-      if (e.id && document.querySelectorAll(`#${CSS.escape(e.id)}`).length === 1) { parts.unshift(`#${CSS.escape(e.id)}`); break; }
-      let p = e.localName + [...e.classList].slice(0, 3).map((c) => `.${CSS.escape(c)}`).join('');
+      if (e.id && document.querySelectorAll(`#${CSS.escape(e.id)}`).length === 1) {
+        parts.unshift(`#${CSS.escape(e.id)}`);
+        break;
+      }
+      let p =
+        e.localName +
+        [...e.classList]
+          .slice(0, 3)
+          .map((c) => `.${CSS.escape(c)}`)
+          .join('');
       const sibs = e.parentElement ? [...e.parentElement.children].filter((x) => x.localName === e.localName) : [];
       if (sibs.length > 1) p += `:nth-of-type(${sibs.indexOf(e) + 1})`;
       parts.unshift(p);
@@ -371,8 +398,17 @@ function inPage(opts) {
   // 3. sideways scroll
   const scrollW = document.documentElement.scrollWidth;
   if (scrollW > vw + 1) {
-    const clipsX = (el) => { for (let e = el.parentElement; e && e !== document.documentElement; e = e.parentElement) { if (e === document.body) return false; if (css(e).overflowX !== 'visible') return true; } return false; };
-    const wide = all.filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.right > vw + 1 && css(el).position !== 'fixed' && visible(el) && !clipsX(el); });
+    const clipsX = (el) => {
+      for (let e = el.parentElement; e && e !== document.documentElement; e = e.parentElement) {
+        if (e === document.body) return false;
+        if (css(e).overflowX !== 'visible') return true;
+      }
+      return false;
+    };
+    const wide = all.filter((el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.right > vw + 1 && css(el).position !== 'fixed' && visible(el) && !clipsX(el);
+    });
     const set = new Set(wide);
     for (const el of wide) {
       if (el.parentElement && set.has(el.parentElement)) continue; // the outermost only
@@ -439,7 +475,8 @@ function inPage(opts) {
     if (b && b !== document.body && !seenClip.has(b) && visible(b)) {
       const r = b.getBoundingClientRect();
       const by = Math.max(...lines.map((l) => Math.max(r.left - l.left, l.right - r.right, r.top - l.top, l.bottom - r.bottom)));
-      if (by > 1 && (!box || !b.contains(box))) { // a clipper inside b scrolls or cuts the text instead
+      if (by > 1 && (!box || !b.contains(box))) {
+        // a clipper inside b scrolls or cuts the text instead
         seenClip.add(b);
         out.push({ check: 'clip', selector: sel(b), text: snip(n.data), axis: 'spill', by: r1(by), why: `text runs ${r1(by)} px outside its box` });
       }
@@ -464,7 +501,7 @@ function inPage(opts) {
     const drawn = {};
     for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
       const sign = side === 'Top' || side === 'Left' ? -1 : 1;
-      if (sides[side]) drawn[side] = at[side] - sign * sides[side] / 2;
+      if (sides[side]) drawn[side] = at[side] - (sign * sides[side]) / 2;
       else if (ow) drawn[side] = at[side] + sign * (off - ow / 2);
       else if (ring) drawn[side] = at[side];
     }
@@ -507,7 +544,7 @@ function inPage(opts) {
   const URLISH = /https?:\/\/[^\s"'<>]+[^\s"'<>.,:;!?)\]]|(?<![\w/.:-])(?:doi:\s?)?10\.\d{4,9}\/[^\s"'<>]*[^\s"'<>.,:;!?)\]]/i;
   const NOT_TEXT = 'a[href], code, pre, kbd, samp, textarea, input, select, script, style, [contenteditable]';
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  for (let n; (n = walker.nextNode());) {
+  for (let n; (n = walker.nextNode()); ) {
     const el = n.parentElement;
     const m = URLISH.exec(n.data);
     if (!m || !el || el.closest(NOT_TEXT) || !inScope(el) || !visible(el)) continue;
@@ -539,18 +576,29 @@ function inPage(opts) {
 function sweepList({ scope, skip }) {
   const sel = 'button, [role=button], [role=tab], summary';
   const bad = /delete|remove|sign.?out|log.?out|discard|erase|destroy/i;
-  const name = (c) => c.localName + (c.id ? '#' + c.id : '') + [...c.classList].slice(0, 2).map((x) => '.' + x).join('') + ' "' + (c.textContent || c.getAttribute('aria-label') || '').trim().slice(0, 24) + '"';
+  const name = (c) =>
+    c.localName +
+    (c.id ? '#' + c.id : '') +
+    [...c.classList]
+      .slice(0, 2)
+      .map((x) => '.' + x)
+      .join('') +
+    ' "' +
+    (c.textContent || c.getAttribute('aria-label') || '').trim().slice(0, 24) +
+    '"';
   const skipEl = skip ? document.querySelector(skip) : null;
-  return [...document.querySelectorAll(sel)].filter((c) => {
-    if (c.disabled || c.getAttribute('aria-disabled') === 'true' || c.closest('[inert]') || !c.checkVisibility()) return false;
-    if (scope && !c.closest(scope)) return false;
-    if (skipEl && (skipEl === c || skipEl.contains(c))) return false;
-    if (bad.test(c.textContent + ' ' + (c.getAttribute('aria-label') || ''))) return false;
-    const r = c.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) return false;
-    const hit = document.elementFromPoint(Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1), Math.min(Math.max(r.top + r.height / 2, 0), innerHeight - 1));
-    return !!hit && (hit === c || c.contains(hit) || hit.contains(c));
-  }).map((c) => ({ c, name: name(c) }));
+  return [...document.querySelectorAll(sel)]
+    .filter((c) => {
+      if (c.disabled || c.getAttribute('aria-disabled') === 'true' || c.closest('[inert]') || !c.checkVisibility()) return false;
+      if (scope && !c.closest(scope)) return false;
+      if (skipEl && (skipEl === c || skipEl.contains(c))) return false;
+      if (bad.test(c.textContent + ' ' + (c.getAttribute('aria-label') || ''))) return false;
+      const r = c.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return false;
+      const hit = document.elementFromPoint(Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1), Math.min(Math.max(r.top + r.height / 2, 0), innerHeight - 1));
+      return !!hit && (hit === c || c.contains(hit) || hit.contains(c));
+    })
+    .map((c) => ({ c, name: name(c) }));
 }
 
 // Rule 23: click with every request held (3 s for --click, 1 s per control in a sweep); at 250 ms the click shows
@@ -578,7 +626,8 @@ async function clickCheck(page, target, label, { hold = 3000, end = 250 } = {}) 
   await page.s('Network.emulateNetworkConditions', { offline: false, latency: hold, downloadThroughput: -1, uploadThroughput: -1 });
   for (const type of ['mousePressed', 'mouseReleased']) await page.s('Input.dispatchMouseEvent', { type, x: pre.x, y: pre.y, button: 'left', clickCount: 1 });
   await sleep(250);
-  const read = () => page.evaluate(`(() => {
+  const read = () =>
+    page.evaluate(`(() => {
     const u = window.__uim;
     const name = (c) => c.localName + (c.id ? '#' + c.id : '') + [...c.classList].slice(0, 2).map((x) => '.' + x).join('') + ' "' + (c.textContent || c.getAttribute('aria-label') || '').trim().slice(0, 24) + '"';
     return { muts: u.muts, off: u.others.filter((c) => c.isConnected && !u.on(c)).map(name), covered: u.reachable.filter((c) => c.isConnected && !u.top(c)).map(name) };
@@ -610,7 +659,10 @@ async function sweep(browser, url, width, o, slug, rec, list, args) {
     const page = await openPage(browser.send, url, width, o);
     try {
       const now = await page.evaluate(`(${sweepList})(${args}).map((x) => x.name)`);
-      if (now[i] !== name) { rec.sweep.skipped_changed++; continue; }
+      if (now[i] !== name) {
+        rec.sweep.skipped_changed++;
+        continue;
+      }
       rec.sweep.clicked++;
       const f = await clickCheck(page, `(${sweepList})(${args})[${i}].c`, `existing control ${name}`, { hold: 1000, end: 1300 });
       rec.findings.push(...f);
@@ -625,7 +677,7 @@ async function sweep(browser, url, width, o, slug, rec, list, args) {
 
 export async function measure(o) {
   const bin = o.chrome || process.env.CHROME || findChrome();
-  if (!bin) throw new Error('no browser: install Playwright\'s chrome-headless-shell (npx playwright install chromium-headless-shell) or pass --chrome');
+  if (!bin) throw new Error("no browser: install Playwright's chrome-headless-shell (npx playwright install chromium-headless-shell) or pass --chrome");
   // A wrong path stops here as a setup error (exit 2), not as an unhandled spawn error that reads like findings (exit 1).
   if (!existsSync(bin)) throw new Error(`no browser at ${bin}: fix --chrome or CHROME`);
   if (o.shots) mkdirSync(o.shots, { recursive: true });
@@ -664,7 +716,10 @@ export async function measure(o) {
   let ignored = 0;
   for (const p of pages) {
     p.findings = p.findings.filter((f) => {
-      const drop = o.ignore.some((rule) => { const c = rule.indexOf(':'); return f.check === rule.slice(0, c) && f.selector.includes(rule.slice(c + 1)); });
+      const drop = o.ignore.some((rule) => {
+        const c = rule.indexOf(':');
+        return f.check === rule.slice(0, c) && f.selector.includes(rule.slice(c + 1));
+      });
       if (drop) ignored++;
       return !drop;
     });
@@ -687,16 +742,26 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
     console.log(HELP);
     process.exit(0);
   }
-  measure(o).then((r) => {
-    // One finding a line: the critic and the author read it, so keep it short.
-    const json = JSON.stringify(r, null, 1).replace(/\{\n\s*"check"[^{}]*?\n\s*\}/g, (f) => JSON.stringify(JSON.parse(f)));
-    if (o.out) writeFileSync(o.out, json + '\n');
-    else console.log(json);
-    if (o.out) console.error(r.ok ? 'ui-measure: clean' : `ui-measure: ${Object.entries(r.counts).map(([k, v]) => `${v} ${k}`).join(', ')} (${o.out})`);
-    if (r.stop) console.error('ui-measure: STOP: a tap or overflow finding stands. Fix it and measure again before a critic round is spent.');
-    process.exit(r.stop ? 3 : r.ok ? 0 : 1);
-  }, (e) => {
-    console.error(`ui-measure: ${e.message}`);
-    process.exit(2);
-  });
+  measure(o).then(
+    (r) => {
+      // One finding a line: the critic and the author read it, so keep it short.
+      const json = JSON.stringify(r, null, 1).replace(/\{\n\s*"check"[^{}]*?\n\s*\}/g, (f) => JSON.stringify(JSON.parse(f)));
+      if (o.out) writeFileSync(o.out, json + '\n');
+      else console.log(json);
+      if (o.out)
+        console.error(
+          r.ok
+            ? 'ui-measure: clean'
+            : `ui-measure: ${Object.entries(r.counts)
+                .map(([k, v]) => `${v} ${k}`)
+                .join(', ')} (${o.out})`,
+        );
+      if (r.stop) console.error('ui-measure: STOP: a tap or overflow finding stands. Fix it and measure again before a critic round is spent.');
+      process.exit(r.stop ? 3 : r.ok ? 0 : 1);
+    },
+    (e) => {
+      console.error(`ui-measure: ${e.message}`);
+      process.exit(2);
+    },
+  );
 }

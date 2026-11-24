@@ -1,7 +1,8 @@
 // The generative media tools (#717, #733), split out of mcp.ts: their descriptions, schemas and the Codex image call.
 import { spawn } from 'node:child_process';
 
-export const MEDIA_COMMON = 'The server makes the call with the key of the person this turn runs for and books it against their monthly cap; a call that would pass the cap, or costs over $0.50, is refused before anything is spent. Writes the file(s) inside your worktree or shared folders with a `<file>.json` note (prompt, model, cost). Returns the paths, what it cost and what is left this month. One take at the default first; more takes or a dearer model only when asked or when the first misses.';
+export const MEDIA_COMMON =
+  'The server makes the call with the key of the person this turn runs for and books it against their monthly cap; a call that would pass the cap, or costs over $0.50, is refused before anything is spent. Writes the file(s) inside your worktree or shared folders with a `<file>.json` note (prompt, model, cost). Returns the paths, what it cost and what is left this month. One take at the default first; more takes or a dearer model only when asked or when the first misses.';
 export const IMAGE_MODELS = ' Models: leave model out for black-forest-labs/flux-3-image-klein, or recraft/recraft-v4.1-vector when out ends in .svg. For readable text in the image or careful edits, google/gemini-nano-banana-2.1 or openai/gpt-image-2, which cost several times more.';
 export const MEDIA_OUT = 'Where to write it, inside your worktree or a shared folder (relative paths start in your worktree). With n over 1 the files are numbered: art-1.png, art-2.png';
 export const MEDIA_MODEL = { type: 'string', description: 'Optional: an OpenRouter model id. Leave it out for the cheap default' };
@@ -24,10 +25,10 @@ export const IMAGE_PROPS = {
  * section: make images and sounds with code; a generative tool (generate_image_codex too) only when a person asks for
  * one or a scheme system uses one (src/rule-homes.ts, id images-by-code).
  */
-export const NOT_DEFAULT = 'Only on a person\'s explicit ask or a scheme system\'s call; otherwise draw with code.';
-export const NOT_DEFAULT_AUDIO = 'Only on a person\'s explicit ask or a scheme system\'s call; otherwise make sound with code.';
+export const NOT_DEFAULT = "Only on a person's explicit ask or a scheme system's call; otherwise draw with code.";
+export const NOT_DEFAULT_AUDIO = "Only on a person's explicit ask or a scheme system's call; otherwise make sound with code.";
 /** Which generative tool makes what (Cara, 2026-11-14, "Codex for raster images"). */
-export const IMAGE_ROUTING = 'Raster images (PNG) go to generate_image_codex, on the person\'s ChatGPT plan; use this tool for SVG (Recraft), and for a PNG only when generate_image_codex refuses (no Codex login, or a Codex limit is near).';
+export const IMAGE_ROUTING = "Raster images (PNG) go to generate_image_codex, on the person's ChatGPT plan; use this tool for SVG (Recraft), and for a PNG only when generate_image_codex refuses (no Codex login, or a Codex limit is near).";
 export const MEDIA_TOOL_LIST = [
   { name: 'generate_image', description: `${NOT_DEFAULT} Then: make an image from a prompt through OpenRouter. ${IMAGE_ROUTING} ${MEDIA_COMMON}${IMAGE_MODELS}`, inputSchema: { type: 'object', properties: IMAGE_PROPS, required: ['prompt', 'out'] } },
   {
@@ -58,7 +59,12 @@ export const MEDIA_TOOL_LIST = [
     inputSchema: {
       type: 'object',
       properties: {
-        provider: { type: 'string', enum: ['openrouter', 'azure'], description: "Optional, default openrouter. azure: Azure Speech on this scheme's own key (scheme secrets AZURE_SPEECH_KEY and AZURE_SPEECH_REGION); input is raw SSML (<phoneme> IPA, <prosody>, <break>, several <voice> elements, HD voices like en-US-Ava:DragonHDLatestNeural), model and response_format aren't used, and the cost (about $15 per million characters of text, $30 for HD voices) is booked to the scheme's outside spend" },
+        provider: {
+          type: 'string',
+          enum: ['openrouter', 'azure'],
+          description:
+            "Optional, default openrouter. azure: Azure Speech on this scheme's own key (scheme secrets AZURE_SPEECH_KEY and AZURE_SPEECH_REGION); input is raw SSML (<phoneme> IPA, <prosody>, <break>, several <voice> elements, HD voices like en-US-Ava:DragonHDLatestNeural), model and response_format aren't used, and the cost (about $15 per million characters of text, $30 for HD voices) is booked to the scheme's outside spend",
+        },
         output_format: { type: 'string', description: 'azure only, optional: the Azure output format, default audio-24khz-48kbitrate-mono-mp3; out must end in the extension it makes (.mp3, .wav for riff-*, .ogg, .webm, .pcm for raw-*)' },
         lang: { type: 'string', description: 'azure only, optional: xml:lang when input is not a whole <speak> document, default en-US' },
         model: { type: 'string', description: 'An OpenRouter speech model id, like fish-audio/drama-3, elevenlabs/eleven-v3 or google/gemini-3.8-flash-tts. Required unless provider is azure' },
@@ -111,7 +117,10 @@ export async function codexImage(args: any, env: NodeJS.ProcessEnv, cwd: string)
     child.stdin.end(args.prompt);
   });
   const usage = /^Codex usage: .*$/m.exec(r.err)?.[0];
-  const why = r.err.replace(/^Codex usage: .*$/m, '').replace(/^citadel-codex-review: /gm, '').trim();
+  const why = r.err
+    .replace(/^Codex usage: .*$/m, '')
+    .replace(/^citadel-codex-review: /gm, '')
+    .trim();
   if (r.code === 0) return `${r.out.trim()} with Codex on this person's ChatGPT plan.${usage ? ` ${usage}.` : ''}`;
   if (r.code === 4) throw new Error(`${why} Use generate_image (OpenRouter) for this one; it refuses too when the person has no OpenRouter key.`);
   throw new Error(`Codex couldn't make the image${r.code === null ? '' : ` (exit ${r.code})`}: ${why || 'no reason given'}`);

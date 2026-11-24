@@ -44,7 +44,10 @@ async function click(page: Page, width: number, selector: string) {
 
 const dimmed = '!!document.querySelector(".pick-dim")';
 
-for (const [width, label] of [[1280, 'desktop'], [390, 'phone']] as const) {
+for (const [width, label] of [
+  [1280, 'desktop'],
+  [390, 'phone'],
+] as const) {
   test(`at ${label} width a pick names the part, crops it, and goes with the message`, { skip }, async () => {
     const page = await open(width, `Point ${label}`);
     // Escape backs out, and nothing lands in the box.

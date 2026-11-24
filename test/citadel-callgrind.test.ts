@@ -17,10 +17,8 @@ const vgBin = join(home, 'valgrind-3.27.1', 'bin');
 const libs = join(home, 'libs', 'usr', 'lib');
 const calls = join(dir, 'calls');
 const has = (cmd: string) => spawnSync('sh', ['-c', `command -v ${cmd}`]).status === 0;
-const run = (...args: string[]) =>
-  spawnSync(tool, args, { encoding: 'utf8', env: { ...process.env, CITADEL_CALLGRIND_HOME: home, TMPDIR: dir } });
-const runTwo = (...args: string[]) =>
-  spawnSync(tool, args, { encoding: 'utf8', env: { ...process.env, CITADEL_CALLGRIND_HOME: home, TMPDIR: dir, TWO: '1' } });
+const run = (...args: string[]) => spawnSync(tool, args, { encoding: 'utf8', env: { ...process.env, CITADEL_CALLGRIND_HOME: home, TMPDIR: dir } });
+const runTwo = (...args: string[]) => spawnSync(tool, args, { encoding: 'utf8', env: { ...process.env, CITADEL_CALLGRIND_HOME: home, TMPDIR: dir, TWO: '1' } });
 
 test('before setup it says to run setup', () => {
   const r = run('/bin/true');
@@ -32,12 +30,15 @@ test('routes dynamic binaries through the generic loader and static ones directl
   mkdirSync(vgBin, { recursive: true });
   mkdirSync(libs, { recursive: true });
   for (const f of ['ld-linux-x86-64.so.2', 'libgcc_s.so.1', 'libstdc++.so.6']) writeFileSync(join(libs, f), '');
-  writeFileSync(join(vgBin, 'valgrind'), `#!/usr/bin/env bash
+  writeFileSync(
+    join(vgBin, 'valgrind'),
+    `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> '${calls}'
 for a; do case $a in --log-file=*) log=\${a#--log-file=};; esac; done
 printf '==1== Events    : Ir\\n==1== Collected : 1234\\n' > "$log"
 [ -z "$TWO" ] || printf '==2== Collected : 66\\n' >> "$log"
-`);
+`,
+  );
   chmodSync(join(vgBin, 'valgrind'), 0o755);
   const script = join(dir, 'static-ish');
   writeFileSync(script, '#!/bin/sh\n');

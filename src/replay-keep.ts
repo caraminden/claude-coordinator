@@ -122,7 +122,13 @@ function dropMatching(dir: string | null, match: (file: string) => boolean) {
 /** Every kept-chats folder on the server, apps no longer registered included: for the daily prune and opt-outs. */
 export function keptDirs(dataDir: string): string[] {
   const root = join(dataDir, 'projects');
-  const sub = (d: string) => { try { return readdirSync(d).map((f) => join(d, f)); } catch { return []; } };
+  const sub = (d: string) => {
+    try {
+      return readdirSync(d).map((f) => join(d, f));
+    } catch {
+      return [];
+    }
+  };
   return sub(root).flatMap((p) => sub(join(p, 'shared', 'project', '.replay')));
 }
 

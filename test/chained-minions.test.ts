@@ -104,7 +104,7 @@ const reset = () => {
   store.setSetting('chained-minions', []); // chains a failed test left behind don't fail the tests after it (#633)
 };
 
-test('a live chain waits through the merge and starts once the server runs the leader\'s work', async () => {
+test("a live chain waits through the merge and starts once the server runs the leader's work", async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
@@ -125,7 +125,7 @@ test('a live chain waits through the merge and starts once the server runs the l
   assert.equal(await w.check(), 0, 'started once');
 });
 
-test('a merged chain starts once the leader\'s work is on main, live or not', async () => {
+test("a merged chain starts once the leader's work is on main, live or not", async () => {
   reset();
   const w = waiters(live.git('rev-parse', 'HEAD'));
   const leader = minion();
@@ -230,7 +230,10 @@ test('a feeder merged into its build and dismissed is merged for a chain, and li
   assert.match(started[0].why, /work is merged into Build 7$/, 'in its build, not landed');
   live.git('merge', '-q', '--ff-only', 'build/7'); // the build lands
   assert.equal(await w.check(live.git('rev-parse', 'HEAD')), 1);
-  assert.deepEqual(started.map((s) => s.c.ticket), [afterMerged, afterLive]);
+  assert.deepEqual(
+    started.map((s) => s.c.ticket),
+    [afterMerged, afterLive],
+  );
 
   // In a scheme whose code this server doesn't run, live means merged: in the build is enough.
   reset();
@@ -275,7 +278,7 @@ test('a leader whose PR was squash-merged counts as merged, and a held chain sta
 // #321: Threadspace merges PRs on GitHub, in a private repo only its owner's login can read, and the
 // server's own fetch can't reach it either, so its local main and origin/main both lag. Asking GitHub
 // as the box's login found nothing, and the leader read as dismissed without its work merged.
-test('a leader squash-merged into origin/main only, in a repo only the scheme owner\'s login can read, counts as merged', async () => {
+test("a leader squash-merged into origin/main only, in a repo only the scheme owner's login can read, counts as merged", async () => {
   reset();
   const remote = join(root, 'obsidian.git');
   execFileSync('git', ['clone', '-q', '--bare', other.dir, remote]);
@@ -307,7 +310,7 @@ test('a leader squash-merged into origin/main only, in a repo only the scheme ow
   mg('-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'Squashed (#10)');
   mg('push', '-q', 'origin', 'main');
   const merge = mg('rev-parse', 'HEAD');
-  assert.throws(() => sg('cat-file', '-e', `${merge}^{commit}`), 'the scheme\'s clone has not got the merge');
+  assert.throws(() => sg('cat-file', '-e', `${merge}^{commit}`), "the scheme's clone has not got the merge");
 
   // gh as the box runs it: GitHub only answers the owner's token.
   const bin = join(root, 'bin');
@@ -329,7 +332,7 @@ test('a leader squash-merged into origin/main only, in a repo only the scheme ow
   }
 });
 
-test('GitHub\'s answers read as a merged PR or none', async () => {
+test("GitHub's answers read as a merged PR or none", async () => {
   const head = 'bd6f4c67cf2aac6092ffcb39fea1df1d43e024bd';
   const merge = '28f4915f1bdea4505501ed04412272a36941d760';
   assert.deepEqual(mergedPr([{ number: 204, state: 'MERGED', headRefOid: head, mergeCommit: { oid: merge } }]), { number: 204, head, commit: merge });
@@ -371,8 +374,7 @@ test('a leader that commits after its PR was squash-merged waits for that work; 
   squash(live, leader.branch);
   // Main moves on and the leader merges it in: a merge commit and main's commits, none of its own.
   live.commit();
-  live.git('update-ref', '-m', 'merge main', `refs/heads/${leader.branch}`,
-    live.git('commit-tree', '-p', `refs/heads/${leader.branch}`, '-p', 'main', '-m', 'merge main', 'main^{tree}'));
+  live.git('update-ref', '-m', 'merge main', `refs/heads/${leader.branch}`, live.git('commit-tree', '-p', `refs/heads/${leader.branch}`, '-p', 'main', '-m', 'merge main', 'main^{tree}'));
   assert.equal(await w.check(), 1);
 });
 
@@ -394,7 +396,11 @@ test("a chained minion's brief stays held until its start sends it: a start that
   const follower = await chain(w, leader.id, 'live');
   store.updateTicket(leader.id, { status: 'closed' });
   assert.equal(await w.check(), 1);
-  assert.deepEqual(w.chains().map((c) => c.message), ['build part two'], 'the brief is still stored');
+  assert.deepEqual(
+    w.chains().map((c) => c.message),
+    ['build part two'],
+    'the brief is still stored',
+  );
   assert.equal(await w.check(), 0, 'not started twice while its start runs');
 
   const restarted = waiters(live.git('rev-parse', 'HEAD'));
@@ -418,7 +424,11 @@ test('a deploy wakes every waiter whose commit is live even when one send throws
   live.commit();
   await assert.doesNotReject(w.check(live.git('rev-parse', 'HEAD')));
   assert.deepEqual(got, [b]);
-  assert.deepEqual(w.list().filter((x) => x.ticket === a || x.ticket === b), [], 'dropped before sending: none woken twice');
+  assert.deepEqual(
+    w.list().filter((x) => x.ticket === a || x.ticket === b),
+    [],
+    'dropped before sending: none woken twice',
+  );
 });
 
 test('a leader already live when the chain is set starts it at once', async () => {
@@ -519,14 +529,22 @@ test('a dismissed follower is dropped; release hands back the held brief once', 
 
 test('a turn answering a parked minion ends with it parked as before, whatever state the turn set', async () => {
   const fake = join(root, 'claude-slow');
-  writeFileSync(fake, `#!${process.execPath}
+  writeFileSync(
+    fake,
+    `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', () => setTimeout(() => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'answered' }));
   process.exit(0);
 }, 300));
-`);
+`,
+  );
   chmodSync(fake, 0o755);
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   runner.heldFor = (id) => (id === t.id ? "#1 Leader's work has shipped" : null);
   const t = store.createTicket({ project_id: citadel.id, title: 'Parked', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
@@ -550,7 +568,9 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
 test("a chained minion's branch is caught up after the turn running in its worktree ends, never under it, and before its brief's turn (#468 S07-2)", async () => {
   const release = join(root, 'release-s07-2');
   const fake = join(root, 'claude-held');
-  writeFileSync(fake, `#!${process.execPath}
+  writeFileSync(
+    fake,
+    `#!${process.execPath}
 const { existsSync } = require('node:fs');
 require('node:readline').createInterface({ input: process.stdin }).once('line', () => {
   const t = setInterval(() => {
@@ -560,15 +580,25 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
     process.exit(0);
   }, 20);
 });
-`);
+`,
+  );
   chmodSync(fake, 0o755);
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   const { id, branch } = minion();
   const cwd = join(root, `wt-${id}`);
   live.git('worktree', 'add', '-q', cwd, branch);
   store.setTicketDir(id, cwd, branch);
   const head = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
-  const said = () => store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data).text);
+  const said = () =>
+    store
+      .listEvents(id)
+      .filter((e) => e.kind === 'user_message')
+      .map((e) => JSON.parse(e.data).text);
   const wait = async (what: string, ok: () => boolean) => {
     for (let i = 0; !ok(); i++) {
       assert.ok(i < 500, what);
@@ -597,16 +627,23 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
 });
 
 test("Start now hears when the brief couldn't be sent, and the brief stays held for the next try (#468 S07-2)", async () => {
-  const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   const { id } = minion();
   const w = new LiveWaiters(store, live.dir, live.commit(), () => {});
   w.chain({ ticket: id, after: 0, when: 'merged', message: 'build part two', from: 'Taskmaster', base: null as any, since: 0 });
-  runner.send = () => { throw new Error('disk full'); };
+  runner.send = () => {
+    throw new Error('disk full');
+  };
   await assert.rejects(startChained(w.claim(id)!, 'Cara started it', { store, runner, waiters: w }), /disk full/);
   assert.ok(w.claim(id), 'held again');
 });
 
-test('through the server: start_after parks the minion with its brief held; the leader\'s dismissal or Unpark starts it, a message is held for that start; a brief is marked as one', async () => {
+test("through the server: start_after parks the minion with its brief held; the leader's dismissal or Unpark starts it, a message is held for that start; a brief is marked as one", async () => {
   const { base, cookie, proc } = await bootServer({ root });
   procs.push(proc);
   const call = async (path: string, body?: unknown) => {
@@ -617,8 +654,7 @@ test('through the server: start_after parks the minion with its brief held; the 
     });
     return { status: res.status, data: await res.json() };
   };
-  const messages = async (id: number) => (await call(`/api/tickets/${id}/events?after=0`)).data
-    .filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
+  const messages = async (id: number) => (await call(`/api/tickets/${id}/events?after=0`)).data.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
   const said = async (id: number) => (await messages(id)).map((m: any) => m.text);
   // The brief that starts a minion is marked, so the chat shows it unfolded; later messages aren't.
   const briefs = async (id: number) => (await messages(id)).map((m: any) => !!m.brief);
@@ -681,7 +717,7 @@ test('through the server: start_after parks the minion with its brief held; the 
   assert.equal(parked.held_brief.text, 'brief for Later');
   assert.equal(parked.held_brief.leader, next.data.number);
   assert.equal(parked.held_brief.when, 'live');
-  assert.equal(parked.held_brief.is, 'is live', 'the chat says the wait in the server\'s words');
+  assert.equal(parked.held_brief.is, 'is live', "the chat says the wait in the server's words");
   const started = await call(`/api/tickets/${later.id}/unpark`, {});
   assert.equal(started.status, 200);
   assert.equal(started.data.held_brief, null, 'sent: no longer shown as held');
@@ -739,7 +775,11 @@ test('a commit GitHub says it has not got (422, a branch commit rebased away) is
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path}`;
   try {
-    const ask = () => githubPrs(() => undefined, missingCommits(new Store(db), () => clock)).commit(dir, 'c'.repeat(40)); // a new store and lookup each time, as after a restart
+    const ask = () =>
+      githubPrs(
+        () => undefined,
+        missingCommits(new Store(db), () => clock),
+      ).commit(dir, 'c'.repeat(40)); // a new store and lookup each time, as after a restart
     const asks = () => (existsSync(asked) ? readFileSync(asked, 'utf8').trim().split('\n').length : 0);
     assert.equal(await ask(), null);
     assert.equal(await ask(), null);

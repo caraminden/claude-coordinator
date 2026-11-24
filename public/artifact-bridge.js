@@ -10,7 +10,7 @@
 (function (cfg) {
   'use strict';
   const TAG = 'citadel-bridge-1';
-  const NO_VIEWER = 'This tab isn\'t connected to Citadel: open the page from Citadel (its viewer or its Open button)';
+  const NO_VIEWER = "This tab isn't connected to Citadel: open the page from Citadel (its viewer or its Open button)";
   const host = window.parent !== window ? window.parent : window.opener;
   const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
   const data = new Map(cfg.entries.map((e) => [e.key, e.value]));
@@ -48,11 +48,16 @@
   // Who is looking and who made the page, once the viewer answers; false when there is no viewer.
   let info = null;
   const hello = (tries) => request('hello', {}, 5000).catch((err) => (tries > 1 ? hello(tries - 1) : Promise.reject(err)));
-  const ready = host ? hello(2).then((r) => {
-    info = { person: r.person, file: r.file, owner: r.owner, draw: !!r.draw };
-    replace(r.entries);
-    return true;
-  }, () => false) : Promise.resolve(false);
+  const ready = host
+    ? hello(2).then(
+        (r) => {
+          info = { person: r.person, file: r.file, owner: r.owner, draw: !!r.draw };
+          replace(r.entries);
+          return true;
+        },
+        () => false,
+      )
+    : Promise.resolve(false);
 
   // Watchers of keys (`key`) or of every key under a prefix (`prefix`), told after any change.
   const watchers = new Set();
@@ -76,7 +81,7 @@
   const inFlight = new Map();
   function write(key, value) {
     // null (NaN and the like clone to it) is the wire's delete, so it deletes here too.
-    const v = value === undefined ? undefined : clone(value) ?? undefined;
+    const v = value === undefined ? undefined : (clone(value) ?? undefined);
     if (v === undefined) data.delete(key);
     else data.set(key, v);
     notify([key]);
@@ -86,13 +91,16 @@
       queue = new Map();
       flushing = null;
       for (const e of entries) inFlight.set(e.key, e.value);
-      sending = sending.catch(() => {}).then(async () => {
-        if (!(await ready)) throw new Error(NO_VIEWER);
-        for (let i = 0; i < entries.length; i += 100) await keep(entries.slice(i, i + 100));
-      }).finally(() => {
-        for (const e of entries) if (inFlight.get(e.key) === e.value) inFlight.delete(e.key);
-        saves();
-      });
+      sending = sending
+        .catch(() => {})
+        .then(async () => {
+          if (!(await ready)) throw new Error(NO_VIEWER);
+          for (let i = 0; i < entries.length; i += 100) await keep(entries.slice(i, i + 100));
+        })
+        .finally(() => {
+          for (const e of entries) if (inFlight.get(e.key) === e.value) inFlight.delete(e.key);
+          saves();
+        });
       saves();
       return sending;
     });
@@ -190,11 +198,13 @@
       removeItem: (k) => void del(k),
       clear: () => keys().forEach(del),
       key: (i) => keys()[i] ?? null,
-      get length() { return keys().length; },
+      get length() {
+        return keys().length;
+      },
     };
     // Like the real thing, `localStorage.x` and `localStorage.x = 1` work too.
     return new Proxy(api, {
-      get: (t, p) => (typeof p === 'symbol' || p in t ? Reflect.get(t, p) : get(p) ?? undefined),
+      get: (t, p) => (typeof p === 'symbol' || p in t ? Reflect.get(t, p) : (get(p) ?? undefined)),
       set: (t, p, v) => (typeof p === 'symbol' || p in t ? Reflect.set(t, p, v) : (set(p, v), true)),
       deleteProperty: (t, p) => (del(p), true),
       has: (t, p) => p in t || get(p) !== null,
@@ -202,7 +212,10 @@
       getOwnPropertyDescriptor: (t, p) => (get(p) === null ? undefined : { value: get(p), enumerable: true, configurable: true, writable: true }),
     });
   }
-  for (const [name, prefix] of [['localStorage', 'localStorage/'], ['sessionStorage', '']]) {
+  for (const [name, prefix] of [
+    ['localStorage', 'localStorage/'],
+    ['sessionStorage', ''],
+  ]) {
     try {
       void window[name];
     } catch {
@@ -211,7 +224,10 @@
   }
 
   // claude.ai's artifact database, Firestore-like: each doc is the key `db/<collection>/<doc>`.
-  const randomId = () => Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 20);
+  const randomId = () =>
+    Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => b.toString(36).padStart(2, '0'))
+      .join('')
+      .slice(0, 20);
   const docSnap = (key, id) => {
     const v = data.get(key);
     return { id, exists: v !== undefined, data: () => clone(v) };
@@ -227,9 +243,9 @@
       return {
         id: String(id),
         get: async () => docSnap(key, String(id)),
-        set: async (v, opts) => void await write(key, opts?.merge ? { ...data.get(key), ...v } : v),
-        update: async (patch) => void await write(key, { ...data.get(key), ...patch }),
-        delete: async () => void await write(key, undefined),
+        set: async (v, opts) => void (await write(key, opts?.merge ? { ...data.get(key), ...v } : v)),
+        update: async (patch) => void (await write(key, { ...data.get(key), ...patch })),
+        delete: async () => void (await write(key, undefined)),
         onSnapshot: (fn) => watch(key, () => fn(docSnap(key, String(id)))),
       };
     };
@@ -332,4 +348,4 @@
     e.preventDefault();
     window.open(url.href, '_blank', 'noopener');
   });
-})
+});

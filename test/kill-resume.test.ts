@@ -61,7 +61,12 @@ let placing = 0;
 let starved = false;
 let pressureReads = 0;
 function makeRunner() {
-  const r = new Runner(store, () => {}, (t: { id: number }) => ({ TEST_MINION: String(t.id) }), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    (t: { id: number }) => ({ TEST_MINION: String(t.id) }),
+    fake,
+  );
   r.pollMs = 10;
   r.resumeGapMs = 0;
   r.onTurnError = (ticket, text) => pushes.push({ ticket, text });
@@ -83,7 +88,11 @@ function minion() {
   store.setTicketDir(t.id, root, null);
   return t.id;
 }
-const events = (id: number, kind: string) => store.listEvents(id).filter((e) => e.kind === kind).map((e) => JSON.parse(e.data).text as string);
+const events = (id: number, kind: string) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === kind)
+    .map((e) => JSON.parse(e.data).text as string);
 const promptsOf = (word: string) => lines(prompts).filter((l) => l.includes(word));
 /** How many turns the minion has started, its resumes included. */
 const turnsOf = (id: number) => lines(prompts).filter((l) => l.startsWith(`${id} `)).length;
@@ -93,13 +102,17 @@ async function kill(id: number) {
   await until('claude to be up', () => store.listEvents(id).some((e) => e.kind === 'claude') && existsSync(join((runner as any).turns.get(id).dir, 'pid.json')), 10_000);
   const live = (runner as any).turns.get(id);
   const pids = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8'));
-  try { process.kill(pids.wrapper, 'SIGKILL'); } catch {}
-  try { process.kill(-pids.claude, 'SIGKILL'); } catch {}
+  try {
+    process.kill(pids.wrapper, 'SIGKILL');
+  } catch {}
+  try {
+    process.kill(-pids.claude, 'SIGKILL');
+  } catch {}
   await until('the server to see the kill', () => (runner as any).turns.get(id) !== live, 10_000);
 }
 
 test('one resume per kill, then a second kill in a row stops', () => {
-  assert.equal(MAX_KILL_RESUMES, 1, "Cara: a second kill in a row stops for good");
+  assert.equal(MAX_KILL_RESUMES, 1, 'Cara: a second kill in a row stops for good');
 });
 
 test('a turn whose wrapper is SIGKILLed is resumed by the server, with one chat line, no push, and its queued message', async () => {
@@ -173,7 +186,7 @@ test('"claude exited with code 1" is not resumed, and its error keeps the last l
   assert.equal(pushes.length, 1);
 });
 
-test('the resume runs on the killed turn\'s person, not the scheme owner or the minion\'s maker', async () => {
+test("the resume runs on the killed turn's person, not the scheme owner or the minion's maker", async () => {
   const id = minion();
   places.length = 0;
   placing = id;
@@ -182,7 +195,7 @@ test('the resume runs on the killed turn\'s person, not the scheme owner or the 
   await kill(id);
   await until('the resume to finish', () => store.getTicket(id)!.status === 'idle' && !runner.isRunning(id) && turnsOf(id) === 2, 15_000);
   const persons = [...new Set(places.filter((p) => p.ticket === id).map((p) => p.person))];
-  assert.deepEqual(persons, [josh.id], 'both the turn and its resume ran on Josh\'s login');
+  assert.deepEqual(persons, [josh.id], "both the turn and its resume ran on Josh's login");
   placing = 0;
 });
 
@@ -206,11 +219,18 @@ test('16 turns killed at once resume one at a time, a few seconds apart, and non
   // The Nov 20 shape: every wrapper and claude killed together.
   const pids = ids.map((id) => JSON.parse(readFileSync(join((runner as any).turns.get(id).dir, 'pid.json'), 'utf8')));
   for (const p of pids) {
-    try { process.kill(p.wrapper, 'SIGKILL'); } catch {}
-    try { process.kill(-p.claude, 'SIGKILL'); } catch {}
+    try {
+      process.kill(p.wrapper, 'SIGKILL');
+    } catch {}
+    try {
+      process.kill(-p.claude, 'SIGKILL');
+    } catch {}
   }
   await until('the server to see all 16 kills', () => ids.every((id) => !runner.isRunning(id)), 15_000);
-  assert.ok(ids.every((id) => runner.killWait(id)), 'each waits to resume');
+  assert.ok(
+    ids.every((id) => runner.killWait(id)),
+    'each waits to resume',
+  );
   // Starved: nothing starts while the hold lasts, though the pressure is read round after round.
   const readsBefore = pressureReads;
   await until('the pressure to be read several times', () => pressureReads >= readsBefore + 4);
@@ -263,7 +283,7 @@ test('a message during the kill wait starts its turn now, which takes the wait',
   starved = false;
   // timing-ok: waits to show nothing happens (no resume on top of the message's turn); a slow box only makes it wait longer
   await new Promise((r) => setTimeout(r, 300));
-  assert.equal(turnsOf(id), 2, 'the turn and the message\'s turn, no resume on top of it');
+  assert.equal(turnsOf(id), 2, "the turn and the message's turn, no resume on top of it");
   runner.detachAll();
 });
 

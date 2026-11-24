@@ -62,7 +62,10 @@ test('right-clicking a message opens its menu, Point pair first; Point at this n
   assert.equal(await page.eval('document.querySelector(".cui-menu .cui-menu-kind").textContent'), 'Message');
   const labels = await page.eval<string[]>(items);
   assert.deepEqual(labels.slice(0, 2), ['📍Point at thisAlt+Shift+P', '✎Point and draw…']);
-  assert.ok(labels.some((l) => l.includes('Reply with a quote')), `its own actions follow: ${labels}`);
+  assert.ok(
+    labels.some((l) => l.includes('Reply with a quote')),
+    `its own actions follow: ${labels}`,
+  );
   assert.equal(await page.eval('document.activeElement.classList.contains("cui-menu-item")'), true, 'focus is on the first item');
   // Arrows move; End goes to the last item.
   await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'End', code: 'End', windowsVirtualKeyCode: 35 });
@@ -86,7 +89,7 @@ test('Point and draw… opens the crop in the drawing tools', { skip }, async ()
   await waitFor(page, 'the drawing tools', '!!document.querySelector(".cui-lb canvas")');
 });
 
-test('a text box and Shift+right-click keep the browser\'s own menu', { skip }, async () => {
+test("a text box and Shift+right-click keep the browser's own menu", { skip }, async () => {
   const page = await open('Menu native');
   await rightClick(page, '.composer textarea');
   await rightClick(page, '#log .msg.user', { shift: true });
@@ -118,7 +121,7 @@ test('Shift+F10 on a focused minion row opens its menu; Escape puts focus back',
   assert.equal(await page.eval('window.focusAfterClose'), true, 'focus is back on the row');
 });
 
-test('a scroll of what it is about closes it; a redraw\'s scroll elsewhere doesn\'t', { skip }, async () => {
+test("a scroll of what it is about closes it; a redraw's scroll elsewhere doesn't", { skip }, async () => {
   const page = await open('Menu scroll');
   await rightClick(page, '#log .msg.user');
   await waitFor(page, 'the menu', menuOpen);
@@ -151,10 +154,13 @@ test('a long press on a link opens the menu as a sheet; its tap does nothing; th
   assert.equal(await page.eval('window.clicked'), 0, 'the press did not click the link');
   assert.equal(await page.eval('location.hash.includes("999")'), false);
   assert.equal(await page.eval('document.querySelector(".cui-menu .cui-menu-kind").textContent'), 'Link');
-  const rows = await page.eval('[...document.querySelectorAll(".cui-menu .cui-menu-item")].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)])') as [string, number][];
+  const rows = (await page.eval('[...document.querySelectorAll(".cui-menu .cui-menu-item")].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)])')) as [string, number][];
   assert.match(rows[0][0], /Point at this/);
   assert.match(rows[1][0], /Point and draw/);
-  assert.ok(rows.every(([, h]) => h >= 44), `every row is 44 px or taller: ${JSON.stringify(rows)}`);
+  assert.ok(
+    rows.every(([, h]) => h >= 44),
+    `every row is 44 px or taller: ${JSON.stringify(rows)}`,
+  );
   assert.equal(await page.eval('!!document.querySelector(".cui-menu .cui-menu-grab")'), true);
   await waitFor(page, 'the sheet at the bottom', 'Math.abs(document.querySelector(".cui-menu").getBoundingClientRect().bottom - innerHeight) < 1');
   await hold(400);

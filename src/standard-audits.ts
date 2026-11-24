@@ -34,7 +34,8 @@ export const STANDARD_AUDITS: Record<string, Partial<Record<string, string>>> = 
     'code-health': 'Split the Grunts by server (src/), front end (public/) and tests (test/). The long files are src/runner.ts, src/db.ts, src/mcp.ts and public/thread.js: judge them by what a split would buy, not their length alone.',
     'test-audit': 'Name the report reports/test-audit-citadel-<YYYY-MM>.md.',
     'monthly-retro': "Kit, tripwire and prompt fixes are Citadel's own: ship them here directly, no handoff relay.",
-    'upstream-check': "Quarterly, on the runs in January, April, July and October: also run citadel:skills-survey as a light, stack-agnostic re-survey of skills.sh's top 50, scoped to entries new since the newest reports/skills-survey-*.md in the shared folder. Only new entries worth using or mining count as something to report; write them up as that skill says.",
+    'upstream-check':
+      "Quarterly, on the runs in January, April, July and October: also run citadel:skills-survey as a light, stack-agnostic re-survey of skills.sh's top 50, scoped to entries new since the newest reports/skills-survey-*.md in the shared folder. Only new entries worth using or mining count as something to report; write them up as that skill says.",
   },
   'Peek Auras': {
     'code-health': PEEK_KEEP,
@@ -132,25 +133,24 @@ function addOnce(store: Store, dataDir: string, projectId: number, slug: string,
  * The weekly app turns check (kit/schedules/app-turns.md) for a scheme home to an app (Cara, 2026-11-16: "automatically
  * add this turn audit and the audit of the audit to new schemes when they add a contraption").
  */
-export const addAppTurnsCheck = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) =>
-  addOnce(store, dataDir, projectId, 'app-turns', `app_turns_check:${projectId}`, templates, now);
+export const addAppTurnsCheck = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) => addOnce(store, dataDir, projectId, 'app-turns', `app_turns_check:${projectId}`, templates, now);
 
 /** The weekly memory curator (kit/schedules/memory-curator.md, #1111) for a scheme: every scheme gets one (Josh, 2026-11-19, "Every scheme, quiet skip"). */
-export const addMemoryCurator = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) =>
-  addOnce(store, dataDir, projectId, 'memory-curator', `memory_curator:${projectId}`, templates, now);
+export const addMemoryCurator = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) => addOnce(store, dataDir, projectId, 'memory-curator', `memory_curator:${projectId}`, templates, now);
 
 /** The weekly ship lessons pass (kit/schedules/ship-lessons.md, #1119), added on a scheme's first real ship lines. */
-export const addShipLessons = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) =>
-  addOnce(store, dataDir, projectId, 'ship-lessons', `ship_lessons_check:${projectId}`, templates, now);
+export const addShipLessons = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) => addOnce(store, dataDir, projectId, 'ship-lessons', `ship_lessons_check:${projectId}`, templates, now);
 
 /** The monthly glossary drift check (kit/schedules/glossary-drift.md, #1774) for a scheme: every scheme gets one, as the memory curator does; the run skips at no cost when the scheme is quiet and says so in one line when it has no glossary. */
-export const addGlossaryDrift = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) =>
-  addOnce(store, dataDir, projectId, 'glossary-drift', `glossary_drift:${projectId}`, templates, now);
+export const addGlossaryDrift = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) => addOnce(store, dataDir, projectId, 'glossary-drift', `glossary_drift:${projectId}`, templates, now);
 
 /** At boot: every scheme gets its glossary drift check (once each, as above). */
 export function addGlossaryDrifts(store: Store, dataDir: string): string[] {
   const templates = loadTemplates();
-  return store.listProjects().map((p) => addGlossaryDrift(store, dataDir, p.id, templates)).filter((l): l is string => !!l);
+  return store
+    .listProjects()
+    .map((p) => addGlossaryDrift(store, dataDir, p.id, templates))
+    .filter((l): l is string => !!l);
 }
 
 /** The notes Citadel's hand-written monthly architecture check (schedule 12) carried beyond the template. */
@@ -166,7 +166,10 @@ export function addArchitectureCheck(store: Store, dataDir: string, projectId: n
   const key = `architecture_check:${projectId}`;
   if (!p || store.getSetting(key)) return null;
   const t = templates.get('architecture');
-  if (!t) { console.error('kit/schedules/architecture.md is missing: no "architecture" schedule added'); return null; }
+  if (!t) {
+    console.error('kit/schedules/architecture.md is missing: no "architecture" schedule added');
+    return null;
+  }
   const rows = store.schedules.list(p.id);
   const copy = rows.find((s) => !s.template && s.name === 'Monthly architecture check');
   if (!copy || rows.some((s) => s.template === 'architecture')) return addOnce(store, dataDir, projectId, 'architecture', key, templates, now);
@@ -179,23 +182,39 @@ export function addArchitectureCheck(store: Store, dataDir: string, projectId: n
 /** At boot: every scheme gets its architecture check (once each, as above). */
 export function addArchitectureChecks(store: Store, dataDir: string): string[] {
   const templates = loadTemplates();
-  return store.listProjects().map((p) => addArchitectureCheck(store, dataDir, p.id, templates)).filter((l): l is string => !!l);
+  return store
+    .listProjects()
+    .map((p) => addArchitectureCheck(store, dataDir, p.id, templates))
+    .filter((l): l is string => !!l);
 }
 
 /** At boot: every scheme gets its memory curator (once each, as above). */
 export function addMemoryCurators(store: Store, dataDir: string): string[] {
   const templates = loadTemplates();
-  return store.listProjects().map((p) => addMemoryCurator(store, dataDir, p.id, templates)).filter((l): l is string => !!l);
+  return store
+    .listProjects()
+    .map((p) => addMemoryCurator(store, dataDir, p.id, templates))
+    .filter((l): l is string => !!l);
 }
 
 /** At boot: every scheme already home to an app gets its check (once each, as above). */
 export function addAppTurnsChecks(store: Store, dataDir: string): string[] {
-  const homes = new Set(store.listContraptions().map((c) => c.home_scheme).filter((id): id is number => id !== null));
+  const homes = new Set(
+    store
+      .listContraptions()
+      .map((c) => c.home_scheme)
+      .filter((id): id is number => id !== null),
+  );
   return [...homes].map((id) => addAppTurnsCheck(store, dataDir, id)).filter((l): l is string => !!l);
 }
 
 /** One template's state in a scheme (H1, #1057): rows that follow it or are hand-made copies of it, and whether it is missing or was left out on purpose. */
-export interface AuditCheck { slug: string; name: string; rows: { id: number; name: string; template: boolean }[]; state: 'ok' | 'missing' | 'duplicate' | 'left-out' }
+export interface AuditCheck {
+  slug: string;
+  name: string;
+  rows: { id: number; name: string; template: boolean }[];
+  state: 'ok' | 'missing' | 'duplicate' | 'left-out';
+}
 
 /**
  * The scheme's rows against the kit's templates. "Left out on purpose" is a template the scheme's entry in STANDARD_AUDITS
@@ -207,11 +226,11 @@ export function checkAudits(store: Store, projectId: number, templates: Map<stri
   const picks = p ? STANDARD_AUDITS[p.name] : undefined;
   const rows = store.schedules.list(projectId);
   // The app turns check and the memory curator have their own rules (addOnce), so they are not part of this list.
-  return [...templates.values()].filter((t) => t.slug in COPY_NAMES).map((t) => {
-    const mine = rows
-      .filter((s) => s.template === t.slug || (!s.template && COPY_NAMES[t.slug].includes(s.name)))
-      .map((s) => ({ id: s.id, name: s.name, template: s.template === t.slug }));
-    const state = mine.length > 1 ? 'duplicate' : mine.length ? 'ok' : picks && !(t.slug in picks) ? 'left-out' : 'missing';
-    return { slug: t.slug, name: t.name, rows: mine, state };
-  });
+  return [...templates.values()]
+    .filter((t) => t.slug in COPY_NAMES)
+    .map((t) => {
+      const mine = rows.filter((s) => s.template === t.slug || (!s.template && COPY_NAMES[t.slug].includes(s.name))).map((s) => ({ id: s.id, name: s.name, template: s.template === t.slug }));
+      const state = mine.length > 1 ? 'duplicate' : mine.length ? 'ok' : picks && !(t.slug in picks) ? 'left-out' : 'missing';
+      return { slug: t.slug, name: t.name, rows: mine, state };
+    });
 }

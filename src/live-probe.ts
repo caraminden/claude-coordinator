@@ -16,22 +16,20 @@ export const PROBE_LINES = 600;
 /** Lines the branch in `cwd` changes against main (added plus removed, binary files left out); 0 when git can't say. */
 // shortcut: a scheme whose trunk isn't named main counts 0 (no probe asked); read its default branch if one ships big changes.
 export function changedLines(cwd: string): Promise<number> {
-  return new Promise((done) => execFile('git', ['diff', '--numstat', 'main...HEAD'], { cwd, maxBuffer: 16 * 1024 * 1024 }, (err, out) => {
-    if (err) return done(0);
-    let n = 0;
-    for (const line of out.split('\n')) {
-      const [a, d] = line.split('\t');
-      if (/^\d+$/.test(a) && /^\d+$/.test(d)) n += Number(a) + Number(d);
-    }
-    done(n);
-  }));
+  return new Promise((done) =>
+    execFile('git', ['diff', '--numstat', 'main...HEAD'], { cwd, maxBuffer: 16 * 1024 * 1024 }, (err, out) => {
+      if (err) return done(0);
+      let n = 0;
+      for (const line of out.split('\n')) {
+        const [a, d] = line.split('\t');
+        if (/^\d+$/.test(a) && /^\d+$/.test(d)) n += Number(a) + Number(d);
+      }
+      done(n);
+    }),
+  );
 }
 
-export type Probe =
-  | { kind: 'http'; path: string; status: number; text?: string }
-  | { kind: 'timing'; path: string; ms: number }
-  | { kind: 'sql'; query: string; min?: number; max?: number }
-  | { kind: 'none'; reason: string };
+export type Probe = { kind: 'http'; path: string; status: number; text?: string } | { kind: 'timing'; path: string; ms: number } | { kind: 'sql'; query: string; min?: number; max?: number } | { kind: 'none'; reason: string };
 
 export interface Outcome {
   result: 'pass' | 'fail' | 'cant';
@@ -40,7 +38,8 @@ export interface Outcome {
 }
 
 /** The kinds, for a refusal that teaches them. */
-export const PROBE_HELP = 'probe is one of: {kind:"http", path:"/api/...", status?:200, text?:"expected text"}, {kind:"timing", path:"/api/...", ms:800} (median of 3 GETs), {kind:"sql", query:"SELECT count(*) FROM ...", min?:1, max?:5} (read-only, secrets masked; the first value of the first row, a number), or {kind:"none", reason:"why nothing live can show it"}. Paths are on this server (an app\'s are /apps/<name>/...), read as the minion\'s own person sees them';
+export const PROBE_HELP =
+  'probe is one of: {kind:"http", path:"/api/...", status?:200, text?:"expected text"}, {kind:"timing", path:"/api/...", ms:800} (median of 3 GETs), {kind:"sql", query:"SELECT count(*) FROM ...", min?:1, max?:5} (read-only, secrets masked; the first value of the first row, a number), or {kind:"none", reason:"why nothing live can show it"}. Paths are on this server (an app\'s are /apps/<name>/...), read as the minion\'s own person sees them';
 
 const str = (v: unknown, name: string, max: number, re?: RegExp): string => {
   if (typeof v !== 'string' || !v.trim()) throw new Error(`probe.${name} is required`);
@@ -93,10 +92,14 @@ export function parseProbe(x: unknown): Probe {
 /** One line for people: what it checks. */
 export function describeProbe(p: Probe): string {
   switch (p.kind) {
-    case 'http': return `GET ${p.path} answers ${p.status}${p.text ? ` with "${p.text}"` : ''}`;
-    case 'timing': return `GET ${p.path} in ${p.ms} ms or less`;
-    case 'sql': return `${p.query} is ${p.min === p.max ? p.min : p.max === undefined ? `at least ${p.min}` : p.min === undefined ? `at most ${p.max}` : `${p.min} to ${p.max}`}`;
-    case 'none': return `none: ${p.reason}`;
+    case 'http':
+      return `GET ${p.path} answers ${p.status}${p.text ? ` with "${p.text}"` : ''}`;
+    case 'timing':
+      return `GET ${p.path} in ${p.ms} ms or less`;
+    case 'sql':
+      return `${p.query} is ${p.min === p.max ? p.min : p.max === undefined ? `at least ${p.min}` : p.min === undefined ? `at most ${p.max}` : `${p.min} to ${p.max}`}`;
+    case 'none':
+      return `none: ${p.reason}`;
   }
 }
 
@@ -125,16 +128,21 @@ async function get(env: ProbeEnv, path: string): Promise<{ status: number; body:
 }
 
 const noAnswer = (err: any): Outcome => ({ result: 'cant', saw: err?.name === 'TimeoutError' ? 'no answer within the time limit' : `no answer: ${clip(String(err?.cause?.code ?? err?.message ?? err), 120)}` });
-const login = (env: ProbeEnv, path: string): Outcome => ({ result: 'cant', saw: `401: it needs a login${env.headers(path) ? ' the minion\'s person doesn\'t have' : ' and the minion has no person to sign in as'}` });
+const login = (env: ProbeEnv, path: string): Outcome => ({ result: 'cant', saw: `401: it needs a login${env.headers(path) ? " the minion's person doesn't have" : ' and the minion has no person to sign in as'}` });
 
 /** Run one probe against the live server. Never throws: a probe that can't run says so. */
 export async function runProbe(p: Probe, env: ProbeEnv): Promise<Outcome> {
   try {
     switch (p.kind) {
-      case 'none': return { result: 'pass', saw: 'none' };
+      case 'none':
+        return { result: 'pass', saw: 'none' };
       case 'http': {
         let r;
-        try { r = await get(env, p.path); } catch (err) { return noAnswer(err); }
+        try {
+          r = await get(env, p.path);
+        } catch (err) {
+          return noAnswer(err);
+        }
         if (r.status === 401 && p.status !== 401) return login(env, p.path);
         // The body stays out of the chat: it's read as a person, and the minion's chat is seen by more people than that.
         if (r.status !== p.status) return { result: 'fail', saw: `${r.status}, not ${p.status}` };
@@ -145,7 +153,11 @@ export async function runProbe(p: Probe, env: ProbeEnv): Promise<Outcome> {
         const times: number[] = [];
         for (let i = 0; i < 3; i++) {
           let r;
-          try { r = await get(env, p.path); } catch (err) { return noAnswer(err); }
+          try {
+            r = await get(env, p.path);
+          } catch (err) {
+            return noAnswer(err);
+          }
           if (r.status === 401) return login(env, p.path);
           if (r.status < 200 || r.status > 299) return { result: 'fail', saw: `${r.status}, not a 2xx` };
           times.push(r.ms);
@@ -174,12 +186,26 @@ export async function runProbe(p: Probe, env: ProbeEnv): Promise<Outcome> {
 function child(args: string[], input: string, ms: number): Promise<{ code: number | null; out: string; err: string; timedOut: boolean }> {
   return new Promise((done) => {
     const c = spawn(process.execPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    let out = '', err = '', timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; c.kill('SIGKILL'); }, ms);
-    c.stdout.on('data', (d) => { if (out.length < 64_000) out += d; });
-    c.stderr.on('data', (d) => { if (err.length < 64_000) err += d; });
-    c.on('error', (e) => { err += e.message; });
-    c.on('close', (code) => { clearTimeout(timer); done({ code, out, err, timedOut }); });
+    let out = '',
+      err = '',
+      timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      c.kill('SIGKILL');
+    }, ms);
+    c.stdout.on('data', (d) => {
+      if (out.length < 64_000) out += d;
+    });
+    c.stderr.on('data', (d) => {
+      if (err.length < 64_000) err += d;
+    });
+    c.on('error', (e) => {
+      err += e.message;
+    });
+    c.on('close', (code) => {
+      clearTimeout(timer);
+      done({ code, out, err, timedOut });
+    });
     c.stdin.end(input);
   });
 }
@@ -319,7 +345,11 @@ export class LiveProbes {
       else {
         this.d.store.updateTicket(id, { state: null, note: 'live probe failed' });
         this.d.runner.broadcastTicket(id);
-        this.d.runner.send(id, this.d.from, `Your live probe failed once your ship${commit ? ` ${commit}` : ''} went live.\n\nProbe: ${what}\nIt saw: ${o.saw}\n\nThe change is live, so people may be hitting this now. If it's a real defect, fix it with what you know and hand the fix off with hand_off_land. If the probe was wrong and the change is fine, say so in one line and close_self: the trial counts wrong fails against real ones.`);
+        this.d.runner.send(
+          id,
+          this.d.from,
+          `Your live probe failed once your ship${commit ? ` ${commit}` : ''} went live.\n\nProbe: ${what}\nIt saw: ${o.saw}\n\nThe change is live, so people may be hitting this now. If it's a real defect, fix it with what you know and hand the fix off with hand_off_land. If the probe was wrong and the change is fine, say so in one line and close_self: the trial counts wrong fails against real ones.`,
+        );
       }
       return o.result;
     } finally {

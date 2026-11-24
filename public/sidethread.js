@@ -43,13 +43,44 @@ function sideRow(id, first, ticket, live) {
   const foot = h('div', { class: 'side-foot' });
   const box = h('textarea', { rows: 2, placeholder: 'Follow up on the side…' });
   const ask = h('button', { type: 'button', class: 'small side-go' }, 'Ask');
-  const follow = h('form', { class: 'side-follow', hidden: true }, box, h('span', { class: 'row' }, ask,
-    h('button', { type: 'button', class: 'small secondary', onclick: () => { follow.hidden = true; } }, 'Cancel')));
-  const followBtn = mine && h('button', { type: 'button', class: 'small secondary', onclick: () => { follow.hidden = false; box.focus(); } }, 'Follow up');
+  const follow = h(
+    'form',
+    { class: 'side-follow', hidden: true },
+    box,
+    h(
+      'span',
+      { class: 'row' },
+      ask,
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'small secondary',
+          onclick: () => {
+            follow.hidden = true;
+          },
+        },
+        'Cancel',
+      ),
+    ),
+  );
+  const followBtn =
+    mine &&
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'small secondary',
+        onclick: () => {
+          follow.hidden = false;
+          box.focus();
+        },
+      },
+      'Follow up',
+    );
   const toMinion = h('button', { type: 'button', class: 'small secondary', title: 'Posts this question and answer to the minion as a message from you' }, 'Send to the minion');
   const actions = h('span', { class: 'row side-actions' }, followBtn || '', toMinion);
-  const el = h('details', { class: 'msg coord side-thread', 'data-thread': id, open: (mine && live) || null },
-    h('summary', {}, who, preview), list, follow, h('div', { class: 'side-bottom' }, foot, actions));
+  const el = h('details', { class: 'msg coord side-thread', 'data-thread': id, open: (mine && live) || null }, h('summary', {}, who, preview), list, follow, h('div', { class: 'side-bottom' }, foot, actions));
   const row = { el, list, cost: 0, state: 'asking', at: null, draw: null };
 
   follow.onsubmit = (e) => {

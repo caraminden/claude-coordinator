@@ -10,7 +10,11 @@ import { ci, git, issued, seen, setup } from './land-fixture.ts';
 import { gitAt } from './git.ts';
 
 const landLog = (shared: string) => readFileSync(join(shared, 'retro-log', readdirSync(join(shared, 'retro-log'))[0], 'land.md'), 'utf8');
-const pushes = (c: ReturnType<typeof ci>) => c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length;
+const pushes = (c: ReturnType<typeof ci>) =>
+  c
+    .calls()
+    .split('\n')
+    .filter((l) => l.includes('/actions/runners ')).length;
 
 test('a red of known flakes only ships with no fresh CI run, says so, and still counts each sighting', () => {
   const r = setup();
@@ -106,9 +110,10 @@ test('a run that also left processes running is no flake run: the leak guard kee
   assert.doesNotMatch(res.stderr, /shipped past/);
 });
 
-const flaky = "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.FLAKY_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if ((process.env.FLAKY_FAIL ?? '').split(',').includes(String(n))) throw new Error('flaky');\n}\n";
+const flaky =
+  "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.FLAKY_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if ((process.env.FLAKY_FAIL ?? '').split(',').includes(String(n))) throw new Error('flaky');\n}\n";
 
-test("a perigee red of known flakes only lands on that run: no retry in place; an unknown one still goes again (#1360)", () => {
+test('a perigee red of known flakes only lands on that run: no retry in place; an unknown one still goes again (#1360)', () => {
   for (const known of [true, false]) {
     const r = setup();
     const c = ci(r);
@@ -144,7 +149,9 @@ test('an open fix minion makes a file known with no other sighting, and the reas
   seen(shared, ['test/busy.test.ts', 'test/slow.test.ts'], 'ticket/1-x'); // only this ship's own sightings
   const dbPath = join(r.dir, 'flakes.db');
   const db = new DatabaseSync(dbPath);
-  db.exec("CREATE TABLE tickets (id INTEGER PRIMARY KEY, project_id INTEGER, number INTEGER, status TEXT); CREATE TABLE flake_fixes (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, file TEXT NOT NULL, ticket_id INTEGER, state TEXT NOT NULL, held_at INTEGER); INSERT INTO tickets VALUES (5, 2, 1, 'working'), (1040, 2, 40, 'working'), (1041, 2, 41, 'working'); INSERT INTO flake_fixes (project_id, file, ticket_id, state) VALUES (2, 'test/busy.test.ts', 1040, 'open'), (2, 'test/slow.test.ts', 1041, 'open')");
+  db.exec(
+    "CREATE TABLE tickets (id INTEGER PRIMARY KEY, project_id INTEGER, number INTEGER, status TEXT); CREATE TABLE flake_fixes (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, file TEXT NOT NULL, ticket_id INTEGER, state TEXT NOT NULL, held_at INTEGER); INSERT INTO tickets VALUES (5, 2, 1, 'working'), (1040, 2, 40, 'working'), (1041, 2, 41, 'working'); INSERT INTO flake_fixes (project_id, file, ticket_id, state) VALUES (2, 'test/busy.test.ts', 1040, 'open'), (2, 'test/slow.test.ts', 1041, 'open')",
+  );
   db.close();
   const res = c.run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared, DEPLOY_DB: dbPath, COORDINATOR_TICKET: '5' });
   assert.equal(res.status, 0, res.stderr);
@@ -154,7 +161,10 @@ test('an open fix minion makes a file known with no other sighting, and the reas
 
 // Part 2 (Taskmaster, 2026-11-21, after Cara: "I thought they were supposed to keep their spot not?"): a red of flakes
 // only on the fresh run too keeps the ship's place in line, up to twice a hand-off, instead of going back to its minion.
-const keeps = (shared: string) => landLog(shared).split('\n').filter((l) => l.includes(' · flake keep · '));
+const keeps = (shared: string) =>
+  landLog(shared)
+    .split('\n')
+    .filter((l) => l.includes(' · flake keep · '));
 
 test('a second red of flakes only keeps its place in line, goes again on the same ticket, and ships on a green', async () => {
   const r = setup();
@@ -165,7 +175,10 @@ test('a second red of flakes only keeps its place in line, goes again on the sam
   writeFileSync(state, 'red');
   let flipped = false;
   const res = await c.runAsync({ FAKE_CI_FILE: state, FAKE_LOG: 'flakes', COORDINATOR_SHARED_DIR: shared }, (s) => {
-    if (!flipped && /keeping its place in line/.test(s)) { flipped = true; writeFileSync(state, 'green'); }
+    if (!flipped && /keeping its place in line/.test(s)) {
+      flipped = true;
+      writeFileSync(state, 'green');
+    }
   });
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /refused on flakes only \(test\/busy\.test\.ts, test\/slow\.test\.ts, then test\/busy\.test\.ts, test\/slow\.test\.ts on the fresh run\), not your change: keeping its place in line and riding the next train \(1 of 2\)/);

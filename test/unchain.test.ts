@@ -48,7 +48,10 @@ test('start_after: null drops the chain, keeps the minion sealed with its brief 
     assert.doesNotMatch(after, /work (is live|has shipped)/, 'no chain left');
     assert.match(after, /sealed on: nothing wakes it by itself/);
     const said = (await call<{ kind: string; data: string }[]>(`/api/tickets/${f}/events?after=0`)).data.filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data));
-    assert.ok(said.some((m: { text: string; parked?: boolean }) => m.text === 'build part two' && m.parked), 'its brief is held mail');
+    assert.ok(
+      said.some((m: { text: string; parked?: boolean }) => m.text === 'build part two' && m.parked),
+      'its brief is held mail',
+    );
     assert.equal((await call(`/api/tickets/${f}`, { start_after: null }, 'PATCH', taskmaster)).status, 409, 'no chain left');
     assert.equal((await call(`/api/tickets/${f}`)).data.ticket.state, 'parked');
   } finally {
@@ -65,10 +68,17 @@ test('an unchained follower is no longer in the chain list, so its leader shippi
   w.chain({ ticket: f, after: lead, when: 'live', message: 'brief', from: 'Taskmaster', base: null });
   assert.ok(w.heldFor(f));
   let sent = '';
-  assert.equal(w.unchain(f, (c) => ((sent = c.message), null)), true);
+  assert.equal(
+    w.unchain(f, (c) => ((sent = c.message), null)),
+    true,
+  );
   assert.equal(sent, 'brief');
   assert.equal(w.heldFor(f), null);
   assert.equal(w.chains().length, 0);
   assert.equal(await w.check(), 0);
-  assert.equal(w.unchain(f, () => null), false, 'not chained any more');
+  assert.equal(
+    w.unchain(f, () => null),
+    false,
+    'not chained any more',
+  );
 });

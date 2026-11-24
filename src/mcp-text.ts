@@ -2,12 +2,29 @@
 // They hold no state of their own (no env, no API calls).
 import { pacificDay } from './pacific.ts';
 
-interface Slice { name: string; usd: number; lastWeek: number; estimated: number }
-interface UsageSplit { total: number; lastWeek: number; weekUsd: number | null; accounts?: number; models: Slice[]; schemes: Slice[]; kinds: Slice[]; top: { id: number; number: number | null; title: string; scheme: string; usd: number }[] }
+interface Slice {
+  name: string;
+  usd: number;
+  lastWeek: number;
+  estimated: number;
+}
+interface UsageSplit {
+  total: number;
+  lastWeek: number;
+  weekUsd: number | null;
+  accounts?: number;
+  models: Slice[];
+  schemes: Slice[];
+  kinds: Slice[];
+  top: { id: number; number: number | null; title: string; scheme: string; usd: number }[];
+}
 /** usage_split's answer (#905): each slice as a share of the week (all accounts together) with its dollars, against last week. */
 export function usageSplitText(w: UsageSplit): string {
   const usd = money;
-  const pct = (n: number) => { const p = (n / w.weekUsd!) * 100; return p && p < 0.1 ? '<0.1' : p < 10 ? p.toFixed(1) : String(Math.round(p)); };
+  const pct = (n: number) => {
+    const p = (n / w.weekUsd!) * 100;
+    return p && p < 0.1 ? '<0.1' : p < 10 ? p.toFixed(1) : String(Math.round(p));
+  };
   const amount = (n: number) => (w.weekUsd ? `${pct(n)}% (${usd(n)})` : usd(n));
   const line = (s: Slice) => `- ${s.name}: ${amount(s.usd)}, last week ${amount(s.lastWeek)}${s.estimated > 0.005 ? `, ${usd(s.estimated)} estimated` : ''}`;
   const fable = (k: 'usd' | 'lastWeek', all: number) => {
@@ -18,16 +35,40 @@ export function usageSplitText(w: UsageSplit): string {
   return [
     `Last 7 days: ${amount(w.total)}; the 7 before: ${amount(w.lastWeek)}. ${w.weekUsd ? `100% is the weekly limit of ${w.accounts! > 1 ? `all ${w.accounts} Claude accounts together` : 'the Claude account'}, about ${usd(w.weekUsd)} at API prices.` : 'No weekly meter can price a share yet, so dollars at API prices only.'}`,
     `Fable's share of spend: ${fable('usd', w.total)} this week, ${fable('lastWeek', w.lastWeek)} last week.`,
-    'By model:', ...w.models.map(line),
-    'By scheme:', ...w.schemes.map(line),
-    'By kind of work:', ...w.kinds.map(line),
-    'Costliest minions this week:', ...w.top.map((m) => `- ${m.number === null ? `ticket ${m.id}` : `#${m.number}`} ${m.title} (${m.scheme}): ${amount(m.usd)}`),
+    'By model:',
+    ...w.models.map(line),
+    'By scheme:',
+    ...w.schemes.map(line),
+    'By kind of work:',
+    ...w.kinds.map(line),
+    'Costliest minions this week:',
+    ...w.top.map((m) => `- ${m.number === null ? `ticket ${m.id}` : `#${m.number}`} ${m.title} (${m.scheme}): ${amount(m.usd)}`),
     ...(estimated > 0.005 ? [`${usd(estimated)} of this week is from turns before the split was kept (2026-11-17), counted under each minion's own model.`] : []),
   ].join('\n');
 }
 
-export interface MemoryHit { kind: string; number?: number; title?: string; ts: number; source_kind: string; source_id: number | string; score: number; text: string }
-export interface PastHit { kind?: string; name: string; mtime: number; snippet: string; files?: string; number: number; title: string; type?: string; closed_at: number; status: string }
+export interface MemoryHit {
+  kind: string;
+  number?: number;
+  title?: string;
+  ts: number;
+  source_kind: string;
+  source_id: number | string;
+  score: number;
+  text: string;
+}
+export interface PastHit {
+  kind?: string;
+  name: string;
+  mtime: number;
+  snippet: string;
+  files?: string;
+  number: number;
+  title: string;
+  type?: string;
+  closed_at: number;
+  status: string;
+}
 /** search_memory's answer: each hit as a header line and its text, cut so a call stays small. */
 export function memoryText(hits: MemoryHit[]): string {
   if (!hits.length) return 'Nothing indexed matches yet.';
@@ -39,28 +80,68 @@ export function memoryText(hits: MemoryHit[]): string {
 export function pastMinionsText(hits: PastHit[]): string {
   if (!hits.length) return 'No closed minion or handoff matches. Fewer words, or another word for it, may find one.';
   const day = pacificDay;
-  return hits.map((h) => {
-    if (h.kind === 'handoff') return `Handoff ${h.name}${h.name.startsWith('shipped/') ? ' (its minion shipped)' : h.name.startsWith('not-picked/') ? ' (not picked)' : ''} · changed ${day(h.mtime)}\n${h.snippet}`;
-    const files = h.files ? h.files.split('\n') : [];
-    return `#${h.number} ${h.title} · ${h.type || 'no type'} · closed ${day(h.closed_at)}${h.status === 'closed' ? '' : ' (reopened)'}\n${h.snippet.replace(/\s+/g, ' ')}${files.length ? `\nFiles: ${files.slice(0, 12).join(', ')}${files.length > 12 ? ` (+${files.length - 12})` : ''}` : ''}`;
-  }).join('\n\n');
+  return hits
+    .map((h) => {
+      if (h.kind === 'handoff') return `Handoff ${h.name}${h.name.startsWith('shipped/') ? ' (its minion shipped)' : h.name.startsWith('not-picked/') ? ' (not picked)' : ''} · changed ${day(h.mtime)}\n${h.snippet}`;
+      const files = h.files ? h.files.split('\n') : [];
+      return `#${h.number} ${h.title} · ${h.type || 'no type'} · closed ${day(h.closed_at)}${h.status === 'closed' ? '' : ' (reopened)'}\n${h.snippet.replace(/\s+/g, ' ')}${files.length ? `\nFiles: ${files.slice(0, 12).join(', ')}${files.length > 12 ? ` (+${files.length - 12})` : ''}` : ''}`;
+    })
+    .join('\n\n');
 }
 
-export interface IdeaRow { id: number | string; title?: string; card?: string | number; status: string; status_manual?: boolean; decided_by?: string; pick_label?: string; pick?: string; decided_at: number | null; words?: string; page_label?: string; page?: string; source_number?: number; handoff?: string; minion?: { number: number } }
-interface Place { label: string; file?: string; line?: number }
-export interface DecisionRow { id: string; date: string; who: string; rule: string; quote?: string; places: Place[]; reversed?: { by: string; byText: string; stale: Place[] } | null; reverses: string[] }
+export interface IdeaRow {
+  id: number | string;
+  title?: string;
+  card?: string | number;
+  status: string;
+  status_manual?: boolean;
+  decided_by?: string;
+  pick_label?: string;
+  pick?: string;
+  decided_at: number | null;
+  words?: string;
+  page_label?: string;
+  page?: string;
+  source_number?: number;
+  handoff?: string;
+  minion?: { number: number };
+}
+interface Place {
+  label: string;
+  file?: string;
+  line?: number;
+}
+export interface DecisionRow {
+  id: string;
+  date: string;
+  who: string;
+  rule: string;
+  quote?: string;
+  places: Place[];
+  reversed?: { by: string; byText: string; stale: Place[] } | null;
+  reverses: string[];
+}
 /** The ideas tool's answer: a count line, then one line per row. */
 export function ideasText(r: { ideas: IdeaRow[]; counts: Record<string, number>; total: number; waiting: number[] }, limit: number): string {
   const day = (ms: number | null) => (ms ? pacificDay(ms) : '');
-  const head = `${r.total} ideas: ${Object.entries(r.counts).filter(([, n]) => n).map(([s, n]) => `${n} ${s}`).join(', ') || 'none yet'}. Showing ${Math.min(limit, r.ideas.length)} of ${r.ideas.length}.${r.waiting.length ? ` ${r.waiting.length} at Later over two weeks.` : ''}`;
-  const rows = r.ideas.slice(0, limit).map((i) => [
-    `- [${i.id}] ${i.title || i.card} · ${i.status}${i.status_manual ? ' (by hand)' : ''}`,
-    i.decided_by ? ` · ${i.pick_label ?? i.pick ?? 'noted'} (${i.decided_by}, ${day(i.decided_at)}${i.words ? `: "${i.words}"` : ''})` : '',
-    i.page_label ? ` · page ${i.page_label}${i.page ? ` card ${i.card}` : ''}` : '',
-    i.source_number ? ` · from #${i.source_number}` : '',
-    i.handoff ? ` · handoff ${i.handoff}` : '',
-    i.minion ? ` · #${i.minion.number}` : '',
-  ].join(''));
+  const head = `${r.total} ideas: ${
+    Object.entries(r.counts)
+      .filter(([, n]) => n)
+      .map(([s, n]) => `${n} ${s}`)
+      .join(', ') || 'none yet'
+  }. Showing ${Math.min(limit, r.ideas.length)} of ${r.ideas.length}.${r.waiting.length ? ` ${r.waiting.length} at Later over two weeks.` : ''}`;
+  const rows = r.ideas
+    .slice(0, limit)
+    .map((i) =>
+      [
+        `- [${i.id}] ${i.title || i.card} · ${i.status}${i.status_manual ? ' (by hand)' : ''}`,
+        i.decided_by ? ` · ${i.pick_label ?? i.pick ?? 'noted'} (${i.decided_by}, ${day(i.decided_at)}${i.words ? `: "${i.words}"` : ''})` : '',
+        i.page_label ? ` · page ${i.page_label}${i.page ? ` card ${i.card}` : ''}` : '',
+        i.source_number ? ` · from #${i.source_number}` : '',
+        i.handoff ? ` · handoff ${i.handoff}` : '',
+        i.minion ? ` · #${i.minion.number}` : '',
+      ].join(''),
+    );
   return [head, ...rows].join('\n');
 }
 
@@ -73,7 +154,13 @@ export function decisionsText(r: { decisions: DecisionRow[]; linked?: DecisionRo
     const at = d.places.length ? `\n  Written in: ${d.places.map(where).join('; ')}` : '';
     const by = d.reversed ? byId.get(d.reversed.by) : null;
     const rev = d.reversed ? `\n  REVERSED by ${by ? `${by.date} ${by.who}: ${by.rule}${by.quote ? ` "${by.quote}"` : ''}` : d.reversed.byText}${d.reversed.stale.length ? `. Still written in: ${d.reversed.stale.map(where).join('; ')}` : ''}` : '';
-    const revs = d.reverses.length ? `\n  Reverses: ${d.reverses.map((id: string) => byId.get(id)).filter((o): o is DecisionRow => !!o).map((o) => `${o.date} ${o.who} "${o.quote || o.rule}"`).join('; ')}` : '';
+    const revs = d.reverses.length
+      ? `\n  Reverses: ${d.reverses
+          .map((id: string) => byId.get(id))
+          .filter((o): o is DecisionRow => !!o)
+          .map((o) => `${o.date} ${o.who} "${o.quote || o.rule}"`)
+          .join('; ')}`
+      : '';
     return head + at + rev + revs;
   });
   const counts = `Sources: ${r.counts.map((c) => `${c.label} ${c.count} in ${c.files} file${c.files === 1 ? '' : 's'}`).join(', ')}.`;
@@ -94,15 +181,34 @@ export function readText(app: string, command: string | undefined, r: { status: 
 /** What register_contraption says when it has no icon (#418). */
 export const NO_ICON = 'To do: it has no icon, so the rail shows its first letter. Every contraption ships one with a web manifest (the citadel:contraption-ui starter has both): set icon with update_contraption, like /icon.svg, or deploy it and an empty icon is filled from its manifest.';
 
-export interface DeployInfo { name: string; state: string; finished_at?: number | null; started_at: number; repo: string; branch: string; by: string; from?: string | null; to?: string | null; todo?: string[]; said: string[]; log: string; tail?: string }
+export interface DeployInfo {
+  name: string;
+  state: string;
+  finished_at?: number | null;
+  started_at: number;
+  repo: string;
+  branch: string;
+  by: string;
+  from?: string | null;
+  to?: string | null;
+  todo?: string[];
+  said: string[];
+  log: string;
+  tail?: string;
+}
 /** A deploy as the tools show it. */
 export function deployText(d: DeployInfo | null | undefined): string {
   if (!d) return 'No deploy since the server started.';
   const head = `${d.name}: ${d.state}${d.state === 'running' ? '' : ` after ${Math.round(((d.finished_at ?? Date.now()) - d.started_at) / 1000)}s`} (${d.repo} ${d.branch}, asked by ${d.by}${d.from || d.to ? `; ${d.from?.slice(0, 9) ?? 'new'} → ${d.to?.slice(0, 9) ?? '?'}` : ''})`;
   // First, so they read as work left, not one log line among many (#418).
   const todo: string[] = d.todo ?? [];
-  return [head, ...(todo.length ? ['To do: deployed, but it still lacks these. Get them done (a minion of its home scheme), then deploy again:', ...todo.map((t) => `- ${t}`), 'What it did:'] : []),
-    ...d.said.filter((l: string) => !l.startsWith('To do: ')).map((l: string) => `- ${l}`), `Log: ${d.log}`, ...(d.state === 'running' ? [] : ['Last lines of the log:', d.tail ?? ''])].join('\n');
+  return [
+    head,
+    ...(todo.length ? ['To do: deployed, but it still lacks these. Get them done (a minion of its home scheme), then deploy again:', ...todo.map((t) => `- ${t}`), 'What it did:'] : []),
+    ...d.said.filter((l: string) => !l.startsWith('To do: ')).map((l: string) => `- ${l}`),
+    `Log: ${d.log}`,
+    ...(d.state === 'running' ? [] : ['Last lines of the log:', d.tail ?? '']),
+  ].join('\n');
 }
 
 /** Dollars as people read them: cents under $10, whole dollars above. The one formatter (#1715); it lives here because
@@ -112,8 +218,25 @@ export const money = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
 export const RISKS = ['unassessed', 'safe', 'interrupts', 'loses_data'];
 export const RISK_WORDS: Record<string, string> = { unassessed: 'not assessed', safe: 'safe', interrupts: 'interrupts users', loses_data: 'may lose data' };
 
-export interface UnitState { unit: string; load?: string; active: string; sub?: string; enabled?: string }
-export interface ServiceInfo { installed: boolean; service: UnitState; unit: string; timers: UnitState[]; folder: string; restart_risk?: string; restart_note?: string; manifestError?: string; health?: string; hand: { path: string; active: string; enabled?: string; why: string }[] }
+export interface UnitState {
+  unit: string;
+  load?: string;
+  active: string;
+  sub?: string;
+  enabled?: string;
+}
+export interface ServiceInfo {
+  installed: boolean;
+  service: UnitState;
+  unit: string;
+  timers: UnitState[];
+  folder: string;
+  restart_risk?: string;
+  restart_note?: string;
+  manifestError?: string;
+  health?: string;
+  hand: { path: string; active: string; enabled?: string; why: string }[];
+}
 /** A service's state as the tools show it. */
 export function serviceText(s: ServiceInfo): string {
   const state = (u: UnitState) => `${u.unit}: ${u.load === 'not-found' ? 'not installed' : `${u.active}${u.sub ? ` (${u.sub})` : ''}, ${u.enabled || 'no unit file'}`}`;
@@ -127,7 +250,24 @@ export function serviceText(s: ServiceInfo): string {
   ].join('\n');
 }
 
-export interface ContraptionInfo { name: string; title: string; port: number; icon?: string | null; default_model?: string | null; open_paths: string[]; relay_paths: string[]; home_scheme?: string | null; turn_cap?: number | null; logins: string[]; keys_dir: string; restart_risk: string; restart_note?: string; repo?: string | null; branch?: string | null; folder?: string | null }
+export interface ContraptionInfo {
+  name: string;
+  title: string;
+  port: number;
+  icon?: string | null;
+  default_model?: string | null;
+  open_paths: string[];
+  relay_paths: string[];
+  home_scheme?: string | null;
+  turn_cap?: number | null;
+  logins: string[];
+  keys_dir: string;
+  restart_risk: string;
+  restart_note?: string;
+  repo?: string | null;
+  branch?: string | null;
+  folder?: string | null;
+}
 /** A contraption as the tools show it: never a key, only where its key files are. */
 export function contraptionText(c: ContraptionInfo): string {
   return [
@@ -148,7 +288,7 @@ export function contraptionText(c: ContraptionInfo): string {
 
 /** A contraption name for a path: the route checks the rest. */
 export function contraptionPath(args: Record<string, unknown>): string {
-  if (typeof args.name !== 'string' || !/^[a-z0-9-]+$/.test(args.name)) throw new Error('name is required: the contraption\'s slug, like mandate');
+  if (typeof args.name !== 'string' || !/^[a-z0-9-]+$/.test(args.name)) throw new Error("name is required: the contraption's slug, like mandate");
   return `/api/contraptions/${encodeURIComponent(args.name)}`;
 }
 
@@ -160,7 +300,13 @@ export function ago(ms: number | null): string {
   return `${when} (${m < 1 ? 'just now' : m < 120 ? `${m} min ago` : `${Math.round(m / 60)} h ago`})`;
 }
 
-export interface CheckResult { server: string; ok: boolean; ms: number; tools: string[]; error?: string }
+export interface CheckResult {
+  server: string;
+  ok: boolean;
+  ms: number;
+  tools: string[];
+  error?: string;
+}
 /** One check result line per server (#307). */
 export function checkLines(results: CheckResult[]): string[] {
   return results.map((r) => `- ${r.server === 'ws' ? 'workspace tools' : 'MCP server'}: ${r.ok ? `PASS in ${r.ms} ms, ${r.tools.length} tools: ${r.tools.join(', ') || 'none'}` : `FAIL after ${r.ms} ms: ${r.error}`}`);
@@ -169,10 +315,31 @@ export function checkLines(results: CheckResult[]): string[] {
 const STATUS_WORDS: Record<string, string> = { ready: 'READY', fix: 'NEEDS A FIX', down: 'DOWN', asleep: 'ASLEEP', checking: 'CHECKING' };
 
 export interface MachineInfo {
-  name: string; status: string; reason: string; when?: { label: string; at: number } | null; project_names: string[]; owner_id: number | null; owner_name?: string | null;
-  workspaces: { name: string; path: string }[]; online: boolean; connected_at: number | null; host?: string; sessions: number; last_seen_at: number | null; managed: boolean;
-  found: { name: string }[]; lend?: { server?: string | null; workspaces: string[] } | null; runners?: unknown; command?: string; servers: string[]; workspace_tools: boolean;
-  minions_get_it: boolean; checked?: { at: number; results: CheckResult[] } | null; problems: string[]; notes?: string; page?: string;
+  name: string;
+  status: string;
+  reason: string;
+  when?: { label: string; at: number } | null;
+  project_names: string[];
+  owner_id: number | null;
+  owner_name?: string | null;
+  workspaces: { name: string; path: string }[];
+  online: boolean;
+  connected_at: number | null;
+  host?: string;
+  sessions: number;
+  last_seen_at: number | null;
+  managed: boolean;
+  found: { name: string }[];
+  lend?: { server?: string | null; workspaces: string[] } | null;
+  runners?: unknown;
+  command?: string;
+  servers: string[];
+  workspace_tools: boolean;
+  minions_get_it: boolean;
+  checked?: { at: number; results: CheckResult[] } | null;
+  problems: string[];
+  notes?: string;
+  page?: string;
 }
 /** A machine as list_machines shows it (#307), its status first as the Machines tab says it (#437). */
 export function machineText(m: MachineInfo): string {
@@ -182,24 +349,51 @@ export function machineText(m: MachineInfo): string {
   return [
     `${m.name}: ${STATUS_WORDS[m.status] ?? m.status}: ${m.when ? `${m.reason} · ${m.when.label} ${ago(m.when.at)}` : m.reason}`,
     `  ${m.online ? `ONLINE, connected since ${ago(m.connected_at)}, host ${m.host || '?'}, ${m.sessions} session${m.sessions === 1 ? '' : 's'} open` : `OFFLINE, last seen ${ago(m.last_seen_at)}`}`,
-    ...(m.managed ? [
-      // Its agent reports what it found and a person ticks what to lend on the Machines page (#439).
-      `  found on that computer: ${[m.found.length ? `MCP servers ${m.found.map((f) => f.name).join(', ')}` : '', ws ? `workspaces ${ws}` : ''].filter(Boolean).join('; ') || 'nothing'}`,
-      `  ticked to lend: ${[m.lend?.server ? `MCP server ${m.lend.server}` : '', m.lend?.workspaces.length ? `workspaces ${m.lend.workspaces.join(', ')}` : ''].filter(Boolean).join('; ') || 'nothing'}`,
-    ] : [
-      m.online && !m.runners ? `  agent runs: ${m.command || '?'} (set on that computer); offers ${m.servers.length ? m.servers.map((s: string) => (s === 'ws' ? 'workspace tools' : 'its MCP server')).join(' and ') : 'nothing'}` : '',
-      m.runners ? '' : `  workspace tools: ${m.workspace_tools ? 'on' : 'off'}${m.online && ws ? `; workspaces: ${ws}` : ''}`,
-    ]),
+    ...(m.managed
+      ? [
+          // Its agent reports what it found and a person ticks what to lend on the Machines page (#439).
+          `  found on that computer: ${[m.found.length ? `MCP servers ${m.found.map((f) => f.name).join(', ')}` : '', ws ? `workspaces ${ws}` : ''].filter(Boolean).join('; ') || 'nothing'}`,
+          `  ticked to lend: ${[m.lend?.server ? `MCP server ${m.lend.server}` : '', m.lend?.workspaces.length ? `workspaces ${m.lend.workspaces.join(', ')}` : ''].filter(Boolean).join('; ') || 'nothing'}`,
+        ]
+      : [
+          m.online && !m.runners ? `  agent runs: ${m.command || '?'} (set on that computer); offers ${m.servers.length ? m.servers.map((s: string) => (s === 'ws' ? 'workspace tools' : 'its MCP server')).join(' and ') : 'nothing'}` : '',
+          m.runners ? '' : `  workspace tools: ${m.workspace_tools ? 'on' : 'off'}${m.online && ws ? `; workspaces: ${ws}` : ''}`,
+        ]),
     `  ${lent}; ${m.minions_get_it ? "this scheme's minions get it" : "this scheme's minions don't get it"}`,
     m.checked?.results.length ? [`  last check ${ago(m.checked.at)}:`, ...checkLines(m.checked.results).map((l) => `  ${l}`)].join('\n') : m.online && !m.runners ? '  tools: not checked yet (Citadel checks it shortly after it connects; check_machine checks now)' : '',
     m.problems.length ? `  agent reports problems: ${m.problems.join('; ')}` : '',
     m.notes ? `  notes: ${m.notes.replace(/\n+/g, ' ')}` : '',
     // #1638: a change goes through propose_machine_lend, and its page entry is a link.
     m.page ? `  change it: propose_machine_lend; on the page: [${m.name} on the Machines page](${m.page})` : '',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
-export interface ScheduleInfo { id: number; name: string; category?: string | null; when: string; cron: string; type: string; model?: string | null; effort?: string | null; min_minions?: number | null; gate_scope?: string; trigger_count?: number | null; trigger_text?: string; trigger_so_far?: number | null; template?: string | null; notes?: string | null; once?: boolean; paused?: boolean; next_run_at: number; last_run_at?: number | null; last_number?: number | null; last_skip?: string | null; last_error?: string | null }
+export interface ScheduleInfo {
+  id: number;
+  name: string;
+  category?: string | null;
+  when: string;
+  cron: string;
+  type: string;
+  model?: string | null;
+  effort?: string | null;
+  min_minions?: number | null;
+  gate_scope?: string;
+  trigger_count?: number | null;
+  trigger_text?: string;
+  trigger_so_far?: number | null;
+  template?: string | null;
+  notes?: string | null;
+  once?: boolean;
+  paused?: boolean;
+  next_run_at: number;
+  last_run_at?: number | null;
+  last_number?: number | null;
+  last_skip?: string | null;
+  last_error?: string | null;
+}
 /** A schedule for list_schedules and its edits: when, how it runs, its gate and trigger (#1798), next and last run. */
 export function scheduleLine(s: ScheduleInfo): string {
   const at = (ms: number) => new Date(ms).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });

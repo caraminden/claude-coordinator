@@ -27,7 +27,7 @@ test('names keep their look but cannot leave the folder, hide, look like a flag 
   assert.equal(safeFileName('.bashrc'), 'bashrc');
   assert.equal(safeFileName('-rf hero.png'), 'rf hero.png');
   assert.equal(safeFileName('Héro sprite [v2].aseprite'), 'Héro sprite _v2_.aseprite');
-  assert.equal(safeFileName('it\'s $(x).zip'), 'it_s _(x).zip');
+  assert.equal(safeFileName("it's $(x).zip"), 'it_s _(x).zip');
   assert.equal(safeFileName('..'), 'file');
   assert.equal(safeFileName(''), 'file');
   const long = safeFileName('x'.repeat(300) + '.kra');
@@ -68,8 +68,7 @@ before(async () => {
   procs.push(srv.proc);
 });
 
-const call = (path: string, init: RequestInit & { as?: number } = {}) =>
-  fetch(base + path, { ...init, headers: { ...(init.as === undefined ? { Cookie: cookie } : { Authorization: `Bearer ${agentToken(join(root, 'data'), init.as)}` }), ...init.headers } });
+const call = (path: string, init: RequestInit & { as?: number } = {}) => fetch(base + path, { ...init, headers: { ...(init.as === undefined ? { Cookie: cookie } : { Authorization: `Bearer ${agentToken(join(root, 'data'), init.as)}` }), ...init.headers } });
 const postJson = (path: string, body: unknown) => call(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 test('people attach a file: it streams into the files folder, the message names it, and it downloads without rendering', async () => {
@@ -117,11 +116,23 @@ test('people attach a file: it streams into the files folder, the message names 
   assert.equal(linked.status, 200);
   assert.match(linked.headers.get('content-disposition') ?? '', /^attachment/);
 
-  const sent = await postJson(`/api/tickets/${minion.id}/messages`, { text: '', files: [{ name: 'page.html', type: 'text/html' }, { name: 'hero.png', type: 'evil type' }] });
+  const sent = await postJson(`/api/tickets/${minion.id}/messages`, {
+    text: '',
+    files: [
+      { name: 'page.html', type: 'text/html' },
+      { name: 'hero.png', type: 'evil type' },
+    ],
+  });
   assert.equal(sent.status, 202, await sent.clone().text());
   const events = await (await call(`/api/tickets/${minion.id}/events?after=0`)).json();
-  const msg = events.map((e: any) => ({ ...e, data: typeof e.data === 'string' ? JSON.parse(e.data) : e.data })).filter((e: any) => e.kind === 'user_message').pop();
-  assert.deepEqual(msg.data.files, [{ name: 'page.html', size: 25, type: 'text/html' }, { name: 'hero.png', size: 16, type: 'application/octet-stream' }]);
+  const msg = events
+    .map((e: any) => ({ ...e, data: typeof e.data === 'string' ? JSON.parse(e.data) : e.data }))
+    .filter((e: any) => e.kind === 'user_message')
+    .pop();
+  assert.deepEqual(msg.data.files, [
+    { name: 'page.html', size: 25, type: 'text/html' },
+    { name: 'hero.png', size: 16, type: 'application/octet-stream' },
+  ]);
   assert.equal((await postJson(`/api/tickets/${minion.id}/messages`, { text: 'x', files: [{ name: 'gone.zip' }] })).status, 400);
   assert.equal((await postJson(`/api/tickets/${minion.id}/messages`, { text: 'x', files: [{ name: '../../coordinator.db' }] })).status, 400);
 });

@@ -47,7 +47,12 @@ const NAMES: Record<Source, RegExp> = {
 const VERSION = /^v?[0-9][0-9A-Za-z.+_-]{0,63}$/;
 
 const SOURCE_NAMES: Record<Source, string> = {
-  mise: "mise's own tools", npm: 'npm', pypi: 'Python packages (PyPI)', cargo: 'Rust crates', github: 'GitHub release binaries', pacman: 'Arch packages',
+  mise: "mise's own tools",
+  npm: 'npm',
+  pypi: 'Python packages (PyPI)',
+  cargo: 'Rust crates',
+  github: 'GitHub release binaries',
+  pacman: 'Arch packages',
 };
 export const sourceName = (s: Source) => SOURCE_NAMES[s];
 
@@ -90,8 +95,7 @@ export function readManifest(file: string): ListedTool[] {
 /** One tool per line, sorted, so two lists that each add a tool rarely touch the same lines. */
 export function manifestText(list: ListedTool[]): string {
   const keys: (keyof ListedTool)[] = ['source', 'package', 'version', 'why', 'approved_by', 'approved_on', 'asked_by'];
-  const rows = [...list].sort((a, b) => `${a.source}:${a.package}`.localeCompare(`${b.source}:${b.package}`))
-    .map((t) => JSON.stringify(Object.fromEntries(keys.map((k) => [k, t[k]]))));
+  const rows = [...list].sort((a, b) => `${a.source}:${a.package}`.localeCompare(`${b.source}:${b.package}`)).map((t) => JSON.stringify(Object.fromEntries(keys.map((k) => [k, t[k]]))));
   return rows.length ? `[\n${rows.join(',\n')}\n]\n` : '[]\n';
 }
 
@@ -101,8 +105,7 @@ export function withTool(list: ListedTool[], t: ListedTool): ListedTool[] {
 }
 
 /** The same tool at the same version is listed already. */
-export const listed = (list: ListedTool[], t: Pick<HostTool, 'source' | 'package' | 'version'>) =>
-  list.some((x) => x.source === t.source && x.package === t.package && x.version === t.version);
+export const listed = (list: ListedTool[], t: Pick<HostTool, 'source' | 'package' | 'version'>) => list.some((x) => x.source === t.source && x.package === t.package && x.version === t.version);
 
 /** What `mise ls --json` says: each tool's versions. */
 export type MiseList = Record<string, { version: string; installed?: boolean; active?: boolean }[]>;
@@ -153,8 +156,10 @@ export function installTool(t: Pick<HostTool, 'source' | 'package' | 'version'>,
   const spec = miseSpec(t);
   if (!spec) return Promise.resolve({ ok: false, output: `${t.package} is an Arch package: a person runs \`${installCommand(t)}\`` });
   running++;
-  return new Promise((done) => execFile(miseBin(home), ['use', '-g', '--pin', '--yes', spec], { cwd: home, env: installEnv(home), timeout: INSTALL_MS, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {
-    running--;
-    done({ ok: !err, output: `${stdout}${stderr}${err && !stderr ? err.message : ''}`.trim().slice(-4000) });
-  }));
+  return new Promise((done) =>
+    execFile(miseBin(home), ['use', '-g', '--pin', '--yes', spec], { cwd: home, env: installEnv(home), timeout: INSTALL_MS, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {
+      running--;
+      done({ ok: !err, output: `${stdout}${stderr}${err && !stderr ? err.message : ''}`.trim().slice(-4000) });
+    }),
+  );
 }

@@ -26,7 +26,16 @@ function stub(name: string, unit: { ActiveState: string; FreezerState?: string; 
   chmodSync(join(dir, 'systemctl'), 0o755);
   const cfg = settings({ GODOT_SYSTEMCTL: join(dir, 'systemctl'), GODOT_ACTIVITY: join(dir, 'last-call') });
   const used = (at: number) => (writeFileSync(cfg.activity, ''), utimesSync(cfg.activity, new Date(at), new Date(at)));
-  const log = () => { try { return readFileSync(calls, 'utf8').trim().split('\n').map((l) => l.replace(/^--user /, '')); } catch { return []; } };
+  const log = () => {
+    try {
+      return readFileSync(calls, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => l.replace(/^--user /, ''));
+    } catch {
+      return [];
+    }
+  };
   return { cfg, used, log, dir };
 }
 
@@ -45,16 +54,25 @@ test('idle-check stops the unit after 30 minutes unused, and leaves a used or fr
   const idle = stub('idle', { ActiveState: 'active', since: NOW - 3 * H });
   idle.used(NOW - 35 * 60_000);
   assert.equal(idleCheck(idle.cfg, NOW).stop, true);
-  assert.deepEqual(idle.log().filter((l) => !l.startsWith('show')), ['stop perigee-godot.service']);
+  assert.deepEqual(
+    idle.log().filter((l) => !l.startsWith('show')),
+    ['stop perigee-godot.service'],
+  );
 
   const busy = stub('busy', { ActiveState: 'active', since: NOW - 3 * H });
   busy.used(NOW - 20 * 60_000);
   assert.equal(idleCheck(busy.cfg, NOW).stop, false);
-  assert.deepEqual(busy.log().filter((l) => !l.startsWith('show')), []);
+  assert.deepEqual(
+    busy.log().filter((l) => !l.startsWith('show')),
+    [],
+  );
 
   const frozen = stub('frozen', { ActiveState: 'active', FreezerState: 'frozen', since: NOW - 14 * 24 * H });
   assert.equal(idleCheck(frozen.cfg, NOW).stop, false);
-  assert.deepEqual(frozen.log().filter((l) => !l.startsWith('show')), []);
+  assert.deepEqual(
+    frozen.log().filter((l) => !l.startsWith('show')),
+    [],
+  );
 
   // Just installed, up for two weeks, never stamped: the first check starts the clock instead.
   const fresh = stub('fresh', { ActiveState: 'active', since: NOW - 14 * 24 * H });
@@ -73,7 +91,10 @@ test('idle-check run as the timer runs it holds the stop lock while it stops the
   const probe = tmp.spawn('flock', ['-n', '-s', join(s.dir, 'stop.lock'), 'true']);
   assert.equal(await new Promise((r) => probe.on('exit', r)), 1, 'a call would wait for this stop');
   assert.equal(await new Promise((r) => run.on('exit', r)), 0);
-  assert.deepEqual(s.log().filter((l) => !l.startsWith('show')), ['stop perigee-godot.service']);
+  assert.deepEqual(
+    s.log().filter((l) => !l.startsWith('show')),
+    ['stop perigee-godot.service'],
+  );
 });
 
 test('needsEditor: tool calls wait for the editor, the handshake and listings do not', () => {
@@ -102,7 +123,9 @@ test('editorConnected: an established connection on the ws port, from /proc/net/
   const server = createServer();
   const port = await tmp.serve(server);
   assert.equal(editorConnected(port), false);
-  const client: Socket = await new Promise((r) => { const c = createConnection(port, '127.0.0.1', () => r(c)); });
+  const client: Socket = await new Promise((r) => {
+    const c = createConnection(port, '127.0.0.1', () => r(c));
+  });
   assert.equal(editorConnected(port), true);
   client.destroy();
 });
@@ -121,7 +144,10 @@ test('ensureEditor starts a stopped unit and waits until the editor connects', a
   // Connects on the 40th poll: 20 s in at 500 ms a poll.
   const got = await ensureEditor(s.cfg, (l: string) => lines.push(l), { now: c.now, poll: 0, settle: 0, connected: () => (c.tick(500), ++polls > 41) });
   assert.equal(got, 'ready');
-  assert.deepEqual(s.log().filter((l) => !l.startsWith('show')), ['start --no-block perigee-godot.service']);
+  assert.deepEqual(
+    s.log().filter((l) => !l.startsWith('show')),
+    ['start --no-block perigee-godot.service'],
+  );
   assert.match(lines.at(-1)!, /connected 2\d s after/);
 });
 
@@ -136,10 +162,16 @@ test('ensureEditor gives up after the ready limit and passes the call on', async
 test('ensureEditor neither starts nor waits on a frozen unit, or on one up long ago that never connected', async () => {
   const frozen = stub('frozen2', { ActiveState: 'active', FreezerState: 'frozen', since: NOW - 3 * H });
   assert.equal(await ensureEditor(frozen.cfg, () => {}, { now: () => NOW, connected: () => false }), 'frozen');
-  assert.deepEqual(frozen.log().filter((l) => !l.startsWith('show')), []);
+  assert.deepEqual(
+    frozen.log().filter((l) => !l.startsWith('show')),
+    [],
+  );
   const stale = stub('stale', { ActiveState: 'active', since: NOW - 3 * H });
   assert.equal(await ensureEditor(stale.cfg, () => {}, { now: () => NOW, connected: () => false }), 'not-connected');
-  assert.deepEqual(stale.log().filter((l) => !l.startsWith('show')), []);
+  assert.deepEqual(
+    stale.log().filter((l) => !l.startsWith('show')),
+    [],
+  );
   // Already connected: not even a systemctl call.
   const up = stub('up', { ActiveState: 'active', since: NOW - 3 * H });
   assert.equal(await ensureEditor(up.cfg, () => {}, { connected: () => true }), 'ready');
@@ -159,11 +191,14 @@ test('a call that lands while idle-check is stopping the editor waits for the st
   const connected = () => (existsSync(stopped) ? (c.tick(500), s.log().includes('start --no-block perigee-godot.service')) : true);
   assert.equal(await ensureEditor(s.cfg, () => {}, { now: c.now, poll: 0, settle: 0, connected }), 'ready');
   assert.ok(s.log().includes('start --no-block perigee-godot.service'), 'it started the editor the stop took away');
-  await new Promise((r) => idle.exitCode === null ? idle.on('exit', r) : r(null));
+  await new Promise((r) => (idle.exitCode === null ? idle.on('exit', r) : r(null)));
 });
 
 // A stand-in for `godot-ai attach`: answers each request at once, a tools/call only once it hears test/release.
-const fakeMcp = [process.execPath, '-e', `
+const fakeMcp = [
+  process.execPath,
+  '-e',
+  `
 const held = [];
 const reply = (m) => console.log(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { method: m.method, params: m.params } }));
 let buf = '';
@@ -177,7 +212,8 @@ process.stdin.setEncoding('utf8').on('data', (d) => {
     else if (m.method === 'tools/call') held.push(m);
     else if (m.id !== undefined) reply(m);
   }
-});`];
+});`,
+];
 
 /** A bridge over fakeMcp, with the editor's readiness held until ready() is called. */
 function fakeBridge(s: ReturnType<typeof stub>, keepEveryMs = 20, stampGapMs = 5_000) {

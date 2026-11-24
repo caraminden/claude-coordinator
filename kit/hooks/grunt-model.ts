@@ -81,7 +81,10 @@ export function jobTable(file = join(KIT, 'skills', 'subagents', 'SKILL.md')): {
   const rows: { job: string; model: string; effort: string }[] = [];
   for (const l of lines.slice(start + 2)) {
     if (!l.startsWith('|')) break;
-    const [job, model, effort] = l.split('|').slice(1).map((c) => c.trim());
+    const [job, model, effort] = l
+      .split('|')
+      .slice(1)
+      .map((c) => c.trim());
     rows.push({ job, model, effort });
   }
   return rows;
@@ -105,7 +108,13 @@ export function gruntModelHook(input: HookInput): string | null {
   let hasEffort = Boolean(ti.effort) || Boolean(def.effort) || Boolean(process.env.CLAUDE_CODE_EFFORT_LEVEL);
   // A missing effort on Explore or general-purpose is the job table's default for it (#1820): still chosen, by the table. A model is never filled in.
   if (hasModel && !hasEffort && DEFAULT_ROW[type]) {
-    const row = (() => { try { return jobTable(); } catch { return []; } })().find((r) => DEFAULT_ROW[type].test(r.job));
+    const row = (() => {
+      try {
+        return jobTable();
+      } catch {
+        return [];
+      }
+    })().find((r) => DEFAULT_ROW[type].test(r.job));
     if (row && /^(low|medium|high)$/.test(row.effort)) {
       ti.effort = row.effort;
       filled.effort = true;

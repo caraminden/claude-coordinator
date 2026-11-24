@@ -65,7 +65,7 @@ test('a credential opens only with the same secret, on its own row', () => {
   assert.equal(creds.get(rachel.id, 'github'), null);
 });
 
-test('linking: the state must be the person\'s own and fresh; a token without repo is refused', async () => {
+test("linking: the state must be the person's own and fresh; a token without repo is refused", async () => {
   const gh = fakeGithub({ gho_new: { login: 'joshdev', id: 7, name: 'Josh D' } });
   const link = new GithubLink(store, creds, 'cid', 'csecret', gh.fetch);
   const url = new URL(link.authorizeUrl(josh.id, project.id, 'https://x/api/github/callback'));
@@ -92,7 +92,7 @@ test('linking: the state must be the person\'s own and fresh; a token without re
 
 // #479: a deploy restart between Link and GitHub's way back used to lose the state, which lived in the server's memory,
 // so the link failed as "expired". The state now carries what it stands for, signed, and a new server takes it.
-test('linking: a state outlives a restart, but not tampering, another kind\'s secret, or its 10 minutes', async () => {
+test("linking: a state outlives a restart, but not tampering, another kind's secret, or its 10 minutes", async () => {
   // Rachel, so Josh keeps the link the tests below use.
   const gh = fakeGithub({ gho_new: { login: 'joshdev', id: 7, name: 'Josh D' } });
   const before = new GithubLink(store, creds, 'cid', 'csecret', gh.fetch);
@@ -148,8 +148,8 @@ const APP = { clientId: 'appid', clientSecret: 'appsecret', slug: 'citadel-app' 
 function fakeApp(repos: string[] | null) {
   const gh = fakeGithub({ ghu_new: { login: 'alexdev', id: 11, name: 'Alex' }, gho_old: { login: 'alexdev', id: 11, name: 'Alex' } }, 'ghu_new', '');
   const fetch = (async (url: string, init?: RequestInit) => {
-    if (url.includes('/user/installations/5/repositories')) return gh.calls.push({ url, init }), Response.json({ repositories: repos!.map((full_name) => ({ full_name })) });
-    if (url.includes('/user/installations')) return gh.calls.push({ url, init }), repos ? Response.json({ installations: [{ id: 5 }] }) : new Response('', { status: 500 });
+    if (url.includes('/user/installations/5/repositories')) return (gh.calls.push({ url, init }), Response.json({ repositories: repos!.map((full_name) => ({ full_name })) }));
+    if (url.includes('/user/installations')) return (gh.calls.push({ url, init }), repos ? Response.json({ installations: [{ id: 5 }] }) : new Response('', { status: 500 }));
     return gh.fetch(url, init);
   }) as typeof globalThis.fetch;
   return { fetch, calls: gh.calls };
@@ -195,7 +195,11 @@ test('a full link is unchanged beside the App, and switching kind replaces the l
   await link.finish(rachel.id, new URLSearchParams({ state, code: 'c' }), 'cb');
   assert.equal(creds.get(rachel.id, 'github')!.secret, 'ghu_new');
   const revokes = gh.calls.filter((c) => c.url.includes('/applications/'));
-  assert.deepEqual(revokes.map((c) => [c.url.split('/applications/')[1], JSON.parse(String(c.init!.body)).access_token]), [['cid/grant', 'gho_old']], 'the full link is revoked with the OAuth App');
+  assert.deepEqual(
+    revokes.map((c) => [c.url.split('/applications/')[1], JSON.parse(String(c.init!.body)).access_token]),
+    [['cid/grant', 'gho_old']],
+    'the full link is revoked with the OAuth App',
+  );
   // GitHub not saying which repos: the link still shows, with no list.
   assert.equal((await link.status(rachel.id)).link!.reach, null);
   // Linking limited again keeps the grant the new token shares.
@@ -236,7 +240,7 @@ test('each way of linking shows only when it is set up; a limited state is refus
   const none = { clientId: '', clientSecret: '', slug: '' };
   const only = new GithubLink(store, creds, '', '', fakeApp([]).fetch, APP);
   assert.deepEqual([only.configured, only.full, only.limited], [true, false, true]);
-  assert.notEqual(only.forTurn(josh, mkdtempSync(join(root, 'only-'))), null, 'with only the App set up, turns still never use the box\'s login');
+  assert.notEqual(only.forTurn(josh, mkdtempSync(join(root, 'only-'))), null, "with only the App set up, turns still never use the box's login");
   const oauth = new GithubLink(store, creds, 'cid', 'csecret', fakeApp([]).fetch, none);
   assert.deepEqual([oauth.configured, oauth.full, oauth.limited, oauth.installUrl], [true, true, false, null]);
   const state = new URL(oauth.authorizeUrl(rachel.id, project.id, 'cb', true)).searchParams.get('state')!;
@@ -258,7 +262,7 @@ test('a token GitHub refuses (401) shows as needing linking again; unlink revoke
   assert.equal(link.login(rachel.id), null);
 });
 
-test('a turn gets its person\'s token and name; unlinked, none and a line saying why; not set up, nothing', () => {
+test("a turn gets its person's token and name; unlinked, none and a line saying why; not set up, nothing", () => {
   const link = new GithubLink(store, creds, 'cid', 'csecret');
   const dir = join(root, 'turn-env');
   const linked = link.forTurn(josh, dir)!;
@@ -282,7 +286,7 @@ test('a turn gets its person\'s token and name; unlinked, none and a line saying
   assert.equal(link.forTurn({ ...josh, disabled_at: Date.now() }, dir)!.env.GH_TOKEN, undefined);
 });
 
-test('server work for a person (#195): their token, or no login at all, and never the server\'s own GH_TOKEN', () => {
+test("server work for a person (#195): their token, or no login at all, and never the server's own GH_TOKEN", () => {
   const link = new GithubLink(store, creds, 'cid', 'csecret');
   const dir = join(root, 'person-env');
   assert.deepEqual(personGithub(link, josh, dir), { login: 'joshdev', env: { GH_CONFIG_DIR: join(dir, 'gh'), GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1', GH_TOKEN: 'gho_new' } });
@@ -300,9 +304,11 @@ test('server work for a person (#195): their token, or no login at all, and neve
     const mine = asEnv(personGithub(link, josh, dir).env)!;
     assert.equal(mine.GH_TOKEN, 'gho_new');
     assert.equal(mine.GITHUB_TOKEN, undefined);
-    assert.equal(asEnv(undefined), undefined, 'an admin\'s runs as the server does');
+    assert.equal(asEnv(undefined), undefined, "an admin's runs as the server does");
   } finally {
-    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    for (const [k, v] of Object.entries(saved))
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
   }
 });
 
@@ -374,11 +380,16 @@ setInterval(() => {
 chmodSync(fake, 0o755);
 
 function runner() {
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.pollMs = 10;
   const link = new GithubLink(store, creds, 'cid', 'csecret');
-  r.personOf = (author, from) => (from ? store.getTicket(from)?.person_id ?? null : store.findUser('name', author)?.id ?? null);
-  r.githubFor = (person, dir) => link.forTurn(person ? store.getUser(person) ?? null : null, dir);
+  r.personOf = (author, from) => (from ? (store.getTicket(from)?.person_id ?? null) : (store.findUser('name', author)?.id ?? null));
+  r.githubFor = (person, dir) => link.forTurn(person ? (store.getUser(person) ?? null) : null, dir);
   return r;
 }
 
@@ -392,7 +403,11 @@ function newTicket() {
 
 const seen = (dir: string): string[] => jsonLines(join(dir, 'seen.txt'));
 const env = (dir: string) => JSON.parse(readFileSync(join(dir, 'env.json'), 'utf8'));
-const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+const notes = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
 async function finish(r: Runner, t: { id: number; dir: string }) {
   writeFileSync(join(t.dir, 'release'), '');
   await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
@@ -406,13 +421,13 @@ test('a turn runs for its sender: their token, a line in its prompt, a note on e
   await until("notes(t.id).some((n) => n.startsWith('Pushed'))", () => notes(t.id).some((n) => n.startsWith('Pushed')));
   assert.deepEqual(env(t.dir), { token: 'gho_new', author: 'Josh D' });
   assert.match(seen(t.dir)[0], /GitHub: this turn runs for Josh/);
-  assert.ok(notes(t.id).includes('Pushed as @joshdev (Josh\'s GitHub)'));
+  assert.ok(notes(t.id).includes("Pushed as @joshdev (Josh's GitHub)"));
   assert.equal(store.getTicket(t.id)!.person_id, josh.id);
   await finish(r, t);
 
   // Cara hasn't linked: no token, and the failed push says why.
   r.send(t.id, 'Cara', 'push now');
-  await until("notes(t.id).some((n) => n.startsWith('Couldn\'t push'))", () => notes(t.id).some((n) => n.startsWith('Couldn\'t push')));
+  await until("notes(t.id).some((n) => n.startsWith('Couldn\'t push'))", () => notes(t.id).some((n) => n.startsWith("Couldn't push")));
   assert.deepEqual(env(t.dir), { token: null, author: 'Cara' });
   assert.match(notes(t.id).at(-1)!, /runs for Cara, who hasn't linked GitHub/);
   await finish(r, t);
@@ -442,7 +457,7 @@ test("a land the server runs for a minion (hand_off_land, the land tool) pushes 
   await finish(r, t);
 });
 
-test("a land or fast-mode verify outside a turn pushes as a person still in the scheme, else as its owner (#1449 P2)", async () => {
+test('a land or fast-mode verify outside a turn pushes as a person still in the scheme, else as its owner (#1449 P2)', async () => {
   const t = newTicket();
   const r = runner();
   r.send(t.id, 'Josh', 'build it');
@@ -466,7 +481,7 @@ test("a land or fast-mode verify outside a turn pushes as a person still in the 
   }
 });
 
-test('a message from someone else waits for its own turn instead of steering; a relay carries its sender\'s person', async () => {
+test("a message from someone else waits for its own turn instead of steering; a relay carries its sender's person", async () => {
   const t = newTicket();
   const r = runner();
   r.send(t.id, 'Josh', 'build it');
@@ -480,7 +495,7 @@ test('a message from someone else waits for its own turn instead of steering; a 
   // Cara's waited, and starts a turn of her own.
   await until("seen(t.dir).some((l) => l.includes('also this'))", () => seen(t.dir).some((l) => l.includes('also this')));
   assert.equal(store.getTicket(t.id)!.person_id, cara.id);
-  assert.equal(r.relayedBy(t.id), null, 'a person\'s turn was relayed by no one');
+  assert.equal(r.relayedBy(t.id), null, "a person's turn was relayed by no one");
   await finish(r, t);
 
   // The Taskmaster's message speaks for the person its own turn ran for.
@@ -490,7 +505,7 @@ test('a message from someone else waits for its own turn instead of steering; a 
   await until("seen(t.dir).some((l) => l.includes('over to you'))", () => seen(t.dir).some((l) => l.includes('over to you')));
   assert.equal(store.getTicket(t.id)!.person_id, josh.id);
   assert.equal(env(t.dir).token, 'gho_new');
-  assert.equal(r.relayedBy(t.id), tm.id, 'a new minion it starts this turn is the relayer\'s (#197)');
+  assert.equal(r.relayedBy(t.id), tm.id, "a new minion it starts this turn is the relayer's (#197)");
   r.send(t.id, 'Josh', 'start one for me', [], {}, true);
   await until('r.relayedBy(t.id) === null', () => r.relayedBy(t.id) === null);
   await finish(r, t);
@@ -565,7 +580,10 @@ test("a person's message shows with its key hidden, and the turn still gets it a
   const r = runner();
   r.send(t.id, 'Josh', 'the key is AKIAIOSFODNN7EXAMPLE');
   await until('seen(t.dir).length > 0', () => seen(t.dir).length > 0);
-  const stored = store.listEvents(t.id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data).text);
+  const stored = store
+    .listEvents(t.id)
+    .filter((e) => e.kind === 'user_message')
+    .map((e) => JSON.parse(e.data).text);
   assert.deepEqual(stored, ['the key is [AWS key hidden]']);
   assert.match(seen(t.dir)[0], /the key is AKIAIOSFODNN7EXAMPLE/);
   await finish(r, t);

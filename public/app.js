@@ -70,23 +70,25 @@ function boot() {
 
 /** Swap the kept chat for the live one once the server answers; offline, try again when the device is back online. */
 function catchUp(live, login) {
-  live.then((who) => {
-    // Someone else signed in on this device since: start afresh, with nothing of theirs kept.
-    if (who.login !== login) {
-      forgetKept();
-      return reloadQuietly();
-    }
-    return goLive(who);
-  }).catch((err) => {
-    if (err.message === 'Not logged in') return; // the login shows, and the kept chat is forgotten
-    const again = () => {
-      removeEventListener('online', again);
-      clearTimeout(timer);
-      catchUp(api('api/me'), login);
-    };
-    addEventListener('online', again);
-    const timer = setTimeout(again, 15_000);
-  });
+  live
+    .then((who) => {
+      // Someone else signed in on this device since: start afresh, with nothing of theirs kept.
+      if (who.login !== login) {
+        forgetKept();
+        return reloadQuietly();
+      }
+      return goLive(who);
+    })
+    .catch((err) => {
+      if (err.message === 'Not logged in') return; // the login shows, and the kept chat is forgotten
+      const again = () => {
+        removeEventListener('online', again);
+        clearTimeout(timer);
+        catchUp(api('api/me'), login);
+      };
+      addEventListener('online', again);
+      const timer = setTimeout(again, 15_000);
+    });
 }
 // The service worker makes the app installable (home screen, full screen), shows push notifications and keeps the app's own
 // files for opening with no network (src/shell.ts).

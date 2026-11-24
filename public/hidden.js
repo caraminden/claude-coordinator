@@ -38,7 +38,10 @@ export function setHidden(p, hidden) {
     send: () => api(`api/projects/${p.id}/hidden`, { method: 'PUT', body: { hidden } }),
     undo: () => !!p.hidden === hidden && show(!hidden), // unless something else changed it since
     label: `${hidden ? 'hide' : 'unhide'} ${p.name}`,
-  }).then(() => refreshSchemes(), () => {}); // a failure already said so in its toast
+  }).then(
+    () => refreshSchemes(),
+    () => {},
+  ); // a failure already said so in its toast
 }
 
 /** A hide changed for someone (this tab or another of theirs): only theirs redraws. */
@@ -73,12 +76,29 @@ function redrawHidden() {
 }
 
 // quiet: no count or spinner, for the ones you hid and the ones you aren't in.
-const row = (p, button = null, quiet = p.hidden) => h('div', { class: 'scheme-row' },
-  h('a', { class: `nav-item${p.id === view.projectId && !view.home ? ' active' : ''}`, href: schemeSwitchHash(location.hash, p.id, !!account?.admin), title: p.name,
-    // The hash at the click, not at the draw: the page may have changed since the shelf was drawn.
-    onclick: (e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); location.hash = schemeSwitchHash(location.hash, p.id, !!account?.admin); } },
-    schemeIcon(p), h('span', { class: 'name', 'data-project-name': p.id }, p.name), quiet ? null : schemeCount(p)),
-  button);
+const row = (p, button = null, quiet = p.hidden) =>
+  h(
+    'div',
+    { class: 'scheme-row' },
+    h(
+      'a',
+      {
+        class: `nav-item${p.id === view.projectId && !view.home ? ' active' : ''}`,
+        href: schemeSwitchHash(location.hash, p.id, !!account?.admin),
+        title: p.name,
+        // The hash at the click, not at the draw: the page may have changed since the shelf was drawn.
+        onclick: (e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+          e.preventDefault();
+          location.hash = schemeSwitchHash(location.hash, p.id, !!account?.admin);
+        },
+      },
+      schemeIcon(p),
+      h('span', { class: 'name', 'data-project-name': p.id }, p.name),
+      quiet ? null : schemeCount(p),
+    ),
+    button,
+  );
 
 let dragged = null; // the scheme ids of a drop not yet saved
 let drops = 0; // counts drops: each saves the whole list, so an older one's Retry has nothing to add
@@ -101,7 +121,7 @@ function reorderSchemes(from, to) {
       stale = drop !== drops;
       if (stale) return;
       before = view.projects.map((p) => p.id);
-      show(dragged = keys);
+      show((dragged = keys));
     },
     send: () => (stale ? null : api('api/me/order/schemes', { method: 'PUT', body: { keys } })),
     undo: () => {
@@ -110,7 +130,10 @@ function reorderSchemes(from, to) {
       show(before);
     },
     label: 'save the order of your schemes',
-  }).then(() => dragged === keys && (dragged = null), () => {});
+  }).then(
+    () => dragged === keys && (dragged = null),
+    () => {},
+  );
 }
 
 /** The shelf's Schemes column: yours you haven't hidden, + New scheme, then the others and the hidden ones collapsed away. */
@@ -127,30 +150,40 @@ export function renderSchemesShelf() {
   const others = view.projects.filter((p) => !p.hidden && !onShelf(p));
   const hidden = view.projects.filter((p) => p.hidden);
   // Opened by itself while you're in one of them, so the open scheme's row shows.
-  const elsewhere = others.length ? h('details', { class: 'hidden-schemes other-schemes', open: othersOpen || others.some((p) => p.id === view.projectId) },
-    h('summary', { title: 'Schemes you can open but aren\'t a member of' }, `Other schemes (${others.length})`),
-    others.map((p) => row(p, null, true))) : null;
+  const elsewhere = others.length
+    ? h(
+        'details',
+        { class: 'hidden-schemes other-schemes', open: othersOpen || others.some((p) => p.id === view.projectId) },
+        h('summary', { title: "Schemes you can open but aren't a member of" }, `Other schemes (${others.length})`),
+        others.map((p) => row(p, null, true)),
+      )
+    : null;
   elsewhere?.addEventListener('toggle', () => (othersOpen = elsewhere.open));
-  const folded = hidden.length ? h('details', { class: 'hidden-schemes', open: hiddenOpen },
-    h('summary', {}, `Hidden (${hidden.length})`),
-    hidden.map((p) => row(p, h('button', { type: 'button', class: 'scheme-hide', title: `Show ${p.name} in your lists again`, onclick: () => setHidden(p, false) }, 'Unhide')))) : null;
+  const folded = hidden.length
+    ? h(
+        'details',
+        { class: 'hidden-schemes', open: hiddenOpen },
+        h('summary', {}, `Hidden (${hidden.length})`),
+        hidden.map((p) => row(p, h('button', { type: 'button', class: 'scheme-hide', title: `Show ${p.name} in your lists again`, onclick: () => setHidden(p, false) }, 'Unhide'))),
+      )
+    : null;
   folded?.addEventListener('toggle', () => (hiddenOpen = folded.open));
   // One chip per shelf, kept across redraws: a new one would read /api/ci again (Cara, 2026-11-18: the CI button "next to the Releases button").
   if (!schemesChip?.isConnected) schemesChip = ciChip();
   if (!statusChipEl?.isConnected) statusChipEl = statusChip();
   if (!releasesChipEl?.isConnected) releasesChipEl = releasesChip();
   // Home (#1140): everything waiting on you across your schemes, for someone in two or more. No pill (Josh, 2026-11-20: "and the orange badge, its all duplicate honestly"; "you can just go home if you want to only see the actionables").
-  const home = shown.length >= 2 ? h('div', { class: 'home-shelf' },
-    h('a', { class: `nav-item${view.home ? ' active' : ''}`, href: '#/home', title: 'What waits on you in every scheme' },
-      h('span', { class: 'home-mark', 'aria-hidden': 'true' }, '⌂'), h('span', { class: 'name' }, 'Home'))) : null;
+  const home = shown.length >= 2 ? h('div', { class: 'home-shelf' }, h('a', { class: `nav-item${view.home ? ' active' : ''}`, href: '#/home', title: 'What waits on you in every scheme' }, h('span', { class: 'home-mark', 'aria-hidden': 'true' }, '⌂'), h('span', { class: 'name' }, 'Home'))) : null;
   rememberHomeLine(!!home);
-  el.replaceChildren(h('h3', {}, gloss('scheme', 'Schemes'), h('span', { class: 'spacer' }), statusChipEl, schemesChip, releasesChipEl),
+  el.replaceChildren(
+    h('h3', {}, gloss('scheme', 'Schemes'), h('span', { class: 'spacer' }), statusChipEl, schemesChip, releasesChipEl),
     home,
     // Each scheme's targets sit under its row (#626): what it ships and how far the next release is.
     ...shown.flatMap((p) => [row(p), releaseRows(p.id)]),
     h('button', { type: 'button', class: 'nav-item add', onclick: openNewScheme }, '+ New scheme'),
     ...(elsewhere ? [elsewhere] : []),
-    ...(folded ? [folded] : []));
+    ...(folded ? [folded] : []),
+  );
 }
 
 /** "Hidden · Unhide" above the minions, in a scheme you hid and opened anyway. */
@@ -158,13 +191,11 @@ export function renderHiddenNote() {
   const el = document.getElementById('hidden-note');
   if (!el) return;
   el.hidden = !isHidden(view.projectId);
-  el.replaceChildren(...(el.hidden ? [] : ['Hidden from your lists', ' · ',
-    h('button', { type: 'button', class: 'link', onclick: () => setHidden(view.project, false) }, 'Unhide')]));
+  el.replaceChildren(...(el.hidden ? [] : ['Hidden from your lists', ' · ', h('button', { type: 'button', class: 'link', onclick: () => setHidden(view.project, false) }, 'Unhide')]));
 }
 
 /** Hide or Unhide for the open scheme, on the Members tab. */
 export function hideButton(p) {
   const hidden = isHidden(p.id);
-  return h('button', { type: 'button', id: 'hide-scheme', class: 'secondary small', onclick: () => setHidden(p, !hidden) },
-    hidden ? `Unhide ${p.name}` : `Hide ${p.name} for me`);
+  return h('button', { type: 'button', id: 'hide-scheme', class: 'secondary small', onclick: () => setHidden(p, !hidden) }, hidden ? `Unhide ${p.name}` : `Hide ${p.name} for me`);
 }

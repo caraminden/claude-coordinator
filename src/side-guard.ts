@@ -9,20 +9,115 @@ import { lex } from './tripwire.ts';
 
 const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS', 'ToolSearch', 'WebSearch', 'WebFetch', 'Skill', 'TaskList', 'TaskGet', 'TaskOutput', 'BashOutput']);
 // Citadel's MCP tools that only read (src/mcp.ts); both servers' names, the minion's and the Taskmaster's.
-const READ_MCP = new Set(['read_minion', 'read_ticket', 'list_tickets', 'list_properties', 'list_artifacts', 'artifact_data', 'host_check', 'ci_runners', 'ci_files',
-  'usage_split', 'ship_risk', 'list_schedules', 'list_catalogue', 'list_machines', 'check_machine', 'get_project_instructions', 'get_project_settings', 'read_person_instructions',
-  'get_app_instructions', 'list_contraptions', 'contraption_read', 'contraption_turns', 'search_memory', 'search_decisions', 'search_minions']);
+const READ_MCP = new Set([
+  'read_minion',
+  'read_ticket',
+  'list_tickets',
+  'list_properties',
+  'list_artifacts',
+  'artifact_data',
+  'host_check',
+  'ci_runners',
+  'ci_files',
+  'usage_split',
+  'ship_risk',
+  'list_schedules',
+  'list_catalogue',
+  'list_machines',
+  'check_machine',
+  'get_project_instructions',
+  'get_project_settings',
+  'read_person_instructions',
+  'get_app_instructions',
+  'list_contraptions',
+  'contraption_read',
+  'contraption_turns',
+  'search_memory',
+  'search_decisions',
+  'search_minions',
+]);
 
 // Commands that only read, whatever their arguments (a few flags that write are refused in FLAG_WRITES).
-const READERS = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'egrep', 'fgrep', 'rg', 'stat', 'du', 'df', 'ps', 'pgrep', 'ss', 'pwd', 'echo', 'printf',
-  'which', 'type', 'file', 'cut', 'tr', 'jq', 'diff', 'cmp', 'comm', 'basename', 'dirname', 'realpath', 'readlink', 'id', 'whoami', 'uptime', 'free', 'nproc',
-  'uname', 'true', 'false', 'test', '[', 'column', 'nl', 'tac', 'rev', 'od', 'lsof', 'lsblk', 'findmnt', 'sha256sum', 'sha1sum', 'md5sum', 'cd', 'zcat',
-  'journalctl', 'ci-failures', 'sort', 'uniq', 'date', 'find', 'sed', 'git', 'gh', 'sqlite3', 'systemctl', 'curl', 'citadel-wait', 'sleep']);
+const READERS = new Set([
+  'ls',
+  'cat',
+  'head',
+  'tail',
+  'wc',
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'stat',
+  'du',
+  'df',
+  'ps',
+  'pgrep',
+  'ss',
+  'pwd',
+  'echo',
+  'printf',
+  'which',
+  'type',
+  'file',
+  'cut',
+  'tr',
+  'jq',
+  'diff',
+  'cmp',
+  'comm',
+  'basename',
+  'dirname',
+  'realpath',
+  'readlink',
+  'id',
+  'whoami',
+  'uptime',
+  'free',
+  'nproc',
+  'uname',
+  'true',
+  'false',
+  'test',
+  '[',
+  'column',
+  'nl',
+  'tac',
+  'rev',
+  'od',
+  'lsof',
+  'lsblk',
+  'findmnt',
+  'sha256sum',
+  'sha1sum',
+  'md5sum',
+  'cd',
+  'zcat',
+  'journalctl',
+  'ci-failures',
+  'sort',
+  'uniq',
+  'date',
+  'find',
+  'sed',
+  'git',
+  'gh',
+  'sqlite3',
+  'systemctl',
+  'curl',
+  'citadel-wait',
+  'sleep',
+]);
 // Flags that make an otherwise read-only command write or run something. GNU tools take a short flag inside a cluster
 // (`-uo`) and a long one cut short (`--out=`), so these match both.
 const FLAG_WRITES: Record<string, RegExp> = {
-  sort: /^-[^-]*o|^--(o|com)/, date: /^-[^-]*s|^--s/, rg: /^--(pre|hostname)/, journalctl: /^--(v|rot|fl|rel|sy|setup)/,
-  find: /^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/, file: /^-[^-]*C|^--comp/, ss: /^-[^-]*K|^--k/,
+  sort: /^-[^-]*o|^--(o|com)/,
+  date: /^-[^-]*s|^--s/,
+  rg: /^--(pre|hostname)/,
+  journalctl: /^--(v|rot|fl|rel|sy|setup)/,
+  find: /^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/,
+  file: /^-[^-]*C|^--comp/,
+  ss: /^-[^-]*K|^--k/,
 };
 // curl prints a GET and nothing else: only these flags, the value ones taking the next word.
 const CURL_FLAGS = /^(-[sSLfiIvk]+|--(silent|show-error|location|fail|include|head|compressed|insecure|verbose|no-progress-meter))$/;
@@ -32,16 +127,20 @@ const CURL_VALUE = /^(-H|--header|-m|--max-time|--connect-timeout|-A|--user-agen
 const SQLITE_FLAGS = /^-(readonly|json|header|noheader|column|csv|line|list|box|markdown|table|tabs|quote|bail|batch)$/;
 const SQLITE_WRITES = /\b(writefile|edit|load_extension|vacuum|fts3_tokenizer)\b/i;
 const SYSTEMCTL_FLAGS = /^(--user|--no-pager|--full|-l|--all|-a|--plain|--no-legend|--value|--lines=\d+)$/;
-const GIT_READS = new Set(['log', 'show', 'diff', 'status', 'rev-parse', 'ls-files', 'ls-tree', 'blame', 'grep', 'merge-base', 'cat-file', 'describe', 'shortlog',
-  'rev-list', 'show-ref', 'for-each-ref', 'name-rev', 'whatchanged', 'range-diff', 'cherry', 'count-objects', 'check-ignore', 'var', 'help', 'version']);
+const GIT_READS = new Set(['log', 'show', 'diff', 'status', 'rev-parse', 'ls-files', 'ls-tree', 'blame', 'grep', 'merge-base', 'cat-file', 'describe', 'shortlog', 'rev-list', 'show-ref', 'for-each-ref', 'name-rev', 'whatchanged', 'range-diff', 'cherry', 'count-objects', 'check-ignore', 'var', 'help', 'version']);
 const GH_READS: Record<string, Set<string>> = {
-  pr: new Set(['view', 'list', 'diff', 'checks', 'status']), run: new Set(['view', 'list']), issue: new Set(['view', 'list', 'status']),
-  repo: new Set(['view', 'list']), release: new Set(['view', 'list']), workflow: new Set(['view', 'list']), search: new Set(['prs', 'issues', 'code', 'commits', 'repos']),
+  pr: new Set(['view', 'list', 'diff', 'checks', 'status']),
+  run: new Set(['view', 'list']),
+  issue: new Set(['view', 'list', 'status']),
+  repo: new Set(['view', 'list']),
+  release: new Set(['view', 'list']),
+  workflow: new Set(['view', 'list']),
+  search: new Set(['prs', 'issues', 'code', 'commits', 'repos']),
 };
 // Redirects that send output nowhere new: into /dev/null, or one stream into the other; `<` and heredocs only feed stdin.
 const SAFE_REDIRECT = new Set(['<', '<<', '<<-', '<<<']);
 
-export const READ_ONLY = 'This is a side question: a read-only copy of the minion\'s session. It can look (files, git, gh, logs, the database read-only) but not change anything';
+export const READ_ONLY = "This is a side question: a read-only copy of the minion's session. It can look (files, git, gh, logs, the database read-only) but not change anything";
 
 /** Why the fork may not make this call, or null when it is a read. */
 export function sideGuard(input: { tool_name?: unknown; tool_input?: any }): string | null {
@@ -147,7 +246,10 @@ function sedWrites(args: string[]): string | null {
   }
   const line = /^(\d+|\$|\/[^/]*\/)(,(\d+|\$|\/[^/]*\/|\+\d+))?\s*[pd=]$|^(\d+|\$)?q$/;
   const sub = /^((\d+|\$|\/[^/]*\/)(,(\d+|\$|\/[^/]*\/))?)?s(.)((?:(?!\5).)*)\5((?:(?!\5).)*)\5[gpiI0-9]*$/;
-  for (const s of scripts.flatMap((x) => x.split(/[;\n]/)).map((x) => x.trim()).filter(Boolean)) {
+  for (const s of scripts
+    .flatMap((x) => x.split(/[;\n]/))
+    .map((x) => x.trim())
+    .filter(Boolean)) {
     if (!line.test(s) && !sub.test(s)) return `the sed script \`${s}\` isn't a plain print or substitute.`;
   }
   return null;

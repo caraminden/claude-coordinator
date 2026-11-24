@@ -88,7 +88,11 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
     return { status: res.status, body: await res.json() };
   };
   const tm = () => store.getCoordinator(Peek.id);
-  const said = () => store.listEvents(tm()!.id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data) as { author: string; text: string; ask?: Record<string, unknown> });
+  const said = () =>
+    store
+      .listEvents(tm()!.id)
+      .filter((e) => e.kind === 'user_message')
+      .map((e) => JSON.parse(e.data) as { author: string; text: string; ask?: Record<string, unknown> });
   /** The `n`th message in the Taskmaster's chat, once the write worker has written it. */
   const heard = async (n: number) => (await until(`message ${n} in the Taskmaster's chat`, () => tm() && said()[n - 1]))!;
   const good = { person: Josh.id, kind: 'feature', text: 'Let me tag an aura with a colour', files: [{ name: '../../../escape/clip.peekclip', data: b64('CLIP') }] };
@@ -127,7 +131,13 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   for (const data of ['not base64!', '', 'QQ']) assert.equal((await ask({ ...good, files: [{ name: 'a', data }] })).status, 400, data);
   // Over 16 MiB in total: refused, and nothing is written.
   const half = b64(Buffer.alloc(8 * 1024 * 1024 + 1));
-  const big = await ask({ ...good, files: [{ name: 'a.bin', data: half }, { name: 'b.bin', data: half }] });
+  const big = await ask({
+    ...good,
+    files: [
+      { name: 'a.bin', data: half },
+      { name: 'b.bin', data: half },
+    ],
+  });
   assert.equal(big.status, 413);
   assert.equal(existsSync(join(shared, 'inbox')), false);
 
@@ -210,7 +220,19 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   assert.deepEqual(r.body.files, ['inbox/peek-auras/josh/layout-2.jsonl']);
   assert.equal(JSON.parse(readFileSync(join(shared, r.body.sidecar), 'utf8')).summary, 'Saved twice.');
   // The caps and checks still hold, and nothing reached the Taskmaster.
-  assert.equal((await ask({ person: Josh.id, kind: 'data', files: [{ name: 'a.bin', data: half }, { name: 'b.bin', data: half }] })).status, 413);
+  assert.equal(
+    (
+      await ask({
+        person: Josh.id,
+        kind: 'data',
+        files: [
+          { name: 'a.bin', data: half },
+          { name: 'b.bin', data: half },
+        ],
+      })
+    ).status,
+    413,
+  );
   assert.equal((await ask({ person: Josh.id, kind: 'data', files: Array.from({ length: 21 }, (_, i) => ({ name: `${i}.png`, data: b64('x') })) })).status, 400);
   assert.equal((await ask({ person: Josh.id, kind: 'data', text: ' ' })).status, 400);
   assert.equal((await ask({ person: Dana.id, kind: 'data' })).status, 403);
@@ -239,7 +261,11 @@ test('POST /api/contraptions/asks with minion (#416): straight to that minion, m
     const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tocKey}` }, body: JSON.stringify(body) });
     return { status: res.status, body: await res.json() };
   };
-  const said = (id: number) => store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data) as { author: string; text: string; ask?: Record<string, unknown> });
+  const said = (id: number) =>
+    store
+      .listEvents(id)
+      .filter((e) => e.kind === 'user_message')
+      .map((e) => JSON.parse(e.data) as { author: string; text: string; ask?: Record<string, unknown> });
 
   // Rachel, a member: her brief reaches #1 as her ask, its file in her inbox, and the Taskmaster hears nothing.
   const brief = { person: Rachel.id, kind: 'feature', minion: acolyte.number, text: 'Brief: rune tooltips.\n\nShow the rune cost.', files: [{ name: 'brief.md', data: b64('# Brief') }] };

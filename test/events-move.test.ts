@@ -173,7 +173,13 @@ test('a copy left by a move that stopped halfway is made again, and a main file 
   raw.close();
   assert.throws(() => new Store(path), /main file has an events table again/);
   const ev2 = new DatabaseSync(join(dir, 'events.db'), { readOnly: true });
-  assert.deepEqual(ev2.prepare('SELECT data FROM events').all().map((r: any) => r.data), [JSON.stringify({ text: 'kept' })]);
+  assert.deepEqual(
+    ev2
+      .prepare('SELECT data FROM events')
+      .all()
+      .map((r: any) => r.data),
+    [JSON.stringify({ text: 'kept' })],
+  );
   ev2.close();
 });
 

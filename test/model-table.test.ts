@@ -15,7 +15,10 @@ test('every pick in the table is a model and effort the server takes', () => {
     assert.ok((MODELS as readonly string[]).includes(p.model), p.model);
     assert.ok((EFFORTS as readonly string[]).includes(p.effort), p.effort);
   }
-  assert.deepEqual(CLAUDE_MODELS.map(([id]) => id), MODELS.filter((m) => m.startsWith('claude-')));
+  assert.deepEqual(
+    CLAUDE_MODELS.map(([id]) => id),
+    MODELS.filter((m) => m.startsWith('claude-')),
+  );
   assert.deepEqual(EFFORT_LEVELS, [...EFFORTS]);
 });
 
@@ -66,7 +69,8 @@ test('the Taskmaster prompt switches to Opus high on its own once Fable is over 
   const project = { id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo', fable_ok: 'on' } as any;
   const t = { id: 1, number: null, title: 'Taskmaster', kind: 'coordinator' } as any;
   const args = [project, t, '/s', '/p', '/t', '/m', [], true, '', null, [], null, false, null, null, false, null, []] as const;
-  const under = (systemPrompt as any)(...args, false), over = (systemPrompt as any)(...args, true);
+  const under = (systemPrompt as any)(...args, false),
+    over = (systemPrompt as any)(...args, true);
   assert.doesNotMatch(under, /over the weekly cap/);
   assert.match(over, /Fable use is over the weekly cap[^.]*start Fable-tier minions on Opus high/);
 });

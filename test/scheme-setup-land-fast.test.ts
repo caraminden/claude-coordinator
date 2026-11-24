@@ -22,7 +22,13 @@ function fakeCi(dir: string) {
     writeFileSync(`${f}.tmp`, `${code}\n${out}`);
     renameSync(`${f}.tmp`, f);
   };
-  const asked = () => { try { return readFileSync(join(ci, 'asked'), 'utf8').split('\n').filter(Boolean); } catch { return []; } };
+  const asked = () => {
+    try {
+      return readFileSync(join(ci, 'asked'), 'utf8').split('\n').filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
   return { env: { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_CI_START: '3' }, answer, asked };
 }
 const CI = { CI_STATUS: '"$CI_FAKE"' };
@@ -155,7 +161,9 @@ test('fast mode in a batched line: the fast landing is a batch of its own, and t
     await until('landing 3 in line', () => q.issued() === 3);
     q.open();
     // Every run CI is asked about is green.
-    const greenAll = setInterval(() => { for (const sha of ci.asked()) ci.answer(sha, 0); }, 50);
+    const greenAll = setInterval(() => {
+      for (const sha of ci.asked()) ci.answer(sha, 0);
+    }, 50);
     try {
       assert.equal(await one.exit, 0, one.stderr());
       assert.equal(await two.exit, 0, two.stderr());

@@ -44,8 +44,12 @@ after(async () => {
 async function readTicket(args: object): Promise<{ text: string; error: boolean }> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(TM.id),
-      COORDINATOR_PROJECT: String(P.id), COORDINATOR_TICKET: String(TM.id), COORDINATOR_ROLE: 'coordinator',
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(TM.id),
+      COORDINATOR_PROJECT: String(P.id),
+      COORDINATOR_TICKET: String(TM.id),
+      COORDINATOR_ROLE: 'coordinator',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -65,7 +69,10 @@ test('read_ticket shows the last entries of a paged history and counts every ear
   assert.match(text, /Long one/);
   assert.match(text, new RegExp(`\\(${MESSAGES - 5} earlier entries omitted\\)`));
   const shown = text.split('\n\n').filter((l) => l.startsWith('[Cara]'));
-  assert.deepEqual(shown, [4, 3, 2, 1, 0].map((k) => MESSAGES - k).map((i) => `[Cara]: message ${i}`));
+  assert.deepEqual(
+    shown,
+    [4, 3, 2, 1, 0].map((k) => MESSAGES - k).map((i) => `[Cara]: message ${i}`),
+  );
 });
 
 test("read_ticket collapses a Grunt's report to its first line and keeps the minion's reply whole", async () => {

@@ -45,8 +45,7 @@ test('switching through eight schemes leaves no old page in memory', { skip }, a
   for (let i = 0; i < 2; i++) await page.send('HeapProfiler.collectGarbage');
   const proto = await page.send('Runtime.evaluate', { expression: 'HTMLTextAreaElement.prototype' });
   const all = await page.send('Runtime.queryObjects', { prototypeObjectId: proto.result.objectId });
-  const off = await page.send('Runtime.callFunctionOn', { objectId: all.objects.objectId, returnByValue: true,
-    functionDeclaration: 'function () { return this.filter((t) => { try { return !t.isConnected; } catch { return false; } }).length; }' });
+  const off = await page.send('Runtime.callFunctionOn', { objectId: all.objects.objectId, returnByValue: true, functionDeclaration: 'function () { return this.filter((t) => { try { return !t.isConnected; } catch { return false; } }).length; }' });
   // The newest lists let go when the next page is drawn, so the page before the one on screen may still be held.
   assert.ok(off.result.value <= 3, `${off.result.value} message boxes from pages left behind are still in memory after ${SWITCHES} switches`);
 });

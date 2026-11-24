@@ -47,7 +47,7 @@ const hhmm = (ms: number, now: number) => {
 /** The minion a wait names: a relay's sender, a chain's leader, a wait on another minion's work. */
 function otherOf(store: Store, r: Delivery): Ticket | null {
   const id = Number(r.when_arg?.ticket ?? r.when_arg?.after ?? r.payload?.after ?? (r.kind === 'relay' ? r.payload?.ticket : null));
-  return Number.isFinite(id) && id ? store.getTicket(id) ?? null : null;
+  return Number.isFinite(id) && id ? (store.getTicket(id) ?? null) : null;
 }
 
 const sha = (r: Delivery) => (typeof r.when_arg === 'string' && /^[0-9a-f]{7,40}$/i.test(r.when_arg) ? r.when_arg.slice(0, 7) : null);
@@ -64,14 +64,22 @@ function chipOf(r: Delivery, other: Ticket | null, now: number): string {
 
 function headlineOf(r: Delivery, other: Ticket | null, now: number): string {
   const n = other ? `#${other.number}` : null;
-  const target = n ? `${n}'s change` : sha(r) ?? 'its commit';
+  const target = n ? `${n}'s change` : (sha(r) ?? 'its commit');
   switch (r.kind) {
-    case 'relay': return n ? `Note from ${n} once its change ${lands(r)}` : `Note once ${target} ${lands(r)}`;
-    case 'wake_at': return `Wakes itself at ${hhmm(r.due ?? Number(r.when_arg), now)}${r.payload?.setBy === 'Taskmaster' || r.set_by === 'Taskmaster' ? ', set by the Taskmaster' : ''}`;
-    case 'wake_when_live': return `Wakes when ${target} ${lands(r)}`;
-    case 'chain': return `Starts when ${n ?? 'its leader'} ${lands(r)}`;
-    case 'box_job': { const m = /\bon ([\w.-]+)/.exec(String(r.payload?.text ?? '')); return `News from its job${m ? ` on ${m[1]}` : ''}`; }
-    case 'runners_back': return 'Wakes when CI runners are back';
+    case 'relay':
+      return n ? `Note from ${n} once its change ${lands(r)}` : `Note once ${target} ${lands(r)}`;
+    case 'wake_at':
+      return `Wakes itself at ${hhmm(r.due ?? Number(r.when_arg), now)}${r.payload?.setBy === 'Taskmaster' || r.set_by === 'Taskmaster' ? ', set by the Taskmaster' : ''}`;
+    case 'wake_when_live':
+      return `Wakes when ${target} ${lands(r)}`;
+    case 'chain':
+      return `Starts when ${n ?? 'its leader'} ${lands(r)}`;
+    case 'box_job': {
+      const m = /\bon ([\w.-]+)/.exec(String(r.payload?.text ?? ''));
+      return `News from its job${m ? ` on ${m[1]}` : ''}`;
+    }
+    case 'runners_back':
+      return 'Wakes when CI runners are back';
   }
   if (r.when_kind === 'at') return `Due at ${hhmm(r.due ?? Number(r.when_arg), now)}`;
   if (r.when_kind === 'ci') return 'Wakes when CI finishes';
@@ -101,16 +109,16 @@ const at = (ms: number, now: number) => {
 /** Who set it, in words: "#824", "the Taskmaster", "Cara". */
 function setter(store: Store, by: string): string {
   const m = /^minion:(\d+)$/.exec(by);
-  if (m) { const t = store.getTicket(Number(m[1])); return t ? (t.kind === 'coordinator' ? 'the Taskmaster' : `#${t.number}`) : 'a minion'; }
+  if (m) {
+    const t = store.getTicket(Number(m[1]));
+    return t ? (t.kind === 'coordinator' ? 'the Taskmaster' : `#${t.number}`) : 'a minion';
+  }
   return by === 'Taskmaster' || by === 'coordinator' ? 'the Taskmaster' : by;
 }
 
 function factsOf(store: Store, r: Delivery, now: number): string[] {
   const s = sha(r);
-  return [
-    `Set by ${setter(store, r.payload?.setBy === 'Taskmaster' ? 'Taskmaster' : r.set_by)} ${at(r.created_at, now)}`,
-    r.due != null ? `due ${hhmm(r.due, now)}` : s ? `waits for ${s} to ${r.when_kind === 'merged' ? 'reach main' : 'go live'}` : '',
-  ].filter(Boolean);
+  return [`Set by ${setter(store, r.payload?.setBy === 'Taskmaster' ? 'Taskmaster' : r.set_by)} ${at(r.created_at, now)}`, r.due != null ? `due ${hhmm(r.due, now)}` : s ? `waits for ${s} to ${r.when_kind === 'merged' ? 'reach main' : 'go live'}` : ''].filter(Boolean);
 }
 
 const whatOf = (r: Delivery) => String(r.payload?.note ?? r.payload?.reason ?? r.payload?.text ?? r.when_arg?.reason ?? r.kind).slice(0, 300);
@@ -119,22 +127,52 @@ const whatOf = (r: Delivery) => String(r.payload?.note ?? r.payload?.reason ?? r
 export function waitsFor(store: Store, t: Ticket, legacy: LegacyWaits = () => [], now = Date.now()): WaitRow[] {
   const q = t.kind === 'coordinator' ? { toKind: 'taskmaster', to: t.project_id } : { toKind: 'minion', to: t.id };
   const row = (r: Delivery): WaitRow => {
-    const other = otherOf(store, r), text = textOf(r);
+    const other = otherOf(store, r),
+      text = textOf(r);
     return {
-    id: r.id, kind: r.kind, chip: chipOf(r, other, now), what: whatOf(r), set_by: r.set_by,
-    headline: headlineOf(r, other, now), line: text ? firstLine(text) : '', text, facts: factsOf(store, r, now),
-    link: other && other.kind !== 'coordinator' ? { project: other.project_id, number: other.number } : null,
-    since: r.created_at, due: r.due, state: r.state as WaitRow['state'], reason: r.reason, cancellable: (r.state === 'waiting' || r.state === 'held') && r.kind !== 'chain', // a chain's row is its brief: Start now or dismiss, not drop
+      id: r.id,
+      kind: r.kind,
+      chip: chipOf(r, other, now),
+      what: whatOf(r),
+      set_by: r.set_by,
+      headline: headlineOf(r, other, now),
+      line: text ? firstLine(text) : '',
+      text,
+      facts: factsOf(store, r, now),
+      link: other && other.kind !== 'coordinator' ? { project: other.project_id, number: other.number } : null,
+      since: r.created_at,
+      due: r.due,
+      state: r.state as WaitRow['state'],
+      reason: r.reason,
+      cancellable: (r.state === 'waiting' || r.state === 'held') && r.kind !== 'chain', // a chain's row is its brief: Start now or dismiss, not drop
     };
   };
   const live = store.listDeliveries({ ...q, states: ['waiting', 'held', 'sending'] }).map(row);
-  const dropped = store.listDeliveries({ ...q, states: ['dropped', 'failed'] }).filter((r) => r.updated_at > now - DROPPED_SHOWN_MS).map(row);
+  const dropped = store
+    .listDeliveries({ ...q, states: ['dropped', 'failed'] })
+    .filter((r) => r.updated_at > now - DROPPED_SHOWN_MS)
+    .map(row);
   // A wait the table already holds is never also read from an old key (a kind mid-move would show it twice).
   const seen = new Set(live.map((r) => `${r.kind}\0${r.what}`));
-  const old = t.kind === 'coordinator' ? [] : legacy(t.id).filter((l) => !seen.has(`${l.kind}\0${l.what}`)).map((l): WaitRow => ({
-    id: null, ...l, headline: l.headline ?? headlineOf({ kind: l.kind, when_kind: 'live', when_arg: null, payload: {} } as unknown as Delivery, null, now),
-    line: l.what ? firstLine(l.what) : '', text: l.what, facts: l.since ? [`Set by ${setter(store, l.set_by)} ${at(l.since, now)}`] : [], link: l.link ?? null,
-    due: null, state: 'waiting', reason: null, cancellable: false,
-  }));
+  const old =
+    t.kind === 'coordinator'
+      ? []
+      : legacy(t.id)
+          .filter((l) => !seen.has(`${l.kind}\0${l.what}`))
+          .map(
+            (l): WaitRow => ({
+              id: null,
+              ...l,
+              headline: l.headline ?? headlineOf({ kind: l.kind, when_kind: 'live', when_arg: null, payload: {} } as unknown as Delivery, null, now),
+              line: l.what ? firstLine(l.what) : '',
+              text: l.what,
+              facts: l.since ? [`Set by ${setter(store, l.set_by)} ${at(l.since, now)}`] : [],
+              link: l.link ?? null,
+              due: null,
+              state: 'waiting',
+              reason: null,
+              cancellable: false,
+            }),
+          );
   return [...live, ...old, ...dropped];
 }

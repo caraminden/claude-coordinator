@@ -33,7 +33,11 @@ test(`a boot at a fifth of a core takes all ${TURNS} running turns back, and eac
   await until('every turn ended', () => minions.every((id) => d.status(id) === 'idle'), 180_000);
   for (const id of minions) {
     assert.equal(d.stream(id, 'result').length, 1, `#${id} took its reply once`);
-    assert.deepEqual(d.notes(id).filter((n) => /Resumed|interrupted|killed/.test(n)), [], `#${id}'s chat`);
+    assert.deepEqual(
+      d.notes(id).filter((n) => /Resumed|interrupted|killed/.test(n)),
+      [],
+      `#${id}'s chat`,
+    );
   }
   assert.equal(d.fake.turnsRun(), TURNS);
   assert.ok(firstAnswerMs > 0);

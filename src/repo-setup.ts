@@ -3,7 +3,10 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export interface Fact { label: string; value: string }
+export interface Fact {
+  label: string;
+  value: string;
+}
 
 /** The `- **Label:** value` bullets under `## Project facts`, continuation lines folded into their bullet. Null with no such block. */
 export function parseProjectFacts(md: string): Fact[] | null {
@@ -20,7 +23,12 @@ export function parseProjectFacts(md: string): Fact[] | null {
   return facts;
 }
 
-export interface RuleFile { name: string; size: number; paths: string[]; upstream: string | null }
+export interface RuleFile {
+  name: string;
+  size: number;
+  paths: string[];
+  upstream: string | null;
+}
 
 /** The `paths:` globs of a rule file's front matter (a list or one line) and the first link after "From" in its body. */
 export function parseRule(name: string, text: string): RuleFile {
@@ -28,8 +36,23 @@ export function parseRule(name: string, text: string): RuleFile {
   const paths: string[] = [];
   const m = /^paths:[ \t]*(.*)$/m.exec(fm);
   if (m) {
-    if (m[1].trim()) paths.push(...m[1].replace(/^\[|\]$/g, '').split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean));
-    else for (const l of fm.slice(m.index + m[0].length).split('\n')) { const i = /^\s*-\s*(.+)$/.exec(l); if (!i) { if (l.trim()) break; continue; } paths.push(i[1].trim().replace(/^["']|["']$/g, '')); }
+    if (m[1].trim())
+      paths.push(
+        ...m[1]
+          .replace(/^\[|\]$/g, '')
+          .split(',')
+          .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+          .filter(Boolean),
+      );
+    else
+      for (const l of fm.slice(m.index + m[0].length).split('\n')) {
+        const i = /^\s*-\s*(.+)$/.exec(l);
+        if (!i) {
+          if (l.trim()) break;
+          continue;
+        }
+        paths.push(i[1].trim().replace(/^["']|["']$/g, ''));
+      }
   }
   const upstream = /^From \[[^\]]+\]\((https:\/\/[^)\s]+)\)/m.exec(text)?.[1] ?? null;
   return { name, size: text.length, paths, upstream };
@@ -45,7 +68,11 @@ export function pinFor(thirdParty: string, path: string): string | null {
   return null;
 }
 
-export interface RepoSetup { facts: Fact[] | null; rules: (RuleFile & { pin: string | null })[]; skills: { name: string; description: string }[] }
+export interface RepoSetup {
+  facts: Fact[] | null;
+  rules: (RuleFile & { pin: string | null })[];
+  skills: { name: string; description: string }[];
+}
 
 const read = (p: string) => readFile(p, 'utf8').catch(() => null);
 const ls = (p: string) => readdir(p).catch(() => [] as string[]);
@@ -62,7 +89,14 @@ export async function repoSetup(repoDir: string): Promise<RepoSetup> {
   for (const d of (await ls(join(repoDir, '.claude', 'skills'))).sort()) {
     const text = await read(join(repoDir, '.claude', 'skills', d, 'SKILL.md'));
     if (text === null || !(await stat(join(repoDir, '.claude', 'skills', d)).catch(() => null))) continue;
-    skills.push({ name: d, description: /^description:\s*(.+)$/m.exec(text)?.[1].replace(/^["']|["']$/g, '').slice(0, 300) ?? '' });
+    skills.push({
+      name: d,
+      description:
+        /^description:\s*(.+)$/m
+          .exec(text)?.[1]
+          .replace(/^["']|["']$/g, '')
+          .slice(0, 300) ?? '',
+    });
   }
   return { facts: claude === null ? null : parseProjectFacts(claude), rules, skills };
 }

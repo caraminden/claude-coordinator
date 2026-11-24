@@ -9,9 +9,7 @@ export const viewQueries = {
 
   /** Save the picks under a name; saving under a name this person already has replaces that view. */
   saveView(this: Store, projectId: number, owner: string, name: string, picks: SavedView['picks']) {
-    this.db
-      .prepare('INSERT INTO person_views (project_id, owner, name, picks, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (project_id, owner, name) DO UPDATE SET picks = excluded.picks, created_at = excluded.created_at')
-      .run(projectId, owner, name, JSON.stringify(picks), Date.now());
+    this.db.prepare('INSERT INTO person_views (project_id, owner, name, picks, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (project_id, owner, name) DO UPDATE SET picks = excluded.picks, created_at = excluded.created_at').run(projectId, owner, name, JSON.stringify(picks), Date.now());
   },
 
   deleteView(this: Store, projectId: number, owner: string, id: number): boolean {

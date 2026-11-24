@@ -10,9 +10,7 @@ export function symbolLines(source: string, symbol: string): string[] | null {
   const lines = source.split('\n');
   const lead = (l: string) => l.length - l.trimStart().length;
   const decl = (name: string, indent: number, from: number, to: number) => {
-    const re = indent === 0
-      ? new RegExp(`^(?:export )?(?:default )?(?:declare )?(?:async )?(?:function\\*? |const |let |var |class |interface |type |enum )${name}\\b`)
-      : new RegExp(`^ {${indent}}(?:(?:private|protected|public|static|async|readonly|get|set|override) )*#?${name}\\s*[(<=:]`);
+    const re = indent === 0 ? new RegExp(`^(?:export )?(?:default )?(?:declare )?(?:async )?(?:function\\*? |const |let |var |class |interface |type |enum )${name}\\b`) : new RegExp(`^ {${indent}}(?:(?:private|protected|public|static|async|readonly|get|set|override) )*#?${name}\\s*[(<=:]`);
     for (let i = from; i < to; i++) if (re.test(lines[i])) return i;
     return -1;
   };
@@ -23,7 +21,10 @@ export function symbolLines(source: string, symbol: string): string[] | null {
     for (let j = i + 1; j < lines.length; j++) {
       const l = lines[j];
       if (!l.trim()) continue;
-      if (lead(l) > indent) { end = j; continue; }
+      if (lead(l) > indent) {
+        end = j;
+        continue;
+      }
       if (lead(l) === indent && /^[}\])]/.test(l.trim())) end = j;
       break;
     }
@@ -49,7 +50,10 @@ export function symbolLines(source: string, symbol: string): string[] | null {
 export function symbolHash(source: string, symbol: string): string | null {
   const lines = symbolLines(source, symbol);
   if (!lines) return null;
-  const code = lines.map((l) => l.trim()).filter((l) => l && !/^(\/\/|\/\*|\*)/.test(l)).join('\n');
+  const code = lines
+    .map((l) => l.trim())
+    .filter((l) => l && !/^(\/\/|\/\*|\*)/.test(l))
+    .join('\n');
   return createHash('sha256').update(code).digest('hex').slice(0, 16);
 }
 
@@ -58,7 +62,11 @@ export function pinHashes(j: Judge, root: string): Record<string, string | null>
   const out: Record<string, string | null> = {};
   for (const p of j.pins) {
     let source = '';
-    try { source = readFileSync(join(root, p.path), 'utf8'); } catch { /* a missing file pins nothing: every symbol null */ }
+    try {
+      source = readFileSync(join(root, p.path), 'utf8');
+    } catch {
+      /* a missing file pins nothing: every symbol null */
+    }
     for (const s of p.symbols) out[`${p.path}#${s}`] = source ? symbolHash(source, s) : null;
   }
   return out;
@@ -67,5 +75,13 @@ export function pinHashes(j: Judge, root: string): Record<string, string | null>
 /** One hash for the judge's whole decision: what a recorded replay is pinned to. */
 export function judgeHash(j: Judge, root: string): string {
   const h = pinHashes(j, root);
-  return createHash('sha256').update(Object.keys(h).sort().map((k) => `${k}=${h[k]}`).join('\n')).digest('hex').slice(0, 16);
+  return createHash('sha256')
+    .update(
+      Object.keys(h)
+        .sort()
+        .map((k) => `${k}=${h[k]}`)
+        .join('\n'),
+    )
+    .digest('hex')
+    .slice(0, 16);
 }

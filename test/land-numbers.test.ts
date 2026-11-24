@@ -17,7 +17,10 @@ const filler = Array.from({ length: 6 }, (_, i) => `  const x${i} = ${i};`).join
 // A db.ts shaped like Citadel's: the history, then two one-off steps far enough apart that edits to them merge.
 const db = (history: [number, string][], first = '  // first', second = '  // second') =>
   `export const SCHEMA_HISTORY = [\n${history.map(([n, d]) => `  [${n}, '${d}'],`).join('\n')}\n] as const;\nexport const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];\n\nfunction first() {\n${first}\n${filler}\n}\n\nfunction second() {\n${second}\n${filler}\n}`; // no last newline: git() trims what show() reads
-const BASE: [number, string][] = [[94, 'host_samples (#1123)'], [95, 'tickets.goal (#1130)']];
+const BASE: [number, string][] = [
+  [94, 'host_samples (#1123)'],
+  [95, 'tickets.goal (#1130)'],
+];
 
 function write(where: string, files: Record<string, string>, msg: string) {
   for (const [f, text] of Object.entries(files)) {
@@ -83,7 +86,7 @@ test('a schema clash it cannot sort out is refused before the line, with the num
   assert.equal(r.note(), null, 'nothing deployed');
 });
 
-test("a feeder whose numbers the build took gets the next ones as it merges into the build", () => {
+test('a feeder whose numbers the build took gets the next ones as it merges into the build', () => {
   const r = start();
   git(r.source, 'branch', 'build/3', 'main');
   const other = worktree(r, 'ticket/2-y', 'build/3');
@@ -114,7 +117,7 @@ test("a build whose numbers main took keeps main's and takes the next ones when 
   assert.equal(show(r, 'main', 'docs/adr/0003-build.md'), '# ADR 0003: build');
 });
 
-test('a branch with two commits each adding a schema line keeps both, in order, after main\'s', () => {
+test("a branch with two commits each adding a schema line keeps both, in order, after main's", () => {
   const r = start();
   write(r.wt, { 'src/db.ts': db([...BASE, [96, 'mine 1 (#1)']]) }, '#1: one');
   write(r.wt, { 'src/db.ts': db([...BASE, [96, 'mine 1 (#1)'], [97, 'mine 2 (#1)']], check(97, 'mine')) }, '#1: two');
@@ -212,8 +215,7 @@ if (process.env.PROMPT_BASELINE === 'write') writeFileSync(new URL('prompt-basel
 void BUDGET, KIT_BUDGET;
 `;
 const made = (text: string) => JSON.stringify({ made: createHash('sha256').update(text).digest('hex') });
-const migrations = (...cols: string[]) =>
-  `\n\nconst MIGRATIONS: [table: string, column: string, ddl: string][] = [\n  ['tickets', 'a', 'TEXT'],\n${cols.map((c) => `  ['tickets', '${c}', 'TEXT'],\n`).join('')}];`;
+const migrations = (...cols: string[]) => `\n\nconst MIGRATIONS: [table: string, column: string, ddl: string][] = [\n  ['tickets', 'a', 'TEXT'],\n${cols.map((c) => `  ['tickets', '${c}', 'TEXT'],\n`).join('')}];`;
 // A stand-in citadel-test for the guard tests: logs the minion budget it saw on the commit it ran on.
 function guarded(r: R) {
   writeFileSync(join(r.source, 'tools', 'citadel-test'), `#!/usr/bin/env bash\ngrep -o "minion: [0-9_]*" ${BUDGET_FILE} >>"$GUARD_LOG"\n`);

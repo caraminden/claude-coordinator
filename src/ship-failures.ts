@@ -57,16 +57,28 @@ export function failureDetail(output: string, code: number | null): FailureDetai
   ]);
   const files = uniq([...output.matchAll(/^(?:.*\t)?run-tests: (\S+\.test\.ts): /gm)].map((m) => m[1]));
   const broken = uniq([...output.matchAll(/^land: broken test, not a flake: (\S+) red in /gm)].map((m) => m[1]));
-  const kind = cls === 'conflict' || conflicts.length ? 'merge conflict'
-    : code === 75 || /^land: .*(gave no verdict|timed out waiting for CI)/m.test(output) ? 'CI timeout'
-    : cls === 'parse' ? 'parse error'
-    : cls === 'ci' ? 'CI or runner problem'
-    : cls === 'boot-copy' ? 'boot check'
-    : /^land: smoke: .*, before the line/m.test(output) ? 'smoke check'
-    : cls === 'passed-alone' ? broken.length ? 'broken test, not a flake' : 'failed together, passed alone' // #1487: red too often to be a flake
-    : cls === 'own-test' || cls === 'always-test' || cls === 'burn-in' || tests.length || /tests failed/.test(output) ? 'tests failed'
-    : /^(deploy|boot-check): .*(fail|refus|error|unhealthy)/im.test(output) ? 'deploy or boot'
-    : 'failed';
+  const kind =
+    cls === 'conflict' || conflicts.length
+      ? 'merge conflict'
+      : code === 75 || /^land: .*(gave no verdict|timed out waiting for CI)/m.test(output)
+        ? 'CI timeout'
+        : cls === 'parse'
+          ? 'parse error'
+          : cls === 'ci'
+            ? 'CI or runner problem'
+            : cls === 'boot-copy'
+              ? 'boot check'
+              : /^land: smoke: .*, before the line/m.test(output)
+                ? 'smoke check'
+                : cls === 'passed-alone'
+                  ? broken.length
+                    ? 'broken test, not a flake'
+                    : 'failed together, passed alone' // #1487: red too often to be a flake
+                  : cls === 'own-test' || cls === 'always-test' || cls === 'burn-in' || tests.length || /tests failed/.test(output)
+                    ? 'tests failed'
+                    : /^(deploy|boot-check): .*(fail|refus|error|unhealthy)/im.test(output)
+                      ? 'deploy or boot'
+                      : 'failed';
   const all = kind === 'merge conflict' ? conflicts : kind === 'broken test, not a flake' ? broken : tests.length ? tests : files;
   const runs = output.split('\n').filter((l) => /\/actions\/runs\/\d+/.test(l));
   // The run named where it failed, else any run not named as a pass (a green CI before a failed deploy isn't the cause).
@@ -95,7 +107,7 @@ export interface AttachDeps {
 /** The release a scheme's failed tries go under: its own server or main, else its first target. */
 const homeOf = (views: Omit<TargetView, 'testCopies'>[]) => views.find((v) => v.target.kind === CITADEL_TARGET || v.target.kind === 'main') ?? views[0];
 
-const releaseName = (tv: Omit<TargetView, 'testCopies'>, r: Release) => r.name ?? (r.number == null ? null : tv.target.numbering?.name?.replace(/\{n\}/g, String(r.number)) ?? `Release ${r.number}`);
+const releaseName = (tv: Omit<TargetView, 'testCopies'>, r: Release) => r.name ?? (r.number == null ? null : (tv.target.numbering?.name?.replace(/\{n\}/g, String(r.number)) ?? `Release ${r.number}`));
 
 /**
  * Put each scheme's failed tries in its home card's Previous releases, newest first among the rest, each with what
@@ -108,10 +120,11 @@ export function attachFailures(views: Omit<TargetView, 'testCopies'>[], d: Attac
     const mine = views.filter((v) => v.target.projectId === projectId);
     // When each minion last went live, and in which release.
     const shipped = new Map<number, { at: number; release: string | null }>();
-    for (const tv of mine) for (const r of [tv.current, ...tv.recent]) {
-      if (!r?.live) continue;
-      for (const c of r.changes) if ((shipped.get(c.ticketId)?.at ?? 0) < r.live) shipped.set(c.ticketId, { at: r.live, release: releaseName(tv, r) });
-    }
+    for (const tv of mine)
+      for (const r of [tv.current, ...tv.recent]) {
+        if (!r?.live) continue;
+        for (const c of r.changes) if ((shipped.get(c.ticketId)?.at ?? 0) < r.live) shipped.set(c.ticketId, { at: r.live, release: releaseName(tv, r) });
+      }
     const places = new Map(mine.flatMap((tv) => tv.line.flatMap((e) => (e.ticketId != null ? [[e.ticketId, e] as const] : []))));
     const newest = new Map<number, ShipFailure>();
     for (const f of list) if ((newest.get(f.ticketId)?.at ?? 0) <= f.at) newest.set(f.ticketId, f);
@@ -124,7 +137,7 @@ export function attachFailures(views: Omit<TargetView, 'testCopies'>[], d: Attac
       if (live && live.at > f.at) return { kind: 'shipped', release: live.release };
       if (d.landing(f.ticketId)) {
         const e = places.get(f.ticketId);
-        return { kind: 'line', place: e?.holds ? null : e?.place ?? null, holds: !!e?.holds };
+        return { kind: 'line', place: e?.holds ? null : (e?.place ?? null), holds: !!e?.holds };
       }
       if (!t || t.status === 'closed') return { kind: 'closed' };
       return { kind: d.running(f.ticketId) ? 'fixing' : 'idle', note: t.note };
@@ -135,14 +148,25 @@ export function attachFailures(views: Omit<TargetView, 'testCopies'>[], d: Attac
     // On a full history, tries older than its oldest release are past it (and past knowing whether they shipped since).
     const times = home.recent.map(when).filter(Boolean);
     const oldest = home.recent.length >= PREVIOUS && times.length ? Math.min(...times) : 0;
-    const tries: Release[] = list.filter((f) => f.at >= oldest).slice(-SHOWN).reverse().map((f) => {
-      const t = d.store.getTicket(f.ticketId);
-      const { ticketId, at, ...detail } = f;
-      return {
-        version: '', number: null, link: null, started: at, live: null, outcome: 'failed', stages: {},
-        changes: [{ ticketId, number: t?.number ?? null, title: t?.title ?? '' }], failure: { ...detail, next: next(f) },
-      };
-    });
+    const tries: Release[] = list
+      .filter((f) => f.at >= oldest)
+      .slice(-SHOWN)
+      .reverse()
+      .map((f) => {
+        const t = d.store.getTicket(f.ticketId);
+        const { ticketId, at, ...detail } = f;
+        return {
+          version: '',
+          number: null,
+          link: null,
+          started: at,
+          live: null,
+          outcome: 'failed',
+          stages: {},
+          changes: [{ ticketId, number: t?.number ?? null, title: t?.title ?? '' }],
+          failure: { ...detail, next: next(f) },
+        };
+      });
     // Each try goes in before the first timed row older than it; the rows already there keep their order.
     const merged: Release[] = [];
     for (const r of home.recent) {
@@ -159,8 +183,14 @@ export function attachFailures(views: Omit<TargetView, 'testCopies'>[], d: Attac
         const { ticketId: _, ...lastTry } = f;
         return lastTry;
       };
-      for (const c of tv.next?.changes ?? []) { const l = last(c.ticketId); if (l) c.lastTry = l; }
-      for (const e of tv.line) { const l = last(e.ticketId); if (l) e.lastTry = l; }
+      for (const c of tv.next?.changes ?? []) {
+        const l = last(c.ticketId);
+        if (l) c.lastTry = l;
+      }
+      for (const e of tv.line) {
+        const l = last(e.ticketId);
+        if (l) e.lastTry = l;
+      }
     }
   }
 }

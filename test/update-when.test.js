@@ -9,9 +9,10 @@ test('a restart with an unchanged front end never reloads, hidden or not', () =>
   // The version is a hash of public/'s content, so the same files give the same version and nothing is pending.
   const version = (files) => createHash('sha256').update(files.join('\0')).digest('hex').slice(0, 12);
   assert.equal(version(['a', 'b']), version(['a', 'b']));
-  for (const hidden of [true, false]) for (const navigating of [true, false]) {
-    assert.equal(shouldReload({ ...base, pending: false, hidden, navigating }), false);
-  }
+  for (const hidden of [true, false])
+    for (const navigating of [true, false]) {
+      assert.equal(shouldReload({ ...base, pending: false, hidden, navigating }), false);
+    }
 });
 test('with a changed front end, a visible tab does not reload by itself', () => {
   assert.equal(shouldReload(base), false);

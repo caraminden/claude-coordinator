@@ -53,7 +53,11 @@ function treatFile(req: IncomingMessage, res: ServerResponse, up: IncomingMessag
     if (tag) {
       headers['etag'] = `"${createHash('sha1').update(body).digest('hex').slice(0, 16)}"`;
       headers['cache-control'] = 'no-cache';
-      if (String(req.headers['if-none-match'] ?? '').split(',').some((t) => t.trim().replace(/^W\//, '') === headers['etag'] || t.trim() === '*')) {
+      if (
+        String(req.headers['if-none-match'] ?? '')
+          .split(',')
+          .some((t) => t.trim().replace(/^W\//, '') === headers['etag'] || t.trim() === '*')
+      ) {
         delete headers['content-length'];
         delete headers['content-type'];
         return void res.writeHead(304, headers).end();

@@ -26,7 +26,9 @@ process.env.CITADEL_SUPERVISOR_ADOPT_MS = '200';
 
 const bin = join(root, 'bin');
 mkdirSync(bin);
-writeFileSync(join(bin, 'systemd-run'), `#!/bin/sh
+writeFileSync(
+  join(bin, 'systemd-run'),
+  `#!/bin/sh
 echo "$*" >> "${bin}/calls"
 case "$*" in *turn-wrapper.mjs*) date +%s%3N >> "${bin}/unit-at";; esac
 scope= expand=1
@@ -44,7 +46,8 @@ if [ -n "$scope" ]; then
   while [ -f "${bin}/hang-scope" ]; do sleep 0.05; [ -f "${bin}/hang-scope" ] || exit 1; done
   [ -f "${bin}/no-scope" ] || [ -n "$expand" ] && { echo "no scopes here" >&2; exit 1; }; exec "$@"; fi
 setsid "$@" </dev/null >/dev/null 2>&1 &
-`);
+`,
+);
 writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "systemctl $*" >> "${bin}/calls"\n`);
 for (const f of ['systemd-run', 'systemctl']) chmodSync(join(bin, f), 0o755);
 process.env.PATH = `${bin}:${process.env.PATH}`;
@@ -88,7 +91,12 @@ const project = store.createProject('Test', null);
 const turnsDir = join(root, 'run', 'turns');
 
 function server() {
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.pollMs = 10;
   r.units = true;
   r.supervisor = true;
@@ -106,7 +114,11 @@ function newTicket() {
 const seen = (dir: string) => lines(join(dir, 'seen.txt'));
 const turnDir = (r: Runner, id: number): string => (r as any).turns.get(id).dir;
 const pidJson = (dir: string) => JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8'));
-const texts = (id: number) => store.listEvents(id).filter((e) => e.kind === 'claude').map((e) => e.data);
+const texts = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'claude')
+    .map((e) => e.data);
 
 /** Start a turn and wait until claude has its first message; resolves with the turn's folder. */
 async function started(r: Runner, t: { id: number; dir: string }, text = 'build it') {
@@ -145,10 +157,13 @@ test('a host turn runs in the shared supervisor, in a scope of its own named as 
   const sup = readSupervisor(spec(r).dir)!;
   const p = pidJson(dir);
   assert.equal(p.supervisor, sup.pid);
-  assert.equal(p.wrapper, p.claude, 'the scope\'s shell is the turn\'s process group, as claude was in the wrapper');
+  assert.equal(p.wrapper, p.claude, "the scope's shell is the turn's process group, as claude was in the wrapper");
   const mine = calls().slice(before);
   const unit = (r as any).turns.get(t.id).unit;
-  assert.ok(mine.some((c) => c.includes('--scope') && c.includes(`--unit=${unit}`)), mine.join('\n'));
+  assert.ok(
+    mine.some((c) => c.includes('--scope') && c.includes(`--unit=${unit}`)),
+    mine.join('\n'),
+  );
   assert.ok(!mine.some((c) => c.includes('turn-wrapper.mjs')), 'no wrapper unit started');
   assert.doesNotMatch(readFileSync(join(dir, 'stderr.log'), 'utf8'), /own memory group/, 'it ran in its scope');
   assert.ok(Number.isInteger(p.wrapper), JSON.stringify(p));
@@ -177,7 +192,10 @@ test('a supervisor killed mid-turn: the turn finishes and its reply is recorded,
   writeFileSync(join(t.dir, 'release'), '');
   await until('the steer starts the next turn', () => seen(t.dir).length === 2);
   assert.equal(seen(t.dir)[1], '[Cara]: in the gap');
-  assert.ok(texts(t.id).some((d) => d.includes('"type":"result"')), 'the first turn\'s reply is recorded');
+  assert.ok(
+    texts(t.id).some((d) => d.includes('"type":"result"')),
+    "the first turn's reply is recorded",
+  );
   await until('the next turn has ended', () => !r.isRunning(t.id));
   rmSync(join(t.dir, 'release'), { force: true });
 });
@@ -200,7 +218,7 @@ async function standIn(r: Runner, port: number, fn: () => Promise<void>) {
   }
 }
 
-test('a turn the supervisor can\'t take starts in its wrapper at once', async () => {
+test("a turn the supervisor can't take starts in its wrapper at once", async () => {
   const r = server();
   // Nothing answers on the port: it resets every connection.
   const port = await tmp.down();
@@ -214,7 +232,7 @@ test('a turn the supervisor can\'t take starts in its wrapper at once', async ()
   });
 });
 
-test('a supervisor that doesn\'t answer in time: the runner starts the wrapper, and the spec\'s claim lets only one run the turn', async () => {
+test("a supervisor that doesn't answer in time: the runner starts the wrapper, and the spec's claim lets only one run the turn", async () => {
   const r = server();
   const hung = createServer(() => {}); // takes the request and never answers
   const port = await tmp.serve(hung);
@@ -233,10 +251,10 @@ test('a supervisor that doesn\'t answer in time: the runner starts the wrapper, 
   writeFileSync(join(dir, 'spec.json'), JSON.stringify({ command: 'true', args: [], cwd: root, env: {} }));
   assert.equal(claimSpec(dir)?.command, 'true');
   assert.equal(claimSpec(dir), null);
-  assert.ok(!existsSync(join(dir, 'spec.json')) && !existsSync(join(dir, `spec.json.${process.pid}`)), 'the claimed spec (it holds the turn\'s token) is gone');
+  assert.ok(!existsSync(join(dir, 'spec.json')) && !existsSync(join(dir, `spec.json.${process.pid}`)), "the claimed spec (it holds the turn's token) is gone");
 });
 
-test('a scope that won\'t start: the supervisor gives the turn back and it runs in its wrapper unit', async () => {
+test("a scope that won't start: the supervisor gives the turn back and it runs in its wrapper unit", async () => {
   const r = await withSupervisor();
   writeFileSync(join(bin, 'no-scope'), '');
   const count = fallbacks.count;
@@ -244,10 +262,15 @@ test('a scope that won\'t start: the supervisor gives the turn back and it runs 
     const t = newTicket();
     const before = calls().length;
     const dir = await started(r, t);
-    assert.equal(pidJson(dir).supervisor, undefined, 'not in the supervisor\'s group: its own wrapper unit runs it');
-    assert.ok(calls().slice(before).some((c) => c.includes('turn-wrapper.mjs')), 'a wrapper unit started');
+    assert.equal(pidJson(dir).supervisor, undefined, "not in the supervisor's group: its own wrapper unit runs it");
+    assert.ok(
+      calls()
+        .slice(before)
+        .some((c) => c.includes('turn-wrapper.mjs')),
+      'a wrapper unit started',
+    );
     assert.match(readFileSync(join(dir, 'stderr.log'), 'utf8'), /own memory group didn't start \(systemd-run exited 1\); the server starts it in a unit of its own/);
-    assert.equal(fallbacks.count, count, 'no fallback: the wrapper unit has the turn\'s slice and limits');
+    assert.equal(fallbacks.count, count, "no fallback: the wrapper unit has the turn's slice and limits");
     assert.ok(!existsSync(join(dir, 'handback')));
     await finished(r, t);
     assert.ok(texts(t.id).some((d) => d.includes('"type":"result"')));

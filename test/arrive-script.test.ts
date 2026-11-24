@@ -30,7 +30,7 @@ test('a feeder branch from build/7 is sized against build/7, not main', () => {
   let out = arrive(dir);
   assert.match(out, /base: build\/7 /);
   assert.match(out, /feeder\.txt/);
-  assert.doesNotMatch(out, /build\.txt/, 'the build\'s own work is not this branch\'s diff');
+  assert.doesNotMatch(out, /build\.txt/, "the build's own work is not this branch's diff");
   assert.match(arrive(dir, 'main'), /base: main /, 'an argument wins');
   // Once build/7 is in main it is not a base any more.
   git(dir, 'switch', '-q', 'main');

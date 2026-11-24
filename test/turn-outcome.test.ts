@@ -7,7 +7,12 @@ import { nextRetries, outcome, RETRIES, retriesOf, type EndedTurn, type TurnEnd 
 
 const ok = { error: false, text: 'done' };
 const end = (over: Partial<TurnEnd> & { turn?: EndedTurn | null } = {}): TurnEnd => ({
-  turn: { result: ok }, exit: { code: 0, signal: null }, stderr: [], closing: false, ran: { unit: true, container: false }, ...over,
+  turn: { result: ok },
+  exit: { code: 0, signal: null },
+  stderr: [],
+  closing: false,
+  ran: { unit: true, container: false },
+  ...over,
 });
 const LIMIT = "Claude AI usage limit reached: You've hit your session limit · resets 3pm";
 const onAccount = (turn: EndedTurn = {}) => ({ person: 7, account: 2, result: { error: true, text: LIMIT }, ...turn });

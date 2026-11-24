@@ -40,7 +40,11 @@ export interface Kept {
   text: string;
 }
 
-export const readChat = (file: string): Kept[] => readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+export const readChat = (file: string): Kept[] =>
+  readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l));
 
 // ---- The stub: answers a replay's tool calls from the kept chat's. ----
 
@@ -72,8 +76,7 @@ async function stub(file: string, server: string, turn: number, toolsFile: strin
   const chat = readChat(file);
   const prefix = `mcp__${server}__`;
   const listed: { name: string; description?: string; inputSchema: object }[] | undefined = toolsFile ? JSON.parse(readFileSync(toolsFile, 'utf8'))[server] : undefined;
-  const tools = listed ?? [...new Set(chat.flatMap((t) => t.calls.map((c) => c.name)).filter((n) => n.startsWith(prefix)))]
-    .map((n) => ({ name: n.slice(prefix.length), description: 'A tool of the app (replay stub).', inputSchema: { type: 'object', additionalProperties: true } }));
+  const tools = listed ?? [...new Set(chat.flatMap((t) => t.calls.map((c) => c.name)).filter((n) => n.startsWith(prefix)))].map((n) => ({ name: n.slice(prefix.length), description: 'A tool of the app (replay stub).', inputSchema: { type: 'object', additionalProperties: true } }));
   const used = new Set<object>();
   const send = (m: object) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');
   for await (const line of createInterface({ input: process.stdin })) {
@@ -120,8 +123,11 @@ interface Step {
 
 /** The chats to replay: the newest `count` session files in the folder. */
 export function pickChats(dir: string, count: number): string[] {
-  return readdirSync(dir).filter((f) => f.endsWith('.jsonl')).map((f) => join(dir, f))
-    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs).slice(0, count);
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .map((f) => join(dir, f))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+    .slice(0, count);
 }
 
 const configDir = () => process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
@@ -135,7 +141,18 @@ async function side(o: Opts, file: string, chat: Kept[], system: string, toolsFi
   try {
     for (const t of chat) {
       const servers = t.servers.map((name) => ({ name, path: '' }));
-      const req = { system: [system, toolNamesPrompt(t.servers)].filter(Boolean).join('\n\n'), blind: false, model: o.model ?? t.model, compactWindow: t.compactWindow, effort: t.effort ?? null, toolSearch: t.toolSearch === true, mcp: servers, agents: t.agents ? { max: 1 } : (false as const), webSearch: t.webSearch, media: false };
+      const req = {
+        system: [system, toolNamesPrompt(t.servers)].filter(Boolean).join('\n\n'),
+        blind: false,
+        model: o.model ?? t.model,
+        compactWindow: t.compactWindow,
+        effort: t.effort ?? null,
+        toolSearch: t.toolSearch === true,
+        mcp: servers,
+        agents: t.agents ? { max: 1 } : (false as const),
+        webSearch: t.webSearch,
+        media: false,
+      };
       // The stub runs in the work folder, so its paths must be absolute.
       // shortcut: the machines note real turns add isn't rebuilt, and Agent runs without its cap's hook; add them if replays of those apps matter.
       const config = mcpConfig(0, []);
@@ -234,12 +251,14 @@ export function chatMd(i: number, chat: Kept[], x: Step[], y: Step[]): string {
 async function pool<T>(jobs: (() => Promise<T>)[], n: number): Promise<T[]> {
   const out: T[] = [];
   let next = 0;
-  await Promise.all(Array.from({ length: Math.min(n, jobs.length) }, async () => {
-    while (next < jobs.length) {
-      const i = next++;
-      out[i] = await jobs[i]();
-    }
-  }));
+  await Promise.all(
+    Array.from({ length: Math.min(n, jobs.length) }, async () => {
+      while (next < jobs.length) {
+        const i = next++;
+        out[i] = await jobs[i]();
+      }
+    }),
+  );
   return out;
 }
 
@@ -257,10 +276,7 @@ export async function run(o: Opts) {
   if (off) console.log(`citadel-replay: warning: ${off} of ${files.length} chats ran on a system prompt other than --old (an earlier version?). The comparison still holds: both sides rerun.`);
   mkdirSync(o.out, { recursive: true });
   const work = join(tmpdir(), `citadel-replay-${randomUUID().slice(0, 8)}`);
-  const jobs = files.flatMap((file, i) => [
-    () => side(o, file, chats[i], oldText, o.tools, join(work, `${i}-old`)),
-    () => side(o, file, chats[i], newText, o.toolsNew ?? o.tools, join(work, `${i}-new`)),
-  ]);
+  const jobs = files.flatMap((file, i) => [() => side(o, file, chats[i], oldText, o.tools, join(work, `${i}-old`)), () => side(o, file, chats[i], newText, o.toolsNew ?? o.tools, join(work, `${i}-new`))]);
   const results = await pool(jobs, o.parallel);
   rmSync(work, { recursive: true, force: true });
   const key: Record<string, { X: string; Y: string; file: string }> = {};
@@ -310,9 +326,17 @@ async function main() {
   const mcp = new Map((flags.get('--mcp') ?? []).map((m) => [m.slice(0, m.indexOf('=')), m.slice(m.indexOf('=') + 1)] as [string, string]));
   try {
     await run({
-      chats: one('--chats')!, old: one('--old')!, new: one('--new')!, count, parallel, mcp,
+      chats: one('--chats')!,
+      old: one('--old')!,
+      new: one('--new')!,
+      count,
+      parallel,
+      mcp,
       out: one('--out') ?? join(process.env.TMPDIR || tmpdir(), `replay-${new Date().toISOString().replace(/[:.]/g, '-')}`),
-      model: one('--model'), tools: one('--tools'), toolsNew: one('--tools-new'), overCap: flags.has('--over-cap'),
+      model: one('--model'),
+      tools: one('--tools'),
+      toolsNew: one('--tools-new'),
+      overCap: flags.has('--over-cap'),
       claude: process.env.CLAUDE_BIN || 'claude',
     });
   } catch (err: any) {

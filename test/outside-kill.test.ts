@@ -45,11 +45,20 @@ chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 runner.pollMs = 10;
 runner.resumeGapMs = 0;
 runner.killStarved = async () => ({ starved: false, why: '' });
-const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+const notes = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
 
 async function turn(text: string, stop = false) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
@@ -63,7 +72,10 @@ async function turn(text: string, stop = false) {
   // Past the one resume a kill gets, if it was killed.
   await until('the turn to stop', async () => !runner.isRunning(t.id) && !runner.killWait(t.id), 10000);
   assert.ok(!runner.isRunning(t.id), 'the turn ended');
-  const errors = store.listEvents(t.id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text);
+  const errors = store
+    .listEvents(t.id)
+    .filter((e) => e.kind === 'error')
+    .map((e) => JSON.parse(e.data).text);
   return { ticket: store.getTicket(t.id)!, errors, notes: notes(t.id) };
 }
 
@@ -104,7 +116,13 @@ test('a claude killed outright by a signal nobody sent from Citadel fails the tu
   assert.match(errors[0] ?? '', /^Killed by SIGTERM from outside Citadel\./);
   assert.match(notes.find((n) => n.startsWith('Killed')) ?? '', /^Killed by SIGTERM from outside Citadel\./);
   // A health row for each of its two kills, which outlives the chat's (#1325).
-  assert.deepEqual(store.healthEventsSince(['turn-killed'], 0).filter((e) => e.detail.startsWith(`minion ${ticket.id}:`)).map((e) => e.detail), [`minion ${ticket.id}: SIGTERM`, `minion ${ticket.id}: SIGTERM`]);
+  assert.deepEqual(
+    store
+      .healthEventsSince(['turn-killed'], 0)
+      .filter((e) => e.detail.startsWith(`minion ${ticket.id}:`))
+      .map((e) => e.detail),
+    [`minion ${ticket.id}: SIGTERM`, `minion ${ticket.id}: SIGTERM`],
+  );
 });
 
 test('a turn killed together with its wrapper (no exit record) is resumed, and killed again fails rather than ending idle like a stop (#468 S03-4)', async () => {
@@ -130,7 +148,10 @@ test('a turn killed together with its wrapper (no exit record) is resumed, and k
     await until('the turn to stop', async () => !runner.isRunning(t.id) && !runner.killWait(t.id), 10000);
     assert.ok(!runner.isRunning(t.id), 'the turn ended');
     assert.equal(store.getTicket(t.id)!.status, 'error');
-    const errors = store.listEvents(t.id).filter((e) => e.kind === 'error').map((e) => JSON.parse(e.data).text);
+    const errors = store
+      .listEvents(t.id)
+      .filter((e) => e.kind === 'error')
+      .map((e) => JSON.parse(e.data).text);
     assert.match(errors[0] ?? '', /^The turn's process was killed before it finished/);
     assert.match(errors[0] ?? '', /already resumed once after a kill/);
     assert.equal(failed.length, 1, 'people hear of it');
@@ -152,7 +173,10 @@ test('a stop before claude has started signals it as soon as it starts, not at t
   runner.clock = clock;
   try {
     runner.stop(t.id);
-    assert.ok(clock.pending().some((p) => p.ms === runner.stopKillMs), 'the SIGKILL retry is armed');
+    assert.ok(
+      clock.pending().some((p) => p.ms === runner.stopKillMs),
+      'the SIGKILL retry is armed',
+    );
     await until('the turn to stop', async () => !runner.isRunning(t.id));
     assert.ok(!runner.isRunning(t.id), 'the turn ended without the clock moving');
   } finally {

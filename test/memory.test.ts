@@ -64,7 +64,10 @@ test('indexes finished turns and minion titles, never tool output, a Grunt, pers
 
   while ((await store.memory.index(A.id, embed, 'fake')) > 0);
   const rows = store.db.prepare('SELECT project_id, source_kind, text FROM memory_chunks ORDER BY id').all() as { project_id: number; source_kind: string; text: string }[];
-  assert.ok(rows.every((r) => r.project_id === A.id), 'only scheme A was indexed');
+  assert.ok(
+    rows.every((r) => r.project_id === A.id),
+    'only scheme A was indexed',
+  );
   const all = rows.map((r) => r.text).join('\n');
   assert.match(all, /Cara: When is the dentist appointment\?\n\nReply: Cara decided the dentist is on Tuesday\./);
   assert.match(all, /#\d+ Dentist reminders/);
@@ -86,7 +89,10 @@ test('indexes finished turns and minion titles, never tool output, a Grunt, pers
   turn(store, a1.id, 'Josh', 'Josh asks about the dentist too', 'Noted.');
   while ((await store.memory.index(A.id, embed, 'fake')) > 0);
   const his = await store.memory.search(A.id, 'dentist', embed, 'fake', { personId: josh.id, limit: 20 });
-  assert.deepEqual(his.map((h) => h.text.split(':')[0]), ['Josh']);
+  assert.deepEqual(
+    his.map((h) => h.text.split(':')[0]),
+    ['Josh'],
+  );
   store.db.close();
 });
 
@@ -97,7 +103,11 @@ test('a turn still running after an hour waits for its result, and is indexed wi
   const later = Date.now() + 61 * 60_000;
   await store.memory.index(A.id, embed, 'fake', 32, later);
   const turns = () => store.db.prepare("SELECT source_id, text FROM memory_chunks WHERE source_kind = 'turn'").all() as { source_id: number; text: string }[];
-  assert.equal(turns().some((t) => t.source_id === long.id), false, 'not while its minion is still running');
+  assert.equal(
+    turns().some((t) => t.source_id === long.id),
+    false,
+    'not while its minion is still running',
+  );
   store.addEvent(a1.id, 'claude', assistant('Figs are done: all green.'));
   const result = store.addEvent(a1.id, 'claude', { type: 'result', result: 'x' });
   store.recordTurn(a1.id, { event_id: result.id, ended_at: Date.now(), session_cost_usd: 0 });
@@ -137,7 +147,10 @@ test("a running turn waits, and holds the mark, until its result; then it's inde
   turn(store, a2.id, 'Cara', 'Bananas please', 'Bananas done.');
   await store.memory.index(A.id, embed, 'fake');
   const turns = () => store.db.prepare("SELECT source_id, text FROM memory_chunks WHERE source_kind = 'turn'").all() as { source_id: number; text: string }[];
-  assert.deepEqual(turns().map((t) => t.text.split('\n')[0]), ['Cara: Bananas please']);
+  assert.deepEqual(
+    turns().map((t) => t.text.split('\n')[0]),
+    ['Cara: Bananas please'],
+  );
   assert.ok((store.getSetting<number>(`memory_turns_after:${A.id}`) ?? 0) < running.id, 'the mark stays before the running turn');
 
   store.addEvent(a1.id, 'claude', assistant('Kiwis are settled: green ones.'));
@@ -194,8 +207,7 @@ test('a new title or note, or a new model, embeds again; a deleted minion takes 
   store.deleteTicket(a1.id);
   assert.equal((store.db.prepare('SELECT COUNT(*) AS n FROM memory_chunks WHERE ticket_id = ?').get(a1.id) as { n: number }).n, 0);
   // A chunk an older release's deleteTicket left behind doesn't show on the minion that reuses its id.
-  store.db.prepare("INSERT INTO memory_chunks (project_id, ticket_id, source_kind, source_id, ts, text, vec, model) VALUES (?, ?, 'turn', 999999, 1, 'left behind hello', ?, 'fake-2')")
-    .run(A.id, a2.id, new Uint8Array(fakeVec('left behind hello').buffer));
+  store.db.prepare("INSERT INTO memory_chunks (project_id, ticket_id, source_kind, source_id, ts, text, vec, model) VALUES (?, ?, 'turn', 999999, 1, 'left behind hello', ?, 'fake-2')").run(A.id, a2.id, new Uint8Array(fakeVec('left behind hello').buffer));
   assert.ok((await store.memory.search(A.id, 'left behind hello', embed, 'fake-2', { limit: 20 })).every((h) => h.source_id !== 999999));
   store.db.close();
 });
@@ -211,18 +223,32 @@ test('a search reads the vectors in pages and still finds the best across all of
   }
   let ticks = 0;
   let on = true;
-  const tick = () => { if (on) { ticks++; setImmediate(tick); } };
+  const tick = () => {
+    if (on) {
+      ticks++;
+      setImmediate(tick);
+    }
+  };
   setImmediate(tick);
   const hits = await store.memory.search(A.id, 'dentist', embed, 'fake', { limit: 2 });
   on = false;
-  assert.deepEqual(hits.map((h) => h.text), ['dentist dentist', 'usage dentist']);
+  assert.deepEqual(
+    hits.map((h) => h.text),
+    ['dentist dentist', 'usage dentist'],
+  );
   assert.ok(ticks > 0, 'other work ran between pages');
-  assert.deepEqual((await store.memory.search(A.id, 'dentist', embed, 'fake', { ticketId: a2.id, limit: 20 })).map((h) => h.text), ['usage dentist']);
+  assert.deepEqual(
+    (await store.memory.search(A.id, 'dentist', embed, 'fake', { ticketId: a2.id, limit: 20 })).map((h) => h.text),
+    ['usage dentist'],
+  );
 
   // A minion deleted between pages, after its chunk was ranked, drops out of the hits rather than leaving a hit with no text.
   const pending = store.memory.search(A.id, 'dentist', embed, 'fake', { limit: 2 });
   setImmediate(() => store.deleteTicket(a2.id));
-  assert.deepEqual((await pending).map((h) => h.text), ['dentist dentist']);
+  assert.deepEqual(
+    (await pending).map((h) => h.text),
+    ['dentist dentist'],
+  );
   store.db.close();
 });
 
@@ -255,20 +281,23 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
   // No CITADEL_MEMORY_SCHEMES: every scheme is indexed (#488).
   const srv = await bootServer({ root: boot, env: { CITADEL_EMBED_URL: embedUrl, CITADEL_MEMORY_SCHEMES: undefined, CITADEL_MEMORY_EVERY_MS: '100' } });
   try {
-    const search = (project: number, q: string, headers: Record<string, string> = { Cookie: srv.cookie }, more = '') =>
-      fetch(`${srv.base}/api/projects/${project}/memory?q=${encodeURIComponent(q)}${more}`, { headers }).then(async (r) => ({ status: r.status, data: await r.json() }));
+    const search = (project: number, q: string, headers: Record<string, string> = { Cookie: srv.cookie }, more = '') => fetch(`${srv.base}/api/projects/${project}/memory?q=${encodeURIComponent(q)}${more}`, { headers }).then(async (r) => ({ status: r.status, data: await r.json() }));
     let r = await search(A.id, 'dentist reminders');
-    await until('the index to hold the minion', async () => {
-      if (r.data.hits?.length) return true;
-      r = await search(A.id, 'dentist reminders');
-      return r.data.hits?.length > 0;
-    }, 10_000);
+    await until(
+      'the index to hold the minion',
+      async () => {
+        if (r.data.hits?.length) return true;
+        r = await search(A.id, 'dentist reminders');
+        return r.data.hits?.length > 0;
+      },
+      10_000,
+    );
     assert.equal(r.status, 200);
     assert.ok(r.data.hits.length > 0);
     assert.ok(r.data.hits.every((h: any) => h.ticket_id !== b1.id));
 
     const bearer = (id: number) => ({ Authorization: `Bearer ${agentToken(data, id)}` });
-    assert.equal((await search(A.id, 'dentist', bearer(a1.id))).status, 200, "a minion searches its own scheme");
+    assert.equal((await search(A.id, 'dentist', bearer(a1.id))).status, 200, 'a minion searches its own scheme');
     assert.equal((await search(A.id, 'dentist', bearer(b1.id))).status, 403, "but not another scheme's");
     assert.ok((await search(B.id, 'dentist', bearer(b1.id))).data.hits.every((h: any) => h.ticket_id === b1.id));
     assert.equal((await search(A.id, 'x')).status, 400, 'too short to search');
@@ -300,7 +329,11 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
 
     // Open minions only, titles and notes only: the duplicate check's scope (#488).
     const minions = (await search(A.id, 'dentist reminders usage bar', undefined, '&scope=minions')).data.hits;
-    assert.deepEqual(minions.map((h: any) => [h.source_kind, h.ticket_id, h.status]), [['ticket', a1.id, 'new']], 'no turns, and not the dismissed Usage bar');
+    assert.deepEqual(
+      minions.map((h: any) => [h.source_kind, h.ticket_id, h.status]),
+      [['ticket', a1.id, 'new']],
+      'no turns, and not the dismissed Usage bar',
+    );
 
     // create_ticket, as the Taskmaster: refused when an open minion reads like the same work, until not_duplicate.
     const create = async (args: object) => {
@@ -319,7 +352,7 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     };
     const twin = await create({ title: 'Dentist reminders', message: 'Remind people about the dentist' });
     assert.match(twin, /^Not created: /);
-    assert.match(twin, new RegExp(`^- #${a1.number} Dentist reminders, Josh's \\(new, [01]\\.\\d+\\)$`, 'm'), "with its owner (#689)");
+    assert.match(twin, new RegExp(`^- #${a1.number} Dentist reminders, Josh's \\(new, [01]\\.\\d+\\)$`, 'm'), 'with its owner (#689)');
     assert.match(await create({ title: 'Usage bar', message: 'Show the usage bar' }), /^Created /, 'a dismissed minion is no twin');
     assert.match(await create({ title: 'Dentist reminders', message: 'Remind people about the dentist', not_duplicate: true }), /^Created /);
 
@@ -342,7 +375,11 @@ test('the route: the indexer fills it in the background, and nobody reads a sche
     assert.equal(got.status, 200);
     assert.equal(got.data.model, 'Qwen3-Embedding-0.6B-Q8_0');
     const dot = (a: number[], b: Float32Array) => a.reduce((s, x, i) => s + x * b[i], 0);
-    assert.deepEqual(got.data.vectors.map((v: number[], i: number) => Math.round(dot(v, fakeVec(['dentist on tuesday', 'usage bar'][i])) * 1000) / 1000), [1, 1], 'each text its own vector, in order');
+    assert.deepEqual(
+      got.data.vectors.map((v: number[], i: number) => Math.round(dot(v, fakeVec(['dentist on tuesday', 'usage bar'][i])) * 1000) / 1000),
+      [1, 1],
+      'each text its own vector, in order',
+    );
     assert.equal((await embedCall({ texts: ['x'] }, {})).status, 401, 'no key, no vectors');
     assert.equal((await embedCall({ texts: ['x'] }, { Cookie: srv.cookie })).status, 403, "a person's browser can't call it");
     for (const texts of [[], ['ok', ''], ['a'.repeat(4001)], Array(17).fill('a'), 'dentist', [3]]) assert.equal((await embedCall({ texts })).status, 400, JSON.stringify(texts).slice(0, 40));
@@ -359,8 +396,12 @@ test('a search with a selective filter yields between pages of rows scanned, and
   store.db.exec('BEGIN');
   for (let i = 0; i < 700; i++) put.run(A.id, a1.id, i < 600 ? 1 : 2, 1000 + i, Date.now() + 1000, `chunk ${i}`, vec);
   store.db.exec('COMMIT');
-  let ticks = 0, going = true;
-  const tick = () => { ticks++; if (going) setImmediate(tick); };
+  let ticks = 0,
+    going = true;
+  const tick = () => {
+    ticks++;
+    if (going) setImmediate(tick);
+  };
   setImmediate(tick);
   const hits = await store.memory.search(A.id, 'dentist', embed, 'fake', { personId: 2, limit: 20 });
   going = false;
@@ -379,7 +420,10 @@ test('indexing finds new messages through events_asks, not a seek into every min
   turn(store, t.id, 'cara', 'question', 'answer');
   const seen: string[] = [];
   const prepare = store.db.prepare.bind(store.db);
-  store.db.prepare = ((sql: string, ...r: any[]) => { seen.push(sql); return prepare(sql, ...r); }) as typeof store.db.prepare;
+  store.db.prepare = ((sql: string, ...r: any[]) => {
+    seen.push(sql);
+    return prepare(sql, ...r);
+  }) as typeof store.db.prepare;
   await store.memory.index(P.id, embed, 'fake');
   const ids = seen.find((sql) => /SELECT e\.id FROM events e/.test(sql));
   assert.ok(ids, 'pendingTurns reads the message ids first');
@@ -405,7 +449,10 @@ test('indexing sorts message ids, never message text', async () => {
   for (let i = 0; i < 5; i++) turn(store, t.id, 'cara', `question ${i}`, `answer ${i}`);
   const seen: string[] = [];
   const prepare = store.db.prepare.bind(store.db);
-  store.db.prepare = ((sql: string, ...r: any[]) => { seen.push(sql); return prepare(sql, ...r); }) as typeof store.db.prepare;
+  store.db.prepare = ((sql: string, ...r: any[]) => {
+    seen.push(sql);
+    return prepare(sql, ...r);
+  }) as typeof store.db.prepare;
   assert.equal(await store.memory.index(P.id, embed, 'fake'), 6, 'five turns and the minion itself');
   const withText = seen.filter((sql) => /e\.data/.test(sql) && /FROM events/.test(sql));
   assert.ok(withText.length);
@@ -425,7 +472,10 @@ test('a cut that lands inside an emoji never sends a lone surrogate to the embed
     return texts.map(fakeVec);
   };
   while ((await store.memory.index(A.id, strict, 'fake')) > 0);
-  assert.ok(sent.some((t) => t.includes('aaaa')), 'the turn was embedded');
+  assert.ok(
+    sent.some((t) => t.includes('aaaa')),
+    'the turn was embedded',
+  );
   for (const t of sent) assert.equal(t, t.toWellFormed(), 'no lone surrogate');
   store.db.close();
 });
@@ -447,7 +497,10 @@ test('a chunk the embedder refuses with a 4xx is skipped once and indexing moves
     console.error = orig;
   }
   const texts = (store.db.prepare("SELECT text FROM memory_chunks WHERE source_kind = 'turn'").all() as { text: string }[]).map((r) => r.text);
-  assert.ok(texts.some((t) => t.includes('limes')), 'the chunk after it is indexed');
+  assert.ok(
+    texts.some((t) => t.includes('limes')),
+    'the chunk after it is indexed',
+  );
   assert.ok(!texts.some((t) => t.includes('POISON')), 'the refused one is not');
   assert.equal(logged.filter((a) => String(a[0]).includes('skipped')).length, 1, 'logged once');
   const down: Embed = async () => {

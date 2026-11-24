@@ -9,7 +9,6 @@ import { pacific } from './pacific.ts';
 import { asData } from './quote.ts';
 import type { QueuedMessage } from './runner.ts';
 
-
 /** Taskmaster↔minion messages (both ways) one minion may exchange per LOOP_WINDOW_MS before the next waits for a person. */
 /** The defaults (#1059): each scheme's own count and window are its message settings. */
 export const LOOP_LIMIT = MSG_DEFAULTS.loopLimit;
@@ -97,7 +96,7 @@ export class Relay {
    */
   relay(minionId: number, to: number, author: string, text: string, _urgent = false, wake = true, need?: string, sender?: number): boolean | 'mail' | 'parked' {
     const minion = this.d.store.getTicket(minionId)!;
-    const from = to === minionId ? sender ?? this.d.store.ownerCoordinator(minion)?.id : minionId;
+    const from = to === minionId ? (sender ?? this.d.store.ownerCoordinator(minion)?.id) : minionId;
     const cfg = this.settings(minionId);
     const { held, parked, woke } = this.guard(loopKey(minionId), cfg.loopLimit, cfg.loopMin * 60_000, to, author, text, to === minionId, from, !wake, need);
     if (!held) return parked ? 'parked' : !wake && !woke ? 'mail' : false;
@@ -188,7 +187,7 @@ export class Relay {
     // Held first, then its chat line (#1378): a crash between the two leaves the mail, not a line nothing delivers.
     const id = store.reserveEventId();
     // Cold mail is a relay delayed (#413), so it keeps its sender's person, as the relay would have; asked-for mail carries none.
-    this.d.hold(to, { author: `Held mail from ${author}, sent ${sent}`, text, images: [], id, ...(cold ? { cold: true as const } : {}), ...(cold && from ? { from } : {}), asker: cold ? this.d.personOf()?.(author, from) ?? null : null }, cold ? this.d.now() : undefined);
+    this.d.hold(to, { author: `Held mail from ${author}, sent ${sent}`, text, images: [], id, ...(cold ? { cold: true as const } : {}), ...(cold && from ? { from } : {}), asker: cold ? (this.d.personOf()?.(author, from) ?? null) : null }, cold ? this.d.now() : undefined);
     this.d.emit(to, 'user_message', { author, text: hideTokens(text), mail: true, ...(need ? { need } : {}), ...(cold ? { cold: true } : {}), ...(from ? { from } : {}), ...(note ? { note: true } : {}) }, id);
     // A Taskmaster's relay that quotes a person's go hands it over when sent, as held mail too (#939).
     const ticket = store.getTicket(to);

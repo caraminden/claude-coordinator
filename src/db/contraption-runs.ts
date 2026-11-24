@@ -5,8 +5,7 @@ export type ContraptionRun = { id: number; contraption_id: number; at: number; a
 
 export const contraptionRunQueries = {
   addContraptionRun(this: Store, r: Omit<ContraptionRun, 'id'>) {
-    this.db.prepare('INSERT INTO contraption_runs (contraption_id, at, action, risk, by, ok, said) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(r.contraption_id, r.at, r.action, r.risk, r.by, r.ok, r.said);
+    this.db.prepare('INSERT INTO contraption_runs (contraption_id, at, action, risk, by, ok, said) VALUES (?, ?, ?, ?, ?, ?, ?)').run(r.contraption_id, r.at, r.action, r.risk, r.by, r.ok, r.said);
   },
   /** Its newest runs, newest first. */
   contraptionRuns(this: Store, contraptionId: number, limit = 10): ContraptionRun[] {

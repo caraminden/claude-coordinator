@@ -68,7 +68,7 @@ export function decideHold(o: { record: HoldRecord | null; held: PromptSections 
 }
 
 /** The note for a session whose instructions changed and then changed back to its system prompt's. */
-export const BACK_NOTE = 'Your instructions are back to this conversation\'s system prompt as written: the last note about changed instructions no longer applies.';
+export const BACK_NOTE = "Your instructions are back to this conversation's system prompt as written: the last note about changed instructions no longer applies.";
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
@@ -99,7 +99,7 @@ export function changeNote(held: PromptSections, current: PromptSections, replac
     for (const line of was) if (line.trim() && !nowSet.has(line)) removed.push(`- "${clip(line, 120)}"`);
   }
   return [
-    'Your instructions changed since this conversation\'s system prompt was written. It stays as it was until your next cold start, so your prompt cache stays warm; these lines are current and win over the old wording in it.',
+    "Your instructions changed since this conversation's system prompt was written. It stays as it was until your next cold start, so your prompt cache stays warm; these lines are current and win over the old wording in it.",
     // Each note is the whole change from the system prompt, so a line an earlier note added and this one lacks is gone.
     ...(replaces ? ['This note replaces the earlier note about changed instructions: a change listed there and not here no longer stands.'] : []),
     ...(added.length ? ['New or reworded:', ...added] : []),

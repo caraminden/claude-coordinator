@@ -7,13 +7,22 @@ import { execFile } from 'node:child_process';
 
 /** Counters that only go up, from /proc/vmstat and the server's own cgroup, in pages (thp in faults, pgpgin in KiB). */
 export interface CacheCounters {
-  kswapd: number; refault: number; serverRefault: number | null; pgpgin: number; thpFallback: number;
+  kswapd: number;
+  refault: number;
+  serverRefault: number | null;
+  pgpgin: number;
+  thpFallback: number;
 }
 
 /** What one sample stores: the database's bytes in memory and its size, then each counter's rate per second. */
 export interface CacheReading {
-  db_cached: number | null; db_size: number | null;
-  kswapd_rate: number | null; refault_rate: number | null; server_refault_rate: number | null; pgpgin_rate: number | null; thp_fallback_rate: number | null;
+  db_cached: number | null;
+  db_size: number | null;
+  kswapd_rate: number | null;
+  refault_rate: number | null;
+  server_refault_rate: number | null;
+  pgpgin_rate: number | null;
+  thp_fallback_rate: number | null;
 }
 
 const num = (text: string, key: string): number | null => {
@@ -41,8 +50,11 @@ export function parseFincore(out: string): { cached: number; size: number } | nu
 export function rates(prev: CacheCounters | null, now: CacheCounters | null, ms: number): Omit<CacheReading, 'db_cached' | 'db_size'> {
   const per = (a: number | null | undefined, b: number | null | undefined) => (a == null || b == null || b < a || ms <= 0 ? null : Math.round(((b - a) / (ms / 1000)) * 100) / 100);
   return {
-    kswapd_rate: per(prev?.kswapd, now?.kswapd), refault_rate: per(prev?.refault, now?.refault), server_refault_rate: per(prev?.serverRefault, now?.serverRefault),
-    pgpgin_rate: per(prev?.pgpgin, now?.pgpgin), thp_fallback_rate: per(prev?.thpFallback, now?.thpFallback),
+    kswapd_rate: per(prev?.kswapd, now?.kswapd),
+    refault_rate: per(prev?.refault, now?.refault),
+    server_refault_rate: per(prev?.serverRefault, now?.serverRefault),
+    pgpgin_rate: per(prev?.pgpgin, now?.pgpgin),
+    thp_fallback_rate: per(prev?.thpFallback, now?.thpFallback),
   };
 }
 
@@ -57,23 +69,22 @@ export function dbCold(rows: { db_cached?: number | null; db_size?: number | nul
   return last.length === COLD_SAMPLES && last.every((r) => r.db_cached != null && r.db_size != null && r.db_size > 0 && r.db_cached < r.db_size * COLD_SHARE && r.mem_avail > COLD_AVAIL_BYTES);
 }
 
-const run = (file: string, args: string[]) => new Promise<string>((resolve, reject) => {
-  execFile(file, args, { timeout: 5000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
-});
+const run = (file: string, args: string[]) =>
+  new Promise<string>((resolve, reject) => {
+    execFile(file, args, { timeout: 5000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+  });
 
 /** Reads the counters and the database's cache, keeping the last counters for the next rates. */
 export class CacheSampler {
   private prev: { at: number; c: CacheCounters } | null = null;
   private deps: { dbPath: string; vmstat?: () => Promise<string>; serverStat?: () => Promise<string | null>; fincore?: (path: string) => Promise<string> };
-  constructor(deps: CacheSampler['deps']) { this.deps = deps; }
+  constructor(deps: CacheSampler['deps']) {
+    this.deps = deps;
+  }
 
   async read(now: number): Promise<CacheReading> {
     const d = this.deps;
-    const [vm, srv, fin] = await Promise.all([
-      (d.vmstat ?? (() => hostText('/proc/vmstat')))().catch(() => null),
-      (d.serverStat ?? serverMemoryStat)().catch(() => null),
-      (d.fincore ?? ((p) => run('fincore', ['-b', '-n', '-o', 'RES,SIZE', p])))(d.dbPath).catch(() => null),
-    ]);
+    const [vm, srv, fin] = await Promise.all([(d.vmstat ?? (() => hostText('/proc/vmstat')))().catch(() => null), (d.serverStat ?? serverMemoryStat)().catch(() => null), (d.fincore ?? ((p) => run('fincore', ['-b', '-n', '-o', 'RES,SIZE', p])))(d.dbPath).catch(() => null)]);
     const c = vm ? parseCounters(vm, srv) : null;
     const db = fin ? parseFincore(fin) : null;
     const r = rates(this.prev?.c ?? null, c, this.prev ? now - this.prev.at : 0);

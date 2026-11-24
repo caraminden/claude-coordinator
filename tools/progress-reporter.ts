@@ -9,14 +9,20 @@ type Event = { type: string; data?: { name?: string; file?: string; todo?: unkno
 
 export default async function* progress(source: AsyncIterable<Event>) {
   const to = process.env.CITADEL_TEST_PROGRESS_TO;
-  const files = new Set<string>(), done = new Set<string>(), failed = new Set<string>(), running: string[] = [];
+  const files = new Set<string>(),
+    done = new Set<string>(),
+    failed = new Set<string>(),
+    running: string[] = [];
   let shown = '';
   for await (const event of source) {
     try {
       const { name, file } = event.data ?? {};
       if (!to || !file) continue;
       // Any failed test marks its file, a todo's failure aside (it fails no run).
-      if (event.type === 'test:fail') { if (event.data?.todo) continue; failed.add(file); }
+      if (event.type === 'test:fail') {
+        if (event.data?.todo) continue;
+        failed.add(file);
+      }
       // A file's own events carry its path as their name; the tests inside it carry their own names.
       else if (!name || resolve(name) !== file) continue;
       else if (event.type === 'test:enqueue') files.add(file);

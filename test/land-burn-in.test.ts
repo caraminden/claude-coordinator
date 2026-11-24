@@ -9,9 +9,17 @@ import { test } from 'node:test';
 import { ci, git, seen, setup, quietProc } from './land-fixture.ts';
 
 const landLog = (shared: string) => readFileSync(join(shared, 'retro-log', readdirSync(join(shared, 'retro-log'))[0], 'land.md'), 'utf8');
-const pushes = (c: ReturnType<typeof ci>) => c.calls().split('\n').filter((l) => l.includes('/actions/runners ')).length;
+const pushes = (c: ReturnType<typeof ci>) =>
+  c
+    .calls()
+    .split('\n')
+    .filter((l) => l.includes('/actions/runners ')).length;
 const ref = (r: ReturnType<typeof setup>, name: string) => {
-  try { return git(join(r.dir, 'hub.git'), 'rev-parse', '-q', '--verify', name); } catch { return ''; }
+  try {
+    return git(join(r.dir, 'hub.git'), 'rev-parse', '-q', '--verify', name);
+  } catch {
+    return '';
+  }
 };
 
 test("a red burn-in refuses the ship as its own red: no fresh run, even when its log quotes a known flake's line", () => {
@@ -33,7 +41,7 @@ test("a red burn-in refuses the ship as its own red: no fresh run, even when its
   assert.equal(c.localRuns(), 0, 'never on perigee');
 });
 
-test('the run gets the ship\'s base as land-base/<branch> beside land/<branch>, and both go when the ship is done', async () => {
+test("the run gets the ship's base as land-base/<branch> beside land/<branch>, and both go when the ship is done", async () => {
   const r = setup();
   const c = ci(r);
   r.commit(r.wt, 'b.txt', 'mine\n');

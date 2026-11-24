@@ -5,17 +5,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deleteNote, indexNote, memoryDir, memoryFolders, noteFile, readFolder, saveNote, staleFlags } from '../src/memory-files.ts';
 
-test('memoryFolders maps a repo path to each login\'s projects/<slug>/memory, once per distinct dir', () => {
+test("memoryFolders maps a repo path to each login's projects/<slug>/memory, once per distinct dir", () => {
   const repo = '/home/cara/.local/share/claude-coordinator/projects/7/repo';
   const got = memoryFolders(repo, [
     { label: "The server's own login", configDir: '/h/.claude' },
     { label: 'Dev account 2', configDir: '/d/claude-accounts/1/2' },
     { label: 'same as first', configDir: '/h/.claude' },
   ]);
-  assert.deepEqual(got.map(({ id, ...f }) => f), [
-    { label: "The server's own login", rel: 'projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory', dir: '/h/.claude/projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory' },
-    { label: 'Dev account 2', rel: 'projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory', dir: '/d/claude-accounts/1/2/projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory' },
-  ]);
+  assert.deepEqual(
+    got.map(({ id, ...f }) => f),
+    [
+      { label: "The server's own login", rel: 'projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory', dir: '/h/.claude/projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory' },
+      { label: 'Dev account 2', rel: 'projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory', dir: '/d/claude-accounts/1/2/projects/-home-cara--local-share-claude-coordinator-projects-7-repo/memory' },
+    ],
+  );
   assert.notEqual(got[0].id, got[1].id);
   assert.equal(memoryDir('/c', '/a/b'), '/c/projects/-a-b/memory');
   assert.deepEqual(memoryFolders(null, [{ label: 'x', configDir: '/c' }]), []);
@@ -53,7 +56,13 @@ test('edit replaces a note whole and refuses one that is not there', () => {
 test('readFolder lists notes in index order with stale flags; a missing folder is not reachable', () => {
   const dir = setup();
   const v = readFolder({ label: 'L', dir }, (n) => n === 5, Date.parse('2026-11-19T12:00:00-08:00'));
-  assert.deepEqual(v.notes.map((n) => [n.file, n.name, n.type]), [['a.md', 'A note', 'project'], ['b.md', 'B', '']]);
+  assert.deepEqual(
+    v.notes.map((n) => [n.file, n.name, n.type]),
+    [
+      ['a.md', 'A note', 'project'],
+      ['b.md', 'B', ''],
+    ],
+  );
   assert.deepEqual(v.notes[0].flags, { closed: [5], datesPast: ['2020-01-01'], datesSoon: [] });
   assert.equal(readFolder({ label: 'L', dir: join(dir, 'nope') }, () => false).reachable, false);
 });
@@ -69,7 +78,10 @@ test('a note that is a symlink is neither listed, edited nor deleted', () => {
   const outside = join(mkdtempSync(join(tmpdir(), 'outside-')), 'secret.md');
   writeFileSync(outside, 'secret');
   symlinkSync(outside, join(dir, 'link.md'));
-  assert.equal(readFolder({ label: 'L', dir }, () => false).notes.some((n) => n.file === 'link.md'), false);
+  assert.equal(
+    readFolder({ label: 'L', dir }, () => false).notes.some((n) => n.file === 'link.md'),
+    false,
+  );
   assert.throws(() => saveNote(dir, 'link.md', 'x'), /No such note/);
   assert.throws(() => deleteNote(dir, 'link.md'), /No such note/);
   assert.equal(readFileSync(outside, 'utf8'), 'secret');
@@ -90,7 +102,10 @@ test('indexNote appends a linked line once, makes MEMORY.md when missing, and re
   assert.equal(indexNote(dir, 'c.md'), true);
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- [A note](a.md) — first\n- [B](b.md) — second\n- [C  draft ](c.md) — third one\n');
   assert.equal(indexNote(dir, 'c.md'), false, 'a second add leaves the index alone');
-  assert.equal(readFolder({ label: 'x', dir, id: 'i', rel: 'r' }, () => false).notes.every((n) => n.inIndex), true);
+  assert.equal(
+    readFolder({ label: 'x', dir, id: 'i', rel: 'r' }, () => false).notes.every((n) => n.inIndex),
+    true,
+  );
   rmSync(join(dir, 'MEMORY.md'));
   assert.equal(indexNote(dir, 'b.md'), true);
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), '- [B](b.md) — second\n');
@@ -100,7 +115,10 @@ test('indexNote appends a linked line once, makes MEMORY.md when missing, and re
   writeFileSync(join(dir, 'MEMORY.md'), lines(199));
   assert.equal(indexNote(dir, 'a.md'), true);
   writeFileSync(join(dir, 'MEMORY.md'), lines(200));
-  assert.throws(() => indexNote(dir, 'a.md'), (e: any) => e.status === 409 && /full/.test(e.message));
+  assert.throws(
+    () => indexNote(dir, 'a.md'),
+    (e: any) => e.status === 409 && /full/.test(e.message),
+  );
   assert.equal(readFileSync(join(dir, 'MEMORY.md'), 'utf8'), lines(200));
 });
 

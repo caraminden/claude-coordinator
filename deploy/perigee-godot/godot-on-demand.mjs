@@ -50,7 +50,12 @@ export const needsEditor = (msg) => !!msg && msg.id !== undefined && EDITOR_WORK
 export function unitState(cfg) {
   const r = spawnSync(cfg.systemctl, ['--user', 'show', cfg.unit, '-p', 'ActiveState', '-p', 'FreezerState', '-p', 'InactiveExitTimestamp', '--timestamp=unix'], { encoding: 'utf8' });
   if (r.status !== 0) throw new Error(`systemctl show ${cfg.unit} failed: ${(r.stderr || r.error?.message || '').trim()}`);
-  const p = Object.fromEntries(r.stdout.split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  const p = Object.fromEntries(
+    r.stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]),
+  );
   const since = /^@(\d+)$/.exec(p.InactiveExitTimestamp ?? '');
   return { state: p.ActiveState ?? 'unknown', frozen: !!p.FreezerState && p.FreezerState !== 'running', since: since ? Number(since[1]) * 1000 : 0 };
 }
@@ -213,22 +218,26 @@ export function bridge(command, cfg = settings(), { input = process.stdin, outpu
   keep.unref();
   // Lines go to the server in order: one held for the editor holds the ones behind it.
   let chain = Promise.resolve();
-  lines(input, (line) => {
-    let msg = null;
-    try {
-      msg = JSON.parse(line);
-    } catch {}
-    const needs = needsEditor(msg);
-    // Only editor work is use: every turn in a scheme the machine is lent to opens a session and sends a
-    // handshake, so stamping those kept the editor up around the clock (#615).
-    if (needs) pending.add(msg.id), stamp();
-    // A call the client gave up on gets no answer: stop counting it as in flight.
-    if (msg?.method === 'notifications/cancelled') pending.delete(msg.params?.requestId);
-    chain = chain.then(async () => {
-      if (needs) await ensure().catch((err) => log(`could not get the editor up: ${err.message}`));
-      child.stdin.write(`${line}\n`);
-    });
-  }, () => chain.then(() => child.stdin.end()));
+  lines(
+    input,
+    (line) => {
+      let msg = null;
+      try {
+        msg = JSON.parse(line);
+      } catch {}
+      const needs = needsEditor(msg);
+      // Only editor work is use: every turn in a scheme the machine is lent to opens a session and sends a
+      // handshake, so stamping those kept the editor up around the clock (#615).
+      if (needs) pending.add(msg.id), stamp();
+      // A call the client gave up on gets no answer: stop counting it as in flight.
+      if (msg?.method === 'notifications/cancelled') pending.delete(msg.params?.requestId);
+      chain = chain.then(async () => {
+        if (needs) await ensure().catch((err) => log(`could not get the editor up: ${err.message}`));
+        child.stdin.write(`${line}\n`);
+      });
+    },
+    () => chain.then(() => child.stdin.end()),
+  );
   lines(child.stdout, (line) => {
     try {
       const msg = JSON.parse(line);

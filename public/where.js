@@ -30,13 +30,25 @@ function bar(pct) {
 /** One table: a row per slice with a bar against the biggest this week, this week, and last week. */
 function sliceTable(head, rows, weekUsd, name = (r) => r.name, all = false) {
   const max = Math.max(...rows.map((r) => r.usd), 0);
-  return h('table', { class: 'where-table' },
+  return h(
+    'table',
+    { class: 'where-table' },
     h('thead', {}, h('tr', {}, h('th', {}, head), h('th', { class: 'bar-col', 'aria-hidden': 'true' }), h('th', { class: 'num' }, all ? 'All time' : 'This week'), all ? '' : h('th', { class: 'num' }, 'Last week'))),
-    h('tbody', {}, rows.map((r) => h('tr', { title: `${r.name}: ${costText(r.usd)} ${all ? 'in all' : 'this week'}${r.estimated ? ` (${costText(r.estimated)} estimated)` : ''}${all ? '' : `, ${costText(r.lastWeek)} last week`}` },
-      h('th', { scope: 'row' }, name(r), r.estimated > 0.005 ? h('span', { class: 'est', title: "Partly estimated: turns from before 2026-11-17 kept no split, so they count under their minion's own model" }, ' est.') : ''),
-      h('td', { class: 'bar-col' }, bar(max ? Math.max(2, (r.usd / max) * 100) : 0)),
-      h('td', { class: 'num' }, amount(r.usd, weekUsd)),
-      all ? '' : h('td', { class: 'num last' }, r.lastWeek ? (share(r.lastWeek, weekUsd) ?? costText(r.lastWeek)) : '–')))));
+    h(
+      'tbody',
+      {},
+      rows.map((r) =>
+        h(
+          'tr',
+          { title: `${r.name}: ${costText(r.usd)} ${all ? 'in all' : 'this week'}${r.estimated ? ` (${costText(r.estimated)} estimated)` : ''}${all ? '' : `, ${costText(r.lastWeek)} last week`}` },
+          h('th', { scope: 'row' }, name(r), r.estimated > 0.005 ? h('span', { class: 'est', title: "Partly estimated: turns from before 2026-11-17 kept no split, so they count under their minion's own model" }, ' est.') : ''),
+          h('td', { class: 'bar-col' }, bar(max ? Math.max(2, (r.usd / max) * 100) : 0)),
+          h('td', { class: 'num' }, amount(r.usd, weekUsd)),
+          all ? '' : h('td', { class: 'num last' }, r.lastWeek ? (share(r.lastWeek, weekUsd) ?? costText(r.lastWeek)) : '–'),
+        ),
+      ),
+    ),
+  );
 }
 
 /** Fable's share of all spend, this week and last: the number "use it half as often" is checked by. */
@@ -53,23 +65,34 @@ export function whereView(w) {
   const weekUsd = all ? null : w.weekUsd;
   const est = w.models.reduce((a, m) => a + m.estimated, 0);
   const top = w.top.map((m) => ({ ...m, name: m.kind === 'coordinator' ? 'Taskmaster' : `#${m.number} ${m.title}`, lastWeek: 0, estimated: 0 }));
-  return h('div', { class: 'where' },
-    h('div', { class: 'where-head' },
-      h('div', { class: 'where-total' }, h('span', { class: 'label' }, all ? 'All time' : 'Last 7 days'), amount(w.total, weekUsd)),
-      all ? '' : h('div', { class: 'where-total' }, h('span', { class: 'label' }, 'The 7 before'), amount(w.lastWeek, weekUsd)),
-      fableShare(w, all)),
-    w.total || w.lastWeek ? [
-      h('h4', {}, 'By model'), sliceTable('Model', w.models, weekUsd, undefined, all),
-      h('h4', {}, 'By scheme'), sliceTable('Scheme', w.schemes, weekUsd, undefined, all),
-      h('h4', {}, 'By kind of work'), sliceTable('Kind', w.kinds, weekUsd, undefined, all),
-      h('h4', {}, all ? 'Costliest minions' : 'Costliest minions this week'),
-      sliceTable('Minion', top, weekUsd, (m) => h('a', { href: threadHref(m) }, m.name, h('span', { class: 'scheme' }, ` · ${m.scheme}`)), all),
-    ] : h('p', { class: 'key' }, all ? 'No turns on your plan yet.' : 'No turns on your plan in the last two weeks.'),
-    h('p', { class: 'foot' },
-      all ? 'Every turn on your plan since the start, in dollars at API prices. '
-        : w.weekUsd ? `100% is the weekly limit of ${w.accounts > 1 ? `all ${w.accounts} of your Claude accounts together` : 'your Claude account'}, ≈ $${Math.round(w.weekUsd)} at API prices, priced from your weekly meter. ` : 'Dollars at API prices until your weekly meter reaches 3%; then shares of the week. ',
+  return h(
+    'div',
+    { class: 'where' },
+    h('div', { class: 'where-head' }, h('div', { class: 'where-total' }, h('span', { class: 'label' }, all ? 'All time' : 'Last 7 days'), amount(w.total, weekUsd)), all ? '' : h('div', { class: 'where-total' }, h('span', { class: 'label' }, 'The 7 before'), amount(w.lastWeek, weekUsd)), fableShare(w, all)),
+    w.total || w.lastWeek
+      ? [
+          h('h4', {}, 'By model'),
+          sliceTable('Model', w.models, weekUsd, undefined, all),
+          h('h4', {}, 'By scheme'),
+          sliceTable('Scheme', w.schemes, weekUsd, undefined, all),
+          h('h4', {}, 'By kind of work'),
+          sliceTable('Kind', w.kinds, weekUsd, undefined, all),
+          h('h4', {}, all ? 'Costliest minions' : 'Costliest minions this week'),
+          sliceTable('Minion', top, weekUsd, (m) => h('a', { href: threadHref(m) }, m.name, h('span', { class: 'scheme' }, ` · ${m.scheme}`)), all),
+        ]
+      : h('p', { class: 'key' }, all ? 'No turns on your plan yet.' : 'No turns on your plan in the last two weeks.'),
+    h(
+      'p',
+      { class: 'foot' },
+      all
+        ? 'Every turn on your plan since the start, in dollars at API prices. '
+        : w.weekUsd
+          ? `100% is the weekly limit of ${w.accounts > 1 ? `all ${w.accounts} of your Claude accounts together` : 'your Claude account'}, ≈ $${Math.round(w.weekUsd)} at API prices, priced from your weekly meter. `
+          : 'Dollars at API prices until your weekly meter reaches 3%; then shares of the week. ',
       "Your plan's turns only, Grunts counted under their own model. ",
-      est > 0.005 ? `${costText(est).slice(2)} of ${all ? 'it' : 'this week'} is from turns before 2026-11-17, counted under each minion's own model (marked est.).` : ''));
+      est > 0.005 ? `${costText(est).slice(2)} of ${all ? 'it' : 'this week'} is from turns before 2026-11-17, counted under each minion's own model (marked est.).` : '',
+    ),
+  );
 }
 
 /** Fetch your summary and draw it into `into`, which keeps its reserved height until then; a failure leaves a line saying so. */
@@ -86,8 +109,14 @@ export async function renderWhere(into, range = 'week') {
 export function usagePage() {
   const slot = h('div', { class: 'where-slot loading' }, loadingLine('Loading…'));
   // The range picker (#956): two buttons of one fixed width, so choosing one moves nothing; the page keeps its last pick.
-  const pick = h('div', { class: 'range-pick', role: 'group', 'aria-label': 'Range' },
-    [['week', 'Last 7 days'], ['all', 'All time']].map(([key, label]) => h('button', { type: 'button', 'data-range': key, onclick: () => choose(key) }, label)));
+  const pick = h(
+    'div',
+    { class: 'range-pick', role: 'group', 'aria-label': 'Range' },
+    [
+      ['week', 'Last 7 days'],
+      ['all', 'All time'],
+    ].map(([key, label]) => h('button', { type: 'button', 'data-range': key, onclick: () => choose(key) }, label)),
+  );
   const choose = (key) => {
     pickedRange = key;
     for (const b of pick.children) b.setAttribute('aria-pressed', String(b.dataset.range === key));
@@ -95,19 +124,26 @@ export function usagePage() {
     renderWhere(slot, key);
   };
   setTimeout(() => choose(pickedRange));
-  return h('section', { class: 'artifacts-main usage-main' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+  return h(
+    'section',
+    { class: 'artifacts-main usage-main' },
+    h(
+      'div',
+      { class: 'ticket-head' },
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
-      h('div', { class: 'meta' }, 'Where your own Claude spend went in every scheme: the last 7 days against the 7 before, or all time.')),
+      h('div', { class: 'meta' }, 'Where your own Claude spend went in every scheme: the last 7 days against the 7 before, or all time.'),
+    ),
     settingsJump(['usage-claude', 'Claude'], ['usage-models', 'Models'], ['usage-codex', 'Codex'], ...(account?.admin ? [['usage-server', 'Server login']] : [])),
     h('h3', { class: 'settings-section settings-anchor', id: 'usage-claude' }, 'Claude spend'),
-    pick, slot,
+    pick,
+    slot,
     h('h3', { class: 'settings-section settings-anchor', id: 'usage-models' }, 'Models and the Fable cap'),
     modelsSlot(),
-    h('h3', { class: 'settings-section settings-anchor', id: 'usage-codex' }, 'Codex'), codexWindowsBlock(),
-    account?.admin ? h('div', { id: 'usage-server', class: 'settings-anchor' }, costDetail()) : '');
+    h('h3', { class: 'settings-section settings-anchor', id: 'usage-codex' }, 'Codex'),
+    codexWindowsBlock(),
+    account?.admin ? h('div', { id: 'usage-server', class: 'settings-anchor' }, costDetail()) : '',
+  );
 }
 
 let pickedRange = 'week';

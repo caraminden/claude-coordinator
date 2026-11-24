@@ -31,14 +31,30 @@ test('hits, misses and false fires are scored per skill', () => {
     { id: 'a', source: 'X', from: 'p', expect: 'bug-fixing', also: ['diagnosing-bugs'], text: 't' },
     { id: 'b', source: 'X', from: 'p', expect: 'none', text: 't' },
   ];
-  const { rows, hits, total } = score(cases, [{ id: 'a', fired: ['bug-fixing', 'diagnosing-bugs', 'grilling'] }, { id: 'b', fired: ['grilling', 'none'] }]);
+  const { rows, hits, total } = score(cases, [
+    { id: 'a', fired: ['bug-fixing', 'diagnosing-bugs', 'grilling'] },
+    { id: 'b', fired: ['grilling', 'none'] },
+  ]);
   assert.deepEqual([hits, total], [3, 5]);
   const r = Object.fromEntries(rows.map((x) => [x.skill, x]));
   assert.deepEqual([r['bug-fixing'].hits, r['bug-fixing'].runs], [2, 3]);
   assert.deepEqual([r.none.hits, r.none.runs], [1, 2]);
   assert.equal(r.grilling.falseFires, 2);
   assert.match(flips(cases, [{ id: 'b', fired: ['none'] }], [{ id: 'b', fired: ['grilling'] }]), /\| b \|/, 'a pick that changes is a flip even when not scored');
-  assert.match(flips(cases, [{ id: 'a', fired: ['none'] }, { id: 'b', fired: ['none'] }], [{ id: 'a', fired: ['bug-fixing'] }, { id: 'b', fired: ['none'] }]), /\| a \|.*\| none \| bug-fixing \|/);
+  assert.match(
+    flips(
+      cases,
+      [
+        { id: 'a', fired: ['none'] },
+        { id: 'b', fired: ['none'] },
+      ],
+      [
+        { id: 'a', fired: ['bug-fixing'] },
+        { id: 'b', fired: ['none'] },
+      ],
+    ),
+    /\| a \|.*\| none \| bug-fixing \|/,
+  );
 });
 
 test('a run that fails is not scored as "none", and the command exits non-zero', () => {
@@ -46,12 +62,13 @@ test('a run that fails is not scored as "none", and the command exits non-zero',
   try {
     writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 1\n');
     chmodSync(join(bin, 'claude'), 0o755);
-    const run = (...args: string[]) => spawnSync(process.execPath, [new URL('../tools/skill-evals/run.ts', import.meta.url).pathname, ...args],
-      { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    const run = (...args: string[]) => spawnSync(process.execPath, [new URL('../tools/skill-evals/run.ts', import.meta.url).pathname, ...args], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
     const r = run('--case', 'n-peek-dps');
     assert.equal(r.status, 1);
     assert.match(r.stderr, /1 run\(s\) failed.*n-peek-dps/);
     assert.match(r.stdout, /Overall: 0\/0 runs/);
     assert.match(run('--jobs', '0').stderr, /whole number above 0/);
-  } finally { rmSync(bin, { recursive: true, force: true }); }
+  } finally {
+    rmSync(bin, { recursive: true, force: true });
+  }
 });

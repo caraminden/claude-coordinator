@@ -50,7 +50,10 @@ const SPEC_LABEL = 'citadel.spec';
 
 /** A short hash of what a container is made of: image, mounts, env and limits. */
 export function specHash(spec: ContainerSpec): string {
-  return createHash('sha256').update(JSON.stringify([spec.image, spec.mounts, spec.env ?? {}, spec.memory ?? null])).digest('hex').slice(0, 12);
+  return createHash('sha256')
+    .update(JSON.stringify([spec.image, spec.mounts, spec.env ?? {}, spec.memory ?? null]))
+    .digest('hex')
+    .slice(0, 12);
 }
 
 /** systemd-run's -p properties for a spec's unit: its memory limits (ContainerSpec.memory). */
@@ -116,7 +119,12 @@ export class Containers {
     }
     // podman's own error line, not the whole command systemd-run logs before it.
     const log = (await this.run('journalctl', ['--user', '-u', spec.name, '-n', '20', '--no-pager', '-o', 'cat'])).stdout.split('\n');
-    const why = log.find((l) => /^Error: /.test(l.trim()))?.trim() ?? log.filter((l) => l.trim() && !/^Started /.test(l)).at(-1)?.trim();
+    const why =
+      log.find((l) => /^Error: /.test(l.trim()))?.trim() ??
+      log
+        .filter((l) => l.trim() && !/^Started /.test(l))
+        .at(-1)
+        ?.trim();
     throw new Error(`${spec.name} didn't start${why ? `: ${why.slice(0, 300)}` : ''}`);
   }
 
@@ -163,7 +171,11 @@ export class Containers {
   /** Remove other tags of `repo` (older builds), ignoring ones still in use. */
   async pruneImages(repo: string, keep: string): Promise<void> {
     const r = await this.run('podman', ['images', '--format', '{{.Repository}}:{{.Tag}}', repo]);
-    for (const tag of r.stdout.split('\n').map((s) => s.trim()).filter((s) => s && s !== keep)) await this.run('podman', ['rmi', tag]);
+    for (const tag of r.stdout
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s && s !== keep))
+      await this.run('podman', ['rmi', tag]);
   }
 }
 

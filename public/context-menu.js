@@ -30,10 +30,12 @@ const KIND = {
 // back into its one window (desktop/main.cjs), so there it shows no foot and no new tab for Citadel's own links.
 // A touch screen has no Shift+right-click either.
 const desktop = !!window.citadelDesktop;
-const FOOT = desktop || matchMedia('(pointer: coarse)').matches ? undefined : 'Shift+right-click: the browser\'s own menu';
+const FOOT = desktop || matchMedia('(pointer: coarse)').matches ? undefined : "Shift+right-click: the browser's own menu";
 
 const shorten = (t, n = 60) => {
-  const s = String(t ?? '').replace(/\s+/g, ' ').trim();
+  const s = String(t ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 };
 const abs = (href) => new URL(href, location.href).href;
@@ -41,14 +43,9 @@ const copy = (text, what) => copyText(text).then((ok) => toast(ok ? `${what} cop
 // While the live stream is down (core.js's Reconnecting… chip), what needs the server is greyed with the reason.
 const offline = () => !!document.querySelector('body > .cui-chip.reconnecting');
 const needsServer = (item) => (offline() ? { ...item, disabled: true, reason: 'reconnecting…' } : item);
-const newTab = (href) => (desktop && new URL(href, location.href).origin === location.origin ? null
-  : { label: desktop ? 'Open in browser' : 'Open in a new tab', icon: '↗', run: () => window.open(href, '_blank', 'noopener') });
+const newTab = (href) => (desktop && new URL(href, location.href).origin === location.origin ? null : { label: desktop ? 'Open in browser' : 'Open in a new tab', icon: '↗', run: () => window.open(href, '_blank', 'noopener') });
 
-const pointItems = (el, label = 'Point at this') => [
-  { label, icon: '📍', keys: 'Alt+Shift+P', point: true, run: () => pointAtElement(el) },
-  { label: 'Point and draw…', icon: '✎', point: true, run: () => pointAtElement(el, { draw: true }) },
-  '-',
-];
+const pointItems = (el, label = 'Point at this') => [{ label, icon: '📍', keys: 'Alt+Shift+P', point: true, run: () => pointAtElement(el) }, { label: 'Point and draw…', icon: '✎', point: true, run: () => pointAtElement(el, { draw: true }) }, '-'];
 
 /** The menu for what was right-clicked, as ui/menu.js's spec; null leaves the browser's own. */
 export function menuFor(target) {
@@ -62,10 +59,7 @@ export function menuFor(target) {
   if (sel && !sel.isCollapsed && sel.containsNode(target, true) && chat) {
     const s = readSelection(chat.querySelector('.log') ?? chat);
     if (s) {
-      return { ...KIND.selection, name: `“${shorten(s.text, 40)}”`, foot: FOOT, items: [
-        ...(form ? selectionActions(s, form).map(({ label, icon, run }) => ({ label, icon, run })) : []),
-        { label: 'Copy', icon: '⧉', keys: 'Ctrl+C', run: () => copy(s.text, 'Text') },
-      ] };
+      return { ...KIND.selection, name: `“${shorten(s.text, 40)}”`, foot: FOOT, items: [...(form ? selectionActions(s, form).map(({ label, icon, run }) => ({ label, icon, run })) : []), { label: 'Copy', icon: '⧉', keys: 'Ctrl+C', run: () => copy(s.text, 'Text') }] };
     }
   }
 
@@ -99,64 +93,89 @@ export function menuFor(target) {
 function minionMenu(row, t) {
   const coord = t.id === view?.coordinator?.id;
   const ref = coord ? taskmasterName() : `#${t.number ?? t.id}`;
-  const redraw = () => { renderSidebar(); if (view?.id === t.id) renderTicketHead(); };
+  const redraw = () => {
+    renderSidebar();
+    if (view?.id === t.id) renderTicketHead();
+  };
   let state;
   if (t.status === 'running' || t.limit_resume_at) state = needsServer({ label: 'Stop turn', icon: '■', run: () => stopChat(t, redraw) });
   else if (t.status === 'closed') state = { label: `Dismissed ${dismissedWhen(t.closed_at)?.short ?? ''}`.trim(), icon: '✕', disabled: true };
   else if (t.state === 'parked' || t.parked_for) state = needsServer({ label: 'Unseal', icon: '⏵', run: () => unpark(t) });
   // The head's Dismiss, behind a question here: a right-click is easier to slip on (the spec: "Asks first").
-  else if (!coord) state = needsServer({ label: 'Dismiss minion', icon: '✕', danger: true, run: () => {
-    if (!confirm(`Dismiss ${ref}${t.title ? ` (${t.title})` : ''}?`)) return;
-    setStatus(t, 'closed');
-    if (view?.id === t.id) location.hash = `#/p/${t.project_id}`;
-  } });
-  return { ...KIND.minion, name: coord ? ref : `${ref} ${t.title ?? ''}`.trim(), foot: FOOT, items: [
-    ...pointItems(row),
-    { label: `Open ${ref}`, icon: '→', keys: 'Enter', run: () => row.click() },
-    newTab(row.href),
-    { label: 'Copy link', icon: '🔗', run: () => copy(abs(threadHref(t)), 'Link') },
-    !coord && { label: `Copy “${ref}”`, icon: '#', run: () => copy(ref, ref) },
-    state && '-',
-    state,
-  ] };
+  else if (!coord)
+    state = needsServer({
+      label: 'Dismiss minion',
+      icon: '✕',
+      danger: true,
+      run: () => {
+        if (!confirm(`Dismiss ${ref}${t.title ? ` (${t.title})` : ''}?`)) return;
+        setStatus(t, 'closed');
+        if (view?.id === t.id) location.hash = `#/p/${t.project_id}`;
+      },
+    });
+  return {
+    ...KIND.minion,
+    name: coord ? ref : `${ref} ${t.title ?? ''}`.trim(),
+    foot: FOOT,
+    items: [...pointItems(row), { label: `Open ${ref}`, icon: '→', keys: 'Enter', run: () => row.click() }, newTab(row.href), { label: 'Copy link', icon: '🔗', run: () => copy(abs(threadHref(t)), 'Link') }, !coord && { label: `Copy “${ref}”`, icon: '#', run: () => copy(ref, ref) }, state && '-', state],
+  };
 }
 
 function messageMenu(msg, form) {
-  const text = [...msg.children].filter((c) => !c.classList.contains('who')).map((c) => c.innerText).join('\n').trim();
+  const text = [...msg.children]
+    .filter((c) => !c.classList.contains('who'))
+    .map((c) => c.innerText)
+    .join('\n')
+    .trim();
   // The select bar's list (#1133) for the whole message, so Reply, Ask on the side and Copy link have one home.
   const acts = form ? Object.fromEntries(selectionActions({ text, first: msg, single: true }, form).map((a) => [a.id, a])) : {};
-  return { ...KIND.message, name: shorten(text, 50), foot: FOOT, items: [
-    ...pointItems(msg),
-    acts.reply && { label: 'Reply with a quote', icon: '❝', run: acts.reply.run },
-    acts.aside && { label: 'Ask on the side', icon: '💬', run: acts.aside.run },
-    { label: 'Copy text', icon: '⧉', run: () => copy(text, 'Text') },
-    acts.link && { label: 'Copy link to message', icon: '🔗', run: acts.link.run },
-  ] };
+  return {
+    ...KIND.message,
+    name: shorten(text, 50),
+    foot: FOOT,
+    items: [
+      ...pointItems(msg),
+      acts.reply && { label: 'Reply with a quote', icon: '❝', run: acts.reply.run },
+      acts.aside && { label: 'Ask on the side', icon: '💬', run: acts.aside.run },
+      { label: 'Copy text', icon: '⧉', run: () => copy(text, 'Text') },
+      acts.link && { label: 'Copy link to message', icon: '🔗', run: acts.link.run },
+    ],
+  };
 }
 
 function codeMenu(pre, msg, form) {
   const code = (pre.querySelector('code') ?? pre).textContent.replace(/\n$/, '');
   const reply = form && selectionActions({ text: `\`\`\`\n${code}\n\`\`\``, first: msg, single: true }, form).find((a) => a.id === 'reply');
   const button = pre.querySelector('.cui-copy');
-  return { ...KIND.code, name: shorten(code.split('\n')[0], 50), foot: FOOT, items: [
-    ...pointItems(pre),
-    // The block's own Copy button, so a shell block copies as it does there (copyPayload).
-    { label: 'Copy code', icon: '⧉', run: () => (button ? button.click() : copy(code, 'Code')) },
-    reply && { label: 'Reply about this code', icon: '❝', run: reply.run },
-  ] };
+  return {
+    ...KIND.code,
+    name: shorten(code.split('\n')[0], 50),
+    foot: FOOT,
+    items: [
+      ...pointItems(pre),
+      // The block's own Copy button, so a shell block copies as it does there (copyPayload).
+      { label: 'Copy code', icon: '⧉', run: () => (button ? button.click() : copy(code, 'Code')) },
+      reply && { label: 'Reply about this code', icon: '❝', run: reply.run },
+    ],
+  };
 }
 
 function fileMenu(a) {
   const path = a.dataset.file;
   const m = /^#\/f\/(\d+)\//.exec(a.getAttribute('href') ?? '');
   const download = a.hasAttribute('download') ? a.href : m && path ? abs(`api/tickets/${m[1]}/file?path=${encodeURIComponent(path)}&download`) : null;
-  return { ...KIND.file, name: a.querySelector('.name, .caption')?.textContent || path || a.textContent, foot: FOOT, items: [
-    ...pointItems(a),
-    { label: 'Open', icon: '→', keys: 'Enter', run: () => a.click() },
-    newTab(a.href),
-    download && { label: 'Download', icon: '⤓', run: () => Object.assign(document.createElement('a'), { href: download, download: '' }).click() },
-    { label: 'Copy link', icon: '🔗', run: () => copy(a.href, 'Link') },
-  ] };
+  return {
+    ...KIND.file,
+    name: a.querySelector('.name, .caption')?.textContent || path || a.textContent,
+    foot: FOOT,
+    items: [
+      ...pointItems(a),
+      { label: 'Open', icon: '→', keys: 'Enter', run: () => a.click() },
+      newTab(a.href),
+      download && { label: 'Download', icon: '⤓', run: () => Object.assign(document.createElement('a'), { href: download, download: '' }).click() },
+      { label: 'Copy link', icon: '🔗', run: () => copy(a.href, 'Link') },
+    ],
+  };
 }
 
 function cardMenu(card) {
@@ -172,12 +191,16 @@ function cardMenu(card) {
     answers = [{ label: picked.length ? `Answered: ${picked.join(', ')}${who ? ` · ${who}` : ''}` : (said ?? 'Answered'), icon: '✓', disabled: true }];
   } else if (card.matches('[data-single]')) {
     // One pick-one question: pick the option, then the card's own Send.
-    answers = [...card.querySelectorAll('[data-q="0"] .opt[data-label]:not(.pic)')].map((opt, i) => needsServer({
-      label: `Answer: ${opt.dataset.label}`, icon: i ? '○' : '✓', run: () => {
-        if (!opt.classList.contains('picked')) opt.click();
-        card.querySelector('.qsend')?.click();
-      },
-    }));
+    answers = [...card.querySelectorAll('[data-q="0"] .opt[data-label]:not(.pic)')].map((opt, i) =>
+      needsServer({
+        label: `Answer: ${opt.dataset.label}`,
+        icon: i ? '○' : '✓',
+        run: () => {
+          if (!opt.classList.contains('picked')) opt.click();
+          card.querySelector('.qsend')?.click();
+        },
+      }),
+    );
   }
   return { ...KIND.card, name: shorten(title, 50), foot: FOOT, items: [...pointItems(card), ...answers, linkItem] };
 }
@@ -193,21 +216,16 @@ function releaseOf(target) {
 function releaseMenu(ver, row) {
   const name = ver.dataset.version;
   const dl = row.querySelector('a[download]');
-  return { ...KIND.release, name: [row.querySelector('.rel-name')?.textContent, name].filter(Boolean).join(' '), foot: FOOT, items: [
-    ...pointItems(row),
-    { label: `Copy version ${name}`, icon: '⧉', run: () => copy(name, name) },
-    ver.href && { label: 'Open release', icon: '→', run: () => window.open(ver.href, '_blank', 'noopener') },
-    dl && { label: 'Copy download link', icon: '⤓', run: () => copy(dl.href, 'Download link') },
-  ] };
+  return {
+    ...KIND.release,
+    name: [row.querySelector('.rel-name')?.textContent, name].filter(Boolean).join(' '),
+    foot: FOOT,
+    items: [...pointItems(row), { label: `Copy version ${name}`, icon: '⧉', run: () => copy(name, name) }, ver.href && { label: 'Open release', icon: '→', run: () => window.open(ver.href, '_blank', 'noopener') }, dl && { label: 'Copy download link', icon: '⤓', run: () => copy(dl.href, 'Download link') }],
+  };
 }
 
 function linkMenu(a) {
-  return { ...KIND.link, name: shorten(a.textContent) || a.href, foot: FOOT, items: [
-    ...pointItems(a),
-    { label: 'Open', icon: '→', run: () => a.click() },
-    newTab(a.href),
-    { label: 'Copy link address', icon: '🔗', run: () => copy(a.href, 'Link') },
-  ] };
+  return { ...KIND.link, name: shorten(a.textContent) || a.href, foot: FOOT, items: [...pointItems(a), { label: 'Open', icon: '→', run: () => a.click() }, newTab(a.href), { label: 'Copy link address', icon: '🔗', run: () => copy(a.href, 'Link') }] };
 }
 
 /** In the desktop app every menu ends with Inspect (#1665): DevTools on what was right-clicked, or the focused thing's middle from the keyboard. */

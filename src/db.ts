@@ -74,12 +74,22 @@ export interface HostSample {
   /** One window of answer times and the main thread's split as JSON (#1559, src/answer-time.ts); null before it or without a probe. */
   answer_time?: string | null;
   /** File-cache health (#1501, src/cache-health.ts): the database's bytes in memory and its size, then per-second rates; null before it or when unreadable. */
-  db_cached?: number | null; db_size?: number | null;
-  kswapd_rate?: number | null; refault_rate?: number | null; server_refault_rate?: number | null; pgpgin_rate?: number | null; thp_fallback_rate?: number | null;
+  db_cached?: number | null;
+  db_size?: number | null;
+  kswapd_rate?: number | null;
+  refault_rate?: number | null;
+  server_refault_rate?: number | null;
+  pgpgin_rate?: number | null;
+  thp_fallback_rate?: number | null;
   /** The database warmer's last pass (#1560, src/db-warmer.ts): ms, MB read, and its backoffs since the server started; null before it or with it off. */
-  warm_ms?: number | null; warm_mb?: number | null; warm_backoffs?: number | null;
+  warm_ms?: number | null;
+  warm_mb?: number | null;
+  warm_backoffs?: number | null;
   /** The growth alarm's readings (#1762, src/growth-alarm.ts): the server's open fds, running citadel-supervisor-* units, bytes used on /tmp, and each app server's memory as JSON; null before it or where unreadable. */
-  open_fds?: number | null; supervisors?: number | null; tmp_used?: number | null; app_mem?: string | null;
+  open_fds?: number | null;
+  supervisors?: number | null;
+  tmp_used?: number | null;
+  app_mem?: string | null;
 }
 
 export interface ReleaseRow {
@@ -407,7 +417,15 @@ export interface RepoCollaborator {
 }
 
 /** A saved secret (src/secrets.ts); `value` is still encrypted. */
-export interface SecretRow { scope: 'person' | 'scheme'; owner_id: number; name: string; value: string; updated_by: number | null; created_at: number; updated_at: number }
+export interface SecretRow {
+  scope: 'person' | 'scheme';
+  owner_id: number;
+  name: string;
+  value: string;
+  updated_by: number | null;
+  created_at: number;
+  updated_at: number;
+}
 
 /** One of a person's linked accounts (src/credentials.ts); `secret` is still encrypted. */
 export type OpenrouterCallKind = 'image' | 'effect' | 'music' | 'speech' | 'text';
@@ -1853,10 +1871,32 @@ export function titleWithoutBuild(title: string, build: number): string {
 export const RECAP_AWAY_MS = 6 * 60 * 60 * 1000;
 
 /** One event of skillTimeline (src/skills.ts): what it called (space-separated), and 0/1 flags. */
-export interface SkillEvent { id: number; ticket_id: number; at: number; skills: string | null; agents: string | null; edit: number; error: number; ship: number; result: number; grunt: number }
+export interface SkillEvent {
+  id: number;
+  ticket_id: number;
+  at: number;
+  skills: string | null;
+  agents: string | null;
+  edit: number;
+  error: number;
+  ship: number;
+  result: number;
+  grunt: number;
+}
 /** A minion in skillTimeline (src/skills.ts): its type property and the id of its newest "Shipped" note in the window (null if none). */
-export interface SkillTicket { id: number; project_id: number; number: number | null; title: string; kind: string; type: string | null; shipped: number | null }
-export interface SkillTimeline { events: SkillEvent[]; tickets: SkillTicket[] }
+export interface SkillTicket {
+  id: number;
+  project_id: number;
+  number: number | null;
+  title: string;
+  kind: string;
+  type: string | null;
+  shipped: number | null;
+}
+export interface SkillTimeline {
+  events: SkillEvent[];
+  tickets: SkillTicket[];
+}
 
 export class Store {
   db: DatabaseSync;
@@ -1907,9 +1947,9 @@ export class Store {
       this.schedules = new Schedules(this.db, (at) => this.eventIdAt(at));
       this.reviews = new ReviewSet(this.db);
       this.claims = new Claims(this.db);
-    this.lessons = new ShipLessons(this.db);
-    this.ideas = new Ideas(this.db);
-    this.usage = new UsageLedger(this.db);
+      this.lessons = new ShipLessons(this.db);
+      this.ideas = new Ideas(this.db);
+      this.usage = new UsageLedger(this.db);
       this.memory = new Memory(this);
       this.minionIndex = new MinionIndex(this);
       this.memoryProposals = new MemoryProposals(this.db);
@@ -2041,9 +2081,11 @@ export class Store {
    */
   private dropEarlyPeekAurasBuilds() {
     if ((this.getSetting<number>('schema_version') ?? 0) >= 69) return;
-    this.db.prepare(`DELETE FROM releases WHERE target = 'ci:windows:release' AND outcome = 'live'
+    this.db
+      .prepare(`DELETE FROM releases WHERE target = 'ci:windows:release' AND outcome = 'live'
       AND project_id IN (SELECT id FROM projects WHERE name = 'Peek Auras')
-      AND version IN ('run:1277', 'run:1279', 'run:1282', 'run:1284', 'run:1286', 'run:1289', 'run:1291')`).run();
+      AND version IN ('run:1277', 'run:1279', 'run:1282', 'run:1284', 'run:1286', 'run:1289', 'run:1291')`)
+      .run();
   }
 
   /**
@@ -2053,9 +2095,11 @@ export class Store {
    */
   private shippingFromRules() {
     if ((this.getSetting<number>('schema_version') ?? 0) >= 73) return;
-    this.db.prepare(`UPDATE projects SET ship_path = 'pr-person', go_from = 'all'
+    this.db
+      .prepare(`UPDATE projects SET ship_path = 'pr-person', go_from = 'all'
       WHERE instr(char(10) || approval_rules || char(10), char(10) || 'Bash(gh pr merge:*)' || char(10)) > 0
-        AND instr(char(10) || approval_rules || char(10), char(10) || 'mcp__*__merge_pull_request' || char(10)) > 0`).run();
+        AND instr(char(10) || approval_rules || char(10), char(10) || 'mcp__*__merge_pull_request' || char(10)) > 0`)
+      .run();
   }
 
   /** Whose subscription the server's own Claude login is: the first admin, the one Citadel made at its first start. */
@@ -2089,11 +2133,12 @@ export class Store {
         }
         const rows = this.machineProjects(m.id);
         const owner = m.owner_id === null ? undefined : this.getUser(m.owner_id);
-        const ids = m.owner_id !== null
-          ? schemes.filter((p) => p.machine_tools && owner && this.canSee({ uid: owner.id, admin: !!owner.admin }, p.id)).map((p) => p.id)
-          : m.scoped
-            ? rows.filter((id) => schemes.find((p) => p.id === id)?.machine_tools)
-            : schemes.filter((p) => p.machine_tools && this.getUser(p.owner_id ?? -1)?.admin).map((p) => p.id);
+        const ids =
+          m.owner_id !== null
+            ? schemes.filter((p) => p.machine_tools && owner && this.canSee({ uid: owner.id, admin: !!owner.admin }, p.id)).map((p) => p.id)
+            : m.scoped
+              ? rows.filter((id) => schemes.find((p) => p.id === id)?.machine_tools)
+              : schemes.filter((p) => p.machine_tools && this.getUser(p.owner_id ?? -1)?.admin).map((p) => p.id);
         this.db.prepare('DELETE FROM machine_projects WHERE machine_id = ?').run(m.id);
         const add = this.db.prepare('INSERT INTO machine_projects (machine_id, project_id) VALUES (?, ?)');
         for (const id of ids) add.run(m.id, id);
@@ -2121,9 +2166,7 @@ export class Store {
    * creation order, and leave a note in every thread whose number changed.
    */
   private numberTickets() {
-    const unnumbered = this.db
-      .prepare("SELECT id, project_id FROM tickets WHERE kind = 'ticket' AND number IS NULL ORDER BY id")
-      .all() as { id: number; project_id: number }[];
+    const unnumbered = this.db.prepare("SELECT id, project_id FROM tickets WHERE kind = 'ticket' AND number IS NULL ORDER BY id").all() as { id: number; project_id: number }[];
     if (!unnumbered.length) return;
     const changed = new Map<number, string[]>(); // project_id -> "#old is now #new"
     this.db.exec('BEGIN');
@@ -2183,9 +2226,7 @@ export class Store {
   }
 
   createProject(name: string, repoUrl: string | null, ownerId: number | null = null): Project {
-    const r = this.db
-      .prepare('INSERT INTO projects (name, repo_url, owner_id, created_at) VALUES (?, ?, ?, ?)')
-      .run(name, repoUrl, ownerId, Date.now());
+    const r = this.db.prepare('INSERT INTO projects (name, repo_url, owner_id, created_at) VALUES (?, ?, ?, ?)').run(name, repoUrl, ownerId, Date.now());
     return this.getProject(Number(r.lastInsertRowid))!;
   }
 
@@ -2204,9 +2245,7 @@ export class Store {
     this.db.exec('BEGIN');
     try {
       const old = (this.db.prepare('SELECT instructions FROM projects WHERE id = ?').get(id) as { instructions: string } | undefined)?.instructions ?? '';
-      this.db
-        .prepare('UPDATE projects SET instructions = ?, instructions_updated_by = ?, instructions_updated_at = ? WHERE id = ?')
-        .run(instructions, by, at, id);
+      this.db.prepare('UPDATE projects SET instructions = ?, instructions_updated_by = ?, instructions_updated_at = ? WHERE id = ?').run(instructions, by, at, id);
       this.db.prepare('INSERT INTO instruction_history (project_id, by, at, old_text, new_text) VALUES (?, ?, ?, ?, ?)').run(id, by, at, old, instructions);
       this.db.exec('COMMIT');
     } catch (err) {
@@ -2217,9 +2256,7 @@ export class Store {
 
   /** A scheme's latest instruction saves, newest first. */
   instructionHistory(projectId: number, limit: number): { by: string; at: number; old_text: string; new_text: string }[] {
-    return this.db
-      .prepare('SELECT by, at, old_text, new_text FROM instruction_history WHERE project_id = ? ORDER BY id DESC LIMIT ?')
-      .all(projectId, limit) as { by: string; at: number; old_text: string; new_text: string }[];
+    return this.db.prepare('SELECT by, at, old_text, new_text FROM instruction_history WHERE project_id = ? ORDER BY id DESC LIMIT ?').all(projectId, limit) as { by: string; at: number; old_text: string; new_text: string }[];
   }
 
   /** The Citadel-wide instructions every minion and Taskmaster in every scheme gets; '' when unset. */
@@ -2244,8 +2281,7 @@ export class Store {
 
   /** A person's own instructions for everywhere (projectId null) or one scheme, with when they last changed; '' when unset. */
   personalInstructions(userId: number, projectId: number | null): { text: string; at: number | null } {
-    const r = this.db.prepare('SELECT new_text, at FROM personal_instructions WHERE user_id = ? AND project_id IS ? ORDER BY id DESC LIMIT 1')
-      .get(userId, projectId) as { new_text: string; at: number } | undefined;
+    const r = this.db.prepare('SELECT new_text, at FROM personal_instructions WHERE user_id = ? AND project_id IS ? ORDER BY id DESC LIMIT 1').get(userId, projectId) as { new_text: string; at: number } | undefined;
     return { text: r?.new_text ?? '', at: r?.at ?? null };
   }
 
@@ -2269,8 +2305,7 @@ export class Store {
 
   /** A person's latest saves for one scope, newest first. */
   personalInstructionHistory(userId: number, projectId: number | null, limit: number): { at: number; old_text: string; new_text: string }[] {
-    return this.db.prepare('SELECT at, old_text, new_text FROM personal_instructions WHERE user_id = ? AND project_id IS ? ORDER BY id DESC LIMIT ?')
-      .all(userId, projectId, limit) as { at: number; old_text: string; new_text: string }[];
+    return this.db.prepare('SELECT at, old_text, new_text FROM personal_instructions WHERE user_id = ? AND project_id IS ? ORDER BY id DESC LIMIT ?').all(userId, projectId, limit) as { at: number; old_text: string; new_text: string }[];
   }
 
   /** The latest Citadel-wide instruction saves, newest first. */
@@ -2278,7 +2313,42 @@ export class Store {
     return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as { by: string; at: number; old_text: string; new_text: string }[];
   }
 
-  setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'msg_never_hold' | 'rules_review' | 'skills_off'>>) {
+  setProjectSettings(
+    id: number,
+    fields: Partial<
+      Pick<
+        Project,
+        | 'approval_rules'
+        | 'plugin_dirs'
+        | 'optional_plugin_dirs'
+        | 'default_effort'
+        | 'onboarding'
+        | 'onboarding_mode'
+        | 'list_groups'
+        | 'ci_quiet'
+        | 'ci_watch'
+        | 'land_mode'
+        | 'fable_ok'
+        | 'builds'
+        | 'grill'
+        | 'gh_runners'
+        | 'shot_widths'
+        | 'shot_themes'
+        | 'shots_required'
+        | 'shot_note'
+        | 'ship_path'
+        | 'go_from'
+        | 'try_first'
+        | 'msg_loop_limit'
+        | 'msg_loop_min'
+        | 'msg_cold_min'
+        | 'msg_hold_h'
+        | 'msg_never_hold'
+        | 'rules_review'
+        | 'skills_off'
+      >
+    >,
+  ) {
     const keys = Object.keys(fields) as (keyof typeof fields)[];
     if (!keys.length) return;
     // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).
@@ -2331,9 +2401,7 @@ export class Store {
   createUser(u: Pick<User, 'name' | 'login'> & { admin?: boolean; server_login?: boolean }): User {
     const { max } = this.db.prepare('SELECT COALESCE(MAX(id), 0) AS max FROM users').get() as { max: number };
     const id = Math.max(this.getSetting<number>('user_id_high') ?? 0, max) + 1;
-    this.db
-      .prepare('INSERT INTO users (id, name, login, admin, server_login, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(id, u.name, u.login, u.admin ? 1 : 0, u.server_login ? 1 : 0, Date.now());
+    this.db.prepare('INSERT INTO users (id, name, login, admin, server_login, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, u.name, u.login, u.admin ? 1 : 0, u.server_login ? 1 : 0, Date.now());
     this.setSetting('user_id_high', id);
     return this.getUser(id)!;
   }
@@ -2372,7 +2440,8 @@ export class Store {
 
   putCredential(userId: number, kind: string, secret: string, meta: object) {
     const now = Date.now();
-    this.db.prepare(`INSERT INTO credentials (user_id, kind, secret, meta, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+    this.db
+      .prepare(`INSERT INTO credentials (user_id, kind, secret, meta, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id, kind) DO UPDATE SET secret = excluded.secret, meta = excluded.meta, updated_at = excluded.updated_at, failed_at = NULL`)
       .run(userId, kind, secret, JSON.stringify(meta), now, now);
   }
@@ -2388,7 +2457,8 @@ export class Store {
 
   putSecret(scope: string, ownerId: number, name: string, value: string, by: number | null) {
     const now = Date.now();
-    this.db.prepare(`INSERT INTO stored_secrets (scope, owner_id, name, value, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+    this.db
+      .prepare(`INSERT INTO stored_secrets (scope, owner_id, name, value, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(scope, owner_id, name) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
       .run(scope, ownerId, name, value, by, now, now);
   }
@@ -2408,14 +2478,20 @@ export class Store {
 
   /** What a person's OpenRouter calls since `since` count against their cap: real costs, and estimates where it isn't known. */
   openrouterSpent(userId: number, since: number): number {
-    const row = this.db.prepare(`SELECT COALESCE(SUM(CASE status WHEN 'ok' THEN cost_usd WHEN 'failed' THEN 0 ELSE estimate_usd END), 0) AS spent
-      FROM openrouter_calls WHERE user_id = ? AND created_at >= ?`).get(userId, since) as { spent: number };
+    const row = this.db
+      .prepare(`SELECT COALESCE(SUM(CASE status WHEN 'ok' THEN cost_usd WHEN 'failed' THEN 0 ELSE estimate_usd END), 0) AS spent
+      FROM openrouter_calls WHERE user_id = ? AND created_at >= ?`)
+      .get(userId, since) as { spent: number };
     return row.spent;
   }
 
   addOpenrouterCall(c: { user_id: number; ticket_id: number | null; project_id: number | null; model: string; kind: OpenrouterCallKind; estimate_usd: number }): number {
-    return Number(this.db.prepare(`INSERT INTO openrouter_calls (user_id, ticket_id, project_id, model, kind, estimate_usd, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`).run(c.user_id, c.ticket_id, c.project_id, c.model, c.kind, c.estimate_usd, Date.now()).lastInsertRowid);
+    return Number(
+      this.db
+        .prepare(`INSERT INTO openrouter_calls (user_id, ticket_id, project_id, model, kind, estimate_usd, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`)
+        .run(c.user_id, c.ticket_id, c.project_id, c.model, c.kind, c.estimate_usd, Date.now()).lastInsertRowid,
+    );
   }
 
   finishOpenrouterCall(id: number, status: 'ok' | 'failed' | 'unknown', cost: number | null) {
@@ -2438,9 +2514,13 @@ export class Store {
 
   /** A scheme's people: the owner first, then members in the order they were added. */
   listMembers(projectId: number): (Pick<User, 'id' | 'name' | 'login'> & { owner: boolean })[] {
-    return (this.db.prepare(`SELECT u.id, u.name, u.login, u.id = p.owner_id AS owner FROM users u JOIN projects p ON p.id = ?
+    return (
+      this.db
+        .prepare(`SELECT u.id, u.name, u.login, u.id = p.owner_id AS owner FROM users u JOIN projects p ON p.id = ?
       LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = u.id
-      WHERE u.id = p.owner_id OR m.user_id IS NOT NULL ORDER BY owner DESC, m.added_at`).all(projectId) as (Pick<User, 'id' | 'name' | 'login'> & { owner: number })[]).map((r) => ({ ...r, owner: !!r.owner }));
+      WHERE u.id = p.owner_id OR m.user_id IS NOT NULL ORDER BY owner DESC, m.added_at`)
+        .all(projectId) as (Pick<User, 'id' | 'name' | 'login'> & { owner: number })[]
+    ).map((r) => ({ ...r, owner: !!r.owner }));
   }
 
   addMember(projectId: number, userId: number) {
@@ -2461,7 +2541,8 @@ export class Store {
   }
 
   putRepoCollaborator(r: Omit<RepoCollaborator, 'updated_at'>) {
-    this.db.prepare(`INSERT INTO repo_collaborators (project_id, user_id, slug, login, state, invitation_id, error, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    this.db
+      .prepare(`INSERT INTO repo_collaborators (project_id, user_id, slug, login, state, invitation_id, error, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (project_id, user_id) DO UPDATE SET slug = excluded.slug, login = excluded.login, state = excluded.state,
         invitation_id = excluded.invitation_id, error = excluded.error, updated_at = excluded.updated_at`)
       .run(r.project_id, r.user_id, r.slug, r.login, r.state, r.invitation_id, r.error, Date.now());
@@ -2482,22 +2563,33 @@ export class Store {
 
   /** Whether a person owns or is a member of a scheme (no admin shortcut). */
   private inScheme(uid: number | undefined, projectId: number): boolean {
-    return !!this.db.prepare(`SELECT 1 FROM projects WHERE id = ?1 AND owner_id = ?2
-      UNION SELECT 1 FROM project_members WHERE project_id = ?1 AND user_id = ?2`).get(projectId, uid ?? -1);
+    return !!this.db
+      .prepare(`SELECT 1 FROM projects WHERE id = ?1 AND owner_id = ?2
+      UNION SELECT 1 FROM project_members WHERE project_id = ?1 AND user_id = ?2`)
+      .get(projectId, uid ?? -1);
   }
 
   /** The schemes a person is in, as owner or member; null for an admin (isAdmin's sense), who is in all of them. */
   visibleProjects(who: { uid?: number; admin?: boolean }): Set<number> | null {
     if (who.admin || this.inScheme(who.uid, GLOBAL_OWNER)) return null;
-    const rows = this.db.prepare(`SELECT id FROM projects WHERE owner_id = ?1
-      UNION SELECT project_id FROM project_members WHERE user_id = ?1`).all(who.uid ?? -1) as { id: number }[];
+    const rows = this.db
+      .prepare(`SELECT id FROM projects WHERE owner_id = ?1
+      UNION SELECT project_id FROM project_members WHERE user_id = ?1`)
+      .all(who.uid ?? -1) as { id: number }[];
     return new Set(rows.map((r) => r.id));
   }
 
   /** The schemes a person owns or is a member of, admin or not: the Releases page's All view (#625). */
   memberSchemes(uid: number | undefined): Set<number> {
-    const rows = scoped(this.db, `member-schemes:${uid ?? -1}`, () => this.db.prepare(`SELECT id FROM projects WHERE owner_id = ?1
-      UNION SELECT project_id FROM project_members WHERE user_id = ?1`).all(uid ?? -1) as { id: number }[]);
+    const rows = scoped(
+      this.db,
+      `member-schemes:${uid ?? -1}`,
+      () =>
+        this.db
+          .prepare(`SELECT id FROM projects WHERE owner_id = ?1
+      UNION SELECT project_id FROM project_members WHERE user_id = ?1`)
+          .all(uid ?? -1) as { id: number }[],
+    );
     return new Set(rows.map((r) => r.id));
   }
 
@@ -2521,8 +2613,7 @@ export class Store {
 
   createContraption(c: Omit<ContraptionRow, 'id' | 'created_at'>): ContraptionRow {
     const keys = Object.keys(c) as (keyof typeof c)[];
-    this.db.prepare(`INSERT INTO contraptions (${keys.join(', ')}, created_at) VALUES (${keys.map(() => '?').join(', ')}, ?)`)
-      .run(...keys.map((k) => c[k] ?? null), Date.now());
+    this.db.prepare(`INSERT INTO contraptions (${keys.join(', ')}, created_at) VALUES (${keys.map(() => '?').join(', ')}, ?)`).run(...keys.map((k) => c[k] ?? null), Date.now());
     return this.getContraption(c.name)!;
   }
 
@@ -2544,14 +2635,18 @@ export class Store {
 
   /** Whether a contraption is enabled for a person who can still sign in. Read fresh each call, so a change takes at once. */
   contraptionEnabled(name: string, userId: number): boolean {
-    return !!this.db.prepare(`SELECT 1 FROM contraption_users cu JOIN contraptions c ON c.id = cu.contraption_id
-      JOIN users u ON u.id = cu.user_id WHERE c.name = ? AND cu.user_id = ? AND u.disabled_at IS NULL`).get(name, userId);
+    return !!this.db
+      .prepare(`SELECT 1 FROM contraption_users cu JOIN contraptions c ON c.id = cu.contraption_id
+      JOIN users u ON u.id = cu.user_id WHERE c.name = ? AND cu.user_id = ? AND u.disabled_at IS NULL`)
+      .get(name, userId);
   }
 
   /** The contraptions enabled for a person, for their app rail. */
   contraptionsFor(userId: number): Pick<ContraptionRow, 'name' | 'title' | 'icon' | 'port' | 'identity_private' | 'folder'>[] {
-    return this.db.prepare(`SELECT c.name, c.title, c.icon, c.port, c.identity_private, c.folder FROM contraptions c JOIN contraption_users cu ON cu.contraption_id = c.id
-      JOIN users u ON u.id = cu.user_id WHERE cu.user_id = ? AND u.disabled_at IS NULL ORDER BY c.title COLLATE NOCASE`).all(userId) as unknown as Pick<ContraptionRow, 'name' | 'title' | 'icon' | 'port' | 'identity_private' | 'folder'>[];
+    return this.db
+      .prepare(`SELECT c.name, c.title, c.icon, c.port, c.identity_private, c.folder FROM contraptions c JOIN contraption_users cu ON cu.contraption_id = c.id
+      JOIN users u ON u.id = cu.user_id WHERE cu.user_id = ? AND u.disabled_at IS NULL ORDER BY c.title COLLATE NOCASE`)
+      .all(userId) as unknown as Pick<ContraptionRow, 'name' | 'title' | 'icon' | 'port' | 'identity_private' | 'folder'>[];
   }
 
   /** A person's named session in a contraption. */
@@ -2566,8 +2661,10 @@ export class Store {
   /** Point a session name at a Claude session (a new one, or the id a resume reported), and mark it used now. */
   putContraptionSession(contraptionId: number, userId: number, name: string, claudeSession: string) {
     const now = Date.now();
-    this.db.prepare(`INSERT INTO contraption_sessions (contraption_id, user_id, name, claude_session, created_at, used_at) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT (contraption_id, user_id, name) DO UPDATE SET claude_session = excluded.claude_session, used_at = excluded.used_at`).run(contraptionId, userId, name, claudeSession, now, now);
+    this.db
+      .prepare(`INSERT INTO contraption_sessions (contraption_id, user_id, name, claude_session, created_at, used_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (contraption_id, user_id, name) DO UPDATE SET claude_session = excluded.claude_session, used_at = excluded.used_at`)
+      .run(contraptionId, userId, name, claudeSession, now, now);
   }
 
   deleteContraptionSession(contraptionId: number, userId: number, name: string): boolean {
@@ -2576,8 +2673,7 @@ export class Store {
 
   /** A finished turn's audit row (#844). */
   putTurnAudit(turnId: number, row: { model: string | null; blind: boolean; images: number; system: string; prompt: string; output: string }) {
-    this.db.prepare('INSERT OR REPLACE INTO contraption_turn_audit (turn_id, at, model, blind, images, system, prompt, output) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(turnId, Date.now(), row.model, row.blind ? 1 : 0, row.images, row.system, row.prompt, row.output);
+    this.db.prepare('INSERT OR REPLACE INTO contraption_turn_audit (turn_id, at, model, blind, images, system, prompt, output) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(turnId, Date.now(), row.model, row.blind ? 1 : 0, row.images, row.system, row.prompt, row.output);
   }
 
   turnAudit(turnId: number): TurnAuditRow | undefined {
@@ -2611,7 +2707,8 @@ export class Store {
 
   /** A scheme's audit page (#844): its home apps' turns, newest first, `limit` of them before turn `before`, one app's if named. */
   schemeTurnAudit(projectId: number, opts: { before?: number; contraption?: string; limit: number }) {
-    return this.db.prepare(`SELECT a.*, t.session, t.outcome, t.started_at, c.name AS contraption, c.title AS contraption_title, u.name AS person
+    return this.db
+      .prepare(`SELECT a.*, t.session, t.outcome, t.started_at, c.name AS contraption, c.title AS contraption_title, u.name AS person
       FROM contraption_turn_audit a JOIN contraption_turns t ON t.id = a.turn_id JOIN contraptions c ON c.id = t.contraption_id JOIN users u ON u.id = t.user_id
       WHERE c.home_scheme = ? AND a.turn_id < ? AND (? IS NULL OR c.name = ?) ORDER BY a.turn_id DESC LIMIT ?`)
       .all(projectId, opts.before ?? Number.MAX_SAFE_INTEGER, opts.contraption ?? null, opts.contraption ?? null, opts.limit) as unknown as (TurnAuditRow & { session: string; outcome: string | null; started_at: number; contraption: string; contraption_title: string; person: string })[];
@@ -2619,14 +2716,18 @@ export class Store {
 
   /** One more of a contraption's errors on a day (#835); the first one's sample stays. */
   addContraptionError(contraptionId: number, day: string, kind: string, key: string, sample: string, at: number) {
-    this.db.prepare(`INSERT INTO contraption_errors (contraption_id, day, kind, key, count, sample, first_at, last_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
-      ON CONFLICT (contraption_id, day, kind, key) DO UPDATE SET count = count + 1, last_at = excluded.last_at`).run(contraptionId, day, kind, key, sample, at, at);
+    this.db
+      .prepare(`INSERT INTO contraption_errors (contraption_id, day, kind, key, count, sample, first_at, last_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+      ON CONFLICT (contraption_id, day, kind, key) DO UPDATE SET count = count + 1, last_at = excluded.last_at`)
+      .run(contraptionId, day, kind, key, sample, at, at);
   }
 
   /** A day's contraption errors with their app's name, title and home scheme, biggest first. */
   contraptionErrors(day: string): ContraptionErrorRow[] {
-    return this.db.prepare(`SELECT e.*, c.name, c.title, c.home_scheme FROM contraption_errors e JOIN contraptions c ON c.id = e.contraption_id
-      WHERE e.day = ? ORDER BY e.count DESC, e.first_at`).all(day) as unknown as ContraptionErrorRow[];
+    return this.db
+      .prepare(`SELECT e.*, c.name, c.title, c.home_scheme FROM contraption_errors e JOIN contraptions c ON c.id = e.contraption_id
+      WHERE e.day = ? ORDER BY e.count DESC, e.first_at`)
+      .all(day) as unknown as ContraptionErrorRow[];
   }
 
   /** A contraption turn's meter row, at its start (so it counts towards the day's cap at once). */
@@ -2635,8 +2736,7 @@ export class Store {
   }
 
   endContraptionTurn(id: number, outcome: string, usage: { input: number; output: number; cacheRead: number; cacheWrite: number } | null) {
-    this.db.prepare(`UPDATE contraption_turns SET ended_at = ?, outcome = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ? WHERE id = ?`)
-      .run(Date.now(), outcome, usage?.input ?? null, usage?.output ?? null, usage?.cacheRead ?? null, usage?.cacheWrite ?? null, id);
+    this.db.prepare(`UPDATE contraption_turns SET ended_at = ?, outcome = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ? WHERE id = ?`).run(Date.now(), outcome, usage?.input ?? null, usage?.output ?? null, usage?.cacheRead ?? null, usage?.cacheWrite ?? null, id);
   }
 
   getContraptionTurn(id: number): ContraptionTurnRow | undefined {
@@ -2666,8 +2766,10 @@ export class Store {
   }
 
   setListOrder(uid: number, list: 'schemes' | 'apps', keys: (number | string)[]) {
-    this.db.prepare(`INSERT INTO list_orders (user_id, list, keys, updated_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(user_id, list) DO UPDATE SET keys = excluded.keys, updated_at = excluded.updated_at`).run(uid, list, JSON.stringify(keys), Date.now());
+    this.db
+      .prepare(`INSERT INTO list_orders (user_id, list, keys, updated_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(user_id, list) DO UPDATE SET keys = excluded.keys, updated_at = excluded.updated_at`)
+      .run(uid, list, JSON.stringify(keys), Date.now());
   }
 
   /** The Needs-you items `name` last saw waiting in each scheme (#539): project id -> their keys. */
@@ -2678,8 +2780,10 @@ export class Store {
 
   /** Record the items `name` saw waiting in a scheme; with `keep`, only when none are recorded yet. */
   setSeenItems(name: string, projectId: number, keys: string[], keep = false) {
-    this.db.prepare(`INSERT INTO project_seen_items (name, project_id, keys, seen_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(name, project_id) DO ${keep ? 'NOTHING' : 'UPDATE SET keys = excluded.keys, seen_at = excluded.seen_at'}`).run(name, projectId, JSON.stringify(keys), Date.now());
+    this.db
+      .prepare(`INSERT INTO project_seen_items (name, project_id, keys, seen_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(name, project_id) DO ${keep ? 'NOTHING' : 'UPDATE SET keys = excluded.keys, seen_at = excluded.seen_at'}`)
+      .run(name, projectId, JSON.stringify(keys), Date.now());
   }
 
   deleteProject(id: number) {
@@ -2713,18 +2817,17 @@ export class Store {
 
   /** addEvent's write: the row (its id, if one was handed out), and its author's latest action. Returns the row's id. */
   insertEvent(id: number | null, ticketId: number, kind: string, json: string, now: number, data: unknown): number {
-    const r = this.db
-      .prepare('INSERT INTO events (id, ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(id, ticketId, kind, json, now);
+    const r = this.db.prepare('INSERT INTO events (id, ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?, ?)').run(id, ticketId, kind, json, now);
     // A message or an approval click is its author's latest action in the scheme, for the recap (Store.recap).
     const actor = kind === 'user_message' ? (data as { author?: unknown } | null)?.author : kind === 'approval_result' ? (data as { by?: unknown } | null)?.by : null;
     if (typeof actor === 'string') {
-      this.db.prepare(`INSERT INTO last_actions (name, project_id, at) SELECT ?, project_id, ? FROM tickets WHERE id = ?
-        ON CONFLICT (name, project_id) DO UPDATE SET at = MAX(at, excluded.at)`).run(actor, now, ticketId);
+      this.db
+        .prepare(`INSERT INTO last_actions (name, project_id, at) SELECT ?, project_id, ? FROM tickets WHERE id = ?
+        ON CONFLICT (name, project_id) DO UPDATE SET at = MAX(at, excluded.at)`)
+        .run(actor, now, ticketId);
     }
     return Number(r.lastInsertRowid);
   }
-
 
   getEvent(id: number): EventRow | undefined {
     const e = scoped(this.db, `event:${id}`, () => this.db.prepare('SELECT * FROM events WHERE id = ?').get(id) as EventRow | undefined);
@@ -2742,8 +2845,7 @@ export class Store {
    * events are never read. Reading a Taskmaster's whole chat to answer one card held the server 1-3 s (#759).
    */
   eventsOfKinds(ticketId: number, kinds: string[], afterId = 0): EventRow[] {
-    return this.db.prepare('SELECT * FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind IN (SELECT value FROM json_each(?)) AND id > ? ORDER BY id')
-      .all(ticketId, JSON.stringify(kinds), afterId) as unknown as EventRow[];
+    return this.db.prepare('SELECT * FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind IN (SELECT value FROM json_each(?)) AND id > ? ORDER BY id').all(ticketId, JSON.stringify(kinds), afterId) as unknown as EventRow[];
   }
 
   /** A project's artifacts, newest first, with the title of the ticket that made each. */
@@ -2783,7 +2885,7 @@ export class Store {
     return rows.sort((a, b) => b.created_at - a.created_at || b.id - a.id)[0];
   }
 
-    getArtifact(id: number): Artifact | undefined {
+  getArtifact(id: number): Artifact | undefined {
     return this.db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id) as unknown as Artifact | undefined;
   }
 
@@ -2873,13 +2975,9 @@ export class Store {
 
   /** Bring a ticket's artifact rows in line with what is on disk. Returns whether anything changed. */
   syncArtifacts(ticket: Ticket, found: { path: string; size: number; mtime: number }[]): boolean {
-    const existing = new Map(
-      (this.db.prepare('SELECT * FROM artifacts WHERE ticket_id = ?').all(ticket.id) as unknown as Artifact[]).map((a) => [a.path, a]),
-    );
+    const existing = new Map((this.db.prepare('SELECT * FROM artifacts WHERE ticket_id = ?').all(ticket.id) as unknown as Artifact[]).map((a) => [a.path, a]));
     let changed = false;
-    const insert = this.db.prepare(
-      'INSERT INTO artifacts (project_id, ticket_id, path, size, mtime, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    );
+    const insert = this.db.prepare('INSERT INTO artifacts (project_id, ticket_id, path, size, mtime, created_at) VALUES (?, ?, ?, ?, ?, ?)');
     const update = this.db.prepare('UPDATE artifacts SET size = ?, mtime = ?, missing = 0 WHERE id = ?');
     this.db.exec('BEGIN');
     try {
@@ -2909,8 +3007,7 @@ export class Store {
   listClaudeState(projectId: number, ticketId: number | null): ClaudeStateRow[] {
     return (ticketId === null
       ? this.db.prepare('SELECT path, project_id, ticket_id, size, mtime FROM claude_state WHERE project_id = ? AND ticket_id IS NULL').all(projectId)
-      : this.db.prepare('SELECT path, project_id, ticket_id, size, mtime FROM claude_state WHERE project_id = ? AND ticket_id = ?').all(projectId, ticketId)
-    ) as unknown as ClaudeStateRow[];
+      : this.db.prepare('SELECT path, project_id, ticket_id, size, mtime FROM claude_state WHERE project_id = ? AND ticket_id = ?').all(projectId, ticketId)) as unknown as ClaudeStateRow[];
   }
 
   getClaudeState(path: string, withData = false): ClaudeStateRow | undefined {
@@ -2940,14 +3037,10 @@ export class Store {
   seenTimes(name: string, projectId: number): Record<number, number> {
     // In a read scope (#1527) one read for every scheme: the scheme list asked twice a scheme, each walking all their marks.
     if (inScope(this.db)) {
-      const all = scoped(this.db, `seen:${name}`, () => (this.db
-        .prepare('SELECT s.ticket_id, s.seen_at, t.project_id FROM ticket_seen s JOIN tickets t ON t.id = s.ticket_id WHERE s.name = ?')
-        .all(name) as { ticket_id: number; seen_at: number; project_id: number }[]));
+      const all = scoped(this.db, `seen:${name}`, () => this.db.prepare('SELECT s.ticket_id, s.seen_at, t.project_id FROM ticket_seen s JOIN tickets t ON t.id = s.ticket_id WHERE s.name = ?').all(name) as { ticket_id: number; seen_at: number; project_id: number }[]);
       return Object.fromEntries(all.filter((r) => r.project_id === projectId).map((r) => [r.ticket_id, r.seen_at]));
     }
-    const rows = this.db
-      .prepare('SELECT s.ticket_id, s.seen_at FROM ticket_seen s JOIN tickets t ON t.id = s.ticket_id WHERE s.name = ? AND t.project_id = ?')
-      .all(name, projectId) as { ticket_id: number; seen_at: number }[];
+    const rows = this.db.prepare('SELECT s.ticket_id, s.seen_at FROM ticket_seen s JOIN tickets t ON t.id = s.ticket_id WHERE s.name = ? AND t.project_id = ?').all(name, projectId) as { ticket_id: number; seen_at: number }[];
     return Object.fromEntries(rows.map((r) => [r.ticket_id, r.seen_at]));
   }
 
@@ -2959,26 +3052,20 @@ export class Store {
 
   markSeen(name: string, ticketId: number): number {
     const now = Date.now();
-    this.db
-      .prepare('INSERT INTO ticket_seen (name, ticket_id, seen_at) VALUES (?, ?, ?) ON CONFLICT(name, ticket_id) DO UPDATE SET seen_at = excluded.seen_at')
-      .run(name, ticketId, now);
+    this.db.prepare('INSERT INTO ticket_seen (name, ticket_id, seen_at) VALUES (?, ?, ?) ON CONFLICT(name, ticket_id) DO UPDATE SET seen_at = excluded.seen_at').run(name, ticketId, now);
     return now;
   }
 
   /** The minions `name` pinned in a project, oldest pin first (#179). */
   pinnedTickets(name: string, projectId: number): number[] {
     // A pin older than its minion belongs to a deleted one whose id was reused: a rolled-back release's deleteTicket leaves it behind.
-    const rows = this.db
-      .prepare('SELECT p.ticket_id FROM ticket_pins p JOIN tickets t ON t.id = p.ticket_id WHERE p.name = ? AND t.project_id = ? AND p.pinned_at >= t.created_at ORDER BY p.pinned_at, p.ticket_id')
-      .all(name, projectId) as { ticket_id: number }[];
+    const rows = this.db.prepare('SELECT p.ticket_id FROM ticket_pins p JOIN tickets t ON t.id = p.ticket_id WHERE p.name = ? AND t.project_id = ? AND p.pinned_at >= t.created_at ORDER BY p.pinned_at, p.ticket_id').all(name, projectId) as { ticket_id: number }[];
     return rows.map((r) => r.ticket_id);
   }
 
   /** Whether `name` pinned this minion, by the same rule as pinnedTickets. */
   isTicketPinned(name: string, ticketId: number): boolean {
-    return !!this.db
-      .prepare('SELECT 1 FROM ticket_pins p JOIN tickets t ON t.id = p.ticket_id WHERE p.name = ? AND p.ticket_id = ? AND p.pinned_at >= t.created_at')
-      .get(name, ticketId);
+    return !!this.db.prepare('SELECT 1 FROM ticket_pins p JOIN tickets t ON t.id = p.ticket_id WHERE p.name = ? AND p.ticket_id = ? AND p.pinned_at >= t.created_at').get(name, ticketId);
   }
 
   setTicketPinned(name: string, ticketId: number, pinned: boolean) {
@@ -2989,9 +3076,7 @@ export class Store {
   /** People's notes on a scheme's minions, by ticket id. Only people's routes may hand these out. */
   personNotes(projectId: number): Record<number, PersonNote> {
     // A note older than its minion belongs to a deleted one whose id was reused: a rolled-back release's deleteTicket leaves it behind.
-    const rows = this.db
-      .prepare('SELECT n.ticket_id, n.text, n.updated_by, n.updated_at FROM person_notes n JOIN tickets t ON t.id = n.ticket_id WHERE t.project_id = ? AND n.updated_at >= t.created_at')
-      .all(projectId) as { ticket_id: number; text: string; updated_by: string; updated_at: number }[];
+    const rows = this.db.prepare('SELECT n.ticket_id, n.text, n.updated_by, n.updated_at FROM person_notes n JOIN tickets t ON t.id = n.ticket_id WHERE t.project_id = ? AND n.updated_at >= t.created_at').all(projectId) as { ticket_id: number; text: string; updated_by: string; updated_at: number }[];
     return Object.fromEntries(rows.map((r) => [r.ticket_id, { text: r.text, by: r.updated_by, at: r.updated_at }]));
   }
 
@@ -3002,9 +3087,7 @@ export class Store {
       return null;
     }
     const at = Date.now();
-    this.db
-      .prepare('INSERT INTO person_notes (ticket_id, text, updated_by, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET text = excluded.text, updated_by = excluded.updated_by, updated_at = excluded.updated_at')
-      .run(ticketId, text, by, at);
+    this.db.prepare('INSERT INTO person_notes (ticket_id, text, updated_by, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET text = excluded.text, updated_by = excluded.updated_by, updated_at = excluded.updated_at').run(ticketId, text, by, at);
     return { text, by, at };
   }
 
@@ -3022,11 +3105,13 @@ export class Store {
     let row = this.db.prepare('SELECT at FROM last_actions WHERE name = ? AND project_id = ?').get(name, projectId) as { at: number } | undefined;
     if (!row) {
       // Once per person and scheme: from before last_actions, read from the events (1.5 s cold for Citadel, #538). 0: never acted.
-      const { since } = this.db.prepare(`
+      const { since } = this.db
+        .prepare(`
         SELECT MAX(e.created_at) AS since FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
         WHERE t.project_id = ? AND e.kind IN ('user_message', 'approval_result') AND (
           (e.kind = 'user_message' AND json_extract(e.data, '$.author') = ?)
-          OR (e.kind = 'approval_result' AND json_extract(e.data, '$.by') = ?))`).get(projectId, name, name) as { since: number | null };
+          OR (e.kind = 'approval_result' AND json_extract(e.data, '$.by') = ?))`)
+        .get(projectId, name, name) as { since: number | null };
       row = { at: since ?? 0 };
       this.db.prepare('INSERT INTO last_actions (name, project_id, at) VALUES (?, ?, ?) ON CONFLICT (name, project_id) DO UPDATE SET at = MAX(at, excluded.at)').run(name, projectId, row.at);
     }
@@ -3036,10 +3121,12 @@ export class Store {
     if (since == null || Date.now() - since < RECAP_AWAY_MS) return { since, turns: {} };
     // Event ids grow with time, so start after the last turn that ended by `since` (turns_ended finds it): the index skips everything older.
     const before = this.db.prepare('SELECT event_id FROM turns WHERE ended_at <= ? AND event_id IS NOT NULL ORDER BY ended_at DESC LIMIT 1').get(since) as { event_id: number } | undefined;
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(`
       SELECT e.ticket_id, COUNT(*) AS n FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
       WHERE t.project_id = ? AND e.kind = 'claude' AND e.id > ? AND e.created_at > ? AND json_extract(e.data, '$.type') = 'result'
-      GROUP BY e.ticket_id`).all(projectId, before?.event_id ?? 0, since) as { ticket_id: number; n: number }[];
+      GROUP BY e.ticket_id`)
+      .all(projectId, before?.event_id ?? 0, since) as { ticket_id: number; n: number }[];
     return { since, turns: Object.fromEntries(rows.map((r) => [r.ticket_id, r.n])) };
   }
 
@@ -3062,27 +3149,31 @@ export class Store {
 
   /** A chat's newest plan card, or undefined: a real plan, not a machine's notes (#617), its lending (#1638) or a release key card (#837), which ride the same event kind. */
   latestPlan(ticketId: number): EventRow | undefined {
-    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND kind = 'plan' AND json_extract(data, '$.machine') IS NULL
-      AND json_extract(data, '$.releaseKey') IS NULL AND json_extract(data, '$.machineLend') IS NULL ORDER BY id DESC LIMIT 1`).get(ticketId) as unknown as EventRow | undefined;
+    return this.db
+      .prepare(`SELECT * FROM events WHERE ticket_id = ? AND kind = 'plan' AND json_extract(data, '$.machine') IS NULL
+      AND json_extract(data, '$.releaseKey') IS NULL AND json_extract(data, '$.machineLend') IS NULL ORDER BY id DESC LIMIT 1`)
+      .get(ticketId) as unknown as EventRow | undefined;
   }
 
   /** The backup chat's lines (src/backup.ts): the newest `limit` messages, notes, errors and replies with text after `afterId`, oldest first. */
   chatTextEvents(ticketId: number, afterId: number, limit: number): EventRow[] {
-    return (this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id > ? AND (kind IN ('user_message', 'note', 'error')
+    return (
+      this.db
+        .prepare(`SELECT * FROM events WHERE ticket_id = ? AND id > ? AND (kind IN ('user_message', 'note', 'error')
       OR (kind = 'claude' AND json_extract(data, '$.type') = 'assistant' AND instr(data, '"type":"text"') > 0))
-      ORDER BY id DESC LIMIT ?`).all(ticketId, afterId, limit) as unknown as EventRow[]).reverse();
+      ORDER BY id DESC LIMIT ?`)
+        .all(ticketId, afterId, limit) as unknown as EventRow[]
+    ).reverse();
   }
 
   /** A chat's events in [from, before), oldest first; `mine` keeps only what Mine shows from the Overlord (MINE_EVENTS). */
   eventsBetween(ticketId: number, from: number, before: number, mine = false): EventRow[] {
-    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id >= ? AND id < ? ${mine ? `AND ${MINE_EVENTS}` : ''} ORDER BY id`)
-      .all(ticketId, from, before) as unknown as EventRow[];
+    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id >= ? AND id < ? ${mine ? `AND ${MINE_EVENTS}` : ''} ORDER BY id`).all(ticketId, from, before) as unknown as EventRow[];
   }
 
   /** A chat's newest `limit` events before `before`, newest first; `mine` as in eventsBetween. */
   eventsBefore(ticketId: number, before: number, limit: number, mine = false): EventRow[] {
-    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id < ? ${mine ? `AND ${MINE_EVENTS}` : ''} ORDER BY id DESC LIMIT ?`)
-      .all(ticketId, before, limit) as unknown as EventRow[];
+    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id < ? ${mine ? `AND ${MINE_EVENTS}` : ''} ORDER BY id DESC LIMIT ?`).all(ticketId, before, limit) as unknown as EventRow[];
   }
 
   /** A chat's newest event of `kind` (#1149: the message a person just sent). */
@@ -3091,9 +3182,7 @@ export class Store {
   }
 
   listEvents(ticketId: number, afterId = 0): EventRow[] {
-    return this.db
-      .prepare('SELECT * FROM events WHERE ticket_id = ? AND id > ? ORDER BY id')
-      .all(ticketId, afterId) as unknown as EventRow[];
+    return this.db.prepare('SELECT * FROM events WHERE ticket_id = ? AND id > ? ORDER BY id').all(ticketId, afterId) as unknown as EventRow[];
   }
 
   /**
@@ -3103,9 +3192,11 @@ export class Store {
    * With `from`, the page reaches back to the start of the turn holding that event too.
    */
   eventsPage(ticketId: number, before: number, limit: number, from?: number): { events: EventRow[]; more: boolean } {
-    const recent = this.db.prepare(`
+    const recent = this.db
+      .prepare(`
       SELECT id, kind = 'claude' AND json_extract(data, '$.type') = 'result' AS ends FROM events
-      WHERE ticket_id = ? AND id < ? ORDER BY id DESC LIMIT ?`).all(ticketId, before, limit + 1) as { id: number; ends: number }[];
+      WHERE ticket_id = ? AND id < ? ORDER BY id DESC LIMIT ?`)
+      .all(ticketId, before, limit + 1) as { id: number; ends: number }[];
     if (!recent.length) return { events: [], more: false };
     let start = recent.at(-1)!.id;
     if (recent.length > limit) {
@@ -3116,22 +3207,22 @@ export class Store {
     if (from != null) start = Math.min(start, this.turnStart(ticketId, from));
     // Notes after a long last turn (dismissed, deployed) aren't a turn: they come with the turn before them,
     // so a minion never opens on nothing but "Load earlier" (#288).
-    const hasTurn = this.db.prepare(`
+    const hasTurn = this.db
+      .prepare(`
       SELECT 1 FROM events WHERE ticket_id = ? AND id >= ? AND id < ? AND (kind = 'user_message'
         OR (kind = 'claude' AND json_extract(data, '$.type') = 'system' AND json_extract(data, '$.subtype') = 'init')) LIMIT 1`)
       .get(ticketId, start, before);
-    const prev = !hasTurn && this.db.prepare('SELECT MAX(id) AS id FROM events WHERE ticket_id = ? AND id < ?').get(ticketId, start) as { id: number | null };
+    const prev = !hasTurn && (this.db.prepare('SELECT MAX(id) AS id FROM events WHERE ticket_id = ? AND id < ?').get(ticketId, start) as { id: number | null });
     if (prev && prev.id != null) start = this.turnStart(ticketId, prev.id);
-    const events = this.db
-      .prepare('SELECT * FROM events WHERE ticket_id = ? AND id >= ? AND id < ? ORDER BY id')
-      .all(ticketId, start, before) as unknown as EventRow[];
+    const events = this.db.prepare('SELECT * FROM events WHERE ticket_id = ? AND id >= ? AND id < ? ORDER BY id').all(ticketId, start, before) as unknown as EventRow[];
     const more = !!this.db.prepare('SELECT 1 FROM events WHERE ticket_id = ? AND id < ? LIMIT 1').get(ticketId, start);
     return { events, more };
   }
 
   /** The first event of the turn holding event `id`: the one after the last result before it. */
   private turnStart(ticketId: number, id: number): number {
-    const row = this.db.prepare(`
+    const row = this.db
+      .prepare(`
       SELECT MIN(id) AS id FROM events WHERE ticket_id = ? AND id > COALESCE((
         SELECT MAX(id) FROM events WHERE ticket_id = ? AND id < ? AND kind = 'claude' AND json_extract(data, '$.type') = 'result'), 0)`)
       .get(ticketId, ticketId, id) as { id: number | null };
@@ -3144,9 +3235,11 @@ export class Store {
    * are most of the bytes, so they are left out by prefix, without parsing anyone's JSON (#497).
    */
   planEvents(ticketId: number, before = Number.MAX_SAFE_INTEGER, after = 0): EventRow[] {
-    return this.db.prepare(`
+    return this.db
+      .prepare(`
       SELECT * FROM events WHERE ticket_id = ? AND id < ? AND id > ? AND kind = 'claude' AND (data NOT LIKE '{"type":"user"%' OR instr(data, 'Task #') > 0)
-      ORDER BY id`).all(ticketId, before, after) as unknown as EventRow[];
+      ORDER BY id`)
+      .all(ticketId, before, after) as unknown as EventRow[];
   }
 
   /**
@@ -3179,25 +3272,25 @@ export class Store {
 
   /** Whether the chat still shows card event `eventId` under its turn's words: no message and no turn end since (public/thread.js heldCards). */
   heldBelow(ticketId: number, eventId: number): boolean {
-    return !this.db.prepare("SELECT 1 FROM events WHERE ticket_id = ? AND id > ? AND (kind = 'user_message' OR (kind = 'claude' AND json_extract(data, '$.type') = 'result')) LIMIT 1")
-      .get(ticketId, eventId);
+    return !this.db.prepare("SELECT 1 FROM events WHERE ticket_id = ? AND id > ? AND (kind = 'user_message' OR (kind = 'claude' AND json_extract(data, '$.type') = 'result')) LIMIT 1").get(ticketId, eventId);
   }
 
   /** The id of the chat event that posted a minion's card `cardId` of `kind`, or null if there's none. */
   cardEventId(ticketId: number, kind: string, cardId: string): number | null {
-    const row = this.db.prepare("SELECT id FROM events WHERE ticket_id = ? AND kind = ? AND json_extract(data, '$.id') = ? ORDER BY id DESC LIMIT 1")
-      .get(ticketId, kind, cardId) as { id: number } | undefined;
+    const row = this.db.prepare("SELECT id FROM events WHERE ticket_id = ? AND kind = ? AND json_extract(data, '$.id') = ? ORDER BY id DESC LIMIT 1").get(ticketId, kind, cardId) as { id: number } | undefined;
     return row?.id ?? null;
   }
 
   private pickedCards(projectId: number, limit: number) {
-    return this.db.prepare(`
+    return this.db
+      .prepare(`
       SELECT * FROM (
         SELECT e.id, t.number, t.kind AS tkind, t.status AS tstatus
         FROM events e INDEXED BY events_cards JOIN tickets t ON t.id = e.ticket_id
         WHERE t.project_id = ? AND e.kind IN ('question', 'plan', 'approval')
         ORDER BY e.id DESC LIMIT ?)
-      ORDER BY id`).all(projectId, limit) as { id: number; number: number | null; tkind: string; tstatus: string }[];
+      ORDER BY id`)
+      .all(projectId, limit) as { id: number; number: number | null; tkind: string; tstatus: string }[];
   }
 
   private readCardRows(ids: number[]) {
@@ -3213,7 +3306,9 @@ export class Store {
    * disk was busy. The server calls this in small steps at start, so that first call finds them read.
    */
   warmCardRows(projectId: number, limit: number, chunk: number): number {
-    const unread = this.pickedCards(projectId, limit).filter((p) => !this.cardRows.has(p.id)).map((p) => p.id);
+    const unread = this.pickedCards(projectId, limit)
+      .filter((p) => !this.cardRows.has(p.id))
+      .map((p) => p.id);
     this.readCardRows(unread.slice(0, chunk));
     return Math.max(unread.length - chunk, 0);
   }
@@ -3236,9 +3331,7 @@ export class Store {
     // events (a deleted newest id can come back as another card, #762). Anything else is read again from the card on.
     const lost = cards.filter((c) => !this.cardFates.has(c.id));
     if (lost.length) {
-      const saved = new Map((this.db.prepare('SELECT * FROM card_fates WHERE card_id IN (SELECT value FROM json_each(?))')
-        .all(JSON.stringify(lost.map((c) => c.id))) as unknown as (CardFate & { card_id: number; ticket_id: number; cid: string | null; up_to: number })[])
-        .map((r) => [r.card_id, r]));
+      const saved = new Map((this.db.prepare('SELECT * FROM card_fates WHERE card_id IN (SELECT value FROM json_each(?))').all(JSON.stringify(lost.map((c) => c.id))) as unknown as (CardFate & { card_id: number; ticket_id: number; cid: string | null; up_to: number })[]).map((r) => [r.card_id, r]));
       for (const c of lost) {
         const r = saved.get(c.id);
         if (r && r.ticket_id === c.ticket_id && r.cid === (c.cid == null ? null : String(c.cid)) && r.up_to >= c.id && r.up_to <= upTo) {
@@ -3252,22 +3345,33 @@ export class Store {
     // scanning the rest of a long chat held the event loop 1-3 s (#622). By kind: left to itself SQLite walked
     // events_ticket, every event of the chat (56,619 rows for 1,861 messages), 2-3 s from a cold cache after a restart.
     for (const ticket of new Set(cards.map((c) => c.ticket_id))) {
-      const mine = cards.flatMap((c, i) => c.ticket_id === ticket ? [{ cid: c.cid, approval: c.kind === 'approval', fate: fates[i] }] : []);
+      const mine = cards.flatMap((c, i) => (c.ticket_id === ticket ? [{ cid: c.cid, approval: c.kind === 'approval', fate: fates[i] }] : []));
       const from = (pick: (f: CardFate) => string | null, of = mine) => Math.min(...of.filter((m) => pick(m.fate) == null).map((m) => m.fate.upTo));
       const replyFrom = from((f) => f.reply);
-      const replies = replyFrom === Infinity ? [] : this.db.prepare(`
+      const replies =
+        replyFrom === Infinity
+          ? []
+          : (this.db
+              .prepare(`
         SELECT a.id, coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) AS card,
           json_object('author', json_extract(a.data, '$.author'), 'at', a.created_at, 'text', substr(json_extract(a.data, '$.text'), 1, 200),
             'answer', json(json_extract(a.data, '$.answer'))) AS reply
         FROM events a INDEXED BY events_ticket_kind WHERE a.ticket_id = ? AND a.kind = 'user_message' AND a.id > ? AND a.id <= ?
           AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) IS NOT NULL ORDER BY a.id`)
-        .all(ticket, replyFrom, upTo) as { id: number; card: unknown; reply: string }[];
+              .all(ticket, replyFrom, upTo) as { id: number; card: unknown; reply: string }[]);
       // Only an approval gets a result: looking one up for every chat's questions and plans was half a cold call (#759).
-      const resultFrom = from((f) => f.result, mine.filter((m) => m.approval));
-      const results = resultFrom === Infinity ? [] : this.db.prepare(`
+      const resultFrom = from(
+        (f) => f.result,
+        mine.filter((m) => m.approval),
+      );
+      const results =
+        resultFrom === Infinity
+          ? []
+          : (this.db
+              .prepare(`
         SELECT id, json_extract(data, '$.id') AS card, json_set(data, '$.at', created_at) AS result
         FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind = 'approval_result' AND id > ? AND id <= ? ORDER BY id`)
-        .all(ticket, resultFrom, upTo) as { id: number; card: unknown; result: string }[];
+              .all(ticket, resultFrom, upTo) as { id: number; card: unknown; result: string }[]);
       for (const { cid, approval, fate } of mine) {
         // Only a click on this card answers it: not one on another card, not a typed message (#812).
         fate.reply ??= replies.find((a) => a.id > fate.upTo && a.card === cid)?.reply ?? null;
@@ -3291,7 +3395,8 @@ export class Store {
     const now = Date.now();
     const lagging = now - this.fatesSavedAt > 5 * 60_000;
     const todo = cards.flatMap((c, i) => {
-      const was = this.savedFates.get(c.id), f = fates[i];
+      const was = this.savedFates.get(c.id),
+        f = fates[i];
       return !was || was.reply !== f.reply || was.result !== f.result || (lagging && was.upTo !== f.upTo) ? [{ c, f }] : [];
     });
     if (!todo.length) return;
@@ -3310,11 +3415,14 @@ export class Store {
       this.db.exec('COMMIT');
       return true;
     } catch {
-      try { this.db.exec('ROLLBACK'); } catch { /* no transaction was open */ }
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        /* no transaction was open */
+      }
       return false; // not saved: it is read again after a restart
     }
   }
-
 
   // What recentCards found of each card, by event id: a reply or result once found stays (events are only appended),
   // and `upTo` is the newest event looked at, so the next read only scans messages after it (#622).
@@ -3343,11 +3451,17 @@ export class Store {
 
   private openCardsWhere(scope: string, id: number): EventRow[] {
     // Index-only: events_ticket_kind holds (ticket_id, kind, id).
-    const ids = (this.db.prepare(`SELECT e.id FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
-      WHERE ${scope} AND t.status != 'closed' AND e.kind IN ('plan', 'question')`).all(id) as { id: number }[])
-      .map((r) => r.id).filter((i) => !this.doneCards.has(i));
+    const ids = (
+      this.db
+        .prepare(`SELECT e.id FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
+      WHERE ${scope} AND t.status != 'closed' AND e.kind IN ('plan', 'question')`)
+        .all(id) as { id: number }[]
+    )
+      .map((r) => r.id)
+      .filter((i) => !this.doneCards.has(i));
     if (!ids.length) return [];
-    const open = this.db.prepare(`
+    const open = this.db
+      .prepare(`
       SELECT e.* FROM events e WHERE e.id IN (SELECT value FROM json_each(?)) AND (
         (e.kind = 'plan' AND json_extract(e.data, '$.status') = 'pending')
         OR (e.kind = 'question' AND json_extract(e.data, '$.settled') IS NULL))
@@ -3357,7 +3471,8 @@ export class Store {
           AND (coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) = json_extract(e.data, '$.id')
             OR (e.id <= ${this.typedHandlesUpTo} AND ${PERSON_WROTE} AND json_extract(e.data, '$.to') IS NULL
               AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) IS NULL)))
-      ORDER BY e.id`).all(JSON.stringify(ids)) as unknown as EventRow[];
+      ORDER BY e.id`)
+      .all(JSON.stringify(ids)) as unknown as EventRow[];
     const still = new Set(open.map((e) => e.id));
     for (const i of ids) if (!still.has(i)) this.doneCards.add(i);
     return open;
@@ -3370,9 +3485,7 @@ export class Store {
    * a second (#609).
    */
   replyTexts(ticketId: number, after = 0, limit = -1): { texts: string[]; upTo: number; more: boolean } {
-    const rows = this.db
-      .prepare("SELECT id, CASE WHEN data LIKE '%\"type\":\"assistant\"%' AND data LIKE '%](%' THEN data END AS data FROM events WHERE ticket_id = ? AND kind = 'claude' AND id > ? ORDER BY id LIMIT ?")
-      .all(ticketId, after, limit) as { id: number; data: string | null }[];
+    const rows = this.db.prepare("SELECT id, CASE WHEN data LIKE '%\"type\":\"assistant\"%' AND data LIKE '%](%' THEN data END AS data FROM events WHERE ticket_id = ? AND kind = 'claude' AND id > ? ORDER BY id LIMIT ?").all(ticketId, after, limit) as { id: number; data: string | null }[];
     const texts: string[] = [];
     for (const { data } of rows) {
       if (data == null) continue;
@@ -3404,7 +3517,8 @@ export class Store {
       throw err;
     }
     const deleted = changes.filter((c) => c.data == null).length;
-    if (deleted) { // a deleted newest id can come back, below recentCards' `upTo`, as a card
+    if (deleted) {
+      // a deleted newest id can come back, below recentCards' `upTo`, as a card
       this.cardFates.clear();
       this.savedFates.clear();
       this.db.prepare('DELETE FROM card_fates').run();
@@ -3416,7 +3530,9 @@ export class Store {
   /** Newest-first messages and Claude output in a project whose raw JSON contains the text (case-insensitive for ASCII). */
   findEvents(projectId: number, text: string, limit = 3000, ticketId?: number): EventRow[] {
     // The data is JSON text: a quote, backslash or line break is stored escaped, so the needle is too.
-    const like = `%${JSON.stringify(text).slice(1, -1).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const like = `%${JSON.stringify(text)
+      .slice(1, -1)
+      .replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     return this.db
       .prepare(`SELECT e.* FROM events e JOIN tickets t ON t.id = e.ticket_id
         WHERE t.project_id = ? AND e.kind IN ('user_message', 'claude') AND e.data LIKE ? ESCAPE '\\' ${ticketId ? 'AND e.ticket_id = ?' : ''}
@@ -3427,8 +3543,7 @@ export class Store {
   /** PR events already handled for a ticket (keys starting with `prefix`, which is stripped). */
   githubSeen(ticketId: number, prefix: string): string[] {
     const like = `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    return (this.db.prepare("SELECT key FROM github_seen WHERE ticket_id = ? AND key LIKE ? ESCAPE '\\'").all(ticketId, like) as { key: string }[])
-      .map((r) => r.key.slice(prefix.length));
+    return (this.db.prepare("SELECT key FROM github_seen WHERE ticket_id = ? AND key LIKE ? ESCAPE '\\'").all(ticketId, like) as { key: string }[]).map((r) => r.key.slice(prefix.length));
   }
 
   /** Record PR events as handled; `delivered` says whether any were sent to the ticket. */
@@ -3467,21 +3582,35 @@ export class Store {
    * whole total is this turn's.
    */
   recordTurn(ticketId: number, r: TurnResult): Turn {
-    const last = (side: boolean, session?: string | null) => this.db
-      .prepare(`SELECT id, session_id, session_cost_usd FROM turns WHERE ticket_id = ? AND side IS ?${session ? ' AND session_id = ?' : ''} ORDER BY id DESC LIMIT 1`)
-      .get(ticketId, side ? 1 : null, ...(session ? [session] : [])) as { id: number; session_id: string | null; session_cost_usd: number } | undefined;
+    const last = (side: boolean, session?: string | null) =>
+      this.db.prepare(`SELECT id, session_id, session_cost_usd FROM turns WHERE ticket_id = ? AND side IS ?${session ? ' AND session_id = ?' : ''} ORDER BY id DESC LIMIT 1`).get(ticketId, side ? 1 : null, ...(session ? [session] : [])) as { id: number; session_id: string | null; session_cost_usd: number } | undefined;
     // A side thread's turns follow its own fork's (threads interleave); the fork's first starts from its parent's total.
-    const prev = r.side && r.session_id ? last(true, r.session_id) ?? (r.fork_of ? last(false, r.fork_of) : undefined) : last(!!r.side);
-    const sameSession = prev && (prev.session_id ?? null) === (r.session_id ?? null) || (r.side && !!r.fork_of && prev?.session_id === r.fork_of);
+    const prev = r.side && r.session_id ? (last(true, r.session_id) ?? (r.fork_of ? last(false, r.fork_of) : undefined)) : last(!!r.side);
+    const sameSession = (prev && (prev.session_id ?? null) === (r.session_id ?? null)) || (r.side && !!r.fork_of && prev?.session_id === r.fork_of);
     const base = sameSession && prev.session_cost_usd <= r.session_cost_usd ? prev.session_cost_usd : 0;
     const u = r.usage ?? null;
     const n = (v: unknown) => (typeof v === 'number' ? v : null);
     const row = this.db
       .prepare(`INSERT INTO turns (ticket_id, event_id, session_id, ended_at, cost_usd, session_cost_usd, duration_ms,
           input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, payer, keepalive, account, prompt_digest, side) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`)
-      .get(ticketId, r.event_id ?? null, r.session_id ?? null, r.ended_at, r.session_cost_usd - base, r.session_cost_usd,
-        n(r.duration_ms), n(u?.input_tokens), n(u?.output_tokens), n(u?.cache_read_input_tokens), n(u?.cache_creation_input_tokens), r.payer ?? null, r.keepalive ? 1 : null,
-        n(r.account), r.hashes ? JSON.stringify(r.hashes) : null, r.side ? 1 : null) as unknown as Turn;
+      .get(
+        ticketId,
+        r.event_id ?? null,
+        r.session_id ?? null,
+        r.ended_at,
+        r.session_cost_usd - base,
+        r.session_cost_usd,
+        n(r.duration_ms),
+        n(u?.input_tokens),
+        n(u?.output_tokens),
+        n(u?.cache_read_input_tokens),
+        n(u?.cache_creation_input_tokens),
+        r.payer ?? null,
+        r.keepalive ? 1 : null,
+        n(r.account),
+        r.hashes ? JSON.stringify(r.hashes) : null,
+        r.side ? 1 : null,
+      ) as unknown as Turn;
     // Each model's running total, less its total at the session's previous turn, as the whole turn's cost is (#905).
     const models = r.modelUsage && typeof r.modelUsage === 'object' ? Object.entries(r.modelUsage) : [];
     const was = this.db.prepare('SELECT session_cost_usd FROM turn_models WHERE turn_id = ? AND model = ?');
@@ -3494,8 +3623,8 @@ export class Store {
     const unsplit = base > 0 && !this.db.prepare('SELECT 1 FROM turn_models WHERE turn_id = ?').get(prev!.id);
     const sum = totals.reduce((a, [, t]) => a + t, 0);
     for (const [model, total] of totals) {
-      const before = base > 0 && !unsplit ? (was.get(prev!.id, model) as { session_cost_usd: number } | undefined)?.session_cost_usd ?? 0 : 0;
-      add.run(row.id, model, unsplit ? (sum ? row.cost_usd * total / sum : 0) : before <= total ? total - before : total, total);
+      const before = base > 0 && !unsplit ? ((was.get(prev!.id, model) as { session_cost_usd: number } | undefined)?.session_cost_usd ?? 0) : 0;
+      add.run(row.id, model, unsplit ? (sum ? (row.cost_usd * total) / sum : 0) : before <= total ? total - before : total, total);
     }
     return row;
   }
@@ -3518,8 +3647,10 @@ export class Store {
 
   /** A minion's latest turns' hash logs (#878), newest first, with how much of each turn's prompt came from the cache. */
   promptHashes(ticketId: number, limit = 1): { ended_at: number; cache_read_tokens: number | null; cache_write_tokens: number | null; hashes: PromptHashes }[] {
-    const rows = this.db.prepare(`SELECT ended_at, cache_read_tokens, cache_write_tokens, prompt_digest FROM turns
-        WHERE ticket_id = ? AND prompt_digest IS NOT NULL ORDER BY id DESC LIMIT ?`).all(ticketId, limit) as { ended_at: number; cache_read_tokens: number | null; cache_write_tokens: number | null; prompt_digest: string }[];
+    const rows = this.db
+      .prepare(`SELECT ended_at, cache_read_tokens, cache_write_tokens, prompt_digest FROM turns
+        WHERE ticket_id = ? AND prompt_digest IS NOT NULL ORDER BY id DESC LIMIT ?`)
+      .all(ticketId, limit) as { ended_at: number; cache_read_tokens: number | null; cache_write_tokens: number | null; prompt_digest: string }[];
     return rows.map(({ prompt_digest, ...r }) => ({ ...r, hashes: JSON.parse(prompt_digest) }));
   }
 
@@ -3528,7 +3659,7 @@ export class Store {
    * come from each turn's init event. Only runs on an empty table; returns how many turns it added.
    */
   backfillTurns(): number {
-    if ((this.db.prepare('SELECT 1 FROM turns LIMIT 1').get())) return 0;
+    if (this.db.prepare('SELECT 1 FROM turns LIMIT 1').get()) return 0;
     const rows = this.db
       .prepare(`SELECT id, ticket_id, data, created_at FROM events WHERE kind = 'claude'
           AND (data LIKE '{"type":"system","subtype":"init"%' OR data LIKE '{"type":"result"%') ORDER BY id`)
@@ -3543,8 +3674,11 @@ export class Store {
           session.set(row.ticket_id, ev.session_id ?? null);
         } else if (typeof ev.total_cost_usd === 'number') {
           this.recordTurn(row.ticket_id, {
-            event_id: row.id, session_id: session.get(row.ticket_id) ?? null, ended_at: row.created_at,
-            session_cost_usd: ev.total_cost_usd, duration_ms: ev.duration_ms,
+            event_id: row.id,
+            session_id: session.get(row.ticket_id) ?? null,
+            ended_at: row.created_at,
+            session_cost_usd: ev.total_cost_usd,
+            duration_ms: ev.duration_ms,
           });
           added++;
         }
@@ -3584,9 +3718,12 @@ export class Store {
    * that undershoots whole plans (progress-estimates-2026-11 report).
    */
   stepRatio(projectId: number): number {
-    const sum = (where: string, ...args: number[]) => this.db.prepare(`SELECT COUNT(*) AS n, SUM(work_ms) AS work, SUM(estimate) AS guess FROM (
+    const sum = (where: string, ...args: number[]) =>
+      this.db
+        .prepare(`SELECT COUNT(*) AS n, SUM(work_ms) AS work, SUM(estimate) AS guess FROM (
       SELECT s.work_ms, s.estimate FROM step_times s JOIN tickets t ON t.id = s.ticket_id WHERE s.estimate IS NOT NULL ${where}
-      ORDER BY s.finished_at DESC LIMIT ${STEP_RATIO.recent})`).get(...args) as { n: number; work: number | null; guess: number | null };
+      ORDER BY s.finished_at DESC LIMIT ${STEP_RATIO.recent})`)
+        .get(...args) as { n: number; work: number | null; guess: number | null };
     const own = sum('AND t.project_id = ?', projectId);
     const pick = own.n >= STEP_RATIO.scheme ? own : sum('');
     const ratio = pick.n >= STEP_RATIO.least && pick.guess ? pick.work! / 60_000 / pick.guess : 1;
@@ -3609,11 +3746,13 @@ export class Store {
    * the model it was set to or last ran on, and what its turns cost. src/minion-budget.ts takes the usual cost from these.
    */
   minionCosts(since: number): { type: string | null; model: string | null; cost: number }[] {
-    return this.db.prepare(`SELECT (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
+    return this.db
+      .prepare(`SELECT (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
           WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type,
         coalesce(k.model, k.last_model) AS model, c.cost
       FROM tickets k JOIN (SELECT ticket_id, SUM(cost_usd) AS cost FROM turns GROUP BY ticket_id) c ON c.ticket_id = k.id
-      WHERE k.kind = 'ticket' AND k.status = 'closed' AND k.created_at >= ? AND c.cost > 0`).all(since) as unknown as { type: string | null; model: string | null; cost: number }[];
+      WHERE k.kind = 'ticket' AND k.status = 'closed' AND k.created_at >= ? AND c.cost > 0`)
+      .all(since) as unknown as { type: string | null; model: string | null; cost: number }[];
   }
 
   /** Cost per local day ('2026-10-28') and project, for turns ended at or after `since`; `hostOnly`: the server login's turns only. */
@@ -3626,17 +3765,14 @@ export class Store {
 
   /** Spend since `since` by payer (null: the server login) and project, every payer's turns (#689). */
   spendByPayer(since: number): { payer: number | null; project_id: number; cost: number }[] {
-    return this.db
-      .prepare('SELECT u.payer, t.project_id, SUM(u.cost_usd) AS cost FROM turns u JOIN tickets t ON t.id = u.ticket_id WHERE u.ended_at >= ? GROUP BY u.payer, t.project_id')
-      .all(since) as unknown as { payer: number | null; project_id: number; cost: number }[];
+    return this.db.prepare('SELECT u.payer, t.project_id, SUM(u.cost_usd) AS cost FROM turns u JOIN tickets t ON t.id = u.ticket_id WHERE u.ended_at >= ? GROUP BY u.payer, t.project_id').all(since) as unknown as { payer: number | null; project_id: number; cost: number }[];
   }
 
   /** What one payer's turns on one of their accounts cost since `since`; a turn from before #905 kept no account and counts as account 1's. */
   accountSpend(payer: number | null, account: number, since: number): number | null {
     // Turns kept no account before #905, so a window holding one of those can't be split by account (keepalive pings keep none, and cost next to nothing).
     if (this.db.prepare('SELECT 1 FROM turns WHERE payer IS ? AND ended_at >= ? AND account IS NULL AND keepalive IS NULL LIMIT 1').get(payer, since)) return null;
-    return (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE payer IS ? AND ended_at >= ? AND ${account === 1 ? '(account IS NULL OR account = 1)' : 'account = ?'}`)
-      .get(payer, since, ...(account === 1 ? [] : [account])) as { c: number }).c;
+    return (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE payer IS ? AND ended_at >= ? AND ${account === 1 ? '(account IS NULL OR account = 1)' : 'account = ?'}`).get(payer, since, ...(account === 1 ? [] : [account])) as { c: number }).c;
   }
 
   /**
@@ -3657,16 +3793,44 @@ export class Store {
 
   /** Health readings of these kinds since `since`, oldest first (#1123, the Status page). */
   healthEventsSince(kinds: string[], since: number): { kind: string; at: number; commit_sha: string | null; detail: string }[] {
-    return this.db.prepare(`SELECT kind, at, commit_sha, detail FROM health_events WHERE kind IN (${kinds.map(() => '?').join(', ')}) AND at >= ? ORDER BY at`)
-      .all(...kinds, since) as unknown as { kind: string; at: number; commit_sha: string | null; detail: string }[];
+    return this.db.prepare(`SELECT kind, at, commit_sha, detail FROM health_events WHERE kind IN (${kinds.map(() => '?').join(', ')}) AND at >= ? ORDER BY at`).all(...kinds, since) as unknown as { kind: string; at: number; commit_sha: string | null; detail: string }[];
   }
 
   /** One reading of perigee's memory, disk and load (#1123); drops readings past HOST_SAMPLE_KEEP_MS. */
   addHostSample(s: HostSample) {
-    this.db.prepare('INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss, cpu_psi, mem_psi, io_psi, swap_used, cpu_ledger, answer_time, db_cached, db_size, kswapd_rate, refault_rate, server_refault_rate, pgpgin_rate, thp_fallback_rate, warm_ms, warm_mb, warm_backoffs, open_fds, supervisors, tmp_used, app_mem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(s.at, s.mem_total, s.mem_avail, s.disk_total, s.disk_free, s.load1, s.rss, s.cpu_psi ?? null, s.mem_psi ?? null, s.io_psi ?? null, s.swap_used ?? null, s.cpu_ledger ?? null, s.answer_time ?? null,
-        s.db_cached ?? null, s.db_size ?? null, s.kswapd_rate ?? null, s.refault_rate ?? null, s.server_refault_rate ?? null, s.pgpgin_rate ?? null, s.thp_fallback_rate ?? null,
-        s.warm_ms ?? null, s.warm_mb ?? null, s.warm_backoffs ?? null, s.open_fds ?? null, s.supervisors ?? null, s.tmp_used ?? null, s.app_mem ?? null);
+    this.db
+      .prepare(
+        'INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss, cpu_psi, mem_psi, io_psi, swap_used, cpu_ledger, answer_time, db_cached, db_size, kswapd_rate, refault_rate, server_refault_rate, pgpgin_rate, thp_fallback_rate, warm_ms, warm_mb, warm_backoffs, open_fds, supervisors, tmp_used, app_mem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        s.at,
+        s.mem_total,
+        s.mem_avail,
+        s.disk_total,
+        s.disk_free,
+        s.load1,
+        s.rss,
+        s.cpu_psi ?? null,
+        s.mem_psi ?? null,
+        s.io_psi ?? null,
+        s.swap_used ?? null,
+        s.cpu_ledger ?? null,
+        s.answer_time ?? null,
+        s.db_cached ?? null,
+        s.db_size ?? null,
+        s.kswapd_rate ?? null,
+        s.refault_rate ?? null,
+        s.server_refault_rate ?? null,
+        s.pgpgin_rate ?? null,
+        s.thp_fallback_rate ?? null,
+        s.warm_ms ?? null,
+        s.warm_mb ?? null,
+        s.warm_backoffs ?? null,
+        s.open_fds ?? null,
+        s.supervisors ?? null,
+        s.tmp_used ?? null,
+        s.app_mem ?? null,
+      );
     this.db.prepare('DELETE FROM host_samples WHERE at < ?').run(s.at - HOST_SAMPLE_KEEP_MS);
   }
 
@@ -3676,8 +3840,7 @@ export class Store {
 
   /** A scheme's releases of one target started or live since `since`, oldest first (#1123). */
   releasesSince(projectId: number, target: string, since: number): ReleaseRow[] {
-    return this.db.prepare('SELECT * FROM releases WHERE project_id = ? AND target = ? AND coalesce(live_at, started_at) >= ? ORDER BY id')
-      .all(projectId, target, since) as unknown as ReleaseRow[];
+    return this.db.prepare('SELECT * FROM releases WHERE project_id = ? AND target = ? AND coalesce(live_at, started_at) >= ? ORDER BY id').all(projectId, target, since) as unknown as ReleaseRow[];
   }
 
   /** Every scheme's releases that went live since `since`, with a start (#1132). */
@@ -3692,20 +3855,20 @@ export class Store {
 
   /** An app's deploys started since `since`, oldest first (#1123). */
   appDeploysSince(name: string, since: number): { started_at: number; finished_at: number | null; outcome: string; to_sha: string | null; by: string }[] {
-    return this.db.prepare('SELECT started_at, finished_at, outcome, to_sha, by FROM contraption_deploys WHERE name = ? AND started_at >= ? ORDER BY started_at, id')
-      .all(name, since) as unknown as { started_at: number; finished_at: number | null; outcome: string; to_sha: string | null; by: string }[];
+    return this.db.prepare('SELECT started_at, finished_at, outcome, to_sha, by FROM contraption_deploys WHERE name = ? AND started_at >= ? ORDER BY started_at, id').all(name, since) as unknown as { started_at: number; finished_at: number | null; outcome: string; to_sha: string | null; by: string }[];
   }
 
   /** An app's error counts per Pacific day, kind and key from `fromDay` on (#1123). */
   appErrorsSince(contraptionId: number, fromDay: string): { day: string; kind: string; key: string; count: number; sample: string; last_at: number }[] {
-    return this.db.prepare("SELECT day, kind, key, count, sample, last_at FROM contraption_errors WHERE contraption_id = ? AND day >= ? AND kind != 'deploy' ORDER BY day, count DESC")
-      .all(contraptionId, fromDay) as unknown as { day: string; kind: string; key: string; count: number; sample: string; last_at: number }[];
+    return this.db.prepare("SELECT day, kind, key, count, sample, last_at FROM contraption_errors WHERE contraption_id = ? AND day >= ? AND kind != 'deploy' ORDER BY day, count DESC").all(contraptionId, fromDay) as unknown as { day: string; kind: string; key: string; count: number; sample: string; last_at: number }[];
   }
 
   /** An app's agent turns started since `since`: when, whose, and its tokens (#1123). */
   appTurnsSince(contraptionId: number, since: number): { started_at: number; person: string; outcome: string | null; tokens: number }[] {
-    return this.db.prepare(`SELECT t.started_at, u.name AS person, t.outcome, coalesce(t.input_tokens, 0) + coalesce(t.output_tokens, 0) + coalesce(t.cache_read_tokens, 0) + coalesce(t.cache_write_tokens, 0) AS tokens
-      FROM contraption_turns t JOIN users u ON u.id = t.user_id WHERE t.contraption_id = ? AND t.started_at >= ? ORDER BY t.started_at`).all(contraptionId, since) as unknown as { started_at: number; person: string; outcome: string | null; tokens: number }[];
+    return this.db
+      .prepare(`SELECT t.started_at, u.name AS person, t.outcome, coalesce(t.input_tokens, 0) + coalesce(t.output_tokens, 0) + coalesce(t.cache_read_tokens, 0) + coalesce(t.cache_write_tokens, 0) AS tokens
+      FROM contraption_turns t JOIN users u ON u.id = t.user_id WHERE t.contraption_id = ? AND t.started_at >= ? ORDER BY t.started_at`)
+      .all(contraptionId, since) as unknown as { started_at: number; person: string; outcome: string | null; tokens: number }[];
   }
 
   /** Bug minions of every scheme created since `since`, with their brief's first 4,000 characters: the third-fix flag's pool (#1157). */
@@ -3737,9 +3900,11 @@ export class Store {
 
   /** A scheme's flakiest test files since `since`: how often, when last, and the minion whose land saw the last one. */
   flakeCounts(projectId: number, since: number, limit = 10): { file: string; count: number; last: number; ticketId: number | null }[] {
-    return this.db.prepare(`SELECT file, COUNT(*) AS count, MAX(at) AS last,
+    return this.db
+      .prepare(`SELECT file, COUNT(*) AS count, MAX(at) AS last,
         (SELECT e2.ticket_id FROM flake_events e2 WHERE e2.project_id = e.project_id AND e2.file = e.file ORDER BY e2.at DESC, e2.id DESC LIMIT 1) AS ticketId
-      FROM flake_events e WHERE project_id = ? AND at >= ? GROUP BY file ORDER BY count DESC, last DESC LIMIT ?`).all(projectId, since, limit) as { file: string; count: number; last: number; ticketId: number | null }[];
+      FROM flake_events e WHERE project_id = ? AND at >= ? GROUP BY file ORDER BY count DESC, last DESC LIMIT ?`)
+      .all(projectId, since, limit) as { file: string; count: number; last: number; ticketId: number | null }[];
   }
 
   /** Whether `file` already has a sighting within `tolMs` of `at`: a retro-log line the server already counted from the land's own output. */
@@ -3767,8 +3932,7 @@ export class Store {
   }
 
   addFlakeFix(projectId: number, file: string, ticketId: number | null, startedAt: number, patch: Partial<FlakeFix> = {}): number {
-    const r = this.db.prepare('INSERT INTO flake_fixes (project_id, file, ticket_id, state, started_at, clean_runs, held_at, reopened) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(projectId, file, ticketId, patch.state ?? 'open', startedAt, patch.clean_runs ?? 0, patch.held_at ?? null, patch.reopened ?? 0);
+    const r = this.db.prepare('INSERT INTO flake_fixes (project_id, file, ticket_id, state, started_at, clean_runs, held_at, reopened) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(projectId, file, ticketId, patch.state ?? 'open', startedAt, patch.clean_runs ?? 0, patch.held_at ?? null, patch.reopened ?? 0);
     return Number(r.lastInsertRowid);
   }
 
@@ -3809,7 +3973,8 @@ export class Store {
     if (!first || !last) return 1;
     const ends = { lo: first.id, hi: last.id };
     const next = this.db.prepare('SELECT id, created_at FROM events WHERE id >= ? ORDER BY id LIMIT 1');
-    let lo = Number(ends.lo), hi = Number(ends.hi) + 1;
+    let lo = Number(ends.lo),
+      hi = Number(ends.hi) + 1;
     while (lo < hi) {
       const mid = Math.floor((lo + hi) / 2);
       const row = next.get(mid) as { id: number; created_at: number } | undefined;
@@ -3825,13 +3990,16 @@ export class Store {
    * plan running out says nothing about a deploy, and they are left out of both counts), how many of those failed (a result with is_error, or an error), and the first failure's time.
    */
   turnOutcomes(from: number, to: number): { turns: number; failed: number; first: number | null; loggedOut: number[] } {
-    const ok = this.db.prepare(`SELECT COUNT(*) AS n, SUM(e.data LIKE '%"is_error":true%') AS bad, MIN(CASE WHEN e.data LIKE '%"is_error":true%' THEN t.ended_at END) AS first
-        FROM turns t LEFT JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND t.keepalive IS NULL AND t.side IS NULL AND NOT COALESCE(e.data LIKE '%"is_error":true%' AND (e.data LIKE '%hit your %limit%' OR e.data LIKE '%Not logged in%'), 0)`).get(from, to) as { n: number; bad: number | null; first: number | null };
+    const ok = this.db
+      .prepare(`SELECT COUNT(*) AS n, SUM(e.data LIKE '%"is_error":true%') AS bad, MIN(CASE WHEN e.data LIKE '%"is_error":true%' THEN t.ended_at END) AS first
+        FROM turns t LEFT JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND t.keepalive IS NULL AND t.side IS NULL AND NOT COALESCE(e.data LIKE '%"is_error":true%' AND (e.data LIKE '%hit your %limit%' OR e.data LIKE '%Not logged in%'), 0)`)
+      .get(from, to) as { n: number; bad: number | null; first: number | null };
     // Through events_errors: without it this read every event of the window (43 ms a day's window, #1178), eventIdAt or not.
-    const errs = this.db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE kind = 'error' AND created_at >= ? AND created_at < ? AND data NOT LIKE '%hit your %limit%' AND data NOT LIKE '%Not logged in%'")
-      .get(from, to) as { n: number; first: number | null };
+    const errs = this.db.prepare("SELECT COUNT(*) AS n, MIN(created_at) AS first FROM events WHERE kind = 'error' AND created_at >= ? AND created_at < ? AND data NOT LIKE '%hit your %limit%' AND data NOT LIKE '%Not logged in%'").get(from, to) as { n: number; first: number | null };
     // Left out too ("Not logged in", #1481: one account's login dropping after a deploy isn't the deploy's fault), but named, so a real logout shows: the account numbers (a turn from before #905 kept none: account 1). shortcut: only finished turns are named; a "Not logged in" error event has no account, so it is left out unnamed, name those if one ever shows up.
-    const out = this.db.prepare(`SELECT DISTINCT COALESCE(t.account, 1) AS a FROM turns t JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND t.keepalive IS NULL AND t.side IS NULL AND e.data LIKE '%"is_error":true%' AND e.data LIKE '%Not logged in%' ORDER BY a`).all(from, to) as { a: number }[];
+    const out = this.db.prepare(`SELECT DISTINCT COALESCE(t.account, 1) AS a FROM turns t JOIN events e ON e.id = t.event_id WHERE t.ended_at >= ? AND t.ended_at < ? AND t.keepalive IS NULL AND t.side IS NULL AND e.data LIKE '%"is_error":true%' AND e.data LIKE '%Not logged in%' ORDER BY a`).all(from, to) as {
+      a: number;
+    }[];
     const firsts = [ok.first, errs.first].filter((f): f is number => f != null);
     return { turns: Number(ok.n) + Number(errs.n), failed: Number(ok.bad ?? 0) + Number(errs.n), first: firsts.length ? Math.min(...firsts) : null, loggedOut: out.map((r) => Number(r.a)) };
   }
@@ -3848,7 +4016,8 @@ export class Store {
   /** The "Shipped …" notes posted at or after `since`, newest first, each with its minion's scheme, number and title: Home's "Shipped since your last visit" (#1140). A push that failed isn't one; one waiting for the restart is (main has it).
    * `ids`, [from, to): only the notes of those event ids, `since` aside: Home's paced first read, a range at a time (#1414). */
   shippedNotes(since: number, ids?: [number, number]): { ticket_id: number; project_id: number; number: number | null; kind: TicketKind; title: string; text: string; at: number }[] {
-    return this.db.prepare(`SELECT e.ticket_id, t.project_id, t.number, t.kind, t.title, json_extract(e.data, '$.text') AS text, e.created_at AS at
+    return this.db
+      .prepare(`SELECT e.ticket_id, t.project_id, t.number, t.kind, t.title, json_extract(e.data, '$.text') AS text, e.created_at AS at
       FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.id < ? AND e.kind = 'note' AND e.data LIKE '{"text":"Shipped %'
       AND e.data NOT LIKE '%not pushed to origin: the push failed.%' ORDER BY e.id DESC`)
       .all(...(ids ?? [this.eventIdAt(since), Number.MAX_SAFE_INTEGER])) as ReturnType<Store['shippedNotes']>;
@@ -3856,8 +4025,10 @@ export class Store {
 
   /** Every ship note ("Shipped …", "Merged …") posted at or after `since`, with its scheme (#1196): ship-risk's input. */
   shipNotesSince(since: number): { project_id: number; created_at: number; text: string }[] {
-    const rows = this.db.prepare(`SELECT t.project_id, e.created_at, e.data FROM events e JOIN tickets t ON t.id = e.ticket_id
-      WHERE e.id >= ? AND e.created_at >= ? AND e.kind = 'note' AND (e.data LIKE '{"text":"Shipped %' OR e.data LIKE '{"text":"Merged %') ORDER BY e.id`).all(this.eventIdAt(since), since) as { project_id: number; created_at: number; data: string }[];
+    const rows = this.db
+      .prepare(`SELECT t.project_id, e.created_at, e.data FROM events e JOIN tickets t ON t.id = e.ticket_id
+      WHERE e.id >= ? AND e.created_at >= ? AND e.kind = 'note' AND (e.data LIKE '{"text":"Shipped %' OR e.data LIKE '{"text":"Merged %') ORDER BY e.id`)
+      .all(this.eventIdAt(since), since) as { project_id: number; created_at: number; data: string }[];
     return rows.map((r) => ({ project_id: Number(r.project_id), created_at: Number(r.created_at), text: String(JSON.parse(r.data).text ?? '') }));
   }
 
@@ -3871,8 +4042,7 @@ export class Store {
   settingsWithPrefix<T>(prefix: string): { key: string; value: T }[] {
     // A range on the key's index like settingKeys: LIKE with ESCAPE read every row of the table (part of a 0.6 s hold in fableMeter, #1251).
     const [where, args] = this.keyRange(prefix);
-    return (this.db.prepare(`SELECT key, value FROM settings WHERE ${where} ORDER BY key`).all(...args) as { key: string; value: string }[])
-      .map((r) => ({ key: r.key, value: JSON.parse(r.value) as T }));
+    return (this.db.prepare(`SELECT key, value FROM settings WHERE ${where} ORDER BY key`).all(...args) as { key: string; value: string }[]).map((r) => ({ key: r.key, value: JSON.parse(r.value) as T }));
   }
 
   /** What every payer's Fable turns cost since `since` (#1061), from the per-model split, so turns before it was kept count for nothing. */
@@ -3882,9 +4052,7 @@ export class Store {
 
   setSetting(key: string, value: unknown) {
     // An unchanged value writes nothing: ci-health alone rewrote 250 KB of the same job lists every 5 minutes (#680).
-    this.db
-      .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE value IS NOT excluded.value')
-      .run(key, JSON.stringify(value));
+    this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE value IS NOT excluded.value').run(key, JSON.stringify(value));
   }
 
   /** Whether this connection checkpoints the WAL itself on commit (SQLite's default) or leaves it to checkpointOffThread (src/checkpoint.ts, #680). */
@@ -3898,21 +4066,17 @@ export class Store {
 
   /** Record a release of a scheme's target (src/releases.ts). */
   addRelease(r: Omit<ReleaseRow, 'id'>): number {
-    return Number(this.db.prepare('INSERT INTO releases (project_id, target, version, changes, started_at, live_at, outcome, stages) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(r.project_id, r.target, r.version, r.changes, r.started_at, r.live_at, r.outcome, r.stages).lastInsertRowid);
+    return Number(this.db.prepare('INSERT INTO releases (project_id, target, version, changes, started_at, live_at, outcome, stages) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(r.project_id, r.target, r.version, r.changes, r.started_at, r.live_at, r.outcome, r.stages).lastInsertRowid);
   }
 
   /** Record a finished contraption deploy (src/release-readers.ts). */
   addContraptionDeploy(r: Omit<ContraptionDeployRow, 'id'>): number {
-    return Number(this.db.prepare('INSERT INTO contraption_deploys (name, from_sha, to_sha, by, started_at, finished_at, outcome, stages, changes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(r.name, r.from_sha, r.to_sha, r.by, r.started_at, r.finished_at, r.outcome, r.stages, r.changes).lastInsertRowid);
+    return Number(this.db.prepare('INSERT INTO contraption_deploys (name, from_sha, to_sha, by, started_at, finished_at, outcome, stages, changes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(r.name, r.from_sha, r.to_sha, r.by, r.started_at, r.finished_at, r.outcome, r.stages, r.changes).lastInsertRowid);
   }
 
   /** A contraption's newest deploys (only those that ended as `outcome`, when given), newest first. */
   listContraptionDeploys(name: string, limit: number, outcome?: string): ContraptionDeployRow[] {
-    return (outcome
-      ? this.db.prepare('SELECT * FROM contraption_deploys WHERE name = ? AND outcome = ? ORDER BY id DESC LIMIT ?').all(name, outcome, limit)
-      : this.db.prepare('SELECT * FROM contraption_deploys WHERE name = ? ORDER BY id DESC LIMIT ?').all(name, limit)) as unknown as ContraptionDeployRow[];
+    return (outcome ? this.db.prepare('SELECT * FROM contraption_deploys WHERE name = ? AND outcome = ? ORDER BY id DESC LIMIT ?').all(name, outcome, limit) : this.db.prepare('SELECT * FROM contraption_deploys WHERE name = ? ORDER BY id DESC LIMIT ?').all(name, limit)) as unknown as ContraptionDeployRow[];
   }
 
   /**
@@ -3920,8 +4084,12 @@ export class Store {
    * served before its first recorded deploy (that deploy started from a commit), so numbers don't move once recording began.
    */
   contraptionReleases(name: string): number {
-    return (this.db.prepare(`SELECT (SELECT COUNT(*) FROM contraption_deploys WHERE name = ? AND outcome = 'deployed')
-      + COALESCE((SELECT from_sha IS NOT NULL FROM contraption_deploys WHERE name = ? ORDER BY id LIMIT 1), 0) AS n`).get(name, name) as { n: number }).n;
+    return (
+      this.db
+        .prepare(`SELECT (SELECT COUNT(*) FROM contraption_deploys WHERE name = ? AND outcome = 'deployed')
+      + COALESCE((SELECT from_sha IS NOT NULL FROM contraption_deploys WHERE name = ? ORDER BY id LIMIT 1), 0) AS n`)
+        .get(name, name) as { n: number }
+    ).n;
   }
 
   /** How many releases a target has recorded: its newest one's release number. */
@@ -3953,32 +4121,9 @@ export class Store {
  * store.listMachines() and the rest. A new query goes in its area's file, not the class above: test/db-areas.test.ts fails on that.
  */
 // One area per line, so two branches adding areas touch different lines (#1313: a single long list here was a conflict hotspot).
-const AREAS = [
-  ciNumberQueries,
-  contraptionRunQueries,
-  deliveryQueries,
-  flakeQueries,
-  machineQueries,
-  minionQueries,
-  pushQueries,
-  readWarmQueries,
-  settingQueries,
-  slowMomentQueries,
-  viewQueries,
-];
+const AREAS = [ciNumberQueries, contraptionRunQueries, deliveryQueries, flakeQueries, machineQueries, minionQueries, pushQueries, readWarmQueries, settingQueries, slowMomentQueries, viewQueries];
 // The same list as a type: written out, since a type taken from AREAS would loop through Store's own type.
-type Areas =
-  & typeof ciNumberQueries
-  & typeof contraptionRunQueries
-  & typeof deliveryQueries
-  & typeof flakeQueries
-  & typeof machineQueries
-  & typeof minionQueries
-  & typeof pushQueries
-  & typeof readWarmQueries
-  & typeof settingQueries
-  & typeof slowMomentQueries
-  & typeof viewQueries;
+type Areas = typeof ciNumberQueries & typeof contraptionRunQueries & typeof deliveryQueries & typeof flakeQueries & typeof machineQueries & typeof minionQueries & typeof pushQueries & typeof readWarmQueries & typeof settingQueries & typeof slowMomentQueries & typeof viewQueries;
 // Without `this: Store` on the class's side, so a caller holding a Pick<Store, ...> can still call them.
 type AreaQueries = { [K in keyof Areas]: OmitThisParameter<Areas[K]> };
 export interface Store extends AreaQueries {}

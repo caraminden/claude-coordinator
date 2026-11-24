@@ -36,12 +36,18 @@ export interface Want {
 export type Download = (w: Want, dir: string) => Promise<void>;
 
 /** `gh run download` of one artifact, as the scheme's linked GitHub login: the access the release monitor reads runs with. */
-export const ghDownload = (as: (p: Project) => GithubEnv): Download => async (w, dir) => {
-  await exec('gh', ['run', 'download', String(w.run.id), '--repo', w.slug, '--name', w.artifact.name, '--dir', dir], { env: asEnv(as(w.project)), timeout: 30 * 60_000 });
-};
+export const ghDownload =
+  (as: (p: Project) => GithubEnv): Download =>
+  async (w, dir) => {
+    await exec('gh', ['run', 'download', String(w.run.id), '--repo', w.slug, '--name', w.artifact.name, '--dir', dir], { env: asEnv(as(w.project)), timeout: 30 * 60_000 });
+  };
 
 /** A name the store takes (ci-store.ts NAME): runs of anything else become a dash. */
-export const storeName = (s: string, max = 150) => s.replace(/[^A-Za-z0-9._+-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '').slice(0, max) || 'artifact';
+export const storeName = (s: string, max = 150) =>
+  s
+    .replace(/[^A-Za-z0-9._+-]+/g, '-')
+    .replace(/^[^A-Za-z0-9]+/, '')
+    .slice(0, max) || 'artifact';
 
 export class CiMirror {
   private ci: Pick<CiStore, 'refusal' | 'fetched' | 'dir'>;

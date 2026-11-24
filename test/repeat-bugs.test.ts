@@ -12,9 +12,9 @@ import { bootServer, stopProcs, stopTurns } from './helpers.ts';
 const HOUR = 3_600_000;
 const NOW = 1_800_000_000_000;
 // Everyday bug briefs, so the words of a scheme's usual work are common and only a fix's own words are rare.
-const FILLER = ['The settings page button is misaligned on phone widths', 'Chat scroll jumps when a new message arrives', 'The card check stalls after a turn ends',
-  'Login page shows the wrong error on a bad password', 'The minions list sorts in the wrong order', 'Images in the chat fail to load on phone']
-  .flatMap((t, i) => [0, 1, 2, 3, 4].map((k) => ({ number: 100 + i * 10 + k, title: t, brief: `${t}. Fix the bug and test it on the page.`, at: NOW - 20 * 86_400_000 })));
+const FILLER = ['The settings page button is misaligned on phone widths', 'Chat scroll jumps when a new message arrives', 'The card check stalls after a turn ends', 'Login page shows the wrong error on a bad password', 'The minions list sorts in the wrong order', 'Images in the chat fail to load on phone'].flatMap(
+  (t, i) => [0, 1, 2, 3, 4].map((k) => ({ number: 100 + i * 10 + k, title: t, brief: `${t}. Fix the bug and test it on the page.`, at: NOW - 20 * 86_400_000 })),
+);
 const bug = (number: number, title: string, brief: string, hoursAgo: number, files: string[] = []): EarlierBug => ({ number, title, brief, at: NOW - hoursAgo * HOUR, files, subjects: files.length ? [`#${number}: ${title}`] : [] });
 const match = (now: BugBrief, earlier: EarlierBug[], hubs: string[] = []) => repeats(now, earlier, { df: termCounts([...FILLER, ...earlier, now]), hubs: new Set(hubs) }).map((m) => m.number);
 
@@ -40,11 +40,11 @@ test('a sibling started within the hour of the new one is not an earlier fix', (
 test('a cited minion and a shared file count, unless the file is a hub every minion changes', () => {
   const a = bug(40, 'Deploy watch misses a restart', 'The watcher never sees the restart.', 50, ['src/deploy-probe.ts']);
   const b = bug(41, 'Restart notice never shows', 'Nobody hears the server came back.', 30, ['src/deploy-probe.ts']);
-  const now = { number: 0, title: 'Deploy notice lost again', brief: 'Earlier fixes #40 and #41 didn\'t hold: src/deploy-probe.ts still drops it.', at: NOW };
+  const now = { number: 0, title: 'Deploy notice lost again', brief: "Earlier fixes #40 and #41 didn't hold: src/deploy-probe.ts still drops it.", at: NOW };
   assert.deepEqual(match(now, [a, b]), [40, 41]);
   assert.deepEqual(match(now, [a, b], ['src/deploy-probe.ts']), [], 'a hub file is no evidence');
   const elsewhere = { ...now, brief: 'Like PR #40 and Citadel #41, src/deploy-probe.ts still drops it.' };
-  assert.deepEqual(match(elsewhere, [a, b]), [], 'a PR or another scheme\'s #N is not a citation');
+  assert.deepEqual(match(elsewhere, [a, b]), [], "a PR or another scheme's #N is not a citation");
 });
 
 test('the block lists each earlier minion, what it shipped, and says diagnose first', () => {
@@ -57,7 +57,7 @@ test('the block lists each earlier minion, what it shipped, and says diagnose fi
   assert.equal(ownBrief(`${block}\n\n---\n\nThe real ask.`), 'The real ask.', 'a later check reads the brief, not the block');
 });
 
-test('the step-up applies only to the table\'s own pick', () => {
+test("the step-up applies only to the table's own pick", () => {
   const table = BY_TYPE.bug;
   assert.deepEqual(steppedTier(table, table, true), nextStep(table.model, table.effort, true));
   assert.equal(steppedTier({ model: 'claude-opus-5-5', effort: 'high' }, table, true), null, 'a tier picked by hand stays');
@@ -91,7 +91,10 @@ test('a third bug minion in a plain scheme starts flagged, one tier up', async (
   const up = nextStep(BY_TYPE.bug.model, BY_TYPE.bug.effort, true)!;
   assert.deepEqual([third.data.model, third.data.effort], [up.model, up.effort]);
   assert.equal(third.data.picked_because, `third fix (#${first.data.number}, #${second.data.number}): one tier up → ${tierLabel(up.model, up.effort)}`);
-  assert.ok(third.data.notes.some((n: string) => n.startsWith('Third-fix flag:')), 'the Taskmaster hears it');
+  assert.ok(
+    third.data.notes.some((n: string) => n.startsWith('Third-fix flag:')),
+    'the Taskmaster hears it',
+  );
   const brief = store.db.prepare("SELECT json_extract(data, '$.text') AS t FROM events WHERE ticket_id = ? AND kind = 'user_message' ORDER BY id LIMIT 1").get(third.data.id) as { t: string };
   assert.match(brief.t, /^\*\*Third fix: diagnose first\.\*\*[^]*citadel:diagnosing-bugs[^]*\n\n---\n\nThe glow on Supercharged Slam/);
 

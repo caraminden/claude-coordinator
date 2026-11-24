@@ -34,8 +34,15 @@ const STUB = `<script>
 
 let app: App;
 let browser: Browser;
-before(async () => { if (skip) return; app = await serveApp({ stub: STUB }); browser = await launch(bin!); });
-after(async () => { await browser?.close(); await app?.close(); });
+before(async () => {
+  if (skip) return;
+  app = await serveApp({ stub: STUB });
+  browser = await launch(bin!);
+});
+after(async () => {
+  await browser?.close();
+  await app?.close();
+});
 
 const label = `document.querySelector('.act-stop')?.textContent`;
 

@@ -29,7 +29,8 @@ test("a minion's MCP server offers fresh_session only in the fresh group", async
   const { execFileSync } = await import('node:child_process');
   const names = (flag: string) => {
     const out = execFileSync(process.execPath, ['src/mcp.ts'], {
-      input: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n', timeout: 20_000,
+      input: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n',
+      timeout: 20_000,
       env: { ...process.env, COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: '1', COORDINATOR_SEAM_TRIAL: flag },
     }).toString();
     return JSON.parse(out.split('\n').find((l) => l.includes('"id":1'))!).result.tools.map((t: { name: string }) => t.name) as string[];
@@ -67,8 +68,7 @@ test('the readout counts each group from enrolment: cost, compactions, reopens, 
   const [f, c] = collect(db, trial);
   assert.equal(f.arm, 'fresh');
   assert.deepEqual([f.values['cost after enrolment'], f.values['seam fresh starts'], f.values.reopens, f.values.dismissed], [2, 1, 1, 1], 'the turn before enrolment is left out');
-  assert.deepEqual([c.values.compactions, c.values.strikes, c.values['"already asked"'], c.values.reopens, c.values['cache reads after enrolment']], [1, 1, 1, 0, 3],
-    'only after enrolment, and only a person\'s own words count as already asked');
+  assert.deepEqual([c.values.compactions, c.values.strikes, c.values['"already asked"'], c.values.reopens, c.values['cache reads after enrolment']], [1, 1, 1, 0, 3], "only after enrolment, and only a person's own words count as already asked");
   const md = render(trial, [f, c], '2026-11-20');
   assert.match(md, /^# Fresh sessions at seams: trial readout \(2026-11-20\)/);
   assert.match(md, /\| cost after enrolment \(USD, turns that ended after it\) \| \$2\.00 \| \$2\.00 \| \$4\.00 \| \$4\.00 \|/);

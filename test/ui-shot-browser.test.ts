@@ -46,16 +46,28 @@ function uiShot(...args: string[]) {
 }
 
 test('a flow is one command: fill, click, wait for text, hover, key, text and eval print a line each', { skip }, async () => {
-  const r = await uiShot('--widths', '1440,390',
-    '--step', 'fill #name | hello there',
-    '--step', 'key Enter',
-    '--step', 'click #send',
-    '--step', 'wait #log .msg | hello there',
-    '--step', 'hover #tip',
-    '--step', 'text #tip',
-    '--step', 'eval document.title',
-    '--step', 'eval ({ msgs: document.querySelectorAll(".msg").length })',
-    '--step', 'shot sent');
+  const r = await uiShot(
+    '--widths',
+    '1440,390',
+    '--step',
+    'fill #name | hello there',
+    '--step',
+    'key Enter',
+    '--step',
+    'click #send',
+    '--step',
+    'wait #log .msg | hello there',
+    '--step',
+    'hover #tip',
+    '--step',
+    'text #tip',
+    '--step',
+    'eval document.title',
+    '--step',
+    'eval ({ msgs: document.querySelectorAll(".msg").length })',
+    '--step',
+    'shot sent',
+  );
   assert.equal(r.code, 0, r.text);
   for (const w of [1440, 390]) {
     // fill replaced "old"; the click's message came after its delay; hover and the real Enter key reached the page.
@@ -67,8 +79,7 @@ test('a flow is one command: fill, click, wait for text, hover, key, text and ev
 });
 
 test('fill with nothing empties the field; type adds to it', { skip }, async () => {
-  const r = await uiShot('--widths', '390', '--step', 'type #name |  and more', '--step', 'eval document.getElementById("name").value',
-    '--step', 'fill #name |', '--step', 'eval document.getElementById("name").value', '--step', 'shot typed');
+  const r = await uiShot('--widths', '390', '--step', 'type #name |  and more', '--step', 'eval document.getElementById("name").value', '--step', 'fill #name |', '--step', 'eval document.getElementById("name").value', '--step', 'shot typed');
   assert.equal(r.code, 0, r.text);
   assert.match(r.text, /eval: "old and more"\n[^\n]*eval: ""/);
 });

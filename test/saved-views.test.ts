@@ -26,7 +26,9 @@ async function call(who: string, path: string, opts: { method?: string; body?: u
 let joshId = 0;
 async function login(name: string) {
   const res = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, password: 'test-password-123' }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, password: 'test-password-123' }),
   });
   cookies[name] = res.headers.get('set-cookie')!.split(';')[0];
 }
@@ -34,8 +36,16 @@ async function login(name: string) {
 before(async () => {
   const server = scratch.spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
+      ...process.env,
+      MACHINES_URL: undefined,
+      CITADEL_HOST_SIGNALS: 'fixed',
+      CITADEL_ZONE: TEST_ZONE,
+      PORT: '0',
+      DATA_DIR: join(root, 'data'),
+      CLAUDE_BIN: '/bin/false',
+      CLAUDE_CONFIG_DIR: join(root, 'claude'),
+      COORDINATOR_PASSWORD: 'test-password-123',
+      SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
@@ -57,14 +67,24 @@ test("views are each person's own per scheme, replaced by name, deletable only b
 
   const saved = await call('Cara', url, { method: 'POST', body: { name: ' Build 8 art ', picks: { type: ['art'], build: [8] } } });
   assert.equal(saved.status, 200);
-  assert.deepEqual(saved.data.map((v: any) => [v.name, v.picks, v.owner]), [['Build 8 art', { type: ['art'], build: [8] }, 'Cara']]);
+  assert.deepEqual(
+    saved.data.map((v: any) => [v.name, v.picks, v.owner]),
+    [['Build 8 art', { type: ['art'], build: [8] }, 'Cara']],
+  );
   await call('Cara', url, { method: 'POST', body: { name: 'Bugs', picks: { type: ['bug'] } } });
-  assert.deepEqual((await call('Cara', url)).data.map((v: any) => v.name), ['Bugs', 'Build 8 art']);
+  assert.deepEqual(
+    (await call('Cara', url)).data.map((v: any) => v.name),
+    ['Bugs', 'Build 8 art'],
+  );
   assert.deepEqual((await call('Josh', url)).data, [], "Josh doesn't see Cara's");
   assert.deepEqual((await call('Cara', `/api/projects/${other.id}/views`)).data, [], 'another scheme has its own');
 
   const josh = await call('Josh', url, { method: 'POST', body: { name: 'Bugs', picks: { type: ['bug', 'feature'] } } });
-  assert.deepEqual(josh.data.map((v: any) => [v.name, v.picks, v.owner]), [['Bugs', { type: ['bug', 'feature'] }, 'Josh']], 'the same name is his own view');
+  assert.deepEqual(
+    josh.data.map((v: any) => [v.name, v.picks, v.owner]),
+    [['Bugs', { type: ['bug', 'feature'] }, 'Josh']],
+    'the same name is his own view',
+  );
   const caras = (await call('Cara', url)).data;
   assert.deepEqual(caras.find((v: any) => v.name === 'Bugs').picks, { type: ['bug'] }, "and leaves Cara's alone");
 
@@ -81,7 +101,10 @@ test("views are each person's own per scheme, replaced by name, deletable only b
   assert.equal((await call('Cara', `/api/projects/${other.id}/views/${art.id}`, { method: 'DELETE' })).status, 404, 'not through another scheme');
   assert.equal((await call('Josh', `${url}/${art.id}`, { method: 'DELETE' })).status, 404, "not someone else's");
   const left = await call('Cara', `${url}/${art.id}`, { method: 'DELETE' });
-  assert.deepEqual(left.data.map((v: any) => v.name), ['Bugs']);
+  assert.deepEqual(
+    left.data.map((v: any) => v.name),
+    ['Bugs'],
+  );
   assert.equal((await call('Cara', `${url}/${art.id}`, { method: 'DELETE' })).status, 404);
 });
 
@@ -102,8 +125,18 @@ test("the scheme's shared views become their saver's own, also after a rollback 
   old.close();
 
   const again = new Store(file);
-  assert.deepEqual(again.listViews(p.id, 'Josh').map((v) => [v.name, v.picks]), [['Josh Test', { type: ['art'] }], ['Mine', { type: ['bug'] }]], 'a name he already had keeps his');
-  assert.deepEqual(again.listViews(p.id, 'Cara').map((v) => v.name), ['Cara bugs']);
+  assert.deepEqual(
+    again.listViews(p.id, 'Josh').map((v) => [v.name, v.picks]),
+    [
+      ['Josh Test', { type: ['art'] }],
+      ['Mine', { type: ['bug'] }],
+    ],
+    'a name he already had keeps his',
+  );
+  assert.deepEqual(
+    again.listViews(p.id, 'Cara').map((v) => v.name),
+    ['Cara bugs'],
+  );
   assert.equal(again.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'saved_views'").get(), undefined, 'the shared table is gone');
   again.db.close();
 });

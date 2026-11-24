@@ -70,7 +70,11 @@ function bridgeSource(): string {
 }
 
 /** JSON that can sit inside a <script> element: nothing in it can close the element or open a comment. */
-const scriptJson = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+const scriptJson = (v: unknown) =>
+  JSON.stringify(v)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
 
 // What isn't the page's prose: comments, links and code already, the head, scripts, styles, form
 // fields, buttons, SVG and MathML (an HTML <a> inside them would break them or do nothing). Whichever

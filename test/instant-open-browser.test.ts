@@ -46,7 +46,8 @@ async function openOnce(srv: Booted, hash: string, width = 1280) {
   await page.send('Network.setCookie', { name, value, url: srv.base });
   // A stream's hello redraws the usage meter from the server's usage (none on a test server: it hides the meter), so a
   // test that draws usage itself waits for the hello first: `window.hellos` counts the ones the page has handled.
-  await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
+  await page.send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `(() => {
     window.hellos = 0;
     const ES = window.EventSource;
     window.EventSource = class extends ES {
@@ -56,7 +57,8 @@ async function openOnce(srv: Booted, hash: string, width = 1280) {
         this.addEventListener('message', (e) => { if (JSON.parse(e.data).type === 'hello') setTimeout(() => window.hellos++); });
       }
     };
-  })()` });
+  })()`,
+  });
   await page.send('Page.navigate', { url: `${srv.base}/c/${hash}` });
   await waitFor(page, 'the chat', said('hello from before'));
   await waitFor(page, 'the kept chat', `JSON.parse(localStorage.getItem('cc-last-chat') || '{}').hash === ${JSON.stringify(hash)}`);
@@ -71,7 +73,10 @@ async function shoot(page: Page, name: string) {
   writeFileSync(join(shots, name), Buffer.from(data, 'base64'));
 }
 
-for (const [width, label] of [[1440, 'desktop'], [390, 'phone']] as const) {
+for (const [width, label] of [
+  [1440, 'desktop'],
+  [390, 'phone'],
+] as const) {
   test(`at ${label} width, with the server gone, the app opens on the last chat at once and says it is catching up`, { skip }, async () => {
     const { srv, hash } = await server();
     const page = await openOnce(srv, hash, width);
@@ -80,14 +85,19 @@ for (const [width, label] of [[1440, 'desktop'], [390, 'phone']] as const) {
     // The address now takes every connection and never answers, so the launch's requests hang for good (the test
     // closes them at the end). The kept chat showing while they hang is what "doesn't wait on the network" means.
     const held: Socket[] = [];
-    const hole = listen((c) => { held.push(c); });
-    after(() => { for (const c of held) c.destroy(); hole.close(); });
+    const hole = listen((c) => {
+      held.push(c);
+    });
+    after(() => {
+      for (const c of held) c.destroy();
+      hole.close();
+    });
     await new Promise<void>((ok) => hole.listen(Number(new URL(srv.base).port), '127.0.0.1', ok));
     // The installed app's start: /c/ with no address of its own.
     await page.send('Page.navigate', { url: `${srv.base}/c/` });
     await waitFor(page, 'the kept chat', said('hello from before'));
     assert.equal(await page.eval(chip), 'Catching up…');
-    assert.equal(await page.eval('location.hash'), hash, 'the app is at the kept chat\'s address');
+    assert.equal(await page.eval('location.hash'), hash, "the app is at the kept chat's address");
     await until('a request to be held', () => held.length > 0);
     assert.ok(held.length > 0, 'the launch did ask the network, and was never answered');
     console.log(`# ${label}: the kept chat showed while ${held.length} connection(s) to the server were held open`);
@@ -103,12 +113,14 @@ test('with the server there, the kept chat shows first and the live one replaces
   const { srv, hash, ticket } = await server();
   const page = await openOnce(srv, hash);
   // Hold the launch's sign-in check, so what shows before it answers is only what was kept.
-  await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
+  await page.send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `(() => {
     const real = window.fetch;
     window.letGo = null;
     window.fetch = (url, opts) => String(url).endsWith('api/me') && !window.letGo
       ? new Promise((ok) => (window.letGo = () => ok(real(url, opts)))) : real(url, opts);
-  })()` });
+  })()`,
+  });
   await page.send('Page.navigate', { url: `${srv.base}/c/` });
   await waitFor(page, 'the kept chat', said('hello from before'));
   await waitFor(page, 'the held sign-in check', '!!window.letGo');
@@ -126,7 +138,7 @@ test('signing out forgets the kept chat, and what was asked, so the next person 
   const { srv, hash, ticket } = await server();
   const page = await openOnce(srv, hash);
   const asked = `import(new URL('base.js', location.href)).then((m) => Object.keys(m.keptAnswers(${ticket.project_id}, ${ticket.id})).length)`;
-  assert.ok(await page.eval(asked) > 0);
+  assert.ok((await page.eval(asked)) > 0);
   await page.eval(`import(new URL('core.js', location.href)).then((m) => m.logout())`);
   assert.equal(await page.eval(`localStorage.getItem('cc-last-chat')`), null);
   assert.equal(await page.eval(asked), 0);
@@ -136,7 +148,7 @@ test('signed out, the top bar has no usage meter or chips (#1439); signing back 
   const { srv, hash } = await server();
   const page = await openOnce(srv, hash);
   const seen = `({ chips: document.querySelectorAll('.topbar .meters .ci-chip, .topbar .meters .status-chip, .topbar .meters .releases-chip').length, usage: !!document.querySelector('.topbar .meters .usage:not([hidden])') })`;
-  await waitFor(page, 'the stream\'s hello', 'window.hellos > 0');
+  await waitFor(page, "the stream's hello", 'window.hellos > 0');
   await page.eval(`import(new URL('core.js', location.href)).then((m) => m.renderUsage({ weekly: { utilization: 0.44, resetsAt: Date.now() + 36e5 } }))`);
   await waitFor(page, 'the chips and meter', `${seen}.chips === 3 && ${seen}.usage`);
   await page.eval(`import(new URL('core.js', location.href)).then((m) => m.logout())`);
@@ -145,13 +157,13 @@ test('signed out, the top bar has no usage meter or chips (#1439); signing back 
   await page.eval('window.hellos = 0');
   await page.eval(`(() => { const f = document.getElementById('login-form'); f.login.value = 'Cara'; f.password.value = ${JSON.stringify(PASSWORD)}; f.requestSubmit(); })()`);
   await waitFor(page, 'the chips back', `${seen}.chips === 3`);
-  await waitFor(page, 'the new stream\'s hello', 'window.hellos > 0'); // a hello after the usage below hid it under load
+  await waitFor(page, "the new stream's hello", 'window.hellos > 0'); // a hello after the usage below hid it under load
   // The sign-in redraws the top bar as it settles, so a meter drawn once can be wiped: draw it again until it shows.
   await waitFor(page, 'the meter back', `import(new URL('core.js', location.href)).then((m) => (m.renderUsage({ weekly: { utilization: 0.44, resetsAt: Date.now() + 36e5 } }), ${seen}.usage))`);
   await shoot(page, 'signed-in-again.png');
 });
 
-test('a ship reaches an open app out of sight: a visible page stays, the next navigation loads the new version from the worker\'s kept files', { skip }, async () => {
+test("a ship reaches an open app out of sight: a visible page stays, the next navigation loads the new version from the worker's kept files", { skip }, async () => {
   // A copy of the repo to ship into, so the change to public/ stays out of this checkout.
   const repo = join(import.meta.dirname, '..');
   const copy = mkdtempSync(join(tmpdir(), 'ship-'));

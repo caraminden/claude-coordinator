@@ -48,18 +48,26 @@ test('the same test red three times fires once, on the third', () => {
 
 test('a red run with no names it can read counts by its command; output from other commands is not a test run', () => {
   const s = emptyState();
-  const got = feed(s, [1, 2, 3].flatMap(() => [run('cargo test -p harness'), result('error[E0425]: cannot find value', true)]));
+  const got = feed(
+    s,
+    [1, 2, 3].flatMap(() => [run('cargo test -p harness'), result('error[E0425]: cannot find value', true)]),
+  );
   assert.equal(got.length, 1);
   assert.match(got[0].what, /exit: cargo test -p harness/);
   // Reading a log full of failures (cat, grep) is no test run.
-  assert.deepEqual(feed(emptyState(), [1, 2, 3].flatMap(() => [run('cat $TMPDIR/citadel-test.log'), result(RED)])), []);
+  assert.deepEqual(
+    feed(
+      emptyState(),
+      [1, 2, 3].flatMap(() => [run('cat $TMPDIR/citadel-test.log'), result(RED)]),
+    ),
+    [],
+  );
 });
 
 test('a test command counts only as the command a segment runs', () => {
   for (const yes of ['citadel-test test/a.test.ts', 'cd /w && npx tsc --noEmit', 'citadel-heavy cargo test --workspace', 'citadel-heavy --here ./gradlew :app:testDebug', 'FOO=1 npm test', 'timeout 300 node --test test/', 'make x; pytest -q', './gradlew :app:testDebug'])
     assert.ok(testCommand(yes) || /tsc/.test(yes), yes);
-  for (const no of ['cat $TMPDIR/citadel-test.log', 'grep -rn pytest pyproject.toml', 'rg jest package.json', 'echo "npm test"', 'git log --grep cargo test'])
-    assert.ok(!testCommand(no), no);
+  for (const no of ['cat $TMPDIR/citadel-test.log', 'grep -rn pytest pyproject.toml', 'rg jest package.json', 'echo "npm test"', 'git log --grep cargo test']) assert.ok(!testCommand(no), no);
 });
 
 test('Codex edits count too: apply_patch lists its files', () => {
@@ -86,13 +94,23 @@ test('a green test run ends the stretch', () => {
   const rounds = (n: number) => Array.from({ length: n }, () => [run('npm test'), result('not ok 1 - x', true), edit('/w/b.ts')]).flat();
   feed(s, rounds(3));
   feed(s, [run('npm test'), result('ok 1 - x')]);
-  assert.deepEqual(feed(s, rounds(1)).filter((g) => g.kind === 'file-churn'), [], 'the count started over after green');
+  assert.deepEqual(
+    feed(s, rounds(1)).filter((g) => g.kind === 'file-churn'),
+    [],
+    'the count started over after green',
+  );
 });
 
-test('a Grunt\'s tool calls are its own, not the minion\'s', () => {
+test("a Grunt's tool calls are its own, not the minion's", () => {
   const s = emptyState();
   const grunt = (e: any) => ({ ...e, parent_tool_use_id: 'toolu_x' });
-  assert.deepEqual(feed(s, [1, 2, 3].flatMap(() => [grunt(run('citadel-test test/land.test.ts')), grunt(result(RED, true))])), []);
+  assert.deepEqual(
+    feed(
+      s,
+      [1, 2, 3].flatMap(() => [grunt(run('citadel-test test/land.test.ts')), grunt(result(RED, true))]),
+    ),
+    [],
+  );
 });
 
 test('two failed ships fire, naming their kinds', () => {
@@ -127,7 +145,11 @@ test('nextStep follows the tiers: Sonnet up to Opus medium, then high, then Fabl
   assert.equal(nextStep('gpt-6-astra', 'high'), null);
   // Every step it names is a model the table uses, so renaming one in TIERS fails here.
   const models = new Set(TIERS.map((t) => t.model));
-  for (const [m, e] of TIERS.map((t) => [t.model, t.effort]).concat([['claude-haiku-5-5', 'low'], ['claude-opus-5-5', 'high'], ['claude-fable-5-2', 'medium']]))
+  for (const [m, e] of TIERS.map((t) => [t.model, t.effort]).concat([
+    ['claude-haiku-5-5', 'low'],
+    ['claude-opus-5-5', 'high'],
+    ['claude-fable-5-2', 'medium'],
+  ]))
     for (const day of ['2026-11-20', '2026-12-01']) {
       const next = nextStep(m, e, true, day);
       if (next) assert.ok(models.has(next.model), `${m} ${e} → ${next.model}`);
@@ -170,7 +192,9 @@ test('a stalled minion gets exactly one suggestion to its Taskmaster, with the e
 });
 
 test('the same stall going on after a step-up signals again at the new tier: the same test red, or ships failing (2R2)', () => {
-  const red = (w: ReturnType<typeof world>) => { for (let i = 0; i < 3; i++) for (const e of [run('citadel-test test/land.test.ts'), result(RED, true)]) w.watch.observe(w.t.id, e); };
+  const red = (w: ReturnType<typeof world>) => {
+    for (let i = 0; i < 3; i++) for (const e of [run('citadel-test test/land.test.ts'), result(RED, true)]) w.watch.observe(w.t.id, e);
+  };
   const w = world();
   red(w);
   assert.equal(w.told.length, 1);

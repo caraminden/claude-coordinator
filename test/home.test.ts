@@ -22,17 +22,20 @@ function setup(file: string) {
     if (member) store.addMember(p.id, josh.id);
     return p.id;
   };
-  const minion = (projectId: number, title: string) =>
-    store.createTicket({ project_id: projectId, title, permission_mode: 'bypassPermissions', created_by: 'cara' });
+  const minion = (projectId: number, title: string) => store.createTicket({ project_id: projectId, title, permission_mode: 'bypassPermissions', created_by: 'cara' });
   return { store, josh, scheme, minion, approvals: new Approvals(() => {}) };
 }
 
-test('Home lists what waits on a person across their schemes: Taskmasters first, then oldest first; not schemes they hid or aren\'t in', () => {
+test("Home lists what waits on a person across their schemes: Taskmasters first, then oldest first; not schemes they hid or aren't in", () => {
   const { store, josh, scheme, minion, approvals } = setup('items.sqlite');
-  const peek = scheme('Peek Auras'), voice = scheme('VoiceAnalyzer'), hid = scheme('Hidden one'), outside = scheme('Not theirs', false);
+  const peek = scheme('Peek Auras'),
+    voice = scheme('VoiceAnalyzer'),
+    hid = scheme('Hidden one'),
+    outside = scheme('Not theirs', false);
   assert.ok(![peek, voice, hid, outside].includes(2), 'none of them is the Citadel scheme');
   store.setProjectHidden(josh.id, hid, true);
-  const old = minion(voice, 'old ask'), newer = minion(peek, 'newer ask');
+  const old = minion(voice, 'old ask'),
+    newer = minion(peek, 'newer ask');
   store.addEvent(old.id, 'question', { id: 'q-old', questions: [] });
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5); // a later millisecond for the newer card
   store.addEvent(newer.id, 'question', { id: 'q-new', questions: [] });
@@ -42,16 +45,25 @@ test('Home lists what waits on a person across their schemes: Taskmasters first,
   store.addEvent(minion(outside, 'outside ask').id, 'question', { id: 'q-outside', questions: [] });
 
   const home = homeView(store, approvals, { name: 'josh', uid: josh.id }, () => false, 0);
-  assert.deepEqual(home.items.map((i) => (i.card as { id: string }).id), ['p-tm', 'q-old', 'q-new'],
-    'the Taskmaster\'s card leads though it is newest; then oldest first; hidden and non-member schemes stay out');
+  assert.deepEqual(
+    home.items.map((i) => (i.card as { id: string }).id),
+    ['p-tm', 'q-old', 'q-new'],
+    "the Taskmaster's card leads though it is newest; then oldest first; hidden and non-member schemes stay out",
+  );
   assert.deepEqual(home.items[1].from, { projectId: voice, scheme: 'VoiceAnalyzer', number: old.number, kind: 'ticket', title: 'old ask' });
-  assert.deepEqual(home.schemes.map((s) => s.name), ['Peek Auras', 'VoiceAnalyzer']);
+  assert.deepEqual(
+    home.schemes.map((s) => s.name),
+    ['Peek Auras', 'VoiceAnalyzer'],
+  );
 });
 
-test('Home\'s working minions and what shipped since, only in the person\'s schemes; build merges and failed pushes aren\'t ships', () => {
+test("Home's working minions and what shipped since, only in the person's schemes; build merges and failed pushes aren't ships", () => {
   const { store, josh, scheme, minion, approvals } = setup('shipped.sqlite');
-  const peek = scheme('Peek Auras'), outside = scheme('Not theirs', false);
-  const busy = minion(peek, 'busy one'), idle = minion(peek, 'idle one'), there = minion(outside, 'theirs');
+  const peek = scheme('Peek Auras'),
+    outside = scheme('Not theirs', false);
+  const busy = minion(peek, 'busy one'),
+    idle = minion(peek, 'idle one'),
+    there = minion(outside, 'theirs');
   const start = Date.now();
   store.addEvent(idle.id, 'note', { text: 'Shipped abc1234: the fix. Risk low: tests. Live now.' });
   store.addEvent(idle.id, 'note', { text: 'Merged abc1235 into build/5: a feeder. Risk low: x.' });
@@ -62,13 +74,16 @@ test('Home\'s working minions and what shipped since, only in the person\'s sche
   store.addEvent(busy.id, 'note', { text: 'Shipped abc1239: a second go. Risk low: x.' });
 
   const home = homeView(store, approvals, { name: 'josh', uid: josh.id }, (t) => t.id === busy.id || t.id === there.id, start - 1000);
-  assert.equal(home.schemes.length, 1, 'only the person\'s schemes');
+  assert.equal(home.schemes.length, 1, "only the person's schemes");
   const s = home.schemes[0];
-  assert.deepEqual({ id: s.id, name: s.name, waiting: s.waiting, working: s.working, shipped: s.shipped }, { id: peek, name: 'Peek Auras', waiting: 0, working: 1, shipped: 2 },
-    'two minions shipped: the build merge and the failed push don\'t count, and a minion shipped twice counts once');
+  assert.deepEqual({ id: s.id, name: s.name, waiting: s.waiting, working: s.working, shipped: s.shipped }, { id: peek, name: 'Peek Auras', waiting: 0, working: 1, shipped: 2 }, "two minions shipped: the build merge and the failed push don't count, and a minion shipped twice counts once");
   assert.equal(home.days.length, 14, 'two weeks of days for the bars');
   assert.equal(s.daily.length, 14);
-  assert.equal(s.daily.reduce((a, b) => a + b, 0), 2, 'the twice-shipped minion counts once in the bars too');
+  assert.equal(
+    s.daily.reduce((a, b) => a + b, 0),
+    2,
+    'the twice-shipped minion counts once in the bars too',
+  );
   assert.equal(Math.max(...s.daily), 2, 'both on the same day (today, unless Pacific midnight fell mid-test)');
   assert.equal(homeView(store, approvals, { name: 'josh', uid: josh.id }, () => false, Date.now() + 60_000).schemes[0].shipped, 0, 'nothing shipped after `since`');
 });
@@ -79,12 +94,15 @@ test('ship notes are read through events_notes, never a walk over every event si
   store.addEvent(minion(peek, 'one').id, 'note', { text: 'Shipped aaa1111: one. Risk low: x.' });
   const seen: string[] = [];
   const prepare = store.db.prepare.bind(store.db);
-  store.db.prepare = ((sql: string, ...r: any[]) => { seen.push(sql); return prepare(sql, ...r); }) as typeof store.db.prepare;
+  store.db.prepare = ((sql: string, ...r: any[]) => {
+    seen.push(sql);
+    return prepare(sql, ...r);
+  }) as typeof store.db.prepare;
   homeView(store, approvals, { name: 'josh', uid: josh.id }, () => false, 0);
   store.shippedSince(0);
   store.shipNotesSince(0);
   const reads = seen.filter((sql) => /kind = 'note'/.test(sql) && /Shipped/.test(sql));
-  assert.equal(reads.length, 4, 'Home\'s buckets and since, shippedSince and shipNotesSince');
+  assert.equal(reads.length, 4, "Home's buckets and since, shippedSince and shipNotesSince");
   for (const sql of reads) {
     const plan = (prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...Array((sql.match(/\?/g) ?? []).length).fill(0)) as { detail: string }[]).map((r) => r.detail).join(' | ');
     // Without it every claude row since `since` was read: 13.6 s of the live loop for a visit days back.
@@ -92,29 +110,43 @@ test('ship notes are read through events_notes, never a walk over every event si
   }
 });
 
-test('Home\'s ship buckets are held for everyone, a new ship shows at once, and old ones leave the window', () => {
+test("Home's ship buckets are held for everyone, a new ship shows at once, and old ones leave the window", () => {
   const { store, josh, scheme, minion, approvals } = setup('cache.sqlite');
   const peek = scheme('Peek Auras');
-  const idle = minion(peek, 'one'), other = minion(peek, 'two');
+  const idle = minion(peek, 'one'),
+    other = minion(peek, 'two');
   const cache = new HomeBucketCache();
   const now = Date.now();
   const who = { name: 'josh', uid: josh.id };
   store.addEvent(idle.id, 'note', { text: 'Shipped aaa1111: one. Risk low: x.' });
   const first = homeView(store, approvals, who, () => false, now - 1000, now, cache);
-  assert.equal(first.schemes[0].daily.reduce((a: number, b: number) => a + b, 0), 1);
+  assert.equal(
+    first.schemes[0].daily.reduce((a: number, b: number) => a + b, 0),
+    1,
+  );
   store.addEvent(other.id, 'note', { text: 'Shipped bbb2222: second. Risk low: x.' });
   const second = homeView(store, approvals, who, () => false, now - 1000, now + 5000, cache);
   assert.equal(second.schemes[0].shipped, 2, 'shipped-since sees the new ship at once');
-  assert.equal(second.schemes[0].daily.reduce((a: number, b: number) => a + b, 0), 2, 'and so do the buckets');
+  assert.equal(
+    second.schemes[0].daily.reduce((a: number, b: number) => a + b, 0),
+    2,
+    'and so do the buckets',
+  );
   const gone = now + (HOME_DAYS + 2) * 86_400_000;
   const later = homeView(store, approvals, who, () => false, gone - 1000, gone, cache);
-  assert.equal(later.schemes[0].daily.reduce((a: number, b: number) => a + b, 0), 0, 'past the window they are dropped');
+  assert.equal(
+    later.schemes[0].daily.reduce((a: number, b: number) => a + b, 0),
+    0,
+    'past the window they are dropped',
+  );
 });
 
-test('Home\'s held ship notes follow a deleted minion, newest events deleted, and a visit older than the window', () => {
+test("Home's held ship notes follow a deleted minion, newest events deleted, and a visit older than the window", () => {
   const { store, josh, scheme, minion, approvals } = setup('cache-drift.sqlite');
   const peek = scheme('Peek Auras');
-  const one = minion(peek, 'one'), two = minion(peek, 'two'), three = minion(peek, 'three');
+  const one = minion(peek, 'one'),
+    two = minion(peek, 'two'),
+    three = minion(peek, 'three');
   const cache = new HomeBucketCache();
   const who = { name: 'josh', uid: josh.id };
   const total = (h: ReturnType<typeof homeView>) => h.schemes[0].daily.reduce((a: number, b: number) => a + b, 0);
@@ -136,7 +168,7 @@ test('Home\'s held ship notes follow a deleted minion, newest events deleted, an
   assert.equal(homeView(store, approvals, who, () => false, now - 40 * 86_400_000, now, fresh).schemes[0].shipped, 1, 'but the visit sees its ship');
 });
 
-test('Home\'s days are the last 14 Pacific dates, oldest first, each once, across both clock changes', () => {
+test("Home's days are the last 14 Pacific dates, oldest first, each once, across both clock changes", () => {
   const fallBack = homeDays(Date.UTC(2026, 10, 2, 12)); // Nov 2, 4 AM PST: the day before was 25 hours
   assert.equal(fallBack.length, 14);
   assert.equal(new Set(fallBack).size, 14);
@@ -159,10 +191,11 @@ test('a visit to Home counts what shipped since the last one ended, and keeps th
 
 // #1414: a cold read of 15 days of ship notes in one statement held the live loop 3-10.7 s on Home's first look, and
 // again every minute after. The first fill now goes a range of event ids at a time, and refreshes read only new notes.
-test('Home\'s ship cache fills in ranges of event ids, then reads only notes past the last one read', async () => {
+test("Home's ship cache fills in ranges of event ids, then reads only notes past the last one read", async () => {
   const { store, josh, scheme, minion, approvals } = setup('ranges.sqlite');
   const peek = scheme('Peek Auras');
-  const one = minion(peek, 'one'), two = minion(peek, 'two');
+  const one = minion(peek, 'one'),
+    two = minion(peek, 'two');
   store.addEvent(one.id, 'note', { text: 'Shipped aaa1111: one. Risk low: x.' });
   store.db.prepare("INSERT INTO events (id, ticket_id, kind, data, created_at) VALUES (20000, ?, 'note', '{}', ?)").run(one.id, Date.now());
   const reads: unknown[][] = [];
@@ -186,7 +219,10 @@ test('Home\'s ship cache fills in ranges of event ids, then reads only notes pas
   store.addEvent(two.id, 'note', { text: 'Shipped bbb2222: two. Risk low: x.' });
   const later = homeView(store, approvals, who, () => false, now - 60_000, now + HOME_BUCKETS_MS, cache);
   assert.equal(later.schemes[0].shipped, 2);
-  assert.equal(later.schemes[0].daily.reduce((a: number, b: number) => a + b, 0), 2);
+  assert.equal(
+    later.schemes[0].daily.reduce((a: number, b: number) => a + b, 0),
+    2,
+  );
   assert.equal(reads.length, 1, 'one read, of the notes past the last');
   assert.ok(Number(reads[0][0]) > 20000, 'starting past the last event read');
 });

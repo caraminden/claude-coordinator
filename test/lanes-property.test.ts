@@ -7,7 +7,7 @@ import fc from 'fast-check';
 import { Lanes } from '../src/lanes.ts';
 
 /** The lanes under test: the real `src/lanes.ts`, or another copy of it (LANES_UNDER_TEST), to prove the test fails on a known bug. */
-const { Lanes: Under } = process.env.LANES_UNDER_TEST ? await import(process.env.LANES_UNDER_TEST) as { Lanes: typeof Lanes } : { Lanes };
+const { Lanes: Under } = process.env.LANES_UNDER_TEST ? ((await import(process.env.LANES_UNDER_TEST)) as { Lanes: typeof Lanes }) : { Lanes };
 
 const seed = Number(process.env.FC_SEED ?? 20261122);
 const params = { seed, numRuns: 200, endOnFailure: false };
@@ -79,7 +79,9 @@ test('a step awaited by its caller sees its lane free, or idle soon, never busy 
         for (let i = 0; i < hops; i++) await s.schedule(Promise.resolve());
       });
       let busyAfterAwait: boolean | undefined;
-      void done.then(() => { busyAfterAwait = lanes.busy(7); });
+      void done.then(() => {
+        busyAfterAwait = lanes.busy(7);
+      });
       await s.waitFor(done);
       await s.waitAll();
       // The lane of a step with nothing nested is free by the time its caller's await resumes (the dismissal's cleanup relies on it).

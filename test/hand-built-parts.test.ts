@@ -23,9 +23,9 @@ const PATTERNS: Record<string, RegExp> = {
 /** file → part → why it stays hand-built. Keep each reason to what the shared part can't do for it. */
 const ALLOWED: Record<string, Record<string, string>> = {
   'artifacts.js': { dialog: "the file viewer fills the page with the file and its chat side by side on a grid, not a box with a head; its picture view already uses the kit's lightbox" },
-  'settings.js': { loading: "a status span beside a button that the save and load calls rewrite in place (textContent), not a block that gets replaced" },
+  'settings.js': { loading: 'a status span beside a button that the save and load calls rewrite in place (textContent), not a block that gets replaced' },
   'thread.js': { loading: "the label of the Load earlier button while it loads: a button's own text, not a line" },
-  'home.js': { loading: "an emptyCard placeholder sized like the card that replaces it" },
+  'home.js': { loading: 'an emptyCard placeholder sized like the card that replaces it' },
   'drawers.js': { dialog: "it is itself a shared part (served to apps as /apps/_citadel/drawers.js): the phone's side panels as named modal drawers" },
 };
 
@@ -40,8 +40,14 @@ function files(dir: string): string[] {
 /** The parts each file hand-builds, ignoring comment lines. */
 function found(text: string): string[] {
   // A toggletip's `role: 'dialog'` passed to the kit's mountTips is the part in use (contraption-ui component-checks.md), not a twin.
-  const code = text.split('\n').filter((l) => !/^\s*(\/\/|\/?\*|<!--)/.test(l)).map((l) => l.replace(/\bmountTips\(.*$/, 'mountTips(')).join('\n');
-  return Object.entries(PATTERNS).filter(([, re]) => code.split('\n').some((l) => re.test(l))).map(([part]) => part);
+  const code = text
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\/?\*|<!--)/.test(l))
+    .map((l) => l.replace(/\bmountTips\(.*$/, 'mountTips('))
+    .join('\n');
+  return Object.entries(PATTERNS)
+    .filter(([, re]) => code.split('\n').some((l) => re.test(l)))
+    .map(([part]) => part);
 }
 
 test('the patterns catch a hand-built dialog, toast and tooltip, and pass the kit parts in use', () => {
@@ -73,6 +79,8 @@ test("Citadel's pages build no dialog, toast or tooltip of their own outside pub
     }
   }
   assert.deepEqual(bad, [], `use the kit part instead (loadingLine and tabs in ui/state.js, openDialog in ui/dialog.js, toast in ui/status.js, data-tip with ui/tip.js, lightbox in ui/media.js), or add the file to ALLOWED in this test with the reason it can't`);
-  const stale = Object.entries(ALLOWED).flatMap(([f, parts]) => Object.keys(parts).map((p) => `${f}:${p}`)).filter((k) => !seen.has(k));
+  const stale = Object.entries(ALLOWED)
+    .flatMap(([f, parts]) => Object.keys(parts).map((p) => `${f}:${p}`))
+    .filter((k) => !seen.has(k));
   assert.deepEqual(stale, [], 'these no longer hand-build the part: take them out of ALLOWED');
 });

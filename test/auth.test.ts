@@ -27,7 +27,7 @@ test('an agent token lives for its turn: the next turn or closing the minion kil
   const closed = new Set<number>();
   const gone = new Set<number>();
   const auth = new Auth('a-password-long-enough', 'x'.repeat(32), {
-    get: (id) => gone.has(id) ? null : { ...kept.get(id) ?? { current: null, previous: null }, closed: closed.has(id) },
+    get: (id) => (gone.has(id) ? null : { ...(kept.get(id) ?? { current: null, previous: null }), closed: closed.has(id) }),
     set: (id, nonces) => void kept.set(id, nonces),
   });
   const as = (token: string, method = 'GET', url = '/api/tickets/7') => auth.session({ method, url, headers: { authorization: `Bearer ${token}` } } as any)?.agent;
@@ -54,7 +54,7 @@ test('an agent token lives for its turn: the next turn or closing the minion kil
 
   // A forged nonce, or a real one under another minion's number, doesn't sign in.
   const [, nonce, sig] = auth.turnToken(7).split('.');
-  assert.equal(as(`7.${nonce.replace(/^./, (c) => c === 'A' ? 'B' : 'A')}.${sig}`), undefined);
+  assert.equal(as(`7.${nonce.replace(/^./, (c) => (c === 'A' ? 'B' : 'A'))}.${sig}`), undefined);
   assert.equal(as(`8.${nonce}.${sig}`), undefined);
 
   // A dismissed minion's token only posts the deploy report it may still be waiting on; a deleted one's is dead.
@@ -67,9 +67,12 @@ test('an agent token lives for its turn: the next turn or closing the minion kil
   assert.equal(report(last), undefined);
 });
 
-test('a session over 7 days old is renewed on use; a newer one, a disabled person\'s, an agent\'s or a preview\'s is not', (t) => {
+test("a session over 7 days old is renewed on use; a newer one, a disabled person's, an agent's or a preview's is not", (t) => {
   const DAY = 86400_000;
-  const people = new Map<number, any>([[1, { id: 1, name: 'Cara', disabled_at: null }], [2, { id: 2, name: 'Olive', disabled_at: Date.now() }]]);
+  const people = new Map<number, any>([
+    [1, { id: 1, name: 'Cara', disabled_at: null }],
+    [2, { id: 2, name: 'Olive', disabled_at: Date.now() }],
+  ]);
   const users = { getUser: (id: number) => people.get(id), findUser: () => undefined, isAdmin: (u: any) => !!u?.admin && !u.disabled_at } as any;
   const auth = new Auth('a-password-long-enough', 'x'.repeat(32), undefined, users);
   const now = Date.now();
@@ -129,7 +132,15 @@ test("a contraption host's sign-in token works once, for its app only, for a min
   assert.equal(auth.redeemAppToken(t, 'mandate', now + 61_000), null, 'stale');
   assert.equal(auth.redeemAppToken(t, 'mandate', now), 7);
   assert.equal(auth.redeemAppToken(t, 'mandate', now), null, 'spent');
-  assert.equal(auth.redeemAppToken(auth.appToken('mandate', 7, now).replace(/.$/, (c) => (c === 'A' ? 'B' : 'A')), 'mandate', now), null, 'forged');
+  assert.equal(
+    auth.redeemAppToken(
+      auth.appToken('mandate', 7, now).replace(/.$/, (c) => (c === 'A' ? 'B' : 'A')),
+      'mandate',
+      now,
+    ),
+    null,
+    'forged',
+  );
   // Another server secret's token, or a cookie passed off as a token, is refused.
   assert.equal(new Auth('a-password-long-enough', 'y'.repeat(32)).redeemAppToken(auth.appToken('mandate', 7, now), 'mandate', now), null);
   assert.equal(auth.redeemAppToken(auth.issueAppCookie('mandate', { id: 7 }, false).split(';')[0].slice('cc_app='.length), 'mandate', now), null);
@@ -170,63 +181,75 @@ function withStore(body: (store: Store, auth: Auth) => void | Promise<void>) {
   };
 }
 
-test("a cookie follows its person's id, not their name: a new person with a removed person's name isn't signed in", withStore((store, auth) => {
-  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
-  const bob = store.createUser({ name: 'Bob', login: 'bob' });
-  const request = { headers: { cookie: auth.issueCookie(bob, false).split(';')[0] } } as any;
-  assert.equal(auth.session(request)?.uid, bob.id);
-  store.deleteUser(bob.id, cara.id);
-  store.createUser({ name: 'Bob', login: 'bob2' });
-  assert.equal(auth.session(request), null);
-}));
+test(
+  "a cookie follows its person's id, not their name: a new person with a removed person's name isn't signed in",
+  withStore((store, auth) => {
+    const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+    const bob = store.createUser({ name: 'Bob', login: 'bob' });
+    const request = { headers: { cookie: auth.issueCookie(bob, false).split(';')[0] } } as any;
+    assert.equal(auth.session(request)?.uid, bob.id);
+    store.deleteUser(bob.id, cara.id);
+    store.createUser({ name: 'Bob', login: 'bob2' });
+    assert.equal(auth.session(request), null);
+  }),
+);
 
-test('an invite link works for a week, not a second, and not for a disabled person', withStore((store, auth) => {
-  const bob = store.createUser({ name: 'Bob', login: 'bob' });
-  const token = auth.newInvite(bob.id);
-  const now = Date.now();
-  assert.ok(store.getUser(bob.id)!.invite_expires! > now + 6.9 * 86400_000, 'the expiry is about 7 days out');
-  const real = Date.now;
-  try {
-    Date.now = () => now + 3600_000;
-    assert.equal(auth.inviteUser('c1', token)?.id, bob.id, 'still good an hour on');
-    Date.now = () => now + 8 * 86400_000;
-    assert.equal(auth.inviteUser('c2', token), null, 'expired after 8 days');
-  } finally {
-    Date.now = real;
-  }
-  store.updateUser(bob.id, { disabled_at: Date.now() });
-  assert.equal(auth.inviteUser('c3', token), null, 'a disabled person\'s link is refused');
-}));
+test(
+  'an invite link works for a week, not a second, and not for a disabled person',
+  withStore((store, auth) => {
+    const bob = store.createUser({ name: 'Bob', login: 'bob' });
+    const token = auth.newInvite(bob.id);
+    const now = Date.now();
+    assert.ok(store.getUser(bob.id)!.invite_expires! > now + 6.9 * 86400_000, 'the expiry is about 7 days out');
+    const real = Date.now;
+    try {
+      Date.now = () => now + 3600_000;
+      assert.equal(auth.inviteUser('c1', token)?.id, bob.id, 'still good an hour on');
+      Date.now = () => now + 8 * 86400_000;
+      assert.equal(auth.inviteUser('c2', token), null, 'expired after 8 days');
+    } finally {
+      Date.now = real;
+    }
+    store.updateUser(bob.id, { disabled_at: Date.now() });
+    assert.equal(auth.inviteUser('c3', token), null, "a disabled person's link is refused");
+  }),
+);
 
-test('a login with a trailing space (a phone autocomplete) still signs in, and a wrong password does not', withStore(async (store, auth) => {
-  const { hashPassword } = await import('../src/auth.ts');
-  const bob = store.createUser({ name: 'Bob', login: 'bob' });
-  store.updateUser(bob.id, { password_hash: await hashPassword('bobs-own-password') });
-  assert.equal((await auth.signIn('c1', 'bob ', 'bobs-own-password'))?.id, bob.id);
-  assert.equal((await auth.signIn('c1', ' bob', 'bobs-own-password'))?.id, bob.id);
-  assert.equal(await auth.signIn('c1', 'bob', 'wrong-password'), null);
-}));
+test(
+  'a login with a trailing space (a phone autocomplete) still signs in, and a wrong password does not',
+  withStore(async (store, auth) => {
+    const { hashPassword } = await import('../src/auth.ts');
+    const bob = store.createUser({ name: 'Bob', login: 'bob' });
+    store.updateUser(bob.id, { password_hash: await hashPassword('bobs-own-password') });
+    assert.equal((await auth.signIn('c1', 'bob ', 'bobs-own-password'))?.id, bob.id);
+    assert.equal((await auth.signIn('c1', ' bob', 'bobs-own-password'))?.id, bob.id);
+    assert.equal(await auth.signIn('c1', 'bob', 'wrong-password'), null);
+  }),
+);
 
-test('ten wrong tries lock a client out, and the lock lifts after the failure window', withStore(async (store, auth) => {
-  const { hashPassword } = await import('../src/auth.ts');
-  const bob = store.createUser({ name: 'Bob', login: 'bob' });
-  store.updateUser(bob.id, { password_hash: await hashPassword('bobs-own-password') });
-  const now = Date.now();
-  const real = Date.now;
-  try {
-    for (let i = 0; i < 9; i++) await auth.signIn('c1', 'bob', 'nope');
-    assert.equal(auth.limited('c1'), false, 'nine failures are still allowed');
-    await auth.signIn('c1', 'bob', 'nope');
-    assert.equal(auth.limited('c1'), true, 'the tenth locks it');
-    assert.equal(auth.limited('c2'), false, 'another client is not locked');
-    Date.now = () => now + 14 * 60_000;
-    assert.equal(auth.limited('c1'), true, 'still locked inside the window');
-    Date.now = () => now + 16 * 60_000;
-    assert.equal(auth.limited('c1'), false, 'free again after the window');
-  } finally {
-    Date.now = real;
-  }
-}));
+test(
+  'ten wrong tries lock a client out, and the lock lifts after the failure window',
+  withStore(async (store, auth) => {
+    const { hashPassword } = await import('../src/auth.ts');
+    const bob = store.createUser({ name: 'Bob', login: 'bob' });
+    store.updateUser(bob.id, { password_hash: await hashPassword('bobs-own-password') });
+    const now = Date.now();
+    const real = Date.now;
+    try {
+      for (let i = 0; i < 9; i++) await auth.signIn('c1', 'bob', 'nope');
+      assert.equal(auth.limited('c1'), false, 'nine failures are still allowed');
+      await auth.signIn('c1', 'bob', 'nope');
+      assert.equal(auth.limited('c1'), true, 'the tenth locks it');
+      assert.equal(auth.limited('c2'), false, 'another client is not locked');
+      Date.now = () => now + 14 * 60_000;
+      assert.equal(auth.limited('c1'), true, 'still locked inside the window');
+      Date.now = () => now + 16 * 60_000;
+      assert.equal(auth.limited('c1'), false, 'free again after the window');
+    } finally {
+      Date.now = real;
+    }
+  }),
+);
 
 test('a contraption cookie over 7 days old is renewed on use, so friends stay signed in to apps', () => {
   const DAY = 86400_000;

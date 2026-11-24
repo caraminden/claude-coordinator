@@ -20,7 +20,14 @@ export const MEDIA_KEEP_MS = 30 * 86_400_000;
 export const MEDIA_PLACE = 'your media folder';
 
 export const MEDIA_TYPE: Record<string, string> = {
-  '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.pcm': 'audio/pcm', '.json': 'application/json',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.jpg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.pcm': 'audio/pcm',
+  '.json': 'application/json',
 };
 
 /** Where a contraption's files for one person go. */
@@ -83,13 +90,15 @@ export function sweepMedia(root: string, now = Date.now()): number {
   return gone;
 }
 
-const COMMON = 'Runs on Citadel with the OpenRouter key of the person this turn is for, booked against their monthly cap: a call that would pass the cap, or could cost over $0.50, is refused before anything is spent. Writes to your media folder with a `<file>.json` note (prompt, model, cost); the app shows it from there. A refusal starts with its code (openrouter_not_connected, over_cap, …): say what it means to the person rather than retrying. Spend like it is their own money, because it is: one take at the default first.';
+const COMMON =
+  'Runs on Citadel with the OpenRouter key of the person this turn is for, booked against their monthly cap: a call that would pass the cap, or could cost over $0.50, is refused before anything is spent. Writes to your media folder with a `<file>.json` note (prompt, model, cost); the app shows it from there. A refusal starts with its code (openrouter_not_connected, over_cap, …): say what it means to the person rather than retrying. Spend like it is their own money, because it is: one take at the default first.';
 const OUT = 'The file to write, a path inside your media folder like frost-alert.png or auras/frost-2.png (n over 1 numbers them: frost-1.png, frost-2.png)';
 const MODEL = { type: 'string', description: 'Optional: an OpenRouter model id. Leave it out for the cheap default' };
 const OVERWRITE = { type: 'boolean', description: 'Replace a file that already exists (default false: refused)' };
 const IMAGE_MODELS = ' Models: leave model out for black-forest-labs/flux-3-image-klein (about $0.01 at 1K), or recraft/recraft-v4.1-vector when out ends in .svg. For an icon on a transparent background, bytedance-seed/seedream-5-0-flash (about $0.02, real transparency).';
 const BACKGROUND = {
-  type: 'string', enum: ['transparent'],
+  type: 'string',
+  enum: ['transparent'],
   description: 'Optional: "transparent" for a see-through background (out must be .png). Models with real transparency (seedream, gpt-image-1) make it; on others Citadel asks for black and takes the black out, which suits glows and spell effects but turns dark parts see-through.',
 };
 const IMAGE_PROPS = {
@@ -153,7 +162,8 @@ export const CODEX_TOOL = 'generate_image_codex';
 /** Offered only to a turn whose person has Codex (MediaTurn.codex), after the three above. */
 export const CODEX_TOOL_DEF = {
   name: CODEX_TOOL,
-  description: "Make or edit a PNG with Codex's built-in image generation (OpenAI gpt-image) on the ChatGPT plan of the person this turn is for, with no per-image charge. For a PNG use this one first; SVG, WebP and sound go to generate_image and generate_audio, and so does a PNG when this refuses with codex_over_pace (it reads their 5-hour and weekly Codex limits first and leaves the rest for their own work). To edit, pass the image in refs and say what to change. No size or aspect setting: say the shape you want in the prompt. Writes to your media folder with a `<file>.json` note; the app shows it from there. Takes a minute or two. A refusal starts with its code (codex_over_pace, codex_not_ready, …): say what it means to the person rather than retrying. One take first; more only when asked or when it misses.",
+  description:
+    "Make or edit a PNG with Codex's built-in image generation (OpenAI gpt-image) on the ChatGPT plan of the person this turn is for, with no per-image charge. For a PNG use this one first; SVG, WebP and sound go to generate_image and generate_audio, and so does a PNG when this refuses with codex_over_pace (it reads their 5-hour and weekly Codex limits first and leaves the rest for their own work). To edit, pass the image in refs and say what to change. No size or aspect setting: say the shape you want in the prompt. Writes to your media folder with a `<file>.json` note; the app shows it from there. Takes a minute or two. A refusal starts with its code (codex_over_pace, codex_not_ready, …): say what it means to the person rather than retrying. One take first; more only when asked or when it misses.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -211,7 +221,7 @@ function readPng(file: string): Buffer {
   }
   try {
     const st = fstatSync(fd);
-    if (!st.isFile() || st.size > MAX_CODEX_PNG) throw new Error('Codex left something that isn\'t a PNG file');
+    if (!st.isFile() || st.size > MAX_CODEX_PNG) throw new Error("Codex left something that isn't a PNG file");
     const buf = Buffer.alloc(st.size);
     let got = 0;
     while (got < st.size) {
@@ -219,7 +229,7 @@ function readPng(file: string): Buffer {
       if (!n) break;
       got += n;
     }
-    if (got < 8 || !buf.subarray(0, 8).equals(PNG_MAGIC)) throw new Error('Codex left something that isn\'t a PNG file');
+    if (got < 8 || !buf.subarray(0, 8).equals(PNG_MAGIC)) throw new Error("Codex left something that isn't a PNG file");
     return buf.subarray(0, got);
   } finally {
     closeSync(fd);
@@ -263,8 +273,7 @@ export async function codexImage(at: CodexAt, dir: string, args: Record<string, 
       return ['--image', name];
     });
     const env = { ...at.env, CITADEL_CODEX_TRIPWIRE: cfg };
-    const argv = ['exec', '-i', '-w', job, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), at.container,
-      process.execPath, driver, '--image-gen', '--timeout', '600', '--out', 'out.png', ...(args.background === 'transparent' ? ['--transparent'] : []), ...images];
+    const argv = ['exec', '-i', '-w', job, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), at.container, process.execPath, driver, '--image-gen', '--timeout', '600', '--out', 'out.png', ...(args.background === 'transparent' ? ['--transparent'] : []), ...images];
     const r = await new Promise<{ code: number | null; err: string }>((done) => {
       const child = spawn(at.podman, argv, { stdio: ['pipe', 'ignore', 'pipe'] });
       let err = '';
@@ -275,13 +284,23 @@ export async function codexImage(at: CodexAt, dir: string, args: Record<string, 
         child.kill('SIGTERM');
       }, 900_000);
       child.stderr!.on('data', (b) => (err = (err + b).slice(-4000)));
-      child.on('error', (e) => { clearTimeout(timer); done({ code: null, err: e.message }); });
-      child.on('close', (code) => { clearTimeout(timer); done({ code, err }); });
+      child.on('error', (e) => {
+        clearTimeout(timer);
+        done({ code: null, err: e.message });
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        done({ code, err });
+      });
       child.stdin!.on('error', () => {});
       child.stdin!.end(prompt);
     });
     const usage = /^Codex usage: (.*)$/m.exec(r.err)?.[1] ?? null;
-    const why = r.err.replace(/^Codex usage: .*$/m, '').replace(/^citadel-codex-review: /gm, '').trim() || 'no reason given';
+    const why =
+      r.err
+        .replace(/^Codex usage: .*$/m, '')
+        .replace(/^citadel-codex-review: /gm, '')
+        .trim() || 'no reason given';
     if (r.code === 4) throw refusal(429, 'codex_over_pace', `${why} Use generate_image for this one.`);
     if (r.code === 3) throw refusal(503, 'codex_not_ready', why);
     if (r.code === null || PODMAN_FAILED.has(r.code)) throw new Error(`Couldn't run Codex in this person's container (${at.container}): ${why}`);
@@ -299,7 +318,7 @@ export async function runMediaTool(openrouter: OpenRouter, dataDir: string, turn
   try {
     mkdirSync(dir, { recursive: true });
     if (tool === CODEX_TOOL) {
-      if (!turn.codex) throw refusal(503, 'codex_not_ready', "This person has no Codex a turn can reach");
+      if (!turn.codex) throw refusal(503, 'codex_not_ready', 'This person has no Codex a turn can reach');
       const r = await codexImage(turn.codex, dir, args);
       const path = relative(dir, r.path).split(sep).join('/');
       turn.emit('media', { tool, ok: true, files: [{ path, bytes: statSync(r.path).size, type: 'image/png' }], model: 'codex image_gen', cost_usd: 0 });
@@ -332,7 +351,8 @@ export async function mcpMessage(msg: any, tools: { name: string }[], call: (too
     case 'initialize':
       return answer({
         protocolVersion: typeof msg.params?.protocolVersion === 'string' ? msg.params.protocolVersion : '2025-06-18',
-        capabilities: { tools: {} }, serverInfo: { name: MEDIA_SERVER, version: '1' },
+        capabilities: { tools: {} },
+        serverInfo: { name: MEDIA_SERVER, version: '1' },
       });
     case 'ping':
       return answer({});

@@ -37,9 +37,19 @@ const Obsidian = store.createProject('Obsidian', null, Josh.id);
 assert.equal(Citadel.id, GLOBAL_OWNER, 'the second scheme stands in for Citadel');
 store.adoptOwnerless(Cara.id);
 // Josh is in Citadel, so an admin everywhere (#621); Dana and Lee aren't.
-for (const [p, u] of [[Delve, Josh], [Citadel, Josh], [Obsidian, Rachel], [Obsidian, Lee], [Delve, Lee]] as const) store.addMember(p.id, u.id);
+for (const [p, u] of [
+  [Delve, Josh],
+  [Citadel, Josh],
+  [Obsidian, Rachel],
+  [Obsidian, Lee],
+  [Delve, Lee],
+] as const)
+  store.addMember(p.id, u.id);
 
-const names = (from: number, person: number | null, now = Date.now()) => taskmasterTargets(store, from, person, now).map((p) => p.name).sort();
+const names = (from: number, person: number | null, now = Date.now()) =>
+  taskmasterTargets(store, from, person, now)
+    .map((p) => p.name)
+    .sort();
 
 test('the schemes a Taskmaster turn may reach: its person in both, an admin anywhere, Citadel always', () => {
   // Member of both: Lee is in Obsidian and Delve, but not Peek Auras.
@@ -84,12 +94,18 @@ test('message_taskmaster: labels who asks Citadel, and refuses without naming hi
   after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const send = async (from: { id: number }, scheme: string, text = 'the inbox count is wrong') => {
     const res = await fetch(srv.base + '/api/taskmaster', {
-      method: 'POST', headers: { Authorization: `Bearer ${tokens.agentToken(from.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ scheme, saw: text, checked: 'my own logs and repro', wanted: 'help', by: 'today', need: 'ask' }),
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokens.agentToken(from.id)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scheme, saw: text, checked: 'my own logs and repro', wanted: 'help', by: 'today', need: 'ask' }),
     });
     const body = await res.json();
     return { status: res.status, body };
   };
-  const authors = () => store.listEvents(CitadelTM.id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data).author);
+  const authors = () =>
+    store
+      .listEvents(CitadelTM.id)
+      .filter((e) => e.kind === 'user_message')
+      .map((e) => JSON.parse(e.data).author);
 
   // Citadel's Taskmaster can't start a conversation with Obsidian, and the error names only what Dana reaches.
   let r = await send(CitadelTM, 'Obsidian', 'want a feature?');
@@ -134,8 +150,13 @@ test("only Citadel's Taskmaster gets the bug/feature rule for non-members' asks"
 });
 
 test("a non-member's ask runs Citadel's turn as Citadel's owner; a member's as themselves", () => {
-  const runner = new Runner(store, () => {}, () => ({}), '/bin/false');
-  runner.personOf = (author, from) => (from ? store.getTicket(from)?.person_id ?? null : store.findUser('name', author)?.id ?? null);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
+  runner.personOf = (author, from) => (from ? (store.getTicket(from)?.person_id ?? null) : (store.findUser('name', author)?.id ?? null));
   const fromScheme = (p: typeof Delve, person: number) => {
     const t = store.createTicket({ project_id: p.id, title: `Asker for ${person}`, permission_mode: 'default', created_by: 'Cara' });
     store.updateTicket(t.id, { person_id: person });

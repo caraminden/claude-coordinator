@@ -5,8 +5,7 @@ import { test } from 'node:test';
 import { FIX_RE, isRunnableTest, isTest, ticketOf, verdict } from '../tools/fix-replay.ts';
 
 test('fix subjects match on whole words, so "change" is not a hang', () => {
-  for (const s of ['#12: fix the rail', 'Review fixes (#545)', 'land hangs on a stale lock', '#9: flaky wait', '#3: self-review findings'])
-    assert.ok(FIX_RE.test(s), s);
+  for (const s of ['#12: fix the rail', 'Review fixes (#545)', 'land hangs on a stale lock', '#9: flaky wait', '#3: self-review findings']) assert.ok(FIX_RE.test(s), s);
   for (const s of ['#12: change the rail', '#4: prefix ids', '#5: add a hangar page']) assert.ok(!FIX_RE.test(s), s);
 });
 
@@ -25,7 +24,8 @@ test('run refuses outside GitHub Actions, so no replay runs tests here', () => {
 });
 
 test('a verdict needs a failing test with the fix undone and a passing run without it', () => {
-  const ok = { code: 0, pass: 3, fail: 0 }, failed = { code: 1, pass: 2, fail: 1 };
+  const ok = { code: 0, pass: 3, fail: 0 },
+    failed = { code: 1, pass: 2, fail: 1 };
   assert.equal(verdict(ok), 'green');
   assert.equal(verdict({ code: 0, pass: 0, fail: 0 }), 'skipped');
   assert.equal(verdict(failed), 'needs-clean');

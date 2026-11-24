@@ -49,7 +49,12 @@ let up = false;
 const probes: number[] = [];
 let gate: Promise<void> | null = null;
 function makeRunner() {
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.onTurnError = (ticket, text) => pushes.push({ ticket, text });
   r.netProbeMs = 20;
   r.netProbeMaxMs = 80;
@@ -80,7 +85,11 @@ async function turn(id: number, result: string, text = 'go', author = 'Cara') {
   return store.getTicket(id)!;
 }
 
-const events = (id: number, kind: string) => store.listEvents(id).filter((e) => e.kind === kind).map((e) => JSON.parse(e.data).text as string);
+const events = (id: number, kind: string) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === kind)
+    .map((e) => JSON.parse(e.data).text as string);
 /** Sets the release file whole: a fake polling for it would otherwise read it between create and write, empty. */
 const setRelease = (words: string) => {
   writeFileSync(`${release}.tmp`, words);
@@ -102,7 +111,8 @@ test('network failures are told apart from every other failure', () => {
     'connect ETIMEDOUT 160.79.104.10:443',
     'Codex: stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)',
     'Codex: failed to lookup address information: Temporary failure in name resolution',
-  ]) assert.ok(isNetworkFailure(text), text);
+  ])
+    assert.ok(isNetworkFailure(text), text);
   for (const text of [
     "You've hit your 5-hour limit · resets 3:30pm (America/Los_Angeles)",
     'API Error: 400 Identity verification is required to continue.',
@@ -113,8 +123,9 @@ test('network failures are told apart from every other failure', () => {
     'API Error: 502 upstream connect error ECONNRESET',
     'Killed by SIGTERM (exit 143) from outside Citadel.',
     'Blocked by the tripwire: git push to main from a minion worktree',
-    'TypeError: Cannot read properties of undefined (reading \'map\')',
-  ]) assert.ok(!isNetworkFailure(text), text);
+    "TypeError: Cannot read properties of undefined (reading 'map')",
+  ])
+    assert.ok(!isNetworkFailure(text), text);
 });
 
 test('an outage waits for the probe, backing off, then resumes with the messages queued behind the dead turn', async () => {
@@ -181,7 +192,7 @@ test('other failures never wait on the network', async () => {
   pushes.length = 0;
 });
 
-test("a turn that ends well clears the failure note a failed turn left, and only that note (#428)", async () => {
+test('a turn that ends well clears the failure note a failed turn left, and only that note (#428)', async () => {
   const id = minion();
   // Back to back, a turn waits for the last one's save: wait until it has run, not just until nothing runs.
   const turn = async (id: number, result: string, text = 'go') => {
@@ -355,10 +366,17 @@ test('a message held by the network wait shows as queued and can be taken back (
   runner.send(id, 'Cara', 'go');
   await until('the turn to start', () => runner.isRunning(id));
   runner.send(id, 'Cara', 'never mind this');
-  const msg = store.listEvents(id).filter((e) => e.kind === 'user_message').at(-1)!;
+  const msg = store
+    .listEvents(id)
+    .filter((e) => e.kind === 'user_message')
+    .at(-1)!;
   writeFileSync(release, OUTAGE);
   await until('the turn to die', () => !runner.isRunning(id));
-  assert.deepEqual(runner.queue.msgs(id).map((m) => m.id), [msg.id], 'it waits in the queue, for the resume');
+  assert.deepEqual(
+    runner.queue.msgs(id).map((m) => m.id),
+    [msg.id],
+    'it waits in the queue, for the resume',
+  );
   const shown = runner.view(store.getTicket(id)!);
   assert.deepEqual([shown.queued, shown.queued_ids], [1, [msg.id]]);
   assert.equal(runner.unqueue(id, msg.id, 'Cara'), true);

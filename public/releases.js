@@ -52,10 +52,14 @@ function refreshExtras() {
 }
 
 /** A `claims` event: that scheme's claims changed. Off the Releases page the next open reads them. */
-export function onClaims(msg) { if (pageEl?.isConnected) loadClaims(msg.projectId, redraw); }
+export function onClaims(msg) {
+  if (pageEl?.isConnected) loadClaims(msg.projectId, redraw);
+}
 
 /** A `ticket` event: a claim holder's stage may have moved (#1334). */
-export function onClaimHolder(ticket) { if (loaded && pageEl?.isConnected) onHolderTicket(ticket, redraw); }
+export function onClaimHolder(ticket) {
+  if (loaded && pageEl?.isConnected) onHolderTicket(ticket, redraw);
+}
 
 /** One scheme's part changed (the `releases` event); a scheme seen for the first time may be a member one, so ask again. True (or a promise of it) when a minion row's release changed. */
 export function onReleases(msg) {
@@ -111,7 +115,7 @@ const stageName = (key) => {
   if (STAGE_NAMES[key]) return STAGE_NAMES[key];
   const t = TRACK.find(([k]) => k === key);
   // A short key is an initialism ("ci" → "CI").
-  return t ? t[2] ?? t[1] : key.length <= 3 ? key.toUpperCase() : key.charAt(0).toUpperCase() + key.slice(1);
+  return t ? (t[2] ?? t[1]) : key.length <= 3 ? key.toUpperCase() : key.charAt(0).toUpperCase() + key.slice(1);
 };
 const isSha = (v) => /^[0-9a-f]{7,40}$/.test(v);
 const minionHref = (projectId, c) => (c.number != null ? `#/p/${projectId}/t/${c.number}` : `#/t/${c.ticketId}`);
@@ -122,7 +126,8 @@ const pageHref = (scope, hl, target = null) => `#/p/${view?.projectId ?? ''}/rel
 /** "50s", "3m", "1h 5m": an estimate's size, rounded. */
 const tookText = (r) => {
   if (!(r.started && r.live)) return null;
-  const total = r.live - r.started, line = Number(r.stages?.line) * 1000;
+  const total = r.live - r.started,
+    line = Number(r.stages?.line) * 1000;
   // Cara, 2026-11-20: "took 5m after 29m in line": the ship-line wait is pulled out of the release's own work (a wait under a minute stays in "took")
   return line >= 60000 && line < total ? `${shortSpan(total - line)} after ${shortSpan(line)} in line` : shortSpan(total);
 };
@@ -134,8 +139,7 @@ const tookText = (r) => {
  rows under a stage line that says it. With no `since` (auto-deploy's timer) it's "any moment".
  */
 function etaText(eta, { suffix = '', since = null, full = true } = {}) {
-  return h('span', { class: 'rel-eta', 'data-eta': eta, 'data-suffix': suffix, 'data-since': since ?? '', 'data-full': full ? '1' : '', title: etaTitle(eta, since) },
-    etaWords(eta, suffix, since, full));
+  return h('span', { class: 'rel-eta', 'data-eta': eta, 'data-suffix': suffix, 'data-since': since ?? '', 'data-full': full ? '1' : '', title: etaTitle(eta, since) }, etaWords(eta, suffix, since, full));
 }
 const etaWords = (eta, suffix, since, full) => {
   if (eta > Date.now()) return `~${shortSpan(eta - Date.now())}${suffix}`;
@@ -143,9 +147,7 @@ const etaWords = (eta, suffix, since, full) => {
   return full ? `running long · usually ~${shortSpan(eta - since)}` : 'running long';
 };
 /** The hover past the estimate: the usual time spelled out, and how long this stage has run. */
-const etaTitle = (eta, since) => (eta <= Date.now() && since
-  ? `Taking longer than usual: this stage and the rest usually take ~${shortSpan(eta - since)}; this stage started ${shortSpan(Date.now() - since)} ago`
-  : '');
+const etaTitle = (eta, since) => (eta <= Date.now() && since ? `Taking longer than usual: this stage and the rest usually take ~${shortSpan(eta - since)}; this stage started ${shortSpan(Date.now() - since)} ago` : '');
 
 /** The commit or version name behind it, shown small on its card for whoever wants it (no hover: Cara, 2026-11-12, "if you want more info, click"). */
 const releaseDetail = (r) => (r.version ? (isSha(r.version) ? `commit ${r.version.slice(0, 7)}` : `version ${r.version}`) : '');
@@ -153,8 +155,7 @@ const releaseDetail = (r) => (r.version ? (isSha(r.version) ? `commit ${r.versio
 /** A release by its number, linked to the release itself (the live site, its file) when it has one: a new tab, as it may leave Citadel. */
 function versionLink(r, cls = 'rel-ver', short = false) {
   // data-version: what the right-click menu's Copy version copies (#1663).
-  return r.link ? h('a', { class: cls, href: r.link, target: '_blank', rel: 'noopener', 'data-version': releaseName(r), onclick: (e) => e.stopPropagation() }, releaseName(r, short))
-    : h('span', { class: cls, 'data-version': releaseName(r) }, releaseName(r, short));
+  return r.link ? h('a', { class: cls, href: r.link, target: '_blank', rel: 'noopener', 'data-version': releaseName(r), onclick: (e) => e.stopPropagation() }, releaseName(r, short)) : h('span', { class: cls, 'data-version': releaseName(r) }, releaseName(r, short));
 }
 
 // ---------- the Schemes list ----------
@@ -183,19 +184,33 @@ export function opening() {
  */
 export function releaseRows(projectId) {
   const s = schemes.get(projectId);
-  return h('div', { class: 'rel-rows', 'data-rel-scheme': projectId }, (s?.targets ?? []).filter((tv) => tv.next).map((tv) => {
-    const href = pageHref(projectId, null, tv.target.id);
-    return h('div', {
-      class: 'rel-row',
-      // The whole row opens the scheme's page (Josh: "clicking any of the releases would take you to that schemes detail page"); its release link opens the release.
-      onclick: (e) => { if (!e.target.closest('a') && !e.defaultPrevented) { opening(); location.hash = href; } }, // a tap on the estimate opens its why
-    },
-    h('a', { class: 'rel-name', href, onclick: opening }, tv.target.name),
-    estimate(tv.next),
-    // The release being made (Cara, 2026-11-17): its number, linked to its preview or download when it has one, plain when not; never the current release.
-    versionLink(tv.next.number != null ? tv.next : { ...tv.next, link: null }, 'rel-ver', true),
-    stageTrack(tv.next.stages, tv.next));
-  }));
+  return h(
+    'div',
+    { class: 'rel-rows', 'data-rel-scheme': projectId },
+    (s?.targets ?? [])
+      .filter((tv) => tv.next)
+      .map((tv) => {
+        const href = pageHref(projectId, null, tv.target.id);
+        return h(
+          'div',
+          {
+            class: 'rel-row',
+            // The whole row opens the scheme's page (Josh: "clicking any of the releases would take you to that schemes detail page"); its release link opens the release.
+            onclick: (e) => {
+              if (!e.target.closest('a') && !e.defaultPrevented) {
+                opening();
+                location.hash = href;
+              }
+            }, // a tap on the estimate opens its why
+          },
+          h('a', { class: 'rel-name', href, onclick: opening }, tv.target.name),
+          estimate(tv.next),
+          // The release being made (Cara, 2026-11-17): its number, linked to its preview or download when it has one, plain when not; never the current release.
+          versionLink(tv.next.number != null ? tv.next : { ...tv.next, link: null }, 'rel-ver', true),
+          stageTrack(tv.next.stages, tv.next),
+        );
+      }),
+  );
 }
 
 // ---------- tracks ----------
@@ -204,10 +219,16 @@ export function releaseRows(projectId) {
 function stageTrack(stages, p, { mini = false, labels = false } = {}) {
   const list = segments(stages);
   const at = list.findIndex((s) => s.name === p.stage);
-  return segTrack(list.map((s, i) => ({
-    size: s.usual, name: stageName(s.name), state: i < at ? 'done' : i === at ? 'now' : '', waits: !!p.waitingOn,
-    clock: { stage: p.stage, since: p.since, usual: p.usual, done: p.done, total: p.total },
-  })), { cls: `rel-track${mini ? ' mini' : ''}`, labels, label: `${stageName(p.stage)}, stage ${at + 1} of ${list.length}` });
+  return segTrack(
+    list.map((s, i) => ({
+      size: s.usual,
+      name: stageName(s.name),
+      state: i < at ? 'done' : i === at ? 'now' : '',
+      waits: !!p.waitingOn,
+      clock: { stage: p.stage, since: p.since, usual: p.usual, done: p.done, total: p.total },
+    })),
+    { cls: `rel-track${mini ? ' mini' : ''}`, labels, label: `${stageName(p.stage)}, stage ${at + 1} of ${list.length}` },
+  );
 }
 
 /**
@@ -280,8 +301,11 @@ function fillPage() {
  */
 function bringIntoView(want, frames = 120) {
   if (want?.shown || (want?.hl == null && want?.target == null)) return;
-  if (!pageEl?.isConnected) { if (frames > 0) requestAnimationFrame(() => page === want && bringIntoView(want, frames - 1)); return; }
-  const el = want.hl != null ? pageEl.querySelector('.rel-change.hl') ?? pageEl.querySelector('.rel-card.hl') : pageEl.querySelector(`[data-target="${CSS.escape(`${want.scope}/${want.target}`)}"]`);
+  if (!pageEl?.isConnected) {
+    if (frames > 0) requestAnimationFrame(() => page === want && bringIntoView(want, frames - 1));
+    return;
+  }
+  const el = want.hl != null ? (pageEl.querySelector('.rel-change.hl') ?? pageEl.querySelector('.rel-card.hl')) : pageEl.querySelector(`[data-target="${CSS.escape(`${want.scope}/${want.target}`)}"]`);
   if (!el) return;
   want.shown = true;
   el.scrollIntoView({ block: want.hl != null ? 'nearest' : 'start' });
@@ -322,37 +346,40 @@ function schemeCards(projectId, alone) {
     claimsBlock(projectId, redraw),
     ...s.targets.flatMap((tv) => [targetCard(projectId, tv, alone), tv.target.id === CITADEL_TARGET_ID ? watchBlock() : '']),
     // On its own page the scheme's name is in the heading; among every scheme's cards, it leads each card's title.
-    s.testCopies.length ? h('article', { class: 'rel-card' },
-      h('header', {}, h('h3', {}, iconOf(projectId), alone ? 'Test copies' : `${schemeName(projectId)} test copies`)), copyList(s.testCopies)) : '',
+    s.testCopies.length ? h('article', { class: 'rel-card' }, h('header', {}, h('h3', {}, iconOf(projectId), alone ? 'Test copies' : `${schemeName(projectId)} test copies`)), copyList(s.testCopies)) : '',
   ];
 }
 
 function targetCard(projectId, tv, alone) {
-  const n = tv.next, cur = tv.current, hl = page?.hl;
+  const n = tv.next,
+    cur = tv.current,
+    hl = page?.hl;
   const curTook = cur && tookText(cur);
-  return h('article', { class: `rel-card${hl && n?.changes.some((c) => c.ticketId === hl) ? ' hl' : ''}`, 'data-target': `${projectId}/${tv.target.id}` },
+  return h(
+    'article',
+    { class: `rel-card${hl && n?.changes.some((c) => c.ticketId === hl) ? ' hl' : ''}`, 'data-target': `${projectId}/${tv.target.id}` },
     h('header', {}, h('h3', {}, iconOf(projectId), alone ? tv.target.name : `${schemeName(projectId)} ${tv.target.name}`)),
-    h('p', { class: 'rel-current' }, 'Current: ', cur ? versionLink(cur) : 'none yet', cur?.live ? ` · live ${ago(cur.live)}` : '', curTook ? ` · took ${curTook}` : '',
-      cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : ''),
+    h('p', { class: 'rel-current' }, 'Current: ', cur ? versionLink(cur) : 'none yet', cur?.live ? ` · live ${ago(cur.live)}` : '', curTook ? ` · took ${curTook}` : '', cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : ''),
     deployBar(projectId, tv),
     rollbackBar(projectId, tv),
     keyBar(projectId, tv),
-    h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : n?.name ?? 'Next release'),
-    n ? [
-      stageTrack(n.stages, n, { labels: true }),
-      h('p', { class: 'rel-now' }, h('b', {}, n.label ?? stageName(n.stage)), ' · ', h('span', { class: n.waitingOn ? 'waits' : '' }, nowWords(n, n.eta, true))),
-      newsList(n),
-    ] : h('p', { class: 'muted' }, 'Nothing on its way.'),
+    h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : (n?.name ?? 'Next release')),
+    n ? [stageTrack(n.stages, n, { labels: true }), h('p', { class: 'rel-now' }, h('b', {}, n.label ?? stageName(n.stage)), ' · ', h('span', { class: n.waitingOn ? 'waits' : '' }, nowWords(n, n.eta, true))), newsList(n)] : h('p', { class: 'muted' }, 'Nothing on its way.'),
     changeList(projectId, tv),
     previousList(projectId, tv),
-    tv.testCopies.length ? [h('h4', {}, 'Test copies'), copyList(tv.testCopies)] : '');
+    tv.testCopies.length ? [h('h4', {}, 'Test copies'), copyList(tv.testCopies)] : '',
+  );
 }
 
 /** What happened so far in the ship under way (#1368): its land.sh lines, oldest first, each #N a link to its minion. */
 function newsList(n) {
   if (!n.news?.length) return '';
   const words = (x) => x.text.split(/(#\d+)/).map((t) => (x.refs?.[t] != null ? h('a', { href: `#/t/${x.refs[t]}` }, t) : t));
-  return h('ul', { class: 'rel-news' }, n.news.map((x) => h('li', { class: x.tone }, words(x))));
+  return h(
+    'ul',
+    { class: 'rel-news' },
+    n.news.map((x) => h('li', { class: x.tone }, words(x))),
+  );
 }
 
 /** The cards whose Previous releases are open ("projectId/target"): every event redraws the cards, so it's kept here. */
@@ -367,25 +394,44 @@ function previousList(projectId, tv) {
   if (!tv.recent.length) return '';
   const key = `${projectId}/${tv.target.id}`;
   const label = (r) => (r.number != null ? releaseName(r) : r.outcome === 'signed' ? 'Signed build' : r.outcome === 'live' ? 'Earlier release' : 'Failed try');
-  return h('details', { class: 'rel-prev', open: openPrevious.has(key), ontoggle: (e) => (e.target.open ? openPrevious.add(key) : openPrevious.delete(key)) },
+  return h(
+    'details',
+    { class: 'rel-prev', open: openPrevious.has(key), ontoggle: (e) => (e.target.open ? openPrevious.add(key) : openPrevious.delete(key)) },
     h('summary', {}, `Previous releases (${tv.recent.length})`),
-    h('ul', { class: 'rel-prev-list' }, tv.recent.map((r) => {
-      const failed = r.outcome !== 'live' && r.outcome !== 'signed';
-      const took = tookText(r) ?? (r.stages?.sign != null ? shortSpan(r.stages.sign * 1000) : null); // a signed APK never goes live: its signing is the whole run
-      const when = r.live ? `live ${ago(r.live)}` : r.started ? `${failed ? 'tried' : 'built'} ${ago(r.started)}` : '';
-      return h('li', {},
-        r.link ? h('a', { class: 'rel-ver', href: r.link, target: '_blank', rel: 'noopener' }, label(r)) : h('span', { class: 'rel-prev-name' }, label(r)),
-        failed ? h('span', { class: 'rel-failed' }, r.failure ? failText(r.failure) : r.outcome) : '',
-        h('span', { class: 'muted' }, [when, took ? `took ${took}` : '', releaseDetail(r)].filter(Boolean).join(' · ')),
-        r.changes.length > 1 ? h('span', { class: 'rel-together muted' }, `${r.changes.length} ships went out together`) : '',
-        r.changes.length ? h('span', { class: 'rel-prev-changes' }, r.changes.length > 1 ? r.changes.map((c) => h('span', { class: 'rel-prev-ship' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c))) : r.changes.flatMap((c) => [h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c)])) : '',
-        r.failure ? failureLines(projectId, r) : '');
-    })));
+    h(
+      'ul',
+      { class: 'rel-prev-list' },
+      tv.recent.map((r) => {
+        const failed = r.outcome !== 'live' && r.outcome !== 'signed';
+        const took = tookText(r) ?? (r.stages?.sign != null ? shortSpan(r.stages.sign * 1000) : null); // a signed APK never goes live: its signing is the whole run
+        const when = r.live ? `live ${ago(r.live)}` : r.started ? `${failed ? 'tried' : 'built'} ${ago(r.started)}` : '';
+        return h(
+          'li',
+          {},
+          r.link ? h('a', { class: 'rel-ver', href: r.link, target: '_blank', rel: 'noopener' }, label(r)) : h('span', { class: 'rel-prev-name' }, label(r)),
+          failed ? h('span', { class: 'rel-failed' }, r.failure ? failText(r.failure) : r.outcome) : '',
+          h('span', { class: 'muted' }, [when, took ? `took ${took}` : '', releaseDetail(r)].filter(Boolean).join(' · ')),
+          r.changes.length > 1 ? h('span', { class: 'rel-together muted' }, `${r.changes.length} ships went out together`) : '',
+          r.changes.length
+            ? h(
+                'span',
+                { class: 'rel-prev-changes' },
+                r.changes.length > 1
+                  ? r.changes.map((c) => h('span', { class: 'rel-prev-ship' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c)))
+                  : r.changes.flatMap((c) => [h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c)]),
+              )
+            : '',
+          r.failure ? failureLines(projectId, r) : '',
+        );
+      }),
+    ),
+  );
 }
 
 /** A failed try's kind in a few words (#1375): "3 tests failed", "merge conflict in 2 files", "smoke check". */
 function failText(f) {
-  const n = f.names.length + f.more, s = n === 1 ? '' : 's';
+  const n = f.names.length + f.more,
+    s = n === 1 ? '' : 's';
   if (f.kind === 'tests failed' && n) return `${n} test${s} failed`;
   if (f.kind === 'merge conflict' && n) return `merge conflict in ${n} file${s}`;
   return f.kind;
@@ -400,14 +446,24 @@ function failureNames(f) {
 
 /** Under a failed try's row: what failed, then what happened since (its minion fixing it, back in line, shipped). */
 function failureLines(projectId, r) {
-  const f = r.failure, nx = f.next, c = r.changes[0];
+  const f = r.failure,
+    nx = f.next,
+    c = r.changes[0];
   const who = c ? h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`) : 'its minion';
-  const now = nx.kind === 'again' ? `tried again at ${pacificClock(nx.at)} and failed again (above)`
-    : nx.kind === 'shipped' ? `shipped since${nx.release ? ` in ${nx.release}` : ''}`
-    : nx.kind === 'line' ? `handed off again: ${nx.holds ? 'shipping now' : nx.place ? `${nx.place} in line` : 'in line'}`
-    : nx.kind === 'closed' ? [who, ' closed without shipping it again']
-    : nx.kind === 'fixing' ? [who, ' is fixing it', nx.note ? `: ${nx.note}` : '']
-    : nx.note ? [who, `: ${nx.note}`] : 'nothing yet';
+  const now =
+    nx.kind === 'again'
+      ? `tried again at ${pacificClock(nx.at)} and failed again (above)`
+      : nx.kind === 'shipped'
+        ? `shipped since${nx.release ? ` in ${nx.release}` : ''}`
+        : nx.kind === 'line'
+          ? `handed off again: ${nx.holds ? 'shipping now' : nx.place ? `${nx.place} in line` : 'in line'}`
+          : nx.kind === 'closed'
+            ? [who, ' closed without shipping it again']
+            : nx.kind === 'fixing'
+              ? [who, ' is fixing it', nx.note ? `: ${nx.note}` : '']
+              : nx.note
+                ? [who, `: ${nx.note}`]
+                : 'nothing yet';
   const names = failureNames(f);
   return [names ? h('span', { class: 'rel-prev-why muted' }, names) : '', h('span', { class: 'rel-prev-next' }, h('b', {}, 'Now: '), now)];
 }
@@ -445,32 +501,41 @@ function deployBar(projectId, tv) {
   if (!d) return '';
   const key = `${projectId}/${tv.target.id}`;
   const body = { projectId, target: tv.target.id };
-  const press = () => optimistic({
-    key: `deploy:${key}`,
-    apply: () => { deploying.add(key); redraw(); },
-    send: () => api('api/releases/deploy', { method: 'POST', body }),
-    undo: () => { deploying.delete(key); redraw(); },
-    label: `deploy ${schemeName(projectId)} ${tv.target.name}`,
-  });
+  const press = () =>
+    optimistic({
+      key: `deploy:${key}`,
+      apply: () => {
+        deploying.add(key);
+        redraw();
+      },
+      send: () => api('api/releases/deploy', { method: 'POST', body }),
+      undo: () => {
+        deploying.delete(key);
+        redraw();
+      },
+      label: `deploy ${schemeName(projectId)} ${tv.target.name}`,
+    });
   const show = (on) => {
     const cur = deployOf(projectId, tv.target.id);
     if (cur) cur.auto = on;
     redraw();
   };
-  const flip = (on) => optimistic({
-    sets: `auto-deploy:${key}`,
-    apply: () => show(on),
-    send: () => api('api/releases/auto-deploy', { method: 'PUT', body: { ...body, on } }),
-    undo: () => show(!on),
-    label: `turn ${on ? 'on' : 'off'} auto-deploy for ${schemeName(projectId)} ${tv.target.name}`,
-  });
+  const flip = (on) =>
+    optimistic({
+      sets: `auto-deploy:${key}`,
+      apply: () => show(on),
+      send: () => api('api/releases/auto-deploy', { method: 'PUT', body: { ...body, on } }),
+      undo: () => show(!on),
+      label: `turn ${on ? 'on' : 'off'} auto-deploy for ${schemeName(projectId)} ${tv.target.name}`,
+    });
   const busy = deploying.has(key) && d.can;
-  return h('div', { class: 'rel-deploy' },
-    busy ? h('span', { class: 'rel-deploying', role: 'status' }, 'Deploying…')
-      : d.can ? h('button', { type: 'button', class: 'secondary', onclick: press, title: 'Deploy the next release now' }, 'Deploy') : '',
-    h('label', { class: 'rel-auto', title: 'Deploys by itself right after main moves, or once the ships still coming have gone (10 minutes at most)' },
-      h('input', { type: 'checkbox', checked: d.auto, onchange: (e) => flip(e.target.checked) }), 'Auto-deploy'),
-    d.due && !busy ? h('span', { class: 'muted' }, d.more ? 'ships in line: deploys by itself, at the latest ' : 'deploys by itself ', etaText(d.due)) : '');
+  return h(
+    'div',
+    { class: 'rel-deploy' },
+    busy ? h('span', { class: 'rel-deploying', role: 'status' }, 'Deploying…') : d.can ? h('button', { type: 'button', class: 'secondary', onclick: press, title: 'Deploy the next release now' }, 'Deploy') : '',
+    h('label', { class: 'rel-auto', title: 'Deploys by itself right after main moves, or once the ships still coming have gone (10 minutes at most)' }, h('input', { type: 'checkbox', checked: d.auto, onchange: (e) => flip(e.target.checked) }), 'Auto-deploy'),
+    d.due && !busy ? h('span', { class: 'muted' }, d.more ? 'ships in line: deploys by itself, at the latest ' : 'deploys by itself ', etaText(d.due)) : '',
+  );
 }
 
 /** Targets whose Roll back to last green was pressed here, until the server's view stops offering it: "projectId/target". */
@@ -487,25 +552,40 @@ function rollbackBar(projectId, tv) {
   if (!rb) return '';
   const key = `${projectId}/${tv.target.id}`;
   const to = rb.sha.slice(0, 7);
-  const press = () => optimistic({
-    key: `rollback:${key}`,
-    apply: () => { rollingBack.add(key); redraw(); },
-    send: () => api('api/releases/rollback', { method: 'POST', body: { projectId, target: tv.target.id } }),
-    undo: () => { rollingBack.delete(key); redraw(); },
-    label: `roll ${schemeName(projectId)} ${tv.target.name} back to last green`,
-  });
+  const press = () =>
+    optimistic({
+      key: `rollback:${key}`,
+      apply: () => {
+        rollingBack.add(key);
+        redraw();
+      },
+      send: () => api('api/releases/rollback', { method: 'POST', body: { projectId, target: tv.target.id } }),
+      undo: () => {
+        rollingBack.delete(key);
+        redraw();
+      },
+      label: `roll ${schemeName(projectId)} ${tv.target.name} back to last green`,
+    });
   const busy = rb.running || (rollingBack.has(key) && rb.can);
   const pin = rb.pin;
-  const line = busy ? h('span', { class: 'rel-deploying', role: 'status' }, `Rolling back to ${to}…`)
-    : pin ? h('span', { class: 'muted' }, `Rolled back to ${pin.sha.slice(0, 7)} from ${pin.from.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: `,
-      // Citadel's server has no Deploy: the fix's own land deploys it, and land.sh holds every other land until then.
-      tv.deploy ? 'it stays there until main has a newer commit that passes the full suite. Deploy takes main live now.'
-        : tv.target.kind === 'citadel-server' ? `changes wait to ship until a fix to ${pin.from.slice(0, 7)} goes live.`
-        : `${pin.code ? `signed as build ${pin.code}, ` : ''}it stays there until main has a newer commit that passes the full suite.`)
-      : rb.failed ? h('span', { class: 'waits' }, `Roll back to ${rb.failed.sha.slice(0, 7)} didn't go live ${ago(rb.failed.at)}: ${rb.failed.why}`) : '';
-  const button = !busy && rb.can
-    ? h('button', { type: 'button', class: 'secondary', onclick: press, title: rollbackTitle(tv.target.kind, to) }, `Roll back to last green ${to}`)
-    : '';
+  const line = busy
+    ? h('span', { class: 'rel-deploying', role: 'status' }, `Rolling back to ${to}…`)
+    : pin
+      ? h(
+          'span',
+          { class: 'muted' },
+          `Rolled back to ${pin.sha.slice(0, 7)} from ${pin.from.slice(0, 7)} by ${pin.by} ${ago(pin.at)}: `,
+          // Citadel's server has no Deploy: the fix's own land deploys it, and land.sh holds every other land until then.
+          tv.deploy
+            ? 'it stays there until main has a newer commit that passes the full suite. Deploy takes main live now.'
+            : tv.target.kind === 'citadel-server'
+              ? `changes wait to ship until a fix to ${pin.from.slice(0, 7)} goes live.`
+              : `${pin.code ? `signed as build ${pin.code}, ` : ''}it stays there until main has a newer commit that passes the full suite.`,
+        )
+      : rb.failed
+        ? h('span', { class: 'waits' }, `Roll back to ${rb.failed.sha.slice(0, 7)} didn't go live ${ago(rb.failed.at)}: ${rb.failed.why}`)
+        : '';
+  const button = !busy && rb.can ? h('button', { type: 'button', class: 'secondary', onclick: press, title: rollbackTitle(tv.target.kind, to) }, `Roll back to last green ${to}`) : '';
   if (!line && !button) return '';
   return h('div', { class: 'rel-deploy rel-rollback' }, button, line);
 }
@@ -530,17 +610,29 @@ function keyBar(projectId, tv) {
   const app = tv.releaseKey;
   if (!app) return '';
   const key = `${projectId}/${app}`;
-  const press = () => optimistic({
-    key: `release-key:${key}`,
-    apply: () => { makingKeys.add(key); redraw(); },
-    send: () => api('api/releases/release-key', { method: 'POST', body: { projectId, contraption: app } }),
-    undo: () => { makingKeys.delete(key); redraw(); },
-    label: `make ${schemeName(projectId)} ${tv.target.name}'s release key`,
-  }).then(() => makingKeys.delete(key), () => {});
-  return h('div', { class: 'rel-deploy rel-key' },
-    makingKeys.has(key) ? h('span', { class: 'rel-deploying', role: 'status' }, 'Making the key…')
-      : h('button', { type: 'button', class: 'secondary', onclick: press, title: 'Make its Android signing key on the server. It is never replaced, and it goes off-box nightly.' }, 'Make release key'),
-    h('span', { class: 'muted' }, 'No release key yet, so its Android app isn\'t built.'));
+  const press = () =>
+    optimistic({
+      key: `release-key:${key}`,
+      apply: () => {
+        makingKeys.add(key);
+        redraw();
+      },
+      send: () => api('api/releases/release-key', { method: 'POST', body: { projectId, contraption: app } }),
+      undo: () => {
+        makingKeys.delete(key);
+        redraw();
+      },
+      label: `make ${schemeName(projectId)} ${tv.target.name}'s release key`,
+    }).then(
+      () => makingKeys.delete(key),
+      () => {},
+    );
+  return h(
+    'div',
+    { class: 'rel-deploy rel-key' },
+    makingKeys.has(key) ? h('span', { class: 'rel-deploying', role: 'status' }, 'Making the key…') : h('button', { type: 'button', class: 'secondary', onclick: press, title: 'Make its Android signing key on the server. It is never replaced, and it goes off-box nightly.' }, 'Make release key'),
+    h('span', { class: 'muted' }, "No release key yet, so its Android app isn't built."),
+  );
 }
 
 /** A target's changes in the order its list shows them: the ones under way (-1), furthest along first, then the land line in its order. */
@@ -550,19 +642,18 @@ function changeRows(tv) {
   // A rider goes right behind its front, whatever waiters sit between them in the line (the server's order for the release).
   const frontAt = at(changes.find((c) => c.train?.role === 'front')?.ticketId);
   const place = (c, k) => (c.train?.role === 'rider' && frontAt >= 0 ? frontAt + (k + 1) / (changes.length + 1) : at(c.ticketId));
-  return [
-    ...changes.map((c, k) => ({ c, i: at(c.ticketId), key: place(c, k) })),
-    ...tv.line.flatMap((e, i) => (e.ticketId != null && changes.some((c) => c.ticketId === e.ticketId) ? [] : [{ e, i, key: i }])),
-  ].sort((a, b) => a.key - b.key); // stable: the changes past the line (-1) keep their furthest-along-first order
+  return [...changes.map((c, k) => ({ c, i: at(c.ticketId), key: place(c, k) })), ...tv.line.flatMap((e, i) => (e.ticketId != null && changes.some((c) => c.ticketId === e.ticketId) ? [] : [{ e, i, key: i }]))].sort((a, b) => a.key - b.key); // stable: the changes past the line (-1) keep their furthest-along-first order
 }
 
 /** Each minion's place in that order across the targets (the minions list's Deploying section sorts by it, #1003): ticketId → index. */
 export function releaseOrder() {
   const order = new Map();
-  for (const s of schemes.values()) for (const tv of s.targets) for (const { c, e } of changeRows(tv)) {
-    const id = (c ?? e).ticketId;
-    if (id != null && !order.has(id)) order.set(id, order.size);
-  }
+  for (const s of schemes.values())
+    for (const tv of s.targets)
+      for (const { c, e } of changeRows(tv)) {
+        const id = (c ?? e).ticketId;
+        if (id != null && !order.has(id)) order.set(id, order.size);
+      }
   return (t) => order.get(t.id);
 }
 
@@ -575,7 +666,8 @@ export function releaseOrder() {
  * be tried on (tryIt).
  */
 function changeList(projectId, tv) {
-  const n = tv.next, hl = page?.hl;
+  const n = tv.next,
+    hl = page?.hl;
   const line = lineInOrder(projectId, tv.line);
   const rows = changeRows({ ...tv, line })
     // a landing from a branch (or a scheme's land script) older than reordering can't move
@@ -589,7 +681,11 @@ function changeList(projectId, tv) {
   const after = firstLater > 0 ? `${next ? 'Releasing next, after' : 'After'} ${n.number != null ? releaseName(n).toLowerCase() : 'this release'}${inLine}` : '';
   const now = rows[0]?.c?.train?.role === 'front' ? `Releasing now: train of ${rows[0].c.train.size}` : '';
   const waiters = rows.filter((r) => r.wait);
-  const list = h('ol', { class: 'rel-changes' }, rows.flatMap((r, i) => [...(i === 0 && now ? [h('li', { class: 'rel-after muted' }, now)] : []), ...(i === firstLater && after ? [h('li', { class: 'rel-after muted' }, after)] : []), row(r, i)]));
+  const list = h(
+    'ol',
+    { class: 'rel-changes' },
+    rows.flatMap((r, i) => [...(i === 0 && now ? [h('li', { class: 'rel-after muted' }, now)] : []), ...(i === firstLater && after ? [h('li', { class: 'rel-after muted' }, after)] : []), row(r, i)]),
+  );
   // The landings waiting in line move (#1002): dragged, or sent to the front of the waiters with Land next. The holder
   // and the changes past the line stay put.
   if (waiters.length > 1) {
@@ -611,34 +707,60 @@ function changeList(projectId, tv) {
     const pos = h('span', { class: 'rel-pos' }, String(i + 1));
     const seq = wait ? { 'data-seq': wait.seq } : {};
     if (c) {
-      return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
-        h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c)),
-        // The one the release's top readout is about shows its stage only: the track, counts and time live up there (#1613).
-        h('span', { class: 'where' }, ...(i === 0 && (!c.train || c.train.role === 'front')
-          ? [h('b', { class: c.waitingOn ? 'waits' : 'work' }, c.label ?? stageName(c.stage))]
-          : [stageTrack(n.stages, c, { mini: true }), ...trainNow(n, c, i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? waiting() : null)])),
-        lastTryLine(c), landNext(wait), stuck(why), placedNote(placed), tryIt(projectId, tv, c)));
+      return h(
+        'li',
+        { class: cls, ...seq },
+        pos,
+        h(
+          'div',
+          { class: 'body' },
+          h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c)),
+          // The one the release's top readout is about shows its stage only: the track, counts and time live up there (#1613).
+          h(
+            'span',
+            { class: 'where' },
+            ...(i === 0 && (!c.train || c.train.role === 'front') ? [h('b', { class: c.waitingOn ? 'waits' : 'work' }, c.label ?? stageName(c.stage))] : [stageTrack(n.stages, c, { mini: true }), ...trainNow(n, c, i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? waiting() : null)]),
+          ),
+          lastTryLine(c),
+          landNext(wait),
+          stuck(why),
+          placedNote(placed),
+          tryIt(projectId, tv, c),
+        ),
+      );
     }
-    return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
-      h('span', { class: 'what' }, e.ticketId != null ? h('a', { href: `#/t/${e.ticketId}` }, e.name) : e.name),
-      h('span', { class: 'where' }, n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
-        e.holds ? [h('b', { class: 'work' }, e.label ?? stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')]
-          : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)]),
-      lastTryLine(e), landNext(wait), stuck(why), placedNote(placed)));
+    return h(
+      'li',
+      { class: cls, ...seq },
+      pos,
+      h(
+        'div',
+        { class: 'body' },
+        h('span', { class: 'what' }, e.ticketId != null ? h('a', { href: `#/t/${e.ticketId}` }, e.name) : e.name),
+        h(
+          'span',
+          { class: 'where' },
+          n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
+          e.holds ? [h('b', { class: 'work' }, e.label ?? stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')] : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)],
+        ),
+        lastTryLine(e),
+        landNext(wait),
+        stuck(why),
+        placedNote(placed),
+      ),
+    );
   }
   /** Who placed a waiter (#1358): a person's drag pins it; a Taskmaster's move says why it went there. */
   function placedNote(p) {
     if (!p) return '';
     const at = new Date(p.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    return h('span', { class: 'placed muted', title: p.taskmaster ? `Moved by ${p.by}` : `${p.by} placed it, so a Taskmaster won't move it or pass it` },
-      p.taskmaster ? `${p.by}: ${p.reason ?? 'moved it'}` : `Placed by ${p.by}, ${at}: stays put until it ships`);
+    return h('span', { class: 'placed muted', title: p.taskmaster ? `Moved by ${p.by}` : `${p.by} placed it, so a Taskmaster won't move it or pass it` }, p.taskmaster ? `${p.by}: ${p.reason ?? 'moved it'}` : `Placed by ${p.by}, ${at}: stays put until it ships`);
   }
   /** Land next: the waiter goes to the front of the waiting landings (for a phone or a keyboard, where dragging is clumsy). */
   function landNext(wait) {
     if (!wait || wait === line.find((e) => !e.holds)) return '';
     const seqs = waiters.map((r) => r.wait.seq);
-    return h('button', { type: 'button', class: 'secondary land-next', title: 'Move it to the front of the changes waiting to ship: it ships once the one shipping now is done',
-      onclick: () => reorderLine(projectId, line, [wait.seq, ...seqs.filter((s) => s !== wait.seq)], wait.seq) }, 'Ship next');
+    return h('button', { type: 'button', class: 'secondary land-next', title: 'Move it to the front of the changes waiting to ship: it ships once the one shipping now is done', onclick: () => reorderLine(projectId, line, [wait.seq, ...seqs.filter((s) => s !== wait.seq)], wait.seq) }, 'Ship next');
   }
 }
 
@@ -682,12 +804,16 @@ function reorderLine(projectId, line, seqs, movedSeq) {
       redraw();
     },
     label: `move ${name} in the ship line`,
-  }).then(() => setTimeout(() => {
-    // The server's releases event has come by now: from here its line speaks, a move someone else made since included.
-    if (drop !== lineDrops) return;
-    lineOrders.delete(projectId);
-    redraw();
-  }, 3000), () => {});
+  }).then(
+    () =>
+      setTimeout(() => {
+        // The server's releases event has come by now: from here its line speaks, a move someone else made since included.
+        if (drop !== lineDrops) return;
+        lineOrders.delete(projectId);
+        redraw();
+      }, 3000),
+    () => {},
+  );
 }
 
 /** Citadel changes whose preview was requested here and isn't in the server's test copies yet: their ticket ids. */
@@ -704,25 +830,34 @@ function tryIt(projectId, tv, c) {
   const preview = copies.find((x) => x.kind === 'preview');
   if (preview) {
     requested.delete(c.ticketId);
-    return h('span', { class: 'try' }, h('a', { href: `../${preview.path}`, target: '_blank', rel: 'noopener' }, 'Try the preview'),
-      h('span', { class: 'muted' }, preview.running ? ' · stops after an hour unused' : ' · stopped, starts when opened'));
+    return h('span', { class: 'try' }, h('a', { href: `../${preview.path}`, target: '_blank', rel: 'noopener' }, 'Try the preview'), h('span', { class: 'muted' }, preview.running ? ' · stops after an hour unused' : ' · stopped, starts when opened'));
   }
   const file = copies.find((x) => x.kind === 'download');
   if (file) return h('span', { class: 'try' }, h('a', { href: `${fileUrl(file.ticketId, file.file)}&download`, download: '' }, `Download ${file.name}`));
   if (!c.canPreview) return '';
   if (requested.has(c.ticketId)) return h('span', { class: 'try muted', role: 'status' }, 'Starting preview…');
-  const ask = () => optimistic({
-    key: `preview:${c.ticketId}`,
-    apply: () => { requested.add(c.ticketId); redraw(); },
-    // The POST alone decides success. The server lists the preview once it's up: ask again rather than wait for the next
-    // poll's event, then let the row draw from the list (the link, or the button if it somehow isn't there).
-    send: async () => {
-      await api(`api/tickets/${c.ticketId}/preview`, { method: 'POST' });
-      void loadReleases().finally(() => { requested.delete(c.ticketId); redraw(); });
-    },
-    undo: () => { requested.delete(c.ticketId); redraw(); },
-    label: `start #${c.number ?? c.ticketId}'s preview`,
-  });
+  const ask = () =>
+    optimistic({
+      key: `preview:${c.ticketId}`,
+      apply: () => {
+        requested.add(c.ticketId);
+        redraw();
+      },
+      // The POST alone decides success. The server lists the preview once it's up: ask again rather than wait for the next
+      // poll's event, then let the row draw from the list (the link, or the button if it somehow isn't there).
+      send: async () => {
+        await api(`api/tickets/${c.ticketId}/preview`, { method: 'POST' });
+        void loadReleases().finally(() => {
+          requested.delete(c.ticketId);
+          redraw();
+        });
+      },
+      undo: () => {
+        requested.delete(c.ticketId);
+        redraw();
+      },
+      label: `start #${c.number ?? c.ticketId}'s preview`,
+    });
   return h('span', { class: 'try' }, h('button', { type: 'button', class: 'secondary', onclick: ask }, 'Request preview'));
 }
 
@@ -733,55 +868,115 @@ function copyLink(c) {
   const tab = { target: '_blank', rel: 'noopener' };
   switch (c.kind) {
     // Its name carries its commit; the line says whose it is.
-    case 'download': return [h('a', { href: `${fileUrl(c.ticketId, c.file)}&download`, download: '' }, c.name), [h('a', { href: minionHref(null, { ticketId: c.ticketId }) }, `#${c.number}`), ` · ${ago(c.at)}`]];
+    case 'download':
+      return [h('a', { href: `${fileUrl(c.ticketId, c.file)}&download`, download: '' }, c.name), [h('a', { href: minionHref(null, { ticketId: c.ticketId }) }, `#${c.number}`), ` · ${ago(c.at)}`]];
     // The host people reached Citadel on, which reaches the site too (both on the tailnet).
-    case 'site': return [h('a', { href: `${location.protocol}//${location.hostname}:${c.port}/`, ...tab }, `${c.name} (port ${c.port})`), c.running ? 'up' : 'down'];
+    case 'site':
+      return [h('a', { href: `${location.protocol}//${location.hostname}:${c.port}/`, ...tab }, `${c.name} (port ${c.port})`), c.running ? 'up' : 'down'];
     // Linked only to its file on perigee (#673): until it is mirrored, just its name.
-    case 'debug-apk': return [c.link ? h('a', { href: c.link, ...tab }, `Debug APK, ${c.name}`) : h('span', {}, `Debug APK, ${c.name}`), made];
-    case 'build-preview': return [h('a', { href: `../${c.path}`, ...tab }, `${c.name} standing preview`), state];
-    default: return [h('a', { href: `../${c.path}`, ...tab }, `Preview of ${c.name}`), state];
+    case 'debug-apk':
+      return [c.link ? h('a', { href: c.link, ...tab }, `Debug APK, ${c.name}`) : h('span', {}, `Debug APK, ${c.name}`), made];
+    case 'build-preview':
+      return [h('a', { href: `../${c.path}`, ...tab }, `${c.name} standing preview`), state];
+    default:
+      return [h('a', { href: `../${c.path}`, ...tab }, `Preview of ${c.name}`), state];
   }
 }
 
 function copyList(copies) {
-  return h('ul', { class: 'rel-list' }, copies.map((c) => {
-    const [link, line] = copyLink(c);
-    return h('li', {}, link, h('span', { class: 'muted' }, ...[line].flat()));
-  }));
+  return h(
+    'ul',
+    { class: 'rel-list' },
+    copies.map((c) => {
+      const [link, line] = copyLink(c);
+      return h('li', {}, link, h('span', { class: 'muted' }, ...[line].flat()));
+    }),
+  );
 }
 
 // ---------- All (take E) ----------
 
 function allView(ids) {
-  if (!ids.length) return [h('p', { class: 'muted rel-empty' }, 'Nothing ships yet from the schemes you\'re a member of.')];
+  if (!ids.length) return [h('p', { class: 'muted rel-empty' }, "Nothing ships yet from the schemes you're a member of.")];
   const rows = ids.flatMap((id) => schemes.get(id).targets.map((tv) => ({ id, tv })));
-  const card = (id, next, c) => h('a', { class: `rel-card-sm${c.ticketId === page?.hl ? ' hl' : ''}`, href: minionHref(id, c) },
-    h('span', { class: 'what' }, h('span', { class: 'num' }, `#${c.number ?? c.ticketId}`), ' ', c.title),
-    stageTrack(next.stages, c, { mini: true }), h('span', { class: 'where' }, ...changeNow(next, c)));
+  const card = (id, next, c) =>
+    h('a', { class: `rel-card-sm${c.ticketId === page?.hl ? ' hl' : ''}`, href: minionHref(id, c) }, h('span', { class: 'what' }, h('span', { class: 'num' }, `#${c.number ?? c.ticketId}`), ' ', c.title), stageTrack(next.stages, c, { mini: true }), h('span', { class: 'where' }, ...changeNow(next, c)));
   // The newest live release: its number (linked to the release itself), its age and the minions it carried.
-  const lastCard = (id, r) => h('div', { class: 'rel-card-sm live' },
-    h('span', { class: 'what' }, versionLink(r), r.live ? h('span', { class: 'where' }, ` · live ${ago(r.live)}`) : ''),
-    r.changes.length ? h('ul', { class: 'rel-carried' }, r.changes.map((c) => h('li', {}, h('a', { class: 'num', href: minionHref(id, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c)))) : '');
-  const grid = h('div', { class: 'rel-grid', role: 'table', 'aria-label': 'Releases of every scheme' },
-    h('div', { class: 'rel-grid-row head', role: 'row' }, ['Target', ...COLUMNS].map((c) => h('span', { role: 'columnheader' }, c))),
+  const lastCard = (id, r) =>
+    h(
+      'div',
+      { class: 'rel-card-sm live' },
+      h('span', { class: 'what' }, versionLink(r), r.live ? h('span', { class: 'where' }, ` · live ${ago(r.live)}`) : ''),
+      r.changes.length
+        ? h(
+            'ul',
+            { class: 'rel-carried' },
+            r.changes.map((c) => h('li', {}, h('a', { class: 'num', href: minionHref(id, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c))),
+          )
+        : '',
+    );
+  const grid = h(
+    'div',
+    { class: 'rel-grid', role: 'table', 'aria-label': 'Releases of every scheme' },
+    h(
+      'div',
+      { class: 'rel-grid-row head', role: 'row' },
+      ['Target', ...COLUMNS].map((c) => h('span', { role: 'columnheader' }, c)),
+    ),
     rows.map(({ id, tv }) => {
       const cells = COLUMNS.map(() => []);
       for (const c of tv.next?.changes ?? []) cells[columnOf(tv.next.stages, c)].push(card(id, tv.next, c));
       if (tv.current) cells[3].push(lastCard(id, tv.current));
-      return tint(h('div', { class: 'rel-grid-row', role: 'row', 'data-scheme': id },
-        h('div', { class: 'rel-target', role: 'rowheader', onclick: (e) => { if (!e.target.closest('a')) { opening(); location.hash = pageHref(id, null, tv.target.id); } } },
-          h('a', { href: pageHref(id, null, tv.target.id), onclick: opening }, iconOf(id), h('b', {}, `${schemeName(id)} ${tv.target.name}`))),
-        cells.map((list) => h('div', { class: 'cell', role: 'cell' }, list))), id);
-    }));
+      return tint(
+        h(
+          'div',
+          { class: 'rel-grid-row', role: 'row', 'data-scheme': id },
+          h(
+            'div',
+            {
+              class: 'rel-target',
+              role: 'rowheader',
+              onclick: (e) => {
+                if (!e.target.closest('a')) {
+                  opening();
+                  location.hash = pageHref(id, null, tv.target.id);
+                }
+              },
+            },
+            h('a', { href: pageHref(id, null, tv.target.id), onclick: opening }, iconOf(id), h('b', {}, `${schemeName(id)} ${tv.target.name}`)),
+          ),
+          cells.map((list) => h('div', { class: 'cell', role: 'cell' }, list)),
+        ),
+        id,
+      );
+    }),
+  );
   const copies = ids.flatMap((id) => {
     const s = schemes.get(id);
     return [...s.targets.flatMap((tv) => tv.testCopies), ...s.testCopies].map((c) => ({ id, c }));
   });
   return [
     // Desktop: the board, then every test copy. A phone: every member scheme's cards (Josh: "The all grid view doesnt really work on mobile").
-    h('div', { class: 'rel-all-wide' }, grid,
-      copies.length ? [h('h4', {}, 'Test copies'), h('ul', { class: 'rel-list' }, copies.map(({ id, c }) => h('li', {}, copyList([c]).firstChild.firstChild, h('span', { class: 'muted' }, schemeName(id)))))] : ''),
-    h('div', { class: 'rel-all-narrow' }, ids.flatMap((id) => schemeCards(id, false))),
+    h(
+      'div',
+      { class: 'rel-all-wide' },
+      grid,
+      copies.length
+        ? [
+            h('h4', {}, 'Test copies'),
+            h(
+              'ul',
+              { class: 'rel-list' },
+              copies.map(({ id, c }) => h('li', {}, copyList([c]).firstChild.firstChild, h('span', { class: 'muted' }, schemeName(id)))),
+            ),
+          ]
+        : '',
+    ),
+    h(
+      'div',
+      { class: 'rel-all-narrow' },
+      ids.flatMap((id) => schemeCards(id, false)),
+    ),
   ];
 }
 
@@ -813,7 +1008,9 @@ function tint(row, id) {
       }
       tints.set(src, n ? `rgb(${sum.map((v) => Math.round(v / n)).join(' ')})` : 'var(--muted)');
       for (const el of document.querySelectorAll(`.rel-grid-row[data-scheme="${CSS.escape(String(id))}"]`)) el.style.setProperty('--tint', tints.get(src));
-    } catch { /* an icon the canvas can't read leaves its row plain */ }
+    } catch {
+      /* an icon the canvas can't read leaves its row plain */
+    }
   };
   img.src = src;
   return row;
@@ -830,15 +1027,42 @@ export function releaseChip(t) {
       // A change past the build under way isn't in it, so it carries no number (#764).
       const n = c.later ? null : tv.next.number;
       // Only the number opens the release itself (its test copy); the rest of the chip opens the scheme's page at this change.
-      return h('span', { class: 'rel-chip' },
+      return h(
+        'span',
+        { class: 'rel-chip' },
         n != null ? versionLink(tv.next, 'rel-ver', true) : '',
-        h('a', { class: 'rel-chip-open', href: pageHref(t.project_id, t.id), onclick: (e) => { e.stopPropagation(); opening(); }, 'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release` },
-          stageTrack(tv.next.stages, c, { mini: true }), ...(c.later && (c.stage === 'line' || c.stage === 'land') ? [h('b', { class: 'waits' }, c.train?.label ?? 'in line'), ...(c.train ? [] : [' ', h('span', { class: 'muted' }, c.brief ?? 'next release')])] : changeNow(tv.next, c)), h('span', { 'aria-hidden': 'true' }, '›')));
+        h(
+          'a',
+          {
+            class: 'rel-chip-open',
+            href: pageHref(t.project_id, t.id),
+            onclick: (e) => {
+              e.stopPropagation();
+              opening();
+            },
+            'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release`,
+          },
+          stageTrack(tv.next.stages, c, { mini: true }),
+          ...(c.later && (c.stage === 'line' || c.stage === 'land') ? [h('b', { class: 'waits' }, c.train?.label ?? 'in line'), ...(c.train ? [] : [' ', h('span', { class: 'muted' }, c.brief ?? 'next release')])] : changeNow(tv.next, c)),
+          h('span', { 'aria-hidden': 'true' }, '›'),
+        ),
+      );
     }
   }
   if (t.ship?.stage === 'build' && t.build) {
-    return h('a', { class: 'rel-chip', href: pageHref(t.project_id), onclick: (e) => { e.stopPropagation(); opening(); } },
-      h('span', { class: 'muted' }, `merged into Build ${t.build}`), h('span', { 'aria-hidden': 'true' }, '›'));
+    return h(
+      'a',
+      {
+        class: 'rel-chip',
+        href: pageHref(t.project_id),
+        onclick: (e) => {
+          e.stopPropagation();
+          opening();
+        },
+      },
+      h('span', { class: 'muted' }, `merged into Build ${t.build}`),
+      h('span', { 'aria-hidden': 'true' }, '›'),
+    );
   }
   return null;
 }
@@ -856,7 +1080,7 @@ export function pendingRelease(t) {
     const next = tpl ? `Next ${tpl.replace(/\{n\}/g, '').replace(/\s+/g, ' ').trim().toLowerCase()}` : 'Next release';
     // Still in the line past the one under way: many releases may stand between, so no release is named (the row's subtitle says the place).
     const inLine = c.later && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn));
-    return { name: inLine ? c.train?.label ?? 'In line' : c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, targetId: tv.target.id, stage: stageName(c.stage), text: c.waitingOn ?? c.text, since: c.since, stuck: stuckFor(c) > 0 };
+    return { name: inLine ? (c.train?.label ?? 'In line') : c.later ? next : tv.next.number != null ? releaseName(tv.next) : (tv.next.name ?? next), target: tv.target.name, targetId: tv.target.id, stage: stageName(c.stage), text: c.waitingOn ?? c.text, since: c.since, stuck: stuckFor(c) > 0 };
   }
   return null;
 }

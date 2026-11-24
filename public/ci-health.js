@@ -10,7 +10,7 @@ const when = pacificStamp;
 // state -> [tone, closed word, hue, why]
 const FAST = {
   running: ['info', 'Running', 'running', 'The full check is running on main now.'],
-  pinning: ['info', 'Finding the culprit', 'running', "A red covers several ships; each commit is being checked oldest first to find whose change broke it."],
+  pinning: ['info', 'Finding the culprit', 'running', 'A red covers several ships; each commit is being checked oldest first to find whose change broke it.'],
   verified: ['ok', 'Verified', 'done', "Main's newest commit has a verdict: green, or red only on the known reds below."],
   stuck: ['warn', 'Stuck', 'waiting', "The last run gave no verdict (CI never answered); it isn't retried until main moves."],
   idle: ['neutral', 'Waiting', 'held', 'Fast mode has not run its check on main yet.'],
@@ -19,26 +19,28 @@ const block = (title, hue, row) => h('section', { class: 'ci-block' }, h('h3', {
 
 function fastBlock(s, fast, now) {
   if (!fast) {
-    const [row] = settingsRow({ key: `health-fast-${s.id}`, icon: 'spark', hue: 'held', title: 'Fast mode', summary: [toneChip('neutral', 'Off'), 'every ship waits for the full tests'] },
-      h('p', { class: 'look-prose' }, 'Fast mode is off here: every ship waits for the full tests before it goes live.'));
+    const [row] = settingsRow({ key: `health-fast-${s.id}`, icon: 'spark', hue: 'held', title: 'Fast mode', summary: [toneChip('neutral', 'Off'), 'every ship waits for the full tests'] }, h('p', { class: 'look-prose' }, 'Fast mode is off here: every ship waits for the full tests before it goes live.'));
     return block('Fast mode', 'held', row);
   }
   const [tone, word, hue, why] = FAST[fast.state] ?? FAST.idle;
   const reds = fast.reds.map((r) => {
     const left = r.escalateAt - now;
     const timer = r.escalated ? 'the Taskmaster has it' : left > 0 ? `reaches the Taskmaster in ${Math.ceil(left / 60_000)} min` : 'reaches the Taskmaster now';
-    return hueRow({ hue: 'danger', lead: 'red', meta: ago(r.at) }, h('strong', { title: r.ids.join(', ') }, r.ids.join(', ')),
-      h('span', { class: 'ci-detail-line muted' }, `since ${r.sha.slice(0, 9)} · ${r.n ? `#${r.n} is fixing it` : 'no minion pinned'} · ${timer}`));
+    return hueRow({ hue: 'danger', lead: 'red', meta: ago(r.at) }, h('strong', { title: r.ids.join(', ') }, r.ids.join(', ')), h('span', { class: 'ci-detail-line muted' }, `since ${r.sha.slice(0, 9)} · ${r.n ? `#${r.n} is fixing it` : 'no minion pinned'} · ${timer}`));
   });
   const nReds = reds.length;
-  const [row] = settingsRow({ key: `health-fast-${s.id}`, icon: 'spark', hue: nReds ? 'danger' : hue, title: 'Fast mode',
-    summary: [toneChip(tone, word), nReds ? toneChip('danger', `${nReds} known red${nReds === 1 ? '' : 's'}`) : 'no known reds'] },
-  statTiles([word, 'full check on main', hue], [String(nReds), 'known reds', nReds ? 'danger' : 'done'], fast.verified && [fast.verified.slice(0, 9), 'last verified commit', 'done']),
-  h('div', { class: 'hue-rows' },
-    hueRow({ hue, lead: word.toLowerCase(), meta: fast.verified ? fast.verified.slice(0, 9) : null }, h('strong', {}, 'Full check on main'), h('span', { class: 'ci-detail-line muted' }, why)),
-    ...reds,
-    ...(fast.pin ? [hueRow({ hue: 'waiting', lead: 'pinning' }, h('strong', {}, fast.pin.ids.join(', ')), h('span', { class: 'ci-detail-line muted' }, 'failing ids not yet blamed on a commit'))] : [])),
-  nReds || fast.pin ? null : emptyCard('No known reds', 'Nothing is failing on main.'));
+  const [row] = settingsRow(
+    { key: `health-fast-${s.id}`, icon: 'spark', hue: nReds ? 'danger' : hue, title: 'Fast mode', summary: [toneChip(tone, word), nReds ? toneChip('danger', `${nReds} known red${nReds === 1 ? '' : 's'}`) : 'no known reds'] },
+    statTiles([word, 'full check on main', hue], [String(nReds), 'known reds', nReds ? 'danger' : 'done'], fast.verified && [fast.verified.slice(0, 9), 'last verified commit', 'done']),
+    h(
+      'div',
+      { class: 'hue-rows' },
+      hueRow({ hue, lead: word.toLowerCase(), meta: fast.verified ? fast.verified.slice(0, 9) : null }, h('strong', {}, 'Full check on main'), h('span', { class: 'ci-detail-line muted' }, why)),
+      ...reds,
+      ...(fast.pin ? [hueRow({ hue: 'waiting', lead: 'pinning' }, h('strong', {}, fast.pin.ids.join(', ')), h('span', { class: 'ci-detail-line muted' }, 'failing ids not yet blamed on a commit'))] : []),
+    ),
+    nReds || fast.pin ? null : emptyCard('No known reds', 'Nothing is failing on main.'),
+  );
   return block('Fast mode', nReds ? 'danger' : hue, row);
 }
 
@@ -46,13 +48,22 @@ function fastBlock(s, fast, now) {
 async function startFix(projectId, f, refresh) {
   const err = h('p', { class: 'error', hidden: true });
   let brief;
-  try { brief = await api(`api/projects/${projectId}/flake-brief?file=${encodeURIComponent(f.file)}`); } catch (ex) { alert(ex.message); return; }
+  try {
+    brief = await api(`api/projects/${projectId}/flake-brief?file=${encodeURIComponent(f.file)}`);
+  } catch (ex) {
+    alert(ex.message);
+    return;
+  }
   const btn = h('button', { type: 'submit' }, 'Start minion');
-  const form = h('form', { class: 'start-brief-form' },
+  const form = h(
+    'form',
+    { class: 'start-brief-form' },
     h('p', { class: 'muted small' }, 'A bug minion starts in this scheme with this first message.'),
     h('label', {}, 'Title', h('input', { name: 'title', value: brief.title, readonly: true })),
-    h('pre', { class: 'artifact-text' }, brief.message), err,
-    h('div', { class: 'row sheet-actions' }, h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel'), btn));
+    h('pre', { class: 'artifact-text' }, brief.message),
+    err,
+    h('div', { class: 'row sheet-actions' }, h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel'), btn),
+  );
   const dialog = openDialog({ title: 'Start a minion to fix it', className: 'new-scheme start-brief', body: [form] });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -88,18 +99,29 @@ function flakeBlock(s, flakes, refresh) {
     if (fx.state === 'held') return `fix held: ${fx.cleanRuns}/${fx.need} clean runs on the desktop, ${ago(fx.heldAt)}`;
     return `${fx.reopened ? 'reopened, ' : ''}${owner}fix started ${age}: ${fx.cleanRuns}/${fx.need} clean runs on the desktop`;
   };
-  const item = (f) => hueRow({ hue: f.fix?.state === 'held' ? 'done' : 'waiting', lead: `${f.count}×`,
-    meta: f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion} ${f.fix?.state === 'held' ? 'fixed it' : 'is on it'}`)
-      : h('button', { type: 'button', class: 'secondary small', onclick: () => startFix(s.id, f, refresh) }, 'Start a minion to fix it') },
-  h('strong', { title: f.file }, f.file),
-  h('span', { class: 'ci-detail-line muted' }, `last ${when(f.last)}`, f.before ? ` · ${f.before} before the file's last change` : '', f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.lastMinion}` }, `#${f.lastMinion}'s land`)] : ' · fast mode'),
-  ...errorLines(f),
-  f.fix ? h('span', { class: 'ci-detail-line muted flake-fix' }, fixLine(f.fix)) : null);
-  const [row] = settingsRow({ key: `health-flakes-${s.id}`, icon: 'chart', hue: flakes.length ? 'waiting' : 'done', title: 'Flaky tests, last 14 days',
-    summary: flakes.length ? [toneChip('warn', `${flakes.length} file${flakes.length === 1 ? '' : 's'}`), `${total} flake${total === 1 ? '' : 's'}`] : [toneChip('ok', 'None'), 'no flaky test file reported'] },
-  flakes.length ? statTiles([String(flakes.length), 'flaky files', 'waiting'], [String(total), 'flakes in 14 days', 'waiting']) : null,
-  flakes.length ? showFirst({ key: `health-flakes-${s.id}`, items: flakes.map(item), n: 5, noun: 'files' })
-    : emptyCard('No flaky test file', 'Only schemes whose land script prints flake lines report them.'));
+  const item = (f) =>
+    hueRow(
+      {
+        hue: f.fix?.state === 'held' ? 'done' : 'waiting',
+        lead: `${f.count}×`,
+        meta: f.minion ? h('a', { href: `#/p/${s.id}/t/${f.minion}` }, `#${f.minion} ${f.fix?.state === 'held' ? 'fixed it' : 'is on it'}`) : h('button', { type: 'button', class: 'secondary small', onclick: () => startFix(s.id, f, refresh) }, 'Start a minion to fix it'),
+      },
+      h('strong', { title: f.file }, f.file),
+      h('span', { class: 'ci-detail-line muted' }, `last ${when(f.last)}`, f.before ? ` · ${f.before} before the file's last change` : '', f.lastMinion ? [' · ', h('a', { href: `#/p/${s.id}/t/${f.lastMinion}` }, `#${f.lastMinion}'s land`)] : ' · fast mode'),
+      ...errorLines(f),
+      f.fix ? h('span', { class: 'ci-detail-line muted flake-fix' }, fixLine(f.fix)) : null,
+    );
+  const [row] = settingsRow(
+    {
+      key: `health-flakes-${s.id}`,
+      icon: 'chart',
+      hue: flakes.length ? 'waiting' : 'done',
+      title: 'Flaky tests, last 14 days',
+      summary: flakes.length ? [toneChip('warn', `${flakes.length} file${flakes.length === 1 ? '' : 's'}`), `${total} flake${total === 1 ? '' : 's'}`] : [toneChip('ok', 'None'), 'no flaky test file reported'],
+    },
+    flakes.length ? statTiles([String(flakes.length), 'flaky files', 'waiting'], [String(total), 'flakes in 14 days', 'waiting']) : null,
+    flakes.length ? showFirst({ key: `health-flakes-${s.id}`, items: flakes.map(item), n: 5, noun: 'files' }) : emptyCard('No flaky test file', 'Only schemes whose land script prints flake lines report them.'),
+  );
   return block('Flaky tests', flakes.length ? 'waiting' : 'done', row);
 }
 
@@ -117,8 +139,7 @@ function landRedsBlock(s, lr) {
   const key = `health-landreds-${s.id}`;
   const title = 'Land runs, last 24 hours';
   if (!lr) {
-    const [row] = settingsRow({ key, icon: 'chart', hue: 'held', title, summary: [toneChip('neutral', 'Not read'), 'no GitHub runs to count'] },
-      emptyCard('Not read', "This scheme has no GitHub repo, or GitHub reads are paused for now.", { mark: '–', hue: 'held' }));
+    const [row] = settingsRow({ key, icon: 'chart', hue: 'held', title, summary: [toneChip('neutral', 'Not read'), 'no GitHub runs to count'] }, emptyCard('Not read', 'This scheme has no GitHub repo, or GitHub reads are paused for now.', { mark: '–', hue: 'held' }));
     return block('Land runs', 'held', row);
   }
   const done = lr.green + lr.red;
@@ -128,27 +149,30 @@ function landRedsBlock(s, lr) {
   const unread = lr.causes.unknown * 2 >= lr.red && lr.red > 0;
   const tone = unread ? 'neutral' : own >= 25 ? 'danger' : own > 0 ? 'warn' : 'ok';
   const hue = { danger: 'danger', warn: 'waiting', ok: 'done', neutral: 'muted' }[tone];
-  const causes = Object.keys(CAUSE).filter((c) => lr.causes[c]).map((c) => {
-    const [h2, word, why] = CAUSE[c];
-    const n = lr.causes[c];
-    return hueRow({ hue: h2, lead: String(n), meta: meter(n / lr.red, `${pct(n, lr.red)}% of reds`) }, h('strong', {}, word),
-      h('span', { class: 'ci-detail-line muted' }, why), c === 'change' && lr.riders ? h('span', { class: 'ci-detail-line muted' }, `${lr.riders} by another ship on the train`) : null);
-  });
+  const causes = Object.keys(CAUSE)
+    .filter((c) => lr.causes[c])
+    .map((c) => {
+      const [h2, word, why] = CAUSE[c];
+      const n = lr.causes[c];
+      return hueRow({ hue: h2, lead: String(n), meta: meter(n / lr.red, `${pct(n, lr.red)}% of reds`) }, h('strong', {}, word), h('span', { class: 'ci-detail-line muted' }, why), c === 'change' && lr.riders ? h('span', { class: 'ci-detail-line muted' }, `${lr.riders} by another ship on the train`) : null);
+    });
   const reds = [...lr.reds].reverse().map((r) => {
     const [h2, word] = CAUSE[r.cause] ?? CAUSE.unknown;
     const n = r.branch.match(/^ticket\/(\d+)-/)?.[1];
-    return hueRow({ hue: h2, meta: r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'run') : null },
+    return hueRow(
+      { hue: h2, meta: r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'run') : null },
       h('span', {}, n ? h('a', { href: `#/p/${s.id}/t/${n}` }, h('strong', {}, `#${n}`)) : h('strong', {}, r.branch), ` · ${word}`),
-      h('span', { class: 'ci-detail-line muted' }, `${when(Date.parse(r.at))} · ${r.why}${r.rider ? ' (another ship on its train)' : ''}`));
+      h('span', { class: 'ci-detail-line muted' }, `${when(Date.parse(r.at))} · ${r.why}${r.rider ? ' (another ship on its train)' : ''}`),
+    );
   });
-  const [row] = settingsRow({ key, icon: 'chart', hue: lr.red ? hue : 'done', title,
-    summary: done ? [toneChip(tone, unread ? `${lr.causes.unknown} reds unread` : `${own}% from a change`), `${raw}% of ${done} red`] : [toneChip('neutral', 'None'), 'no land runs finished'] },
-  done ? statTiles([String(done), lr.other ? `finished runs · ${lr.other} going or cancelled` : 'finished runs', 'running'], [`${raw}%`, 'red', lr.red ? 'waiting' : 'done'], [unread ? '–' : `${own}%`, unread ? 'reds unread' : "red from a ship's change", hue]) : null,
-  causes.length ? h('div', { class: 'hue-rows' }, ...causes) : null,
-  reds.length ? showFirst({ key, items: reds, n: 5, noun: 'red runs' })
-    : emptyCard(done ? 'No red land runs' : 'No land runs', done ? 'Every ship that finished its CI run went green.' : 'No ship ran its tests on GitHub in the last 24 hours.'),
-  lr.partial ? h('p', { class: 'look-prose' }, `Only the newest ${lr.runs} runs were read: GitHub had more in the day than the tab reads.`) : null,
-  h('p', { class: 'look-prose' }, "Each red run counts under one cause, read from the lines the ship script writes to the retro log. The red rate from a change leaves out flaky runs and main's own reds."));
+  const [row] = settingsRow(
+    { key, icon: 'chart', hue: lr.red ? hue : 'done', title, summary: done ? [toneChip(tone, unread ? `${lr.causes.unknown} reds unread` : `${own}% from a change`), `${raw}% of ${done} red`] : [toneChip('neutral', 'None'), 'no land runs finished'] },
+    done ? statTiles([String(done), lr.other ? `finished runs · ${lr.other} going or cancelled` : 'finished runs', 'running'], [`${raw}%`, 'red', lr.red ? 'waiting' : 'done'], [unread ? '–' : `${own}%`, unread ? 'reds unread' : "red from a ship's change", hue]) : null,
+    causes.length ? h('div', { class: 'hue-rows' }, ...causes) : null,
+    reds.length ? showFirst({ key, items: reds, n: 5, noun: 'red runs' }) : emptyCard(done ? 'No red land runs' : 'No land runs', done ? 'Every ship that finished its CI run went green.' : 'No ship ran its tests on GitHub in the last 24 hours.'),
+    lr.partial ? h('p', { class: 'look-prose' }, `Only the newest ${lr.runs} runs were read: GitHub had more in the day than the tab reads.`) : null,
+    h('p', { class: 'look-prose' }, "Each red run counts under one cause, read from the lines the ship script writes to the retro log. The red rate from a change leaves out flaky runs and main's own reds."),
+  );
   return block('Land runs', lr.red ? hue : 'done', row);
 }
 

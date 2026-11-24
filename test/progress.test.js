@@ -6,7 +6,10 @@ import { applyEvent, createProgress, describeAction, nowDoing, planEstimate, pla
 const plan = (statuses) => ({
   ...createProgress(),
   tasks: [...statuses].map((s, n) => ({
-    id: String(n + 1), subject: `Move turns ${n + 1}`, activeForm: `Moving turns ${n + 1}`, actions: 0,
+    id: String(n + 1),
+    subject: `Move turns ${n + 1}`,
+    activeForm: `Moving turns ${n + 1}`,
+    actions: 0,
     status: { c: 'completed', i: 'in_progress', p: 'pending' }[s],
   })),
 });
@@ -110,19 +113,33 @@ test("an amended plan's steps keep their ids, so a step's actions still show und
   const p = createProgress();
   const todo = (id, todos) => applyEvent(p, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'TodoWrite', input: { todos: todos.map(([s, status]) => ({ content: s, activeForm: s, status })) } }] } });
   const read = (id) => applyEvent(p, 'claude', { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Read', input: { file_path: '/a.js' } }] } });
-  todo('t1', [['Look', 'in_progress'], ['Fix', 'pending']]);
+  todo('t1', [
+    ['Look', 'in_progress'],
+    ['Fix', 'pending'],
+  ]);
   const look = read('r1')[0].taskId;
   const fix = p.tasks[1].id;
-  todo('t2', [['Look', 'completed'], ['Fix', 'in_progress'], ['Add a test', 'pending']]);
-  assert.deepEqual(p.tasks.slice(0, 2).map((t) => t.id), [look, fix], 'a step added to the plan leaves the others theirs');
+  todo('t2', [
+    ['Look', 'completed'],
+    ['Fix', 'in_progress'],
+    ['Add a test', 'pending'],
+  ]);
+  assert.deepEqual(
+    p.tasks.slice(0, 2).map((t) => t.id),
+    [look, fix],
+    'a step added to the plan leaves the others theirs',
+  );
   assert.ok(![look, fix].includes(p.tasks[2].id));
-  todo('t3', [['Fix', 'completed'], ['Add a test', 'in_progress']]);
+  todo('t3', [
+    ['Fix', 'completed'],
+    ['Add a test', 'in_progress'],
+  ]);
   assert.equal(p.tasks[0].id, fix, 'nor does a step dropped from it');
 });
 
 test('a turn that died says so, not the Done of a plan an earlier turn finished', () => {
   const p = plan('cccccc');
-  applyEvent(p, 'error', { text: 'API Error: Can\'t reach the API server' });
+  applyEvent(p, 'error', { text: "API Error: Can't reach the API server" });
   assert.equal(progressLine(p, false), 'Last turn failed: see the error below');
   // The next turn's start clears it (and drops the finished plan).
   applyEvent(p, 'claude', { type: 'system', subtype: 'init' });
@@ -144,7 +161,7 @@ test('an error after a turn finished well (a deploy warning) or during one that 
   assert.equal(progressLine(p, false), 'Last turn failed: see the error below');
 });
 
-test('the readout keeps a finished call\'s label for a few seconds, then says Thinking (#543)', () => {
+test("the readout keeps a finished call's label for a few seconds, then says Thinking (#543)", () => {
   const read = { block: { type: 'tool_use', name: 'Read', input: { file_path: '/x/runner.ts' } } };
   const label = describeAction(read.block).text;
   assert.equal(nowDoing([], 0), 'Thinking…');
@@ -157,7 +174,7 @@ test('the readout keeps a finished call\'s label for a few seconds, then says Th
   assert.equal(nowDoing([bash, done], 10_000 + THINKING_AFTER), describeAction(bash.block).text);
 });
 
-test('the readout\'s step side names the step underway, not the last action (#551)', () => {
+test("the readout's step side names the step underway, not the last action (#551)", () => {
   assert.equal(stepName(plan('cccipp'), true), 'Moving turns 4');
   assert.equal(stepName(createProgress(), true), 'Working');
   assert.equal(stepName(plan('pppp'), true), 'Planning', 'a plan with nothing started yet');
@@ -174,10 +191,17 @@ test("a step's guessed minutes fill the readout's bar from when it started, and 
   const call = (id, name, input, t) => ev({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } }, t);
   const made = (id, n, t) => ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${n} created successfully` }] } }, t);
   ev({ type: 'system', subtype: 'init' }, at(0));
-  call('c1', 'TaskCreate', { subject: 'Read', description: 'x', metadata: { estimate: 10 } }, at(0)); made('c1', 1, at(0));
-  call('c2', 'TaskCreate', { subject: 'Build', description: 'x', metadata: { estimate: '20' } }, at(0)); made('c2', 2, at(0));
-  call('c3', 'TaskCreate', { subject: 'Ship', description: 'x', metadata: { estimate: 'soon' } }, at(0)); made('c3', 3, at(0));
-  assert.deepEqual(p.tasks.map((t) => t.estimate), [10, 20, undefined], 'a guess that is not a number is dropped');
+  call('c1', 'TaskCreate', { subject: 'Read', description: 'x', metadata: { estimate: 10 } }, at(0));
+  made('c1', 1, at(0));
+  call('c2', 'TaskCreate', { subject: 'Build', description: 'x', metadata: { estimate: '20' } }, at(0));
+  made('c2', 2, at(0));
+  call('c3', 'TaskCreate', { subject: 'Ship', description: 'x', metadata: { estimate: 'soon' } }, at(0));
+  made('c3', 3, at(0));
+  assert.deepEqual(
+    p.tasks.map((t) => t.estimate),
+    [10, 20, undefined],
+    'a guess that is not a number is dropped',
+  );
   assert.equal(planEstimate(p, true, at(1)), null, 'nothing underway yet');
   call('u1', 'TaskUpdate', { taskId: '1', status: 'in_progress' }, at(2));
   assert.deepEqual(planEstimate(p, true, at(6)), { since: at(2), usual: 600, left: 26, planSince: at(2) }, '6 of 10 minutes left, plus the 20 not started; the plan is 4 minutes in');
@@ -198,8 +222,10 @@ test("the plan's guesses are scaled by what steps really took, and a step counts
   const call = (id, name, input, t) => ev({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } }, t);
   const made = (id, n, t) => ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${n} created successfully` }] } }, t);
   ev({ type: 'system', subtype: 'init' }, at(0));
-  call('c1', 'TaskCreate', { subject: 'Build', description: 'x', metadata: { estimate: 20 } }, at(0)); made('c1', 1, at(0));
-  call('c2', 'TaskCreate', { subject: 'Ship', description: 'x', metadata: { estimate: 10 } }, at(0)); made('c2', 2, at(0));
+  call('c1', 'TaskCreate', { subject: 'Build', description: 'x', metadata: { estimate: 20 } }, at(0));
+  made('c1', 1, at(0));
+  call('c2', 'TaskCreate', { subject: 'Ship', description: 'x', metadata: { estimate: 10 } }, at(0));
+  made('c2', 2, at(0));
   call('u1', 'TaskUpdate', { taskId: '1', status: 'in_progress' }, at(0));
   assert.deepEqual(planEstimate(p, true, at(0), 0.3), { since: at(0), usual: 360, left: 9, planSince: at(0) }, 'a 20-minute guess is a 6-minute bar, and the 10 not started are 3');
   assert.deepEqual(planEstimate(p, true, at(0)), { since: at(0), usual: 1200, left: 30, planSince: at(0) }, 'no ratio is the guesses as they are');
@@ -220,9 +246,12 @@ test('a finished step is collected with its working time across turns, once, and
     const call = (id, name, input, t, extra = {}) => ev({ type: 'assistant', ...extra, message: { content: [{ type: 'tool_use', id, name, input }] } }, t);
     const made = (id, n, t) => ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${n} created successfully` }] } }, t);
     ev({ type: 'system', subtype: 'init', model: 'claude-opus-5-5' }, at(0));
-    call('c1', 'TaskCreate', { subject: 'Build', description: 'x', metadata: { estimate: 20 } }, at(0)); made('c1', 1, at(0));
-    call('c2', 'TaskCreate', { subject: 'Ship', description: 'x' }, at(0)); made('c2', 2, at(0));
-    call('c3', 'TaskCreate', { subject: 'Never started', description: 'x' }, at(0)); made('c3', 3, at(0));
+    call('c1', 'TaskCreate', { subject: 'Build', description: 'x', metadata: { estimate: 20 } }, at(0));
+    made('c1', 1, at(0));
+    call('c2', 'TaskCreate', { subject: 'Ship', description: 'x' }, at(0));
+    made('c2', 2, at(0));
+    call('c3', 'TaskCreate', { subject: 'Never started', description: 'x' }, at(0));
+    made('c3', 3, at(0));
     call('u1', 'TaskUpdate', { taskId: '1', status: 'in_progress' }, at(1));
     ev({ type: 'result', is_error: false }, at(5));
     // A turn that dies with no result stops counting at its last event.
@@ -237,8 +266,7 @@ test('a finished step is collected with its working time across turns, once, and
   };
   const p = { ...createProgress(), finished: [] };
   replay(p);
-  assert.deepEqual(p.finished, [{ id: '1', subject: 'Build', estimate: 20, startedAt: at(1), finishedAt: at(93), work: (4 + 2 + 3) * 60_000, model: 'claude-fable-5-2' }],
-    '4 minutes in the first turn, 2 in the one that died, 3 in the last; the step never started and the Grunt\'s own list write nothing');
+  assert.deepEqual(p.finished, [{ id: '1', subject: 'Build', estimate: 20, startedAt: at(1), finishedAt: at(93), work: (4 + 2 + 3) * 60_000, model: 'claude-fable-5-2' }], "4 minutes in the first turn, 2 in the one that died, 3 in the last; the step never started and the Grunt's own list write nothing");
   assert.equal(p.tasks[1].status, 'pending', "a Grunt's own task list doesn't move the minion's plan");
   const plain = createProgress();
   replay(plain);
@@ -251,40 +279,90 @@ test("the plan's track fills left to right: done steps in the order they finishe
   const call = (id, name, input) => ev({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
   const made = (id, n) => ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Task #${n} created successfully` }] } });
   ev({ type: 'system', subtype: 'init' });
-  for (const n of [1, 2, 3]) { call(`c${n}`, 'TaskCreate', { subject: `Step ${n}`, description: 'x', metadata: { estimate: n } }); made(`c${n}`, n); }
+  for (const n of [1, 2, 3]) {
+    call(`c${n}`, 'TaskCreate', { subject: `Step ${n}`, description: 'x', metadata: { estimate: n } });
+    made(`c${n}`, n);
+  }
   call('u1', 'TaskUpdate', { taskId: '1', status: 'completed' });
   call('u2', 'TaskUpdate', { taskId: '2', status: 'in_progress' });
   // A step added late and finished before step 2.
-  call('c4', 'TaskCreate', { subject: 'Late step', description: 'x', metadata: { estimate: 4 } }); made('c4', 4);
+  call('c4', 'TaskCreate', { subject: 'Late step', description: 'x', metadata: { estimate: 4 } });
+  made('c4', 4);
   call('u3', 'TaskUpdate', { taskId: '4', status: 'completed' });
-  assert.deepEqual(planTrack(p), [[1, 'c'], [4, 'c'], [2, 'i'], [3, 'p']], 'the late step sits with the done ones, before the step underway');
+  assert.deepEqual(
+    planTrack(p),
+    [
+      [1, 'c'],
+      [4, 'c'],
+      [2, 'i'],
+      [3, 'p'],
+    ],
+    'the late step sits with the done ones, before the step underway',
+  );
   call('u4', 'TaskUpdate', { taskId: '2', status: 'completed' });
   call('u5', 'TaskUpdate', { taskId: '3', status: 'in_progress' });
-  assert.deepEqual(planTrack(p), [[1, 'c'], [4, 'c'], [2, 'c'], [3, 'i']], 'done steps keep the order they finished in');
+  assert.deepEqual(
+    planTrack(p),
+    [
+      [1, 'c'],
+      [4, 'c'],
+      [2, 'c'],
+      [3, 'i'],
+    ],
+    'done steps keep the order they finished in',
+  );
 });
 
-test("the plan tool (#1275) drives the readout as TaskCreate and TaskUpdate do: steps, estimates, outcomes, a new plan", () => {
+test('the plan tool (#1275) drives the readout as TaskCreate and TaskUpdate do: steps, estimates, outcomes, a new plan', () => {
   const p = { ...createProgress(), finished: [] };
   const at = (min) => 1_000_000 + min * 60_000;
   const plan = (id, steps, t, extra = {}) => applyEvent(p, 'claude', { type: 'assistant', ...extra, message: { content: [{ type: 'tool_use', id, name: 'mcp__thread__plan', input: { steps } }] } }, t);
   applyEvent(p, 'claude', { type: 'system', subtype: 'init', model: 'claude-opus-5-5' }, at(0));
-  plan('a', [
-    { n: 1, step: 'Find the parser', doing: 'Finding the parser', why: 'x', minutes: 3 },
-    { n: 2, step: 'Fix it', doing: 'Fixing it', minutes: 5 },
-    { n: 3, step: 'Ship it' },
-  ], at(0));
-  assert.deepEqual(p.tasks.map((t) => [t.subject, t.status, t.estimate]), [['Find the parser', 'pending', 3], ['Fix it', 'pending', 5], ['Ship it', 'pending', undefined]]);
+  plan(
+    'a',
+    [
+      { n: 1, step: 'Find the parser', doing: 'Finding the parser', why: 'x', minutes: 3 },
+      { n: 2, step: 'Fix it', doing: 'Fixing it', minutes: 5 },
+      { n: 3, step: 'Ship it' },
+    ],
+    at(0),
+  );
+  assert.deepEqual(
+    p.tasks.map((t) => [t.subject, t.status, t.estimate]),
+    [
+      ['Find the parser', 'pending', 3],
+      ['Fix it', 'pending', 5],
+      ['Ship it', 'pending', undefined],
+    ],
+  );
   assert.equal(progressLine(p, true), 'Planning… 0 of 3 done');
   plan('b', [{ n: 1, status: 'doing' }], at(1));
   assert.equal(progressLine(p, true), 'Finding the parser… · 0 of 3 done');
   assert.equal(planEstimate(p, true, at(2)).usual, 180);
   // One call finishes a step and starts the next.
-  plan('c', [{ n: 1, status: 'done', outcome: 'It lives in progress.js.' }, { n: 2, status: 'doing' }], at(4));
+  plan(
+    'c',
+    [
+      { n: 1, status: 'done', outcome: 'It lives in progress.js.' },
+      { n: 2, status: 'doing' },
+    ],
+    at(4),
+  );
   assert.equal(p.tasks[0].outcome, 'It lives in progress.js.');
   assert.equal(progressLine(p, true), 'Fixing it… · 1 of 3 done');
-  assert.deepEqual(p.finished.map((f) => [f.subject, f.estimate, f.work]), [['Find the parser', 3, 3 * 60_000]]);
+  assert.deepEqual(
+    p.finished.map((f) => [f.subject, f.estimate, f.work]),
+    [['Find the parser', 3, 3 * 60_000]],
+  );
   // Reword, drop, and a Grunt's call that isn't the minion's plan.
-  plan('d', [{ n: 2, step: 'Fix the parser', doing: 'Fixing the parser' }, { n: 3, status: 'dropped' }], at(5));
+  plan(
+    'd',
+    [
+      { n: 2, step: 'Fix the parser', doing: 'Fixing the parser' },
+      { n: 3, status: 'dropped' },
+    ],
+    at(5),
+  );
   plan('g', [{ n: 2, status: 'done' }], at(5), { parent_tool_use_id: 'agent1' });
   assert.equal(progressLine(p, true), 'Fixing the parser… · 1 of 2 done');
   plan('e', [{ n: 2, status: 'done', outcome: 'Fixed.' }], at(6));
@@ -294,12 +372,18 @@ test("the plan tool (#1275) drives the readout as TaskCreate and TaskUpdate do: 
   assert.equal(progressLine(p, true), 'Fix a review finding… · 2 of 3 done');
   plan('l', [{ n: 4, status: 'done' }], at(7));
   plan('f', [{ n: 1, step: 'Next thing', minutes: 2 }], at(7));
-  assert.deepEqual(p.tasks.map((t) => [t.subject, t.status]), [['Next thing', 'pending']]);
+  assert.deepEqual(
+    p.tasks.map((t) => [t.subject, t.status]),
+    [['Next thing', 'pending']],
+  );
   assert.notEqual(p.tasks[0].id, p.finished[0].id);
   // A call the tool refuses changes nothing, not even its good steps: no steps, a step with no number, a number as text.
   plan('h', null, at(8));
   plan('i', [{ n: 1, status: 'dropped' }, { step: 'No number' }], at(8));
   plan('j', [{ n: 1, doing: 42, status: 'doing' }], at(8));
   plan('m', [{ n: 1, status: 'started' }], at(8));
-  assert.deepEqual(p.tasks.map((t) => [t.subject, t.status]), [['Next thing', 'pending']]);
+  assert.deepEqual(
+    p.tasks.map((t) => [t.subject, t.status]),
+    [['Next thing', 'pending']],
+  );
 });

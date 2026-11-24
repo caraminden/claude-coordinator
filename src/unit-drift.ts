@@ -31,7 +31,12 @@ export function repoUnits(deployDir: string): string[] {
 
 export function skipped(deployDir: string): Set<string> {
   try {
-    return new Set(readFileSync(join(deployDir, SKIP_FILE), 'utf8').split('\n').map((l) => l.replace(/#.*/, '').trim()).filter(Boolean));
+    return new Set(
+      readFileSync(join(deployDir, SKIP_FILE), 'utf8')
+        .split('\n')
+        .map((l) => l.replace(/#.*/, '').trim())
+        .filter(Boolean),
+    );
   } catch {
     return new Set();
   }

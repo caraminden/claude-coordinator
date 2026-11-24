@@ -17,21 +17,23 @@ let cookie = '';
 
 /** A request as Cara, or as the minion or Taskmaster `as` (a ticket id) with its token. */
 let srv: Booted;
-const call = (path: string, opts: { method?: string; body?: unknown; as?: number } = {}) =>
-  (opts.as === undefined ? srv.call : srv.as({ token: agentToken(join(root, 'data'), opts.as) }))(path, opts.body || undefined, opts.method ?? 'GET');
+const call = (path: string, opts: { method?: string; body?: unknown; as?: number } = {}) => (opts.as === undefined ? srv.call : srv.as({ token: agentToken(join(root, 'data'), opts.as) }))(path, opts.body || undefined, opts.method ?? 'GET');
 
 before(async () => {
   // A stand-in Claude for the describe box: a turn (stream-json) fails as /bin/false would; a describe call proposes
   // an edit to the finding checker when the ask reaches it on stdin, and answers nonsense otherwise.
   const claude = join(root, 'fake-claude');
-  writeFileSync(claude, `#!/bin/sh
+  writeFileSync(
+    claude,
+    `#!/bin/sh
 case "$*" in *stream-json*) exit 1;; esac
 if grep -q 'twice as picky'; then
   printf '%s' '{"type":"result","is_error":false,"result":"{\\"edits\\":[{\\"slug\\":\\"finding-checker\\",\\"body\\":\\"Be twice as picky with migrations.\\",\\"why\\":\\"Pickier on migrations\\"},{\\"slug\\":\\"no-such\\",\\"body\\":\\"x\\"}],\\"note\\":\\"One edit\\"}"}'
 else
   printf '%s' '{"type":"result","is_error":false,"result":"I would rather chat."}'
 fi
-`);
+`,
+  );
   chmodSync(claude, 0o755);
   srv = await bootServer({ root, stdout: true, env: { CLAUDE_BIN: claude } });
   base = srv.base;
@@ -79,7 +81,14 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
   assert.equal((await call(url, { method: 'POST', body: { slug: 'x' }, as: minion.id })).status, 403);
 
   const history = await call(`${entry}/versions`);
-  assert.deepEqual(history.data.versions.map((v: any) => [v.version, v.note]), [[3, 'Learned from a verdict'], [2, 'Turned off'], [1, 'Made']]);
+  assert.deepEqual(
+    history.data.versions.map((v: any) => [v.version, v.note]),
+    [
+      [3, 'Learned from a verdict'],
+      [2, 'Turned off'],
+      [1, 'Made'],
+    ],
+  );
   const back = await call(`${entry}/restore`, { method: 'POST', body: { version: 1 } });
   assert.deepEqual([back.status, back.data.version, back.data.enabled, back.data.body], [200, 4, true, '']);
   assert.equal((await call(`${entry}/restore`, { method: 'POST', body: { version: 9 } })).status, 404);
@@ -117,7 +126,7 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
   const widened = await tool({ slug: 'claims', when: 'diff: src/**', version: 2 }, 'review_set', page2.coordinator);
   assert.equal(widened.text, 'Saved claims as version 3.');
   assert.match((await tool({ slug: 'claims' })).text, /when: "diff: src\/\*\*"/);
-  assert.ok((await tool({ slug: 'claims', when: 'nonsense: x', version: 3 }, 'review_set', page2.coordinator)).error, 'the page\'s checks apply');
+  assert.ok((await tool({ slug: 'claims', when: 'nonsense: x', version: 3 }, 'review_set', page2.coordinator)).error, "the page's checks apply");
   // Phase 3: a round's verdict, and a person's disagreement, recorded with the tools.
   assert.equal((await tool({ slug: 'claims', run: { round: 1, verdict: 'fail' } })).text, 'Recorded round 1 of claims: fail.');
   assert.ok((await tool({ slug: 'claims', run: { round: 1, verdict: 'meh' } })).error);
@@ -128,7 +137,7 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
 
 // Phase 2 (#1052), in a scheme that isn't Citadel: the kit's reviewers switch per scheme, the pre-ship review's switch
 // decides whether a ship needs a go, trial locks blocking until calibrated, and the describe box proposes edits.
-test("kit reviewers switch per scheme, trial locks blocking until calibrated, and the describe box proposes what Apply saves", async () => {
+test('kit reviewers switch per scheme, trial locks blocking until calibrated, and the describe box proposes what Apply saves', async () => {
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Peek' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
   const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'hi', properties: { type: 'chore' } } });
@@ -145,7 +154,10 @@ test("kit reviewers switch per scheme, trial locks blocking until calibrated, an
   assert.equal(first.data.entries.find((e: any) => e.slug === 'lens-tests').agent, null, 'a lens has no agent file of its own');
   assert.equal(first.data.label, 'Pre-ship review');
   assert.ok(first.data.audits.length, 'the standard audits are listed');
-  assert.ok(first.data.entries.every((e: any) => !e.kit || (!e.trial && e.what)), "kit entries are off trial and carry the kit's own words");
+  assert.ok(
+    first.data.entries.every((e: any) => !e.kit || (!e.trial && e.what)),
+    "kit entries are off trial and carry the kit's own words",
+  );
 
   // A person switches a lens, fresh eyes and the pre-ship review off; a kit entry's name stays the kit's.
   for (const slug of ['lens-tests', 'fresh-eyes', 'pre-ship-review']) {
@@ -158,7 +170,9 @@ test("kit reviewers switch per scheme, trial locks blocking until calibrated, an
   assert.equal((await call(url)).data.label, null, 'nothing gives the label now');
 
   // With the pre-ship review off, a ship with a label is still sent back for a go (before land.sh would run).
-  const { data: { ticket: t } } = await call(`/api/tickets/${minion.id}`);
+  const {
+    data: { ticket: t },
+  } = await call(`/api/tickets/${minion.id}`);
   assert.ok(t.cwd);
   mkdirSync(join(t.cwd, 'tools'), { recursive: true });
   writeFileSync(join(t.cwd, 'tools', 'land.sh'), 'exit 1\n');
@@ -205,7 +219,11 @@ test("kit reviewers switch per scheme, trial locks blocking until calibrated, an
   const proposed = await call(`${url}/describe`, { method: 'POST', body: { text: 'Make the finding checker twice as picky' } });
   assert.equal(proposed.status, 200, JSON.stringify(proposed.data));
   assert.equal(proposed.data.note, 'One edit');
-  assert.deepEqual(proposed.data.proposals.map((x: any) => [x.slug, x.before, x.after, x.why]), [['finding-checker', '', 'Be twice as picky with migrations.', 'Pickier on migrations']], 'an entry not in the set is dropped');
+  assert.deepEqual(
+    proposed.data.proposals.map((x: any) => [x.slug, x.before, x.after, x.why]),
+    [['finding-checker', '', 'Be twice as picky with migrations.', 'Pickier on migrations']],
+    'an entry not in the set is dropped',
+  );
   const pr = proposed.data.proposals[0];
   const applied = await call(`${url}/finding-checker`, { method: 'PATCH', body: { body: pr.after, version: pr.version, note: 'Described: Make the finding checker twice as picky' } });
   assert.deepEqual([applied.status, applied.data.body], [200, 'Be twice as picky with migrations.']);
@@ -222,13 +240,27 @@ test('phase 3 in a scheme of its own: a panel with a referee, run order, the rec
   const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'Make the glade glow', properties: { type: 'feature' } } });
   const url = `/api/projects/${p.id}/reviews`;
   const tm = page.coordinator.id;
-  for (const [slug, kind] of [['look', 'critic'], ['taste-a', 'critic'], ['taste-b', 'critic'], ['taste-ref', 'referee']]) {
+  for (const [slug, kind] of [
+    ['look', 'critic'],
+    ['taste-a', 'critic'],
+    ['taste-b', 'critic'],
+    ['taste-ref', 'referee'],
+  ]) {
     assert.equal((await call(url, { method: 'POST', body: { slug, kind, when: 'creative: art', body: `# ${slug}` }, as: tm })).status, 201);
   }
   // The Taskmaster groups the panel and sets the hand-offs; a minion may not.
   for (const slug of ['taste-a', 'taste-b', 'taste-ref']) assert.equal((await call(`${url}/${slug}`, { method: 'PATCH', body: { panel: 'Taste' }, as: tm })).data.panel, 'Taste');
   assert.equal((await call(`${url}/look`, { method: 'PATCH', body: { panel: 'Taste' }, as: minion.id })).status, 403);
-  const handOff = await call(`${url}/look`, { method: 'PATCH', body: { on_fail: [{ after: 1, to: 'taste-ref' }, { after: 2, to: 'person' }] }, as: tm });
+  const handOff = await call(`${url}/look`, {
+    method: 'PATCH',
+    body: {
+      on_fail: [
+        { after: 1, to: 'taste-ref' },
+        { after: 2, to: 'person' },
+      ],
+    },
+    as: tm,
+  });
   assert.match(handOff.data.text, /^on_fail: taste-ref after 1 fail, person after 2 fails$/m);
   assert.equal((await call(`${url}/look`, { method: 'PATCH', body: { on_fail: [{ after: 1, to: 'ghost' }] } })).status, 400);
   const moved = await call(`${url}/look/move`, { method: 'POST', body: { dir: 'down' } });
@@ -238,11 +270,18 @@ test('phase 3 in a scheme of its own: a panel with a referee, run order, the rec
   // Calibrated and set to block: its fail on this minion holds the ship.
   await call(`${url}/look`, { method: 'PATCH', body: { trial: false } });
   await call(`${url}/look`, { method: 'PATCH', body: { gate: 'block' } });
-  for (const [slug, verdict] of [['taste-a', 'pass'], ['taste-b', 'fail'], ['taste-ref', 'pass'], ['look', 'fail']]) {
+  for (const [slug, verdict] of [
+    ['taste-a', 'pass'],
+    ['taste-b', 'fail'],
+    ['taste-ref', 'pass'],
+    ['look', 'fail'],
+  ]) {
     assert.equal((await call(`${url}/${slug}/runs`, { method: 'POST', body: { round: 1, verdict }, as: minion.id })).status, 201);
   }
   assert.equal((await call(`${url}/look/runs`, { method: 'POST', body: { round: 1, verdict: 'pass' } })).status, 403, 'only a minion records a run');
-  const { data: { ticket: t } } = await call(`/api/tickets/${minion.id}`);
+  const {
+    data: { ticket: t },
+  } = await call(`/api/tickets/${minion.id}`);
   mkdirSync(join(t.cwd, 'tools'), { recursive: true });
   writeFileSync(join(t.cwd, 'tools', 'land.sh'), 'exit 1\n');
   const held = await fetch(`${base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'x', risk: 'low', risk_reason: 'front end' }) });
@@ -261,13 +300,21 @@ test('phase 3 in a scheme of its own: a panel with a referee, run order, the rec
   writeFileSync(join(t.cwd, 'glade', 'glow.css'), '.glow{}\n');
   git('add', 'glade');
   git('commit', '-qm', 'glow');
-  const unjudged = await fetch(`${base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'x', risk: 'low', risk_reason: 'front end', go: 'Josh, 3:05 PM PST' }) });
+  const unjudged = await fetch(`${base}/api/tickets/${minion.id}/land/handoff`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ summary: 'x', risk: 'low', risk_reason: 'front end', go: 'Josh, 3:05 PM PST' }),
+  });
   assert.equal(unjudged.status, 400);
   assert.match((await unjudged.json()).error, /^Not handed off: this change matches Shots \(`shots`, 1 line in glade\/glow\.css\)/, "a person's go doesn't stand in for the critic's run");
   assert.equal((await call(`${url}/shots/runs`, { method: 'POST', body: { round: 1, verdict: 'fail' }, as: minion.id })).status, 201);
   // An uncommitted edit stops the hand-off at the next check after the gate, so no landing starts behind the test.
   writeFileSync(join(t.cwd, 'glade', 'glow.css'), '.glow{opacity:1}\n');
-  const judged = await fetch(`${base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'x', risk: 'low', risk_reason: 'front end', go: 'Josh, 3:05 PM PST' }) });
+  const judged = await fetch(`${base}/api/tickets/${minion.id}/land/handoff`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ summary: 'x', risk: 'low', risk_reason: 'front end', go: 'Josh, 3:05 PM PST' }),
+  });
   assert.equal(judged.status, 409);
   assert.match((await judged.json()).error, /^Not handed off: your worktree has uncommitted changes/, 'an advisory critic with any verdict lets it through to the next check');
 
@@ -289,7 +336,11 @@ test('phase 3 in a scheme of its own: a panel with a referee, run order, the rec
   assert.equal((await call(refutes, { method: 'POST', body: { refuted: [{ kind: 'x', why: 'y' }] }, as: minion.id })).status, 400);
   for (let i = 0; i < 3; i++) assert.equal((await call(refutes, { method: 'POST', body: { refuted: [one] }, as: minion.id })).status, 201);
   const pre = (await call(url)).data.entries.find((e: any) => e.slug === 'pre-ship-review');
-  assert.deepEqual(pre.lessons.map((l: any) => [l.kind, l.count, l.lesson]), [['unescaped shell arg', 1, false]], "one minion's rounds count once");
+  assert.deepEqual(
+    pre.lessons.map((l: any) => [l.kind, l.count, l.lesson]),
+    [['unescaped shell arg', 1, false]],
+    "one minion's rounds count once",
+  );
   assert.equal((await call(`${url}/pre-ship-review/lessons`, { method: 'DELETE', body: { kind: 'unescaped shell arg' }, as: minion.id })).status, 403);
   assert.equal((await call(`${url}/pre-ship-review/lessons`, { method: 'DELETE', body: { kind: 'unescaped shell arg' } })).status, 200);
   assert.deepEqual((await call(url)).data.entries.find((e: any) => e.slug === 'pre-ship-review').lessons, []);
@@ -325,20 +376,55 @@ test("a Taskmaster's review_set tool adds a teacher and sets a critic's model, e
   assert.equal((await tool(tm, { add: true, extends: 'teacher', slug: 'art-professor' })).text.slice(0, 22), 'Added art-professor (o');
   assert.equal((await one('art-professor')).kind, 'teacher');
   assert.equal((await tool(tm, { add: true, extends: 'creative', slug: 'art', when: 'creative: new art', kind: 'critic', model: 'opus', effort: 'high' })).error, false);
-  const added = (await one('art'));
+  const added = await one('art');
   assert.deepEqual([added.model, added.effort, added.kind], ['opus', 'high', 'critic']);
 
   // A save sets the rest and is a version in History; a bad value is the store's own refusal.
-  const guides = [{ label: 'Taste', href: 'docs/design/art-style/taste.md' }, { label: 'Techniques', href: 'docs/design/art-style/techniques.md' }];
-  const saved = await tool(tm, { slug: 'art', model: 'sonnet', effort: 'medium', on_fail: [{ after: 2, to: 'art-professor' }, { after: 3, to: 'person' }], context: { guides }, note: 'Teacher after 2' });
+  const guides = [
+    { label: 'Taste', href: 'docs/design/art-style/taste.md' },
+    { label: 'Techniques', href: 'docs/design/art-style/techniques.md' },
+  ];
+  const saved = await tool(tm, {
+    slug: 'art',
+    model: 'sonnet',
+    effort: 'medium',
+    on_fail: [
+      { after: 2, to: 'art-professor' },
+      { after: 3, to: 'person' },
+    ],
+    context: { guides },
+    note: 'Teacher after 2',
+  });
   assert.equal(saved.text, 'Saved art as version 2.', saved.text);
-  const art = (await one('art'));
-  assert.deepEqual([art.model, art.effort, art.on_fail, art.context.guides], ['sonnet', 'medium', [{ after: 2, to: 'art-professor' }, { after: 3, to: 'person' }], guides]);
+  const art = await one('art');
+  assert.deepEqual(
+    [art.model, art.effort, art.on_fail, art.context.guides],
+    [
+      'sonnet',
+      'medium',
+      [
+        { after: 2, to: 'art-professor' },
+        { after: 3, to: 'person' },
+      ],
+      guides,
+    ],
+  );
   assert.match(art.text, /\non_fail: art-professor after 2 fails, person after 3 fails\n/);
   assert.match(art.text, /- Guide: \[Taste\]\(docs\/design\/art-style\/taste\.md\)/);
   assert.match((await one('art-professor')).text, /^---\nname: art-professor\nkind: teacher\n/);
   assert.equal((await call(`${url}/art/versions`)).data.versions[0].note, 'Teacher after 2');
-  for (const bad of [{ model: 'gpt' }, { kind: 'wizard' }, { on_fail: [{ after: 2, to: 'no-such' }] }, { on_fail: [{ after: 3, to: 'person' }, { after: 2, to: 'professor' }] }, { context: { guides: [{ label: 'x' }] } }]) {
+  for (const bad of [
+    { model: 'gpt' },
+    { kind: 'wizard' },
+    { on_fail: [{ after: 2, to: 'no-such' }] },
+    {
+      on_fail: [
+        { after: 3, to: 'person' },
+        { after: 2, to: 'professor' },
+      ],
+    },
+    { context: { guides: [{ label: 'x' }] } },
+  ]) {
     assert.equal((await tool(tm, { slug: 'art', ...bad })).error, true, JSON.stringify(bad));
   }
   assert.equal((await one('art')).version, 2, 'a refused save leaves no version');
@@ -381,7 +467,21 @@ test("a scheme's own reviewing agent files are entries: read live, guessed or ki
   const kindTry = await call(`${url}/art-critic`, { method: 'PATCH', body: { kind: 'reviewer', version: critic.version + 1 } });
   assert.equal(kindTry.status, 400);
   assert.match(kindTry.data.error, /agent file \.claude\/agents\/art-critic\.md/);
-  assert.equal((await call(`${url}/art-critic`, { method: 'PATCH', body: { on_fail: [{ after: 2, to: 'art-professor' }, { after: 3, to: 'person' }], version: critic.version + 1 } })).status, 200);
+  assert.equal(
+    (
+      await call(`${url}/art-critic`, {
+        method: 'PATCH',
+        body: {
+          on_fail: [
+            { after: 2, to: 'art-professor' },
+            { after: 3, to: 'person' },
+          ],
+          version: critic.version + 1,
+        },
+      })
+    ).status,
+    200,
+  );
   // The review_set tool names it as the file's, and reads out the file's text with the scheme's additions.
   const tm = (await call(`/api/projects/${p.id}`)).data.coordinator.id;
   const tool = async (args: Record<string, unknown>) => {
@@ -405,7 +505,7 @@ test("a scheme's own reviewing agent files are entries: read live, guessed or ki
   assert.deepEqual([gone.file, gone.agent, gone.body], ['.claude/agents/art-critic.md', null, 'Pixel art at whole scales.']);
 });
 
-test("the page at a glance (#1094): judged this week, the last run, unwatched folders, review skills, and the Every scheme rows", async () => {
+test('the page at a glance (#1094): judged this week, the last run, unwatched folders, review skills, and the Every scheme rows', async () => {
   // Not Citadel: a scheme with a repo whose last month touched src/ and game/logic/, and one critic on src/**.
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Glance Grove' } });
   // And one Cara isn't a member of: its row stays off her Every scheme tab.
@@ -421,7 +521,8 @@ test("the page at a glance (#1094): judged this week, the last run, unwatched fo
   writeFileSync(join(repo, 'README.md'), 'docs are left out');
   const git = (...a: string[]) => execFileSync('git', ['-C', repo, ...a], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
   execFileSync('git', ['init', '-q', repo]);
-  git('add', '.'); git('commit', '-qm', 'first');
+  git('add', '.');
+  git('commit', '-qm', 'first');
   const url = `/api/projects/${p.id}/reviews`;
   assert.equal((await call(url, { method: 'POST', body: { slug: 'src-critic', name: 'Src critic', kind: 'critic', when: 'diff: src/**', body: '## Rules\nTidy.' } })).status, 201);
   const a = (await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'one', properties: { type: 'chore' } } })).data;
@@ -446,10 +547,13 @@ test("the page at a glance (#1094): judged this week, the last run, unwatched fo
 
   const { status, data: every } = await call('/api/reviews/schemes');
   assert.equal(status, 200);
-  assert.equal(every.schemes.some((s: any) => s.id === away.id), false, 'only schemes the person is a member of');
+  assert.equal(
+    every.schemes.some((s: any) => s.id === away.id),
+    false,
+    'only schemes the person is a member of',
+  );
   const row = every.schemes.find((s: any) => s.id === p.id);
-  assert.deepEqual([row.name, row.opened, row.critics, row.trial, row.preship, row.rate, row.last, row.closed, row.judged],
-    ['Glance Grove', true, 1, 1, true, 100, at, 2, 1]);
+  assert.deepEqual([row.name, row.opened, row.critics, row.trial, row.preship, row.rate, row.last, row.closed, row.judged], ['Glance Grove', true, 1, 1, true, 100, at, 2, 1]);
   assert.deepEqual(row.coverage, { changes: 3, watched: 1, gap: { folder: 'game/logic', changes: 2 } });
 });
 
@@ -457,7 +561,7 @@ test("the page at a glance (#1094): judged this week, the last run, unwatched fo
 // mid-edit to differ, which the page's browser test can't stage.
 test("RV5: the edit form's Save sends the version it opened with, not the list's current one", () => {
   const src = readFileSync(join(import.meta.dirname, '..', 'public', 'reviews.js'), 'utf8');
-  const save = src.slice(src.indexOf('const submit = async (ev)'), src.indexOf('state.mode = \'view\'', src.indexOf('const submit = async (ev)')));
+  const save = src.slice(src.indexOf('const submit = async (ev)'), src.indexOf("state.mode = 'view'", src.indexOf('const submit = async (ev)')));
   assert.match(save, /version: e\.version\b/);
   assert.doesNotMatch(save, /entry\(e\.slug\)\?\.version/);
 });

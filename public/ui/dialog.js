@@ -26,10 +26,14 @@ export function mountDialogs(root = document) {
   if (mounted.has(root)) return;
   mounted.add(root);
   let pressed = null; // the dialog whose backdrop the press started on
-  root.addEventListener('pointerdown', (e) => {
-    const d = e.target;
-    pressed = d instanceof HTMLDialogElement && d.matches('.cui-dialog[open]') && outside(d, e) ? d : null;
-  }, true);
+  root.addEventListener(
+    'pointerdown',
+    (e) => {
+      const d = e.target;
+      pressed = d instanceof HTMLDialogElement && d.matches('.cui-dialog[open]') && outside(d, e) ? d : null;
+    },
+    true,
+  );
   root.addEventListener('click', (e) => {
     const d = pressed;
     pressed = null;

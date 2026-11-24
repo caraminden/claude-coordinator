@@ -19,11 +19,13 @@ function rawGet(path: string): Promise<number> {
     request({ host: '127.0.0.1', port: srv.port, path }, (res) => {
       res.resume();
       resolve(res.statusCode!);
-    }).on('error', reject).end();
+    })
+      .on('error', reject)
+      .end();
   });
 }
 
-test('a URL that can\'t be parsed or decoded gets a 400, and the server keeps answering', async () => {
+test("a URL that can't be parsed or decoded gets a 400, and the server keeps answering", async () => {
   assert.equal(await rawGet('//'), 400);
   assert.equal(await rawGet('/%'), 400);
   assert.equal(await rawGet('/api/%zz'), 400);
@@ -50,15 +52,23 @@ test('a throwing background job, a stray rejection and an uncaught throw are log
   assert.match(r.stderr, /UNCAUGHT EXCEPTION.*stray throw/s);
 });
 
-test('a server that can\'t start still exits non-zero, so systemd restarts it', async () => {
+test("a server that can't start still exits non-zero, so systemd restarts it", async () => {
   const tmp = tempRoot('crash-proof-');
   const root = tmp.dir;
   const busyPort = await tmp.serve(createServer());
   try {
     const proc = tmp.spawn(process.execPath, [join(REPO, 'server.ts')], {
       env: {
-        ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: String(busyPort), DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
-        CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
+        ...process.env,
+        MACHINES_URL: undefined,
+        CITADEL_HOST_SIGNALS: 'fixed',
+        CITADEL_ZONE: TEST_ZONE,
+        PORT: String(busyPort),
+        DATA_DIR: join(root, 'data'),
+        CLAUDE_BIN: '/bin/false',
+        CLAUDE_CONFIG_DIR: join(root, 'claude'),
+        COORDINATOR_PASSWORD: PASSWORD,
+        SESSION_SECRET: SECRET,
       },
       stdio: 'ignore',
     });

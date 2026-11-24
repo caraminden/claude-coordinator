@@ -28,7 +28,9 @@ export async function freeAppPort(taken: Set<number>, [from, to] = PORTS): Promi
   for (let port = from; port <= to; port++) {
     if (taken.has(port)) continue;
     const free = await new Promise<boolean>((ok) => {
-      const s = createServer().once('error', () => ok(false)).listen(port, '127.0.0.1', () => s.close(() => ok(true)));
+      const s = createServer()
+        .once('error', () => ok(false))
+        .listen(port, '127.0.0.1', () => s.close(() => ok(true)));
     });
     if (free) return port;
   }
@@ -111,8 +113,20 @@ async function make(app: App, project: Project, caller: Ticket, by: string, a: {
   }
 
   app.contraptions.register({
-    name, title, port, icon: '/icon.svg', home_scheme: project.id, open_paths: '[]', relay_paths: '[]', static_paths: null,
-    default_model: null, turn_cap: null, repo, branch: branch === 'main' ? null : branch, folder: null, subdir: appDir(name),
+    name,
+    title,
+    port,
+    icon: '/icon.svg',
+    home_scheme: project.id,
+    open_paths: '[]',
+    relay_paths: '[]',
+    static_paths: null,
+    default_model: null,
+    turn_cap: null,
+    repo,
+    branch: branch === 'main' ? null : branch,
+    folder: null,
+    subdir: appDir(name),
   });
   const contraption = store.getContraption(name)!;
   for (const m of store.listMembers(project.id)) store.setContraptionUser(contraption.id, m.id, true, maker.id);
@@ -196,8 +210,20 @@ export async function adoptApp(app: App, project: Project, caller: Ticket, body:
     port = await freeAppPort(new Set([...store.listContraptions().map((c) => c.port), ...making.ports]));
     making.ports.add(port);
     app.contraptions.register({
-      name, title, port, icon, home_scheme: project.id, open_paths: '[]', relay_paths: '[]', static_paths: null,
-      default_model: null, turn_cap: null, repo, branch: null, folder: null, subdir,
+      name,
+      title,
+      port,
+      icon,
+      home_scheme: project.id,
+      open_paths: '[]',
+      relay_paths: '[]',
+      static_paths: null,
+      default_model: null,
+      turn_cap: null,
+      repo,
+      branch: null,
+      folder: null,
+      subdir,
     });
     const contraption = store.getContraption(name)!;
     for (const m of store.listMembers(project.id)) store.setContraptionUser(contraption.id, m.id, true, maker.id);

@@ -31,7 +31,10 @@ const ARMS: Arm[] = JSON.parse(readFileSync(join(HERE, 'arms.json'), 'utf8')).ar
 const GRUNT_LINE = 'Citadel, Scheme, Taskmaster, Minion and Grunt are playful names for how the work is organised, not a comment on ability. Work as a careful, senior engineer: think things through, check your work, and push back when something looks wrong.';
 
 const argv = process.argv.slice(2);
-const arg = (k: string) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
+const arg = (k: string) => {
+  const i = argv.indexOf(k);
+  return i >= 0 ? argv[i + 1] : undefined;
+};
 const SET = loadSet(arg('--set') ?? 'all');
 const git = (...a: string[]) => execFileSync('git', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 << 20 });
 const KEEP = /^(PATH|HOME|USER|LOGNAME|LANG|LC_\w+|TERM|SHELL|TZ|CLAUDE_CONFIG_DIR|ANTHROPIC_\w+)$/;
@@ -48,16 +51,21 @@ function workspace(c: Case, out: string): string {
   git('clone', '-q', '--shared', '--no-checkout', REPO, dir);
   const g = (...a: string[]) => git('-C', dir, '-c', 'user.name=replay', '-c', 'user.email=replay@localhost', '-c', 'core.hooksPath=/dev/null', ...a);
   const branch = `ticket/${c.origin}-replay`;
-  let base = c.base, how = 'as shipped';
+  let base = c.base,
+    how = 'as shipped';
   g('checkout', '-q', '--detach', c.base);
   g('checkout', '-q', '-b', branch, c.head ?? c.base);
   if (c.plant) {
     // The plant goes into the head commit itself, so the reviewer's `git diff main...HEAD` has only the planted version and
     // no commit says what was changed.
     for (const p of c.plant) {
-      const file = join(dir, p.file), text = readFileSync(file, 'utf8');
+      const file = join(dir, p.file),
+        text = readFileSync(file, 'utf8');
       if (text.split(p.from).length !== 2) throw new Error(`${c.id}: the plant's "from" text is in ${p.file} ${text.split(p.from).length - 1} times, not once`);
-      writeFileSync(file, text.replace(p.from, () => p.to));
+      writeFileSync(
+        file,
+        text.replace(p.from, () => p.to),
+      );
     }
     g('commit', '-q', '-a', '--amend', '--no-edit');
   }
@@ -65,8 +73,15 @@ function workspace(c: Case, out: string): string {
     // Other work landed between its commits: replay them onto where it started; when that conflicts, take the last
     // one's tree with them reverted out as main and the change as one commit carrying their messages; when that
     // conflicts too, the plain range from the first to the last (with the work in between in the diff).
-    try { for (const sha of c.picks) g('cherry-pick', '--allow-empty', '--keep-redundant-commits', sha); how = 'cherry-pick'; } catch {
-      try { g('cherry-pick', '--abort'); } catch { /* nothing to abort */ }
+    try {
+      for (const sha of c.picks) g('cherry-pick', '--allow-empty', '--keep-redundant-commits', sha);
+      how = 'cherry-pick';
+    } catch {
+      try {
+        g('cherry-pick', '--abort');
+      } catch {
+        /* nothing to abort */
+      }
       const last = c.picks[c.picks.length - 1];
       g('checkout', '-q', '--detach', last);
       try {
@@ -74,16 +89,21 @@ function workspace(c: Case, out: string): string {
         base = g('rev-parse', 'HEAD').trim();
         const msg = c.picks.map((s) => g('show', '-s', '--format=%B', s).trim()).join('\n\n');
         const head = g('commit-tree', `${last}^{tree}`, '-p', base, '-m', msg).trim();
-        g('checkout', '-q', '-B', branch, head); how = 'revert';
+        g('checkout', '-q', '-B', branch, head);
+        how = 'revert';
       } catch {
-        try { g('revert', '--abort'); } catch { /* nothing to abort */ }
-        g('checkout', '-q', '-B', branch, last); how = 'range';
+        try {
+          g('revert', '--abort');
+        } catch {
+          /* nothing to abort */
+        }
+        g('checkout', '-q', '-B', branch, last);
+        how = 'range';
       }
     }
   }
   g('remote', 'remove', 'origin');
-  for (const r of g('for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/tags').split('\n').filter(Boolean))
-    if (r !== `refs/heads/${branch}`) g('update-ref', '-d', r);
+  for (const r of g('for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/tags').split('\n').filter(Boolean)) if (r !== `refs/heads/${branch}`) g('update-ref', '-d', r);
   g('branch', '-q', 'main', base);
   writeFileSync(join(dir, '.git', 'replay-how'), how);
   g('reflog', 'expire', '--expire=now', '--all');
@@ -98,20 +118,34 @@ function workspace(c: Case, out: string): string {
 
 /** One `claude -p`: the stream to `file`, its final text and cost. */
 function claude(args: string[], input: string, cwd: string, file: string, timeoutMs: number, extraEnv: Record<string, string> = {}): Promise<Meta & { text: string }> {
-  const tmp = join(dirname(file), 'tmp'); mkdirSync(tmp, { recursive: true });
+  const tmp = join(dirname(file), 'tmp');
+  mkdirSync(tmp, { recursive: true });
   const t0 = Date.now();
   return new Promise((done) => {
     const p = spawn('claude', args, { cwd, env: { ...cleanEnv(tmp), ...extraEnv }, stdio: ['pipe', 'pipe', 'pipe'] });
-    let out = '', err = '';
+    let out = '',
+      err = '';
     const timer = setTimeout(() => p.kill('SIGTERM'), timeoutMs);
     // As it runs, for the verifier's stay hook, which reads what it has done so far.
     writeFileSync(file, '');
-    p.stdout.on('data', (d) => { out += d; appendFileSync(file, d); });
+    p.stdout.on('data', (d) => {
+      out += d;
+      appendFileSync(file, d);
+    });
     p.stderr.on('data', (d) => (err += d));
     p.on('close', (code) => {
       clearTimeout(timer);
       writeFileSync(file, out);
-      const msgs = out.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      const msgs = out
+        .split('\n')
+        .map((l) => {
+          try {
+            return JSON.parse(l);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
       const result = msgs.findLast((m) => m.type === 'result');
       const meta = { cost: Number(result?.total_cost_usd ?? 0), ms: Date.now() - t0, turns: Number(result?.num_turns ?? 0), models: Object.keys(result?.modelUsage ?? {}) };
       if (!result) return done({ ...meta, text: '', error: `claude exited ${code} with no result: ${err.trim().slice(-300)}` });
@@ -131,12 +165,33 @@ async function review(c: Case, arm: Arm, out: string, kit: string): Promise<void
   // The brief citadel:self-review §2 writes, with the arm's extra lens in place of "by the diff".
   const brief = `${GRUNT_LINE}\n\nFollow \`${kit}/agents/reviewer.md\`. Review branch \`ticket/${c.origin}-replay\` in \`${ws}\`; the change is \`git diff main...HEAD\`; the kit is \`${kit}\`. ${arm.lens ?? 'Lenses: by the diff.'}${arg('--additions') ? ` The scheme's additions file: \`${resolve(arg('--additions')!)}\`.` : ''}\n`;
   writeFileSync(join(dir, 'brief.md'), brief);
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '.*',
-    hooks: [{ type: 'command', command: `'${process.execPath}' '${join(REPO, 'tools/prompt-evals/guard.ts')}'`, timeout: 10 }] }] } }));
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions',
-    '--plugin-dir', kit, '--agent', 'citadel:reviewer', '--model', arm.model, '--effort', arm.effort,
-    '--settings', join(dir, 'settings.json'), '--setting-sources', 'project', '--strict-mcp-config',
-    '--max-turns', '120', '--max-budget-usd', arg('--budget') ?? '6', '--no-session-persistence'];
+  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '.*', hooks: [{ type: 'command', command: `'${process.execPath}' '${join(REPO, 'tools/prompt-evals/guard.ts')}'`, timeout: 10 }] }] } }));
+  const args = [
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--permission-mode',
+    'bypassPermissions',
+    '--plugin-dir',
+    kit,
+    '--agent',
+    'citadel:reviewer',
+    '--model',
+    arm.model,
+    '--effort',
+    arm.effort,
+    '--settings',
+    join(dir, 'settings.json'),
+    '--setting-sources',
+    'project',
+    '--strict-mcp-config',
+    '--max-turns',
+    '120',
+    '--max-budget-usd',
+    arg('--budget') ?? '6',
+    '--no-session-persistence',
+  ];
   const r = await claude(args, brief, ws, join(dir, 'stream.jsonl'), 30 * 60_000);
   if (r.error && !r.cost) return console.log(`${arm.name} ${c.id}: not reviewed, rerun to retry: ${r.error}`);
   writeFileSync(join(dir, 'review.md'), r.text);
@@ -152,7 +207,12 @@ const SHIMMED = ['systemctl', 'loginctl', 'journalctl', 'systemd-run', 'gh', 'po
 function leftovers(dir: string): number[] {
   const pids: number[] = [];
   for (const p of readdirSync('/proc').filter((x) => /^\d+$/.test(x))) {
-    try { const cwd = readlinkSync(`/proc/${p}/cwd`); if (cwd === dir || cwd.startsWith(dir + '/')) pids.push(Number(p)); } catch { /* gone or not ours */ }
+    try {
+      const cwd = readlinkSync(`/proc/${p}/cwd`);
+      if (cwd === dir || cwd.startsWith(dir + '/')) pids.push(Number(p));
+    } catch {
+      /* gone or not ours */
+    }
   }
   return pids;
 }
@@ -182,23 +242,64 @@ async function verify(c: Case, arm: Arm, out: string, kit: string): Promise<void
   mkdirSync(join(dir, 'shims'));
   for (const s of SHIMMED) writeFileSync(join(dir, 'shims', s), `#!/bin/sh\necho "${s}: stubbed in this verifier case (#1740)" >&2\nexit 1\n`, { mode: 0o755 });
   const brief = `${GRUNT_LINE}\n\n${readFileSync(join(HERE, 'verifier.md'), 'utf8')}`
-    .replaceAll('{origin}', String(c.origin)).replaceAll('{repo}', repo).replaceAll('{root}', dir).replace('{brief}', () => BRIEFS[c.id] ?? c.title);
+    .replaceAll('{origin}', String(c.origin))
+    .replaceAll('{repo}', repo)
+    .replaceAll('{root}', dir)
+    .replace('{brief}', () => BRIEFS[c.id] ?? c.title);
   writeFileSync(join(dir, 'brief.md'), brief);
   const chrome = join(process.env.HOME ?? '', '.cache/ms-playwright');
-  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '.*',
-    hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'verifier-guard.ts')}' '${dir}' '${kit}' '${chrome}' '${dirname(dirname(process.execPath))}'`, timeout: 10 }] }],
-  // It may not stop until it has driven the copy enough, for long enough (verifier-stay.mjs).
-  Stop: [{ hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'verifier-stay.mjs')}' '${dir}'`, timeout: 10 }] }] } }));
+  writeFileSync(
+    join(dir, 'settings.json'),
+    JSON.stringify({
+      hooks: {
+        PreToolUse: [{ matcher: '.*', hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'verifier-guard.ts')}' '${dir}' '${kit}' '${chrome}' '${dirname(dirname(process.execPath))}'`, timeout: 10 }] }],
+        // It may not stop until it has driven the copy enough, for long enough (verifier-stay.mjs).
+        Stop: [{ hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'verifier-stay.mjs')}' '${dir}'`, timeout: 10 }] }],
+      },
+    }),
+  );
   writeFileSync(join(dir, 'started-at'), String(Date.now()));
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions',
-    '--model', arm.model, '--effort', arm.effort, '--disallowedTools', 'Agent,Task,WebFetch,WebSearch',
-    '--settings', join(dir, 'settings.json'), '--setting-sources', 'project', '--strict-mcp-config',
-    '--max-turns', '150', '--max-budget-usd', arg('--budget') ?? '4', '--no-session-persistence'];
+  const args = [
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--permission-mode',
+    'bypassPermissions',
+    '--model',
+    arm.model,
+    '--effort',
+    arm.effort,
+    '--disallowedTools',
+    'Agent,Task,WebFetch,WebSearch',
+    '--settings',
+    join(dir, 'settings.json'),
+    '--setting-sources',
+    'project',
+    '--strict-mcp-config',
+    '--max-turns',
+    '150',
+    '--max-budget-usd',
+    arg('--budget') ?? '4',
+    '--no-session-persistence',
+  ];
   const r = await claude(args, brief, repo, join(dir, 'stream.jsonl'), 35 * 60_000, { PATH: `${join(dir, 'shims')}:${process.env.PATH}` });
-  try { execFileSync(process.execPath, [join(dir, 'boot.mjs'), 'stop'], { stdio: 'ignore' }); } catch { /* not started */ }
+  try {
+    execFileSync(process.execPath, [join(dir, 'boot.mjs'), 'stop'], { stdio: 'ignore' });
+  } catch {
+    /* not started */
+  }
   const left = leftovers(dir);
-  for (const pid of left) try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
-  if (r.error && !r.cost) { execFileSync('rm', ['-rf', dir]); return console.log(`${arm.name} ${c.id}: not run, rerun to retry: ${r.error}`); }
+  for (const pid of left)
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      /* gone */
+    }
+  if (r.error && !r.cost) {
+    execFileSync('rm', ['-rf', dir]);
+    return console.log(`${arm.name} ${c.id}: not run, rerun to retry: ${r.error}`);
+  }
   // Keep the report, the stream, the logs and its screenshots; the clone and the data are big and rebuilt on demand.
   execFileSync('rm', ['-rf', repo, join(dir, 'data'), join(dir, 'scratch'), join(dir, 'home')]);
   writeFileSync(join(dir, 'review.md'), r.text);
@@ -231,8 +332,7 @@ Be strict: the same file or area is not enough for named. Reply with JSON only, 
 
 // The same judge, told the report came from someone who ran the change, and asked whether it made the defect happen.
 // shortcut: the judge sees only the report, not the tool log, so `ran` is the verifier's word; give it stream.jsonl's commands if `ran` ever decides anything.
-const VERIFY_JUDGE_RULES = JUDGE_RULES
-  .replace('whether a code review, written before a change shipped,', 'whether a report from someone who ran a change before it shipped')
+const VERIFY_JUDGE_RULES = JUDGE_RULES.replace('whether a code review, written before a change shipped,', 'whether a report from someone who ran a change before it shipped')
   .replace("You don't know who wrote the review or how.", "You don't know who wrote the report or how. Its findings are its numbered lines; its flows-run and not-exercised lists are not findings.")
   .replace('"why":"<one sentence>"}', '"ran":<true when the report shows this wrong behaviour actually happening when the change was run, false when it only describes or traces it>,"why":"<one sentence>"}');
 
@@ -243,40 +343,62 @@ async function judge(c: Case, arm: Arm, out: string, model: string): Promise<voi
   const defects = c.defects!.map((d) => `### ${c.kind === 'planted' ? 'Planted defect' : `Defect fixed by #${d.fix}`}: ${d.title}\nWhat went wrong: ${d.why}\n\n${fixShape(d, c)}`).join('\n\n');
   const prompt = `${arm.mode === 'verify' ? VERIFY_JUDGE_RULES : JUDGE_RULES}\n\n## The change reviewed\n#${c.origin}: ${c.title}\n\n## Defects found after it shipped\n\n${defects}\n\n## The review\n\n${reviewText}\n`;
   writeFileSync(join(dir, 'judge-prompt.md'), prompt);
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--model', model, '--effort', 'medium', '--tools', '', '--max-turns', '1',
-    '--setting-sources', 'project', '--strict-mcp-config', '--no-session-persistence'];
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--model', model, '--effort', 'medium', '--tools', '', '--max-turns', '1', '--setting-sources', 'project', '--strict-mcp-config', '--no-session-persistence'];
   const r = await claude(args, prompt, tmpdir(), join(dir, 'judge-stream.jsonl'), 10 * 60_000);
   if (r.error && !r.cost) return console.log(`${arm.name} ${c.id}: not judged, rerun to retry: ${r.error}`);
   const m = r.text.match(/\{[\s\S]*\}/);
   let verdicts: Verdict[] = [];
-  try { verdicts = JSON.parse(m?.[0] ?? '').verdicts; } catch { /* left empty: the report counts it as unjudged */ }
+  try {
+    verdicts = JSON.parse(m?.[0] ?? '').verdicts;
+  } catch {
+    /* left empty: the report counts it as unjudged */
+  }
   writeFileSync(join(dir, 'judge.json'), JSON.stringify({ cost: r.cost, verdicts, raw: verdicts.length ? undefined : r.text }, null, 1));
 }
 
 async function pool<T>(items: T[], jobs: number, fn: (t: T) => Promise<void>) {
   const q = [...items];
-  await Promise.all(Array.from({ length: jobs }, async () => { for (let t = q.shift(); t !== undefined; t = q.shift()) await fn(t); }));
+  await Promise.all(
+    Array.from({ length: jobs }, async () => {
+      for (let t = q.shift(); t !== undefined; t = q.shift()) await fn(t);
+    }),
+  );
 }
 
 /** The numbers of one arm on one group of cases (escapes, planted); `summary.json` keeps them for tools/review-escapes/bench.ts. */
 export type Tally = { reviews: number; defects: number; named: number; near: number; cases: number; casesNamed: number; findings: number; controls: number; controlsWith: number; controlFindings: number; cost: number; judgeCost: number; unjudged: number; medianSec: number; ran?: number };
 
 function tally(out: string, arm: Arm, group: string): { t: Tally; per: string[] } {
-  const read = (p: string) => existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : undefined;
+  const read = (p: string) => (existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : undefined);
   const t: Tally = { reviews: 0, defects: 0, named: 0, near: 0, cases: 0, casesNamed: 0, findings: 0, controls: 0, controlsWith: 0, controlFindings: 0, cost: 0, judgeCost: 0, unjudged: 0, medianSec: 0 };
-  const per: string[] = [], times: number[] = [];
+  const per: string[] = [],
+    times: number[] = [];
   for (const c of SET.filter((c) => c.set === group)) {
     const dir = join(out, arm.name, c.id);
     const meta: Meta | undefined = read(join(dir, 'meta.json'));
     if (!meta) continue;
-    t.reviews++; t.cost += meta.cost; times.push(meta.ms);
+    t.reviews++;
+    t.cost += meta.cost;
+    times.push(meta.ms);
     const f = countFindings(existsSync(join(dir, 'review.md')) ? readFileSync(join(dir, 'review.md'), 'utf8') : '');
     // A clean case that failed (a budget, a usage limit) is no finished review: it would pass for one with no finding.
-    if (!hasDefects(c) && meta.error) { t.reviews--; continue; }
-    if (!hasDefects(c)) { t.controls++; t.controlFindings += f; if (f) t.controlsWith++; continue; }
-    t.cases++; t.findings += f;
+    if (!hasDefects(c) && meta.error) {
+      t.reviews--;
+      continue;
+    }
+    if (!hasDefects(c)) {
+      t.controls++;
+      t.controlFindings += f;
+      if (f) t.controlsWith++;
+      continue;
+    }
+    t.cases++;
+    t.findings += f;
     const j = read(join(dir, 'judge.json'));
-    if (!j?.verdicts?.length) { t.unjudged++; continue; }
+    if (!j?.verdicts?.length) {
+      t.unjudged++;
+      continue;
+    }
     t.judgeCost += j.cost;
     let any = false;
     for (const d of c.defects!) {
@@ -285,7 +407,10 @@ function tally(out: string, arm: Arm, group: string): { t: Tally; per: string[] 
       const v = jv?.verdict ?? 'no';
       // A verifier's named bug it showed happening, not just traced (#1740).
       if (v === 'named' && arm.mode === 'verify' && jv?.ran) t.ran = (t.ran ?? 0) + 1;
-      if (v === 'named') { t.named++; any = true; } else if (v === 'near') t.near++;
+      if (v === 'named') {
+        t.named++;
+        any = true;
+      } else if (v === 'near') t.near++;
       per.push(`${arm.name}\t${c.id}\t#${d.fix}\t${v}${c.taught ? '\ttaught' : ''}`);
     }
     if (any) t.casesNamed++;
@@ -296,16 +421,22 @@ function tally(out: string, arm: Arm, group: string): { t: Tally; per: string[] 
 }
 
 function report(out: string, arms: Arm[]): string {
-  const rows: string[] = ['| Arm | Set | Reviews | Defects named | Near | Changes with a defect named | Findings on those (per review) | Clean changes or controls with a finding | Findings on clean | Review cost | Judge cost | $ per defect named | Median time |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
-  const per: string[] = [], summary: Record<string, Record<string, Tally>> = {};
-  for (const arm of arms) for (const group of [...new Set(SET.map((c) => c.set!))]) {
-    const { t, per: p } = tally(out, arm, group);
-    if (!t.reviews) continue;
-    per.push(...p);
-    (summary[arm.name] ??= {})[group] = t;
-    rows.push(`| ${arm.name} | ${group} | ${t.reviews} | ${t.named} of ${t.defects} | ${t.near} | ${t.casesNamed} of ${t.cases - t.unjudged} | ${t.cases ? (t.findings / t.cases).toFixed(1) : '-'} | ${t.controlsWith} of ${t.controls} | ${t.controlFindings} | $${t.cost.toFixed(2)} | $${t.judgeCost.toFixed(2)} | ${t.named ? '$' + (t.cost / t.named).toFixed(2) : '-'} | ${t.medianSec} s |${t.unjudged ? ` (${t.unjudged} unjudged)` : ''}${arm.mode === 'verify' ? ` (${t.ran ?? 0} it says it made happen)` : ''}`);
-  }
+  const rows: string[] = [
+    '| Arm | Set | Reviews | Defects named | Near | Changes with a defect named | Findings on those (per review) | Clean changes or controls with a finding | Findings on clean | Review cost | Judge cost | $ per defect named | Median time |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+  ];
+  const per: string[] = [],
+    summary: Record<string, Record<string, Tally>> = {};
+  for (const arm of arms)
+    for (const group of [...new Set(SET.map((c) => c.set!))]) {
+      const { t, per: p } = tally(out, arm, group);
+      if (!t.reviews) continue;
+      per.push(...p);
+      (summary[arm.name] ??= {})[group] = t;
+      rows.push(
+        `| ${arm.name} | ${group} | ${t.reviews} | ${t.named} of ${t.defects} | ${t.near} | ${t.casesNamed} of ${t.cases - t.unjudged} | ${t.cases ? (t.findings / t.cases).toFixed(1) : '-'} | ${t.controlsWith} of ${t.controls} | ${t.controlFindings} | $${t.cost.toFixed(2)} | $${t.judgeCost.toFixed(2)} | ${t.named ? '$' + (t.cost / t.named).toFixed(2) : '-'} | ${t.medianSec} s |${t.unjudged ? ` (${t.unjudged} unjudged)` : ''}${arm.mode === 'verify' ? ` (${t.ran ?? 0} it says it made happen)` : ''}`,
+      );
+    }
   writeFileSync(join(out, 'verdicts.tsv'), per.join('\n') + '\n');
   writeFileSync(join(out, 'summary.json'), JSON.stringify(summary, null, 1));
   return rows.join('\n');
@@ -314,12 +445,26 @@ function report(out: string, arms: Arm[]): string {
 /** What is wrong with a planted case: a plant that isn't in lines the change added, one that doesn't change the diff, or a file that no longer parses. */
 function plantProblems(c: Case, ws: string): string[] {
   const bad: string[] = [];
-  const added = (git('-C', REPO, 'show', '--format=', '-U0', c.head!).split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).map((l) => l.slice(1))).join('\n');
+  const added = git('-C', REPO, 'show', '--format=', '-U0', c.head!)
+    .split('\n')
+    .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
+    .map((l) => l.slice(1))
+    .join('\n');
   for (const p of c.plant!) {
     if (p.from === p.to) bad.push(`${p.file}: from and to are the same`);
     if (!added.includes(p.from)) bad.push(`${p.file}: "${p.from.slice(0, 50)}" is not in the lines this change added (whole consecutive added lines' text, indent included)`);
     if (/\.(ts|js)$/.test(p.file)) {
-      try { execFileSync(process.execPath, ['--check', join(ws, p.file)], { stdio: 'pipe' }); } catch (e: any) { bad.push(`${p.file} no longer parses: ${String(e.stderr).split('\n').find((l: string) => /Error/.test(l)) ?? ''}`); }
+      try {
+        execFileSync(process.execPath, ['--check', join(ws, p.file)], { stdio: 'pipe' });
+      } catch (e: any) {
+        bad.push(
+          `${p.file} no longer parses: ${
+            String(e.stderr)
+              .split('\n')
+              .find((l: string) => /Error/.test(l)) ?? ''
+          }`,
+        );
+      }
     }
   }
   if (!c.defects?.length || !c.defects[0].why) bad.push('no defect text');
@@ -346,23 +491,43 @@ async function main() {
   const re = new RegExp(arg('--case') ?? '.');
   const cases = SET.filter((c) => re.test(c.id));
   const names = arg('--arms')?.split(',');
-  const arms = names ? names.map((n) => ARMS.find((a) => a.name === n) ?? (() => { throw new Error(`no arm ${n} in arms.json`); })()) : ARMS.filter((a) => a.mode !== 'verify'); // the verifier boots servers: only when named
+  const arms = names
+    ? names.map(
+        (n) =>
+          ARMS.find((a) => a.name === n) ??
+          (() => {
+            throw new Error(`no arm ${n} in arms.json`);
+          })(),
+      )
+    : ARMS.filter((a) => a.mode !== 'verify'); // the verifier boots servers: only when named
   mkdirSync(out, { recursive: true });
   if (cmd === 'check') {
     for (const c of cases) {
       const ws = workspace(c, out);
       const stat = git('-C', ws, 'diff', '--shortstat', 'main...HEAD').trim();
-      const leak = c.plant ? [] : git('-C', ws, 'log', '--all', '--format=%s').split('\n').filter((s) => c.defects?.some((d) => new RegExp(`#${d.fix}(?!\\d)`).test(s)));
+      const leak = c.plant
+        ? []
+        : git('-C', ws, 'log', '--all', '--format=%s')
+            .split('\n')
+            .filter((s) => c.defects?.some((d) => new RegExp(`#${d.fix}(?!\\d)`).test(s)));
       const bad = c.plant ? plantProblems(c, ws) : [];
-      console.log(`${c.id} (${readFileSync(join(ws, ".git", "replay-how"), "utf8")}): ${stat}${leak.length ? '  LEAK: ' + leak[0] : ''}${bad.length ? '  PROBLEM: ' + bad.join('; ') : ''}`);
+      console.log(`${c.id} (${readFileSync(join(ws, '.git', 'replay-how'), 'utf8')}): ${stat}${leak.length ? '  LEAK: ' + leak[0] : ''}${bad.length ? '  PROBLEM: ' + bad.join('; ') : ''}`);
     }
     return;
   }
   if (cmd === 'run') {
     for (const c of cases) workspace(c, out); // serially: clones and cherry-picks share the repo's lock
     const jobs = Number(arg('--jobs') ?? 3);
-    await pool(arms.flatMap((a) => cases.map((c) => [a, c] as const)), jobs, ([a, c]) => (a.mode === 'verify' ? verify : review)(c, a, out, kit));
-    await pool(arms.flatMap((a) => cases.map((c) => [a, c] as const)), jobs, ([a, c]) => judge(c, a, out, arg('--judge-model') ?? 'opus'));
+    await pool(
+      arms.flatMap((a) => cases.map((c) => [a, c] as const)),
+      jobs,
+      ([a, c]) => (a.mode === 'verify' ? verify : review)(c, a, out, kit),
+    );
+    await pool(
+      arms.flatMap((a) => cases.map((c) => [a, c] as const)),
+      jobs,
+      ([a, c]) => judge(c, a, out, arg('--judge-model') ?? 'opus'),
+    );
   } else if (cmd !== 'report') return console.log(HELP);
   console.log(report(out, arms));
   console.log(`\nPer defect: ${join(out, 'verdicts.tsv')}`);

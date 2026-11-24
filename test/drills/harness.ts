@@ -49,7 +49,10 @@ export class Drill {
     const p = this.srv!.proc;
     this.srv = null;
     if (p.exitCode !== null || p.signalCode !== null) return;
-    await new Promise((r) => { p.once('exit', r); p.kill('SIGKILL'); });
+    await new Promise((r) => {
+      p.once('exit', r);
+      p.kill('SIGKILL');
+    });
   }
 
   /** A server booted with CITADEL_FAULT_POINT=`point`: wait for it to have died by its own hand there. */
@@ -80,7 +83,11 @@ export class Drill {
 
   /** How many times the servers logged a line matching `re`. */
   logged(re: RegExp): number {
-    return existsSync(this.log) ? readFileSync(this.log, 'utf8').split('\n').filter((l) => re.test(l)).length : 0;
+    return existsSync(this.log)
+      ? readFileSync(this.log, 'utf8')
+          .split('\n')
+          .filter((l) => re.test(l)).length
+      : 0;
   }
 
   setting<T = any>(key: string): T | null {
@@ -94,7 +101,9 @@ export class Drill {
 
   /** The stream lines of `type` saved in a minion's chat. */
   stream(id: number, type: string): any[] {
-    return this.rows<{ data: string }>("SELECT data FROM events WHERE ticket_id = ? AND kind = 'claude' ORDER BY id", id).map((r) => JSON.parse(r.data)).filter((d) => d.type === type);
+    return this.rows<{ data: string }>("SELECT data FROM events WHERE ticket_id = ? AND kind = 'claude' ORDER BY id", id)
+      .map((r) => JSON.parse(r.data))
+      .filter((d) => d.type === type);
   }
 
   status(id: number): string {
@@ -131,12 +140,20 @@ export class Drill {
     const cwd = join(this.root, `worktree-${id}`);
     const go = join(this.root, `go-${id}`);
     mkdirSync(join(cwd, 'tools'), { recursive: true });
-    writeFileSync(join(cwd, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0
+    writeFileSync(
+      join(cwd, 'tools', 'land.sh'),
+      `[ "$1" = --check ] && exit 0
 echo started
 for i in $(seq 6000); do [ -e ${JSON.stringify(go)} ] && break; sleep 0.05; done
 echo 'land: main is now at abc1234 "#${id}: ${title}"'
-`);
-    for (const args of [['init', '-q'], ['add', '.'], ['-c', 'user.name=Drill', '-c', 'user.email=drill@example.invalid', 'commit', '-qm', 'init']]) execFileSync('git', args, { cwd });
+`,
+    );
+    for (const args of [
+      ['init', '-q'],
+      ['add', '.'],
+      ['-c', 'user.name=Drill', '-c', 'user.email=drill@example.invalid', 'commit', '-qm', 'init'],
+    ])
+      execFileSync('git', args, { cwd });
     store.setTicketDir(id, cwd, null);
     store.db.close();
     const res = await fetch(`${this.srv!.base}/api/tickets/${id}/land/handoff`, {

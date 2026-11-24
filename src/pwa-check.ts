@@ -30,7 +30,7 @@ export async function installCheck(name: string, get: (path: string) => Promise<
   const html = await page.text();
   const hrefOf = (tag: string | undefined) => {
     const m = tag && /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
-    return m ? m[1] ?? m[2] ?? m[3] : null;
+    return m ? (m[1] ?? m[2] ?? m[3]) : null;
   };
   const href = hrefOf(/<link\b[^>]*\brel\s*=\s*["']?manifest\b[^>]*>/i.exec(html)?.[0]);
   if (href === null) return found([`Its page has no <link rel="manifest">, so it can't be installed as its own app.`]);
@@ -52,7 +52,11 @@ export async function installCheck(name: string, get: (path: string) => Promise<
   }
   // Resolved as the Web App Manifest spec does: start_url and scope against the manifest's URL, id against start_url's origin.
   const resolve = (v: unknown, against: URL | string) => {
-    try { return typeof v === 'string' ? new URL(v, against) : null; } catch { return null; }
+    try {
+      return typeof v === 'string' ? new URL(v, against) : null;
+    } catch {
+      return null;
+    }
   };
   let start = resolve(m.start_url, murl);
   if (!start || start.origin !== base.origin) start = base;
@@ -74,9 +78,17 @@ export async function installCheck(name: string, get: (path: string) => Promise<
   }
   for (const px of [192, 512]) {
     // A PNG, since Android won't make an installed app from an SVG alone; "any" purpose, at least px wide.
-    const icon = icons.find((i) => typeof i?.src === 'string' && (i.type === 'image/png' || /\.png(\?|$)/i.test(i.src))
-      && String(i.purpose ?? 'any').split(/\s+/).includes('any')
-      && String(i.sizes ?? '').split(/\s+/).some((s) => Number(/^(\d+)x\d+$/i.exec(s)?.[1]) >= px));
+    const icon = icons.find(
+      (i) =>
+        typeof i?.src === 'string' &&
+        (i.type === 'image/png' || /\.png(\?|$)/i.test(i.src)) &&
+        String(i.purpose ?? 'any')
+          .split(/\s+/)
+          .includes('any') &&
+        String(i.sizes ?? '')
+          .split(/\s+/)
+          .some((s) => Number(/^(\d+)x\d+$/i.exec(s)?.[1]) >= px),
+    );
     const url = icon && resolve(icon.src, murl);
     if (!url) {
       problems.push(`Its manifest lists no PNG icon of at least ${px}x${px} (purpose "any"): Chrome asks for a 192 and a 512 px icon, and Android won't install from an SVG alone. Add icon-${px}.png.`);

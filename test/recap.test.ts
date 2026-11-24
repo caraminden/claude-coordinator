@@ -10,11 +10,12 @@ after(() => rmSync(root, { recursive: true, force: true }));
 
 test('the scheme recap: your last action in the scheme, and turns finished since, per minion', async () => {
   const store = new Store(join(root, 'db.sqlite'));
-  const minion = (projectId: number, title: string) =>
-    store.createTicket({ project_id: projectId, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
+  const minion = (projectId: number, title: string) => store.createTicket({ project_id: projectId, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }).id;
   const p1 = store.createProject('One', null).id;
   const p2 = store.createProject('Two', null).id;
-  const a = minion(p1, 'a'), b = minion(p1, 'b'), elsewhere = minion(p2, 'elsewhere');
+  const a = minion(p1, 'a'),
+    b = minion(p1, 'b'),
+    elsewhere = minion(p2, 'elsewhere');
   const turn = (id: number) => store.addEvent(id, 'claude', { type: 'result', is_error: false });
   const tick = () => new Promise((r) => setTimeout(r, 2));
 
@@ -27,7 +28,10 @@ test('the scheme recap: your last action in the scheme, and turns finished since
   const clicked = store.addEvent(b, 'approval_result', { id: 'x', state: 'allowed', by: 'Cara' });
   store.addEvent(elsewhere, 'user_message', { author: 'Cara', text: 'other scheme' });
   await tick();
-  turn(a); turn(a); turn(b); turn(elsewhere);
+  turn(a);
+  turn(a);
+  turn(b);
+  turn(elsewhere);
   store.addEvent(b, 'claude', { type: 'assistant', message: { content: [] } });
 
   // Not away yet (#538): the turns aren't counted, as the page shows no recap until RECAP_AWAY_MS.

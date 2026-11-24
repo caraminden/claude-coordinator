@@ -52,9 +52,7 @@ async function tryGit(args: string[], cwd: string): Promise<string | null> {
 /** The newest pull request whose head is `branch`, via the gh CLI; null if none or gh can't tell. */
 async function findPr(repoDir: string, branch: string): Promise<BranchStatus['pr']> {
   try {
-    const { stdout } = await run('gh', [
-      'pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', 'number,title,state,url,isDraft',
-    ], { cwd: repoDir, timeout: 20_000 });
+    const { stdout } = await run('gh', ['pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', 'number,title,state,url,isDraft'], { cwd: repoDir, timeout: 20_000 });
     const [pr] = JSON.parse(stdout);
     return pr ? { number: pr.number, title: pr.title, state: pr.state, url: pr.url, draft: !!pr.isDraft } : null;
   } catch {
@@ -85,7 +83,7 @@ export function forgetSettled() {
 
 /** Each named ref that exists, as name → commit, and origin/HEAD's target; one git process. */
 async function readRefs(repoDir: string, names: string[]): Promise<{ sha: Map<string, string>; originHead: string | null }> {
-  const out = await tryGit(['for-each-ref', '--format=%(refname)%09%(objectname)%09%(symref)', '--', ...names], repoDir) ?? '';
+  const out = (await tryGit(['for-each-ref', '--format=%(refname)%09%(objectname)%09%(symref)', '--', ...names], repoDir)) ?? '';
   const sha = new Map<string, string>();
   let originHead: string | null = null;
   for (const line of out.split('\n')) {
@@ -137,11 +135,13 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
     ahead,
     merged,
     empty,
-    build: buildSha ? {
-      n: build!,
-      merged: !empty && await contains(repoDir, buildSha, tip) === true,
-      ahead: (await countBetween(repoDir, buildSha, tip)) ?? 0,
-    } : null,
+    build: buildSha
+      ? {
+          n: build!,
+          merged: !empty && (await contains(repoDir, buildSha, tip)) === true,
+          ahead: (await countBetween(repoDir, buildSha, tip)) ?? 0,
+        }
+      : null,
     pr: withPr ? await findPr(repoDir, branch) : null,
     deploy: merged && live ? await deployed(repoDir, tip, live) : null,
     uncommitted: worktree ? await uncommittedFiles(worktree) : 0,
@@ -151,7 +151,7 @@ export async function branchStatus(repoDir: string, branch: string, startedAt: n
 /** Commits in `tip` that `base` lacks (both hashes); null when git can't tell. */
 function countBetween(repoDir: string, base: string, tip: string): Promise<number | null> {
   return once(`count\0${repoDir}\0${base}\0${tip}`, async () => {
-    const n = Number(await tryGit(['rev-list', '--count', `${base}..${tip}`], repoDir) ?? NaN);
+    const n = Number((await tryGit(['rev-list', '--count', `${base}..${tip}`], repoDir)) ?? NaN);
     return Number.isNaN(n) ? null : n;
   });
 }
@@ -200,8 +200,10 @@ export async function buildRefOf(repoDir: string, build: number): Promise<string
  * fast-forwards don't count. Null when the branch has no reflog.
  */
 export async function madeCommits(repoDir: string, branch: string, since: number): Promise<boolean | null> {
-  const lines = (await tryGit(['reflog', 'show', '--date=unix', '--format=%H %gd %gs', `refs/heads/${branch}`], repoDir) ?? '')
-    .split('\n').map((line) => line.match(/^(\w+) .*?@\{(\d+)\}\s+(.*)$/)).filter((m) => !!m);
+  const lines = ((await tryGit(['reflog', 'show', '--date=unix', '--format=%H %gd %gs', `refs/heads/${branch}`], repoDir)) ?? '')
+    .split('\n')
+    .map((line) => line.match(/^(\w+) .*?@\{(\d+)\}\s+(.*)$/))
+    .filter((m) => !!m);
   if (!lines.length) return null;
   for (const [i, [, sha, time, what]] of lines.entries()) {
     if (Number(time) < since) break;
@@ -254,7 +256,9 @@ export async function checkoutHead(dir: string): Promise<string | null> {
       const sha = (await readFile(join(dir, '.git', ref), 'utf8')).trim();
       if (HASH.test(sha)) return sha;
     }
-  } catch { /* fall back to git */ }
+  } catch {
+    /* fall back to git */
+  }
   return tryGit(['rev-parse', 'HEAD'], dir);
 }
 

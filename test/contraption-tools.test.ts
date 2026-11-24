@@ -50,9 +50,14 @@ after(async () => {
 async function mcp(ticket: { id: number; project_id: number }, method: string, params: object, citadel = ticket.project_id === GLOBAL_OWNER, home?: string, role = 'coordinator'): Promise<any> {
   const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, COORDINATOR_API: srv.base, COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
-      COORDINATOR_PROJECT: String(ticket.project_id), COORDINATOR_TICKET: String(ticket.id), COORDINATOR_ROLE: role,
-      COORDINATOR_APP_INSTRUCTIONS: citadel ? '1' : undefined, COORDINATOR_HOME_CONTRAPTIONS: home,
+      ...process.env,
+      COORDINATOR_API: srv.base,
+      COORDINATOR_TOKEN: tokens.agentToken(ticket.id),
+      COORDINATOR_PROJECT: String(ticket.project_id),
+      COORDINATOR_TICKET: String(ticket.id),
+      COORDINATOR_ROLE: role,
+      COORDINATOR_APP_INSTRUCTIONS: citadel ? '1' : undefined,
+      COORDINATOR_HOME_CONTRAPTIONS: home,
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -80,7 +85,7 @@ function noKeys(text: string, name: string) {
 const MANDATE = { title: 'Mandate', port: 7341, icon: '/icons/icon.svg', default_model: 'haiku', open_paths: [] };
 const ALL = ['list_contraptions', 'register_contraption', 'update_contraption', 'set_contraption_person', 'rotate_contraption_keys', 'contraption_service'];
 
-test('Citadel\'s Taskmaster registers and enables a contraption just as Settings → Contraptions does', async () => {
+test("Citadel's Taskmaster registers and enables a contraption just as Settings → Contraptions does", async () => {
   const names = (await mcp(CitadelTM, 'tools/list', {})).tools.map((x: any) => x.name);
   for (const n of ALL) assert.ok(names.includes(n), n);
 
@@ -115,7 +120,7 @@ test('Citadel\'s Taskmaster registers and enables a contraption just as Settings
   assert.match(on.text, /enabled for cara/);
   // The tool's answer waits only a moment for the server's DB write worker, so this test's own Store waits for the row (#1239).
   await until('cara enabled', () => store.contraptionEnabled('mandate', cara.id));
-  assert.equal(store.db.prepare('SELECT added_by FROM contraption_users WHERE user_id = ?').get(cara.id)!.added_by, cara.id, 'enabled by the turn\'s person');
+  assert.equal(store.db.prepare('SELECT added_by FROM contraption_users WHERE user_id = ?').get(cara.id)!.added_by, cara.id, "enabled by the turn's person");
   assert.equal((await tool(CitadelTM, 'set_contraption_person', { name: 'mandate', login: '42', enabled: true })).isError, false);
   await until('an all-digit login is a login, not an id', () => store.contraptionEnabled('mandate', digits.id));
   assert.equal(store.contraptionEnabled('mandate', 42), false);
@@ -127,7 +132,7 @@ test('Citadel\'s Taskmaster registers and enables a contraption just as Settings
   assert.equal(upd.isError, false, upd.text);
   await until('the update written', () => store.getContraption('mandate')!.title === 'Mandate!');
   assert.deepEqual([store.getContraption('mandate')!.title, store.getContraption('mandate')!.turn_cap, store.getContraption('mandate')!.port], ['Mandate!', 50, 7341]);
-  assert.equal((await tool(CitadelTM, 'update_contraption', { name: 'mandate', port: 80 })).isError, true, 'the route\'s checks apply');
+  assert.equal((await tool(CitadelTM, 'update_contraption', { name: 'mandate', port: 80 })).isError, true, "the route's checks apply");
 
   const before = keyFiles('mandate');
   const rot = await tool(CitadelTM, 'rotate_contraption_keys', { name: 'mandate' });
@@ -149,14 +154,18 @@ test('Citadel\'s Taskmaster registers and enables a contraption just as Settings
   assert.match(bare.text, /^bare: Bare/m);
 });
 
-test('a turn someone who isn\'t an admin asked for is refused, and changes nothing', async () => {
+test("a turn someone who isn't an admin asked for is refused, and changes nothing", async () => {
   turnFor(CitadelTM, olive.id);
   try {
     const before = keyFiles('twin');
     for (const [name, args] of [
-      ['list_contraptions', {}], ['register_contraption', { name: 'sneaky', ...MANDATE }], ['update_contraption', { name: 'twin', title: 'Mine' }],
-      ['set_contraption_person', { name: 'twin', login: 'olive', enabled: true }], ['rotate_contraption_keys', { name: 'twin' }],
-      ['contraption_service', { name: 'twin', action: 'status' }], ['contraption_service', { name: 'twin', action: 'install' }],
+      ['list_contraptions', {}],
+      ['register_contraption', { name: 'sneaky', ...MANDATE }],
+      ['update_contraption', { name: 'twin', title: 'Mine' }],
+      ['set_contraption_person', { name: 'twin', login: 'olive', enabled: true }],
+      ['rotate_contraption_keys', { name: 'twin' }],
+      ['contraption_service', { name: 'twin', action: 'status' }],
+      ['contraption_service', { name: 'twin', action: 'install' }],
     ] as const) {
       const r = await tool(CitadelTM, name, args);
       assert.equal(r.isError, true, name);
@@ -172,21 +181,26 @@ test('a turn someone who isn\'t an admin asked for is refused, and changes nothi
   }
 });
 
-test('another scheme\'s Taskmaster isn\'t offered the tools, and the API refuses it and a minion even if they get them', async () => {
+test("another scheme's Taskmaster isn't offered the tools, and the API refuses it and a minion even if they get them", async () => {
   const names = (await mcp(DelveTM, 'tools/list', {})).tools.map((x: any) => x.name);
   for (const n of ALL) assert.ok(!names.includes(n), n);
   assert.match((await tool(DelveTM, 'list_contraptions')).text, /Unknown tool/);
   for (const t of [DelveTM, Minion]) {
-    for (const [name, args] of [['list_contraptions', {}], ['register_contraption', { name: 'sneaky', ...MANDATE }], ['rotate_contraption_keys', { name: 'twin' }], ['contraption_service', { name: 'twin', action: 'install' }]] as const) {
+    for (const [name, args] of [
+      ['list_contraptions', {}],
+      ['register_contraption', { name: 'sneaky', ...MANDATE }],
+      ['rotate_contraption_keys', { name: 'twin' }],
+      ['contraption_service', { name: 'twin', action: 'install' }],
+    ] as const) {
       const r = await tool(t, name, args, true);
-      assert.equal(r.isError, true, `${name} as ${t === DelveTM ? 'Delve\'s Taskmaster' : 'a minion'}`);
+      assert.equal(r.isError, true, `${name} as ${t === DelveTM ? "Delve's Taskmaster" : 'a minion'}`);
       assert.match(r.text, t === DelveTM ? /Only the Citadel scheme's Taskmaster manages contraptions: ask it with message_taskmaster/ : /A minion may only update itself/, name);
     }
   }
   assert.equal(store.getContraption('sneaky'), undefined);
 });
 
-test('Citadel\'s Taskmaster installs and runs a contraption\'s service, as the Settings buttons do', async () => {
+test("Citadel's Taskmaster installs and runs a contraption's service, as the Settings buttons do", async () => {
   const folder = join(home, 'apps', 'twin');
   const units = join(home, '.config', 'systemd', 'user');
   mkdirSync(units, { recursive: true });
@@ -256,7 +270,13 @@ test('restart and stop carry a risk (#1682): shown first, a typed name for "may 
   assert.equal(r.isError, false, r.text);
 
   const runs = store.contraptionRuns(twin().id);
-  assert.deepEqual(runs.slice(0, 2).map((x) => [x.action, x.risk, x.ok]), [['stop', 'loses_data', 1], ['restart', 'interrupts', 1]]);
+  assert.deepEqual(
+    runs.slice(0, 2).map((x) => [x.action, x.risk, x.ok]),
+    [
+      ['stop', 'loses_data', 1],
+      ['restart', 'interrupts', 1],
+    ],
+  );
   assert.equal(runs[0].by, 'Taskmaster for cara');
   const viewed = await srv.call('/api/contraptions');
   assert.equal(viewed.data.find((c: any) => c.name === 'twin').runs.length, 3, 'with the unassessed stop from the test before');
@@ -269,7 +289,11 @@ test('a boot check never touches systemd, even with the stand-ins set', async ()
   try {
     const before = fake.calls().length;
     assert.equal((await check.call('/api/contraptions', { name: 'mandate', ...MANDATE })).status, 201);
-    for (const [path, body] of [['/api/contraptions/mandate/service', undefined], ['/api/contraptions/mandate/service', { action: 'install' }], ['/api/contraptions/mandate/service/logs', undefined]] as const) {
+    for (const [path, body] of [
+      ['/api/contraptions/mandate/service', undefined],
+      ['/api/contraptions/mandate/service', { action: 'install' }],
+      ['/api/contraptions/mandate/service/logs', undefined],
+    ] as const) {
       const r = await check.call(path, body);
       assert.equal(r.status, 409, path);
       assert.match(r.data.error, /boot check or a preview never touches app services/);
@@ -280,7 +304,7 @@ test('a boot check never touches systemd, even with the stand-ins set', async ()
   }
 });
 
-test('deploy_contraption: its home scheme\'s Taskmaster and minions, and Citadel\'s Taskmaster on an admin\'s turn; no one else', async () => {
+test("deploy_contraption: its home scheme's Taskmaster and minions, and Citadel's Taskmaster on an admin's turn; no one else", async () => {
   const DelveMinion = thread(Delve.id, 'ticket');
   turnFor(DelveMinion, olive.id);
   store.updateContraption('twin', { home_scheme: Delve.id, repo: null });
@@ -289,7 +313,7 @@ test('deploy_contraption: its home scheme\'s Taskmaster and minions, and Citadel
   assert.equal(await offered(DelveMinion, false, 'twin'), true, 'home minion');
   assert.equal(await offered(DelveTM, false), false, 'a scheme home to none');
   assert.equal(await offered(Minion, false), false, 'a minion of a scheme home to none');
-  assert.equal(await offered(CitadelTM, true), true, 'Citadel\'s Taskmaster');
+  assert.equal(await offered(CitadelTM, true), true, "Citadel's Taskmaster");
 
   const call = async (t: any, citadel = false) => {
     const child = await mcp(t, 'tools/call', { name: 'deploy_contraption', arguments: { name: 'twin' } }, citadel, 'twin', t.kind === 'ticket' ? 'thread' : 'coordinator');
@@ -325,7 +349,7 @@ test('deploy_contraption: its home scheme\'s Taskmaster and minions, and Citadel
   assert.equal((await srv.call('/api/contraptions/twin/deploy')).status, 200, 'an admin reads the last deploy');
 });
 
-test('publish_release: offered to a home scheme\'s Taskmaster and minions; the server refuses another scheme\'s contraption and one with no Android feed (#663)', async () => {
+test("publish_release: offered to a home scheme's Taskmaster and minions; the server refuses another scheme's contraption and one with no Android feed (#663)", async () => {
   const DelveMinion = thread(Delve.id, 'ticket');
   turnFor(DelveMinion, olive.id);
   store.updateContraption('twin', { home_scheme: Delve.id });
@@ -334,7 +358,7 @@ test('publish_release: offered to a home scheme\'s Taskmaster and minions; the s
   assert.equal(await offered(DelveTM, 'twin'), true, 'home Taskmaster');
   assert.equal(await offered(DelveMinion, 'twin'), true, 'home minion');
   assert.equal(await offered(DelveMinion), false, 'a scheme home to none');
-  assert.equal(await offered(CitadelTM), false, 'Citadel\'s Taskmaster is not offered another scheme\'s');
+  assert.equal(await offered(CitadelTM), false, "Citadel's Taskmaster is not offered another scheme's");
 
   const call = async (t: any) => (await mcp(t, 'tools/call', { name: 'publish_release', arguments: { contraption: 'twin' } }, false, 'twin', role(t))).content[0].text as string;
   // Through to the release step: twin has no android/latest.json feed, so nothing Citadel can publish.

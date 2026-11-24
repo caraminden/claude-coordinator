@@ -32,8 +32,15 @@ const STUB = `<script>
 
 let app: App;
 let browser: Browser;
-before(async () => { if (skip) return; app = await serveApp({ stub: STUB }); browser = await launch(bin!); });
-after(async () => { await browser?.close(); await app?.close(); });
+before(async () => {
+  if (skip) return;
+  app = await serveApp({ stub: STUB });
+  browser = await launch(bin!);
+});
+after(async () => {
+  await browser?.close();
+  await app?.close();
+});
 
 /** A real click: move there, press, release. */
 async function click(page: Awaited<ReturnType<Browser['page']>>, at: { x: number; y: number }) {
@@ -43,7 +50,7 @@ async function click(page: Awaited<ReturnType<Browser['page']>>, at: { x: number
 
 const tip = `(document.querySelector('.why-tip:popover-open')?.textContent ?? '')`;
 
-test('a minion with two waits shows one line each in one popover, and it stays on its minion through another minion\'s change', { skip }, async () => {
+test("a minion with two waits shows one line each in one popover, and it stays on its minion through another minion's change", { skip }, async () => {
   const page = await browser.page(`${app.base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the chips', `document.querySelectorAll('.wait-chip[data-wait-id="102"]').length === 1`);
   const c = await page.centre('.wait-chip[data-wait-id="102"]');
@@ -57,7 +64,7 @@ test('a minion with two waits shows one line each in one popover, and it stays o
   assert.ok(await page.eval<boolean>(`${tip}.includes('check the run') && ${tip}.includes('Note from #1') && !${tip}.includes('cancelled wake')`));
   // B's own change shows in the open popover.
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...b, outbox_waits: [b.outbox_waits[1]], updated_at: Date.now() } }) })`);
-  await waitFor(page, 'B\'s update', `!${tip}.includes('check the run') && ${tip}.includes('Note from #1')`);
+  await waitFor(page, "B's update", `!${tip}.includes('check the run') && ${tip}.includes('Note from #1')`);
 });
 
 // #1512 (Cara, 2026-11-21: "a headline single sentence description, and then clicking it opens a few sentence summary"; take A, opens in place).
@@ -88,12 +95,12 @@ test('a wait line is a headline with its first sentence under it; a click opens 
   // click pressed before the redraw and released after it still lands (the burn-in race, #1512).
   await page.eval(`document.querySelector('.thread-row[data-id="102"]').dataset.old = '1'; document.querySelector('.why-tip:popover-open .wait-line-hd').dataset.old = '1'`);
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...b, updated_at: Date.now() } }) })`);
-  await waitFor(page, 'B\'s row to redraw', `!document.querySelector('.thread-row[data-id="102"]')?.dataset.old`);
+  await waitFor(page, "B's row to redraw", `!document.querySelector('.thread-row[data-id="102"]')?.dataset.old`);
   await page.eval(`new Promise((r) => queueMicrotask(r))`);
   assert.equal(await page.eval(`document.querySelector('.why-tip:popover-open .wait-line-hd')?.dataset.old`), '1', 'a redraw with nothing new leaves the popover alone');
   // B's waits change (another wait goes): the popover redraws and the open line stays open, without animating again.
   await page.eval(`es.onmessage({ data: JSON.stringify({ type: 'ticket', ticket: { ...b, outbox_waits: b.outbox_waits.slice(1), updated_at: Date.now() } }) })`);
-  await waitFor(page, 'B\'s update', `!${tip}.includes('check the run')`);
+  await waitFor(page, "B's update", `!${tip}.includes('check the run')`);
   const open = `document.querySelector('.why-tip:popover-open .wait-line.open')`;
   assert.ok(await page.eval<boolean>(`!!${open}?.textContent.includes('Three and four.') && !${open}.classList.contains('opening')`));
   // A wait with no words of its own opens to its facts alone; a second click closes it.
@@ -108,7 +115,7 @@ test('a wait line is a headline with its first sentence under it; a click opens 
 });
 
 // #1676 (Cara, 2026-11-22: "this should link to the minion it is waiting on"): the chip's "⇢ #N" opens that minion, not the row or the popover.
-test('a wait chip naming a minion links to it, and the click opens neither the row\'s chat nor the popover', { skip }, async () => {
+test("a wait chip naming a minion links to it, and the click opens neither the row's chat nor the popover", { skip }, async () => {
   const page = await browser.page(`${app.base}#/p/1`, { width: 1280, height: 800 });
   await waitFor(page, 'the link', `!!document.querySelector('.wait-chip[data-wait-id="101"] a.wait-chip-link')`);
   assert.equal(await page.eval(`document.querySelector('.wait-chip[data-wait-id="101"] a').getAttribute('aria-label')`), 'Waits on #2');

@@ -7,10 +7,7 @@ import { dirname, join, relative } from 'node:path';
 const HERE = import.meta.dirname;
 const TEMPLATE = join(HERE, 'template');
 /** Copied as they are: the kit's stand-in icons and its fake Citadel, so a fix in the kit reaches the next app. */
-const COPIED: [string, string][] = [
-  ...['icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'].map((f): [string, string] => [join(HERE, '..', 'starter', f), join('public', f)]),
-  [join(HERE, '..', 'fake-citadel', 'fake-citadel.ts'), join('test', 'fake-citadel.ts')],
-];
+const COPIED: [string, string][] = [...['icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'].map((f): [string, string] => [join(HERE, '..', 'starter', f), join('public', f)]), [join(HERE, '..', 'fake-citadel', 'fake-citadel.ts'), join('test', 'fake-citadel.ts')]];
 /** Citadel's contraption name rule (src/contraptions.ts CONTRAPTION_NAME). */
 export const NAME = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 /** A title lands in HTML, JSON and code comments unescaped, so it keeps to characters safe in all three. */

@@ -71,7 +71,9 @@ export function step(prev: WatchState, found: Map<string, { title: string; findi
     const theirs = <T>(list: [string, T][]) => (only ? list.filter(([k]) => only.has(k)) : list);
     const [newDown, newBack] = [theirs(fresh), theirs(back)];
     if (!newDown.length && !newBack.length) return null;
-    const down = theirs(Object.entries(sent)).filter(([, e]) => e.alerted).map(([, e]) => e);
+    const down = theirs(Object.entries(sent))
+      .filter(([, e]) => e.alerted)
+      .map(([, e]) => e);
     const parts: string[] = [];
     if (down.length) parts.push(`Down: ${down.map((e) => `${e.title} ${mins(now - e.since)} (${e.why})`).join(', ')}.`);
     if (newBack.length) parts.push(`${down.length ? 'Back' : 'All back'}: ${newBack.map(([, e]) => `${e.title} (${e.upWhy} after ${mins(e.upAt! - e.since)})`).join(', ')}.`);
@@ -116,14 +118,18 @@ export interface Recipient {
  */
 export function recipients(db: DatabaseSync): Recipient[] {
   // Not a desktop app's device (#1186): hears through Citadel's own stream, down with it.
-  const admins = db.prepare(`SELECT name, endpoint, p256dh, auth FROM push_subscriptions
-    WHERE endpoint NOT LIKE 'desktop:%' AND name COLLATE NOCASE IN (SELECT name FROM users WHERE admin = 1 AND disabled_at IS NULL) ORDER BY id`).all() as any[];
-  const owners = db.prepare(`SELECT s.name, s.endpoint, s.p256dh, s.auth, 'app:' || c.name AS key FROM contraptions c
+  const admins = db
+    .prepare(`SELECT name, endpoint, p256dh, auth FROM push_subscriptions
+    WHERE endpoint NOT LIKE 'desktop:%' AND name COLLATE NOCASE IN (SELECT name FROM users WHERE admin = 1 AND disabled_at IS NULL) ORDER BY id`)
+    .all() as any[];
+  const owners = db
+    .prepare(`SELECT s.name, s.endpoint, s.p256dh, s.auth, 'app:' || c.name AS key FROM contraptions c
     JOIN projects p ON p.id = c.home_scheme JOIN users u ON u.id = p.owner_id
     JOIN push_subscriptions s ON s.name = u.name COLLATE NOCASE
     WHERE s.endpoint NOT LIKE 'desktop:%' AND u.admin = 0 AND u.disabled_at IS NULL AND EXISTS (SELECT 1 FROM contraption_users cu
       JOIN contraptions m ON m.id = cu.contraption_id WHERE m.name = 'mandate' AND cu.user_id = u.id)
-    ORDER BY s.id, c.name`).all() as any[];
+    ORDER BY s.id, c.name`)
+    .all() as any[];
   const out: Recipient[] = admins.map((s) => ({ ...s, only: null }));
   const byDevice = new Map<string, Recipient>();
   for (const { key, ...s } of owners) {
@@ -140,11 +146,17 @@ export interface UnitState {
 }
 
 export function unitState(unit: string, systemctl = 'systemctl'): Promise<UnitState> {
-  return new Promise((ok, fail) => execFile(systemctl, ['--user', 'show', unit, '-p', 'ActiveState', '-p', 'UnitFileState'], { timeout: 15_000 }, (err, out) => {
-    if (err) return fail(new Error(`systemctl show ${unit}: ${err.message}`));
-    const v = Object.fromEntries(String(out).split('\n').map((l) => l.split(/=(.*)/s).slice(0, 2)));
-    ok({ active: v.ActiveState ?? 'unknown', enabled: v.UnitFileState ?? '' });
-  }));
+  return new Promise((ok, fail) =>
+    execFile(systemctl, ['--user', 'show', unit, '-p', 'ActiveState', '-p', 'UnitFileState'], { timeout: 15_000 }, (err, out) => {
+      if (err) return fail(new Error(`systemctl show ${unit}: ${err.message}`));
+      const v = Object.fromEntries(
+        String(out)
+          .split('\n')
+          .map((l) => l.split(/=(.*)/s).slice(0, 2)),
+      );
+      ok({ active: v.ActiveState ?? 'unknown', enabled: v.UnitFileState ?? '' });
+    }),
+  );
 }
 
 /** Null when it answers within `ms`, else why not. */
@@ -162,19 +174,24 @@ export async function answer(probe: Target['probe'], ms = 5000): Promise<Finding
   return new Promise((ok) => {
     const sock = connect({ host: '127.0.0.1', port: probe.port, timeout: ms });
     const done = (why: Finding) => (sock.destroy(), ok(why));
-    sock.once('connect', () => done(null)).once('timeout', () => done(`port ${probe.port} not answering`)).once('error', () => done(`port ${probe.port} closed`));
+    sock
+      .once('connect', () => done(null))
+      .once('timeout', () => done(`port ${probe.port} not answering`))
+      .once('error', () => done(`port ${probe.port} closed`));
   });
 }
 
 /** Check every target: its unit first (a stopped one isn't worth a probe), then whether it answers. Contraptions whose unit isn't enabled are left out. */
 export async function check(list: Target[], deps = { unitState, answer }): Promise<Map<string, { title: string; finding: Finding }>> {
   const found = new Map<string, { title: string; finding: Finding }>();
-  await Promise.all(list.map(async (t) => {
-    // A wedged user bus mustn't silence the rest: without a unit state, whether it answers decides.
-    const u = await deps.unitState(t.unit).catch((err: Error) => (console.error(err.message), null));
-    if (u && !t.always && u.enabled !== 'enabled') return;
-    const finding = u && u.active !== 'active' ? u.active : await deps.answer(t.probe);
-    found.set(t.key, { title: t.title, finding });
-  }));
+  await Promise.all(
+    list.map(async (t) => {
+      // A wedged user bus mustn't silence the rest: without a unit state, whether it answers decides.
+      const u = await deps.unitState(t.unit).catch((err: Error) => (console.error(err.message), null));
+      if (u && !t.always && u.enabled !== 'enabled') return;
+      const finding = u && u.active !== 'active' ? u.active : await deps.answer(t.probe);
+      found.set(t.key, { title: t.title, finding });
+    }),
+  );
   return found;
 }

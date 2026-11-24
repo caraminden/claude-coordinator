@@ -9,14 +9,24 @@ import { readFileSync, watch } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-export interface CountsBody { done: number; total: number; file: string; failed: string[]; phase: 'suite' | 'rerun' }
+export interface CountsBody {
+  done: number;
+  total: number;
+  file: string;
+  failed: string[];
+  phase: 'suite' | 'rerun';
+}
 
 /** POST /api/ci-tests's body from a progress file's text, or null while it holds no counts. */
 export function countsBody(text: string): CountsBody | null {
   const [done, total, file = '', failed = '', phase = ''] = text.split('\n');
   if (!/^\d{1,9}$/.test(done) || !/^\d{1,9}$/.test(total) || +total === 0 || +done > +total) return null;
   // Citadel keeps 20 names of 200 characters at most; cut here too, so a long list never makes the body too big.
-  const names = failed.split('\t').filter(Boolean).slice(0, 20).map((f) => f.slice(0, 200));
+  const names = failed
+    .split('\t')
+    .filter(Boolean)
+    .slice(0, 20)
+    .map((f) => f.slice(0, 200));
   return { done: +done, total: +total, file: file.slice(0, 200), failed: names, phase: phase === 'rerun' ? 'rerun' : 'suite' };
 }
 
@@ -25,7 +35,12 @@ async function main(path: string) {
   const store = env.CITADEL_STORE_URL || 'http://perigee.tail59477f.ts.net:8574';
   const every = Number(env.CI_PROGRESS_EVERY) * 1000 || 2_000;
   const said = new Set<string>();
-  const warn = (why: string) => { if (!said.has(why)) { said.add(why); console.error(`ci-progress: ${why}; the tests go on`); } };
+  const warn = (why: string) => {
+    if (!said.has(why)) {
+      said.add(why);
+      console.error(`ci-progress: ${why}; the tests go on`);
+    }
+  };
   // GitHub's hosted runners aren't on the tailnet, so they can't reach Citadel.
   if (env.RUNNER_ENVIRONMENT === 'github-hosted') return;
   if (!env.ACTIONS_ID_TOKEN_REQUEST_URL || !env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) return warn("no run token (the job needs 'permissions: id-token: write'), so the Releases page shows no counts");
@@ -34,12 +49,23 @@ async function main(path: string) {
   let latest: CountsBody | null = null;
   const look = () => {
     let body: CountsBody | null = null;
-    try { body = countsBody(readFileSync(path, 'utf8')); } catch { /* no run going: between the full run and its reruns */ }
+    try {
+      body = countsBody(readFileSync(path, 'utf8'));
+    } catch {
+      /* no run going: between the full run and its reruns */
+    }
     if (body) latest = body;
     return body;
   };
-  try { watch(dirname(path), { persistent: false }, (_, name) => { if (name === basename(path)) look(); }).on('error', () => {}); } catch { /* the sends still read it */ }
-  let token = '', got = 0;
+  try {
+    watch(dirname(path), { persistent: false }, (_, name) => {
+      if (name === basename(path)) look();
+    }).on('error', () => {});
+  } catch {
+    /* the sends still read it */
+  }
+  let token = '',
+    got = 0;
   const send = async (body: CountsBody) => {
     try {
       // A run token lasts minutes: a fresh one every 4, or after a refusal.
@@ -50,7 +76,9 @@ async function main(path: string) {
         if (!token) return warn(`GitHub didn't hand out a run token (HTTP ${r.status})`);
       }
       const r = await fetch(`${store}/api/ci-tests`, {
-        method: 'POST', body: JSON.stringify(body), signal: AbortSignal.timeout(15_000),
+        method: 'POST',
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       });
       if (r.status === 401) token = '';
@@ -76,6 +104,9 @@ async function main(path: string) {
 }
 
 if (import.meta.main) {
-  if (!process.argv[2]) { console.error('usage: node tools/ci-progress.ts <progress file>'); process.exit(2); }
+  if (!process.argv[2]) {
+    console.error('usage: node tools/ci-progress.ts <progress file>');
+    process.exit(2);
+  }
   main(process.argv[2]).catch((err) => console.error(`ci-progress: stopped: ${err?.message ?? err}`));
 }

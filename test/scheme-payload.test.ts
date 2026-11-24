@@ -15,13 +15,17 @@ const store = new Store(join(data, 'coordinator.db'));
 const P = store.createProject('A', null);
 const TM = store.createTicket({ project_id: P.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Cara' });
 const minion = (title: string) => store.createTicket({ project_id: P.id, title, permission_mode: 'default', created_by: 'Cara' }).id;
-const open = minion('still open'), gone = minion('dismissed one'), gone2 = minion('dismissed two');
+const open = minion('still open'),
+  gone = minion('dismissed one'),
+  gone2 = minion('dismissed two');
 store.updateTicket(gone, { status: 'closed' });
 store.updateTicket(gone2, { status: 'closed' });
 store.db.close();
 
 let srv: Booted;
-before(async () => { srv = await bootServer({ root }); });
+before(async () => {
+  srv = await bootServer({ root });
+});
 after(async () => {
   await srv?.stop();
   rmSync(root, { recursive: true, force: true });
@@ -47,7 +51,7 @@ test('the scheme payload: everything, the open minions with a count of the dismi
   assert.deepEqual(await ids('?number=9999'), []);
 });
 
-test('the scheme list names each scheme\'s Taskmaster', async () => {
+test("the scheme list names each scheme's Taskmaster", async () => {
   const { data } = await srv.call('/api/projects');
   assert.equal(data.find((p: any) => p.id === P.id).coordinator_id, TM.id);
 });
@@ -62,7 +66,13 @@ test('the dismissed list pages newest first with limit and before, and finds by 
   assert.equal(page2.tickets.length, 1);
   assert.notEqual(page2.tickets[0].id, last.id);
   assert.equal(page2.more, false);
-  assert.deepEqual((await get('&q=two')).tickets.map((t: any) => t.id), [gone2]);
-  assert.deepEqual((await get(`&ids=${gone}`)).tickets.map((t: any) => t.id), [gone]);
+  assert.deepEqual(
+    (await get('&q=two')).tickets.map((t: any) => t.id),
+    [gone2],
+  );
+  assert.deepEqual(
+    (await get(`&ids=${gone}`)).tickets.map((t: any) => t.id),
+    [gone],
+  );
   assert.equal((await get('&since=99999999999999')).tickets.length, 0);
 });

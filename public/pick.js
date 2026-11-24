@@ -19,7 +19,10 @@ let active = null;
 /** The chat a pick goes to, now: this chat, or the scheme's Taskmaster from a page with no chat. Null (and a toast) with neither. */
 function target() {
   const chatId = view?.main === 'chat' ? view.id : view?.coordinator?.id;
-  if (!chatId) { toast('Open a scheme first: what you point at goes to one of its chats', { tone: 'warn' }); return null; }
+  if (!chatId) {
+    toast('Open a scheme first: what you point at goes to one of its chats', { tone: 'warn' });
+    return null;
+  }
   const coordinator = chatId === view.coordinator?.id ? view.coordinator : null;
   return { chatId, coordinator, ticket: coordinator ?? view.ticket };
 }
@@ -37,15 +40,13 @@ export function startPick() {
   if (!to) return;
   const { chatId, coordinator } = to;
   const box = h('div', { class: 'pick-box', hidden: true });
-  const hint = h('div', { class: 'pick-hint', role: 'status' },
-    h('span', {}, matchMedia('(hover: hover)').matches ? 'Click the thing you mean' : 'Tap the thing you mean'),
-    h('button', { type: 'button', class: 'secondary small', onclick: () => stop() }, 'Cancel'));
+  const hint = h('div', { class: 'pick-hint', role: 'status' }, h('span', {}, matchMedia('(hover: hover)').matches ? 'Click the thing you mean' : 'Tap the thing you mean'), h('button', { type: 'button', class: 'secondary small', onclick: () => stop() }, 'Cancel'));
   // The dim catches every press, so nothing under it acts on the click that picks.
   const dim = h('div', { class: 'pick-dim' });
   document.body.append(dim, box, hint);
   const under = (x, y) => {
     const el = document.elementsFromPoint(x, y).find((e) => e !== dim && e !== box && !hint.contains(e));
-    return el && el !== document.documentElement && el !== document.body ? el.closest(PICKABLE) ?? el : null;
+    return el && el !== document.documentElement && el !== document.body ? (el.closest(PICKABLE) ?? el) : null;
   };
   const show = (el) => {
     box.hidden = !el;
@@ -72,7 +73,10 @@ export function startPick() {
     show(el);
     // The dim stays a moment to take the click that follows a tap, so it can't reach what's under it. A screenshot
     // (the desktop app) would catch it and the box: they go see-through.
-    if (capture) { dim.style.setProperty('background', 'transparent'); box.hidden = true; }
+    if (capture) {
+      dim.style.setProperty('background', 'transparent');
+      box.hidden = true;
+    }
     hint.remove();
     removeEventListener('keydown', onKey, true);
     setTimeout(stop, 300);
@@ -97,7 +101,10 @@ export function startPick() {
   dim.addEventListener('pointerdown', (e) => e.preventDefault());
   dim.addEventListener('click', (e) => e.preventDefault());
   // A right-click while picking picks too (#1663), rather than opening a menu over the dim.
-  dim.addEventListener('contextmenu', (e) => { e.stopPropagation(); pick(e); });
+  dim.addEventListener('contextmenu', (e) => {
+    e.stopPropagation();
+    pick(e);
+  });
   addEventListener('keydown', onKey, true);
   active = { stop };
 }
@@ -138,7 +145,9 @@ export function pageName() {
   if (!view) return 'Citadel';
   if (view.main === 'chat') return view.id === view.coordinator?.id ? `${taskmasterName()}'s chat` : `#${view.ticket?.number ?? view.id}'s chat`;
   const main = typeof view.main === 'string' ? view.main : view.kind;
-  return `${String(main ?? 'Citadel').replace(/[-_]/g, ' ').replace(/^\w/, (c) => c.toUpperCase())} page`;
+  return `${String(main ?? 'Citadel')
+    .replace(/[-_]/g, ' ')
+    .replace(/^\w/, (c) => c.toUpperCase())} page`;
 }
 
 /**
@@ -158,8 +167,7 @@ addEventListener('message', async (e) => {
   if (!to) return;
   const note = { label: d.note.label.slice(0, 200), text: d.note.text.slice(0, 2000) };
   const r = frameRect(d.rect);
-  const crop = d.crop instanceof Blob && d.crop.type === 'image/png' ? d.crop
-    : capture && r ? await captureBox({ left: at.left + r.left, top: at.top + r.top, width: r.width, height: r.height }) : null;
+  const crop = d.crop instanceof Blob && d.crop.type === 'image/png' ? d.crop : capture && r ? await captureBox({ left: at.left + r.left, top: at.top + r.top, width: r.width, height: r.height }) : null;
   pointAt(to.chatId, null, note);
   if (to.ticket) location.hash = threadHref(to.ticket);
   if (crop) pointAt(to.chatId, crop, null, { draw: !!d.draw });

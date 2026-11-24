@@ -55,7 +55,10 @@ test('a stale stamp (the reload never happened) does not hide a later cold open'
 
 // The installed app's window buttons sit on the theme-color metas' colour: the map's top while the splash shows, so
 // they're no white strip over it, and the page's plain colour once it lifts (#1691).
-for (const [name, hash] of [['', ''], [', when a slow page head makes its lift due at once', '#slow']]) {
+for (const [name, hash] of [
+  ['', ''],
+  [', when a slow page head makes its lift due at once', '#slow'],
+]) {
   test(`while the splash shows, the title bar takes the map colour, and gets its plain one back when it lifts${name}`, { skip }, async () => {
     const page = await browser.page(app.base + hash);
     const bar = `[...document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')].map((m) => m.content).join(' ')`;

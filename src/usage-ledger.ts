@@ -18,9 +18,22 @@ const MAX_PENDING = 2000;
 /** A name as the ledger keeps it: only these characters, cut short, so a name can't carry content. */
 export const usageName = (name: string) => name.replace(/[^\w:./@ -]/g, '').slice(0, MAX_NAME);
 
-export interface UsageRow { kind: UsageKind; name: string; first: string; last: string; n: number; days: number }
+export interface UsageRow {
+  kind: UsageKind;
+  name: string;
+  first: string;
+  last: string;
+  n: number;
+  days: number;
+}
 
-interface Pending { day: string; kind: UsageKind; name: string; n: number; people: Set<string> }
+interface Pending {
+  day: string;
+  kind: UsageKind;
+  name: string;
+  n: number;
+  people: Set<string>;
+}
 
 export class UsageLedger {
   private pending = new Map<string, Pending>();
@@ -41,7 +54,10 @@ export class UsageLedger {
       const clean = usageName(name);
       if (!clean) return;
       const day = pacificDay(this.now());
-      if (day !== this.seenDay) { this.seen.clear(); this.seenDay = day; }
+      if (day !== this.seenDay) {
+        this.seen.clear();
+        this.seenDay = day;
+      }
       const key = `${day}\0${kind}\0${clean}`;
       let p = this.pending.get(key);
       if (!p) {
@@ -56,7 +72,9 @@ export class UsageLedger {
         if (!s) this.seen.set(key, (s = new Set()));
         s.add(who);
       }
-    } catch { /* counting never fails a caller */ }
+    } catch {
+      /* counting never fails a caller */
+    }
   }
 
   /** Write the counts so far. Returns whether it wrote; on a failure the counts are kept for the next flush. */
@@ -70,7 +88,11 @@ export class UsageLedger {
         for (const [key, p] of this.pending) up.run(p.day, p.kind, p.name, this.seen.get(key)?.size ?? 0, p.n);
         this.db.exec('COMMIT');
       } catch (err) {
-        try { this.db.exec('ROLLBACK'); } catch { /* already closed */ }
+        try {
+          this.db.exec('ROLLBACK');
+        } catch {
+          /* already closed */
+        }
         throw err;
       }
       this.pending.clear();
@@ -94,7 +116,11 @@ export class UsageLedger {
 
   /** Rows older than this many days are dropped, so the table stays small. */
   prune(days = 400): void {
-    try { this.db.prepare('DELETE FROM usage_counts WHERE day < ?').run(pacificDay(this.now() - days * 86_400_000)); } catch { /* next time */ }
+    try {
+      this.db.prepare('DELETE FROM usage_counts WHERE day < ?').run(pacificDay(this.now() - days * 86_400_000));
+    } catch {
+      /* next time */
+    }
   }
 }
 
@@ -106,6 +132,5 @@ export function unusedList(rows: UsageRow[], known: { kind: UsageKind; name: str
   const byKey = new Map(rows.map((r) => [`${r.kind}\0${r.name}`, r]));
   for (const k of known) if (!byKey.has(`${k.kind}\0${k.name}`)) byKey.set(`${k.kind}\0${k.name}`, { ...k, first: since ?? today, last: '', n: 0, days: 0 });
   const cutoff = pacificDay(Date.parse(`${today}T12:00:00Z`) - UNUSED_MS);
-  return [...byKey.values()].map((r) => ({ ...r, never: !r.last, idle: !r.last || r.last < cutoff }))
-    .sort((a, b) => Number(b.idle) - Number(a.idle) || (a.last || '').localeCompare(b.last || '') || a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
+  return [...byKey.values()].map((r) => ({ ...r, never: !r.last, idle: !r.last || r.last < cutoff })).sort((a, b) => Number(b.idle) - Number(a.idle) || (a.last || '').localeCompare(b.last || '') || a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
 }

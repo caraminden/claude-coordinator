@@ -19,7 +19,9 @@ process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 // A `claude -p` that runs until the test lets it go, so the checks below have a turn that is certainly live.
 const go = join(root, 'go');
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 const { existsSync } = require('node:fs');
 const t = setInterval(() => {
   if (!existsSync(${JSON.stringify(go)})) return;
@@ -27,7 +29,8 @@ const t = setInterval(() => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 }, 20);
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 // #1618: the row a read is served can be behind the write queue (src/db-writer.ts gives up after READ_WAIT_MS and
@@ -40,7 +43,12 @@ test('a minion shows as running while its turn is live, however stale the row th
   const project = store.createProject('P', null);
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
-  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   try {
     runner.send(t.id, 'Cara', 'look into it');
     await until('the turn to start', () => runner.isRunning(t.id));

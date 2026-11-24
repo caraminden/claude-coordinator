@@ -26,7 +26,10 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 const WINDOW_MS = 14 * 24 * 60 * 60_000; // src/flakes.ts's FLAKE_WINDOW_MS
-const BROKEN_MS = 6 * 60 * 60_000, BROKEN_SHARE = 0.2, BROKEN_RUNS = 5, BROKEN_REDS = 3;
+const BROKEN_MS = 6 * 60 * 60_000,
+  BROKEN_SHARE = 0.2,
+  BROKEN_RUNS = 5,
+  BROKEN_REDS = 3;
 const [branchList = '', ...files] = process.argv.slice(2);
 if (!files.length) {
   console.error('usage: known-flakes.ts <branches> <file>...');
@@ -42,11 +45,17 @@ const recent = new Map<string, { at: number; branch: string }[]>(); // file -> i
 let runs = 1; // the run being judged
 const root = process.env.COORDINATOR_SHARED_DIR ? join(process.env.COORDINATOR_SHARED_DIR, 'retro-log') : '';
 let days: string[] = [];
-try { days = root ? readdirSync(root).filter((d) => /^\d{4}-\d\d-\d\d$/.test(d)) : []; } catch {}
+try {
+  days = root ? readdirSync(root).filter((d) => /^\d{4}-\d\d-\d\d$/.test(d)) : [];
+} catch {}
 for (const day of days) {
   if (Date.parse(`${day}T23:59:59Z`) < now - WINDOW_MS) continue;
   let md = '';
-  try { md = readFileSync(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
+  try {
+    md = readFileSync(join(root, day, 'land.md'), 'utf8');
+  } catch {
+    continue;
+  }
   for (const m of md.matchAll(/^- (\d\d:\d\d:\d\d)Z · (timing|flake rerun|bisect run) · (.+)$/gm)) {
     const at = Date.parse(`${day}T${m[1]}Z`);
     if (Number.isNaN(at) || at < now - BROKEN_MS) continue;
@@ -58,7 +67,11 @@ for (const day of days) {
     if (parts[1] === 'smoke' || Number.isNaN(at) || at < now - WINDOW_MS) continue; // a smoke line names no branch
     const branch = parts.slice(1).find((x) => x !== 'in CI' && !x.startsWith('load ') && !x.startsWith('with '));
     if (branch && at >= now - BROKEN_MS) recent.set(parts[0], [...(recent.get(parts[0]) ?? []), { at, branch }]);
-    const riders = parts.find((x) => x.startsWith('with '))?.slice(5).split(' ') ?? [];
+    const riders =
+      parts
+        .find((x) => x.startsWith('with '))
+        ?.slice(5)
+        .split(' ') ?? [];
     if (branch && !mine.has(branch) && !riders.some((b) => mine.has(b))) sights.set(parts[0], [...(sights.get(parts[0]) ?? []), { at, branch }]);
   }
 }
@@ -71,13 +84,17 @@ try {
   if (process.env.LAND_FLAKE_DB && Number.isInteger(ticket) && ticket > 0) {
     const db = new DatabaseSync(process.env.LAND_FLAKE_DB, { readOnly: true });
     try {
-      const rows = db.prepare(`SELECT f.file, f.state, f.held_at, t.number, t.status FROM flake_fixes f LEFT JOIN tickets t ON t.id = f.ticket_id
-        WHERE f.project_id = (SELECT project_id FROM tickets WHERE id = ?)`).all(ticket) as { file: string; state: string; held_at: number | null; number: number | null; status: string | null }[];
+      const rows = db
+        .prepare(`SELECT f.file, f.state, f.held_at, t.number, t.status FROM flake_fixes f LEFT JOIN tickets t ON t.id = f.ticket_id
+        WHERE f.project_id = (SELECT project_id FROM tickets WHERE id = ?)`)
+        .all(ticket) as { file: string; state: string; held_at: number | null; number: number | null; status: string | null }[];
       for (const r of rows) {
         if (r.state === 'open' && r.status && r.status !== 'closed') fixes.set(r.file, r.number);
         else if (r.state === 'held' && r.held_at) held.set(r.file, Math.max(held.get(r.file) ?? 0, r.held_at));
       }
-    } finally { db.close(); }
+    } finally {
+      db.close();
+    }
   }
 } catch {}
 
@@ -91,10 +108,7 @@ for (const file of files) {
     continue;
   }
   const branches = new Set((sights.get(file) ?? []).filter((s) => s.at > fixedAt).map((s) => s.branch));
-  const why = [
-    ...(branches.size ? [`seen on ${branches.size} other branch${branches.size === 1 ? '' : 'es'} in 14 days`] : []),
-    ...(fixes.has(file) ? [fixes.get(file) ? `fix #${fixes.get(file)}` : 'a minion is fixing it'] : []),
-  ];
+  const why = [...(branches.size ? [`seen on ${branches.size} other branch${branches.size === 1 ? '' : 'es'} in 14 days`] : []), ...(fixes.has(file) ? [fixes.get(file) ? `fix #${fixes.get(file)}` : 'a minion is fixing it'] : [])];
   if (!why.length) {
     all = false;
     console.log(`${file} (not seen on another branch in 14 days${fixedAt ? ' since its fix passed its proof' : ''}, and no minion is fixing it)`);

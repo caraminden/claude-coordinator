@@ -9,8 +9,7 @@ import { landsBuilds } from '../src/workspace.ts';
 
 const project = { id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' } as any;
 const minion = { id: 9, number: 12, title: 'A feeder', kind: 'ticket', branch: 'ticket/12-a-feeder', build: 7 } as any;
-const prompt = (build: any, builds = false, kind = 'ticket') =>
-  systemPrompt(project, { ...minion, kind }, null, null, '/tickets', null, [], true, '', null, [], build, builds);
+const prompt = (build: any, builds = false, kind = 'ticket') => systemPrompt(project, { ...minion, kind }, null, null, '/tickets', null, [], true, '', null, [], build, builds);
 
 test('build lines are given only to a minion in a build with its branch made, and the Taskmaster gets the build line only when the scheme can land one', () => {
   assert.deepEqual(buildLines(null), []);

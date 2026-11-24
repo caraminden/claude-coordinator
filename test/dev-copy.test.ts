@@ -70,7 +70,7 @@ test('start, status, a second start that replaces the first, then stop leaves no
   assert.match(run(['stop']).stdout, /No dev copy was running/);
 });
 
-test('env hands a script the copy\'s URL, cookie and pid; seed adds a state to an empty copy and prints its route (#642)', async () => {
+test("env hands a script the copy's URL, cookie and pid; seed adds a state to an empty copy and prints its route (#642)", async () => {
   const none = spawnSync('bash', ['-c', `eval "$('${cmd}' env)"`], { cwd: repo, env, encoding: 'utf8' });
   assert.notEqual(none.status, 0, 'with no copy the eval itself fails, so an && chain stops');
   assert.match(none.stderr, /no dev copy is running/);
@@ -97,7 +97,10 @@ test('env hands a script the copy\'s URL, cookie and pid; seed adds a state to a
   // The running server sees the seeded minion at once, signed in with the cookie env printed.
   const view = await (await fetch(`${s.url}api/tickets/${id}`, { headers: { cookie: s.cookie } })).json();
   assert.equal(view.ticket.title, 'Sidebar badge colours');
-  assert.deepEqual(view.ticket.open_cards.map((c: any) => c.kind), ['question', 'question']);
+  assert.deepEqual(
+    view.ticket.open_cards.map((c: any) => c.kind),
+    ['question', 'question'],
+  );
 
   const bad = run(['seed', 'nonsense']);
   assert.equal(bad.status, 2);
@@ -122,7 +125,8 @@ test('every seed scenario applies to a fresh store, twice over', async () => {
   mkdirSync(dir);
   const s = new Store(join(dir, 'coordinator.db'));
   const robin = s.createUser({ name: 'Robin', login: 'robin', admin: true, server_login: true });
-  const tree = () => execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }), before = tree();
+  const tree = () => execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }),
+    before = tree();
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
   for (let i = 0; i < 2; i++) {
     const ctx = seedScheme(s, dir, 'robin');
@@ -162,12 +166,20 @@ test('a copy finishes while the live server keeps writing', async () => {
   db.exec("INSERT INTO settings (key, value) VALUES ('turn:529', '{}')");
   db.exec('CREATE TABLE filler (b BLOB); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000) INSERT INTO filler SELECT randomblob(4000) FROM n');
   db.close();
-  const writer = scratch.spawn(process.execPath, ['-e', `
+  const writer = scratch.spawn(
+    process.execPath,
+    [
+      '-e',
+      `
     const db = new (require('node:sqlite').DatabaseSync)(process.argv[1]);
     db.exec('PRAGMA busy_timeout = 5000; PRAGMA synchronous = OFF');
     const put = db.prepare('INSERT INTO filler VALUES (randomblob(100))');
     process.stdout.write('writing\\n');
-    for (;;) put.run();`, join(live, 'coordinator.db')], { stdio: ['ignore', 'pipe', 'inherit'] });
+    for (;;) put.run();`,
+      join(live, 'coordinator.db'),
+    ],
+    { stdio: ['ignore', 'pipe', 'inherit'] },
+  );
   seen.push(writer.pid!);
   try {
     await new Promise((ok) => writer.stdout!.once('data', ok));

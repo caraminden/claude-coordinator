@@ -36,8 +36,7 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const pins = async (cookie?: string) =>
-  (await (await fetch(`${srv.base}/api/projects/${P.id}`, { headers: { Cookie: cookie ?? srv.cookie } })).json()).pins;
+const pins = async (cookie?: string) => (await (await fetch(`${srv.base}/api/projects/${P.id}`, { headers: { Cookie: cookie ?? srv.cookie } })).json()).pins;
 
 test('a pin is the pinner’s alone, listed oldest first, and unpinning drops it', async () => {
   assert.deepEqual(await pins(), []);
@@ -54,7 +53,9 @@ test('bad bodies, the Taskmaster and agents are refused', async () => {
   assert.equal((await srv.call(`/api/tickets/${M2.id}/pin`, { pinned: 'yes' }, 'PUT')).status, 400);
   assert.equal((await srv.call(`/api/tickets/${TM.id}/pin`, { pinned: true }, 'PUT')).status, 400);
   const asTM = await fetch(`${srv.base}/api/tickets/${M2.id}/pin`, {
-    method: 'PUT', headers: { Authorization: `Bearer ${tokens.agentToken(TM.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ pinned: true }),
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${tokens.agentToken(TM.id)}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pinned: true }),
   });
   assert.equal(asTM.status, 403);
   const page = await (await fetch(`${srv.base}/api/projects/${P.id}`, { headers: { Authorization: `Bearer ${tokens.agentToken(TM.id)}` } })).json();

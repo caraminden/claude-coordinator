@@ -20,7 +20,10 @@ const home = async () => {
   await send('Page.bringToFront', {}, APP.s);
   await sleep(800);
 };
-const windowAt = async () => { const { bounds: b } = await send('Browser.getWindowBounds', { windowId: WINDOW }); return [b.left, b.top]; };
+const windowAt = async () => {
+  const { bounds: b } = await send('Browser.getWindowBounds', { windowId: WINDOW });
+  return [b.left, b.top];
+};
 /** The visible frame in Citadel's page: `${FRAME} ... d.querySelector(...)` (f: the iframe, fr: its rect, d: its document, w: its window). */
 const FRAME = `const f = document.querySelector('#frames iframe:not([hidden])'); const fr = f?.getBoundingClientRect(); const d = f?.contentDocument; const w = d?.defaultView;`;
 /** Goes to a route and waits for it: a framed app with its .cui-topbar up, or an unframed page. */
@@ -63,7 +66,10 @@ const drag = async (sel, frame = false) => {
 /** The ids of the fixture's buttons clicked since openFixture. */
 const frameClicks = () => ev(`${FRAME} return w.clicks.slice()`);
 /** A screenshot of the app window, saved on perigee as <name>.png (rig.ts prints the folder). */
-const snap = async (name) => { await sleep(400); return shot(name, APP.targetId); };
+const snap = async (name) => {
+  await sleep(400);
+  return shot(name, APP.targetId);
+};
 
 await home();
 expect('title bar overlay on', await ev(`return !!navigator.windowControlsOverlay?.visible`), true);

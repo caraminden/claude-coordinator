@@ -16,8 +16,7 @@ export function directReads(file: string, text: string): string[] {
   return text.split('\n').flatMap((row, i) => (HOST_READ.test(row) && !OK.test(row) && !/^\s*(\/\/|\*|\/\*)/.test(row) ? [`${file}:${i + 1}`] : []));
 }
 
-const walk = (dir: string): string[] =>
-  readdirSync(join(REPO, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : /\.ts$/.test(e.name) ? [join(dir, e.name)] : []));
+const walk = (dir: string): string[] => readdirSync(join(REPO, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : /\.ts$/.test(e.name) ? [join(dir, e.name)] : []));
 
 test('the server reads host signals only through src/host-signals.ts', () => {
   assert.deepEqual(directReads('a.ts', "import { loadavg } from 'node:os';\nreadFile('/proc/pressure/cpu');\nreadFile('/proc/stat')\n// /proc/loadavg in prose\nx('/sys/fs/cgroup'); // host-signal-ok: a test\nimport { homedir } from 'node:os';"), ['a.ts:1', 'a.ts:2', 'a.ts:3']);
@@ -35,7 +34,15 @@ export function unpinnedStarts(file: string, text: string): string[] {
 }
 
 test('every test that starts server.ts itself pins its host signals and hands it its zone', () => {
-  assert.deepEqual(unpinnedStarts('a.ts', "spawn(node, [join(r, 'server.ts')], {\n  env: { PORT: '0' },\n});\nspawn(node, [join(r, 'server.ts')], { env: { CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE } });\nspawn(node, ['-e', `spawn(x, [${s(join(r, 'server.ts'))}], { env: {} })`]); // CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: \nspawn(node, [join(r, 'server.ts')], { env: { CITADEL_HOST_SIGNALS: 'fixed' } });"), ['a.ts:1', 'a.ts:5', 'a.ts:6']);
-  const missing = readdirSync(join(REPO, 'test')).filter((f) => f.endsWith('.ts') && f !== 'host-signals.test.ts' && f !== 'host-signals-guards.test.ts').flatMap((f) => unpinnedStarts(join('test', f), readFileSync(join(REPO, 'test', f), 'utf8')));
+  assert.deepEqual(
+    unpinnedStarts(
+      'a.ts',
+      "spawn(node, [join(r, 'server.ts')], {\n  env: { PORT: '0' },\n});\nspawn(node, [join(r, 'server.ts')], { env: { CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE } });\nspawn(node, ['-e', `spawn(x, [${s(join(r, 'server.ts'))}], { env: {} })`]); // CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: \nspawn(node, [join(r, 'server.ts')], { env: { CITADEL_HOST_SIGNALS: 'fixed' } });",
+    ),
+    ['a.ts:1', 'a.ts:5', 'a.ts:6'],
+  );
+  const missing = readdirSync(join(REPO, 'test'))
+    .filter((f) => f.endsWith('.ts') && f !== 'host-signals.test.ts' && f !== 'host-signals-guards.test.ts')
+    .flatMap((f) => unpinnedStarts(join('test', f), readFileSync(join(REPO, 'test', f), 'utf8')));
   assert.deepEqual(missing, [], "start it with bootServer, or put CITADEL_HOST_SIGNALS: 'fixed' and CITADEL_ZONE: TEST_ZONE in its env");
 });

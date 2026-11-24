@@ -82,7 +82,7 @@ async function newRepoSlug(app: App, name: string, admin: boolean, user: User | 
   let owner: string | null;
   let as: GithubEnv;
   if (admin) {
-    owner = app.store.getSetting<string>(GITHUB_OWNER) ?? await citadelOwner();
+    owner = app.store.getSetting<string>(GITHUB_OWNER) ?? (await citadelOwner());
     if (!owner) throw new HttpError(400, `Set the GitHub owner for new schemes in Settings → ${APP_NAME}-wide first`);
   } else {
     const mine = user ? githubOf(app, user) : null;
@@ -115,7 +115,9 @@ async function putOnGithub(app: App, projectId: number, dir: string, slug: strin
  */
 export function schemeTarget(app: App, from: Ticket, scheme: unknown) {
   const { store } = app;
-  const want = String(scheme ?? '').trim().toLowerCase();
+  const want = String(scheme ?? '')
+    .trim()
+    .toLowerCase();
   const own = store.getProject(from.project_id)!;
   // Only schemes the turn's person is in, and Citadel (src/access.ts): a scheme they aren't in gets
   // the same answer as one that doesn't exist, so its name doesn't leak.
@@ -130,7 +132,7 @@ export function schemeTarget(app: App, from: Ticket, scheme: unknown) {
     // Schemes Citadel may only answer stay unlisted: the person may not be in them.
     const listed = others.filter((p) => p.id === GLOBAL_OWNER || store.canSee(who, p.id));
     const answers = own.id === GLOBAL_OWNER ? ` The ${own.name} ${AGENT_NAME} may also answer a scheme whose ${AGENT_NAME} wrote to it in the last ${CITADEL_REPLY_MS / 86_400_000} days.` : '';
-    throw new HttpError(404, `No scheme called "${String(scheme ?? '')}" that ${person?.name ?? 'this turn\'s person'} is in. You can reach: ${listed.map((p) => `${p.name} (${p.id})`).join(', ') || 'none'}.${answers}`);
+    throw new HttpError(404, `No scheme called "${String(scheme ?? '')}" that ${person?.name ?? "this turn's person"} is in. You can reach: ${listed.map((p) => `${p.name} (${p.id})`).join(', ') || 'none'}.${answers}`);
   }
   return { own, person, who, project };
 }
@@ -173,7 +175,7 @@ export async function ensureCoordinatorFor(app: App, project: Project, personId:
   if (!store.listMembers(project.id).some((m) => m.id === personId)) return own;
   const before = new Set(store.listCoordinators(project.id).map((t) => t.id));
   const mine = store.splitScheme(project.id, personId);
-  if (!split) runner.emit(only.id, 'note', { text: `${store.getUser(personId)?.name ?? 'Someone'} wrote to the ${AGENT_NAME}, so each person in this scheme now has their own; this one is ${store.getUser(project.owner_id!)?.name ?? "the owner"}'s, and a new Overlord does the scheme-wide jobs.` });
+  if (!split) runner.emit(only.id, 'note', { text: `${store.getUser(personId)?.name ?? 'Someone'} wrote to the ${AGENT_NAME}, so each person in this scheme now has their own; this one is ${store.getUser(project.owner_id!)?.name ?? 'the owner'}'s, and a new Overlord does the scheme-wide jobs.` });
   for (const t of store.listCoordinators(project.id)) if (!before.has(t.id) || t.id === only.id) runner.broadcastTicket(t.id);
   return mine;
 }
@@ -249,16 +251,20 @@ async function startChecks(app: App, projectId: number, id: number, startedBy: s
     const theirs = twins.map((h) => ({ ...h, by: store.minionOwner({ id: h.ticket_id }) })).find((h) => h.by != null && h.by !== mine);
     if (!watching || !theirs) return;
     const who = store.getUser(theirs.by!)?.name ?? 'someone';
-    postCard(app, watching, { questions: [{
-      header: 'Duplicate start?',
-      question: `${startedBy} started #${minion.number} '${minion.title}', which reads like ${who}'s #${theirs.number} '${theirs.title}' (match ${theirs.score.toFixed(2)}). Same work?`,
-      multiSelect: false,
-      options: [
-        { label: 'Both stay', description: 'Different work after all; nothing to do.', recommended: true },
-        { label: `Dismiss #${minion.number}`, description: `#${theirs.number} carries on; #${minion.number} is dismissed and its starter told why.` },
-        { label: 'Merge into one', description: `Both owners' Taskmasters are told to agree which minion carries on with both briefs.` },
+    postCard(app, watching, {
+      questions: [
+        {
+          header: 'Duplicate start?',
+          question: `${startedBy} started #${minion.number} '${minion.title}', which reads like ${who}'s #${theirs.number} '${theirs.title}' (match ${theirs.score.toFixed(2)}). Same work?`,
+          multiSelect: false,
+          options: [
+            { label: 'Both stay', description: 'Different work after all; nothing to do.', recommended: true },
+            { label: `Dismiss #${minion.number}`, description: `#${theirs.number} carries on; #${minion.number} is dismissed and its starter told why.` },
+            { label: 'Merge into one', description: `Both owners' Taskmasters are told to agree which minion carries on with both briefs.` },
+          ],
+        },
       ],
-    }] });
+    });
   } catch {}
 }
 
@@ -278,7 +284,11 @@ function sameScheme(store: App['store'], projectId: number, id: number | null): 
 
 /** A stand-in title from the start of a first message, cut at a word near 40 characters. */
 function provisionalTitle(message: string): string {
-  const line = message.split('\n').find((l) => l.trim())!.replace(/\s+/g, ' ').trim();
+  const line = message
+    .split('\n')
+    .find((l) => l.trim())!
+    .replace(/\s+/g, ' ')
+    .trim();
   if (line.length <= 40) return line;
   const cut = line.slice(0, 40);
   const space = cut.lastIndexOf(' ');
@@ -372,8 +382,7 @@ export function claimView(app: App, c: Claim, now = Date.now()) {
   const { store } = app;
   const t = store.getTicket(c.holder);
   // A Taskmaster that took a claim for itself has no number: name it (#921).
-  const holder_name = t?.kind !== 'coordinator' ? `#${t?.number ?? c.holder} ${t?.title ?? ''}`.trim()
-    : t.coordinator_of != null ? `${store.getUser(t.coordinator_of)?.name ?? 'a person'}'s Taskmaster` : store.isSplit(t.project_id) ? 'the Overlord' : 'the Taskmaster';
+  const holder_name = t?.kind !== 'coordinator' ? `#${t?.number ?? c.holder} ${t?.title ?? ''}`.trim() : t.coordinator_of != null ? `${store.getUser(t.coordinator_of)?.name ?? 'a person'}'s Taskmaster` : store.isSplit(t.project_id) ? 'the Overlord' : 'the Taskmaster';
   const rows = store.claims.queue(c.project_id, c.name);
   const est = rows.some((r) => r.done_at == null) ? store.claims.estimate(c.project_id, c.name) : null;
   const left = est ? Math.max(est.median - (now - c.since), 0) : 0;
@@ -386,10 +395,16 @@ export function claimView(app: App, c: Claim, now = Date.now()) {
   });
   const waiting = queue.filter((q) => q.state !== 'done').length;
   return {
-    ...c, holder_number: t?.number ?? null, holder_title: t?.title ?? '', holder_name, since_text: `since ${pacific(c.since)}`,
-    ...holderStage(app, t), queue,
+    ...c,
+    holder_number: t?.number ?? null,
+    holder_title: t?.title ?? '',
+    holder_name,
+    since_text: `since ${pacific(c.since)}`,
+    ...holderStage(app, t),
+    queue,
     // Steps of this run: past holders, the holder, the waiting. Its time left only once ESTIMATE_MIN holders have finished.
-    done: queue.length - waiting, total: queue.length + 1,
+    done: queue.length - waiting,
+    total: queue.length + 1,
     estimate: est && waiting ? { left_ms: left + est.median * waiting, median_ms: est.median, of: est.of } : null,
   };
 }
@@ -417,7 +432,9 @@ export const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', '
 
 export const projectRoutes: Route[] = [
   {
-    method: 'GET', path: '/api/projects', who: ['person'],
+    method: 'GET',
+    path: '/api/projects',
+    who: ['person'],
     // inbox: the count on the scheme's Needs-you badge, for the scheme switcher.
     // icon: the version of the scheme's favicon (#222) for its URL, or null when it has none.
     // hidden: this person hid it (#226); its badge stays at zero.
@@ -436,31 +453,49 @@ export const projectRoutes: Route[] = [
       // In the order they dragged the shelf into (#649); one they haven't placed goes at the end.
       const schemes: Project[] = inOrder(visibleSchemes(store, session), (p: Project) => p.id, session.uid === undefined ? [] : store.listOrder(session.uid, 'schemes'));
       // Each scheme's part up to its icon's await runs in one read scope (src/read-scope.ts, #1527): the people, settings and waits it reads per minion come once.
-      json(res, 200, await Promise.all(readScope(store.db, () => schemes.map(async (p) => {
-        const tickets = store.listTickets(p.id);
-        const waiting = hidden.has(p.id) ? [] : inboxWaiting(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id));
-        const seen = seenItems.get(p.id);
-        if (!hidden.has(p.id) && !seen) store.setSeenItems(session.name, p.id, waiting.map((i) => i.key), true);
-        const inbox = minionCount(waiting);
-        return {
-          ...p, owner: store.getUser(p.owner_id ?? -1)?.name ?? null, tickets: tickets.filter((t) => t.kind === 'ticket').length,
-          hidden: hidden.has(p.id),
-          member: member.has(p.id),
-          inbox,
-          fresh: !!seen && waiting.some((i) => !seen.has(i.key)),
-          running: !hidden.has(p.id) && tickets.some(busy),
-          working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && busy(t)).length,
-          shipping: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && isShipping({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) })).length,
-          icon: await iconVersion(p.repo_dir, { store, projectId: p.id }),
-          // Its Taskmaster, so a scheme switch fetches that chat alongside the scheme (#538): the person's own once split (#919).
-          coordinator_id: store.coordinatorFor(p.id, session.uid ?? null)?.id ?? null,
-        };
-      }))));
+      json(
+        res,
+        200,
+        await Promise.all(
+          readScope(store.db, () =>
+            schemes.map(async (p) => {
+              const tickets = store.listTickets(p.id);
+              const waiting = hidden.has(p.id) ? [] : inboxWaiting(store, runner.approvals, p.id, session.name, store.seenTimes(session.name, p.id));
+              const seen = seenItems.get(p.id);
+              if (!hidden.has(p.id) && !seen)
+                store.setSeenItems(
+                  session.name,
+                  p.id,
+                  waiting.map((i) => i.key),
+                  true,
+                );
+              const inbox = minionCount(waiting);
+              return {
+                ...p,
+                owner: store.getUser(p.owner_id ?? -1)?.name ?? null,
+                tickets: tickets.filter((t) => t.kind === 'ticket').length,
+                hidden: hidden.has(p.id),
+                member: member.has(p.id),
+                inbox,
+                fresh: !!seen && waiting.some((i) => !seen.has(i.key)),
+                running: !hidden.has(p.id) && tickets.some(busy),
+                working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && busy(t)).length,
+                shipping: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && isShipping({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) })).length,
+                icon: await iconVersion(p.repo_dir, { store, projectId: p.id }),
+                // Its Taskmaster, so a scheme switch fetches that chat alongside the scheme (#538): the person's own once split (#919).
+                coordinator_id: store.coordinatorFor(p.id, session.uid ?? null)?.id ?? null,
+              };
+            }),
+          ),
+        ),
+      );
     },
   },
   {
     // Home (#1140): what waits on you across your schemes, what's working in them, and what shipped since your last visit here.
-    method: 'GET', path: '/api/home', who: ['person'],
+    method: 'GET',
+    path: '/api/home',
+    who: ['person'],
     handler: async ({ res, app: { store, runner, ciHealth }, session }) => {
       await homeBuckets.ready(store);
       const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
@@ -477,7 +512,9 @@ export const projectRoutes: Route[] = [
   },
   {
     // Hide a scheme from your own lists, badges and pushes, or show it again (#226). Only ever your own.
-    method: 'PUT', path: '/api/projects/:project/hidden', who: ['person'],
+    method: 'PUT',
+    path: '/api/projects/:project/hidden',
+    who: ['person'],
     async handler({ req, res, app, session, project }) {
       const body = await readJson(req);
       if (typeof body.hidden !== 'boolean') throw new HttpError(400, 'hidden must be true or false');
@@ -490,7 +527,9 @@ export const projectRoutes: Route[] = [
   },
   {
     // A scheme's month of outside-API spend by service, OpenRouter beside it, and its optional cap (#839). Any member reads; any member sets the cap.
-    method: ['GET', 'PUT'], path: '/api/projects/:project/spend', who: ['person'],
+    method: ['GET', 'PUT'],
+    path: '/api/projects/:project/spend',
+    who: ['person'],
     async handler({ req, res, app, project }) {
       if (req.method === 'PUT') {
         const body = await readJson(req);
@@ -502,7 +541,9 @@ export const projectRoutes: Route[] = [
   },
   {
     // The Needs-you items this person saw waiting while in the scheme (#539: InboxItem.key): the scheme list marks the badge when one not among them waits.
-    method: 'PUT', path: '/api/projects/:project/seen-items', who: ['person'],
+    method: 'PUT',
+    path: '/api/projects/:project/seen-items',
+    who: ['person'],
     async handler({ req, res, app, session, project }) {
       const { keys } = await readJson(req);
       if (!Array.isArray(keys) || keys.length > 1000 || !keys.every((k) => typeof k === 'string' && k.length <= 200)) throw new HttpError(400, 'keys must be a list of item keys');
@@ -514,11 +555,13 @@ export const projectRoutes: Route[] = [
   },
   {
     // The scheme's favicon (src/scheme-icon.ts). Its URL carries the version, so it can be kept long.
-    method: 'GET', path: '/api/projects/:project/icon', who: ['person'],
+    method: 'GET',
+    path: '/api/projects/:project/icon',
+    who: ['person'],
     async handler({ res, project, session, app: { store, contraptions } }) {
       // The home app may gate its routes: it is asked as the person asking, when they may use it.
       const user = typeof session.uid === 'number' ? store.getUser(session.uid) : undefined;
-      const icon = await readIcon(project.id, project.repo_dir, store, (c) => user && contraptions.enabled(c.name, user.id) ? contraptions.signIdentity(c.name, user) : null);
+      const icon = await readIcon(project.id, project.repo_dir, store, (c) => (user && contraptions.enabled(c.name, user.id) ? contraptions.signIdentity(c.name, user) : null));
       if ('missing' in icon) throw new HttpError(404, icon.missing);
       send(res, 200, { ...iconHeaders(icon.type), 'Cache-Control': 'private, max-age=31536000, immutable' }, icon.body);
     },
@@ -527,27 +570,30 @@ export const projectRoutes: Route[] = [
     // Many schemes' favicons in one answer (#1543): ?ids=<id>.<v>,… (what the list's `icon` field makes the icon URL's ?v=). Each key
     // answers a `data:` URL for an SVG, the icon route's URL for any other type (kept off the JSON), or null (none, or not theirs).
     // The page keeps the answers by key, so a new version is the only thing it asks for again.
-    method: 'GET', path: '/api/icons', who: ['person'],
+    method: 'GET',
+    path: '/api/icons',
+    who: ['person'],
     async handler({ res, url, session, app: { store, contraptions } }) {
       const keys = (url.searchParams.get('ids') ?? '').split(',').filter(Boolean);
       if (keys.length > 200 || !keys.every((k) => /^\d{1,9}\.\d{1,20}$/.test(k))) throw new HttpError(400, 'ids must be a list of <scheme>.<version>');
       const mine = new Map(visibleSchemes(store, session).map((p) => [p.id, p]));
       const user = typeof session.uid === 'number' ? store.getUser(session.uid) : undefined;
-      const identityFor = (c: { name: string }) => user && contraptions.enabled(c.name, user.id) ? contraptions.signIdentity(c.name, user) : null;
+      const identityFor = (c: { name: string }) => (user && contraptions.enabled(c.name, user.id) ? contraptions.signIdentity(c.name, user) : null);
       const icons: Record<string, string | null> = {};
       for (const key of keys) {
         const [id, v] = key.split('.');
         const p = mine.get(Number(id));
         const icon = p ? await readIcon(p.id, p.repo_dir, store, identityFor) : null;
-        icons[key] = !icon || 'missing' in icon ? null
-          : icon.type === 'image/svg+xml' ? `data:image/svg+xml;base64,${icon.body.toString('base64')}` : `api/projects/${id}/icon?v=${v}`;
+        icons[key] = !icon || 'missing' in icon ? null : icon.type === 'image/svg+xml' ? `data:image/svg+xml;base64,${icon.body.toString('base64')}` : `api/projects/${id}/icon?v=${v}`;
       }
       return json(res, 200, { icons });
     },
   },
   {
     // What a scheme being set up can adapt (#172): names and descriptions from every scheme's .claude/ and the kit, never file bodies.
-    method: 'GET', path: '/api/catalogue', who: PEOPLE_AND_TASKMASTER,
+    method: 'GET',
+    path: '/api/catalogue',
+    who: PEOPLE_AND_TASKMASTER,
     handler: ({ res, app, session, caller }) => {
       // A Taskmaster sees what its scheme's owner sees.
       const owner = caller ? app.store.getUser(app.store.getProject(caller.project_id)?.owner_id ?? -1) : null;
@@ -556,9 +602,11 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/projects', who: ['person'],
+    method: 'POST',
+    path: '/api/projects',
+    who: ['person'],
     async handler({ req, res, app, session }) {
-      if (app.preview) throw new HttpError(403, 'A preview can\'t start schemes');
+      if (app.preview) throw new HttpError(403, "A preview can't start schemes");
       const body = await readJson(req);
       const name = str(body.name, 'Name', 80);
       // Checked first too, so a taken name doesn't cost a GitHub lookup; the unique index still decides.
@@ -584,7 +632,7 @@ export const projectRoutes: Route[] = [
         // Whose GitHub, not who may (#621): the flag, so a Citadel member still clones with their own token.
         if (!user?.admin) {
           // The box's SSH key and gh login are Cara's: anyone else clones with their own token, or none.
-          if (!repoUrl.startsWith('https://')) throw new HttpError(400, 'Use the repo\'s https:// URL: a git@ URL would clone with the server\'s own SSH key');
+          if (!repoUrl.startsWith('https://')) throw new HttpError(400, "Use the repo's https:// URL: a git@ URL would clone with the server's own SSH key");
           if (!user) throw new HttpError(403, 'Sign in with your own login to clone a repo');
           as = githubOf(app, user).env;
         }
@@ -595,7 +643,7 @@ export const projectRoutes: Route[] = [
       } else if (source === 'new') {
         ({ slug, as } = await newRepoSlug(app, name, !!user?.admin, user));
         // Refused before anything exists, with the name shown so the person can pick another.
-        if (await githubRepoExists(slug, as) === true) throw new HttpError(409, `GitHub repo ${slug} already exists; pick another scheme name`);
+        if ((await githubRepoExists(slug, as)) === true) throw new HttpError(409, `GitHub repo ${slug} already exists; pick another scheme name`);
       }
       let project;
       try {
@@ -625,7 +673,8 @@ export const projectRoutes: Route[] = [
       }
       app.store.setProjectSettings(project.id, { onboarding: setup ? 'interview' : 'skipped' });
       await ownWrites(); // the kickoff and the reply re-read the scheme it just wrote (#1244)
-      addMemoryCurator(app.store, app.dataDir, project.id); addArchitectureCheck(app.store, app.dataDir, project.id);
+      addMemoryCurator(app.store, app.dataDir, project.id);
+      addArchitectureCheck(app.store, app.dataDir, project.id);
       void app.releases.refresh(true); // its targets show up without anyone asking (#627)
       if (setup) {
         const coordinator = await ensureCoordinator(app, app.store.getProject(project.id)!);
@@ -638,9 +687,11 @@ export const projectRoutes: Route[] = [
     // Try again to put a new scheme's repo on GitHub after it failed at creation. It goes where the
     // create would have put it: on the scheme owner's GitHub, with their token, unless they're an admin (#195).
     // Any member may ask (#621): it makes the repo the owner already asked for, the same way.
-    method: 'POST', path: '/api/projects/:project/github', who: ['person'],
+    method: 'POST',
+    path: '/api/projects/:project/github',
+    who: ['person'],
     async handler({ res, app, project }) {
-      if (app.preview) throw new HttpError(403, 'A preview can\'t make GitHub repos');
+      if (app.preview) throw new HttpError(403, "A preview can't make GitHub repos");
       if (!project.github_error || !project.repo_dir) throw new HttpError(409, 'This scheme has no GitHub repo waiting to be made');
       const owner = project.owner_id === null ? undefined : app.store.getUser(project.owner_id);
       // A scheme with no owner left was an admin's to begin with (#34 made new repos admin-only).
@@ -652,7 +703,9 @@ export const projectRoutes: Route[] = [
   },
   {
     // Citadel-wide settings: the GitHub owner new schemes' repos are made under.
-    method: ['GET', 'PUT'], path: '/api/app/settings', who: ['person'],
+    method: ['GET', 'PUT'],
+    path: '/api/app/settings',
+    who: ['person'],
     async handler({ req, res, app, session }) {
       if (req.method === 'PUT') {
         if (!session.admin) throw new HttpError(403, 'Only an admin can do that');
@@ -668,7 +721,10 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER, everyScheme: true,
+    method: 'GET',
+    path: '/api/projects/:project',
+    who: PEOPLE_AND_TASKMASTER,
+    everyScheme: true,
     // ?tickets=open leaves the dismissed minions out (`dismissed` counts them), and ?tickets=closed sends only them: the page
     // draws the scheme from the open ones and fetches the dismissed behind it, 80% of Citadel's payload (#538). ?tickets=none
     // sends no minions, for a caller that wants only the scheme's own fields: every minion's view took 9 to 31 s under load (#1514).
@@ -681,9 +737,7 @@ export const projectRoutes: Route[] = [
       const number = url.searchParams.has('number') ? Number(url.searchParams.get('number')) : null;
       const all = app.store.listTickets(project.id).filter((t) => t.kind === 'ticket');
       const dismissed = all.filter((t) => t.status === 'closed').length;
-      let picked = all
-        .filter((t) => which === 'open' ? t.status !== 'closed' : which === 'closed' ? t.status === 'closed' : which !== 'none')
-        .filter((t) => number === null || t.number === number);
+      let picked = all.filter((t) => (which === 'open' ? t.status !== 'closed' : which === 'closed' ? t.status === 'closed' : which !== 'none')).filter((t) => number === null || t.number === number);
       // The dismissed list is read a page at a time, newest first (closed-list-on-demand): ?limit= a page, ?before=<updated_at>&before_id=
       // the last row of the page before, ?q= only those whose number, title or properties match (the page's thread search), ?since= only
       // those updated after that time (the recap), ?ids=1,2 only those. `more` says whether another page follows; none of them is sent
@@ -700,7 +754,10 @@ export const projectRoutes: Route[] = [
         if (before !== null) picked = picked.filter((t) => t.updated_at < before || (t.updated_at === before && t.id < (beforeId ?? Infinity)));
         if (q) {
           // The page's own match (threadMatches in public/threadgroups.js): the number, or the title or a property value containing it.
-          const props = app.store.props.forTargets('minion', picked.map((t) => t.id));
+          const props = app.store.props.forTargets(
+            'minion',
+            picked.map((t) => t.id),
+          );
           picked = picked.filter((t) => {
             if (String(t.number) === q.replace(/^#/, '')) return true;
             const p = props.get(t.id) ?? {};
@@ -728,15 +785,16 @@ export const projectRoutes: Route[] = [
       // Mine and Everyone (#920): person_id null is the Overlord. Empty until the scheme splits. updated_at and status: when its
       // offered replies count as seen in Needs you and whether its turn spins the pill, as for any minion (#1400).
       const all_tms = app.store.listCoordinators(project.id);
-      const own = !caller && all_tms.length > 1 ? app.store.coordinatorFor(project.id, session.uid!) ?? coordinator : coordinator;
-      const taskmasters = all_tms.length > 1
-        ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : app.store.getUser(t.coordinator_of)?.name ?? null, updated_at: t.updated_at, status: t.status }))
-        : [];
+      const own = !caller && all_tms.length > 1 ? (app.store.coordinatorFor(project.id, session.uid!) ?? coordinator) : coordinator;
+      const taskmasters = all_tms.length > 1 ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : (app.store.getUser(t.coordinator_of)?.name ?? null), updated_at: t.updated_at, status: t.status })) : [];
       return json(res, 200, { project, coordinator: readScope(app.store.db, () => ticketView(app, own.id)), taskmasters, tickets, dismissed, ...(which === 'closed' ? { more } : {}), seen, person_notes, pins, builds, build_previews });
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project/taskmaster-events', who: ['person'], everyScheme: true,
+    method: 'GET',
+    path: '/api/projects/:project/taskmaster-events',
+    who: ['person'],
+    everyScheme: true,
     // Mine and Everyone (#920): your Taskmaster's chat with the others', paged as one by event id (history.ts).
     // Mine adds only the Overlord's for-everyone items and card answers; Everyone adds every session whole.
     async handler({ res, url, app, session, project }) {
@@ -745,9 +803,7 @@ export const projectRoutes: Route[] = [
       const own = store.coordinatorFor(project.id, session.uid!) ?? list[0];
       const everyone = url.searchParams.get('view') === 'everyone';
       // Someone who hasn't written yet has no Taskmaster of their own, so theirs is the Overlord: Mine filters it too.
-      const parts = !own ? [] : [{ id: own.id, mine: !everyone && own.coordinator_of == null && list.length > 1 }, ...list
-        .filter((t) => t.id !== own.id && (everyone || t.coordinator_of == null))
-        .map((t) => ({ id: t.id, mine: !everyone }))];
+      const parts = !own ? [] : [{ id: own.id, mine: !everyone && own.coordinator_of == null && list.length > 1 }, ...list.filter((t) => t.id !== own.id && (everyone || t.coordinator_of == null)).map((t) => ({ id: t.id, mine: !everyone }))];
       const num = (k: string) => Number(url.searchParams.get(k)) || undefined;
       if (url.searchParams.has('after')) return json(res, 200, mergedAfter(store, parts, num('after') ?? 0));
       return json(res, 200, mergedPage(store, parts, { before: num('before'), limit: num('limit'), from: num('from') }));
@@ -757,7 +813,10 @@ export const projectRoutes: Route[] = [
     // The scheme's minions as list_tickets prints them, for its minions too: read-only, and only the
     // line's fields, the latest activity line and waiting cards' labels and links among them (no card
     // contents, costs or paths). checkRole keeps a minion to its own scheme.
-    method: 'GET', path: '/api/projects/:project/tickets', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
+    method: 'GET',
+    path: '/api/projects/:project/tickets',
+    who: ['person', 'taskmaster', 'minion'],
+    everyScheme: true,
     handler({ res, url, app, project, caller }) {
       const closed = url.searchParams.get('include_closed') === '1';
       const listed = app.store.listTickets(project.id).filter((t) => t.kind === 'ticket' && (closed || t.status !== 'closed'));
@@ -773,16 +832,82 @@ export const projectRoutes: Route[] = [
   },
   {
     // Any member changes its settings (#621, Cara 2026-11-12), plugin folders still an admin's (below).
-    method: 'PATCH', path: '/api/projects/:project', who: PEOPLE_AND_TASKMASTER,
+    method: 'PATCH',
+    path: '/api/projects/:project',
+    who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
       const { store, runner } = app;
       // Any of name, instructions, approval_rules, plugin_dirs, optional_plugin_dirs, default_effort, onboarding, onboarding_mode, list_groups, ci_quiet, ci_watch, land_mode, fable_ok, builds, grill, gh_runners, the shot_* settings, ship_path, go_from, try_first, the msg_* settings and msg_never_hold; what is left out stays.
       const body = await readJson(req);
-      const fields = ['name', 'instructions', 'approval_rules', 'plugin_dirs', 'optional_plugin_dirs', 'default_effort', 'onboarding', 'onboarding_mode', 'list_groups', 'ci_quiet', 'ci_watch', 'land_mode', 'fable_ok', 'builds', 'grill', 'gh_runners', 'shot_widths', 'shot_themes', 'shots_required', 'shot_note', 'ship_path', 'go_from', 'try_first', 'rules_review', 'msg_loop_limit', 'msg_loop_min', 'msg_cold_min', 'msg_hold_h', 'msg_never_hold', 'repo_url', 'skills_off'];
+      const fields = [
+        'name',
+        'instructions',
+        'approval_rules',
+        'plugin_dirs',
+        'optional_plugin_dirs',
+        'default_effort',
+        'onboarding',
+        'onboarding_mode',
+        'list_groups',
+        'ci_quiet',
+        'ci_watch',
+        'land_mode',
+        'fable_ok',
+        'builds',
+        'grill',
+        'gh_runners',
+        'shot_widths',
+        'shot_themes',
+        'shots_required',
+        'shot_note',
+        'ship_path',
+        'go_from',
+        'try_first',
+        'rules_review',
+        'msg_loop_limit',
+        'msg_loop_min',
+        'msg_cold_min',
+        'msg_hold_h',
+        'msg_never_hold',
+        'repo_url',
+        'skills_off',
+      ];
       if (fields.every((k) => body[k] === undefined)) throw new HttpError(400, 'Nothing to change');
       for (const k of fields) if (body[k] !== undefined) store.usage.used('setting', `scheme.${k}`, session.uid ?? session.name); // the usage ledger (#1306)
       const name = body.name === undefined ? project.name : str(body.name, 'Name', 80);
-      const settings: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'msg_never_hold' | 'rules_review' | 'skills_off'>> = {};
+      const settings: Partial<
+        Pick<
+          Project,
+          | 'approval_rules'
+          | 'plugin_dirs'
+          | 'optional_plugin_dirs'
+          | 'default_effort'
+          | 'onboarding'
+          | 'onboarding_mode'
+          | 'list_groups'
+          | 'ci_quiet'
+          | 'ci_watch'
+          | 'land_mode'
+          | 'fable_ok'
+          | 'builds'
+          | 'grill'
+          | 'gh_runners'
+          | 'shot_widths'
+          | 'shot_themes'
+          | 'shots_required'
+          | 'shot_note'
+          | 'ship_path'
+          | 'go_from'
+          | 'try_first'
+          | 'msg_loop_limit'
+          | 'msg_loop_min'
+          | 'msg_cold_min'
+          | 'msg_hold_h'
+          | 'msg_never_hold'
+          | 'rules_review'
+          | 'skills_off'
+        >
+      > = {};
       // Unlike oneOf, null and '' are refused: there is no "unset" onboarding.
       const required = (v: unknown, all: readonly string[], field: string) => {
         if (typeof v !== 'string' || !all.includes(v)) throw new HttpError(400, `${field} must be one of: ${all.join(', ')}`);
@@ -805,7 +930,7 @@ export const projectRoutes: Route[] = [
         if (body.shot_widths !== undefined) settings.shot_widths = cleanShotWidths(body.shot_widths);
         if (body.shot_themes !== undefined) settings.shot_themes = cleanShotThemes(body.shot_themes);
         if (body.shot_note !== undefined) settings.shot_note = cleanShotNote(body.shot_note);
-        } catch (err) {
+      } catch (err) {
         throw new HttpError(400, thrown(err).message!);
       }
       // Message settings (#1059): whole numbers inside src/msg-settings.ts's bounds.
@@ -827,8 +952,12 @@ export const projectRoutes: Route[] = [
       }
       // Kit skills turned off on the Skills page (#1062): any member, nothing locked (Josh, 2026-11-19); only skills the kit has.
       if (body.skills_off !== undefined) {
-        const kit = new Set(listSkills(KIT_DIR, null).filter((i) => i.kind === 'skill').map((i) => i.slug));
-        if (!Array.isArray(body.skills_off) || body.skills_off.some((s: unknown) => typeof s !== 'string' || !kit.has(s))) throw new HttpError(400, 'skills_off must be a list of the kit\'s skill names');
+        const kit = new Set(
+          listSkills(KIT_DIR, null)
+            .filter((i) => i.kind === 'skill')
+            .map((i) => i.slug),
+        );
+        if (!Array.isArray(body.skills_off) || body.skills_off.some((s: unknown) => typeof s !== 'string' || !kit.has(s))) throw new HttpError(400, "skills_off must be a list of the kit's skill names");
         settings.skills_off = [...new Set(body.skills_off as string[])].sort().join(' ');
       }
       if (body.try_first !== undefined) settings.try_first = required(body.try_first, values(TRY_FIRST), 'try_first') as Project['try_first'];
@@ -875,7 +1004,11 @@ export const projectRoutes: Route[] = [
       const gate = shippingGate({ ...project, ...settings });
       if (gate.go_from !== (settings.go_from ?? project.go_from)) settings.go_from = gate.go_from;
       if (gate.approval_rules !== (settings.approval_rules ?? project.approval_rules)) {
-        try { settings.approval_rules = cleanRules(gate.approval_rules); } catch (e) { throw new HttpError(400, `Shipping ticks "Merge a pull request" under Approvals, which doesn't fit: ${(e as Error).message}`); }
+        try {
+          settings.approval_rules = cleanRules(gate.approval_rules);
+        } catch (e) {
+          throw new HttpError(400, `Shipping ticks "Merge a pull request" under Approvals, which doesn't fit: ${(e as Error).message}`);
+        }
       }
       // Renamed first: it is the only change that can still be refused (a taken name).
       if (name !== project.name) {
@@ -891,7 +1024,10 @@ export const projectRoutes: Route[] = [
         store.setProjectUpstream(project.id, repoUrl, null);
         const coordinator = store.getOverlord(project.id);
         if (coordinator) {
-          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set the scheme's repo to ${repoUrl}. Nothing was cloned or re-pointed: a person still has to clone it into the scheme's repo folder${project.repo_dir ? ' (a checkout exists and its origin decides at the next restart: until it is re-pointed to this repo, the old URL comes back)' : ''}, set up the push guard, and give Citadel's GitHub access to it.` });
+          runner.emit(coordinator.id, 'note', {
+            everyone: true,
+            text: `${session.name} set the scheme's repo to ${repoUrl}. Nothing was cloned or re-pointed: a person still has to clone it into the scheme's repo folder${project.repo_dir ? ' (a checkout exists and its origin decides at the next restart: until it is re-pointed to this repo, the old URL comes back)' : ''}, set up the push guard, and give Citadel's GitHub access to it.`,
+          });
         }
       }
       for (const k of Object.keys(settings) as (keyof typeof settings)[]) if (settings[k] === project[k]) delete settings[k];
@@ -917,13 +1053,20 @@ export const projectRoutes: Route[] = [
         }
         if (settings.land_mode === 'fast') app.fastMode?.reset(project.id);
         if (coordinator && settings.land_mode !== undefined) {
-          runner.emit(coordinator.id, 'note', { everyone: true, text: settings.land_mode === 'fast'
-            ? `${session.name} turned fast mode on. Low and medium changes now ship live on the smoke check alone, and the full suite runs on main behind them: a red reopens the minion whose change broke it, and comes to you if it isn't fixed in 30 minutes. High-risk changes and pipeline changes keep the full gate.`
-            : `${session.name} turned fast mode off. Every change waits for the full check and CI again before it ships.` });
+          runner.emit(coordinator.id, 'note', {
+            everyone: true,
+            text:
+              settings.land_mode === 'fast'
+                ? `${session.name} turned fast mode on. Low and medium changes now ship live on the smoke check alone, and the full suite runs on main behind them: a red reopens the minion whose change broke it, and comes to you if it isn't fixed in 30 minutes. High-risk changes and pipeline changes keep the full gate.`
+                : `${session.name} turned fast mode off. Every change waits for the full check and CI again before it ships.`,
+          });
         }
         if (coordinator && (['ship_path', 'go_from', 'try_first'] as const).some((k) => settings[k] !== undefined)) {
           const now = { ...project, ...settings };
-          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} set Shipping to: ${label(SHIP_PATHS, now.ship_path)}; a person's go: ${label(GO_FROM, now.go_from).toLowerCase()}; try it first: ${label(TRY_FIRST, now.try_first).toLowerCase()}. It applies from each minion's next turn and wins over the scheme instructions. If those still describe shipping differently, offer the members a card to bring them in line.` });
+          runner.emit(coordinator.id, 'note', {
+            everyone: true,
+            text: `${session.name} set Shipping to: ${label(SHIP_PATHS, now.ship_path)}; a person's go: ${label(GO_FROM, now.go_from).toLowerCase()}; try it first: ${label(TRY_FIRST, now.try_first).toLowerCase()}. It applies from each minion's next turn and wins over the scheme instructions. If those still describe shipping differently, offer the members a card to bring them in line.`,
+          });
         }
         if (coordinator && settings.skills_off !== undefined) {
           const was = new Set(offSkills(project));
@@ -947,9 +1090,7 @@ export const projectRoutes: Route[] = [
         mailParksUnderOldRule(app, [store.getProject(project.id)!], project.instructions, instructions, 'scheme');
         const coordinator = store.getOverlord(project.id);
         if (coordinator) {
-          runner.emit(coordinator.id, 'note', { everyone: true,
-            text: `${session.name} ${instructions ? 'updated' : 'cleared'} the scheme instructions; they apply from each minion's next turn.`,
-          });
+          runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} ${instructions ? 'updated' : 'cleared'} the scheme instructions; they apply from each minion's next turn.` });
         }
       }
       await ownWrites(); // the reply and the broadcast re-read the row it just wrote (#1244)
@@ -960,7 +1101,9 @@ export const projectRoutes: Route[] = [
   },
   {
     // Settings' "Tune up" (#175): onboarding again in tune-up mode, and a message that starts the Taskmaster on it.
-    method: 'POST', path: '/api/projects/:project/tune-up', who: ['person'],
+    method: 'POST',
+    path: '/api/projects/:project/tune-up',
+    who: ['person'],
     async handler({ res, app, session, project }) {
       if (onboardingOpen(project)) throw new HttpError(409, `${project.onboarding_mode === 'tune-up' ? 'A tune-up' : 'Setup'} is under way already`);
       // The Taskmaster first, so a failure there can't leave onboarding open with nobody told.
@@ -975,7 +1118,9 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project/instructions/history', who: ['person'],
+    method: 'GET',
+    path: '/api/projects/:project/instructions/history',
+    who: ['person'],
     handler({ res, app, project }) {
       const history = app.store.instructionHistory(project.id, 5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text), before: h.old_text }));
       return json(res, 200, { history });
@@ -983,7 +1128,9 @@ export const projectRoutes: Route[] = [
   },
   {
     // Your own instructions (#688): the text for everywhere and this scheme's, for the My instructions tab.
-    method: ['GET', 'PUT'], path: '/api/projects/:project/my-instructions', who: ['person'],
+    method: ['GET', 'PUT'],
+    path: '/api/projects/:project/my-instructions',
+    who: ['person'],
     async handler({ req, res, app, session, project }) {
       const uid = session.uid;
       if (typeof uid !== 'number') throw new HttpError(400, 'Sign in again first');
@@ -1002,17 +1149,20 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project/my-instructions/history', who: ['person'],
+    method: 'GET',
+    path: '/api/projects/:project/my-instructions/history',
+    who: ['person'],
     handler({ res, app, session, project, url }) {
       if (typeof session.uid !== 'number') throw new HttpError(400, 'Sign in again first');
-      const history = app.store.personalInstructionHistory(session.uid, url.searchParams.get('scope') === 'scheme' ? project.id : null, 5)
-        .map((h) => ({ by: session.name, at: h.at, diff: lineDiff(h.old_text, h.new_text) }));
+      const history = app.store.personalInstructionHistory(session.uid, url.searchParams.get('scope') === 'scheme' ? project.id : null, 5).map((h) => ({ by: session.name, at: h.at, diff: lineDiff(h.old_text, h.new_text) }));
       return json(res, 200, { history });
     },
   },
   {
     // The Taskmaster's read_person_instructions: its own prompt never carries a person's text, so it reads it before starting a minion for them.
-    method: 'GET', path: '/api/projects/:project/people/:person/instructions', who: ['taskmaster'],
+    method: 'GET',
+    path: '/api/projects/:project/people/:person/instructions',
+    who: ['taskmaster'],
     handler({ res, app, project, params }) {
       const asked = decodeURIComponent(params.person);
       const name = app.store.props.personName(asked);
@@ -1023,7 +1173,10 @@ export const projectRoutes: Route[] = [
   },
   {
     // The Citadel-wide instructions: people, and the Citadel scheme's Taskmaster only (checked below).
-    method: ['GET', 'PUT'], path: '/api/app/instructions', who: PEOPLE_AND_TASKMASTER, access: 'admin',
+    method: ['GET', 'PUT'],
+    path: '/api/app/instructions',
+    who: PEOPLE_AND_TASKMASTER,
+    access: 'admin',
     async handler({ req, res, app, session, caller }) {
       const { store, runner } = app;
       if (caller && caller.project_id !== GLOBAL_OWNER) {
@@ -1055,7 +1208,10 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/app/instructions/history', who: ['person'], access: 'admin',
+    method: 'GET',
+    path: '/api/app/instructions/history',
+    who: ['person'],
+    access: 'admin',
     handler({ res, app }) {
       const history = app.store.appInstructionHistory(5).map((h) => ({ by: h.by, at: h.at, diff: lineDiff(h.old_text, h.new_text), before: h.old_text }));
       return json(res, 200, { history });
@@ -1064,7 +1220,10 @@ export const projectRoutes: Route[] = [
   {
     // edit_instructions (#961): a minion edits its scheme's or the Citadel-wide Settings text like any other instruction file.
     // Every find must match exactly once, or nothing is saved; one save through the same setters and history as Settings.
-    method: 'POST', path: '/api/tickets/:ticket/edit-instructions', who: ['minion'], refuse: 'Only the minion itself can edit instructions from its chat',
+    method: 'POST',
+    path: '/api/tickets/:ticket/edit-instructions',
+    who: ['minion'],
+    refuse: 'Only the minion itself can edit instructions from its chat',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const { store } = app;
@@ -1120,7 +1279,9 @@ export const projectRoutes: Route[] = [
     // A person's own Settings save (#1162): what already says the new words, shown before the save so they can save
     // anyway or keep editing. The matcher only: a minion's edit adds its Grunt's findings, a person reads the list.
     // The Taskmaster's set_app_instructions and set_project_instructions ask it first too (#1211).
-    method: 'POST', path: '/api/projects/:project/instructions/overlaps', who: PEOPLE_AND_TASKMASTER,
+    method: 'POST',
+    path: '/api/projects/:project/instructions/overlaps',
+    who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, project, caller }) {
       const body = await readJson(req);
       if (body.scope !== 'scheme' && body.scope !== 'citadel') throw new HttpError(400, 'scope must be "scheme" or "citadel"');
@@ -1135,7 +1296,10 @@ export const projectRoutes: Route[] = [
     // The Sonnet check on a person's Settings save (#1211; Josh, 2026-11-20: "Matcher, then a Grunt"): asked after the
     // matcher's list is on screen, only when it found something, on the saver's own Claude login (sender pays). No login
     // or a failed check gives no verdicts and says why; the list stays and Save anyway still works ("Keep the matcher list").
-    method: 'POST', path: '/api/projects/:project/instructions/overlaps/verdicts', who: ['person'], refuse: 'Only a person\'s own Settings save gets the Sonnet check, on their own Claude login',
+    method: 'POST',
+    path: '/api/projects/:project/instructions/overlaps/verdicts',
+    who: ['person'],
+    refuse: "Only a person's own Settings save gets the Sonnet check, on their own Claude login",
     async handler({ req, res, app, session, project }) {
       const body = await readJson(req);
       if (body.scope !== 'scheme' && body.scope !== 'citadel') throw new HttpError(400, 'scope must be "scheme" or "citadel"');
@@ -1149,7 +1313,11 @@ export const projectRoutes: Route[] = [
       const place = app.claude.place(session.uid!);
       if (!place) return json(res, 200, { unlinked: "Your Claude plan isn't linked (Settings → Your account), so there's no login of yours to run the check on" });
       try {
-        const reply = await runDescribe(place, verdictPrompt(body.scope, before, text, found, (id) => ruleHome(app, project, id)), { claudeBin: process.env.CLAUDE_BIN ?? 'claude', hostEnv: turnEnv(process.env), cwd: join(app.claude.turnsDir(session.uid!), 'repeat-check'), timeoutMs: 30_000 });
+        const reply = await runDescribe(
+          place,
+          verdictPrompt(body.scope, before, text, found, (id) => ruleHome(app, project, id)),
+          { claudeBin: process.env.CLAUDE_BIN ?? 'claude', hostEnv: turnEnv(process.env), cwd: join(app.claude.turnsDir(session.uid!), 'repeat-check'), timeoutMs: 30_000 },
+        );
         return json(res, 200, { verdicts: readVerdicts(reply, found.length), places });
       } catch (err) {
         return json(res, 200, { failed: String(thrown(err).message).slice(0, 300) });
@@ -1157,20 +1325,26 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project/repo-setup', who: ['person'],
+    method: 'GET',
+    path: '/api/projects/:project/repo-setup',
+    who: ['person'],
     handler: async ({ res, project }) => json(res, 200, project.repo_dir ? await repoSetup(project.repo_dir) : { facts: null, rules: [], skills: [] }),
   },
   {
-    method: 'GET', path: '/api/projects/:project/instructions/sources', who: ['person'],
+    method: 'GET',
+    path: '/api/projects/:project/instructions/sources',
+    who: ['person'],
     handler: async ({ res, app, project }) => json(res, 200, { sources: await instructionSources(project, claudeConfigDir(process.env), app.dataDir), max: MAX_INSTRUCTIONS }),
   },
 
   {
-    method: 'POST', path: '/api/projects/:project/tickets', who: PEOPLE_AND_TASKMASTER,
+    method: 'POST',
+    path: '/api/projects/:project/tickets',
+    who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
       const { store, runner, waiters } = app;
       // Every new minion gets a git worktree in the scheme's real repo.
-      if (app.preview) throw new HttpError(403, 'A preview can\'t start minions');
+      if (app.preview) throw new HttpError(403, "A preview can't start minions");
       const body = await readJson(req);
       const message = str(body.message, 'First message', 100_000);
       // Without a title (the New thread form sends none) start from the message's opening words;
@@ -1188,7 +1362,7 @@ export const projectRoutes: Route[] = [
       const givenCost = body.expected_cost == null ? null : Number(body.expected_cost);
       if (givenCost != null && !(Number.isFinite(givenCost) && givenCost > 0 && givenCost <= 100_000)) throw new HttpError(400, 'expected_cost must be dollars, more than 0');
       const lineCost = expectedCost(briefText);
-      const estimate = givenCost == null || lineCost == null ? givenCost ?? lineCost : Math.max(givenCost, lineCost);
+      const estimate = givenCost == null || lineCost == null ? (givenCost ?? lineCost) : Math.max(givenCost, lineCost);
       let plugins = '';
       try {
         plugins = cleanPluginPicks(body.plugin_dirs, project.optional_plugin_dirs);
@@ -1220,11 +1394,19 @@ export const projectRoutes: Route[] = [
         const fileOf = (text: string) => handoffIn(text, shared)?.replace(/^handoffs\/(?:shipped|not-picked)\//, 'handoffs/') ?? null;
         const rel = fileOf(message);
         const held = new Map(waiters.chains().map((c) => [c.ticket, c.message]));
-        const textOf = (data: string | null) => { try { return String(JSON.parse(data ?? '{}').text ?? ''); } catch { return ''; } };
+        const textOf = (data: string | null) => {
+          try {
+            return String(JSON.parse(data ?? '{}').text ?? '');
+          } catch {
+            return '';
+          }
+        };
         const twins = rel ? store.briefsSince(project.id, Date.now() - 3 * 86_400_000).filter((t) => fileOf(held.get(t.id) ?? textOf(t.data)) === rel) : [];
         if (twins.length) {
-          throw new HttpError(409, `Not created: ${twins.map((t) => `#${t.number} ${t.title} (${t.status})`).join('; ')} already started from ${rel} (open, or closed in the last 3 days). `
-            + 'If it is the same work, message it instead (message_ticket, or reopen it). If not, call create_ticket again with not_duplicate: true.');
+          throw new HttpError(
+            409,
+            `Not created: ${twins.map((t) => `#${t.number} ${t.title} (${t.status})`).join('; ')} already started from ${rel} (open, or closed in the last 3 days). ` + 'If it is the same work, message it instead (message_ticket, or reopen it). If not, call create_ticket again with not_duplicate: true.',
+          );
         }
       }
       const table = pickFor(planned.type?.[0]);
@@ -1255,21 +1437,21 @@ export const projectRoutes: Route[] = [
         if (f.state === 'wait') follow = { leader, when, base: f.base, since: f.since };
       }
       // Its build: the one the create sets (null: none), as `build` or the build property; else its parent's, else its start_after leader's.
-      const build = body.build !== undefined ? buildNumber(body.build) : given('build') ? undefined : parent?.build ?? leader?.build ?? null;
+      const build = body.build !== undefined ? buildNumber(body.build) : given('build') ? undefined : (parent?.build ?? leader?.build ?? null);
       // Its effort (#1751, src/effort-retros.ts): its own, else its leader's, else its parent's; an unnamed chain is named after its leader.
-      const effortOf = (t: Ticket | null | undefined) => (t ? (store.props.forTarget('minion', t.id)[EFFORT_KEY] as string | undefined) ?? null : null);
+      const effortOf = (t: Ticket | null | undefined) => (t ? ((store.props.forTarget('minion', t.id)[EFFORT_KEY] as string | undefined) ?? null) : null);
       const joins = given(EFFORT_KEY) ? null : effortFor(null, leader ? { number: leader.number!, effort: effortOf(leader) } : null, effortOf(parent));
       if (joins?.name) props[EFFORT_KEY] = joins.name;
       if (joins?.stampLeader && leader) store.props.set('minion', leader.id, project.id, { [EFFORT_KEY]: joins.name }, session.name);
       // The build's own minion (build branches, specs/build-branches.md): it keeps the list and lands the build.
       const owner = body.build_owner === true;
-      if (owner && !build && !given('build')) throw new HttpError(400, 'build_owner needs a build: pass build (the scheme\'s highest build number plus one for a new one)');
+      if (owner && !build && !given('build')) throw new HttpError(400, "build_owner needs a build: pass build (the scheme's highest build number plus one for a new one)");
       const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name);
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
       store.addPick(id, model, effort, pickBy, because);
-      store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
+      store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : (session.uid ?? null), parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
       await ownWrites(); // its build owner and the reply read the row back (#1244)
-      const ownBuild = owner ? store.getTicket(id)?.build ?? null : null;
+      const ownBuild = owner ? (store.getTicket(id)?.build ?? null) : null;
       if (ownBuild) store.setSetting(buildOwnerKey(project.id, ownBuild), id);
       // And it is that turn's asker's ask (#255), so its messages back count as theirs.
       const asker = caller && store.turnAsker(caller.id);
@@ -1279,7 +1461,9 @@ export const projectRoutes: Route[] = [
         const shared = projectSharedDir(app.dataDir, project.id);
         const rel = handoffIn(message, shared);
         if (rel) store.ideas.linkHandoff(project.id, shared, rel, store.getTicket(id)!);
-      } catch (e) { console.error(`ideas: linking #${id}: ${(e as Error).message}`); }
+      } catch (e) {
+        console.error(`ideas: linking #${id}: ${(e as Error).message}`);
+      }
       // A split scheme's other Taskmasters read it in their next turn's digest (#919).
       if (store.isSplit(project.id)) {
         const by = caller?.kind === 'coordinator' ? caller : null;
@@ -1297,7 +1481,9 @@ export const projectRoutes: Route[] = [
         store.setSetting(startHoldKey(id), { usd: estimate, card: card.id });
         // Not sealed (#1757): it waits on a person, so it lists and counts as needing one; the setting above holds its turns.
         if (!follow) store.updateTicket(id, { note: startNote(estimate) });
-        notes.push(`Held: its brief expects about ${money(estimate)}, over ${money(START_CARD_USD)}, so no turn runs until a person answers its start card (${card.href}): Start, or Split first (it is dismissed and you split the brief). It isn't sealed: it shows as waiting on a person. Link that card in your reply; you can't answer it or start it yourself.`);
+        notes.push(
+          `Held: its brief expects about ${money(estimate)}, over ${money(START_CARD_USD)}, so no turn runs until a person answers its start card (${card.href}): Start, or Split first (it is dismissed and you split the brief). It isn't sealed: it shows as waiting on a person. Link that card in your reply; you can't answer it or start it yourself.`,
+        );
       }
       if (follow) {
         const { leader, when } = follow;
@@ -1328,10 +1514,14 @@ export const projectRoutes: Route[] = [
 
   // The scheme's Claude Code memory notes, read and written in place (the Orders → Memory page); a PUT with index: true adds a note's line to MEMORY.md. Not /memory, which is search over chats.
   {
-    method: ['GET', 'PUT', 'DELETE'], path: '/api/projects/:project/memory-files', who: ['person'],
+    method: ['GET', 'PUT', 'DELETE'],
+    path: '/api/projects/:project/memory-files',
+    who: ['person'],
     async handler({ req, res, url, app, project }) {
       const folders = memoryFolders(project.repo_dir, memoryLogins(app));
-      const closed = (n: number) => { return app.store.getTicketByNumber(project.id, n)?.status === 'closed'; };
+      const closed = (n: number) => {
+        return app.store.getTicketByNumber(project.id, n)?.status === 'closed';
+      };
       if (req.method !== 'GET') {
         const body = req.method === 'PUT' ? await readJson(req) : {};
         const folder = folders.find((f) => f.id === (req.method === 'PUT' ? body.folder : url.searchParams.get('folder')));
@@ -1342,8 +1532,7 @@ export const projectRoutes: Route[] = [
             deleteNote(folder.dir, file);
             // The saved copy of it too, or the next turn's restore puts the note back (sessions.ts writeBack).
             app.store.deleteClaudeState(join(folder.rel, file));
-          }
-          else if (body.index === true) indexNote(folder.dir, file);
+          } else if (body.index === true) indexNote(folder.dir, file);
           else {
             if (typeof body.text !== 'string' || body.text.length > 200_000) throw new HttpError(400, 'text must be text under 200 KB');
             saveNote(folder.dir, file, body.text);
@@ -1358,7 +1547,9 @@ export const projectRoutes: Route[] = [
   },
   // The CI page's Test health tab (#1063): fast mode's state and known reds, and the flakiest test files of the last 14 days, each with the open minion on it.
   {
-    method: 'GET', path: '/api/projects/:project/test-health', who: ['person'],
+    method: 'GET',
+    path: '/api/projects/:project/test-health',
+    who: ['person'],
     async handler({ res, app, project }) {
       const { store } = app;
       const open = store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed');
@@ -1372,19 +1563,21 @@ export const projectRoutes: Route[] = [
         const fx = store.flakeFix(project.id, f.file);
         const ft = fx?.ticket_id == null ? undefined : store.getTicket(fx.ticket_id);
         // The fix (#1120): its minion's number and person, its age, and the clean runs of the 50 the desktop proof needs.
-        const fix = fx && { state: fx.state, minion: ft?.number ?? null, owner: ft?.person_id == null ? null : store.getUser(ft.person_id)?.name ?? null, startedAt: fx.started_at, heldAt: fx.held_at, cleanRuns: fx.clean_runs, need: PROOF_RUNS, reopened: fx.reopened };
-        return { ...f, ...app.store.flakeMessages(project.id, f.file, Date.now() - FLAKE_WINDOW_MS), before, changedAt: at, fix: fix ?? null, minion: open.find((t) => t.title === title)?.number ?? ft?.number ?? null, lastMinion: f.ticketId == null ? null : store.getTicket(f.ticketId)?.number ?? null };
+        const fix = fx && { state: fx.state, minion: ft?.number ?? null, owner: ft?.person_id == null ? null : (store.getUser(ft.person_id)?.name ?? null), startedAt: fx.started_at, heldAt: fx.held_at, cleanRuns: fx.clean_runs, need: PROOF_RUNS, reopened: fx.reopened };
+        return { ...f, ...app.store.flakeMessages(project.id, f.file, Date.now() - FLAKE_WINDOW_MS), before, changedAt: at, fix: fix ?? null, minion: open.find((t) => t.title === title)?.number ?? ft?.number ?? null, lastMinion: f.ticketId == null ? null : (store.getTicket(f.ticketId)?.number ?? null) };
       });
       // The last day's land runs, each red one under its cause (#1607); null when GitHub can't be read.
       const since = Date.now() - LAND_REDS_MS;
-      const read = await app.ciHealth?.runsSince(project, since) ?? null;
+      const read = (await app.ciHealth?.runsSince(project, since)) ?? null;
       const landRed = read && { ...landReds(read.runs, await readRetro(projectSharedDir(app.dataDir, project.id), since, Date.now()), since), partial: read.partial };
-      json(res, 200, { fast: project.land_mode === 'fast' ? app.fastMode?.view(project.id) ?? null : null, flakes, landReds: landRed, now: Date.now() });
+      json(res, 200, { fast: project.land_mode === 'fast' ? (app.fastMode?.view(project.id) ?? null) : null, flakes, landReds: landRed, now: Date.now() });
     },
   },
   // The first message "Start a minion to fix it" shows for a flaky file, for the person to read and confirm (#1063).
   {
-    method: 'GET', path: '/api/projects/:project/flake-brief', who: ['person'],
+    method: 'GET',
+    path: '/api/projects/:project/flake-brief',
+    who: ['person'],
     handler({ res, url, app, project }) {
       const file = url.searchParams.get('file') ?? '';
       const row = app.store.flakeCounts(project.id, Date.now() - FLAKE_WINDOW_MS, 1000).find((f) => f.file === file);
@@ -1396,7 +1589,9 @@ export const projectRoutes: Route[] = [
   // The ideas ledger (#1150): every idea the scheme was shown, its pick, handoff and minion. The list re-reads the
   // scheme's pages and handoffs in the background once it is a few minutes old; ?status= and ?q= filter.
   {
-    method: 'GET', path: '/api/projects/:project/ideas', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/projects/:project/ideas',
+    who: ['person', 'taskmaster', 'minion'],
     async handler({ res, url, app, project }) {
       const status = url.searchParams.get('status');
       if (status && !(IDEA_STATUSES as readonly string[]).includes(status)) throw new HttpError(400, `status is one of ${IDEA_STATUSES.join(', ')}`);
@@ -1405,7 +1600,9 @@ export const projectRoutes: Route[] = [
   },
   {
     // A hand fix: { status: one of the statuses, or null for automatic } and/or { ticket: #N, null to unlink, or 'auto' }.
-    method: 'POST', path: '/api/projects/:project/ideas/:id', who: ['person', 'taskmaster', 'minion'],
+    method: 'POST',
+    path: '/api/projects/:project/ideas/:id',
+    who: ['person', 'taskmaster', 'minion'],
     async handler({ req, res, app, project, params, session, caller }) {
       const body = await readJson(req);
       const row = app.store.ideas.get(Number(params.id));
@@ -1431,7 +1628,9 @@ export const projectRoutes: Route[] = [
   // Every dated decision this scheme can see, parsed live from where it is written (the Orders → Decisions page and
   // search_decisions, #1064). ?scope=scheme|citadel|all, ?q= to search.
   {
-    method: 'GET', path: '/api/projects/:project/decisions', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/projects/:project/decisions',
+    who: ['person', 'taskmaster', 'minion'],
     async handler({ res, url, app, project }) {
       const scope = url.searchParams.get('scope') ?? 'all';
       if (!['scheme', 'citadel', 'all'].includes(scope)) throw new HttpError(400, 'scope must be scheme, citadel or all');
@@ -1446,18 +1645,24 @@ export const projectRoutes: Route[] = [
   },
   // The plugin folders in the scheme's repo, for the Minion rules page's picker (#1041). Saving them stays admin-only (PATCH).
   {
-    method: 'GET', path: '/api/projects/:project/plugins', who: ['person'],
+    method: 'GET',
+    path: '/api/projects/:project/plugins',
+    who: ['person'],
     async handler({ res, project }) {
       json(res, 200, { plugins: project.repo_dir ? await findPlugins(project.repo_dir) : [] });
     },
   },
   // The property registry: everyone reads it; people and the Taskmaster change it, minions propose.
   {
-    method: 'GET', path: '/api/projects/:project/properties', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/projects/:project/properties',
+    who: ['person', 'taskmaster', 'minion'],
     handler: ({ res, app, project }) => json(res, 200, { keys: app.store.props.list(project.id), globalOwner: GLOBAL_OWNER }),
   },
   {
-    method: 'POST', path: '/api/projects/:project/properties/keys', who: PEOPLE_AND_TASKMASTER,
+    method: 'POST',
+    path: '/api/projects/:project/properties/keys',
+    who: PEOPLE_AND_TASKMASTER,
     async handler(ctx) {
       const { app, project } = ctx;
       const r = app.store.props.registerKey(project.id, await readJson(ctx.req), actorFor(ctx));
@@ -1466,7 +1671,9 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/projects/:project/properties/values', who: PEOPLE_AND_TASKMASTER,
+    method: 'POST',
+    path: '/api/projects/:project/properties/values',
+    who: PEOPLE_AND_TASKMASTER,
     async handler(ctx) {
       const { app, project } = ctx;
       const body = await readJson(ctx.req);
@@ -1481,7 +1688,9 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/projects/:project/properties/review', who: PEOPLE_AND_TASKMASTER,
+    method: 'POST',
+    path: '/api/projects/:project/properties/review',
+    who: PEOPLE_AND_TASKMASTER,
     async handler(ctx) {
       const { app, project } = ctx;
       const body = await readJson(ctx.req);
@@ -1495,7 +1704,9 @@ export const projectRoutes: Route[] = [
   // Saved views: each person's own named property filters above the minions list (#194).
   { method: 'GET', path: '/api/projects/:project/views', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, app.store.listViews(project.id, session.name)) },
   {
-    method: 'POST', path: '/api/projects/:project/views', who: ['person'],
+    method: 'POST',
+    path: '/api/projects/:project/views',
+    who: ['person'],
     async handler({ req, res, app, session, project }) {
       const body = await readJson(req);
       app.store.saveView(project.id, session.name, str(body.name, 'Name', 40), viewPicks(body.picks));
@@ -1506,7 +1717,9 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'DELETE', path: '/api/projects/:project/views/:view', who: ['person'],
+    method: 'DELETE',
+    path: '/api/projects/:project/views/:view',
+    who: ['person'],
     handler({ res, app, session, project, params }) {
       if (!app.store.deleteView(project.id, session.name, Number(params.view))) throw new HttpError(404, 'No such view');
       app.broadcast({ type: 'views', name: session.name, projectId: project.id });
@@ -1515,13 +1728,21 @@ export const projectRoutes: Route[] = [
   },
 
   // Everything in the scheme waiting on a person: open cards, and minions in state ready, complete or try; only this scheme's (a card another scheme addressed to them stays out: Josh, 2026-11-19, docs/adr/0015).
-  { method: 'GET', path: '/api/projects/:project/inbox', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, {
-      items: inboxItems(app.store, app.runner.approvals, project.id, session.name),
-    }) },
+  {
+    method: 'GET',
+    path: '/api/projects/:project/inbox',
+    who: ['person'],
+    handler: ({ res, app, session, project }) =>
+      json(res, 200, {
+        items: inboxItems(app.store, app.runner.approvals, project.id, session.name),
+      }),
+  },
   // What happened in the scheme since this person last did something there, for the Taskmaster chat.
   { method: 'GET', path: '/api/projects/:project/recap', who: ['person'], handler: ({ res, app, session, project }) => json(res, 200, app.store.recap(session.name, project.id)) },
   {
-    method: 'GET', path: '/api/projects/:project/search', who: ['person'],
+    method: 'GET',
+    path: '/api/projects/:project/search',
+    who: ['person'],
     handler({ res, url, app, project }) {
       const q = (url.searchParams.get('q') ?? '').trim().slice(0, 200);
       const ticket = Number(url.searchParams.get('ticket')) || undefined;
@@ -1531,7 +1752,9 @@ export const projectRoutes: Route[] = [
   // Search by meaning (#331): the scheme's chunks closest to q. scope mine: the calling minion's own
   // chat, or a person's own messages; minions: open minions' titles and notes (create_ticket's duplicate check, #488). The router keeps people to their schemes and agents to their own.
   {
-    method: 'GET', path: '/api/projects/:project/memory', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/projects/:project/memory',
+    who: ['person', 'taskmaster', 'minion'],
     async handler({ res, url, app, project, caller, session }) {
       const q = (url.searchParams.get('q') ?? '').trim().slice(0, 1000);
       if (q.length < 2) throw new HttpError(400, 'Say what to look for (q)');
@@ -1539,18 +1762,18 @@ export const projectRoutes: Route[] = [
       const mine = scope === 'mine';
       const limit = Number(url.searchParams.get('limit')) || 5;
       if (!app.memory.indexed(project.id)) throw new HttpError(409, `${project.name}'s chats aren't indexed for search by meaning yet`);
-      const hits = await app.store.memory
-        .search(project.id, q, app.memory.embed, app.memory.model, { limit, openMinions: scope === 'minions', ...(mine ? (caller ? { ticketId: caller.id } : { personId: session.uid ?? -1 }) : {}) })
-        .catch((err) => {
-          console.error('Semantic memory search failed:', err?.cause?.code ?? err?.message ?? err);
-          throw new HttpError(503, "The embedding service isn't answering, so search by meaning is down; exact-text search still works");
-        });
+      const hits = await app.store.memory.search(project.id, q, app.memory.embed, app.memory.model, { limit, openMinions: scope === 'minions', ...(mine ? (caller ? { ticketId: caller.id } : { personId: session.uid ?? -1 }) : {}) }).catch((err) => {
+        console.error('Semantic memory search failed:', err?.cause?.code ?? err?.message ?? err);
+        throw new HttpError(503, "The embedding service isn't answering, so search by meaning is down; exact-text search still works");
+      });
       return json(res, 200, { hits: scope === 'minions' ? minionHits(app, hits) : hits });
     },
   },
   // Past minions and handoffs by words (#1156, search_minions): ?q= (empty lists the newest closed), ?since=YYYY-MM-DD, ?limit=.
   {
-    method: 'GET', path: '/api/projects/:project/past-minions', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/projects/:project/past-minions',
+    who: ['person', 'taskmaster', 'minion'],
     handler({ res, url, app, project }) {
       const since = (url.searchParams.get('since') ?? '').trim();
       if (since && !/^\d{4}-\d{2}-\d{2}$/.test(since)) throw new HttpError(400, 'since is a date, YYYY-MM-DD');
@@ -1564,13 +1787,17 @@ export const projectRoutes: Route[] = [
   // The scheme's scheduled minions, for the Schedules page and the Taskmaster; each with the number
   // of the minion its last run started. People and the Taskmaster add them; minions can't.
   {
-    method: 'GET', path: '/api/projects/:project/schedules', who: PEOPLE_AND_TASKMASTER,
+    method: 'GET',
+    path: '/api/projects/:project/schedules',
+    who: PEOPLE_AND_TASKMASTER,
     handler: ({ res, app, project }) => json(res, 200, { schedules: app.store.schedules.list(project.id).map((s) => scheduleView(app, s)) }),
   },
   // Who waits on whom (#1679), for the Chains page and the chat head's chain link: waits on another minion, claim queues,
   // build feeders. Read from what the minions list already holds; cached a few seconds, as every chat open asks.
   {
-    method: 'GET', path: '/api/projects/:project/chains', who: PEOPLE_AND_TASKMASTER,
+    method: 'GET',
+    path: '/api/projects/:project/chains',
+    who: PEOPLE_AND_TASKMASTER,
     handler: ({ res, app, project }) => {
       const hit = chainCache.get(project.id);
       if (hit && hit.at > Date.now() - 5000) return json(res, 200, { chains: hit.chains });
@@ -1588,11 +1815,15 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project/schedule-audits', who: PEOPLE_AND_TASKMASTER,
+    method: 'GET',
+    path: '/api/projects/:project/schedule-audits',
+    who: PEOPLE_AND_TASKMASTER,
     handler: ({ res, app, project }) => json(res, 200, { audits: checkAudits(app.store, project.id) }),
   },
   {
-    method: 'POST', path: '/api/projects/:project/schedules', who: PEOPLE_AND_TASKMASTER,
+    method: 'POST',
+    path: '/api/projects/:project/schedules',
+    who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, caller, project }) {
       const { body, extra } = scheduleTemplate(app, project, await readJson(req), null);
       const fields = scheduleFields(app, project.id, body, true, !!caller);
@@ -1603,7 +1834,9 @@ export const projectRoutes: Route[] = [
   },
   // The post-deploy watch's checks per deploy (#1060): this server's own deploys, so Citadel's Releases page only.
   {
-    method: 'GET', path: '/api/deploy-watch', who: ['person'],
+    method: 'GET',
+    path: '/api/deploy-watch',
+    who: ['person'],
     handler: ({ res, app }) => json(res, 200, { deploys: app.health?.watch?.report() ?? [] }),
   },
   // Claims (#921): the pipeline lane and other single-holder duties. Everyone in the scheme reads them; people and
@@ -1611,7 +1844,9 @@ export const projectRoutes: Route[] = [
   // Three lines after every ship (#1119, src/ship-lessons.ts): the scheme's queue, read and marked taken by its weekly
   // Ship lessons run or a Taskmaster now, and by the memory curator (#1111) once it reads the queue.
   {
-    method: 'GET', path: '/api/projects/:project/ship-lessons', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/projects/:project/ship-lessons',
+    who: ['person', 'taskmaster', 'minion'],
     handler: ({ res, url, app, project }) => {
       const days = Math.min(Math.max(Number(url.searchParams.get('days')) || 60, 1), 365);
       const since = Date.now() - days * 86_400_000;
@@ -1620,7 +1855,9 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'POST', path: '/api/projects/:project/ship-lessons/take', who: ['person', 'taskmaster', 'minion'],
+    method: 'POST',
+    path: '/api/projects/:project/ship-lessons/take',
+    who: ['person', 'taskmaster', 'minion'],
     async handler({ req, res, app, project }) {
       const body = await readJson(req);
       if (!Array.isArray(body.ids) || !body.ids.length || body.ids.length > 200 || !body.ids.every((n: unknown) => Number.isInteger(n) && (n as number) > 0)) throw new HttpError(400, 'ids is a list of 1 to 200 lesson ids');
@@ -1629,11 +1866,16 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project/claims', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/projects/:project/claims',
+    who: ['person', 'taskmaster', 'minion'],
     handler: ({ res, app, project }) => json(res, 200, { claims: app.store.claims.list(project.id).map((c) => claimView(app, c)) }),
   },
   {
-    method: 'POST', path: '/api/projects/:project/claims', who: PEOPLE_AND_TASKMASTER, refuse: 'Only people and Taskmasters take claims; ask your Taskmaster',
+    method: 'POST',
+    path: '/api/projects/:project/claims',
+    who: PEOPLE_AND_TASKMASTER,
+    refuse: 'Only people and Taskmasters take claims; ask your Taskmaster',
     async handler({ req, res, app, session, caller, project }) {
       const body = await readJson(req);
       const name = claimName(body.name);
@@ -1669,7 +1911,9 @@ export const projectRoutes: Route[] = [
   },
   {
     // The page's reorder and remove (#1334): the whole waiting order, first in line first.
-    method: 'PUT', path: '/api/projects/:project/claims/:name/queue', who: PEOPLE_AND_TASKMASTER,
+    method: 'PUT',
+    path: '/api/projects/:project/claims/:name/queue',
+    who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, session, project, params }) {
       const name = claimName(decodeURIComponent(params.name));
       const queue = queueOf(app, project.id, (await readJson(req)).queue);
@@ -1683,7 +1927,10 @@ export const projectRoutes: Route[] = [
   {
     // Release: the claim passes to the first in its queue, who hears so (#1334), or is free. Taskmasters only (the `release` tool): the page
     // has no Release button, since a person can't tell whom it would pass to (#1435).
-    method: 'DELETE', path: '/api/projects/:project/claims/:name', who: ['taskmaster'], refuse: 'Only Taskmasters pass a claim on; ask yours',
+    method: 'DELETE',
+    path: '/api/projects/:project/claims/:name',
+    who: ['taskmaster'],
+    refuse: 'Only Taskmasters pass a claim on; ask yours',
     handler({ res, app, session, caller, project, params, url }) {
       const name = claimName(decodeURIComponent(params.name));
       // ?holder=<number>: the holder the caller saw, so a second Release click can't pass it on twice.
@@ -1704,7 +1951,9 @@ export const projectRoutes: Route[] = [
   },
   // Edit, pause or resume, or delete a schedule; runs it already started stay.
   {
-    method: 'PATCH', path: '/api/schedules/:schedule', who: PEOPLE_AND_TASKMASTER,
+    method: 'PATCH',
+    path: '/api/schedules/:schedule',
+    who: PEOPLE_AND_TASKMASTER,
     async handler({ req, res, app, schedule: s }) {
       const project = app.store.getProject(s.project_id)!;
       const { body, extra } = scheduleTemplate(app, project, await readJson(req), s);
@@ -1719,7 +1968,9 @@ export const projectRoutes: Route[] = [
     },
   },
   {
-    method: 'DELETE', path: '/api/schedules/:schedule', who: PEOPLE_AND_TASKMASTER,
+    method: 'DELETE',
+    path: '/api/schedules/:schedule',
+    who: PEOPLE_AND_TASKMASTER,
     handler({ res, app, schedule: s }) {
       app.store.schedules.remove(s.id);
       app.broadcast({ type: 'schedules', projectId: s.project_id });
@@ -1730,7 +1981,10 @@ export const projectRoutes: Route[] = [
   {
     // message_taskmaster: one scheme's Taskmaster writes to another's, the only way out of its own
     // scheme. It reaches that Taskmaster alone, never its minions.
-    method: 'POST', path: '/api/taskmaster', who: ['taskmaster'], refuse: `Only a ${AGENT_NAME} can message another scheme's ${AGENT_NAME}`,
+    method: 'POST',
+    path: '/api/taskmaster',
+    who: ['taskmaster'],
+    refuse: `Only a ${AGENT_NAME} can message another scheme's ${AGENT_NAME}`,
     async handler({ req, res, app, caller }) {
       const from = caller!;
       const { store, runner } = app;
@@ -1756,9 +2010,7 @@ export const projectRoutes: Route[] = [
       // Citadel's Taskmaster weighs a non-member's ask differently (its prompt). Names that could fake
       // the membership clause (a scheme called "X, for Cara, a Citadel member") come quoted.
       const name = (s: string) => (/[,"[\]\n]/.test(s) ? JSON.stringify(s) : s);
-      const author = toCitadel
-        ? `${AGENT_NAME} of ${name(own.name)}, for ${person ? name(person.name) : 'no one'}, ${store.canSee(who, project.id) ? 'a' : 'not a'} ${project.name} member`
-        : `${AGENT_NAME} of ${own.name}${senderLabel(app, from)}`;
+      const author = toCitadel ? `${AGENT_NAME} of ${name(own.name)}, for ${person ? name(person.name) : 'no one'}, ${store.canSee(who, project.id) ? 'a' : 'not a'} ${project.name} member` : `${AGENT_NAME} of ${own.name}${senderLabel(app, from)}`;
       // A file (#405) is copied into the receiver's shared inbox/ before anything is sent, so a bad path sends nothing.
       const file = body.file == null || body.file === '' ? null : relayFile(projectSharedDir(app.dataDir, own.id), projectSharedDir(app.dataDir, project.id), own.name, str(body.file, 'File', 1000));
       const attached = file ? `\n${APP_NAME} copied a file it attached into your scheme's shared folder, where your minions can read it too: ${file.path} (${byteSize(file.size)})` : '';

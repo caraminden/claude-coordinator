@@ -36,7 +36,7 @@ test('the tests run in a scope in citadel.slice with CPUWeight=500, bound to the
   const cgroup = readFileSync('/proc/self/cgroup', 'utf8').trim();
   const unit = /\/user@\d+\.service\/.+\/([^/]+\.(?:service|scope))$/.exec(cgroup)?.[1];
   if (unit) assert.ok(r.calls[1].includes(`-p BindsTo=${unit} --`), 'stopping the landing turn still stops its tests');
-  else assert.doesNotMatch(r.calls[1], /BindsTo/, 'nothing of the user manager\'s to bind to');
+  else assert.doesNotMatch(r.calls[1], /BindsTo/, "nothing of the user manager's to bind to");
 });
 
 test('without a systemd to ask it runs unweighted, and an empty weight asks none', () => {

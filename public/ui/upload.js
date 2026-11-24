@@ -73,7 +73,13 @@ export function startUpload(endpoint, file, { folder = '', onChange } = {}) {
   let run = 0; // a pause or cancel leaves the run it interrupted to notice it's stale
   let settle;
   const u = {
-    file, folder, size: file.size, sent: 0, state: 'sending', error: '', result: null,
+    file,
+    folder,
+    size: file.size,
+    sent: 0,
+    state: 'sending',
+    error: '',
+    result: null,
     done: new Promise((resolve) => (settle = resolve)),
     pause() {
       if (u.state !== 'sending') return;
@@ -178,7 +184,10 @@ export function startUpload(endpoint, file, { folder = '', onChange } = {}) {
 
 /** Whether `file` fits an <input accept> list: ".jpg", "image/*", "video/mp4". Empty accepts all. */
 function accepts(accept, file) {
-  const list = accept.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const list = accept
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
   const name = file.name.toLowerCase();
   const type = (file.type || '').toLowerCase();
   return !list.length || list.some((a) => (a.startsWith('.') ? name.endsWith(a) : a.endsWith('/*') ? type.startsWith(a.slice(0, -1)) : type === a));
@@ -203,7 +212,7 @@ export async function droppedFiles(dataTransfer) {
       try {
         files.push({ file: await new Promise((res, rej) => entry.file(res, rej)), path });
       } catch {
-        skipped.push({ path, why: 'couldn\'t be read' });
+        skipped.push({ path, why: "couldn't be read" });
       }
       return;
     }
@@ -245,16 +254,20 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
   const allBtn = el('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => (anyRunning() ? pauseAll() : resumeAll()) });
   const total = el('div', { class: 'cui-upload-total', hidden: true, role: 'status' }, totalText, totalBar, allBtn);
   const list = el('ul', { class: 'cui-upload-list' });
-  const zone = el('div', { class: 'cui-upload-drop' },
+  const zone = el(
+    'div',
+    { class: 'cui-upload-drop' },
     el('span', {}, label),
-    el('span', { class: 'cui-upload-pick' },
-      el('button', { type: 'button', class: 'cui-btn', onclick: () => pickFiles.click() }, 'Choose files'),
-      folders ? el('button', { type: 'button', class: 'cui-btn', onclick: () => pickFolder.click() }, 'Choose a folder') : ''));
+    el('span', { class: 'cui-upload-pick' }, el('button', { type: 'button', class: 'cui-btn', onclick: () => pickFiles.click() }, 'Choose files'), folders ? el('button', { type: 'button', class: 'cui-btn', onclick: () => pickFolder.click() }, 'Choose a folder') : ''),
+  );
   const box = el('div', { class: 'cui-upload' }, zone, pickFiles, pickFolder, left, total, list);
   root.append(box);
 
   const picked = (input) => {
-    add([...input.files].map((file) => ({ file, path: file.webkitRelativePath || file.name })), []);
+    add(
+      [...input.files].map((file) => ({ file, path: file.webkitRelativePath || file.name })),
+      [],
+    );
     input.value = '';
   };
   pickFiles.addEventListener('change', () => picked(pickFiles));
@@ -286,7 +299,10 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
     }
     left.hidden = !out.length;
     left.textContent = out.length
-      ? `Left out ${out.length}: ${out.slice(0, 4).map((o) => `${o.path} (${o.why})`).join(', ')}${out.length > 4 ? ` and ${out.length - 4} more` : ''}`
+      ? `Left out ${out.length}: ${out
+          .slice(0, 4)
+          .map((o) => `${o.path} (${o.why})`)
+          .join(', ')}${out.length > 4 ? ` and ${out.length - 4} more` : ''}`
       : '';
     next();
   }
@@ -296,25 +312,37 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
     const bar = el('progress', { class: 'cui-upload-bar', max: 1, value: 0 });
     const meta = el('span', { class: 'cui-upload-meta' });
     const error = el('span', { class: 'cui-upload-error', hidden: true });
-    const toggle = el('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => {
-      if (!r.up) r.held = !r.held;
-      else if (r.up.state === 'sending') r.up.pause();
-      else if (r.queued) r.queued = false; // waiting for its turn: Pause leaves it paused
-      else r.queued = true; // Resume: next() starts it when nothing else is sending
+    const toggle = el('button', {
+      type: 'button',
+      class: 'cui-btn cui-small',
+      onclick: () => {
+        if (!r.up) r.held = !r.held;
+        else if (r.up.state === 'sending') r.up.pause();
+        else if (r.queued)
+          r.queued = false; // waiting for its turn: Pause leaves it paused
+        else r.queued = true; // Resume: next() starts it when nothing else is sending
 
-      draw(r);
-      next();
-    } });
-    const cancel = el('button', { type: 'button', class: 'cui-btn cui-small cui-ghost', 'aria-label': `Cancel ${file.name}`, onclick: () => {
-      r.cancelled = true;
-      r.up?.cancel();
-      draw(r);
-      next();
-    } }, '✕');
+        draw(r);
+        next();
+      },
+    });
+    const cancel = el(
+      'button',
+      {
+        type: 'button',
+        class: 'cui-btn cui-small cui-ghost',
+        'aria-label': `Cancel ${file.name}`,
+        onclick: () => {
+          r.cancelled = true;
+          r.up?.cancel();
+          draw(r);
+          next();
+        },
+      },
+      '✕',
+    );
     r.parts = { bar, meta, error, toggle, cancel };
-    r.node = el('li', { class: 'cui-upload-file' },
-      el('span', { class: 'cui-upload-name', title: dir ? `${dir}/${file.name}` : file.name }, dir ? `${dir}/${file.name}` : file.name),
-      meta, toggle, cancel, bar, error);
+    r.node = el('li', { class: 'cui-upload-file' }, el('span', { class: 'cui-upload-name', title: dir ? `${dir}/${file.name}` : file.name }, dir ? `${dir}/${file.name}` : file.name), meta, toggle, cancel, bar, error);
     list.append(r.node);
     draw(r);
     return r;
@@ -345,9 +373,7 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
     const sent = live.reduce((n, r) => n + (r.up?.sent ?? 0), 0);
     const finished = live.filter((r) => r.up?.state === 'done').length;
     totalBar.value = size ? sent / size : finished / live.length;
-    totalText.textContent = finished === live.length
-      ? `Uploaded ${live.length} file${live.length === 1 ? '' : 's'} · ${formatBytes(size)}`
-      : `${finished} of ${live.length} files · ${formatBytes(sent)} of ${formatBytes(size)}`;
+    totalText.textContent = finished === live.length ? `Uploaded ${live.length} file${live.length === 1 ? '' : 's'} · ${formatBytes(size)}` : `${finished} of ${live.length} files · ${formatBytes(sent)} of ${formatBytes(size)}`;
     allBtn.hidden = finished === live.length;
     allBtn.textContent = anyRunning() ? 'Pause all' : 'Resume all';
   }
@@ -357,7 +383,8 @@ export function mountUpload(root, { endpoint, folder = '', accept = '', folders 
     if (rows.some((r) => stateOf(r) === 'sending')) return drawTotal();
     const r = rows.find((r) => stateOf(r) === 'waiting');
     if (!r) return drawTotal();
-    if (r.up) { // a paused file that was told to resume
+    if (r.up) {
+      // a paused file that was told to resume
       r.queued = false;
       r.up.resume();
       return draw(r);

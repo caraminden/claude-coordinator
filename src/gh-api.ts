@@ -41,7 +41,10 @@ export class GhHelpers {
     const token = env.GH_TOKEN || env.GITHUB_TOKEN || null;
     delete env.GH_TOKEN;
     delete env.GITHUB_TOKEN;
-    const key = createHash('sha256').update(`${token ?? ''}\0${env.GH_CONFIG_DIR ?? ''}`).digest('hex').slice(0, 16);
+    const key = createHash('sha256')
+      .update(`${token ?? ''}\0${env.GH_CONFIG_DIR ?? ''}`)
+      .digest('hex')
+      .slice(0, 16);
     const h = this.live.get(key);
     if (!h) {
       if ((this.off.get(key) ?? 0) < Date.now() && !this.starting.has(key)) {
@@ -70,7 +73,13 @@ export class GhHelpers {
   private async start(key: string, token: string | null, env: NodeJS.ProcessEnv) {
     const socket = join(this.dir!, `${key}.sock`);
     if (Buffer.byteLength(socket) > 107) return; // past a unix socket path's limit (a dev copy's long DATA_DIR): reads go through gh
-    if (!(await mkdir(this.dir!, { recursive: true, mode: 0o700 }).then(() => true, () => false))) return;
+    if (
+      !(await mkdir(this.dir!, { recursive: true, mode: 0o700 }).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return;
     const nonce = randomBytes(24).toString('hex');
     // argv0 is not node: ananicy runs anything named node at idle priority (deploy/priority.md).
     const proc = spawn(process.execPath, [join(import.meta.dirname, 'gh-helper.ts')], { argv0: 'citadel-gh', env, stdio: ['pipe', 'pipe', 'ignore'] });
@@ -141,8 +150,16 @@ export const ghHelpers = new GhHelpers();
 /** A REST path as a poller's name: run and issue numbers become N, a commit sha SHA, a query keeps its names only. */
 export function pathShape(path: string): string {
   const [p, q] = path.replace(/^\//, '').split('?', 2);
-  const shape = p.split('/').map((s) => (/^\d+$/.test(s) ? 'N' : /^[0-9a-f]{40}$/i.test(s) ? 'SHA' : s)).join('/');
-  return q ? `${shape}?${q.split('&').map((kv) => kv.split('=')[0]).join('&')}` : shape;
+  const shape = p
+    .split('/')
+    .map((s) => (/^\d+$/.test(s) ? 'N' : /^[0-9a-f]{40}$/i.test(s) ? 'SHA' : s))
+    .join('/');
+  return q
+    ? `${shape}?${q
+        .split('&')
+        .map((kv) => kv.split('=')[0])
+        .join('&')}`
+    : shape;
 }
 
 /**

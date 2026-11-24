@@ -35,13 +35,17 @@ export function supervisorSpec(turnsDir: string, unitTag: string, pins: { MCP_DI
     // Restart: a crash comes back within a second and adopts the turns it left. KillMode=process: a `systemd-run --scope`
     // it left starting a turn runs on through that restart and starts the turn; the runner, seeing it there, waits for it
     // (runner.ts rescue).
-    systemdRun: ['--user', '--collect', '--quiet', `--unit=citadel-supervisor-${unitTag}-${version.slice(0, 8)}`, `--slice=${TASKMASTER_SLICE}`,
-      '-p', 'ManagedOOMPreference=omit', '-p', 'UMask=0077', '-p', 'Restart=on-failure', '-p', 'KillMode=process', ...thpProps()],
+    systemdRun: ['--user', '--collect', '--quiet', `--unit=citadel-supervisor-${unitTag}-${version.slice(0, 8)}`, `--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit', '-p', 'UMask=0077', '-p', 'Restart=on-failure', '-p', 'KillMode=process', ...thpProps()],
     env: Object.fromEntries(['PATH', 'HOME', 'LANG', 'TZ'].filter((k) => env[k]).map((k) => [k, env[k]!])),
   };
 }
 
-interface Running { pid: number; port: number; key: string; version: string }
+interface Running {
+  pid: number;
+  port: number;
+  key: string;
+  version: string;
+}
 
 /** `pid` runs a turn supervisor; its pid reused by another process doesn't count. */
 export function supervisorAlive(pid: unknown): boolean {
@@ -126,7 +130,10 @@ export function handTurn(spec: SupervisorSpec, dir: string, scope: string[], tim
   return new Promise((done) => {
     const body = JSON.stringify({ dir, scope });
     const req = request({ host: '127.0.0.1', port: s.port, method: 'POST', path: '/start', timeout: timeoutMs, headers: { 'X-Supervisor-Key': s.key, 'Content-Type': 'application/json' } }, (res) => {
-      res.resume().on('end', () => done(res.statusCode === 200)).on('error', () => done(false));
+      res
+        .resume()
+        .on('end', () => done(res.statusCode === 200))
+        .on('error', () => done(false));
     });
     req.on('timeout', () => req.destroy(new Error('timed out'))).on('error', () => done(false));
     req.end(body);

@@ -99,8 +99,7 @@ export function markSvg(m, width) {
   }
   if (m.tool === 'arrow') {
     const p = arrowParts(a, b, width);
-    return `<line x1="${r(a.x)}" y1="${r(a.y)}" x2="${r(p.end.x)}" y2="${r(p.end.y)}" stroke="${c}" stroke-width="${width}" stroke-linecap="round"/>`
-      + `<polygon points="${r(b.x)},${r(b.y)} ${r(p.left.x)},${r(p.left.y)} ${r(p.right.x)},${r(p.right.y)}" fill="${c}"/>`;
+    return `<line x1="${r(a.x)}" y1="${r(a.y)}" x2="${r(p.end.x)}" y2="${r(p.end.y)}" stroke="${c}" stroke-width="${width}" stroke-linecap="round"/>` + `<polygon points="${r(b.x)},${r(b.y)} ${r(p.left.x)},${r(p.left.y)} ${r(p.right.x)},${r(p.right.y)}" fill="${c}"/>`;
   }
   const text = (size, s, fit) => `<text x="${r(a.x)}" y="${r(a.y)}" fill="${ink}" font-family="${FONT}" font-weight="700" font-size="${r(size)}" text-anchor="middle" dominant-baseline="central"${fit ? ` textLength="${r(fit)}" lengthAdjust="spacingAndGlyphs"` : ''}>${esc(s)}</text>`;
   if (m.tool === 'pin') {
@@ -129,7 +128,10 @@ export function parseMarks(title) {
   const h = +m[2];
   if (!w || !h) return null;
   const marks = [];
-  for (const part of m[3].split(';').map((s) => s.trim()).filter(Boolean)) {
+  for (const part of m[3]
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)) {
     const words = part.split(/\s+/);
     const tool = words.shift();
     if (!(tool in KINDS)) return null;
@@ -157,9 +159,7 @@ export function parseMarks(title) {
 /** Marks back as an image title, the inverse of parseMarks (marks in image pixels of a w × h picture). */
 export function marksTitle(w, h, marks) {
   const pc = (p) => `${n1((p.x * 100) / w)} ${n1((p.y * 100) / h)}`;
-  return `marks ${w}x${h}: ${marks.map((m) => [m.tool, m.colour === 'yellow' ? 'yellow' : '', m.tool === 'pin' ? m.n : '',
-    ...(m.tool === 'pin' || m.tool === 'label' ? [pc(m.pts[0])] : [pc(m.pts[0]), pc(m.pts[m.pts.length - 1])]), m.tool === 'label' ? m.text : '']
-    .filter((s) => s !== '').join(' ')).join('; ')}`;
+  return `marks ${w}x${h}: ${marks.map((m) => [m.tool, m.colour === 'yellow' ? 'yellow' : '', m.tool === 'pin' ? m.n : '', ...(m.tool === 'pin' || m.tool === 'label' ? [pc(m.pts[0])] : [pc(m.pts[0]), pc(m.pts[m.pts.length - 1])]), m.tool === 'label' ? m.text : ''].filter((s) => s !== '').join(' ')).join('; ')}`;
 }
 
 /** The SVG that lies over a w × h picture, drawn at the picture's own size and scaled with it. */

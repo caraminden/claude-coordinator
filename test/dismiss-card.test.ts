@@ -16,7 +16,9 @@ after(async () => {
 });
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -24,15 +26,18 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let srv: Booted;
-const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) =>
-  ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
+const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) => ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 let ticket: any;
-const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
+const live = () =>
+  turns()
+    .filter((t) => t.token.startsWith(`${ticket.id}.`))
+    .at(-1).token;
 const idle = () => until('the turn to end', async () => (await call(`/api/tickets/${ticket.id}`)).ticket.status !== 'running');
 const events = async () => (await call(`/api/tickets/${ticket.id}/events?after=0`)) as any[];
 const data = async (kind: string) => (await events()).filter((e) => e.kind === kind).map((e) => JSON.parse(e.data));

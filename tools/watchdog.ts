@@ -42,7 +42,9 @@ console.log(`${found.size} watched, ${down.length ? `down: ${down.join('; ')}` :
 let next = sent;
 if (message) {
   // Each device hears what's theirs: an admin everything, a contraption's owner only theirs.
-  const subs = recipients(db).map((s) => ({ ...s, msg: messageFor(s.only) })).filter((s) => s.msg);
+  const subs = recipients(db)
+    .map((s) => ({ ...s, msg: messageFor(s.only) }))
+    .filter((s) => s.msg);
   for (const s of subs) console.log(`${dry ? 'Would push' : 'Pushing'} to ${s.name}${s.only ? ' (owner)' : ''}: ${s.msg!.title}: ${s.msg!.body}`);
   if (!subs.length) console.log(`No device to push to: ${message.title}: ${message.body}`);
   // Never make a key pair here: loadVapidKeys would, and a new one orphans every subscription.
@@ -55,9 +57,14 @@ if (message) {
     // The subject the server signs with (server.ts): a push service may refuse another.
     const stored = db.prepare("SELECT value FROM settings WHERE key = 'push_subject'").get() as { value: string } | undefined;
     const subject = env.PUSH_SUBJECT ?? (stored ? JSON.parse(stored.value) : null) ?? 'https://localhost';
-    const results = await Promise.all(subs.map((s) => postPush(s, s.msg!, keys, subject).then(
-      async (res) => (res.ok || console.error(`Push to ${s.name} answered ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`), res.ok),
-      (err) => (console.error(`Push to ${s.name} failed: ${err.message}`), false))));
+    const results = await Promise.all(
+      subs.map((s) =>
+        postPush(s, s.msg!, keys, subject).then(
+          async (res) => (res.ok || console.error(`Push to ${s.name} answered ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`), res.ok),
+          (err) => (console.error(`Push to ${s.name} failed: ${err.message}`), false),
+        ),
+      ),
+    );
     // One device that got it is enough: the alert is out (a phone that missed it hears the all-clear).
     delivered = results.some(Boolean);
   }

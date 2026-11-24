@@ -30,14 +30,20 @@ const swept = new Set<string>();
 /** Where this process's spares go and what they copy. Makes none yet: fillPinSpares starts that (server.ts, after boot). */
 export function pinSparesAt(dir: string, src: string): void {
   // A re-pin (#1416): the old folder's spares can never be taken (takeSpare checks src), so they go now, not at exit.
-  if (at && at.dir !== dir) { swept.delete(at.dir); removing = rm(at.dir, { recursive: true, force: true }).catch(() => {}); }
+  if (at && at.dir !== dir) {
+    swept.delete(at.dir);
+    removing = rm(at.dir, { recursive: true, force: true }).catch(() => {});
+  }
   at = { dir, src };
   on = false;
   ready.link = [];
   ready.copy = [];
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  if (!swept.size) process.once('exit', () => { for (const d of swept) rmSync(d, { recursive: true, force: true }); });
+  if (!swept.size)
+    process.once('exit', () => {
+      for (const d of swept) rmSync(d, { recursive: true, force: true });
+    });
   swept.add(dir);
 }
 
@@ -85,10 +91,11 @@ const need = (): SpareKind | undefined => (at && on && !failed ? (['link', 'copy
 
 /** Make spares one at a time until each kind has its count, so a refill never crowds the disk. */
 function fill(): Promise<void> {
-  if (!making && need()) making = pass().finally(() => {
-    making = null;
-    void fill(); // a take or a fill that came while this pass was ending
-  });
+  if (!making && need())
+    making = pass().finally(() => {
+      making = null;
+      void fill(); // a take or a fill that came while this pass was ending
+    });
   return making ?? Promise.resolve();
 }
 
@@ -114,7 +121,8 @@ async function pass(): Promise<void> {
 async function linkTree(src: string, dst: string): Promise<void> {
   await mkdir(dst, { recursive: true });
   for (const e of await readdir(src, { withFileTypes: true })) {
-    const from = join(src, e.name), to = join(dst, e.name);
+    const from = join(src, e.name),
+      to = join(dst, e.name);
     if (e.isDirectory()) await linkTree(from, to);
     else if (e.isSymbolicLink()) await symlink(await readlink(from), to);
     else await link(from, to);

@@ -115,7 +115,7 @@ test("a Codex turn's patches are checked path by path as writes, and one the par
   }
   assert.equal(hook({ ...patch('*** Add File: x\n+y'), cwd: undefined }, t).code, 2, 'a relative path with no cwd');
   assert.equal(hook(patch('*** Add File: x\n+y'), turnCfg({ rules: ['Edit(docs/**)'] })).code, 2, 'an edit rule blocks patches');
-  assert.equal(hook(bash(`echo x > ${home}/.citadel-turns/9-1/codex-tripwire.json`), t).code, 2, 'the shell can\'t rewrite the config either');
+  assert.equal(hook(bash(`echo x > ${home}/.citadel-turns/9-1/codex-tripwire.json`), t).code, 2, "the shell can't rewrite the config either");
 });
 
 test("a Codex turn runs only its own MCP servers' tools; Grunts, goals and unknown tools are off", () => {
@@ -327,10 +327,15 @@ test('images go to Codex after the brief, as local image inputs (#408)', async (
   rmSync(fakeLog, { force: true });
   const r = await review('Judge the sheet.', { cwd: root, timeoutMs: 10_000, images: ['/w/a.png', '/s/b.webp'], bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'ok' } });
   assert.equal(r.code, 0);
-  assert.deepEqual(logged().find((m) => m.method === 'turn/start').params.input.slice(1), [
-    { type: 'localImage', path: '/w/a.png' },
-    { type: 'localImage', path: '/s/b.webp' },
-  ]);
+  assert.deepEqual(
+    logged()
+      .find((m) => m.method === 'turn/start')
+      .params.input.slice(1),
+    [
+      { type: 'localImage', path: '/w/a.png' },
+      { type: 'localImage', path: '/s/b.webp' },
+    ],
+  );
 });
 
 test('an image run starts a thread with no shell and image instructions, names the refs for image_gen, and writes the picture to out (#733)', async () => {
@@ -383,7 +388,7 @@ test("an image run's Codex gets the turn's tripwire config in image mode, a revi
   assert.equal(refused.text, "Codex made no image: [tripwire] image_genimagegen is off: Citadel's Codex image run makes one picture with image_gen and nothing else.\nImage generation failed: Citadel's read-only reviewer policy blocked the image_gen tool.");
 });
 
-test("an image run skips (exit 4) when an image limit is over pace, and says when a used-up image limit resets (#733)", async () => {
+test('an image run skips (exit 4) when an image limit is over pace, and says when a used-up image limit resets (#733)', async () => {
   const out = join(root, 'gen-none.png');
   const over = await review('a red dot', { cwd: root, timeoutMs: 10_000, imageGen: { out, transparent: false }, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'image-over' } });
   assert.equal(over.code, 4);
@@ -396,7 +401,7 @@ test("an image run skips (exit 4) when an image limit is over pace, and says whe
   assert.equal(readdirSync(root).includes('gen-none.png'), false);
 });
 
-test("--out is a .png inside the worktree or the shared folders, never over a file unless overwrite (#733)", () => {
+test('--out is a .png inside the worktree or the shared folders, never over a file unless overwrite (#733)', () => {
   const w = join(root, 'out-worktree');
   const shared = join(root, 'out-shared');
   const outside = join(root, 'out-outside');
@@ -440,7 +445,7 @@ test("--image takes only image files in the review's folder or the turn's shared
   assert.match((images(['--image', join(shared, 'b.JPG')], w, {}) as { error: string }).error, /outside/, 'no shared folder in the env: only the worktree');
 });
 
-test("a failed Codex turn says why (a usage limit, say), and a stuck one times out and is stopped", async () => {
+test('a failed Codex turn says why (a usage limit, say), and a stuck one times out and is stopped', async () => {
   const failed = await review('Review.', { cwd: root, timeoutMs: 10_000, bin: fakeCodex, env: { ...process.env, FAKE_CODEX: 'fail' } });
   assert.equal(failed.code, 1);
   assert.match(failed.text, /failed: You have hit your usage limit/);
@@ -479,7 +484,9 @@ test("Codex signs in inside the person's container by device code, and the login
   mkdirSync(bin);
   const calls = join(dir, 'calls.jsonl');
   const go = join(dir, 'go');
-  writeFileSync(join(bin, 'podman'), `#!${process.execPath}
+  writeFileSync(
+    join(bin, 'podman'),
+    `#!${process.execPath}
 const fs = require('node:fs');
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n');
 const args = process.argv.slice(2);
@@ -493,7 +500,8 @@ const wait = setInterval(() => {
   clearInterval(wait);
   process.exit(how === 'ok' ? 0 : 1);
 }, 50);
-`);
+`,
+  );
   chmodSync(join(bin, 'podman'), 0o755);
   const savedPath = process.env.PATH;
   process.env.PATH = `${bin}:${savedPath}`;
@@ -654,7 +662,7 @@ test("a host turn's review runs in the Codex container the runner named, read-on
   // Its files sit in the person's mounted turns folder: the driver with its lock and image helper, the tripwire, and a review-mode config.
   assert.ok(call.script.startsWith(personTurns + '/review-'), call.script);
   assert.deepEqual(call.files, ['codex-lock.ts', 'codex-review.ts', 'codex-tripwire.json', 'codex.ts', 'kit', 'tripwire-base.ts', 'tripwire-git.ts', 'tripwire.ts']);
-  assert.deepEqual(call.cfg, { script: join(dirname(call.script), 'tripwire.ts'), config }, 'the container turns\' review mode: no container, no turn mode');
+  assert.deepEqual(call.cfg, { script: join(dirname(call.script), 'tripwire.ts'), config }, "the container turns' review mode: no container, no turn mode");
   assert.equal(call.writable, false, 'read-only, as the runner writes it');
   assert.deepEqual(readdirSync(personTurns), [], 'the copy goes once the review ends');
 });
@@ -691,7 +699,7 @@ test("a host turn's review is exit 3 with the reason when the container isn't si
     assert.equal(r.status, 3);
     assert.match(args[0] === '--check' ? r.stdout : r.stderr, /managed tripwire hook isn't installed/);
   }
-  assert.equal(podCalls().length, 0, 'never execs into a container the runner didn\'t name');
+  assert.equal(podCalls().length, 0, "never execs into a container the runner didn't name");
 });
 
 test("a host turn's images go to the Codex container as --image, with the shared folders to check them against; a bad one stops before podman (#408)", () => {

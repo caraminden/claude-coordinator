@@ -40,7 +40,12 @@ chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 runner.pollMs = 10;
 // The grace and kill timers run on a clock the test moves (#1444): what's checked is which signal goes when, in order,
 // not how many real milliseconds a stop took.
@@ -83,7 +88,11 @@ test('a claude that ignores SIGINT still dies by SIGTERM after the grace period'
   const id = await started('plain');
   runner.stop(id);
   assert.deepEqual(sent, ['SIGINT']);
-  assert.deepEqual(clock.pending().map((p) => p.ms), [stopGraceMs, stopKillMs], 'SIGTERM after the grace, SIGKILL after the kill wait');
+  assert.deepEqual(
+    clock.pending().map((p) => p.ms),
+    [stopGraceMs, stopKillMs],
+    'SIGTERM after the grace, SIGKILL after the kill wait',
+  );
   clock.advance(stopGraceMs - 1);
   assert.deepEqual(sent, ['SIGINT'], 'nothing more before the grace period is up');
   clock.advance(1);
@@ -112,7 +121,7 @@ test('a second Stop does not push the SIGKILL out', async () => {
   assert.deepEqual(sent, ['SIGINT', 'SIGTERM']);
   runner.stop(id);
   assert.deepEqual(sent, ['SIGINT', 'SIGTERM'], 'the second Stop sends nothing new');
-  assert.deepEqual(clock.pending(), [{ ms: stopKillMs, in: stopKillMs - stopGraceMs - 700 }], 'the SIGKILL still comes on the first Stop\'s schedule');
+  assert.deepEqual(clock.pending(), [{ ms: stopKillMs, in: stopKillMs - stopGraceMs - 700 }], "the SIGKILL still comes on the first Stop's schedule");
   clock.advance(stopKillMs - stopGraceMs - 700);
   assert.deepEqual(sent, ['SIGINT', 'SIGTERM', 'SIGKILL']);
   await ended(id);

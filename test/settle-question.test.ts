@@ -19,7 +19,9 @@ after(async () => {
 });
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -27,19 +29,22 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let base = '';
 let cookie = '';
 
 let srv: Booted;
-const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) =>
-  ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
+const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) => ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 // The token the minion's latest turn holds: each turn's token dies when the next turn starts.
-const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
+const live = () =>
+  turns()
+    .filter((t) => t.token.startsWith(`${ticket.id}.`))
+    .at(-1).token;
 const idle = (id: number) => until('the turn to end', async () => (await call(`/api/tickets/${id}`)).ticket.status !== 'running');
 
 let ticket: any;
@@ -56,7 +61,6 @@ before(async () => {
   await idle(ticket.id);
 });
 
-
 const ask = (q: string) => call(`/api/tickets/${ticket.id}/questions`, { method: 'POST', token: live(), body: { questions: [{ question: q, options: [{ label: 'A', recommended: true }, { label: 'B' }] }] } });
 const settle = (questionId?: string) => call(`/api/tickets/${ticket.id}/settle`, { method: 'POST', token: live(), body: { questionId: questionId ?? null } });
 const inbox = async () => (await call(`/api/projects/${ticket.project_id}/inbox`)).items.filter((i: any) => i.kind === 'question');
@@ -69,7 +73,10 @@ test('a settled card leaves the inbox, records it on the card and refuses a late
   assert.equal((await inbox()).length, 0);
   const events = await call(`/api/tickets/${ticket.id}/events?after=0`);
   assert.equal(JSON.parse(events.find((e: any) => e.kind === 'question').data).settled.at > 0, true);
-  assert.deepEqual(events.filter((e: any) => e.kind === 'question_result').map((e: any) => JSON.parse(e.data).id), [id]);
+  assert.deepEqual(
+    events.filter((e: any) => e.kind === 'question_result').map((e: any) => JSON.parse(e.data).id),
+    [id],
+  );
   await assert.rejects(call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: ['A'], other: '' }] } }), /409 Claude took this as answered/);
   await assert.rejects(settle(id), /404 No open card with that id/);
 });
@@ -112,8 +119,7 @@ test('a card addressed to one person (#687): to must be a member; a notice takes
 
   const notice = await post({ to: '@Cara', notice: 'Runner slots went to 3' });
   let events = await call(`/api/tickets/${ticket.id}/events?after=0`);
-  assert.deepEqual(JSON.parse(events.find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === notice.id).data),
-    { id: notice.id, questions: [], to: 'Cara', notice: 'Runner slots went to 3' });
+  assert.deepEqual(JSON.parse(events.find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === notice.id).data), { id: notice.id, questions: [], to: 'Cara', notice: 'Runner slots went to 3' });
   assert.equal((await inbox()).length, 1);
   const turnsBefore = turns().length;
   await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: notice.id } });
@@ -129,7 +135,7 @@ test('a card addressed to one person (#687): to must be a member; a notice takes
   db.prepare('UPDATE turns SET ended_at = ended_at - ? WHERE ticket_id = ?').run(2 * 3_600_000, ticket.id);
   db.close();
   await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: ['B'], other: '' }] } });
-  await until('the answer\'s turn', () => turns().length > turnsBefore);
+  await until("the answer's turn", () => turns().length > turnsBefore);
   await idle(ticket.id);
   assert.ok(JSON.stringify(turns().at(-1).prompt).includes('Direct?\\n→ B'));
 });

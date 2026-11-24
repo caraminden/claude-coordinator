@@ -25,7 +25,11 @@ import { CLAUDE_MODELS, EFFORT_LEVELS } from './model-table.js';
 // Text goes to localStorage; images are too big for it, so they go to IndexedDB, with the names of
 // files already uploaded.
 export function loadDraft(key) {
-  try { return JSON.parse(localStorage.getItem(key)) ?? null; } catch { return null; }
+  try {
+    return JSON.parse(localStorage.getItem(key)) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function saveDraft(key, value) {
@@ -46,23 +50,28 @@ function draftStore(mode, fn) {
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
-  return draftDb.then((db) => new Promise((resolve, reject) => {
-    const tx = db.transaction('images', mode);
-    const req = fn(tx.objectStore('images'));
-    tx.oncomplete = () => resolve(req.result);
-    tx.onerror = () => reject(tx.error);
-  }));
+  return draftDb.then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction('images', mode);
+        const req = fn(tx.objectStore('images'));
+        tx.oncomplete = () => resolve(req.result);
+        tx.onerror = () => reject(tx.error);
+      }),
+  );
 }
 
-const loadDraftImages = (ticketId) => draftStore('readonly', (s) => s.get(ticketId)).then((v) => v ?? [], () => []);
-const saveDraftImages = (ticketId, items) =>
-  draftStore('readwrite', (s) => (items.length ? s.put(items, ticketId) : s.delete(ticketId))).catch(() => {});
+const loadDraftImages = (ticketId) =>
+  draftStore('readonly', (s) => s.get(ticketId)).then(
+    (v) => v ?? [],
+    () => [],
+  );
+const saveDraftImages = (ticketId, items) => draftStore('readwrite', (s) => (items.length ? s.put(items, ticketId) : s.delete(ticketId))).catch(() => {});
 
 /** The message box's hint; a dismissed minion's says a message brings it back. */
 export function composerPlaceholder(ticket) {
   const keys = matchMedia('(max-width: 800px)').matches ? '' : ' (Enter to send, Shift+Enter for a new line)';
-  const ask = isCoordinator(ticket) ? 'Ask the Taskmaster to start, check on, or dismiss minions…'
-    : ticket.status === 'closed' ? 'Dismissed: send a message to reopen…' : 'Message this minion…';
+  const ask = isCoordinator(ticket) ? 'Ask the Taskmaster to start, check on, or dismiss minions…' : ticket.status === 'closed' ? 'Dismissed: send a message to reopen…' : 'Message this minion…';
   return ask + keys;
 }
 
@@ -105,15 +114,16 @@ function arrived(chatId) {
 const noConnection = (err) => err instanceof TypeError || [502, 503, 504].includes(err?.status);
 
 /** Until the device says it's back online, or `ms` pass (it can't always tell). */
-const backOnline = (ms) => new Promise((ok) => {
-  const go = () => {
-    clearTimeout(timer);
-    removeEventListener('online', go);
-    ok();
-  };
-  const timer = setTimeout(go, ms);
-  addEventListener('online', go);
-});
+const backOnline = (ms) =>
+  new Promise((ok) => {
+    const go = () => {
+      clearTimeout(timer);
+      removeEventListener('online', go);
+      ok();
+    };
+    const timer = setTimeout(go, ms);
+    addEventListener('online', go);
+  });
 
 /**
  * Mark a message that didn't reach the server: "not sent" with Retry, or (no connection) "waiting to send", which goes
@@ -123,23 +133,39 @@ function notSent(chatId, entry, waiting = false) {
   entry.state = waiting ? 'waiting' : 'failed';
   const { el } = entry;
   if (!waiting) el.classList.replace('pending', 'not-sent');
-  el.querySelector('.who')?.append(h('span', { class: `msg-tag unsent-tag${waiting ? ' waiting-tag' : ''}` }, waiting ? 'waiting to send' : 'not sent',
-    waiting ? null : h('button', { type: 'button', class: 'take-back', title: 'Send it again', 'aria-label': 'Send it again', onclick: () => entry.retry() }, '↻'),
-    h('button', { type: 'button', class: 'take-back', title: waiting ? 'Cancel and take back to edit' : 'Take back to edit', 'aria-label': 'Take back to edit', onclick: () => {
-      if (entry.state !== 'failed' && entry.state !== 'waiting') return;
-      entry.state = 'taken back';
-      setSending(sending - 1);
-      el.remove();
-      for (const url of entry.urls ?? []) URL.revokeObjectURL(url);
-      const box = outbox(chatId);
-      if (box.includes(entry)) box.splice(box.indexOf(entry), 1);
-      const form = chatOpen(chatId) && document.querySelector('.composer');
-      if (form?.editBack) return form.editBack(entry.text, entry.saved);
-      // Moved to another chat meanwhile: the text waits in this chat's draft, the attachments in its box.
-      const draft = loadDraft(`cc-draft:${chatId}`)?.trim();
-      saveDraft(`cc-draft:${chatId}`, draft ? `${entry.text}\n${draft}` : entry.text);
-      chatAttachments(chatId).restore(entry.saved);
-    } }, '✎')));
+  el.querySelector('.who')?.append(
+    h(
+      'span',
+      { class: `msg-tag unsent-tag${waiting ? ' waiting-tag' : ''}` },
+      waiting ? 'waiting to send' : 'not sent',
+      waiting ? null : h('button', { type: 'button', class: 'take-back', title: 'Send it again', 'aria-label': 'Send it again', onclick: () => entry.retry() }, '↻'),
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'take-back',
+          title: waiting ? 'Cancel and take back to edit' : 'Take back to edit',
+          'aria-label': 'Take back to edit',
+          onclick: () => {
+            if (entry.state !== 'failed' && entry.state !== 'waiting') return;
+            entry.state = 'taken back';
+            setSending(sending - 1);
+            el.remove();
+            for (const url of entry.urls ?? []) URL.revokeObjectURL(url);
+            const box = outbox(chatId);
+            if (box.includes(entry)) box.splice(box.indexOf(entry), 1);
+            const form = chatOpen(chatId) && document.querySelector('.composer');
+            if (form?.editBack) return form.editBack(entry.text, entry.saved);
+            // Moved to another chat meanwhile: the text waits in this chat's draft, the attachments in its box.
+            const draft = loadDraft(`cc-draft:${chatId}`)?.trim();
+            saveDraft(`cc-draft:${chatId}`, draft ? `${entry.text}\n${draft}` : entry.text);
+            chatAttachments(chatId).restore(entry.saved);
+          },
+        },
+        '✎',
+      ),
+    ),
+  );
 }
 
 /** The message box under a chat: text, pasted images, model and effort, and Send. */
@@ -163,9 +189,35 @@ export function composer(chatId, ticket) {
     if (cold) {
       sideStrip.replaceChildren(
         h('span', {}, `${cold.idle ? 'Cold' : 'Last ran on another plan'}: a side question re-reads its ${cold.k}k context on your login, about ${cold.cost}. `),
-        h('span', { class: 'row' },
-          h('button', { type: 'button', class: 'small side-go', onclick: () => { sideOk = true; askSide(text); } }, 'Ask anyway'),
-          h('button', { type: 'button', class: 'small secondary', onclick: () => { sideStrip.hidden = true; textarea.focus(); } }, 'Cancel')));
+        h(
+          'span',
+          { class: 'row' },
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'small side-go',
+              onclick: () => {
+                sideOk = true;
+                askSide(text);
+              },
+            },
+            'Ask anyway',
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'small secondary',
+              onclick: () => {
+                sideStrip.hidden = true;
+                textarea.focus();
+              },
+            },
+            'Cancel',
+          ),
+        ),
+      );
       sideStrip.hidden = false;
       return;
     }
@@ -176,13 +228,24 @@ export function composer(chatId, ticket) {
       alertNote(`Side question not asked: ${ex.message}`);
     });
   };
-  const sideBtn = minion && h('button', { type: 'button', class: 'secondary side-ask', 'data-part': 'ask-on-the-side', title: 'Ask on the side: a read-only copy of this minion answers, and nothing reaches its session (or start a message with /btw)',
-    onclick: () => {
-      const text = box.value.trim().replace(/^\/btw\s+/, '');
-      if (text) return askSide(text);
-      textarea.placeholder = 'Type a side question, then press Aside…';
-      textarea.focus();
-    } }, 'Aside');
+  const sideBtn =
+    minion &&
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'secondary side-ask',
+        'data-part': 'ask-on-the-side',
+        title: 'Ask on the side: a read-only copy of this minion answers, and nothing reaches its session (or start a message with /btw)',
+        onclick: () => {
+          const text = box.value.trim().replace(/^\/btw\s+/, '');
+          if (text) return askSide(text);
+          textarea.placeholder = 'Type a side question, then press Aside…';
+          textarea.focus();
+        },
+      },
+      'Aside',
+    );
   const box = mountComposer(document.createDocumentFragment(), {
     placeholder: composerPlaceholder(ticket),
     draftKey: `cc-draft:${chatId}`,
@@ -191,27 +254,34 @@ export function composer(chatId, ticket) {
       const cmd = parseCommand(text);
       // `/btw <question>` asks on the side (#932), as the button does; it never goes to the minion.
       if (cmd && minion && cmd.name === 'btw') {
-        if (!cmd.rest) return alertNote('Type your question after /btw.'), false;
-        if (attachments.items.length) return alertNote('A side question takes text only: remove the attachments, or send it as a message.'), false;
-        return askSide(cmd.rest), false;
+        if (!cmd.rest) return (alertNote('Type your question after /btw.'), false);
+        if (attachments.items.length) return (alertNote('A side question takes text only: remove the attachments, or send it as a message.'), false);
+        return (askSide(cmd.rest), false);
       }
-      if (cmd?.name === 'help') return (box.value = ''), slash.open(true), false;
+      if (cmd?.name === 'help') return ((box.value = ''), slash.open(true), false);
       if (cmd?.name === 'fresh') {
-        if (cmd.rest) return alertNote('/fresh takes nothing after it: send the rest as its own message once the fresh session starts.'), false;
-        return startFresh(), false;
+        if (cmd.rest) return (alertNote('/fresh takes nothing after it: send the rest as its own message once the fresh session starts.'), false);
+        return (startFresh(), false);
       }
       if (cmd && commands.loaded && !commands.names.has(cmd.name)) {
-        return alertNote(`/${cmd.name} isn't a command here: type / to see the list, or start with // to send it anyway, both slashes included.`), false;
+        return (alertNote(`/${cmd.name} isn't a command here: type / to see the list, or start with // to send it anyway, both slashes included.`), false);
       }
       const found = !sendAnyway && looksSecret(text);
       sendAnyway = false;
-      if (found) return askToSaveSecret(ticket, found, {
-        saved: (name) => {
-          box.value = box.value.split(found).join(`$${SECRET_ENV}${name}`);
-          textarea.focus();
-        },
-        sendAnyway: () => { sendAnyway = true; form.requestSubmit(); },
-      }), false;
+      if (found)
+        return (
+          askToSaveSecret(ticket, found, {
+            saved: (name) => {
+              box.value = box.value.split(found).join(`$${SECRET_ENV}${name}`);
+              textarea.focus();
+            },
+            sendAnyway: () => {
+              sendAnyway = true;
+              form.requestSubmit();
+            },
+          }),
+          false
+        );
       return !!text || attachments.items.length > 0 || attachments.busy > 0;
     },
     // Returns at once, so Send never waits (#392): a failed message stays in the chat with Retry and Edit, not back in the box.
@@ -227,18 +297,22 @@ export function composer(chatId, ticket) {
   const { form, textarea, row, sendButton: sendBtn } = box;
   // The chat's commands, loaded once per composer; until they come (or if they don't), nothing is refused.
   const commands = { loaded: false, names: new Set(), list: chatCommandList([], minion) };
-  api(`api/tickets/${chatId}/commands`).then((r) => {
-    if (!r?.loaded) return;
-    commands.list = chatCommandList(r.commands, minion);
-    commands.names = new Set(commands.list.map((c) => c.name));
-    commands.loaded = true;
-    slash.update();
-  }).catch(() => {});
+  api(`api/tickets/${chatId}/commands`)
+    .then((r) => {
+      if (!r?.loaded) return;
+      commands.list = chatCommandList(r.commands, minion);
+      commands.names = new Set(commands.list.map((c) => c.name));
+      commands.loaded = true;
+      slash.update();
+    })
+    .catch(() => {});
   const slash = slashMenu(form, textarea, () => commands.list);
   // @mentions (#1149): the scheme's members but you. A person's own Taskmaster is theirs alone, so no one to mention there.
   if (minion || ticket.coordinator_of == null) {
     const people = [];
-    api(`api/projects/${ticket.project_id}/members`).then((list) => people.push(...list.filter((m) => m.name.toLowerCase() !== String(me).toLowerCase()))).catch(() => {});
+    api(`api/projects/${ticket.project_id}/members`)
+      .then((list) => people.push(...list.filter((m) => m.name.toLowerCase() !== String(me).toLowerCase())))
+      .catch(() => {});
     mentionMenu(form, textarea, () => people);
   }
   /**
@@ -262,7 +336,10 @@ export function composer(chatId, ticket) {
       const batch = holds.splice(0);
       for (const hold of batch) hold.el.remove();
       if (attachments.failures > batch[0].failedAtStart) {
-        const back = batch.map((x) => x.text).filter(Boolean).join('\n\n');
+        const back = batch
+          .map((x) => x.text)
+          .filter(Boolean)
+          .join('\n\n');
         box.value = box.value.trim() ? `${back}\n${box.value}` : back;
         alertNote('An upload failed, so your message was not sent. It is back in the box: send it again.');
         toast('Upload failed: your message is back in the box', { tone: 'warn', ms: 8000, action: { label: 'Send again', run: () => form.requestSubmit() } });
@@ -299,18 +376,29 @@ export function composer(chatId, ticket) {
   textarea.rows = 2;
   textarea.dataset.part = 'message-box'; // "show me where" names (#1122, src/show-parts.ts)
   textarea.setAttribute('data-draft', '');
-  const menu = h('div', { class: 'send-menu', role: 'menu', hidden: true },
-    h('button', { type: 'button', class: 'secondary', role: 'menuitem', onclick: () => {
-      closeMenu();
-      after = true;
-      try {
-        form.requestSubmit();
-      } finally {
-        after = false;
-      }
-    } }, 'Send after this turn'));
-  const moreBtn = h('button', { type: 'button', class: 'more', 'data-part': 'more-ways-to-send', title: 'More ways to send', 'aria-label': 'More ways to send', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
-    onclick: () => (menu.hidden ? openMenu() : closeMenu()) }, '▾');
+  const menu = h(
+    'div',
+    { class: 'send-menu', role: 'menu', hidden: true },
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'secondary',
+        role: 'menuitem',
+        onclick: () => {
+          closeMenu();
+          after = true;
+          try {
+            form.requestSubmit();
+          } finally {
+            after = false;
+          }
+        },
+      },
+      'Send after this turn',
+    ),
+  );
+  const moreBtn = h('button', { type: 'button', class: 'more', 'data-part': 'more-ways-to-send', title: 'More ways to send', 'aria-label': 'More ways to send', 'aria-haspopup': 'menu', 'aria-expanded': 'false', onclick: () => (menu.hidden ? openMenu() : closeMenu()) }, '▾');
   const openMenu = () => {
     menu.hidden = false;
     moreBtn.setAttribute('aria-expanded', 'true');
@@ -334,19 +422,23 @@ export function composer(chatId, ticket) {
     attachments.add(picker.files);
     picker.value = '';
   });
-  textarea.before(attachments.el,
-    account && !account.turns ? h('p', { class: 'muted small composer-note' },
-      'Your messages don\'t start or steer turns yet: they wait here, unseen by Claude, until you can link your own Claude account.') : '');
+  textarea.before(attachments.el, account && !account.turns ? h('p', { class: 'muted small composer-note' }, "Your messages don't start or steer turns yet: they wait here, unseen by Claude, until you can link your own Claude account.") : '');
   textarea.after(picker);
   if (minion) textarea.before(sideStrip);
   row.replaceChildren(
-    h('button', { type: 'button', class: 'secondary small add-image', 'data-part': 'attach', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() },
-      h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach')),
+    h('button', { type: 'button', class: 'secondary small add-image', 'data-part': 'attach', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() }, h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach')),
     // Point at something (#1141, Josh picked "🎯 beside the paperclip"): in the row's empty middle, so no taller.
-    h('button', { type: 'button', class: 'secondary small add-image', 'data-part': 'point-at', title: 'Point at something on the page, to ask about it (Alt+Shift+P)', 'aria-label': 'Point at something', onclick: () => startPick() },
-      h('span', { 'aria-hidden': 'true' }, '🎯'), h('span', { class: 'wide-only' }, ' Point')),
+    h(
+      'button',
+      { type: 'button', class: 'secondary small add-image', 'data-part': 'point-at', title: 'Point at something on the page, to ask about it (Alt+Shift+P)', 'aria-label': 'Point at something', onclick: () => startPick() },
+      h('span', { 'aria-hidden': 'true' }, '🎯'),
+      h('span', { class: 'wide-only' }, ' Point'),
+    ),
     h('span', { class: 'spacer' }),
-    modelPicker(chatId), sideBtn || '', sendGroup);
+    modelPicker(chatId),
+    sideBtn || '',
+    sendGroup,
+  );
   pointTip();
   const pasteFiles = (e) => {
     const files = pastedFiles(e.clipboardData);
@@ -396,86 +488,93 @@ export function composer(chatId, ticket) {
     // The server's copy of the message replaces this one when it arrives (thread.js, by sendId).
     // Its images' object URLs are let go when the bubble goes (taken back here, swapped for the server's copy in thread.js).
     const urls = images.map(({ mediaType, data }) => base64Url(mediaType, data));
-    const el = userBubble(me, text, urls, null, null,
-      uploads.map((u) => ({ ...u, href: uploadUrl(chatId, u.name) })));
+    const el = userBubble(
+      me,
+      text,
+      urls,
+      null,
+      null,
+      uploads.map((u) => ({ ...u, href: uploadUrl(chatId, u.name) })),
+    );
     const entry = { el, urls, text, sendId: crypto.randomUUID(), saved: [...images, ...uploads.map((upload) => ({ upload }))], state: 'new' };
     const body = { text, images, ...(files.length ? { files } : {}), ...(queue ? { after: true } : {}), ...(unpark ? { unpark: true } : {}), sendId: entry.sendId };
     setSending(sending + 1); // until it's in or taken back: a reload now would lose it
-    entry.retry = () => optimistic({
-      key: `send:${chatId}`,
-      label: 'send your message',
-      apply: () => {
-        // A Retry of one sending again already, or taken back to edit, does nothing.
-        if (entry.state !== 'new' && entry.state !== 'failed') throw new Error(`already ${entry.state}`);
-        entry.state = 'sending';
-        el.classList.replace('not-sent', 'pending') || el.classList.add('pending');
-        el.querySelector('.unsent-tag')?.remove();
-        // Last in the chat, as it reaches the server after the ones already on their way.
-        const box = outbox(chatId);
-        if (box.includes(entry)) box.splice(box.indexOf(entry), 1);
-        box.push(entry);
-        onTheWay.set(chatId, (onTheWay.get(chatId) ?? 0) + 1);
-        if (chatOpen(chatId)) {
-          document.getElementById('log')?.append(el);
-          view.sendingTo = chatId;
-          renderTyping();
-          scrollToBottom();
-        }
-      },
-      send: async () => {
-        let counted = true; // in onTheWay: not while it waits for the network
-        try {
-          // With no connection it waits, in its place in the chat's queue, and tries again with the same sendId.
-          for (let wait = 2000; ; wait = Math.min(wait * 2, 15_000)) {
-            try {
-              const ticket = await api(`api/tickets/${chatId}/messages`, { method: 'POST', body });
-              if (entry.state === 'sending') {
-                entry.state = 'sent';
-                setSending(sending - 1);
-              }
-              // Show the message now even if the live stream is down; duplicates are skipped by id.
-              if (chatOpen(chatId)) {
-                // You just sent something, so follow the reply.
-                scrollToBottom();
-                adoptTicket(chatId, ticket);
-              }
-              return ticket;
-            } catch (err) {
-              if (!noConnection(err) || entry.state !== 'sending') throw err;
-            }
-            notSent(chatId, entry, true);
-            arrived(chatId);
-            counted = false;
-            // Nothing is thinking while it waits, the messages queued behind it included.
-            if (view?.sendingTo === chatId) {
-              view.sendingTo = null;
-              renderTyping();
-            }
-            await backOnline(wait);
-            // Taken back to edit, or its server copy came in (its reply was lost): nothing more to send.
-            if (entry.state !== 'waiting') return null;
-            entry.state = 'sending';
-            el.querySelector('.unsent-tag')?.remove();
-            onTheWay.set(chatId, (onTheWay.get(chatId) ?? 0) + 1);
-            counted = true;
-            if (chatOpen(chatId)) {
-              view.sendingTo = chatId;
-              renderTyping();
-            }
+    entry.retry = () =>
+      optimistic({
+        key: `send:${chatId}`,
+        label: 'send your message',
+        apply: () => {
+          // A Retry of one sending again already, or taken back to edit, does nothing.
+          if (entry.state !== 'new' && entry.state !== 'failed') throw new Error(`already ${entry.state}`);
+          entry.state = 'sending';
+          el.classList.replace('not-sent', 'pending') || el.classList.add('pending');
+          el.querySelector('.unsent-tag')?.remove();
+          // Last in the chat, as it reaches the server after the ones already on their way.
+          const box = outbox(chatId);
+          if (box.includes(entry)) box.splice(box.indexOf(entry), 1);
+          box.push(entry);
+          onTheWay.set(chatId, (onTheWay.get(chatId) ?? 0) + 1);
+          if (chatOpen(chatId)) {
+            document.getElementById('log')?.append(el);
+            view.sendingTo = chatId;
+            renderTyping();
+            scrollToBottom();
           }
-        } finally {
-          if (counted) arrived(chatId);
-          reloadWhenIdle();
-        }
-      },
-      undo: () => {
-        if (entry.state !== 'sending') return;
-        if (outbox(chatId).includes(entry)) return notSent(chatId, entry);
-        // The server's copy came back already (thread.js swapped it in): it went, whatever the reply said.
-        entry.state = 'sent';
-        setSending(sending - 1);
-      },
-    });
+        },
+        send: async () => {
+          let counted = true; // in onTheWay: not while it waits for the network
+          try {
+            // With no connection it waits, in its place in the chat's queue, and tries again with the same sendId.
+            for (let wait = 2000; ; wait = Math.min(wait * 2, 15_000)) {
+              try {
+                const ticket = await api(`api/tickets/${chatId}/messages`, { method: 'POST', body });
+                if (entry.state === 'sending') {
+                  entry.state = 'sent';
+                  setSending(sending - 1);
+                }
+                // Show the message now even if the live stream is down; duplicates are skipped by id.
+                if (chatOpen(chatId)) {
+                  // You just sent something, so follow the reply.
+                  scrollToBottom();
+                  adoptTicket(chatId, ticket);
+                }
+                return ticket;
+              } catch (err) {
+                if (!noConnection(err) || entry.state !== 'sending') throw err;
+              }
+              notSent(chatId, entry, true);
+              arrived(chatId);
+              counted = false;
+              // Nothing is thinking while it waits, the messages queued behind it included.
+              if (view?.sendingTo === chatId) {
+                view.sendingTo = null;
+                renderTyping();
+              }
+              await backOnline(wait);
+              // Taken back to edit, or its server copy came in (its reply was lost): nothing more to send.
+              if (entry.state !== 'waiting') return null;
+              entry.state = 'sending';
+              el.querySelector('.unsent-tag')?.remove();
+              onTheWay.set(chatId, (onTheWay.get(chatId) ?? 0) + 1);
+              counted = true;
+              if (chatOpen(chatId)) {
+                view.sendingTo = chatId;
+                renderTyping();
+              }
+            }
+          } finally {
+            if (counted) arrived(chatId);
+            reloadWhenIdle();
+          }
+        },
+        undo: () => {
+          if (entry.state !== 'sending') return;
+          if (outbox(chatId).includes(entry)) return notSent(chatId, entry);
+          // The server's copy came back already (thread.js swapped it in): it went, whatever the reply said.
+          entry.state = 'sent';
+          setSending(sending - 1);
+        },
+      });
     return entry.retry();
   };
   // A one-tap reply (replies.js) sends its text the same way, leaving any draft in the box alone.
@@ -540,9 +639,7 @@ function slashMenu(form, textarea, list) {
     shown = query === null ? [] : matchCommands(list(), query);
     if (!shown.length) return close();
     active = Math.min(active, shown.length - 1);
-    menu.replaceChildren(...shown.map((c, i) => h('div', { class: 'slash-item', role: 'option', id: `${menu.id}-${i}`, onclick: () => pick(c) },
-      h('span', { class: 'slash-name' }, `/${c.name}`, c.args ? h('span', { class: 'slash-args' }, ` ${c.args}`) : ''),
-      h('span', { class: 'slash-desc' }, c.description || ''))));
+    menu.replaceChildren(...shown.map((c, i) => h('div', { class: 'slash-item', role: 'option', id: `${menu.id}-${i}`, onclick: () => pick(c) }, h('span', { class: 'slash-name' }, `/${c.name}`, c.args ? h('span', { class: 'slash-args' }, ` ${c.args}`) : ''), h('span', { class: 'slash-desc' }, c.description || ''))));
     menu.hidden = false;
     textarea.setAttribute('aria-expanded', 'true');
     mark();
@@ -556,23 +653,27 @@ function slashMenu(form, textarea, list) {
   });
   textarea.addEventListener('blur', close);
   // Capture: ahead of the box's own Enter, which would send.
-  form.addEventListener('keydown', (e) => {
-    if (menu.hidden || e.target !== textarea || e.isComposing) return;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      active = (active + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length;
-      mark();
-    } else if (e.key === 'Escape') {
-      close();
-    } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
-      // Enter on a name typed out in full sends it; otherwise Enter, like Tab, fills in the one picked.
-      if (e.key === 'Enter' && textarea.value === `/${shown[active].name}`) return close();
-      pick(shown[active]);
-    } else {
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-  }, true);
+  form.addEventListener(
+    'keydown',
+    (e) => {
+      if (menu.hidden || e.target !== textarea || e.isComposing) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        active = (active + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length;
+        mark();
+      } else if (e.key === 'Escape') {
+        close();
+      } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        // Enter on a name typed out in full sends it; otherwise Enter, like Tab, fills in the one picked.
+        if (e.key === 'Enter' && textarea.value === `/${shown[active].name}`) return close();
+        pick(shown[active]);
+      } else {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    true,
+  );
   return {
     update: () => !menu.hidden && update(),
     open: (everything = false) => {
@@ -619,8 +720,7 @@ function mentionMenu(form, textarea, people) {
     shown = q === null ? [] : people().filter((m) => m.name.toLowerCase().startsWith(lower) || m.login.toLowerCase().startsWith(lower));
     if (!shown.length) return close();
     active = Math.min(active, shown.length - 1);
-    menu.replaceChildren(...shown.map((m, i) => h('div', { class: 'slash-item', role: 'option', id: `${menu.id}-${i}`, onclick: () => pick(m) },
-      h('span', { class: 'slash-name' }, `@${m.name}`), h('span', { class: 'slash-desc' }, m.owner ? 'Owner' : m.login))));
+    menu.replaceChildren(...shown.map((m, i) => h('div', { class: 'slash-item', role: 'option', id: `${menu.id}-${i}`, onclick: () => pick(m) }, h('span', { class: 'slash-name' }, `@${m.name}`), h('span', { class: 'slash-desc' }, m.owner ? 'Owner' : m.login))));
     menu.hidden = false;
     textarea.setAttribute('aria-controls', menu.id);
     textarea.setAttribute('aria-expanded', 'true');
@@ -632,21 +732,25 @@ function mentionMenu(form, textarea, people) {
     update();
   });
   textarea.addEventListener('blur', close);
-  form.addEventListener('keydown', (e) => {
-    if (menu.hidden || e.target !== textarea || e.isComposing) return;
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      active = (active + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length;
-      mark();
-    } else if (e.key === 'Escape') {
-      close();
-    } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
-      pick(shown[active]);
-    } else {
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-  }, true);
+  form.addEventListener(
+    'keydown',
+    (e) => {
+      if (menu.hidden || e.target !== textarea || e.isComposing) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        active = (active + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length;
+        mark();
+      } else if (e.key === 'Escape') {
+        close();
+      } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        pick(shown[active]);
+      } else {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    true,
+  );
 }
 
 // ---------- pasted images and attached files ----------
@@ -685,7 +789,9 @@ function pointTip() {
   try {
     if (localStorage.getItem('citadel.pointTip')) return;
     localStorage.setItem('citadel.pointTip', '1');
-  } catch { return; }
+  } catch {
+    return;
+  }
   setTimeout(() => toast('Right-click anything to point at it', { ms: 8000 }), 1200);
 }
 
@@ -717,29 +823,45 @@ export const uploadsRunning = () => [...attachmentsByChat.values()].some((a) => 
 function createAttachments(chatId, onChange) {
   const el = h('div', { class: 'attachments', hidden: true });
   const state = {
-    el, items: [], busy: 0,
-    get uploading() { return state.items.some((i) => i.upload && !i.upload.name); },
+    el,
+    items: [],
+    busy: 0,
+    get uploading() {
+      return state.items.some((i) => i.upload && !i.upload.name);
+    },
     failures: 0,
   };
   const idleWaiters = [];
   // Waiters run once nothing is being prepared or uploaded (a microtask later, so an image's original has started by then).
-  const settle = () => queueMicrotask(() => {
-    if (state.busy || state.uploading) return;
-    for (const f of idleWaiters.splice(0)) f();
-  });
-  state.whenIdle = (f) => { idleWaiters.push(f); settle(); };
+  const settle = () =>
+    queueMicrotask(() => {
+      if (state.busy || state.uploading) return;
+      for (const f of idleWaiters.splice(0)) f();
+    });
+  state.whenIdle = (f) => {
+    idleWaiters.push(f);
+    settle();
+  };
   const removeButton = (item) => h('button', { type: 'button', class: 'remove', title: 'Remove', 'aria-label': 'Remove', onclick: () => state.remove([item]) }, '×');
   const render = () => {
     onChange(state.items.filter((i) => i.data || i.upload?.name || i.note).map(({ mediaType, data, upload, note }) => (note ? { note } : upload ? { upload } : { mediaType, data })));
     el.hidden = !state.items.length;
-    el.replaceChildren(...state.items.map((item) => item.note
-      ? h('div', { class: 'file-chip point-chip', title: item.note.text }, h('span', { class: 'icon', 'aria-hidden': 'true' }, '📍'), h('span', { class: 'name' }, item.note.label), removeButton(item))
-      : item.upload
-      ? h('div', { class: 'file-chip' }, h('span', { class: 'icon', 'aria-hidden': 'true' }, '📄'), h('span', { class: 'name' }, item.upload.label ?? item.file?.name ?? item.upload.name),
-        h('span', { class: 'size' }, item.upload.name ? formatSize(item.upload.size) : `${Math.round((item.progress ?? 0) * 100)}%`), removeButton(item))
-      : h('div', { class: 'thumb' },
-        h('button', { type: 'button', class: 'zoom', title: 'View larger or draw on it', onclick: () => drawOn(item) }, h('img', { src: item.url, alt: 'Image to send' })),
-        removeButton(item))));
+    el.replaceChildren(
+      ...state.items.map((item) =>
+        item.note
+          ? h('div', { class: 'file-chip point-chip', title: item.note.text }, h('span', { class: 'icon', 'aria-hidden': 'true' }, '📍'), h('span', { class: 'name' }, item.note.label), removeButton(item))
+          : item.upload
+            ? h(
+                'div',
+                { class: 'file-chip' },
+                h('span', { class: 'icon', 'aria-hidden': 'true' }, '📄'),
+                h('span', { class: 'name' }, item.upload.label ?? item.file?.name ?? item.upload.name),
+                h('span', { class: 'size' }, item.upload.name ? formatSize(item.upload.size) : `${Math.round((item.progress ?? 0) * 100)}%`),
+                removeButton(item),
+              )
+            : h('div', { class: 'thumb' }, h('button', { type: 'button', class: 'zoom', title: 'View larger or draw on it', onclick: () => drawOn(item) }, h('img', { src: item.url, alt: 'Image to send' })), removeButton(item)),
+      ),
+    );
   };
   const addFile = async (file, label) => {
     if (state.items.filter((i) => i.upload).length >= MAX_FILES) return alertNote(`At most ${MAX_FILES} files per message.`);
@@ -827,23 +949,24 @@ function createAttachments(chatId, onChange) {
   const drawOn = (item) => {
     const clean = item.clean ?? { url: item.url, mediaType: item.mediaType, data: item.data };
     const lb = lightbox([{ src: clean.url, caption: 'Image to send', alt: 'Image to send, full size' }], {
-      render: (_, stage) => annotator(stage, clean.url, {
-        marks: item.marks,
-        onDone: async (canvas, marks) => {
-          lb.close();
-          const blob = canvas && await encodeCanvas(canvas).catch(() => null);
-          if (canvas && !blob) return alertNote('Could not save the marked image: it came out too large.');
-          if (!state.items.includes(item)) return; // removed while open
-          if (item.url !== clean.url) URL.revokeObjectURL(item.url);
-          if (!blob) {
-            Object.assign(item, clean, { clean: undefined, marks: undefined });
-          } else {
-            const data = await blobBase64(blob);
-            Object.assign(item, { url: URL.createObjectURL(blob), mediaType: blob.type, data, clean, marks });
-          }
-          render();
-        },
-      }),
+      render: (_, stage) =>
+        annotator(stage, clean.url, {
+          marks: item.marks,
+          onDone: async (canvas, marks) => {
+            lb.close();
+            const blob = canvas && (await encodeCanvas(canvas).catch(() => null));
+            if (canvas && !blob) return alertNote('Could not save the marked image: it came out too large.');
+            if (!state.items.includes(item)) return; // removed while open
+            if (item.url !== clean.url) URL.revokeObjectURL(item.url);
+            if (!blob) {
+              Object.assign(item, clean, { clean: undefined, marks: undefined });
+            } else {
+              const data = await blobBase64(blob);
+              Object.assign(item, { url: URL.createObjectURL(blob), mediaType: blob.type, data, clean, marks });
+            }
+            render();
+          },
+        }),
     });
   };
   state.drawOn = drawOn;
@@ -885,17 +1008,36 @@ const SECRET_ENV = 'CITADEL_SECRET_';
 function askToSaveSecret(ticket, found, { saved, sendAnyway }) {
   const value = h('input', { type: 'password', value: found, ...noAutofill('secret-value', 'new-password'), spellcheck: 'false', required: true, 'aria-label': 'The value' });
   const name = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', required: true, placeholder: 'SITE_PASSWORD', pattern: '[A-Za-z][A-Za-z0-9_]{0,63}', 'aria-label': 'Name' });
-  const whose = h('select', { 'aria-label': 'Whose' }, h('option', { value: 'person' }, 'Mine'),
-    ticket?.project_id != null ? h('option', { value: 'scheme' }, 'This scheme\'s') : null);
+  const whose = h('select', { 'aria-label': 'Whose' }, h('option', { value: 'person' }, 'Mine'), ticket?.project_id != null ? h('option', { value: 'scheme' }, "This scheme's") : null);
   const err = h('p', { class: 'error', role: 'alert', hidden: true });
   const save = h('button', { type: 'submit' }, 'Save as a secret');
-  const form = h('form', { class: 'secret-warning' },
-    h('p', {}, 'Chats are kept, so a password or key sent here stays in this chat. Save it as a secret instead: a minion gets it as ',
-      h('code', {}, `$${SECRET_ENV}<NAME>`), ' and the message names it in place of the value.'),
-    h('label', {}, 'The value', value), h('label', {}, 'Name', name), h('label', {}, 'Whose', whose), err,
-    h('div', { class: 'row' }, save,
-      h('button', { type: 'button', class: 'secondary', onclick: () => { dialog.close(); sendAnyway(); } }, 'Send anyway'),
-      h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel')));
+  const form = h(
+    'form',
+    { class: 'secret-warning' },
+    h('p', {}, 'Chats are kept, so a password or key sent here stays in this chat. Save it as a secret instead: a minion gets it as ', h('code', {}, `$${SECRET_ENV}<NAME>`), ' and the message names it in place of the value.'),
+    h('label', {}, 'The value', value),
+    h('label', {}, 'Name', name),
+    h('label', {}, 'Whose', whose),
+    err,
+    h(
+      'div',
+      { class: 'row' },
+      save,
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'secondary',
+          onclick: () => {
+            dialog.close();
+            sendAnyway();
+          },
+        },
+        'Send anyway',
+      ),
+      h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel'),
+    ),
+  );
   const dialog = openDialog({ title: 'This looks like a secret. Save it as one instead?', className: 'secret-ask', body: form });
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -971,18 +1113,16 @@ function codexBlocked() {
 function modelPicker(chatId) {
   const save = (field) => (e) => {
     const value = field === 'workflow' ? e.target.value === 'on' : e.target.value || null;
-    setTicketField(chatId, field, value, field === 'workflow' ? (value ? 'on' : 'off') : value ?? 'the default');
+    setTicketField(chatId, field, value, field === 'workflow' ? (value ? 'on' : 'off') : (value ?? 'the default'));
   };
   const model = h('select', { class: 'picker', id: 'model-picker', 'data-part': 'model-picker', title: 'Model for this minion', 'aria-label': 'Model for this minion', onchange: save('model') });
   const effort = h('select', { class: 'picker', id: 'effort-picker', 'data-part': 'effort-picker', title: 'Effort for this minion', 'aria-label': 'Effort for this minion', onchange: save('effort') });
   // Workflow (#359): off by default, as the tool adds ~2k tokens to every call; the Taskmaster never gets it.
-  const workflow = h('select', { class: 'picker', id: 'workflow-picker', onchange: save('workflow') },
-    h('option', { value: '' }, 'Workflow off'), h('option', { value: 'on' }, 'Workflow on'));
+  const workflow = h('select', { class: 'picker', id: 'workflow-picker', onchange: save('workflow') }, h('option', { value: '' }, 'Workflow off'), h('option', { value: 'on' }, 'Workflow on'));
   // Each picker in a row with its name, which only phones show; on desktop the rows are display: contents.
   const because = h('span', { class: 'picker-because', id: 'picker-because' });
   const row = (name, control, id) => h('span', { class: 'picker-row', id }, h('span', { class: 'picker-label', 'aria-hidden': 'true' }, name), control);
-  const pickers = h('span', { class: 'pickers', id: 'pickers' },
-    row('Model', model), row('Effort', effort), row('Workflow', workflow, 'workflow-row'), row('Plugins', pluginPicker(chatId), 'plugin-row'), because);
+  const pickers = h('span', { class: 'pickers', id: 'pickers' }, row('Model', model), row('Effort', effort), row('Workflow', workflow, 'workflow-row'), row('Plugins', pluginPicker(chatId), 'plugin-row'), because);
   return settingsMenu(pickers);
 }
 
@@ -999,8 +1139,7 @@ phone.addEventListener('change', () => {
  * of named rows. Desktop never shows the button, and the pickers stay inline as before (style.css).
  */
 function settingsMenu(pickers) {
-  const button = h('button', { type: 'button', class: 'picker settings-button', id: 'settings-picker', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'pickers' },
-    h('span', { class: 'gear', 'aria-hidden': 'true' }, '⚙'), h('span', { class: 'dot', 'aria-hidden': 'true' }));
+  const button = h('button', { type: 'button', class: 'picker settings-button', id: 'settings-picker', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'pickers' }, h('span', { class: 'gear', 'aria-hidden': 'true' }, '⚙'), h('span', { class: 'dot', 'aria-hidden': 'true' }));
   const wrap = h('span', { class: 'settings-picker' }, button, pickers);
   const close = () => {
     wrap.classList.remove('open');
@@ -1097,14 +1236,19 @@ export function renderModelPicker() {
   const onPhone = phone.matches;
   const defModel = !t.model && t.last_model ? modelName(t.last_model) : onPhone ? 'Default' : 'Model';
   const blocked = codexBlocked();
-  model.replaceChildren(h('option', { value: '' }, defModel),
-    h('optgroup', { label: 'Claude' }, ...MODELS.map(([id, name]) => {
-      // The scheme's Minion rules can turn Fable off (#1045): greyed, but a minion already on it keeps showing it.
-      const noFable = view.project?.fable_ok === 'off' && /fable/.test(id) && t.model !== id;
-      return h('option', { value: id, disabled: noFable, title: noFable ? 'Fable is off in this scheme (Minion rules)' : null }, name);
-    })),
-    h('optgroup', { label: blocked ? `Codex (${blocked})` : 'Codex' },
-      ...CODEX_MODELS.map(([id, name]) => h('option', { value: id, disabled: !!blocked && t.model !== id, title: blocked ? `Codex: ${codex?.why ?? 'sign in to Citadel to use Codex'}` : null }, name))));
+  model.replaceChildren(
+    h('option', { value: '' }, defModel),
+    h(
+      'optgroup',
+      { label: 'Claude' },
+      ...MODELS.map(([id, name]) => {
+        // The scheme's Minion rules can turn Fable off (#1045): greyed, but a minion already on it keeps showing it.
+        const noFable = view.project?.fable_ok === 'off' && /fable/.test(id) && t.model !== id;
+        return h('option', { value: id, disabled: noFable, title: noFable ? 'Fable is off in this scheme (Minion rules)' : null }, name);
+      }),
+    ),
+    h('optgroup', { label: blocked ? `Codex (${blocked})` : 'Codex' }, ...CODEX_MODELS.map(([id, name]) => h('option', { value: id, disabled: !!blocked && t.model !== id, title: blocked ? `Codex: ${codex?.why ?? 'sign in to Citadel to use Codex'}` : null }, name))),
+  );
   // A model set outside these lists (say, by an older version) still shows as itself.
   if (t.model && ![...MODELS, ...CODEX_MODELS].some(([id]) => id === t.model)) model.append(h('option', { value: t.model }, t.model));
   model.value = t.model ?? '';
@@ -1141,8 +1285,7 @@ export function renderModelPicker() {
 function renderSettingsButton(t, picked, later) {
   const button = document.getElementById('settings-picker');
   if (!button) return;
-  const off = [t.model && modelName(t.model), t.effort && `${t.effort} effort`, t.workflow && t.kind !== 'coordinator' && 'Workflow on',
-    picked.length && `plugins: ${picked.map(pluginName).join(', ')}`].filter(Boolean);
+  const off = [t.model && modelName(t.model), t.effort && `${t.effort} effort`, t.workflow && t.kind !== 'coordinator' && 'Workflow on', picked.length && `plugins: ${picked.map(pluginName).join(', ')}`].filter(Boolean);
   button.classList.toggle('is-default', !off.length);
   button.title = `Settings for this minion: ${off.length ? off.join(', ') : 'all on their defaults'}${later}`;
   button.setAttribute('aria-label', button.title);
@@ -1162,8 +1305,7 @@ function renderPluginPicker(t, later) {
   button.title = `${picked.length ? `Extra plugins for this minion: ${picked.map(pluginName).join(', ')}` : 'No extra plugins for this minion'}: each costs tokens and memory on every turn, and a change breaks the prompt cache once${later}`;
   button.setAttribute('aria-label', button.title);
   const focused = menu.contains(document.activeElement) ? document.activeElement.value : null;
-  menu.replaceChildren(h('p', { class: 'muted small' }, 'Extra plugins for this minion'),
-    ...offered.map((d) => h('label', { title: d }, h('input', { type: 'checkbox', value: d, checked: picked.includes(d) }), ` ${pluginName(d)}`)));
+  menu.replaceChildren(h('p', { class: 'muted small' }, 'Extra plugins for this minion'), ...offered.map((d) => h('label', { title: d }, h('input', { type: 'checkbox', value: d, checked: picked.includes(d) }), ` ${pluginName(d)}`)));
   if (focused) menu.querySelector(`input[value="${CSS.escape(focused)}"]`)?.focus();
   return t.kind === 'coordinator' ? [] : picked;
 }

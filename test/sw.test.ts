@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-test('the service worker answers Citadel\'s page loads but no /apps/ request', () => {
+test("the service worker answers Citadel's page loads but no /apps/ request", () => {
   const listeners: Record<string, (e: any) => void> = {};
   const self = { addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn) };
   new Function('self', 'fetch', readFileSync(join(import.meta.dirname, '..', 'public', 'sw.js'), 'utf8'))(self, () => new Promise(() => {}));
@@ -23,14 +23,27 @@ test('the service worker answers Citadel\'s page loads but no /apps/ request', (
 
 test("a notification click opens the thread in Citadel's window, not a focused contraption's (#274)", async () => {
   const listeners: Record<string, (e: any) => void> = {};
-  const win = (url: string, focused: boolean) => ({ url, focused, sent: [] as unknown[], postMessage(m: unknown) { this.sent.push(m); }, focus: async () => {} });
+  const win = (url: string, focused: boolean) => ({
+    url,
+    focused,
+    sent: [] as unknown[],
+    postMessage(m: unknown) {
+      this.sent.push(m);
+    },
+    focus: async () => {},
+  });
   const mandate = win('https://citadel.example/apps/mandate/', true);
   const citadel = win('https://citadel.example/c/#/p/2', false);
   let opened = '';
   const self = {
     addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn),
     location: { origin: 'https://citadel.example' },
-    clients: { matchAll: async () => [mandate, citadel], openWindow: async (url: string) => { opened = url; } },
+    clients: {
+      matchAll: async () => [mandate, citadel],
+      openWindow: async (url: string) => {
+        opened = url;
+      },
+    },
   };
   new Function('self', 'fetch', readFileSync(join(import.meta.dirname, '..', 'public', 'sw.js'), 'utf8'))(self, () => new Promise(() => {}));
   let done: Promise<unknown> = Promise.resolve();
@@ -42,14 +55,27 @@ test("a notification click opens the thread in Citadel's window, not a focused c
 });
 
 test("a notification click goes to a window on Citadel's own page, never a preview or the backup page, else opens one", async () => {
-  const win = (url: string, focused: boolean) => ({ url, focused, sent: [] as unknown[], postMessage(m: unknown) { this.sent.push(m); }, focus: async () => {} });
+  const win = (url: string, focused: boolean) => ({
+    url,
+    focused,
+    sent: [] as unknown[],
+    postMessage(m: unknown) {
+      this.sent.push(m);
+    },
+    focus: async () => {},
+  });
   const click = async (windows: ReturnType<typeof win>[]) => {
     const listeners: Record<string, (e: any) => void> = {};
     let opened = '';
     const self = {
       addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn),
       location: { origin: 'https://citadel.example' },
-      clients: { matchAll: async () => windows, openWindow: async (url: string) => { opened = url; } },
+      clients: {
+        matchAll: async () => windows,
+        openWindow: async (url: string) => {
+          opened = url;
+        },
+      },
     };
     new Function('self', 'fetch', readFileSync(join(import.meta.dirname, '..', 'public', 'sw.js'), 'utf8'))(self, () => new Promise(() => {}));
     let done: Promise<unknown> = Promise.resolve();
@@ -97,10 +123,19 @@ test('a push shows its notification under its tag; a silent one (an all-clear) r
     registration: { showNotification: async (title: string, opts: any) => void shown.push([title, opts]) },
   };
   new Function('self', 'fetch', readFileSync(join(import.meta.dirname, '..', 'public', 'sw.js'), 'utf8'))(self, () => new Promise(() => {}));
-  for (const msg of [{ title: 'Citadel down', tag: 'citadel-watchdog' }, { title: 'Citadel back up', tag: 'citadel-watchdog', silent: true }]) {
+  for (const msg of [
+    { title: 'Citadel down', tag: 'citadel-watchdog' },
+    { title: 'Citadel back up', tag: 'citadel-watchdog', silent: true },
+  ]) {
     let done: Promise<unknown> = Promise.resolve();
     listeners.push({ data: { json: () => msg }, waitUntil: (p: Promise<unknown>) => (done = p) });
     await done;
   }
-  assert.deepEqual(shown.map(([t, o]) => [t, o.tag, o.renotify, o.silent]), [['Citadel down', 'citadel-watchdog', true, false], ['Citadel back up', 'citadel-watchdog', false, true]]);
+  assert.deepEqual(
+    shown.map(([t, o]) => [t, o.tag, o.renotify, o.silent]),
+    [
+      ['Citadel down', 'citadel-watchdog', true, false],
+      ['Citadel back up', 'citadel-watchdog', false, true],
+    ],
+  );
 });

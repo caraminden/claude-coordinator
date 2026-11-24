@@ -160,7 +160,7 @@ test('--check (#770) says whether the rebase onto main would conflict, naming th
   assert.match(check('x').stderr, /takes no arguments/);
 });
 
-test("a stale squash, which reverts what landed since the branch started, is refused until it names each undo (#677)", () => {
+test('a stale squash, which reverts what landed since the branch started, is refused until it names each undo (#677)', () => {
   const r = setup();
   r.commit(r.wt, 'b.txt', 'mine\n');
   r.commit(r.main, 'c.txt', [1, 2, 3, 4, 5].map((k) => `someone else landed this, line ${k}\n`).join(''));
@@ -253,15 +253,7 @@ test('the pre-push template refuses a push to main from the same clone', () => {
 
 // The numbered-things check: a scheme whose Project facts name its migrations, a version and a ledger.
 // The line wraps onto a second line, as Project facts bullets do.
-const facts = [
-  '## Project facts',
-  '',
-  '- **Check commands:** none.',
-  '- **Numbered things:** `files db/migrations/NNNN-*.sql`; `ids docs/ledger.md "^- \\*\\*U(\\d+)\\."`;',
-  '  `version addons/*/*.toc "^## Version: (.+)"`',
-  '- **Glossary:** none.',
-  '',
-].join('\n');
+const facts = ['## Project facts', '', '- **Check commands:** none.', '- **Numbered things:** `files db/migrations/NNNN-*.sql`; `ids docs/ledger.md "^- \\*\\*U(\\d+)\\."`;', '  `version addons/*/*.toc "^## Version: (.+)"`', '- **Glossary:** none.', ''].join('\n');
 const ledger = (open: string, proven: string) => `# Ledger\n\n## Open\n\n${open}\n## Proven\n\n${proven}\n## End\n`;
 function numbered() {
   const r = setup();
@@ -320,7 +312,7 @@ test('numbered things: a ledger id main already has is refused, even in another 
   refused(r, r.run(), mine, main, /docs\/ledger\.md has id 3 twice: this branch adds one and main already has it \(the highest so far is 3\)/);
 });
 
-test('numbered things: new numbers past main\'s, a version only the branch bumps and edits to old entries land', () => {
+test("numbered things: new numbers past main's, a version only the branch bumps and edits to old entries land", () => {
   const r = numbered();
   // A duplicate main already had is not this branch's to fix, even when the branch edits that entry.
   r.commit(r.main, 'docs/ledger.md', ledger('- **U1.** one\n- **U1.** old duplicate\n', '- **U2.** two\n'));
@@ -365,13 +357,22 @@ test('ten landings started together land in the order they arrived, each told it
   }
   const codes = await Promise.all(lands.map((l) => l.exit));
   codes.forEach((code, i) => assert.equal(code, 0, `landing ${i + 1}: ${lands[i].stderr()}`));
-  assert.deepEqual(q.landed(), lands.map((_, i) => `f${i + 1}.txt: ${i + 1}`));
+  assert.deepEqual(
+    q.landed(),
+    lands.map((_, i) => `f${i + 1}.txt: ${i + 1}`),
+  );
   assert.equal(git(q.origin, 'rev-parse', 'main'), git(q.main, 'rev-parse', 'main'), 'the last push carried them all');
   assert.doesNotMatch(lands[0].stderr(), /in line/, 'the first had nobody to wait for');
   assert.match(lands[9].stderr(), /queue: 2nd in line for the land lock, about \d+ min \(ahead: ticket\/9-x, /);
   assert.match(lands[9].stderr(), /queue: got the land lock/);
   assert.deepEqual(q.tickets(), [], 'every ticket is gone');
-  assert.equal(readFileSync(join(q.state, 'land-queue', '.took'), 'utf8').trim().split('\n').length, 5, 'the newest five landings were timed, for the estimate');
+  assert.equal(
+    readFileSync(join(q.state, 'land-queue', '.took'), 'utf8')
+      .trim()
+      .split('\n').length,
+    5,
+    'the newest five landings were timed, for the estimate',
+  );
   assert.ok(landLockFree(q), 'the land lock is free');
 });
 
@@ -441,7 +442,10 @@ queue_write() { printf '%s\\n' "$2" "$3" "$4" "$5" "$6" "$7" "$8" >"$1.tmp$$" &&
 test('a waiter .order ranks stays behind one from a land.sh before .order that arrived first', async () => {
   const q = queueSetup(3);
   const old = join(q.dir, 'old-land.sh');
-  writeFileSync(old, readFileSync(join(q.wts[1], 'tools', 'land.sh'), 'utf8').replace(/^queue_ordinal\(\) \{/m, () => `${before1007}queue_ordinal() {`));
+  writeFileSync(
+    old,
+    readFileSync(join(q.wts[1], 'tools', 'land.sh'), 'utf8').replace(/^queue_ordinal\(\) \{/m, () => `${before1007}queue_ordinal() {`),
+  );
   const lands: { child: ReturnType<typeof spawn>; exit: Promise<number | null>; stderr: () => string }[] = [];
   try {
     lands.push(q.land(1));
@@ -490,7 +494,13 @@ test('a waiter that is killed leaves the line, and the one behind it goes next',
 
 // A zombie: b's parent starts it, then becomes a sleep that never waits on it, so once b is killed its
 // /proc entry stays, start time and all, until the parent goes.
-const isZombie = (pid: number) => { try { return /\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return false; } };
+const isZombie = (pid: number) => {
+  try {
+    return /\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8'));
+  } catch {
+    return false;
+  }
+};
 
 test('a killed waiter whose parent never reaps it leaves the line too', async () => {
   const q = queueSetup(3);
@@ -590,7 +600,13 @@ test('the head of the line waits for a lock held outside it (an older land.sh), 
     assert.equal(await a.exit, 0, a.stderr());
     assert.equal(await b.exit, 0, b.stderr());
     assert.deepEqual(q.landed(), ['f1.txt: 1', 'f2.txt: 2']);
-    assert.equal(readFileSync(join(q.state, 'land-queue', '.took'), 'utf8').trim().split('\n').length, 4, 'each noted how long it held the lock');
+    assert.equal(
+      readFileSync(join(q.state, 'land-queue', '.took'), 'utf8')
+        .trim()
+        .split('\n').length,
+      4,
+      'each noted how long it held the lock',
+    );
   } finally {
     older.kill('SIGKILL');
   }
@@ -628,7 +644,10 @@ test('a waiter that is stopped (SIGSTOP) is passed over: the one behind it takes
     assert.deepEqual(q.landed(), ['f1.txt: 1', 'f3.txt: 3', 'f2.txt: 2']);
   } finally {
     for (const g of Object.values(gate)) writeFileSync(g, '');
-    if (b) { b.child.kill('SIGCONT'); b.child.kill('SIGKILL'); }
+    if (b) {
+      b.child.kill('SIGCONT');
+      b.child.kill('SIGKILL');
+    }
     c?.child.kill('SIGKILL');
   }
 });
@@ -641,7 +660,9 @@ test('a waiter whose cgroup is frozen (state S) is passed over like a stopped on
   try {
     const pid = sleeper.pid!;
     await until('the frozen one to be in state S, as a frozen cgroup leaves it', () => /\) S /.test(readFileSync(`/proc/${pid}/stat`, 'utf8')));
-    const start = readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /s, '').split(' ')[19];
+    const start = readFileSync(`/proc/${pid}/stat`, 'utf8')
+      .replace(/^.*\) /s, '')
+      .split(' ')[19];
     const cg = readFileSync(`/proc/${pid}/cgroup`, 'utf8').match(/^0::(.*)$/m)![1];
     const fake = join(q.dir, 'cgroup');
     mkdirSync(join(fake, cg), { recursive: true });
@@ -677,7 +698,9 @@ test('giving up names the process at the head of the line, its state and whether
     stuck = spawn('sleep', ['60'], { stdio: 'ignore' });
     const pid = stuck.pid!;
     await until('the stuck process to run', () => existsSync(`/proc/${pid}/stat`));
-    const started = readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /s, '').split(' ')[19];
+    const started = readFileSync(`/proc/${pid}/stat`, 'utf8')
+      .replace(/^.*\) /s, '')
+      .split(' ')[19];
     const seq = Number(readFileSync(join(q.state, 'land-queue', '.seq'), 'utf8')) + 1;
     writeFileSync(join(q.state, 'land-queue', String(seq).padStart(10, '0')), `${pid} ${started}\n0\nstuck\nwaiting\n-\n`);
     writeFileSync(join(q.state, 'land-queue', '.seq'), `${seq}\n`);

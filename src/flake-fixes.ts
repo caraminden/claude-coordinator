@@ -59,7 +59,9 @@ export class FlakeFixes {
   private busy = false;
   private fronted = new Set<string>(); // broken(): "<minion> <file> <line time>" already moved, or tried (#1487)
   private d: FlakeFixDeps;
-  constructor(d: FlakeFixDeps) { this.d = d; }
+  constructor(d: FlakeFixDeps) {
+    this.d = d;
+  }
 
   private evidence(p: Project, branch: string, file: string, at: number) {
     return this.d.evidence ? this.d.evidence(p, branch, file, at) : Promise.resolve(null);
@@ -71,13 +73,21 @@ export class FlakeFixes {
     if (!dir) return 0;
     const root = join(dir, 'retro-log');
     let days: string[];
-    try { days = (await readdir(root)).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
+    try {
+      days = (await readdir(root)).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort();
+    } catch {
+      return 0;
+    }
     const since = now - FLAKE_WINDOW_MS;
     const fresh: { file: string; at: number; source: string; branch?: string }[] = [];
     for (const day of days) {
       if (Date.parse(`${day}T23:59:59Z`) < since) continue;
       let md: string;
-      try { md = await readFile(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
+      try {
+        md = await readFile(join(root, day, 'land.md'), 'utf8');
+      } catch {
+        continue;
+      }
       for (const s of parseRetroFlakes(md, day)) {
         if (s.at >= since && s.at <= now + 60_000 && !this.d.store.hasFlakeNear(project.id, s.file, s.at, SAME_SIGHTING_MS)) fresh.push(s);
       }
@@ -105,13 +115,21 @@ export class FlakeFixes {
     if (!dir || !this.d.wake) return 0;
     const root = join(dir, 'retro-log');
     let days: string[];
-    try { days = (await readdir(root)).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
+    try {
+      days = (await readdir(root)).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort();
+    } catch {
+      return 0;
+    }
     const since = now - 2 * ALARM_QUIET_MS;
     const byFile = new Map<string, { at: number; branch?: string }[]>();
     for (const day of days) {
       if (Date.parse(`${day}T23:59:59Z`) < since) continue;
       let md: string;
-      try { md = await readFile(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
+      try {
+        md = await readFile(join(root, day, 'land.md'), 'utf8');
+      } catch {
+        continue;
+      }
       for (const s of parseRetroFlakes(md, day)) if (s.at >= since && s.at <= now) byFile.set(s.file, [...(byFile.get(s.file) ?? []), s]);
     }
     let woke = 0;
@@ -124,10 +142,14 @@ export class FlakeFixes {
       const hit = sameFlake(sights);
       if (!hit) continue;
       const commits = await (this.d.suspect ?? ((p, f, t) => (p.repo_dir ? suspectCommits(p.repo_dir, f, t) : Promise.resolve(null))))(project, file, hit.first);
-      const text = `Same-flake alarm: ${file} failed in the full run and passed alone on ${hit.branches.length} different branches inside ${ALARM_WINDOW_MS / 60_000} minutes (${hit.branches.join(', ')}), the first at ${pacificStamp(hit.first)}. `
-        + `That is a bug in the test or the code it tests, not load: every ship meanwhile pays a red run. ${commits ? `Likely cause: ${commits}. ` : ''}`
-        + `Start a minion to fix it now (the Test health tab on the CI page has the button). It rings once for this file until a day passes or the file changes on main.`;
-      if (this.d.wake(project, text)) { this.d.store.setSetting(key, now); woke++; }
+      const text =
+        `Same-flake alarm: ${file} failed in the full run and passed alone on ${hit.branches.length} different branches inside ${ALARM_WINDOW_MS / 60_000} minutes (${hit.branches.join(', ')}), the first at ${pacificStamp(hit.first)}. ` +
+        `That is a bug in the test or the code it tests, not load: every ship meanwhile pays a red run. ${commits ? `Likely cause: ${commits}. ` : ''}` +
+        `Start a minion to fix it now (the Test health tab on the CI page has the button). It rings once for this file until a day passes or the file changes on main.`;
+      if (this.d.wake(project, text)) {
+        this.d.store.setSetting(key, now);
+        woke++;
+      }
     }
     return woke;
   }
@@ -151,12 +173,20 @@ export class FlakeFixes {
     if (!dir || !this.d.front) return 0;
     const root = join(dir, 'retro-log');
     let days: string[];
-    try { days = (await readdir(root)).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
+    try {
+      days = (await readdir(root)).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort();
+    } catch {
+      return 0;
+    }
     const why = new Map<string, [number, string]>(); // file -> its newest line's time and "red in N of M runs in the last 6 h"
     for (const day of days) {
       if (Date.parse(`${day}T23:59:59Z`) < now - BROKEN_FRONT_MS) continue;
       let md: string;
-      try { md = await readFile(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
+      try {
+        md = await readFile(join(root, day, 'land.md'), 'utf8');
+      } catch {
+        continue;
+      }
       for (const m of md.matchAll(/^- (\d\d:\d\d:\d\d)Z · broken test · (\S+) · (.+?) · \S+$/gm)) {
         const at = Date.parse(`${day}T${m[1]}Z`);
         if (at >= now - BROKEN_FRONT_MS && at <= now + 60_000) why.set(m[2], [at, m[3]]);
@@ -191,7 +221,10 @@ export class FlakeFixes {
         const changed = await (this.d.changedAt ?? ((p, f) => (p.repo_dir ? fileChangedAt(p.repo_dir, f) : Promise.resolve(null))))(project, file);
         if (changed != null && sights.filter((t) => t > changed).length < FLAKE_REPEAT) continue;
         // A minion a person already started from the tab's button owns it: record the fix on that one, start no second.
-        if (owner) { store.addFlakeFix(project.id, file, owner.id, now); continue; }
+        if (owner) {
+          store.addFlakeFix(project.id, file, owner.id, now);
+          continue;
+        }
         id = store.addFlakeFix(project.id, file, null, now);
       } else if (fix.state === 'held') {
         // #1521 (CA1): only its own closed minion lets a held fix get here (an open one owns it, above), and a minion closes once
@@ -231,8 +264,7 @@ export class FlakeFixes {
       const branch = store.getTicket(fix.ticket_id)?.branch;
       if (!branch) continue;
       const runs = await this.d.runs(project, branch);
-      const run = (runs ?? []).filter((r) => r.display_title === `flake-proof ${fix.file}` && Date.parse(r.created_at) >= fix.started_at)
-        .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+      const run = (runs ?? []).filter((r) => r.display_title === `flake-proof ${fix.file}` && Date.parse(r.created_at) >= fix.started_at).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
       if (!run) continue;
       const jobs = await this.d.jobs(project, run);
       const steps = ((jobs ?? [])[0]?.steps ?? []) as { name?: string; conclusion?: string | null }[];
@@ -264,4 +296,3 @@ export class FlakeFixes {
     }
   }
 }
-

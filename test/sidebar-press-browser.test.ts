@@ -33,8 +33,15 @@ const STUB = `<script>
 
 let app: App;
 let browser: Browser;
-before(async () => { if (skip) return; app = await serveApp({ stub: STUB }); browser = await launch(bin!); });
-after(async () => { await browser?.close(); await app?.close(); });
+before(async () => {
+  if (skip) return;
+  app = await serveApp({ stub: STUB });
+  browser = await launch(bin!);
+});
+after(async () => {
+  await browser?.close();
+  await app?.close();
+});
 
 /** Press on `selector`, let another minion's update redraw the list, then release where it was pressed. */
 async function clickThroughRedraw(page: Page, selector: string) {
@@ -46,7 +53,10 @@ async function clickThroughRedraw(page: Page, selector: string) {
   await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at });
 }
 
-for (const [where, selector] of [['the minion list', '#threads .thread-row[data-id="101"] .name'], ['Needs you', '.inbox-rows .inbox-row .name']]) {
+for (const [where, selector] of [
+  ['the minion list', '#threads .thread-row[data-id="101"] .name'],
+  ['Needs you', '.inbox-rows .inbox-row .name'],
+]) {
   test(`a row in ${where} opens its minion when the list redraws during the click`, { skip }, async () => {
     const page = await browser.page(`${app.base}#/p/1/t/2`, { width: 1280, height: 800 });
     await waitFor(page, 'the rows', `!!document.querySelector('${selector}')`);

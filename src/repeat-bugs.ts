@@ -25,7 +25,8 @@ export type BugBrief = { number: number; title: string; brief: string; at: numbe
 export type EarlierBug = BugBrief & { files: string[]; subjects: string[] };
 export type RepeatMatch = { number: number; title: string; cited: boolean; files: string[]; words: string[]; subjects: string[] };
 
-const STOP = new Set(`a an and are as at be been but by can could did do does done each either for from had has have he her
+const STOP = new Set(
+  `a an and are as at be been but by can could did do does done each either for from had has have he her
 his how i if in into is it its it's just may me more most much my no not now of on once one only or other our out over
 own same see she should so some still such than that the their them then there these they this those though through to
 too under up us use used very was we were what when where which while who why will with would you your also any after
@@ -36,7 +37,8 @@ need needs never often onto per rather really since soon though toward towards u
 cara josh alex taskmaster minion minions scheme citadel brief handoff bug bugs fix fixes fixed fixing test tests
 read start shared project projects home local share claude coordinator reports report inbox uploads png jpg md ts js
 sqlite3 readonly credentials flaky-tests memory plainly citadel:bug-fixing citadel:diagnosing-bugs citadel:self-review self-review land lands landed ship ships shipped pst pdt
-nov november oct october 2026 run runs ran line lines file files code check checks show shows find found cause`.split(/\s+/));
+nov november oct october 2026 run runs ran line lines file files code check checks show shows find found cause`.split(/\s+/),
+);
 
 const NOT_CODE = /\.(?:md|txt|log|png|jpe?g|gif|webp|mp4|webm|zip)$/i;
 const PATH = /(?:[\w.@-]+\/)+[\w.@-]+\.[a-z0-9]{1,5}\b/gi;
@@ -49,7 +51,10 @@ export function namedPaths(text: string): string[] {
 
 /** Content words in order, paths and URLs dropped. */
 function words(text: string): string[] {
-  const clean = text.toLowerCase().replace(/https?:\/\/\S+/g, ' ').replace(/(?:^|\s)\S*\/\S*/g, ' ');
+  const clean = text
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/(?:^|\s)\S*\/\S*/g, ' ');
   return (clean.match(/[a-z][a-z0-9'_-]*[a-z0-9]/g) ?? []).filter((w) => w.length > 2 && !STOP.has(w));
 }
 
@@ -130,13 +135,18 @@ export function repeats(now: BugBrief, earlier: EarlierBug[], ctx: { df: Map<str
 export function flagBlock(matches: RepeatMatch[]): string {
   const lines = matches.map((m) => {
     const why = [m.cited && 'named in this brief', m.files.length && `same files: ${m.files.join(', ')}`, m.words.length && `same words: "${m.words.slice(0, 3).join('", "')}"`].filter(Boolean).join('; ');
-    const did = m.subjects.length ? ` What it shipped: ${m.subjects.slice(0, 3).map((s) => `"${s}"`).join('; ')}${m.subjects.length > 3 ? ` and ${m.subjects.length - 3} more` : ''}.` : ' Nothing shipped from it yet.';
+    const did = m.subjects.length
+      ? ` What it shipped: ${m.subjects
+          .slice(0, 3)
+          .map((s) => `"${s}"`)
+          .join('; ')}${m.subjects.length > 3 ? ` and ${m.subjects.length - 3} more` : ''}.`
+      : ' Nothing shipped from it yet.';
     return `- #${m.number} "${m.title}" (${why}).${did}`;
   });
   return [
     `${FLAG_HEAD} ${matches.length} bug minions in the last 14 days look like they were about this same thing, so the earlier fixes may not have held:`,
     ...lines,
-    'Before you change any code, run `citadel:diagnosing-bugs`: rebuild the failure from the evidence, check why each earlier fix didn\'t hold, and find the cause they missed. The match is by files and wording, so it can be wrong: if these minions are about something else, say so in one line and carry on with `citadel:bug-fixing`.',
+    "Before you change any code, run `citadel:diagnosing-bugs`: rebuild the failure from the evidence, check why each earlier fix didn't hold, and find the cause they missed. The match is by files and wording, so it can be wrong: if these minions are about something else, say so in one line and carry on with `citadel:bug-fixing`.",
   ].join('\n');
 }
 
@@ -154,11 +164,15 @@ type Commit = { n: string; s: string; files: string[] };
 async function recentCommits(repoDir: string | null, now: number): Promise<Commit[]> {
   if (!repoDir) return [];
   const out = await git('git', ['-C', repoDir, '-c', 'core.quotePath=false', 'log', 'HEAD', `--since=${new Date(now - REPEAT_WINDOW_MS).toISOString()}`, '--no-merges', '--format=%x01%s', '--name-only'], { timeout: 10_000, maxBuffer: 64 << 20 })
-    .then((r) => r.stdout).catch(() => '');
-  return out.split('\x01').slice(1).map((chunk) => {
-    const [s, ...files] = chunk.split('\n');
-    return { n: subjectTicket(s), s, files: files.filter(Boolean) };
-  });
+    .then((r) => r.stdout)
+    .catch(() => '');
+  return out
+    .split('\x01')
+    .slice(1)
+    .map((chunk) => {
+      const [s, ...files] = chunk.split('\n');
+      return { n: subjectTicket(s), s, files: files.filter(Boolean) };
+    });
 }
 
 /**
@@ -196,4 +210,3 @@ export function flagNote(matches: RepeatMatch[], tier: { from: string; to: strin
   const list = matches.map((m) => `#${m.number}`).join(', ');
   return `Third-fix flag: ${list} look like earlier fixes for the same thing, so its brief starts with a "diagnose first" block (citadel:diagnosing-bugs). ${tier ? `It starts one tier up, on ${tier.to} instead of ${tier.from}; if the match is wrong, update_ticket it back.` : 'Its tier is as picked; step it up with update_ticket if the first turn stalls.'}`;
 }
-

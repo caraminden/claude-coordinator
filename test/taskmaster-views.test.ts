@@ -39,7 +39,11 @@ test('Everyone interleaves every session by event id, and paging back never skip
   let page = mergedPage(store, parts, { limit: 10 });
   assert.ok(page.more, 'a long history pages');
   const seen = [...ids(page)];
-  assert.deepEqual(seen, [...seen].sort((a, b) => a - b), 'one page is in time order');
+  assert.deepEqual(
+    seen,
+    [...seen].sort((a, b) => a - b),
+    'one page is in time order',
+  );
   while (page.more) {
     page = mergedPage(store, parts, { before: seen[0], limit: 10 });
     assert.ok(page.events.length, 'an earlier page is never empty while there is more');
@@ -53,13 +57,13 @@ test('a quiet session waits behind a busy one until its time comes', () => {
   const old = turn(store, alex.id);
   const busy = [turn(store, cara.id, 30), turn(store, cara.id, 30)].flat();
   const page = mergedPage(store, [{ id: cara.id }, { id: alex.id }], { limit: 40 });
-  assert.ok(!ids(page).some((id) => old.includes(id)), 'Alex\'s older turn is not pulled into the newest page');
+  assert.ok(!ids(page).some((id) => old.includes(id)), "Alex's older turn is not pulled into the newest page");
   assert.ok(page.more);
   const rest = mergedPage(store, [{ id: cara.id }, { id: alex.id }], { before: ids(page)[0], limit: 1000 });
   assert.deepEqual([...ids(rest), ...ids(page)], [...old, ...busy]);
 });
 
-test('Mine takes only the Overlord\'s for-everyone items, card answers and card results', () => {
+test("Mine takes only the Overlord's for-everyone items, card answers and card results", () => {
   const { store, cara, ovl } = setup('mine');
   const mineTurn = turn(store, cara.id);
   turn(store, ovl.id, 2, 'Alex'); // Alex talking to the Overlord: not in Cara's Mine
@@ -70,14 +74,17 @@ test('Mine takes only the Overlord\'s for-everyone items, card answers and card 
   const parts = [{ id: cara.id }, { id: ovl.id, mine: true }];
   const page = mergedPage(store, parts, {});
   assert.deepEqual(ids(page), [...mineTurn, card, alert, answer, settled]);
-  assert.ok(page.events.filter((e) => e.ticket_id === ovl.id).every((e) => inMine(e)), 'the front end\'s rule agrees with the query');
+  assert.ok(
+    page.events.filter((e) => e.ticket_id === ovl.id).every((e) => inMine(e)),
+    "the front end's rule agrees with the query",
+  );
   const later = store.addEvent(ovl.id, 'claude', { type: 'assistant', message: { content: [] } }).id;
   const live = store.addEvent(ovl.id, 'note', { text: 'deploy is live', everyone: true }).id;
   assert.deepEqual(ids({ events: mergedAfter(store, parts, settled) }), [live], 'catch-up filters the same way');
   assert.ok(!inMine({ kind: 'claude', data: JSON.stringify({ type: 'assistant' }) }) && later);
 });
 
-test('Mine skips past a run of the Overlord\'s own work instead of paging through it', () => {
+test("Mine skips past a run of the Overlord's own work instead of paging through it", () => {
   const { store, cara, ovl } = setup('skip');
   const a = turn(store, cara.id);
   const alert = store.addEvent(ovl.id, 'note', { text: 'alert', everyone: true }).id;
@@ -98,28 +105,49 @@ test('the newest page reaches back to a card still waiting in any session', () =
 });
 
 test('the front end merges only when the scheme has split: Mine takes your chat and the Overlord, Everyone takes all, each named', () => {
-  const tms = [{ id: 1, person_id: 7, person_name: 'Cara' }, { id: 2, person_id: 8, person_name: 'Alex' }, { id: 3, person_id: null, person_name: null }];
+  const tms = [
+    { id: 1, person_id: 7, person_name: 'Cara' },
+    { id: 2, person_id: 8, person_name: 'Alex' },
+    { id: 3, person_id: null, person_name: null },
+  ];
   assert.equal(mergedView(9, 5, [{ id: 5, person_id: null, person_name: null }], 'mine'), null, 'one Taskmaster: a plain chat');
-  assert.equal(mergedView(9, 4, tms, 'mine'), null, 'a chat that isn\'t a Taskmaster of this scheme: plain');
+  assert.equal(mergedView(9, 4, tms, 'mine'), null, "a chat that isn't a Taskmaster of this scheme: plain");
   const mine = mergedView(9, 1, tms, 'mine');
-  assert.deepEqual(mine.parts.map((p) => [p.id, p.label, p.mine]), [[1, undefined, false], [3, 'Overlord', true]]);
+  assert.deepEqual(
+    mine.parts.map((p) => [p.id, p.label, p.mine]),
+    [
+      [1, undefined, false],
+      [3, 'Overlord', true],
+    ],
+  );
   const notYet = mergedView(9, 3, tms, 'mine');
-  assert.deepEqual(notYet.parts.map((p) => [p.id, p.mine]), [[3, true]], 'no Taskmaster of your own yet: Mine is the Overlord\'s for-everyone items, not its whole chat');
+  assert.deepEqual(
+    notYet.parts.map((p) => [p.id, p.mine]),
+    [[3, true]],
+    "no Taskmaster of your own yet: Mine is the Overlord's for-everyone items, not its whole chat",
+  );
   assert.ok(!inMerged(notYet, { ticket_id: 3, kind: 'claude', data: '{}' }) && inMerged(notYet, { ticket_id: 3, kind: 'note', data: '{"everyone":true}' }));
   assert.ok(!mergedView(9, 3, tms, 'everyone').parts[0].mine);
   assert.equal(mine.src, 'api/projects/9/taskmaster-events?view=mine');
   const all = mergedView(9, 1, tms, 'everyone');
-  assert.deepEqual(all.parts.map((p) => [p.id, p.label, p.mine]), [[1, undefined, false], [2, "Alex's Taskmaster", false], [3, 'Overlord', false]]);
+  assert.deepEqual(
+    all.parts.map((p) => [p.id, p.label, p.mine]),
+    [
+      [1, undefined, false],
+      [2, "Alex's Taskmaster", false],
+      [3, 'Overlord', false],
+    ],
+  );
   const ev = (ticket_id: number, data: object, kind = 'claude') => ({ ticket_id, kind, data: JSON.stringify(data) });
   assert.ok(inMerged(mine, ev(1, { type: 'assistant' })), 'your own session: everything');
-  assert.ok(!inMerged(mine, ev(3, { type: 'assistant' })), 'the Overlord\'s own work stays out of Mine');
+  assert.ok(!inMerged(mine, ev(3, { type: 'assistant' })), "the Overlord's own work stays out of Mine");
   assert.ok(inMerged(mine, ev(3, { text: 'CI fell back', everyone: true }, 'note')));
-  assert.ok(!inMerged(mine, ev(2, { type: 'assistant' })), 'another person\'s Taskmaster: only in Everyone');
+  assert.ok(!inMerged(mine, ev(2, { type: 'assistant' })), "another person's Taskmaster: only in Everyone");
   assert.ok(inMerged(all, ev(2, { type: 'assistant' })) && inMerged(all, ev(3, { type: 'assistant' })));
-  assert.ok(!inMerged(all, ev(4, { type: 'assistant' })) && !inMerged(null, ev(1, {})), 'a minion\'s event never lands in the Taskmaster chat');
+  assert.ok(!inMerged(all, ev(4, { type: 'assistant' })) && !inMerged(null, ev(1, {})), "a minion's event never lands in the Taskmaster chat");
 });
 
-test('through the server: each person opens their own Taskmaster, Mine adds the Overlord\'s for-everyone items, Everyone adds the rest', async () => {
+test("through the server: each person opens their own Taskmaster, Mine adds the Overlord's for-everyone items, Everyone adds the rest", async () => {
   const dir = join(root, 'server');
   mkdirSync(join(dir, 'data'), { recursive: true });
   const store = new Store(join(dir, 'data', 'coordinator.db'));
@@ -142,16 +170,29 @@ test('through the server: each person opens their own Taskmaster, Mine adds the 
     const get = async (path: string) => (await fetch(srv.base + path, { headers: { Cookie: cookie } })).json() as Promise<any>;
     const scheme = await get(`/api/projects/${p.id}`);
     assert.equal(scheme.coordinator.id, alexTm.id, 'the scheme opens on your own Taskmaster');
-    assert.deepEqual(scheme.taskmasters.map((t: any) => [t.id, t.person_name]), [[first.id, 'Cara'], [ovl.id, null], [alexTm.id, 'Alex']]);
+    assert.deepEqual(
+      scheme.taskmasters.map((t: any) => [t.id, t.person_name]),
+      [
+        [first.id, 'Cara'],
+        [ovl.id, null],
+        [alexTm.id, 'Alex'],
+      ],
+    );
     const evs = async (q: string) => (await get(`/api/projects/${p.id}/taskmaster-events?${q}`)).events.map((e: any) => e.id);
-    assert.deepEqual(await evs('view=mine'), [alex, alert], 'Mine: yours and the Overlord\'s alert, not its work nor Cara\'s chat');
+    assert.deepEqual(await evs('view=mine'), [alex, alert], "Mine: yours and the Overlord's alert, not its work nor Cara's chat");
     assert.deepEqual(await evs('view=everyone'), [cara, alex, work, alert]);
     assert.deepEqual(await evs(`view=everyone&before=${work}`), [cara, alex], 'one id cursor pages them all');
-    assert.deepEqual((await get(`/api/projects/${p.id}/taskmaster-events?view=mine&after=${alex}`)).map((e: any) => e.id), [alert]);
+    assert.deepEqual(
+      (await get(`/api/projects/${p.id}/taskmaster-events?view=mine&after=${alex}`)).map((e: any) => e.id),
+      [alert],
+    );
     // Rachel hasn't written yet, so she has no Taskmaster of her own: the Overlord's work stays out of her Mine.
     const rachel = new Auth(PASSWORD, SECRET).issueCookie(Rachel, false).split(';')[0];
-    const hers = await (await fetch(`${srv.base}/api/projects/${p.id}/taskmaster-events?view=mine`, { headers: { Cookie: rachel } })).json() as any;
-    assert.deepEqual(hers.events.map((e: any) => e.id), [alert]);
+    const hers = (await (await fetch(`${srv.base}/api/projects/${p.id}/taskmaster-events?view=mine`, { headers: { Cookie: rachel } })).json()) as any;
+    assert.deepEqual(
+      hers.events.map((e: any) => e.id),
+      [alert],
+    );
   } finally {
     await srv.stop();
   }

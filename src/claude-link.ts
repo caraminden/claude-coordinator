@@ -39,8 +39,7 @@ export const CONTAINER_MEMORY = { high: '10G', max: '12G', swap: '4G' };
 export function checkoutMounts(dir: string): Mount[] | null {
   let ignored: string[];
   try {
-    ignored = execFileSync('git', ['-C', dir, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard'], { encoding: 'utf8', timeout: 10_000 })
-      .split('\0').filter(Boolean);
+    ignored = execFileSync('git', ['-C', dir, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard'], { encoding: 'utf8', timeout: 10_000 }).split('\0').filter(Boolean);
   } catch {
     return null;
   }
@@ -167,8 +166,7 @@ export { accountReady };
  * the folder its turns' files go in, the only part of run/turns that container mounts). `account` is which of
  * the person's Claude accounts (#779); a host turn on the server login's extra account has its folder in `env`.
  */
-export type TurnPlace = { host: true; account?: number; configDir?: string; env?: Record<string, string> }
-  | { host: false; container: string; configDir: string; home: string; turnsDir: string; env: Record<string, string>; ensure: () => Promise<void>; account?: number };
+export type TurnPlace = { host: true; account?: number; configDir?: string; env?: Record<string, string> } | { host: false; container: string; configDir: string; home: string; turnsDir: string; env: Record<string, string>; ensure: () => Promise<void>; account?: number };
 
 /** Where the server login's container volume is on the host (#341): it has no Claude link to record it in. */
 const containerHomeKey = (uid: number) => `container_home:${uid}`;
@@ -245,7 +243,7 @@ export class ClaudeLink {
 
   /** A person's container home (its volume) as the host sees it: their Claude link's, or the server login's Codex-only one (#341). */
   volumeHome(uid: number): string | null {
-    return this.meta(uid)?.home ?? (this.serverLogin(uid) ? this.store.getSetting<string>(containerHomeKey(uid)) ?? null : null);
+    return this.meta(uid)?.home ?? (this.serverLogin(uid) ? (this.store.getSetting<string>(containerHomeKey(uid)) ?? null) : null);
   }
 
   /** Turns for this person may start: on the host (server login) or in a container that's signed in. */
@@ -293,9 +291,15 @@ export class ClaudeLink {
     const now = Date.now();
     const pick = set && this.pick(uid, set, undefined, now);
     const base = {
-      host, ...(c?.meta.email ? { email: c.meta.email } : {}), ...(c?.meta.plan ? { plan: c.meta.plan } : {}), ...(login?.error ? { error: login.error } : {}),
-      accounts: (set?.accounts ?? []).map((a) => ({ ...a, ready: accountReady(a, now) })), inUse: pick?.n ?? null, ...(pick ? { why: pick.why } : {}),
-      ...(set?.pinned ? { pinned: set.pinned } : {}), ...(login ? { linking: login.n } : {}),
+      host,
+      ...(c?.meta.email ? { email: c.meta.email } : {}),
+      ...(c?.meta.plan ? { plan: c.meta.plan } : {}),
+      ...(login?.error ? { error: login.error } : {}),
+      accounts: (set?.accounts ?? []).map((a) => ({ ...a, ready: accountReady(a, now) })),
+      inUse: pick?.n ?? null,
+      ...(pick ? { why: pick.why } : {}),
+      ...(set?.pinned ? { pinned: set.pinned } : {}),
+      ...(login ? { linking: login.n } : {}),
     };
     if (login && !login.error) return { ...base, state: login.url ? 'waiting for code' : 'starting', ...(login.url ? { url: login.url } : {}) };
     return { ...base, state: host ? 'linked' : !c ? 'not linked' : c.failed ? 'expired' : 'linked' };
@@ -309,8 +313,12 @@ export class ClaudeLink {
     const payer = this.serverLogin(uid) ? null : uid;
     const at = warm ? this.store.getSetting<WarmRecord>(warmKey(uid))?.[warm] : undefined;
     return pickAccount({
-      accounts: set.accounts, meter: (n) => this.store.getSetting<Meter>(accountUsageKey(payer, n)) ?? null, nextUp: set.inUse, pinned: set.pinned,
-      warm: at && now - at.at < WARM_MS ? at.n : null, now,
+      accounts: set.accounts,
+      meter: (n) => this.store.getSetting<Meter>(accountUsageKey(payer, n)) ?? null,
+      nextUp: set.inUse,
+      pinned: set.pinned,
+      warm: at && now - at.at < WARM_MS ? at.n : null,
+      now,
     });
   }
 
@@ -364,10 +372,15 @@ export class ClaudeLink {
     const p = this.pick(uid, set);
     // Two folders signed in to one Claude organization share one allowance (#1461): `same` names the first by its label, so the meter says so.
     const orgs = set.accounts.map((a) => this.orgOf(uid, a.n));
-    return { inUse: p?.n ?? null, ...(p ? { why: p.why } : {}), ...(set.pinned ? { pinned: set.pinned } : {}), accounts: set.accounts.map((a, i) => {
-      const twin = orgs[i] ? set.accounts[orgs.indexOf(orgs[i])] : undefined;
-      return { n: a.n, label: this.label(uid, a), ...(twin && twin.n !== a.n ? { same: this.label(uid, twin) } : {}) };
-    }) };
+    return {
+      inUse: p?.n ?? null,
+      ...(p ? { why: p.why } : {}),
+      ...(set.pinned ? { pinned: set.pinned } : {}),
+      accounts: set.accounts.map((a, i) => {
+        const twin = orgs[i] ? set.accounts[orgs.indexOf(orgs[i])] : undefined;
+        return { n: a.n, label: this.label(uid, a), ...(twin && twin.n !== a.n ? { same: this.label(uid, twin) } : {}) };
+      }),
+    };
   }
 
   /** Each folder's Claude organization as last read, by its .claude.json path (orgOf). */
@@ -381,7 +394,15 @@ export class ClaudeLink {
   private orgOf(uid: number, n: number): string | null {
     // The server login's own account keeps .claude.json beside its folder, unless CLAUDE_CONFIG_DIR moved it in.
     const file = this.serverLogin(uid) && n === 1 && !process.env.CLAUDE_CONFIG_DIR ? join(this.home, '.claude.json') : join(this.configDir(uid, n) ?? '', '.claude.json');
-    readFile(file, 'utf8').then((text) => JSON.parse(text).oauthAccount?.organizationUuid ?? null, () => null).then((org) => this.orgs.set(file, org), () => this.orgs.set(file, null));
+    readFile(file, 'utf8')
+      .then(
+        (text) => JSON.parse(text).oauthAccount?.organizationUuid ?? null,
+        () => null,
+      )
+      .then(
+        (org) => this.orgs.set(file, org),
+        () => this.orgs.set(file, null),
+      );
     return this.orgs.get(file) ?? null;
   }
 
@@ -389,8 +410,12 @@ export class ClaudeLink {
   limitedView(uid: number, n: number, until: number): { next: { n: number; label: string } | null; resetAt: number; limits: { n: number; label: string; until: number }[] } | null {
     if (!this.accounts(uid)) return null;
     const next = this.limited(uid, n, until);
-    const resets = this.accounts(uid)!.accounts.filter((a) => !a.expired).map((a) => a.limitedUntil ?? Date.now());
-    const limits = this.accounts(uid)!.accounts.filter((a) => !a.expired && a.limitedUntil && a.limitedUntil > Date.now()).map((a) => ({ n: a.n, label: this.label(uid, a), until: a.limitedUntil! }));
+    const resets = this.accounts(uid)!
+      .accounts.filter((a) => !a.expired)
+      .map((a) => a.limitedUntil ?? Date.now());
+    const limits = this.accounts(uid)!
+      .accounts.filter((a) => !a.expired && a.limitedUntil && a.limitedUntil > Date.now())
+      .map((a) => ({ n: a.n, label: this.label(uid, a), until: a.limitedUntil! }));
     return { next: next && { n: next.n, label: this.label(uid, next) }, resetAt: resets.length ? Math.min(...resets) : until, limits };
   }
 
@@ -443,14 +468,17 @@ export class ClaudeLink {
     for (const d of TOOL_DIRS) if (existsSync(join(this.home, d))) mounts.push({ src: join(this.home, d), dst: join(this.home, d), ro: true });
     // The code this server runs, read-only, so a member's turn checks the live checkout as a host turn does (#621). A dev
     // copy runs from a worktree, already mounted writable under projects/.
-    if (!LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/')) mounts.push(...checkoutMounts(LIVE_CHECKOUT) ?? []);
+    if (!LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/')) mounts.push(...(checkoutMounts(LIVE_CHECKOUT) ?? []));
     // The contraptions' folders, read-only, for a Citadel member or admin: their Citadel Taskmaster turns read every scheme (#656).
     const user = this.store.getUser(uid);
     // Their parent folders: a folder is a link into its two slots beside it (#801), which a mount of the link would pin at
     // the slot live when the container started.
     if (this.store.isAdmin(user)) {
       // shortcut: a folder set right in home (none is) mounts its link pinned at start, not home with its keys; mount per slot if one is.
-      const dirs = this.store.listContraptions().flatMap((c) => { const f = appFolder(c, this.home); return dirname(f) === this.home ? [f, slotsOf(f)] : [dirname(f)]; });
+      const dirs = this.store.listContraptions().flatMap((c) => {
+        const f = appFolder(c, this.home);
+        return dirname(f) === this.home ? [f, slotsOf(f)] : [dirname(f)];
+      });
       for (const dir of new Set(dirs)) {
         if (existsSync(dir)) mounts.push({ src: dir, dst: dir, ro: true });
       }
@@ -494,7 +522,11 @@ export class ClaudeLink {
     }
     // The shared Gradle build cache's init script (#1153): on only in a turn, which names the cache.
     if (vol) {
-      try { ensureGradleInit(vol); } catch (e) { console.warn(`gradle init script for ${vol}: ${(e as Error).message}`); }
+      try {
+        ensureGradleInit(vol);
+      } catch (e) {
+        console.warn(`gradle init script for ${vol}: ${(e as Error).message}`);
+      }
     }
     const now = await this.containers.status(spec.name);
     // shortcut: a changed spec (new image, a new scheme's memory) waits until no other turn runs in the container; a busy one keeps its old mounts meanwhile.
@@ -530,8 +562,14 @@ export class ClaudeLink {
     const c = this.credentials.get<ClaudeMeta>(user.id, 'claude_runner');
     if (!c || c.failed || !n) return null;
     return {
-      host: false, container: c.meta.container, configDir: join(c.meta.home, accountDir(n)), home: c.meta.home, turnsDir: this.turnsDir(user.id),
-      env: this.containerEnv(n), ensure: () => this.ensure(user.id, true), account: n,
+      host: false,
+      container: c.meta.container,
+      configDir: join(c.meta.home, accountDir(n)),
+      home: c.meta.home,
+      turnsDir: this.turnsDir(user.id),
+      env: this.containerEnv(n),
+      ensure: () => this.ensure(user.id, true),
+      account: n,
     };
   }
 
@@ -638,14 +676,12 @@ export class ClaudeLink {
       if (this.logins.get(uid) !== login) return this.status(uid);
       const claude = resolveClaude(this.claudeBin);
       const script = ['script', '-qfec', `stty cols 4000; ${claude} auth login --claudeai`, '/dev/null'];
-      const child = host
-        ? spawn(script[0], script.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], env: this.hostEnv(this.hostFolder(uid, n)) })
-        : spawn('podman', ['exec', '-i', '-e', `CLAUDE_CONFIG_DIR=${join(this.home, accountDir(n))}`, this.name(uid), ...script], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = host ? spawn(script[0], script.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], env: this.hostEnv(this.hostFolder(uid, n)) }) : spawn('podman', ['exec', '-i', '-e', `CLAUDE_CONFIG_DIR=${join(this.home, accountDir(n))}`, this.name(uid), ...script], { stdio: ['pipe', 'pipe', 'pipe'] });
       login.child = child;
       login.exited = new Promise((r) => child.on('exit', (code) => r(code ?? 1)));
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
-          login.error = 'The sign-in didn\'t show a link within 60 seconds.';
+          login.error = "The sign-in didn't show a link within 60 seconds.";
           child.kill();
           resolve();
         }, 60_000);
@@ -797,10 +833,25 @@ export function signInUrl(out: string): string | null {
 }
 
 function lastLines(out: string): string {
-  return out.trim().split('\n').filter((l) => l.trim()).slice(-3).join(' ').slice(-300) || '(no output)';
+  return (
+    out
+      .trim()
+      .split('\n')
+      .filter((l) => l.trim())
+      .slice(-3)
+      .join(' ')
+      .slice(-300) || '(no output)'
+  );
 }
 
 /** What the sign-in said after the link: its last lines, without the long link and with the pasted code masked. */
 export function signInOutcome(out: string, code: string): string {
-  return lastLines(out.split(code).join('[code]').split('\n').filter((l) => !/https:\/\/|Opening browser/.test(l)).join('\n'));
+  return lastLines(
+    out
+      .split(code)
+      .join('[code]')
+      .split('\n')
+      .filter((l) => !/https:\/\/|Opening browser/.test(l))
+      .join('\n'),
+  );
 }

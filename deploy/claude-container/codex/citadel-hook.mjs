@@ -37,7 +37,13 @@ export function patchPaths(patch) {
   return paths.length ? paths : null;
 }
 
-const glob = (pattern) => new RegExp(`^${pattern.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
+const glob = (pattern) =>
+  new RegExp(
+    `^${pattern
+      .split('*')
+      .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+      .join('.*')}$`,
+  );
 
 /** The approval rule (a Claude Code permission rule) this call matches, or null. Matches wide on purpose: a miss runs a call a person meant to approve. */
 export function ruleHit(rules, tool, ti) {
@@ -48,7 +54,12 @@ export function ruleHit(rules, tool, ti) {
     if (tool === 'Bash' && name === 'Bash') {
       if (spec === undefined) return rule;
       const prefix = spec.replace(/:\*$/, '').replace(/\s+/g, ' ').trim();
-      if (String(ti?.command ?? '').replace(/\s+/g, ' ').includes(prefix)) return rule;
+      if (
+        String(ti?.command ?? '')
+          .replace(/\s+/g, ' ')
+          .includes(prefix)
+      )
+        return rule;
     } else if (tool === 'apply_patch' && ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(name)) {
       // shortcut: any edit rule blocks every patch, path-scoped or not; match its paths if a scheme with one wants Codex edits.
       return rule;
@@ -86,9 +97,9 @@ async function check(input, cfgFile) {
   // image_gen reads its reference images: each is checked as a read.
   const imageGen = () => {
     // Fail closed if the arguments come in another shape (a string, a wrapper key): the refs could hide in it unchecked.
-    if (typeof ti !== 'object' || Array.isArray(ti) || typeof ti.prompt !== 'string') deny('This image_gen call\'s arguments are not the expected { prompt, ... } object, so the tripwire cannot check what it reads.');
+    if (typeof ti !== 'object' || Array.isArray(ti) || typeof ti.prompt !== 'string') deny("This image_gen call's arguments are not the expected { prompt, ... } object, so the tripwire cannot check what it reads.");
     const refs = ti.referenced_image_paths ?? [];
-    if (!Array.isArray(refs)) deny('image_gen\'s referenced_image_paths is not a list, so the tripwire cannot check what it reads.');
+    if (!Array.isArray(refs)) deny("image_gen's referenced_image_paths is not a list, so the tripwire cannot check what it reads.");
     for (const p of refs) stop(tripwire({ tool_name: 'Read', tool_input: { file_path: at(String(p)) }, cwd }, { ...config, ask: false }));
   };
   if (mode === 'image') {

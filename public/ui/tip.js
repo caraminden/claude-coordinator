@@ -203,7 +203,9 @@ export function mountTips(root = document.body, o = {}) {
     describe(at, true);
     // Inside the topmost open modal dialog, if any: everything outside one is inert, so the tip's links couldn't be clicked.
     let home = document.body;
-    try { home = [...document.querySelectorAll('dialog:modal')].at(-1) ?? home; } catch {}
+    try {
+      home = [...document.querySelectorAll('dialog:modal')].at(-1) ?? home;
+    } catch {}
     if (pop.parentNode !== home) home.append(pop); // moving it closes it, so it opens again below
     if (!pop.matches(':popover-open')) pop.showPopover();
     shown = close;
@@ -287,26 +289,31 @@ export function mountTips(root = document.body, o = {}) {
   on(root, 'contextmenu', (e) => {
     if (press?.fired) e.preventDefault();
   });
-  on(root, 'click', (e) => {
-    const el = tipOf(e.target);
-    if (press?.fired && press.el === el) {
-      // The click a long press ends in: the tip, not the thing's action.
-      e.preventDefault();
-      e.stopPropagation();
+  on(
+    root,
+    'click',
+    (e) => {
+      const el = tipOf(e.target);
+      if (press?.fired && press.el === el) {
+        // The click a long press ends in: the tip, not the thing's action.
+        e.preventDefault();
+        e.stopPropagation();
+        press = null;
+        return;
+      }
       press = null;
-      return;
-    }
-    press = null;
-    if (!el) return;
-    const actor = e.target.closest(acts);
-    if (!o.tapOpens && actor && el.contains(actor)) return;
-    // A link inside a tap-to-open thing is its own action (a wait chip's "⇢ #N" opens that minion).
-    if (o.tapOpens && e.target.closest('a[href]') && el.contains(e.target.closest('a[href]'))) return;
-    if (o.tapOpens) e.preventDefault();
-    // A click or tap on a thing that only shows something: open and keep it, or close it again.
-    if (at === el && pinned) return close();
-    open(el, true);
-  }, { capture: true });
+      if (!el) return;
+      const actor = e.target.closest(acts);
+      if (!o.tapOpens && actor && el.contains(actor)) return;
+      // A link inside a tap-to-open thing is its own action (a wait chip's "⇢ #N" opens that minion).
+      if (o.tapOpens && e.target.closest('a[href]') && el.contains(e.target.closest('a[href]'))) return;
+      if (o.tapOpens) e.preventDefault();
+      // A click or tap on a thing that only shows something: open and keep it, or close it again.
+      if (at === el && pinned) return close();
+      open(el, true);
+    },
+    { capture: true },
+  );
 
   on(document, 'keydown', (e) => {
     press = null; // a click from the keyboard isn't the end of a long press

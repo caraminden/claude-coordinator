@@ -4,21 +4,35 @@
 import { hideTokens } from './hide-tokens.ts';
 import { stateWord } from './needs.ts';
 
-interface EventRow { kind: string; data: string; created_at: number }
-interface Call { name: string; input: any; at: number; grunt: string | null; id: string; result?: { at: number; error: boolean; text: string } }
+interface EventRow {
+  kind: string;
+  data: string;
+  created_at: number;
+}
+interface Call {
+  name: string;
+  input: any;
+  at: number;
+  grunt: string | null;
+  id: string;
+  result?: { at: number; error: boolean; text: string };
+}
 
 const RECENT = 6;
 /** The Grunt tools: a call to one stays open while its Grunt works. */
 const GRUNT_TOOLS = new Set(['Agent', 'Task']);
 
 /** Values that read like secrets but have no token shape: env assignments (`PASSWORD=x`, an `env` dump), a URL's password, a bearer token. */
-const hideValues = (s: string) => s
-  .replace(/\b([A-Z][A-Z0-9_]*)=("[^"]*"|'[^']*'|\S+)/g, '$1=…')
-  .replace(/(\w+:\/\/[^\s:/@]+):[^\s@]+@/g, '$1:…@')
-  .replace(/\b(Bearer|token)\s+[\w.~+/=-]{8,}/gi, '$1 …');
+const hideValues = (s: string) =>
+  s
+    .replace(/\b([A-Z][A-Z0-9_]*)=("[^"]*"|'[^']*'|\S+)/g, '$1=…')
+    .replace(/(\w+:\/\/[^\s:/@]+):[^\s@]+@/g, '$1:…@')
+    .replace(/\b(Bearer|token)\s+[\w.~+/=-]{8,}/gi, '$1 …');
 
 const oneLine = (s: unknown, max: number) => {
-  const t = hideTokens(hideValues(String(s ?? ''))).replace(/\s+/g, ' ').trim();
+  const t = hideTokens(hideValues(String(s ?? '')))
+    .replace(/\s+/g, ' ')
+    .trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 };
 
@@ -56,7 +70,9 @@ export function liveState(ticket: any, events: EventRow[], now = Date.now()): st
   // This turn's (or, between turns, the last turn's) events: from its last init on.
   let from = 0;
   const parsed = events.map((e) => ({ ...e, ev: e.kind === 'claude' ? JSON.parse(e.data) : null }));
-  parsed.forEach((e, i) => { if (e.ev?.type === 'system' && e.ev.subtype === 'init') from = i; });
+  parsed.forEach((e, i) => {
+    if (e.ev?.type === 'system' && e.ev.subtype === 'init') from = i;
+  });
   const running = ticket.status === 'running';
   // A turn that started but hasn't sent its init yet isn't the last one: an old unanswered call isn't running.
   if (running && ticket.turnStartedAt && (parsed[from]?.created_at ?? 0) < ticket.turnStartedAt) {

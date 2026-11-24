@@ -68,7 +68,7 @@ test('PATCH /api/projects/:id renames, with friendly errors', async () => {
   assert.ok(texts.includes('Cara renamed the scheme from "Old name" to "New name".'), 'the coordinator hears about it');
 });
 
-test('PATCH sets a scheme\'s repo_url, refuses to replace one without replace_repo, and notes what a person still does', async () => {
+test("PATCH sets a scheme's repo_url, refuses to replace one without replace_repo, and notes what a person still does", async () => {
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Repoless' } });
   await call(`/api/projects/${p.id}`);
   const bad = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { repo_url: 'ftp://nope' } });
@@ -87,7 +87,10 @@ test('PATCH sets a scheme\'s repo_url, refuses to replace one without replace_re
   assert.equal(swap.data.repo_url, 'https://github.com/me/two');
   const { data: page } = await call(`/api/projects/${p.id}`);
   const notes = (await call(`/api/tickets/${page.coordinator.id}/events?after=0`)).data.map((e: any) => JSON.parse(e.data).text);
-  assert.ok(notes.some((t: string) => /set the scheme's repo to https:\/\/github.com\/me\/one.*clone/.test(t)), notes.join('\n'));
+  assert.ok(
+    notes.some((t: string) => /set the scheme's repo to https:\/\/github.com\/me\/one.*clone/.test(t)),
+    notes.join('\n'),
+  );
 });
 
 test('GET /api/projects/:id/instructions/history shows the last saves with their diffs', async () => {
@@ -97,10 +100,25 @@ test('GET /api/projects/:id/instructions/history shows the last saves with their
   await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { instructions: 'keep\nnew' } });
   const { status, data } = await call(`/api/projects/${p.id}/instructions/history`);
   assert.equal(status, 200);
-  assert.deepEqual(data.history.map((h: any) => [h.by, h.diff]), [
-    ['Cara', [{ op: '-', text: 'old' }, { op: '+', text: 'new' }]],
-    ['Cara', [{ op: '+', text: 'keep' }, { op: '+', text: 'old' }]],
-  ]);
+  assert.deepEqual(
+    data.history.map((h: any) => [h.by, h.diff]),
+    [
+      [
+        'Cara',
+        [
+          { op: '-', text: 'old' },
+          { op: '+', text: 'new' },
+        ],
+      ],
+      [
+        'Cara',
+        [
+          { op: '+', text: 'keep' },
+          { op: '+', text: 'old' },
+        ],
+      ],
+    ],
+  );
   assert.equal(typeof data.history[0].at, 'number');
 });
 
@@ -170,7 +188,7 @@ test("PATCH land_mode turns fast mode on only once the scheme's land.sh knows it
   assert.equal(notes.filter((t: string) => /fast mode/i.test(t)).length, 2, notes.join('\n'));
 });
 
-test('PATCH saves a scheme\'s screenshot widths, themes, requirement and note, and defaults to today\'s rule (#1044)', async () => {
+test("PATCH saves a scheme's screenshot widths, themes, requirement and note, and defaults to today's rule (#1044)", async () => {
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Shots' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
   assert.deepEqual([page.project.shot_widths, page.project.shot_themes, page.project.shots_required, page.project.shot_note], ['1440,390', 'light', 1, '']);
@@ -182,7 +200,7 @@ test('PATCH saves a scheme\'s screenshot widths, themes, requirement and note, a
   }
 });
 
-test('PATCH saves a scheme\'s never-hold kinds on their own and refuses unknown ones (#1067)', async () => {
+test("PATCH saves a scheme's never-hold kinds on their own and refuses unknown ones (#1067)", async () => {
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Never hold' } });
   const ok = await call(`/api/projects/${p.id}`, { method: 'PATCH', body: { msg_never_hold: ['note', 'decision', 'note'] } });
   assert.equal(ok.status, 200);

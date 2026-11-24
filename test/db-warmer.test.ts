@@ -22,7 +22,8 @@ test('three slow passes in a row back off for 30 s, then it starts counting agai
 
 test('a fast pass resets the count, a tiny pass is no evidence, and the wait is what is left of the period', () => {
   const p = new Pacer();
-  p.after(100, 1000); p.after(100, 1000);
+  p.after(100, 1000);
+  p.after(100, 1000);
   assert.equal(p.after(100, 40).backoff, false); // 2500 MB/s: from memory
   assert.equal(p.after(100, 1000).backoff, false);
   assert.equal(p.after(100, 1000).backoff, false);
@@ -42,5 +43,7 @@ test('the worker reads the database and its WAL, and the setting turns it off an
     await until('the warmer is off: no pass is shown', () => w.stats().mb === 0);
     store.setSetting(WARMER_SETTING, true);
     await until('the warmer is on again', () => w.stats().mb > 0);
-  } finally { w.stop(); }
+  } finally {
+    w.stop();
+  }
 });

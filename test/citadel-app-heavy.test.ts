@@ -23,7 +23,9 @@ test("it runs the step with its status and puts the app's name in the history", 
   const r = spawnSync(tool, ['sh', '-c', 'echo hi; exit 3'], { env: env('trip'), encoding: 'utf8' });
   assert.equal(r.status, 3);
   assert.equal(r.stdout, 'hi\n');
-  const line = readFileSync(join(root, `locks-${n}`, 'history'), 'utf8').trim().split('\t');
+  const line = readFileSync(join(root, `locks-${n}`, 'history'), 'utf8')
+    .trim()
+    .split('\t');
   assert.equal(line[1], 'trip (app)');
   assert.equal(spawnSync(tool, [], { env: env('trip') }).status, 2);
 });
@@ -39,7 +41,9 @@ test('a hold past the cap is stopped with 124 and told to split the work', () =>
 
 test('apps hold one slot between them: a second app waits outside the line, then runs', async () => {
   n++;
-  const go = join(root, 'go'), aUp = join(root, 'a-up'), bUp = join(root, 'b-up');
+  const go = join(root, 'go'),
+    aUp = join(root, 'a-up'),
+    bUp = join(root, 'b-up');
   const a = tmp.spawn(tool, ['sh', '-c', `touch '${aUp}'; i=0; while [ ! -e '${go}' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i + 1)); done`], { env: env('one'), stdio: 'ignore' });
   const aDone = new Promise((r) => a.on('close', r));
   await until('the first app to start', () => existsSync(aUp));

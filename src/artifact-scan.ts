@@ -35,11 +35,14 @@ export class ScanTimers {
     const pending = this.timers.get(ticketId);
     if (pending && pending.at <= at) return;
     if (pending) clearTimeout(pending.timer);
-    this.timers.set(ticketId, { at, timer: setTimeout(() => {
-      this.timers.delete(ticketId);
-      this.last.set(ticketId, Date.now());
-      this.run(ticketId);
-    }, at - now) });
+    this.timers.set(ticketId, {
+      at,
+      timer: setTimeout(() => {
+        this.timers.delete(ticketId);
+        this.last.set(ticketId, Date.now());
+        this.run(ticketId);
+      }, at - now),
+    });
   }
 }
 // The file a broken link's name finds (findByName), kept a while: a scan runs every few seconds, and
@@ -94,10 +97,17 @@ export class ArtifactScanner {
       const st = inside ? await lstat(join(dir, p.path)).catch(() => null) : null;
       files.push(st?.isFile() ? { path: p.path, size: st.size, mtime: Math.round(st.mtimeMs) } : { path: p.path, size: 0, mtime: p.pinned_at, missing: 1 });
     }
-    return files.sort((a, b) => b.mtime - a.mtime).map((f) => ({
-      ...f, name: basename(f.path), kind: fileType(f.path)?.kind ?? 'text', display_path: `scheme shared/${f.path}`,
-      pinned_at: pins.get(f.path)?.pinned_at ?? null, pinned_by: pins.get(f.path)?.pinned_by ?? null, missing: f.missing ?? 0,
-    }));
+    return files
+      .sort((a, b) => b.mtime - a.mtime)
+      .map((f) => ({
+        ...f,
+        name: basename(f.path),
+        kind: fileType(f.path)?.kind ?? 'text',
+        display_path: `scheme shared/${f.path}`,
+        pinned_at: pins.get(f.path)?.pinned_at ?? null,
+        pinned_by: pins.get(f.path)?.pinned_by ?? null,
+        missing: f.missing ?? 0,
+      }));
   };
 
   private async scanShared(projectId: number) {
@@ -111,8 +121,8 @@ export class ArtifactScanner {
   /** The paths a ticket's replies linked so far, reading only the events since the last call, a page at a time. */
   private async linkedSoFar(ticketId: number, cwd: string): Promise<Set<string>> {
     let seen = this.links.get(ticketId);
-    if (seen?.cwd !== cwd) this.links.set(ticketId, seen = { cwd, upTo: 0, linked: new Set() });
-    for (let more = true; more;) {
+    if (seen?.cwd !== cwd) this.links.set(ticketId, (seen = { cwd, upTo: 0, linked: new Set() }));
+    for (let more = true; more; ) {
       const page = this.store.replyTexts(ticketId, seen.upTo, REPLY_PAGE);
       for (const p of linkedPaths(page.texts, cwd)) seen.linked.add(p);
       seen.upTo = page.upTo;
@@ -144,7 +154,7 @@ export class ArtifactScanner {
         const key = `${ticketId}\0${abs}`;
         let fix = this.nameFixes.get(key);
         if (!fix || Date.now() - fix.at > NAME_FIX_MS) {
-          this.nameFixes.set(key, fix = { match: await findByName(abs, [ticket.cwd, shared, projectSharedDir(this.dataDir, ticket.project_id)]), at: Date.now() });
+          this.nameFixes.set(key, (fix = { match: await findByName(abs, [ticket.cwd, shared, projectSharedDir(this.dataDir, ticket.project_id)]), at: Date.now() }));
         }
         if (fix.match) linked.add(fix.match);
       }

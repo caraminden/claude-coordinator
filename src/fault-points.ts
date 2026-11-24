@@ -7,7 +7,7 @@ const POINT = process.env.CITADEL_FAULT_POINT || null;
 
 export async function faultPoint(name: string) {
   if (name !== POINT) return;
-  for (let p; (p = writes.landed?.(true));) await p;
+  for (let p; (p = writes.landed?.(true)); ) await p;
   console.error(`Fault point ${name}: killing the server here (CITADEL_FAULT_POINT).`);
   process.kill(process.pid, 'SIGKILL');
   await new Promise(() => {}); // nothing after the point runs, even for the moment the signal takes

@@ -18,7 +18,9 @@ after(async () => {
 });
 
 const fakeClaude = join(root, 'claude-fake');
-writeFileSync(fakeClaude, `#!${process.execPath}
+writeFileSync(
+  fakeClaude,
+  `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 createInterface({ input: process.stdin }).once('line', (prompt) => {
@@ -26,19 +28,22 @@ createInterface({ input: process.stdin }).once('line', (prompt) => {
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fakeClaude, 0o755);
 
 let base = '';
 let cookie = '';
 
 let srv: Booted;
-const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) =>
-  ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
+const call = async (path: string, opts: { method?: string; body?: unknown; token?: string } = {}) => ok(await (opts.token ? srv.as({ token: opts.token }) : srv.call)(path, opts.body || undefined, opts.method ?? 'GET'));
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
 // The token the minion's latest turn holds: each turn's token dies when the next turn starts.
-const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
+const live = () =>
+  turns()
+    .filter((t) => t.token.startsWith(`${ticket.id}.`))
+    .at(-1).token;
 const idle = (id: number) => until('the turn to end', async () => (await call(`/api/tickets/${id}`)).ticket.status !== 'running');
 
 let ticket: any;
@@ -62,15 +67,20 @@ before(async () => {
   for (const f of [join(turn.cwd, 'takes/a.png'), join(turn.cwd, 'takes/b.gif'), join(turn.cwd, 'report.md'), join(shared, 'c.mp4'), join(root, 'secret.png')]) writeFileSync(f, 'x');
 });
 
-const ask = (images: (string | undefined)[]) => call(`/api/tickets/${ticket.id}/questions`, {
-  method: 'POST', token: live(),
-  body: { questions: [{ question: 'Which take?', options: images.map((image, i) => ({ label: `Take ${i + 1}`, ...(image ? { image } : {}), ...(i ? {} : { recommended: true }) })) }] },
-});
+const ask = (images: (string | undefined)[]) =>
+  call(`/api/tickets/${ticket.id}/questions`, {
+    method: 'POST',
+    token: live(),
+    body: { questions: [{ question: 'Which take?', options: images.map((image, i) => ({ label: `Take ${i + 1}`, ...(image ? { image } : {}), ...(i ? {} : { recommended: true }) })) }] },
+  });
 
-test('a question card keeps option pictures from the thread\'s folders', async () => {
+test("a question card keeps option pictures from the thread's folders", async () => {
   const { id } = await ask(['takes/a.png', join(turn.cwd, 'takes/b.gif'), join(shared, 'c.mp4'), undefined]);
   const card = (await call(`/api/tickets/${ticket.id}/events?after=0`)).find((e: any) => e.kind === 'question' && JSON.parse(e.data).id === id);
-  assert.deepEqual(JSON.parse(card.data).questions[0].options.map((o: any) => o.image), ['takes/a.png', join(turn.cwd, 'takes/b.gif'), join(shared, 'c.mp4'), undefined]);
+  assert.deepEqual(
+    JSON.parse(card.data).questions[0].options.map((o: any) => o.image),
+    ['takes/a.png', join(turn.cwd, 'takes/b.gif'), join(shared, 'c.mp4'), undefined],
+  );
   const res = await fetch(`${base}/api/tickets/${ticket.id}/file?path=${encodeURIComponent('takes/a.png')}`, { headers: { Cookie: cookie } });
   assert.equal(res.status, 200);
 });
@@ -83,13 +93,22 @@ test('a question card refuses pictures outside those folders, missing or not pic
   await assert.rejects(ask(['/etc/passwd', 'takes/a.png']), /400 .*must be an image/);
 });
 
-const askWith = (options: object[], multiSelect = false) => call(`/api/tickets/${ticket.id}/questions`, {
-  method: 'POST', token: live(), body: { not_duplicate: true, questions: [{ question: 'Tabs or list?', multiSelect, options }] },
-});
+const askWith = (options: object[], multiSelect = false) =>
+  call(`/api/tickets/${ticket.id}/questions`, {
+    method: 'POST',
+    token: live(),
+    body: { not_duplicate: true, questions: [{ question: 'Tabs or list?', multiSelect, options }] },
+  });
 
 test('every question on a card recommends an option', async () => {
   await assert.rejects(askWith([{ label: 'Tabs' }, { label: 'List' }]), /400 Question 1 needs a recommended option/);
-  await assert.rejects(askWith([{ label: 'Tabs', recommended: true }, { label: 'List', recommended: true }]), /400 Question 1 recommends 2 options; mark just one/);
+  await assert.rejects(
+    askWith([
+      { label: 'Tabs', recommended: true },
+      { label: 'List', recommended: true },
+    ]),
+    /400 Question 1 recommends 2 options; mark just one/,
+  );
   await askWith([{ label: 'Tabs', recommended: true }, { label: 'List', recommended: true }, { label: 'Both' }], true);
   // A label that says "(Recommended)" itself becomes the flag, so the card doesn't show the words twice.
   const { id } = await askWith([{ label: 'Tabs' }, { label: 'List (Recommended)' }]);
@@ -100,7 +119,7 @@ test('every question on a card recommends an option', async () => {
 test('a comment on a file is a chat message from the person that wakes the thread', async () => {
   const before = turns().length;
   await call(`/api/tickets/${ticket.id}/comments`, { method: 'POST', body: { path: 'report.md', text: 'Shorter, please.', quote: 'The long intro' } });
-  const next = (await until('the comment\'s turn', () => turns().length > before && turns())).at(-1);
+  const next = (await until("the comment's turn", () => turns().length > before && turns())).at(-1);
   assert.deepEqual(withoutTurnNote(next.prompt.message.content), [{ type: 'text', text: '[Cara on report.md]: > The long intro\n\nShorter, please.' }]);
   const message = (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'user_message').at(-1);
   assert.deepEqual(JSON.parse(message.data), { author: 'Cara', text: '> The long intro\n\nShorter, please.', comment: { path: 'report.md', about: 'report.md' } });
@@ -116,7 +135,7 @@ test('comments only on files the thread may show, and only from people', async (
 test('a thread can message its coordinator, which wakes with the thread named', async () => {
   const before = turns().length;
   await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'Send #2 the handoff', need: 'ask' } });
-  const next = (await until('the coordinator\'s turn', () => turns().length > before && turns())).at(-1);
+  const next = (await until("the coordinator's turn", () => turns().length > before && turns())).at(-1);
   assert.match(withoutTurnNote(next.prompt.message.content)[0].text, /^\[#1 .+\]: Send #2 the handoff$/);
   assert.notEqual(next.token, turn.token);
   // Let the coordinator's turn end here, or its wind-down writes into root while after() deletes it.
@@ -137,7 +156,7 @@ test('need (#851): a fyi to the coordinator is held mail that starts no turn; a 
   assert.ok(evs.some((e: any) => e.kind === 'note' && e.data.need === 'fyi'));
 });
 
-test('a zip in the thread\'s folders is served as a download, never shown', async () => {
+test("a zip in the thread's folders is served as a download, never shown", async () => {
   writeFileSync(join(shared, 'Game build.zip'), 'PK');
   const res = await fetch(`${base}/api/tickets/${ticket.id}/file?path=${encodeURIComponent(join(shared, 'Game build.zip'))}`, { headers: { Cookie: cookie } });
   assert.equal(res.status, 200);
@@ -145,7 +164,7 @@ test('a zip in the thread\'s folders is served as a download, never shown', asyn
   assert.equal(res.headers.get('content-disposition'), "attachment; filename*=UTF-8''Game%20build.zip");
 });
 
-test('an apk in the thread\'s folders downloads with Android\'s type, so a phone offers to install it', async () => {
+test("an apk in the thread's folders downloads with Android's type, so a phone offers to install it", async () => {
   writeFileSync(join(shared, 'app-release.apk'), 'PK');
   const res = await fetch(`${base}/api/tickets/${ticket.id}/file?path=${encodeURIComponent(join(shared, 'app-release.apk'))}`, { headers: { Cookie: cookie } });
   assert.equal(res.status, 200);

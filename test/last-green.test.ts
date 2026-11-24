@@ -14,15 +14,23 @@ let dbs = 0;
 
 let minute = 0;
 const run = (sha: string, conclusion: string | null, workflow = 1, file = 'tests.yml', status = conclusion ? 'completed' : 'in_progress'): GreenRun => ({
-  head_sha: sha, workflow_id: workflow, file, status, conclusion, created_at: new Date(Date.UTC(2026, 10, 18, 0, ++minute)).toISOString(),
+  head_sha: sha,
+  workflow_id: workflow,
+  file,
+  status,
+  conclusion,
+  created_at: new Date(Date.UTC(2026, 10, 18, 0, ++minute)).toISOString(),
 });
 
-test('a commit is green when every workflow\'s newest run on it passed, and a rerun replaces the first verdict', () => {
+test("a commit is green when every workflow's newest run on it passed, and a rerun replaces the first verdict", () => {
   const runs = [
     run('a', 'success'),
-    run('b', 'success'), run('b', 'failure', 2, 'lint.yml'),
-    run('c', 'failure'), run('c', 'success'), // rerun passed
-    run('d', 'success'), run('d', null, 2, 'lint.yml'), // one still running
+    run('b', 'success'),
+    run('b', 'failure', 2, 'lint.yml'),
+    run('c', 'failure'),
+    run('c', 'success'), // rerun passed
+    run('d', 'success'),
+    run('d', null, 2, 'lint.yml'), // one still running
     run('e', 'skipped'), // nothing actually passed
   ];
   assert.deepEqual(greenShas(runs), ['c', 'a']);

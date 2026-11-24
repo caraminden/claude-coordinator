@@ -54,7 +54,11 @@ test('the monthly bill sums per scheme and service, with OpenRouter beside it, a
   const mine = bill.find((b) => b.project_id === twi.id)!;
   assert.equal(mine.name, 'TWIReader');
   assert.equal(mine.month_usd, 39.5);
-  assert.deepEqual(mine.services, [{ service: 'azure-speech', usd: 37.25 }, { service: 'elevenlabs', usd: 2 }, { service: 'openrouter', usd: 0.25 }]);
+  assert.deepEqual(mine.services, [
+    { service: 'azure-speech', usd: 37.25 },
+    { service: 'elevenlabs', usd: 2 },
+    { service: 'openrouter', usd: 0.25 },
+  ]);
   assert.equal(bill.find((b) => b.project_id === other.id)!.month_usd, 1);
   assert.equal(mine.cap_usd, null);
 });
@@ -76,18 +80,24 @@ test('a cap warns once a month when crossed, and refuses nothing', () => {
   spend.record(other.id, { service: 's', usd: 11, units: null, note: null }, 'x', Date.UTC(2027, 1, 2));
   assert.equal(warned.length, 6);
   // A cap with no spend yet that month still shows, so the field can display it.
-  assert.deepEqual(spend.bill(Date.UTC(2027, 5, 1)).filter((b) => b.project_id === other.id).map((b) => [b.month_usd, b.cap_usd]), [[0, 10]]);
+  assert.deepEqual(
+    spend
+      .bill(Date.UTC(2027, 5, 1))
+      .filter((b) => b.project_id === other.id)
+      .map((b) => [b.month_usd, b.cap_usd]),
+    [[0, 10]],
+  );
   spend.setCap(other.id, null);
   assert.equal(spend.bill(now).find((b) => b.project_id === other.id)!.cap_usd, null);
   assert.throws(() => spend.setCap(other.id, -3), /cap/);
 });
 
-test('POST /api/contraptions/spend books to the contraption\'s home scheme; the bill shows on the scheme route', { timeout: 60_000 }, async () => {
+test("POST /api/contraptions/spend books to the contraption's home scheme; the bill shows on the scheme route", { timeout: 60_000 }, async () => {
   const srv = await bootServer({ root });
   try {
     const post = async (body: unknown, key: string | null = KEY) => {
       const res = await fetch(`${srv.base}/api/contraptions/spend`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) }, body: JSON.stringify(body) });
-      return { status: res.status, body: await res.json() as any };
+      return { status: res.status, body: (await res.json()) as any };
     };
     assert.equal((await post({ service: 'azure-speech', usd: 1 }, null)).status, 401);
     assert.equal((await post({ service: 'azure-speech', usd: -1 })).status, 400);

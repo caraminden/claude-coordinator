@@ -76,7 +76,9 @@ test('ad-hoc copies go at 7 days old, only while a recent nightly backup restore
   assert.match(run(backup), /Backed up to .*coordinator-\d{4}-\d\d-\d\d\.db.*, sessions to state-\d{4}-\d\d-\d\d\.db/);
   const mode = execFileSync('stat', ['-c', '%a', join(root, 'backups')], { encoding: 'utf8' }).trim();
   assert.equal(mode, '700');
-  const nightly = readdirSync(join(root, 'backups')).filter((f) => /^coordinator-\d/.test(f)).map((f) => join(root, 'backups', f));
+  const nightly = readdirSync(join(root, 'backups'))
+    .filter((f) => /^coordinator-\d/.test(f))
+    .map((f) => join(root, 'backups', f));
   for (const f of nightly) utimesSync(f, ago(3), ago(3));
   assert.match(run(prune, '--apply', '--stale-backups'), /Keeping them: no nightly backup from the last 2 days/, 'a backup that stopped running unlocks nothing');
   assert.ok(existsSync(stale));

@@ -44,14 +44,26 @@ test('a changed reviewer text, model, lens or brief rule changes the hash; white
         assert.ok(readFileSync(join(changed, file), 'utf8') !== readFileSync(join(ROOT, file), 'utf8'), `${from} is no longer in ${file}: update this test`);
         assert.notEqual(benchHash(changed).hash, benchHash(ROOT).hash, `${file}: ${from}`);
         assert.ok(staleReasons({ ...readRecord()!, ...benchHash(ROOT) }, changed)[0]?.includes('changed since'), `${file}: staleReasons says so`);
-      } finally { rmSync(changed, { recursive: true, force: true }); }
+      } finally {
+        rmSync(changed, { recursive: true, force: true });
+      }
     }
     const spaced = copy((_, t) => t.replace(/\n\n/g, '\n\n\n\n').replace(/\n/g, '  \n'));
-    try { assert.equal(benchHash(spaced).hash, benchHash(ROOT).hash, 'trailing spaces and blank-line runs are not a change'); } finally { rmSync(spaced, { recursive: true, force: true }); }
+    try {
+      assert.equal(benchHash(spaced).hash, benchHash(ROOT).hash, 'trailing spaces and blank-line runs are not a change');
+    } finally {
+      rmSync(spaced, { recursive: true, force: true });
+    }
     // Only self-review's section 2 is the reviewer's brief: another section's edit is not a reviewer change.
     const other = copy((f, t) => (f.endsWith('self-review/SKILL.md') ? t.replace('## 4. Label the risk', '## 4. Label the risk\n\nA new sentence.') : t));
-    try { assert.equal(benchHash(other).hash, benchHash(ROOT).hash); } finally { rmSync(other, { recursive: true, force: true }); }
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+    try {
+      assert.equal(benchHash(other).hash, benchHash(ROOT).hash);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test(`lessons count as a change once ${NEW_LESSONS} new ones are added since the run; removed ones do not`, () => {
@@ -60,7 +72,7 @@ test(`lessons count as a change once ${NEW_LESSONS} new ones are added since the
   assert.deepEqual(staleReasons(rec, ROOT, ['a', 'c', 'd']), [], 'two new ones are not enough');
   assert.equal(staleReasons(rec, ROOT, ['a', 'b', 'c', 'd', 'e']).length, 1, 'three new ones are');
   assert.deepEqual(staleReasons(rec, ROOT, []), [], 'a removed lesson is not a change');
-  assert.deepEqual(lessonKinds("## Lessons\n\n- race with no wrong outcome: refuted 3 times, last 2026-11-22. It was wrong because x.\n- a b: refuted 1 time, last 2026-11-01.\nnot - a lesson: refuted"), ['race with no wrong outcome', 'a b']);
+  assert.deepEqual(lessonKinds('## Lessons\n\n- race with no wrong outcome: refuted 3 times, last 2026-11-22. It was wrong because x.\n- a b: refuted 1 time, last 2026-11-01.\nnot - a lesson: refuted'), ['race with no wrong outcome', 'a b']);
 });
 
 test('the planted set: about 20 real small commits with one bug each, 5 controls, every kind of bug', () => {

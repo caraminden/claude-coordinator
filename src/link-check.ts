@@ -131,7 +131,13 @@ function postedCard(transcript?: string): boolean | null {
 
 /** The sentence in the reply's last two paragraphs that asks a choice, when no card, link to one or reply button answers it; else null. */
 export function proseChoice(text: string, status: { replies?: unknown } | null, transcript?: string): string | null {
-  const tail = text.replace(CODE, '').replace(QUOTED, '').trim().split(/\n\s*\n/).slice(-2).join('\n\n');
+  const tail = text
+    .replace(CODE, '')
+    .replace(QUOTED, '')
+    .trim()
+    .split(/\n\s*\n/)
+    .slice(-2)
+    .join('\n\n');
   if (/\]\(#\/p\/\d+\/t\/\d+\?e=\d+\)|nothing needed from you/i.test(tail)) return null;
   if (Array.isArray(status?.replies) && status.replies.length) return null;
   const hit = tail.split(/(?<=[.?!])\s+|\n/).find((s) => DIRECT.test(s) || OFFER.test(s));
@@ -150,11 +156,23 @@ function closeSelfOk(transcript?: string): boolean | null | undefined {
       if (!l) continue;
       const e = JSON.parse(l);
       const content = e.message?.content;
-      if (!Array.isArray(content)) { if (e.type === 'user' && !e.isMeta) { called = false; ids.clear(); } continue; }
-      if (e.type === 'user' && !e.isMeta && !content.some((c: any) => c?.type === 'tool_result')) { called = false; ids.clear(); continue; }
+      if (!Array.isArray(content)) {
+        if (e.type === 'user' && !e.isMeta) {
+          called = false;
+          ids.clear();
+        }
+        continue;
+      }
+      if (e.type === 'user' && !e.isMeta && !content.some((c: any) => c?.type === 'tool_result')) {
+        called = false;
+        ids.clear();
+        continue;
+      }
       for (const c of content) {
-        if (c?.type === 'tool_use' && /^mcp__[a-z-]+__close_self$/.test(c.name)) { ids.set(c.id, false); called = true; }
-        else if (c?.type === 'tool_result' && ids.has(c.tool_use_id)) ids.set(c.tool_use_id, !c.is_error);
+        if (c?.type === 'tool_use' && /^mcp__[a-z-]+__close_self$/.test(c.name)) {
+          ids.set(c.id, false);
+          called = true;
+        } else if (c?.type === 'tool_result' && ids.has(c.tool_use_id)) ids.set(c.tool_use_id, !c.is_error);
       }
     }
     return [...ids.values()].some(Boolean) || (called ? false : null);
@@ -166,10 +184,26 @@ function closeSelfOk(transcript?: string): boolean | null | undefined {
 /** Why a reply that says the minion is closing is false (no working close_self, or a status line that cancels it), or null (#809). */
 export function closingClaim(text: string, status: { state?: unknown } | null, transcript?: string, self?: number | null): string | null {
   if (!transcript || self === null) return null; // a Taskmaster has no close_self
-  const tail = text.replace(CODE, '').replace(QUOTED, '').trim().split(/\n\s*\n/).slice(-2).join('\n\n');
+  const tail = text
+    .replace(CODE, '')
+    .replace(QUOTED, '')
+    .trim()
+    .split(/\n\s*\n/)
+    .slice(-2)
+    .join('\n\n');
   const m = tail.match(CLOSING);
   const hit = m?.[0];
-  if (!m || !hit || /\b(not|never|no longer)\b|n't/i.test(tail.slice(Math.max(0, m.index! - 40), m.index!).split(/[.!?\n]/).pop()!)) return null;
+  if (
+    !m ||
+    !hit ||
+    /\b(not|never|no longer)\b|n't/i.test(
+      tail
+        .slice(Math.max(0, m.index! - 40), m.index!)
+        .split(/[.!?\n]/)
+        .pop()!,
+    )
+  )
+    return null;
   const ok = closeSelfOk(transcript);
   const state = typeof status?.state === 'string' ? status.state : null;
   if (ok && state && ['complete', 'try', 'ready'].includes(state)) return `its status line sets state ${state}, which cancels the close, so it stays open`;
@@ -218,50 +252,46 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
       if (input.stop_hook_active) return null;
     }
   }
-  const lines = await Promise.all(broken.map(async (abs) => {
-    // The one file of its name the chat can show, which the rewrite most likely meant (#281).
-    const match = await findByName(abs, cfg.roots);
-    return `- ${abs}: ${existsSync(abs) ? 'outside the folders the chat can show' : 'no such file'}${match ? `. Did you mean ${match}?` : ''}`;
-  }));
+  const lines = await Promise.all(
+    broken.map(async (abs) => {
+      // The one file of its name the chat can show, which the rewrite most likely meant (#281).
+      const match = await findByName(abs, cfg.roots);
+      return `- ${abs}: ${existsSync(abs) ? 'outside the folders the chat can show' : 'no such file'}${match ? `. Did you mean ${match}?` : ''}`;
+    }),
+  );
   const links = broken.length
-    ? `These file links in your reply won't open in the chat:\n${lines.join('\n')}\n`
-      + `Relative links resolve against your working directory ${cfg.cwd}; absolute paths are safest. `
-      + `Files must be inside ${cfg.roots.length > 1 ? `it or ${cfg.roots.slice(1).join(' or ')}` : 'it'}. `
-      + 'Fix the paths (or drop links to files that are gone).\n'
+    ? `These file links in your reply won't open in the chat:\n${lines.join('\n')}\n` +
+      `Relative links resolve against your working directory ${cfg.cwd}; absolute paths are safest. ` +
+      `Files must be inside ${cfg.roots.length > 1 ? `it or ${cfg.roots.slice(1).join(' or ')}` : 'it'}. ` +
+      'Fix the paths (or drop links to files that are gone).\n'
     : '';
   const pages = rolled.length
-    ? `These pages have an answer or copy button of their own (navigator.clipboard, execCommand('copy') or citadel.send):\n${rolled.map((p) => `- ${p}`).join('\n')}\n`
-      + 'People answer a page only through the mock kit\'s Send dock, which posts straight into your chat: ask with mock.picks instead '
-      + '(citadel:docs-and-mocks skill, mockkit.md), fix the pages, then rewrite the reply. A clipboard use that is no answer button can stay, '
-      + 'if a click or key press starts it: a page that fills the clipboard on its own trips Windows Defender\'s ClickFix check.\n'
+    ? `These pages have an answer or copy button of their own (navigator.clipboard, execCommand('copy') or citadel.send):\n${rolled.map((p) => `- ${p}`).join('\n')}\n` +
+      "People answer a page only through the mock kit's Send dock, which posts straight into your chat: ask with mock.picks instead " +
+      '(citadel:docs-and-mocks skill, mockkit.md), fix the pages, then rewrite the reply. A clipboard use that is no answer button can stay, ' +
+      "if a click or key press starts it: a page that fills the clipboard on its own trips Windows Defender's ClickFix check.\n"
     : '';
   const choice = choices.length
-    ? `These pages ask with pick bars, but no card in the chat opens them:\n${choices.map((p) => `- ${p}`).join('\n')}\n`
-      + 'A choices page always comes with its card: call ask_question with doc set to the page\'s path (and no questions), so it waits on people '
-      + 'like any card and its Send settles it, then rewrite the reply with the card\'s link. A page linked only to show picks already made can stay.\n'
+    ? `These pages ask with pick bars, but no card in the chat opens them:\n${choices.map((p) => `- ${p}`).join('\n')}\n` +
+      "A choices page always comes with its card: call ask_question with doc set to the page's path (and no questions), so it waits on people " +
+      "like any card and its Send settles it, then rewrite the reply with the card's link. A page linked only to show picks already made can stay.\n"
     : '';
-  const ask = asked
-    ? `Your reply asks a choice in prose ("${asked.slice(0, 120)}") and no card was posted this turn. Post it as an ask_question card (or a status-line reply button for a lone go), `
-      + `or answer ${KEEP} if nobody has a choice to make.\n`
-    : '';
-  const close = closing
-    ? `Your reply says this minion is closing, but ${closing}. Words don't close it: call close_self (state null in the status line, no card open), or rewrite the line to say plainly why it stays open `
-      + '(for example "Staying open in state ready for you to do X").\n'
-    : '';
+  const ask = asked ? `Your reply asks a choice in prose ("${asked.slice(0, 120)}") and no card was posted this turn. Post it as an ask_question card (or a status-line reply button for a lone go), ` + `or answer ${KEEP} if nobody has a choice to make.\n` : '';
+  const close = closing ? `Your reply says this minion is closing, but ${closing}. Words don't close it: call close_self (state null in the status line, no card open), or rewrite the line to say plainly why it stays open ` + '(for example "Staying open in state ready for you to do X").\n' : '';
   const wait = waiting ? `${explainWaiting(waiting)}\n` : '';
   const wording = misused.length ? `${explain(misused)}\n` : '';
   const scheme = strays.length ? `${explainStrays(strays, refs!.scheme)}\n` : '';
-  const card = (cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '') + (misplaced.length ? `${explainMisplaced(misplaced)}\n` : '')
-    + (stale.length ? `${explainStale(stale, refs!.self ?? null)}\n` : '');
+  const card = (cards.length ? `${explainCards(cards, refs!.self ?? null)}\n` : '') + (misplaced.length ? `${explainMisplaced(misplaced)}\n` : '') + (stale.length ? `${explainStale(stale, refs!.self ?? null)}\n` : '');
   return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${choice}${ask}${close}${wait}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
 }
 
 // In a function, never awaited at the top level: a thread that loads this module would abort the process if it were terminated mid-start (test/worker-tla.test.ts).
-if (process.argv[1] === fileURLToPath(import.meta.url)) void (async () => {
-  try {
-    const verdict = await check(JSON.parse(readFileSync(0, 'utf8')), JSON.parse(process.argv[2]));
-    if (verdict) process.stdout.write(JSON.stringify(verdict));
-  } catch {
-    // A check that can't run never holds up the turn.
-  }
-})();
+if (process.argv[1] === fileURLToPath(import.meta.url))
+  void (async () => {
+    try {
+      const verdict = await check(JSON.parse(readFileSync(0, 'utf8')), JSON.parse(process.argv[2]));
+      if (verdict) process.stdout.write(JSON.stringify(verdict));
+    } catch {
+      // A check that can't run never holds up the turn.
+    }
+  })();

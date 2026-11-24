@@ -47,7 +47,14 @@ export interface MenuSpec {
 }
 
 /** Where a `w` × `h` menu opened at (`x`, `y`) goes in a `vw` × `vh` window. Pure. */
-export function placeMenu(x: number, y: number, w: number, h: number, vw: number, vh: number): {
+export function placeMenu(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  vw: number,
+  vh: number,
+): {
   left: number;
   top: number;
   maxHeight: number;

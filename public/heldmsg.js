@@ -18,8 +18,8 @@ export function heldLine(data, eventId, ticket) {
 }
 
 // A start card's wait (#1757) isn't a seal, so its held messages say so.
-const heldTag = (data) => data.startHold ? { tag: 'left before it started', title: 'Left while it waited for its start card, read when a person started it' }
-  : data.parked ? { tag: 'left while sealed', title: 'Left while it was sealed, read when it was unsealed' } : { tag: 'held mail', title: 'Held for its next turn, read then' };
+const heldTag = (data) =>
+  data.startHold ? { tag: 'left before it started', title: 'Left while it waited for its start card, read when a person started it' } : data.parked ? { tag: 'left while sealed', title: 'Left while it was sealed, read when it was unsealed' } : { tag: 'held mail', title: 'Held for its next turn, read then' };
 
 /** The one-line hint over the composer while the open minion is parked (a message waits), or null. */
 export function composerHint(t) {

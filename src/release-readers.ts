@@ -25,8 +25,7 @@ const PREVIOUS = 10;
 export function nextOf(track: string[], usual: (stage: string) => number | null, lead: Progress, changes: Change[], number: number | null, link: string | null = null): Next {
   const stages = track.map((name) => ({ name, usual: name === 'live' ? 0 : usual(name) }));
   const after = stages.slice(track.indexOf(lead.stage) + 1);
-  const eta = lead.waitingOn || lead.usual == null || after.some((s) => s.usual == null)
-    ? null : lead.since + (lead.usual + after.reduce((sum, s) => sum + s.usual!, 0)) * 1000;
+  const eta = lead.waitingOn || lead.usual == null || after.some((s) => s.usual == null) ? null : lead.since + (lead.usual + after.reduce((sum, s) => sum + s.usual!, 0)) * 1000;
   return { ...lead, number, link, stages, eta, changes };
 }
 
@@ -158,8 +157,15 @@ export class ContraptionReader implements Reader {
     const landed = all && t ? landedOn(all, shipsOnTarget(t, this.d.finder.list())) : null;
     const end = view.finished_at ?? (this.d.now ?? Date.now)();
     store.addContraptionDeploy({
-      name: view.name, from_sha: view.from, to_sha: view.to, by: view.by, started_at: view.started_at, finished_at: end, outcome: view.state,
-      stages: JSON.stringify(lengths(view.stages, end)), changes: JSON.stringify((landed?.tickets ?? []).map((x) => ({ ticketId: x.id, number: x.number, title: x.title }))),
+      name: view.name,
+      from_sha: view.from,
+      to_sha: view.to,
+      by: view.by,
+      started_at: view.started_at,
+      finished_at: end,
+      outcome: view.state,
+      stages: JSON.stringify(lengths(view.stages, end)),
+      changes: JSON.stringify((landed?.tickets ?? []).map((x) => ({ ticketId: x.id, number: x.number, title: x.title }))),
     });
   }
 
@@ -180,16 +186,24 @@ export class ContraptionReader implements Reader {
       for (const r of rows) if (r.outcome === 'deployed') numbers.set(r.id, total - k++);
       for (const [i, r] of live.entries()) numbers.set(r.id, total - i);
       const release = (r: ContraptionDeployRow, link: string | null = null): Release => ({
-        version: r.to_sha ?? r.from_sha ?? '', number: numbers.get(r.id) ?? null, link, changes: JSON.parse(r.changes),
-        started: r.started_at, live: r.outcome === 'deployed' ? r.finished_at : null, outcome: r.outcome === 'deployed' ? 'live' : r.outcome, stages: JSON.parse(r.stages),
+        version: r.to_sha ?? r.from_sha ?? '',
+        number: numbers.get(r.id) ?? null,
+        link,
+        changes: JSON.parse(r.changes),
+        started: r.started_at,
+        live: r.outcome === 'deployed' ? r.finished_at : null,
+        outcome: r.outcome === 'deployed' ? 'live' : r.outcome,
+        stages: JSON.parse(r.stages),
       });
       // While a deploy runs, the commit it started from still serves.
       const version = (run ? run.from : null) ?? s?.deployed ?? live[0]?.to_sha ?? null;
       const mine = live.find((r) => r.to_sha === version);
       // The current release is the app as it serves now; an older one can't be opened any more.
-      const current: Release | null = mine ? release(mine, t.link)
-        : version ? { version, number: live.length ? total + 1 : Math.max(total, 1), link: t.link, changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
-      const recent = rows.filter((r) => r.id !== mine?.id).slice(0, PREVIOUS).map((r) => release(r));
+      const current: Release | null = mine ? release(mine, t.link) : version ? { version, number: live.length ? total + 1 : Math.max(total, 1), link: t.link, changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
+      const recent = rows
+        .filter((r) => r.id !== mine?.id)
+        .slice(0, PREVIOUS)
+        .map((r) => release(r));
 
       let lead: Progress | null = null;
       if (run) {
@@ -200,7 +214,7 @@ export class ContraptionReader implements Reader {
         lead = { stage, since, usual: waits ? null : usual(stage), waitingOn: waits, text: waits ?? run.said.at(-1) ?? 'deploying' };
       } else if (s?.ahead) {
         // Say what sends it out (#629's Deploy button and auto-deploy) rather than "a deploy call" (Cara, 2026-11-12: "What does 'waiting for a deploy call' mean?").
-        const what = s.ahead === 1 ? '1 change on main isn\'t' : `${s.ahead} changes on main aren't`;
+        const what = s.ahead === 1 ? "1 change on main isn't" : `${s.ahead} changes on main aren't`;
         const text = `${what} live yet: they go out with the next deploy, from the Deploy button or by auto-deploy, at once unless more ships are coming`;
         lead = { stage: 'call', since: s.oldest ?? (this.d.now ?? Date.now)(), usual: null, waitingOn: text, text };
       }
@@ -270,7 +284,14 @@ function span(r: RunJobs): { start: number | null; started: number | null; end: 
 /** A run that shipped: completed, and its job (or the run, for a whole-workflow target) succeeded. */
 const shipped = (r: RunJobs) => r.run.status === 'completed' && (r.jobs.length ? r.jobs[0].conclusion === 'success' : r.run.conclusion === 'success');
 /** A needed workflow's run (Found.needs) that ran every job and each passed: a run that skipped some (NOT RUN) still says success. */
-const allGreen = (r: RunJobs) => r.run.status === 'completed' && r.run.conclusion === 'success' && r.jobs.length > 0 && ciVerdict(r.jobs.map((j) => ciState(j.status, j.conclusion)), { skipBlocks: true }) === 'green';
+const allGreen = (r: RunJobs) =>
+  r.run.status === 'completed' &&
+  r.run.conclusion === 'success' &&
+  r.jobs.length > 0 &&
+  ciVerdict(
+    r.jobs.map((j) => ciState(j.status, j.conclusion)),
+    { skipBlocks: true },
+  ) === 'green';
 /** A needed workflow's short name, its stage on the track: "desktop.yml" → "desktop". */
 const needName = (w: string) => w.replace(/^.*\//, '').replace(/\.ya?ml$/, '');
 
@@ -281,7 +302,8 @@ const failedShip = (r: RunJobs) => r.run.status === 'completed' && (r.jobs.lengt
 function runRelease(r: RunJobs, outcome: string, changes: Release['changes'] = [], file: string | null = null, number: number | null = null): Release {
   const s = span(r);
   const stages: Record<string, number> = {};
-  const ci = secs(s.start, s.started), pkg = secs(s.started, s.end);
+  const ci = secs(s.start, s.started),
+    pkg = secs(s.started, s.end);
   if (ci != null) stages.ci = ci;
   if (pkg != null) stages.package = pkg;
   return { version: r.run.head_sha, number, link: file, changes, started: s.start, live: outcome === 'live' ? s.end : null, outcome, stages };
@@ -289,7 +311,10 @@ function runRelease(r: RunJobs, outcome: string, changes: Release['changes'] = [
 
 /** The usual CI and package time of the newest shipped runs. */
 function runUsual(runs: RunJobs[]): (stage: string) => number | null {
-  const ok = runs.filter(shipped).slice(0, RECENT).map((r) => runRelease(r, 'live'));
+  const ok = runs
+    .filter(shipped)
+    .slice(0, RECENT)
+    .map((r) => runRelease(r, 'live'));
   return (stage) => median(ok.flatMap((r) => (typeof r.stages[stage] === 'number' ? [r.stages[stage]] : [])));
 }
 
@@ -347,7 +372,10 @@ class RunsCache {
     if (!this.touched.has(key)) {
       if (this.touched.size > 64) this.touched.clear();
       const files = (await git(['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', head], dir))?.split('\n').filter(Boolean) ?? [];
-      this.touched.set(key, files.some((f) => holds(t, f)));
+      this.touched.set(
+        key,
+        files.some((f) => holds(t, f)),
+      );
     }
     return this.touched.get(key)!;
   }
@@ -522,7 +550,10 @@ class RunsCache {
 
   /** The runs counted as releases, newest first: by run, since the ones from before counting began were added after. */
   private recorded(t: Found): number[] {
-    return this.d.store.listReleases(t.projectId, t.id, -1).map((r) => Number(r.version.replace(/^run:/, ''))).sort((a, b) => b - a);
+    return this.d.store
+      .listReleases(t.projectId, t.id, -1)
+      .map((r) => Number(r.version.replace(/^run:/, '')))
+      .sort((a, b) => b - a);
   }
 
   /** What is on `t`'s branch since commit `from` and ships on `t`, read again when either end moves (#764); null: not known. */
@@ -658,15 +689,20 @@ export class CiPackageReader implements Reader {
       const heldRun = pinned && runs.find((r) => r.run.id === pinned.run);
       const held = pinned && (!gated || (heldRun ? out(heldRun) : this.cache.onFeed(t, pinned.run))) ? pinned : null;
       if (held) {
-        const recent = runs.filter((r) => r !== heldRun && tried(r)).slice(0, PREVIOUS).map(was);
+        const recent = runs
+          .filter((r) => r !== heldRun && tried(r))
+          .slice(0, PREVIOUS)
+          .map(was);
         // Newer runs can push the held one out of the page GitHub lists: it is still what people get, so show it from the pin.
-        const current = heldRun ? runRelease(heldRun, 'live', ch(heldRun), installs(heldRun), num.of(heldRun))
-          : { version: held.sha, number: null, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} };
+        const current = heldRun ? runRelease(heldRun, 'live', ch(heldRun), installs(heldRun), num.of(heldRun)) : { version: held.sha, number: null, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} };
         return { target: targetOf(t), current, next: null, line: [], recent };
       }
       const cur = runs.find(out);
       // A build that shipped but never went out (its needed workflow didn't pass) reached no one: not a release, nor a failed one.
-      const recent = runs.filter((r) => r !== cur && tried(r)).slice(0, PREVIOUS).map(was);
+      const recent = runs
+        .filter((r) => r !== cur && tried(r))
+        .slice(0, PREVIOUS)
+        .map(was);
       const ciUsual = runUsual(runs);
       // Publishing takes seconds: no stage of its own to wait out in an estimate.
       const usual = (stage: string) => (stage === 'publish' ? 0 : ciUsual(stage));
@@ -679,8 +715,7 @@ export class CiPackageReader implements Reader {
       // when the newest run after the current release failed.
       const ahead = this.pending.get(tkey(t));
       const failed = runs.find((r) => r.run.status === 'completed' && newer(r));
-      const text = failed && failedShip(failed) ? 'CI failed on main: it waits on a fix'
-        : failed && publishFailed(failed) ? "the desktop feed couldn't take its build: it waits on a fix" : 'on main: it goes out with the next build CI ships';
+      const text = failed && failedShip(failed) ? 'CI failed on main: it waits on a fix' : failed && publishFailed(failed) ? "the desktop feed couldn't take its build: it waits on a fix" : 'on main: it goes out with the next build CI ships';
       const waiting: Progress | null = ahead?.commits.size ? { stage: 'ci', since: Math.min(...ahead.commits.values()), usual: null, waitingOn: text, text } : null;
       const inRun = new Set(moving ? ch(moving).map((c) => c.ticketId) : []);
       const changes: Change[] = [
@@ -784,7 +819,7 @@ export class ApkReader implements Reader {
         await this.cache.read(this.rb(t));
       }
       const back = this.cache.runs.get(tkey(this.rb(t))) ?? [];
-      const built = !feed ? null : (pub?.version_code === feed.versionCode ? [...runs, ...back].find((r) => r.run.id === pub.run_id) : null) ?? runs.find((r) => shipped(r) && (ms(r.run.created_at) ?? Infinity) <= feed.at);
+      const built = !feed ? null : ((pub?.version_code === feed.versionCode ? [...runs, ...back].find((r) => r.run.id === pub.run_id) : null) ?? runs.find((r) => shipped(r) && (ms(r.run.created_at) ?? Infinity) <= feed.at));
       if (built) this.builtAt.set(tkey(t), built.run.head_sha);
       else this.builtAt.delete(tkey(t));
       if (pin?.code && feed) {
@@ -853,7 +888,10 @@ export class ApkReader implements Reader {
     const now = (this.d.now ?? Date.now)();
     return this.d.finder.list('apk').map((t) => {
       const runs = this.cache.runs.get(tkey(t)) ?? [];
-      const signs = runs.filter(shipped).slice(0, RECENT).flatMap((r) => apkRun(r, 'live').stages.sign ?? []);
+      const signs = runs
+        .filter(shipped)
+        .slice(0, RECENT)
+        .flatMap((r) => apkRun(r, 'live').stages.sign ?? []);
       const usual = (s: string) => (s === 'sign' ? median(signs) : null);
       const feed = this.feeds.get(tkey(t));
       const main = this.mains.get(tkey(t));
@@ -868,17 +906,23 @@ export class ApkReader implements Reader {
         // No feed to read: the newest signed run is the release, as for a CI package.
         const num = this.cache.numbers(t);
         const cur = runs.find(shipped);
-        const recent = runs.filter((r) => r !== cur && (shipped(r) || failedShip(r))).slice(0, PREVIOUS).map((r) => apkRun(r, shipped(r) ? 'live' : 'failed', file(r), num.of(r)));
+        const recent = runs
+          .filter((r) => r !== cur && (shipped(r) || failedShip(r)))
+          .slice(0, PREVIOUS)
+          .map((r) => apkRun(r, shipped(r) ? 'live' : 'failed', file(r), num.of(r)));
         const lead = moving && (!cur || runs.indexOf(moving) < runs.indexOf(cur)) ? signing(moving) : null;
         return { target: targetOf(t), current: cur ? apkRun(cur, 'live', file(cur), num.of(cur)) : null, next: lead ? nextOf(APK_TRACK, usual, lead, [], num.total + 1) : null, line: [], recent };
       }
       // Numbered by its versionCode, the counter its app's update banner reads; the versionName stays as the detail.
-      const version = main?.code === feed.versionCode && main.name ? main.name : feed.versionName ?? String(feed.versionCode);
+      const version = main?.code === feed.versionCode && main.name ? main.name : (feed.versionName ?? String(feed.versionCode));
       const link = feed.apk && t.contraption ? `/apps/${t.contraption}/android/${feed.apk}` : t.link;
       const at = this.builtAt.get(tkey(t));
       const current: Release = { version, number: feed.versionCode, link, changes: [], started: null, live: feed.at, outcome: 'live', stages: {}, ...(at ? { commit: at } : {}) };
       // Its signed runs, as the APKs people could have been given: not releases, so no release number.
-      const recent = runs.filter((r) => shipped(r) || failedShip(r)).slice(0, PREVIOUS).map((r) => apkRun(r, shipped(r) ? 'signed' : 'failed', file(r)));
+      const recent = runs
+        .filter((r) => shipped(r) || failedShip(r))
+        .slice(0, PREVIOUS)
+        .map((r) => apkRun(r, shipped(r) ? 'signed' : 'failed', file(r)));
       let lead: Progress | null = null;
       let tryIt: string | null = null;
       const ahead = this.ahead.get(tkey(t));
@@ -965,8 +1009,8 @@ export class PrsInFlight {
     if (v === 'pending') {
       const ci = this.d.ci?.(id);
       const queued = pr.checks.some((c) => c.status === 'pending' && c.queued);
-      const text = queued ? 'its checks wait for a CI runner' : ci?.text ?? 'checks running';
-      return { stage: 'checks', since: ci?.since ?? this.since(id, 'checks', now), usual: queued ? null : ci?.usual ?? null, waitingOn: queued ? text : null, text };
+      const text = queued ? 'its checks wait for a CI runner' : (ci?.text ?? 'checks running');
+      return { stage: 'checks', since: ci?.since ?? this.since(id, 'checks', now), usual: queued ? null : (ci?.usual ?? null), waitingOn: queued ? text : null, text };
     }
     if (v === 'failed') {
       const text = 'its checks failed: the minion fixes them';
@@ -1032,7 +1076,11 @@ export const placeRank = (brief: string | undefined): number => (brief == null ?
 
 /** Where a land stands from land.sh's `queue:` lines: in line for the lock (its place), or landing. */
 export function landProgress(output: string, since: number): Progress {
-  const last = output.split('\n').filter((l) => l.startsWith('queue: ')).at(-1) ?? '';
+  const last =
+    output
+      .split('\n')
+      .filter((l) => l.startsWith('queue: '))
+      .at(-1) ?? '';
   const place = /^queue: (next|\d+(?:st|nd|rd|th)) in line for the land lock/.exec(last)?.[1];
   if (place) {
     const text = `in line to ship (${place})`;
@@ -1086,18 +1134,26 @@ export class LandsInFlight {
       if (!lines.has(p.id)) {
         // Whether the scheme's own land.sh follows .order yet: until it does, no landing in its line can move.
         let script = '';
-        try { script = readFileSync(join(p.repo_dir!, 'tools', 'land.sh'), 'utf8'); } catch { /* none: no line to read either */ }
+        try {
+          script = readFileSync(join(p.repo_dir!, 'tools', 'land.sh'), 'utf8');
+        } catch {
+          /* none: no line to read either */
+        }
         lines.set(p.id, { line: schemeLine(p.repo_dir!), current: /^queue_order\(\)/m.test(script) });
       }
       return lines.get(p.id)!;
     };
-    const landing = this.d.landings.handoffs().map((id) => ({ id, run: this.d.landings.get(id) })).filter((x) => x.run?.code === null).map((x) => {
-      const t = store.getTicket(x.id);
-      const p = t?.branch ? store.getProject(t.project_id) : null;
-      const q = p?.repo_dir ? lineOf(p) : null;
-      const at = q ? q.line.findIndex((l) => l.label === t!.branch) : -1;
-      return { ...x, t, p, q, at };
-    });
+    const landing = this.d.landings
+      .handoffs()
+      .map((id) => ({ id, run: this.d.landings.get(id) }))
+      .filter((x) => x.run?.code === null)
+      .map((x) => {
+        const t = store.getTicket(x.id);
+        const p = t?.branch ? store.getProject(t.project_id) : null;
+        const q = p?.repo_dir ? lineOf(p) : null;
+        const at = q ? q.line.findIndex((l) => l.label === t!.branch) : -1;
+        return { ...x, t, p, q, at };
+      });
     // Rows go the way the line does (the one landing first, then each place in turn), whatever order the hand-offs came
     // in: by the line itself where the landing is in it, else by the place its output last said.
     const rank = new Map(landing.map((x) => [x.id, x.at >= 0 ? x.at : placeRank(landProgress(x.run!.output, 0).brief)]));
@@ -1117,8 +1173,14 @@ export class LandsInFlight {
       const l = q && at >= 0 ? q.line[at] : null;
       const waits = l?.got === 0;
       const entry: LineEntry | null = l && {
-        name: `#${t.number ?? t.id}`, ticketId: t.id, holds: !waits, place: ordinal(at + 1), seq: l.seq, movable: waits && !!l.orders && q!.current && !behindOld(q!.line, l),
-        stage: waits ? 'line' : 'land', since: l.mtime,
+        name: `#${t.number ?? t.id}`,
+        ticketId: t.id,
+        holds: !waits,
+        place: ordinal(at + 1),
+        seq: l.seq,
+        movable: waits && !!l.orders && q!.current && !behindOld(q!.line, l),
+        stage: waits ? 'line' : 'land',
+        since: l.mtime,
         ...(waits && !q!.current ? { why: OLD_SCHEME_LAND } : waits && !l.orders ? { why: OLD_LAND } : waits && behindOld(q!.line, l) ? { why: BEHIND_OLD } : {}),
       };
       for (const tv of mine.filter((v) => on.has(v.target.id))) {
@@ -1168,7 +1230,12 @@ export class MainReader implements Reader {
       // History rewritten under it (a force push) reads as nothing landed, rather than no row ever again.
       const landed = last ? await landedIn(store, p, last.version, head) : null;
       store.addRelease({
-        project_id: p.id, target: t.id, version: head, outcome: 'live', stages: '{}', live_at: at,
+        project_id: p.id,
+        target: t.id,
+        version: head,
+        outcome: 'live',
+        stages: '{}',
+        live_at: at,
         started_at: landed?.commits.size ? Math.min(...landed.commits.values()) : null,
         changes: JSON.stringify((landed?.tickets ?? []).map((x) => ({ ticketId: x.id, number: x.number, title: x.title }))),
       });
@@ -1183,8 +1250,7 @@ export class MainReader implements Reader {
       const total = store.countReleases(t.projectId, t.id);
       const mine = head && rows[0]?.version === head ? rows[0] : null;
       // Main is the release: there's no site or file of it to open, so no link (never a commit, Cara 2026-11-12).
-      const current = mine ? releaseOf(mine, null, total)
-        : head ? { version: head, number: total + 1, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
+      const current = mine ? releaseOf(mine, null, total) : head ? { version: head, number: total + 1, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} } : null;
       const skip = mine ? 1 : 0;
       const recent = rows.slice(skip, skip + PREVIOUS).map((r, i) => releaseOf(r, null, total - skip - i));
       const changes = this.prs.changes(t.projectId);

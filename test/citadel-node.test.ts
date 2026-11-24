@@ -23,11 +23,14 @@ test('tools/citadel-node runs node --test, and the test files it starts, under a
   try {
     mkdirSync(join(dir, 't'));
     const out = join(dir, 'names.json');
-    writeFileSync(join(dir, 't', 'a.test.mjs'), `import { writeFileSync } from 'node:fs';
+    writeFileSync(
+      join(dir, 't', 'a.test.mjs'),
+      `import { writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 const child = execFileSync(process.execPath, ['-e', ${JSON.stringify(argv0)}], { encoding: 'utf8' });
 writeFileSync(${JSON.stringify(out)}, JSON.stringify({ file: process.argv0, child }));
-`);
+`,
+    );
     const env: Record<string, string | undefined> = { ...process.env, TMPDIR: dir, CITADEL_NODE: undefined, NODE_OPTIONS: undefined, NODE_TEST_CONTEXT: undefined };
     execFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-node'), ['--test', 't/'], { cwd: dir, env, stdio: 'pipe' });
     const names = JSON.parse(readFileSync(out, 'utf8'));
@@ -64,12 +67,11 @@ test('tools/citadel-node makes its link folder private, and refuses one that is 
   }
 });
 
-test('tools/citadel-node sets a compile cache under TMPDIR, keeps a caller\'s own, and an edited file at the same path runs its new code', () => {
+test("tools/citadel-node sets a compile cache under TMPDIR, keeps a caller's own, and an edited file at the same path runs its new code", () => {
   const dir = mkdtempSync(join(tmpdir(), 'citadel-node-cc-'));
   try {
     const bin = join(import.meta.dirname, '..', 'tools', 'citadel-node');
-    const run = (args: string[], extra: Record<string, string> = {}) =>
-      spawnSync(bin, args, { env: { ...process.env, TMPDIR: dir, NODE_COMPILE_CACHE: '', ...extra }, encoding: 'utf8' });
+    const run = (args: string[], extra: Record<string, string> = {}) => spawnSync(bin, args, { env: { ...process.env, TMPDIR: dir, NODE_COMPILE_CACHE: '', ...extra }, encoding: 'utf8' });
     const show = 'process.stdout.write(process.env.NODE_COMPILE_CACHE ?? "")';
     assert.equal(run(['-e', show]).stdout, join(dir, 'citadel-node-cache'));
     assert.equal(run(['-e', show], { NODE_COMPILE_CACHE: '/x/mine' }).stdout, '/x/mine');

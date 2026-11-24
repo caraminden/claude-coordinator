@@ -57,7 +57,10 @@ test("any scheme's minion lands through the tool when its worktree has tools/lan
   assert.match((await none.json()).error, /no tools\/land\.sh/);
   writeFileSync(join(cwd, 'tools', 'land.sh'), 'echo landed-other\n');
   assert.equal((await call('POST')).status, 202);
-  const run = await until('land.sh ends', async () => { const body = await (await call('GET')).json(); return body.code === null ? null : body; });
+  const run = await until('land.sh ends', async () => {
+    const body = await (await call('GET')).json();
+    return body.code === null ? null : body;
+  });
   assert.equal(run.output.trim(), 'landed-other');
 });
 
@@ -77,7 +80,12 @@ test('the land tool passes LAND_FIX=1 only when asked to with fix: true, and LAN
   const land = async (body?: object) => {
     const post = await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { method: 'POST', headers: body ? { ...auth, 'Content-Type': 'application/json' } : auth, body: body ? JSON.stringify(body) : undefined });
     assert.equal(post.status, 202);
-    return (await until('land.sh ends', async () => { const b = await (await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth })).json(); return b.code === null ? null : b; })).output.trim();
+    return (
+      await until('land.sh ends', async () => {
+        const b = await (await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth })).json();
+        return b.code === null ? null : b;
+      })
+    ).output.trim();
   };
   assert.equal(await land(), 'fix:none');
   assert.equal(await land({}), 'fix:none');
@@ -86,16 +94,20 @@ test('the land tool passes LAND_FIX=1 only when asked to with fix: true, and LAN
   assert.equal(await land({ outage: true }), 'fix:none urgent', 'outage is its own mark: no LAND_FIX, so no critic skip');
 });
 
-test("a container turn of any scheme is offered the land tool; a host turn is not", async () => {
-  const tools = (extra: Record<string, string>) => new Promise<string[]>((resolve, reject) => {
-    const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
-      env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:9', COORDINATOR_TOKEN: '7.sig', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '7', COORDINATOR_ROLE: 'thread', COORDINATOR_DEPLOYS: undefined, COORDINATOR_CONTAINER: undefined, ...extra },
-      stdio: ['pipe', 'pipe', 'inherit'],
+test('a container turn of any scheme is offered the land tool; a host turn is not', async () => {
+  const tools = (extra: Record<string, string>) =>
+    new Promise<string[]>((resolve, reject) => {
+      const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
+        env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: 'http://127.0.0.1:9', COORDINATOR_TOKEN: '7.sig', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '7', COORDINATOR_ROLE: 'thread', COORDINATOR_DEPLOYS: undefined, COORDINATOR_CONTAINER: undefined, ...extra },
+        stdio: ['pipe', 'pipe', 'inherit'],
+      });
+      child.once('exit', (code) => reject(new Error(`mcp.ts ended (${code}) before it listed its tools`)));
+      createInterface({ input: child.stdout! }).once('line', (l) => {
+        child.kill();
+        resolve(JSON.parse(l).result.tools.map((t: any) => t.name));
+      });
+      child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
     });
-    child.once('exit', (code) => reject(new Error(`mcp.ts ended (${code}) before it listed its tools`)));
-    createInterface({ input: child.stdout! }).once('line', (l) => { child.kill(); resolve(JSON.parse(l).result.tools.map((t: any) => t.name)); });
-    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
-  });
   assert.ok((await tools({ COORDINATOR_CONTAINER: '1' })).includes('land'));
   assert.ok(!(await tools({})).includes('land'));
 });
@@ -110,8 +122,15 @@ test('the land tool says the server restarted when the landing it started is no 
   await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
   const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`, COORDINATOR_TOKEN: '7.sig',
-      COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '7', COORDINATOR_ROLE: 'thread', COORDINATOR_DEPLOYS: '1', COORDINATOR_CONTAINER: '1',
+      ...process.env,
+      MACHINES_URL: undefined,
+      COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,
+      COORDINATOR_TOKEN: '7.sig',
+      COORDINATOR_PROJECT: '1',
+      COORDINATOR_TICKET: '7',
+      COORDINATOR_ROLE: 'thread',
+      COORDINATOR_DEPLOYS: '1',
+      COORDINATOR_CONTAINER: '1',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
@@ -149,10 +168,13 @@ test("a landing outlives the server that started it: its deploy report reaches t
     const cwd = join(root, 'worktree');
     mkdirSync(join(cwd, 'tools'), { recursive: true });
     // As deploy.sh's report_me does, once the server has restarted under it.
-    writeFileSync(join(cwd, 'tools', 'land.sh'), `echo started
+    writeFileSync(
+      join(cwd, 'tools', 'land.sh'),
+      `echo started
 for i in $(seq 600); do [ -e ${JSON.stringify(go)} ] && break; sleep 0.05; done
 curl -sS -o /dev/null -w 'report: %{http_code}\\n' -X POST "$COORDINATOR_API/api/tickets/$COORDINATOR_TICKET/deploy" -H "Authorization: Bearer $COORDINATOR_TOKEN" -H 'Content-Type: application/json' -d '{"ok":true,"text":"Deployed abc1234: live now"}'
-`);
+`,
+    );
     store.setTicketDir(minion.id, cwd, null);
     const token = agentToken(first.data, minion.id);
     const call = (base: string, method: string) => fetch(`${base}/api/tickets/${minion.id}/land`, { method, headers: { Authorization: `Bearer ${token}` } });
@@ -168,10 +190,16 @@ curl -sS -o /dev/null -w 'report: %{http_code}\\n' -X POST "$COORDINATOR_API/api
     const running = await (await call(next.base, 'GET')).json();
     assert.equal(running.code, null, 'the new server finds it still running');
     writeFileSync(go, '');
-    const done = await until('land.sh ends', async () => { const r = await (await call(next!.base, 'GET')).json(); return r.code === null ? null : r; });
+    const done = await until('land.sh ends', async () => {
+      const r = await (await call(next!.base, 'GET')).json();
+      return r.code === null ? null : r;
+    });
     assert.equal(done.code, 0, done.output);
-    assert.match(done.output, /report: 201/, 'the new server took the report from the turn\'s token');
-    assert.ok(store.listEvents(minion.id).some((e) => String(e.data).includes('Deployed abc1234: live now')), "the report is in the minion's chat");
+    assert.match(done.output, /report: 201/, "the new server took the report from the turn's token");
+    assert.ok(
+      store.listEvents(minion.id).some((e) => String(e.data).includes('Deployed abc1234: live now')),
+      "the report is in the minion's chat",
+    );
   } finally {
     writeFileSync(go, '');
     await first?.stop();
@@ -197,8 +225,7 @@ test('landArgs gives land.sh only the shapes it accepts, files as paths inside t
     assert.deepEqual(landArgs({ build: false, full: false, files: [], into: null }, cwd), []);
     assert.deepEqual(landArgs({ build: true }, cwd), ['--build']);
     assert.deepEqual(landArgs({ into: 'build/7', full: true }, cwd), ['--into', 'build/7', '--full']);
-    assert.deepEqual(landArgs({ into: 'build/12', files: ['test/a.test.ts', './test/sub/b.test.ts', join(cwd, 'test', 'a.test.ts')] }, cwd),
-      ['--into', 'build/12', 'test/a.test.ts', 'test/sub/b.test.ts', 'test/a.test.ts'], 'in order, relative to the worktree');
+    assert.deepEqual(landArgs({ into: 'build/12', files: ['test/a.test.ts', './test/sub/b.test.ts', join(cwd, 'test', 'a.test.ts')] }, cwd), ['--into', 'build/12', 'test/a.test.ts', 'test/sub/b.test.ts', 'test/a.test.ts'], 'in order, relative to the worktree');
     assert.deepEqual(landArgs({ into: 'build/7' }, cwd), ['--into', 'build/7'], 'no files: land.sh lets only a docs-only change through');
     assert.deepEqual(landArgs({ into: 'build/7', files: ['-x.test.ts'] }, cwd), ['--into', 'build/7', './-x.test.ts'], 'never read as an option');
 
@@ -245,7 +272,12 @@ test('the land route hands land.sh those arguments, and refuses a bad call witho
   const land = async (body?: object) => {
     const res = await post(body);
     assert.equal(res.status, 202);
-    return (await until('land.sh ends', async () => { const b = await (await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth })).json(); return b.code === null ? null : b; })).output.trim();
+    return (
+      await until('land.sh ends', async () => {
+        const b = await (await fetch(`${srv.base}/api/tickets/${minion.id}/land`, { headers: auth })).json();
+        return b.code === null ? null : b;
+      })
+    ).output.trim();
   };
   assert.equal(await land(), 'n=0', 'no body: land.sh as before');
   assert.equal(await land({}), 'n=0');
@@ -265,7 +297,9 @@ test('the land tool sends into, files, full and build on to the server, and noth
   const bodies: any[] = [];
   const api = createServer((req, res) => {
     let raw = '';
-    req.on('data', (c) => { raw += c; });
+    req.on('data', (c) => {
+      raw += c;
+    });
     req.on('end', () => {
       if (req.method === 'POST') bodies.push(JSON.parse(raw || '{}'));
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ output: 'ok', code: 0 }));
@@ -274,8 +308,15 @@ test('the land tool sends into, files, full and build on to the server, and noth
   await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
   const child = spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`, COORDINATOR_TOKEN: '7.sig',
-      COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '7', COORDINATOR_ROLE: 'thread', COORDINATOR_DEPLOYS: '1', COORDINATOR_CONTAINER: '1',
+      ...process.env,
+      MACHINES_URL: undefined,
+      COORDINATOR_API: `http://127.0.0.1:${(api.address() as any).port}`,
+      COORDINATOR_TOKEN: '7.sig',
+      COORDINATOR_PROJECT: '1',
+      COORDINATOR_TICKET: '7',
+      COORDINATOR_ROLE: 'thread',
+      COORDINATOR_DEPLOYS: '1',
+      COORDINATOR_CONTAINER: '1',
     },
     stdio: ['pipe', 'pipe', 'inherit'],
   });

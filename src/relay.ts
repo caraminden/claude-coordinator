@@ -71,7 +71,11 @@ export async function relay(ctx: Ctx, from: ContraptionRow) {
   let status: number, type: string | null, answer: Buffer;
   try {
     const r = await fetch(`http://127.0.0.1:${to.port}/apps/${to.name}${rest}${url.search}`, {
-      method: req.method, headers, body, redirect: 'manual', signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
+      method: req.method,
+      headers,
+      body,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
     });
     answer = Buffer.from(await r.arrayBuffer());
     [status, type] = [r.status, r.headers.get('content-type')];

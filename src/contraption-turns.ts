@@ -67,10 +67,9 @@ export interface PersonMachine {
 /** What a contraption turn tells claude about the person's machines it has. */
 export function machinesPrompt(machines: PersonMachine[]): string {
   if (!machines.length) return '';
-  return [
-    `Connected machines: ${machines.map((m) => `${m.name} (mcp__${m.name})`).join(', ')}. Their MCP tools run on this person's own computers, not where you run, and fail if that computer goes offline mid-turn.`,
-    ...machines.filter((m) => m.notes).map((m) => `Notes on ${m.name} from its owner:\n${m.notes}`),
-  ].join('\n\n');
+  return [`Connected machines: ${machines.map((m) => `${m.name} (mcp__${m.name})`).join(', ')}. Their MCP tools run on this person's own computers, not where you run, and fail if that computer goes offline mid-turn.`, ...machines.filter((m) => m.notes).map((m) => `Notes on ${m.name} from its owner:\n${m.notes}`)].join(
+    '\n\n',
+  );
 }
 
 export { args, mcpConfig, settings, toolNamesPrompt, userLine };
@@ -142,7 +141,10 @@ export const DRAIN_MS = 3 * 60_000;
 export const KILL_AFTER_MS = 2_000;
 /** Where a blind turn's random folder goes: a path with no login, home or app in it. */
 const BLIND_ROOT = '/tmp';
-interface Blind { root: string | null; cwd: string }
+interface Blind {
+  root: string | null;
+  cwd: string;
+}
 const SESSION_NAME = /^[\w.:@-]{1,100}$/;
 const MODEL = /^[\w.\[\]-]{1,60}$/;
 /** Effort an app may ask for: nothing above high (citadel:subagents, "Minions, Taskmasters and schedules too"). */
@@ -163,7 +165,7 @@ function int(v: unknown, what: string, min: number, max: number, fallback: numbe
 /** Check a start-turn body, filling in the registry's defaults. */
 export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): TurnRequest {
   if (!body || typeof body !== 'object') bad('Send a JSON object');
-  if (!Number.isInteger(body.person) || body.person < 1) bad('person must be a person\'s id');
+  if (!Number.isInteger(body.person) || body.person < 1) bad("person must be a person's id");
   if (typeof body.session !== 'string' || !SESSION_NAME.test(body.session)) bad('session must be a name of letters, digits and . _ : @ -, at most 100');
   if (body.fresh !== undefined && typeof body.fresh !== 'boolean') bad('fresh must be true or false');
   if (typeof body.prompt !== 'string' || !body.prompt.trim()) bad('prompt is required');
@@ -175,7 +177,7 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
   for (const s of body.mcp ?? []) {
     if (!s || typeof s !== 'object' || typeof s.name !== 'string' || !SERVER_NAME.test(s.name)) bad('Each mcp server needs a name of letters, digits, _ and -');
     if (mcp.some((m) => m.name === s.name)) bad(`Two mcp servers are called ${s.name}`);
-    if (typeof s.path !== 'string' || !/^\/[\x21-\x7e]{0,199}$/.test(s.path)) bad('Each mcp server needs a path on the contraption\'s port, starting with /');
+    if (typeof s.path !== 'string' || !/^\/[\x21-\x7e]{0,199}$/.test(s.path)) bad("Each mcp server needs a path on the contraption's port, starting with /");
     if (s.headers !== undefined && (!s.headers || typeof s.headers !== 'object' || Array.isArray(s.headers))) bad('mcp headers must be an object');
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(s.headers ?? {})) {
@@ -203,9 +205,24 @@ export function parseTurn(body: any, c: Pick<ContraptionRow, 'default_model'>): 
   if (body.keep === true && body.blind === true) bad('A blind turn has no session to keep: send keep or blind, not both');
   if (body.media === true && mcp.some((s) => s.name === MEDIA_SERVER)) bad(`With media: true, ${MEDIA_SERVER} is Citadel's server: call yours something else`);
   return {
-    person: body.person, session: body.session, fresh: body.fresh === true || body.blind === true, prompt: body.prompt, system: body.system ?? '', model,
-    compactWindow: int(body.compactWindow, 'compactWindow', 10_000, 1_000_000, DEFAULT_COMPACT_WINDOW), effort: body.effort ?? null, toolSearch: body.toolSearch === true, mcp, agents,
-    webSearch: body.webSearch === true, machines: body.machines !== false && body.blind !== true, media: body.media === true, blind: body.blind === true, keep: body.keep === true, images: body.images ?? [], timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
+    person: body.person,
+    session: body.session,
+    fresh: body.fresh === true || body.blind === true,
+    prompt: body.prompt,
+    system: body.system ?? '',
+    model,
+    compactWindow: int(body.compactWindow, 'compactWindow', 10_000, 1_000_000, DEFAULT_COMPACT_WINDOW),
+    effort: body.effort ?? null,
+    toolSearch: body.toolSearch === true,
+    mcp,
+    agents,
+    webSearch: body.webSearch === true,
+    machines: body.machines !== false && body.blind !== true,
+    media: body.media === true,
+    blind: body.blind === true,
+    keep: body.keep === true,
+    images: body.images ?? [],
+    timeoutSec: int(body.timeoutSec, 'timeoutSec', 1, 900, DEFAULT_TIMEOUT_SEC),
   };
 }
 
@@ -445,7 +462,7 @@ export class ContraptionTurns {
     if (c.turn_cap && this.store.contraptionTurnsSince(c.id, req.person, dayStart()) >= c.turn_cap) return fail('limit', `${c.title}'s cap of ${c.turn_cap} turns a day is used up for this person`);
     const known = !req.fresh && this.store.contraptionSession(c.id, req.person, req.session);
     const place = this.claude.place(req.person, known ? appWarmKey(c.id, req.session) : undefined);
-    if (!place) return fail('no_plan', 'This person hasn\'t linked their Claude in Citadel (Settings → Claude), or it needs linking again');
+    if (!place) return fail('no_plan', "This person hasn't linked their Claude in Citadel (Settings → Claude), or it needs linking again");
 
     // The server login's Codex turns run in its Codex-only container (#341); its Claude turns, and the session's bookkeeping, stay on the host.
     // A blind turn is Claude's only (Codex's own prompt and folder aren't proven clean), whatever the switch says.
@@ -456,12 +473,25 @@ export class ContraptionTurns {
     // Busy only once the turn is recorded, so a throw here can't leave the name busy until a restart (#468 S04-8).
     const id = this.store.startContraptionTurn(c.id, req.person, req.session);
     // A neutral folder for everything of the turn's (host: its private files and cwd; a container: only the cwd, made inside it).
-    const blind: Blind | null = !req.blind ? null : at.host
-      ? { root: mkdtempSync(join(BLIND_ROOT, 't-')), cwd: '' } : { root: null, cwd: join(BLIND_ROOT, `t-${randomBytes(6).toString('hex')}`) };
+    const blind: Blind | null = !req.blind ? null : at.host ? { root: mkdtempSync(join(BLIND_ROOT, 't-')), cwd: '' } : { root: null, cwd: join(BLIND_ROOT, `t-${randomBytes(6).toString('hex')}`) };
     if (blind?.root) blind.cwd = join(blind.root, 'w');
     const dir = this.turnDir(id, at, blind);
-    const live: Live = { id, contraption: c.id, person: req.person, session: req.session, container: at.host ? null : at.container, child: null, pidFile: join(dir.onHost, 'pid'), stopped: null, token: `cmt_${randomBytes(32).toString('base64url')}`, machines: [], replied: false, steers: new Set(), audit: null,
-      media: req.media ? { person: req.person, name: c.name, home: c.home_scheme, emit, codex: this.codexAt(req.person, place) } : null };
+    const live: Live = {
+      id,
+      contraption: c.id,
+      person: req.person,
+      session: req.session,
+      container: at.host ? null : at.container,
+      child: null,
+      pidFile: join(dir.onHost, 'pid'),
+      stopped: null,
+      token: `cmt_${randomBytes(32).toString('base64url')}`,
+      machines: [],
+      replied: false,
+      steers: new Set(),
+      audit: null,
+      media: req.media ? { person: req.person, name: c.name, home: c.home_scheme, emit, codex: this.codexAt(req.person, place) } : null,
+    };
     this.names.add(key);
     this.live.set(id, live);
     let outcome: string = 'failed';
@@ -597,7 +627,16 @@ export class ContraptionTurns {
       secret('agent-cap.ts', AGENT_CAP);
       hook = { node: process.execPath, script: join(dir.inside, 'agent-cap.ts'), slots: join(dir.inside, 'slots') };
     }
-    secret('settings.json', JSON.stringify(settings(req, hook, machines.map((m) => m.name))));
+    secret(
+      'settings.json',
+      JSON.stringify(
+        settings(
+          req,
+          hook,
+          machines.map((m) => m.name),
+        ),
+      ),
+    );
     let prompt = req.prompt;
     if (codex) {
       for (const [f, text] of CODEX_FILES) secret(f, text);
@@ -618,9 +657,16 @@ export class ContraptionTurns {
 
     const tmp = join(dir.inside, 'tmp');
     let env: Record<string, string> = {
-      ...turnEnv(this.env), TMPDIR: tmp, TMP: tmp, TEMP: tmp, CLAUDE_CODE_TMPDIR: tmp,
+      ...turnEnv(this.env),
+      TMPDIR: tmp,
+      TMP: tmp,
+      TEMP: tmp,
+      CLAUDE_CODE_TMPDIR: tmp,
       // Belt and braces with --setting-sources '': no CLAUDE.md or auto-memory, and Agent calls wait for their agent (the cap's hook counts on it).
-      CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', DISABLE_AUTOUPDATER: '1',
+      CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
+      DISABLE_AUTOUPDATER: '1',
     };
     delete env.SSH_AUTH_SOCK;
     // Nothing of the login in the process (the model sees no env without a shell, but a tool it's given might); the config dir stays, it holds the sign-in.
@@ -633,8 +679,7 @@ export class ContraptionTurns {
     if (codex) {
       env.CITADEL_CODEX_TRIPWIRE = join(dir.inside, 'codex-tripwire.json');
       // The shim reads claude's flags; --resume/--session-id are Claude's own session, which the Codex turns leave alone.
-      argv = [join(dir.inside, 'codex-turn.ts'), '--codex-mode', 'contraption', '--codex-log', join(dir.inside, 'codex-log.jsonl'), '--codex-handover', join(dir.inside, 'handover.md'),
-        ...(codexSession?.thread ? ['--codex-thread', codexSession.thread] : []), ...argv];
+      argv = [join(dir.inside, 'codex-turn.ts'), '--codex-mode', 'contraption', '--codex-log', join(dir.inside, 'codex-log.jsonl'), '--codex-handover', join(dir.inside, 'handover.md'), ...(codexSession?.thread ? ['--codex-thread', codexSession.thread] : []), ...argv];
     }
     let cmd: string;
     let cmdArgs: string[];
@@ -655,8 +700,7 @@ export class ContraptionTurns {
       const exe = codex ? process.execPath : resolveClaude(this.claudeBin);
       // A blind turn makes its random folder inside the container, and runs there.
       const [wd, script, more] = blind ? [BLIND_ROOT, 'echo $$ > "$0"; mkdir -p "$1" && cd "$1" && shift && exec "$@"', [blind.cwd]] : [runIn.cwd, 'echo $$ > "$0"; exec "$@"', []];
-      cmdArgs = ['exec', '-i', '-w', wd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), at.container,
-        'sh', '-c', script, join(dir.inside, 'pid'), ...more, exe, ...argv];
+      cmdArgs = ['exec', '-i', '-w', wd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), at.container, 'sh', '-c', script, join(dir.inside, 'pid'), ...more, exe, ...argv];
     }
     if (live.stopped) return { outcome: live.stopped, usage: null };
 
@@ -685,7 +729,10 @@ export class ContraptionTurns {
       // A Grunt's events name the Agent call that started it; the top level's name none.
       const parent = ev.parent_tool_use_id ? String(ev.parent_tool_use_id) : null;
       // The full name of the model it runs (an alias, or none for the account's default, in start), for end.
-      if (ev.type === 'system' && ev.subtype === 'init' && !parent && typeof ev.model === 'string' && MODEL.test(ev.model)) { model = ev.model; if (live.audit) live.audit.model = model; }
+      if (ev.type === 'system' && ev.subtype === 'init' && !parent && typeof ev.model === 'string' && MODEL.test(ev.model)) {
+        model = ev.model;
+        if (live.audit) live.audit.model = model;
+      }
       if (ev.type === 'system' && ev.subtype === 'init' && !parent && Array.isArray(ev.tools)) initToolNames = ev.tools.filter((t: unknown): t is string => typeof t === 'string');
       if (ev.type === 'codex_waiting') {
         waited = true;
@@ -714,8 +761,7 @@ export class ContraptionTurns {
             tools.set(String(b.id), String(b.name));
             emit('tool', { id: b.id, name: b.name, input: b.input, parent });
             kept?.calls.set(String(b.id), { name: String(b.name), input: b.input, ok: null, result: null });
-          }
-          else if (b?.type === 'text' && !parent && typeof b.text === 'string') {
+          } else if (b?.type === 'text' && !parent && typeof b.text === 'string') {
             if (kept) kept.text += (kept.text ? '\n\n' : '') + b.text;
             // Text the partial stream missed (it is off, or cut short): the rest of it, once.
             const all = (said.get(mid) ?? '') + b.text;
@@ -744,8 +790,7 @@ export class ContraptionTurns {
             // Only the main agent's own calls, and not when tool search may have left the app's tools out of init's list (an incomplete list would name the wrong ones).
             const note = called && !codex && !parent && (!req.toolSearch || initToolNames.some((t) => t.startsWith('mcp__'))) ? suggestTools(called, initToolNames) : null;
             if (note && !live.replied && !live.stopped && live.child?.stdin?.writable) live.child.stdin.write(userLine(note));
-          }
-          else emit('tool_result', { id: b.tool_use_id, ok: true, parent });
+          } else emit('tool_result', { id: b.tool_use_id, ok: true, parent });
         }
       } else if (ev.type === 'result') {
         result = ev;
@@ -823,7 +868,23 @@ export class ContraptionTurns {
       // Checked again at the end: the person may have opted out, or deleted the session, while the turn ran.
       if (kept && keepAt && !this.store.getSetting(optOutKey(req.person)) && this.store.contraptionSession(c.id, req.person, req.session)) {
         try {
-          keepTurn(keepAt, { at: Date.now(), turn: live.id, prompt: req.prompt, images: req.imageBlocks?.length ?? 0, system: sha256(req.system), model: req.model, servers: Object.keys(config.mcpServers), agents: !!req.agents, webSearch: req.webSearch, compactWindow: req.compactWindow, effort: req.effort, toolSearch: req.toolSearch, calls: [...kept.calls.values()], text: cap(kept.text), stop: String(result.stop_reason ?? result.subtype ?? 'end_turn') });
+          keepTurn(keepAt, {
+            at: Date.now(),
+            turn: live.id,
+            prompt: req.prompt,
+            images: req.imageBlocks?.length ?? 0,
+            system: sha256(req.system),
+            model: req.model,
+            servers: Object.keys(config.mcpServers),
+            agents: !!req.agents,
+            webSearch: req.webSearch,
+            compactWindow: req.compactWindow,
+            effort: req.effort,
+            toolSearch: req.toolSearch,
+            calls: [...kept.calls.values()],
+            text: cap(kept.text),
+            stop: String(result.stop_reason ?? result.subtype ?? 'end_turn'),
+          });
         } catch (err: any) {
           console.warn(`contraption ${c.name}: couldn't keep a turn for replay: ${err?.code ?? 'error'}`); // no content in the log
         }
@@ -843,7 +904,7 @@ export class ContraptionTurns {
     // A Codex turn's 401 is OpenAI's: it says nothing about the Claude sign-in.
     if (!codex && isAuthFailure(why)) {
       if (!place.host || (place.account ?? 1) > 1) this.claude.expire(req.person, place.account);
-      return error('no_plan', 'This person\'s Claude sign-in was refused: they need to link it again in Citadel');
+      return error('no_plan', "This person's Claude sign-in was refused: they need to link it again in Citadel");
     }
     // SIGTERM from outside the turn (#1382): a Citadel restart (systemd stops every process of the service, claude
     // with it, while the server lingers a few seconds), or a stray `pkill`. Its work so far is in the session's
@@ -853,9 +914,11 @@ export class ContraptionTurns {
       const twice = !!this.store.getSetting<boolean>(cutKey(c.id, req.person, req.session));
       const retry = !req.fresh && !twice;
       emit('error', {
-        code: 'interrupted', retry,
-        message: `${this.stopping ? 'Citadel restarted and cut this turn off' : 'The turn was cut off from outside Citadel'} before it finished. ${retry
-          ? 'Its work so far is kept in the session: send it again to carry on.' : twice ? 'It was cut off twice in a row, so try again in a minute.' : 'Send it again to start over.'}`,
+        code: 'interrupted',
+        retry,
+        message: `${this.stopping ? 'Citadel restarted and cut this turn off' : 'The turn was cut off from outside Citadel'} before it finished. ${
+          retry ? 'Its work so far is kept in the session: send it again to carry on.' : twice ? 'It was cut off twice in a row, so try again in a minute.' : 'Send it again to start over.'
+        }`,
       });
       return { outcome: 'interrupted', usage };
     }

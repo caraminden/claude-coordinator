@@ -43,37 +43,84 @@ const other = store.addEvent(MB.id, 'note', { text: 'elsewhere' });
 
 // Every path the slice answers, with the cases a page asks for.
 const PATHS = [
-  `/api/tickets/${M1.id}/events`, `/api/tickets/${M1.id}/events?after=0`, `/api/tickets/${M1.id}/events?before=1000&limit=2`,
-  `/c/api/tickets/${M1.id}/events`, `/api/tickets/${MB.id}/events`, '/api/tickets/9999/events',
-  `/api/tickets/${M1.id}/events/${events[1].id}`, `/api/tickets/${M1.id}/events/${other.id}`, `/api/tickets/${M1.id}/events/99999`,
-  `/api/projects/${A.id}/memory?q=one`, `/api/projects/${B.id}/memory?q=one`, `/api/projects/${A.id}/memory`,
+  `/api/tickets/${M1.id}/events`,
+  `/api/tickets/${M1.id}/events?after=0`,
+  `/api/tickets/${M1.id}/events?before=1000&limit=2`,
+  `/c/api/tickets/${M1.id}/events`,
+  `/api/tickets/${MB.id}/events`,
+  '/api/tickets/9999/events',
+  `/api/tickets/${M1.id}/events/${events[1].id}`,
+  `/api/tickets/${M1.id}/events/${other.id}`,
+  `/api/tickets/${M1.id}/events/99999`,
+  `/api/projects/${A.id}/memory?q=one`,
+  `/api/projects/${B.id}/memory?q=one`,
+  `/api/projects/${A.id}/memory`,
   // Slice 2 (#1590): the minions list, a minion's page and the Status page.
-  `/api/projects/${A.id}`, `/api/projects/${A.id}?tickets=open`, `/c/api/projects/${A.id}`, `/api/projects/${B.id}`, '/api/projects/999',
-  `/api/tickets/${M1.id}`, `/api/tickets/${MB.id}`, '/api/tickets/9999', '/api/status',
+  `/api/projects/${A.id}`,
+  `/api/projects/${A.id}?tickets=open`,
+  `/c/api/projects/${A.id}`,
+  `/api/projects/${B.id}`,
+  '/api/projects/999',
+  `/api/tickets/${M1.id}`,
+  `/api/tickets/${MB.id}`,
+  '/api/tickets/9999',
+  '/api/status',
   // Slice 3 (#1628): the rest of people's GETs that read only the database and the snapshot.
   ...['commands', 'ship-risk'].flatMap((r) => [`/api/tickets/${M1.id}/${r}`, `/api/tickets/${MB.id}/${r}`, `/api/tickets/9999/${r}`]),
-  ...['members', 'taskmaster-events', 'instructions/history', 'my-instructions', 'my-instructions/history',
-    'repo-setup', 'plugins', 'properties', 'views', 'search?q=one', 'past-minions', 'schedule-audits', 'ship-lessons',
-    'claims', 'contraption-turns',
-  ].flatMap((r) => [`/api/projects/${A.id}/${r}`, `/api/projects/${B.id}/${r}`, `/api/projects/999/${r}`]),
-  '/api/ship-lines', '/c/api/ship-lines', '/api/app/instructions', '/api/app/instructions/history', '/api/ci', '/api/ci-desktop', '/api/units',
+  ...['members', 'taskmaster-events', 'instructions/history', 'my-instructions', 'my-instructions/history', 'repo-setup', 'plugins', 'properties', 'views', 'search?q=one', 'past-minions', 'schedule-audits', 'ship-lessons', 'claims', 'contraption-turns'].flatMap((r) => [
+    `/api/projects/${A.id}/${r}`,
+    `/api/projects/${B.id}/${r}`,
+    `/api/projects/999/${r}`,
+  ]),
+  '/api/ship-lines',
+  '/c/api/ship-lines',
+  '/api/app/instructions',
+  '/api/app/instructions/history',
+  '/api/ci',
+  '/api/ci-desktop',
+  '/api/units',
 ];
 // What differs between two servers' boots (its start time, the answer probe, the machine's load) is compared on one server instead.
 const BOOT_BOUND = new Set(['/api/status']);
 // The clock a body carries, the one field that differs between two asks of the same answer.
 const unclocked = (body: string) => body.replace(/"(at|now)":\d+/g, '"$1":0');
 
-test('the readers\' routes are GETs of the main thread\'s table, each asked for by a path here; the rest stay on main', () => {
-  assert.deepEqual(readerRoutes().map((r) => r.path).sort(), [...READER_ROUTES].sort());
+test("the readers' routes are GETs of the main thread's table, each asked for by a path here; the rest stay on main", () => {
+  assert.deepEqual(
+    readerRoutes()
+      .map((r) => r.path)
+      .sort(),
+    [...READER_ROUTES].sort(),
+  );
   assert.ok(readerRoutes().every((r) => [r.method].flat().includes('GET')));
   for (const p of PATHS) assert.ok(READER_PATHS.test(p.split('?')[0]), p);
   // A route that reaches for a part of the app a reader lacks throws, so the main thread answers it.
   assert.equal(mainOnly({ store: 1 }).store, 1);
   assert.throws(() => (mainOnly({}) as { runner?: unknown }).runner, /app\.runner is the main thread's/);
   const asked = (r: string) => new RegExp(`^(?:/c)?${r.replace(/:\w+/g, '[^/]+')}$`);
-  for (const r of READER_ROUTES) assert.ok(PATHS.some((p) => asked(r).test(p.split('?')[0])), `a path asks for ${r}`);
-  for (const p of ['/api/tickets/1/x', '/api/tickets/1/events/1/x', '/api/projects/1/tickets', '/api/tickets/1/stream', '/api/projects', '/api/me',
-    '/api/home', '/api/projects/1/ci-files', '/api/projects/1/shared', '/api/tickets/1/facts', '/api/projects/1/schedules', '/api/app/settings', '/api/reviews/schemes', '/api/tickets/1/jobs', '/api/ship-lines/x']) assert.ok(!READER_PATHS.test(p), p);
+  for (const r of READER_ROUTES)
+    assert.ok(
+      PATHS.some((p) => asked(r).test(p.split('?')[0])),
+      `a path asks for ${r}`,
+    );
+  for (const p of [
+    '/api/tickets/1/x',
+    '/api/tickets/1/events/1/x',
+    '/api/projects/1/tickets',
+    '/api/tickets/1/stream',
+    '/api/projects',
+    '/api/me',
+    '/api/home',
+    '/api/projects/1/ci-files',
+    '/api/projects/1/shared',
+    '/api/tickets/1/facts',
+    '/api/projects/1/schedules',
+    '/api/app/settings',
+    '/api/reviews/schemes',
+    '/api/tickets/1/jobs',
+    '/api/ship-lines/x',
+  ])
+    assert.ok(!READER_PATHS.test(p), p);
 });
 
 const signIn = async (srv: Booted, name: string, password: string) => {
@@ -90,8 +137,11 @@ const get = async (srv: Booted, path: string, cookie?: string): Promise<Got> => 
 /** Each caller's answer to each path. */
 async function answers(srv: Booted) {
   const callers: Record<string, string | undefined> = {
-    cara: srv.cookie, max: await signIn(srv, 'Max', 'a-long-password'), olive: await signIn(srv, 'Olive', 'a-long-password'),
-    anon: undefined, forged: 'cc_session=forged.cookie',
+    cara: srv.cookie,
+    max: await signIn(srv, 'Max', 'a-long-password'),
+    olive: await signIn(srv, 'Olive', 'a-long-password'),
+    anon: undefined,
+    forged: 'cc_session=forged.cookie',
   };
   const out: Record<string, Got> = {};
   for (const [who, cookie] of Object.entries(callers)) for (const p of PATHS) out[`${who} ${p}`] = await get(srv, p, cookie);
@@ -123,7 +173,9 @@ test('with readers off, the main thread answers everything (the reference answer
 
 let srv: Booted;
 // At the file's end, not the test's: the tests after the first share this server.
-after(async () => { if (srv && srv.proc.exitCode === null && srv.proc.signalCode === null) await srv.stop(); });
+after(async () => {
+  if (srv && srv.proc.exitCode === null && srv.proc.signalCode === null) await srv.stop();
+});
 const LOG = join(root, 'server.log');
 const logged = () => readFileSync(LOG, 'utf8');
 const readyAgain = () => logged().split('Reader thread started again').length - 1;
@@ -142,9 +194,18 @@ test('through the front thread, readers give every caller the same answers and r
     assert.deepEqual({ status: got.status, body: bound ? '' : unclocked(got.body) }, { status: viaMain[key].status, body: bound ? '' : unclocked(viaMain[key].body) }, key);
     assert.ok(got.timed, `the answer to ${key} carries Server-Timing`);
   }
-  assert.ok(Object.values(viaReaders).some((g) => g.reader && g.timed), 'a reader\'s answer carries Server-Timing');
+  assert.ok(
+    Object.values(viaReaders).some((g) => g.reader && g.timed),
+    "a reader's answer carries Server-Timing",
+  );
   // All at once, so a route a reader hands back shows with every other.
-  assert.deepEqual(Object.entries(viaReaders).filter(([, got]) => !got.reader).map(([key]) => key), [], 'a reader answered them all');
+  assert.deepEqual(
+    Object.entries(viaReaders)
+      .filter(([, got]) => !got.reader)
+      .map(([key]) => key),
+    [],
+    'a reader answered them all',
+  );
   // Agents' calls stay on the main thread, where their nonces are.
   const bearer = await fetch(srv.base + PATHS[0], { headers: { Authorization: 'Bearer nope' } });
   assert.equal(bearer.headers.get('x-citadel-answered'), null);
@@ -183,9 +244,15 @@ test('a reader never sees half of one main step: two writes in one run of the ma
   // A reader holds a read back while a step is open and the busy main thread answers it when the step ends: whichever answers, it is never the half.
   const reads = await Promise.all([1, 2, 3, 4].map(async () => ({ asked: Date.now(), ...(await title()) })));
   assert.equal((await step).status, 200);
-  assert.ok(reads.every((r) => r.asked < stepEnded), 'every read was asked while the step was still running, so none could pass on a step already over');
+  assert.ok(
+    reads.every((r) => r.asked < stepEnded),
+    'every read was asked while the step was still running, so none could pass on a step already over',
+  );
   const seen = reads.map((r) => r.title);
-  assert.ok(seen.every((t) => t === before || t === 'whole'), `a read saw ${[...new Set(seen)].join(', ')} (before: ${before})`);
+  assert.ok(
+    seen.every((t) => t === before || t === 'whole'),
+    `a read saw ${[...new Set(seen)].join(', ')} (before: ${before})`,
+  );
   assert.ok(!seen.includes('half'), `a read saw half the step: ${[...new Set(seen)].join(', ')}`);
   // Once the step is whole, readers answer again, with all of it.
   await until('a reader answers with the whole step', async () => {
@@ -218,21 +285,31 @@ test('a reader that hangs: its request goes to the main thread, and the thread i
 });
 
 /** One raw answer (no fetch, which would undo the gzip): status, the headers both threads should agree on, the bytes. */
-const raw = (path: string, headers: Record<string, string> = {}, method = 'GET') => new Promise<{ status: number; headers: Record<string, unknown>; body: Buffer; front: boolean; timed: boolean }>((resolve, reject) => {
-  const req = request(`${srv.base}${path}`, { method, headers }, (res) => {
-    const parts: Buffer[] = [];
-    res.on('data', (c) => parts.push(c)).on('end', () => {
-      const { date, connection, 'keep-alive': _k, 'x-citadel-answered': by, 'server-timing': timing, ...rest } = res.headers;
-      resolve({ status: res.statusCode!, headers: rest, body: Buffer.concat(parts), front: by === 'front', timed: TIMED.test(String(timing)) });
+const raw = (path: string, headers: Record<string, string> = {}, method = 'GET') =>
+  new Promise<{ status: number; headers: Record<string, unknown>; body: Buffer; front: boolean; timed: boolean }>((resolve, reject) => {
+    const req = request(`${srv.base}${path}`, { method, headers }, (res) => {
+      const parts: Buffer[] = [];
+      res
+        .on('data', (c) => parts.push(c))
+        .on('end', () => {
+          const { date, connection, 'keep-alive': _k, 'x-citadel-answered': by, 'server-timing': timing, ...rest } = res.headers;
+          resolve({ status: res.statusCode!, headers: rest, body: Buffer.concat(parts), front: by === 'front', timed: TIMED.test(String(timing)) });
+        });
     });
+    req.on('error', reject).end();
   });
-  req.on('error', reject).end();
-});
 const viaMainThread = (path: string) => `${path}${path.includes('?') ? '&' : '?'}citadel-test-reader=main`;
 
 test('a reload asks again and gets a 304 for every front-end file it already has, its tag the hash of the bytes it got (#1697)', { timeout: 60_000 }, async () => {
   const sha = (b: Buffer) => `"${createHash('sha256').update(b).digest('hex').slice(0, 16)}"`;
-  for (const [path, headers] of [['/c/', {}], ['/c/app.js', {}], ['/c/style.css', { 'Accept-Encoding': 'gzip' }], ['/manifest.webmanifest', { 'Sec-CH-Prefers-Color-Scheme': 'dark' }], ['/sw.js', {}], ['/apps/_citadel/theme.css', {}]] as const) {
+  for (const [path, headers] of [
+    ['/c/', {}],
+    ['/c/app.js', {}],
+    ['/c/style.css', { 'Accept-Encoding': 'gzip' }],
+    ['/manifest.webmanifest', { 'Sec-CH-Prefers-Color-Scheme': 'dark' }],
+    ['/sw.js', {}],
+    ['/apps/_citadel/theme.css', {}],
+  ] as const) {
     for (const ask of [raw, (p: string, h: Record<string, string>) => raw(viaMainThread(p), h)]) {
       const first = await ask(path, { ...headers });
       assert.equal(first.status, 200, path);
@@ -255,18 +332,30 @@ test('a reload asks again and gets a 304 for every front-end file it already has
     const off = await raw('/sw.js', { 'If-None-Match': String(on.headers.etag) });
     assert.equal(off.status, 200);
     assert.notDeepEqual(off.body, on.body);
-  } finally { rmSync(join(srv.data, SHELL_OFF_FILE)); }
+  } finally {
+    rmSync(join(srv.data, SHELL_OFF_FILE));
+  }
 });
 
-test("front-end files come from the front thread, the bytes and headers main sends, and while main is busy", { timeout: 60_000 }, async () => {
+test('front-end files come from the front thread, the bytes and headers main sends, and while main is busy', { timeout: 60_000 }, async () => {
   const kit = await raw(viaMainThread('/apps/_citadel/theme.css'));
   const cases: [string, Record<string, string>, string?][] = [
-    ['/c/', {}], ['/c/', { 'Accept-Encoding': 'gzip' }], ['/c/app.js', {}], ['/app.js', { 'Accept-Encoding': 'gzip, br' }], ['/app.js', {}], ['/style.css', {}, 'HEAD'],
-    ['/sw.js', {}], ['/manifest.webmanifest', {}], ['/manifest.webmanifest', { 'Sec-CH-Prefers-Color-Scheme': 'dark' }],
-    ['/apps/_citadel/theme.css', {}], ['/apps/_citadel/theme.css', { 'If-None-Match': String(kit.headers.etag) }], ['/apps/_citadel/ui/chat.js', {}],
+    ['/c/', {}],
+    ['/c/', { 'Accept-Encoding': 'gzip' }],
+    ['/c/app.js', {}],
+    ['/app.js', { 'Accept-Encoding': 'gzip, br' }],
+    ['/app.js', {}],
+    ['/style.css', {}, 'HEAD'],
+    ['/sw.js', {}],
+    ['/manifest.webmanifest', {}],
+    ['/manifest.webmanifest', { 'Sec-CH-Prefers-Color-Scheme': 'dark' }],
+    ['/apps/_citadel/theme.css', {}],
+    ['/apps/_citadel/theme.css', { 'If-None-Match': String(kit.headers.etag) }],
+    ['/apps/_citadel/ui/chat.js', {}],
   ];
   for (const [path, headers, method] of cases) {
-    const main = await raw(viaMainThread(path), headers, method), front = await raw(path, headers, method);
+    const main = await raw(viaMainThread(path), headers, method),
+      front = await raw(path, headers, method);
     const key = `${method ?? 'GET'} ${path} ${JSON.stringify(headers)}`;
     assert.ok(front.front && !main.front, key);
     assert.ok(front.timed && main.timed, `${key}: both carry Server-Timing (#1752)`);
@@ -285,7 +374,9 @@ test("front-end files come from the front thread, the bytes and headers main sen
     assert.ok(off.front);
     assert.deepEqual(off.body, (await raw(viaMainThread('/sw.js'))).body);
     assert.notDeepEqual(off.body, on.body);
-  } finally { rmSync(join(srv.data, SHELL_OFF_FILE)); }
+  } finally {
+    rmSync(join(srv.data, SHELL_OFF_FILE));
+  }
   let unblocked = 0;
   const blocked = fetch(`${srv.base}/api/test/block?ms=1500`).then((r) => ((unblocked = Date.now()), r));
   // timing-ok: a busy main thread can't say it is busy; 200 ms puts these reads inside its 1.5 s loop
@@ -304,7 +395,7 @@ test("front-end files come from the front thread, the bytes and headers main sen
 test('everything else passes through: a POST, a live stream, the password check', { timeout: 60_000 }, async () => {
   const wrong = await fetch(`${srv.base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: `${PASSWORD}x` }) });
   assert.equal(wrong.status, 401);
-  assert.match(wrong.headers.get('server-timing') ?? '', TIMED, 'a passed-on answer carries the front\'s stamp alone (#1752)');
+  assert.match(wrong.headers.get('server-timing') ?? '', TIMED, "a passed-on answer carries the front's stamp alone (#1752)");
   const me = await srv.call('/api/me');
   assert.equal(me.status, 200);
   const ctl = new AbortController();
@@ -319,18 +410,20 @@ test('everything else passes through: a POST, a live stream, the password check'
 test("a client can't set the peer headers, not even on a connection that asked for an upgrade the main thread refuses", { timeout: 60_000 }, async () => {
   const sock = connect(Number(new URL(srv.base).port), '127.0.0.1');
   // One request at a time on the one connection; each answer is a small JSON body, chunked or with a Content-Length.
-  const ask = (extra: string) => new Promise<string>((done, fail) => {
-    let got = '';
-    const on = (c: Buffer) => {
-      got += c;
-      const end = got.indexOf('\r\n\r\n'), len = Number(/content-length: (\d+)/i.exec(got)?.[1]);
-      if (end < 0 || !(got.endsWith('\r\n0\r\n\r\n') || Buffer.byteLength(got) - end - 4 >= len)) return;
-      sock.off('data', on);
-      done(got);
-    };
-    sock.on('data', on).once('error', fail);
-    sock.write(`GET /api/test/peer HTTP/1.1\r\nHost: 127.0.0.1\r\n${extra}X-Citadel-Peer: 10.9.9.9\r\nX-Citadel-Local: 10.9.9.9 4444\r\n\r\n`);
-  });
+  const ask = (extra: string) =>
+    new Promise<string>((done, fail) => {
+      let got = '';
+      const on = (c: Buffer) => {
+        got += c;
+        const end = got.indexOf('\r\n\r\n'),
+          len = Number(/content-length: (\d+)/i.exec(got)?.[1]);
+        if (end < 0 || !(got.endsWith('\r\n0\r\n\r\n') || Buffer.byteLength(got) - end - 4 >= len)) return;
+        sock.off('data', on);
+        done(got);
+      };
+      sock.on('data', on).once('error', fail);
+      sock.write(`GET /api/test/peer HTTP/1.1\r\nHost: 127.0.0.1\r\n${extra}X-Citadel-Peer: 10.9.9.9\r\nX-Citadel-Local: 10.9.9.9 4444\r\n\r\n`);
+    });
   try {
     for (const extra of ['Connection: Upgrade\r\nUpgrade: websocket\r\n', '']) {
       const got = await ask(extra);
@@ -343,7 +436,7 @@ test("a client can't set the peer headers, not even on a connection that asked f
   }
 });
 
-test('a restart answers what the front thread already took, a reader\'s answer included, then exits', { timeout: 60_000 }, async () => {
+test("a restart answers what the front thread already took, a reader's answer included, then exits", { timeout: 60_000 }, async () => {
   const slow = get(srv, `${PATHS[0]}?citadel-test-reader=slow`, srv.cookie);
   await until('the reader has the request', () => logged().includes('Reader test hook: slow'));
   srv.proc.kill('SIGTERM');
@@ -414,36 +507,44 @@ test("a running turn, a queued message and an approval card: the readers' list, 
     assert.equal((await live.call(`/api/tickets/${t.id}/messages`, { text: 'and then this', after: true })).status, 202);
     // A tripwire card (test/approvals.test.ts): the server's HOME holds its data, the turn has its own TMPDIR.
     const bak = join(live.data, 'coordinator.db.bak-x');
-    const card = await (await fetch(`${live.base}/api/tickets/${t.id}/approvals`, {
-      method: 'POST', headers: minion, body: JSON.stringify({ tool_name: 'Bash', input: { command: `cp ${bak} "$TMPDIR/" && rm ${bak}`, description: 'Move the stale copy Cara named out of the data dir' } }),
-    })).json();
+    const card = await (
+      await fetch(`${live.base}/api/tickets/${t.id}/approvals`, {
+        method: 'POST',
+        headers: minion,
+        body: JSON.stringify({ tool_name: 'Bash', input: { command: `cp ${bak} "$TMPDIR/" && rm ${bak}`, description: 'Move the stale copy Cara named out of the data dir' } }),
+      })
+    ).json();
     assert.ok(card.id, JSON.stringify(card));
     const page = (p: string, main = false, cookie = live.cookie) => get(live, main ? `${p}${p.includes('?') ? '&' : '?'}citadel-test-reader=main` : p, cookie);
     // Main's own answer has the three: the turn running, the message queued, the card waiting.
     const first = await page(`/api/tickets/${t.id}`, true);
     const viaMainNow = JSON.parse(first.body).ticket;
     assert.equal(first.status, 200, first.body);
-    assert.equal(viaMainNow.status, "running", first.body.slice(0, 600));
+    assert.equal(viaMainNow.status, 'running', first.body.slice(0, 600));
     assert.equal(viaMainNow.queued, 1);
     assert.equal(viaMainNow.approvals, 1);
-    assert.ok(viaMainNow.open_cards.some((c: { kind: string }) => c.kind === "approval"), JSON.stringify(viaMainNow.open_cards));
+    assert.ok(
+      viaMainNow.open_cards.some((c: { kind: string }) => c.kind === 'approval'),
+      JSON.stringify(viaMainNow.open_cards),
+    );
     // The scheme's first open makes its Taskmaster, a write: the main thread's (a reader hands it over).
     assert.equal((await page(`/api/projects/${project.id}`, true)).status, 200);
-    for (const [who, cookie] of Object.entries(callers)) for (const p of [`/api/tickets/${t.id}`, `/api/projects/${project.id}`, `/api/projects/${project.id}?tickets=open`, '/api/status']) {
-      // The reader first, so its copy can't have been refreshed by main's answer to the same page.
-      const reader = await page(p, false, cookie);
-      const main = await page(p, true, cookie);
-      assert.ok(reader.reader && !main.reader, `${who} ${p}`);
-      assert.equal(reader.status, main.status, `${who} ${p}`);
-      if (who !== 'olive') assert.equal(reader.status, 200, `${who} ${p}`);
-      // The Status page's clock is each answer's own. Values main moves on a timer with no broadcast, which only the
-      // sweep (off here) carries: the turn's activity clock while a card waits on a person (Runner.checkQuiet), and the
-      // answer-time probes' last readings.
-      const timed = (k: string, v: unknown) => (k === 'activity' && v ? { ...v, at: 0 } : k === 'answer' && v && typeof v === 'object' && 'probing' in v ? { ...v, now: 0, reader: 0 } : v);
-      const sansNow = (body: string) => ({ ...JSON.parse(body, timed), now: 0 });
-      const [r, m] = [sansNow(reader.body), sansNow(main.body)];
-      assert.deepEqual(r, m, `${who} ${p}: ${differs(r, m).slice(0, 5).join(', ')}`);
-    }
+    for (const [who, cookie] of Object.entries(callers))
+      for (const p of [`/api/tickets/${t.id}`, `/api/projects/${project.id}`, `/api/projects/${project.id}?tickets=open`, '/api/status']) {
+        // The reader first, so its copy can't have been refreshed by main's answer to the same page.
+        const reader = await page(p, false, cookie);
+        const main = await page(p, true, cookie);
+        assert.ok(reader.reader && !main.reader, `${who} ${p}`);
+        assert.equal(reader.status, main.status, `${who} ${p}`);
+        if (who !== 'olive') assert.equal(reader.status, 200, `${who} ${p}`);
+        // The Status page's clock is each answer's own. Values main moves on a timer with no broadcast, which only the
+        // sweep (off here) carries: the turn's activity clock while a card waits on a person (Runner.checkQuiet), and the
+        // answer-time probes' last readings.
+        const timed = (k: string, v: unknown) => (k === 'activity' && v ? { ...v, at: 0 } : k === 'answer' && v && typeof v === 'object' && 'probing' in v ? { ...v, now: 0, reader: 0 } : v);
+        const sansNow = (body: string) => ({ ...JSON.parse(body, timed), now: 0 });
+        const [r, m] = [sansNow(reader.body), sansNow(main.body)];
+        assert.deepEqual(r, m, `${who} ${p}: ${differs(r, m).slice(0, 5).join(', ')}`);
+      }
   } finally {
     await live.stop();
   }

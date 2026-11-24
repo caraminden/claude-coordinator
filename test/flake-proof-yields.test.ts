@@ -20,8 +20,14 @@ test('burners and test runs start under nice -n 19', () => {
   const r = spawnSync('bash', [join(root, 'tools/flake-proof.sh'), join(dir, 'x.test.ts'), '1', '1'], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_TOKEN: '', CITADEL_HEAVY_HELD: '1' }, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = readFileSync(join(dir, 'log'), 'utf8').trim().split('\n');
-  assert.ok(lines.some((l) => l.startsWith('nice -n 19 bash -c')), 'the burner is niced');
-  assert.ok(lines.some((l) => /^nice -n 19 .*citadel-node --test/.test(l)), 'the test run is niced');
+  assert.ok(
+    lines.some((l) => l.startsWith('nice -n 19 bash -c')),
+    'the burner is niced',
+  );
+  assert.ok(
+    lines.some((l) => /^nice -n 19 .*citadel-node --test/.test(l)),
+    'the test run is niced',
+  );
 });
 
 test('a batch runs its copies at once (#1443), each in its own TMPDIR', () => {
@@ -93,6 +99,7 @@ test('a batch fails when the file skipped a test, and the workflow installs pwsh
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stdout, /skipped a test on this runner/);
   assert.doesNotMatch(r.stdout, /clean runs at once/);
-  const pwsh = yml.indexOf('- name: pwsh and PSScriptAnalyzer'), batch = yml.indexOf('- name: 10 clean runs (1 of 5)');
+  const pwsh = yml.indexOf('- name: pwsh and PSScriptAnalyzer'),
+    batch = yml.indexOf('- name: 10 clean runs (1 of 5)');
   assert.ok(pwsh > 0 && pwsh < batch, 'the pwsh step comes before the first batch');
 });

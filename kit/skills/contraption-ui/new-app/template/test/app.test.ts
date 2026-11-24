@@ -27,8 +27,7 @@ after(async () => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-const get = (path: string, identity?: string) =>
-  fetch(`${app.url}${path}`, { headers: identity ? { 'x-citadel-identity': identity } : {}, redirect: 'manual' });
+const get = (path: string, identity?: string) => fetch(`${app.url}${path}`, { headers: identity ? { 'x-citadel-identity': identity } : {}, redirect: 'manual' });
 
 test('health answers with no identity once the database is open', async () => {
   assert.equal((await get('/healthz')).status, 204);
@@ -38,7 +37,7 @@ test('every page needs a signed-in person', async () => {
   for (const path of ['/', '/index.html', '/app.js', '/api/me']) assert.equal((await get(path)).status, 401, path);
 });
 
-test('a forged, expired, relayed or other app\'s identity is refused', async () => {
+test("a forged, expired, relayed or other app's identity is refused", async () => {
   const good = fake.identity(1);
   const [v, claims] = good.split('.');
   const forged = `${v}.${claims}.${Buffer.alloc(64).toString('base64url')}`;

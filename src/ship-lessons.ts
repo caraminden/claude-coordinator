@@ -46,9 +46,20 @@ export interface Lesson {
  */
 export function parseLearned(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
-  const lines = raw.split('\n').map((l) => l.trim().replace(/^[-*•]\s+/, '').trim()).filter(Boolean);
+  const lines = raw
+    .split('\n')
+    .map((l) =>
+      l
+        .trim()
+        .replace(/^[-*•]\s+/, '')
+        .trim(),
+    )
+    .filter(Boolean);
   if (lines.length === 1 && /^(nothing|none|n\/a|-+|—)[.!]?$/i.test(lines[0])) return '';
-  return lines.slice(0, MAX_LINES).map((l) => (l.length > MAX_LINE ? `${l.slice(0, MAX_LINE - 1)}…` : l)).join('\n');
+  return lines
+    .slice(0, MAX_LINES)
+    .map((l) => (l.length > MAX_LINE ? `${l.slice(0, MAX_LINE - 1)}…` : l))
+    .join('\n');
 }
 
 /**
@@ -60,7 +71,12 @@ export function touchedFiles(cwd: string, bases: string[] = ['main', 'origin/HEA
   return (async () => {
     for (const base of bases) {
       const out = await git(['diff', '--name-only', `${base}...HEAD`]);
-      if (out !== null) return out.split('\n').map((f) => f.trim()).filter(Boolean).slice(0, MAX_FILES);
+      if (out !== null)
+        return out
+          .split('\n')
+          .map((f) => f.trim())
+          .filter(Boolean)
+          .slice(0, MAX_FILES);
     }
     return [];
   })();
@@ -89,8 +105,7 @@ export class ShipLessons {
         return this.get(old.id)!;
       }
     }
-    const { id } = this.db.prepare('INSERT INTO ship_lessons (project_id, ticket_id, number, lines, files, source, at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id')
-      .get(l.project_id, l.ticket_id, l.number, l.lines, files, l.source, now) as { id: number };
+    const { id } = this.db.prepare('INSERT INTO ship_lessons (project_id, ticket_id, number, lines, files, source, at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id').get(l.project_id, l.ticket_id, l.number, l.lines, files, l.source, now) as { id: number };
     return this.get(id)!;
   }
 
@@ -102,8 +117,7 @@ export class ShipLessons {
   /** A scheme's rows with lines since `since`, newest first: open ones only unless `taken` is true. Nothing-rows are left out. */
   list(projectId: number, opts: { since?: number; taken?: boolean; limit?: number } = {}, now = Date.now()): Lesson[] {
     const since = opts.since ?? now - OPEN_WINDOW_MS;
-    const rows = this.db.prepare(`SELECT * FROM ship_lessons WHERE project_id = ? AND at >= ? AND lines != ''${opts.taken ? '' : ' AND taken_at IS NULL'} ORDER BY at DESC, id DESC LIMIT ?`)
-      .all(projectId, since, Math.min(opts.limit ?? 200, 500)) as unknown as Row[];
+    const rows = this.db.prepare(`SELECT * FROM ship_lessons WHERE project_id = ? AND at >= ? AND lines != ''${opts.taken ? '' : ' AND taken_at IS NULL'} ORDER BY at DESC, id DESC LIMIT ?`).all(projectId, since, Math.min(opts.limit ?? 200, 500)) as unknown as Row[];
     return rows.map(row);
   }
 
@@ -135,7 +149,14 @@ export const REPEAT_WINDOW_MS = 7 * 24 * 3600_000;
 /** Two lines are the same lesson at this word overlap (Jaccard). shortcut: word overlap, not meaning; add the memory index's score when it is back. */
 const SIMILAR = 0.35;
 const STOP = new Set('the and that this with from when then they have has had was were for not but are can will into than its our out you your what which about there their been only also just need needs made make over after before more some such'.split(' '));
-const words = (line: string) => new Set(line.toLowerCase().split(/[^a-z0-9_.\-/]+/).map((w) => w.replace(/^[.\-/]+|[.\-/]+$/g, '')).filter((w) => w.length > 2 && !STOP.has(w)));
+const words = (line: string) =>
+  new Set(
+    line
+      .toLowerCase()
+      .split(/[^a-z0-9_.\-/]+/)
+      .map((w) => w.replace(/^[.\-/]+|[.\-/]+$/g, ''))
+      .filter((w) => w.length > 2 && !STOP.has(w)),
+  );
 const similar = (a: Set<string>, b: Set<string>) => {
   let both = 0;
   for (const w of a) if (b.has(w)) both++;
@@ -153,7 +174,12 @@ export const isFiller = (line: string) => {
  * its lines, the lessons they came from and their distinct minion numbers.
  */
 export function lessonGroups(lessons: Lesson[]): { lessons: Lesson[]; lines: string[]; minions: number[] }[] {
-  const units = lessons.flatMap((l) => l.lines.split('\n').filter((x) => x.trim() && !isFiller(x)).map((text) => ({ l, text, w: words(text) })));
+  const units = lessons.flatMap((l) =>
+    l.lines
+      .split('\n')
+      .filter((x) => x.trim() && !isFiller(x))
+      .map((text) => ({ l, text, w: words(text) })),
+  );
   const parent = units.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   for (let i = 0; i < units.length; i++) for (let j = 0; j < i; j++) if (similar(units[i].w, units[j].w)) parent[find(i)] = find(j);
@@ -187,7 +213,23 @@ export function repeatAlert(store: Store, dataDir: string, projectId: number, no
     const quote = g.lines[0];
     const nums = g.minions.map((n) => `#${n}`).join(', ');
     const file = join(projectSharedDir(dataDir, projectId), rel);
-    void mkdir(join(file, '..'), { recursive: true }).then(() => writeFile(file, `# Handoff: ${quote.slice(0, 80)}\n\n## Goal\nStop the repeated ship lesson below from costing the next minion the same time.\n\n## Their words\nMinions ${nums} each wrote a ship lesson about it:\n${g.lessons.map((l) => `- ${l.number != null ? `#${l.number}` : 'a minion'}: ${l.lines.split('\n').filter((x) => !isFiller(x)).join(' / ')}`).join('\n')}\n\n## Done when\n- (fill in: when X, then Y)\n\n## Ruled out or tried\nNothing yet. Mark these lessons taken (ship_lessons tool, ids ${ids.join(', ')}) once this is started.\n\n## Model and effort\nSonnet 5.5 medium unless the fix touches the ship pipeline.\n`, { flag: 'wx' })).catch((err) => err?.code !== 'EEXIST' && console.error(`Ship lessons repeat handoff failed: ${err?.message ?? err}`));
+    void mkdir(join(file, '..'), { recursive: true })
+      .then(() =>
+        writeFile(
+          file,
+          `# Handoff: ${quote.slice(0, 80)}\n\n## Goal\nStop the repeated ship lesson below from costing the next minion the same time.\n\n## Their words\nMinions ${nums} each wrote a ship lesson about it:\n${g.lessons
+            .map(
+              (l) =>
+                `- ${l.number != null ? `#${l.number}` : 'a minion'}: ${l.lines
+                  .split('\n')
+                  .filter((x) => !isFiller(x))
+                  .join(' / ')}`,
+            )
+            .join('\n')}\n\n## Done when\n- (fill in: when X, then Y)\n\n## Ruled out or tried\nNothing yet. Mark these lessons taken (ship_lessons tool, ids ${ids.join(', ')}) once this is started.\n\n## Model and effort\nSonnet 5.5 medium unless the fix touches the ship pipeline.\n`,
+          { flag: 'wx' },
+        ),
+      )
+      .catch((err) => err?.code !== 'EEXIST' && console.error(`Ship lessons repeat handoff failed: ${err?.message ?? err}`));
     return `Ship lessons repeat: ${g.minions.length} minions (${nums}) wrote the same lesson, e.g. "${quote}". Draft handoff: ${rel} in the shared folder. Start it or mark the lessons taken (ship_lessons tool, ids ${ids.join(', ')}).`;
   }
   return null;
@@ -205,7 +247,9 @@ export function queueLesson(store: Store, dataDir: string, t: { id: number; proj
     try {
       const alert = repeatAlert(store, dataDir, t.project_id);
       if (alert) notify?.(alert);
-    } catch (err: any) { console.error(`Ship lessons repeat check failed: ${err?.message ?? err}`); }
+    } catch (err: any) {
+      console.error(`Ship lessons repeat check failed: ${err?.message ?? err}`);
+    }
   }
   return row;
 }

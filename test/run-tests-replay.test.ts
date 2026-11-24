@@ -19,7 +19,9 @@ test("a stale progress temp file from a killed run does not hide the next run's 
   mkdirSync(join(dir, 'test'));
   for (const f of ['run-tests.sh', 'parse-check.ts', 'deploy-queue.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(dir, 'tools', f));
   writeFileSync(join(dir, 'test', 'ok.test.mjs'), "import test from 'node:test';\ntest('fine', () => {});\n");
-  writeFileSync(join(dir, 'test', 'progress.test.mjs'), `import test from 'node:test';
+  writeFileSync(
+    join(dir, 'test', 'progress.test.mjs'),
+    `import test from 'node:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 test('watch', async () => {
   const f = process.env.CITADEL_TEST_PROGRESS_TO;
@@ -27,7 +29,8 @@ test('watch', async () => {
   for (let i = 0; i < 200 && !(f && existsSync(f) && readFileSync(f, 'utf8').startsWith('1\\n2\\ntest/progress.test.mjs\\n')); i++) await new Promise((r) => setTimeout(r, 25)); // poll-ok: fixture child, no ./wait.ts
   writeFileSync('seen-progress', f && existsSync(f) ? readFileSync(f, 'utf8') : 'none');
 });
-`);
+`,
+  );
   const stale = join(dir, 'land-test.progress.tmp');
   writeFileSync(stale, '99\n99\nstale\n');
   chmodSync(stale, 0o444);

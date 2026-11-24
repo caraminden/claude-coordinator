@@ -135,9 +135,12 @@ test('a big file goes into the shared folder in chunks, resuming after a connect
 
 test("a contraption's page uploads into its DATA_DIR/uploads/<login>/, and Citadel tells the app as the uploader", async () => {
   // Signed in on the app's host through the real handoff from Citadel's.
-  const header = (host: string, path: string, headers: Record<string, string>, name: string) => new Promise<string>((resolve, reject) => {
-    request({ host: '127.0.0.1', port, path, headers: { Host: host, ...headers } }, (res) => (res.resume(), resolve(String(res.headers[name])))).on('error', reject).end();
-  });
+  const header = (host: string, path: string, headers: Record<string, string>, name: string) =>
+    new Promise<string>((resolve, reject) => {
+      request({ host: '127.0.0.1', port, path, headers: { Host: host, ...headers } }, (res) => (res.resume(), resolve(String(res.headers[name]))))
+        .on('error', reject)
+        .end();
+    });
   const to = new URL(await header(`127.0.0.1:${port}`, '/apps/stub/', { Accept: 'text/html', Cookie: srv.cookie }, 'location'));
   const app = { Cookie: (await header(APP, to.pathname + to.search, {}, 'set-cookie')).split(';')[0] };
   const base = '/apps/_citadel/uploads/stub';
@@ -178,7 +181,10 @@ test('the free-disk floor counts what uploads under way still have to send; a st
     await assert.rejects(c.status(cara, { kind: 'app', app: 'stub' }, a.id), (e: any) => e.status === 404);
     // Down at the floor, chunks wait.
     c.free = async () => 99;
-    await assert.rejects(c.put(cara, target, a.id, 0, [Buffer.from('x')], async () => ({})), (e: any) => e.status === 507);
+    await assert.rejects(
+      c.put(cara, target, a.id, 0, [Buffer.from('x')], async () => ({})),
+      (e: any) => e.status === 507,
+    );
     // Untouched for 3 days, it's given up at the next start, and no longer counted.
     const old = (Date.now() - 4 * 24 * 3600 * 1000) / 1000;
     utimesSync(join(dir, 'chunked', `${a.id}.part`), old, old);
@@ -191,7 +197,7 @@ test('the free-disk floor counts what uploads under way still have to send; a st
   }
 });
 
-test('the kit\'s client (ui/upload.js) pauses, resumes after a reload from where it got to, and cancels', async () => {
+test("the kit's client (ui/upload.js) pauses, resumes after a reload from where it got to, and cancels", async () => {
   // The page's globals, over the real server: fetch and an XMLHttpRequest that carry the session, and localStorage.
   const plain = globalThis.fetch;
   const withCookie = (o: RequestInit = {}) => ({ ...o, headers: { ...(o.headers as object), Cookie: srv.cookie } });
@@ -212,12 +218,15 @@ test('the kit\'s client (ui/upload.js) pauses, resumes after a reload from where
       this.#stop.abort();
     }
     send(body: Blob) {
-      plain(this.#how[1], withCookie({ method: this.#how[0], body, signal: this.#stop.signal })).then(async (r) => {
-        this.status = r.status;
-        this.responseText = await r.text();
-        this.upload.onprogress?.({ loaded: body.size });
-        this.onload?.();
-      }, () => (this.#stop.signal.aborted ? this.onabort : this.onerror)?.());
+      plain(this.#how[1], withCookie({ method: this.#how[0], body, signal: this.#stop.signal })).then(
+        async (r) => {
+          this.status = r.status;
+          this.responseText = await r.text();
+          this.upload.onprogress?.({ loaded: body.size });
+          this.onload?.();
+        },
+        () => (this.#stop.signal.aborted ? this.onabort : this.onerror)?.(),
+      );
     }
   }
   Object.assign(globalThis, {

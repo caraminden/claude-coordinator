@@ -4,7 +4,7 @@ import { CLAMP_OVER, isBookkeeping, isNarration, narrationSorter, NARRATION_MAX 
 
 test('a short plain remark is narration', () => {
   assert.ok(isNarration('Checking the merged code boots:'));
-  assert.ok(isNarration('Found it: the drawer\'s own click handler closes the drawer. Checking how `onClick` is registered.'));
+  assert.ok(isNarration("Found it: the drawer's own click handler closes the drawer. Checking how `onClick` is registered."));
   assert.ok(isNarration('Line one\nline two of the same paragraph.'));
   assert.ok(isNarration('x'.repeat(NARRATION_MAX - 1)));
 });
@@ -12,8 +12,7 @@ test('a short plain remark is narration', () => {
 test('long text, paragraphs and Markdown structure are not', () => {
   assert.ok(!isNarration('x'.repeat(NARRATION_MAX)));
   assert.ok(!isNarration('Done.\n\nIt shipped as abc123.'));
-  for (const md of ['## Rules\nOnly a Claude.', 'Two things:\n- one\n- two', 'Steps:\n1. build\n2. test',
-    'Steps:\n1) build', '| a | b |\n|---|---|', 'Run:\n```\nnpm test\n```', '> quoted', '* star item']) {
+  for (const md of ['## Rules\nOnly a Claude.', 'Two things:\n- one\n- two', 'Steps:\n1. build\n2. test', 'Steps:\n1) build', '| a | b |\n|---|---|', 'Run:\n```\nnpm test\n```', '> quoted', '* star item']) {
     assert.ok(!isNarration(md), md);
   }
 });

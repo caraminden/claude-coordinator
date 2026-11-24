@@ -12,11 +12,23 @@ import { Waits } from '../src/waits.ts';
 // src/ci-wait.ts (#546): a CI run's jobs and steps as a minion's wait.
 const T0 = Date.parse('2026-11-11T20:00:00Z');
 const iso = (s: number) => new Date(T0 + s * 1000).toISOString();
-const steps = (done: number, of: number, running = true) => Array.from({ length: of }, (_, i) => ({
-  name: `step ${i + 1}`, status: i < done ? 'completed' : i === done && running ? 'in_progress' : 'queued', conclusion: i < done ? 'success' : null,
-}));
+const steps = (done: number, of: number, running = true) =>
+  Array.from({ length: of }, (_, i) => ({
+    name: `step ${i + 1}`,
+    status: i < done ? 'completed' : i === done && running ? 'in_progress' : 'queued',
+    conclusion: i < done ? 'success' : null,
+  }));
 const job = (name: string, over: Partial<Job> = {}): Job => ({
-  id: 1, run_id: 7, name, status: 'queued', conclusion: null, created_at: iso(0), runner_name: null, labels: ['self-hosted', 'citadel-ci-linux'], steps: [], ...over,
+  id: 1,
+  run_id: 7,
+  name,
+  status: 'queued',
+  conclusion: null,
+  created_at: iso(0),
+  runner_name: null,
+  labels: ['self-hosted', 'citadel-ci-linux'],
+  steps: [],
+  ...over,
 });
 
 test('ciNow: queued, then a job by its steps or several by how many are done, then pass or fail', async () => {
@@ -24,16 +36,9 @@ test('ciNow: queued, then a job by its steps or several by how many are done, th
   assert.deepEqual(ciNow([job('test')]), { stage: 'queued', short: 'queued', text: 'queued for a runner (citadel-ci-linux)', since: T0 });
   const one = ciNow([job('test', { status: 'in_progress', runner_name: 'cara-desktop', steps: steps(4, 8) })])!;
   assert.deepEqual([one.short, one.text, one.done, one.total], ['step 5/8', 'test step 5 of 8: step 5 (cara-desktop)', 4, 8]);
-  const three = ciNow([
-    job('lint', { status: 'completed', conclusion: 'success', created_at: iso(5) }),
-    job('test-linux', { status: 'in_progress', steps: steps(1, 3) }),
-    job('test-windows'),
-  ])!;
+  const three = ciNow([job('lint', { status: 'completed', conclusion: 'success', created_at: iso(5) }), job('test-linux', { status: 'in_progress', steps: steps(1, 3) }), job('test-windows')])!;
   assert.deepEqual([three.stage, three.short, three.text, three.since], ['jobs', '1/3 jobs', 'test-linux step 2 of 3: step 2', T0]);
-  const red = ciNow([
-    job('lint', { status: 'completed', conclusion: 'failure', steps: [{ name: 'eslint', status: 'completed', conclusion: 'failure' }] }),
-    job('test', { status: 'in_progress', steps: steps(0, 2) }),
-  ])!;
+  const red = ciNow([job('lint', { status: 'completed', conclusion: 'failure', steps: [{ name: 'eslint', status: 'completed', conclusion: 'failure' }] }), job('test', { status: 'in_progress', steps: steps(0, 2) })])!;
   assert.equal(red.text, 'lint failed, test step 1 of 2: step 1', 'a red job shows before the run ends');
   const ok = (over: Partial<Job>) => job('test', { status: 'completed', conclusion: 'success', completed_at: iso(300), ...over });
   assert.deepEqual(ciNow([ok({})]), { stage: 'passed', short: 'passed', text: 'passed, its job green', since: T0, ended: T0 + 300_000 });
@@ -44,13 +49,15 @@ test('ciNow: queued, then a job by its steps or several by how many are done, th
   assert.equal(ciNow([ok({}), ok({ name: 'b', conclusion: 'skipped' })])!.stage, 'passed');
 });
 
-test('pendingRuns: the Actions runs of a PR\'s pending checks', async () => {
-  const pr = { checks: [
-    { name: 'a', status: 'pending', url: 'https://github.com/o/r/actions/runs/11/job/1' },
-    { name: 'b', status: 'pending', url: 'https://github.com/o/r/actions/runs/11/job/2' },
-    { name: 'c', status: 'passed', url: 'https://github.com/o/r/actions/runs/12/job/3' },
-    { name: 'd', status: 'pending', url: 'https://ci.example.com/x' },
-  ] } as PrSnapshot;
+test("pendingRuns: the Actions runs of a PR's pending checks", async () => {
+  const pr = {
+    checks: [
+      { name: 'a', status: 'pending', url: 'https://github.com/o/r/actions/runs/11/job/1' },
+      { name: 'b', status: 'pending', url: 'https://github.com/o/r/actions/runs/11/job/2' },
+      { name: 'c', status: 'passed', url: 'https://github.com/o/r/actions/runs/12/job/3' },
+      { name: 'd', status: 'pending', url: 'https://ci.example.com/x' },
+    ],
+  } as PrSnapshot;
   assert.deepEqual(pendingRuns(pr), [11]);
 });
 
@@ -88,16 +95,28 @@ function setup() {
   let ci!: CiRuns;
   const heads: { sha: string | null } = { sha: null };
   const waits = new Waits({
-    store, deployState: state, heavyDir: join(root, 'none'), ship: () => null, interruptible: () => 0,
-    changed: (id) => changed.push(id), now: () => now, alive: () => true, held: () => false, ci: (ci = new CiRuns({ changed: (id) => waits.check(id), get: gh.get, now: () => now, head: async () => heads.sha })), ciSlug: () => 'o/r',
+    store,
+    deployState: state,
+    heavyDir: join(root, 'none'),
+    ship: () => null,
+    interruptible: () => 0,
+    changed: (id) => changed.push(id),
+    now: () => now,
+    alive: () => true,
+    held: () => false,
+    ci: (ci = new CiRuns({ changed: (id) => waits.check(id), get: gh.get, now: () => now, head: async () => heads.sha })),
+    ciSlug: () => 'o/r',
   });
-  const pr = (number: number, runs: number[], state: PrSnapshot['state'] = 'OPEN') => ({
-    number, state, checks: runs.map((r) => ({ name: `c${r}`, status: 'pending', url: `https://github.com/o/r/actions/runs/${r}/job/1` })),
-  } as PrSnapshot);
+  const pr = (number: number, runs: number[], state: PrSnapshot['state'] = 'OPEN') =>
+    ({
+      number,
+      state,
+      checks: runs.map((r) => ({ name: `c${r}`, status: 'pending', url: `https://github.com/o/r/actions/runs/${r}/job/1` })),
+    }) as PrSnapshot;
   return { gh, ci, waits, changed, state, pr, heads, at: (s: number) => (now = T0 + s * 1000), now: () => now };
 }
 
-test('a PR\'s run: queued, its jobs, then green for a while; shown only once the turn has ended', async () => {
+test("a PR's run: queued, its jobs, then green for a while; shown only once the turn has ended", async () => {
   const { gh, ci, waits, changed, pr, at } = setup();
   const m = minion();
   gh.answers.set('repos/o/r/actions/runs/7', { id: 7, workflow_id: 3, status: 'queued' });
@@ -249,10 +268,17 @@ test('a landing waiting for CI shows its run on land/<branch>; a fallback says s
   assert.equal(ci.view(m.id), null, 'the cancelled run is let go');
 });
 
-test('a queued run counts the repo\'s older queued runs ahead of it, read once a poll for the repo', async () => {
+test("a queued run counts the repo's older queued runs ahead of it, read once a poll for the repo", async () => {
   const { gh, ci, waits, pr } = setup();
-  const a = minion(), b = minion();
-  gh.answers.set('repos/o/r/actions/runs', { workflow_runs: [{ id: 6, created_at: iso(-10) }, { id: 7, created_at: iso(0) }, { id: 9, created_at: iso(5) }] });
+  const a = minion(),
+    b = minion();
+  gh.answers.set('repos/o/r/actions/runs', {
+    workflow_runs: [
+      { id: 6, created_at: iso(-10) },
+      { id: 7, created_at: iso(0) },
+      { id: 9, created_at: iso(5) },
+    ],
+  });
   gh.answers.set('repos/o/r/actions/runs/6/jobs', { jobs: [job('test', { created_at: iso(-10) })] });
   gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { created_at: iso(5) })] });
   ci.pr(a.id, 'o/r', undefined, pr(1, [6]));
@@ -262,7 +288,13 @@ test('a queued run counts the repo\'s older queued runs ahead of it, read once a
   assert.deepEqual([waits.wait(b.id)!.chip, waits.wait(b.id)!.text], ['CI · 2 ahead', 'PR #2 · queued for a runner (citadel-ci-linux), 2 runs ahead']);
   assert.equal(gh.calls.filter((c) => c.startsWith('repos/o/r/actions/runs?status=queued')).length, 1);
   // Over a page of queued runs: the oldest may be missing, so no count.
-  gh.answers.set('repos/o/r/actions/runs', { total_count: 101, workflow_runs: [{ id: 6, created_at: iso(-10) }, { id: 9, created_at: iso(5) }] });
+  gh.answers.set('repos/o/r/actions/runs', {
+    total_count: 101,
+    workflow_runs: [
+      { id: 6, created_at: iso(-10) },
+      { id: 9, created_at: iso(5) },
+    ],
+  });
   await ci.tick();
   assert.equal(waits.wait(a.id)!.chip, 'CI · queued');
   assert.equal(waits.wait(a.id)!.text, 'PR #1 · queued for a runner (citadel-ci-linux)');
@@ -272,12 +304,15 @@ test('a queued run counts the repo\'s older queued runs ahead of it, read once a
   gh.calls.length = 0;
   await ci.tick();
   assert.equal(waits.wait(b.id)!.chip, 'CI · step 1/2');
-  assert.deepEqual(gh.calls.filter((c) => c.includes('status=queued')), []);
+  assert.deepEqual(
+    gh.calls.filter((c) => c.includes('status=queued')),
+    [],
+  );
 });
 
 // #1368: a landing's CI job sends its suite's test file counts (POST /api/ci-tests, its run named by its GitHub run
 // token); the wait, and so the Releases Test stage and its riders, read "143/412 test files" and fill by them.
-test('a landing\'s CI shows its suite\'s test files as its job sends them, and its steps again once they stop', async () => {
+test("a landing's CI shows its suite's test files as its job sends them, and its steps again once they stop", async () => {
   const { generateKeyPairSync, sign } = await import('node:crypto');
   const { Readable } = await import('node:stream');
   const { AUDIENCE, CiStore, ISSUER, RunTokens } = await import('../src/ci-store.ts');
@@ -305,7 +340,16 @@ test('a landing\'s CI shows its suite\'s test files as its job sends them, and i
   const route = agentRoutes.find((r) => r.path === '/api/ci-tests')!;
   const post = async (sent: unknown, auth = `Bearer ${token}`) => {
     const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(sent))]), { headers: { 'content-type': 'application/json', authorization: auth } });
-    const res = { status: 0, headersSent: false, setHeader() {}, writeHead(s: number) { this.status = s; return this; }, end() {} };
+    const res = {
+      status: 0,
+      headersSent: false,
+      setHeader() {},
+      writeHead(s: number) {
+        this.status = s;
+        return this;
+      },
+      end() {},
+    };
     try {
       await route.handler({ req, res, app } as any);
       return res.status;
@@ -317,7 +361,7 @@ test('a landing\'s CI shows its suite\'s test files as its job sends them, and i
   assert.equal(await post({ done: 413, total: 412 }), 400);
   assert.equal(await post({ done: 'x', total: 412 }), 400);
   ci.testCounts('someone/else', 9, { done: 1, total: 2, file: '' });
-  assert.equal(waits.wait(m.id)!.brief, 'CI: step 7', 'another repo\'s run 9 is not this one');
+  assert.equal(waits.wait(m.id)!.brief, 'CI: step 7', "another repo's run 9 is not this one");
   assert.equal(await post({ done: 143, total: 412, file: 'test/releases.test.ts' }), 202);
   const w = waits.wait(m.id)!;
   assert.deepEqual([w.brief, w.done, w.total, w.chip], ['CI: 143/412 test files', 143, 412, 'ship · CI 7/8'], 'the stage reads and fills by test files; the chip keeps its steps (Josh, #551)');

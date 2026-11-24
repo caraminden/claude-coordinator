@@ -6,13 +6,12 @@ import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { toneChip } from './look.js';
 
-const COST = 'It uses one of your 3 free ultra reviews, or about $5-25 in usage credits once those are gone. Citadel can\'t see how many free runs you have left, and a run counts as soon as it starts, even if it fails.';
+const COST = "It uses one of your 3 free ultra reviews, or about $5-25 in usage credits once those are gone. Citadel can't see how many free runs you have left, and a run counts as soon as it starts, even if it fails.";
 
 /** The header's button: every open chat can review an area; a minion with a branch can also review that. */
 export function ultraButton(t) {
   if (t.status === 'closed') return '';
-  return h('button', { type: 'button', class: 'secondary act-ultra', title: 'Run an ultra review on your own Claude account: this branch, or an area of the repo', onclick: () => openUltra(t) },
-    'Ultra', h('span', { class: 'wide-only' }, ' review'));
+  return h('button', { type: 'button', class: 'secondary act-ultra', title: 'Run an ultra review on your own Claude account: this branch, or an area of the repo', onclick: () => openUltra(t) }, 'Ultra', h('span', { class: 'wide-only' }, ' review'));
 }
 
 const fmt = (n) => n.toLocaleString('en-US');
@@ -20,7 +19,7 @@ const fmt = (n) => n.toLocaleString('en-US');
 function openUltra(t) {
   const hasBranch = t.kind !== 'coordinator' && !!t.branch;
   const radio = (value, label, extra = {}) => h('label', { class: 'ur-mode' }, h('input', { type: 'radio', name: 'mode', value, ...extra }), label);
-  const branchOpt = radio('branch', hasBranch ? h('span', {}, 'This minion\'s branch ', h('code', {}, t.branch)) : 'This minion\'s branch (none)', { checked: hasBranch, disabled: !hasBranch });
+  const branchOpt = radio('branch', hasBranch ? h('span', {}, "This minion's branch ", h('code', {}, t.branch)) : "This minion's branch (none)", { checked: hasBranch, disabled: !hasBranch });
   const areaOpt = radio('area', 'An area of the repo', { checked: !hasBranch });
   const batchOpt = radio('batch', 'Several areas: a draft pull request for each, started one by one');
   const paths = h('textarea', { name: 'paths', rows: 4, placeholder: 'src/db.ts src/mcp.ts src/routes', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Paths in the area' });
@@ -30,15 +29,7 @@ function openUltra(t) {
   const btn = h('button', { type: 'submit', disabled: true }, 'Start ultra review');
   const batch = batchPanel(t, () => dialog);
   const cost = h('p', { class: 'ur-cost' }, 'Runs on ', h('strong', {}, 'your own Claude account'), '. ', COST, ' It takes 5-15 minutes, up to 45, and the findings land in this chat.');
-  const form = h('form', { class: 'ur-form' },
-    h('div', { class: 'ur-modes' }, branchOpt, areaOpt, batchOpt),
-    pathsBox,
-    size,
-    batch.el,
-    cost,
-    err,
-    h('div', { class: 'row sheet-actions' }, h('span', { class: 'spacer' }),
-      h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel'), btn));
+  const form = h('form', { class: 'ur-form' }, h('div', { class: 'ur-modes' }, branchOpt, areaOpt, batchOpt), pathsBox, size, batch.el, cost, err, h('div', { class: 'row sheet-actions' }, h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'secondary', onclick: () => dialog.close() }, 'Cancel'), btn));
   const dialog = openDialog({ title: 'Ultra review', className: 'new-scheme ultra-review', body: form });
 
   const mode = () => form.elements.mode.value;
@@ -65,9 +56,12 @@ function openUltra(t) {
       if (n !== seq) return;
       const over = r.size.files > r.limits.files || r.size.lines > r.limits.lines;
       const what = r.mode === 'branch' ? `${r.branch} against ${r.base}` : `the area, against ${r.base} without it`;
-      size.replaceChildren(`Reviews ${what}: `, h('strong', {}, `${fmt(r.size.files)} file${r.size.files === 1 ? '' : 's'}, ${fmt(r.size.lines)} changed lines`),
-        over ? h('span', { class: 'ur-over' }, ` Over the CLI's limit of ${fmt(r.limits.files)} files and ${fmt(r.limits.lines)} lines: it will refuse before using a run.`) : ` (limit ${fmt(r.limits.files)} files, ${fmt(r.limits.lines)} lines).`);
-      if (!r.linked) return showErr('Your Claude plan isn\'t linked (Settings → Your account), so there\'s no login of yours to run it on.');
+      size.replaceChildren(
+        `Reviews ${what}: `,
+        h('strong', {}, `${fmt(r.size.files)} file${r.size.files === 1 ? '' : 's'}, ${fmt(r.size.lines)} changed lines`),
+        over ? h('span', { class: 'ur-over' }, ` Over the CLI's limit of ${fmt(r.limits.files)} files and ${fmt(r.limits.lines)} lines: it will refuse before using a run.`) : ` (limit ${fmt(r.limits.files)} files, ${fmt(r.limits.lines)} lines).`,
+      );
+      if (!r.linked) return showErr("Your Claude plan isn't linked (Settings → Your account), so there's no login of yours to run it on.");
       if (r.running) return showErr('You already have an ultra review running. Wait for its findings first.');
       checked = { mode: r.mode, paths: r.paths };
       btn.disabled = false;
@@ -127,32 +121,52 @@ function batchPanel(t, dialogOf) {
   const list = h('div', { class: 'ur-rows' });
   const areas = h('div', { class: 'ur-areas' });
   const refused = h('div', { class: 'cui-notice ur-refused', 'data-tone': 'danger', role: 'alert', hidden: true });
-  const noGithub = h('p', { class: 'cui-notice', 'data-tone': 'warn', hidden: true },
-    'You haven\'t linked GitHub (Settings → Your account). Each area\'s draft pull request goes out as your own GitHub login, and Citadel never uses anyone else\'s.');
+  const noGithub = h('p', { class: 'cui-notice', 'data-tone': 'warn', hidden: true }, "You haven't linked GitHub (Settings → Your account). Each area's draft pull request goes out as your own GitHub login, and Citadel never uses anyone else's.");
   const prep = h('button', { type: 'button', onclick: () => send() }, 'Prep draft PRs');
   const add = h('button', { type: 'button', class: 'secondary', onclick: () => addArea(true) }, '+ Add area');
-  const listBox = h('div', { class: 'ur-rows-box' }, h('h4', {}, 'Prepped'), list,
-    h('p', { class: 'ur-cost' }, 'Each Start runs on ', h('strong', {}, 'your own Claude account'), ' and the findings land in this chat. ', COST));
-  const el = h('div', { class: 'ur-batch', hidden: true },
+  const listBox = h('div', { class: 'ur-rows-box' }, h('h4', {}, 'Prepped'), list, h('p', { class: 'ur-cost' }, 'Each Start runs on ', h('strong', {}, 'your own Claude account'), ' and the findings land in this chat. ', COST));
+  const el = h(
+    'div',
+    { class: 'ur-batch', hidden: true },
     listBox,
     h('h4', {}, 'Areas to prep'),
-    h('p', { class: 'ur-cost muted' }, 'Prepping is free: a draft pull request per area as your GitHub login (only ', h('code', {}, 'review/…'), ' branches, CI skipped). An area over the CLI\'s limit is refused with its size.'),
+    h('p', { class: 'ur-cost muted' }, 'Prepping is free: a draft pull request per area as your GitHub login (only ', h('code', {}, 'review/…'), " branches, CI skipped). An area over the CLI's limit is refused with its size."),
     noGithub,
     areas,
     refused,
-    h('div', { class: 'row ur-batch-actions' }, add, h('span', { class: 'spacer' }), prep));
+    h('div', { class: 'row ur-batch-actions' }, add, h('span', { class: 'spacer' }), prep),
+  );
 
   function addArea(focus = false, a = {}) {
     const name = h('input', { name: 'area-name', placeholder: 'Name, e.g. Database', autocomplete: 'off', value: a.name || '', 'aria-label': 'Area name' });
     const ps = h('textarea', { name: 'area-paths', rows: 2, placeholder: 'src/db.ts src/db', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Paths in the area' });
     ps.value = a.paths || '';
     const q = h('input', { name: 'area-question', placeholder: 'Question for the review (optional)', autocomplete: 'off', value: a.question || '', 'aria-label': 'Question for the review' });
-    const box = h('fieldset', { class: 'ur-area' },
-      h('div', { class: 'row' }, name, h('button', { type: 'button', class: 'secondary ur-remove', title: 'Remove this area', 'aria-label': 'Remove this area', onclick: () => {
-        box.remove();
-        if (!areas.children.length) addArea(true);
-      } }, '×')),
-      ps, q);
+    const box = h(
+      'fieldset',
+      { class: 'ur-area' },
+      h(
+        'div',
+        { class: 'row' },
+        name,
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'secondary ur-remove',
+            title: 'Remove this area',
+            'aria-label': 'Remove this area',
+            onclick: () => {
+              box.remove();
+              if (!areas.children.length) addArea(true);
+            },
+          },
+          '×',
+        ),
+      ),
+      ps,
+      q,
+    );
     box.read = () => ({ name: name.value.trim(), paths: ps.value.split(/[\s,]+/).filter(Boolean), question: q.value.trim() });
     areas.append(box);
     if (focus) name.focus();
@@ -173,14 +187,25 @@ function batchPanel(t, dialogOf) {
     const [tone, word] = STATE[r.state] || ['neutral', r.state];
     const start = h('button', { type: 'button', disabled: r.state !== 'ready', onclick: () => startRow(r) }, r.state === 'ready' && r.error ? 'Retry' : 'Start');
     const drop = h('button', { type: 'button', class: 'secondary', disabled: r.state === 'running', onclick: () => discard(r) }, 'Discard');
-    return h('div', { class: 'ur-row', 'data-row': r.id },
-      h('div', { class: 'ur-row-head' },
-        h('strong', { class: 'ur-row-name' }, r.name), toneChip(tone, word),
+    return h(
+      'div',
+      { class: 'ur-row', 'data-row': r.id },
+      h(
+        'div',
+        { class: 'ur-row-head' },
+        h('strong', { class: 'ur-row-name' }, r.name),
+        toneChip(tone, word),
         h('span', { class: 'muted ur-row-size' }, `${fmt(r.size.lines)} lines, ${fmt(r.size.files)} file${r.size.files === 1 ? '' : 's'}`),
-        r.pr?.url ? h('a', { href: r.pr.url, target: '_blank', rel: 'noopener' }, `PR #${r.pr.number}`) : h('span', { class: 'muted' }, 'Opening PR…')),
-      h('div', { class: 'ur-row-paths muted' }, r.paths.flatMap((p, i) => [i ? ', ' : '', h('code', {}, p)])),
+        r.pr?.url ? h('a', { href: r.pr.url, target: '_blank', rel: 'noopener' }, `PR #${r.pr.number}`) : h('span', { class: 'muted' }, 'Opening PR…'),
+      ),
+      h(
+        'div',
+        { class: 'ur-row-paths muted' },
+        r.paths.flatMap((p, i) => [i ? ', ' : '', h('code', {}, p)]),
+      ),
       r.error ? h('div', { class: 'ur-row-err' }, r.error) : '',
-      h('div', { class: 'row ur-row-actions' }, h('span', { class: 'spacer' }), drop, start));
+      h('div', { class: 'row ur-row-actions' }, h('span', { class: 'spacer' }), drop, start),
+    );
   };
 
   const setRow = (id, patch) => {
@@ -190,7 +215,8 @@ function batchPanel(t, dialogOf) {
 
   function startRow(r) {
     optimistic({
-      key: `ur:${r.id}`, label: `start the ultra review of ${r.name}`,
+      key: `ur:${r.id}`,
+      label: `start the ultra review of ${r.name}`,
       apply: () => setRow(r.id, { state: 'running', error: undefined }),
       send: () => api(`api/tickets/${t.id}/ultrareview/batch/${r.id}/start`, { method: 'POST', body: { confirm: true } }),
       undo: () => {
@@ -202,7 +228,8 @@ function batchPanel(t, dialogOf) {
 
   function discard(r) {
     optimistic({
-      key: `ur:${r.id}`, label: `discard the ultra review of ${r.name}`,
+      key: `ur:${r.id}`,
+      label: `discard the ultra review of ${r.name}`,
       apply: () => setRow(r.id, null),
       send: () => api(`api/tickets/${t.id}/ultrareview/batch/${r.id}`, { method: 'DELETE' }),
       undo: () => {
@@ -256,25 +283,38 @@ function batchPanel(t, dialogOf) {
   return { el, load };
 }
 
-const what = (d) => (d.mode === 'branch' ? h('span', {}, 'branch ', h('code', {}, d.branch), ' against ', h('code', {}, d.base)) : h('span', {}, 'area ', d.paths.flatMap((p, i) => [i ? ', ' : '', h('code', {}, p)])));
+const what = (d) =>
+  d.mode === 'branch'
+    ? h('span', {}, 'branch ', h('code', {}, d.branch), ' against ', h('code', {}, d.base))
+    : h(
+        'span',
+        {},
+        'area ',
+        d.paths.flatMap((p, i) => [i ? ', ' : '', h('code', {}, p)]),
+      );
 
 /** The chat's card for a review: busy until its result settles it with the findings, or why it failed. */
 export function ultraCard(data) {
-  const status = h('div', { class: 'ur-status muted', role: 'status' }, 'Running on ', data.by, '\'s Claude account: 5-15 minutes, up to 45', h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')));
-  const card = h('div', { class: 'qcard ur-card busy', 'data-ultra': data.id },
+  const status = h('div', { class: 'ur-status muted', role: 'status' }, 'Running on ', data.by, "'s Claude account: 5-15 minutes, up to 45", h('span', { class: 'state-dots', 'aria-hidden': 'true' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.')));
+  const card = h(
+    'div',
+    { class: 'qcard ur-card busy', 'data-ultra': data.id },
     h('div', { class: 'who' }, 'Ultra review'),
     h('div', { class: 'qtitle' }, data.by, ' started an ultra review of ', what(data), ` (${fmt(data.size.files)} files, ${fmt(data.size.lines)} lines)`),
     data.pr ? prLine(data.pr) : '',
     data.question ? h('div', { class: 'ur-question' }, h('span', { class: 'muted' }, 'Question: '), data.question) : '',
-    status);
+    status,
+  );
   card.settle = (r) => {
     if (r.pr && !card.querySelector('.ur-pr')) card.querySelector('.qtitle').after(prLine(r.pr));
     card.classList.remove('busy');
     card.classList.toggle('failed', !r.ok);
     const body = h('pre', { class: 'ur-findings' }, r.text);
-    status.replaceChildren(r.ok
-      ? h('details', { open: true }, h('summary', {}, 'Findings', r.file ? h('span', { class: 'muted' }, ` · saved to ${r.file.split('/').pop()} in this chat's shared folder`) : ''), body)
-      : h('div', {}, h('div', { class: 'ur-fail' }, r.code == null ? 'It didn\'t finish.' : `It failed (exit code ${r.code}).`), body));
+    status.replaceChildren(
+      r.ok
+        ? h('details', { open: true }, h('summary', {}, 'Findings', r.file ? h('span', { class: 'muted' }, ` · saved to ${r.file.split('/').pop()} in this chat's shared folder`) : ''), body)
+        : h('div', {}, h('div', { class: 'ur-fail' }, r.code == null ? "It didn't finish." : `It failed (exit code ${r.code}).`), body),
+    );
   };
   return card;
 }
@@ -288,4 +328,3 @@ export function ultraResult(r) {
   card.settle(r);
   return card;
 }
-

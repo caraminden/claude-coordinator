@@ -29,7 +29,11 @@ function commit(dir: string, files: Record<string, string>, msg: string): string
   return git(dir, ['rev-parse', 'HEAD']).trim();
 }
 const lines = (n: number, tag = '') => Array.from({ length: n }, (_, i) => `line ${i}${tag}`).join('\n') + '\n';
-const edit = (text: string, i: number, to: string) => text.split('\n').map((l, j) => (j === i ? to : l)).join('\n');
+const edit = (text: string, i: number, to: string) =>
+  text
+    .split('\n')
+    .map((l, j) => (j === i ? to : l))
+    .join('\n');
 
 /**
  * A round's temp root holds the schemes' worktrees and the jobs' folders, and a check or ship job writes there until its
@@ -138,9 +142,15 @@ test('a file the scheme does not have is left alone, and the repo holding the te
     const own = repo(projects, '2/repo');
     commit(own, { [LAND.template]: f.v2, [LAND.path]: 'its own\n' }, 'citadel');
     mkdirSync(join(projects, '4'), { recursive: true });
-    assert.deepEqual(schemeRepos(projects, [2, 3, 4]).map((r) => r.project), [3]);
+    assert.deepEqual(
+      schemeRepos(projects, [2, 3, 4]).map((r) => r.project),
+      [3],
+    );
     const plan = planScheme(f.kit, 'HEAD', { [LAND.template]: templateHistory(f.kit, 'HEAD', LAND.template) }, s);
-    assert.deepEqual(plan.map((p) => p.status), ['merged', 'missing', 'missing', 'missing']);
+    assert.deepEqual(
+      plan.map((p) => p.status),
+      ['merged', 'missing', 'missing', 'missing'],
+    );
   } finally {
     f.done();
   }
@@ -165,7 +175,11 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     const land1 = '#!/usr/bin/env bash\n# v1\necho "$(git rev-parse HEAD) $KIT_TEST_WHO" >>"$KIT_TEST_LOG"\n';
     commit(kit, { [LAND.template]: land1 }, 'v1');
     const projectsDir = join(root, 'projects');
-    for (const [n, smoke] of [[3, 'true'], [4, 'echo the check broke; exit 3'], [5, 'true']] as const) {
+    for (const [n, smoke] of [
+      [3, 'true'],
+      [4, 'echo the check broke; exit 3'],
+      [5, 'true'],
+    ] as const) {
       const s = repo(projectsDir, `${n}/repo`);
       commit(s, { [LAND.path]: land1, 'tools/land.local.sh': `SMOKE_CMD='${smoke}'\n` }, 'setup');
       git(s, ['update-index', '--chmod=+x', LAND.path]);
@@ -179,23 +193,41 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     const mails: [number, string][] = [];
     const notes: [number, string][] = [];
     const ks = new KitSync({
-      kitDir: kit, projectsDir, runDir: join(root, 'run'), jobs,
-      load: () => saved && JSON.parse(JSON.stringify(saved)), save: (s) => (saved = s),
-      projects: () => [{ id: 2, name: 'Citadel' }, { id: 3, name: 'Green' }, { id: 4, name: 'Red' }, { id: 5, name: 'Elsewhere' }],
-      home: () => 2, chat: async (p) => 100 + p,
+      kitDir: kit,
+      projectsDir,
+      runDir: join(root, 'run'),
+      jobs,
+      load: () => saved && JSON.parse(JSON.stringify(saved)),
+      save: (s) => (saved = s),
+      projects: () => [
+        { id: 2, name: 'Citadel' },
+        { id: 3, name: 'Green' },
+        { id: 4, name: 'Red' },
+        { id: 5, name: 'Elsewhere' },
+      ],
+      home: () => 2,
+      chat: async (p) => 100 + p,
       env: (person) => ({ PATH: process.env.PATH!, HOME: process.env.HOME!, KIT_TEST_LOG: log, KIT_TEST_WHO: String(person) }),
       canPush: async (dir) => !dir.includes('/5/'),
       postCard: (ticket, card) => (cards.push({ ticket, card }), `q${cards.length}`),
-      settle: () => {}, note: (t, text) => notes.push([t, text]), mail: (t, text) => mails.push([t, text]),
+      settle: () => {},
+      note: (t, text) => notes.push([t, text]),
+      mail: (t, text) => mails.push([t, text]),
     });
     const polled = (what: string, ok: () => boolean) => until(what, async () => (await ks.poll(), ok()), 10_000);
     await polled('the checks end and the card is posted', () => cards.length > 0);
     const states = () => Object.fromEntries(saved.round.schemes.map((x: any) => [x.name, x.state]));
     assert.deepEqual(states(), { Green: 'green', Red: 'red', Elsewhere: 'green' });
     assert.equal(saved.round.kit, kitHead);
-    assert.deepEqual(cards.map((c) => [c.ticket, c.card.kind, c.card.kitSync]), [[102, 'merge', kitHead]]);
+    assert.deepEqual(
+      cards.map((c) => [c.ticket, c.card.kind, c.card.kitSync]),
+      [[102, 'merge', kitHead]],
+    );
     assert.match(cards[0].card.questions[0].question, /Check failed \(its Taskmaster has the output\): Red\./);
-    assert.deepEqual(mails.map(([t]) => t), [104]);
+    assert.deepEqual(
+      mails.map(([t]) => t),
+      [104],
+    );
     assert.match(mails[0][1], /fails this scheme's check \(exit 3\)[\s\S]*the check broke/);
 
     await ks.poll();
@@ -207,7 +239,11 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     assert.equal(git(join(projectsDir, '3/repo'), ['log', '-1', '--format=%(trailers:key=Kit-Sync,valueonly)', synced]).trim(), kitHead);
     assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [`${synced} 7`], 'land.sh ran once, on the sync commit, as the clicker');
     assert.equal(states().Elsewhere, 'elsewhere');
-    assert.deepEqual(cards.map((c) => c.ticket), [102, 105], 'the scheme it cannot push to gets its own card');
+    assert.deepEqual(
+      cards.map((c) => c.ticket),
+      [102, 105],
+      'the scheme it cannot push to gets its own card',
+    );
     assert.ok(mails.some(([t, text]) => t === 105 && /couldn't push to this repo/.test(text)));
     assert.ok(notes.some(([t, text]) => t === 102 && /Green shipped/.test(text)));
     await assert.rejects(ks.decide({ ticket: 102, question: 'q1' }, SHIP, { id: 7, name: 'josh' }), /no longer waiting/);
@@ -235,12 +271,24 @@ test("a round waits out a deploy's unchecked window, a running check keeps its r
     const cards: any[] = [];
     const mails: [number, string][] = [];
     const ks = new KitSync({
-      kitDir: kit, projectsDir, runDir: join(root, 'run'), jobs,
-      load: () => saved && JSON.parse(JSON.stringify(saved)), save: (s) => (saved = s),
-      projects: () => [{ id: 3, name: 'Gated' }, { id: 4, name: 'Bare' }],
-      home: () => 2, chat: async (p) => 100 + p, env: () => ({ PATH: process.env.PATH!, HOME: process.env.HOME! }),
-      canPush: async () => true, postCard: (ticket, card) => (cards.push({ ticket, card }), `q${cards.length}`),
-      settle: () => {}, note: () => {}, mail: (t, text) => mails.push([t, text]),
+      kitDir: kit,
+      projectsDir,
+      runDir: join(root, 'run'),
+      jobs,
+      load: () => saved && JSON.parse(JSON.stringify(saved)),
+      save: (s) => (saved = s),
+      projects: () => [
+        { id: 3, name: 'Gated' },
+        { id: 4, name: 'Bare' },
+      ],
+      home: () => 2,
+      chat: async (p) => 100 + p,
+      env: () => ({ PATH: process.env.PATH!, HOME: process.env.HOME! }),
+      canPush: async () => true,
+      postCard: (ticket, card) => (cards.push({ ticket, card }), `q${cards.length}`),
+      settle: () => {},
+      note: () => {},
+      mail: (t, text) => mails.push([t, text]),
     });
     const states = () => Object.fromEntries(saved.round.schemes.map((x: any) => [x.name, x.state]));
     const polled = (what: string, ok: () => boolean) => until(what, async () => (await ks.poll(), ok()));
@@ -263,7 +311,7 @@ test("a round waits out a deploy's unchecked window, a running check keeps its r
     assert.equal(states().Gated, 'checking');
 
     writeFileSync(gate, '');
-    await polled('the gated scheme\'s check to end', () => saved.round.kit !== v2);
+    await polled("the gated scheme's check to end", () => saved.round.kit !== v2);
     assert.equal(saved.round.kit, v3, 'once the check ended, the newer change starts its own round');
   } finally {
     await tidy(jobs, root);

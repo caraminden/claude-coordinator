@@ -65,5 +65,5 @@ test('no test file awaits at its top level after its first test', () => {
   assert.ok(files.length > 100, `the scan reads the test folder: ${files.length} files`);
   const found = scan(Object.fromEntries(files.map((f) => [f, readFileSync(join(TESTS, f), 'utf8')])));
   const bad = Object.entries(found).map(([f, { test: t, await: a }]) => `test/${f}: a test at line ${t}, a top-level await at line ${a}`);
-  assert.deepEqual(bad, [], 'under the gate\'s force-exit, a file ends once the tests registered so far are done, so the tests after a top-level await never run: do the setup before the first test, or in before()');
+  assert.deepEqual(bad, [], "under the gate's force-exit, a file ends once the tests registered so far are done, so the tests after a top-level await never run: do the setup before the first test, or in before()");
 });

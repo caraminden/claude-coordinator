@@ -6,15 +6,30 @@ import { unusedList, usageName } from '../usage-ledger.ts';
 export const usageRoutes: Route[] = [
   {
     // A page opened: the route with its numbers replaced (`p/n/settings`), so no scheme or minion id is kept.
-    method: 'POST', path: '/api/usage/page', who: ['person'],
+    method: 'POST',
+    path: '/api/usage/page',
+    who: ['person'],
     async handler({ req, res, app, session }) {
       const body = await readJson(req);
-      if (typeof body.name === 'string') app.store.usage.used('page', usageName(body.name.replace(/^#\/?/, '').replace(/[?#].*$/, '').replace(/\d+/g, 'n')), session.uid ?? session.name);
+      if (typeof body.name === 'string')
+        app.store.usage.used(
+          'page',
+          usageName(
+            body.name
+              .replace(/^#\/?/, '')
+              .replace(/[?#].*$/, '')
+              .replace(/\d+/g, 'n'),
+          ),
+          session.uid ?? session.name,
+        );
       return json(res, 200, { ok: true });
     },
   },
   {
-    method: 'GET', path: '/api/admin/usage', who: ['person'], access: 'admin',
+    method: 'GET',
+    path: '/api/admin/usage',
+    who: ['person'],
+    access: 'admin',
     handler({ res, app }) {
       const ledger = app.store.usage;
       const rows = ledger.rows();

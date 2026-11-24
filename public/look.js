@@ -17,22 +17,17 @@ export const schemeTag = (scheme, label = scheme) => h('span', { class: 'scheme-
 export const toneChip = (tone, text) => h('span', { class: 'cui-chip state-chip', 'data-tone': tone }, text);
 
 /** Stat tiles: each [value, label, hue] (hue a data-hue name, running by default); a falsy tile is left out. */
-export const statTiles = (...tiles) => h('div', { class: 'stat-tiles' }, ...tiles.filter(Boolean).map(([value, label, hue = 'running']) =>
-  h('div', { class: 'stat-tile', 'data-hue': hue }, h('b', {}, value), h('span', {}, label))));
+export const statTiles = (...tiles) => h('div', { class: 'stat-tiles' }, ...tiles.filter(Boolean).map(([value, label, hue = 'running']) => h('div', { class: 'stat-tile', 'data-hue': hue }, h('b', {}, value), h('span', {}, label))));
 
 /**
  * An item row with a bar in its hue down the left: `lead` (a number or a short word), the text, and `meta` on the
  * right. `hue` is a data-hue name, `cat` a scheme's (schemeHue); `free` draws it dashed and quiet, for an empty slot.
  */
 export const hueRow = ({ hue, cat, lead, meta, free } = {}, ...text) =>
-  h('div', { class: `hue-row${free ? ' free' : ''}`, 'data-hue': hue, 'data-cat': cat },
-    lead != null ? h('b', { class: 'hue-row-lead' }, lead) : null,
-    h('span', { class: 'hue-row-text' }, ...text),
-    meta != null ? h('span', { class: 'hue-row-meta' }, meta) : null);
+  h('div', { class: `hue-row${free ? ' free' : ''}`, 'data-hue': hue, 'data-cat': cat }, lead != null ? h('b', { class: 'hue-row-lead' }, lead) : null, h('span', { class: 'hue-row-text' }, ...text), meta != null ? h('span', { class: 'hue-row-meta' }, meta) : null);
 
 /** An empty state as a card: a mark, what it is, and what would fill it. `hue` defaults to done (green). */
-export const emptyCard = (title, line, { mark = '✓', hue } = {}) => h('div', { class: 'empty-card', 'data-hue': hue },
-  h('span', { class: 'empty-card-mark', 'aria-hidden': 'true' }, mark), h('div', {}, h('b', {}, title), line ? h('span', {}, line) : null));
+export const emptyCard = (title, line, { mark = '✓', hue } = {}) => h('div', { class: 'empty-card', 'data-hue': hue }, h('span', { class: 'empty-card-mark', 'aria-hidden': 'true' }, mark), h('div', {}, h('b', {}, title), line ? h('span', {}, line) : null));
 
 /** A bar for `frac` (0 to 1) in --h, beside its words. Its width is set through the CSSOM: the CSP refuses style="". */
 export function meter(frac, words) {
@@ -54,10 +49,28 @@ export function showFirst({ key, items, n = 5, noun = 'rows', wrap = (xs) => h('
   const box = h('div', { class: 'show-first' });
   const draw = () => {
     const all = shownAll.has(key) || items.length <= n + 1; // never hide just one
-    box.replaceChildren(wrap(all ? items : items.slice(0, n)), ...(items.length > n + 1 ? [h('button', {
-      type: 'button', class: 'show-more', 'aria-expanded': String(all),
-      onclick: () => { if (shownAll.has(key)) shownAll.delete(key); else shownAll.add(key); draw(); box.querySelector('.show-more')?.focus(); },
-    }, all ? `Show the first ${n} only` : `Show all ${items.length} ${noun}`)] : [])); // replaceChildren writes a null as "null"
+    box.replaceChildren(
+      wrap(all ? items : items.slice(0, n)),
+      ...(items.length > n + 1
+        ? [
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'show-more',
+                'aria-expanded': String(all),
+                onclick: () => {
+                  if (shownAll.has(key)) shownAll.delete(key);
+                  else shownAll.add(key);
+                  draw();
+                  box.querySelector('.show-more')?.focus();
+                },
+              },
+              all ? `Show the first ${n} only` : `Show all ${items.length} ${noun}`,
+            ),
+          ]
+        : []),
+    ); // replaceChildren writes a null as "null"
   };
   draw();
   return box;

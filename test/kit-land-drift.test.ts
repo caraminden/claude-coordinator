@@ -50,8 +50,7 @@ function world() {
     return git(live, 'rev-parse', 'HEAD');
   };
   const drift = () => execFileSync('bash', [join(live, 'tools', 'kit-land-drift.sh'), projects], { env, encoding: 'utf8' });
-  const deploy = (from: string, to: string, extra: Record<string, string> = {}) =>
-    promisify(execFile)('bash', [join(live, 'tools', 'deploy.sh'), 'kit-land-drift', from, to], { env: { ...env, DEPLOY_LIVE: live, DEPLOY_SOURCE: join(projects, '2', 'repo'), ...extra }, encoding: 'utf8' });
+  const deploy = (from: string, to: string, extra: Record<string, string> = {}) => promisify(execFile)('bash', [join(live, 'tools', 'deploy.sh'), 'kit-land-drift', from, to], { env: { ...env, DEPLOY_LIVE: live, DEPLOY_SOURCE: join(projects, '2', 'repo'), ...extra }, encoding: 'utf8' });
   return { live, drifted, commit, drift, deploy };
 }
 
@@ -59,13 +58,22 @@ async function standIn() {
   const seen: { url: string; auth?: string; body: string }[] = [];
   const srv = createServer((req, res) => {
     let body = '';
-    req.on('data', (d) => (body += d)).on('end', () => {
-      seen.push({ url: req.url ?? '', auth: req.headers.authorization, body });
-      res.writeHead(202, { 'Content-Type': 'application/json' }).end('{"sent":true}');
-    });
+    req
+      .on('data', (d) => (body += d))
+      .on('end', () => {
+        seen.push({ url: req.url ?? '', auth: req.headers.authorization, body });
+        res.writeHead(202, { 'Content-Type': 'application/json' }).end('{"sent":true}');
+      });
   });
   await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-  return { url: `http://127.0.0.1:${(srv.address() as any).port}`, seen, close: () => { srv.closeAllConnections(); srv.close(); } };
+  return {
+    url: `http://127.0.0.1:${(srv.address() as any).port}`,
+    seen,
+    close: () => {
+      srv.closeAllConnections();
+      srv.close();
+    },
+  };
 }
 
 test('kit-land-drift.sh lists only the scheme repos whose committed land.sh differs, leaving out Citadel and repos without one', () => {

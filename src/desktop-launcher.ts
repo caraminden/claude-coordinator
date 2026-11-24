@@ -33,7 +33,10 @@ export interface LauncherOpts {
 
 const dotnetBuild = async (dotnet: string, dir: string, out: string) => {
   await run(dotnet, ['build', join(dir, 'Launcher.csproj'), '-c', 'Release', '-o', out, '-nologo', '-v', 'q'], {
-    cwd: dir, timeout: 5 * 60_000, maxBuffer: 4 << 20, env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' },
+    cwd: dir,
+    timeout: 5 * 60_000,
+    maxBuffer: 4 << 20,
+    env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' },
   });
 };
 
@@ -75,7 +78,11 @@ export class Launchers {
     } catch (err) {
       this.failedHash = hash;
       this.failedAt = Date.now();
-      this.o.log?.(`desktop launcher: couldn't build it: ${String((err as { stderr?: string }).stderr || (err as Error).message).trim().slice(0, 500)}`);
+      this.o.log?.(
+        `desktop launcher: couldn't build it: ${String((err as { stderr?: string }).stderr || (err as Error).message)
+          .trim()
+          .slice(0, 500)}`,
+      );
       return null;
     } finally {
       await rm(tmp, { recursive: true, force: true });

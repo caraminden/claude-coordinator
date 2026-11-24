@@ -38,7 +38,7 @@ function run(dir: string, progress: string | undefined, args = ['--test', '--tes
   return { code: r.status, out: r.stdout.replace(/\(\d+(\.\d+)?ms\)|duration_ms [\d.]+/g, '') };
 }
 
-test('the counts follow the run: files done, of how many, the one running and the ones failed; the exit status and output are the run\'s own', () => {
+test("the counts follow the run: files done, of how many, the one running and the ones failed; the exit status and output are the run's own", () => {
   const dir = suite({ 'a.test.mjs': ok, 'b.test.mjs': WATCHER, 'c.test.mjs': red });
   const progress = join(dir, 'progress');
   const r = run(dir, progress);
@@ -79,16 +79,21 @@ test('events it cannot make sense of are passed over, and it reads the stream to
   const { default: progress } = await import('../tools/progress-reporter.ts');
   const dir = suite({});
   const file = join(dir, 't', 'a.test.mjs');
-  const events: any[] = [null, {}, { type: 'test:enqueue' }, { type: 'test:enqueue', data: null }, { type: 'test:enqueue', data: { name: 42, file } },
-    { type: 'test:enqueue', data: { name: file, file } }, { type: 'test:complete', data: { name: file, file } }];
+  const events: any[] = [null, {}, { type: 'test:enqueue' }, { type: 'test:enqueue', data: null }, { type: 'test:enqueue', data: { name: 42, file } }, { type: 'test:enqueue', data: { name: file, file } }, { type: 'test:complete', data: { name: file, file } }];
   let read = 0;
-  async function* source() { for (const e of events) { read++; yield e; } }
+  async function* source() {
+    for (const e of events) {
+      read++;
+      yield e;
+    }
+  }
   const before = process.env.CITADEL_TEST_PROGRESS_TO;
   process.env.CITADEL_TEST_PROGRESS_TO = join(dir, 'progress');
   try {
     for await (const _ of progress(source())) assert.fail('it says nothing');
   } finally {
-    if (before === undefined) delete process.env.CITADEL_TEST_PROGRESS_TO; else process.env.CITADEL_TEST_PROGRESS_TO = before;
+    if (before === undefined) delete process.env.CITADEL_TEST_PROGRESS_TO;
+    else process.env.CITADEL_TEST_PROGRESS_TO = before;
   }
   assert.equal(read, events.length);
   assert.equal(readFileSync(join(dir, 'progress'), 'utf8'), '1\n1\n\n\n');

@@ -36,15 +36,22 @@ test('every number in a PR or issue list is a PR, not a minion', () => {
 });
 
 test('"<Scheme> #N" links into that scheme', () => {
-  const schemes = [{ id: 1, name: 'Delve' }, { id: 2, name: 'Citadel' }, { id: 7, name: 'Delve Two' }, { id: 9, name: "Tom's game" }];
+  const schemes = [
+    { id: 1, name: 'Delve' },
+    { id: 2, name: 'Citadel' },
+    { id: 7, name: 'Delve Two' },
+    { id: 9, name: "Tom's game" },
+  ];
   const lnk = (html, titleOf) => linkThreadRefs(html, 2, titleOf, schemes);
   const at = (p, n, text) => `<a class="thread-ref" href="#/p/${p}/t/${n}">${text}</a>`;
   assert.equal(lnk('Delve #68'), at(1, 68, 'Delve #68'));
   assert.equal(lnk('see delve #68.'), `see ${at(1, 68, 'delve #68')}.`);
   assert.equal(lnk('Delve Two #3 and Delve #4'), `${at(7, 3, 'Delve Two #3')} and ${at(1, 4, 'Delve #4')}`);
   assert.equal(lnk('Tom&#39;s game #5'), at(9, 5, 'Tom&#39;s game #5'));
-  assert.equal(lnk('Citadel #68', (n) => (n === 68 ? '#68 Sixty' : null)),
-    '<a class="thread-ref" href="#/p/2/t/68" title="#68 Sixty">Citadel #68</a>');
+  assert.equal(
+    lnk('Citadel #68', (n) => (n === 68 ? '#68 Sixty' : null)),
+    '<a class="thread-ref" href="#/p/2/t/68" title="#68 Sixty">Citadel #68</a>',
+  );
   // Not a whole word, or not a scheme: today's behaviour.
   assert.equal(lnk('Undelve #6'), `Undelve ${a(6)}`);
   assert.equal(lnk('Perigee #6'), `Perigee ${a(6)}`);
@@ -54,7 +61,11 @@ test('"<Scheme> #N" links into that scheme', () => {
 });
 
 test('a scheme\'s name scopes "\'s", "minion" and "minion #N in <Scheme>" to that scheme', () => {
-  const schemes = [{ id: 1, name: 'Delve' }, { id: 2, name: 'Citadel' }, { id: 9, name: "Tom's game" }];
+  const schemes = [
+    { id: 1, name: 'Delve' },
+    { id: 2, name: 'Citadel' },
+    { id: 9, name: "Tom's game" },
+  ];
   const lnk = (html) => linkThreadRefs(html, 2, () => null, schemes);
   const at = (p, n, text = `#${n}`) => `<a class="thread-ref" href="#/p/${p}/t/${n}">${text}</a>`;
   // Escaped as the renderer escapes it: a straight apostrophe is &#39;.
@@ -77,8 +88,10 @@ test('a scheme\'s name scopes "\'s", "minion" and "minion #N in <Scheme>" to tha
 });
 
 test('titles known threads and needs a project', () => {
-  assert.equal(link('#3', (n) => (n === 3 ? '#3 Fix "it"' : null)),
-    '<a class="thread-ref" href="#/p/2/t/3" title="#3 Fix &quot;it&quot;">#3</a>');
+  assert.equal(
+    link('#3', (n) => (n === 3 ? '#3 Fix "it"' : null)),
+    '<a class="thread-ref" href="#/p/2/t/3" title="#3 Fix &quot;it&quot;">#3</a>',
+  );
   assert.equal(linkThreadRefs('#3', null), '#3');
 });
 
@@ -95,8 +108,7 @@ test('inAppHash keeps links into this app in the app', async () => {
   assert.equal(inAppHash('http://[bad', here), null);
 });
 
-
-test('PR URLs: only a PR\'s own page counts', () => {
+test("PR URLs: only a PR's own page counts", () => {
   assert.deepEqual(prUrlParts('https://github.com/CaraMinden/gamedevtest/pull/186'), { repo: 'caraminden/gamedevtest', number: 186 });
   for (const s of ['https://github.com/o/r/pull/1/files', 'https://github.com/o/r/pull/1#issuecomment-2', 'https://github.com/o/r/issues/1', 'http://github.com/o/r/pull/1', null]) {
     assert.equal(prUrlParts(s), null, s);
@@ -163,12 +175,11 @@ test('threadNumberHref is the address the app itself gives a numbered minion', (
 
 test('prLinkOpen: a link to the owner, keeping the already-escaped PR address as it is; none without an owner', () => {
   const url = 'https://github.com/o/r/pull/5?w=1&amp;x=2';
-  assert.equal(prLinkOpen(url, { hash: '#/p/1/t/68', title: 'Delve #68 "Fix" <b> & co\'s (owns PR #5)' }),
-    `<a href="#/p/1/t/68" title="Delve #68 &quot;Fix&quot; &lt;b&gt; &amp; co&#39;s (owns PR #5)" data-pr-url="${url}">`);
+  assert.equal(prLinkOpen(url, { hash: '#/p/1/t/68', title: 'Delve #68 "Fix" <b> & co\'s (owns PR #5)' }), `<a href="#/p/1/t/68" title="Delve #68 &quot;Fix&quot; &lt;b&gt; &amp; co&#39;s (owns PR #5)" data-pr-url="${url}">`);
   assert.equal(prLinkOpen(url, null), null);
 });
 
-test('prNumberRoute finds a PR by its scheme\'s repo', () => {
+test("prNumberRoute finds a PR by its scheme's repo", () => {
   assert.deepEqual(prNumberRoute(delveRepos, 1, 186), { hash: '#/p/1/t/68', title: 'Delve #68 Laptop "scripts" (owns PR #186)' });
   // #272: one that isn't in the repo is false, not "unknown".
   assert.equal(prNumberRoute(delveRepos, 1, 7), null, 'not in the repo');
@@ -177,9 +188,19 @@ test('prNumberRoute finds a PR by its scheme\'s repo', () => {
 });
 
 test('"PR #N" links to the minion owning the PR in the scheme on screen', () => {
-  const schemes = [{ id: 1, name: 'Delve' }, { id: 2, name: 'Citadel' }];
+  const schemes = [
+    { id: 1, name: 'Delve' },
+    { id: 2, name: 'Citadel' },
+  ];
   // Minion #187 is known; PR #7 isn't in the repo, so it waits, plain, in a span for linkPrRefs.
-  const lnk = (html, p = 1) => linkThreadRefs(html, p, (n) => (n === 187 ? 'Minion 187' : null), schemes, (projectId, n) => prNumberRoute(delveRepos, projectId, n));
+  const lnk = (html, p = 1) =>
+    linkThreadRefs(
+      html,
+      p,
+      (n) => (n === 187 ? 'Minion 187' : null),
+      schemes,
+      (projectId, n) => prNumberRoute(delveRepos, projectId, n),
+    );
   const at = (p, n, text = `#${n}`) => `<a class="thread-ref" href="#/p/${p}/t/${n}">${text}</a>`;
   assert.equal(lnk('PR #186 shipped. #187 next'), `${toOwner('PR #186')} shipped. <a class="thread-ref" href="#/p/1/t/187" title="Minion 187">#187</a> next`);
   assert.equal(lnk('pull request #186.'), `${toOwner('pull request #186')}.`);
@@ -200,14 +221,16 @@ test('"PR #N" links to the minion owning the PR in the scheme on screen', () => 
   assert.equal(lnk('Delve&#39;s PR #186', 2), toOwner('Delve&#39;s PR #186'));
   assert.equal(lnk('delve PRs #7 and #186', 2), `${pending(7, 'delve PRs #7')} and ${toOwner('#186')}`);
   // Without a PR lookup, PR mentions stay plain text as before.
-  assert.equal(linkThreadRefs('PR #186 and Delve PR #186', 2, () => null, schemes), 'PR #186 and Delve PR #186');
+  assert.equal(
+    linkThreadRefs('PR #186 and Delve PR #186', 2, () => null, schemes),
+    'PR #186 and Delve PR #186',
+  );
 });
 
 test('bare PR URLs go to their owner from the start, GitHub otherwise', () => {
   const route = (url) => prOwnerRoute(delveRepos, url.replace(/&amp;/g, '&'));
   const owned = 'https://github.com/o/r/pull/186';
-  assert.equal(linkUrls(`see ${owned}.`, null, route),
-    `see <a href="#/p/1/t/68" title="Delve #68 Laptop &quot;scripts&quot; (owns PR #186)" data-pr-url="${owned}">${owned}</a>.`);
+  assert.equal(linkUrls(`see ${owned}.`, null, route), `see <a href="#/p/1/t/68" title="Delve #68 Laptop &quot;scripts&quot; (owns PR #186)" data-pr-url="${owned}">${owned}</a>.`);
   for (const url of ['https://github.com/o/r/pull/7', `${owned}/files`, 'https://github.com/x/y/pull/186']) {
     assert.equal(linkUrls(url, null, route), tab(url), url);
   }
@@ -215,7 +238,7 @@ test('bare PR URLs go to their owner from the start, GitHub otherwise', () => {
 
 test('jumpParts: a chat address asking to open at one event, or its latest reply (#236)', () => {
   assert.deepEqual(jumpParts('#/p/2/t/34?e=901'), { hash: '#/p/2/t/34', target: '901' });
-  assert.deepEqual(jumpParts('#/p/2?e=latest'), { hash: '#/p/2', target: 'latest' }, 'the Taskmaster\'s chat');
+  assert.deepEqual(jumpParts('#/p/2?e=latest'), { hash: '#/p/2', target: 'latest' }, "the Taskmaster's chat");
   assert.deepEqual(jumpParts('#/t/7?e=3'), { hash: '#/t/7', target: '3' });
   for (const hash of ['#/p/2/t/34', '#/p/2/artifacts?e=1', '#/p/2/t/34?e=', '#/p/2/t/34?e=1x', '', undefined]) assert.equal(jumpParts(hash), null, String(hash));
 });
@@ -225,9 +248,19 @@ const knownRepos = new Map([['o/r', { ...delveRepos.get('o/r'), pulls: [115, 146
 const ghPr = (n, text) => `<a href="https://github.com/o/r/pull/${n}" target="_blank" rel="noopener" title="No minion owns this PR: opens o/r PR #${n} on GitHub">${text}</a>`;
 const issue = (n, text) => `<a href="https://github.com/o/r/issues/${n}" target="_blank" rel="noopener" title="o/r issue #${n} on GitHub">${text}</a>`;
 
-test('a bare #N with no minion of that number links its repo\'s PR or issue, or stays plain', () => {
-  const minions = new Map([[5, 'Five'], [68, 'Laptop']]);
-  const lnk = (html, repos = knownRepos) => linkThreadRefs(html, 1, (n) => minions.get(n) ?? null, [], (p, n) => prNumberRoute(repos, p, n));
+test("a bare #N with no minion of that number links its repo's PR or issue, or stays plain", () => {
+  const minions = new Map([
+    [5, 'Five'],
+    [68, 'Laptop'],
+  ]);
+  const lnk = (html, repos = knownRepos) =>
+    linkThreadRefs(
+      html,
+      1,
+      (n) => minions.get(n) ?? null,
+      [],
+      (p, n) => prNumberRoute(repos, p, n),
+    );
   assert.equal(lnk('#5'), '<a class="thread-ref" href="#/p/1/t/5" title="Five">#5</a>', 'a minion stays a minion');
   assert.equal(lnk('#186'), toOwner('#186'), 'a PR a minion owns goes to it');
   assert.equal(lnk('#115.'), `${ghPr(115, '#115')}.`, 'a PR nobody owns goes to GitHub');
@@ -242,7 +275,14 @@ test('a bare #N with no minion of that number links its repo\'s PR or issue, or 
 test('"PR #N" nobody owns links to GitHub, saying why', () => {
   assert.deepEqual(prNumberRoute(knownRepos, 1, 115), { url: 'https://github.com/o/r/pull/115', title: 'No minion owns this PR: opens o/r PR #115 on GitHub' });
   assert.equal(prNumberRoute(knownRepos, 1, 999), null, 'not in the repo');
-  const lnk = (html) => linkThreadRefs(html, 1, () => null, [], (p, n) => prNumberRoute(knownRepos, p, n));
+  const lnk = (html) =>
+    linkThreadRefs(
+      html,
+      1,
+      () => null,
+      [],
+      (p, n) => prNumberRoute(knownRepos, p, n),
+    );
   assert.equal(lnk('PR #115'), ghPr(115, 'PR #115'));
   assert.equal(lnk('PR #999'), pending(999, 'PR #999'));
 });
@@ -256,16 +296,32 @@ test('"PR #N" links to the minion owning it even when that is the minion on scre
   ]);
   const toMandate = (text) => `<a class="thread-ref" href="#/p/5/t/24" title="Mandate #24 Use Citadel colours (owns PR #15)">${text}</a>`;
   assert.deepEqual(prNumberRoute(mandate, 5, 15), { hash: '#/p/5/t/24', title: 'Mandate #24 Use Citadel colours (owns PR #15)' });
-  assert.deepEqual(prNumberRoute(knownRepos, 1, 186), { hash: '#/p/1/t/68', title: 'Delve #68 Laptop "scripts" (owns PR #186)' }, 'Delve #68\'s own PR');
-  const lnk = (html, p) => linkThreadRefs(html, p, () => null, [{ id: 1, name: 'Delve' }, { id: 5, name: 'Mandate' }], (q, n) => prNumberRoute(mandate, q, n));
+  assert.deepEqual(prNumberRoute(knownRepos, 1, 186), { hash: '#/p/1/t/68', title: 'Delve #68 Laptop "scripts" (owns PR #186)' }, "Delve #68's own PR");
+  const lnk = (html, p) =>
+    linkThreadRefs(
+      html,
+      p,
+      () => null,
+      [
+        { id: 1, name: 'Delve' },
+        { id: 5, name: 'Mandate' },
+      ],
+      (q, n) => prNumberRoute(mandate, q, n),
+    );
   assert.equal(lnk('Merged PR #15.', 5), `Merged ${toMandate('PR #15')}.`, 'in Mandate');
   assert.equal(lnk('see Mandate PR #15', 2), `see ${toMandate('Mandate PR #15')}`, 'from another scheme');
-  assert.equal(lnk('PR #15', 1), pending(15, 'PR #15'), 'Delve\'s repo has no PR #15');
+  assert.equal(lnk('PR #15', 1), pending(15, 'PR #15'), "Delve's repo has no PR #15");
 });
 
 test('"PRs (#115 and #146)" reads every number after "PRs" as a PR, not a minion', () => {
-  const lnk = (html) => linkThreadRefs(html, 1, () => 'a minion', [], (p, n) => prNumberRoute(knownRepos, p, n));
-  assert.equal(lnk('The tech tree PRs (#115 and #146) and the walk fixes (PR #186)'),
-    `The tech tree ${ghPr(115, 'PRs (#115')} and ${ghPr(146, '#146')}) and the walk fixes (${toOwner('PR #186')})`);
+  const lnk = (html) =>
+    linkThreadRefs(
+      html,
+      1,
+      () => 'a minion',
+      [],
+      (p, n) => prNumberRoute(knownRepos, p, n),
+    );
+  assert.equal(lnk('The tech tree PRs (#115 and #146) and the walk fixes (PR #186)'), `The tech tree ${ghPr(115, 'PRs (#115')} and ${ghPr(146, '#146')}) and the walk fixes (${toOwner('PR #186')})`);
   assert.equal(lnk('PRs: #115, #146'), `${ghPr(115, 'PRs: #115')}, ${ghPr(146, '#146')}`);
 });

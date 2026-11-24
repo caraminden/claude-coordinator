@@ -6,7 +6,8 @@ import { setAccount, setView } from '../public/base.js';
 import { askWhy, mentions, byUrgency, cardChip, cardsYours, pacific, progressWhy, refBucket, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, spokenCell, workingBy } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
-const MIN = 60_000, HOUR = 60 * MIN;
+const MIN = 60_000,
+  HOUR = 60 * MIN;
 const t = (over) => ({ status: 'idle', updated_at: NOW - 5 * MIN, ...over });
 const pill = (over, usage = null) => {
   const { rank, fam, cell, pulse } = rowState(t(over), usage, NOW);
@@ -48,7 +49,7 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
   for (const [over, want] of rows) assert.deepEqual(pill(over), want, JSON.stringify(over));
 });
 
-test('rowState: amber only for a card or replies of yours; another person\'s says whose (#1121)', () => {
+test("rowState: amber only for a card or replies of yours; another person's says whose (#1121)", () => {
   const card = (over) => ({ kind: 'question', href: '#/p/2/t/9?e=5', ...over });
   setAccount({ name: 'Josh' });
   try {
@@ -71,8 +72,11 @@ test('rowState: amber only for a card or replies of yours; another person\'s say
     assert.deepEqual(pill({ approvals: 1, status: 'running', properties: { assigned: 'Cara' } }), [2, 'wait', 'Cara 5m'], "Cara's approval");
     assert.deepEqual(pill({ approvals: 1, status: 'running', properties: { assigned: 'josh' } }), [0, 'you', '5m'], 'your approval');
     const mixed = { ...age, open_cards: [card({ to: 'Cara', href: '#cara' }), card({ to: 'Josh', href: '#josh' })] };
-    assert.deepEqual(cardsYours(t(mixed)).map((c) => c.href), ['#josh']);
-    assert.equal(rowWhy(t(mixed), rowState(t(mixed), null, NOW), NOW).link.href, '#josh', 'the popover opens your card, not the older one of Cara\'s');
+    assert.deepEqual(
+      cardsYours(t(mixed)).map((c) => c.href),
+      ['#josh'],
+    );
+    assert.equal(rowWhy(t(mixed), rowState(t(mixed), null, NOW), NOW).link.href, '#josh', "the popover opens your card, not the older one of Cara's");
     assert.deepEqual(cardsYours(t({ ...age, open_cards: [card({ to: 'Cara' })] })), [], 'none of yours: the badge goes violet');
   } finally {
     setAccount(null);
@@ -214,7 +218,10 @@ test('a wait reads elapsed against its usual, and runs late past 15% over', asyn
 });
 
 test('rowBar: a bar only while it works or waits on a land, CI or a deploy; none while it waits on a person (#575)', () => {
-  const bar = (over) => { const row = t(over); return rowBar(row, rowState(row, null, NOW)); };
+  const bar = (over) => {
+    const row = t(over);
+    return rowBar(row, rowState(row, null, NOW));
+  };
   const half = { done: 2, total: 4 };
   const ci = { kind: 'ci', stage: 'ci', since: NOW - MIN, usual: 5 * MIN };
   // Cara, 2026-11-11: "if a minion is asking a question it shouldnt have a progress bar right?"
@@ -226,7 +233,13 @@ test('rowBar: a bar only while it works or waits on a land, CI or a deploy; none
   assert.equal(bar({ status: 'closed', steps: half }), null, 'dismissed');
   assert.equal(bar({ steps: half, state: 'ready', wait: ci }), null, 'a stale wait on a row waiting on you');
   assert.deepEqual(bar({ status: 'running', steps: half }), { ...half, track: null }, 'working: steps done');
-  const steps = { ...half, since: NOW - MIN, usual: 120 }, track = [[2, 'c'], [3, 'c'], [2, 'i'], [null, 'p']];
+  const steps = { ...half, since: NOW - MIN, usual: 120 },
+    track = [
+      [2, 'c'],
+      [3, 'c'],
+      [2, 'i'],
+      [null, 'p'],
+    ];
   assert.deepEqual(bar({ status: 'running', steps, step_track: track }), { ...steps, track }, "working: the plan's track, its running step against its guess (#630)");
   assert.deepEqual(bar({ status: 'running', steps, step_track: track, wait: ci }), { ...steps, track, wait: ci }, 'a CI wait in the turn keeps the plan with it (#630)');
   assert.deepEqual(bar({ status: 'running', wait: ci }), { track: null, wait: ci }, 'a CI wait in a turn with no plan');
@@ -243,7 +256,10 @@ test('rowBar: a bar only while it works or waits on a land, CI or a deploy; none
 
 test('rowUnread: an unseen row is unread only when it has something for a person, never while it works or waits on the system (#576)', () => {
   // Cara, 2026-11-11, of a row waiting to land and one deploying: "isnt that for when there is something you need to do?"
-  const unread = (over, usage = null) => { const row = t(over); return rowUnread(row, rowState(row, usage, NOW), false); };
+  const unread = (over, usage = null) => {
+    const row = t(over);
+    return rowUnread(row, rowState(row, usage, NOW), false);
+  };
   const line = { kind: 'land', stage: 'line', chip: 'line · 2nd', text: '2nd in line, behind #575 (waiting for CI)', since: NOW - MIN, usual: 160 };
   const ci = (stage) => ({ ...line, kind: 'ci', stage, chip: `CI · ${stage}` });
   const forPerson = [
@@ -263,8 +279,8 @@ test('rowUnread: an unseen row is unread only when it has something for a person
     [{ state: 'pending-deploy' }, 'deploying, no wait yet'],
     [{ state: 'outside' }, 'waiting elsewhere'],
     [{ state: 'outside', wait: ci('queued') }, 'CI queued'],
-    [{ state: 'outside', wait: ci('passed') }, 'CI passed: green chip, still the minion\'s move'],
-    [{ state: 'outside', wait: ci('failed') }, 'CI failed: red chip, still the minion\'s move'],
+    [{ state: 'outside', wait: ci('passed') }, "CI passed: green chip, still the minion's move"],
+    [{ state: 'outside', wait: ci('failed') }, "CI failed: red chip, still the minion's move"],
     [{ status: 'error', state: 'limited', limit_resume_at: NOW + HOUR }, 'usage limit, resumes by itself'],
     [{ status: 'error', state: 'limited' }, 'usage limit, nothing known'],
     [{ status: 'running' }, 'working'],
@@ -301,7 +317,11 @@ test("a segmented track's pieces are as wide as their usual time, the average wh
 
 test("progressPieces: the plan's track stays through a wait, the wait filling the step underway; a landing with no step underway shows its stages (#630)", async () => {
   const { progressPieces } = await import('../public/wait.js');
-  const track = [[2, 'c'], [3, 'i'], [null, 'p']];
+  const track = [
+    [2, 'c'],
+    [3, 'i'],
+    [null, 'p'],
+  ];
   const test = { kind: 'land', stage: 'test', since: NOW - MIN, usual: 90, text: 'step 3 of 13' };
   const line = { kind: 'land', stage: 'line', since: NOW - MIN, text: '2nd in line' };
   const states = (r) => r.segs.map((s) => s.state + (s.waits ? '~' : '') + (s.clock ? '*' : ''));
@@ -309,15 +329,25 @@ test("progressPieces: the plan's track stays through a wait, the wait filling th
   assert.deepEqual(states(est), ['done', 'now*', ''], 'no wait: the step fills against its guess');
   assert.equal(est.segs[1].clock.usual, 180);
   const landing = progressPieces({ track, since: NOW - MIN, usual: 180, wait: test });
-  assert.deepEqual(states(landing), ['done', 'now*', ''], 'a landing mid-step: still the plan, not the wait\'s solid bar');
+  assert.deepEqual(states(landing), ['done', 'now*', ''], "a landing mid-step: still the plan, not the wait's solid bar");
   assert.equal(landing.segs[1].clock, test, 'the step underway fills by the wait');
   assert.deepEqual(states(progressPieces({ track, wait: line })), ['done', 'now~', ''], 'waiting in the line: the step underway is hatched');
-  const two = [[2, 'c'], [3, 'i'], [4, 'i']];
+  const two = [
+    [2, 'c'],
+    [3, 'i'],
+    [4, 'i'],
+  ];
   assert.deepEqual(states(progressPieces({ track: two, since: NOW - MIN, usual: 180, wait: test })), ['done', 'now*', 'now'], 'two steps underway: only the first fills from the wait');
   assert.deepEqual(states(progressPieces({ track: two, wait: line })), ['done', 'now~', 'now'], 'two steps underway in the line: only the first is hatched');
   assert.deepEqual(states(progressPieces({ track: two, since: NOW - MIN, usual: 180 })), ['done', 'now*', 'now'], 'no wait: the one scaled guess is not shared either');
   // Cara's screenshot: a land with no plan step underway read "Test 3/6" over one solid bar.
-  const stages = progressPieces({ track: [[2, 'c'], [3, 'c']], wait: test });
+  const stages = progressPieces({
+    track: [
+      [2, 'c'],
+      [3, 'c'],
+    ],
+    wait: test,
+  });
   assert.deepEqual(states(stages), ['done', 'done', 'now*', '', '', ''], "no step underway: the landing's own six stages");
   assert.equal(stages.label, 'Test, stage 3 of 6');
   assert.deepEqual(states(progressPieces({ track: null, wait: line })), ['now~', '', '', '', '', ''], 'in the line with no estimate');
@@ -361,7 +391,15 @@ test('serverLabel: the land phase in words, from the wait the server already rec
 });
 
 test("rowBar: the server's land draws the landing's track as a turn's wait does (#727)", () => {
-  const row = t({ server_work: { kind: 'land' }, steps: { done: 4, total: 4 }, step_track: [[3, 'c'], [2, 'c']], wait: { kind: 'land', stage: 'test', chip: 'ship · CI', text: 'x', since: NOW, usual: 120 } });
+  const row = t({
+    server_work: { kind: 'land' },
+    steps: { done: 4, total: 4 },
+    step_track: [
+      [3, 'c'],
+      [2, 'c'],
+    ],
+    wait: { kind: 'land', stage: 'test', chip: 'ship · CI', text: 'x', since: NOW, usual: 120 },
+  });
   const bar = rowBar(row, rowState(row, null, NOW));
   assert.equal(bar.wait.stage, 'test');
 });
@@ -402,13 +440,32 @@ test('rowWhy: every state rowState gives has a title and a reason; cards and rel
   const card = { kind: 'question', what: 'question', href: '#/p/2/t/9?e=5' };
   const release = { name: 'Release 14', target: 'Citadel', stage: 'restart', text: 'waits for 3 turns' };
   const states = [
-    {}, { replies: ['Go'] }, { pending_card_at: NOW - HOUR, open_cards: [{ ...card, to: 'Cara' }] }, { state: 'ready' }, { state: 'complete', note: 'nothing left' }, { state: 'try' }, { approvals: 1, status: 'running', open_cards: [card] },
-    { state: 'ready', pending_card_at: NOW - HOUR, open_cards: [card] }, { status: 'error' }, { status: 'running' },
+    {},
+    { replies: ['Go'] },
+    { pending_card_at: NOW - HOUR, open_cards: [{ ...card, to: 'Cara' }] },
+    { state: 'ready' },
+    { state: 'complete', note: 'nothing left' },
+    { state: 'try' },
+    { approvals: 1, status: 'running', open_cards: [card] },
+    { state: 'ready', pending_card_at: NOW - HOUR, open_cards: [card] },
+    { status: 'error' },
+    { status: 'running' },
     { status: 'running', turnStartedAt: NOW - 12 * MIN, last_activity: 'Editing thread.css', steps: { done: 2, total: 5, since: NOW - 3 * MIN, usual: 300 } },
-    { status: 'new' }, { status: 'new', parked_for: 'x', wakes_on: 'x', state: 'parked' }, { state: 'parked' }, { state: 'parked', wakes_on: 'the fix in #9 goes live' },
-    { state: 'outside', wait }, { state: 'pending-deploy' }, { state: 'pending-deploy', release }, { state: 'blocked', note: 'needs Cody' },
-    { status: 'closed' }, { status: 'closed', release }, { server_work: { kind: 'land' }, wait }, { server_work: { kind: 'land' }, release },
-    { status: 'error', state: 'limited', limit_resume_at: NOW + 40 * MIN }, { status: 'error', state: 'limited' }, QUIET,
+    { status: 'new' },
+    { status: 'new', parked_for: 'x', wakes_on: 'x', state: 'parked' },
+    { state: 'parked' },
+    { state: 'parked', wakes_on: 'the fix in #9 goes live' },
+    { state: 'outside', wait },
+    { state: 'pending-deploy' },
+    { state: 'pending-deploy', release },
+    { state: 'blocked', note: 'needs Cody' },
+    { status: 'closed' },
+    { status: 'closed', release },
+    { server_work: { kind: 'land' }, wait },
+    { server_work: { kind: 'land' }, release },
+    { status: 'error', state: 'limited', limit_resume_at: NOW + 40 * MIN },
+    { status: 'error', state: 'limited' },
+    QUIET,
   ];
   for (const over of states) {
     const m = t({ project_id: 2, ...over });
@@ -416,7 +473,10 @@ test('rowWhy: every state rowState gives has a title and a reason; cards and rel
     assert.ok(why.title, `a title for ${JSON.stringify(over)}`);
     assert.ok(why.lines.length && why.lines.every((l) => l.trim()), `a reason for ${JSON.stringify(over)}`);
   }
-  const of = (over) => { const m = t({ project_id: 2, ...over }); return rowWhy(m, rowState(m, null, NOW), NOW); };
+  const of = (over) => {
+    const m = t({ project_id: 2, ...over });
+    return rowWhy(m, rowState(m, null, NOW), NOW);
+  };
   assert.deepEqual(of({ pending_card_at: NOW - HOUR, open_cards: [card] }).link, { href: card.href, text: 'Open the question card →' });
   assert.equal(of({ status: 'closed', release }).link.href, '#/p/2/releases/2');
   // A wait says what and against its usual; a ready minion says since when.
@@ -430,9 +490,16 @@ test('rowWhy: every state rowState gives has a title and a reason; cards and rel
 test('askWhy: every kind of Needs-you item says why it is there and since when (#906)', () => {
   const at = NOW - 10 * MIN;
   const kinds = [
-    { kind: 'approval', card: {} }, { kind: 'question', card: {} }, { kind: 'question', card: { doc: 'x.html' } }, { kind: 'question', card: { notice: 'x' } },
-    { kind: 'question', card: { secret: { name: 'X' } } }, { kind: 'plan', card: {} }, { kind: 'spend', card: { stage: 5 } }, { kind: 'quiet' },
-    { kind: 'replies' }, { kind: 'mention', card: { by: 'Cara', text: '@Josh can you look at this' } },
+    { kind: 'approval', card: {} },
+    { kind: 'question', card: {} },
+    { kind: 'question', card: { doc: 'x.html' } },
+    { kind: 'question', card: { notice: 'x' } },
+    { kind: 'question', card: { secret: { name: 'X' } } },
+    { kind: 'plan', card: {} },
+    { kind: 'spend', card: { stage: 5 } },
+    { kind: 'quiet' },
+    { kind: 'replies' },
+    { kind: 'mention', card: { by: 'Cara', text: '@Josh can you look at this' } },
   ];
   for (const item of kinds) {
     const why = askWhy({ at, ...item }, { state: 'ready' }, NOW);

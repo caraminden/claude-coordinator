@@ -26,14 +26,24 @@ let joshId = 0;
 before(async () => {
   const server = tmp.spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
-      CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
+      ...process.env,
+      MACHINES_URL: undefined,
+      CITADEL_HOST_SIGNALS: 'fixed',
+      CITADEL_ZONE: TEST_ZONE,
+      PORT: '0',
+      DATA_DIR: join(root, 'data'),
+      CLAUDE_BIN: '/bin/false',
+      CLAUDE_CONFIG_DIR: join(root, 'claude'),
+      COORDINATOR_PASSWORD: 'test-password-123',
+      SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   base = `http://127.0.0.1:${await listeningPort(server)}`;
   const res = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Cara', password: 'test-password-123' }),
   });
   cookies.Cara = res.headers.get('set-cookie')!.split(';')[0];
   const { data: made } = await call('Cara', '/api/people', { method: 'POST', body: { name: 'Josh' } });
@@ -44,7 +54,7 @@ before(async () => {
 
 const listed = async (who: string, id: number) => (await call(who, '/api/projects')).data.find((p: any) => p.id === id);
 
-test('a hide is the hider\'s own: it flags the scheme and zeroes its badge for them only, and Unhide restores it', async () => {
+test("a hide is the hider's own: it flags the scheme and zeroes its badge for them only, and Unhide restores it", async () => {
   const { data: obsidian } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Obsidian' } });
   assert.equal((await call('Cara', `/api/projects/${obsidian.id}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
   // A minion waiting on people's answer (one-tap replies; ready and try don't count since #1121) gives the scheme a Needs-you count.
@@ -76,7 +86,7 @@ test('a hide is the hider\'s own: it flags the scheme and zeroes its badge for t
   assert.equal((await listed('Cara', obsidian.id)).hidden, false);
 });
 
-test('nobody hides a scheme they aren\'t in, and the body must say true or false', async () => {
+test("nobody hides a scheme they aren't in, and the body must say true or false", async () => {
   const { data: carasOwn } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Private' } });
   // Not in it: answers as if it didn't exist, and nothing is stored for anyone.
   assert.equal((await call('Josh', `/api/projects/${carasOwn.id}/hidden`, { method: 'PUT', body: { hidden: true } })).status, 404);
@@ -84,7 +94,7 @@ test('nobody hides a scheme they aren\'t in, and the body must say true or false
   assert.equal((await call('Cara', `/api/projects/${carasOwn.id}/hidden`, { method: 'PUT', body: { hidden: 'yes' } })).status, 400);
 });
 
-test('running: a scheme with a turn running, its Taskmaster\'s included, says so for the spinner; a hidden one stays quiet (#248)', async () => {
+test("running: a scheme with a turn running, its Taskmaster's included, says so for the spinner; a hidden one stays quiet (#248)", async () => {
   const { data: busy } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Busy' } });
   assert.equal((await listed('Cara', busy.id)).running, false, 'nothing running yet');
   const store = new Store(join(root, 'data', 'coordinator.db'));
@@ -110,7 +120,7 @@ test('running: a scheme with a turn running, its Taskmaster\'s included, says so
   store.db.close();
 });
 
-test('fresh: something waits that wasn\'t waiting when you last opened the scheme, compared item by item, kept per person; a stranger stores nothing (#498, #539)', async () => {
+test("fresh: something waits that wasn't waiting when you last opened the scheme, compared item by item, kept per person; a stranger stores nothing (#498, #539)", async () => {
   const { data: quartz } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Quartz' } });
   assert.equal((await call('Cara', `/api/projects/${quartz.id}/members`, { method: 'POST', body: { person: joshId } })).status, 200);
   const store = new Store(join(root, 'data', 'coordinator.db'));
@@ -146,7 +156,7 @@ test('fresh: something waits that wasn\'t waiting when you last opened the schem
   // Josh's first look takes today's items, and Cara's marks never were his.
   minion('E');
   assert.deepEqual(await pill('Josh'), [1, false]);
-  assert.deepEqual(await pill('Cara'), [1, true], 'Josh\'s look is his own');
+  assert.deepEqual(await pill('Cara'), [1, true], "Josh's look is his own");
   await open('Josh');
   assert.deepEqual(await pill('Cara'), [1, true]);
   for (const keys of [null, 'state:1', [1], ['x'.repeat(201)]]) assert.equal((await call('Cara', `/api/projects/${quartz.id}/seen-items`, { method: 'PUT', body: { keys } })).status, 400, JSON.stringify(keys));

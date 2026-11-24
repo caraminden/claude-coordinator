@@ -70,7 +70,8 @@ after(async () => {
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Box = { left: number; top: number; right: number; bottom: number; text: string };
-const tipBox = (page: Page) => page.eval<Box | null>(`(() => {
+const tipBox = (page: Page) =>
+  page.eval<Box | null>(`(() => {
   const pop = [...document.querySelectorAll('.cui-tip')].find((p) => p.matches(':popover-open'));
   if (!pop) return null;
   const r = pop.getBoundingClientRect();
@@ -80,7 +81,8 @@ const rect = (page: Page, sel: string) => page.eval<Box>(`document.querySelector
 const open = (opts: { touch?: boolean } = {}) => browser.page(base, opts);
 const SHOWN = `[...document.querySelectorAll('.cui-tip')].some((p) => p.matches(':popover-open'))`;
 /** Times in the page's own clock, which a loaded test box can't stretch: when the pointer first came over each thing (by id), and each tip's opening. */
-const clock = (page: Page) => page.eval(`(() => {
+const clock = (page: Page) =>
+  page.eval(`(() => {
   window.over = {}; window.opened = [];
   document.addEventListener('pointerover', (e) => { if (e.target.id) over[e.target.id] ??= performance.now(); }, true);
   document.addEventListener('beforetoggle', (e) => { if (e.newState === 'open') opened.push(performance.now()); }, true);
@@ -93,12 +95,12 @@ test('opens on hover after a short pause, below the thing, and closes when the m
   await page.mouse(c.x, c.y);
   await waitFor(page, 'the tip', SHOWN);
   // tip.js's OPEN_MS is 250; a few ms off for the clock's coarsening.
-  assert.ok(await page.eval<number>('opened[0] - over.top') >= 240, 'not at once: a mouse passing over doesn\'t flash tips');
+  assert.ok((await page.eval<number>('opened[0] - over.top')) >= 240, "not at once: a mouse passing over doesn't flash tips");
   const box = await tipBox(page);
   const t = await rect(page, '#top');
   assert.equal(box?.text, 'Life: 1,234');
   assert.ok(box!.top >= t.bottom, 'below the thing');
-  assert.match(await page.eval<string>('document.getElementById("top").getAttribute("aria-describedby")'), /^own-note cui-tip-\w+$/, 'adds its id beside the page\'s own');
+  assert.match(await page.eval<string>('document.getElementById("top").getAttribute("aria-describedby")'), /^own-note cui-tip-\w+$/, "adds its id beside the page's own");
   await page.mouse(590, 300);
   await waitFor(page, 'the tip to close', `!${SHOWN}`);
   assert.equal(await tipBox(page), null);
@@ -139,7 +141,7 @@ test('shows a skeleton while a slow body loads, then the body', { skip }, async 
   assert.equal(await page.eval('document.querySelectorAll(".cui-tip .cui-skeleton").length'), 0);
 });
 
-test('one tip open on the page, across mounts; a redraw\'s copy of the thing keeps it open', { skip }, async () => {
+test("one tip open on the page, across mounts; a redraw's copy of the thing keeps it open", { skip }, async () => {
   const page = await open();
   const c = await page.centre('#top');
   await clock(page);
@@ -148,7 +150,7 @@ test('one tip open on the page, across mounts; a redraw\'s copy of the thing kee
   const o = await page.centre('#other');
   await page.mouse(o.x, o.y);
   await waitFor(page, "#other's tip", 'opened.length === 2');
-  assert.ok(await page.eval<number>('opened[1] - over.other') < 150, 'warm: quicker from one tip to the next (60 ms, not 250)');
+  assert.ok((await page.eval<number>('opened[1] - over.other')) < 150, 'warm: quicker from one tip to the next (60 ms, not 250)');
   assert.equal((await tipBox(page))?.text, 'From another mount');
   assert.equal(await page.eval('document.querySelectorAll(".cui-tip:popover-open").length'), 1);
   // Back on #top, then the page redraws it.
@@ -173,7 +175,7 @@ test('on a touch screen a tap opens a tip that stays, and a tap elsewhere closes
   assert.equal(await tipBox(page), null);
 });
 
-test('a tap on a button does the button\'s thing; a long press shows its tip and swallows the click', { skip }, async () => {
+test("a tap on a button does the button's thing; a long press shows its tip and swallows the click", { skip }, async () => {
   const page = await open({ touch: true });
   const b = await page.centre('#btn');
   await page.tap(b.x, b.y);
@@ -206,5 +208,5 @@ test('a tip for a thing inside a modal dialog sits in it, so its buttons can be 
   await page.mouse(b.x, b.y);
   for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: b.x, y: b.y, button: 'left', clickCount: 1 });
   await waitFor(page, 'the click', 'window.tipClicks > 0');
-  assert.equal(await page.eval('window.tipClicks'), 1, 'the click reached the tip\'s button');
+  assert.equal(await page.eval('window.tipClicks'), 1, "the click reached the tip's button");
 });

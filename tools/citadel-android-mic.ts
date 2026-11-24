@@ -31,10 +31,19 @@ export function toneWav(hz: number, seconds: number, rate = MAX_RATE): Buffer {
   const data = Buffer.alloc(n * 2);
   for (let i = 0; i < n; i++) data.writeInt16LE(Math.round(16383 * Math.sin((2 * Math.PI * hz * i) / rate)), i * 2);
   const head = Buffer.alloc(44);
-  head.write('RIFF', 0); head.writeUInt32LE(36 + data.length, 4); head.write('WAVE', 8);
-  head.write('fmt ', 12); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22);
-  head.writeUInt32LE(rate, 24); head.writeUInt32LE(rate * 2, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34);
-  head.write('data', 36); head.writeUInt32LE(data.length, 40);
+  head.write('RIFF', 0);
+  head.writeUInt32LE(36 + data.length, 4);
+  head.write('WAVE', 8);
+  head.write('fmt ', 12);
+  head.writeUInt32LE(16, 16);
+  head.writeUInt16LE(1, 20);
+  head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(rate, 24);
+  head.writeUInt32LE(rate * 2, 28);
+  head.writeUInt16LE(2, 32);
+  head.writeUInt16LE(16, 34);
+  head.write('data', 36);
+  head.writeUInt32LE(data.length, 40);
   return Buffer.concat([head, data]);
 }
 
@@ -43,14 +52,18 @@ export function parseWav(buf: Buffer): Pcm {
   if (buf.length < 12 || buf.toString('latin1', 0, 4) !== 'RIFF' || buf.toString('latin1', 8, 12) !== 'WAVE') throw new Error('not a WAV file (no RIFF/WAVE header)');
   let fmt: Buffer | undefined, data: Buffer | undefined;
   for (let at = 12; at + 8 <= buf.length; ) {
-    const id = buf.toString('latin1', at, at + 4), size = buf.readUInt32LE(at + 4);
+    const id = buf.toString('latin1', at, at + 4),
+      size = buf.readUInt32LE(at + 4);
     const body = buf.subarray(at + 8, Math.min(buf.length, at + 8 + size));
     if (id === 'fmt ') fmt = body;
     else if (id === 'data') data = body;
     at += 8 + size + (size & 1);
   }
   if (!fmt || fmt.length < 16 || !data) throw new Error('the WAV has no fmt or data chunk');
-  const format = fmt.readUInt16LE(0), channels = fmt.readUInt16LE(2), rate = fmt.readUInt32LE(4), bits = fmt.readUInt16LE(14);
+  const format = fmt.readUInt16LE(0),
+    channels = fmt.readUInt16LE(2),
+    rate = fmt.readUInt32LE(4),
+    bits = fmt.readUInt16LE(14);
   // 0xFFFE (extensible) is still PCM when its sub-format says so; its first two bytes hold the plain format code.
   const pcm = format === 1 || (format === 0xfffe && fmt.length >= 26 && fmt.readUInt16LE(24) === 1);
   if (!pcm || bits !== 16) throw new Error(`the WAV must be 16-bit PCM (it is format ${format}, ${bits}-bit): ffmpeg -i in.wav -c:a pcm_s16le out.wav`);
@@ -61,7 +74,12 @@ export function parseWav(buf: Buffer): Pcm {
   return { rate, channels, data: data.subarray(0, whole) };
 }
 
-const varint = (n: number) => { const b: number[] = []; for (; n > 127; n = Math.floor(n / 128)) b.push((n % 128) | 128); b.push(n); return Buffer.from(b); };
+const varint = (n: number) => {
+  const b: number[] = [];
+  for (; n > 127; n = Math.floor(n / 128)) b.push((n % 128) | 128);
+  b.push(n);
+  return Buffer.from(b);
+};
 const field = (tag: number, body: Buffer) => Buffer.concat([varint(tag), varint(body.length), body]);
 
 /** One gRPC message of android.emulation.control.AudioPacket: the format (S16, MODE_UNSPECIFIED) on the first one only. */
@@ -70,7 +88,8 @@ export function audioFrame(chunk: Buffer, pcm: Pick<Pcm, 'rate' | 'channels'> | 
   // AudioFormat: samplingRate = 1, channels = 2 (Mono 0, Stereo 1), format = 3 (AUD_FMT_S16 1).
   if (pcm) parts.push(field(0x0a, Buffer.concat([varint(0x08), varint(pcm.rate), varint(0x10), varint(pcm.channels - 1), varint(0x18), varint(1)])));
   parts.push(field(0x1a, chunk)); // audio = 3
-  const msg = Buffer.concat(parts), head = Buffer.alloc(5);
+  const msg = Buffer.concat(parts),
+    head = Buffer.alloc(5);
   head.writeUInt32BE(msg.length, 1);
   return Buffer.concat([head, msg]);
 }
@@ -82,15 +101,25 @@ export function audioFrame(chunk: Buffer, pcm: Pick<Pcm, 'rate' | 'channels'> | 
 export function inject(pcm: Pcm, seconds = 0, port = GRPC_PORT, stop?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const client = connect(`http://127.0.0.1:${port}`);
-    const done = (err?: Error) => { client.close(); err ? reject(err) : resolve(); };
+    const done = (err?: Error) => {
+      client.close();
+      err ? reject(err) : resolve();
+    };
     let connected = false;
     const unreachable = (e: Error) => new Error(`no emulator microphone on 127.0.0.1:${port} (${e.message}): is the emulator up, and has its desktop been set up again since #843?`);
     client.on('connect', () => (connected = true));
     client.on('error', (e) => done(unreachable(e)));
     const req = client.request({ ':method': 'POST', ':path': '/android.emulation.control.EmulatorController/injectAudio', 'content-type': 'application/grpc', te: 'trailers' });
-    let status = '', message = '';
-    req.on('response', (h) => { status = String(h['grpc-status'] ?? status); message = String(h['grpc-message'] ?? message); });
-    req.on('trailers', (h) => { status = String(h['grpc-status'] ?? status); message = decodeURIComponent(String(h['grpc-message'] ?? message)); });
+    let status = '',
+      message = '';
+    req.on('response', (h) => {
+      status = String(h['grpc-status'] ?? status);
+      message = String(h['grpc-message'] ?? message);
+    });
+    req.on('trailers', (h) => {
+      status = String(h['grpc-status'] ?? status);
+      message = decodeURIComponent(String(h['grpc-message'] ?? message));
+    });
     req.on('error', (e) => done(connected ? e : unreachable((e.cause as Error) ?? e)));
     stop?.addEventListener('abort', () => req.close());
     req.on('close', () => done(status === '0' || stop?.aborted ? undefined : new Error(`the emulator refused the audio: grpc-status ${status || 'none'} ${message}`.trim())));
@@ -99,7 +128,8 @@ export function inject(pcm: Pcm, seconds = 0, port = GRPC_PORT, stop?: AbortSign
     const total = seconds > 0 ? Math.round(seconds * pcm.rate) * 2 * pcm.channels : pcm.data.length;
     (async () => {
       for (let sent = 0; sent < total && !stop?.aborted; ) {
-        const at = sent % pcm.data.length, n = Math.min(step, pcm.data.length - at, total - sent);
+        const at = sent % pcm.data.length,
+          n = Math.min(step, pcm.data.length - at, total - sent);
         if (!req.write(audioFrame(pcm.data.subarray(at, at + n), sent === 0 ? pcm : null))) await new Promise((r) => req.once('drain', r));
         sent += n;
       }
@@ -124,21 +154,41 @@ export async function play(pcm: Pcm, seconds = 0, wait = 120, cancel?: AbortSign
   const stop = new AbortController();
   cancel?.addEventListener('abort', () => stop.abort());
   let cut = false;
-  const limit = setTimeout(() => { cut = true; stop.abort(); }, ((seconds || pcm.data.length / (2 * pcm.channels * pcm.rate)) + 10) * 1000);
-  try { await inject(pcm, seconds, port, stop.signal); } finally { clearTimeout(limit); }
+  const limit = setTimeout(
+    () => {
+      cut = true;
+      stop.abort();
+    },
+    ((seconds || pcm.data.length / (2 * pcm.channels * pcm.rate)) + 10) * 1000,
+  );
+  try {
+    await inject(pcm, seconds, port, stop.signal);
+  } finally {
+    clearTimeout(limit);
+  }
   if (cut) throw new Error('the phone stopped taking the audio before the end: did the app stop recording?');
 }
 
 /** The strongest frequency between 50 Hz and 8 kHz, in 5 Hz steps (Goertzel), and the level in dBFS. */
 export function peak(samples: Float32Array, rate: number): { hz: number; dbfs: number } {
-  let best = 0, bestHz = 0, sq = 0;
+  let best = 0,
+    bestHz = 0,
+    sq = 0;
   for (const s of samples) sq += s * s;
   for (let hz = 50; hz <= Math.min(8000, rate / 2 - 50); hz += 5) {
     const c = 2 * Math.cos((2 * Math.PI * hz) / rate);
-    let s1 = 0, s2 = 0;
-    for (const x of samples) { const s0 = x + c * s1 - s2; s2 = s1; s1 = s0; }
+    let s1 = 0,
+      s2 = 0;
+    for (const x of samples) {
+      const s0 = x + c * s1 - s2;
+      s2 = s1;
+      s1 = s0;
+    }
     const p = s1 * s1 + s2 * s2 - c * s1 * s2;
-    if (p > best) { best = p; bestHz = hz; }
+    if (p > best) {
+      best = p;
+      bestHz = hz;
+    }
   }
   return { hz: bestHz, dbfs: 10 * Math.log10(sq / samples.length || 1e-12) };
 }
@@ -191,14 +241,28 @@ async function check(hz: number): Promise<number> {
   const me = join(import.meta.dirname, 'citadel-android');
   const step = (...a: string[]) => spawnSync(me, a, { stdio: ['ignore', 'inherit', 'inherit'] }).status === 0;
   if (!step('up')) return 1;
-  let got: (r: Result) => void = () => {}, started = () => {};
+  let got: (r: Result) => void = () => {},
+    started = () => {};
   const opened = new Promise<void>((r) => (started = r));
   const result = new Promise<Result>((r) => (got = r));
   const server = createServer((req, res) => {
-    if (req.method === 'POST' && req.url === '/started') { started(); res.end('ok'); return; }
+    if (req.method === 'POST' && req.url === '/started') {
+      started();
+      res.end('ok');
+      return;
+    }
     if (req.method === 'POST' && req.url === '/result') {
       const parts: Buffer[] = [];
-      req.on('data', (c) => parts.push(c)).on('end', () => { res.end('ok'); try { got(JSON.parse(Buffer.concat(parts).toString())); } catch { got({ error: 'the page sent something that is not JSON' }); } });
+      req
+        .on('data', (c) => parts.push(c))
+        .on('end', () => {
+          res.end('ok');
+          try {
+            got(JSON.parse(Buffer.concat(parts).toString()));
+          } catch {
+            got({ error: 'the page sent something that is not JSON' });
+          }
+        });
       return;
     }
     res.setHeader('content-type', req.url === '/worklet.js' ? 'text/javascript' : 'text/html');
@@ -217,7 +281,10 @@ async function check(hz: number): Promise<number> {
     // A minute at most; it stops as soon as the page has its recording.
     opened.then(() => (playing = play(parseWav(toneWav(hz, 1)), 60, 10, stop.signal).catch((e: Error) => got({ error: e.message }))));
     const r = await Promise.race([result, new Promise<Result>((ok) => setTimeout(() => ok({ error: 'the page sent nothing in 45 s (citadel-android shot to see why)' }), 45000))]);
-    if (r.error || !r.samples || !r.sampleRate) { console.error(`mic check: FAIL: ${r.error || 'no recording'}`); return 1; }
+    if (r.error || !r.samples || !r.sampleRate) {
+      console.error(`mic check: FAIL: ${r.error || 'no recording'}`);
+      return 1;
+    }
     const b = Buffer.from(r.samples, 'base64');
     const { hz: heard, dbfs } = peak(new Float32Array(b.buffer, b.byteOffset, b.length / 4), r.sampleRate);
     const ok = Math.abs(heard - hz) <= Math.max(10, hz * 0.02) && dbfs > -50;
@@ -235,7 +302,10 @@ async function check(hz: number): Promise<number> {
 
 if (import.meta.main) {
   const [cmd, ...a] = process.argv.slice(2);
-  const fail = (m: string, code = 1) => { console.error(`citadel-android: ${m}`); process.exit(code); };
+  const fail = (m: string, code = 1) => {
+    console.error(`citadel-android: ${m}`);
+    process.exit(code);
+  };
   try {
     if (cmd === 'tone' && a.length >= 3) {
       const [hz, s, out, rate] = [Number(a[0]), Number(a[1]), a[2], Number(a[3] || MAX_RATE)];
@@ -250,5 +320,7 @@ if (import.meta.main) {
       if (!(hz >= 50 && hz <= 8000)) fail('mic-check [hz from 50 to 8000]', 2);
       process.exit(await check(hz));
     } else fail('usage: citadel-android tone <hz> <seconds> <out.wav> [rate] | mic <file.wav> [seconds] | mic-check [hz]', 2);
-  } catch (e) { fail((e as Error).message); }
+  } catch (e) {
+    fail((e as Error).message);
+  }
 }

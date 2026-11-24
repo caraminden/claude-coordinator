@@ -26,7 +26,10 @@ export function readCommentLine(line: string, open: string | null): { comment: b
     open = null;
   }
   if (!t || t.startsWith('//')) return { comment: true, open: null };
-  for (const [start, end] of [['/*', '*/'], ['<!--', '-->']]) {
+  for (const [start, end] of [
+    ['/*', '*/'],
+    ['<!--', '-->'],
+  ]) {
     if (!t.startsWith(start)) continue;
     const j = t.indexOf(end, start.length);
     if (j < 0) return { comment: true, open: end };
@@ -51,15 +54,25 @@ export function commentOnlyFiles(patch: string): Set<string> {
   const lines = patch.split('\n');
   for (let k = 0; k < lines.length; k++) {
     const l = lines[k];
-    if (l.startsWith('diff --git ')) { file = null; continue; }
-    if (l.startsWith('+++ ')) { file = l === '+++ /dev/null' ? null : l.slice(6); if (file) code.set(file, code.get(file) ?? false); continue; }
+    if (l.startsWith('diff --git ')) {
+      file = null;
+      continue;
+    }
+    if (l.startsWith('+++ ')) {
+      file = l === '+++ /dev/null' ? null : l.slice(6);
+      if (file) code.set(file, code.get(file) ?? false);
+      continue;
+    }
     const h = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(l);
     if (!h || !file) continue;
     let left = Number(h[1] ?? 1) + Number(h[2] ?? 1);
     const open: Record<string, string | null> = { '-': null, '+': null };
     for (; left > 0 && k + 1 < lines.length; left--) {
       const c = lines[++k];
-      if (c.startsWith('\\')) { left++; continue; } // "\ No newline at end of file"
+      if (c.startsWith('\\')) {
+        left++;
+        continue;
+      } // "\ No newline at end of file"
       const side = c[0] === '-' ? '-' : '+';
       const r = readCommentLine(c.slice(1), open[side]);
       open[side] = r.open;
@@ -85,11 +98,14 @@ export function diffFiles(cwd: string, bases: string[]): Promise<DiffFile[] | nu
       if (out === null) continue;
       const patch = await git(['diff', '-U0', '--no-renames', '--no-color', '--no-ext-diff', `${base}...HEAD`]);
       const quiet = patch === null ? new Set<string>() : commentOnlyFiles(patch);
-      return out.split('\n').filter(Boolean).map((l) => {
-        const [add, del, ...rest] = l.split('\t');
-        const path = rest.join('\t');
-        return { path, lines: (Number(add) || 0) + (Number(del) || 0), ...(quiet.has(path) ? { comments: true } : {}) };
-      });
+      return out
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => {
+          const [add, del, ...rest] = l.split('\t');
+          const path = rest.join('\t');
+          return { path, lines: (Number(add) || 0) + (Number(del) || 0), ...(quiet.has(path) ? { comments: true } : {}) };
+        });
     }
     return null;
   })();
@@ -123,7 +139,7 @@ export function missingCritics(entries: ReviewEntry[], ran: Set<number>, files: 
 export function missingText(missing: Missing[]): string {
   const one = (m: Missing) => {
     const files = m.files.length > 3 ? `${m.files.slice(0, 3).join(', ')} and ${m.files.length - 3} more` : m.files.join(', ');
-    return `${m.name} (\`${m.slug}\`, ${m.lines} ${m.lines === 1 ? "line" : "lines"} in ${files})`;
+    return `${m.name} (\`${m.slug}\`, ${m.lines} ${m.lines === 1 ? 'line' : 'lines'} in ${files})`;
   };
   const slugs = missing.map((m) => m.slug);
   const block = missing.filter((m) => m.block).map((m) => m.slug);

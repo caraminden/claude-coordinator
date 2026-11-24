@@ -20,7 +20,9 @@ export const CGROUP_ROOT = '/sys/fs/cgroup';
 const PSI = 'some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n';
 /** A quiet 4-core box with 16 GB, half of it free. */
 const FIXED_FILES: Record<string, string> = {
-  [PSI_FILES.cpu]: PSI, [PSI_FILES.memory]: PSI, [PSI_FILES.io]: PSI,
+  [PSI_FILES.cpu]: PSI,
+  [PSI_FILES.memory]: PSI,
+  [PSI_FILES.io]: PSI,
   [MEMINFO]: 'MemTotal: 16777216 kB\nMemAvailable: 8388608 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n',
   [PROC_STAT]: 'cpu  0 0 0 0 0 0 0 0 0 0\nprocesses 0\n',
 };

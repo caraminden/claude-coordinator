@@ -40,7 +40,10 @@ test("both citadel-heavy workflows' command step keeps the end marker readable a
     const script = step[1].replace(/^ {10}/gm, '');
     const res = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...process.env, COMMAND: 'printf "last words"; exit 4' } });
     assert.equal(res.status, 4, f);
-    const log = res.stdout.split('\n').map((l) => `2026-11-20T10:00:00Z ${l}`).join('\n');
+    const log = res.stdout
+      .split('\n')
+      .map((l) => `2026-11-20T10:00:00Z ${l}`)
+      .join('\n');
     assert.deepEqual(commandOutput(log), { lines: ['last words'], code: 4 }, f);
   }
 });
@@ -110,10 +113,12 @@ function repo(workflow = true) {
   spawnSync('git', ['init', '-q', '--bare', bare]);
   mkdirSync(join(d, '.github', 'workflows'), { recursive: true });
   git(d, 'init', '-q', '-b', 'main');
-  git(d, 'config', 'user.email', 't@t'); git(d, 'config', 'user.name', 't');
+  git(d, 'config', 'user.email', 't@t');
+  git(d, 'config', 'user.name', 't');
   if (workflow) writeFileSync(join(d, '.github', 'workflows', 'citadel-heavy.yml'), 'name: citadel-heavy\n');
   writeFileSync(join(d, 'a.txt'), 'committed\n');
-  git(d, 'add', '-A'); git(d, 'commit', '-qm', 'one');
+  git(d, 'add', '-A');
+  git(d, 'commit', '-qm', 'one');
   git(d, 'remote', 'add', 'origin', 'https://github.com/o/r');
   git(d, 'config', `url.${bare}.pushInsteadOf`, 'https://github.com/o/r');
   writeFileSync(join(d, 'a.txt'), 'edited, not committed\n');
@@ -122,10 +127,28 @@ function repo(workflow = true) {
   mkdirSync(gh);
   return { d, bare, gh };
 }
-const run = (r: ReturnType<typeof repo>, mode: string, extra: NodeJS.ProcessEnv = {}, cwd = r.d) => spawnSync(heavy, ['sh', '-c', 'echo ran here; exit 5'], {
-  cwd, encoding: 'utf8', timeout: 30_000,
-  env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_GH_DIR: r.gh, FAKE_GH_MODE: mode, CITADEL_HEAVY_DIR: join(r.gh, 'locks'), CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_HERE: undefined, CITADEL_HEAVY_PRIORITY: undefined, CITADEL_HEAVY_CI_POLL: '0.05', CITADEL_HEAVY_PRESSURE: join(root, 'no-psi'), CITADEL_HEAVY_JUDGE: undefined, CITADEL_HEAVY_GUESS: 'heavy', CITADEL_HEAVY_WHO: 'Peek #9', ...extra },
-});
+const run = (r: ReturnType<typeof repo>, mode: string, extra: NodeJS.ProcessEnv = {}, cwd = r.d) =>
+  spawnSync(heavy, ['sh', '-c', 'echo ran here; exit 5'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 30_000,
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      FAKE_GH_DIR: r.gh,
+      FAKE_GH_MODE: mode,
+      CITADEL_HEAVY_DIR: join(r.gh, 'locks'),
+      CITADEL_HEAVY_HELD: undefined,
+      CITADEL_HEAVY_HERE: undefined,
+      CITADEL_HEAVY_PRIORITY: undefined,
+      CITADEL_HEAVY_CI_POLL: '0.05',
+      CITADEL_HEAVY_PRESSURE: join(root, 'no-psi'),
+      CITADEL_HEAVY_JUDGE: undefined,
+      CITADEL_HEAVY_GUESS: 'heavy',
+      CITADEL_HEAVY_WHO: 'Peek #9',
+      ...extra,
+    },
+  });
 
 test('a job runs the working copy on CI, prints its output, exits with its status and leaves the branch alone', () => {
   const r = repo();
@@ -143,7 +166,9 @@ test('a job runs the working copy on CI, prints its output, exits with its statu
   assert.equal(git(r.bare, 'for-each-ref'), '', 'the scratch ref is gone again');
   assert.equal(git(r.d, 'status', '--porcelain'), before, 'the branch and index are as they were');
   assert.equal(git(r.d, 'rev-list', '--count', 'HEAD'), '1');
-  const line = readFileSync(join(r.gh, 'locks', 'history'), 'utf8').trim().split('\t');
+  const line = readFileSync(join(r.gh, 'locks', 'history'), 'utf8')
+    .trim()
+    .split('\t');
   assert.deepEqual([line[1], line[3], line[6]], ['Peek #9', 'ci:o/r', '3']);
 });
 
@@ -220,7 +245,13 @@ test('from a subfolder it runs there on CI, with every edit in the repo and no u
   assert.equal(sent['inputs[command]'], `cd 'sub dir/' && sh -c 'echo ran here; exit 5'`);
   assert.equal(git(r.bare, 'show', `${sent['inputs[sha]']}:a.txt`), 'edited, not committed', 'an edit outside the folder goes too');
   assert.equal(git(r.bare, 'show', `${sent['inputs[sha]']}:sub dir/b.txt`), 'b');
-  assert.equal(git(r.bare, 'ls-tree', '-r', '--name-only', sent['inputs[sha]']).split('\n').filter((f) => /\.env|\.pem/.test(f)).length, 0, 'no .env or key file pushed');
+  assert.equal(
+    git(r.bare, 'ls-tree', '-r', '--name-only', sent['inputs[sha]'])
+      .split('\n')
+      .filter((f) => /\.env|\.pem/.test(f)).length,
+    0,
+    'no .env or key file pushed',
+  );
 });
 
 // Long jobs (#1363): --long only queues; the server's pump (src/long-jobs.ts, test/long-jobs.test.ts) starts and watches them.
@@ -252,7 +283,7 @@ test('--long pushes the snapshot, writes the job for the server and returns at o
 
 // CB1 (#1519): one failed read of the job or its log is tried again, not the run reported lost; and once the run has
 // completed the command never runs here as well, even when it went queued to completed between two looks.
-test("a blip reading the job or its log is tried again, and a run that completed is never run here too", () => {
+test('a blip reading the job or its log is tried again, and a run that completed is never run here too', () => {
   const blip = run(repo(), 'blip');
   assert.equal(blip.status, 3, blip.stderr);
   assert.equal(blip.stdout, 'hello from CI\n');

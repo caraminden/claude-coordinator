@@ -71,7 +71,12 @@ const DelveTM = taskmaster(Delve, Cara.id);
 const ObsidianTM = taskmaster(Obsidian, Rachel.id);
 
 test("a non-member's relay runs as Citadel's owner but is the non-member's ask, and that carries on", async () => {
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.pollMs = 10;
   r.personOf = messagePerson(store);
   const release = (on: boolean) => {
@@ -116,7 +121,12 @@ test("a non-member's relay runs as Citadel's owner but is the non-member's ask, 
 });
 
 test("a contraption's ask is its person's, and a held relay keeps the asker it had when held", async () => {
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.pollMs = 10;
   r.personOf = messagePerson(store);
   const turn = async (to: number, author: string, extra: object = {}) => {
@@ -141,7 +151,7 @@ test("a contraption's ask is its person's, and a held relay keeps the asker it h
   store.setSetting(askerKey(ObsidianTM.id), Cara.id);
   r.continueLoop(ObsidianTM.id, 'Cara');
   await until('!r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0 && ...', () => !r.isRunning(CitadelTM.id) && r.queued(CitadelTM.id) === 0 && store.turnAsker(CitadelTM.id) !== Cara.id);
-  assert.equal(store.turnAsker(CitadelTM.id), Rachel.id, 'still Rachel\'s ask');
+  assert.equal(store.turnAsker(CitadelTM.id), Rachel.id, "still Rachel's ask");
   store.deleteSetting(askerKey(ObsidianTM.id));
 });
 
@@ -151,7 +161,9 @@ test('admin-only routes refuse a Taskmaster turn asked for by someone outside th
   after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const as = async (method: string, path: string, body?: object) => {
     const res = await fetch(srv.base + path, {
-      method, headers: { Authorization: `Bearer ${tokens.agentToken(CitadelTM.id)}`, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body),
+      method,
+      headers: { Authorization: `Bearer ${tokens.agentToken(CitadelTM.id)}`, 'Content-Type': 'application/json' },
+      body: body && JSON.stringify(body),
     });
     return { status: res.status, body: await res.json() };
   };

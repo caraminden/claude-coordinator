@@ -27,7 +27,10 @@ test('globs: * stays in a folder, ** crosses them, **/ may be no folder', () => 
 test('every matching rule counts, a touched test runs itself, and a deleted one does not', () => {
   const m = parseMap('@tests test/*.test.ts\nsrc/**: test/a.test.ts\nsrc/db.ts: test/b.test.ts test/a.test.ts\n**: test/c.test.ts\n');
   const a = affected(m, ['src/db.ts', 'test/affected.test.ts', 'test/gone.test.ts'], tracked, repo);
-  assert.deepEqual(a.run.map((r) => r.test), ['test/a.test.ts', 'test/affected.test.ts', 'test/b.test.ts', 'test/c.test.ts']);
+  assert.deepEqual(
+    a.run.map((r) => r.test),
+    ['test/a.test.ts', 'test/affected.test.ts', 'test/b.test.ts', 'test/c.test.ts'],
+  );
   assert.deepEqual(a.run[0].why, ['map:2 src/**', 'map:3 src/db.ts']);
   assert.deepEqual(a.run[1].why, ['touched']);
   assert.deepEqual(a.unmapped, [], 'a deleted test file is a test file, not unmapped');
@@ -49,7 +52,9 @@ test('a bad map says which line', () => {
 });
 
 test("Citadel's map: its tests exist, its globs match something, and every repo-wide test is mapped or always run", () => {
-  const always = readFileSync(join(repo, 'tools', 'always-tests.txt'), 'utf8').split('\n').filter((l) => l && !l.startsWith('#'));
+  const always = readFileSync(join(repo, 'tools', 'always-tests.txt'), 'utf8')
+    .split('\n')
+    .filter((l) => l && !l.startsWith('#'));
   const mapped = new Set(map.rules.flatMap((r) => r.tests.flatMap((t) => (/[*?]/.test(t) ? tracked.filter((f) => globRe(t).test(f)) : [t]))));
   for (const t of mapped) assert.ok(tracked.includes(t), `the map names ${t}, which is not a tracked file`);
   for (const r of map.rules) assert.ok(r.glob === '**' || tracked.some((f) => r.re.test(f)), `map:${r.line} ${r.glob} matches no tracked file`);
@@ -76,8 +81,7 @@ test('the route test runs for the paths that can move the route table, and not o
   const always = readFileSync(join(repo, 'tools', 'always-tests.txt'), 'utf8').split('\n');
   assert.ok(!always.includes('test/access-matrix.test.ts'));
   const picked = (path: string) => lines([path]).run.map((r) => r.test);
-  for (const path of ['server.ts', 'src/http.ts', 'src/auth.ts', 'src/apps.ts', 'src/contraptions.ts', 'src/access.ts', 'src/routes/x.ts', 'src/db/people.ts', 'test/helpers.ts', 'test/access-matrix.snapshot.json', 'test/access-matrix.test.ts'])
-    assert.ok(picked(path).includes('test/access-matrix.test.ts'), path);
+  for (const path of ['server.ts', 'src/http.ts', 'src/auth.ts', 'src/apps.ts', 'src/contraptions.ts', 'src/access.ts', 'src/routes/x.ts', 'src/db/people.ts', 'test/helpers.ts', 'test/access-matrix.snapshot.json', 'test/access-matrix.test.ts']) assert.ok(picked(path).includes('test/access-matrix.test.ts'), path);
   assert.ok(!picked('test/ports.test.ts').includes('test/access-matrix.test.ts'));
 });
 
@@ -90,23 +94,35 @@ test('the command prints which rule picked each test', () => {
 
 test('the command reads a real diff: committed, uncommitted and untracked changes, and a rename as both paths', () => {
   const dir = mkdtempSync(join(tmpdir(), 'affected-'));
-  const g = (...a: string[]) => { const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
+  const g = (...a: string[]) => {
+    const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+  };
   try {
-    mkdirSync(join(dir, 'tools')); mkdirSync(join(dir, 'src'));
+    mkdirSync(join(dir, 'tools'));
+    mkdirSync(join(dir, 'src'));
     writeFileSync(join(dir, 'tools', 'affected-map.txt'), '@tests t/*.test.ts\nsrc/a.ts: t/a.test.ts\nsrc/b.ts: t/b.test.ts\nsrc/c.ts: t/c.test.ts\nsrc/d.ts: t/d.test.ts\nsrc/old.ts: t/o.test.ts\n');
     for (const f of ['a', 'b', 'c', 'old']) writeFileSync(join(dir, 'src', `${f}.ts`), f);
-    g('init', '-q', '-b', 'main'); g('add', '-A'); g('commit', '-qm', 'base');
+    g('init', '-q', '-b', 'main');
+    g('add', '-A');
+    g('commit', '-qm', 'base');
     g('checkout', '-qb', 'work');
-    writeFileSync(join(dir, 'src', 'a.ts'), 'changed'); g('commit', '-qam', 'committed');
+    writeFileSync(join(dir, 'src', 'a.ts'), 'changed');
+    g('commit', '-qam', 'committed');
     writeFileSync(join(dir, 'src', 'b.ts'), 'edited'); // uncommitted
     writeFileSync(join(dir, 'src', 'd.ts'), 'new'); // untracked
     g('mv', 'src/old.ts', 'src/new.ts'); // a rename: old.ts's rule fires too
     const r = spawnSync('node', [join(repo, 'tools', 'affected.ts'), '--root', dir], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
-    const ran = r.stdout.split('\n').filter((l) => l.startsWith('run\t')).map((l) => l.split('\t')[1]);
+    const ran = r.stdout
+      .split('\n')
+      .filter((l) => l.startsWith('run\t'))
+      .map((l) => l.split('\t')[1]);
     assert.deepEqual(ran, ['t/a.test.ts', 't/b.test.ts', 't/d.test.ts', 't/o.test.ts']);
     assert.match(r.stdout, /^unmapped\tsrc\/new\.ts$/m);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
   const bad = spawnSync('node', ['tools/affected.ts', '--base', 'no-such-ref'], { cwd: repo, encoding: 'utf8' });
   assert.equal(bad.status, 2);
 });
@@ -115,12 +131,18 @@ test('the command reads a real diff: committed, uncommitted and untracked change
 // shortcut: the deploy files have no test that catches a break yet (not in R11), so they are exempt; map each and drop it here.
 const DEPLOY_GAPS = ['tools/deploy.sh', 'tools/boot-check.ts', 'deploy/'];
 test('every file CLAUDE.md lists as high risk by file is covered by a rule of the map', () => {
-  const bullet = readFileSync(join(repo, 'CLAUDE.md'), 'utf8').split('\n- ').find((b) => b.startsWith('**High risk by file')) ?? '';
+  const bullet =
+    readFileSync(join(repo, 'CLAUDE.md'), 'utf8')
+      .split('\n- ')
+      .find((b) => b.startsWith('**High risk by file')) ?? '';
   const paths = [...bullet.matchAll(/`([^`<>\s]+)`/g)].map((m) => m[1]).filter((p) => /[/.]/.test(p) && !p.startsWith('test/') && !DEPLOY_GAPS.includes(p));
   assert.ok(paths.length >= 5, 'found the high-risk paths in CLAUDE.md');
   for (const p of paths) {
     const probe = p.endsWith('/') ? `${p}x` : p;
-    assert.ok(map.rules.some((r) => r.glob !== '**' && r.re.test(probe)), `${p} is high risk in CLAUDE.md but no rule of tools/affected-map.txt covers it`);
+    assert.ok(
+      map.rules.some((r) => r.glob !== '**' && r.re.test(probe)),
+      `${p} is high risk in CLAUDE.md but no rule of tools/affected-map.txt covers it`,
+    );
   }
 });
 
@@ -143,19 +165,33 @@ const BREAKS: [ship: string, changed: string, failed: string][] = [
   ['#1364', 'src/runner.ts', 'test/background-jobs.test.ts'],
 ];
 test('each replayed break picks the test that failed', () => {
-  for (const [ship, changed, failed] of BREAKS) assert.ok(lines([changed]).run.some((r) => r.test === failed), `${ship}: ${changed} must pick ${failed}`);
+  for (const [ship, changed, failed] of BREAKS)
+    assert.ok(
+      lines([changed]).run.some((r) => r.test === failed),
+      `${ship}: ${changed} must pick ${failed}`,
+    );
 });
 
 test('a source file picks its same-name test by basename (.ts or .js), and only a test that is tracked', () => {
-  const picked = (p: string) => lines([p]).run.filter((r) => r.why.some((w) => w.startsWith('name'))).map((r) => r.test);
+  const picked = (p: string) =>
+    lines([p])
+      .run.filter((r) => r.why.some((w) => w.startsWith('name')))
+      .map((r) => r.test);
   assert.deepEqual(picked('src/inbox.ts'), ['test/inbox.test.js', 'test/inbox.test.ts']);
-  assert.deepEqual(picked('public/ui/chat.js'), tracked.filter((f) => /^test\/chat\.test\.(ts|js)$/.test(f)));
+  assert.deepEqual(
+    picked('public/ui/chat.js'),
+    tracked.filter((f) => /^test\/chat\.test\.(ts|js)$/.test(f)),
+  );
   assert.deepEqual(picked('src/no-such-module-xyz.ts'), []);
   assert.deepEqual(picked('tools/affected.ts'), ['test/affected.test.ts']);
 });
 
 test('any public/ change picks the boot-check test', () => {
-  for (const p of ['public/base.js', 'public/ui/chat.js', 'public/style.css', 'public/x/new-file.html']) assert.ok(lines([p]).run.some((r) => r.test === 'test/boot-check.test.ts'), p);
+  for (const p of ['public/base.js', 'public/ui/chat.js', 'public/style.css', 'public/x/new-file.html'])
+    assert.ok(
+      lines([p]).run.some((r) => r.test === 'test/boot-check.test.ts'),
+      p,
+    );
 });
 
 test('a test that directly imports a src/, public/ or tools/ module is picked when that module changes (#1809)', () => {
@@ -166,20 +202,29 @@ test('a test that directly imports a src/, public/ or tools/ module is picked wh
       if (!lines([dep]).run.some((r) => r.test === t)) missed.push(`${t} imports ${dep}`);
     }
   }
-  assert.deepEqual(missed, [], 'add the file to the map\'s @imports glob, or a rule line for it');
+  assert.deepEqual(missed, [], "add the file to the map's @imports glob, or a rule line for it");
 });
 
 test('@imports picks only the test files that import the changed file directly', () => {
   const dir = mkdtempSync(join(tmpdir(), 'aff-imp-'));
   try {
-    mkdirSync(join(dir, 'src')); mkdirSync(join(dir, 'test'));
+    mkdirSync(join(dir, 'src'));
+    mkdirSync(join(dir, 'test'));
     writeFileSync(join(dir, 'src', 'a.ts'), '');
     writeFileSync(join(dir, 'test', 'x.test.ts'), "import { a } from '../src/a.ts';\n");
     writeFileSync(join(dir, 'test', 'y.test.ts'), "const z = await import('../src/b.ts');\n");
     const m = parseMap('@tests test/*.test.ts\n@imports src/**\n');
     const tr = ['src/a.ts', 'test/x.test.ts', 'test/y.test.ts'];
-    assert.deepEqual(affected(m, ['src/a.ts'], tr, dir).run.map((r) => r.test), ['test/x.test.ts']);
-    assert.deepEqual(affected(m, ['src/b.ts'], tr, dir).run.map((r) => r.test), ['test/y.test.ts']);
+    assert.deepEqual(
+      affected(m, ['src/a.ts'], tr, dir).run.map((r) => r.test),
+      ['test/x.test.ts'],
+    );
+    assert.deepEqual(
+      affected(m, ['src/b.ts'], tr, dir).run.map((r) => r.test),
+      ['test/y.test.ts'],
+    );
     assert.deepEqual(affected(parseMap('@tests test/*.test.ts\n'), ['src/a.ts'], tr, dir).run, []);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

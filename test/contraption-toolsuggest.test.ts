@@ -63,10 +63,13 @@ const turns = new ContraptionTurns(store, contraptions, places as any, { dataDir
 async function said(body: object): Promise<string> {
   const evs: { event: string; data: any }[] = [];
   await turns.run(mandate, parseTurn({ person: cara.id, prompt: 'x', ...body }, mandate), (event, data) => evs.push({ event, data }));
-  return evs.filter((e) => e.event === 'text').map((e) => e.data.delta).join('');
+  return evs
+    .filter((e) => e.event === 'text')
+    .map((e) => e.data.delta)
+    .join('');
 }
 
-test('the main agent gets the note (the control), a Grunt\'s call and a tool-search turn without the app\'s tools get none', async () => {
+test("the main agent gets the note (the control), a Grunt's call and a tool-search turn without the app's tools get none", async () => {
   assert.match(await said({ session: 'main', prompt: 'main call' }), /Note: mandate_move is not one of your tools\. Did you mean mcp__mandate__move\?/, 'the main agent is told');
   assert.equal(await said({ session: 'grunt', prompt: 'sub call' }), 'NO NOTE', "a Grunt's refused call gets no note about the main agent's tools");
   assert.equal(await said({ session: 'search', prompt: 'hidden call', toolSearch: true }), 'NO NOTE', "tool search hid the app's tools: init's list would name the wrong ones");

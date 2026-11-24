@@ -31,7 +31,11 @@ export const BOOT_STALL = 'loop-lag-boot';
 const OWN_STALL = 'src/deploy-watch.ts';
 
 /** One kind of reading: worse means at least `floor` after and at least double the window before. */
-export interface Signal { key: string; name: string; floor: number }
+export interface Signal {
+  key: string;
+  name: string;
+  floor: number;
+}
 export const SIGNALS: Signal[] = [
   // 3, not 5: the route keeps one report per person per error each 10 minutes, so one person adds at most 2 in 20 minutes.
   { key: 'client-error', name: 'front-end errors', floor: 3 },
@@ -55,12 +59,25 @@ export interface Watched {
   /** Set once it raised an alert: no more checks or wakes for it. */
   alerted?: boolean;
 }
-export interface WatchState { live: string | null; deploys: Watched[] }
+export interface WatchState {
+  live: string | null;
+  deploys: Watched[];
+}
 
-export interface Finding { name: string; before: string; after: string; first: number | null; top: { detail: string; n: number }[] }
+export interface Finding {
+  name: string;
+  before: string;
+  after: string;
+  first: number | null;
+  top: { detail: string; n: number }[];
+}
 /** A reading with its verdict: what the page may show. `first` and `top` are for alerts, not for everyone signed in. */
 export type Reading = Finding & { worse: boolean };
-export interface Suspect { ticketId: number; number: number | null; commits: { sha: string; subject: string }[] }
+export interface Suspect {
+  ticketId: number;
+  number: number | null;
+  commits: { sha: string; subject: string }[];
+}
 
 export interface WatchDeps {
   store: Store;
@@ -89,7 +106,14 @@ export function gitCommits(dir: string): WatchDeps['commits'] {
   return (prev, head) =>
     new Promise((done) =>
       execFile('git', ['log', '--reverse', '--topo-order', '--format=%H%x09%s', `${prev}..${head}`], { cwd: dir, timeout: 30_000, maxBuffer: 16 << 20 }, (err, out) =>
-        done(err ? null : out.split('\n').filter(Boolean).map((l) => ({ sha: l.slice(0, l.indexOf('\t')), subject: l.slice(l.indexOf('\t') + 1) }))),
+        done(
+          err
+            ? null
+            : out
+                .split('\n')
+                .filter(Boolean)
+                .map((l) => ({ sha: l.slice(0, l.indexOf('\t')), subject: l.slice(l.indexOf('\t') + 1) })),
+        ),
       ),
     );
 }
@@ -223,7 +247,9 @@ export class DeployWatch {
 
   /** The signals that got worse in [at, at + len) against [at - len, at). */
   compare(at: number, len: number): Finding[] {
-    return this.readings(at, len).filter((r) => r.worse).map(({ worse: _w, ...f }) => f);
+    return this.readings(at, len)
+      .filter((r) => r.worse)
+      .map(({ worse: _w, ...f }) => f);
   }
 
   /**
@@ -240,17 +266,19 @@ export class DeployWatch {
       if (at + len <= now) kept.set(key, r);
       return r;
     };
-    const out = deploys.map((w) => {
-      const next = deploys.filter((o) => o.at > w.at).reduce((a, o) => Math.min(a, o.at), Infinity);
-      const checks = CHECKS.map((offset) => {
-        if (w.at + offset > now && next === Infinity) return { offset, len: null, readings: [] };
-        const len = Math.min(w.at + offset, next, now) - w.at;
-        // An alert ends the watch: checks past the one that raised it never ran.
-        if (w.alerted && len > w.len) return { offset, len: null, readings: [] };
-        return len < MIN_WINDOW ? { offset, len, readings: [] } : { offset, len, readings: read(w.at, len) };
-      });
-      return { commit: w.commit, prev: w.prev, at: w.at, alerted: !!w.alerted, checks };
-    }).sort((a, b) => b.at - a.at);
+    const out = deploys
+      .map((w) => {
+        const next = deploys.filter((o) => o.at > w.at).reduce((a, o) => Math.min(a, o.at), Infinity);
+        const checks = CHECKS.map((offset) => {
+          if (w.at + offset > now && next === Infinity) return { offset, len: null, readings: [] };
+          const len = Math.min(w.at + offset, next, now) - w.at;
+          // An alert ends the watch: checks past the one that raised it never ran.
+          if (w.alerted && len > w.len) return { offset, len: null, readings: [] };
+          return len < MIN_WINDOW ? { offset, len, readings: [] } : { offset, len, readings: read(w.at, len) };
+        });
+        return { commit: w.commit, prev: w.prev, at: w.at, alerted: !!w.alerted, checks };
+      })
+      .sort((a, b) => b.at - a.at);
     // Only the windows still shown, so deploys that left the watch leave the cache too.
     this.settled = kept;
     return out;
@@ -320,7 +348,12 @@ export class DeployWatch {
     const tm = scheme && store.getOverlord(scheme.id);
     if (!tm) return;
     const woke = suspects.length ? `Woke ${suspects.map((s) => `#${s.number ?? s.ticketId}`).join(', ')}.` : 'No minion to wake: none of its commits names one.';
-    const loose = unowned.length ? ` Commits with no minion: ${unowned.slice(0, 5).map((c) => `${c.sha.slice(0, 8)} ${c.subject.slice(0, 80)}`).join('; ')}${unowned.length > 5 ? `; and ${unowned.length - 5} more` : ''}.` : '';
+    const loose = unowned.length
+      ? ` Commits with no minion: ${unowned
+          .slice(0, 5)
+          .map((c) => `${c.sha.slice(0, 8)} ${c.subject.slice(0, 80)}`)
+          .join('; ')}${unowned.length > 5 ? `; and ${unowned.length - 5} more` : ''}.`
+      : '';
     try {
       this.d.mail(tm.id, `Post-deploy watch: after ${when}, ${lines.join('; ')} (${window} after vs before). ${woke}${loose} Nothing was reverted.`);
     } catch (err: any) {
@@ -350,7 +383,9 @@ export class ClientErrors {
     const message = text(body?.message, 300);
     if (!message || HARMLESS_CLIENT_ERRORS.some((h) => h.match.test(message))) return null;
     // Only the path: the origin and any query (a cache-buster, a token) would split one error into many.
-    const source = text(body?.source, 300).replace(/^[a-z]+:\/\/[^/]+/i, '').replace(/[?#].*$/, '');
+    const source = text(body?.source, 300)
+      .replace(/^[a-z]+:\/\/[^/]+/i, '')
+      .replace(/[?#].*$/, '');
     const line = Number.isInteger(body?.line) && body.line > 0 ? `:${body.line}` : '';
     const detail = `${body?.kind === 'rejection' ? 'Unhandled rejection: ' : ''}${message}${source ? ` (${source}${line})` : ''}`;
     let p = this.seen.get(who);

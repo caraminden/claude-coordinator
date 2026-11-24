@@ -27,19 +27,27 @@ process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
 const prompts = join(root, 'prompts.jsonl');
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
   require('node:fs').appendFileSync(${JSON.stringify(prompts)}, input + '\\n');
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 const NOW = Date.UTC(2026, 10, 14, 18, 2);
 const SENT = '2026-11-14 18:02';
 const store = new Store(join(root, 'test.db'));
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 runner.now = () => NOW;
 const project = store.createProject('P', null);
 const tm = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' });
@@ -53,8 +61,12 @@ function minion(state: TicketState | null = 'parked') {
   store.updateTicket(t.id, { status: 'idle', state });
   return store.getTicket(t.id)!;
 }
-const messages = (id: number) => store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data));
-const held = (id: number) => (store.getSetting<any>(`minion-queue:${id}`)?.held ?? null) ?? [];
+const messages = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'user_message')
+    .map((e) => JSON.parse(e.data));
+const held = (id: number) => store.getSetting<any>(`minion-queue:${id}`)?.held ?? null ?? [];
 const promptCount = () => lines(prompts).length;
 const lastPrompt = () => withoutTurnNote(jsonLines(prompts).at(-1).message.content).map((c: any) => c.text);
 async function turn(start: () => unknown): Promise<string[]> {
@@ -84,11 +96,7 @@ test("a person's message to a parked minion is held; Unpark wakes it with the he
   assert.equal(store.getTicket(m.id)!.state, 'parked', 'still parked');
 
   const prompt = await turn(() => assert.equal(runner.unpark(m.id, 'Cara', 'Cara'), true));
-  assert.deepEqual(prompt, [
-    '[Cara]: Unsealed you. The 2 messages left for you while you were sealed follow. Pick up where you left off.',
-    `[Cara, left while you were sealed, ${SENT} UTC]: when you wake, check the logs`,
-    `[Josh, left while you were sealed, ${SENT} UTC]: and the tripwire test`,
-  ]);
+  assert.deepEqual(prompt, ['[Cara]: Unsealed you. The 2 messages left for you while you were sealed follow. Pick up where you left off.', `[Cara, left while you were sealed, ${SENT} UTC]: when you wake, check the logs`, `[Josh, left while you were sealed, ${SENT} UTC]: and the tripwire test`]);
   assert.notEqual(store.getTicket(m.id)!.state, 'parked');
   assert.ok(store.listEvents(m.id).some((e) => e.kind === 'note' && JSON.parse(e.data).text === 'Cara unsealed this minion.'));
   await idle(m.id);
@@ -136,10 +144,7 @@ test("wake_when_live's wake starts a parked minion's turn, its held messages aft
   runner.send(m.id, 'Cara', 'also bump the version', [], { hold: true });
   // The server's LiveWaiters callback: runner.send(ticketId, APP_NAME, text), no hold.
   const prompt = await turn(() => runner.send(m.id, APP_NAME, '`abc1234` is live now: retry the tripwire test'));
-  assert.deepEqual(prompt, [
-    `[${APP_NAME}]: \`abc1234\` is live now: retry the tripwire test`,
-    `[Cara, left while you were sealed, ${SENT} UTC]: also bump the version`,
-  ]);
+  assert.deepEqual(prompt, [`[${APP_NAME}]: \`abc1234\` is live now: retry the tripwire test`, `[Cara, left while you were sealed, ${SENT} UTC]: also bump the version`]);
   await idle(m.id);
 });
 
@@ -164,18 +169,14 @@ test('a start_after minion holds messages, and its start delivers them after its
 
   // What the server's waiters.start does once the leader's work is live.
   const prompt = await turn(() => startChained(w.claim(m.id)!, `#${tm.number}'s work is live`, { store, runner, waiters: w }));
-  assert.deepEqual(prompt, [
-    '[Taskmaster]: brief: build part two',
-    `[Cara, left while you were sealed, ${SENT} UTC]: use the new schema`,
-    `[Taskmaster, left while you were sealed, ${SENT} UTC]: part one is merged`,
-  ]);
+  assert.deepEqual(prompt, ['[Taskmaster]: brief: build part two', `[Cara, left while you were sealed, ${SENT} UTC]: use the new schema`, `[Taskmaster, left while you were sealed, ${SENT} UTC]: part one is merged`]);
   assert.equal(runner.heldFor(m.id), null);
   await idle(m.id);
   assert.deepEqual(held(m.id), []);
   runner.heldFor = () => null;
 });
 
-test('through the server: Unpark, the Taskmaster\'s unpark option, and update_ticket state null', async () => {
+test("through the server: Unpark, the Taskmaster's unpark option, and update_ticket state null", async () => {
   const { base, cookie, stop } = await bootServer({ root: join(root, 'server') });
   try {
     const auth = new Auth(PASSWORD, SECRET);
@@ -187,8 +188,7 @@ test('through the server: Unpark, the Taskmaster\'s unpark option, and update_ti
       });
       return { status: res.status, data: await res.json() };
     };
-    const said = async (id: number) => (await call(`/api/tickets/${id}/events?after=0`)).data
-      .filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
+    const said = async (id: number) => (await call(`/api/tickets/${id}/events?after=0`)).data.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
     const view = async (id: number) => (await call(`/api/tickets/${id}`)).data.ticket;
     const settled = async (id: number) => {
       await until('the turn to end', async () => (await view(id)).status !== 'running');
@@ -296,7 +296,11 @@ test('through a server whose writes lag: the waking message and the reply see th
     const { data: p } = await call('/api/projects', { name: 'Scheme' });
     const tm = as({ token: auth.agentToken((await call(`/api/projects/${p.id}`)).data.coordinator.id) });
     const view = async (id: number) => (await call(`/api/tickets/${id}`)).data.ticket;
-    const last = async (id: number) => (await call(`/api/tickets/${id}/events?after=0`)).data.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data)).at(-1);
+    const last = async (id: number) =>
+      (await call(`/api/tickets/${id}/events?after=0`)).data
+        .filter((e: any) => e.kind === 'user_message')
+        .map((e: any) => JSON.parse(e.data))
+        .at(-1);
     const { data: m } = await call(`/api/projects/${p.id}/tickets`, { title: 'M', message: 'brief' });
     const park = async () => {
       await until('the turn to end', async () => (await view(m.id)).status !== 'running');

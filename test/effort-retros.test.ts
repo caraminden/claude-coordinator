@@ -7,16 +7,21 @@ const H = 3_600_000;
 const NOW = 1_800_000_000_000;
 let n = 0;
 const t = (over: Partial<Ticket> = {}): Ticket => ({ id: ++n, number: n, title: `T${n}`, kind: 'ticket', status: 'closed', closed_at: NOW - 7 * H, updated_at: NOW - 7 * H, created_at: NOW - 48 * H, build: null, person_id: null, ...over }) as Ticket;
-const due = (tickets: Ticket[], name: string, since: (n: string) => number | undefined = () => undefined, now = NOW, major = (_b: number) => true) =>
-  effortsDue(tickets, new Map(tickets.map((x) => [x.id, name])), since, now, major);
+const due = (tickets: Ticket[], name: string, since: (n: string) => number | undefined = () => undefined, now = NOW, major = (_b: number) => true) => effortsDue(tickets, new Map(tickets.map((x) => [x.id, name])), since, now, major);
 
 test('a named effort retros at 3 closed minions, an unnamed chain only at 4 (#1751)', () => {
   assert.equal(NAMED_FLOOR, 3);
   assert.equal(CHAIN_FLOOR, 4);
   assert.deepEqual(due([t(), t()], 'CI speed-up'), []);
-  assert.deepEqual(due([t(), t(), t()], 'CI speed-up').map((v) => [v.name, v.act, v.members.length]), [['CI speed-up', 'start', 3]]);
+  assert.deepEqual(
+    due([t(), t(), t()], 'CI speed-up').map((v) => [v.name, v.act, v.members.length]),
+    [['CI speed-up', 'start', 3]],
+  );
   assert.deepEqual(due([t(), t(), t()], 'chain from #12'), []);
-  assert.deepEqual(due([t(), t(), t(), t()], 'chain from #12').map((v) => v.act), ['start']);
+  assert.deepEqual(
+    due([t(), t(), t(), t()], 'chain from #12').map((v) => v.act),
+    ['start'],
+  );
   // The Taskmaster's own row never counts toward the floor.
   assert.deepEqual(due([t(), t(), t({ kind: 'coordinator' } as Partial<Ticket>)], 'CI speed-up'), []);
 });
@@ -32,9 +37,13 @@ test('a name reused for a later goal gets its own retro: only minions made after
   const cut = NOW - 30 * H;
   const old = [t({ created_at: NOW - 60 * H }), t({ created_at: NOW - 60 * H }), t({ created_at: NOW - 60 * H })];
   const fresh = () => t({ created_at: NOW - 20 * H });
-  assert.deepEqual(due([...old, fresh(), fresh()], 'CI speed-up', () => cut), [], 'two new ones are under the floor');
+  assert.deepEqual(
+    due([...old, fresh(), fresh()], 'CI speed-up', () => cut),
+    [],
+    'two new ones are under the floor',
+  );
   const [v] = due([...old, fresh(), fresh(), fresh()], 'CI speed-up', () => cut);
-  assert.equal(v.members.length, 3, 'the old effort\'s minions are not in the new retro');
+  assert.equal(v.members.length, 3, "the old effort's minions are not in the new retro");
 });
 
 test('an effort that is mostly one major build is skipped: the build retro covers it (#1751)', () => {
@@ -47,7 +56,7 @@ test('an effort that is mostly one major build is skipped: the build retro cover
   assert.equal(due([t({ build: 4 }), t({ build: 4 }), t()], 'Bugs from Build 4', undefined, NOW, () => false)[0].act, 'start');
 });
 
-test('a new minion joins its leader\'s effort, else its parent\'s; an unnamed chain is named after its leader (#1751)', () => {
+test("a new minion joins its leader's effort, else its parent's; an unnamed chain is named after its leader (#1751)", () => {
   assert.deepEqual(effortFor('Given', { number: 3, effort: 'Lead' }, 'Parent'), { name: 'Given', stampLeader: false });
   assert.deepEqual(effortFor(null, { number: 3, effort: 'Lead' }, 'Parent'), { name: 'Lead', stampLeader: false });
   assert.deepEqual(effortFor(null, { number: 3, effort: null }, 'Parent'), { name: 'Parent', stampLeader: false });
@@ -81,12 +90,20 @@ test('the tick starts one retro minion in a scheme that is not Citadel, and reco
       const x = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'default', created_by: 'Citadel' });
       return { id: x.id, number: x.number! };
     },
-    runner: { emit: () => {}, send: (id: number, _by: string, text: string) => { sent.push({ id, text }); } } as any,
+    runner: {
+      emit: () => {},
+      send: (id: number, _by: string, text: string) => {
+        sent.push({ id, text });
+      },
+    } as any,
     note: () => {},
     mode: 'act',
   });
   const said = await retros.tick();
-  assert.deepEqual(made.map((m) => [m.project, m.title, m.props.type, m.props.assigned]), [[peek.id, 'Retro: Overlay rewrite', 'research', 'Cara']]);
+  assert.deepEqual(
+    made.map((m) => [m.project, m.title, m.props.type, m.props.assigned]),
+    [[peek.id, 'Retro: Overlay rewrite', 'research', 'Cara']],
+  );
   assert.equal(sent.length, 1);
   assert.match(sent[0].text, /citadel:retro/);
   assert.match(sent[0].text, /"Overlay rewrite" in Peek/);
@@ -119,7 +136,9 @@ test('log-only notes the retro it would start, and acting later starts it after 
       return { id: x.id, number: x.number! };
     },
     runner: { emit: () => {}, send: () => {} } as any,
-    note: (line: string) => { notes.push(line); },
+    note: (line: string) => {
+      notes.push(line);
+    },
   };
   await new EffortRetros({ ...deps, mode: 'log-only' }).tick();
   assert.deepEqual(made, []);

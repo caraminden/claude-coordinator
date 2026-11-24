@@ -37,20 +37,23 @@ function app(port: number): Promise<Server> {
 }
 
 /** A graceful stop: it takes no new connections and ends those it has once answered (one it has already read can't be replayed). */
-const stop = (s: Server) => new Promise<void>((ok) => {
-  s.close(() => ok());
-  s.closeIdleConnections();
-});
+const stop = (s: Server) =>
+  new Promise<void>((ok) => {
+    s.close(() => ok());
+    s.closeIdleConnections();
+  });
 
 /** The proxy in front of it, as AppProxy.serve uses the holds. */
 // The proxy's own retry of a refused GET (#1173, test/proxy-retry.test.ts) is off unless a test asks for it, so these
 // test the hold alone; a held request never retries on top, as in src/apps.ts.
 // `held` gets, per request path, whether it waited under the hold: the tests check that, not how long it took (#1444).
 async function proxy(holds: RestartHolds, port: number, retryMs = 0, held: Record<string, boolean> = {}): Promise<string> {
-  const s = createServer((req, res) => holds.whenUp('fixture', port, res, (h) => {
-    held[req.url!] = !!h;
-    forward(req, res, port, req.url!, { ...req.headers }, { what: 'Fixture', retryMs: h ? 0 : retryMs });
-  }));
+  const s = createServer((req, res) =>
+    holds.whenUp('fixture', port, res, (h) => {
+      held[req.url!] = !!h;
+      forward(req, res, port, req.url!, { ...req.headers }, { what: 'Fixture', retryMs: h ? 0 : retryMs });
+    }),
+  );
   servers.push(s);
   return `http://127.0.0.1:${await tmp.serve(s)}`;
 }
@@ -92,7 +95,10 @@ test('an app restarting under a stream of requests: none gets a 502, each waits 
   await until('requests sent once it is back', () => asked.length >= back + 10);
   clearInterval(stream);
   const done = await Promise.all(asked);
-  assert.deepEqual(done.map((d, n) => ({ ...d, n })).filter((d) => d.n >= firstAfter && d.status !== 200), []);
+  assert.deepEqual(
+    done.map((d, n) => ({ ...d, n })).filter((d) => d.n >= firstAfter && d.status !== 200),
+    [],
+  );
   for (const [n, d] of done.entries()) if (n >= firstAfter && n % 3 === 0) assert.equal(d.body, `got body ${n}`);
 });
 
@@ -162,7 +168,7 @@ test('past the cap on waiting requests, the next one is not held', async () => {
   assert.equal(held['/apps/fixture/a'], true);
 });
 
-test('through Citadel: a restart from Settings holds the app\'s requests, a stop does not', async () => {
+test("through Citadel: a restart from Settings holds the app's requests, a stop does not", async () => {
   // A systemctl whose restart takes a while, as a real one does while the app comes back; it says when it began.
   const fake = fakeSystemd(join(root, 'systemd'));
   const slow = join(root, 'slow-systemctl');

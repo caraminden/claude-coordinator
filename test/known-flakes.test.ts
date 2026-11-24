@@ -13,9 +13,16 @@ const root = mkdtempSync(join(tmpdir(), 'known-flakes-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 let n = 0;
 
-const stamp = (ms: number) => { const d = new Date(ms).toISOString(); return { day: d.slice(0, 10), time: d.slice(11, 19) }; };
-const line = (ago: number, rest: string) => { const s = stamp(Date.now() - ago); return { day: s.day, text: `- ${s.time}Z · flake · ${rest}` }; };
-const MIN = 60_000, DAY = 24 * 60 * MIN;
+const stamp = (ms: number) => {
+  const d = new Date(ms).toISOString();
+  return { day: d.slice(0, 10), time: d.slice(11, 19) };
+};
+const line = (ago: number, rest: string) => {
+  const s = stamp(Date.now() - ago);
+  return { day: s.day, text: `- ${s.time}Z · flake · ${rest}` };
+};
+const MIN = 60_000,
+  DAY = 24 * 60 * MIN;
 
 /** A retro log of `lines`, and optionally a database of flake fixes (held_at: ms ago). */
 function setup(lines: { day: string; text: string }[], fixes?: { file: string; ticket: number; state: string; status: string; heldAgo?: number }[]) {
@@ -26,7 +33,7 @@ function setup(lines: { day: string; text: string }[], fixes?: { file: string; t
     mkdirSync(join(shared, 'retro-log', l.day), { recursive: true });
     writeFileSync(join(shared, 'retro-log', l.day, 'land.md'), `${l.text}\n`, { flag: 'a' });
   }
-  const env: Record<string, string> = { ...process.env as Record<string, string>, COORDINATOR_SHARED_DIR: shared };
+  const env: Record<string, string> = { ...(process.env as Record<string, string>), COORDINATOR_SHARED_DIR: shared };
   if (fixes) {
     const db = new DatabaseSync(join(dir, 'c.db'));
     db.exec('CREATE TABLE tickets (id INTEGER PRIMARY KEY, project_id INTEGER, number INTEGER, status TEXT); CREATE TABLE flake_fixes (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, file TEXT NOT NULL, ticket_id INTEGER, state TEXT NOT NULL, held_at INTEGER)');
@@ -76,11 +83,14 @@ test('a sighting older than 14 days, a smoke line, or one from before its fix pa
 });
 
 test("an open fix minion in the ship's own scheme makes a file known; a closed or held one, or another scheme's, does not", () => {
-  const run = setup([line(2 * DAY, 'test/x.test.ts · load 1 · ticket/7-a · in CI')], [
-    { file: 'test/x.test.ts', ticket: 41, state: 'open', status: 'running' },
-    { file: 'test/z.test.ts', ticket: 42, state: 'open', status: 'closed' },
-    { file: 'test/w.test.ts', ticket: 43, state: 'held', status: 'running' },
-  ]);
+  const run = setup(
+    [line(2 * DAY, 'test/x.test.ts · load 1 · ticket/7-a · in CI')],
+    [
+      { file: 'test/x.test.ts', ticket: 41, state: 'open', status: 'running' },
+      { file: 'test/z.test.ts', ticket: 42, state: 'open', status: 'closed' },
+      { file: 'test/w.test.ts', ticket: 43, state: 'held', status: 'running' },
+    ],
+  );
   assert.equal(run('ticket/1-me', 'test/x.test.ts').out, 'test/x.test.ts (seen on 1 other branch in 14 days, fix #41)');
   assert.equal(run('ticket/7-a', 'test/x.test.ts').out, 'test/x.test.ts (fix #41)');
   for (const f of ['test/z.test.ts', 'test/w.test.ts', 'test/y.test.ts']) assert.equal(run('ticket/1-me', f).status, 1, f);
@@ -97,17 +107,30 @@ test('no retro log, no database or a broken one: nothing is known, and it says s
 test("its retro-log parsing matches src/flakes.ts's parseRetroFlakes on the lines land.sh and run-tests.sh write", () => {
   const md = ['- 02:45:47Z · flake · test/a.test.ts · load 16.43 · ticket/945-x · in CI', '- 03:00:00Z · flake · test/b.test.ts · smoke · nothing', '- 04:00:00Z · flake rerun · ticket/9-y · test/a.test.ts · green', '- 05:00:00Z · flake · test/c.test.ts · load 2 · ticket/946-z'].join('\n');
   const day = stamp(Date.now()).day;
-  assert.deepEqual(parseRetroFlakes(md, day).filter((s) => s.branch).map((s) => `${s.file} ${s.branch}`), ['test/a.test.ts ticket/945-x', 'test/c.test.ts ticket/946-z']);
+  assert.deepEqual(
+    parseRetroFlakes(md, day)
+      .filter((s) => s.branch)
+      .map((s) => `${s.file} ${s.branch}`),
+    ['test/a.test.ts ticket/945-x', 'test/c.test.ts ticket/946-z'],
+  );
   // The same lines through the script: a and c on other branches, b (smoke) and the rerun line not.
   const run = setup([]);
   const dir = join(root, String(n), 'shared', 'retro-log', day);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'land.md'), md.replace(/^- \d\d:\d\d:\d\d/gm, `- ${stamp(Date.now() - MIN).time}`));
-  for (const [f, known] of [['test/a.test.ts', 0], ['test/b.test.ts', 1], ['test/c.test.ts', 0]] as const) assert.equal(run('ticket/1-me', f).status, known, f);
+  for (const [f, known] of [
+    ['test/a.test.ts', 0],
+    ['test/b.test.ts', 1],
+    ['test/c.test.ts', 0],
+  ] as const)
+    assert.equal(run('ticket/1-me', f).status, known, f);
 });
 
 // #1487 (Cara, 2026-11-21: "how do we know its a flake ..."): a file red in a big share of the last hours' runs is broken.
-const raw = (ago: number, rest: string) => { const s = stamp(Date.now() - ago); return { day: s.day, text: `- ${s.time}Z · ${rest}` }; };
+const raw = (ago: number, rest: string) => {
+  const s = stamp(Date.now() - ago);
+  return { day: s.day, text: `- ${s.time}Z · ${rest}` };
+};
 /** `n` test runs (a landing's timing line with a CI run) in the last few hours. */
 const runs = (n: number) => Array.from({ length: n }, (_, i) => raw((i + 1) * MIN, `timing · ticket/${100 + i}-r · line 0 · rebase 1 · ci-queue 8 · ci-run 107 · fallback - · deploy 7 · live 42 · landed`));
 const reds = (n: number, ago = MIN) => Array.from({ length: n }, (_, i) => line(ago + i * MIN, `test/x.test.ts · load 3 · ticket/${10 + i}-o · in CI`));
@@ -123,9 +146,15 @@ test('a file red in 20% or more of the last 6 h of runs is a broken test, not a 
   assert.equal(over.out, 'broken test, not a flake: test/x.test.ts red in 3 of 11 runs in the last 6 h');
   // Exactly 20% is broken; a fresh rerun and a bisect run are runs too, a feeder's merge (its own files only) is not; the
   // ship's own red counts, as it reddened a run.
-  const edge = setup([...runs(12), raw(MIN, 'flake rerun · ticket/9-y · test/q.test.ts · green'), raw(MIN, 'flake rerun · ticket/9-y · test/q.test.ts · not started'),
-    raw(MIN, 'bisect run · ticket/9-y · 1 of 3'), raw(MIN, 'timing · ticket/5-f · line 0 · rebase 1 · tests 40 · deploy - · merged'),
-    ...reds(2), line(MIN, 'test/x.test.ts · load 3 · ticket/1-me · in CI')])('ticket/1-me', 'test/x.test.ts');
+  const edge = setup([
+    ...runs(12),
+    raw(MIN, 'flake rerun · ticket/9-y · test/q.test.ts · green'),
+    raw(MIN, 'flake rerun · ticket/9-y · test/q.test.ts · not started'),
+    raw(MIN, 'bisect run · ticket/9-y · 1 of 3'),
+    raw(MIN, 'timing · ticket/5-f · line 0 · rebase 1 · tests 40 · deploy - · merged'),
+    ...reds(2),
+    line(MIN, 'test/x.test.ts · load 3 · ticket/1-me · in CI'),
+  ])('ticket/1-me', 'test/x.test.ts');
   assert.equal(edge.out, 'broken test, not a flake: test/x.test.ts red in 3 of 15 runs in the last 6 h');
 });
 

@@ -8,7 +8,14 @@ import { callEnv } from './pool-context.ts';
 import { thrown } from './thrown.ts';
 
 /** A JSON-RPC message, as far as this file reads it. */
-interface Rpc { jsonrpc?: string; id?: unknown; method?: string; params?: unknown; result?: Record<string, unknown>; error?: unknown }
+interface Rpc {
+  jsonrpc?: string;
+  id?: unknown;
+  method?: string;
+  params?: unknown;
+  result?: Record<string, unknown>;
+  error?: unknown;
+}
 type Link = { session: string; stream: AbortController; pending: Map<unknown, (msg: Rpc) => void>; queue: Promise<unknown> };
 type Turn = { handshake: Rpc[]; link: Promise<Link> | null };
 
@@ -20,7 +27,11 @@ const turns = new Map<string, Map<string, Turn>>();
 
 /** Close a forgotten turn's machine sessions. */
 export function dropLinks(token: string) {
-  for (const t of turns.get(token)?.values() ?? []) t.link?.then((l) => l.stream.abort(), () => {});
+  for (const t of turns.get(token)?.values() ?? [])
+    t.link?.then(
+      (l) => l.stream.abort(),
+      () => {},
+    );
   turns.delete(token);
 }
 
@@ -141,7 +152,11 @@ async function open(api: string, route: string, machine: number, server: string,
         while ((cut = buf.indexOf('\n\n')) >= 0) {
           const block = buf.slice(0, cut);
           buf = buf.slice(cut + 2);
-          const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
+          const data = block
+            .split('\n')
+            .filter((l) => l.startsWith('data:'))
+            .map((l) => l.slice(5).trimStart())
+            .join('\n');
           if (!data) continue;
           const m = JSON.parse(data);
           if (m.closed) return end('its MCP server exited');

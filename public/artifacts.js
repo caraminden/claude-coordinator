@@ -22,7 +22,10 @@ export async function showFile(ticketId, path) {
     api(`api/tickets/${ticketId}`),
     // A file that has gone (or never could be shown) still opens the view, saying so.
     api(`api/tickets/${ticketId}/file?info&path=${encodeURIComponent(path)}`).catch((err) => ({
-      missing: err.message, name: baseName(path), kind: fileKind(path) ?? 'text', display_path: shortPath(path),
+      missing: err.message,
+      name: baseName(path),
+      kind: fileKind(path) ?? 'text',
+      display_path: shortPath(path),
     })),
   ]);
   if (seq !== routeSeq) return;
@@ -40,7 +43,10 @@ export async function showFile(ticketId, path) {
 export async function showSharedFile(projectId, path) {
   const seq = routeSeq;
   const file = await api(`api/projects/${projectId}/shared/file?info&path=${encodeURIComponent(path)}`).catch((err) => ({
-    missing: err.message, name: baseName(path), kind: fileKind(path) ?? 'text', display_path: `scheme shared/${path}`,
+    missing: err.message,
+    name: baseName(path),
+    kind: fileKind(path) ?? 'text',
+    display_path: `scheme shared/${path}`,
   }));
   if (seq !== routeSeq) return; // overtaken by another click while loading
   await showProject(projectId, { kind: 'shared', file: { ...file, path } });
@@ -75,10 +81,7 @@ async function refreshArtifacts() {
   if (view?.kind !== 'project') return;
   const projectId = view.projectId;
   try {
-    const [artifacts, shared] = await Promise.all([
-      api(`api/projects/${projectId}/artifacts`),
-      api(`api/projects/${projectId}/shared`).catch(() => []),
-    ]);
+    const [artifacts, shared] = await Promise.all([api(`api/projects/${projectId}/artifacts`), api(`api/projects/${projectId}/shared`).catch(() => [])]);
     if (view?.kind === 'project' && view.projectId === projectId) setArtifacts(artifacts, shared);
   } catch {}
 }
@@ -104,27 +107,32 @@ function setPinned(a, pinned) {
   optimistic({
     sets: `artifact-pin:${a.id ?? a.path}`,
     apply: () => show(pinned ? { pinned_at: Date.now(), pinned_by: me } : { pinned_at: null, pinned_by: null }),
-    send: () => (a.id
-      ? api(`api/artifacts/${a.id}/pin`, { method: 'POST', body: { pinned } })
-      : api(`api/projects/${projectId}/shared/pin`, { method: 'POST', body: { path: a.path, pinned } })),
+    send: () => (a.id ? api(`api/artifacts/${a.id}/pin`, { method: 'POST', body: { pinned } }) : api(`api/projects/${projectId}/shared/pin`, { method: 'POST', body: { path: a.path, pinned } })),
     undo: () => !!a.pinned_at === pinned && show(was), // unless something else changed it since
     label: `${pinned ? 'pin' : 'unpin'} ${a.name}`,
-  }).then(() => refreshArtifacts(), () => {}); // a failure already said so in its toast
+  }).then(
+    () => refreshArtifacts(),
+    () => {},
+  ); // a failure already said so in its toast
 }
 
 export function pinButton(a) {
   const pinned = !!a.pinned_at;
-  return h('button', {
-    type: 'button',
-    class: `pin${pinned ? ' on' : ''}`,
-    title: pinned ? `Pinned by ${a.pinned_by}; click to unpin` : 'Pin to the top of the artifacts panel',
-    'aria-pressed': String(pinned),
-    onclick: (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setPinned(a, !pinned);
+  return h(
+    'button',
+    {
+      type: 'button',
+      class: `pin${pinned ? ' on' : ''}`,
+      title: pinned ? `Pinned by ${a.pinned_by}; click to unpin` : 'Pin to the top of the artifacts panel',
+      'aria-pressed': String(pinned),
+      onclick: (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setPinned(a, !pinned);
+      },
     },
-  }, pinned ? '★' : '☆');
+    pinned ? '★' : '☆',
+  );
 }
 
 /** The far-left panel: pinned artifacts, then the most recent ones from any thread. */
@@ -135,27 +143,35 @@ export function renderShelf() {
   // Pinned shared-folder files sit with pinned artifacts; they have no id.
   const pinned = [...all, ...(view.shared ?? [])].filter((a) => a.pinned_at).sort((a, b) => b.pinned_at - a.pinned_at);
   const recent = all.filter((a) => !a.pinned_at && !a.missing).slice(0, RECENT_ARTIFACTS);
-  const item = (a) => h('a', {
-    class: `artifact-item${(a.id ? view.artifactId === a.id : view.main === 'shared' && view.file?.path === a.path) ? ' active' : ''}${a.missing ? ' missing' : ''}`,
-    href: a.id ? `#/a/${a.id}` : sharedHref(view.projectId, a.path), title: a.display_path ?? a.path,
-  },
-    h('span', { class: `badge k-${a.kind}` }, extOf(a)),
-    h('span', { class: 'text' },
-      h('span', { class: 'name' }, a.name),
-      h('span', { class: 'meta' }, `${!a.id ? 'Shared' : a.ticket_kind === 'coordinator' ? taskmasterName() : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)));
-  const sub = (title, count, items, empty, render = item) => h('div', { class: 'sub' },
-    h('h4', {}, title, count ? h('span', { class: 'count' }, count) : ''),
-    items.length ? items.map(render) : h('p', { class: 'muted small' }, empty));
+  const item = (a) =>
+    h(
+      'a',
+      {
+        class: `artifact-item${(a.id ? view.artifactId === a.id : view.main === 'shared' && view.file?.path === a.path) ? ' active' : ''}${a.missing ? ' missing' : ''}`,
+        href: a.id ? `#/a/${a.id}` : sharedHref(view.projectId, a.path),
+        title: a.display_path ?? a.path,
+      },
+      h('span', { class: `badge k-${a.kind}` }, extOf(a)),
+      h('span', { class: 'text' }, h('span', { class: 'name' }, a.name), h('span', { class: 'meta' }, `${!a.id ? 'Shared' : a.ticket_kind === 'coordinator' ? taskmasterName() : `#${a.ticket_number ?? a.ticket_id}`} · ${a.missing ? 'missing' : ago(a.mtime)}`)),
+    );
+  const sub = (title, count, items, empty, render = item) => h('div', { class: 'sub' }, h('h4', {}, title, count ? h('span', { class: 'count' }, count) : ''), items.length ? items.map(render) : h('p', { class: 'muted small' }, empty));
   // Recent starts collapsed; opening it is remembered with the panels' own open state.
-  const recentFold = h('details', { class: 'sub fold', open: loadPanelState().recent === true },
+  const recentFold = h(
+    'details',
+    { class: 'sub fold', open: loadPanelState().recent === true },
     h('summary', {}, 'Recent', recent.length ? h('span', { class: 'count' }, recent.length) : ''),
-    recent.length ? recent.map(item) : h('p', { class: 'muted small' }, 'Documents, pages and canvases that minions create show up here.'));
+    recent.length ? recent.map(item) : h('p', { class: 'muted small' }, 'Documents, pages and canvases that minions create show up here.'),
+  );
   recentFold.addEventListener('toggle', () => savePanelState({ ...loadPanelState(), recent: recentFold.open }));
-  el.replaceChildren(h('section', { class: 'column' },
-    h('h3', {}, 'Artifacts', h('span', { class: 'spacer' }),
-      h('a', { class: `browse${view.main === 'files' ? ' active' : ''}`, href: `#/p/${view.projectId}/shared`, title: 'Every file: the shared folder and what minions linked' }, 'All files')),
-    sub('Pinned', pinned.length, pinned, 'Pin artifacts with ☆ to keep them here.'),
-    recentFold));
+  el.replaceChildren(
+    h(
+      'section',
+      { class: 'column' },
+      h('h3', {}, 'Artifacts', h('span', { class: 'spacer' }), h('a', { class: `browse${view.main === 'files' ? ' active' : ''}`, href: `#/p/${view.projectId}/shared`, title: 'Every file: the shared folder and what minions linked' }, 'All files')),
+      sub('Pinned', pinned.length, pinned, 'Pin artifacts with ☆ to keep them here.'),
+      recentFold,
+    ),
+  );
 }
 
 // What a page's bridge says the viewer opened: a file a chat linked, or a file in the scheme's shared folder.
@@ -168,11 +184,20 @@ function drawForPage(src, marks) {
     let done = null;
     const lb = lightbox([{ src, caption: 'Picture on the page' }], {
       label: 'Draw on the picture',
-      render: (_, stage) => annotator(stage, src, { marks, onDone: (canvas, kept) => { done = { canvas, marks: kept }; lb.close(); } }),
+      render: (_, stage) =>
+        annotator(stage, src, {
+          marks,
+          onDone: (canvas, kept) => {
+            done = { canvas, marks: kept };
+            lb.close();
+          },
+        }),
       onClose: () => {
         if (!done) return resolve(null);
         if (!done.canvas) return resolve({ marks: [], image: null });
-        canvasBlob(done.canvas).then(sendableImage).then((image) => resolve({ marks: done.marks, image }), reject);
+        canvasBlob(done.canvas)
+          .then(sendableImage)
+          .then((image) => resolve({ marks: done.marks, image }), reject);
       },
     });
   });
@@ -201,12 +226,18 @@ export function artifactViewer(a) {
   const body = h('div', { class: 'artifact-body' });
   const section = h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'artifact-head' }), body);
   if (a.missing) {
-    body.append(h('p', { class: 'muted' }, 'This file is no longer in the minion\'s folder. Unpin it to remove it from the list.'));
+    body.append(h('p', { class: 'muted' }, "This file is no longer in the minion's folder. Unpin it to remove it from the list."));
   } else {
     const comment = commentBox(artifactThread(a), a.path, a.name, body);
     const bridge = { open: { artifact: a.id }, owner: threadName(a) };
     // The head reads the list's copy of the artifact, not this one.
-    const onMissing = () => { a.missing = 1; const listed = view.artifacts.find((x) => x.id === a.id); if (listed) listed.missing = 1; comment.remove(); renderArtifactHead(); };
+    const onMissing = () => {
+      a.missing = 1;
+      const listed = view.artifacts.find((x) => x.id === a.id);
+      if (listed) listed.missing = 1;
+      comment.remove();
+      renderArtifactHead();
+    };
     renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id, bridge, onMissing });
     section.append(comment);
   }
@@ -245,7 +276,9 @@ function openViewer(ticket, file, inPlace) {
       leaveViewer();
     });
     // Browsers may close a dialog past a refused cancel (Esc pressed twice); still go back properly.
-    dialog.addEventListener('close', () => { if (viewer?.dialog === dialog) leaveViewer(); });
+    dialog.addEventListener('close', () => {
+      if (viewer?.dialog === dialog) leaveViewer();
+    });
     // Another file from the chat swaps in place, so closing still goes straight back to the chat.
     dialog.addEventListener('click', (e) => {
       const a = e.target.closest?.('a[href^="#/f/"]');
@@ -280,8 +313,23 @@ function openViewer(ticket, file, inPlace) {
   else {
     // A page's Send goes to the chat beside it.
     // After a send the viewer closes on the chat it went to (a page can opt out: send's keepOpen).
-    const bridge = { ...viewerBridge(ticket, file), afterSend: () => { if (viewer?.file === file) leaveViewer(); } };
-    if (!showMedia(ticket, file)) renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, bridge, onMissing: (message) => { file.missing = message; renderViewerBar(); } });
+    const bridge = {
+      ...viewerBridge(ticket, file),
+      afterSend: () => {
+        if (viewer?.file === file) leaveViewer();
+      },
+    };
+    if (!showMedia(ticket, file))
+      renderFileBody(viewer.stage, {
+        ...file,
+        src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`,
+        ticketId: ticket.id,
+        bridge,
+        onMissing: (message) => {
+          file.missing = message;
+          renderViewerBar();
+        },
+      });
   }
   renderViewerBar();
 }
@@ -309,11 +357,17 @@ function showMedia(ticket, file) {
   if (!paths.includes(file.path)) paths.splice(0, paths.length, file.path);
   const items = paths.map((p) => ({
     src: p === file.path ? `${fileUrl(ticket.id, p)}&v=${file.mtime}` : fileUrl(ticket.id, p),
-    kind: fileKind(p), alt: baseName(p), marks: minionMarks.get(p),
+    kind: fileKind(p),
+    alt: baseName(p),
+    marks: minionMarks.get(p),
   }));
   viewer.stage.className = 'viewer-stage k-media';
   const kept = new Map();
-  const lb = lightbox(items, { at: paths.indexOf(file.path), into: viewer.stage, autoplay: true, label: 'Pictures and clips in this message',
+  const lb = lightbox(items, {
+    at: paths.indexOf(file.path),
+    into: viewer.stage,
+    autoplay: true,
+    label: 'Pictures and clips in this message',
     onChange: (at) => replaceHash(fileHref(ticket.id, paths[at])),
     // A picture is ready to draw on (#946): Done puts the marked copy in the chat's message box and goes back to it.
     // Each picture's marks outlive stepping to another one, while the viewer stays open.
@@ -327,8 +381,14 @@ function showMedia(ticket, file) {
           leaveViewer();
         },
       });
-      return { destroy: () => { kept.set(item.src, a.marks); a.destroy(); } };
-    } });
+      return {
+        destroy: () => {
+          kept.set(item.src, a.marks);
+          a.destroy();
+        },
+      };
+    },
+  });
   viewer.media = { ticketId: ticket.id, paths, lb };
   return true;
 }
@@ -361,12 +421,17 @@ function watchKeyboard(dialog) {
   const vv = window.visualViewport;
   if (!vv) return () => {};
   let tallest = Math.max(vv.height, innerHeight);
-  const stop = () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); removeEventListener('focusin', update); removeEventListener('blur', onBlur, true); screen.orientation?.removeEventListener('change', onTurn); };
+  const stop = () => {
+    vv.removeEventListener('resize', update);
+    vv.removeEventListener('scroll', update);
+    removeEventListener('focusin', update);
+    removeEventListener('blur', onBlur, true);
+    screen.orientation?.removeEventListener('change', onTurn);
+  };
   const update = () => {
     if (!dialog.isConnected) return stop();
     tallest = Math.max(tallest, vv.height, innerHeight);
-    const typing = document.activeElement?.classList.contains('artifact-frame') && matchMedia('(max-width: 800px)').matches
-      && vv.height < tallest - 120;
+    const typing = document.activeElement?.classList.contains('artifact-frame') && matchMedia('(max-width: 800px)').matches && vv.height < tallest - 120;
     dialog.classList.toggle('kb-page', !!typing);
     // Chrome on Android shrinks only the visual viewport: size and place the dialog to it.
     dialog.style.height = typing ? `${vv.height}px` : '';
@@ -375,7 +440,10 @@ function watchKeyboard(dialog) {
   };
   const onBlur = () => setTimeout(update);
   // A rotated phone has a new tallest height.
-  const onTurn = () => { tallest = 0; update(); };
+  const onTurn = () => {
+    tallest = 0;
+    update();
+  };
   screen.orientation?.addEventListener('change', onTurn);
   vv.addEventListener('resize', update);
   vv.addEventListener('scroll', update);
@@ -407,14 +475,14 @@ function renderViewerBar() {
   if (at >= 0 && options.length > 1) viewer.stage.append(h('div', { class: 'edge-steps' }, stepLink(t, options, at, -1, 'prev'), stepLink(t, options, at, 1, 'next')));
   viewer.bar.replaceChildren(
     at >= 0 ? '' : h('span', { class: `badge k-${file.kind}` }, fileExt(file.name)),
-    h('div', { class: 'name' }, h('h2', { title: file.display_path }, at >= 0 ? options[at].label : file.name),
-      h('span', { class: 'meta' }, file.missing ? 'not found' : `${formatSize(file.size)} · updated ${ago(file.mtime)}`)),
+    h('div', { class: 'name' }, h('h2', { title: file.display_path }, at >= 0 ? options[at].label : file.name), h('span', { class: 'meta' }, file.missing ? 'not found' : `${formatSize(file.size)} · updated ${ago(file.mtime)}`)),
     at >= 0 ? galleryControls(t, options, at) : '',
     a ? pinButton(a) : '',
     file.missing || file.kind !== 'html' ? '' : fullScreenButton(() => viewer?.stage),
     open,
     file.missing ? '' : h('a', { class: 'button secondary wide-only', href: `${src}&download` }, 'Download'),
-    h('button', { type: 'button', class: 'close-view', title: 'Back to the chat', 'aria-label': 'Back to the chat', onclick: leaveViewer }, icon('close')));
+    h('button', { type: 'button', class: 'close-view', title: 'Back to the chat', 'aria-label': 'Back to the chat', onclick: leaveViewer }, icon('close')),
+  );
 }
 
 /**
@@ -424,31 +492,47 @@ function renderViewerBar() {
 function stepLink(t, options, at, by, cls = '') {
   if (options.length < 2) return '';
   const to = (at + by + options.length) % options.length;
-  return h('a', {
-    class: `button secondary step ${cls}`, href: fileHref(t.id, options[to].path), 'aria-label': by < 0 ? 'Previous option' : 'Next option',
-    onclick: (e) => {
-      gallery.at = to;
-      // The same picture under another option: no new address to go to, so only the bar changes.
-      if (options[to].path === options[at].path) { e.preventDefault(); renderViewerBar(); }
+  return h(
+    'a',
+    {
+      class: `button secondary step ${cls}`,
+      href: fileHref(t.id, options[to].path),
+      'aria-label': by < 0 ? 'Previous option' : 'Next option',
+      onclick: (e) => {
+        gallery.at = to;
+        // The same picture under another option: no new address to go to, so only the bar changes.
+        if (options[to].path === options[at].path) {
+          e.preventDefault();
+          renderViewerBar();
+        }
+      },
     },
-  }, by < 0 ? '‹' : '›');
+    by < 0 ? '‹' : '›',
+  );
 }
 
 function galleryControls(t, options, at) {
   const o = options[at];
   const picked = o.picked();
   const pick = gallery.answered()
-    ? (picked ? h('span', { class: 'picked' }, '✓ Picked') : '')
-    : h('button', {
-      type: 'button', class: `small pick${picked ? ' secondary' : ''}`, 'aria-pressed': String(picked),
-      onclick: () => {
-        o.pick();
-        viewer?.bar.querySelector('.pick')?.focus(); // the pick redrew the bar
-      },
-    }, picked ? '✓ Picked' : 'Pick this');
+    ? picked
+      ? h('span', { class: 'picked' }, '✓ Picked')
+      : ''
+    : h(
+        'button',
+        {
+          type: 'button',
+          class: `small pick${picked ? ' secondary' : ''}`,
+          'aria-pressed': String(picked),
+          onclick: () => {
+            o.pick();
+            viewer?.bar.querySelector('.pick')?.focus(); // the pick redrew the bar
+          },
+        },
+        picked ? '✓ Picked' : 'Pick this',
+      );
   // Pick leads, so its width changing ("Pick this", "✓ Picked", nothing) never moves the arrows.
-  return h('div', { class: 'gallery-controls' },
-    pick, stepLink(t, options, at, -1), options.length < 2 ? '' : h('span', { class: 'count' }, `${at + 1} / ${options.length}`), stepLink(t, options, at, 1));
+  return h('div', { class: 'gallery-controls' }, pick, stepLink(t, options, at, -1), options.length < 2 ? '' : h('span', { class: 'count' }, `${at + 1} / ${options.length}`), stepLink(t, options, at, 1));
 }
 
 /**
@@ -467,18 +551,24 @@ function commentBox(t, path, name, body) {
   const setQuote = (text) => {
     quote = text;
     quoteEl.hidden = !text;
-    quoteEl.replaceChildren(h('span', { class: 'text' }, text),
-      h('button', { type: 'button', class: 'secondary small', title: 'Remove the quote', 'aria-label': 'Remove the quote', onclick: () => setQuote('') }, '×'));
+    quoteEl.replaceChildren(h('span', { class: 'text' }, text), h('button', { type: 'button', class: 'secondary small', title: 'Remove the quote', 'aria-label': 'Remove the quote', onclick: () => setQuote('') }, '×'));
   };
-  const quoteBtn = h('button', {
-    type: 'button', class: 'secondary small', hidden: true, title: 'Quote the text selected in the file',
-    // Keep the selection when the button is pressed, so there is still something to quote.
-    onpointerdown: (e) => e.preventDefault(),
-    onclick: () => {
-      setQuote(selected);
-      textarea.focus();
+  const quoteBtn = h(
+    'button',
+    {
+      type: 'button',
+      class: 'secondary small',
+      hidden: true,
+      title: 'Quote the text selected in the file',
+      // Keep the selection when the button is pressed, so there is still something to quote.
+      onpointerdown: (e) => e.preventDefault(),
+      onclick: () => {
+        setQuote(selected);
+        textarea.focus();
+      },
     },
-  }, '❝ Quote selection');
+    '❝ Quote selection',
+  );
   // Only text the file shows on this page can be quoted; pages and PDFs sit in frames of their own.
   const onSelection = () => {
     if (!body.isConnected) return document.removeEventListener('selectionchange', onSelection);
@@ -498,8 +588,7 @@ function commentBox(t, path, name, body) {
     grow();
   });
   setTimeout(grow);
-  const form = h('form', { class: 'file-comment' }, quoteEl, textarea,
-    h('div', { class: 'row' }, quoteBtn, status, h('span', { class: 'spacer' }), sendBtn));
+  const form = h('form', { class: 'file-comment' }, quoteEl, textarea, h('div', { class: 'row' }, quoteBtn, status, h('span', { class: 'spacer' }), sendBtn));
   textarea.addEventListener('keydown', (e) => {
     if (continueList(textarea, e, matchMedia('(max-width: 800px)').matches)) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(max-width: 800px)').matches) {
@@ -539,7 +628,11 @@ export function sharedViewer(file) {
   // Comments on a shared page go to the Taskmaster; the page's own Send goes to the minion that linked it, if one did (the server knows).
   const comment = !file.missing && file.kind === 'html' && view.coordinator ? commentBox(view.coordinator, file.abs, file.name, body) : null;
   const bridge = sharedBridge(file);
-  const onMissing = (message) => { file.missing = message; comment?.remove(); renderSharedHead(); };
+  const onMissing = (message) => {
+    file.missing = message;
+    comment?.remove();
+    renderSharedHead();
+  };
   if (!file.missing) renderFileBody(body, { ...file, onMissing, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), bridge });
   return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body, comment ?? '');
 }
@@ -552,18 +645,19 @@ export function renderSharedHead() {
   const listed = view.shared.find((f) => f.path === file.path);
   const src = `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`;
   el.replaceChildren(
-    h('div', { class: 'row' },
+    h(
+      'div',
+      { class: 'row' },
       h('span', { class: `badge k-${file.kind}` }, fileExt(file.name)),
       h('h2', {}, file.name),
       h('span', { class: 'spacer' }),
       listed ? pinButton(listed) : '',
       file.missing || file.kind !== 'html' ? '' : fullScreenButton(() => el.closest('.artifacts-main')),
       file.missing ? '' : openButton(src, file, sharedBridge(file)),
-      file.missing ? '' : h('a', { class: 'button secondary', href: `${src}&download` }, 'Download')),
-    h('div', { class: 'meta' },
-      file.display_path, ' · in the folder every minion and the Taskmaster share',
-      file.missing ? ' · not found' : ` · ${formatSize(file.size)} · updated ${ago(file.mtime)}`,
-      listed?.pinned_at ? ` · pinned by ${listed.pinned_by}` : ''));
+      file.missing ? '' : h('a', { class: 'button secondary', href: `${src}&download` }, 'Download'),
+    ),
+    h('div', { class: 'meta' }, file.display_path, ' · in the folder every minion and the Taskmaster share', file.missing ? ' · not found' : ` · ${formatSize(file.size)} · updated ${ago(file.mtime)}`, listed?.pinned_at ? ` · pinned by ${listed.pinned_by}` : ''),
+  );
 }
 
 /**
@@ -571,12 +665,20 @@ export function renderSharedHead() {
  * tab has no viewer behind it). Where a frame can't go full screen (iPhone), it fills the window instead.
  */
 function fullScreenButton(scope) {
-  return h('button', { type: 'button', class: 'secondary full-screen', onclick: () => {
-    const frame = scope()?.querySelector('iframe.artifact-frame');
-    if (!frame) return;
-    if (document.fullscreenEnabled && frame.requestFullscreen) frame.requestFullscreen().catch(() => fillWindow(frame));
-    else fillWindow(frame);
-  } }, 'Full screen');
+  return h(
+    'button',
+    {
+      type: 'button',
+      class: 'secondary full-screen',
+      onclick: () => {
+        const frame = scope()?.querySelector('iframe.artifact-frame');
+        if (!frame) return;
+        if (document.fullscreenEnabled && frame.requestFullscreen) frame.requestFullscreen().catch(() => fillWindow(frame));
+        else fillWindow(frame);
+      },
+    },
+    'Full screen',
+  );
 }
 
 function fillWindow(frame) {
@@ -627,31 +729,35 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, bridge, o
   } else {
     body.append(loadingLine('Loading…'));
     const show = (el) => body.textLoad === load && body.replaceChildren(el);
-    fetch(src).then(async (res) => {
-      if (!res.ok) {
-        const message = (await res.json().catch(() => ({}))).error || `HTTP ${res.status}`;
-        // Listed but gone: the viewer's Open, Download and Comment have nothing to act on (#882).
-        if (res.status === 404 && onMissing && body.textLoad === load) {
-          body.replaceChildren(h('p', { class: 'muted' }, `${message}.`));
-          return onMissing(message);
+    fetch(src)
+      .then(async (res) => {
+        if (!res.ok) {
+          const message = (await res.json().catch(() => ({}))).error || `HTTP ${res.status}`;
+          // Listed but gone: the viewer's Open, Download and Comment have nothing to act on (#882).
+          if (res.status === 404 && onMissing && body.textLoad === load) {
+            body.replaceChildren(h('p', { class: 'muted' }, `${message}.`));
+            return onMissing(message);
+          }
+          throw new Error(message);
         }
-        throw new Error(message);
-      }
-      const text = await res.text();
-      const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-      const imageUrl = (href) => (isLocalPath(href) ? urlFor(joinPath(dir, href.split('#')[0])) : null);
-      let shown = text;
-      if (kind === 'canvas') {
-        // JSON Canvas files are JSON; lay them out readably.
-        try { shown = JSON.stringify(JSON.parse(text), null, 2); } catch {}
-      }
-      const linkHref = (href) => hrefFor(joinPath(dir, href));
-      const doc = kind === 'markdown' && markdownDoc(text, { imageUrl, linkHref });
-      // Plain text keeps its URLs clickable too (#440): linkify escapes everything else.
-      const pre = h('pre', { class: 'artifact-text' });
-      if (!doc) pre.innerHTML = linkify(shown);
-      show(doc ? h('div', { class: 'msg doc' }, doc) : pre);
-    }).catch((err) => show(h('p', { class: 'error' }, `Could not load: ${err.message}`)));
+        const text = await res.text();
+        const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+        const imageUrl = (href) => (isLocalPath(href) ? urlFor(joinPath(dir, href.split('#')[0])) : null);
+        let shown = text;
+        if (kind === 'canvas') {
+          // JSON Canvas files are JSON; lay them out readably.
+          try {
+            shown = JSON.stringify(JSON.parse(text), null, 2);
+          } catch {}
+        }
+        const linkHref = (href) => hrefFor(joinPath(dir, href));
+        const doc = kind === 'markdown' && markdownDoc(text, { imageUrl, linkHref });
+        // Plain text keeps its URLs clickable too (#440): linkify escapes everything else.
+        const pre = h('pre', { class: 'artifact-text' });
+        if (!doc) pre.innerHTML = linkify(shown);
+        show(doc ? h('div', { class: 'msg doc' }, doc) : pre);
+      })
+      .catch((err) => show(h('p', { class: 'error' }, `Could not load: ${err.message}`)));
   }
 }
 
@@ -669,22 +775,21 @@ export function renderArtifactHead() {
   if (!el) return;
   const a = view.artifacts.find((x) => x.id === view.artifactId);
   if (!a) {
-    el.replaceChildren(h('div', { class: 'row' }, h('h2', {}, 'Artifact removed'),
-      h('span', { class: 'muted' }, 'The file was deleted from its minion\'s folder.')));
+    el.replaceChildren(h('div', { class: 'row' }, h('h2', {}, 'Artifact removed'), h('span', { class: 'muted' }, "The file was deleted from its minion's folder.")));
     return;
   }
   el.replaceChildren(
-    h('div', { class: 'row' },
+    h(
+      'div',
+      { class: 'row' },
       h('span', { class: `badge k-${a.kind}` }, extOf(a)),
       h('h2', {}, a.name),
       h('span', { class: 'spacer' }),
       pinButton(a),
       a.missing || a.kind !== 'html' ? '' : fullScreenButton(() => el.closest('.artifacts-main')),
       a.missing ? '' : openButton(rawUrl(a), a, { open: { artifact: a.id }, owner: threadName(a) }),
-      a.missing ? '' : h('a', { class: 'button secondary', href: `${rawUrl(a)}&download` }, 'Download')),
-    h('div', { class: 'meta' },
-      a.display_path ?? a.path, ' · from ',
-      h('a', { href: threadHref(artifactThread(a)) }, threadName(a)),
-      a.missing ? ' · missing' : ` · ${formatSize(a.size)} · updated ${ago(a.mtime)}`,
-      a.pinned_at ? ` · pinned by ${a.pinned_by}` : ''));
+      a.missing ? '' : h('a', { class: 'button secondary', href: `${rawUrl(a)}&download` }, 'Download'),
+    ),
+    h('div', { class: 'meta' }, a.display_path ?? a.path, ' · from ', h('a', { href: threadHref(artifactThread(a)) }, threadName(a)), a.missing ? ' · missing' : ` · ${formatSize(a.size)} · updated ${ago(a.mtime)}`, a.pinned_at ? ` · pinned by ${a.pinned_by}` : ''),
+  );
 }

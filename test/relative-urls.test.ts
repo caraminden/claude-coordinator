@@ -12,10 +12,12 @@ test('the front end uses relative URLs for the API and its own files', () => {
   // sw.js runs only at the root (a preview shares the live worker), and machine-agent.mjs runs on machines.
   const files = [...readdirSync(dir), ...readdirSync(join(dir, 'ui')).map((f) => `ui/${f}`)];
   for (const f of files.filter((f) => /\.(js|html)$/.test(f) && f !== 'sw.js')) {
-    readFileSync(join(dir, f), 'utf8').split('\n').forEach((line, i) => {
-      const bad = /['"`]\/api\//.test(line) || /\b(href|src)="\/[^/]/.test(line) || /EventSource\(['"`]\//.test(line);
-      if (bad && !line.includes("register('/sw.js')")) found.push(`${f}:${i + 1}: ${line.trim()}`);
-    });
+    readFileSync(join(dir, f), 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        const bad = /['"`]\/api\//.test(line) || /\b(href|src)="\/[^/]/.test(line) || /EventSource\(['"`]\//.test(line);
+        if (bad && !line.includes("register('/sw.js')")) found.push(`${f}:${i + 1}: ${line.trim()}`);
+      });
   }
   assert.deepEqual(found, []);
 });

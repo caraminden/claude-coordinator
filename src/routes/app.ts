@@ -21,7 +21,9 @@ import { handoverState } from '../handover.ts';
 const MAX_CLIENTS = 100;
 
 /** A page's slow-moment report (POST /api/slow-moments, public/slow-moments.js): rows a person's flood can't grow past this many per window. */
-const SLOW_RATE = 60, SLOW_RATE_MS = 10 * 60_000, SLOW_MAX_MS = 10 * 60_000;
+const SLOW_RATE = 60,
+  SLOW_RATE_MS = 10 * 60_000,
+  SLOW_MAX_MS = 10 * 60_000;
 const slowSeen = new Map<string, { since: number; n: number }>();
 const SLOW_KINDS = new Set(['request', 'open', 'load', 'freeze']);
 
@@ -31,14 +33,25 @@ export function slowRows(body: any, person: string, room: number, now = Date.now
   const ms = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(Math.min(Math.max(v, 0), SLOW_MAX_MS)) : null);
   const out: Omit<SlowMoment, 'id'>[] = [];
   for (const m of Array.isArray(body?.moments) ? body.moments.slice(0, 20) : []) {
-    const total = ms(m?.total), at = Math.round(Number(m?.at));
+    const total = ms(m?.total),
+      at = Math.round(Number(m?.at));
     // A day back at most, and nothing from the future: a report kept offline overnight still counts.
     if (out.length >= room || !SLOW_KINDS.has(m?.kind) || total === null || !(at > now - 86_400_000 && at < now + 60_000)) continue;
     const page = text(m.page, 120);
     const scheme = /^#\/p\/(\d+)/.exec(page);
     out.push({
-      at, person, device: text(body.device, 60), tab: text(m.tab ?? body.tab, 12), kind: m.kind, what: text(m.what, 160), page,
-      project_id: scheme ? Number(scheme[1]) : null, total_ms: total, server_ms: ms(m.server), network_ms: ms(m.network) ?? 0, tab_ms: ms(m.tab_ms) ?? 0,
+      at,
+      person,
+      device: text(body.device, 60),
+      tab: text(m.tab ?? body.tab, 12),
+      kind: m.kind,
+      what: text(m.what, 160),
+      page,
+      project_id: scheme ? Number(scheme[1]) : null,
+      total_ms: total,
+      server_ms: ms(m.server),
+      network_ms: ms(m.network) ?? 0,
+      tab_ms: ms(m.tab_ms) ?? 0,
     });
   }
   return out;
@@ -46,7 +59,13 @@ export function slowRows(body: any, person: string, room: number, now = Date.now
 
 /** Display names end up in prompts as "[Name]: ...", so keep them plain. */
 export function cleanName(v: unknown): string {
-  const name = typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f\[\]:]/g, '').replace(/\s+/g, ' ').trim() : '';
+  const name =
+    typeof v === 'string'
+      ? v
+          .replace(/[\x00-\x1f\x7f\[\]:]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+      : '';
   if (!name) throw new HttpError(400, 'Name is required');
   if (looksLikeUrl(name)) throw new HttpError(400, 'That looks like a web address. Type your name.');
   if (NOT_PEOPLE.some((n) => n.toLowerCase() === name.toLowerCase()) || /^#\d/.test(name)) throw new HttpError(400, 'That name is reserved');
@@ -75,12 +94,16 @@ function meView({ store, claude, runner }: Ctx['app'], session: Ctx['session']) 
 
 export const appRoutes: Route[] = [
   {
-    method: 'POST', path: '/api/login', who: 'anyone',
+    method: 'POST',
+    path: '/api/login',
+    who: 'anyone',
     async handler({ req, res, app: { auth } }) {
       const ip = clientIp(req);
       const body = await readJson(req);
       // `name` is what sign-in sent before per-person logins (and tools/boot-check.ts still does).
-      const login = String(body.login ?? body.name ?? '').trim().slice(0, 64);
+      const login = String(body.login ?? body.name ?? '')
+        .trim()
+        .slice(0, 64);
       if (!login) throw new HttpError(400, 'Login is required');
       if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
       const user = await auth.signIn(ip, login, String(body.password ?? '').slice(0, 1000));
@@ -90,7 +113,9 @@ export const appRoutes: Route[] = [
   },
   {
     // An invite (or password-reset) link: who it is for, and setting the password, which signs them in.
-    method: ['GET', 'POST'], path: '/api/invite/:token', who: 'anyone',
+    method: ['GET', 'POST'],
+    path: '/api/invite/:token',
+    who: 'anyone',
     async handler({ req, res, params, app: { auth, store } }) {
       const ip = clientIp(req);
       if (auth.limited(ip)) throw new HttpError(429, 'Too many attempts; try again later');
@@ -106,7 +131,9 @@ export const appRoutes: Route[] = [
   {
     // For tools/deploy.sh, so no login: is this server up, which code it booted from, which front end
     // it serves, and that it reloads public/ on SIGHUP (an older server would exit on one).
-    method: 'GET', path: '/api/health', who: 'anyone',
+    method: 'GET',
+    path: '/api/health',
+    who: 'anyone',
     // interruptible: running turns a restart would stop (they don't run in a unit of their own); interruptibleTurns:
     // which minions' turns, by id only (#584): deploy.sh names them from the database. fallbacks: jobs
     // systemd-run couldn't put in a unit of their own since the server started, which ran in it instead (#519).
@@ -116,7 +143,9 @@ export const appRoutes: Route[] = [
   {
     // The front-end error beacon (public/error-beacon.js, #724): one uncaught error or rejection from a page, for the
     // post-deploy watch. Repeats and floods are dropped per person (ClientErrors); the answer is the same either way.
-    method: 'POST', path: '/api/client-errors', who: ['person'],
+    method: 'POST',
+    path: '/api/client-errors',
+    who: ['person'],
     async handler({ req, res, app, session }) {
       const body = await readJson(req, 8_000);
       const detail = app.health?.clientErrors.take(String(session.uid ?? session.name), body);
@@ -126,10 +155,13 @@ export const appRoutes: Route[] = [
   },
   {
     // The slow-load recorder (public/slow-moments.js, #1752): a page's pauses over 2 s, for the Status page.
-    method: 'POST', path: '/api/slow-moments', who: ['person'],
+    method: 'POST',
+    path: '/api/slow-moments',
+    who: ['person'],
     async handler({ req, res, app, session }) {
       const body = await readJson(req, 16_000);
-      const who = String(session.name), t = Date.now();
+      const who = String(session.name),
+        t = Date.now();
       let seen = slowSeen.get(who);
       if (!seen || t - seen.since >= SLOW_RATE_MS) slowSeen.set(who, (seen = { since: t, n: 0 }));
       const rows = slowRows(body, who, SLOW_RATE - seen.n, t);
@@ -140,7 +172,9 @@ export const appRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/me', who: ['person', 'taskmaster', 'minion'],
+    method: 'GET',
+    path: '/api/me',
+    who: ['person', 'taskmaster', 'minion'],
     handler({ req, res, app, session, caller }) {
       const { store } = app;
       // The app's public address, as Caddy forwards it, so start_preview can hand out a full link.
@@ -152,24 +186,30 @@ export const appRoutes: Route[] = [
   },
   // The first-day welcome (#1151): its steps again after the person did something, and dismissing it or answering its practice card.
   {
-    method: 'GET', path: '/api/welcome', who: ['person'],
+    method: 'GET',
+    path: '/api/welcome',
+    who: ['person'],
     handler({ res, app, session }) {
       return json(res, 200, { welcome: meView(app, session).welcome });
     },
   },
   {
-    method: 'POST', path: '/api/welcome', who: ['person'],
+    method: 'POST',
+    path: '/api/welcome',
+    who: ['person'],
     async handler({ req, res, app, session }) {
       const body = await readJson(req);
       if (!session.uid) throw new HttpError(400, 'Only a person has a welcome');
       if (body?.dismiss === true) welcomeAct(app.store, session.uid, { dismiss: true });
       else if (CARD_OPTIONS.includes(body?.card)) welcomeAct(app.store, session.uid, { card: body.card });
-      else throw new HttpError(400, 'Send dismiss: true or one of the practice card\'s answers');
+      else throw new HttpError(400, "Send dismiss: true or one of the practice card's answers");
       return json(res, 200, { welcome: meView(app, session).welcome });
     },
   },
   {
-    method: 'GET', path: '/api/stream', who: ['person'],
+    method: 'GET',
+    path: '/api/stream',
+    who: ['person'],
     handler({ req, res, app, session }) {
       if (app.clients.size >= MAX_CLIENTS) throw new HttpError(503, 'Too many open streams');
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
@@ -188,187 +228,276 @@ export const appRoutes: Route[] = [
     },
   },
   // A tab's presence heartbeat (#695, public/presence.js): the chat it has open, or null. Starts no turn.
-  { method: 'POST', path: '/api/presence', who: ['person'], handler: async ({ req, res, app: { store, presence }, session }) => {
-    const body = await readJson(req);
-    const ticketId = body?.ticketId == null ? null : Number(body.ticketId);
-    if (ticketId !== null) {
-      const t = Number.isInteger(ticketId) ? store.getTicket(ticketId) : undefined;
-      if (!t || !store.canSee(session, t.project_id)) throw new HttpError(404, 'No such minion');
-    }
-    // An unknown stream (the server restarted under the tab): its EventSource reconnects and reports under the new id.
-    if (!presence.view(String(body?.stream ?? ''), session.name, ticketId)) throw new HttpError(409, 'No such stream');
-    return json(res, 200, {});
-  } },
+  {
+    method: 'POST',
+    path: '/api/presence',
+    who: ['person'],
+    handler: async ({ req, res, app: { store, presence }, session }) => {
+      const body = await readJson(req);
+      const ticketId = body?.ticketId == null ? null : Number(body.ticketId);
+      if (ticketId !== null) {
+        const t = Number.isInteger(ticketId) ? store.getTicket(ticketId) : undefined;
+        if (!t || !store.canSee(session, t.project_id)) throw new HttpError(404, 'No such minion');
+      }
+      // An unknown stream (the server restarted under the tab): its EventSource reconnects and reports under the new id.
+      if (!presence.view(String(body?.stream ?? ''), session.name, ticketId)) throw new HttpError(409, 'No such stream');
+      return json(res, 200, {});
+    },
+  },
   // Every scheme's spend on the server's Claude login, so only for admins.
   { method: 'GET', path: '/api/costs', who: ['person'], access: 'admin', handler: ({ res, app: { store, runner, outsideSpend } }) => json(res, 200, { outside: outsideSpend.bill(), days: costDays(store), week: hostWeek(store, runner.usageOf(store.serverLoginOwner())), split: spendSplit(store) }) },
   // The weekly Fable cap, a percent of the weekly plan (#1061; Josh, 2026-11-19). Admins only, as the cost page's other server-wide numbers are.
-  { method: 'PUT', path: '/api/costs/fable-cap', who: ['person'], access: 'admin', handler: async ({ req, res, app: { store } }) => {
-    const pct = (await readJson(req))?.pct;
-    if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100) throw new HttpError(400, 'pct is the cap as a percent of the weekly plan, 0 to 100');
-    store.setSetting(FABLE_CAP_KEY, pct);
-    return json(res, 200, fableMeter(store));
-  } },
+  {
+    method: 'PUT',
+    path: '/api/costs/fable-cap',
+    who: ['person'],
+    access: 'admin',
+    handler: async ({ req, res, app: { store } }) => {
+      const pct = (await readJson(req))?.pct;
+      if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100) throw new HttpError(400, 'pct is the cap as a percent of the weekly plan, 0 to 100');
+      store.setSetting(FABLE_CAP_KEY, pct);
+      return json(res, 200, fableMeter(store));
+    },
+  },
   // The database warmer (#1560, src/db-warmer.ts) on or off with no restart: its worker follows this setting within 5 s. Admins only.
-  { method: 'PUT', path: '/api/admin/db-warmer', who: ['person'], access: 'admin', handler: async ({ req, res, app: { store } }) => {
-    const on = (await readJson(req))?.on;
-    if (typeof on !== 'boolean') throw new HttpError(400, 'on is true or false');
-    store.setSetting(WARMER_SETTING, on);
-    return json(res, 200, { on });
-  } },
+  {
+    method: 'PUT',
+    path: '/api/admin/db-warmer',
+    who: ['person'],
+    access: 'admin',
+    handler: async ({ req, res, app: { store } }) => {
+      const on = (await readJson(req))?.on;
+      if (typeof on !== 'boolean') throw new HttpError(400, 'on is true or false');
+      store.setSetting(WARMER_SETTING, on);
+      return json(res, 200, { on });
+    },
+  },
   // Where your own spend went this week (#905): yours only, so any person (Cara, 2026-11-17: "Per person only"); a Taskmaster
   // reads its asker's (usage_split).
-  { method: 'GET', path: '/api/costs/mine', who: ['person', 'taskmaster'], handler: ({ res, app: { store, runner, claude }, session, caller, url }) => {
-    const uid = session.uid ?? (caller ? store.turnAsker(caller.id) : null);
-    if (!uid) throw new HttpError(409, 'No person asked for this turn, so there is no one whose spend to show');
-    const payer = runner.payerOf(uid);
-    // 100% is all the person's accounts together (Cara, 2026-11-17: "All accounts combined"), each priced like the one in use.
-    const accounts = Math.max(1, claude.accounts(uid)?.accounts.filter((a) => !a.expired).length ?? 1);
-    const week = weekLimit(store, payer, runner.usageOf(uid));
-    return json(res, 200, { ...whereItWent(store, payer, week && week * accounts, Date.now(), url.searchParams.get('range') === 'all' ? 'all' : 'week'), accounts, fable: fableMeter(store) });
-  } },
+  {
+    method: 'GET',
+    path: '/api/costs/mine',
+    who: ['person', 'taskmaster'],
+    handler: ({ res, app: { store, runner, claude }, session, caller, url }) => {
+      const uid = session.uid ?? (caller ? store.turnAsker(caller.id) : null);
+      if (!uid) throw new HttpError(409, 'No person asked for this turn, so there is no one whose spend to show');
+      const payer = runner.payerOf(uid);
+      // 100% is all the person's accounts together (Cara, 2026-11-17: "All accounts combined"), each priced like the one in use.
+      const accounts = Math.max(1, claude.accounts(uid)?.accounts.filter((a) => !a.expired).length ?? 1);
+      const week = weekLimit(store, payer, runner.usageOf(uid));
+      return json(res, 200, { ...whereItWent(store, payer, week && week * accounts, Date.now(), url.searchParams.get('range') === 'all' ? 'all' : 'week'), accounts, fable: fableMeter(store) });
+    },
+  },
   // Which minion owns each PR, so the front end can open it instead of GitHub (src/prlinks.ts).
-  { method: 'GET', path: '/api/prs', who: ['person'], handler: async ({ res, app: { store }, session }) => {
-    const seen = store.visibleProjects(session);
-    return json(res, 200, await prOwners(store.listProjects().filter((p) => !seen || seen.has(p.id)), (id) => store.listTickets(id)));
-  } },
+  {
+    method: 'GET',
+    path: '/api/prs',
+    who: ['person'],
+    handler: async ({ res, app: { store }, session }) => {
+      const seen = store.visibleProjects(session);
+      return json(
+        res,
+        200,
+        await prOwners(
+          store.listProjects().filter((p) => !seen || seen.has(p.id)),
+          (id) => store.listTickets(id),
+        ),
+      );
+    },
+  },
   // The release monitor (#625, src/releases.ts): the schemes this person may see; ?scope=member keeps those they own or
   // are a member of, for the All view (Josh, 2026-11-13: "all should only show schemes you are a member of").
-  { method: 'GET', path: '/api/releases', who: ['person'], handler: ({ res, url, app: { store, releases, contraptions }, session }) => {
-    const member = url.searchParams.get('scope') === 'member' ? store.memberSchemes(session.uid) : null;
-    // An app's link is shown as its own host when APPS_DOMAIN is set (#827); an APK's or any deeper path stays as it is.
-    const short = (link: string | null | undefined) => { const n = link && /^\/apps\/([a-z0-9-]+)\/$/.exec(link)?.[1]; return (n && contraptions.appUrl(n)) || link; };
-    const schemes = releases.view((id) => store.canSee(session, id) && (!member || member.has(id)));
-    if (!contraptions.appsDomain) return json(res, 200, { schemes });
-    const fix = <T extends { link?: string | null }>(r: T | null | undefined): T | null | undefined => (r && r.link ? { ...r, link: short(r.link) } : r);
-    return json(res, 200, { schemes: schemes.map((s) => ({ ...s, targets: s.targets.map((t) => ({ ...t, target: fix(t.target), current: fix(t.current), next: fix(t.next), recent: t.recent.map((r) => fix(r)) })) })) });
-  } },
+  {
+    method: 'GET',
+    path: '/api/releases',
+    who: ['person'],
+    handler: ({ res, url, app: { store, releases, contraptions }, session }) => {
+      const member = url.searchParams.get('scope') === 'member' ? store.memberSchemes(session.uid) : null;
+      // An app's link is shown as its own host when APPS_DOMAIN is set (#827); an APK's or any deeper path stays as it is.
+      const short = (link: string | null | undefined) => {
+        const n = link && /^\/apps\/([a-z0-9-]+)\/$/.exec(link)?.[1];
+        return (n && contraptions.appUrl(n)) || link;
+      };
+      const schemes = releases.view((id) => store.canSee(session, id) && (!member || member.has(id)));
+      if (!contraptions.appsDomain) return json(res, 200, { schemes });
+      const fix = <T extends { link?: string | null }>(r: T | null | undefined): T | null | undefined => (r && r.link ? { ...r, link: short(r.link) } : r);
+      return json(res, 200, { schemes: schemes.map((s) => ({ ...s, targets: s.targets.map((t) => ({ ...t, target: fix(t.target), current: fix(t.current), next: fix(t.next), recent: t.recent.map((r) => fix(r)) })) })) });
+    },
+  },
   // A release card's Deploy button (#629; Cara, 2026-11-12: "Yes, on any target that can deploy"): any member of the
   // target's scheme deploys it at once. Starts it and answers; the releases event follows it.
-  { method: 'POST', path: '/api/releases/deploy', who: ['person'], handler: async ({ req, res, app: { store, autoDeploy, releases }, session }) => {
-    const { projectId, target } = releaseTarget(store, session, await readJson(req));
-    try {
-      await autoDeploy.deployNow(projectId, target, store.getUser(session.uid as number)?.name ?? 'a member', session.uid ?? null);
-    } catch (err) {
-      if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
-      throw err;
-    }
-    releases.poll();
-    return json(res, 202, { ok: true });
-  } },
+  {
+    method: 'POST',
+    path: '/api/releases/deploy',
+    who: ['person'],
+    handler: async ({ req, res, app: { store, autoDeploy, releases }, session }) => {
+      const { projectId, target } = releaseTarget(store, session, await readJson(req));
+      try {
+        await autoDeploy.deployNow(projectId, target, store.getUser(session.uid as number)?.name ?? 'a member', session.uid ?? null);
+      } catch (err) {
+        if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
+        throw err;
+      }
+      releases.poll();
+      return json(res, 202, { ok: true });
+    },
+  },
   // A release card's Roll back to last green (#1016, src/rollback.ts): any member of the target's scheme; it answers
   // the commit it went to. Citadel's own server restarts on it a minute or two later, so its card says how it went.
-  { method: 'POST', path: '/api/releases/rollback', who: ['person'], handler: async ({ req, res, app: { store, rollback, releases }, session }) => {
-    const { projectId, target } = releaseTarget(store, session, await readJson(req));
-    const views = releases.view((id) => id === projectId)[0]?.targets ?? [];
-    const tv = views.find((t) => t.target.id === target);
-    if (!tv) throw new HttpError(404, `${target} isn't one of this scheme's releases`);
-    const sha = await rollback.rollBack(tv, store.getUser(session.uid as number)?.name ?? 'a member', session.uid ?? null, views);
-    releases.poll();
-    return json(res, 202, { ok: true, sha });
-  } },
+  {
+    method: 'POST',
+    path: '/api/releases/rollback',
+    who: ['person'],
+    handler: async ({ req, res, app: { store, rollback, releases }, session }) => {
+      const { projectId, target } = releaseTarget(store, session, await readJson(req));
+      const views = releases.view((id) => id === projectId)[0]?.targets ?? [];
+      const tv = views.find((t) => t.target.id === target);
+      if (!tv) throw new HttpError(404, `${target} isn't one of this scheme's releases`);
+      const sha = await rollback.rollBack(tv, store.getUser(session.uid as number)?.name ?? 'a member', session.uid ?? null, views);
+      releases.poll();
+      return json(res, 202, { ok: true, sha });
+    },
+  },
   // publish_release (#663; Josh, 2026-11-13: "We should fix things so that any scheme member can publish"): a scheme's
   // Taskmaster or minion releases the Android app of a contraption its scheme owns, on the server, so a container turn can
   // too. The same step as the card's Deploy button (src/auto-deploy.ts), signing-key check and record included.
-  { method: 'POST', path: '/api/projects/:project/releases/publish', who: ['taskmaster', 'minion'], handler: async ({ req, res, app: { store, autoDeploy, releases }, caller, params }) => {
-    const projectId = Number(params.project);
-    const name = str((await readJson(req))?.contraption, 'contraption', 100);
-    const c = store.getContraption(name);
-    if (!c || c.home_scheme !== projectId) throw new HttpError(403, `${name} isn't one of this scheme's contraptions`);
-    const t = autoDeploy.apkOf(projectId, name);
-    if (!t) throw new HttpError(404, `${name} has no Android release Citadel can publish: it needs a release workflow and an android/latest.json feed`);
-    const by = caller!.kind === 'coordinator' ? `${store.getProject(projectId)?.name ?? 'the'} Taskmaster` : `#${caller!.number}`;
-    let said: string | undefined;
-    try {
-      said = await autoDeploy.deployNow(projectId, t.id, by, store.turnAsker(caller!.id));
-    } catch (err) {
-      if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
-      throw err;
-    }
-    releases.poll();
-    return json(res, 200, { said: said ?? `Started ${t.name}'s release.` });
-  } },
+  {
+    method: 'POST',
+    path: '/api/projects/:project/releases/publish',
+    who: ['taskmaster', 'minion'],
+    handler: async ({ req, res, app: { store, autoDeploy, releases }, caller, params }) => {
+      const projectId = Number(params.project);
+      const name = str((await readJson(req))?.contraption, 'contraption', 100);
+      const c = store.getContraption(name);
+      if (!c || c.home_scheme !== projectId) throw new HttpError(403, `${name} isn't one of this scheme's contraptions`);
+      const t = autoDeploy.apkOf(projectId, name);
+      if (!t) throw new HttpError(404, `${name} has no Android release Citadel can publish: it needs a release workflow and an android/latest.json feed`);
+      const by = caller!.kind === 'coordinator' ? `${store.getProject(projectId)?.name ?? 'the'} Taskmaster` : `#${caller!.number}`;
+      let said: string | undefined;
+      try {
+        said = await autoDeploy.deployNow(projectId, t.id, by, store.turnAsker(caller!.id));
+      } catch (err) {
+        if (err instanceof ServiceError) throw new HttpError(err.status, err.message);
+        throw err;
+      }
+      releases.poll();
+      return json(res, 200, { said: said ?? `Started ${t.name}'s release.` });
+    },
+  },
   // A keyless Capacitor app's Make release key button (#837; Cara, 2026-11-17, "Both"): any member of its home scheme
   // makes the key on the server, as approving make_release_key's card does. Neither the key nor its password is sent back.
-  { method: 'POST', path: '/api/releases/release-key', who: ['person'], handler: async ({ req, res, app, session }) => {
-    const body = await readJson(req);
-    const projectId = Number(body?.projectId);
-    if (!Number.isInteger(projectId) || !app.store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
-    const c = homeApp(app, projectId, str(body?.contraption, 'contraption', 100));
-    await makeKey(app, session, c.name);
-    return json(res, 201, { ok: true });
-  } },
+  {
+    method: 'POST',
+    path: '/api/releases/release-key',
+    who: ['person'],
+    handler: async ({ req, res, app, session }) => {
+      const body = await readJson(req);
+      const projectId = Number(body?.projectId);
+      if (!Number.isInteger(projectId) || !app.store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
+      const c = homeApp(app, projectId, str(body?.contraption, 'contraption', 100));
+      await makeKey(app, session, c.name);
+      return json(res, 201, { ok: true });
+    },
+  },
   // The land line's order (#1002; Cara, 2026-11-18: "In the releases tab, I should be able to drag the order and choose which
   // one gets released next"): any member of the scheme whose line it is sets the order of the landings waiting in it,
   // `order` their line tickets front first; the holder keeps the lock. `moved` is the one dragged or sent to land next, for
   // the line in each waiting landing's output and the server log saying who moved what.
-  { method: 'POST', path: '/api/releases/land-order', who: ['person'], handler: async ({ req, res, app, session }) => {
-    const { store } = app;
-    const body = await readJson(req);
-    const projectId = Number(body?.projectId);
-    if (!Number.isInteger(projectId) || !store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
-    const seqs = body?.order;
-    if (!Array.isArray(seqs) || seqs.length > 200 || !seqs.every((n) => Number.isInteger(n) && n > 0)) throw new HttpError(400, 'order must be a list of line tickets');
-    const movedSeq = Number(body?.moved);
-    const who = store.getUser(session.uid as number)?.name ?? 'a member';
-    // A person's move wins: it pins the ship until it ships, and no Taskmaster moves it or passes it (#1358).
-    const order = moveShip(app, projectId, movedSeq, seqs, { name: who, taskmaster: false });
-    return json(res, 200, { order });
-  } },
+  {
+    method: 'POST',
+    path: '/api/releases/land-order',
+    who: ['person'],
+    handler: async ({ req, res, app, session }) => {
+      const { store } = app;
+      const body = await readJson(req);
+      const projectId = Number(body?.projectId);
+      if (!Number.isInteger(projectId) || !store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
+      const seqs = body?.order;
+      if (!Array.isArray(seqs) || seqs.length > 200 || !seqs.every((n) => Number.isInteger(n) && n > 0)) throw new HttpError(400, 'order must be a list of line tickets');
+      const movedSeq = Number(body?.moved);
+      const who = store.getUser(session.uid as number)?.name ?? 'a member';
+      // A person's move wins: it pins the ship until it ships, and no Taskmaster moves it or passes it (#1358).
+      const order = moveShip(app, projectId, movedSeq, seqs, { name: who, taskmaster: false });
+      return json(res, 200, { order });
+    },
+  },
   // order_ship_line (#1358; Cara, 2026-11-20: "can I authorize you to take some agency over the ordering? Unless a user
   // explicitly moves the order, you (and other taskmasters in their schemes) should have the power to gauge the priority of
   // ships and order them commensurately"): a scheme's Taskmaster moves one waiting ship, by the same path as the drag above,
   // with a reason. A ship a person placed stays put, and nothing passes it.
-  { method: 'POST', path: '/api/projects/:project/releases/ship-line', who: ['taskmaster'], refuse: "Only a scheme's Taskmaster orders its ship line", handler: async ({ req, res, app, project, params }) => {
-    const body = await readJson(req);
-    const num = (v: unknown, field: string) => {
-      const n = Number(String(v ?? '').replace(/^#/, ''));
-      if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, `${field} must be a minion number like 1234`);
-      return n;
-    };
-    const reason = str(body?.reason, 'reason', REASON_MAX).replace(/\s+/g, ' ');
-    if (!reason) throw new HttpError(400, 'reason is required: why this ship goes where it does');
-    const waiting = (app.releases.poll(), app.releases.view((id) => id === project.id)[0]?.targets.flatMap((t) => t.line) ?? []);
-    const find = (n: number) => {
-      const e = waiting.find((x) => !x.holds && x.name === `#${n}`);
-      if (!e) throw new HttpError(409, `#${n} is not waiting in this scheme's ship line`);
-      return e;
-    };
-    const ship = find(num(body?.ship, 'ship'));
-    const ahead = body?.before == null ? undefined : find(num(body.before, 'before'));
-    const seqs = seqsFor(waiting, ship.seq, ahead?.seq);
-    const order = moveShip(app, project.id, ship.seq, seqs, { name: `${project.name} Taskmaster`, taskmaster: true }, reason);
-    return json(res, 200, { order, said: `Moved ${ship.name}: ${order.indexOf(ship.seq) === 0 ? 'it ships next' : `now ${order.indexOf(ship.seq) + 1} of ${order.length} waiting`}.` });
-  } },
+  {
+    method: 'POST',
+    path: '/api/projects/:project/releases/ship-line',
+    who: ['taskmaster'],
+    refuse: "Only a scheme's Taskmaster orders its ship line",
+    handler: async ({ req, res, app, project, params }) => {
+      const body = await readJson(req);
+      const num = (v: unknown, field: string) => {
+        const n = Number(String(v ?? '').replace(/^#/, ''));
+        if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, `${field} must be a minion number like 1234`);
+        return n;
+      };
+      const reason = str(body?.reason, 'reason', REASON_MAX).replace(/\s+/g, ' ');
+      if (!reason) throw new HttpError(400, 'reason is required: why this ship goes where it does');
+      const waiting = (app.releases.poll(), app.releases.view((id) => id === project.id)[0]?.targets.flatMap((t) => t.line) ?? []);
+      const find = (n: number) => {
+        const e = waiting.find((x) => !x.holds && x.name === `#${n}`);
+        if (!e) throw new HttpError(409, `#${n} is not waiting in this scheme's ship line`);
+        return e;
+      };
+      const ship = find(num(body?.ship, 'ship'));
+      const ahead = body?.before == null ? undefined : find(num(body.before, 'before'));
+      const seqs = seqsFor(waiting, ship.seq, ahead?.seq);
+      const order = moveShip(app, project.id, ship.seq, seqs, { name: `${project.name} Taskmaster`, taskmaster: true }, reason);
+      return json(res, 200, { order, said: `Moved ${ship.name}: ${order.indexOf(ship.seq) === 0 ? 'it ships next' : `now ${order.indexOf(ship.seq) + 1} of ${order.length} waiting`}.` });
+    },
+  },
   // The ship lines on the Status page (#1168): who holds each line the person can see, for how long and doing what, and
   // who waits behind. Read afresh on every call, so a stuck ship shows within the panel's poll.
-  { method: 'GET', path: '/api/ship-lines', who: ['person'], handler: async ({ res, app, session }) => {
-    return json(res, 200, { lines: shipLines(app, (id) => app.store.canSee(session, id)), at: Date.now() });
-  } },
+  {
+    method: 'GET',
+    path: '/api/ship-lines',
+    who: ['person'],
+    handler: async ({ res, app, session }) => {
+      return json(res, 200, { lines: shipLines(app, (id) => app.store.canSee(session, id)), at: Date.now() });
+    },
+  },
   // "Stop this ship" (#1168; Josh picked it 2026-11-19 from #1093's ideas): any member of the scheme ends the land.sh run
   // that holds (or waits in) its line, cleanly: it leaves the line, lets go of the lock, and main stays as it was.
-  { method: 'POST', path: '/api/ship-lines/stop', who: ['person'], handler: async ({ req, res, app, session }) => {
-    const body = await readJson(req);
-    const projectId = Number(body?.projectId), seq = Number(body?.seq);
-    if (!Number.isInteger(projectId) || !app.store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
-    if (!Number.isInteger(seq) || seq <= 0) throw new HttpError(400, 'seq must be a line ticket');
-    try {
-      const { name } = stopShip(app, projectId, seq, session.name ?? 'a member');
-      app.releases.poll();
-      return json(res, 200, { stopped: name });
-    } catch (err) {
-      if (err instanceof StopRefused) throw new HttpError(409, err.message);
-      throw err;
-    }
-  } },
+  {
+    method: 'POST',
+    path: '/api/ship-lines/stop',
+    who: ['person'],
+    handler: async ({ req, res, app, session }) => {
+      const body = await readJson(req);
+      const projectId = Number(body?.projectId),
+        seq = Number(body?.seq);
+      if (!Number.isInteger(projectId) || !app.store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
+      if (!Number.isInteger(seq) || seq <= 0) throw new HttpError(400, 'seq must be a line ticket');
+      try {
+        const { name } = stopShip(app, projectId, seq, session.name ?? 'a member');
+        app.releases.poll();
+        return json(res, 200, { stopped: name });
+      } catch (err) {
+        if (err instanceof StopRefused) throw new HttpError(409, err.message);
+        throw err;
+      }
+    },
+  },
   // A target's auto-deploy on or off (#629: "A scheme can turn it off"), from its card, by any member of its scheme.
-  { method: 'PUT', path: '/api/releases/auto-deploy', who: ['person'], handler: async ({ req, res, app: { store, autoDeploy, releases }, session }) => {
-    const body = await readJson(req);
-    const { projectId, target } = releaseTarget(store, session, body);
-    if (typeof body.on !== 'boolean') throw new HttpError(400, 'on must be true or false');
-    if (!autoDeploy.setOn(projectId, target, body.on)) throw new HttpError(404, `${target} has no release step Citadel can start`);
-    releases.poll();
-    return json(res, 200, { on: body.on });
-  } },
+  {
+    method: 'PUT',
+    path: '/api/releases/auto-deploy',
+    who: ['person'],
+    handler: async ({ req, res, app: { store, autoDeploy, releases }, session }) => {
+      const body = await readJson(req);
+      const { projectId, target } = releaseTarget(store, session, body);
+      if (typeof body.on !== 'boolean') throw new HttpError(400, 'on must be true or false');
+      if (!autoDeploy.setOn(projectId, target, body.on)) throw new HttpError(404, `${target} has no release step Citadel can start`);
+      releases.poll();
+      return json(res, 200, { on: body.on });
+    },
+  },
 ];
 
 /**

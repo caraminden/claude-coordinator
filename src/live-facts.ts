@@ -58,11 +58,13 @@ export interface Facts {
 
 /** The newest run on any of `branches` in `slug`, or null. */
 export async function newestRun(get: GhGet, slug: string, as: GithubEnv, branches: string[], tip: string | null): Promise<CiRun | null> {
-  const found = await Promise.all(branches.map(async (b) => {
-    const r = await get(`/repos/${slug}/actions/runs?branch=${encodeURIComponent(b)}&per_page=1`, null, as);
-    if (r.status !== 200) throw new Error(`GitHub answered ${r.status}`);
-    return r.body?.workflow_runs?.[0] ?? null;
-  }));
+  const found = await Promise.all(
+    branches.map(async (b) => {
+      const r = await get(`/repos/${slug}/actions/runs?branch=${encodeURIComponent(b)}&per_page=1`, null, as);
+      if (r.status !== 200) throw new Error(`GitHub answered ${r.status}`);
+      return r.body?.workflow_runs?.[0] ?? null;
+    }),
+  );
   const run = found.filter(Boolean).sort((a, b) => Date.parse(b.run_started_at ?? b.created_at) - Date.parse(a.run_started_at ?? a.created_at))[0];
   if (!run) return null;
   return {
@@ -109,7 +111,11 @@ export async function liveFacts(app: App, ticketId: number, get: GhGet = ghGet):
     try {
       ci = await newestRun(get, slug, schemeGithub(store, app.github, project.repo_dir, app.dataDir), [t.branch, `land/${t.branch}`, `check/${t.branch}`, `early/${t.branch}`], status?.tip.slice(0, 8) ?? null);
     } catch (err: any) {
-      ci = { error: String(err?.message ?? err).split('\n')[0].slice(0, 120) };
+      ci = {
+        error: String(err?.message ?? err)
+          .split('\n')[0]
+          .slice(0, 120),
+      };
     }
   } else if (t.branch) ci = { error: 'its scheme has no GitHub repo' };
   return {
@@ -124,7 +130,7 @@ export async function liveFacts(app: App, ticketId: number, get: GhGet = ghGet):
 const ciText = (ci: Facts['ci']): string => {
   if (!ci) return 'none found on its branch or land/ branch';
   if ('error' in ci) return `couldn't read (${ci.error})`;
-  const result = ci.status === 'completed' ? ci.conclusion ?? 'done' : ci.status.replace('_', ' ');
+  const result = ci.status === 'completed' ? (ci.conclusion ?? 'done') : ci.status.replace('_', ' ');
   return `${ci.workflow} on ${ci.branch} @ ${ci.sha}: ${result}, started ${pacific(ci.at)}${ci.onHead === null ? ' (a ship run: the branch rebased onto main, so it may predate a newer commit)' : ci.onHead ? '' : ' (an older commit than its head)'} ${ci.url}`;
 };
 
@@ -140,11 +146,13 @@ export function factsText(f: Facts): string {
     `change: ${f.ship ? f.ship.text : !f.branch ? 'none: it has no branch' : f.branchRead ? 'nothing committed on its branch' : "couldn't read its branch"}`,
     f.pr ? `PR #${f.pr.number}: ${f.pr.state.toLowerCase()} ${f.pr.url}` : '',
     f.branch ? `newest CI run: ${ciText(f.ci)}` : '',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /** How the sheet opens when the handoff came back: the prose is the Taskmaster's, the sheet the database's. */
-export const SHEET_CHECK = "Facts sheet built by the server at hand-off from the database: check the handoff above against it, and trust the sheet where they differ.";
+export const SHEET_CHECK = 'Facts sheet built by the server at hand-off from the database: check the handoff above against it, and trust the sheet where they differ.';
 /** How the sheet opens when the handoff turn failed, so it is all the new session has. */
 export const SHEET_FAILED = "No handoff came back (the handoff turn failed), so this facts sheet was built by the server from the database: check before relying on anything else, and rely on memory and the minions' own records for the rest.";
 
@@ -163,19 +171,27 @@ export function handoffSheet(store: Store, runner: Pick<Runner, 'view'>, taskmas
   const line = ({ f }: { f: ReturnType<typeof storedFacts> }) => `- #${f.number} ${cut(f.title, 80)}: ${f.status}${f.state ? `, ${stateWord(f.state)}` : ''}${f.note ? ` · ${cut(f.note, 100)}` : ''}`;
   const cards = rows.flatMap(({ f }) => f.cards.map((c) => `- #${f.number}: ${cardText(c)}`)).slice(0, SHEET_MINIONS);
   const parks = rows.filter(({ f }) => f.state === 'parked').map((r) => `${line(r)} (${r.f.parkedOn ? `wakes on: ${r.f.parkedOn}` : 'nothing wakes it by itself'})`);
-  const flight = rows.filter(({ f }) => f.status === 'running' || (f.state && f.state !== 'parked')).slice(0, SHEET_MINIONS).map(line);
+  const flight = rows
+    .filter(({ f }) => f.status === 'running' || (f.state && f.state !== 'parked'))
+    .slice(0, SHEET_MINIONS)
+    .map(line);
   const ships = rows.filter(({ f }) => f.ship).map(({ f }) => `- #${f.number}: ${f.ship!.text}`);
-  const people = store.eventsBefore(taskmaster.id, Number.MAX_SAFE_INTEGER, 80).filter((e) => e.kind === 'user_message').map((e) => { try { return JSON.parse(e.data); } catch { return null; } })
+  const people = store
+    .eventsBefore(taskmaster.id, Number.MAX_SAFE_INTEGER, 80)
+    .filter((e) => e.kind === 'user_message')
+    .map((e) => {
+      try {
+        return JSON.parse(e.data);
+      } catch {
+        return null;
+      }
+    })
     .filter((d) => d && typeof d.text === 'string' && d.author && !d.from && !d.mail && !d.brief && !/^(system|citadel|mandate|#)/i.test(d.author))
-    .slice(0, SHEET_PEOPLE).reverse().map((d) => `- ${d.author}: ${cut(d.text.replace(/\s+/g, ' '), 300)}`);
+    .slice(0, SHEET_PEOPLE)
+    .reverse()
+    .map((d) => `- ${d.author}: ${cut(d.text.replace(/\s+/g, ' '), 300)}`);
   const part = (head: string, items: string[], none: string) => `${head}\n${items.length ? items.join('\n') : none}`;
-  return [
-    part('Open cards waiting on people:', cards, 'none'),
-    part('Sealed minions:', parks, 'none'),
-    part('Minions in flight:', flight, 'none'),
-    part('Ships in progress:', ships, 'none'),
-    part('Last messages from people (newest last):', people, 'none'),
-  ].join('\n\n');
+  return [part('Open cards waiting on people:', cards, 'none'), part('Sealed minions:', parks, 'none'), part('Minions in flight:', flight, 'none'), part('Ships in progress:', ships, 'none'), part('Last messages from people (newest last):', people, 'none')].join('\n\n');
 }
 
 const MINION_PEOPLE = 10;
@@ -186,14 +202,27 @@ const MINION_PEOPLE = 10;
  */
 export function minionSheet(store: Store, runner: Pick<Runner, 'view'>, t: Ticket): string {
   const f = storedFacts(store, runner, t);
-  const people = store.eventsBefore(t.id, Number.MAX_SAFE_INTEGER, 200).filter((e) => e.kind === 'user_message').map((e) => { try { return { at: e.created_at, d: JSON.parse(e.data) }; } catch { return null; } })
+  const people = store
+    .eventsBefore(t.id, Number.MAX_SAFE_INTEGER, 200)
+    .filter((e) => e.kind === 'user_message')
+    .map((e) => {
+      try {
+        return { at: e.created_at, d: JSON.parse(e.data) };
+      } catch {
+        return null;
+      }
+    })
     .filter((x) => x && typeof x.d.text === 'string' && x.d.author && !x.d.from && !x.d.mail && !/^(system|citadel|mandate|github|#)/i.test(x.d.author))
-    .slice(0, MINION_PEOPLE).reverse().map((x) => `- ${x!.d.author}, ${pacific(x!.at)}: ${cut(x!.d.text.replace(/\s+/g, ' '), 600)}`);
+    .slice(0, MINION_PEOPLE)
+    .reverse()
+    .map((x) => `- ${x!.d.author}, ${pacific(x!.at)}: ${cut(x!.d.text.replace(/\s+/g, ' '), 600)}`);
   return [
     `State: ${f.status}${f.state ? `, ${stateWord(f.state)}` : ''}${f.note ? ` · note: ${f.note}` : ''}`,
     f.parkedOn ? `Sealed on: ${f.parkedOn}` : '',
     `Cards waiting on people:\n${f.cards.length ? f.cards.map((c) => `- ${cardText(c)}`).join('\n') : 'none'}`,
     `Branch: ${f.branch ?? 'none'}`,
     `People's last messages (newest last):\n${people.length ? people.join('\n') : 'none'}`,
-  ].filter(Boolean).join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }

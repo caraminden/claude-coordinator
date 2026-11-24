@@ -28,7 +28,9 @@ export function runningTasks(input: HookInput): { id: string; what: string; grun
 
 /** The background Bash jobs still running (Grunts left out), as "id (what it is)". */
 export function runningJobs(input: HookInput): string[] {
-  return runningTasks(input).filter((t) => !t.grunt).map((t) => `${t.id} (${t.what})`);
+  return runningTasks(input)
+    .filter((t) => !t.grunt)
+    .map((t) => `${t.id} (${t.what})`);
 }
 
 /** The one action that ends the wait for this Bash job. */

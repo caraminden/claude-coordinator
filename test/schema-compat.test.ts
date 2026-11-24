@@ -18,16 +18,19 @@ after(() => rmSync(root, { recursive: true, force: true }));
 // left from long ago, which would test a rollback to a release no deploy goes back to (#1169).
 const live = process.env.DEPLOY_LIVE || join(homedir(), 'claude-coordinator');
 const resolves = (dir: string, ref: string) => spawnSync('git', ['-C', dir, 'rev-parse', '-q', '--verify', `${ref}^{commit}`]).status === 0;
-const [prevRepo, prev] = ([[live, 'last-good'], [repo, 'last-good'], [repo, 'origin/main']] as const).find(([dir, ref]) => resolves(dir, ref)) ?? [repo, undefined];
+const [prevRepo, prev] = (
+  [
+    [live, 'last-good'],
+    [repo, 'last-good'],
+    [repo, 'origin/main'],
+  ] as const
+).find(([dir, ref]) => resolves(dir, ref)) ?? [repo, undefined];
 const prevDir = join(root, 'prev');
 mkdirSync(prevDir);
 if (prev) execFileSync('sh', ['-c', 'git -C "$1" archive "$2" src public | tar -x -C "$3"', 'sh', prevRepo, prev, prevDir]);
 // A branch whose base is older than the last release has a lower SCHEMA_VERSION; shipping that would be
 // wrong, and the failures that follow look like the change broke compatibility. Say the real cause.
-const staleBase = (ref: string | undefined, releaseVersion: number, branchVersion: number) =>
-  releaseVersion > branchVersion
-    ? `this branch's schema is ${branchVersion}, older than the last release's ${releaseVersion} (${ref}): its base is behind. Rebase onto main.`
-    : undefined;
+const staleBase = (ref: string | undefined, releaseVersion: number, branchVersion: number) => (releaseVersion > branchVersion ? `this branch's schema is ${branchVersion}, older than the last release's ${releaseVersion} (${ref}): its base is behind. Rebase onto main.` : undefined);
 const loadPrev = async () => {
   assert.ok(prev, 'no last-good tag or origin/main to find the last release by: fetch origin');
   const mod = await import(join(prevDir, 'src', 'db.ts'));
@@ -69,7 +72,10 @@ test(`the last release's Store (${prev}) reads and writes a database this code h
   now.db.close();
 
   const old = new PrevStore(file);
-  assert.deepEqual(old.listProjects().map((p: any) => p.name), ['Compat']);
+  assert.deepEqual(
+    old.listProjects().map((p: any) => p.name),
+    ['Compat'],
+  );
   assert.equal(old.getTicket(ticket.id).title, 'Before');
   assert.equal(old.listEvents(ticket.id).at(-1).data, JSON.stringify({ text: 'written by this code' }));
   // Releases before state.db (version 2) look for session state in the main file: they find an empty
@@ -92,9 +98,16 @@ test(`the last release's Store (${prev}) reads and writes a database this code h
   assert.equal(again.getTicket(added.id)!.title, 'After rollback');
   assert.equal(added.id, noted.id, 'the newest id is reused');
   assert.equal(again.personNotes(project.id)[added.id], undefined, "the deleted minion's note left behind doesn't show on the new one");
-  assert.deepEqual(again.pinnedTickets('Cara', project.id), [], "nor does its pin");
+  assert.deepEqual(again.pinnedTickets('Cara', project.id), [], 'nor does its pin');
   assert.equal(again.getSetting('schema_version'), SCHEMA_VERSION);
-  assert.deepEqual(again.listClaudeState(project.id, ticket.id).map((r) => r.path).sort(), ['projects/x/1.jsonl', 'projects/x/2.jsonl'], "sessions from both releases");
+  assert.deepEqual(
+    again
+      .listClaudeState(project.id, ticket.id)
+      .map((r) => r.path)
+      .sort(),
+    ['projects/x/1.jsonl', 'projects/x/2.jsonl'],
+    'sessions from both releases',
+  );
   again.db.close();
 });
 

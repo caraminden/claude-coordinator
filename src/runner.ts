@@ -57,7 +57,31 @@ import { takeStatus, type StatusFields } from './status-trailer.ts';
 import { appFolder, slotsOf } from './app-services.ts';
 import { DEFAULT_CONTRAPTIONS_DIR } from './contraptions.ts';
 import { GLOBAL_OWNER } from './properties.ts';
-import { CACHE_TTL_MS, KEEPALIVE_AFTER_MS, KEEPALIVE_GATES_KEY, KEEPALIVE_OFF_KEY, KEEPALIVE_REPORT_KEY, KEEPALIVE_TEXT, SERIES_CAP_MS, WEEK_MS, changedParts, claudeStamp, contextText, countGate, fingerprint, inWindow, keepaliveKey, missed, prefixParts, reportText, tooManyMisses, treeHash, turnDate, weekReport, type KeepaliveSeries } from './keepalive.ts';
+import {
+  CACHE_TTL_MS,
+  KEEPALIVE_AFTER_MS,
+  KEEPALIVE_GATES_KEY,
+  KEEPALIVE_OFF_KEY,
+  KEEPALIVE_REPORT_KEY,
+  KEEPALIVE_TEXT,
+  SERIES_CAP_MS,
+  WEEK_MS,
+  changedParts,
+  claudeStamp,
+  contextText,
+  countGate,
+  fingerprint,
+  inWindow,
+  keepaliveKey,
+  missed,
+  prefixParts,
+  reportText,
+  tooManyMisses,
+  treeHash,
+  turnDate,
+  weekReport,
+  type KeepaliveSeries,
+} from './keepalive.ts';
 import { homedir } from 'node:os';
 import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type ProcCheck } from './quiet.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
@@ -307,18 +331,31 @@ export const guessWindow = (model: string | null | undefined) => (/\[1m\]/i.test
  * fresh_session, and `compact` once the handoff failed and a /compact turn falls back on. `auto`: Citadel
  * asked for it by itself (turn end or idle), so a message queued meanwhile goes first.
  */
-export interface FreshState { why: string; summary?: string; compact?: true; auto?: true; seam?: { carryOn: boolean } }
+export interface FreshState {
+  why: string;
+  summary?: string;
+  compact?: true;
+  auto?: true;
+  seam?: { carryOn: boolean };
+}
 const freshKey = (ticketId: number) => `fresh:${ticketId}`;
 /** The handoff a fresh session's first turn starts from, kept until that session exists. */
 const handoffKey = (ticketId: number) => `handoff:${ticketId}`;
 /** A claim holder whose work shipped (#1334): its claims pass on as shipped when it is dismissed. */
 const shippedKey = (ticketId: number) => `claim-shipped:${ticketId}`;
 /** A fresh start's idle time for the chat's divider (#1059): "55 m", "1 h 12 m". */
-export const idleText = (ms: number) => { const m = Math.round(ms / 60_000); return m < 60 ? `${m} m` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} m` : ''}`; };
+export const idleText = (ms: number) => {
+  const m = Math.round(ms / 60_000);
+  return m < 60 ? `${m} m` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} m` : ''}`;
+};
 /** What a fresh start's notes call the chat's agent. */
 const roleWord = (t: Ticket) => (t.kind === 'coordinator' ? 'Taskmaster' : 'minion');
 /** The slash commands a chat's last turn loaded (its init event, #937), and the scheme's newest, for a chat with no turn yet. */
-export interface LoadedCommands { names: string[]; plugins: { name: string; path: string }[]; cwd: string }
+export interface LoadedCommands {
+  names: string[];
+  plugins: { name: string; path: string }[];
+  cwd: string;
+}
 export const commandsKey = (ticketId: number) => `commands:${ticketId}`;
 export const schemeCommandsKey = (projectId: number) => `commands-scheme:${projectId}`;
 /** The note the server last wrote about a failed or stopped turn, which the next turn that ends well clears (#428). */
@@ -455,35 +492,37 @@ export { KILL_HOLD_MAX_MS, nextLimitResume };
 export type { LimitedAccount };
 /** Usage-limit resumes in a row before a minion waits for a person. */
 export const MAX_LIMIT_RESUMES = RETRIES.limit.cap;
-const RESUME_ACCOUNT_PROMPT =
-  `Your last turn stopped at a Claude account's usage limit (or its sign-in ran out), so this turn carries on with another of your person's Claude accounts. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
+const RESUME_ACCOUNT_PROMPT = `Your last turn stopped at a Claude account's usage limit (or its sign-in ran out), so this turn carries on with another of your person's Claude accounts. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
 
-const RESUME_LIMIT_PROMPT =
-  `Your last turn stopped at the account's usage limit, which has now reset. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
+const RESUME_LIMIT_PROMPT = `Your last turn stopped at the account's usage limit, which has now reset. Check the state of your work (files, git, background jobs) and continue where you left off. Don't redo finished steps.`;
 
 /** Every one of a person's accounts is limited (#779): when the first resets, and (#819) each one's own limit. */
-export interface AllLimited { resetAt: number; accounts: LimitedAccount[] }
+export interface AllLimited {
+  resetAt: number;
+  accounts: LimitedAccount[];
+}
 
 /** The note for a minion whose accounts are all limited: which one is out until when, and which reset it waits for. */
 export function allLimitedText(accounts: LimitedAccount[], at: number): string {
   const out = (a: LimitedAccount) => `${a.here ? `This account (${a.label})` : a.label} is out until ${clockTime(a.until)}${a.kind ? ` (${a.kind})` : ''}.`;
   const first = accounts.reduce((m, a) => (a.until < m.until ? a : m));
   const when = accounts.length > 1 ? `when ${first.label}'s limit resets` : 'when it resets';
-  return `${[...accounts].sort((a, b) => Number(!!b.here) - Number(!!a.here) || a.until - b.until).map(out).join(' ')} This minion carries on at ${clockTime(at)}, ${when} (or sooner once a turn gets through); a person's message tries now.`;
+  return `${[...accounts]
+    .sort((a, b) => Number(!!b.here) - Number(!!a.here) || a.until - b.until)
+    .map(out)
+    .join(' ')} This minion carries on at ${clockTime(at)}, ${when} (or sooner once a turn gets through); a person's message tries now.`;
 }
 
 /** Network-outage resumes in a row before a thread is left in error for a person. */
 export const MAX_NET_RESUMES = RETRIES.net.cap;
 /** The minion's note while it waits: cleared by the next turn's start. */
 const NET_NOTE = 'Network outage: resumes once it is back';
-const RESUME_NET_PROMPT =
-  `Your last turn died because the network or the model's API was unreachable; it is reachable again now. A command may have half-run when the connection dropped (a ship, a push, a deploy, a fetch), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps.`;
+const RESUME_NET_PROMPT = `Your last turn died because the network or the model's API was unreachable; it is reachable again now. A command may have half-run when the connection dropped (a ship, a push, a deploy, a fetch), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps.`;
 
 /** A turn killed from outside (out of memory, a container stop, a stray signal) is resumed by the server once (RL1, #1364). */
 export const MAX_KILL_RESUMES = RETRIES.kill.cap;
 const KILL_NOTE = 'Killed: resumes by itself shortly';
-const RESUME_KILL_PROMPT =
-  `Your last turn was killed from outside before it finished (out of memory, a container stop or a stray signal), and Citadel resumed it by itself. A command may have half-run when it died (a ship, a push, a deploy, a test run), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps, and don't restart whatever heavy job was running without thinking about why the turn was killed.`;
+const RESUME_KILL_PROMPT = `Your last turn was killed from outside before it finished (out of memory, a container stop or a stray signal), and Citadel resumed it by itself. A command may have half-run when it died (a ship, a push, a deploy, a test run), so check the state of your work (git first, then files and background jobs) before you continue where you left off. Don't redo finished steps, and don't restart whatever heavy job was running without thinking about why the turn was killed.`;
 
 /** Whether the API answers at all: any HTTP response counts, only a failure to connect (DNS, socket, 10 s timeout) doesn't. */
 export async function apiReachable(): Promise<boolean> {
@@ -523,9 +562,7 @@ type StruckData = Partial<ClaudeEvent> & { text?: string; strikes?: { text: stri
  */
 export function slimEvent(ev: ClaudeEvent, stored = false): ClaudeEvent | null {
   if (ev.type === 'system') {
-    return ev.subtype === 'init'
-      ? { type: 'system', subtype: 'init', session_id: ev.session_id, model: ev.model, cwd: ev.cwd }
-      : null;
+    return ev.subtype === 'init' ? { type: 'system', subtype: 'init', session_id: ev.session_id, model: ev.model, cwd: ev.cwd } : null;
   }
   if ((ev.type === 'assistant' || ev.type === 'user') && Array.isArray(ev.message?.content)) {
     const content = ev.message!.content!.flatMap((block: ContentBlock): ContentBlock[] => {
@@ -565,7 +602,12 @@ function describeActivity(ev: ClaudeEvent): string | null {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
     // A Grunt's report (a subagent's words) isn't what the minion is doing; its tool calls are.
-    if (b?.type === 'text' && !ev.parent_tool_use_id && typeof b.text === 'string' && b.text.trim()) return b.text.trim().split('\n')[0].replace(/\*\*|`/g, '').slice(0, 160);
+    if (b?.type === 'text' && !ev.parent_tool_use_id && typeof b.text === 'string' && b.text.trim())
+      return b.text
+        .trim()
+        .split('\n')[0]
+        .replace(/\*\*|`/g, '')
+        .slice(0, 160);
     // The same plain words as the readout ("Ran the tests", "Edited app.js"), not "Using Bash".
     if (b.type === 'tool_use' && isWorkTool(b.name)) return activityLabel(b);
   }
@@ -631,9 +673,15 @@ export class Runner {
   /** The usage-limit, network and kill waits (src/resumes.ts). */
   private resumes: Resumes;
   /** The waits' timers and probe delay, read by tests. */
-  private get limitTimer() { return this.resumes.limitTimer; }
-  private get netTimer() { return this.resumes.netTimer; }
-  get netDelay() { return this.resumes.netDelay; }
+  private get limitTimer() {
+    return this.resumes.limitTimer;
+  }
+  private get netTimer() {
+    return this.resumes.netTimer;
+  }
+  get netDelay() {
+    return this.resumes.netDelay;
+  }
   /** When each account error last pushed: one push per error for everyone, not one per minion. */
   private accountPushes = new Map<string, number>();
   /** Copies a session into the database (src/sessions.ts); tests hold it open to race the next step against it. */
@@ -748,7 +796,16 @@ export class Runner {
     const last = project ? payerInScheme(this.store, project, ticket.person_id) : ticket.person_id;
     const person = live ?? (project && this.store.getUser(last ?? -1)?.disabled_at ? project.owner_id : last);
     const github = this.githubFor?.(person, join(this.dataDir, 'people', String(person ?? 'nobody')))?.env;
-    return { ...turnEnv(process.env), ...github, ...this.coordinatorEnv(ticket, token), ...this.heavyEnv(ticket, person), COORDINATOR_ROLE: 'thread', COORDINATOR_TICKET: String(ticket.id), ...(ticket.number == null ? {} : { COORDINATOR_NUMBER: String(ticket.number) }), ...(shared ? { COORDINATOR_SHARED_DIR: shared } : {}) };
+    return {
+      ...turnEnv(process.env),
+      ...github,
+      ...this.coordinatorEnv(ticket, token),
+      ...this.heavyEnv(ticket, person),
+      COORDINATOR_ROLE: 'thread',
+      COORDINATOR_TICKET: String(ticket.id),
+      ...(ticket.number == null ? {} : { COORDINATOR_NUMBER: String(ticket.number) }),
+      ...(shared ? { COORDINATOR_SHARED_DIR: shared } : {}),
+    };
   }
 
   /** citadel-heavy's slots (#325), in the projects folder every person's container mounts at the same path, and who a job runs for. */
@@ -794,7 +851,17 @@ export class Runner {
     if (ticket.kind !== 'coordinator' || project.id !== GLOBAL_OWNER || asker === null || !this.store.isAdmin(this.store.getUser(asker))) return null;
     const others = this.store.listProjects().filter((p) => p.id !== project.id && p.repo_dir);
     return {
-      gitDirs: [...new Set(others.flatMap((p) => [p.repo_dir!, ...this.store.listTickets(p.id).filter((t) => t.status !== 'closed' && t.cwd).map((t) => t.cwd!)]))],
+      gitDirs: [
+        ...new Set(
+          others.flatMap((p) => [
+            p.repo_dir!,
+            ...this.store
+              .listTickets(p.id)
+              .filter((t) => t.status !== 'closed' && t.cwd)
+              .map((t) => t.cwd!),
+          ]),
+        ),
+      ],
       // The folder is a link into its two slots (#801): rules match the path read, so both are listed.
       apps: this.store.listContraptions().flatMap((c) => [appFolder(c, homedir()), slotsOf(appFolder(c, homedir()))]),
       data: dirname(this.store.path),
@@ -821,16 +888,36 @@ export class Runner {
     const self = this;
     this.resumes = new Resumes({
       store,
-      get resumeGapMs() { return self.resumeGapMs; },
-      get limitDelayMs() { return self.limitDelayMs; },
-      get limitGapMs() { return self.limitGapMs; },
-      get limitProvenGapMs() { return self.limitProvenGapMs; },
-      get netProbe() { return self.netProbe; },
-      get netProbeMs() { return self.netProbeMs; },
-      get netProbeMaxMs() { return self.netProbeMaxMs; },
-      get killStarved() { return self.killStarved; },
-      get killHoldMaxMs() { return self.killHoldMaxMs; },
-      get detached() { return self.detached; },
+      get resumeGapMs() {
+        return self.resumeGapMs;
+      },
+      get limitDelayMs() {
+        return self.limitDelayMs;
+      },
+      get limitGapMs() {
+        return self.limitGapMs;
+      },
+      get limitProvenGapMs() {
+        return self.limitProvenGapMs;
+      },
+      get netProbe() {
+        return self.netProbe;
+      },
+      get netProbeMs() {
+        return self.netProbeMs;
+      },
+      get netProbeMaxMs() {
+        return self.netProbeMaxMs;
+      },
+      get killStarved() {
+        return self.killStarved;
+      },
+      get killHoldMaxMs() {
+        return self.killHoldMaxMs;
+      },
+      get detached() {
+        return self.detached;
+      },
       limitStarting: this.limitStarting,
       killStarted: this.killStarted,
       isRunning: (id) => self.isRunning(id),
@@ -842,12 +929,26 @@ export class Runner {
     const moved = migrateQueues(store);
     if (moved) console.log(`Moved ${moved} minions' saved messages into their queues (#1378).`);
     this.queue = new MinionQueue(store);
-    this.approvals = new Approvals((ticketId, kind, data) => {
-      this.emit(ticketId, kind, data);
-      // The threads list shows which threads are waiting on an approval.
-      this.broadcastTicket(ticketId);
-    }, { get: (p) => store.getSetting<Go[]>(goesKey(p)) ?? [], set: (p, goes) => store.setSetting(goesKey(p), goes) });
-    this.relays = new Relay({ store, approvals: this.approvals, emit: (id, kind, data, reserved) => this.emit(id, kind, data, reserved), now: () => this.now(), isRunning: (id) => this.isRunning(id), send: (id, author, text, images, extra, steer) => this.send(id, author, text, images, extra, steer), personOf: () => this.personOf, broadcastTicket: (id) => this.broadcastTicket(id), parked: (t) => this.parked(t), hold: (id, msg, coldAt) => this.queue.hold(id, msg, coldAt) });
+    this.approvals = new Approvals(
+      (ticketId, kind, data) => {
+        this.emit(ticketId, kind, data);
+        // The threads list shows which threads are waiting on an approval.
+        this.broadcastTicket(ticketId);
+      },
+      { get: (p) => store.getSetting<Go[]>(goesKey(p)) ?? [], set: (p, goes) => store.setSetting(goesKey(p), goes) },
+    );
+    this.relays = new Relay({
+      store,
+      approvals: this.approvals,
+      emit: (id, kind, data, reserved) => this.emit(id, kind, data, reserved),
+      now: () => this.now(),
+      isRunning: (id) => this.isRunning(id),
+      send: (id, author, text, images, extra, steer) => this.send(id, author, text, images, extra, steer),
+      personOf: () => this.personOf,
+      broadcastTicket: (id) => this.broadcastTicket(id),
+      parked: (t) => this.parked(t),
+      hold: (id, msg, coldAt) => this.queue.hold(id, msg, coldAt),
+    });
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
     // Messages that arrived while a step ran start a turn once the minion's lane is free.
@@ -1002,7 +1103,11 @@ export class Runner {
       this.store.warmTurnTotals(ids);
       this.store.warmTouches(open);
       this.store.warmEvents(open.flatMap((t) => this.queue.heldMail(t.id).flatMap((m) => m.id ?? [])));
-      for (const pid of new Set(open.map((t) => t.project_id))) this.store.warmOpenCards(pid, open.filter((t) => t.project_id === pid).map((t) => t.id));
+      for (const pid of new Set(open.map((t) => t.project_id)))
+        this.store.warmOpenCards(
+          pid,
+          open.filter((t) => t.project_id === pid).map((t) => t.id),
+        );
       return tickets.map((t) => this.view(t, { once, properties: properties.get(t.id)! }));
     });
   }
@@ -1030,7 +1135,8 @@ export class Runner {
       step_ratio: ratio,
       steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
       // The plan's segmented track for the list row (#630): each step's guess and whether it's done, underway or not started.
-      step_track: total ? planTrack(p!) : null, closing: this.closing.has(ticket.id),
+      step_track: total ? planTrack(p!) : null,
+      closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
       turnStartedAt: this.turnStartedAt(ticket.id),
       // What the running turn last did and whether it has gone quiet (#906): the chip's popover says so.
@@ -1039,7 +1145,12 @@ export class Runner {
       spend_alert: this.spendAlert(ticket),
       approvals: this.approvals.waiting(ticket.id),
       // Its approval cards waiting on people, which open_cards lists among its stored cards.
-      asks: closed ? [] : this.approvals.pending().filter((a) => a.ticketId === ticket.id).map(({ at, card }) => ({ at, card })),
+      asks: closed
+        ? []
+        : this.approvals
+            .pending()
+            .filter((a) => a.ticketId === ticket.id)
+            .map(({ at, card }) => ({ at, card })),
       // Sealed on start_after: what it waits for, for Start now.
       parked_for: this.heldFor(ticket.id),
       // Waiting on its start card (#1757): not sealed, not working either; its card is the person's to answer.
@@ -1054,7 +1165,7 @@ export class Runner {
       // The server working for it while its own turn has ended (#727): the list and chat show it as working.
       server_work: closed ? null : this.serverWork(ticket.id),
       // The chat's size meter (#1193): the context as of the turn's latest API call (so it moves mid-turn and drops after a compaction), against the model's window.
-      context_live: this.turns.has(ticket.id) ? this.contextSizes.get(ticket.id) ?? null : null,
+      context_live: this.turns.has(ticket.id) ? (this.contextSizes.get(ticket.id) ?? null) : null,
     };
   }
 
@@ -1077,10 +1188,15 @@ export class Runner {
     const props = list?.properties ?? this.store.props.forTarget('minion', ticket.id);
     const user = (id: number) => once(`user:${id}`, () => this.store.getUser(id));
     const hears = (id: number, pid: number) => once(`hears:${id}:${pid}`, () => this.store.hearsScheme(id, pid, user(id)));
-    const nameOf = (id: number | null) => id == null ? null : user(id)?.name ?? null;
+    const nameOf = (id: number | null) => (id == null ? null : (user(id)?.name ?? null));
     return {
       // A wait's held messages stay in the queue (src/minion-queue.ts): they go into its resume.
-      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id), held_ids: this.queue.heldMail(ticket.id).flatMap((m) => m.id ?? []), queued_ids: this.queue.msgs(ticket.id).flatMap((m) => m.id ?? []), ...shown,
+      ...ticket,
+      replies: ticket.replies ? (JSON.parse(ticket.replies) as string[]) : [],
+      queued: this.queued(ticket.id),
+      held_ids: this.queue.heldMail(ticket.id).flatMap((m) => m.id ?? []),
+      queued_ids: this.queue.msgs(ticket.id).flatMap((m) => m.id ?? []),
+      ...shown,
       // The status from the live turn and the row together, never the row alone: the row's write waits in the queue
       // (src/db-writer.ts), so under load this called a minion idle whose turn had already started -- and a turn's
       // token, minted at that start, is the only one that still works, so anything acting on "idle, nothing queued"
@@ -1088,7 +1204,7 @@ export class Runner {
       // turn has ended (its copy of live() is posted on each broadcast, src/reader-live.ts).
       status: shown.turn_live ? 'running' : ticket.status,
       // Messages the loop guard holds for a person's Continue (#1067), for the row's badge and the chat's held-mail card.
-      loop_hold: closed ? null : once('loop-holds', () => loopHolds(this.store)).get(ticket.id) ?? null,
+      loop_hold: closed ? null : (once('loop-holds', () => loopHolds(this.store)).get(ticket.id) ?? null),
       held_mail: this.heldMail(ticket),
       // When it resumes by itself after the usage limit, if it waits for that.
       limit_resume_at: limit?.at ?? null,
@@ -1314,7 +1430,10 @@ export class Runner {
       const d: ClaudeEvent & { text?: string; author?: string } = JSON.parse(e.data);
       if (e.kind === 'user_message' && typeof d.text === 'string' && !asked.has(d.text)) out.push(`[${d.author}]: ${d.text}`);
       else if (e.kind === 'claude') {
-        const text = ((d.message?.content ?? []) as ContentBlock[]).filter((b) => b?.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n');
+        const text = ((d.message?.content ?? []) as ContentBlock[])
+          .filter((b) => b?.type === 'text' && typeof b.text === 'string')
+          .map((b) => b.text)
+          .join('\n');
         if (text.trim()) out.push(`[You]: ${text}`);
       }
       if (out.length === LOST_DIGEST_ENTRIES) break;
@@ -1410,7 +1529,14 @@ export class Runner {
               removed(what, bytes, s.saved ? `, its uncommitted work saved in ${ref}` : '');
               this.emit(t.id, 'note', { text: `Removed this dismissed minion's worktree (${size(bytes)}). Its branch ${t.branch} stays, and a reopen brings the folder back${s.saved ? ` with its uncommitted work, saved meanwhile in ${ref}` : ''}.` });
             } catch (err) {
-              keep(what, `could not remove: ${String(thrown(err).stderr || thrown(err).message).trim().split('\n')[0]}`);
+              keep(
+                what,
+                `could not remove: ${
+                  String(thrown(err).stderr || thrown(err).message)
+                    .trim()
+                    .split('\n')[0]
+                }`,
+              );
             }
           });
         }
@@ -1421,7 +1547,9 @@ export class Runner {
           ...log.removed.map((r) => `- ${r}`),
           log.kept.length ? 'Kept:' : '',
           ...log.kept.map((k) => `- ${k}`),
-        ].filter(Boolean).join('\n');
+        ]
+          .filter(Boolean)
+          .join('\n');
         console.log(`${p.name}: ${text}`);
         this.dailyCleanupNote(p.id, now, log);
       }
@@ -1448,12 +1576,7 @@ export class Runner {
     total.bytes += log.bytes;
     const n = total.removed.length;
     const text = `${n ? `Cleaned up ${n} worktree${n === 1 ? '' : 's'} today, ${size(total.bytes)} freed` : 'No worktrees removed today'}${total.kept.length ? ` · ${total.kept.length} kept` : ''}`;
-    const detail = [
-      n ? 'Removed (branches kept; a reopen brings a minion\'s back):' : '',
-      ...total.removed.map((r) => `- ${r}`),
-      total.kept.length ? 'Kept:' : '',
-      ...total.kept.map((k) => `- ${k}`),
-    ].filter(Boolean).join('\n');
+    const detail = [n ? "Removed (branches kept; a reopen brings a minion's back):" : '', ...total.removed.map((r) => `- ${r}`), total.kept.length ? 'Kept:' : '', ...total.kept.map((k) => `- ${k}`)].filter(Boolean).join('\n');
     const existing = total.event ? this.store.getEvent(total.event) : undefined;
     if (existing) {
       this.store.setEventData(existing.id, { ...JSON.parse(existing.data), text, detail });
@@ -1489,7 +1612,14 @@ export class Runner {
         }
         removed(what, await removeWorktree(p.repo_dir!, g.path), s.saved ? `, its uncommitted work saved in ${ref}` : '');
       } catch (err) {
-        keep(what, `could not remove: ${String(thrown(err).stderr || thrown(err).message).trim().split('\n')[0]}`);
+        keep(
+          what,
+          `could not remove: ${
+            String(thrown(err).stderr || thrown(err).message)
+              .trim()
+              .split('\n')[0]
+          }`,
+        );
       }
     }
   }
@@ -1502,11 +1632,14 @@ export class Runner {
    */
   saveIdleSession(ticketId: number, configDir: string): Promise<void> | null {
     if (this.lanes.busy(ticketId)) return null;
-    return track('session saves', this.lanes.run(ticketId, 'session sweep', () => {
-      const ticket = this.store.getTicket(ticketId);
-      const project = ticket && this.store.getProject(ticket.project_id);
-      if (ticket?.session_id && ticket.status !== 'closed' && project) return this.saveSession(this.store, ticket, project, configDir, null);
-    }));
+    return track(
+      'session saves',
+      this.lanes.run(ticketId, 'session sweep', () => {
+        const ticket = this.store.getTicket(ticketId);
+        const project = ticket && this.store.getProject(ticket.project_id);
+        if (ticket?.session_id && ticket.status !== 'closed' && project) return this.saveSession(this.store, ticket, project, configDir, null);
+      }),
+    );
   }
 
   /**
@@ -1725,7 +1858,7 @@ export class Runner {
           const status = turn?.status;
           this.statuses.delete(t.id);
           // With its record gone (a crash after the resume was owed), the owed resume's carry stands.
-          const carry = turn ? { ...(turn.from ? { from: turn.from } : {}), ...(turn.parkedAs ? { parkedAs: turn.parkedAs } : {}), ...(status ? { status } : {}) } : this.queue.owed(t.id)?.carry ?? {};
+          const carry = turn ? { ...(turn.from ? { from: turn.from } : {}), ...(turn.parkedAs ? { parkedAs: turn.parkedAs } : {}), ...(status ? { status } : {}) } : (this.queue.owed(t.id)?.carry ?? {});
           // Steers it never passed on go back to the queue.
           this.queue.endSteers(t.id, turn?.dir ? unsentSteers({ steered: this.queue.steers(t.id), dir: turn.dir }) : []);
           // A line read, or output it never read, says claude had its prompt (#1364): that turn resumes with its batch.
@@ -1735,7 +1868,9 @@ export class Runner {
           let wrote = !!turn?.offset;
           try {
             wrote ||= !!turn?.dir && statSync(join(turn.dir, 'stream.jsonl')).size > (turn.offset ?? 0);
-          } catch { /* no stream: it never began */ }
+          } catch {
+            /* no stream: it never began */
+          }
           const back = !turn?.stopped && !saving && !wrote;
           const rerun = back && !!this.queue.get(t.id).taken?.length;
           if (back) this.queue.giveBack(t.id);
@@ -1811,15 +1946,17 @@ export class Runner {
     }
     // Temp folders of minions dismissed or deleted while no server watched (or whose clearing failed).
     try {
-      const gone = readdirSync(join(this.dataDir, 'projects')).filter((name) => /^\d+$/.test(name)).flatMap((name) => {
-        // Removed only on proof: the minion was dismissed, or its folder sits in another scheme's root. A
-        // minion the database doesn't know (a restored backup, say) keeps its folder (#259).
-        const keep = (id: number) => {
-          const t = this.store.getTicket(id);
-          return !t || this.turns.has(id) || this.lanes.busy(id) || (t.project_id === Number(name) && t.status !== 'closed');
-        };
-        return sweepTmpDirs(this.tmpRoot(Number(name)), keep);
-      });
+      const gone = readdirSync(join(this.dataDir, 'projects'))
+        .filter((name) => /^\d+$/.test(name))
+        .flatMap((name) => {
+          // Removed only on proof: the minion was dismissed, or its folder sits in another scheme's root. A
+          // minion the database doesn't know (a restored backup, say) keeps its folder (#259).
+          const keep = (id: number) => {
+            const t = this.store.getTicket(id);
+            return !t || this.turns.has(id) || this.lanes.busy(id) || (t.project_id === Number(name) && t.status !== 'closed');
+          };
+          return sweepTmpDirs(this.tmpRoot(Number(name)), keep);
+        });
       if (gone.length) console.log(`Cleared the temp folders of ${gone.length} dismissed or deleted minion${gone.length === 1 ? '' : 's'}.`);
     } catch (err) {
       if (thrown(err).code !== 'ENOENT') console.error(`Could not sweep the temp folders: ${thrown(err).message}`);
@@ -1889,7 +2026,9 @@ export class Runner {
     try {
       why = readFileSync(join(dir, 'handback'), 'utf8');
       rmSync(join(dir, 'handback'), { force: true });
-    } catch { /* not given back */ }
+    } catch {
+      /* not given back */
+    }
     if (why !== null) console.error(`Ticket ${ticketId}: its scope from the turn supervisor didn't start (${why}); it starts in its wrapper unit.`);
     else {
       // Nothing still names the folder: a systemd-run the dead supervisor left starting the turn's scope would run it yet.
@@ -1925,33 +2064,49 @@ export class Runner {
     if (this.isRunning(ticketId)) return void (ours() && this.resumes.cancelLimitWait(ticketId));
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259). Nor beside a
     // turn still live by then (#1464): as above, that turn is resume enough.
-    const ran = this.lanes.run(ticketId, 'resume', () => this.liveTurn(ticketId) ?? this.afterRestore(ticketId, (ticket, project) => this.turnPerson(ticket, project, this.waiting(ticketId), true), () => {
-      const ticket = this.store.getTicket(ticketId);
-      const project = ticket && this.store.getProject(ticket.project_id);
-      if (!ticket || !project || ticket.status === 'closed') {
-        if (killLine) this.resumes.cancelKillWait(ticketId);
-        return this.queue.owe(ticketId, null);
-      }
-      // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
-      if (via === 'net' && !this.netWait(ticketId)) return;
-      // So does one from the kill line (#1364).
-      if (killLine && !this.killWait(ticketId)) return;
-      // So does a limit resume: a stop or a person's message (which tries now) ended it meanwhile.
-      if (token && !ours()) return;
-      this.dropDisabled(ticketId);
-      const person = this.turnPerson(ticket, project, this.waiting(ticketId), true);
-      if (this.refused(ticketId, person)) {
-        // Nothing it would have carried is dropped: the queue and held mail wait for the next turn (#468 S03-6).
-        // A kill wait ends here, as the turn that would have taken it.
-        if (killLine) this.resumes.cancelKillWait(ticketId);
-        this.queue.owe(ticketId, null);
-        return;
-      }
-      // An account switch's note went with the turn that stopped (endFailed); a kill resume's with the kill (one line).
-      if (via !== 'switch' && !killLine) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : 'Resumed after a server restart' });
-      // It carries on the interrupted turn, so it runs for that turn's person.
-      return this.startTurn(project, ticket, [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)], person, retries);
-    }));
+    const ran = this.lanes.run(
+      ticketId,
+      'resume',
+      () =>
+        this.liveTurn(ticketId) ??
+        this.afterRestore(
+          ticketId,
+          (ticket, project) => this.turnPerson(ticket, project, this.waiting(ticketId), true),
+          () => {
+            const ticket = this.store.getTicket(ticketId);
+            const project = ticket && this.store.getProject(ticket.project_id);
+            if (!ticket || !project || ticket.status === 'closed') {
+              if (killLine) this.resumes.cancelKillWait(ticketId);
+              return this.queue.owe(ticketId, null);
+            }
+            // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
+            if (via === 'net' && !this.netWait(ticketId)) return;
+            // So does one from the kill line (#1364).
+            if (killLine && !this.killWait(ticketId)) return;
+            // So does a limit resume: a stop or a person's message (which tries now) ended it meanwhile.
+            if (token && !ours()) return;
+            this.dropDisabled(ticketId);
+            const person = this.turnPerson(ticket, project, this.waiting(ticketId), true);
+            if (this.refused(ticketId, person)) {
+              // Nothing it would have carried is dropped: the queue and held mail wait for the next turn (#468 S03-6).
+              // A kill wait ends here, as the turn that would have taken it.
+              if (killLine) this.resumes.cancelKillWait(ticketId);
+              this.queue.owe(ticketId, null);
+              return;
+            }
+            // An account switch's note went with the turn that stopped (endFailed); a kill resume's with the kill (one line).
+            if (via !== 'switch' && !killLine) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : 'Resumed after a server restart' });
+            // It carries on the interrupted turn, so it runs for that turn's person.
+            return this.startTurn(
+              project,
+              ticket,
+              [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)],
+              person,
+              retries,
+            );
+          },
+        ),
+    );
     // One that started no turn (dismissed, refused, a start that bailed) ends its wait here, as it did before it was kept.
     if (token) void ran.then(() => ours() && this.resumes.cancelLimitWait(ticketId));
     return ran;
@@ -1972,20 +2127,22 @@ export class Runner {
       // Nothing stored, nothing to restore: no need to ask whose Claude it runs on.
       if (ticket && project && ticket.status !== 'closed' && (this.store.listClaudeState(project.id, ticket.id).length || this.store.listClaudeState(project.id, null).length)) {
         const place = this.placeFor?.(person(ticket, project), warmKey(ticket)) ?? { host: true as const };
-        if (!('refused' in place)) ahead = restoreAhead(this.store, ticket, project, place.host ? place.configDir ?? claudeConfigDir(process.env) : place.configDir);
+        if (!('refused' in place)) ahead = restoreAhead(this.store, ticket, project, place.host ? (place.configDir ?? claudeConfigDir(process.env)) : place.configDir);
       }
     } catch (err) {
       // The turn's start meets the same trouble itself, and says so.
       console.error(`Ticket ${ticketId}: could not check its session files before the turn: ${thrown(err).message}`);
     }
     if (!ahead) return step();
-    return ahead.then(
-      (n) => n && console.log(`Ticket ${ticketId}: restored the Claude session from the database off the event loop (${n} file${n === 1 ? '' : 's'}).`),
-      (err) => console.error(`Ticket ${ticketId}: restoring the session off the event loop failed, so the turn's start tries again: ${err.message}`),
-    ).then(() => {
-      // Dismissed meanwhile, which a running turn would have refused: no turn; the dismissal's cleanup notes the queue.
-      if (this.store.getTicket(ticketId)?.status !== 'closed') return step();
-    });
+    return ahead
+      .then(
+        (n) => n && console.log(`Ticket ${ticketId}: restored the Claude session from the database off the event loop (${n} file${n === 1 ? '' : 's'}).`),
+        (err) => console.error(`Ticket ${ticketId}: restoring the session off the event loop failed, so the turn's start tries again: ${err.message}`),
+      )
+      .then(() => {
+        // Dismissed meanwhile, which a running turn would have refused: no turn; the dismissal's cleanup notes the queue.
+        if (this.store.getTicket(ticketId)?.status !== 'closed') return step();
+      });
   }
 
   /** What takeQueue would take, left where it is. */
@@ -2073,8 +2230,12 @@ export class Runner {
   }
 
   // Tests drive the limit line by hand.
-  private limitResumeNext() { this.resumes.limitResumeNext(); }
-  private armLimitTimer() { this.resumes.armLimitTimer(); }
+  private limitResumeNext() {
+    this.resumes.limitResumeNext();
+  }
+  private armLimitTimer() {
+    this.resumes.armLimitTimer();
+  }
 
   /** Stop waiting on the usage limit (a stop, a dismissal); true if it was waiting. */
   cancelLimitWait(ticketId: number): boolean {
@@ -2104,7 +2265,10 @@ export class Runner {
     };
     const now = Date.now();
     const early = list.filter((w) => w.at > now && !w.codex && onPlan(w.ticket));
-    for (const w of early) { w.at = now; w.proven = true; }
+    for (const w of early) {
+      w.at = now;
+      w.proven = true;
+    }
     const back = gaveUp.filter((t: Ticket) => onPlan(t.id)).map((t) => ({ ticket: t.id, at: now, tries: 1, proven: true as const }));
     if (early.length || back.length) this.resumes.saveLimits([...list, ...back]);
   }
@@ -2134,7 +2298,15 @@ export class Runner {
    * running keeps for its next turn instead of starting one ('parked'). Wakes (wake_when_live, a chained start,
    * runners back, a card's answer, GitHub) leave it off and start a turn as before.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string; path?: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; hold?: boolean; brief?: boolean; everyone?: boolean; ask?: object; answer?: object } & object = {}, steer = false, files: MessageFile[] = []): { event: EventRow; parked?: true } {
+  send(
+    ticketId: number,
+    author: string,
+    text: string,
+    images: MessageImage[] = [],
+    extra: { comment?: { about: string; path?: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; hold?: boolean; brief?: boolean; everyone?: boolean; ask?: object; answer?: object } & object = {},
+    steer = false,
+    files: MessageFile[] = [],
+  ): { event: EventRow; parked?: true } {
     // Whose ask it is, when that isn't its author's or relay's now: a contraption's person, or a held relay's asker.
     const { asker: askedBy, fyi, light, hold, ...shown } = extra;
     extra = shown;
@@ -2164,11 +2336,35 @@ export class Runner {
     // message the next turn reads, never a line in the chat that no turn gets. Its id is the line's, handed out now.
     // The chat shows it masked; the turn still gets it as typed, for a key someone hands over on purpose.
     const id = this.store.reserveEventId();
-    const line = () => this.emit(ticketId, 'user_message', {
-      author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}),
-      ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}), ...(parked ? { mail: true, parked: true, ...(this.store.getSetting(startHoldKey(ticketId)) ? { startHold: true } : {}) } : {}),
-    }, id);
-    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(extra.typed || 'answer' in extra ? { own: true } : {}), ...(fyi ? { fyi: true } : {}), ...(light ? { light: true as const } : {}), asker };
+    const line = () =>
+      this.emit(
+        ticketId,
+        'user_message',
+        {
+          author,
+          text: hideTokens(text),
+          ...(images.length ? { images: images.map((i) => i.name) } : {}),
+          ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}),
+          ...extra,
+          ...(steers ? { steered: true } : {}),
+          ...(parked ? { mail: true, parked: true, ...(this.store.getSetting(startHoldKey(ticketId)) ? { startHold: true } : {}) } : {}),
+        },
+        id,
+      );
+    const msg: QueuedMessage = {
+      author,
+      text,
+      images,
+      ...(files.length ? { files } : {}),
+      about: extra.comment?.about,
+      id,
+      ...(extra.from ? { from: extra.from } : {}),
+      ...(extra.typed ? { typed: true } : {}),
+      ...(extra.typed || 'answer' in extra ? { own: true } : {}),
+      ...(fyi ? { fyi: true } : {}),
+      ...(light ? { light: true as const } : {}),
+      asker,
+    };
     if (parked) {
       // With the held mail, in order: whatever next wakes it (Unseal, a wake, its chained start) reads it after its own message.
       this.queue.hold(ticketId, { ...msg, parked: new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ') });
@@ -2217,10 +2413,11 @@ export class Runner {
   private heard(ticketId: number, ticket: Ticket | null | undefined, msg: QueuedMessage) {
     // A person's typed "merge it" stands for the whole scheme until its PR merges (#260), whenever a turn reads it.
     // In the Taskmaster chat "#N" names minion N (#939).
-    if (ticket) this.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, msg, (n) => {
-      const m = this.store.getTicketByNumber(ticket.project_id, n);
-      return m ? { id: m.id, number: m.number, branch: m.branch } : null;
-    });
+    if (ticket)
+      this.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, msg, (n) => {
+        const m = this.store.getTicketByNumber(ticket.project_id, n);
+        return m ? { id: m.id, number: m.number, branch: m.branch } : null;
+      });
     // Anything said answers the one-tap replies; a steer or a held message starts no turn to clear them.
     if (this.store.getTicket(ticketId)?.replies) {
       this.store.updateTicket(ticketId, { replies: null });
@@ -2363,7 +2560,10 @@ export class Runner {
   releaseMail(t: Ticket, p: Project, by = ''): number {
     let mail = this.queue.heldMail(t.id);
     // A dismissed minion isn't reopened by the cap: its mail waits for a person's message, or its dismissal's cleanup notes it.
-    if (!mail.length || t.status === 'closed') { this.queue.warm(t.id); return 0; }
+    if (!mail.length || t.status === 'closed') {
+      this.queue.warm(t.id);
+      return 0;
+    }
     if (this.startHold(t.id)) return 0; // only its start card's answer starts it (#1757)
     // A disabled person's held mail never runs, on their login or anyone else's (#1270 C3, #1509).
     if (this.dropDisabled(t.id)) mail = this.queue.heldMail(t.id);
@@ -2403,8 +2603,7 @@ export class Runner {
    * it. A note with the reason goes in that chat, and in `by`'s own if that's another one.
    */
   strike(by: number, quote: string, reason: string): { ticketId: number } {
-    const texts = (e: EventRow, data: StruckData): string[] =>
-      e.kind === 'claude' ? (data.type === 'assistant' ? ((data.message?.content ?? []) as ContentBlock[]).filter((b) => b.type === 'text').map((b) => b.text!) : []) : [data.text ?? ''];
+    const texts = (e: EventRow, data: StruckData): string[] => (e.kind === 'claude' ? (data.type === 'assistant' ? ((data.message?.content ?? []) as ContentBlock[]).filter((b) => b.type === 'text').map((b) => b.text!) : []) : [data.text ?? '']);
     let e: EventRow | undefined;
     let data!: StruckData;
     // Find it first: leaving the loop closes the read before anything is written.
@@ -2452,14 +2651,23 @@ export class Runner {
   continueLoop(ticketId: number, by: string): number {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return 0;
-    const loops: { key: string; chats: () => number[]; pair?: true }[] = ticket.kind === 'coordinator'
-      ? this.store.listProjects().flatMap((p) => this.store.listCoordinators(p.id)).filter((c) => c && c.id !== ticketId)
-        .map((c) => ({ key: pairKey(ticketId, c!.id), chats: () => [ticketId, c!.id] }))
-      // Its Taskmaster only once there's a loop to lift: looking it up for every minion cost 0.2 ms each (#1029).
-      : [{ key: loopKey(ticketId), chats: () => this.relays.loopChats(ticket) },
-        // Its direct exchanges with the scheme's other minions (#783).
-        ...this.store.settingKeys(MINION_PAIRS).map((key) => key.slice(MINION_PAIRS.length).split(':').map(Number)).filter((ids) => ids.includes(ticketId))
-          .map(([a, b]) => ({ key: minionPairKey(a, b), chats: () => [ticketId, a === ticketId ? b : a], pair: true as const }))];
+    const loops: { key: string; chats: () => number[]; pair?: true }[] =
+      ticket.kind === 'coordinator'
+        ? this.store
+            .listProjects()
+            .flatMap((p) => this.store.listCoordinators(p.id))
+            .filter((c) => c && c.id !== ticketId)
+            .map((c) => ({ key: pairKey(ticketId, c!.id), chats: () => [ticketId, c!.id] }))
+        : // Its Taskmaster only once there's a loop to lift: looking it up for every minion cost 0.2 ms each (#1029).
+          [
+            { key: loopKey(ticketId), chats: () => this.relays.loopChats(ticket) },
+            // Its direct exchanges with the scheme's other minions (#783).
+            ...this.store
+              .settingKeys(MINION_PAIRS)
+              .map((key) => key.slice(MINION_PAIRS.length).split(':').map(Number))
+              .filter((ids) => ids.includes(ticketId))
+              .map(([a, b]) => ({ key: minionPairKey(a, b), chats: () => [ticketId, a === ticketId ? b : a], pair: true as const })),
+          ];
     let total = 0;
     for (const { key, chats, pair } of loops) {
       const loop = this.store.getSetting<LoopState>(key);
@@ -2527,7 +2735,9 @@ export class Runner {
       pid = Number(p.claude) || null;
       // A supervisor turn's `claude` is its shell (#1343, turn-run.mjs SHIM), the process group to signal; claude is its one child.
       if (pid && p.supervisor) pid = Number(readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/)[0]) || pid;
-    } catch { /* not started yet, or just ended */ }
+    } catch {
+      /* not started yet, or just ended */
+    }
     return checkProcess(pid);
   }
 
@@ -2544,7 +2754,7 @@ export class Runner {
         this.queue.drop(ticketId);
         this.wakeNow.delete(ticketId);
         this.setFailNote(ticketId, { note: 'Killed: stopped, send a message to carry on' });
-        this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
+        this.emit(ticketId, 'note', { text: "Stopped by user: it won't resume by itself." });
         this.broadcastTicket(ticketId);
         return true;
       }
@@ -2553,7 +2763,7 @@ export class Runner {
         this.queue.drop(ticketId);
         this.wakeNow.delete(ticketId);
         this.setFailNote(ticketId, { note: 'Network outage: stopped, send a message to carry on' });
-        this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
+        this.emit(ticketId, 'note', { text: "Stopped by user: it won't resume by itself." });
         this.broadcastTicket(ticketId);
         return true;
       }
@@ -2561,7 +2771,7 @@ export class Runner {
       if (!this.resumes.cancelLimitWait(ticketId)) return false;
       this.queue.drop(ticketId);
       this.setFailNote(ticketId, { note: 'Usage limit: stopped, send a message to carry on' });
-      this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
+      this.emit(ticketId, 'note', { text: "Stopped by user: it won't resume by itself." });
       this.broadcastTicket(ticketId);
       return true;
     }
@@ -2664,7 +2874,7 @@ export class Runner {
   recordHandoff(ticketId: number, summary: string, carryOn = true): string | null {
     const ticket = this.store.getTicket(ticketId);
     const seam = ticket?.kind !== 'coordinator';
-    if (seam && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticketId) !== 'fresh') return 'Only a Taskmaster, or a minion in the fresh-session trial\'s fresh group, starts its own fresh session: a person can type /fresh in your chat';
+    if (seam && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticketId) !== 'fresh') return "Only a Taskmaster, or a minion in the fresh-session trial's fresh group, starts its own fresh session: a person can type /fresh in your chat";
     if (!this.isRunning(ticketId)) return 'Only a running turn can hand off';
     const was = this.store.getSetting<FreshState>(freshKey(ticketId));
     this.store.setSetting(freshKey(ticketId), { why: was?.why ?? (seam ? SEAM_WHY : 'the Taskmaster asked for it'), summary: summary.slice(0, HANDOFF_MAX), ...(seam ? { seam: { carryOn } } : {}) });
@@ -2678,9 +2888,7 @@ export class Runner {
   private saveCommands(ticketId: number, ev: ClaudeEvent) {
     const terminal = new Set(Array.isArray(ev.terminal_slash_commands) ? ev.terminal_slash_commands : []);
     const names = [...new Set<string>(ev.slash_commands!.filter((n: unknown) => typeof n === 'string' && n && !n.startsWith('__') && !terminal.has(n)))];
-    const plugins = (Array.isArray(ev.plugins) ? ev.plugins : [])
-      .filter((p) => typeof p?.name === 'string' && typeof p.path === 'string' && p.path.startsWith('/'))
-      .map((p) => ({ name: p.name, path: p.path }));
+    const plugins = (Array.isArray(ev.plugins) ? ev.plugins : []).filter((p) => typeof p?.name === 'string' && typeof p.path === 'string' && p.path.startsWith('/')).map((p) => ({ name: p.name, path: p.path }));
     const loaded: LoadedCommands = { names, plugins, cwd: typeof ev.cwd === 'string' ? ev.cwd : '' };
     const ticket = this.store.getTicket(ticketId);
     if (JSON.stringify(this.store.getSetting(commandsKey(ticketId))) !== JSON.stringify(loaded)) this.store.setSetting(commandsKey(ticketId), loaded);
@@ -2709,8 +2917,7 @@ export class Runner {
     const ticket = this.store.getTicket(ticketId);
     const who = ticket ? roleWord(ticket) : 'Taskmaster';
     // A minion's /fresh has no fresh_session (only the seam trial's fresh group has the tool, which records the summary first): its handoff turn's reply is its handoff (#937), the status line left out.
-    const reply = ticket?.kind !== 'coordinator' && turn?.fresh === 'handoff' && ok && !stopped && !turn.result?.error
-      ? (turn.result?.text ?? '').replace(/<!--\s*status:[\s\S]*?-->/g, '').trim() : '';
+    const reply = ticket?.kind !== 'coordinator' && turn?.fresh === 'handoff' && ok && !stopped && !turn.result?.error ? (turn.result?.text ?? '').replace(/<!--\s*status:[\s\S]*?-->/g, '').trim() : '';
     if (!f.summary && reply) f = { ...f, summary: reply.slice(0, HANDOFF_MAX) };
     // A Taskmaster's failed handoff starts the fresh session from a facts sheet the server builds from the database (G6), not a compaction.
     const sheeted = ticket?.kind === 'coordinator' && !f.summary && turn?.fresh === 'handoff' && !stopped;
@@ -2727,8 +2934,7 @@ export class Runner {
       this.emit(ticketId, 'fresh', { summary: sheeted ? text : f.summary, why: f.why });
       // A seam handoff carries straight on (#1129), unless the turn failed or was stopped, closes, or waits on people.
       const after = this.store.getTicket(ticketId);
-      if (f.seam?.carryOn && ok && !stopped && after && !this.closing.has(ticketId) && !this.parked(after)
-        && !['ready', 'try', 'complete', 'parked', 'pending-deploy'].includes(after.state ?? '') && !this.store.openCardsOf(ticketId).length) {
+      if (f.seam?.carryOn && ok && !stopped && after && !this.closing.has(ticketId) && !this.parked(after) && !['ready', 'try', 'complete', 'parked', 'pending-deploy'].includes(after.state ?? '') && !this.store.openCardsOf(ticketId).length) {
         this.send(ticketId, 'System', CARRY_ON);
       }
     } else if (turn?.fresh === 'handoff' && stopped) {
@@ -2866,9 +3072,15 @@ export class Runner {
   /** A keepalive's result: costed apart, and its miss stops its series; too many misses in a day switch keepalives off. */
   private keepaliveResult(ticketId: number, ev: ClaudeEvent) {
     this.store.recordTurn(ticketId, {
-      session_id: typeof ev.session_id === 'string' ? ev.session_id : null, ended_at: Date.now(), session_cost_usd: ev.total_cost_usd!,
-      duration_ms: ev.duration_ms, usage: ev.usage, payer: this.payerOf(this.store.getSetting<TurnState>(turnKey(ticketId))?.person), keepalive: true,
-      account: this.store.getSetting<TurnState>(turnKey(ticketId))?.account ?? null, modelUsage: ev.modelUsage,
+      session_id: typeof ev.session_id === 'string' ? ev.session_id : null,
+      ended_at: Date.now(),
+      session_cost_usd: ev.total_cost_usd!,
+      duration_ms: ev.duration_ms,
+      usage: ev.usage,
+      payer: this.payerOf(this.store.getSetting<TurnState>(turnKey(ticketId))?.person),
+      keepalive: true,
+      account: this.store.getSetting<TurnState>(turnKey(ticketId))?.account ?? null,
+      modelUsage: ev.modelUsage,
     });
     if (!missed(ev.usage)) return;
     this.stopSeries(ticketId, 'missed');
@@ -2926,50 +3138,56 @@ export class Runner {
     // Whose turn it will be, as below: a fresh-start step's is the minion's own, else the first queued message's.
     const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.freshStep(ticketId) ? [] : this.waiting(ticketId));
     // Nor beside a turn still live (#1464): the queue waits until it ends, then asks again.
-    this.lanes.run(ticketId, 'turn', () => this.liveTurn(ticketId) ?? this.afterRestore(ticketId, person, () => {
-      const ticket = this.store.getTicket(ticketId);
-      const project = ticket && this.store.getProject(ticket.project_id);
-      if (!ticket || !project) return;
-      // A Taskmaster's fresh-start step runs first and alone; the queue waits for the fresh session
-      // (but goes before a handoff Citadel asked for by itself: freshStep).
-      const fresh = this.freshStep(ticketId);
-      if (fresh) {
-        let ended: Promise<void> | void;
-        try {
-          ended = this.startTurn(project, ticket, [fresh], this.turnPerson(ticket, project, []));
-        } catch (err) {
-          // Thrown out of the step with the fresh start still pending, the freed lane would ask again in a
-          // microtask, for ever, and nothing else on the server would run: give up as below.
-          console.error(`Ticket ${ticketId}: its fresh start's turn could not start:`, err);
-          ended = this.turns.get(ticketId)?.ended;
-        }
-        // The queue waits behind this turn as behind any.
-        if (this.isRunning(ticketId)) return ended;
-        // No turn started (a preview, a refused place): drop it, or the idle lane would ask again at once,
-        // and forget its size, or the idle check would ask again each minute.
-        this.store.deleteSetting(freshKey(ticketId));
-        this.store.deleteSetting(contextKey(ticketId));
-        this.emit(ticketId, 'note', { text: 'The fresh start could not run a turn, so the Taskmaster keeps its session.' });
-      }
-      // A real message that came in meanwhile goes first, and the keepalive is dropped: that turn re-reads the cache anyway.
-      const skew = this.keepalivePending.get(ticketId);
-      if (this.keepalivePending.delete(ticketId) && !this.queue.size(ticketId) && !this.netWait(ticketId) && !this.killWait(ticketId) && this.wantsKeepalive(ticket, project, this.now() + skew!)) {
-        return this.startTurn(project, ticket, [{ author: 'System', text: KEEPALIVE_TEXT, images: [], keepalive: true }], this.turnPerson(ticket, project, []));
-      }
-      // Everything queued while the last turn ran goes into one turn. Held mail alone wakes nothing, nor does a disabled person's message.
-      this.dropDisabled(ticketId);
-      if (!this.queue.size(ticketId)) return;
-      const person = this.turnPerson(ticket, project, this.waiting(ticketId));
-      if (this.refused(ticketId, person)) {
-        // What woke it is refused, as in send(); held mail stays for the next turn (#468 S03-6). Not kept as held mail:
-        // a refused person's message would pick them to pay for every later batch, and refuse it too (#1378 review).
-        this.queue.refuse(ticketId);
-        this.wakeNow.delete(ticketId);
-        this.broadcastTicket(ticketId);
-        return;
-      }
-      return this.startTurn(project, ticket, this.takeQueue(ticketId), person);
-    }));
+    this.lanes.run(
+      ticketId,
+      'turn',
+      () =>
+        this.liveTurn(ticketId) ??
+        this.afterRestore(ticketId, person, () => {
+          const ticket = this.store.getTicket(ticketId);
+          const project = ticket && this.store.getProject(ticket.project_id);
+          if (!ticket || !project) return;
+          // A Taskmaster's fresh-start step runs first and alone; the queue waits for the fresh session
+          // (but goes before a handoff Citadel asked for by itself: freshStep).
+          const fresh = this.freshStep(ticketId);
+          if (fresh) {
+            let ended: Promise<void> | void;
+            try {
+              ended = this.startTurn(project, ticket, [fresh], this.turnPerson(ticket, project, []));
+            } catch (err) {
+              // Thrown out of the step with the fresh start still pending, the freed lane would ask again in a
+              // microtask, for ever, and nothing else on the server would run: give up as below.
+              console.error(`Ticket ${ticketId}: its fresh start's turn could not start:`, err);
+              ended = this.turns.get(ticketId)?.ended;
+            }
+            // The queue waits behind this turn as behind any.
+            if (this.isRunning(ticketId)) return ended;
+            // No turn started (a preview, a refused place): drop it, or the idle lane would ask again at once,
+            // and forget its size, or the idle check would ask again each minute.
+            this.store.deleteSetting(freshKey(ticketId));
+            this.store.deleteSetting(contextKey(ticketId));
+            this.emit(ticketId, 'note', { text: 'The fresh start could not run a turn, so the Taskmaster keeps its session.' });
+          }
+          // A real message that came in meanwhile goes first, and the keepalive is dropped: that turn re-reads the cache anyway.
+          const skew = this.keepalivePending.get(ticketId);
+          if (this.keepalivePending.delete(ticketId) && !this.queue.size(ticketId) && !this.netWait(ticketId) && !this.killWait(ticketId) && this.wantsKeepalive(ticket, project, this.now() + skew!)) {
+            return this.startTurn(project, ticket, [{ author: 'System', text: KEEPALIVE_TEXT, images: [], keepalive: true }], this.turnPerson(ticket, project, []));
+          }
+          // Everything queued while the last turn ran goes into one turn. Held mail alone wakes nothing, nor does a disabled person's message.
+          this.dropDisabled(ticketId);
+          if (!this.queue.size(ticketId)) return;
+          const person = this.turnPerson(ticket, project, this.waiting(ticketId));
+          if (this.refused(ticketId, person)) {
+            // What woke it is refused, as in send(); held mail stays for the next turn (#468 S03-6). Not kept as held mail:
+            // a refused person's message would pick them to pay for every later batch, and refuse it too (#1378 review).
+            this.queue.refuse(ticketId);
+            this.wakeNow.delete(ticketId);
+            this.broadcastTicket(ticketId);
+            return;
+          }
+          return this.startTurn(project, ticket, this.takeQueue(ticketId), person);
+        }),
+    );
   }
 
   /** The one person whose own typed message a ticket's running turn answers (TurnState.typedBy), else null. */
@@ -3033,7 +3251,11 @@ export class Runner {
     for (const w of this.store.wordsBy(ticketId, 6)) {
       const d: ClaudeEvent = JSON.parse(w.data);
       if (w.kind !== 'claude' || w.created_at < started) continue;
-      reply = ((d.message?.content ?? []) as ContentBlock[]).filter((b) => b.type === 'text').map((b) => b.text).join('\n\n').trim();
+      reply = ((d.message?.content ?? []) as ContentBlock[])
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n\n')
+        .trim();
       if (reply) break;
     }
     if (!reply) return;
@@ -3118,7 +3340,7 @@ export class Runner {
     // Who asked for it (#255): its messages' askers, any non-admin of them if several, since a ride-along
     // ask is in the turn too; with none (GitHub, a notice), and on a resume, the last turn's carries on.
     const before = this.store.turnAsker(ticket.id);
-    const askers = [...(resumed || keepalive ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : this.personOf?.(m.author, m.from) ?? null))].filter((a): a is number => a !== null);
+    const askers = [...(resumed || keepalive ? [before] : []), ...batch.map((m) => (m.asker !== undefined ? m.asker : (this.personOf?.(m.author, m.from) ?? null)))].filter((a): a is number => a !== null);
     const asker = askers.find((a) => !this.store.isAdmin(this.store.getUser(a))) ?? askers[0] ?? before ?? person;
     // Threads (not the coordinator, which hands work off) get the tools of every machine online now and lent
     // to the scheme, and the asker's own (#306): the one person this batch (or the turn it resumes) answers, so
@@ -3131,7 +3353,7 @@ export class Runner {
     const switched = person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person));
     const wantsCodex = isCodexModel(picked) || switched;
     let codexWhy = wantsCodex ? this.codexWhy(person) : null;
-    const codexPlace = wantsCodex && !codexWhy && claudePlace.host && person !== null ? this.codexPlaceFor?.(person) ?? null : null;
+    const codexPlace = wantsCodex && !codexWhy && claudePlace.host && person !== null ? (this.codexPlaceFor?.(person) ?? null) : null;
     if (wantsCodex && !codexWhy && claudePlace.host && !codexPlace) codexWhy = "Codex's container isn't there yet (sign in to Codex in Settings → Your account)";
     const codex = wantsCodex && !codexWhy;
     const place: TurnPlace = codexPlace ?? claudePlace;
@@ -3143,9 +3365,7 @@ export class Runner {
     // A minion's turn whose whole batch is machine notices of success runs at low effort (#951): it relays news or
     // checks state. A person's or Taskmaster's message, a failure or a resume keeps its own. A keepalive replays
     // the effort of the turn whose cache it keeps warm, so its launch matches that turn's.
-    const light = !codex && ticket.kind !== 'coordinator' && (keepalive
-      ? !!this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticket.id))?.light
-      : !resumed && batch.length > 0 && batch.every((m) => m.light));
+    const light = !codex && ticket.kind !== 'coordinator' && (keepalive ? !!this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticket.id))?.light : !resumed && batch.length > 0 && batch.every((m) => m.light));
     const effort = light ? 'low' : itsEffort;
     // Saved secrets as env vars (#838): never in the prompt, so never in the turn's context unless it prints one.
     // A person's own only when they alone sent this turn's messages themselves and it runs as them: never on a
@@ -3177,8 +3397,17 @@ export class Runner {
     let built: ReturnType<Runner['buildLaunch']>;
     try {
       built = this.buildLaunch(project, ticket, {
-        place, person, asker, machines, model, effort, typedBy, secrets, name: `${ticket.id}-${Date.now()}`,
-        folders: { files: filesDir, shared: sharedDir, memory: memoryDir }, codex: codex ? { thread: same || null } : null,
+        place,
+        person,
+        asker,
+        machines,
+        model,
+        effort,
+        typedBy,
+        secrets,
+        name: `${ticket.id}-${Date.now()}`,
+        folders: { files: filesDir, shared: sharedDir, memory: memoryDir },
+        codex: codex ? { thread: same || null } : null,
       });
     } catch (err) {
       // A launch that can't be built (a settings file past Claude Code's cap, #661; claude not on the PATH) fails the turn with its reason, in the chat.
@@ -3196,11 +3425,24 @@ export class Runner {
     const { command, args, env, configDir } = plan;
     // What its cached prefix is built from (#862), before --resume joins the arguments: a keepalive runs only while it is the
     // one its last real turn cached. A minion's alone: Taskmasters and Codex get no keepalives.
-    const fpParts = ticket.kind === 'coordinator' || codex || !ticket.cwd ? null : prefixParts({
-      dir, systemPrompt: system, args, files: plan.files, env, pinned: treeHash(pins.MCP_DIR), claude: claudeStamp(command, env.PATH),
-      context: contextText(ticket.cwd, configDir, [ticket.cwd, project.repo_dir].filter((d): d is string => !!d).map((d) => join(configDir, 'projects', projectSlug(d), 'memory', 'MEMORY.md'))),
-      date: turnDate(Date.now(), env.TZ),
-    });
+    const fpParts =
+      ticket.kind === 'coordinator' || codex || !ticket.cwd
+        ? null
+        : prefixParts({
+            dir,
+            systemPrompt: system,
+            args,
+            files: plan.files,
+            env,
+            pinned: treeHash(pins.MCP_DIR),
+            claude: claudeStamp(command, env.PATH),
+            context: contextText(
+              ticket.cwd,
+              configDir,
+              [ticket.cwd, project.repo_dir].filter((d): d is string => !!d).map((d) => join(configDir, 'projects', projectSlug(d), 'memory', 'MEMORY.md')),
+            ),
+            date: turnDate(Date.now(), env.TZ),
+          });
     const fp = fpParts && fingerprint(fpParts);
     if (keepalive) {
       const s = this.store.getSetting<KeepaliveSeries>(keepaliveKey(ticket.id));
@@ -3285,7 +3527,9 @@ export class Runner {
       return;
     } else if (ticket.session_id) {
       lost = lostSessionText(ticket.session_id, ticket.note, this.chatDigest(ticket.id, batch));
-      this.emit(ticket.id, 'note', { text: `This minion's conversation (session ${ticket.session_id}) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here; Claude doesn't remember the earlier turns, so it starts from ${lost.entries ? `its status note and its last ${lost.entries} chat entries` : 'its status note'}.` });
+      this.emit(ticket.id, 'note', {
+        text: `This minion's conversation (session ${ticket.session_id}) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here; Claude doesn't remember the earlier turns, so it starts from ${lost.entries ? `its status note and its last ${lost.entries} chat entries` : 'its status note'}.`,
+      });
       this.store.updateTicket(ticket.id, { session_id: null });
     }
     // The Taskmaster's auto-memory moved to the repo memory (#98); bring its old notes along once.
@@ -3312,9 +3556,22 @@ export class Runner {
       this.promptHolds.save(ticket.id, step ? { ...d, record: { ...d.record, pending: undefined } } : d);
       if (d.reload) console.log(`[prompt-hold] minion ${ticket.id}: takes the current prompt (${d.reload})`);
     }
-    const prompt = step === 'compact' ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
-      : keepalive ? promptMessage(batch)
-      : promptMessage([...(context ? [{ author: 'System', text: context, images: [] }] : []), ...(github ? [{ author: 'System', text: github.line, images: [] }] : []), ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []), ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []), ...handBack, ...cancelledLine, ...digestLine, ...stuckLine, ...batch]);
+    const prompt =
+      step === 'compact'
+        ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
+        : keepalive
+          ? promptMessage(batch)
+          : promptMessage([
+              ...(context ? [{ author: 'System', text: context, images: [] }] : []),
+              ...(github ? [{ author: 'System', text: github.line, images: [] }] : []),
+              ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []),
+              ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []),
+              ...handBack,
+              ...cancelledLine,
+              ...digestLine,
+              ...stuckLine,
+              ...batch,
+            ]);
     writeFileSync(join(dir, 'prompt.jsonl'), prompt);
     for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
     if (codex) {
@@ -3331,10 +3588,33 @@ export class Runner {
     }
     // Holds the turn's token: private, and the wrapper deletes it once read.
     writeFileSync(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
-    const turn: TurnState = { ...(Object.keys(retries).length ? { retries } : {}), dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex || light, ...(light ? { light: true as const } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, hashes, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
+    const turn: TurnState = {
+      ...(Object.keys(retries).length ? { retries } : {}),
+      dir,
+      unit,
+      offset: 0,
+      startedAt: Date.now(),
+      configDir,
+      chosenEffort: !!ticket.effort || codex || light,
+      ...(light ? { light: true as const } : {}),
+      ...(codex ? { codex: true as const } : {}),
+      ...(handBack.length ? { handBack: true as const } : {}),
+      ...(step ? { fresh: step } : {}),
+      ...(handoff ? { handoff: true as const } : {}),
+      person,
+      asker,
+      typedBy,
+      hashes,
+      ...(secretPerson ? { secretPerson } : {}),
+      ...(github ? { github: github.login } : {}),
+      ...(place.host ? {} : { container: place.container }),
+      ...(codex ? {} : { account: claudePlace.account ?? 1 }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}),
-      ...(keepalive ? { keepalive: true as const } : {}), ...(fp ? { fp, fpParts: fpParts! } : {}),
-      ...(!keepalive && this.turnFrom.has(ticket.id) ? { from: this.turnFrom.get(ticket.id) } : {}), ...(!keepalive && this.parkedAs.has(ticket.id) ? { parkedAs: this.parkedAs.get(ticket.id) } : {}) };
+      ...(keepalive ? { keepalive: true as const } : {}),
+      ...(fp ? { fp, fpParts: fpParts! } : {}),
+      ...(!keepalive && this.turnFrom.has(ticket.id) ? { from: this.turnFrom.get(ticket.id) } : {}),
+      ...(!keepalive && this.parkedAs.has(ticket.id) ? { parkedAs: this.parkedAs.get(ticket.id) } : {}),
+    };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     live.had = had;
@@ -3347,7 +3627,10 @@ export class Runner {
       this.queue.owe(ticket.id, null);
       // Saved with a running turn now, so recover() resumes it: the outbox's rows it carries are sent (#1385, ADR 0021 "Accepted means durable").
       try {
-        this.onTurnStart(ticket.id, batch.flatMap((m) => (m.id == null ? [] : [m.id])));
+        this.onTurnStart(
+          ticket.id,
+          batch.flatMap((m) => (m.id == null ? [] : [m.id])),
+        );
       } catch (err) {
         console.error(`onTurnStart for #${ticket.id} failed:`, err);
       }
@@ -3363,13 +3646,14 @@ export class Runner {
       return live.ended;
     }
     const { systemdRun, scope } = plan.spawn;
-    const inUnit = () => execFile('systemd-run', systemdRun, (err, _out, stderr) => {
-      if (!err) return fallbacks.started();
-      fallbacks.record(ticket.id, 'A turn', String(stderr).trim() || err.message);
-      live.unit = null;
-      this.saveTurn(ticket.id, { unit: null });
-      this.spawnWrapper(wrapper, dir);
-    });
+    const inUnit = () =>
+      execFile('systemd-run', systemdRun, (err, _out, stderr) => {
+        if (!err) return fallbacks.started();
+        fallbacks.record(ticket.id, 'A turn', String(stderr).trim() || err.message);
+        live.unit = null;
+        this.saveTurn(ticket.id, { unit: null });
+        this.spawnWrapper(wrapper, dir);
+      });
     // The scope keeps the unit's name, so stopping it by name (signal) reaches it either way.
     if (this.supervisor) {
       live.restart = inUnit;
@@ -3390,11 +3674,25 @@ export class Runner {
    * question's fork (#932, src/side-ask.ts) builds its own here too, so its tools and prompt, the cached prefix,
    * are its minion's turn's. Throws, removing the folder, when the launch can't be built.
    */
-  buildLaunch(project: Project, ticket: Ticket, f: {
-    place: TurnPlace; person: number | null; asker: number | null; machines: ReturnType<Runner['machines']>; model: string | null; effort: string | null;
-    typedBy: number | null; secrets: Map<string, string>; name: string; folders: { files: string | null; shared: string | null; memory: string | null };
-    codex: { thread: string | null } | null; github?: number | null; side?: boolean;
-  }) {
+  buildLaunch(
+    project: Project,
+    ticket: Ticket,
+    f: {
+      place: TurnPlace;
+      person: number | null;
+      asker: number | null;
+      machines: ReturnType<Runner['machines']>;
+      model: string | null;
+      effort: string | null;
+      typedBy: number | null;
+      secrets: Map<string, string>;
+      name: string;
+      folders: { files: string | null; shared: string | null; memory: string | null };
+      codex: { thread: string | null } | null;
+      github?: number | null;
+      side?: boolean;
+    },
+  ) {
     const { place, person, asker, machines, model, effort, codex } = f;
     const { files: filesDir, shared: sharedDir, memory: memoryDir } = f.folders;
     // The turn's folder, with its own copy of the pinned files: a restart sweeps the server's copy, and
@@ -3414,20 +3712,50 @@ export class Runner {
       // A file, not an argument: in claude's argv, a turn's own `pkill -f <word from the prompt>` would match claude itself.
       // Builds (specs/build-branches.md): only once the scheme's land.sh can merge into one.
       const builds = landsBuilds(project.repo_dir);
-      const build = builds && ticket.kind !== 'coordinator' && ticket.build
-        ? {
-          build: ticket.build, branch: buildBranch(project.repo_dir, ticket.build), owner: this.store.getSetting<number>(buildOwnerKey(project.id, ticket.build)) === ticket.id,
-          // Only this server's own scheme has build previews (src/previews.ts).
-          preview: deploys ? `${this.store.getSetting<string>('public_origin') ?? ''}/${buildPreviewPath(ticket.build)}` : null,
-        }
-        : null;
+      const build =
+        builds && ticket.kind !== 'coordinator' && ticket.build
+          ? {
+              build: ticket.build,
+              branch: buildBranch(project.repo_dir, ticket.build),
+              owner: this.store.getSetting<number>(buildOwnerKey(project.id, ticket.build)) === ticket.id,
+              // Only this server's own scheme has build previews (src/previews.ts).
+              preview: deploys ? `${this.store.getSetting<string>('public_origin') ?? ''}/${buildPreviewPath(ticket.build)}` : null,
+            }
+          : null;
       // What the Citadel scheme's Taskmaster may read in every scheme this turn (#656): its prompt and its launch say the same.
       const everyScheme = this.everySchemeFor(project, ticket, asker);
-      const everySchemeView = everyScheme && { data: everyScheme.data, schemes: this.store.listProjects().filter((p) => p.id !== project.id).map((p) => ({ id: p.id, name: p.name })), apps: this.store.listContraptions().map((c) => ({ name: c.name, folder: appFolder(c, homedir()) })) };
+      const everySchemeView = everyScheme && {
+        data: everyScheme.data,
+        schemes: this.store
+          .listProjects()
+          .filter((p) => p.id !== project.id)
+          .map((p) => ({ id: p.id, name: p.name })),
+        apps: this.store.listContraptions().map((c) => ({ name: c.name, folder: appFolder(c, homedir()) })),
+      };
       // Two halves (#878): system-prompt.md, the same for every minion of the scheme, and the per-minion and volatile lines that open the turn message.
       // Machines a minion may queue jobs on (#857): lent to this scheme with a jobs block; the owner's go card is the gate.
       const jobMachines = ticket.kind === 'coordinator' ? [] : jobMachinesFor(this.store, project.id);
-      const parts = promptParts(project, ticket.kind === 'ticket' ? { ...ticket, type: this.store.props.forTarget('minion', ticket.id).type } : ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null, jobMachines, ticket.kind === 'coordinator' && fableMeter(this.store).over);
+      const parts = promptParts(
+        project,
+        ticket.kind === 'ticket' ? { ...ticket, type: this.store.props.forTarget('minion', ticket.id).type } : ticket,
+        filesDir,
+        sharedDir,
+        this.ticketsDir(project),
+        memoryDir,
+        machines,
+        deploys,
+        this.store.appInstructions().text,
+        this.heldFor(ticket.id),
+        ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [],
+        build,
+        builds,
+        everySchemeView,
+        this.store.personalLayer(ticket),
+        this.openPr(ticket.id),
+        ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null,
+        jobMachines,
+        ticket.kind === 'coordinator' && fableMeter(this.store).over,
+      );
       // A warm session keeps the prompt it last ran with (#1276): a changed byte would re-write its whole cached conversation.
       // Codex has no such cache to keep.
       const current = parts.system;
@@ -3467,7 +3795,7 @@ export class Runner {
       this.writeRefs(refsFile, ticket, undefined, true);
       // A host turn has no Codex hook, so the server login's Codex reviews run in its Codex container (#398): woken
       // (by the caller) if it stopped (a reboot) without replacing one a review may be running in.
-      const codexAt = place.host && person !== null ? this.codexPlaceFor?.(person) ?? null : null;
+      const codexAt = place.host && person !== null ? (this.codexPlaceFor?.(person) ?? null) : null;
       const reviewAt = codexAt && !codexAt.host ? codexAt : null;
       // CITADEL_, not COORDINATOR_: a warm turn's flag must not move the keepalive fingerprint (src/keepalive.ts).
       const coordinator = { ...this.coordinatorEnv(ticket), ...(hold?.warm ? { CITADEL_TOOL_HOLD: '1' } : {}) };
@@ -3475,17 +3803,43 @@ export class Runner {
       // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
       const github = this.githubFor?.(f.github === undefined ? person : f.github, dir) ?? null;
       const typer = f.typedBy ? this.store.getUser(f.typedBy) : undefined;
-      const homeOf = this.store.listContraptions().filter((c) => c.home_scheme === project.id).map((c) => c.name);
+      const homeOf = this.store
+        .listContraptions()
+        .filter((c) => c.home_scheme === project.id)
+        .map((c) => c.name);
       // A side question's fork runs as the server's child: it is short, and a restart loses it anyway.
       const unit = this.units && place.host && !f.side ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
       // A host turn with no unit of its own (a side question) keeps its own helpers: a pool it started would live in the
       // server's cgroup and die on the next deploy restart, with every host turn's calls.
       // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
       const plan = launchPlan({
-        project, ticket, dir, pins, place, machines, model, effort, deploys, unit, pool: this.pool && !codex && !(place.host && !unit && this.units),
-        folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
+        project,
+        ticket,
+        dir,
+        pins,
+        place,
+        machines,
+        model,
+        effort,
+        deploys,
+        unit,
+        pool: this.pool && !codex && !(place.host && !unit && this.units),
+        folders: {
+          files: filesDir,
+          shared: sharedDir,
+          memory: memoryDir,
+          tmp,
+          tickets: this.ticketsDir(project),
+          data: dirname(this.store.path),
           // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
-          openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
+          openTickets:
+            ticket.kind === 'coordinator'
+              ? this.store
+                  .listTickets(project.id)
+                  .filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd)
+                  .map((t) => t.cwd!)
+              : undefined,
+        },
         codex,
         codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
         env: { server: process.env, coordinator, heavy, github: github?.env ?? null, secrets: secretEnv(f.secrets) },
@@ -3530,8 +3884,19 @@ export class Runner {
     const turnAsker = this.store.turnAsker(ticket.id) ?? person;
     const machines = this.machines(project, turnAsker !== null ? [turnAsker] : []);
     const { plan, dir } = this.buildLaunch(project, ticket, {
-      place, person, asker: turnAsker, machines, model, effort, typedBy: null, secrets: new Map(), name: `side-${ticket.id}-${Date.now()}`,
-      folders: { files: this.filesDir(ticket), shared: this.sharedDir(project), memory: null }, codex: null, github: asker, side: true,
+      place,
+      person,
+      asker: turnAsker,
+      machines,
+      model,
+      effort,
+      typedBy: null,
+      secrets: new Map(),
+      name: `side-${ticket.id}-${Date.now()}`,
+      folders: { files: this.filesDir(ticket), shared: this.sharedDir(project), memory: null },
+      codex: null,
+      github: asker,
+      side: true,
     });
     try {
       for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
@@ -3567,17 +3932,28 @@ export class Runner {
     // Starting the container (building its image, the first time) can take minutes; it counts as running meanwhile.
     const starting = setInterval(beat, 5_000);
     // Both return as soon as the wrapper is started. One that hangs (a stuck podman lock) would keep the turn "running" for good.
-    const run = ([cmd, ...args]: string[]) => new Promise<void>((resolve, reject) => {
-      execFile(cmd, args, { timeout: this.containerStartMs }, (err, _out, stderr) => (err ? reject(new Error(err.killed ? `${cmd} did not return within ${this.containerStartMs / 1000} s` : String(stderr).trim() || err.message)) : resolve()));
-    });
+    const run = ([cmd, ...args]: string[]) =>
+      new Promise<void>((resolve, reject) => {
+        execFile(cmd, args, { timeout: this.containerStartMs }, (err, _out, stderr) => (err ? reject(new Error(err.killed ? `${cmd} did not return within ${this.containerStartMs / 1000} s` : String(stderr).trim() || err.message)) : resolve()));
+      });
     // Stopped while it started (stop() wrote exit.json), and maybe finished since: nothing more to start or to say.
     const over = () => !existsSync(dir) || existsSync(join(dir, 'exit.json'));
     const exec = ['podman', 'exec', '-d', place.container, ...wrapper];
     const scoped = ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${TURN_SLICE}`, ...exec];
-    place.ensure()
+    place
+      .ensure()
       // As with host turns, a failed systemd-run still runs the turn, though a restart then SIGKILLs its conmon.
       // Only an exec that then starts counts as a fallback: one that fails both ways was podman's trouble.
-      .then(() => (over() ? undefined : this.units ? run(scoped).then(() => fallbacks.started('scope'), (err) => run(exec).then(() => fallbacks.record(ticketId, `A turn in ${place.container}`, err.message, Date.now(), 'scope'))) : run(exec)))
+      .then(() =>
+        over()
+          ? undefined
+          : this.units
+            ? run(scoped).then(
+                () => fallbacks.started('scope'),
+                (err) => run(exec).then(() => fallbacks.record(ticketId, `A turn in ${place.container}`, err.message, Date.now(), 'scope')),
+              )
+            : run(exec),
+      )
       .catch((err) => !over() && writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${place.container}: ${err.message}` })))
       .finally(() => clearInterval(starting));
   }
@@ -3594,9 +3970,18 @@ export class Runner {
     let end!: () => void;
     const ended = new Promise<void>((resolve) => (end = resolve));
     const live: LiveTurn = {
-      dir: turn.dir!, unit: turn.unit ?? null, offset: turn.offset ?? 0, startedAt: turn.startedAt ?? Date.now(),
-      configDir: turn.configDir ?? claudeConfigDir(process.env), chosenEffort: !!turn.chosenEffort, container: turn.container ?? null, ticks: 0,
-      timer: setInterval(() => this.poll(ticketId), this.pollMs), ended, end, had: null,
+      dir: turn.dir!,
+      unit: turn.unit ?? null,
+      offset: turn.offset ?? 0,
+      startedAt: turn.startedAt ?? Date.now(),
+      configDir: turn.configDir ?? claudeConfigDir(process.env),
+      chosenEffort: !!turn.chosenEffort,
+      container: turn.container ?? null,
+      ticks: 0,
+      timer: setInterval(() => this.poll(ticketId), this.pollMs),
+      ended,
+      end,
+      had: null,
       // After a restart the clock starts again: what ran before isn't known.
       activity: { at: Date.now(), tools: [] },
     };
@@ -3613,7 +3998,7 @@ export class Runner {
       // Checked before reading: once exit.json is there, everything claude wrote is in the stream. Only after the folder
       // changed (dirChanged), so a quiet tick makes no file-name lookup at all (#1562).
       // Once seen, it is looked for every tick until handled: a tick that failed on it can't leave the turn running.
-      const exited = live.exitSeen = (live.exitSeen || this.dirChanged(live)) && existsSync(join(live.dir, 'exit.json'));
+      const exited = (live.exitSeen = (live.exitSeen || this.dirChanged(live)) && existsSync(join(live.dir, 'exit.json')));
       this.readStream(ticketId, live, exited);
       const exit = exited ? JSON.parse(readFileSync(join(live.dir, 'exit.json'), 'utf8')) : null;
       // Whether its claude has started (pid.json), looked up only while a stop or a rescue waits on it.
@@ -3650,7 +4035,8 @@ export class Runner {
     if (live.dirFd === undefined) {
       live.dirFd = null;
       open(live.dir, 'r', (err, fd) => {
-        if (err) live.dirFd = undefined; // tried again next tick
+        if (err)
+          live.dirFd = undefined; // tried again next tick
         else if (live.unfollowed) close(fd, () => {});
         else live.dirFd = fd;
       });
@@ -3792,7 +4178,8 @@ export class Runner {
     let out = outcome(end);
     // A row that outlives the chat's (#1325): kill waves (systemd-oomd's, most often) are counted from these.
     if (out.killed) {
-      const at = Date.now(), how = exit?.signal ?? (exit ? 'SIGTERM (exit 143)' : 'its unit or process group was killed, no exit noted');
+      const at = Date.now(),
+        how = exit?.signal ?? (exit ? 'SIGTERM (exit 143)' : 'its unit or process group was killed, no exit noted');
       const row = (oom: boolean) => this.store.addHealthEvent('turn-killed', at, null, `minion ${ticketId}${live.unit ? ` (${live.unit})` : ''}: ${oom ? 'out of memory, says the journal: ' : ''}${how}`);
       if (live.unit) void oomKilled(live.unit).then(row, () => row(false));
       else row(false);
@@ -3893,7 +4280,6 @@ export class Runner {
     // A message that came in meanwhile waits behind it in the queue, as behind any turn.
     this.saveAfterTurn(ticketId, live.configDir, live.had).then(live.end);
   }
-
 
   /** Copy a minion's session into the database after its turn (or a restart cut that off); never rejects. Counted for settled() (#1437). */
   private saveAfterTurn(ticketId: number, configDir: string, had: Set<string> | null) {
@@ -4018,7 +4404,7 @@ export class Runner {
   private limitResetAt(reason: string, usage: Usage | null | undefined, codexReset?: number | null): number {
     // A Codex turn's limit (codexReset is set, maybe null) is Codex's own windows, never Claude's.
     const hit = codexReset !== undefined ? (codexReset ? [codexReset] : []) : [usage?.session, usage?.weekly].filter((w) => w?.status === 'rejected' && w.resetsAt && w.resetsAt > Date.now()).map((w) => w!.resetsAt!);
-    return hit.length ? Math.max(...hit) : parseResetTime(reason) ?? Date.now() + this.limitFallbackMs;
+    return hit.length ? Math.max(...hit) : (parseResetTime(reason) ?? Date.now() + this.limitFallbackMs);
   }
 
   /**
@@ -4106,7 +4492,7 @@ export class Runner {
     if (ev.type === 'result' && ev.modelUsage && typeof ev.modelUsage === 'object') {
       // Grunts' models are in modelUsage too: the window is the main model's.
       const main = this.mainModels.get(ticketId);
-      const mu: ModelUsage | null = main ? ev.modelUsage[main] ?? ev.modelUsage[main.replace(/\[1m\]$/i, '')] : null;
+      const mu: ModelUsage | null = main ? (ev.modelUsage[main] ?? ev.modelUsage[main.replace(/\[1m\]$/i, '')]) : null;
       if (mu && Number(mu.contextWindow) > 0) this.store.setSetting(windowKey(ticketId), Number(mu.contextWindow));
     }
     if (ev.type === 'result') this.contextShown.delete(ticketId);
@@ -4181,10 +4567,16 @@ export class Runner {
     if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
       const state = this.store.getSetting<TurnState>(turnKey(ticketId));
       const turn = this.store.recordTurn(ticketId, {
-        event_id: row.id, session_id: typeof ev.session_id === 'string' ? ev.session_id : null, ended_at: row.created_at,
-        session_cost_usd: ev.total_cost_usd, duration_ms: ev.duration_ms, usage: ev.usage,
-        payer: this.payerOf(state?.person), hashes: state?.hashes ?? null,
-        account: state?.account ?? null, modelUsage: ev.modelUsage,
+        event_id: row.id,
+        session_id: typeof ev.session_id === 'string' ? ev.session_id : null,
+        ended_at: row.created_at,
+        session_cost_usd: ev.total_cost_usd,
+        duration_ms: ev.duration_ms,
+        usage: ev.usage,
+        payer: this.payerOf(state?.person),
+        hashes: state?.hashes ?? null,
+        account: state?.account ?? null,
+        modelUsage: ev.modelUsage,
       });
       this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
       this.recordGrunts(ticketId, turn.id, state, ev.session_id);
@@ -4223,7 +4615,7 @@ export class Runner {
       const ticket = this.store.getTicket(ticketId);
       // Earlier turns' cost and the budget once a turn: this runs on every assistant message.
       const budget = ticket?.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
-      this.spends.set(ticketId, spend = { startedAt: turn.startedAt, meter: new SpendMeter(turn.spend), prior: budget ? this.store.ticketCost(ticketId) : 0, budget });
+      this.spends.set(ticketId, (spend = { startedAt: turn.startedAt, meter: new SpendMeter(turn.spend), prior: budget ? this.store.ticketCost(ticketId) : 0, budget }));
     }
     const { meter } = spend;
     if (!meter.add(ev)) return;
@@ -4252,7 +4644,10 @@ export class Runner {
     const now = this.now();
     const level = wakeLevel(budget, spent);
     this.store.setSetting(budgetKey(ticketId), {
-      ...state, ...(marks.includes('ask') ? { asked: now } : {}), ...(marks.includes('wake') ? { woke: state.woke ?? now, wakes: level } : {}), ...(marks.includes('card') ? { carded: now } : {}),
+      ...state,
+      ...(marks.includes('ask') ? { asked: now } : {}),
+      ...(marks.includes('wake') ? { woke: state.woke ?? now, wakes: level } : {}),
+      ...(marks.includes('card') ? { carded: now } : {}),
     });
     console.log(`[budget] minion ${ticketId}: passed ${marks.join(' and ')} at about $${spent.toFixed(2)} (usual $${budget.usd.toFixed(2)})`);
     if (marks.includes('ask')) {
@@ -4267,10 +4662,13 @@ export class Runner {
   /** The minion's own "Costing more:" line since the ask (#1672), from its main thread's replies; null when it never said. */
   private costReason(ticketId: number): string | null {
     const ask = this.store.eventsOfKinds(ticketId, ['note']).findLast((e) => JSON.parse(e.data).text?.startsWith('Budget:'));
-    const texts = this.store.eventsOfKinds(ticketId, ['claude'], ask?.id ?? 0).filter((e) => e.data.includes(REASON)).flatMap((e) => {
-      const d: ClaudeEvent = JSON.parse(e.data);
-      return d.type === 'assistant' && !d.parent_tool_use_id && Array.isArray(d.message?.content) ? d.message.content.filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c.text!) : [];
-    });
+    const texts = this.store
+      .eventsOfKinds(ticketId, ['claude'], ask?.id ?? 0)
+      .filter((e) => e.data.includes(REASON))
+      .flatMap((e) => {
+        const d: ClaudeEvent = JSON.parse(e.data);
+        return d.type === 'assistant' && !d.parent_tool_use_id && Array.isArray(d.message?.content) ? d.message.content.filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c.text!) : [];
+      });
     return costReason(texts);
   }
 
@@ -4348,8 +4746,7 @@ export class Runner {
   private replaceSentBack(ticketId: number, resultId: number) {
     // A Grunt's words aren't the reply.
     const words = (data: ClaudeEvent) => data.type === 'assistant' && !data.parent_tool_use_id && ((data.message?.content ?? []) as ContentBlock[]).some((b) => b?.type === 'text' && b.text?.trim());
-    const sentBack = (data: ClaudeEvent) => data.type === 'user' && Array.isArray(data.message?.content)
-      && data.message.content.some((b) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(SENT_BACK));
+    const sentBack = (data: ClaudeEvent) => data.type === 'user' && Array.isArray(data.message?.content) && data.message.content.some((b) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(SENT_BACK));
     const swaps: { original: EventRow; rewrite?: EventRow }[] = [];
     let last: EventRow | null = null;
     for (const e of this.store.eventsPage(ticketId, resultId, 1).events) {
@@ -4363,11 +4760,21 @@ export class Runner {
         if (open && open.original !== e) open.rewrite = e;
       }
     }
-    const text = (data: ClaudeEvent) => (data.message!.content as ContentBlock[]).filter((b) => b?.type === 'text').map((b) => b.text).join('').trim();
+    const text = (data: ClaudeEvent) =>
+      (data.message!.content as ContentBlock[])
+        .filter((b) => b?.type === 'text')
+        .map((b) => b.text)
+        .join('')
+        .trim();
     for (const { original, rewrite } of swaps) {
       if (!rewrite) continue;
       // A bare KEEP stands by the first version (#404): the KEEP is what gives way.
-      const [gone, by] = text(JSON.parse(rewrite.data)).replace(/[*_.!]/g, '').toUpperCase() === KEEP ? [rewrite, original] : [original, rewrite];
+      const [gone, by] =
+        text(JSON.parse(rewrite.data))
+          .replace(/[*_.!]/g, '')
+          .toUpperCase() === KEEP
+          ? [rewrite, original]
+          : [original, rewrite];
       const data: ClaudeEvent & { replaced?: number } = JSON.parse(gone.data);
       if (data.replaced) continue;
       this.store.setEventData(gone.id, { ...data, replaced: by.id });
@@ -4392,7 +4799,9 @@ export class Runner {
         else if (b.name === 'Skill' && typeof b.input?.skill === 'string') this.store.usage.used('skill', b.input.skill);
         else if ((b.name === 'Agent' || b.name === 'Task') && typeof b.input?.subagent_type === 'string') this.store.usage.used('grunt', b.input.subagent_type);
       }
-    } catch { /* counting never fails a turn */ }
+    } catch {
+      /* counting never fails a turn */
+    }
   }
 
   /** Bash calls that push or open a pull request, by tool_use id, until their result comes back. */
@@ -4412,7 +4821,7 @@ export class Runner {
       const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
       // Absent: GitHub linking isn't set up, and the box's own login pushes as before.
       if (turn?.github === undefined) continue;
-      const who = turn.person ? this.store.getUser(turn.person)?.name ?? 'Its person' : 'Nobody';
+      const who = turn.person ? (this.store.getUser(turn.person)?.name ?? 'Its person') : 'Nobody';
       if (turn.github && !b.is_error) this.emit(ticketId, 'note', { text: kind === 'pr' ? `Opened a pull request as @${turn.github} (${who}'s GitHub)` : `Pushed as @${turn.github} (${who}'s GitHub)` });
       else if (!turn.github && b.is_error) this.emit(ticketId, 'note', { text: `Couldn't ${kind === 'pr' ? 'open a pull request' : 'push'}: this turn runs for ${who}, who hasn't linked GitHub. Link it in Settings → Your account.` });
     }
@@ -4439,16 +4848,13 @@ export class Runner {
    */
   private checkLoadErrors(ticketId: number, ev: ClaudeEvent) {
     const line = (e: LoadError, kind: string) => {
-      const name = typeof e === 'object' ? e?.plugin ?? e?.name ?? e?.server : null;
-      const why = typeof e === 'string' ? e : e?.error ?? e?.message ?? JSON.stringify(e);
+      const name = typeof e === 'object' ? (e?.plugin ?? e?.name ?? e?.server) : null;
+      const why = typeof e === 'string' ? e : (e?.error ?? e?.message ?? JSON.stringify(e));
       return `${name ? `${name} ` : ''}${kind}: ${why}`;
     };
     const role = this.store.getTicket(ticketId)?.kind === 'coordinator' ? 'coordinator' : 'thread';
     // The turn's own server already got checkMcp's error.
-    const lines = [
-      ...(Array.isArray(ev.plugin_errors) ? ev.plugin_errors.map((e) => line(e, 'plugin')) : []),
-      ...(Array.isArray(ev.mcp_server_errors) ? ev.mcp_server_errors.filter((e) => (typeof e === 'string' ? undefined : e?.name) !== role).map((e) => line(e, 'MCP server')) : []),
-    ];
+    const lines = [...(Array.isArray(ev.plugin_errors) ? ev.plugin_errors.map((e) => line(e, 'plugin')) : []), ...(Array.isArray(ev.mcp_server_errors) ? ev.mcp_server_errors.filter((e) => (typeof e === 'string' ? undefined : e?.name) !== role).map((e) => line(e, 'MCP server')) : [])];
     if (!lines.length) return;
     const text = `This turn started with load errors, so some of its skills, hooks or tools are missing: ${lines.join('; ')}`.slice(0, 1500);
     console.error(`Ticket ${ticketId}: ${text}`);
@@ -4504,7 +4910,7 @@ export class Runner {
     try {
       // The effort it ran at: a low-effort turn's steps (#951) are low, whatever the minion's own.
       const light = this.store.getSetting<TurnState>(turnKey(ticketId))?.light;
-      this.store.addStepTimes(ticketId, p.finished, light ? 'low' : t?.last_effort ?? t?.effort ?? null);
+      this.store.addStepTimes(ticketId, p.finished, light ? 'low' : (t?.last_effort ?? t?.effort ?? null));
       p.finished.length = 0;
     } catch (err) {
       // Kept for the next event's try: the backfill has run, so nothing else would record them.
@@ -4574,8 +4980,7 @@ export class Runner {
     const usage = this.store.getSetting<Usage>(accountUsageKey(payer, acc?.inUse ?? 1));
     if (!acc || acc.accounts.length < 2) return usage;
     // `account` is where a new or cold turn goes now, and `why` (#793): its week resets soonest, it's pinned, or every account is near full.
-    return { ...(usage ?? { weekly: null, session: null, updatedAt: 0 }), account: acc.inUse ?? 1, ...(acc.why ? { why: acc.why } : {}), ...(acc.pinned ? { pinned: acc.pinned } : {}),
-      accounts: acc.accounts.map((a) => ({ ...a, usage: this.store.getSetting<Usage>(accountUsageKey(payer, a.n)) })) };
+    return { ...(usage ?? { weekly: null, session: null, updatedAt: 0 }), account: acc.inUse ?? 1, ...(acc.why ? { why: acc.why } : {}), ...(acc.pinned ? { pinned: acc.pinned } : {}), accounts: acc.accounts.map((a) => ({ ...a, usage: this.store.getSetting<Usage>(accountUsageKey(payer, a.n)) })) };
   }
 
   /**
@@ -4667,7 +5072,7 @@ export class Runner {
       this.limitCleared(payer);
     }
     // Only the payer's own meter shows it (server.ts, broadcast): the account in use's, whichever account this turn ran on.
-    this.broadcast({ type: 'usage', usage: person ? this.usageOf(person) ?? usage : usage, payer });
+    this.broadcast({ type: 'usage', usage: person ? (this.usageOf(person) ?? usage) : usage, payer });
   }
 
   private setStatus(ticketId: number, status: Ticket['status']) {
@@ -4688,7 +5093,10 @@ export class Runner {
     // everyone only when its emitter says so (`everyone: true`, and only on the Overlord): most are one person's.
     const lord = (EVERYONES.has(kind) || (data as { everyone?: unknown } | null)?.everyone === true) && this.isOverlord(this.store.getTicket(ticketId));
     // The flag goes last, whatever order the caller wrote it in: the db's `data LIKE '{"text":…'` queries match a prefix.
-    if (data && typeof data === 'object' && 'everyone' in data) { const { everyone: _, ...rest } = data as Record<string, unknown>; data = rest; }
+    if (data && typeof data === 'object' && 'everyone' in data) {
+      const { everyone: _, ...rest } = data as Record<string, unknown>;
+      data = rest;
+    }
     if (lord) data = { ...(data as object), everyone: true };
     const row = this.store.addEvent(ticketId, kind, data, reserved);
     this.broadcast({ type: 'event', event: row });
@@ -4701,7 +5109,12 @@ export class Runner {
     if (ticket.status === 'closed') return [];
     const minion = ticket.kind === 'coordinator' ? null : ticket.number;
     const link = (kind: CardLink['kind'], data: unknown, eventId: number): CardLink => ({
-      minion, kind, what: cardWhat(kind, data), label: cardLabel(kind, data), href: cardHref(ticket, eventId), ...((data as { to?: string })?.to ? { to: (data as { to: string }).to } : {}),
+      minion,
+      kind,
+      what: cardWhat(kind, data),
+      label: cardLabel(kind, data),
+      href: cardHref(ticket, eventId),
+      ...((data as { to?: string })?.to ? { to: (data as { to: string }).to } : {}),
       ...((data as { doc?: { path: string } })?.doc ? { doc: (data as { doc: { path: string } }).doc.path } : {}),
       // Only question and plan cards are held under the turn's words (public/thread.js heldCards).
       ...(placed ? { below: kind !== 'approval' && this.store.heldBelow(ticket.id, eventId) } : {}),
@@ -4763,7 +5176,7 @@ export class Runner {
   private writeRefs(file: string, ticket: Ticket, shared = this.refsShared(ticket.project_id), now = false) {
     const { project, projects, tickets, openOf, links, settled } = shared;
     // Only the turn's own cards say where each sits (`placed`).
-    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => t.id === ticket.id ? this.cardLinks(t, true, openOf.get(t.id)) : links.get(t.id)!) };
+    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => (t.id === ticket.id ? this.cardLinks(t, true, openOf.get(t.id)) : links.get(t.id)!)) };
     const refs = { ...schemeRefs(project, projects, tickets, cards), settled };
     const text = JSON.stringify(refs);
     if (now) {
@@ -4786,7 +5199,10 @@ export class Runner {
    */
   private putRefs(file: string, text: string) {
     const held = this.refsWrites.get(file);
-    if (held) { held.text = text; return; }
+    if (held) {
+      held.text = text;
+      return;
+    }
     const w = { text: text as string | null, done: Promise.resolve() };
     this.refsWrites.set(file, w);
     w.done = (async () => {
@@ -4861,7 +5277,7 @@ export class Runner {
         const file = join(turn.dir, 'scheme-refs.json');
         // A turn that ended took its folder with it (putRefs checks the same, off the thread).
         if (id === own && !existsSync(file)) continue;
-        this.writeRefs(file, t, shared ??= this.refsShared(projectId), id === own);
+        this.writeRefs(file, t, (shared ??= this.refsShared(projectId)), id === own);
       } catch {
         // A stale snapshot only means a card goes unchecked.
       }

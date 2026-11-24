@@ -15,13 +15,18 @@ import { Worker } from 'node:worker_threads';
 export interface AnswerWindow {
   v: 1;
   /** Probes answered, and probes that failed or timed out (a failure counts as the worst answer). */
-  n: number; fail: number;
-  p50: number; p95: number; p99: number; max: number;
+  n: number;
+  fail: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  max: number;
   /** The share of probes over 0.5 s, 0 to 1. */
   over: number;
   /** The main thread's time over the window: on CPU, waiting for a core, blocked (D state), idle. Null where /proc can't be read. */
   split: { cpu: number; wait: number; blocked: number; idle: number } | null;
-  load: number; turns: number;
+  load: number;
+  turns: number;
 }
 
 /** The target (Cara, 2026-11-21: "AS RESPONSIVE AS POSSIBLE"): at a load up to 100 and up to 50 running turns, 95% of probes within 100 ms, 99% within 500 ms, none over 2 s. */
@@ -38,7 +43,14 @@ export const SLOW_OVER_MS = 500;
 export const percentile = (sorted: number[], q: number): number => statsPercentile(sorted, q) ?? 0;
 
 /** One probe's reading from the worker: its time (null when it failed), and the main thread's counters since the last message. */
-export interface ProbeMessage { ms: number | null; run: number; wait: number; samples: number; blocked: number; wallMs: number }
+export interface ProbeMessage {
+  ms: number | null;
+  run: number;
+  wait: number;
+  samples: number;
+  blocked: number;
+  wallMs: number;
+}
 
 /** A window's numbers from its probes and the worker's counters; null with no probe at all. Pure, so a test feeds it. */
 export function summarize(messages: ProbeMessage[], load: number, turns: number): AnswerWindow | null {
@@ -59,8 +71,17 @@ export function summarize(messages: ProbeMessage[], load: number, turns: number)
     split = { cpu: Math.round(cpu), wait: Math.round(wait), blocked: Math.round(blocked), idle: Math.max(0, Math.round(wall - cpu - wait - blocked)) };
   }
   return {
-    v: 1, n: answered.length, fail, p50: r1(percentile(all, 0.5)), p95: r1(percentile(all, 0.95)), p99: r1(percentile(all, 0.99)), max: r1(all.at(-1)!),
-    over: Math.round((all.filter((t) => t > SLOW_OVER_MS).length / all.length) * 1000) / 1000, split, load: Math.round(load * 10) / 10, turns,
+    v: 1,
+    n: answered.length,
+    fail,
+    p50: r1(percentile(all, 0.5)),
+    p95: r1(percentile(all, 0.95)),
+    p99: r1(percentile(all, 0.99)),
+    max: r1(all.at(-1)!),
+    over: Math.round((all.filter((t) => t > SLOW_OVER_MS).length / all.length) * 1000) / 1000,
+    split,
+    load: Math.round(load * 10) / 10,
+    turns,
   };
 }
 
@@ -70,7 +91,9 @@ export function parseWindow(text: string | null | undefined): AnswerWindow | nul
   try {
     const w = JSON.parse(text);
     return w && w.v === 1 && Number.isFinite(w.p95) ? (w as AnswerWindow) : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 export function outside(w: AnswerWindow, line: { p95: number; p99: number }): boolean {
@@ -168,7 +191,9 @@ export class AnswerProbe {
   /** The same for a reader's answer (#1628); null with no reader probe, before the first, after a failed one, or while no reader answers. */
   readerMs: number | null = null;
   private opts: { everyMs?: number; lookMs?: number };
-  constructor(opts: { everyMs?: number; lookMs?: number } = {}) { this.opts = opts; }
+  constructor(opts: { everyMs?: number; lookMs?: number } = {}) {
+    this.opts = opts;
+  }
 
   /** `port` is the one the server is bound to (the socket systemd hands over included); `readerPath` a reader route's, behind the front thread. */
   start(port: number, host = '127.0.0.1', readerPath?: string) {
@@ -193,5 +218,8 @@ export class AnswerProbe {
     return summarize(m, load, turns);
   }
 
-  stop() { void this.worker?.terminate(); this.worker = null; }
+  stop() {
+    void this.worker?.terminate();
+    this.worker = null;
+  }
 }

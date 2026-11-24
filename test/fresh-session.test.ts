@@ -59,7 +59,12 @@ const waitForRelease = () => { const wait = setInterval(() => {
 chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 
 let n = 0;
 /** A Taskmaster (or a minion) with a session whose transcript is on this login, so its turns resume it. */
@@ -92,12 +97,19 @@ async function endTurn(id: number, outcome: 'ok' | 'error' | `ok:${string}`) {
 
 /** The last turn's argv and prompt, once the fake has logged it. */
 async function lastCall(count: number) {
-  const all = await until('the fake to log its call', () => { const a = jsonLines(calls); return a.length > count && a; });
+  const all = await until('the fake to log its call', () => {
+    const a = jsonLines(calls);
+    return a.length > count && a;
+  });
   return all[all.length - 1] as { args: string[]; prompt: any };
 }
 const callCount = () => lines(calls).length;
 const promptText = (p: any) => (typeof p === 'string' ? p : p.map((b: any) => b.text).join('\n'));
-const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string);
+const notes = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text as string);
 const waitIdle = async (id: number) => {
   await until('the turn to go idle', () => !runner.isRunning(id) && store.getTicket(id)!.status !== 'running');
 };
@@ -134,7 +146,10 @@ test('the handoff turn resumes the old session; the next turn starts a new one f
   count = callCount();
   await endTurn(id, 'ok');
   // The reset: the session goes, the chat gets its marker, and the queued message starts the new session.
-  const fresh = store.listEvents(id).filter((e) => e.kind === 'fresh').map((e) => JSON.parse(e.data));
+  const fresh = store
+    .listEvents(id)
+    .filter((e) => e.kind === 'fresh')
+    .map((e) => JSON.parse(e.data));
   assert.deepEqual(fresh, [{ summary: 'Open: #12 waits on a pick from Cara.', why: 'Cara asked for it' }]);
   await started(id);
   const first = await lastCall(count);
@@ -155,7 +170,7 @@ test('the handoff turn resumes the old session; the next turn starts a new one f
   await endTurn(id, 'ok');
 });
 
-test('a message queued when a manual fresh start\'s handoff turn starts is in that turn\'s record, so a restart keeps it (#468 S03-3)', async () => {
+test("a message queued when a manual fresh start's handoff turn starts is in that turn's record, so a restart keeps it (#468 S03-3)", async () => {
   const id = taskmaster();
   const before = callCount();
   runner.send(id, 'Cara', 'first');
@@ -170,7 +185,10 @@ test('a message queued when a manual fresh start\'s handoff turn starts is in th
   assert.match(promptText(handoff.prompt), /Call fresh_session/);
   assert.doesNotMatch(promptText(handoff.prompt), /m1 queued/);
   // What reattach and recover read back after a restart.
-  assert.deepEqual(store.getSetting<any>(`minion-queue:${id}`)?.msgs?.map((m: any) => m.text), ['m1 queued']);
+  assert.deepEqual(
+    store.getSetting<any>(`minion-queue:${id}`)?.msgs?.map((m: any) => m.text),
+    ['m1 queued'],
+  );
   assert.equal(store.getSetting<any>(`minion-queue:${id}`)?.taken, undefined, 'the handoff turn took nothing from the queue');
   assert.equal(runner.queued(id), 1);
   assert.equal(runner.recordHandoff(id, 'Nothing open.'), null);
@@ -193,7 +211,10 @@ test("a minion's /fresh (#937): its handoff turn's reply, status line left out, 
   count = callCount();
   await endTurn(id, 'ok:Branch ticket/9 has the fix committed; Cara picked tabs.\n\n<!-- status: {"state":null} -->');
   await waitIdle(id);
-  const fresh = store.listEvents(id).filter((e) => e.kind === 'fresh').map((e) => JSON.parse(e.data));
+  const fresh = store
+    .listEvents(id)
+    .filter((e) => e.kind === 'fresh')
+    .map((e) => JSON.parse(e.data));
   assert.deepEqual(fresh, [{ summary: 'Branch ticket/9 has the fix committed; Cara picked tabs.', why: 'Cara asked for it' }]);
   assert.equal(store.getTicket(id)!.session_id, null);
   assert.ok(notes(id).some((t) => /the minion writes its handoff first/.test(t)));
@@ -213,13 +234,23 @@ test('a Taskmaster that hands off on its own resets when its turn ends', async (
   await endTurn(id, 'ok');
   await waitIdle(id);
   assert.equal(store.getTicket(id)!.session_id, null);
-  assert.deepEqual(store.listEvents(id).filter((e) => e.kind === 'fresh').map((e) => JSON.parse(e.data).why), ['the Taskmaster asked for it']);
+  assert.deepEqual(
+    store
+      .listEvents(id)
+      .filter((e) => e.kind === 'fresh')
+      .map((e) => JSON.parse(e.data).why),
+    ['the Taskmaster asked for it'],
+  );
 });
 
-test("a failed handoff starts the new session from a facts sheet the server builds, and its cards and parks match the database (G6)", async () => {
+test('a failed handoff starts the new session from a facts sheet the server builds, and its cards and parks match the database (G6)', async () => {
   const id = taskmaster();
   const pid = store.getTicket(id)!.project_id;
-  const mk = (title: string, patch: Record<string, unknown>) => { const m = store.createTicket({ project_id: pid, title, permission_mode: 'default', created_by: 'Cara' }); store.updateTicket(m.id, patch as any); return store.getTicket(m.id)!; };
+  const mk = (title: string, patch: Record<string, unknown>) => {
+    const m = store.createTicket({ project_id: pid, title, permission_mode: 'default', created_by: 'Cara' });
+    store.updateTicket(m.id, patch as any);
+    return store.getTicket(m.id)!;
+  };
   const parked = mk('Waits on a deploy', { status: 'idle', state: 'parked', note: 'parked for the fix' });
   const asking = mk('Needs a pick', { status: 'idle', state: 'ready', note: 'asked Cara' });
   store.addEvent(asking.id, 'question', { id: 'q1', questions: [{ question: 'Tabs or list?', header: 'Layout', options: [{ label: 'Tabs' }, { label: 'List' }] }] });
@@ -235,7 +266,10 @@ test("a failed handoff starts the new session from a facts sheet the server buil
   assert.equal(store.getTicket(id)!.session_id, null);
   assert.equal(callCount(), before, 'no /compact turn');
   assert.ok(notes(id).some((t) => /No handoff came back \(the turn failed\)/.test(t)));
-  const fresh = store.listEvents(id).filter((e) => e.kind === 'fresh').map((e) => JSON.parse(e.data));
+  const fresh = store
+    .listEvents(id)
+    .filter((e) => e.kind === 'fresh')
+    .map((e) => JSON.parse(e.data));
   assert.equal(fresh.length, 1);
   runner.send(id, 'Cara', 'what is open?');
   await started(id);
@@ -287,7 +321,11 @@ test('the idle sweep starts fresh only past the idle time and the context size',
   const due = taskmaster();
   const small = taskmaster();
   const recent = taskmaster();
-  for (const [id, size, ended] of [[due, FRESH_IDLE_CONTEXT_TOKENS + 1, now - FRESH_IDLE_MS], [small, FRESH_IDLE_CONTEXT_TOKENS, now - FRESH_IDLE_MS], [recent, FRESH_IDLE_CONTEXT_TOKENS + 1, now - FRESH_IDLE_MS + 60_000]]) {
+  for (const [id, size, ended] of [
+    [due, FRESH_IDLE_CONTEXT_TOKENS + 1, now - FRESH_IDLE_MS],
+    [small, FRESH_IDLE_CONTEXT_TOKENS, now - FRESH_IDLE_MS],
+    [recent, FRESH_IDLE_CONTEXT_TOKENS + 1, now - FRESH_IDLE_MS + 60_000],
+  ]) {
     store.setSetting(`context:${id}`, size);
     store.recordTurn(id, { event_id: null, session_id: 'old', ended_at: ended, session_cost_usd: 0, duration_ms: 1, usage: {} } as any);
   }
@@ -362,7 +400,9 @@ const freshNotes = (id: number) => notes(id).filter((t) => t.startsWith('Startin
 /** The prompts of the turns started since count, once there are want of them. */
 async function prompts(count: number, want: number) {
   await until('the fake to log its calls', () => callCount() >= count + want);
-  return jsonLines(calls).slice(count).map((l) => promptText(l.prompt));
+  return jsonLines(calls)
+    .slice(count)
+    .map((l) => promptText(l.prompt));
 }
 
 test('61k of context: an idle Taskmaster hands off, one whose turn just ended does not (Cara 2026-11-15)', async () => {
@@ -554,10 +594,19 @@ test('seam trial: minions whose turn ends past 150k are enrolled, fresh then con
       await waitIdle(id);
     }
     const trial = store.getSetting<SeamTrial>(SEAM_TRIAL_KEY)!;
-    assert.deepEqual(trial.fresh.map((e) => e.id), [a]);
-    assert.deepEqual(trial.control.map((e) => e.id), [b]);
+    assert.deepEqual(
+      trial.fresh.map((e) => e.id),
+      [a],
+    );
+    assert.deepEqual(
+      trial.control.map((e) => e.id),
+      [b],
+    );
     assert.equal(trial.fresh[0].context, SEAM_CONTEXT_TOKENS + 1);
-    for (const [id, told] of [[a, true], [b, false]] as const) {
+    for (const [id, told] of [
+      [a, true],
+      [b, false],
+    ] as const) {
       const count = callCount();
       runner.send(id, 'Josh', 'next');
       await started(id);
@@ -588,7 +637,13 @@ test('seam trial: a fresh-group minion that hands off starts its fresh session a
   const first = await lastCall(count);
   assert.ok(!first.args.includes('--resume'), 'a new session');
   assert.match(promptText(first.prompt), /fresh Claude session[\s\S]*Josh picked tabs on 2026-11-20\.[\s\S]*Facts sheet built by the server[\s\S]*- Josh, [^\n]*: Use tabs, not a list\.[\s\S]*Carry on from your handoff/);
-  assert.deepEqual(store.listEvents(id).filter((e) => e.kind === 'fresh').map((e) => JSON.parse(e.data).why), ['a seam the minion picked, in the fresh-session trial']);
+  assert.deepEqual(
+    store
+      .listEvents(id)
+      .filter((e) => e.kind === 'fresh')
+      .map((e) => JSON.parse(e.data).why),
+    ['a seam the minion picked, in the fresh-session trial'],
+  );
   await endTurn(id, 'ok');
   await waitIdle(id);
 });
@@ -602,7 +657,7 @@ test('seam trial: a handoff with carry_on false, or one whose minion waits on pe
     await started(id);
     await lastCall(before);
     const count = callCount();
-    assert.equal(runner.recordHandoff(id, 'Waiting on Josh\'s pick.', wait !== 'carry_on'), null);
+    assert.equal(runner.recordHandoff(id, "Waiting on Josh's pick.", wait !== 'carry_on'), null);
     if (wait === 'state') store.updateTicket(id, { state: 'ready' });
     await endTurn(id, 'ok');
     await waitIdle(id);

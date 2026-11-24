@@ -16,8 +16,12 @@ test('who strings become schemes', () => {
   assert.equal(schemeOfWho('Delve'), 'Delve');
 });
 
-test('an app\'s jobs count under its home scheme, and say which kind they were', () => {
-  const owners = new Map([['twireader', 'TWIReader'], ['twi reader', 'TWIReader'], ['peek-auras', 'Peek Auras']]);
+test("an app's jobs count under its home scheme, and say which kind they were", () => {
+  const owners = new Map([
+    ['twireader', 'TWIReader'],
+    ['twi reader', 'TWIReader'],
+    ['peek-auras', 'Peek Auras'],
+  ]);
   assert.deepEqual(jobOfWho('twireader deploy', owners), { scheme: 'TWIReader', label: 'twireader', kind: 'deploy' });
   assert.deepEqual(jobOfWho('TWI Reader APK build', owners), { scheme: 'TWIReader', label: 'TWI Reader', kind: 'apk' });
   assert.deepEqual(jobOfWho('peek-auras (app)', owners), { scheme: 'Peek Auras', label: 'peek-auras', kind: 'app' });
@@ -29,17 +33,18 @@ test('an app\'s jobs count under its home scheme, and say which kind they were',
 test('history: one row per scheme with its turns and each app job split out', () => {
   const now = Date.parse('2026-11-19T12:00:00-0800');
   const owners = new Map([['twireader', 'TWIReader']]);
-  const text = [
-    line('2026-11-19T11:00:00-0800', 'TWIReader #1 (josh)', 10),
-    line('2026-11-19T11:00:00-0800', 'TWIReader #2 (josh)', 50),
-    line('2026-11-19T10:00:00-0800', 'twireader deploy', 70),
-    line('2026-11-19T10:00:00-0800', 'Citadel #3 (cara)', 5),
-  ].join('\n');
+  const text = [line('2026-11-19T11:00:00-0800', 'TWIReader #1 (josh)', 10), line('2026-11-19T11:00:00-0800', 'TWIReader #2 (josh)', 50), line('2026-11-19T10:00:00-0800', 'twireader deploy', 70), line('2026-11-19T10:00:00-0800', 'Citadel #3 (cara)', 5)].join('\n');
   assert.deepEqual(parseHistory(text, now - 7 * 24 * 3600_000, owners), [
-    { scheme: 'TWIReader', jobs: 3, medianS: 50, longestS: 70, parts: [
-      { label: 'TWIReader', kind: 'turn', jobs: 2, medianS: 30, longestS: 50 },
-      { label: 'twireader', kind: 'deploy', jobs: 1, medianS: 70, longestS: 70 },
-    ] },
+    {
+      scheme: 'TWIReader',
+      jobs: 3,
+      medianS: 50,
+      longestS: 70,
+      parts: [
+        { label: 'TWIReader', kind: 'turn', jobs: 2, medianS: 30, longestS: 50 },
+        { label: 'twireader', kind: 'deploy', jobs: 1, medianS: 70, longestS: 70 },
+      ],
+    },
     { scheme: 'Citadel', jobs: 1, medianS: 5, longestS: 5 },
   ]);
 });
@@ -75,8 +80,13 @@ test('pressure and the whole read from a folder', () => {
   assert.deepEqual(l.holders, []);
   writeFileSync(join(root, 'wait-1-2'), `Delve #4\na nested Claude session\n${Math.floor(Date.now() / 1000)}\nease\n`);
   writeFileSync(join(root, 'wait-3-4'), `Peek #2\nnpm test\n${Math.floor(Date.now() / 1000)}\nmemory\n`);
-  assert.deepEqual(hostLoad(root).waiters.map((w) => w.who), ['Peek #2'], "claude-pace's waits are no heavy job's line (#1748)");
-  rmSync(join(root, 'wait-1-2')); rmSync(join(root, 'wait-3-4'));
+  assert.deepEqual(
+    hostLoad(root).waiters.map((w) => w.who),
+    ['Peek #2'],
+    "claude-pace's waits are no heavy job's line (#1748)",
+  );
+  rmSync(join(root, 'wait-1-2'));
+  rmSync(join(root, 'wait-3-4'));
 });
 
 test('slot count follows citadel-heavy: no number is 2, a 0 is 1', () => {
@@ -87,8 +97,22 @@ test('slot count follows citadel-heavy: no number is 2, a 0 is 1', () => {
 });
 
 test('an app counts under its home scheme only for a viewer who can see that scheme', () => {
-  const apps = [{ name: 'twireader', title: 'TWI Reader', home_scheme: 7 }, { name: 'secret-app', title: 'Secret', home_scheme: 9 }, { name: 'loose', title: 'Loose', home_scheme: null }];
-  const owners = appOwners(apps, (id) => id === 7, (id) => ({ 7: 'TWIReader', 9: 'Hidden' })[id]);
-  assert.deepEqual([...owners], [['twireader', 'TWIReader'], ['twi reader', 'TWIReader']]);
+  const apps = [
+    { name: 'twireader', title: 'TWI Reader', home_scheme: 7 },
+    { name: 'secret-app', title: 'Secret', home_scheme: 9 },
+    { name: 'loose', title: 'Loose', home_scheme: null },
+  ];
+  const owners = appOwners(
+    apps,
+    (id) => id === 7,
+    (id) => ({ 7: 'TWIReader', 9: 'Hidden' })[id],
+  );
+  assert.deepEqual(
+    [...owners],
+    [
+      ['twireader', 'TWIReader'],
+      ['twi reader', 'TWIReader'],
+    ],
+  );
   assert.equal(jobOfWho('secret-app deploy', owners).scheme, 'secret-app'); // its own name, not the hidden scheme's
 });

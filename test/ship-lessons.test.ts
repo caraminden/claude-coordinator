@@ -30,7 +30,7 @@ test('parseLearned keeps three tidy lines, reads "nothing" as an answer, and cut
   assert.ok(long.endsWith('…'));
 });
 
-test("the queue is per scheme: open lines list newest first, nothing-rows only count, and taken lines stop coming back", () => {
+test('the queue is per scheme: open lines list newest first, nothing-rows only count, and taken lines stop coming back', () => {
   const store = newStore();
   const peek = store.createProject('Peek Auras', null);
   const other = store.createProject('Mandate', null);
@@ -42,7 +42,11 @@ test("the queue is per scheme: open lines list newest first, nothing-rows only c
   store.lessons.add({ ...t(other.id, 4), ticket_id: 104, lines: 'mandate line', files: [], source: 'land' }, t0);
 
   const open = store.lessons.list(peek.id);
-  assert.deepEqual(open.map((l) => l.number), [3, 1], 'newest first, the nothing-row left out, the other scheme left out');
+  assert.deepEqual(
+    open.map((l) => l.number),
+    [3, 1],
+    'newest first, the nothing-row left out, the other scheme left out',
+  );
   assert.deepEqual(open[0].files, ['src/fx.rs', 'ci.yml']);
   assert.deepEqual(store.lessons.stats(peek.id, t0 - 60_000), { ships: 3, withLines: 2 });
 
@@ -59,7 +63,10 @@ test("log_learned's second call replaces its first within a few hours; a land al
   const t = { id: 5, project_id: p.id, number: 5 };
   queueLesson(store, '/data', t, 'first try', [], 'tool');
   queueLesson(store, '/data', t, 'corrected', [], 'tool');
-  assert.deepEqual(store.lessons.list(p.id).map((l) => l.lines), ['corrected']);
+  assert.deepEqual(
+    store.lessons.list(p.id).map((l) => l.lines),
+    ['corrected'],
+  );
   queueLesson(store, '/data', t, 'second piece', [], 'land');
   queueLesson(store, '/data', t, 'third piece', [], 'land');
   assert.equal(store.lessons.list(p.id).length, 3);
@@ -204,7 +211,10 @@ test('3 similar lessons from 3 minions alert once; 3 from one minion do not; gro
   assert.equal(sent.length, 1, 'a group already alerted waits for 3 more minions');
   say(6, 'land.sh stale lock file in the CI queue');
   assert.equal(sent.length, 2, 'five minions plus one more is 3 more than the 3 alerted');
-  const ids = store.lessons.list(p.id).filter((l) => /lock/.test(l.lines)).map((l) => l.id);
+  const ids = store.lessons
+    .list(p.id)
+    .filter((l) => /lock/.test(l.lines))
+    .map((l) => l.id);
   store.lessons.take(p.id, ids, 'proposed');
   say(7, 'land.sh stale lock file in the CI queue');
   say(8, 'land.sh stale lock file in the CI queue');

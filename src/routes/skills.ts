@@ -10,7 +10,7 @@ import { HttpError, json, type Route } from '../http.ts';
 function scope(url: URL, app: any, session: any, project: { id: number }) {
   const citadel = !!session && app.store.canSee(session, GLOBAL_OWNER);
   const all = url.searchParams.get('all') === '1';
-  if (all && !citadel) throw new HttpError(403, 'Every scheme\'s counts are for the Citadel scheme\'s members');
+  if (all && !citadel) throw new HttpError(403, "Every scheme's counts are for the Citadel scheme's members");
   return { citadel, all, id: all ? null : project.id };
 }
 const usageBody = (u: { since: number; skills: object; agents: object; active: object } | null) => (u ? { since: u.since, usage: { skills: u.skills, agents: u.agents, active: u.active } } : { since: null, usage: null });
@@ -18,7 +18,9 @@ const usageBody = (u: { since: number; skills: object; agents: object; active: o
 export const skillRoutes: Route[] = [
   {
     // ?all=1: usage across every scheme, for the Citadel scheme's members (the kit's own view).
-    method: 'GET', path: '/api/projects/:project/skills', who: ['person', 'taskmaster'],
+    method: 'GET',
+    path: '/api/projects/:project/skills',
+    who: ['person', 'taskmaster'],
     async handler({ res, url, app, session, project }) {
       const { citadel, all, id } = scope(url, app, session, project);
       return json(res, 200, {
@@ -35,7 +37,9 @@ export const skillRoutes: Route[] = [
     },
   },
   {
-    method: 'GET', path: '/api/projects/:project/skills/usage', who: ['person', 'taskmaster'],
+    method: 'GET',
+    path: '/api/projects/:project/skills/usage',
+    who: ['person', 'taskmaster'],
     async handler({ res, url, app, session, project }) {
       const { all, id } = scope(url, app, session, project);
       return json(res, 200, { ...usageBody(cachedUsage(app.store, id) ?? (await refreshUsage(app.store, id))), all });
@@ -43,12 +47,14 @@ export const skillRoutes: Route[] = [
   },
   {
     // An opened row (#1082): where one skill or Grunt type ran, and the not-used evidence. ?name=citadel:grilling&kind=skill.
-    method: 'GET', path: '/api/projects/:project/skills/detail', who: ['person', 'taskmaster'],
+    method: 'GET',
+    path: '/api/projects/:project/skills/detail',
+    who: ['person', 'taskmaster'],
     async handler({ res, url, app, session, project }) {
       const { all, id } = scope(url, app, session, project);
       const name = url.searchParams.get('name') ?? '';
       const kind = url.searchParams.get('kind');
-      if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/.test(name)) throw new HttpError(400, 'name: a skill or Grunt type\'s name');
+      if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/.test(name)) throw new HttpError(400, "name: a skill or Grunt type's name");
       if (kind !== 'skill' && kind !== 'agent') throw new HttpError(400, 'kind: skill or agent');
       return json(res, 200, { ...(await usageDetail(app.store, id, name, kind)), all });
     },

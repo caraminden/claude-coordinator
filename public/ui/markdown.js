@@ -29,8 +29,7 @@ const SHELL_KINDS = {
   bash: ['bash', ['bash', 'sh', 'zsh', 'shell', 'console']],
   cmd: ['cmd · Windows', ['cmd', 'bat']],
 };
-const SHELLS = Object.fromEntries(Object.entries(SHELL_KINDS).flatMap(([tone, [label, tags]]) =>
-  tags.map((t) => [t, [tone, tone === 'bash' && t !== 'bash' ? t : label]])));
+const SHELLS = Object.fromEntries(Object.entries(SHELL_KINDS).flatMap(([tone, [label, tags]]) => tags.map((t) => [t, [tone, tone === 'bash' && t !== 'bash' ? t : label]])));
 /** A fence's opening line; a backtick one with a backtick later on its line is inline code, not a fence (CommonMark). */
 const FENCE = /^ {0,3}(`{3,}(?!.*`)|~{3,})\s*([^`\s]*)/;
 const HEADING = /^(#{1,6})\s+(.*?)\s*#*$/;
@@ -50,8 +49,7 @@ const isTableStart = (lines, i) => /^\s*\|/.test(lines[i]) || (lines[i].includes
 const startsBlock = (lines, i, breaks) => {
   const l = lines[i];
   const item = ITEM.exec(l);
-  return HEADING.test(l) || FENCE.test(l) || QUOTE.test(l) || HR.test(l) || isTableStart(lines, i)
-    || (!!item && item[3] != null && (breaks || !/\d/.test(item[2]) || /^0*1\D/.test(item[2])));
+  return HEADING.test(l) || FENCE.test(l) || QUOTE.test(l) || HR.test(l) || isTableStart(lines, i) || (!!item && item[3] != null && (breaks || !/\d/.test(item[2]) || /^0*1\D/.test(item[2])));
 };
 
 /** A code span (not across a blank line) or an HTML comment, for stripComments. */
@@ -104,13 +102,15 @@ function stripComments(src) {
 
 /** GitHub's id for a heading: lower case, punctuation dropped, spaces to hyphens. */
 export function slug(html) {
-  return unescapeHtml(html.replace(/<[^>]*>/g, '')).toLowerCase().trim().replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '').replace(/ /g, '-');
+  return unescapeHtml(html.replace(/<[^>]*>/g, ''))
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '')
+    .replace(/ /g, '-');
 }
 
 /** The default link: http(s) and mailto open a new tab, never `_top` (that would take Citadel's whole window); anything else is inert. */
-const defaultLink = (href, html) => (/^(https?:\/\/|mailto:)/i.test(href)
-  ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${html}</a>`
-  : `<span class="cui-link" title="${escapeHtml(href)}">${html}</span>`);
+const defaultLink = (href, html) => (/^(https?:\/\/|mailto:)/i.test(href) ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${html}</a>` : `<span class="cui-link" title="${escapeHtml(href)}">${html}</span>`);
 
 /**
  * A bare http(s) URL, DOI ("10.1234/x", "doi:10.1234/x") or web address with no scheme
@@ -124,9 +124,7 @@ const WEB_TLDS = 'com|org|net|io|dev|app|ai|gov|edu|uk';
 /** How a package name starts ("com.example.app"); no web address does, unlike "app." or "dev.". */
 const PACKAGE_ROOT = /^(?:com|org|net|edu)$/i;
 const URL_TAIL = `(?:(?!&quot;|&#39;|&lt;|&gt;)[^\\s<>"'\\u0000\\u0001])`;
-const BARE = new RegExp(`(?<![A-Za-z0-9/])(https?:\\/\\/${URL_TAIL}+)`
-  + `|(?<![A-Za-z0-9/.:-])(doi:\\s?)?(10\\.\\d{4,9}\\/${URL_TAIL}+)`
-  + `|(?<![A-Za-z0-9/.:@\\\\-])(?<![A-Za-z0-9]_)((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+(${WEB_TLDS})(?![A-Za-z0-9-]|[._][A-Za-z0-9])(?::\\d{2,5})?(?:[/?#]${URL_TAIL}*)?)`, 'gi');
+const BARE = new RegExp(`(?<![A-Za-z0-9/])(https?:\\/\\/${URL_TAIL}+)` + `|(?<![A-Za-z0-9/.:-])(doi:\\s?)?(10\\.\\d{4,9}\\/${URL_TAIL}+)` + `|(?<![A-Za-z0-9/.:@\\\\-])(?<![A-Za-z0-9]_)((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+(${WEB_TLDS})(?![A-Za-z0-9-]|[._][A-Za-z0-9])(?::\\d{2,5})?(?:[/?#]${URL_TAIL}*)?)`, 'gi');
 
 /**
  * A bare link's end without the marks that end the sentence around it, and in markdown (`md`) the
@@ -154,9 +152,14 @@ function linkBare(s, link, held = null) {
     const kept = trimBare(m, !!held);
     // What's left must still point somewhere: not "https://" or "10.1234/" alone.
     if (url ? /^https?:\/\/$/i.test(kept) : doi && !/\/[^/]/.test(kept)) return m;
-    const href = url ? unescapeHtml(kept)
-      : web ? `https://${unescapeHtml(kept)}`
-      : `https://doi.org/${unescapeHtml(kept.slice(doiPrefix?.length ?? 0)).split('/').map(encodeURIComponent).join('/')}`;
+    const href = url
+      ? unescapeHtml(kept)
+      : web
+        ? `https://${unescapeHtml(kept)}`
+        : `https://doi.org/${unescapeHtml(kept.slice(doiPrefix?.length ?? 0))
+            .split('/')
+            .map(encodeURIComponent)
+            .join('/')}`;
     return (held ?? String)(link(href, kept)) + m.slice(kept.length);
   });
 }
@@ -202,7 +205,16 @@ function mendStreaming(src) {
   line = line.replace(/(^|\s)[*_`]+$/, '$1');
   if ((line.split('`').length - 1) % 2) line += '`';
   // Half of a closing "**" ("**9:59 pm:*") completes it rather than showing a stray "*".
-  if (/[^*\s]\*$/.test(line) && line.slice(0, -1).replace(/`[^`]*`/g, '').split('**').length % 2 === 0) line += '*';
+  if (
+    /[^*\s]\*$/.test(line) &&
+    line
+      .slice(0, -1)
+      .replace(/`[^`]*`/g, '')
+      .split('**').length %
+      2 ===
+      0
+  )
+    line += '*';
   else {
     const bare = line.replace(/`[^`]*`/g, '');
     // The closer goes before any trailing space ("**9:59 " mid-word), since a closer can't follow one.
@@ -226,9 +238,7 @@ function markedImage(image, href, alt, title, draw) {
   const html = image(href, alt, parsed ? null : title);
   if (!parsed || !/<img\b/i.test(html)) return html;
   const pic = html.replace(/<img\b[^>]*>/i, (img) => `<span class="cui-marked-pic">${img}${marksOverlay(parsed)}</span>`);
-  return `<span class="cui-marked" data-marks="${escapeHtml(title)}">${pic}<span class="cui-marks-bar">`
-    + `<label class="cui-marks-toggle"><input type="checkbox" checked> Marks</label>`
-    + `${draw ? '<button type="button" class="cui-marks-draw">✎ Draw on it</button>' : ''}</span></span>`;
+  return `<span class="cui-marked" data-marks="${escapeHtml(title)}">${pic}<span class="cui-marks-bar">` + `<label class="cui-marks-toggle"><input type="checkbox" checked> Marks</label>` + `${draw ? '<button type="button" class="cui-marks-draw">✎ Draw on it</button>' : ''}</span></span>`;
 }
 
 /**
@@ -252,22 +262,23 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
   const base = Math.min(Math.max(Math.trunc(headingBase) || 1, 1), 6) - 1;
   const slugs = new Map();
 
-  const emphasis = (s) => s
-    .replace(/\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*/g, '<strong><em>$1</em></strong>')
-    .replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|[^\w])__(?=\S)(.+?)(?<=\S)__(?!\w)/g, '$1<strong>$2</strong>')
-    .replace(/~~(?=\S)(.+?)(?<=\S)~~/g, '<del>$1</del>')
-    .replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>')
-    // Only between spaces or brackets, so snake_case_names and <date>_<branch> stay as they are.
-    .replace(/(^|[\s([{]|&quot;|&#39;)_(?=[^_\s])(.+?)(?<=[^_\s])_(?=$|[\s.,;:!?)\]}]|&quot;|&#39;)/g, '$1<em>$2</em>');
+  const emphasis = (s) =>
+    s
+      .replace(/\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*/g, '<strong><em>$1</em></strong>')
+      .replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^\w])__(?=\S)(.+?)(?<=\S)__(?!\w)/g, '$1<strong>$2</strong>')
+      .replace(/~~(?=\S)(.+?)(?<=\S)~~/g, '<del>$1</del>')
+      .replace(/(^|[^*\w])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])/g, '$1<em>$2</em>')
+      // Only between spaces or brackets, so snake_case_names and <date>_<branch> stay as they are.
+      .replace(/(^|[\s([{]|&quot;|&#39;)_(?=[^_\s])(.+?)(?<=[^_\s])_(?=$|[\s.,;:!?)\]}]|&quot;|&#39;)/g, '$1<em>$2</em>');
 
   const inline = (t) => {
     // Code, escapes, links and URLs are held out as \0n\0 so emphasis can't reach into them; n is
     // written in private-use digits, not ASCII ones, so a `text` hook that rewrites numbers leaves it be.
     const held = [];
-    const hold = (html) => `\u0000${String(held.push(html) - 1).replace(/\d/g, (d) => String.fromCharCode(0xE000 + Number(d)))}\u0000`;
+    const hold = (html) => `\u0000${String(held.push(html) - 1).replace(/\d/g, (d) => String.fromCharCode(0xe000 + Number(d)))}\u0000`;
     const MARK = /\u0000([\uE000-\uE009]+)\u0000/g;
-    const at = (n) => held[Number([...n].map((c) => c.charCodeAt(0) - 0xE000).join(''))] ?? '';
+    const at = (n) => held[Number([...n].map((c) => c.charCodeAt(0) - 0xe000).join(''))] ?? '';
     // An image's alt is an attribute, so what was held in it comes back as text.
     const plain = (html) => html.replace(MARK, (_, n) => at(n).replace(/<[^>]*>/g, ''));
     let s = escapeHtml(t)
@@ -293,14 +304,26 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
    * A paragraph's lines: a line ending in "\" or two spaces breaks. With `breaks` every line does,
    * and each is its own run of emphasis, so a stray "*" can't italicise the next line.
    */
-  const paragraph = (para) => (breaks ? para.map((l) => inline(l.trim())).join('<br>') : inline(para.map((l, n) => {
-    if (n === para.length - 1) return l.trim();
-    if (/\\$/.test(l.trimEnd())) return `${l.trim().slice(0, -1)}\n`;
-    return `${l.trim()}${/ {2,}$/.test(l) ? '\n' : ' '}`;
-  }).join('')).replace(/\n/g, '<br>'));
+  const paragraph = (para) =>
+    breaks
+      ? para.map((l) => inline(l.trim())).join('<br>')
+      : inline(
+          para
+            .map((l, n) => {
+              if (n === para.length - 1) return l.trim();
+              if (/\\$/.test(l.trimEnd())) return `${l.trim().slice(0, -1)}\n`;
+              return `${l.trim()}${/ {2,}$/.test(l) ? '\n' : ' '}`;
+            })
+            .join(''),
+        ).replace(/\n/g, '<br>');
 
   const table = (rows) => {
-    const cells = (r) => r.trim().replace(/^\||(?<!\\)\|$/g, '').split(/(?<!\\)\|/).map((c) => c.trim());
+    const cells = (r) =>
+      r
+        .trim()
+        .replace(/^\||(?<!\\)\|$/g, '')
+        .split(/(?<!\\)\|/)
+        .map((c) => c.trim());
     const hasHead = rows.length > 1 && DELIM.test(rows[1]) && rows[1].includes('-');
     const align = hasHead ? cells(rows[1]).map((c) => (/^:-+:$/.test(c) ? ' class="cui-al-c"' : /-:$/.test(c) ? ' class="cui-al-r"' : '')) : [];
     const row = (r, tag) => {
@@ -318,7 +341,10 @@ export function renderMarkdown(src, { link = defaultLink, image, text = (s) => s
     const first = ITEM.exec(lines[i]);
     const indent = first[1].length;
     const ordered = /\d/.test(first[2]);
-    const sibling = (l) => { const m = ITEM.exec(l); return !!m && m[1].length <= indent && /\d/.test(m[2]) === ordered; };
+    const sibling = (l) => {
+      const m = ITEM.exec(l);
+      return !!m && m[1].length <= indent && /\d/.test(m[2]) === ordered;
+    };
     const items = [];
     let loose = false;
     let item = null;
@@ -437,7 +463,12 @@ export function markdownLine(src, { streaming = false } = {}) {
     const bullet = item ? '• ' : '';
     if (item) l = (item[3] ?? '').replace(/^\[[ xX]\]\s+/, '');
     else l = l.replace(/^#{1,6}\s+/, '').replace(/\s+#+$/, '');
-    if (/^\|.*\|$/.test(l)) l = l.slice(1, -1).split(/(?<!\\)\|/).map((c) => c.trim()).join(' · ');
+    if (/^\|.*\|$/.test(l))
+      l = l
+        .slice(1, -1)
+        .split(/(?<!\\)\|/)
+        .map((c) => c.trim())
+        .join(' · ');
     // One paragraph of one line: its HTML is the line's, inside a single <p>.
     const html = renderMarkdown(l, plain).replace(/^<p>([\s\S]*)<\/p>$/, '$1');
     if (html || bullet) out.push(bullet + html);
@@ -546,7 +577,9 @@ export async function copyText(text, near = document.body) {
   ta.select();
   ta.setSelectionRange(0, text.length);
   let ok = false;
-  try { ok = document.execCommand('copy'); } catch {}
+  try {
+    ok = document.execCommand('copy');
+  } catch {}
   ta.remove();
   back?.focus?.({ preventScroll: true });
   return ok;
@@ -564,12 +597,15 @@ async function onCopy(e) {
   if (!code) return;
   const ok = await copyText(copyPayload(code.textContent, b.parentElement.classList.contains('cui-shell')), b.parentElement);
   b.dataset.copied = ok ? 'yes' : 'no';
-  label(b, ok ? 'Copied' : 'Couldn\'t copy');
+  label(b, ok ? 'Copied' : "Couldn't copy");
   clearTimeout(copied.get(b));
-  copied.set(b, setTimeout(() => {
-    delete b.dataset.copied;
-    label(b, 'Copy code');
-  }, 2000));
+  copied.set(
+    b,
+    setTimeout(() => {
+      delete b.dataset.copied;
+      label(b, 'Copy code');
+    }, 2000),
+  );
 }
 const hooked = new WeakSet();
 

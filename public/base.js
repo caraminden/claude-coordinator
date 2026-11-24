@@ -83,16 +83,25 @@ export function whenShown(fn) {
  * whoever joins while a read runs takes its answer: no second read (#1610).
  */
 export function poller(read, every) {
-  let timer = null, busy = false;
+  let timer = null,
+    busy = false;
   const tick = async () => {
     timer = null;
     busy = true;
     let go = true;
-    try { go = (await read()) !== false; } catch { /* the next tick asks again */ }
+    try {
+      go = (await read()) !== false;
+    } catch {
+      /* the next tick asks again */
+    }
     busy = false;
     if (go) timer = setTimeout(() => whenShown(tick), every);
   };
-  return { now() { if (!timer && !busy) timer = setTimeout(tick, 0); } };
+  return {
+    now() {
+      if (!timer && !busy) timer = setTimeout(tick, 0);
+    },
+  };
 }
 /**
  * Whether a tab coming back may have missed stream news, so must resync (#1528): it was hidden a minute or more, the
@@ -103,16 +112,23 @@ export const missedNews = (hiddenAt, heardAt, now, frozen) => frozen || now - hi
 
 // Each request is timed for the slow-load recorder (public/slow-moments.js, #1752), its answer read whole first.
 const send = (path, opts) => {
-  const start = performance.now(), timed = (res) => globalThis.citadelSlow?.request(opts.method, path, start, res);
+  const start = performance.now(),
+    timed = (res) => globalThis.citadelSlow?.request(opts.method, path, start, res);
   return fetch(path, {
     ...opts,
     headers: opts.body ? { 'Content-Type': 'application/json' } : {},
     body: opts.body ? JSON.stringify(opts.body) : undefined,
-  }).then(async (res) => {
-    const body = await res.json().catch(() => ({}));
-    timed(res);
-    return { res, body };
-  }, (err) => { timed(null); throw err; });
+  }).then(
+    async (res) => {
+      const body = await res.json().catch(() => ({}));
+      timed(res);
+      return { res, body };
+    },
+    (err) => {
+      timed(null);
+      throw err;
+    },
+  );
 };
 
 export async function api(path, opts = {}) {
@@ -128,7 +144,9 @@ export async function api(path, opts = {}) {
     sent = send(path, opts);
     if (get) {
       inflight.set(path, sent);
-      const done = () => { if (inflight.get(path) === sent) inflight.delete(path); };
+      const done = () => {
+        if (inflight.get(path) === sent) inflight.delete(path);
+      };
       sent.then(done, done);
     }
   }
@@ -206,20 +224,35 @@ export function keptChat(hash) {
 
 /** Set while the shelf shows the Home line (#1140): the app's start opens Home rather than the kept chat. */
 export const HOME_LINE = 'cc-home-line';
-const homeFirst = () => { try { return localStorage.getItem(HOME_LINE) === '1'; } catch { return false; } };
+const homeFirst = () => {
+  try {
+    return localStorage.getItem(HOME_LINE) === '1';
+  } catch {
+    return false;
+  }
+};
 
 /** Home's cached answer and whether the shelf showed its line (home.js) are theirs too. */
-const forgetHome = () => { try { localStorage.removeItem('cc-home'); localStorage.removeItem(HOME_LINE); } catch {} };
+const forgetHome = () => {
+  try {
+    localStorage.removeItem('cc-home');
+    localStorage.removeItem(HOME_LINE);
+  } catch {}
+};
 
 /** A reload nobody clicked: the next page skips the cold-open splash (Cara, 2026-11-21, "Lets not show the splash screen
  * when the app refreshes automatically"). One-shot, stamped, read and cleared by login-map-art.js. */
 export function reloadQuietly() {
-  try { sessionStorage.setItem('cc-no-splash', String(Date.now())); } catch {}
+  try {
+    sessionStorage.setItem('cc-no-splash', String(Date.now()));
+  } catch {}
   location.reload();
 }
 
 export function forgetKept() {
-  try { localStorage.removeItem(KEPT); } catch {}
+  try {
+    localStorage.removeItem(KEPT);
+  } catch {}
 }
 
 /** While on, GETs answer from the kept chat's answers only (null turns it off). */
@@ -240,7 +273,10 @@ export function h(tag, attrs = {}, ...children) {
 }
 
 /** Puts `el`'s looping animation (`ms` per turn) at the page's shared clock, so a redrawn element rejoins its phase instead of restarting (#1532). Set through the CSSOM: the page's CSP blocks a style attribute. */
-export const phase = (el, ms) => { el.style.animationDelay = `-${Date.now() % ms}ms`; return el; };
+export const phase = (el, ms) => {
+  el.style.animationDelay = `-${Date.now() % ms}ms`;
+  return el;
+};
 
 /**
  * A redraw of the sidebar (or Home's list, its own page on a phone, or the Schemes shelf's release rows: #1548) while a pointer is pressed in it waits for the release
@@ -259,9 +295,19 @@ const release = () => {
   if (!pressedAt) return;
   pressedAt = 0;
   // After the click, which the browser sends right after the pointerup.
-  setTimeout(() => { const due = [...held]; held.clear(); for (const fn of due) fn(); });
+  setTimeout(() => {
+    const due = [...held];
+    held.clear();
+    for (const fn of due) fn();
+  });
 };
-globalThis.addEventListener?.('pointerdown', (e) => { if (e.target instanceof Element && e.target.closest('.sidebar, .home-overview, #schemes-shelf')) pressedAt = performance.now(); }, true);
+globalThis.addEventListener?.(
+  'pointerdown',
+  (e) => {
+    if (e.target instanceof Element && e.target.closest('.sidebar, .home-overview, #schemes-shelf')) pressedAt = performance.now();
+  },
+  true,
+);
 for (const type of ['pointerup', 'pointercancel']) globalThis.addEventListener?.(type, release, true);
 globalThis.addEventListener?.('blur', release); // the window's own, not captured: a press moves focus, and that blur mustn't count
 
@@ -278,13 +324,49 @@ export const noAutofill = (name, token = 'nope') => ({ autocomplete: token, name
  */
 export function schemeIcon(p) {
   const src = iconSrc(p);
-  const img = h('img', { class: 'scheme-icon', 'data-scheme-icon': p.id, src, alt: '', hidden: !src, onerror: () => { img.hidden = true; } });
+  const img = h('img', {
+    class: 'scheme-icon',
+    'data-scheme-icon': p.id,
+    src,
+    alt: '',
+    hidden: !src,
+    onerror: () => {
+      img.hidden = true;
+    },
+  });
   return img;
 }
 
-const ICONS = { back: 'M10.25 3.5 5.75 8l4.5 4.5', forward: 'M5.75 3.5 10.25 8l-4.5 4.5', close: 'M4 4l8 8M12 4l-8 8', pin: 'M5.5 2.5h5M6.5 2.5v4l-2 3h7l-2-3v-4M8 9.5V14', tag: 'M2.5 2.5h5l6 6-5 5-6-6zM5.25 5.25h.01',
+const ICONS = {
+  back: 'M10.25 3.5 5.75 8l4.5 4.5',
+  forward: 'M5.75 3.5 10.25 8l-4.5 4.5',
+  close: 'M4 4l8 8M12 4l-8 8',
+  pin: 'M5.5 2.5h5M6.5 2.5v4l-2 3h7l-2-3v-4M8 9.5V14',
+  tag: 'M2.5 2.5h5l6 6-5 5-6-6zM5.25 5.25h.01',
   // Settings' side menu and rows (#995)
-  shield: 'M8 1.8 13 3.6v4c0 3-2.2 5.4-5 6.6-2.8-1.2-5-3.6-5-6.6v-4zM5.8 8l1.5 1.5L10.4 6.4', plug: 'M6 1.8v3M10 1.8v3M4.2 4.8h7.6v2.6a3.8 3.8 0 0 1-7.6 0zM8 11.2v3', plugplus: 'M6 1.8v3M10 1.8v3M4.2 4.8h7.6v2a3.8 3.8 0 0 1-3.8 3.8M8 10.6v1M11.5 11v4M9.5 13h4', rows: 'M2.5 3.5h11M2.5 8h11M2.5 12.5h7', bell: 'M4 11.5V7a4 4 0 0 1 8 0v4.5l1 1H3zM6.6 13.5a1.6 1.6 0 0 0 2.8 0', belloff: 'M4 11.5V7a4 4 0 0 1 6.5-3.1M12 7v4.5H5.5M6.6 13.5a1.6 1.6 0 0 0 2.8 0M2 2l12 12', eye: 'M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8zM6 8a2 2 0 1 0 4 0a2 2 0 1 0 -4 0', doc: 'M4 1.8h5.2L12 4.6v9.6H4zM6 7.5h4M6 10h4', users: 'M3.7 5.5a2.3 2.3 0 1 0 4.6 0a2.3 2.3 0 1 0 -4.6 0M1.8 13.5c.5-2.4 2.2-3.8 4.2-3.8s3.7 1.4 4.2 3.8M9.5 5.8a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0 -3.6 0M11.2 9.7c1.6.1 2.6 1.3 3 3.3', user: 'M5.2 5.5a2.8 2.8 0 1 0 5.6 0a2.8 2.8 0 1 0 -5.6 0M2.8 14c.6-2.8 2.7-4.4 5.2-4.4s4.6 1.6 5.2 4.4', pen: 'M10.5 2.5 13.5 5.5 5.5 13.5H2.5V10.5z', monitor: 'M1.8 2.5h12.4v8.5h-12.4zM5.5 14h5M8 11v3', chart: 'M2.5 13.5h11M4.5 11V7.5M8 11V4M11.5 11V8.5', globe: 'M1.8 8a6.2 6.2 0 1 0 12.4 0a6.2 6.2 0 1 0 -12.4 0M1.8 8h12.4M8 1.8c1.8 2 2.6 4 2.6 6.2S9.8 12.2 8 14.2C6.2 12.2 5.4 10.2 5.4 8S6.2 3.8 8 1.8z', people: 'M3 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M9 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M1.5 12.5c.4-2 1.7-3.2 3.5-3.2S8 10.5 8.5 12.5M7.5 12.5c.4-2 1.7-3.2 3.5-3.2s3.1 1.2 3.5 3.2', box: 'M8 1.8 14 5v6L8 14.2 2 11V5zM2 5l6 3.2L14 5M8 8.2v6', key: 'M2 10.5a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M7.2 8.3l6-6M11 4.5l1.5 1.5', spark: 'M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3M3.4 3.4l2.1 2.1M10.5 10.5l2.1 2.1M3.4 12.6l2.1-2.1M10.5 5.5l2.1-2.1', branch: 'M2.9 3.5a1.6 1.6 0 1 0 3.2 0a1.6 1.6 0 1 0 -3.2 0M2.9 12.5a1.6 1.6 0 1 0 3.2 0a1.6 1.6 0 1 0 -3.2 0M9.9 5.5a1.6 1.6 0 1 0 3.2 0a1.6 1.6 0 1 0 -3.2 0M4.5 5.1v5.8M11.5 7.1c0 2.4-3 2.4-5.8 4', lock: 'M3 7h10v7h-10zM5.2 7V5a2.8 2.8 0 0 1 5.6 0v2', vault: 'M2 2.5h12v11h-12zM5.6 8a2.4 2.4 0 1 0 4.8 0a2.4 2.4 0 1 0 -4.8 0M8 5.6V4.4M10.4 8h1.2', check: 'm3 8.5 3.2 3L13 4.5' };
+  shield: 'M8 1.8 13 3.6v4c0 3-2.2 5.4-5 6.6-2.8-1.2-5-3.6-5-6.6v-4zM5.8 8l1.5 1.5L10.4 6.4',
+  plug: 'M6 1.8v3M10 1.8v3M4.2 4.8h7.6v2.6a3.8 3.8 0 0 1-7.6 0zM8 11.2v3',
+  plugplus: 'M6 1.8v3M10 1.8v3M4.2 4.8h7.6v2a3.8 3.8 0 0 1-3.8 3.8M8 10.6v1M11.5 11v4M9.5 13h4',
+  rows: 'M2.5 3.5h11M2.5 8h11M2.5 12.5h7',
+  bell: 'M4 11.5V7a4 4 0 0 1 8 0v4.5l1 1H3zM6.6 13.5a1.6 1.6 0 0 0 2.8 0',
+  belloff: 'M4 11.5V7a4 4 0 0 1 6.5-3.1M12 7v4.5H5.5M6.6 13.5a1.6 1.6 0 0 0 2.8 0M2 2l12 12',
+  eye: 'M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8zM6 8a2 2 0 1 0 4 0a2 2 0 1 0 -4 0',
+  doc: 'M4 1.8h5.2L12 4.6v9.6H4zM6 7.5h4M6 10h4',
+  users: 'M3.7 5.5a2.3 2.3 0 1 0 4.6 0a2.3 2.3 0 1 0 -4.6 0M1.8 13.5c.5-2.4 2.2-3.8 4.2-3.8s3.7 1.4 4.2 3.8M9.5 5.8a1.8 1.8 0 1 0 3.6 0a1.8 1.8 0 1 0 -3.6 0M11.2 9.7c1.6.1 2.6 1.3 3 3.3',
+  user: 'M5.2 5.5a2.8 2.8 0 1 0 5.6 0a2.8 2.8 0 1 0 -5.6 0M2.8 14c.6-2.8 2.7-4.4 5.2-4.4s4.6 1.6 5.2 4.4',
+  pen: 'M10.5 2.5 13.5 5.5 5.5 13.5H2.5V10.5z',
+  monitor: 'M1.8 2.5h12.4v8.5h-12.4zM5.5 14h5M8 11v3',
+  chart: 'M2.5 13.5h11M4.5 11V7.5M8 11V4M11.5 11V8.5',
+  globe: 'M1.8 8a6.2 6.2 0 1 0 12.4 0a6.2 6.2 0 1 0 -12.4 0M1.8 8h12.4M8 1.8c1.8 2 2.6 4 2.6 6.2S9.8 12.2 8 14.2C6.2 12.2 5.4 10.2 5.4 8S6.2 3.8 8 1.8z',
+  people: 'M3 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M9 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M1.5 12.5c.4-2 1.7-3.2 3.5-3.2S8 10.5 8.5 12.5M7.5 12.5c.4-2 1.7-3.2 3.5-3.2s3.1 1.2 3.5 3.2',
+  box: 'M8 1.8 14 5v6L8 14.2 2 11V5zM2 5l6 3.2L14 5M8 8.2v6',
+  key: 'M2 10.5a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M7.2 8.3l6-6M11 4.5l1.5 1.5',
+  spark: 'M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3M3.4 3.4l2.1 2.1M10.5 10.5l2.1 2.1M3.4 12.6l2.1-2.1M10.5 5.5l2.1-2.1',
+  branch: 'M2.9 3.5a1.6 1.6 0 1 0 3.2 0a1.6 1.6 0 1 0 -3.2 0M2.9 12.5a1.6 1.6 0 1 0 3.2 0a1.6 1.6 0 1 0 -3.2 0M9.9 5.5a1.6 1.6 0 1 0 3.2 0a1.6 1.6 0 1 0 -3.2 0M4.5 5.1v5.8M11.5 7.1c0 2.4-3 2.4-5.8 4',
+  lock: 'M3 7h10v7h-10zM5.2 7V5a2.8 2.8 0 0 1 5.6 0v2',
+  vault: 'M2 2.5h12v11h-12zM5.6 8a2.4 2.4 0 1 0 4.8 0a2.4 2.4 0 1 0 -4.8 0M8 5.6V4.4M10.4 8h1.2',
+  check: 'm3 8.5 3.2 3L13 4.5',
+};
 /** A line icon in the text colour. Drawn on its own centre, so it sits dead centre in its button, as a font's glyph doesn't. */
 export function icon(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -307,9 +389,16 @@ let pixel = null;
 export function tintTitleBar(color, over) {
   for (const m of document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')) {
     m.dataset.base ??= m.content;
-    if (!color || !matchMedia(m.media).matches) { m.content = m.dataset.base; continue; }
+    if (!color || !matchMedia(m.media).matches) {
+      m.content = m.dataset.base;
+      continue;
+    }
     pixel ??= h('canvas', { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true });
-    const fill = (c) => { pixel.fillStyle = 'transparent'; pixel.fillStyle = c; pixel.fillRect(0, 0, 1, 1); };
+    const fill = (c) => {
+      pixel.fillStyle = 'transparent';
+      pixel.fillStyle = c;
+      pixel.fillRect(0, 0, 1, 1);
+    };
     pixel.clearRect(0, 0, 1, 1);
     fill(color);
     if (pixel.getImageData(0, 0, 1, 1).data[3] < 255) fill(m.dataset.base);
@@ -369,7 +458,11 @@ export const pacificClockBare = (ms) => new Date(ms).toLocaleTimeString('en-US',
 /** `ms` as "Mon, 11:30 PM PST". */
 export const pacificWeekdayClock = (ms) => new Date(ms).toLocaleString('en-US', { ...PT, weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 /** The zone's short name right now, "PST" or "PDT". */
-export const pacificZone = () => new Date().toLocaleTimeString('en-US', { ...PT, timeZoneName: 'short' }).split(' ').pop();
+export const pacificZone = () =>
+  new Date()
+    .toLocaleTimeString('en-US', { ...PT, timeZoneName: 'short' })
+    .split(' ')
+    .pop();
 /** Pacific minutes since midnight at `ms`. */
 export function pacificMinutes(ms) {
   const p = new Intl.DateTimeFormat('en-US', { ...PT, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms));
@@ -380,11 +473,40 @@ export function pacificMinutes(ms) {
 
 // What the server will serve from a thread's folders, by extension (mirrors src/artifacts.ts).
 const FILE_KINDS = {
-  md: 'markdown', markdown: 'markdown', canvas: 'canvas', html: 'html', htm: 'html', pdf: 'pdf', txt: 'text', csv: 'text',
-  js: 'text', mjs: 'text', css: 'text', json: 'text',
-  png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', avif: 'image', svg: 'image',
-  mp4: 'video', webm: 'video', mov: 'video', mp3: 'audio', wav: 'audio', ogg: 'audio', m4a: 'audio',
-  zip: 'download', '7z': 'download', tar: 'download', gz: 'download', tgz: 'download', apk: 'download', xpi: 'download', crx: 'download',
+  md: 'markdown',
+  markdown: 'markdown',
+  canvas: 'canvas',
+  html: 'html',
+  htm: 'html',
+  pdf: 'pdf',
+  txt: 'text',
+  csv: 'text',
+  js: 'text',
+  mjs: 'text',
+  css: 'text',
+  json: 'text',
+  png: 'image',
+  jpg: 'image',
+  jpeg: 'image',
+  gif: 'image',
+  webp: 'image',
+  avif: 'image',
+  svg: 'image',
+  mp4: 'video',
+  webm: 'video',
+  mov: 'video',
+  mp3: 'audio',
+  wav: 'audio',
+  ogg: 'audio',
+  m4a: 'audio',
+  zip: 'download',
+  '7z': 'download',
+  tar: 'download',
+  gz: 'download',
+  tgz: 'download',
+  apk: 'download',
+  xpi: 'download',
+  crx: 'download',
 };
 export const fileKind = (path) => FILE_KINDS[(path.split(/[?#]/)[0].split('.').pop() || '').toLowerCase()] ?? null;
 export const baseName = (path) => path.split('/').filter(Boolean).pop() ?? path;
@@ -425,10 +547,16 @@ export function joinPath(dir, rel) {
 
 /** Which side panels (artifacts shelf, threads list) are open on wide screens. */
 export function loadPanelState() {
-  try { return JSON.parse(localStorage.getItem('cc-panels')) ?? {}; } catch { return {}; }
+  try {
+    return JSON.parse(localStorage.getItem('cc-panels')) ?? {};
+  } catch {
+    return {};
+  }
 }
 export function savePanelState(state) {
-  try { localStorage.setItem('cc-panels', JSON.stringify(state)); } catch {}
+  try {
+    localStorage.setItem('cc-panels', JSON.stringify(state));
+  } catch {}
 }
 
 /** A thread you have opened since it last changed. */
@@ -445,8 +573,7 @@ export function statusLabel(t) {
  * Threads are numbered per project and live at #/p/<project>/t/<number>. A server from before
  * per-project numbers sends no number, so fall back to the global id there.
  */
-export const threadHref = (t) =>
-  isCoordinator(t) ? `#/p/${t.project_id}` : t.number == null ? `#/t/${t.id}` : `#/p/${t.project_id}/t/${t.number}`;
+export const threadHref = (t) => (isCoordinator(t) ? `#/p/${t.project_id}` : t.number == null ? `#/t/${t.id}` : `#/p/${t.project_id}/t/${t.number}`);
 
 /** A link that opens `t`'s chat scrolled to one thing in it (threadrefs.js jumpParts). */
 export const jumpHref = (t, target) => `${threadHref(t)}?e=${target}`;

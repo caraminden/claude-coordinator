@@ -59,10 +59,17 @@ after(async () => {
   await app?.close();
 });
 
-interface Layout { scroller: number; table: number; cols: number[]; rows: number[]; line: number }
+interface Layout {
+  scroller: number;
+  table: number;
+  cols: number[];
+  rows: number[];
+  line: number;
+}
 
 /** The table in #id: its scroller's and its own width, each column's width, each body row's height, and one line's height. */
-const layout = (page: Page, id: string) => page.eval<Layout>(`(() => {
+const layout = (page: Page, id: string) =>
+  page.eval<Layout>(`(() => {
   const md = document.getElementById(${JSON.stringify(id)});
   const t = md.querySelector('table');
   return {
@@ -86,7 +93,10 @@ async function shot(page: Page, name: string) {
   writeFileSync(join(shots, name), Buffer.from(data, 'base64'));
 }
 
-for (const [label, width, panel, touch] of [['a 372px side panel', 1366, 372, false], ['a phone', 390, null, true]] as const) {
+for (const [label, width, panel, touch] of [
+  ['a 372px side panel', 1366, 372, false],
+  ['a phone', 390, null, true],
+] as const) {
   test(`${label}: a long code token in a cell breaks, so the table fits and its prose columns keep a readable width`, { skip }, async () => {
     const page = await open(width, panel, touch);
     await shot(page, `table-${touch ? 'phone' : 'panel'}.png`);

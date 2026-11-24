@@ -19,10 +19,17 @@ const setup = (name: string) => {
   s.addMember(p.id, josh.id);
   s.createTicket({ project_id: p.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
   s.splitScheme(p.id, josh.id);
-  const r = new Runner(s, () => {}, () => ({}), '/bin/false');
+  const r = new Runner(
+    s,
+    () => {},
+    () => ({}),
+    '/bin/false',
+  );
   return { s, r, p, lord: s.getOverlord(p.id)!, josh: s.coordinatorFor(p.id, josh.id)! };
 };
-const turn = (r: Runner, at: number) => { (r as any).turnStartedAt = () => at; };
+const turn = (r: Runner, at: number) => {
+  (r as any).turnStartedAt = () => at;
+};
 const mine = (s: Store, id: number) => s.eventsBetween(id, 0, Number.MAX_SAFE_INTEGER, true);
 
 test("the Overlord's everyone card carries its turn's reply, and the update shows in Mine", () => {
@@ -32,7 +39,10 @@ test("the Overlord's everyone card carries its turn's reply, and the update show
   say(r, lord.id, 'Restart them with:\n\n```powershell\nStart-Service x\n```');
   (r as any).carryReply(lord.id);
   assert.match(JSON.parse(s.getEvent(card.id)!.data).reply, /Start-Service x/);
-  assert.ok(mine(s, lord.id).some((e) => e.kind === 'card_reply'), 'live viewers get the update in Mine');
+  assert.ok(
+    mine(s, lord.id).some((e) => e.kind === 'card_reply'),
+    'live viewers get the update in Mine',
+  );
   s.db.close();
 });
 

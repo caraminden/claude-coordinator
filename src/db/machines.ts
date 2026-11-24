@@ -39,9 +39,7 @@ export const machineQueries = {
 
   /** A machine `ownerId` manages (#306), or a shared one with none. It is lent to no scheme until some are added (#438). */
   createMachine(this: Store, name: string, tokenHash: string, by: string, ownerId: number | null = null): Machine {
-    const { lastInsertRowid } = this.db
-      .prepare('INSERT INTO machines (name, token_hash, created_by, created_at, owner_id, scoped) VALUES (?, ?, ?, ?, ?, 1)')
-      .run(name, tokenHash, by, Date.now(), ownerId);
+    const { lastInsertRowid } = this.db.prepare('INSERT INTO machines (name, token_hash, created_by, created_at, owner_id, scoped) VALUES (?, ?, ?, ?, ?, 1)').run(name, tokenHash, by, Date.now(), ownerId);
     return this.getMachine(Number(lastInsertRowid))!;
   },
 
@@ -52,7 +50,10 @@ export const machineQueries = {
   },
 
   /** A new job (#857); returns it. */
-  addMachineJob(this: Store, j: Omit<MachineJob, 'id' | 'go' | 'go_by' | 'paused_by' | 'card' | 'input_token_hash' | 'started_at' | 'ended_at' | 'run_s' | 'server_run_s' | 'gpu_busy_s' | 'live' | 'live_at' | 'exit_code' | 'error' | 'outputs' | 'upload_bytes' | 'swept_at'> & Partial<Pick<MachineJob, 'go' | 'go_by'>>): MachineJob {
+  addMachineJob(
+    this: Store,
+    j: Omit<MachineJob, 'id' | 'go' | 'go_by' | 'paused_by' | 'card' | 'input_token_hash' | 'started_at' | 'ended_at' | 'run_s' | 'server_run_s' | 'gpu_busy_s' | 'live' | 'live_at' | 'exit_code' | 'error' | 'outputs' | 'upload_bytes' | 'swept_at'> & Partial<Pick<MachineJob, 'go' | 'go_by'>>,
+  ): MachineJob {
     const keys = Object.keys(j) as (keyof typeof j)[];
     const { lastInsertRowid } = this.db.prepare(`INSERT INTO machine_jobs (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((k) => (j[k] ?? null) as any));
     return this.getMachineJob(Number(lastInsertRowid))!;
@@ -72,11 +73,26 @@ export const machineQueries = {
   machineJobs(this: Store, where: { machine?: number; ticket?: number; contraption?: number; states?: readonly string[]; endedBefore?: number }, limit = 100): MachineJob[] {
     const conds: string[] = [];
     const args: (number | string)[] = [];
-    if (where.machine !== undefined) { conds.push('machine_id = ?'); args.push(where.machine); }
-    if (where.ticket !== undefined) { conds.push('ticket_id = ?'); args.push(where.ticket); }
-    if (where.contraption !== undefined) { conds.push('contraption_id = ?'); args.push(where.contraption); }
-    if (where.states) { conds.push(`state IN (${where.states.map(() => '?').join(', ')})`); args.push(...where.states); }
-    if (where.endedBefore !== undefined) { conds.push('ended_at < ? AND swept_at IS NULL'); args.push(where.endedBefore); }
+    if (where.machine !== undefined) {
+      conds.push('machine_id = ?');
+      args.push(where.machine);
+    }
+    if (where.ticket !== undefined) {
+      conds.push('ticket_id = ?');
+      args.push(where.ticket);
+    }
+    if (where.contraption !== undefined) {
+      conds.push('contraption_id = ?');
+      args.push(where.contraption);
+    }
+    if (where.states) {
+      conds.push(`state IN (${where.states.map(() => '?').join(', ')})`);
+      args.push(...where.states);
+    }
+    if (where.endedBefore !== undefined) {
+      conds.push('ended_at < ? AND swept_at IS NULL');
+      args.push(where.endedBefore);
+    }
     return this.db.prepare(`SELECT * FROM machine_jobs ${conds.length ? `WHERE ${conds.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`).all(...args, limit) as unknown as MachineJob[];
   },
 

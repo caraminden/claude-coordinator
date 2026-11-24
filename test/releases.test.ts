@@ -20,7 +20,8 @@ let dirs = 0;
 function world(news?: ConstructorParameters<typeof CitadelServer>[0]['news']) {
   const store = new Store(join(root, `test-${++dirs}.db`));
   const citadel = store.createProject('Citadel', 'https://github.com/o/citadel');
-  const state = join(root, `state-${dirs}`), heavy = join(root, `heavy-${dirs}`);
+  const state = join(root, `state-${dirs}`),
+    heavy = join(root, `heavy-${dirs}`);
   mkdirSync(join(state, 'queue'), { recursive: true });
   mkdirSync(heavy, { recursive: true });
   const ships = new Map<number, Ship['stage']>();
@@ -31,9 +32,21 @@ function world(news?: ConstructorParameters<typeof CitadelServer>[0]['news']) {
   let head: string | null = 'live1';
   const failed = new Map<number, string[]>(); // CI's files failed so far, as POST /api/ci-tests puts them on the wait
   const server = new CitadelServer({
-    store, scheme: () => store.getProject(citadel.id) ?? null, head: () => head, line: () => waits.line, ticketFor: (l) => waits.ticketFor(l),
-    wait: (id) => { const x = waits.wait(id); return x && failed.has(id) ? { ...x, failed: failed.get(id) } : x; },
-    ship, usual: waits.usual, interruptible: () => turns, ciQueued: (id) => queued.has(id), now: () => now, news,
+    store,
+    scheme: () => store.getProject(citadel.id) ?? null,
+    head: () => head,
+    line: () => waits.line,
+    ticketFor: (l) => waits.ticketFor(l),
+    wait: (id) => {
+      const x = waits.wait(id);
+      return x && failed.has(id) ? { ...x, failed: failed.get(id) } : x;
+    },
+    ship,
+    usual: waits.usual,
+    interruptible: () => turns,
+    ciQueued: (id) => queued.has(id),
+    now: () => now,
+    news,
   });
   const minion = (title = 'T') => {
     const t = store.createTicket({ project_id: citadel.id, title, permission_mode: 'default', created_by: 'Cara' });
@@ -48,8 +61,18 @@ function world(news?: ConstructorParameters<typeof CitadelServer>[0]['news']) {
   };
   const clearLine = () => rmSync(join(state, 'queue'), { recursive: true, force: true }) ?? mkdirSync(join(state, 'queue'));
   return {
-    store, citadel, waits, server, ships, queued, failed, minion, land, clearLine,
-    setTurns: (n: number) => (turns = n), setHead: (h: string | null) => (head = h),
+    store,
+    citadel,
+    waits,
+    server,
+    ships,
+    queued,
+    failed,
+    minion,
+    land,
+    clearLine,
+    setTurns: (n: number) => (turns = n),
+    setHead: (h: string | null) => (head = h),
   };
 }
 
@@ -58,7 +81,8 @@ const usuals = { 'land:rebase': [5], 'land:ci': [90, 100, 80], 'land:deploy': [1
 test('the next release: the furthest-along change leads, with its stage, usual, the land line and an estimate', async () => {
   const w = world();
   w.store.setSetting('wait-usual', usuals);
-  const a = w.minion('Holder'), b = w.minion('Waiter');
+  const a = w.minion('Holder'),
+    b = w.minion('Waiter');
   w.land(1, a.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
   w.land(2, b.branch, 0, 'waiting', 20);
   await w.waits.poll();
@@ -67,29 +91,53 @@ test('the next release: the furthest-along change leads, with its stage, usual, 
   assert.equal(t.target.projectId, w.citadel.id);
   assert.equal(t.target.name, 'Server');
   assert.deepEqual(t.current, { version: 'live1', number: 1, link: '/', changes: [], started: null, live: null, outcome: 'live', stages: {} }, 'no row yet: the live head alone, numbered as its row will be, linked to the site');
-  assert.deepEqual(t.line.map((e) => [e.name, e.holds, e.stage]), [[`#${a.number}`, true, 'test'], [`#${b.number}`, false, 'line']]);
+  assert.deepEqual(
+    t.line.map((e) => [e.name, e.holds, e.stage]),
+    [
+      [`#${a.number}`, true, 'test'],
+      [`#${b.number}`, false, 'line'],
+    ],
+  );
   const n = t.next!;
   assert.deepEqual(n.stages, [
-    { name: 'line', usual: null }, { name: 'rebase', usual: 5 }, { name: 'test', usual: 90 },
-    { name: 'deploy', usual: 10 }, { name: 'restart', usual: 40 }, { name: 'live', usual: 0 },
+    { name: 'line', usual: null },
+    { name: 'rebase', usual: 5 },
+    { name: 'test', usual: 90 },
+    { name: 'deploy', usual: 10 },
+    { name: 'restart', usual: 40 },
+    { name: 'live', usual: 0 },
   ]);
   assert.equal(n.stage, 'test');
   assert.equal(n.since, now - 30_000);
   assert.equal(n.usual, 90, "the median of land:ci's last lengths");
   assert.equal(n.waitingOn, null);
   assert.equal(n.eta, now - 30_000 + (90 + 10 + 40) * 1000);
-  assert.deepEqual(n.changes.map((c) => [c.ticketId, c.stage]), [[a.id, 'test'], [b.id, 'line']]);
+  assert.deepEqual(
+    n.changes.map((c) => [c.ticketId, c.stage]),
+    [
+      [a.id, 'test'],
+      [b.id, 'line'],
+    ],
+  );
   assert.equal(n.changes[1].waitingOn, `Releasing next: 2nd in line, behind #${a.number} (waiting for CI)`, 'the line is a wait: it says what it waits on');
   assert.equal(n.changes[1].usual, null);
   // One list on the card (Josh, 2026-11-13): its order says the line, so a waiting change's short words are its place alone.
   assert.equal(n.changes[1].brief, 'Releasing next', 'its train, not a place');
-  assert.deepEqual(t.line.map((e) => e.place), ['next', '2nd']);
-  assert.deepEqual(n.changes.map((c) => !!c.later), [false, true], 'the one waiting for the lock goes out in the release after, so it has no number');
+  assert.deepEqual(
+    t.line.map((e) => e.place),
+    ['next', '2nd'],
+  );
+  assert.deepEqual(
+    n.changes.map((c) => !!c.later),
+    [false, true],
+    'the one waiting for the lock goes out in the release after, so it has no number',
+  );
 });
 
 test('a change offers a preview while its minion is open with a worktree, not once dismissed (#638)', async () => {
   const w = world();
-  const a = w.minion('Open'), b = w.minion('Dismissed');
+  const a = w.minion('Open'),
+    b = w.minion('Dismissed');
   w.land(1, a.branch, 0, 'waiting', 20);
   w.land(2, b.branch, 0, 'waiting', 10);
   w.store.updateTicket(b.id, { status: 'closed' });
@@ -97,7 +145,7 @@ test('a change offers a preview while its minion is open with a worktree, not on
   const by = new Map(w.server.read()[0].next!.changes.map((c) => [c.ticketId, c.canPreview]));
   assert.equal(by.get(a.id), true);
   assert.equal(by.has(b.id), true, 'a dismissed minion still in the line is listed');
-  assert.equal(by.get(b.id), undefined, '...but its preview can\'t start');
+  assert.equal(by.get(b.id), undefined, "...but its preview can't start");
 });
 
 test('the estimate: only when the current stage and every one after it have a usual time and nothing waits', async () => {
@@ -153,13 +201,21 @@ test('the estimate: only when the current stage and every one after it have a us
 
 test('on main with no deploy coming waits for one; a failed deploy says why; a branch not landing is not in it', async () => {
   const w = world();
-  const a = w.minion(), b = w.minion(), c = w.minion();
+  const a = w.minion(),
+    b = w.minion(),
+    c = w.minion();
   w.ships.set(a.id, 'main');
   w.ships.set(b.id, 'failed');
   w.ships.set(c.id, 'branch');
   await w.waits.poll();
   const n = w.server.read()[0].next!;
-  assert.deepEqual(n.changes.map((x) => [x.ticketId, x.stage, x.waitingOn]).sort(), [[a.id, 'deploy', 'on main, not deployed yet: the next change to ship takes it live, or the Taskmaster can run a deploy'], [b.id, 'deploy', 'ship failed']].sort());
+  assert.deepEqual(
+    n.changes.map((x) => [x.ticketId, x.stage, x.waitingOn]).sort(),
+    [
+      [a.id, 'deploy', 'on main, not deployed yet: the next change to ship takes it live, or the Taskmaster can run a deploy'],
+      [b.id, 'deploy', 'ship failed'],
+    ].sort(),
+  );
   const since = n.since;
   now += 5000;
   assert.equal(w.server.read()[0].next!.since, since, "a stage's start stays put between polls, so the event isn't re-sent every poll");
@@ -169,25 +225,29 @@ test('on main with no deploy coming waits for one; a failed deploy says why; a b
   await w.waits.poll();
   const m = w.server.read()[0].next!;
   assert.equal(m.changes.find((x) => x.ticketId === a.id)!.waitingOn, null);
-  assert.deepEqual(w.server.read()[0].line.map((e) => [e.name, e.ticketId]), [['tools/deploy.sh', null]]);
+  assert.deepEqual(
+    w.server.read()[0].line.map((e) => [e.name, e.ticketId]),
+    [['tools/deploy.sh', null]],
+  );
 });
 
 // #1368: the ship holding the line says what happened so far, from its land.sh lines, each #N a link to its minion.
-test('the next release carries the holder\'s news, with its minions linked, and only the holder\'s', async () => {
+test("the next release carries the holder's news, with its minions linked, and only the holder's", async () => {
   const asked: number[] = [];
   const w = world((id, name) => {
     asked.push(id);
     return [{ tone: 'bad', text: `${name(rider.branch)} dropped: it turned the train red; back in line: ${name('ticket/9999-gone')}` }];
   });
-  const holder = w.minion('Holder'), rider = w.minion('Rider');
+  const holder = w.minion('Holder'),
+    rider = w.minion('Rider');
   w.land(1, holder.branch, now / 1000 - 40, 'finding the ship that turned the train red', 30);
   w.land(2, rider.branch, 0, 'waiting', 20);
   await w.waits.poll();
   const n = w.server.read()[0].next!;
-  assert.deepEqual(asked, [holder.id], 'only the holder\'s log is read');
+  assert.deepEqual(asked, [holder.id], "only the holder's log is read");
   assert.deepEqual(n.news, [{ tone: 'bad', text: `#${rider.number} dropped: it turned the train red; back in line: 9999-gone`, refs: { [`#${rider.number}`]: rider.id } }]);
   w.failed.set(holder.id, ['test/a.test.ts', 'test/b.test.ts', 'test/c.test.ts', 'test/d.test.ts']);
-  assert.deepEqual(w.server.read()[0].next!.news!.at(-1), { tone: 'bad', text: 'Failed so far: a.test.ts, b.test.ts, c.test.ts +1 more' }, 'CI\'s failures so far, live, last');
+  assert.deepEqual(w.server.read()[0].next!.news!.at(-1), { tone: 'bad', text: 'Failed so far: a.test.ts, b.test.ts, c.test.ts +1 more' }, "CI's failures so far, live, last");
   w.clearLine();
   await w.waits.poll();
   assert.equal(w.server.read()[0].next?.news, undefined, 'nobody holds the line: no news');
@@ -200,7 +260,6 @@ test('an idle target has no next release; no scheme yet, no target', async () =>
   const none = new CitadelServer({ store: w.store, scheme: () => null, head: () => 'x', line: () => [], ticketFor: () => null, wait: () => null, ship: () => null, usual: () => null, interruptible: () => 0 });
   assert.deepEqual(none.read(), []);
 });
-
 
 test('live writes one row per new head, with the minions whose branch tips landed and their stage times', async () => {
   const w = world();
@@ -255,7 +314,11 @@ test('live writes one row per new head, with the minions whose branch tips lande
   assert.equal(row.outcome, 'live');
   assert.equal(row.started_at, t0);
   assert.equal(row.live_at, now + 40_000);
-  assert.deepEqual(JSON.parse(row.changes).map((c: { ticketId: number }) => c.ticketId), [a.id], 'the idle branch at base is not a change');
+  assert.deepEqual(
+    JSON.parse(row.changes).map((c: { ticketId: number }) => c.ticketId),
+    [a.id],
+    'the idle branch at base is not a change',
+  );
   assert.deepEqual(JSON.parse(row.stages), { rebase: 20, test: 90, deploy: 10, restart: 40 });
   assert.equal(w.store.getSetting<Record<string, unknown>>('releases-tracking')?.[a.id], undefined, 'its tracking goes with the row');
 
@@ -267,7 +330,11 @@ test('live writes one row per new head, with the minions whose branch tips lande
   assert.equal(t.current!.version, head);
   assert.deepEqual([t.current!.number, t.current!.link], [2, '/'], 'the second row, linked to the site');
   assert.deepEqual(t.current!.changes, [{ ticketId: a.id, number: a.number, title: 'Feature A' }]);
-  assert.deepEqual(t.recent.map((r) => [r.version, r.number, r.link]), [[base, 1, null]], 'an older release has nothing left to open');
+  assert.deepEqual(
+    t.recent.map((r) => [r.version, r.number, r.link]),
+    [[base, 1, null]],
+    'an older release has nothing left to open',
+  );
   assert.equal(t.next, null);
 
   // git can't say what landed (the last row's commit is gone): no row, rather than one with its changes lost.
@@ -292,18 +359,32 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   const sent: any[] = [];
   let builds = [7];
   const releases = new Releases({
-    store: w.store, readers: [w.server], broadcast: (m) => sent.push(m),
+    store: w.store,
+    readers: [w.server],
+    broadcast: (m) => sent.push(m),
     testCopies: () => previewCopies(w.store, { own: () => w.store.getProject(w.citadel.id) ?? null, running: (k) => (k === 'build-7' ? { commit: 'b7' } : null), builds: () => builds }),
   });
   const all = releases.view(() => true);
   const c = all.find((s) => s.projectId === w.citadel.id)!;
-  assert.deepEqual(c.targets[0].testCopies.map((x) => [x.kind, x.path, x.running, x.commit]), [['preview', `preview/${mine.id}/`, false, null], ['build-preview', 'preview/build/7/', true, 'b7']]);
+  assert.deepEqual(
+    c.targets[0].testCopies.map((x) => [x.kind, x.path, x.running, x.commit]),
+    [
+      ['preview', `preview/${mine.id}/`, false, null],
+      ['build-preview', 'preview/build/7/', true, 'b7'],
+    ],
+  );
   assert.deepEqual(c.testCopies, []);
   assert.equal(c.targets[0].next, null);
   const d = all.find((s) => s.projectId === delve.id)!;
   assert.deepEqual(d.targets, [], 'a scheme with no target still lists its test copies');
-  assert.deepEqual(d.testCopies.map((x) => [x.ticketId, x.target]), [[theirs.id, null]]);
-  assert.deepEqual(releases.view((id) => id === delve.id).map((s) => s.projectId), [delve.id]);
+  assert.deepEqual(
+    d.testCopies.map((x) => [x.ticketId, x.target]),
+    [[theirs.id, null]],
+  );
+  assert.deepEqual(
+    releases.view((id) => id === delve.id).map((s) => s.projectId),
+    [delve.id],
+  );
   // A change on its way: the next release links that change's test copy, not a running one that doesn't carry it (build 7).
   w.ships.set(mine.id, 'main');
   await w.waits.poll();
@@ -315,7 +396,11 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   assert.deepEqual(sent, []);
   builds = [];
   releases.poll();
-  assert.deepEqual(sent.map((m) => [m.type, m.projectId]), [['releases', w.citadel.id]], "only the scheme whose part changed");
+  assert.deepEqual(
+    sent.map((m) => [m.type, m.projectId]),
+    [['releases', w.citadel.id]],
+    'only the scheme whose part changed',
+  );
   w.store.deleteSetting(`preview:${theirs.id}`);
   releases.poll();
   assert.deepEqual(sent.at(-1), { type: 'releases', projectId: delve.id, releases: { projectId: delve.id, targets: [], testCopies: [] } }, 'a scheme left with nothing is sent empty');
@@ -352,7 +437,10 @@ test('the releases table: an older database gets it on open, and a row reads bac
   const p = store.createProject('P', null);
   store.addRelease({ project_id: p.id, target: 't', version: 'v1', changes: '[]', started_at: null, live_at: 5, outcome: 'live', stages: '{}' });
   store.addRelease({ project_id: p.id, target: 't', version: 'v2', changes: '[]', started_at: 1, live_at: 6, outcome: 'live', stages: '{"deploy":3}' });
-  assert.deepEqual(store.listReleases(p.id, 't', 1).map((r) => [r.version, r.stages]), [['v2', '{"deploy":3}']]);
+  assert.deepEqual(
+    store.listReleases(p.id, 't', 1).map((r) => [r.version, r.stages]),
+    [['v2', '{"deploy":3}']],
+  );
   store.deleteProject(p.id);
   assert.deepEqual(store.listReleases(p.id, 't', 5), [], "a scheme's releases go with it");
 });
@@ -362,19 +450,16 @@ test("opening the database before 69 drops only Peek Auras' Windows Builds 1277-
   const store = new Store(path);
   const peek = store.createProject('Peek Auras', null);
   const other = store.createProject('Other', null);
-  const add = (project: number, target: string, version: string, outcome = 'live') =>
-    store.addRelease({ project_id: project, target, version, changes: '[]', started_at: 1, live_at: 2, outcome, stages: '{}' });
+  const add = (project: number, target: string, version: string, outcome = 'live') => store.addRelease({ project_id: project, target, version, changes: '[]', started_at: 1, live_at: 2, outcome, stages: '{}' });
   for (const n of [1275, 1277, 1279, 1282, 1284, 1286, 1289, 1291, 1292]) add(peek.id, 'ci:windows:release', `run:${n}`);
   add(peek.id, 'app:peek-auras', 'run:1277');
   add(other.id, 'ci:windows:release', 'run:1279');
   add(peek.id, 'ci:windows:release', 'run:1280', 'failed');
   store.setSetting('schema_version', 68);
   store.db.close();
-  const left = () => (again.db.prepare('SELECT project_id, target, version FROM releases ORDER BY id').all() as { project_id: number; target: string; version: string }[])
-    .map((r) => `${r.project_id === peek.id ? 'peek' : 'other'} ${r.target} ${r.version}`);
+  const left = () => (again.db.prepare('SELECT project_id, target, version FROM releases ORDER BY id').all() as { project_id: number; target: string; version: string }[]).map((r) => `${r.project_id === peek.id ? 'peek' : 'other'} ${r.target} ${r.version}`);
   let again = new Store(path);
-  assert.deepEqual(left(), ['peek ci:windows:release run:1275', 'peek ci:windows:release run:1292', 'peek app:peek-auras run:1277',
-    'other ci:windows:release run:1279', 'peek ci:windows:release run:1280']);
+  assert.deepEqual(left(), ['peek ci:windows:release run:1275', 'peek ci:windows:release run:1292', 'peek app:peek-auras run:1277', 'other ci:windows:release run:1279', 'peek ci:windows:release run:1280']);
   // Once: a build recorded again later stays.
   again.addRelease({ project_id: peek.id, target: 'ci:windows:release', version: 'run:1291', changes: '[]', started_at: 3, live_at: 4, outcome: 'live', stages: '{}' });
   again.db.close();
@@ -385,32 +470,49 @@ test("opening the database before 69 drops only Peek Auras' Windows Builds 1277-
 
 test('a ship train (#1303): the riders are in the release under way, right behind the front, not later and not movable', async () => {
   const w = world();
-  const f = w.minion('Front'), r1 = w.minion('Rider one'), r2 = w.minion('Rider two'), x = w.minion('Waiter');
+  const f = w.minion('Front'),
+    r1 = w.minion('Rider one'),
+    r2 = w.minion('Rider two'),
+    x = w.minion('Waiter');
   w.land(1, f.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
   w.land(2, r1.branch, 0, `riding in ${f.branch}'s ship train`, 20);
   w.land(3, x.branch, 0, 'waiting', 15);
   w.land(4, r2.branch, 0, `riding in ${f.branch}'s ship train`, 10); // joined the train after a plain waiter
   await w.waits.poll();
   const n = w.server.read()[0].next!;
-  assert.deepEqual(n.changes.map((c) => [c.ticketId, c.train?.role, !!c.later]), [
-    [f.id, 'front', false], [r1.id, 'rider', false], [r2.id, 'rider', false], [x.id, 'waiting', true],
-  ]);
+  assert.deepEqual(
+    n.changes.map((c) => [c.ticketId, c.train?.role, !!c.later]),
+    [
+      [f.id, 'front', false],
+      [r1.id, 'rider', false],
+      [r2.id, 'rider', false],
+      [x.id, 'waiting', true],
+    ],
+  );
   assert.equal(n.changes[0].train?.size, 3);
   assert.equal(n.changes[1].waitingOn, null, 'a rider is being tested, not waiting for a place');
-  assert.deepEqual(w.server.read()[0].line.map((e) => e.movable), [false, false, false, false]);
+  assert.deepEqual(
+    w.server.read()[0].line.map((e) => e.movable),
+    [false, false, false, false],
+  );
 });
 
 // #1398: a fix shipped without a go says so on its Releases row, read from its newest shipped line; one still on its way
 // with no shipped line yet, or shipped with a go, shows nothing.
 test('Releases: a change that shipped as a fix without a go carries its line', async () => {
   const w = world();
-  const fix = w.minion('Guard fix'), plain = w.minion('Plain');
+  const fix = w.minion('Guard fix'),
+    plain = w.minion('Plain');
   w.ships.set(fix.id, 'main');
   w.ships.set(plain.id, 'main');
   await w.waits.poll();
   const releases = new Releases({ store: w.store, readers: [w.server], broadcast: () => {}, testCopies: () => [] });
   const next = () => releases.read().find((s) => s.projectId === w.citadel.id)!.targets[0].next!.changes;
-  assert.deepEqual(next().map((c) => c.fix), [undefined, undefined], 'no shipped line yet');
+  assert.deepEqual(
+    next().map((c) => c.fix),
+    [undefined, undefined],
+    'no shipped line yet',
+  );
   const line = 'Shipped as a fix without a go: test/guard.test.ts (red on abc1234)';
   w.store.addEvent(fix.id, 'note', { text: `Shipped abc1234 "x": Guard fix. Risk high: guard file. ${line}. Live now.` });
   w.store.addEvent(plain.id, 'note', { text: 'Shipped def5678 "y": Plain. Risk high: guard file. Go: Cara, 3:05 PM PST. Live now.' });

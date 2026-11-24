@@ -81,6 +81,23 @@ test('with no room anywhere, it keeps next-up while ready, else the next ready o
   const full = { 1: week(0.99, 120 * H), 2: week(0.99, 24 * H) };
   assert.deepEqual(pick({ meters: full }), { n: 1, nextUp: 1, why: 'full' });
   assert.equal(pick({ meters: full, accounts: [{ n: 1, limitedUntil: NOW + H }, { n: 2 }] })?.n, 2);
-  assert.equal(pick({ meters: full, accounts: [{ n: 1, limitedUntil: NOW + H }, { n: 2, limitedUntil: NOW + 2 * H }] })?.n, 1);
-  assert.equal(pick({ accounts: [{ n: 1, expired: 1 }, { n: 2, expired: 1 }] }), null);
+  assert.equal(
+    pick({
+      meters: full,
+      accounts: [
+        { n: 1, limitedUntil: NOW + H },
+        { n: 2, limitedUntil: NOW + 2 * H },
+      ],
+    })?.n,
+    1,
+  );
+  assert.equal(
+    pick({
+      accounts: [
+        { n: 1, expired: 1 },
+        { n: 2, expired: 1 },
+      ],
+    }),
+    null,
+  );
 });

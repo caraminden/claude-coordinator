@@ -98,14 +98,26 @@ test('a dismissed minion keeps its wait for 3 days, and hears it after a reopen'
 test('saved waits move into the table at boot in one go, none dropped, and the key is emptied', async () => {
   const a = minion();
   const b = minion();
-  store.setSetting(RUNNER_WAITERS, [{ ticket: a, reason: 'one.' }, { ticket: b, reason: 'two.' }]);
+  store.setSetting(RUNNER_WAITERS, [
+    { ticket: a, reason: 'one.' },
+    { ticket: b, reason: 'two.' },
+  ]);
   const w = world();
   await w.outbox.boot();
-  assert.deepEqual(store.listDeliveries({ kind: 'runners_back' }).map((r) => [r.to_id, r.payload.reason, r.when_kind]), [[a, 'one.', 'runners'], [b, 'two.', 'runners']]);
+  assert.deepEqual(
+    store.listDeliveries({ kind: 'runners_back' }).map((r) => [r.to_id, r.payload.reason, r.when_kind]),
+    [
+      [a, 'one.', 'runners'],
+      [b, 'two.', 'runners'],
+    ],
+  );
   assert.deepEqual(runnerWaiters(store), []);
   await w.outbox.poke({ type: 'tick' }); // a second pass moves nothing twice
   assert.equal(store.listDeliveries({ kind: 'runners_back' }).length, 2);
   w.health.wakeParked(project as any, runner(true));
   await w.outbox.poke({ type: 'tick' });
-  assert.deepEqual(w.sent.map((s) => s.id), [a, b]);
+  assert.deepEqual(
+    w.sent.map((s) => s.id),
+    [a, b],
+  );
 });

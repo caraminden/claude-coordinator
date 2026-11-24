@@ -20,7 +20,9 @@ process.env.CLAUDE_CONFIG_DIR = join(root, 'claude');
 
 const seen = join(root, 'seen.jsonl');
 const fake = join(root, 'claude-fake');
-writeFileSync(fake, `#!${process.execPath}
+writeFileSync(
+  fake,
+  `#!${process.execPath}
 const fs = require('node:fs');
 const system = fs.readFileSync(process.argv[process.argv.indexOf('--append-system-prompt-file') + 1], 'utf8');
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
@@ -29,11 +31,17 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done', session_id: 's', total_cost_usd: 0.01, usage: { input_tokens: 1, output_tokens: 1 } }));
   process.exit(0);
 });
-`);
+`,
+);
 chmodSync(fake, 0o755);
 
 const store = new Store(join(root, 'test.db'));
-const runner = new Runner(store, () => {}, () => ({}), fake);
+const runner = new Runner(
+  store,
+  () => {},
+  () => ({}),
+  fake,
+);
 const project = store.createProject('P', null);
 
 function minion(title: string) {

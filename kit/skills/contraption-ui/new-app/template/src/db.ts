@@ -19,7 +19,9 @@ export function openDb(dataDir: string): DatabaseSync {
 
 export function migrate(db: DatabaseSync, dir = MIGRATIONS): number {
   let at = Number((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
-  const files = readdirSync(dir).filter((f) => /^\d{4}-[\w-]+\.sql$/.test(f)).sort();
+  const files = readdirSync(dir)
+    .filter((f) => /^\d{4}-[\w-]+\.sql$/.test(f))
+    .sort();
   for (const f of files) {
     const n = Number(f.slice(0, 4));
     if (n <= at) continue;

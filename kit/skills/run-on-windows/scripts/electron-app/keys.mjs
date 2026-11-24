@@ -44,7 +44,9 @@ let exe;
 const edge = build === 'edge';
 if (edge) exe = ['ProgramFiles(x86)', 'ProgramFiles'].map((v) => path.join(process.env[v] ?? '', 'Microsoft', 'Edge', 'Application', 'msedge.exe')).find(existsSync);
 else if (build === 'checkout') {
-  const have = readdirSync(root).filter((d) => /^build-\d+$/.test(d)).sort((a, b) => Number(b.slice(6)) - Number(a.slice(6)));
+  const have = readdirSync(root)
+    .filter((d) => /^build-\d+$/.test(d))
+    .sort((a, b) => Number(b.slice(6)) - Number(a.slice(6)));
   const base = fetchBuild(have[0]?.slice(6) ?? '9');
   const dir = path.join(root, 'checkout');
   rmSync(dir, { recursive: true, force: true });
@@ -53,7 +55,9 @@ else if (build === 'checkout') {
   // Only the files desktop/build.sh puts in the app, so a file it misses fails here too. RIG_APP: another desktop/ folder
   // (an older commit's, for a control run).
   const from = process.env.RIG_APP || path.join(repo, 'desktop');
-  const files = readFileSync(path.join(from, 'build.sh'), 'utf8').match(/cp "\$here"\/\{([^}]+)\} "\$work\/Citadel\/resources\/app\/"/)[1].split(',');
+  const files = readFileSync(path.join(from, 'build.sh'), 'utf8')
+    .match(/cp "\$here"\/\{([^}]+)\} "\$work\/Citadel\/resources\/app\/"/)[1]
+    .split(',');
   mkdirSync(path.join(dir, 'resources', 'app'));
   for (const f of files) cpSync(path.join(from, f), path.join(dir, 'resources', 'app', f));
   exe = path.join(dir, 'Citadel.exe');
@@ -90,8 +94,15 @@ addEventListener('load', report); addEventListener('resize', report);
 </script>`;
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
-  const send = (body, type = 'text/html') => { res.writeHead(200, { 'content-type': type, 'cache-control': 'max-age=600' }); res.end(body.replaceAll('${PORT}', String(PORT))); };
-  if (u.pathname === '/c/') { layout = null; loads.push({ hard: /no-cache/.test(req.headers['cache-control'] ?? '') || /no-cache/.test(req.headers.pragma ?? '') }); return send(top); }
+  const send = (body, type = 'text/html') => {
+    res.writeHead(200, { 'content-type': type, 'cache-control': 'max-age=600' });
+    res.end(body.replaceAll('${PORT}', String(PORT)));
+  };
+  if (u.pathname === '/c/') {
+    layout = null;
+    loads.push({ hard: /no-cache/.test(req.headers['cache-control'] ?? '') || /no-cache/.test(req.headers.pragma ?? '') });
+    return send(top);
+  }
   const app = { '/apps/demo/': 'same', '/apps/art/': 'sandboxed', '/apps/cross/': 'cross' }[u.pathname];
   if (app) appLoads[app]++;
   if (u.pathname === '/apps/demo/') return send(pane('same', 'same-origin app frame'));
@@ -101,7 +112,8 @@ const server = http.createServer((req, res) => {
   if (process.env.RIG_DEBUG && u.pathname !== '/c/') console.log('  page:', u.pathname, u.search);
   if (u.pathname === '/focus') focus = u.searchParams.get('w');
   if (u.pathname === '/layout') layout = JSON.parse(u.searchParams.get('d'));
-  res.writeHead(204, { 'access-control-allow-origin': '*' }); res.end();
+  res.writeHead(204, { 'access-control-allow-origin': '*' });
+  res.end();
 });
 let focus = null;
 const PORT = await new Promise((r) => server.listen(0, () => r(server.address().port)));
@@ -114,26 +126,61 @@ const app = spawn(exe, [`--user-data-dir=${profile}`, `--remote-debugging-port=$
 const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(import.meta.dirname, '..', 'wco', 'mouse.ps1')], { stdio: ['pipe', 'pipe', 'inherit'] });
 const psQ = [];
 readline.createInterface({ input: ps.stdout }).on('line', (l) => psQ.shift()?.(l.trim()));
-const input = (cmd) => new Promise((r) => { psQ.push(r); ps.stdin.write(cmd + '\n'); });
-const until = async (ok, ms = 15000) => { for (let t = 0; t < ms && !ok(); t += 200) await sleep(200); return ok(); };
+const input = (cmd) =>
+  new Promise((r) => {
+    psQ.push(r);
+    ps.stdin.write(cmd + '\n');
+  });
+const until = async (ok, ms = 15000) => {
+  for (let t = 0; t < ms && !ok(); t += 200) await sleep(200);
+  return ok();
+};
 
 const cdp = process.env.RIG_INPUT === 'cdp';
 let send = null;
 if (cdp) {
   let wsUrl;
-  for (let i = 0; i < 60 && !wsUrl; i++) { try { wsUrl = (await (await fetch(`http://127.0.0.1:${dbg}/json/version`)).json()).webSocketDebuggerUrl; } catch { await sleep(500); } }
+  for (let i = 0; i < 60 && !wsUrl; i++) {
+    try {
+      wsUrl = (await (await fetch(`http://127.0.0.1:${dbg}/json/version`)).json()).webSocketDebuggerUrl;
+    } catch {
+      await sleep(500);
+    }
+  }
   const ws = new WebSocket(wsUrl);
-  await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-  let id = 0; const waits = new Map();
-  ws.onmessage = (m) => { const d = JSON.parse(m.data); const w = waits.get(d.id); if (w) { waits.delete(d.id); d.error ? w.j(new Error(d.error.message)) : w.r(d.result); } };
-  const raw = (method, params = {}, sessionId) => new Promise((r, j) => { const n = ++id; waits.set(n, { r, j }); ws.send(JSON.stringify({ id: n, method, params, sessionId })); });
+  await new Promise((r, j) => {
+    ws.onopen = r;
+    ws.onerror = j;
+  });
+  let id = 0;
+  const waits = new Map();
+  ws.onmessage = (m) => {
+    const d = JSON.parse(m.data);
+    const w = waits.get(d.id);
+    if (w) {
+      waits.delete(d.id);
+      d.error ? w.j(new Error(d.error.message)) : w.r(d.result);
+    }
+  };
+  const raw = (method, params = {}, sessionId) =>
+    new Promise((r, j) => {
+      const n = ++id;
+      waits.set(n, { r, j });
+      ws.send(JSON.stringify({ id: n, method, params, sessionId }));
+    });
   let page;
-  for (let i = 0; i < 60 && !page; i++) { page = (await raw('Target.getTargets')).targetInfos.find((t) => t.type === 'page'); if (!page) await sleep(500); }
+  for (let i = 0; i < 60 && !page; i++) {
+    page = (await raw('Target.getTargets')).targetInfos.find((t) => t.type === 'page');
+    if (!page) await sleep(500);
+  }
   const sid = (await raw('Target.attachToTarget', { targetId: page.targetId, flatten: true })).sessionId;
   send = (method, params) => raw(method, params, sid);
 }
 // CSS px in the page, for DevTools' events.
-const css = (where, lower) => { const [x, y1, y2] = layout.at[where]; return [x, lower ? y2 : y1]; };
+const css = (where, lower) => {
+  const [x, y1, y2] = layout.at[where];
+  return [x, lower ? y2 : y1];
+};
 const mouse = async (where, button, lower) => {
   if (!cdp) return input(`${button === 'right' ? 'rclick' : 'click'} ${(([x, y1, y2]) => [x, lower ? y2 : y1])(at(where)).join(' ')}`);
   const [x, y] = css(where, lower);
@@ -148,11 +195,26 @@ const press = async (k) => {
 };
 
 // Each /c/ load clears the layout; the page sends a new one once it and its frames have loaded.
-const ready = async () => { await until(() => layout); await sleep(600); };
-if (!(await until(() => loads.length, 30000))) { console.log('FAIL the app never loaded /c/'); process.exit(1); }
+const ready = async () => {
+  await until(() => layout);
+  await sleep(600);
+};
+if (!(await until(() => loads.length, 30000))) {
+  console.log('FAIL the app never loaded /c/');
+  process.exit(1);
+}
 await ready();
-if (!layout) { console.log('FAIL the page never sent its layout'); process.exit(1); }
-const at = (where) => { const L = layout, bx = L.x + (L.ow - L.iw) / 2, by = L.y + L.oh - L.ih - (L.ow - L.iw) / 2; const [x, y1, y2] = L.at[where]; return [Math.round((bx + x) * L.dpr), Math.round((by + y1) * L.dpr), Math.round((by + y2) * L.dpr)]; };
+if (!layout) {
+  console.log('FAIL the page never sent its layout');
+  process.exit(1);
+}
+const at = (where) => {
+  const L = layout,
+    bx = L.x + (L.ow - L.iw) / 2,
+    by = L.y + L.oh - L.ih - (L.ow - L.iw) / 2;
+  const [x, y1, y2] = L.at[where];
+  return [Math.round((bx + x) * L.dpr), Math.round((by + y1) * L.dpr), Math.round((by + y2) * L.dpr)];
+};
 const places = ['top', 'same', 'sandboxed', 'cross'];
 // Another window (a console left open on the box) may sit on top: the app's window comes forward before each click.
 const front = () => input(`front ${app.pid}`);
@@ -163,7 +225,12 @@ let fails = 0;
 
 if (what === 'keys' || what === 'all') {
   console.log('input', cdp ? 'DevTools' : 'real (SendKeys, mouse_event)');
-  const keys = [['^r', 'Ctrl+R', false], ['{F5}', 'F5', false], ['^+r', 'Ctrl+Shift+R', true], ['^{F5}', 'Ctrl+F5', true]];
+  const keys = [
+    ['^r', 'Ctrl+R', false],
+    ['{F5}', 'F5', false],
+    ['^+r', 'Ctrl+Shift+R', true],
+    ['^{F5}', 'Ctrl+F5', true],
+  ];
   for (const where of places) {
     for (const [k, name, hard] of keys) {
       focus = null;
@@ -171,7 +238,9 @@ if (what === 'keys' || what === 'all') {
       await mouse(where, 'left', false);
       // A missed click leaves focus elsewhere, and a reload there would pass for this frame's: no focus, no pass.
       const focused = await until(() => focus === where, 3000);
-      const f = focus, n = loads.length, s = seen.length;
+      const f = focus,
+        n = loads.length,
+        s = seen.length;
       await press(k);
       const reloaded = await until(() => loads.length > n, 4000);
       const ok = focused && reloaded && (!hard || loads.at(-1).hard);
@@ -183,12 +252,20 @@ if (what === 'keys' || what === 'all') {
 }
 
 // An open menu would take the next right-click, so each one is closed and the rig waits until it's gone.
-const closeMenu = async () => { for (let i = 0; i < 10 && (await input('menu')).trim(); i++) { await input('menu-close'); await sleep(300); } };
+const closeMenu = async () => {
+  for (let i = 0; i < 10 && (await input('menu')).trim(); i++) {
+    await input('menu-close');
+    await sleep(300);
+  }
+};
 if (!edge && (what === 'rclick' || what === 'all')) {
   // The rig's own check: a text box always gets the edit menu, so none here means the rig can't see a menu.
   {
     const [x, y] = at('top');
-    await front(); await input(`move ${x} ${y}`); await mouse('top', 'right', false); await sleep(900);
+    await front();
+    await input(`move ${x} ${y}`);
+    await mouse('top', 'right', false);
+    await sleep(900);
     const items = (await input('menu')).trim();
     await input(`shot ${path.join(shots, 'rclick-textbox.png')}`);
     console.log(`${items ? 'ok  ' : 'RIG?'} right-click Citadel's text box, menu: ${items || '(none): the rig sees no menu, so the lines below prove nothing'}`);
@@ -202,17 +279,22 @@ if (!edge && (what === 'rclick' || what === 'all')) {
     await input(`move ${x} ${y}`);
     await mouse(where, 'right', true);
     await sleep(900);
-    const items = (await input('menu')).split(' | ').map((s) => s.trim()).filter(Boolean);
+    const items = (await input('menu'))
+      .split(' | ')
+      .map((s) => s.trim())
+      .filter(Boolean);
     await input(`shot ${path.join(shots, `rclick-${where}.png`)}`);
     const has = (re) => items.some((i) => re.test(i));
-    let ok, note = '';
+    let ok,
+      note = '';
     if (where === 'top') {
       ok = !has(/Reload this app/);
     } else if (process.env.RIG_KIT) ok = !items.length;
     else {
       ok = has(/^Reload this app/) && has(/^Inspect/);
       if (ok) {
-        const c = loads.length, a = { ...appLoads };
+        const c = loads.length,
+          a = { ...appLoads };
         note = `; ${await input('menu-invoke ^Reload this app')}`;
         const reloaded = await until(() => appLoads[where] > a[where], 4000);
         await sleep(800);
@@ -230,6 +312,8 @@ if (!edge && (what === 'rclick' || what === 'all')) {
   }
 }
 writeFileSync(path.join(root, 'last.txt'), `fails ${fails}\n`);
-ps.stdin.end(); app.kill(); server.close();
+ps.stdin.end();
+app.kill();
+server.close();
 await sleep(500);
 process.exit(fails ? 1 : 0);

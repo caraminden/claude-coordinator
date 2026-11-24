@@ -40,7 +40,8 @@ function oneGrunt(agentId: string, meta: any, transcript: string): GruntRow {
     const usage: any = { ...(was?.usage ?? m.usage), ...m.usage };
     for (const f of FIELDS) usage[f] = Math.max(Number(was?.usage?.[f]) || 0, Number(m.usage[f]) || 0);
     if (m.usage.cache_creation || was?.usage?.cache_creation) {
-      const a = was?.usage?.cache_creation ?? {}, b = m.usage.cache_creation ?? {};
+      const a = was?.usage?.cache_creation ?? {},
+        b = m.usage.cache_creation ?? {};
       usage.cache_creation = { ephemeral_5m_input_tokens: Math.max(a.ephemeral_5m_input_tokens ?? 0, b.ephemeral_5m_input_tokens ?? 0), ephemeral_1h_input_tokens: Math.max(a.ephemeral_1h_input_tokens ?? 0, b.ephemeral_1h_input_tokens ?? 0) };
     }
     messages.set(m.id, { model: String(m.model ?? ''), usage });
@@ -53,15 +54,28 @@ function oneGrunt(agentId: string, meta: any, transcript: string): GruntRow {
   }
   const model = [...byModel].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
   return {
-    agent_id: agentId, agent_type: text(meta?.agentType, 100), model, effort: text(meta?.effort, 20) ?? effort, calls: messages.size, cost_usd: cost,
-    request_shape: text(meta?.requestShape, 40), spawn_depth: typeof meta?.spawnDepth === 'number' ? meta.spawnDepth : null, description: text(meta?.description),
+    agent_id: agentId,
+    agent_type: text(meta?.agentType, 100),
+    model,
+    effort: text(meta?.effort, 20) ?? effort,
+    calls: messages.size,
+    cost_usd: cost,
+    request_shape: text(meta?.requestShape, 40),
+    spawn_depth: typeof meta?.spawnDepth === 'number' ? meta.spawnDepth : null,
+    description: text(meta?.description),
   };
 }
 
 /** The folder holding a session's Grunt files: under the turn's working folder if it's there, else under whichever project folder has the session (a container's folders differ). */
 async function subagentsDir(configDir: string, cwd: string, sessionId: string): Promise<string | null> {
   const projects = join(configDir, 'projects');
-  const has = async (dir: string) => (await readdir(dir).then(() => true, () => false)) ? dir : null;
+  const has = async (dir: string) =>
+    (await readdir(dir).then(
+      () => true,
+      () => false,
+    ))
+      ? dir
+      : null;
   const direct = await has(join(projects, projectSlug(cwd), sessionId, 'subagents'));
   if (direct) return direct;
   for (const slug of await readdir(projects).catch(() => [] as string[])) {
@@ -84,7 +98,9 @@ export async function readGrunts(configDir: string, cwd: string, sessionId: stri
       if (since && (await stat(join(dir, `agent-${m[1]}.jsonl`))).mtimeMs < since) continue;
       const meta = JSON.parse(await readFile(join(dir, name), 'utf8'));
       rows.push(oneGrunt(m[1], meta, await readFile(join(dir, `agent-${m[1]}.jsonl`), 'utf8').catch(() => '')));
-    } catch { /* an unreadable Grunt is skipped, not the turn */ }
+    } catch {
+      /* an unreadable Grunt is skipped, not the turn */
+    }
   }
   return rows;
 }

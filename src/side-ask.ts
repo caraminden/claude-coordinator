@@ -32,11 +32,12 @@ export const SIDE_IDLE_MS = 60 * 60_000;
 export const SIDE_LIMIT_MS = 15 * 60_000;
 export const SIDE_MAX_CHARS = 8000;
 
-const PREAMBLE = 'This message is a side question, asked while you work. It runs in a read-only copy of your session: '
-  + 'you can read files and run read-only commands (git, gh, logs, ps, the database with -readonly), but nothing you do here '
-  + 'reaches your real session, your task list or your next turn, and writes are refused. Answer the question directly and '
-  + 'briefly. Look at the actual state (processes, logs, git, the turn folder) when asked what is going on, rather than '
-  + 'answering from memory. If something needs the minion to act, say what to tell it.';
+const PREAMBLE =
+  'This message is a side question, asked while you work. It runs in a read-only copy of your session: ' +
+  'you can read files and run read-only commands (git, gh, logs, ps, the database with -readonly), but nothing you do here ' +
+  'reaches your real session, your task list or your next turn, and writes are refused. Answer the question directly and ' +
+  'briefly. Look at the actual state (processes, logs, git, the turn folder) when asked what is going on, rather than ' +
+  'answering from memory. If something needs the minion to act, say what to tell it.';
 
 export class SideAsks {
   private threads = new Map<number, SideThread>();
@@ -193,8 +194,17 @@ export class SideAsks {
     // Its cost is the asker's (sender pays), kept apart from the minion's own turns.
     if (cost !== null && t.forkId) {
       const turn: Turn = this.store.recordTurn(t.ticketId, {
-        event_id: ev.id, session_id: t.forkId, ended_at: ev.created_at, session_cost_usd: cost, duration_ms: result.duration_ms,
-        usage: result.usage, payer: this.runner.payerOf(t.asker), account: t.account, modelUsage: result.modelUsage, side: true, fork_of: minion,
+        event_id: ev.id,
+        session_id: t.forkId,
+        ended_at: ev.created_at,
+        session_cost_usd: cost,
+        duration_ms: result.duration_ms,
+        usage: result.usage,
+        payer: this.runner.payerOf(t.asker),
+        account: t.account,
+        modelUsage: result.modelUsage,
+        side: true,
+        fork_of: minion,
       });
       this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(t.ticketId)?.project_id });
     }

@@ -31,7 +31,12 @@ function world() {
   const view = (): SchemeReleases[] => [{ projectId: 3, targets: [app, ci].map((t) => ({ ...tv(t), testCopies: [] })), testCopies: [] }];
   const held = new LastGreen(store);
   const auto = new AutoDeploy({
-    store, targets: () => [app, ci], view, now: () => now, held, shipping: () => shipping,
+    store,
+    targets: () => [app, ci],
+    view,
+    now: () => now,
+    held,
+    shipping: () => shipping,
     failed: (t, why) => failed.push(`${t.id}: ${why}`),
     deployers: {
       contraption: {
@@ -45,7 +50,12 @@ function world() {
     },
   });
   return {
-    auto, started, failed, held, app: tv(app), ci: tv(ci),
+    auto,
+    started,
+    failed,
+    held,
+    app: tv(app),
+    ci: tv(ci),
     set: (o: { head?: string; waits?: boolean; refuse?: string | null; shipping?: boolean }) => {
       if (o.shipping !== undefined) shipping = o.shipping;
       if (o.head !== undefined) head = o.head;
@@ -111,10 +121,16 @@ test('an Android target follows the same rule (d)', async () => {
   const store = new Store(join(root, `t-${++dbs}.db`));
   const apk: Found = { projectId: 3, id: 'apk:release', kind: 'apk', name: 'Android', link: null, branch: 'main', workflow: 'r.yml', contraption: 'm' };
   const tv: Omit<TargetView, 'testCopies'> = { target: { id: apk.id, projectId: 3, name: apk.name, kind: 'apk', link: null }, current: null, next: null, line: [], recent: [] };
-  let now = 1_800_000_000_000, shipping = true;
+  let now = 1_800_000_000_000,
+    shipping = true;
   const started: string[] = [];
   const auto = new AutoDeploy({
-    store, targets: () => [apk], view: () => [{ projectId: 3, targets: [{ ...tv, testCopies: [] }], testCopies: [] }], failed: () => {}, now: () => now, shipping: () => shipping,
+    store,
+    targets: () => [apk],
+    view: () => [{ projectId: 3, targets: [{ ...tv, testCopies: [] }], testCopies: [] }],
+    failed: () => {},
+    now: () => now,
+    shipping: () => shipping,
     deployers: { apk: { waits: () => true, head: async () => 'publish:8', start: () => void started.push('apk') } },
   });
   await auto.tick();
@@ -126,7 +142,7 @@ test('an Android target follows the same rule (d)', async () => {
   assert.deepEqual(started, ['apk'], 'nothing coming: at once');
 });
 
-test('turned off, it waits for the button; the button deploys at once and counts as the commit\'s try', async () => {
+test("turned off, it waits for the button; the button deploys at once and counts as the commit's try", async () => {
   const w = world();
   assert.equal(w.auto.setOn(3, 'app:peek', false), true);
   assert.equal(w.auto.isOn(3, 'app:peek'), false);
@@ -141,7 +157,7 @@ test('turned off, it waits for the button; the button deploys at once and counts
   await w.auto.tick();
   w.pass(60_000);
   await w.auto.tick();
-  assert.equal(w.started.length, 1, 'the person\'s deploy was this commit\'s try');
+  assert.equal(w.started.length, 1, "the person's deploy was this commit's try");
 });
 
 test('nothing waiting, nothing due; a kind with no release step has no button or switch', async () => {
@@ -157,7 +173,7 @@ test('nothing waiting, nothing due; a kind with no release step has no button or
   await assert.rejects(w.auto.deployNow(3, 'ci:windows:release', 'Cara', 1), /no release step/);
 });
 
-test('an auto-deploy that can\'t start is told, and not retried at that commit', async () => {
+test("an auto-deploy that can't start is told, and not retried at that commit", async () => {
   const w = world();
   w.set({ refuse: 'peek is being installed or deployed already' });
   await w.auto.tick();
@@ -175,7 +191,10 @@ test('a deploy still starting (an APK downloading) is not started twice, and its
   let finish!: () => void;
   let starts = 0;
   const auto = new AutoDeploy({
-    store, targets: () => [apk], view: () => [{ projectId: 3, targets: [{ ...tv, testCopies: [] }], testCopies: [] }], failed: () => {},
+    store,
+    targets: () => [apk],
+    view: () => [{ projectId: 3, targets: [{ ...tv, testCopies: [] }], testCopies: [] }],
+    failed: () => {},
     deployers: { apk: { waits: () => true, head: async () => 'publish:8', start: () => (starts++, new Promise<void>((done) => (finish = done))) } },
   });
   const first = auto.deployNow(3, apk.id, 'Cara', 1);

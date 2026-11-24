@@ -48,7 +48,12 @@ const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
 
 function server() {
-  const r = new Runner(store, () => {}, () => ({}), fake);
+  const r = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
   r.pollMs = 10;
   return r;
 }
@@ -63,7 +68,11 @@ function newTicket(kind: TicketKind = 'ticket') {
 }
 
 const seen = (dir: string) => lines(join(dir, 'seen.txt'));
-const events = (id: number, kind: string) => store.listEvents(id).filter((e) => e.kind === kind).map((e) => ({ id: e.id, ...JSON.parse(e.data) }));
+const events = (id: number, kind: string) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === kind)
+    .map((e) => ({ id: e.id, ...JSON.parse(e.data) }));
 const turnDir = (r: Runner, id: number): string => (r as any).turns.get(id).dir;
 
 /** Start a turn with Cara's first message, and wait until claude has it. */
@@ -172,7 +181,7 @@ test('a message queued after Stop survives a restart that finds the stopped turn
   await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
 });
 
-test('the Taskmaster steers its minion; a minion\'s message to a busy Taskmaster queues', async () => {
+test("the Taskmaster steers its minion; a minion's message to a busy Taskmaster queues", async () => {
   const coord = newTicket('coordinator');
   const t = newTicket();
   const r = server();
@@ -200,7 +209,10 @@ test('✕ takes back a queued message, which then never reaches claude', async (
   assert.equal(r.unqueue(t.id, msg.id, 'Cara'), true);
   assert.equal(r.unqueue(t.id, msg.id, 'Cara'), false, 'only once');
   assert.equal(r.queued(t.id), 0);
-  assert.deepEqual(events(t.id, 'unqueued').map((e) => [e.id, e.by]), [[msg.id, 'Cara']]);
+  assert.deepEqual(
+    events(t.id, 'unqueued').map((e) => [e.id, e.by]),
+    [[msg.id, 'Cara']],
+  );
   assert.equal(store.getSetting<any>(`minion-queue:${t.id}`)?.msgs, undefined, 'a restart would not bring it back');
   writeFileSync(join(t.dir, 'release'), '');
   await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
@@ -228,7 +240,9 @@ test('a reader never sees steer.sent empty or half-written while steers go in', 
   await started(r, t);
   const sentFile = join(turnDir(r, t.id), 'steer.sent');
   // A process of its own reading as fast as it can, as the runner would on a restart mid-write.
-  const reader = tmp.spawn(process.execPath, ['-e', `
+  const reader = tmp.spawn(process.execPath, [
+    '-e',
+    `
     const { readFileSync } = require('node:fs');
     const bad = new Set();
     let reads = 0;
@@ -238,7 +252,8 @@ test('a reader never sees steer.sent empty or half-written while steers go in', 
       try { const s = readFileSync(${JSON.stringify(sentFile)}, 'utf8'); reads++; if (!/^\\d+$/.test(s)) bad.add(s); } catch {}
     }
     console.log(JSON.stringify({ reads, bad: [...bad] }));
-  `]);
+  `,
+  ]);
   let out = '';
   reader.stdout!.on('data', (d) => (out += d));
   const exited = new Promise((res) => reader.on('exit', res));
@@ -263,10 +278,23 @@ test('a reader never sees steer.sent empty or half-written while steers go in', 
 test('an unreadable steer.sent redelivers nothing; a missing one, everything', () => {
   const dir = mkdtempSync(join(root, 'sent-'));
   const msg = (text: string) => ({ author: 'Cara', text }) as any;
-  const turn = { dir, steered: [{ end: 10, msg: msg('a') }, { end: 20, msg: msg('b') }] };
-  assert.deepEqual(unsentSteers(turn).map((m) => m.text), ['a', 'b'], 'none passed on yet');
+  const turn = {
+    dir,
+    steered: [
+      { end: 10, msg: msg('a') },
+      { end: 20, msg: msg('b') },
+    ],
+  };
+  assert.deepEqual(
+    unsentSteers(turn).map((m) => m.text),
+    ['a', 'b'],
+    'none passed on yet',
+  );
   writeFileSync(join(dir, 'steer.sent'), '10');
-  assert.deepEqual(unsentSteers(turn).map((m) => m.text), ['b']);
+  assert.deepEqual(
+    unsentSteers(turn).map((m) => m.text),
+    ['b'],
+  );
   writeFileSync(join(dir, 'steer.sent'), '20');
   assert.deepEqual(unsentSteers(turn), []);
   for (const junk of ['', '1x', ' ', '-3', '1e3']) {

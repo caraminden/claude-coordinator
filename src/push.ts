@@ -90,13 +90,7 @@ export function vapidJwt(audience: string, subject: string, key: KeyObject, now 
  * Encrypt a payload for one subscription (RFC 8291, aes128gcm, a single record). `salt` and
  * `serverPrivateKey` are random for each message; tests pass the RFC's to check the output.
  */
-export function encryptPayload(
-  payload: Buffer,
-  uaPublicB64: string,
-  authB64: string,
-  salt = randomBytes(16),
-  serverPrivateKey?: Buffer,
-): Buffer {
+export function encryptPayload(payload: Buffer, uaPublicB64: string, authB64: string, salt = randomBytes(16), serverPrivateKey?: Buffer): Buffer {
   const uaPublic = Buffer.from(uaPublicB64, 'base64url');
   const authSecret = Buffer.from(authB64, 'base64url');
   if (uaPublic.length !== 65 || uaPublic[0] !== 4) throw new Error('p256dh must be an uncompressed P-256 point');
@@ -165,7 +159,7 @@ export function notificationFor(ticket: Ticket, trigger: PushTrigger, projectNam
  * (Pusher.local) while the app runs. Stored like a subscription, `desktop:<uuid>`, so it keeps the same per-device settings.
  */
 export const DESKTOP = 'desktop:';
-export const desktopId = (raw: unknown) => typeof raw === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(raw) ? raw : null;
+export const desktopId = (raw: unknown) => (typeof raw === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(raw) ? raw : null);
 
 /** Is this a subscription worth storing: an https push service and well-formed keys? */
 export function validSubscription(raw: any): raw is PushSubscriptionJson {
@@ -218,10 +212,8 @@ export class Pusher {
     // A mention is said to its person (#1149): it reaches their pinned-only devices too, as a spend alert's person.
     const also = trigger.kind === 'spend' && trigger.also ? trigger.also.toLowerCase() : trigger.kind === 'mention' ? to : null;
     const pinned = (name: string) => this.store.isTicketPinned(name, ticket.id);
-    const forThem = (s: PushSubscriptionRow) => to ? s.name.toLowerCase() === to
-      : !owner || s.name.toLowerCase() === owner || s.name.toLowerCase() === also || pinned(s.name) || JSON.parse(s.everything).includes(ticket.project_id);
-    const subs = this.store.listPushSubscriptions().filter((s) => s.name !== except && forThem(s) && !JSON.parse(s.muted).includes(ticket.project_id)
-      && this.inScheme(s.name, ticket.project_id) && (!s.only_pinned || ticket.kind !== 'ticket' || pinned(s.name) || s.name.toLowerCase() === also));
+    const forThem = (s: PushSubscriptionRow) => (to ? s.name.toLowerCase() === to : !owner || s.name.toLowerCase() === owner || s.name.toLowerCase() === also || pinned(s.name) || JSON.parse(s.everything).includes(ticket.project_id));
+    const subs = this.store.listPushSubscriptions().filter((s) => s.name !== except && forThem(s) && !JSON.parse(s.muted).includes(ticket.project_id) && this.inScheme(s.name, ticket.project_id) && (!s.only_pinned || ticket.kind !== 'ticket' || pinned(s.name) || s.name.toLowerCase() === also));
     await Promise.all(subs.map((s) => this.send(s, msg).catch((err) => console.error(`Push to ${s.name} failed:`, err.message))));
   }
 
@@ -234,7 +226,7 @@ export class Pusher {
   /** A minion's owner's name, lowercased (Store.minionPerson: the scheme's owner once its assignee is gone, #1449); null for none, so everyone hears. */
   private owner(ticket: Ticket): string | null {
     const id = this.store.minionPerson(ticket);
-    return id == null ? null : this.store.getUser(id)?.name.toLowerCase() ?? null;
+    return id == null ? null : (this.store.getUser(id)?.name.toLowerCase() ?? null);
   }
 
   /**

@@ -15,8 +15,14 @@ function setup(status = 200) {
   const booked: any[] = [];
   const deps: AzureDeps = {
     secret: (n) => ({ AZURE_SPEECH_KEY: KEY, AZURE_SPEECH_REGION: 'westus2' })[n] ?? null,
-    book: (s) => { booked.push(s); return { month_usd: 1, cap_usd: null, over_cap: false }; },
-    fetch: (async (url: any, init: any) => { calls.push({ url: String(url), init }); return new Response(status === 200 ? Buffer.from('MP3DATA') : 'nope ' + KEY, { status }); }) as typeof fetch,
+    book: (s) => {
+      booked.push(s);
+      return { month_usd: 1, cap_usd: null, over_cap: false };
+    },
+    fetch: (async (url: any, init: any) => {
+      calls.push({ url: String(url), init });
+      return new Response(status === 200 ? Buffer.from('MP3DATA') : 'nope ' + KEY, { status });
+    }) as typeof fetch,
   };
   return { calls, booked, deps };
 }
@@ -36,7 +42,7 @@ test('a whole SSML document goes to the regional endpoint untouched, with the ke
   assert.equal(booked.length, 1);
   assert.equal(booked[0].service, 'azure-speech');
   assert.equal(booked[0].units, billedChars(SSML));
-  assert.ok(Math.abs(booked[0].usd - billedChars(SSML) * 30 / 1e6) < 1e-12, 'one HD voice prices the call at the HD rate');
+  assert.ok(Math.abs(booked[0].usd - (billedChars(SSML) * 30) / 1e6) < 1e-12, 'one HD voice prices the call at the HD rate');
   assert.equal(r.cost_usd, booked[0].usd);
   assert.ok(!readFileSync(join(root, 'a.mp3.json'), 'utf8').includes(KEY), 'the key is never written');
   assert.ok(!JSON.stringify(r).includes(KEY));

@@ -39,7 +39,10 @@ test('it asks GitHub for a run token for the store and posts the counts with it,
         asks.push(`${req.url} ${req.headers.authorization}`);
         return res.end(JSON.stringify({ value: `run-token-${asks.length}` }));
       }
-      if (refuse-- > 0) { res.statusCode = 503; return res.end('busy'); }
+      if (refuse-- > 0) {
+        res.statusCode = 503;
+        return res.end('busy');
+      }
       got.push({ auth: String(req.headers.authorization), body: JSON.parse(text) });
       res.statusCode = 202;
       res.end('{}');
@@ -54,13 +57,23 @@ test('it asks GitHub for a run token for the store and posts the counts with it,
   let stderr = '';
   child.stderr.on('data', (c) => (stderr += c));
   try {
-    await until('two posts', () => got.length >= 2, undefined, () => stderr);
+    await until(
+      'two posts',
+      () => got.length >= 2,
+      undefined,
+      () => stderr,
+    );
     assert.equal(asks[0], '/token?x=1&audience=citadel-ci-store Bearer ask-token');
     assert.equal(got[0].auth, 'Bearer run-token-1');
     assert.deepEqual(got[0].body, { done: 96, total: 212, file: 'test/runner.test.ts', failed: ['test/a.test.ts'], phase: 'suite' });
     assert.match(stderr, /ci-progress: Citadel at \S+ refused the counts \(HTTP 503\): busy; the tests go on/);
     writeFileSync(file, '0\n1\ntest/a.test.ts\ntest/a.test.ts\nrerun\n');
-    await until('the reruns\' counts', () => got.some((g) => g.body.phase === 'rerun'), undefined, () => stderr);
+    await until(
+      "the reruns' counts",
+      () => got.some((g) => g.body.phase === 'rerun'),
+      undefined,
+      () => stderr,
+    );
     assert.equal(asks.length, 1, 'one token while it lasts');
   } finally {
     child.kill();
@@ -90,7 +103,12 @@ test("stopped once the tests end, it sends the run's last counts on its way out,
   child.stderr.on('data', (c) => (stderr += c));
   const exited = new Promise((r) => child.once('exit', (code, signal) => r({ code, signal })));
   try {
-    await until('the counts sent', () => got.length > 0, undefined, () => stderr);
+    await until(
+      'the counts sent',
+      () => got.length > 0,
+      undefined,
+      () => stderr,
+    );
     rmSync(file); // run-tests.sh removes it as the suite ends, then the step stops the sender
     const before = got.length;
     child.kill('SIGTERM');

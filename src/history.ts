@@ -7,7 +7,10 @@ import { cutEvent } from '../public/eventcut.js';
 
 type Progress = ReturnType<typeof createProgress>;
 /** The task-list rules a saved state was built by: one from another public/progress.js is rebuilt in full, so no deploy leaves old counts (#530). */
-const PLAN_RULES = createHash('sha256').update(readFileSync(new URL('../public/progress.js', import.meta.url))).digest('hex').slice(0, 16);
+const PLAN_RULES = createHash('sha256')
+  .update(readFileSync(new URL('../public/progress.js', import.meta.url)))
+  .digest('hex')
+  .slice(0, 16);
 
 /** A task-list state as saved in settings (planKey, pagePlanKey): it holds every event up to `upTo`. */
 export const packPlan = (p: Progress, upTo: number) => ({ rules: PLAN_RULES, upTo, p: { ...p, pendingCreates: [...p.pendingCreates], finished: undefined } });
@@ -99,12 +102,14 @@ export function mergedPage(store: Store, parts: Part[], opts: { before?: number;
   // The newest page reaches back to a card still waiting in any session, as historyPage does.
   const open = opts.before == null ? parts.map((p) => store.openCardEventId(p.id, MAX_PAGE_EVENTS)).filter((id) => id != null) : [];
   start = Math.min(start, ...open, opts.from ?? start);
-  const events = parts.flatMap((p, i) => {
-    const page = pages[i];
-    const first = page.events[0]?.id ?? before;
-    const reach = page.more && start < first ? store.eventsBetween(p.id, start, first, p.mine) : [];
-    return reach.concat(page.events.filter((e) => e.id >= start));
-  }).sort((a, b) => a.id - b.id);
+  const events = parts
+    .flatMap((p, i) => {
+      const page = pages[i];
+      const first = page.events[0]?.id ?? before;
+      const reach = page.more && start < first ? store.eventsBetween(p.id, start, first, p.mine) : [];
+      return reach.concat(page.events.filter((e) => e.id >= start));
+    })
+    .sort((a, b) => a.id - b.id);
   const more = parts.some((p) => store.eventsBefore(p.id, start, 1, p.mine).length > 0);
   const own = parts[0];
   const firstOwn = events.find((e) => e.ticket_id === own?.id)?.id;

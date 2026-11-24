@@ -37,11 +37,8 @@ export function servicePanel(c, summary = () => {}) {
   const base = `api/contraptions/${c.name}/service`;
   const show = (s) => {
     summary(s.installed ? s.service.active : 'not installed');
-    line.textContent = `Service ${s.unit}: ${s.installed ? unitState(s.service) : 'not installed'}`
-      + (s.timers.length ? ` · timers ${s.timers.map((t) => `${t.unit.replace(/^citadel-app-/, '')} ${unitState(t)}`).join(', ')}` : '');
-    notes.replaceChildren(
-      ...(s.manifestError ? [h('div', {}, s.manifestError)] : []),
-      ...s.hand.map((u) => h('div', {}, `Hand-installed ${u.path}: ${unitState(u)} (${u.why}).`)));
+    line.textContent = `Service ${s.unit}: ${s.installed ? unitState(s.service) : 'not installed'}` + (s.timers.length ? ` · timers ${s.timers.map((t) => `${t.unit.replace(/^citadel-app-/, '')} ${unitState(t)}`).join(', ')}` : '');
+    notes.replaceChildren(...(s.manifestError ? [h('div', {}, s.manifestError)] : []), ...s.hand.map((u) => h('div', {}, `Hand-installed ${u.path}: ${unitState(u)} (${u.why}).`)));
     const live = s.hand.some((u) => u.active === 'active' || u.active === 'activating' || /^enabled/.test(u.enabled));
     const btn = (label, action, extra = {}, ask) => {
       const b = h('button', { type: 'button', class: 'secondary small', title: action === 'stop' || action === 'restart' ? `Risk: ${riskWords(c)}` : undefined }, label);
@@ -56,18 +53,29 @@ export function servicePanel(c, summary = () => {}) {
         } else if (ask && !confirm(ask)) return;
         // The click shows at once ("Restarting…", buttons held); a failure rolls that back with a toast and a Retry.
         const before = status.textContent;
-        const hold = (on) => { for (const x of buttons.querySelectorAll('button')) x.disabled = on; };
+        const hold = (on) => {
+          for (const x of buttons.querySelectorAll('button')) x.disabled = on;
+        };
         optimistic({
           key: `contraption-service:${c.name}`,
-          apply: () => { status.textContent = `${label}…`; hold(true); },
+          apply: () => {
+            status.textContent = `${label}…`;
+            hold(true);
+          },
           send: () => api(base, { method: 'POST', body: { action, ...extra } }),
-          undo: () => { status.textContent = before; hold(false); },
+          undo: () => {
+            status.textContent = before;
+            hold(false);
+          },
           label: `${label.toLowerCase()} ${c.title}`,
-        }).then((r) => {
-          if (action === 'stop' || action === 'restart') lastRun.textContent = `Last ${action}: just now · risk ${(RISKS[c.restart_risk] ?? RISKS.unassessed)[0].toLowerCase()} · ${r.said.at(-1)}`;
-          status.textContent = r.said.join(' ');
-          show(r.status);
-        }, () => {});
+        }).then(
+          (r) => {
+            if (action === 'stop' || action === 'restart') lastRun.textContent = `Last ${action}: just now · risk ${(RISKS[c.restart_risk] ?? RISKS.unassessed)[0].toLowerCase()} · ${r.said.at(-1)}`;
+            status.textContent = r.said.join(' ');
+            show(r.status);
+          },
+          () => {},
+        );
       };
       return b;
     };
@@ -82,11 +90,10 @@ export function servicePanel(c, summary = () => {}) {
       }
     };
     buttons.replaceChildren(
-      live
-        ? btn('Install, replacing hand-installed', 'install', { replace: true }, `Stop and disable ${s.hand.map((u) => u.unit).join(', ')} and install ${s.unit} instead? Their files stay.`)
-        : btn(s.installed ? 'Reinstall' : 'Install', 'install'),
+      live ? btn('Install, replacing hand-installed', 'install', { replace: true }, `Stop and disable ${s.hand.map((u) => u.unit).join(', ')} and install ${s.unit} instead? Their files stay.`) : btn(s.installed ? 'Reinstall' : 'Install', 'install'),
       ...(s.installed ? [btn('Start', 'start'), btn('Restart', 'restart'), btn('Stop', 'stop', {}, `Stop ${c.title}? It stays down until started again (or the box restarts).`)] : []),
-      logs);
+      logs,
+    );
   };
   // Its last deploy, followed while it runs.
   const deployLine = h('div', { class: 'small' });
@@ -100,26 +107,60 @@ export function servicePanel(c, summary = () => {}) {
     deployTodo.replaceChildren(...(d.todo ?? []).map((t) => h('li', {}, h('strong', {}, 'To do: '), t)));
     deployLog.textContent = d.tail ?? '';
     deployLog.hidden = d.state === 'running' || d.state === 'deployed' || !d.tail;
-    if (d.state === 'running') setTimeout(() => deployLine.isConnected && api(`api/contraptions/${c.name}/deploy`).then(showDeploy).catch(() => {}), 3000);
-    else api(base).then(show).catch(() => {});
+    if (d.state === 'running')
+      setTimeout(
+        () =>
+          deployLine.isConnected &&
+          api(`api/contraptions/${c.name}/deploy`)
+            .then(showDeploy)
+            .catch(() => {}),
+        3000,
+      );
+    else
+      api(base)
+        .then(show)
+        .catch(() => {});
   };
   deployBtn.onclick = async () => {
     if (!confirm(`Deploy ${c.title} from ${c.repo} ${c.branch || 'main'}? It builds and restarts it, and rolls back if that fails.`)) return;
     const before = deployLine.textContent;
     optimistic({
       key: `contraption-deploy:${c.name}`,
-      apply: () => { deployBtn.disabled = true; deployLine.textContent = 'Deploying…'; },
+      apply: () => {
+        deployBtn.disabled = true;
+        deployLine.textContent = 'Deploying…';
+      },
       send: () => api(`api/contraptions/${c.name}/deploy`, { method: 'POST' }),
-      undo: () => { deployBtn.disabled = false; deployLine.textContent = before; },
+      undo: () => {
+        deployBtn.disabled = false;
+        deployLine.textContent = before;
+      },
       label: `deploy ${c.title}`,
     }).then(showDeploy, () => {});
   };
-  api(base).then(show).catch((err) => {
-    line.textContent = `Service: ${err.message}`;
-    summary('service unknown');
-  });
-  if (c.repo) api(`api/contraptions/${c.name}/deploy`).then(showDeploy).catch(() => {});
-  return h('div', { class: 'contraption-service' }, h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), toneChip(riskTone, `Restart: ${riskText}`), buttons, deployBtn), h('div', { class: 'small muted', hidden: !c.restart_note }, c.restart_note), lastRun, notes, status, log, deployLine, deployTodo, deployLog);
+  api(base)
+    .then(show)
+    .catch((err) => {
+      line.textContent = `Service: ${err.message}`;
+      summary('service unknown');
+    });
+  if (c.repo)
+    api(`api/contraptions/${c.name}/deploy`)
+      .then(showDeploy)
+      .catch(() => {});
+  return h(
+    'div',
+    { class: 'contraption-service' },
+    h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), toneChip(riskTone, `Restart: ${riskText}`), buttons, deployBtn),
+    h('div', { class: 'small muted', hidden: !c.restart_note }, c.restart_note),
+    lastRun,
+    notes,
+    status,
+    log,
+    deployLine,
+    deployTodo,
+    deployLog,
+  );
 }
 
 const size = (b) => (b < 1e9 ? `${Math.round(b / 1e6)} MB` : `${(b / 1e9).toFixed(b < 1e11 ? 1 : 0)} GB`);
@@ -130,11 +171,14 @@ function diskLine(c) {
   const dir = `~/.local/share/${c.name}`;
   if (!d) return h('p', { class: 'small muted' }, `Data in ${dir}: not measured yet (every 30 min, from 2 min after a restart).`);
   const over = d.warn_gb !== null && d.data_bytes !== null && d.data_bytes > d.warn_gb * 1e9;
-  return h('p', { class: 'small muted' },
+  return h(
+    'p',
+    { class: 'small muted' },
     d.data_bytes === null ? `No data in ${dir} yet` : `Data: ${size(d.data_bytes)} in ${dir}`,
     `, measured ${when(d.measured_at)}`,
     d.warn_gb !== null && !over ? `; warns past ${d.warn_gb} GB.` : '.',
-    over ? h('strong', { class: 'warn' }, ` Past its ${d.warn_gb} GB warning line.`) : '');
+    over ? h('strong', { class: 'warn' }, ` Past its ${d.warn_gb} GB warning line.`) : '',
+  );
 }
 
 // Split so src/icons.ts doesn't take it for Citadel's own icon and append ?v=<hash>.
@@ -144,12 +188,12 @@ const riskSelect = (c) => h('select', { name: 'restart_risk' }, ...Object.entrie
 
 /** One contraption as a row that opens (#997): who it's enabled for, its settings, its service and its keys. */
 function card(c, people, replace) {
-  const field = (label, name, value, attrs = {}) => h('label', { class: attrs.wide ? 'wide' : '' }, label,
-    h('input', { name, value: value ?? '', autocomplete: 'off', spellcheck: 'false', ...attrs, wide: undefined }));
-  const scheme = h('select', { name: 'home_scheme' }, h('option', { value: '' }, 'None'),
-    ...(view.projects ?? []).map((p) => h('option', { value: p.id, selected: p.id === c.home_scheme }, p.name)));
+  const field = (label, name, value, attrs = {}) => h('label', { class: attrs.wide ? 'wide' : '' }, label, h('input', { name, value: value ?? '', autocomplete: 'off', spellcheck: 'false', ...attrs, wide: undefined }));
+  const scheme = h('select', { name: 'home_scheme' }, h('option', { value: '' }, 'None'), ...(view.projects ?? []).map((p) => h('option', { value: p.id, selected: p.id === c.home_scheme }, p.name)));
   const status = h('span', { class: 'muted small', role: 'status' });
-  const form = h('form', { class: 'machine-add' },
+  const form = h(
+    'form',
+    { class: 'machine-add' },
     field('Title', 'title', c.title, { required: true, maxlength: 60 }),
     field('Port', 'port', c.port, { type: 'number', min: 1024, max: 65535, required: true }),
     field('Icon', 'icon', c.icon, { placeholder: ICON_HINT, title: 'Every contraption has one. Empty: the rail shows its first letter until a deploy fills it from its web manifest.' }),
@@ -163,7 +207,9 @@ function card(c, people, replace) {
     field('Repo (deploys from)', 'repo', c.repo, { placeholder: 'owner/name' }),
     field('Branch', 'branch', c.branch, { placeholder: 'main' }),
     field('Folder', 'folder', c.folder, { placeholder: `~/apps/${c.name}`, wide: true }),
-    h('button', { type: 'submit' }, 'Save'), status);
+    h('button', { type: 'submit' }, 'Save'),
+    status,
+  );
   // Saved at once (the form keeps what was typed); the server's copy redraws the card, and a refusal says it isn't.
   form.onsubmit = (e) => {
     e.preventDefault();
@@ -173,13 +219,23 @@ function card(c, people, replace) {
     if (v.restart_note === (c.restart_note ?? '')) delete v.restart_note;
     optimistic({
       key: `contraption:${c.name}`,
-      apply: () => { status.textContent = 'Saved.'; },
-      send: () => api(`api/contraptions/${c.name}`, { method: 'PATCH', body: {
-        ...v, port: Number(v.port), home_scheme: v.home_scheme ? Number(v.home_scheme) : null,
-        open_paths: v.open_paths.split(/[\s,]+/).filter(Boolean),
-        relay_paths: v.relay_paths.split(/[\s,]+/).filter(Boolean),
-      } }),
-      undo: () => { status.textContent = 'Not saved.'; },
+      apply: () => {
+        status.textContent = 'Saved.';
+      },
+      send: () =>
+        api(`api/contraptions/${c.name}`, {
+          method: 'PATCH',
+          body: {
+            ...v,
+            port: Number(v.port),
+            home_scheme: v.home_scheme ? Number(v.home_scheme) : null,
+            open_paths: v.open_paths.split(/[\s,]+/).filter(Boolean),
+            relay_paths: v.relay_paths.split(/[\s,]+/).filter(Boolean),
+          },
+        }),
+      undo: () => {
+        status.textContent = 'Not saved.';
+      },
       label: `save ${c.title}'s settings`,
     }).then(replace, () => {});
   };
@@ -191,39 +247,56 @@ function card(c, people, replace) {
     if (r) replace(r);
   };
   const base = `${c.name} · port ${c.port}`;
-  const [row, sum] = settingsRow({ icon: 'box', hue: 'teal', title: c.title, summary: base, open: c.wasOpen },
+  const [row, sum] = settingsRow(
+    { icon: 'box', hue: 'teal', title: c.title, summary: base, open: c.wasOpen },
     h('div', { class: 'row' }, h('span', { class: 'small muted' }, `Key files in ${c.keys_dir} (identity.pub, contraption.key), made ${when(c.keys_at)}.`), h('span', { class: 'spacer' }), rotate),
-    h('div', { class: 'contraption-people', role: 'group', 'aria-label': `Who ${c.title} is enabled for` },
+    h(
+      'div',
+      { class: 'contraption-people', role: 'group', 'aria-label': `Who ${c.title} is enabled for` },
       h('span', { class: 'small' }, 'Enabled for'),
-      ...people.filter((u) => !u.disabled).map((u) => h('label', { class: 'small turns-toggle' },
-        h('input', {
-          type: 'checkbox', checked: enabled.has(u.id),
-          // The box shows it at once (and c.people, for a redraw meanwhile); a refusal unticks (or ticks) it
-          // again, unless a later click changed it. No redraw after: the box already shows what the server has.
-          onchange: (e) => {
-            const box = e.target;
-            const on = box.checked;
-            const show = (yes) => {
-              box.checked = yes;
-              c.people = yes ? [...new Set([...c.people, u.id])] : c.people.filter((id) => id !== u.id);
-            };
-            optimistic({
-              key: `contraption-people:${c.name}:${u.id}`,
-              apply: () => show(on),
-              send: () => api(`api/contraptions/${c.name}/people/${u.id}`, { method: 'PUT', body: { enabled: on } }),
-              undo: () => c.people.includes(u.id) === on && show(!on),
-              label: `${on ? 'enable' : 'disable'} ${c.title} for ${u.name}`,
-            }).then(() => {
-              if (u.id === account?.id) showRail(); // enabling yourself: the rail appears now
-            }, () => {});
-          },
-        }), u.name))),
+      ...people
+        .filter((u) => !u.disabled)
+        .map((u) =>
+          h(
+            'label',
+            { class: 'small turns-toggle' },
+            h('input', {
+              type: 'checkbox',
+              checked: enabled.has(u.id),
+              // The box shows it at once (and c.people, for a redraw meanwhile); a refusal unticks (or ticks) it
+              // again, unless a later click changed it. No redraw after: the box already shows what the server has.
+              onchange: (e) => {
+                const box = e.target;
+                const on = box.checked;
+                const show = (yes) => {
+                  box.checked = yes;
+                  c.people = yes ? [...new Set([...c.people, u.id])] : c.people.filter((id) => id !== u.id);
+                };
+                optimistic({
+                  key: `contraption-people:${c.name}:${u.id}`,
+                  apply: () => show(on),
+                  send: () => api(`api/contraptions/${c.name}/people/${u.id}`, { method: 'PUT', body: { enabled: on } }),
+                  undo: () => c.people.includes(u.id) === on && show(!on),
+                  label: `${on ? 'enable' : 'disable'} ${c.title} for ${u.name}`,
+                }).then(
+                  () => {
+                    if (u.id === account?.id) showRail(); // enabling yourself: the rail appears now
+                  },
+                  () => {},
+                );
+              },
+            }),
+            u.name,
+          ),
+        ),
+    ),
     diskLine(c),
     servicePanel(c, (state) => {
       sum.textContent = `${base} · ${state}`;
       row.dataset.hue = state === 'active' ? 'running' : 'muted';
     }),
-    h('details', { class: 'contraption-settings', open: c.wasSettingsOpen }, h('summary', { class: 'small' }, 'Settings'), form));
+    h('details', { class: 'contraption-settings', open: c.wasSettingsOpen }, h('summary', { class: 'small' }, 'Settings'), form),
+  );
   row.classList.add('contraption');
   return row;
 }
@@ -250,9 +323,7 @@ export function contraptionsPage() {
   const port = h('input', { name: 'port', type: 'number', min: 1024, max: 65535, placeholder: '9101', required: true });
   const iconIn = h('input', { name: 'icon', placeholder: ICON_HINT, autocomplete: 'off', spellcheck: 'false', title: 'A path on its service, from its base. Empty: the rail shows its first letter until a deploy fills it from its web manifest.' });
   const status = h('span', { class: 'muted', role: 'status' });
-  const form = h('form', { class: 'machine-add' },
-    h('label', {}, 'Name', name), h('label', {}, 'Title', title), h('label', {}, 'Port', port), h('label', {}, 'Icon', iconIn),
-    h('button', { type: 'submit' }, 'Register'), status);
+  const form = h('form', { class: 'machine-add' }, h('label', {}, 'Name', name), h('label', {}, 'Title', title), h('label', {}, 'Port', port), h('label', {}, 'Icon', iconIn), h('button', { type: 'submit' }, 'Register'), status);
   form.onsubmit = async (e) => {
     e.preventDefault();
     status.textContent = 'Registering…';
@@ -267,19 +338,33 @@ export function contraptionsPage() {
       status.textContent = err.message;
     }
   };
-  Promise.all([api('api/contraptions'), api('api/people')]).then(([cs, ps]) => {
-    all = cs;
-    people = ps;
-    render();
-  }).catch(fail);
-  return h('section', { class: 'artifacts-main people-main' },
-    h('div', { class: 'ticket-head' },
-      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }),
-        h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
+  Promise.all([api('api/contraptions'), api('api/people')])
+    .then(([cs, ps]) => {
+      all = cs;
+      people = ps;
+      render();
+    })
+    .catch(fail);
+  return h(
+    'section',
+    { class: 'artifacts-main people-main' },
+    h(
+      'div',
+      { class: 'ticket-head' },
+      h('div', { class: 'row' }, ...settingsTitle(), h('span', { class: 'spacer' }), h('a', { class: 'close-view', href: `#/p/${view.projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
       settingsTabs(),
-      h('div', { class: 'meta' }, 'Personal apps with their own service, reached through Citadel. Each opens only for the people it is enabled for here.')),
-    h('div', { class: 'settings-rows register-row' }, settingsRow({ icon: 'plugplus', hue: 'accent', title: 'Register a contraption', summary: 'Name, title, port and icon' },
-      settingsHelp('Registering writes the key files its own service reads: identity.pub checks who a request is from, and contraption.key lets it run turns.',
-        'Citadel keeps only the private key, sealed, and a hash of contraption.key. Being in the scheme that builds an app grants nothing.'), form)[0]),
-    h('h3', { class: 'settings-section' }, 'Registered'), list);
+      h('div', { class: 'meta' }, 'Personal apps with their own service, reached through Citadel. Each opens only for the people it is enabled for here.'),
+    ),
+    h(
+      'div',
+      { class: 'settings-rows register-row' },
+      settingsRow(
+        { icon: 'plugplus', hue: 'accent', title: 'Register a contraption', summary: 'Name, title, port and icon' },
+        settingsHelp('Registering writes the key files its own service reads: identity.pub checks who a request is from, and contraption.key lets it run turns.', 'Citadel keeps only the private key, sealed, and a hash of contraption.key. Being in the scheme that builds an app grants nothing.'),
+        form,
+      )[0],
+    ),
+    h('h3', { class: 'settings-section' }, 'Registered'),
+    list,
+  );
 }

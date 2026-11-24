@@ -24,10 +24,15 @@ export function mergedView(projectId, ownId, taskmasters, mode) {
     mode: everyone ? 'everyone' : 'mine',
     src: `api/projects/${projectId}/taskmaster-events?view=${everyone ? 'everyone' : 'mine'}`,
     // Someone who hasn't written yet has the Overlord as theirs (src/routes/projects.ts): Mine filters it too.
-    parts: [{ id: ownId, mine: !everyone && taskmasters.find((t) => t.id === ownId).person_id == null }, ...others.map((t) => ({
-      id: t.id, mine: !everyone, overlord: t.person_id == null,
-      label: t.person_id == null ? 'Overlord' : `${t.person_name ?? 'Someone'}'s Taskmaster`,
-    }))],
+    parts: [
+      { id: ownId, mine: !everyone && taskmasters.find((t) => t.id === ownId).person_id == null },
+      ...others.map((t) => ({
+        id: t.id,
+        mine: !everyone,
+        overlord: t.person_id == null,
+        label: t.person_id == null ? 'Overlord' : `${t.person_name ?? 'Someone'}'s Taskmaster`,
+      })),
+    ],
     states: new Map(), // thread.js: each other session's drawing state
     last: ownId, // the session the newest drawn event was in
   };

@@ -19,11 +19,16 @@ function tree(use: Record<string, [number, number]>, proc = 'cpu  1000 0 400 800
 }
 const M = `user.slice/user-${UID}.slice/user@${UID}.service`;
 const base = (k = 1): Record<string, [number, number]> => ({
-  'user.slice': [100e6 * k, 20e6 * k], [`user.slice/user-${UID}.slice`]: [80e6 * k, 15e6 * k],
-  [M]: [80e6 * k, 15e6 * k], [`${M}/citadel.slice`]: [60e6 * k, 10e6 * k],
-  [`${M}/citadel.slice/claude-coordinator.service`]: [10e6 * k, 2e6 * k], [`${M}/citadel.slice/citadel-turns.slice`]: [30e6 * k, 6e6 * k],
-  [`${M}/citadel.slice/citadel-claude-2.service`]: [8e6 * k, 1e6 * k], [`${M}/app.slice`]: [12e6 * k, 2e6 * k],
-  [`${M}/app.slice/perigee-godot.service`]: [9e6 * k, 1e6 * k], [`${M}/contraptions.slice`]: [3e6 * k, 1e6 * k],
+  'user.slice': [100e6 * k, 20e6 * k],
+  [`user.slice/user-${UID}.slice`]: [80e6 * k, 15e6 * k],
+  [M]: [80e6 * k, 15e6 * k],
+  [`${M}/citadel.slice`]: [60e6 * k, 10e6 * k],
+  [`${M}/citadel.slice/claude-coordinator.service`]: [10e6 * k, 2e6 * k],
+  [`${M}/citadel.slice/citadel-turns.slice`]: [30e6 * k, 6e6 * k],
+  [`${M}/citadel.slice/citadel-claude-2.service`]: [8e6 * k, 1e6 * k],
+  [`${M}/app.slice`]: [12e6 * k, 2e6 * k],
+  [`${M}/app.slice/perigee-godot.service`]: [9e6 * k, 1e6 * k],
+  [`${M}/contraptions.slice`]: [3e6 * k, 1e6 * k],
 });
 
 test('a reading names each source and keeps raw totals; other users are one total', async () => {
@@ -39,7 +44,14 @@ test('a reading names each source and keeps raw totals; other users are one tota
 test('the remainders come from each step: the rest of the account, other apps and other users', async () => {
   const a = await readLedger({ ...tree(base(1)), uid: UID });
   const b = await readLedger({ ...tree(base(2)), uid: UID });
-  const w = cpuTable(ledgerSteps([{ at: 0, cpu_ledger: JSON.stringify(a) }, { at: 300_000, cpu_ledger: JSON.stringify(b) }]), 300_000, 3_600_000);
+  const w = cpuTable(
+    ledgerSteps([
+      { at: 0, cpu_ledger: JSON.stringify(a) },
+      { at: 300_000, cpu_ledger: JSON.stringify(b) },
+    ]),
+    300_000,
+    3_600_000,
+  );
   const sec = (k: string) => w.rows.find((r) => r.key === k)!.coreSeconds;
   assert.equal(sec('mine'), 5); // the manager's own
   assert.equal(sec('citadel-other'), 12); // citadel.slice's unnamed (an ended container lands here)
@@ -52,7 +64,14 @@ test('a restarted named unit does not show as a burst in the remainders', async 
   const after = base(1);
   after[`${M}/citadel.slice/claude-coordinator.service`] = [1e6, 0]; // the server restarted: its own counter fell
   const b = await readLedger({ ...tree(after), uid: UID });
-  const w = cpuTable(ledgerSteps([{ at: 0, cpu_ledger: JSON.stringify(a) }, { at: 300_000, cpu_ledger: JSON.stringify(b) }]), 300_000, 3_600_000);
+  const w = cpuTable(
+    ledgerSteps([
+      { at: 0, cpu_ledger: JSON.stringify(a) },
+      { at: 300_000, cpu_ledger: JSON.stringify(b) },
+    ]),
+    300_000,
+    3_600_000,
+  );
   assert.equal(w.rows.find((r) => r.key === 'mine')?.coreSeconds ?? 0, 0);
   assert.equal(w.rows.find((r) => r.key === 'citadel-other')?.coreSeconds ?? 0, 0);
 });
@@ -60,7 +79,10 @@ test('a restarted named unit does not show as a burst in the remainders', async 
 test('the table is the difference of two readings, per window, with kernel share and the host line', async () => {
   const a = await readLedger({ ...tree(base(1)), uid: UID });
   const b = await readLedger({ ...tree(base(2), 'cpu  2000 0 800 16000 200 0 100 0\nprocesses 8000\n'), uid: UID });
-  const rows = [{ at: 0, cpu_ledger: JSON.stringify(a) }, { at: 300_000, cpu_ledger: JSON.stringify(b) }];
+  const rows = [
+    { at: 0, cpu_ledger: JSON.stringify(a) },
+    { at: 300_000, cpu_ledger: JSON.stringify(b) },
+  ];
   const w = cpuTable(ledgerSteps(rows), 300_000, 3_600_000);
   assert.equal(w.seconds, 300);
   const turns = w.rows.find((r) => r.key === 'turns')!;
@@ -75,7 +97,15 @@ test('the table is the difference of two readings, per window, with kernel share
 
 test('a counter that went down (a restart) counts from zero, and an old row without a ledger is skipped', () => {
   const l = (u: number): string => JSON.stringify({ v: 1, s: { server: [u, 0] }, h: null } satisfies CpuLedger);
-  const w = cpuTable(ledgerSteps([{ at: 0, cpu_ledger: null }, { at: 1000, cpu_ledger: l(900e6) }, { at: 301_000, cpu_ledger: l(5e6) }]), 301_000, 3_600_000);
+  const w = cpuTable(
+    ledgerSteps([
+      { at: 0, cpu_ledger: null },
+      { at: 1000, cpu_ledger: l(900e6) },
+      { at: 301_000, cpu_ledger: l(5e6) },
+    ]),
+    301_000,
+    3_600_000,
+  );
   assert.equal(w.rows.find((r) => r.key === 'server')!.coreSeconds, 5);
   assert.equal(w.host, null);
 });

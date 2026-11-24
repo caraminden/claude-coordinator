@@ -11,10 +11,8 @@ const root = mkdtempSync(join(tmpdir(), 'review-glance-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
 test('tests and docs are left out of the hint', () => {
-  for (const p of ['test/a.ts', 'src/tests/b.ts', 'app/__tests__/c.js', 'docs/x.html', 'src/a.test.ts', 'lib/b.spec.js', 'README.md', 'kit/skills/x/SKILL.md'])
-    assert.ok(isTestOrDoc(p), p);
-  for (const p of ['src/server.ts', 'public/app.js', 'testing/x.ts', 'latest/a.ts', 'src/contest.ts'])
-    assert.ok(!isTestOrDoc(p), p);
+  for (const p of ['test/a.ts', 'src/tests/b.ts', 'app/__tests__/c.js', 'docs/x.html', 'src/a.test.ts', 'lib/b.spec.js', 'README.md', 'kit/skills/x/SKILL.md']) assert.ok(isTestOrDoc(p), p);
+  for (const p of ['src/server.ts', 'public/app.js', 'testing/x.ts', 'latest/a.ts', 'src/contest.ts']) assert.ok(!isTestOrDoc(p), p);
 });
 
 test('a gap is named two folders deep where it can be', () => {
@@ -29,20 +27,19 @@ test("coverage counts what the scheme's own critics watch and ranks the rest by 
   const c = coverage(paths, ['public/**']);
   assert.equal(c.changes, 6, 'test and doc paths are dropped');
   assert.equal(c.watched, 2);
-  assert.deepEqual(c.gaps, [{ folder: 'app/server', changes: 3 }, { folder: 'levels', changes: 1 }]);
+  assert.deepEqual(c.gaps, [
+    { folder: 'app/server', changes: 3 },
+    { folder: 'levels', changes: 1 },
+  ]);
   assert.deepEqual(coverage([], ['**']), { changes: 0, watched: 0, gaps: [] });
 });
 
 test("only the scheme's own critics that are on and watch a diff count", () => {
   const e = (over: Partial<ReviewEntry>) => ({ enabled: true, source: null, triggers: { diff: ['src/**'] }, ...over }) as unknown as ReviewEntry;
-  assert.deepEqual(ownGlobs([
-    e({}),
-    e({ enabled: false, triggers: { diff: ['off/**'] } }),
-    e({ source: 'kit:reviewer', triggers: { diff: ['kit/**'] } }),
-    e({ source: 'agent:shader-critic', triggers: { diff: ['agent/**'] } }),
-    e({ triggers: { ask: true } as any }),
-    e({ kind: 'teacher', triggers: { diff: ['teacher/**'] } }),
-  ]), ['src/**']);
+  assert.deepEqual(
+    ownGlobs([e({}), e({ enabled: false, triggers: { diff: ['off/**'] } }), e({ source: 'kit:reviewer', triggers: { diff: ['kit/**'] } }), e({ source: 'agent:shader-critic', triggers: { diff: ['agent/**'] } }), e({ triggers: { ask: true } as any }), e({ kind: 'teacher', triggers: { diff: ['teacher/**'] } })]),
+    ['src/**'],
+  );
 });
 
 test("the last 30 days' changed paths come from git, and no repo or no history is null", async () => {
@@ -51,9 +48,13 @@ test("the last 30 days' changed paths come from git, and no repo or no history i
   const g = (...a: string[]) => execFileSync('git', ['-C', repo, ...a], { env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
   execFileSync('git', ['init', '-q', repo]);
   writeFileSync(join(repo, 'app', 'a.ts'), '1');
-  g('add', '.'); g('commit', '-qm', 'one');
-  writeFileSync(join(repo, 'app', 'a.ts'), '2'); writeFileSync(join(repo, 'b.ts'), '1'); writeFileSync(join(repo, 'app', 'café.ts'), '1');
-  g('add', '.'); g('commit', '-qm', 'two');
+  g('add', '.');
+  g('commit', '-qm', 'one');
+  writeFileSync(join(repo, 'app', 'a.ts'), '2');
+  writeFileSync(join(repo, 'b.ts'), '1');
+  writeFileSync(join(repo, 'app', 'café.ts'), '1');
+  g('add', '.');
+  g('commit', '-qm', 'two');
   // A name past ASCII comes back as written, not git's quoted escape, so app/** still matches it.
   assert.deepEqual((await changedPaths(repo))?.sort(), ['app/a.ts', 'app/a.ts', 'app/café.ts', 'b.ts']);
   assert.equal(await changedPaths(null), null);

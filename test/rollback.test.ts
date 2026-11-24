@@ -16,7 +16,9 @@ after(() => rmSync(root, { recursive: true, force: true }));
 let dbs = 0;
 
 const sha = (c: string) => c.repeat(40);
-const A = sha('a'), B = sha('b'), X = sha('e');
+const A = sha('a'),
+  B = sha('b'),
+  X = sha('e');
 const order = [A, B];
 const contains: Contains = async (_dir, ancestor, commit) => order.includes(ancestor) && order.includes(commit) && order.indexOf(ancestor) <= order.indexOf(commit);
 
@@ -28,20 +30,28 @@ function world(kind = 'contraption', follows?: (t: Omit<TargetView, 'testCopies'
   let changed = 0;
   let refuse: string | null = null;
   const rb = new Rollback({
-    lastGreen, repoDir: () => '/repo', contains, follows,
+    lastGreen,
+    repoDir: () => '/repo',
+    contains,
+    follows,
     starters: {
       [kind]: (t, to, by) => {
         if (refuse) throw new Error(refuse);
         started.push(`${t.target.id} to ${to.slice(0, 1)} by ${by}`);
       },
     },
-    running: () => false, tell: (_p, text) => told.push(text), changed: () => changed++,
-    get: (k) => store.getSetting(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
+    running: () => false,
+    tell: (_p, text) => told.push(text),
+    changed: () => changed++,
+    get: (k) => store.getSetting(k) ?? undefined,
+    set: (k, v) => store.setSetting(k, v),
   });
   const tv = (current: string | null): Omit<TargetView, 'testCopies'> => ({
     target: { id: 'app:peek', projectId: 3, name: 'Peek', kind, link: null },
     current: current ? { version: current, number: 2, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} } : null,
-    next: null, line: [], recent: [],
+    next: null,
+    line: [],
+    recent: [],
   });
   return { store, lastGreen, rb, started, told, tv, changed: () => changed, refuse: (r: string | null) => (refuse = r) };
 }
@@ -89,7 +99,7 @@ test("a roll back that didn't go live lets go of its pin and shows why, until th
   assert.equal(w.rb.info(w.tv(B))?.failed, null);
 });
 
-test('a deploy of anything else (the fix, a person\'s Deploy) ends the pin', async () => {
+test("a deploy of anything else (the fix, a person's Deploy) ends the pin", async () => {
   const w = world();
   w.store.setSetting('last-green:3', { sha: A, at: 1 });
   await w.rb.rollBack(w.tv(B), 'Cara', 1);
@@ -99,7 +109,7 @@ test('a deploy of anything else (the fix, a person\'s Deploy) ends the pin', asy
   assert.equal(w.lastGreen.pinned(3, 'app:peek'), null);
 });
 
-test('an app\'s roll back refused before it picked a commit (its migrations changed) lets go of its pin too', async () => {
+test("an app's roll back refused before it picked a commit (its migrations changed) lets go of its pin too", async () => {
   const w = world();
   w.store.setSetting('last-green:3', { sha: A, at: 1 });
   await w.rb.rollBack(w.tv(B), 'Cara', 1);
@@ -123,9 +133,9 @@ test("an APK Citadel builds after each deploy rolls back with its app: its card'
   assert.equal(await w.rb.rollBack(apk, 'Cara', 1, views), A);
   assert.deepEqual(w.started, ['app:peek to a by Cara'], "the app's deploy, nothing of its own");
   assert.equal(w.lastGreen.pinned(3, 'app:peek')?.sha, A);
-  assert.equal(w.lastGreen.pinned(3, 'apk:peek'), null, 'one pin, the app\'s');
+  assert.equal(w.lastGreen.pinned(3, 'apk:peek'), null, "one pin, the app's");
   assert.match(w.told[0], /rolled Peek back to last green aaaaaaaaa from bbbbbbbbb .*from its Android card: its APK build follows the app/);
-  assert.equal(w.rb.info(apk, [w.tv(A), apk])?.pin?.sha, A, 'its card shows the app\'s pin');
+  assert.equal(w.rb.info(apk, [w.tv(A), apk])?.pin?.sha, A, "its card shows the app's pin");
 });
 
 test("a CI package's roll back holds it at last green's existing build: the pin keeps the build, and showing it doesn't end the pin", async () => {
@@ -135,14 +145,23 @@ test("a CI package's roll back holds it at last green's existing build: the pin 
   // Its newest build at or before last green A was made at another commit, X.
   const build = { run: 41, sha: X, workflow: 'windows.yml' };
   const rb = new Rollback({
-    lastGreen, repoDir: () => '/repo', contains, starters: { ci: () => ({ build }) },
-    running: () => false, tell: (_p, text) => told.push(text), changed: () => {},
-    get: (k) => store.getSetting(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
+    lastGreen,
+    repoDir: () => '/repo',
+    contains,
+    starters: { ci: () => ({ build }) },
+    running: () => false,
+    tell: (_p, text) => told.push(text),
+    changed: () => {},
+    get: (k) => store.getSetting(k) ?? undefined,
+    set: (k, v) => store.setSetting(k, v),
   });
   store.setSetting('last-green:3', { sha: A, at: 1 });
   const tv = (current: string): Omit<TargetView, 'testCopies'> => ({
     target: { id: 'ci:windows:release', projectId: 3, name: 'Windows', kind: 'ci', link: null },
-    current: { version: current, number: 7, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} }, next: null, line: [], recent: [],
+    current: { version: current, number: 7, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} },
+    next: null,
+    line: [],
+    recent: [],
   });
   assert.equal(await rb.rollBack(tv(B), 'Cara', 1), A);
   assert.deepEqual(lastGreen.pinned(3, 'ci:windows:release')?.build, build);
@@ -156,15 +175,24 @@ test("a CI-signed APK's roll back compares the commit its build was made from, a
   const told: string[] = [];
   let signing = true;
   const rb = new Rollback({
-    lastGreen, repoDir: () => '/repo', contains, starters: { apk: (t) => ({ code: t.current!.number! + 1 }) },
-    running: () => signing, tell: (_p, text) => told.push(text), changed: () => {},
-    get: (k) => store.getSetting(k) ?? undefined, set: (k, v) => store.setSetting(k, v),
+    lastGreen,
+    repoDir: () => '/repo',
+    contains,
+    starters: { apk: (t) => ({ code: t.current!.number! + 1 }) },
+    running: () => signing,
+    tell: (_p, text) => told.push(text),
+    changed: () => {},
+    get: (k) => store.getSetting(k) ?? undefined,
+    set: (k, v) => store.setSetting(k, v),
   });
   store.setSetting('last-green:3', { sha: A, at: 1 });
   // A version name is no commit: the commit the published build came from is what's compared.
   const tv = (commit: string, number: number): Omit<TargetView, 'testCopies'> => ({
     target: { id: 'apk:android-release', projectId: 3, name: 'Android', kind: 'apk', link: null },
-    current: { version: '1.4', commit, number, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} }, next: null, line: [], recent: [],
+    current: { version: '1.4', commit, number, link: null, changes: [], started: null, live: null, outcome: 'live', stages: {} },
+    next: null,
+    line: [],
+    recent: [],
   });
   signing = false;
   assert.equal(rb.info(tv(B, 5))?.can, false, 'git has not answered yet');

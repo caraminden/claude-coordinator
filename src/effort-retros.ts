@@ -87,14 +87,20 @@ export function effortBrief(project: Pick<Project, 'name'>, v: EffortVerdict): s
     `The effort: ${v.members.length} minions, ${span}.`,
     ...v.members.map((t) => `- #${t.number} ${t.title}`),
     '',
-    'Follow citadel:retro, for an effort. Read the minions with read_minion, a few per Sonnet Grunt, each returning counts and minion numbers, never transcripts: what was asked, corrected or redone, refused ships and land conflicts, hand-offs between the minions, and the steps that took longest. Also read this scheme\'s retro log for the window (retro-log/<date>/*.md in its shared folder), and the last retro and the ledger in the retro folder its CLAUDE.md names (docs/retros/ if none). The question this retro answers that a per-minion digest can\'t: what went wrong across the effort (the split into minions, the order, a brief that left the next one guessing, work done twice).',
+    "Follow citadel:retro, for an effort. Read the minions with read_minion, a few per Sonnet Grunt, each returning counts and minion numbers, never transcripts: what was asked, corrected or redone, refused ships and land conflicts, hand-offs between the minions, and the steps that took longest. Also read this scheme's retro log for the window (retro-log/<date>/*.md in its shared folder), and the last retro and the ledger in the retro folder its CLAUDE.md names (docs/retros/ if none). The question this retro answers that a per-minion digest can't: what went wrong across the effort (the split into minions, the order, a brief that left the next one guessing, work done twice).",
     `Then: write effort-<slug>.md in that retro folder (slug from "${v.name}", plus the date), update the ledger, and make the few edits the retro calls for in this scheme's own skills, rules and docs, after citadel:self-review, by its usual landing route. A fix for the Citadel kit, the tripwire or Citadel's prompts goes in a handoff in this scheme's handoffs/ (handoff-citadel-<slug>.md); message your Taskmaster its path.`,
     `Reply with the top three findings and what shipped, linking the retro. Stay open in state complete, the retro named in the note. #${first.number} to #${last.number} are closed: don't reopen them.`,
   ].join('\n');
 }
 
 /** The `effort-retro:<scheme>:<name>` setting: the verdict a name last got. */
-interface Marker { act: 'start' | 'skip' | 'would' | 'failed'; why: string; at?: number; tries?: number; ticket?: number }
+interface Marker {
+  act: 'start' | 'skip' | 'would' | 'failed';
+  why: string;
+  at?: number;
+  tries?: number;
+  ticket?: number;
+}
 
 export interface EffortRetroDeps {
   store: Store;
@@ -122,9 +128,17 @@ export class EffortRetros {
     const said: string[] = [];
     const mode = this.d.mode ?? judge('effort-retros')?.mode;
     // A judge (#1503): log-only notes the retro it would start and marks the effort `would`; once it acts, those start too.
-    const start = judged('effort-retros', 'start a retro', (project: Project, v: EffortVerdict) => this.start(project, v),
-      (p: Project, v: EffortVerdict) => { this.d.store.setSetting(doneKey(p.id, v.name), { act: 'would', why: v.why, at: now }); return Promise.resolve(`would start a retro (${v.why})`); },
-      (line, project) => this.d.note(line, project), mode);
+    const start = judged(
+      'effort-retros',
+      'start a retro',
+      (project: Project, v: EffortVerdict) => this.start(project, v),
+      (p: Project, v: EffortVerdict) => {
+        this.d.store.setSetting(doneKey(p.id, v.name), { act: 'would', why: v.why, at: now });
+        return Promise.resolve(`would start a retro (${v.why})`);
+      },
+      (line, project) => this.d.note(line, project),
+      mode,
+    );
     // When a name last got a verdict. A `would` counts as none once the judge acts, and so does a failed start with tries left.
     const since = (projectId: number, name: string) => {
       const r = store.getSetting<Marker>(doneKey(projectId, name));
@@ -141,7 +155,10 @@ export class EffortRetros {
         const before = store.getSetting<Marker>(doneKey(project.id, v.name));
         // Marked before the start: a crash between the two loses one retro rather than starting it twice.
         store.setSetting(doneKey(project.id, v.name), { act: v.act, why: v.why, at: now });
-        if (v.act === 'skip') { said.push(`${project.name} "${v.name}": no retro, ${v.why}`); continue; }
+        if (v.act === 'skip') {
+          said.push(`${project.name} "${v.name}": no retro, ${v.why}`);
+          continue;
+        }
         try {
           said.push(`${project.name} "${v.name}": ${await start(project, v)}`);
         } catch (err: any) {
@@ -199,7 +216,12 @@ function stepsUp(from: { model: string | null; effort: string | null }, to: { mo
 /** A tick starts at most this many post-mortems, so switching the judge to act can't start a backlog at once. */
 export const PER_TICK = 5;
 
-export interface TroubleVerdict { name: string; ticket: Ticket; kinds: Trouble[]; why: string }
+export interface TroubleVerdict {
+  name: string;
+  ticket: Ticket;
+  kinds: Trouble[];
+  why: string;
+}
 
 export function troubleBrief(project: Pick<Project, 'name'>, v: TroubleVerdict, owner: string | null): string {
   const t = v.ticket;
@@ -243,11 +265,22 @@ export class TroubleRetros {
     const now = this.d.now?.() ?? Date.now();
     const said: string[] = [];
     const since = store.getSetting<number>(SINCE_KEY);
-    if (since == null) { store.setSetting(SINCE_KEY, now); return said; }
+    if (since == null) {
+      store.setSetting(SINCE_KEY, now);
+      return said;
+    }
     const mode = this.d.mode ?? judge('trouble-retros')?.mode;
-    const start = judged('trouble-retros', 'start a post-mortem', (project: Project, v: TroubleVerdict) => this.start(project, v),
-      (p: Project, v: TroubleVerdict) => { for (const k of v.kinds) store.setSetting(troubleKey(v.ticket.id, k), { act: 'would', why: v.why, at: now }); return Promise.resolve(`would start a post-mortem (${v.why})`); },
-      (line, project) => this.d.note(line, project), mode);
+    const start = judged(
+      'trouble-retros',
+      'start a post-mortem',
+      (project: Project, v: TroubleVerdict) => this.start(project, v),
+      (p: Project, v: TroubleVerdict) => {
+        for (const k of v.kinds) store.setSetting(troubleKey(v.ticket.id, k), { act: 'would', why: v.why, at: now });
+        return Promise.resolve(`would start a post-mortem (${v.why})`);
+      },
+      (line, project) => this.d.note(line, project),
+      mode,
+    );
     for (const project of store.listProjects()) {
       for (const t of store.listTickets(project.id)) {
         // Trouble comes before closing, so a minion closed before the trigger began has none to chase (and the scan stays small).

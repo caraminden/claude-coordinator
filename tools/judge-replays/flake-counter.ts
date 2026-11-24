@@ -37,8 +37,14 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
   // The minions it starts get negative ids and stay open.
   const started: Ticket[] = [];
   const ids = projects.map((p) => p.id);
-  const realStarts = (store.db.prepare("SELECT e.created_at AS at, t.id, t.title, t.project_id FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.kind = 'note' AND e.data LIKE '{\"text\":\"Started by the flaky-test rule%'")
-    .all(store.eventIdAt(start)) as { at: number; id: number; title: string; project_id: number }[]).filter((r) => r.at >= start && ids.includes(r.project_id));
+  const realStarts = (
+    store.db.prepare("SELECT e.created_at AS at, t.id, t.title, t.project_id FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.kind = 'note' AND e.data LIKE '{\"text\":\"Started by the flaky-test rule%'").all(store.eventIdAt(start)) as {
+      at: number;
+      id: number;
+      title: string;
+      project_id: number;
+    }[]
+  ).filter((r) => r.at >= start && ids.includes(r.project_id));
   // The fix minions the rule really started in the window would block the replay's own starts for their files: its own stand in.
   minionsAsOf(store, () => now, started, new Set(realStarts.map((r) => r.id)));
   const hits: Act[] = [];
@@ -48,7 +54,8 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     return history.get(p.id)!;
   };
   const fixes = new FlakeFixes({
-    store, now: () => now,
+    store,
+    now: () => now,
     sharedDir: (id) => projectSharedDir(dataDir, id),
     start: async (p, brief) => {
       const id = -1 - started.length;
@@ -62,7 +69,10 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
       return true;
     },
     // The file's newest commit on main as of `now`, from one git log of the scheme's main.
-    changedAt: async (p, file) => commitsOf(p).get(file)?.find((t) => t <= now) ?? null,
+    changedAt: async (p, file) =>
+      commitsOf(p)
+        .get(file)
+        ?.find((t) => t <= now) ?? null,
     suspect: async () => null,
     runs: async () => null,
     jobs: async () => null,
@@ -81,14 +91,19 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
   }
   const real: Act[] = [
     ...realStarts.map((r) => ({ at: r.at, key: `start:${flakeKey(r.title)}`, text: r.title })),
-    ...(store.db.prepare("SELECT e.created_at AS at, e.data, t.project_id FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.kind = 'user_message' AND e.data LIKE '{\"author\":\"Citadel\",\"text\":\"Same-flake alarm:%'")
-      .all(store.eventIdAt(start)) as { at: number; data: string; project_id: number }[])
+    ...(
+      store.db.prepare('SELECT e.created_at AS at, e.data, t.project_id FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.kind = \'user_message\' AND e.data LIKE \'{"author":"Citadel","text":"Same-flake alarm:%\'').all(store.eventIdAt(start)) as { at: number; data: string; project_id: number }[]
+    )
       .filter((r) => ids.includes(r.project_id))
-      .map((r) => { const text = String(JSON.parse(r.data).text); return { at: r.at, key: `alarm:${flakeKey(/^Same-flake alarm: (\S+)/.exec(text)?.[1] ?? '?')}`, text: text.slice(0, 200) }; }),
+      .map((r) => {
+        const text = String(JSON.parse(r.data).text);
+        return { at: r.at, key: `alarm:${flakeKey(/^Same-flake alarm: (\S+)/.exec(text)?.[1] ?? '?')}`, text: text.slice(0, 200) };
+      }),
   ].sort((a, b) => a.at - b.at);
   return {
     inputs: `${Math.round((ctx.now - start) / PASS_MS)} passes over ${projects.length} schemes: their retro logs, land-recorded flakes and minions`,
-    hits, real,
+    hits,
+    real,
     limits: [
       "a fix's proof runs (GitHub's flake-proof results) aren't replayed, so a fix that went held inside the window stays open in the replay",
       'fixes started before the window are seeded as they are now, not as they were then',
@@ -102,7 +117,11 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
 function fileCommits(repo: string): Map<string, number[]> {
   const out = new Map<string, number[]>();
   let log = '';
-  try { log = execFileSync('git', ['log', '--format=@%ct', '--name-only', 'main'], { cwd: repo, encoding: 'utf8', timeout: 120_000, maxBuffer: 256 << 20 }); } catch { return out; }
+  try {
+    log = execFileSync('git', ['log', '--format=@%ct', '--name-only', 'main'], { cwd: repo, encoding: 'utf8', timeout: 120_000, maxBuffer: 256 << 20 });
+  } catch {
+    return out;
+  }
   let at = 0;
   for (const line of log.split('\n')) {
     if (line.startsWith('@')) at = Number(line.slice(1)) * 1000;

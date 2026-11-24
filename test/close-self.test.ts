@@ -47,7 +47,12 @@ chmodSync(fake, 0o755);
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
 const broadcasts: any[] = [];
-const runner = new Runner(store, (m) => broadcasts.push(m), () => ({}), fake);
+const runner = new Runner(
+  store,
+  (m) => broadcasts.push(m),
+  () => ({}),
+  fake,
+);
 
 function newTicket() {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
@@ -74,7 +79,11 @@ async function endTurn(id: number, outcome: 'ok' | 'error') {
   await until('the turn to end', () => !runner.isRunning(id));
 }
 
-const notes = (id: number) => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text);
+const notes = (id: number) =>
+  store
+    .listEvents(id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => JSON.parse(e.data).text);
 
 test('refuses when the ticket is not mid-turn', () => {
   assert.equal(runner.closeAfterTurn(newTicket(), null), false);
@@ -293,7 +302,10 @@ test('close() marks a ticket closed, as the coordinator does', () => {
 });
 
 test('a new turn clears complete with its note, since "nothing left" is stale once work starts; ready keeps its note (#547)', async () => {
-  for (const [state, note] of [['complete', null], ['ready', 'merged']] as const) {
+  for (const [state, note] of [
+    ['complete', null],
+    ['ready', 'merged'],
+  ] as const) {
     const id = newTicket();
     store.updateTicket(id, { state, note: state === 'complete' ? 'nothing left' : 'merged' });
     runner.send(id, 'Cara', 'one more thing');

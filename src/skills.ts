@@ -54,7 +54,10 @@ export function pruneKit(kitDir: string, off: readonly string[]): void {
 
 /** Split a description into what it does and when to use it: sentences opening "Use", "Open", "Also for/when" or "Only when", and a leading "Before …:" clause, are the trigger. */
 export function splitDescription(text: string): { what: string; trigger: string } {
-  const sentences = text.replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+(?=[A-Z])/);
+  const sentences = text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/(?<=[.!?])\s+(?=[A-Z])/);
   const isTrigger = (s: string) => /^(Use\b|Open\b|Also (for|when|use)\b|Only when\b|TRIGGER\b)/.test(s);
   // "Before shipping your own branch: a Grunt reviews…" opens with its trigger as a clause.
   const lead = /^((?:Before|After) [^:]{3,80}):\s+(.+)$/.exec(sentences[0]);
@@ -108,7 +111,12 @@ export function listSkills(kitDir: string, repoDir: string | null): SkillItem[] 
 export const PHASES = ['before any edit', 'after edits', 'after an error', 'before a ship'] as const;
 export type Phase = (typeof PHASES)[number];
 
-export interface RecentRun { project_id: number; number: number | null; title: string; at: number }
+export interface RecentRun {
+  project_id: number;
+  number: number | null;
+  title: string;
+  at: number;
+}
 export interface Usage {
   runs: number;
   /** Distinct minions it ran in. */
@@ -126,7 +134,12 @@ export interface Usage {
   last: RecentRun[];
 }
 /** `active`: the minions at work in the window per type (any event the walk keeps; Taskmasters left out), what a type's rate is out of. */
-export interface UsageReport { since: number; skills: Record<string, Usage>; agents: Record<string, Usage>; active: Record<string, number> }
+export interface UsageReport {
+  since: number;
+  skills: Record<string, Usage>;
+  agents: Record<string, Usage>;
+  active: Record<string, number>;
+}
 
 const LAST = 5;
 /** Called once per run as the walk settles it (a skill's phase is final only when its turn ends; a Grunt type has none). */
@@ -148,7 +161,7 @@ export function usageFrom(t: SkillTimeline, since: number, per?: PerRun): UsageR
     const k = tickets.get(ticket);
     u.runs++;
     const ids = seen.get(u) ?? new Set<number>();
-    const type = k?.kind === 'coordinator' ? 'taskmaster' : k?.type ?? 'none';
+    const type = k?.kind === 'coordinator' ? 'taskmaster' : (k?.type ?? 'none');
     if (!ids.has(ticket) && type !== 'taskmaster') bump(u.typeMinions, type);
     seen.set(u, ids.add(ticket));
     u.minions = ids.size;
@@ -230,7 +243,8 @@ function windowStart(db: DatabaseSync, since: number): number {
 function skillEvents(db: DatabaseSync, projectId: number | null, since: number, after: number, upTo: number): SkillEvent[] {
   const tools = (name: string, field: string, fallback: string) => `CASE WHEN e.data LIKE '%"name":"${name}"%' THEN (SELECT group_concat(coalesce(json_extract(c.value, '$.input.${field}'), '${fallback}'), ' ')
       FROM json_each(e.data, '$.message.content') c WHERE json_extract(c.value, '$.type') = 'tool_use' AND json_extract(c.value, '$.name') = '${name}') END`;
-  return db.prepare(`
+  return db
+    .prepare(`
     SELECT * FROM (SELECT e.id, e.ticket_id, e.created_at AS at,
         ${tools('Skill', 'skill', '')} AS skills,
         ${tools('Agent', 'subagent_type', 'general-purpose')} AS agents,
@@ -242,11 +256,18 @@ function skillEvents(db: DatabaseSync, projectId: number | null, since: number, 
       FROM events e JOIN tickets t ON t.id = e.ticket_id
       WHERE e.id > ?1 AND e.id <= ?4 AND e.kind = 'claude' AND e.created_at > ?2 AND (?3 IS NULL OR t.project_id = ?3))
     WHERE skills IS NOT NULL OR agents IS NOT NULL OR edit OR error OR ship OR result
-    ORDER BY ticket_id, id`).all(after, since, projectId, upTo) as unknown as SkillEvent[];
+    ORDER BY ticket_id, id`)
+    .all(after, since, projectId, upTo) as unknown as SkillEvent[];
 }
 
 /** A message to a minion (its brief, a person's, the Taskmaster's) that names a kit skill or Grunt type, with the sentence it's in. */
-export interface SkillMention { id: number; ticket_id: number; at: number; name: string; quote: string }
+export interface SkillMention {
+  id: number;
+  ticket_id: number;
+  at: number;
+  name: string;
+  quote: string;
+}
 // shortcut: only the `citadel:<name>` form counts as naming one; bare names ("run a grilling round") and a scheme's own skills
 // aren't caught. Upgrade if Josh wants those on the page.
 const NAMED = /citadel:([a-z0-9]+(?:-[a-z0-9]+)*)/g;
@@ -261,13 +282,18 @@ export function sentenceAround(text: string, at: number): string {
   if (end - start <= QUOTE) return text.slice(start, end).replace(/\s+/g, ' ').trim();
   // A long sentence: QUOTE characters with the name in the middle.
   const from = Math.max(start, Math.min(at - QUOTE / 2, end - QUOTE));
-  const q = text.slice(from, from + QUOTE).replace(/\s+/g, ' ').trim();
+  const q = text
+    .slice(from, from + QUOTE)
+    .replace(/\s+/g, ' ')
+    .trim();
   return `${from > start ? '…' : ''}${q}${from + QUOTE < end ? '…' : ''}`;
 }
 
 function skillMentions(db: DatabaseSync, since: number, after: number, upTo: number): SkillMention[] {
-  const rows = db.prepare(`SELECT id, ticket_id, created_at AS at, json_extract(data, '$.text') AS text FROM events
-    WHERE id > ?1 AND id <= ?3 AND kind = 'user_message' AND created_at > ?2 AND data LIKE '%citadel:%' ORDER BY ticket_id, id`).all(after, since, upTo) as { id: number; ticket_id: number; at: number; text: unknown }[];
+  const rows = db
+    .prepare(`SELECT id, ticket_id, created_at AS at, json_extract(data, '$.text') AS text FROM events
+    WHERE id > ?1 AND id <= ?3 AND kind = 'user_message' AND created_at > ?2 AND data LIKE '%citadel:%' ORDER BY ticket_id, id`)
+    .all(after, since, upTo) as { id: number; ticket_id: number; at: number; text: unknown }[];
   const out: SkillMention[] = [];
   for (const r of rows) {
     if (typeof r.text !== 'string') continue;
@@ -285,16 +311,23 @@ function skillMentions(db: DatabaseSync, since: number, after: number, upTo: num
 function skillTickets(db: DatabaseSync, events: { ticket_id: number }[], from: number): SkillTicket[] {
   const ids = [...new Set(events.map((e) => e.ticket_id))];
   if (!ids.length) return [];
-  return db.prepare(`
+  return db
+    .prepare(`
     SELECT k.id, k.project_id, k.number, k.title, k.kind,
       (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
         WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type,
       (SELECT max(n.id) FROM events n WHERE n.ticket_id = k.id AND n.kind = 'note' AND n.id > ?1 AND n.data LIKE '{"text":"Shipped %') AS shipped
-    FROM tickets k WHERE k.id IN (SELECT value FROM json_each(?2))`).all(from, JSON.stringify(ids)) as unknown as SkillTicket[];
+    FROM tickets k WHERE k.id IN (SELECT value FROM json_each(?2))`)
+    .all(from, JSON.stringify(ids)) as unknown as SkillTicket[];
 }
 
 /** Every scheme's walked events (the rows `skillEvents` keeps) up to event id `hi`, kept between refreshes. */
-export interface SkillScan { hi: number; events: SkillEvent[]; mentions: SkillMention[]; fullAt: number }
+export interface SkillScan {
+  hi: number;
+  events: SkillEvent[];
+  mentions: SkillMention[];
+  fullAt: number;
+}
 
 /**
  * Bring `prev` up to date: read only the Claude events after its `hi` (all of them, with no `prev` or when `prev` is older than
@@ -306,7 +339,7 @@ export function scanSkills(db: DatabaseSync, since: number, prev: SkillScan | nu
   const full = !prev || now - prev.fullAt >= FULL_SCAN_MS;
   db.exec('BEGIN');
   try {
-    const hi = (db.prepare("SELECT max(id) AS hi FROM events").get() as { hi: number | null }).hi ?? 0;
+    const hi = (db.prepare('SELECT max(id) AS hi FROM events').get() as { hi: number | null }).hi ?? 0;
     const from = windowStart(db, since);
     const fresh = skillEvents(db, null, since, full ? from : Math.max(from, prev!.hi), hi);
     const events = full ? fresh : [...prev!.events.filter((e) => e.at > since), ...fresh].sort((a, b) => a.ticket_id - b.ticket_id || a.id - b.id);
@@ -327,7 +360,13 @@ export function reportFor(scan: SkillScan, tickets: SkillTicket[], projectId: nu
 }
 
 /** A minion on an opened row: its number, title, type and when it last did the thing the row lists. */
-export interface DetailMinion { project_id: number; number: number | null; title: string; type: string; at: number }
+export interface DetailMinion {
+  project_id: number;
+  number: number | null;
+  title: string;
+  type: string;
+  at: number;
+}
 /** What an opened row on the Skills page shows for one skill or Grunt type (#1082). */
 export interface SkillDetail {
   /** The minions it ran in, newest first: how often and at which step of the turn. */
@@ -351,7 +390,7 @@ export function skillDetail(scan: SkillScan, tickets: SkillTicket[], projectId: 
   const mine = projectId == null ? tickets : tickets.filter((k) => k.project_id === projectId);
   const byId = new Map(mine.map((k) => [k.id, k]));
   const events = scan.events.filter((e) => byId.has(e.ticket_id) && e.at > since);
-  const minion = (k: SkillTicket, at: number): DetailMinion => ({ project_id: k.project_id, number: k.number, title: k.title, type: k.kind === 'coordinator' ? 'taskmaster' : k.type ?? 'none', at });
+  const minion = (k: SkillTicket, at: number): DetailMinion => ({ project_id: k.project_id, number: k.number, title: k.title, type: k.kind === 'coordinator' ? 'taskmaster' : (k.type ?? 'none'), at });
   const used = new Map<number, SkillDetail['used'][number]>();
   const opened = new Map<number, Set<string>>();
   usageFrom({ events, tickets: mine }, since, (k, n, ticket, at, phase) => {
@@ -395,7 +434,11 @@ export function skillDetail(scan: SkillScan, tickets: SkillTicket[], projectId: 
 }
 
 /** A scan's result: the scan to keep, its minions, and a report per key asked for ("all" or a scheme's id). */
-interface Refreshed { scan: SkillScan; tickets: SkillTicket[]; reports: Record<string, UsageReport> }
+interface Refreshed {
+  scan: SkillScan;
+  tickets: SkillTicket[];
+  reports: Record<string, UsageReport>;
+}
 const keyOf = (projectId: number | null) => String(projectId ?? 'all');
 function refresh(db: DatabaseSync, since: number, prev: SkillScan | null, keys: string[], now: number): Refreshed {
   const { scan, tickets } = scanSkills(db, since, prev, now);
@@ -431,14 +474,15 @@ export function refreshUsage(store: Store, projectId: number | null, now = Date.
   const go = (): Promise<void> => {
     const keys = [...wanted];
     const since = now - USAGE_DAYS * 86_400_000;
-    const job: Promise<Refreshed> = store.path === ':memory:'
-      ? Promise.resolve(refresh(store.db, since, kept?.scan ?? null, keys, now))
-      : new Promise((resolve, reject) => {
-          const worker = new Worker(new URL(import.meta.url), { workerData: { skillUsage: { path: store.path, since, prev: kept?.scan ?? null, keys, now } } });
-          worker.once('message', resolve);
-          worker.once('error', reject);
-          worker.once('exit', (code) => reject(new Error(`the skill usage worker stopped (exit code ${code}) before it finished`)));
-        });
+    const job: Promise<Refreshed> =
+      store.path === ':memory:'
+        ? Promise.resolve(refresh(store.db, since, kept?.scan ?? null, keys, now))
+        : new Promise((resolve, reject) => {
+            const worker = new Worker(new URL(import.meta.url), { workerData: { skillUsage: { path: store.path, since, prev: kept?.scan ?? null, keys, now } } });
+            worker.once('message', resolve);
+            worker.once('error', reject);
+            worker.once('exit', (code) => reject(new Error(`the skill usage worker stopped (exit code ${code}) before it finished`)));
+          });
     return job.then((r) => {
       kept = { scan: r.scan, tickets: r.tickets, since };
       for (const [k, report] of Object.entries(r.reports)) reports.set(k, { at: now, report });
@@ -492,12 +536,12 @@ if (!isMainThread && workerData?.skillUsage) {
  * waits for a person's go.
  */
 export const OFF_WARNINGS: Record<string, string> = {
-  'self-review': 'No pre-ship review: minions can\'t label a change\'s risk themselves, so every ship in this scheme waits for a person\'s go.',
+  'self-review': "No pre-ship review: minions can't label a change's risk themselves, so every ship in this scheme waits for a person's go.",
   subagents: 'Minions lose the rules for which model and effort each Grunt gets, so Grunts may run on pricier models or brief each other badly.',
-  'scheme-setup': 'A setup or tune-up minion can\'t apply an approved setup plan to this scheme\'s repo.',
+  'scheme-setup': "A setup or tune-up minion can't apply an approved setup plan to this scheme's repo.",
   'bug-fixing': 'Bug minions lose the proof-before-fix order, so a quick change can hide a bug instead of fixing it.',
-  critique: 'Critic rounds stop: the rubric critics on the Reviewers and critics page don\'t run.',
-  'docs-and-mocks': 'Choices pages and mocks lose the kit\'s format, so picking on a page may stop working.',
+  critique: "Critic rounds stop: the rubric critics on the Reviewers and critics page don't run.",
+  'docs-and-mocks': "Choices pages and mocks lose the kit's format, so picking on a page may stop working.",
   'writing-for-agents': 'Changes to instructions, rules and skills lose their checks.',
   grilling: 'Design-shaped features start without a grilling round of questions.',
 };

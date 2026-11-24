@@ -28,9 +28,15 @@ export function takeOver(t, shown = () => {}) {
   const was = t.properties?.assigned ?? null;
   return optimistic({
     sets: `assign:${t.id}`,
-    apply: () => { t.properties = { ...t.properties, assigned: me }; shown(true); },
+    apply: () => {
+      t.properties = { ...t.properties, assigned: me };
+      shown(true);
+    },
     send: () => api(`api/tickets/${t.id}/properties`, { method: 'PUT', body: { properties: { assigned: me } } }),
-    undo: () => { t.properties = { ...t.properties, assigned: was }; shown(false); },
+    undo: () => {
+      t.properties = { ...t.properties, assigned: was };
+      shown(false);
+    },
     label: 'take it over',
   });
 }
@@ -42,8 +48,25 @@ export function takeOver(t, shown = () => {}) {
 function withVisit(t, line, own) {
   const owner = account?.turns && t.status !== 'closed' && otherOwner(t);
   if (!owner) return line;
-  const part = h('span', { class: 'visit' }, own ? 'Runs on your login; ' : ' ', `${owner} owns this one. `,
-    h('button', { type: 'button', class: 'small', onclick: () => takeOver(t, (done) => { part.hidden = done; if (!line) el.hidden = done; }) }, 'Take it over'));
+  const part = h(
+    'span',
+    { class: 'visit' },
+    own ? 'Runs on your login; ' : ' ',
+    `${owner} owns this one. `,
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'small',
+        onclick: () =>
+          takeOver(t, (done) => {
+            part.hidden = done;
+            if (!line) el.hidden = done;
+          }),
+      },
+      'Take it over',
+    ),
+  );
   const el = line ?? h('div', { class: 'payer-line' });
   el.append(part);
   return el;
@@ -61,33 +84,47 @@ function basePayerLine(t, sendText) {
   if (t.state === 'limited' && t.payer) {
     const other = account.turns && !mine(t);
     // Sends the box (and any attachments) the usual way, with a plain "Carry on." when the box is empty.
-    const go = other && h('button', { type: 'button', class: 'small', onclick: (e) => {
-      const form = e.target.closest('.composer');
-      const box = form?.querySelector('textarea');
-      if (!form || !box) return sendText('Carry on.');
-      if (!box.value.trim()) box.value = 'Carry on.';
-      form.requestSubmit();
-    } }, 'Continue on my plan');
+    const go =
+      other &&
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'small',
+          onclick: (e) => {
+            const form = e.target.closest('.composer');
+            const box = form?.querySelector('textarea');
+            if (!form || !box) return sendText('Carry on.');
+            if (!box.value.trim()) box.value = 'Carry on.';
+            form.requestSubmit();
+          },
+        },
+        'Continue on my plan',
+      );
     // Sender pays: any message from another plan carries on now, so the cost is said for Send too.
     // Several accounts, all limited (#819): say which one is out until when, not one plan "hit its limit".
     const accs = t.limit_accounts?.length > 1 && t.limit_resume_at ? t.limit_accounts : null;
     const owner = mine(t) ? 'Your' : `${t.payer.name}'s`;
     const lead = accs
-      ? `${owner} Claude accounts are all at their limit: ${[...accs].sort((a, b) => a.until - b.until).map((a) => `${a.label}${a.here ? ' (this one)' : ''} until ${time(a.until)}${a.kind ? ` (${a.kind})` : ''}`).join(', ')}. `
+      ? `${owner} Claude accounts are all at their limit: ${[...accs]
+          .sort((a, b) => a.until - b.until)
+          .map((a) => `${a.label}${a.here ? ' (this one)' : ''} until ${time(a.until)}${a.kind ? ` (${a.kind})` : ''}`)
+          .join(', ')}. `
       : `${owner} plan hit its usage limit; `;
-    return h('div', { class: 'payer-line warn' },
+    return h(
+      'div',
+      { class: 'payer-line warn' },
       lead,
       t.limit_resume_at ? `${accs ? 'This minion' : 'this minion'} carries on at ${time(t.limit_resume_at)}${mine(t) ? ', or sooner if you reset it: a message tries now' : ''}.` : 'this minion stopped retrying and waits for a message.',
-      go ? h('span', { class: 'row' }, go, h('span', { class: 'muted' }, `${cost ? `${cost} of your usage to load it. ` : ''}Any message you send carries on too.`)) : '');
+      go ? h('span', { class: 'row' }, go, h('span', { class: 'muted' }, `${cost ? `${cost} of your usage to load it. ` : ''}Any message you send carries on too.`)) : '',
+    );
   }
   if (!account.turns) {
-    return h('div', { class: 'payer-line' }, 'You haven\'t linked a Claude plan yet: messages wait until you do. ',
-      h('a', { href: `#/p/${t.project_id}/account` }, 'Link it'));
+    return h('div', { class: 'payer-line' }, "You haven't linked a Claude plan yet: messages wait until you do. ", h('a', { href: `#/p/${t.project_id}/account` }, 'Link it'));
   }
   if (t.payer && !mine(t)) {
     const week = myWeek();
-    return h('div', { class: 'payer-line' }, 'Sends on ', h('b', {}, 'your plan'), week ? ` (${week})` : '',
-      `. This minion last ran on ${t.payer.name}'s: the first turn re-reads it${cost ? `, ${cost} of usage` : ''}.`);
+    return h('div', { class: 'payer-line' }, 'Sends on ', h('b', {}, 'your plan'), week ? ` (${week})` : '', `. This minion last ran on ${t.payer.name}'s: the first turn re-reads it${cost ? `, ${cost} of usage` : ''}.`);
   }
   return coldLine(t);
 }
@@ -100,8 +137,11 @@ const idleText = (ms) => (ms < 2 * 3_600_000 ? `${Math.round(ms / 60_000)} min` 
 export function coldLine(t, now = Date.now()) {
   const idle = t.last_turn_end ? now - t.last_turn_end : 0;
   if (t.status === 'running' || !t.session_id || !t.context_tokens || idle <= COLD_MS) return null;
-  return h('div', { class: 'payer-line cold', title: 'Its prompt cache lasts an hour, so the next turn re-reads its whole context. Held mail rides along with your message.' },
-    `Cold, idle ${idleText(idle)}: replying re-reads its ${Math.round(t.context_tokens / 1000)}k context, about ${loadCost(t).replace('~', '')}. Say it all in one message.`);
+  return h(
+    'div',
+    { class: 'payer-line cold', title: 'Its prompt cache lasts an hour, so the next turn re-reads its whole context. Held mail rides along with your message.' },
+    `Cold, idle ${idleText(idle)}: replying re-reads its ${Math.round(t.context_tokens / 1000)}k context, about ${loadCost(t).replace('~', '')}. Say it all in one message.`,
+  );
 }
 
 /**

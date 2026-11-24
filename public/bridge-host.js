@@ -116,9 +116,9 @@ async function onMessage(e) {
   if (req.op === 'typing') return void (typedAt = Date.now());
   try {
     if (req.op === 'draw') {
-      if (!frame.draw) throw new Error('Drawing on a picture works only in Citadel\'s viewer');
+      if (!frame.draw) throw new Error("Drawing on a picture works only in Citadel's viewer");
       if (navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.draw works only from a click or key press');
-      if (!ownPicture(req.src)) throw new Error('Only a picture from this page\'s own folder can be drawn on');
+      if (!ownPicture(req.src)) throw new Error("Only a picture from this page's own folder can be drawn on");
       // The marks are kept here, so opening a marked picture again can undo back to the clean one.
       const r = await frame.draw(req.src, frame.marks.get(req.src) ?? []);
       if (r) frame.marks.set(req.src, r.marks);
@@ -131,7 +131,10 @@ async function onMessage(e) {
       if (frame.tab && Date.now() - (frame.sentAt ?? 0) < TAB_SEND_GAP) throw new Error('Sent a moment ago; wait a few seconds before sending again');
       // #1409: the choices card this page answers drops from the counts at the click; a refused send brings it back.
       const unanswer = frame.open?.ticket ? answerNow(frame.open.ticket, (i) => !!i.card?.doc && (i.card.doc.path === frame.open.path || i.card.doc.path?.endsWith(`/${frame.open.path}`))) : () => {};
-      const r = await frame.api('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text, images: req.images, items: req.items } }).catch((e) => { unanswer(); throw e; });
+      const r = await frame.api('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text, images: req.images, items: req.items } }).catch((e) => {
+        unanswer();
+        throw e;
+      });
       frame.sentAt = Date.now(); // after it went, so a retry after a failure isn't held back
       reply({ ok: true, result: { sent: true, to: r.to.label } });
       // Sent: the viewer goes away and the chat shows the message, unless the page keeps it open (send's keepOpen).
@@ -168,7 +171,10 @@ export function onArtifactData(store) {
   for (const f of frames) {
     if (!alive(f)) frames.delete(f);
     else if (f.store === store && f.page) {
-      storeCall(f, f.page, { op: 'list' }).then((r) => win(f)?.postMessage({ bridge: TAG, op: 'changed', entries: r.entries }, '*'), () => {});
+      storeCall(f, f.page, { op: 'list' }).then(
+        (r) => win(f)?.postMessage({ bridge: TAG, op: 'changed', entries: r.entries }, '*'),
+        () => {},
+      );
     }
   }
 }

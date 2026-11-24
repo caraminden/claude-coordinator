@@ -53,7 +53,10 @@ export class Fallbacks {
     if (this.raised.has(cause)) return;
     this.raised.add(cause);
     const retry = () => this.raised.delete(cause);
-    this.serial(() => this.alert(cause, job, error, ticketId, kind)).then((ok) => ok || retry(), (err) => (console.error(`Alerting a fallback failed: ${err?.message ?? err}`), retry()));
+    this.serial(() => this.alert(cause, job, error, ticketId, kind)).then(
+      (ok) => ok || retry(),
+      (err) => (console.error(`Alerting a fallback failed: ${err?.message ?? err}`), retry()),
+    );
   }
 }
 

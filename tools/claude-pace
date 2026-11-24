@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Nested Claude sessions pace themselves on the box's memory (#1748). Every turn's PATH starts with pin/bin/heavy, where
-# `claude` links here (src/turn-launch.ts), so a script a turn runs that starts `claude -p` sessions (skill evals, prompt
-# evals, replays, a fan-out of its own) comes through this first. On 2026-11-23 one turn's eval fan-out reached 16.7 GB
-# and swapped the box.
+# `claude` links here (src/turn-launch.ts), so a script a turn runs that starts `claude -p` sessions (skill evals, a
+# fan-out of its own) comes through this first. On 2026-11-23 one turn's eval fan-out reached 16.7 GB and swapped the
+# box. Prompt evals and review-escape replays start claude with a cleaned env (no CLAUDECODE), so they go unpaced.
 #
 # It reads the memory level the server writes (src/memory-ease.ts: $CITADEL_HEAVY_DIR/memory-level, the level then
 # why; a file over 60 s old counts as ok, so a stopped server never holds anyone):

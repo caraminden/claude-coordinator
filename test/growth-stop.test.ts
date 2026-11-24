@@ -71,11 +71,11 @@ test('a lift that fails is tried again; a turn that ended is forgotten; stop lif
   assert.equal(r.g.slowed().length, 1);
   await r.g.stop();
   assert.equal(r.calls.at(-1), `${unit(2)} MemoryHigh=infinity`);
-  r.scopes.clear();
-  r.size(3, 3); r.wait(60_000); await r.g.tick('tight'); r.size(3, 5); r.wait(60_000); await r.g.tick('tight');
-  assert.deepEqual(r.g.slowed().map((x) => x.ticket), [3]);
-  r.scopes.delete(unit(3)); await r.g.tick('tight');
-  assert.deepEqual(r.g.slowed(), [], 'the turn ended: nothing to show or lift');
+  const n = rig();
+  n.size(3, 3); n.wait(60_000); await n.g.tick('tight'); n.size(3, 5); n.wait(60_000); await n.g.tick('tight');
+  assert.deepEqual(n.g.slowed().map((x) => x.ticket), [3]);
+  n.scopes.delete(unit(3)); await n.g.tick('tight');
+  assert.deepEqual(n.g.slowed(), [], 'the turn ended: nothing to show or lift');
 });
 
 test("a hold a restart left behind is lifted at the server's first reading", async () => {
@@ -104,4 +104,22 @@ test('only turn scopes are read, so a Taskmaster or the server is never held', a
   // And the server never calls anything but set-property MemoryHigh (no stop, kill or MemoryMax).
   const src = readFileSync(join(import.meta.dirname, '..', 'src', 'growth-stop.ts'), 'utf8');
   assert.doesNotMatch(src, /'(stop|kill)'|MemoryMax=|process\.kill/);
+});
+
+test('a hold whose set was still running when the server stopped is lifted, and no reading after stop holds anyone', async () => {
+  const r = rig();
+  r.size(1, 3); await r.g.tick('tight');
+  r.wait(60_000); r.size(1, 4);
+  const real = (r.g as any).d.set;
+  let release!: () => void;
+  const gate = new Promise<void>((res) => { release = res; });
+  (r.g as any).d.set = async (u: string, b: number | null) => { if (b !== null) await gate; return real(u, b); };
+  const holding = r.g.tick('tight'); // blocks inside set, as a slow systemctl would
+  const stopped = r.g.stop(); // nothing held yet to lift
+  release();
+  await Promise.all([holding, stopped]);
+  assert.deepEqual(r.calls, [`${unit(1)} MemoryHigh=${4 * GB + STOP.headroom}`, `${unit(1)} MemoryHigh=infinity`]);
+  assert.deepEqual(r.g.slowed(), []);
+  r.wait(60_000); r.size(1, 6); await r.g.tick('tight');
+  assert.equal(r.calls.length, 2, 'stopped: no new holds');
 });

@@ -71,7 +71,7 @@ export function readerStatus(store: Store, snap: Snapshot, dataDir: string): () 
   return () => snap.status && (page ??= new StatusPage({
     store, dataDir, bootAt: s().bootAt, commit: s().commit, cores: s().cores, ownScheme: () => snap.ownScheme,
     ciSnapshot: (canSee) => CiHealth.prototype.snapshot.call({ store } as unknown as CiHealth, canSee),
-    desktops: () => s().desktops, storms: () => s().storms, diskUse: (row) => s().disk[row.name] ?? null,
+    desktops: () => s().desktops, storms: () => s().storms, easing: () => s().easing, diskUse: (row) => s().disk[row.name] ?? null,
     unitsNow: () => s().units, jobs: () => s().jobs,
     answer: s().probing ? { probe: { get lastMs() { return s().lastMs; }, get readerMs() { return s().readerMs; }, take: () => null }, turns: () => 0 } : undefined,
   }));

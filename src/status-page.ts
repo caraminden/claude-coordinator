@@ -295,14 +295,15 @@ export class StatusPage {
     store.addHealthEvent('cache-cold', now, null, `${Math.round((r.db_cached ?? 0) / 1048576)} MB of the ${Math.round((r.db_size ?? 0) / 1048576)} MB database in memory for ${COLD_SAMPLES} readings, with ${(r.mem_avail / 1024 ** 3).toFixed(1)} GB available`);
   }
 
-  /** The Answer time tile's numbers: each window of the last day, the newest probe, the line and the target. */
-  /** A turn's minion as people name it: "#12" in Citadel's scheme, "Delve #12" in another; null when it's gone. */
-  private minionLabel(ticket: number | null): string | null {
+  /** A turn's minion as people name it: "#12" in Citadel's scheme, "Delve #12" in another; null when it's gone or
+   * in a scheme the viewer isn't in (the page then says "a turn"). */
+  private minionLabel(ticket: number | null, viewer: Viewer): string | null {
     const t = ticket == null ? null : this.deps.store.getTicket(ticket);
-    if (!t || t.number == null) return null;
+    if (!t || t.number == null || !viewer.canSee(t.project_id)) return null;
     return t.project_id === this.deps.ownScheme() ? `#${t.number}` : `${this.deps.store.getProject(t.project_id)?.name ?? 'scheme'} #${t.number}`;
   }
 
+  /** The Answer time tile's numbers: each window of the last day, the newest probe, the line and the target. */
   private answerData(samples: HostSample[], now: number) {
     const rows = samples.filter((r) => r.at >= now - DAY_MS).flatMap((r) => { const w = parseWindow(r.answer_time); return w ? [[r.at, w] as [number, AnswerWindow]] : []; });
     return { rows: rows.map(([at, w]) => [at, w.p50, w.p95, w.p99, w.max, w.over, w.load, w.turns]), latest: rows.at(-1) ? { at: rows.at(-1)![0], ...rows.at(-1)![1] } : null, now: this.deps.answer?.probe.lastMs ?? null, reader: this.deps.answer?.probe.readerMs ?? null, probing: !!this.deps.answer, line: this.answerLine(), target: TARGET, alert: this.deps.store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1)?.kind === 'answer-slow' };
@@ -473,7 +474,7 @@ export class StatusPage {
     // Memory easing (#1748): stretches per day, minutes eased, the last one, and one going now.
     const eased = store.healthEventsSince(['memory-easing'], since).flatMap((e) => {
       const ep = parseEpisode(e.detail);
-      return ep ? [{ ...ep, slowed: ep.slowed.map((x) => ({ ...x, minion: this.minionLabel(x.ticket) })) }] : [];
+      return ep ? [{ ...ep, slowed: ep.slowed.map((x) => ({ ...x, minion: this.minionLabel(x.ticket, viewer) })) }] : [];
     });
     const easeCount = blank();
     const easeMinutes = blank();
@@ -585,7 +586,7 @@ export class StatusPage {
       stalls: { counts: days.map((d) => stallCount[d]), afterBoot: days.map((d) => stallBoot[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), work: stallWorkOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
       host: { answer: this.answerData(samples, now), series, cache: [...cacheHours.values()], latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(cpuSteps), groups: CPU_GROUPS } },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
-      easing: { counts: days.map((d) => easeCount[d]), minutes: days.map((d) => easeMinutes[d]), last: eased.at(-1) ?? null, now: easeNow && { ...easeNow, slowed: easeNow.slowed.map((x) => ({ ...x, minion: this.minionLabel(x.ticket) })) } },
+      easing: { counts: days.map((d) => easeCount[d]), minutes: days.map((d) => easeMinutes[d]), last: eased.at(-1) ?? null, now: easeNow && { ...easeNow, slowed: easeNow.slowed.map((x) => ({ ...x, minion: this.minionLabel(x.ticket, viewer) })) } },
       ciVisible,
       // Every periodic job (#1311), for those who see Citadel's scheme.
       jobs: ciVisible ? jobList(now, this.deps.jobs?.()) : [],

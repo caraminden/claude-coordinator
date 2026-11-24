@@ -29,7 +29,7 @@ export type LiveDeps = {
   /** The Status page's in-memory inputs, as server.ts gives them to its StatusPage. */
   /** The ship lines' inputs (Ships in src/front.ts), for /api/ship-lines. */
   ships: () => Ships;
-  statusInputs: { bootAt: number; commit: string; probing: boolean; lastMs: () => number | null; readerMs: () => number | null; storms: () => unknown; desktops: () => unknown; diskUse: (row: ContraptionRow) => DiskUse | null };
+  statusInputs: { bootAt: number; commit: string; probing: boolean; lastMs: () => number | null; readerMs: () => number | null; storms: () => unknown; easing: () => unknown; desktops: () => unknown; diskUse: (row: ContraptionRow) => DiskUse | null };
   sweepMs?: number;
 };
 
@@ -63,7 +63,7 @@ export function publishLive(d: LiveDeps) {
     const s = d.statusInputs;
     if (!units || Date.now() - units.at >= UNITS_MS) units = { at: Date.now(), rows: await d.status.unitRows(store.listContraptions()) };
     const status = {
-      bootAt: s.bootAt, commit: s.commit, cores: cores(), probing: s.probing, lastMs: s.lastMs(), readerMs: s.readerMs(), storms: s.storms(), desktops: s.desktops(),
+      bootAt: s.bootAt, commit: s.commit, cores: cores(), probing: s.probing, lastMs: s.lastMs(), readerMs: s.readerMs(), storms: s.storms(), easing: s.easing(), desktops: s.desktops(),
       disk: Object.fromEntries(store.listContraptions().map((r) => [r.name, s.diskUse(r)])), units: units.rows, jobs: jobList(),
     };
     const projects = store.listProjects();

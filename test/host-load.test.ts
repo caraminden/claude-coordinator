@@ -73,6 +73,10 @@ test('pressure and the whole read from a folder', () => {
   assert.equal(l.pressure, 63);
   assert.equal(l.week[0].longestS, 40);
   assert.deepEqual(l.holders, []);
+  writeFileSync(join(root, 'wait-1-2'), `Delve #4\na nested Claude session\n${Math.floor(Date.now() / 1000)}\nease\n`);
+  writeFileSync(join(root, 'wait-3-4'), `Peek #2\nnpm test\n${Math.floor(Date.now() / 1000)}\nmemory\n`);
+  assert.deepEqual(hostLoad(root).waiters.map((w) => w.who), ['Peek #2'], "claude-pace's waits are no heavy job's line (#1748)");
+  rmSync(join(root, 'wait-1-2')); rmSync(join(root, 'wait-3-4'));
 });
 
 test('slot count follows citadel-heavy: no number is 2, a 0 is 1', () => {

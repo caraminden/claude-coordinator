@@ -213,6 +213,20 @@ test('memory easing (#1748): spells per day and their minutes, the last with its
   c = (await page.build(viewer(store, josh.id, true), now + 1)).citadel;
   assert.deepEqual(c.verdict.reasons, [`easing off memory since ${pacificStamp(now - 5 * 60_000)}: 4.2 GB free (eases under 6.0 GB, back over 8.0 GB)`]);
   assert.deepEqual(c.easing.now?.slowed.map((x) => x.minion), [`Peek Auras #${theirs.number}`]);
+  const outside = (await page.build({ canSee: (id) => id === citadel.id, admin: false, key: 'o' }, now + 2)).citadel;
+  assert.deepEqual(outside.easing.last?.slowed.map((x) => x.minion), [`#${ours.number}`, null], "another scheme's minion isn't named to someone outside it");
+  assert.deepEqual(outside.easing.now?.slowed.map((x) => x.minion), [null]);
+});
+
+test("a reader thread's Status page shows easing from main's snapshot (#1748): readers answer /api/status", async () => {
+  const { store, josh, citadel } = setup('easing-reader');
+  const { readerStatus } = await import('../src/reader.ts');
+  const now = sameDayNow();
+  const going = { level: 'easing', since: now - 60_000, why: '5.0 GB free', free: 5e9, reclaim: 0, swapOut: 0, lines: { easeFree: 6e9, backFree: 8e9, tightFree: 3e9 }, waiting: { starts: 0, heavy: 0, nested: 0 }, slowed: [], episodeSince: now - 60_000 };
+  const snap = { ready: true, live: {}, builds: {}, ownScheme: citadel.id, previews: false, ships: null,
+    status: { bootAt: now - DAY, commit: 'c', cores: 4, probing: false, lastMs: null, readerMs: null, storms: [], easing: going, desktops: [], disk: {}, units: [], jobs: [] } };
+  const c = (await readerStatus(store, snap, root)()!.build(viewer(store, josh.id, true), now)).citadel;
+  assert.equal(c.easing.now?.why, '5.0 GB free');
 });
 
 test('a viewer outside Citadel sees its health but not its CI', async () => {

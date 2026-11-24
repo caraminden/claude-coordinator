@@ -2123,7 +2123,7 @@ if (process.env.CITADEL_FRONT !== '0') {
   publishLive({
     publish: throughFront.publish, store, runner, builds: (id) => builds.get(id), ownScheme: () => ownScheme()?.id ?? null, previews: !!previews, status,
     ships: () => ({ queue: waits.queue, releases: releases.view(() => true) }),
-    statusInputs: { bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', probing: !BOOT_CHECK && !PREVIEW, lastMs: () => answerProbe.lastMs, readerMs: () => answerProbe.readerMs, storms: () => memoryStorms.current(), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row) },
+    statusInputs: { bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', probing: !BOOT_CHECK && !PREVIEW, lastMs: () => answerProbe.lastMs, readerMs: () => answerProbe.readerMs, storms: () => memoryStorms.current(), easing: () => memoryEase.current(), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row) },
     ...(SETTLED_ROUTE && Number(process.env.CITADEL_READER_SWEEP_MS) ? { sweepMs: Number(process.env.CITADEL_READER_SWEEP_MS) } : {}),
   });
 } else if (onSocket) {
@@ -2158,6 +2158,7 @@ server.on('listening', () => void services.interrupted().then((cut) => {
 // meanwhile wait in systemd's socket for the next server, so every second spent here is a stall (#493).
 const SHUTDOWN_GRACE_MS = 5000;
 // Let go of the work a next server picks up: turns, app turns, the usage ledger, a storm going on.
+let holdsLifted: Promise<void> = Promise.resolve();
 function stopWork() {
   services.stopping = true;
   contraptionTurns.stopping = true; // an app turn systemd's SIGTERM cuts off now says Citadel restarted (#1382)
@@ -2166,7 +2167,7 @@ function stopWork() {
   store.usage.flush();
   memoryStorms.stop(); // records a storm still going, which the next server would otherwise only see from its middle
   memoryEase.stop(); // records a stretch of easing still going
-  void growthStop.stop(); // no turn stays held once the server watching it is gone
+  holdsLifted = growthStop.stop(); // no turn stays held once the server watching it is gone; the exit waits for it
 }
 // Stop taking requests, end the ones that never finish, and exit once the rest are answered.
 function closeDown(why: string) {
@@ -2185,7 +2186,7 @@ function closeDown(why: string) {
   // the grace timer below can add one more grace on top of its own, which is the headroom this fix needs and still
   // well inside systemd's default 90 s stop timeout (deploy/claude-coordinator.service sets none).
   const exit = async () => {
-    await Promise.race([throughFront?.quiet ?? Promise.resolve(), new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS).unref())]);
+    await Promise.race([Promise.all([throughFront?.quiet, holdsLifted]), new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS).unref())]);
     process.exit(0);
   };
   // Through the front thread (#1563) this thread keeps listening until the front has let go of the port and answered

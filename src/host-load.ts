@@ -105,6 +105,6 @@ export function hostLoad(dir: string, now = Date.now(), pressureFile?: string, o
   const tag = (j: HeavyJob) => ({ ...j, scheme: schemeOfWho(j.who, owners) });
   let history = '';
   try { history = readFileSync(join(dir, 'history'), 'utf8'); } catch { /* none yet */ }
-  return { slots: slotCount(dir), holders: holders.map(tag), waiters: waiters.map(tag), pressure: readPressure(pressureFile), maxPressure: MAX_PRESSURE, loadWaitS: LOAD_WAIT_S, week: parseHistory(history, now - WEEK_MS, owners),
+  return { slots: slotCount(dir), holders: holders.map(tag), waiters: waiters.filter((w) => w.reason !== 'ease').map(tag) /* a nested session claude-pace holds is no heavy job */, pressure: readPressure(pressureFile), maxPressure: MAX_PRESSURE, loadWaitS: LOAD_WAIT_S, week: parseHistory(history, now - WEEK_MS, owners),
     long: longView(readLongJobs(dir), now).map((j) => ({ ...j, scheme: schemeOfWho(j.who, owners) })), now };
 }

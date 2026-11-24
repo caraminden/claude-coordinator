@@ -74,6 +74,7 @@ export class GrowthStop {
   private held = new Map<string, Slowed>();
   private lastHold = -Infinity;
   private cleaned = false;
+  private stopped = false;
 
   constructor(d: GrowthStopDeps = {}) {
     this.d = d;
@@ -89,6 +90,7 @@ export class GrowthStop {
 
   /** One reading at this level. Never throws. */
   async tick(level: EaseLevel): Promise<void> {
+    if (this.stopped) return;
     try {
       if (this.dir === undefined) {
         const citadel = await citadelSliceDir();
@@ -130,6 +132,8 @@ export class GrowthStop {
       await this.set(pick.unit, bytes);
       this.held.set(pick.unit, { unit: pick.unit, ticket: scopeTicket(pick.unit), bytes, at: now });
       this.lastHold = now;
+      // A stop that came while this set ran has already lifted what it saw, so lift this one too.
+      if (this.stopped) return await this.lift(pick.unit, 'the server is stopping');
       this.log(`holding ${pick.unit} at ${Math.round(bytes / MB)} MB: it grew ${Math.round(pick.grew / MB)} MB in ${STOP.windowMs / 60_000} min while memory is tight`);
     } catch (err: any) {
       console.error(`Growth stop failed: ${err?.message ?? err}`);
@@ -148,6 +152,7 @@ export class GrowthStop {
 
   /** On shutdown: lifts every hold, so none outlives the server that watches it. */
   async stop(): Promise<void> {
+    this.stopped = true;
     for (const unit of [...this.held.keys()]) await this.lift(unit, 'the server is stopping');
   }
 }

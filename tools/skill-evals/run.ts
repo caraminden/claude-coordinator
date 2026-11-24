@@ -111,8 +111,13 @@ function runCase(kitDir: string, c: Case, model: string): Promise<string> {
       '--append-system-prompt', frame(c), c.text],
     { cwd, stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
-    p.stdout.on('data', (d) => { out += d; });
-    const t = setTimeout(() => p.kill(), 120_000);
+    // The 120 s starts at claude's first output, not at spawn: tools/claude-pace can hold a nested session while memory
+    // is low (#1748), and that wait isn't the case's. The outer 20 min only stops a claude that never says anything.
+    let t = setTimeout(() => p.kill(), 20 * 60_000);
+    p.stdout.on('data', (d) => {
+      if (!out) { clearTimeout(t); t = setTimeout(() => p.kill(), 120_000); }
+      out += d;
+    });
     p.on('close', () => {
       clearTimeout(t);
       rmSync(cwd, { recursive: true, force: true });

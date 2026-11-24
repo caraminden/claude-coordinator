@@ -74,9 +74,9 @@ the triggers miss. Give it the code, not your view of it: no summary of what you
 
 **Open `references/review-extras.md` when one applies:**
 - **A feeder** (your base is `build/<n>`): reviewed on the build's tip, with two more brief lines.
-- **Codex second opinion (light and deep):** when `citadel-codex-review --check` prints `ready`.
+- **Codex second opinion (light and deep):** run `citadel-codex-review --check` on every light or deep review; open it when that prints `ready`.
 - **Tests against the base (light and deep):** when the diff adds or changes tests.
-- **Fresh eyes:** a feature (the minion's `type`) that is not small.
+- **Fresh eyes:** any feature (the minion's `type`, or the kind the brief names), even with the pre-ship review off: the reference says which are small enough to skip.
 
 
 **Deep only:** start a `citadel:finding-checker` Grunt, again with `run_in_background: false` (its pinned Opus at medium; on a high-risk change set `model: fable`, `effort: medium` on the call: dropping a

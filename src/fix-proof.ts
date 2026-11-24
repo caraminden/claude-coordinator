@@ -1,6 +1,6 @@
 // A bug fix at or above the go threshold that proves itself ships with no go (#1398; Cara, 2026-11-20, picked "Fixes ship;
 // data still asks": "the thing we are trying to protect is already broken, shouldnt we just fix it?"). The how-to and the
-// four conditions live in the self-review skill, §5 "The go threshold"; this is the hand-off gate's half: what it can
+// four conditions live in the self-review skill, `references/ship.md` "The fix route"; this is the hand-off gate's half: what it can
 // check from git and the minion's properties, so the route never takes the minion's word for what it can see itself.
 import { execFile } from 'node:child_process';
 import { isAbsolute, normalize } from 'node:path';

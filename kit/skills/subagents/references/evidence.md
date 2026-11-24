@@ -36,6 +36,6 @@ that ever filled its context; code reads for review fixes were 34%.
 
 ## Why fan-outs return 3 lines
 
-Added on
+The fan-out rule in SKILL.md was added on
 Delve #55 (Cara, 2026-10-30): 8 drawers and 8 critics over 3 rounds put about 16 reports of 20 to
 40 lines each into the chat per round.

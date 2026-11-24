@@ -35,7 +35,7 @@ conflicts, a batch of fixes, a regeneration, a full check pass) to a fresh worke
 
 The brief is the worker's only context, so it names: the branch and its head, the step's own
 text in the skill (point at it, don't retype it), the repo's merge rules, and what to return in
-at most 15 lines (3 lines in a fan-out, see below): the pushed sha, tests green or red with counts, each conflict and how it was
+at most 15 lines (3 lines in a fan-out, see "Fan-outs" in SKILL.md): the pushed sha, tests green or red with counts, each conflict and how it was
 resolved, files touched, and anything left undone. A conflict that needs a judgment call is not
 the worker's to settle: it stops at its last green commit and returns the question. One worker
 writes the branch at a time; the session commits before starting it and leaves the tree alone

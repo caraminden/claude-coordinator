@@ -141,7 +141,7 @@ Loop an agent only after the four checks in `references/more.md`, "Before loopin
 
 A turn that starts more than 2 Grunts, or loops one Grunt more than once, is a fan-out. This
 threshold sets how the Grunts report back; where the work runs is the more-than-four-jobs rule
-above. Added on
+above.
 Every Grunt's report lands in the chat as well as in your
 context, so a fan-out must not return prose (the story: `references/evidence.md`).
 

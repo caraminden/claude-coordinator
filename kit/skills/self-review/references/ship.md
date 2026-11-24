@@ -24,7 +24,7 @@ The steps (section 5):
 - **Alongside the ship:** the steps, in one turn:
   1. Run any critic whose `when:` matches first (section 3's rubrics), then `hand_off_land` with risk `low` and the reason `low by file list; review runs alongside`. Code review runs alongside a ship, critics don't: the hand-off refuses a change a critic matches until its run is on record (Cara, 2026-11-21: "Code review can be simultaneous, but critics not").
   2. Keep the turn open and run sections 2, 3 and 4: reviewer, base check, Codex and any fresh eyes in one message, `run_in_background: false`. The ship runs on the server meanwhile; an open turn can't cut the Grunt off.
-  3. Nothing real found: end the turn with the report line below. The server dismisses you once the ship is clean.
+  3. Nothing real found: end the turn with the report line (SKILL.md section 5, "Below the threshold"). The server dismisses you once the ship is clean.
   4. Something real fixed: commit and `hand_off_land` again with the same `risk` and `risk_reason` and the summary `follow-up: <what the review found>`. It waits for the first ship if that still runs, so a slow return is the line, not a hang.
   5. The first ship fails while the review runs: its wake arrives after your turn ends. Fix the failure on top of the review's commits and hand off again.
   A qualifying change that the review shows is medium or high is a defect in the file-list test: say so in the Risk line, and the follow-up takes that label's route.
@@ -57,7 +57,7 @@ The steps (section 5):
 
 ## The High route
 
-- **At or above the threshold (High), unless the fix route above holds:** stop before shipping. Post the same line, the findings you fixed in one line each,
+- **At or above the threshold (High), unless the fix route above holds:** stop before shipping. Post the same line (the Risk line in SKILL.md section 5), the findings you fixed in one line each,
   and an `ask_question` card with `kind: "merge"` and header "Ship It" (the minions list's chip reads "Ship It"), "Ship this <label>-risk change?" (Ship It /
   Hold, with your pick marked recommended). A feeder's change merges into its build, so its card says Merge: header "Merge", "Merge this <label>-risk change into Build <n>?" (Merge / Hold). Set state null, note `risk <label>: waiting for a go`,
   and end the turn. Ship only on a go.

@@ -24,6 +24,7 @@ import { parseEpisode, type EaseNow, type Episode } from './memory-ease.ts';
 import { BOOT_STALL } from './deploy-watch.ts';
 import { every, jobList, type JobRow, type Job } from './every.ts';
 import { CacheSampler, dbCold, COLD_SAMPLES } from './cache-health.ts';
+import { thrown } from './thrown.ts';
 import { standingStatus, type StandingStatus } from './standing-checks.ts';
 import { checkGrowth, readGrowth, type GrowthReading } from './growth-alarm.ts';
 
@@ -257,8 +258,8 @@ export class StatusPage {
       this.checkAnswer(at);
       if (this.deps.growth) checkGrowth({ store: this.deps.store, bootAt: this.deps.bootAt, turns: this.deps.growth.turns, ownScheme: this.deps.ownScheme, tell: this.deps.tell }, at);
       return s;
-    } catch (err: any) {
-      console.error(`Status sample failed: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Status sample failed: ${thrown(err).message ?? err}`);
       return null;
     }
   }
@@ -304,7 +305,7 @@ export class StatusPage {
   }
 
   /** The Answer time tile's numbers: each window of the last day, the newest probe, the line and the target. */
-  private answerData(samples: HostSample[], now: number) {
+  answerData(samples: HostSample[], now: number) {
     const rows = samples.filter((r) => r.at >= now - DAY_MS).flatMap((r) => { const w = parseWindow(r.answer_time); return w ? [[r.at, w] as [number, AnswerWindow]] : []; });
     return { rows: rows.map(([at, w]) => [at, w.p50, w.p95, w.p99, w.max, w.over, w.load, w.turns]), latest: rows.at(-1) ? { at: rows.at(-1)![0], ...rows.at(-1)![1] } : null, now: this.deps.answer?.probe.lastMs ?? null, reader: this.deps.answer?.probe.readerMs ?? null, probing: !!this.deps.answer, line: this.answerLine(), target: TARGET, alert: this.deps.store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1)?.kind === 'answer-slow' };
   }
@@ -408,9 +409,9 @@ export class StatusPage {
       const rows = (await this.deps.unitStates?.(names)) ?? [];
       this.units = { at: now, rows };
       return rows;
-    } catch (err: any) {
+    } catch (err) {
       // Not cached: a failed read says so on the page and asks again on the next one.
-      console.error(`Status: reading the units failed: ${err?.message ?? err}`);
+      console.error(`Status: reading the units failed: ${thrown(err).message ?? err}`);
       return null;
     }
   }
@@ -539,16 +540,16 @@ export class StatusPage {
     const view = ciVisible ? this.deps.ciSnapshot?.((id) => id === own && viewer.canSee(id)).find((s) => s.id === own)?.view : undefined;
     // Only the default branch's runs of workflows that ring: `view.runs` is every branch's newest, quiet workflows included.
     const quietNames = new Set((view?.workflows ?? []).filter((w) => w.quiet).map((w) => w.name));
-    const done = (view?.runs ?? []).filter((r: any) => r.branch === view?.branch && !quietNames.has(r.name)).filter((r: any) => r.status === 'completed' && r.conclusion && r.conclusion !== 'cancelled' && r.conclusion !== 'skipped');
+    const done = (view?.runs ?? []).filter((r) => r.branch === view?.branch && !quietNames.has(r.name)).filter((r) => r.status === 'completed' && r.conclusion && r.conclusion !== 'cancelled' && r.conclusion !== 'skipped');
     const redWorkflows = (view?.workflows ?? []).filter((w) => !w.quiet && w.verdict?.conclusion && w.verdict.conclusion !== 'success').map((w) => w.name);
     // Enough main runs: by failure share. Too few (tests.yml on main is daily): main's newest verdict red is yellow, as before.
     const enough = done.length >= RATE_MIN_RUNS;
-    const ciTone: Tone = enough ? rateTone(done.length - done.filter((r: any) => r.conclusion === 'success').length, done.length) : redWorkflows.length ? 'warn' : 'ok';
+    const ciTone: Tone = enough ? rateTone(done.length - done.filter((r) => r.conclusion === 'success').length, done.length) : redWorkflows.length ? 'warn' : 'ok';
     const ci = view ? {
       tone: ciTone,
       at: view.at, url: `https://github.com/${view.slug}/actions`,
       workflows: view.workflows.filter((w) => !w.quiet).map((w) => ({ name: w.name, conclusion: w.verdict?.conclusion ?? null, status: w.verdict?.status ?? null, at: w.verdict?.at ?? null, url: w.verdict?.url ?? null })),
-      runs: done.length, green: done.filter((r: any) => r.conclusion === 'success').length,
+      runs: done.length, green: done.filter((r) => r.conclusion === 'success').length,
     } : null;
     const citadelUnits = (units ?? []).filter((u) => CITADEL_UNITS.includes(u.unit));
     const desktops = (this.deps.desktops?.() ?? []).map((pc) => ({ host: pc.host, verdict: pc.verdict, now: pc.now, restarts: pc.restarts, seen: pc.series.some((s) => s[1] !== null) }));
@@ -677,7 +678,7 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
   if (lastDeploy?.outcome === 'failed') reasons.push(['bad', 'its last deploy failed', 'deploys']);
   else if (deployTone !== 'ok') reasons.push([deployTone, `${nFailed} of ${deploys.length} deploys failed this week`, 'deploys']);
   if (lastDay >= APP_ERRORS_WARN) reasons.push(['warn', `${lastDay} errors in the last day`, 'errors']);
-  if (disk?.warn_gb && disk.data_bytes >= disk.warn_gb * 1e9) reasons.push(['warn', `its data is over ${disk.warn_gb} GB`, 'disk']);
+  if (disk?.warn_gb && disk.data_bytes! >= disk.warn_gb * 1e9) reasons.push(['warn', `its data is over ${disk.warn_gb} GB`, 'disk']);
   const backup = appBackup(join(home, '.local/share', a.name), now);
   if (backup.day && !backup.ok) reasons.push(['warn', `its last backup was ${backup.day}`, 'backup']);
   return {
@@ -700,9 +701,9 @@ export interface CitadelStatus {
   /** Whether this viewer can see Citadel's scheme, so its tiles carry Investigate (#1273). */
   canInvestigate: boolean;
   uptime: { bootAt: number; commit: string; reason: string | null; restarts: number[]; boots: { at: number; reason: string; commit: string | null }[] };
-  stalls: { counts: number[]; afterBoot: number[]; longest: number[]; last: { at: number; seconds: number | null; cause: string | null; afterBoot: boolean; detail: string } | null };
+  stalls: { counts: number[]; afterBoot: number[]; longest: number[]; last: { at: number; seconds: number | null; cause: string | null; work: string | null; afterBoot: boolean; detail: string } | null };
   /** series: [hour, memory used %, disk used %, load], the hour's worst; peak: today's highest load. */
-  host: { series: HostPoint[]; /** Hourly [time, least % of the database in memory, highest discard MB/s, highest re-read MB/s] (#1501). */ cache: [number, number, number, number][]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null;
+  host: { answer: ReturnType<StatusPage['answerData']>; series: HostPoint[]; /** Hourly [time, least % of the database in memory, highest discard MB/s, highest re-read MB/s] (#1501). */ cache: [number, number, number, number][]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null;
     /** CPU by source (#1332): the last hour, day and week as a table, and the week by hour for the stacked chart. */
     cpu: { windows: { hour: CpuWindow; day: CpuWindow; week: CpuWindow }; hours: CpuHour[]; groups: { key: string; label: string }[] } };
   /** Memory-limit storms (#1280): per day, their count and seconds stalled; the last that ended; those going now. */
@@ -739,7 +740,7 @@ export interface AppStatus {
   deploys: { tone: Tone; counts: number[]; failed: number[]; median: number | null; longest: number | null; last: { at: number; outcome: string; by: string; sha: string | null; took: number | null } | null };
   errors: { counts: number[]; kinds: Record<string, number>; top: { kind: string; count: number; sample: string; last_at: number }[]; lastDay: number };
   turns: { counts: number[]; tokens: number[]; people: { name: string; turns: number }[] };
-  disk: { bytes: number; at: number; warn_gb: number | null } | null;
+  disk: { bytes: number | null; at: string; warn_gb: number | null } | null;
   backup: { day: string | null; ok: boolean };
 }
 

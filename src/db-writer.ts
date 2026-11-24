@@ -10,6 +10,7 @@ import { isMainThread, parentPort, Worker, workerData } from 'node:worker_thread
 import { Store } from './db.ts';
 import { writes } from './http.ts';
 import { busySource } from './settled.ts';
+import { thrown } from './thrown.ts';
 
 /** The Store's writes the worker runs: none returns a value its callers use, and every argument survives postMessage. */
 export const WRITES = [
@@ -44,7 +45,7 @@ export const VALUE_WRITES = [
 
 /** What a write makes the server forget of its own caches: when it is sent, and again when it lands, since a read in
  * between caches what the file still holds. */
-const FORGETS: Record<string, (store: Store, args: any[]) => void> = {
+const FORGETS: Record<string, (store: Store, args: number[]) => void> = {
   deleteTicket: (store, [id]) => (store.forgetCards(), store.memory.forgetTicket(id)),
   setEventData: (store, [id]) => store.forgetCards(id),
   'memory.deleteTicket': (store, [id]) => store.memory.forgetTicket(id),
@@ -61,9 +62,13 @@ export const SLOW_DRAIN_MS = 500;
 /** At most one stale-read row in the health log per this long: a day-long stall stays far under the log's row cap. */
 const STALE_NOTE_MS = 60_000;
 
-const owner = (store: any, name: string) => {
+type Stmt = Record<'run' | 'get' | 'all' | 'iterate', (...a: unknown[]) => unknown>;
+type Methods = Record<string, (...args: unknown[]) => unknown>;
+/** The object a write's name ('addDelivery', 'props.set') lives on, and its method name: looked up by name, so untyped. */
+const owner = (store: Store, name: string) => {
+  const methods = store as unknown as Record<string, Methods>;
   const dot = name.indexOf('.');
-  return dot < 0 ? { obj: store, method: name } : { obj: store[name.slice(0, dot)], method: name.slice(dot + 1) };
+  return dot < 0 ? { obj: store as unknown as Methods, method: name } : { obj: methods[name.slice(0, dot)], method: name.slice(dot + 1) };
 };
 
 export type Writer = {
@@ -93,7 +98,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   // [3]: the steps whose every write has run (the worker's), [4]: the steps this thread has opened.
   const shared = new BigInt64Array(new SharedArrayBuffer(40));
   const worker = new Worker(new URL(import.meta.url), { workerData: { writer: { path: store.path, shared, delayMs } } });
-  worker.on('error', (err) => console.error(`DB write worker failed: ${err?.stack ?? err}`));
+  worker.on('error', (err) => console.error(`DB write worker failed: ${thrown(err).stack ?? err}`));
   // Its start is a few ms of opening the file; waiting here keeps the boot's own writes in order.
   const until = Date.now() + readyMs;
   while (Atomics.load(shared, 1) === 0n && Date.now() < until) Atomics.wait(shared, 1, 0n, until - Date.now());
@@ -107,7 +112,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   let seq = 0;
   let stalled = 0; // a read gave up waiting for this write: later reads don't wait until it has run
   let inline = 0; // inside a write on this thread: writes it makes run with it
-  const pending = new Map<number, { name: string; args: any[]; resolve: () => void; reject: (e: Error) => void }>();
+  const pending = new Map<number, { name: string; args: unknown[]; resolve: () => void; reject: (e: Error) => void }>();
   // Responses waiting for their request's writes (#1244): each until the write numbered `seq` has run.
   const waiters = new Set<{ seq: number; done: () => void }>();
   // Settings sent and not yet written, by key (null: deleted). A read that gave up waiting still sees them, or a
@@ -193,12 +198,12 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   // The store's connection: reads wait a moment for queued writes, and its own writes for all of them.
   const maxEvent = db.prepare('SELECT max(id) AS id FROM events');
   const prepare = db.prepare.bind(db);
-  db.prepare = ((sql: string, ...rest: any[]) => {
+  db.prepare = ((sql: string, ...rest: never[]) => {
     const st = prepare(sql, ...rest) as StatementSync;
     const before = WRITE_SQL.test(sql) ? () => (openStep(), beforeWrite(`SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}`)) : () => beforeRead(sql);
     for (const m of ['run', 'get', 'all', 'iterate'] as const) {
-      const f = (st as any)[m].bind(st);
-      (st as any)[m] = (...a: any[]) => {
+      const f = (st as Stmt)[m].bind(st);
+      (st as Stmt)[m] = (...a: unknown[]) => {
         if (!db.isTransaction) before();
         return f(...a);
       };
@@ -228,7 +233,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     const { obj, method } = owner(store, name);
     const f = obj[method];
     if (typeof f !== 'function') throw new Error(`db-writer: no ${name} to run on the server's thread`);
-    obj[method] = function (this: unknown, ...args: any[]) {
+    obj[method] = function (this: unknown, ...args: unknown[]) {
       openStep();
       beforeWrite(name);
       inline++;
@@ -240,16 +245,16 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     const { obj, method } = owner(store, name);
     const f = obj[method];
     if (typeof f !== 'function') throw new Error(`db-writer: no ${name} to send to the write worker`);
-    obj[method] = function (this: unknown, ...args: any[]) {
+    obj[method] = function (this: unknown, ...args: unknown[]) {
       openStep();
       // Inside a transaction or another write on this thread it runs with that, or the worker would wait on our lock.
       if (!alive || inline || db.isTransaction) return f.apply(this, args);
       const n = seq + 1;
       try {
         worker.postMessage({ seq: n, name, args });
-      } catch (e: any) {
+      } catch (e) {
         // An argument postMessage can't copy: run it here, after the queue.
-        console.error(`DB write ${name} can't go to the write worker (${e?.message ?? e}): run on the server's thread.`);
+        console.error(`DB write ${name} can't go to the write worker (${thrown(e).message ?? e}): run on the server's thread.`);
         beforeWrite(name);
         return f.apply(this, args);
       }
@@ -257,15 +262,15 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
       Atomics.store(shared, 2, BigInt(n));
       const req = writes.request.getStore();
       if (req && !req.done) req.seq = n;
-      if (name === 'setSetting') unwritten.set(args[0], { seq: n, json: JSON.stringify(args[1]) });
-      else if (name === 'deleteSetting') unwritten.set(args[0], { seq: n, json: null });
+      if (name === 'setSetting') unwritten.set(args[0] as string, { seq: n, json: JSON.stringify(args[1]) });
+      else if (name === 'deleteSetting') unwritten.set(args[0] as string, { seq: n, json: null });
       else if (name === 'setSettings') {
         for (const [k, v] of Object.entries(args[0] as Record<string, unknown>)) unwritten.set(k, { seq: n, json: JSON.stringify(v) });
         for (const k of (args[1] as string[] | undefined) ?? []) unwritten.set(k, { seq: n, json: null });
       }
       // The server's connection must not checkpoint either while the checkpoint worker does (src/checkpoint.ts).
       else if (name === 'autoCheckpoint') exec(`PRAGMA wal_autocheckpoint = ${args[0] ? 1000 : 0}`);
-      FORGETS[name]?.(store, args);
+      FORGETS[name]?.(store, args as number[]);
       const p = new Promise<void>((resolve, reject) => pending.set(n, { name, args, resolve, reject }));
       p.catch(() => { /* logged by the worker; a caller that awaits sees it */ });
       return p;
@@ -275,7 +280,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   worker.on('message', ({ seq: n, error }: { seq: number; error?: string }) => {
     const p = pending.get(n);
     pending.delete(n);
-    if (p) FORGETS[p.name]?.(store, p.args);
+    if (p) FORGETS[p.name]?.(store, p.args as number[]);
     if (error) p?.reject(new Error(error));
     else p?.resolve();
     for (const w of waiters) if (applied() >= w.seq) w.done();
@@ -327,9 +332,9 @@ if (!isMainThread && workerData?.writer) {
     try {
       const { obj, method } = owner(store, name);
       obj[method](...args);
-    } catch (e: any) {
-      error = String(e?.message ?? e);
-      console.error(`DB write ${name} failed on the write worker: ${e?.stack ?? e}`);
+    } catch (e) {
+      error = String(thrown(e).message ?? e);
+      console.error(`DB write ${name} failed on the write worker: ${thrown(e).stack ?? e}`);
       try {
         store.addHealthEvent('db-write-error', Date.now(), null, `${name}: ${error}`.slice(0, 2000));
       } catch { /* the health log is best effort */ }

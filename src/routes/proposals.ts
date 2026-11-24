@@ -22,6 +22,7 @@ import { lendAfter, lendLines, lendPatch, parseLendChange } from '../machine-len
 import { installCommand, LIVE_MANIFEST, listed, parseHostTool, readManifest, sourceName, toolLabel } from '../host-tools.ts';
 import { approveHostTool } from '../host-tool-ship.ts';
 import { addressee, deliverAnswer, personWrote } from './tickets.ts';
+import { thrown } from '../thrown.ts';
 import { decideTidy } from './memory-curator.ts';
 
 // How long one wait for an approval card's outcome holds the request open.
@@ -81,8 +82,8 @@ export const proposalRoutes: Route[] = [
       let change;
       try {
         change = parseLendChange(body);
-      } catch (err: any) {
-        throw new HttpError(400, err.message);
+      } catch (err) {
+        throw new HttpError(400, thrown(err).message!);
       }
       const why = body.why === undefined ? '' : str(body.why, 'Why', 500);
       const project = store.getProject(ticket.project_id)!;
@@ -129,8 +130,8 @@ export const proposalRoutes: Route[] = [
       let tool;
       try {
         tool = parseHostTool(await readJson(req));
-      } catch (err: any) {
-        throw new HttpError(400, err.message);
+      } catch (err) {
+        throw new HttpError(400, thrown(err).message!);
       }
       if (listed(readManifest(LIVE_MANIFEST), tool)) throw new HttpError(400, `${toolLabel(tool)} is on the server already: it's in the host tools list`);
       const command = installCommand(tool);
@@ -301,7 +302,7 @@ export const proposalRoutes: Route[] = [
       const schemeRepo = (goCall || near) && project.repo_dir ? await originRepo(project.repo_dir) : null;
       const target = goCall ? mergeTarget(goPr, schemeRepo) : null;
       // The card's lookup skips a moved shell's PR; a refusal runs nothing, so the worktree's answer does here.
-      const nearPr = near ? pr ?? (near.moved && !near.repo ? await prInfo({ ...near, moved: false }, ticket.cwd, env) : null) : null;
+      const nearPr = near ? pr ?? (near.moved && !near.repo ? await prInfo({ ...near, moved: false }, ticket.cwd, env!) : null) : null;
       const nearTarget = near ? mergeTarget(nearPr, schemeRepo) : null;
       const retry = nearTarget && { target: nearTarget, command: `gh pr merge ${nearTarget.number} --repo ${schemeRepo} ${near!.method === 'merge' ? '--merge' : '--squash'}${near!.auto ? ' --auto' : ''}` };
       if ((merge || goCall) && !runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');

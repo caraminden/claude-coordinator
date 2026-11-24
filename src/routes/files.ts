@@ -18,7 +18,14 @@ import { projectDir, projectSharedDir } from '../workspace.ts';
 import type { PageItem } from '../ideas.ts';
 import { connection, HttpError, json, ownWrites, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
 import { imageSize } from '../image-size.ts';
-import { MAX_LABEL, MAX_MARKS, marksTitle, parseMarks } from '../../public/ui/marks.js';
+import { MAX_LABEL, MAX_MARKS, marksTitle, parseMarks, type Mark } from '../../public/ui/marks.js';
+
+/** A ticket as the files helpers need it: the row, or the API's view of it (whose replies are a list). */
+type TicketLike = Omit<Ticket, 'replies'>;
+/** The page a viewer asks to open (body.open): what the checks below look for. */
+interface OpenRef { artifact: number; ticket: number; project: number; path: string }
+/** One mark as a minion writes it, before the checks. */
+interface MarkIn { kind: string; colour?: string; at?: unknown; to?: unknown; n?: number; text?: unknown }
 
 export function artifactView(app: App, a: Artifact & { ticket_title?: string; ticket_kind?: string; ticket_number?: number | null }) {
   const ticket = a.ticket_title === undefined ? app.store.getTicket(a.ticket_id) : null;
@@ -47,10 +54,10 @@ function artifactCsp(kind: string): string {
 }
 
 /** A path as people should see it: relative to the working directory, or under "shared files". */
-export function displayPath(app: App, ticket: Ticket, path: string): string {
+export function displayPath(app: App, ticket: TicketLike, path: string): string {
   const projectShared = projectSharedDir(app.dataDir, ticket.project_id) + sep;
   if (path.startsWith(projectShared)) return `scheme shared/${path.slice(projectShared.length)}`;
-  const shared = app.sharedDir(ticket) + sep;
+  const shared = app.sharedDir(ticket as Ticket) + sep;
   if (path.startsWith(shared)) return `shared files/${path.slice(shared.length)}`;
   if (ticket.cwd && path.startsWith(ticket.cwd + sep)) return path.slice(ticket.cwd.length + 1);
   // Another minion's shared folder (a file it made, shown under this one): still never the server's absolute path.
@@ -60,10 +67,10 @@ export function displayPath(app: App, ticket: Ticket, path: string): string {
 }
 
 /** The folders a ticket may show files from: its working directory, its shared folder and the project's. */
-export const ticketRoots = (app: App, ticket: Ticket) => [ticket.cwd, app.sharedDir(ticket), projectSharedDir(app.dataDir, ticket.project_id)];
+export const ticketRoots = (app: App, ticket: TicketLike) => [ticket.cwd, app.sharedDir(ticket as Ticket), projectSharedDir(app.dataDir, ticket.project_id)];
 
 /** A file a ticket may show (see resolveFile), or null. */
-export function resolveTicketFile(app: App, ticket: Ticket, path: string) {
+export function resolveTicketFile(app: App, ticket: TicketLike, path: string) {
   return resolveFile(path, ticket.cwd, ticketRoots(app, ticket));
 }
 
@@ -261,7 +268,7 @@ function pageItems(raw: unknown): PageItem[] {
   });
 }
 
-async function openedPage(app: App, open: any): Promise<{ project: Project; file: string; abs: string; name: string; ticket: Ticket | null }> {
+async function openedPage(app: App, open: OpenRef): Promise<{ project: Project; file: string; abs: string; name: string; ticket: Ticket | null }> {
   let found: Awaited<ReturnType<typeof resolveFile>> = null;
   let projectId = 0;
   // The chat the viewer opened it from: the artifact's minion, or the chat that linked the file.
@@ -286,7 +293,7 @@ async function openedPage(app: App, open: any): Promise<{ project: Project; file
  * The HTML page an agent names for artifact_data: an artifact id, or a path (absolute, relative to its
  * working directory, or "scheme shared/…") inside a folder of its scheme.
  */
-async function agentPage(app: App, project: Project, caller: Ticket, body: any): Promise<string> {
+async function agentPage(app: App, project: Project, caller: Ticket, body: { artifact?: unknown; path?: unknown }): Promise<string> {
   let found: Awaited<ReturnType<typeof resolveFile>> = null;
   const shared = projectSharedDir(app.dataDir, project.id);
   if (body.artifact != null) {
@@ -303,7 +310,7 @@ async function agentPage(app: App, project: Project, caller: Ticket, body: any):
   return found.file;
 }
 
-const ticketScopes = (app: App, ticket: Ticket) => ticketRoots(app, ticket).map((root, i): [string, string] => [`t${ticket.id}-${i}`, root]);
+const ticketScopes = (app: App, ticket: TicketLike) => ticketRoots(app, ticket).map((root, i): [string, string] => [`t${ticket.id}-${i}`, root]);
 
 /** A path under a file token, as segments decoded one by one; null if one is empty, hidden, `.`/`..` or hides a slash. */
 function tokenPath(raw: string): string | null {
@@ -332,12 +339,12 @@ const IMAGE_TYPES: { type: string; ext: string; magic: (b: Buffer) => boolean }[
 ];
 const IMAGE_NAME = /^[0-9a-f]{24}\.(png|jpg|gif|webp)$/;
 
-function uploadsDir(app: App, ticket: Ticket): string {
+function uploadsDir(app: App, ticket: TicketLike): string {
   return join(projectDir(app.dataDir, ticket.project_id), 'uploads', String(ticket.id));
 }
 
 /** Check pasted images (base64 in the request body) and write them to the ticket's uploads folder. */
-export async function saveImages(app: App, ticket: Ticket, raw: unknown): Promise<{ name: string; path: string; mediaType: string }[]> {
+export async function saveImages(app: App, ticket: TicketLike, raw: unknown): Promise<{ name: string; path: string; mediaType: string }[]> {
   if (raw == null || (Array.isArray(raw) && !raw.length)) return [];
   if (!Array.isArray(raw)) throw new HttpError(400, 'images must be a list');
   if (raw.length > MAX_IMAGES) throw new HttpError(400, `At most ${MAX_IMAGES} images per message`);
@@ -361,10 +368,10 @@ export async function saveImages(app: App, ticket: Ticket, raw: unknown): Promis
 }
 
 /** A thread's attached files: its files folder (COORDINATOR_FILES_DIR), so Claude can read them. */
-export const fileUploadsDir = (app: App, ticket: Ticket) => join(app.sharedDir(ticket), 'uploads');
+export const fileUploadsDir = (app: App, ticket: TicketLike) => join(app.sharedDir(ticket as Ticket), 'uploads');
 
 /** An uploaded file by its name in the thread's uploads folder, or null; the name can't leave the folder. */
-async function findUpload(app: App, ticket: Ticket, name: unknown) {
+async function findUpload(app: App, ticket: TicketLike, name: unknown) {
   if (typeof name !== 'string' || !isUploadName(name)) return null;
   const dir = fileUploadsDir(app, ticket);
   try {
@@ -378,7 +385,7 @@ async function findUpload(app: App, ticket: Ticket, name: unknown) {
 }
 
 /** The files a message names (uploaded beforehand with PUT .../uploads), each with its type for Claude. */
-export async function messageFiles(app: App, ticket: Ticket, raw: unknown): Promise<MessageFile[]> {
+export async function messageFiles(app: App, ticket: TicketLike, raw: unknown): Promise<MessageFile[]> {
   if (raw == null) return [];
   if (!Array.isArray(raw)) throw new HttpError(400, 'files must be a list');
   if (raw.length > MAX_UPLOADS) throw new HttpError(400, `At most ${MAX_UPLOADS} files per message`);
@@ -396,7 +403,7 @@ export async function messageFiles(app: App, ticket: Ticket, raw: unknown): Prom
  * picture is one pasted in this chat (copied into the minion's files folder, so it shows like any file it links) or an
  * image in its folders; marks are { kind, at, to, n, text, colour } in percent of the picture from its top left.
  */
-export async function markImage(app: App, ticket: Ticket, body: any): Promise<{ markdown: string; path: string; w: number; h: number }> {
+export async function markImage(app: App, ticket: TicketLike, body: { image?: unknown; alt?: unknown; marks?: unknown }): Promise<{ markdown: string; path: string; w: number; h: number }> {
   const image = str(body.image, 'image', 2000);
   const alt = body.alt == null ? 'Marked picture' : str(body.alt, 'alt', 200);
   if (/[[\]\n]/.test(alt)) throw new HttpError(400, 'alt must be one line with no square brackets');
@@ -404,7 +411,7 @@ export async function markImage(app: App, ticket: Ticket, body: any): Promise<{ 
   const uploads = uploadsDir(app, ticket);
   if (isAbsolute(image) && normalize(join(image, '..')) === uploads && IMAGE_NAME.test(basename(image))) {
     const src = join(uploads, basename(image));
-    const dir = app.sharedDir(ticket);
+    const dir = app.sharedDir(ticket as Ticket);
     path = join(dir, basename(image));
     await mkdir(dir, { recursive: true });
     await copyFile(src, path).catch((e) => { throw e?.code === 'ENOENT' ? new HttpError(404, `No pasted picture ${basename(image)} in this chat`) : e; });
@@ -426,7 +433,7 @@ export async function markImage(app: App, ticket: Ticket, body: any): Promise<{ 
     return { x: (v[0] * w) / 100, y: (v[1] * h) / 100 };
   };
   let pins = 0;
-  const marks = raw.map((m: any, i: number) => {
+  const marks = raw.map((m: MarkIn, i: number) => {
     const what = `Mark ${i + 1}`;
     const kind = m?.kind;
     if (!['box', 'arrow', 'pin', 'label'].includes(kind)) throw new HttpError(400, `${what}: kind must be box, arrow, pin or label`);
@@ -434,7 +441,7 @@ export async function markImage(app: App, ticket: Ticket, body: any): Promise<{ 
     if (colour !== 'red' && colour !== 'yellow') throw new HttpError(400, `${what}: colour must be red or yellow`);
     const pts = [point(m.at, `${what}'s at`)];
     if (kind === 'box' || kind === 'arrow') pts.push(point(m.to, `${what}'s to`));
-    const mark: any = { tool: kind, colour, pts };
+    const mark: Mark = { tool: kind as Mark['tool'], colour, pts };
     if (kind === 'pin') {
       mark.n = m.n ?? ++pins;
       if (!Number.isInteger(mark.n) || mark.n < 0 || mark.n > 99) throw new HttpError(400, `${what}: n must be a whole number 0 to 99`);

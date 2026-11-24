@@ -21,6 +21,7 @@ import { installCheck } from './pwa-check.ts';
 import { track } from './settled.ts';
 import { listSnapshots, restoreSnapshot, snapshotsDir, takeSnapshot, type Snapshot } from './app-snapshots.ts';
 import { THP_LINE, thpProps } from './unit-thp.ts';
+import { thrown } from './thrown.ts';
 
 /** The manifest's file name, in the app's folder. */
 export const MANIFEST = 'citadel-app.json';
@@ -37,7 +38,7 @@ export interface Manifest {
   timers: Record<string, { command: string[]; on_calendar: string; workdir: string }>;
   /** A path that answers 2xx once it is up, like /health; without one, an open port counts. */
   health: string | null;
-  /** Shell commands a deploy runs in the folder, in order, niced; any failing fails the deploy. */
+  /** Shell commands a deploy runs in the folder, in order, niced; one failing fails the deploy. */
   build: string[];
   /** Minutes the whole build may take (default 20, at most 60). */
   build_timeout: number;
@@ -55,6 +56,8 @@ export interface Manifest {
 
 /** An app's DATA_DIR size, from the last background measure (#847). */
 export interface DiskUse { data_bytes: number | null; measured_at: string; warn_gb: number | null }
+/** One line of `journalctl -o json`, the fields read. */
+interface JournalLine { __CURSOR?: unknown; __REALTIME_TIMESTAMP?: unknown; MESSAGE?: unknown; USER_UNIT?: unknown; _SYSTEMD_USER_UNIT?: unknown; PRIORITY?: unknown }
 
 /** The environment Citadel sets on every app's units; a manifest can't. */
 export const CITADEL_ENV = ['PORT', 'DATA_DIR', 'CITADEL_KEYS', 'CITADEL_URL', 'BASE_PATH', 'PATH', 'CITADEL_HEAVY'];
@@ -76,11 +79,11 @@ function command(v: unknown, what: string): string[] {
 
 /** Check a manifest's text; an Error says what is wrong in words for whoever writes it. */
 export function parseManifest(text: string): Manifest {
-  let m: any;
+  let m: Partial<Manifest>;
   try {
     m = JSON.parse(text);
-  } catch (err: any) {
-    throw new Error(`${MANIFEST} isn't JSON: ${err.message}`);
+  } catch (err) {
+    throw new Error(`${MANIFEST} isn't JSON: ${thrown(err).message}`);
   }
   if (!m || typeof m !== 'object' || Array.isArray(m)) throw new Error(`${MANIFEST} must be an object`);
   const env: Record<string, string> = {};
@@ -96,7 +99,7 @@ export function parseManifest(text: string): Manifest {
   const timers: Manifest['timers'] = {};
   if (m.timers !== undefined) {
     if (!m.timers || typeof m.timers !== 'object' || Array.isArray(m.timers) || Object.keys(m.timers).length > MAX_TIMERS) throw new Error(`timers must be an object of at most ${MAX_TIMERS} named jobs`);
-    for (const [job, t] of Object.entries<any>(m.timers)) {
+    for (const [job, t] of Object.entries(m.timers)) {
       if (!JOB.test(job)) throw new Error(`timer name ${JSON.stringify(job)} must be a short slug, like backup`);
       if (!t || typeof t !== 'object') throw new Error(`timer ${job} must be an object with command and on_calendar`);
       if (!isText(t.on_calendar, 100)) throw new Error(`timer ${job} needs on_calendar, a systemd calendar time like "*-*-* 03:30:00" or daily`);
@@ -496,8 +499,8 @@ export class AppServices {
     }
     try {
       return parseManifest(text);
-    } catch (err: any) {
-      throw new ServiceError(409, err.message);
+    } catch (err) {
+      throw new ServiceError(409, thrown(err).message!);
     }
   }
 
@@ -555,8 +558,8 @@ export class AppServices {
     let health: string | null = null;
     try {
       health = (await this.manifest(row, folder)).health;
-    } catch (err: any) {
-      manifestError = err.message;
+    } catch (err) {
+      manifestError = thrown(err).message!;
     }
     const owned = await this.owned(row.name);
     const timers = await Promise.all(owned.filter((f) => f.endsWith('.timer')).sort().map((f) => this.state(f)));
@@ -927,9 +930,9 @@ export class AppServices {
         link = relative(dirname(folder), a);
         try {
           await symlink(link, folder);
-        } catch (err: any) {
+        } catch (err) {
           const back = await rename(a, folder).then(() => 'so it was moved back', (e) => `and moving it back failed too (${e.message}): the next deploy links it`);
-          throw new Error(`Couldn't link ${folder} to ${a}, ${back}: ${err.message}`);
+          throw new Error(`Couldn't link ${folder} to ${a}, ${back}: ${thrown(err).message}`);
         }
         await say(`Moved ${folder} to ${a} and linked it there: from now on a deploy builds in a second folder beside it.`);
       }
@@ -1040,9 +1043,9 @@ export class AppServices {
         } finally {
           holder?.stdin!.end();
         }
-      } catch (err: any) {
+      } catch (err) {
         // The live slot was never touched, nor its service restarted.
-        await say(`Failed: ${err.message}`);
+        await say(`Failed: ${thrown(err).message}`);
         view.state = 'failed';
         await unchanged();
         return;
@@ -1075,8 +1078,8 @@ export class AppServices {
         await start(next, m, data);
         view.state = 'deployed';
         await say(`Deployed ${short(view.to)}${taken && !restore ? `; its data was snapshotted first, so a roll back brings that back too` : restore ? `, with its data as it was at ${short(restore.commit)}` : ''}.`);
-      } catch (err: any) {
-        await say(`Failed: ${err.message}`);
+      } catch (err) {
+        await say(`Failed: ${thrown(err).message}`);
         // Refused before its folder was pointed at the new slot: the old one runs on, untouched.
         if (!old || (await realpath(folder).catch(() => null)) !== (await realpath(next))) {
           view.state = 'failed';
@@ -1091,9 +1094,9 @@ export class AppServices {
           } : undefined);
           view.state = 'rolled back';
           await say(`Rolled back: ${short(prev)} runs again.`);
-        } catch (again: any) {
+        } catch (again) {
           view.state = 'failed';
-          await say(`Rolling back failed too: ${again.message}`);
+          await say(`Rolling back failed too: ${thrown(again).message}`);
         }
       }
       if (view.state !== 'deployed') return;
@@ -1107,8 +1110,8 @@ export class AppServices {
       if (!header) return { problems: [] as string[], icon: null, statics: [] as string[] };
       try {
         return await installCheck(row.name, (path) => fetch(`http://127.0.0.1:${row.port}${path}`, { headers: { 'x-citadel-identity': header, accept: 'text/html' }, signal: AbortSignal.timeout(ms) }));
-      } catch (err: any) {
-        return { problems: [], icon: null, statics: [] as string[], unchecked: err?.message ?? String(err) };
+      } catch (err) {
+        return { problems: [] as string[], icon: null, statics: [] as string[], unchecked: thrown(err).message ?? String(err) };
       }
     };
     // A check that couldn't run says nothing about the app (a timeout under load is not "no manifest"): no to-dos, no
@@ -1216,7 +1219,7 @@ export class AppServices {
     const entries = [];
     let next = cursor;
     for (const line of r.out.split('\n')) {
-      let e: any;
+      let e: JournalLine;
       try {
         e = JSON.parse(line);
       } catch {

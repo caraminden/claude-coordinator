@@ -5,9 +5,12 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { callEnv } from './pool-context.ts';
+import { thrown } from './thrown.ts';
 
-type Link = { session: string; stream: AbortController; pending: Map<unknown, (msg: any) => void>; queue: Promise<unknown> };
-type Turn = { handshake: any[]; link: Promise<Link> | null };
+/** A JSON-RPC message, as far as this file reads it. */
+interface Rpc { jsonrpc?: string; id?: unknown; method?: string; params?: unknown; result?: Record<string, unknown>; error?: unknown }
+type Link = { session: string; stream: AbortController; pending: Map<unknown, (msg: Rpc) => void>; queue: Promise<unknown> };
+type Turn = { handshake: Rpc[]; link: Promise<Link> | null };
 
 // Claude's MCP handshake replayed to a session it never saw (or a new one): the machine's reply to it is dropped.
 const REPLAY_ID = 'citadel-replayed-initialize';
@@ -22,7 +25,7 @@ export function dropLinks(token: string) {
 }
 
 const cachePath = (dir: string, machine: number, server: string) => join(dir, `${machine}-${server}.json`);
-function readCache(dir: string, machine: number, server: string): { init: any; tools: any } | null {
+function readCache(dir: string, machine: number, server: string): { init: Record<string, unknown>; tools: unknown[] } | null {
   try {
     const c = JSON.parse(readFileSync(cachePath(dir, machine, server), 'utf8'));
     return c?.init && Array.isArray(c?.tools) ? c : null;
@@ -30,11 +33,11 @@ function readCache(dir: string, machine: number, server: string): { init: any; t
     return null;
   }
 }
-function writeCache(dir: string, machine: number, server: string, patch: { init?: any; tools?: any }) {
+function writeCache(dir: string, machine: number, server: string, patch: { init?: Record<string, unknown>; tools?: unknown[] }) {
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const file = cachePath(dir, machine, server);
-    let old: any = {};
+    let old: Record<string, unknown> = {};
     try {
       old = JSON.parse(readFileSync(file, 'utf8'));
     } catch {}
@@ -46,7 +49,7 @@ function writeCache(dir: string, machine: number, server: string, patch: { init?
 const error = (id: unknown, message: string) => ({ jsonrpc: '2.0', id, error: { code: -32000, message } });
 
 /** One MCP message from a turn to a machine: its answer, or null for a notification. */
-export async function machineRequest(token: string, machine: number, server: 'mcp' | 'ws', name: string, msg: any, cacheDir: string): Promise<object | null> {
+export async function machineRequest(token: string, machine: number, server: 'mcp' | 'ws', name: string, msg: Rpc, cacheDir: string): Promise<object | null> {
   const env = callEnv();
   const api = env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
   const route = env.COORDINATOR_MACHINE_ROUTE === 'contraption-session' ? 'contraption-session' : 'session';
@@ -59,7 +62,7 @@ export async function machineRequest(token: string, machine: number, server: 'mc
     turn.handshake = msg.method === 'initialize' ? [msg] : [...turn.handshake.filter((m) => m.method === 'initialize'), msg];
   }
   const headers = { Authorization: `Bearer ${token}` };
-  async function post(l: Link, m: any) {
+  async function post(l: Link, m: Rpc) {
     const r = await fetch(`${api}/api/machines/${machine}/${route}/${l.session}`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: m }) });
     if (!r.ok) throw new Error(r.status === 503 || r.status === 404 ? 'the machine went offline' : `the app answered ${r.status}`);
   }
@@ -84,12 +87,12 @@ export async function machineRequest(token: string, machine: number, server: 'mc
   let link: Link;
   try {
     link = await t.link;
-  } catch (err: any) {
-    return error(msg.id, `${name}: ${err.message}`);
+  } catch (err) {
+    return error(msg.id, `${name}: ${thrown(err).message}`);
   }
-  const answer = new Promise<any>((done) => link.pending.set(msg.id, done));
+  const answer = new Promise<Rpc>((done) => link.pending.set(msg.id, done));
   // The machine sees a turn's messages in order.
-  link.queue = link.queue.then(() => post(link, msg)).catch((err: any) => link.pending.get(msg.id)?.(error(msg.id, `${name}: ${err.message}`)));
+  link.queue = link.queue.then(() => post(link, msg)).catch((err: unknown) => link.pending.get(msg.id)?.(error(msg.id, `${name}: ${thrown(err).message}`)));
   const reply = await answer;
   link.pending.delete(msg.id);
   if (!reply.error) {
@@ -100,7 +103,7 @@ export async function machineRequest(token: string, machine: number, server: 'mc
 }
 
 /** Open the machine's session stream; a machine that is offline (503) gets about 20 s to come back. */
-async function open(api: string, route: string, machine: number, server: string, name: string, headers: Record<string, string>, replay: any[], cacheDir: string, closed: () => void): Promise<Link> {
+async function open(api: string, route: string, machine: number, server: string, name: string, headers: Record<string, string>, replay: Rpc[], cacheDir: string, closed: () => void): Promise<Link> {
   const stream = new AbortController();
   const started = Date.now();
   let res: Response;
@@ -111,9 +114,10 @@ async function open(api: string, route: string, machine: number, server: string,
       if (res.ok && res.body) break;
       why = `${name} is not available (${res.status}): ${await res.text().catch(() => '')}`;
       if (res.status !== 503) throw new Error(why);
-    } catch (err: any) {
-      if (err.name === 'AbortError' || /not available/.test(err.message)) throw err;
-      why = `could not reach the app: ${err.message}`;
+    } catch (err) {
+      const e = thrown(err);
+      if (e.name === 'AbortError' || /not available/.test(e.message!)) throw err;
+      why = `could not reach the app: ${e.message}`;
     }
     if (Date.now() - started > 20_000) throw new Error(why);
     await new Promise((r) => setTimeout(r, 1000));
@@ -159,11 +163,11 @@ async function open(api: string, route: string, machine: number, server: string,
         }
       }
       end('the connection to the machine dropped (the app restarted?), so this call was lost');
-    } catch (err: any) {
-      end(err.name === 'AbortError' ? 'the turn ended' : 'the connection to the machine dropped (the app restarted?), so this call was lost');
+    } catch (err) {
+      end(thrown(err).name === 'AbortError' ? 'the turn ended' : 'the connection to the machine dropped (the app restarted?), so this call was lost');
     }
   })();
-  async function post(m: any) {
+  async function post(m: Rpc) {
     const r = await fetch(`${api}/api/machines/${machine}/${route}/${link.session}`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: m }) });
     if (!r.ok) throw new Error(`the app answered ${r.status}`);
   }

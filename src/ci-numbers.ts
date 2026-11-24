@@ -46,7 +46,7 @@ export function parseNumbers(body: unknown): Sent[] {
   if (!Array.isArray(list) || !list.length) throw new HttpError(400, 'Send { "numbers": [{ "name", "value", "unit" }] } with at least one');
   if (list.length > LIMITS.perUpload) throw new HttpError(413, `A run sends at most ${LIMITS.perUpload} numbers`);
   const seen = new Set<string>();
-  return list.map((n: any) => {
+  return list.map((n: { name?: unknown; value?: unknown; unit?: unknown } | null) => {
     const name = n?.name, value = n?.value, unit = n?.unit ?? '';
     if (typeof name !== 'string' || !NUMBER_NAME.test(name)) throw new HttpError(400, `A number's name is letters, digits and . _ + -, at most 80: ${JSON.stringify(name)?.slice(0, 90)}`);
     if (typeof value !== 'number' || !Number.isFinite(value)) throw new HttpError(400, `${name}'s value is not a number`);

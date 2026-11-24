@@ -50,7 +50,7 @@ export type Kind = {
   /** A re-add with the same dedupe_key: the payload to keep. Without it the new payload replaces the old. */
   merge?(row: Delivery, incoming: NewDelivery): unknown;
   /** When a row with this payload is due, on add and on every merge (alert batches: their wait moves with each alert). */
-  due?(payload: any): number | null;
+  due?(payload: unknown): number | null;
   /** `deliver`: still sent to a dismissed minion (relays, as held mail). Default `hold`: the 3-day rule. */
   onDismiss?: 'hold' | 'deliver';
   /** The dual read (ADR 0021, "Steps"): move anything found in the kind's old settings key into the table. Runs every pass. */

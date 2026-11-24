@@ -5,7 +5,7 @@
 // CI's opens that tab, its dot the worst verdict it shows.
 import { ago, api, h, view, poller, pacificStamp, pacificIso, pacificClockBare, pacificClock } from './base.js';
 import { toast } from './ui/status.js';
-import { hueRow, schemeTag, toneChip } from './look.js';
+import { emptyCard, hueRow, schemeTag, showFirst, toneChip } from './look.js';
 import { optimistic } from './ui/optimistic.js';
 import { pcWord } from './ci-desktop.js';
 import { LAST_SCHEME } from './sidebar.js';
@@ -306,6 +306,7 @@ function citadelTiles(c, days, now, ships, redraw) {
     ...(c.checks ? [checksTile(c.checks, now)] : []),
     ...(c.host.cpu ? [cpuTile(c.host.cpu, now)] : []),
     answerTile(c.host.answer, now),
+    ...(c.slow ? [slowTile(c.slow)] : []),
     cacheTile(c.host, now, c.verdict),
     tile('Starved', host?.cpu_psi == null ? 'No reading yet' : `CPU ${host.cpu_psi}% · memory ${host.mem_psi ?? 0}%`, 'How long work waited for a core or for memory over the last minute; background passes pause at 50% CPU or 20% memory',
       hourLine(c.host.series.filter((s) => s[4] != null), 4, { from, to: now, label: 'CPU pressure each hour, at its highest', rule: 50, tip: (v) => `CPU pressure ${v}% at its highest` }),
@@ -350,6 +351,38 @@ function answerTile(a, now) {
     l ? `Last 5 min: p95 ${ms(l.p95)}, p99 ${ms(l.p99)}, worst ${ms(l.max)} · target p95 ${ms(t.p95)}, p99 ${ms(t.p99)}` : `target p95 ${ms(t.p95)}, p99 ${ms(t.p99)}`,
     hourLine(a.rows, 2, { from: now - 24 * 3_600_000, to: now, label: 'answer time p95 for each 5 minutes over the last day', max, rule: t.p95, tip: (v) => `p95 ${ms(v)}` }),
     { tone: a.alert ? 'warn' : null, key, chart: `${target}; p95 per 5 min, last day: ${a.rows.slice(-24).map((r) => `${pacificClockBare(r[0])} ${ms(r[2])}`).join(', ')}; alert line p95 ${ms(a.line.p95)}, p99 ${ms(a.line.p99)}` });
+}
+
+/** Where a page was (its address then), in words: `scheme` is its scheme's name when the viewer may see it. */
+export function slowPlace(page, scheme) {
+  const of = scheme ?? 'a scheme';
+  if (/^#\/(p\/\d+\/)?t\/\d+/.test(page)) return scheme ? `a minion in ${scheme}` : 'a minion';
+  const m = /^#\/p\/\d+(?:\/([a-z-]+))?/.exec(page);
+  if (m) return m[1] ? `${of}'s ${m[1].replace(/-/g, ' ')} page` : of;
+  if (/^#\/(home)?$/.test(page) || !page) return 'Home';
+  return page;
+}
+const s1 = (v) => `${(v / 1000).toFixed(1)} s`;
+/** One slow moment in plain words (#1752): "20.1 s opening Citadel: 0.1 s server, 0.2 s network, 19.8 s the tab was frozen". */
+export function slowWords(m) {
+  const where = slowPlace(m.page, m.scheme);
+  if (m.kind === 'freeze') return `${s1(m.total_ms)} the tab was frozen on ${where}`;
+  const split = [m.server_ms != null ? `${s1(m.server_ms)} server` : null, `${s1(m.network_ms)} network${m.server_ms == null ? ' and server' : ''}`, `${s1(m.tab_ms)} the tab was frozen`].filter(Boolean).join(', ');
+  return `${s1(m.total_ms)} ${m.kind === 'load' ? 'opening Citadel' : `waiting for ${m.what} on ${where}`}: ${split}`;
+}
+/** The part that took most of it, as a hue: the server's, the network's or the tab's. */
+const slowHue = (m) => {
+  const parts = [['accent', m.server_ms ?? 0], ['teal', m.network_ms], ['waiting', m.tab_ms]];
+  return parts.reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+};
+/** Slow moments (#1752): every load, click or freeze over 2 s on people's pages in the last day, and where its time went. */
+function slowTile(slow) {
+  const worst = slow.reduce((w, m) => Math.max(w, m.total_ms), 0);
+  return tile('Slow moments', slow.length ? `${slow.length} in the last day` : 'None in the last day',
+    slow.length ? `The longest ${s1(worst)} · pages note any wait over 2 s and whether the server, the network or the tab took it` : 'Pages note any wait over 2 s and whether the server, the network or the tab took it',
+    slow.length ? showFirst({ key: 'st-slow', noun: 'moments', items: slow.map((m) => hueRow({ hue: slowHue(m), lead: s1(m.total_ms), meta: `${m.person} · ${m.device} · ${pacificClock(m.at)}` }, slowWords(m))) })
+      : emptyCard('No slow moments', 'A wait over 2 s on anyone\'s page shows here'),
+    { wide: true, key: 'slow', chart: slow.slice(0, 10).map((m) => `${pacificClockBare(m.at)} ${m.person} (${m.device}): ${slowWords(m)}`).join('; ') });
 }
 
 /**

@@ -101,11 +101,19 @@ export function poller(read, every) {
  */
 export const missedNews = (hiddenAt, heardAt, now, frozen) => frozen || now - hiddenAt >= 60_000 || heardAt < hiddenAt;
 
-const send = (path, opts) => fetch(path, {
-  ...opts,
-  headers: opts.body ? { 'Content-Type': 'application/json' } : {},
-  body: opts.body ? JSON.stringify(opts.body) : undefined,
-}).then(async (res) => ({ res, body: await res.json().catch(() => ({})) }));
+// Each request is timed for the slow-load recorder (public/slow-moments.js, #1752), its answer read whole first.
+const send = (path, opts) => {
+  const start = performance.now(), timed = (res) => globalThis.citadelSlow?.request(opts.method, path, start, res);
+  return fetch(path, {
+    ...opts,
+    headers: opts.body ? { 'Content-Type': 'application/json' } : {},
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  }).then(async (res) => {
+    const body = await res.json().catch(() => ({}));
+    timed(res);
+    return { res, body };
+  }, (err) => { timed(null); throw err; });
+};
 
 export async function api(path, opts = {}) {
   const get = !opts.method || opts.method === 'GET';

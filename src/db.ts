@@ -24,6 +24,7 @@ import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
 import { readWarmQueries } from './db/read-warm.ts';
 import { settingQueries } from './db/settings.ts';
+import { slowMomentQueries } from './db/slow-moments.ts';
 import { viewQueries } from './db/views.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
@@ -1354,6 +1355,23 @@ CREATE TABLE IF NOT EXISTS health_events (
   detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS health_events_kind ON health_events(kind, at);
+-- Pauses over 2 s people's pages noticed (#1752, src/db/slow-moments.ts): where the time went. The newest SLOW_KEEP kept.
+CREATE TABLE IF NOT EXISTS slow_moments (
+  id INTEGER PRIMARY KEY,
+  at INTEGER NOT NULL,
+  person TEXT NOT NULL,
+  device TEXT NOT NULL DEFAULT '',
+  tab TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL,
+  what TEXT NOT NULL DEFAULT '',
+  page TEXT NOT NULL DEFAULT '',
+  project_id INTEGER,
+  total_ms INTEGER NOT NULL,
+  server_ms INTEGER,
+  network_ms INTEGER NOT NULL,
+  tab_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS slow_moments_at ON slow_moments(at);
 -- perigee's own memory, disk and load every 5 minutes (#1123), for the Status page's week of history. Kept HOST_SAMPLE_KEEP_MS.
 CREATE TABLE IF NOT EXISTS host_samples (
   at INTEGER PRIMARY KEY,
@@ -1789,6 +1807,7 @@ export const SCHEMA_HISTORY = [
   [110, 'host_samples.answer_time (#1559)'],
   [111, 'events_old dropped and the main file vacuumed, by the server at start (#1169 ship 3)'],
   [112, 'contraptions.restart_risk, restart_note and contraption_runs (#1682)'],
+  [113, 'slow_moments (#1752)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3930,6 +3949,7 @@ const AREAS = [
   pushQueries,
   readWarmQueries,
   settingQueries,
+  slowMomentQueries,
   viewQueries,
 ];
 // The same list as a type: written out, since a type taken from AREAS would loop through Store's own type.
@@ -3943,6 +3963,7 @@ type Areas =
   & typeof pushQueries
   & typeof readWarmQueries
   & typeof settingQueries
+  & typeof slowMomentQueries
   & typeof viewQueries;
 // Without `this: Store` on the class's side, so a caller holding a Pick<Store, ...> can still call them.
 type AreaQueries = { [K in keyof Areas]: OmitThisParameter<Areas[K]> };

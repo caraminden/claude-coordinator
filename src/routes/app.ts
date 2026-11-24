@@ -7,6 +7,7 @@ import { fallbacks } from '../fallbacks.ts';
 import { prOwners } from '../prlinks.ts';
 import { ServiceError } from '../app-services.ts';
 import type { ContraptionRow, Store } from '../db.ts';
+import type { SlowMoment } from '../db/slow-moments.ts';
 import { hasKey } from '../release-key.ts';
 import { mayReceive } from '../access.ts';
 import { randomUUID } from 'node:crypto';
@@ -18,6 +19,30 @@ import { CARD_OPTIONS, welcomeAct, welcomeView } from '../welcome.ts';
 import { handoverState } from '../handover.ts';
 
 const MAX_CLIENTS = 100;
+
+/** A page's slow-moment report (POST /api/slow-moments, public/slow-moments.js): rows a person's flood can't grow past this many per window. */
+const SLOW_RATE = 60, SLOW_RATE_MS = 10 * 60_000, SLOW_MAX_MS = 10 * 60_000;
+const slowSeen = new Map<string, { since: number; n: number }>();
+const SLOW_KINDS = new Set(['request', 'load', 'freeze']);
+
+/** The report's rows as stored, each field checked and clipped, at most `room` of them; malformed ones dropped. */
+export function slowRows(body: any, person: string, room: number, now = Date.now()): Omit<SlowMoment, 'id'>[] {
+  const text = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f]/g, '').slice(0, max) : '');
+  const ms = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(Math.min(Math.max(v, 0), SLOW_MAX_MS)) : null);
+  const out: Omit<SlowMoment, 'id'>[] = [];
+  for (const m of Array.isArray(body?.moments) ? body.moments.slice(0, 20) : []) {
+    const total = ms(m?.total), at = Math.round(Number(m?.at));
+    // A day back at most, and nothing from the future: a report kept offline overnight still counts.
+    if (out.length >= room || !SLOW_KINDS.has(m?.kind) || total === null || !(at > now - 86_400_000 && at < now + 60_000)) continue;
+    const page = text(m.page, 120);
+    const scheme = /^#\/p\/(\d+)/.exec(page);
+    out.push({
+      at, person, device: text(body.device, 60), tab: text(body.tab, 12), kind: m.kind, what: text(m.what, 160), page,
+      project_id: scheme ? Number(scheme[1]) : null, total_ms: total, server_ms: ms(m.server), network_ms: ms(m.network) ?? 0, tab_ms: ms(m.tab) ?? 0,
+    });
+  }
+  return out;
+}
 
 /** Display names end up in prompts as "[Name]: ...", so keep them plain. */
 export function cleanName(v: unknown): string {
@@ -96,6 +121,20 @@ export const appRoutes: Route[] = [
       const body = await readJson(req, 8_000);
       const detail = app.health?.clientErrors.take(String(session.uid ?? session.name), body);
       if (detail) app.health?.watch?.record('client-error', detail);
+      return json(res, 202, {});
+    },
+  },
+  {
+    // The slow-load recorder (public/slow-moments.js, #1752): a page's pauses over 2 s, for the Status page.
+    method: 'POST', path: '/api/slow-moments', who: ['person'],
+    async handler({ req, res, app, session }) {
+      const body = await readJson(req, 16_000);
+      const who = String(session.name), t = Date.now();
+      let seen = slowSeen.get(who);
+      if (!seen || t - seen.since >= SLOW_RATE_MS) slowSeen.set(who, (seen = { since: t, n: 0 }));
+      const rows = slowRows(body, who, SLOW_RATE - seen.n, t);
+      seen.n += rows.length;
+      if (rows.length) app.store.addSlowMoments(rows);
       return json(res, 202, {});
     },
   },

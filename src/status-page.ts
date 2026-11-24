@@ -7,6 +7,7 @@ import { statfs } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { cores as hostCores, hostText, loadavg, MEMINFO } from './host-signals.ts';
 import type { Store, HostSample, ReleaseRow, ContraptionRow } from './db.ts';
+import type { SlowMoment } from './db/slow-moments.ts';
 import type { CiView } from './ci-health.ts';
 import type { PcView } from './ci-load.ts';
 import type { DiskUse, UnitState } from './app-services.ts';
@@ -564,10 +565,18 @@ export class StatusPage {
       units: citadelUnits.map((u) => ({ unit: u.unit, load: u.load, active: u.active, sub: u.sub })),
       desktops,
       backup: { ...backup, problems: backupMissing },
+      slow: slowView(this.deps.store, viewer, now),
       // Tiles still to come: the minions that build them fill these in (Build 5, lane 3).
       slots: [], // the line slot became the ship line panel (#1168), read by the page from /api/ship-lines
     };
   }
+}
+
+/** Pauses over 2 s people's pages noticed in the last day (#1752), newest first; a scheme the viewer can't see goes unnamed. */
+export function slowView(store: Store, viewer: Viewer, now: number): CitadelStatus['slow'] {
+  return store.slowMoments(now - DAY_MS).map(({ id: _id, project_id, ...m }) => ({
+    ...m, scheme: project_id != null && viewer.canSee(project_id) ? store.getProject(project_id)?.name ?? null : null,
+  }));
 }
 
 function shipChanges(r: ReleaseRow): string[] {
@@ -677,6 +686,8 @@ export interface CitadelStatus {
   /** Backup freshness (#1142): problems is what a missed night names; empty when all is well. */
   backup: BackupInfo & { problems: string[] };
   slots: { key: string; title: string; note: string }[];
+  /** Pauses over 2 s on people's pages in the last day (#1752): where each one's time went. */
+  slow: (Omit<SlowMoment, 'id' | 'project_id'> & { scheme: string | null })[];
 }
 
 export interface AppStatus {

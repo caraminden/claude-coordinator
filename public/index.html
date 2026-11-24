@@ -79,6 +79,7 @@
 
   <!-- First, so it hears errors from every module app.js loads (#724). -->
   <script src="error-beacon.js"></script>
+  <script src="slow-moments.js"></script>
   <script src="app.js" type="module"></script>
   <!-- After app.js on purpose: it runs before any module does, to catch one that fails to load. -->
   <script src="boot-guard.js"></script>

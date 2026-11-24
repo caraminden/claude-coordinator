@@ -161,6 +161,34 @@ export interface FileSync {
   /** The new text, for a merged file. */
   text?: string;
   base?: Base['how'];
+  /** The kit commit of that base, for the by-hand note's diff. */
+  baseCommit?: string;
+  /** A conflict with no marker: a case label the clean merge left twice in one `case` (bash runs only the first arm). */
+  dupes?: string[];
+}
+
+/**
+ * The case labels that appear more than once in one `case ... esac` of a shell script (#1769: a clean merge of
+ * guard.sh left two `files)` arms, and bash ran only the first). A line-based scan: it is run on the merged text and on
+ * the scheme's own copy, and only labels the merge made twice count.
+ */
+export function dupCaseLabels(text: string): string[] {
+  const frames: Map<string, number>[] = [];
+  const dupes = new Set<string>();
+  for (const line of text.split('\n')) {
+    if (/^\s*#/.test(line)) continue;
+    if (/^\s*esac\b/.test(line)) { frames.pop(); continue; }
+    const top = frames[frames.length - 1];
+    const arm = top && line.match(/^\s*\(?\s*([A-Za-z0-9_*?.\/\-"'$\[\]]+(?:\s*\|\s*[A-Za-z0-9_*?.\/\-"'$\[\]]+)*)\s*\)(?:\s|$)/);
+    if (arm) {
+      const label = arm[1].replace(/\s+/g, '');
+      const n = (top.get(label) ?? 0) + 1;
+      top.set(label, n);
+      if (n > 1) dupes.add(label);
+    }
+    if (/^\s*case\s.*\sin\s*$/.test(line)) frames.push(new Map());
+  }
+  return [...dupes];
 }
 
 /**
@@ -179,10 +207,31 @@ export function planScheme(kitDir: string, kitRev: string, histories: Record<str
     // With no base at all (a template with no history), the copy is taken as the base: nothing comes in.
     const baseText = base ? git(kitDir, ['cat-file', 'blob', base.blob]) : ours;
     const merged = merge3(ours, baseText, theirs);
-    if (merged.conflict) return { path: file.path, status: 'conflict' as const, base: base?.how };
-    if (merged.text === ours) return { path: file.path, status: 'same' as const, base: base?.how };
-    return { path: file.path, status: 'merged' as const, text: merged.text, base: base?.how };
+    const info = { base: base?.how, baseCommit: base?.commit };
+    if (merged.conflict) return { path: file.path, status: 'conflict' as const, ...info };
+    if (merged.text === ours) return { path: file.path, status: 'same' as const, ...info };
+    // A clean merge of a shell file can still leave one label twice in a case; bash runs only the first arm.
+    if (ours.startsWith('#!')) {
+      const before = new Set(dupCaseLabels(ours));
+      const dupes = dupCaseLabels(merged.text).filter((l) => !before.has(l));
+      if (dupes.length) return { path: file.path, status: 'conflict' as const, ...info, dupes };
+    }
+    return { path: file.path, status: 'merged' as const, text: merged.text, ...info };
   });
+}
+
+/** The mail to a scheme's Taskmaster when files clash: what a minion does by hand (#1769). Held mail, so it stays short. */
+export function byHandNote(kitDir: string, kit: string, clashes: FileSync[]): string {
+  const diffs = clashes.map((f) => {
+    const template = KIT_FILES.find((k) => k.path === f.path)!.template;
+    return f.baseCommit ? `git -C ${kitDir} diff ${short(f.baseCommit)} ${short(kit)} -- ${template}` : `${f.path}: no base found, so use the sha in the last "${TRAILER}" trailer of this scheme's sync commit as the first sha of the same diff`;
+  });
+  const dupes = clashes.filter((f) => f.dupes?.length).map((f) => `${f.path} (${f.dupes!.map((l) => `${l})`).join(', ')})`);
+  return `Kit sync (kit ${short(kit)}): ${list(clashes.map((f) => f.path))} clash with this scheme's own edits, so no sync was made here, not even of the files that merge cleanly. A minion has to take the kit's change by hand:\n`
+    + `1. See only the kit's change, not this scheme's own edits mixed in: diff the template between the last sync and the kit (the sha is this scheme's last "${TRAILER}" trailer; mind that more than the notices named may have changed):\n${diffs.join('\n')}\n`
+    + `2. Apply those hunks by hand, keeping this scheme's lines.${dupes.length ? ` These merged cleanly but left a case label twice in one case, and bash runs only the first arm: ${dupes.join('; ')}. Merge the arms into one.` : ''} Before shipping, check the result for a case label that appears twice in one case.\n`
+    + `3. A fresh worktree has no node_modules: run \`npm ci\` before the scheme's tests. \`tools/guard.sh --self-test\` takes about 2 minutes (plain, then nested): run it in the background on its own, not in one call with other checks.\n`
+    + `4. Put "${TRAILER}: ${kit}" in the commit's final trailer block (right above Co-Authored-By, no blank line between them) and touch every file named above, so the next sync merges from there.`;
 }
 
 /** The scheme repos a round looks at: <projects>/<n>/repo with git, leaving out any repo holding the templates (Citadel's). */
@@ -375,7 +424,8 @@ export class KitSync {
         continue;
       }
       const merged = plan.filter((f) => f.status === 'merged');
-      const clashes = plan.filter((f) => f.status === 'conflict').map((f) => f.path);
+      const clashPlan = plan.filter((f) => f.status === 'conflict');
+      const clashes = clashPlan.map((f) => f.path);
       const sync: SchemeSync = { project, name, state: 'none', files: merged.map((f) => f.path), repo: dir };
       round.schemes.push(sync);
       if (!merged.length && !clashes.length) continue;
@@ -389,7 +439,7 @@ export class KitSync {
         sync.state = 'conflict';
         sync.files = clashes;
         const chat = await this.d.chat(project);
-        if (chat) this.d.mail(chat, `Kit sync (kit ${short(kit)}): ${list(clashes)} clash with this scheme's own edits, so no sync was made here, not even of the files that merge cleanly. A minion has to take the kit's change by hand: diff each file against the kit's template in Citadel's repo (kit/skills/scheme-setup/templates/), keep this scheme's lines, and put "${TRAILER}: ${kit}" in the commit's final trailer block (right above Co-Authored-By, no blank line between them) and touch every file named above, so the next sync merges from there.`);
+        if (chat) this.d.mail(chat, byHandNote(this.d.kitDir, kit, clashPlan));
         continue;
       }
       try {

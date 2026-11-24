@@ -328,7 +328,7 @@ test('a Kit-Sync line outside the last paragraph is found by a body grep when th
 
 // ---- #1769: a clean merge that leaves two arms of one case, and the note a clash sends ----------------------------
 
-const CASE_BASE = ['#!/usr/bin/env bash', 'case "$1" in', '  a) echo a ;;', '  *) echo other ;;', 'esac', ...Array.from({ length: 12 }, (_, i) => `echo filler ${i}`), 'case "$2" in', '  x) echo x ;;', 'esac', ''].join('\n');
+const CASE_BASE = ['#!/usr/bin/env bash', 'case "$1" in', '  a) echo a ;;', ...Array.from({ length: 12 }, (_, i) => `  # filler ${i}`), '  *) echo other ;;', 'esac', ''].join('\n');
 const withArm = (text: string, after: string, arm: string) => text.replace(after, `${after}\n${arm}`);
 
 test('a clean merge that leaves two arms with one label in a case is a conflict naming the label', () => {
@@ -336,7 +336,7 @@ test('a clean merge that leaves two arms with one label in a case is a conflict 
   try {
     const base = CASE_BASE;
     const ours = withArm(base, '  a) echo a ;;', '  files) echo scheme block ;;');
-    const theirs = withArm(base, '  x) echo x ;;', '  files) echo kit block ;;');
+    const theirs = withArm(base, '  # filler 11', '  files) echo kit block ;;');
     assert.equal(merge3(ours, base, theirs).conflict, false, 'git merge-file takes both');
     commit(f.kit, { [GUARD.template]: base }, 'guard base');
     const s = repo(f.root, 'scheme');
@@ -355,8 +355,8 @@ test('a label the scheme already had twice does not turn a clean merge into a co
   const f = fixture();
   try {
     const base = withArm(CASE_BASE, '  a) echo a ;;', '  a) echo dead arm ;;');
-    const ours = base.replace('echo filler 0', 'echo scheme filler');
-    const theirs = base.replace('echo filler 11', 'echo filler eleven');
+    const ours = base.replace('# filler 0', '# scheme filler');
+    const theirs = base.replace('# filler 11', '# filler eleven');
     commit(f.kit, { [GUARD.template]: base }, 'guard base');
     const s = repo(f.root, 'scheme');
     commit(s, { [GUARD.path]: ours }, `sync\n\n${TRAILER}: ${git(f.kit, ['rev-parse', 'HEAD']).trim()}`);

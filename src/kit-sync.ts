@@ -224,7 +224,7 @@ export function planScheme(kitDir: string, kitRev: string, histories: Record<str
 export function byHandNote(kitDir: string, kit: string, clashes: FileSync[]): string {
   const diffs = clashes.map((f) => {
     const template = KIT_FILES.find((k) => k.path === f.path)!.template;
-    return f.baseCommit ? `git -C ${kitDir} diff ${short(f.baseCommit)} ${short(kit)} -- ${template}` : `${f.path}: no base found, so use the sha in the last "${TRAILER}" trailer of this scheme's sync commit as the first sha of the same diff`;
+    return f.baseCommit ? `git -C ${kitDir} diff ${short(f.baseCommit)} ${short(kit)} -- ${template}${f.base === 'closest' ? '   (no trailer: this base is Citadel\'s best guess of the version the copy came from)' : ''}` : `${f.path}: no base found, so use the sha in the last "${TRAILER}" trailer of this scheme's sync commit as the first sha of the same diff`;
   });
   const dupes = clashes.filter((f) => f.dupes?.length).map((f) => `${f.path} (${f.dupes!.map((l) => `${l})`).join(', ')})`);
   return `Kit sync (kit ${short(kit)}): ${list(clashes.map((f) => f.path))} clash with this scheme's own edits, so no sync was made here, not even of the files that merge cleanly. A minion has to take the kit's change by hand:\n`

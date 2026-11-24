@@ -517,11 +517,16 @@ export function questionCard(ticketId, card, opts = {}) {
   while (picks.length < card.questions.length) picks.push({ selected: new Set(), other: '' }); // a card that grew since it was last drawn
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;
   let pictures = card.questions.some((q) => q.options.some((o) => o.image));
-  const atts = cardPictures.get(card.id) ?? cardAttachments(ticketId, () => {
-    if (atts.items.length || atts.busy || atts.uploading) cardPictures.set(card.id, atts);
-    else cardPictures.delete(card.id);
-    atts.onChange?.();
-  });
+  let atts = cardPictures.get(card.id);
+  if (!atts) {
+    atts = cardAttachments(ticketId, () => {
+      if (!atts.items.length && !atts.busy && !atts.uploading && cardPictures.get(card.id) === atts) cardPictures.delete(card.id);
+      atts.onChange?.();
+    });
+    // Kept from the moment a picture starts coming in, so a card drawn again meanwhile finds this strip.
+    const add = atts.add;
+    atts.add = (...args) => { cardPictures.set(card.id, atts); return add(...args); };
+  }
   atts.onChange = () => refresh();
   const sendBtn = h('button', { type: 'button', class: 'small qsend', disabled: true }, single ? 'Send' : 'Send answers');
   const status = h('span', { class: 'muted' });

@@ -117,6 +117,19 @@ test('opening and closing the file viewer leaves nothing behind', { skip }, asyn
     }
   });
   assert.ok(grew(seen, 'detached') <= 1 && grew(seen, 'listeners') <= 10, `viewers left behind: ${JSON.stringify(seen)}`);
+  // The phone keyboard watch is on while a viewer is open and off once it closes.
+  const turns = async () => {
+    const o = await page.send('Runtime.evaluate', { expression: 'screen.orientation', objectGroup: 'turns' });
+    const { listeners } = await page.send('DOMDebugger.getEventListeners', { objectId: o.result.objectId });
+    await page.send('Runtime.releaseObjectGroup', { objectGroup: 'turns' });
+    return listeners.filter((l: any) => l.type === 'change').length;
+  };
+  await page.eval(`location.hash = '#/f/${ticketId}/' + encodeURIComponent('last.txt')`);
+  await waitFor(page, 'the viewer', `!!document.querySelector('dialog.viewer[open]')`);
+  assert.equal(await turns(), 1, 'an open viewer watches for the phone turning');
+  await page.eval(`location.hash = '#/p/${projectId}'`);
+  await waitFor(page, 'the viewer to close', `!document.querySelector('dialog.viewer')`);
+  assert.equal(await turns(), 0, 'a closed viewer stops watching');
 });
 
 test('closed bridge frames are let go', { skip }, async () => {

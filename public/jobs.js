@@ -85,7 +85,16 @@ function redraw(id) {
   }
 }
 
-/** Cards of finished jobs never redraw, so each new card also lets go of the ones that left the page (#1760). */
+/**
+ * Cards of finished jobs never redraw, so each new card also lets go of the ones that left the page (#1760). A task
+ * later, so a list being rebuilt (the Machines page moves its open cards into new rows) has put them back first.
+ */
+let forgetting = false;
+function forgetSoon() {
+  if (forgetting) return;
+  forgetting = true;
+  setTimeout(() => { forgetting = false; forgetLeft(); });
+}
 function forgetLeft() {
   for (const [id, cards] of drawn) {
     for (const el of cards.keys()) if (!el.isConnected && el.wasShown) cards.delete(el);
@@ -123,7 +132,7 @@ export function jobCard(id, first, where = 'chat') {
     el.replaceChildren(...cardParts(v, where));
     if (v.state === 'running') tick();
   };
-  forgetLeft();
+  forgetSoon();
   if (!drawn.has(id)) drawn.set(id, new Map());
   drawn.get(id).set(el, draw);
   draw();

@@ -272,7 +272,6 @@ function openViewer(ticket, file, inPlace) {
     return renderViewerBar();
   }
   viewer.media?.lb.destroy();
-  viewer.stopKeyboard?.();
   viewer.media = null;
   viewer.stage.className = `viewer-stage k-${file.kind}`;
   viewer.stage.replaceChildren();
@@ -340,6 +339,7 @@ export function closeViewer() {
   const { dialog, chat, placeholder, ticket, scrollY } = viewer;
   const follow = followChat;
   viewer.media?.lb.destroy();
+  viewer.stopKeyboard?.();
   viewer = gallery = null;
   placeholder.replaceWith(chat);
   // Gone once its close event has been out on the page, which puts the caret back in the chat's box (ui/composer.js).

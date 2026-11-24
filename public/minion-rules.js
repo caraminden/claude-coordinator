@@ -227,8 +227,8 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     settingsHelp('Whether the Taskmaster may suggest a numbered build for a big multi-minion feature.', 'Off leaves the builds line out of its prompt. Builds already running carry on.'),
     'builds', [['suggest', 'Suggest'], ['off', 'Off']], 'suggest', 'Major builds');
   const grill = () => choice({ icon: 'spark', hue: 'running', title: 'Grill before code' },
-    settingsHelp('How much a feature minion questions its requester, as cards, before it writes code.', 'Design only, the default in every scheme: only features that need design. Every feature grills them all; Never skips it. Bugs and chores skip it either way.'),
-    'grill', [['design', 'Design only'], ['all', 'Every feature'], ['never', 'Never']], 'design', 'Grill before code');
+    settingsHelp('How much a feature minion questions its requester, as cards, before it writes code.', 'Features that need design, the default, grills only features whose work needs design: a new screen, data model or flow. Each minion judges that from its brief, not from its type (design-type minions question people as part of their own work anyway). Every feature grills them all; Never skips it. Bugs, chores and small features or tweaks with a clear spec skip it either way.'),
+    'grill', [['design', 'Features that need design'], ['all', 'Every feature'], ['never', 'Never']], 'design', 'Grill before code');
   const ghRunners = () => choice({ icon: 'spark', hue: 'running', title: 'GitHub\'s own runners' },
     settingsHelp('CI on GitHub\'s runners (CI_RUNNER=github) costs Actions minutes.', 'Ask makes a minion get a person\'s go first; OK lets it use them; Never keeps CI on this scheme\'s own runners.'),
     'gh_runners', [['ask', 'Ask first'], ['ok', 'OK'], ['never', 'Never']], 'ask', 'GitHub runners');

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Template: copy to tools/fmt (Citadel #1792). Needs `@biomejs/biome` pinned exactly in devDependencies.
+# Formats Citadel's TypeScript and JavaScript with Biome (biome.json), or only checks it: `tools/fmt --check`.
+# Uses the repo's own install (npm ci) and otherwise the same pinned version through npx. Files named after the
+# flags are formatted instead of the whole repo, e.g. `tools/fmt src/runner.ts`.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+bin=node_modules/.bin/biome
+if [ -x "$bin" ]; then run=("$bin"); else
+  version=$(node -p "require('./package.json').devDependencies['@biomejs/biome']")
+  run=(npx --yes "@biomejs/biome@$version")
+fi
+if [ "${1:-}" = "--check" ]; then shift; exec "${run[@]}" format "${@:-.}"; fi
+exec "${run[@]}" format --write "${@:-.}"

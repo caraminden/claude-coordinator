@@ -12,6 +12,7 @@
     "test": "tools/citadel-node --test --test-timeout=$(( ${CITADEL_TEST_TIMEOUT:-60} * 1000 )) --test-concurrency=${CITADEL_TEST_CONCURRENCY:-$(tools/mem-room workers 2>/dev/null || echo $(( ($(nproc) + 1) / 2 )))} --test-global-setup=test/leak-guard.ts test/"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.9",
     "@types/node": "26.6.7",
     "fast-check": "^4.11.0",
     "typescript": "7.0.2"

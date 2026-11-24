@@ -4,6 +4,7 @@
 // On finding itself reparented it kills what still names its data folder (the supervisors and turns it started: both
 // outlive a server on purpose, in units of their own) and exits.
 import { readFile, readdir, stat } from 'node:fs/promises';
+import { supervisorHome } from './reaper.ts';
 
 /** This user's live processes, other than `self`, with an argument that is or is inside `dir`. */
 export async function procsNaming(dir: string, self = process.pid): Promise<number[]> {
@@ -18,14 +19,18 @@ export async function procsNaming(dir: string, self = process.pid): Promise<numb
   return found;
 }
 
-/** SIGKILL what names `dir`: each one's process group first (claude leads one with its tools in it), then the pid. */
+/**
+ * Kill what names `dir`: each one's process group first (claude leads one with its tools in it), then the pid. SIGKILL,
+ * but a turn supervisor gets SIGTERM: killed, its unit's Restart=on-failure would start it again (#1758).
+ */
 export async function killNaming(dir: string) {
   for (const pid of await procsNaming(dir)) {
+    const signal = await readFile(`/proc/${pid}/cmdline`, 'utf8').then((c) => (supervisorHome(c.split('\0')) ? 'SIGTERM' : 'SIGKILL'), () => 'SIGKILL' as const);
     try {
-      process.kill(-pid, 'SIGKILL');
+      process.kill(-pid, signal);
     } catch {
       try {
-        process.kill(pid, 'SIGKILL');
+        process.kill(pid, signal);
       } catch {}
     }
   }

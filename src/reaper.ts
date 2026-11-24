@@ -18,7 +18,7 @@
 import { SHIM } from './turn-run.mjs';
 import { readdir, readFile, readlink, stat } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 /** One process of this account, as /proc tells it. */
 export interface Proc {
@@ -173,6 +173,28 @@ export function shownCommand(argv: string[]): string {
     .slice(0, 160);
 }
 
+/** A turn supervisor's folder, from its command line (`<node> <folder>/turn-supervisor.mjs <folder> <version>`, src/supervisor-client.ts), or null for any other process. */
+export function supervisorHome(argv: string[]): string | null {
+  return argv.length >= 4 && argv[1] === join(argv[2], 'turn-supervisor.mjs') ? argv[2] : null;
+}
+
+/**
+ * Whether no runner will hand the supervisor in `home` a turn again (#1758): its folder is gone (a test's data
+ * deleted), or it is a test server's in a ship whose land.sh has ended (`run/landings/<n>/tmp/…`, kept 14 days).
+ */
+export async function supervisorOrphaned(home: string, landingsRoots: string[]): Promise<boolean> {
+  try {
+    await stat(home);
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+  for (const root of landingsRoots) {
+    const n = home.startsWith(root + '/') && /^(\d+)\/tmp\//.exec(home.slice(root.length + 1))?.[1];
+    if (n) return stat(join(root, n, 'code')).then(() => true, () => false);
+  }
+  return false;
+}
+
 /** What the reaper reads and writes of the store. */
 export interface ReaperStore {
   getTicket(id: number): { id: number; number: number; title: string; project_id: number; kind: string; status: string } | undefined;
@@ -207,12 +229,15 @@ export const WRAPPER_MARKS = ['/turn-wrapper.mjs', '/turn-wrapper.ts'] as const;
 export class Reaper {
   private readonly o: Required<Omit<ReaperOptions, 'commit'>> & { commit: string | null };
   readonly projectsRoot: string;
+  /** Ships' folders (src/land.ts), as given and as resolved: a test's tmpdir() may name either. */
+  private readonly landingsRoots: string[];
 
   constructor(o: ReaperOptions) {
     const root = join(o.dataDir, 'projects');
     let real = root;
     try { real = realpathSync(root); } catch { /* not made yet: the path as given */ }
     this.projectsRoot = real;
+    this.landingsRoots = [...new Set([join(resolve(o.dataDir), 'run', 'landings'), join(dirname(real), 'run', 'landings')])];
     this.o = {
       store: o.store, dataDir: o.dataDir, commit: o.commit ?? null, selfPid: o.selfPid ?? process.pid, wrapperMark: o.wrapperMark ?? WRAPPER_MARKS,
       guardCgroup: o.guardCgroup ?? guardedCgroup, scan: o.scan ?? scanProcs, kill: o.kill ?? ((pid, sig) => process.kill(pid, sig)),
@@ -247,14 +272,10 @@ export class Reaper {
     return t && t.project_id === projectId && t.kind !== 'coordinator' && t.status === 'closed' ? t : null;
   }
 
-  /** Stop what closed minions left running: only `ticketId`'s when given (its close), else every closed minion's (the sweep). */
-  async reap(ticketId?: number): Promise<Reaped[]> {
-    const found = (await this.owned()).filter((x) => (ticketId === undefined || x.ticketId === ticketId) && this.closed(x.ticketId, x.projectId));
-    if (!found.length) return [];
-    // Read again at the kill: a minion reopened while /proc was read keeps its processes.
-    const term = found.filter((x) => this.closed(x.ticketId, x.projectId));
-    const sent: Owned[] = [];
-    for (const x of term) {
+  /** TERM each, then KILL what is still there after termWaitMs; each checked to be the same process before each signal. */
+  private async stop<T extends { proc: Proc }>(found: T[]): Promise<{ sent: T[]; killed: Set<number> }> {
+    const sent: T[] = [];
+    for (const x of found) {
       if ((await startOf(x.proc.pid)) !== x.proc.start) continue; // gone, or the pid is another process now
       try {
         this.o.kill(x.proc.pid, 'SIGTERM');
@@ -266,7 +287,7 @@ export class Reaper {
     let left = sent;
     while (left.length && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 200));
-      left = (await Promise.all(left.map(async (x) => ((await startOf(x.proc.pid)) === x.proc.start ? x : null)))).filter((x): x is Owned => !!x);
+      left = (await Promise.all(left.map(async (x) => ((await startOf(x.proc.pid)) === x.proc.start ? x : null)))).filter((x): x is T => !!x);
     }
     for (const x of left) {
       if ((await startOf(x.proc.pid)) !== x.proc.start) continue;
@@ -275,6 +296,32 @@ export class Reaper {
         killed.add(x.proc.pid);
       } catch { /* gone meanwhile */ }
     }
+    return { sent, killed };
+  }
+
+  /**
+   * Stop turn supervisors no runner will use again (supervisorOrphaned): test servers' left in their own units, which a
+   * test's kill by pid doesn't end (#1758). TERM ends one cleanly, so its unit's Restart=on-failure doesn't bring it back.
+   */
+  async reapSupervisors(): Promise<number[]> {
+    const found: { proc: Proc; home: string }[] = [];
+    for (const proc of await this.o.scan()) {
+      const home = supervisorHome(proc.argv);
+      if (home && proc.pid !== this.o.selfPid && (await supervisorOrphaned(home, this.landingsRoots))) found.push({ proc, home });
+    }
+    if (!found.length) return [];
+    const { sent, killed } = await this.stop(found);
+    for (const x of sent) this.o.log(`Stopped turn supervisor pid ${x.proc.pid} (${killed.has(x.proc.pid) ? 'KILL' : 'TERM'}): nothing will hand it a turn again, ${x.home}`);
+    if (sent.length) this.reapedAt = Date.now();
+    return sent.map((x) => x.proc.pid);
+  }
+
+  /** Stop what closed minions left running: only `ticketId`'s when given (its close), else every closed minion's (the sweep). */
+  async reap(ticketId?: number): Promise<Reaped[]> {
+    const found = (await this.owned()).filter((x) => (ticketId === undefined || x.ticketId === ticketId) && this.closed(x.ticketId, x.projectId));
+    if (!found.length) return [];
+    // Read again at the kill: a minion reopened while /proc was read keeps its processes.
+    const { sent, killed } = await this.stop(found.filter((x) => this.closed(x.ticketId, x.projectId)));
     const now = Date.now();
     this.reapedAt = now;
     return sent.map((x) => {

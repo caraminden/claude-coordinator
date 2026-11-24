@@ -126,12 +126,14 @@ export async function stopTurns(...dirs: string[]) {
       await settledInProcess(10_000);
       return;
     }
-    for (const pid of left.keys()) {
+    for (const [pid, command] of left) {
+      // A turn supervisor gets TERM, which its unit's Restart=on-failure leaves stopped; KILLed, it came back (#1758). KILL after 2 s.
+      const signal = i < 40 && / \S*\/turn-supervisor\.mjs /.test(` ${command} `) ? 'SIGTERM' : 'SIGKILL';
       try {
-        process.kill(-pid, 'SIGKILL'); // claude leads a process group of its own, with its tools in it
+        process.kill(-pid, signal); // claude leads a process group of its own, with its tools in it
       } catch {
         try {
-          process.kill(pid, 'SIGKILL');
+          process.kill(pid, signal);
         } catch {}
       }
     }

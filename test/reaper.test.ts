@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { type ChildProcess } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
@@ -174,6 +174,49 @@ test('the sweep reaps every closed minion\'s leftovers, skips one reopened while
   assert.ok(await alive(pb), 'the reopened minion keeps its process');
   assert.ok(!sent.some((s) => s.startsWith(`${pb} `)));
   await until('the stubborn process to die of KILL', async () => !(await alive(pa)) && !(await alive(pc)), 5000);
+  store.db.close();
+});
+
+/** A stand-in turn supervisor: its command line as supervisor-client starts one (`<node> <home>/turn-supervisor.mjs <home> <version>`). */
+async function supervisor(home: string, tag: string): Promise<number> {
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, 'turn-supervisor.mjs'), 'setInterval(() => {}, 1000);\n');
+  const pidFile = join(root, `${tag}.pid`);
+  const sh: ChildProcess = tmp.spawn('sh', ['-c', `"$0" "$1/turn-supervisor.mjs" "$1" v1 & echo $! > "$2"`, process.execPath, home, pidFile], { detached: true, stdio: 'ignore' });
+  await new Promise((r) => sh.on('exit', r));
+  const pid = await until(`${tag} to run`, async () => {
+    try {
+      const p = Number(readFileSync(pidFile, 'utf8').trim());
+      return p && (await startOf(p)) ? p : null;
+    } catch { return null; } // not written yet
+  });
+  pids.push(pid);
+  return pid;
+}
+
+test('turn supervisors whose folder is gone or whose ship has ended are stopped with TERM; live ones and running ships\' keep theirs', async () => {
+  const dir = join(root, 'supervisors');
+  const { store } = scheme(dir);
+  const landings = join(dir, 'run', 'landings');
+  const sup = (...p: string[]) => join(...p, 'data', 'run', 'turns', '.supervisor', 'v1');
+  const gone = await supervisor(sup(root, 'deleted-test'), 'gone');
+  const live = await supervisor(sup(dir), 'live');
+  const shipped = await supervisor(sup(landings, '7', 'tmp', 'boot-x'), 'shipped');
+  const shipping = await supervisor(sup(landings, '8', 'tmp', 'boot-y'), 'shipping');
+  const notOne = await detached(root, 'not-a-supervisor');
+  rmSync(join(root, 'deleted-test'), { recursive: true }); // timing-ok: the folder going is the case under test
+  writeFileSync(join(landings, '7', 'code'), '0'); // ship 7's land.sh ended; 8's still runs
+  const sent: string[] = [];
+  const reaper = new Reaper({
+    store, dataDir: dir, termWaitMs: 2000, log: () => {},
+    // This test's own processes only: the box's real supervisors are not the test's to stop.
+    scan: async () => (await scanProcs()).filter((p) => pids.includes(p.pid)),
+    kill: (pid, sig) => { sent.push(`${pid} ${sig}`); process.kill(pid, sig); },
+  });
+  assert.deepEqual((await reaper.reapSupervisors()).sort(), [gone, shipped].sort());
+  assert.deepEqual(sent.sort(), [`${gone} SIGTERM`, `${shipped} SIGTERM`].sort());
+  await until('both to exit of TERM', async () => !(await alive(gone)) && !(await alive(shipped)));
+  for (const pid of [live, shipping, notOne]) assert.ok(await alive(pid), `pid ${pid} still runs`);
   store.db.close();
 });
 

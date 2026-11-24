@@ -290,6 +290,12 @@ setInterval(() => {
 }, 2_000).unref();
 // Beats, as the wrapper's; and adopted turns are watched by pid, having no child here.
 setInterval(() => {
+  // Its folder gone (a test's data deleted, #1758), no runner can find it or read its turns' files: a clean exit, which its
+  // unit's Restart=on-failure leaves stopped. superseded() can't tell, reading no `current` as "still current".
+  if (!existsSync(home)) {
+    console.error(`turn supervisor: ${home} is gone, so it exits`);
+    process.exit(0);
+  }
   for (const t of turns.values()) {
     if (t.adopted && t.pid && !runs(t.pid, t.dir)) {
       forget(t);

@@ -823,8 +823,9 @@ if (!BOOT_CHECK) {
     // What it left running stops too (#1365), once its preview has: by folder and pid, never by name (src/reaper.ts).
     return Promise.resolve(stopped).then(() => reaper.reap(ticketId)).then(() => {}, (err) => console.error(`Ticket ${ticketId}: reaping its processes failed:`, err));
   };
-  // Anything a close missed (a restart mid-close, a container turn's job re-parented to the container's init), hourly.
-  every('reap closed minions', 3600_000, () => reaper.reap(), 10 * 60_000);
+  // Anything a close missed (a restart mid-close, a container turn's job re-parented to the container's init), hourly;
+  // and test servers' turn supervisors left in their units once their folder or their ship is gone (#1758).
+  every('reap closed minions', 3600_000, () => reaper.reap().finally(() => reaper.reapSupervisors()), 10 * 60_000);
   liveOn(BOOT_COMMIT);
 }
 // Citadel's recovery promises, checked at boot and hourly, report only (#1415, src/standing-checks.ts): reads in a worker.

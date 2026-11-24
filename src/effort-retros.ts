@@ -2,7 +2,7 @@
 // "Why not other schemes too if they do a big project?"; her picks: "Both" named efforts and unnamed chains, "Starts by itself").
 // An effort is the minions sharing the global `effortName` property: named by the Taskmaster at its first minion, carried
 // by start_after followers and parent starts (effortFor), and `chain from #N` for a start_after chain nobody named.
-// docs/adr/0030-effort-retros.md has the picks.
+// docs/adr/0031-effort-retros.md has the picks.
 import { buildOwnerKey, type Project, type Store, type Ticket } from './db.ts';
 import type { Runner } from './runner.ts';
 import { pickFor } from '../public/model-table.js';

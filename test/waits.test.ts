@@ -52,7 +52,7 @@ function setup() {
   return { state, heavy, waits, changed, dead, free, ticket, waiter };
 }
 
-test('the land line: the holder by its phase, each waiter by its place and who is ahead, with an estimate', () => {
+test('the land line: the holder by its phase, each waiter by its place and who is ahead, with an estimate', async () => {
   const { state, waits, changed, dead, ticket } = setup();
   const a = minion(), b = minion(), c = minion(), d = minion();
   writeFileSync(join(state, 'queue', '.took'), '100\n200\n150\n');
@@ -60,7 +60,7 @@ test('the land line: the holder by its phase, each waiter by its place and who i
   ticket(2, b.branch, 0, 'waiting', 60);
   ticket(3, c.branch, 0, 'waiting', 10);
   dead.add(ticket(4, d.branch, 0, 'waiting', 5)); // its process is gone
-  waits.poll();
+  await waits.poll();
 
   assert.deepEqual(waits.wait(a.id), { kind: 'land', stage: 'test', label: 'Tests on perigee', chip: 'ship · tests', text: 'CI fell back: running the full suite on perigee', brief: 'full suite on perigee', since: now - 30_000, usual: null });
   const wb = waits.wait(b.id)!;
@@ -75,36 +75,36 @@ test('the land line: the holder by its phase, each waiter by its place and who i
   assert.deepEqual(changed.sort(), [a.id, b.id, c.id].sort(), "a minion whose process is gone has no wait to send");
 
   changed.length = 0;
-  waits.poll();
+  await waits.poll();
   assert.deepEqual(changed, [], 'nothing changed, nothing re-sent');
   // A holder running long doesn't stretch the estimate, so the waiter's bar turns amber.
   now += 600_000;
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.wait(b.id)!.usual, 150);
   now -= 600_000;
 });
 
-test('a stage that moves on counts toward its usual; a landing that leaves the line early does not', () => {
+test('a stage that moves on counts toward its usual; a landing that leaves the line early does not', async () => {
   const { state, waits, ticket } = setup();
   const a = minion(), b = minion();
   ticket(1, a.branch, now / 1000, 'rebasing onto main', 0);
   ticket(2, b.branch, now / 1000, 'waiting for CI since 14:00', 0);
-  waits.poll();
+  await waits.poll();
   now += 12_000;
   ticket(1, a.branch, now / 1000 - 12, 'deploying: boot check since 14:01', 0);
   rmSync(join(state, 'queue', '0000000002')); // B's CI went red
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.usual('land:rebase'), 12);
   assert.equal(waits.usual('land:ci'), null);
   assert.deepEqual({ ...waits.wait(a.id)!, since: 0 }, { kind: 'land', stage: 'deploy', label: 'Deploy', chip: 'ship · deploy', text: 'boot check', since: 0, usual: null });
   now += 30_000;
   rmSync(join(state, 'queue', '0000000001'));
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.usual('land:deploy'), 30, 'a deploy that ends is a landing done');
   assert.equal(waits.wait(a.id), null);
 });
 
-test('heavy slots: the holder runs, the waiters line up behind it, and only a running minion shows one', () => {
+test('heavy slots: the holder runs, the waiters line up behind it, and only a running minion shows one', async () => {
   const { heavy, waits, free, waiter } = setup();
   const a = minion(), b = minion(), idle = minion('idle'), killed = minion(), gone = minion();
   writeFileSync(join(heavy, 'slot-0.who'), `Citadel #${a.number} (cara): npm test (since 14:00, pid 4242)\n`);
@@ -114,7 +114,7 @@ test('heavy slots: the holder runs, the waiters line up behind it, and only a ru
   waiter('wait-97-1', `Citadel #${killed.number} (cara)`, now / 1000 - 300, 'line', 61);
   writeFileSync(join(heavy, 'slot-1.who'), `Citadel #${gone.number} (cara): npm test (since 13:00, pid 1)\n`);
   free.add(join(heavy, 'slot-1'));
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.wait(killed.id), null);
   assert.equal(waits.wait(gone.id), null);
   assert.equal(waits.wait(a.id)!.text, 'running in heavy slot 1: npm test');
@@ -122,20 +122,20 @@ test('heavy slots: the holder runs, the waiters line up behind it, and only a ru
   assert.deepEqual(waits.wait(b.id), { kind: 'heavy', stage: 'slot', chip: 'slot · 2nd', text: `2nd in line for a heavy slot, all held (#${a.number})`, since: now - 20_000, usual: null });
   assert.equal(waits.wait(idle.id), null);
   waiter('wait-99-1', `Citadel #${b.number} (cara)`, now / 1000 - 20, 'load');
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.wait(b.id)!.chip, 'slot · busy box');
   // A's run cut off by its minion stopping says nothing of how long npm test takes; B's wait that ended does.
   store.updateTicket(a.id, { status: 'idle' });
   rmSync(join(heavy, 'slot-0.who'));
   rmSync(join(heavy, 'wait-99-1'));
   now += 5000;
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.usual('heavy:run:npm test'), null);
   assert.equal(waits.usual('heavy:slot'), 25);
   now -= 5000;
 });
 
-test('the restart: while the ship line says deploying, with the turns it waits for; its length counts once live', () => {
+test('the restart: while the ship line says deploying, with the turns it waits for; its length counts once live', async () => {
   const { waits } = setup();
   const a = minion('idle');
   ships.set(a.id, 'deploying');
@@ -150,7 +150,7 @@ test('the restart: while the ship line says deploying, with the turns it waits f
   assert.equal(after.usual('restart'), 45);
 });
 
-test('median, and a live process told apart from a reused pid', () => {
+test('median, and a live process told apart from a reused pid', async () => {
   assert.equal(median([]), null);
   assert.equal(median([5, 1, 3]), 3);
   assert.equal(median([4, 1, 3, 2]), 3);
@@ -161,7 +161,7 @@ test('median, and a live process told apart from a reused pid', () => {
   assert.ok(!procAlive(''));
 });
 
-test('the lock list counts holders, not waiters or other lock kinds, and none to read trusts every slot (#1562)', () => {
+test('the lock list counts holders, not waiters or other lock kinds, and none to read trusts every slot (#1562)', async () => {
   const list = [
     '1: FLOCK  ADVISORY  WRITE 767318 00:23:231177942 0 EOF',
     '1: -> FLOCK  ADVISORY  WRITE 767400 00:23:555 0 EOF',
@@ -189,7 +189,7 @@ test('a heavy slot reads as held only while someone holds its lock', async () =>
   }
 });
 
-test("a test run's counts (#545): the landing's run and a heavy Node suite show files done of total; other runs show none", () => {
+test("a test run's counts (#545): the landing's run and a heavy Node suite show files done of total; other runs show none", async () => {
   const { state, heavy, waits, ticket } = setup();
   const a = minion(), b = minion(), c = minion(), d = minion();
   const progress = (f: string, text: string, ago?: number) => {
@@ -198,28 +198,28 @@ test("a test run's counts (#545): the landing's run and a heavy Node suite show 
   };
   ticket(1, a.branch, now / 1000 - 40, 'running the tests since 14:02', 30);
   progress(join(state, 'land-test.progress'), '5\n200\ntest/old.test.ts\n', 31);
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.wait(a.id)!.chip, 'ship · tests', "counts from before this phase are an earlier run's");
   progress(join(state, 'land-test.progress'), '96\n212\ntest/runner.test.ts\n', 1);
-  waits.poll();
+  await waits.poll();
   assert.deepEqual(waits.wait(a.id), {
     kind: 'land', stage: 'test', label: 'Tests on perigee', chip: 'ship · 96/212', text: 'CI fell back: running the full suite on perigee: 96 of 212 files · test/runner.test.ts', brief: 'full suite on perigee',
     since: now - 30_000, usual: null, done: 96, total: 212,
   });
   // #1368: the full run's failed files so far go on to Releases; the reruns' counts (run-tests.sh's rerun_counts) say what they are.
   progress(join(state, 'land-test.progress'), '97\n212\ntest/runner.test.ts\ntest/a.test.ts\ttest/b.test.ts\n', 1);
-  waits.poll();
+  await waits.poll();
   assert.deepEqual(waits.wait(a.id)!.failed, ['test/a.test.ts', 'test/b.test.ts']);
   ticket(1, a.branch, now / 1000 - 40, 'rerunning 2 failed test files since 14:04', 5);
   progress(join(state, 'land-test.progress'), '1\n2\ntest/b.test.ts\ntest/a.test.ts\ttest/b.test.ts\nrerun\n', 1);
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.wait(a.id)!.text, 'rerunning the failed test files alone on perigee: 1 of 2 failed files rerun alone · test/b.test.ts');
   assert.equal(waits.wait(a.id)!.chip, 'ship · 1/2');
   assert.equal(waits.wait(a.id)!.brief, 'failed files rerun alone on perigee');
   // deploy.sh's own run logs to test.log, so its counts are in test.progress.
   ticket(1, a.branch, now / 1000 - 40, 'deploying: running the tests since 14:05', 10);
   progress(join(state, 'test.progress'), '212\n212\n\n', 1);
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.wait(a.id)!.chip, 'ship · 212/212');
   assert.equal(waits.wait(a.id)!.text, 'running the tests: 212 of 212 files');
 
@@ -228,7 +228,7 @@ test("a test run's counts (#545): the landing's run and a heavy Node suite show 
   writeFileSync(join(heavy, 'slot-1.who'), `Citadel #${c.number} (cara): cargo test (since 14:00, pid 4243)\n`);
   progress(join(heavy, 'slot-1.progress'), '9\n3\n'); // more done than there are: not counts
   writeFileSync(join(heavy, 'slot-2.who'), `Citadel #${d.number} (cara): npm test (since 14:00, pid 4244)\n`);
-  waits.poll();
+  await waits.poll();
   const wb = waits.wait(b.id)!;
   assert.equal(wb.chip, 'tests 3/212');
   assert.equal(wb.text, 'running in heavy slot 1: npm test: 3 of 212 files · test/db.test.ts');
@@ -238,7 +238,7 @@ test("a test run's counts (#545): the landing's run and a heavy Node suite show 
   assert.equal(waits.wait(d.id)!.chip, 'heavy run');
 });
 
-test('every poll hands the land line to the land alarm (#561): each landing by its minion, phase and gate run', () => {
+test('every poll hands the land line to the land alarm (#561): each landing by its minion, phase and gate run', async () => {
   const { state, heavy, ticket } = setup();
   const seen: unknown[] = [];
   const views = new Map<number, string>();
@@ -252,7 +252,7 @@ test('every poll hands the land line to the land alarm (#561): each landing by i
   ticket(1, a.branch, now / 1000 - 60, 'waiting for CI since 14:00', 30);
   ticket(2, b.branch, 0, 'waiting', 10);
   ticket(3, 'tools/deploy.sh', 0, 'waiting', 5);
-  waits.poll();
+  await waits.poll();
   assert.deepEqual(seen, [[[
     { seq: 1, name: `#${a.number}`, phase: 'ci', ci: 'jobs', run: 4308 },
     { seq: 2, name: `#${b.number}`, phase: 'line', ci: null, run: null },
@@ -260,19 +260,19 @@ test('every poll hands the land line to the land alarm (#561): each landing by i
   ], now]]);
 });
 
-test('the land line in the order set on the Releases page (#1002): the holder first, then .order, then the rest by arrival', () => {
+test('the land line in the order set on the Releases page (#1002): the holder first, then .order, then the rest by arrival', async () => {
   const { state, waits, ticket, dead } = setup();
   const a = minion(), b = minion(), c = minion(), d = minion(), e = minion();
   ticket(1, a.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
   ticket(2, b.branch, 0, 'waiting', 60);
   ticket(3, c.branch, 0, 'waiting', 50);
   ticket(4, d.branch, 0, 'waiting', 40);
-  waits.poll();
+  await waits.poll();
   // Land next on d: the order names every waiter, d first; the holder isn't one of them.
   assert.deepEqual(waits.setOrder([4, 1, 2, 4, 99], 'Cara moved #4 to land next'), [4, 2, 3]);
   assert.equal(readFileSync(join(state, 'queue', '.order'), 'utf8'), '# Cara moved #4 to land next\n0000000004\n0000000002\n0000000003\n');
   ticket(5, e.branch, 0, 'waiting', 1); // joined after: the back
-  waits.poll();
+  await waits.poll();
   assert.deepEqual(waits.line.map((t) => t.seq), [1, 4, 2, 3, 5]);
   assert.equal(waits.wait(d.id)!.text, `Releasing next: 2nd in line, behind #${a.number} (waiting for CI)`);
   assert.equal(waits.wait(b.id)!.chip, 'line · next train');
@@ -282,7 +282,7 @@ test('the land line in the order set on the Releases page (#1002): the holder fi
   // order, so it can't be ranked ahead of one that waits for it. It lands after the ordered ones.
   const f = minion();
   ticket(6, f.branch, 0, 'waiting', 1, false);
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.line.find((t) => t.seq === 6)!.orders, false);
   assert.deepEqual(waits.setOrder([6, 5], 'Josh moved #6 to land next'), [5, 3, 4, 2]);
   assert.deepEqual(waits.line.map((t) => t.seq), [1, 5, 3, 4, 2, 6]);
@@ -292,7 +292,7 @@ test('the land line in the order set on the Releases page (#1002): the holder fi
 
 // The Trans Agenda #76: one from before #1002 that arrived first waits only for the lower tickets, so nobody behind it
 // goes ahead of it, whatever .order says: the line shows it where it lands.
-test('the land line keeps a landing from before .order ahead of the ones behind it that .order names', () => {
+test('the land line keeps a landing from before .order ahead of the ones behind it that .order names', async () => {
   const { state, waits, ticket } = setup();
   const [a, b, c, d] = [minion(), minion(), minion(), minion()];
   ticket(1, a.branch, now / 1000 - 40, 'checking', 30);
@@ -300,14 +300,14 @@ test('the land line keeps a landing from before .order ahead of the ones behind 
   ticket(3, c.branch, 0, 'waiting', 50, false);
   ticket(4, d.branch, 0, 'waiting', 40);
   writeFileSync(join(state, 'queue', '.order'), '# Cara moved #4 to land next\n0000000004\n0000000002\n');
-  waits.poll();
+  await waits.poll();
   assert.deepEqual(waits.line.map((t) => t.seq), [1, 2, 3, 4]);
   // A move leaves #4 unranked: a deploy-queue.sh from before #1020 would put a ranked #4 ahead of #3.
   assert.deepEqual(waits.setOrder([4, 2], 'Cara moved #4 to land next', 4), [2]);
   assert.equal(readFileSync(join(state, 'queue', '.order'), 'utf8'), '# Cara moved #4 to land next\n0000000002\n');
 });
 
-test('a move on a target that shows part of the line moves only that landing (#1007)', () => {
+test('a move on a target that shows part of the line moves only that landing (#1007)', async () => {
   // The line waits 5, 6, 7, 8; a target shows 6, 7 and 8 (5 ships elsewhere).
   assert.deepEqual(moveIn([5, 6, 7, 8], [8, 6, 7], 8), [8, 5, 6, 7], 'Land next: the front of the whole line');
   assert.deepEqual(moveIn([5, 6, 7, 8], [6, 8, 7], 8), [5, 6, 8, 7], 'dragged up one: just ahead of the one it now goes before');
@@ -316,12 +316,12 @@ test('a move on a target that shows part of the line moves only that landing (#1
   assert.deepEqual(moveIn([5, 6], [9, 6], 6), [5, 6], 'the rest of what it names is gone: it keeps its place');
 });
 
-test("a ship waiting for CI or a quiet perigee shows that wait, how long so far included, not a plain CI wait (#1254)", () => {
+test("a ship waiting for CI or a quiet perigee shows that wait, how long so far included, not a plain CI wait (#1254)", async () => {
   assert.deepEqual(landPhase('waiting for CI or a quiet perigee, 5 min so far'), { stage: 'test', word: 'CI', key: 'ci', text: 'waiting for CI or a quiet perigee, 5 min so far', label: 'CI' });
   assert.equal(landPhase('waiting for CI since 14:02').text, 'waiting for CI on the rebased commit');
 });
 
-test('a ship train (#1303): the front reads "Train of N", a rider reads riding in its front, a sent-back rider and a plain waiter read as waiting, by which train they will be in', () => {
+test('a ship train (#1303): the front reads "Train of N", a rider reads riding in its front, a sent-back rider and a plain waiter read as waiting, by which train they will be in', async () => {
   const { waits, ticket } = setup();
   const f = minion(), r1 = minion(), r2 = minion(), w = minion(), back = minion();
   ticket(1, f.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
@@ -329,7 +329,7 @@ test('a ship train (#1303): the front reads "Train of N", a rider reads riding i
   ticket(3, r2.branch, 0, `riding in ${f.branch}'s ship train`, 19);
   ticket(4, back.branch, 0, 'waiting', 18); // the train went without it
   ticket(5, w.branch, 0, `riding in ticket/9-gone's ship train`, 17); // its front is gone: waiting in line again
-  waits.poll();
+  await waits.poll();
   const front = waits.wait(f.id)!;
   assert.equal(front.train?.role, 'front');
   assert.equal(front.train?.size, 3);
@@ -344,7 +344,7 @@ test('a ship train (#1303): the front reads "Train of N", a rider reads riding i
   assert.equal(waits.wait(w.id)!.train?.role, 'waiting');
 });
 
-test('a red train under bisect reads as the front bisecting; later trains say how many are ahead', () => {
+test('a red train under bisect reads as the front bisecting; later trains say how many are ahead', async () => {
   assert.equal(landPhase('finding the ship that turned the train red').key, 'bisect');
   assert.equal(trainLabel(0), 'Releasing next');
   assert.equal(trainLabel(1), 'Train 3, after 2 ahead');
@@ -354,7 +354,7 @@ test('a red train under bisect reads as the front bisecting; later trains say ho
 
 // Every phase tools/land.sh, deploy.sh and run-tests.sh write (queue_phase), by the name the Releases page shows (#1566):
 // only a rebase reads "Rebase".
-test('landPhase names each phase land.sh writes: starting, boot check, rebase, CI, the suite on perigee, reruns, bisect and deploy', () => {
+test('landPhase names each phase land.sh writes: starting, boot check, rebase, CI, the suite on perigee, reruns, bisect and deploy', async () => {
   const rows: [string, string, string, string][] = [ // phase, stage, key, label
     ['starting', 'rebase', 'rebase', 'Starting'],
     ['', 'rebase', 'rebase', 'Starting'],
@@ -383,7 +383,7 @@ test('landPhase names each phase land.sh writes: starting, boot check, rebase, C
   assert.notEqual(landPhase('boot check before CI since 14:01').text, landPhase('rebasing onto main').text);
 });
 
-test('a ship whose CI started early on the train ahead reads "CI · started early"; a held ship (main broken) is in no train and not counted ahead (#1566, #1564)', () => {
+test('a ship whose CI started early on the train ahead reads "CI · started early"; a held ship (main broken) is in no train and not counted ahead (#1566, #1564)', async () => {
   const { waits, ticket } = setup();
   const f = minion(), h = minion(), w = minion();
   const early = new Set<number>([f.id]);
@@ -391,7 +391,7 @@ test('a ship whose CI started early on the train ahead reads "CI · started earl
   ticket(1, f.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
   ticket(2, h.branch, 0, 'held: main is broken (12 min)', 20);
   ticket(3, w.branch, 0, 'waiting', 19);
-  waits.poll();
+  await waits.poll();
   const front = waits.wait(f.id)!;
   assert.equal(front.label, 'CI · started early');
   assert.equal(front.chip, 'ship · CI · early');
@@ -402,18 +402,18 @@ test('a ship whose CI started early on the train ahead reads "CI · started earl
   assert.equal(waits.wait(w.id)!.train?.label, 'Releasing next', 'the held ship fills no train');
   assert.doesNotMatch(waits.wait(w.id)!.text, /behind .*\(waiting\).*and 1 more/);
   early.clear();
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.wait(f.id)!.label, 'CI');
 });
 
-test("land-news's earlyCi reads the latest try's early_gate line only", () => {
+test("land-news's earlyCi reads the latest try's early_gate line only", async () => {
   const line = "land: early next train: CI started on this train at 14:02 while ticket/9-x's deployed, and it came out the same, so that run is its CI (120 s head start)";
   assert.equal(earlyCi(`land: rebasing a onto main\n${line}\n`), true);
   assert.equal(earlyCi(`${line}\nland: rebasing a onto main\nland: waiting for CI on abc\n`), false);
   assert.equal(earlyCi('land: waiting for CI on abc\n'), false);
 });
 
-test("the kit core's tickets in deploy-queue.sh's queue (#1323): their order line is the 8th, and their phases read as stages", () => {
+test("the kit core's tickets in deploy-queue.sh's queue (#1323): their order line is the 8th, and their phases read as stages", async () => {
   const { state, waits, ticket } = setup();
   const [a, b, c] = [minion(), minion(), minion()];
   ticket(1, a.branch, now / 1000 - 40, 'running the guards since 14:01', 30);
@@ -423,7 +423,7 @@ test("the kit core's tickets in deploy-queue.sh's queue (#1323): their order lin
   core(2, b.branch, "waiting for its batch's deploy");
   core(3, c.branch, 'waiting');
   writeFileSync(join(state, 'queue', '.order'), '# Cara moved #3 to land next\n0000000003\n0000000002\n');
-  waits.poll();
+  await waits.poll();
   assert.deepEqual(waits.line.map((t) => [t.seq, t.orders]), [[1, true], [3, true], [2, true]], '.order ranks the core tickets');
   assert.match(waits.wait(c.id)!.text, new RegExp(`2nd in line, behind #${a.number} \\(running the check\\)`), 'the head in its check phase');
   assert.equal(landPhase("waiting for its batch's deploy").stage, 'deploy');

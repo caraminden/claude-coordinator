@@ -19,7 +19,7 @@ const job = (name: string, over: Partial<Job> = {}): Job => ({
   id: 1, run_id: 7, name, status: 'queued', conclusion: null, created_at: iso(0), runner_name: null, labels: ['self-hosted', 'citadel-ci-linux'], steps: [], ...over,
 });
 
-test('ciNow: queued, then a job by its steps or several by how many are done, then pass or fail', () => {
+test('ciNow: queued, then a job by its steps or several by how many are done, then pass or fail', async () => {
   assert.equal(ciNow([]), null);
   assert.deepEqual(ciNow([job('test')]), { stage: 'queued', short: 'queued', text: 'queued for a runner (citadel-ci-linux)', since: T0 });
   const one = ciNow([job('test', { status: 'in_progress', runner_name: 'cara-desktop', steps: steps(4, 8) })])!;
@@ -44,7 +44,7 @@ test('ciNow: queued, then a job by its steps or several by how many are done, th
   assert.equal(ciNow([ok({}), ok({ name: 'b', conclusion: 'skipped' })])!.stage, 'passed');
 });
 
-test('pendingRuns: the Actions runs of a PR\'s pending checks', () => {
+test('pendingRuns: the Actions runs of a PR\'s pending checks', async () => {
   const pr = { checks: [
     { name: 'a', status: 'pending', url: 'https://github.com/o/r/actions/runs/11/job/1' },
     { name: 'b', status: 'pending', url: 'https://github.com/o/r/actions/runs/11/job/2' },
@@ -182,7 +182,7 @@ test('a landing waiting for CI finds its run by its commit, as land.sh does', as
   const m = minion('running');
   heads.sha = 'abc123';
   writeFileSync(join(state, 'queue', '0000000001'), `100 77\n1\n${m.branch}\nwaiting for CI since 12:01\n`);
-  waits.poll();
+  await waits.poll();
   // An earlier try's green run of the same commit counts, however old.
   gh.answers.set('repos/o/r/actions/workflows/tests.yml/runs', { workflow_runs: [{ id: 5, status: 'completed', created_at: iso(-3600) }] });
   gh.answers.set('repos/o/r/actions/runs/5/jobs', { jobs: [job('test', { status: 'in_progress', steps: steps(1, 3) })] });
@@ -198,7 +198,7 @@ test("a landing waiting for CI passes over an earlier try's red run of the same 
   const f = join(state, 'queue', '0000000001');
   writeFileSync(f, `100 77\n${now() / 1000 - 30}\n${m.branch}\nwaiting for CI since 12:01\n`);
   utimesSync(f, now() / 1000, now() / 1000);
-  waits.poll();
+  await waits.poll();
   const runs = 'repos/o/r/actions/workflows/tests.yml/runs';
   const old = { id: 5, status: 'completed', conclusion: 'failure', created_at: iso(-3600) };
   gh.answers.set(runs, { workflow_runs: [old] });
@@ -222,7 +222,7 @@ test('a landing waiting for CI shows its run on land/<branch>; a fallback says s
     utimesSync(f, now() / 1000, now() / 1000);
   };
   phase('waiting for CI since 12:01');
-  waits.poll();
+  await waits.poll();
   assert.equal(waits.wait(m.id)!.chip, 'ship · CI', 'no run yet');
   // An old run of the branch from an earlier landing doesn't count; the new one does.
   const runs = `repos/o/r/actions/workflows/tests.yml/runs`;
@@ -244,7 +244,7 @@ test('a landing waiting for CI shows its run on land/<branch>; a fallback says s
   assert.equal(waits.wait(m.id)!.brief, 'CI: step 5', "the line's short form: one counter (the landing's stage), the step by name, no runner (#630)");
   // No runner took it in time: land.sh cancels the run and tests on perigee.
   phase('running the tests since 12:03');
-  waits.poll();
+  await waits.poll();
   assert.deepEqual([waits.wait(m.id)!.chip, waits.wait(m.id)!.text], ['ship · tests', 'CI fell back: running the full suite on perigee']);
   assert.equal(ci.view(m.id), null, 'the cancelled run is let go');
 });
@@ -287,7 +287,7 @@ test('a landing\'s CI shows its suite\'s test files as its job sends them, and i
   const f = join(state, 'queue', '0000000001');
   writeFileSync(f, `100 77\n${now() / 1000 - 30}\n${m.branch}\nwaiting for CI since 12:01\n`);
   utimesSync(f, now() / 1000, now() / 1000);
-  waits.poll();
+  await waits.poll();
   gh.answers.set('repos/o/r/actions/workflows/tests.yml/runs', { workflow_runs: [{ id: 9, workflow_id: 3, status: 'in_progress', created_at: iso(61) }] });
   gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { status: 'in_progress', runner_name: 'cara-desktop', steps: steps(6, 8) })] });
   at(65);

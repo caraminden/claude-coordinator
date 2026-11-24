@@ -55,13 +55,13 @@ function world(news?: ConstructorParameters<typeof CitadelServer>[0]['news']) {
 
 const usuals = { 'land:rebase': [5], 'land:ci': [90, 100, 80], 'land:deploy': [10], restart: [40] };
 
-test('the next release: the furthest-along change leads, with its stage, usual, the land line and an estimate', () => {
+test('the next release: the furthest-along change leads, with its stage, usual, the land line and an estimate', async () => {
   const w = world();
   w.store.setSetting('wait-usual', usuals);
   const a = w.minion('Holder'), b = w.minion('Waiter');
   w.land(1, a.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
   w.land(2, b.branch, 0, 'waiting', 20);
-  w.waits.poll();
+  await w.waits.poll();
   const [t] = w.server.read();
   assert.equal(t.target.id, CITADEL_TARGET);
   assert.equal(t.target.projectId, w.citadel.id);
@@ -87,25 +87,25 @@ test('the next release: the furthest-along change leads, with its stage, usual, 
   assert.deepEqual(n.changes.map((c) => !!c.later), [false, true], 'the one waiting for the lock goes out in the release after, so it has no number');
 });
 
-test('a change offers a preview while its minion is open with a worktree, not once dismissed (#638)', () => {
+test('a change offers a preview while its minion is open with a worktree, not once dismissed (#638)', async () => {
   const w = world();
   const a = w.minion('Open'), b = w.minion('Dismissed');
   w.land(1, a.branch, 0, 'waiting', 20);
   w.land(2, b.branch, 0, 'waiting', 10);
   w.store.updateTicket(b.id, { status: 'closed' });
-  w.waits.poll();
+  await w.waits.poll();
   const by = new Map(w.server.read()[0].next!.changes.map((c) => [c.ticketId, c.canPreview]));
   assert.equal(by.get(a.id), true);
   assert.equal(by.has(b.id), true, 'a dismissed minion still in the line is listed');
   assert.equal(by.get(b.id), undefined, '...but its preview can\'t start');
 });
 
-test('the estimate: only when the current stage and every one after it have a usual time and nothing waits', () => {
+test('the estimate: only when the current stage and every one after it have a usual time and nothing waits', async () => {
   const w = world();
   w.store.setSetting('wait-usual', usuals);
   const a = w.minion();
   w.land(1, a.branch, now / 1000 - 10, 'deploying: boot check on a copy of the database', 4);
-  w.waits.poll();
+  await w.waits.poll();
   let n = w.server.read()[0].next!;
   assert.equal(n.stage, 'deploy');
   assert.equal(n.usual, 10);
@@ -113,7 +113,7 @@ test('the estimate: only when the current stage and every one after it have a us
 
   // CI waiting for a runner to take the run: a wait, no estimate.
   w.land(1, a.branch, now / 1000 - 10, 'waiting for CI since 14:02', 4);
-  w.waits.poll();
+  await w.waits.poll();
   w.queued.add(a.id);
   n = w.server.read()[0].next!;
   assert.equal(n.stage, 'test');
@@ -132,7 +132,7 @@ test('the estimate: only when the current stage and every one after it have a us
   w.clearLine();
   w.ships.set(a.id, 'deploying');
   w.setTurns(2);
-  w.waits.poll();
+  await w.waits.poll();
   n = w.server.read()[0].next!;
   assert.equal(n.stage, 'restart');
   assert.equal(n.waitingOn, 'the restart waits for 2 running turns to end');
@@ -147,17 +147,17 @@ test('the estimate: only when the current stage and every one after it have a us
   w.store.setSetting('wait-usual', { 'land:deploy': [10] });
   w.ships.delete(a.id);
   w.land(2, a.branch, now / 1000, 'deploying: running the tests', 1);
-  w.waits.poll();
+  await w.waits.poll();
   assert.equal(w.server.read()[0].next!.eta, null);
 });
 
-test('on main with no deploy coming waits for one; a failed deploy says why; a branch not landing is not in it', () => {
+test('on main with no deploy coming waits for one; a failed deploy says why; a branch not landing is not in it', async () => {
   const w = world();
   const a = w.minion(), b = w.minion(), c = w.minion();
   w.ships.set(a.id, 'main');
   w.ships.set(b.id, 'failed');
   w.ships.set(c.id, 'branch');
-  w.waits.poll();
+  await w.waits.poll();
   const n = w.server.read()[0].next!;
   assert.deepEqual(n.changes.map((x) => [x.ticketId, x.stage, x.waitingOn]).sort(), [[a.id, 'deploy', 'on main, not deployed yet: the next change to ship takes it live, or the Taskmaster can run a deploy'], [b.id, 'deploy', 'ship failed']].sort());
   const since = n.since;
@@ -166,14 +166,14 @@ test('on main with no deploy coming waits for one; a failed deploy says why; a b
 
   // A deploy run alone carries what's on main.
   w.land(1, 'tools/deploy.sh', now / 1000, 'deploying: boot check', 2);
-  w.waits.poll();
+  await w.waits.poll();
   const m = w.server.read()[0].next!;
   assert.equal(m.changes.find((x) => x.ticketId === a.id)!.waitingOn, null);
   assert.deepEqual(w.server.read()[0].line.map((e) => [e.name, e.ticketId]), [['tools/deploy.sh', null]]);
 });
 
 // #1368: the ship holding the line says what happened so far, from its land.sh lines, each #N a link to its minion.
-test('the next release carries the holder\'s news, with its minions linked, and only the holder\'s', () => {
+test('the next release carries the holder\'s news, with its minions linked, and only the holder\'s', async () => {
   const asked: number[] = [];
   const w = world((id, name) => {
     asked.push(id);
@@ -182,20 +182,20 @@ test('the next release carries the holder\'s news, with its minions linked, and 
   const holder = w.minion('Holder'), rider = w.minion('Rider');
   w.land(1, holder.branch, now / 1000 - 40, 'finding the ship that turned the train red', 30);
   w.land(2, rider.branch, 0, 'waiting', 20);
-  w.waits.poll();
+  await w.waits.poll();
   const n = w.server.read()[0].next!;
   assert.deepEqual(asked, [holder.id], 'only the holder\'s log is read');
   assert.deepEqual(n.news, [{ tone: 'bad', text: `#${rider.number} dropped: it turned the train red; back in line: 9999-gone`, refs: { [`#${rider.number}`]: rider.id } }]);
   w.failed.set(holder.id, ['test/a.test.ts', 'test/b.test.ts', 'test/c.test.ts', 'test/d.test.ts']);
   assert.deepEqual(w.server.read()[0].next!.news!.at(-1), { tone: 'bad', text: 'Failed so far: a.test.ts, b.test.ts, c.test.ts +1 more' }, 'CI\'s failures so far, live, last');
   w.clearLine();
-  w.waits.poll();
+  await w.waits.poll();
   assert.equal(w.server.read()[0].next?.news, undefined, 'nobody holds the line: no news');
 });
 
-test('an idle target has no next release; no scheme yet, no target', () => {
+test('an idle target has no next release; no scheme yet, no target', async () => {
   const w = world();
-  w.waits.poll();
+  await w.waits.poll();
   assert.equal(w.server.read()[0].next, null);
   const none = new CitadelServer({ store: w.store, scheme: () => null, head: () => 'x', line: () => [], ticketFor: () => null, wait: () => null, ship: () => null, usual: () => null, interruptible: () => 0 });
   assert.deepEqual(none.read(), []);
@@ -224,20 +224,20 @@ test('live writes one row per new head, with the minions whose branch tips lande
   w.store.setSetting('wait-usual', usuals);
   const t0 = now;
   w.land(1, a.branch, now / 1000, 'starting', 0);
-  w.waits.poll();
+  await w.waits.poll();
   w.server.read();
   now += 20_000;
   w.land(1, a.branch, now / 1000 - 20, 'waiting for CI since 14:00', 0);
-  w.waits.poll();
+  await w.waits.poll();
   w.server.read();
   now += 90_000;
   w.land(1, a.branch, now / 1000 - 110, 'deploying: boot check', 0);
-  w.waits.poll();
+  await w.waits.poll();
   w.server.read();
   now += 10_000;
   w.clearLine();
   w.ships.set(a.id, 'deploying');
-  w.waits.poll();
+  await w.waits.poll();
   w.server.read();
   git(repo, 'checkout', '-q', '-b', a.branch);
   gitAt(Date.now(), repo, 'commit', '-q', '--allow-empty', '-m', 'A');
@@ -262,7 +262,7 @@ test('live writes one row per new head, with the minions whose branch tips lande
   // The reader shows it as current, the first as recent.
   w.setHead(head);
   w.ships.set(a.id, 'live');
-  w.waits.poll();
+  await w.waits.poll();
   const [t] = w.server.read();
   assert.equal(t.current!.version, head);
   assert.deepEqual([t.current!.number, t.current!.link], [2, '/'], 'the second row, linked to the site');
@@ -282,7 +282,7 @@ test('live writes one row per new head, with the minions whose branch tips lande
   assert.equal(w.store.listReleases(w.citadel.id, CITADEL_TARGET, 1)[0].version, '0'.repeat(40));
 });
 
-test('Releases: test copies go to the target whose code they run, else to the scheme; a change is sent once, per scheme', () => {
+test('Releases: test copies go to the target whose code they run, else to the scheme; a change is sent once, per scheme', async () => {
   const w = world();
   const delve = w.store.createProject('Delve', null);
   const mine = w.minion('Has a preview');
@@ -306,7 +306,7 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   assert.deepEqual(releases.view((id) => id === delve.id).map((s) => s.projectId), [delve.id]);
   // A change on its way: the next release links that change's test copy, not a running one that doesn't carry it (build 7).
   w.ships.set(mine.id, 'main');
-  w.waits.poll();
+  await w.waits.poll();
   assert.equal(releases.read().find((s) => s.projectId === w.citadel.id)!.targets[0].next?.link, `/preview/${mine.id}/`);
 
   releases.poll();
@@ -324,7 +324,7 @@ test('Releases: test copies go to the target whose code they run, else to the sc
   assert.equal(sent.at(-1).releases.testCopies.length, 1, 'a scheme that gets something after the first poll is sent too');
 });
 
-test('Releases: a target the releaseKey dep names carries releaseKey for its Make release key button (#837); others carry none', () => {
+test('Releases: a target the releaseKey dep names carries releaseKey for its Make release key button (#837); others carry none', async () => {
   const w = world();
   const keyless = new Releases({ store: w.store, readers: [w.server], broadcast: () => {}, testCopies: () => [], releaseKey: (tv) => (tv.target.id === CITADEL_TARGET ? 'twi' : null) });
   assert.equal(keyless.read().find((s) => s.projectId === w.citadel.id)!.targets[0].releaseKey, 'twi');
@@ -332,7 +332,7 @@ test('Releases: a target the releaseKey dep names carries releaseKey for its Mak
   assert.ok(!('releaseKey' in keyed.read().find((s) => s.projectId === w.citadel.id)!.targets[0]));
 });
 
-test('memberSchemes: the schemes a person owns or is in, admin or not', () => {
+test('memberSchemes: the schemes a person owns or is in, admin or not', async () => {
   const w = world();
   const josh = w.store.createUser({ name: 'Josh', login: 'josh', admin: true });
   const other = w.store.createProject('Other', null, josh.id);
@@ -342,7 +342,7 @@ test('memberSchemes: the schemes a person owns or is in, admin or not', () => {
   assert.ok(!w.store.memberSchemes(josh.id).has(third.id));
 });
 
-test('the releases table: an older database gets it on open, and a row reads back', () => {
+test('the releases table: an older database gets it on open, and a row reads back', async () => {
   const f = join(root, 'old.db');
   new Store(f).db.close();
   const raw = new DatabaseSync(f);
@@ -357,7 +357,7 @@ test('the releases table: an older database gets it on open, and a row reads bac
   assert.deepEqual(store.listReleases(p.id, 't', 5), [], "a scheme's releases go with it");
 });
 
-test("opening the database before 69 drops only Peek Auras' Windows Builds 1277-1291 recorded live too early (#1019)", () => {
+test("opening the database before 69 drops only Peek Auras' Windows Builds 1277-1291 recorded live too early (#1019)", async () => {
   const path = join(root, 'early-builds.db');
   const store = new Store(path);
   const peek = store.createProject('Peek Auras', null);
@@ -383,14 +383,14 @@ test("opening the database before 69 drops only Peek Auras' Windows Builds 1277-
   again.db.close();
 });
 
-test('a ship train (#1303): the riders are in the release under way, right behind the front, not later and not movable', () => {
+test('a ship train (#1303): the riders are in the release under way, right behind the front, not later and not movable', async () => {
   const w = world();
   const f = w.minion('Front'), r1 = w.minion('Rider one'), r2 = w.minion('Rider two'), x = w.minion('Waiter');
   w.land(1, f.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
   w.land(2, r1.branch, 0, `riding in ${f.branch}'s ship train`, 20);
   w.land(3, x.branch, 0, 'waiting', 15);
   w.land(4, r2.branch, 0, `riding in ${f.branch}'s ship train`, 10); // joined the train after a plain waiter
-  w.waits.poll();
+  await w.waits.poll();
   const n = w.server.read()[0].next!;
   assert.deepEqual(n.changes.map((c) => [c.ticketId, c.train?.role, !!c.later]), [
     [f.id, 'front', false], [r1.id, 'rider', false], [r2.id, 'rider', false], [x.id, 'waiting', true],
@@ -402,12 +402,12 @@ test('a ship train (#1303): the riders are in the release under way, right behin
 
 // #1398: a fix shipped without a go says so on its Releases row, read from its newest shipped line; one still on its way
 // with no shipped line yet, or shipped with a go, shows nothing.
-test('Releases: a change that shipped as a fix without a go carries its line', () => {
+test('Releases: a change that shipped as a fix without a go carries its line', async () => {
   const w = world();
   const fix = w.minion('Guard fix'), plain = w.minion('Plain');
   w.ships.set(fix.id, 'main');
   w.ships.set(plain.id, 'main');
-  w.waits.poll();
+  await w.waits.poll();
   const releases = new Releases({ store: w.store, readers: [w.server], broadcast: () => {}, testCopies: () => [] });
   const next = () => releases.read().find((s) => s.projectId === w.citadel.id)!.targets[0].next!.changes;
   assert.deepEqual(next().map((c) => c.fix), [undefined, undefined], 'no shipped line yet');

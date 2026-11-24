@@ -6,6 +6,7 @@
 import { readTail } from './wait-tail.ts';
 import { median as statsMedian } from './stats.ts';
 import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { readdir, readFile, stat as statFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Store } from './db.ts';
 import type { Ship } from './branch.ts';
@@ -54,6 +55,11 @@ const read = (f: string) => { try { return readFileSync(f, 'utf8'); } catch { re
 const stat = (f: string) => { try { return statSync(f); } catch { return null; } };
 const mtime = (f: string) => stat(f)?.mtimeMs ?? null;
 const files = (dir: string) => { try { return readdirSync(dir); } catch { return []; } };
+// The same reads off the server's thread, for the poll that runs every 2 s (#1807): a blocking call waited up to 0.7 s on a busy disk.
+const readA = async (f: string) => { try { return await readFile(f, 'utf8'); } catch { return null; } };
+const statA = async (f: string) => { try { return await statFile(f); } catch { return null; } };
+const mtimeA = async (f: string) => (await statA(f))?.mtimeMs ?? null;
+const filesA = async (dir: string) => { try { return await readdir(dir); } catch { return []; } };
 
 /** A line ticket's minion by its label: a branch, or "<scheme> #N" (a ship from another scheme's line). */
 export function labelTicket(store: Store, label: string) {
@@ -82,7 +88,12 @@ export interface TestCounts { done: number; total: number; file: string; failed?
 
 /** The counts in a progress file written since `since` (ms): an older one is a run before this one. */
 export function readTestCounts(f: string, since: number): TestCounts | null {
-  const at = mtime(f), text = read(f);
+  return countsFrom(mtime(f), read(f), since);
+}
+async function readTestCountsA(f: string, since: number): Promise<TestCounts | null> {
+  return countsFrom(await mtimeA(f), await readA(f), since);
+}
+function countsFrom(at: number | null, text: string | null, since: number): TestCounts | null {
   if (at == null || at < since || text == null) return null;
   // The 4th line: files failed so far, tab-separated; the 5th: rerun while run-tests.sh reruns them alone (#1368).
   const [done, total, file = '', failed = '', phase = ''] = text.split('\n');
@@ -108,7 +119,8 @@ const countsText = (c: TestCounts) => `${c.done} of ${c.total} ${c.rerun ? 'fail
 export interface LandTicket { seq: number; proc: string; got: number; label: string; phase: string; mtime: number; orders?: boolean; tests?: TestCounts | null }
 
 /** The waiting tickets' numbers in the order people set on the Releases page (#1002): queue/.order, as deploy-queue.sh reads it. */
-const readOrder = (q: string) => (read(join(q, '.order')) ?? '').split('\n').filter((l) => /^\d{10}$/.test(l)).map(Number);
+const orderFrom = (text: string | null) => (text ?? '').split('\n').filter((l) => /^\d{10}$/.test(l)).map(Number);
+const tookFrom = (text: string | null) => (text ?? '').split('\n').filter((l) => /^\d+$/.test(l)).map(Number);
 
 /**
  * The land line in order, its gone processes left out, and the last landings' lengths in s: the holder first, then the
@@ -119,14 +131,26 @@ const readOrder = (q: string) => (read(join(q, '.order')) ?? '').split('\n').fil
 export function readLandLine(stateDir: string, alive = procAlive): { line: LandTicket[]; took: number[] } {
   const q = join(stateDir, 'queue');
   const line = readQueue(q, 4, alive);
-  for (const t of line) {
-    const log = /^running the tests/.test(t.phase) ? 'land-test' : /^deploying: running the tests/.test(t.phase) ? 'test' : null;
-    if (t.got > 0 && log) t.tests = readTestCounts(join(stateDir, `${log}.progress`), t.mtime);
-    // run-tests.sh's reruns name no run in their phase; the full run's file went when it ended, so the one written since is theirs (#1368).
-    else if (t.got > 0 && /^rerunning \d+ failed test file/.test(t.phase)) t.tests = readTestCounts(join(stateDir, 'land-test.progress'), t.mtime) ?? readTestCounts(join(stateDir, 'test.progress'), t.mtime);
-  }
-  const took = (read(join(q, '.took')) ?? '').split('\n').filter((l) => /^\d+$/.test(l)).map(Number);
-  return { line, took };
+  for (const t of line) for (const log of testsLogs(t)) if ((t.tests = readTestCounts(join(stateDir, `${log}.progress`), t.mtime))) break;
+  return { line, took: tookFrom(read(join(q, '.took'))) };
+}
+
+/** readLandLine with every file read off the server's thread (#1807). */
+export async function readLandLineA(stateDir: string, alive = procAlive): Promise<{ line: LandTicket[]; took: number[] }> {
+  const q = join(stateDir, 'queue');
+  const [line, took] = await Promise.all([readQueueA(q, 4, alive), readA(join(q, '.took'))]);
+  await Promise.all(line.map(async (t) => {
+    for (const log of testsLogs(t)) if ((t.tests = await readTestCountsA(join(stateDir, `${log}.progress`), t.mtime))) break;
+  }));
+  return { line, took: tookFrom(took) };
+}
+
+/** The progress files that may hold the holder's test counts, best first. run-tests.sh's reruns name no run in their phase; the full run's file went when it ended, so the one written since is theirs (#1368). */
+function testsLogs(t: LandTicket): string[] {
+  if (t.got <= 0) return [];
+  if (/^running the tests/.test(t.phase)) return ['land-test'];
+  if (/^deploying: running the tests/.test(t.phase)) return ['test'];
+  return /^rerunning \d+ failed test file/.test(t.phase) ? ['land-test', 'test'] : [];
 }
 
 /**
@@ -135,12 +159,22 @@ export function readLandLine(stateDir: string, alive = procAlive): { line: LandT
  * core's tickets in deploy-queue.sh's queue/ (Citadel shipping on the core, #1323) keep theirs on the 8th line too.
  */
 export function readQueue(q: string, orderAt: number, alive = procAlive): LandTicket[] {
+  const tickets = files(q).filter((n) => /^\d+$/.test(n)).sort().map((name) => ({ name, text: read(join(q, name)), at: mtime(join(q, name)) }));
+  return queueFrom(orderFrom(read(join(q, '.order'))), tickets, orderAt, alive);
+}
+
+/** readQueue with every file read off the server's thread (#1807). */
+export async function readQueueA(q: string, orderAt: number, alive = procAlive): Promise<LandTicket[]> {
+  const [order, names] = await Promise.all([readA(join(q, '.order')), filesA(q)]);
+  const tickets = await Promise.all(names.filter((n) => /^\d+$/.test(n)).sort().map(async (name) => ({ name, text: await readA(join(q, name)), at: await mtimeA(join(q, name)) })));
+  return queueFrom(orderFrom(order), tickets, orderAt, alive);
+}
+
+function queueFrom(order: number[], tickets: { name: string; text: string | null; at: number | null }[], orderAt: number, alive: (proc: string) => boolean): LandTicket[] {
   const line: LandTicket[] = [];
-  const order = readOrder(q);
   // A waiter from before .order waits for every lower ticket, so nobody who arrived after it goes ahead (The Trans Agenda #76).
   const rank = (t: LandTicket) => (t.got > 0 ? -1 : !t.orders ? order.length + 1 : order.includes(t.seq) ? order.indexOf(t.seq) : order.length);
-  for (const name of files(q).filter((n) => /^\d+$/.test(n)).sort()) {
-    const f = join(q, name), text = read(f), at = mtime(f);
+  for (const { name, text, at } of tickets) {
     if (text == null || at == null) continue;
     const l = text.split('\n');
     const [proc = '', got = '0', label = '', phase = ''] = l;
@@ -312,9 +346,15 @@ export function flockedInodes(text = read('/proc/locks')): Set<number> | null {
 
 /** Whether a heavy slot's lock is held: a holder killed past its trap leaves its .who behind, but not the lock. */
 export function slotHeld(file: string, locked = flockedInodes()): boolean {
-  if (!locked) return true; // no lock list at all: trust the file
-  const ino = stat(file)?.ino;
-  return ino !== undefined && locked.has(ino); // no lock file: nobody holds its lock
+  return heldIn(locked, stat(file)?.ino);
+}
+const heldIn = (locked: Set<number> | null, ino: number | undefined) =>
+  !locked || (ino !== undefined && locked.has(ino)); // no lock list at all: trust the file; no lock file: nobody holds its lock
+
+/** heldSlots with the lock list and each slot's file read off the server's thread (#1807). */
+export function heldSlotsA(): (file: string) => Promise<boolean> {
+  let locked: Promise<Set<number> | null> | undefined;
+  return async (file) => heldIn(await (locked ??= readA('/proc/locks').then((t) => flockedInodes(t))), (await statA(file))?.ino);
 }
 
 /** slotHeld for one look at the heavy folder: the lock list is read once, and only if a slot has a .who. */
@@ -333,23 +373,40 @@ const STALE_WAITER_MS = 60_000; // citadel-heavy freshens a waiter's file at lea
 export function readHeavy(dir: string, now = Date.now(), held = heldSlots()): { holders: HeavyJob[]; waiters: HeavyJob[] } {
   const holders: HeavyJob[] = [], waiters: HeavyJob[] = [];
   for (const name of files(dir)) {
-    const f = join(dir, name);
-    let m = name.match(/^slot-(\d+)\.who$/);
+    const f = join(dir, name), m = name.match(/^slot-(\d+)\.who$/);
     if (m) {
-      const text = read(f)?.trim(), at = mtime(f);
-      const w = text?.match(/^(.*?): (.*) \(since \d\d:\d\d, pid \d+\)$/);
-      if (w && at != null && held(join(dir, `slot-${m[1]}`))) {
-        holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, tests: readTestCounts(join(dir, `slot-${m[1]}.progress`), at) });
-      }
-      continue;
-    }
-    if (/^wait-\d+-\d+$/.test(name) && now - (mtime(f) ?? 0) < STALE_WAITER_MS) {
-      const [who, what, since, reason] = (read(f) ?? '').split('\n');
-      if (who && Number(since)) waiters.push({ who, what, since: Number(since) * 1000, reason });
+      const w = holderOf(read(f)?.trim()), at = mtime(f);
+      if (w && at != null && held(join(dir, `slot-${m[1]}`))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, tests: readTestCounts(join(dir, `slot-${m[1]}.progress`), at) });
+    } else if (/^wait-\d+-\d+$/.test(name) && now - (mtime(f) ?? 0) < STALE_WAITER_MS) {
+      const w = waiterOf(read(f));
+      if (w) waiters.push(w);
     }
   }
-  waiters.sort((a, b) => a.since - b.since);
-  return { holders, waiters };
+  return { holders, waiters: waiters.sort((a, b) => a.since - b.since) };
+}
+
+/** readHeavy with every file read off the server's thread (#1807); `held` may answer later. */
+export async function readHeavyA(dir: string, now = Date.now(), held: (slotFile: string) => boolean | Promise<boolean> = heldSlotsA()): Promise<{ holders: HeavyJob[]; waiters: HeavyJob[] }> {
+  const holders: HeavyJob[] = [], waiters: HeavyJob[] = [];
+  await Promise.all((await filesA(dir)).map(async (name) => {
+    const f = join(dir, name), m = name.match(/^slot-(\d+)\.who$/);
+    if (m) {
+      const [text, at] = await Promise.all([readA(f), mtimeA(f)]);
+      const w = holderOf(text?.trim());
+      if (w && at != null && await held(join(dir, `slot-${m[1]}`))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, tests: await readTestCountsA(join(dir, `slot-${m[1]}.progress`), at) });
+    } else if (/^wait-\d+-\d+$/.test(name) && now - ((await mtimeA(f)) ?? 0) < STALE_WAITER_MS) {
+      const w = waiterOf(await readA(f));
+      if (w) waiters.push(w);
+    }
+  }));
+  holders.sort((a, b) => a.slot! - b.slot!); // reads finish in any order
+  return { holders, waiters: waiters.sort((a, b) => a.since - b.since) };
+}
+
+const holderOf = (text: string | null | undefined) => text?.match(/^(.*?): (.*) \(since \d\d:\d\d, pid \d+\)$/);
+function waiterOf(text: string | null): HeavyJob | null {
+  const [who, what, since, reason] = (text ?? '').split('\n');
+  return who && Number(since) ? { who, what, since: Number(since) * 1000, reason } : null;
 }
 
 /** Each heavy job's wait, by its who ("Citadel #544 (cara)"). */
@@ -498,9 +555,9 @@ export class Waits {
    */
   setOrder(seqs: number[], note: string | ((order: number[]) => string), moved?: number): number[] {
     if (!this.d.deployState) throw new Error('This server has no ship line');
-    this.poll();
+    this.pollNow();
     const order = writeOrder(join(this.d.deployState, 'queue'), this.line, seqs, note, moved);
-    this.poll();
+    this.pollNow();
     return order;
   }
 
@@ -521,7 +578,7 @@ export class Waits {
 
   /** The newest `n` output lines of the heavy run this minion holds a slot for (#1681); none when it has no run. */
   async tail(ticketId: number, n: number): Promise<string[]> {
-    const h = readHeavy(this.d.heavyDir, this.now(), this.d.held).holders.find((x) => this.ticketFor(x.who) === ticketId);
+    const h = (await readHeavyA(this.d.heavyDir, this.now(), this.d.held)).holders.find((x) => this.ticketFor(x.who) === ticketId);
     return h ? readTail(join(this.d.heavyDir, `slot-${h.slot - 1}.out`), n) : [];
   }
 
@@ -531,11 +588,25 @@ export class Waits {
     return t ? `#${t.number ?? t.id}` : label.replace(/ \(.*\)$/, '');
   };
 
-  poll() {
+  /** Read the land line and heavy folder with no blocking file call (#1807), then apply them. */
+  async poll() {
+    const [land, heavy] = await Promise.all([
+      this.d.deployState ? readLandLineA(this.d.deployState, this.d.alive) : null,
+      readHeavyA(this.d.heavyDir, this.now(), this.d.held),
+    ]);
+    this.apply(land, heavy);
+  }
+
+  /** poll for a person's own action (setOrder), which must have the line before it returns: it reads in the thread. */
+  private pollNow() {
+    this.apply(this.d.deployState ? readLandLine(this.d.deployState, this.d.alive) : null, readHeavy(this.d.heavyDir, this.now(), this.d.held));
+  }
+
+  private apply(land: { line: LandTicket[]; took: number[] } | null, heavy: ReturnType<typeof readHeavy>) {
     const now = this.now();
     const next = new Map<number, Wait & { key?: string }>();
-    if (this.d.deployState) {
-      const { line, took } = readLandLine(this.d.deployState, this.d.alive);
+    if (land) {
+      const { line, took } = land;
       this.line = line;
       // Before ci.landings below lets go of a landing that left its CI wait, so its run's last stage is still there.
       this.d.landLine?.(line.map((t) => {
@@ -548,7 +619,6 @@ export class Waits {
         if (id != null) next.set(id, { ...w, key: holder ? `land:${landPhase(holder.phase).key}` : undefined });
       }
     }
-    const heavy = readHeavy(this.d.heavyDir, now, this.d.held);
     for (const [who, w] of heavyWaits(heavy, this.usual, this.name)) {
       const id = this.ticketFor(who);
       // A heavy job runs inside its minion's turn; its files can outlive a killed job, so only a running minion shows one.

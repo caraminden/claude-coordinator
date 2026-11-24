@@ -1346,8 +1346,8 @@ if (!BOOT_CHECK || PREVIEW) {
   every('ship poll', SHIP_POLL_MS, () => ships.poll());
   every('builds', 2 * SHIP_POLL_MS, () => builds.poll(), 0);
   // A few small files, so every 2 s: a landing's phases last tens of seconds.
-  every('waits', 2_000, () => {
-    waits.poll();
+  every('waits', 2_000, async () => {
+    await waits.poll();
     releases.poll();
   });
   // Release targets' git reads every 15 s, and finding every scheme's targets again every 5 minutes (#627).

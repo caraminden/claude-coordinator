@@ -33,7 +33,7 @@ function fake(queue: object[], extraArgs: string[] = [], files: Record<string, s
       encoding: 'utf8', cwd: dir, timeout: 30_000,
     });
     const events = r.stdout.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-    const calls = readFileSync(join(dir, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const calls = readFileSync(join(dir, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); // raw-read-ok: spawnSync returned, so the fake has exited
     return { status: r.status, events, calls, left: readFileSync(join(dir, 'turns.jsonl'), 'utf8') };
   } finally {
     rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir

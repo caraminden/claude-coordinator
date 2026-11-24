@@ -249,9 +249,27 @@ load_text() {
 mem_need=${CITADEL_HEAVY_MEM_NEED:-2000}
 [[ $mem_need =~ ^[0-9]+$ ]] || mem_need=2000
 mem_wait=${CITADEL_HEAVY_MEM_WAIT:-300}
+# It also waits while the box's memory level (#1748, src/memory-ease.ts: $dir/memory-level, the level then why) says
+# easing or tight; a file over 60 s old is a stopped server's, and counts as ok.
 mem_room=
-mem_short() { mem_room=$("$(dirname "$0")/mem-room" mb 2>/dev/null) && [[ $mem_room =~ ^[0-9]+$ ]] && [ "$mem_room" -lt "$mem_need" ]; }
-mem_text() { echo "waiting for memory: ${mem_room:-?} MB free for heavy work, needs $mem_need MB"; }
+ease=
+ease_level() {
+  local f=${CITADEL_MEMORY_LEVEL:-$dir/memory-level} age lines
+  ease=
+  age=$(($(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0)))
+  [ "$age" -le 60 ] || return 1
+  mapfile -t lines <"$f" 2>/dev/null || return 1
+  case ${lines[0]:-} in easing | tight) ease="${lines[0]}: ${lines[1]:-}"; return 0 ;; esac
+  return 1
+}
+mem_short() {
+  ease_level && return 0
+  mem_room=$("$(dirname "$0")/mem-room" mb 2>/dev/null) && [[ $mem_room =~ ^[0-9]+$ ]] && [ "$mem_room" -lt "$mem_need" ]
+}
+mem_text() {
+  if [ -n "$ease" ]; then echo "waiting for memory: Citadel is easing off ($ease)"; return; fi
+  echo "waiting for memory: ${mem_room:-?} MB free for heavy work, needs $mem_need MB"
+}
 
 # The slots this job may use: plain jobs at most CITADEL_HEAVY_PLAIN_SLOTS of them.
 plain=${CITADEL_HEAVY_PLAIN_SLOTS:-1}

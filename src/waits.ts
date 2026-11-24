@@ -421,7 +421,12 @@ export function heavyWaits({ holders, waiters }: ReturnType<typeof readHeavy>, u
       ...(c && { done: c.done, total: c.total }),
     });
   }
-  waiters.forEach((w, i) => {
+  // A nested Claude session tools/claude-pace holds while the box eases off memory (#1748): not in the heavy line.
+  for (const w of waiters) {
+    if (w.reason !== 'ease' || out.has(w.who)) continue;
+    out.set(w.who, { kind: 'heavy', stage: 'slot', chip: 'session · easing off memory', text: 'a nested Claude session waits while Citadel eases off memory: about one starts a minute per turn, and the ones running carry on', since: w.since, usual: null });
+  }
+  waiters.filter((w) => w.reason !== 'ease').forEach((w, i) => {
     const place = ordinal(i + 1);
     const busy = holders.map((h) => name(h.who)).join(', ');
     const text = w.reason === 'load'

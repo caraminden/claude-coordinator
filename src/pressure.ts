@@ -2,7 +2,8 @@
 // the host samples, #1325) /proc/pressure/io ("some avg60", the same line tools/citadel-heavy gates on), cached for 5 s
 // and read asynchronously, so a look never blocks the event loop. The server's background passes (indexers, sweeps,
 // kit-sync's look) ask `pressure.gate(name)` and skip a pass while starved; nothing a person or a minion starts asks
-// (turn starts never read this).
+// (turn starts never read this). The box's memory level (#1748, src/memory-ease.ts: free memory and reclaim, which PSI
+// misses on zram swap) counts too once the server hands it over with `useEase`: easing or tight is starved.
 //
 // Small API: `pressure.read()` (the reading), `pressure.gate(name)` (true: run this pass), `createPressure()` (tests).
 import { hostText, PSI_FILES } from './host-signals.ts';
@@ -18,9 +19,12 @@ const CACHE_MS = 5_000;
 /** One look: whole percents (null without a PSI file) and whether CPU or memory is at its line; `why` says which, for a log line. IO is recorded, never gated on. */
 export interface PressureReading { cpu: number | null; mem: number | null; io: number | null; starved: boolean; why: string }
 
+/** The memory level's look (src/memory-ease.ts MemoryEase.get). */
+export type EaseLook = () => { level: 'ok' | 'easing' | 'tight'; why: string };
+
 export interface PressureOptions {
   cpuFile?: string; memFile?: string; ioFile?: string; now?: () => number; log?: (line: string) => void;
-  maxCpu?: number; maxMem?: number; runAnywayMs?: number;
+  maxCpu?: number; maxMem?: number; runAnywayMs?: number; ease?: EaseLook;
 }
 
 /** "some avg60=63.21" as a whole percent, like citadel-heavy's read_pressure; null when the file is missing or odd. */
@@ -40,12 +44,14 @@ export function createPressure(opts: PressureOptions = {}) {
   const runAnywayMs = opts.runAnywayMs ?? RUN_ANYWAY_MS;
   const now = opts.now ?? Date.now;
   const log = opts.log ?? ((line: string) => console.log(line));
+  let ease = opts.ease;
   let cached: { at: number; reading: Promise<PressureReading> } | null = null;
   const skipping = new Map<string, number>(); // pass name -> when its current run of skips began
 
   const look = async (): Promise<PressureReading> => {
     const [cpu, mem, io] = await Promise.all([readPsi(cpuFile), readPsi(memFile), readPsi(ioFile)]);
-    const why = cpu !== null && cpu >= maxCpu ? `CPU pressure ${cpu}%` : mem !== null && mem >= maxMem ? `memory pressure ${mem}%` : '';
+    const e = ease?.();
+    const why = cpu !== null && cpu >= maxCpu ? `CPU pressure ${cpu}%` : mem !== null && mem >= maxMem ? `memory pressure ${mem}%` : e && e.level !== 'ok' ? `memory ${e.level}: ${e.why}` : '';
     return { cpu, mem, io, starved: why !== '', why };
   };
 
@@ -72,7 +78,10 @@ export function createPressure(opts: PressureOptions = {}) {
     return false;
   };
 
-  return { read, gate };
+  /** Counts the memory level from now on (the server's MemoryEase). */
+  const useEase = (look: EaseLook) => { ease = look; cached = null; };
+
+  return { read, gate, useEase };
 }
 
 /** The server's one reader. */

@@ -147,13 +147,18 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   }
   // heavy-unit and its shims (#1298): pin/bin/heavy, first on every turn's PATH, sends each heavy command a turn types
   // (or a script it runs calls) to a scope of its own in citadel-heavy.slice, so memory running out stops it, not the turn.
-  for (const tool of ['heavy-unit', 'heavy-shim']) {
+  // claude-pace (#1748): pin/bin/heavy/claude, so a nested `claude` a turn's script starts paces itself on the box's memory.
+  for (const tool of ['heavy-unit', 'heavy-shim', 'claude-pace']) {
     const source = join(import.meta.dirname, '..', 'tools', tool);
     if (existsSync(source)) cpSync(source, join(MCP_DIR, 'bin', tool));
   }
   if (existsSync(join(MCP_DIR, 'bin', 'heavy-shim'))) {
     mkdirSync(join(MCP_DIR, 'bin', 'heavy'), { recursive: true });
     for (const cmd of HEAVY_SHIMS) symlinkSync('../heavy-shim', join(MCP_DIR, 'bin', 'heavy', cmd));
+  }
+  if (existsSync(join(MCP_DIR, 'bin', 'claude-pace'))) {
+    mkdirSync(join(MCP_DIR, 'bin', 'heavy'), { recursive: true });
+    symlinkSync('../claude-pace', join(MCP_DIR, 'bin', 'heavy', 'claude'));
   }
   // node under another name, so ananicy-cpp's stock `node` rule (SCHED_IDLE) misses the wrapper, claude under it and the MCP servers (#506, deploy/priority.md).
   mkdirSync(join(MCP_DIR, 'bin'), { recursive: true });

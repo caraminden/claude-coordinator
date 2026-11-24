@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Nested Claude sessions pace themselves on the box's memory (#1748). Every turn's PATH starts with pin/bin/heavy, where
+# `claude` links here (src/turn-launch.ts), so a script a turn runs that starts `claude -p` sessions (skill evals, prompt
+# evals, replays, a fan-out of its own) comes through this first. On 2026-11-23 one turn's eval fan-out reached 16.7 GB
+# and swapped the box.
+#
+# It reads the memory level the server writes (src/memory-ease.ts: $CITADEL_HEAVY_DIR/memory-level, the level then
+# why; a file over 60 s old counts as ok, so a stopped server never holds anyone):
+#   ok      starts at once.
+#   easing  starts once no other nested session of this turn (CITADEL_HEAVY_WHO) has started in the last 60 s, so a
+#           wide fan-out goes about one a minute. Sessions already running carry on.
+#   tight   holds; after 10 min of holding it goes as at easing, so nothing waits for ever.
+# Only a caller already inside a Claude session (CLAUDECODE=1, which the CLI sets for its tool calls) is paced; the
+# turn's own session starts by its full path, and anything else runs at once. While it waits, a wait-* file in the heavy
+# folder (citadel-heavy's format, reason "ease") shows the minion as waiting for memory.
+# Tests: CITADEL_MEMORY_LEVEL names another level file; CITADEL_PACE_POLL, CITADEL_PACE_SPACING and CITADEL_PACE_HOLD
+# (seconds) shorten the waits.
+name=claude
+real=
+IFS=: read -ra dirs <<<"$PATH"
+for d in "${dirs[@]}"; do
+  d=${d:-.}
+  [ -f "$d/$name" ] && [ -x "$d/$name" ] || continue
+  [ "$d/$name" -ef "$0" ] && continue
+  # Another turn's copy of this (a turn inside a turn) would hand it back here.
+  case $(readlink -f "$d/$name") in */claude-pace) continue ;; esac
+  real=$d/$name
+  break
+done
+[ -n "$real" ] || { echo "$name: command not found" >&2; exit 127; }
+[ "${CLAUDECODE:-}" = 1 ] || exec "$real" "$@"
+
+dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
+levelfile=${CITADEL_MEMORY_LEVEL:-$dir/memory-level}
+poll=${CITADEL_PACE_POLL:-5}
+spacing=${CITADEL_PACE_SPACING:-60}
+hold=${CITADEL_PACE_HOLD:-600}
+who=${CITADEL_HEAVY_WHO:-$USER}
+[ -d "$dir" ] || exec "$real" "$@"
+
+level=ok why=
+read_level() {
+  local age lines
+  level=ok why=
+  age=$(($(date +%s) - $(stat -c %Y "$levelfile" 2>/dev/null || echo 0)))
+  [ "$age" -le 60 ] || return 0
+  mapfile -t lines <"$levelfile" 2>/dev/null || return 0
+  case ${lines[0]:-} in easing | tight) level=${lines[0]} why=${lines[1]:-} ;; esac
+}
+
+# This turn's last nested start, under a lock so two waiters can't both take the same minute.
+stamp="$dir/pace-$(printf '%s' "$who" | cksum | cut -d' ' -f1)"
+claim() {
+  local last now
+  exec 9>>"$stamp" || return 0
+  flock 9 || { exec 9>&-; return 0; }
+  last=$(cat "$stamp" 2>/dev/null)
+  now=$(date +%s)
+  if [[ $last =~ ^[0-9]+$ ]] && [ $((now - last)) -lt "$spacing" ]; then exec 9>&-; return 1; fi
+  printf '%s\n' "$now" >"$stamp"
+  exec 9>&-
+  return 0
+}
+
+started=$(date +%s)
+waitfile=
+said=
+while :; do
+  read_level
+  [ "$level" = ok ] && break
+  if [ "$level" = easing ] || [ $(($(date +%s) - started)) -ge "$hold" ]; then claim && break; fi
+  if [ -z "$waitfile" ]; then
+    waitfile="$dir/wait-$$-$RANDOM$RANDOM"
+    trap 'rm -f "$waitfile" "$waitfile.tmp"' EXIT
+    trap 'exit 130' INT TERM
+  fi
+  printf '%s\n' "$who" "a nested Claude session" "$started" ease >"$waitfile.tmp" 2>/dev/null && mv -f "$waitfile.tmp" "$waitfile" 2>/dev/null
+  if [ -z "$said" ]; then
+    said=1
+    if [ "$level" = tight ]; then
+      echo "claude: memory is tight ($why), so this nested session waits until it eases, at most $((hold / 60)) min" >&2
+    else
+      echo "claude: Citadel is easing off memory ($why), so this turn starts one nested session every $spacing s; this one waits its turn" >&2
+    fi
+  fi
+  sleep "$poll"
+done
+[ -z "$waitfile" ] || rm -f "$waitfile" "$waitfile.tmp"
+exec "$real" "$@"

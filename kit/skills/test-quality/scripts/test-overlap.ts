@@ -130,7 +130,7 @@ async function main(): Promise<void> {
     /* no package.json: defaults */
   }
   const dirName = (script.trim().split(/\s+/).pop() ?? '').replace(/\/$/, '');
-  const dir = dirName && existsSync(join(root, dirName)) ? dirName : 'test';
+  const dir = [dirName, 'test', 'tests', 'spec', '__tests__', '.'].find((d) => d && existsSync(join(root, d))) ?? '.'; // `node --test` alone names no folder
   const files = args.length ? args : findTests(join(root, dir)).map((f) => relative(root, f));
   const cov = join(out, 'cov');
   mkdirSync(cov, { recursive: true });
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
       const f = files[next++];
       const dest = join(cov, `${key(f)}.lcov`);
       if (!existsSync(dest)) {
-        const cmd = [launcher, '--test', ...flags, '--experimental-test-coverage', `--test-coverage-exclude=${dir}/**`, '--test-coverage-exclude=**/node_modules/**', '--test-reporter=lcov', `--test-reporter-destination=${dest}`, f];
+        const cmd = [launcher, '--test', ...flags, '--experimental-test-coverage', `--test-coverage-exclude=${dir === '.' ? '**/*.test.*' : `${dir}/**`}`, '--test-coverage-exclude=**/node_modules/**', '--test-reporter=lcov', `--test-reporter-destination=${dest}`, f];
         const code = await runOne(cmd, root, 300_000);
         if (code !== 0) failed.push(`${f} (exit ${code})`);
       }

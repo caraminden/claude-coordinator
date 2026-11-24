@@ -22,6 +22,7 @@ const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\brunner\.send
  */
 const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 40 },
+  'kit/skills/test-quality/scripts/test-overlap.ts': { why: 'an audit script: kills only the test process it started when that file runs past its time limit; judges nothing', calls: 1 },
   'src/exit-with-parent.ts': { why: "kills only its own test server's processes when the parent test exits; judges nothing", calls: 2 },
   'src/worktree-deps.ts': { why: 'stops its own npm install past its time limit; judges nothing', calls: 1 },
   'src/ci-armed.ts': { why: "tellTaskmaster itself and the minion's own message tool", calls: 3 },

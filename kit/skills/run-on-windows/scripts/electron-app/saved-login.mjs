@@ -149,7 +149,15 @@ try {
   await c.until('the sign-in page', `!!${form}`);
   await sleep(2000);
   check(!(await c.ev(STATE)).password, 'after Forget, the next sign-in page is not filled');
-} catch (e) { console.log(`FAIL ${e.message}`); failed++; }
+} catch (e) {
+  console.log(`FAIL ${e.message}`);
+  failed++;
+  // What the page and the bridge held when it stopped (the password itself left out).
+  const seen = await c?.ev(`(async () => { const f = ${form}; const r = await window.citadelDesktop?.savedLogin?.().catch((x) => String(x));
+    return { url: location.href, form: !!f, login: f?.login.value, password: f ? f.password.value.length : null, file: null,
+      bridge: r && (typeof r === 'string' ? r : { canSave: r.canSave, login: r.login?.login, password: r.login ? r.login.password.length : null }) }; })()`).catch((x) => String(x));
+  console.log('seen', JSON.stringify(seen), 'file', existsSync(file));
+}
 
 c?.close();
 app?.kill();

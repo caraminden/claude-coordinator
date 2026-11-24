@@ -1,6 +1,6 @@
 ---
 name: retro
-description: The retrospective that closes a milestone. It covers what the spec left Claude to invent, what the skills, agents, hooks and tools got wrong, stale or slow, and the few edits that fix them, shipped in the milestone's own PR. Use when a milestone PR is ready for review, when a major build is ready for its go card, for a scheduled monthly retro, or when someone asks how the process went.
+description: The retrospective that closes a milestone. It covers what the spec left Claude to invent, what the skills, agents, hooks and tools got wrong, stale or slow, and the few edits that fix them. Use when a milestone PR is ready for review, when a major build is ready for its go card, for a scheduled monthly or effort retro, or when someone asks how the process went.
 ---
 
 # Retro
@@ -23,6 +23,11 @@ Create either file when it is first needed.
   branch, in the retro folder CLAUDE.md's Project facts name; there is no milestone PR.
 - A scheduled monthly retro (its brief names the window). It ships by the scheme's usual route for a
   doc change; there is no milestone PR.
+- An effort retro: the server starts one when every minion of an effort (the `effortName` property: 3
+  or more minions, or 4 in an unnamed start_after chain) has closed and stayed closed for 6 hours, in any
+  scheme. Its brief lists the minions; the retro asks what went wrong across them (the split, the order,
+  briefs that left the next minion guessing) and writes `effort-<slug>.md` in the retro folder. An effort
+  that is mostly one major build gets none: the build's retro covers it.
 
 ## Steps
 

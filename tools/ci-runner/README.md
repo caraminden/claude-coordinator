@@ -230,6 +230,27 @@ there and tell the minion**: the PC is never restarted for this.
    If it asks for a UNIX user name and password, give any (`cara` will do); nothing uses them. It opens a shell in
    the distro when it's done: type `exit`. ([Microsoft's install guide](https://learn.microsoft.com/en-us/windows/wsl/install)
    says more; if `--name` is refused, stop and tell the minion.)
+   Then turn off WSL's localhost relay. In its default NAT networking, `wslrelay.exe` opens a Windows listening
+   socket for every port a WSL program listens on, and on Cara's PC it never closed them after the test suites'
+   servers did: ~1,760 piled up in 36 hours (Nov 22–24), until Windows ran short of ports and Citadel froze for
+   seconds at a time (#1753). Nothing here needs it: the runners, ToC's runners and the Android emulator's tunnel
+   all connect outward from WSL. The cost: Windows can't open a server in any of Cara's WSL distros at
+   `localhost` (the distro's own IP, `wsl -d <distro> hostname -I`, still works). In the same PowerShell:
+
+   ```powershell
+   $f = "$env:UserProfile\.wslconfig"; $t = if (Test-Path $f) { Get-Content -Raw $f } else { '' }
+   if ($t -match '(?m)^[^\S\r\n]*localhostForwarding\s*=') { $t = $t -replace '(?m)^[^\S\r\n]*localhostForwarding[^\S\r\n]*=[^\r\n]*', 'localhostForwarding=false' } elseif ($t -match '(?m)^\[wsl2\]') { $t = $t -replace '(?m)^\[wsl2\][^\S\r\n]*(?=\r?$)', "[wsl2]`r`nlocalhostForwarding=false" } else { $t = "[wsl2]`r`nlocalhostForwarding=false`r`n`r`n" + $t }
+   Set-Content -Path $f -Value $t -Encoding ASCII; Get-Content $f
+   wsl --shutdown
+   ```
+
+   To check it's holding (after a suite has run there), this should print a number near zero for wslrelay:
+
+   ```powershell
+   $r = @(Get-Process wslrelay -ErrorAction SilentlyContinue).Id; "wslrelay listeners: " + @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $r -contains $_.OwningProcess }).Count; "listeners inside citadel-ci: " + (wsl -d citadel-ci -u root -- sh -c 'ss -Hltn | wc -l')
+   ```
+
+   (`networkingMode=mirrored`, step 3's fallback, also has no relay; `localhostForwarding` only applies to NAT.)
 2. **Its host on Citadel.** On Citadel's Machines page, press **Add a CI runner host** and name it
    `cara-desktop-linux`. Leave the install line open on the **Linux in WSL** tab and press **Copy**. Give the host
    the schemes that should get Linux runners (Theory of Crafting) under its line, as for the Windows host.

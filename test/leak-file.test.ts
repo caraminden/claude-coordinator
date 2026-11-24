@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { judge, KINDS, readBaseline, type Leftovers } from './leak-file.ts';
+import { until } from './wait.ts';
 
 const GUARD = join(import.meta.dirname, 'leak-guard.ts');
 const alive = (pid: number) => {
@@ -79,7 +80,7 @@ test('a file that leaves a process, a port, a unit and a temp folder goes red na
     assert.match(r.text, /entr\(ies\) left in its temp folder:\s+left-/, r.text);
     assert.match(r.text, /✖ leaky\.test\.mjs/, r.text);
     assert.match(r.text, /✔ cleans up after itself/, r.text);
-    assert.equal(alive(left.pid), false, 'the leaked process was killed');
+    await until('the leaked process to be killed and reaped', () => !alive(left.pid)); // KILLed, then reaped by whoever adopted it
     if (hasUnits) {
       assert.match(r.text, new RegExp(`user unit\\(s\\) still running:\\s+${left.unit.replace(/\./g, '\\.')}`), r.text);
       const state = spawnSync('systemctl', ['--user', 'is-active', left.unit], { encoding: 'utf8' }).stdout.trim();
@@ -103,6 +104,7 @@ test('a baseline lets a file leave as many as it allows, fails one more, and ask
   assert.equal(under.fail, false);
   assert.match(under.text, /now leaves 1 where test\/leak-baseline\.json allows 2 \(tmp\): lower it/);
   assert.equal(judge('x.test.ts', { ...none, ports: [[80, 1]] }, { tmp: 5 }).fail, true, 'a baseline for one kind allows no other');
+  assert.match(judge('x.test.ts', none, { tmp: 2 }).text, /now leaves 0 where .* allows 2 \(tmp\): lower it/, 'a file that leaves nothing at all hears it too');
 });
 
 test('a test process that is not a test file of a guarded run loads the counter but does nothing', () => {

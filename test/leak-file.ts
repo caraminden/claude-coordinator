@@ -215,8 +215,9 @@ function install() {
     if (event === 'exit') {
       try {
         const left = settledLeftovers({ self: process.pid, id, dir });
-        if (KINDS.some((k) => left[k].length)) {
-          const { fail, text } = judge(file, left, readBaseline()[file]);
+        const allowed = readBaseline()[file];
+        if (allowed || KINDS.some((k) => left[k].length)) { // a baselined file that left nothing still hears to lower it
+          const { fail, text } = judge(file, left, allowed);
           if (text) process.stderr.write(`\n${text}\n`);
           if (fail && !process.exitCode) process.exitCode = 1;
         }

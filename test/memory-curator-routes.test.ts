@@ -42,6 +42,14 @@ const turns = () => jsonLines(join(root, 'turns.jsonl'));
 const idle = () => until('the turn to end', async () => (await call('Cara', `/api/tickets/${ticket.id}`)).ticket.status !== 'running');
 const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));
 const propose = (changes: unknown) => call('minion', `/api/tickets/${ticket.id}/memory-proposal`, { method: 'POST', body: { changes } });
+// An answer wakes the run: wait for that turn to have run and ended, so its new token is the one read next.
+const answered = async (act: () => Promise<unknown>) => {
+  const n = turns().length;
+  const out = await act();
+  await until('the answer\'s turn', () => turns().length > n);
+  await idle();
+  return out;
+};
 const applyMine = () => call('minion', `/api/tickets/${ticket.id}/memory-proposal/apply`, { method: 'POST', body: {} });
 const verdict = (who: string, planId: string, v: string) => call(who, `/api/tickets/${ticket.id}/verdict`, { method: 'POST', body: { planId, verdict: v } });
 const cardOf = async (proposal: number) => (await events('plan')).find((c: any) => c.memory?.proposal === proposal);
@@ -140,11 +148,10 @@ test('approved on the card, the run applies the whole tidy through the page\'s p
   ]);
   await idle();
   const card = await cardOf(r.proposal);
-  await verdict('Cara', card.id, 'approve');
+  await answered(() => verdict('Cara', card.id, 'approve'));
   assert.equal(read('c.md'), '---\nname: C\ndescription: unindexed\n---\ngamma\n', 'Approve itself writes nothing: the run applies');
   assert.match((await events('user_message')).at(-1).text, /^Approved: Cara approved your whole memory tidy .* Call apply_memory now/);
   assert.equal((await proposals()).open.approved_by, 'Cara', 'the page shows it approved on the card');
-  await idle();
   const out = await applyMine();
   assert.match(out.line, /^Applied 2 of the 2 changes Cara approved \(1 edit, 1 delete\)\.$/);
   assert.deepEqual(out.changes.map((c: any) => c.outcome), ['applied', 'applied', 'noted']);
@@ -171,7 +178,7 @@ test('a non-member\'s answer applies nothing, and Reject turns it down at once',
   await assert.rejects(applyMine(), /409 Not approved/);
   assert.equal((await cardOf(r.proposal)).status, 'pending');
   assert.notEqual(read('c.md'), 'olive was here\n');
-  await verdict('Cara', card.id, 'revise');
+  await answered(() => verdict('Cara', card.id, 'revise'));
   assert.equal((await cardOf(r.proposal)).status, 'rejected');
   assert.equal((await proposals()).open, null);
   await assert.rejects(applyMine(), /409 Cara already turned down this tidy/);
@@ -184,7 +191,7 @@ test('ticked on the page, then approved on the card: applied once', async () => 
   const r = await propose([{ action: 'edit', file: 'c.md', text: 'once', reason: 'r' }, { action: 'index', file: 'b.md', line: '- [B](b.md) — again', reason: 'r' }]);
   await idle();
   const card = await cardOf(r.proposal);
-  await call('Cara', `/api/projects/${project.id}/memory-proposals/${r.proposal}/decide`, { method: 'POST', body: { apply: [1] } });
+  await answered(() => call('Cara', `/api/projects/${project.id}/memory-proposals/${r.proposal}/decide`, { method: 'POST', body: { apply: [1] } }));
   await assert.rejects(verdict('Cara', card.id, 'approve'), /409 Cara already approved this memory tidy/);
   await assert.rejects(applyMine(), /409 Cara already applied this tidy/);
   assert.equal(read('c.md'), 'once\n');
@@ -199,9 +206,8 @@ test('ticked on the page, then approved on the card: applied once', async () => 
 test('approved on the card, then ticked on the page before the run applies: the run finds it applied', async () => {
   const r = await propose([{ action: 'edit', file: 'c.md', text: 'page first', reason: 'r' }, { action: 'index', file: 'b.md', line: '- [B](b.md) — again', reason: 'r' }]);
   await idle();
-  await verdict('Cara', (await cardOf(r.proposal)).id, 'approve');
-  await idle();
-  await call('Cara', `/api/projects/${project.id}/memory-proposals/${r.proposal}/decide`, { method: 'POST', body: { apply: [1] } });
+  await answered(async () => verdict('Cara', (await cardOf(r.proposal)).id, 'approve'));
+  await answered(() => call('Cara', `/api/projects/${project.id}/memory-proposals/${r.proposal}/decide`, { method: 'POST', body: { apply: [1] } }));
   await assert.rejects(applyMine(), /409 Cara already applied this tidy/);
   assert.equal(read('c.md'), 'page first\n');
   assert.doesNotMatch(read('MEMORY.md')!, /again/);

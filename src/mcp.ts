@@ -415,12 +415,8 @@ const PROPOSE_MEMORY = () => ({
   },
 });
 
-const APPLY_MEMORY = {
-  name: 'apply_memory',
-  description:
-    "For a memory curator run, only after a member approved your memory tidy card (the approval comes as a message): applies the whole approved tidy to the memory folder through the Memory page's own apply, and returns what changed and what was skipped (a note changed since you proposed it is skipped, never overwritten). Refused before an approval, and for a tidy someone already decided on the Memory page. Never edit memory files yourself.",
-  inputSchema: { type: 'object', properties: {} },
-};
+const APPLY_MEMORY = { name: 'apply_memory', inputSchema: { type: 'object', properties: {} }, description:
+  "For a memory curator run, only after a member approved your memory tidy card (the approval comes as a message): applies the whole approved tidy to the memory folder through the Memory page's own apply, and returns what changed and what was skipped (a note changed since you proposed it is skipped, never overwritten). Refused before an approval, and for a tidy someone already decided on the Memory page. Never edit memory files yourself." };
 
 const EDIT_INSTRUCTIONS = {
   name: 'edit_instructions',
@@ -2349,10 +2345,8 @@ async function runTool(name: string, args: any): Promise<string> {
       const { href, counts } = await call('POST', `/api/tickets/${C().TICKET}/memory-proposal`, { changes: args.changes });
       return `The memory tidy card (${counts}) is in the chat; its link is ${href}. Link every mention of it. A member approves it on the card or picks changes on the Memory page, and the answer comes as a message. End your turn now, in state ready. On an approval, call apply_memory; then, or on any other answer, report it and close yourself with close_self.`;
     }
-    case 'apply_memory': {
-      const { line } = await call('POST', `/api/tickets/${C().TICKET}/memory-proposal/apply`, {});
-      return `${line} Report that in a few lines, then close yourself with close_self.`;
-    }
+    case 'apply_memory':
+      return `${(await call('POST', `/api/tickets/${C().TICKET}/memory-proposal/apply`, {})).line} Report that in a few lines, then close yourself with close_self.`;
     case 'propose_plan': {
       const { href } = await call('POST', `/api/tickets/${C().TICKET}/plans`, { summary: args.summary, plan: args.plan, ...(args.to ? { to: args.to } : {}) });
       return `The plan card is in the chat${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [the plan card below](${href})` : ''}. End your turn now with a short reply and write no code; the go or the notes to revise it will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;

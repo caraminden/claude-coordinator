@@ -15,7 +15,7 @@ export const LIMIT = 1500;
 export const ALLOWED: Record<string, [number, string]> = {
   'src/runner.ts': [4849, 'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued'],
   'src/db.ts': [3988, 'schema, migrations and settings; queries are already moving to src/db/<area>.ts (+1: SCHEMA_HISTORY row 115, #1798)'],
-  'src/mcp.ts': [2635, 'every MCP tool definition and handler; split by tool family is queued'],
+  'src/mcp.ts': [2640, 'every MCP tool definition and handler; split by tool family is queued (+5: apply_memory, #1803)'],
   'tools/land.sh': [2509, 'the ship script is one shell program; its steps share state and are pinned by tests'],
   'public/machine-agent.mjs': [2337, 'standalone agent a person runs on their own computer: one file so it can be copied alone'],
   'src/routes/projects.ts': [1894, 'every /projects route; split by page is queued'],

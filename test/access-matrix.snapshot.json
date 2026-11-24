@@ -3182,6 +3182,16 @@
   "m1": "404 This scheme has no memory folder Citadel can reach, so there is nothing to tidy: say so in one line and close yourself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/memory-proposal/apply": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the curator run itself applies its approved tidy",
+  "member": "403 Only the curator run itself applies its approved tidy",
+  "outsider": "403 Only the curator run itself applies its approved tidy",
+  "tmA": "403 Only the curator run itself applies its approved tidy",
+  "tmB": "403 Only the curator run itself applies its approved tidy",
+  "m1": "404 This minion has proposed no memory tidy",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/messages": {
   "anon": "401 Not logged in",
   "person": "405 Method not allowed",
@@ -4029,6 +4039,16 @@
   "outsider": "403 Only the curator run itself can propose a memory tidy in its chat",
   "tmA": "403 Only the curator run itself can propose a memory tidy in its chat",
   "tmB": "403 Only the curator run itself can propose a memory tidy in its chat",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/memory-proposal/apply": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the curator run itself applies its approved tidy",
+  "member": "403 Only the curator run itself applies its approved tidy",
+  "outsider": "403 Only the curator run itself applies its approved tidy",
+  "tmA": "403 Only the curator run itself applies its approved tidy",
+  "tmB": "403 Only the curator run itself applies its approved tidy",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

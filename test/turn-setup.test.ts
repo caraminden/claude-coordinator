@@ -67,20 +67,24 @@ const system = args.includes('--append-system-prompt-file') ? readFileSync(args[
 // The turn's first message, from prompt.jsonl beside it: a minion's own lines open it, its machines' included (#878).
 const message = system === null ? null : JSON.parse(readFileSync(require('node:path').join(require('node:path').dirname(args[args.indexOf('--append-system-prompt-file') + 1]), 'prompt.jsonl'), 'utf8').split('\\n')[0]).message.content.map((b) => b.text ?? '').join('\\n');
 const mcp = JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8'));
+// The tools a Bash call would reach (seven spawns), probed only on a turn that asks with the probe file: one test reads them.
+let heavy, wait, devCopy, ciFailures, cargo, replay, where;
+if (require('node:fs').existsSync(${JSON.stringify(join(root, 'probe'))})) {
 // What a Bash call would run for \`citadel-heavy\`, read while the turn's folder still exists.
-const heavy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-heavy) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
-const wait = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-wait) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
-const devCopy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-dev-copy) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
-const ciFailures = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v ci-failures) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
+heavy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-heavy) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
+wait = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-wait) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
+devCopy = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v citadel-dev-copy) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
+ciFailures = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v ci-failures) && [ -x "$f" ] && cat "$f"'], { encoding: 'utf8' }).stdout;
 // Where a Bash call's cargo and heavy-unit come from (#1298): the shim, a link to heavy-shim, then heavy-unit beside it.
-const cargo = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v cargo) && echo "$f" && readlink "$f" && command -v heavy-unit'], { encoding: 'utf8' }).stdout.split('\\n');
+cargo = require('node:child_process').spawnSync('sh', ['-c', 'f=$(command -v cargo) && echo "$f" && readlink "$f" && command -v heavy-unit'], { encoding: 'utf8' }).stdout.split('\\n');
 // citadel-replay (#836) runs from the pin, its replay.ts and contraption-args.ts beside it: with no arguments, its usage.
-const replay = require('node:child_process').spawnSync('citadel-replay', [], { encoding: 'utf8' });
+replay = require('node:child_process').spawnSync('citadel-replay', [], { encoding: 'utf8' });
 // citadel-where (#1122) runs from the pin, show-parts.ts beside it.
-const where = require('node:child_process').spawnSync('citadel-where', ['--scheme', '3', 'fast', 'mode'], { encoding: 'utf8' });
+where = require('node:child_process').spawnSync('citadel-where', ['--scheme', '3', 'fast', 'mode'], { encoding: 'utf8' });
+}
 // The kit's skills as this turn sees them, read while its folder still exists (#1062).
 const kitSkills = args.includes('--plugin-dir') ? require('node:fs').readdirSync(require('node:path').join(args[args.indexOf('--plugin-dir') + 1], 'skills')) : null;
-writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, message, mcp, heavy, wait, devCopy, ciFailures, cargo, kitSkills, replay: { status: replay.status, stderr: replay.stderr }, where: { status: where.status, stdout: where.stdout } }));
+writeFileSync(${JSON.stringify(join(root, 'turn'))}, JSON.stringify({ args, env: process.env, settings, system, message, mcp, heavy, wait, devCopy, ciFailures, cargo, kitSkills, replay: replay && { status: replay.status, stderr: replay.stderr }, where: where && { status: where.status, stdout: where.stdout } }));
 const status = readFileSync(${JSON.stringify(join(root, 'mcp-status'))}, 'utf8');
 const role = process.env.COORDINATOR_ROLE;
 const initErrors = require('node:fs').existsSync(${JSON.stringify(join(root, 'init-errors'))}) ? JSON.parse(readFileSync(${JSON.stringify(join(root, 'init-errors'))}, 'utf8')) : {};
@@ -347,7 +351,9 @@ test("a Taskmaster launch past Claude Code's 2 MiB settings cap doesn't start, a
 });
 
 test('every turn finds citadel-heavy first on its PATH, pinned, with the shared slots folder and who it runs for; only minions are told to use it (#325)', async () => {
+  writeFileSync(join(root, 'probe'), '');
   const t = await turn('ticket', 'connected');
+  rmSync(join(root, 'probe'));
   assert.equal(t.heavy, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-heavy'), 'utf8'), 'on PATH and executable');
   assert.equal(t.wait, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-wait'), 'utf8'), 'citadel-wait beside it (#481)');
   assert.equal(t.devCopy, readFileSync(join(import.meta.dirname, '..', 'tools', 'citadel-dev-copy'), 'utf8'), 'citadel-dev-copy (#482) too');

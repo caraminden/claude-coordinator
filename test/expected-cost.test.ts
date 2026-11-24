@@ -69,6 +69,7 @@ test('a Taskmaster brief over $30 waits for a person\'s start card; under it, or
     assert.deepEqual(held.d.questions[0].options.map((o: { label: string }) => o.label), ['Start', 'Split first']);
     const brief = (await events(id)).find((e) => e.kind === 'user_message');
     assert.equal(JSON.parse(brief!.data).parked, true, 'its brief is held, no turn');
+    assert.equal(JSON.parse(brief!.data).startHold, true, 'held for its start card, not a seal');
     // A message to it is held too, and no turn runs.
     const msg = await s.call(`/api/tickets/${id}/messages`, { text: 'Any news?' });
     assert.equal(msg.data.held, 'parked', JSON.stringify(msg.data));

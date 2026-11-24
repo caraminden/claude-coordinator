@@ -454,7 +454,7 @@ mock.boards('#takes', { boards: [
     seed(c) {
       const t = minion(c, 'Turns ease off as memory fills', { status: 'new', note: startNote(35) }, 'feature');
       c.store.setSetting(startHoldKey(t.id), { usd: 35, card: 'seed-start' });
-      c.store.addEvent(t.id, 'user_message', { text: 'Start from the handoff. Expected cost: ~$35.', author: 'Taskmaster', brief: true, mail: true, parked: true });
+      c.store.addEvent(t.id, 'user_message', { text: 'Start from the handoff. Expected cost: ~$35.', author: 'Taskmaster', brief: true, mail: true, parked: true, startHold: true });
       const e = c.store.addEvent(t.id, 'question', { id: 'seed-start', questions: [startCard(t.number, t.title, 35)], startCost: 35 });
       return route(c, t, e.id);
     },

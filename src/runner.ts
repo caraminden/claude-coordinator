@@ -2145,7 +2145,7 @@ export class Runner {
     const id = this.store.reserveEventId();
     const line = () => this.emit(ticketId, 'user_message', {
       author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}),
-      ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}), ...(parked ? { mail: true, parked: true } : {}),
+      ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}), ...(parked ? { mail: true, parked: true, ...(this.store.getSetting(startHoldKey(ticketId)) ? { startHold: true } : {}) } : {}),
     }, id);
     const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(extra.typed || 'answer' in extra ? { own: true } : {}), ...(fyi ? { fyi: true } : {}), ...(light ? { light: true as const } : {}), asker };
     if (parked) {

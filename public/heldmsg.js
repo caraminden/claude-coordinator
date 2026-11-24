@@ -14,8 +14,12 @@ export function heldLine(data, eventId, ticket) {
   if (!data?.mail) return null;
   const held = !!ticket?.held_ids?.includes(eventId);
   const queued = held && ticket.status === 'running';
-  return { waiting: held && !queued, queued, text: 'Not sent yet: held mail, read on its next turn.', tag: data.parked ? 'left while sealed' : 'held mail', title: data.parked ? 'Left while it was sealed, read when it was unsealed' : 'Held for its next turn, read then' };
+  return { waiting: held && !queued, queued, text: 'Not sent yet: held mail, read on its next turn.', ...heldTag(data) };
 }
+
+// A start card's wait (#1757) isn't a seal, so its held messages say so.
+const heldTag = (data) => data.startHold ? { tag: 'left before it started', title: 'Left while it waited for its start card, read when a person started it' }
+  : data.parked ? { tag: 'left while sealed', title: 'Left while it was sealed, read when it was unsealed' } : { tag: 'held mail', title: 'Held for its next turn, read then' };
 
 /** The one-line hint over the composer while the open minion is parked (a message waits), or null. */
 export function composerHint(t) {

@@ -10,6 +10,8 @@ test('heldLine: waiting while the chat lists it as held, then a read tag; never 
   const taken = heldLine({ mail: true, parked: true }, 7, { held_ids: [9] });
   assert.deepEqual([taken.waiting, taken.tag], [false, 'left while sealed']);
   assert.equal(heldLine({ mail: true, cold: true }, 3, { held_ids: [] }).tag, 'held mail');
+  // A start card's wait isn't a seal (#1757).
+  assert.equal(heldLine({ mail: true, parked: true, startHold: true }, 4, { held_ids: [] }).tag, 'left before it started');
   assert.equal(heldLine({ text: 'hi' }, 1, { held_ids: [1] }), null);
 });
 

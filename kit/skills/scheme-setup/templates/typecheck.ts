@@ -46,11 +46,13 @@ export async function tscErrors(root = ROOT, projects = PROJECTS): Promise<TscEr
     const tsc = [root, dirname(p), ROOT].map((d) => join(d, 'node_modules', 'typescript', 'bin', 'tsc')).find((t) => existsSync(t));
     if (!tsc) throw new Error('typescript is not installed in node_modules: run `npm ci` (the type check needs it as a devDependency)');
     // tsc exits 2 when it found errors; anything else on stderr with no parsed error is tsc itself failing.
-    const stdout = await run(process.execPath, [tsc, '-p', p, '--noEmit', '--pretty', 'false'], { cwd: root, maxBuffer: 64 * 1024 * 1024 })
-      .then((r) => r.stdout, (e: { stdout?: string; stderr?: string; message: string }) => {
+    const stdout = await run(process.execPath, [tsc, '-p', p, '--noEmit', '--pretty', 'false'], { cwd: root, maxBuffer: 64 * 1024 * 1024 }).then(
+      (r) => r.stdout,
+      (e: { stdout?: string; stderr?: string; message: string }) => {
         if (e.stdout && /error TS\d+/.test(e.stdout)) return e.stdout;
         throw new Error(`tsc failed to run: ${e.stderr || e.message}`);
-      });
+      },
+    );
     out.push(...parseTsc(stdout, root));
   }
   return out;
@@ -156,7 +158,10 @@ export function countEscapes(code: string, file = 'x.ts', byPattern = false): { 
 /** The TypeScript files git tracks, the escape count's files. */
 export async function tsFiles(root = ROOT): Promise<string[]> {
   const { stdout } = await run('git', ['ls-files', '-z', '--', '*.ts', '*.tsx', '*.mts', '*.cts'], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
-  return stdout.split('\0').filter(Boolean).filter((f) => existsSync(join(root, f)));
+  return stdout
+    .split('\0')
+    .filter(Boolean)
+    .filter((f) => existsSync(join(root, f)));
 }
 
 /** Today's counts: every file with an error or an escape, and nothing else. */
@@ -209,7 +214,11 @@ export function moved(baseline: Table, now: Table): Table | null {
 }
 
 function sorted(t: Table): Table {
-  return Object.fromEntries(Object.keys(t).sort().map((k) => [k, t[k]!]));
+  return Object.fromEntries(
+    Object.keys(t)
+      .sort()
+      .map((k) => [k, t[k]!]),
+  );
 }
 
 export function readBaseline(path = BASELINE): Table {
@@ -233,7 +242,7 @@ export function upMessage(up: Change[], errors: TscError[]): string {
   return [
     `A file has more type errors or escapes (an explicit \`any\`, or a @ts-ignore / @ts-expect-error / @ts-nocheck) than ${relative(ROOT, BASELINE)} allows:`,
     ...up.map((c) => `  ${describe(c)}`),
-    'Fix them with real types (`unknown` and a narrowing, not `any`); the baseline only goes down. `node tools/typecheck.ts <file>` lists a file\'s errors.',
+    "Fix them with real types (`unknown` and a narrowing, not `any`); the baseline only goes down. `node tools/typecheck.ts <file>` lists a file's errors.",
     'Moved or split code (its old file went down as much)? `node tools/typecheck.ts --update --moved` re-files the counts when the totals did not rise.',
     ...detail.slice(0, 40),
   ].join('\n');
@@ -264,7 +273,7 @@ async function main(args: string[]) {
   if (args.includes('--update') && args.includes('--moved')) {
     const next = moved(baseline, table);
     if (!next) {
-      console.log('typecheck: not re-filing: the repo\'s total errors or escapes went up, so this is more than a move');
+      console.log("typecheck: not re-filing: the repo's total errors or escapes went up, so this is more than a move");
       process.exitCode = 1;
       return;
     }

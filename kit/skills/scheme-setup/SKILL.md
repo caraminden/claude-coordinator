@@ -92,7 +92,7 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
    `node tools/typecheck.ts --init`, and make `node tools/typecheck.ts` (exit 1 when a file gains a type error, an
    explicit `any` or a `@ts-ignore`) part of the check commands, with a line on fixing it with real types and
    `--update` after lowering counts (Cara, 2026-11-24: "don't cheat and use 'any'"; Citadel's is `test/typecheck.test.ts`).
-   A repo with TypeScript or JavaScript also gets the formatter (#1792): copy `templates/biome.json` to the repo root (set its
+   A repo with TypeScript or JavaScript also gets the formatter (#1792): copy `templates/biome.config.json` to the repo root as `biome.json` (set its
    `includes` to the repo's source folders, and `!`-exclude generated and vendored files), `templates/fmt` to `tools/fmt` and
    `templates/format.test.ts` to `test/`, add `@biomejs/biome` to devDependencies pinned exactly (`npm i -D --save-exact
    --ignore-scripts @biomejs/biome`), run `tools/fmt` once and commit that reformat alone, add its hash to

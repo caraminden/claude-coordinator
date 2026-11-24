@@ -73,7 +73,7 @@ test('the check fails on growth past the limit or past an allowed size, and pass
   assert.deepEqual(overBudget({ 'big.ts': 2000 }, { 'big.ts': [3000, 'x'] }, 1500), []);
 });
 
-test('a kit-synced file over the limit is not counted, and the scheme\'s own big file still is', () => {
+test("a kit-synced file over the limit is not counted, and the scheme's own big file still is", () => {
   const dir = mkdtempSync(join(tmpdir(), 'size-budget-'));
   try {
     const big = 'x\n'.repeat(LIMIT + 10);
@@ -84,7 +84,7 @@ test('a kit-synced file over the limit is not counted, and the scheme\'s own big
     const counts = lineCounts(dir);
     assert.ok(!('tools/land.sh' in counts), 'tools/land.sh is kit-synced, so it is skipped');
     assert.equal(counts['src/own.ts'], LIMIT + 10);
-    assert.equal(overBudget(counts, {}, LIMIT).length, 1, 'the scheme\'s own file is still over budget');
+    assert.equal(overBudget(counts, {}, LIMIT).length, 1, "the scheme's own file is still over budget");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -8,7 +8,7 @@ import { Approvals, mcpMerge, mergeGo, mergeTarget, plainMerge, type Go, type Go
 import { Store } from '../src/db.ts';
 import { parseMerge, type PrInfo } from '../src/merge-card.ts';
 import { Runner } from '../src/runner.ts';
-import { agentToken, bootServer, REPO, stopProcs, stopTurns, until, testPins } from './helpers.ts';
+import { agentToken, bootServer, REPO, stopProcs, stopTurns, turnSaved, until, testPins } from './helpers.ts';
 testPins();
 
 // A person's own typed "merge it" lets the turn that reads it merge once with no card (#201). Only
@@ -638,7 +638,7 @@ type Srv = Awaited<ReturnType<typeof bootServer>>;
  */
 async function turnAuth(srv: Srv, id: number) {
   const auth = () => ({ Authorization: `Bearer ${agentToken(srv.data, id)}`, 'Content-Type': 'application/json' });
-  await until('the turn', async () => (await srv.call(`/api/tickets/${id}`)).data.ticket?.status === 'running' && (await fetch(`${srv.base}/api/tickets/${id}/approvals?id=x`, { headers: auth() })).ok);
+  await until('the turn', async () => turnSaved(srv.data, id) && (await srv.call(`/api/tickets/${id}`)).data.ticket?.status === 'running' && (await fetch(`${srv.base}/api/tickets/${id}/approvals?id=x`, { headers: auth() })).ok);
   return auth();
 }
 

@@ -249,10 +249,19 @@ export function agentToken(data: string, id: number): string {
 }
 
 function nonceRow(data: string, id: number) {
+  return settingRow(data, `agent-nonce:${id}`);
+}
+
+function settingRow(data: string, key: string) {
   const db = new DatabaseSync(join(data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(`agent-nonce:${id}`) as { value: string } | undefined;
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   db.close();
   return row;
+}
+
+/** Whether minion `id`'s turn is saved and followed on the server whose DATA_DIR is `data`: its status shows running from the start of the launch, before then (#1808). */
+export function turnSaved(data: string, id: number): boolean {
+  return !!settingRow(data, `turn:${id}`);
 }
 
 /** agentToken once minion `id`'s first turn has minted it: the launch runs after the send returns (#1808), so a read at the send can come first. */

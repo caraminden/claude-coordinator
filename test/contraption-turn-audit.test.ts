@@ -5,7 +5,7 @@ import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
-import { agentToken, bootServer, tempRoot } from './helpers.ts';
+import { agentToken, bootServer, mintedAgentToken, tempRoot } from './helpers.ts';
 
 const tmp = tempRoot('turn-audit-');
 const root = tmp.dir;
@@ -118,6 +118,8 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
   assert.equal((await bearer(tmAlpha, `/api/projects/${alpha}/contraption-turns`)).status, 200);
   assert.equal((await bearer(tmAlpha, `/api/projects/${bravo}/contraption-turns`)).status, 403, "another scheme's");
   const minion = (await srv.call(`/api/projects/${alpha}/tickets`, { message: 'A minion' })).data.id;
+  // Its first turn mints its token after the send returns (#1808): one read sooner is refused as stale, not as a minion.
+  await mintedAgentToken(srv.data, minion);
   assert.equal((await bearer(minion, `/api/projects/${alpha}/contraption-turns`)).status, 403, 'a minion');
   // Getting the app gave Alpha its weekly app turns check (#844); that check's current run reads the audit.
   const checks = (await srv.call(`/api/projects/${alpha}/schedules`)).data.schedules.filter((s: any) => s.template === 'app-turns');

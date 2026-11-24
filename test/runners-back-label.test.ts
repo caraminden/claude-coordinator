@@ -37,7 +37,8 @@ const post = (id: number) =>
     body: JSON.stringify({ reason: 'run tools/land.sh again.' }),
   });
 
-test('a scheme whose name makes no runner label is refused 409 and stores no runner wait (#541)', async () => {
+test('the wait route: a scheme whose name makes no runner label is refused 409 with nothing stored (#541); one with a label gets its wait', async () => {
+  const waiting = (id: number) => store.listDeliveries({ kind: 'runners_back' }).filter((r) => r.to_id === id).length;
   const res = await post(badMinion.id);
   const body = await res.json();
   assert.equal(res.status, 409, JSON.stringify(body));
@@ -49,12 +50,9 @@ test('a scheme whose name makes no runner label is refused 409 and stores no run
     [],
     'no waiter stored',
   );
-  assert.equal(store.listDeliveries({ kind: 'runners_back' }).filter((r) => r.to_id === badMinion.id).length, 0, 'no outbox row either');
-});
-
-test('a scheme with a runner label is accepted and gets its wait', async () => {
-  const res = await post(goodMinion.id);
-  assert.equal(res.status, 201);
-  assert.equal((await res.json()).label, 'peek-auras-ci');
-  assert.equal(store.listDeliveries({ kind: 'runners_back' }).filter((r) => r.to_id === goodMinion.id).length, 1);
+  assert.equal(waiting(badMinion.id), 0, 'no outbox row either');
+  const ok = await post(goodMinion.id);
+  assert.equal(ok.status, 201);
+  assert.equal((await ok.json()).label, 'peek-auras-ci');
+  assert.equal(waiting(goodMinion.id), 1);
 });

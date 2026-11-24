@@ -336,3 +336,45 @@ test('the desktop pull fetches app backups into apps\\<app>\\<day>\\ and prunes 
   assert.equal(readFileSync(join(dest, 'keys', 'twi-release.pass'), 'utf8'), 'twi password');
   assert.equal(readFileSync(join(dest, 'keys', 'voice-release.jks'), 'utf8'), 'voice keystore', 'keys\\ is never pruned');
 });
+
+// #828 review fix: one app backup file the script can't read is left out and named on stderr; the run still exits 0
+// and ships Citadel's own set and the app's other files. Its own data root: the app's data is on another filesystem
+// (/dev/shm) than DATA_DIR, so a hard link fails and the copy is what reads the file, as on perigee.
+test('an app backup the script cannot read is left out and named, and everything else still ships (#828)', (t) => {
+  const own = mkdtempSync(join(tmpdir(), 'offbox-unreadable-'));
+  const shm = existsSync('/dev/shm') && statSync('/dev/shm').dev !== statSync(own).dev ? mkdtempSync('/dev/shm/offbox-unreadable-') : null;
+  try {
+    if (!shm) return t.skip('no second filesystem to make the hard link fail');
+    const st = new Store(join(own, 'coordinator.db'));
+    for (const [name, port, key] of [['mandate', 9, 'h'], ['peek', 10, 'h2']] as const) {
+      st.createContraption({ name, title: name, icon: null, port, home_scheme: null, open_paths: '[]', relay_paths: '[]', repo: null, branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: key, keys_at: 0 });
+    }
+    st.db.close();
+    mkdirSync(join(own, 'backups'));
+    new Store(join(own, 'backups', `coordinator-${day}.db`)).db.close();
+    const dayDir = (a: string) => join(shm, a, 'backups', day);
+    for (const a of ['mandate', 'peek']) mkdirSync(dayDir(a), { recursive: true });
+    writeFileSync(join(dayDir('mandate'), 'good.db'), 'readable');
+    writeFileSync(join(dayDir('mandate'), 'locked.db'), 'unreadable');
+    writeFileSync(join(dayDir('peek'), 'peek.db'), 'another app');
+    chmodSync(join(dayDir('mandate'), 'locked.db'), 0o000);
+    try {
+      readFileSync(join(dayDir('mandate'), 'locked.db'));
+      return t.skip('chmod 000 does not block reads for this user (root?)');
+    } catch {}
+    const r = spawnSync(join(deploy, 'offbox.sh'), { env: { ...process.env, DATA_DIR: own, APPS_DATA: shm, KEY_DIR: join(own, 'keys') }, encoding: 'utf8' });
+    assert.equal(r.status, 0, `exit status; stderr: ${r.stderr}`);
+    assert.match(r.stderr, /couldn't link or copy apps\/mandate\/[0-9-]+\/locked\.db, left out/);
+    const out = join(own, 'offbox');
+    assert.ok(existsSync(join(out, `coordinator-${day}.db`)), "Citadel's own set shipped");
+    assert.deepEqual(readdirSync(join(out, 'apps', 'mandate', day)), ['good.db'], 'the readable file shipped, the locked one did not');
+    assert.deepEqual(readdirSync(join(out, 'apps', 'peek', day)), ['peek.db'], "another app's file shipped");
+    const sums = readFileSync(join(out, 'SHA256SUMS'), 'utf8');
+    assert.match(sums, /apps\/peek\/.*peek\.db/);
+    assert.doesNotMatch(sums, /locked\.db/);
+  } finally {
+    // timing-ok: own temp dirs
+    rmSync(own, { recursive: true, force: true });
+    if (shm) rmSync(shm, { recursive: true, force: true });
+  }
+});

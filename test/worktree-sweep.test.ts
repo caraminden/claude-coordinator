@@ -38,8 +38,8 @@ const runner = new Runner(
   '/bin/false',
 );
 
-function scheme(name: string, repo?: string) {
-  const p = store.createProject(name, null);
+function scheme(name: string, repo?: string, owner?: number) {
+  const p = store.createProject(name, null, owner);
   repo ??= join(data, 'projects', String(p.id), 'repo');
   mkdirSync(repo, { recursive: true });
   git(repo, 'init', '-q', '-b', 'main');
@@ -327,4 +327,31 @@ test('one cleanup note per scheme per Pacific day: a second sweep the same day a
   await runner.sweepWorktrees(day1 + DAY);
   assert.equal(count(), 2, 'next day: a new note');
   assert.match(dailyNote(s.coordinator).text, /^Cleaned up 1 worktree today/);
+});
+
+// #1055 review fix: the day's cleanup note, when edited by a later sweep, keeps its everyone flag, so the
+// live edit reaches every member's open chat like the note itself did.
+test("the edit of the day's cleanup note carries everyone: true, as the note did", async () => {
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const s = scheme('Split', undefined, cara.id);
+  // A split scheme: a person's own Taskmaster exists beside the Overlord, so the note is the Overlord's (for everyone, #920).
+  store.splitScheme(s.id, josh.id);
+  const lord = store.getOverlord(s.id)!;
+  const day1 = Date.parse('2026-11-19T20:00:00Z');
+  const old = () => {
+    const m = minion(s, null);
+    store.updateTicket(m.id, { status: 'closed' });
+    store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(day1 - 4 * DAY, m.id);
+  };
+  old();
+  await runner.sweepWorktrees(day1);
+  old();
+  await runner.sweepWorktrees(day1 + 3_600_000);
+  const events = store.listEvents(lord.id);
+  const note = events.find((e) => e.kind === 'note' && /today/.test(JSON.parse(e.data).text));
+  assert.equal(JSON.parse(note!.data).everyone, true, 'the note itself is for everyone');
+  const edits = events.filter((e) => e.kind === 'note_edit');
+  assert.equal(edits.length, 1);
+  assert.equal(JSON.parse(edits[0].data).everyone, true, 'the edit keeps the flag');
 });

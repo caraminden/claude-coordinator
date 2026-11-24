@@ -132,6 +132,16 @@ test('unpark: true wakes a minion parked on the sender, and the Taskmaster gets 
   assert.equal(copy.unparked, true);
   assert.match(copy.text, /^my work is on main/);
   assert.equal((store.getSetting<any>(`minion-queue:${TM.id}`)?.held ?? null ?? []).length, 0);
+  // #853: wake: false is ignored with unpark: the message exists to start the turn, so it is a message, not held mail.
+  const Q = minion(A.id, 'Waiting on #1 too');
+  store.updateTicket(Q.id, { state: 'parked' });
+  const quiet = await tool(M1.id, 'message_minion', { ticket_id: Q.number, text: 'go quietly', unpark: true, wake: false });
+  assert.equal(quiet.error, false, quiet.text);
+  assert.doesNotMatch(quiet.text, /held mail/i);
+  const got = events(Q.id, 'user_message').find((m) => m.text === 'go quietly');
+  assert.ok(got, 'the message reached its chat');
+  assert.notEqual(got.mail, true, 'a message that starts the turn, not held mail');
+  assert.notEqual(store.getTicket(Q.id)!.state, 'parked');
 });
 
 test('unpark: a chain a person put on hold is refused and stays parked', async () => {

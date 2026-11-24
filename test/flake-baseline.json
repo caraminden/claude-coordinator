@@ -11,6 +11,12 @@
    "ok": 0
   }
  },
+ "answer-time.test.ts": {
+  "sleep": {
+   "n": 0,
+   "ok": 1
+  }
+ },
  "app-browser.test.ts": {
   "shortUntil": {
    "n": 1,
@@ -26,12 +32,6 @@
  "app-services.test.ts": {
   "sleep": {
    "n": 2,
-   "ok": 0
-  }
- },
- "approvals.test.ts": {
-  "rmTemp": {
-   "n": 1,
    "ok": 0
   }
  },
@@ -101,7 +101,7 @@
  },
  "citadel-android.test.ts": {
   "shortUntil": {
-   "n": 8,
+   "n": 7,
    "ok": 0
   },
   "elapsed": {
@@ -185,6 +185,12 @@
    "ok": 0
   }
  },
+ "expected-cost.test.ts": {
+  "rmTemp": {
+   "n": 0,
+   "ok": 1
+  }
+ },
  "fake-citadel-contract.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -194,13 +200,23 @@
  "frame-protocol-browser.test.ts": {
   "sleep": {
    "n": 1,
-   "ok": 0
+   "ok": 1
   }
  },
  "fresh-session.test.ts": {
   "sleep": {
    "n": 1,
    "ok": 0
+  }
+ },
+ "front.test.ts": {
+  "sleep": {
+   "n": 0,
+   "ok": 3
+  },
+  "elapsed": {
+   "n": 0,
+   "ok": 2
   }
  },
  "github-link.test.ts": {
@@ -337,10 +353,22 @@
    "ok": 0
   }
  },
+ "leak-file.ts": {
+  "rmTemp": {
+   "n": 0,
+   "ok": 1
+  }
+ },
  "leak-guard.test.ts": {
   "sleep": {
    "n": 3,
    "ok": 0
+  }
+ },
+ "list-reads.test.ts": {
+  "rmTemp": {
+   "n": 0,
+   "ok": 1
   }
  },
  "loop-guard.test.ts": {
@@ -379,7 +407,7 @@
  },
  "machines.test.ts": {
   "shortUntil": {
-   "n": 2,
+   "n": 1,
    "ok": 0
   }
  },
@@ -401,7 +429,7 @@
    "ok": 1
   },
   "shortUntil": {
-   "n": 4,
+   "n": 3,
    "ok": 0
   }
  },
@@ -529,6 +557,12 @@
    "ok": 0
   }
  },
+ "previews.test.ts": {
+  "sleep": {
+   "n": 0,
+   "ok": 1
+  }
+ },
  "progress-reporter.test.ts": {
   "sleep": {
    "n": 1,
@@ -576,10 +610,10 @@
   },
   "rmTemp": {
    "n": 1,
-   "ok": 0
+   "ok": 1
   },
   "shortUntil": {
-   "n": 4,
+   "n": 2,
    "ok": 0
   }
  },
@@ -653,6 +687,18 @@
   "sleep": {
    "n": 0,
    "ok": 2
+  }
+ },
+ "rule-parks.test.ts": {
+  "rmTemp": {
+   "n": 0,
+   "ok": 1
+  }
+ },
+ "run-tests-replay.test.ts": {
+  "sleep": {
+   "n": 0,
+   "ok": 1
   }
  },
  "run-tests.test.ts": {
@@ -803,6 +849,12 @@
    "ok": 0
   }
  },
+ "supervisor-leftovers.test.ts": {
+  "rmTemp": {
+   "n": 0,
+   "ok": 1
+  }
+ },
  "taskmaster-mail.test.ts": {
   "rmTemp": {
    "n": 2,
@@ -839,6 +891,16 @@
    "ok": 0
   }
  },
+ "turn-cost.test.ts": {
+  "rmTemp": {
+   "n": 0,
+   "ok": 1
+  },
+  "sleep": {
+   "n": 0,
+   "ok": 2
+  }
+ },
  "ultrareview.test.ts": {
   "rmTemp": {
    "n": 1,
@@ -867,10 +929,12 @@
   "rmTemp": {
    "n": 1,
    "ok": 0
-  },
-  "sleep": {
-   "n": 2,
-   "ok": 0
+  }
+ },
+ "worktree-deps.test.ts": {
+  "rmTemp": {
+   "n": 0,
+   "ok": 1
   }
  }
 }

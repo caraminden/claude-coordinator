@@ -203,3 +203,30 @@ test('through the tool: `to` as a list queues one Taskmaster note naming every r
   assert.equal(mail(m2.id).filter((m) => m.text === 'to all').length, 0, 'nothing sent yet');
   git('merge', '-q', '--ff-only', 'workc');
 });
+
+// #1001: a relay to several recipients answers with the queued relays' ids, and the tool text names every one,
+// so the sender can cancel or track the right relays.
+test('a relay to two recipients: the route returns the queued ids, and the tool text names every relay', async () => {
+  const [m2, m3] = [mk('Second'), mk('Third')];
+  git('checkout', '-q', '-b', 'workd');
+  const c = commit();
+  git('checkout', '-q', 'main');
+  const to = [`#${m2.number}`, `#${m3.number}`];
+  const res = await fetch(`${srv!.base}/api/tickets/${M1.id}/relay-when-live`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${tokens.agentToken(M1.id)}` },
+    body: JSON.stringify({ to, text: 'to both', commit: c }),
+  });
+  const body: any = await res.json();
+  assert.equal(res.status, 201, JSON.stringify(body));
+  assert.equal(body.queued, true);
+  assert.equal(body.ids.length, 2, 'ids lists every queued relay');
+  assert.equal(body.id, body.ids[0], 'id is a queued relay, not a sent one');
+  const pending = body.relays.map((r: any) => r.id);
+  for (const id of body.ids) assert.ok(pending.includes(id), `relay ${id} is pending`);
+  const t = await tool(M1.id, 'relay_when_live', { to, text: 'again', commit: c });
+  assert.equal(t.error, false, t.text);
+  const m = /^Queued as #(\d+) \(relays #(\d+), #(\d+), one per recipient\)/.exec(t.text);
+  assert.ok(m, `the text names every relay: ${t.text}`);
+  assert.equal(m![1], m![2]);
+});

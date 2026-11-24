@@ -2266,7 +2266,8 @@ export class Runner {
     let moved = 0;
     for (const { key, value } of this.store.settingsWithPrefix<{ usd: number }>(START_HOLD_PREFIX)) {
       const t = this.store.getTicket(Number(key.slice(START_HOLD_PREFIX.length)));
-      if (!t || t.status === 'closed' || t.state !== 'parked' || this.heldFor(t.id)) continue;
+      // Only #1674's own seal (its note): a seal a person set later, for another reason, stays.
+      if (!t || t.status === 'closed' || t.state !== 'parked' || this.heldFor(t.id) || !/^waits for its start card/.test(t.note ?? '')) continue;
       this.store.updateTicket(t.id, { state: null, note: startNote(value.usd) });
       moved++;
     }
@@ -2342,6 +2343,7 @@ export class Runner {
     let mail = this.queue.heldMail(t.id);
     // A dismissed minion isn't reopened by the cap: its mail waits for a person's message, or its dismissal's cleanup notes it.
     if (!mail.length || t.status === 'closed') { this.queue.warm(t.id); return 0; }
+    if (this.startHold(t.id)) return 0; // only its start card's answer starts it (#1757)
     // A disabled person's held mail never runs, on their login or anyone else's (#1270 C3, #1509).
     if (this.dropDisabled(t.id)) mail = this.queue.heldMail(t.id);
     if (!mail.length) return 0;

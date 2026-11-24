@@ -743,6 +743,7 @@ export const ticketRoutes: Route[] = [
     async handler(ctx) {
       const { res, session, app, ticket } = ctx;
       if (app.runner.isRunning(ticket.id)) return json(res, 409, { error: 'It is running: its held mail reaches it with its next turn' });
+      if (app.runner.startHold(ticket.id)) return json(res, 409, { error: 'It waits for a person to answer its start card: the answer starts it with its mail' });
       const project = app.store.getProject(ticket.project_id)!;
       return json(res, 200, { delivered: app.runner.releaseMail(ticket, project, session.name) });
     },

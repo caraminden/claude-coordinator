@@ -2207,7 +2207,7 @@ async function runTool(name: string, args: any): Promise<string> {
       // Unseal (#718; start_now is its old name): the server unseals it first if it's sealed, and this message wakes it.
       const unpark = args.unpark === true || args.start_now === true;
       const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(unpark ? { unpark: true } : {}) });
-      if (t.held === 'parked') return `Held for #${t.number}: it is sealed or waits for its start card, so the message shows in its chat now and reaches it when it is unsealed or woken (its deploy wait or chained start). Do not resend it; message_ticket with \`unpark\` wakes it now.\n${ticketLine(t)}`;
+      if (t.held === 'parked') return `Held for #${t.number}: it is sealed or waits for its start card, so the message shows in its chat now and reaches it when it is unsealed or woken (its deploy wait or chained start). Do not resend it; message_ticket with \`unpark\` wakes a sealed one now, but one waiting on its start card starts only on a person's answer.\n${ticketLine(t)}`;
       return t.held ? `${HELD()} Finish your turn.\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {

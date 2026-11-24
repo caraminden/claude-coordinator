@@ -441,8 +441,11 @@ export function markHeld(bubble, ticket, last = true) {
     bubble.querySelector('.who .held-tag')?.remove();
     if (!row) bubble.append(row = h('div', { class: 'held-line', role: 'status' }));
     const parked = ticket.parked_for || ticket.state === 'parked';
-    row.replaceChildren(h('span', { class: 'held-text' }, parked ? "Not sent yet: this minion is sealed, so it reads this when it's unsealed." : line.text));
-    if (last) {
+    // Waiting on its start card (#1757): only the card's answer starts it, so no Deliver.
+    const startHold = !parked && !!ticket.start_hold;
+    row.replaceChildren(h('span', { class: 'held-text' }, parked ? "Not sent yet: this minion is sealed, so it reads this when it's unsealed."
+      : startHold ? 'Not sent yet: it reads this once a person starts it on its start card.' : line.text));
+    if (last && !startHold) {
       const btn = parked
         ? h('button', { type: 'button', class: 'secondary small held-act', title: 'Wake it now: it reads the messages left for it' }, 'Unseal and send')
         : h('button', { type: 'button', class: 'secondary small held-act', title: 'Run a turn now that reads all the held mail' }, 'Deliver');

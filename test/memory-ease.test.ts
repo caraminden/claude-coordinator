@@ -1,7 +1,7 @@
 // Memory easing (#1748): a fake box steps free memory down and back up, and what waits on it waits, then resumes.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryEase, LEVEL_FILE, parseEpisode, type Episode, type RawMemory } from '../src/memory-ease.ts';
@@ -10,6 +10,9 @@ import { HeldStarts } from '../src/held-starts.ts';
 import { Store } from '../src/db.ts';
 
 const GB = 1024 ** 3;
+const temps: string[] = [];
+after(() => { for (const d of temps) rmSync(d, { recursive: true, force: true }); }); // timing-ok: own temp dir
+const temp = (prefix: string) => { const d = mkdtempSync(join(tmpdir(), prefix)); temps.push(d); return d; };
 const T0 = 1_800_000_000_000;
 
 /** A fake box: free memory and kswapd/swap counters that move at the rates you set, read every 5 s. */
@@ -112,7 +115,7 @@ test('stop records a stretch still going', async () => {
 });
 
 test('every reading rewrites the level file: the level, then why', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ease-'));
+  const dir = temp('ease-');
   const b = box({ heavyDir: dir });
   await b.run(5);
   assert.equal(readFileSync(join(dir, LEVEL_FILE), 'utf8'), 'ok\n\n');
@@ -122,7 +125,7 @@ test('every reading rewrites the level file: the level, then why', async () => {
 
 test('easing holds scheduled starts and pauses background passes; back at ok they go', async () => {
   const b = box();
-  const dir = mkdtempSync(join(tmpdir(), 'ease-psi-'));
+  const dir = temp('ease-psi-');
   const quiet = 'some avg10=0.00 avg60=0.00 avg300=0.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1\n';
   for (const f of ['cpu', 'memory', 'io']) writeFileSync(join(dir, f), quiet);
   const p = createPressure({ cpuFile: join(dir, 'cpu'), memFile: join(dir, 'memory'), ioFile: join(dir, 'io'), now: b.now, log: () => {} });

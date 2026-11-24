@@ -356,19 +356,28 @@ function answerTile(a, now) {
 /** Where a page was (its address then), in words: `scheme` is its scheme's name when the viewer may see it. */
 export function slowPlace(page, scheme) {
   const of = scheme ?? 'a scheme';
+  const named = (w) => `${w[0].toUpperCase()}${w.slice(1).replace(/-/g, ' ')} page`;
   if (/^#\/(p\/\d+\/)?t\/\d+/.test(page)) return scheme ? `a minion in ${scheme}` : 'a minion';
   const m = /^#\/p\/\d+(?:\/([a-z-]+))?/.exec(page);
-  if (m) return m[1] ? `${of}'s ${m[1].replace(/-/g, ' ')} page` : of;
-  if (/^#\/(home)?$/.test(page) || !page) return 'Home';
-  return page;
+  if (m) return m[1] ? `${of}'s ${named(m[1])}` : of;
+  if (!page || /^#\/(home)?$/.test(page)) return 'Home';
+  const top = /^#\/([a-z-]+)/.exec(page);
+  return top ? `the ${named(top[1])}` : page;
 }
 const s1 = (v) => `${(v / 1000).toFixed(1)} s`;
+/** What the moment was waiting on: "Opening Citadel", "Waiting for GET /api/status on the Status page". */
+const slowDoing = (m) => (m.kind === 'freeze' ? `The tab was frozen on ${slowPlace(m.page, m.scheme)}`
+  : m.kind === 'load' ? 'Opening Citadel' : `Waiting for ${m.what} on ${slowPlace(m.page, m.scheme)}`);
+/** Where its time went, parts under 0.05 s left out: "0.1 s server, 0.2 s network, 19.8 s the tab was frozen". */
+const slowSplit = (m) => {
+  if (m.kind === 'freeze') return '';
+  const parts = [[m.server_ms, 'server'], [m.network_ms, m.server_ms == null ? 'with no answer from the server' : 'network'], [m.tab_ms, 'the tab was frozen']];
+  return parts.filter(([v]) => v >= 50).map(([v, w]) => `${s1(v)} ${w}`).join(', ');
+};
 /** One slow moment in plain words (#1752): "20.1 s opening Citadel: 0.1 s server, 0.2 s network, 19.8 s the tab was frozen". */
 export function slowWords(m) {
-  const where = slowPlace(m.page, m.scheme);
-  if (m.kind === 'freeze') return `${s1(m.total_ms)} the tab was frozen on ${where}`;
-  const split = [m.server_ms != null ? `${s1(m.server_ms)} server` : null, `${s1(m.network_ms)} network${m.server_ms == null ? ' and server' : ''}`, `${s1(m.tab_ms)} the tab was frozen`].filter(Boolean).join(', ');
-  return `${s1(m.total_ms)} ${m.kind === 'load' ? 'opening Citadel' : `waiting for ${m.what} on ${where}`}: ${split}`;
+  const doing = slowDoing(m), split = slowSplit(m);
+  return `${s1(m.total_ms)} ${doing[0].toLowerCase()}${doing.slice(1)}${split ? `: ${split}` : ''}`;
 }
 /** The part that took most of it, as a hue: the server's, the network's or the tab's. */
 const slowHue = (m) => {
@@ -380,7 +389,8 @@ function slowTile(slow) {
   const worst = slow.reduce((w, m) => Math.max(w, m.total_ms), 0);
   return tile('Slow moments', slow.length ? `${slow.length} in the last day` : 'None in the last day',
     slow.length ? `The longest ${s1(worst)} · pages note any wait over 2 s and whether the server, the network or the tab took it` : 'Pages note any wait over 2 s and whether the server, the network or the tab took it',
-    slow.length ? showFirst({ key: 'st-slow', noun: 'moments', items: slow.map((m) => hueRow({ hue: slowHue(m), lead: s1(m.total_ms), meta: `${m.person} · ${m.device} · ${pacificClock(m.at)}` }, slowWords(m))) })
+    slow.length ? showFirst({ key: 'st-slow', noun: 'moments', items: slow.map((m) => hueRow({ hue: slowHue(m), lead: s1(m.total_ms), meta: pacificClock(m.at) },
+      h('div', {}, slowDoing(m)), h('div', { class: 'muted' }, [slowSplit(m), `${m.person} · ${m.device}`].filter(Boolean).join(' · ')))) })
       : emptyCard('No slow moments', 'A wait over 2 s on anyone\'s page shows here'),
     { wide: true, key: 'slow', chart: slow.slice(0, 10).map((m) => `${pacificClockBare(m.at)} ${m.person} (${m.device}): ${slowWords(m)}`).join('; ') });
 }

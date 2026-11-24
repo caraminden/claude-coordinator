@@ -89,6 +89,8 @@ tools/burn-in.sh: test/burn-in.test.ts test/flake-proof-yields.test.ts test/ci-r
 tools/flake-proof.sh: test/flake-proof-yields.test.ts
 tools/win-test-box/**: test/ps1-lint.test.ts
 kit/skills/**: test/ps1-lint.test.ts test/skill-evals.test.ts
+# The desktop app's own modules (#1754), each kept apart from Electron so a test can run it.
+desktop/**: test/desktop-route.test.ts test/desktop-keys.test.ts test/desktop-app-frame.test.ts test/desktop-saved-login.test.ts
 # The kit desktop launcher: its trial rules on .NET 8, and the feed that builds it from these sources.
 kit/desktop-launcher/**: test/desktop-launcher-trial.test.ts test/desktop-feed.test.ts
 tools/skill-evals/**: test/skill-evals.test.ts

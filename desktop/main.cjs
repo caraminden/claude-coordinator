@@ -6,12 +6,13 @@
 // updates it: it starts this build, and this build says it started by writing the file CITADEL_STARTED_FILE names.
 // Settings and the sign-in cookie live in %APPDATA%\Citadel (Electron's userData), never in the read-only build folder.
 // Closing the window keeps it in the tray, so notifications (core.js desktopNotify) still come; Quit is the tray's menu.
-const { app, BrowserWindow, Menu, Tray, nativeTheme, screen, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeTheme, safeStorage, screen, shell, ipcMain } = require('electron');
 const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { dirname, join } = require('node:path');
 const { route } = require('./route.cjs');
 const { reloadKey, devtoolsKey } = require('./keys.cjs');
 const { appFrame } = require('./app-frame.cjs');
+const { savedLogin, fromCitadel } = require('./saved-login.cjs');
 
 const START = new URL(process.env.CITADEL_URL || 'https://citadel.zip/c/');
 /** Citadel's other addresses: a link to one of these opens here, on START's host, rather than in a browser. */
@@ -183,6 +184,11 @@ ipcMain.handle('citadel:capture', async (e, r) => {
 ipcMain.on('citadel:inspect', (e, x, y) => {
   if (Number.isFinite(x) && Number.isFinite(y)) e.sender.inspectElement(Math.round(x), Math.round(y));
 });
+// The sign-in page's saved password (#1754): filled in, never sent by itself; only Citadel's own top page may ask.
+const saved = () => savedLogin(app.getPath('userData'), safeStorage);
+ipcMain.handle('citadel:login-saved', (e) => (fromCitadel(e.senderFrame, START) ? { canSave: saved().available(), login: saved().get() } : null));
+ipcMain.handle('citadel:login-save', (e, login, password) => fromCitadel(e.senderFrame, START) && saved().save(login, password));
+ipcMain.handle('citadel:login-forget', (e) => { if (fromCitadel(e.senderFrame, START)) saved().forget(); });
 app.on('second-instance', show);
 app.on('before-quit', () => { remember(); quitting = true; });
 // The second copy only hands over (second-instance above): it quits before making a window or a tray icon.

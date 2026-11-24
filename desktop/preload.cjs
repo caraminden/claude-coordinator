@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld('citadelDesktop', {
   show: () => ipcRenderer.send('citadel:show'),
   capture: (rect) => ipcRenderer.invoke('citadel:capture', rect),
   inspect: (x, y) => ipcRenderer.send('citadel:inspect', x, y),
+  // The sign-in page's saved password (#1754, main.cjs): { canSave, login: { login, password } | null }, save, forget.
+  savedLogin: () => ipcRenderer.invoke('citadel:login-saved'),
+  saveLogin: (login, password) => ipcRenderer.invoke('citadel:login-save', login, password),
+  forgetLogin: () => ipcRenderer.invoke('citadel:login-forget'),
 });
 
 // The window's controls sit over the page (main.cjs titleBarOverlay) and Chromium reports their strip

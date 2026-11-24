@@ -282,7 +282,7 @@ export function templateVars(store: Pick<Store, 'getProject' | 'listProjects'>, 
 }
 
 /** A standard audit's category, by its kit template. */
-const TEMPLATE_CATEGORY: Record<string, string> = { 'code-health': 'Code', 'test-audit': 'Tests', 'monthly-retro': 'Process', 'upstream-check': 'Skills and docs', 'app-turns': 'Apps', 'memory-curator': 'Process', 'ship-lessons': 'Process', 'glossary-drift': 'Skills and docs' };
+const TEMPLATE_CATEGORY: Record<string, string> = { 'code-health': 'Code', 'test-audit': 'Tests', 'monthly-retro': 'Process', 'upstream-check': 'Skills and docs', 'app-turns': 'Apps', 'memory-curator': 'Process', 'ship-lessons': 'Process', 'glossary-drift': 'Skills and docs', architecture: 'Code' };
 // First match on the name wins; a name nothing matches stays uncategorised ('', shown as Other).
 const NAME_CATEGORY: [RegExp, string][] = [
   [/read-?back/i, 'Read-backs'],

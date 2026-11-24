@@ -69,7 +69,7 @@ import { ScheduledRuns } from './src/schedules.ts';
 import { EffortRetros } from './src/effort-retros.ts';
 import { HeldStarts } from './src/held-starts.ts';
 import { curatorTarget } from './src/memory-curator.ts';
-import { addAppTurnsChecks, addGlossaryDrifts, addMemoryCurators, backfillStandardAudits } from './src/standard-audits.ts';
+import { addAppTurnsChecks, addArchitectureChecks, addGlossaryDrifts, addMemoryCurators, backfillStandardAudits } from './src/standard-audits.ts';
 import { queueLesson } from './src/ship-lessons.ts';
 import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
@@ -862,6 +862,7 @@ try {
   for (const line of addAppTurnsChecks(store, DATA_DIR)) console.log(`App turns check (#844): ${line}`);
   for (const line of addMemoryCurators(store, DATA_DIR)) console.log(`Memory curator (#1111): ${line}`);
   for (const line of addGlossaryDrifts(store, DATA_DIR)) console.log(`Glossary drift check (#1774): ${line}`);
+  for (const line of addArchitectureChecks(store, DATA_DIR)) console.log(`Architecture check (#1797): ${line}`);
 } catch (err) {
   console.error('Standard audits (#799) backfill failed; it tries again at the next start:', err);
 }

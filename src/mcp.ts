@@ -178,7 +178,7 @@ export function handOffResult(args: Record<string, any>, contraptions: string[],
     + 'If it fails (a conflict, even once main moves while it waits; a red test; a refusal; a failed deploy), you are woken with the end of its output: fix it and hand it off again.';
 }
 
-export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check', 'app-turns', 'memory-curator', 'ship-lessons', 'glossary-drift'] as const;
+export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check', 'app-turns', 'memory-curator', 'ship-lessons', 'glossary-drift', 'architecture'] as const;
 const SCHEDULE_GATE = {
   min_minions: { type: ['integer', 'null'], minimum: 1, description: 'Skip a due slot unless at least this many minions were made since the last real run (Taskmasters and schedule-started minions not counted); null always runs' },
   gate_scope: { type: 'string', enum: ['scheme', 'all'], description: "Whose minions min_minions counts: this scheme's (default) or every scheme's, for a sweep across schemes" },
@@ -746,7 +746,7 @@ const TOOLS = () => ([
   {
     name: 'schedule_audit',
     description:
-      "Add one of the kit's standard audits to this scheme (kit/schedules/<template>.md, #799): it brings its name, time (staggered by scheme), model, effort and activity gate, and each run renders the kit's current text with this scheme's name, then your notes. Add one only where the repo shows what it needs. code-health: app code people build on, not only notes, docs or an empty scaffold. test-audit: a test suite. monthly-retro: minions working in the scheme. upstream-check: a THIRD_PARTY.md with a Copies table, or a \"## Copies\" table in onboarding.md. app-turns: a scheme home to an app; Citadel adds it by itself when the scheme gets its first app. ship-lessons: a scheme whose minions ship; Citadel adds it by itself on the scheme's first ship lessons. A scheme has each at most once; update_schedule changes it.",
+      "Add one of the kit's standard audits to this scheme (kit/schedules/<template>.md, #799): it brings its name, time (staggered by scheme), model, effort and activity gate, and each run renders the kit's current text with this scheme's name, then your notes. Add one only where the repo shows what it needs. code-health: app code people build on, not only notes, docs or an empty scaffold. test-audit: a test suite. monthly-retro: minions working in the scheme. upstream-check: a THIRD_PARTY.md with a Copies table, or a \"## Copies\" table in onboarding.md. app-turns: a scheme home to an app; Citadel adds it by itself when the scheme gets its first app. ship-lessons: a scheme whose minions ship; Citadel adds it by itself on the scheme's first ship lessons. architecture: every scheme gets it by itself monthly; it skips unless 20 minions worked in the scheme since the last run. A scheme has each at most once; update_schedule changes it.",
     inputSchema: {
       type: 'object',
       properties: {

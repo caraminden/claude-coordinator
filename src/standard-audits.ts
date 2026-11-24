@@ -153,6 +153,35 @@ export function addGlossaryDrifts(store: Store, dataDir: string): string[] {
   return store.listProjects().map((p) => addGlossaryDrift(store, dataDir, p.id, templates)).filter((l): l is string => !!l);
 }
 
+/** The notes Citadel's hand-written monthly architecture check (schedule 12) carried beyond the template. */
+const CITADEL_ARCHITECTURE_NOTES = "Also read this scheme's retro-log/ in the shared folder for rebase conflicts and red ships. For the first run on the template, the baseline is the monolith findings in citadel-retro-2026-10.md at the shared folder's top level.";
+
+/**
+ * The monthly architecture check (kit/schedules/architecture.md, #1797) for a scheme: every scheme gets one, once. A scheme whose
+ * hand-written "Monthly architecture check" exists (Citadel's schedule 12) has that row moved onto the template, keeping its
+ * last run and pause, instead of getting a second one.
+ */
+export function addArchitectureCheck(store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()): string | null {
+  const p = store.getProject(projectId);
+  const key = `architecture_check:${projectId}`;
+  if (!p || store.getSetting(key)) return null;
+  const t = templates.get('architecture');
+  if (!t) { console.error('kit/schedules/architecture.md is missing: no "architecture" schedule added'); return null; }
+  const rows = store.schedules.list(p.id);
+  const copy = rows.find((s) => !s.template && s.name === 'Monthly architecture check');
+  if (!copy || rows.some((s) => s.template === 'architecture')) return addOnce(store, dataDir, projectId, 'architecture', key, templates, now);
+  const fields = templateFields(t, p, p.name === 'Citadel' ? CITADEL_ARCHITECTURE_NOTES : '', templateVars(store, dataDir, p.id));
+  store.schedules.update(copy.id, { ...fields, cron: copy.cron }, now);
+  store.setSetting(key, now);
+  return `${p.name}: "${copy.name}" now follows kit/schedules/architecture.md (${copy.cron})`;
+}
+
+/** At boot: every scheme gets its architecture check (once each, as above). */
+export function addArchitectureChecks(store: Store, dataDir: string): string[] {
+  const templates = loadTemplates();
+  return store.listProjects().map((p) => addArchitectureCheck(store, dataDir, p.id, templates)).filter((l): l is string => !!l);
+}
+
 /** At boot: every scheme gets its memory curator (once each, as above). */
 export function addMemoryCurators(store: Store, dataDir: string): string[] {
   const templates = loadTemplates();

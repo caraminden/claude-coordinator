@@ -123,7 +123,7 @@ async function review(c: Case, arm: Arm, out: string, kit: string): Promise<void
   mkdirSync(dir, { recursive: true });
   const ws = workspace(c, out);
   // The brief citadel:self-review §2 writes, with the arm's extra lens in place of "by the diff".
-  const brief = `${GRUNT_LINE}\n\nFollow \`${kit}/agents/reviewer.md\`. Review branch \`ticket/${c.origin}-replay\` in \`${ws}\`; the change is \`git diff main...HEAD\`; the kit is \`${kit}\`. ${arm.lens ?? 'Lenses: by the diff.'}\n`;
+  const brief = `${GRUNT_LINE}\n\nFollow \`${kit}/agents/reviewer.md\`. Review branch \`ticket/${c.origin}-replay\` in \`${ws}\`; the change is \`git diff main...HEAD\`; the kit is \`${kit}\`. ${arm.lens ?? 'Lenses: by the diff.'}${arg('--additions') ? ` The scheme's additions file: \`${resolve(arg('--additions')!)}\`.` : ''}\n`;
   writeFileSync(join(dir, 'brief.md'), brief);
   writeFileSync(join(dir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '.*',
     hooks: [{ type: 'command', command: `'${process.execPath}' '${join(REPO, 'tools/prompt-evals/guard.ts')}'`, timeout: 10 }] }] } }));
@@ -245,11 +245,12 @@ function plantProblems(c: Case, ws: string): string[] {
 
 const HELP = `tools/review-escapes: the pre-ship reviewer against defects that really escaped (#1505)
 
-  node tools/review-escapes/run.ts run [--arms sonnet,opus,lens] [--set escapes|planted|all|<file>] [--case <regex>] [--jobs 3] [--out <dir>] [--kit <dir>] [--judge-model opus] [--budget 6]
+  node tools/review-escapes/run.ts run [--arms sonnet,opus,lens] [--set escapes|planted|all|<file>] [--case <regex>] [--jobs 3] [--out <dir>] [--kit <dir>] [--additions <file>] [--judge-model opus] [--budget 6]
       reviews each case with each arm (skipping ones already in --out), judges the escapes blind, prints the table
   node tools/review-escapes/run.ts report [--arms ...] [--out <dir>]     the table again, and <out>/verdicts.tsv and summary.json
   node tools/review-escapes/run.ts check [--case <regex>] [--out <dir>]  builds every case's workspace, no model calls
 
+  --additions: the scheme's pre-ship-review.md (its lessons), named in the brief the way a real review's is; leave it out to review with the kit alone.
   --out defaults to $TMPDIR/review-escapes. --kit defaults to this checkout's kit/, the reviewer under test.
   Arms are in arms.json; a new arm is a new entry there. Runs on the asker's Claude login: start it in the
   background, not through citadel-heavy (it waits on Claude, not the CPU).`;

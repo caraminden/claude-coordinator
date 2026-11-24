@@ -1,1 +1,643 @@
-{"cases": []}
+{
+ "cases": [
+  {
+   "id": "planted-1342",
+   "kind": "planted",
+   "origin": 1342,
+   "title": "the slow-ship alarm measures how long the line has been still",
+   "lines": 86,
+   "base": "f8ec32a731dc310b6da8ce9fd3e3de159f71a7ae",
+   "head": "d5e91f2a0b7550635dcc8af73f9138db48f6e2dc",
+   "plantKind": "wrong argument order",
+   "plant": [
+    {
+     "file": "src/ci-land-gate.ts",
+     "from": ".sort((a, b) => a.seq - b.seq)[0];",
+     "to": ".sort((a, b) => b.seq - a.seq)[0];"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "Line head is picked with the sort comparator reversed",
+     "why": "The comment says the head is the lowest seq, but the swapped comparator makes the last ship in line the head, so with ships seq 1 and 5 waiting, the head string tracks seq 5 and the alarm names the wrong ship as first and misses the real head moving.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1291",
+   "kind": "planted",
+   "origin": 1291,
+   "title": "fix-replay: a conflicting undo falls back to a partial one (-X ours)",
+   "lines": 40,
+   "base": "e95dd5b8374d20e87ab67153a85138d76688cea6",
+   "head": "e0258353b681c379e4574356ab97deb9c74dcaa9",
+   "plantKind": "flipped comparison or boundary",
+   "plant": [
+    {
+     "file": "tools/fix-replay.ts",
+     "from": "conflicts.length ? 'partial-'",
+     "to": "conflicts.length > 1 ? 'partial-'"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "The partial- prefix needs two conflicts instead of one",
+     "why": "When exactly one file conflicted and the -X ours fallback was used, pre is empty, so the outcome is reported as a plain red or applies instead of partial-red, hiding that the undo was only partial.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1287",
+   "kind": "planted",
+   "origin": 1287,
+   "title": "a new minion's properties are checked before its row is made",
+   "lines": 107,
+   "base": "f6c7c141547329665afb4c04282b3644fe26c3f2",
+   "head": "a7e6618b27214e724a9961b05a492bc966a12c76",
+   "plantKind": "dropped await",
+   "plant": [
+    {
+     "file": "src/new-minion.ts",
+     "from": "await afterWrites();",
+     "to": "afterWrites();"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "afterWrites is no longer awaited inside the try",
+     "why": "When afterWrites rejects, the failure is not caught here: the row is not deleted and no 500 is thrown, leaving an empty minion and an unhandled rejection, and the writes may not have finished when makeMinion returns.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1649",
+   "kind": "planted",
+   "origin": 1649,
+   "title": "a cut-off install kills npm's whole process group; the sweep leaves the npm cache alone while an install runs",
+   "lines": 101,
+   "base": "ecef7b0126114e1bcb6ab533925fcd593850bbea",
+   "head": "aba057809c37f51a5847275f1669e1b35d27f246",
+   "plantKind": "flipped comparison or boundary",
+   "plant": [
+    {
+     "file": "server.ts",
+     "from": "npmSize > NPM_CACHE_CAP && !installsRunning()",
+     "to": "npmSize > NPM_CACHE_CAP && installsRunning()"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "Cache sweep condition is inverted: empties it only while an install runs",
+     "why": "The comment says the cache is emptied when no install is reading it, but the dropped negation wipes it exactly while an install is running (breaking that install) and never when idle, so it stays over its cap.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1391",
+   "kind": "planted",
+   "origin": 1391,
+   "title": "when_ci_passes waits are outbox rows (kind ci_armed)",
+   "lines": 229,
+   "base": "0d60ade35fe5d0b5df76b3310ac39b21a13a31c1",
+   "head": "d84d6efd7439cf3ab397e6c0b42bdd1a0b62cfae",
+   "plantKind": "flipped comparison or boundary",
+   "plant": [
+    {
+     "file": "src/ci-armed.ts",
+     "from": "row.when_arg === incoming.when_arg ?",
+     "to": "row.when_arg !== incoming.when_arg ?"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "merge condition is inverted for same-commit and new-commit arms",
+     "why": "The comment says a second arm on the same commit adds to the row and a new commit replaces it, but with the flipped test a same-sha re-arm replaces the payload (losing the earlier card or message) and a new sha merges old fields into it.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-983",
+   "kind": "planted",
+   "origin": 983,
+   "title": "a Taskmaster is woken for CI problems only overnight (shared wake)",
+   "lines": 135,
+   "base": "b6e06490fa1c5be65ac3ff1179cc5cab87285d54",
+   "head": "c56b8d97cea4e0960a539feabb1bd0386851f6fb",
+   "plantKind": "flipped comparison or boundary",
+   "plant": [
+    {
+     "file": "src/ci-health.ts",
+     "from": "    if (quietUntil(now) === null) {\n      for (const x of ringing",
+     "to": "    if (quietUntil(now) !== null) {\n      for (const x of ringing"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "Per-scheme wake sent only during the overnight hold",
+     "why": "wakeFor tests quietUntil(now) !== null, so a problem wakes its Taskmaster only inside the 2-9 AM hold and never during the day; wakeShared still uses === null, so the two disagree.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-678",
+   "kind": "planted",
+   "origin": 678,
+   "title": "back to green also comes from a push or merge run on main",
+   "lines": 85,
+   "base": "aa27f042741f47fd51e053342a2687ff09e4a6d3",
+   "head": "bfb7fcb32dafd5bc3729634812a7c405c1c95dd8",
+   "plantKind": "flipped comparison or boundary",
+   "plant": [
+    {
+     "file": "src/ci-health.ts",
+     "from": "at(r.created_at) > at(was.at)",
+     "to": "at(r.created_at) < at(was.at)"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "Back to green picks green runs older than the red one",
+     "why": "The filter keeps green runs created before the red run instead of after it, so the first poll after a red reports \"back to green\" from an old run while the workflow is still red.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1453",
+   "kind": "planted",
+   "origin": 1453,
+   "title": "semantic memory skips refused chunks and reads ticket texts in pages",
+   "lines": 102,
+   "base": "8593bea2a0310fd3f2e6465e4f4729085d2862df",
+   "head": "dc89ca351d5fc6e9a1b3217b2b98c8f90ae451d7",
+   "plantKind": "dropped await",
+   "plant": [
+    {
+     "file": "src/memory.ts",
+     "from": "    await this.loadTicketTexts();",
+     "to": "    this.loadTicketTexts();"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "loadTicketTexts is not awaited before pendingTickets",
+     "why": "loadTicketTexts yields between pages and sets ticketTexts only at the end, so pendingTickets runs with the map still null, sees an empty index and queues every ticket for re-embedding on the first pass.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1348",
+   "kind": "planted",
+   "origin": 1348,
+   "title": "the wording check flags <stand-in> placeholders in shell command blocks",
+   "lines": 74,
+   "base": "a49185c7a5160d56d7a154f796c46880efd281b9",
+   "head": "f7f4e3a5a1e4bb73f629444e8b387059bd776fe4",
+   "plantKind": "flipped comparison or boundary",
+   "plant": [
+    {
+     "file": "src/wording.ts",
+     "from": ".some((w) => SECRET_WORDS.test(w))",
+     "to": ".every((w) => SECRET_WORDS.test(w))"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "Secret stand-in exempt only when every word is a secret word",
+     "why": "With every, a multi-word secret like <api token> or <my-password> is flagged as a placeholder because \"api\" or \"my\" is not a secret word; the commit says a stand-in with one of these words is allowed.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1406",
+   "kind": "planted",
+   "origin": 1406,
+   "title": "a schedule slot cut off by a kill finishes with its minion",
+   "lines": 95,
+   "base": "3b019278f1ad801d2e11aa3871aedd88396df847",
+   "head": "e41726ee7d2d998258125bef9773ba752266a1bc",
+   "plantKind": "flipped comparison or boundary",
+   "plant": [
+    {
+     "file": "src/schedules.ts",
+     "from": "AND created_at >= ? AND id IS NOT ?",
+     "to": "AND created_at <= ? AND id IS NOT ?"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "cutOff matches minions made before the slot came due",
+     "why": "created_at <= next_run_at selects the schedule's oldest earlier minion instead of one made since the slot came due, so every normal slot finishes (or marks ran) an old minion and never starts a new run.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-976",
+   "kind": "planted",
+   "origin": 976,
+   "title": "surface plugin_errors and mcp_server_errors from a turn's init in the chat and the minion's note",
+   "lines": 41,
+   "base": "a3a4b43abbde2d6dc85536a116a57b5fc3b7b5ed",
+   "head": "aefe3b7d50fcf8fcf68b7b534e3449100970fa95",
+   "plantKind": "flipped comparison or boundary",
+   "plant": [
+    {
+     "file": "src/runner.ts",
+     "from": "    if (!lines.length) return;\n",
+     "to": "    if (lines.length <= 1) return;\n"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "A single plugin or MCP load error is ignored",
+     "why": "checkLoadErrors returns early when there is exactly one error line, so a turn with one failed plugin shows no chat error and no note, though the comment says any failed load is reported.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1345",
+   "kind": "planted",
+   "origin": 1345,
+   "title": "a merged branch keeps its artifacts; two boots at once can't pass the preview cap",
+   "lines": 75,
+   "base": "d5e91f2a0b7550635dcc8af73f9138db48f6e2dc",
+   "head": "a59a994df69b230fa845c522915aa4c4a27a7218",
+   "plantKind": "missed sibling",
+   "plant": [
+    {
+     "file": "src/previews.ts",
+     "from": "      this.starting.delete(key);\n      this.booting.delete(key);\n",
+     "to": "      this.starting.delete(key);\n"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "booting key never removed when a boot ends",
+     "why": "The finally clears `starting` but not `booting`, so each finished or failed boot keeps its slot counted against max: after max boots the cap loop waits on booting forever (or halts previews needlessly).",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1430",
+   "kind": "planted",
+   "origin": 1430,
+   "title": "a red train whose real failure also fails on main's tip refuses no rider",
+   "lines": 138,
+   "base": "768d6ce0ff07b965c307acd68c71857b8eab9089",
+   "head": "bd1b55f603d4f77c199a0bff5e5dc8619f107072",
+   "plantKind": "flipped comparison or boundary",
+   "plant": [
+    {
+     "file": "tools/land.sh",
+     "from": "[ \"$main_red_riders\" = 0 ] || retry_in_place",
+     "to": "[ \"$main_red_riders\" != 0 ] || retry_in_place"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "retry_in_place condition inverted",
+     "why": "The retry in place is meant for riders going back in line (the comment says alone, a retry would only run CI again), but the test is flipped: a ship alone gets a pointless retry and a train with riders gets none.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1051",
+   "kind": "planted",
+   "origin": 1051,
+   "title": "review_set MCP tool for reading the set and saving a critic's learning",
+   "lines": 62,
+   "base": "fefa681af831cb41de9640b6e9ad9cd822fd3dcf",
+   "head": "ebfd9a5d1f1f943b75a4d79e400c4cfc3cf1adef",
+   "plantKind": "dropped await",
+   "plant": [
+    {
+     "file": "src/mcp.ts",
+     "from": "const e = await call('PATCH',",
+     "to": "const e = call('PATCH',"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "PATCH result not awaited in review_set save",
+     "why": "e is a Promise, so the tool replies 'Saved undefined as version undefined.' and a refused save (stale version) is never thrown to the minion.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-632",
+   "kind": "planted",
+   "origin": 632,
+   "title": "uncommitted work in a minion's worktree takes its live badge back to its branch",
+   "lines": 115,
+   "base": "b2022b13593a6ce0d6d9149431cf292c6ef38ee9",
+   "head": "a3806ba8983429fea5c1c2cd48dc9d2f9ee84464",
+   "plantKind": "dropped await",
+   "plant": [
+    {
+     "file": "src/branch.ts",
+     "from": "uncommitted: worktree ? await uncommittedFiles(worktree) : 0,",
+     "to": "uncommitted: worktree ? uncommittedFiles(worktree) : 0,"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "uncommittedFiles not awaited",
+     "why": "uncommitted holds a Promise: truthy for any minion with a worktree, so every branch shows 'changes not committed yet', and JSON.stringify of it gives {}.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-806",
+   "kind": "planted",
+   "origin": 806,
+   "title": "Stop-hook finding: a choice asked in prose with no card this turn",
+   "lines": 90,
+   "base": "7de8332ed99c136be5bf0f63c9a70b205b97f27a",
+   "head": "a9c31256a5a1f77af1dc9092bcfc18b3c83e6511",
+   "plantKind": "flipped comparison or boundary",
+   "plant": [
+    {
+     "file": "src/link-check.ts",
+     "from": ".split(/\\n\\s*\\n/).slice(-2).join('\\n\\n');",
+     "to": ".split(/\\n\\s*\\n/).slice(0, 2).join('\\n\\n');"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "tail takes the first two paragraphs, not the last two",
+     "why": "The doc says the last two paragraphs are checked, but slice(0, 2) takes the first two: a choice asked in the closing paragraph of a reply with 3 or more paragraphs is never flagged, and one in the opening paragraphs is.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-983b",
+   "kind": "planted",
+   "origin": 983,
+   "title": "CI problems that ring wake their scheme's Taskmaster once",
+   "lines": 72,
+   "base": "4c5cfd1db9e19ec5b3c413f52d3609ad79a2966b",
+   "head": "b6e06490fa1c5be65ac3ff1179cc5cab87285d54",
+   "plantKind": "missed sibling",
+   "plant": [
+    {
+     "file": "src/ci-health.ts",
+     "from": "    if (p) {\n      await this.deliver(p, w.problems.filter((x) => x.quiet), w as Required<LandWatch>);\n      this.wakeFor(p, w.problems, 'ci-health:woke:land');\n    }",
+     "to": "    if (p) await this.deliver(p, w.problems.filter((x) => x.quiet), w as Required<LandWatch>);"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "land gate path never calls wakeFor",
+     "why": "The header comment says the land gate wakes the live checkout's scheme too, but only check() calls wakeFor: when the land gate opens a ringing problem, no Taskmaster is woken, and Citadel's bundle no longer wakes either.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-988",
+   "kind": "planted",
+   "origin": 988,
+   "title": "one classifier for links: a framed app's own links stay in it, citadel.zip stays in Citadel",
+   "lines": 163,
+   "base": "be37d66be66902cf17f13144cb0a70fff397f69e",
+   "head": "c29bdf909eced0b4c837ed2cec640ae4a0652854",
+   "plantKind": "flipped comparison or boundary",
+   "plant": [
+    {
+     "file": "public/extlinks.js",
+     "from": "if (app && app.name !== self) return",
+     "to": "if (app && app.name === self) return"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "app link test flipped: only the page's own app opens in the app view",
+     "why": "The comment says another app's link opens in the app view and the page's own stays; with === a link to another app falls through to firefox/browser handling, and a link to the framed app itself is sent up to Citadel instead of staying in the frame.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-898",
+   "kind": "planted",
+   "origin": 898,
+   "title": "a fenced block tagged with where it runs gets a coloured header",
+   "lines": 58,
+   "base": "84d75575c46f03127dfff22c68b41197757dffa6",
+   "head": "34b14909c9d28e0ef8d7f84b68cb2fec681fd58d",
+   "plantKind": "unescaped value",
+   "plant": [
+    {
+     "file": "public/ui/markdown.js",
+     "from": "class=\"language-${escapeHtml(m[2])}\"",
+     "to": "class=\"language-${m[2]}\""
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "Fence info string put into the class attribute without escaping",
+     "why": "The info string (m[2]) is any non-space, non-backtick text, so a fence tagged ```x\"onmouseover=\"alert(1) breaks out of the class attribute and injects markup, while the neighbouring data-label and the code body are escaped.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1382",
+   "kind": "planted",
+   "origin": 1382,
+   "title": "an app turn cut off by a restart ends interrupted with one retry",
+   "lines": 140,
+   "base": "48c03a828da65e8f865490b8f2655567802a2886",
+   "head": "0c3a233cf7a6f9fc425ab10bde9b55e1ed6a2003",
+   "plantKind": "unescaped value",
+   "plant": [
+    {
+     "file": "public/ui/chat.js",
+     "from": "<b>Couldn't finish:</b> ${esc(b.message || b.code)}",
+     "to": "<b>Couldn't finish:</b> ${b.message || b.code}"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "Error notice message inserted into HTML without esc",
+     "why": "The error block's message comes from the turn's event stream and is rendered into the notice template unescaped, while RETRY_SAY in the same template goes through esc; a message containing < or & renders as markup.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1339",
+   "kind": "planted",
+   "origin": 1339,
+   "title": "heavy-unit scopes get a TMPDIR on disk; sweep removes orphaned scratch",
+   "lines": 202,
+   "base": "4aefb030e721188eb2b905aecf78183ecb63df77",
+   "head": "4e0a97767aa6044f623f57ecde838eaa377dc937",
+   "plantKind": "unescaped value",
+   "plant": [
+    {
+     "file": "src/host-job.ts",
+     "from": "export ${k}=${quote(tmp)}",
+     "to": "export ${k}=${tmp}"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "Scratch dir path written into the job shell script unquoted",
+     "why": "tmp is joined from the job dir and written into a shell script; without quote() a dir path containing a space or shell metacharacter splits or runs as commands, where the other exported values are quoted.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "planted-1520",
+   "kind": "planted",
+   "origin": 1520,
+   "title": "MA5: run_task names the commit it ran and refuses a caller whose own git_sync another minion has since moved",
+   "lines": 30,
+   "base": "084b727d48674d963fef6560ef383fc4953b370d",
+   "head": "af488ac43e894c8798b931172c38046d308d9b0d",
+   "plantKind": "wrong argument order",
+   "plant": [
+    {
+     "file": "public/machine-agent.mjs",
+     "from": "You checked out ${mine.sha.slice(0, 10)}; it is now at ${commit.slice(0, 10)}",
+     "to": "You checked out ${commit.slice(0, 10)}; it is now at ${mine.sha.slice(0, 10)}"
+    }
+   ],
+   "defects": [
+    {
+     "fix": 1,
+     "title": "Refusal message swaps the synced commit and the current commit",
+     "why": "The text says \"You checked out\" the workspace head and \"it is now at\" the caller's own synced sha, so the two commits are reversed: a caller who synced A when the workspace moved to B is told they checked out B.",
+     "cause": "planted",
+     "foundBy": "planted",
+     "fixCommits": []
+    }
+   ]
+  },
+  {
+   "id": "control-863",
+   "kind": "control",
+   "origin": 863,
+   "title": "waits released by a proven plan resume 5 s apart, not 30 s (an unproven wait no longer holds a proven one back); the limit notes say Pacific",
+   "lines": 87,
+   "base": "a2e6479bb236d3ea0afe021446948748857c6481",
+   "head": "e9ed3f7bc3622e6147c3530f7dce709df5e26fd0"
+  },
+  {
+   "id": "control-829",
+   "kind": "control",
+   "origin": 829,
+   "title": "blind contraption turns: neutral folder, the app's text as the whole system prompt, no machines, no Codex, always fresh; api.md says so and ",
+   "lines": 115,
+   "base": "c0e4e6de44a25816854c70f73f61d7f60ce4419e",
+   "head": "c0eba43f9f3597d867fcc43c22caf6d7c14f88c3"
+  },
+  {
+   "id": "control-1251",
+   "kind": "control",
+   "origin": 1251,
+   "title": "ship notes and new messages read through partial indexes; settingsWithPrefix reads a key range",
+   "lines": 71,
+   "base": "dd7c8dbd4cb8577511e8c991e5bd8b4e118e0d05",
+   "head": "af94b0d503af38b5f934432218ae9965d616d060"
+  },
+  {
+   "id": "control-1198",
+   "kind": "control",
+   "origin": 1198,
+   "title": "citadel-test's time limit signals only node's runner; its test fires the limit once the hung test runs",
+   "lines": 50,
+   "base": "fdce043b11b95f80c11bb62fb111dcb8b9deee5a",
+   "head": "c1b866a43b26c41bd4f2993d17b9fbe336955e74"
+  },
+  {
+   "id": "control-1311",
+   "kind": "control",
+   "origin": 1311,
+   "title": "Status page Jobs tile lists every periodic job, flagging overdue (3 periods), slow (>1 s) and failed ones",
+   "lines": 25,
+   "base": "e491396262fe8be8bac52d53f9a82be73486a28d",
+   "head": "a49185c7a5160d56d7a154f796c46880efd281b9"
+  }
+ ]
+}

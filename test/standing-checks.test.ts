@@ -178,7 +178,9 @@ test('8: a database that fails quick_check is named, only on an integrity pass',
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = DELETE; CREATE TABLE t (a TEXT); CREATE INDEX t_a ON t(a);');
   const ins = db.prepare('INSERT INTO t VALUES (?)');
+  db.exec('BEGIN'); // one commit, not 2,000 fsyncs (17 s on btrfs)
   for (let i = 0; i < 2000; i++) ins.run(`row ${i} ${'x'.repeat(50)}`);
+  db.exec('COMMIT');
   db.close();
   // Scribble over a page in the middle: the table and its index no longer agree.
   const fd = openSync(file, 'r+');

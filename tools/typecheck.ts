@@ -11,6 +11,8 @@
  *
  *   node tools/typecheck.ts            what went up, what went down (exit 1 when anything went up)
  *   node tools/typecheck.ts --update   lower the baseline to today's counts (refuses while anything went up)
+ *   node tools/typecheck.ts --update --moved   after moving or splitting code: take today's counts file by file,
+ *                                      refused if the repo's total errors or escapes went up
  *   node tools/typecheck.ts <file>...  tsc's errors and the escapes in those files
  */
 import { execFile } from 'node:child_process';
@@ -144,6 +146,13 @@ export function lowered(baseline: Table, now: Table): Table {
   return sorted(out);
 }
 
+/** After a move or split (a file's errors now in a new file): today's counts, or null when either total went up. */
+export function moved(baseline: Table, now: Table): Table | null {
+  const total = (t: Table, k: keyof Counts) => Object.values(t).reduce((s, c) => s + c[k], 0);
+  if (total(now, 'errors') > total(baseline, 'errors') || total(now, 'escapes') > total(baseline, 'escapes')) return null;
+  return sorted(Object.fromEntries(Object.entries(now).filter(([, c]) => c.errors || c.escapes)));
+}
+
 function sorted(t: Table): Table {
   return Object.fromEntries(Object.keys(t).sort().map((k) => [k, t[k]!]));
 }
@@ -185,6 +194,17 @@ async function main(args: string[]) {
     if (existsSync(BASELINE)) throw new Error(`${relative(ROOT, BASELINE)} exists: --init only writes the first one`);
     writeFileSync(BASELINE, formatBaseline(table));
     console.log(`wrote ${relative(ROOT, BASELINE)}`);
+    return;
+  }
+  if (args.includes('--update') && args.includes('--moved')) {
+    const next = moved(baseline, table);
+    if (!next) {
+      console.log('typecheck: not re-filing: the repo\'s total errors or escapes went up, so this is more than a move');
+      process.exitCode = 1;
+      return;
+    }
+    writeFileSync(BASELINE, formatBaseline(next));
+    console.log(`typecheck: re-filed the counts in ${relative(ROOT, BASELINE)} (totals did not rise)`);
     return;
   }
   if (args.includes('--update')) {

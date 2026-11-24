@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compare, describe, escapes, lowered, measure, parseTsc, readBaseline, tscErrors } from '../tools/typecheck.ts';
+import { compare, describe, escapes, lowered, measure, moved, parseTsc, readBaseline, tscErrors } from '../tools/typecheck.ts';
 
 test('no file has more type errors or escapes than its baseline', async () => {
   const { table, errors } = await measure();
@@ -16,6 +16,7 @@ test('no file has more type errors or escapes than its baseline', async () => {
   assert.deepEqual(up.map(describe), [], [
     'A file has more type errors or escapes (an explicit `any`, or a @ts-ignore / @ts-expect-error / @ts-nocheck) than test/typecheck-baseline.json allows.',
     'Fix them with real types (`unknown` and a narrowing, not `any`); the baseline only goes down. `node tools/typecheck.ts <file>` lists a file\'s errors.',
+    'Moved or split code (its old file went down as much)? `node tools/typecheck.ts --update --moved` re-files the counts when the totals did not rise.',
     ...detail.slice(0, 40),
   ].join('\n'));
 });
@@ -47,6 +48,12 @@ test('--update only ever lowers: a count above its baseline keeps the baseline, 
   const base = { 'a.ts': { errors: 2, escapes: 1 }, 'gone.ts': { errors: 1, escapes: 0 } };
   const now = { 'a.ts': { errors: 5, escapes: 0 }, 'new.ts': { errors: 3, escapes: 3 } };
   assert.deepEqual(lowered(base, now), { 'a.ts': { errors: 2, escapes: 0 } });
+});
+
+test('--moved re-files counts after a split, but not when a total went up', () => {
+  const base = { 'big.ts': { errors: 5, escapes: 2 } };
+  assert.deepEqual(moved(base, { 'big.ts': { errors: 2, escapes: 0 }, 'part.ts': { errors: 3, escapes: 2 } }), { 'big.ts': { errors: 2, escapes: 0 }, 'part.ts': { errors: 3, escapes: 2 } });
+  assert.equal(moved(base, { 'big.ts': { errors: 2, escapes: 0 }, 'part.ts': { errors: 3, escapes: 3 } }), null);
 });
 
 test('tsc runs and its errors are read per file', async () => {

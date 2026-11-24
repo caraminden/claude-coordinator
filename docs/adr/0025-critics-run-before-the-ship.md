@@ -31,3 +31,10 @@ TWIReader `ui-screenshots` 1 of 4; TripPresenter, Genesis Tree, VoiceAnalyzer an
 the contraption starter) that is about 55 critic runs a day, twice the handoff's budget of about 25 ($9), so the gate
 ships with the trigger narrowed to 10+ lines of CSS or HTML (about 11 a day, 8 of the 13 caught), set on the entry by
 the Taskmaster once this is live. There was no logging-only week: this replay of the record stands in for it.
+
+## Amended 2026-11-24: comment-only files ask no critic
+
+Cara, 2026-11-24, on the retro #1795's card: "Skip comment-only edits". After the gate shipped, minions left dead code
+and kept help lines out of front-end files to avoid a critic round, and comment-only edits still needed one though the
+screenshots could show nothing (`docs/retros/2026-11-10-24.md`, fix 3). A changed file whose changed lines are all
+blank or comments (`//`, block or HTML comments) no longer counts toward a critic's match; any code line in it does.

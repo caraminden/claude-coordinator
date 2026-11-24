@@ -6,8 +6,32 @@ import { gitOut } from './git.ts';
 import { posix } from 'node:path';
 import type { ReviewEntry, ReviewSet } from './review-set.ts';
 
-/** One changed file of a branch: its path in the repo and its lines added plus removed (0 for a binary file). */
-export type DiffFile = { path: string; lines: number };
+/**
+ * One changed file of a branch: its path in the repo and its lines added plus removed (0 for a binary file). `comments`
+ * is true when every changed line is a comment or blank, so a critic's screenshots could show nothing.
+ */
+export type DiffFile = { path: string; lines: number; comments?: boolean };
+
+/** A changed line that can't change what a page draws: blank, or a `//`, block or HTML comment line. */
+export function isCommentLine(line: string): boolean {
+  const t = line.trim();
+  if (!t || /^(\/\/|\/\*|\*\/|<!--|-->)/.test(t)) return true;
+  // A block comment's middle line ("* text"), but not CSS's universal selector or a wrapped multiplication.
+  return /^\*(\s|$)/.test(t) && !/[{};=()]/.test(t);
+}
+
+/** The files of a `git diff -U0` patch whose changed lines are all comments or blank. */
+export function commentOnlyFiles(patch: string): Set<string> {
+  const code = new Map<string, boolean>();
+  let file: string | null = null;
+  for (const l of patch.split('\n')) {
+    if (l.startsWith('diff --git ')) { file = null; continue; }
+    if (l.startsWith('+++ ')) { file = l === '+++ /dev/null' ? null : l.slice(6); if (file) code.set(file, code.get(file) ?? false); continue; }
+    if (l.startsWith('--- ') || !file) continue;
+    if ((l[0] === '+' || l[0] === '-') && !isCommentLine(l.slice(1))) code.set(file, true);
+  }
+  return new Set([...code].filter(([, c]) => !c).map(([f]) => f));
+}
 
 /** What a critic with no run on record would judge in this change: its files and their lines. */
 export type Missing = { slug: string; name: string; block: boolean; files: string[]; lines: number };
@@ -22,9 +46,12 @@ export function diffFiles(cwd: string, bases: string[]): Promise<DiffFile[] | nu
     for (const base of bases) {
       const out = await git(['diff', '--numstat', '--no-renames', `${base}...HEAD`]);
       if (out === null) continue;
+      const patch = await git(['diff', '-U0', '--no-renames', '--no-color', '--no-ext-diff', `${base}...HEAD`]);
+      const quiet = patch === null ? new Set<string>() : commentOnlyFiles(patch);
       return out.split('\n').filter(Boolean).map((l) => {
         const [add, del, ...rest] = l.split('\t');
-        return { path: rest.join('\t'), lines: (Number(add) || 0) + (Number(del) || 0) };
+        const path = rest.join('\t');
+        return { path, lines: (Number(add) || 0) + (Number(del) || 0), ...(quiet.has(path) ? { comments: true } : {}) };
       });
     }
     return null;
@@ -35,7 +62,8 @@ export function diffFiles(cwd: string, bases: string[]): Promise<DiffFile[] | nu
 export function matchedFiles(e: Pick<ReviewEntry, 'triggers'>, files: DiffFile[]): DiffFile[] {
   const globs = e.triggers.diff ?? [];
   if (!globs.length) return [];
-  const hit = files.filter((f) => globs.some((g) => posix.matchesGlob(f.path, g)));
+  // A comment-only file asks no critic (Cara, 2026-11-24, on #1795's card: "Skip comment-only edits").
+  const hit = files.filter((f) => !f.comments && globs.some((g) => posix.matchesGlob(f.path, g)));
   const lines = hit.reduce((n, f) => n + f.lines, 0);
   return hit.length && lines >= (e.triggers.lines ?? 0) ? hit : [];
 }

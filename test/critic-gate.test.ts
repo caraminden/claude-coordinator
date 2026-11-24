@@ -80,3 +80,25 @@ test('the hand-off refusal over a real branch: names the critic and its files, l
   assert.equal(await criticRefusal(set, ticket, [], false), null, 'its run is on record');
   assert.equal(await criticRefusal(set, { ...ticket, cwd: join(root, 'nowhere') }, [], false), null, "a diff git can't read never holds a ship");
 });
+
+test('a change that only touches comments or blank lines in a file asks no critic of it (Cara, 2026-11-24, "Skip comment-only edits")', async () => {
+  const repo = join(root, 'comments');
+  mkdirSync(join(repo, 'public'), { recursive: true });
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, stdio: 'pipe' });
+  git('init', '-q', '-b', 'main');
+  writeFileSync(join(repo, 'public', 'app.js'), 'const a = 1;\n');
+  writeFileSync(join(repo, 'public', 'app.css'), 'a { color: red; }\n');
+  git('add', '.'); git('commit', '-qm', 'base');
+  git('checkout', '-qb', 'ticket/41');
+  writeFileSync(join(repo, 'public', 'app.js'), '// why a is 1\n/* see\n * the glossary\n */\n\nconst a = 1;\n');
+  writeFileSync(join(repo, 'public', 'app.css'), '/* red on purpose */\na { color: red; }\n<!-- x -->\n');
+  git('add', '.'); git('commit', '-qm', 'comments');
+  const set = fresh();
+  set.create(3, { slug: 'ui', name: 'UI critic', triggers: { diff: ['public/**'] }, gate: 'advise' }, 'Josh');
+  const ticket = { id: 41, project_id: 3, cwd: repo };
+  assert.equal(await criticRefusal(set, ticket, [], false), null, 'comments and blank lines only');
+  writeFileSync(join(repo, 'public', 'app.css'), '/* red on purpose */\na { color: red; }\n* { margin: 0 }\n');
+  git('add', '.'); git('commit', '-qm', 'a universal selector is code, not a comment');
+  assert.match((await criticRefusal(set, ticket, [], false)) ?? '', /UI critic \(`ui`, \d+ lines in public\/app\.css\)/, 'the code file still asks; the comment-only one is left out');
+  assert.doesNotMatch((await criticRefusal(set, ticket, [], false)) ?? '', /app\.js/);
+});

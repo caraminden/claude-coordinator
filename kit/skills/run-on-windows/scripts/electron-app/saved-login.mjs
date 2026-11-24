@@ -77,7 +77,8 @@ async function connect() {
       for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(250)) if (await ev(expr).catch(() => false)) return;
       throw new Error(`timed out waiting for ${what}`);
     },
-    shot: async (name) => writeFileSync(path.join(shots, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' }, s)).data, 'base64')),
+    // After the reload splash (index.html #splash) has gone, so the shot shows the page.
+    shot: async (name) => { for (let i = 0; i < 40 && (await ev("!!document.getElementById('splash')")); i++) await sleep(250); writeFileSync(path.join(shots, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' }, s)).data, 'base64')); },
     close: () => ws.close(),
   };
 }

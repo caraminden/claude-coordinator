@@ -12,8 +12,8 @@ import type { PoolSize } from '../src/turn-line.ts';
 import { bootServer, stopTurns, until, ok } from './helpers.ts';
 
 const TURNS = 100,
-  WINDOW_S = 15,
-  LIVE_S = 40;
+  WINDOW_S = 6,
+  LIVE_S = 120; // a cap only: each turn ends when the test drops its stop file
 const budgetFile = join(import.meta.dirname, 'turn-cost.json');
 const root = mkdtempSync(join(tmpdir(), 'turn-cost-'));
 // timing-ok: stopTurns ends every child first
@@ -32,18 +32,20 @@ function mainCpuMs(pid: number): number {
 
 test('a running turn costs the main thread under its budget of CPU per turn-second', { skip: process.platform !== 'linux', timeout: 180_000 }, async () => {
   const started = join(root, 'started');
+  const stop = join(root, 'stop');
   const fake = join(root, 'claude-fake');
   writeFileSync(
     fake,
     `#!${process.execPath}
-const { writeFileSync, mkdirSync } = require('node:fs');
+const { writeFileSync, mkdirSync, existsSync } = require('node:fs');
 const { createInterface } = require('node:readline');
 mkdirSync(${JSON.stringify(started)}, { recursive: true });
 createInterface({ input: process.stdin }).once('line', () => {
   writeFileSync(${JSON.stringify(started)} + '/' + process.pid, '');
   const say = () => console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'working on it' }] } }));
-  const timer = setInterval(say, 500);
-  setTimeout(() => { clearInterval(timer); console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' })); process.exit(0); }, ${LIVE_S * 1000});
+  const end = () => { clearInterval(timer); console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' })); process.exit(0); };
+  const timer = setInterval(() => (existsSync(${JSON.stringify(stop)}) ? end() : say()), 500);
+  setTimeout(end, ${LIVE_S * 1000});
 });
 `,
   );
@@ -62,6 +64,7 @@ createInterface({ input: process.stdin }).once('line', () => {
     await new Promise((r) => setTimeout(r, WINDOW_S * 1000)); // timing-ok: the measurement window is the point; CPU is read at its ends
     const perTurnSecond = (mainCpuMs(srv.proc.pid!) - before) / (TURNS * WINDOW_S);
     const { msPerTurnSecond } = JSON.parse(readFileSync(budgetFile, 'utf8'));
+    writeFileSync(stop, '');
     console.log(`main thread: ${perTurnSecond.toFixed(3)} ms of CPU per turn-second (budget ${msPerTurnSecond})`);
     assert.ok(perTurnSecond <= msPerTurnSecond, `${perTurnSecond.toFixed(3)} ms of CPU per turn-second is over the budget of ${msPerTurnSecond}: a running turn got dearer for the server's one thread`);
   } finally {

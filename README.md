@@ -168,7 +168,7 @@ No dependencies: Node 24+ runs the TypeScript directly (type stripping) and
 uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDependencies are
 `fast-check`, for the property tests only (`test/lanes-property.test.ts`, `test/claims-property.test.ts`;
 `docs/adr/0029-fast-check-for-tests-only.md`), and `typescript` with `@types/node`, for the type check
-(`tsconfig.json`, `test/typecheck.test.ts`; `docs/adr/0032-typecheck-ratchet.md`). A fresh worktree gets them from `npm ci`.
+(`tsconfig.json`, `test/typecheck.test.ts`; `docs/adr/0033-typecheck-ratchet.md`). A fresh worktree gets them from `npm ci`.
 
 ## Layout
 

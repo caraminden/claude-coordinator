@@ -5,7 +5,9 @@
 // .navigating) while it opens one. The report goes out a moment after the pause ends, kept on this device until it's
 // taken, so a tab that froze or was offline sends it later or on its next load. It never throws and never holds up the page.
 (() => {
-  const SLOW = 2000,
+  // Tests turn the times down (test/slow-recorder-browser.test.ts sets this before the script runs); a page never does.
+  const knob = globalThis.citadelSlowKnobs ?? {};
+  const SLOW = knob.slow ?? 2000,
     TICK = 250,
     KEY = 'cc-slow-moments',
     KEEP = 20,
@@ -163,7 +165,7 @@
         if (nav) noteMoment('load', '', 0, nav.loadEventStart, server);
       } catch {}
       // What an earlier page kept (it froze, closed or was offline), a while after this one opened.
-      setTimeout(send, 5000);
+      setTimeout(send, knob.sendAfterLoad ?? 5000);
     }),
   );
   addEventListener('online', send);

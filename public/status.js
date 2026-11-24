@@ -456,9 +456,13 @@ function easeTile(e, days, now) {
       waits(n.waiting) ? `waiting: ${waits(n.waiting)}` : 'nothing waiting yet', n.slowed.length ? held(n.slowed) : ''].filter(Boolean).join(' · ')
     : e.last ? `The last ${ago(e.last.since)}, ${span((e.last.until ?? e.last.since) - e.last.since)}${e.last.peak === 'tight' ? ', reached tight' : ''}: ${e.last.why}${e.last.lowestFree !== null ? ` · lowest ${bytes(e.last.lowestFree)} free` : ''}${waits(e.last.waited) ? ` · at most ${waits(e.last.waited)} waited` : ''}${e.last.slowed.length ? ` · ${held(e.last.slowed)}` : ''}`
     : 'Free memory stayed above the line all week';
-  return tile('Memory easing', n ? (n.level === 'tight' ? 'Tight now' : 'Easing off now') : e.counts[today] ? `${plural(e.counts[today], 'spell')} today` : 'None today', sub,
+  const value = n ? (n.level === 'tight' ? 'Tight now' : 'Easing off now') : e.counts[today] ? `${plural(e.counts[today], 'spell')} today` : 'None today';
+  const el = tile('Memory easing', value, sub,
     dayBars(days, e.minutes, { tip: (i) => `${plural(e.counts[i], 'spell')}${e.counts[i] ? `, ${e.minutes[i]} min` : ''}`, label: 'minutes eased off a day' }),
     { tone: n ? 'warn' : null, wide: true, key: 'easing', chart: `minutes eased off a day: ${perDay(days, e.minutes)}; spells a day: ${perDay(days, e.counts)}` });
+  // While easing the headline is a toned chip, so it reads as "slowing down" at a glance and not as the stripe alone.
+  if (n) el.querySelector('.st-value').replaceChildren(toneChip('warn', value));
+  return el;
 }
 
 /** Backup freshness (#1142): the last database backup, the last off-box pull, and each app yes or no. Red when a night is missing. */

@@ -565,6 +565,9 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-tile[data-tone="warn"] { box-shadow: inset 3px 0 0 var(--waiting); }
 .st-tile[data-tone="bad"] { box-shadow: inset 3px 0 0 var(--error); }
 .st-tile.wide { grid-column: 1 / -1; }
+/* Memory easing (#1748): the sub line says what waits and who is held, so it wraps whole instead of clamping at 2 lines. */
+.st-tile[data-tile="easing"] { grid-template-rows: auto auto minmax(2.6em, auto) 1fr auto; }
+.st-tile[data-tile="easing"] .st-sub { display: block; }
 /* Slow moments (#1752): the seconds in one column, so every row's text starts at the same place. */
 .st-tile[data-tile="slow"] .hue-row-lead { min-width: 3.4em; }
 .st-slow-split { margin: 0.15rem 0; }

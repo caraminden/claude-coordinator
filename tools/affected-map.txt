@@ -44,9 +44,9 @@ src/runner.ts: test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-as
 
 # The server boots from server.ts, src/ and public/ alone (tests and previews copy only those).
 server.ts: test/boot-imports.test.ts
-src/**: test/boot-imports.test.ts test/layout-map.test.ts
-public/**: test/layout-map.test.ts
-tools/**: test/layout-map.test.ts
+src/**: test/boot-imports.test.ts test/layout-map.test.ts test/size-budget.test.ts
+public/**: test/layout-map.test.ts test/size-budget.test.ts
+tools/**: test/layout-map.test.ts test/size-budget.test.ts
 README.md: test/layout-map.test.ts
 
 # Routes and who sees what. The route test takes over 5 CPU-seconds, so it runs for these paths, not on every run (#1544);

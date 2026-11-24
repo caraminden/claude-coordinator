@@ -7,7 +7,7 @@ import { readdirSync, readFileSync, lstatSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
-const ROOTS = ['src', 'public', 'tools'];
+const ROOTS = ['src', 'public', 'tools', 'kit'];
 const CODE = /\.(ts|js|mjs|sh|html|css|ps1|py)$/;
 export const LIMIT = 1500;
 
@@ -17,6 +17,7 @@ export const ALLOWED: Record<string, [number, string]> = {
   'src/db.ts': [3988, 'schema, migrations and settings; queries are already moving to src/db/<area>.ts (+1: SCHEMA_HISTORY row 115, #1798)'],
   'src/mcp.ts': [2640, 'every MCP tool definition and handler; split by tool family is queued (+5: apply_memory, #1803)'],
   'tools/land.sh': [2509, 'the ship script is one shell program; its steps share state and are pinned by tests'],
+  'kit/skills/scheme-setup/templates/land.sh': [2787, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted'],
   'public/machine-agent.mjs': [2337, 'standalone agent a person runs on their own computer: one file so it can be copied alone'],
   'src/routes/projects.ts': [1894, 'every /projects route; split by page is queued'],
   'src/tripwire.ts': [1672, 'the tripwire rules; high risk to edit, so a split waits for its own change'],
@@ -53,7 +54,7 @@ export function overBudget(counts: Record<string, number>, allowed = ALLOWED, li
 const HELP = `Split the file along a seam (one concern per module, then add its row to the README Layout table), or, if a split truly doesn't fit,
 add or raise its entry in ALLOWED in test/size-budget.test.ts with a one-line reason.`;
 
-test(`no source file in src, public or tools is over ${LIMIT} lines unless ALLOWED lists it`, () => {
+test(`no source file in src, public, tools or kit is over ${LIMIT} lines unless ALLOWED lists it`, () => {
   assert.deepEqual(overBudget(lineCounts()), [], HELP);
 });
 

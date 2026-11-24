@@ -1,7 +1,7 @@
 // A Taskmaster's fresh Claude session (#406): the handoff turn, the reset, the fresh session's first
 // prompt, the /compact fallback, Stop, and the idle sweep and turn end (#423) that start it by itself.
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -86,7 +86,11 @@ async function started(id: number) {
 async function endTurn(id: number, outcome: 'ok' | 'error' | `ok:${string}`) {
   const turn = () => store.getSetting<{ startedAt: number }>(`turn:${id}`)?.startedAt;
   const was = turn();
-  writeFileSync(join(store.getTicket(id)!.cwd, 'release'), outcome);
+  // Renamed into place: the fake polls for the file, and one it found created but not yet written read as '',
+  // which ended an 'error' turn as ok on a loaded box (#1826).
+  const release = join(store.getTicket(id)!.cwd, 'release');
+  writeFileSync(`${release}.tmp`, outcome);
+  renameSync(`${release}.tmp`, release);
   await until('the turn to end', () => turn() !== was);
 }
 

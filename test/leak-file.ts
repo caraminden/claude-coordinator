@@ -140,6 +140,21 @@ export function readBaseline(file = BASELINE): Record<string, Partial<Record<Kin
   }
 }
 
+/** This user's live processes with an argument that is, or is inside, one of `dirs`: pid → command line. */
+export function procsUnder(dirs: string[]): Map<number, string> {
+  const found = new Map<number, string>();
+  for (const name of readdirSync('/proc')) {
+    if (!/^\d+$/.test(name) || Number(name) === process.pid) continue;
+    try {
+      if (statSync(`/proc/${name}`).uid !== process.getuid!()) continue;
+      if (/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${name}/stat`, 'utf8'))) continue; // exited, not yet reaped
+      const args = readFileSync(`/proc/${name}/cmdline`, 'utf8').split('\0').filter(Boolean);
+      if (args.some((a) => dirs.some((d) => a === d || a.startsWith(`${d}/`)))) found.set(Number(name), args.join(' '));
+    } catch {} // gone meanwhile
+  }
+  return found;
+}
+
 /** The lines to print for `left`, judged against `allowed`: a failure for each kind over it, a note for one under it. */
 export function judge(file: string, left: Leftovers, allowed: Partial<Record<Kind, number>> = {}): { fail: boolean; text: string } {
   const what: Record<Kind, (n: number) => string> = {
@@ -149,7 +164,7 @@ export function judge(file: string, left: Leftovers, allowed: Partial<Record<Kin
     tmp: (n) => `${n} entr(ies) left in its temp folder`,
   };
   const detail: Record<Kind, string[]> = {
-    procs: left.procs.map(([pid, cmd]) => `${pid} ${cmd.slice(0, 200)}`),
+    procs: left.procs.map(([pid, cmd]) => `${pid} ${cmd.slice(0, 400)}`),
     units: left.units,
     ports: left.ports.map(([port, pid]) => `${port} (pid ${pid})`),
     tmp: left.tmp.slice(0, 10).concat(left.tmp.length > 10 ? [`… and ${left.tmp.length - 10} more`] : []),

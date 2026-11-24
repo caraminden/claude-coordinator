@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -59,5 +59,23 @@ test('a failing test still fails the run through the scope, and its rerun alone 
     assert.match(r.calls[2], /CPUWeight=500 .*-- \S*\/citadel-node --test --test-force-exit --test-timeout=\d+ test\/b\.test\.mjs$/);
   } finally {
     rmSync(join(repo, 'test', 'b.test.mjs'));
+  }
+});
+
+test('a file that leaves something behind fails its rerun alone too: a real failure, never a flake (#1763)', () => {
+  // The real guard, as the repo's own test/leak-guard.ts: each file counts what it leaves (test/leak-file.ts).
+  const guard = join(repo, 'test', 'leak-guard.ts');
+  symlinkSync(join(import.meta.dirname, 'leak-guard.ts'), guard);
+  writeFileSync(join(repo, 'test', 'c.test.mjs'), "import test from 'node:test';\nimport { mkdtempSync } from 'node:fs';\nimport { tmpdir } from 'node:os';\nimport { join } from 'node:path';\ntest('green, but leaves a folder', () => { mkdtempSync(join(tmpdir(), 'left-')); });\n");
+  try {
+    const r = run();
+    assert.equal(r.status, 1, r.log);
+    assert.match(r.log, /leak guard: \S*c\.test\.mjs left these behind/, r.log);
+    assert.match(r.calls[2], /--test-global-setup=test\/leak-guard\.ts test\/c\.test\.mjs$/);
+    assert.match(r.log, /run-tests: test\/c\.test\.mjs: failed again alone: a real failure/, r.log);
+    assert.doesNotMatch(r.log, /passed alone/, r.log);
+  } finally {
+    rmSync(join(repo, 'test', 'c.test.mjs'));
+    rmSync(guard);
   }
 });

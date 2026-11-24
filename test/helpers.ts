@@ -2,13 +2,14 @@
 import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import type { Server } from 'node:http';
 import { createServer as createNetServer, type AddressInfo, type Server as NetServer } from 'node:net';
-import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
 import { freePort, listeningPort } from '../src/ports.ts';
 import { supervisorHome } from '../src/reaper.ts';
+import { procsUnder } from './leak-file.ts';
 import { pinTurnFiles, type TurnPins } from '../src/turn-launch.ts';
 import { until } from './wait.ts';
 import { holds } from './holds.ts';
@@ -151,22 +152,7 @@ function isSupervisor(pid: number): boolean {
   }
 }
 
-/** This user's live processes with an argument that is, or is inside, one of `dirs`: pid → command line. */
-export function procsUnder(dirs: string[]): Map<number, string> {
-  const found = new Map<number, string>();
-  for (const name of readdirSync('/proc')) {
-    if (!/^\d+$/.test(name) || Number(name) === process.pid) continue;
-    try {
-      if (statSync(`/proc/${name}`).uid !== process.getuid!()) continue;
-      if (/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${name}/stat`, 'utf8'))) continue; // exited, not yet reaped
-      const args = readFileSync(`/proc/${name}/cmdline`, 'utf8').split('\0').filter(Boolean);
-      if (args.some((a) => dirs.some((d) => a === d || a.startsWith(`${d}/`)))) found.set(Number(name), args.join(' '));
-    } catch {} // gone meanwhile
-  }
-  return found;
-}
-
-export { freePort, listeningPort };
+export { freePort, listeningPort, procsUnder };
 
 // Every test request gets a fresh connection. Under load a test's synchronous step can hold its event
 // loop past a server's 5 s keep-alive; fetch then sends the next request on the idle socket the server

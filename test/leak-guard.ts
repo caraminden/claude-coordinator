@@ -7,8 +7,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { procsUnder } from './helpers.ts';
-import { IMPORT_FLAG, PARENT_ENV } from './leak-file.ts';
+import { IMPORT_FLAG, PARENT_ENV, procsUnder } from './leak-file.ts';
 
 const tmp = tmpdir();
 const scratch = () => procsUnder([tmp]);

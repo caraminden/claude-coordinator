@@ -45,6 +45,8 @@ test/script-env.ts
 test/git.ts
 test/wait.ts
 test/quiet-proc.ts
+test/leak-guard.ts
+test/leak-file.ts
 test/land-fixture.ts
 test/land-train-fixture.ts
 test/land-recover-fixture.ts

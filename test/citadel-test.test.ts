@@ -106,8 +106,10 @@ test('a process a test leaves running is reported and the run fails', async () =
   );
   const r = await run([f]);
   assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /✔ 1 passed, 0 failed/);
-  assert.match(r.out, /The tests left 1 process\(es\) running \(now killed\)[^]*setTimeout.*leak\/x/);
+  // The file's own count (test/leak-file.ts, #1763) fails it and kills the process, before the run's guard would.
+  assert.match(r.out, /✖ 1 passed, 1 failed/);
+  assert.match(r.out, /leak\.test\.ts left these behind[^]*1 process\(es\) still running:[^]*setTimeout.*leak\/x/);
+  await until('the leaked process to be killed', () => procsUnder([gone]).size === 0);
 });
 
 test("a folder is refused: the full suite is the land gate's", async () => {

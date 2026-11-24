@@ -60,9 +60,11 @@ concurrency=${CITADEL_TEST_CONCURRENCY:-$("$(dirname "${BASH_SOURCE[0]}")/mem-ro
 max_reruns=5 # more failed files than this is a broken change, not load
 tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 weight=${DEPLOY_TEST_CPU_WEIGHT-500}
-# npm test's leak guard, on the full run only: green tests that leave processes running are a red run (a rerun only labels).
-guard=()
-[ -r test/leak-guard.ts ] && guard=(--global-setup test/leak-guard.ts)
+# npm test's leak guard: green tests that leave processes running are a red run (a rerun only labels). Each file also
+# counts what it leaves behind (test/leak-file.ts, #1763), so a rerun alone runs it too: a leak red there is a real one,
+# never a flake that passed alone.
+guard=() rerun_guard=()
+[ -r test/leak-guard.ts ] && guard=(--global-setup test/leak-guard.ts) rerun_guard=(--test-global-setup=test/leak-guard.ts)
 cgroup=$(sed -n 's|^0::||p' /proc/self/cgroup 2>/dev/null)
 scope=(systemd-run --user --scope --quiet --collect --slice=citadel.slice -p "CPUWeight=$weight")
 # Only a unit below the user manager: a login's session-N.scope belongs to the system manager, which --user can't bind to.
@@ -133,7 +135,7 @@ rerun_alone() {
     [ -z "$due" ] || [ "$due" -ge "$this" ] || this=$due
     echo "== $f" >>"$rerun_log"
     began=$SECONDS
-    timeout -k 10 "$this" "${scope[@]}" "$tools/citadel-node" --test --test-force-exit --test-timeout="$test_limit" "$f" >>"$rerun_log" 2>&1
+    timeout -k 10 "$this" "${scope[@]}" "$tools/citadel-node" --test --test-force-exit --test-timeout="$test_limit" "${rerun_guard[@]}" "$f" >>"$rerun_log" 2>&1
     frc=$?
     # 137 before its limit: killed from outside, as in the full run above (#1393). It says nothing, so no label.
     kind=$frc

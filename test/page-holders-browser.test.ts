@@ -108,7 +108,8 @@ test('job cards seen and left leave nothing behind', { skip }, async () => {
 test('opening and closing the file viewer leaves nothing behind', { skip }, async () => {
   const page = await open(`#/p/${projectId}`);
   const seen = await rounds(page, 'HTMLDialogElement.prototype', async (r) => {
-    for (let i = 0; i < PER_ROUND / 2; i++) {
+    // Five a round: Chromium drops address changes past about 200 in 10 s, and each open and close makes several.
+    for (let i = 0; i < 5; i++) {
       await page.eval(`location.hash = '#/f/${ticketId}/' + encodeURIComponent('f${r}-${i}.txt')`);
       await waitFor(page, 'the viewer', `!!document.querySelector('dialog.viewer[open]')`);
       await page.eval(`location.hash = '#/p/${projectId}'`);

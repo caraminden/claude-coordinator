@@ -1,10 +1,6 @@
 ---
 name: post-mortem
-description: >
-  What went wrong with a minion, ship, chat, job or thing it made, and how to stop it happening
-  again: a timeline, a cause class and one fix on a card. Use for "what happened to #N", "what went
-  wrong with X", "what caused X", "why did that take so long", "make sure it doesn't happen again".
-  A live bug is citadel:bug-fixing.
+description: What went wrong with a minion, ship, chat or thing it made, and how to stop it happening again: a timeline, a cause class and one fix on a card. Use for "what happened to #N", "what went wrong with X", "why so long", "stop that from happening again". A live bug is citadel:bug-fixing.
 ---
 
 A person asks what went wrong. The answer they can act on has three parts: a **timeline** (what

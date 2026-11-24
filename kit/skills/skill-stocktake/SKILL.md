@@ -1,9 +1,6 @@
 ---
 name: skill-stocktake
-description: >
-  Stocktake of the skills and agents themselves, judging each Keep, Improve, Update, Retire or
-  Merge. Use when asked to audit, prune or stocktake the kit's or a repo's skills, or which skills
-  load each turn and what they cost or change (citadel:retro calls it on a misfire).
+description: Stocktake of the skills and agents themselves, judging each Keep, Improve, Update, Retire or Merge. Use when asked to audit, prune or stocktake the kit's or a repo's skills (citadel:retro calls it on a misfire).
 ---
 
 # Skill stocktake

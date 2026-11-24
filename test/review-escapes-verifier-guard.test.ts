@@ -8,8 +8,9 @@ import { test } from 'node:test';
 const guard = join(import.meta.dirname, '../tools/review-escapes/verifier-guard.ts');
 const H = process.env.HOME ?? '/home/someone';
 const R = `${H}/.local/share/claude-coordinator/projects/2/tmp/1/verifier-p1/verifier/escape-1`;
-const denied = (tool_name: string, tool_input: Record<string, unknown>) => {
-  const r = spawnSync(process.execPath, [guard, R, `${H}/kit`], { input: JSON.stringify({ tool_name, tool_input, cwd: `${R}/repo` }), encoding: 'utf8' });
+const denied = (tool_name: string, tool_input: Record<string, unknown>, root = R) => {
+  const r = spawnSync(process.execPath, [guard, root, `${H}/kit`], { input: JSON.stringify({ tool_name, tool_input, cwd: `${root}/repo` }), encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
   return r.stdout.includes('"deny"');
 };
 const bash = (command: string) => denied('Bash', { command });
@@ -48,4 +49,11 @@ test('the box, GitHub, the live Citadel and today\'s state are out of reach', ()
   assert.equal(denied('Read', { file_path: `${H}/.local/share/claude-coordinator/projects/2/repo/server.ts` }), true);
   assert.equal(denied('Write', { file_path: '/tmp/a.sh' }), true);
   assert.equal(denied('Agent', {}), true);
+});
+
+test('another case of the same run is out of reach, wherever --out is', () => {
+  const root = '/tmp/escapes-out/verifier/escape-1', other = '/tmp/escapes-out/opus/escape-1/judge-prompt.md';
+  assert.equal(denied('Read', { file_path: other }, root), true);
+  assert.equal(denied('Bash', { command: `cat ${other}` }, root), true);
+  assert.equal(denied('Bash', { command: `ls ${root}/scratch /usr/bin` }, root), false);
 });

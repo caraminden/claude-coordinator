@@ -8,6 +8,9 @@ import { resolve } from 'node:path';
 
 const [root, ...readable] = process.argv.slice(2).map((p) => resolve(p));
 const HOME = process.env.HOME ?? '/home';
+// The run's --out (root is <out>/<arm>/<case>): the other arms' judge prompts there spell out the defect, wherever --out is.
+const OUT = root ? resolve(root, '../..') : '/nonexistent';
+const sibling = (p: string) => inside(p, [OUT]) && !inside(p, [root, ...readable]);
 // The session's own saved long outputs (tool-results/) are its own, not today's state (#1505).
 const OWN_OUTPUT = /\/\.claude\/projects\/[^/"' ]+\/[0-9a-f-]{36}\/tool-results\/[\w-][\w.-]*/g;
 const OWN_ONE = /\/\.claude\/projects\/[^/]+\/[0-9a-f-]{36}\/tool-results\//;
@@ -26,6 +29,7 @@ export function verdict(input: { tool_name?: string; tool_input?: Record<string,
     const p = String(ti.file_path ?? ti.path ?? input.cwd ?? root);
     const abs = resolve(input.cwd ?? root, p);
     if (OWN_ONE.test(abs)) return '';
+    if (sibling(abs)) return `reads only this case's folder ${root}, not the other cases of the run`;
     return !abs.startsWith(HOME) || inside(abs, [root, ...readable]) ? '' : `reads only this case's folder ${root}, the kit and system paths`;
   }
   if (tool === 'Bash') {
@@ -41,6 +45,7 @@ export function verdict(input: { tool_name?: string; tool_input?: Record<string,
       return 'kill a pid you started (kill 12345, kill $P, node boot.mjs stop for the server), never one found by name or every process';
     if (/(^|[\s'"=:])(~|\$HOME|\$\{HOME\})(\/|\s|$|['"])/.test(c)) return `name paths inside ${root}, not the home folder`;
     if (/:8573\b/.test(c)) return 'the live Citadel is out of reach; use your own copy\'s port';
+    for (const m of c.matchAll(/(?<![\w.])\/[^\s'"`;|&)<>]*/g)) if (sibling(resolve(m[0]))) return `${m[0]} is another case's folder`;
     for (const m of c.matchAll(/\/home\/[^\s'"`;|&)<>]*/g)) if (!inside(resolve(m[0]), [root, ...readable])) return `${m[0]} is outside this case's folder`;
     return '';
   }

@@ -220,6 +220,7 @@ For each defect, answer one of:
 Be strict: the same file or area is not enough for named. Reply with JSON only, no fence: {"verdicts":[{"fix":<number>,"verdict":"named|near|no","finding":<the finding's number or null>,"why":"<one sentence>"}]}`;
 
 // The same judge, told the report came from someone who ran the change, and asked whether it made the defect happen.
+// shortcut: the judge sees only the report, not the tool log, so `ran` is the verifier's word; give it stream.jsonl's commands if `ran` ever decides anything.
 const VERIFY_JUDGE_RULES = JUDGE_RULES
   .replace('whether a code review, written before a change shipped,', 'whether a report from someone who ran a change before it shipped')
   .replace("You don't know who wrote the review or how.", "You don't know who wrote the report or how. Its findings are its numbered lines; its flows-run and not-exercised lists are not findings.")
@@ -260,6 +261,8 @@ function tally(out: string, arm: Arm, group: string): { t: Tally; per: string[] 
     if (!meta) continue;
     t.reviews++; t.cost += meta.cost; times.push(meta.ms);
     const f = countFindings(existsSync(join(dir, 'review.md')) ? readFileSync(join(dir, 'review.md'), 'utf8') : '');
+    // A clean case that failed (a budget, a usage limit) is no finished review: it would pass for one with no finding.
+    if (!hasDefects(c) && meta.error) { t.reviews--; continue; }
     if (!hasDefects(c)) { t.controls++; t.controlFindings += f; if (f) t.controlsWith++; continue; }
     t.cases++; t.findings += f;
     const j = read(join(dir, 'judge.json'));
@@ -291,7 +294,7 @@ function report(out: string, arms: Arm[]): string {
     if (!t.reviews) continue;
     per.push(...p);
     (summary[arm.name] ??= {})[group] = t;
-    rows.push(`| ${arm.name} | ${group} | ${t.reviews} | ${t.named} of ${t.defects} | ${t.near} | ${t.casesNamed} of ${t.cases - t.unjudged} | ${t.cases ? (t.findings / t.cases).toFixed(1) : '-'} | ${t.controlsWith} of ${t.controls} | ${t.controlFindings} | $${t.cost.toFixed(2)} | $${t.judgeCost.toFixed(2)} | ${t.named ? '$' + (t.cost / t.named).toFixed(2) : '-'} | ${t.medianSec} s |${t.unjudged ? ` (${t.unjudged} unjudged)` : ''}${arm.mode === 'verify' ? ` (${t.ran ?? 0} made to happen)` : ''}`);
+    rows.push(`| ${arm.name} | ${group} | ${t.reviews} | ${t.named} of ${t.defects} | ${t.near} | ${t.casesNamed} of ${t.cases - t.unjudged} | ${t.cases ? (t.findings / t.cases).toFixed(1) : '-'} | ${t.controlsWith} of ${t.controls} | ${t.controlFindings} | $${t.cost.toFixed(2)} | $${t.judgeCost.toFixed(2)} | ${t.named ? '$' + (t.cost / t.named).toFixed(2) : '-'} | ${t.medianSec} s |${t.unjudged ? ` (${t.unjudged} unjudged)` : ''}${arm.mode === 'verify' ? ` (${t.ran ?? 0} it says it made happen)` : ''}`);
   }
   writeFileSync(join(out, 'verdicts.tsv'), per.join('\n') + '\n');
   writeFileSync(join(out, 'summary.json'), JSON.stringify(summary, null, 1));

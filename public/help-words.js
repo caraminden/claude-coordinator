@@ -1,4 +1,4 @@
-// Plain-words help (#1131): Citadel's own words, said once. Each word is a term in the kit's glossary (kit/skills/citadel-words/SKILL.md; test/citadel-words.test.ts). The "How Citadel works" page (help.js) and the welcome page read WORDS. Every scheme: the words
+// Plain-words help (#1131): Citadel's own words, said once. The "How Citadel works" page (help.js) and the welcome page read WORDS. Every scheme: the words
 // describe Citadel, not any one scheme. A member reads the copy before it ships.
 import { h } from './base.js';
 

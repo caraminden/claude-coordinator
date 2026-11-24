@@ -55,42 +55,15 @@ scheme with Fable off gets them without Fable):
   above high unless a person asks (xhigh only after a Fable run has failed twice; never max).
   Never put `effort` on a skill: it would hold for the rest of a long turn, and a switch
   mid-session may restart the prompt cache.
-- Judging Grunts run on Opus: on Delve's art critic Opus caught about 9 of 13 of Cara's notes,
-  Sonnet 5. The stalled-worker row is Cara's (2026-11-14, "Widen to known-shape work"), the same
-  tier Citadel's model table gives minions.
-- The high-risk reviewer is Opus at high, not Fable: on 8 past high-risk diffs Opus caught 10 of
-  18 real medium-or-high findings and Fable 11, each missing some the other caught, for $1.02 a
-  run against $1.46 (#950, 2026-11-17, `reports/highrisk-review-ab-2026-11.md` in the shared folder).
-  The checker stays on Fable: it wasn't tested.
-- Turn count beats token price: the cheapest model took 2 to 3 times the turns on multi-step work
-  in obra/superpowers' subagent-driven-development. Use `haiku` only when the brief holds
-  everything the Grunt needs.
-- A scheme's own agents (`.claude/agents/`) pin `model:` and `effort:` too, never `inherit`; the
-  hook reads them there. On a Fable turn Citadel still sets `CLAUDE_CODE_SUBAGENT_MODEL` to Opus
-  (#705) as a backstop for any Grunt that slips through, so a Grunt that must run on Fable names
-  `fable` on the call.
-- To retune, edit the row. A kit agent's row and its definition's `model:` and `effort:` change in
-  the same commit (a test in Citadel's repo checks they match), and the hook quotes the table as
-  written.
+- Why the rows are what they are (Opus for judging, the high-risk reviewer's A/B, Haiku's turn
+  count) and how the cost works: `references/evidence.md`. A scheme's own agents and retuning a row:
+  `references/more.md`.
 
 ### Minions, Taskmasters and schedules too
 
 Moved here from the Citadel-wide Settings (#1576):
 - Nothing above high effort unless a person asks, for a Grunt, a minion, a schedule or an app's turn.
 - Models by kind of work: the Taskmaster's model table (`public/model-table.js`) is their one home; this skill and `citadel:briefing` part 8 render its tiers (Josh, 2026-11-13: "only for really complex or high risk things").
-
-## How the cost works
-
-Every model call re-reads the session's whole context, so a session's cost is roughly its calls
-times its context. A subagent starts with a fresh, small context (about 15k tokens on average, with the
-brief). It makes its own calls and hands back a summary, and the session never carries what it
-read. When a session wakes after more than an hour idle, its prompt cache has lapsed, so the wake
-re-writes the whole context (about $2.40 at 300k on Opus). A lean session makes every later call
-and every wake cheaper. Compaction caps the cost of a session that forgets, but every compaction
-is lossy: what never entered the context can't be lost from it.
-
-Sonnet costs about half of what Opus does, cache reads included (measured 2026-11-14), so moving
-known-shape work to Sonnet halves it. Keeping noisy work out of the session saves more on top.
 
 ## The test
 
@@ -105,16 +78,9 @@ Ask one question: will the session need what this step reads, or only what it co
   tokens or more. The session would re-read all of that on every later call. A check whose raw
   output is long (an untrimmed build or test log) goes to the `citadel:check-runner` agent; a
   wrapper that already trims output (`citadel-test`, a scheme's check script) runs inline.
-- **"What happened" about a minion, a ship or a turn.** The database, the transcripts, the service
-  and ship logs and the retro log are one job for the `citadel:investigator` agent, not a
-  hand-written general-purpose brief: ask it the question, with the minion's #N and the window, and
-  take back its Pacific-time timeline (at most 15 lines). It works in a person's container too
-  (it uses `host_check` there). When the person asks what went wrong and how to stop it, the
-  `citadel:post-mortem` skill sends it and adds the cause and the fix.
-- **"What has this scheme already done here?"** Past minions on an area (who touched it, what they
-  tried or ruled out, what they left to reuse) are one job for the `citadel:scout` agent: give it the
-  area, the paths or the draft brief, and take back its 15 lines. It keeps a dated note per area in
-  the shared folder, so a second ask on the same area costs a few calls.
+- **"What happened" about a minion, a ship or a turn, or "what has this scheme already done here?"**
+  Those are one job each for the `citadel:investigator` and `citadel:scout` agents: `references/more.md`,
+  "Investigator and scout", says what to give each and what comes back.
 - **A sweep or a chain of lookups.** A sweep whose raw reads the session won't need again (many files,
   long ones, a chain of lookups) goes to an `Explore` Grunt on Sonnet, briefed for the conclusion and
   the exact lines that matter, not file dumps. A few targeted reads, or reads the session will act on
@@ -146,19 +112,8 @@ Ask one question: will the session need what this step reads, or only what it co
 
 ## Briefing a worker for a heavy step
 
-A long-lived session that owns a branch (a build, a big feature) keeps the plan, the
-requester's questions, the decisions and the replies, and hands each heavy step (a merge with
-conflicts, a batch of fixes, a regeneration, a full check pass) to a fresh worker. On Delve a
-build session did four merges inline and their diffs and conflict dumps were 12% of everything
-that ever filled its context; code reads for review fixes were 34%.
-
-The brief is the worker's only context, so it names: the branch and its head, the step's own
-text in the skill (point at it, don't retype it), the repo's merge rules, and what to return in
-at most 15 lines (3 lines in a fan-out, see below): the pushed sha, tests green or red with counts, each conflict and how it was
-resolved, files touched, and anything left undone. A conflict that needs a judgment call is not
-the worker's to settle: it stops at its last green commit and returns the question. One worker
-writes the branch at a time; the session commits before starting it and leaves the tree alone
-while it runs. The session trusts the summary and CI; it does not re-run what the worker ran.
+A long-lived session that owns a branch (a build, a big feature) hands each heavy step to a fresh
+worker: open `references/more.md`, "Briefing a worker for a heavy step", before briefing one.
 
 ## Writing the brief
 
@@ -180,21 +135,15 @@ Several reviewers, or a loop, make a fan-out: they write findings to files and r
 (see below). When several report, merge from their files: the same file:line and the same issue is
 one finding, and where severities conflict the higher wins.
 
-## Before looping an agent
-
-Loop an agent only if all four hold: the task repeats often, the goal is machine-checkable, the
-budget fits the number of rounds, and the agent can see the result of each round. Give every loop
-a stop condition. Watch for the agent gaming the verifier (Goodhart) rather than meeting the
-goal. A person owns the goal.
+Loop an agent only after the four checks in `references/more.md`, "Before looping an agent".
 
 ## Fan-outs: one page, not a stream
 
 A turn that starts more than 2 Grunts, or loops one Grunt more than once, is a fan-out. This
 threshold sets how the Grunts report back; where the work runs is the more-than-four-jobs rule
 above. Added on
-Delve #55 (Cara, 2026-10-30): 8 drawers and 8 critics over 3 rounds put about 16 reports of 20 to
-40 lines each into the chat per round. Every Grunt's report lands in the chat as well as in your
-context, so a fan-out must not return prose.
+Every Grunt's report lands in the chat as well as in your
+context, so a fan-out must not return prose (the story: `references/evidence.md`).
 
 - Each Grunt writes its full report to a file, in the worktree or in scratch outside the shared
   folder, and returns at most 3 lines: verdict, path, one headline. Put that in every brief.
@@ -205,24 +154,9 @@ context, so a fan-out must not return prose.
   page rather than starting another.
 - The 3-line return still has to carry anything that blocks you, such as "failed, no file
   written". Don't ask a Grunt to hide a failure to keep the return short.
-- Claude Code's Workflow tool runs a fan-out as a script, and only its return value reaches your
-  context. It is off unless a minion is opted in, as it adds about 2k tokens to every call: a
-  minion that will fan out asks the Taskmaster for it (create_ticket or update_ticket
-  `workflow: true`, or the composer's Workflow picker), ideally at creation, since a later flip
-  breaks the prompt cache once. It applies from the next turn.
+- The Workflow tool runs a fan-out as a script: `references/more.md` says when a minion gets it.
 
-## What else fills a session
-
-Over six context windows of one Delve build, about 18% of what filled the session was repeats
-that helped nobody. Three of them a session controls:
-
-- **The checklist.** Every update resends the whole list. Keep it under ten lines, collapse finished
-  steps into one line, and update it when a step changes, not on every call.
-- **The PR description.** Write it once at a milestone, from the worker that ran the checks,
-  rather than reading and rewriting it in the session every round (that alone cost 3.6%).
-- **Memory files.** Each edit to a memory file is shown back in full, and memory files come back
-  after every compaction. Live status goes on the checklist; memory takes durable facts, edited
-  at a milestone, not at every step.
+What else fills a session (the checklist, the PR description, memory files): `references/more.md`.
 
 ## The model is the smaller lever
 

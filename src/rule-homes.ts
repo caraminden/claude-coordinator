@@ -103,7 +103,7 @@ export const RULE_HOMES: RuleHome[] = [
   {
     id: 'ui-checks',
     title: 'UI checks for every front end',
-    home: { kind: 'repo', file: 'kit/skills/self-review/SKILL.md', section: 'UI checks for every front end' },
+    home: { kind: 'repo', file: 'kit/skills/self-review/references/ui-checks.md', section: 'UI checks for every front end' },
     pointer: 'the UI checks (citadel:self-review, "UI findings")',
     phrases: ['proportional checks', 'no reflow without input', 'sit for a minute', 'automated layout shift check', 'big pieces of the ui', 'scrollbar coming and going', 'never in backticks or a bare domain'],
   },

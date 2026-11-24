@@ -107,7 +107,7 @@ nothing? Write `No findings.` Never invent one to fill the list.
 | Smells | a new module, or over about 100 new lines of logic |
 | Agent instructions | text an agent reads as instructions: the Citadel kit, `CLAUDE.md`, `AGENTS.md`, `.claude/`, or a prompt, guide or tool description Project facts lists under "Agent instructions", or the message a hook gives an agent |
 | Check claims | a check added or changed: anything that reports pass or fail, a problem list or a count (a test, an eval, a lint, audit or check script, a grep), or a Project facts check command |
-| UI findings, in `<kit>/skills/self-review/SKILL.md` | a file in the front end, as Project facts names it |
+| UI findings, in `<kit>/skills/self-review/references/ui-checks.md` | a file in the front end, as Project facts names it |
 
 #### Error handling
 

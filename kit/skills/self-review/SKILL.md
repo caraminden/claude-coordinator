@@ -23,7 +23,7 @@ line: everything is on, as written here.
   from its verdict, and ship with that label as usual.
 - **A lens off:** write `Lenses: by the diff, except <names>` in the reviewer's brief.
 - **Finding checker off:** skip it on deep reviews.
-- **Fresh eyes off:** no `citadel:fresh-eyes` Grunt (see "Fresh eyes" in 2). It is its own switch: with the pre-ship review off and fresh eyes on, a medium feature still gets it.
+- **Fresh eyes off:** no `citadel:fresh-eyes` Grunt (`references/review-extras.md`, "Fresh eyes"). It is its own switch: with the pre-ship review off and fresh eyes on, a medium feature still gets it.
 - **Additions** (the scheme's own lines, people's verdicts, and the lessons its finding checker
   taught the reviewer): add `Also read <file>, this scheme's additions to the review` to the brief.
 
@@ -49,18 +49,10 @@ Before your final test run, rebase onto your base once (the one "take a newer ba
 
 **Critics run before any `hand_off_land`, low-first path included.** A diff that matches a critic's `when:` (any `public/` file: `ui-screenshots`, even a timing-only change the shots can't show) is refused until that critic's run is on record: run `citadel:critique` with the rubric from your turn's review-set folder, then `review_set` with `run: {round, verdict}`.
 
-**Alongside the ship.** A change qualifies when how it ships is `hand_off_land` (the server runs
-the ship and the call returns at once), the Shipping line in your prompt lets a low change ship
-with no go and no try first, the sizing is Light, the branch is no feeder's (a feeder reviews
-before it merges in: 2, "A feeder"), and the file list alone says low.
-`git diff --name-only main...HEAD` shows only front-end files, `README.md`, docs outside
-`docs/rubrics/` and `docs/design-system/`, and test files that exercise no high-risk file, and it
-shows none of: a file on Project facts' high-risk-by-file or medium-at-least lists, a file under
-its "Agent instructions", `CLAUDE.md`, `.claude/`, the kit, or a file a Project facts rubric's
-`when:` matches. Decide this from the file list before any review; a doubt about one file means it
-doesn't qualify. A qualifying change hands off its ship as soon as its tests are green and the
-screenshots are checked, and the review in sections 2 to 4 runs in the same turn while the ship
-runs. Everything else reviews first.
+**Alongside the ship.** When how it ships is `hand_off_land` and the file list alone may say low,
+open `references/ship.md`, "Alongside the ship": it says which changes hand off their ship before
+the review and run sections 2 to 4 while it runs. Decide it from the file list before any review.
+Everything else reviews first.
 
 ## 2. Review in a Grunt
 
@@ -80,24 +72,12 @@ quoted whole from your system prompt) plus:
 loaded): the Grunt can't resolve it itself. Name lenses instead of "by the diff" only to add one
 the triggers miss. Give it the code, not your view of it: no summary of what you think is fine.
 
-**A feeder** (your base is `build/<n>`) is reviewed on the build's tip, not on the commit it started
-from: bugs where feeders meet only show beside the other feeders' merged code (Peek Auras' Build 4
-found 2 Must fix and 5 Should fix at those seams in the whole-build review, too late, after four
-feeders had closed). Right before starting the review Grunts:
+**Open `references/review-extras.md` when one applies:**
+- **A feeder** (your base is `build/<n>`): reviewed on the build's tip, with two more brief lines.
+- **Codex second opinion (light and deep):** when `citadel-codex-review --check` prints `ready`.
+- **Tests against the base (light and deep):** when the diff adds or changes tests.
+- **Fresh eyes:** a feature (the minion's `type`) that is not small.
 
-1. Run `git rebase build/<n>`. When it brought commits in (the facts' `BEHIND:` line lists them),
-   re-run the tests you touched.
-2. Every reviewer's brief gets the same two lines: the kit's reviewer and each of the scheme's own
-   reviewing agents your diff triggers (the "Kit reviewers" line names them; Project facts or the
-   agent's own description says which diffs each one is for). The lines are: the change is `git diff build/<n>...HEAD`, and "The other
-   feeders' work this change now sits on: `git log --oneline --no-merges main..build/<n>`; check
-   where this change meets their code." (That `main` stays main: it is what the build adds.)
-3. Fix real findings in your branch (section 3) before you merge in. A finding in another feeder's code
-   goes to the build minion (`message_minion`).
-
-If `build/<n>` takes another feeder's merge before yours and that merge changes a file your diff
-changes, rebase and run the scheme's own reviewing agents again on the new tip; not the rest. The
-build minion's whole-build review at the end stays as it is.
 
 **Deep only:** start a `citadel:finding-checker` Grunt, again with `run_in_background: false` (its pinned Opus at medium; on a high-risk change set `model: fable`, `effort: medium` on the call: dropping a
 real finding in risky code is the expensive miss), briefed with the Grunt line, the same branch
@@ -110,65 +90,8 @@ that is the same mistake as one of them takes its words. A kind refuted in three
 reviews becomes a lesson in the scheme's additions file for later reviews. A refute you think the checker got wrong
 (you fix the finding anyway) isn't recorded.
 
-**Codex second opinion (light and deep):** when `citadel-codex-review --check` prints `ready`
-(the turn's person has signed in to Codex in their container, or for the server login's host
-turns, in its Codex container), Codex, a model from another family
-on their own ChatGPT plan, reviews the same diff read-only. Start the reviewer, then in the same
-message run `citadel-codex-review --timeout 540 < "$TMPDIR/review-brief.md"` (Bash timeout
-600000); the brief's `Follow` line points Codex at the reviewer's rules. Its findings join the
-Grunt's: drop duplicates, and on a deep review the finding-checker checks them too. A non-zero
-exit (a usage limit, a timeout, or exit 4: the person's Codex usage is past 80% or ahead of pace,
-so it saves their plan) skips it: say so in the report line (`Codex: skipped: <why>`). Its last
-stderr line, `Codex usage: 5-hour N%, weekly N%`, goes in the report line too. Anything else
-`--check` prints means it isn't set up: skip it silently.
-
 A light review costs about 47k Grunt tokens and a minute (about $0.35); deep is about $1 to $1.50.
-Codex reads whatever repo the command runs in, so a review run from a scratch clone sends that
-diff to the person's plan too. That is by design; cost-check before running it on a throwaway diff.
 Don't re-review after fixes unless a fix grew past a few lines of high-row code.
-
-**Tests against the base (light and deep):** when the diff adds or changes tests, run
-`node <kit>/skills/self-review/scripts/base-check.ts` in the same message as the reviewer (Bash
-timeout 600000). It runs each changed test file once, in a scratch worktree holding the base's code
-and the branch's tests, and judges each new or changed case:
-
-- `red`: it fails without the change, so it tests the change. A file that can't load or build on
-  the base (it imports what the change adds) is red too.
-- `PASSES ON BASE`: a finding for 3. A test that passes without the change pins what the code
-  already does. Make it go red on the base by asserting what the change should do, or keep it
-  and say why in the report: a refactor's safety net, or a regression guard for behaviour that
-  already worked. It doesn't raise the label by itself.
-- `skipped: <why>`: not checked (a stack it can't run, a missing tool, a timeout, a case the
-  run's output never names, a new Rust test module). Say so in
-  the report; a skip is no pass.
-
-Leave it out for docs-only changes, UI changes the scheme proves by screenshot, and diffs that
-touch no test. When the check command in Project facts runs one file in a way the helper can't
-guess (a wrapper, an env var), pass it as `--cmd '<command with {file}>'`. Its `Result:` line
-goes under the Risk line in 5.
-
-**Fresh eyes (medium or larger features only):** a feature that is not small gets a
-`citadel:fresh-eyes` Grunt before you call it ready, in the same message as the reviewer
-(`run_in_background: false`). It asks whether you built what the requester asked for, which the
-reviewer doesn't. A run costs about $1 (its pinned Opus at high), so the cut is strict
-(Josh, 2026-11-19: "Only on medium or larger features, not small ones"):
-
-- **Runs** when the work is a feature (the minion's `type` property, or the kind the brief names) and it is not
-  small. Medium is the size of the feature, not its risk label.
-- **Small, so it skips:** touches three files or fewer (test and doc files not counted) and changes
-  under about 150 lines (`git diff --stat main...HEAD`, all files), and adds no new screen, flow or table. Any one of those three broken
-  makes it not small. A doubt means it runs.
-- **Never runs** for bugs, chores, research, docs or art.
-- **Off** when the turn's "Kit reviewers" line says fresh eyes is switched off: no Grunt.
-- **Its own step:** it runs even when the pre-ship review is off (then start it alone, no reviewer to share a message with), and whether the retro is written yet doesn't matter.
-
-Brief it as in the reviewer's brief (the Grunt line, branch, worktree, `<kit>`), with
-`Follow <kit>/agents/fresh-eyes.md`, the requester's own words verbatim with their times (or the
-path of a handoff that quotes them; never your summary of them), the diff `git diff main...HEAD`,
-and the done lines if your first reply showed any. Hand it the spec or PR text only as the
-agent's step 3 says. Its three lists (built but not asked, asked but not built, read
-differently) are findings like the reviewer's: fix them or list them under "Not fixed" with a
-reason. Record the run with `review_set` (slug `fresh-eyes`).
 
 ## 3. Fix what's real
 
@@ -222,41 +145,15 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 
 ## 5. Report and ship
 
-- **Alongside the ship:** the steps, in one turn:
-  1. Run any critic whose `when:` matches first (section 3's rubrics), then `hand_off_land` with risk `low` and the reason `low by file list; review runs alongside`. Code review runs alongside a ship, critics don't: the hand-off refuses a change a critic matches until its run is on record (Cara, 2026-11-21: "Code review can be simultaneous, but critics not").
-  2. Keep the turn open and run sections 2, 3 and 4: reviewer, base check, Codex and any fresh eyes in one message, `run_in_background: false`. The ship runs on the server meanwhile; an open turn can't cut the Grunt off.
-  3. Nothing real found: end the turn with the report line below. The server dismisses you once the ship is clean.
-  4. Something real fixed: commit and `hand_off_land` again with the same `risk` and `risk_reason` and the summary `follow-up: <what the review found>`. It waits for the first ship if that still runs, so a slow return is the line, not a hang.
-  5. The first ship fails while the review runs: its wake arrives after your turn ends. Fix the failure on top of the review's commits and hand off again.
-  A qualifying change that the review shows is medium or high is a defect in the file-list test: say so in the Risk line, and the follow-up takes that label's route.
+- **Alongside the ship:** the steps are in `references/ship.md`, "Alongside the ship".
 - **The go threshold:** the Shipping line in your prompt says which labels wait for a person's go
   (with no Shipping line: high only; "No change waits": none). Below it, the label ships by itself;
-  at or above it, it takes the High route below, whatever the label, unless the line says the
+  at or above it, it takes the High route (`references/ship.md`), whatever the label, unless the line says the
   merge's own Approve is the go: then open the pull request and merge it, with no card. One way
-  out: a bug fix that passes the fix route below ships with no go.
-- **The fix route** (Cara, 2026-11-20, "Fixes ship; data still asks": "the thing we are trying to
-  protect is already broken, shouldnt we just fix it?"). At or above the threshold, a change skips
-  the go when your minion's `type` is bug and all four hold:
-  1. **A test proves it.** A test file that ran red on main's tip and green on your branch. Record
-     it, don't claim it: write or change the test (or name one main already has red) and commit.
-     Run your test file against main's code, not your fix: a scratch clone checked out at the main
-     commit your branch is built on (`git merge-base HEAD main`) with only your test file copied in.
-     Keep the failing lines it prints, then run it green on your branch. The test file, that main
-     commit's sha and the failing lines are the proof.
-  2. **The deep review is clean:** run deep whatever the diff's size, and nothing real is left
-     unfixed.
-  3. **No data, no auth:** no migration that changes rows or columns already there, no deletion
-     of data, and no change to any file Project facts marks as auth.
-  4. **A plain revert undoes it** (two-way door in 4).
-  On `hand_off_land`, pass `fix_proof` in place of `go`: `{ test, red_on, red_output, review }`
-  (`review` starts "clean"). The server checks what git can show: type bug, the test a file your
-  branch commits (changed by it, or a test file), `red_on` on main and in your branch, and a diff
-  with no path named for auth, migration or SQL that rewrites or deletes data; anything it refuses
-  takes the High route. The rest is your word: the red run, the review, a revert, and auth files
-  only Project facts names. On a pull-request path, the PR description carries the same proof and the line
-  `Shipped as a fix without a go: <test>`. Members get that one line on the shipped line and the
-  Releases row, no card. It never applies where every change waits for a person, and a new rule or
-  feature is not a fix, even in a high-risk file.
+  out: a bug fix that passes the fix route (`references/ship.md`) ships with no go.
+- **The fix route:** at or above the threshold, a bug fix with a recorded red-then-green test, a clean
+  deep review, no data or auth change and a plain revert can ship with no go. When your minion's
+  `type` is bug, open `references/ship.md`, "The fix route", for the four conditions and `fix_proof`.
 - **Below the threshold:** carry on with how a change ships, as the Shipping line says (with none,
   the scheme instructions; with neither, open the PR and stop there). The ready note leads
   with the label in a few words, within its 60 characters (`risk medium: runner retries`), and
@@ -271,44 +168,10 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 - **Both:** under that line, `Process: <the skill, agent, doc or tool that sent this change the
   wrong way, and how>` or `Process: none`. Anything
   but none goes to the scheme's retro log (the answer-check hook writes it), where the process digest batches it.
-- **At or above the threshold (High), unless the fix route above holds:** stop before shipping. Post the same line, the findings you fixed in one line each,
-  and an `ask_question` card with `kind: "merge"` and header "Ship It" (the minions list's chip reads "Ship It"), "Ship this <label>-risk change?" (Ship It /
-  Hold, with your pick marked recommended). A feeder's change merges into its build, so its card says Merge: header "Merge", "Merge this <label>-risk change into Build <n>?" (Merge / Hold). Set state null, note `risk <label>: waiting for a go`,
-  and end the turn. Ship only on a go.
+- **At or above the threshold (High), unless the fix route holds:** stop before shipping. The card
+  and the steps are in `references/ship.md`, "The High route". Ship only on a go.
 
 ## UI findings
 
-### UI checks for every front end
-
-Every scheme's front end, built or reviewed, follows these (moved here from the Citadel-wide
-Settings, #1576); a break is a Should-fix finding:
-
-- Vertical padding (contraption-ui rule 1): text or an icon in anything boxed (a bar, button, row or chip) gets the same non-zero padding top and bottom. Check it in screenshots.
-- Proportional checks: test and screenshot what the change touches, not the whole app.
-- Clicks never freeze the UI (Cara, 2026-11-08; her words are in contraption-ui rule 23). A person's action shows its result at once and the request runs behind it; a failure rolls back that one item with a toast and a retry. In contraptions use the kit's `optimistic()`.
-- No reflow without input (Cara, 2026-11-16: "UI reflowing without a user input should be avoided, especially if it moves big pieces of the UI around"). Nothing on screen moves unless the person did something. Content that arrives or changes on its own (live status, counts, timers, cards, images, a scrollbar coming and going) keeps a reserved size or appears where it pushes nothing: fixed or min widths, tabular numbers, `scrollbar-gutter: stable`, placeholders sized like what replaces them. Sideways shifts and moves of big pieces (panes, the rail, the chat column) are the worst. Check a page that updates live by letting it sit for a minute and comparing positions, and prefer an automated layout-shift check where it can repeat.
-- Links are clickable (Cara, 2026-11-09, her words in contraption-ui rule 6; Josh, 2026-11-10, extended it to documents). Any URL, DOI or reference to another page or item that a UI shows is a real link, never plain text or only a tooltip; external ones open in a new tab; text from data is linkified on render. The same holds for documents written for people: every URL, console page or external doc is a markdown link `[name](https://…)`, never in backticks or a bare domain.
-
-### Web front ends
-
-For a diff that touches the front end, each of these is a Should-fix finding. The rules behind
-them are "The rules" in `citadel:contraption-ui`.
-
-- A hand-built twin of a part the kit serves (Cara, 2026-11-17: "using reusable components"): a
-  dialog not built with `openDialog` or `cui-dialog`, a toast not from `toast`, a tooltip not from
-  `data-tip`, a picture viewer not from `lightbox`, or, in a contraption (an app under
-  `/apps/<name>/`), hand-rolled markdown, a chat log or a composer. Where the part lacks something,
-  the fix is adding it to the part. A copied Citadel hex colour instead of its `--citadel-*` variable.
-- A clickable `div` or `span` where a native control (`<button>`, `<a href>`, an input) belongs;
-  an icon-only button with no `aria-label`; an `<img>` with no `alt`; a field other than the
-  composer named only by its placeholder.
-- An action reachable only on `:hover` or only by dragging; meaning carried by a colour alone.
-- `outline: none` with no `:focus-visible` ring; animating `width`, `height`, `top`, `left` or a margin; a
-  loop that isn't a spinner or skeleton; a duration not from `--citadel-motion`; a state change
-  finished in `transitionend` or `animationend`; anything on the "Flag on sight" list in
-  `contraption-ui`'s `references/motion.md`.
-- A fixed `height` or `overflow: hidden` on a box of text (the status line's one-line cut is
-  fine); `100vh`; a long URL, id or table that
-  can push a phone page sideways; an `<img>` with no size or `aspect-ratio`.
-- A status, error or new element inserted into the flow; a submit that can fire twice; an empty
-  or failed state that is blank or says only "Error".
+When the diff touches a front end, open `references/ui-checks.md`: the UI checks for every front
+end and the web front-end findings, each break a Should-fix finding.

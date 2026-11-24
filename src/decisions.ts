@@ -401,9 +401,9 @@ export function adrDir(claudeMd: string): string {
   return (m?.[1] ?? 'docs/adr/').replace(/^\.\//, '').replace(/\/?$/, '/');
 }
 
-/** Each commit that changed a dated line in these paths, as before/after pairs per file (oldest first). Cached by HEAD. */
 /** At most this many scheme/path sets are kept; the oldest goes first. */
 export const HISTORY_CACHE_MAX = 8;
+/** Each commit that changed a dated line in these paths, as before/after pairs per file (oldest first). Cached by HEAD. */
 const historyCache = new Map<string, { head: string; edits: Map<string, Edit[]> }>();
 export async function gitEdits(repo: string, paths: string[], href: (file: string, sha: string) => string | null): Promise<Map<string, Edit[]>> {
   const head = await gitOut(['rev-parse', 'HEAD'], repo);

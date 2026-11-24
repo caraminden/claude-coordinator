@@ -7,7 +7,7 @@ import { sideGuard } from '../../src/side-guard.ts';
 
 const LIVE = /\/projects\/\d+\/shared\/project|coordinator\.db|\/home\/[^/"]+\/claude-coordinator\b|~\/claude-coordinator\b|\.claude\/projects\//;
 // The kit's read-only review scripts a reviewer is told to run (the Tests lens's test-habits), with only their own flags.
-const KIT_READS = /^(cd\s+[\w./-]+\s*&&\s*)?node\s+\S*\/kit\/skills\/test-quality\/scripts\/test-habits\.ts(\s+--(base|max-lines|words)\s+[\w./-]+)*\s*$/;
+const KIT_READS = /^(cd\s+[\w./-]+\s*&&\s*)?node\s+[\w./-]*\/kit\/skills\/test-quality\/scripts\/test-habits\.ts(\s+--(base|max-lines|words)\s+[\w./-]+)*\s*$/;
 const deny = (why: string) => console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: why } }));
 try {
   const input = JSON.parse(readFileSync(0, 'utf8'));

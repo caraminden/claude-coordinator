@@ -7,7 +7,8 @@
 //
 // It reads only the lines the branch adds (git diff <merge-base>...HEAD) to test files, and flags:
 //   seam      a new test file named for a fix (-replay, -regression, -repro, a bug number), or a new short one, whose
-//             seam (the source modules it imports, the rare strings it sends) an existing test file already drives;
+//             seam (its name, the source modules it imports, the rare strings it sends) an existing test file already
+//             drives (no such file found: no line, since there is nothing to name);
 //   prose     an assert that matches a regex or a substring of 4+ words (a sentence of prompt, copy or tool text);
 //   sleep     a fixed sleep or idle of 100 ms or more (setTimeout into a promise, sleep, delay, time.sleep...);
 //   harness   a new copy of a harness: a function whose lines mostly repeat one in another test file or a shared
@@ -327,7 +328,6 @@ export function scan(root: string, added: Added, opts: { maxLines?: number; word
               .join(', ')}`
           : 'same name';
         if (m) hits.push({ file, line: 1, kind: 'seam', text: `${fixNamed ? 'new file named for a fix' : `new ${src.split('\n').length}-line file`}; ${m.file} already drives the same seam (${shared}): add the case there as a row or an assert, unless this file opens a new seam` });
-        else if (fixNamed) hits.push({ file, line: 1, kind: 'seam', text: "new file named for a fix: a fix's case goes into the file that drives that behaviour (grep the test folder for what it calls); a new file is for a new seam" });
       }
     }
     let fake = false;

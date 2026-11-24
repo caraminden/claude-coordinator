@@ -86,8 +86,9 @@ async function connect() {
 let failed = 0;
 const check = (ok, what) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${what}`); if (!ok) failed++; };
 const form = `document.getElementById('login-form')`;
+// The password itself never goes in the log: its length, and whether it is the dev copy's.
 const STATE = `(() => { const f = ${form}; const r = f?.querySelector('.login-remember'); const e = document.getElementById('login-error');
-  return f && { login: f.login.value, password: f.password.value, row: !!r && !r.hidden, ticked: !!f.remember?.checked,
+  return f && { login: f.login.value, pw: f.password.value.length, same: f.password.value === ${JSON.stringify(cfg.password)}, row: !!r && !r.hidden, ticked: !!f.remember?.checked,
   forget: !!r && !r.querySelector('button').hidden, error: e.hidden ? '' : e.textContent }; })()`;
 const SIGN_OUT = `[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Sign out').click()`;
 const file = path.join(profile, 'saved-login.bin');
@@ -101,7 +102,7 @@ try {
   await c.until('the sign-in page', `!!${form}`);
   await c.until('the Remember row', `!${form}.querySelector('.login-remember').hidden`);
   let st = await c.ev(STATE);
-  check(st.row && !st.ticked && !st.password, 'first sign-in page: Remember shows, unticked, nothing filled');
+  check(st.row && !st.ticked && !st.pw, 'first sign-in page: Remember shows, unticked, nothing filled');
   await c.ev(`(() => { const f = ${form}; f.login.value = ${JSON.stringify(cfg.login)}; f.password.value = ${JSON.stringify(cfg.password)}; f.remember.click(); })()`);
   await c.shot('1-remember');
   await c.ev(`${form}.querySelector('button[type=submit]').click()`);
@@ -114,7 +115,7 @@ try {
   await c.until('the fill after signing out', `!!${form}?.password.value`);
   await sleep(3000);
   st = await c.ev(STATE);
-  check(st.login === cfg.login && st.password === cfg.password && st.ticked && st.forget, 'after signing out: login and password filled, Remember ticked, Forget shows');
+  check(st.login === cfg.login && st.same && st.ticked && st.forget, 'after signing out: login and password filled, Remember ticked, Forget shows');
   check(await c.ev(`!!${form}`), 'it waits on the sign-in page: no sign-in by itself after 3 s');
   await c.shot('2-filled');
 
@@ -129,7 +130,7 @@ try {
   c = await connect();
   await c.until('the fill after a restart', `!!${form}?.password.value`);
   st = await c.ev(STATE);
-  check(st.password === cfg.password && st.ticked, 'after restarting the app: still filled');
+  check(st.same && st.ticked, 'after restarting the app: still filled');
 
   // A saved password the server refuses is dropped, and the form shows empty with the error.
   await c.ev(`window.citadelDesktop.saveLogin(${JSON.stringify(cfg.login)}, 'not-the-password-1754')`);
@@ -137,8 +138,9 @@ try {
   await c.until('the wrong fill', `${form}?.password.value === 'not-the-password-1754'`);
   await c.ev(`${form}.querySelector('button[type=submit]').click()`);
   await c.until('the refusal', `!document.getElementById('login-error').hidden`);
+  await c.until('the form emptied', `!${form}.password.value`);
   st = await c.ev(STATE);
-  check(!st.password && !st.ticked && !st.forget && /wrong/i.test(st.error), `a refused saved password: form emptied, unticked, error shown ("${st.error}")`);
+  check(!st.pw && !st.ticked && !st.forget && /wrong/i.test(st.error), `a refused saved password: form emptied, unticked, error shown ("${st.error}")`);
   check(await waitFile(false), 'a refused saved password is deleted');
   await c.shot('3-refused');
 
@@ -152,13 +154,29 @@ try {
   await c.ev(`${form}.querySelector('.login-remember button').click()`);
   await sleep(500);
   st = await c.ev(STATE);
-  check(!st.password && !st.ticked && !st.forget, 'Forget: password emptied, unticked, Forget hidden');
+  check(!st.pw && !st.ticked && !st.forget, 'Forget: password emptied, unticked, Forget hidden');
   check(await waitFile(false), 'Forget deletes the saved file');
   await c.shot('4-forgotten');
   await c.send('Page.reload', {});
   await c.until('the sign-in page', `!!${form}`);
   await sleep(2000);
-  check(!(await c.ev(STATE)).password, 'after Forget, the next sign-in page is not filled');
+  check(!(await c.ev(STATE)).pw, 'after Forget, the next sign-in page is not filled');
+
+  // Signing in as the saved login with Remember unticked drops it too.
+  await c.ev(`(() => { const f = ${form}; f.login.value = ${JSON.stringify(cfg.login)}; f.password.value = ${JSON.stringify(cfg.password)}; f.remember.click(); f.querySelector('button[type=submit]').click(); })()`);
+  await c.until('signed in', `!${form}`);
+  check(await waitFile(true), 'saved again');
+  await c.until('the Sign out button', SIGN_OUT.replace('.click()', ''));
+  await c.ev(SIGN_OUT);
+  await c.until('the fill again', `!!${form}?.password.value`);
+  await c.ev(`(() => { const f = ${form}; f.remember.click(); f.querySelector('button[type=submit]').click(); })()`);
+  await c.until('signed in', `!${form}`);
+  check(await waitFile(false), 'signing in with Remember unticked deletes the saved password');
+  await c.until('the Sign out button', SIGN_OUT.replace('.click()', ''));
+  await c.ev(SIGN_OUT);
+  await c.until('the sign-in page', `!!${form}`);
+  await sleep(2000);
+  check(!(await c.ev(STATE)).pw, 'after signing in unticked, the next sign-in page is not filled');
 } catch (e) {
   console.log(`FAIL ${e.message}`);
   failed++;

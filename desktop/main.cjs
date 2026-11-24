@@ -188,7 +188,7 @@ ipcMain.on('citadel:inspect', (e, x, y) => {
 const saved = () => savedLogin(app.getPath('userData'), safeStorage);
 ipcMain.handle('citadel:login-saved', (e) => (fromCitadel(e.senderFrame, START) ? { canSave: saved().available(), login: saved().get() } : null));
 ipcMain.handle('citadel:login-save', (e, login, password) => fromCitadel(e.senderFrame, START) && saved().save(login, password));
-ipcMain.handle('citadel:login-forget', (e) => { if (fromCitadel(e.senderFrame, START)) saved().forget(); });
+ipcMain.handle('citadel:login-forget', (e) => fromCitadel(e.senderFrame, START) && saved().forget());
 app.on('second-instance', show);
 app.on('before-quit', () => { remember(); quitting = true; });
 // The second copy only hands over (second-instance above): it quits before making a window or a tray icon.

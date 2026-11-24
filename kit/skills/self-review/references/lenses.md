@@ -106,6 +106,7 @@ nothing? Write `No findings.` Never invent one to fill the list.
 | Access and secrets | a file Project facts lists as auth or access control, or code that reads a secret or decides who may do what |
 | Smells | a new module, or over about 100 new lines of logic |
 | Agent instructions | text an agent reads as instructions: the Citadel kit, `CLAUDE.md`, `AGENTS.md`, `.claude/`, or a prompt, guide or tool description Project facts lists under "Agent instructions", or the message a hook gives an agent |
+| Added without a remove | `addEventListener`, a `setInterval`/`setTimeout` kept in a variable, a module-level `Map`/`Set`/array that gains entries, a cache, `systemd-run`, `spawn`, `mkdtemp` or `mkdirSync` under tmp |
 | Check claims | a check added or changed: anything that reports pass or fail, a problem list or a count (a test, an eval, a lint, audit or check script, a grep), or a Project facts check command |
 | UI findings, in `<kit>/skills/self-review/references/ui-checks.md` | a file in the front end, as Project facts names it |
 
@@ -123,6 +124,16 @@ with no sign anything went wrong:
   what-went-wrong or what-to-do.
 
 A best-effort step that says so in a comment is fine (Silenced on purpose).
+
+#### Added without a remove
+
+For each thing the diff adds that holds a resource (a listener, timer, map entry, cache entry,
+unit, process, temp folder), find what frees it and when. Run it over a long life: a tab open
+for days, a server between restarts, a test suite run thousands of times. Should fix when
+nothing frees it (a removal on the same lifetime, a size cap, an expiry, a teardown); Must fix
+when it grows with every request, render or minion. Name the line that frees it, or the
+missing one, in the finding. A resource that lives exactly as long as its owner needs no
+remove: say so and move on. Measuring a suspected leak: `citadel:diagnosing-bugs`, "Leaks".
 
 #### Comments
 

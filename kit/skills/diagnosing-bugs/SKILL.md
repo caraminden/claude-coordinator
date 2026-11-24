@@ -84,6 +84,23 @@ Sleeps help reproduce a race; they never fix one.
   tests then the victim (on a runner when the halves are big), keep whichever half still breaks it, repeat to one test. Then
   check what that test leaves behind.
 
+### Leaks
+
+A leak is a count that climbs with use, so measure counts, never a single reading.
+
+- **Count over cycles.** Take the count at start, after N cycles and after 2N, forcing GC
+  before each. Flat is no leak; a steady rise per cycle is one. A single RSS reading proves nothing.
+- **In a browser,** read `Performance.getMetrics` (`Nodes`, `JSEventListeners`) each time, and
+  look for detached elements in a heap snapshot (`detachedness`). #1747 shows the front-end case.
+- **Release what the probe holds.** `Runtime.queryObjects` and `Runtime.evaluate` results need an
+  `objectGroup`, released (`Runtime.releaseObjectGroup`) after each measure; otherwise the
+  probe is the leak (#1756 lost an hour to it). Check the probe is flat on a page that does nothing.
+- **On the box,** count units (`systemctl --user list-units`), open fds (`ls /proc/<pid>/fd`),
+  files in `/tmp` and listening ports (`ss -ltn`) next to RSS: most leaks here are processes,
+  folders and sockets.
+- **Name the grower** by diffing the counts' contents (which node, which unit, which file)
+  between the N and 2N readings, then find what should have freed it.
+
 ### When the first repro fails
 
 List 3+ hypotheses about what triggers the bug (timing, data, environment, order), each

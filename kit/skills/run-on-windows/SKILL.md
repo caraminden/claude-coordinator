@@ -57,6 +57,7 @@ page) under this skill's `scripts/`, with a line here, so the next minion starts
 Scripts already here besides the WCO rig:
 - `scripts/defender-copy/check.ps1`: does copying in a window raise Defender's SuspClip.B (#1185, #1186). Run it with the `run` task; it installs Electron into `%LOCALAPPDATA%\defender-copy` the first time.
 - `scripts/electron-app/place.mjs`: where the desktop app's window opens (fresh profile, saved place, off-screen place, maximised); no server needed.
+- `scripts/electron-app/saved-login.mjs`: the desktop app's saved password (#1754) end to end on the WCO rig's dev copy: Remember, filled after sign-out and restart, a refused one dropped, Forget.
 - `scripts/electron-app/install.ps1`: the first-install zip unzipped and its launcher started, as a person does it; `-Keep` leaves it up for a screenshot.
 
 ## Testing Citadel itself

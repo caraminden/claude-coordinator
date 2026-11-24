@@ -23,7 +23,7 @@ const DIR = join(process.env.TMPDIR || tmpdir(), 'wco-rig');
 const STATE = join(DIR, 'state.json');
 const SHOTS = join(DIR, 'shots');
 const TOPBAR_ROUTE = '#/p/99999'; // a route error: Citadel shows its own .topbar there
-interface State { token: string; host: string; rigPort: number; fwdPort: number; devPort: number; devPid: number; cookie: string; data: string; serverPid: number; scheme: string; minion: string; artifact: string }
+interface State { token: string; host: string; rigPort: number; fwdPort: number; devPort: number; devPid: number; cookie: string; login: string; password: string; data: string; serverPid: number; scheme: string; minion: string; artifact: string }
 
 const state = (): State => {
   if (!existsSync(STATE)) die('no rig running from this $TMPDIR: node rig.ts up first');
@@ -59,7 +59,7 @@ async function up() {
   const dev = JSON.parse(devCopy('status', '--json'));
   // RIG_HOST (perigee.tail59477f.ts.net) for a turn with no tailscale command, such as one in a container.
   const host = process.env.RIG_HOST ?? (JSON.parse(execFileSync('tailscale', ['status', '--json'], { encoding: 'utf8' })).Self.DNSName as string).replace(/\.$/, '');
-  writeFileSync(STATE, JSON.stringify({ token: randomBytes(12).toString('hex'), host, devPort: dev.port, devPid: dev.pid, cookie: dev.cookie, data: dev.data }));
+  writeFileSync(STATE, JSON.stringify({ token: randomBytes(12).toString('hex'), host, devPort: dev.port, devPid: dev.pid, cookie: dev.cookie, login: dev.login, password: dev.password, data: dev.data }));
   const log = openSync(join(DIR, 'server.log'), 'a');
   const server = spawn(process.execPath, [join(HERE, 'rig.ts'), 'serve'], { detached: true, stdio: ['ignore', log, log] });
   server.unref();
@@ -106,7 +106,7 @@ async function serve() {
     const [, token, what, arg] = url.pathname.split('/');
     if (token !== s.token) return res.writeHead(404).end();
     if (['driver.mjs', 'mouse.ps1', 'cleanup.ps1'].includes(what)) return file(res, join(HERE, what));
-    if (what === 'config') return res.writeHead(200).end(JSON.stringify({ upstream: `${s.host}:${state().fwdPort}`, cookie: s.cookie, route: state().scheme }));
+    if (what === 'config') return res.writeHead(200).end(JSON.stringify({ upstream: `${s.host}:${state().fwdPort}`, cookie: s.cookie, login: s.login, password: s.password, route: state().scheme }));
     if (what === 'ready') { const e = (await body(req)).toString(); driver = { ...driver, ready: !e, error: e }; wake(); return res.end('ok'); }
     if (what === 'status') return res.end(JSON.stringify({ ...driver, polledAgo: driver.polled ? Date.now() - driver.polled : null, queued: queue.length }));
     if (what === 'shot') { writeFileSync(join(SHOTS, `${decodeURIComponent(arg).replace(/[^\w .-]/g, '_')}.png`), await body(req)); return res.end('ok'); }

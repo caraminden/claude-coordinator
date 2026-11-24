@@ -11,7 +11,7 @@
 # It always exits 0 once it has a verdict, so heavy-ci.ts's own status means only "it didn't run".
 # LIGHT_CHECK_LIMIT (240 s) is the affected run's limit, LIGHT_CHECK_BUDGET (600 s) the whole run's (no file is pinned
 # past it), LIGHT_CHECK_FILES (4) the most files pinned. LIGHT_CHECK_TEST and LIGHT_CHECK_NODE stand in for
-# tools/citadel-test and tools/citadel-node in tests.
+# tools/citadel-test and tools/citadel-node in tests, LIGHT_CHECK_NPM for npm.
 set -uo pipefail
 base=${1:?usage: light-check-run.sh <main commit>}
 ct=${LIGHT_CHECK_TEST:-tools/citadel-test} node=${LIGHT_CHECK_NODE:-tools/citadel-node}
@@ -20,6 +20,13 @@ verdict() { echo "light check: $*"; exit 0; }
 git cat-file -e "$base^{commit}" 2>/dev/null || verdict "no verdict: main's commit $base isn't in this checkout"
 out=$(mktemp) main=''
 trap 'rm -f "$out" "$out.alone"; [ -z "$main" ] || git worktree remove --force "$main" >/dev/null 2>&1' EXIT
+# The side runner keeps its workspace and citadel-heavy.yml runs no npm ci: a ship that adds a devDependency was red
+# here for want of it (#1789). Install when this commit's lockfile isn't the one last installed.
+lock=$(sha256sum package-lock.json 2>/dev/null | cut -d' ' -f1)
+if [ -n "$lock" ] && [ "$(cat node_modules/.light-check-lock 2>/dev/null)" != "$lock" ]; then
+  "${LIGHT_CHECK_NPM:-npm}" ci --ignore-scripts --no-audit --no-fund >"$out" 2>&1 </dev/null && echo "$lock" >node_modules/.light-check-lock \
+    || { tail -n 20 "$out"; verdict "no verdict: npm ci failed (its lines above say why)"; }
+fi
 rc=0
 nice -n 10 "$ct" --affected --base "$base" --timeout "${LIGHT_CHECK_LIMIT:-240}" >"$out" 2>&1 </dev/null || rc=$?
 tail -n 60 "$out"

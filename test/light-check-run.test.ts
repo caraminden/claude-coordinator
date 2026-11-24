@@ -2,7 +2,7 @@
 // FAKE_CT_OUT and exits FAKE_CT_RC); each failed file then runs alone for real, with node, on the ship's commit and on main.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -53,6 +53,30 @@ test("light-check-run: green, red that is the ship's own, flakes, main's own red
     assert.equal(r.run(1, '✖ 0 passed, 1 failed').verdict, 'light check: no verdict: red (status 1) with no test file named');
     assert.equal(r.run(1, '✖ test/b.test.mjs:2 › breaks', { LIGHT_CHECK_BUDGET: '0' }).verdict, 'light check: no verdict: test/b.test.mjs (out of time)');
     assert.equal(git(r.dir, 'worktree', 'list').split('\n').length, 1, "main's checkout is gone");
+  } finally {
+    r.done();
+  }
+});
+
+test('light-check-run: installs packages when the lockfile changed, once (#1789)', () => {
+  const r = repo();
+  try {
+    // A fake npm that logs its call and makes node_modules, as `npm ci` does; NPM_RC makes it fail.
+    writeFileSync(join(r.dir, 'fake-npm'), '#!/usr/bin/env bash\necho "npm $*" >>npm.log\nmkdir -p node_modules\nexit "${NPM_RC:-0}"\n', { mode: 0o755 });
+    const npm = { LIGHT_CHECK_NPM: join(r.dir, 'fake-npm') };
+    const calls = () => (existsSync(join(r.dir, 'npm.log')) ? readFileSync(join(r.dir, 'npm.log'), 'utf8').trim().split('\n') : []);
+    assert.equal(r.run(0, '✔ 1 passed', npm).verdict, 'light check: green', 'no lockfile: nothing to install');
+    assert.deepEqual(calls(), []);
+    writeFileSync(join(r.dir, 'package-lock.json'), '{"v":1}');
+    assert.equal(r.run(0, '✔ 1 passed', npm).verdict, 'light check: green');
+    assert.deepEqual(calls(), ['npm ci --ignore-scripts --no-audit --no-fund']);
+    r.run(0, '✔ 1 passed', npm);
+    assert.equal(calls().length, 1, 'the same lockfile again: no second install');
+    writeFileSync(join(r.dir, 'package-lock.json'), '{"v":2}');
+    assert.equal(r.run(0, '✔ 1 passed', { ...npm, NPM_RC: '1' }).verdict, 'light check: no verdict: npm ci failed (its lines above say why)');
+    assert.equal(calls().length, 2);
+    r.run(0, '✔ 1 passed', npm);
+    assert.equal(calls().length, 3, 'a failed install is tried again next time');
   } finally {
     r.done();
   }

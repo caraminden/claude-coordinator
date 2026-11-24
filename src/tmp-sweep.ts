@@ -23,7 +23,8 @@ const NAMES: { re: RegExp; pid: boolean }[] = [
 
 /** Test leftovers are old for days before they go, so no run of a suite can still be using one. */
 export const TEST_MIN_AGE_MS = 3 * 24 * 60 * 60_000;
-const SUFFIX = '-[A-Za-z0-9]{6}';
+// mkdtemp's six characters; one has a digit or capital (all lowercase is 0.5% of real ones), so a plain word like "-backup" never matches.
+const SUFFIX = '-(?=[a-z]*[A-Z0-9])[A-Za-z0-9]{6}';
 const stems = (list: string[]) => new RegExp(`^(?:${list.join('|')})${SUFFIX}$`);
 const TEST_NAMES: { re: RegExp; file?: boolean }[] = [
   {
@@ -34,7 +35,7 @@ const TEST_NAMES: { re: RegExp; file?: boolean }[] = [
     ]),
   },
   // Other schemes' tests, left to this sweep by their Taskmasters (VoiceAnalyzer, TWIReader, Peek).
-  { re: new RegExp(`^(?:voice|twi)-[a-z0-9-]+${SUFFIX}$`) },
+  { re: new RegExp(`^(?:voice|twi)(?:-[a-z0-9-]+)?${SUFFIX}$`) },
   { re: stems(['peek-(?:wanted|auras-test|video)']) },
   // ui-measure's screenshots: files, not folders.
   { re: /^uim-(?:busy-\d+-\d+|hover-\d+)\.png$/, file: true },

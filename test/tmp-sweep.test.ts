@@ -58,6 +58,7 @@ test('old test leftovers go by name; young, busy, other-owner and unnamed ones s
     make('answer-tmp-aB3dEf', old),
     make('kit-shared-0DE0zd', old),
     make('voice-data-00mr1N', old),
+    make('voice-04ju2a', old), // bare stem
     make('twi-drafts-2-05QwZ3', old),
     make('peek-wanted-01vjum', old),
   ];
@@ -69,6 +70,7 @@ test('old test leftovers go by name; young, busy, other-owner and unnamed ones s
     make('curator-notastem', old), // wrong suffix length
     make('my-own-project-aB3dEf', old), // not a known stem
     make('voice87-profile', old),
+    make('voice-backup', old), // six plain lowercase letters: a word, not mkdtemp's
     make('peek-other-aB3dEf', old), // peek stems are named, not the whole prefix
   ];
   const busy = make('memfiles-Busy01', old);

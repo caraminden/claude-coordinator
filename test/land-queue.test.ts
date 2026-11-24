@@ -528,7 +528,7 @@ test('a waiter further back naps between looks and runs no subshell in a look, y
 
 test('a waiter further back still gives up on time when nothing moves (#1545)', { timeout: 60_000 }, async () => {
   const state = queueState();
-  const a = waiter(state, 'a', 'sleep 600');
+  const a = waiter(state, 'a', 'exec sleep 600'); // exec: the KILL below reaches the sleep, not a shell that leaves it orphaned (#1763)
   const ws: ReturnType<typeof napper>[] = [];
   try {
     await until('a to hold the lock', () => order(state).length === 1);

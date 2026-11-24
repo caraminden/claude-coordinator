@@ -7,7 +7,8 @@ import { appServerLimits } from '../src/codex-link.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { codexHigh, codexLevel, codexTop, codexWindows, windowName } from '../public/codexusage.js';
-import { testPins } from './helpers.ts';
+import { procsUnder, testPins } from './helpers.ts';
+import { until } from './wait.ts';
 testPins();
 
 // Codex's usage bar (#342): each person's own windows, a bar under Claude's above 75%, and a read for Settings.
@@ -86,4 +87,5 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   writeFileSync(silent, `#!${process.execPath}\nprocess.stdin.resume().on('end', () => process.exit());\n`);
   chmodSync(silent, 0o755);
   assert.equal(await appServerLimits([silent], 200), null, "one that doesn't answer times out");
+  await until('the silent server to end with its stdin', () => procsUnder([silent]).size === 0); // a slow start outlives the file (#1763)
 });

@@ -59,6 +59,7 @@ test('a minion shows as running while its turn is live, however stale the row th
     (runner as unknown as { keepalives: Set<number> }).keepalives.delete(t.id);
   } finally {
     writeFileSync(go, '');
-    await until('the turn to end', () => !runner.isRunning(t.id));
+    // The row too: the runner wraps the turn up after it stops counting it running, writing into the temp folder (#1763).
+    await until('the turn to end', () => !runner.isRunning(t.id) && store.getTicket(t.id)!.status !== 'running');
   }
 });

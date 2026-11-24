@@ -40,7 +40,7 @@ test('on a reader thread processes and file writes throw, a load-time copy too; 
     assert.equal(reader.readFileSync, 'ran');
     assert.deepEqual(Object.values(await inWorker(tmp.dir, false)), ['ran', 'ran', 'ran', 'ran', 'ran']);
   } finally {
-    tmp.teardown();
+    await tmp.teardown();
   }
 });
 

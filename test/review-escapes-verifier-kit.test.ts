@@ -4,9 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-// @ts-expect-error: plain .mjs, no types
 import { take } from '../tools/review-escapes/fake-claude.mjs';
-// @ts-expect-error: plain .mjs, no types
 import { MAX_BLOCKS, NEED, shortfall, tally } from '../tools/review-escapes/verifier-stay.mjs';
 
 // The verifier's state kit (#1740): the stand-in claude a dev copy's turns run, and the hook that keeps the verifier

@@ -99,8 +99,8 @@ function findTests(dir: string): string[] {
 
 function runOne(cmd: string[], cwd: string, timeoutMs: number): Promise<number | null> {
   return new Promise((resolve) => {
-    const p = spawn(cmd[0], cmd.slice(1), { cwd, stdio: 'ignore' });
-    const t = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
+    const p = spawn(cmd[0], cmd.slice(1), { cwd, stdio: 'ignore', detached: true }); // own process group, so a timeout reaches the test's children
+    const t = setTimeout(() => process.kill(-p.pid!, 'SIGKILL'), timeoutMs);
     p.on('close', (code) => {
       clearTimeout(t);
       resolve(code);

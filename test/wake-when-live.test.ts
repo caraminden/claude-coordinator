@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -314,20 +314,21 @@ test('a check leaves the event loop free while git and gh run (#526)', async () 
   sg('-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'work');
   const work = sg('rev-parse', 'HEAD');
   sg('remote', 'add', 'origin', 'https://github.com/cara/slow.git');
-  // gh as GitHub on a slow day: its answer takes 0.4 s.
+  // gh as GitHub on a slow day: it answers only once the test's event loop has seen it running (a timer wrote `seen`),
+  // or after 5 s if the loop never turns. Waiting on the loop itself, not on a clock: a wall-clock limit on the loop's
+  // longest gap failed on a loaded runner, where the process just had no CPU for 237 ms (#1825).
   const bin = join(root, 'slow-bin');
   mkdirSync(bin);
-  writeFileSync(join(bin, 'gh'), '#!/bin/sh\nsleep 0.4\necho "[]"\n');
+  const asked = join(bin, 'asked');
+  const seen = join(bin, 'seen');
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh\n: > '${asked}'\ni=0\nwhile [ ! -e '${seen}' ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done\necho "[]"\n`);
   chmodSync(join(bin, 'gh'), 0o755);
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path}`;
   const w = new LiveWaiters(store, dir, head, () => {});
-  let last = performance.now();
-  let gap = 0;
+  // The loop turning while gh runs: a timer that fires between gh's start and its answer.
   const beat = setInterval(() => {
-    const now = performance.now();
-    gap = Math.max(gap, now - last);
-    last = now;
+    if (existsSync(asked) && !existsSync(seen)) writeFileSync(seen, '');
   }, 10);
   try {
     // A scheme of its own: other tests give the shared one a repo this server doesn't run.
@@ -336,13 +337,9 @@ test('a check leaves the event loop free while git and gh run (#526)', async () 
     const t = store.createTicket({ project_id: scheme.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
     store.updateTicket(t.id, { status: 'idle' });
     store.setSetting('wake-when-live', [{ ticket: t.id, commit: work, reason: 'x', since: head }]);
-    last = performance.now();
-    gap = 0;
-    const began = performance.now();
     assert.equal(await w.check(), 0);
-    assert.ok(performance.now() - began >= 400, 'the check did ask the slow gh');
-    await new Promise((r) => setTimeout(r, 30)); // a beat after it, so a stall that ended with the check is counted
-    assert.ok(gap < 200, `the event loop stalled for ${Math.round(gap)} ms during the check`);
+    assert.ok(existsSync(asked), 'the check did ask the slow gh');
+    assert.ok(existsSync(seen), 'the event loop did not turn while gh ran: the check blocked it');
   } finally {
     clearInterval(beat);
     process.env.PATH = path;
@@ -362,8 +359,8 @@ test('checks run one at a time, and a waiter added while one runs is kept (#526)
   try {
     await w.add(slow, 'f'.repeat(40), 'x'); // asks once
     const first = w.check(); // asks again, and waits on GitHub
-    await new Promise((r) => setTimeout(r, 100));
-    assert.equal(asked, 2, 'the first check is waiting on GitHub');
+    // Wait for the ask itself: the check runs git first, which took more than a fixed 100 ms on a loaded runner (#1825).
+    await until('the first check to wait on GitHub', () => asked === 2);
     await w.add(late, null, 'the next deploy');
     const second = w.check();
     assert.equal(w.check(), second, 'a third call shares the check that has not started');

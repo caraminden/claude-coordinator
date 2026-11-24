@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { until } from './wait.ts';
 import { spawnSync } from 'node:child_process';
-import { CHECK_SCRIPT, git, KIT_FILES, lineDistance, merge3, pickBase, planScheme, schemeRepos, templateHistory, TRAILER } from '../src/kit-sync.ts';
+import { byHandNote, CHECK_SCRIPT, git, KIT_FILES, lineDistance, merge3, pickBase, planScheme, schemeRepos, templateHistory, TRAILER } from '../src/kit-sync.ts';
 
 const ID = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
 const LAND = KIT_FILES[0];
@@ -324,4 +324,59 @@ test('a Kit-Sync line outside the last paragraph is found by a body grep when th
   } finally {
     f.done();
   }
+});
+
+// ---- #1769: a clean merge that leaves two arms of one case, and the note a clash sends ----------------------------
+
+const CASE_BASE = ['#!/usr/bin/env bash', 'case "$1" in', '  a) echo a ;;', '  *) echo other ;;', 'esac', ...Array.from({ length: 12 }, (_, i) => `echo filler ${i}`), 'case "$2" in', '  x) echo x ;;', 'esac', ''].join('\n');
+const withArm = (text: string, after: string, arm: string) => text.replace(after, `${after}\n${arm}`);
+
+test('a clean merge that leaves two arms with one label in a case is a conflict naming the label', () => {
+  const f = fixture();
+  try {
+    const base = CASE_BASE;
+    const ours = withArm(base, '  a) echo a ;;', '  files) echo scheme block ;;');
+    const theirs = withArm(base, '  x) echo x ;;', '  files) echo kit block ;;');
+    assert.equal(merge3(ours, base, theirs).conflict, false, 'git merge-file takes both');
+    commit(f.kit, { [GUARD.template]: base }, 'guard base');
+    const s = repo(f.root, 'scheme');
+    commit(s, { [GUARD.path]: ours }, `sync\n\n${TRAILER}: ${git(f.kit, ['rev-parse', 'HEAD']).trim()}`);
+    commit(f.kit, { [GUARD.template]: theirs }, 'guard v2');
+    const g = planScheme(f.kit, 'HEAD', { [GUARD.template]: templateHistory(f.kit, 'HEAD', GUARD.template) }, s).find((p) => p.path === GUARD.path)!;
+    assert.equal(g.status, 'conflict');
+    assert.deepEqual(g.dupes, ['files']);
+    assert.equal(g.text, undefined);
+  } finally {
+    f.done();
+  }
+});
+
+test('a label the scheme already had twice does not turn a clean merge into a conflict', () => {
+  const f = fixture();
+  try {
+    const base = withArm(CASE_BASE, '  a) echo a ;;', '  a) echo dead arm ;;');
+    const ours = base.replace('echo filler 0', 'echo scheme filler');
+    const theirs = base.replace('echo filler 11', 'echo filler eleven');
+    commit(f.kit, { [GUARD.template]: base }, 'guard base');
+    const s = repo(f.root, 'scheme');
+    commit(s, { [GUARD.path]: ours }, `sync\n\n${TRAILER}: ${git(f.kit, ['rev-parse', 'HEAD']).trim()}`);
+    commit(f.kit, { [GUARD.template]: theirs }, 'guard v2');
+    const g = planScheme(f.kit, 'HEAD', { [GUARD.template]: templateHistory(f.kit, 'HEAD', GUARD.template) }, s).find((p) => p.path === GUARD.path)!;
+    assert.equal(g.status, 'merged');
+  } finally {
+    f.done();
+  }
+});
+
+test('the by-hand note gives the template diff between the last sync and the kit, the 2-minute self-test, npm ci and the labels', () => {
+  const note = byHandNote('/kit/repo', 'f'.repeat(40), [
+    { path: GUARD.path, status: 'conflict', base: 'trailer', baseCommit: 'a'.repeat(40), dupes: ['files'] },
+    { path: LAND.path, status: 'conflict' },
+  ]);
+  assert.ok(note.includes(`git -C /kit/repo diff ${'a'.repeat(7)} ${'f'.repeat(7)} -- ${GUARD.template}`), note);
+  assert.match(note, /last "Kit-Sync" trailer[\s\S]*land\.sh/);
+  assert.match(note, /case label[\s\S]*files/);
+  assert.match(note, /--self-test[\s\S]*2 minutes[\s\S]*background/);
+  assert.match(note, /npm ci/);
+  assert.match(note, new RegExp(`${TRAILER}: ${'f'.repeat(40)}`));
 });

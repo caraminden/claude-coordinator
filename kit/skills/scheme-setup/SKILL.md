@@ -85,7 +85,7 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
    in the source folders has no row (Citadel's is `test/layout-map.test.ts`). Where "where does X
    live" is asked, the table answers it, read on demand: never copy it into CLAUDE.md.
    The plan's check commands also include a size budget: copy `templates/size-budget.test.ts` to the repo's
-   `test/`, set its source folders, and list each file already over the line limit at its current size with a
+   `test/`, set its source folders and file extensions, and list each file already over the line limit at its current size with a
    one-line reason, so files can shrink but not grow (Citadel's is `test/size-budget.test.ts`).
 2. **Working rules**: only this repo's own (its stack's traps, a file never to edit by hand).
    The Citadel-wide layer and the scheme instructions already reach every session, so nothing

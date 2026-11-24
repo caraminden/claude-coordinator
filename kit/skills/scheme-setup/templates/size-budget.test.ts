@@ -4,7 +4,7 @@
 // Big files already here are in ALLOWED at their size, each with its reason; they can shrink but not grow.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, lstatSync } from 'node:fs';
+import { readdirSync, readFileSync, lstatSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
@@ -18,9 +18,11 @@ export const ALLOWED: Record<string, [number, string]> = {
   // 'src/big.ts': [2100, 'why it is one file'],
 };
 
+// Symlinks are skipped on purpose: their target is counted where it really lives.
 export function lineCounts(dir = root): Record<string, number> {
   const out: Record<string, number> = {};
   const walk = (rel: string) => {
+    if (!existsSync(join(dir, rel))) return; // a root this repo lacks
     for (const e of readdirSync(join(dir, rel))) {
       if (e === 'node_modules') continue;
       const path = `${rel}/${e}`;

@@ -53,8 +53,8 @@ changes the pipeline (land.sh, land.local.sh, `.github/`, the lanes map, and `PI
 Leave it at the default. A high share of red ship runs (over about 15%) argues for 2. A scheme that deploys what
 ships gives land.local.sh a `land_deploy`: the batch deploys once, and a failed deploy takes main back. Files two
 ships often change in the same place (a budget both raise, a list both append to, a generated baseline) get a
-`MERGES` line each, so the rebase merges them by rule rather than stopping. A ship whose diff is a command's
-output (a reformat, a regenerated baseline or generated files) needs no setup: it declares the command with two
+`MERGES` line each, so the rebase merges them by rule rather than stopping. A ship whose whole diff is a command's
+output (a reformat, a regenerated baseline or generated files; not a feature that also moves one) needs no setup: it declares the command with two
 trailers on one of its commits, `Regenerate: <command>` and `Regenerate-files: <patterns>`, and land.sh takes
 main's side of those files on a conflict, runs the command again after the rebase, commits what it wrote and holds the
 line (first among the waiters, alone) until it ships. A conflict refusal names the trailers. The rest of land.local.sh's hooks (guards,

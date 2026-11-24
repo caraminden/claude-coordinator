@@ -242,10 +242,15 @@ function notesBody(card) {
   ];
 }
 
-/** A memory tidy card (#1111): nothing changes until a member ticks changes on the Memory page, which this links. */
+/**
+ * A memory tidy card (#1111, #1803): Approve all has the curator apply the whole tidy in its next turn; to pick change by
+ * change, the Memory page. The notes it would delete are named outside the toggle, so none goes unseen.
+ */
 function memoryBody(card, ticketId) {
+  const deletes = [...(card.plan ?? '').matchAll(/^- \*\*delete\*\* `([^`]+)`/gm)].map((m) => m[1]);
   return [
-    h('div', {}, 'Nothing changes until a member ticks what to keep on ', h('a', { href: `#/p/${card.memory.project}/memory` }, 'the Memory page'), '. Deletes each need their own tick.'),
+    h('div', {}, 'Approve all and the curator applies it in its next turn, or pick change by change on ', h('a', { href: `#/p/${card.memory.project}/memory` }, 'the Memory page'), '. Either can be put back there for 30 days.'),
+    deletes.length ? h('div', { class: 'pwarn' }, `Deletes ${deletes.length} note${deletes.length === 1 ? '' : 's'}: ${deletes.join(', ')}`) : null,
     h('details', {}, h('summary', {}, 'Every change'), markdown(card.plan, ticketId)),
   ];
 }
@@ -277,7 +282,7 @@ export function planCard(ticketId, card, opts = {}) {
   const k = card.releaseKey;
   // A host tool card (#1147): installs software on the server, so only a member of the Citadel scheme (account.admin) approves.
   const t = card.hostTool;
-  // A memory tidy card (#1111): decided change by change on the Memory page, so it links there and has no buttons.
+  // A memory tidy card (#1111): Approve all or Reject here (#1803), or change by change on the Memory page it links.
   const mem = card.memory;
   // A held instructions edit (#1162): Save anyway, Work it in (notes optional) or Cancel edit.
   const ins = card.instructions;
@@ -290,10 +295,9 @@ export function planCard(ticketId, card, opts = {}) {
   const hint = mayApprove ? '' : t ? 'Only a member of the Citadel scheme can approve' : ins ? 'Only an admin or a Citadel scheme member can save the Citadel-wide text' : `Only ${owned.owner ? `${owned.owner} (its owner)` : 'an admin'}${owned.owner ? ' or an admin' : ''} can approve`;
   const status = h('span', { class: 'muted', role: 'status' });
   const why = h('div', { class: 'muted small', hidden: !hint }, hint);
-  const approve = h('button', { type: 'button', class: 'small', disabled: !mayApprove, title: hint || null }, ins ? 'Save anyway' : 'Approve');
+  const approve = h('button', { type: 'button', class: 'small', disabled: !mayApprove, title: hint || null }, ins ? 'Save anyway' : mem ? 'Approve all' : 'Approve');
   const revise = h('button', { type: 'button', class: 'small secondary' }, ins ? 'Work it in' : fixed ? 'Reject' : 'Revise');
   const drop = h('button', { type: 'button', class: 'small secondary', hidden: !ins }, 'Cancel edit');
-  if (mem) approve.hidden = revise.hidden = true;
   const notes = h('textarea', { class: 'pnotes', rows: 3, maxlength: 10000, placeholder: ins ? 'Where should it go? (optional)' : fixed ? 'Why? (optional)' : 'What should change?', hidden: true });
   const cancel = h('button', { type: 'button', class: 'small secondary', hidden: true }, 'Cancel');
   const sendNotes = h('button', { type: 'button', class: 'small', hidden: true, disabled: !fixed && !ins }, ins ? 'Send back' : fixed ? 'Reject' : 'Send notes');
@@ -350,7 +354,7 @@ export function planCard(ticketId, card, opts = {}) {
         approve.hidden = revise.hidden = drop.hidden = dismiss.hidden = true;
         el.classList.add('answered');
         why.hidden = true;
-        status.textContent = verdict === 'approve' ? (k ? 'Making the key…' : t && t.source !== 'pacman' ? 'Installing…' : ins ? 'Saved' : 'Approved') : verdict === 'reject' ? 'Cancelled' : fixed ? 'Rejected' : 'Revision sent';
+        status.textContent = verdict === 'approve' ? (k ? 'Making the key…' : t && t.source !== 'pacman' ? 'Installing…' : ins ? 'Saved' : mem ? 'Approved: the curator applies it next' : 'Approved') : verdict === 'reject' ? 'Cancelled' : fixed ? 'Rejected' : 'Revision sent';
       },
       send: () => api(`api/tickets/${ticketId}/verdict`, { method: 'POST', body: { planId: card.id, verdict, notes: text } }),
       undo: () => {
@@ -365,7 +369,7 @@ export function planCard(ticketId, card, opts = {}) {
         status.textContent = '';
         if (verdict === 'revise') editing(true);
       },
-      label: ins ? (verdict === 'approve' ? 'save the instructions edit' : verdict === 'reject' ? 'cancel the instructions edit' : 'send the edit back') : m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : ml ? `${verdict === 'approve' ? 'approve' : 'reject'} the lending change for ${ml.name}` : t ? `${verdict === 'approve' ? 'approve' : 'reject'} installing ${t.package}` : k ? `${verdict === 'approve' ? 'make' : 'reject'} ${k.title}'s release key` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
+      label: ins ? (verdict === 'approve' ? 'save the instructions edit' : verdict === 'reject' ? 'cancel the instructions edit' : 'send the edit back') : m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : ml ? `${verdict === 'approve' ? 'approve' : 'reject'} the lending change for ${ml.name}` : t ? `${verdict === 'approve' ? 'approve' : 'reject'} installing ${t.package}` : mem ? `${verdict === 'approve' ? 'approve' : 'reject'} the memory tidy` : k ? `${verdict === 'approve' ? 'make' : 'reject'} ${k.title}'s release key` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
     }).then((ticket) => adoptTicket(ticketId, ticket), () => {}); // a failure already said so in its toast
   };
   approve.addEventListener('click', () => decide('approve'));

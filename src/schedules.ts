@@ -669,7 +669,7 @@ export class ScheduledRuns {
     if (s.template === 'memory-curator') {
       const open = store.memoryProposals.open(s.project_id);
       memoryDir = this.d.memoryTarget?.(s.project_id);
-      const why = open ? `a tidy${open.ticket_id === null ? '' : ` from #${store.getTicket(open.ticket_id)?.number}`} still waits on the Memory page` : !memoryDir?.notes ? 'no memory notes to tidy' : null;
+      const why = open ? `a tidy${open.ticket_id === null ? '' : ` from #${store.getTicket(open.ticket_id)?.number}`} still waits on a member` : !memoryDir?.notes ? 'no memory notes to tidy' : null;
       if (why) {
         const skip = `Skipped ${pacific(now)}: ${why}`;
         console.log(`Schedule ${s.id} "${s.name}": ${skip}`);

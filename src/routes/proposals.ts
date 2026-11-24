@@ -22,6 +22,7 @@ import { lendAfter, lendLines, lendPatch, parseLendChange } from '../machine-len
 import { installCommand, LIVE_MANIFEST, listed, parseHostTool, readManifest, sourceName, toolLabel } from '../host-tools.ts';
 import { approveHostTool } from '../host-tool-ship.ts';
 import { addressee, deliverAnswer, personWrote } from './tickets.ts';
+import { decideTidy } from './memory-curator.ts';
 
 // How long one wait for an approval card's outcome holds the request open.
 const APPROVAL_POLL_MS = 25_000;
@@ -170,22 +171,20 @@ export const proposalRoutes: Route[] = [
       const event = store.eventsOfKinds(id, ['plan']).find((e) => JSON.parse(e.data).id === body.planId);
       if (!event) throw new HttpError(404, 'No such plan');
       const card = JSON.parse(event.data);
-      // A memory tidy card (#1111) is decided change by change on the Memory page, never with Approve on the card.
-      if (card.memory) throw new HttpError(409, 'Review the memory tidy on the Memory page: each change is ticked there');
       // A held instructions edit (#1162): Save anyway, Work it in (notes optional) or Cancel edit; only it has a reject of its own.
       const ins = card.instructions as HeldEdit | undefined;
       if (body.verdict === 'reject' && !ins) throw new HttpError(400, 'verdict must be approve or revise');
       // A machine's notes card (#617) or a release key card (#837): a reason to reject is optional, and a reject is final.
       // A host tool card (#1147) too.
-      // A machine lending card (#1638) too.
-      const fixed = card.machine || card.releaseKey || card.hostTool || card.machineLend;
+      // A machine lending card (#1638) too, and a memory tidy card (#1803).
+      const fixed = card.machine || card.releaseKey || card.hostTool || card.machineLend || card.memory;
       const ml = card.machineLend;
       const notes = body.verdict === 'approve' ? null : (fixed || ins) && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
       if (card.status === 'withdrawn') throw new HttpError(409, 'Its minion withdrew this card: nothing to answer');
       if (card.status === 'dismissed') throw new HttpError(409, `${card.by} dismissed this card`);
       if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : ml ? `A newer proposal for ${ml.name}'s lending replaced this one` : card.releaseKey ? 'A newer card for this key replaced this one' : card.hostTool ? `A newer proposal for ${card.hostTool.package} replaced this one` : 'A newer plan replaced this one');
       if (ins && card.status !== 'pending') throw new HttpError(409, `${card.by} already ${card.status === 'approved' ? 'saved' : card.status === 'rejected' ? 'cancelled' : 'sent back'} this edit`);
-      if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : ml ? 'this change' : card.hostTool ? 'this tool' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
+      if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : ml ? 'this change' : card.hostTool ? 'this tool' : card.memory ? 'this memory tidy' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
       // One answer per card: the key, the notes and the install each take time (keytool, a write) before the card says "approved",
       // so a second click in that gap would run them again after the first one's answer. Held until the card's new status is readable.
       if (deciding.has(event.id)) throw new HttpError(409, `${card.by}'s card is being answered right now`);
@@ -211,6 +210,13 @@ export const proposalRoutes: Route[] = [
           // The same save as the page's: the agent is told the ticks, and sessions on what is no longer lent end.
           if (Object.keys(patch).length) await patchMachine(app, session, machine, patch);
           lendResult = Object.keys(patch).length ? '' : ' (it already had all of that: someone saved it on the Machines page meanwhile)';
+        }
+        // A memory tidy card (#1803): Approve wakes the run, which applies it all with apply_memory through the page's own
+        // decideTidy; Reject turns it down here. Either way only while the tidy is open: one ticked on the page is decided.
+        if (card.memory) {
+          const p = store.memoryProposals.get(card.memory.proposal);
+          if (!p || p.status !== 'open') throw new HttpError(409, !p ? 'That memory tidy is gone' : p.status === 'superseded' ? 'A newer tidy replaced this one' : `${p.decided_by} already ${p.status === 'applied' ? 'applied' : 'turned down'} this tidy on the Memory page`);
+          if (notes !== null) decideTidy(app, store.getProject(p.project_id)!, p, [], session.name);
         }
         // A host tool installs software on the server every scheme's turns share: a member of the Citadel scheme approves it (Josh, 2026-11-19).
         if (card.hostTool && notes === null && !session.admin) throw new HttpError(403, `Only a member of the ${APP_NAME} scheme can approve installing software on the server`);
@@ -247,6 +253,10 @@ export const proposalRoutes: Route[] = [
           ? notes === null
             ? `Approved: ${ml.name}'s lending is saved as the card showed${lendResult}. Its agent has it now, and minion turns that start from now get it: a minion that needs it ends its turn and carries on in the next.`
             : `Rejected your proposed lending for ${ml.name}; nothing changed.${notes ? `\n\n${notes}` : ''}`
+          : card.memory
+          ? notes === null
+            ? `Approved: ${session.name} approved your whole memory tidy (${card.memory.counts}). Call apply_memory now: it applies it and says what changed. Then report that in a few lines and close yourself with close_self.`
+            : `${session.name} turned the memory tidy down; nothing changed.${notes ? `\n\n${notes}` : ''} Close yourself with close_self.`
           : card.machine
           ? notes === null
             ? `Approved: ${card.machine.name}'s new notes are saved, and turns read them from their next start.`

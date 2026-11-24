@@ -71,7 +71,7 @@ test('a run is skipped free with no notes or an open tidy, and otherwise its bri
   due();
   await runs.runDue();
   assert.deepEqual(made, [], 'last week\'s tidy still waits: no second one');
-  assert.match(store.schedules.get(s.id)!.last_skip!, new RegExp(`a tidy from #${old.number} still waits on the Memory page$`));
+  assert.match(store.schedules.get(s.id)!.last_skip!, new RegExp(`a tidy from #${old.number} still waits on a member$`));
 
   store.memoryProposals.decide(store.memoryProposals.open(p.id)!.id, { status: 'dismissed', changes: [], backup: [], by: 'Josh' });
   due();

@@ -242,6 +242,11 @@ export class MemoryProposals {
     return parse(this.db.prepare("SELECT * FROM memory_proposals WHERE project_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1").get(projectId) as Row | undefined);
   }
 
+  /** The newest proposal a run made, whatever became of it (#1803: its apply_memory applies only this one). */
+  latestOf(ticketId: number): Proposal | null {
+    return parse(this.db.prepare('SELECT * FROM memory_proposals WHERE ticket_id = ? ORDER BY id DESC LIMIT 1').get(ticketId) as Row | undefined);
+  }
+
   /** Decided proposals whose old notes are still kept, newest first. */
   kept(projectId: number): Proposal[] {
     return (this.db.prepare('SELECT * FROM memory_proposals WHERE project_id = ? AND backup IS NOT NULL ORDER BY decided_at DESC').all(projectId) as Row[]).map((r) => parse(r)!);

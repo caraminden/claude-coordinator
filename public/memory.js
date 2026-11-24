@@ -76,7 +76,7 @@ function tidyReview(p, changed) {
       buttons[1].onclick = () => decide([]);
       const kinds = Object.keys(ACTION).map((a) => [a, o.changes.filter((c) => c.action === a).length]).filter(([, n]) => n);
       const [row] = settingsRow({ icon: 'doc', hue: 'waiting', title: `Proposed tidy${o.ticket ? ` from #${o.ticket}` : ''} · ${day(o.created_at)}`,
-        summary: `${plural(o.changes.length, 'change')} waiting: nothing changes until you apply`, open: true },
+        summary: o.approved_by ? `${o.approved_by} approved it all on the card: the curator applies it in its next turn` : `${plural(o.changes.length, 'change')} waiting: nothing changes until you apply`, open: true },
         statTiles(...kinds.map(([a, n]) => [String(n), ACTION[a][1].toLowerCase() + (n === 1 ? '' : 's'), a === 'delete' ? 'danger' : a === 'flag' ? 'waiting' : 'running'])),
         showFirst({ key: `memory-tidy:${o.id}`, items: items, n: 8, noun: 'changes', wrap: (xs) => h('div', { class: 'memory-changes' }, ...xs) }),
         h('div', { class: 'memory-actions' }, status, h('span', { class: 'spacer' }), ...buttons),

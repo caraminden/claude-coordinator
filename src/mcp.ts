@@ -392,7 +392,7 @@ const PROPOSE_MACHINE_NOTES = {
 const PROPOSE_MEMORY = () => ({
   name: 'propose_memory',
   description:
-    "For a memory curator run: propose a tidy of this scheme's Claude Code memory (MEMORY.md and its notes) as a card in this chat. Nothing is written until a member ticks changes on the Memory page; the decision comes as a message. One change per note file: edit (whole new text, and optionally a new index line), add (new note with its index line), delete (a member ticks each one by hand), index (only its MEMORY.md line), or flag (no change, just the reason, for a person to judge). Every change needs a reason people decide from. A newer proposal replaces an open one. Never edit memory files yourself in a curator run.",
+    "For a memory curator run: propose a tidy of this scheme's Claude Code memory (MEMORY.md and its notes) as a card in this chat. Nothing is written until a member approves it all on the card (then you apply it with apply_memory) or ticks changes on the Memory page; the decision comes as a message. One change per note file: edit (whole new text, and optionally a new index line), add (new note with its index line), delete, index (only its MEMORY.md line), or flag (no change, just the reason, for a person to judge). Every change needs a reason people decide from. A newer proposal replaces an open one. Never edit memory files yourself in a curator run.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -414,6 +414,13 @@ const PROPOSE_MEMORY = () => ({
     required: ['changes'],
   },
 });
+
+const APPLY_MEMORY = {
+  name: 'apply_memory',
+  description:
+    "For a memory curator run, only after a member approved your memory tidy card (the approval comes as a message): applies the whole approved tidy to the memory folder through the Memory page's own apply, and returns what changed and what was skipped (a note changed since you proposed it is skipped, never overwritten). Refused before an approval, and for a tidy someone already decided on the Memory page. Never edit memory files yourself.",
+  inputSchema: { type: 'object', properties: {} },
+};
 
 const EDIT_INSTRUCTIONS = {
   name: 'edit_instructions',
@@ -2340,7 +2347,11 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'propose_memory': {
       const { href, counts } = await call('POST', `/api/tickets/${C().TICKET}/memory-proposal`, { changes: args.changes });
-      return `The memory tidy card (${counts}) is in the chat; its link is ${href}. Link every mention of it. A member decides each change on the Memory page, and the answer comes as a message. End your turn now, in state ready, and close yourself with close_self once the answer comes.`;
+      return `The memory tidy card (${counts}) is in the chat; its link is ${href}. Link every mention of it. A member approves it on the card or picks changes on the Memory page, and the answer comes as a message. End your turn now, in state ready. On an approval, call apply_memory; then, or on any other answer, report it and close yourself with close_self.`;
+    }
+    case 'apply_memory': {
+      const { line } = await call('POST', `/api/tickets/${C().TICKET}/memory-proposal/apply`, {});
+      return `${line} Report that in a few lines, then close yourself with close_self.`;
     }
     case 'propose_plan': {
       const { href } = await call('POST', `/api/tickets/${C().TICKET}/plans`, { summary: args.summary, plan: args.plan, ...(args.to ? { to: args.to } : {}) });
@@ -2573,7 +2584,7 @@ function toolListAll() {
   const memory = [...(C().MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS, SEARCH_MINIONS, IDEAS];
   const audit = C().HOME_CONTRAPTIONS.length && (C().ROLE !== 'thread' || C().APP_TURNS_RUN) ? [CONTRAPTION_TURNS()] : [];
   if (C().ROLE !== 'thread') return C().APP_INSTRUCTIONS ? [...TOOLS().map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS(), WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS(), ...(C().SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, PREP_ULTRA_REVIEWS, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...(C().HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION(), PUBLISH_RELEASE(), MAKE_RELEASE_KEY()] : []), PROPOSE_MACHINE_NOTES, PROPOSE_MACHINE_LEND, PROPOSE_HOST_TOOL(), PROPOSE_MEMORY(), EDIT_INSTRUCTIONS, ...(C().JOB_MACHINES.length ? [QUEUE_JOB(), JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(C().APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS(), ...(C().SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, PREP_ULTRA_REVIEWS, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...(C().HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION(), PUBLISH_RELEASE(), MAKE_RELEASE_KEY()] : []), PROPOSE_MACHINE_NOTES, PROPOSE_MACHINE_LEND, PROPOSE_HOST_TOOL(), PROPOSE_MEMORY(), APPLY_MEMORY, EDIT_INSTRUCTIONS, ...(C().JOB_MACHINES.length ? [QUEUE_JOB(), JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(C().APPROVALS ? [APPROVE] : [])];
 }
 
 /** One JSON-RPC request's answer, or null for a notification: a turn's own helper writes it to stdout, the shared tool server (src/mcp-pool.ts) sends it over HTTP. */

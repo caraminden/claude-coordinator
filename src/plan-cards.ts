@@ -11,7 +11,7 @@ export const deciding = new Set<number>();
  * (waiting, or sent back for changes): a plan replaces plans, a machine's notes card (#617) that machine's earlier ones, a lending card (#1638) that machine's,
  * a release key card (#837) that app's, a host tool card (#1147) that tool's, and a held instructions edit (#1162) the earlier held edits.
  */
-export function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number }; releaseKey?: { app: string }; hostTool?: { source: string; package: string }; memory?: object; instructions?: object }) {
+export function postPlan(app: App, id: number, card: Record<string, unknown> & { summary: string; plan: string; machine?: { id: number; name?: string; owner?: string | null }; releaseKey?: { app: string; title?: string }; hostTool?: { source: string; package: string; command?: string }; memory?: object; instructions?: object }) {
   const { store, runner } = app;
   const kind = (c: typeof card) => (c.machine ? `machine:${c.machine.id}` : c.machineLend ? `lend:${(c.machineLend as { id: number }).id}` : c.releaseKey ? `key:${c.releaseKey.app}` : c.hostTool ? `tool:${c.hostTool.source}:${c.hostTool.package}` : c.memory ? 'memory' : c.instructions ? 'instructions' : 'plan');
   for (const e of store.eventsOfKinds(id, ['plan'])) {

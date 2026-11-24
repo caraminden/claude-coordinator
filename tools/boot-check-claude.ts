@@ -39,7 +39,7 @@ async function check(): Promise<string> {
   let stderr = '';
   mcp.stderr.on('data', (d) => (stderr += d));
   const replies = createInterface({ input: mcp.stdout })[Symbol.asyncIterator]();
-  const call = async (id: number, method: string, params: { name?: string }) => {
+  const call = async (id: number, method: string, params: { name?: string } & Record<string, unknown>) => {
     mcp.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
     // 10 s on a quiet box, stretched by the load (#1514); the error names the tool, so a slow one can be found.
     const slow = loadStretch();

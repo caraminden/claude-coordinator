@@ -579,7 +579,7 @@ export interface ScheduledRunDeps {
   store: Store;
   /** server.ts's newMinion: a minion with its worktree, not started yet. */
   newMinion: (project: Project, m: ReturnType<typeof runMinion>, by: string) => Promise<{ id: number; number: number }>;
-  runner: Pick<Runner, 'emit' | 'send' | 'limitWait' | 'netWait'>;
+  runner: Pick<Runner, 'emit' | 'send' | 'limitWait' | 'netWait' | 'killWait'>;
   broadcast: (msg: object) => void;
   /** Who a run's minion says started it. */
   by: string;

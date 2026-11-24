@@ -44,7 +44,7 @@ export const ghDownload = (as: (p: Project) => GithubEnv): Download => async (w,
 export const storeName = (s: string, max = 150) => s.replace(/[^A-Za-z0-9._+-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '').slice(0, max) || 'artifact';
 
 export class CiMirror {
-  private ci: Pick<CiStore, 'fits' | 'fetched' | 'dir'>;
+  private ci: Pick<CiStore, 'refusal' | 'fetched' | 'dir'>;
   private download: Download;
   private now: () => number;
   /** One download at a time, behind the poll rather than in it. */
@@ -54,7 +54,7 @@ export class CiMirror {
   /** Artifacts already kept: never downloaded again, even once the store has swept them (until a restart). */
   private kept = new Set<string>();
 
-  constructor(ci: Pick<CiStore, 'fits' | 'fetched' | 'dir'>, download: Download, now: () => number = Date.now) {
+  constructor(ci: Pick<CiStore, 'refusal' | 'fetched' | 'dir'>, download: Download, now: () => number = Date.now) {
     this.ci = ci;
     this.download = download;
     this.now = now;

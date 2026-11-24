@@ -1354,7 +1354,7 @@ const RETRY_MS = 120_000;
 
 async function call(method: string, path: string, body?: object): Promise<any> {
   const started = Date.now();
-  let res: Response;
+  let res!: Response;
   for (let wait = 500; ; wait = Math.min(wait * 2, 5000)) {
     // A refused connection never reached the app, so any call is safe to send again; one cut off
     // mid-way, or answered by the proxy, may have run, so only reads are.

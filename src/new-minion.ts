@@ -14,7 +14,7 @@ export async function makeMinion(
   project: Project,
   m: NewMinionSpec,
   by: string,
-  makeDir: (id: number, number: number) => Promise<{ cwd: string; branch: string }>,
+  makeDir: (id: number, number: number) => Promise<{ cwd: string; branch: string | null }>,
   afterWrites: () => Promise<unknown> = async () => {},
 ) {
   store.props.check(project.id, m.props);

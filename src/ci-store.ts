@@ -9,7 +9,7 @@
 // which names the repo, run, attempt, commit and workflow (Josh's pick, 2026-11-13: "GitHub's run token (no secret)",
 // after "we need the system to work without manual work and for repos not owned by cara"). Nothing is made, stored
 // or rotated here, and a job can only write to the scheme whose repo it runs in, under its own run.
-import { createHash, createPublicKey, verify, randomBytes, type JsonWebKey } from 'node:crypto';
+import { createHash, createPublicKey, verify, randomBytes, type webcrypto } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { lstat, mkdir, readdir, realpath, rename, rm, rmdir } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
@@ -63,7 +63,7 @@ export interface RunClaims {
   ref: string;
 }
 
-type Jwk = JsonWebKey & { kid?: string };
+type Jwk = webcrypto.JsonWebKey & { kid?: string };
 
 /** Checks GitHub's run tokens against GitHub's published keys, fetched at most hourly (and once more for a key id it hasn't seen). */
 export class RunTokens {

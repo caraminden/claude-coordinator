@@ -6,7 +6,7 @@
 // with its queue, and a verdict: fine, could do more (add a runner), overloading (take one away), crashed under
 // load, or full. A verdict that holds becomes one quiet Mandate item per admin, never an alarm, cleared when it ends.
 // Nothing here changes a runner: it advises.
-import { clock, type Job } from './ci-health.ts';
+import { clock, type Job as CiJob } from './ci-health.ts';
 import type { Project, Store, User } from './db.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
@@ -108,7 +108,7 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 /** A job with its repo, and its times as ms (NaN where GitHub has none yet). */
 export interface LoadJob { repo: string; name: string; status: string; runner: string; labels: string; created: number; started: number; ended: number }
-export function loadJob(repo: string, j: Job): LoadJob {
+export function loadJob(repo: string, j: CiJob): LoadJob {
   return {
     repo, name: j.name, status: j.status, runner: j.runner_name ?? '', labels: (j.labels ?? []).filter((l) => l !== 'self-hosted').join(','),
     created: at(j.created_at), started: j.runner_name ? at(j.started_at) : NaN, ended: at(j.completed_at),
@@ -303,7 +303,7 @@ export function pcView(host: string, samples: Sample[], jobs: LoadJob[], project
 
 export interface CiLoadDeps {
   /** Every scheme's jobs of the last day, as CI health last read them. */
-  jobs: () => { project: Project; jobs: Job[] }[];
+  jobs: () => { project: Project; jobs: CiJob[] }[];
   /** The host names of the CI runner agents connected now. */
   hosts: () => string[];
   /** Put (with `title`) or clear (null) a person's quiet Mandate item from a scheme; true once Mandate has it settled. */

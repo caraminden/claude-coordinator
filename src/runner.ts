@@ -147,7 +147,7 @@ export interface QueuedMessage {
   fresh?: 'handoff' | 'compact'; // a Taskmaster's fresh-start step (#406), which runs alone
   cold?: true; // held mail left because its recipient was cold (#413), for the Held list (#1059)
   fyi?: boolean; // a notice that needs no action (its PR merged, CI passed): it doesn't cancel a pending close_self (#619)
-  sealed?: string; // held for a sealed minion (#718): when it was sent, "2026-11-14 18:02" UTC
+  parked?: string; // held for a sealed minion (#718): when it was sent, "2026-11-14 18:02" UTC
   keepalive?: true; // a hidden keepalive (#862, src/keepalive.ts): no chat, no state, nothing of the minion's changes
   light?: true; // a machine's notice of success (a land that landed, CI passed, a job done): a turn of only these runs at low effort (#951)
 }
@@ -2113,7 +2113,7 @@ export class Runner {
    * running keeps for its next turn instead of starting one ('parked'). Wakes (wake_when_live, a chained start,
    * runners back, a card's answer, GitHub) leave it off and start a turn as before.
    */
-  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; hold?: boolean } & object = {}, steer = false, files: MessageFile[] = []): { event: EventRow; parked?: true } {
+  send(ticketId: number, author: string, text: string, images: MessageImage[] = [], extra: { comment?: { about: string; path?: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; hold?: boolean; brief?: boolean; everyone?: boolean; ask?: object; answer?: object } & object = {}, steer = false, files: MessageFile[] = []): { event: EventRow; parked?: true } {
     // Whose ask it is, when that isn't its author's or relay's now: a contraption's person, or a held relay's asker.
     const { asker: askedBy, fyi, light, hold, ...shown } = extra;
     extra = shown;

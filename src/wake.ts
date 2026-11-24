@@ -1024,7 +1024,7 @@ export const pacificTime = pacificWeekday;
 export function parseWakeTime(text: string): number {
   const m = /^(\d{4})-(\d\d)-(\d\d)(?:[T ](\d\d):(\d\d)(?::(\d\d))?)?\s*(Z|[+-]\d\d:?\d\d)?$/i.exec(text.trim());
   if (!m) return NaN;
-  const [y, mo, d, h = '0', mi = '0', s = '0'] = m.slice(1, 7).map((x) => Number(x ?? 0));
+  const [y, mo, d, h = 0, mi = 0, s = 0] = m.slice(1, 7).map((x) => Number(x ?? 0));
   const local = Date.UTC(y, mo - 1, d, h, mi, s);
   if (new Date(local).getUTCMonth() !== mo - 1 || h > 23 || mi > 59 || s > 59) return NaN; // 31 Nov, 24:00, 09:99
   if (m[7] && Number(m[7].slice(-2)) > 59) return NaN;

@@ -226,7 +226,7 @@ interface Deps {
   place: (uid: number) => TurnPlace | null;
   /** The person's own scratch space, which their container mounts (ClaudeLink.turnsDir). */
   scratch: (uid: number) => string;
-  emit: (ticketId: number, kind: 'ultrareview' | 'ultrareview_result', data: unknown) => void;
+  emit: (ticketId: number, kind: 'ultrareview' | 'ultrareview_result' | 'note', data: unknown) => void;
   getSetting: <T>(key: string) => T | undefined;
   setSetting: (key: string, value: unknown) => void;
   /** The host's turn environment (turn-launch.ts turnEnv), for the server login's owner. */

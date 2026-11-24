@@ -382,10 +382,12 @@ export function slowWords(m) {
   return `${s1(m.total_ms)} ${doing[0].toLowerCase()}${doing.slice(1)}${split ? `: ${split}` : ''}`;
 }
 /** What took most of it, as [hue, chip tone, word]: the server, the network or the tab. */
-const slowCause = (m) => [['danger', 'danger', 'server', m.server_ms ?? 0], ['teal', 'info', 'network', m.network_ms], ['waiting', 'warn', 'tab frozen', m.tab_ms]]
-  .reduce((a, b) => (b[3] > a[3] ? b : a));
-/** A request's path, free to wrap after each slash rather than mid-word. */
-const pathText = (text) => text.split(/(?<=\/)/).flatMap((part, i) => (i ? [h('wbr'), part] : [part]));
+const slowCause = (m) => (m.server_ms == null && m.network_ms >= m.tab_ms ? ['muted', 'neutral', 'no answer']
+  // No answer came, so the server and the network can't be told apart.
+  : [['danger', 'danger', 'server', m.server_ms ?? 0], ['running', 'info', 'network', m.network_ms], ['waiting', 'warn', 'tab frozen', m.tab_ms]]
+    .reduce((a, b) => (b[3] > a[3] ? b : a)));
+/** A request's path, free to wrap after each slash but the leading one, rather than mid-word. */
+const pathText = (text) => text.split(/(?<=\w\/)/).flatMap((part, i) => (i ? [h('wbr'), part] : [part]));
 /** Slow moments (#1752): every load, click or freeze over 2 s on people's pages in the last day, and where its time went. */
 function slowTile(slow) {
   const row = (m) => {

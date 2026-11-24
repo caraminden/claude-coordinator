@@ -449,9 +449,39 @@ function afterLiveDraw() {
   liveDrawn = true;
   requestAnimationFrame(() => {
     liveDrawn = false;
-    if (followChat) scrollToBottom();
+    if (replyHold) replyHold.align();
+    else if (followChat) scrollToBottom();
     renderCardJump();
   });
+}
+
+/**
+ * A new reply that arrives while you're at the bottom scrolls so its first line sits just under the thread bar,
+ * and stays there as it grows, its progress lines and cards arrive, until you scroll yourself or send. A reply
+ * that fits shows in full at the bottom as before. Scrolled up, nothing moves. Each newer reply of the turn takes over.
+ */
+let replyHold = null;
+function holdReply(el) {
+  releaseReply();
+  const scroller = chatScroller() ?? document.scrollingElement;
+  const align = () => {
+    if (!el.isConnected) return releaseReply();
+    const head = document.getElementById('ticket-head')?.getBoundingClientRect().bottom ?? 0;
+    scroller.scrollTop += el.getBoundingClientRect().top - head - 8;
+  };
+  const settle = new ResizeObserver(align);
+  const stop = () => releaseReply();
+  const hold = { align, settle, stop };
+  replyHold = hold;
+  for (const type of USER_SCROLL) addEventListener(type, stop, { capture: true, passive: true });
+  const log = document.getElementById('log');
+  if (log) settle.observe(log);
+}
+function releaseReply() {
+  if (!replyHold) return;
+  replyHold.settle.disconnect();
+  for (const type of USER_SCROLL) removeEventListener(type, replyHold.stop, true);
+  replyHold = null;
 }
 
 function drawEvent(event, scroll) {
@@ -748,6 +778,8 @@ function drawEvent(event, scroll) {
   if (event.kind === 'claude' && data.type === 'result') flushFolds();
   mergePushNotes(log);
   renderTyping();
+  if (scroll && event.kind === 'user_message') releaseReply();
+  if (scroll && spoke && (followChat || replyHold)) holdReply(spoke);
   if (scroll) afterLiveDraw();
 }
 

@@ -32,3 +32,11 @@ test('the check is red on an unformatted file and green once formatted', { skip:
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("the kit's biome.json template carries the same style as Citadel's", () => {
+  const read = (p: string) => JSON.parse(readFileSync(join(root, p), 'utf8'));
+  const mine = read('biome.json');
+  const kit = read('kit/skills/scheme-setup/templates/biome.json');
+  assert.deepEqual(kit.formatter, mine.formatter, 'a style change goes into kit/skills/scheme-setup/templates/biome.json too (other schemes copy it)');
+  assert.deepEqual(kit.javascript, mine.javascript);
+});

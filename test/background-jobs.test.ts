@@ -74,11 +74,11 @@ test("a standard audit's run renders its kit template fresh, keeps that brief on
   const sch = store.schedules.create({ project_id: project.id, name: 'Monthly retro', cron: '* * * * *', brief: 'an old render', type: 'research', template: 'monthly-retro', notes: 'Never push.', created_by: 'Cara' });
   await runs.run(sch);
   assert.equal(sends.length, 1);
-  assert.match(sends[0].text, new RegExp(`Monthly retro for ${project.name}`));
+  assert.match(sends[0].text, new RegExp(`Retro for ${project.name}`));
   assert.ok(sends[0].text.includes(join('/data', 'projects', String(citadel.id), 'shared', 'project', 'reports')), "Citadel's digests by path");
   assert.match(sends[0].text, new RegExp(`For ${project.name}:\\nNever push\\.`));
   assert.doesNotMatch(sends[0].text, /an old render/);
-  assert.match(store.schedules.get(sch.id)!.brief, /^Monthly retro for /);
+  assert.match(store.schedules.get(sch.id)!.brief, /^Retro for /);
 
   const gone = store.schedules.create({ project_id: project.id, name: 'Gone', cron: '* * * * *', brief: 'b', type: 'research', template: 'no-such-audit', created_by: 'Cara' });
   await runs.run(gone);

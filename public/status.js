@@ -635,16 +635,23 @@ const paintChip = (c, { title, tone }) => {
   c.setAttribute('aria-label', title);
   c.querySelector('.dot').className = `dot ${DOT[tone]}`;
 };
-const dropGoneChips = () => { for (const c of chips) if (!c.isConnected && c.dataset.placed) chips.delete(c); };
+// Held weakly: a chip in a page left behind would otherwise keep that whole page until the next minute's read (#1747).
+const eachChip = (f) => {
+  for (const r of chips) {
+    const c = r.deref();
+    if (!c || (!c.isConnected && c.dataset.placed)) chips.delete(r);
+    else f(c);
+  }
+};
 const chipPoll = poller(async () => {
-  dropGoneChips();
+  eachChip(() => {});
   if (!chips.size) return false;
   try {
     const data = await api('api/status');
     if (data) {
       const bad = [['Citadel', data.citadel.verdict], ...data.apps.map((a) => [a.title, a.verdict])].filter(([, v]) => v.tone !== 'ok');
       chipRead = { tone: worstOf(data).tone, title: bad.length ? `Status: ${bad.map(([n, v]) => `${n} ${WORD[v.tone].toLowerCase()}`).join('; ')}` : 'Status: Citadel and your apps are OK' };
-      for (const c of chips) paintChip(c, chipRead);
+      eachChip((c) => paintChip(c, chipRead));
     }
   } catch {
     // The last colour stays: the next minute asks again.
@@ -656,9 +663,8 @@ export function statusChip(projectId = null) {
   const c = h('a', { class: 'ci-chip status-chip', href: projectId ? `#/p/${projectId}/status` : '#/',
     onclick: () => { opening(); c.href = scopedPageHash('status', projectId ?? view?.projectId, localStorage.getItem(LAST_SCHEME) ?? 2); } },
   h('span', { class: 'dot asleep' }), h('span', { class: 'label' }, 'Status'));
-  dropGoneChips(); // one off the page holds that whole page (#1747)
   c.dataset.placed = '1';
-  chips.add(c);
+  chips.add(new WeakRef(c));
   if (chipRead) paintChip(c, chipRead);
   chipPoll.now();
   return c;

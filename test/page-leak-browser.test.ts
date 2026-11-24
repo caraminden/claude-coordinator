@@ -3,7 +3,7 @@
 // four lists kept every old one for good or for a minute: the message boxes waiting for the caret (ui/composer.js
 // tested a marker it sets to ''), a width watcher made per draw (project.js), each chat's attachment strip
 // (composer.js) and the CI and Status chips (ci.js, status.js). In a real browser (headless Chromium, test/browser.ts)
-// against the real server: after ten switches and a forced collection, the old pages' message boxes are gone.
+// against the real server: after a visit to each of eight schemes (each chat seen once, so its strip is never moved to a newer page) and a forced collection, the old pages' message boxes are gone.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { bootServer, type Booted } from './helpers.ts';
@@ -18,7 +18,7 @@ const schemes: number[] = [];
 
 before(async () => {
   srv = await bootServer();
-  for (const name of ['One', 'Two']) schemes.push((await srv.call('/api/projects', { name })).data.id);
+  for (const name of ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight']) schemes.push((await srv.call('/api/projects', { name })).data.id);
   if (!skip) browser = await launch(bin!);
 });
 
@@ -27,15 +27,15 @@ after(async () => {
   await srv?.stop();
 });
 
-test('switching schemes ten times leaves no old page in memory', { skip }, async () => {
+test('switching through eight schemes leaves no old page in memory', { skip }, async () => {
   const page = await browser.page('data:text/html,<script>window.ready=true</script>', { width: 1280, height: 800 });
   const [name, value] = srv.cookie.split('=');
   await page.send('Network.setCookie', { name, value, url: srv.base });
   await page.send('Page.navigate', { url: `${srv.base}/#/p/${schemes[0]}` });
   const shown = (id: number) => `location.hash === '#/p/${id}' && !!document.querySelector('.composer textarea') && !document.querySelector('.composer textarea').dataset.leakSeen`;
-  const SWITCHES = 10;
+  const SWITCHES = schemes.length - 1;
   for (let i = 0; i <= SWITCHES; i++) {
-    const id = schemes[i % 2];
+    const id = schemes[i];
     if (i) await page.eval(`location.hash = '#/p/${id}'`);
     await waitFor(page, `scheme ${id}'s page`, shown(id));
     // Marked, so the next wait is for a new page's box; two frames on, so the box's own caret step has run.

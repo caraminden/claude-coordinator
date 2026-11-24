@@ -155,11 +155,11 @@ function renderCrumbs(main) {
           : [h('span', { class: 'scheme-crumb' }, icon(), h('span', { 'data-project-name': project.id }, project.name))]));
 }
 
+let phoneWidth = null;
 /**
  * A project page: artifacts and threads on the side, and in the main panel a chat with the
  * coordinator (or the chosen ticket), the artifact browser, or one artifact.
  */
-let phoneWidth = null;
 export async function showProject(projectId, main = { kind: 'chat', number: null }) {
   const seq = routeSeq;
   // Moving between chats of the project already on screen only swaps the chat; the side panels stay.

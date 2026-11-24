@@ -515,11 +515,13 @@ const paintChip = (c) => {
   c.setAttribute('aria-label', look.title || c.dataset.kind);
   c.querySelector('.dot').className = `dot ${look.worst}`;
 };
-// A chip off the page holds that whole page, so they go when the next one is made, not a minute later (#1747).
-const dropGoneChips = () => { for (const c of chips) if (c.dataset.placed && !c.isConnected) chips.delete(c); };
+// Held weakly: a chip in a page left behind would otherwise keep that whole page until the next minute's read (#1747).
 function paintChips() {
-  dropGoneChips();
-  for (const c of chips) paintChip(c);
+  for (const r of chips) {
+    const c = r.deref();
+    if (!c || (c.dataset.placed && !c.isConnected)) chips.delete(r);
+    else paintChip(c);
+  }
 }
 // Releases arriving move the Releases dot and the page's list at once, between reads.
 onReleasesRedraw(() => { paintChips(); if (shell?.el.isConnected) shell.drawList(); });
@@ -539,8 +541,7 @@ function chip(kind, label, page, projectId) {
   const c = h('a', { class: `ci-chip ${kind}-chip`, 'data-kind': kind, hidden: kind === 'ci', href: projectId ? `#/p/${projectId}/${page}` : '#/',
     onclick: () => { opening(); c.href = scopedPageHash(page, projectId ?? view?.projectId, localStorage.getItem(LAST_SCHEME) ?? 2); } },
   h('span', { class: 'dot asleep' }), h('span', { class: 'label' }, label));
-  dropGoneChips();
-  chips.add(c);
+  chips.add(new WeakRef(c));
   paintChip(c);
   if (projectId === null) c.dataset.placed = '1';
   chipPoll.now();

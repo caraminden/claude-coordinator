@@ -503,6 +503,17 @@ console.log(JSON.stringify({ number: n, title: 'PR ' + n, url: 'https://github.c
   return { home, seed, env, git };
 }
 
+type Srv = Awaited<ReturnType<typeof bootServer>>;
+/**
+ * Wait until a minion's turn runs, then answer with its token. Not before: creating a minion returns while its turn's
+ * start may still be async, and a token minted before the turn's own (its nonce) stops working once that exists (#1794).
+ */
+async function turnAuth(srv: Srv, id: number) {
+  const auth = () => ({ Authorization: `Bearer ${agentToken(srv.data, id)}`, 'Content-Type': 'application/json' });
+  await until('the turn', async () => (await srv.call(`/api/tickets/${id}`)).data.ticket?.status === 'running' && (await fetch(`${srv.base}/api/tickets/${id}/approvals?id=x`, { headers: auth() })).ok);
+  return auth();
+}
+
 test('through the routes: a typed go lets one plain merge of the right PR through; relays and wider calls get the card', async () => {
   const { home, seed, env, git } = delveRepo('e2e');
   const srv = await bootServer({ root: home, env });
@@ -516,7 +527,7 @@ test('through the routes: a typed go lets one plain merge of the right PR throug
     const t = created.ticket ?? created;
     git(['remote', 'set-url', 'origin', 'https://github.com/cara/delve.git'], project.repo_dir);
     const minion = () => ({ Authorization: `Bearer ${agentToken(srv.data, t.id)}`, 'Content-Type': 'application/json' });
-    await until('the turn', async () => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion() })).ok);
+    await turnAuth(srv, t.id);
     const ask = async (command: string) => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Merge the PR' } }) })).json();
     const merge = async (command: string) => {
       const r = await ask(command);
@@ -581,8 +592,7 @@ test("through the routes: Delve #42's go in one minion lets the build minion mer
     const category = await minion('the enchanting category');
     const build = await minion('build 7');
     git(['remote', 'set-url', 'origin', 'https://github.com/cara/delve.git'], project.repo_dir);
-    const auth = { Authorization: `Bearer ${agentToken(srv.data, build.id)}`, 'Content-Type': 'application/json' };
-    await until('the build turn', async () => (await fetch(`${srv.base}/api/tickets/${build.id}/approvals?id=x`, { headers: auth })).ok);
+    const auth = await turnAuth(srv, build.id);
     const merge = async (command: string) => {
       const r = await (await fetch(`${srv.base}/api/tickets/${build.id}/approvals`, { method: 'POST', headers: auth, body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Fold the PR' } }) })).json();
       assert.ok(r.id, JSON.stringify(r));
@@ -616,7 +626,7 @@ test('Delve replays: a typed fold survives restarts mid-turn, a refused merge an
     const t = created.ticket ?? created;
     git(['remote', 'set-url', 'origin', 'https://github.com/cara/delve.git'], project.repo_dir);
     const minion = () => ({ Authorization: `Bearer ${agentToken(srv.data, t.id)}`, 'Content-Type': 'application/json' });
-    const attached = () => until('the turn', async () => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion() })).ok);
+    const attached = () => turnAuth(srv, t.id);
     const ask = async (command: string) => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Fold the PR' } }) })).json();
     const merge = async (command: string) => {
       const r = await ask(command);

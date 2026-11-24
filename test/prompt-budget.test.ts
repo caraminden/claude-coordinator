@@ -79,7 +79,7 @@ test('saving instructions says what they cost, the same in the settings page and
 // next to the built-in prompt, so they get a budget too. Characters of name + description, today's size
 // plus about 5% on 2026-11-14. This never asks for shorter text: a skill with a longer description is a
 // deliberate decision, made by raising the number with the reason in the commit message.
-const KIT_BUDGET = 10_550; // +200 for the desktop-app skill (#1148, Build 6); +250 on 2026-11-19 for citadel:briefing (#1108); +300 for the trigger-eval descriptions (#1110); +200 on 2026-11-20 for the citadel:scout agent (#1156)
+const KIT_BUDGET = 10_650; // +200 for the desktop-app skill (#1148, Build 6); +250 on 2026-11-19 for citadel:briefing (#1108); +300 for the trigger-eval descriptions (#1110); +200 on 2026-11-20 for the citadel:scout agent (#1156); +100 on 2026-11-23 for measured trigger fixes (#1744: research 55->85%, critique 60->87%)
 
 /** A skill's or agent's `name` and `description` frontmatter, a folded or plain description joined on one line. */
 function listing(file: string): string {

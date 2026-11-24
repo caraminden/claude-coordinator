@@ -34,7 +34,7 @@ export function verdict(input: { tool_name?: string; tool_input?: Record<string,
     if (/(^|[\s;&|(`])(systemctl|loginctl|journalctl|systemd-run|gh|podman|docker|sudo|crontab|tailscale|caddy|pkill|killall|claude|citadel-dev-copy|citadel-heavy|heavy-unit)(?=$|[\s;&|)`])/m.test(c))
       return 'that command reaches the box, GitHub or other sessions; a verifier case runs only its own copy';
     if (/\bgit\b[^;&|]*\b(push|fetch|pull|clone|remote)\b/.test(c)) return 'git stays inside this case\'s clone: no push, fetch, pull, clone or remote';
-    if (/\bkill\b(?![^;&|]*\s-?\d)/.test(c)) return 'kill by pid only';
+    if (/\bkill\b(?![^;&|]*\s-?\d)/.test(c)) return 'kill by a literal pid only: look the pid up first (node boot.mjs stop for the server), then kill 12345';
     if (/(^|[\s'"=:])(~|\$HOME|\$\{HOME\})(\/|\s|$|['"])/.test(c)) return `name paths inside ${root}, not the home folder`;
     if (/:8573\b/.test(c)) return 'the live Citadel is out of reach; use your own copy\'s port';
     for (const m of c.matchAll(/\/home\/[^\s'"`;|&)<>]*/g)) if (!inside(resolve(m[0]), [root, ...readable])) return `${m[0]} is outside this case's folder`;

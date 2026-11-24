@@ -1,0 +1,487 @@
+#!/usr/bin/env node
+// who-uses (#1781): who calls this, and which tests cover it, in a few lines, before changing what a file or symbol does.
+//   who-uses <path>...      the files that import it or name its path, and the tests that reach it (directly, through
+//                           other imports, or by naming its path), plus lists and docs that name it and same-named files
+//   who-uses <symbol>...    where it is defined (two or more definitions: twins, such as a fake or a copy), the files
+//                           that use it grouped by top folder, the tests that name it and the lists and docs that do
+//   --all                   no caps on the lists
+// Imports are followed for TypeScript and JavaScript, Python, Rust (mod, use crate/super/self and workspace crates) and
+// Godot (res:// paths in .gd, .tscn and .tres, and class_name); anything else falls back to path and name search.
+// Read-only and index-free: each run is a few `git grep` calls over the tracked and untracked (not ignored) files of
+// the repo you are in, so uncommitted edits count and there is nothing to keep current. A test list is a lead, not a
+// proof: a test can reach a file in ways no text shows (a spawned process, a glob), so still run what --affected picks.
+// Plain JavaScript in one file, so the copy on a turn's PATH runs without the repo; ESM by syntax, wherever it sits.
+import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { existsSync, statSync } from 'node:fs';
+import { relative, resolve, dirname, basename, posix } from 'node:path';
+
+const usage = 'usage: who-uses <path or symbol>... [--all]';
+function die(msg, code = 2) {
+  process.stderr.write(`who-uses: ${msg}\n`);
+  process.exit(code);
+}
+
+/** git in a directory; resolves stdout ('' when nothing matched), or null when git fails. Never throws. */
+function git(cwd, args) {
+  return new Promise((done) =>
+    execFile('git', ['-c', 'core.quotePath=false', ...args], { cwd, encoding: 'utf8', maxBuffer: 256 << 20 }, (err, out) =>
+      done(err ? (err.code === 1 && !out ? '' : out || null) : out)));
+}
+
+const JS = ['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs', 'vue', 'svelte'];
+const PY = ['py'];
+const RS = ['rs'];
+const GD = ['gd', 'tscn', 'tres', 'godot'];
+const SHELL = ['sh', 'bash', 'fish', 'ps1', 'zsh'];
+const CODE = new Set(['', ...JS, ...PY, ...RS, ...GD, ...SHELL, 'go', 'java', 'kt', 'kts', 'cs', 'rb', 'php', 'swift', 'c', 'h', 'cc', 'cpp', 'hpp', 'lua', 'html']);
+const ext = (p) => { const b = basename(p); const i = b.lastIndexOf('.'); return i > 0 ? b.slice(i + 1).toLowerCase() : ''; };
+// Basenames too common to treat a quoted mention as meaning one file.
+const COMMON = new Set(['index', 'mod', 'lib', 'main', '__init__', 'README', 'types', 'utils', 'util', 'config', 'package', 'Cargo', 'setup', 'test', 'tests', 'helpers']);
+
+/** A test file by the usual conventions of each stack. */
+export function isTest(p) {
+  const b = basename(p);
+  return /(^|\/)(test|tests|__tests__|spec|specs|e2e)\//.test(p) || /\.(test|spec)\.[^.]+$/.test(b) ||
+    /^test_.*\.(py|gd)$/.test(b) || /_test\.(py|go|rs|gd|ts|js)$/.test(b) || /Tests?\.(java|kt|cs|swift)$/.test(b);
+}
+
+/** A test file a runner runs, rather than a helper or fixture under a test folder. */
+export function isRunnableTest(p) {
+  const b = basename(p);
+  return isTest(p) && (/\.(test|spec)\.[^.]+$/.test(b) || /^test_|_test\.|Tests?\./.test(b) || /(^|\/)tests\/.+\.rs$/.test(p));
+}
+
+// ---------- the repo ----------
+
+class Repo {
+  constructor(root, files) {
+    this.root = root;
+    this.files = files;
+    this.set = new Set(files);
+    this.bySuffix = new Map(); // 'a/b' (no extension) and 'a/b.ts' -> files whose path ends there on a / boundary
+    this.byBase = new Map();
+    for (const f of files) {
+      const parts = f.split('/');
+      const noExt = f.replace(/\.[^./]+$/, '');
+      const nparts = noExt.split('/');
+      for (let i = 0; i < parts.length; i++) {
+        this.#add(this.bySuffix, parts.slice(i).join('/'), f);
+        this.#add(this.bySuffix, '\0' + nparts.slice(i).join('/'), f);
+      }
+      this.#add(this.byBase, basename(f), f);
+    }
+  }
+  #add(m, k, v) { const a = m.get(k); if (a) a.push(v); else m.set(k, [v]); }
+  has(p) { return this.set.has(p); }
+  /** Files whose path ends with this, extension included ('ui/x.js') or not ('app/models'). */
+  suffix(s, withExt = true) { return this.bySuffix.get(withExt ? s : '\0' + s) ?? []; }
+}
+
+async function openRepo(cwd) {
+  const root = (await git(cwd, ['rev-parse', '--show-toplevel']))?.trim();
+  if (!root) die('not inside a git repository');
+  const out = await git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard']);
+  if (out == null) die('git ls-files failed');
+  const files = [...new Set(out.split('\0').filter(Boolean))].filter((f) => existsSync(resolve(root, f)));
+  return new Repo(root, files);
+}
+
+/** git grep over the repo; returns [{file, line, text}]. */
+async function grep(repo, args, pathspecs = []) {
+  const out = await git(repo.root, ['grep', '--untracked', '-n', '-I', '--no-color', '--full-name', ...args, '--', ...pathspecs]);
+  if (out == null) return [];
+  const rows = [];
+  for (const l of out.split('\n')) {
+    const m = /^(.*?):(\d+):(.*)$/.exec(l);
+    if (m) rows.push({ file: m[1], line: Number(m[2]), text: m[3] });
+  }
+  return rows;
+}
+
+// ---------- imports, per stack ----------
+
+const norm = (p) => posix.normalize(p).replace(/^\.\//, '');
+
+function resolveJs(repo, from, spec) {
+  spec = spec.split('?')[0];
+  let bases = [];
+  if (spec.startsWith('.')) bases = [norm(posix.join(posix.dirname(from), spec))];
+  else if (spec.startsWith('/')) bases = repo.suffix(spec.slice(1)).length ? repo.suffix(spec.slice(1)) : [spec.slice(1)];
+  else if (/^[@~#]\//.test(spec)) bases = [spec.slice(2)];
+  else return [];
+  const found = [];
+  for (const b of bases) {
+    if (b.startsWith('..')) continue;
+    const swap = b.replace(/\.(m|c)?jsx?$/, '');
+    const cands = [b, ...JS.map((e) => `${b}.${e}`), ...JS.map((e) => `${swap}.${e}`), ...JS.map((e) => `${b}/index.${e}`), `${b}.json`];
+    const hit = cands.find((c) => repo.has(c)) ?? (!spec.startsWith('.') ? cands.map((c) => repo.suffix(c)).find((a) => a.length === 1)?.[0] : undefined);
+    if (hit) found.push(hit);
+  }
+  return found;
+}
+
+function jsSpecs(text) {
+  const specs = [];
+  for (const re of [/\b(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g, /\brequire\s*\(\s*['"]([^'"]+)['"]/g]) {
+    for (const m of text.matchAll(re)) specs.push(m[1]);
+  }
+  return specs;
+}
+
+function resolvePy(repo, from, text) {
+  const found = [];
+  const pyFile = (dotted) => {
+    const key = dotted.replace(/\./g, '/');
+    if (!key) return [];
+    for (const c of [`${key}.py`, `${key}/__init__.py`]) {
+      const hits = repo.has(c) ? [c] : repo.suffix(c);
+      if (hits.length) return hits.slice(0, 3);
+    }
+    return [];
+  };
+  const rel = (dots, rest) => {
+    let dir = posix.dirname(from);
+    for (let i = 1; i < dots; i++) dir = posix.dirname(dir);
+    const key = norm(posix.join(dir, rest.replace(/\./g, '/')));
+    return [`${key}.py`, `${key}/__init__.py`].filter((c) => repo.has(c));
+  };
+  let m = /^\s*from\s+(\.*)([\w.]*)\s+import\s+\(?\s*([\w\s,*]+)/.exec(text);
+  if (m) {
+    const [, dots, mod, names] = m;
+    const subs = names.split(',').map((s) => s.trim().split(/\s+/)[0]).filter((s) => s && s !== '*');
+    const res = (path) => (dots ? rel(dots.length, path) : pyFile(path));
+    let base = res(mod);
+    for (const s of subs) { const sub = res(mod ? `${mod}.${s}` : s); if (sub.length) found.push(...sub); }
+    found.push(...base);
+    return found;
+  }
+  m = /^\s*import\s+([\w.,\s]+?)(?:\s+as\s+\w+)?\s*$/.exec(text);
+  if (m) for (const part of m[1].split(',')) found.push(...pyFile(part.trim().split(/\s+/)[0]));
+  return found;
+}
+
+/** The crate a Rust file belongs to: its Cargo.toml directory and src root. */
+function rustCrate(repo, file, crates) {
+  let d = posix.dirname(file);
+  for (;;) {
+    const c = crates.byDir.get(d === '.' ? '' : d);
+    if (c) return c;
+    if (d === '.' || d === '' || d === '/') return null;
+    d = posix.dirname(d);
+  }
+}
+
+function rustModFile(repo, dir, segs) {
+  for (let n = segs.length; n > 0; n--) {
+    const key = posix.join(dir, ...segs.slice(0, n));
+    for (const c of [`${key}.rs`, `${key}/mod.rs`]) if (repo.has(c)) return c;
+  }
+  return null;
+}
+
+/** The directory a Rust file's own child modules live in. */
+function rustModDir(file) {
+  const b = basename(file);
+  return ['lib.rs', 'main.rs', 'mod.rs'].includes(b) ? posix.dirname(file) : file.replace(/\.rs$/, '');
+}
+
+function resolveRs(repo, from, text, crates) {
+  const found = [];
+  const crate = rustCrate(repo, from, crates);
+  let m = /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;/.exec(text);
+  if (m) {
+    const hit = rustModFile(repo, rustModDir(from), [m[1]]);
+    if (hit) found.push(hit);
+    return found;
+  }
+  m = /^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([^;]+)/.exec(text);
+  if (!m) return found;
+  const tree = m[1].trim();
+  // Expand one level of {a, b::c} groups.
+  const g = /^(.*?)::\{([^}]*)\}?/.exec(tree);
+  const paths = g ? g[2].split(',').map((s) => `${g[1]}::${s.trim()}`).filter((s) => !s.endsWith('::')) : [tree];
+  if (g) paths.push(g[1]);
+  for (const p of paths) {
+    const segs = p.split(/\s+as\s+/)[0].split('::').map((s) => s.trim()).filter((s) => s && s !== '*' && s !== '{');
+    if (!segs.length) continue;
+    const head = segs.shift();
+    let dir = null;
+    if (head === 'crate' && crate) dir = crate.src;
+    else if (head === 'self') dir = rustModDir(from);
+    else if (head === 'super') {
+      dir = posix.dirname(rustModDir(from));
+      while (segs[0] === 'super') { segs.shift(); dir = posix.dirname(dir); }
+    } else {
+      const other = crates.byName.get(head);
+      if (other) dir = other.src;
+    }
+    if (dir == null) continue;
+    const hit = rustModFile(repo, dir, segs);
+    if (hit) found.push(hit);
+    else if (head !== 'self' && head !== 'super') {
+      const root = (head === 'crate' ? crate : crates.byName.get(head));
+      for (const r of ['lib.rs', 'main.rs']) if (root && repo.has(posix.join(root.src, r))) { found.push(posix.join(root.src, r)); break; }
+    }
+  }
+  return found;
+}
+
+async function rustCrates(repo) {
+  const byDir = new Map();
+  const byName = new Map();
+  for (const f of repo.files.filter((f) => basename(f) === 'Cargo.toml')) {
+    const dir = posix.dirname(f) === '.' ? '' : posix.dirname(f);
+    const text = await readFile(resolve(repo.root, f), 'utf8').catch(() => '');
+    const name = /\[package\][^[]*?\bname\s*=\s*"([^"]+)"/s.exec(text)?.[1];
+    const c = { dir, src: dir ? `${dir}/src` : 'src', name };
+    byDir.set(dir, c);
+    if (name) byName.set(name.replace(/-/g, '_'), c);
+  }
+  return { byDir, byName };
+}
+
+function godotRoot(repo, file, roots) {
+  let d = posix.dirname(file);
+  for (;;) {
+    if (roots.has(d === '.' ? '' : d)) return d === '.' ? '' : d;
+    if (d === '.' || d === '' || d === '/') return null;
+    d = posix.dirname(d);
+  }
+}
+
+/** Reverse import graph: file -> Set of files importing it. One git grep for the import-shaped lines of every stack. */
+async function importGraph(repo) {
+  const rev = new Map();
+  const add = (to, from) => {
+    if (!to || to === from) return;
+    let s = rev.get(to);
+    if (!s) rev.set(to, (s = new Set()));
+    s.add(from);
+  };
+  const specs = (exts) => exts.map((e) => `*.${e}`);
+  const has = (exts) => repo.files.some((f) => exts.includes(ext(f)));
+  const jobs = [];
+  if (has(JS)) jobs.push(grep(repo, ['-E', '-e', `(from|import)[[:space:]]*\\(?[[:space:]]*['"]`, '-e', `require[[:space:]]*\\([[:space:]]*['"]`], specs(JS)).then((rows) => {
+    for (const r of rows) for (const s of jsSpecs(r.text)) for (const to of resolveJs(repo, r.file, s)) add(to, r.file);
+  }));
+  if (has(PY)) jobs.push(grep(repo, ['-E', '-e', '^[[:space:]]*(from[[:space:]]+[.A-Za-z_]|import[[:space:]]+[A-Za-z_])'], specs(PY)).then((rows) => {
+    for (const r of rows) for (const to of resolvePy(repo, r.file, r.text)) add(to, r.file);
+  }));
+  if (has(RS)) jobs.push(Promise.all([rustCrates(repo), grep(repo, ['-E', '-e', '^[[:space:]]*(pub[^[:space:]]*[[:space:]]+)?(mod|use)[[:space:]]'], specs(RS))]).then(([crates, rows]) => {
+    for (const r of rows) for (const to of resolveRs(repo, r.file, r.text, crates)) add(to, r.file);
+  }));
+  if (has(GD)) {
+    const roots = new Set(repo.files.filter((f) => basename(f) === 'project.godot').map((f) => (posix.dirname(f) === '.' ? '' : posix.dirname(f))));
+    jobs.push(grep(repo, ['-F', '-e', 'res://'], specs(GD)).then((rows) => {
+      for (const r of rows) {
+        const root = godotRoot(repo, r.file, roots) ?? '';
+        for (const m of r.text.matchAll(/res:\/\/([^"'\s)]+)/g)) {
+          const p = norm(posix.join(root, m[1]));
+          if (repo.has(p)) add(p, r.file);
+        }
+      }
+    }));
+    // class_name Foo: any .gd naming Foo uses that file.
+    jobs.push(grep(repo, ['-E', '-e', '^class_name[[:space:]]+[A-Za-z_]'], specs(['gd'])).then(async (rows) => {
+      const byClass = new Map();
+      for (const r of rows) { const n = /^class_name\s+(\w+)/.exec(r.text)?.[1]; if (n) byClass.set(n, r.file); }
+      if (!byClass.size) return;
+      const uses = await grep(repo, ['-w', '-F', ...[...byClass.keys()].flatMap((k) => ['-e', k])], specs(['gd', 'tscn', 'tres']));
+      for (const u of uses) for (const w of u.text.match(/\w+/g) ?? []) if (byClass.has(w) && !/^class_name\b/.test(u.text)) add(byClass.get(w), u.file);
+    }));
+  }
+  await Promise.all(jobs);
+  return rev;
+}
+
+// ---------- path mentions ----------
+
+/** Patterns that name a file in text: its repo path, and its quoted basename when no other file shares it. */
+function mentionPatterns(repo, f) {
+  const pats = [f];
+  const b = basename(f);
+  const stem = b.replace(/\.[^.]+$/, '');
+  if ((repo.byBase.get(b)?.length ?? 0) === 1 && !COMMON.has(stem) && b.length > 4) pats.push(`'${b}'`, `"${b}"`);
+  return pats;
+}
+
+/** For each file, the files whose text names it: Map file -> [{file, line}]. One git grep for the lot. */
+async function mentions(repo, targets) {
+  const pat = new Map();
+  for (const t of targets) for (const p of mentionPatterns(repo, t)) pat.set(p, t);
+  const res = new Map(targets.map((t) => [t, []]));
+  if (!pat.size) return res;
+  const rows = await grep(repo, ['-F', ...[...pat.keys()].flatMap((p) => ['-e', p])]);
+  // One alternation, longest first; a repo path must not sit inside a longer word ('xsrc/db.ts', 'src/db.tsx').
+  const keys = [...pat.keys()].sort((a, b) => b.length - a.length);
+  const re = new RegExp(keys.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+  for (const r of rows) {
+    for (const m of r.text.matchAll(re)) {
+      const t = pat.get(m[0]);
+      if (r.file === t) continue;
+      const before = r.text[m.index - 1] ?? ' ', after = r.text[m.index + m[0].length] ?? ' ';
+      if (m[0] === t && ((/[\w-]/.test(before) && before !== '/') || /\w/.test(after))) continue;
+      const list = res.get(t);
+      if (!list.some((x) => x.file === r.file)) list.push({ file: r.file, line: r.line });
+    }
+  }
+  return res;
+}
+
+// ---------- output ----------
+
+const ALL = process.argv.includes('--all');
+const cap = (list, n) => (ALL || list.length <= n ? list : list.slice(0, n));
+const more = (list, n) => (!ALL && list.length > n ? ` (+${list.length - n}, --all)` : '');
+function row(label, list, n, fmt = (x) => x) {
+  if (!list.length) return [];
+  const items = cap(list, n).map(fmt);
+  const lines = [];
+  let cur = `  ${label} (${list.length}):`;
+  for (const it of items) {
+    if (cur.length + it.length + 1 > 118 && !/:$/.test(cur)) { lines.push(cur); cur = '     '; }
+    cur += ` ${it}`;
+  }
+  lines.push(cur + more(list, n));
+  return lines;
+}
+const isDoc = (f) => !CODE.has(ext(f)) || ['md', 'txt'].includes(ext(f));
+const top = (f) => (f.includes('/') ? f.split('/')[0] + '/' : './');
+
+// ---------- file mode ----------
+
+async function fileReport(repo, file, graph) {
+  const out = [file];
+  const directImporters = [...(graph.get(file) ?? [])].sort();
+  // Breadth-first over "imports it" and "names its path". Path mentions are searched for the first 2 levels only
+  // (one git grep a level); imports are followed all the way. A runnable test is a leaf: nothing imports a test.
+  const seen = new Map([[file, { depth: 0, via: null, how: '', branches: new Set() }]]);
+  let frontier = [file];
+  const named = new Map(); // file -> line where it names the target itself
+  const docs = new Map();
+  for (let depth = 1; frontier.length; depth++) {
+    const ment = depth <= 2 ? await mentions(repo, frontier) : new Map();
+    const next = [];
+    for (const f of frontier) {
+      const edges = [...[...(graph.get(f) ?? [])].map((s) => ({ file: s, how: 'import' })), ...(ment.get(f) ?? []).map((m) => ({ file: m.file, line: m.line, how: 'names' }))];
+      for (const e of edges) {
+        if (f === file && e.how === 'names') {
+          if (isDoc(e.file)) { if (!docs.has(e.file)) docs.set(e.file, e.line); continue; }
+          if (!named.has(e.file)) named.set(e.file, e.line);
+        }
+        if (isDoc(e.file)) continue;
+        const from = depth === 1 ? [e.file] : seen.get(f).branches;
+        const had = seen.get(e.file);
+        if (had) { if (had.depth === depth) for (const b of from) had.branches.add(b); continue; }
+        seen.set(e.file, { depth, via: f, how: e.how, branches: new Set(from) });
+        if (!isRunnableTest(e.file)) next.push(e.file);
+      }
+    }
+    frontier = next;
+  }
+  const users = [...seen].filter(([f, s]) => s.depth === 1 && !isTest(f)).map(([f]) => f).sort();
+  const tests = [...seen].filter(([f, s]) => s.depth >= 1 && isRunnableTest(f));
+  const direct = tests.filter(([, s]) => s.depth === 1).map(([f, s]) => (s.how === 'names' ? `${f}:${named.get(f)}` : f)).sort();
+  // Deeper tests, grouped by the file next to the target they come through: small groups are the telling ones, a hub
+  // such as a server entry point that every test boots shows as one count.
+  // A test reached through several of them at its shortest depth is credited to the one that reaches fewest tests.
+  const reach = new Map();
+  for (const [, s] of tests) if (s.depth > 1) for (const b of s.branches) reach.set(b, (reach.get(b) ?? 0) + 1);
+  const groups = new Map();
+  for (const [f, s] of tests) {
+    if (s.depth === 1) continue;
+    const b = [...s.branches].sort((x, y) => reach.get(x) - reach.get(y) || x.localeCompare(y))[0];
+    const g = groups.get(b) ?? [];
+    g.push(f);
+    groups.set(b, g);
+  }
+  const ordered = [...groups].sort((a, b) => a[1].length - b[1].length || a[0].localeCompare(b[0]));
+  if (!directImporters.length && !named.size && !tests.length) out.push('  nothing imports it or names its path');
+  out.push(...row('used by (imports it or names its path)', users.map((f) => (named.has(f) && !directImporters.includes(f) ? `${f}:${named.get(f)}` : f)), 14));
+  out.push(...row('tests, direct', direct, 20));
+  if (ordered.length) {
+    const total = ordered.reduce((n, [, g]) => n + g.length, 0);
+    out.push(`  tests through other files (${total}), by the file they come through, smallest first:`);
+    for (const [b, g] of cap(ordered, 8)) out.push(`     via ${b} (${g.length}): ${g.length <= 4 || ALL ? g.sort().join(' ') : 'too many to list'}`);
+    if (!ALL && ordered.length > 8) out.push(`     +${ordered.length - 8} more files, --all`);
+  }
+  // Rust tests inside the file itself.
+  if (ext(file) === 'rs') {
+    const text = await readFile(resolve(repo.root, file), 'utf8').catch(() => '');
+    if (/#\[cfg\(test\)\]|#\[test\]/.test(text)) out.push('  tests inside the file: #[cfg(test)] / #[test]');
+  }
+  out.push(...row('named in docs and lists', [...docs].map(([f, l]) => `${f}:${l}`).sort(), 10));
+  const same = (repo.byBase.get(basename(file)) ?? []).filter((f) => f !== file);
+  if (same.length && !COMMON.has(basename(file).replace(/\.[^.]+$/, ''))) out.push(...row('same file name elsewhere (twins?)', same, 8));
+  return out;
+}
+
+// ---------- symbol mode ----------
+
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function isDefinition(name, text, file) {
+  const n = esc(name);
+  const kw = new RegExp(`\\b(function\\*?|class|interface|type|enum|const|let|var|def|fn|func|struct|trait|mod|signal|class_name|macro_rules!)\\s+${n}\\b`);
+  if (kw.test(text)) return true;
+  if (/^\s*#\s*define\s/.test(text) && new RegExp(`define\\s+${n}\\b`).test(text)) return true;
+  // A method or object-literal member: `  name(args) {`, `  async name(...): T {`, `name: (..) =>`, `name = (..) =>`.
+  const mods = '(?:(?:export|default|pub(?:\\([^)]*\\))?|public|private|protected|static|async|override|readonly|get|set|abstract)\\s+)*';
+  if (new RegExp(`^\\s*${mods}\\*?${n}\\s*(?:<[^>]*>)?\\s*\\([^;]*\\)\\s*(?::[^=;]*)?\\{?\\s*$`).test(text) && !/[;]\s*$/.test(text)) return true;
+  if (new RegExp(`^\\s*${mods}['"]?${n}['"]?\\s*[:=]\\s*(?:async\\s*)?(?:function\\b|\\([^)]*\\)\\s*(?::[^=]*)?=>|\\w+\\s*=>)`).test(text)) return true;
+  if (ext(file) === 'gd' && new RegExp(`^\\s*(static\\s+)?func\\s+${n}\\b`).test(text)) return true;
+  return false;
+}
+
+async function symbolReport(repo, raw, graph) {
+  const name = raw.replace(/\(\)$/, '').split(/\.|::|#/).pop();
+  if (!/^[\w$]+$/.test(name)) return [`${raw}`, '  not a path in this repo, nor a plain symbol name'];
+  const rows = await grep(repo, ['-w', '-F', '-e', name]);
+  const out = [raw === name ? name : `${raw} (searching for ${name})`];
+  if (!rows.length) return [...out, '  no file names it'];
+  const defs = rows.filter((r) => CODE.has(ext(r.file)) && isDefinition(name, r.text, r.file));
+  const defFiles = [...new Set(defs.map((d) => d.file))];
+  const byFile = new Map();
+  for (const r of rows) if (!byFile.has(r.file)) byFile.set(r.file, r.line);
+  const useFiles = [...byFile.keys()].filter((f) => !isDoc(f));
+  const users = useFiles.filter((f) => !isTest(f) && !defFiles.includes(f));
+  const tests = useFiles.filter((f) => isTest(f));
+  const docs = [...byFile.keys()].filter((f) => isDoc(f));
+  const label = defFiles.length > 1 ? `defined in ${defFiles.length} files: twins, fakes or copies to keep in step` : 'defined';
+  out.push(...row(label, defs.map((d) => `${d.file}:${d.line}`), 12));
+  if (!defs.length) out.push('  no definition found (a property, a generated name, or a language this tool does not parse)');
+  const groups = new Map();
+  for (const f of users) groups.set(top(f), (groups.get(top(f)) ?? 0) + 1);
+  const summary = [...groups].sort((a, b) => b[1] - a[1]).map(([g, c]) => `${g} ${c}`).join(', ');
+  out.push(...row(`used in${summary ? ` (${summary})` : ''}`, users.map((f) => `${f}:${byFile.get(f)}`), 14));
+  out.push(...row('tests naming it', tests.map((f) => `${f}:${byFile.get(f)}`), 14));
+  // Tests that import a defining file but never name the symbol: they may still run it.
+  const importing = new Set();
+  for (const d of defFiles) for (const s of graph.get(d) ?? []) if (isTest(s) && !tests.includes(s)) importing.add(s);
+  if (importing.size) out.push(...row(`tests importing ${defFiles.length === 1 ? defFiles[0] : 'a defining file'} without naming it`, [...importing].sort(), 8));
+  out.push(...row('named in docs and lists', docs.map((f) => `${f}:${byFile.get(f)}`), 8));
+  if (defFiles.length === 1 && !isTest(defFiles[0])) out.push(`  every test that reaches ${defFiles[0]}: who-uses ${defFiles[0]}`);
+  return out;
+}
+
+// ---------- main ----------
+
+async function main() {
+  const args = process.argv.slice(2).filter((a) => a !== '--all');
+  if (!args.length || args.includes('-h') || args.includes('--help')) { console.log(usage); process.exit(args.length ? 0 : 2); }
+  const unknown = args.find((a) => a.startsWith('-'));
+  if (unknown) die(`unknown option ${unknown}\n${usage}`);
+  const repo = await openRepo(process.cwd());
+  const graph = await importGraph(repo);
+  const blocks = [];
+  for (const a of args) {
+    const abs = resolve(process.cwd(), a.replace(/:\d+$/, ''));
+    const rel = relative(repo.root, abs);
+    const asFile = !rel.startsWith('..') && existsSync(abs) && statSync(abs).isFile() ? rel.split('\\').join('/') : repo.has(a) ? a : null;
+    blocks.push(asFile ? await fileReport(repo, asFile, graph) : await symbolReport(repo, a, graph));
+  }
+  console.log(blocks.map((b) => b.join('\n')).join('\n\n'));
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) main().catch((e) => die(String(e?.stack ?? e), 1));
+export { resolveJs, resolvePy, resolveRs, isDefinition, Repo };

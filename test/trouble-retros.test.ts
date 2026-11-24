@@ -1,4 +1,4 @@
-// A post-mortem when a minion goes past twice its budget or a Taskmaster steps its model up (a fix that didn't hold), in every scheme.
+// A post-mortem when a minion goes past four times its budget or a Taskmaster steps its model up (a fix that didn't hold), in every scheme.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { budgetKey } from '../src/minion-budget.ts';
@@ -31,12 +31,12 @@ function setup(mode: 'act' | 'log-only' = 'act') {
     store.updateTicket(x.id, { status } as any);
     return x;
   };
-  const over = (id: number, at = T0) => store.setSetting(budgetKey(id), { asked: at });
+  const over = (id: number, at = T0) => store.setSetting(budgetKey(id), { asked: at, woke: at });
   const stepUp = (id: number, at = T0) => store.addPick(id, 'claude-opus-5-5', 'medium', 'Taskmaster', 'changed by the Taskmaster', at);
   return { store, peek, retros, made, sent, notes, minion, over, stepUp };
 }
 
-test('a minion past twice its budget gets exactly one post-mortem once it has closed (#1796)', async () => {
+test('a minion past four times its budget gets exactly one post-mortem once it has closed (#1796)', async () => {
   const s = setup();
   const x = s.minion();
   s.over(x.id);
@@ -48,7 +48,7 @@ test('a minion past twice its budget gets exactly one post-mortem once it has cl
   assert.match(s.sent[0], /Expected cost: ~\$3/);
   const pm = s.store.listTickets(s.peek.id).find((t) => t.title.startsWith('Post-mortem'))!;
   assert.equal(s.store.getSetting<{ estimate: number }>(budgetKey(pm.id))?.estimate, 3, 'its budget alarms count from $3, the cap');
-  assert.match(s.sent[0], /past twice its budget/);
+  assert.match(s.sent[0], /past four times its budget/);
   assert.deepEqual(await s.retros.tick(), [], 'a second tick starts nothing');
   assert.equal(s.made.length, 1);
 });
@@ -78,6 +78,13 @@ test('the default model reads as Opus: default to Sonnet is a step down (#1796)'
   const x = s.minion();
   s.store.addPick(x.id, null, 'medium', 'Taskmaster', 'start', T0 - 4 * H); // the first pick was the table's; a null model follows
   s.store.addPick(x.id, 'claude-sonnet-5-5', 'medium', 'Taskmaster', 'cheaper', T0);
+  assert.deepEqual(await s.retros.tick(), []);
+});
+
+test('past 2x alone is not trouble: only the 4x mark is (#1796)', async () => {
+  const s = setup();
+  const x = s.minion();
+  s.store.setSetting(budgetKey(x.id), { asked: T0 });
   assert.deepEqual(await s.retros.tick(), []);
 });
 

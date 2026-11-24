@@ -174,7 +174,7 @@ export class EffortRetros {
 }
 
 // A post-mortem for a minion in trouble (#1796; Cara, 2026-11-24, "Retro on trouble"), in every scheme, on the effort trigger's launcher.
-// Trouble is either of two marks the server already keeps, no new data: its budget's `asked` time (past twice its expected cost,
+// Trouble is either of two marks the server already keeps, no new data: its budget's `woke` time (past four times its expected cost,
 // src/minion-budget.ts) or a Taskmaster's model step-up (a `ticket_picks` row by 'Taskmaster', which is how a stall or a person's
 // "that fix didn't hold" reaches update_ticket). It waits until the minion has closed, so the troubled minion is never interrupted.
 // docs/adr/0032-trouble-post-mortems.md has the picks.
@@ -186,7 +186,7 @@ export type Trouble = 'budget' | 'stepup';
 export const troubleKey = (ticketId: number, kind: Trouble) => `trouble-retro:${ticketId}:${kind}`;
 /** Set on a post-mortem minion the moment it is made, so it never gets one of its own. */
 export const postMortemOfKey = (ticketId: number) => `post-mortem-of:${ticketId}`;
-const WHAT: Record<Trouble, string> = { budget: 'went past twice its budget', stepup: "had its model stepped up by the Taskmaster, so a fix didn't hold" };
+const WHAT: Record<Trouble, string> = { budget: 'went past four times its budget', stepup: "had its model stepped up by the Taskmaster, so a fix didn't hold" };
 
 const MODEL_RANK = ['haiku', 'sonnet', 'opus', 'fable'];
 const EFFORT_RANK = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -207,7 +207,7 @@ export function troubleBrief(project: Pick<Project, 'name'>, v: TroubleVerdict, 
     `Post-mortem of #${t.number} "${t.title}" in ${project.name}. The server started this minion, not a person (#1796): #${t.number} has closed and ${v.kinds.map((k) => WHAT[k]).join('; it also ')}. Nobody is watching it live.`,
     '',
     'Follow citadel:post-mortem for that one minion: read it through the citadel:investigator Grunt (a Sonnet Grunt returning a timeline of at most 15 lines), never its raw transcript yourself. Give the timeline with its turn point, the cause class, and one fix.',
-    `The fix goes on one ask_question card \`to\` ${owner ?? 'its owner (read_minion shows who)'}, worded for someone who did not follow the work. You change no code, rules or skills yourself. Your only write is one line in the scheme's retro folder ledger (the folder CLAUDE.md's Project facts name, docs/retros/ if none): the minion, the cause class, the proposed fix. Ship that line as a docs-only change by this scheme's usual route.`,
+    `The fix goes on one ask_question card \`to\` ${owner ?? 'its owner (read_minion shows who)'}, worded for someone who did not follow the work. You change no code, rules or skills yourself. Your only write is one line in this scheme's retro log (retro-log/<date>/ in its shared folder, as the kit's hooks write theirs): the minion, the cause class, the proposed fix. It ships nothing; the scheme's retro adds repeats to its ledger.`,
     'Expected cost: ~$3. It is Sonnet medium and reads only through the investigator; past twice that its budget alarm asks you to say why, so stop and report instead of widening.',
     `Reply with the cause class and the card's link. Stay open in state complete. #${t.number} is closed: don't reopen it.`,
   ].join('\n');
@@ -225,8 +225,9 @@ export class TroubleRetros {
   private due(t: Ticket, since: number, mode: JudgeMode | undefined): Trouble[] {
     const { store } = this.d;
     const out: Trouble[] = [];
-    const asked = store.getSetting<BudgetState>(budgetKey(t.id))?.asked;
-    if (asked != null && asked >= since) out.push('budget');
+    // `woke` is the 4x mark (the Taskmaster's wake): Cara, 2026-11-24, "Only past 4x budget" (2x would be ~127 a week).
+    const woke = store.getSetting<BudgetState>(budgetKey(t.id))?.woke;
+    if (woke != null && woke >= since) out.push('budget');
     // The first pick is the start's own; a later one by the Taskmaster that moves the model or effort up is a step-up (a step down isn't trouble).
     const picks = store.picksOf(t.id);
     if (picks.some((p, i) => i > 0 && p.by === 'Taskmaster' && p.at >= since && stepsUp(picks[i - 1], p))) out.push('stepup');

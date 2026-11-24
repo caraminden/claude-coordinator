@@ -173,7 +173,7 @@ export const JUDGES: Judge[] = [
   },
   {
     id: 'trouble-retros', name: 'Trouble post-mortems (#1796)', mode: 'log-only', replay: { notYet: 'replays over the budget and pick history of real minions' },
-    acts: 'starts a citadel:post-mortem minion for a closed minion that went past twice its budget or had its model stepped up by a Taskmaster, once per minion and trigger',
+    acts: 'starts a citadel:post-mortem minion for a closed minion that went past four times its budget or had its model stepped up by a Taskmaster, once per minion and trigger',
     pins: [{ path: 'src/effort-retros.ts', symbols: ['TroubleRetros.tick', 'TroubleRetros.due'] }],
     callers: ['src/effort-retros.ts'],
   },

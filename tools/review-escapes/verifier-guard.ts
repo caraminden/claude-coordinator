@@ -45,8 +45,12 @@ export function verdict(input: { tool_name?: string; tool_input?: Record<string,
       return 'kill a pid you started (kill 12345, kill $P, node boot.mjs stop for the server), never one found by name or every process';
     if (/(^|[\s'"=:])(~|\$HOME|\$\{HOME\})(\/|\s|$|['"])/.test(c)) return `name paths inside ${root}, not the home folder`;
     if (/:8573\b/.test(c)) return 'the live Citadel is out of reach; use your own copy\'s port';
-    for (const m of c.matchAll(/(?<![\w.])\/[^\s'"`;|&)<>]*/g)) if (sibling(resolve(m[0]))) return `${m[0]} is another case's folder`;
-    for (const m of c.matchAll(/\/home\/[^\s'"`;|&)<>]*/g)) if (!inside(resolve(m[0]), [root, ...readable])) return `${m[0]} is outside this case's folder`;
+    // Whole path words only: a HOME like /opt/runner/home holds "/home/" mid-path (#1740's CI).
+    for (const m of c.matchAll(/(?<![\w.\/-])\/[^\s'"`;|&)<>]*/g)) {
+      const p = resolve(m[0]);
+      if (sibling(p)) return `${m[0]} is another case's folder`;
+      if ((p.startsWith('/home/') || inside(p, [HOME])) && !inside(p, [root, ...readable])) return `${m[0]} is outside this case's folder`;
+    }
     return '';
   }
   return '';

@@ -57,3 +57,10 @@ test('another case of the same run is out of reach, wherever --out is', () => {
   assert.equal(denied('Bash', { command: `cat ${other}` }, root), true);
   assert.equal(denied('Bash', { command: `ls ${root}/scratch /usr/bin` }, root), false);
 });
+
+test('a HOME outside /home (a CI runner\'s) still lets the case folder through and keeps the rest out', () => {
+  const home = '/opt/runner/home', root = `${home}/out/verifier/escape-1`;
+  const run = (command: string) => spawnSync(process.execPath, [guard, root], { input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: root }), encoding: 'utf8', env: { ...process.env, HOME: home } }).stdout.includes('"deny"');
+  assert.equal(run(`cd ${root}/scratch && git push -q ../bare.git HEAD:main`), false);
+  assert.equal(run(`cat ${home}/.local/share/claude-coordinator/coordinator.db`), true);
+});

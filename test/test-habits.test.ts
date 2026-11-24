@@ -70,9 +70,8 @@ ${mcpTool('call')}
 test('the #1234 replay', async () => {
   await post('/api/relay/when-live', { kind: 'relay_when_live' });
   writeFileSync(join(dir, 'claude'), '#!/bin/sh\\necho hi\\n', { mode: 0o755 });
-  globalThis.fetch = async () => ({ ok: true });
-  // timing-ok: the planted sleep the checker must flag
-  await new Promise((r) => setTimeout(r, 2_000));
+  globalThis.EventSource = class {};
+  await idle(2_000);
   assert.match(text, /End your turn now with a short reply/);
   assert.equal(relay(2), 2);
 });
@@ -85,7 +84,7 @@ test('the #1234 replay', async () => {
   assert.ok(by('seam', /test\/relay-when-live\.test\.ts already drives the same seam/), JSON.stringify(hits, null, 1));
   assert.ok(by('harness', /call\(\) repeats test\/missing-args\.test\.ts:\d+ tool\(\)/), JSON.stringify(hits, null, 1));
   assert.ok(by('harness', /fake executable.*fakeClaude \(test\/helpers\.ts\)/), JSON.stringify(hits, null, 1));
-  assert.ok(by('harness', /stubs the browser's fetch/), JSON.stringify(hits, null, 1));
+  assert.ok(by('harness', /stubs the browser's EventSource/), JSON.stringify(hits, null, 1));
   assert.ok(by('sleep', /fixed 2000 ms wait.*until \(test\/helpers\.ts\)/), JSON.stringify(hits, null, 1));
   assert.ok(by('prose', /End your turn now with a short reply/), JSON.stringify(hits, null, 1));
   assert.equal(hits.length, 6, JSON.stringify(hits, null, 1));
@@ -124,6 +123,8 @@ test('relays once live', async () => {
 });
 test('a second relay waits on the event', async () => {
   await until('relayed', () => relay(3));
+  // timing-ok: a sleep someone already justified is not flagged again
+  await new Promise((r) => setTimeout(r, 300));
   assert.match(res.data.error, /refused/);
   assert.equal(res.status, 409);
 });

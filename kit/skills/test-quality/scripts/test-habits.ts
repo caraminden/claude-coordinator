@@ -267,7 +267,7 @@ export function fixedSleep(line: string): number | null {
   return hit.length ? Math.max(...hit) : null;
 }
 
-const STUB = /\b(?:globalThis|global|window|self)\.(document|window|fetch|EventSource|WebSocket|localStorage|sessionStorage|navigator|location|matchMedia|requestAnimationFrame|IntersectionObserver|ResizeObserver|MutationObserver|HTMLElement|customElements)\s*=(?!=)|defineProperty\(\s*globalThis\s*,\s*['"](\w+)['"]/;
+const STUB = /\b(?:globalThis|global|window|self)\.(document|window|EventSource|WebSocket|localStorage|sessionStorage|navigator|location|matchMedia|requestAnimationFrame|IntersectionObserver|ResizeObserver|MutationObserver|HTMLElement|customElements)\s*=(?!=)|defineProperty\(\s*globalThis\s*,\s*['"](\w+)['"]/;
 
 // ---- the scan ----
 
@@ -335,7 +335,7 @@ export function scan(root: string, added: Added, opts: { maxLines?: number; word
     for (const [n, line] of a.lines) {
       const p = prosePin(line, opts.words ?? 4);
       if (p) hits.push({ file, line: n, kind: 'prose', text: `assert pins ${p.length > 60 ? `${p.slice(0, 57)}...` : p}: pin what the code does (the status, the field, refused or posted), not the sentence` });
-      const s = fixedSleep(line);
+      const s = /timing-ok:/.test(`${a.lines.get(n - 1) ?? ''}\n${line}`) ? null : fixedSleep(line); // the repo's escape, on the row or the one above
       if (s != null) hits.push({ file, line: n, kind: 'sleep', text: `fixed ${s} ms wait: wait on the event${waitHelpers.length ? ` with ${waitHelpers.slice(0, 2).join(' or ')}` : ''}, or give the code a setting the test turns down` });
       if (!fake && /['"`]#!\s*\/|['"`]#!\$\{/.test(line)) {
         fake = true;

@@ -90,10 +90,13 @@ for (const [name, size] of [['desktop', { width: 1280, height: 800 }], ['phone',
     const off = await page.eval<number>(OFFSET);
     assert.ok(off >= 0 && off <= 16, `reply top ${off}px under the thread bar`);
     // It grows (a card or more text arrives): the top holds.
-    await page.eval(`pushTool(); push('Next line of the same turn.')`);
+    await page.eval(`pushTool(); push(${JSON.stringify('NEXTREPLY\n\n' + LONG)})`);
     await frame(page);
     const rs = await page.eval<number>(`document.querySelectorAll('#log .msg.reply').length`);
     assert.ok(rs > 1);
+    // Each newer reply takes over the hold (the long one scrolls away), so what holds now is the newest (long) reply's top.
+    const held = await page.eval<number>(OFFSET);
+    assert.ok(held >= 0 && held <= 16, `after it grew, the newest reply's top is ${held}px under the thread bar`);
   });
 
   test(`${name}: scrolled up, a new reply moves nothing`, { skip }, async () => {

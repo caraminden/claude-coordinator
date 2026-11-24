@@ -33,7 +33,7 @@
   const requests = []; // [start, end, server ms or null, what]
   // The page's address over time, so a wait is put on the page it started on.
   const pages = [[-Infinity, location.hash || '#/']];
-  addEventListener('hashchange', () => { pages.push([performance.now(), location.hash || '#/']); if (pages.length > 50) pages.shift(); });
+  addEventListener('hashchange', () => { pages.push([performance.now(), location.hash || '#/']); if (pages.length > 50) { pages.shift(); pages[0][0] = -Infinity; } });
   const pageAt = (t) => pages.findLast(([at]) => at <= t)[1];
 
   const tabTime = (start, end) => blocked.reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, end) - Math.max(a, start)), 0);

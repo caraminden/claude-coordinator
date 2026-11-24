@@ -115,3 +115,13 @@ test('a report the server could not take is kept and sent on the next load', { s
     refuse = false;
   }
 });
+
+test('a request asked before the oldest kept page is still reported, with a page, after 60 page changes', { skip }, async () => {
+  const page = await open();
+  const ask = page.eval(SLOW_FETCH);
+  for (let i = 0; i < 60; i++) await page.eval(go(`#/p/${i + 1}`));
+  await ask;
+  const [req] = await until('the request was reported', () => rows('request').length && rows('request'));
+  assert.equal(req.what, 'GET /api/slow');
+  assert.match(req.page, /^#\//);
+});

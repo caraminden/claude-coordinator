@@ -63,8 +63,19 @@ test('the git-history cache is capped', async () => {
   const repo = join(root, 'repo');
   const run = (...a: string[]) => execFileSync('git', a, { cwd: repo, stdio: 'ignore' });
   execFileSync('git', ['init', '-q', repo]);
-  run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x');
-  for (let i = 0; i < HISTORY_CACHE_MAX + 4; i++) await gitEdits(repo, [`f${i}.md`], () => null);
+  // A dated line in every file, so a miss (a real git read) calls href once and a hit never does.
+  const total = HISTORY_CACHE_MAX + 4;
+  for (let i = 0; i < total; i++) writeFileSync(join(repo, `f${i}.md`), 'on 2026-11-24 something\n');
+  run('add', '.');
+  run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x');
+  let reads = 0;
+  const href = () => { reads++; return null; };
+  for (let i = 0; i < total; i++) await gitEdits(repo, [`f${i}.md`], href);
+  assert.equal(reads, total);
 
-  assert.ok(historyCacheSize() <= HISTORY_CACHE_MAX);
+  assert.equal(historyCacheSize(), HISTORY_CACHE_MAX);
+  await gitEdits(repo, [`f${total - 1}.md`], href);
+  assert.equal(reads, total, 'the newest key is still cached');
+  await gitEdits(repo, ['f0.md'], href);
+  assert.equal(reads, total + 1, 'the first key was evicted, so it is read again');
 });

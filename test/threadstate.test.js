@@ -510,7 +510,6 @@ test('refBucket: a minion link in chat is waiting, working, deployed or neutral 
     [{ state: 'pending-deploy', ship: { stage: 'main', text: 'Shipped to main' } }, 'working'],
     [{ status: 'closed', state: 'pending-deploy', note: 'Deployed trippresenter at f001fc5dc, healthy', ship: { stage: 'main', text: 'Shipped to main' } }, 'deployed'],
     // A release target (APK, desktop): working while its release is on its way, stuck waits, released is deployed.
-    [{ status: 'closed', ship: { stage: 'main', text: 'Shipped to main' }, release: { stuck: false } }, 'working'],
     [{ status: 'closed', ship: { stage: 'main', text: 'Shipped to main' }, release: { stuck: true } }, 'waiting'],
     [{ status: 'closed', ship: { stage: 'main', text: 'Shipped to main' }, release: { stuck: false } }, 'working'], // an APK or contraption release on its way
     [{ status: 'closed', ship: live, release: { stuck: false } }, 'working'], // its release is still on its way

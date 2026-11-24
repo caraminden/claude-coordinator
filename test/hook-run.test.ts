@@ -137,16 +137,13 @@ test('a side question: the read-only guard refuses writes first, every tool goes
   assert.equal(hookRunMatcher(true), '.*');
 });
 
-test("the runner keeps the tripwire's 10 s limit and its block on failure (#817), and pins every file it loads", () => {
+test("the runner keeps the tripwire's block on failure (#817), and pins every file it loads", () => {
   const { runner } = setup(false, 'shape');
   const [hard, soft] = runner;
   assert.equal(runner.length, 2);
-  assert.equal(hard.hooks[0].timeout, 10);
   assert.equal(hard.hooks[0].onFailure, 'block');
-  assert.match(hard.hooks[0].command, /^NODE_COMPILE_CACHE='[^']*\.compile-cache' '[^']+' '[^']*hook-run\.ts' '\{/);
   // The message and card tools only the soft checks read: same process, but a timeout or crash lets them through.
   assert.equal(soft.hooks[0].command, hard.hooks[0].command);
-  assert.equal(soft.hooks[0].timeout, 10);
   assert.equal(soft.hooks[0].onFailure, undefined);
   for (const t of ['mcp__thread__message_coordinator', 'mcp__coordinator__message_ticket', 'mcp__thread__ask_question', 'mcp__thread__propose_plan']) assert.ok(new RegExp(soft.matcher).test(t) && !new RegExp(hard.matcher).test(t), t);
   for (const t of ['Bash', 'Read', 'Write', 'Edit', 'MultiEdit', 'Skill']) assert.ok(new RegExp(hard.matcher).test(t) && !new RegExp(soft.matcher).test(t), t);

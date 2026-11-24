@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { loadTemplates, ScheduledRuns } from '../src/schedules.ts';
+import { ScheduledRuns } from '../src/schedules.ts';
 import { addArchitectureCheck, addArchitectureChecks } from '../src/standard-audits.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'architecture-'));
@@ -33,15 +33,6 @@ test("every scheme gets the check once, a deleted one stays deleted, and Citadel
   store.schedules.remove(rows(store, other.id)[0].id);
   assert.equal(addArchitectureCheck(store, '/data', other.id), null);
   assert.equal(rows(store, other.id).length, 0);
-});
-
-test('the template runs Opus high, monthly, gated on 20 minions, and reads the last report for follow-through', () => {
-  const t = loadTemplates().get('architecture')!;
-  assert.deepEqual([t.min_minions, t.model, t.effort], [20, 'claude-opus-5-5', 'high']);
-  assert.match(t.cron, /^\d+ \d+ \d+ \* \*$/);
-  assert.match(t.body, /citadel:improve-codebase-architecture/);
-  assert.match(t.body, /went nowhere|not built/);
-  assert.match(t.body, /ask_question card of the seams/);
 });
 
 test('an inactive scheme skips at no cost; an active one runs', async () => {

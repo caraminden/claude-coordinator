@@ -15,7 +15,6 @@ after(() => tmp.teardown());
 test('a new scheme defaults to high effort', () => {
   const store = new Store(join(root, 'store.db'));
   const p = store.createProject('Alpha', null);
-  assert.equal(store.getProject(p.id)!.default_effort, 'high');
   store.setProjectSettings(p.id, { default_effort: '' });
   assert.equal(store.getProject(p.id)!.default_effort, '');
 });

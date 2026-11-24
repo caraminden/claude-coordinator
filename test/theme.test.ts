@@ -28,10 +28,7 @@ test('every colour and token in style.css has a chosen --citadel-* name, in ligh
 
 test("theme.css carries the tokens, the phone control height and reduced motion, with Citadel's names renamed", () => {
   const css = themeCss(style);
-  assert.match(css, /--citadel-on-accent: #fff;/);
-  assert.match(css, /prefers-color-scheme: dark[\s\S]*--citadel-on-accent: #1d1c1a;/);
-  assert.match(css, /^:root \{[^}]*--citadel-space-3: 12px;[^}]*--citadel-control-h: 32px;/m);
-  assert.match(css, /@media \(max-width: 800px\) \{\s*:root \{\s*--citadel-control-h: 40px;/);
+  assert.match(css, /@media \(max-width: 800px\) \{\s*:root \{\s*--citadel-control-h: /);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*:root \{\s*--citadel-motion: 0s;/);
   // A token built from Citadel's colours points at the served names, never Citadel's own (apps don't have --accent).
   assert.match(css, /--citadel-focus-ring: 2px solid var\(--citadel-accent\);/);

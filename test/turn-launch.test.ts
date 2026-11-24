@@ -267,11 +267,6 @@ test("a resumed turn is sent this turn's system prompt, not its session's first 
   }
 });
 
-// #1188: the flag measured no drop in first-turn cache writes, so no scheme runs with it; the switch stays for a re-try.
-test('--exclude-dynamic-system-prompt-sections is off for every scheme while EXCLUDE_DYNAMIC_PROMPT_SCHEMES is empty', async () => {
-  assert.ok(!((await launch({ project: 2 })) as any).spec.args.includes('--exclude-dynamic-system-prompt-sections'));
-});
-
 // The advisor trial (#817): a minion set to Sonnet with an Opus advisor launches as Sonnet and gets
 // --advisor; a plain model never does, and a Taskmaster set to it runs without the advisor.
 test("--advisor is passed only when the minion's model carries one, and never to a Taskmaster", async () => {

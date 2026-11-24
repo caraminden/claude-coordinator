@@ -55,14 +55,17 @@ test('an inactive scheme skips at no cost; an active one runs', async () => {
     runner: { emit() {}, send() {}, limitWait: () => null, netWait: () => null, killWait: () => null } as any,
   } as any);
   addArchitectureChecks(store, '/data');
+  // The window opens at the row's making: put that a day back so minions made in the same millisecond still count.
+  store.db.prepare('UPDATE schedules SET created_at = created_at - 86400000').run();
   const mk = (id: number, n: number) => { for (let i = 0; i < n; i++) store.createTicket({ project_id: id, title: 'work', permission_mode: 'bypassPermissions', created_by: 'Cara' }); };
   mk(quiet.id, 19);
   mk(busy.id, 20);
   const later = Date.now() + 1000;
-  await runs.run(rows(store, quiet.id)[0], later);
+  const row = (id: number) => store.schedules.get(rows(store, id)[0].id)!;
+  await runs.run(row(quiet.id), later);
   assert.deepEqual(made, []);
   assert.match(store.schedules.get(rows(store, quiet.id)[0].id)!.last_skip ?? '', /19 minions since .*\(needs 20\)/);
-  await runs.run(rows(store, busy.id)[0], later);
+  await runs.run(row(busy.id), later);
   assert.equal(made.length, 1);
   assert.match(made[0], /^Busy:/);
 });

@@ -20,7 +20,7 @@ type Arm = { name: string; model: string; effort: string; lens?: string };
 type Meta = { cost: number; ms: number; turns: number; models: string[]; error?: string };
 type Verdict = { fix: number; verdict: 'named' | 'near' | 'no'; finding: number | null; why: string };
 
-/** `--set escapes|planted|all` (default all), or the path of a set file (its group is its file name). */
+/** `--set escapes|planted|all` (default all), or the path of a set file (its cases are tallied as the planted group). */
 function loadSet(which: string): Case[] {
   const files = which === 'all' ? ['set.json', 'planted.json'] : which === 'escapes' ? ['set.json'] : which === 'planted' ? ['planted.json'] : [resolve(which)];
   return files.flatMap((f) => (JSON.parse(readFileSync(resolve(HERE, f), 'utf8')).cases as Case[]).map((c) => ({ ...c, set: f === 'set.json' ? 'escapes' : 'planted' })));

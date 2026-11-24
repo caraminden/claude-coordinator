@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { benchHash, lessonKinds, newLessons, NEW_LESSONS, readRecord, ROOT, staleReasons } from '../tools/review-escapes/bench.ts';
+import { benchHash, DROP, lessonKinds, newLessons, NEW_LESSONS, readRecord, ROOT, staleReasons } from '../tools/review-escapes/bench.ts';
 
 const FILES = ['kit/agents/reviewer.md', 'kit/skills/self-review/SKILL.md', 'kit/skills/self-review/references/lenses.md', 'kit/skills/ponytail-review/SKILL.md'];
 
@@ -26,7 +26,7 @@ test("the reviewer's text, lenses and model match the last recorded benchmark ru
   const rec = readRecord();
   assert.ok(rec, 'no benchmark is recorded: run node tools/review-escapes/bench.ts record (tools/review-escapes/README.md)');
   const why = staleReasons(rec);
-  assert.deepEqual(why, [], `${why.join('; ')}. Run the benchmark on both sets, two passes, and record it: tools/review-escapes/README.md, "When the reviewer changes". A drop of ${2} planted bugs or more makes the change high risk.`);
+  assert.deepEqual(why, [], `${why.join('; ')}. Run the benchmark on both sets, two passes, and record it: tools/review-escapes/README.md, "When the reviewer changes". A drop of ${DROP} planted bugs or more makes the change high risk.`);
 });
 
 test('a changed reviewer text, model, lens or brief rule changes the hash; whitespace does not', () => {

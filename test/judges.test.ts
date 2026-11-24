@@ -50,6 +50,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'src/fault-points.ts': { why: 'test-only fault injection kills its own process', calls: 1 },
   'tools/dev-copy.ts': { why: 'stops the dev copy it started', calls: 3 },
   'tools/ui-shot.ts': { why: 'stops the dev copy it started', calls: 1 },
+  'tools/review-escapes/run.ts': { why: 'stops processes a verifier case left running in its own folder (#1740)', calls: 1 },
   'kit/skills/run-on-windows/scripts/wco/rig.ts': { why: 'stops and pings the rig processes it started', calls: 3 },
   'kit/hooks/run.ts': { why: 'runs the hook scripts', calls: 0 },
   'kit/hooks/heavy-nudge.ts': { why: 'says the citadel-heavy rule when a heavy build runs (the line moved out of the prompt, #1577); judges no work and never blocks', calls: 0 },

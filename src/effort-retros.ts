@@ -8,6 +8,7 @@ import type { Runner } from './runner.ts';
 import { pickFor } from '../public/model-table.js';
 import { pacific } from './schedules.ts';
 import { judge, judged, type JudgeMode } from './judges.ts';
+import { budgetKey, family, type BudgetState } from './minion-budget.ts';
 
 export const EFFORT_KEY = 'effortName';
 /** A named effort needs this many minions; an unnamed chain one more (a 3-minion chain is often only ordering). */
@@ -168,6 +169,109 @@ export class EffortRetros {
     store.setSetting(doneKey(project.id, v.name), { act: 'start', why: v.why, at: this.d.now?.() ?? Date.now(), ticket: made.number });
     runner.emit(made.id, 'note', { text: `Started by the effort trigger: every minion of "${v.name}" has closed (${v.why}).` });
     runner.send(made.id, by, effortBrief(project, v), [], { brief: true });
+    return `started #${made.number} (${v.why})`;
+  }
+}
+
+// A post-mortem for a minion in trouble (#1796; Cara, 2026-11-24, "Retro on trouble"), in every scheme, on the effort trigger's launcher.
+// Trouble is either of two marks the server already keeps, no new data: its budget's `asked` time (past twice its expected cost,
+// src/minion-budget.ts) or a Taskmaster's model step-up (a `ticket_picks` row by 'Taskmaster', which is how a stall or a person's
+// "that fix didn't hold" reaches update_ticket). It waits until the minion has closed, so the troubled minion is never interrupted.
+// docs/adr/0032-trouble-post-mortems.md has the picks.
+
+/** When the trigger started watching: trouble from before it is not chased (a first deploy would otherwise post-mortem every old minion). */
+export const SINCE_KEY = 'trouble-retros:since';
+export type Trouble = 'budget' | 'stepup';
+/** One marker per minion per trigger: the verdict, written before the start. */
+export const troubleKey = (ticketId: number, kind: Trouble) => `trouble-retro:${ticketId}:${kind}`;
+/** Set on a post-mortem minion the moment it is made, so it never gets one of its own. */
+export const postMortemOfKey = (ticketId: number) => `post-mortem-of:${ticketId}`;
+const WHAT: Record<Trouble, string> = { budget: 'went past twice its budget', stepup: "had its model stepped up by the Taskmaster, so a fix didn't hold" };
+
+export interface TroubleVerdict { name: string; ticket: Ticket; kinds: Trouble[]; why: string }
+
+export function troubleBrief(project: Pick<Project, 'name'>, v: TroubleVerdict, owner: string | null): string {
+  const t = v.ticket;
+  return [
+    `Post-mortem of #${t.number} "${t.title}" in ${project.name}. The server started this minion, not a person (#1796): #${t.number} has closed and ${v.kinds.map((k) => WHAT[k]).join('; it also ')}. Nobody is watching it live.`,
+    '',
+    'Follow citadel:post-mortem for that one minion: read it through the citadel:investigator Grunt (a Sonnet Grunt returning a timeline of at most 15 lines), never its raw transcript yourself. Give the timeline with its turn point, the cause class, and one fix.',
+    `The fix goes on one ask_question card \`to\` ${owner ?? 'its owner (read_minion shows who)'}, worded for someone who did not follow the work. You change no code, rules or skills yourself. Your only write is one line in the scheme's retro folder ledger (the folder CLAUDE.md's Project facts name, docs/retros/ if none): the minion, the cause class, the proposed fix. Ship that line as a docs-only change by this scheme's usual route.`,
+    'Expected cost: ~$3. It is Sonnet medium and reads only through the investigator; past twice that its budget alarm asks you to say why, so stop and report instead of widening.',
+    `Reply with the cause class and the card's link. Stay open in state complete. #${t.number} is closed: don't reopen it.`,
+  ].join('\n');
+}
+
+/** Checks every scheme's closed minions for trouble and starts one post-mortem per minion; server.ts ticks it with EffortRetros. */
+export class TroubleRetros {
+  private d: EffortRetroDeps;
+
+  constructor(d: EffortRetroDeps) {
+    this.d = d;
+  }
+
+  /** The troubles of a minion since `since` that have no marker yet. */
+  private due(t: Ticket, since: number, mode: JudgeMode | undefined): Trouble[] {
+    const { store } = this.d;
+    const out: Trouble[] = [];
+    const asked = store.getSetting<BudgetState>(budgetKey(t.id))?.asked;
+    if (asked != null && asked >= since) out.push('budget');
+    // The first pick is the start's own; a later one by the Taskmaster is a step-up.
+    if (store.picksOf(t.id).slice(1).some((p) => p.by === 'Taskmaster' && p.at >= since)) out.push('stepup');
+    // Marked already is done, except a `would` once the judge acts and a failed start with tries left.
+    return out.filter((k) => {
+      const m = store.getSetting<Marker>(troubleKey(t.id, k));
+      return m == null || (m.act === 'would' && mode !== 'log-only') || (m.act === 'failed' && (m.tries ?? 1) < TRIES);
+    });
+  }
+
+  async tick(): Promise<string[]> {
+    const { store } = this.d;
+    const now = this.d.now?.() ?? Date.now();
+    const said: string[] = [];
+    const since = store.getSetting<number>(SINCE_KEY);
+    if (since == null) { store.setSetting(SINCE_KEY, now); return said; }
+    const mode = this.d.mode ?? judge('trouble-retros')?.mode;
+    const start = judged('trouble-retros', 'start a post-mortem', (project: Project, v: TroubleVerdict) => this.start(project, v),
+      (p: Project, v: TroubleVerdict) => { for (const k of v.kinds) store.setSetting(troubleKey(v.ticket.id, k), { act: 'would', why: v.why, at: now }); return Promise.resolve(`would start a post-mortem (${v.why})`); },
+      (line, project) => this.d.note(line, project), mode);
+    for (const project of store.listProjects()) {
+      for (const t of store.listTickets(project.id)) {
+        if (t.kind === 'coordinator' || t.status !== 'closed' || family(t.model ?? t.last_model) == null) continue;
+        if (store.getSetting(postMortemOfKey(t.id)) != null) continue;
+        const kinds = this.due(t, since, mode);
+        if (!kinds.length) continue;
+        const v: TroubleVerdict = { name: `#${t.number} ${t.title}`, ticket: t, kinds, why: kinds.map((k) => WHAT[k]).join(', ') };
+        const before = store.getSetting<Marker>(troubleKey(t.id, kinds[0]));
+        try {
+          // Marked before the start: a crash between the two loses one post-mortem rather than starting it twice.
+          for (const k of kinds) store.setSetting(troubleKey(t.id, k), { act: 'start', why: v.why, at: now });
+          said.push(`${project.name} #${t.number}: ${await start(project, v)}`);
+        } catch (err: any) {
+          console.error(`Post-mortem of #${t.number} in ${project.name} didn't start:`, err);
+          // Its minion was made: leave it. Else mark the failure and try again next tick, TRIES in all.
+          if (store.getSetting<Marker>(troubleKey(t.id, kinds[0]))?.ticket == null) {
+            const tries = (before?.act === 'failed' ? (before.tries ?? 1) : 0) + 1;
+            for (const k of kinds) store.setSetting(troubleKey(t.id, k), { act: 'failed', why: String(err?.message ?? err).slice(0, 300), at: now, tries });
+          }
+        }
+      }
+    }
+    for (const line of said) console.log(`Trouble post-mortems (#1796): ${line}`);
+    return said;
+  }
+
+  private async start(project: Project, v: TroubleVerdict): Promise<string> {
+    const { store, runner, by } = this.d;
+    const t = v.ticket;
+    const assigned = store.props.forTarget('minion', t.id).assigned;
+    const owner = typeof assigned === 'string' ? assigned : null;
+    const made = await this.d.newMinion(project, { title: `Post-mortem: #${t.number} ${t.title}`.slice(0, 120), model: 'claude-sonnet-5-5', effort: 'medium', props: { type: 'research', ...(owner ? { assigned: owner } : {}) } }, by);
+    store.setSetting(postMortemOfKey(made.id), t.number);
+    store.updateTicket(made.id, { person_id: t.person_id ?? null });
+    for (const k of v.kinds) store.setSetting(troubleKey(t.id, k), { act: 'start', why: v.why, at: this.d.now?.() ?? Date.now(), ticket: made.number });
+    runner.emit(made.id, 'note', { text: `Started by the trouble trigger: #${t.number} ${v.why}.` });
+    runner.send(made.id, by, troubleBrief(project, v, owner), [], { brief: true });
     return `started #${made.number} (${v.why})`;
   }
 }

@@ -28,6 +28,9 @@ Create either file when it is first needed.
   scheme. Its brief lists the minions; the retro asks what went wrong across them (the split, the order,
   briefs that left the next minion guessing) and writes `effort-<slug>.md` in the retro folder. An effort
   that is mostly one major build gets none: the build's retro covers it.
+- A trouble post-mortem: the server starts a `citadel:post-mortem` minion (Sonnet medium, read-only) for a
+  closed minion that went past twice its budget or whose model a Taskmaster stepped up (a fix that didn't
+  hold). It is one minion, not the process's retro: it proposes one fix on a card to the minion's owner.
 
 ## Steps
 

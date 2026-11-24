@@ -51,6 +51,8 @@ test('stagger moves each scheme to its own slot and wraps inside the window', ()
   assert.equal(staggerCron('0 7 1 * *', '1d within 28d', 28), '0 7 1 * *');
   assert.equal(staggerCron('0 7 15 * *', '1d within 14d', 13), '0 7 28 * *', 'never past the 28th, so every month has it');
   assert.equal(staggerCron('0 7 15 * *', '1d within 14d', 14), '0 7 15 * *');
+  assert.equal(staggerCron('0 7 1,16 * *', '1d within 12d', 5), '0 7 6,21 * *', 'a list of days shifts together (#1796: the retro runs on the 1st and 16th)');
+  assert.equal(staggerCron('0 7 1,16 * *', '1d within 12d', 11), '0 7 12,27 * *', 'and stays under the 28th');
   assert.throws(() => staggerCron('0 7 * * *', '1d within 28d', 1), /day/);
   assert.throws(() => staggerCron('0 7 1 * *', 'often', 1), /stagger/);
 });

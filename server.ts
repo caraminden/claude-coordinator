@@ -66,7 +66,7 @@ import { makeMinion, type NewMinionSpec } from './src/new-minion.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
 import { depsNote, installDeps, installsRunning, NPM_CACHE_CAP, npmCacheDir } from './src/worktree-deps.ts';
 import { ScheduledRuns } from './src/schedules.ts';
-import { EffortRetros } from './src/effort-retros.ts';
+import { EffortRetros, TroubleRetros } from './src/effort-retros.ts';
 import { HeldStarts } from './src/held-starts.ts';
 import { curatorTarget } from './src/memory-curator.ts';
 import { addAppTurnsChecks, addArchitectureChecks, addGlossaryDrifts, addMemoryCurators, backfillStandardAudits } from './src/standard-audits.ts';
@@ -884,6 +884,9 @@ if (!BOOT_CHECK) every('held starts', 30_000, () => heldStarts.tick());
 // A finished multi-minion effort starts its retro, in every scheme (#1751, src/effort-retros.ts).
 const effortRetros = new EffortRetros({ store, newMinion, runner, by: APP_NAME, note: (line, p) => judgeNote(() => p.id)(line) });
 if (!BOOT_CHECK && !PREVIEW) every('effort retros', 10 * 60_000, () => effortRetros.tick());
+// A closed minion that went past twice its budget or had its model stepped up gets one post-mortem, in every scheme (#1796).
+const troubleRetros = new TroubleRetros({ store, newMinion, runner, by: APP_NAME, note: (line, p) => judgeNote(() => p.id)(line) });
+if (!BOOT_CHECK && !PREVIEW) every('trouble post-mortems', 10 * 60_000, () => troubleRetros.tick());
 // Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
 if (!BOOT_CHECK && !PREVIEW) warmUsage(store);
 if (!BOOT_CHECK && !PREVIEW) every('fresh sessions', 60_000, () => runner.freshSweep());

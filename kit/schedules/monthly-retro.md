@@ -4,11 +4,11 @@ type: research
 model: claude-opus-5-5
 effort: medium
 min_minions: 40
-cron: 0 7 15 * *
-stagger: 1d within 14d
+cron: 0 7 1,16 * *
+stagger: 1d within 12d
 applies: the scheme has minions working in it (any repo: the retro is about how the work went, not the code)
 ---
-Monthly retro for {scheme}: how the last month's work went, by citadel:retro. Cara (2026-11-15) picked a monthly retro for each busy scheme, because milestone retros never ran here (move-fast work has no milestone PRs). Cara (2026-11-23) picked "Lower it to 40" for the gate: at 150 none had run, and only the four busiest schemes would ever clear it.
+Retro for {scheme}, every two weeks: how the work since the last retro went, by citadel:retro. Cara (2026-11-15) picked a monthly retro for each busy scheme, because milestone retros never ran here (move-fast work has no milestone PRs). Cara (2026-11-23) picked "Lower it to 40" for the gate: at 150 none had run, and only the four busiest schemes would ever clear it.
 
 Read these, one Sonnet Grunt per source. Each Grunt returns counts and minion numbers, never transcripts.
 1. This scheme's retro log since the last retro (retro-log/<date>/*.md in its shared folder), especially:

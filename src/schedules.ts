@@ -239,8 +239,8 @@ export function staggerCron(base: string, stagger: string, slot: number): string
     const t = (Number(f[1]) * 60 + Number(f[0]) + shift) % 1440;
     return [t % 60, Math.floor(t / 60), ...f.slice(2)].join(' ');
   }
-  if (!/^\d+$/.test(f[2])) throw new Error(`A day stagger needs a set day of the month, not "${base}"`);
-  return [f[0], f[1], Number(f[2]) + shift, ...f.slice(3)].join(' ');
+  if (!/^\d+(,\d+)*$/.test(f[2])) throw new Error(`A day stagger needs a set day of the month (or a list like 1,16), not "${base}"`);
+  return [f[0], f[1], f[2].split(',').map((d) => Number(d) + shift).join(','), ...f.slice(3)].join(' ');
 }
 
 export interface TemplateVars {

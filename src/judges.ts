@@ -171,6 +171,12 @@ export const JUDGES: Judge[] = [
     pins: [{ path: 'src/effort-retros.ts', symbols: ['NAMED_FLOOR', 'CHAIN_FLOOR', 'QUIET_MS', 'AUTO', 'effortsDue', 'EffortRetros.tick'] }],
     callers: ['src/effort-retros.ts'],
   },
+  {
+    id: 'trouble-retros', name: 'Trouble post-mortems (#1796)', mode: 'log-only', replay: { notYet: 'replays over the budget and pick history of real minions' },
+    acts: 'starts a citadel:post-mortem minion for a closed minion that went past twice its budget or had its model stepped up by a Taskmaster, once per minion and trigger',
+    pins: [{ path: 'src/effort-retros.ts', symbols: ['TroubleRetros.tick', 'TroubleRetros.due'] }],
+    callers: ['src/effort-retros.ts'],
+  },
 ];
 
 export const judge = (id: string): Judge | undefined => JUDGES.find((j) => j.id === id);

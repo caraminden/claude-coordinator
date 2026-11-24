@@ -156,7 +156,7 @@ test('a minion sealed on its start card before #1757 moves out of the seal at bo
   try {
     const big = (await s.call(`/api/tickets/${ids[0]}`)).data.ticket;
     assert.equal(big.state, null, 'moved out of sealed');
-    assert.equal(big.note, "waits for a person's go on its start card: expected $35");
+    assert.equal(big.note, "needs a person's go on its start card, $35");
     assert.deepEqual(big.start_hold, { usd: 35 }, 'still held');
     assert.equal((await s.call(`/api/tickets/${ids[1]}`)).data.ticket.state, 'parked', 'a seal of its own stays');
     const later = (await s.call(`/api/tickets/${ids[2]}`)).data.ticket;

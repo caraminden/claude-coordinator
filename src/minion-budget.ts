@@ -123,7 +123,7 @@ export const START_HOLD_PREFIX = 'start_hold:';
  * Its note while it waits: not sealed (#1757; Cara, 2026-11-24: "that minion needs human interaction, sealing it makes that
  * less likely to happen"), so it lists and counts as waiting on a person; the hold itself is the setting above.
  */
-export const startNote = (estimate: number) => `waits for a person's go on its start card: expected ${usd(estimate)}`;
+export const startNote = (estimate: number) => `needs a person's go on its start card, ${usd(estimate)}`;
 export const START = 'Start';
 export const SPLIT = 'Split first';
 /** The start card for a brief expected over START_CARD_USD. */

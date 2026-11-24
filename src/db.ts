@@ -76,6 +76,8 @@ export interface HostSample {
   kswapd_rate?: number | null; refault_rate?: number | null; server_refault_rate?: number | null; pgpgin_rate?: number | null; thp_fallback_rate?: number | null;
   /** The database warmer's last pass (#1560, src/db-warmer.ts): ms, MB read, and its backoffs since the server started; null before it or with it off. */
   warm_ms?: number | null; warm_mb?: number | null; warm_backoffs?: number | null;
+  /** The growth alarm's readings (#1762, src/growth-alarm.ts): the server's open fds, running citadel-supervisor-* units, bytes used on /tmp, and each app server's memory as JSON; null before it or where unreadable. */
+  open_fds?: number | null; supervisors?: number | null; tmp_used?: number | null; app_mem?: string | null;
 }
 
 export interface ReleaseRow {
@@ -1396,7 +1398,11 @@ CREATE TABLE IF NOT EXISTS host_samples (
   thp_fallback_rate REAL,
   warm_ms REAL,
   warm_mb REAL,
-  warm_backoffs INTEGER
+  warm_backoffs INTEGER,
+  open_fds INTEGER,
+  supervisors INTEGER,
+  tmp_used INTEGER,
+  app_mem TEXT
 );
 -- One row per test file that failed in a land's or fast mode's run and passed alone (#1063): the CI page's Test health tab counts them.
 CREATE TABLE IF NOT EXISTS flake_events (
@@ -1601,6 +1607,10 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['host_samples', 'warm_ms', 'ALTER TABLE host_samples ADD COLUMN warm_ms REAL'],
   ['host_samples', 'warm_mb', 'ALTER TABLE host_samples ADD COLUMN warm_mb REAL'],
   ['host_samples', 'warm_backoffs', 'ALTER TABLE host_samples ADD COLUMN warm_backoffs INTEGER'],
+  ['host_samples', 'open_fds', 'ALTER TABLE host_samples ADD COLUMN open_fds INTEGER'],
+  ['host_samples', 'supervisors', 'ALTER TABLE host_samples ADD COLUMN supervisors INTEGER'],
+  ['host_samples', 'tmp_used', 'ALTER TABLE host_samples ADD COLUMN tmp_used INTEGER'],
+  ['host_samples', 'app_mem', 'ALTER TABLE host_samples ADD COLUMN app_mem TEXT'],
   ['tickets', 'closed_at', 'ALTER TABLE tickets ADD COLUMN closed_at INTEGER'],
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
   ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
@@ -1808,6 +1818,7 @@ export const SCHEMA_HISTORY = [
   [111, 'events_old dropped and the main file vacuumed, by the server at start (#1169 ship 3)'],
   [112, 'contraptions.restart_risk, restart_note and contraption_runs (#1682)'],
   [113, 'slow_moments (#1752)'],
+  [114, 'host_samples open_fds, supervisors, tmp_used, app_mem (#1762)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3649,10 +3660,10 @@ export class Store {
 
   /** One reading of perigee's memory, disk and load (#1123); drops readings past HOST_SAMPLE_KEEP_MS. */
   addHostSample(s: HostSample) {
-    this.db.prepare('INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss, cpu_psi, mem_psi, io_psi, swap_used, cpu_ledger, answer_time, db_cached, db_size, kswapd_rate, refault_rate, server_refault_rate, pgpgin_rate, thp_fallback_rate, warm_ms, warm_mb, warm_backoffs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    this.db.prepare('INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss, cpu_psi, mem_psi, io_psi, swap_used, cpu_ledger, answer_time, db_cached, db_size, kswapd_rate, refault_rate, server_refault_rate, pgpgin_rate, thp_fallback_rate, warm_ms, warm_mb, warm_backoffs, open_fds, supervisors, tmp_used, app_mem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(s.at, s.mem_total, s.mem_avail, s.disk_total, s.disk_free, s.load1, s.rss, s.cpu_psi ?? null, s.mem_psi ?? null, s.io_psi ?? null, s.swap_used ?? null, s.cpu_ledger ?? null, s.answer_time ?? null,
         s.db_cached ?? null, s.db_size ?? null, s.kswapd_rate ?? null, s.refault_rate ?? null, s.server_refault_rate ?? null, s.pgpgin_rate ?? null, s.thp_fallback_rate ?? null,
-        s.warm_ms ?? null, s.warm_mb ?? null, s.warm_backoffs ?? null);
+        s.warm_ms ?? null, s.warm_mb ?? null, s.warm_backoffs ?? null, s.open_fds ?? null, s.supervisors ?? null, s.tmp_used ?? null, s.app_mem ?? null);
     this.db.prepare('DELETE FROM host_samples WHERE at < ?').run(s.at - HOST_SAMPLE_KEEP_MS);
   }
 

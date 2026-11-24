@@ -24,7 +24,8 @@ import { LiveProbes, probeLog, runProbe } from './src/live-probe.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { AnswerProbe } from './src/answer-time.ts';
 import { StatusPage, recordBoot, recordLive } from './src/status-page.ts';
-import { MemoryStorms } from './src/memory-storms.ts';
+import { citadelSliceDir, MemoryStorms } from './src/memory-storms.ts';
+import { readGrowth } from './src/growth-alarm.ts';
 import { Reaper, shownCommand } from './src/reaper.ts';
 import { StandingChecks } from './src/standing-checks.ts';
 import { startRealtime } from './src/realtime.ts';
@@ -1835,6 +1836,8 @@ const status = new StatusPage({
   unitStates: PREVIEW ? undefined : (units) => services.unitStates(units),
   tell: (projectId, text) => tellHome(projectId, text),
   answer: !BOOT_CHECK && !PREVIEW ? { probe: answerProbe, turns: () => runner.runningCount() } : undefined,
+  // The growth alarm (#1762): open fds, supervisor units, /tmp and app servers' memory, and a wake when one keeps growing.
+  growth: !BOOT_CHECK && !PREVIEW ? { read: async () => readGrowth({ slice: await citadelSliceDir(), apps: store.listContraptions().map((c) => c.name) }), turns: () => runner.runningCount() } : undefined,
 });
 if (!BOOT_CHECK && !PREVIEW) {
   recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT, readStop(DATA_DIR));

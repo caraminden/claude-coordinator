@@ -24,6 +24,7 @@ import { BOOT_STALL } from './deploy-watch.ts';
 import { every, jobList, type JobRow, type Job } from './every.ts';
 import { CacheSampler, dbCold, COLD_SAMPLES } from './cache-health.ts';
 import { standingStatus, type StandingStatus } from './standing-checks.ts';
+import { checkGrowth, readGrowth, type GrowthReading } from './growth-alarm.ts';
 
 const DAY_MS = 24 * 60 * 60_000;
 /** Days of history each tile shows: today and the 7 before it. */
@@ -199,6 +200,8 @@ export interface StatusDeps {
   /** A reader thread's (#1590, src/reader.ts): the units' rows and the periodic jobs as the main thread last read them. */
   unitsNow?: () => UnitState[] | null;
   jobs?: () => JobRow[];
+  /** The growth alarm's readings (#1762) and the turns running now; left out in a preview or a test that doesn't watch growth. */
+  growth?: { read: () => Promise<GrowthReading>; turns: () => number };
 }
 
 /** One tile as a person saw it when they pressed Investigate (#1273): what the Taskmaster is sent. */
@@ -238,8 +241,9 @@ export class StatusPage {
       this.cacheSampler ??= new CacheSampler({ dbPath: join(this.deps.dataDir, 'coordinator.db') });
       const cache = await (this.deps.cache ?? ((n) => this.cacheSampler!.read(n)))(at).catch(() => null);
       const w = this.deps.warm?.() ?? null;
+      const g = await this.deps.growth?.read().catch(() => null);
       const s: HostSample = {
-        ...cache, ...(w && w.mb > 0 ? { warm_ms: w.ms, warm_mb: w.mb, warm_backoffs: w.backoffs } : {}), at, mem_total: mem.total, mem_avail: Number.isFinite(mem.avail) ? mem.avail : 0,
+        ...cache, ...g, ...(w && w.mb > 0 ? { warm_ms: w.ms, warm_mb: w.mb, warm_backoffs: w.backoffs } : {}), at, mem_total: mem.total, mem_avail: Number.isFinite(mem.avail) ? mem.avail : 0,
         disk_total: disk.total, disk_free: disk.free, load1: loadavg()[0], rss: process.memoryUsage.rss(), cpu_psi: psi.cpu, mem_psi: psi.mem,
         io_psi: psi.io, swap_used: Number.isFinite(mem.swap) ? mem.swap : null,
         cpu_ledger: ledger ? JSON.stringify(ledger) : null,
@@ -248,6 +252,7 @@ export class StatusPage {
       this.deps.store.addHostSample(s);
       this.checkCold(at);
       this.checkAnswer(at);
+      if (this.deps.growth) checkGrowth({ store: this.deps.store, bootAt: this.deps.bootAt, turns: this.deps.growth.turns, ownScheme: this.deps.ownScheme, tell: this.deps.tell }, at);
       return s;
     } catch (err: any) {
       console.error(`Status sample failed: ${err?.message ?? err}`);

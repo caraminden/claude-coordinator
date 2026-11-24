@@ -5,7 +5,7 @@ description: "Citadel's own words: the name people read and the name in code (mi
 
 # Citadel
 
-Citadel runs Claude sessions for a small group of friends, one workspace per project. These are the words
+Citadel runs Claude sessions for a small group of friends, one scheme for each piece of work they share. These are the words
 every scheme shares. A scheme's own `GLOSSARY.md` holds its domain's words and doesn't repeat these.
 
 Each term is the word people read. `Code` is the name it keeps in code, tool names, stored values, routes and
@@ -94,6 +94,24 @@ A file a fresh minion or session starts from, written so it needs nothing else.
 
 **Held mail**:
 A message that waits for the recipient's next turn instead of waking it.
+
+**Steer**:
+A person's message to a minion while its turn runs, read mid-turn.
+
+**Relay**:
+A message the Taskmaster passes on to another minion or another scheme.
+
+**Status line**:
+The end of a minion's reply that sets its state, note and one-tap replies in the minions list.
+Code: `set_thread_status`
+
+**Goal**:
+Several minions' work toward one aim, named on the first; a retro starts once all have closed.
+Code: `effortName`
+
+**Schedule**:
+A minion that starts again on a timetable.
+Code: `schedule_minion`
 
 ### Shipping
 

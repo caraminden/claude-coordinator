@@ -29,7 +29,7 @@ if (import.meta.main) {
   const facts: Fact[] = JSON.parse(readFileSync(process.env.STUB_FACTS!, 'utf8'));
   const send = (m: object) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');
   createInterface({ input: process.stdin }).on('line', (line) => {
-    let m: any;
+    let m: { id?: number | string; method?: string; params?: { protocolVersion?: string; name?: string; arguments?: Record<string, unknown> } };
     try { m = JSON.parse(line); } catch { return; }
     if (m.id === undefined) return;
     if (m.method === 'initialize') {

@@ -52,10 +52,13 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-// @ts-ignore: plain JS from the kit
 import { findChrome, launch, openPage, shot } from '../kit/skills/critique/scripts/ui-measure.mjs';
 
 const root = resolve(import.meta.dirname, '..');
+
+/** An open page from ui-measure, and the browser's CDP send. */
+type Page = Awaited<ReturnType<typeof openPage>>;
+type Browser = ReturnType<typeof launch>;
 const TIMEOUT_MS = 20_000;
 const VERBS = ['click', 'hover', 'type', 'fill', 'key', 'wait', 'text', 'sleep', 'eval', 'shot'];
 
@@ -211,7 +214,7 @@ const FRAME = 'await new Promise((r) => requestAnimationFrame(() => requestAnima
 const KEYS: Record<string, [string, number, string?]> = { Enter: ['Enter', 13, '\r'], Escape: ['Escape', 27], Tab: ['Tab', 9], Backspace: ['Backspace', 8], ArrowDown: ['ArrowDown', 40], ArrowUp: ['ArrowUp', 38], ArrowLeft: ['ArrowLeft', 37], ArrowRight: ['ArrowRight', 39], ' ': ['Space', 32, ' '] };
 
 /** Run one step on an open page; a shot's file name comes back through `shoot`. */
-async function step(page: any, st: Step, ms: number, shoot: (name: string) => Promise<void>, say: (s: string) => void) {
+async function step(page: Page, st: Step, ms: number, shoot: (name: string) => Promise<void>, say: (s: string) => void) {
   const q = JSON.stringify(st.arg);
   const until = (cond: string, what: string) => page.evaluate(`(async () => { for (const end = Date.now() + ${ms}; !(${cond}); await new Promise((r) => setTimeout(r, 50))) if (Date.now() > end) throw new Error(${JSON.stringify(`${what} never came`)}); })()`);
   const there = () => until(`document.querySelector(${q})`, st.arg);
@@ -263,7 +266,7 @@ async function serverFor(o: Opts): Promise<{ server: Server; note: string }> {
   return { server, note: version ? `Serving public/ as it is now (front end ${version}) at ${server.url}; ready in ${Date.now() - t0} ms` : `Shooting ${server.url} as it is (not this worktree's dev copy, so nothing is reloaded)` };
 }
 
-function browserFor(): { send: any; close: () => Promise<void> } {
+function browserFor(): Browser {
   const bin = process.env.CHROME || findChrome();
   if (!bin) throw new Error("no browser: install Playwright's chrome-headless-shell (npx playwright install chromium-headless-shell)");
   // In a scope of its own in citadel-heavy.slice (#1298), so a browser that runs out of memory doesn't end the turn.
@@ -271,7 +274,7 @@ function browserFor(): { send: any; close: () => Promise<void> } {
 }
 
 /** Open one route at one width and theme, ready to drive; `onPage` gets it even when the load then hangs. */
-async function openRoute(browser: { send: any }, server: Server, o: Opts, route: string, width: number, theme: string, onPage: (p: any) => void) {
+async function openRoute(browser: Pick<Browser, 'send'>, server: Server, o: Opts, route: string, width: number, theme: string, onPage: (p: Page) => void) {
   const mode = o.media.find((m) => m.name === 'display-mode')?.value;
   const emulate = !!(mode || o.titlebar);
   const opening = openPage(browser.send, server.url + route, width, {
@@ -341,7 +344,7 @@ async function main() {
         for (const width of o.widths) {
           const label = `${route || '/'} at ${width}${theme === 'dark' ? ' dark' : ''}`;
           const t = Date.now();
-          let page: any;
+          let page: Page | undefined;
           let at = 'loading';
           const shoot = async (name = '') => {
             const file = join(o.out, shotName(route, width, theme, o.media, name));

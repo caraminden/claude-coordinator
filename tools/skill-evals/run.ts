@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { ClaudeEvent, ContentBlock } from '../../src/claude-events.ts';
 
 export type Case = { id: string; source: string; from: string; expect: string; also?: string[]; edited?: string; text: string };
 // fired: the first Skill call's name, `citadel:` stripped; Claude Code's own skills keep a `cc:` prefix; 'none' if none;
@@ -25,10 +26,10 @@ export function loadCases(file = CASES_FILE): Case[] {
 export function firstSkill(stream: string): string {
   for (const line of stream.split('\n')) {
     if (!line.startsWith('{')) continue;
-    let ev: any;
+    let ev: ClaudeEvent;
     try { ev = JSON.parse(line); } catch { continue; }
     if (ev.type !== 'assistant') continue;
-    for (const part of ev.message?.content ?? []) {
+    for (const part of (ev.message?.content ?? []) as ContentBlock[]) {
       if (part.type === 'tool_use' && part.name === 'Skill' && typeof part.input?.skill === 'string') {
         const s = part.input.skill.trim();
         return s.startsWith('citadel:') ? s.slice(8) : `cc:${s}`;

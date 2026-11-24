@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { attachEventsIfThere } from '../src/events-db.ts';
+import type { ClaudeEvent, ContentBlock } from '../src/claude-events.ts';
 
 export const ADVISED = 'claude-sonnet-5-5+opus-advisor';
 const SONNET = 'claude-sonnet-5-5';
@@ -41,9 +42,9 @@ export function trialTurns(db: DatabaseSync, since: number): TurnRow[] {
     let model: string | null = null;
     let consults = 0;
     for (const e of events) {
-      const ev = JSON.parse(e.data);
+      const ev: ClaudeEvent = JSON.parse(e.data);
       if (ev.type === 'system' && ev.subtype === 'init') model = ev.model ?? null;
-      else consults += (ev.message?.content ?? []).filter((b: any) => b?.type === 'server_tool_use' && b.name === 'advisor').length;
+      else consults += ((ev.message?.content ?? []) as ContentBlock[]).filter((b) => b?.type === 'server_tool_use' && b.name === 'advisor').length;
     }
     out.push({ ticket, cost: t.cost_usd, model, consults });
     if (t.event_id) from = t.event_id;
@@ -79,7 +80,7 @@ if (import.meta.main) {
   const since = Date.parse(`${values.since}T08:00:00Z`);
   if (Number.isNaN(since)) throw new Error(`--since wants a date like 2026-11-16, not ${values.since}`);
   const n = trialNumbers(db, since);
-  const names = new Map((db.prepare('SELECT t.id, t.number, t.title, t.model, t.effort, p.name AS scheme FROM tickets t JOIN projects p ON p.id = t.project_id').all() as any[]).map((t) => [t.id, t]));
+  const names = new Map((db.prepare('SELECT t.id, t.number, t.title, t.model, t.effort, p.name AS scheme FROM tickets t JOIN projects p ON p.id = t.project_id').all() as { id: number; number: number; title: string; model: string; effort: string; scheme: string }[]).map((t) => [t.id, t]));
   const money = (x: number) => `$${x.toFixed(2)}`;
   const per = (a: number, b: number) => (b ? a / b : 0);
   const out = [`# Advisor trial numbers since ${values.since} (PST)`, '',
@@ -89,7 +90,7 @@ if (import.meta.main) {
     `| Sonnet, minions now at medium, no advisor | ${n.baseline.minions} | ${n.baseline.turns} | ${money(per(n.baseline.cost, n.baseline.turns))} | – | – | ${money(n.baseline.cost)} |`,
     '', '## Trial minions', '', '| minion | setting now | Sonnet turns | cost a turn | consults (a turn) | max in a turn | moved off |', '|---|---|---|---|---|---|---|'];
   for (const m of n.perMinion) {
-    const t = names.get(m.id);
+    const t = names.get(m.id)!;
     out.push(`| ${t.scheme} #${t.number} ${String(t.title).replaceAll('|', '/')} | ${t.model ?? 'default'} ${t.effort ?? ''} | ${m.turns} | ${money(per(m.cost, m.turns))} | ${m.consults} (${per(m.consults, m.turns).toFixed(2)}) | ${m.max} | ${m.escalated ? 'yes' : ''} |`);
   }
   if (!n.perMinion.length) out.push('| none yet | | | | | | |');

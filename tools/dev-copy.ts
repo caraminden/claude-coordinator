@@ -157,7 +157,7 @@ async function start(args: string[]): Promise<void> {
   for (const deadline = Date.now() + BOOT_TIMEOUT_MS; ; await new Promise((r) => setTimeout(r, 200))) {
     if (!started(holder.pid!)) await fail('the server exited during boot');
     if (Date.now() > deadline) await fail(`the server did not answer within ${BOOT_TIMEOUT_MS / 1000} s`);
-    const health = await fetch(`${url}api/health`, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.json() : null), () => null);
+    const health = await fetch(`${url}api/health`, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? (r.json() as Promise<{ preview?: boolean }>) : null), () => null);
     if (!health) continue;
     if (health.preview !== true) await fail('this branch\'s server has no preview mode; rebase it onto main first');
     break;

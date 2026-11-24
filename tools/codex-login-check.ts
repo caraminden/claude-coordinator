@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -45,7 +46,7 @@ const server = http.createServer((req, res) => {
   });
 });
 let url = '';
-before(() => new Promise<void>((r) => server.listen(0, '127.0.0.1', () => ((url = `http://127.0.0.1:${(server.address() as any).port}`), r()))));
+before(() => new Promise<void>((r) => server.listen(0, '127.0.0.1', () => ((url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`), r()))));
 const children = new Set<ChildProcess>();
 after(async () => {
   for (const c of children) c.kill('SIGKILL');
@@ -66,19 +67,22 @@ function home(left: number): { dir: string; env: Record<string, string | undefin
   return { dir, env: { PATH: process.env.PATH, HOME: dir, CODEX_HOME: dir, CODEX_REFRESH_TOKEN_URL_OVERRIDE: `${url}/oauth/token` } };
 }
 
+/** A JSON-RPC reply from `codex app-server`: only the fields read. */
+interface Reply { id?: number; method?: string; error?: { message?: string } }
+
 /** A `codex app-server` as a review starts it; `usage()` reads the account's usage (a backend call with the access token). */
 function appServer(env: Record<string, string | undefined>) {
   const child = spawn('codex', ['app-server', '-c', 'cli_auth_credentials_store="file"', '-c', 'history.persistence="none"'], { env: env as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'ignore'] });
   children.add(child);
   child.on('exit', () => children.delete(child));
-  const waiting = new Map<number, (m: any) => void>();
+  const waiting = new Map<number, (m: Reply) => void>();
   let id = 1;
   let buf = '';
   child.stdout!.on('data', (c) => {
     buf += c;
     let nl;
     while ((nl = buf.indexOf('\n')) >= 0) {
-      let m: any;
+      let m: Reply | undefined;
       try {
         m = JSON.parse(buf.slice(0, nl));
       } catch {}
@@ -86,7 +90,7 @@ function appServer(env: Record<string, string | undefined>) {
       if (m?.id !== undefined && m.method === undefined) waiting.get(m.id)?.(m), waiting.delete(m.id);
     }
   });
-  const call = (method: string, params: object) => new Promise<any>((r) => (waiting.set(++id, r), child.stdin!.write(JSON.stringify({ id, method, params }) + '\n')));
+  const call = (method: string, params: object) => new Promise<Reply>((r) => (waiting.set(++id, r), child.stdin!.write(JSON.stringify({ id, method, params }) + '\n')));
   const ready = call('initialize', { clientInfo: { name: 'citadel-test', version: '1' }, capabilities: { experimentalApi: false } }).then(() => child.stdin!.write(JSON.stringify({ method: 'initialized' }) + '\n'));
   return {
     usage: async (): Promise<string> => (await ready, await call('account/rateLimits/read', {})).error?.message ?? 'ok',

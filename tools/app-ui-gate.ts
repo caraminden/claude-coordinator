@@ -16,7 +16,6 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { freePort } from '../src/ports.ts';
 import { startFakeCitadel } from '../kit/skills/contraption-ui/fake-citadel/fake-citadel.ts';
-// @ts-ignore: plain JS from the kit
 import { measure } from '../kit/skills/critique/scripts/ui-measure.mjs';
 
 const root = resolve(import.meta.dirname, '..');
@@ -77,8 +76,30 @@ function scriptStrings(js: string) {
   return [...t.matchAll(/"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g)].map((m) => m[1] ?? m[2] ?? (m[3] ?? '').replace(/\$\{[^}]*(?:\}|$)/g, " ")).filter((x) => /\s/.test(x.trim()));
 }
 
+/** What ui-measure reads from a page: browser results are untyped JSON, so this names the fields read. */
+interface Measured {
+  ok: boolean;
+  error?: string;
+  counts: Record<string, number>;
+  pages: { width: number; findings?: { check: string; selector?: string; text?: string }[] }[];
+}
+
+interface GateOpts {
+  paths: string[];
+  mode: string;
+  widths: number[];
+  env: string[];
+  dir?: string;
+  out?: string;
+  name?: string;
+  cmd?: string[];
+  workdir?: string;
+  health?: string;
+  allow?: string;
+}
+
 function args(argv: string[]) {
-  const o: any = { paths: ['/'], mode: 'report', widths: [1440, 390], env: [] };
+  const o: GateOpts = { paths: ['/'], mode: 'report', widths: [1440, 390], env: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i], v = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
     if (a === '--app-dir') o.dir = resolve(v());
@@ -95,7 +116,7 @@ function args(argv: string[]) {
     else throw new Error(`unknown option ${a}`);
   }
   if (!o.dir) throw new Error('--app-dir is required');
-  return o;
+  return { ...o, dir: o.dir };
 }
 
 export async function gate(o: ReturnType<typeof args>) {
@@ -137,11 +158,11 @@ export async function gate(o: ReturnType<typeof args>) {
         if (u.origin === `http://127.0.0.1:${port}` && !texts[u.pathname]) texts[u.pathname] = await get(u.href);
       }
     }
-    const pages: any[] = [];
+    const pages: { path: string; ok: boolean; error?: string; counts: Record<string, number>; pages: Measured['pages'] }[] = [];
     for (const p of o.paths) {
-      const r = await measure({ urls: [url(p)], widths: o.widths, settle: 800, cookies: [], headers: [`x-citadel-identity: ${fake.identity()}`], ignore: [], dark: false })
+      const r: Measured = await measure({ urls: [url(p)], widths: o.widths, settle: 800, cookies: [], headers: [`x-citadel-identity: ${fake.identity()}`], ignore: [], dark: false })
         .catch((e: Error) => ({ ok: false, error: e.message, pages: [], counts: {} }));
-      pages.push({ path: p, ok: r.ok, error: r.error, counts: r.counts, pages: (r.pages ?? []).map((x: any) => ({ width: x.width, findings: x.findings })) });
+      pages.push({ path: p, ok: r.ok, error: r.error, counts: r.counts, pages: (r.pages ?? []).map((x) => ({ width: x.width, findings: x.findings })) });
     }
     const contractF = contractFindings(texts);
     // Allow-list: --allow, else <app>/ui-gate-allow.json: [{ "word": "scheme", "file": "/", "reason": "a colour scheme" }]
@@ -158,7 +179,7 @@ export async function gate(o: ReturnType<typeof args>) {
 export function markdown(r: Awaited<ReturnType<typeof gate>>) {
   const l = [`# UI gate: ${r.app}`, '', `Mode: ${r.mode}. ${r.clean ? 'Clean.' : 'Findings below.'}`, ''];
   for (const p of r.pages) {
-    l.push(`## ${p.path}`, p.error ? `Could not measure: ${p.error}` : Object.keys(p.counts ?? {}).length ? p.pages.flatMap((x: any) => (x.findings ?? []).map((f: any) => `- ${x.width}px ${f.check}: ${String(f.selector ?? f.text ?? '').slice(0, 90)}`)).join('\n') : 'No measure findings.', '');
+    l.push(`## ${p.path}`, p.error ? `Could not measure: ${p.error}` : Object.keys(p.counts ?? {}).length ? p.pages.flatMap((x) => (x.findings ?? []).map((f) => `- ${x.width}px ${f.check}: ${String(f.selector ?? f.text ?? '').slice(0, 90)}`)).join('\n') : 'No measure findings.', '');
   }
   l.push('## Kit contract', r.contract.length ? r.contract.map((c) => `- ${c.kind} \`${c.name}\` in ${c.file}`).join('\n') : 'No unknown cui-* classes or --citadel-* names.');
   l.push('', '## Citadel words', r.words?.length ? r.words.map((w) => `- ${w.word} (${w.where}) in ${w.file}: "${w.text}"`).join('\n') : 'No internal words or server paths in what people read.');

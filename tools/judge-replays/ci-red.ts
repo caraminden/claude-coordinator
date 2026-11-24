@@ -15,9 +15,12 @@ const LEAD_MS = 8 * 86_400_000;
 const RED = /run (\d+) failed on/;
 const RING = /^[^\n]*?: CI: \S+ failed on \S+ \(run (\d+)/;
 
+/** A GitHub answer as read here: one run, a page of runs or the repo. */
+type GhReply = Run & { workflow_runs: Run[]; default_branch?: string };
+
 type Run = { id: number; workflow_id: number; created_at: string; updated_at?: string; run_started_at?: string; run_attempt?: number; status: string; conclusion: string | null; [k: string]: unknown };
 
-function gh(path: string): Promise<any> {
+function gh(path: string): Promise<GhReply | null> {
   return new Promise((done) => execFile('gh', ['api', path], { timeout: 60_000, maxBuffer: 64 << 20 }, (err, out) => done(err ? null : JSON.parse(out))));
 }
 

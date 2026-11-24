@@ -25,7 +25,7 @@ const width = Number(arg('width', '1440'));
 const rounds = Number(arg('rounds', '6'));
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const page: any = await open(route, { width });
+const page = await open(route, { width });
 try {
   for (const end = Date.now() + 120_000; !(await page.evaluate(`!!document.querySelector('#log') && !document.body.classList.contains('navigating')`).catch(() => false)); await sleep(200)) {
     if (Date.now() > end) throw new Error(`no chat (#log) on ${route}: open a scheme page whose chat shows`);

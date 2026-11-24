@@ -13,7 +13,7 @@ export type Spec = {
   appText: string;        // the Citadel-wide instructions
   schemeText: string;     // the scheme's own
   dirs: { files: string; shared: string; tickets: string; cwd: string };
-  // Ablation (#1277): prompt parts to empty, entries to remove (any entry containing the text; an instructions block is one entry), tools cut to their first sentence.
+  // Ablation (#1277): prompt parts to empty, entries to remove (each entry containing the text; an instructions block is one entry), tools cut to their first sentence.
   drop?: { parts?: string[]; lines?: string[]; tools?: string[] };
 };
 
@@ -21,7 +21,7 @@ export type Spec = {
 export function ablate(parts: Record<'system' | 'turn', Record<string, string[]>>, tools: { name: string; description?: string }[], drop: NonNullable<Spec['drop']>) {
   const keys = Object.keys(drop ?? {});
   if (!drop || typeof drop !== 'object' || !keys.length || keys.some((k) => !['parts', 'lines', 'tools'].includes(k))
-    || keys.some((k) => !Array.isArray((drop as any)[k]) || !(drop as any)[k].length || (drop as any)[k].some((x: unknown) => typeof x !== 'string' || !x)))
+    || keys.some((k) => { const v = (drop as Record<string, unknown>)[k]; return !Array.isArray(v) || !v.length || v.some((x: unknown) => typeof x !== 'string' || !x); }))
     throw new Error('drop: want {"parts"?, "lines"?, "tools"?}, each a non-empty list of non-empty strings');
   const all = { ...parts.system, ...parts.turn };
   for (const k of drop.parts ?? []) {

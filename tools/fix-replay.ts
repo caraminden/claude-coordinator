@@ -36,6 +36,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { thrown } from '../src/thrown.ts';
 
 // The review heat map's fix regex, with word edges (its bare "hang" took every "change") and review commits added.
 export const FIX_RE = /\b(fix(es)?|bug|regress\w*|broke|broken|flak\w*|revert\w*|crash\w*|leak\w*|race|stuck|hangs?|wrong)\b|self-review|fresh-eyes/i;
@@ -213,7 +214,8 @@ function run(args: string[]) {
         outcome = verdict(undone, clean);
       }
       say({ ...head, outcome: pre + outcome, share, conflicts, undo: stat, changedSrc, undone, clean, secs: Math.round((Date.now() - t0) / 1000) });
-    } catch (e: any) {
+    } catch (err) {
+      const e = thrown(err);
       say({ ...head, outcome: 'error', err: String(e.stderr || e.message).slice(-400) });
     } finally {
       gitTry(repo, 'worktree', 'remove', '--force', wt);

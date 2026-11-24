@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { loadVapidKeys, postPush } from '../src/push.ts';
 import { readBackups, backupProblems } from '../src/backup-freshness.ts';
 import { answer, check, recipients, step, targets, unitState, type WatchState } from '../src/watchdog.ts';
+import { thrown } from '../src/thrown.ts';
 
 const env = process.env;
 const dry = process.argv.includes('--dry-run');
@@ -22,8 +23,8 @@ const db = new DatabaseSync(join(dataDir, 'coordinator.db'), { readOnly: true })
 let prev: WatchState = {};
 try {
   prev = JSON.parse(readFileSync(stateFile, 'utf8'));
-} catch (err: any) {
-  if (err.code !== 'ENOENT') console.error(`Starting afresh: ${stateFile} unreadable (${err.message})`);
+} catch (err) {
+  if (thrown(err).code !== 'ENOENT') console.error(`Starting afresh: ${stateFile} unreadable (${thrown(err).message})`);
 }
 
 const now = Date.now();

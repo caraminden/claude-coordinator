@@ -6,6 +6,8 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, write
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { ClaudeEvent, ContentBlock } from '../../src/claude-events.ts';
+import { thrown } from '../../src/thrown.ts';
 import { nameMatches, type Fact } from './stub.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -27,10 +29,10 @@ export type Event = { call?: string; input?: string; text?: string };
 export function events(stream: string): Event[] {
   const out: Event[] = [];
   for (const line of stream.split('\n')) {
-    let m: any;
+    let m: ClaudeEvent;
     try { m = JSON.parse(line); } catch { continue; }
     if (m?.type !== 'assistant' || m.parent_tool_use_id) continue;
-    for (const b of m.message?.content ?? []) {
+    for (const b of (m.message?.content ?? []) as ContentBlock[]) {
       if (b.type === 'text' && b.text?.trim()) out.push({ text: b.text });
       else if (b.type === 'tool_use') out.push({ call: String(b.name), input: JSON.stringify(b.input ?? {}) });
     }
@@ -68,21 +70,37 @@ export const passes = (passed: number, runs: number) => passed * 2 > runs;
 /** A case fell when its passing runs dropped by 2 or more against the base: one run's swing is noise (README.md, "Scoring"). */
 export const fell = (now: number, base: number) => base - now >= 2;
 
+/** A case file as it is meant to read; it is untyped JSON until `problems` has checked it, so every field may be anything. */
+interface RawCase {
+  [k: string]: unknown;
+  ticket?: { number?: unknown; title?: unknown };
+  facts?: { tool?: unknown; result?: unknown; match?: unknown }[];
+  checks?: { [k: string]: unknown; why?: unknown; call?: unknown }[];
+}
+
+/** A brief file as it is meant to read, untyped JSON until `briefProblems` has checked it. */
+interface RawBrief {
+  [k: string]: unknown;
+  ticket?: { number?: unknown; title?: unknown };
+  tests?: unknown[];
+}
+
 /** What is wrong with a case file, or an empty list. */
-export function problems(c: any, file?: string): string[] {
+export function problems(raw: unknown, file?: string): string[] {
+  const c = raw as RawCase | null | undefined;
   const out: string[] = [];
   const str = (k: string) => typeof c?.[k] === 'string' && c[k].trim() !== '';
   for (const k of ['id', 'source', 'commit', 'from', 'message', 'right', 'wrong']) if (!str(k)) out.push(`${k} is missing`);
   if (typeof c?.history !== 'string') out.push('history must be a string (empty for a first turn)');
   if (file && c?.id !== file.replace(/\.json$/, '')) out.push(`id ${c?.id} doesn't match its file name`);
-  if (!['strike', 'correction', 'rule'].includes(c?.kind)) out.push('kind is strike, correction or rule');
-  if (!['minion', 'taskmaster'].includes(c?.role)) out.push('role is minion or taskmaster');
+  if (!['strike', 'correction', 'rule'].includes(c?.kind as string)) out.push('kind is strike, correction or rule');
+  if (!['minion', 'taskmaster'].includes(c?.role as string)) out.push('role is minion or taskmaster');
   if (!Number.isInteger(c?.ticket?.number) || typeof c?.ticket?.title !== 'string') out.push('ticket needs number and title');
-  if (!/^[0-9a-f]{7,40}$/.test(c?.commit ?? '')) out.push('commit is a sha');
-  if (c?.work !== undefined && !/^[0-9a-f]{7,40}$/.test(c.work)) out.push('work is a sha (a child of commit)');
+  if (!/^[0-9a-f]{7,40}$/.test((c?.commit ?? '') as string)) out.push('commit is a sha');
+  if (c?.work !== undefined && !/^[0-9a-f]{7,40}$/.test(c.work as string)) out.push('work is a sha (a child of commit)');
   const compiles = (what: string, s: unknown) => {
     if (s === undefined) return;
-    try { if (typeof s !== 'string') throw new Error('not a string'); new RegExp(s, 'i'); } catch (e: any) { out.push(`${what}: ${e.message}`); }
+    try { if (typeof s !== 'string') throw new Error('not a string'); new RegExp(s, 'i'); } catch (e) { out.push(`${what}: ${thrown(e).message}`); }
   };
   if (!Array.isArray(c?.facts)) out.push('facts is a list');
   for (const [i, f] of (c?.facts ?? []).entries()) {
@@ -101,17 +119,18 @@ export function problems(c: any, file?: string): string[] {
 }
 
 /** What is wrong with a brief file, or an empty list. */
-export function briefProblems(b: any, file?: string): string[] {
+export function briefProblems(raw: unknown, file?: string): string[] {
+  const b = raw as RawBrief | null | undefined;
   const out: string[] = [];
   for (const k of ['id', 'source', 'from', 'message', 'right']) if (typeof b?.[k] !== 'string' || !b[k].trim()) out.push(`${k} is missing`);
   if (file && b?.id !== file.replace(/\.json$/, '')) out.push(`id ${b?.id} doesn't match its file name`);
-  for (const k of ['before', 'fix']) if (!/^[0-9a-f]{7,40}$/.test(b?.[k] ?? '')) out.push(`${k} is a sha`);
+  for (const k of ['before', 'fix']) if (!/^[0-9a-f]{7,40}$/.test((b?.[k] ?? '') as string)) out.push(`${k} is a sha`);
   if (!Number.isInteger(b?.ticket?.number) || typeof b?.ticket?.title !== 'string') out.push('ticket needs number and title');
   if (!Array.isArray(b?.tests) || !b.tests.length || !b.tests.every((t: unknown) => typeof t === 'string' && /^test\/[\w./-]+\.ts$/.test(t))) out.push('tests lists test/<name>.ts files');
   return out;
 }
 
-export function load<T>(dir: string, check: (x: any, file: string) => string[]): T[] {
+export function load<T>(dir: string, check: (x: unknown, file: string) => string[]): T[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter((f) => f.endsWith('.json')).sort().map((f) => {
     const x = JSON.parse(readFileSync(join(dir, f), 'utf8'));

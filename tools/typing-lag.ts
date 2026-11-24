@@ -44,7 +44,7 @@ const INIT = `
 `;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const page: any = await open(route, { width });
+const page = await open(route, { width });
 let failed = false;
 try {
   await page.s('Page.addScriptToEvaluateOnNewDocument', { source: INIT });

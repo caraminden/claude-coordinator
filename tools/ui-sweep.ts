@@ -19,11 +19,29 @@ import { Auth } from '../src/auth.ts';
 import { copyDb } from '../src/db-copy.ts';
 import { freePort } from '../src/ports.ts';
 import { previewEnv, scrub } from '../src/previews.ts';
-// @ts-ignore: plain JS from the kit
 import { measure } from '../kit/skills/critique/scripts/ui-measure.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const LIVE_DB = join(homedir(), '.local/share/claude-coordinator/coordinator.db');
+
+/** What ui-measure returns per screen, as far as this script reads it: browser results are untyped JSON. */
+interface Measured {
+  ok: boolean;
+  error?: string;
+  counts: Record<string, number>;
+  pages: { width: number; shot?: string; shot_after_click?: string }[];
+}
+
+/** One screen's line in index.json. */
+interface IndexEntry {
+  name: string;
+  about: string;
+  flow: boolean;
+  hash: string;
+  counts: Record<string, number>;
+  error?: string;
+  shots: string[];
+}
 
 interface Screen {
   name: string;
@@ -165,7 +183,7 @@ async function main() {
 
   mkdirSync(o.out, { recursive: true });
   const screens = SCREENS.filter((s) => !o.only || o.only.includes(s.name));
-  const index: object[] = [];
+  const index: IndexEntry[] = [];
   for (const s of screens) {
     const hash = s.hash.replace('__EMPTY__', String(emptyId));
     const shots = join(dir, 'shots', s.name);
@@ -179,8 +197,8 @@ async function main() {
       wait: s.anon ? 'form' : '#app > *',
     });
     // One retry: a busy box sometimes misses the 15 s load wait.
-    const r = await run().catch(() => run()).catch((e: Error) => ({ ok: false, error: e.message, pages: [] as any[], counts: {} }));
-    const pages = (r.pages ?? []).map((p: any) => {
+    const r: Measured = await run().catch(() => run()).catch((e: Error) => ({ ok: false, error: e.message, pages: [], counts: {} }));
+    const pages = (r.pages ?? []).map((p) => {
       for (const k of ['shot', 'shot_after_click'] as const) {
         if (!p[k]) continue;
         const to = join(o.out, `${s.name}-${p.width}${k === 'shot' ? '' : '-click'}.png`);
@@ -190,12 +208,12 @@ async function main() {
       return p;
     });
     writeFileSync(join(o.out, `${s.name}.json`), JSON.stringify({ ...r, pages }, null, 1) + '\n');
-    index.push({ name: s.name, about: s.about, flow: !!s.flow, hash, counts: r.counts, error: (r as any).error, shots: pages.flatMap((p: any) => [p.shot, p.shot_after_click].filter(Boolean)) });
-    console.log(`${s.name}: ${(r as any).error ? `ERROR ${(r as any).error}` : r.ok ? 'clean' : Object.entries(r.counts).map(([k, v]) => `${v} ${k}`).join(', ')}`);
+    index.push({ name: s.name, about: s.about, flow: !!s.flow, hash, counts: r.counts, error: r.error, shots: pages.flatMap((p) => [p.shot, p.shot_after_click].filter((x): x is string => !!x)) });
+    console.log(`${s.name}: ${r.error ? `ERROR ${r.error}` : r.ok ? 'clean' : Object.entries(r.counts).map(([k, v]) => `${v} ${k}`).join(', ')}`);
   }
   // --only re-shoots a few: keep the other screens' entries, in SCREENS order.
-  const prev: any[] = existsSync(join(o.out, 'index.json')) ? JSON.parse(readFileSync(join(o.out, 'index.json'), 'utf8')) : [];
-  const byName = new Map([...prev, ...index].map((e: any) => [e.name, e]));
+  const prev: IndexEntry[] = existsSync(join(o.out, 'index.json')) ? JSON.parse(readFileSync(join(o.out, 'index.json'), 'utf8')) : [];
+  const byName = new Map([...prev, ...index].map((e) => [e.name, e]));
   writeFileSync(join(o.out, 'index.json'), JSON.stringify(SCREENS.map((s) => byName.get(s.name)).filter(Boolean), null, 1) + '\n');
   if (o.keep) {
     console.log('--keep: Ctrl-C (or kill this pid) stops the server');
@@ -204,7 +222,7 @@ async function main() {
   stop();
   rmSync(dir, { recursive: true, force: true });
   // Findings are the point of a sweep; a screen that couldn't be shot is a failure.
-  if (index.some((e: any) => e.error)) process.exitCode = 1;
+  if (index.some((e) => e.error)) process.exitCode = 1;
 }
 
 if (import.meta.main) await main();

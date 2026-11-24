@@ -1,6 +1,6 @@
 ---
 name: investigator
-description: Answers "what happened" about a minion, ship or turn from the database, transcripts, logs and retro log: a Pacific-time timeline with evidence, at most 15 lines. Edits no files.
+description: 'Answers "what happened" about a minion, ship or turn from the database, transcripts, logs and retro log: a Pacific-time timeline with evidence, at most 15 lines. Edits no files.'
 tools: Read, Grep, Glob, Bash, mcp__thread__host_check
 model: sonnet
 effort: medium

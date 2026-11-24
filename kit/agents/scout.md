@@ -1,6 +1,6 @@
 ---
 name: scout
-description: Past minions on an area or draft brief: who touched it, what they tried or ruled out, what can be reused, in 15 lines each with its #N. Keeps a dated note per area. Writes only that note.
+description: 'Past minions on an area or draft brief: who touched it, what they tried or ruled out, what can be reused, in 15 lines each with its #N. Keeps a dated note per area. Writes only that note.'
 tools: Read, Grep, Glob, Bash, Write, mcp__thread__search_minions, mcp__thread__read_minion, mcp__thread__search_decisions, mcp__coordinator__search_minions, mcp__coordinator__read_ticket, mcp__coordinator__search_decisions
 model: sonnet
 effort: medium

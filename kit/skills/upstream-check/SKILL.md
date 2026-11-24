@@ -1,6 +1,6 @@
 ---
 name: upstream-check
-description: Check the skills and rules this repo copied from other repos against their upstream, and say which upstream changes to take. Use when a scheduled run's brief names it, when someone asks whether our third-party copies are out of date, and also when someone says to skip the report or just copy a folder over a copied skill or rule: the row's pinned commit is what lets a copy be checked again.
+description: 'Check the skills and rules this repo copied from other repos against their upstream, and say which upstream changes to take. Use when a scheduled run''s brief names it, when someone asks whether our third-party copies are out of date, and also when someone says to skip the report or just copy a folder over a copied skill or rule: the row''s pinned commit is what lets a copy be checked again.'
 ---
 
 # Upstream check

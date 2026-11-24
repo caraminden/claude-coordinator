@@ -1,6 +1,6 @@
 ---
 name: briefing
-description: Writing a brief for a new minion, or a handoff file one starts from: the eight parts, in order. Use before create_ticket, and when writing handoffs or specs for a minion to pick up. Not for messaging a running minion, nor your own /fresh handoff.
+description: 'Writing a brief for a new minion, or a handoff file one starts from: the eight parts, in order. Use before create_ticket, and when writing handoffs or specs for a minion to pick up. Not for messaging a running minion, nor your own /fresh handoff.'
 ---
 
 # Briefing

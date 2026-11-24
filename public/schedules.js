@@ -82,7 +82,7 @@ function listRow(s) {
   return h('a', { class: `schedule-item${s.id === current ? ' active' : ''}${s.paused ? ' paused' : ''}`, href: href(s.id), 'data-hue': s.paused ? 'held' : HUE[tone],
     'aria-current': s.id === current ? 'page' : null },
     h('span', { class: 'schedule-item-top' }, h('span', { class: 'schedule-item-name' }, s.name), chip(tone, word, tip)),
-    h('span', { class: 'schedule-item-sub' }, s.paused ? s.when : [s.when, ' · next ', h('span', { class: 'tnum' }, soon(s.next_run_at))]));
+    h('span', { class: 'schedule-item-sub' }, s.when, s.trigger_count != null ? ` or after ${s.trigger_count} ${s.trigger_kind}` : '', s.paused ? '' : [' · next ', h('span', { class: 'tnum' }, soon(s.next_run_at))]));
 }
 
 function scheduleList(schedules) {
@@ -157,10 +157,14 @@ function schedulePage(s) {
           hueRow({ hue: 'accent', lead: 'Effort' }, s.effort ?? 'the model table’s pick'),
           hueRow({ hue: 'teal', lead: 'Type' }, s.type),
           hueRow({ hue, lead: 'When' }, h('span', { title: cron }, s.when, s.paused ? '' : [' · next ', h('span', { title: new Date(s.next_run_at).toString() }, when(s.next_run_at))])),
-          hueRow({ hue: 'held', lead: 'Cron' }, h('code', {}, s.cron))))[0],
+          hueRow({ hue: 'held', lead: 'Cron' }, h('code', {}, s.cron)),
+          s.trigger_count != null ? hueRow({ hue: 'teal', lead: 'Early' }, triggerText(s), h('span', { class: 'muted tnum' }, ` · ${s.trigger_so_far ?? 0} so far`)) : ''))[0],
       settingsRow({ key: `schedule-gate:${s.id}`, icon: 'shield', hue: 'waiting', title: 'When it skips',
         summary: s.min_minions != null ? [toneChip('warn', `Under ${s.min_minions}`), `minions since its last run${s.gate_scope === 'all' ? ', all schemes' : ''}`] : [toneChip('ok', 'Always runs'), s.last_skip ?? ''] },
         gateFields(s), s.last_skip ? h('p', { class: 'look-prose' }, 'Last skip: ', s.last_skip) : '')[0],
+      settingsRow({ key: `schedule-trigger:${s.id}`, icon: 'chart', hue: 'teal', title: 'Runs early',
+        summary: s.trigger_count != null ? [toneChip('ok', `${s.trigger_so_far ?? 0} of ${s.trigger_count}`), triggerText(s)] : [toneChip('held', 'Off'), 'only on its calendar'] },
+        triggerFields(s))[0],
       settingsRow({ key: `schedule-cat:${s.id}`, icon: 'tag', hue: 'held', title: 'Category', summary: [toneChip('violet', s.category || 'Other'), 'its group in the list'] },
         categoryField(s))[0]),
   ];
@@ -274,6 +278,42 @@ function gateFields(s) {
     h('label', { title: 'Each due slot checks first: with fewer minions made since its last real run, it skips at no cost' }, 'Skip unless ', n, ' minions since the last run'),
     s.min_minions != null ? scope : '',
     h('label', { title: 'Pause after its first real run, for a one-off' }, h('input', { type: 'checkbox', checked: !!s.once, onchange: (e) => save(s, { once: e.target.checked }) }), ' Run once'));
+}
+
+/** "runs after 150 ships" (#1798): its activity trigger, counted in gate_scope; the server's describeTrigger says the same for tools. */
+function triggerText(s) {
+  return `runs after ${s.trigger_count} ${s.trigger_kind}${s.gate_scope === 'all' ? ' across all schemes' : ''}${s.trigger_gap_hours != null ? `, at most every ${s.trigger_gap_hours} h` : ''}`;
+}
+
+/**
+ * The activity trigger (#1798): "Also run after N ships|minions since the last run" (blank: calendar only), and its floor
+ * in hours (blank: a day). Checked hourly; the calendar slot stays. Each change shows at once and saves behind.
+ */
+function triggerFields(s) {
+  const whole = (v, max) => v === '' || (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= max);
+  const n = h('input', {
+    type: 'number', min: 1, max: 100000, step: 1, inputmode: 'numeric', placeholder: 'off', value: s.trigger_count ?? '', 'aria-label': 'Count that runs it early',
+    onchange: (e) => {
+      const v = e.target.value.trim();
+      if (!whole(v, 100000)) return e.target.reportValidity();
+      save(s, v === '' ? { trigger_count: null, trigger_kind: null, trigger_gap_hours: null } : { trigger_count: Number(v), trigger_kind: s.trigger_kind ?? 'ships' });
+    },
+  });
+  const kind = h('select', { class: 'small', 'aria-label': 'What it counts', onchange: (e) => save(s, { trigger_kind: e.target.value }) },
+    h('option', { value: 'ships', selected: s.trigger_kind !== 'minions' }, 'ships to main'),
+    h('option', { value: 'minions', selected: s.trigger_kind === 'minions' }, 'minions made'));
+  const gap = h('input', {
+    type: 'number', min: 1, max: 720, step: 1, inputmode: 'numeric', placeholder: '24', value: s.trigger_gap_hours ?? '', 'aria-label': 'Hours between early runs',
+    onchange: (e) => {
+      const v = e.target.value.trim();
+      if (!whole(v, 720)) return e.target.reportValidity();
+      save(s, { trigger_gap_hours: v === '' ? null : Number(v) });
+    },
+  });
+  return h('div', { class: 'schedule-gate small' },
+    h('label', { title: 'Checked every hour: once this many are counted since its last real run, it runs without waiting for its slot' }, 'Also run after ', n),
+    s.trigger_count != null ? [kind, h('span', {}, s.gate_scope === 'all' ? ' in all schemes' : ' in this scheme'),
+      h('label', { title: 'Never early within this many hours of its last run (blank is a day), and never over a run still working' }, 'at most every ', gap, ' h')] : '');
 }
 
 /** Its category (#1083): any short name, with the scheme's others offered; blank puts it under Other. */

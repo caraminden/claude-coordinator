@@ -183,6 +183,9 @@ const SCHEDULE_GATE = {
   min_minions: { type: ['integer', 'null'], minimum: 1, description: 'Skip a due slot unless at least this many minions were made since the last real run (Taskmasters and schedule-started minions not counted); null always runs' },
   gate_scope: { type: 'string', enum: ['scheme', 'all'], description: "Whose minions min_minions counts: this scheme's (default) or every scheme's, for a sweep across schemes" },
   once: { type: 'boolean', description: 'Pause after the first real run (skips not counted): set it for a one-off such as a dated read-back' },
+  trigger_count: { type: ['integer', 'null'], minimum: 1, description: 'Activity trigger: also run early once this many ships to main (or minions made, by trigger_kind) since the last real run, counted in gate_scope and checked hourly; the cron slot stays as the fallback. null clears it' },
+  trigger_kind: { type: 'string', enum: ['ships', 'minions'], description: 'What trigger_count counts: ships to main (merges into a build branch not counted) or minions made (counted as min_minions counts them)' },
+  trigger_gap_hours: { type: ['integer', 'null'], minimum: 1, maximum: 720, description: "A trigger's floor: never runs early within this many hours of the last real run, nor over a run still working; null is a day" },
   category: { type: 'string', description: 'The group it shows under on the Schedules page, at most 40 characters: reuse one list_schedules shows (e.g. Code, Tests, Process, Skills and docs, Models and usage, Apps, Read-backs). Left out of schedule_minion, it is guessed from the name' },
 };
 const WORKFLOW = {
@@ -2490,7 +2493,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return schedules.length ? schedules.map(scheduleLine).join('\n') : 'Nothing scheduled.';
     }
     case 'schedule_minion': {
-      const s = await call('POST', `/api/projects/${C().PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort, min_minions: args.min_minions, gate_scope: args.gate_scope, once: args.once, category: args.category });
+      const s = await call('POST', `/api/projects/${C().PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort, min_minions: args.min_minions, gate_scope: args.gate_scope, once: args.once, category: args.category, trigger_count: args.trigger_count, trigger_kind: args.trigger_kind, trigger_gap_hours: args.trigger_gap_hours });
       return `Scheduled. ${scheduleLine(s)}`;
     }
     case 'schedule_audit': {
@@ -2499,7 +2502,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'update_schedule': {
       const { schedule_id, ...patch } = args;
-      needOne(patch, ['name', 'cron', 'brief', 'type', 'model', 'effort', 'min_minions', 'gate_scope', 'once', 'paused', 'template', 'notes', 'category'], 'update_schedule');
+      needOne(patch, ['name', 'cron', 'brief', 'type', 'model', 'effort', 'min_minions', 'gate_scope', 'once', 'paused', 'template', 'notes', 'category', 'trigger_count', 'trigger_kind', 'trigger_gap_hours'], 'update_schedule');
       return `Updated. ${scheduleLine(await call('PATCH', `/api/schedules/${Number(schedule_id)}`, patch))}`;
     }
     case 'delete_schedule':
@@ -2540,8 +2543,9 @@ function scheduleLine(s: any): string {
   // A schedule from before #698 may name neither; its runs take the model table's pick for its type (src/schedules.ts runMinion).
   const runsAs = `model ${s.model ?? `the table's pick for a ${s.type}`}, effort ${s.effort ?? `the table's pick for a ${s.type}`}`;
   const gate = s.min_minions != null ? `; skips under ${s.min_minions} minions${s.gate_scope === 'all' ? ' across all schemes' : ''}` : '';
+  const trigger = s.trigger_count != null ? `; ${s.trigger_text} (${s.trigger_so_far ?? 0} so far)` : '';
   const kind = s.template ? `; standard audit ${s.template}${s.notes ? ' with notes' : ''}` : '';
-  return `[${s.id}] ${s.name}${s.category ? ` (${s.category})` : ''}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${kind}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
+  return `[${s.id}] ${s.name}${s.category ? ` (${s.category})` : ''}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${trigger}${kind}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
 }
 
 /** "pipeline-lane: #580 Fix land.sh, taken by Josh since Nov 17, 10:14 PST (land retry)" (#921). */

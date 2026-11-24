@@ -32,7 +32,7 @@ import { pacific } from '../pacific.ts';
 import { checkAudits } from '../standard-audits.ts';
 import { FLAKE_WINDOW_MS, PROOF_RUNS, fileChangedAt, flakeBrief } from '../flakes.ts';
 import { LAND_REDS_MS, landReds, readRetro } from '../land-reds.ts';
-import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
+import { describeCron, describeTrigger, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule, type TriggerKind } from '../schedules.ts';
 import { turnEnv, turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
@@ -265,8 +265,8 @@ async function startChecks(app: App, projectId: number, id: number, startedBy: s
 const MODEL_REQUIRED = (tool: string) => `${tool} needs a model and an effort, picked on purpose from the model table in your prompt by the kind of work (e.g. model: "claude-opus-5-5", effort: "medium"); there is no default.`;
 
 /** A schedule's name, cron, brief and type from a request body: all of them (`all`) or those given. */
-function scheduleFields(app: App, projectId: number, body: any, all: boolean, taskmaster = false) {
-  const out: { name?: string; cron?: string; brief?: string; type?: string; model?: string | null; effort?: string | null; min_minions?: number | null; gate_scope?: 'scheme' | 'all'; once?: boolean; category?: string } = {};
+function scheduleFields(app: App, projectId: number, body: any, all: boolean, taskmaster = false, row: Schedule | null = null) {
+  const out: { name?: string; cron?: string; brief?: string; type?: string; model?: string | null; effort?: string | null; min_minions?: number | null; gate_scope?: 'scheme' | 'all'; once?: boolean; category?: string; trigger_kind?: TriggerKind | null; trigger_count?: number | null; trigger_gap_hours?: number | null } = {};
   if (all || body.name !== undefined) out.name = str(body.name, 'Name', 80);
   if (all || body.cron !== undefined) out.cron = str(body.cron, 'cron', 100);
   if (all || body.brief !== undefined) out.brief = str(body.brief, 'Brief', 100_000);
@@ -288,6 +288,18 @@ function scheduleFields(app: App, projectId: number, body: any, all: boolean, ta
     if (typeof body.once !== 'boolean') throw new HttpError(400, 'once must be true or false');
     out.once = body.once;
   }
+  // The activity trigger (#1798): run early after N ships or minions; a null count clears it, kind and gap with it.
+  if (body.trigger_kind !== undefined) out.trigger_kind = oneOf(body.trigger_kind, ['ships', 'minions'], 'trigger_kind') as TriggerKind | null;
+  if (body.trigger_count !== undefined) {
+    if (body.trigger_count !== null && !(Number.isInteger(body.trigger_count) && body.trigger_count >= 1 && body.trigger_count <= 100_000)) throw new HttpError(400, 'trigger_count must be a whole number from 1 to 100000, or null for no trigger');
+    out.trigger_count = body.trigger_count;
+  }
+  if (body.trigger_gap_hours !== undefined) {
+    if (body.trigger_gap_hours !== null && !(Number.isInteger(body.trigger_gap_hours) && body.trigger_gap_hours >= 1 && body.trigger_gap_hours <= 720)) throw new HttpError(400, 'trigger_gap_hours must be a whole number of hours from 1 to 720, or null for a day');
+    out.trigger_gap_hours = body.trigger_gap_hours;
+  }
+  const count = out.trigger_count !== undefined ? out.trigger_count : row?.trigger_count ?? null;
+  if (count != null && !(out.trigger_kind !== undefined ? out.trigger_kind : row?.trigger_kind)) throw new HttpError(400, 'A trigger needs trigger_kind: ships (to main) or minions (made)');
   // Its group on the Schedules page (#1083); '' is Other, and left out of a create it is guessed from the name.
   if (body.category !== undefined && body.category !== null) {
     if (typeof body.category !== 'string') throw new HttpError(400, 'category must be text');
@@ -339,6 +351,8 @@ function scheduleView(app: App, s: Schedule) {
   return {
     ...s, brief, when: describeCron(s.cron), last_number: last?.number ?? null, last_state: last?.state ?? null, last_status: last?.status ?? null,
     last_note: last?.note ?? null, last_cost: last?.cost ?? null, runs, skips14: app.store.schedules.skipsSince(s.id, Date.now() - 14 * 864e5),
+    // Its trigger's count since the last real run (#1798), what the hourly check compares with trigger_count.
+    trigger_text: describeTrigger(s), trigger_so_far: s.trigger_count == null ? null : s.trigger_kind === 'ships' ? app.store.schedules.shipsSince(s) : app.store.schedules.minionsSince(s, APP_NAME),
   };
 }
 
@@ -1788,7 +1802,7 @@ export const projectRoutes: Route[] = [
     async handler({ req, res, app, schedule: s }) {
       const project = app.store.getProject(s.project_id)!;
       const { body, extra } = scheduleTemplate(app, project, await readJson(req), s);
-      const patch: Record<string, unknown> = { ...scheduleFields(app, s.project_id, body, false), ...extra };
+      const patch: Record<string, unknown> = { ...scheduleFields(app, s.project_id, body, false, false, s), ...extra };
       if (body.paused !== undefined) {
         if (typeof body.paused !== 'boolean') throw new HttpError(400, 'paused must be true or false');
         patch.paused = body.paused;

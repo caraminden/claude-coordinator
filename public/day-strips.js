@@ -207,6 +207,7 @@ export function dayStripsPanel() {
       sumBar(tot, all),
       look === 'table' ? table(rows) : chart(rows),
       look === 'table' ? '' : h('p', { class: 'muted ds-note' }, 'Each strip starts at its minion’s start and ends when it went live, on a square-root scale so short ones stay readable. Hover or tap one for its times; click to open it.'),
+      tot.none ? h('p', { class: 'muted ds-note' }, `Nothing recorded: ${WHY.none}`) : '',
     );
   };
 

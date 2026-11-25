@@ -46,6 +46,8 @@ test('a Pacific day starts at its own midnight, summer or winter; anything else 
   assert.equal(dayStartMs('2026-07-01'), Date.UTC(2026, 6, 1, 7));
   assert.equal(dayStartMs('2026-03-08'), Date.UTC(2026, 2, 8, 8)); // the day clocks spring forward starts in PST
   assert.equal(dayStartMs('nope'), null);
+  assert.equal(dayStartMs('2026-02-31'), null, 'a day the calendar lacks is no day (the route answers 400, not 500)');
+  assert.equal(dayStartMs('2026-13-01'), null);
 });
 
 test('a strip: the log clipped to live, gaps nothing explains, and the ship stages over waits but never over work', () => {

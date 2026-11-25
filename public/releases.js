@@ -755,7 +755,13 @@ function changeList(projectId, tv) {
   function frozenLine(e) {
     if (!e.frozen) return '';
     const at = new Date(e.frozen.since).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
-    return h('span', { class: 'frozen stuck', title: 'The time is when Citadel first saw it frozen; nothing records who froze it.' }, h('b', { class: 'waits' }, `Frozen since ${at}`), ' · to thaw it, run on perigee: ', h('code', {}, e.frozen.thaw));
+    return h(
+      'span',
+      { class: 'frozen stuck', title: 'The time is when Citadel first saw it frozen; nothing records who froze it.' },
+      h('b', { class: 'waits' }, `Frozen since ${at}`),
+      ' · to thaw it, run on perigee: ',
+      h('code', { style: 'display:inline-block;max-width:100%;overflow-x:auto;white-space:nowrap;vertical-align:bottom' }, e.frozen.thaw),
+    );
   }
   /** Who placed a waiter (#1358): a person's drag pins it; a Taskmaster's move says why it went there. */
   function placedNote(p) {

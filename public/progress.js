@@ -578,7 +578,10 @@ function applyPlan(p, callId, input, at) {
   // Naming step 1 with a title once the plan is finished starts a new one, its ids new; a late step 4 just adds.
   // A tagged plan's last step may never be ticked (its ship ends the turn), so a later turn's new step 1, with others, starts one too.
   const first = p.tasks.find((t) => (t.n ?? Number(t.id)) === 1);
-  const fresh = (s) => s.n === 1 && s.step && (allDone(p) || (p.at && !p.planned && first && s.step !== first.subject && input.steps.filter((o) => o.step).length > 1));
+  // Others mostly restated under their own titles are the same plan, its first step retitled.
+  const others = input.steps.filter((o) => o.step && o.n !== 1);
+  const same = others.filter((o) => p.tasks.some((t) => (t.n ?? Number(t.id)) === o.n && t.subject === o.step)).length;
+  const fresh = (s) => s.n === 1 && s.step && (allDone(p) || (p.at && !p.planned && first && s.step !== first.subject && same * 2 < others.length));
   if (p.tasks.length && input.steps.some(fresh)) p.tasks = [];
   if (!p.tasks.some((t) => t.id === p.at)) p.at = null;
   p.planned = true;

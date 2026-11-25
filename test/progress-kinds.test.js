@@ -194,6 +194,12 @@ test('a new plan in a later turn replaces a tagged one the ship left open; a fix
   assert.equal(c.p.tasks.length, 5, 'one title alone is a fix-up in any turn');
   c.turn();
   c.plan([
+    { n: 1, step: 'Read all of it' },
+    { n: 2, step: 'build' },
+  ]);
+  assert.equal(c.p.tasks.length, 5, 'and so is one beside a title the plan has');
+  c.turn();
+  c.plan([
     { n: 1, step: 'Fix what CI found', kind: 'build' },
     { n: 2, step: 'Ship again', kind: 'ship' },
   ]);

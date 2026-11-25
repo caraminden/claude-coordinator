@@ -104,7 +104,7 @@ import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillRes
 import type { MinionJobs } from './minion-jobs.ts';
 import { LinePlaces, sameAccount, type OnAccount } from './line-place.ts';
 import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
-import { StartNow } from './start-now.ts';
+import { holdOver, StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
 import { sleepKey, stateWord, type Sleep } from './needs.ts';
@@ -994,7 +994,7 @@ export class Runner {
       this.turnLine.reordered();
       this.lineChanged(ids);
     });
-    this.startNow = new StartNow({ store, over: (id) => this.holdOver(id), changed: (ids) => this.lineChanged(ids), now: () => this.now() });
+    this.startNow = new StartNow({ store, over: (id) => holdOver(store.getTicket(id), (t) => this.parked(t) && !this.turnLine.has(id) && !this.lanes.busy(id)), changed: (ids) => this.lineChanged(ids), now: () => this.now() });
     this.places = new LinePlaces({ store, urgent: this.urgent, chains: () => this.chains(), now: () => this.now() });
     this.turnLine = new TurnLine({
       store,
@@ -3585,12 +3585,6 @@ export class Runner {
     if (via === 'net' && this.netWait(ticket)) return this.resumes.netResume(ticket);
     if (via && owed) return void this.resume(ticket, via, owedRetries(owed));
     this.next(ticket, true);
-  }
-
-  /** A minion whose own worker (#1957) ends: closed, gone, or sealed with no turn under way. */
-  private holdOver(ticketId: number): boolean {
-    const t = this.store.getTicket(ticketId);
-    return !t || t.status === 'closed' || (this.parked(t) && !this.turnLine.has(ticketId) && !this.lanes.busy(ticketId));
   }
 
   /** Whose share a waiting turn counts in, and its place there (Waiting.rank). */

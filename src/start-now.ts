@@ -2,7 +2,7 @@
 // with it. Josh, 2026-11-25: "We should make it so I can force create a new worker if there is a minion I want to actively
 // work on"; "While you're working with it"; "Two per person". A capped exception to the pool (src/turn-line.ts). Saved in
 // the settings table, so a restart keeps each hold and its clock.
-import type { Store } from './db.ts';
+import type { Store, Ticket } from './db.ts';
 
 const HOLDS = 'start-now';
 
@@ -26,12 +26,15 @@ export interface WorkerHold {
 
 export interface HoldDeps {
   store: Pick<Store, 'getSetting' | 'setSetting' | 'deleteSetting'>;
-  /** The minion can use it no longer: closed, gone, or sealed with no turn running or waiting. */
+  /** The minion can use it no longer (holdOver). */
   over: (ticketId: number) => boolean;
   /** Holds of these minions began, ended or moved their clock. */
   changed: (ids: number[]) => void;
   now: () => number;
 }
+
+/** A minion that can use a worker of its own no longer: gone, closed, or sealed with no turn running or waiting (`sealedIdle`). */
+export const holdOver = (t: Ticket | undefined, sealedIdle: (t: Ticket) => boolean): boolean => !t || t.status === 'closed' || sealedIdle(t);
 
 export class StartNow {
   private d: HoldDeps;

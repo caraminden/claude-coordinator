@@ -2,14 +2,14 @@
 // cache by each file's path from the cache folder, so a copy laid out the same way from a link to the cache adds no entries.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 import { mirroredCopy } from './helpers.ts';
 
 const entries = (dir: string) => readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).length;
-const run = (script: string, cache: string, portable = true) => execFileSync(process.execPath, [script], { env: { PATH: process.env.PATH, NODE_COMPILE_CACHE: cache, ...(portable ? { NODE_COMPILE_CACHE_PORTABLE: '1' } : {}) }, encoding: 'utf8' });
+const run = (script: string, cache: string) => execFileSync(process.execPath, [script], { env: { PATH: process.env.PATH, NODE_COMPILE_CACHE: cache, NODE_COMPILE_CACHE_PORTABLE: '1' }, encoding: 'utf8' });
 
 for (const [name, at] of [
   ['beside the checkout, as a worktree has it', (root: string) => ({ repo: join(root, 'tickets', '7'), cache: join(root, 'repo', '.git', 'worktrees', '7', 'compile-cache') })],
@@ -29,11 +29,13 @@ for (const [name, at] of [
       assert.equal(entries(cache), warm, 'a second run from the checkout adds nothing');
 
       const mirror = mirroredCopy(join(root, 'mirror'), repo, cache);
+      assert.equal(realpathSync(mirror.cache), realpathSync(cache), 'the copy reads the same cache, through a link');
+      assert.equal(relative(mirror.cache, mirror.copy), relative(cache, repo), 'and sits where its entries expect it');
       cpSync(repo, mirror.copy, { recursive: true, filter: (src) => !/[/\\]\.git$/.test(src) });
       assert.equal(run(join(mirror.copy, 'main.ts'), mirror.cache), '4\n');
       assert.equal(entries(cache), warm, 'the copy found every file in the cache');
 
-      // The cases this replaces: a copy at some other path, or a cache keyed by full paths, compiles everything again.
+      // What this replaces: a copy at any other path compiles everything again.
       const plain = join(root, 'plain');
       cpSync(repo, plain, { recursive: true, filter: (src) => !/[/\\]\.git$/.test(src) });
       assert.equal(run(join(plain, 'main.ts'), cache), '4\n');

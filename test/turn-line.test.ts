@@ -902,6 +902,7 @@ test('the Workers tile reads the limits with the last 7 days beside each line, a
   const reset = await workers('PUT', { limits: { shrinkCpu: null } });
   const back = reset.limits.find((l: { key: string }) => l.key === 'shrinkCpu');
   assert.deepEqual([back.value, back.by], [50, undefined]);
+});
 
 test('a stop while waiting for a worker tells the outbox which queued messages it dropped', async () => {
   runner.turnLine.setSize(1, 'Cara');

@@ -129,6 +129,8 @@ export interface ResumeHost {
   resume(ticketId: number, via: RetryKind, retries: Retries, onCodex?: boolean): Promise<void> | undefined;
   /** A kill resume's start threw and left its wait (already removed): tell the chat and run what was queued behind it. */
   killResumeFailed(ticketId: number): void;
+  /** It waits for a worker (src/turn-line.ts): its start is neither over nor failed. */
+  lined(ticketId: number): boolean;
 }
 
 export class Resumes {
@@ -201,7 +203,7 @@ export class Resumes {
   }
 
   /** The wait stays saved until the resume's turn takes it (takeQueue), so a restart during the last turn's save still resumes. */
-  private netResume(ticketId: number) {
+  netResume(ticketId: number) {
     const w = this.net.get(ticketId);
     if (w) this.host.resume(ticketId, 'net', { net: w.tries });
   }
@@ -249,7 +251,7 @@ export class Resumes {
     if (!w) return void (this.killHeldSince = null);
     // The last one started may still be behind its session save (afterRestore): it goes first, so a slow save can't
     // bunch the line up; one stuck that long doesn't hold the rest.
-    if (list.some((x) => Date.now() - (h.killStarted.get(x.ticket) ?? 0) < KILL_START_MAX_MS)) return this.armKillResumes(Math.max(h.resumeGapMs, 250));
+    if (list.some((x) => !h.lined(x.ticket) && Date.now() - (h.killStarted.get(x.ticket) ?? 0) < KILL_START_MAX_MS)) return this.armKillResumes(Math.max(h.resumeGapMs, 250));
     if (r.starved) {
       if (this.killHeldSince === null) {
         this.killHeldSince = Date.now();
@@ -259,6 +261,15 @@ export class Resumes {
       console.log(`[kill-resume] held ${Math.round((Date.now() - this.killHeldSince) / 1000)} s for a starved box (${r.why}): minion ${w.ticket} resumes anyway`);
       this.killHeldSince = Date.now();
     } else this.killHeldSince = null;
+    this.startKill(w.ticket);
+    this.armKillResumes();
+  }
+
+  /** Start the minion's kill resume, if it waits for one; false if not. */
+  startKill(ticketId: number): boolean {
+    const h = this.host;
+    const w = this.kill.get(ticketId);
+    if (!w) return false;
     h.killStarted.set(w.ticket, Date.now());
     let ran: Promise<void> | undefined;
     try {
@@ -267,7 +278,7 @@ export class Resumes {
       console.error(`[kill-resume] minion ${w.ticket}: its resume failed to start: ${err?.message ?? err}`);
     }
     void Promise.resolve(ran).then(() => this.killResumeEnded(w.ticket));
-    this.armKillResumes();
+    return true;
   }
 
   /**
@@ -275,7 +286,7 @@ export class Resumes {
    * there means the start threw, so it stops here with an error (the host's killResumeFailed).
    */
   private killResumeEnded(ticketId: number) {
-    if (!this.host.killStarted.has(ticketId) || this.host.isRunning(ticketId)) return;
+    if (!this.host.killStarted.has(ticketId) || this.host.isRunning(ticketId) || this.host.lined(ticketId)) return;
     if (!this.cancelKillWait(ticketId)) return;
     this.host.killResumeFailed(ticketId);
     this.armKillResumes();
@@ -329,10 +340,18 @@ export class Resumes {
     const w = next?.wait;
     if (!w || next.due > Date.now()) return this.armLimitTimer();
     this.lastLimitResume = Date.now();
+    this.startLimit(w.ticket);
+  }
+
+  /** Start the minion's limit resume, if it waits for one; false if not. */
+  startLimit(ticketId: number): boolean {
+    const w = this.limit.get(ticketId);
+    if (!w) return false;
     // The wait and its held messages stay saved until the resume's turn takes them (startTurn ends the wait), as a network
     // wait does: a restart while the resume restores the session still resumes (A2, #1286).
-    h.limitStarting.set(w.ticket, {});
+    this.host.limitStarting.set(w.ticket, {});
     this.armLimitTimer();
-    h.resume(w.ticket, 'limit', { limit: w.tries }, !!w.codex);
+    this.host.resume(w.ticket, 'limit', { limit: w.tries }, !!w.codex);
+    return true;
   }
 }

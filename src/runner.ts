@@ -97,6 +97,7 @@ import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
 import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume } from './resumes.ts';
+import { TurnLine, type LineEntry } from './turn-line.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
 import { sleepKey, stateWord, type Sleep } from './needs.ts';
 
@@ -684,6 +685,8 @@ export class Runner {
   private detached = false;
   /** The usage-limit, network and kill waits (src/resumes.ts). */
   private resumes: Resumes;
+  /** The worker pool and the line of turns waiting for one (src/turn-line.ts, #1868). */
+  readonly turnLine: TurnLine;
   /** The waits' timers and probe delay, read by tests. */
   private get limitTimer() {
     return this.resumes.limitTimer;
@@ -937,12 +940,26 @@ export class Runner {
       isRunning: (id) => self.isRunning(id),
       resume: (id, via, retries, onCodex) => self.resume(id, via, retries, onCodex),
       killResumeFailed: (id) => self.killResumeFailed(id),
+      lined: (id) => self.turnLine.has(id),
     });
     this.broadcast = broadcast;
     // Saved queues and waits from before #1378 move into each minion's one queue on the first boot, never dropped.
     const moved = migrateQueues(store);
     if (moved) console.log(`Moved ${moved} minions' saved messages into their queues (#1378).`);
     this.queue = new MinionQueue(store);
+    this.turnLine = new TurnLine({
+      store,
+      exempt: (id) => (store.getTicket(id)?.kind ?? 'coordinator') === 'coordinator',
+      busy: (id) => this.lanes.busy(id),
+      asks: (id, via) => this.lineAsks(id, via),
+      start: (entry) => this.startLined(entry),
+      get gapMs() {
+        return self.resumeGapMs;
+      },
+      get detached() {
+        return self.detached;
+      },
+    });
     this.approvals = new Approvals(
       (ticketId, kind, data) => {
         this.emit(ticketId, kind, data);
@@ -966,7 +983,10 @@ export class Runner {
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
     // Messages that arrived while a step ran start a turn once the minion's lane is free.
-    this.lanes.onIdle = (ticketId) => this.next(ticketId);
+    this.lanes.onIdle = (ticketId) => {
+      this.next(ticketId);
+      this.turnLine.pump();
+    };
     this.turnsDir = join(dirname(store.path), 'run', 'turns');
     this.dataDir = resolve(dirname(store.path));
     this.promptHolds = new Holds(store);
@@ -1115,6 +1135,7 @@ export class Runner {
   detachAll() {
     // The next server probes for the threads waiting on the network, and resumes the killed turns waiting for theirs.
     this.resumes.stop();
+    this.turnLine.stop();
     this.detached = true;
     for (const t of this.turns.values()) {
       clearInterval(t.timer);
@@ -1411,6 +1432,7 @@ export class Runner {
   }
 
   private dropQueue(ticketId: number, keepHeld = false) {
+    this.turnLine.leave(ticketId);
     // A no-action notice (its own PR merged, #619) was never meant to be read before a close: it isn't named.
     const left = this.queue.clear(ticketId, keepHeld).filter((m) => !m.fyi);
     if (left.length) {
@@ -1856,7 +1878,14 @@ export class Runner {
     // Before any turn starts below: a turn the last server left running may still run in its folder (#1464).
     this.noteStrays();
     this.unsealStartHolds();
+    // Taskmasters' starts; a minion's takes its place in the line (#1868).
     const later: (() => void)[] = [];
+    this.turnLine.close();
+    const start = (t: Ticket, via?: RetryKind, retries?: Retries) => {
+      if (t.kind === 'coordinator') return void later.push(() => (via ? this.resume(t.id, via, retries!) : !this.isRunning(t.id) && this.next(t.id)));
+      // A saved wait's messages go into its resume.
+      if (via || !(this.limitWait(t.id) || this.netWait(t.id) || this.killWait(t.id))) this.turnLine.enter(t.id, via);
+    };
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
         // A minion dismissed with messages still in its queue: its chat says so. Its held mail stays: mail sent after a
@@ -1883,11 +1912,11 @@ export class Runner {
           if (!saving && this.queue.get(t.id).taken) this.queue.giveBack(t.id);
           // Messages that waited (for that save, say) start a turn once it is in; an owed resume takes them instead:
           // one turn, not a plain one and then the resume.
-          if (!owed && this.queue.size(t.id)) later.push(() => this.next(t.id));
+          if (!owed && this.queue.size(t.id)) start(t);
         }
         if (owed) {
           this.carryIn(t.id, owed.carry);
-          later.push(() => this.resume(t.id, owed.onAccount ? 'switch' : 'restart', owedRetries(owed)));
+          start(t, owed.onAccount ? 'switch' : 'restart', owedRetries(owed));
         }
         if (cut) {
           let turn = this.store.getSetting<TurnState>(turnKey(t.id));
@@ -1938,21 +1967,21 @@ export class Runner {
           // what came after waits for a turn of its own.
           if (out.kind === 'stopped') {
             this.queue.done(t.id);
-            if (this.queue.size(t.id)) later.push(() => !this.isRunning(t.id) && this.next(t.id));
+            if (this.queue.size(t.id)) start(t);
             continue;
           }
           if (out.followUps.includes('rerun')) {
-            later.push(() => !this.isRunning(t.id) && this.next(t.id));
+            start(t);
             continue;
           }
           if (!resumed) {
             const skipped = out.spent ? `It was not resumed: it had already been resumed ${out.spent.tries} times in a row.` : turn?.result && !turn.result.error ? 'Its reply was already in, so it was not resumed.' : 'It was set to be dismissed, so it was not resumed.';
             this.emit(t.id, 'note', { text: `The server restarted during this turn, so it was interrupted. ${skipped}` });
             this.queue.done(t.id);
-            if (this.queue.size(t.id)) later.push(() => !this.isRunning(t.id) && this.next(t.id));
+            if (this.queue.size(t.id)) start(t);
           } else {
             this.carryIn(t.id, carry);
-            later.push(() => this.resume(t.id, resumed.via, resumed.retries));
+            start(t, resumed.via, resumed.retries);
           }
         }
         if (/^Using \w+$/.test(t.last_activity ?? '')) {
@@ -1969,6 +1998,7 @@ export class Runner {
       }
     }
     later.forEach((start, i) => setTimeout(start, this.resumeGapMs * (i + 1)));
+    this.turnLine.open(this.resumeGapMs);
     // Minions waiting on the usage limit keep waiting; the messages held for them wait in their queues.
     this.resumes.armLimitTimer();
     // Threads waiting on the network keep waiting: the probe starts over (#366).
@@ -2034,7 +2064,7 @@ export class Runner {
     }
     if ('closing' in turn) this.closing.set(ticketId, turn.closing ?? null);
     if (turn.deployed) this.deployedMidTurn.add(ticketId);
-    this.lanes.run(ticketId, 're-attached turn', () => live.ended);
+    this.lanes.run(ticketId, 're-attached turn', () => this.turnLine.reattach(ticketId, () => live.ended));
     console.log(`Ticket ${ticketId}: re-attached to its running turn${live.unit ? ` in ${live.unit}` : ''}.`);
     return true;
   }
@@ -2113,9 +2143,11 @@ export class Runner {
     const ours = () => !!token && this.limitStarting.get(ticketId) === token;
     // Someone's message got in first; its turn took the queue, and that is resume enough.
     if (this.isRunning(ticketId)) return void (ours() && this.resumes.cancelLimitWait(ticketId));
+    // No worker free: it waits in the line, its wait or debt kept, and startLined starts it (#1868).
+    if (!this.turnLine.enter(ticketId, via)) return;
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259). Nor beside a
     // turn still live by then (#1464): as above, that turn is resume enough.
-    const ran = this.lanes.run(ticketId, 'resume', () =>
+    const step = () =>
       this.liveTurn(ticketId, () =>
         this.afterRestore(
           ticketId,
@@ -2156,8 +2188,8 @@ export class Runner {
             );
           },
         ),
-      ),
-    );
+      );
+    const ran = this.lanes.run(ticketId, 'resume', () => this.turnLine.hold(ticketId, step));
     // One that started no turn (dismissed, refused, a start that bailed) ends its wait here, as it did before it was kept.
     if (token) void ran.then(() => ours() && this.resumes.cancelLimitWait(ticketId));
     return ran;
@@ -2480,6 +2512,7 @@ export class Runner {
   unqueue(ticketId: number, eventId: number, by: string): boolean {
     // A wait's held messages are in the queue too (#468 S03-9).
     if (!this.queue.remove(ticketId, eventId)) return false;
+    if (!this.queue.size(ticketId) && !this.freshStep(ticketId)) this.turnLine.leave(ticketId, true);
     const projectId = this.store.getTicket(ticketId)?.project_id;
     if (projectId !== undefined) this.approvals.unsaid(projectId, eventId);
     this.emit(ticketId, 'unqueued', { id: eventId, by });
@@ -2814,6 +2847,7 @@ export class Runner {
       return true;
     }
     if (!live) {
+      const lined = this.turnLine.leave(ticketId);
       // Waiting for its resume after a kill (#1364): likewise.
       if (this.resumes.cancelKillWait(ticketId)) {
         this.queue.drop(ticketId);
@@ -2833,8 +2867,17 @@ export class Runner {
         return true;
       }
       // Waiting on the usage limit: a stop ends the wait, and as with a turn, its held messages go too.
-      if (!this.resumes.cancelLimitWait(ticketId)) return false;
+      const limited = this.resumes.cancelLimitWait(ticketId);
+      if (!limited && !lined) return false;
       this.queue.drop(ticketId);
+      if (!limited) {
+        // Waiting for a worker (#1868): as a running turn's stop, and a cut-off one's batch is done with.
+        this.queue.done(ticketId);
+        this.wakeNow.delete(ticketId);
+        this.emit(ticketId, 'note', { text: 'Stopped by user.' });
+        this.broadcastTicket(ticketId);
+        return true;
+      }
       this.setFailNote(ticketId, { note: 'Usage limit: stopped, send a message to carry on' });
       this.emit(ticketId, 'note', { text: "Stopped by user: it won't resume by itself." });
       this.broadcastTicket(ticketId);
@@ -3202,12 +3245,17 @@ export class Runner {
     // One step at a time per minion (src/lanes.ts): the lane calls next() again once it is free. Its last
     // turn's save above all: a turn on another login restores from that save (#250). The queue keeps the messages.
     if (this.lanes.busy(ticketId)) return;
+    // A keepalive alone takes no worker; anything else waits in the line for one (#1868).
+    const quiet = !this.queue.size(ticketId) && !this.freshStep(ticketId);
+    if (!quiet && !this.turnLine.enter(ticketId)) return;
     // Whose turn it will be, as below: a fresh-start step's is the minion's own, else the first queued message's.
     const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.freshStep(ticketId) ? [] : this.waiting(ticketId));
     // Nor beside a turn still live (#1464): the queue waits until it ends, then asks again.
-    this.lanes.run(ticketId, 'turn', () =>
+    const step = () =>
       this.liveTurn(ticketId, () =>
         this.afterRestore(ticketId, person, () => {
+          // A real message came in meanwhile: it needs a worker, so the keepalive is dropped and the free lane asks again.
+          if (quiet && (this.queue.size(ticketId) || this.freshStep(ticketId))) return void this.keepalivePending.delete(ticketId);
           const ticket = this.store.getTicket(ticketId);
           const project = ticket && this.store.getProject(ticket.project_id);
           if (!ticket || !project) return;
@@ -3255,8 +3303,37 @@ export class Runner {
               return rest();
             });
         }),
-      ),
-    );
+      );
+    this.lanes.run(ticketId, 'turn', quiet ? step : () => this.turnLine.hold(ticketId, step));
+  }
+
+  /** Start a turn the line gave a worker: the resume it waited for as it stands now, else its queue's turn. */
+  private startLined({ ticket, via }: LineEntry) {
+    const owed = this.queue.owed(ticket);
+    if (via === 'kill' && this.resumes.startKill(ticket)) return;
+    if (via === 'limit' && this.resumes.startLimit(ticket)) return;
+    if (via === 'net' && this.netWait(ticket)) return this.resumes.netResume(ticket);
+    if (via && owed) return void this.resume(ticket, via, owedRetries(owed));
+    this.next(ticket, true);
+  }
+
+  /** Whose share a waiting turn counts in, and its place there (Waiting.rank). */
+  private lineAsks(ticketId: number, via?: RetryKind): { person: number; rank: number } {
+    try {
+      const ticket = this.store.getTicket(ticketId);
+      const project = ticket && this.store.getProject(ticket.project_id);
+      if (!ticket || !project) return { person: 0, rank: 2 };
+      const fresh = this.freshStep(ticketId);
+      const waiting = this.waiting(ticketId);
+      const person = this.turnPerson(ticket, project, fresh ? [] : waiting, !!via) ?? 0;
+      if (waiting.msgs.some((m) => m.own)) return { person, rank: 0 };
+      const started = fresh || !ticket.session_id || via === 'restart' || via === 'switch' || waiting.msgs.some((m) => m.from && this.store.getTicket(m.from)?.kind === 'coordinator');
+      return { person, rank: started ? 1 : 2 };
+    } catch (err) {
+      // One minion's trouble doesn't hold the line up; its turn's start meets the same trouble and says so.
+      console.error(`Minion ${ticketId}: its place in the line could not be worked out:`, err);
+      return { person: 0, rank: 2 };
+    }
   }
 
   /** The one person whose own typed message a ticket's running turn answers (TurnState.typedBy), else null. */

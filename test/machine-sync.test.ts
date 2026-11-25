@@ -70,7 +70,7 @@ async function scheme(o: { landing?: () => boolean } = {}) {
   } as unknown as StateDeps;
   const dir = join(server, 'turns', 'turn-1');
   mkdirSync(dir, { recursive: true });
-  const at = { id: 1, name: 'Desk', wrapper: [], cwd, home: '/h', roots: [], state: { ticket: 7, config: { here: config, there: '/h/.claude' }, mkdirs: [join(server, 'tmp', '7')] } } as Placed;
+  const at = { id: 1, name: 'Desk', wrapper: [], cwd, home: '/h', roots: [], state: { ticket: 7, config: { here: config, there: '/h/.claude' } } } as Placed;
   const calls: string[] = [];
   const bytes: number[] = [];
   /** Calls whose answer is lost. */
@@ -122,7 +122,6 @@ test('a worktree goes to a machine and comes back with every file, its index and
   assert.deepEqual(gitView(s.cwd), before);
   assert.equal(sh(s.there, 'symbolic-ref', 'HEAD'), 'refs/heads/ticket/7');
   assert.ok(existsSync(join(s.prefix + s.repo, '.githooks', 'post-checkout')), "the scheme's own checkout is there for what reads it by path");
-  assert.ok(existsSync(`${s.prefix}${join(s.server, 'tmp', '7')}`));
   assert.equal(sh(s.there, 'config', 'remote.origin.url'), 'https://example.com/x.git', 'no login goes along');
 
   // The turn works: commits, stages, deletes, leaves things about.

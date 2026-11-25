@@ -3043,7 +3043,7 @@ export class Runner {
     // Its `machine` file and first beat: the machine's agent fetches the folder and starts it (src/machine-turn.ts).
     const projects = join(dirname(this.store.path), 'projects');
     const roots = [dirname(dir), projects, ...(project.repo_dir && !project.repo_dir.startsWith(projects + sep) ? [project.repo_dir] : [])];
-    const state = { ticket: ticket.id, config: { here: configDir, there: plan.env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? '', '.claude') }, mkdirs: plan.env.TMPDIR ? [plan.env.TMPDIR] : [] };
+    const state = { ticket: ticket.id, config: { here: configDir, there: join(env.HOME ?? '', '.claude') } };
     if (plan.spawn.how === 'machine') await placeTurn(dir, worker!, { wrapper: plan.spawn.wrapper, cwd: ticket.cwd, home: env.HOME ?? '', roots, state });
     // Nothing more to await: a stop or a dismissal meanwhile means no turn, and nothing of the minion's changed. A message
     // to a minion already dismissed does run its turn (it reopens it).

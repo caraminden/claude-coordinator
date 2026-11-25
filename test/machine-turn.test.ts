@@ -144,7 +144,7 @@ test("the worker container holds only the turn's folders, and the home volume", 
   assert.equal(sameClaude(null, null), false);
 });
 
-const state = { ticket: 1, config: { here: '/c', there: '/c' }, mkdirs: [] };
+const state = { ticket: 1, config: { here: '/c', there: '/c' } };
 async function stateful(id: number) {
   const dir = await placed(id);
   await placeTurn(dir, { id, name: `box-${id}` }, { ...launch, state });
@@ -497,14 +497,17 @@ test("a minion's worktree, session and files go to the machine before its turn, 
   // A turn there: the worktree is there before claude is.
   const t = await turn('on the machine');
   const { cwd, branch } = (await call(`/api/tickets/${t.id}`)).ticket;
+  assert.ok(existsSync(there(join(cwd, '..', '..', 'tmp', basename(cwd)))), 'its temp folder is there');
   assert.equal(text(there(cwd), 'a.txt'), 'one\n');
   assert.equal(git(there(cwd), 'symbolic-ref', '--short', 'HEAD'), branch);
 
   // A commit comes home by itself, with what is not committed yet; so do its conversation and its files.
   const slug = cwd.replace(/[^a-zA-Z0-9]/g, '-');
+  // Here in the server's config folder; there in the machine's own home, which the turn's sign-in is in.
   const jsonl = (at: string) => join(at, 'claude', 'projects', slug, `${session}.jsonl`);
-  mkdirSync(join(there(jsonl(root)), '..'), { recursive: true });
-  writeFileSync(there(jsonl(root)), '{"n":1}\n');
+  const jsonlThere = there(join(process.env.HOME!, '.claude', 'projects', slug, `${session}.jsonl`));
+  mkdirSync(join(jsonlThere, '..'), { recursive: true });
+  writeFileSync(jsonlThere, '{"n":1}\n');
   writeFileSync(there(join(cwd, 'a.txt')), 'two\n');
   git(there(cwd), 'commit', '-qam', 'on the machine');
   await until('the commit to come home', () => git(cwd, 'log', '-1', '--format=%s') === 'on the machine' && git(cwd, 'status', '--porcelain') === '');
@@ -519,7 +522,7 @@ test("a minion's worktree, session and files go to the machine before its turn, 
 
   // What it left uncommitted at its end is here by the time the turn is over, and its session is in the database's keeping.
   writeFileSync(there(join(cwd, 'left.txt')), 'uncommitted\n');
-  writeFileSync(there(jsonl(root)), '{"n":1}\n{"n":2}\n');
+  writeFileSync(jsonlThere, '{"n":1}\n{"n":2}\n');
   await end(t.id);
   assert.equal(text(cwd, 'left.txt'), 'uncommitted\n');
   assert.equal(readFileSync(jsonl(root), 'utf8'), '{"n":1}\n{"n":2}\n');
@@ -542,7 +545,7 @@ test("a minion's worktree, session and files go to the machine before its turn, 
   const again = await turn('there again', t.id);
   assert.notEqual(again.api, home.api);
   assert.equal(again.resume, session);
-  assert.equal(readFileSync(there(jsonl(root)), 'utf8'), '{"n":1}\n{"n":2}\n{"n":3}\n');
+  assert.equal(readFileSync(jsonlThere, 'utf8'), '{"n":1}\n{"n":2}\n{"n":3}\n');
   assert.equal(text(there(cwd), 'left.txt'), 'changed at home\n');
   assert.equal(git(there(cwd), 'log', '-1', '--format=%s'), 'at home');
   await end(t.id);

@@ -22,10 +22,8 @@ import { projectSlug, sessionFiles, validSessionId } from './sessions.ts';
 /** In a placed turn's `machine` file: what its syncs need beyond the minion itself, which the database has. */
 export interface TurnState {
   ticket: number;
-  /** Claude's config folder: this server's copy, and where the turn has it. */
+  /** Claude's config folder: this server's copy, and the machine's own in its home. */
   config: { here: string; there: string };
-  /** Folders the turn expects, with nothing in them to send (its temp folder). */
-  mkdirs: string[];
 }
 
 export interface StateDeps {
@@ -179,7 +177,7 @@ async function look(d: StateDeps, dir: string, at: string, s: TurnState, t: Tick
     roots.push({ ...r, files: files.map(([f, [size, mtime]]) => [f, size, mtime]) });
   }
   const w = body.git === false ? null : await worktree(t, p);
-  return { now: Date.now(), ticket: t.id, git: w && (await alone(t.id, () => lookGit(d, dir, at, t, w, start))), roots, mkdirs: start ? s.mkdirs : [] };
+  return { now: Date.now(), ticket: t.id, git: w && (await alone(t.id, () => lookGit(d, dir, at, t, w, start))), roots };
 }
 
 async function lookGit(d: StateDeps, dir: string, at: string, t: Ticket, w: Work, start: boolean) {

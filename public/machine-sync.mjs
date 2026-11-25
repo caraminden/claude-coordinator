@@ -817,7 +817,7 @@ export function reconcile(local, remote, base, o = {}) {
 
 /**
  * @typedef {{ repo: string, cwd: string, name: string, config: [string, string][], exclude: string, main: { head: string, branch: string | null } | null, refs: Record<string, string> | null, snap: string, last: string | null, moved?: boolean, branch?: string | null }} GitLook
- * @typedef {{ now: number, ticket: number, git: GitLook | null, roots: (Root & { files: [string, number, number][] })[], mkdirs: string[] }} Look
+ * @typedef {{ now: number, ticket: number, git: GitLook | null, roots: (Root & { files: [string, number, number][] })[] }} Look
  */
 
 /** A connection with nothing on it for so long is a dead one. */
@@ -880,7 +880,6 @@ export class Machine {
     /** @type {Look} */
     const look = await this.json('look', { start: !!o.start, git: o.git !== false, roots: o.roots ?? null });
     const skew = look.now - Math.round((asked + Date.now()) / 2);
-    for (const d of look.mkdirs) await mkdir(this.at(d), { recursive: true });
     // Files first: what a commit's turn was shown is home before its commit says it is.
     const left = await this.folders(look, skew, !!o.start);
     for (let tries = 1; o.final && left.size && tries < 3; tries++) {

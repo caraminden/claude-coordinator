@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { EventRow } from '../src/db-rows.ts';
-import { cardTimes, cutTime, timeLog, type LogTicket, type TimeLog } from '../src/time-log.ts';
+import { cardTimes, timeLog, type LogTicket, type TimeLog } from '../src/time-log.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'time-log-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -53,10 +53,16 @@ const rows = (l: TimeLog) => l.rows.map((r) => [r.type, r.title, mins(r.work), m
 test('a plan of steps: each has its own time, its outcome, and the waits between them are rows', async () => {
   const m = minion();
   m.init(0);
-  m.plan(0.2, [{ n: 1, step: 'Read' }, { n: 2, step: 'Build' }]);
+  m.plan(0.2, [
+    { n: 1, step: 'Read' },
+    { n: 2, step: 'Build' },
+  ]);
   m.plan(0.5, [{ n: 1, status: 'doing' }]);
   m.bash(2, 4, 'rg x');
-  m.plan(5, [{ n: 1, status: 'done', outcome: 'It was there.' }, { n: 2, status: 'doing' }]);
+  m.plan(5, [
+    { n: 1, status: 'done', outcome: 'It was there.' },
+    { n: 2, status: 'doing' },
+  ]);
   m.end(8);
   m.at(20, 'user_message', { author: 'Cara', text: 'go on' });
   m.init(20.1);
@@ -71,13 +77,19 @@ test('a plan of steps: each has its own time, its outcome, and the waits between
   assert.deepEqual(l.rows.map((r) => r.type).slice(0, 3), ['step', 'step', 'wait']);
   assert.match(l.rows[2].title, /Waiting on Cara/);
   // A message that started the next turn says who, not that it was a person: a guess.
-  assert.deepEqual(segs(l).find((s) => s[0] === 8), [8, 20, 'wait', 'person', 'guess']);
+  assert.deepEqual(
+    segs(l).find((s) => s[0] === 8),
+    [8, 20, 'wait', 'person', 'guess'],
+  );
 });
 
 test('steps overlap: the one that started last owns the time; a step edge cuts the stretch', async () => {
   const m = minion();
   m.init(0);
-  m.plan(0, [{ n: 1, step: 'A', status: 'doing' }, { n: 2, step: 'B' }]);
+  m.plan(0, [
+    { n: 1, step: 'A', status: 'doing' },
+    { n: 2, step: 'B' },
+  ]);
   m.plan(4, [{ n: 2, status: 'doing' }]);
   m.plan(9, [{ n: 2, status: 'done', outcome: 'b' }]);
   m.plan(10, [{ n: 1, status: 'done', outcome: 'a' }]);
@@ -117,7 +129,7 @@ test('a wait command waits, unless other work runs; a time-limited run is lost; 
   assert.equal(mins(l.totals.lost), 3);
   assert.equal(mins(l.totals.work), 3);
   const cut = l.segs.find((s) => s.sub === 'cut')!;
-  assert.equal(cut.guess, true, 'worked out from the words, not recorded');
+  assert.equal(cut.guess, undefined, 'its exit code is the record');
   assert.ok(cut.event);
 
   const b = minion();
@@ -156,7 +168,10 @@ test('cards, ships, holds, limits, kills and dismissals are exact, and cut a gap
       [60, 62, 'wait', 'deploy', ''],
     ],
   );
-  assert.ok(l.segs.every((s) => s.kind === 'work' || s.sub === 'unknown' || s.sub === 'start' || s.event), 'each known wait names its event');
+  assert.ok(
+    l.segs.every((s) => s.kind === 'work' || s.sub === 'unknown' || s.sub === 'start' || s.event),
+    'each known wait names its event',
+  );
   assert.equal(l.end, T0 + 62 * MIN);
 
   const k = minion();
@@ -165,7 +180,10 @@ test('cards, ships, holds, limits, kills and dismissals are exact, and cut a gap
   k.note(5, "The turn's process was killed before it finished, with no record of how.\nCitadel resumes it by itself in a moment, once: killed again, it stops for good.");
   k.init(7);
   k.end(8);
-  assert.deepEqual(segs(await k.log(8)).find((s) => s[2] === 'lost'), [2, 7, 'lost', 'kill', '']);
+  assert.deepEqual(
+    segs(await k.log(8)).find((s) => s[2] === 'lost'),
+    [2, 7, 'lost', 'kill', ''],
+  );
 
   const u = minion();
   u.init(0);
@@ -173,7 +191,12 @@ test('cards, ships, holds, limits, kills and dismissals are exact, and cut a gap
   u.note(90, 'Resumed after the usage limit reset');
   u.init(90);
   u.end(91);
-  assert.deepEqual(segs(await u.log(91)).find((s) => s[3] === 'limit')?.slice(0, 4), [3, 90, 'wait', 'limit']);
+  assert.deepEqual(
+    segs(await u.log(91))
+      .find((s) => s[3] === 'limit')
+      ?.slice(0, 4),
+    [3, 90, 'wait', 'limit'],
+  );
 });
 
 test('states: running grows, not started waits, finished and dismissed stop, stopped waits for a message', async () => {
@@ -225,13 +248,11 @@ test('a recorded wait replaces a guess over it', async () => {
   m.end(5);
   m.init(30);
   m.end(31);
-  const s = (await import('../src/time-log.ts')).cutTime;
   const base = await m.log(31);
   assert.equal(base.segs[1].guess, true);
   const t = { id: m.id, created_at: T0, status: 'idle', state: null, closed_at: null };
   const l = await timeLog(store, t, T0 + 31 * MIN, [{ start: T0 + 5 * MIN, end: T0 + 30 * MIN, kind: 'wait', sub: 'ship', title: 'Ship line' }]);
   assert.deepEqual(segs(l)[1], [5, 30, 'wait', 'ship', '']);
-  assert.ok(s);
 });
 
 test('a card settled in place, by a result event or by a message closes at the first of them', () => {
@@ -281,5 +302,4 @@ test('every stretch is contiguous and the totals add up, whatever the events', a
   assert.equal(l.segs.at(-1)!.end, T0 + 12 * MIN);
   assert.equal(l.totals.work + l.totals.wait + l.totals.lost, 12 * MIN);
   assert.ok(rows(l).length >= 2);
-  void cutTime;
 });

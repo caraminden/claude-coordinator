@@ -348,7 +348,7 @@ const release = () => {
 globalThis.addEventListener?.(
   'pointerdown',
   (e) => {
-    if (e.target instanceof Element && e.target.closest('.sidebar, .home-overview, #schemes-shelf')) pressedAt = performance.now();
+    if (e.target instanceof Element && e.target.closest('.sidebar, .home-overview, #schemes-shelf, .time-log')) pressedAt = performance.now();
   },
   true,
 );

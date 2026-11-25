@@ -9,6 +9,7 @@ import { stepMark } from './ui/chat.js';
 import { firstSentence, ticketActionRef } from './chattext.js';
 import { actionCut } from './eventcut.js';
 import { failedLine, loadingLine } from './ui/state.js';
+import { drawTimeLog, readLog, timeLogPanel } from './time-log-ui.js';
 import { actionLabel, heldStep, nowDoing, planEstimate, planTrack, progressLine, runningFor, stepInfo, stepName, withoutCount, workPhases } from './progress.js';
 
 // ---------- work progress (thread-bar readout) ----------
@@ -237,6 +238,10 @@ export function renderProgress() {
         view.ui.open = !view.ui.open;
         renderProgress();
       },
+      // Read ahead, so the click shows the log at once. A Taskmaster's chat never ends, so it has none.
+      onpointerenter: () => isCoordinator(view.ticket) || readLog(),
+      onfocus: () => isCoordinator(view.ticket) || readLog(),
+      onpointerdown: () => isCoordinator(view.ticket) || readLog(),
     },
     // No dot of its own: the title's dot just above says the same (Josh, 2026-11-13: "we've duplicated the dots").
     h(
@@ -268,6 +273,30 @@ export function renderProgress() {
 
   const prevDetail = progressEl.querySelector('.progress-detail');
   const scrollTop = prevDetail?.scrollTop ?? 0;
+  // The wait in full, its words uncut, with a landing's whole track above it.
+  const waitLine = w ? h('div', { class: 'wait-line' }, waitTrack(w), h('p', { class: 'wait-full' }, waitNow(w, true), ' · ', waitClock(w))) : '';
+  const req = view.turnRequest;
+  const request = req?.length
+    ? h(
+        'p',
+        { class: 'request' },
+        h('span', { class: 'muted' }, running ? 'Working on ' : 'Last worked on '),
+        req.flatMap((m, n) => [n ? ' and ' : '', `${m.author}'s request: `, h('q', {}, firstSentence(m.text, 160))]),
+      )
+    : '';
+  if (view.ui.open && !isCoordinator(view.ticket)) {
+    // The log's element stays where it is, so a redraw takes no focus, scroll or half-made click from it.
+    const log = timeLogPanel();
+    const detail = log.parentElement === prevDetail && prevDetail ? prevDetail : h('div', { class: 'progress-detail timed' }, log);
+    for (const c of [...detail.children]) if (c !== log) c.remove();
+    detail.prepend(...[waitLine, request].filter(Boolean));
+    for (const c of [...progressEl.children]) if (c !== detail) c.remove();
+    progressEl.prepend(...[bar, meter, caption, w ? waitTail(view.ticket.id, w) : ''].filter(Boolean));
+    if (detail.parentElement !== progressEl) progressEl.append(detail);
+    progressEl.hidden = false;
+    drawTimeLog();
+    return;
+  }
   let detail = '';
   if (view.ui.open) {
     const all = [...view.actions.values()];
@@ -284,20 +313,11 @@ export function renderProgress() {
       );
     const section = (title, tasks) => (tasks.length ? h('section', { class: 'plan-group' }, h('h4', {}, title), tasks.map(stepEl)) : '');
     const loose = view.turnActions.filter((a) => a.taskId == null || !p.tasks.some((t) => t.id === a.taskId));
-    const req = view.turnRequest;
     detail = h(
       'div',
       { class: 'progress-detail' },
-      // The wait in full, its words uncut, with a landing's whole track above it.
-      w ? h('div', { class: 'wait-line' }, waitTrack(w), h('p', { class: 'wait-full' }, waitNow(w, true), ' · ', waitClock(w))) : '',
-      req?.length
-        ? h(
-            'p',
-            { class: 'request' },
-            h('span', { class: 'muted' }, running ? 'Working on ' : 'Last worked on '),
-            req.flatMap((m, n) => [n ? ' and ' : '', `${m.author}'s request: `, h('q', {}, firstSentence(m.text, 160))]),
-          )
-        : '',
+      waitLine,
+      request,
       section('Done', groups.completed),
       section(running && current ? 'Now' : 'Stopped at', groups.in_progress),
       section('Up next', groups.pending),

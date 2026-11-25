@@ -1,0 +1,68 @@
+/* What a minion's progress line opens to (#1991): the ribbon of its time over its steps. */
+.progress-detail.timed { padding: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.progress-detail.timed > .wait-line, .progress-detail.timed > .request { margin: 0.6rem 0.75rem 0; }
+.time-log { padding: 0 0.75rem 0.75rem; }
+/* The ribbon stays in sight while the steps scroll, so a picked step's stretches can be seen. */
+.tl-top { position: sticky; top: 0; z-index: 2; padding: 0.65rem 0 0.5rem; background: var(--panel); }
+.tl-total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.8rem; margin-bottom: 0.45rem; font-size: 0.85em; font-variant-numeric: tabular-nums; }
+.tl-total > b { font-size: 1.15em; }
+.tl-bit { white-space: nowrap; }
+.tl-k { display: inline-block; width: 0.7em; height: 0.7em; margin-right: 0.35em; border-radius: 2px; background: var(--tl-work); }
+
+/* Waiting is hatched as well as amber, and lost is dark red, so no two kinds rest on hue alone. */
+.tl-k.wait, .time-log .tl-tile.wait { background: repeating-linear-gradient(45deg, var(--tl-wait) 0 3px, color-mix(in srgb, var(--tl-wait) 38%, var(--panel)) 3px 6px); }
+.tl-k.wait { background-size: 100% 100%; box-shadow: inset 0 0 0 1px var(--tl-wait); }
+.tl-k.lost, .time-log .tl-tile.lost { background: var(--tl-lost); }
+.tl-k.gone, .time-log .tl-tile.gone { background: color-mix(in srgb, var(--tl-gone) 35%, var(--panel)); }
+.tl-k.guess, .time-log .tl-tile.guess { opacity: 0.5; }
+
+.tl-ribbon { display: flex; gap: 2px; height: 26px; border-radius: 6px; overflow: hidden; }
+.tl-ribbon.tight { gap: 1px; }
+.tl-ribbon.none { background: var(--code-bg); }
+.tl-ribbon.busy { animation: pulse 1.4s infinite; }
+.tl-ribbon.live::after { content: ''; flex: none; width: 4px; background: var(--tl-work); border-radius: 2px; animation: pulse 1.4s infinite; }
+.time-log .tl-tile { flex: 1 1 0; min-width: 2px; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--tl-work); overflow: hidden; cursor: pointer; }
+.time-log .tl-tile.lost { min-width: 5px; }
+.time-log .tl-tile.squeezed { min-width: 3.2rem; }
+.tl-tile em { padding: 1px 5px; border-radius: 4px; background: var(--panel); color: var(--ink); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.time-log .tl-tile.dim { opacity: 0.2; }
+.time-log .tl-tile:hover, .time-log .tl-tile.sel { box-shadow: inset 0 0 0 2px var(--ink); }
+.tl-axis { display: flex; justify-content: space-between; margin-top: 0.15rem; font-size: 0.75em; color: var(--muted); }
+.tl-picked { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.4rem; margin: 0.4rem 0 0; font-size: 0.85em; }
+.time-log .tl-clear { margin-left: auto; padding: 0 0.5rem; border: 0; background: none; color: var(--muted); font-size: 1.1em; cursor: pointer; }
+.tl-clear:hover { color: var(--ink); }
+
+.tl-rows { display: grid; gap: 0.35rem; }
+.tl-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 0.95em; }
+.tl-row.tl-wait { border-style: dashed; background: color-mix(in srgb, var(--tl-wait) 9%, var(--panel)); }
+.tl-row.tl-wait.lost { background: color-mix(in srgb, var(--tl-lost) 8%, var(--panel)); }
+.tl-row.in_progress { border-color: var(--running); }
+.tl-row.paused { border-color: var(--waiting); }
+.tl-row.on { box-shadow: 0 0 0 2px var(--ink); }
+.time-log .tl-head { display: flex; align-items: baseline; gap: 0.5rem; width: 100%; padding: 0.4rem 0.6rem; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; }
+button.tl-head { cursor: pointer; }
+.time-log button.tl-head:hover { background: color-mix(in srgb, var(--tl-work) 8%, transparent); }
+.tl-head .icon { flex: none; width: 1em; text-align: center; color: var(--muted); }
+.tl-row.completed .icon { color: var(--done); }
+.tl-row.in_progress .icon { color: var(--running); }
+.tl-row.paused .icon { color: var(--waiting); }
+.tl-head .subject { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tl-row.tl-step .subject { font-weight: 600; }
+.tl-row.pending .subject { font-weight: 400; color: var(--muted); }
+.tl-meta { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 0.7rem; font-size: 0.85em; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tl-ms { color: var(--ink); }
+.tl-guess { color: var(--muted); font-size: 0.85em; }
+.tl-total .tl-guess { font-size: 1em; }
+.tl-note { grid-column: 1 / -1; margin: -0.15rem 0.6rem 0.45rem 2.1rem; font-size: 0.9em; color: var(--muted); overflow-wrap: anywhere; }
+.tl-jump { font-size: 0.82em; }
+.tl-row .tl-jump { padding: 0.5rem 0.65rem 0.4rem 0; white-space: nowrap; }
+.tl-more { justify-self: start; }
+@media (max-width: 800px) {
+  .tl-ribbon { height: 38px; }
+  .time-log .tl-head { flex-wrap: wrap; row-gap: 0.15rem; }
+  .tl-head .subject { flex: 1 1 70%; }
+  .tl-meta { flex-basis: 100%; justify-content: flex-start; padding-left: 1.5rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tl-ribbon.busy, .tl-ribbon.live::after { animation: none; }
+}

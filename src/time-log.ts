@@ -186,7 +186,7 @@ function claudeEvent(s: State, row: EventRow, d: Record<string, unknown>) {
     return;
   }
   if (d.type === 'result') {
-    if (cur && cur.end === null) ((cur.end = at), (cur.last = at));
+    if (cur && cur.end === null) (cur.end = at), (cur.last = at);
     return;
   }
   // Words after a turn's result with no new start: a turn whose start wasn't kept.
@@ -246,7 +246,15 @@ function syncSteps(s: State, at: number) {
 /** What's left of `span` after taking out `outs`. */
 function subtract(span: Span, outs: Span[]): Span[] {
   let left: Span[] = [span];
-  for (const [a, b] of outs) left = left.flatMap(([s, e]): Span[] => (b <= s || a >= e ? [[s, e]] : [[s, Math.min(a, e)], [Math.max(b, s), e]].filter((x): x is Span => x[1] - x[0] > 0)));
+  for (const [a, b] of outs)
+    left = left.flatMap(([s, e]): Span[] =>
+      b <= s || a >= e
+        ? [[s, e]]
+        : [
+            [s, Math.min(a, e)],
+            [Math.max(b, s), e],
+          ].filter((x): x is Span => x[1] - x[0] > 0),
+    );
   return left;
 }
 
@@ -321,9 +329,12 @@ function turnSegs(turn: Turn, tools: Tool[], end: number): TimeSeg[] {
       if (t.k !== k) continue;
       const over = busy.filter(([s, e]) => s < ends(t) && e > t.at);
       const free = subtract([Math.max(t.at, turn.start), ends(t)], [...over, ...taken.map((x): Span => [x.start, x.end])]).filter(([a, b]) => b - a >= LEAST_MS);
-      for (const [a, b] of free) taken.push({ start: a, end: b, ...said[k], event: t.event, ...(k !== 'wait' && { guess: true as const }) });
+      for (const [a, b] of free) taken.push({ start: a, end: b, ...said[k], event: t.event, ...(k === 'overload' && { guess: true as const }) });
     }
-  const work = subtract([turn.start, end], taken.map((x): Span => [x.start, x.end])).map(([a, b]): TimeSeg => ({ start: a, end: b, kind: 'work' }));
+  const work = subtract(
+    [turn.start, end],
+    taken.map((x): Span => [x.start, x.end]),
+  ).map(([a, b]): TimeSeg => ({ start: a, end: b, kind: 'work' }));
   return [...taken, ...work].sort((a, b) => a.start - b.start);
 }
 
@@ -340,17 +351,30 @@ export function cutTime(s: State, ticket: LogTicket, cards: CardTime[], now: num
     const got: TimeSeg[] = [];
     for (const w of known) {
       if (w.end <= a || w.start >= b) continue;
-      const free = subtract([Math.max(a, w.start), Math.min(b, w.end)], got.map((x): Span => [x.start, x.end])).filter(([x, y]) => y - x >= LEAST_MS);
+      const free = subtract(
+        [Math.max(a, w.start), Math.min(b, w.end)],
+        got.map((x): Span => [x.start, x.end]),
+      ).filter(([x, y]) => y - x >= LEAST_MS);
       for (const [x, y] of free) got.push({ start: x, end: y, kind: w.kind, sub: w.sub, title: w.title, event: w.event, ...(w.guess && { guess: w.guess }) });
     }
-    for (const [x, y] of subtract([a, b], got.map((g): Span => [g.start, g.end]))) if (y - x >= LEAST_MS) got.push(...unknown(s, ticket, x, y, tail && y >= b, closed, known));
+    for (const [x, y] of subtract(
+      [a, b],
+      got.map((g): Span => [g.start, g.end]),
+    ))
+      if (y - x >= LEAST_MS) got.push(...unknown(s, ticket, x, y, tail && y >= b, closed, known));
     segs.push(...got.sort((m, n) => m.start - n.start));
   };
   if (s.turns.length) gap(ticket.created_at, s.turns[0].start, false);
   else gap(ticket.created_at, stop, true);
   s.turns.forEach((turn, i) => {
     const end = turn.end ?? (running && i === s.turns.length - 1 ? stop : turn.last);
-    segs.push(...turnSegs(turn, s.tools.filter((t) => t.turn === i), end));
+    segs.push(
+      ...turnSegs(
+        turn,
+        s.tools.filter((t) => t.turn === i),
+        end,
+      ),
+    );
     const next = s.turns[i + 1];
     if (next) gap(end, next.start, false);
     else if (!running) gap(end, stop, true);
@@ -387,11 +411,19 @@ function unknown(s: State, ticket: LogTicket, a: number, b: number, tail: boolea
 }
 
 /** A line row's title until the minion speaks. */
-const UNSAID = 'Working, nothing said yet';
+const UNSAID = 'No line posted';
 
 const clean = (text: string) => {
-  const line = text.replace(/```[\s\S]*?(```|$)/g, ' ').split('\n').map((l) => l.trim()).find((l) => l && !/^[-*#>|]+$/.test(l)) ?? text;
-  return line.replace(/[*_`#]/g, '').trim().slice(0, 160);
+  const line =
+    text
+      .replace(/```[\s\S]*?(```|$)/g, ' ')
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l && !/^[-*#>|]+$/.test(l)) ?? text;
+  return line
+    .replace(/[*_`#]/g, '')
+    .trim()
+    .slice(0, 160);
 };
 
 /** The stretches with their rows: a step per plan step, the minion's lines for work no step owns, and waits between them. */
@@ -409,6 +441,8 @@ function shape(s: State, raw: TimeSeg[], meta: { start: number; end: number; run
   const rows: TimeRow[] = [];
   const stepRow = new Map<Step, number>();
   let line: { row: number; from: number } | null = null;
+  // The first of its lines after the stretch being cut: says and stretches both run in time order.
+  let spoke = 0;
   const segs: TimeSeg[] = [];
   const push = (seg: TimeSeg) => {
     const prev = segs.at(-1);
@@ -437,7 +471,9 @@ function shape(s: State, raw: TimeSeg[], meta: { start: number; end: number; run
     }
     // Cut at every step edge inside it, so an owner's stretch ends where its step does, and (for unowned work) where the minion spoke.
     const edges = cuts.filter((c) => c > seg.start && c < seg.end);
-    const speak = says.map((x) => x.at).filter((c) => c > seg.start && c < seg.end);
+    while (spoke < says.length && says[spoke].at <= seg.start) spoke++;
+    const speak = new Set<number>();
+    for (let i = spoke; i < says.length && says[i].at < seg.end; i++) speak.add(says[i].at);
     const all = [...new Set([seg.start, ...edges, ...speak, seg.end])].sort((x, y) => x - y);
     for (let i = 0; i + 1 < all.length; i++) {
       const [a, b] = [all[i], all[i + 1]];
@@ -452,9 +488,9 @@ function shape(s: State, raw: TimeSeg[], meta: { start: number; end: number; run
         }
         line = null;
       } else {
-        if (!line || (speak.includes(a) && a - line.from >= ROW_MS)) line = { row: lineRow(a, b), from: a };
+        if (!line || (speak.has(a) && a - line.from >= ROW_MS)) line = { row: lineRow(a, b), from: a };
         // Work before it had said anything takes its first line.
-        else if (speak.includes(a) && rows[line.row].title === UNSAID) {
+        else if (speak.has(a) && rows[line.row].title === UNSAID) {
           const say = says.find((x) => x.at === a)!;
           Object.assign(rows[line.row], { title: clean(say.text), event: say.event });
         }

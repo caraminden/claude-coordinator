@@ -128,9 +128,11 @@ export class ShipTrail {
     }
     const ours = new Set(handed);
     const before = JSON.stringify([...this.open]);
-    for (const id of new Set([...ours, ...steps.keys(), ...this.open.keys()])) {
+    const ids = [...new Set([...ours, ...steps.keys(), ...this.open.keys()])];
+    const runs = await Promise.all(ids.map((id) => (ours.has(id) || this.open.get(id)?.ours ? this.d.landings.look(id) : null)));
+    for (const [i, id] of ids.entries()) {
       let o = this.open.get(id);
-      const run = ours.has(id) || o?.ours ? await this.d.landings.look(id) : null;
+      const run = runs[i];
       // Its exit code is newer than the line, which may still show it.
       const ended = !!run && run.code !== null && ours.has(id);
       const step = ended ? null : (steps.get(id) ?? (run && run.code === null ? outputStep(run.output) : null));

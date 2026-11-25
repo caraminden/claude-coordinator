@@ -1931,7 +1931,8 @@ const shipTrail = new ShipTrail({
   landings,
   lines: () => everyLine({ store, own: ownScheme()?.id ?? null, line: waits.line, ticketFor: (label) => waits.ticketFor(label) }),
 });
-const trailPoll = () => shipTrail.poll().catch((err) => console.error(`[ship trail] ${thrown(err).message}`));
+// Two seconds at most: a slow disk under one scheme's line must not hold up every scheme's ship reports.
+const trailPoll = () => Promise.race([shipTrail.poll().catch((err) => console.error(`[ship trail] ${thrown(err).message}`)), new Promise((r) => setTimeout(r, 2000))]);
 if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await trailPoll(), await landHandoffs.poll(), serverWork.sync()));
 // Was a blocking scan at each start, before the listen (#1463).
 if (!BOOT_CHECK && !PREVIEW) every('landings prune', 24 * 3600_000, () => landings.prune(), 10 * 60_000);

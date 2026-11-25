@@ -50,7 +50,7 @@ const says = { image: { state: 'ready', text: 'claude 2' }, github: false as boo
 let asked: string | null = null;
 async function post(path: string, body: object) {
   const res = await fetch(srv.base + path, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  return res.json();
+  return (await res.json()) as { test: string | null };
 }
 async function word() {
   await post('/api/machines/turns', { worker: { claude: '2.0.0', max: 3, signedIn: says.signedIn }, turns: [] });

@@ -69,11 +69,14 @@ test('of two workers on one token the newer stays and the older is told to stop'
   assert.equal('replaced' in (await say({ boot: 'old', started: 10 })), false, 'one that went away holds nothing');
 });
 
+/** The self-test an answer asks for. */
+const told = (answer: object) => ('test' in answer ? answer.test : null);
+
 test('a self-test: its lines as they come, the last full pass kept over a failure and a restart', async () => {
   const { join, machine, at, say, settings } = joined();
   await say();
   const first = join.startTest(machine);
-  assert.equal((await say()).test, first.id, 'its worker hears of it at its next word');
+  assert.equal(told(await say()), first.id, 'its worker hears of it at its next word');
   await say({
     test: {
       id: first.id,

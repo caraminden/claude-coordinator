@@ -2,9 +2,11 @@
 # Run a few test files and see only what matters (#641), on every turn's PATH like citadel-wait:
 #   citadel-test test/a.test.ts [test/b.test.ts ...] [--name '<pattern>'] [--full] [--timeout <seconds>]
 # Runs them through the worktree's tools/citadel-node --test with the leak guard (test/leak-guard.ts) and a time
-# limit (default 300 s), and prints a line of counts, then each failure's file, name and assertion diff, and the leak
+# limit (300 s up to 10 files, then 30 s more a file, at most 1500 s; #1925), and prints a line of counts, then each failure's file, name and assertion diff, and the leak
 # guard's complaint if any. The full output goes to $TMPDIR/citadel-test.log; --full prints it too. --name keeps the
 # tests whose name matches (node's --test-name-pattern). Exits with the tests' status, 124 at the time limit.
+# A run that hits the limit says which files finished and reruns only the others, once, under one more limit; the
+# failures of the finished files stay, and a file that stops twice is "not finished" and ends the run at 124.
 # It also runs the repo-wide tests in tools/always-tests.txt (a change anywhere can break them), counted as "+N
 # repo-wide"; --name does not filter those (they run in a second pass).
 # With no files it runs --affected (#1621), so a bare `citadel-test` is the tests your change touched plus the repo-wide list.
@@ -23,13 +25,13 @@
 # The full suite is the land gate's job (tools/land.sh), so it refuses to run on a folder.
 set -uo pipefail
 say() { echo "citadel-test: $*" >&2; }
-usage() { say "usage: citadel-test [--affected [--wide] [--base <ref>]] [test/<name>.test.ts ...] [--name '<pattern>'] [--full] [--timeout <seconds>]"; exit 2; }
+usage() { say "usage: citadel-test [--affected [--wide] [--base <ref>]] [test/<name>.test.ts ...] [--name '<pattern>'] [--full] [--timeout <seconds>: the limit, instead of the one sized by the file count]"; exit 2; }
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { say "run it inside a worktree of Citadel's repo"; exit 2; }
 reporter=$root/tools/citadel-test-reporter.ts
 [ -f "$reporter" ] || { say "$root has no tools/citadel-test-reporter.ts: it isn't Citadel's repo, or its branch is older than the command (rebase onto main)"; exit 2; }
 
-files=() opts=() full= limit=300 affected= base=main wide= narrow=--narrow
+files=() opts=() full= limit=300 explicit= affected= base=main wide= narrow=--narrow
 while [ $# -gt 0 ]; do
   case $1 in
     --name) [ $# -ge 2 ] || usage; opts+=("--test-name-pattern=$2"); shift ;;
@@ -38,8 +40,8 @@ while [ $# -gt 0 ]; do
     --affected) affected=1 ;;
     --wide) affected=1 wide=1 narrow= ;;
     --base) [ $# -ge 2 ] || usage; base=$2; shift ;;
-    --timeout) [ $# -ge 2 ] && [[ $2 =~ ^[0-9]+$ ]] || usage; limit=$2; shift ;;
-    --timeout=*) limit=${1#--timeout=}; [[ $limit =~ ^[0-9]+$ ]] || usage ;;
+    --timeout) [ $# -ge 2 ] && [[ $2 =~ ^[0-9]+$ ]] || usage; limit=$2; explicit=1; shift ;;
+    --timeout=*) limit=${1#--timeout=}; explicit=1; [[ $limit =~ ^[0-9]+$ ]] || usage ;;
     -*) say "unknown option $1"; usage ;;
     *) files+=("$1") ;;
   esac
@@ -112,18 +114,66 @@ stop_at() {
   [ $status -eq 124 ] && kill -TERM -- "-$pg" 2>/dev/null
   return $status
 }
-NODE_OPTIONS=$gate_opts stop_at "$limit" "$root/tools/citadel-node" --test --test-force-exit "${workers[@]}" --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
-  --test-reporter=spec --test-reporter-destination="$log" --test-reporter="$reporter" --test-reporter-destination=stdout \
-  "${opts[@]}" "${files[@]}" >"$out" 2>"$err"
+# node's runner over some files, under a limit; each finished file's counts go to <done> (tools/citadel-test-reporter.ts).
+#   run_tests <seconds> <done> <spec log> <file>...   (reads popts)
+run_tests() {
+  local s=$1 dn=$2 lg=$3; shift 3
+  NODE_OPTIONS=$gate_opts CITADEL_TEST_DONE_FILE=$dn stop_at "$s" "$root/tools/citadel-node" --test --test-force-exit "${workers[@]}" --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
+    --test-reporter=spec --test-reporter-destination="$lg" --test-reporter="$reporter" --test-reporter-destination=stdout \
+    "${popts[@]}" "$@"
+}
+# One pass over some files: under the limit for that many files; if it stops there, only the files that hadn't finished
+# (a file counts as finished only once node said its process is done)
+# run again, once, under one more limit (#1925). The finished files' failures stay: a red file still makes the run red.
+#   pass <out> <log> <file>...   (reads popts; returns the status; appends what it says to $out; sets pass_limit)
+pass() {
+  local o=$1 lg=$2 n st st2 dn fl=() un=() f rp passed failed red= lim2 o2 d2
+  shift 2; fl=("$@"); n=${#fl[@]}
+  pass_limit=$(limit_for "$n"); [ -n "$explicit" ] || [ "$pass_limit" -eq "${CITADEL_TEST_LIMIT_BASE:-300}" ] || say "time limit: ${pass_limit} s for $n files"
+  dn=$(mktemp)
+  run_tests "$pass_limit" "$dn" "$lg" "${fl[@]}" >"$o" 2>>"$err"
+  st=$?
+  if [ $st -ne 124 ] && [ $st -ne 137 ]; then rm -f "$dn"; return $st; fi
+  for f in "${fl[@]}"; do rp=$(realpath "$f"); cut -f1 "$dn" | grep -qxF -- "$rp" || un+=("$f"); done
+  if [ ${#un[@]} -eq 0 ]; then rm -f "$dn"; return $st; fi
+  while IFS=$'\t' read -r f passed failed; do [ "${failed:-0}" -gt 0 ] && { red=1; echo "${f#"$root/"}" >>"$failed_file"; }; done <"$dn"
+  { echo "✖ stopped at the time limit, ${pass_limit} s: $((n - ${#un[@]})) of $n files finished; rerunning only: ${un[*]}"; } >>"$o"
+  lim2=$(limit_for ${#un[@]})
+  o2=$(mktemp); d2=$(mktemp)
+  CITADEL_TEST_EXTRA=0 run_tests "$lim2" "$d2" "$lg.r" "${un[@]}" >"$o2" 2>>"$err"
+  st2=$?; cat "$lg.r" >>"$lg"; rm -f "$lg.r"; cat "$o2" >>"$o"; rm -f "$o2"
+  # Both parts' finished files, counted together.
+  local tp=0 tf=0 nf=0
+  while IFS=$'\t' read -r f passed failed; do tp=$((tp + passed)); tf=$((tf + failed)); nf=$((nf + 1)); done < <(cat "$dn" "$d2")
+  rm -f "$dn" "$d2"
+  if [ $st2 -eq 124 ] || [ $st2 -eq 137 ]; then
+    unfinished_note="not finished after two limits: ${un[*]}"
+    return 124
+  fi
+  { echo; echo "both parts: $([ "$tf" -gt 0 ] || [ $st2 -ne 0 ] || [ -n "$red" ] && echo ✖ || echo ✔) $tp passed, $tf failed ($nf files)"; } >>"$o"
+  [ $st2 -ne 0 ] && return $st2
+  [ -n "$red" ] && return 1
+  return 0
+}
+limit_for() {
+  [ -n "$explicit" ] && { echo "$limit"; return; }
+  local n=$1 free=${CITADEL_TEST_LIMIT_FREE:-10} l
+  l=$((${CITADEL_TEST_LIMIT_BASE:-300} + ${CITADEL_TEST_LIMIT_PER_FILE:-30} * (n > free ? n - free : 0)))
+  echo $((l > ${CITADEL_TEST_LIMIT_CAP:-1500} ? ${CITADEL_TEST_LIMIT_CAP:-1500} : l))
+}
+failed_file=$failed unfinished_note= pass_limit=0
+popts=("${opts[@]}")
+pass "$out" "$log" "${files[@]}"
 status=$?
+limit1=$pass_limit
 if [ ${#second[@]} -gt 0 ] && [ $status -ne 124 ]; then
   out2=$(mktemp); trap 'rm -f "$err" "$out" "$out2" "$failed" ${gate_note:+"$gate_note" "$gate_note.n"}; [ -z "$watch" ] || kill "$watch" 2>/dev/null' EXIT
-  NODE_OPTIONS=$gate_opts stop_at "$limit" "$root/tools/citadel-node" --test --test-force-exit "${workers[@]}" --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
-    --test-reporter=spec --test-reporter-destination="$log.2" --test-reporter="$reporter" --test-reporter-destination=stdout \
-    "${second[@]}" >"$out2" 2>>"$err"
+  popts=()
+  pass "$out2" "$log.2" "${second[@]}"
   s2=$?; cat "$log.2" >>"$log"; rm -f "$log.2"
   { echo; echo "repo-wide tests (--name doesn't filter them):"; cat "$out2"; } >>"$out"
   [ $status -eq 0 ] && status=$s2
+  [ $s2 -eq 124 ] && limit1=$pass_limit
 fi
 cat "$err" >>"$log"
 [ -n "$full" ] && cat "$log" && echo
@@ -134,7 +184,8 @@ if [ -s "$err" ]; then
   else cat "$err"
   fi
 fi
-[ $status -eq 124 ] || [ $status -eq 137 ] && echo "✖ stopped at the time limit, ${limit} s (--timeout <seconds> to change it), after $((SECONDS - start)) s"
+[ -n "$unfinished_note" ] && echo "✖ $unfinished_note"
+[ $status -eq 124 ] || [ $status -eq 137 ] && echo "✖ stopped at the time limit, ${limit1} s (--timeout <seconds> to change it), after $((SECONDS - start)) s"
 echo "full output: $log"
 
 # On a red, one line per failed file when it applies (#1650; Cara, 2026-11-22: "On a red, says if the file is a known flake or the

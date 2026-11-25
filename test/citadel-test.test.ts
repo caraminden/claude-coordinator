@@ -86,6 +86,9 @@ test('a hung test ends at the limit, named, with a line saying so, and what it s
   await until('the hung test to start', () => existsSync(log) && readFileSync(log, 'utf8').includes('hung test running'));
   const [limit] = await until('the time limit', () => [...procsUnder([tmp])].find(([, cmd]) => cmd.startsWith('timeout --foreground')));
   process.kill(limit, 'SIGALRM');
+  // The file had not finished, so it runs once more under one more limit, and stops there too.
+  const [limit2] = await until('the second limit', () => [...procsUnder([tmp])].find(([pid, cmd]) => pid !== limit && cmd.startsWith('timeout --foreground')));
+  process.kill(limit2, 'SIGALRM');
   const { code, out } = await r;
   assert.equal(code, 124, `the runner stopped on the limit's SIGTERM, not the KILL 10 s later: ${out}`);
   assert.match(out, /stopped before the end \(1 passed, 0 failed by then\)\. Still running:\n {2}.*hang\.test\.ts:5 › waits forever\n/);
@@ -296,5 +299,91 @@ test('citadel-test killed outright leaves no watcher holding its output open', a
         process.kill(-Number(k), 'SIGKILL'); // the runner's own group, which a SIGKILL of citadel-test leaves (as on main)
       } catch {}
     }
+  }
+});
+
+// #1925: the limit grows with the files it runs, and a run that hits it reruns only the files it hadn't finished.
+const knobs = { CITADEL_TEST_LIMIT_BASE: '20', CITADEL_TEST_LIMIT_FREE: '2', CITADEL_TEST_LIMIT_PER_FILE: '5', CITADEL_TEST_LIMIT_CAP: '40' };
+const quick = (n: string) => file(`lim-${n}.test.ts`, `test('ok', () => {});`);
+
+test('the time limit is the base up to the free files, then grows a step per file, up to the cap', async () => {
+  const two = await run([quick('a'), quick('b')], noList, knobs);
+  assert.doesNotMatch(two.out, /time limit:/, 'the base limit is not worth a line');
+  const five = await run([quick('a'), quick('b'), quick('c'), quick('d'), quick('e')], noList, knobs);
+  assert.match(five.out, /time limit: 35 s for 5 files/);
+  const nine = await run(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].map(quick), noList, knobs);
+  assert.match(nine.out, /time limit: 40 s for 9 files/);
+  assert.equal(nine.code, 0, nine.out);
+});
+
+test('--timeout wins, and the repo-wide files count toward the size', async () => {
+  const list = join(tmp, 'one.txt');
+  writeFileSync(list, `${relative(repo, quick('w'))}\n`);
+  const fixed = await run([quick('a'), quick('b'), quick('c'), '--timeout', '77'], list, knobs);
+  assert.doesNotMatch(fixed.out, /time limit:/);
+  const counted = await run([quick('a'), quick('b'), quick('c')], list, knobs);
+  assert.match(counted.out, /time limit: 30 s for 4 files/);
+});
+
+test('the base limit is 300 s without knobs, and a stop names the one it used', async () => {
+  const quiet = await run([quick('a')]);
+  assert.doesNotMatch(quiet.out, /time limit:/);
+  const r = await run([hangs('stop-base', true)], noList, { CITADEL_TEST_LIMIT_BASE: '2' });
+  assert.equal(r.code, 124, r.out);
+  assert.match(r.out, /stopped at the time limit, 2 s/);
+});
+
+/** A file that hangs on the first run (it leaves a marker) and passes on the next, or hangs every time. */
+function hangs(name: string, always = false): string {
+  const marker = join(tmp, `${name}.marker`);
+  rmSync(marker, { force: true });
+  return file(`${name}.test.ts`, `import { existsSync, writeFileSync } from 'node:fs';\ntest('maybe hangs', () => {\n  if (${always ? 'false' : `existsSync(${JSON.stringify(marker)})`}) return;\n  writeFileSync(${JSON.stringify(marker)}, '');\n  return new Promise(() => setInterval(() => {}, 1000));\n});`);
+}
+
+test('a run stopped at the limit reruns only the files it had not finished, and passes when they do', async () => {
+  const done = quick('stop-done');
+  const slow = hangs('stop-slow');
+  const r = await run([done, slow, '--timeout', '3'], noList);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /stopped at the time limit, 3 s/);
+  assert.match(r.out, /1 of 2 files finished; rerunning only: .*stop-slow\.test\.ts/);
+  assert.doesNotMatch(r.out, /rerunning only: .*stop-done/);
+  assert.match(r.out, /✔ 1 passed, 0 failed/);
+});
+
+test('a failure in a file that finished before the stop keeps the run red across both parts', async () => {
+  const bad = file('stop-bad.test.ts', `test('fails', () => { assert.equal(1, 2); });`);
+  const slow = hangs('stop-slow2');
+  const r = await run([bad, slow, '--timeout', '3'], noList, { CITADEL_TEST_LOADAVG: join(tmp, 'none.txt') });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /stop-bad\.test\.ts[^\n]*fails/);
+  assert.match(r.out, /rerunning only: .*stop-slow2/);
+  assert.match(r.out, /both parts: ✖ 1 passed, 1 failed/);
+});
+
+test('a file that hits the limit twice is reported unfinished and the run exits 124', async () => {
+  const slow = hangs('stop-never', true);
+  const r = await run([quick('stop-ok'), slow, '--timeout', '3'], noList);
+  assert.equal(r.code, 124, r.out);
+  assert.match(r.out, /not finished after two limits: .*stop-never\.test\.ts/);
+  assert.doesNotMatch(r.out, /Before chasing/);
+});
+
+test('the --name pass for the repo-wide files follows the same rule', async () => {
+  const list = join(tmp, 'wide.txt');
+  const slow = hangs('stop-wide');
+  writeFileSync(list, `${relative(repo, slow)}\n`);
+  const r = await run([quick('stop-named'), '--name', 'ok', '--timeout', '3'], list);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /rerunning only: .*stop-wide/);
+});
+
+test('a file that finished before the stop and failed outside its tests is not forgotten', async () => {
+  const exit = file('stop-exit.test.ts', `test('ok', () => {});\nprocess.exitCode = 1;`);
+  const hook = file('stop-hook.test.ts', `import { after } from 'node:test';\ntest('ok', () => {});\nafter(() => { throw new Error('after hook'); });`);
+  for (const bad of [exit, hook]) {
+    const r = await run([bad, hangs(`stop-slow-${relative(tmp, bad)}`), '--timeout', '3'], noList, { CITADEL_TEST_LOADAVG: join(tmp, 'none.txt') });
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /1 of 2 files finished/);
   }
 });

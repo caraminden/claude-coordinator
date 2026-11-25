@@ -14,7 +14,7 @@ type Data = {
   skip?: unknown;
   todo?: unknown;
   message?: string;
-  details?: { error?: Err; duration_ms?: number; type?: string };
+  details?: { error?: Err; duration_ms?: number; type?: string; passed?: boolean };
   counts?: { passed: number; failed: number; cancelled: number; skipped: number; todo: number };
   duration_ms?: number;
   tests?: Data[];
@@ -57,6 +57,9 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
   const running = new Map<string, Data>();
   const failures: { file: string; own: boolean; where: string; name: string; error?: Err }[] = [];
   let passed = 0;
+  // The files whose process is done, and whether node passed it: what a stopped run doesn't rerun (#1925).
+  const done = new Map<string, boolean>();
+  const passes = new Map<string, number>();
 
   /** The summary; with `still` (the run was stopped from outside) the counts so far and what was still running. */
   function report(total?: Data, still?: Data[]): string {
@@ -73,6 +76,13 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
           })
           .join('')}`
       : `${failed ? '✖' : '✔'} ${counts} in ${((total?.duration_ms ?? 0) / 1000).toFixed(1)} s\n`;
+    // For tools/citadel-test's rerun: a line a finished file, written now so a failure node reports after the file's end counts.
+    if (process.env.CITADEL_TEST_DONE_FILE) {
+      const lines = [...done].map(([file, ok]) => `${file}\t${passes.get(file) ?? 0}\t${failures.filter((f) => f.file === file).length || (ok ? 0 : 1)}\n`);
+      try {
+        appendFileSync(process.env.CITADEL_TEST_DONE_FILE, lines.join(''));
+      } catch {}
+    }
     // tools/citadel-test reads the failed files from here, for its hint on a red (#1650); nothing about the summary changes.
     if (process.env.CITADEL_TEST_FAILED_FILE && !still) {
       try {
@@ -106,6 +116,7 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
       yield report(undefined, data.tests ?? []);
     }
     if (!file) continue;
+    if (type === 'test:complete' && data.name && resolve(data.name) === file) done.set(file, data.details?.passed !== false);
     if (type === 'test:stderr') {
       const lines = stderr.get(file) ?? [];
       lines.push(...(data.message ?? '').replace(/\n$/, '').split('\n'));
@@ -119,7 +130,10 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
     } else if (type === 'test:pass' || type === 'test:fail') {
       if (running.get(file)?.name === data.name) running.delete(file);
       if (type === 'test:pass') {
-        if (data.details?.type !== 'suite' && !data.skip && !data.todo) passed++;
+        if (data.details?.type !== 'suite' && !data.skip && !data.todo) {
+          passed++;
+          passes.set(file, (passes.get(file) ?? 0) + 1);
+        }
         continue;
       }
       const error = data.details?.error;

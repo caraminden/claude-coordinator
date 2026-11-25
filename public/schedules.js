@@ -233,13 +233,18 @@ function overview(schedules) {
   ];
 }
 
+let waitingOnBlur = false;
 let drawnFor; // the schedule the page shows now: a redraw for the same one waits for a field being edited
 function drawPage() {
   if (!pageEl?.isConnected) return;
   // Fields save on change: a redraw under one in use drops the typed text and the focus (WP5, #1858), so it waits for the blur.
   const f = document.activeElement;
   if (drawnFor === current && f && pageEl.contains(f) && f.matches('input, textarea, select')) {
-    f.addEventListener('blur', drawPage, { once: true });
+    if (!waitingOnBlur) {
+      waitingOnBlur = true;
+      // setTimeout: at blur the next field isn't focused yet, so the redraw would still drop its click
+      f.addEventListener('blur', () => setTimeout(() => ((waitingOnBlur = false), drawPage()), 0), { once: true });
+    }
     return;
   }
   drawnFor = current;

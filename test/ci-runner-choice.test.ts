@@ -167,3 +167,10 @@ test('every workflow that runs the tests installs their packages after its check
     assert.ok(at > yml.indexOf('actions/checkout@'), f);
   }
 });
+
+// ci_busy keeps an own check and the early next train off a busy desktop (#1906); a flake proof runs beside ships (Josh, 2026-11-25), so it isn't busy.
+test('a flake proof does not make the desktop busy for an own check or the early next train', () => {
+  const [, re] = /ci_busy\(\) \{[^}]*?test\("([^"]+)"\)/s.exec(read('tools/deploy-queue.sh'))!;
+  const busy = (file: string) => new RegExp(re.replaceAll('\\\\', '\\')).test(`.github/workflows/${file}`);
+  assert.deepEqual(['tests.yml', 'citadel-heavy.yml', 'flake-proof.yml', 'desktop.yml'].map(busy), [true, true, false, false]);
+});

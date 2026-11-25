@@ -265,6 +265,8 @@ a ship is in line, and put it back after?"): while a ship is in line or testing,
 (`src/runner-cap.ts`). Jobs already running finish, so builds can overlap at the start; screen and heavy jobs are apart. The costs he
 took: Peek's own ship can wait behind a Peek build already queued, the label stays off while Citadel is down, and 4 hours at most while it's up.
 
+Josh, 2026-11-25, picked "Let them run, one at a time" on #1902's card ("one flaky-test proof may run beside ships"), which narrows that pick and "Deploys first" for flake proofs only: a running proof keeps no early run, own check or light check off the desktop, so `ci_busy` doesn't count one.
+
 ### While the train ahead's CI runs (#1568)
 
 Cara, 2026-11-21, "Go" on fix F of #1549's report (ship stalls), and 2026-11-22, picked "Low-priority run on a ship

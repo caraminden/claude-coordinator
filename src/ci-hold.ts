@@ -1,6 +1,6 @@
 // Deploys first on the CI desktop (#1902; Josh, 2026-11-24, approved: "Deploys first: while a ship is in line, nothing
 // optional runs on the CI desktop"). Every HOLD_POLL_MS this reads Citadel's ship line and the runs on the PC's repos:
-//  - Optional runs (flake proofs, citadel-heavy jobs, the suite started by hand on a branch) are stopped while a ship is
+//  - Optional runs (citadel-heavy jobs, the suite started by hand on a branch) are stopped while a ship is
 //    in line or testing, or main's full run is queued or running. A stop is a cancel on GitHub; Citadel starts the same
 //    run again (its rerun, so from the start) once the line has been empty for a settle time.
 //  - Main's full run waits for ships, MAIN_WAIT_MS at most, and goes before anything optional.
@@ -12,6 +12,10 @@
 // ship in line with no run doesn't count: that is when it is worth running), is never waited for, and comes back only while
 // its branch is there (land.sh deletes it when its ship goes on). A job that ran SLOT_HOLD_MS
 // keeps no other waiting, and none waits behind lower ones past SLOT_WAIT_MS.
+// One flake proof beside ships (Josh, 2026-11-25, picked "Let them run, one at a time"): a proof starts and runs on whatever the
+// ship line does, never two at once, the longest held first. A ship, its own check and the early next train never wait for one; main's run, heavy
+// jobs and suites still do not run beside one, and one of those that may start goes before the next proof. No proof starts
+// while a ship's red tests run again alone (one already running goes on).
 // Left out: desktop.yml (a release build), other schemes' push-started builds, which the runner agents squeeze (src/ci-ships.ts).
 // A job asks before it starts (POST /api/ci-hold; citadel-heavy reads hold.json). Fails open: a job that can't ask, or a
 // GitHub this can't read, means optional work goes ahead; nothing here is asked by a ship. Off switch: <deploy state>/hold-off.
@@ -53,12 +57,20 @@ const RATE_LIMITED_MS = 5 * 60_000;
 const SHIP_RUN_MS = 60 * 60_000;
 /** Reruns that failed in a row, RECANCEL_MS apart, before the job is given up and its minion (or Taskmaster) told: an hour. */
 const MAX_MISSES = 60;
+/** tests.yml's step that runs a ship's red test files again, alone (land.sh's CI_RERUN_STEP). */
+const RETRY_STEP = 'rerun failed files alone';
 const STATUSES = ['queued', 'in_progress', 'pending'];
 
 export type HoldKind = 'proof' | 'heavy' | 'suite' | 'main' | 'check' | 'early';
-/** Order among runs that aren't a ship's: main's, then a ship's checks, then optional work. */
-const RANK: Record<HoldKind, number> = { main: 1, check: 2, early: 2, proof: 3, heavy: 3, suite: 3 };
+/** Order among runs that aren't a ship's: main's, then a ship's checks, then optional work, proofs last: they have the ships' time too. */
+const RANK: Record<HoldKind, number> = { main: 1, check: 2, early: 2, heavy: 3, suite: 3, proof: 4 };
 const sideRun = (kind: HoldKind) => RANK[kind] === 2;
+interface Slot {
+  run: number;
+  kind: HoldKind;
+  what: string;
+  at: number;
+}
 export interface HeldRun {
   repo: string;
   run: number;
@@ -214,11 +226,14 @@ export class CiHold {
   private publishing: Promise<unknown> = Promise.resolve();
   /** Ship and main runs at the last good look, and when that was. */
   private seen = { at: 0, ship: 0, main: false };
-  /** What was running at the last good look, and the queued runs that aren't a check's. */
+  /** What was running at the last good look (the ships' runs by id), and the queued runs that aren't a check's or a proof's. */
   private running: RunningRow[] = [];
+  private ships: number[] = [];
   private queued = new Set<number>();
   /** The lower Citadel job that may run now, and when it was let in. */
-  private slot: { run: number; kind: HoldKind; what: string; at: number } | null = null;
+  private slot: Slot | null = null;
+  /** The one flake proof that may run now. */
+  private proof: Slot | null = null;
   private looked = false;
   /** When each run was first seen on a runner. */
   private running0 = new Map<number, number>();
@@ -250,7 +265,7 @@ export class CiHold {
 
   state(now = Date.now()): HoldState {
     const off = this.offNow;
-    return { off, why: off ? null : this.gate(now), repos: this.repos(), own: this.d.own()?.toLowerCase() ?? null, busy: off ? null : this.taken(null, now), running: this.fresh(now) ? this.running : [], held: [...this.held.values()].filter((h) => this.isHeld(h.run, now)) };
+    return { off, why: off ? null : this.gate(now), repos: this.repos(), own: this.d.own()?.toLowerCase() ?? null, busy: off ? null : this.taken('heavy', null, now), running: this.fresh(now) ? this.running : [], held: [...this.held.values()].filter((h) => this.isHeld(h.run, now)) };
   }
 
   /** Why optional work of this repo may not start now, or null; a repo with no runners on that PC is never held. */
@@ -295,9 +310,31 @@ export class CiHold {
   }
 
   /** The lower Citadel job in this run's way, in words, or null. An old look at GitHub doesn't count: it goes ahead. */
-  private taken(run: number | null, now: number): string | null {
-    const s = this.slot;
-    return s && s.run !== run && this.fresh(now) && now - s.at < SLOT_HOLD_MS ? `a ${NAMES[s.kind]} is running (${s.what}), and Citadel runs one job at a time on the CI desktop`.replace(/^a (main's|next)/, '$1') : null;
+  private taken(kind: HoldKind, run: number | null, now: number): string | null {
+    const there = (s: Slot | null) => (s && s.run !== run && this.fresh(now) && now - s.at < SLOT_HOLD_MS ? s : null);
+    const proof = sideRun(kind) ? null : there(this.proof);
+    if (proof && kind === 'proof') return `another flake proof is running (${proof.what}), and they run one at a time on the CI desktop`;
+    const s = there(this.slot) ?? proof;
+    return s ? `a ${NAMES[s.kind]} is running (${s.what}), and Citadel runs one job at a time on the CI desktop`.replace(/^a (main's|next)/, '$1') : null;
+  }
+
+  private has(run: number) {
+    return this.slot?.run === run || this.proof?.run === run;
+  }
+
+  private give(s: Slot) {
+    if (s.kind === 'proof') this.proof = s;
+    else this.slot = s;
+  }
+
+  /** Why no proof starts just now: a ship's red tests run again alone, with nothing optional beside them. GitHub not read: it starts. */
+  private async retryWhy(as: GithubEnv): Promise<string | null> {
+    for (const id of this.ships) {
+      const r = await (this.d.get ?? ghGet)(`repos/${this.d.own()}/actions/runs/${id}/jobs?per_page=10`, null, as).catch(() => null);
+      const jobs = (r?.status === 200 ? (r.body as { jobs?: { steps?: { name?: string; status?: string }[] }[] } | null)?.jobs : null) ?? [];
+      if (jobs.some((j) => j.steps?.some((s) => s.name === RETRY_STEP && s.status === 'in_progress'))) return "a ship's failed tests are running again alone";
+    }
+    return null;
   }
 
   /** On a runner a while without having been let in; one that ran past SLOT_HOLD_MS is left to end. */
@@ -307,12 +344,14 @@ export class CiHold {
   }
 
   private slotPast(h: HeldRun | undefined, now: number) {
-    return h?.behind !== undefined && now - h.behind >= SLOT_WAIT_MS;
+    return h?.behind !== undefined && h.kind !== 'proof' && now - h.behind >= SLOT_WAIT_MS; // never two proofs
   }
 
   /** Why this run must not be running now for a ship's or main's sake, or null. `start`: optional work also waits the settle time. */
   private shipsFirst(kind: HoldKind, h: HeldRun | undefined, start: boolean, now: number): string | null {
     if (kind === 'main') return this.mainPast(h, now) ? null : this.shipWhy(now);
+    // No ship stops a proof; main's run does once it may go itself.
+    if (kind === 'proof') return !this.shipWhy(now) || [...this.held.values()].some((m) => m.kind === 'main' && this.mainPast(m, now)) ? this.mainWhy(now) : null;
     if (!sideRun(kind)) return start ? this.gate(now, h?.stops) : this.stopWhy(now);
     if (!this.fresh(now)) return null;
     return this.seen.ship ? "a ship's tests are running" : start ? this.mainWhy(now) : null;
@@ -370,6 +409,7 @@ export class CiHold {
     let ship = 0;
     let main = false;
     const running: RunningRow[] = [];
+    const ships: number[] = [];
     for (const repo of this.repos()) {
       const as = this.d.as(repo);
       if (!as) continue;
@@ -382,8 +422,10 @@ export class CiHold {
             if (!kind || ((kind === 'ship' || kind === 'main') && old)) continue;
             if (repo === own && run.status === 'in_progress')
               running.push({ kind, what: kind === 'ship' ? "a ship's tests" : run.display_title || NAMES[kind], url: run.html_url ?? null, ticket: kind === 'proof' || kind === 'heavy' ? this.d.ticket(repo, run.head_branch ?? '', heavyId(kind, run.display_title ?? '')) : null });
-            if (kind === 'ship') ship++;
-            else active.set(run.id, { repo, run, kind });
+            if (kind === 'ship') {
+              ship++;
+              if (run.status === 'in_progress') ships.push(run.id);
+            } else active.set(run.id, { repo, run, kind });
             if (kind === 'main') main = true;
           }
         }
@@ -396,6 +438,7 @@ export class CiHold {
     for (const path of this.cache.keys()) if (!used.has(path) && path.includes('?status=')) this.cache.delete(path);
     this.seen = { at: now, ship, main };
     this.running = running;
+    this.ships = ships;
     this.takeSlot(own, [...active.values()], now);
 
     if (!off) {
@@ -406,10 +449,10 @@ export class CiHold {
         const runs = a.run.status === 'in_progress';
         if (a.repo === own) {
           // A queued check or early run takes no runner's time: it asks when it starts. Main's running one yields to a ship (#1906).
-          const first = a.kind !== 'main' && !sideRun(a.kind) ? why : runs || a.kind === 'main' ? this.shipsFirst(a.kind, h, false, now) : null;
+          const first = a.kind !== 'main' && a.kind !== 'proof' && !sideRun(a.kind) ? why : runs || a.kind === 'proof' || a.kind === 'main' ? this.shipsFirst(a.kind, h, false, now) : null;
           if (first) await this.hold(a.repo, a.run, a.kind, first, now);
-          else if (runs && this.slot?.run !== a.run.id && this.unasked(a.run.id, now) && !this.slotPast(h, now)) {
-            const taken = this.taken(a.run.id, now);
+          else if (runs && !this.has(a.run.id) && this.unasked(a.run.id, now) && !this.slotPast(h, now)) {
+            const taken = this.taken(a.kind, a.run.id, now);
             if (taken) await this.hold(a.repo, a.run, a.kind, taken, now, true);
           }
         } else if (why && !this.capped(a.repo, this.since(h, a.kind, a.run), now)) await this.hold(a.repo, a.run, a.kind, why, now);
@@ -445,19 +488,24 @@ export class CiHold {
     for (const id of this.running0.keys()) if (!on.some((a) => a.run.id === id)) this.running0.delete(id);
     this.queued = new Set(
       mine
-        .filter((a) => a.run.status !== 'in_progress' && !sideRun(a.kind) && !this.stopped(a.run.id) && now - Date.parse(a.run.run_started_at ?? '') < SHIP_RUN_MS) /* longer, GitHub left it there (ci_busy, land.sh) */
+        .filter((a) => a.run.status !== 'in_progress' && !sideRun(a.kind) && a.kind !== 'proof' && !this.stopped(a.run.id) && now - Date.parse(a.run.run_started_at ?? '') < SHIP_RUN_MS) /* longer, GitHub left it there (ci_busy, land.sh) */
         .map((a) => a.run.id),
     );
-    const s = this.slot;
-    if (s) {
+    for (const s of [this.slot, this.proof]) {
+      if (!s) continue;
       const age = now - s.at;
       const run = mine.find((a) => a.run.id === s.run);
-      const there = run && (run.run.status === 'in_progress' || age < QUEUED_MS);
-      if (!there && age >= SLOT_GRACE_MS) this.slot = null;
+      // A proof keeps its turn while it waits for a runner: no other proof could go ahead of it.
+      const there = run && (run.run.status === 'in_progress' || s.kind === 'proof' || age < QUEUED_MS);
+      if (there || age < SLOT_GRACE_MS) continue;
+      if (s === this.proof) this.proof = null;
+      else this.slot = null;
     }
-    if (this.slot) return;
-    const [a] = on.filter((x) => now - this.running0.get(x.run.id)! < SLOT_HOLD_MS).sort((x, y) => RANK[x.kind] - RANK[y.kind] || x.run.id - y.run.id);
-    if (a) this.slot = { run: a.run.id, kind: a.kind, what: a.run.display_title || NAMES[a.kind], at: this.running0.get(a.run.id)! };
+    const found = on.filter((x) => now - this.running0.get(x.run.id)! < SLOT_HOLD_MS).sort((x, y) => RANK[x.kind] - RANK[y.kind] || x.run.id - y.run.id);
+    const take = (a: (typeof mine)[number] | undefined) => a && this.give({ run: a.run.id, kind: a.kind, what: a.run.display_title || NAMES[a.kind], at: this.running0.get(a.run.id) ?? now });
+    if (!this.slot) take(found.find((x) => x.kind !== 'proof'));
+    // After a restart: the one running, else the one started again that still waits for a runner.
+    if (!this.proof) take(found.find((x) => x.kind === 'proof') ?? mine.find((x) => x.kind === 'proof' && x.run.status !== 'in_progress' && this.held.get(x.run.id)?.phase === 'resumed'));
   }
 
   private stopped(run: number) {
@@ -513,20 +561,24 @@ export class CiHold {
       }
       if (own && !off) {
         const ship = this.shipsFirst(h.kind, h, true, now);
-        const taken = ship ? null : this.taken(h.run, now);
+        const taken = ship ? null : (this.taken(h.kind, h.run, now) ?? (h.kind === 'proof' ? await this.retryWhy(as) : null));
         if (taken && (h.why !== taken || h.behind === undefined)) {
           Object.assign(h, { why: taken, behind: h.behind ?? now });
+          this.save();
+        }
+        if (ship && h.kind === 'proof' && h.why !== ship) {
+          h.why = ship;
           this.save();
         }
         if (taken && !this.slotPast(h, now)) return;
         if (sideRun(h.kind) && this.queued.size) return;
       }
-      const clear = sideRun(h.kind) ? !this.shipsFirst(h.kind, h, true, now) : h.kind === 'main' ? !this.shipWhy(now) || this.mainPast(h, now) : (!this.gate(now, h.stops) || this.capped(h.repo, h.since, now)) && (id === null || (this.d.mayResume?.(id) ?? true));
+      const clear = sideRun(h.kind) || h.kind === 'proof' ? !this.shipsFirst(h.kind, h, true, now) : h.kind === 'main' ? !this.shipWhy(now) || this.mainPast(h, now) : (!this.gate(now, h.stops) || this.capped(h.repo, h.since, now)) && (id === null || (this.d.mayResume?.(id) ?? true));
       if ((!off && !clear) || (group && groups.has(group)) || (h.misses && now - h.at < RECANCEL_MS)) return;
       const { status } = await post('rerun');
       if (status >= 200 && status < 300) {
         groups.add(group);
-        if (own && !this.slotPast(h, now)) this.slot = { run: h.run, kind: h.kind, what: h.what, at: now };
+        if (own && !this.slotPast(h, now)) this.give({ run: h.run, kind: h.kind, what: h.what, at: now });
         return this.phase(h, 'resumed', now);
       }
       h.misses = (h.misses ?? 0) + 1;
@@ -586,15 +638,16 @@ export class CiHold {
     };
     this.held.set(run.id, h);
     if (this.slot?.run === run.id) this.slot = null; // its cancel takes seconds
+    if (this.proof?.run === run.id) this.proof = null;
     this.letIn.delete(run.id);
     this.save();
     await this.publish(now); // before the cancel: citadel-heavy must never see the cancelled run without its hold
     if (!had && h.ticket !== null && !sideRun(kind))
       this.d.tell(
         h.ticket,
-        taken
+        taken || kind === 'proof'
           ? `Your ${NAMES[kind]} (${what}, ${h.url}) is waiting: ${why}. Citadel starts it again by itself${kind === 'proof' ? ', its clean runs counted from zero,' : ' from the start'} once that has ended. Nothing to do; don't start it again, and the cancelled run isn't a failure.`
-          : `Your ${NAMES[kind]} (${what}, ${h.url}) is waiting: ${why} on the CI desktop, and ships go first. Citadel starts it again by itself${kind === 'proof' ? ', its clean runs counted from zero,' : ' from the start'} once the line has been empty for 5 minutes (1 minute between 11 PM and 6 AM Pacific; longer each time it is stopped again). Nothing to do; don't start it again, and the cancelled run isn't a failure.`,
+          : `Your ${NAMES[kind]} (${what}, ${h.url}) is waiting: ${why} on the CI desktop, and ships go first. Citadel starts it again by itself from the start once the line has been empty for 5 minutes (1 minute between 11 PM and 6 AM Pacific; longer each time it is stopped again). Nothing to do; don't start it again, and the cancelled run isn't a failure.`,
       );
     await (this.d.post ?? ghPost)(`repos/${repo}/actions/runs/${run.id}/cancel`, this.d.as(repo) ?? {}).catch((err) => this.say(`CI hold: cancel of run ${run.id}: ${err?.message ?? err}`));
   }
@@ -619,9 +672,11 @@ export class CiHold {
     const mine = repo.toLowerCase() === own;
     // Another scheme's job asks about ships alone; one that came back asks again without the settle time.
     const first = mine ? this.shipsFirst(kind, h, h?.phase !== 'resumed', now) : this.capped(repo.toLowerCase(), this.since(h, kind, run), now) ? null : h?.phase === 'resumed' ? this.stopWhy(now) : this.gate(now);
-    const taken = first || !mine || this.slotPast(h, now) ? null : this.slotWhy(kind, runId, now);
+    const retry = mine && kind === 'proof' && !first ? await this.retryWhy(as) : null;
+    const taken = first || !mine || this.slotPast(h, now) ? null : (this.slotWhy(kind, runId, now) ?? retry);
     if (!first && !taken) {
-      if (mine && this.slot?.run !== runId && !this.taken(runId, now)) this.slot = { run: runId, kind, what: run.display_title || NAMES[kind], at: now };
+      // A proof counts from its start, not from its wait for a runner.
+      if (mine && (kind === 'proof' || !this.has(runId)) && !this.taken(kind, runId, now)) this.give({ run: runId, kind, what: run.display_title || NAMES[kind], at: now });
       this.letIn.set(runId, now);
       return yes;
     }
@@ -632,8 +687,8 @@ export class CiHold {
 
   /** Why a run that asks may not start though no ship is in its way, or null. */
   private slotWhy(kind: HoldKind, run: number, now: number): string | null {
-    const taken = this.taken(run, now);
-    if (taken || this.slot?.run === run) return taken;
+    const taken = this.taken(kind, run, now);
+    if (taken || this.has(run)) return taken;
     const up = this.nextUp(kind, now);
     if (up && up.run !== run) return `a ${NAMES[up.kind]} waited longer and goes first`;
     return sideRun(kind) && this.fresh(now) && [...this.queued].some((id) => id !== run) ? 'another Citadel job is queued, and a check starts only on an idle CI desktop' : null;
@@ -645,7 +700,10 @@ export class CiHold {
       if (h.reported || h.phase === 'resumed' || now - h.since < REPORT_MS) continue;
       h.reported = true;
       this.save();
-      this.d.report(h.repo, `A ${NAMES[h.kind]} has been held off the CI desktop for over 24 hours (${h.what}, ${h.url}): ${h.why}. Ships go first, so it starts once the line is empty; it is never forced. The CI page lists what is held.`);
+      this.d.report(
+        h.repo,
+        `A ${NAMES[h.kind]} has been held off the CI desktop for over 24 hours (${h.what}, ${h.url}): ${h.why}. ${h.kind === 'proof' ? 'Flake proofs run one at a time, the longest held first; it' : 'Ships go first, so it starts once the line is empty; it'} is never forced. The CI page lists what is held.`,
+      );
     }
   }
 

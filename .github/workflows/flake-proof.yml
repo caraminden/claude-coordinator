@@ -34,7 +34,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26
-      # Deploys first (#1902): while a ship is in line this run is stopped here and Citadel starts it again (tools/ci-hold-ask.ts).
+      # One proof at a time, beside ships (#1902; Josh, 2026-11-25): while another runs, this one is stopped here and Citadel starts it again (tools/ci-hold-ask.ts).
       - name: ask Citadel whether ships go first
         run: node tools/ci-hold-ask.ts
       # As in tests.yml (#1863): without them the type check and the property tests can't run.

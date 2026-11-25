@@ -83,12 +83,6 @@ export function whenShown(fn) {
   });
 }
 /**
- * One poller for a page's refresh loop or a chip set's shared read: `read` runs, then again `every` ms later once the tab
- * is shown (whenShown), never twice at once. A read that returns `false` stops the loop (its element or chips are gone);
- * a throw is the read's own business (catch inside it). `now()` starts a read at once unless one is running or due, so
- * whoever joins while a read runs takes its answer: no second read (#1610).
- */
-/**
  * Run `build`, which replaces nodes inside `root`, then give the keyboard focus and each inner scroll back to the node in the
  * same place of the new tree (#1922 WP14): a timed redraw otherwise drops them to the body.
  */
@@ -114,6 +108,12 @@ export function keepView(root, build) {
   if (n && n.tagName === focus.tag && n !== document.activeElement) n.focus({ preventScroll: true });
 }
 
+/**
+ * One poller for a page's refresh loop or a chip set's shared read: `read` runs, then again `every` ms later once the tab
+ * is shown (whenShown), never twice at once. A read that returns `false` stops the loop (its element or chips are gone);
+ * a throw is the read's own business (catch inside it). `now()` starts a read at once unless one is running or due, so
+ * whoever joins while a read runs takes its answer: no second read (#1610).
+ */
 export function poller(read, every) {
   let timer = null,
     busy = false;

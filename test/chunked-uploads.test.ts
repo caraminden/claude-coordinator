@@ -133,6 +133,11 @@ test('a big file goes into the shared folder in chunks, resuming after a connect
   // A second of the same name never overwrites the first.
   const again = await ask(host, 'POST', base, { ...cookie, 'Content-Type': 'application/json' }, JSON.stringify({ name: 'trip.zip', size: 3, folder: 'inbox/Trip' }));
   assert.equal((await ask(host, 'PUT', `${base}/${again.body.id}?offset=0`, cookie, 'abc')).body.path, 'inbox/Trip/trip (2).zip');
+  // Asked for as a finished one, it answers until its file is gone (#1945): a page that never heard must then send it again.
+  const finished = () => ask(host, 'GET', `${base}/${again.body.id}?finished=1`, cookie);
+  assert.equal((await finished()).body.path, 'inbox/Trip/trip (2).zip');
+  rmSync(join(projectSharedDir(srv.data, project), 'inbox/Trip/trip (2).zip'));
+  assert.equal((await finished()).status, 404);
   // A folder can't climb or hide.
   for (const folder of ['..', '.git', 'a/b/c/d/e/f/g/h/i']) {
     assert.equal((await ask(host, 'POST', base, { ...cookie, 'Content-Type': 'application/json' }, JSON.stringify({ name: 'x', size: 1, folder }))).status, 400, folder);

@@ -25,7 +25,7 @@ export interface Upload {
   readonly sent: number;
   /** "paused" also when it stopped by itself: after 8 failed tries in a row, a 507 (the server's disk floor) or a refusal; see `error`. */
   readonly state: 'sending' | 'paused' | 'done' | 'cancelled';
-  /** Why it stopped, when it stopped by itself; "" otherwise. */
+  /** Why it stopped, when it stopped by itself, or that a cancel came too late (state "cancelled", after `done`); "" otherwise. */
   readonly error: string;
   readonly result: UploadResult | null;
   /** Resolves with the finished file's result, or null once cancelled. Never rejects: a failure pauses it instead. */
@@ -34,7 +34,7 @@ export interface Upload {
   pause(): void;
   /** Carry on from the server's offset. */
   resume(): void;
-  /** Stop and delete what the server has. */
+  /** Stop and delete what the server has. A file already in place stays there: onChange is then called again with `error` saying so. */
   cancel(): void;
 }
 

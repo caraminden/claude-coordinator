@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import { HttpError } from './http.ts';
 import { writeAtomic } from './memory-files.ts';
 import { claimName, safeFileName, uploadFolder } from './uploads.ts';
+import { projectSharedDir } from './workspace.ts';
 
 /** The most one PUT may carry; the kit's client sends 8 MiB, well under the proxy's 20 MiB and Caddy's limits. */
 export const CHUNK_MAX = 16 * 1024 * 1024;
@@ -66,6 +67,7 @@ const sameTarget = (a: Target, b: Target) => a.kind === b.kind && (a.kind === 's
 
 export class ChunkedUploads {
   readonly dir: string;
+  private dataDir: string;
   private doneDir: string;
   private floor: number;
   /** Ids with a PUT on its way: a second PUT for one (a retry racing the first) waits its turn as a 409. */
@@ -80,6 +82,7 @@ export class ChunkedUploads {
   };
 
   constructor(dataDir: string, floor = DISK_FLOOR) {
+    this.dataDir = dataDir;
     this.dir = join(dataDir, 'chunked');
     this.doneDir = join(dataDir, 'chunked-done');
     this.floor = floor;
@@ -204,10 +207,18 @@ export class ChunkedUploads {
 
   private answer = ({ meta, file, answer }: Finished): Answer => ({ id: meta.id, offset: meta.size, size: meta.size, done: true, ...file, ...answer });
 
-  private record = (id: string): Promise<Finished | null> =>
-    readFile(this.donePath(id), 'utf8')
+  /** A finished upload's record; none once its file is gone from the shared folder (an app may have moved its own), so picking it again sends it. */
+  private async record(id: string): Promise<Finished | null> {
+    const rec: Finished | null = await readFile(this.donePath(id), 'utf8')
       .then(JSON.parse)
       .catch(() => null);
+    const target = rec?.meta.target;
+    if (target?.kind !== 'shared') return rec;
+    return stat(join(projectSharedDir(this.dataDir, target.project), String(rec?.file.path))).then(
+      () => rec,
+      () => null,
+    );
+  }
 
   /** Write a finished upload's record. The file is in place by now, so failing to never fails the upload. */
   private async keep(rec: Finished) {

@@ -868,7 +868,7 @@ host only, under the same gate as your pages (signed in, your app enabled for th
   with a dot). 507 when the file would take the server's disk below its floor (50 GB free, counting
   the uploads already under way).
 - `GET …/<id>` → `{ id, offset, size }`: how many bytes Citadel has. With `?finished=1`, an upload that has finished
-  gets its finished file again (below), for at least 3 days; without it, a 404 once it's finished.
+  gets its finished file again (below), for at least 3 days, even once your app has moved it; without it, a 404 once it's finished.
 - `PUT …/<id>?offset=<n>` with the next bytes (at most 16 MiB; the kit sends 8) → `{ id, offset, size }`.
   A wrong offset, or a chunk still landing, is a 409: GET and go on from its offset. A connection that
   breaks off keeps what arrived. The last chunk's answer is the finished file:

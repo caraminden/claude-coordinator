@@ -558,10 +558,8 @@ function unsentWork() {
   if (framed()) return 'once you leave this app';
   // A page opened with Open saves through this tab, which a reload would forget.
   if (tabBridgeOpen()) return 'once you close the page you opened with Open';
-  if (document.querySelector('.attachments:not([hidden])') || uploadsRunning()) return writing;
+  if (document.querySelector('.attachments:not([hidden])') || uploadsRunning() || unsentCardWork()) return writing; // card picks too (#1852)
   if (filesUploading()) return 'once your files finish uploading';
-  // Picks and pictures on a card nobody has sent yet, drawn or not (#1852).
-  if (unsentCardWork()) return 'once you have sent your card answers';
   return [...app.querySelectorAll('[data-draft]')].some((el) => el.value.trim()) ? writing : null;
 }
 

@@ -431,8 +431,8 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   const readers = new Set<Reader>();
   const asks = new Set<Ask>();
   let nextId = 1;
-  // A reader has been ready since this process started.
-  let up = false;
+  // When the first reader of this process was ready; 0 until then.
+  let upAt = 0;
   let failures = 0;
   let stopping = false;
   let released = false; // a warm handover's: every request goes to the main thread, which passes it on
@@ -471,7 +471,8 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
       r.heard = Date.now();
       r.late = r.silent = false;
       if (m.ready) {
-        r.ready = up = true;
+        r.ready = true;
+        upAt ||= Date.now();
         started_up();
         failures = 0;
         if (again) console.log('Reader thread started again: ready.');
@@ -570,8 +571,10 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   // After a start on a busy box the first reader takes longer than that to load: a read waits for it (or, once none can be
   // hoped for, goes to the main thread), since callers that aren't the page don't ask again.
   const tooLong = (a: Ask) => {
-    if (up) return settle(a, () => busy(a.res));
-    a.timer = setTimeout(() => tooLong(a), answerMs);
+    // One that came up meanwhile gets the whole wait to answer, counted from then.
+    const left = upAt ? upAt + 4 * answerMs - Date.now() : answerMs;
+    if (left <= 0) return settle(a, () => busy(a.res));
+    a.timer = setTimeout(() => tooLong(a), left);
     give(a);
   };
   const ask = (req: IncomingMessage, res: ServerResponse) => {

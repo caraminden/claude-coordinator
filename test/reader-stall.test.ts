@@ -125,7 +125,8 @@ test('a page read before the first reader is up waits for it past its usual wait
   const may = join(root, 'first-readers-may-start');
   const srv = await bootServer({ root, env: { ...KNOBS, CITADEL_READER_BOOT_WAIT: may }, log: join(root, 'four.log') });
   try {
-    const first = get(srv, PAGE);
+    // Its reader, once up, takes 1.5 s over it: it has the whole wait from then, not what was left of the read's own.
+    const first = get(srv, `${PAGE}&citadel-test-reader=stall-1500`);
     const sent = Date.now();
     const worst = slowestHealth(srv, first);
     // timing-ok: past the 4 s a read waits for readers that have been up, where it got a 503

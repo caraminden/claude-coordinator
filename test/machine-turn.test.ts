@@ -187,7 +187,7 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', as
   try {
     status = (await fetch(process.env.COORDINATOR_API + '/api/tickets/' + process.env.COORDINATOR_TICKET, { headers: { Authorization: 'Bearer ' + process.env.COORDINATOR_TOKEN } })).status;
   } catch {}
-  fs.appendFileSync(${JSON.stringify(heard)}, JSON.stringify({ n, api: process.env.COORDINATOR_API, status, dir: process.argv[1] }) + '\\n');
+  fs.appendFileSync(${JSON.stringify(heard)}, JSON.stringify({ n, api: process.env.COORDINATOR_API, status, dir: process.argv[1], config: process.env.CLAUDE_CONFIG_DIR ?? null }) + '\\n');
   out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'heard ' + n }] } });
 });
 process.on('SIGINT', () => end('interrupted'));
@@ -232,6 +232,7 @@ test('a turn placed on a machine starts, streams, steers, survives a server rest
   const local = join(workerRoot, 'fs', dir);
   assert.notEqual(first.api, srv.base.replace('localhost', '127.0.0.1'), "its tools call home through the agent's forwarder");
   assert.equal(first.status, 200, "and the call arrives as the turn's own");
+  assert.equal(first.config, null, "the sign-in is the machine's own: the server's config folder is not named there");
   assert.match(text(local, 'stream.jsonl'), /heard 1/, "claude's stream is written on the machine");
   await until('the stream to come home', () => /heard 1/.test(text(dir, 'stream.jsonl')));
   await until('its pid to come home', () => existsSync(join(dir, 'pid.json')) && JSON.parse(text(dir, 'pid.json')).claude > 0);

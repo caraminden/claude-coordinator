@@ -340,6 +340,10 @@ export class Worker {
     const file = join(t.local, 'spec.json');
     const spec = JSON.parse(readFileSync(file, 'utf8'));
     spec.env = { ...spec.env, COORDINATOR_API: `http://127.0.0.1:${this.port}` };
+    // The sign-in is this machine's own, in the container's home volume: the server's config folder isn't here.
+    delete spec.env.CLAUDE_CONFIG_DIR;
+    // shortcut: the turn's temp, files and shared folders start empty here, until state sync (T3) brings what they hold.
+    for (const dir of [spec.env.TMPDIR, spec.env.COORDINATOR_FILES_DIR, spec.env.COORDINATOR_SHARED_DIR]) if (this.mine(dir) && t.launch.roots.some((r) => dir.startsWith(`${r}/`))) mkdirSync(this.local(dir), { recursive: true });
     if (this.cfg.claude) spec.command = this.cfg.claude;
     if (this.cfg.node && spec.pool) spec.pool.node = this.cfg.node;
     writeFileSync(file, JSON.stringify(spec), { mode: 0o600 });

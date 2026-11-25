@@ -61,6 +61,11 @@ export const eventQueries = {
     return this.db.prepare('SELECT * FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind IN (SELECT value FROM json_each(?)) AND id > ? ORDER BY id').all(ticketId, JSON.stringify(kinds), afterId) as unknown as EventRow[];
   },
 
+  /** The data of a chat's first user_message (a minion's brief), or undefined: one row, never the whole chat (#1974). */
+  firstMessage(this: Store, ticketId: number): string | undefined {
+    return (this.db.prepare("SELECT data FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind = 'user_message' ORDER BY id LIMIT 1").get(ticketId) as { data: string } | undefined)?.data;
+  },
+
   /** The event the chat's last counted turn ended at, or 0: the running turn's come after it. */
   lastTurnEvent(this: Store, ticketId: number): number {
     return (this.db.prepare('SELECT event_id FROM turns WHERE ticket_id = ? AND event_id IS NOT NULL AND side IS NULL ORDER BY id DESC LIMIT 1').get(ticketId) as { event_id: number } | undefined)?.event_id ?? 0;

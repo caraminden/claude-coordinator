@@ -94,7 +94,7 @@ health() {
 }
 
 # frontend if every file changed between two commits is under public/, none if nothing changed, light if every one
-# is in tools/lanes' light lane as <from> has it (#753: no test or server code reads them), server otherwise (and
+# is in tools/lanes' light lane as <from> has it (#753: no server code reads them; the tests that do run at ship time, #1864), server otherwise (and
 # whenever the running commit is unknown). Files under test/ are judged apart (#1416): the running server never reads
 # them, so test/ next to public/ is frontend, and test/ alone or with light files is tests: no boot check and no
 # restart, but the tests run as for any change (land.sh doesn't always test the exact commit). repin: only kit/, tools/

@@ -26,7 +26,9 @@ function guarded(r: ReturnType<typeof setup>) {
     `#!/usr/bin/env bash
 case " $* " in *" ${oneUntil} "*) ;; *) exit 0 ;; esac
 rc=0
+if [ -n "\${GUARD_SLOW:-}" ] && [ -e f4.txt ]; then sleep "$GUARD_SLOW"; fi # a train with ship 4 on it
 ! grep -qs sleep test/loop-lag.test.ts || { echo "✖ ${oneUntil}:22 › loop-lag.test.ts has 5 \\\`sleep\\\` hits, the baseline allows 3"; echo "full output: /somewhere/citadel-test.log"; rc=1; }
+if [ "$rc" = 1 ] && [ -n "\${GUARD_LATE:-}" ] && [ ! -e "$GUARD_LATE" ]; then : >"$GUARD_LATE"; rc=124; fi
 echo "guard $(git rev-parse HEAD) $rc" >>"$GUARD_LOG"
 exit $rc
 `,
@@ -70,6 +72,49 @@ test("a train's only rider refused on its guards leaves the front to ship alone 
   assert.match(done[2].stderr, /the guard tests failed on ticket\/2-x's ship train in test\/one-until\.test\.ts with ticket\/3-x on it/);
   for (const i of [1, 2]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   assert.match(done[1].stderr, /main is now at [0-9a-f]{7,}/, 'the front shipped on its own');
+  l.done();
+});
+
+test("a front whose own guard run didn't decide is checked again before its first rider is blamed (#1864)", async () => {
+  // Ship 2 breaks the guard, and its own guard run times out (GUARD_LATE: the first red one), so CI decides.
+  const l = await line([{}, { change: ['test/loop-lag.test.ts', '// sleep\n'] }, {}], (dir) => ({ ...guardEnv({ FAKE_RED_PATH: 'test/loop-lag.test.ts', GUARD_LATE: join(dir, 'late') })(dir) }), guarded);
+  const done = await l.go();
+  assert.match(done[1].stderr, /the guard tests couldn't run or ran past/);
+  assert.match(done[1].stderr, /the guard tests failed on the ship train's top .*, but ticket\/2-x's own run of them didn't decide and fails now too, so they name no ship: CI runs them/);
+  assert.doesNotMatch(done[2].stderr, /the guard tests failed/);
+  assert.equal(done[2].status, 0, done[2].stderr);
+  assert.equal(done[1].status, 1, done[1].stderr);
+  l.done();
+});
+
+test("a train's guard runs and main's check of a red one keep their own phase moving, so the line behind doesn't give up on them (#1864)", async () => {
+  // timing-ok: a test slower than a tick is the thing under test (the slow step the phase moves on during)
+  const slow = 'await new Promise((r) => setTimeout(r, 1500));\n';
+  const main = `import { existsSync } from 'node:fs';\n${slow}if (existsSync(new URL('../f4.txt', import.meta.url))) throw new Error('red');\n`;
+  const l = await line(
+    [{}, {}, {}, {}],
+    (dir) => ({ ...guardEnv({ FAKE_RED_PATH: 'f4.txt', LAND_PHASE_EVERY: '0.3', GUARD_SLOW: '1.2' })(dir) }),
+    (r) => {
+      guarded(r);
+      r.commit(r.source, 'test/real.test.ts', main);
+    },
+  );
+  const done = await l.go();
+  assert.equal(done[3].status, 1, done[3].stderr);
+  const waiter = done[2].stderr;
+  for (const p of ['the guard tests on the train', 'the red tests alone on main']) assert.match(waiter, new RegExp(`ahead: ticket/2-x, running ${p} since \\d\\d:\\d\\d, \\d+ min so far`), p);
+  l.done();
+});
+
+test('a train rebuilt without a rider its guards refused takes the next ship in line, also when it had an early run to match (#1864)', async () => {
+  const l = await line([{}, {}, {}, { change: ['test/loop-lag.test.ts', '// sleep\n'] }, {}], guardEnv({ LAND_EARLY: '0' }), guarded);
+  const main = git(l.r.source, 'rev-parse', 'main');
+  writeFileSync(join(l.state, 'early'), `${main} ticket/2-x ${Math.floor(Date.now() / 1000)} ticket/9-x ${main} ${tickets(l.state).slice(2, 4).join(',')}\n`); // as early_next leaves it
+  const done = await l.go();
+  assert.match(done[1].stderr, /takes the 2 ships waiting behind it \(ticket\/3-x ticket\/4-x\)/, 'the riders its early run had');
+  assert.equal(done[3].status, 1, done[3].stderr);
+  assert.match(done[1].stderr, /takes the 2 ships waiting behind it \(ticket\/3-x ticket\/5-x\)/, 'ship 5 takes its place');
+  for (const i of [3, 5]) shipped(l, done[i - 1], i, 2, 3);
   l.done();
 });
 
@@ -199,6 +244,47 @@ test('a bisect run killed from outside twice before any test failed refuses nobo
   for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   assert.equal(done[3].status, 1, done[3].stderr);
   assert.match(done[3].stderr, /land: tests failed on the rebased branch in CI/);
+  l.done();
+});
+
+// #1864 (DR1): a train whose runner went away, or whose step or log GitHub doesn't send, read as red, and the bisect refused its last ship.
+for (const [name, extra, why] of [
+  ['lost its runner twice', { FAKE_CUT: '1 3', FAKE_CUT_KIND: 'lost' }, /the ship train goes back in line, since CI gave no answer \(CI's one fresh run lost its runner before any step failed/],
+  ['sends no log', { FAKE_FLAKY_PATH: 'f4.txt', FAKE_LOG: 'down' }, /the ship train goes back in line, since CI gave no answer \(GitHub didn't send the red CI run's log/],
+  ['names no step', { FAKE_FLAKY_PATH: 'f4.txt', FAKE_STEP: 'down' }, /the ship train goes back in line, since CI gave no answer \(GitHub didn't say which step of the red CI run failed/],
+] as [string, Record<string, string>, RegExp][])
+  test(`a train whose red run ${name} refuses nobody`, async () => {
+    const l = await line([{}, {}, {}, {}], extra);
+    const done = await l.go();
+    assert.match(done[1].stderr, why);
+    assert.doesNotMatch(done[1].stderr, /the bisect found/);
+    for (const i of [1, 2, 3, 4]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+    l.done();
+  });
+
+// A rider whose tests take the runner down, on a busy perigee: the front is refused for it neither with it nor alone.
+test('a train whose every run is lost while perigee is busy drops its riders, and only the ship that does it alone is refused (#1864)', async () => {
+  const l = await line([{}, {}, { change: ['red.txt', 'red\n'] }], (dir) => {
+    const proc = quietProc(join(dir, 'proc'), { load: 999 });
+    return { FAKE_RED_PATH: 'red.txt', FAKE_STEP: 'lost', LAND_NO_VERDICT_MAX: '2', LAND_QUIET_POLL: '0.2', LAND_QUIET_PROC: proc, CITADEL_HEAVY_PRESSURE: join(proc, 'pressure', 'cpu'), CITADEL_HEAVY_DIR: join(dir, 'heavy') };
+  });
+  const done = await l.go();
+  assert.match(done[1].stderr, /the ship train goes back in line, since CI gave no answer \(CI's one fresh run lost its runner before any step failed/);
+  assert.doesNotMatch(done[1].stderr, /refused by the pipeline/);
+  for (const i of [1, 2]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  assert.equal(done[2].status, 1, done[2].stderr);
+  assert.match(done[2].stderr, /CI and perigee both busy, try again: CI: .*\(its runs were lost or cut off 2 times\); perigee/);
+  l.done();
+});
+
+// #1864 (LB4): a train red twice of flakes only (no real failure to pin) went to the bisect; the front
+// keeps its place instead. (Past its keeps, the bisect refuses nobody but a ship tested by itself: #1899.)
+test('a train red twice of flakes only keeps its place, and every ship on it ships', async () => {
+  const l = await line([{}, {}, {}, {}], { FAKE_FLAKY_PATH: 'f4.txt', FAKE_FLAKY_LOGS: '2', FAKE_LOG: 'flakes' });
+  const done = await l.go();
+  assert.match(done[1].stderr, /refused on flakes only \(test\/busy\.test\.ts, test\/slow\.test\.ts, then test\/busy\.test\.ts, test\/slow\.test\.ts on the fresh run\), not your change: keeping its place in line/);
+  assert.doesNotMatch(done[1].stderr, /the bisect/);
+  for (const i of [1, 2, 3, 4]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   l.done();
 });
 

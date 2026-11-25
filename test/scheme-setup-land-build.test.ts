@@ -338,6 +338,17 @@ test('--into: with no lanes map, only a build-claims.md-only merge skips the che
   assert.deepEqual(b.ranFiles(), ['check'], 'docs are full without a map saying otherwise');
 });
 
+test("--into: a claims merge's mark survives a feeder that clears dead marks while it is written (#1864)", () => {
+  const b = buildSetup();
+  b.commit(b.wts[2], 'build-claims.md', 'build: #3\n#1: f1.txt\n#2: f2.txt\n');
+  // A feeder's claims_inflight runs just before the mark moves into place: what its glob finds then goes.
+  const bin = join(b.dir, 'race-bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'mv'), '#!/bin/bash\nto=${!#}\ncase "$to" in *.claims.*) rm -f "${to%.*}".* ;; esac\nexec /usr/bin/mv "$@"\n', { mode: 0o755 });
+  const res = spawnSync('bash', [join(b.wts[2], 'tools', 'land.sh'), '--into', 'build/1'], { cwd: b.wts[2], encoding: 'utf8', timeout: 90_000, env: { ...env, RAN: join(b.dir, 'ran'), PATH: `${bin}:${env.PATH}` } });
+  assert.equal(res.status, 0, res.stderr);
+});
+
 test("--into: a feeder that hands off while the build minion's claims merge is in flight waits for it, then goes ahead under the new claims", async () => {
   const b = buildSetup();
   git(b.wts[2], 'reset', '-q', '--hard', 'build/1');
@@ -387,7 +398,7 @@ function buildCi(config: Record<string, string>, dispatched = '') {
   );
   writeFileSync(join(ci, 'dispatched.tsv'), dispatched ? `.github/workflows/${dispatched}\t7\tcompleted\t${dispatched.endsWith(' red') ? 'failure' : 'success'}\thttps://x/7\n`.replace(/ (red|green)\t/, '\t') : '');
   const full = (more: Record<string, string> = {}) =>
-    spawnSync('bash', [join(b.wts[2], 'tools', 'land.sh'), '--into', 'build/1', '--full'], { cwd: b.wts[2], encoding: 'utf8', timeout: 90_000, env: { ...env, RAN: join(b.dir, 'ran'), CI_DIR: ci, PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', ...more } });
+    spawnSync('bash', [join(b.wts[2], 'tools', 'land.sh'), '--into', 'build/1', '--full'], { cwd: b.wts[2], encoding: 'utf8', timeout: 90_000, env: { ...env, RAN: join(b.dir, 'ran'), CI_DIR: ci, PATH: `${bin}:${process.env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', ...more } });
   const ghLog = () => (existsSync(join(ci, 'gh.log')) ? readFileSync(join(ci, 'gh.log'), 'utf8') : '');
   return { ...b, full, ghLog };
 }

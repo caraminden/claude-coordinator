@@ -364,7 +364,9 @@ export function landPhase(phase: string): { stage: string; word: string; key: st
   // The red train's bisect: its trial runs (#1366) and its search.
   if (/^(finding the ship that turned the train red|testing the train again without its likely causes)/.test(p))
     return { stage: 'test', word: 'bisect', key: 'bisect', text: p === 'finding the ship that turned the train red' ? 'the train went red in CI: finding the ship that turned it red' : 'the train went red in CI: testing it again without its likely causes', label: 'Bisect' };
-  if (/^running the red tests alone here/.test(p)) return { stage: 'test', word: 'bisect', key: 'bisect', text: `the train went red in CI: ${p}`, label: 'Bisect' };
+  // Its long steps' own phases (#1864), a ", 5 min so far" on them once one takes a while.
+  if (/^running the red tests alone/.test(p)) return { stage: 'test', word: 'bisect', key: 'bisect', text: `the train went red in CI: ${p}`, label: 'Bisect' };
+  if (/^running the guard tests/.test(p)) return { stage: 'test', word: 'check', key: 'check', text: p, label: 'Check' };
   // The kit core's own phases (Citadel on the core, #1323): its check, CI on a batch, and a member waiting on its head's deploy.
   if (/^(running the check|waiting to run the check|running the guards|running land_preflight)/.test(p)) return { stage: 'test', word: 'check', key: 'check', text: p, label: 'Check' };
   if (/^(CI is red|CI passed|checked \S+: CI runs on its batch's top)/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: p, label: 'CI' };

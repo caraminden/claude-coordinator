@@ -52,6 +52,11 @@ src/**: test/boot-imports.test.ts test/layout-map.test.ts test/size-budget.test.
 public/**: test/layout-map.test.ts test/size-budget.test.ts
 tools/**: test/layout-map.test.ts test/size-budget.test.ts
 README.md: test/layout-map.test.ts
+docs/design-system/media/**: test/media-browser.test.ts
+
+# The light lane's paths (tools/lanes): a ship of only these runs no CI, so land.sh runs what these rows pick (#1864).
+CLAUDE.md: test/rule-homes.test.ts test/affected.test.ts
+.claude/**: test/rule-homes.test.ts test/frontmatter-strict.test.ts
 
 # Routes and who sees what. The route test takes over 5 CPU-seconds, so it runs for these paths, not on every run (#1544);
 # land.sh's quick check adds it when this map picks it. server.ts holds the router() calls it reads, src/http.ts the 403

@@ -2,11 +2,12 @@
 // build minion takes main in with --into build/<n> --full and lands the build with --build, and a plain land refuses
 // a branch that carries a build's commits.
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { git, setup, ci, env, landAsync } from './land-fixture.ts';
+import { until } from './wait.ts';
 
 type R = ReturnType<typeof setup>;
 const has = (r: R, ref: string) => git(r.source, 'for-each-ref', '--format=%(refname)', ref) !== '';
@@ -415,6 +416,66 @@ test("claims: a shared file takes added lines, not changes to lines another feed
   git(boss, 'merge', '-q', '--ff-only', 'build/3');
   r.commit(boss, 'c.txt', 'the build minion fixed it\n');
   res = into(r, [OK], {}, boss);
+  assert.equal(res.status, 0, res.stderr);
+});
+
+test("claims: a feeder that hands off while the build minion's claims merge waits is checked against the new claims (#1864, as #1684)", async () => {
+  const r = setup();
+  const { boss } = claimed(r);
+  git(boss, 'reset', '-q', '--hard', 'build/3');
+  r.commit(r.wt, 'x.txt', 'one needs it\n'); // #2's under the claims on the build
+  const e = { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), TEST_RUNS: join(r.dir, 'test-runs') };
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  const marks = () => readdirSync(state).filter((f) => f.startsWith('build-3.claims.'));
+  // Something else holds the build's lock, so the claims merge (x.txt moves to #1) waits on it, in flight.
+  const held = join(r.dir, 'held');
+  const release = join(r.dir, 'release');
+  const holder = spawn('bash', ['-c', `exec 6>"${state}/build-3.lock"; flock 6; touch "${held}"; until [ -e "${release}" ]; do sleep 0.05; done`]);
+  const gone = new Promise((ok) => holder.on('close', ok));
+  try {
+    await until('the lock is held', () => existsSync(held));
+    r.commit(boss, 'build-claims.md', '# Build 3\nbuild: #9\n#1: b.txt x.txt\n#2: c.txt\nshared: hub.txt\n');
+    let said = '';
+    const claims = landAsync(boss, e, 60_000, (s) => (said = s), ['--into', 'build/3']);
+    await until(
+      'the claims merge is in flight',
+      () => marks().length > 0,
+      30_000,
+      () => said,
+    );
+    const early = r.run({}, ['--check', '--into', 'build/3', OK]);
+    assert.equal(early.status, 0, `the hand-off goes ahead: ${early.stderr}`);
+    assert.match(early.stderr, /claims merge in flight on build\/3/);
+    let feeder = '';
+    const merge = landAsync(r.wt, e, 60_000, (s) => (feeder = s), ['--into', 'build/3', OK]);
+    await until(
+      'the feeder waits',
+      () => /claims merge in flight on build\/3 .*waiting/.test(feeder),
+      30_000,
+      () => feeder,
+    );
+    writeFileSync(release, '');
+    const [c, m] = await Promise.all([claims, merge]);
+    assert.equal(c.status, 0, c.stderr);
+    assert.equal(m.status, 0, m.stderr);
+    assert.equal(git(r.source, 'log', '--format=%s', 'build/3', '-1'), 'x.txt: one needs it', 'the feeder went on top of the new claims');
+    assert.deepEqual(marks(), [], 'the claims merge cleared its mark');
+  } finally {
+    writeFileSync(release, '');
+    await gone;
+  }
+});
+
+test("claims: a claims merge's mark survives a feeder that clears dead marks while it is written", () => {
+  const r = setup();
+  const { boss } = claimed(r);
+  git(boss, 'reset', '-q', '--hard', 'build/3');
+  r.commit(boss, 'build-claims.md', '# Build 3\nbuild: #9\n#1: b.txt x.txt\n#2: c.txt\nshared: hub.txt\n');
+  // A feeder's claims_inflight runs just before the mark moves into place: what its glob finds then goes.
+  const bin = join(r.dir, 'race-bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'mv'), '#!/bin/bash\nto=${!#}\ncase "$to" in *.claims.*) rm -f "${to%.*}".* ;; esac\nexec /usr/bin/mv "$@"\n', { mode: 0o755 });
+  const res = into(r, [], { PATH: `${bin}:${process.env.PATH}` }, boss);
   assert.equal(res.status, 0, res.stderr);
 });
 

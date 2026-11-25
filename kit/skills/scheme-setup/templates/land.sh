@@ -1366,10 +1366,10 @@ case $mode in
     claims_gate
     # This run changes the claims: its mark, until it ends (claims_inflight).
     if [ "$mode" = into ] && ! git diff --quiet "$(git merge-base "refs/heads/$build" HEAD)" HEAD -- build-claims.md; then
-      claims_flag=$(claims_mark).$$
-      trap 'rm -f "$claims_flag" "$claims_flag-new"' EXIT
-      # Written whole, then moved into place: a feeder reading it half-written would take it for a dead one's.
-      queue_proc $$ >"$claims_flag-new" && mv -f "$claims_flag-new" "$claims_flag"
+      claims_flag=$(claims_mark).$$ claims_new=$(claims_mark)-new.$$
+      trap 'rm -f "$claims_flag" "$claims_new"' EXIT
+      # Written whole, then moved into place: a feeder reading it half-written would take it for a dead one's, and drop it.
+      queue_proc $$ >"$claims_new" && mv -f "$claims_new" "$claims_flag"
     fi
     ;;
 esac

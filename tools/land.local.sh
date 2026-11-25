@@ -385,6 +385,7 @@ CITADEL_CI_LABEL=citadel-ci-linux
 CITADEL_CI_STEP='the full suite'
 CITADEL_CI_CLOCK_STEP="the runner's clock"
 CITADEL_CI_RERUN_STEP='rerun failed files alone'
+CITADEL_CI_PORTS_STEP='Windows ports left behind'
 CITADEL_CI_BURN_STEP='burn in new and changed tests'
 # Ports CI_START_ONLINE, CI_ONLINE_POLL, CI_RERUN (#1374, = tests.yml RERUN_WINDOW) and CI_BURN (#1443): land_ci_more's extra time.
 CITADEL_CI_START_ONLINE=${LAND_CI_START_ONLINE:-900}
@@ -550,12 +551,13 @@ citadel_ci_rerun_said() {
     if [ "$k" = flake ]; then citadel_retro_log "flake rerun · $br · $what · $4"; else citadel_retro_log "cut-off rerun · $br · $what · $4"; fi
   done
 }
-# Ports ci_failed: run <id>'s failed log, GitHub's "<job> <step> <time> " prefixes stripped, fetched once into <dir>/run-<id>.log; prints its path.
+# Ports ci_failed: run <id>'s failed log, GitHub's "<job> <step> <time> " prefixes stripped, fetched once into <dir>/run-<id>.log; prints its path. Fails, keeping nothing, when GitHub doesn't send it (#1864).
 citadel_ci_log() {
   local slug=$1 id=$2 dir=$3 f=$3/run-$2.log
   if [ ! -e "$f" ]; then
-    citadel_hub gh run view "$id" --repo "$slug" --log-failed 2>/dev/null |
-      sed -E $'s/^[^\t]*\t[^\t]*\t(\xEF\xBB\xBF)?[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z ?//' >"$f.$$" 2>/dev/null || true
+    citadel_hub gh run view "$id" --repo "$slug" --log-failed >"$f.raw.$$" 2>/dev/null && [ -s "$f.raw.$$" ] || { rm -f "$f.raw.$$"; : >"$f.none"; echo "$f.none"; return 1; }
+    sed -E $'s/^[^\t]*\t[^\t]*\t(\xEF\xBB\xBF)?[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z ?//' "$f.raw.$$" >"$f.$$" 2>/dev/null || true
+    rm -f "$f.raw.$$"
     mv -f "$f.$$" "$f"
   fi
   echo "$f"
@@ -574,7 +576,7 @@ citadel_ci_digest() {
 # --- CI_STATUS ------------------------------------------------------------------------------------------------------
 # Ports ci_run, ci_gate's verdict, ci_failed, cut_off's and known_flakes' parts of gate(): exit 0 green, 1 red, 2 running, 3 not started, 4 no verdict, 5 no answer (the core's codes).
 citadel_ci_status() {
-  local sha=$1 dir slug br run id status result url step log rc n files known why_f skips
+  local sha=$1 dir slug br run id status result url step log rc n files known why_f skips lost how
   [ "${LAND_CI:-1}" != 0 ] || { echo "LAND_CI=0 was set"; return 5; }
   dir=$(citadel_ci_dir) || { echo "no git dir to keep CI's state in"; return 5; }
   why_f=$dir/why-$sha
@@ -605,17 +607,38 @@ citadel_ci_status() {
     *) echo "the CI run ended as $result, not as a verdict on the tests ($url)" | tee "$why_f"; return 4 ;;
   esac
   step=''
-  [ "$result" != failure ] || step=$(citadel_hub gh api "repos/$slug/actions/runs/$id/jobs" --jq '[.jobs[].steps[] | select(.conclusion == "failure") | .name][0] // empty' 2>/dev/null) || step=''
+  if [ "$result" = failure ]; then
+    # #1864, as land.sh's ci_gate: no answer is asked again by the core, and no failed step is a lost runner, not a red.
+    step=$(citadel_hub gh api "repos/$slug/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[].steps[]? | select(.conclusion == "failure") | .name][0] // (if (.jobs | length) == 0 then "no jobs" else "no failed step" end)' 2>/dev/null) && [ -n "$step" ] || {
+      echo "GitHub didn't say which step of the red CI run failed ($url), so it isn't known whether its tests are red" | tee "$why_f"; return 5; }
+    # The tests passed, then the check of the PC's own ports went red (LB6): nothing about this commit.
+    if [ "$step" = "$CITADEL_CI_PORTS_STEP" ]; then
+      ! mkdir "$dir/said-$id-ports" 2>/dev/null || citadel_retro_log "CI ports red · $br · counted as green · $url"
+      citadel_ci_rerun_said "$dir" "$sha" "$id" green
+      echo "CI's full suite passed on ${sha:0:12}; its check of the PC's own ports (\"$step\") went red, which counts as green ($url)"
+      return 0
+    fi
+  fi
   if [ "$step" = "$CITADEL_CI_CLOCK_STEP" ]; then
     echo "runner clock: the CI runner's clock stayed skewed for 2 min, so no test ran ($url); a systemd-timesyncd in a WSL distro on Cara's desktop must be masked (tools/ci-runner/README.md)" | tee "$why_f"
     printf '%s %s\n' "$(date +%s)" "$(cat "$why_f")" >"${dir%/land-ci}/ci-down" 2>/dev/null || true # ci_down: a skewed clock lasts hours (#900)
     return 4
   fi
-  if [ -n "$step" ] && [ "$step" != "$CITADEL_CI_STEP" ] && [ "$step" != "$CITADEL_CI_BURN_STEP" ]; then
-    echo "the CI run failed in its setup step \"$step\", before any test ran ($url): the runner needs fixing" | tee "$why_f"
-    return 4
+  lost=''
+  case $step in
+    '' | "$CITADEL_CI_STEP" | "$CITADEL_CI_BURN_STEP") ;;
+    'no jobs') echo "the CI run failed before any job started (a workflow file or account problem): $url"; citadel_ci_rerun_said "$dir" "$sha" "$id" red; return 1 ;;
+    'no failed step') lost=1 ;;
+    *)
+      echo "the CI run failed in its setup step \"$step\", before any test ran ($url): the runner needs fixing" | tee "$why_f"
+      return 4 ;;
+  esac
+  how='was cut off before any test failed'
+  if [ -n "$lost" ]; then log=/dev/null how='lost its runner before any step failed'
+  else
+    log=$(citadel_ci_log "$slug" "$id" "$dir") || [ "$step" = "$CITADEL_CI_BURN_STEP" ] || {
+      echo "GitHub didn't send the red CI run's log ($url), so a flake, a cut-off run and a real failure can't be told apart" | tee "$why_f"; return 5; }
   fi
-  log=$(citadel_ci_log "$slug" "$id" "$dir")
   if [ "$step" = "$CITADEL_CI_BURN_STEP" ]; then # the ship's own red (#1443): never a flake, a cut-off or a known flake
     citadel_ci_digest "$log" "$id" "$url" burn-in
     echo "land: a new or changed test failed its burn-in in CI ($url): $(citadel_ci_burn_lines <"$log"), so it never reached the full suite. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait. This is the ship's own red, never a known flake"
@@ -623,16 +646,16 @@ citadel_ci_status() {
     citadel_ci_rerun_said "$dir" "$sha" "$id" red
     return 1
   fi
-  if citadel_cut_off <"$log"; then # no verdict on the commit (#1377): the core runs it again once on 4; cut off twice is no answer
+  if [ -n "$lost" ] || citadel_cut_off <"$log"; then # no verdict on the commit (#1377): the core runs it again once on 4; cut off twice is no answer
     if read -r n files 2>/dev/null <"$dir/cut-$sha" && [ "$n" != "$id" ]; then
-      echo "CI was cut off twice before any test failed ($files, $url)" | tee "$why_f"
+      echo "CI gave no verdict twice: the first run was cut off or lost its runner ($files), and the fresh one $how ($url)" | tee "$why_f"
       citadel_ci_rerun_said "$dir" "$sha" "$id" "no answer"
     elif read -r n files 2>/dev/null <"$dir/flake-$sha" && [ "$n" != "$id" ]; then
-      echo "CI's one fresh run after a red of flakes only ($files) was cut off before any test failed ($url)" | tee "$why_f"
+      echo "CI's one fresh run after a red of flakes only ($files) $how ($url)" | tee "$why_f"
       citadel_ci_rerun_said "$dir" "$sha" "$id" "no answer"
     else
       printf '%s %s\n' "$id" "$url" >"$dir/cut-$sha"
-      echo "land: the CI run on ${sha:0:12} was cut off before any test failed ($url), so it says nothing about this commit: running CI once more" | tee "$why_f"
+      echo "land: the CI run on ${sha:0:12} $how ($url), so it says nothing about this commit: running CI once more" | tee "$why_f"
     fi
     return 4
   fi

@@ -8,7 +8,7 @@ scheme pooled (`src/minion-budget.ts`). It is never a cap. The grilling round wi
 1. **When the minion is asked**: "2x and past $3". At twice its budget, and never under $3, one line reaches the running
    turn (or the next turn's opening line) asking it to say why it is costing more or to split off what's left. Once per minion.
 2. **When its Taskmaster hears**: "4x and past $10". One message to its Taskmaster with the numbers, waking it (cold too, since
-   ADR 0027 dropped the cold hold). Once per minion. Nothing stops by itself. *Amended 2026-11-22 (#1672, below): again at each doubling.*
+   ADR 0036 dropped the cold hold). Once per minion. Nothing stops by itself. *Amended 2026-11-22 (#1672, below): again at each doubling.*
 3. **The line up front**: "Yes, each turn". Each turn opens with what its kind of work usually costs and what it has used.
 4. **What the minion is told**: "Say why, or split".
 5. **What people see**: "Chat line + minion page". A chat line at each mark, and "$14 of about $6.50" on the minion's

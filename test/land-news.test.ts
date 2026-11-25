@@ -78,6 +78,7 @@ test('the other ways a train ends: the front itself red, no answer from CI, a ri
       .slice(1),
     ['#1311 itself red; back in line: #1348, #1331, #1351, #1350'],
   );
+  assert.deepEqual(at('land: the CI run on d66e2d82 lost its runner before any step failed (https://ci/1), so it says nothing about this commit: running CI once more').slice(-1), [{ tone: 'warn', text: 'CI run lost its runner before any test failed (https://ci/1): one more run' }]);
   assert.deepEqual(at('land: the ship train goes back in line, since CI gave no answer (a timeout): ticket/1311-front goes on alone'), [{ tone: 'warn', text: 'CI gave no answer (a timeout): #1311 goes on alone; back in line: #1348, #1331, #1351, #1350' }]);
   assert.deepEqual(
     at(...red, 'land: the ship train goes back in line, since CI gave no answer (a timeout): ticket/1311-front goes on alone', "land: waiting for CI on 0123abcd: the full suite on Cara's desktop")

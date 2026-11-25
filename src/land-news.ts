@@ -78,8 +78,8 @@ export function landNews(output: string, name: (branch: string) => string): News
     } else if ((m = s.match(/^CI's full run ended red and it is rerunning the failed files alone.*?waits up to (.+?) more/))) {
       slow = { tone: 'warn', text: `CI's full run ended red: rerunning the failed files alone, to tell flakes from real failures (up to ${m[1]} more)` };
     } else if (/^CI passed on /.test(s)) slow = null;
-    else if ((m = s.match(/^the CI run on \S+ was cut off before any test failed \((.*)\), so/))) {
-      news.push({ tone: 'warn', text: `CI run cut off before any test failed (${m[1]}): one more run` });
+    else if ((m = s.match(/^the CI run on \S+ (was cut off before any test failed|lost its runner before any step failed) \((.*)\), so/))) {
+      news.push({ tone: 'warn', text: `CI run ${m[1].startsWith('lost') ? 'lost its runner' : 'cut off'} before any test failed (${m[2]}): one more run` });
     } else if ((m = s.match(/^CI is red on the ship train/))) {
       slow = null;
       redNews(i);

@@ -19,7 +19,7 @@ test('the real deploy.sh takes the lock land.sh holds, lets go of it once the re
     assert.deepEqual(runs(), [r.wt], 'the suite ran once, in the worktree');
   }));
 
-// The light lane (#753): a land touching only light paths in tools/lanes runs no tests anywhere, starts no CI, and the
+// The light lane (#753): a land touching only light paths in tools/lanes runs only the tests the affected map picks for them (none here), starts no CI, and the
 // real deploy.sh skips the boot check and goes live by SIGHUP, with no restart.
 let running = '';
 // Main gets a map with docs/ light, the server runs it, and the worktree commits a doc.
@@ -41,7 +41,7 @@ test('a light land runs no tests and no boot check, and goes live without a rest
       lightLand(r);
       const res = await run(land, r.wt);
       assert.match(res.stderr, /lane: light \(tools\/lanes; the path that decided it: docs\/a\.md\)/);
-      assert.match(res.stderr, /no tests and no CI/);
+      assert.match(res.stderr, /no CI: the server reads/);
       assert.doesNotMatch(res.stderr, /CI FALLBACK|running the tests|boot check: the new code/);
       assert.match(res.stderr, /live now: docs and config only, nothing to reload\. No restart\./);
       assert.deepEqual(runs(), [], 'no test ran anywhere');

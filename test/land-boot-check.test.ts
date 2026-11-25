@@ -1,6 +1,6 @@
 // A boot check that fails, hangs or is stopped, and the rollback after it (#553).
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { tools, git, until, pipe, land, subjects } from './land-recover-fixture.ts';
@@ -207,4 +207,23 @@ test("a boot check that failed for one landing's own change does not stop the ne
   assert.match(next.stderr, /the boot check passes on/);
   assert.ok(!existsSync(join(p.state, 'refusing')));
   assert.equal(git(p.source, 'rev-parse', 'main'), git(p.wts[1], 'rev-parse', 'HEAD'));
+});
+
+test('a ship that fails its boot check where main passed earlier, on a box that broke since, holds rather than being refused (#1864)', { timeout: 200_000 }, async (t) => {
+  const p = await pipe(t, 1);
+  const broken = join(p.dir, 'box-broken');
+  writeFileSync(broken, '');
+  p.commit(p.wts[0], 'b.txt', 'innocent\n');
+  mkdirSync(p.state, { recursive: true });
+  const now = Math.floor(Date.now() / 1000);
+  writeFileSync(join(p.state, 'refusing'), `${now - 60} the boot check failed on abcdef1\n`);
+  writeFileSync(join(p.state, 'boot-main'), `${p.base} 0 ${now - 30}\n`); // main's check passed 30 s ago
+  const held = p.start(land, p.wts[0], { BOOT_BROKEN: broken, LAND_HOLD_POLL: '0.2' });
+  await until('the ship to hold', () => phases(p.state).some((x) => x.startsWith('held: main is broken')) || /the cause is in your change/.test(held.stderr()));
+  assert.doesNotMatch(held.stderr(), /the cause is in your change/);
+  rmSync(broken);
+  rmSync(join(p.state, 'refusing'));
+  const fixed = await held.done;
+  assert.equal(fixed.status, 0, fixed.stderr);
+  assert.match(fixed.stderr, /the deploy's note changed/);
 });

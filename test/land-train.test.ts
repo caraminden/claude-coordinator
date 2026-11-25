@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ci, git } from './land-fixture.ts';
+import { ci, git, seen } from './land-fixture.ts';
 import { line, shipped, bad, realOf } from './land-train-fixture.ts';
 import { until } from './wait.ts';
 
@@ -23,6 +23,45 @@ test('five ships waiting in line ship as one train: one CI run, one deploy, each
     shipped(l, done[i - 1], i, 2, 5);
     assert.doesNotMatch(done[i - 1].stderr, /land: rebasing/, 'a rider never rebases or tests on its own');
   }
+  l.done();
+});
+
+// #1864 (LA1): a rider got none of the front's steps after its rebase, so two ADRs 0027 shipped in one train.
+test("a rider gets the front's steps: the next free ADR number, and its prompt baseline measured again", async () => {
+  const budget = `test/${'prompt-budget'}.test.ts`; // built, not quoted: test/pipeline-files.test.ts reads quoted test names
+  const base = 'test/prompt-baseline.json';
+  const adr = (n: number) => [`docs/adr/0002-${n}.md`, `# ADR 0002: ${n}\n`] as [string, string];
+  const l = await line([{}, { also: adr(2) }, { also: adr(3) }, { also: [base, 'stale\n'] }, { also: adr(5) }], {}, (r) => {
+    for (const d of ['docs/adr', 'test']) mkdirSync(join(r.source, d), { recursive: true });
+    r.commit(r.source, 'docs/adr/0001-first.md', '# ADR 0001: first\n');
+    r.commit(r.source, base, 'old\n');
+    r.commit(r.source, budget, `import { writeFileSync } from 'node:fs';\nif (process.env.PROMPT_BASELINE === 'write') writeFileSync(new URL('prompt-baseline.json', import.meta.url), 'measured\\n');\n`);
+    git(r.wt, 'merge', '-q', '--ff-only', 'main');
+  });
+  for (const n of [2, 3, 4, 5]) {
+    git(l.wts[n - 1], 'reset', '-q', '--soft', git(l.wts[n - 1], 'merge-base', 'main', 'HEAD'));
+    git(l.wts[n - 1], 'commit', '-q', '-m', `#${n}: adr`);
+  }
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[1].stderr, /ship train: ticket\/2-x takes the 3 ships waiting behind it/);
+  const adrs = git(l.r.source, 'ls-tree', '--name-only', 'main:docs/adr').split('\n');
+  assert.deepEqual(adrs, ['0001-first.md', '0002-2.md', '0003-3.md', '0004-5.md']);
+  assert.equal(git(l.r.source, 'show', 'main:docs/adr/0004-5.md'), '# ADR 0004: 5');
+  assert.match(done[1].stderr, /ADR 0002 → 0003: the ship train took 0002/);
+  assert.equal(git(l.r.source, 'show', `main:${base}`), 'measured');
+  assert.equal(git(l.r.source, 'rev-parse', 'ticket/5-x'), git(l.r.source, 'rev-parse', 'main'), 'its branch holds its renumbering');
+  l.done();
+});
+
+test('a rider whose commit lost its #N: title stays in line, and is refused for it at the front', async () => {
+  const l = await line([{}, {}, { change: ['f3.txt', '#3: kept\n'], also: ['g3.txt', 'lost\n'] }], {});
+  git(l.wts[2], 'commit', '-q', '--amend', '-m', 'lost it');
+  git(l.wts[2], 'commit', '-q', '--allow-empty', '-m', '#3: kept');
+  const done = await l.go();
+  assert.match(done[1].stderr, /ship train: ticket\/3-x stays in line \(a commit of it lost its #N: title\)/);
+  assert.equal(done[2].status, 1);
+  assert.match(done[2].stderr, /lost its #N: title/);
   l.done();
 });
 

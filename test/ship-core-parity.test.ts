@@ -219,7 +219,7 @@ test('land.local.sh refuses a CI red that skipped a test as land.sh does, whatev
   const status = (skips: number, then = '', edit = (log: string) => log) => {
     writeFileSync(join(dir, 'run-7.log'), edit(readFileSync(join(dir, 'run-7.log'), 'utf8')).replace(/^ℹ skipped \d+$/m, `ℹ skipped ${skips}`));
     const names = ['citadel_flake_only', 'citadel_skipped', 'citadel_skipped_said', 'citadel_cut_off', 'citadel_ci_digest', 'citadel_ci_status'];
-    const stubs = `citadel_retro_log() { echo "retro: $1"; }\ncitadel_ci_dir() { echo ${JSON.stringify(dir)}; }\ncitadel_slug() { echo o/r; }\ncitadel_hub() { printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n'; }\ncitadel_ci_log() { echo ${JSON.stringify(dir)}/run-7.log; }\ncitadel_ci_known() { echo 'a known flake'; }\ncitadel_ci_rerun_said() { :; }\nCITADEL_CI_WORKFLOW=w CITADEL_CI_CLOCK_STEP=c CITADEL_CI_STEP="$(printf '7\\tcompleted\\tfailure\\thttps://ci/7')" CITADEL_CI_BURN_STEP=b`;
+    const stubs = `citadel_retro_log() { echo "retro: $1"; }\ncitadel_ci_dir() { echo ${JSON.stringify(dir)}; }\ncitadel_slug() { echo o/r; }\ncitadel_hub() { printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n'; }\ncitadel_ci_log() { echo ${JSON.stringify(dir)}/run-7.log; }\ncitadel_ci_known() { echo 'a known flake'; }\ncitadel_ci_rerun_said() { :; }\nCITADEL_CI_WORKFLOW=w CITADEL_CI_CLOCK_STEP=c CITADEL_CI_STEP="$(printf '7\\tcompleted\\tfailure\\thttps://ci/7')" CITADEL_CI_BURN_STEP=b CITADEL_CI_PORTS_STEP=p`;
     return bash(`set -euo pipefail\n${names.map((n) => fn(local, n)).join('')}${stubs}\nrc=0; citadel_ci_status 0123456789abcdef >${JSON.stringify(dir)}/cilog || rc=$?; cat ${JSON.stringify(dir)}/cilog; echo "rc $rc"\n${then}`).filter((l) => /^rc |^waived|^refused|^land: (a test|only known)/.test(l));
   };
   const [why, rc] = status(1);
@@ -256,4 +256,88 @@ test('tests.yml fails a run that skipped a test, red runs included, and says not
   assert.deepEqual(end(1, 'ℹ skipped 2\n'), [1, true], 'a red run says so too');
   assert.deepEqual(end(3, 'ℹ skipped 2\n'), [3, true], "a red run keeps run-tests.sh's code");
   assert.deepEqual(end(1, ''), [1, false], 'cut short: no summary');
+});
+
+// #1864 (DR1, LB6): GitHub's own JSON through each script's own jq. A lost runner leaves a failed job with no failed
+// step, an unanswered call is no answer, and the PC's port check runs after a green suite: none is a red.
+const JOBS = {
+  suite: { jobs: [{ steps: [{ name: 'the full suite', conclusion: 'failure' }] }] },
+  lost: {
+    jobs: [
+      {
+        steps: [
+          { name: 'Set up job', conclusion: 'success' },
+          { name: 'the full suite', conclusion: null },
+        ],
+      },
+    ],
+  },
+  unstarted: { jobs: [{ steps: null }] },
+  ports: {
+    jobs: [
+      {
+        steps: [
+          { name: 'the full suite', conclusion: 'success' },
+          { name: 'Windows ports left behind', conclusion: 'failure' },
+        ],
+      },
+    ],
+  },
+  setup: { jobs: [{ steps: [{ name: "the runner user's systemd", conclusion: 'failure' }] }] },
+  none: { jobs: [] },
+};
+test('what a failed run means is the same in land.sh and land.local.sh: 1 only when a step that runs the tests failed', () => {
+  const land = readFileSync(join(repo, 'tools', 'land.sh'), 'utf8');
+  const cut = (a: string, b: string) => land.slice(land.indexOf(a), land.indexOf(b, land.indexOf(a)));
+  const verdict = cut('    failure)\n      # Red only when', '    timed_out) return 1');
+  const consts = [...land.matchAll(/^CI_(?:CLOCK_|PORTS_)?STEP=.*$/gm)].map((m) => m[0]).join('\n');
+  const local = join(repo, 'tools', 'land.local.sh');
+  const fns = ['citadel_ci_status', 'citadel_ci_rerun_said', 'citadel_cut_off', 'citadel_flake_only', 'citadel_ci_digest', 'citadel_ci_log'].map((n) => fn(local, n)).join('\n');
+  const localConsts = [...readFileSync(local, 'utf8').matchAll(/^CITADEL_CI_[A-Z_]*(?:STEP|WORKFLOW|LABEL)=.*$/gm)].map((m) => m[0]).join('\n');
+  const dir = mkdtempSync(join(root, 'verdict-'));
+  // `gh api … --jq <expr>` answers from $JSON through jq; `down` answers nothing.
+  const gh = `fake() { case "$*" in
+    *head_sha*) printf '7\\tcompleted\\tfailure\\thttps://ci/7\\n' ;;
+    *"/jobs"*) [ "$JSON" != down ] || return 1; local e; while [ $# -gt 0 ]; do [ "$1" != --jq ] || e=$2; shift; done; jq -r "$e" <<<"$JSON" ;;
+    *"run view"*) [ "$LOG" != down ] || return 1; printf 'job\\tstep\\t2026-11-24T00:00:00Z %s\\n' "$LOG" ;;
+  esac; }`;
+  const landRc = (json: string) => {
+    const script = `${gh}
+say() { :; }; retro_log() { :; }; ci_said() { :; }; ci_down() { :; }; hub() { fake "$@"; }; state=${dir} CI_POLL=0 ci_slug=o/r ci_id=7 ci_url=u short=s branch=b ci_lost='' burn_red='' CI_BURN_STEP='burn in new and changed tests'
+${consts}
+${fn(join(repo, 'tools', 'land.sh'), 'ci_fact')}
+v() { case failure in
+${verdict}
+esac; }
+rc=0; v || rc=$?; echo "$rc\${ci_lost:+ lost}"`;
+    return spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...env, JSON: json } });
+  };
+  const localRc = (json: string, log = 'run-tests: broken') => {
+    const d = mkdtempSync(join(dir, 'd-'));
+    const script = `${gh}
+${localConsts}
+citadel_hub() { fake "$@"; }; citadel_ci_dir() { echo ${d}; }; citadel_slug() { echo o/r; }; citadel_retro_log() { :; }; citadel_ci_known() { return 1; }; citadel_ci_burn_lines() { :; }
+${fns}
+citadel_ci_status abcdef0123456789; echo "rc $?"`;
+    return spawnSync('bash', ['-c', script], { encoding: 'utf8', cwd: d, env: { ...env, JSON: json, LOG: log } });
+  };
+  const want: [string, string, string][] = [
+    ['suite', '1', '1'],
+    ['lost', '1 lost', '4'],
+    ['unstarted', '1 lost', '4'],
+    ['ports', '0', '0'],
+    ['setup', '2', '4'],
+    ['none', '1', '1'],
+    ['down', '2', '5'],
+  ];
+  for (const [k, a, b] of want) {
+    const json = k === 'down' ? 'down' : JSON.stringify(JOBS[k as keyof typeof JOBS]);
+    const l = landRc(json);
+    assert.equal(l.stdout.trim(), a, `land.sh, ${k}: ${l.stdout}${l.stderr}`);
+    const c = localRc(json);
+    assert.equal(c.stdout.trim().split('\n').at(-1), `rc ${b}`, `land.local.sh, ${k}: ${c.stdout}${c.stderr}`);
+  }
+  const noLog = localRc(JSON.stringify(JOBS.suite), 'down');
+  assert.equal(noLog.stdout.trim().split('\n').at(-1), 'rc 5', noLog.stdout + noLog.stderr);
+  assert.match(noLog.stdout, /GitHub didn't send the red CI run's log/);
 });

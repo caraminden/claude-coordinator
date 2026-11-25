@@ -216,7 +216,7 @@ queue_lock() {
     echo "$n"
   ); fi
   export DEPLOY_QUEUE_TICKET="$q/$n"
-  trap queue_done EXIT
+  trap "${QUEUE_EXIT:-queue_done}" EXIT
 
   queue_order "$q"
   by=$QUEUE_ORDER_BY # an order set before this joined is no news to it

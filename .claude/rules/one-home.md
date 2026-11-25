@@ -16,4 +16,4 @@ Before writing a helper of these kinds, use its home. `test/one-home.test.ts` fi
 | Reading JSON, a value a line, from a process's output | `jsonLines(stream, on)`, `src/json-lines.ts`: no readline, which also splits inside a string at U+2028 |
 | Refusing a request | `throw new HttpError(400, '…')`, `src/http.ts`, with no alias that only fills in the status |
 | A setting from the environment, in `server.ts` | a named, typed, defaulted entry in `src/config.ts`, and a row in README's table when people set it; `process.env` whole only for what a child process inherits, or for a module that reads its own settings (`serviceOptions`) |
-| Answering with JSON, or a whole file | `json` and `sendFile`, `src/http.ts` (`routes/files.ts` for ranges) |
+| Answering with JSON, or a whole file | `json` and `sendFile`, `src/http.ts` (`src/routes/files.ts` for ranges) |

@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { agentToken, bootServer, REPO, tempRoot, type Booted } from './helpers.ts';
+import { agentToken, bootServer, mintedAgentToken, REPO, tempRoot, type Booted } from './helpers.ts';
 import { until } from './wait.ts';
 
 const tmp = tempRoot('review-set-api-');
@@ -48,6 +48,8 @@ test("a scheme's review set: new on trial, switches, a minion's learning, Histor
   const { data: page } = await call(`/api/projects/${p.id}`);
   const { data: otherPage } = await call(`/api/projects/${other.id}`);
   const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'hi', properties: { type: 'chore' } } });
+  // Its first turn mints its token after the send returns (#1808): a token read before that is refused once it has (#1883).
+  await mintedAgentToken(join(root, 'data'), minion.id);
   const url = `/api/projects/${p.id}/reviews`;
 
   // The kit's own reviewers are there from the start (#1052); this test is about the scheme's own entries.
@@ -141,6 +143,7 @@ test('kit reviewers switch per scheme, trial locks blocking until calibrated, an
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Peek' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
   const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'hi', properties: { type: 'chore' } } });
+  await mintedAgentToken(join(root, 'data'), minion.id);
   const url = `/api/projects/${p.id}/reviews`;
 
   const first = await call(url);
@@ -238,6 +241,7 @@ test('phase 3 in a scheme of its own: a panel with a referee, run order, the rec
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Glade' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
   const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'Make the glade glow', properties: { type: 'feature' } } });
+  await mintedAgentToken(join(root, 'data'), minion.id);
   const url = `/api/projects/${p.id}/reviews`;
   const tm = page.coordinator.id;
   for (const [slug, kind] of [
@@ -352,6 +356,7 @@ test("a Taskmaster's review_set tool adds a teacher and sets a critic's model, e
   const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Tidepool' } });
   const { data: page } = await call(`/api/projects/${p.id}`);
   const { data: minion } = await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message: 'Draw a crab', properties: { type: 'art' } } });
+  await mintedAgentToken(join(root, 'data'), minion.id);
   const url = `/api/projects/${p.id}/reviews`;
   const tool = async (as: number, args: Record<string, unknown>) => {
     const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], {

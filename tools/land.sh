@@ -1337,7 +1337,7 @@ ci_failed() {
     say "flake: $f · in CI" # the server counts these (src/flakes.ts)
   done < <(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*load \([0-9.]*\)).*/\1 \2/p' <<<"$failed")
   while read -r f; do # a real failure: such a file never runs last with the load-sensitive ones (src/late-tests.ts, #1898)
-    retro_log "failed alone · $f · $branch · in CI"
+    retro_log "failed alone · $f · $branch · in CI${train_br[*]:+ · with ${train_br[*]}}"
   done < <(train_labels | sed -n 's/^\(failed again alone\|hung when rerun alone\) //p')
 }
 # The burn-in's verdict in $failed (#1443): "<file>: failed in <n> of <N> copies at once" for each red file; nothing otherwise.

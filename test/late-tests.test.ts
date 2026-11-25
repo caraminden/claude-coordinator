@@ -36,9 +36,10 @@ test('a file joins on sightings from two branches within three days, not on two 
   });
 });
 
-test('a sighting written without its branch counts as one more place, and a path that is no test file is never listed', () => {
+test('a sighting written without its branch may be the same branch again, and a path that is no test file is never listed', () => {
   const lines = log(['24', '08:00:00Z · flake · test/a.test.ts · load 30.0'], flake('24', '09:00', 'test/a.test.ts', 'ticket/2-y'), flake('24', '09:00', '../x.sh', 'ticket/2-y'), flake('24', '09:01', '../x.sh', 'ticket/3-y'));
-  assert.deepEqual(names(lateTests(lines, [], NOW).listed), ['test/a.test.ts']);
+  assert.deepEqual(lateTests(lines, [], NOW).listed, []);
+  assert.equal(lateTests([...lines, ...log(flake('24', '10:00', 'test/a.test.ts', 'ticket/3-z'))], [], NOW).listed[0].sightings, 3);
 });
 
 test('a file leaves three days after the sightings that put it on, and a held fix takes it off at once', () => {
@@ -58,17 +59,17 @@ test('a file that also failed alone is kept off the list and marked, with where 
   const lines = log(
     ...['a', 'b', 'c', 'd'].flatMap((f) => on(`test/${f}.test.ts`)),
     ['24', '10:00:00Z · failed alone · test/a.test.ts · ticket/7-q · in CI'],
-    ['24', `10:10:00Z · ship train suspects · ticket/8-l · #8 (test/d.test.ts), #9 (test/b.test.ts,test/zz.test.ts) · failed alone here: #9 · ${U}`],
+    ['24', `10:10:00Z · shipped through main's red · ticket/8-l · test/b.test.ts · ${U}`],
     ['24', `10:20:00Z · red on main too: not this ship's · ticket/10-k · test/c.test.ts · ${U}`],
     ['24', '10:30:00Z · failed alone · test/never-flaked.test.ts · ticket/7-q · in CI'],
   );
   const out = lateTests(lines, [], NOW);
-  assert.deepEqual(names(out.listed), ['test/d.test.ts'], "#8's file was suspected, not confirmed by a run alone");
+  assert.deepEqual(names(out.listed), ['test/d.test.ts']);
   assert.deepEqual(
     out.alone.map((f) => [f.file, f.failedAlone, f.where]),
     [
       ['test/a.test.ts', at('24T10:00'), 'ticket/7-q'],
-      ['test/b.test.ts', at('24T10:10'), '#9'],
+      ['test/b.test.ts', at('24T10:10'), 'main'],
       ['test/c.test.ts', at('24T10:20'), 'main'],
     ],
   );

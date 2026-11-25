@@ -20,8 +20,8 @@
 // Load-sensitive files run last (#1898; Josh, 2026-11-24, "Can we move the load sensitive tests to only run when load is
 // low?"). CITADEL_LATE_TESTS names a file listing them, one per line (tests.yml fetches it from Citadel, which makes it from
 // the retro log's flake lines: src/late-tests.ts). They are ordered last and wait at the gate until every other file has
-// ended, and then up to LATE_WAIT_MS for other suites' main waves (shorter in a run already long); then LATE_AT_ONCE run at
-// a time. A red there is red like any other. While a suite's own main wave is over, "<window>.late" beside its window tells
+// ended; then LATE_AT_ONCE run at a time, each starting only while no other suite is in its main wave, for LATE_WAIT_MS of
+// waiting in all (a run already long waits less, and from LATE_BY_MS on runs them as it runs any other). A red there is red like any other. While a suite's own main wave is over, "<window>.late" beside its window tells
 // the others not to wait for it, so two suites never wait for each other.
 import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -134,10 +134,16 @@ function otherWindows(window: string, now: number): string[] {
 export const filesAtOnce = (own: number, others: number) => Math.max(1, Math.ceil(own / (others + 1)));
 
 const LATE_AT_ONCE = 2;
-// A ship's run has 9 minutes on CI in all (land.sh's LAND_CI_TIMEOUT), so the wait is short and ends by the 4th minute.
+// A ship's run has 9 minutes on CI in all (land.sh's LAND_CI_TIMEOUT), so the late files never eat into it: they wait for
+// LATE_WAIT_MS in all, not past the 5th minute, and from LATE_BY_MS on nothing is held back. The list puts the likeliest
+// first, so the rest lose out.
 const LATE_WAIT_MS = 60_000;
-const LATE_WAIT_BY_MS = 240_000;
-export const lateWait = (wait: number, elapsed: number) => Math.max(0, Math.min(wait, LATE_WAIT_BY_MS - elapsed));
+const LATE_WAIT_BY_MS = 300_000;
+const LATE_BY_MS = 400_000;
+/** Whether the late files keep waiting for other suites, `waited` ms so far of `wait`, `elapsed` ms into the run. */
+export const lateWaits = (waited: number, wait: number, elapsed: number) => waited < wait && elapsed < LATE_WAIT_BY_MS;
+/** How many late files run at once, `elapsed` ms into the run. */
+export const lateAtOnce = (elapsed: number, max: number) => (elapsed < LATE_BY_MS ? LATE_AT_ONCE : max);
 // Some main file never reached the gate (it couldn't write there): none running this long is the wave's end too.
 const SETTLED_MS = 10_000;
 
@@ -155,7 +161,10 @@ function startGate(window: string | undefined, own: number, late: string[], main
   const lateRun = new Set<number>();
   let quietSince = 0; // since when no main file runs or waits
   let waveEnd = 0; // when the main wave ended
-  let waveGo = false; // the late files may start
+  let waited = 0; // how long they waited for other suites so far
+  let ticked = Date.now();
+  let said = false;
+  const lateWaitMs = Number(process.env.CITADEL_LATE_WAIT ?? LATE_WAIT_MS);
   const look = () => {
     if (Date.now() - beat < BEAT_MS) return;
     beat = Date.now();
@@ -170,10 +179,8 @@ function startGate(window: string | undefined, own: number, late: string[], main
     if (filesAtOnce(own, n) === own) writeFileSync(open, '');
     else rmSync(open, { force: true });
   };
-  // Whether the late files may start now: the main wave has ended, and other suites' main waves too, or the cap passed.
-  const lateMay = (running: number, waiting: number) => {
-    if (waveGo) return true;
-    const now = Date.now();
+  // Whether a late file may start now: the main wave has ended, and other suites' main waves too, or the cap passed.
+  const lateMay = (running: number, waiting: number, now: number, since: number) => {
     quietSince = running || waiting ? 0 : quietSince || now;
     if (!waveEnd) {
       // node starts files in order, so a main file not seen yet is only starting.
@@ -184,14 +191,20 @@ function startGate(window: string | undefined, own: number, late: string[], main
       } catch {} // the others then wait for this suite up to their cap
     }
     const busy = window ? otherMainWaves(window) : 0;
-    if (busy && now - waveEnd < lateWait(Number(process.env.CITADEL_LATE_WAIT ?? LATE_WAIT_MS), waveEnd - started)) return false;
-    waveGo = true;
-    if (busy) process.stdout.write(`suite-runner: ${busy} other suite(s) in their main wave after ${((now - waveEnd) / 1000).toFixed(1)} s: the load-sensitive test files run now\n`);
-    process.stdout.write(`suite-runner: the main wave has ended; ${late.length} load-sensitive test files run now, ${LATE_AT_ONCE} at once, after ${Math.round((now - started) / 1000)} s\n`);
+    if (busy && lateWaits(waited, lateWaitMs, now - started)) {
+      waited += since;
+      return false;
+    }
+    if (said) return true;
+    said = true;
+    process.stdout.write(`suite-runner: the main wave has ended; ${late.length} load-sensitive test files run now, ${LATE_AT_ONCE} at once, after ${Math.round((now - started) / 1000)} s (${Math.round(waited / 1000)} s of it waiting for other suites)\n`);
     return true;
   };
   const tick = () => {
     look();
+    const now = Date.now();
+    const since = now - ticked;
+    ticked = now;
     const max = filesAtOnce(own, others);
     if (max === own && !late.length) return;
     const names = readdirSync(dir);
@@ -223,9 +236,10 @@ function startGate(window: string | undefined, own: number, late: string[], main
       if (letIn(pid, 'wait')) running++;
     }
     const lates = of('.late');
-    if (!lates.length || !lateMay(running, held)) return;
+    const atOnce = lateAtOnce(now - started, max);
+    if (!lates.length || lateRunning >= atOnce || !lateMay(running, held, now, since)) return;
     for (const pid of lates) {
-      if (lateRunning >= LATE_AT_ONCE) break;
+      if (lateRunning >= atOnce) break;
       lateRun.add(pid);
       if (letIn(pid, 'late')) lateRunning++;
     }

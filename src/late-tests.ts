@@ -34,18 +34,13 @@ export const CLEAN_MS = 3 * 86_400_000;
 export const LATE_READ_MS = 14 * 86_400_000;
 const TEST_FILE = /^test\/[\w./-]+\.test\.m?[jt]s$/;
 
-/** Each failure of a file run by itself: land.sh's reruns alone, a train's suspects confirmed alone, and main's own reds. */
+/** Each failure of a file run by itself: a ship's reruns alone in CI, and main's own reds. */
 function aloneFailures(l: RetroLine): { file: string; where: string }[] {
   const files = (s: string | undefined) => (s ?? '').split(/[\s,]+/).filter((f) => TEST_FILE.test(f));
   if (l.kind === 'failed alone') return files(l.parts[0]).map((file) => ({ file, where: l.parts[1] ?? '' }));
-  if (l.kind.startsWith('red on main too')) return files(l.parts[1]).map((file) => ({ file, where: 'main' }));
-  if (l.kind !== 'ship train suspects') return [];
-  const sure =
-    l.parts
-      .find((p) => p.startsWith('failed alone here: '))
-      ?.slice(19)
-      .split(', ') ?? [];
-  return [...(l.parts[1] ?? '').matchAll(/([^\s,(]+) \(([^)]*)\)/g)].filter(([, ship]) => sure.includes(ship)).flatMap(([, ship, list]) => files(list).map((file) => ({ file, where: ship })));
+  // main's own red: refused ("red on main too: …") or shipped through
+  if (l.kind.startsWith('red on main too') || l.kind === "shipped through main's red") return files(l.parts[1]).map((file) => ({ file, where: 'main' }));
+  return [];
 }
 
 /** The list at `now`, from the retro log's lines (readRetro, LATE_READ_MS back) and each file's newest fix. */
@@ -64,14 +59,14 @@ export function lateTests(lines: RetroLine[], fixes: LateFix[], now: number): { 
     if (seen.length && l.at - seen[seen.length - 1].at > CLEAN_MS) seen = []; // it had left
     sighted.set(file, [...seen, { at: l.at, branch, load }]);
   }
-  const joined = (seen: { at: number; branch: string }[]) => seen.some((s) => new Set(seen.filter((o) => o.at <= s.at && s.at - o.at <= CLEAN_MS).map((o) => o.branch)).size >= BRANCHES);
+  const joined = (seen: { at: number; branch: string }[]) => seen.some((s) => new Set(seen.filter((o) => o.branch && o.at <= s.at && s.at - o.at <= CLEAN_MS).map((o) => o.branch)).size >= BRANCHES);
   const on = [...sighted].filter(([, seen]) => now - seen[seen.length - 1].at <= CLEAN_MS && joined(seen));
   const listed = on
     .filter(([file]) => !alone.has(file))
     .map(([file, seen]) => {
       const loads = seen.map((s) => s.load);
       const fix = fixOf.get(file);
-      return { file, sightings: seen.length, branches: [...new Set(seen.map((s) => s.branch))], last: seen[seen.length - 1].at, loads: [Math.min(...loads), Math.max(...loads)] as [number, number], fixing: fix?.state === 'open' ? fix.ticket_id : null };
+      return { file, sightings: seen.length, branches: [...new Set(seen.map((s) => s.branch).filter(Boolean))], last: seen[seen.length - 1].at, loads: [Math.min(...loads), Math.max(...loads)] as [number, number], fixing: fix?.state === 'open' ? fix.ticket_id : null };
     })
     .sort((a, b) => b.branches.length - a.branches.length || b.sightings - a.sightings || a.file.localeCompare(b.file));
   return { listed, alone: on.flatMap(([file]) => alone.get(file) ?? []).sort((a, b) => a.file.localeCompare(b.file)) };

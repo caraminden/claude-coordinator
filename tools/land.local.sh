@@ -620,6 +620,7 @@ citadel_ci_status() {
   # run-tests.sh's flake labels into the retro log, once per run: they can't reach it from the desktop.
   if mkdir "$dir/said-$id" 2>/dev/null; then
     while read -r n files; do citadel_retro_log "flake · $n · load $files · $br · in CI"; done < <(sed -n 's/.*run-tests: \(.*\): failed in the full run, passed alone.*load \([0-9.]*\)).*/\1 \2/p' "$log" | sort -u)
+    while read -r n; do citadel_retro_log "failed alone · $n · $br · in CI"; done < <(failed=$(cat "$log") citadel_labels | sed -n 's/^\(failed again alone\|hung when rerun alone\) //p') # src/late-tests.ts (#1898)
   fi
   rc=1
   files=$(citadel_flake_only <"$log") || files=''

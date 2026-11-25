@@ -25,6 +25,10 @@ const FAMILIES: Record<string, Family> = {
       'tools/ui-sweep.ts': { copies: 1, why: 'runs in the browser page, inside a string' },
       'tools/ui-shot.ts': { copies: 2, why: 'runs in the browser page, inside a string' },
       'tools/citadel-android-mic.ts': { copies: 1, why: 'runs in the browser page, inside a string' },
+      // Ship pipeline files: they change only with the pipeline lane.
+      'src/land.ts': { copies: 1, why: 'pipeline lane; not converted yet' },
+      'tools/boot-check.ts': { copies: 4, why: 'pipeline lane; not converted yet' },
+      'tools/heavy-ci.ts': { copies: 1, why: 'pipeline lane; not converted yet, and it takes seconds' },
     },
   },
 };

@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { Auth } from '../src/auth.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
 import { queueKey } from '../src/minion-queue.ts';
-import { git } from './git.ts';
-import { agentToken, bootServer, releaseFake, type Booted, stopProcs, tempRoot, until } from './helpers.ts';
+import { git, makeRepo } from './git.ts';
+import { agentToken, bootServer, PASSWORD, releaseFake, SECRET, type Booted, stopProcs, tempRoot, until } from './helpers.ts';
 
 // #1930 (Josh, 2026-11-25, "Yes, server ships it"): Ship It on a card whose minion prepared its hand-off ships at once
 // from the server, with no turn and no worker; anything that rules that out sends the minion the answer, with why.
@@ -14,6 +15,7 @@ const root = tmp.dir;
 const fake = releaseFake(root);
 const LIVE = 'land: main is now at abc1234 "#9: usage bar"\ndeploy: live now: the server reloaded the front end (v2); open tabs reload when idle. No restart.\n';
 const HAND_OFF = { summary: 'Usage bar', risk: 'high', risk_reason: 'ship path', learned: 'nothing' };
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAHnOcQAAAAABJRU5ErkJggg==';
 const OPTIONS = [{ label: 'Ship It', recommended: true }, { label: 'Hold' }];
 
 let srv: Booted;
@@ -38,7 +40,10 @@ async function minion(opts: { file?: string; handOff?: object | null; kind?: str
   const t = store.createTicket({ project_id: opts.project ?? projectId, title: 'M', permission_mode: 'default', created_by: 'Cara' });
   const cwd = join(srv.data, 'projects', String(t.project_id), 'tickets', String(t.id));
   mkdirSync(join(cwd, 'tools'), { recursive: true });
-  writeFileSync(join(cwd, 'tools', 'land.sh'), `if [ "$1" = --check ]; then [ -e conflict ] || exit 0; echo "land: it would conflict; conflicted files: a.txt" >&2; exit 3; fi\n[ -e fail ] && { echo "land: the tests failed on x"; exit 1; }\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
+  writeFileSync(
+    join(cwd, 'tools', 'land.sh'),
+    `if [ "$1" = --check ]; then [ ! -e moves ] || git commit -q --allow-empty -m meanwhile; [ -e conflict ] || exit 0; echo "land: it would conflict; conflicted files: a.txt" >&2; exit 3; fi\n[ -e fail ] && { echo "land: the tests failed on x"; exit 1; }\nprintf '%b' ${JSON.stringify(LIVE)}\n`,
+  );
   writeFileSync(join(cwd, 'tools', 'pipeline-files.txt'), '# the pipeline\ntools/land.sh\nsrc/pipe/\n');
   git(cwd, 'init', '-q', '-b', 'main');
   git(cwd, 'add', '.');
@@ -55,6 +60,7 @@ async function minion(opts: { file?: string; handOff?: object | null; kind?: str
   const card = async (extra: object = {}) => {
     const r = await post(opts.handOff === undefined ? HAND_OFF : opts.handOff, extra);
     assert.equal(r.status, 201, JSON.stringify(r.data));
+    assert.equal((await asMinion(`/api/tickets/${t.id}`)).status, 200, "the turn's own token still works");
     return r.data.id as string;
   };
   const press = (questionId: string, answer: object = {}, extra: object = {}) => srv.call(`/api/tickets/${t.id}/answer`, { questionId, answers: [{ selected: ['Ship It'], other: '', ...answer }], ...extra });
@@ -129,6 +135,27 @@ test('a ship that fails wakes the minion with the output, and its answer', async
   assert.match(q.held[0].text, /^Cara answered your ship card: Ship It\. .*hand it off with go "Cara, .*"\.$/, 'and that turn reads the go it has');
 });
 
+test("another member's press ships as theirs, and a failure wakes the minion on their login", async () => {
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  store.addMember(projectId, josh.id);
+  const m = await minion();
+  const card = await m.card();
+  writeFileSync(join(m.cwd, 'fail'), '');
+  const cookie = new Auth(PASSWORD, SECRET).issueCookie(josh, false).split(';')[0];
+  const r = await srv.as({ cookie })(`/api/tickets/${m.id}/answer`, { questionId: card, answers: [{ selected: ['Ship It'], other: '' }] });
+  assert.equal(r.status, 202, JSON.stringify(r.data));
+  assert.equal(m.state().person_id, josh.id);
+  await until('the wake', () => m.texts().find((x) => x.includes("Your handed-off land didn't go through")));
+});
+
+test('two answers at once, one with a picture: one counts, the other is refused', async () => {
+  const m = await minion();
+  const card = await m.card();
+  const both = await Promise.all([m.press(card, {}, { images: [{ mediaType: 'image/png', data: PNG }] }), m.press(card)]);
+  assert.deepEqual(both.map((x) => x.status).sort(), [202, 409], JSON.stringify(both.map((x) => x.data)));
+  assert.equal(m.texts().filter((x) => x.startsWith('My answers to your question card')).length, 1);
+});
+
 test('what rules the server out sends the answer to the minion with why', async () => {
   const none = await minion({ handOff: null });
   await fellBack(none, await none.card(), /Citadel didn't ship it by itself: the card had no hand-off prepared/);
@@ -148,6 +175,14 @@ test('what rules the server out sends the answer to the minion with why', async 
   writeFileSync(join(clash.cwd, 'conflict'), '');
   await fellBack(clash, clashCard, /it would conflict; conflicted files: a\.txt/);
 
+  const meanwhile = await minion();
+  const meanwhileCard = await meanwhile.card();
+  writeFileSync(join(meanwhile.cwd, 'moves'), '');
+  await fellBack(meanwhile, meanwhileCard, /your branch moved since the card/);
+
+  const pic = await minion();
+  await fellBack(pic, await pic.card(), /words or files added/, {}, { images: [{ mediaType: 'image/png', data: PNG }] });
+
   const hold = await minion();
   await fellBack(hold, await hold.card(), /the pick wasn't Ship It/, { selected: ['Hold'] });
   const words = await minion();
@@ -158,11 +193,21 @@ test('what rules the server out sends the answer to the minion with why', async 
   store.updateTicket(sealed.id, { state: 'parked' });
   await fellBack(sealed, sealedCard, /you were sealed/);
 
-  const feeder = await minion();
-  const feederCard = await feeder.card();
-  store.setSetting(buildOwnerKey(projectId, 7), feeder.id);
-  store.updateTicket(feeder.id, { build: 7 });
-  await fellBack(feeder, feederCard, null);
+  const owner = await minion();
+  const ownerCard = await owner.card();
+  store.setSetting(buildOwnerKey(projectId, 7), owner.id);
+  store.updateTicket(owner.id, { build: 7 });
+  await fellBack(owner, ownerCard, null);
+
+  const feeder = await minion({ handOff: null });
+  const repo = makeRepo(join(root, 'repo'));
+  git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
+  git(repo, 'branch', 'build/8');
+  store.setProjectRepoDir(projectId, repo);
+  store.updateTicket(feeder.id, { build: 8 });
+  const merge = { question: 'Merge this high-risk change into Build 8?', options: [{ label: 'Merge', recommended: true }, { label: 'Hold' }] };
+  assert.match(String((await feeder.post(HAND_OFF)).data.error), /not a build's card/);
+  await fellBack(feeder, await feeder.card({ questions: [merge] }), null, { selected: ['Merge'] });
 });
 
 test('a pipeline change ships from the click only for the lane holder', async () => {
@@ -171,6 +216,11 @@ test('a pipeline change ships from the click only for the lane holder', async ()
   const other = await minion({ file: 'tools/pipeline-files.txt' });
   store.claims.take(projectId, 'pipeline-lane', out.id, 'Cara');
   await fellBack(other, await other.card(), /tools\/pipeline-files\.txt is a pipeline file/);
+
+  const dropped = await minion({ file: 'src/pipe/deep/x.ts' });
+  git(dropped.cwd, 'rm', '-q', 'tools/pipeline-files.txt');
+  git(dropped.cwd, 'commit', '-qm', 'no list');
+  await fellBack(dropped, await dropped.card(), /is a pipeline file/);
 
   const holder = await minion({ file: 'src/pipe/deep/x.ts' });
   store.claims.release(projectId, 'pipeline-lane');
@@ -196,6 +246,9 @@ test('a hand_off the ship would refuse is refused with the card, and so is one i
   writeFileSync(join(m.cwd, 'src', 'a.ts'), 'edited\n');
   assert.match(await why(HAND_OFF), /uncommitted changes/);
   git(m.cwd, 'checkout', '--', 'src/a.ts');
+  writeFileSync(join(m.cwd, 'conflict'), '');
+  assert.match(await why(HAND_OFF), /it would conflict/);
+  assert.match(await why(HAND_OFF), /it would conflict/, "a late refusal leaves the turn's token working, to post again");
   assert.equal(store.eventsOfKinds(m.id, ['question']).length, 0, 'no card went out');
 
   const prs = (await srv.call('/api/projects', { name: 'PRs' })).data.id;

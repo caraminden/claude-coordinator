@@ -315,6 +315,9 @@ export function addressee(app: App, ticket: Ticket | TicketView, raw: unknown): 
   return m.name;
 }
 
+/** The calling turn's own token, for what it starts: a new one would cut the turn off its tools. */
+const bearer = (req: Ctx['req']) => String(req.headers.authorization).replace(/^Bearer /, '');
+
 /**
  * Hand a person's answer to a card back to the asking chat: it runs now, as a typed message does, whoever answers
  * and whether or not the card was addressed (`to`), so a cold asker wakes too (Cara, 2026-11-14: "normal cards in
@@ -954,7 +957,7 @@ export const ticketRoutes: Route[] = [
       // Held until CI passes on the pushed commit (#715): posted then with no turn, or now if it already passed.
       if (body.hand_off !== undefined) {
         if (!kind || !questions.length) throw new HttpError(400, 'hand_off goes with a question card of kind ship');
-        card.handoff = await prepareHandoff(app, app.store.getTicket(ticket.id)!, body.hand_off, questions);
+        card.handoff = await prepareHandoff(app, app.store.getTicket(ticket.id)!, body.hand_off, questions, bearer(req));
       }
       const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { card }) : null;
       if (armed) return json(res, 202, { armed });
@@ -1169,23 +1172,23 @@ export const ticketRoutes: Route[] = [
         })
         .join('\n\n');
       const answer = { answer: { questionId: body.questionId, answers } };
-      // Pictures and files pasted into the card's box ride in the answer message, as in the composer.
-      const files = await messageFiles(app, ticket, body.files);
-      // A Taskmaster's card for everyone (#921): kept where the card is, acted on by the Taskmaster that asked.
       const asker = data.asker != null ? store.getTicket(data.asker) : undefined;
-      if (asker && asker.status !== 'closed') {
-        // Saved in both chats: the card's chat shows them on the settled card, the asker's turn reads its own copy.
-        const kept = await saveImages(app, ticket, body.images);
-        runner.recordAnswer(id, session.name, `My answers to the question card:\n\n${text}`, { ...answer, ...(kept.length ? { images: kept.map((i) => i.name) } : {}) });
-        deliverAnswer(app, asker.id, session.name, `My answers to your question card for everyone (in the Overlord's chat):\n\n${text}`, {}, await saveImages(app, asker, body.images), files);
-      } else {
-        // Ship It on a card with its hand-off prepared ships now, with no turn (#1930); else the minion gets the answer, with why.
-        const mine = `My answers to your question card:\n\n${text}`;
-        const images = await saveImages(app, ticket, body.images);
-        let why: string | null;
-        deciding.add(card.id);
-        try {
-          why = await shipOnClick(
+      // Held from here, before the first wait: a second answer while this one saves its pictures or a ship is checked is refused.
+      deciding.add(card.id);
+      try {
+        // Pictures and files pasted into the card's box ride in the answer message, as in the composer.
+        const files = await messageFiles(app, ticket, body.files);
+        // A Taskmaster's card for everyone (#921): kept where the card is, acted on by the Taskmaster that asked.
+        if (asker && asker.status !== 'closed') {
+          // Saved in both chats: the card's chat shows them on the settled card, the asker's turn reads its own copy.
+          const kept = await saveImages(app, ticket, body.images);
+          runner.recordAnswer(id, session.name, `My answers to the question card:\n\n${text}`, { ...answer, ...(kept.length ? { images: kept.map((i) => i.name) } : {}) });
+          deliverAnswer(app, asker.id, session.name, `My answers to your question card for everyone (in the Overlord's chat):\n\n${text}`, {}, await saveImages(app, asker, body.images), files);
+        } else {
+          // Ship It on a card with its hand-off prepared ships now, with no turn (#1930); else the minion gets the answer, with why.
+          const mine = `My answers to your question card:\n\n${text}`;
+          const images = await saveImages(app, ticket, body.images);
+          const why = await shipOnClick(
             app,
             store.getTicket(id)!,
             { event: card.id, data },
@@ -1197,10 +1200,10 @@ export const ticketRoutes: Route[] = [
               record: (held) => runner.recordAnswer(id, session.name, mine, answer, { by: APP_NAME, text: held }),
             },
           );
-        } finally {
-          deciding.delete(card.id);
+          if (why !== null) deliverAnswer(app, id, session.name, `${mine}${why ? `\n\n(${APP_NAME} didn't ship it by itself: ${why}.)` : ''}`, answer, images, files);
         }
-        if (why !== null) deliverAnswer(app, id, session.name, `${mine}${why ? `\n\n(${APP_NAME} didn't ship it by itself: ${why}.)` : ''}`, answer, images, files);
+      } finally {
+        deciding.delete(card.id);
       }
       runner.echoOverlordAnswer(ticket, session.name, text, asker && asker.status !== 'closed' ? asker.id : id, session.uid);
       personWrote(ctx);
@@ -1568,7 +1571,7 @@ export const ticketRoutes: Route[] = [
       // Any scheme's: a container turn that ran land.sh itself couldn't see the host's landings in line (#574).
       if (!existsSync(join(ticket.cwd, 'tools', 'land.sh'))) throw new HttpError(404, 'This worktree has no tools/land.sh: land the way the scheme instructions say');
       // Only a minion's own bearer token gets here (who: minion).
-      const token = String(req.headers.authorization).replace(/^Bearer /, '');
+      const token = bearer(req);
       const env = app.runner.hostEnv(ticket, token);
       if (body?.fix === true) env.LAND_FIX = '1';
       if (body?.outage === true) env.LAND_URGENT = '1'; // { outage: true }: its restart skips deploy.sh's starved-box hold (#1417)
@@ -1651,7 +1654,7 @@ export const ticketRoutes: Route[] = [
       const { req, res, app, ticket } = ctx;
       const body = (await readJson(req)) ?? {};
       const mine = app.store.getTicket(ticket.id)!;
-      const ready = await checkHandoff(app, mine, body, String(req.headers.authorization).replace(/^Bearer /, ''));
+      const ready = await checkHandoff(app, mine, body, bearer(req));
       if (!startHandoff(app, mine, ready)) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
       return json(res, 202, { ok: true });
     },

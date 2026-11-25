@@ -33,8 +33,11 @@ const hasLand = (cwd: string) =>
     () => false,
   );
 
-/** Every check a hand-off must pass; throws the refusal. `token` is the calling turn's, when one calls. */
-export async function checkHandoff(app: App, ticket: Ticket, body: Record<string, unknown>, token?: string): Promise<Ready> {
+/**
+ * Every check a hand-off must pass; throws the refusal. `caller` is the calling turn's token, or with no turn calling, what
+ * throws if one has started meanwhile: minting a token here would cut that turn off its tools.
+ */
+export async function checkHandoff(app: App, ticket: Ticket, body: Record<string, unknown>, caller: string | (() => void)): Promise<Ready> {
   if (ticket.kind !== 'ticket' || !ticket.cwd) throw new HttpError(403, 'Only a minion with a worktree lands with tools/land.sh');
   if (!(await hasLand(ticket.cwd))) throw new HttpError(404, 'This worktree has no tools/land.sh: land the way the scheme instructions say');
   // No risk label is high (Q10, Build 4): a scheme whose pre-ship review is off, with nothing else giving the label, has every ship wait for a person's go.
@@ -123,7 +126,8 @@ export async function checkHandoff(app: App, ticket: Ticket, body: Record<string
   // As land.sh's own first check, but now, before the minion ends its turn on a land that would refuse at once.
   const dirty = await new Promise<string>((done) => execFile('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: ticket.cwd! }, (err, out) => done(err ? `git status failed: ${err.message}` : out.trim())));
   if (dirty) throw new HttpError(409, `Not handed off: your worktree has uncommitted changes. Commit them first.\n${dirty.slice(0, 2000)}`);
-  const env = app.runner.hostEnv(ticket, token);
+  if (typeof caller === 'function') caller();
+  const env = app.runner.hostEnv(ticket, typeof caller === 'string' ? caller : undefined);
   if (body.fix === true) env.LAND_FIX = '1';
   if (body.outage === true) env.LAND_URGENT = '1'; // its restart skips deploy.sh's starved-box hold (#1417)
   // Fast mode (#1017): low and medium lands go live on the smoke check; every land in the scheme is let through on known reds.
@@ -161,7 +165,7 @@ export interface Prepared {
 }
 
 /** What a prepared hand-off takes: hand_off_land's arguments for a plain ship to main, less the go, which is the click. */
-const PREPARED_KEYS = ['summary', 'learned', 'risk', 'risk_reason', 'probe', 'fix', 'outage', 'deploy', 'stay_open', 'waiting_on'];
+const PREPARED_KEYS = ['summary', 'learned', 'risk', 'risk_reason', 'probe', 'fix', 'stay_open', 'waiting_on'];
 const isShipOption = (label: unknown) => /^ship it$/i.test(String(label ?? '').trim());
 /** A branch in a build under way merges there, and the build minion's own go card opens its ship in its turn: both cards go to the minion. */
 const inBuild = (app: App, ticket: Ticket) => !!buildBranch(app.store.getProject(ticket.project_id)?.repo_dir ?? null, ticket.build) || (ticket.build != null && app.store.getSetting<number>(buildOwnerKey(ticket.project_id, ticket.build)) === ticket.id);
@@ -170,7 +174,7 @@ const inBuild = (app: App, ticket: Ticket) => !!buildBranch(app.store.getProject
 const serverShips = async (app: App, ticket: Ticket) => ticket.kind === 'ticket' && !!ticket.cwd && (app.store.getProject(ticket.project_id)?.ship_path ?? 'citadel') === 'citadel' && (await hasLand(ticket.cwd)) && !inBuild(app, ticket);
 
 /** A ship card's hand_off, checked as the hand-off itself will be, so what it refuses is fixed in the minion's turn and not after the click. */
-export async function prepareHandoff(app: App, ticket: Ticket, raw: unknown, questions: { multiSelect?: boolean; options: { label: string }[] }[]): Promise<Prepared> {
+export async function prepareHandoff(app: App, ticket: Ticket, raw: unknown, questions: { multiSelect?: boolean; options: { label: string }[] }[], token: string): Promise<Prepared> {
   const bad = (why: string) => new HttpError(400, `Card not posted: ${why}`);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw bad("hand_off is an object: hand_off_land's arguments, without go");
   if (!(await serverShips(app, ticket))) throw bad("hand_off is for a minion's own ship to main with hand_off_land, not a build's card or a pull request: leave it out and the answer comes to you");
@@ -182,7 +186,7 @@ export async function prepareHandoff(app: App, ticket: Ticket, raw: unknown, que
   const head = await gitOut(['rev-parse', 'HEAD'], ticket.cwd!);
   if (!head) throw bad("git couldn't read your worktree's commit");
   try {
-    await checkHandoff(app, ticket, { ...args, go: 'the click' });
+    await checkHandoff(app, ticket, { ...args, go: 'the click' }, token);
   } catch (err) {
     if (err instanceof HttpError) throw new HttpError(err.status, `Card not posted, since the ship it prepares would be refused: ${err.message}`);
     throw err;
@@ -192,14 +196,17 @@ export async function prepareHandoff(app: App, ticket: Ticket, raw: unknown, que
 
 /** Whether a change touches the ship pipeline (tools/pipeline-files.txt, where a repo has one) and so ships only from the `pipeline-lane` claim's holder; null when it may ship. */
 async function laneRefusal(app: App, ticket: Ticket): Promise<string | null> {
+  if (app.store.claims.get(ticket.project_id, 'pipeline-lane')?.holder === ticket.id) return null;
+  // Main's list too: a branch that drops a path from the list, or the list itself, still changes the pipeline.
   const list = await readFile(join(ticket.cwd!, 'tools', 'pipeline-files.txt'), 'utf8').catch((err) => {
     if (err.code === 'ENOENT') return null;
     throw err;
   });
-  if (list === null || app.store.claims.get(ticket.project_id, 'pipeline-lane')?.holder === ticket.id) return null;
+  const main = await gitOut(['show', 'main:tools/pipeline-files.txt'], ticket.cwd!);
+  if (list === null && main === null) return null;
   const changed = await gitOut(['diff', '--name-only', '--no-renames', '-z', 'main...HEAD'], ticket.cwd!, { trim: false });
   if (changed === null) return "it couldn't tell whether the change needs the pipeline lane";
-  const paths = ['tools/pipeline-files.txt', ...list.split('\n').map((l) => l.trim())].filter((l) => l && !l.startsWith('#'));
+  const paths = ['tools/pipeline-files.txt', ...`${list ?? ''}\n${main ?? ''}`.split('\n').map((l) => l.trim())].filter((l) => l && !l.startsWith('#'));
   const hit = changed.split('\0').find((f) => f && paths.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p)));
   return hit ? `${hit} is a pipeline file and you don't hold the pipeline lane` : null;
 }
@@ -232,23 +239,31 @@ export async function shipOnClick(app: App, ticket: Ticket, card: { event: numbe
   const prepared = data.handoff;
   if (!prepared) return 'the card had no hand-off prepared (hand_off)';
   try {
-    const now = chatRefusal(app, ticket.id, card.event);
-    if (now) return now;
+    const clear = () => {
+      const now = chatRefusal(app, ticket.id, card.event);
+      if (now) throw new HttpError(409, now);
+    };
+    clear();
     // A copy of the data (a dev copy) names the live worktrees: nothing pressed there may ship them.
     if (!resolve(ticket.cwd!).startsWith(resolve(app.dataDir) + sep)) return "your worktree isn't in this server's own folder";
-    if ((await gitOut(['rev-parse', 'HEAD'], ticket.cwd!)) !== prepared.head) return 'your branch moved since the card';
+    const moved = async () => (await gitOut(['rev-parse', 'HEAD'], ticket.cwd!)) !== prepared.head && 'your branch moved since the card';
+    const early = await moved();
+    if (early) return early;
     const lane = await laneRefusal(app, ticket);
     if (lane) return lane;
     const go = `${answer.by}, ${pacificStamp(Date.now())}, by Ship It (the server shipped it with no turn)`.slice(0, 200);
     // Its pushes go out as whoever pressed it, as from the turn their answer would have started.
-    const ready = await checkHandoff(app, { ...ticket, person_id: answer.uid ?? ticket.person_id }, { ...prepared.args, go });
+    const ready = await checkHandoff(app, { ...ticket, person_id: answer.uid ?? ticket.person_id }, { ...prepared.args, go }, clear);
     ready.h.go = go; // on its shipped line at any risk
-    // The checks take seconds: what came meanwhile still counts, and nothing below waits.
-    const later = chatRefusal(app, ticket.id, card.event);
-    if (later) return later;
+    // The checks take seconds: what came meanwhile still counts, and nothing below the last read of the commit waits.
+    const late = await moved();
+    if (late) return late;
+    clear();
     const fresh = app.store.eventsOfKinds(ticket.id, ['question'], card.event - 1).find((e) => e.id === card.event);
     if (!fresh || JSON.parse(fresh.data).settled) return 'you settled the card meanwhile';
     if (!startHandoff(app, ticket, ready)) return 'a ship of yours already ran';
+    // A ship that fails wakes it on the presser's login, as the turn their answer would have started ran on it.
+    if (answer.uid != null && answer.uid !== ticket.person_id) app.store.updateTicket(ticket.id, { person_id: answer.uid });
     answer.record(`${answer.by} answered your ship card: Ship It. ${APP_NAME} handed your ship off as you prepared it, with no turn of yours. If it has to go again and what they approved is unchanged, hand it off with go "${go}".`);
     app.runner.emit(ticket.id, 'note', { text: `${answer.by} pressed Ship It, so ${APP_NAME} started this ship with no turn.` });
     return null;

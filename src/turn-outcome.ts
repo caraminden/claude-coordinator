@@ -132,6 +132,10 @@ export interface Outcome {
   switchesSpent?: number;
 }
 
+/** What claude's stderr says when it was refused a thread or process, or memory. */
+const NO_THREADS = /pthread|resource temporarily|EAGAIN/i;
+const NO_MEMORY = /out of memory|allocation failed/i;
+
 /** What `end` means: its kind, what follows, and the resume it earns. Pure: the caller carries it out. */
 export function outcome(end: TurnEnd): Outcome {
   const { turn, exit } = end;
@@ -145,9 +149,9 @@ export function outcome(end: TurnEnd): Outcome {
   const code = exit?.code ?? null;
   // Citadel never sends SIGABRT: claude raises it on itself when it can't go on (#1848: five turns whose container was refused threads).
   const abort = exit?.signal === 'SIGABRT';
-  // In our words, never stderr's own: it can hold a secret, and this goes in the chat.
-  const said = end.stderr.join('\n');
-  const why = /pthread|resource temporarily|EAGAIN/i.test(said) ? "it couldn't start a thread or a process" : /out of memory|allocation failed/i.test(said) ? 'it ran out of memory' : null;
+  // The newest line that says why, in our words, never stderr's own: it can hold a secret, and this goes in the chat.
+  const said = end.stderr.findLast((l) => NO_THREADS.test(l) || NO_MEMORY.test(l)) ?? '';
+  const why = NO_THREADS.test(said) ? "it couldn't start a thread or a process" : said ? 'it ran out of memory' : null;
   // Citadel only signals claude on a stop, so any other signal (143 is claude's own exit on SIGTERM) came from outside.
   const killed = abort
     ? `Claude crashed with SIGABRT.\nIt stops itself this way when it can't go on: ${why ? `its last output says ${why}` : "most likely it couldn't start a thread or a process, or it ran out of memory"}.`

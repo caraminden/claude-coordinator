@@ -104,6 +104,11 @@ test('a SIGABRT is put down to claude aborting itself, with the cause its stderr
   const threads = killed(['x', 'panic: pthread_create at postgres://u:hunter2hunter2@h: Resource temporarily unavailable', 'y']);
   assert.match(threads, /its last output says it couldn't start a thread or a process\./);
   assert.doesNotMatch(threads, /hunter2|panic/, 'stderr can hold a secret, so none of it is quoted');
+  // The newest telling line wins: an EAGAIN at launch isn't why the heap ran out later, nor the other way round.
+  const eagain = "The shared tool server didn't start (spawn EAGAIN); this turn runs its own helpers.";
+  const heap = 'FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory';
+  assert.match(killed([eagain, heap, 'a trace']), /it ran out of memory\./);
+  assert.match(killed([heap, eagain]), /it couldn't start a thread or a process\./);
   assert.match(killed(['FATAL ERROR: JavaScript heap out of memory']), /its last output says it ran out of memory\./);
   assert.match(killed([], 'SIGKILL'), /^Killed by SIGKILL from outside Citadel\./);
 });

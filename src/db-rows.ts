@@ -554,6 +554,8 @@ export interface TurnResult {
   account?: number | null;
   /** The result's `modelUsage`: each model's running session cost, Grunts' models included (#905). */
   modelUsage?: Record<string, ModelUsage>;
+  /** A killed turn's estimated spend by model (#1938), in place of a result's: the session's running totals stay as they were, since claude saved none of it. */
+  estimate?: Record<string, number>;
 }
 
 /** A person's own named property filter in a scheme (#194): key → the values ticked for it. */

@@ -12,7 +12,7 @@ import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
 import { Relay, clip, loopHolds, loopKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
-import { askerKey, buildOwnerKey, onboardingOpen, pagePlanKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketState } from './db.ts';
+import { askerKey, buildOwnerKey, onboardingOpen, pagePlanKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketState, type TurnResult } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import { CompactWatch } from './compactions.ts';
 import type { Claim } from './claims.ts';
@@ -31,7 +31,7 @@ import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { thrown } from './thrown.ts';
 import type { ClaudeEvent, ContentBlock, LoadError, ModelUsage } from './claude-events.ts';
-import { turnOf } from './turn-row.ts';
+import { killedSpend, turnOf } from './turn-row.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
 import { readScope } from './read-scope.ts';
 import { accountUsageKey, usageKey } from './account-pick.ts';
@@ -2031,6 +2031,7 @@ export class Runner {
           // A kill resume's count rides along (RETRIES), so a kill after the restart still counts as the second in a row.
           if (resumed) this.queue.owe(t.id, { ...owedOf(resumed.via, resumed.retries), ...(out.kind === 'paused' ? { paused: true } : {}), ...(Object.keys(carry).length ? { carry } : {}) });
           this.store.deleteSetting(turnKey(t.id));
+          this.keepKilled(t.id, turn, null);
           if (turn?.dir) rmSync(turn.dir, { recursive: true, force: true });
           this.setStatus(t.id, 'idle');
           // Stopped on purpose: it already says so, and no resume. What was queued before the stop went with it;
@@ -4611,6 +4612,7 @@ export class Runner {
     // Its session's cache is warm on this account for the next hour (src/account-pick.ts): its next turn stays there.
     if (turn?.person && !turn.codex && turn.account) this.onRan?.(turn.person, `ticket:${ticketId}`, turn.account);
     if (this.keepalives.delete(ticketId)) return this.wrapUpKeepalive(ticketId, live, turn, exit);
+    this.keepKilled(ticketId, turn, exit);
     if (unsent.length) {
       this.emit(ticketId, 'note', { text: `${unsent.length === 1 ? 'A message' : `${unsent.length} messages`} arrived as the turn ended, so the next turn picks ${unsent.length === 1 ? 'it' : 'them'} up.` });
     }
@@ -5044,23 +5046,9 @@ export class Runner {
     if (ev.type === 'result' && this.sentBack.delete(ticketId)) this.replaceSentBack(ticketId, row.id);
     if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
       const state = this.store.getSetting<TurnState>(turnKey(ticketId));
-      void this.store
-        .recordTurn(ticketId, {
-          event_id: row.id,
-          ...turnOf(ev),
-          ended_at: row.created_at,
-          payer: this.payerOf(state?.person),
-          hashes: state?.hashes ?? null,
-          account: state?.account ?? null,
-        })
-        .then((turn) => {
-          this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
-          this.recordGrunts(ticketId, turn.id, state, ev.session_id);
-          // The turn's real cost, for a Codex turn (unmetered) or one the estimate undercounted; its reply is out, so no steer.
-          const ticket = this.store.getTicket(ticketId);
-          if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
-        })
-        .catch((e) => console.error(`[turn] minion ${ticketId}: its turn's cost was not recorded: ${(e as Error).message}`));
+      this.keepTurn(ticketId, state, { event_id: row.id, ...turnOf(ev), ended_at: row.created_at });
+      this.spends.get(ticketId)?.meter.settle();
+      if (state?.spend?.open) this.saveTurn(ticketId, { spend: { ...state.spend, open: {} } });
     }
     if (ev.type === 'user' && Array.isArray(ev.message?.content) && (ev.message!.content as ContentBlock[]).some((b) => b?.type === 'tool_result')) {
       this.onFilesMayChange(ticketId, false);
@@ -5070,6 +5058,26 @@ export class Runner {
       this.onFilesMayChange(ticketId, true);
     }
     this.notePushes(ticketId, ev);
+  }
+
+  /** Record what a turn cost, from its result or, killed with none, its estimate. */
+  private keepTurn(ticketId: number, state: TurnState | null | undefined, r: TurnResult) {
+    void this.store
+      .recordTurn(ticketId, { ...r, payer: this.payerOf(state?.person), hashes: state?.hashes ?? null, account: state?.account ?? null })
+      .then((turn) => {
+        this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
+        this.recordGrunts(ticketId, turn.id, state, r.session_id);
+        // The turn's real cost, for a Codex turn (unmetered) or one the estimate undercounted; its reply is out, so no steer.
+        const ticket = this.store.getTicket(ticketId);
+        if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
+      })
+      .catch((e) => console.error(`[turn] minion ${ticketId}: its turn's cost was not recorded: ${(e as Error).message}`));
+  }
+
+  /** A turn that died with no result to say what it cost (#1938). Called after its record is gone: a crash between loses the estimate, never counts it twice. */
+  private keepKilled(ticketId: number, turn: TurnState | null | undefined, exit: Parameters<typeof killedSpend>[1]) {
+    const estimate = killedSpend(turn, exit);
+    if (estimate) this.keepTurn(ticketId, turn, { session_id: this.store.getTicket(ticketId)?.session_id, session_cost_usd: 0, ended_at: Date.now(), estimate });
   }
 
   /** Keep the turn's Grunts (#948), read from the turn's config dir (a container's home volume as the host sees it); behind the turn, and a failure only logs. */

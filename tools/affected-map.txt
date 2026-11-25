@@ -14,6 +14,7 @@
 
 # The database: its schema, its secrets list, and the first-run commit budget.
 src/db.ts: test/db-setup.test.ts test/host-check.test.ts test/db-areas.test.ts
+src/db-schema.ts: test/db-setup.test.ts test/host-check.test.ts test/schema-compat.test.ts
 src/db/*.ts: test/db-areas.test.ts test/db-writer.test.ts
 src/db-view.ts: test/host-check.test.ts
 src/host-check.ts: test/host-check.test.ts
@@ -73,6 +74,7 @@ test/access-matrix.snapshot.json: test/access-matrix.test.ts
 
 # The front end: Citadel UI's contract, relative URLs under previews, hand-built parts, the theme, the service worker.
 public/**: test/boot-check.test.ts test/ui-contract.test.ts test/relative-urls.test.ts test/hand-built-parts.test.ts test/theme.test.ts test/sw.test.ts
+public/reviews.js: test/review-set-api.test.ts
 # home.js imports the app shell (core, sidebar), which node can't load; inbox.js loads it lazily (Build 5).
 public/home.js: test/inbox.test.js test/home.test.ts
 src/theme.ts: test/ui-contract.test.ts test/theme.test.ts

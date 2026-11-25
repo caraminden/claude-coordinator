@@ -1276,8 +1276,12 @@ export class Runner {
 
   // Dismissing a minion, what keeps it open, and its claims: src/closing.ts.
 
-  holderShipped(ticketId: number) {
-    return this.closer.holderShipped(ticketId);
+  holderShipped(ticketId: number, commit: string) {
+    return this.closer.holderShipped(ticketId, commit);
+  }
+
+  holdersLive(live: (ticketId: number, commit: string) => Promise<boolean>) {
+    return this.closer.holdersLive(live);
   }
 
   claimPassed(projectId: number, passed: ({ from: Claim; to?: Claim } | { from?: undefined; to: Claim })[], why: string, author: string) {

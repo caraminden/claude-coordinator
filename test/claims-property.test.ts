@@ -11,7 +11,7 @@ const seed = Number(process.env.FC_SEED ?? 20261122);
 const NAME = 'pipeline-lane';
 const ticket = fc.integer({ min: 1, max: 5 });
 
-type Cmd = { op: 'take'; t: number } | { op: 'queue'; ts: number[] } | { op: 'release' } | { op: 'passOn'; how: 'live' | 'released' | 'dismissed' } | { op: 'releaseHeldBy'; t: number } | { op: 'staleRelease'; saw: number };
+type Cmd = { op: 'take'; t: number } | { op: 'queue'; ts: number[] } | { op: 'release' } | { op: 'passOn'; how: 'live' | 'released' | 'dismissed' } | { op: 'releaseHeldBy'; t: number } | { op: 'staleRelease'; saw: number } | { op: 'ship'; t: number } | { op: 'live' } | { op: 'keep'; keep: boolean };
 
 const cmd: fc.Arbitrary<Cmd> = fc.oneof(
   fc.record({ op: fc.constant('take' as const), t: ticket }),
@@ -20,6 +20,9 @@ const cmd: fc.Arbitrary<Cmd> = fc.oneof(
   fc.record({ op: fc.constant('passOn' as const), how: fc.constantFrom('live' as const, 'released' as const, 'dismissed' as const) }),
   fc.record({ op: fc.constant('releaseHeldBy' as const), t: ticket }),
   fc.record({ op: fc.constant('staleRelease' as const), saw: ticket }),
+  fc.record({ op: fc.constant('ship' as const), t: ticket }),
+  fc.record({ op: fc.constant('live' as const) }),
+  fc.record({ op: fc.constant('keep' as const), keep: fc.boolean() }),
 );
 
 function fresh() {
@@ -35,8 +38,12 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
       let holder: number | null = null; // the model: a holder and a plain array
       let waiting: number[] = [];
       let now = 1000;
+      let shipped = 0; // the holder's ships not live yet (#1985)
+      let keep = false;
       const modelPass = () => {
         holder = waiting.shift() ?? null;
+        shipped = 0;
+        keep = false;
       };
       for (const c of cmds) {
         now += 10;
@@ -68,6 +75,22 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
             if (holder === c.t) modelPass();
             break;
           }
+          case 'ship': {
+            claims.shipped(c.t, `c${now}`);
+            if (holder === c.t) shipped++;
+            break;
+          }
+          case 'live': {
+            const seen = claims.get(1, NAME);
+            if (seen) claims.holderLive(seen, seen.landed.split(' '), now);
+            if (shipped > (keep ? 1 : 0)) modelPass();
+            else if (shipped) [shipped, keep] = [0, false];
+            break;
+          }
+          case 'keep': {
+            if (holder != null) claims.take(1, NAME, holder, 'p', '', now, (keep = c.keep));
+            break;
+          }
           case 'staleRelease': {
             // The route's guard (?holder=<n>, src/routes/projects.ts) is copied here, so this checks that Claims.passOn moves the claim exactly once and the model agrees, not the route itself (that lives in test/claims.test.ts's route cases).
             const current = claims.get(1, NAME);
@@ -81,6 +104,7 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
         // The invariants, after every command.
         const real = claims.get(1, NAME);
         assert.equal(real?.holder ?? null, holder, 'holder matches the model');
+        assert.deepEqual([real?.landed ? real.landed.split(' ').length : 0, !!real?.keep], [shipped, keep], 'its ships and keep match the model');
         const wait = claims.waiting(1, NAME);
         assert.deepEqual(wait, waiting, 'the waiting line matches the model: none lost, order kept');
         assert.equal(new Set(wait).size, wait.length, 'nobody waits twice');

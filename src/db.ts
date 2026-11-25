@@ -331,6 +331,7 @@ export const SCHEMA_HISTORY = [
   [114, 'host_samples open_fds, supervisors, tmp_used, app_mem (#1762)'],
   [115, "schedules.trigger_kind, trigger_count, trigger_gap_hours; standard audits' rows take their template's trigger (#1798)"],
   [116, 'machine_jobs.pause_failed (#1956)'],
+  [117, 'claims.landed, keep (#1985)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

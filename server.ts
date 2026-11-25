@@ -629,6 +629,8 @@ function catchUp(repoDir: string) {
     })
     .catch((err) => console.error('Checking waiters after a merge failed:', err));
 }
+/** Pass on each claim whose holder's change is live (#1985). */
+const passLiveClaims = () => runner.holdersLive((id, commit) => waiters.isLive(id, commit)).catch((err) => console.error('Passing on the claims of live ships failed:', err));
 /** The server now runs `head`: wake its waiters, and dismiss pending-deploy minions it ships. */
 function liveOn(head: string | null, booted = false) {
   // Not waited for (#526): its git and gh calls take seconds, and the server answers meanwhile.
@@ -639,6 +641,7 @@ function liveOn(head: string | null, booted = false) {
     waiters.proven = head;
     await waiters.check(head);
     for (const id of await waiters.pendingLive()) runner.deployLive(id);
+    await passLiveClaims();
     void liveProbes.sweep().catch((err) => console.error(`The live probe sweep failed: ${err?.message ?? err}`)); // #1741: a kept probe whose ship this head has; never holds up what follows
     // Last, so nothing above waits on it; after waiters.check, which moves the head that says whose code is live.
     await citadelServer.live(head);
@@ -1920,7 +1923,8 @@ const landHandoffs = new LandHandoffs({
   landed: (id, commit) => {
     runner.urgent.done(id);
     runner.startNow.end(id);
-    runner.holderShipped(id);
+    runner.holderShipped(id, commit);
+    void passLiveClaims(); // a front-end ship can be live by now, and another scheme's is live once it is on its main
     const t = store.getTicket(id);
     if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);
   },

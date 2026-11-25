@@ -8,8 +8,6 @@ export const windowKey = (ticketId: number) => `ctxwin:${ticketId}`;
 export const freshKey = (ticketId: number) => `fresh:${ticketId}`;
 /** The handoff a fresh session's first turn starts from, kept until that session exists. */
 export const handoffKey = (ticketId: number) => `handoff:${ticketId}`;
-/** A claim holder whose work shipped (#1334): its claims pass on as shipped when it is dismissed. */
-export const shippedKey = (ticketId: number) => `claim-shipped:${ticketId}`;
 /** The note the server last wrote about a failed or stopped turn, which the next turn that ends well clears (#428). */
 export const failNoteKey = (ticketId: number) => `failnote:${ticketId}`;
 /** Why a minion's close_self was cancelled at its turn's end, told to its next turn (#619). */

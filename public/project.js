@@ -73,7 +73,7 @@ const getApp = () => (offersApp() ? h('a', { class: 'get-app', href: DESKTOP_APP
 /** The Releases page (#1423: Releases, CI and Status as its tabs) on `to` = { scope, tab, hl }: an open one switches in place. */
 export async function showReleases(projectId, to) {
   if (goReleases(projectId, to) && view?.main === 'releases') return;
-  if (!(view?.kind === 'project' && view.projectId === projectId && document.querySelector('#app .split'))) return showProject(projectId, { kind: 'releases' });
+  if (!(view?.kind === 'project' && view.projectId === projectId && !view.home && document.querySelector('#app .split'))) return showProject(projectId, { kind: 'releases' });
   const { kind, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = view;
   setView({
     kind,
@@ -260,7 +260,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     ? [{ ...stale, dismissed: 0, person_notes: stale.personNotes, build_previews: stale.buildPreviews }, null, known]
     : // The dismissed minions stay on the server until the Dismissed list is opened, searched or linked to: most of a big scheme's payload (#538), 8,000 elements.
       await Promise.all([api(`api/projects/${projectId}?tickets=open`), firstItems, schemes, filter]);
-  const [artifacts, shared, machines] = stale ? [stale.artifacts, stale.shared, stale.machines] : files ? await files : [[], [], []];
+  const [artifacts, shared, machines] = stale ? [stale.artifacts, stale.shared, stale.machines] : files ? await files : [[], [], []]; // null: that read failed
   let tickets = open;
   // A link to a dismissed minion fetches that one minion; any other open draws without it.
   const findClosed = main.kind === 'chat' && main.number != null && dismissed && !open.some((t) => t.number === main.number);
@@ -305,8 +305,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     pins: pins ?? [], // ticket ids you pinned, oldest pin first (#179)
     builds: builds ?? [], // build branches' headers: { build, merged, open, behind } (src/builds.ts)
     buildPreviews: !!build_previews, // this server runs the scheme's code, so each build branch has a preview (src/previews.ts)
-    artifacts,
-    shared,
+    artifacts: artifacts ?? [],
+    shared: shared ?? [],
+    filesFailed: artifacts === null, // the read failed: say so, not "no files" or "Artifact removed" (HP16)
     artifactId: main.artifact?.id ?? null,
     machines,
     projects: projects ?? view?.projects ?? [],
@@ -464,7 +465,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
 }
 
 /** A scheme's artifacts and shared files, and your machines (an admin's: every one, #306). An empty shelf beats a broken page if the server is older than this front end. */
-const shelfFiles = (projectId) => Promise.all([api(`api/projects/${projectId}/artifacts`).catch(() => []), api(`api/projects/${projectId}/shared`).catch(() => []), api('api/machines').catch(() => [])]);
+const shelfFiles = (projectId) => Promise.all([api(`api/projects/${projectId}/artifacts`).catch(() => null), api(`api/projects/${projectId}/shared`).catch(() => null), api('api/machines').catch(() => [])]);
 
 /** A chat's or Home's first paint left the files and machines till after (#1533): fill them in, unless the page has moved on. */
 async function fillShelf(projectId) {
@@ -480,9 +481,9 @@ const SCHEME_CACHE = 6;
 
 function rememberScheme() {
   if (view?.kind !== 'project' || !view.tickets) return;
-  const { projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, artifacts, shared, machines } = view;
+  const { projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, machines } = view;
   schemeCache.delete(projectId);
-  schemeCache.set(projectId, { project, coordinator, taskmasters, tickets: [...tickets.values()], closed: closedSnapshot(tickets), seen, personNotes, pins, artifacts, shared, machines });
+  schemeCache.set(projectId, { project, coordinator, taskmasters, tickets: [...tickets.values()], closed: closedSnapshot(tickets), seen, personNotes, pins, builds, buildPreviews, artifacts, shared, machines });
   if (schemeCache.size > SCHEME_CACHE) schemeCache.delete(schemeCache.keys().next().value);
 }
 
@@ -496,7 +497,7 @@ export function forgetSchemes() {
  * A failed fetch (a restart's gap) tries again, backing off to 30 s.
  */
 async function refreshScheme(projectId) {
-  const list = view.tickets;
+  let list = view.tickets;
   // The chat you're on, if the refresh brought a newer copy of it (one dismissed while you were away, say).
   const headUp = () => {
     const shown = view.id === view.coordinator.id ? view.coordinator : list.get(view.id);
@@ -511,7 +512,8 @@ async function refreshScheme(projectId) {
   for (let wait = 1000; !got; wait = Math.min(30_000, wait * 2)) {
     before = new Map(list); // what the stream changes meanwhile is newer than the answer
     got = await Promise.all([api(`api/projects/${projectId}?tickets=open`), api(`api/projects/${projectId}/artifacts`).catch(() => view.artifacts), api(`api/projects/${projectId}/shared`).catch(() => view.shared), api('api/machines').catch(() => view.machines)]).catch(() => null);
-    if (view?.kind !== 'project' || view.tickets !== list) return; // a newer load of the scheme drew its own
+    if (view?.kind !== 'project' || view.projectId !== projectId) return void panel?.removeAttribute('aria-busy'); // left the scheme; its page is gone
+    list = view.tickets; // a reconnect's resync may have swapped the list meanwhile: the answer goes onto the one shown
     if (!got) await new Promise((r) => setTimeout(r, wait));
   }
   panel?.removeAttribute('aria-busy');
@@ -554,7 +556,7 @@ async function switchChat(main, seq) {
   const cached = cachedEvents(merged?.src ?? chatId);
   const page = cached ?? (await loadEvents(merged?.src ?? chatId));
   if (seq !== routeSeq) return true; // overtaken by another click while loading
-  const { kind, home, projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, artifacts, shared, showClosed, machines, projects } = view;
+  const { kind, home, projectId, project, coordinator, taskmasters, tickets, seen, personNotes, pins, builds, buildPreviews, artifacts, shared, showClosed, machines, projects } = view;
   setView({
     kind,
     home,
@@ -567,6 +569,8 @@ async function switchChat(main, seq) {
     seen,
     personNotes,
     pins,
+    builds,
+    buildPreviews,
     artifacts,
     shared,
     showClosed,

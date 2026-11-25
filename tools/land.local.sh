@@ -753,7 +753,7 @@ land_flaky() {
 
 # Ports the CI FALLBACK section (land.sh 2096-2172) with busy_gate/busy_wait (#1254, #1361) and retry_in_place (#1360): 0 green, 1 red, 75 no verdict (asks again once, then parks).
 land_fallback() {
-  local sha=$1 dir why t at w out rc spent=0 last told='' log trc kept flakes known half left v
+  local sha=$1 dir why t at w out rc spent=0 last told='' log trc kept flakes known half left v limit own=()
   t=$(dirname "$citadel_self")
   dir=$(citadel_ci_dir) || dir=''
   why=$(head -n 1 "$dir/why-$sha" 2>/dev/null) || why=''
@@ -803,9 +803,12 @@ land_fallback() {
   trc=0
   # citadel-heavy's slot (nice 19, idle IO), half run-tests.sh's concurrency, CPU weight 20: it yields to turns (#1254).
   half=$(( ( ($(nproc 2>/dev/null || echo 2) + 1) / 2 + 1) / 2 ))
+  limit=$((half < 10 ? 6000 / half : 600)) # run-tests.sh's 600 s is for half the cores (#1863)
+  [ "$limit" -le 1800 ] || limit=1800
   left=$((CITADEL_QUIET_LIMIT - spent))
   CITADEL_HEAVY_WHAT="land.sh's suite for $branch (CI fallback)" CITADEL_HEAVY_MAX_WAIT=${LAND_HEAVY_MAX_WAIT:-$((left > 60 ? left : 60))} \
     CITADEL_TEST_CONCURRENCY=${CITADEL_TEST_CONCURRENCY:-$half} DEPLOY_TEST_CPU_WEIGHT=${DEPLOY_TEST_CPU_WEIGHT-20} \
+    DEPLOY_TEST_TIMEOUT=${DEPLOY_TEST_TIMEOUT:-$limit} \
     "$t/citadel-heavy" --here --heavy "$t/run-tests.sh" "$log" || trc=$?
   if [ "$trc" = 75 ]; then
     if [ "${LAND_PARK_RETRIED:-0}" -lt "$PARK_RETRIES" ]; then
@@ -816,6 +819,7 @@ land_fallback() {
     return 75
   fi
   [ "$trc" != 3 ] || { say "no test ran: the test run could not write its files (the run-tests line above says which), so main is untouched"; return 1; }
+  [ "$trc" != 4 ] || { say "no test ran: the packages the tests import could not be installed here (the run-tests line above says why), so that is no answer about $branch"; return 75; }
   [ "$trc" != 0 ] || { say "the full suite passed on perigee"; return 0; }
   tail -n 40 "$log" >&2
   find "$state" -maxdepth 1 -name 'land-red-*.log' -mtime +14 -delete 2>/dev/null || true
@@ -839,6 +843,13 @@ land_fallback() {
   elif [ -z "${flakes:-}" ] && citadel_cut_off <"$kept"; then
     say "the suite on perigee was killed from outside before any test failed (full log: $kept): that says nothing about $branch, but it is no answer either, so main is untouched. Run this again"
     return 75
+  fi
+  # Stopped at its limit: only a file that fails alone here and passes on main is this ship's (#1863).
+  if grep -q '^run-tests: the tests ran past' "$kept"; then
+    queue_phase "running the stopped suite's suspects alone since $(date +%H:%M)"
+    mapfile -t own < <("$t/test-alone.sh" stopped "$kept" "$sha" refs/heads/main 2>"$state/train-pin.log")
+    [ ${#own[@]} -gt 0 ] || { say "the suite on perigee ran out of its time limit and no test is known to be $branch's own failure (full log: $kept): that is no answer, so main is untouched"; return 75; }
+    say "tests failed on the rebased branch: the suite ran out of time, and ${own[*]} fails alone here and passes on main"
   fi
   say "tests failed on the rebased branch (full log: $kept), so main is untouched"
   return 1
@@ -998,8 +1009,7 @@ citadel_known_flakes() {
 # Ports train_alone: 0 when <file> passes run alone at <commit> in scratch worktree <wt> (or the commit hasn't got it), 1 when it fails; else no answer.
 citadel_alone() {
   git -C "$1" checkout -q --detach "$2" 2>/dev/null || return 2
-  [ -e "$1/$3" ] || return 0
-  (cd "$1" && timeout -k 10 "${LAND_PIN_LIMIT:-120}" nice -n 19 "$here/tools/citadel-node" --test --test-force-exit --test-timeout=60000 "$3") >>"$state/train-pin.log" 2>&1 9>&- 7>&- 6>&- </dev/null
+  "$here/tools/test-alone.sh" run "$1" "$3" >>"$state/train-pin.log" 2>&1 9>&- 7>&- 6>&- </dev/null
 }
 # Ports train_pin: the member that turns <file> red run alone here (red at the top, green on main, bisected, rechecked both sides); nothing if unsure.
 citadel_pin() {
@@ -1029,7 +1039,7 @@ citadel_main_alone() {
   [ -n "$main_wt" ] || { main_wt=$(mktemp -d "${TMPDIR:-/tmp}/land-main.XXXXXX") && git worktree add -q --detach "$main_wt" "$m" 2>/dev/null; } || { [ -z "$main_wt" ] || rm -rf "${main_wt:?}"; main_wt=''; return 2; }
   [ "$((main_runs++))" -lt 6 ] || return 2 # shortcut: at most 6 files, so a badly red main costs minutes, not an hour
   [ -e "$main_wt/$f" ] || return 0
-  (cd "$main_wt" && timeout -k 10 "${LAND_PIN_LIMIT:-120}" nice -n 19 "$here/tools/citadel-node" --test --test-force-exit --test-timeout=60000 "$f") >"$state/main-red.one" 2>&1 9>&- 7>&- 6>&- </dev/null || r=$?
+  "$here/tools/test-alone.sh" run "$main_wt" "$f" >"$state/main-red.one" 2>&1 9>&- 7>&- 6>&- </dev/null || r=$?
   cat "$state/main-red.one" >>"$state/main-red.log"
   [ "$r" != 1 ] || ! grep -q 'test timed out after' "$state/main-red.one" || r=timeout
   case $r in 0 | 1) mkdir -p "$d" && find "$d" -type f -mmin +1440 -delete 2>/dev/null; echo "$r" >"$d/$key.$$" && mv -f "$d/$key.$$" "$d/$key" ;; *) return 2 ;; esac

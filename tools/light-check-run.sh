@@ -20,7 +20,7 @@ verdict() { echo "light check: $*"; exit 0; }
 git cat-file -e "$base^{commit}" 2>/dev/null || verdict "no verdict: main's commit $base isn't in this checkout"
 out=$(mktemp) main=''
 trap 'rm -f "$out" "$out.alone"; [ -z "$main" ] || git worktree remove --force "$main" >/dev/null 2>&1' EXIT
-# The side runner keeps its workspace and citadel-heavy.yml runs no npm ci: a ship that adds a devDependency was red
+# citadel-heavy.yml's own npm ci (#1863) clears the marker below, so this is a second, quick one: a ship that adds a devDependency was red
 # here for want of it (#1789). Install when this commit's lockfile isn't the one last installed.
 lock=$(sha256sum package-lock.json 2>/dev/null | cut -d' ' -f1)
 if [ -n "$lock" ] && [ "$(cat node_modules/.light-check-lock 2>/dev/null)" != "$lock" ]; then

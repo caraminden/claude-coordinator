@@ -65,7 +65,7 @@ export function failureDetail(output: string, code: number | null): FailureDetai
         ? 'CI timeout'
         : cls === 'parse'
           ? 'parse error'
-          : cls === 'ci'
+          : cls === 'ci' || cls === 'no-answer'
             ? 'CI or runner problem'
             : cls === 'boot-copy'
               ? 'boot check'

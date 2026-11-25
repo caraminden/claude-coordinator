@@ -461,6 +461,9 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
   if (/a \.ts file does not parse|^land: smoke: .*SyntaxError/m.test(output)) return k('parse', 'Kind: parse error (a .ts file does not parse, which would stop the server). Yours, not infra: the lines below name the file and line; fix it, re-test, hand off again.');
   // A burn-in red (#1443) quotes the failing copy's output, which can hold a "passed alone" line: still the ship's own.
   if (/failed its burn-in in CI/.test(output)) return k('burn-in', 'Kind: a new or changed test failed its burn-in (racy when run as copies at once). Yours: fix the race (a shared path, a fixed port, a timing assumption), not the wait; run it with tools/burn-in.sh <file>, then hand off again.');
+  // The fallback's no-answers on perigee (#1863): the log shown above them can hold a ✖ of a file that then passed alone.
+  if (/^land: .*(ran out of its time limit and no test is known to be|packages the tests import could not be installed)/m.test(output))
+    return k('no-answer', 'Kind: the suite on perigee gave no answer (it ran out of time, or its packages could not be installed). Not yours: nothing is known to fail in your change. Hand off again; if it repeats, tell the Taskmaster.');
   const testsRed = /tests failed on the rebased branch/.test(output) || failedFiles.length > 0;
   if (!testsRed && /failed in its setup step|runner clock:|the runner needs fixing/.test(output)) return k('ci', 'Kind: CI or runner problem. Not yours: nothing in your change failed. Hand off again; if it repeats, tell the Taskmaster.');
   // Only the copy's own troubles: node marks every SQL error, the change's own too, ERR_SQLITE_ERROR.

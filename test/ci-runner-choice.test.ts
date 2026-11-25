@@ -158,3 +158,12 @@ test("main's run and heavy jobs ask Citadel before they start, with their own ru
   assert.ok(ask.includes("if: ${{ !startsWith(github.ref, 'refs/heads/land/') }}"), "only a ship's run in line starts unasked: a check and an early run ask (#1906)");
   assert.ok(yml.indexOf(ask) < yml.indexOf('- name: the full suite') && !yml.includes('wait for the lands'), 'nothing waits on the runner');
 });
+
+// HE1 (#1863): a heavy job's `npm test` and a flake proof of a property test could never be green: no packages there.
+test('every workflow that runs the tests installs their packages after its checkout', () => {
+  for (const f of ['tests', 'citadel-heavy', 'flake-proof']) {
+    const yml = read(`.github/workflows/${f}.yml`);
+    const at = yml.indexOf('run: npm ci --ignore-scripts --no-audit --no-fund');
+    assert.ok(at > yml.indexOf('actions/checkout@'), f);
+  }
+});

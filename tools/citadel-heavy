@@ -111,6 +111,7 @@ fi
 dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
 who=${CITADEL_HEAVY_WHO:-$(id -un 2>/dev/null || echo someone)}
 what=${CITADEL_HEAVY_WHAT:-$*}
+who=${who//[$'\t\n']/ } what=${what//[$'\t\n']/ } # one line each: the slot and wait files are read a line at a time (#1863)
 first=${CITADEL_HEAVY_PRIORITY:+1}
 [ ${#what} -le 100 ] || what="${what:0:97}..."
 poll=${CITADEL_HEAVY_POLL:-2}
@@ -176,6 +177,8 @@ judge() {
       return c % 2 ? v[(c + 1) / 2] : (v[c / 2] + v[c / 2 + 1]) / 2
     }
     BEGIN { mine = scheme(who) "\t" key(what) }
+    # A job that failed at once says nothing about how long it takes (#1863).
+    $7 != 0 && $6 < min_run { next }
     $6 ~ /^[0-9]+$/ && scheme($2) "\t" key($3) == mine { seen++; run[seen % 5] = $6 + 0; cpu[seen % 5] = $9 }
     END {
       if (!seen) { print guess, "no past runs of it" (guess == "heavy" ? "; the caller guessed heavy" : ""); exit }
@@ -235,16 +238,19 @@ if [ -z "$here$first" ] && slug=$("${ci[@]}" --repo); then
     done
     printf '%s: %s (since %s, pid %s)\n' "$who" "$what" "$(date +%H:%M)" "$$" >"$dir/ci-$key-$cislot.who" 2>/dev/null
   fi
-  t1=$(us) fell=$(mktemp)
-  CITADEL_HEAVY_FALLBACK_FILE=$fell "${ci[@]}" "$@"
+  t1=$(us) fell=$(mktemp) ran=$(mktemp)
+  CITADEL_HEAVY_FALLBACK_FILE=$fell CITADEL_HEAVY_RAN_FILE=$ran "${ci[@]}" "$@"
   status=$?
   # The file, not the status, says nothing ran there: a command may exit 120 itself.
   [ -s "$fell" ] && status=fallback
-  rm -f "$fell"
+  # What the runner worked on it, so the wait for a runner counts as waiting, not as how long the job takes (#1863).
+  all=$((($(us) - t1) / 1000000)) took=$(cat "$ran" 2>/dev/null)
+  [[ $took =~ ^[0-9]{1,7}$ ]] && [ "$took" -le "$all" ] || took=$all
+  rm -f "$fell" "$ran"
   [ -z "$cislot" ] || { rm -f "$dir/ci-$key-$cislot.who"; exec 5>&-; }
   if [ "$status" != fallback ]; then
     # 75: handed over to Citadel for ships, so it took no time here.
-    [ "$status" = 75 ] || { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$(((t1 - t0) / 1000000))" "$((($(us) - t1) / 1000000))" "$status" >>"$dir/history"; } 2>/dev/null
+    [ "$status" = 75 ] || { printf '%s\t%s\t%s\tci:%s\t%s\t%s\t%s\t-\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$slug" "$(((t1 - t0) / 1000000 + all - took))" "$took" "$status" >>"$dir/history"; } 2>/dev/null
     exit "$status"
   fi
 fi

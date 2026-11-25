@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { test } from 'node:test';
-import { land, env, git, setup, withRealDeploy } from './land-fixture.ts';
+import { DEP, depsRepo, land, env, git, setup, withRealDeploy } from './land-fixture.ts';
 import { until } from './wait.ts';
 
 test('the real deploy.sh takes the lock land.sh holds, lets go of it once the restart is queued, and skips the tests land.sh just ran', () =>
@@ -124,6 +124,51 @@ test('deploy.sh tests again when a file outside the commit was in the worktree (
     });
   }
 });
+
+// Every minion worktree has an ignored node_modules and the live checkout has none (#1863): land.sh took the folder for a
+// stray and tested again in the live checkout, where the tests couldn't import a package, so good code could not ship.
+const withDeps = (body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>) => Promise<{ stderr: string }>, runs: () => string[], npmRuns: () => string[]) => Promise<void>) =>
+  withRealDeploy(async (r, run, runs) => {
+    const { npmBin, npmRuns } = depsRepo(r.dir, r.source);
+    r.commit(r.source, 'test/dep.test.mjs', `import '${DEP}';\n`);
+    git(r.wt, 'rebase', '-q', 'main');
+    const PATH = `${npmBin}:${join(r.dir, 'bin')}:${process.env.PATH}`;
+    await body(r, (script, cwd, extra = {}) => run(script, cwd, { PATH, ...extra }), runs, npmRuns);
+  });
+const deploySh = join(import.meta.dirname, '..', 'tools', 'deploy.sh');
+
+test('a ship tested here gets past a suite that imports a package: its own node_modules is no stray, so it is tested once', () =>
+  withDeps(async (r, run, runs, npmRuns) => {
+    mkdirSync(join(r.wt, 'node_modules', DEP), { recursive: true }); // a minion's own folder
+    writeFileSync(join(r.wt, 'node_modules', DEP, 'package.json'), '{"version":"1.0.0"}');
+    writeFileSync(join(r.wt, 'node_modules', DEP, 'index.js'), '');
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const res = await run(land, r.wt);
+    assert.match(res.stderr, /skipping the tests: land\.sh just ran them on/);
+    assert.match(res.stderr, /live now: the server restarted on/);
+    assert.deepEqual(runs(), [r.wt], 'the suite ran once, in the worktree');
+    assert.deepEqual(npmRuns(), []);
+  }));
+
+test('a hand-run deploy.sh gets past a suite that imports a package, and the live checkout keeps none', () =>
+  withDeps(async (r, run, runs) => {
+    const res = await run(deploySh, r.source);
+    assert.match(res.stderr, /running the tests[\s\S]*live now: the server restarted on/);
+    assert.deepEqual(runs(), [r.live]);
+    assert.ok(!existsSync(join(r.live, 'node_modules')), 'the link went with the run');
+  }));
+
+test('a hand-run deploy.sh whose packages cannot be installed says no test ran, and deploys nothing', () =>
+  withDeps(async (r, run, runs) => {
+    const was = git(r.live, 'rev-parse', 'HEAD');
+    await assert.rejects(run(deploySh, r.source, { FAKE_NPM_FAIL: '1' }), (e: { stdout?: string; stderr?: string }) => {
+      assert.match(e.stderr!, /no test ran: the packages the tests import could not be installed/);
+      assert.doesNotMatch(e.stderr!, /tests failed/);
+      return true;
+    });
+    assert.deepEqual(runs(), []);
+    assert.equal(git(r.live, 'rev-parse', 'HEAD'), was);
+  }));
 
 test('deploy.sh on its own, or told of a different tested commit, still runs the tests', async () => {
   for (const tested of [undefined, 'stale']) {

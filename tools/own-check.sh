@@ -213,6 +213,5 @@ own_check_run() {
 # at that commit, or the commit hasn't got it; 1: fails; anything else (a checkout that failed, LAND_PIN_LIMIT s) is no answer.
 own_alone() {
   git -C "$1" checkout -q --detach "$2" 2>/dev/null || return 2
-  [ -e "$1/$3" ] || return 0
-  (cd "$1" && timeout -k 10 "${LAND_PIN_LIMIT:-120}" nice -n 19 "$tools/citadel-node" --test --test-force-exit --test-timeout=60000 "$3") >>"$state/own-check-pin.log" 2>&1 9>&- 7>&- 6>&- 5>&- </dev/null
+  "$tools/test-alone.sh" run "$1" "$3" >>"$state/own-check-pin.log" 2>&1 9>&- 7>&- 6>&- 5>&- </dev/null
 }

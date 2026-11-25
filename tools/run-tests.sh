@@ -48,6 +48,11 @@
 #
 # Exit 3: no test ran, because its temp file or log could not be written (a full or read-only TMPDIR, an unwritable
 # log): a line on stderr says which, so the caller doesn't call it a red run (#553 F12a). node --test never exits 3.
+# Exit 4: no test ran, because the packages of package-lock.json aren't here and couldn't be had (#1863). A checkout with
+# none (the live one, an old minion's worktree) gets a link to the shared ones while this runs (tools/test-deps.sh).
+#
+# A run stopped at its time limit names the files with a failed test so far ("had a failed test when it was stopped: "),
+# so land.sh can tell a ship's own red from a run that only ran out of time.
 set -uo pipefail
 log=$1
 limit=${DEPLOY_TEST_TIMEOUT:-600}
@@ -110,7 +115,7 @@ rerun_alone() {
   fi
   SECONDS=0
   real=
-  trap 'rm -f "$failed" "$progress" "$progress.tmp"' EXIT
+  trap done_files EXIT
   for i in "${!files[@]}"; do
     f=${files[$i]}
     rerun_counts "$i" "$f"
@@ -161,6 +166,16 @@ rerun_alone() {
 failed=$(mktemp) || { echo "run-tests: could not make a temp file in ${TMPDIR:-/tmp} (full, or not writable), so no test ran" >&2; exit 3; }
 : >"$log" || { rm -f "$failed"; echo "run-tests: could not write the log $log, so no test ran" >&2; exit 3; }
 
+linked=
+done_files() { rm -f "$failed" "$progress" "$progress.tmp"; [ "$linked" != linked ] || rm -f node_modules; }
+# The packages the tests import, for a checkout with a lockfile: linked in for this run when the checkout has none.
+need_deps() {
+  [ -e package-lock.json ] || return 0
+  linked=$("$tools/test-deps.sh" . 2>>"$log") && return 0
+  echo "run-tests: the packages package-lock.json names aren't here and couldn't be installed ($(tail -n 1 "$log")), so no test ran" | tee -a "$log" >&2
+  exit 4
+}
+
 # CI's rerun step: no full run, only the reruns the full run's step left (tests.yml).
 if [ -n "$from" ]; then
   rm -f "$failed"
@@ -169,6 +184,8 @@ if [ -n "$from" ]; then
   [[ $rc =~ ^[0-9]+$ ]] || rc=1
   parse_failed
   [ "${#files[@]}" -gt 0 ] || exit "$rc"
+  trap done_files EXIT
+  need_deps
   rerun_alone
 fi
 
@@ -250,12 +267,14 @@ fi
 
 unset CITADEL_TEST_PROGRESS # the reruns below write their own counts (rerun_counts)
 rm -f "$progress" "$progress.tmp"
-trap 'rm -f "$failed" "$progress" "$progress.tmp"' EXIT
+trap done_files EXIT
+need_deps
 started=$SECONDS
 # node --test with its files started longest first (tools/suite-runner.ts, #1565): the same tests, limits and reporters.
 CITADEL_TEST_PROGRESS_TO=$progress timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" "$tools/suite-runner.ts" --concurrency "$concurrency" --timeout "$test_limit" "${guard[@]}" \
   --failed-to "$failed" -- "${targets[@]}" >>"$log" 2>&1
 rc=$?
+red_files=$(sed -n 4p "$progress" 2>/dev/null) || red_files=
 rm -f "$progress" "$progress.tmp"
 load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || load='?'
 # 124: timeout stopped it at the limit. 137 is timeout's KILL after a TERM that didn't take, but only past the limit:
@@ -264,6 +283,7 @@ load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || load='?'
 ran=$((SECONDS - started))
 if [ "$rc" -eq 124 ] || { [ "$rc" -eq 137 ] && [ "$ran" -ge "$limit" ]; }; then
   echo "run-tests: the tests ran past ${limit}s and were stopped: a test hung (the files still running are named on the \"still running:\" lines above)." | tee -a "$log" >&2
+  [ -z "$red_files" ] || say "had a failed test when it was stopped: ${red_files//$'\t'/ }"
 elif [ "$rc" -gt 128 ]; then
   echo "run-tests: the tests were killed (exit $rc) after ${ran}s, before the ${limit}s limit: stopped from outside (the out-of-memory killer?), not a hang, so this run says nothing about the change" | tee -a "$log" >&2
 fi

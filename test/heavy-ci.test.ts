@@ -114,7 +114,7 @@ else if (url.endsWith('/runs/7') && mode === 'held') {
   // mode blip: the first read of the jobs and of the log each fail once; skip: the jobs never read.
   fs.writeFileSync(path.join(dir, 'blip-' + url.split('/').pop()), '');
   process.stderr.write('HTTP 502: Bad Gateway\\n'); process.exit(1);
-} else if (url.endsWith('/runs/7/jobs')) out({ jobs: [{ id: 9, runner_name: mode === 'queued' ? null : 'ci-r-1' }] });
+} else if (url.endsWith('/runs/7/jobs')) out({ jobs: [{ id: 9, runner_name: mode === 'queued' ? null : 'ci-r-1', started_at: '2026-11-20T10:00:00Z', completed_at: '2026-11-20T10:00:' + (process.env.FAKE_GH_TOOK || '00') + 'Z' }] });
 else if (url.endsWith('/jobs/9/logs') && !escapes) { process.stderr.write('the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway\\n'); process.exit(1); }
 else if (url.endsWith('/jobs/9/logs')) out(['2026-11-20T10:00:00Z \x1b[36;1mset -e\x1b[0m', '2026-11-20T10:00:01Z ${BEGIN}', '2026-11-20T10:00:02Z hello from CI', '2026-11-20T10:00:03Z ${END}3 ==='].join('\\n'));
 else { process.stderr.write('fake gh: no ' + url + '\\n'); process.exit(1); }
@@ -233,6 +233,27 @@ test('busy runners keep the job waiting on CI: it never comes back to perigee', 
   assert.equal(res.status, 3, res.stderr);
   assert.equal(res.stdout, 'hello from CI\n');
   assert.ok(!existsSync(join(r.gh, 'cancelled')));
+});
+
+// HE3 (#1863): the light/heavy judge reads the run column, and a quick job that waited long for a runner read as a long one.
+test("a CI job's history line counts its wait for a runner as waiting, and only the runner's time on it as its run", () => {
+  const r = repo();
+  const at = (t: string) => {
+    assert.equal(run(r, 'busy', { CITADEL_HEAVY_CI_POLL: '0.2', FAKE_GH_TOOK: t, CITADEL_HEAVY_CI_QUEUE: '60' }).status, 3);
+    rmSync(join(r.gh, 'polls'));
+    return readFileSync(join(r.gh, 'locks', 'history'), 'utf8')
+      .trim()
+      .split('\n')
+      .at(-1)!
+      .split('\t')
+      .slice(4, 6)
+      .map(Number);
+  };
+  const [wait, ran] = at('01');
+  assert.equal(ran, 1, 'the second the runner worked on it');
+  assert.ok(wait >= 1, `it waited ${wait} s`);
+  const [, odd] = at('59');
+  assert.ok(odd < 59, 'never more than the time that passed here');
 });
 
 test("a ship's CI run goes first: a new heavy job waits for it before it is dispatched, and never runs on perigee", () => {

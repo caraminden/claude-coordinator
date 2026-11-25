@@ -144,13 +144,28 @@ test('a test that hangs is stopped at the time limit, says so, and lets go of th
   const r = setup();
   r.commit(r.wt, 'test/ok.test.mjs', "import { test } from 'node:test';\ntest('hangs', () => new Promise(() => setInterval(() => {}, 1000)));\n");
   const main = git(r.source, 'rev-parse', 'main');
-  const res = r.run({ DEPLOY_TEST_TIMEOUT: '2' });
+  // It hangs alone too, and passes on main, so it is the ship's own (#1863); 3 s is enough to tell a hang by.
+  const res = r.run({ DEPLOY_TEST_TIMEOUT: '2', LAND_PIN_LIMIT: '3' });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /the tests ran past 2s and were stopped: a test hung/);
   assert.match(res.stderr, /tests failed on the rebased branch/);
   assert.equal(git(r.source, 'rev-parse', 'main'), main);
   const lock = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'lock');
   assert.equal(spawnSync('flock', ['-n', lock, 'true']).status, 0, 'the deploy lock is free');
+});
+
+// 6 of 9 fallbacks on perigee hit the 600 s limit, and each told its minion its own tests had failed (#1863).
+test('a suite that only ran out of time is no verdict on the ship: refused, and never as its own failed tests', () => {
+  const r = setup();
+  r.commit(r.source, 'test/hang.test.mjs', "import { test } from 'node:test';\ntest('hangs', () => new Promise(() => setInterval(() => {}, 1000)));\n");
+  git(r.wt, 'rebase', '-q', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = r.run({ DEPLOY_TEST_TIMEOUT: '3', LAND_PIN_LIMIT: '3' });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /land: the suite on perigee ran out of its time limit and no test is known to be ticket\/1-x's own failure .*: that is no answer, so main is untouched/);
+  assert.doesNotMatch(res.stderr, /tests failed/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
 });
 
 test('green CI on the exact rebased commit lands it without a test run here, and the scratch branch goes', () => {
@@ -351,7 +366,8 @@ test("a retro log that can't be written changes neither a landing's output nor i
         .replace(/\b[0-9a-f]{7,40}\b/g, 'H')
         .replace(/\d\d:\d\d/g, 'T')
         .replace(/\/\d+\//g, '/N/')
-        .replace(/(passed in) \d+ s/g, '$1 N s'),
+        .replace(/(passed in) \d+ s/g, '$1 N s')
+        .replace(/its last \d+ run/g, 'its last N run'), // this file's ships share one history, so the second counts one more
     };
   });
   assert.deepEqual(runs[1], runs[0]);

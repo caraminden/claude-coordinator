@@ -37,6 +37,10 @@ jobs:
       # Deploys first (#1902): while a ship is in line this run is stopped here and Citadel starts it again (tools/ci-hold-ask.ts).
       - name: ask Citadel whether ships go first
         run: node tools/ci-hold-ask.ts
+      # As in tests.yml (#1863): without them the type check and the property tests can't run.
+      - name: devDependencies for the tests
+        if: hashFiles('package-lock.json') != ''
+        run: npm ci --ignore-scripts --no-audit --no-fund
       # Node 26 needs libatomic1, and deploy.sh, backup.sh and prune.sh the sqlite3 CLI. A fresh distro has neither,
       # and a job has no root, so until someone runs `apt-get install -y libatomic1 sqlite3` there as root they are
       # unpacked from their .debs into the runner's home.

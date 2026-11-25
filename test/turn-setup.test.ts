@@ -360,6 +360,10 @@ test('every turn finds citadel-heavy first on its PATH, pinned, with the shared 
   assert.equal(t.ciFailures, readFileSync(join(import.meta.dirname, '..', 'tools', 'ci-failures'), 'utf8'), 'ci-failures (#644) too');
   assert.deepEqual([t.replay.status, t.replay.stderr.split(' run ')[0]], [2, 'usage: citadel-replay'], 'citadel-replay (#836) runs from the pin');
   assert.deepEqual([t.where.status, t.where.stdout.split('  ')[0]], [0, '[Fast mode](#/p/3/approvals?show=fast-mode)'], 'citadel-where (#1122) runs from the pin');
+  // What citadel-heavy runs from its own folder is pinned beside it (mem-room was not, so a minion's job never waited for memory: #1863).
+  const beside = [...new Set([...t.heavy.matchAll(/\$\(dirname "\$0"\)\/([\w.-]+)/g)].map((m) => m[1]))].sort();
+  assert.deepEqual(beside, ['heavy-ci.ts', 'mem-room']);
+  for (const f of beside) assert.ok(existsSync(join(MCP_DIR, 'bin', f)), `${f} pinned beside citadel-heavy`);
   const [shims, pinBin] = t.env.PATH.split(':');
   assert.ok(!t.env.PATH.startsWith(MCP_DIR) && pinBin.endsWith('/pin/bin'), "the turn's own pinned copy, which outlives a restart");
   assert.equal(shims, join(pinBin, 'heavy'), 'the heavy-command shims before it (#1298)');

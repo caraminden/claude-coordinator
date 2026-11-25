@@ -10,6 +10,8 @@ paths:
   - "tools/deploy-queue.sh"
   - "tools/kit-land-drift.sh"
   - "tools/run-tests.sh"
+  - "tools/test-deps.sh"
+  - "tools/test-alone.sh"
   - "tools/citadel-wait"
   - "tools/citadel-heavy"
   - "tools/heavy-ci.ts"

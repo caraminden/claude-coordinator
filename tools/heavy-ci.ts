@@ -451,6 +451,8 @@ async function main(argv: string[]): Promise<number> {
       throw new Fallback(`the CI run ended ${run.conclusion} before a runner took it`);
     }
     started = true;
+    const took = Math.round((Date.parse(job?.completed_at) - Date.parse(job?.started_at)) / 1000);
+    if (took >= 0 && process.env.CITADEL_HEAVY_RAN_FILE) writeFileSync(process.env.CITADEL_HEAVY_RAN_FILE, `${took}\n`);
     const out = job ? commandOutput(ghText(`repos/${slug}/actions/jobs/${job.id}/logs`, 'reading the log')) : { lines: [], code: null };
     if (out.lines.length) process.stdout.write(out.lines.join('\n') + '\n');
     if (out.code === null) {

@@ -8,7 +8,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { ci, git, seen, setup, landAsync } from './land-fixture.ts';
+import { DEP, ci, depsRepo, git, seen, setup, landAsync } from './land-fixture.ts';
 import { line, shipped, bad, realOf, shared } from './land-train-fixture.ts';
 import { until } from './wait.ts';
 
@@ -205,6 +205,32 @@ test('a red test that only times out when run alone on main is no main red: the 
   assert.match(one.stderr, /land: tests failed on the rebased branch in CI \(https:\/\/ci\/\d+\), so main is untouched/);
   l.done();
 });
+
+// A test that could not run on main here is no proof main is red (#1863): the scratch worktree had no packages, so the type
+// check and the property tests failed on their import and a ship's own red shipped "through main's red".
+for (const [why, withLock] of [
+  ['its package is nowhere to be had', false],
+  ['it passes on main once the packages its lockfile names are there', true],
+] as const) {
+  test(`a red test whose package main's scratch worktree lacks is no main red: ${why} (#1863)`, async () => {
+    let bin = '';
+    const l = await line(
+      [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}],
+      (d) => ({ FAKE_RED_PATH: 'test/real.test.ts', ...shared(d), ...(withLock ? { PATH: `${bin}:${join(d, 'bin')}:${process.env.PATH}` } : {}) }),
+      (r) => {
+        if (withLock) bin = depsRepo(r.dir, r.source).npmBin;
+        r.commit(r.source, 'test/real.test.ts', `import '${DEP}';\n`);
+      },
+    );
+    const [first, one] = await l.go();
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(one.status, 1, one.stderr);
+    assert.match(one.stderr, /red on main\?: running test\/real\.test\.ts alone/, 'it did check main');
+    assert.doesNotMatch(one.stderr, /red on main too|SHIPPING THROUGH/);
+    assert.match(one.stderr, /land: tests failed on the rebased branch in CI \(https:\/\/ci\/\d+\), so main is untouched/);
+    l.done();
+  });
+}
 
 // Conflict prep (#1366, Cara, 2026-11-20: "we know what main WILL look like, and we can deal with the merge issues before
 // we try to ship"): ship 4 waits behind ship 2's train, which carries ship 3, and conflicts with ship 3 in a.txt. While the

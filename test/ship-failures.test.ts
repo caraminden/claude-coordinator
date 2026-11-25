@@ -49,6 +49,9 @@ test('a failed ship sums up as its kind, the first three names and "+N more", an
     more: 0,
     ci: RUN,
   });
+  // #1863: a suite stopped at its limit is no answer, though its log shows a file that then passed alone.
+  const stopped = "✖ a flaky thing (12.4ms)\nland: the suite on perigee ran out of its time limit and no test is known to be ticket/9's own failure (full log: /x): that is no answer";
+  assert.equal(failureDetail(stopped, 1).kind, 'CI or runner problem');
   assert.deepEqual(failureDetail('something odd', 1), { kind: 'failed', names: [], more: 0, ci: null });
   // The smoke check names its test with no time; a green CI run before a failed deploy isn't the try's CI run.
   assert.deepEqual(failureDetail('land: smoke: ✖ test/prompt-budget.test.ts › budget\nland: smoke: tests failed (exit 1), before the line (21 s), so nothing landed', 1), { kind: 'smoke check', names: ['budget'], more: 0, ci: null });

@@ -12,7 +12,7 @@ import { after, test } from 'node:test';
 
 // The snapshot records each file's mode, and the server's umask (077 under its unit) isn't a shell's.
 process.umask(0o022);
-const { jsonLines, lines, stopTurns, tempRoot, testPins } = await import('./helpers.ts');
+const { jsonLines, lines, stopTurns, tempRoot, testPins, until } = await import('./helpers.ts');
 const tmp = tempRoot('turn-launch-');
 const root = realpathSync(tmp.dir);
 // The delete hit ENOTEMPTY under CI load (#758): a turn's session save was still running, and its worker thread
@@ -78,7 +78,8 @@ runner.ticketsDir = (project) => join(root, 'projects', String(project.id), 'tic
 (runner as any).spawnWrapper = (wrapper: string[], dir: string) => spawned.push({ how: 'child', dir, wrapper });
 (runner as any).spawnInContainer = (place: { container: string }, dir: string, wrapper: string[]) => spawned.push({ how: `container ${place.container}`, dir, wrapper });
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// How long a wait below may take before it counts as hung. Each one ends on its condition; none ends on this.
+const SETTLE_MS = 120_000;
 /** Paths, ids and times that differ per run, by name. Longest first, so a folder inside another keeps its own name. */
 function scrub(value: unknown): any {
   let text = JSON.stringify(value);
@@ -115,7 +116,10 @@ async function launch(c: Case) {
   rmSync(units, { force: true });
   runner.units = !!c.units;
   runner.send(t.id, c.author ?? 'Cara', 'go');
-  for (let i = 0; i < 500 && !spawned.length && !lines(units).length && runner.isRunning(t.id); i++) await wait(10);
+  // Until the launch has settled, however long its files take: it copies the turn's pinned files, which ran past a fixed
+  // 5 s on a loaded box (#1924). Read while still launching, the turn looked unlaunched, was never ended, and its spawn
+  // landed in the next case's list, so every case after it failed too. The limit is only for a launch that hangs.
+  await until('the launch to start its turn or give up', () => spawned.length > 0 || lines(units).length > 0 || !runner.isRunning(t.id), SETTLE_MS);
   const notes = store
     .listEvents(t.id)
     .filter((e) => e.kind === 'note')
@@ -145,8 +149,7 @@ async function launch(c: Case) {
   writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: 0, signal: null }));
   // Its lane ends with the session save, whose worker thread opens state.db under root: wait for that too.
   const busy = () => runner.isRunning(t.id) || (runner as any).lanes.busy(t.id);
-  for (let i = 0; i < 1000 && busy(); i++) await wait(10);
-  assert.ok(!busy(), 'the turn ended and its session is saved');
+  await until('the turn to end and its session to be saved', () => !busy(), SETTLE_MS);
   return scrub(got);
 }
 
@@ -370,7 +373,7 @@ test('a pooled turn gets its Citadel tools: the wrapper starts its pool and Clau
         try {
           const [node, ...wrapper] = spawned[0].wrapper;
           const w = tmp.spawn(node, wrapper, { stdio: 'ignore' });
-          for (let i = 0; i < 3000 && !existsSync(join(dir, 'exit.json')); i++) await wait(10);
+          await until("the wrapper's exit.json", () => existsSync(join(dir, 'exit.json')) || w.exitCode !== null || w.signalCode !== null, SETTLE_MS);
           w.kill();
           exit = existsSync(join(dir, 'exit.json')) ? JSON.parse(readFileSync(join(dir, 'exit.json'), 'utf8')) : null;
           if (spec.pool) pool = readPool(spec.pool.dir);

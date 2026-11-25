@@ -89,7 +89,7 @@ export function containerPath(hostPath = ''): string {
   return [...IMAGE_PATH, ...hostPath.split(delimiter).filter((d) => d && !IMAGE_PATH.includes(d))].join(delimiter);
 }
 
-/** A short hash of every file in an image's build folder, by path and contents, so a change to any of them rebuilds it. */
+/** imageHash without blocking the event loop: the same hash. */
 export async function imageHashAsync(dir: string): Promise<string> {
   const h = createHash('sha256');
   for (const f of ((await readdir(dir, { recursive: true })) as string[]).sort()) {
@@ -98,6 +98,8 @@ export async function imageHashAsync(dir: string): Promise<string> {
   }
   return h.digest('hex').slice(0, 12);
 }
+
+/** A short hash of every file in an image's build folder, by path and contents, so a change to any of them rebuilds it. */
 export function imageHash(dir: string): string {
   const h = createHash('sha256');
   for (const f of (readdirSync(dir, { recursive: true }) as string[]).sort()) {
@@ -470,7 +472,7 @@ export class ClaudeLink {
     return join(this.dataDir, 'run', 'turns', `person-${uid}`);
   }
 
-  /** What a person's container is made of. Every mount sits at its host path, so worktrees, session folders and prompts match. */
+  /** What a person's container is made of. An async caller passes `pre` (read with checkoutMountsAsync / imageHashAsync): without it the spec spawns git and walks the image folder on the main thread.  Every mount sits at its host path, so worktrees, session folders and prompts match. */
   spec(uid: number, pre?: { checkout?: Mount[] | null; image?: string }): ContainerSpec {
     const name = this.name(uid);
     const mounts: Mount[] = [

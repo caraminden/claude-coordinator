@@ -13,6 +13,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { after, before, test } from 'node:test';
 import { codexLock } from '../src/codex-lock.ts';
 
@@ -102,7 +103,7 @@ function appServer(env: Record<string, string | undefined>) {
   };
 }
 const until = async (cond: () => boolean, ms: number) => {
-  for (const end = Date.now() + ms; !cond() && Date.now() < end; ) await new Promise((r) => setTimeout(r, 50));
+  for (const end = Date.now() + ms; !cond() && Date.now() < end; ) await sleep(50);
 };
 
 test('without the login check, app-servers started together on a stale login reuse its refresh token', { timeout: 60_000 }, async () => {

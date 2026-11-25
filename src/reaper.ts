@@ -21,6 +21,7 @@ import { promisify } from 'node:util';
 import { readdir, readFile, readlink, stat } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 /** One process of this account, as /proc tells it. */
 export interface Proc {
@@ -328,7 +329,7 @@ export class Reaper {
     const deadline = Date.now() + this.o.termWaitMs;
     let left = sent;
     while (left.length && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 200));
+      await sleep(200);
       left = (await Promise.all(left.map(async (x) => ((await startOf(x.proc.pid)) === x.proc.start ? x : null)))).filter((x): x is T => !!x);
     }
     for (const x of left) {

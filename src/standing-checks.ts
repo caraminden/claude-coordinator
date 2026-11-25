@@ -9,6 +9,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import type { Store } from './db.ts';
 import { nextRun } from './schedules.ts';
@@ -420,7 +421,7 @@ export class StandingChecks {
   }
 
   private async confirm(first: Finding[], integrity: boolean, kept: Kept | null) {
-    await (this.d.wait ?? ((ms) => new Promise((r) => setTimeout(r, ms).unref())))(this.d.confirmMs ?? CONFIRM_MS);
+    await (this.d.wait ?? ((ms) => sleep(ms, undefined, { ref: false })))(this.d.confirmMs ?? CONFIRM_MS);
     const seen = new Set(first.map((f) => f.key));
     const found = (await this.pass(await this.snapshot(), integrity)).filter((f) => seen.has(f.key) || f.check === 'db-integrity');
     if (!integrity) found.push(...this.lastIntegrity(kept));

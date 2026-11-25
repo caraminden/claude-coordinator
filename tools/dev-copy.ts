@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, openSync, closeSync, readFileSync, realpathSync,
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { copyDb } from '../src/db-copy.ts';
 import { freePort } from '../src/ports.ts';
 import { previewEnv, scrub } from '../src/previews.ts';
@@ -92,7 +93,7 @@ function readState(): State | null {
 const running = (s: State | null) => !!s && started(s.pid) === s.started;
 
 async function waitGone(pid: number, start: string, ms: number): Promise<boolean> {
-  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 100))) if (started(pid) !== start) return true;
+  for (const end = Date.now() + ms; Date.now() < end; await sleep(100)) if (started(pid) !== start) return true;
   return started(pid) !== start;
 }
 
@@ -168,7 +169,7 @@ async function start(args: string[]): Promise<void> {
     rmSync(home, { recursive: true, force: true });
     return refuse(`${why}${out ? `\n--- server output ---\n${out}` : ''}`);
   };
-  for (const deadline = Date.now() + BOOT_TIMEOUT_MS; ; await new Promise((r) => setTimeout(r, 200))) {
+  for (const deadline = Date.now() + BOOT_TIMEOUT_MS; ; await sleep(200)) {
     if (!started(holder.pid!)) await fail('the server exited during boot');
     if (Date.now() > deadline) await fail(`the server did not answer within ${BOOT_TIMEOUT_MS / 1000} s`);
     const health = await fetch(`${url}api/health`, { signal: AbortSignal.timeout(2000) }).then(

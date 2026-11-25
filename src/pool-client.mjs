@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { request } from 'node:http';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 /**
  * Where one version's pool lives and how to start it; `systemdRun` (the host) runs it in its own unit, so it outlives the turn that started it.
@@ -74,9 +75,6 @@ function call(port, method, path, headers = {}, body) {
     req.end(body);
   });
 }
-
-/** @param {number} ms */
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * This place's pool for `spec.version`, started if none answers; throws if it can't start within about 20 s (a loaded box is slow to load it).

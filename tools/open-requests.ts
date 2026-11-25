@@ -7,6 +7,7 @@
 // for `--quiet` ms more, and counts the requests to api/ (the event stream itself left out) with
 // Resource Timing. It prints the count and each path's tally; `--max` exits 1 when the count passes it.
 // The count moves a little between runs (presence, chat images, what the seed has waiting).
+import { setTimeout as sleep } from 'node:timers/promises';
 import { open } from './ui-shot.ts';
 
 const arg = (name: string, fallback: string) => {
@@ -16,7 +17,6 @@ const arg = (name: string, fallback: string) => {
 const route = arg('route', '#/p/2');
 const quiet = Number(arg('quiet', '5000'));
 const max = Number(arg('max', '0'));
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Waits for the page's body only: ui-measure gives the app 15 s to draw, which a busy box can pass. The wait below is longer.
 const page = await open(route, { args: ['--wait', 'body'] });

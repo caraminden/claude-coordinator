@@ -9,6 +9,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 /** A run starts with at least this much life in the access token (seconds), far from Codex's own 5-minute refresh. */
 export const MARGIN_S = 24 * 3600;
@@ -160,7 +161,7 @@ export async function codexLock(home: string, onWait: () => void, opts: { env?: 
       else {
         // A login check takes a second or so: only a longer wait is worth a line in the chat.
         if (!said && now() - began >= noteMs) (said = true), onWait();
-        await new Promise((r) => setTimeout(r, said ? 1000 : 200));
+        await sleep(said ? 1000 : 200);
       }
     }
   }

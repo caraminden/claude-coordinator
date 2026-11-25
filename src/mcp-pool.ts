@@ -8,6 +8,7 @@ import { linkSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'n
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { handle } from './mcp.ts';
 import { poolAlive } from './pool-client.mjs';
 import { beatWhileOpen, turnStore, type TurnContext } from './pool-context.ts';
@@ -163,7 +164,7 @@ async function bind(): Promise<boolean> {
   for (const end = Date.now() + 10_000; last; ) {
     if (await listen(last)) return true;
     if (Date.now() > end) break;
-    await new Promise((r) => setTimeout(r, 500));
+    await sleep(500);
   }
   return listen(0);
 }

@@ -17,13 +17,13 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 export const FALLBACK = 120;
 export const BEGIN = '=== citadel-heavy: the command starts ===';
 export const END = '=== citadel-heavy: the command exited ';
 const WORKFLOW = 'citadel-heavy.yml';
 const say = (text: string) => process.stderr.write(`citadel-heavy: ${text}\n`);
-const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
 
 /** owner/repo from a github.com remote URL (https or ssh), else null. */
 export function slugOf(url: string): string | null {
@@ -168,7 +168,7 @@ async function waitForShips(slug: string, poll: number) {
       say(`waiting for ${n} ship run(s) on CI to finish first (${Math.round((Date.now() - from) / 60000)} min)`);
       told = Date.now();
     }
-    await sleep(poll);
+    await sleep(poll * 1000);
   }
 }
 
@@ -329,7 +329,7 @@ async function main(argv: string[]): Promise<number> {
         /* a blip: looked again until the limit */
       }
       if (!runId && Date.now() - from >= findLimit * 1000) throw new Fallback(`GitHub took the workflow but showed no run for it in ${findLimit} s`);
-      if (!runId) await sleep(Math.min(2, poll));
+      if (!runId) await sleep(Math.min(2, poll) * 1000);
     }
     let queued = Date.now();
     const asked = queued;
@@ -371,7 +371,7 @@ async function main(argv: string[]): Promise<number> {
         if (told) say(`still ${started ? 'running' : 'waiting for a runner'} (${Math.round((Date.now() - asked) / 60000)} min)`);
         told = Date.now();
       }
-      await sleep(poll);
+      await sleep(poll * 1000);
       run = await read();
     }
     const job = gh([`repos/${slug}/actions/runs/${runId}/jobs`], 'reading the job').jobs?.[0];

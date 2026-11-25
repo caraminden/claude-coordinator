@@ -4,6 +4,7 @@
 // list the session opens at tools/list, and every session that opens refreshes the list.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { callEnv } from './pool-context.ts';
 import { thrown } from './thrown.ts';
 
@@ -131,7 +132,7 @@ async function open(api: string, route: string, machine: number, server: string,
       why = `could not reach the app: ${e.message}`;
     }
     if (Date.now() - started > 20_000) throw new Error(why);
-    await new Promise((r) => setTimeout(r, 1000));
+    await sleep(1000);
   }
   let markReady!: (l: Link) => void;
   let fail!: (e: Error) => void;

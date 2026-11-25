@@ -13,6 +13,7 @@
 // one ~10 s entry with no load at all, while frames keep coming every 17 ms; input delay and long tasks hold.
 // --dismissed-open opens the Dismissed list first, so every redraw builds its rows too. --max-delay exits 1 when the worst input delay passes it. --profile saves a CPU profile for DevTools.
 import { writeFileSync } from 'node:fs';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { open } from './ui-shot.ts';
 
 const arg = (name: string, fallback: string) => {
@@ -43,7 +44,6 @@ const INIT = `
   addEventListener('keydown', (e) => { if (__lag.on) { __lag.keys++; __lag.delay = Math.max(__lag.delay, performance.now() - e.timeStamp); } }, true);
 `;
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const page = await open(route, { width });
 let failed = false;
 try {

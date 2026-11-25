@@ -1,7 +1,7 @@
 // tools/land.sh itself: the rebase, its test run or CI gate, conflicts and refusals.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { test } from 'node:test';
 import { land, env, git, setup, landAsync, tickets, issued, ci, quietProc, stopShip } from './land-fixture.ts';
@@ -1758,6 +1758,60 @@ test("a clean smoke check lands as before, its time outside the timing line; tes
   const off = smokeSetup();
   assert.equal(off.smoke({ SMOKE_EXIT: '1', LAND_SMOKE: '0' }).status, 0);
   assert.deepEqual(off.ran(), []);
+});
+
+// #1983: eight ships on 2026-11-25 waited up to 70 minutes in line to hear they were over the size list. The real repo-wide
+// list and the real size test (its list of allowed giants emptied: the fixture has none of them), run by the real citadel-test.
+test('a branch over the file size limit is refused by the smoke check, before the line (#1983)', () => {
+  const r = setup();
+  const size = `test/${'size-budget'}.test.ts`; // built, not quoted: test/pipeline-files.test.ts reads quoted test names
+  for (const f of ['tools/citadel-test', 'tools/citadel-test-reporter.ts', 'tools/citadel-node', 'tools/citadel-node.cjs', 'tools/mem-room', 'test/leak-guard.ts', 'test/leak-file.ts', 'package.json', size]) cpSync(join(repo, f), join(r.source, f));
+  const real = readFileSync(join(repo, size), 'utf8');
+  const bare = real.replace(/(export const ALLOWED[^\n]* = \{)\n[^]*?\n\};/, '$1};');
+  assert.notEqual(bare, real);
+  writeFileSync(join(r.source, size), bare);
+  const listed = readFileSync(join(repo, 'tools/always-tests.txt'), 'utf8').split('\n');
+  writeFileSync(join(r.source, 'tools/always-tests.txt'), `${listed.filter((l) => l === size).join('\n')}\n`);
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'size check');
+  git(r.wt, 'rebase', '-q', 'main');
+  r.commit(r.wt, 'tools/big.sh', ':\n'.repeat(1501));
+  const main = git(r.source, 'rev-parse', 'main');
+  const own = { CITADEL_TEST_EXTRA: '0', TMPDIR: r.dir };
+  const res = r.run(own);
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /^land: smoke: .*tools\/big\.sh: 1501 lines, limit 1500/m);
+  assert.match(res.stderr, /^land: smoke: tests failed \(exit 1\), before the line/m);
+  assert.doesNotMatch(res.stderr, /^(queue|land: rebasing)/m, 'it never got in line');
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  r.commit(r.wt, 'tools/big.sh', ':\n'.repeat(1500));
+  const ok = r.run(own);
+  assert.equal(ok.status, 0, ok.stderr);
+});
+
+test('a commit that lost its #N: title is refused by the smoke check, before the line; a branch with no #N titles is not (#1983)', () => {
+  const r = setup();
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  git(r.wt, 'commit', '-q', '--amend', '-m', 'lost it');
+  git(r.wt, 'commit', '-q', '--allow-empty', '-m', '#1: kept');
+  const tip = git(r.wt, 'rev-parse', 'HEAD');
+  const main = git(r.source, 'rev-parse', 'main');
+  const shared = join(r.dir, 'shared');
+  const res = r.run({ COORDINATOR_SHARED_DIR: shared });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /^land: smoke: commit [0-9a-f]+ \("lost it"\) lost its #N: title/m);
+  assert.match(res.stderr, /^land: smoke: a commit title is wrong, before the line \(\d+ s\), so nothing landed and nobody waited on it\./m);
+  assert.doesNotMatch(res.stderr, /^(queue|land: rebasing)/m, 'it never got in line');
+  assert.equal(git(r.wt, 'rev-parse', 'HEAD'), tip);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+  assert.match(landLog(shared), /· smoke · ticket\/1-x · a commit title is wrong · \d+s$/m);
+  // The check at the front stays, for what the line or the rebase changed.
+  const late = r.run({ LAND_SMOKE: '0' });
+  assert.equal(late.status, 1);
+  assert.match(late.stderr, /^land: rebasing [^]*lost its #N: title/m);
+  git(r.wt, 'reset', '-q', '--hard', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n'); // "b.txt: mine": no title of it starts "#N"
+  assert.equal(r.run().status, 0);
 });
 
 test("the smoke check refuses a .ts file that doesn't parse, by the branch's tools/parse-check.ts (#1012)", () => {

@@ -44,7 +44,7 @@
 #    doesn't refuse; a file's id stands for every test in it. A check that timed out, or a CI workflow still running,
 #    is never waived. With no SMOKE_CMD (or LAND_SMOKE=0) fast mode is off: a land with no check at all takes the gate.
 # 0. The smoke check, before it gets in line, so what fails in seconds never holds the line: whether the rebase onto
-#    main would conflict (git merge-tree), then SMOKE_CMD, the scheme's quick check, if it sets one, then (EARLY_CHECK)
+#    main would conflict (git merge-tree), commit titles, then SMOKE_CMD, the scheme's quick check, if it sets one, then (EARLY_CHECK)
 #    CHECK_LIGHT on the branch rebased onto main, so a red light check is refused before the line too. A fail says
 #    "smoke: …" and exits 1. LAND_SMOKE=0 skips it.
 # 1. Rebases the branch onto the local main. A conflict stops here, unless MERGES has a rule for the file (ship-time
@@ -2597,6 +2597,7 @@ smoke() {
   local t0=$SECONDS out rc=0 passed=1
   say "smoke: checking $branch before it queues"
   early_conflict "$pre" "before the line" || refuse "smoke: it conflicts with $BRANCH, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test, commit, then run this again"
+  [ "$mode" != land ] || titles "nothing landed and nobody waited on it" "refs/heads/$BRANCH..$pre" # again on the rebased commit (#1983)
   early_plan
   # A SMOKE_CMD that is the early check's own command runs once, on the rebase.
   if [ -n "$SMOKE_CMD" ] && [ "$SMOKE_CMD" != "$early_cmd" ]; then

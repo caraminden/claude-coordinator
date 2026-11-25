@@ -9,7 +9,7 @@
 # wait for its verdict (the restart lock, #566). If that restart was rolled back and its commit came off main,
 # steps 1 and 2 are done again without it.
 # 0. The smoke check (#1012), before it gets in line, so what fails in seconds never holds the line: a trial rebase
-#    (git merge-tree), tools/parse-check.ts, and through tools/citadel-test the always-tests plus the test files the
+#    (git merge-tree), tools/commit-titles.sh, tools/parse-check.ts, and through tools/citadel-test the always-tests plus the test files the
 #    branch changes. A fail says "smoke: …", logs a smoke line to the retro log and no timing line. See smoke() below.
 #    Then, with others in line and the one check runner free, its own check (#1567, tools/own-check.sh): its CI on that
 #    runner before it joins the line, so a ship red on its own goes back to its minion without holding anyone up.
@@ -487,13 +487,18 @@ if [ -n "$check" ]; then
   exit 0 # --full: no rebase, so nothing to check
 fi
 
+# Commit titles (#1489): a rebase stopped on a conflict and continued with GIT_EDITOR=true used to read "#N: ..." as a comment
+# and drop it. One line in $lost naming the first commit that lost its title while a sibling kept theirs; a plain scheme has none.
+lost_title() {
+  [ "$mode" = build ] || [ ! -x "$tools/commit-titles.sh" ] || lost=$("$tools/commit-titles.sh" "$([ "$mode" = into ] && echo "refs/heads/$build" || echo main)" 2>&1)
+}
 # The smoke check (#1012): before the line, the checks that fail in seconds, so a land they refuse never waits in line
 # or for CI (#1006: about 40 of 86 refusals at the lock were these). It reads the branch's own tools (a repo without
 # one skips that check). Tests that run past LAND_SMOKE_TIMEOUT (300 s) don't decide: CI still runs everything.
 # shortcut: the tests run on the branch as it is, not on its rebase onto main; a break only the two together make
 # still meets CI in line. Run them on a merge-tree commit if those show up. Off: LAND_SMOKE=0.
 smoke() {
-  local t0=$SECONDS out rc=0 tests=() f
+  local t0=$SECONDS out rc=0 tests=() f lost
   smoke_fail() {
     retro_log "smoke · $label · $1 · $((SECONDS - t0))s"
     refuse "smoke: $1, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test (citadel-test), commit, then run this again${formatted:+. tools/land.sh $formatted}"
@@ -503,6 +508,7 @@ smoke() {
     under=$(under_of)
     early_check main "before the line" || smoke_fail "it conflicts with main"
   fi
+  lost_title || { say "smoke: $lost"; smoke_fail "a commit title is wrong"; } # what waited in line to hear it (#1983)
   if [ -f tools/parse-check.ts ]; then
     out=$("$tools/citadel-node" --no-warnings tools/parse-check.ts 2>/dev/null) || true
     [ -z "$out" ] || { sed 's/^/land: smoke: /' <<<"$out" >&2; smoke_fail "a .ts file does not parse"; }
@@ -925,11 +931,7 @@ if [[ $mode = land || $mode = into ]] && [ -f test/prompt-budget.test.ts ] && ! 
   regen_run "${n:+#$n: }test/prompt-baseline.json measured again at ship time" "PROMPT_BASELINE=write $(printf %q "$tools/citadel-node") --no-warnings --test test/prompt-budget.test.ts >/dev/null 2>&1 || true" test/prompt-baseline.json
 fi
 
-# Commit titles (#1489): a rebase stopped on a conflict and continued with GIT_EDITOR=true used to read "#N: ..." as a comment
-# and drop it. One line naming the first commit that lost its title while a sibling kept theirs; a plain scheme has none.
-if [ "$mode" != build ] && [ -x "$tools/commit-titles.sh" ]; then
-  lost=$("$tools/commit-titles.sh" "$([ "$mode" = into ] && echo "refs/heads/$build" || echo main)" 2>&1) || refuse "$lost. Nothing landed"
-fi
+lost_title || refuse "$lost. Nothing landed" # again on the rebased commit, after the smoke check
 
 # The undo guard (#677, after Peek Auras #361's tools/undo-guard.sh): prints, and exits 1 on, the commits among
 # <onto>'s last 60 that this branch reverts without seeing them. A stale squash does that behind a clean

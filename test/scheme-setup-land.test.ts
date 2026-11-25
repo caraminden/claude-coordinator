@@ -789,6 +789,11 @@ test('a commit that lost its "#N:" title beside one that has it is refused by na
   const res = r.run();
   assert.equal(res.status, 1);
   assert.match(res.stderr, /lost its #N: title/);
+  assert.doesNotMatch(res.stderr, /^(queue|land: rebasing)/m, 'before the line (#1983)');
+  assert.equal(git(r.main, 'rev-parse', 'main'), before);
+  const late = r.run({ LAND_SMOKE: '0' }); // and at the front, for what the rebase did
+  assert.equal(late.status, 1);
+  assert.match(late.stderr, /^land: rebasing [^]*lost its #N: title/m);
   assert.equal(git(r.main, 'rev-parse', 'main'), before);
 });
 

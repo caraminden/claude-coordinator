@@ -1075,9 +1075,10 @@ export class Runner {
     return [...this.turns.keys()];
   }
 
-  /** Whether a turn of its runs, or one is owed: messages or a worker it waits for, or a cut-off turn to carry on (#1930). */
+  /** Whether a turn of its runs, or one is owed: messages or a worker it waits for, or a cut-off turn to carry on, after its approval card too (#1930). */
   busy(ticketId: number): boolean {
-    return this.isRunning(ticketId) || this.strayWaits.has(ticketId) || this.turnLine.has(ticketId) || this.queue.size(ticketId) > 0 || !!this.queue.get(ticketId).owed;
+    const waits = this.limitWait(ticketId) || this.netWait(ticketId) || this.killWait(ticketId) || cardHeld(this.store, ticketId);
+    return !!waits || this.isRunning(ticketId) || this.strayWaits.has(ticketId) || this.turnLine.has(ticketId) || this.queue.size(ticketId) > 0 || !!this.queue.get(ticketId).owed;
   }
 
   /** A turn launching (startTurn, #1808) counts: it is past the queue's take, so a message now waits for it as for a live one. */

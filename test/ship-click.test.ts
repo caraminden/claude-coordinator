@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
+import { keptCards } from '../src/card-wait.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
 import { queueKey } from '../src/minion-queue.ts';
 import { git, makeRepo } from './git.ts';
@@ -192,6 +193,12 @@ test('what rules the server out sends the answer to the minion with why', async 
   const sealedCard = await sealed.card();
   store.updateTicket(sealed.id, { state: 'parked' });
   await fellBack(sealed, sealedCard, /you were sealed/);
+
+  // Its turn's process ended on an approval card (#1916): the turn is still half done.
+  const held = await minion();
+  const heldCard = await held.card();
+  keptCards(store).put({ ticket: held.id, id: 'c1', call: { tool: 'Bash', input: {}, cwd: held.cwd, tripwire: null, pr: null }, person: null, at: Date.now() });
+  await fellBack(held, heldCard, /your turn was running or about to/);
 
   const owner = await minion();
   const ownerCard = await owner.card();

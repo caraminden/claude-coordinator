@@ -1800,7 +1800,7 @@ const THREAD_TOOLS = () => [
       ...ASK_QUESTION().inputSchema,
       properties: {
         ...ASK_QUESTION().inputSchema.properties,
-        hand_off: { type: 'object', description: "With kind ship, your own ship to main: hand_off_land's arguments but go, so Ship It ships it with no turn of yours (self-review)" },
+        hand_off: { type: 'object', description: "With kind ship: hand_off_land's arguments but go, so Ship It needs no turn" },
       },
     },
   },

@@ -248,7 +248,13 @@ function trainNow(next, c, waits) {
   const members = `Releasing now: ${t.members?.join(', ')}`;
   if (t.role === 'rider') return [h('b', { class: 'work' }, 'Riding'), ' ', h('span', { class: 'muted', title: members }, `in ${t.front}'s train`)];
   if (t.role === 'front') return [h('span', { title: members }, changeNow(next, c))];
-  return [h('b', { class: 'waits' }, t.label)];
+  return [h('b', { class: 'waits' }, t.label), ...earlyNote(c)];
+}
+
+/** A waiting ship's early test (#1905): "Testing early · 12/40 files", "Passed early", or why it was dropped. */
+function earlyNote(c) {
+  const e = c.early;
+  return e ? [' ', h('span', { class: `early early-${e.state} ${e.state === 'running' || e.state === 'passed' ? '' : 'waits'}`, title: e.text }, '· ' + e.brief)] : [];
 }
 
 /** A change's stage and its short words: "Deploy ~50s left", "Line 2nd". */
@@ -1056,7 +1062,7 @@ export function releaseChip(t) {
             'aria-label': `${tv.target.name}${n != null ? ` ${releaseName(tv.next)}` : ''}: ${c.waitingOn ?? c.text}. Open its release`,
           },
           stageTrack(tv.next.stages, c, { mini: true }),
-          ...(c.later && (c.stage === 'line' || c.stage === 'land') ? [h('b', { class: 'waits' }, c.train?.label ?? 'in line'), ...(c.train ? [] : [' ', h('span', { class: 'muted' }, c.brief ?? 'next release')])] : changeNow(tv.next, c)),
+          ...(c.later && (c.stage === 'line' || c.stage === 'land') ? [h('b', { class: 'waits' }, c.train?.label ?? 'in line'), ...(c.train ? earlyNote(c) : [' ', h('span', { class: 'muted' }, c.brief ?? 'next release')])] : changeNow(tv.next, c)),
           h('span', { 'aria-hidden': 'true' }, '›'),
         ),
       );

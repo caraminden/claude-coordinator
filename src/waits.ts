@@ -41,6 +41,20 @@ export interface Wait {
   frozen?: Frozen;
   /** When it ended, ms: a CI run's pass or fail, shown a while after; its time stops there. */
   ended?: number;
+  /** A waiting ship's early test (#1905): the run land.sh started on its stacked train while the ship ahead is tested. */
+  early?: EarlyTest;
+}
+
+/** Where a waiting ship's early test stands: running, passed (and waiting for the ship ahead), failed, or thrown away. */
+export interface EarlyTest {
+  state: 'running' | 'passed' | 'failed' | 'dropped';
+  /** The short words for a row: "Testing early · 12/40 files". */
+  brief: string;
+  /** The whole sentence for a readout. */
+  text: string;
+  done?: number;
+  total?: number;
+  failed?: string[];
 }
 
 /** A landing's stages, in order: a wait at one of these shows the track. */
@@ -353,6 +367,42 @@ export function landPhase(phase: string): { stage: string; word: string; key: st
 /** A waiter's phase while main fails its boot check (#1564): it holds, up to 8 h, and never rides a train. "held: main is broken (12 min)". */
 export const heldOf = (phase: string): string | null => (/^held: main is broken/.test(phase) ? phase.replace(/ since \d\d:\d\d$/, '') : null);
 
+/** land.sh's `<cc-deploy>/early` (#1366): the next ship's stacked early run. `top` is the commit the run tests. */
+export interface EarlyFile {
+  top: string;
+  /** The next ship's branch, the one whose train was stacked. */
+  next: string;
+  /** When it was pushed, s. */
+  at: number;
+  /** The branch whose train is being tested, ahead of it. */
+  head: string;
+}
+export const parseEarly = (text: string | null): EarlyFile | null => {
+  const [top, next, at, head] = (text ?? '').trim().split(/\s+/);
+  return top && next && head && /^\d+$/.test(at ?? '') ? { top, next, at: Number(at), head } : null;
+};
+/** Early tests are off for every landing while `<cc-deploy>/early-off` exists (land.sh's early_next). */
+export const readEarly = (stateDir: string): EarlyFile | null => (stat(join(stateDir, 'early-off')) ? null : parseEarly(read(join(stateDir, 'early'))));
+export const readEarlyA = async (stateDir: string): Promise<EarlyFile | null> => ((await statA(join(stateDir, 'early-off'))) ? null : parseEarly(await readA(join(stateDir, 'early'))));
+
+/** A waiting ship's early test as people read it, from its run's CI state (null: not found yet) and the ship ahead's name. */
+export function earlyTest(ci: { stage: string; text: string; done?: number; total?: number; failed?: string[] } | null | undefined, ahead: string): EarlyTest {
+  if (ci?.stage === 'passed' || ci?.stage === 'skipped') return { state: 'passed', brief: `Passed early · waits for ${ahead}`, text: `Early test passed: its train's CI already went green on GitHub while ${ahead} ahead of it ships, so it waits for ${ahead}` };
+  if (ci?.stage === 'failed' || ci?.stage === 'cancelled') return { state: 'failed', brief: 'Early test failed', text: `Early test failed (${ci.text}): it tests again when its turn comes`, ...(ci.failed?.length && { failed: ci.failed }) };
+  const c = ci?.total ? { done: ci.done, total: ci.total } : {};
+  const files = ci?.total ? ` · ${ci.done}/${ci.total} files` : '',
+    bad = ci?.failed?.length ? ` · ${ci.failed.length} failed` : '';
+  const where = ci ? ci.text : 'its run is starting on GitHub';
+  return { state: 'running', brief: `Testing early${files}${bad}`, text: `Testing early, while ${ahead} ahead of it ships: ${where}${ci?.failed?.length ? `; failed so far: ${ci.failed.join(', ')}` : ''}`, ...c, ...(ci?.failed?.length && { failed: ci.failed }) };
+}
+
+/** A waiting ship's wait with its early test on it: the chip, the row's words and the readout all say it. */
+export function earlyWait(w: Wait, e: EarlyTest): Wait {
+  const count = e.state === 'running' && e.total ? ` ${e.done}/${e.total}` : '';
+  const word = e.state === 'running' ? `early${count}` : e.state === 'passed' ? 'passed early' : e.state === 'failed' ? 'early failed' : 'early dropped';
+  return { ...w, early: e, chip: `${w.chip} · ${word}`, text: `${w.text}. ${e.text}`, brief: w.brief ? `${w.brief} · ${e.brief}` : e.brief };
+}
+
 /** The Releases page's words for a holder's CI after an early run counted for it (land.sh's early_gate). */
 export const EARLY_CI = { word: 'CI · early', label: 'CI · started early', text: "CI started early, during the train ahead's deploy: waiting for that run's result" };
 
@@ -650,6 +700,8 @@ export interface WaitDeps {
   landLine?: (seen: LandSeen[], now: number) => void;
   /** Whether a minion's ship counted a CI run started early on its train (#1566, land-news's earlyCi). */
   early?: (ticketId: number) => boolean;
+  /** Why the ship ahead (its minion) threw away the early run it stacked for `next`, from its landing's log (#1905); null when unknown. */
+  earlyWhy?: (headTicketId: number, next: string) => string | null;
 }
 
 /** The waits of every minion, polled from disk; a change re-sends that minion's row. */
@@ -657,6 +709,10 @@ export class Waits {
   private current = new Map<number, Wait & { key?: string }>();
   private restartSince: Map<number, number>;
   private shown = new Map<number, string>();
+  /** Waiting ships with an early run stacked on them, by minion, and the ship ahead's branch (#1905). */
+  private earlyNow = new Map<number, { head: string; next: string }>();
+  /** Waiting ships whose early run was thrown away, by minion: what to say, until they leave the line or are stacked again. */
+  private earlyDropped = new Map<number, string>();
   private d: WaitDeps;
   constructor(d: WaitDeps) {
     this.d = d;
@@ -684,12 +740,23 @@ export class Waits {
     const ci = this.d.ci?.view(ticketId);
     if (w) {
       const { key, ...rest } = w;
-      return key === 'land:ci' && ci ? landCi(rest, ci) : rest;
+      if (key === 'land:ci' && ci) return landCi(rest, ci);
+      const e = rest.train?.role === 'waiting' ? this.earlyOf(ticketId, ci) : null;
+      return e ? earlyWait(rest, e) : rest;
     }
     // A PR's CI shows once the turn has ended (outside): while it runs, its steps say more.
     if (ci?.what && this.d.store.getTicket(ticketId)?.status !== 'running') return prCi(ci);
     return this.restart(ticketId);
   };
+
+  /** A waiting ship's early test (#1905): its stacked run's progress, or why it was thrown away. null when none. */
+  private earlyOf(ticketId: number, ci: ReturnType<CiRuns['view']> | undefined): EarlyTest | null {
+    const gone = this.earlyDropped.get(ticketId);
+    if (gone) return { state: 'dropped', brief: gone, text: gone };
+    const e = this.earlyNow.get(ticketId);
+    if (!e) return null;
+    return earlyTest(ci?.early ? ci : null, this.name(e.head));
+  }
 
   /** Merged and pulled but not running yet: the idle restart, and the turns it waits for. */
   private restart(ticketId: number): Wait | null {
@@ -765,18 +832,49 @@ export class Waits {
   /** Read the land line and heavy folder with no blocking file call (#1807), then apply them. */
   async poll() {
     const gen = ++this.reads;
-    const [land, heavy] = await Promise.all([this.d.deployState ? readLandLineA(this.d.deployState, this.d.alive) : null, readHeavyA(this.d.heavyDir, this.now(), this.d.held)]);
-    if (gen === this.reads) this.apply(land, heavy); // a newer poll or setOrder read since: this snapshot is old
+    const [land, heavy, early] = await Promise.all([this.d.deployState ? readLandLineA(this.d.deployState, this.d.alive) : null, readHeavyA(this.d.heavyDir, this.now(), this.d.held), this.d.deployState ? readEarlyA(this.d.deployState) : null]);
+    if (gen === this.reads) this.apply(land, heavy, early); // a newer poll or setOrder read since: this snapshot is old
   }
   private reads = 0;
 
   /** poll for a person's own action (setOrder), which must have the line before it returns: it reads in the thread. */
   private pollNow() {
     this.reads++;
-    this.apply(this.d.deployState ? readLandLine(this.d.deployState, this.d.alive) : null, readHeavy(this.d.heavyDir, this.now(), this.d.held));
+    this.apply(this.d.deployState ? readLandLine(this.d.deployState, this.d.alive) : null, readHeavy(this.d.heavyDir, this.now(), this.d.held), this.d.deployState ? readEarly(this.d.deployState) : null);
   }
 
-  private apply(land: { line: LandTicket[]; took: number[] } | null, heavy: ReturnType<typeof readHeavy>) {
+  /** Which waiting ships have an early run, and which just lost theirs (#1905): the file goes when land.sh throws the run away. */
+  private trackEarly(line: LandTicket[], file: EarlyFile | null): Map<number, { branch: string; top: string; since: number }> {
+    const waiting = new Set(line.filter((t) => t.got === 0 && !ridingOf(t.phase)).map((t) => t.label));
+    const nextId = file && waiting.has(file.next) ? this.ticketFor(file.next) : null;
+    const was = this.earlyNow;
+    this.earlyNow = new Map();
+    const off = !!this.d.deployState && !!stat(join(this.d.deployState, 'early-off'));
+    if (off) this.earlyDropped.clear();
+    const watch = new Map<number, { branch: string; top: string; since: number }>();
+    if (file && nextId != null) {
+      this.earlyNow.set(nextId, { head: file.head, next: file.next });
+      this.earlyDropped.delete(nextId);
+      watch.set(nextId, { branch: file.next, top: file.top, since: file.at * 1000 });
+    }
+    for (const [id, e] of was) {
+      if (off || this.earlyNow.has(id) || !waiting.has(e.next) || this.earlyDropped.has(id)) continue;
+      // Still waiting and no early run any more: land.sh threw it away (early-off, being switched off now, shows nothing).
+      const headId = this.ticketFor(e.head);
+      const why = headId != null ? this.d.earlyWhy?.(headId, e.next) : null;
+      const ahead = this.name(e.head);
+      const text = !why ? `Early test dropped: ${ahead} ahead of it changed` : /went red/.test(why) ? `Early test dropped: ${ahead} ahead of it failed` : /built again/.test(why) ? `Early test dropped: ${ahead}'s train was built again, so the run no longer matches` : `Early test dropped: ${why}`;
+      this.earlyDropped.set(id, text);
+    }
+    // A dropped note goes once its ship is no longer waiting in the line.
+    for (const id of [...this.earlyDropped.keys()]) {
+      const label = [...this.byLabel].find(([, v]) => v === id)?.[0];
+      if (!label || !waiting.has(label)) this.earlyDropped.delete(id);
+    }
+    return watch;
+  }
+
+  private apply(land: { line: LandTicket[]; took: number[] } | null, heavy: ReturnType<typeof readHeavy>, early: EarlyFile | null = null) {
     const now = this.now();
     const next = new Map<number, Wait & { key?: string }>();
     if (land) {
@@ -786,7 +884,7 @@ export class Waits {
       this.d.landLine?.(
         line.map((t) => {
           const id = this.ticketFor(t.label);
-          return { seq: t.seq, name: t.label === 'tools/deploy.sh' ? t.label : this.name(t.label), phase: t.got > 0 ? landPhase(t.phase).key : 'line', ci: id != null ? (this.d.ci?.view(id)?.stage ?? null) : null, run: id != null ? (this.d.ci?.runOf(id) ?? null) : null };
+          return { seq: t.seq, name: t.label === 'tools/deploy.sh' ? t.label : this.name(t.label), phase: t.got > 0 ? landPhase(t.phase).key : 'line', ci: id != null && !this.d.ci?.view(id)?.early ? (this.d.ci?.view(id)?.stage ?? null) : null, run: id != null ? (this.d.ci?.runOf(id) ?? null) : null };
         }),
         now,
       );
@@ -823,6 +921,8 @@ export class Waits {
       if (t?.branch) gates.set(id, { branch: t.branch, cwd: t.cwd, since: w.since });
     }
     this.d.ci?.landings(this.d.ciSlug?.() ?? null, gates);
+    const stacked = land ? this.trackEarly(land.line, early) : new Map();
+    this.d.ci?.early?.(this.d.ciSlug?.() ?? null, stacked);
     for (const id of ids) this.check(id);
   }
 

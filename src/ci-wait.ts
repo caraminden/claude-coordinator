@@ -136,6 +136,8 @@ interface Watch {
   jobs: Map<number, Job[]>;
   ended?: number;
   lastAt: number;
+  /** An early run (#1905): the next ship's stacked train, tested while the ship ahead is. Its watch stays until land.sh lets it go. */
+  early?: boolean;
   /** While its run is queued: how many of the repo's queued runs are older (Josh, 2026-11-11: "Count from GitHub"). */
   ahead?: number;
 }
@@ -201,12 +203,22 @@ export class CiRuns {
 
   /** The minions whose landing waits for CI now, by id: their branch and when that wait began (Waits.poll). */
   landings(slug: string | null, now: Map<number, { branch: string; cwd: string | null; since: number }>) {
-    for (const [id, w] of this.watches) if (w.branch && !now.has(id)) this.drop(id);
+    for (const [id, w] of this.watches) if (w.branch && !w.early && !now.has(id)) this.drop(id);
     if (!slug) return;
     for (const [id, { branch, cwd, since }] of now) {
       const w = this.watches.get(id);
       if (!branch || (w?.branch === branch && w.since === since)) continue;
       this.watches.set(id, { slug, as: undefined, what: '', runs: [], branch, cwd: cwd ?? undefined, since, usual: new Map(), jobs: new Map(), lastAt: 0 });
+    }
+  }
+
+  /** The next ships in line whose stacked early run is going, by minion: their branch, the commit it tests and when it was pushed. One watch each, found by that commit. */
+  early(slug: string | null, now: Map<number, { branch: string; top: string; since: number }>) {
+    for (const [id, w] of this.watches) if (w.early && (!slug || now.get(id)?.top !== w.sha)) this.drop(id);
+    if (!slug) return;
+    for (const [id, { branch, top, since }] of now) {
+      if (this.watches.has(id)) continue; // a landing's or PR's own watch says more
+      this.watches.set(id, { slug, as: undefined, what: '', runs: [], branch, sha: top, since, early: true, usual: new Map(), jobs: new Map(), lastAt: 0 });
     }
   }
 
@@ -217,7 +229,8 @@ export class CiRuns {
 
   /** The run a minion's watch follows (a landing's gate run once found), for the land alarm (#561). */
   runOf(ticketId: number): number | null {
-    return this.watches.get(ticketId)?.runs[0] ?? null;
+    const w = this.watches.get(ticketId);
+    return w && !w.early ? (w.runs[0] ?? null) : null; // an early run isn't the landing's gate
   }
 
   /** A CI job's test file counts while its suite runs (POST /api/ci-tests): its run's watches show them at once. */
@@ -231,7 +244,7 @@ export class CiRuns {
   }
 
   /** Where a minion's CI stands, with what it is for ("PR #88", "" for a landing) and the usual length in s. */
-  view(ticketId: number): (CiNow & { what: string; usual: number | null }) | null {
+  view(ticketId: number): (CiNow & { what: string; usual: number | null; early?: boolean }) | null {
     const w = this.watches.get(ticketId);
     if (!w) return null;
     const c = ciNow([...w.jobs.values()].flat(), !!w.ended);
@@ -248,7 +261,7 @@ export class CiRuns {
       c.short = w.ahead ? `${w.ahead} ahead` : 'queued';
       c.text += w.ahead ? `, ${w.ahead} run${w.ahead === 1 ? '' : 's'} ahead` : ', none ahead';
     }
-    return { ...c, what: w.what, usual: usuals.length ? Math.max(...usuals) : null };
+    return { ...c, what: w.what, usual: usuals.length ? Math.max(...usuals) : null, ...(w.early && { early: true }) };
   }
 
   private check(id: number) {
@@ -268,8 +281,8 @@ export class CiRuns {
       const inFlight = [...this.watches.values()].reduce((n, w) => n + (w.ended ? 0 : Math.max(1, w.runs.length)), 0);
       for (const [id, w] of [...this.watches]) {
         if (w.ended) {
-          if (now - w.ended >= KEEP_MS) this.drop(id);
-          else if (w.branch && (await this.reformed(w))) w.lastAt = now;
+          if (now - w.ended >= KEEP_MS && !w.early) this.drop(id);
+          else if (w.branch && !w.early && (await this.reformed(w))) w.lastAt = now;
           continue;
         }
         if (inFlight > BUSY && now - w.lastAt < SLOW_MS) continue;
@@ -315,7 +328,7 @@ export class CiRuns {
         return (body?.workflow_runs ?? []).find((r: any) => fresh(r) || r.status !== 'completed' || !r.conclusion || r.conclusion === 'success');
       };
       // In a train the run is on the train's top, a descendant of this worktree's head: it is on land/<branch> all the same.
-      const byBranch = async () => ((await this.read(`${runs}branch=${encodeURIComponent(`land/${w.branch}`)}`, w.as))?.workflow_runs ?? []).find(fresh);
+      const byBranch = async () => ((await this.read(`${runs}branch=${encodeURIComponent(`${w.early ? 'early' : 'land'}/${w.branch}`)}`, w.as))?.workflow_runs ?? []).find(fresh);
       const run = (w.sha && (await bySha())) || (await byBranch());
       if (!run) return;
       w.runs = [run.id]; // its usual is the landing's own CI stage's (Waits)

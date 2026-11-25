@@ -137,7 +137,7 @@ import { Waits, labelTicket, readHeavy, readHeavyA, readQueue, readQueueA } from
 import { lineFor } from './src/ship-stop.ts';
 import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
-import { earlyCi, landNews, readTail } from './src/land-news.ts';
+import { earlyCi, earlyDroppedWhy, landNews, readTail } from './src/land-news.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
@@ -1161,6 +1161,7 @@ const waits = new Waits({
   // The land gate's alarm (#561), under the scheme whose repo the live checkout is.
   // Not before the live repo is known: a guess of no scheme would clear the alarm, and a restart would ring it again.
   early: (id) => earlyCi(readTail(landings.log(id))),
+  earlyWhy: (id, next) => earlyDroppedWhy(readTail(landings.log(id)), next),
   landLine: (seen, now) => {
     const live = liveSlug && store.listProjects().find((p) => repoSlug(p.repo_url) === liveSlug);
     if (live) ciHealth.land(live.id, seen, now).catch((err) => console.error(`Land alarm: ${err?.message ?? err}`));

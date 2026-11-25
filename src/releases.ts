@@ -16,7 +16,7 @@ import type { Frozen } from './frozen-ships.ts';
 import { fixLineIn } from './fix-proof.ts';
 import { gitOut } from './git.ts';
 import { buildPreviewPath, previewKey, previewPath } from './previews.ts';
-import { behindOld, landPhase, ordinal, ridingOf, TRACK, type LandTicket, type Wait } from './waits.ts';
+import { behindOld, landPhase, ordinal, ridingOf, TRACK, type EarlyTest, type LandTicket, type Wait } from './waits.ts';
 
 export interface Target {
   /** Unique within its scheme: "citadel-server". */
@@ -71,6 +71,8 @@ export interface Progress {
   label?: string;
   done?: number;
   total?: number;
+  /** A waiting ship's early test (#1905): running, passed, failed or dropped, with its words. */
+  early?: EarlyTest;
   /** Its ship train (Citadel's land line): the front with its riders, a rider, or a waiter's train ("Releasing next"). */
   train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[] };
 }
@@ -415,7 +417,7 @@ export class CitadelServer implements Reader {
     const w = this.d.wait(id);
     if (w?.kind === 'land') {
       const waits = w.stage === 'line' || (w.stage === 'test' && !!this.d.ciQueued?.(id));
-      const p: Progress = { stage: w.stage, since: w.since, usual: waits ? null : w.usual, waitingOn: waits ? w.text : null, text: w.text, ...(w.brief && { brief: w.brief }), ...(w.label && { label: w.label }), ...(w.train && { train: w.train }) };
+      const p: Progress = { stage: w.stage, since: w.since, usual: waits ? null : w.usual, waitingOn: waits ? w.text : null, text: w.text, ...(w.brief && { brief: w.brief }), ...(w.label && { label: w.label }), ...(w.train && { train: w.train }), ...(w.early && { early: w.early }) };
       if (w.total) Object.assign(p, { done: w.done, total: w.total });
       return p;
     }

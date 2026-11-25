@@ -135,6 +135,16 @@ export function earlyCi(output: string): boolean {
   return all.slice(start + 1).some((l) => /^land: early next train: CI started on this train at /.test(l));
 }
 
+/** Why the ship ahead threw away the early run it stacked for `next` (land.sh's early_cancel), from its log's latest such line; null when it has none. */
+export function earlyDroppedWhy(output: string, next: string): string | null {
+  const re = /^land: early next train: dropped the early CI run on (\S+)'s train \((.*)\)$/;
+  for (const l of output.split('\n').reverse()) {
+    const m = re.exec(l);
+    if (m && m[1] === next) return m[2];
+  }
+  return null;
+}
+
 /** A landing log's end, read again only when it changed (Releases reads it at every poll). */
 export function readTail(path: string): string {
   let st;

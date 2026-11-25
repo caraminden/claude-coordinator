@@ -9,7 +9,7 @@ export const CLAUDE_MODELS = [
   ['claude-opus-5-5', 'Opus 5.5'],
   ['claude-sonnet-5-5', 'Sonnet 5.5'],
   // The advisor trial (#817, Cara 2026-11-16 "Start the trial"): Sonnet runs the turn and consults Opus at hard points.
-  // Experimental in Claude Code; to drop it, take this row and its TIERS row out (and from MODELS in src/db.ts, MODEL_IDS in src/mcp.ts).
+  // Experimental in Claude Code; to drop it, take this row and its TIERS row out (and from MODELS in src/db-rows.ts, MODEL_IDS in src/mcp.ts).
   ['claude-sonnet-5-5+opus-advisor', 'Sonnet 5.5 + Opus advisor'],
   ['claude-haiku-5-5', 'Haiku 5.5'],
   ['claude-fable-5-1', 'Fable 5.1'],
@@ -28,7 +28,7 @@ export const TIERS = [
     short: 'for known-shape work',
   },
   { work: 'a read-only check', model: 'claude-sonnet-5-5', effort: 'low' },
-  // The advisor trial (#817) has its own row: it is over on its date, and taking the row out (and from MODELS in src/db.ts, MODEL_IDS in src/mcp.ts) ends it.
+  // The advisor trial (#817) has its own row: it is over on its date, and taking the row out (and from MODELS in src/db-rows.ts, MODEL_IDS in src/mcp.ts) ends it.
   {
     work: 'in the advisor trial (#817) until 2026-11-30, about 15 known-shape middle minions and about 5 small features with a clear spec that would otherwise get Opus high at medium, and a stalled Sonnet-medium minion before Opus medium, never a Taskmaster (`node tools/advisor-trial.ts` reads its numbers)',
     model: 'claude-sonnet-5-5+opus-advisor',

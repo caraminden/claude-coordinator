@@ -1,4 +1,4 @@
-// What Claude turns cost per day, at API prices (src/db.ts Turn). Days are the server's local days.
+// What Claude turns cost per day, at API prices (src/db-rows.ts Turn). Days are the server's local days.
 import { APP_NAME } from './appname.ts';
 import type { SpendRowRaw, Store } from './db.ts';
 

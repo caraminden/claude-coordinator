@@ -28,7 +28,7 @@ export interface Schedule {
   brief: string;
   /** The `type` property each run's minion gets. */
   type: string;
-  /** The model and effort each run starts with (src/db.ts MODELS, EFFORTS); null for the scheme's default. */
+  /** The model and effort each run starts with (src/db-rows.ts MODELS, EFFORTS); null for the scheme's default. */
   model: string | null;
   effort: string | null;
   paused: number;

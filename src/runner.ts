@@ -7,7 +7,7 @@ import { jobMachinesFor } from './machine-jobs.ts';
 import { createHash } from 'node:crypto';
 import { appendFileSync, close, existsSync, fstatSync, open, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
 import { Relay, loopHolds, LOOP_LIMIT, LOOP_WINDOW_MS } from './minion-relay.ts';
@@ -26,7 +26,7 @@ import type { Ship } from './branch.ts';
 import type { Wait } from './waits.ts';
 import { releaseEmulatorLease } from './emulator-lease.ts';
 import { track } from './settled.ts';
-import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
+import { claudeConfigDir, lastEffort, mergeTaskmasterMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
 import { Fresh, roleWord, type FreshState } from './fresh.ts';
 import { HeldMail } from './held-mail.ts';
 import { KeepaliveRun } from './keepalive-run.ts';
@@ -2997,10 +2997,7 @@ export class Runner {
     const oldMemory = memoryDir && join(configDir, 'projects', projectSlug(ticket.cwd), 'memory');
     if (memoryDir && oldMemory && (await exists(oldMemory))) {
       try {
-        mergeMemory(oldMemory, memoryDir);
-        // Their stored copies too, or the next start restores the old folder and merges a note deleted since back in (#1952).
-        const merged = join('projects', projectSlug(ticket.cwd), 'memory') + sep;
-        for (const row of this.store.listClaudeState(project.id, ticket.id)) if (row.path.startsWith(merged)) this.store.deleteClaudeState(row.path);
+        mergeTaskmasterMemory(this.store, ticket, oldMemory, memoryDir);
       } catch (err) {
         this.emit(ticket.id, 'note', { text: `Could not move the Taskmaster's old memory into ${memoryDir}: ${thrown(err).message}` });
       }

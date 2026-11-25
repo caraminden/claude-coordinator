@@ -72,6 +72,16 @@ export function mergeMemory(oldDir: string, memoryDir: string): number {
   return copied;
 }
 
+/**
+ * mergeMemory, and the old folder's stored copies go too, or the next start restores it and merges a note deleted
+ * since back in (#1952).
+ */
+export function mergeTaskmasterMemory(store: Store, ticket: Ticket, oldDir: string, memoryDir: string) {
+  mergeMemory(oldDir, memoryDir);
+  const old = join('projects', projectSlug(ticket.cwd), 'memory');
+  for (const row of store.listClaudeState(ticket.project_id, ticket.id)) if (under(old, row.path)) store.deleteClaudeState(row.path);
+}
+
 interface Scope {
   /** Rows that belong to this ticket alone, in the turn's config dir. */
   ticketRoots: string[];

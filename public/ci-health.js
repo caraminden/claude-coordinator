@@ -189,10 +189,16 @@ function lateBlock(s, late) {
   });
   const alone = late.alone.map((f) => {
     const n = f.where.match(/^(?:ticket\/|#)(\d+)/)?.[1];
-    return hueRow({ hue: 'danger', lead: 'kept off' }, h('strong', {}, f.file), line('also failed alone, on ', n ? link(n) : f.where === 'main' ? 'main itself' : f.where, `, ${ago(f.failedAlone)}: it may be a real bug, so it runs with the rest`));
+    return hueRow({ hue: 'danger', lead: 'off' }, h('strong', {}, f.file), line('also failed alone, on ', n ? link(n) : f.where === 'main' ? 'main itself' : f.where, `, ${ago(f.failedAlone)}: it may be a real bug, so it runs with the rest`));
   });
   const [row] = settingsRow(
-    { key, icon: 'chart', hue: listed.length ? 'waiting' : 'done', title: 'Timing tests, run last', summary: listed.length ? [toneChip('warn', files(listed.length)), alone.length ? `${alone.length} kept off` : 'run after the rest, two at once'] : [toneChip('ok', 'None'), 'every test file runs in the main wave'] },
+    {
+      key,
+      icon: 'chart',
+      hue: listed.length ? 'waiting' : 'done',
+      title: 'Timing tests, run last',
+      summary: listed.length ? [toneChip('warn', files(listed.length)), alone.length ? toneChip('danger', `${alone.length} kept off`) : 'run after the rest, two at once'] : [toneChip('ok', 'None'), 'every test file runs in the main wave'],
+    },
     listed.length || alone.length ? statTiles([String(listed.length), 'run last', 'waiting'], [String(alone.length), 'kept off: failed alone', alone.length ? 'danger' : 'done']) : null,
     listed.length ? showFirst({ key, items: listed, n: 5, noun: 'files' }) : emptyCard('No test file runs last', 'A file joins when it fails under load and passes alone on two branches within three days.'),
     alone.length ? h('div', { class: 'hue-rows' }, ...alone) : null,

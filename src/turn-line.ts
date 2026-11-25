@@ -6,6 +6,7 @@
 // The line holds no messages: those stay in each minion's queue (src/minion-queue.ts), and a resume's wait or debt stays
 // where it was (src/resumes.ts, the queue's `owed`). An entry says only "this minion has a turn to start", so one whose
 // turn needs no starting any more is simply dropped when it comes up.
+import { HOLD } from './start-now.ts';
 import type { Store } from './db.ts';
 import type { PressureReading } from './pressure.ts';
 import { limitsOf, refuse, LIMIT_INFO, type LimitKey, type PoolBox, type PoolLimits, type SavedLimits } from './turn-limits.ts';
@@ -137,7 +138,7 @@ export interface LineHost {
   /** Whose share its turn counts in, and its place there. */
   asks(ticketId: number, via?: RetryKind): LinePlace;
   /** A person holds a worker of its own for it (#1957, src/start-now.ts): its turns start past the size. */
-  forced(ticketId: number): boolean;
+  forced(ticketId: number): { user: number; by: string } | null;
   /** Start its turn, now that a worker is free: it calls enter() again, which grants it. */
   start(entry: LineEntry): void;
   /** Stop its running turn to carry on later; one already ending or not yet launched is left. */
@@ -156,9 +157,9 @@ export class TurnLine {
   /**
    * Turns that run: the minion, how many of its lane's steps count on it (an account switch queues its resume in its turn's end), and whose
    * share. A `lent` one only waits on an approval card, so its worker is back in the pool until the answer (#1916); a `forced` one
-   * started on a worker of its own (#1957).
+   * started on a worker of its own (#1957), that person's.
    */
-  private granted = new Map<number, { steps: number; person: number; lent?: true; forced?: true }>();
+  private granted = new Map<number, { steps: number; person: number; lent?: true; forced?: number }>();
   private admitting: number | null = null;
   private timer?: NodeJS.Timeout;
   /** Until a boot's resumes are in (open): the line takes turns in but starts none. */
@@ -238,7 +239,16 @@ export class TurnLine {
     const paused = this.paused();
     if (paused) return `${paused.by} paused all minions`;
     if (this.closed || this.host.detached) return 'Citadel is restarting';
-    return this.stalled.size && this.full(this.host.asks(entry.ticket, entry.via).person) ? 'the container it runs in is at its memory limit' : null;
+    if (this.stalled.size && this.full(this.host.asks(entry.ticket, entry.via).person)) return 'the container it runs in is at its memory limit';
+    const hold = this.host.forced(entry.ticket);
+    return hold && this.forcedFor(entry.ticket) === null ? `${HOLD.each} turns ${hold.by} started now are still running` : null;
+  }
+
+  /** Who gave it a worker of its own, while they have one left: a hold let go mid-turn keeps its worker until that turn ends, or presses in a row would pass "Two per person". */
+  private forcedFor(ticketId: number): number | null {
+    const user = this.host.forced(ticketId)?.user;
+    if (user === undefined) return null;
+    return [...this.granted].filter(([id, g]) => g.forced === user && id !== ticketId).length < HOLD.each ? user : null;
   }
 
   /** A person pressed Start now: its waiting turn starts at once, past the size and the gap between starts. A busy lane's starts once idle. */
@@ -319,7 +329,7 @@ export class TurnLine {
 
   /** What the Workers tile shows (src/routes/workers.ts). */
   summary() {
-    return { used: this.used(), lent: this.lent(), running: this.granted.size, forced: [...this.granted.values()].filter((g) => g.forced && !g.lent).length, size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people() };
+    return { used: this.used(), lent: this.lent(), running: this.granted.size, forced: [...this.granted.values()].filter((g) => g.forced !== undefined && !g.lent).length, size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people() };
   }
 
   /** A person's number, or null for Auto. */
@@ -378,7 +388,7 @@ export class TurnLine {
     if (this.admitting === ticketId) return this.grant(ticketId, via);
     const own = this.entries.find((e) => e.ticket === ticketId);
     // Its queue's turn never goes before the resume it waits for: the resume takes the queue along.
-    const forced = this.host.forced(ticketId);
+    const forced = this.forcedFor(ticketId) !== null;
     const first = !paused && !this.closed && !this.host.busy(ticketId) && (forced || this.used() < this.size()) && !(own?.via && !via) && !this.full(this.host.asks(ticketId, via).person);
     if (first) {
       if (forced) return this.grant(ticketId, via);
@@ -402,7 +412,7 @@ export class TurnLine {
     const own = this.entries.find((e) => e.ticket === ticketId);
     if (!own) this.save([...this.entries, { ticket: ticketId, since: Date.now(), ...(via ? { via } : {}) }]);
     else if (via && own.via !== via) this.save(this.entries.map((e) => (e === own ? { ...own, via } : e)));
-    if (this.used() < this.size() || this.host.forced(ticketId)) this.pumpIn(0);
+    if (this.used() < this.size() || this.forcedFor(ticketId) !== null) this.pumpIn(0);
   }
 
   /** Forget the line, the pause and the pool's size: a boot check's or a preview's copied database mustn't start the live minions' turns, or wait on their pause. */
@@ -453,7 +463,7 @@ export class TurnLine {
     if (this.timer || this.closed || this.host.detached || this.admitting !== null) return;
     if (!this.entries.length || this.paused()) return;
     const ready = this.ready();
-    const entry = this.best(this.used() < this.size() ? ready : ready.filter((e) => this.host.forced(e.ticket)));
+    const entry = this.best(this.used() < this.size() ? ready : ready.filter((e) => this.forcedFor(e.ticket) !== null));
     if (entry) this.admit(entry);
   }
 
@@ -488,7 +498,7 @@ export class TurnLine {
     if (held) {
       held.steps++;
       delete held.lent;
-    } else this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, ...(this.host.forced(ticketId) ? { forced: true } : {}) });
+    } else this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, forced: this.forcedFor(ticketId) ?? undefined });
     this.leave(ticketId);
     return true;
   }
@@ -516,7 +526,7 @@ export class TurnLine {
   }
 
   private asked(entries: LineEntry[]): Waiting[] {
-    return entries.map((e) => ({ ...e, ...this.host.asks(e.ticket, e.via), ...(this.host.forced(e.ticket) ? { forced: true } : {}) }));
+    return entries.map((e) => ({ ...e, ...this.host.asks(e.ticket, e.via), ...(this.forcedFor(e.ticket) !== null ? { forced: true } : {}) }));
   }
 
   private byPerson(): Map<number, number> {

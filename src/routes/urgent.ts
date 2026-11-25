@@ -33,8 +33,8 @@ function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?:
       person: store.getUser(w.person)?.name ?? null,
       since: w.since,
       urgent: w.urgent !== undefined,
-      forced: !!w.forced,
-      held: w.forced ? runner.turnLine.heldBy(w) : null,
+      forced: !!runner.startNow.get(w.ticket),
+      held: runner.startNow.get(w.ticket) ? runner.turnLine.heldBy(w) : null,
       // Why it stands where it does in its person's share.
       first: !!w.first,
       warm: w.heat === 0,

@@ -16,6 +16,7 @@ function line(t: TestContext, size = 1) {
   const changes: number[][] = [];
   const busy = new Set<number>();
   const forced = new Set<number>();
+  const pressers = new Map<number, number>();
   const persons = new Map<number, number>();
   const steps = new Map<number, (() => void)[]>();
   let fails = 0;
@@ -30,7 +31,7 @@ function line(t: TestContext, size = 1) {
     exempt: () => false,
     busy: (id) => busy.has(id),
     asks: (id) => ({ person: persons.get(id) ?? 1, rank: 0 }),
-    forced: (id) => forced.has(id),
+    forced: (id) => (forced.has(id) ? { user: pressers.get(id) ?? 7, by: 'Josh' } : null),
     start: (e) => {
       started.push(e.via ? `${e.ticket} ${e.via}` : String(e.ticket));
       if (fails-- > 0) throw new Error('no place to run');
@@ -58,6 +59,7 @@ function line(t: TestContext, size = 1) {
     stopped,
     busy,
     forced,
+    pressers,
     persons,
     changes,
     /** A person presses Start now on it. */
@@ -360,4 +362,21 @@ test('two forced turns that waited out a pause both start, and nobody else', asy
   await x.turn();
   await x.turn();
   assert.deepEqual([x.started, x.waits()], [['3', '4'], [2]]);
+});
+
+test("let go mid-turn, a worker is its person's until that turn ends: presses in a row never make three of theirs", async (t) => {
+  const x = line(t);
+  x.run(1);
+  for (const id of [2, 3, 4, 5]) x.run(id);
+  x.press(2);
+  x.press(3);
+  assert.deepEqual(x.started, ['2', '3']);
+  x.forced.delete(2);
+  x.press(4);
+  assert.deepEqual([x.started, x.l.wait(4)?.held], [['2', '3'], '2 turns Josh started now are still running']);
+  x.pressers.set(5, 8);
+  x.press(5);
+  assert.deepEqual(x.started, ['2', '3', '5'], "another person's two are their own");
+  await x.end(2);
+  assert.deepEqual([x.started, x.waits()], [['2', '3', '5', '4'], []], 'it starts by itself');
 });

@@ -1001,7 +1001,7 @@ export class Runner {
       exempt: (id) => (store.getTicket(id)?.kind ?? 'coordinator') === 'coordinator',
       busy: (id) => this.lanes.busy(id),
       asks: (id, via) => this.lineAsks(id, via),
-      forced: (id) => !!this.startNow.get(id),
+      forced: (id) => this.startNow.get(id),
       start: (entry) => this.startLined(entry),
       pauseTurn: (id) => this.pauseTurn(id),
       changed: (ids) => this.lineChanged(ids),

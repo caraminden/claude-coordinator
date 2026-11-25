@@ -595,6 +595,7 @@ export const ticketRoutes: Route[] = [
       const text = str(body.text, 'text', SIDE_MAX_CHARS);
       const thread = body.thread === undefined || body.thread === null ? undefined : Number(body.thread);
       if (thread !== undefined && !Number.isSafeInteger(thread)) throw new HttpError(400, "thread must be a side thread's id");
+      app.runner.startNow.touch(ticket.id, session.uid);
       try {
         return json(res, 202, await app.sideAsks.ask(ticket.id, session.uid, session.name, text, thread));
       } catch (err) {
@@ -1096,6 +1097,7 @@ export const ticketRoutes: Route[] = [
       if (data.secret) throw new HttpError(409, 'This card takes a secret: type it into its field and press Save');
       // A notice (#687): Got it takes it out of the addressee's list, and sends the asker nothing.
       if (data.notice) {
+        runner.startNow.touch(id, session.uid);
         const settled = { at: Date.now(), by: session.name };
         store.setEventData(card.id, { ...data, settled });
         runner.emit(id, 'question_result', { id: data.id, settled });

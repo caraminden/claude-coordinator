@@ -1,8 +1,7 @@
 import { dirname, join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
-import { GLOBAL_OWNER, Registry } from './properties.ts';
+import { Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
-import { scheduleFirstWeek } from './first-week.ts';
 import { ReviewSet } from './review-set.ts';
 import type { GruntRow } from './grunts.ts';
 import { Claims } from './claims.ts';
@@ -14,7 +13,6 @@ import { Memory } from './memory.ts';
 import { MinionIndex, MINION_INDEX_SCHEMA } from './minion-index.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
-import { thrown } from './thrown.ts';
 import { ciNumberQueries } from './db/ci-numbers.ts';
 import { contraptionRunQueries } from './db/contraption-runs.ts';
 import { deliveryQueries } from './db/deliveries.ts';
@@ -32,49 +30,22 @@ import { artifactQueries } from './db/artifacts.ts';
 import { claudeStateQueries } from './db/claude-state.ts';
 import { releaseQueries } from './db/releases.ts';
 import { turnRow } from './turn-row.ts';
+import { schemeQueries } from './db/schemes.ts';
+import { peopleQueries } from './db/people.ts';
+import { credentialQueries } from './db/credentials.ts';
 import { slowMomentQueries } from './db/slow-moments.ts';
 import { viewQueries } from './db/views.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
-import { copyRow, scoped } from './read-scope.ts';
+import { scoped } from './read-scope.ts';
 import { CHAT, attachEventsForWrite, cardFatesTrigger, eventsHome, eventsMoved, eventsPath, eventsSchema, moveEvents } from './events-db.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
-import {
-  type AppInstructions,
-  type ClaudeStateRow,
-  type CredentialRow,
-  type EventRow,
-  FLAKE_KEEP_MS,
-  type FinishedStep,
-  type FlakeFix,
-  HEALTH_KEEP_MS,
-  HEALTH_MAX_ROWS,
-  HOST_SAMPLE_KEEP_MS,
-  type HostSample,
-  type Machine,
-  type OpenrouterCallKind,
-  type PersonNote,
-  type PersonalLayer,
-  type Project,
-  type RepoCollaborator,
-  STEP_RATIO,
-  type SecretRow,
-  type SpendRowRaw,
-  type Ticket,
-  type Turn,
-  type TurnResult,
-  type User,
-  onboardingOpen,
-  titleWithoutBuild,
-  type CardFate,
-  PUT_CLAUDE_STATE,
-} from './db-rows.ts';
+import { type ClaudeStateRow, type EventRow, FLAKE_KEEP_MS, type FinishedStep, type FlakeFix, HEALTH_KEEP_MS, HEALTH_MAX_ROWS, HOST_SAMPLE_KEEP_MS, type HostSample, type Machine, STEP_RATIO, type SpendRowRaw, type Turn, type TurnResult, titleWithoutBuild, type CardFate, PUT_CLAUDE_STATE } from './db-rows.ts';
 export * from './db-rows.ts';
 
 /** The newest event when #812 landed: a card at or below it still counts a typed message as handling it (PERSON_WROTE), or every old card nobody settled would wake up open. */
 export const TYPED_HANDLES_UP_TO = 696493;
 
-const APP_INSTRUCTIONS = 'app_instructions';
 /** How long the write worker's connection waits out another connection's write lock: giving up loses the write. */
 export const WRITER_BUSY_MS = 30_000;
 
@@ -1406,11 +1377,6 @@ export class Store {
       .run();
   }
 
-  /** Whose subscription the server's own Claude login is: the first admin, the one Citadel made at its first start. */
-  serverLoginOwner(): number | null {
-    return (this.db.prepare('SELECT min(id) AS id FROM users WHERE admin = 1').get() as { id: number | null }).id;
-  }
-
   /**
    * Lending becomes one list of schemes per machine (#438): each machine's machine_projects rows become exactly
    * the schemes whose minions got it under the old rules, so no scheme gains or loses one. The old rules: a scheme
@@ -1520,430 +1486,6 @@ export class Store {
     }
   }
 
-  listProjects(): Project[] {
-    return this.db.prepare('SELECT * FROM projects ORDER BY name').all() as unknown as Project[];
-  }
-
-  getProject(id: number): Project | undefined {
-    const p = scoped(this.db, `project:${id}`, () => this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as Project | undefined);
-    return copyRow(p);
-  }
-
-  createProject(name: string, repoUrl: string | null, ownerId: number | null = null): Project {
-    const r = this.db.prepare('INSERT INTO projects (name, repo_url, owner_id, created_at) VALUES (?, ?, ?, ?)').run(name, repoUrl, ownerId, Date.now());
-    return this.getProject(Number(r.lastInsertRowid))!;
-  }
-
-  setProjectRepoDir(id: number, dir: string) {
-    this.db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(dir, id);
-  }
-
-  /** Where a scheme's repo lives upstream, and why putting it on GitHub failed (null once it worked). */
-  setProjectUpstream(id: number, repoUrl: string | null, githubError: string | null) {
-    this.db.prepare('UPDATE projects SET repo_url = ?, github_error = ? WHERE id = ?').run(repoUrl, githubError, id);
-  }
-
-  /** Saves a scheme's instructions, with a history row of who changed them from what. */
-  setProjectInstructions(id: number, instructions: string, by: string) {
-    const at = Date.now();
-    this.db.exec('BEGIN');
-    try {
-      const old = (this.db.prepare('SELECT instructions FROM projects WHERE id = ?').get(id) as { instructions: string } | undefined)?.instructions ?? '';
-      this.db.prepare('UPDATE projects SET instructions = ?, instructions_updated_by = ?, instructions_updated_at = ? WHERE id = ?').run(instructions, by, at, id);
-      this.db.prepare('INSERT INTO instruction_history (project_id, by, at, old_text, new_text) VALUES (?, ?, ?, ?, ?)').run(id, by, at, old, instructions);
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-  }
-
-  /** A scheme's latest instruction saves, newest first. */
-  instructionHistory(projectId: number, limit: number): { by: string; at: number; old_text: string; new_text: string }[] {
-    return this.db.prepare('SELECT by, at, old_text, new_text FROM instruction_history WHERE project_id = ? ORDER BY id DESC LIMIT ?').all(projectId, limit) as { by: string; at: number; old_text: string; new_text: string }[];
-  }
-
-  /** The Citadel-wide instructions every minion and Taskmaster in every scheme gets; '' when unset. */
-  appInstructions(): AppInstructions {
-    return this.getSetting<AppInstructions>(APP_INSTRUCTIONS) ?? { text: '', by: null, at: null };
-  }
-
-  /** Saves the Citadel-wide instructions, with a history row of who changed them from what. */
-  setAppInstructions(text: string, by: string) {
-    const at = Date.now();
-    this.db.exec('BEGIN');
-    try {
-      const old = this.appInstructions().text;
-      this.setSetting(APP_INSTRUCTIONS, { text, by, at });
-      this.db.prepare('INSERT INTO app_instruction_history (by, at, old_text, new_text) VALUES (?, ?, ?, ?)').run(by, at, old, text);
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-  }
-
-  /** A person's own instructions for everywhere (projectId null) or one scheme, with when they last changed; '' when unset. */
-  personalInstructions(userId: number, projectId: number | null): { text: string; at: number | null } {
-    const r = this.db.prepare('SELECT new_text, at FROM personal_instructions WHERE user_id = ? AND project_id IS ? ORDER BY id DESC LIMIT 1').get(userId, projectId) as { new_text: string; at: number } | undefined;
-    return { text: r?.new_text ?? '', at: r?.at ?? null };
-  }
-
-  /** Saves a person's own instructions for one scope; the row is its history entry too. */
-  setPersonalInstructions(userId: number, projectId: number | null, text: string) {
-    const old = this.personalInstructions(userId, projectId).text;
-    if (old === text) return;
-    this.db.prepare('INSERT INTO personal_instructions (user_id, project_id, at, old_text, new_text) VALUES (?, ?, ?, ?, ?)').run(userId, projectId, Date.now(), old, text);
-  }
-
-  /** The personal layer of a minion's prompt (#688): its owner's (`assigned`) texts; null for the Taskmaster, nobody or no text. */
-  personalLayer(ticket: Pick<Ticket, 'id' | 'kind' | 'project_id'>): PersonalLayer | null {
-    if (ticket.kind === 'coordinator') return null;
-    const assigned = String(this.props.forTarget('minion', ticket.id).assigned ?? '').trim();
-    const name = assigned && this.props.personName(assigned);
-    const user = name ? this.findUser('name', name) : undefined;
-    if (!user) return null;
-    const layer = { name: user.name, everywhere: this.personalInstructions(user.id, null).text, scheme: this.personalInstructions(user.id, ticket.project_id).text };
-    return layer.everywhere || layer.scheme ? layer : null;
-  }
-
-  /** A person's latest saves for one scope, newest first. */
-  personalInstructionHistory(userId: number, projectId: number | null, limit: number): { at: number; old_text: string; new_text: string }[] {
-    return this.db.prepare('SELECT at, old_text, new_text FROM personal_instructions WHERE user_id = ? AND project_id IS ? ORDER BY id DESC LIMIT ?').all(userId, projectId, limit) as { at: number; old_text: string; new_text: string }[];
-  }
-
-  /** The latest Citadel-wide instruction saves, newest first. */
-  appInstructionHistory(limit: number): { by: string; at: number; old_text: string; new_text: string }[] {
-    return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as { by: string; at: number; old_text: string; new_text: string }[];
-  }
-
-  setProjectSettings(
-    id: number,
-    fields: Partial<
-      Pick<
-        Project,
-        | 'approval_rules'
-        | 'plugin_dirs'
-        | 'optional_plugin_dirs'
-        | 'default_effort'
-        | 'onboarding'
-        | 'onboarding_mode'
-        | 'list_groups'
-        | 'ci_quiet'
-        | 'ci_watch'
-        | 'land_mode'
-        | 'fable_ok'
-        | 'builds'
-        | 'grill'
-        | 'gh_runners'
-        | 'shot_widths'
-        | 'shot_themes'
-        | 'shots_required'
-        | 'shot_note'
-        | 'ship_path'
-        | 'go_from'
-        | 'try_first'
-        | 'msg_loop_limit'
-        | 'msg_loop_min'
-        | 'msg_cold_min'
-        | 'msg_hold_h'
-        | 'msg_never_hold'
-        | 'rules_review'
-        | 'skills_off'
-      >
-    >,
-  ) {
-    const keys = Object.keys(fields) as (keyof typeof fields)[];
-    if (!keys.length) return;
-    // A setup round starts at interview, or when a closed one opens again: only plans approved after it count (#180).
-    const was = this.getProject(id);
-    if (fields.onboarding && onboardingOpen(fields as Pick<Project, 'onboarding'>) && (fields.onboarding === 'interview' || (was && !onboardingOpen(was)))) {
-      this.setSetting(`onboarding_opened:${id}`, Date.now());
-    }
-    // Setup finishing opens the pass on Minion rules, whoever or whatever set it (#1046).
-    if (fields.onboarding === 'done' && was && was.onboarding !== 'done' && fields.rules_review === undefined) fields = { ...fields, rules_review: 1 };
-    const keys2 = Object.keys(fields) as (keyof typeof fields)[];
-    this.db.prepare(`UPDATE projects SET ${keys2.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys2.map((k) => fields[k] ?? ''), id);
-    // Setup reaching done books the first-week check, seven days out, in that scheme (#1101).
-    if (fields.onboarding === 'done' && was && was.onboarding !== 'done') scheduleFirstWeek(this, id);
-  }
-
-  /** When this scheme's current setup or tune-up round opened, or 0 for one opened before that was recorded. */
-  onboardingOpenedAt(id: number): number {
-    return this.getSetting<number>(`onboarding_opened:${id}`) ?? 0;
-  }
-
-  /** Change a project's display name; its repo, folders and links go by id and stay put. */
-  renameProject(id: number, name: string): Project {
-    const trimmed = name.trim();
-    if (!trimmed) throw new Error('The scheme name cannot be empty');
-    try {
-      this.db.prepare('UPDATE projects SET name = ? WHERE id = ?').run(trimmed, id);
-    } catch (err) {
-      if (/UNIQUE/.test(thrown(err).message ?? '')) throw new Error(`There is already a scheme called "${trimmed}"`);
-      throw err;
-    }
-    return this.getProject(id)!;
-  }
-
-  listUsers(): User[] {
-    return this.db.prepare('SELECT * FROM users ORDER BY id').all() as unknown as User[];
-  }
-
-  getUser(id: number): User | undefined {
-    const u = scoped(this.db, `user:id:${id}`, () => this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as unknown as User | undefined);
-    return copyRow(u);
-  }
-
-  /** By login, name or open invite, either case: cookies from the shared-password days carry only the name. */
-  findUser(field: 'login' | 'name' | 'invite_hash', value: string): User | undefined {
-    const u = scoped(this.db, `user:${field}:${value}`, () => this.db.prepare(`SELECT * FROM users WHERE ${field} = ?`).get(value) as unknown as User | undefined);
-    return copyRow(u);
-  }
-
-  /** A new person gets an id no one has ever had: a removed person's cookie names their id (#468 S05-1). */
-  createUser(u: Pick<User, 'name' | 'login'> & { admin?: boolean; server_login?: boolean }): User {
-    const { max } = this.db.prepare('SELECT COALESCE(MAX(id), 0) AS max FROM users').get() as { max: number };
-    const id = Math.max(this.getSetting<number>('user_id_high') ?? 0, max) + 1;
-    this.db.prepare('INSERT INTO users (id, name, login, admin, server_login, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, u.name, u.login, u.admin ? 1 : 0, u.server_login ? 1 : 0, Date.now());
-    this.setSetting('user_id_high', id);
-    return this.getUser(id)!;
-  }
-
-  updateUser(id: number, fields: Partial<Omit<User, 'id' | 'login' | 'admin' | 'created_at'>>) {
-    const keys = Object.keys(fields) as (keyof typeof fields)[];
-    if (!keys.length) return;
-    this.db.prepare(`UPDATE users SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k] ?? null), id);
-  }
-
-  /** Remove a person: their schemes go to `heir`, their memberships with them, and their machines to no one (#306). Their messages keep their name. */
-  deleteUser(id: number, heir: number) {
-    this.db.exec('BEGIN');
-    try {
-      this.db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id = ?').run(heir, id);
-      // Ownerless and lent to no scheme, so a gone person's computer reaches no one's turns; an admin removes it.
-      this.db.prepare('DELETE FROM machine_projects WHERE machine_id IN (SELECT id FROM machines WHERE owner_id = ?)').run(id);
-      this.db.prepare('UPDATE machines SET owner_id = NULL, scoped = 1 WHERE owner_id = ?').run(id);
-      this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
-      // People added before user_id_high existed: remember the removed id so it is never reused.
-      if (id > (this.getSetting<number>('user_id_high') ?? 0)) this.setSetting('user_id_high', id);
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-  }
-
-  getCredential(userId: number, kind: string): CredentialRow | undefined {
-    return this.db.prepare('SELECT * FROM credentials WHERE user_id = ? AND kind = ?').get(userId, kind) as CredentialRow | undefined;
-  }
-
-  listCredentials(kind: string): CredentialRow[] {
-    return this.db.prepare('SELECT * FROM credentials WHERE kind = ?').all(kind) as unknown as CredentialRow[];
-  }
-
-  putCredential(userId: number, kind: string, secret: string, meta: object) {
-    const now = Date.now();
-    this.db
-      .prepare(`INSERT INTO credentials (user_id, kind, secret, meta, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(user_id, kind) DO UPDATE SET secret = excluded.secret, meta = excluded.meta, updated_at = excluded.updated_at, failed_at = NULL`)
-      .run(userId, kind, secret, JSON.stringify(meta), now, now);
-  }
-
-  getSecret(scope: string, ownerId: number, name: string): SecretRow | undefined {
-    return this.db.prepare('SELECT * FROM stored_secrets WHERE scope = ? AND owner_id = ? AND name = ?').get(scope, ownerId, name) as SecretRow | undefined;
-  }
-
-  /** One owner's secrets, by name. */
-  listSecrets(scope: string, ownerId: number): SecretRow[] {
-    return this.db.prepare('SELECT * FROM stored_secrets WHERE scope = ? AND owner_id = ? ORDER BY name').all(scope, ownerId) as unknown as SecretRow[];
-  }
-
-  putSecret(scope: string, ownerId: number, name: string, value: string, by: number | null) {
-    const now = Date.now();
-    this.db
-      .prepare(`INSERT INTO stored_secrets (scope, owner_id, name, value, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(scope, owner_id, name) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
-      .run(scope, ownerId, name, value, by, now, now);
-  }
-
-  deleteSecret(scope: string, ownerId: number, name: string): boolean {
-    return this.db.prepare('DELETE FROM stored_secrets WHERE scope = ? AND owner_id = ? AND name = ?').run(scope, ownerId, name).changes > 0;
-  }
-
-  /** The account refused it (revoked, or it can't be decrypted): kept, so Settings can say "link again". */
-  failCredential(userId: number, kind: string) {
-    this.db.prepare('UPDATE credentials SET failed_at = ? WHERE user_id = ? AND kind = ? AND failed_at IS NULL').run(Date.now(), userId, kind);
-  }
-
-  deleteCredential(userId: number, kind: string) {
-    this.db.prepare('DELETE FROM credentials WHERE user_id = ? AND kind = ?').run(userId, kind);
-  }
-
-  /** What a person's OpenRouter calls since `since` count against their cap: real costs, and estimates where it isn't known. */
-  openrouterSpent(userId: number, since: number): number {
-    const row = this.db
-      .prepare(`SELECT COALESCE(SUM(CASE status WHEN 'ok' THEN cost_usd WHEN 'failed' THEN 0 ELSE estimate_usd END), 0) AS spent
-      FROM openrouter_calls WHERE user_id = ? AND created_at >= ?`)
-      .get(userId, since) as { spent: number };
-    return row.spent;
-  }
-
-  addOpenrouterCall(c: { user_id: number; ticket_id: number | null; project_id: number | null; model: string; kind: OpenrouterCallKind; estimate_usd: number }): number {
-    return Number(
-      this.db
-        .prepare(`INSERT INTO openrouter_calls (user_id, ticket_id, project_id, model, kind, estimate_usd, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`)
-        .run(c.user_id, c.ticket_id, c.project_id, c.model, c.kind, c.estimate_usd, Date.now()).lastInsertRowid,
-    );
-  }
-
-  finishOpenrouterCall(id: number, status: 'ok' | 'failed' | 'unknown', cost: number | null) {
-    this.db.prepare('UPDATE openrouter_calls SET status = ?, cost_usd = ?, finished_at = ? WHERE id = ?').run(status, cost, Date.now(), id);
-  }
-
-  setOpenrouterCallPath(id: number, path: string) {
-    this.db.prepare('UPDATE openrouter_calls SET path = ? WHERE id = ?').run(path, id);
-  }
-
-  /** At boot, calls still pending died with the last server: they may have been billed, so they count at their estimate. */
-  sweepOpenrouterCalls() {
-    this.db.prepare(`UPDATE openrouter_calls SET status = 'unknown', finished_at = ? WHERE status = 'pending'`).run(Date.now());
-  }
-
-  /** Schemes from before owners (and any whose owner is gone) become this admin's. */
-  adoptOwnerless(adminId: number) {
-    this.db.prepare('UPDATE projects SET owner_id = ? WHERE owner_id IS NULL OR owner_id NOT IN (SELECT id FROM users)').run(adminId);
-  }
-
-  /** A scheme's people: the owner first, then members in the order they were added. */
-  listMembers(projectId: number): (Pick<User, 'id' | 'name' | 'login'> & { owner: boolean })[] {
-    return (
-      this.db
-        .prepare(`SELECT u.id, u.name, u.login, u.id = p.owner_id AS owner FROM users u JOIN projects p ON p.id = ?
-      LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = u.id
-      WHERE u.id = p.owner_id OR m.user_id IS NOT NULL ORDER BY owner DESC, m.added_at`)
-        .all(projectId) as (Pick<User, 'id' | 'name' | 'login'> & { owner: number })[]
-    ).map((r) => ({ ...r, owner: !!r.owner }));
-  }
-
-  addMember(projectId: number, userId: number) {
-    this.db.prepare('INSERT OR IGNORE INTO project_members (project_id, user_id, added_at) VALUES (?, ?, ?)').run(projectId, userId, Date.now());
-  }
-
-  removeMember(projectId: number, userId: number) {
-    this.db.prepare('DELETE FROM project_members WHERE project_id = ? AND user_id = ?').run(projectId, userId);
-  }
-
-  /** What Citadel did on GitHub for scheme members (src/repo-access.ts): one row, or all of them. */
-  getRepoCollaborator(projectId: number, userId: number): RepoCollaborator | undefined {
-    return this.db.prepare('SELECT * FROM repo_collaborators WHERE project_id = ? AND user_id = ?').get(projectId, userId) as unknown as RepoCollaborator | undefined;
-  }
-
-  listRepoCollaborators(): RepoCollaborator[] {
-    return this.db.prepare('SELECT * FROM repo_collaborators').all() as unknown as RepoCollaborator[];
-  }
-
-  putRepoCollaborator(r: Omit<RepoCollaborator, 'updated_at'>) {
-    this.db
-      .prepare(`INSERT INTO repo_collaborators (project_id, user_id, slug, login, state, invitation_id, error, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (project_id, user_id) DO UPDATE SET slug = excluded.slug, login = excluded.login, state = excluded.state,
-        invitation_id = excluded.invitation_id, error = excluded.error, updated_at = excluded.updated_at`)
-      .run(r.project_id, r.user_id, r.slug, r.login, r.state, r.invitation_id, r.error, Date.now());
-  }
-
-  deleteRepoCollaborator(projectId: number, userId: number) {
-    this.db.prepare('DELETE FROM repo_collaborators WHERE project_id = ? AND user_id = ?').run(projectId, userId);
-  }
-
-  /**
-   * Whether a person counts as a Citadel admin: the admin flag, or being in the Citadel scheme (#621, Cara 2026-11-12:
-   * "any scheme member should have access to everything they need"). Admin gates, sessions and canSee read this; the
-   * bare flag is left for whose GitHub owns new schemes' repos and who gets admins' push alerts.
-   */
-  isAdmin(user: Pick<User, 'id' | 'admin' | 'disabled_at'> | undefined | null): boolean {
-    return !!user && !user.disabled_at && (!!user.admin || this.inScheme(user.id, GLOBAL_OWNER));
-  }
-
-  /** Whether a person owns or is a member of a scheme (no admin shortcut). */
-  private inScheme(uid: number | undefined, projectId: number): boolean {
-    return !!this.db
-      .prepare(`SELECT 1 FROM projects WHERE id = ?1 AND owner_id = ?2
-      UNION SELECT 1 FROM project_members WHERE project_id = ?1 AND user_id = ?2`)
-      .get(projectId, uid ?? -1);
-  }
-
-  /** The schemes a person is in, as owner or member; null for an admin (isAdmin's sense), who is in all of them. */
-  visibleProjects(who: { uid?: number; admin?: boolean }): Set<number> | null {
-    if (who.admin || this.inScheme(who.uid, GLOBAL_OWNER)) return null;
-    const rows = this.db
-      .prepare(`SELECT id FROM projects WHERE owner_id = ?1
-      UNION SELECT project_id FROM project_members WHERE user_id = ?1`)
-      .all(who.uid ?? -1) as { id: number }[];
-    return new Set(rows.map((r) => r.id));
-  }
-
-  /** The schemes a person owns or is a member of, admin or not: the Releases page's All view (#625). */
-  memberSchemes(uid: number | undefined): Set<number> {
-    const rows = scoped(
-      this.db,
-      `member-schemes:${uid ?? -1}`,
-      () =>
-        this.db
-          .prepare(`SELECT id FROM projects WHERE owner_id = ?1
-      UNION SELECT project_id FROM project_members WHERE user_id = ?1`)
-          .all(uid ?? -1) as { id: number }[],
-    );
-    return new Set(rows.map((r) => r.id));
-  }
-
-  /** Whether a person may see a scheme: an admin (a Citadel member too: isAdmin), its owner, or a member. */
-  canSee(who: { uid?: number; admin?: boolean }, projectId: number): boolean {
-    return !!who.admin || this.inScheme(who.uid, projectId) || this.inScheme(who.uid, GLOBAL_OWNER);
-  }
-
-  /** The schemes this person hid for themselves (#226). */
-  hiddenProjects(uid: number): Set<number> {
-    const rows = this.db.prepare('SELECT project_id FROM project_hides WHERE user_id = ?').all(uid) as { project_id: number }[];
-    return new Set(rows.map((r) => r.project_id));
-  }
-
-  setProjectHidden(uid: number, projectId: number, hidden: boolean) {
-    if (hidden) this.db.prepare('INSERT INTO project_hides (user_id, project_id, hidden_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING').run(uid, projectId, Date.now());
-    else this.db.prepare('DELETE FROM project_hides WHERE user_id = ? AND project_id = ?').run(uid, projectId);
-  }
-
-  /** The order this person dragged a list into (#649): scheme ids or contraption names; [] when they never did. */
-  listOrder(uid: number, list: 'schemes' | 'apps'): (number | string)[] {
-    const row = this.db.prepare('SELECT keys FROM list_orders WHERE user_id = ? AND list = ?').get(uid, list) as { keys: string } | undefined;
-    return row ? JSON.parse(row.keys) : [];
-  }
-
-  setListOrder(uid: number, list: 'schemes' | 'apps', keys: (number | string)[]) {
-    this.db
-      .prepare(`INSERT INTO list_orders (user_id, list, keys, updated_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(user_id, list) DO UPDATE SET keys = excluded.keys, updated_at = excluded.updated_at`)
-      .run(uid, list, JSON.stringify(keys), Date.now());
-  }
-
-  /** The Needs-you items `name` last saw waiting in each scheme (#539): project id -> their keys. */
-  seenItems(name: string): Map<number, Set<string>> {
-    const rows = this.db.prepare('SELECT project_id, keys FROM project_seen_items WHERE name = ?').all(name) as { project_id: number; keys: string }[];
-    return new Map(rows.map((r) => [r.project_id, new Set(JSON.parse(r.keys) as string[])]));
-  }
-
-  /** Record the items `name` saw waiting in a scheme; with `keep`, only when none are recorded yet. */
-  setSeenItems(name: string, projectId: number, keys: string[], keep = false) {
-    this.db
-      .prepare(`INSERT INTO project_seen_items (name, project_id, keys, seen_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(name, project_id) DO ${keep ? 'NOTHING' : 'UPDATE SET keys = excluded.keys, seen_at = excluded.seen_at'}`)
-      .run(name, projectId, JSON.stringify(keys), Date.now());
-  }
-
-  deleteProject(id: number) {
-    this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
-  }
-
   /** updateTicket's (src/db/minions.ts): each close gets its own closed_at. */
   lastClosedAt = 0;
 
@@ -1961,24 +1503,6 @@ export class Store {
   /** state.db's file, for a second connection to it (StateDb); null for an in-memory store. */
   get statePath(): string | null {
     return this.path === ':memory:' ? null : join(dirname(this.path), 'state.db');
-  }
-
-  /** People's notes on a scheme's minions, by ticket id. Only people's routes may hand these out. */
-  personNotes(projectId: number): Record<number, PersonNote> {
-    // A note older than its minion belongs to a deleted one whose id was reused: a rolled-back release's deleteTicket leaves it behind.
-    const rows = this.db.prepare('SELECT n.ticket_id, n.text, n.updated_by, n.updated_at FROM person_notes n JOIN tickets t ON t.id = n.ticket_id WHERE t.project_id = ? AND n.updated_at >= t.created_at').all(projectId) as { ticket_id: number; text: string; updated_by: string; updated_at: number }[];
-    return Object.fromEntries(rows.map((r) => [r.ticket_id, { text: r.text, by: r.updated_by, at: r.updated_at }]));
-  }
-
-  /** Set a minion's person note, or clear it with an empty text. */
-  setPersonNote(ticketId: number, text: string, by: string): PersonNote | null {
-    if (!text) {
-      this.db.prepare('DELETE FROM person_notes WHERE ticket_id = ?').run(ticketId);
-      return null;
-    }
-    const at = Date.now();
-    this.db.prepare('INSERT INTO person_notes (ticket_id, text, updated_by, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET text = excluded.text, updated_by = excluded.updated_by, updated_at = excluded.updated_at').run(ticketId, text, by, at);
-    return { text, by, at };
   }
 
   /**
@@ -2402,9 +1926,34 @@ export class Store {
  * store.listMachines() and the rest. A new query goes in its area's file, not the class above: test/db-areas.test.ts fails on that.
  */
 // One area per line, so two branches adding areas touch different lines (#1313: a single long list here was a conflict hotspot).
-const AREAS = [releaseQueries, claudeStateQueries, artifactQueries, contraptionQueries, seenQueries, cardQueries, eventQueries, ciNumberQueries, contraptionRunQueries, deliveryQueries, flakeQueries, machineQueries, minionQueries, pushQueries, readWarmQueries, settingQueries, slowMomentQueries, viewQueries];
+const AREAS = [
+  credentialQueries,
+  peopleQueries,
+  schemeQueries,
+  releaseQueries,
+  claudeStateQueries,
+  artifactQueries,
+  contraptionQueries,
+  seenQueries,
+  cardQueries,
+  eventQueries,
+  ciNumberQueries,
+  contraptionRunQueries,
+  deliveryQueries,
+  flakeQueries,
+  machineQueries,
+  minionQueries,
+  pushQueries,
+  readWarmQueries,
+  settingQueries,
+  slowMomentQueries,
+  viewQueries,
+];
 // The same list as a type: written out, since a type taken from AREAS would loop through Store's own type.
-type Areas = typeof releaseQueries &
+type Areas = typeof credentialQueries &
+  typeof peopleQueries &
+  typeof schemeQueries &
+  typeof releaseQueries &
   typeof claudeStateQueries &
   typeof artifactQueries &
   typeof contraptionQueries &

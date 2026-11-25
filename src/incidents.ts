@@ -67,6 +67,8 @@ export interface Open {
   from: number;
   last: number;
   why: string[];
+  /** When each `why` first passed (ms), same order. Missing on an incident saved before this: those read as `from`. */
+  at?: number[];
 }
 export interface IncidentState {
   open: Open | null;
@@ -78,13 +80,16 @@ export interface IncidentState {
 
 /** Fold one tick's triggers into the state; `close` is the incident to write now, if one went quiet. Pure. */
 export function step(state: IncidentState, triggers: Trigger[], now: number): { state: IncidentState; close: Open | null } {
-  let open = state.open ? { ...state.open, why: [...state.open.why] } : null;
+  let open: Open | null = state.open ? { ...state.open, why: [...state.open.why], at: state.open.why.map((_, i) => state.open?.at?.[i] ?? state.open?.from ?? 0) } : null;
   for (const t of triggers) {
     if (t.last <= state.after) continue;
-    if (!open) open = { from: t.from, last: t.last, why: [] };
+    if (!open) open = { from: t.from, last: t.last, why: [], at: [] };
     open.from = Math.min(open.from, Math.max(t.from, state.after));
     open.last = Math.max(open.last, t.last);
-    if (!open.why.includes(t.why) && open.why.length < 12) open.why.push(t.why);
+    if (!open.why.includes(t.why) && open.why.length < 12) {
+      open.why.push(t.why);
+      open.at?.push(Math.max(t.from, state.after));
+    }
   }
   if (open && now - open.last >= QUIET_MS) return { state: { ...state, open: null, after: open.last }, close: open };
   return { state: { ...state, open }, close: null };
@@ -456,7 +461,7 @@ export function biggestStalls(entries: Entry[]): Stall[] {
 
 /** The timeline file's markdown. */
 export function render(incident: Open, from: number, to: number, g: Gathered, dbPath: string): string {
-  const groups = group([...incident.why.map((why) => ({ at: incident.from, source: 'trigger' as const, text: why })), ...g.entries]);
+  const groups = group([...incident.why.map((why, i) => ({ at: incident.at?.[i] ?? incident.from, source: 'trigger' as const, text: why })), ...g.entries]);
   const shown = groups.slice(0, MAX_LINES);
   const line = (g: Group) => {
     const { first, n, last } = g;

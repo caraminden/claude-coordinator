@@ -1301,6 +1301,7 @@ export class Runner {
       asleep: closed || ticket.kind !== 'ticket' ? null : this.store.getSetting<Sleep>(sleepKey(ticket.id)),
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
+      running_cost: this.turns.has(ticket.id) ? (this.store.getSetting<TurnState>(turnKey(ticket.id))?.spend?.usd ?? 0) : 0,
       // What its kind of work usually costs and its two marks (#1114), for the minion page's "$X of about $Y".
       budget: ticket.kind === 'ticket' && !closed ? this.budgetView(ticket, list?.properties) : null,
       // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).

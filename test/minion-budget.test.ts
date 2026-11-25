@@ -170,8 +170,12 @@ test('a turn past 2x gets the ask once, in the chat and the turn; its Taskmaster
   await until('the ask to reach the turn', () => existsSync(stdin) && readFileSync(stdin, 'utf8').includes('[System]: Budget: this minion has now used'));
   assert.match(readFileSync(stdin, 'utf8'), /Budget: a feature on Opus has usually cost about \$5\.00 \(the median of 5 minions/);
   assert.equal(wakes.length, 0);
+  // While it runs, the view carries the running turn's estimate next to the finished turns' cost (#1913); the ask came at $10.
+  assert.equal(runner.view(store.getTicket(id)!).cost, 0);
+  assert.equal(Math.round(runner.view(store.getTicket(id)!).running_cost), 10);
   writeFileSync(go, '');
   await until('the turn to end', () => !runner.isRunning(id));
+  assert.equal(runner.view(store.getTicket(id)!).running_cost, 0);
   assert.equal(notes().length, 1);
   assert.deepEqual(
     wakes.map((w) => w.ticket),

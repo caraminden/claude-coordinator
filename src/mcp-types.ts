@@ -27,6 +27,8 @@ export interface TicketView {
   parent?: number | null;
   last_activity?: string;
   cost?: number;
+  /** The running turn's estimated cost (#1913), not yet in `cost`; 0 with no turn running. */
+  running_cost?: number;
   budget?: { usd: number; estimate: boolean; basis: string; ask: number; wake: number; card: number };
   open_cards?: CardLink[];
   notes?: string[];

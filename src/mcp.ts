@@ -1569,7 +1569,7 @@ function ticketLine(t: TicketView): string {
     t.last_activity ? `latest: ${t.last_activity}` : '',
     // read_minion and read_ticket (#1114): spend against what its kind of work usually costs.
     t.budget
-      ? `budget: ${money(t.cost ?? 0)} used of about ${money(t.budget.usd)} (${t.budget.estimate ? "its brief's expected cost" : `usual for ${t.budget.basis}`}; asked to say why or split past ${money(t.budget.ask)}, Taskmaster told past ${money(t.budget.wake)} and at each doubling, owner carded past ${money(t.budget.card)})`
+      ? `budget: ${t.running_cost ? `about ${money((t.cost ?? 0) + t.running_cost)} so far, the running turn's estimate included,` : `${money(t.cost ?? 0)} used`} of about ${money(t.budget.usd)} (${t.budget.estimate ? "its brief's expected cost" : `usual for ${t.budget.basis}`}; asked to say why or split past ${money(t.budget.ask)}, Taskmaster told past ${money(t.budget.wake)} and at each doubling, owner carded past ${money(t.budget.card)})`
       : '',
     // Each waiting card with its link (#400), so a mention of it can link it.
     ...(t.open_cards ?? []).map((c: CardLink) => `waiting: ${cardText(c)}`),

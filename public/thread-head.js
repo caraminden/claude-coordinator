@@ -488,14 +488,15 @@ function budgetChip(t) {
   const b = !isCoordinator(t) && t.budget;
   if (!b) return '';
   const usd = (n) => `$${n >= 10 ? Math.round(n) : n.toFixed(2)}`;
-  const cost = t.cost ?? 0;
+  const running = t.running_cost ?? 0; // the running turn's estimate (#1913), not yet in t.cost
+  const cost = (t.cost ?? 0) + running;
   return h(
     'span',
     {
       class: `tag-chip budget-chip${cost >= b.ask ? ' over' : ''}`,
-      title: `${b.basis} has usually cost about ${usd(b.usd)} (median of ${b.n} minions, last 4 weeks). Past ${usd(b.ask)} the minion is asked to say why or split the work; past ${usd(b.wake)} its Taskmaster hears, and again at ${usd(b.wake * 2)} and each doubling after; past ${usd(b.card)} its owner gets a card to carry on, split or stop. Nothing stops it unless its owner picks Stop.`,
+      title: `${running ? `About ${usd(cost)} so far: finished turns ${usd(t.cost ?? 0)} plus the running turn's estimate ${usd(running)}. ` : ''}${b.estimate ? `The about ${usd(b.usd)} is the brief's own estimate of this minion's cost.` : `${b.basis} has usually cost about ${usd(b.usd)} (median of ${b.n} minions, last 4 weeks).`} Past ${usd(b.ask)} the minion is asked to say why or split the work; past ${usd(b.wake)} its Taskmaster hears, and again at ${usd(b.wake * 2)} and each doubling after; past ${usd(b.card)} its owner gets a card to carry on, split or stop. Nothing stops it unless its owner picks Stop.`,
     },
-    `${usd(cost)} of about ${usd(b.usd)}`,
+    `${running ? `about ${usd(cost)} so far` : usd(cost)} of about ${usd(b.usd)}`,
   );
 }
 

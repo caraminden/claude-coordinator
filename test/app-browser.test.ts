@@ -346,3 +346,24 @@ test('the window controls keep the base colour for a see-through background and 
     assert.equal(await tint(null), baseColour, 'no bar puts the base back');
   }
 });
+
+// The header's cost chip (#1913; Josh, 2026-11-24: "about $12 so far of about $15" while a turn runs): finished turns plus the running turn's estimate.
+test('the budget chip adds the running turn to the finished turns, as an estimate, and goes amber on the total', { skip }, async () => {
+  const page = await inboxPage('ok');
+  const chip = (t: object) =>
+    page.eval(`(async () => {
+      const { setView, view } = await import('/base.js');
+      const { renderTicketHead } = await import('/thread-head.js');
+      Object.assign(view.ticket, ${JSON.stringify(t)}, { budget: { usd: 15, n: 0, basis: 'its brief', estimate: 15, ask: 30, wake: 60, card: 150 } });
+      renderTicketHead();
+      const c = document.querySelector('.budget-chip');
+      return { text: c.textContent, over: c.classList.contains('over'), title: c.title };
+    })()`) as Promise<{ text: string; over: boolean; title: string }>;
+  const running = await chip({ cost: 2, running_cost: 10 });
+  assert.equal(running.text, 'about $12 so far of about $15');
+  assert.equal(running.over, false);
+  assert.match(running.title, /brief's own estimate/);
+  assert.match(running.title, /running turn's estimate \$10\./);
+  assert.equal((await chip({ cost: 2, running_cost: 0 })).text, '$2.00 of about $15');
+  assert.equal((await chip({ cost: 5, running_cost: 30 })).over, true, 'amber goes by the total');
+});

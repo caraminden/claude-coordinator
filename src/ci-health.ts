@@ -963,6 +963,7 @@ export class CiHealth {
     const c = mark.fixer ? this.store.getTicket(mark.fixer.ticket) : null;
     return c && c.project_id === p.id && c.number != null ? { number: c.number, closedAt: c.status === 'closed' ? c.updated_at : null, via: `shipped ${short(mark.fixer!.sha)} touching ${mark.fixer!.file}` } : null;
   }
+
   /** The minions that could be fixing a red: made since its Taskmaster heard of it, or naming it in their chat. */
   private candidates(p: Project, mark: RedMark): Ticket[] {
     return this.store.listTickets(p.id).filter((x) => x.number != null && (mark.chat?.ids.includes(x.id) || x.created_at >= (mark.told ?? 0) - 60_000));

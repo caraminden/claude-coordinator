@@ -1566,7 +1566,7 @@ export const projectRoutes: Route[] = [
           } else if (body.index === true) indexNote(folder.dir, file);
           else {
             if (typeof body.text !== 'string' || body.text.length > 200_000) throw new HttpError(400, 'text must be text under 200 KB');
-            saveNote(folder.dir, file, body.text);
+            saveNote(folder.dir, file, body.text, typeof body.was === 'string' ? body.was : undefined);
           }
         } catch (err) {
           if (err instanceof HttpError) throw err;

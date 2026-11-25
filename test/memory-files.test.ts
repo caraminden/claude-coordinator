@@ -43,6 +43,19 @@ test('two accounts whose projects folder is one symlinked folder list it once (2
   assert.equal(got[0].dir, memoryDir(join(root, 'one'), repo), "the path and id stay the first login's");
 });
 
+test('a save made from older text is refused once the note changed, and an unchecked one still saves (2ME4)', () => {
+  const dir = setup();
+  const opened = readFileSync(join(dir, 'b.md'), 'utf8');
+  saveNote(dir, 'b.md', 'a session wrote this');
+  assert.throws(
+    () => saveNote(dir, 'b.md', "the page's older edit", opened),
+    (e: any) => e.status === 409 && /changed since you opened it/.test(e.message),
+  );
+  assert.equal(readFileSync(join(dir, 'b.md'), 'utf8'), 'a session wrote this');
+  saveNote(dir, 'b.md', 'saved from what was shown', 'a session wrote this');
+  assert.equal(readFileSync(join(dir, 'b.md'), 'utf8'), 'saved from what was shown');
+});
+
 test('noteFile refuses paths, the index and non-markdown', () => {
   for (const bad of ['../x.md', 'a/b.md', 'MEMORY.md', '.hidden.md', 'x.txt', 5, undefined]) assert.equal(noteFile(bad), null);
   assert.equal(noteFile('fable-burst.md'), 'fable-burst.md');

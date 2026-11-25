@@ -175,8 +175,10 @@ export function writeAtomic(path: string, text: string) {
 }
 
 /** Replace one note's text (it must exist: this edits, never adds). */
-export function saveNote(dir: string, file: string, text: string) {
+export function saveNote(dir: string, file: string, text: string, was?: string) {
   if (!plain(join(dir, file))) throw new Error('No such note');
+  // `was` is the text the page showed: a note written since (a session's update) isn't overwritten unseen (2ME4). Without it, the save is unchecked.
+  if (was !== undefined && readFileSync(join(dir, file), 'utf8') !== was) throw Object.assign(new Error('This note changed since you opened it (a session may have updated it). Reload the page to see the new text, then make your edit again.'), { status: 409 });
   writeAtomic(join(dir, file), text);
 }
 

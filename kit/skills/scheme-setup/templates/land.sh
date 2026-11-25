@@ -705,8 +705,8 @@ queue_order() {
   [ ! -f "$Q_DIR/.order" ] || while read -r t; do
     if [[ $t =~ ^[0-9]{10}$ ]]; then rank[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then Q_ORDER_BY=${t#\# }; elif [[ $t == '#pin '* ]]; then pins=${t#\#pin }; fi
   done <"$Q_DIR/.order" 2>/dev/null || true
-  # A ship a person placed ("#pin": Citadel's "Person's drag wins") stays ahead of one that holds the line: it goes behind the last still here.
-  for t in $pins; do printf -v t '%010d' "$((10#$t))" 2>/dev/null && [ -e "$Q_DIR/$t" ] && [ "${rank[$t]:-0}" -gt "$pin" ] && pin=${rank[$t]}; done
+  # A ship a person placed ("#pin": Citadel's "Person's drag wins") stays ahead of one that holds the line: it goes behind the last still waiting (not landing: line 2 is 0).
+  for t in $pins; do printf -v t '%010d' "$((10#$t))" 2>/dev/null && [ "$(sed -n 2p "$Q_DIR/$t" 2>/dev/null || echo x)" = 0 ] && [ "${rank[$t]:-0}" -gt "$pin" ] && pin=${rank[$t]}; done
   for t in "$Q_DIR"/[0-9]*; do
     t=${t##*/}
     [[ $t =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue # not a ticket half-written, or the glob itself
@@ -1409,7 +1409,7 @@ fi
 # its command runs on the newest $BRANCH, and nobody's batch carries a ship past it.
 if [ -n "$Q_HOLD" ]; then
   CI_STACK=1 CI_BATCH=1 BATCH='' UNRUN=old
-  [ -n "$check" ] || say "$branch declares Regenerate files (${regen_pats[*]}), so it holds the line: it goes first among the waiters, alone, and nothing ships ahead of it"
+  [ -n "$check" ] || say "$branch declares Regenerate files (${regen_pats[*]}), so it holds the line: it goes first among the waiters, alone, behind only ships a person placed"
 fi
 # A landing that changes the pipeline ships alone the same way: a batch would carry its untested land.sh into the
 # others' landings, and a red in it would take them all down with it.

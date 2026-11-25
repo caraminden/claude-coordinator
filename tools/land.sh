@@ -553,12 +553,12 @@ fi
 # On landed or refused this ends the landing, as its own ship would have.
 train_dir=$state/train riding=''
 [ "$mode" != land ] || [ "${LAND_TRAIN:-1}" = 0 ] || QUEUE_TRAIN=train # the ticket's 6th line (tools/deploy-queue.sh)
-# A Regenerate ship (above) holds the line instead (Cara picked "Regenerate + hold the line", 2026-11-24): it waits at
-# the front, rides no train and takes no riders, and the restart lock keeps the next ship until it is live. Anything
+# A Regenerate ship (above) holds the line instead (Cara picked "Regenerate + hold the line", 2026-11-24): it waits at the
+# front (behind only ships a person placed), rides no train and takes no riders, and the restart lock keeps the next ship until it is live. Anything
 # that ships ahead of it would only make its command run on a newer main; anything batched with it would conflict.
 if [ "$mode" = land ] && [ -n "$regen_attrs" ]; then
   QUEUE_TRAIN=hold
-  [ -n "$quiet" ] || say "$branch declares Regenerate files (${regen_pats[*]}), so it holds the line: it goes first among the waiters, alone, and nothing ships ahead of it"
+  [ -n "$quiet" ] || say "$branch declares Regenerate files (${regen_pats[*]}), so it holds the line: it goes first among the waiters, alone, behind only ships a person placed"
 fi
 train_verdict() {
   local f=$train_dir/${DEPLOY_QUEUE_TICKET##*/} v a b c d e x lines=() at requeue=''

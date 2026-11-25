@@ -154,8 +154,8 @@ queue_order() {
   while read -r t; do
     if [[ $t =~ ^[0-9]{10}$ ]]; then QUEUE_RANK[$t]=$((i += 1)); elif [[ $t == '# '* ]]; then QUEUE_ORDER_BY=${t#\# }; elif [[ $t == '#pin '* ]]; then pins=${t#\#pin }; fi
   done <"$1/.order" 2>/dev/null || true
-  # A ship a person placed ("#pin", #1827 "Person's drag wins") stays ahead of a holding ship: it goes behind the last still here.
-  for t in ${pins:-}; do printf -v t '%010d' "$((10#$t))" 2>/dev/null && [ -e "$1/$t" ] && [ "${QUEUE_RANK[$t]:-0}" -gt "$QUEUE_PIN" ] && QUEUE_PIN=${QUEUE_RANK[$t]}; done
+  # A ship a person placed ("#pin", #1827 "Person's drag wins") stays ahead of a holding ship: it goes behind the last still waiting (not landing: line 2 is 0).
+  for t in ${pins:-}; do printf -v t '%010d' "$((10#$t))" 2>/dev/null && [ "$(sed -n 2p "$1/$t" 2>/dev/null || echo x)" = 0 ] && [ "${QUEUE_RANK[$t]:-0}" -gt "$QUEUE_PIN" ] && QUEUE_PIN=${QUEUE_RANK[$t]}; done
   return 0
 }
 queue_key() { # <ticket> [variable]: printed, or into that variable (as queue_proc)
@@ -164,7 +164,7 @@ queue_key() { # <ticket> [variable]: printed, or into that variable (as queue_pr
     [ "$o" != "$1" ] || { printf -v k '%05d2' "$seg"; break; }
     [[ $o > $1 ]] || seg=$((seg + 1))
   done
-  # A ship that holds the line (6th line "hold") comes before every rank, which start at 1, then in arrival order.
+  # A ship that holds the line (6th line "hold") sits right behind the last ship a person placed (QUEUE_PIN, else 0: before every rank), then in arrival order.
   if [ -n "${k:-}" ]; then :; elif [[ ${QUEUE_HOLD:-} == *" $1 "* ]]; then printf -v k '%05d0%010d%s' "$seg" "${QUEUE_PIN:-0}" "$1"; elif [ -n "${QUEUE_RANK[$1]:-}" ]; then printf -v k '%05d0%010d' "$seg" "${QUEUE_RANK[$1]}"; else printf -v k '%05d1%s' "$seg" "$1"; fi
   if [ -n "${2:-}" ]; then printf -v "$2" %s "$k"; else printf %s "$k"; fi
 }

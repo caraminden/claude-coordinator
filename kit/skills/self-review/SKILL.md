@@ -39,7 +39,7 @@ missing, show the stat or file list cut (more than about 40 files), name a base 
 Commit first (the facts above already cover it when nothing says UNCOMMITTED), then
 `git diff --stat main...HEAD` (three dots: only what this branch changed) when you need it again.
 Before your final test run, rebase onto your base once (the one "take a newer base at the end" step): then the tests you ran saw the files other ships added, which is what the ship's CI sees.
-A ship that is all a command's output (a reformat, a regenerated baseline or generated files, and nothing else) goes with the trailers `Regenerate: <command>` and `Regenerate-files: <patterns>` on one of its commits: tools/land.sh then makes those files again on the newest main instead of refusing on their conflicts, and the ship holds the line, first and alone, until it ships (#1827). A feature that also moves a baseline doesn't declare: it would jump the line. Ships by pull request ignore the trailers.
+A ship that is all a command's output (a reformat, a regenerated baseline or generated files, and nothing else) goes with the trailers `Regenerate: <command>` and `Regenerate-files: <patterns>` on one of its commits: tools/land.sh then makes those files again on the newest main instead of refusing on their conflicts, and the ship holds the line, first and alone (behind only ships a person placed), until it ships (#1827). A feature that also moves a baseline doesn't declare: it would jump the line. Ships by pull request ignore the trailers.
 
 - **Skip** when under about 20 changed lines and every change is docs (`docs/`, `README.md`) or
   user-visible text in the front end with no logic touched. Label it `low: docs/copy only` and go

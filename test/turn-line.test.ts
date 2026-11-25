@@ -99,7 +99,9 @@ const end = (id: number) => writeFileSync(join(root, `end-${id}`), '');
 const unend = (id: number) => rmSync(join(root, `end-${id}`), { force: true });
 const turnsOf = (id: number) => lines(prompts).filter((l) => l.startsWith(`${id} `));
 const started = (id: number) => until(`minion ${id} to start`, () => turnsOf(id).length > 0);
-const idle = (id: number) => until(`minion ${id} to finish`, () => !runner.isRunning(id) && store.getTicket(id)!.status !== 'running');
+/** No turn of its runs and its lane is free: the session save after a turn is over too, which is when its worker goes back (#1967). */
+const over = (id: number) => !runner.isRunning(id) && !(runner as unknown as { lanes: { busy(id: number): boolean } }).lanes.busy(id);
+const idle = (id: number) => until(`minion ${id} to finish`, () => over(id) && store.getTicket(id)!.status !== 'running');
 /** The line has nothing left to start: no pump due, no turn launching, and each worker's turn has its prompt. */
 const settle = () =>
   until('the line to settle', () => {
@@ -125,7 +127,7 @@ beforeEach(async () => {
     end(id);
     if (runner.approvals.waiting(id)) runner.stop(id);
   }
-  await until('the minions before to finish', () => made.every((id) => !runner.isRunning(id)) && runner.turnLine.waiting().length === 0);
+  await until('the minions before to finish', () => made.every(over) && runner.turnLine.waiting().length === 0);
   made.length = 0;
 });
 

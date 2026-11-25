@@ -455,7 +455,7 @@ export function planCard(ticketId, card, opts = {}) {
       why.hidden = true;
       approve.hidden = revise.hidden = drop.hidden = dismiss.hidden = true;
       status.textContent = ins ? insOutcome(r) : planOutcome(r, fixed);
-      if (r.by) head.done(`${r.status === 'approved' ? 'approved' : 'sent back'} by ${r.by}`);
+      if (r.by) head.done(`${r.status === 'approved' ? 'approved' : r.status === 'dismissed' ? 'dismissed' : 'sent back'} by ${r.by}`);
     },
   };
   mine.handle = handle;
@@ -670,11 +670,12 @@ export function questionCard(ticketId, card, opts = {}) {
     optimistic({
       key: `card:${card.id}`,
       apply: () => {
+        if (confirmed) return; // a Retry after someone else answered: the card already says who
         unanswer = answerNow(ticketId, card.id);
         lock(true);
         status.textContent = `Answered by ${me}`;
       },
-      send: () => api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id, answers, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}) } }),
+      send: () => (confirmed ? Promise.reject(new Error('Someone already answered this card')) : api(`api/tickets/${ticketId}/answer`, { method: 'POST', body: { questionId: card.id, answers, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}) } })),
       undo: () => {
         if (confirmed) return;
         unanswer();
@@ -840,6 +841,7 @@ export function questionCard(ticketId, card, opts = {}) {
         atts.el.before(drawQ(q, card.questions.length - 1));
       }
       sendBtn.textContent = 'Send answers';
+      el.removeAttribute('data-single'); // two questions now: the right-click "Answer: X" would answer only the first
       pictures = card.questions.some((q) => q.options.some((o) => o.image));
       refresh();
     },

@@ -55,3 +55,22 @@ test('Send during a multi-image add waits for every image (C3)', { skip }, async
   });
   assert.equal(await page.eval(`document.querySelectorAll('.composer .attachments .thumb').length`), 0, 'nothing left behind in the box');
 });
+
+// C5: "Send after this turn" stays "after this turn" when it goes through the secret warning's "Send anyway".
+test('"Send after this turn" survives the secret warning (C5)', { skip }, async () => {
+  const { page, t } = await open('secret after');
+  await page.eval(`(() => {
+    window.__bodies = [];
+    const f = window.fetch;
+    window.fetch = (u, o) => { if (o?.body && /\\/message/.test(String(u))) window.__bodies.push(String(o.body)); return f(u, o); };
+    const box = document.querySelector('.composer textarea');
+    box.value = 'the password is hunter2!x';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    [...document.querySelectorAll('.send-menu button')].find((b) => /after this turn/.test(b.textContent)).click();
+  })()`);
+  await waitFor(page, 'the warning', '!![...document.querySelectorAll("button")].find((b) => b.textContent === "Send anyway")');
+  await page.eval(`[...document.querySelectorAll('button')].find((b) => b.textContent === 'Send anyway').click()`);
+  await waitFor(page, 'the request', 'window.__bodies.length > 0');
+  assert.equal(JSON.parse(await page.eval(`window.__bodies[0]`)).after, true);
+  assert.ok(t.id);
+});

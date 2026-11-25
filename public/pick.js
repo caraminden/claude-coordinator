@@ -66,10 +66,13 @@ export function startPick() {
     if (e.button !== 0) return;
     pick(e);
   };
+  let picked = false; // a double-click's second press lands inside the 300 ms the dim stays
   const pick = (e) => {
     e.preventDefault();
+    if (picked) return;
     const el = under(e.clientX, e.clientY);
     if (!el) return;
+    picked = true;
     show(el);
     // The dim stays a moment to take the click that follows a tap, so it can't reach what's under it. A screenshot
     // (the desktop app) would catch it and the box: they go see-through.

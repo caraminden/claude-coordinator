@@ -198,8 +198,11 @@ export function composer(chatId, ticket) {
               type: 'button',
               class: 'small side-go',
               onclick: () => {
+                // The box may have changed since the cost was shown: ask what it says now, nothing if it is empty.
+                const now = box.value.trim().replace(/^\/btw\s+/, '');
+                if (!now) return void (sideStrip.hidden = true);
                 sideOk = true;
-                askSide(text);
+                askSide(now);
               },
             },
             'Ask anyway',
@@ -270,7 +273,9 @@ export function composer(chatId, ticket) {
       }
       const found = !sendAnyway && looksSecret(text);
       sendAnyway = false;
-      if (found)
+      if (found) {
+        // "Send after this turn" / "Send and unseal" were pressed: they must still be in force when "Send anyway" resubmits.
+        const [wasAfter, wasUnpark] = [after, unparkWith];
         return (
           askToSaveSecret(ticket, found, {
             saved: (name) => {
@@ -279,11 +284,17 @@ export function composer(chatId, ticket) {
             },
             sendAnyway: () => {
               sendAnyway = true;
-              form.requestSubmit();
+              [after, unparkWith] = [wasAfter, wasUnpark];
+              try {
+                form.requestSubmit();
+              } finally {
+                [after, unparkWith] = [false, false];
+              }
             },
           }),
           false
         );
+      }
       return !!text || attachments.items.length > 0 || attachments.busy > 0 || attachments.adding > 0;
     },
     // Returns at once, so Send never waits (#392): a failed message stays in the chat with Retry and Edit, not back in the box.
@@ -342,6 +353,14 @@ export function composer(chatId, ticket) {
           .map((x) => x.text)
           .filter(Boolean)
           .join('\n\n');
+        if (!form.isConnected) {
+          // You left the chat: the box is gone, and a new one may hold fresh text. Put it in the saved draft, never over live text.
+          const cur = loadDraft(`cc-draft:${chatId}`) ?? '';
+          saveDraft(`cc-draft:${chatId}`, cur.trim() ? `${back}\n${cur}` : back);
+          alertNote("An upload failed, so your message was not sent. It is in this chat's draft.");
+          toast("Upload failed: your message is in the chat's draft", { tone: 'warn', ms: 8000 });
+          return;
+        }
         box.value = box.value.trim() ? `${back}\n${box.value}` : back;
         alertNote('An upload failed, so your message was not sent. It is back in the box: send it again.');
         toast('Upload failed: your message is back in the box', { tone: 'warn', ms: 8000, action: { label: 'Send again', run: () => form.requestSubmit() } });
@@ -349,7 +368,11 @@ export function composer(chatId, ticket) {
       }
       const sent = attachments.items.slice();
       attachments.remove(sent);
-      batch.forEach((hold, i) => send(hold.text, i === 0 ? sent : [], hold.queue, hold.unpark));
+      // Nothing left to send (the only upload was removed, or Send was pressed twice with no text): no empty message.
+      batch.forEach((hold, i) => {
+        const files = i === 0 ? sent : [];
+        if (hold.text || files.length) send(hold.text, files, hold.queue, hold.unpark);
+      });
     });
   };
   /** /fresh (#937): a fresh Claude session, Taskmaster or minion, after it writes its handoff. */
@@ -711,7 +734,8 @@ function mentionMenu(form, textarea, people) {
   };
   const pick = (m) => {
     const caret = textarea.selectionStart;
-    const q = mentionQuery(textarea.value, caret) ?? '';
+    const q = mentionQuery(textarea.value, caret);
+    if (q === null) return close();
     textarea.setRangeText(`@${m.name} `, caret - q.length - 1, caret, 'end');
     textarea.dispatchEvent(new Event('input', { bubbles: true })); // saves the draft and fits the box; closes the menu
     textarea.focus();
@@ -734,10 +758,16 @@ function mentionMenu(form, textarea, people) {
     update();
   });
   textarea.addEventListener('blur', close);
+  // A caret moved by click or keys (Home, Left, Right) can leave "@" behind: re-read it, so the menu closes.
+  textarea.addEventListener('click', update);
+  textarea.addEventListener('keyup', (e) => {
+    if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape', 'Shift'].includes(e.key)) update();
+  });
   form.addEventListener(
     'keydown',
     (e) => {
       if (menu.hidden || e.target !== textarea || e.isComposing) return;
+      if (textarea.selectionStart !== textarea.selectionEnd || mentionQuery(textarea.value, textarea.selectionStart) === null) return close(); // stale menu: the key does its own job
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         active = (active + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length;
         mark();
@@ -1267,7 +1297,6 @@ export function renderModelPicker() {
   model.value = t.model ?? '';
   // Why it runs on this model (#1061): a tooltip on the picker, and a line under the pickers in the phone menu.
   const why = t.picked_because ? `Picked because: ${t.picked_because}` : '';
-  model.title = `Model for this minion${why ? `. ${why}` : ''}`;
   const note = document.getElementById('picker-because');
   if (note) note.textContent = why;
   const shownDefault = t.default_effort ?? t.last_effort;
@@ -1278,6 +1307,7 @@ export function renderModelPicker() {
   effort.classList.toggle('is-default', !t.effort);
   const later = t.status === 'running' ? '; a change applies from the next turn' : '';
   model.title = t.model ? `Model for this minion: ${modelName(t.model)}${later}` : `Model for this minion: the default${t.last_model ? ` (${modelName(t.last_model)} on its last turn)` : ''}${later}`;
+  if (why) model.title += `. ${why}`;
   effort.title = t.effort ? `Effort for this minion: ${t.effort}${later}` : `Effort for this minion: the default${t.default_effort ? ` (${t.default_effort})` : t.last_effort ? ` (${t.last_effort} on its last turn)` : ''}${later}`;
   model.setAttribute('aria-label', model.title);
   effort.setAttribute('aria-label', effort.title);

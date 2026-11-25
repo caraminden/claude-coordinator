@@ -25,7 +25,7 @@ export const ALLOWED: Record<string, [number, string]> = {
   'src/mcp.ts': [2108, 'MCP tool lists, and the tool families not split out yet (#1843)'],
   'tools/land.sh': [2841, 'the ship script is one shell program; its steps share state and are pinned by tests (+141: a red train pulls every likely ship and hands what is left to the next one, #1918)'],
   'kit/skills/scheme-setup/templates/land.sh': [2887, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted (+8: the count merge rule, #1917)'],
-  'public/machine-agent.mjs': [2474, 'standalone agent a person runs on their own computer: one file so it can be copied alone (raised once for the Biome reformat, #1792)'],
+  'public/machine-agent.mjs': [2517, 'standalone agent a person runs on their own computer: one file so it can be copied alone (raised once for the Biome reformat, #1792) (+43: jobs keep their state across reconnect, Pause and Stop, #1956)'],
   'src/routes/projects.ts': [2105, 'every /projects route; split by page is queued (+2: a waiting minion counts as working, #1868) (raised once for the Biome reformat, #1792) (+30: same-scheme Taskmaster message, #1855) (+4: the stale check and its wait for queued saves, #1859)'],
   'src/tripwire.ts': [1830, 'the tripwire rules; high risk to edit, so a split waits for its own change (raised once for the Biome reformat, #1792)'],
   'src/routes/tickets.ts': [1936, 'every /tickets route; split by page is queued (+19: #1823 unchain, +13: card types replacing any, #1799) (raised once for the Biome reformat, #1792) (+3: a hand-off and a deploy report move its place in line, #1888)'],

@@ -18,7 +18,7 @@
 # One shared limit (#1928): the test files running at once across every citadel-test run on the box stay within CITADEL_TEST_FILES
 # (4 to start, 0 = off), which tools/test-gate.ts moves between CITADEL_TEST_FILES_MIN (2) and CITADEL_TEST_FILES_MAX (8) by the host's
 # CPU pressure (its header has the steps). A file waits for a place holding nothing, and starts anyway after CITADEL_TEST_ROOM_WAIT
-# seconds (120); a run that waited prints one line saying so at the end. Not on CI (RUNNER_TEMP, GITHUB_ACTIONS), not inside a
+# seconds (120); a run that waits prints one line saying so. Not on CI (RUNNER_TEMP, GITHUB_ACTIONS), not inside a
 # citadel-heavy job (CITADEL_HEAVY_HELD), and land.sh's smoke check runs with CITADEL_TEST_FILES=0.
 # The full suite is the land gate's job (tools/land.sh), so it refuses to run on a folder.
 set -uo pipefail
@@ -89,11 +89,13 @@ if [[ $conc =~ ^[1-9][0-9]*$ ]]; then
 fi
 log=${TMPDIR:-/tmp}/citadel-test.log
 err=$(mktemp) out=$(mktemp) failed=$(mktemp); export CITADEL_TEST_FAILED_FILE=$failed CITADEL_TEST_ROOT=$root
-gate_note= gate_opts=${NODE_OPTIONS:-}
+gate_note= watch= gate_opts=${NODE_OPTIONS:-}
 if [ "${CITADEL_TEST_FILES:-4}" != 0 ] && [ -z "${RUNNER_TEMP:-}${GITHUB_ACTIONS:-}${CITADEL_HEAVY_HELD:-}" ] && command -v flock >/dev/null && [ -f "$root/tools/test-gate.ts" ]; then
   gate_note=$(mktemp -u); gate_opts="${NODE_OPTIONS:-} --import=$root/tools/test-gate.ts"; export CITADEL_TEST_GATE_NOTE=$gate_note
+  # Says the wait when it happens, not at the end; read -t on a pipe nobody writes is a sleep with no child to leave behind.
+  ( exec {nap}<> <(:); until [ -s "$gate_note" ]; do read -rt 0.3 -u "$nap"; done; say "$(cat "$gate_note")" ) >/dev/null & watch=$!
 fi
-trap 'rm -f "$err" "$out" "$failed" "$gate_note"' EXIT
+trap 'rm -f "$err" "$out" "$failed" ${gate_note:+"$gate_note" "$gate_note.n"}; [ -z "$watch" ] || kill "$watch" 2>/dev/null' EXIT
 start=$SECONDS
 load0=$(cut -d' ' -f1 "${CITADEL_TEST_LOADAVG:-/proc/loadavg}" 2>/dev/null)
 # The spec output goes to the log, the short version to stdout, and node's own stderr (the leak guard says its
@@ -115,7 +117,7 @@ NODE_OPTIONS=$gate_opts stop_at "$limit" "$root/tools/citadel-node" --test --tes
   "${opts[@]}" "${files[@]}" >"$out" 2>"$err"
 status=$?
 if [ ${#second[@]} -gt 0 ] && [ $status -ne 124 ]; then
-  out2=$(mktemp); trap 'rm -f "$err" "$out" "$out2" "$failed" "$gate_note"' EXIT
+  out2=$(mktemp); trap 'rm -f "$err" "$out" "$out2" "$failed" ${gate_note:+"$gate_note" "$gate_note.n"}; [ -z "$watch" ] || kill "$watch" 2>/dev/null' EXIT
   NODE_OPTIONS=$gate_opts stop_at "$limit" "$root/tools/citadel-node" --test --test-force-exit "${workers[@]}" --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
     --test-reporter=spec --test-reporter-destination="$log.2" --test-reporter="$reporter" --test-reporter-destination=stdout \
     "${second[@]}" >"$out2" 2>>"$err"
@@ -133,7 +135,6 @@ if [ -s "$err" ]; then
   fi
 fi
 [ $status -eq 124 ] || [ $status -eq 137 ] && echo "✖ stopped at the time limit, ${limit} s (--timeout <seconds> to change it), after $((SECONDS - start)) s"
-[ -z "$gate_note" ] || [ ! -s "$gate_note" ] || say "$(cat "$gate_note")"
 echo "full output: $log"
 
 # On a red, one line per failed file when it applies (#1650; Cara, 2026-11-22: "On a red, says if the file is a known flake or the

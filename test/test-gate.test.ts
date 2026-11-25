@@ -90,19 +90,73 @@ test('a file killed while it holds a place frees it at once', async () => {
 
 test('a file that waits prints one line, holds no place and starts anyway after the wait', async () => {
   const { env, run } = setup(20);
-  const one = { ...env, CITADEL_TEST_FILES: '1', CITADEL_TEST_FILES_MIN: '1', CITADEL_TEST_FILES_MAX: '1', CITADEL_TEST_ROOM_WAIT: '1' };
+  const one = { ...env, CITADEL_TEST_FILES: '1', CITADEL_TEST_FILES_MIN: '1', CITADEL_TEST_FILES_MAX: '1', CITADEL_TEST_ROOM_WAIT: '2' };
   const holder = spawn(process.execPath, ['--import', gate, '-e', body(60_000)], { env: one, stdio: 'ignore' });
   await until('the holder up', () => readdirSync(run).some((f) => f.startsWith('up-')));
-  assert.equal(await file(one, 50), 0, 'it started after the 1 s wait');
+  assert.equal(await file(one, 50), 0, 'it started after the 2 s wait');
   assert.match(readFileSync(env.CITADEL_TEST_GATE_NOTE!, 'utf8'), /^waiting for room: 1 test files may run at once on this box \(CPU pressure 20%\)/);
   assert.equal(peak(run), 2, 'it started past the limit, as the cap says');
   holder.kill('SIGKILL');
 });
 
-test('off, on CI and inside a heavy slot, nothing waits', async () => {
+test('off, on CI and inside a heavy slot, nothing waits: all six run at once on a box whose limit is two', async () => {
   for (const off of [{ CITADEL_TEST_FILES: '0' }, { RUNNER_TEMP: '/tmp' }, { GITHUB_ACTIONS: 'true' }, { CITADEL_HEAVY_HELD: '1' }]) {
     const { env, run } = setup(60);
-    await Promise.all(Array.from({ length: 6 }, () => file({ ...env, ...off }, 3000)));
-    assert.ok(peak(run) > 2, `${JSON.stringify(off)}: peak ${peak(run)} is past the floor the busy box would allow`);
+    const all = Array.from({ length: 6 }, () => spawn(process.execPath, ['--import', gate, '-e', body(600_000)], { env: { ...env, ...off }, stdio: 'ignore' }));
+    try {
+      await until(`all six up with ${JSON.stringify(off)}`, () => readdirSync(run).filter((f) => f.startsWith('up-')).length === 6);
+    } finally {
+      for (const c of all) c.kill('SIGKILL');
+    }
   }
+});
+
+// A place of the limit's, held by this test until it is let go.
+async function holdPlace(dir: string, i: number) {
+  const c = spawn('flock', [join(dir, `test-slot-${i}`), 'sh', '-c', 'echo held; exec sleep 600'], { stdio: ['ignore', 'pipe', 'ignore'], detached: true });
+  let up = false;
+  c.stdout!.on('data', () => (up = true));
+  await until(`place ${i} held`, () => up);
+  return () => process.kill(-c.pid!, 'SIGKILL');
+}
+const inLine = (dir: string) => (existsSync(join(dir, 'test-line')) ? readdirSync(join(dir, 'test-line')) : []);
+
+test('after a shrink no file starts while the files still running fill the smaller limit, whichever places they hold', async () => {
+  const { env, run, dir } = setup(40); // the floor: 2
+  const free = [await holdPlace(dir, 5), await holdPlace(dir, 6)];
+  const c = file({ ...env, CITADEL_TEST_ROOM_WAIT: '600' }, 10);
+  try {
+    await until('it says it waits', () => existsSync(env.CITADEL_TEST_GATE_NOTE!));
+    assert.ok(!existsSync(join(run, 'seen')), 'two run and the limit is two');
+    free.shift()!();
+    assert.equal(await c, 0);
+  } finally {
+    for (const f of free) f();
+  }
+});
+
+test("a one-file run goes before a long run's remaining files, though they were in line first", async () => {
+  const { env, run, dir } = setup(20);
+  const base: NodeJS.ProcessEnv = { ...env, CITADEL_TEST_FILES: '1', CITADEL_TEST_FILES_MIN: '1', CITADEL_TEST_FILES_MAX: '1', CITADEL_TEST_ROOM_WAIT: '600' };
+  const free = await holdPlace(dir, 0);
+  const named = (e: NodeJS.ProcessEnv, name: string) => {
+    const c = spawn(process.execPath, ['--import', gate, '-e', `require('fs').appendFileSync(${JSON.stringify(join(run, 'order'))}, '${name}\\n')`], { env: e, stdio: 'ignore' });
+    return new Promise((r) => c.on('close', r));
+  };
+  const jobs: Promise<unknown>[] = [];
+  let letGo: (() => void) | undefined = free;
+  try {
+    for (let i = 1; i <= 3; i++) {
+      jobs.push(named(base, `long-${i}`));
+      await until(`long-${i} in line`, () => inLine(dir).length === i);
+    }
+    jobs.push(named({ ...base, CITADEL_TEST_GATE_NOTE: `${base.CITADEL_TEST_GATE_NOTE}-short` }, 'short'));
+    await until('the short run in line', () => inLine(dir).length === 4);
+    letGo();
+    letGo = undefined;
+    await Promise.all(jobs);
+  } finally {
+    letGo?.();
+  }
+  assert.deepEqual(readFileSync(join(run, 'order'), 'utf8').trim().split('\n'), ['long-1', 'short', 'long-2', 'long-3']);
 });

@@ -11,11 +11,14 @@
 // Tests give way first: they shed at 25%, ten points before the pool stops growing, and are down to the floor at 35%, so the
 // pressure our own test files raise never carries the pool past its grow mark, and the pool, which only shrinks at 50%, never
 // sees tests holding its reading up. The limit is read at each file's start: files already running finish, none is killed.
-// Waiting: files wait in the order they asked (a line of small files in $CITADEL_HEAVY_DIR/test-line, each kept fresh while
-// it waits), hold nothing while they wait, and start anyway after CITADEL_TEST_ROOM_WAIT seconds (120), so nothing is stuck.
-// The first to wait writes one line to $CITADEL_TEST_GATE_NOTE, which citadel-test prints. Any error here lets the file run.
+// A new file starts only while fewer places than that are held, the ones above a shrunk limit included.
+// Waiting: a line of small files in $CITADEL_HEAVY_DIR/test-line, each kept fresh while it waits and holding no place. It goes
+// by each file's number within its own run, then by when it asked: a run's first file is never behind another run's later
+// ones, and within a run they go in order. A file starts anyway after CITADEL_TEST_ROOM_WAIT seconds (120), so nothing is stuck.
+// The run's first file to wait half a second writes one line to $CITADEL_TEST_GATE_NOTE, which citadel-test prints as it
+// appears. Any error here lets the file run.
 import { spawn } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -60,19 +63,38 @@ function tryHold(file: string): Promise<boolean> {
   });
 }
 
+// How many places are held right now, over all of them: a shrink must count the files still running in the places above it.
+function heldPlaces(files: string[]): Promise<number> {
+  return new Promise((done) => {
+    const c = spawn('sh', ['-c', 'for f; do flock -n "$f" true || echo held; done', 'sh', ...files], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    c.stdout.on('data', (b) => (out += b));
+    c.on('error', () => done(0));
+    c.on('close', () => done(out.split('held').length - 1));
+  });
+}
+
 async function gate() {
   const start = n(env.CITADEL_TEST_FILES, 4);
   if (start === 0 || env.RUNNER_TEMP || env.GITHUB_ACTIONS || env.CITADEL_HEAVY_HELD) return;
   const min = n(env.CITADEL_TEST_FILES_MIN, 2);
-  const max = Math.max(start, n(env.CITADEL_TEST_FILES_MAX, 8));
+  const max = Math.max(start, min, n(env.CITADEL_TEST_FILES_MAX, 8));
   const dir = env.CITADEL_HEAVY_DIR || join(env.HOME ?? '', '.local/share/claude-coordinator/projects/.heavy');
+  const places = Array.from({ length: max }, (_, i) => join(dir, `test-slot-${i}`));
   const line = join(dir, 'test-line');
   mkdirSync(line, { recursive: true });
-  const me = `${String(Date.now()).padStart(15, '0')}-${Math.random().toString(36).slice(2)}`;
+  // This file's number within its run, from a byte each of the run's files adds to one file.
+  const note = env.CITADEL_TEST_GATE_NOTE;
+  let nth = 1;
+  if (note) {
+    appendFileSync(`${note}.n`, '.');
+    nth = statSync(`${note}.n`).size;
+  }
+  const me = `${String(nth).padStart(6, '0')}-${String(Date.now()).padStart(15, '0')}-${Math.random().toString(36).slice(2)}`;
   const mine = join(line, me);
   const cap = n(env.CITADEL_TEST_ROOM_WAIT, 120) * 1000;
   const since = Date.now();
-  let told = false;
+  let told = !note;
   try {
     for (;;) {
       writeFileSync(mine, '');
@@ -83,20 +105,23 @@ async function gate() {
           return false;
         }
       });
-      const timedOut = Date.now() - since >= cap;
-      if (timedOut || [...live].sort()[0] === me) {
-        const p = pressure();
-        const limit = limitAt(p, start, min, max);
-        for (let i = 0; i < limit; i++) if (await tryHold(join(dir, `test-slot-${i}`))) return;
-        if (timedOut) return;
-        if (!told && env.CITADEL_TEST_GATE_NOTE) {
-          told = true;
-          try {
-            writeFileSync(env.CITADEL_TEST_GATE_NOTE, `waiting for room: ${limit} test files may run at once on this box${p === null ? '' : ` (CPU pressure ${p}%)`} and other runs hold them; starts anyway after ${cap / 1000} s\n`, { flag: 'wx' });
-          } catch {}
-        }
+      const waited = Date.now() - since;
+      const p = pressure();
+      const limit = limitAt(p, start, min, max);
+      const head = live.sort()[0] === me;
+      if (head && (await heldPlaces(places)) < limit) for (const f of places) if (await tryHold(f)) return;
+      if (waited >= cap) {
+        // Started past the limit, it still takes a place if one is free, so the others count it.
+        for (const f of places) if (await tryHold(f)) return;
+        return;
       }
-      await sleep(100);
+      if (!told && note && waited >= 500) {
+        told = true;
+        try {
+          writeFileSync(note, `waiting for room: ${limit} test files may run at once on this box${p === null ? '' : ` (CPU pressure ${p}%)`} and other files hold them; each starts anyway after ${cap / 1000} s\n`, { flag: 'wx' });
+        } catch {}
+      }
+      await sleep(head ? 150 : 50);
     }
   } finally {
     rmSync(mine, { force: true });

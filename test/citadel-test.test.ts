@@ -255,10 +255,11 @@ test('a run waits for a held place, starts anyway after the wait, and says so in
   const holder = spawn('flock', [join(heavyDir, 'test-slot-0'), 'sleep', '600'], { stdio: 'ignore', detached: true });
   try {
     await until('the place held', () => existsSync(join(heavyDir, 'test-slot-0')));
-    const r = await run([file('gated.test.ts', `test('ran', () => {});`)], noList, { CITADEL_TEST_FILES: '1', CITADEL_TEST_FILES_MIN: '1', CITADEL_TEST_FILES_MAX: '1', CITADEL_TEST_ROOM_WAIT: '1', CITADEL_HEAVY_DIR: heavyDir, CITADEL_HEAVY_PRESSURE: join(tmp, 'no-psi') });
+    const r = await run([file('gated.test.ts', `test('ran', () => {});`)], noList, { CITADEL_TEST_FILES: '1', CITADEL_TEST_FILES_MIN: '1', CITADEL_TEST_FILES_MAX: '1', CITADEL_TEST_ROOM_WAIT: '2', CITADEL_HEAVY_DIR: heavyDir, CITADEL_HEAVY_PRESSURE: join(tmp, 'no-psi') });
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /^citadel-test: waiting for room: 1 test files may run at once on this box and other runs hold them; starts anyway after 1 s$/m);
+    assert.match(r.out, /^citadel-test: waiting for room: 1 test files may run at once on this box and other files hold them; each starts anyway after 2 s$/m);
     assert.equal(r.out.match(/waiting for room/g)?.length, 1);
+    assert.ok(r.out.indexOf('waiting for room') < r.out.indexOf('1 passed'), 'said while it waits, not after the counts');
   } finally {
     process.kill(-holder.pid!, 'SIGTERM'); // the group: flock's sleep too
   }

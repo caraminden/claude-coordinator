@@ -10,7 +10,8 @@
 #   - only on an idle CI desktop (ci_busy, land.sh) while the CI hold is on: one Citadel job at a time (#1906);
 #   - one check at a time (<state>/own-check.lock): a ship that would wait more than LAND_OWN_CHECK_WAIT (120 s) for the
 #     check running, going by the last check's time, gets the light check instead (tools/light-check.sh, #1620): its
-#     own and affected test files on CI's side runner.
+#     own and affected test files on CI's side runner. With the CI hold on a running check is a busy desktop (above), so
+#     that ship joins the line unchecked.
 # Verdicts:
 #   green          joins the line. Its rebase goes to <state>/own-checked ("<main> <branch tip> <commit>"), which the
 #                  rebase in line takes (stacked_of), so when main hasn't moved and nobody rides with it, ci_gate finds

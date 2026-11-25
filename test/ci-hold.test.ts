@@ -536,6 +536,55 @@ test('two heavy Citadel jobs queued together run one after the other, the second
   assert.equal(await w.ask(c), false, 'the one that came back holds the desktop');
 });
 
+test('three jobs run one after another, each let in when it asks again', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const [a, b, c] = [w.heavy(), w.proof(), w.heavy()];
+  assert.deepEqual([await w.ask(a), await w.ask(b), await w.ask(c)], [true, false, false]);
+  await w.for(2 * MIN);
+  for (const [done, next] of [
+    [a, b],
+    [b, c],
+  ]) {
+    end(done);
+    await w.for(3 * MIN);
+    assert.equal(w.posts.at(-1), `rerun ${next.id}`);
+    next.status = 'in_progress';
+    assert.equal(await w.ask(next), true, 'the one longer held is not in its way');
+    await w.for(5 * MIN);
+  }
+  assert.deepEqual(w.posts, ['cancel 2', 'cancel 3', 'rerun 2', 'rerun 3']);
+});
+
+test('a restart stops none of the jobs that were let in beside one that ran past four hours', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const a = w.heavy();
+  assert.equal(await w.ask(a), true);
+  await w.for(SLOT_HOLD_MS + 5 * MIN);
+  const b = w.proof();
+  assert.equal(await w.ask(b), true);
+  await w.for(20 * MIN);
+  const v = world(w.now, w.settings.get('ci-hold') ?? null);
+  v.runs = w.runs;
+  await v.for(20 * MIN);
+  assert.deepEqual([...w.posts, ...v.posts], []);
+  assert.equal(await v.ask(v.proof()), false, 'the young one holds the desktop');
+});
+
+test('jobs let in while GitHub was unreadable run on when it is back', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  w.down = true;
+  const [a, b] = [w.heavy(), w.proof()];
+  assert.deepEqual([await w.ask(a), await w.ask(b)], [true, true]);
+  await w.for(5 * MIN);
+  w.down = false;
+  await w.for(20 * MIN);
+  assert.deepEqual(w.posts, []);
+  assert.equal(await w.ask(w.heavy()), false);
+});
+
 test('a job that waited goes before one that only just asks', async () => {
   const w = world();
   await w.for(10 * MIN);
@@ -732,9 +781,11 @@ test('the CI page has what runs and what it keeps waiting', async () => {
   await w.for(10 * MIN);
   const a = w.heavy();
   assert.equal(await w.ask(a), true);
-  const rows = () => heldRows(w.hold.state(w.now), { getTicket: () => undefined, getProject: () => undefined } as never, () => true);
+  const rows = (sees = true) => heldRows(w.hold.state(w.now), { getTicket: () => ({ number: 7, project_id: 2 }), getProject: () => undefined } as never, () => sees);
   await w.tick();
   assert.match(rows().busy ?? '', /a heavy job is running/);
+  assert.equal(rows(false).busy, 'another Citadel job is running', 'without its name for someone who does not see its scheme');
+  assert.deepEqual(rows(false).running, []);
   w.land();
   await w.tick();
   assert.deepEqual(

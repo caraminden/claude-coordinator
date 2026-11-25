@@ -88,6 +88,7 @@ export interface RunningRow {
   kind: HoldKind | 'ship';
   what: string;
   url: string | null;
+  ticket: number | null;
 }
 export interface HoldState {
   off: boolean;
@@ -194,7 +195,11 @@ export function heldRows(state: HoldState, store: Pick<Store, 'getTicket' | 'get
       return { ...r, number: t?.number, schemeId: t?.project_id, scheme: t && store.getProject(t.project_id)?.name };
     })
     .filter((r) => r.schemeId === undefined || canSee(r.schemeId));
-  return { off: state.off, why: state.why, busy: state.busy, running: state.running, held };
+  const running = state.running.filter((r) => {
+    const t = r.ticket === null ? undefined : store.getTicket(r.ticket);
+    return !t || canSee(t.project_id);
+  });
+  return { off: state.off, why: state.why, busy: state.busy && running.length < state.running.length ? 'another Citadel job is running' : state.busy, running, held };
 }
 
 export class CiHold {
@@ -214,8 +219,11 @@ export class CiHold {
   private queued = new Set<number>();
   /** The lower Citadel job that may run now, and when it was let in. */
   private slot: { run: number; kind: HoldKind; what: string; at: number } | null = null;
+  private looked = false;
   /** When each run was first seen on a runner. */
   private running0 = new Map<number, number>();
+  /** Runs told to go, and when: those stay, whatever is found beside them later. */
+  private letIn = new Map<number, number>();
   /** Since when nothing has stood in optional work's way; null while something does. */
   private quietSince: number | null = null;
 
@@ -290,7 +298,7 @@ export class CiHold {
   /** On a runner a while without having been let in; one that ran past SLOT_HOLD_MS is left to end. */
   private unasked(run: number, now: number) {
     const on = now - (this.running0.get(run) ?? now);
-    return on >= UNASKED_MS && on < SLOT_HOLD_MS;
+    return on >= UNASKED_MS && on < SLOT_HOLD_MS && !this.letIn.has(run);
   }
 
   private slotPast(h: HeldRun | undefined, now: number) {
@@ -367,7 +375,8 @@ export class CiHold {
             const kind = Number.isInteger(run?.id) ? kindOf(run, repo === own) : null;
             const old = now - Date.parse(run.run_started_at ?? run.created_at ?? '') >= SHIP_RUN_MS;
             if (!kind || ((kind === 'ship' || kind === 'main') && old)) continue;
-            if (repo === own && run.status === 'in_progress') running.push({ kind, what: kind === 'ship' ? "a ship's tests" : run.display_title || NAMES[kind], url: run.html_url ?? null });
+            if (repo === own && run.status === 'in_progress')
+              running.push({ kind, what: kind === 'ship' ? "a ship's tests" : run.display_title || NAMES[kind], url: run.html_url ?? null, ticket: kind === 'proof' || kind === 'heavy' ? this.d.ticket(repo, run.head_branch ?? '', heavyId(kind, run.display_title ?? '')) : null });
             if (kind === 'ship') ship++;
             else active.set(run.id, { repo, run, kind });
             if (kind === 'main') main = true;
@@ -422,7 +431,10 @@ export class CiHold {
   private takeSlot(own: string, active: { repo: string; run: GhRun; kind: HoldKind }[], now: number) {
     const mine = active.filter((a) => a.repo === own);
     const on = mine.filter((a) => a.run.status === 'in_progress' && !this.stopped(a.run.id));
-    for (const a of on) if (!this.running0.has(a.run.id)) this.running0.set(a.run.id, now);
+    // On the first look after a restart GitHub says since when; later a run was first seen now (its start counts its queue).
+    for (const a of on) if (!this.running0.has(a.run.id)) this.running0.set(a.run.id, this.looked ? now : Date.parse(a.run.run_started_at ?? '') || now);
+    this.looked = true;
+    for (const [id, at] of this.letIn) if (now - at > 2 * SLOT_HOLD_MS) this.letIn.delete(id);
     for (const id of this.running0.keys()) if (!on.some((a) => a.run.id === id)) this.running0.delete(id);
     this.queued = new Set(mine.filter((a) => a.run.status !== 'in_progress' && !sideRun(a.kind) && !this.stopped(a.run.id)).map((a) => a.run.id));
     const s = this.slot;
@@ -433,8 +445,8 @@ export class CiHold {
       if (!there && age >= SLOT_GRACE_MS) this.slot = null;
     }
     if (this.slot) return;
-    const [a] = on.sort((x, y) => RANK[x.kind] - RANK[y.kind] || x.run.id - y.run.id);
-    if (a) this.slot = { run: a.run.id, kind: a.kind, what: a.run.display_title || NAMES[a.kind], at: now };
+    const [a] = on.filter((x) => now - this.running0.get(x.run.id)! < SLOT_HOLD_MS).sort((x, y) => RANK[x.kind] - RANK[y.kind] || x.run.id - y.run.id);
+    if (a) this.slot = { run: a.run.id, kind: a.kind, what: a.run.display_title || NAMES[a.kind], at: this.running0.get(a.run.id)! };
   }
 
   private stopped(run: number) {
@@ -563,6 +575,7 @@ export class CiHold {
     };
     this.held.set(run.id, h);
     if (this.slot?.run === run.id) this.slot = null; // its cancel takes seconds
+    this.letIn.delete(run.id);
     this.save();
     await this.publish(now); // before the cancel: citadel-heavy must never see the cancelled run without its hold
     if (!had && h.ticket !== null && !sideRun(kind))
@@ -585,6 +598,7 @@ export class CiHold {
     try {
       run = await this.one(`repos/${repo}/actions/runs/${runId}`, as);
     } catch {
+      this.letIn.set(runId, now);
       return yes;
     }
     const kind = run ? kindOf(run, repo.toLowerCase() === own) : null;
@@ -597,6 +611,7 @@ export class CiHold {
     const taken = first || !mine || this.slotPast(h, now) ? null : this.slotWhy(kind, runId, now);
     if (!first && !taken) {
       if (mine && this.slot?.run !== runId && !this.taken(runId, now)) this.slot = { run: runId, kind, what: run.display_title || NAMES[kind], at: now };
+      this.letIn.set(runId, now);
       return yes;
     }
     const why = (first ?? taken)!;
@@ -607,7 +622,7 @@ export class CiHold {
   /** Why a run that asks may not start though no ship is in its way, or null. */
   private slotWhy(kind: HoldKind, run: number, now: number): string | null {
     const taken = this.taken(run, now);
-    if (taken) return taken;
+    if (taken || this.slot?.run === run) return taken;
     const up = this.nextUp(kind, now);
     if (up && up.run !== run) return `a ${NAMES[up.kind]} waited longer and goes first`;
     return sideRun(kind) && this.fresh(now) && [...this.queued].some((id) => id !== run) ? 'another Citadel job is queued, and a check starts only on an idle CI desktop' : null;

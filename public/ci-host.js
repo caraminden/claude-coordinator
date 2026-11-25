@@ -114,7 +114,7 @@ function holdRow(l) {
   const handed = (l.long ?? []).filter(handedOver).map((j) => ({ ...j, why: why ?? busy ?? (j.quiet ? 'starts within a minute' : 'starts at 2am') }));
   const runs = [...l.hold.held, ...handed].sort((a, b) => a.since - b.since);
   const waits = runs.filter((r) => r.phase !== 'resumed').length;
-  const chip = off ? toneChip('warn', 'Off') : waits ? toneChip('warn', `${waits} held`) : runs.length ? toneChip('info', 'Starting again') : why ? toneChip('info', 'Ships first') : running.length ? toneChip('info', '1 job running') : toneChip('ok', 'Nothing held');
+  const chip = off ? toneChip('warn', 'Off') : waits ? toneChip('warn', `${waits} held`) : runs.length ? toneChip('info', 'Starting again') : why ? toneChip('info', 'Ships first') : running.length ? toneChip('info', `${running.length} running`) : toneChip('ok', 'Nothing held');
   const note = off ? 'nothing is held: jobs run side by side' : runs.length ? `longest ${held(runs[0], l.now)}` : (why ?? busy ?? 'optional jobs start at once');
   const [row] = settingsRow(
     { key: 'host-hold', icon: 'lock', hue: runs.length || off ? 'waiting' : 'done', title: 'One job at a time', summary: [chip, note] },

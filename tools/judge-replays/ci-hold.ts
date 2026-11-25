@@ -84,9 +84,20 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
       return { status: 201 };
     },
   });
-  for (; now <= ctx.now; now += HOLD_POLL_MS) await hold.tick(now);
+  // Each run asks as it starts, as its workflow does (tools/ci-hold-ask.ts); told to wait, it is stopped (post, above).
+  const asked = new Map<number, number>();
+  const look = async () => {
+    await hold.tick(now);
+    for (const sim of sims) {
+      const kind = active(sim) && asked.get(sim.run.id) !== sim.attempt ? kindOf(sim.run, true) : null;
+      if (!kind || kind === 'ship') continue;
+      asked.set(sim.run.id, sim.attempt);
+      await hold.ask(slug, sim.run.id, now);
+    }
+  };
+  for (; now <= ctx.now; now += HOLD_POLL_MS) await look();
   // Quiet from here: whatever is still held must come back. Two proofs of one file go one after the other, after a back-off of up to 40 min, and jobs one at a time (#1906).
-  for (const end = now + 24 * 3600_000; now < end; now += HOLD_POLL_MS) await hold.tick(now);
+  for (const end = now + 24 * 3600_000; now < end; now += HOLD_POLL_MS) await look();
   const stuck = hold.state(now).held.filter((h) => h.phase !== 'resumed');
   if (stuck.length) throw new Error(`still held after 24 hours with nothing running: ${stuck.map((h) => h.what).join(', ')}`);
   const sorted = waits.sort((a, b) => a - b);

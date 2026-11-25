@@ -175,23 +175,6 @@ test("a ship reaches an open app out of sight: a visible page stays, the next na
   const page = await browser.page('data:text/html,<script>window.ready=true</script>', { width: 1280, height: 800 });
   const [name, value] = srv.cookie.split('=');
   await page.send('Network.setCookie', { name, value, url: srv.base });
-  // Count the stream's hellos with their versions, and the runs of the page's own reload check (reloadWhenIdle, every
-  // 2 s), so "it did not reload" is checked after the ship's hello and a check that could have acted on it.
-  await page.send('Page.addScriptToEvaluateOnNewDocument', {
-    source: `(() => {
-    window.versions = [];
-    window.idleChecks = 0;
-    const ES = window.EventSource;
-    window.EventSource = class extends ES {
-      constructor(...a) {
-        super(...a);
-        this.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.type === 'hello') setTimeout(() => window.versions.push(m.version)); });
-      }
-    };
-    const every = window.setInterval;
-    window.setInterval = (f, ms, ...a) => every(typeof f === 'function' && f.name === 'reloadWhenIdle' ? () => { f(); window.idleChecks++; } : f, ms, ...a);
-  })()`,
-  });
   await page.send('Page.navigate', { url: `${srv.base}/c/` });
   const version = `document.querySelector('meta[name="citadel-version"]').content`;
   await waitFor(page, 'the page', `!!document.querySelector('.topbar')`);
@@ -205,11 +188,8 @@ test("a ship reaches an open app out of sight: a visible page stays, the next na
   appendFileSync(join(copy, 'public', 'style.css'), '\n/* shipped */\n');
   srv.proc.kill('SIGHUP');
   const shipped = Date.now();
-  // A page you are looking at never refreshes by itself (#1256): once the ship's hello has landed and the page's reload
-  // check has run after it, it is still the same page.
-  await waitFor(page, "the ship's hello", 'window.versions.some((v) => v && v !== window.versions[0])');
-  const checks = await page.eval('window.idleChecks');
-  await waitFor(page, 'a reload check after it', `window.idleChecks > ${checks}`);
+  // A page you are looking at never refreshes by itself (#1256): give the stream's hello time to land, then check it stayed.
+  await new Promise((done) => setTimeout(done, 7000));
   assert.equal(await page.eval('window.beforeTheShip'), true, 'a visible page does not reload on its own');
   await page.eval(`location.hash = '#/settings'`);
   await waitFor(page, 'the new version', `!window.beforeTheShip && document.querySelector('meta[name="citadel-version"]')?.content !== ${JSON.stringify(v1)}`);

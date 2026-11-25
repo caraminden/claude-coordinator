@@ -13,6 +13,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { copyDb } from '../src/db-copy.ts';
 import { MAX_STRETCH, stepLimit, within } from '../src/load-stretch.ts';
@@ -184,7 +185,7 @@ try {
   begin('/api/health');
   let health: any = null;
   const healthy = stepLimit();
-  for (; !health; await new Promise((r) => setTimeout(r, 100))) {
+  for (; !health; await sleep(100)) {
     if (server.exitCode !== null) fail(`The server exited during boot (code ${server.exitCode})`);
     if (healthy.over(20_000)) fail(`The server did not answer /api/health within ${healthy.text(20_000)}`);
     health = await fetch(`${base}/api/health`).then(
@@ -227,7 +228,7 @@ try {
       if (!sent.ok) fail(`Messaging the ${what} answered ${sent.status}: ${await sent.text()}`);
       const report = join(dir, 'report.json');
       const slow = stepLimit();
-      for (; ; await new Promise((r) => setTimeout(r, 100))) {
+      for (; ; await sleep(100)) {
         const got = await fetch(`${base}/api/tickets/${id}`, { headers: { Cookie: cookie } });
         // A slow reader's 503 on a busy box (#2003) means ask again, as the page does, within the turn's own limit.
         if (got.status === 503) await got.body?.cancel();
@@ -335,12 +336,12 @@ async function pageCheck(url: string, cookie: string) {
   // The first render waits on several rounds of API calls, each seconds long when the box is loaded, so
   // wait while the page is still loading and fail once it has gone quiet with #app still empty.
   const slow = stepLimit();
-  for (; !(await send('Runtime.evaluate', { expression: app, returnByValue: true }, sessionId)).result.value; await new Promise((r) => setTimeout(r, 100))) {
+  for (; !(await send('Runtime.evaluate', { expression: app, returnByValue: true }, sessionId)).result.value; await sleep(100)) {
     if (errors.length) break;
     if (!loading.size && slow.over(10_000, lastLoad)) fail(`The app page finished loading but rendered nothing in #app (nothing loading for ${slow.text(10_000)})`);
     if (slow.over(60_000)) fail(`The app page rendered nothing in #app within ${slow.text(60_000)} (still loading: ${loading.size} requests)`);
   }
   // Room for errors that come just after the first render (a view's own imports, its first fetches).
-  await new Promise((r) => setTimeout(r, 1000));
+  await sleep(1000);
   if (errors.length) fail(`The app page logged errors in Chromium:\n${errors.join('\n').slice(0, 3000)}`);
 }

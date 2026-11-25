@@ -22,7 +22,7 @@ export { ownPath } from './front.ts';
 import type { Auth, Session } from './auth.ts';
 import type { BranchStatus } from './branch.ts';
 import type { Builds } from './builds.ts';
-import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket } from './db.ts';
+import type { Artifact, ContraptionRow, Machine, Project, Store, Ticket, TicketFields } from './db.ts';
 import type { MachineRelay } from './machines.ts';
 import type { MachineJobs } from './machine-jobs.ts';
 import type { KitSync } from './kit-sync.ts';
@@ -406,7 +406,7 @@ export interface App {
   /** Build branches' headers (src/builds.ts). */
   builds: Pick<Builds, 'get'>;
   sharedFiles(projectId: number): Promise<SharedFile[]>;
-  sharedDir(ticket: Ticket): string;
+  sharedDir(ticket: TicketFields): string;
   registryChanged(projectId: number, global: boolean): void;
 }
 

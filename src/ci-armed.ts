@@ -6,7 +6,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cardHref } from './card-links.ts';
 import { gitOut } from './git.ts';
-import type { Store, Ticket, TicketState } from './db.ts';
+import type { Store, Ticket, TicketFields, TicketState } from './db.ts';
 import type { Delivery, NewDelivery } from './db/deliveries.ts';
 import type { Outbox, Outcome } from './outbox.ts';
 import { runsOnPullRequest, type PrSnapshot } from './github.ts';
@@ -53,7 +53,7 @@ export const armedKey = (ticketId: number) => `ci-armed:${ticketId}`;
 const short = (sha: string) => sha.slice(0, 7);
 
 /** Post a question card in a minion's chat, as ask_question does; returns its id and link. */
-export function postCard(app: App, ticket: Ticket, card: Card): { id: string; href: string } {
+export function postCard(app: App, ticket: TicketFields, card: Card): { id: string; href: string } {
   const { runner } = app;
   const { questions, kind, into, to, notice, doc, secret, asker, job, recipe, mergeable, kitSync, budget, startCost } = card;
   const id = randomBytes(6).toString('hex');
@@ -87,7 +87,7 @@ export const CARD_MAX = 8;
  * the card lives, `asker` the thread whose turn asks. Returns the first card's id and link, or null when nothing merges:
  * only a card marked mergeable, with the same `to` and asker, posted in this turn, not answered, settled or full.
  */
-export function mergeCard(app: App, chat: Ticket, asker: Ticket, card: Card): { id: string; href: string; merged: true } | null {
+export function mergeCard(app: App, chat: TicketFields, asker: TicketFields, card: Card): { id: string; href: string; merged: true } | null {
   const { store, runner } = app;
   const started = runner.turnStartedAt(asker.id);
   if (started == null || !card.mergeable) return null;
@@ -118,7 +118,7 @@ export const replyToKey = (ticketId: number) => `minion_reply_to:${ticketId}`;
  * Send the minion's Taskmaster a message, as message_coordinator does; returns runner.relay's answer. `notice`: the server's
  * own word about the minion (its budget, #1114), which goes to the owner's and leaves the minion's reply routing for its reply.
  */
-export async function tellTaskmaster(app: App, ticket: Ticket, text: string, urgent: boolean, wake = true, need?: string, notice = false) {
+export async function tellTaskmaster(app: App, ticket: TicketFields, text: string, urgent: boolean, wake = true, need?: string, notice = false) {
   const { store, runner } = app;
   await ensureCoordinator(app, store.getProject(ticket.project_id)!);
   // A reply goes to the Taskmaster that asked, else its owner's gets it as sent (#919); every other touched person's own gets held mail.
@@ -152,7 +152,7 @@ async function prCi(cwd: string): Promise<boolean> {
  * Arm a card or a Taskmaster message for when CI passes on the worktree's HEAD. Returns what to tell the minion, or null
  * when CI already passed on HEAD, so the caller posts it now. A second arm on the same commit replaces that part only.
  */
-export async function armForCi(app: App, ticket: Ticket, part: Pick<Armed, 'card' | 'coordinator'>): Promise<string | null> {
+export async function armForCi(app: App, ticket: TicketFields, part: Pick<Armed, 'card' | 'coordinator'>): Promise<string | null> {
   const { store } = app;
   if (!ticket.cwd || !ticket.branch) throw new HttpError(400, 'when_ci_passes needs a minion on a branch');
   if (!(await prCi(ticket.cwd))) throw new HttpError(400, "when_ci_passes: this repo's CI doesn't run on pull requests, so no PR CI result will come. Post it now without when_ci_passes");

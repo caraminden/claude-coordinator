@@ -6,6 +6,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
+import { thrown } from './thrown.ts';
 
 export const REVIEW_SCHEMA = `
 CREATE TABLE IF NOT EXISTS review_entries (
@@ -516,8 +517,18 @@ export function loadStarters(dir = STARTER_DIR): { slug: string; judges: string;
     });
 }
 
-type Row = Record<string, any>;
-const fromRow = (r: Row): ReviewEntry => ({ ...r, triggers: JSON.parse(r.triggers), context: JSON.parse(r.context), enabled: !!r.enabled, trial: !!r.trial, gives_label: !!r.gives_label, calibration: r.calibration ? JSON.parse(r.calibration) : null, on_fail: r.on_fail ? JSON.parse(r.on_fail) : null }) as ReviewEntry;
+/** A review_entries row as stored: JSON columns as text, flags as 0 or 1. */
+type EntryRow = Omit<ReviewEntry, 'triggers' | 'context' | 'enabled' | 'trial' | 'gives_label' | 'calibration' | 'on_fail'> & {
+  triggers: string;
+  context: string;
+  enabled: number;
+  trial: number;
+  gives_label: number;
+  calibration: string | null;
+  on_fail: string | null;
+};
+const fromRow = (r: EntryRow): ReviewEntry =>
+  ({ ...r, triggers: JSON.parse(r.triggers), context: JSON.parse(r.context), enabled: !!r.enabled, trial: !!r.trial, gives_label: !!r.gives_label, calibration: r.calibration ? JSON.parse(r.calibration) : null, on_fail: r.on_fail ? JSON.parse(r.on_fail) : null }) as ReviewEntry;
 const snapshotOf = (e: EntryFields): EntryFields => Object.fromEntries(FIELDS.map((k) => [k, e[k]])) as EntryFields;
 
 /** On trial an entry only advises (Q12): it can't block a ship or give the risk label until it is calibrated or marked good. */
@@ -569,12 +580,12 @@ export class ReviewSet {
     try {
       db.exec(REVIEW_SCHEMA);
       // A database phase 1 made (build/4 previews and dev copies) has the table without phase 2's columns.
-      const has = new Set((db.prepare('PRAGMA table_info(review_entries)').all() as Row[]).map((c) => c.name));
+      const has = new Set((db.prepare('PRAGMA table_info(review_entries)').all() as { name: string }[]).map((c) => c.name));
       if (!has.has('gives_label')) db.exec('ALTER TABLE review_entries ADD COLUMN gives_label INTEGER NOT NULL DEFAULT 0');
       if (!has.has('calibration')) db.exec('ALTER TABLE review_entries ADD COLUMN calibration TEXT');
       if (!has.has('panel')) db.exec('ALTER TABLE review_entries ADD COLUMN panel TEXT');
       if (!has.has('on_fail')) db.exec('ALTER TABLE review_entries ADD COLUMN on_fail TEXT');
-      const runCols = new Set((db.prepare('PRAGMA table_info(review_runs)').all() as Row[]).map((c) => c.name));
+      const runCols = new Set((db.prepare('PRAGMA table_info(review_runs)').all() as { name: string }[]).map((c) => c.name));
       if (!runCols.has('source')) db.exec('ALTER TABLE review_runs ADD COLUMN source TEXT');
       db.exec('COMMIT');
     } catch (err) {
@@ -585,11 +596,11 @@ export class ReviewSet {
 
   /** The scheme's entries in page order: by column, then run order, then name. */
   list(projectId: number): ReviewEntry[] {
-    return (this.db.prepare('SELECT * FROM review_entries WHERE project_id = ? ORDER BY position, name').all(projectId) as Row[]).map(fromRow);
+    return (this.db.prepare('SELECT * FROM review_entries WHERE project_id = ? ORDER BY position, name').all(projectId) as EntryRow[]).map(fromRow);
   }
 
   get(projectId: number, slug: string): ReviewEntry | null {
-    const r = this.db.prepare('SELECT * FROM review_entries WHERE project_id = ? AND slug = ?').get(projectId, slug) as Row | undefined;
+    const r = this.db.prepare('SELECT * FROM review_entries WHERE project_id = ? AND slug = ?').get(projectId, slug) as EntryRow | undefined;
     return r ? fromRow(r) : null;
   }
 
@@ -732,7 +743,13 @@ export class ReviewSet {
   versions(projectId: number, slug: string): ReviewVersion[] {
     const e = this.get(projectId, slug);
     if (!e) throw new ReviewError(`No entry named ${slug}`);
-    return (this.db.prepare('SELECT version, by, at, note, snapshot FROM review_versions WHERE entry_id = ? ORDER BY version DESC').all(e.id) as Row[]).map((r) => ({ version: r.version, by: r.by, at: r.at, note: r.note, snapshot: JSON.parse(r.snapshot) }));
+    return (this.db.prepare('SELECT version, by, at, note, snapshot FROM review_versions WHERE entry_id = ? ORDER BY version DESC').all(e.id) as { version: number; by: string; at: number; note: string; snapshot: string }[]).map((r) => ({
+      version: r.version,
+      by: r.by,
+      at: r.at,
+      note: r.note,
+      snapshot: JSON.parse(r.snapshot),
+    }));
   }
 
   /** Put version `n` back, as a new version on top: nothing in History is ever lost. The slug stays what it is now. */
@@ -747,7 +764,7 @@ export class ReviewSet {
    * scheme's own entry that already took a built-in's slug keeps it, and that built-in stays at its kit default (on).
    */
   ensureBuiltIns(projectId: number, at = Date.now()): void {
-    const have = new Set((this.db.prepare('SELECT slug FROM review_entries WHERE project_id = ?').all(projectId) as Row[]).map((r) => r.slug));
+    const have = new Set((this.db.prepare('SELECT slug FROM review_entries WHERE project_id = ?').all(projectId) as { slug: string }[]).map((r) => r.slug));
     BUILT_INS.forEach((b, i) => {
       if (have.has(b.slug)) return;
       this.create(projectId, { slug: b.slug, name: b.name, kind: b.kind, source: b.source, stage: 'ship', position: i - BUILT_INS.length - 1000 }, 'Citadel', "The kit's, added to the page", at);
@@ -919,7 +936,7 @@ export class ReviewSet {
   lessons(projectId: number, now = Date.now(), all = false): Lesson[] {
     const e = this.kit(projectId, 'pre-ship-review');
     if (!e) return [];
-    const rows = this.db.prepare('SELECT kind, why, at, ticket_id FROM review_refutes WHERE entry_id = ? ORDER BY kind, at, id').all(e.id) as Row[];
+    const rows = this.db.prepare('SELECT kind, why, at, ticket_id FROM review_refutes WHERE entry_id = ? ORDER BY kind, at, id').all(e.id) as { kind: string; why: string; at: number; ticket_id: number | null }[];
     const by = new Map<string, Lesson & { seen: Set<number> }>();
     for (const r of rows) {
       const was = by.get(r.kind);
@@ -948,7 +965,7 @@ export class ReviewSet {
   /** Every entry's recorded verdicts in a scheme, newest first by date (a backfilled one keeps its log's, #1095), by entry id. */
   verdicts(projectId: number): Map<number, Verdict[]> {
     const out = new Map<number, Verdict[]>();
-    const rows = this.db.prepare(`SELECT v.* FROM review_verdicts v JOIN review_entries e ON e.id = v.entry_id WHERE e.project_id = ? ORDER BY v.at DESC, v.id DESC`).all(projectId) as Row[];
+    const rows = this.db.prepare(`SELECT v.* FROM review_verdicts v JOIN review_entries e ON e.id = v.entry_id WHERE e.project_id = ? ORDER BY v.at DESC, v.id DESC`).all(projectId) as { id: number; entry_id: number; person: string; words: string; minion: string; at: number }[];
     for (const r of rows) {
       const list = out.get(r.entry_id) ?? [];
       if (!out.has(r.entry_id)) out.set(r.entry_id, list);
@@ -964,7 +981,10 @@ export class ReviewSet {
    */
   record(projectId: number): Map<number, { runs: Run[]; rate: number | null; firsts: number; passes: number; stuck: 'pass' | 'fail' | null }> {
     const out = new Map<number, { runs: Run[]; rate: number | null; firsts: number; passes: number; stuck: 'pass' | 'fail' | null }>();
-    const rows = this.db.prepare(`SELECT * FROM (SELECT r.*, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.at DESC, r.id DESC) AS n FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ?) WHERE n <= 10 ORDER BY at, id`).all(projectId) as Row[];
+    const rows = this.db.prepare(`SELECT * FROM (SELECT r.*, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.at DESC, r.id DESC) AS n FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ?) WHERE n <= 10 ORDER BY at, id`).all(projectId) as (Omit<Run, 'disagreed'> & {
+      entry_id: number;
+      disagreed: number;
+    })[];
     for (const r of rows) {
       if (!out.has(r.entry_id)) out.set(r.entry_id, { runs: [], rate: null, firsts: 0, passes: 0, stuck: null });
       out.get(r.entry_id)!.runs.push({ id: r.id, minion: r.minion, round: r.round, verdict: r.verdict, disagreed: !!r.disagreed, at: r.at });
@@ -974,7 +994,7 @@ export class ReviewSet {
       .prepare(
         `SELECT entry_id, teacher, count(*) AS n, sum(verdict = 'pass') AS pass FROM (SELECT r.entry_id, r.verdict, e.kind = 'teacher' AS teacher, row_number() OVER (PARTITION BY r.entry_id ORDER BY r.at DESC, r.id DESC) AS k FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ? AND (r.round = 1 OR e.kind = 'teacher')) WHERE k <= 20 GROUP BY entry_id`,
       )
-      .all(projectId) as Row[];
+      .all(projectId) as { entry_id: number; teacher: number; n: number; pass: number }[];
     for (const f of firsts) {
       const rec = out.get(f.entry_id)!;
       rec.firsts = f.n;
@@ -987,7 +1007,7 @@ export class ReviewSet {
 
   /** The entries this minion recorded a run of (not a backfilled one): the critic gate's record (#1504). */
   ranOn(projectId: number, ticketId: number): Set<number> {
-    const rows = this.db.prepare('SELECT DISTINCT r.entry_id FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ? AND r.ticket_id = ? AND r.source IS NULL').all(projectId, ticketId) as Row[];
+    const rows = this.db.prepare('SELECT DISTINCT r.entry_id FROM review_runs r JOIN review_entries e ON e.id = r.entry_id WHERE e.project_id = ? AND r.ticket_id = ? AND r.source IS NULL').all(projectId, ticketId) as { entry_id: number }[];
     return new Set(rows.map((r) => Number(r.entry_id)));
   }
 
@@ -997,7 +1017,7 @@ export class ReviewSet {
    */
   holds(projectId: number, ticketId: number): { slug: string; name: string; verdict: string }[] {
     const all = this.list(projectId);
-    const last = (entryId: number) => this.db.prepare('SELECT id, verdict FROM review_runs WHERE entry_id = ? AND ticket_id = ? AND source IS NULL ORDER BY id DESC LIMIT 1').get(entryId, ticketId) as Row | undefined;
+    const last = (entryId: number) => this.db.prepare('SELECT id, verdict FROM review_runs WHERE entry_id = ? AND ticket_id = ? AND source IS NULL ORDER BY id DESC LIMIT 1').get(entryId, ticketId) as { id: number; verdict: string } | undefined;
     const out: { slug: string; name: string; verdict: string }[] = [];
     for (const e of all) {
       if (!e.enabled || e.trial || e.gate !== 'block') continue;
@@ -1026,7 +1046,7 @@ export class ReviewSet {
    * Returns a line per scheme.
    */
   backfill(all: BackfillLog[], now = Date.now()): string[] {
-    const names = new Map((this.db.prepare('SELECT id, name FROM projects').all() as Row[]).map((p) => [p.id as number, p.name as string]));
+    const names = new Map((this.db.prepare('SELECT id, name FROM projects').all() as { id: number; name: string }[]).map((p) => [p.id as number, p.name as string]));
     const logs = all.filter((l) => names.get(l.project) === l.scheme);
     const away = [...new Set(all.filter((l) => !logs.includes(l)).map((l) => l.scheme))];
     const per = new Map<number, { logs: number; runs: number; verdicts: number; already: number; missing: string[] }>();
@@ -1082,7 +1102,7 @@ export class ReviewSet {
 
   /** The minion's ask (Q8, the requester's words): its first chat message and who wrote it, or null. */
   requesterWords(ticketId: number): Extra['requester'] {
-    const r = this.db.prepare("SELECT json_extract(data, '$.author') AS author, json_extract(data, '$.text') AS text FROM events WHERE ticket_id = ? AND kind = 'user_message' ORDER BY id LIMIT 1").get(ticketId) as Row | undefined;
+    const r = this.db.prepare("SELECT json_extract(data, '$.author') AS author, json_extract(data, '$.text') AS text FROM events WHERE ticket_id = ? AND kind = 'user_message' ORDER BY id LIMIT 1").get(ticketId) as { author: unknown; text: unknown } | undefined;
     return r && typeof r.text === 'string' ? { author: String(r.author ?? 'the requester'), text: r.text } : null;
   }
 
@@ -1180,8 +1200,8 @@ export function importRubrics(set: ReviewSet, projectId: number, files: [string,
     let why = '';
     try {
       split = splitRubric(text);
-    } catch (err: any) {
-      why = err.message;
+    } catch (err) {
+      why = thrown(err).message ?? String(err);
     }
     const slug = split?.fields.slug ?? fileSlug;
     if (set.get(projectId, slug)) {
@@ -1192,13 +1212,14 @@ export function importRubrics(set: ReviewSet, projectId: number, files: [string,
       if (!split) throw new ReviewError(why);
       set.create(projectId, { ...split.fields, slug, name: nameFor(slug), body: split.body, source: path }, by, `Imported from ${path}`);
       added.push(path);
-    } catch (err: any) {
+    } catch (err) {
+      const refused = thrown(err).message ?? String(err);
       // A file the store refuses still comes in whole, switched off, so nothing is lost and a person fixes it on the page.
       try {
-        set.create(projectId, { slug: set.get(projectId, fileSlug) ? `${fileSlug}-imported` : fileSlug, name: nameFor(fileSlug), body: text.replace(/\r\n/g, '\n').trim(), source: path, enabled: false }, by, `Imported from ${path}, off: ${err.message}`);
-        added.push(`${path} (off: ${err.message})`);
-      } catch (err2: any) {
-        failed.push(`${path} (${err2.message})`);
+        set.create(projectId, { slug: set.get(projectId, fileSlug) ? `${fileSlug}-imported` : fileSlug, name: nameFor(fileSlug), body: text.replace(/\r\n/g, '\n').trim(), source: path, enabled: false }, by, `Imported from ${path}, off: ${refused}`);
+        added.push(`${path} (off: ${refused})`);
+      } catch (err2) {
+        failed.push(`${path} (${thrown(err2).message ?? err2})`);
       }
     }
   }

@@ -356,6 +356,8 @@ export interface Ticket {
   created_at: number;
   updated_at: number;
 }
+/** What a tickets row and a view of one (Runner.view, whose replies are parsed) share. */
+export type TicketFields = Omit<Ticket, 'replies'>;
 
 /** A row of repo_collaborators: see its CREATE TABLE. */
 export interface RepoCollaborator {

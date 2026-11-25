@@ -334,8 +334,8 @@ test('"Is this still going?" on a supervisor turn names the command claude runs,
 
 test('the runner starts its supervisor when it starts, before any turn', async () => {
   const r = server();
-  (r as any).turnsDir = join(root, 'warm');
-  (r as any).unitTag = 'warm'; // a turns folder of its own has a unit name of its own: the one above still runs
+  // A turns folder of its own has a unit name of its own: the supervisor above still runs.
+  Object.assign(r as any, { turnsDir: join(root, 'warm'), unitTag: 'warm' });
   mkdirSync(join(root, 'warm'));
   assert.equal(readSupervisor(spec(r).dir), null);
   r.recover();

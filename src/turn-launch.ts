@@ -802,7 +802,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (pooled) {
     const pool = (path: string, extra: object = {}) => ({ type: 'http', url: `http://127.0.0.1:\${CITADEL_POOL_PORT}${path}`, headers: { Authorization: 'Bearer ${COORDINATOR_TOKEN}' }, ...extra });
     const http: Record<string, object> = { [role]: pool('/mcp', role === 'thread' ? { timeout: APPROVAL_TIMEOUT_MS } : {}) };
-    for (const m of machines) for (const s of machineServers(m)) http[s.name] = pool(`/machine/${m.id}/${s.server}?name=${encodeURIComponent(s.name)}`);
+    for (const m of machines) for (const s of machineServers(m)) http[s.name] = pool(`/machine/${m.id}/${s.server}?name=${encodeURIComponent(s.name)}${s.server === 'mcp' && m.lent ? `&lent=${encodeURIComponent(m.lent)}` : ''}`);
     files.push({ name: 'mcp.json', text: JSON.stringify({ mcpServers: http }) });
     files.push({ name: 'mcp-stdio.json', text: JSON.stringify({ mcpServers: servers }) });
   } else {

@@ -423,8 +423,8 @@ function approvalNote(project: Project): string[] {
   ];
 }
 
-/** A connected machine and the servers this turn gets from it; without servers, the MCP server it lends. */
-export type TurnMachine = Machine & { servers?: MachineServer[] };
+/** A connected machine and the servers this turn gets from it; without servers, the MCP server it lends. `lent` names that MCP server, where its agent says. */
+export type TurnMachine = Machine & { servers?: MachineServer[]; lent?: string | null };
 
 /** The MCP servers a turn gets from a machine: its own under its name, its workspace tools as <name>-ws. */
 export function machineServers(m: TurnMachine): { name: string; server: MachineServer }[] {

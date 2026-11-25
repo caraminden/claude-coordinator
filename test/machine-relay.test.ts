@@ -66,6 +66,21 @@ test("when the agent goes away, its proxies' streams just end: they reconnect on
   );
 });
 
+test('a managed machine names the MCP server it lends, to a starting turn and on the session it opens (2MA6)', () => {
+  const { relay, store, box } = world();
+  relay.connectAgent(box, stream(), { host: 'h', command: '', managed: true });
+  relay.setInfo(store.getMachine(box.id)!, { v: 2, found: [{ name: 'blender' }, { name: 'godot-ai' }] });
+  const opened = () => {
+    const proxy = stream();
+    assert.equal(relay.openSession(box.id, { ticketId: 1, projectId: 1 }, 'mcp', '#1', proxy), true);
+    return [relay.online()[0].lent, proxy.sent[0].lent];
+  };
+  relay.setLend(box.id, { server: 'blender', workspaces: [] });
+  assert.deepEqual(opened(), ['blender', 'blender']);
+  relay.setLend(box.id, { server: 'godot-ai', workspaces: [] });
+  assert.deepEqual(opened(), ['godot-ai', 'godot-ai']);
+});
+
 test('an agent that beats and then goes quiet (a laptop asleep) is dropped within a couple of minutes; one that never beats is kept', () => {
   mock.timers.enable({ apis: ['setInterval', 'Date'] });
   try {

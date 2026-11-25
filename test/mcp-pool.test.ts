@@ -30,7 +30,7 @@ function root(): string {
 /** A fake app: records each API call's method, path and token; the machine routes behave like test/machine-mcp.test.ts's. */
 async function fakeApp() {
   const calls: { method: string; path: string; token: string }[] = [];
-  const machine = { gets: 0, posts: [] as any[], stream: null as ServerResponse | null, session: '' };
+  const machine = { gets: 0, posts: [] as any[], stream: null as ServerResponse | null, session: '', lent: undefined as string | undefined };
   const srv = createServer((req, res) => {
     let body = '';
     req.on('data', (c) => (body += c));
@@ -41,7 +41,7 @@ async function fakeApp() {
         machine.gets++;
         machine.session = String(machine.gets).padStart(24, '0');
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        res.write(`data: ${JSON.stringify({ session: machine.session })}\n\n`);
+        res.write(`data: ${JSON.stringify({ session: machine.session, lent: machine.lent })}\n\n`);
         machine.stream = res;
         return;
       }
@@ -54,9 +54,9 @@ async function fakeApp() {
         if (message.id !== undefined && message.method) {
           const result =
             message.method === 'initialize'
-              ? { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'box', version: '1' } }
+              ? { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: machine.lent ?? 'box', version: '1' } }
               : message.method === 'tools/list'
-                ? { tools: [{ name: 'run_task', description: 'Run a task', inputSchema: { type: 'object' } }] }
+                ? { tools: [{ name: machine.lent ? `${machine.lent}_tool` : 'run_task', description: 'Run a task', inputSchema: { type: 'object' } }] }
                 : { content: [{ type: 'text', text: `ran ${message.params?.name}` }] };
           setTimeout(() => machine.stream?.write(`data: ${JSON.stringify({ message: { jsonrpc: '2.0', id: message.id, result } })}\n\n`), 5);
         }
@@ -286,6 +286,35 @@ test("machine tools are lazy: a remembered tool list answers the turn's start, a
   await until('the machine got the notification', () => app.machine.posts.some((m) => m.method === 'notifications/cancelled'));
   process.kill(pool.pid, 0);
   assert.equal((await rpc(pool.port, 'token-b', path, toolCall(4, 'run_task', { task: 'again' }))).result.content[0].text, 'ran run_task');
+});
+
+test("a turn that starts after another MCP server is ticked gets the new one's tools, not the remembered ones (2MA6)", async () => {
+  const app = await fakeApp();
+  const r = root();
+  const pool = await started(spec(r, 'v1', undefined, true));
+  // A turn's start, as Claude Code does it, on the server ticked when its config was written.
+  const start = async (token: string, ticked: string) => {
+    await registerTurn(pool, token, turn(app.base, 11, 1));
+    const path = `/machine/5/mcp?name=box&lent=${ticked}`;
+    const init = await rpc(pool.port, token, path, { id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'c', version: '1' } } });
+    const list = await rpc(pool.port, token, path, { id: 2, method: 'tools/list' });
+    return { server: init.result.serverInfo.name, tools: list.result.tools.map((t: { name: string }) => t.name), call: () => rpc(pool.port, token, path, toolCall(3, 'x')) };
+  };
+  app.machine.lent = 'blender';
+  assert.deepEqual((await start('token-a', 'blender')).tools, ['blender_tool']);
+  const opened = app.machine.gets;
+  const b = await start('token-b', 'blender');
+  assert.equal(app.machine.gets, opened, 'the remembered list answers a turn on the same server');
+
+  app.machine.lent = 'godot-ai';
+  const c = await start('token-c', 'godot-ai');
+  assert.equal(c.server, 'godot-ai');
+  assert.deepEqual(c.tools, ['godot-ai_tool']);
+
+  // A turn from before the swap opens its session only now, so godot answers it: that list isn't kept as blender's.
+  await b.call();
+  app.machine.lent = 'blender';
+  assert.deepEqual((await start('token-d', 'blender')).tools, ['blender_tool']);
 });
 
 test("a turn whose pool won't start runs with its own helpers instead (the stdio config)", async () => {

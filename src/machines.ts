@@ -79,7 +79,7 @@ function storedLend(m: Machine): Lend | null {
 
 /** The servers an agent can offer: the MCP server it lends, and its built-in workspace tools. */
 export type MachineServer = 'mcp' | 'ws';
-export type OnlineMachine = Machine & { servers: MachineServer[] };
+export type OnlineMachine = Machine & { servers: MachineServer[] /** The MCP server ticked now; null from an agent that lends what its command line says. */; lent: string | null };
 
 // An agent that stops reading (asleep mid-stream) is dropped rather than buffered for forever.
 const MAX_BACKLOG = 64 * 1024 * 1024;
@@ -337,6 +337,9 @@ function lentServers(m: Machine, agent: Agent): MachineServer[] {
   return [...(lend.server && agent.found.some((f) => f.name === lend.server) ? ['mcp' as const] : []), ...(agent.workspaces.some((w) => lend.workspaces.includes(w.name)) ? ['ws' as const] : [])];
 }
 
+/** The MCP server a turn gets by name, as its tools are remembered (src/pool-machine.ts): null without one, or when the agent alone knows. */
+const lentName = (m: Machine, agent: Agent, servers: MachineServer[]) => (agent.managed && servers.includes('mcp') ? (storedLend(m)?.server ?? null) : null);
+
 const holderKey = (h: SessionHolder) => ('ticketId' in h ? `t${h.ticketId}` : 'contraptionTurn' in h ? `c${h.contraptionTurn}` : `k${h.check}`);
 
 export class MachineRelay {
@@ -493,7 +496,7 @@ export class MachineRelay {
     return this.store.listMachines().flatMap((m) => {
       const agent = this.agents.get(m.id);
       const servers = agent ? lentServers(m, agent) : [];
-      return servers.length ? [{ ...m, servers }] : [];
+      return servers.length ? [{ ...m, servers, lent: lentName(m, agent!, servers) }] : [];
     });
   }
 
@@ -1020,13 +1023,14 @@ export class MachineRelay {
   /** A turn's proxy started: give it a session whose stream carries the machine's replies. */
   openSession(machineId: number, holder: SessionHolder, server: MachineServer, who: string, res: ServerResponse): boolean {
     const agent = this.agents.get(machineId);
-    if (!agent || !this.online().some((m) => m.id === machineId && m.servers.includes(server))) return false;
+    const machine = this.online().find((m) => m.id === machineId && m.servers.includes(server));
+    if (!agent || !machine) return false;
     const id = randomBytes(12).toString('hex');
     const minion = 'ticketId' in holder ? holder : null;
     this.sessions.set(id, { machineId, holder: holderKey(holder), ticketId: minion?.ticketId ?? null, projectId: minion?.projectId ?? null, server, who, res });
     agent.sessions.add(id);
     res.writeHead(200, SSE_HEADERS);
-    res.write(`data: ${JSON.stringify({ session: id })}\n\n`);
+    res.write(`data: ${JSON.stringify({ session: id, ...(server === 'mcp' && machine.lent ? { lent: machine.lent } : {}) })}\n\n`);
     const ping = setInterval(() => res.write(': ping\n\n'), PING_MS);
     res.on('close', () => {
       clearInterval(ping);

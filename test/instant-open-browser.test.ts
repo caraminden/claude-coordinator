@@ -10,7 +10,7 @@ import { createServer as listen, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { bootServer, until, PASSWORD, type Booted } from './helpers.ts';
+import { bootServer, repoCopy, until, PASSWORD, type Booted } from './helpers.ts';
 import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
 import { holds } from './holds.ts';
 
@@ -180,10 +180,13 @@ test('signed out, the top bar has no usage meter or chips (#1439); signing back 
 test("a ship reaches an open app out of sight: a visible page stays, the next navigation loads the new version from the worker's kept files", { skip }, async () => {
   // A copy of the repo to ship into, so the change to public/ stays out of this checkout.
   const repo = join(import.meta.dirname, '..');
-  const copy = mkdtempSync(join(tmpdir(), 'ship-'));
-  after(() => rmSync(copy, { recursive: true, force: true }));
+  // It sits where the compile cache expects it (repoCopy): at any other path its boot compiles the whole app again, and
+  // under load that boot ran past the 20 s the server has to name its port (#1895).
+  const base = mkdtempSync(join(tmpdir(), 'ship-'));
+  after(() => rmSync(base, { recursive: true, force: true }));
+  const { copy, env } = repoCopy(base);
   cpSync(repo, copy, { recursive: true, filter: (src) => !/[/\\](\.git|node_modules)$/.test(src) });
-  const srv = await bootServer({ script: join(copy, 'server.ts') });
+  const srv = await bootServer({ script: join(copy, 'server.ts'), env });
   servers.push(srv);
   browser ??= await launch(bin!);
   const page = await browser.page('data:text/html,<script>window.ready=true</script>', { width: 1280, height: 800 });

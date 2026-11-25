@@ -2240,6 +2240,19 @@ async function main() {
   // GPU jobs (#858): made even without a jobs block, so a job sent here is refused out loud.
   const runner = new JobRunner({ block: host?.jobsBlock ?? null, appUrl, token, log });
   runner.onLeftover = () => sendInfo();
+  // Minion turns (Build 7): only with a "worker" block in the config file, and only then is machine-worker.mjs loaded, from beside this file.
+  let worker = null;
+  try {
+    const block = configFile && existsSync(configFile) ? JSON.parse(readFileSync(configFile, 'utf8'))?.worker : null;
+    if (block) {
+      worker = new (await import('./machine-worker.mjs')).Worker({ config: block, appUrl, token, log });
+      await worker.start();
+      log(`Minion turns: up to ${worker.cfg.max} at once, in ${worker.cfg.root}`);
+    }
+  } catch (err) {
+    worker = null;
+    log(`Config problem: worker: ${err.message}, so this computer runs no minion turns`);
+  }
 
   /** Tells the app which servers and workspaces this agent offers; sent on connect and when the config changes. */
   async function sendInfo() {
@@ -2441,6 +2454,8 @@ async function main() {
         throw Object.assign(new Error(`another agent connected with this machine's token, from ${msg.by || 'another computer'}; run only one`), { replaced: true });
       } else if (msg.lend) {
         setLend(msg.lend);
+      } else if (msg.worker) {
+        worker?.poke();
       } else if (msg.job) {
         runner.handle(msg.job).catch((err) => log(`Job ${msg.job.id}: ${err.message}`));
       } else if (msg.close) {

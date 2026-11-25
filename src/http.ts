@@ -395,6 +395,8 @@ export interface App {
   dataDir: string;
   preview: boolean;
   machinesUrl: URL | null;
+  /** This server's own address as turns' tools call it (COORDINATOR_API): where a machine turn's tool calls are passed on (routes/machines.ts turnCall). */
+  turnApi: () => string;
   /** The commit the server runs: its boot commit, moved on by each SIGHUP reload (a front-end-only or light deploy). */
   liveCommit: string | null;
   readonly assetVersion: string;

@@ -47,6 +47,7 @@ import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { buildOwnerKey, SCHEMA_VERSION, Store, type Artifact, type CiNumberStep, type Project, type User } from './src/db.ts';
 import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
+import { machineLink, workerInfo } from './src/machine-turn.ts';
 import { ShipWatch } from './src/ci-ships.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs, readLongJobs } from './src/long-jobs.ts';
@@ -650,6 +651,14 @@ if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
 const ciNumbers = new CiNumbers(store);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
+// Turns on connected machines (Build 7 T2, src/machine-turn.ts). Nothing places one yet (T4 does): only CITADEL_WORKER_FORCE, for trying a worker.
+machineLink.online = (id) => machines.isOnline(id);
+machineLink.poke = (id) => machines.pokeWorker(id);
+runner.workerFor = (_ticket, person) => {
+  const m = config.workerForce ? store.listMachines().find((x) => x.name === config.workerForce) : null;
+  // Its owner's turns only (Josh, 2026-11-25), its switch on, and a worker agent there that has said so.
+  return m && person !== null && m.owner_id === person && machines.lendsWorker(m) && machines.isOnline(m.id) && workerInfo(m.id) ? { id: m.id, name: m.name } : null;
+};
 runner.refuseTurn = (ticket, author, from, asker) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from, asker);
 runner.placeFor = (person, warm) => turnPlace(store, claudeLink, person, warm);
 runner.accountFor = (person, warm) => claudeLink.accountFor(person, warm);
@@ -2351,6 +2360,7 @@ const app: App = {
   dataDir: DATA_DIR,
   preview: PREVIEW,
   machinesUrl: MACHINES_URL,
+  turnApi: () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`,
   liveCommit: BOOT_COMMIT,
   health: { watch: deployWatch, clientErrors },
   get assetVersion() {

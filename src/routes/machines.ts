@@ -15,6 +15,8 @@ import { HttpError, json, publicOrigin, ownWrites, readJson, str, type Ctx, type
 import { ensureCoordinatorFor } from './projects.ts';
 import { pickFor } from '../../public/model-table.js';
 import { thrown } from '../thrown.ts';
+import { request } from 'node:http';
+import { placedAt, sendFolder, syncTurns } from '../machine-turn.ts';
 
 /** The reds an Investigate press is starting a minion for (#1491), by `<scheme>:<workflow>`: a second press waits for the first. */
 const investigating = new Set<string>();
@@ -117,7 +119,7 @@ async function machineUpload({ req, res, url, app }: Ctx, machine: Machine) {
 }
 
 /** A route a machine's agent calls with its token, which reaches nothing else. */
-const agent = (method: string, path: string, handler: (ctx: Ctx, machine: Machine) => unknown): Route => ({
+const agent = (method: string | readonly string[], path: string, handler: (ctx: Ctx, machine: Machine) => unknown): Route => ({
   method,
   path,
   who: 'machine',
@@ -127,6 +129,33 @@ const agent = (method: string, path: string, handler: (ctx: Ctx, machine: Machin
     return handler(ctx, machine);
   },
 });
+
+/**
+ * A tool call home from a turn on a machine (Build 7 T2): its tool server's request, passed on by the machine's agent
+ * with the machine's token, the turn's own in X-Turn-Authorization. Only for a turn placed on that machine and still
+ * running; then it goes to this server's own address as the turn's request, where the turn's token is checked as ever.
+ */
+function turnCall({ req, res, url, params, app }: Ctx, machine: Machine) {
+  const bearer = String(req.headers['x-turn-authorization'] ?? '');
+  const ticketId = Number(/^Bearer (\d+)\./.exec(bearer)?.[1]);
+  const dir = ticketId ? app.runner.turnDir(ticketId) : null;
+  if (!dir || placedAt(dir)?.id !== machine.id) throw new HttpError(403, 'Not a turn running on this machine');
+  const headers: Record<string, string> = { authorization: bearer };
+  for (const h of ['content-type', 'content-length', 'accept', 'mcp-session-id', 'mcp-protocol-version', 'last-event-id']) if (typeof req.headers[h] === 'string') headers[h] = req.headers[h];
+  return new Promise<void>((done) => {
+    const out = request(new URL(`/${params.rest}${url.search}`, app.turnApi()), { method: req.method, headers }, (back) => {
+      res.writeHead(back.statusCode ?? 502, back.headers);
+      back.pipe(res).on('close', done);
+    });
+    out.on('error', () => {
+      if (!res.headersSent) json(res, 502, { error: 'The server did not answer the tool call' });
+      else res.destroy();
+      done();
+    });
+    res.on('close', () => out.destroy());
+    req.pipe(out);
+  });
+}
 
 /** What a machine's agent calls: hold its stream open, pass on a message from its MCP server, its details, a file. */
 export const agentRoutes: Route[] = [
@@ -152,6 +181,12 @@ export const agentRoutes: Route[] = [
     return json(res, 202, {});
   }),
   agent('POST', '/api/machines/upload', machineUpload),
+  // A worker's turns (Build 7 T2, src/machine-turn.ts): the sync it makes about every half second, a turn's folder to start it from, and its tool calls home.
+  agent('POST', '/api/machines/turns', async ({ req, res }, machine) => json(res, 200, await syncTurns(machine.id, await readJson(req, 30_000_000)))),
+  agent('GET', '/api/machines/turn-folder', async ({ res, url }, machine) => {
+    if (!(await sendFolder(machine.id, url.searchParams.get('dir'), res))) throw new HttpError(404, 'Not a turn placed on this machine');
+  }),
+  agent(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/api/machines/turn-call/*rest', turnCall),
   // Jobs (#857, shared/project/specs/desktop-gpu-jobs.md "Wire contract"): one input file with the job's token, the
   // job's state every 10 s and on every change, and one result file, streamed to disk under the job's caps.
   agent('GET', '/api/machines/job-input', ({ req, res, url, app }, machine) => app.jobs.input(machine, req, res, url)),

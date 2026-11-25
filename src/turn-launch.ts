@@ -689,6 +689,8 @@ export interface TurnFacts {
   unit: string | null;
   /** Its Citadel tools and machine links come from its place's shared tool server (#1259), not helpers of its own. Never a Codex turn's. */
   pool?: boolean;
+  /** It is placed on a connected machine (Build 7 T2, src/machine-turn.ts): its agent runs the wrapper there, and nothing is spawned here. */
+  machine?: boolean;
 }
 
 /** Claude Code refuses a settings file past 2 MiB (2.1.x: "Settings file exceeds the 2MiB limit"). */
@@ -728,7 +730,7 @@ export interface LaunchPlan {
    * src/turn-supervisor.mjs), which runs it in a scope from `scope` (systemd-run's arguments: the same name, slice and
    * memory marks), and starts the wrapper in a unit from `systemdRun` when the supervisor doesn't take it.
    */
-  spawn: { how: 'container'; wrapper: string[] } | { how: 'unit'; systemdRun: string[]; scope: string[]; wrapper: string[] } | { how: 'child'; wrapper: string[] };
+  spawn: { how: 'container'; wrapper: string[] } | { how: 'unit'; systemdRun: string[]; scope: string[]; wrapper: string[] } | { how: 'child'; wrapper: string[] } | { how: 'machine'; wrapper: string[] };
   /** The shared tool server the wrapper keeps up for this turn (src/pool-client.mjs); with it, `mcp.json` reaches the pool and `mcp-stdio.json` is the fallback. */
   pool?: PoolSpec;
 }
@@ -951,7 +953,13 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   // systemd-oomd (#1338): a minion turn is `avoid`, the last pick once heavy commands, ships and test scopes are gone;
   // a Taskmaster turn is `omit`, never picked. A turn unit or scope is a leaf cgroup, which is where oomd reads the mark.
   const group = [`--unit=${facts.unit}`, ...(ticket.kind === 'coordinator' ? [`--slice=${TASKMASTER_SLICE}`, '-p', 'ManagedOOMPreference=omit'] : [`--slice=${TURN_SLICE}`, '-p', 'ManagedOOMPreference=avoid']), '-p', 'TimeoutStopSec=15'];
-  const spawn: LaunchPlan['spawn'] = !place.host ? { how: 'container', wrapper } : facts.unit ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', ...group, '-p', 'UMask=0077', ...thpProps(), ...wrapper], scope: ['--user', '--scope', '--collect', '--quiet', ...group], wrapper } : { how: 'child', wrapper };
+  const spawn: LaunchPlan['spawn'] = facts.machine
+    ? { how: 'machine', wrapper }
+    : !place.host
+      ? { how: 'container', wrapper }
+      : facts.unit
+        ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', ...group, '-p', 'UMask=0077', ...thpProps(), ...wrapper], scope: ['--user', '--scope', '--collect', '--quiet', ...group], wrapper }
+        : { how: 'child', wrapper };
   // One pool per place (the host's turns folder, or a person's) and version; it gets a plain env, each turn's own comes with its registration.
   // On the host it runs in a unit of its own, so it outlives the turn that started it, in the Taskmasters' slice (#1280):
   // it serves their Citadel tools too, so a minion storm mustn't stall it (about 70M). `omit` (#1338): every turn's

@@ -51,6 +51,7 @@ import { armOf, CARRY_ON, eligible, enrol, fullText, MINION_SHEET_CHECK, SEAM_CO
 import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, minionHandoffPrompt, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
+import { placeTurn } from './machine-turn.ts';
 import { offSkills, pruneKit } from './skills.ts';
 import { alive, copyPinned, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wrapperSpec } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
@@ -709,6 +710,11 @@ export class Runner {
   /** Machines online now and lent to this scheme (access.ts lendsMachine); a thread's turn gets each one's MCP tools. */
   /** The online machines a turn in this scheme gets, for these askers (#306: their own machines). */
   machines: (project: Project, askers: number[]) => TurnMachine[] = () => [];
+  /**
+   * The connected machine this turn is placed on (Build 7 T2, src/machine-turn.ts), or null: it runs here. Nothing places
+   * one by default; server.ts sets it, and only ever for an ordinary minion's turn on Claude.
+   */
+  workerFor: (ticket: Ticket, person: number | null) => { id: number; name: string } | null = () => null;
   /** Files on disk may have changed. `soon`: a turn ended or a reply linked a file, so look within seconds; false: a tool result, looked at throttled (#1542). */
   onFilesMayChange: (ticketId: number, soon: boolean) => void = () => {};
   /** Where the minion's change is, branch to live (src/branch.ts), for its bar and its row's badge. */
@@ -2996,6 +3002,11 @@ export class Runner {
     this.armKill(live, ticketId);
   }
 
+  /** The folder of a minion's running turn, or null. */
+  turnDir(ticketId: number): string | null {
+    return this.turns.get(ticketId)?.dir ?? null;
+  }
+
   /** Signal a turn's claude and, as it runs in its own process group, its tool subprocesses too. */
   signal(live: TurnAt, sig: NodeJS.Signals) {
     runningTurn(live).signal(sig);
@@ -3664,6 +3675,8 @@ export class Runner {
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
     const same = codexThread?.person === person && codexThread.thread;
     if (!step && !keepalive && !codex) this.seamEnrol(ticket.id);
+    // Only an ordinary minion's turn on Claude is ever placed on a machine (spec section 2): Taskmasters, Codex turns, keepalives and fresh-session steps run here.
+    const worker = ticket.kind !== 'coordinator' && !codex && !keepalive && !step ? this.workerFor(ticket, person) : null;
     let built: Awaited<ReturnType<Runner['buildLaunch']>>;
     try {
       built = await this.buildLaunch(project, ticket, {
@@ -3678,6 +3691,7 @@ export class Runner {
         name: `${ticket.id}-${Date.now()}`,
         folders: { files: filesDir, shared: sharedDir, memory: memoryDir },
         codex: codex ? { thread: same || null } : null,
+        worker,
       });
     } catch (err) {
       // A launch that can't be built (a settings file past Claude Code's cap, #661; claude not on the PATH) fails the turn with its reason, in the chat.
@@ -3820,6 +3834,8 @@ export class Runner {
     // Holds the turn's token: private, and the wrapper deletes it once read.
     await writeFile(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
     if (plan.spawn.how === 'container') await containerFiles(dir, place as Extract<TurnPlace, { host: false }>);
+    // Its `machine` file and first beat: the machine's agent fetches the folder and starts it (src/machine-turn.ts).
+    if (plan.spawn.how === 'machine') await placeTurn(dir, worker!, { wrapper: plan.spawn.wrapper, cwd: ticket.cwd, home: env.HOME ?? '', roots: [dirname(dir), join(dirname(this.store.path), 'projects')] });
     // Nothing more to await: a stop or a dismissal meanwhile means no turn, and nothing of the minion's changed. A message
     // to a minion already dismissed does run its turn (it reopens it).
     const still = this.store.getTicket(ticket.id);
@@ -3888,7 +3904,7 @@ export class Runner {
       hashes,
       ...(secretPerson ? { secretPerson } : {}),
       ...(github ? { github: github.login } : {}),
-      ...(place.host ? {} : { container: place.container }),
+      ...(place.host || worker ? {} : { container: place.container }),
       ...(codex ? {} : { account: claudePlace.account ?? 1 }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}),
       ...(keepalive ? { keepalive: true as const } : {}),
@@ -3933,6 +3949,8 @@ export class Runner {
       }
     }
     // Its step on the lane lasts until it has ended and its session is saved (finish).
+    // Nothing to spawn for a machine's turn: its agent has been told, and asks for what is its own.
+    if (plan.spawn.how === 'machine') return { ended: live.ended };
     if (plan.spawn.how === 'container') {
       this.spawnInContainer(place as Exclude<TurnPlace, { host: true }>, dir, plan.spawn.wrapper, ticket.id);
       return { ended: live.ended };
@@ -3988,6 +4006,8 @@ export class Runner {
       codex: { thread: string | null } | null;
       github?: number | null;
       side?: boolean;
+      /** The machine it is placed on (workerFor). */
+      worker?: { id: number; name: string } | null;
     },
   ) {
     const { place, person, asker, machines, model, effort, codex } = f;
@@ -4113,7 +4133,7 @@ export class Runner {
         .filter((c) => c.home_scheme === project.id)
         .map((c) => c.name);
       // A side question's fork runs as the server's child: it is short, and a restart loses it anyway.
-      const unit = this.units && place.host && !f.side ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
+      const unit = this.units && place.host && !f.side && !f.worker ? `citadel-turn-${this.unitTag}-${basename(dir)}` : null;
       // A host turn with no unit of its own (a side question) keeps its own helpers: a pool it started would live in the
       // server's cgroup and die on the next deploy restart, with every host turn's calls.
       // Everything the turn is launched with, from the facts chosen above (src/turn-launch.ts).
@@ -4128,7 +4148,8 @@ export class Runner {
         effort,
         deploys,
         unit,
-        pool: this.pool && !codex && !(place.host && !unit && this.units),
+        pool: this.pool && !codex && (!!f.worker || !(place.host && !unit && this.units)),
+        machine: !!f.worker,
         folders: {
           files: filesDir,
           shared: sharedDir,

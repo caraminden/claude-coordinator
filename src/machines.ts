@@ -53,7 +53,9 @@ const DEFAULT_CLAUDE_MCP = 'godot-ai';
  * gpu_off (#1175): GPU jobs switched off, so a GPU_TASK is refused and one running is stopped.
  * before_ticks: saved for an agent from before #439, only to hold gpu_off; its ticks start fresh once it is managed.
  */
-export type Lend = { server: string | null; workspaces: string[]; gpu_off?: true; before_ticks?: true };
+export type Lend = { server: string | null; workspaces: string[]; gpu_off?: true; before_ticks?: true } & WorkerLend;
+/** worker (Build 7): the Minion turns switch. Off unless set, so a machine linked before it lends no worker. */
+type WorkerLend = { worker?: true };
 /** The workspace task that runs a job with the machine's GPU on (tools/win-test-box/gpu.ps1 adds it). */
 export const GPU_TASK = 'run-gpu';
 const GPU_OFF_WHO = 'the GPU jobs switch on the Machines page';
@@ -66,7 +68,7 @@ export function cleanLend(input: unknown): Lend | null {
   const v = input as { server?: unknown; workspaces?: unknown; gpu_off?: unknown; before_ticks?: unknown };
   if (v.server !== null && !(typeof v.server === 'string' && SERVER_NAME.test(v.server))) return null;
   if (!Array.isArray(v.workspaces) || v.workspaces.length > 50 || !v.workspaces.every((w: unknown) => typeof w === 'string' && WORKSPACE_NAME.test(w))) return null;
-  return { server: v.server as string | null, workspaces: [...new Set<string>(v.workspaces)], ...(v.gpu_off === true ? { gpu_off: true as const } : {}), ...(v.before_ticks === true ? { before_ticks: true as const } : {}) };
+  return { server: v.server as string | null, workspaces: [...new Set<string>(v.workspaces)], ...(v.gpu_off === true ? { gpu_off: true as const } : {}), ...(v.before_ticks === true ? { before_ticks: true as const } : {}), ...((input as WorkerLend).worker === true ? { worker: true as const } : {}) };
 }
 
 function storedLend(m: Machine): Lend | null {
@@ -499,6 +501,16 @@ export class MachineRelay {
 
   isOnline(machineId: number): boolean {
     return this.agents.has(machineId);
+  }
+
+  /** Its owner switched Minion turns on (Lend.worker). */
+  lendsWorker(machine: Machine): boolean {
+    return storedLend(machine)?.worker === true;
+  }
+
+  /** Hurry a worker agent's next sync of its turns (src/machine-turn.ts); it syncs by itself anyway. */
+  pokeWorker(machineId: number) {
+    this.agents.get(machineId)?.res.write(`data: ${JSON.stringify({ worker: 'poke' })}\n\n`);
   }
 
   /** A machine's agent connected: hold the stream open and send it its sessions' messages. */

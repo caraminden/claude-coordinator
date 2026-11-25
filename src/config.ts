@@ -22,6 +22,8 @@ export function readConfig(env: NodeJS.ProcessEnv) {
     appsDomain: env.APPS_DOMAIN?.trim().toLowerCase() || null,
     /** Where machines' agents connect, if not the app's own address: a URL on a private network (the tailnet). */
     machinesUrl: env.MACHINES_URL ? new URL(env.MACHINES_URL) : null,
+    /** Build 7, until placement (T4) is built: every ordinary minion turn of this machine's owner runs on it, when its Minion turns switch is on and its worker agent is connected. For trying the worker; unset on perigee. */
+    workerForce: env.CITADEL_WORKER_FORCE?.trim() || null,
     dataDir: env.DATA_DIR ?? DEFAULT_DATA_DIR,
     /** Where contraptions' keys live; null picks by the data folder. */
     contraptionsDir: env.CITADEL_CONTRAPTIONS_DIR || null,

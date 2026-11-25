@@ -4,6 +4,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { MachineTurn, placedAt } from './machine-turn.ts';
 import { checkProcess, type ProcCheck } from './quiet.ts';
 import { supervisorAlive } from './supervisor-client.ts';
 import { alive } from './turn-launch.ts';
@@ -37,6 +38,9 @@ export interface RunningTurn {
 /** The running turn at `at`. Holds nothing: made where it's asked, from where the turn runs now (a unit that won't start leaves a child). */
 export function runningTurn(at: TurnAt): RunningTurn {
   if (at.container) return new ContainerTurn(at.dir, at.container);
+  // A turn on a connected machine has neither, and its folder's `machine` file (Build 7 T2): read only then, so a unit's or a container's turn costs no file read.
+  const machine = at.unit ? null : placedAt(at.dir);
+  if (machine) return new MachineTurn(at.dir, machine);
   return at.unit ? new UnitTurn(at.dir, at.unit) : new ChildTurn(at.dir);
 }
 
@@ -45,8 +49,10 @@ export const START_GRACE_MS = 60_000;
 /** A container turn's wrapper beat (src/turn-wrapper.mjs) longer ago than this is stale: checked against /proc then. */
 const BEAT_STALE_MS = 30_000;
 
-/** alive() for a turn's folder alone, as the sweeps and strays know it: a container turn's has the `container` file. */
+/** alive() for a turn's folder alone, as the sweeps and strays know it: a container turn's has the `container` file, a machine's turn the `machine` file. */
 export function wrapperAlive(dir: string): boolean | null {
+  const machine = placedAt(dir);
+  if (machine) return new MachineTurn(dir, machine).alive();
   return (existsSync(join(dir, 'container')) ? containerAlive : hostAlive)(dir);
 }
 

@@ -227,7 +227,7 @@ test('pending-deploy minions whose branch the live commit contains are found, wh
   // #81: a deploy reports only to the minions that ran it, so one waiting on a commit that went live
   // in someone else's restart stayed pending-deploy.
   store.setProjectRepoDir(project.id, repo);
-  const withBranch = (state: any, branch: string | null) => {
+  const withBranch = (state: Parameters<Store['updateTicket']>[1]['state'], branch: string | null) => {
     const id = minion();
     store.setTicketDir(id, root, branch);
     store.updateTicket(id, { state });

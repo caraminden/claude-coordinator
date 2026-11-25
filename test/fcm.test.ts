@@ -11,6 +11,7 @@ import { after, before, test } from 'node:test';
 import { Fcm, fcmMessage, parsePush } from '../src/fcm.ts';
 import { HttpError } from '../src/http.ts';
 import { bootServer, tempRoot, type Booted } from './helpers.ts';
+import { json } from './typed.ts';
 
 const tmp = tempRoot('fcm-');
 const root = tmp.dir;
@@ -59,7 +60,7 @@ test('the send body is checked: recipients, lengths, the open path and data keys
   const bad = (b: unknown, re: RegExp) =>
     assert.throws(
       () => parsePush('mandate', b),
-      (e: any) => e instanceof HttpError && e.status === 400 && re.test(e.message),
+      (e: unknown) => e instanceof HttpError && e.status === 400 && re.test(e.message),
       JSON.stringify(b),
     );
   bad({ title: 'x' }, /to/);
@@ -86,7 +87,7 @@ test('the send body is checked: recipients, lengths, the open path and data keys
 });
 
 test('the access token is cached until a minute before it ends, and a dead token says so', async () => {
-  const calls: { url: string; body: any; auth?: string }[] = [];
+  const calls: { url: string; body: Record<string, string>; auth?: string }[] = [];
   let now = 1_000_000;
   let answer: { status: number; body: unknown } = { status: 200, body: { name: 'projects/proj-1/messages/1' } };
   const fakeFetch = (async (url: string, init: RequestInit) => {
@@ -133,7 +134,7 @@ test('with no key file, Fcm says where it goes', () => {
   const fcm = new Fcm(join(root, 'none', 'fcm-service-account.json'), { fetch: (() => assert.fail('no fetch')) as typeof fetch });
   assert.throws(
     () => fcm.account(),
-    (e: any) => e.status === 503 && e.message.includes(join(root, 'none', 'fcm-service-account.json')),
+    (e: unknown) => (e as HttpError).status === 503 && (e as HttpError).message.includes(join(root, 'none', 'fcm-service-account.json')),
   );
 });
 
@@ -147,7 +148,7 @@ let port = 0;
 let key = '';
 let cara = 0;
 
-const sent: any[] = [];
+const sent: ReturnType<typeof fcmMessage>[] = [];
 let tokenCalls = 0;
 /** What the stub Firebase answers a send to each token, by default 200. */
 const fcmAnswers = new Map<string, { status: number; body: unknown }>();
@@ -169,7 +170,7 @@ const google = createServer((req: IncomingMessage, res) => {
   });
 });
 
-type Got = { status: number; body: any };
+type Got = { status: number; body: unknown };
 function ask(host: string, method: string, path: string, headers: Record<string, string>, body?: unknown): Promise<Got> {
   const data = body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body);
   return new Promise((resolve, reject) => {
@@ -179,7 +180,7 @@ function ask(host: string, method: string, path: string, headers: Record<string,
       let text = '';
       res.on('data', (d) => (text += d));
       res.on('end', () => {
-        let parsed: any = text;
+        let parsed: unknown = text;
         try {
           parsed = JSON.parse(text);
         } catch {}
@@ -273,7 +274,7 @@ test('re-registering a token moves it to the person and app now signed in', asyn
 test("a DELETE forgets the phone by its token, signed out or as another person, so a login change ends the old one's push", async () => {
   const app = await appCookie();
   const reg = '/apps/_citadel/push/stub';
-  const devices = async () => (await pushApi({ to: 'cara', data: { s: '1' } })).body.devices;
+  const devices = async () => ((await pushApi({ to: 'cara', data: { s: '1' } })).body as { devices: number }).devices;
   assert.equal(await devices(), 0);
   // Signed out: no session to name the owner, and the token is the proof.
   assert.equal((await ask(APP, 'POST', reg, app, { token: 'shared', platform: 'android' })).status, 204);
@@ -313,7 +314,7 @@ test('without the key file the send API answers 503 naming where it goes', async
     const k = readFileSync(join(made.data.keys_dir, 'contraption.key'), 'utf8');
     const res = await fetch(`${bare.base}/api/contraptions/push`, { method: 'POST', headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ to: 'cara', title: 'x' }) });
     assert.equal(res.status, 503);
-    assert.ok((await res.json()).error.includes(join(root, 'bare-home', '.config/citadel-android/fcm-service-account.json')));
+    assert.ok((await json<{ error: string }>(res)).error.includes(join(root, 'bare-home', '.config/citadel-android/fcm-service-account.json')));
   } finally {
     await bare.stop();
   }

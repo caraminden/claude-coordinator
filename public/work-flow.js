@@ -307,11 +307,12 @@ function build(id, name, data, retry, redraw) {
     ),
   );
   const head = h('div', { class: 'ci-head' }, h('h3', {}, name), h('span', { class: 'muted' }, `minions started ${dayWords(st.from)} to ${dayWords(st.to)}`));
-  if (fresh?.error) return [head, controls, h('p', { class: 'error' }, "Couldn't read where this scheme's work went. ", h('button', { type: 'button', class: 'secondary small', onclick: retry }, 'Try again'))];
+  if (fresh?.error) return [head, controls, h('p', { class: 'cui-notice', 'data-tone': 'danger', role: 'alert' }, "Couldn't read where this scheme's work went. ", h('button', { type: 'button', class: 'secondary small', onclick: retry }, 'Try again'))];
   if (!shown) return [head, controls, h('div', { class: 'code-skeleton flow-skeleton', role: 'status', 'aria-label': "Reading the minions' chats" })];
   const ms = shown.minions;
   const notes = [
     shown.unread ? h('p', { class: 'flow-note' }, toneChip('info', 'Still reading'), ' ', h('span', { class: 'muted' }, `${plural(shown.unread, 'chat')} not read yet: they join as they are.`)) : '',
+    shown.early ? h('p', { class: 'flow-note' }, toneChip('info', 'Refusals not recorded'), ' ', h('span', { class: 'muted' }, 'before Nov 14: a refused ship from then shows nowhere here.')) : '',
     shown.git ? '' : h('p', { class: 'flow-note' }, toneChip('warn', "Main wasn't read"), ' ', h('span', { class: 'muted' }, "Its commits couldn't be, so some work that is on main may read as never shipped.")),
   ];
   if (!ms.length) return [head, controls, ...notes, shown.unread ? h('div', { class: 'code-skeleton flow-skeleton' }) : emptyCard('Nothing started in these days', 'Every minion started here shows as a thread from its kind to how it ended. Pick a longer range to see older ones.', { mark: '≈', hue: 'muted' })];
@@ -321,7 +322,7 @@ function build(id, name, data, retry, redraw) {
   const legend = h('div', { class: 'flow-names' });
   const has = (p) => ms.some((m) => m[p.col] === p.key);
   if (!has(st.pick)) {
-    const first = ['nothing', 'late', 'live', 'main', 'answer', 'open', 'build'].find((key) => has({ col: 'end', key }));
+    const first = ['nothing', 'norepo', 'late', 'live', 'main', 'answer', 'open', 'build'].find((key) => has({ col: 'end', key }));
     st.pick = { col: 'end', key: first };
   }
   const drawList = () => {
@@ -343,7 +344,8 @@ function build(id, name, data, retry, redraw) {
     st.pick = p;
     show();
   };
-  const drawLegend = () =>
+  const drawLegend = () => {
+    const at = legend.contains(document.activeElement) ? document.activeElement.dataset.hue : null;
     legend.replaceChildren(
       ...nodesOf(ms).map((col, i) =>
         h(
@@ -363,6 +365,8 @@ function build(id, name, data, retry, redraw) {
         ),
       ),
     );
+    if (at) legend.querySelector(`[data-hue="${at}"]`)?.focus({ preventScroll: true });
+  };
   const stage = h('div', { class: 'flow-stage' });
   if (st.table) {
     stage.append(
@@ -397,7 +401,7 @@ function build(id, name, data, retry, redraw) {
   };
   drawLegend();
   drawList();
-  body.append(h('div', { class: 'code-sum flow-sum' }, h('span', { class: 'settings-tile' }, icon('chart')), summary(ms)), stage, legend, listBox);
+  body.append(h('div', { class: 'code-sum flow-sum' }, h('span', { class: 'settings-tile' }, icon('chart')), summary(ms, shown.early)), stage, legend, listBox);
   return [head, controls, ...notes, body, how(shown)];
 }
 
@@ -420,7 +424,7 @@ function rowOf(id, m, most) {
 }
 
 /** The sentence over the river. */
-function summary(ms) {
+function summary(ms, early) {
   const refused = ms.filter((m) => m.path === 'refused'),
     there = refused.filter((m) => m.end === 'late'),
     nothing = ms.filter((m) => m.end === 'nothing');
@@ -429,8 +433,10 @@ function summary(ms) {
     { class: 'flow-words' },
     h('b', {}, num(ms.length)),
     ` ${ms.length === 1 ? 'minion' : 'minions'}, ${money(value(ms, 'cost'))}. `,
-    ...(refused.length ? [h('b', {}, num(refused.length)), ` had two or more refused ships${there.length === refused.length ? ', and all of them still got there. ' : `, and ${num(there.length)} of those still got there. `}`] : ['None had two or more refused ships. ']),
-    ...(nothing.length ? [h('b', {}, num(nothing.length)), ` ${nothing.length === 1 ? 'feature, fix or chore' : 'features, fixes and chores'} closed with nothing on main: ${money(value(nothing, 'cost'))}.`] : ['No feature, fix or chore closed with nothing on main.']),
+    ...(refused.length
+      ? [h('b', {}, num(refused.length)), ` had two or more refused ships${there.length === refused.length ? ', and all of them still got there. ' : `, and ${num(there.length)} of those still got there. `}`]
+      : [early ? 'None is on record with two or more refused ships. ' : 'None had two or more refused ships. ']),
+    ...(nothing.length ? [h('b', {}, num(nothing.length)), ` ${nothing.length === 1 ? 'feature, fix or chore' : 'features, fixes and chores'} closed with nothing on main, why not recorded: ${money(value(nothing, 'cost'))}.`] : ['No feature, fix or chore closed with nothing on main.']),
   );
 }
 
@@ -444,5 +450,9 @@ const how = (data) =>
       { class: 'look-prose muted small' },
       `Each minion started in these days, Pacific, counts once, with all its turns so far at API prices; a killed turn counts at its estimate. "Live" means a release or an app's deploy that went live names it${data.releases ? '' : '; no release here names any of these'}. "On main" without one means its ship, its pull request or a commit that names it is on the main branch.`,
     ),
-    h('p', { class: 'look-prose muted small' }, 'A refused ship is a hand-off that did not go through, kept in its chat since Nov 14, or a note of two failed ships, since Nov 19. A ship from before then, or one the minion ran itself, has none on record, so it reads "refusals not recorded" rather than as a first try.'),
+    h(
+      'p',
+      { class: 'look-prose muted small' },
+      'A refused ship is a hand-off that did not go through, kept in its chat since Nov 14, or a note of two failed ships, since Nov 19. A ship from before then, or one the minion ran itself, has none on record, so it reads "refusals not recorded" rather than as a first try. Why a minion closed isn\'t recorded either: one stopped on purpose and given to others counts with the rest.',
+    ),
   );

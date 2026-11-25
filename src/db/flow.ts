@@ -13,7 +13,9 @@ export interface FlowRow {
   cost: number;
   /** A release or an app's deploy that went live names it. */
   live: number;
-  /** A pull request of its own merged. */
+  /** The major build it is in. */
+  build: number | null;
+  /** A pull request of its own merged; which branch into isn't kept. */
   merged_pr: number;
 }
 
@@ -26,7 +28,7 @@ export const flowQueries = {
         ), deployed AS (
           SELECT DISTINCT json_extract(c.value, '$.ticketId') AS id FROM contraption_deploys d, json_each(d.changes) c WHERE d.outcome = 'deployed' AND d.finished_at >= :from
         )
-        SELECT t.id, t.number, t.title, t.status, t.created_at, t.updated_at,
+        SELECT t.id, t.number, t.title, t.status, t.build, t.created_at, t.updated_at,
           (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id WHERE p.target_type = 'minion' AND p.target_id = t.id AND pk.key = 'type' LIMIT 1) AS type,
           (SELECT COALESCE(SUM(u.cost_usd), 0) FROM turns u WHERE u.ticket_id = t.id) AS cost,
           (t.number IN (SELECT number FROM live) OR t.id IN (SELECT id FROM deployed)) AS live,

@@ -10,7 +10,7 @@ export const KINDS = [
 ];
 export const PATHS = [
   ['shipped', 'Shipped, under two refusals', 'Shipped'],
-  ['untold', 'Shipped, refusals not recorded', 'Not recorded'],
+  ['untold', 'On main, refusals not recorded', 'Refusals unknown'],
   ['refused', 'Two or more refused ships', '2+ refusals'],
   ['other', 'On main, no release of its own', 'No release'],
   ['never', 'Never shipped'],
@@ -18,9 +18,10 @@ export const PATHS = [
 export const ENDS = [
   ['live', 'Live'],
   ['main', 'On main, no release recorded', 'On main'],
-  ['late', 'Got there after refusals', 'Late'],
+  ['late', 'Got there after refusals', 'After refusals'],
   ['build', 'In a build that is not on main', 'In a build'],
   ['nothing', 'Closed, nothing on main', 'Not on main'],
+  ['norepo', 'Closed, no repo to look in', 'No repo'],
   ['answer', 'Answer, report or design', 'Answer'],
   ['open', 'Still open', 'Open'],
 ];
@@ -68,8 +69,9 @@ export function layout(minions, unit, along, { gap = 14, least = 2 } = {}) {
         const ms = a.ms.filter((m) => m[b.col] === b.key);
         if (!ms.length) continue;
         const v = value(ms, unit);
-        const wa = a.v ? (v / a.v) * a.size : a.size,
-          wb = b.v ? (v / b.v) * b.size : b.size;
+        // A node that cost nothing shares its width by count.
+        const wa = (a.v ? v / a.v : ms.length / a.ms.length) * a.size,
+          wb = (b.v ? v / b.v : ms.length / b.ms.length) * b.size;
         links.push({ from: a, to: b, ms, v, a0: a.at + out.get(a), a1: a.at + out.get(a) + wa, b0: b.at + into.get(b), b1: b.at + into.get(b) + wb });
         out.set(a, out.get(a) + wa);
         into.set(b, into.get(b) + wb);

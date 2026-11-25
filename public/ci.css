@@ -149,7 +149,7 @@
 }
 /* The Flow tab (#1989, public/work-flow.js): a scheme's minions from kind, through how they got to main, to how they ended. */
 [data-hue=kind-feature] { --h: var(--cat-1); } [data-hue=kind-bug] { --h: var(--cat-3); } [data-hue=kind-chore] { --h: var(--cat-2); } [data-hue=kind-research] { --h: var(--waiting); } [data-hue=kind-other] { --h: var(--muted); }
-[data-hue=path-shipped], [data-hue=path-untold], [data-hue=path-other], [data-hue=path-never], [data-hue=end-open] { --h: var(--muted); } [data-hue=path-refused], [data-hue=end-late] { --h: var(--waiting); }
+[data-hue=path-shipped], [data-hue=path-untold], [data-hue=path-other], [data-hue=path-never], [data-hue=end-open], [data-hue=end-norepo] { --h: var(--muted); } [data-hue=path-refused], [data-hue=end-late] { --h: var(--waiting); }
 [data-hue=end-live] { --h: var(--done); } [data-hue=end-main] { --h: var(--cat-2); } [data-hue=end-build] { --h: var(--held); } [data-hue=end-nothing] { --h: var(--error); } [data-hue=end-answer] { --h: var(--cat-6); }
 .flow-ctl-right { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .flow-ctl .chips { align-items: center; }

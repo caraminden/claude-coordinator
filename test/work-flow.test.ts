@@ -2,7 +2,7 @@
 // Citadel, each minion's kind, way to main and ending are the ones its chat, releases, pull requests and commits say.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -31,7 +31,7 @@ const FROM = Date.now() - 86_400_000;
 const TO = Date.now() + 86_400_000;
 
 type FlowNode = { key: string; v: number; at: number; size: number };
-type Seed = { type?: string; closed?: boolean; cost?: number; notes?: string[]; refused?: number; pr?: boolean; project?: number };
+type Seed = { type?: string; closed?: boolean; cost?: number; notes?: string[]; refused?: number; pr?: boolean; build?: number; project?: number };
 async function minion(title: string, s: Seed = {}) {
   const t = store.createTicket({ project_id: s.project ?? scheme.id, title, permission_mode: 'default', created_by: 'Cara' });
   if (s.type) store.props.set('minion', t.id, s.project ?? scheme.id, { type: s.type }, 'Cara');
@@ -39,6 +39,7 @@ async function minion(title: string, s: Seed = {}) {
   for (const text of s.notes ?? []) store.addEvent(t.id, 'note', { text });
   if (s.cost) await store.recordTurn(t.id, { ended_at: Date.now(), session_cost_usd: s.cost });
   if (s.pr) store.db.prepare("INSERT INTO github_seen (ticket_id, key, delivered, created_at) VALUES (?, 'pr7:state:MERGED:1', 1, 1)").run(t.id);
+  if (s.build) store.updateTicket(t.id, { build: s.build });
   if (s.closed !== false) store.db.prepare("UPDATE tickets SET status = 'closed', updated_at = updated_at + 1 WHERE id = ?").run(t.id);
   return t;
 }
@@ -59,6 +60,10 @@ await minion('an answer', { type: 'research', cost: 11, notes: ['Claude dismisse
 await minion('an idea', { type: 'ideation', cost: 1, notes: ['Shipped and live, so the server dismissed this minion.'] });
 await minion('still going', { type: 'feature', closed: false });
 await minion('no type', {});
+await minion('its pull request merged into a build', { type: 'feature', pr: true, build: 3 });
+// The words a merge into a build left until Nov 19, and a ship whose commit's subject wasn't known.
+await minion('merged, in the old words', { type: 'feature', notes: ['Shipped 0123abc4d "a piece": a piece. Risk low: small. Merged into build/3, not live until the build ships.'] });
+await minion('shipped, no subject', { type: 'bug', notes: ['Shipped 0123abc4d: a thing. Risk low: small. Shipped.'] });
 await minion('not this scheme', { type: 'feature', cost: 99, project: other.id });
 await minion('in the other scheme only', { type: 'feature', project: other.id });
 store.addRelease({ project_id: scheme.id, target: 'app', version: '1', changes: JSON.stringify([1, 2, 3, 6].map((number) => ({ number, title: 'x' }))), started_at: null, live_at: Date.now(), outcome: 'live', stages: '[]' });
@@ -82,6 +87,9 @@ const want: Record<number, [FlowMinion['kind'], FlowMinion['path'], FlowMinion['
   13: ['other', 'never', 'answer', 1],
   14: ['feature', 'never', 'open', 0],
   15: ['other', 'never', 'answer', 0],
+  16: ['feature', 'never', 'build', 0],
+  17: ['feature', 'never', 'build', 0],
+  18: ['bug', 'shipped', 'main', 0],
 };
 
 test('every minion of the scheme, by kind, way to main and ending; another scheme’s are not in it', async () => {
@@ -98,8 +106,8 @@ test('every minion of the scheme, by kind, way to main and ending; another schem
   assert.deepEqual(
     apart.minions.map((m) => [m.number, m.path, m.end]),
     [
-      [2, 'never', 'nothing'],
-      [1, 'never', 'nothing'],
+      [2, 'never', 'norepo'],
+      [1, 'never', 'norepo'],
     ],
   );
   assert.deepEqual([apart.git, apart.releases], [true, false]);
@@ -108,29 +116,29 @@ test('every minion of the scheme, by kind, way to main and ending; another schem
 test('the river: every column holds every minion, and a ribbon for each step taken', async () => {
   const { minions } = await new WorkFlow(store, { dir: join(root, 'kept'), read: readApart, db, waitMs: 60_000 }).view(scheme.id, FROM, TO);
   const { cols, links, total } = layout(minions, 'n', 400);
-  assert.equal(total, 15);
+  assert.equal(total, 18);
   assert.deepEqual(
     cols.map((c: FlowNode[]) => c.map((n) => [n.key, n.v])),
     [
       [
-        ['feature', 7],
-        ['bug', 2],
+        ['feature', 9],
+        ['bug', 3],
         ['chore', 3],
         ['research', 1],
         ['other', 2],
       ],
       [
-        ['shipped', 3],
+        ['shipped', 4],
         ['untold', 1],
         ['refused', 3],
         ['other', 2],
-        ['never', 6],
+        ['never', 8],
       ],
       [
         ['live', 3],
-        ['main', 3],
+        ['main', 4],
         ['late', 1],
-        ['build', 2],
+        ['build', 4],
         ['nothing', 2],
         ['answer', 3],
         ['open', 1],
@@ -181,12 +189,23 @@ test('a chat is read once until its minion changes, and one not read in time is 
   hold = new Promise((r) => (open = r));
   const second = new WorkFlow(store, { dir, read, db, waitMs: 20 });
   const part = await second.view(scheme.id, FROM, TO);
-  assert.deepEqual([part.unread, part.minions.length, asked.at(-1)], [1, 15, [t.id]]);
+  assert.deepEqual([part.unread, part.minions.length, asked.at(-1)], [1, 18, [t.id]]);
   open();
   hold = null;
   let all = await second.view(scheme.id, FROM, TO);
   while (all.unread) all = await second.view(scheme.id, FROM, TO);
-  assert.deepEqual([all.unread, all.minions.length], [0, 16]);
+  assert.deepEqual([all.unread, all.minions.length], [0, 19]);
+  // One read before that has changed since is as unread as a new one; a broken file is read again.
+  store.db.prepare('UPDATE tickets SET updated_at = updated_at + 5 WHERE id = ?').run(t.id);
+  hold = new Promise((r) => (open = r));
+  const changed = await second.view(scheme.id, FROM, TO);
+  assert.deepEqual([changed.unread, changed.minions.length], [1, 18]);
+  open();
+  hold = null;
+  let settled = await second.view(scheme.id, FROM, TO);
+  while (settled.unread) settled = await second.view(scheme.id, FROM, TO);
+  writeFileSync(join(dir, `${scheme.id}.json`), '{"broken');
+  assert.equal((await new WorkFlow(store, { dir, read, db, waitMs: 60_000 }).view(scheme.id, FROM, TO)).unread, 0);
   assert.ok(Object.keys(JSON.parse(readFileSync(join(dir, `${scheme.id}.json`), 'utf8'))).length >= 15);
 });
 
@@ -218,6 +237,23 @@ test('which minion a commit names: the number its subject starts or ends with; G
 
 test('a ship with no refusals on record and no note of its own is never a first try', () => {
   const none = { refused: 0, stalled: false, shipped: false, merged: false };
-  assert.deepEqual(settle({ type: 'feature', status: 'closed', live: 1, merged_pr: 0 }, none, true), { path: 'untold', end: 'live' });
-  assert.deepEqual(settle({ type: 'feature', status: 'closed', live: 1, merged_pr: 0 }, { ...none, shipped: true }, true), { path: 'shipped', end: 'live' });
+  const m = { type: 'feature', status: 'closed', live: 0, merged_pr: 0, build: null, created_at: Date.parse('2026-11-20T12:00:00-08:00') };
+  const early = { ...m, created_at: Date.parse('2026-11-13T12:00:00-08:00') };
+  assert.deepEqual(settle({ ...m, live: 1 }, none, true), { path: 'untold', end: 'live' });
+  assert.deepEqual(settle({ ...m, live: 1 }, { ...none, shipped: true }, true), { path: 'shipped', end: 'live' });
+  // On main by a commit alone: from before refusals were kept it says so.
+  assert.deepEqual(settle(early, none, true), { path: 'untold', end: 'main' });
+  assert.deepEqual(settle(m, none, true), { path: 'other', end: 'main' });
+  assert.deepEqual(settle(m, none, false, false), { path: 'never', end: 'norepo' });
+});
+
+test('nodes that cost nothing: their ribbons stay inside them in dollars', () => {
+  const free = (end: string) => ({ number: 1, title: 'x', kind: 'feature', path: 'never', end, cost: 0, refused: 0, said: '' });
+  for (const ms of [
+    [free('open'), free('nothing')],
+    [free('open'), free('nothing'), { ...free('live'), kind: 'bug', path: 'shipped', cost: 5 }],
+  ]) {
+    const { links } = layout(ms, 'cost', 300);
+    for (const l of links) assert.ok(l.a1 <= l.from.at + l.from.size + 1e-6 && l.b1 <= l.to.at + l.to.size + 1e-6, `${l.from.key} > ${l.to.key}`);
+  }
 });

@@ -17,10 +17,12 @@ import { pacificDay } from './pacific.ts';
 import { turnEnv } from './turn-launch.ts';
 
 export type Kind = 'feature' | 'bug' | 'chore' | 'research' | 'other';
-/** shipped: refusals were recorded, and there were fewer than two. untold: from before they were, or it ran its ship itself. other: on main with no ship or release of its own. */
+/** shipped: refusals were recorded, and there were fewer than two. untold: on main from before they were, or live with a ship it ran itself. other: on main with no ship or release of its own. */
 export type Path = 'shipped' | 'untold' | 'refused' | 'other' | 'never';
-/** build: merged into a major build that isn't on main. nothing: feature, fix or chore work closed with nothing on main. */
-export type End = 'live' | 'late' | 'main' | 'build' | 'nothing' | 'answer' | 'open';
+/** build: merged into a major build that isn't on main. nothing: feature, fix or chore work closed with nothing on main. norepo: the same, in a scheme with no repo to look in. */
+export type End = 'live' | 'late' | 'main' | 'build' | 'nothing' | 'norepo' | 'answer' | 'open';
+/** Refused hand-offs, and hand-offs' own ship notes, are in the chats from this Pacific day on. */
+export const REFUSALS_FROM = '2026-11-14';
 
 /** What one minion's chat says. */
 export interface ChatFacts {
@@ -52,10 +54,12 @@ export interface FlowView {
   from: number;
   to: number;
   minions: FlowMinion[];
-  /** Minions whose chats haven't been read yet: left out of `minions`, the next read has more of them. */
+  /** Minions whose chats haven't been read, or not since they last changed: left out of `minions`, the next read has more of them. */
   unread: number;
   /** Whether main's commits could be read. */
   git: boolean;
+  /** Whether the range reaches before refused ships were kept. */
+  early: boolean;
   /** Whether any release of the scheme's is in the range, so "no release recorded" means something. */
   releases: boolean;
 }
@@ -68,6 +72,7 @@ export function dayStart(day: string): number | null {
   if (!/^\d{4}-\d\d-\d\d$/.test(day)) return null;
   return ['-07:00', '-08:00'].map((z) => Date.parse(`${day}T00:00:00${z}`)).find((t) => Number.isFinite(t) && pacificDay(t) === day && pacificDay(t - 1) !== day) ?? null;
 }
+const RECORDED = dayStart(REFUSALS_FROM) ?? 0;
 /** The range a page asked for, both days in it: the last two weeks by default; null when it isn't one. */
 export function rangeOf(from: string | null, to: string | null, now = Date.now()): { from: number; to: number } | null {
   const last = dayStart(to ?? pacificDay(now));
@@ -81,15 +86,19 @@ const KINDS: Kind[] = ['feature', 'bug', 'chore', 'research'];
 export const kindOf = (type: string | null): Kind => KINDS.find((k) => k === type) ?? 'other';
 
 /** How a minion got to main, and how it ended. */
-export function settle(m: Pick<FlowRow, 'type' | 'status' | 'live' | 'merged_pr'>, f: Omit<ChatFacts, 'id' | 'said'>, named: boolean): { path: Path; end: End } {
+export function settle(m: Pick<FlowRow, 'type' | 'status' | 'live' | 'build' | 'merged_pr' | 'created_at'>, f: Omit<ChatFacts, 'id' | 'said'>, named: boolean, repo = true): { path: Path; end: End } {
   const kind = kindOf(m.type);
-  const onMain = !!m.live || f.shipped || named || !!m.merged_pr;
+  // A build minion's pull request may have gone into its build's branch: only a release or a commit says it is on main.
+  const ownPr = !!m.merged_pr && m.build === null;
+  const onMain = !!m.live || f.shipped || named || ownPr;
   const refused = f.refused >= 2 || f.stalled;
-  const path: Path = refused ? 'refused' : f.shipped ? 'shipped' : m.live ? 'untold' : onMain ? 'other' : 'never';
+  const early = m.created_at < RECORDED;
+  const path: Path = refused ? 'refused' : f.shipped ? 'shipped' : m.live || (onMain && early) ? 'untold' : onMain ? 'other' : 'never';
   if (onMain) return { path, end: refused ? 'late' : m.live ? 'live' : 'main' };
-  if (f.merged) return { path, end: 'build' };
+  if (f.merged || m.merged_pr) return { path, end: 'build' };
   if (m.status !== 'closed') return { path, end: 'open' };
-  return { path, end: kind === 'research' || kind === 'other' ? 'answer' : 'nothing' };
+  if (kind === 'research' || kind === 'other') return { path, end: 'answer' };
+  return { path, end: repo ? 'nothing' : 'norepo' };
 }
 
 /** The minions `log` (git log --format=%cn%x09%s) names: the #N a subject starts or ends with, else its first. GitHub's own merges end with a pull request's number. */
@@ -114,8 +123,9 @@ export function chatFacts(db: DatabaseSync, ids: number[]): ChatFacts[] {
     const f: ChatFacts = { id, refused: Number((refusals.get(id) as { n: number }).n), stalled: false, shipped: false, merged: false, said: '' };
     for (const { text } of notes.all(id) as { text: string | null }[]) {
       if (!text) continue;
-      if (/^Shipped (?:[0-9a-f]{7,40} |the branch)/.test(text)) f.shipped = true;
-      else if (/^Merged /.test(text)) f.merged = true;
+      // A merge into a build said "Shipped <commit> … Merged into build/N, not live …" until Nov 19.
+      if (/^Merged /.test(text) || /\bMerged into build\/\d+, not live\b/.test(text)) f.merged = true;
+      else if (/^Shipped (?:[0-9a-f]{7,40}\b|the branch)/.test(text)) f.shipped = true;
       else if (/^Stall signal: .*\b2 failed ships/.test(text)) f.stalled = true;
       const closed = /^(\S.{0,60}?) dismissed this minion(?:: (.*))?\.?$/s.exec(text);
       if (closed) f.said = /\bso (?:it|the server)$/.test(closed[1]) ? '' : (closed[2]?.trim() || `Closed by ${closed[1] === 'Claude' ? 'the minion itself' : closed[1]}, no note`).slice(0, 300);
@@ -187,10 +197,9 @@ export class WorkFlow {
   private async load(id: number): Promise<Kept> {
     let k = this.kept.get(id);
     if (!k) {
-      k = await readFile(this.file(id), 'utf8').then(
-        (s) => JSON.parse(s) as Kept,
-        () => ({}),
-      );
+      k = await readFile(this.file(id), 'utf8')
+        .then((s) => JSON.parse(s) as Kept)
+        .catch(() => ({})); // a broken file is read again from the chats
       k = this.kept.get(id) ?? k;
       this.kept.set(id, k);
     }
@@ -238,16 +247,17 @@ export class WorkFlow {
     const named = await git;
     const on = new Set(named ?? []);
     const kept = await this.load(id);
-    const read = rows.filter((r) => kept[r.id]);
+    const read = rows.filter((r) => kept[r.id]?.at >= r.updated_at); // an older read is as good as none: it may have closed since
     return {
       from,
       to,
       minions: read.map((r) => {
         const f = kept[r.id];
-        return { number: r.number, title: r.title, kind: kindOf(r.type), ...settle(r, f, on.has(r.number)), cost: r.cost, refused: f.refused, said: f.said };
+        return { number: r.number, title: r.title, kind: kindOf(r.type), ...settle(r, f, on.has(r.number), !!repo), cost: r.cost, refused: f.refused, said: f.said };
       }),
       unread: rows.length - read.length,
       git: !repo || named !== null,
+      early: from < RECORDED,
       releases: rows.some((r) => r.live),
     };
   }

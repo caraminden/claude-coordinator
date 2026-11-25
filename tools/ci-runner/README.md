@@ -349,7 +349,10 @@ except what is about the distro itself. The runners start with the PC, with nobo
 `citadel-runners.slice`, held to 75% of the PC's cores ([Your own caps](#your-own-caps)). A runner the PC had before
 this takes the slice at its next start. To update, run the line again.
 
-**What has been tested** (#1933): VMPROOF
+**What has been tested** (#1933, Nov 25 2026): the install, on a fresh Debian 12 VM (x64, software-emulated, 2 cores)
+against a stand-in Citadel. It installed with no WSL step and no `/etc/wsl.conf`, connected, and answered a list job; a
+busy loop in the slice used 149% of one core (75% of the PC), then 81% after `caps.json` said 40; a second install kept
+`caps.json`. Not tried: a real GitHub runner added on plain Linux, another distro, and `caps.json` on a real Windows PC.
 
 ## Load samples (#534)
 

@@ -1,12 +1,14 @@
-// tools/fmt --own and the format check before the line (test/format-own.test.ts on tools/always-tests.txt, #1885), in
-// throwaway repos: a ship that changed an unformatted file is refused by land.sh's real smoke check, Biome installed or not.
+// tools/fmt --own, the format check before the line (test/format-own.test.ts on tools/always-tests.txt, #1885) and land.sh's
+// format_ship (tools/ship-format.sh), in throwaway repos: a ship's unformatted files go out formatted, Biome installed or
+// not, no other file changes, and where Biome can't do it the check refuses the ship.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { env, git, setup } from './land-fixture.ts';
-import { line } from './land-train-fixture.ts';
+import { line, shared } from './land-train-fixture.ts';
+import { until } from './wait.ts';
 
 const repo = join(import.meta.dirname, '..');
 const biome = join(repo, 'node_modules/.bin/biome');
@@ -130,6 +132,10 @@ test('a test the formatting breaks (a pinned hash, a size budget) refuses the sh
   assert.equal(res.status, 1, res.stderr);
   assert.match(res.stderr, /pin\.ts moved/);
   assert.match(res.stderr, /smoke: tests failed.*before the line.*run this again\. tools\/land\.sh formatted 1 of this ship's files in [0-9a-f]{7,} \(pin\.ts\)/);
+  // Handed off again, with nothing left to format: the same.
+  const again = r.land();
+  assert.equal(again.status, 1, again.stderr);
+  assert.match(again.stderr, /pin\.ts moved/);
 });
 
 test("main moved, land.sh with it: the format commit is rebased, and the rebased copy doesn't format again", { skip }, () => {
@@ -161,6 +167,41 @@ test("a ship train takes its riders' formatted commits", { skip }, async () => {
   assert.match(done[2].stderr, /^land: shipped in ticket\/2-x's ship train of 2 ships/m);
   assert.deepEqual(subjects(l.r, 'main').slice(-4), ['f1.txt: 1', 'f2.txt: 2', 'new.ts: const  a = {b:1}', 'formatted at ship time']);
   assert.equal(git(l.r.source, 'show', 'main:new.ts'), GOOD.trim());
+  l.done();
+});
+
+test("the early next train is the one that ships when its front's files were formatted", { skip }, async () => {
+  const e: Record<string, string> = { CI: '', CITADEL_TEST_EXTRA: '0', LAND_TRAIN_MAX: '1' };
+  const held = { FAKE_CI_GATE: '' };
+  const l = await line([{}, { env: held }, {}, { change: ['new.ts', BAD] }], e, (r) => {
+    install(r);
+    Object.assign(e, shared(r.dir), { TMPDIR: r.dir });
+    held.FAKE_CI_GATE = join(r.dir, 'ci-go');
+  });
+  const all = l.go();
+  await until("the early push beside ship 2's run", () => /its CI starts now/.test(l.out[1]));
+  writeFileSync(held.FAKE_CI_GATE, '');
+  const done = await all;
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  const top = /while this one's CI runs \(([0-9a-f]{7,})\)/.exec(done[1].stderr)![1];
+  assert.match(done[3].stderr, /^land: early next train: CI started on this train at .* so that run is its CI/m);
+  assert.equal(git(l.r.source, 'rev-parse', 'main').slice(0, 7), top.slice(0, 7));
+  assert.equal(subjects(l.r, 'main').at(-1), 'formatted at ship time');
+  assert.equal(git(l.r.source, 'show', 'main:new.ts'), GOOD.trim());
+  l.done();
+});
+
+test("a ship's own check runs on its formatted commit, and that run is its CI in line", { skip }, async () => {
+  const e: Record<string, string> = { CI: '', CITADEL_TEST_EXTRA: '0', FAKE_CHECK_RUNNERS: '1', LAND_OWN_CHECK_POLL: '0.05' };
+  const l = await line([{}, { change: ['new.ts', BAD] }], e, (r) => {
+    install(r);
+    Object.assign(e, shared(r.dir), { TMPDIR: r.dir });
+  });
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[1].stderr, /^land: own check: green in \d+ s .* so it joins the line/m);
+  assert.equal(l.runs(), 2, "ship 1's run and ship 2's check, which was its CI in line too");
+  assert.equal(subjects(l.r, 'main').at(-1), 'formatted at ship time');
   l.done();
 });
 

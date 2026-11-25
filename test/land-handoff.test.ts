@@ -115,7 +115,7 @@ test('a ship land.sh formatted says so in its shipped line (#1885)', async () =>
   const s = setup('live');
   await s.land(`land: format: formatted 2 of this ship's files in abc1230 (a.ts, b.ts)\n${LIVE}`);
   await s.handoffs.poll();
-  assert.deepEqual(s.notes, ['Shipped abc1234 "#9: usage bar": Usage bar in the top bar. Risk low: front end only. The ship script formatted 2 of its files in a commit of its own, abc1230 (a.ts, b.ts). Live now.']);
+  assert.deepEqual(s.notes, ['Shipped abc1234 "#9: usage bar": Usage bar in the top bar. Risk low: front end only. The ship script formatted 2 of its files in a commit of its own (a.ts, b.ts). Live now.']);
 });
 
 test("a ship let through main's red names main's red test in its shipped line (#1478)", async () => {

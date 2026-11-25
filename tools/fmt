@@ -6,8 +6,8 @@
 # main, or the build/<n> it was rebased onto, so never another minion's. Uncommitted edits count; a file git doesn't track
 # is formatted but never checked, since it isn't in the ship. FMT_WHOLE_BUILD=1 (a build's own ship, land.sh --build)
 # takes everything the build adds to main. Exit 3: Biome couldn't run, so nothing was checked.
-# `tools/fmt --own --commit` (land.sh's format_ship): the tracked ones only, what changes going in a commit of its own, which
-# it names on stdout. Any trouble (Biome missing, failing or past FMT_TIMEOUT) leaves the files as they were, with no commit.
+# `tools/fmt --own --commit` (land.sh's format_ship): the tracked ones only, what changes going in a commit of its own.
+# Any trouble (Biome missing, failing or past FMT_TIMEOUT) leaves the files as they were, with no commit and the reason said.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 bin=node_modules/.bin/biome
@@ -41,10 +41,10 @@ if [ -n "$commit" ]; then
   mapfile -d '' -t files < <(git diff -z --name-only -- "${files[@]}")
   [ ${#files[@]} -gt 0 ] || exit 0
   # "#N: " only beside titles that have one: commit-titles.sh refuses a branch that mixes them.
-  n=$(git branch --show-current) n=${n#ticket/} n=${n%%-*}
+  n=$(git branch --show-current)
+  [[ $n =~ ^ticket/([0-9]+) ]] && n=${BASH_REMATCH[1]} || n=
   [[ $'\n'$(git log --no-merges --format=%s "$base..HEAD") =~ $'\n'(WIP )?'#'[0-9] ]] || n=
   git commit -q -m "${n:+#$n: }formatted at ship time" -m "By tools/land.sh with tools/fmt (Biome), only files this branch changed (#1885)." -- "${files[@]}" >/dev/null 2>&1 || as_was "git could not commit the formatted files"
-  echo "formatted ${#files[@]} of this ship's files in $(git rev-parse --short HEAD) ($(printf '%s\n' "${files[@]:0:5}" | paste -sd, | sed 's/,/, /g')$([ ${#files[@]} -le 5 ] || echo ', …'))"
   exit 0
 fi
 rc=0

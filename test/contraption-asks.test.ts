@@ -425,8 +425,14 @@ test('POST /api/contraptions/asks/files (#1841): a 100 MB file streamed, then na
   // Used once: a second ask naming it finds nothing.
   assert.equal((await ask({ person: Rachel.id, kind: 'bug', text: 'Again', files: [{ upload: id }] })).status, 404);
 
+  // A feature ask takes uploads the same way.
+  up = await upload(Rachel.id, 'mock.png', Buffer.from('PNG'));
+  const f = await ask({ person: Rachel.id, kind: 'feature', text: 'A wider aura', files: [{ upload: up.body.upload }] });
+  assert.equal(f.status, 202, JSON.stringify(f.body));
+  assert.deepEqual(f.body.files, ['inbox/rec/rachel/mock.png']);
+
   // A data ask takes uploads too, under its own name when it gives none.
-  up = await upload(Josh.id, 'session.webm', Buffer.from('small clip'));
+  up = await upload(Josh.id,'session.webm', Buffer.from('small clip'));
   const d = await ask({ person: Josh.id, kind: 'data', files: [{ upload: up.body.upload }] });
   assert.equal(d.status, 202, JSON.stringify(d.body));
   assert.deepEqual(d.body.files, ['inbox/rec/josh/session.webm']);

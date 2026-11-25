@@ -135,13 +135,6 @@ export const mainOnly = <T extends object>(o: T): T =>
 export const stepsOpened = (shared: BigInt64Array | null) => (shared && Atomics.load(shared, 1) === 1n ? Atomics.load(shared, 4) : 0n);
 
 const writerUp = (shared: BigInt64Array | null) => !!shared && Atomics.load(shared, 1) === 1n;
-/** The main thread is inside a step it has written in (src/db-writer.ts): what is written may be half of it. */
-const inStep = (shared: BigInt64Array | null) => !!shared && Atomics.load(shared, 5) < Atomics.load(shared, 4);
-/** How long a request waits for the writer to catch up with the main thread's steps. */
-const STEP_WAIT_MS = 1000;
-/** Begin a read transaction: one read of each file starts its snapshot, so it keeps the three as they are here. */
-const pin = (db: DatabaseSync) => (db.exec('BEGIN'), db.prepare(`SELECT (SELECT count(*) FROM main.sqlite_master), (SELECT count(*) FROM state.sqlite_master), (SELECT count(*) FROM ${CHAT}.sqlite_master)`).get());
-
 /**
  * Begin a read transaction on `db` at a whole step of the main thread's (#1628): every write of every step it opened
  * so far has run and none of a later one's has, so a read never sees half of one (a turn's queue taken but the next
@@ -149,6 +142,8 @@ const pin = (db: DatabaseSync) => (db.exec('BEGIN'), db.prepare(`SELECT (SELECT 
  * worker to count them (the main thread answers).
  */
 export function atWholeStep(db: DatabaseSync, shared: BigInt64Array | null, ms = READ_WAIT_MS): bigint | null {
+  // One read of each file starts its snapshot: the transaction keeps the three as they were here.
+  const pin = () => (db.exec('BEGIN'), db.prepare(`SELECT (SELECT count(*) FROM main.sqlite_master), (SELECT count(*) FROM state.sqlite_master), (SELECT count(*) FROM ${CHAT}.sqlite_master)`).get());
   // With no write worker the main thread writes in place, where a step can't be told from the next: it answers.
   if (!shared || !writerUp(shared)) return null;
   const until = Date.now() + ms;
@@ -156,7 +151,7 @@ export function atWholeStep(db: DatabaseSync, shared: BigInt64Array | null, ms =
     const opened = Atomics.load(shared, 4),
       closed = Atomics.load(shared, 3);
     if (closed >= opened) {
-      pin(db);
+      pin();
       // No step opened while it pinned, so nothing committed since the check.
       if (Atomics.load(shared, 4) === opened) return opened;
       db.exec('ROLLBACK');
@@ -321,35 +316,23 @@ if (workerData?.reader) {
   // one since) waits for them to finish.
   let tx: { at: bigint; refs: number; done: Promise<void>; end: () => void } | null = null;
   const inWholeStep = async <T>(run: () => Promise<T>): Promise<T | null> => {
-    // While main is inside a step this waits for it. When it is only the writer that is behind, it waits a second: past
-    // that the main thread would answer from what is written too (READ_WAIT_MS there), so a reader does (#2003), from a
-    // transaction no other request shares. A person's own writes are in it: main holds their answer until they are.
-    // The second starts over when main was in a step meanwhile, at most twice: a main thread that is always in one
-    // step or the next must not keep it waiting.
     const start = Date.now();
-    let until = start + STEP_WAIT_MS,
-      wait = READ_WAIT_MS;
-    while (!tx || tx.at < stepsOpened(data.shared)) {
+    for (let wait = READ_WAIT_MS; !tx || tx.at < stepsOpened(data.shared); wait = 0) {
+      // The front thread answered it long since (four times READER_ANSWER_MS): a writer far behind must not pile these up here.
+      if (Date.now() - start > 5 * READER_ANSWER_MS) return null;
       if (tx) {
         await tx.done;
         continue;
       }
-      let at = atWholeStep(store.db, data.shared, wait);
-      if (at === null && !writerUp(data.shared)) return null;
-      if (inStep(data.shared)) until = Math.min(Date.now(), start + 2 * STEP_WAIT_MS) + STEP_WAIT_MS;
-      else if (at === null && Date.now() >= until) {
-        pin(store.db);
-        at = -1n;
+      const at = atWholeStep(store.db, data.shared, wait);
+      if (at === null) {
+        // No write worker: the main thread answers.
+        if (!writerUp(data.shared)) return null;
+        await sleep(20);
+        continue;
       }
-      // The front thread answered it long since (four times READER_ANSWER_MS): a main thread stuck in a step must not pile these up here.
-      if (at === null && Date.now() - start > 5 * READER_ANSWER_MS) return null;
-      if (at !== null) {
-        let end!: () => void;
-        tx = { at, refs: 0, done: new Promise<void>((r) => (end = r)), end };
-        break;
-      }
-      wait = 0;
-      await sleep(20);
+      let end!: () => void;
+      tx = { at, refs: 0, done: new Promise<void>((r) => (end = r)), end };
     }
     const mine = tx;
     mine.refs++;
@@ -399,5 +382,6 @@ if (workerData?.reader) {
     }
     parentPort!.postMessage({ id: m.id, answer: a });
   });
+  if (data.testHooks) console.log('Reader test hook: ready');
   parentPort!.postMessage({ ready: true });
 }

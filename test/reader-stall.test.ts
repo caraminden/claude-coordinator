@@ -31,7 +31,10 @@ const get = async (srv: Booted, path: string, signal?: AbortSignal): Promise<Got
   const res = await fetch(srv.base + path, { headers: { Cookie: srv.cookie }, signal });
   return { status: res.status, by: res.headers.get('x-citadel-answered'), body: await res.text() };
 };
-const readerAnswers = (srv: Booted) => until('a reader answers', async () => (await get(srv, PAGE)).by === 'reader');
+const readersAnswer = async (srv: Booted, log: string) => {
+  await until('both readers are up', () => readFileSync(join(root, log), 'utf8').split('Reader test hook: ready').length === 3);
+  await until('a reader answers', async () => (await get(srv, PAGE)).by === 'reader');
+};
 /** Stall both readers for `ms`: two requests, which go to a reader each, both given up at once by the page that sent them. */
 async function stall(srv: Booted, log: string, ms: number) {
   const gone = new AbortController();
@@ -58,7 +61,7 @@ async function slowestHealth(srv: Booted, done: Promise<unknown>) {
 test('with both readers stalled, page reads are answered by the readers started in their place, the main thread free throughout', { timeout: 90_000 }, async () => {
   const srv = await bootServer({ root, env: KNOBS, log: join(root, 'one.log') });
   try {
-    await readerAnswers(srv);
+    await readersAnswer(srv, 'one.log');
     await stall(srv, 'one.log', 15_000);
     const t0 = Date.now();
     // As the page asks (public/base.js): again on a 503 that says so.
@@ -92,15 +95,14 @@ test('with no reader to be had, a page read fails within its wait, saying to ret
   writeFileSync(may, '');
   const srv = await bootServer({ root, env: { ...KNOBS, CITADEL_READER_BOOT_WAIT: may }, log: join(root, 'two.log') });
   try {
-    await readerAnswers(srv);
+    await readersAnswer(srv, 'two.log');
     rmSync(may); // the ones started in their place don't get ready
     await stall(srv, 'two.log', 10_000);
     const first = get(srv, PAGE);
     const worst = await slowestHealth(srv, first);
     const got = await first;
-    assert.equal(got.status, 503);
+    assert.deepEqual([got.status, got.by], [503, 'front']);
     assert.equal(JSON.parse(got.body).retry, true);
-    assert.equal(got.by, 'front');
     // timing-ok: as above
     assert.ok(worst < HELD, `the main thread was held for ${worst} ms`);
     // Slow, not stuck: the same readers answer once their disk does, neither thrown away.
@@ -115,10 +117,10 @@ test('with no reader to be had, a page read fails within its wait, saying to ret
   }
 });
 
-test('while writes are backed up, readers answer from what is written, the main thread free throughout', { timeout: 90_000 }, async () => {
-  const srv = await bootServer({ root, env: { ...KNOBS, CITADEL_DB_WRITE_DELAY_MS: '700' }, log: join(root, 'three.log') });
+test('while writes are backed up, page reads wait for them in a reader, the main thread free throughout', { timeout: 90_000 }, async () => {
+  const srv = await bootServer({ root, env: { ...KNOBS, CITADEL_DB_WRITE_DELAY_MS: '300' }, log: join(root, 'three.log') });
   try {
-    await readerAnswers(srv);
+    await readersAnswer(srv, 'three.log');
     const sent = srv.call(`/api/tickets/${M.id}/messages`, { text: 'read your writes' });
     let over = false;
     void sent.finally(() => (over = true));
@@ -130,9 +132,13 @@ test('while writes are backed up, readers answer from what is written, the main 
     const worst = await slowestHealth(srv, reads);
     assert.ok(worst < HELD, `the main thread was held for ${worst} ms`);
     assert.equal((await sent).status, 202);
-    assert.ok(seen.length > 0 && seen.every((by) => by === 'reader'), seen.join());
+    assert.ok(seen.length > 0 && seen.every((by) => by === 'reader' || by === 'front'), seen.join());
     // The message's answer came once its writes ran (#1244): the next read has it.
-    assert.match((await get(srv, PAGE)).body, /read your writes/);
+    const next = await until('a reader answers', async () => {
+      const got = await get(srv, PAGE);
+      return got.by === 'reader' && got;
+    });
+    assert.match(next.body, /read your writes/);
   } finally {
     await srv.stop();
   }

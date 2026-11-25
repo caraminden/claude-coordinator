@@ -452,7 +452,7 @@ test('a write the writer is still holding is never missed: the read waits for it
   const slow = await bootServer({ root, env: { CITADEL_DB_WRITE_DELAY_MS: '300' } });
   try {
     await readerAnswers(slow);
-    // Held 300 ms on the writer: a reader waits for it (up to a second), never the main thread.
+    // Held 300 ms on the writer: a reader waits for it, never the main thread.
     const sent = slow.call(`/api/tickets/${M1.id}/messages`, { text: 'read your writes' });
     await until('a read that waited for the held write', async () => {
       const t0 = Date.now();

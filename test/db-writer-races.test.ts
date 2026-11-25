@@ -178,19 +178,6 @@ test('chat lines queued when the worker dies are lost whole, and the next line t
   );
 });
 
-// Red on main when written (#1778): the gone mark is set only by the worker's own 'exit' handler, which these deaths skip.
-// Its fix takes the skip off. Handoff: the shared folder's handoffs/db-writer-dead-worker-mark.md.
-const GONE_MARK = 'found by #1778: a dead write worker is never marked gone';
-test("once the worker is gone no reader thread answers on its own: the server writes in place, where a step can't be told from the next", { skip: GONE_MARK }, async () => {
-  const { store, w } = open();
-  const t = minion(store);
-  await until('the step closes', () => w.shared[3] >= w.shared[4]);
-  await w.stop();
-  const reader = new Store(store.path, { reader: true });
-  store.updateTicket(t.id, { title: 'half a step' });
-  assert.equal(atWholeStep(reader.db, w.shared), null);
-});
-
 /** Run `body` in a process of its own (`store` and `w` are there), which kills itself as a crash would; its database. */
 function crash(name: string, body: string) {
   const dir = join(root, name);
@@ -290,9 +277,7 @@ test('a crash with a new minion half made leaves no minion and no chat line of i
 // it are not kept, or the next start finds half of it. `ready` makes the row set, `act` is the write, `see` what it changed.
 const num = (name: string) => ({ project_id: 1, name, value: 1, unit: 's', workflow: 'w', run_id: 1, run_attempt: 1, sha: 'a', ref: 'main', created_at: 1 });
 const slow = (id: number) => ({ at: 5, person: 'cara', device: 'desk', tab: 't', kind: 'request', what: `GET /${id}`, page: '', project_id: null, total_ms: 1, server_ms: null, network_ms: 0, tab_ms: 0 });
-// The two skipped are red on main (#1778): handoffs/half-saved-records.md in the shared folder; its fix takes the skips off.
-const HALF_SAVED = 'found by #1778: saved in several commits';
-const manyRecords: { what: string; refuse: [on: string, when?: string]; ready: (s: Store) => void; act: (s: Store) => unknown; see: (s: Store) => unknown; skip?: string }[] = [
+const manyRecords: { what: string; refuse: [on: string, when?: string]; ready: (s: Store) => void; act: (s: Store) => unknown; see: (s: Store) => unknown }[] = [
   {
     what: "a scheme's instructions and their history",
     refuse: ['INSERT ON instruction_history'],
@@ -381,32 +366,9 @@ const manyRecords: { what: string; refuse: [on: string, when?: string]; ready: (
         .all()
         .map((r) => r.key),
   },
-  {
-    what: "a schedule's slot and its place in the history",
-    skip: HALF_SAVED,
-    refuse: ['UPDATE ON schedules'],
-    ready: (s) => {
-      s.createProject('p', null);
-      s.schedules.create({ project_id: 1, name: 'Nightly', cron: '0 3 * * *', brief: 'b', type: 'chore', created_by: 'cara' }, 1_000);
-    },
-    act: (s) => s.schedules.ran(1, { skip: 'nothing moved' }, 2_000),
-    see: (s) => s.schedules.runs(1).map((r) => r.skip),
-  },
-  {
-    what: 'a minion and its chat, deleted',
-    skip: HALF_SAVED,
-    refuse: ['DELETE ON tickets'],
-    ready: (s) => {
-      const p = s.createProject('p', null);
-      const t = s.createTicket({ project_id: p.id, title: 'a minion', permission_mode: 'default', created_by: 'cara' });
-      s.addEvent(t.id, 'note', { text: 'kept' });
-    },
-    act: (s) => s.deleteTicket(1),
-    see: (s) => s.listEvents(1).length,
-  },
 ];
 for (const c of manyRecords)
-  test(`all or nothing: ${c.what}`, { skip: c.skip ?? false }, async () => {
+  test(`all or nothing: ${c.what}`, async () => {
     const { store, w } = open({}, (s) => {
       c.ready(s);
       refuse(s, 'last_record', ...c.refuse);

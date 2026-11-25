@@ -112,7 +112,7 @@ test('a rider refused for a skipped test hears so, for its wake to say skipped, 
   const l = await line([{}, {}, {}, { change: ['test/real.test.ts', '// red\n'] }], { FAKE_RED_PATH: 'test/real.test.ts', FAKE_LOG: 'after-real', FAKE_SKIP: '1' });
   const done = await l.go();
   assert.equal(done[3].status, 1, done[3].stderr);
-  assert.match(done[3].stderr, /so it is likely the cause/);
+  assert.match(done[3].stderr, /It was pulled off the train on that guess/);
   assert.match(done[3].stderr, /^land: a test was skipped in CI \(https:\/\/ci\/\d+\): the format check$/m);
   for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   l.done();

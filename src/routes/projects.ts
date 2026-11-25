@@ -1918,6 +1918,8 @@ export const projectRoutes: Route[] = [
       const name = claimName(body.name);
       const note = body.note == null ? '' : str(body.note, 'Note', 300);
       const queue = body.queue == null ? null : queueOf(app, project.id, body.queue);
+      if (body.keep != null && typeof body.keep !== 'boolean') throw new HttpError(400, 'keep is true or false');
+      if (body.keep != null && body.minion == null) throw new HttpError(400, 'keep goes with minion, the holder it is kept for');
       let holder: Ticket | null | undefined = caller;
       if (body.minion != null) {
         holder = app.store.getTicketByNumber(project.id, Number(body.minion));
@@ -1933,7 +1935,7 @@ export const projectRoutes: Route[] = [
       const first = queue?.length && body.minion == null && !held;
       if (first) holder = app.store.getTicket(queue[0])!;
       if (!holder) throw new HttpError(400, 'Name the minion that holds it (minion: its number), or give a queue');
-      const taken = app.store.claims.take(project.id, name, holder.id, session.name, note);
+      const taken = app.store.claims.take(project.id, name, holder.id, session.name, note, undefined, body.keep ?? undefined);
       if (taken.held) {
         const v = claimView(app, taken.held);
         throw new HttpError(409, `${name} is held by ${v.holder_name}, taken by ${v.taken_by} ${v.since_text}${taken.held.note ? ` (${taken.held.note})` : ''}. Release it first if it should move, or add to its queue.`);

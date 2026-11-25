@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
-import { imageHash, type ClaudeLink } from '../src/claude-link.ts';
+import { imageHashAsync, type ClaudeLink } from '../src/claude-link.ts';
 import { CodexLink, deviceCode } from '../src/codex-link.ts';
 import { Containers } from '../src/containers.ts';
 import { IMAGE_INSTRUCTIONS, images, notReady, outPath, overPace, REQUIREMENTS, review, usageLine } from '../src/codex-review.ts';
@@ -195,15 +195,15 @@ test("Codex's managed requirements run only Citadel's hook, from a static comman
   assert.match(req, /^unified_exec_tty = false$/m);
 });
 
-test('the image tag changes with any file in its build folder, not just the Containerfile', () => {
+test('the image tag changes with any file in its build folder, not just the Containerfile', async () => {
   const dir = join(root, 'img');
   mkdirSync(join(dir, 'codex'), { recursive: true });
   writeFileSync(join(dir, 'Containerfile'), 'FROM x\n');
   writeFileSync(join(dir, 'codex', 'hook.mjs'), 'a');
-  const before = imageHash(dir);
-  assert.equal(imageHash(dir), before);
+  const before = await imageHashAsync(dir);
+  assert.equal(await imageHashAsync(dir), before);
   writeFileSync(join(dir, 'codex', 'hook.mjs'), 'b');
-  assert.notEqual(imageHash(dir), before);
+  assert.notEqual(await imageHashAsync(dir), before);
 });
 
 test("a review refuses to run without the managed hook, the turn's tripwire config or the person's Codex sign-in", () => {

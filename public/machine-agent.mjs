@@ -1872,6 +1872,7 @@ export class JobRunner {
     // Without a block now, a running job keeps its time limit; the disk cap needs the block's number.
     const cap = slow && this.block ? this.block.max_disk_gb * 1024 ** 3 : 0;
     for (const j of live) {
+      if (j.final) continue; // ended while the sample was out (#1964): finish() reports it now, and this tick's report, on its own connection, could reach the app last
       j._gpu = gpu;
       if (j.state === 'running' && !j.pausing) {
         if (j.kind.gpu && gpu && gpu.pct >= GPU_BUSY_PCT) j.gpu_busy_s += dt;

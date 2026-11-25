@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS claims (
   taken_by TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT '',
   since INTEGER NOT NULL,
+  landed TEXT NOT NULL DEFAULT '',
+  keep INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (project_id, name)
 );
 CREATE INDEX IF NOT EXISTS claims_holder ON claims(holder);
@@ -51,6 +53,10 @@ export interface Claim {
   taken_by: string;
   note: string;
   since: number;
+  /** The commits its holder shipped while holding it that aren't live yet (#1985), with spaces between. */
+  landed: string;
+  /** 1: the holder's next live leaves it with the holder, who has another piece to ship (#1985). */
+  keep: number;
 }
 
 /** A queue row: waiting while done_at is null, else a past holder of this run. */
@@ -64,7 +70,7 @@ export interface QueueRow {
   how: SpanEnd | null;
 }
 
-/** How a holder's time ended: it shipped (and was dismissed for it), it was released, or it was dismissed without shipping. */
+/** How a holder's time ended: its ship went live (or it shipped and was dismissed), it was released, or it was dismissed without shipping. */
 export type SpanEnd = 'live' | 'released' | 'dismissed';
 
 /** Spans the estimate needs before it shows (the brief: hidden when history is thin), and how many recent ones it reads. */
@@ -87,6 +93,10 @@ export class Claims {
     this.db = db;
     // One commit, not one per table: a new database's setup is counted (test/db-setup.test.ts).
     db.exec(`BEGIN; ${CLAIMS_SCHEMA} COMMIT;`);
+    // Here, not in MIGRATIONS (src/db.ts), which run before this table exists in a new database.
+    const cols = (db.prepare('PRAGMA table_info(claims)').all() as { name: string }[]).map((c) => c.name);
+    if (!cols.includes('landed')) db.exec("ALTER TABLE claims ADD COLUMN landed TEXT NOT NULL DEFAULT ''");
+    if (!cols.includes('keep')) db.exec('ALTER TABLE claims ADD COLUMN keep INTEGER NOT NULL DEFAULT 0');
   }
 
   list(projectId: number): Claim[] {
@@ -104,9 +114,9 @@ export class Claims {
 
   /**
    * Take `name` for `holder`. Refused while another ticket holds it (the caller sees who); taking one
-   * the same holder already has only updates its note. A new holder leaves the queue. Returns the row.
+   * the same holder already has only updates its note, and `keep` when given. A new holder leaves the queue. Returns the row.
    */
-  take(projectId: number, name: string, holder: number, takenBy: string, note = '', now = Date.now()): { claim: Claim; held?: Claim } {
+  take(projectId: number, name: string, holder: number, takenBy: string, note = '', now = Date.now(), keep?: boolean): { claim: Claim; held?: Claim } {
     const held = this.get(projectId, name);
     if (held && held.holder !== holder) return { claim: held, held };
     if (held) this.db.prepare('UPDATE claims SET note = ? WHERE project_id = ? AND name = ?').run(note, projectId, name);
@@ -114,6 +124,7 @@ export class Claims {
       this.db.prepare('INSERT INTO claims (project_id, name, holder, taken_by, note, since) VALUES (?, ?, ?, ?, ?, ?)').run(projectId, name, holder, takenBy, note, now);
       this.db.prepare('DELETE FROM claim_queue WHERE project_id = ? AND name = ? AND ticket = ? AND done_at IS NULL').run(projectId, name, holder);
     }
+    if (keep !== undefined) this.db.prepare('UPDATE claims SET keep = ? WHERE project_id = ? AND name = ?').run(keep ? 1 : 0, projectId, name);
     return { claim: this.get(projectId, name)! };
   }
 
@@ -173,7 +184,7 @@ export class Claims {
         this.db.prepare('DELETE FROM claims WHERE project_id = ? AND name = ?').run(projectId, name);
         this.db.prepare('DELETE FROM claim_queue WHERE project_id = ? AND name = ?').run(projectId, name);
       } else {
-        this.db.prepare("UPDATE claims SET holder = ?, note = '', since = ? WHERE project_id = ? AND name = ?").run(next, now, projectId, name);
+        this.db.prepare("UPDATE claims SET holder = ?, note = '', since = ?, landed = '', keep = 0 WHERE project_id = ? AND name = ?").run(next, now, projectId, name);
         this.db.prepare('DELETE FROM claim_queue WHERE project_id = ? AND name = ? AND ticket IN (?, ?)').run(projectId, name, next, from.holder);
         this.db.prepare('INSERT INTO claim_queue (project_id, name, ticket, pos, added_by, added_at, done_at, how) VALUES (?, ?, ?, -1, ?, ?, ?, ?)').run(projectId, name, from.holder, from.taken_by, from.since, now, how);
       }
@@ -183,6 +194,33 @@ export class Claims {
       throw err;
     }
     return { from, ...(next != null && { to: this.get(projectId, name)! }) };
+  }
+
+  /** `holder` shipped `commit`: kept on each claim it holds until that is live (holderLive) or the claim moves. */
+  shipped(holder: number, commit: string): void {
+    // Once per commit: a hand-off picked up again after a restart reports its ship again.
+    this.db.prepare("UPDATE claims SET landed = trim(landed || ' ' || ?1) WHERE holder = ?2 AND instr(' ' || landed || ' ', ' ' || ?1 || ' ') = 0").run(commit, holder);
+  }
+
+  /** The claims whose holder shipped something not seen live yet, in every scheme. */
+  shippedClaims(): Claim[] {
+    return this.db.prepare("SELECT * FROM claims WHERE landed != '' ORDER BY project_id, name").all() as unknown as Claim[];
+  }
+
+  /**
+   * The commits `live` of the claim as it was `seen` are live (#1985): it passes on, its holder open or not. A kept one
+   * stays through the first of them, once. Undefined when it stayed, or moved since it was seen.
+   */
+  holderLive(seen: Claim, live: string[], now = Date.now()): { from: Claim; to?: Claim } | undefined {
+    const c = this.get(seen.project_id, seen.name);
+    if (!c || c.holder !== seen.holder || c.since !== seen.since) return undefined;
+    const ships = c.landed.split(' ').filter(Boolean);
+    const left = ships.filter((l) => !live.includes(l));
+    const went = ships.length - left.length;
+    if (!went) return undefined;
+    if (!c.keep || went > 1) return this.passOn(c.project_id, c.name, 'live', now);
+    this.db.prepare('UPDATE claims SET landed = ?, keep = 0 WHERE project_id = ? AND name = ?').run(left.join(' '), c.project_id, c.name);
+    return undefined;
   }
 
   /** Free `name`, whoever holds it (every member decides alike), passing it to the first waiting. The row it was, or undefined if nobody held it. */

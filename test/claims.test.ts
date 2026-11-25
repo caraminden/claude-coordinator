@@ -1,5 +1,6 @@
 // Claims (#921): the pipeline lane and any other single-holder duty, as rows any Taskmaster reads and takes.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -148,9 +149,13 @@ test('a holder whose work shipped passes its claim on as shipped when dismissed,
         .all()
         .map((r) => [r.holder, r.how]);
     store.claims.take(p, 'pipeline-lane', a.id, 'Cara');
-    runner.holderShipped(a.id);
-    runner.holderShipped(other.id);
-    assert.ok(!store.getSetting(`claim-shipped:${other.id}`), 'only a holder is marked');
+    runner.holderShipped(a.id, 'c1');
+    runner.holderShipped(other.id, 'c1');
+    assert.deepEqual(
+      store.claims.shippedClaims().map((c) => [c.holder, c.landed]),
+      [[a.id, 'c1']],
+      'only a holder is marked',
+    );
     await runner.close(a.id, 'Shipped and live, so the server dismissed this minion.');
     store.claims.take(p, 'pipeline-lane', b.id, 'Cara');
     // C waits in the queue and on a start_after chain: the claim line waits with its brief, so the chain's start is its one wake.
@@ -164,8 +169,143 @@ test('a holder whose work shipped passes its claim on as shipped when dismissed,
       [a.id, 'live'],
       [b.id, 'dismissed'],
     ]);
-    assert.ok(!store.getSetting(`claim-shipped:${a.id}`), 'the mark goes with the dismissal');
+    assert.deepEqual(store.claims.shippedClaims(), [], 'the mark goes with the claim');
   } finally {
+    await scratch.teardown();
+  }
+});
+
+// #1985: the lane sat idle while a holder stayed open after its change was live.
+test("a claim passes on once its holder's ship is live, the holder still open", async () => {
+  const scratch = tempRoot('claims-live-');
+  try {
+    const store = new Store(join(scratch.dir, 'test.db'));
+    const runner = new Runner(
+      store,
+      () => {},
+      () => ({}),
+      '/bin/false',
+    );
+    const p = store.createProject('Lane', null).id;
+    const mk = (title: string) => store.createTicket({ project_id: p, title, permission_mode: 'default', created_by: 'Cara' });
+    const [a, b, c] = [mk('A'), mk('B'), mk('C')];
+    const holder = () => store.claims.get(p, 'pipeline-lane')?.holder;
+    const live = new Set<string>();
+    const sweep = () => runner.holdersLive(async (_id, commit) => live.has(commit));
+    // The next holders are held, so their line is mail and no turn starts.
+    runner.heldFor = () => 'a chain';
+    store.claims.take(p, 'pipeline-lane', a.id, 'Cara');
+    store.claims.setQueue(p, 'pipeline-lane', [b.id, c.id], 'Cara');
+
+    await sweep();
+    assert.equal(holder(), a.id, 'nothing shipped');
+    runner.holderShipped(a.id, 'a1');
+    await sweep();
+    assert.equal(holder(), a.id, 'shipped, not live');
+    live.add('a1');
+    await sweep();
+    assert.equal(holder(), b.id);
+    assert.notEqual(store.getTicket(a.id)!.status, 'closed', 'its holder stays open');
+    assert.equal(store.claims.queue(p, 'pipeline-lane')[0].how, 'live');
+    assert.match(JSON.stringify(store.eventsOfKinds(a.id, ['note'])), new RegExp(`passed to #${b.number}`));
+    assert.equal(JSON.stringify(store.getSetting(`minion-queue:${b.id}`)).split('You hold the pipeline-lane claim now').length - 1, 1, 'the new holder hears it once');
+    await sweep();
+    assert.equal(holder(), b.id, 'a live seen twice passes it on once');
+
+    // Back in line: the ship it already had live says nothing about its next time with the claim.
+    store.claims.setQueue(p, 'pipeline-lane', [a.id, c.id], 'Cara');
+    store.claims.release(p, 'pipeline-lane');
+    await sweep();
+    assert.equal(holder(), a.id, 'an old ship of its own does not count');
+
+    // A claim that moves while the commit is being looked up stays where it went.
+    runner.holderShipped(a.id, 'a1');
+    await runner.holdersLive(async () => {
+      store.claims.release(p, 'pipeline-lane');
+      return true;
+    });
+    assert.equal(holder(), c.id);
+    // Nobody waits: it is free.
+    runner.holderShipped(c.id, 'a1');
+    await sweep();
+    assert.equal(holder(), undefined);
+  } finally {
+    await scratch.teardown();
+  }
+});
+
+// #1902 ships two pieces back to back and keeps the lane between them.
+test('a kept claim stays through its next live, once', () => {
+  const claims = bare();
+  const at = () => claims.get(1, 'pipeline-lane')!;
+  claims.take(1, 'pipeline-lane', 580, 'Josh', 'two pieces', 1000, true);
+  claims.setQueue(1, 'pipeline-lane', [601], 'Josh');
+  claims.shipped(580, 'one');
+  claims.shipped(580, 'one');
+  assert.equal(at().landed, 'one', 'a ship reported twice (a restart mid-ship) is one ship');
+  assert.equal(claims.holderLive(at(), ['one']), undefined);
+  assert.deepEqual([at().holder, at().keep, at().landed], [580, 0, ''], 'the first piece is live: it keeps the claim, and the keep is used');
+  claims.shipped(580, 'two');
+  assert.equal(claims.holderLive(at(), [])?.to, undefined);
+  assert.equal(claims.holderLive(at(), ['two'])?.to?.holder, 601, 'the second passes it on');
+
+  // Both pieces live at once (one train): nothing is left to keep it for.
+  claims.setQueue(1, 'pipeline-lane', [602], 'Josh');
+  claims.take(1, 'pipeline-lane', 601, 'Josh', '', 2000, true);
+  claims.shipped(601, 'three');
+  claims.shipped(601, 'four');
+  const both = at();
+  assert.equal(claims.holderLive(both, ['three']), undefined);
+  assert.equal(claims.holderLive(at(), ['four'])?.to?.holder, 602);
+  claims.take(1, 'pipeline-lane', 602, 'Josh', '', 3000, true);
+  claims.shipped(602, 'five');
+  claims.shipped(602, 'six');
+  claims.setQueue(1, 'pipeline-lane', [603], 'Josh');
+  assert.equal(claims.holderLive(at(), ['five', 'six'])?.to?.holder, 603);
+  assert.equal(at().keep, 0, "the next holder doesn't inherit it");
+
+  // Kept, then taken back; a retake that doesn't say leaves it as it was.
+  claims.take(1, 'pipeline-lane', 603, 'Josh', '', 4000, true);
+  claims.take(1, 'pipeline-lane', 603, 'Josh', 'a note', 4000);
+  assert.equal(at().keep, 1);
+  claims.take(1, 'pipeline-lane', 603, 'Josh', '', 4000, false);
+  claims.shipped(603, 'seven');
+  claims.holderLive(at(), ['seven']);
+  assert.equal(claims.get(1, 'pipeline-lane'), undefined);
+});
+
+test('a database from before #1985 gains the two columns, its claim as it was', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE projects (id INTEGER PRIMARY KEY); INSERT INTO projects (id) VALUES (1);
+    CREATE TABLE claims (project_id INTEGER NOT NULL, name TEXT NOT NULL, holder INTEGER NOT NULL, taken_by TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', since INTEGER NOT NULL, PRIMARY KEY (project_id, name));
+    INSERT INTO claims VALUES (1, 'pipeline-lane', 580, 'Josh', 'part B', 1000);`);
+  const claims = new Claims(db);
+  assert.deepEqual({ ...claims.get(1, 'pipeline-lane') }, { project_id: 1, name: 'pipeline-lane', holder: 580, taken_by: 'Josh', note: 'part B', since: 1000, landed: '', keep: 0 });
+  new Claims(db);
+  claims.shipped(580, 'one');
+  assert.equal(claims.holderLive(claims.get(1, 'pipeline-lane')!, ['one'])?.from.holder, 580, 'held from before: its next live passes it on');
+});
+
+// The wiring: a server that comes up on a commit a holder shipped passes its claim on.
+test('a server that comes up on the shipped commit passes the claim on, its holder open', async () => {
+  const scratch = tempRoot('claims-boot-');
+  const boot = await bootServer({ root: scratch.dir });
+  try {
+    const repo = join(import.meta.dirname, '..');
+    const { data: p } = await boot.call('/api/projects', { name: 'Boot lane', repo_dir: repo });
+    const mk = async (message: string) => (await boot.call(`/api/projects/${p.id}/tickets`, { message, properties: { type: 'chore' } })).data;
+    const [a, b] = [await mk('one'), await mk('two')];
+    const url = `/api/projects/${p.id}/claims`;
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    assert.equal((await boot.call(url, { name: 'pipeline-lane', queue: [a.number, b.number] })).status, 201);
+    const db = new DatabaseSync(join(scratch.dir, 'data', 'coordinator.db'), { timeout: 30_000 });
+    db.prepare('UPDATE claims SET landed = ?').run(head);
+    db.close();
+    boot.proc.kill('SIGHUP');
+    await until('the claim to pass on', async () => (await boot.call(url)).data.claims[0]?.holder_number === b.number);
+    assert.notEqual((await boot.call(`/api/tickets/${a.id}`)).data.ticket.status, 'closed');
+  } finally {
+    await boot.stop();
     await scratch.teardown();
   }
 });
@@ -326,6 +466,8 @@ test("the Taskmaster's claim, release and list_claims tools, and list_tickets sh
   assert.equal(await tool('list_claims'), 'No claims: every duty is free.');
   assert.match(await tool('claim', { name: 'pipeline-lane', minion: m.number, note: 'land retry' }), new RegExp(`^Claimed: pipeline-lane: #${m.number} .*since .* ${RegExp.escape(zoneLabel(srv.zone))} \\(land retry\\)$`)); // the server's zone (#1536)
   assert.match(await tool('claim', { name: 'pipeline-lane' }), /^Error: pipeline-lane is held by #/);
+  assert.match(await tool('claim', { name: 'pipeline-lane', minion: m.number, keep: true }), /, kept through its next live$/);
+  assert.match(await tool('claim', { name: 'pipeline-lane', queue: [], keep: true }), /^Error: keep goes with minion/);
   assert.match(await tool('list_tickets'), new RegExp(`\\nClaims:\\npipeline-lane: #${m.number} `));
   assert.match(await tool('release', { name: 'pipeline-lane' }), /^Released: pipeline-lane/);
   assert.match(await tool('claim', { name: 'release-train' }), /^Claimed: release-train: the Taskmaster, taken by /, 'a Taskmaster holding it is named, not #null');

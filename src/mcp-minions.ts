@@ -230,13 +230,14 @@ export const FRESH_SESSION = {
 export const CLAIM = {
   name: 'claim',
   description:
-    'Take a single-holder duty for a minion, e.g. the pipeline lane (`pipeline-lane`): a row every Taskmaster in the scheme sees, not a note in memory. Refused while another holds it (the answer names the holder). `queue` sets who waits for it, in order, held by anyone: when its holder is dismissed or it is released, it passes to the first in line, who gets one chat line saying so (a minion still waiting on its start_after leader starts when its chain does), and with nobody in line it is free. A queue alone on a free claim gives it to the first in line. Without `minion` or `queue` you hold it yourself.',
+    'Take a single-holder duty for a minion, e.g. the pipeline lane (`pipeline-lane`): a row every Taskmaster in the scheme sees, not a note in memory. Refused while another holds it (the answer names the holder). `queue` sets who waits for it, in order, held by anyone: when what its holder shipped is live, or the holder is dismissed, or it is released, it passes to the first in line, who gets one chat line saying so (a minion still waiting on its start_after leader starts when its chain does), and with nobody in line it is free. A queue alone on a free claim gives it to the first in line. Without `minion` or `queue` you hold it yourself.',
   inputSchema: {
     type: 'object',
     properties: {
       name: { type: 'string', description: 'Lowercase words joined by hyphens, e.g. pipeline-lane' },
       minion: { type: 'integer', description: 'The minion that holds it (#N as a number); leave out to hold it yourself' },
       note: { type: 'string', maxLength: 300, description: 'Optional: what it is held for' },
+      keep: { type: 'boolean', description: 'true with minion (its holder): it stays with that minion through its next live, once, for a second piece that ships right after; false takes that back' },
       queue: { type: 'array', items: { type: 'integer' }, maxItems: 50, description: 'Optional: the whole waiting line, first in line first (#N as numbers); it replaces the line list_claims shows, [] empties it' },
     },
     required: ['name'],
@@ -520,7 +521,7 @@ function claimLine(c: ClaimView) {
   const waiting = (c.queue ?? []).filter((q) => q.state !== 'done');
   const left = c.estimate ? `, about ${Math.round((c.estimate.left_ms / 3_600_000) * 10) / 10} h left (an estimate from the last ${c.estimate.of} holders)` : '';
   const line = waiting.length ? `; queue: ${waiting.map(chip).join(', ')}; ${c.done} of ${c.total} done${left}` : '';
-  return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}${line}`;
+  return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}${c.keep ? ', kept through its next live' : ''}${line}`;
 }
 
 /** Answers this family's tools; NOT_HERE for any other. */
@@ -536,7 +537,7 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
       return [...head, tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.', ...(claims.length ? ['Claims:', ...claims.map(claimLine)] : [])].join('\n');
     }
     case 'claim': {
-      const r = await call<{ claim: ClaimView }>('POST', `/api/projects/${C().PROJECT}/claims`, { name: args.name, minion: args.minion ?? null, note: args.note ?? null, queue: args.queue ?? null });
+      const r = await call<{ claim: ClaimView }>('POST', `/api/projects/${C().PROJECT}/claims`, { name: args.name, minion: args.minion ?? null, note: args.note ?? null, keep: args.keep ?? null, queue: args.queue ?? null });
       return `${args.queue && args.minion == null ? 'Queue set' : 'Claimed'}: ${claimLine(r.claim)}`;
     }
     case 'release': {

@@ -877,6 +877,11 @@ export class LiveWaiters {
     return null;
   }
 
+  /** Whether `commit`, shipped by `ticket`, is live. */
+  isLive(ticket: number, commit: string): Promise<boolean> {
+    return this.live({ ticket, commit, reason: '', since: null });
+  }
+
   /**
    * Is this waiter's deploy live (in a scheme this server doesn't run: its commit merged)? A commit
    * in a merged PR counts by the PR's merge commit, which a squash or rebase merge needs.

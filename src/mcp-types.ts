@@ -68,6 +68,7 @@ export interface ClaimView {
   taken_by: string;
   since_text: string;
   note?: string | null;
+  keep?: number;
   queue?: { number: number; state: string; after?: number }[] | null;
   done: number;
   total: number;

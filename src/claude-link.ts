@@ -4,9 +4,9 @@
 // Their turns run in it (src/runner.ts, placeFor) at the same paths as on the host. The server
 // login's owner keeps running on the host. The credential row (kind claude_runner) holds only
 // Citadel's bookkeeping: container, volume path, email and plan.
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
@@ -40,26 +40,16 @@ export const CONTAINER_MEMORY = { high: '12G', max: '14G', swap: '4G' };
  */
 export const TASKMASTER_MEMORY = { high: '3G', max: '4G', swap: '2G' };
 
-/**
- * The live checkout's read-only mount, with each file git ignores there (`.env`, `env`, a stray `.db`, the test box's
- * password file) covered by /dev/null, since they can hold secrets (#621 floor). Null, so nothing is mounted, when git
- * can't list them or there are too many to cover.
- */
-export function checkoutMounts(dir: string): Mount[] | null {
-  let ignored: string[];
-  try {
-    ignored = execFileSync('git', IGNORED_ARGS(dir), { encoding: 'utf8', timeout: 10_000 }).split('\0').filter(Boolean);
-  } catch {
-    return null;
-  }
-  return maskedMounts(dir, ignored);
-}
 const IGNORED_ARGS = (dir: string) => ['-C', dir, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard'];
 function maskedMounts(dir: string, ignored: string[]): Mount[] | null {
   if (ignored.length > MAX_MASKED) return null;
   return [{ src: dir, dst: dir, ro: true }, ...ignored.map((f) => ({ src: '/dev/null', dst: join(dir, f), ro: true }))];
 }
-/** checkoutMounts without blocking the event loop: the same list, read fresh on every call (nothing is cached, so a new .env is covered at once). */
+/**
+ * The live checkout's read-only mount, with each file git ignores there (`.env`, `env`, a stray `.db`, the test box's
+ * password file) covered by /dev/null, since they can hold secrets (#621 floor). Null, so nothing is mounted, when git
+ * can't list them or there are too many to cover. Read fresh on every call (nothing is cached, so a new .env is covered at once).
+ */
 export async function checkoutMountsAsync(dir: string): Promise<Mount[] | null> {
   const r = await execResult('git', IGNORED_ARGS(dir), { timeout: 10_000 });
   if (r.code !== 0 || r.fail) return null;
@@ -98,22 +88,12 @@ export function containerPath(hostPath = ''): string {
   return [...IMAGE_PATH, ...hostPath.split(delimiter).filter((d) => d && !IMAGE_PATH.includes(d))].join(delimiter);
 }
 
-/** imageHash without blocking the event loop: the same hash. */
+/** A short hash of every file in an image's build folder, by path and contents, so a change to any of them rebuilds it. */
 export async function imageHashAsync(dir: string): Promise<string> {
   const h = createHash('sha256');
   for (const f of ((await readdir(dir, { recursive: true })) as string[]).sort()) {
     const p = join(dir, f);
     if ((await stat(p)).isFile()) h.update(`${f}\0`).update(await readFile(p));
-  }
-  return h.digest('hex').slice(0, 12);
-}
-
-/** A short hash of every file in an image's build folder, by path and contents, so a change to any of them rebuilds it. */
-export function imageHash(dir: string): string {
-  const h = createHash('sha256');
-  for (const f of (readdirSync(dir, { recursive: true }) as string[]).sort()) {
-    const p = join(dir, f);
-    if (statSync(p).isFile()) h.update(`${f}\0`).update(readFileSync(p));
   }
   return h.digest('hex').slice(0, 12);
 }
@@ -479,11 +459,6 @@ export class ClaudeLink {
     return (this.accounts(uid)?.accounts ?? []).flatMap((a) => this.configDir(uid, a.n) ?? []);
   }
 
-  /** The image tag for the current Containerfile and the files it copies in (codex/). */
-  private image(): string {
-    return `${IMAGE_REPO}:${imageHash(CONTAINERFILE_DIR)}`;
-  }
-
   /**
    * The folder a person's container turns keep their files in (prompt, settings, spec.json with the turn's
    * tokens): their own, inside run/turns, which holds the host's turns and so is never mounted whole (#241).
@@ -492,8 +467,11 @@ export class ClaudeLink {
     return join(this.dataDir, 'run', 'turns', `person-${uid}`);
   }
 
-  /** What a person's container is made of. An async caller passes `pre` (read with checkoutMountsAsync / imageHashAsync): without it the spec spawns git and walks the image folder on the main thread.  Every mount sits at its host path, so worktrees, session folders and prompts match. */
-  spec(uid: number, pre?: { checkout?: Mount[] | null; image?: string }, taskmaster = false): ContainerSpec {
+  /** What a person's container is made of. Every mount sits at its host path, so worktrees, session folders and prompts match. */
+  async spec(uid: number, taskmaster = false): Promise<ContainerSpec> {
+    // The two slow reads (git's ignored list, the image folder walk) run off the main thread, fresh every time. The image
+    // tag is for the current Containerfile and the files it copies in (codex/).
+    const [checkout, image] = await Promise.all([LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/') ? Promise.resolve(null) : checkoutMountsAsync(LIVE_CHECKOUT), imageHashAsync(CONTAINERFILE_DIR).then((h) => `${IMAGE_REPO}:${h}`)]);
     const mounts: Mount[] = [
       { src: this.name(uid), dst: this.home, volume: true },
       { src: join(this.dataDir, 'projects'), dst: join(this.dataDir, 'projects') },
@@ -507,7 +485,7 @@ export class ClaudeLink {
     for (const d of TOOL_DIRS) if (existsSync(join(this.home, d))) mounts.push({ src: join(this.home, d), dst: join(this.home, d), ro: true });
     // The code this server runs, read-only, so a member's turn checks the live checkout as a host turn does (#621). A dev
     // copy runs from a worktree, already mounted writable under projects/.
-    if (!LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/')) mounts.push(...((pre && 'checkout' in pre ? pre.checkout : checkoutMounts(LIVE_CHECKOUT)) ?? []));
+    mounts.push(...(checkout ?? []));
     // The contraptions' folders, read-only, for a Citadel member or admin: their Citadel Taskmaster turns read every scheme (#656).
     const user = this.store.getUser(uid);
     // Their parent folders: a folder is a link into its two slots beside it (#801), which a mount of the link would pin at
@@ -533,7 +511,7 @@ export class ClaudeLink {
     }
     const home = this.meta(uid)?.home;
     // Only a sign-in's start chowns a volume (link()), and not while Taskmaster turns write in it: a file that goes mid-walk fails it.
-    const made = { image: pre?.image ?? this.image(), mounts, env: { HOME: this.home }, chown: !taskmaster && (!home || (this.logins.has(uid) && !this.busy(this.taskmasterName(uid)))) };
+    const made = { image, mounts, env: { HOME: this.home }, chown: !taskmaster && (!home || (this.logins.has(uid) && !this.busy(this.taskmasterName(uid)))) };
     if (!taskmaster) return { ...made, name: this.name(uid), memory: CONTAINER_MEMORY };
     // Claude Code lists its running sessions by pid, and the two containers count pids apart: one list each.
     if (home) for (let n = 1; n <= MAX_ACCOUNTS; n++) mounts.push({ src: join(home, accountDir(n), 'sessions-taskmaster'), dst: join(this.home, accountDir(n), 'sessions') });
@@ -553,9 +531,7 @@ export class ClaudeLink {
   }
 
   private async start(uid: number, forTurn: boolean, taskmaster: boolean): Promise<void> {
-    // The two slow reads of a spec (git's ignored list, the image folder walk) run off the main thread, fresh every start.
-    const [checkout, image] = await Promise.all([LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/') ? Promise.resolve(null) : checkoutMountsAsync(LIVE_CHECKOUT), imageHashAsync(CONTAINERFILE_DIR).then((h) => `${IMAGE_REPO}:${h}`)]);
-    const spec = this.spec(uid, { checkout, image }, taskmaster);
+    const spec = await this.spec(uid, taskmaster);
     const volume = this.name(uid);
     await this.containers.ensureImage(spec.image, CONTAINERFILE_DIR);
     await this.containers.createVolume(volume);

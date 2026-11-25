@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { appOwners, hostLoad, jobOfWho, parseHistory, readPressure, schemeOfWho } from '../src/host-load.ts';
+import { readHeavyA } from '../src/waits.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'host-load-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -66,14 +67,14 @@ test('history: a week of waits per scheme, median and longest, bad lines and old
   ]);
 });
 
-test('pressure and the whole read from a folder', () => {
+test('pressure and the whole read from a folder', async () => {
   const psi = join(root, 'cpu');
   writeFileSync(psi, 'some avg10=1.00 avg60=63.40 avg300=2.00 total=1\nfull avg10=0 avg60=0 avg300=0 total=0\n');
   assert.equal(readPressure(psi), 63);
   assert.equal(readPressure(join(root, 'none')), null);
   writeFileSync(join(root, 'slots'), '3 # how many\n');
   writeFileSync(join(root, 'history'), `${line(new Date().toISOString(), 'Citadel #5 (cara)', 40)}\n`);
-  const l = hostLoad(root, Date.now(), psi);
+  const l = hostLoad(root, await readHeavyA(root), Date.now(), psi);
   assert.equal(l.slots, 3);
   assert.equal(l.pressure, 63);
   assert.equal(l.week[0].longestS, 40);
@@ -81,7 +82,7 @@ test('pressure and the whole read from a folder', () => {
   writeFileSync(join(root, 'wait-1-2'), `Delve #4\na nested Claude session\n${Math.floor(Date.now() / 1000)}\nease\n`);
   writeFileSync(join(root, 'wait-3-4'), `Peek #2\nnpm test\n${Math.floor(Date.now() / 1000)}\nmemory\n`);
   assert.deepEqual(
-    hostLoad(root).waiters.map((w) => w.who),
+    hostLoad(root, await readHeavyA(root)).waiters.map((w) => w.who),
     ['Peek #2'],
     "claude-pace's waits are no heavy job's line (#1748)",
   );
@@ -89,11 +90,11 @@ test('pressure and the whole read from a folder', () => {
   rmSync(join(root, 'wait-3-4'));
 });
 
-test('slot count follows citadel-heavy: no number is 2, a 0 is 1', () => {
+test('slot count follows citadel-heavy: no number is 2, a 0 is 1', async () => {
   writeFileSync(join(root, 'slots'), '# none\n');
-  assert.equal(hostLoad(root).slots, 2);
+  assert.equal(hostLoad(root, await readHeavyA(root)).slots, 2);
   writeFileSync(join(root, 'slots'), '0\n');
-  assert.equal(hostLoad(root).slots, 1);
+  assert.equal(hostLoad(root, await readHeavyA(root)).slots, 1);
 });
 
 test('an app counts under its home scheme only for a viewer who can see that scheme', () => {

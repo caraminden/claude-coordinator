@@ -13,7 +13,7 @@
  "src/build-output.ts": 1,
  "src/catalogue.ts": 2,
  "src/checkpoint.ts": 5,
- "src/claude-link.ts": 22,
+ "src/claude-link.ts": 18,
  "src/codex-link.ts": 1,
  "src/codex-lock.ts": 13,
  "src/codex-review.ts": 29,

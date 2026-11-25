@@ -20,7 +20,7 @@ import type { LinePlaces } from './line-place.ts';
 import type { TurnLine } from './turn-line.ts';
 import type { RunsOn } from './runs-on.ts';
 import type { Urgent } from './urgent.ts';
-import { contextKey, windowKey, shippedKey, closeCancelledKey, turnKey, talkedKey, commandsKey } from './turn-keys.ts';
+import { contextKey, windowKey, closeCancelledKey, turnKey, talkedKey, commandsKey } from './turn-keys.ts';
 import type { Broadcast, TurnState } from './runner.ts';
 
 /** What closing a minion needs from the Runner. */
@@ -67,19 +67,37 @@ export class Closing {
   }
 
   /**
-   * A claim holder's work shipped (#1334, the land's `landed` hook): when it is dismissed, its claims pass on as shipped,
-   * which the time estimate counts, not as an unshipped dismissal. A setting, so a restart before it goes live keeps it.
+   * A claim holder's work shipped (#1334, the land's `landed` hook) as `commit`: its claims pass on once that is live
+   * (holdersLive), or as shipped when it is dismissed, which the time estimate counts, not as an unshipped dismissal.
    */
-  holderShipped(ticketId: number) {
-    const t = this.d.store.getTicket(ticketId);
-    if (t && this.d.store.claims.list(t.project_id).some((c) => c.holder === ticketId)) this.d.store.setSetting(shippedKey(ticketId), true);
+  holderShipped(ticketId: number, commit: string) {
+    this.d.store.claims.shipped(ticketId, commit);
+  }
+
+  /**
+   * Pass on each claim whose holder's ship is live (#1985), even when the holder stays open for checks: the dismissal
+   * alone left the pipeline lane idle for 41 min in one morning. `live`: whether a holder's commit is live.
+   */
+  async holdersLive(live: (ticketId: number, commit: string) => Promise<boolean>) {
+    for (const c of this.d.store.claims.shippedClaims()) {
+      const went: string[] = [];
+      for (const commit of c.landed.split(' ')) if (await live(c.holder, commit)) went.push(commit);
+      const holder = this.d.store.getTicket(c.holder);
+      const passed = this.d.store.claims.holderLive(c, went);
+      if (!passed || !holder) {
+        if (went.length) this.d.broadcast({ type: 'claims', projectId: c.project_id });
+        continue;
+      }
+      const next = passed.to && this.d.store.getTicket(passed.to.holder);
+      this.d.emit(holder.id, 'note', { text: `Its change is live, so the ${c.name} claim ${next ? `passed to #${next.number}` : 'is free'}.` });
+      this.claimPassed(c.project_id, [passed], `#${holder.number}'s change, its holder's, is live`, `#${holder.number} ${holder.title}`);
+    }
   }
 
   /** A dismissed minion's claims (#921) pass to the next in each one's queue, or free themselves (#1334: claimPassed). */
   private freeClaims(ticketId: number) {
     const minion = this.d.store.getTicket(ticketId);
-    const shipped = !!this.d.store.getSetting(shippedKey(ticketId));
-    if (shipped) this.d.store.deleteSetting(shippedKey(ticketId));
+    const shipped = this.d.store.claims.shippedClaims().some((c) => c.holder === ticketId);
     const passed = this.d.store.claims.releaseHeldBy(ticketId, shipped ? 'live' : 'dismissed');
     if (minion) this.claimPassed(minion.project_id, passed, `#${minion.number}, its holder, ${shipped ? 'shipped and was dismissed' : 'was dismissed'}`, `#${minion.number} ${minion.title}`);
   }
@@ -97,7 +115,7 @@ export class Closing {
     for (const { from, to } of passed) {
       const next = to && this.d.store.getTicket(to.holder);
       if (next && next.status !== 'closed') {
-        const line = `You hold the ${to!.name} claim now: ${why}. It passes to the next in its queue when you are dismissed.`;
+        const line = `You hold the ${to!.name} claim now: ${why}. It passes to the next in its queue when your change is live, or you are dismissed. More than one piece to ship? Before the first ships, ask your Taskmaster (message_coordinator, need: ask) to keep it for you (claim's keep).`;
         if (this.d.heldFor(next.id)) this.d.send(next.id, APP_NAME, line, [], { hold: true });
         else {
           if (next.state === 'parked') this.d.store.updateTicket(next.id, { state: null });

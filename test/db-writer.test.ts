@@ -521,6 +521,8 @@ const STAYS_ON_THREAD: Record<string, string> = {
       'claims.releaseHeldBy',
       'claims.setQueue',
       'claims.passOn',
+      'claims.shipped',
+      'claims.holderLive',
       'lessons.add',
       'lessons.take',
       'ideas.upsert',

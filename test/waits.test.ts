@@ -5,7 +5,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { Ship } from '../src/branch.ts';
 import { earlyCi } from '../src/land-news.ts';
-import { flockedInodes, landPhase, median, moveIn, procAlive, ridingOf, slotHeld, trainLabel, Waits } from '../src/waits.ts';
+import { flockedInodes, heldIn, heldSlotsA, landPhase, median, moveIn, procAlive, ridingOf, trainLabel, Waits } from '../src/waits.ts';
 import { tempRoot } from './helpers.ts';
 import type { CiRuns } from '../src/ci-wait.ts';
 import { fake } from './typed.ts';
@@ -183,18 +183,18 @@ test('the lock list counts holders, not waiters or other lock kinds, and none to
   const list = ['1: FLOCK  ADVISORY  WRITE 767318 00:23:231177942 0 EOF', '1: -> FLOCK  ADVISORY  WRITE 767400 00:23:555 0 EOF', '2: POSIX  ADVISORY  WRITE 1234 00:23:777 0 EOF', '3: OFDLCK ADVISORY  READ  -1 00:05:888 0 EOF', '4: FLOCK  ADVISORY  READ  99 fd:01:42 0 EOF'].join('\n');
   assert.deepEqual([...flockedInodes(list)!].sort(), [231177942, 42].sort());
   assert.equal(flockedInodes(null), null);
-  assert.equal(slotHeld(join(root, 'no-such-slot'), null), true);
-  assert.equal(slotHeld(join(root, 'no-such-slot'), new Set([1])), false);
+  assert.equal(heldIn(null, undefined), true);
+  assert.equal(heldIn(new Set([1]), undefined), false);
 });
 
 test('a heavy slot reads as held only while someone holds its lock', async () => {
   const slot = join(root, 'slot-0');
   writeFileSync(slot, '');
-  assert.equal(slotHeld(slot), false);
+  assert.equal(await heldSlotsA()(slot), false);
   const holder = tmp.spawn('flock', [slot, 'sh', '-c', 'echo held; sleep 30'], { stdio: ['ignore', 'pipe', 'ignore'], detached: true });
   try {
     await new Promise((r) => holder.stdout!.once('data', r));
-    assert.equal(slotHeld(slot), true);
+    assert.equal(await heldSlotsA()(slot), true);
   } finally {
     process.kill(-holder.pid!, 'SIGKILL'); // its sleep too
     await new Promise((r) => holder.once('exit', r));

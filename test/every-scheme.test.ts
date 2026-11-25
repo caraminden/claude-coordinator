@@ -146,13 +146,13 @@ test('its turn message names every scheme and contraption folder on a member ask
   assert.equal(turnContext(peek, tmPeek, null, null, join(data, 'projects/3/tickets'), null, [], false, '', null, [], null, false, view), '');
 });
 
-test("a member's container mounts the contraption folders read-only; others' don't", () => {
+test("a member's container mounts the contraption folders read-only; others' don't", async () => {
   const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), data, process.execPath, new Containers(async () => ({ code: 0, stdout: '', stderr: '' })), 'citadel-claude-es-');
   // The folder's parent: the folder links into its slots beside it, which must follow each deploy (#801).
   const apps = dirname(appDir);
-  const mount = (uid: number) => link.spec(uid).mounts.find((m) => m.src === apps);
-  assert.deepEqual(mount(josh.id), { src: apps, dst: apps, ro: true });
-  assert.equal(mount(alex.id), undefined);
+  const mount = async (uid: number) => (await link.spec(uid)).mounts.find((m) => m.src === apps);
+  assert.deepEqual(await mount(josh.id), { src: apps, dst: apps, ro: true });
+  assert.equal(await mount(alex.id), undefined);
 });
 
 test("list_tickets and read_ticket read another scheme for the Citadel Taskmaster on a member's ask, and nothing else crosses", { timeout: 60_000 }, async () => {

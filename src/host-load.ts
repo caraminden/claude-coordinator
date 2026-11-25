@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { hostTextSync, PSI_FILES } from './host-signals.ts';
 import { join } from 'node:path';
-import { median, readHeavy, type HeavyJob } from './waits.ts';
+import { median, type HeavyJob, type HeavyJobs } from './waits.ts';
 import { MAX_CPU_PRESSURE } from './pressure.ts';
 import { longView, readLongJobs } from './long-jobs.ts';
 
@@ -119,7 +119,7 @@ export interface HostLoad {
   now: number;
 }
 
-export function hostLoad(dir: string, now = Date.now(), pressureFile?: string, owners?: AppOwners, heavy: ReturnType<typeof readHeavy> = readHeavy(dir, now), longs = readLongJobs(dir)): HostLoad {
+export function hostLoad(dir: string, heavy: HeavyJobs, now = Date.now(), pressureFile?: string, owners?: AppOwners, longs = readLongJobs(dir)): HostLoad {
   const { holders, waiters } = heavy;
   const tag = (j: HeavyJob) => ({ ...j, scheme: schemeOfWho(j.who, owners) });
   let history = '';

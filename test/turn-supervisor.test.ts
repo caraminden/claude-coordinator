@@ -7,7 +7,7 @@ import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { fallbacks } from '../src/fallbacks.ts';
 import { claimSpec } from '../src/turn-run.mjs';
-import { readSupervisor } from '../src/supervisor-client.ts';
+import { handTurn, readSupervisor } from '../src/supervisor-client.ts';
 import { lines, tempRoot, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
 testPins(); // the turn files the runner and its supervisor run from
@@ -30,11 +30,11 @@ writeFileSync(
   join(bin, 'systemd-run'),
   `#!/bin/sh
 echo "$*" >> "${bin}/calls"
-case "$*" in *turn-wrapper.mjs*) date +%s%3N >> "${bin}/unit-at";; esac
-scope= expand=1
+scope= expand=1 unit=
 while [ $# -gt 0 ]; do case $1 in
   --) shift; break;;
   --scope) scope=1;;
+  --unit=*) unit=\${1#--unit=};;
   --expand-environment=no) expand=;;
   -p|-E) shift;;
   -*) ;;
@@ -45,7 +45,15 @@ if [ -n "$scope" ]; then
   [ -f "${bin}/hang-scope" ] && : > "${bin}/scope-hanging"
   while [ -f "${bin}/hang-scope" ]; do sleep 0.05; [ -f "${bin}/hang-scope" ] || exit 1; done
   [ -f "${bin}/no-scope" ] || [ -n "$expand" ] && { echo "no scopes here" >&2; exit 1; }; exec "$@"; fi
+# One unit of a name at a time, as systemd has it: the runner asks again every 100 ms here while its supervisor is
+# starting, and without this each ask started another, which wrote its supervisor.json over a later test's stand-in (#1872).
+until mkdir "${bin}/starting" 2>/dev/null; do sleep 0.02; done
+was=$(cat "${bin}/$unit.pid" 2>/dev/null)
+if [ -n "$was" ] && kill -0 "$was" 2>/dev/null; then
+  rmdir "${bin}/starting"; echo "Unit $unit.service was already loaded" >&2; exit 1; fi
 setsid "$@" </dev/null >/dev/null 2>&1 &
+echo $! > "${bin}/$unit.pid"
+rmdir "${bin}/starting"
 `,
 );
 writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "systemctl $*" >> "${bin}/calls"\n`);
@@ -200,9 +208,6 @@ test('a supervisor killed mid-turn: the turn finishes and its reply is recorded,
   rmSync(join(t.dir, 'release'), { force: true });
 });
 
-/** When the runner last ran systemd-run for a wrapper unit, in ms: the fallback tests time the runner's choice, not node's start. */
-const unitAt = () => Number(readFileSync(join(bin, 'unit-at'), 'utf8').trim().split('\n').at(-1));
-
 /** Point the runner's supervisor.json at a stand-in that seems to run, at `port`, for the length of `fn`. */
 async function standIn(r: Runner, port: number, fn: () => Promise<void>) {
   const s = spec(r);
@@ -223,10 +228,10 @@ test("a turn the supervisor can't take starts in its wrapper at once", async () 
   // Nothing answers on the port: it resets every connection.
   const port = await tmp.down();
   await standIn(r, port, async () => {
+    // "At once" is a refusal that doesn't wait out the hand-off's timeout: with one that never ends, it still answers.
+    assert.equal(await handTurn(spec(r), root, [], 2 ** 31 - 1), false);
     const t = newTicket();
-    const t0 = Date.now();
     const dir = await started(r, t);
-    assert.ok(unitAt() >= t0 && unitAt() - t0 < 1_000, `its wrapper unit started ${unitAt() - t0} ms after the message`);
     assert.equal(pidJson(dir).supervisor, undefined, 'its wrapper runs it');
     await finished(r, t);
   });
@@ -234,14 +239,17 @@ test("a turn the supervisor can't take starts in its wrapper at once", async () 
 
 test("a supervisor that doesn't answer in time: the runner starts the wrapper, and the spec's claim lets only one run the turn", async () => {
   const r = server();
-  const hung = createServer(() => {}); // takes the request and never answers
+  // Takes the request and never answers. "In time" is told by order, not by a clock a loaded box stretches (#1872): the
+  // hand-off's 500 ms wait and this 1.5 s timer, set once its request is here, run on one event loop, which fires
+  // timers in the order they fall due however late it gets to them.
+  let late = 0;
+  const hung = createServer(() => setTimeout(() => late++, 1_500));
   const port = await tmp.serve(hung);
   await standIn(r, port, async () => {
+    assert.equal(await handTurn(spec(r), root, []), false);
+    assert.equal(late, 0, 'the hand-off gave up before a 1.5 s timer set when its request arrived: the wait for an answer is short');
     const t = newTicket();
-    const t0 = Date.now();
     const dir = await started(r, t);
-    // The hand-off waits 500 ms for an answer.
-    assert.ok(unitAt() >= t0 && unitAt() - t0 < 1_500, `its wrapper unit started ${unitAt() - t0} ms after the message: the wait for an answer is short`);
     assert.equal(pidJson(dir).supervisor, undefined, 'its wrapper runs it');
     await finished(r, t);
   });
@@ -326,7 +334,8 @@ test('"Is this still going?" on a supervisor turn names the command claude runs,
 
 test('the runner starts its supervisor when it starts, before any turn', async () => {
   const r = server();
-  (r as any).turnsDir = join(root, 'warm');
+  // A turns folder of its own has a unit name of its own: the supervisor above still runs.
+  Object.assign(r as any, { turnsDir: join(root, 'warm'), unitTag: 'warm' });
   mkdirSync(join(root, 'warm'));
   assert.equal(readSupervisor(spec(r).dir), null);
   r.recover();

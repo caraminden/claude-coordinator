@@ -43,7 +43,7 @@ async function minion(opts: { file?: string; handOff?: object | null; kind?: str
   mkdirSync(join(cwd, 'tools'), { recursive: true });
   writeFileSync(
     join(cwd, 'tools', 'land.sh'),
-    `if [ "$1" = --check ]; then [ ! -e moves ] || git commit -q --allow-empty -m meanwhile; [ -e conflict ] || exit 0; echo "land: it would conflict; conflicted files: a.txt" >&2; exit 3; fi\n[ -e fail ] && { echo "land: the tests failed on x"; exit 1; }\nprintf '%b' ${JSON.stringify(LIVE)}\n`,
+    `if [ "$1" = --check ]; then [ ! -e moves ] || git -c user.name=t -c user.email=t@t commit -q --allow-empty -m meanwhile; [ -e conflict ] || exit 0; echo "land: it would conflict; conflicted files: a.txt" >&2; exit 3; fi\n[ -e fail ] && { echo "land: the tests failed on x"; exit 1; }\nprintf '%b' ${JSON.stringify(LIVE)}\n`,
   );
   writeFileSync(join(cwd, 'tools', 'pipeline-files.txt'), '# the pipeline\ntools/land.sh\nsrc/pipe/\n');
   git(cwd, 'init', '-q', '-b', 'main');

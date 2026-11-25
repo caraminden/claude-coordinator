@@ -1,6 +1,6 @@
 {
   "name": "@citadel/android-shell",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Citadel's shared Android shell: one Capacitor plugin every contraption's Android app pins. Citadel links open outside the app, the offline page for a dead connection, the native update prompt, and push through Citadel. Docs: the citadel:android-app skill, \"Shared shell\".",
   "license": "UNLICENSED",
   "private": true,

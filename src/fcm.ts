@@ -47,6 +47,16 @@ const optional = (v: unknown, field: string, max: number, min = 0): string | und
 };
 const reservedKey = (k: string) => k.startsWith('citadel_') || ['from', 'notification', 'message_type'].includes(k) || k.startsWith('google.') || k.startsWith('gcm.');
 
+/**
+ * Whether a tap may open `open`: a page under the app's own path, no other app's, and nothing a decoder could turn into
+ * one. Only the path is checked for dots, encodings and `//`: a query or fragment may carry any address. The shell's
+ * PushMessage.open is the same rule; push-open-cases.txt (kit/android-shell, the Java tests' resources) tests both.
+ */
+function openOk(app: string, open: string): boolean {
+  if (!open.startsWith(`/apps/${app}/`) || /[\\\u0000-\u001f\u007f]/.test(open)) return false;
+  return !/\/\/|%2e|%2f|%5c|\/\.\.?(\/|$)/i.test(open.split(/[?#]/, 1)[0]);
+}
+
 /** Check a send body from contraption `app`; a broken rule is a 400 naming it. */
 export function parsePush(app: string, raw: unknown): { to: string[]; send: PushSend } {
   const b = (raw ?? {}) as Record<string, unknown>;
@@ -61,10 +71,7 @@ export function parsePush(app: string, raw: unknown): { to: string[]; send: Push
     tag: optional(b.tag, 'tag', 100),
   };
   if (send.title === undefined && (send.body !== undefined || send.open !== undefined || send.tag !== undefined)) throw new HttpError(400, 'body, open and tag go with a title');
-  // A tap opens it in the app's own pages: no other app's, and nothing a decoder could turn into one.
-  if (send.open !== undefined && (!send.open.startsWith(`/apps/${app}/`) || /[\\\u0000-\u001f\u007f]|%2e|%2f|%5c|\/\.\.?(\/|$|\?|#)/i.test(send.open))) {
-    throw new HttpError(400, `open must be a path under /apps/${app}/`);
-  }
+  if (send.open !== undefined && !openOk(app, send.open)) throw new HttpError(400, `open must be a path under /apps/${app}/`);
   if (b.data !== undefined) {
     if (!b.data || typeof b.data !== 'object' || Array.isArray(b.data)) throw new HttpError(400, 'data must be an object of string values');
     for (const [k, v] of Object.entries(b.data)) {

@@ -46,6 +46,11 @@ final class WatchdogListener {
         watchdog.started();
     }
 
+    /** The load being watched ended with no page (a download, a link opened outside): the one on screen stays. */
+    void leftAsIs() {
+        watchdog.leftAsIs();
+    }
+
     void onPageStarted(WebView view) {
         // Chromium's WebView calls this once the new page has answered (at commit), not when it is asked for,
         // so a load that never answers is watched from navigationStarted or watchFirstLoad instead. A page that

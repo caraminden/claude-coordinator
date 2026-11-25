@@ -429,12 +429,14 @@ test("keys that don't open: a page gets Citadel's styled panel with a Settings l
   }
   const res = await get('/apps/locked/', { Cookie: srv.cookie, Accept: 'text/html' });
   assert.equal(res.status, 503);
+  assert.equal(res.headers.get('x-citadel-page'), '1', 'marked, so the Android shell shows it rather than its offline page');
   const body = await res.text();
   assert.match(body, /Locked can&#39;t open/);
   assert.match(body, /id="back"[^>]*>Back to /);
   assert.ok(body.includes(`href="/c/#/p/${scheme}/contraptions"`));
   const api = await get('/apps/locked/x', asCara());
   assert.equal(api.status, 503);
+  assert.equal(api.headers.get('x-citadel-page'), null);
   assert.match(await api.text(), /keys don't open/);
 });
 

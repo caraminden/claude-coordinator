@@ -99,4 +99,23 @@ public class LoadWatchdogTest {
         assertTrue(LoadWatchdog.leavesPage("https://voice.citadel.zip/apps/voice/", null));
         assertTrue(LoadWatchdog.leavesPage("https://voice.citadel.zip/sign-in", "https://voice.citadel.zip/apps/voice/#today"));
     }
+
+    @Test
+    public void aDownloadLeavesTheWorkingPage() {
+        dog.started();
+        dog.settled();
+        dog.started(); // the link that turned out to be a download
+        dog.leftAsIs();
+        timer.elapse();
+        assertEquals(0, offline);
+        assertFalse(dog.armed());
+    }
+
+    @Test
+    public void aFirstLoadThatShowsNothingStillEndsOffline() {
+        dog.started();
+        dog.leftAsIs();
+        timer.elapse();
+        assertEquals(1, offline);
+    }
 }

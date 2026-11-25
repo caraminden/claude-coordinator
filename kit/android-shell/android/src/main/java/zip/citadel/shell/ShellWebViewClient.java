@@ -29,13 +29,20 @@ final class ShellWebViewClient extends BridgeWebViewClient {
     private final WatchdogListener watchdog;
     private final String self;
     private final String citadelHost;
+    private final PageLoaded signIn;
 
-    ShellWebViewClient(Bridge bridge, WatchdogListener watchdog, String self, String citadelHost) {
+    /** Told of each page the main frame finished loading: push follows a change of the signed-in person. */
+    interface PageLoaded {
+        void pageLoaded(String url);
+    }
+
+    ShellWebViewClient(Bridge bridge, WatchdogListener watchdog, String self, String citadelHost, PageLoaded signIn) {
         super(bridge);
         this.bridge = bridge;
         this.watchdog = watchdog;
         this.self = self;
         this.citadelHost = citadelHost;
+        this.signIn = signIn;
     }
 
     // Main frame only: also called for a server redirect, so an app-host link Citadel bounces to its own host is caught.
@@ -49,6 +56,7 @@ final class ShellWebViewClient extends BridgeWebViewClient {
                 } catch (ActivityNotFoundException e) {
                     // No browser at all: stay on the app rather than load Citadel in its window.
                 }
+                watchdog.leftAsIs();
                 return true;
             }
         }
@@ -56,7 +64,7 @@ final class ShellWebViewClient extends BridgeWebViewClient {
         // An outside link opens in the browser and leaves this page alone; only a load in this WebView is watched.
         if (!handledElsewhere && request.isForMainFrame() && LoadWatchdog.leavesPage(request.getUrl().toString(), view.getUrl())) {
             watchdog.navigationStarted();
-        }
+        } else if (handledElsewhere && request.isForMainFrame()) watchdog.leftAsIs();
         return handledElsewhere;
     }
 
@@ -68,7 +76,7 @@ final class ShellWebViewClient extends BridgeWebViewClient {
         watchdog.onReceivedHttpError(view);
         int status = response.getStatusCode();
         String errorUrl = bridge.getErrorUrl();
-        if (errorUrl != null && (status == 502 || status == 503 || status == 504)) view.loadUrl(errorUrl);
+        if (errorUrl != null && Gateway.unreachable(status, response.getResponseHeaders())) view.loadUrl(errorUrl);
     }
 
     @Override
@@ -87,6 +95,7 @@ final class ShellWebViewClient extends BridgeWebViewClient {
     public void onPageFinished(WebView view, String url) {
         super.onPageFinished(view, url);
         watchdog.onPageLoaded(view);
+        signIn.pageLoaded(url);
     }
 
     @Override

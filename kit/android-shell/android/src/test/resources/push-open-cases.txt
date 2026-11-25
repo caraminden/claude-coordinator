@@ -1,0 +1,33 @@
+# Which push `open` pages are allowed for the app at /apps/voice, read by both sides' tests: test/fcm.test.ts
+# (parsePush, the server) and PushMessageTest (PushMessage.open, the phone). "<TAB>" is a tab character.
+ok /apps/voice/
+ok /apps/voice/takes/12
+ok /apps/voice/takes?id=3
+ok /apps/voice/#/takes/12
+ok /apps/voice/share?u=https://example.com/a
+ok /apps/voice/share?u=https%3A%2F%2Fexample.com%2Fa
+ok /apps/voice/?file=a%2eb&dir=/../x
+ok /apps/voice/#//x/../y
+ok /apps/voice/a..b/.hidden
+no /apps/voice
+no /apps/voicex/
+no /apps/mandate/
+no //evil.example/apps/voice/
+no https://evil.example/apps/voice/
+no /apps/voice//evil.example
+no /apps/voice/a//b?x=1
+no /apps/voice/../../c/
+no /apps/voice/..
+no /apps/voice/../mandate/?x=1
+no /apps/voice/..?x=1
+no /apps/voice/..#x
+no /apps/voice/./x
+no /apps/voice/.
+no /apps/voice/%2E%2e/%2e%2E/c/
+no /apps/voice/%2e
+no /apps/voice/a%2fb
+no /apps/voice/a%5Cb
+no /apps/voice/\evil.example
+no /apps/voice/?x=\
+no /apps/voice/.<TAB>./c/
+no /apps/voice/?x=<TAB>

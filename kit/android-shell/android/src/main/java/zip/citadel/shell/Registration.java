@@ -18,6 +18,8 @@ final class Registration {
     private static final String TAG = "CitadelShell";
     static final String ENABLED = "push_enabled";
     static final String TOKEN = "push_token";
+    /** The login (PushOwner.login) Citadel took the token from. */
+    static final String OWNER = "push_owner";
 
     private Registration() {}
 
@@ -29,26 +31,50 @@ final class Registration {
     }
 
     /** POST the token; true once Citadel has it. */
-    static boolean register(Context context, String token) {
-        boolean ok = send(context, "POST", token);
-        if (ok) Shell.prefs(context).edit().putString(TOKEN, token).apply();
+    static synchronized boolean register(Context context, String token) {
+        String cookies = cookies(context);
+        boolean ok = send(context, "POST", token, cookies);
+        if (ok) Shell.prefs(context).edit().putString(TOKEN, token).putString(OWNER, PushOwner.login(cookies)).apply();
         return ok;
     }
 
-    /** DELETE the token Citadel has for this phone; true once it's gone. */
-    static boolean unregister(Context context) {
+    /** As {@link #register}, unless push was turned off meanwhile. */
+    static synchronized boolean refresh(Context context, String token) {
+        return enabled(context) && register(context, token);
+    }
+
+    /** DELETE the token Citadel has for this phone, whoever it is registered to; true once it's gone. */
+    static synchronized boolean unregister(Context context) {
         SharedPreferences prefs = Shell.prefs(context);
         String token = prefs.getString(TOKEN, null);
-        boolean ok = token == null || send(context, "DELETE", token);
-        if (ok) prefs.edit().remove(TOKEN).apply();
+        boolean ok = token == null || send(context, "DELETE", token, cookies(context));
+        if (ok) prefs.edit().remove(TOKEN).remove(OWNER).apply();
         return ok;
+    }
+
+    /** What is owed to Citadel now that a page has loaded; {@code signInPage} as {@link PushOwner#next} says. No network. */
+    static PushOwner.Step owed(Context context, boolean signInPage) {
+        SharedPreferences prefs = Shell.prefs(context);
+        boolean registered = prefs.getString(TOKEN, null) != null;
+        if (!enabled(context) && !registered) return PushOwner.Step.NONE;
+        return PushOwner.next(enabled(context), registered, PushOwner.login(cookies(context)), prefs.getString(OWNER, null), signInPage);
+    }
+
+    /** {@link #unregister}, unless by now it isn't owed (push turned on, or the person signed in, while it waited). */
+    static synchronized void unregisterIfOwed(Context context, boolean signInPage) {
+        if (owed(context, signInPage) == PushOwner.Step.UNREGISTER) unregister(context);
+    }
+
+    private static String cookies(Context context) {
+        String url = endpoint(Shell.serverUrl(context));
+        return url == null ? null : Shell.cookies(url);
     }
 
     static boolean enabled(Context context) {
         return Shell.prefs(context).getBoolean(ENABLED, false);
     }
 
-    private static boolean send(Context context, String method, String token) {
+    private static boolean send(Context context, String method, String token, String cookie) {
         String url = endpoint(Shell.serverUrl(context));
         if (url == null || token == null) return false;
         HttpURLConnection c = null;
@@ -59,7 +85,6 @@ final class Registration {
             c.setReadTimeout(10_000);
             c.setDoOutput(true);
             c.setRequestProperty("Content-Type", "application/json");
-            String cookie = Shell.cookies(url);
             if (cookie != null) c.setRequestProperty("Cookie", cookie);
             byte[] body = new JSONObject().put("token", token).put("platform", "android").toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream out = c.getOutputStream()) {

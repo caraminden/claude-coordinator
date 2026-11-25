@@ -5,6 +5,9 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.Test;
@@ -40,6 +43,22 @@ public class PushMessageTest {
         assertEquals("sync", p.appData.get("kind"));
         assertFalse(p.appData.containsKey("citadel_app"));
         assertNull(PushMessage.from(data("citadel_title", ""), ORIGIN, SELF).title);
+    }
+
+    /** The server's rule and this one, over one list of cases (test/fcm.test.ts reads it too). */
+    @Test
+    public void theOpenRuleAgreesWithTheServerCaseByCase() throws Exception {
+        String home = ORIGIN + SELF + "/";
+        int cases = 0;
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(getClass().getResourceAsStream("/push-open-cases.txt"), StandardCharsets.UTF_8))) {
+            for (String line; (line = in.readLine()) != null; ) {
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                String open = line.substring(3).replace("<TAB>", "\t");
+                assertEquals(line, line.startsWith("ok ") ? ORIGIN + open : home, PushMessage.open(open, ORIGIN, SELF));
+                cases++;
+            }
+        }
+        assertTrue(cases + " cases", cases > 20);
     }
 
     @Test

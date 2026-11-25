@@ -99,6 +99,16 @@ public final class Links {
         }
     }
 
+    /** Whether {@code url} is Citadel's sign-in on its way back to the app: whoever was signed in to it no longer is. */
+    static boolean isSignIn(String url, String citadel, String self) {
+        try {
+            URI u = new URI(url);
+            return citadel != null && self != null && citadel.equalsIgnoreCase(u.getHost()) && u.getRawPath() != null && signIn(u.getRawPath(), u.getRawQuery(), self);
+        } catch (URISyntaxException | NullPointerException e) {
+            return false;
+        }
+    }
+
     /** Citadel's sign-in page on its way back to the app: /c/?next=/apps/voice/…. */
     private static boolean signIn(String path, String query, String self) {
         if (!path.equals("/c/") && !path.equals("/c")) return false;

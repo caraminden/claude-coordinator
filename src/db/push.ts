@@ -11,9 +11,9 @@ export const pushQueries = {
       .run(token, contraptionId, userId, platform, now, now);
   },
 
-  /** Forget a phone: a dead token, or (with userId) a person's own phone signing out. */
-  deletePushDevice(this: Store, token: string, userId: number | null = null) {
-    this.db.prepare('DELETE FROM contraption_push_devices WHERE token = ? AND (? IS NULL OR user_id = ?)').run(token, userId, userId);
+  /** Forget a phone, whoever it is registered to: a dead token, or a phone that ended its own push. */
+  deletePushDevice(this: Store, token: string) {
+    this.db.prepare('DELETE FROM contraption_push_devices WHERE token = ?').run(token);
   },
 
   /** The tokens of these people's phones for a contraption. */

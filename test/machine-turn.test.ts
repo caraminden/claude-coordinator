@@ -480,7 +480,7 @@ test("a minion's worktree, session and files go to the machine before its turn, 
   const turn = async (text: string, id?: number) => {
     rmSync(release, { force: true });
     writeFileSync(heard, '');
-    const t = id ? (await call(`/api/tickets/${id}/messages`, { text }), { id }) : await call(`/api/projects/${project.id}/tickets`, { message: text });
+    const t = id ? (await call(`/api/tickets/${id}/messages`, { text }), { id }) : await call(`/api/projects/${project.id}/tickets`, { message: text, runs_on: 'w1' });
     return { ...t, ...JSON.parse((await until('the turn to say what it heard', () => lines(heard).length === 1 && lines(heard)))[0]) };
   };
   const end = async (id: number) => {
@@ -489,8 +489,8 @@ test("a minion's worktree, session and files go to the machine before its turn, 
   };
   const online = () => until('the machine to be online', async () => (await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'w1' && m.online));
   const machine = await online();
-  const onMachine = (worker: boolean) => call(`/api/machines/${machine.id}`, { lend: { server: null, workspaces: [], worker } }, 'PATCH');
   const project = await call('/api/projects', { name: 'Repo', source: 'folder', folder: src });
+  await call(`/api/machines/${machine.id}`, { projects: [project.id] }, 'PATCH');
   const session = '11111111-2222-3333-4444-555555555555';
   writeFileSync(sessionFile, session);
 
@@ -526,7 +526,7 @@ test("a minion's worktree, session and files go to the machine before its turn, 
   assert.match(git(cwd, 'status', '--porcelain'), /\?\? left\.txt/);
 
   // It goes on here from that conversation, even with the machine's copy of it all that was left.
-  await onMachine(false);
+  await call(`/api/tickets/${t.id}/runs-on`, { on: 'perigee' }, 'PUT');
   await s.settled();
   rmSync(jsonl(root));
   const home = await turn('at home', t.id);
@@ -538,7 +538,7 @@ test("a minion's worktree, session and files go to the machine before its turn, 
   await end(t.id);
 
   // And there again from what happened here.
-  await onMachine(true);
+  await call(`/api/tickets/${t.id}/runs-on`, { on: 'w1' }, 'PUT');
   const again = await turn('there again', t.id);
   assert.notEqual(again.api, home.api);
   assert.equal(again.resume, session);

@@ -87,6 +87,30 @@ export class Urgent {
     return null;
   }
 
+  /**
+   * A Taskmaster's or the server's mark, placed where it chose (#1909): just ahead of `where` (a minion in the group), or 'first'
+   * for the first spot it may take, right after the last person-set mark above it. Marks of kind 'person' are the ones a person
+   * pressed or dragged (a drag makes the mark theirs), so it never passes one. Why not, or null.
+   */
+  put(ticketId: number, how: UrgentBy, where: number | 'first'): string | null {
+    const was = this.get(ticketId);
+    const rest = this.on.filter((m) => m.ticket !== ticketId);
+    // Only the marks above the minion are passable-or-not; for one not in the group, all of them are.
+    const cur = was ? this.on.findIndex((m) => m.ticket === ticketId) : rest.length;
+    let spot: number;
+    if (where === 'first') {
+      const lastPerson = rest.slice(0, cur).findLastIndex((m) => m.kind === 'person');
+      spot = lastPerson + 1;
+    } else {
+      spot = rest.findIndex((m) => m.ticket === where);
+      if (spot < 0) return 'that minion is not Urgent any more';
+      const blocking = rest.slice(spot, cur).find((m) => m.kind === 'person');
+      if (blocking) return `that would put it ahead of a minion ${blocking.by} marked or placed`;
+    }
+    const refused = this.set(ticketId, how, rest[spot]?.ticket ?? null);
+    return refused;
+  }
+
   /** Out of the group, remembered so nobody with less say puts it back. Why not, or null. */
   unset(ticketId: number, how: Pick<UrgentBy, 'kind' | 'by'>): string | null {
     const person = this.person(ticketId);

@@ -77,9 +77,19 @@ export const urgentRoutes: Route[] = [
       if (!ticket) throw new HttpError(404, 'No such minion in this scheme');
       const on = body?.on !== false;
       const reason = on ? str(body?.reason, 'reason', REASON_MAX, ': why it goes ahead of the others').replace(/\s+/g, ' ') : '';
+      const first = body?.first === true;
+      const beforeN = body?.before == null ? undefined : Number(String(body.before).replace(/^#/, ''));
+      if (beforeN !== undefined && (!Number.isInteger(beforeN) || beforeN < 1)) throw new HttpError(400, 'before is the number of a minion in the Urgent group');
+      if (!on && (first || beforeN !== undefined)) throw new HttpError(400, 'before and first go with marking a minion, not taking it off');
+      if (first && beforeN !== undefined) throw new HttpError(400, 'Give before or first, not both');
+      const target = beforeN === undefined ? undefined : app.store.getTicketByNumber(project.id, beforeN);
+      if (beforeN !== undefined && !target) throw new HttpError(404, `No minion #${beforeN} in this scheme`);
       const how = { kind: 'taskmaster' as const, by: `${project.name} Taskmaster`, ...(on ? { reason } : {}) };
       const { urgent } = app.runner;
-      const refused = on ? urgent.set(markable(ticket).id, how) : urgent.unset(ticket.id, how);
+      let refused: string | null;
+      if (!on) refused = urgent.unset(ticket.id, how);
+      else if (target || first) refused = urgent.put(markable(ticket).id, how, target ? target.id : 'first');
+      else refused = urgent.set(markable(ticket).id, how);
       if (refused) throw new HttpError(409, `#${n} stays as it is: ${refused}`);
       return json(res, 200, { said: on ? `#${n} is Urgent: ${spot(app, ticket.id)}.` : `#${n} is not Urgent.` });
     },

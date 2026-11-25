@@ -346,3 +346,82 @@ test("mark_urgent is on the Taskmaster tool list and not on a minion's", () => {
   assert.ok(tools('coordinator').includes('mark_urgent'));
   assert.ok(!tools('thread').includes('mark_urgent'));
 });
+
+test("a Taskmaster places a mark ahead of another Taskmaster's or the server's, never past a person's, and it is kept over a restart", async () => {
+  const { store, urgent, minion, peek, ids } = world();
+  const app = { store, runner: { urgent } };
+  const other = store.createProject('Delve', null);
+  for (let i = 0; i < 40; i++) minion(other.id);
+  const [a, b, c, d, e, f] = [minion(), minion(), minion(), minion(), minion(other.id), minion()];
+  const num = (id: number) => store.getTicket(id)!.number;
+  const post = (body: unknown) => call('POST', '/api/projects/:project/urgent', app, { project: peek }, body);
+  const reason = 'it unblocks the release';
+  urgent.set(a, SERVER);
+  urgent.set(b, { ...TM, by: 'Delve Taskmaster' });
+  // Ahead of the server's, and of another Taskmaster's: both its own kind of mark.
+  let r = await post({ minion: num(c), reason, before: num(a) });
+  assert.match(r.data.said, /1 of 3 in the group/);
+  r = await post({ minion: num(d), reason, before: num(b) });
+  assert.deepEqual(ids(), [c, a, d, b]);
+  assert.match(r.data.said, /3 of 4 in the group/);
+  assert.equal(urgent.get(d)?.reason, reason);
+  // An existing mark moves up too.
+  await post({ minion: num(d), reason, before: num(c) });
+  assert.deepEqual(ids(), [d, c, a, b]);
+  // A person's press: nothing goes ahead of it, and 'first' stops right behind it.
+  urgent.set(f, JOSH, d);
+  assert.deepEqual(ids(), [f, d, c, a, b]);
+  const refused = await post({ minion: num(c), reason, before: num(f) });
+  assert.deepEqual([refused.status, /ahead of a minion Josh marked or placed/.test(String(refused.body))], [409, true]);
+  assert.deepEqual(ids(), [f, d, c, a, b]);
+  await post({ minion: num(a), reason, first: true });
+  assert.deepEqual(ids(), [f, a, d, c, b]);
+  // A person's drag makes the mark theirs, so it is passed by no one either.
+  urgent.set(c, CARA, null);
+  assert.equal((await post({ minion: num(a), reason, before: num(c) })).status, 200, 'a is above c, moving down is no pass');
+  assert.equal((await post({ minion: num(d), reason, before: num(f) })).status, 409);
+  // The minion itself: a person's mark or a person's take-off.
+  assert.equal((await post({ minion: num(c), reason, before: num(a) })).status, 409);
+  const g = minion();
+  urgent.set(g, JOSH);
+  urgent.unset(g, JOSH);
+  assert.match(String((await post({ minion: num(g), reason, first: true })).body), /took Urgent off it/);
+  // A target that left the group, another scheme's, and a wrong shape.
+  assert.equal((await post({ minion: 900, reason, first: true })).status, 404);
+  const gone = minion();
+  assert.equal((await post({ minion: num(gone), reason, before: 901 })).status, 404);
+  const idle = minion();
+  assert.equal((await post({ minion: num(idle), reason, before: num(idle) })).status, 409, 'a target not in the group is refused, not placed elsewhere');
+  const idsBefore = ids();
+  assert.equal((await post({ minion: num(idle), reason, before: num(a), first: true })).status, 400);
+  assert.equal((await post({ minion: num(idle), on: false, first: true })).status, 400);
+  assert.equal((await post({ minion: num(idle), before: num(a) })).status, 400, 'a reason is always needed');
+  assert.equal((await post({ minion: num(e), reason, first: true })).status, 404, "another scheme's minion is not this one's to mark");
+  assert.deepEqual(
+    ids().filter((x) => !idsBefore.includes(x)),
+    [],
+  );
+  // Kept over a restart.
+  const again = new Urgent(store, () => {});
+  assert.deepEqual(
+    again.list().map((m) => m.ticket),
+    ids(),
+  );
+});
+
+test('first among the ones it may pass is the very front when no person has marked anything', () => {
+  const { urgent, ids } = world();
+  urgent.set(1, SERVER);
+  urgent.set(2, TM);
+  assert.equal(urgent.put(3, TM, 'first'), null);
+  assert.deepEqual(ids(), [3, 1, 2]);
+  assert.equal(urgent.put(9, TM, 77), 'that minion is not Urgent any more');
+});
+
+test("a mark saved without a kind that is a Taskmaster's still counts as the saved kind: nothing is migrated", () => {
+  const { store, urgent } = world();
+  store.setSetting('urgent', { on: [{ ticket: 5, kind: 'person', by: 'Josh', at: 1 }], off: [] });
+  const again = new Urgent(store, () => {});
+  assert.equal(again.put(6, TM, 5), 'that would put it ahead of a minion Josh marked or placed');
+  assert.equal(urgent.list().length, 0);
+});

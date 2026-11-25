@@ -1251,13 +1251,15 @@ const ORDER_SHIP_LINE = {
 const MARK_URGENT = {
   name: 'mark_urgent',
   description:
-    "Mark one minion of this scheme Urgent: when it wants a worker it goes ahead of everyone's share, after the minions already Urgent, until it ships or closes or someone takes it off. on: false takes off your own or the server's mark. Your reason shows beside it. It never overrides a person: a minion a person marked, or took Urgent off, stays as they left it. It doesn't move the minion's ship (order_ship_line does).",
+    "Mark one minion of this scheme Urgent: when it wants a worker it goes ahead of everyone's share, after the minions already Urgent (or, with before or first, where you place it), until it ships or closes or someone takes it off. on: false takes off your own or the server's mark. Your reason shows beside it. It never overrides a person: a minion a person marked, or took Urgent off, stays as they left it. It never goes ahead of a minion a person marked or placed, and a move is refused saying so. It doesn't move the minion's ship (order_ship_line does).",
   inputSchema: {
     type: 'object',
     properties: {
       minion: { type: 'integer', description: 'The minion number.' },
       on: { type: 'boolean', description: 'false takes Urgent off; default true.' },
       reason: { type: 'string', description: 'One line on why, at most 200 characters; needed to mark one.' },
+      before: { type: 'integer', description: 'The number of a minion of this scheme in the Urgent group to go just ahead of; leave out to go at the end (a minion already Urgent stays where it is).' },
+      first: { type: 'boolean', description: "true: go first among the ones you may pass, right behind the last minion a person marked or placed. The way to jump ahead of other schemes' minions. Not with before." },
     },
     required: ['minion'],
   },
@@ -2409,7 +2411,7 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
     case 'order_ship_line':
       return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/releases/ship-line`, { ship: args.ship, before: args.before, reason: args.reason })).said;
     case 'mark_urgent':
-      return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/urgent`, { minion: args.minion, on: args.on, reason: args.reason })).said;
+      return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/urgent`, { minion: args.minion, on: args.on, reason: args.reason, before: args.before, first: args.first })).said;
     case 'publish_release':
       return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/releases/publish`, { contraption: args.contraption })).said;
     case 'deploy_contraption': {

@@ -1073,21 +1073,25 @@ export class CiHealth {
   /** The red's named fix minion: only these are held open and re-run for (#1074); a credited fixer (mark.fixer) only touched the file. */
   private fixTicket(p: Project, mark: RedMark): Ticket | null {
     const held = mark.rerun ? this.store.getTicket(mark.rerun.ticket) : null;
-    if (held && held.project_id === p.id && held.number != null) return held;
+    const heldOk = held && held.project_id === p.id && held.number != null ? held : null;
     // #1491: any red run of the streak, not only its first: a minion started later names the newest.
     const ids = [mark.run, ...(mark.runs ?? [])].map(String);
-    // The first open one, else the newest (Josh, 2026-11-19): a second fix after the first closed is the one at work, and a
-    // later minion that only quotes the run (a review) can't take the hold from the open one.
-    const named = this.store
+    // #1849: a title or brief naming a run is the strong claim; a chat mention alone (an investigator, a reviewer) only
+    // counts when no strong one is open, so it can't take or keep the hold from the minion the red was briefed to.
+    const cands = this.store
       .listTickets(p.id)
       .filter((x) => x.number != null && (mark.chat?.ids.includes(x.id) || x.created_at >= (mark.told ?? 0) - 60_000))
       .sort((a, b) => a.created_at - b.created_at)
-      .filter((x) => {
-        if (mark.chat?.ids.includes(x.id)) return true;
+      .map((x) => {
         const brief = this.store.eventsOfKinds(x.id, ['user_message'])[0]?.data ?? '';
-        return ids.some((id) => x.title.includes(id) || brief.includes(id));
-      });
-    return named.find((x) => x.status !== 'closed') ?? named.at(-1) ?? null;
+        return { x, strong: ids.some((id) => x.title.includes(id) || brief.includes(id)) };
+      })
+      .filter((c) => c.strong || mark.chat?.ids.includes(c.x.id));
+    const open = (c: { x: Ticket }) => c.x.status !== 'closed';
+    // The first open strong one (Josh, 2026-11-19: a later minion that only quotes the run can't take the hold from the open
+    // one), then an open holder, then an open chat-named one; a closed holder keeps it only when nobody open names the run.
+    const pick = cands.find((c) => c.strong && open(c))?.x ?? (heldOk && heldOk.status !== 'closed' ? heldOk : null) ?? cands.find(open)?.x;
+    return pick ?? heldOk ?? cands.filter((c) => c.strong).at(-1)?.x ?? cands.at(-1)?.x ?? null;
   }
 
   /**

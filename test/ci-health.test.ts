@@ -1487,6 +1487,40 @@ test("a red credits a minion that names its run anywhere in its chat, however ol
   assert.equal(health.hold(lister.id), null);
 });
 
+// #1849: a hold that landed on a chat-only minion stuck there (#1763 held #1833's red). A brief naming the run beats a chat mention,
+// and a hold on a closed minion moves to an open named one.
+test('a minion whose brief names the run takes the hold from one that only mentioned it in chat, and a closed holder passes it on (#1849)', async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const health = new CiHealth(w.store, { ...w.outside, tell: () => true });
+  const older = w.minion(w.peek.id, 'ticket/1763-other');
+  w.store.addEvent(older.id, 'user_message', { text: 'unrelated work' });
+  w.store.db.prepare('UPDATE tickets SET created_at = ? WHERE id = ?').run(NOW - 2 * HOUR, older.id);
+  w.gh.mainRuns = [runOf({ id: 55501, event: 'push', workflow_id: 7, path: '.github/workflows/desktop.yml', head_sha: 'abc1234', conclusion: 'failure', created_at: iso(30 * MIN), updated_at: iso(20 * MIN) })];
+  await health.tick(NOW);
+  w.store.addEvent(older.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'looking at run 55501' }] } });
+  const named = w.minion(w.peek.id, 'ticket/1833-main-red');
+  w.store.addEvent(named.id, 'user_message', { text: 'Main went red: run 55501 failed' });
+  await health.tick(NOW + RED_FIX_MS);
+  const key = `ci-health:red:${w.peek.id}`;
+  const mark = () => Object.values(w.store.getSetting<Record<string, { chat: { ids: number[] }; rerun?: unknown }>>(key)!)[0];
+  // The wrong holder already holds it, as #1763 did.
+  const marks = w.store.getSetting<Record<string, { chat: { ids: number[] }; rerun?: unknown }>>(key)!;
+  Object.values(marks)[0].rerun = { ticket: older.id, sha: 'a', tip: 'b', at: NOW };
+  w.store.setSetting(key, marks);
+  assert.ok(mark().chat.ids.includes(older.id));
+  assert.equal(health.hold(older.id), null, 'a chat mention does not hold against a named brief');
+  assert.match(health.hold(named.id)!, /run 55501/);
+  // A holder that closed without green hands it on to the next open minion whose brief names the run.
+  const marks2 = w.store.getSetting<Record<string, { chat: { ids: number[] }; rerun?: unknown }>>(key)!;
+  Object.values(marks2)[0].rerun = { ticket: named.id, sha: 'a', tip: 'b', at: NOW };
+  w.store.setSetting(key, marks2);
+  w.store.updateTicket(named.id, { status: 'closed' });
+  const next = w.minion(w.peek.id, 'ticket/1900-main-red');
+  w.store.addEvent(next.id, 'user_message', { text: 'Main still red: run 55501' });
+  assert.match(health.hold(next.id)!, /run 55501/);
+});
+
 // #1491 (Cara, 2026-11-21, "Investigate button"): one press on a red in Open problems starts a fix minion in the red's own scheme,
 // briefed from the red, and the red names it at once; Peek Auras, a scheme other than Citadel.
 test('Investigate on a red starts one Sonnet-medium bug minion in its scheme, briefed with the run and its failing tests, and the red names it at once (#1491)', async () => {

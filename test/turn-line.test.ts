@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, renameSync, statSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { after, beforeEach, test } from 'node:test';
@@ -281,8 +281,11 @@ const CALL = { command: 'gh pr merge 1' };
 const TOLD = JSON.stringify(JSON.stringify(CALL)).slice(1, -1);
 const steer = (id: number) => runner.send(id, 'Cara', 'one more thing', [], { typed: true }, true);
 const ask = (id: number, input: object = CALL) => {
-  const cfg = { home: homedir(), data: '/home/u/data', checkout: '/home/u/app', project: project.id, claudeConfig: '/home/u/.claude', deployScript: true };
-  return runner.approvals.ask(id, 'Bash', input, root, cfg, true) as { id: string };
+  // `home` is the test's own folder: anything beside the home it names counts as another person's, as CI's temp folder is.
+  const cfg = { home: root, data: '/home/u/data', checkout: '/home/u/app', project: project.id, claudeConfig: '/home/u/.claude', deployScript: true };
+  const asked = runner.approvals.ask(id, 'Bash', input, root, cfg, true);
+  assert.ok('id' in asked, 'refused' in asked ? asked.refused : '');
+  return asked;
 };
 const pass = (id: number) => store.getSetting<{ pass?: object }>(`turn:${id}`)?.pass;
 const texts = (id: number, kind: string) => store.eventsOfKinds(id, [kind]).map((e) => e.data);

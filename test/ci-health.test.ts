@@ -2542,7 +2542,14 @@ test('the chat search for a red reads events by id, not minion by minion, and in
   w.quietDelve();
   w.gh.jobs.set(9001, [job({ run_id: 9001, name: 'windows', conclusion: 'failure', steps: [{ name: 'Test', conclusion: 'failure' }] })]);
   w.gh.mainRuns = [runOf({ id: 9001, event: 'push', workflow_id: 7, path: '.github/workflows/desktop.yml', conclusion: 'failure', created_at: iso(20 * MIN), updated_at: iso(19 * MIN) })];
+  const naming = w.store.minionsNaming.bind(w.store);
+  const spans: number[] = [];
+  w.store.minionsNaming = (pid, needles, after, atMost = Infinity) => {
+    spans.push(atMost - after);
+    return naming(pid, needles, after, atMost);
+  };
   await health.tick(NOW);
+  assert.ok(spans.length >= 3 && spans.every((n) => n === CHAT_STEP), `searched in steps: ${spans}`);
   const mark = w.store.getSetting<Record<string, { chat: { ids: number[]; upTo: number } }>>(`ci-health:red:${w.peek.id}`)!['7'];
   assert.deepEqual(mark.chat.ids, [t.id]);
   assert.equal(mark.chat.upTo, (prepare('SELECT max(id) AS id FROM events').get() as { id: number }).id);

@@ -1024,15 +1024,20 @@ export class CiHealth {
     const breathe = breather();
     const needles = [mark.run, ...(mark.runs ?? [])].map(String);
     let from = mark.chat?.upTo ?? this.store.eventIdAt(at(mark.at)) - 1;
+    const found = new Set(mark.chat?.ids);
+    let upTo: number;
     for (;;) {
       const chat = this.store.minionsNaming(p.id, needles, from, from + CHAT_STEP);
-      if (chat.upTo !== mark.chat?.upTo) {
-        mark.chat = { ids: [...new Set([...(mark.chat?.ids ?? []), ...chat.ids])], upTo: chat.upTo };
-        save();
-      }
-      if (chat.upTo !== from + CHAT_STEP) break;
-      from = chat.upTo;
+      for (const id of chat.ids) found.add(id);
+      upTo = chat.upTo;
+      if (upTo !== from + CHAT_STEP) break;
+      from = upTo;
       await breathe();
+    }
+    // Saved once, whole: a press of Investigate between steps must not see a half-done search.
+    if (upTo !== mark.chat?.upTo) {
+      mark.chat = { ids: [...found], upTo };
+      save();
     }
     // The briefs fixTicket reads, in the same paced way: after a restart that is every candidate's.
     for (const t of this.candidates(p, mark)) {

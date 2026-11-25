@@ -70,11 +70,13 @@ test('a plan of steps: each has its own time, its outcome, and the waits between
   m.end(22);
   const l = await m.log(22, { state: 'ready' });
   const read = l.rows.find((r) => r.title === 'Read')!;
-  const build = l.rows.find((r) => r.title === 'Build')!;
+  const [build, again] = l.rows.filter((r) => r.title === 'Build');
   assert.equal(mins(read.work), 4.5);
-  assert.equal(mins(build.work), 4.9); // 5 to 8, then 20.1 to 22
-  assert.equal(build.outcome, 'Built.');
-  assert.deepEqual(l.rows.map((r) => r.type).slice(0, 3), ['step', 'step', 'wait']);
+  // A step that goes on after a wait goes on in a row of its own, so the wait sits between the two.
+  assert.deepEqual([mins(build.work), mins(again.work)], [3, 1.9]);
+  assert.deepEqual([build.more, build.continued, build.outcome], [true, undefined, undefined]);
+  assert.deepEqual([again.more, again.continued, again.outcome], [undefined, true, 'Built.']);
+  assert.deepEqual(l.rows.map((r) => r.type).slice(0, 4), ['step', 'step', 'wait', 'step']);
   assert.match(l.rows[2].title, /Waiting on Cara/);
   // A message that started the next turn says who, not that it was a person: a guess.
   assert.deepEqual(
@@ -228,6 +230,70 @@ test('states: running grows, not started waits, finished and dismissed stop, sto
   w.end(2);
   const waits = await w.log(30, { state: 'ready' });
   assert.deepEqual(segs(waits).at(-1)?.slice(2, 5), ['wait', 'person', 'guess']);
+
+  // The state now says what it waits on now: a record of the whole wait only when its own last turn ended in that state.
+  assert.deepEqual(
+    segs(await w.log(30, { state: 'parked' }))
+      .at(-1)
+      ?.slice(2, 5),
+    ['wait', 'sealed', 'guess'],
+  );
+  const own = minion();
+  own.init(0);
+  own.at(1, 'claude', { type: 'assistant', turn_state: 'parked', message: { content: [{ type: 'text', text: 'Sealed until then.' }] } });
+  own.end(2);
+  assert.deepEqual(
+    segs(await own.log(30, { state: 'parked' }))
+      .at(-1)
+      ?.slice(2, 5),
+    ['wait', 'sealed', ''],
+  );
+  const set = minion();
+  set.init(0);
+  set.use(1, 'mcp__thread__set_thread_status', { state: 'pending-deploy' });
+  set.end(2);
+  assert.deepEqual(
+    segs(await set.log(30, { state: 'pending-deploy' }))
+      .at(-1)
+      ?.slice(2, 5),
+    ['wait', 'deploy', ''],
+  );
+
+  // A worker's wait starts at the message it is for, however long the minion sat before it.
+  w.at(20, 'user_message', { author: 'Cara', text: 'go on' });
+  assert.deepEqual(segs(await w.log(30, { worker_wait: { since: 1 } })).slice(-2), [
+    [2, 20, 'wait', 'person', 'guess'],
+    [20, 30, 'wait', 'start', ''],
+  ]);
+});
+
+test('a log read the moment a turn ends ends in the wait, so a page that grows it adds no work', async () => {
+  const m = minion();
+  m.init(0);
+  m.end(2);
+  const l = await m.log(2 + 0.5 / 60, { state: 'ready' });
+  assert.deepEqual([l.segs.at(-1)!.kind, l.totals.work], ['wait', 2 * MIN]);
+});
+
+test('a message stamped just after its turn starts ends the wait at the start, not inside the turn', async () => {
+  const m = minion();
+  m.init(0);
+  m.end(2);
+  m.at(10, 'user_message', { author: 'Cara', text: 'go on' });
+  m.init(10 - 0.8 / 60);
+  m.end(12);
+  const l = await m.log(12);
+  for (const [i, x] of l.segs.slice(1).entries()) assert.equal(x.start, l.segs[i].end);
+});
+
+test('a native step shows from the result that made it', async () => {
+  const m = minion();
+  m.init(0);
+  m.result(1, m.use(0.5, 'TaskCreate', { subject: 'Read it', description: 'x' }), 'Task #1 created successfully: Read it');
+  assert.deepEqual(
+    (await m.log(1, { status: 'running' })).rows.filter((r) => r.type === 'step').map((r) => r.title),
+    ['Read it'],
+  );
 });
 
 test('an old minion: a gap nothing explains is marked, not named', async () => {

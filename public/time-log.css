@@ -35,6 +35,7 @@
 .tl-rows { display: grid; gap: 0.35rem; padding-top: 2px; }
 .tl-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 0.95em; }
 .tl-row.tl-wait { border-style: dashed; background: color-mix(in srgb, var(--tl-wait) 9%, var(--panel)); }
+.tl-row.tl-wait.guess { background: color-mix(in srgb, var(--tl-wait) 4%, var(--panel)); }
 .tl-row.tl-wait.lost { background: color-mix(in srgb, var(--tl-lost) 8%, var(--panel)); }
 .tl-row.in_progress { border-color: var(--running); }
 .tl-row.paused { border-color: var(--waiting); }

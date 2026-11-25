@@ -191,8 +191,9 @@ test('through the front thread, readers give every caller the same answers and r
   await readerAnswers(srv);
   const viaReaders = await answers(srv);
   for (const [key, got] of Object.entries(viaReaders)) {
-    const bound = BOOT_BOUND.has(key.split(' ')[1]);
-    assert.deepEqual({ status: got.status, body: bound ? '' : unclocked(got.body) }, { status: viaMain[key].status, body: bound ? '' : unclocked(viaMain[key].body) }, key);
+    // A time log ends now, so its numbers differ; its stretches and rows don't.
+    const same = (body: string) => (key.endsWith('/time-log') ? body.replace(/\d+/g, '0') : BOOT_BOUND.has(key.split(' ')[1]) ? '' : unclocked(body));
+    assert.deepEqual({ status: got.status, body: same(got.body) }, { status: viaMain[key].status, body: same(viaMain[key].body) }, key);
     assert.ok(got.timed, `the answer to ${key} carries Server-Timing`);
   }
   assert.ok(

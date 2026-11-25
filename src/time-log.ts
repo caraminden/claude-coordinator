@@ -32,6 +32,9 @@ export interface TimeRow {
   /** A step's state, and the line the minion wrote when it finished. */
   status?: string;
   outcome?: string;
+  /** A step a wait cut in parts, a row each: this one goes on from an earlier row, or goes on in a later one (which has its state and outcome). */
+  continued?: true;
+  more?: true;
   start: number | null;
   end: number | null;
   work: number;
@@ -100,10 +103,12 @@ interface State {
   ships: { at: number; event: number; call: string }[];
   steps: Step[];
   live: Map<string, Step>;
+  /** The state its newest turn set for itself: how it ended. */
+  state: string | null;
   p: ReturnType<typeof createProgress>;
 }
 
-const newState = (): State => ({ upTo: 0, turns: [], tools: [], open: new Map(), says: [], marks: [], ships: [], steps: [], live: new Map(), p: createProgress() });
+const newState = (): State => ({ upTo: 0, turns: [], tools: [], open: new Map(), says: [], marks: [], ships: [], steps: [], live: new Map(), state: null, p: createProgress() });
 
 /** A command that waits for a job instead of doing work. */
 const WAITS = /\bcitadel-wait\b|\bgh run watch\b|\btail --pid\b|\bsleep \d{2,}|\buntil (?:grep|\[)/;
@@ -173,7 +178,7 @@ export function foldEvent(s: State, row: EventRow) {
   if (row.kind !== 'claude') return;
   claudeEvent(s, row, d);
   applyEvent(s.p, 'claude', d, at);
-  if (d.type === 'assistant' || d.type === 'result' || d.type === 'system') syncSteps(s, at);
+  syncSteps(s, at);
 }
 
 function claudeEvent(s: State, row: EventRow, d: Record<string, unknown>) {
@@ -183,6 +188,7 @@ function claudeEvent(s: State, row: EventRow, d: Record<string, unknown>) {
     if (d.subtype !== 'init') return;
     if (cur && cur.end === null) cur.end = cur.last;
     s.turns.push({ start: at, end: null, last: at });
+    s.state = null;
     return;
   }
   if (d.type === 'result') {
@@ -195,11 +201,13 @@ function claudeEvent(s: State, row: EventRow, d: Record<string, unknown>) {
   const content = (d.message as { content?: unknown } | undefined)?.content;
   const blocks = (Array.isArray(content) ? content : []) as Block[];
   const grunt = !!d.parent_tool_use_id;
+  if (typeof d.turn_state === 'string') s.state = d.turn_state;
   for (const b of blocks) {
     if (b.type === 'text' && d.type === 'assistant' && !grunt && b.text && b.text.trim().length > 15) s.says.push({ at, event: row.id, text: b.text.trim() });
     else if (b.type === 'tool_use' && b.id) {
       const tool: Tool = { at, end: null, event: row.id, k: (b.name === 'Bash' && WAITS.test(String(b.input?.command ?? ''))) || (b.name === 'TaskOutput' && b.input?.block !== false) ? 'wait' : 'work', turn: s.turns.length - 1 };
       s.open.set(b.id, tool);
+      if (b.name === 'mcp__thread__set_thread_status' && typeof b.input?.state === 'string') s.state = b.input.state;
       if (b.name?.endsWith('hand_off_land')) s.ships.push({ at, event: row.id, call: b.id });
       if (b.name !== 'mcp__thread__plan') s.tools.push(tool);
     } else if (b.type === 'tool_result' && b.tool_use_id) {
@@ -347,21 +355,23 @@ export function cutTime(s: State, ticket: LogTicket, cards: CardTime[], now: num
   const segs: TimeSeg[] = [];
   const known = knownWaits(s, cards, stop, recorded);
   const gap = (a: number, b: number, tail: boolean) => {
-    if (b - a < LEAST_MS) return;
+    // The last wait counts from its first moment: it is the one still going on.
+    const least = tail ? 1 : LEAST_MS;
+    if (b - a < least) return;
     const got: TimeSeg[] = [];
     for (const w of known) {
       if (w.end <= a || w.start >= b) continue;
       const free = subtract(
         [Math.max(a, w.start), Math.min(b, w.end)],
         got.map((x): Span => [x.start, x.end]),
-      ).filter(([x, y]) => y - x >= LEAST_MS);
+      ).filter(([x, y]) => y - x >= least);
       for (const [x, y] of free) got.push({ start: x, end: y, kind: w.kind, sub: w.sub, title: w.title, event: w.event, ...(w.guess && { guess: w.guess }) });
     }
     for (const [x, y] of subtract(
       [a, b],
       got.map((g): Span => [g.start, g.end]),
     ))
-      if (y - x >= LEAST_MS) got.push(...unknown(s, ticket, x, y, tail && y >= b, closed, known));
+      if (y - x >= least) got.push(...unknown(s, ticket, x, y, tail && y >= b, closed, known));
     segs.push(...got.sort((m, n) => m.start - n.start));
   };
   if (s.turns.length) gap(ticket.created_at, s.turns[0].start, false);
@@ -387,18 +397,25 @@ function unknown(s: State, ticket: LogTicket, a: number, b: number, tail: boolea
   if (tail) {
     const held = (kind: TimeKind, sub: TimeSub, title: string, guess = false): TimeSeg[] => [{ start: a, end: b, kind, sub, title, ...(guess && { guess: true as const }) }];
     if (closed) return held('gone', 'finished', 'Finished; open until it was dismissed', true);
-    if (ticket.worker_wait || !s.turns.length) return held('wait', 'start', ticket.worker_wait ? 'Waiting for a worker' : 'Waiting to start', !ticket.worker_wait);
+    if (ticket.worker_wait) {
+      const msg = s.marks.findLast((m) => m.tag === 'message' && m.at > a && m.at < b);
+      if (msg) return [...held('wait', 'person', 'Waiting on a person', true).map((x) => ({ ...x, end: msg.at })), { start: msg.at, end: b, kind: 'wait', sub: 'start', title: 'Waiting for a worker' }];
+      return held('wait', 'start', 'Waiting for a worker', s.turns.length > 0);
+    }
+    if (!s.turns.length) return held('wait', 'start', 'Waiting to start', true);
     const st = ticket.state;
-    if (st === 'complete') return held('gone', 'finished', 'Finished; open until someone has seen it');
-    if (st === 'pending-deploy') return held('wait', 'deploy', 'Waiting for the deploy');
-    if (st === 'parked') return held('wait', 'sealed', 'Sealed');
-    if (st === 'outside' || st === 'blocked') return held('wait', 'outside', st === 'blocked' ? 'Blocked on something outside the minion' : 'Work running elsewhere');
-    if (st === 'limited') return held('wait', 'limit', 'Waiting for the usage limit to reset');
+    // Only a state its last turn set is known to have held all along; one set since (a Taskmaster's seal) is not.
+    const guess = s.state !== st;
+    if (st === 'complete') return held('gone', 'finished', 'Finished; open until someone has seen it', guess);
+    if (st === 'pending-deploy') return held('wait', 'deploy', 'Waiting for the deploy', guess);
+    if (st === 'parked') return held('wait', 'sealed', 'Sealed', guess);
+    if (st === 'outside' || st === 'blocked') return held('wait', 'outside', st === 'blocked' ? 'Blocked on something outside the minion' : 'Work running elsewhere', guess);
+    if (st === 'limited') return held('wait', 'limit', 'Waiting for the usage limit to reset', guess);
     return held('wait', 'person', 'Waiting on a person', true);
   }
   // Between turns: the message that started the next one says who it waited on.
   const msg = s.marks.findLast((m) => m.tag === 'message' && m.at >= a && m.at <= b + 1500);
-  const from = msg ? Math.max(a, msg.at) : b;
+  const from = msg ? Math.min(b, Math.max(a, msg.at)) : b;
   const out: TimeSeg[] = [];
   const inLine = known.some((w) => w.sub === 'ship' && w.start < b && w.end > a);
   if (from - a >= LEAST_MS) {
@@ -441,6 +458,7 @@ function shape(s: State, raw: TimeSeg[], meta: { start: number; end: number; run
   const rows: TimeRow[] = [];
   const stepRow = new Map<Step, number>();
   let line: { row: number; from: number } | null = null;
+  let lastWait = -1;
   // The first of its lines after the stretch being cut: says and stretches both run in time order.
   let spoke = 0;
   const segs: TimeSeg[] = [];
@@ -462,7 +480,7 @@ function shape(s: State, raw: TimeSeg[], meta: { start: number; end: number; run
       const long = seg.end - seg.start >= ROW_MS || seg.kind === 'lost';
       let row: number | undefined;
       if (long && seg.kind !== 'gone') {
-        row = rows.length;
+        row = lastWait = rows.length;
         rows.push({ type: 'wait', title: seg.title ?? 'Waiting', kind: seg.kind, sub: seg.sub, start: seg.start, end: seg.end, work: 0, wait: 0, lost: 0, ...(seg.guess && { guess: seg.guess }), ...(seg.event && { event: seg.event }) });
         line = null;
       }
@@ -481,9 +499,11 @@ function shape(s: State, raw: TimeSeg[], meta: { start: number; end: number; run
       let row: number | undefined;
       if (own) {
         row = stepRow.get(own);
-        if (row === undefined) {
+        if (row === undefined || lastWait > row) {
+          const before = row === undefined ? undefined : rows[row];
+          if (before) Object.assign(before, { more: true, outcome: undefined, status: own.status === 'completed' ? 'completed' : undefined });
           row = rows.length;
-          rows.push({ type: 'step', title: own.subject, kind: 'work', status: own.status, outcome: own.outcome, start: a, end: b, work: 0, wait: 0, lost: 0 });
+          rows.push({ type: 'step', title: own.subject, kind: 'work', status: own.status, outcome: own.outcome, ...(before && { continued: true as const }), start: a, end: b, work: 0, wait: 0, lost: 0 });
           stepRow.set(own, row);
         }
         line = null;
@@ -575,7 +595,7 @@ async function catchUp(store: Store, id: number, s: State) {
 
 /**
  * A minion's time log, right now: the one reader every view shares. Reads only what the chat holds, and only what is
- * new since the last call for this minion.
+ * new since the last call for this minion, but for its cards, which settle in place and are read again.
  */
 export async function timeLog(store: Store, ticket: LogTicket & { id: number }, now = Date.now(), recorded: RecordedWait[] = []): Promise<TimeLog> {
   let logs = kept.get(store);

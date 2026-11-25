@@ -101,12 +101,12 @@ function rowEl(r, isLast, log) {
   const on = key && panel.ui.tlSel === key;
   const going = isLast && !log?.closed && r.type !== 'step';
   const ms = r.work + r.wait + r.lost;
-  const icon = r.type === 'step' ? (ICON[r.status] ?? '○') : r.type === 'line' ? '·' : '‖';
-  const line = r.type === 'step' && stepLine(r);
+  const icon = r.type === 'step' ? (ICON[r.status] ?? (r.more ? '·' : '○')) : r.type === 'line' ? '·' : '‖';
+  const line = r.type === 'step' && !r.more && stepLine(r);
   const when = r.start && `${at(r.start, log)} to ${going || (r.status === 'in_progress' && isRunning()) ? 'now' : at(r.end, log)}`;
   const head = [
     h('span', { class: 'icon', 'aria-hidden': 'true' }, icon),
-    h('span', { class: 'subject' }, r.type === 'line' ? firstSentence(r.title, 200) : r.title, ' ', probably(r) || ''),
+    h('span', { class: 'subject' }, r.type === 'line' ? firstSentence(r.title, 200) : r.title, ' ', r.continued ? h('span', { class: 'tl-guess' }, 'continued ') : '', probably(r) || ''),
     h(
       'span',
       { class: 'tl-meta' },
@@ -158,7 +158,8 @@ function ribbon(log) {
         'button',
         {
           class: `tl-tile ${t.kind}${t.guess ? ' guess' : ''}${t.squeezed ? ' squeezed' : ''}${sel && !log.segs.some((s) => s.start >= t.start && s.end <= t.end && rowKey(log.rows[s.row]) === sel) ? ' dim' : ''}${panel.ui.tlSeg != null && panel.ui.tlSeg >= t.start && panel.ui.tlSeg < t.end ? ' sel' : ''}`,
-          tabindex: -1,
+          // A stretch with a row is reached by it.
+          tabindex: key(t) ? -1 : 0,
           'data-tip': words,
           'aria-label': words,
           onclick: () => pick(key(t), t.main),

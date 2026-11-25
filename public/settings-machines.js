@@ -63,7 +63,7 @@ function machineAddForm(runners, label) {
           'ol',
           { class: 'settings-steps' },
           h('li', {}, h('strong', {}, 'Name it'), ' and press Add CI runner host.'),
-          h('li', {}, h('strong', {}, 'Paste the line it shows'), ' on that PC, as administrator or root. Any PC with Windows, or Linux with systemd.'),
+          h('li', {}, h('strong', {}, 'Paste the line it shows'), ' on that PC, as administrator or root. Any 64-bit Intel or AMD PC with Windows, or Linux with systemd.'),
           h('li', {}, h('strong', {}, 'Open its line and pick the schemes'), ' under Runs CI for. Only those schemes can put runners on it: CI there runs code their members push.'),
         )
       : h(

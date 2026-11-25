@@ -14,6 +14,7 @@ import type { Machine } from '../db.ts';
 import { HttpError, json, publicOrigin, ownWrites, readJson, str, type Ctx, type Route } from '../http.ts';
 import { ensureCoordinatorFor } from './projects.ts';
 import { pickFor } from '../../public/model-table.js';
+import { thrown } from '../thrown.ts';
 
 /** The reds an Investigate press is starting a minion for (#1491), by `<scheme>:<workflow>`: a second press waits for the first. */
 const investigating = new Set<string>();
@@ -43,7 +44,7 @@ export function machineNotes(v: unknown): string {
  * Change a machine: any of name, notes, lend (what is ticked), workspace_tools, always_on and projects (the schemes it is
  * lent to: the whole list). The one write path for its settings: the Machines page's PATCH, and an approved notes card (#617).
  */
-export async function patchMachine(app: Ctx['app'], session: Ctx['session'], machine: Machine, body: any) {
+export async function patchMachine(app: Ctx['app'], session: Ctx['session'], machine: Machine, body: Record<string, unknown>) {
   if (!managesMachine(session, machine)) throw new HttpError(404, 'No such machine');
   const lend = body.lend === undefined ? undefined : cleanLend(body.lend);
   if (lend === null) throw new HttpError(400, "lend must be { server: a found MCP server's name or null, workspaces: [names] }");
@@ -109,8 +110,8 @@ async function machineUpload({ req, res, url, app }: Ctx, machine: Machine) {
     try {
       await writeFile(path, Buffer.concat(chunks), { flag: 'wx' });
       return json(res, 201, { path });
-    } catch (err: any) {
-      if (err.code !== 'EEXIST' || n > 999) throw err;
+    } catch (err) {
+      if (thrown(err).code !== 'EEXIST' || n > 999) throw err;
     }
   }
 }

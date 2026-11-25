@@ -25,6 +25,7 @@ import { githubRepo } from './github.ts';
 import { HostJobs, type JobState } from './host-job.ts';
 import { asEnv, errorText } from './scheme-repo.ts';
 import { TURN_SLICE } from './turn-launch.ts';
+import { thrown } from './thrown.ts';
 
 const run = promisify(execFile);
 
@@ -482,8 +483,8 @@ export class UltraReviews {
       r.job = true;
       this.save();
       this.follow(r);
-    } catch (err: any) {
-      this.finish(r, { id: r.id, ok: false, code: null, text: `The review didn't start: ${String(err?.stderr || err?.message || err).trim()}` });
+    } catch (err) {
+      this.finish(r, { id: r.id, ok: false, code: null, text: `The review didn't start: ${String(thrown(err).stderr || thrown(err).message || err).trim()}` });
     }
   }
 
@@ -516,9 +517,9 @@ export class UltraReviews {
       this.save();
       r.pr = await this.openPr(r.uid, spec, r.pr, { name: spec.paths.join(', ').slice(0, 80), by: r.by ?? 'someone' });
       this.save();
-    } catch (err: any) {
+    } catch (err) {
       if (r.pr && !r.pr.number) delete r.pr;
-      return this.finish(r, { id: r.id, ok: false, code: null, text: `${said}\n\nCitadel tried a draft pull request instead, but ${err?.message ?? err}.` });
+      return this.finish(r, { id: r.id, ok: false, code: null, text: `${said}\n\nCitadel tried a draft pull request instead, but ${thrown(err).message ?? err}.` });
     }
     const place = this.deps.place(r.uid);
     if (!place) return this.finish(r, { id: r.id, ok: false, code: null, text: "Your Claude plan isn't linked any more, so the review stopped." });

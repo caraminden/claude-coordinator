@@ -56,7 +56,7 @@ export function workersPanel(page) {
       .finally(() => sent--);
   };
   const pause = (how) => {
-    if (how === 'stop' && !confirm(`Stop the ${plural(w.used, 'running minion turn')} now? Each carries on where it was after Resume. Taskmasters keep running.`)) return;
+    if (how === 'stop' && !confirm(`Stop the ${plural(w.running, 'running minion turn')} now? Each carries on where it was after Resume. Taskmasters keep running.`)) return;
     set({ pause: how }, { paused: how ? { by: 'you', at: Date.now(), ...(how === 'stop' ? { stop: true } : {}) } : null }, how ? 'pause minions' : 'resume minions');
   };
   const setLimit = (row, value) => {
@@ -96,7 +96,7 @@ export function workersPanel(page) {
     if (!w) return el.replaceChildren(h('h4', {}, 'Workers'), h('b', { class: 'st-value' }, failed ? `Couldn't read it: ${failed}` : 'Reading…'));
     const { pool } = w;
     const changed = w.limits.filter((l) => l.by).length;
-    const value = `${w.used} of ${w.size} working${w.waiting ? ` · ${w.waiting} waiting` : ''}`;
+    const value = `${w.used} of ${w.size} working${w.lent ? ` · ${w.lent} waiting on a card` : ''}${w.waiting ? ` · ${w.waiting} waiting` : ''}`;
     const size = pool.fixed ? `Set to ${pool.fixed.size} by ${pool.fixed.by}` : `Auto, between ${w.min} and ${w.max}${pool.why ? `: moved to ${pool.size} ${ago(pool.at)}, ${pool.why}` : ''}`;
     const sizes = [...new Set([...SIZES, ...(pool.fixed ? [pool.fixed.size] : [])])].sort((a, b) => a - b);
     const pick = h(
@@ -141,7 +141,13 @@ export function workersPanel(page) {
       h(
         'div',
         { class: 'hue-rows st-line-rows' },
-        ...w.people.map((p) => hueRow({ hue: p.used ? 'running' : 'waiting', lead: String(p.used), meta: h('span', { class: 'muted small' }, `${p.waiting ? `${p.waiting} waiting` : ''}${p.stalled ? ' · held: container full' : ''}`) }, p.name, h('span', { class: 'muted' }, p.used ? ' working' : ''))),
+        ...w.people.map((p) =>
+          hueRow(
+            { hue: p.used ? 'running' : 'waiting', lead: String(p.used), meta: h('span', { class: 'muted small' }, [p.lent && `${p.lent} waiting on a card`, p.waiting && `${p.waiting} waiting`, p.stalled && 'held: container full'].filter(Boolean).join(' · ')) },
+            p.name,
+            h('span', { class: 'muted' }, p.used ? ' working' : ''),
+          ),
+        ),
       ),
     );
     if (focused) el.querySelector(`[data-key="${CSS.escape(focused)}"]`)?.focus();

@@ -17,6 +17,8 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { args, mcpConfig, settings, toolNamesPrompt, userLine } from './contraption-args.ts';
+import { thrown } from './thrown.ts';
+import { blocks, type ClaudeEvent } from './claude-events.ts';
 
 export const TURN_CAP = 60;
 const TURN_TIMEOUT_MS = 300_000;
@@ -52,7 +54,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 /** How alike two inputs are: top-level keys with equal values. */
 function likeness(a: unknown, b: unknown): number {
   if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return same(a, b) ? 1 : 0;
-  return Object.keys(a).filter((k) => same((a as any)[k], (b as any)[k])).length;
+  return Object.keys(a).filter((k) => same((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])).length;
 }
 
 /**
@@ -80,7 +82,7 @@ async function stub(file: string, server: string, turn: number, toolsFile: strin
   const used = new Set<object>();
   const send = (m: object) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');
   for await (const line of createInterface({ input: process.stdin })) {
-    let m: any;
+    let m: { id?: unknown; method?: string; params?: { protocolVersion?: string; name?: unknown; arguments?: Record<string, unknown> } };
     try {
       m = JSON.parse(line);
     } catch {
@@ -155,7 +157,7 @@ async function side(o: Opts, file: string, chat: Kept[], system: string, toolsFi
       };
       // The stub runs in the work folder, so its paths must be absolute.
       // shortcut: the machines note real turns add isn't rebuilt, and Agent runs without its cap's hook; add them if replays of those apps matter.
-      const config = mcpConfig(0, []);
+      const config: { mcpServers: Record<string, object> } = mcpConfig(0, []);
       for (const s of t.servers) {
         const url = o.mcp.get(s);
         config.mcpServers[s] = url ? { type: 'http', url } : { type: 'stdio', command: process.execPath, args: [import.meta.filename, 'stub', resolve(file), '--server', s, '--turn', String(t.n), ...(toolsFile ? ['--tools', resolve(toolsFile)] : [])] };
@@ -192,7 +194,7 @@ function claude(bin: string, argv: string[], cwd: string, prompt: string): Promi
     child.stdin.on('error', () => {});
     child.stdin.write(userLine(prompt));
     createInterface({ input: child.stdout }).on('line', (line) => {
-      let ev: any;
+      let ev: ClaudeEvent;
       try {
         ev = JSON.parse(line);
       } catch {
@@ -200,17 +202,17 @@ function claude(bin: string, argv: string[], cwd: string, prompt: string): Promi
       }
       if (ev.parent_tool_use_id) return; // a Grunt's own words and calls
       if (ev.type === 'system' && ev.subtype === 'init') {
-        const down = (ev.mcp_servers ?? []).filter((m: any) => m?.status !== 'connected').map((m: any) => `${m?.name} ${m?.status}`);
+        const down = (ev.mcp_servers ?? []).filter((m) => m?.status !== 'connected').map((m) => `${m?.name} ${m?.status}`);
         if (down.length) error = `MCP server not connected: ${down.join(', ')}`;
       } else if (ev.type === 'assistant') {
-        for (const b of ev.message?.content ?? []) {
+        for (const b of blocks(ev.message?.content)) {
           if (b?.type === 'text' && b.text) text += (text ? '\n\n' : '') + b.text;
           if (b?.type === 'tool_use') calls.set(String(b.id), { name: String(b.name), input: b.input, ok: null, result: null });
         }
       } else if (ev.type === 'user') {
-        for (const b of Array.isArray(ev.message?.content) ? ev.message.content : []) {
+        for (const b of blocks(ev.message?.content)) {
           const call = b?.type === 'tool_result' ? calls.get(String(b.tool_use_id)) : undefined;
-          if (call) Object.assign(call, { ok: !b.is_error, result: typeof b.content === 'string' ? b.content : (b.content ?? []).map((x: any) => x?.text ?? '').join('\n') });
+          if (call) Object.assign(call, { ok: !b.is_error, result: typeof b.content === 'string' ? b.content : (b.content ?? []).map((x) => x?.text ?? '').join('\n') });
         }
       } else if (ev.type === 'result') {
         cost = Number(ev.total_cost_usd) || 0;
@@ -339,8 +341,8 @@ async function main() {
       overCap: flags.has('--over-cap'),
       claude: process.env.CLAUDE_BIN || 'claude',
     });
-  } catch (err: any) {
-    console.error(`citadel-replay: ${err.message}`);
+  } catch (err) {
+    console.error(`citadel-replay: ${thrown(err).message}`);
     process.exit(1);
   }
 }

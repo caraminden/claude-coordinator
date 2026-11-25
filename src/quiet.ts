@@ -7,6 +7,7 @@
 // timeout when that is later (a test run with a 10 min timeout is not quiet until 12 min).
 import { readdirSync, readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
+import type { ContentBlock } from './claude-events.ts';
 
 export const QUIET_MS = 5 * 60_000;
 export const GRACE_MS = 2 * 60_000;
@@ -31,26 +32,26 @@ export interface Activity {
 }
 
 /** How long a tool call may run before its silence counts against it: its own timeout where it has one. */
-export function toolLimit(name: string, input: any): number {
+export function toolLimit(name: string, input: ContentBlock['input']): number {
   if (input?.run_in_background) return 0;
-  if (name === 'Bash') return Math.min(BASH_MAX_MS, Number(input?.timeout) > 0 ? Number(input.timeout) : BASH_MS);
+  if (name === 'Bash') return Math.min(BASH_MAX_MS, Number(input?.timeout) > 0 ? Number(input?.timeout) : BASH_MS);
   if (name.startsWith('mcp__')) return MCP_MS;
   return 0;
 }
 
 /** A tool call in words, short: "Bash: npm test", "Read: src/db.ts". */
-export function toolWords(name: string, input: any): string {
+export function toolWords(name: string, input: ContentBlock['input'] | null): string {
   const arg = input?.description ?? input?.command ?? input?.file_path ?? input?.pattern ?? input?.url ?? input?.query ?? '';
   const short = String(arg).split('\n')[0].slice(0, 80);
   return short ? `${name}: ${short}` : name;
 }
 
 /** Note a stream event (the main thread's or a Grunt's): any line is a sign of life; tool calls open, their results close. */
-export function noteEvent(a: Activity, ev: any, now: number): Activity {
+export function noteEvent(a: Activity, ev: { type?: string; message?: { content?: unknown } }, now: number): Activity {
   let tools = a.tools;
-  const blocks: any[] = Array.isArray(ev?.message?.content) ? ev.message.content : [];
+  const blocks: ContentBlock[] = Array.isArray(ev?.message?.content) ? ev.message.content : [];
   if (ev?.type === 'assistant') {
-    const opened = blocks.filter((b) => b?.type === 'tool_use' && typeof b.id === 'string').map((b) => ({ id: b.id, name: String(b.name ?? ''), label: toolWords(String(b.name ?? ''), b.input), started: now, limit: toolLimit(String(b.name ?? ''), b.input) }));
+    const opened = blocks.filter((b): b is ContentBlock & { id: string } => b?.type === 'tool_use' && typeof b.id === 'string').map((b) => ({ id: b.id, name: String(b.name ?? ''), label: toolWords(String(b.name ?? ''), b.input ?? null), started: now, limit: toolLimit(String(b.name ?? ''), b.input) }));
     if (opened.length) tools = [...tools, ...opened];
   } else if (ev?.type === 'user') {
     const done = new Set(blocks.filter((b) => b?.type === 'tool_result').map((b) => b.tool_use_id));
@@ -72,7 +73,7 @@ export interface ProcCheck {
   verdict: 'busy' | 'idle' | 'gone' | 'unknown';
   /** One line for the popover. */
   text: string;
-  /** The longest-running command under the turn, if any. */
+  /** The longest-running command under the turn, if it has one. */
   command?: string;
   /** How long it has run, ms. */
   ranMs?: number;

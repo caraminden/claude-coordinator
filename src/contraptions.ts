@@ -178,7 +178,7 @@ export class Contraptions {
    */
   mine(uid: number) {
     return Promise.all(
-      inOrder(this.store.contraptionsFor(uid), (c) => c.name, this.store.listOrder(uid, 'apps')).map(async (c) => {
+      inOrder(this.store.contraptionsFor(uid), (c: ContraptionRow) => c.name, this.store.listOrder(uid, 'apps')).map(async (c: ContraptionRow) => {
         const deployed = this.store.listContraptionDeploys(c.name, 1, 'deployed')[0]?.finished_at;
         return {
           name: c.name,

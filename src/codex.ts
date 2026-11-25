@@ -54,7 +54,7 @@ export function fitLog(parts: Part[], max = HANDOVER_MAX): string {
     .join('\n');
 }
 
-export const blockText = (c: any): string => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => (b?.type === 'text' ? String(b.text ?? '') : b?.type === 'image' ? '[image]' : `[${b?.type ?? 'block'}]`)).join('\n') : '');
+export const blockText = (c: unknown): string => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => (b?.type === 'text' ? String(b.text ?? '') : b?.type === 'image' ? '[image]' : `[${b?.type ?? 'block'}]`)).join('\n') : '');
 
 /**
  * The [System] note that opens each turn message with a minion's own lines, or the Citadel Taskmaster's every-scheme
@@ -63,8 +63,16 @@ export const blockText = (c: any): string => (typeof c === 'string' ? c : Array.
  */
 export const isTurnNote = (text: string): boolean => ['You are a minion working on #', 'You can read every scheme, read-only', "git in other schemes' folders"].some((p) => text.startsWith(`[System]: ${p}`));
 
+/** What saveGenerated reads of a Codex imageGeneration item. */
+export interface GeneratedImage {
+  savedPath?: unknown;
+  result?: unknown;
+  status?: unknown;
+  failure?: { type?: unknown; resetsAt?: number } | null;
+}
+
 /** A tool call as one log line: a Bash command as it is, anything else as its JSON input. */
-export function callLine(name: string, input: any): string {
+export function callLine(name: string, input?: { command?: unknown }): string {
   if (name === 'Bash' && typeof input?.command === 'string') return `[Bash] ${input.command}`;
   return `[${name}] ${JSON.stringify(input ?? {})}`;
 }
@@ -87,7 +95,7 @@ export function claudeParts(jsonl: string): Part[] {
   });
   const parts: Part[] = [];
   for (const l of lines.slice(from)) {
-    let e: any;
+    let e: { type?: unknown; isSidechain?: unknown; isCompactSummary?: unknown; message?: { content?: unknown } };
     try {
       e = JSON.parse(l);
     } catch {
@@ -188,7 +196,7 @@ export function codexResetAt(u: CodexUsage | null | undefined): number | null {
  * inline base64 (#716, #733). Without `overwrite`, never over anything already at `to`, a link included.
  * Throws why there is none, a used-up image limit included.
  */
-export function saveGenerated(item: any, to: string, overwrite = true): void {
+export function saveGenerated(item: GeneratedImage | null | undefined, to: string, overwrite = true): void {
   if (typeof item?.savedPath === 'string' && existsSync(item.savedPath)) return copyFileSync(item.savedPath, to, overwrite ? 0 : constants.COPYFILE_EXCL);
   if (typeof item?.result === 'string' && item.result) return writeFileSync(to, Buffer.from(item.result, 'base64'), { flag: overwrite ? 'w' : 'wx' });
   const at = item?.failure?.resetsAt ? ` until ${new Date(item.failure.resetsAt * 1000).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}` : ''; // pacific-ok: codex.ts is pinned alone into a turn folder, so it imports no other src file

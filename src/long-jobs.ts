@@ -75,13 +75,14 @@ const same = (a: string | null, b: string) => a?.toLowerCase() === b.toLowerCase
 const dur = (ms: number) => (ms < 3600_000 ? `${Math.max(1, Math.round(ms / 60_000))} min` : `${(ms / 3600_000).toFixed(1)} h`);
 
 /** A job file as a turn wrote it, or null when it isn't one: it comes from a turn, so every field is checked. */
-export function cleanJob(raw: any): LongJob | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const str = (v: unknown, max: number) => typeof v === 'string' && v.length > 0 && v.length <= max;
-  if (!str(raw.id, 60) || !ID.test(raw.id) || !Number.isInteger(raw.ticket) || raw.ticket <= 0) return null;
+export function cleanJob(value: unknown): LongJob | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<Record<keyof LongJob, unknown>>;
+  const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max;
+  if (!str(raw.id, 60) || !ID.test(raw.id) || typeof raw.ticket !== 'number' || !Number.isInteger(raw.ticket) || raw.ticket <= 0) return null;
   if (!str(raw.slug, 200) || !/^[\w.-]+\/[\w.-]+$/.test(raw.slug) || !str(raw.sha, 40) || !/^[0-9a-f]{40}$/.test(raw.sha)) return null;
   if (!str(raw.command, 20_000) || !str(raw.what, 200) || !str(raw.who, 200) || !Number.isFinite(raw.queued_at)) return null;
-  if (!['queued', 'dispatched', 'running', 'done', 'failed', 'lost'].includes(raw.state)) return null;
+  if (!['queued', 'dispatched', 'running', 'done', 'failed', 'lost'].includes(raw.state as string)) return null;
   return raw as LongJob;
 }
 
@@ -207,7 +208,7 @@ export class LongJobs {
   private async watch(j: LongJob, projectId: number) {
     if (!j.run_id) {
       const runs = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=100`])).workflow_runs ?? [];
-      const run = runs.find((r: any) => r.display_title === `heavy ${j.id}`);
+      const run = runs.find((r: Record<string, unknown>) => r.display_title === `heavy ${j.id}`);
       if (!run) {
         if (this.now() - (j.dispatched_at ?? 0) < NO_RUN_MS) return;
         if ((j.tries ?? 0) >= MAX_TRIES) {

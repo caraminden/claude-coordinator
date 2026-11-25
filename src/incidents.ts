@@ -18,6 +18,8 @@ import type { GithubEnv } from './scheme-repo.ts';
 import { ZONE, clockTime, pacific, pacificDay } from './pacific.ts';
 import { HEALTH_KIND, keptChecks } from './standing-checks.ts';
 import { PLANNED } from './sd-watchdog.ts';
+import { thrown } from './thrown.ts';
+import type { GhJobsBody, GhRun, GhRunsBody } from './gh-bodies.ts';
 
 const run = promisify(execFile);
 const MIN = 60_000;
@@ -329,8 +331,8 @@ export async function gather(store: IncidentStore, src: Sources, from: number, t
       const { list, said } = await get();
       entries.push(...list);
       read[name] = said;
-    } catch (err: any) {
-      read[name] = `not read: ${clip(oneLine(String(err?.message ?? err)), 200)}`;
+    } catch (err) {
+      read[name] = `not read: ${clip(oneLine(String(thrown(err).message ?? err)), 200)}`;
     }
   };
   await take('health_events', async () => {
@@ -549,20 +551,21 @@ export async function readDeploys(liveDir: string, from: number, to: number): Pr
 /** The repo's workflow runs created in the window, and each failed one's failed job, step and runner. */
 export async function readCiRuns(get: GhGet, slug: string, as: GithubEnv, from: number, to: number, maxFailed = 80): Promise<CiRun[]> {
   const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z');
-  const raw: any[] = [];
+  const raw: GhRun[] = [];
   for (let page = 1; page <= 5; page++) {
     const a = await get(`repos/${slug}/actions/runs?created=${iso(from)}..${iso(to)}&per_page=100&page=${page}`, null, as);
     if (a.status !== 200) throw new Error(`GitHub answered ${a.status} for ${slug}'s runs`);
-    const runs = Array.isArray(a.body?.workflow_runs) ? a.body.workflow_runs : [];
+    const body = a.body as GhRunsBody | null;
+    const runs = Array.isArray(body?.workflow_runs) ? body.workflow_runs : [];
     raw.push(...runs);
     if (runs.length < 100) break;
   }
   const out: CiRun[] = raw.map((r) => ({ id: r.id, workflow: r.name ?? 'a workflow', branch: r.head_branch ?? '', conclusion: r.conclusion ?? null, created: Date.parse(r.created_at), updated: Date.parse(r.updated_at ?? r.created_at), url: r.html_url ?? `https://github.com/${slug}/actions/runs/${r.id}` }));
   for (const r of out.filter((x) => x.conclusion === 'failure').slice(0, maxFailed)) {
     const a = await get(`repos/${slug}/actions/runs/${r.id}/jobs?per_page=50`, null, as).catch(() => null);
-    const job = (a?.body?.jobs ?? []).find((j: any) => j.conclusion === 'failure');
+    const job = ((a?.body as GhJobsBody | null)?.jobs ?? []).find((j) => j.conclusion === 'failure');
     if (!job) continue;
-    const stepName = (job.steps ?? []).find((s: any) => s.conclusion === 'failure')?.name;
+    const stepName = (job.steps ?? []).find((s) => s.conclusion === 'failure')?.name;
     r.failed = `${job.name}${stepName ? ` › ${stepName}` : ''}`;
     r.runner = job.runner_name ?? null;
   }

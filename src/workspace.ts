@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { asEnv, identity, type GithubEnv } from './scheme-repo.ts';
 import { restoreSaved } from './worktree-sweep.ts';
+import { thrown } from './thrown.ts';
 
 const run = promisify(execFile);
 const GIT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -90,9 +91,9 @@ export async function catchUpMain(repoDir: string): Promise<string | null> {
   if (await git(['status', '--porcelain', '--untracked-files=no'], repoDir)) return 'the checkout has uncommitted changes';
   try {
     await git(['merge', '--ff-only', '--quiet', origin], repoDir);
-  } catch (err: any) {
+  } catch (err) {
     return `the fast-forward failed: ${
-      String(err.stderr || err.message)
+      String(thrown(err).stderr || thrown(err).message)
         .trim()
         .split('\n')[0]
     }`;

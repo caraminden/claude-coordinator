@@ -128,7 +128,7 @@ export interface SchemeRefsConfig {
 export { SCHEME_REFS_MATCHER } from './hook-matchers.ts';
 
 /** The PreToolUse hook's answer: a deny with the reason, or null to let the call through. */
-export function checkCall(input: { tool_name?: string; tool_input?: any }, cfg: SchemeRefsConfig) {
+export function checkCall(input: { tool_name?: string; tool_input?: unknown }, cfg: SchemeRefsConfig) {
   const refs = readRefs(cfg.refs);
   if (!refs) return null;
   const sent = readSent<number>(cfg.sent);

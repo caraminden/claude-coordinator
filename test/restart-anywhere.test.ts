@@ -29,8 +29,7 @@
 // (Store.setSettings).
 import assert from 'node:assert/strict';
 import { createHook } from 'node:async_hooks';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { gzipSync } from 'node:zlib';
@@ -42,11 +41,13 @@ import { RESUME_PROMPT } from '../src/prompts.ts';
 import { Runner } from '../src/runner.ts';
 import { chainedStep, LiveWaiters, TimedWakes } from '../src/wake.ts';
 import { releaseFake, stopTurns, testPins, followed } from './helpers.ts';
+import { pickRoot } from './shm-root.ts';
 import { until } from './wait.ts';
 testPins();
 
 // The copies are many and small: on tmpfs a copy and a reopen take ~25 ms, on a busy disk ~125 ms.
-const root = mkdtempSync(join(existsSync('/dev/shm') ? '/dev/shm' : tmpdir(), 'restart-anywhere-'));
+// A cut-off run leaves its folder behind and fills /dev/shm (63M in a container): pickRoot falls back to disk when it is short.
+const root = pickRoot('restart-anywhere-');
 after(async () => {
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });

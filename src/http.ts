@@ -358,7 +358,7 @@ export interface App {
   ciTests?: (repo: string, runId: number, c: TestCounts) => void;
   /** Numbers the schemes' CI sends per run, kept for months and flagged on a step up (src/ci-numbers.ts, #1369). */
   ciNumbers: CiNumbers;
-  /** Jobs for the CI runner agent on Cara's desktop: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */
+  /** Jobs for the CI runner agent on a CI PC: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */
   runnerJobs: RunnerJobs;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */
   claude: ClaudeLink;
@@ -457,7 +457,7 @@ export interface Route {
    * path's :project must be its home_scheme (#665, so a contraption reads its own scheme's CI files).
    */
   homeContraption?: true;
-  /** A GET the Citadel scheme's Taskmaster may make in any scheme, on a turn a Citadel member or admin asked for (#656). */
+  /** A GET the Citadel scheme's Taskmaster may make in every scheme, on a turn a Citadel member or admin asked for (#656). */
   everyScheme?: true;
   handler(ctx: Ctx): unknown;
 }

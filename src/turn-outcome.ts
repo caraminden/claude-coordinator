@@ -20,7 +20,7 @@ export function isNetworkFailure(text: string): boolean {
   return NETWORK_ERROR.test(text) && !isAuthFailure(text) && !/\b(status|API Error:) [1-5]\d\d\b/i.test(text);
 }
 
-export type Kind = 'ok' | 'stopped' | 'paused' | 'closing' | 'limit' | 'net' | 'switch-account' | 'account-error' | 'killed' | 'failed';
+export type Kind = 'ok' | 'stopped' | 'paused' | 'card' | 'closing' | 'limit' | 'net' | 'switch-account' | 'account-error' | 'killed' | 'failed';
 
 /**
  * What an ending sets off besides its kind. A turn that ended well: `cleared` (its failure note, the limits it proved
@@ -65,6 +65,8 @@ export interface EndedTurn {
   stopped?: true;
   /** A pause stopped it to carry on later (#1868). */
   paused?: true;
+  /** Ended while only its approval card waited: the answer resumes it (#1916). */
+  card?: true;
   closing?: string | null;
   result?: { error: boolean; text: string | null };
   fresh?: string;
@@ -144,6 +146,7 @@ export function outcome(end: TurnEnd): Outcome {
   const base = { reason: null, killed: null, authFailed: false };
   if (end.cut) return cutOutcome(turn, r, end.cut.rerun);
   if (stopped) return { kind: 'stopped', followUps: [], ...base };
+  if (turn?.card) return { kind: 'card', followUps: [], ...base };
   // Not the turn's doing, so it counts towards no cap.
   if (turn?.paused) return { kind: 'paused', followUps: [], ...base, retry: { via: 'restart', retries: r } };
   const code = exit?.code ?? null;
@@ -196,6 +199,7 @@ export function outcome(end: TurnEnd): Outcome {
 function cutOutcome(turn: EndedTurn | null, r: Retries, rerun: boolean): Outcome {
   const base = { reason: null, killed: null, authFailed: false };
   if (turn?.stopped) return { kind: 'stopped', followUps: [], ...base };
+  if (turn?.card) return { kind: 'card', followUps: [], ...base };
   if (rerun) return { kind: 'killed', followUps: ['rerun'], ...base };
   // Its reply is in (a kill after a good result line): ended as the watched path ends it, killed with no resume (2A1).
   // An error result (a limit, say) left the work undone, so it still resumes.

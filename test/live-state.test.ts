@@ -60,6 +60,11 @@ test('an approval card is what it waits on, not the model', () => {
   assert.match(text, /No tool calls in this turn\./);
 });
 
+test('a card kept past its turn is what it waits on (#1916)', () => {
+  const text = liveState({ ...minion, status: 'idle', turnStartedAt: null, approvals: 1 }, [init(0)], T0 + 5_000).join('\n');
+  assert.match(text, /^waiting on: a person: 1 approval card/m);
+});
+
 test("a minion with no turn running says so, and a call its turn never answered isn't shown as running", () => {
   const events = [init(0), use(5, 'a', 'Bash', { command: 'sleep 999' }), ev(9, { type: 'result', subtype: 'error' })];
   const text = liveState({ ...minion, status: 'idle', state: 'ready', turnStartedAt: null }, events, T0 + 60_000).join('\n');

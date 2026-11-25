@@ -27,7 +27,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { saveGenerated } from './codex.ts';
+import { saveGenerated, type GeneratedImage } from './codex.ts';
 import { codexLock } from './codex-lock.ts';
 import { jsonLines } from './json-lines.ts';
 
@@ -72,6 +72,27 @@ export interface RateWindow {
 export interface RateLimits {
   primary?: RateWindow | null;
   secondary?: RateWindow | null;
+}
+/** One line of codex app-server's JSON-RPC, as runTurn reads it (parsed, not checked). */
+interface RpcMessage {
+  id?: unknown;
+  method?: string;
+  error?: { message?: string } | null;
+  result?: RpcResult;
+  params?: {
+    rateLimits?: RateLimits | null;
+    item?: GeneratedImage & { type?: string; text?: unknown };
+    run?: { status?: string; entries?: ({ text?: unknown } | null)[] };
+    willRetry?: boolean;
+    error?: { message?: string } | null;
+    turn?: { status?: string; error?: { message?: string } | null };
+  };
+}
+/** What the calls runTurn makes answer: account/rateLimits/read and thread/start. */
+interface RpcResult {
+  rateLimitsByLimitId?: Record<string, RateLimits> | null;
+  rateLimits?: RateLimits | null;
+  thread?: { id: string };
 }
 
 /** Past this much of a window, reviews leave the rest for the person's own Codex work. */
@@ -172,8 +193,8 @@ export function outPath(p: string | undefined, cwd: string, overwrite: boolean, 
       )
     )
       return { error: outside };
-  } catch (err: any) {
-    return { error: `can't make the folder for ${p}: ${err.message}` };
+  } catch (err) {
+    return { error: `can't make the folder for ${p}: ${(err as Error).message}` };
   }
   return { path };
 }
@@ -224,15 +245,15 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
   let imageCfg: string | null = null;
   try {
     imageCfg = gen ? imageConfig(env) : null;
-  } catch (err: any) {
-    return Promise.resolve({ code: 1, text: `Couldn't write the image run's tripwire config: ${err.message}`, usage: '' });
+  } catch (err) {
+    return Promise.resolve({ code: 1, text: `Couldn't write the image run's tripwire config: ${(err as Error).message}`, usage: '' });
   }
   const child = spawn(bin, ['app-server', '-c', 'cli_auth_credentials_store="file"', '-c', 'history.persistence="none"', ...(gen ? ['-c', 'features.shell_tool=false'] : [])], { cwd: opts.cwd, env: imageCfg ? { ...env, CITADEL_CODEX_TRIPWIRE: imageCfg } : env, stdio: ['pipe', 'pipe', 'pipe'] });
   let nextId = 1;
-  const waiting = new Map<number, (msg: any) => void>();
+  const waiting = new Map<unknown, (msg: RpcMessage) => void>();
   const send = (msg: object) => child.stdin.write(JSON.stringify(msg) + '\n');
   const call = (method: string, params: object) =>
-    new Promise<any>((resolve, reject) => {
+    new Promise<RpcResult | undefined>((resolve, reject) => {
       const id = nextId++;
       waiting.set(id, (msg) => (msg.error ? reject(new Error(`${method}: ${msg.error.message ?? JSON.stringify(msg.error)}`)) : resolve(msg.result)));
       send({ id, method, params });
@@ -259,13 +280,13 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
     const timer = setTimeout(() => finish(124, `Codex didn't finish the ${gen ? 'image' : 'review'} within ${Math.round(opts.timeoutMs / 1000)} s.${last ? `\nIts last message:\n${last}` : ''}`), opts.timeoutMs);
     child.on('error', (err) => finish(3, `Couldn't start ${bin}: ${err.message}`));
     child.on('exit', (code) => finish(1, `codex app-server exited (${code}) before the ${gen ? 'image' : 'review'} finished.${tail(stderr)}`));
-    jsonLines<any>(child.stdout, (msg) => {
+    jsonLines<RpcMessage>(child.stdout, (msg) => {
       if (msg.id !== undefined && msg.method === undefined) {
         waiting.get(msg.id)?.(msg);
         waiting.delete(msg.id);
       } else if (msg.id !== undefined) {
         // A request from Codex: decline approvals, refuse the rest (no one is there to answer).
-        if (/requestApproval$|^(applyPatch|execCommand)Approval$/.test(msg.method)) send({ id: msg.id, result: { decision: 'decline' } });
+        if (/requestApproval$|^(applyPatch|execCommand)Approval$/.test(String(msg.method))) send({ id: msg.id, result: { decision: 'decline' } });
         else send({ id: msg.id, error: { code: -32601, message: `${msg.method} isn't available in a read-only review` } });
       } else if (msg.method === 'account/rateLimits/updated') {
         limits = msg.params?.rateLimits ?? limits;
@@ -275,8 +296,8 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
         try {
           saveGenerated(msg.params.item, gen.out, gen.overwrite === true);
           saved = gen.out;
-        } catch (err: any) {
-          errors.push(err.message);
+        } catch (err) {
+          errors.push((err as Error).message ?? String(err));
         }
       } else if (msg.method === 'hook/completed' && msg.params?.run?.status === 'blocked') {
         // The hook's own deny reason, word for word, ahead of Codex's paraphrase of it (#738).
@@ -297,7 +318,7 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
       await call('initialize', { clientInfo: { name: 'citadel-codex-review', version: '1' }, capabilities: { experimentalApi: false, requestAttestation: false } });
       send({ method: 'initialized' });
       // An account without ChatGPT limits (or an older backend) can't answer: review anyway.
-      const read = (await Promise.race([call('account/rateLimits/read', { excludeResetCreditDetails: true }), sleep(15_000, undefined, { ref: false })]).catch(() => null)) as any;
+      const read = (await Promise.race([call('account/rateLimits/read', { excludeResetCreditDetails: true }), sleep(15_000, undefined, { ref: false })]).catch(() => null)) as RpcResult | null | undefined;
       limits = read?.rateLimitsByLimitId?.codex ?? read?.rateLimits ?? null;
       // shortcut: an image run also paces against any limit whose id names images (a failed generation carries its own limitId); the id isn't documented, so check it on a real read.
       const imageLimits = gen
@@ -307,10 +328,10 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
         : [];
       const why = [limits, ...imageLimits].map((l) => overPace(l, opts.now?.(), !gen)).find(Boolean);
       if (why) return finish(4, `Skipped to save your Codex plan: ${why}.`);
-      const { thread } = await call('thread/start', { cwd: opts.cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true, developerInstructions: gen ? IMAGE_INSTRUCTIONS : DEVELOPER_INSTRUCTIONS });
+      const { thread } = (await call('thread/start', { cwd: opts.cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true, developerInstructions: gen ? IMAGE_INSTRUCTIONS : DEVELOPER_INSTRUCTIONS }))!;
       // An image run names its references for image_gen to read, rather than attaching them to the chat.
       const input = gen ? [{ type: 'text', text: imageBrief(brief, gen.transparent, opts.images ?? []), text_elements: [] }] : [{ type: 'text', text: brief, text_elements: [] }, ...(opts.images ?? []).map((path) => ({ type: 'localImage', path }))];
-      await call('turn/start', { threadId: thread.id, input });
+      await call('turn/start', { threadId: thread!.id, input });
     })().catch((err) => finish(1, `${err.message}${tail(stderr)}`));
   });
 }
@@ -403,9 +424,9 @@ export function inContainer(args: string[], cfg: CodexConfig & { container: Revi
       cpSync(kit, join(dir, 'kit'), { recursive: true });
       brief = brief.replaceAll(kit, join(dir, 'kit'));
     }
-  } catch (err: any) {
+  } catch (err) {
     if (dir) rmSync(dir, { recursive: true, force: true });
-    return Promise.resolve(fail(check, `Couldn't set up the review for Codex's container (${c.name}): ${err.message}`));
+    return Promise.resolve(fail(check, `Couldn't set up the review for Codex's container (${c.name}): ${(err as Error).message}`));
   }
   const driver = join(dir, basename(fileURLToPath(import.meta.url)));
   // The shared folders too, so the copy can check --image paths against them (the container mounts them at the same paths).
@@ -434,7 +455,7 @@ export function inContainer(args: string[], cfg: CodexConfig & { container: Revi
       child.stdin!.end(brief);
     }
     for (const s of SIGNALS) process.on(s, stop);
-    child.stderr.on('data', (b) => {
+    child.stderr!.on('data', (b) => {
       if (!check) process.stderr.write(b);
       stderr = (stderr + b).slice(-4000);
     });

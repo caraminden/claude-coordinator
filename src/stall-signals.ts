@@ -6,6 +6,7 @@
 // the same signals across minions.
 import type { Store, Ticket } from './db.ts';
 import { nextStep, tierLabel } from '../public/model-table.js';
+import type { ClaudeEvent, ContentBlock } from './claude-events.ts';
 
 /** Thresholds, from the handoff (starting values: the two-week read says whether they hold). */
 export const RED_TIMES = 3;
@@ -45,10 +46,10 @@ export function failingTests(output: string): string[] {
 }
 
 /** The files an edit tool call writes (Claude's edit tools, or a Codex turn's apply_patch: `files: ['update <path>']`). */
-export function editedFiles(block: any): string[] {
+export function editedFiles(block: ContentBlock): string[] {
   if (block?.type !== 'tool_use') return [];
   if (block.name === 'apply_patch') return (Array.isArray(block.input?.files) ? block.input.files : []).map((f: unknown) => String(f).replace(/^\S+ /, '')).filter(Boolean);
-  if (!['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(block.name)) return [];
+  if (!['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(block.name ?? '')) return [];
   const p = block.input?.file_path ?? block.input?.notebook_path;
   return typeof p === 'string' && p ? [p] : [];
 }
@@ -86,16 +87,16 @@ const base = (p: string) => p.split('/').slice(-2).join('/');
  * Feed one stream event (slimmed, as the runner stores it) into a minion's counts. Returns the signals this event pushed
  * over a threshold (each fires once, on the event that reaches it). `changed` tells the caller whether to save the state.
  */
-export function observe(s: StallState, ev: any): { signals: Signal[]; changed: boolean } {
+export function observe(s: StallState, ev: ClaudeEvent): { signals: Signal[]; changed: boolean } {
   const signals: Signal[] = [];
   let changed = false;
   if (ev?.parent_tool_use_id || !Array.isArray(ev?.message?.content)) return { signals, changed };
   for (const b of ev.message.content) {
     if (ev.type === 'assistant' && b?.type === 'tool_use') {
       // A ship the minion runs itself (the land tool, or land.sh in a build's own turn) counts like a handed-off one.
-      const ship = b.name === 'mcp__thread__land' || (b.name === 'Bash' && LAND.test(b.input?.command ?? ''));
+      const ship = b.name === 'mcp__thread__land' || (b.name === 'Bash' && LAND.test((b.input?.command as string | undefined) ?? ''));
       if (ship || (b.name === 'Bash' && typeof b.input?.command === 'string' && checkCommand(b.input.command))) {
-        s.pending[b.id] = ship ? SHIP : short(b.input.command, 200);
+        s.pending[b.id!] = ship ? SHIP : short(b.input!.command as string, 200);
         changed = true;
         continue;
       }
@@ -106,9 +107,9 @@ export function observe(s: StallState, ev: any): { signals: Signal[]; changed: b
         changed = true;
         if (s.rounds[file] === CHURN_ROUNDS) signals.push({ kind: 'file-churn', what: `${base(file)} edited after ${CHURN_ROUNDS} failed checks in a row`, evidence: [file] });
       }
-    } else if (ev.type === 'user' && b?.type === 'tool_result' && b.tool_use_id in s.pending) {
-      const cmd = s.pending[b.tool_use_id];
-      delete s.pending[b.tool_use_id];
+    } else if (ev.type === 'user' && b?.type === 'tool_result' && b.tool_use_id! in s.pending) {
+      const cmd = s.pending[b.tool_use_id!];
+      delete s.pending[b.tool_use_id!];
       changed = true;
       const out = typeof b.content === 'string' ? b.content : '';
       if (cmd === SHIP) {
@@ -171,7 +172,7 @@ export class StallWatch {
     this.d = d;
   }
 
-  observe(ticketId: number, ev: any) {
+  observe(ticketId: number, ev: ClaudeEvent) {
     if (ev?.type !== 'assistant' && ev?.type !== 'user') return;
     const s = this.d.store.getSetting<StallState>(stallKey(ticketId)) ?? emptyState();
     const { signals, changed } = observe(s, ev);

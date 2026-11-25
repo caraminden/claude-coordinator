@@ -2,17 +2,18 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
-import { connect } from 'node:net';
+import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
+import { thrown } from './thrown.ts';
 
 const run = promisify(execFile);
 
 export interface GhAnswer {
   status: number;
   etag: string | null;
-  body: any;
+  body: unknown;
 }
 export type GhGet = (path: string, etag: string | null, as: GithubEnv) => Promise<GhAnswer>;
 
@@ -97,8 +98,8 @@ export class GhHelpers {
     proc.stdin!.write(`${JSON.stringify({ socket, nonce, token, api: this.api, idleMs: this.idleMs })}\n`);
     // Unref'd: an idle helper never keeps the server's process from exiting; its stdin closing then ends it.
     proc.unref();
-    (proc.stdin as any).unref?.();
-    (proc.stdout as any).unref?.();
+    (proc.stdin as Partial<Socket>).unref?.();
+    (proc.stdout as Partial<Socket>).unref?.();
   }
 
   private drop(key: string, proc: ChildProcess) {
@@ -132,7 +133,7 @@ function ask(socket: string, nonce: string, path: string, etag: string | null): 
         if (typeof head.error === 'string') return done(null);
         if (typeof head.status !== 'number') throw new Error('helper gave no status');
         const rest = nl < 0 ? '' : all.subarray(nl + 1).toString('utf8');
-        let body: any = null;
+        let body: unknown = null;
         try {
           body = rest.trim() ? JSON.parse(rest) : null;
         } catch {}
@@ -200,16 +201,17 @@ export async function ghGet(path: string, etag: string | null, as: GithubEnv): P
   let out: string;
   try {
     ({ stdout: out } = await run('gh', ['api', '-i', path, ...(etag ? ['-H', `If-None-Match: ${etag}`] : [])], { env: asEnv(as), timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }));
-  } catch (err: any) {
+  } catch (err) {
     // gh exits 1 on a 304 or an error status, but still prints the answer.
-    out = typeof err?.stdout === 'string' ? err.stdout : '';
+    const { stdout } = thrown(err);
+    out = typeof stdout === 'string' ? stdout : '';
     if (!/^HTTP\/\S+ \d+/.test(out)) throw err;
   }
   const split = /\r?\n\r?\n/.exec(out);
   const head = split ? out.slice(0, split.index) : out;
   const rest = split ? out.slice(split.index + split[0].length) : '';
   const status = Number(/^HTTP\/\S+ (\d+)/.exec(head)?.[1] ?? 0);
-  let body: any = null;
+  let body: unknown = null;
   try {
     body = rest.trim() ? JSON.parse(rest) : null;
   } catch {}
@@ -223,8 +225,9 @@ export async function ghPost(path: string, as: GithubEnv, fields: Record<string,
   try {
     const { stdout } = await run('gh', ['api', '-i', '-X', 'POST', path, ...Object.entries(fields).flatMap(([k, v]) => ['-f', `${k}=${v}`])], { env: asEnv(as), timeout: 30_000 });
     return { status: Number(/^HTTP\/\S+ (\d+)/.exec(stdout)?.[1] ?? 0) };
-  } catch (err: any) {
-    const out = typeof err?.stdout === 'string' ? err.stdout : '';
+  } catch (err) {
+    const { stdout } = thrown(err);
+    const out = typeof stdout === 'string' ? stdout : '';
     if (!/^HTTP\/\S+ \d+/.test(out)) throw err;
     return { status: Number(/^HTTP\/\S+ (\d+)/.exec(out)![1]) };
   }

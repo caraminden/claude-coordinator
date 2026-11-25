@@ -47,10 +47,14 @@ export function visibleChars(content: unknown): number {
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
 
+/** A message's usage as the API sends it, unchecked: num() reads each count. */
+type RawUsage = Record<string, unknown> & { cache_creation?: { ephemeral_5m_input_tokens?: unknown; ephemeral_1h_input_tokens?: unknown } | null };
+
 /** One API message's input side in dollars, and its output price per token; null for a model without a price. */
-function inputSide(model: unknown, usage: any): { input: number; outPrice: number } | null {
+function inputSide(model: unknown, raw: unknown): { input: number; outPrice: number } | null {
   const p = priceFor(model);
-  if (!p || !usage || typeof usage !== 'object') return null;
+  if (!p || !raw || typeof raw !== 'object') return null;
+  const usage = raw as RawUsage;
   const cc = usage.cache_creation && typeof usage.cache_creation === 'object' ? usage.cache_creation : null;
   const w5 = cc ? num(cc.ephemeral_5m_input_tokens) : num(usage.cache_creation_input_tokens);
   const w1 = cc ? num(cc.ephemeral_1h_input_tokens) : 0;
@@ -59,7 +63,7 @@ function inputSide(model: unknown, usage: any): { input: number; outPrice: numbe
 }
 
 /** What one API message cost, from its usage, at the table above; 0 for a model without a price. */
-export function usageCost(model: unknown, usage: any): number {
+export function usageCost(model: unknown, usage: object & { output_tokens?: unknown }): number {
   const side = inputSide(model, usage);
   return side ? side.input + num(usage.output_tokens) * side.outPrice : 0;
 }
@@ -118,14 +122,14 @@ export class SpendMeter {
   }
 
   /** Count a stream event (a no-op for anything but an assistant message with usage); true if the estimate moved. */
-  add(ev: any): boolean {
+  add(ev: { type?: string; parent_tool_use_id?: string | null; message?: { id?: unknown; model?: unknown; usage?: unknown; content?: unknown } }): boolean {
     if (ev?.type !== 'assistant' || typeof ev.message?.id !== 'string') return false;
     const m = ev.message;
-    return this.addMessage(m.id, m.model, m.usage, visibleChars(m.content));
+    return this.addMessage(ev.message.id, m.model, m.usage as Record<string, unknown>, visibleChars(m.content));
   }
 
   /** Count one event of an API message: its usage (counted once per id) and `chars` more visible output. */
-  addMessage(id: string, model: unknown, usage: any, chars: number): boolean {
+  addMessage(id: string, model: unknown, usage: Record<string, unknown>, chars: number): boolean {
     let msg = this.messages.get(id);
     if (!msg) {
       const side = inputSide(model, usage);

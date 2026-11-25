@@ -21,7 +21,7 @@ export async function findPlugins(root: string): Promise<FoundPlugin[]> {
     const abs = rel ? join(root, rel) : root;
     const manifest = await readFile(join(abs, '.claude-plugin', 'plugin.json'), 'utf8').catch(() => null);
     if (manifest !== null && rel) {
-      let m: any = {};
+      let m: { name?: unknown; description?: unknown } = {};
       try {
         m = JSON.parse(manifest) ?? {};
       } catch {

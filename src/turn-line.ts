@@ -138,6 +138,8 @@ export interface LineHost {
   start(entry: LineEntry): void;
   /** Stop its running turn to carry on later; one already ending or not yet launched is left. */
   pauseTurn(ticketId: number): void;
+  /** Minions with no turn running that wait on an approval card, and whose share they come back to. */
+  carded(): { ticket: number; person: number }[];
   /** Who waits, or why they all do, changed. */
   changed(ids: number[]): void;
   readonly gapMs: number;
@@ -147,8 +149,11 @@ export interface LineHost {
 export class TurnLine {
   private host: LineHost;
   private entries: LineEntry[];
-  /** Workers in use: the minion, how many of its lane's steps count on it (an account switch queues its resume in its turn's end), and whose share. */
-  private granted = new Map<number, { steps: number; person: number }>();
+  /**
+   * Turns that run: the minion, how many of its lane's steps count on it (an account switch queues its resume in its turn's end), and whose
+   * share. A `lent` one only waits on an approval card, so its worker is back in the pool until the answer (#1916).
+   */
+  private granted = new Map<number, { steps: number; person: number; lent?: true }>();
   private admitting: number | null = null;
   private timer?: NodeJS.Timeout;
   /** Until a boot's resumes are in (open): the line takes turns in but starts none. */
@@ -163,7 +168,25 @@ export class TurnLine {
   }
 
   used(): number {
-    return this.granted.size;
+    return [...this.granted.values()].filter((g) => !g.lent).length;
+  }
+
+  /** The minions that wait on an approval card without a worker. */
+  lent(): number {
+    return this.granted.size - this.used() + this.carded().length;
+  }
+
+  /**
+   * Give a running turn's worker back while it only waits on an approval card, or take it again. Josh, 2026-11-24: "shouldnt a minion waiting on
+   * a card just release to the pool until the card is answered?" Taking it again never waits: the turn already goes on, over the size if need be.
+   */
+  setLent(ticketId: number, lent: boolean) {
+    const held = this.granted.get(ticketId);
+    if (!held || !!held.lent === lent) return;
+    if (lent) held.lent = true;
+    else delete held.lent;
+    this.ordered = null;
+    if (lent) this.pumpIn(0);
   }
 
   /** The waiting minions, first in first. */
@@ -201,11 +224,29 @@ export class TurnLine {
     return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null };
   }
 
-  /** Each person's workers and waiting turns, the most first. */
-  people(): { person: number; used: number; waiting: number; stalled?: true }[] {
-    const out = new Map([...this.byPerson()].map(([person, used]) => [person, { person, used, waiting: 0 }]));
-    for (const w of this.asked(this.entries)) out.set(w.person, { person: w.person, used: 0, ...out.get(w.person), waiting: (out.get(w.person)?.waiting ?? 0) + 1 });
-    return [...out.values()].map((p) => (this.full(p.person) ? { ...p, stalled: true as const } : p)).sort((a, b) => b.used + b.waiting - a.used - a.waiting || a.person - b.person);
+  /** Those whose process has ended too; one still ending counts as its turn. */
+  private carded() {
+    return this.host.carded().filter((c) => !this.granted.has(c.ticket));
+  }
+
+  /** Whether a person's container is at its memory limit. */
+  stalledFor(person: number): boolean {
+    return this.stalled.has(person);
+  }
+
+  /** Each person's workers, turns waiting on a card (`lent`) and waiting turns, the most first. */
+  people(): { person: number; used: number; waiting: number; lent: number; stalled?: true }[] {
+    const out = new Map<number, { person: number; used: number; waiting: number; lent: number }>();
+    const add = (person: number, key: 'used' | 'waiting' | 'lent') => {
+      const p = out.get(person) ?? { person, used: 0, waiting: 0, lent: 0 };
+      p[key]++;
+      out.set(person, p);
+    };
+    for (const g of this.granted.values()) add(g.person, g.lent ? 'lent' : 'used');
+    for (const c of this.carded()) add(c.person, 'lent');
+    for (const w of this.asked(this.entries)) add(w.person, 'waiting');
+    const all = (p: { used: number; waiting: number; lent: number }) => p.used + p.waiting + p.lent;
+    return [...out.values()].map((p) => (this.full(p.person) ? { ...p, stalled: true as const } : p)).sort((a, b) => all(b) - all(a) || a.person - b.person);
   }
 
   pool(): PoolSize {
@@ -254,7 +295,7 @@ export class TurnLine {
 
   /** What the Workers tile shows (src/routes/workers.ts). */
   summary() {
-    return { used: this.used(), size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people() };
+    return { used: this.used(), lent: this.lent(), running: this.granted.size, size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people() };
   }
 
   /** A person's number, or null for Auto. */
@@ -307,7 +348,7 @@ export class TurnLine {
     if (this.admitting === ticketId) return this.grant(ticketId, via);
     const own = this.entries.find((e) => e.ticket === ticketId);
     // Its queue's turn never goes before the resume it waits for: the resume takes the queue along.
-    const first = !paused && !this.closed && !this.host.busy(ticketId) && this.granted.size < this.size() && !(own?.via && !via) && !this.full(this.host.asks(ticketId, via).person);
+    const first = !paused && !this.closed && !this.host.busy(ticketId) && this.used() < this.size() && !(own?.via && !via) && !this.full(this.host.asks(ticketId, via).person);
     if (first) {
       const me = own ?? { ticket: ticketId, since: Date.now(), via };
       const rest = this.ready().filter((e) => e.ticket !== ticketId);
@@ -329,7 +370,7 @@ export class TurnLine {
     const own = this.entries.find((e) => e.ticket === ticketId);
     if (!own) this.save([...this.entries, { ticket: ticketId, since: Date.now(), ...(via ? { via } : {}) }]);
     else if (via && own.via !== via) this.save(this.entries.map((e) => (e === own ? { ...own, via } : e)));
-    if (this.granted.size < this.size()) this.pumpIn(0);
+    if (this.used() < this.size()) this.pumpIn(0);
   }
 
   /** Forget the line, the pause and the pool's size: a boot check's or a preview's copied database mustn't start the live minions' turns, or wait on their pause. */
@@ -378,7 +419,7 @@ export class TurnLine {
   /** Start who is next, while workers are free; a burst goes gapMs apart. */
   pump() {
     if (this.timer || this.closed || this.host.detached || this.admitting !== null) return;
-    if (!this.entries.length || this.granted.size >= this.size() || this.paused()) return;
+    if (!this.entries.length || this.used() >= this.size() || this.paused()) return;
     const entry = this.best(this.ready());
     if (!entry) return;
     this.save(this.entries.filter((e) => e.ticket !== entry.ticket));
@@ -408,8 +449,10 @@ export class TurnLine {
 
   private grant(ticketId: number, via?: RetryKind): true {
     const held = this.granted.get(ticketId);
-    if (held) held.steps++;
-    else this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person });
+    if (held) {
+      held.steps++;
+      delete held.lent;
+    } else this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person });
     this.leave(ticketId);
     return true;
   }
@@ -428,7 +471,7 @@ export class TurnLine {
 
   /** Their container is out of memory with a turn of theirs in it, so another would only stall it more; with none running, one may start. */
   private full(person: number): boolean {
-    return this.stalled.has(person) && [...this.granted.values()].some((g) => g.person === person);
+    return this.stalled.has(person) && [...this.granted.values()].some((g) => g.person === person && !g.lent);
   }
 
   private best(entries: LineEntry[]): LineEntry | null {
@@ -442,7 +485,7 @@ export class TurnLine {
 
   private byPerson(): Map<number, number> {
     const running = new Map<number, number>();
-    for (const g of this.granted.values()) running.set(g.person, (running.get(g.person) ?? 0) + 1);
+    for (const g of this.granted.values()) if (!g.lent) running.set(g.person, (running.get(g.person) ?? 0) + 1);
     return running;
   }
 

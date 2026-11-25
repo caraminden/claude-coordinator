@@ -31,14 +31,16 @@ export type DeliveryPatch = Partial<Pick<Delivery, 'when_arg' | 'payload' | 'sta
 
 // The states of a row not yet sent or dropped, which a read scope keeps.
 const LIVE: DeliveryState[] = ['waiting', 'held', 'sending'];
-const row = (r: any): Delivery => ({ ...r, when_arg: JSON.parse(r.when_arg), payload: JSON.parse(r.payload) });
+/** A row as stored: both JSON columns still text. */
+type DeliveryRow = Omit<Delivery, 'when_arg' | 'payload'> & { when_arg: string; payload: string };
+const row = (r: DeliveryRow): Delivery => ({ ...r, when_arg: JSON.parse(r.when_arg), payload: JSON.parse(r.payload) });
 const PATCHABLE = new Set(['when_arg', 'payload', 'state', 'due', 'met_at', 'attempts', 'last_error', 'reason', 'event_id']);
 
 function insert(store: Store, d: NewDelivery, now: number): number {
   const cols = ['project_id', 'kind', 'to_kind', 'to_id', 'when_kind', 'when_arg', 'payload', 'set_by', 'state', 'due', 'met_at', 'dedupe_key', 'origin', 'reason', 'created_at', 'updated_at'];
   const vals = [d.project_id, d.kind, d.to_kind, d.to_id, d.when_kind, JSON.stringify(d.when_arg ?? null), JSON.stringify(d.payload ?? {}), d.set_by, d.state ?? 'waiting', d.due ?? null, d.met_at ?? null, d.dedupe_key ?? null, d.origin ?? null, d.reason ?? null, now, now];
   if (d.id != null) cols.unshift('id'), vals.unshift(d.id);
-  const r = store.db.prepare(`INSERT INTO deliveries (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) ON CONFLICT (origin) DO NOTHING`).run(...(vals as any[]));
+  const r = store.db.prepare(`INSERT INTO deliveries (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) ON CONFLICT (origin) DO NOTHING`).run(...vals);
   return r.changes ? Number(r.lastInsertRowid) : 0;
 }
 
@@ -50,7 +52,7 @@ export const deliveryQueries = {
 
   getDelivery(this: Store, id: number): Delivery | undefined {
     const r = this.db.prepare('SELECT * FROM deliveries WHERE id = ?').get(id);
-    return r ? row(r) : undefined;
+    return r ? row(r as unknown as DeliveryRow) : undefined;
   },
 
   /** Rows in id order, narrowed by kind, target (a minion's id unless toKind says otherwise), states or dedupe key. */
@@ -59,7 +61,7 @@ export const deliveryQueries = {
     // prune keeps short), and each ask for some of them filters that: a scheme's list asked twice a minion (#1527).
     if (inScope(this.db) && q.dedupe == null && q.states?.length) {
       const states = q.states.every((s) => LIVE.includes(s)) ? LIVE : [...new Set(q.states)].sort();
-      const live = scoped(this.db, `deliveries:${states.join(',')}`, () => this.db.prepare(`SELECT * FROM deliveries WHERE state IN (${states.map(() => '?').join(', ')}) ORDER BY id`).all(...states) as any[]);
+      const live = scoped(this.db, `deliveries:${states.join(',')}`, () => this.db.prepare(`SELECT * FROM deliveries WHERE state IN (${states.map(() => '?').join(', ')}) ORDER BY id`).all(...states) as unknown as DeliveryRow[]);
       return live.filter((r) => (q.kind == null || r.kind === q.kind) && (q.to == null || (r.to_kind === (q.toKind ?? 'minion') && Number(r.to_id) === Number(q.to))) && q.states!.includes(r.state)).map(row);
     }
     const where: string[] = [];
@@ -68,7 +70,7 @@ export const deliveryQueries = {
     if (q.to != null) where.push('to_kind = ? AND to_id = ?'), args.push(q.toKind ?? 'minion', q.to);
     if (q.dedupe != null) where.push('dedupe_key = ?'), args.push(q.dedupe);
     if (q.states?.length) where.push(`state IN (${q.states.map(() => '?').join(', ')})`), args.push(...q.states);
-    return (this.db.prepare(`SELECT * FROM deliveries ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id`).all(...args) as any[]).map(row);
+    return (this.db.prepare(`SELECT * FROM deliveries ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id`).all(...args) as unknown as DeliveryRow[]).map(row);
   },
 
   /** Change a row, only if it is still in one of `from` (when given). True if it changed: a claim that lost says false. */
@@ -82,8 +84,8 @@ export const deliveryQueries = {
         if (twin) patch = { state: 'dropped', reason: 'a newer row with the same key is waiting' };
       }
     }
-    const keys = Object.keys(patch).filter((k) => PATCHABLE.has(k));
-    const vals = keys.map((k) => (k === 'payload' || k === 'when_arg' ? JSON.stringify((patch as any)[k]) : (patch as any)[k]));
+    const keys = (Object.keys(patch) as (keyof DeliveryPatch)[]).filter((k) => PATCHABLE.has(k));
+    const vals = keys.map((k) => (k === 'payload' || k === 'when_arg' ? JSON.stringify(patch[k]) : (patch[k] ?? null)));
     const guard = from?.length ? ` AND state IN (${from.map(() => '?').join(', ')})` : '';
     const sets = [...keys.map((k) => `${k} = ?`), 'updated_at = ?'].join(', ');
     return this.db.prepare(`UPDATE deliveries SET ${sets} WHERE id = ?${guard}`).run(...vals, now, id, ...(from ?? [])).changes > 0;

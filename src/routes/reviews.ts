@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import type { Project, Ticket } from '../db.ts';
 import { glance } from '../review-glance.ts';
 import { KIT_DIR, listSkills } from '../skills.ts';
+import { thrown } from '../thrown.ts';
 
 /** The kit's agent each built-in runs as (#1089): its own text, shown on the page behind a toggle. */
 const KIT_AGENTS: Record<string, string> = { 'pre-ship-review': 'reviewer', 'finding-checker': 'finding-checker', 'fresh-eyes': 'fresh-eyes', professor: 'professor' };
@@ -99,29 +100,31 @@ function run<T>(f: () => T): T {
 }
 
 /** The fields a request may set, from its body: `when` as the rubric format writes it, or `triggers` whole. */
-function fieldsFrom(body: Record<string, any>): Partial<EntryFields> {
+function fieldsFrom(body: Record<string, unknown>): Partial<EntryFields> {
   const f: Partial<EntryFields> = {};
   for (const k of ['slug', 'name', 'kind', 'body', 'stage', 'gate', 'extends', 'model', 'effort'] as const) {
     if (body[k] === undefined) continue;
     if (body[k] !== null && typeof body[k] !== 'string') throw new HttpError(400, `${k} is text`);
-    (f as any)[k] = ['gate', 'extends', 'model', 'effort'].includes(k) ? body[k] || null : body[k];
+    (f as Record<string, unknown>)[k] = ['gate', 'extends', 'model', 'effort'].includes(k) ? body[k] || null : body[k];
   }
   for (const k of ['enabled', 'trial', 'gives_label'] as const) {
     if (body[k] === undefined) continue;
     if (typeof body[k] !== 'boolean') throw new HttpError(400, `${k} is true or false`);
     f[k] = body[k];
   }
-  if (body.position !== undefined) f.position = body.position;
+  // position, on_fail, context and triggers are checked where the entry is saved.
+  if (body.position !== undefined) f.position = body.position as EntryFields['position'];
   if (body.panel !== undefined) {
     if (body.panel !== null && typeof body.panel !== 'string') throw new HttpError(400, 'panel is text, or empty for none');
     f.panel = body.panel?.trim() || null;
   }
-  if (body.on_fail !== undefined) f.on_fail = Array.isArray(body.on_fail) && !body.on_fail.length ? null : body.on_fail;
-  if (body.context !== undefined) f.context = body.context;
-  if (body.triggers !== undefined) f.triggers = body.triggers;
+  if (body.on_fail !== undefined) f.on_fail = Array.isArray(body.on_fail) && !body.on_fail.length ? null : (body.on_fail as EntryFields['on_fail']);
+  if (body.context !== undefined) f.context = body.context as EntryFields['context'];
+  if (body.triggers !== undefined) f.triggers = body.triggers as EntryFields['triggers'];
   else if (body.when !== undefined) {
-    if (typeof body.when !== 'string') throw new HttpError(400, 'when is text, like "diff: public/**"');
-    f.triggers = run(() => parseWhen(body.when));
+    const when = body.when;
+    if (typeof when !== 'string') throw new HttpError(400, 'when is text, like "diff: public/**"');
+    f.triggers = run(() => parseWhen(when));
   }
   return f;
 }
@@ -259,16 +262,17 @@ export const reviewRoutes: Route[] = [
     async handler({ req, res, app, session, project }) {
       const { text } = (await readJson(req)) ?? {};
       if (typeof text !== 'string' || !text.trim() || text.length > 2000) throw new HttpError(400, 'Describe the change in 1 to 2,000 characters');
-      const place = app.claude.place(session.uid);
+      const uid = session.uid!; // who: ['person']
+      const place = app.claude.place(uid);
       if (!place) throw new HttpError(409, "Your Claude plan isn't linked (Settings → Your account), so there's no login of yours to run the agent on");
       ensure(app, project);
       const entries = app.store.reviews.list(project.id);
       let reply: string;
       try {
-        reply = await runDescribe(place, describePrompt(text.trim(), entries), { claudeBin: process.env.CLAUDE_BIN ?? 'claude', hostEnv: turnEnv(process.env), cwd: join(app.claude.turnsDir(session.uid), 'review-describe') });
+        reply = await runDescribe(place, describePrompt(text.trim(), entries), { claudeBin: process.env.CLAUDE_BIN ?? 'claude', hostEnv: turnEnv(process.env), cwd: join(app.claude.turnsDir(uid), 'review-describe') });
         return json(res, 200, readProposals(reply, entries));
-      } catch (err: any) {
-        throw new HttpError(502, err.message);
+      } catch (err) {
+        throw new HttpError(502, thrown(err).message ?? String(err));
       }
     },
   },

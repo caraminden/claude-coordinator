@@ -76,7 +76,7 @@ export async function resync() {
 
 async function refreshLists(v) {
   const was = { rows: new Map(v.tickets), coordinator: v.coordinator, ticket: v.ticket };
-  const [{ coordinator, tickets, dismissed, seen, person_notes, pins, builds }, artifacts, chat] = await Promise.all([api(`api/projects/${v.projectId}?tickets=open`), api(`api/projects/${v.projectId}/artifacts`), v.id ? api(`api/tickets/${v.id}`) : null]);
+  const [{ coordinator, tickets, dismissed, seen, person_notes, pins, builds, build_previews }, artifacts, chat] = await Promise.all([api(`api/projects/${v.projectId}?tickets=open`), api(`api/projects/${v.projectId}/artifacts`), v.id ? api(`api/tickets/${v.id}`) : null]);
   if (view !== v) return; // you went to another view meanwhile; its own load is fresh
   view.coordinator = freshest(view.coordinator, was.coordinator, coordinator);
   view.tickets = mergeOpen(tickets, dismissed, was.rows); // the dismissed rows already read stay (closedlist.js)
@@ -85,6 +85,7 @@ async function refreshLists(v) {
   view.personNotes = person_notes ?? view.personNotes;
   view.pins = pins ?? view.pins;
   view.builds = builds ?? view.builds;
+  view.buildPreviews = build_previews ?? view.buildPreviews;
   if (view.id) markSeen(view.id);
   renderSidebar();
   // Cards raised or settled while the stream was down, here or in other schemes (the counts fetch the inbox after them).

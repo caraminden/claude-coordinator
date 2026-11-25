@@ -10,6 +10,7 @@
 import { CONTRAPTION_NAME } from './contraptions.ts';
 import { HttpError, json, readJson, type Ctx } from './http.ts';
 import { typedPersonFor } from './mandate-items.ts';
+import { thrown } from './thrown.ts';
 
 const COMMAND = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const TIMEOUT_MS = 15_000;
@@ -43,8 +44,8 @@ export async function contraptionRead({ req, res, app, params, caller }: Ctx) {
     } catch {
       answer = body.text;
     }
-  } catch (err: any) {
-    if (err?.name === 'TimeoutError') throw new HttpError(504, `${c.title} didn't answer within ${TIMEOUT_MS / 1000} s`);
+  } catch (err) {
+    if (thrown(err).name === 'TimeoutError') throw new HttpError(504, `${c.title} didn't answer within ${TIMEOUT_MS / 1000} s`);
     throw new HttpError(502, `${c.title} is not answering`);
   }
   json(res, 200, { status, answer, ...(truncated ? { truncated: READ_MAX } : {}) });

@@ -86,6 +86,7 @@ import {
 } from './keepalive.ts';
 import { homedir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { answerPrompt, callOf, CARD_HOLD_MS, cardHeld, cardWait, keptCards, losesPass, newCalls, noteCalls, readsSteers, repliedPrompt, sameCall, STEER_LAG_MS, type CardPass, type KeptCard, type TurnCalls } from './card-wait.ts';
 import { longestTool, noteEvent, quietAt, type Activity, type ProcCheck } from './quiet.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
@@ -98,7 +99,7 @@ import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
 import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
-import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume } from './resumes.ts';
+import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume, type WaitList } from './resumes.ts';
 import { LinePlaces, sameAccount, type OnAccount } from './line-place.ts';
 import { runningTurn, START_GRACE_MS, wrapperAlive, type TurnAt } from './running-turn.ts';
 import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
@@ -209,6 +210,7 @@ export interface QueuedMessage {
   fyi?: boolean; // a notice that needs no action (its PR merged, CI passed): it doesn't cancel a pending close_self (#619)
   parked?: string; // held for a sealed minion (#718): when it was sent, "2026-11-14 18:02" UTC
   keepalive?: true; // a hidden keepalive (#862, src/keepalive.ts): no chat, no state, nothing of the minion's changes
+  card?: string; // the kept card it answers (#1916): only the turn that gets this may have its pass
   light?: true; // a machine's notice of success (a land that landed, CI passed, a job done): a turn of only these runs at low effort (#951)
 }
 
@@ -225,6 +227,12 @@ interface TurnState {
   stopped?: true;
   /** A pause stopped it, to carry on after it (#1868). */
   paused?: true;
+  /** Ended while only its approval card waited, which is kept for its answer (#1916). */
+  card?: true;
+  /** As LiveTurn's. */
+  unread?: number;
+  /** The approved call it may make once without another card. */
+  pass?: CardPass;
   /** Present (a reason or null) once the thread asked to close after this turn. */
   closing?: string | null;
   /** The turn's folder (see src/turn-wrapper.mjs); absent for turns from before they had one. */
@@ -293,6 +301,8 @@ interface TurnState {
   fpParts?: Record<string, string>;
   /** It runs at low effort (#951): its batch was only machine notices of success, or it keeps such a turn's cache warm. */
   light?: true;
+  /** The kinds of its background tasks that run now (TurnCalls.background), which its stored events don't keep. */
+  background?: string[];
 }
 
 /** A turn this server follows: its folder, read up to `offset`. */
@@ -311,6 +321,12 @@ interface LiveTurn {
   stopGraceTimer?: ClockTimer;
   /** What it last did and the tool calls still open (#906): when it counts as quiet. */
   activity: Activity;
+  /** Its open calls and background work, for what it does while a card waits (#1916). */
+  calls: TurnCalls;
+  /** When it was last steered, until claude has surely read it: a process that may hold an unread message isn't ended for a card. */
+  unread?: number;
+  /** Being ended for its card (TurnState.card). */
+  card?: boolean;
   /** Stopped before its claude had started (no pid.json): signalled once it has. */
   stopPending?: boolean;
   /** Resolves once the turn has ended and its session is saved: its step on the minion's lane. */
@@ -535,6 +551,7 @@ export function slimEvent(ev: ClaudeEvent, stored = false): ClaudeEvent | null {
     if (!content.length) return null;
     const slim: ClaudeEvent = { type: ev.type, message: { role: ev.message!.role, content } };
     if (ev.parent_tool_use_id) slim.parent_tool_use_id = ev.parent_tool_use_id;
+    if (ev.turn_state) slim.turn_state = ev.turn_state;
     return slim;
   }
   if (ev.type === 'result') {
@@ -714,6 +731,8 @@ export class Runner {
   outboxWaits: (ticket: Ticket) => unknown[] = () => [];
   /** Approve / Deny cards waiting on people, for projects with approval rules. */
   approvals: Approvals;
+  /** Cards whose minion's process ended while they waited (#1916). */
+  private cardWaits: WaitList<KeptCard>;
   private relays: Relay;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
   placeFor?: (person: number | null, warm?: string) => TurnPlace | { refused: string };
@@ -910,6 +929,7 @@ export class Runner {
       start: (entry) => this.startLined(entry),
       pauseTurn: (id) => this.pauseTurn(id),
       changed: (ids) => this.lineChanged(ids),
+      carded: () => this.cardWaits.all().flatMap((k) => (k.answer || !this.store.getTicket(k.ticket) ? [] : [{ ticket: k.ticket, person: k.person ?? 0 }])),
       get gapMs() {
         return self.resumeGapMs;
       },
@@ -920,11 +940,20 @@ export class Runner {
     this.approvals = new Approvals(
       (ticketId, kind, data) => {
         this.emit(ticketId, kind, data);
+        this.lendWorker(ticketId);
         // The threads list shows which threads are waiting on an approval.
         this.broadcastTicket(ticketId);
       },
       { get: (p) => store.getSetting<Go[]>(goesKey(p)) ?? [], set: (p, goes) => store.setSetting(goesKey(p), goes) },
     );
+    this.cardWaits = keptCards(store);
+    this.approvals.keptAnswered = (id, card, allow, by) => this.cardAnswered(id, card, allow, by);
+    this.approvals.usePass = (id, call) => {
+      const pass = this.store.getSetting<TurnState>(turnKey(id))?.pass;
+      if (!pass) return null;
+      this.saveTurn(id, { pass: undefined });
+      return sameCall(pass.call, call) ? pass : null;
+    };
     this.relays = new Relay({
       store,
       approvals: this.approvals,
@@ -1349,6 +1378,7 @@ export class Runner {
     this.resumes.cancelLimitWait(ticketId);
     this.resumes.cancelNetWait(ticketId);
     this.resumes.cancelKillWait(ticketId);
+    this.dropCard(ticketId, 'The minion was dismissed while this waited.');
     this.store.deleteSetting(closeCancelledKey(ticketId));
     // Nor wait on its start card (#1674): a person's reopen is its start.
     this.store.deleteSetting(startHoldKey(ticketId));
@@ -1852,8 +1882,9 @@ export class Runner {
     const start = (t: Ticket, via?: RetryKind, retries?: Retries) => {
       if (t.kind === 'coordinator') return void later.push(() => (via ? this.resume(t.id, via, retries!) : !this.isRunning(t.id) && this.next(t.id)));
       // A saved wait's messages go into its resume.
-      if (via || !(this.limitWait(t.id) || this.netWait(t.id) || this.killWait(t.id))) this.turnLine.enter(t.id, via);
+      if (via || !(this.limitWait(t.id) || this.netWait(t.id) || this.killWait(t.id) || cardHeld(this.store, t.id))) this.turnLine.enter(t.id, via);
     };
+    this.restoreCards();
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
         // A minion dismissed with messages still in its queue: its chat says so. Its held mail stays: mail sent after a
@@ -1933,7 +1964,7 @@ export class Runner {
           this.setStatus(t.id, 'idle');
           // Stopped on purpose: it already says so, and no resume. What was queued before the stop went with it;
           // what came after waits for a turn of its own.
-          if (out.kind === 'stopped') {
+          if (out.kind === 'stopped' || out.kind === 'card') {
             this.queue.done(t.id);
             if (this.queue.size(t.id)) start(t);
             continue;
@@ -2030,7 +2061,15 @@ export class Runner {
     }
     if ('closing' in turn) this.closing.set(ticketId, turn.closing ?? null);
     if (turn.deployed) this.deployedMidTurn.add(ticketId);
-    this.lanes.run(ticketId, 're-attached turn', () => this.turnLine.reattach(ticketId, () => live.ended));
+    // The calls it had open, in what the chat kept of this turn.
+    for (const e of this.store.eventsOfKinds(ticketId, ['claude'], this.store.lastTurnEvent(ticketId))) if (e.created_at >= live.startedAt) noteCalls(live.calls, JSON.parse(e.data));
+    this.lanes.run(ticketId, 're-attached turn', () =>
+      this.turnLine.reattach(ticketId, () => {
+        this.lendWorker(ticketId);
+        return live.ended;
+      }),
+    );
+    if (turn.card) this.endLive(live, ticketId);
     const { where } = runningTurn(live);
     console.log(`Ticket ${ticketId}: re-attached to its running turn${where ? ` in ${where}` : ''}.`);
     return true;
@@ -2224,6 +2263,7 @@ export class Runner {
     this.wakeNow.delete(ticketId);
     this.resumes.cancelNetWait(ticketId);
     this.resumes.cancelKillWait(ticketId);
+    this.carryIn(ticketId, { from: this.cardWaits.get(ticketId)?.from });
     return this.queue.take(ticketId);
   }
 
@@ -2317,6 +2357,76 @@ export class Runner {
     if (carry?.status) this.statuses.set(ticketId, carry.status as StatusFields);
   }
 
+  /** A running turn that only waits on approval cards has no worker until one is answered (#1916). */
+  private lendWorker(ticketId: number) {
+    const live = this.turns.get(ticketId);
+    // A process ending for its card reads as having no call left, and stays without its worker.
+    if (live) this.turnLine.setLent(ticketId, !!live.card || cardWait(live.calls, this.approvals.cards(ticketId)) !== 'working');
+  }
+
+  /**
+   * Turns that have waited out their hold on one approval card, with nothing of theirs running, give their process back too. Josh, 2026-11-24:
+   * "why cant we fully free a minion waiting on a card and then just resume it when the card is answered?" The card is kept; its answer resumes them.
+   */
+  endCardWaits(short: boolean, now = this.now()) {
+    for (const [ticketId, live] of this.turns) {
+      const cards = this.approvals.cards(ticketId);
+      if (cardWait(live.calls, cards) !== 'end' || live.unread || live.card) continue;
+      const [card] = cards;
+      const ticket = this.store.getTicket(ticketId);
+      const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
+      if (!ticket || !turn || ticket.kind === 'coordinator' || turn.stopped || turn.paused || turn.result || turn.fresh || turn.keepalive || turn.codex || turn.closing !== undefined) continue;
+      const person = turn.person ?? null;
+      if (now - card.at < (short || this.turnLine.stalledFor(person ?? 0) ? 0 : CARD_HOLD_MS)) continue;
+      const call = callOf(card, ticket.cwd);
+      // A person's words queued behind this turn stay there, as before #1916: the next turn's are theirs.
+      if (!call || this.queue.msgs(ticketId).some((m) => m.own && !m.from)) continue;
+      this.cardWaits.put({ ticket: ticketId, id: card.id, call, person, ...(turn.from ? { from: turn.from } : {}), at: card.at });
+      this.approvals.keep(card.id);
+      this.saveTurn(ticketId, { card: true });
+      live.card = true;
+      this.emit(ticketId, 'note', { text: 'Still waiting on the card, so this turn ended to free its memory. It carries on when the card is answered.' });
+      this.endLive(live, ticketId);
+    }
+  }
+
+  /** A kept card's answer: the minion resumes with it, first in its queue. */
+  private cardAnswered(ticketId: number, id: string, allow: boolean, by: string) {
+    const kept = this.cardWaits.get(ticketId);
+    if (kept?.id !== id) return;
+    const answered: KeptCard = { ...kept, answer: { allow, by } };
+    // Queued before the card is marked answered: a crash between the two queues it twice, never not at all (restoreCards).
+    // shortcut: runs as the ended turn's person but without their own saved secrets, as every resume; keep secretPerson if one ever needs them.
+    this.queue.put(ticketId, { author: 'System', text: answerPrompt(answered), images: [], asker: kept.person, card: id }, true);
+    this.cardWaits.put(answered);
+    if (!this.isRunning(ticketId)) this.next(ticketId, true);
+    this.broadcastTicket(ticketId);
+  }
+
+  /** Forget a kept card, answered or not; an unanswered one expires. */
+  private dropCard(ticketId: number, reason: string): KeptCard | null {
+    const kept = this.cardWaits.take(ticketId);
+    if (kept && !kept.answer) this.approvals.expire(kept.id, reason);
+    return kept;
+  }
+
+  /** After a server restart: the kept cards wait on, and one answered as the last server died has its answer. */
+  private restoreCards() {
+    for (const kept of this.cardWaits.all()) {
+      if (kept.answer) continue;
+      const events = this.store.eventsOfKinds(kept.ticket, ['approval', 'approval_result']).filter((e) => JSON.parse(e.data).id === kept.id);
+      const result = events.find((e) => e.kind === 'approval_result');
+      this.approvals.restore(kept.ticket, events);
+      this.approvals.keep(kept.id);
+      // A crash between keeping the card and marking its turn: that turn still ends.
+      const turn = this.store.getSetting<TurnState>(turnKey(kept.ticket));
+      if (turn && !turn.card && (turn.startedAt ?? Infinity) <= kept.at) this.saveTurn(kept.ticket, { card: true });
+      const { state, by } = result ? JSON.parse(result.data) : { state: 'pending' };
+      if (state === 'allowed' || state === 'denied') this.cardAnswered(kept.ticket, kept.id, state === 'allowed', by);
+      else if (state !== 'pending' || !events.length) this.cardWaits.take(kept.ticket);
+    }
+  }
+
   /** Merge into the saved state of a ticket's running turn. */
   private saveTurn(ticketId: number, patch: Partial<TurnState>) {
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId)) ?? {};
@@ -2366,9 +2476,12 @@ export class Runner {
     const otherPerson = !!(person && turn && ((turn.person !== undefined && turn.person !== person) || (turn.asker !== undefined && turn.asker !== asker) || (extra.typed && turn.typedBy && turn.typedBy !== person)));
     // Nor a Taskmaster's fresh-start step: what's said now goes to the fresh session. Nor a stopped turn, still dying: it would drop it.
     // Nor a low-effort turn (#951) something other than a success notice: it waits for a turn at the minion's own effort.
-    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !otherPerson && !(turn.light && !light) && existsSync(join(live.dir, 'steer.jsonl')));
+    const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !turn.card && !otherPerson && !(turn.light && !light) && existsSync(join(live.dir, 'steer.jsonl')));
     // A minion waiting on its start card (#1674) holds everything, wakes and its chained brief too, until a person answers it.
     const parked = !!(!live && ticket && ((hold && this.parked(ticket)) || (!('answer' in extra) && this.store.getSetting(startHoldKey(ticketId)))));
+    // A person's words to a minion waiting on a kept card stand in for its answer (#1916). A question card's answer isn't about it.
+    const replied = person && !extra.from && !('answer' in extra) && cardHeld(this.store, ticketId) ? this.dropCard(ticketId, `${author} replied instead, so this was not run.`) : null;
+    if (replied) this.queue.put(ticketId, { author: 'System', text: repliedPrompt(replied, author), images: [] });
     // The message goes into the queue (or steer file) first, then its chat line (#1378): a crash between the two leaves a
     // message the next turn reads, never a line in the chat that no turn gets. Its id is the line's, handed out now.
     // The chat shows it masked; the turn still gets it as typed, for a key someone hands over on purpose.
@@ -2418,7 +2531,8 @@ export class Runner {
       this.queue.steered(ticketId, { end: statSync(file).size, msg });
       const row = line();
       this.heard(ticketId, ticket, msg);
-      this.saveTurn(ticketId, { typedBy });
+      live!.unread = this.now();
+      this.saveTurn(ticketId, { typedBy, unread: live!.unread });
       // A person steering in speaks after the relay, so what the turn starts now is theirs.
       if (person && !extra.from && this.turnFrom.delete(ticketId)) this.saveTurn(ticketId, { from: undefined });
       return { event: row };
@@ -2776,6 +2890,7 @@ export class Runner {
 
   stop(ticketId: number): boolean {
     const live = this.turns.get(ticketId);
+    const card = this.dropCard(ticketId, 'The turn was stopped while this waited.');
     const launching = this.launching.get(ticketId);
     if (!live && launching) {
       // Its launch is still writing its files (#1808): it starts no turn, and as with a turn, its queue goes too.
@@ -2812,7 +2927,7 @@ export class Runner {
       }
       // Waiting on the usage limit: a stop ends the wait, and as with a turn, its held messages go too.
       const limited = this.resumes.cancelLimitWait(ticketId);
-      if (!limited && !lined) return false;
+      if (!limited && !lined && !card) return false;
       this.queue.drop(ticketId);
       if (!limited) {
         // Waiting for a worker (#1868): as a running turn's stop, and a cut-off one's batch is done with.
@@ -3068,6 +3183,7 @@ export class Runner {
     if (this.limitWait(t.id)) return 'limit wait';
     if (this.netWait(t.id)) return 'net wait';
     if (this.killWait(t.id)) return 'kill wait';
+    if (cardHeld(this.store, t.id)) return 'card wait';
     if (this.parked(t) && !lined) return 'parked';
     if (this.store.getSetting(sleepKey(t.id)) && !lined) return 'asleep';
     if (this.store.getSetting(freshKey(t.id))) return 'fresh';
@@ -3176,6 +3292,8 @@ export class Runner {
     if (!this.queue.size(ticketId) && !this.freshStep(ticketId) && !this.keepalivePending.has(ticketId)) return;
     // Waiting for the usage limit to reset: the messages go into the resume, not a turn that would fail at once.
     if (this.limitWait(ticketId)) return;
+    // Nor while its card waits on a person: what came since goes into the turn that resumes it (#1916).
+    if (cardHeld(this.store, ticketId)) return;
     if (this.netWait(ticketId) || this.killWait(ticketId)) {
       if (now) this.wakeNow.add(ticketId);
       else if (!this.wakeNow.has(ticketId)) return;
@@ -3781,7 +3899,12 @@ export class Runner {
       ...(!keepalive && this.turnFrom.has(ticket.id) ? { from: this.turnFrom.get(ticket.id) } : {}),
       ...(!keepalive && this.parkedAs.has(ticket.id) ? { parkedAs: this.parkedAs.get(ticket.id) } : {}),
     };
+    const kept = keepalive ? null : this.cardWaits.get(ticket.id);
+    // shortcut: a resumed turn that fails before the call loses its pass, so the call asks again; save it with the retry if that happens often.
+    if (kept?.answer?.allow && batch.some((m) => m.card === kept.id)) turn.pass = { id: kept.id, by: kept.answer.by, call: kept.call };
     this.store.setSetting(turnKey(ticket.id), turn);
+    if (kept) this.dropCard(ticket.id, 'The turn ended while this waited.');
+    if (kept) this.approvals.resumed(ticket.id);
     const live = this.follow(ticket.id, turn);
     live.had = had;
     // A refresh of the scheme's snapshots since this one's was taken didn't know this turn: it gets the newest now.
@@ -4167,6 +4290,9 @@ export class Runner {
       had: null,
       // After a restart the clock starts again: what ran before isn't known.
       activity: { at: Date.now(), tools: [] },
+      calls: newCalls(turn.background),
+      ...(turn.card ? { card: true } : {}),
+      ...(turn.unread ? { unread: turn.unread } : {}),
     };
     // The server's listener keeps the process up; a Runner alone (a test) can exit with turns followed.
     live.timer.unref();
@@ -4368,7 +4494,7 @@ export class Runner {
       else row(false);
     }
     const cleared = out.followUps.includes('cleared');
-    const status: 'idle' | 'error' = cleared || out.kind === 'stopped' || out.kind === 'paused' ? 'idle' : 'error';
+    const status: 'idle' | 'error' = cleared || out.kind === 'stopped' || out.kind === 'paused' || out.kind === 'card' ? 'idle' : 'error';
     if (out.kind === 'paused') this.waitOutPause(ticketId, turn!, out.retry!);
     if (status === 'error') out = this.endFailed(ticketId, live, turn, end, out, hideSecrets(stderr.slice(-10).join('\n'), secrets), code);
     // Claude has the Codex turns now.
@@ -4649,6 +4775,15 @@ export class Runner {
     const live = this.turns.get(ticketId);
     if (live) {
       live.activity = noteEvent(live.activity, ev, Date.now());
+      const pass = this.store.getSetting<TurnState>(turnKey(ticketId))?.pass;
+      if (pass && losesPass(pass, live.calls, ev)) this.saveTurn(ticketId, { pass: undefined });
+      noteCalls(live.calls, ev);
+      if (live.unread && readsSteers(live.calls, ev) && this.now() - live.unread > STEER_LAG_MS) {
+        live.unread = undefined;
+        this.saveTurn(ticketId, { unread: undefined });
+      }
+      if (ev.type === 'system' && ev.subtype === 'background_tasks_changed') this.saveTurn(ticketId, { background: live.calls.background });
+      this.lendWorker(ticketId);
       if (this.quietSince(ticketId, live) === null && this.store.getSetting<TurnState>(turnKey(ticketId))?.quiet) this.checkQuiet(ticketId, live);
     }
     // A keepalive (#862) shows nothing: only its session id and its cost are kept.
@@ -4730,6 +4865,9 @@ export class Runner {
       const hashes = this.store.getSetting<TurnState>(turnKey(ticketId))?.hashes;
       if (hashes) this.saveTurn(ticketId, { hashes: { ...hashes, claude: ev.claude_code_version } });
     }
+    // A process ended for its card says the call was rejected and the turn failed; the chat shows it still waiting.
+    if (live?.card && ev.type === 'user') return;
+    if (live?.card && ev.type === 'result') ev = { ...ev, is_error: false, result: '' };
     const slim = slimEvent(ev);
     if (!slim) return;
     const progress = this.progressFor(ticketId);
@@ -4907,6 +5045,7 @@ export class Runner {
   /** A main-thread message without its status trailer, remembering the last good one for the turn's end; a bad one is noted once. */
   private stripStatus(ticketId: number, ev: ClaudeEvent): ClaudeEvent {
     let changed = false;
+    let state = '';
     const content = (ev.message!.content as ContentBlock[]).flatMap((b): ContentBlock[] => {
       if (b?.type !== 'text' || typeof b.text !== 'string') return [b];
       const { text, status, bad } = takeStatus(b.text);
@@ -4915,6 +5054,7 @@ export class Runner {
       if (status) {
         this.statuses.set(ticketId, status);
         this.saveTurn(ticketId, { status });
+        state = typeof status.state === 'string' ? status.state : '';
       }
       if (bad) {
         // A later reply's bad line (a sent-back reply's rewrite) doesn't let an earlier reply's line stand.
@@ -4924,7 +5064,9 @@ export class Runner {
       }
       return text ? [{ ...b, text }] : [];
     });
-    return changed ? { ...ev, message: { ...ev.message, content } } : ev;
+    if (!changed) return ev;
+    // The end it named stays on the stored event: the plan's last step is ticked by it, in every replay (progress.js, #1923).
+    return { ...ev, message: { ...ev.message, content }, ...(state ? { turn_state: state } : {}) };
   }
 
   /**

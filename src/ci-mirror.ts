@@ -10,6 +10,7 @@ import type { CiStore, Kind } from './ci-store.ts';
 import type { Project } from './db.ts';
 import type { Artifact } from './release-readers.ts';
 import { asEnv, type GithubEnv } from './scheme-repo.ts';
+import { thrown } from './thrown.ts';
 
 const exec = promisify(execFile);
 
@@ -73,8 +74,8 @@ export class CiMirror {
     this.waiting.add(key);
     this.queue = this.queue
       .then(() => this.mirror(w))
-      .catch((err: any) => {
-        console.warn(`CI mirror: ${what(w)} failed: ${(err?.stderr || err?.message || String(err)).toString().trim().slice(0, 300)}`);
+      .catch((err: unknown) => {
+        console.warn(`CI mirror: ${what(w)} failed: ${(thrown(err).stderr || thrown(err).message || String(err)).toString().trim().slice(0, 300)}`);
         return false;
       })
       .then((ok) => {

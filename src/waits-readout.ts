@@ -143,7 +143,7 @@ export function waitsFor(store: Store, t: Ticket, legacy: LegacyWaits = () => []
       line: text ? firstLine(text) : '',
       text,
       facts: factsOf(store, r, now),
-      link: other && other.kind !== 'coordinator' ? { project: other.project_id, number: other.number } : null,
+      link: other && other.kind !== 'coordinator' ? { project: other.project_id, number: other.number! } : null,
       since: r.created_at,
       due: r.due,
       state: r.state as WaitRow['state'],

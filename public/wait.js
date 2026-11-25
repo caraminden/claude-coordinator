@@ -67,7 +67,7 @@ export function segSizes(sizes) {
 /**
  * A segmented track, one logic for the release's stages, the chat readout and the minions list (#630; Cara: "We should
  * standardize the release, minion list and chat segmented tracks to all use the same logic"). A piece per segment
- * ({ size, state: 'done' | 'now' | '', clock, waits, name, title }), as wide as its usual time: one with none known
+ * ({ size, state: 'done' | 'now' | 'held' | '', clock, waits, name, title }), as wide as its usual time: one with none known
  * takes the others' average, and none goes under 8% of the whole, so a 1-second rebase still shows. Done pieces are
  * full; the one underway fills by its `clock` (a waitBar: elapsed over usual, or a count) up to `cap`, going amber past
  * LATE, or shows a sliver when nothing is known; hatched, never filled, while it `waits`. `labels` names them under.
@@ -93,9 +93,9 @@ export const waitShows = (w) => !!w && !!(w.total || w.usual || TRACK.some(([key
 /**
  * The one progress track for the chat readout and the list row (#630; Cara, on her bar during a land: "the progress
  * bars for 630 on the list and chat are out of sync, arent showing the stages"). A plan with a step underway draws
- * its steps (`track`: [guess minutes or null, 'c' done | 'i' underway | 'p' not started]), the step underway filling
+ * its steps (`track`: [guess minutes or null, 'c' done | 'i' underway | 'h' held | 'p' not started]), the step underway filling
  * by the `wait` when there is one (hatched while it waits in a line or queue), else against `since`/`usual`, its
- * scaled guess. With no step underway, a landing draws its own stages; another wait its bar; a plan its steps.
+ * scaled guess. A step built and now being tested ('h', #1923) is full, in the running colour. With no step underway, a landing draws its own stages; another wait its bar; a plan its steps.
  */
 export function progressTrack(src, cls = '') {
   const what = progressPieces(src);
@@ -111,7 +111,7 @@ export function progressPieces({ track, since, usual, wait }) {
     // Nothing in the track or the wait ties a wait to a step, so the first step underway owns it (a guess): only it fills
     // by the clock or hatches; any other step underway shows as underway with a sliver.
     const owner = track.findIndex(([, st]) => st === 'i');
-    return { segs: track.map(([g, st], i) => (st === 'c' ? piece('done', g) : st === 'i' ? (i === owner ? piece('now', g, wClock ?? (usual ? { since, usual } : null)) : { ...piece('now', g), waits: false }) : piece('', g))), label: '' };
+    return { segs: track.map(([g, st], i) => (st === 'c' ? piece('done', g) : st === 'i' ? (i === owner ? piece('now', g, wClock ?? (usual ? { since, usual } : null)) : { ...piece('now', g), waits: false }) : piece(st === 'h' ? 'held' : '', g))), label: '' };
   }
   if (!w) return null;
   const { at } = stageOf(w);

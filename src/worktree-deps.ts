@@ -14,6 +14,7 @@ import { access } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { turnEnv } from './turn-launch.ts';
+import { thrown } from './thrown.ts';
 
 const run = promisify(execFile);
 let running = 0;
@@ -81,7 +82,7 @@ async function install(worktree: string, cacheDir: string, opts: { npm?: string[
   let dirs: string[];
   try {
     dirs = await lockfileDirs(worktree);
-  } catch (err: any) {
+  } catch (err) {
     return { installed: [], failed: [{ dir: '', why: `listing its lockfiles failed: ${firstLine(err)}` }] };
   }
   const npm = opts.npm ?? [HEAVY_UNIT, '--what', 'npm ci', 'npm'];
@@ -144,8 +145,8 @@ export function depsNote(r: DepsResult): string | null {
 }
 
 /** The last useful line of a failed command: npm's own `npm error` line when it gave one. */
-function firstLine(err: any): string {
-  const text = String(err?.stderr || err?.message || err)
+function firstLine(err: unknown): string {
+  const text = String(thrown(err).stderr || thrown(err).message || err)
     .trim()
     .split('\n')
     .filter(Boolean);

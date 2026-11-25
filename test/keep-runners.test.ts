@@ -23,7 +23,7 @@ Add-Type 'public static class CitadelCiJob { public static System.Collections.Ge
 $t = $null; $e = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile('${script}', [ref]$t, [ref]$e)
 foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) { . ([scriptblock]::Create($f.Extent.Text)) }
-$CpuPercent = 75; $SqueezePercent = 30; $said = ''; $identity = @{}
+$CpuPercent = 75; $SqueezePercent = 30; $CitadelSqueezePercent = 10; $firstShip = $false; $said = ''; $identity = @{}
 $shipsFile = '${join(dir, 'ships.json')}'
 ${body}`,
   );
@@ -54,7 +54,13 @@ $again = @([CitadelCiJob]::Calls)
 $ships = $null
 Set-SlotRate
 $lifted = @([CitadelCiJob]::Calls | Sort-Object)
-@{ squeezed = $squeezed; again = $again; lifted = $lifted } | ConvertTo-Json -Compress`,
+[CitadelCiJob]::Calls.Clear()
+# Citadel's own ship (first: true in ships.json): the others share 10%, not 30%.
+$firstShip = $true
+$ships = 'caraminden/claude-coordinator|desktop-g248ij8'
+Set-SlotRate
+$citadel = @([CitadelCiJob]::Calls | Sort-Object)
+@{ squeezed = $squeezed; again = $again; lifted = $lifted; citadel = $citadel } | ConvertTo-Json -Compress`,
       dir,
     );
     // Three others run a job (b, c, e), so 10% of the PC each: inside the 75% shared job that is 10/75 of its cap
@@ -63,6 +69,8 @@ $lifted = @([CitadelCiJob]::Calls | Sort-Object)
     assert.deepEqual(out.again, [], 'an unchanged share is not set again');
     // Lifted: inside slots back to no cap of their own; e back to the 75% it had on its own.
     assert.deepEqual(out.lifted, ['2=0', '3=0', '4=0', '5=7500']);
+    // Josh, 2026-11-24: a Citadel ship squeezes the three busy others to 10% of the PC together: 3.33% each, 444 of the 75% job; e: 333.
+    assert.deepEqual(out.citadel, ['2=444', '3=444', '4=444', '5=333']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -77,16 +85,20 @@ test('ships.json counts until its expiry, and a missing, broken or expired file 
 $none = @(Read-Ship).Count
 Set-Content -LiteralPath $shipsFile -Value '{"until": ${later}, "ships": [{"repo": "CaraMinden/Peek-Auras", "runner": "DESKTOP-G248IJ8"}, {"repo": "caraminden/peek-auras", "runner": "desktop-g248ij8"}]}'
 $live = @(Read-Ship)
+$firstNone = $script:firstShip
+Set-Content -LiteralPath $shipsFile -Value '{"until": ${later}, "ships": [{"repo": "caraminden/claude-coordinator", "runner": "r", "first": true}]}'
+$null = @(Read-Ship)
+$firstSet = $script:firstShip
 Set-Content -LiteralPath $shipsFile -Value '{"until": 1, "ships": [{"repo": "a/b", "runner": "r"}]}'
 $expired = @(Read-Ship).Count
 Set-Content -LiteralPath $shipsFile -Value '{"until": '
 $broken = @(Read-Ship).Count
 Set-Content -LiteralPath $shipsFile -Value '{"until": ${later}, "ships": []}'
 $empty = @(Read-Ship).Count
-@{ none = $none; live = $live; expired = $expired; broken = $broken; empty = $empty } | ConvertTo-Json -Compress`,
+@{ none = $none; live = $live; firstNone = $firstNone; firstSet = $firstSet; expired = $expired; broken = $broken; empty = $empty } | ConvertTo-Json -Compress`,
       dir,
     );
-    assert.deepEqual(out, { none: 0, live: ['caraminden/peek-auras|desktop-g248ij8'], expired: 0, broken: 0, empty: 0 });
+    assert.deepEqual(out, { none: 0, live: ['caraminden/peek-auras|desktop-g248ij8'], firstNone: false, firstSet: true, expired: 0, broken: 0, empty: 0 });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

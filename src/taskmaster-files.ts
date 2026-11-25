@@ -5,6 +5,7 @@
 import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, sep } from 'node:path';
 import { HttpError } from './http.ts';
+import { thrown } from './thrown.ts';
 
 export const RELAY_FILE_MAX = 2 * 1024 * 1024;
 
@@ -48,8 +49,8 @@ export function relayFile(fromShared: string, toShared: string, fromScheme: stri
     try {
       writeFileSync(path, data, { flag: 'wx' }); // never overwrites what the receiver has
       return { path, size: data.length };
-    } catch (e: any) {
-      if (e.code !== 'EEXIST' || n >= 100) throw e;
+    } catch (e) {
+      if (thrown(e).code !== 'EEXIST' || n >= 100) throw e;
     }
   }
 }

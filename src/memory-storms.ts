@@ -10,6 +10,7 @@ import { basename, join } from 'node:path';
 import { every, type Job } from './every.ts';
 import { CGROUP_ROOT, hostText, SELF_CGROUP } from './host-signals.ts';
 import { shownCommand } from './reaper.ts';
+import { thrown } from './thrown.ts';
 
 export const STORM_EVERY_MS = 15_000;
 /**
@@ -272,8 +273,8 @@ export class MemoryStorms {
       if (this.stopped) for (const [path, o] of [...this.open]) this.close(path, o);
       this.last = groups;
       this.lastAt = now;
-    } catch (err: any) {
-      console.error(`Memory storm reading failed: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Memory storm reading failed: ${thrown(err).message ?? err}`);
     } finally {
       this.busy = false;
     }
@@ -286,8 +287,8 @@ export class MemoryStorms {
     const storm: Storm = { group: basename(path), seconds: Math.round((o.end - o.start) / 1000), stalled: Math.round(stalled), highs: o.highs, peak: Math.min(1, Math.round(o.peak * 100) / 100), limit: o.limit, unit: o.unit, unitBytes: o.unitBytes, top: o.top };
     try {
       this.d.record(o.start, storm);
-    } catch (err: any) {
-      console.error(`Recording a memory storm failed: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Recording a memory storm failed: ${thrown(err).message ?? err}`);
     }
   }
 

@@ -61,6 +61,11 @@ export const eventQueries = {
     return this.db.prepare('SELECT * FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind IN (SELECT value FROM json_each(?)) AND id > ? ORDER BY id').all(ticketId, JSON.stringify(kinds), afterId) as unknown as EventRow[];
   },
 
+  /** The event the chat's last counted turn ended at, or 0: the running turn's come after it. */
+  lastTurnEvent(this: Store, ticketId: number): number {
+    return (this.db.prepare('SELECT event_id FROM turns WHERE ticket_id = ? AND event_id IS NOT NULL AND side IS NULL ORDER BY id DESC LIMIT 1').get(ticketId) as { event_id: number } | undefined)?.event_id ?? 0;
+  },
+
   /** A chat's newest plan card, or undefined: a real plan, not a machine's notes (#617), its lending (#1638) or a release key card (#837), which ride the same event kind. */
   latestPlan(this: Store, ticketId: number): EventRow | undefined {
     return this.db

@@ -53,12 +53,20 @@ export type LoadError = string | { plugin?: string; name?: string; server?: stri
 export interface ClaudeEvent {
   type: string;
   subtype?: string;
+  /** user: a steer echoed back as the turn takes it */
+  isReplay?: boolean;
+  /** stream_event (--include-partial-messages) */
+  event?: { type?: string; message?: { id?: string }; delta?: { type?: string; text?: string } };
   session_id?: string;
   uuid?: string;
   parent_tool_use_id?: string | null;
+  /** The state a reply's status trailer gave, kept on its stored event (runner.ts stripStatus). */
+  turn_state?: string;
   message?: ClaudeMessage;
   /** result */
   result?: string;
+  errors?: unknown[];
+  stop_reason?: string | null;
   is_error?: boolean;
   total_cost_usd?: number;
   duration_ms?: number;
@@ -78,6 +86,8 @@ export interface ClaudeEvent {
   claude_code_version?: string;
   plugin_errors?: LoadError[];
   mcp_server_errors?: LoadError[];
+  /** system background_tasks_changed: every one that runs now */
+  tasks?: { task_type?: string }[];
   /** rate_limit_event */
   rate_limit_info?: Record<string, unknown>;
   /** The Codex adapter's own lines (src/codex-turn.ts): codex_waiting, codex_gate, codex_rate_limits, and codex_* on init. */

@@ -1,6 +1,6 @@
 // Self-hosted CI runners for every scheme (#320; Josh, 2026-11-05: "we should set up a single CI setup that
 // all schemes can use"). GitHub refuses hosted Actions jobs on the caraminden account, so each scheme's repo
-// gets its own runner instance on Cara's desktop, installed by tools/ci-runner/add-runner.ps1. That script
+// gets its own runner instance on a CI PC (first Cara's desktop), installed by tools/ci-runner/add-runner.ps1. That script
 // needs a runner registration token, which only a repo admin can mint, so Citadel mints it with the scheme
 // owner's linked GitHub login and hands back just the token: it lasts about an hour and is never stored.
 // The caller is a machine's agent key (the Machines page), the same credential that PC already uses.
@@ -11,6 +11,16 @@ import type { GithubLink } from './github-link.ts';
 import type { MachineRelay } from './machines.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
+import { thrown } from './thrown.ts';
+
+/** A self-hosted runner as GitHub lists it: the fields read here, checked before use. */
+interface GhRunner {
+  id?: unknown;
+  name?: unknown;
+  status?: unknown;
+  busy?: unknown;
+  labels?: unknown;
+}
 
 const API = 'https://api.github.com';
 const GITHUB_WAIT_MS = 10_000;
@@ -123,16 +133,16 @@ export class RunnerTokens {
     const own = schemeLabels(project.name);
     if (typeof label !== 'string' || !own.includes(label)) throw new HttpError(400, `label must be one of ${own.join(', ')}: the label the runner being removed carries`);
     const answer = { scheme: project.name, repo: slug, name };
-    let found: { id?: unknown; labels?: unknown } | undefined;
+    let found: GhRunner | null | undefined;
     for (let page = 1; !found; page++) {
       const r = await this.github(ownerToken, 'GET', `/repos/${slug}/actions/runners?per_page=${RUNNERS_PAGE}&page=${page}`);
       if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
-      const body = (await r.json().catch(() => ({}))) as { runners?: any[] };
+      const body = (await r.json().catch(() => ({}))) as { runners?: (GhRunner | null)[] };
       const runners = Array.isArray(body.runners) ? body.runners : [];
       found = runners.find((x) => x?.name === name);
       if (!found && (runners.length < RUNNERS_PAGE || page >= RUNNERS_PAGES)) return { ...answer, removed: false };
     }
-    if (!Array.isArray(found.labels) || !found.labels.some((l: any) => l?.name === label)) {
+    if (!Array.isArray(found.labels) || !found.labels.some((l: { name?: unknown } | null) => l?.name === label)) {
       throw new HttpError(403, `The runner ${name} of ${slug} doesn't carry the label ${label}, so it isn't the kind of runner being removed and Citadel won't remove it; nothing changed.`);
     }
     if (!Number.isSafeInteger(found.id)) throw new HttpError(502, `GitHub listed the runner ${name} without an id`);
@@ -150,8 +160,8 @@ export class RunnerTokens {
     const label = want ?? own;
     const r = await this.github(ownerToken, 'GET', `/repos/${slug}/actions/runners?per_page=100`);
     if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
-    const body = (await r.json().catch(() => ({}))) as { runners?: any[] };
-    return (Array.isArray(body.runners) ? body.runners : []).filter((x) => Array.isArray(x?.labels) && x.labels.some((l: any) => l?.name === label)).map((x) => ({ name: String(x.name), status: String(x.status), busy: x.busy === true }));
+    const body = (await r.json().catch(() => ({}))) as { runners?: (GhRunner | null)[] };
+    return (Array.isArray(body.runners) ? body.runners : []).filter((x): x is GhRunner => Array.isArray(x?.labels) && x.labels.some((l: { name?: unknown } | null) => l?.name === label)).map((x) => ({ name: String(x.name), status: String(x.status), busy: x.busy === true }));
   }
 
   /** The scheme's repo, owner, owner's GitHub token and runner label; throws an HttpError saying what's missing. */
@@ -178,8 +188,8 @@ export class RunnerTokens {
         signal: AbortSignal.timeout(GITHUB_WAIT_MS),
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Citadel' },
       });
-    } catch (err: any) {
-      throw new HttpError(502, `Couldn't reach GitHub (${err?.message ?? err}); try again.`);
+    } catch (err) {
+      throw new HttpError(502, `Couldn't reach GitHub (${thrown(err).message ?? err}); try again.`);
     }
   }
 }
@@ -230,7 +240,7 @@ export interface RunnerJobView {
   text: string;
 }
 
-type Relay = Pick<MachineRelay, 'runnerMachines' | 'runnerJob'>;
+type Relay = Pick<MachineRelay, 'runnerMachines' | 'runnerJob' | 'runnerHost'>;
 
 /** A failed job's reason for its one-line note: its output's last line, cut to 160 characters. */
 function why(text: string): string {
@@ -238,10 +248,18 @@ function why(text: string): string {
   return last.length > 160 ? `${last.slice(0, 159)}…` : last;
 }
 
-export type RunnerAsk = { op: RunnerOp; count: number | null; os: RunnerOs };
+/** `host` names one PC (its machine name or its hostname); left out, add takes any idle one and list and remove reach every PC. */
+export type RunnerAsk = { op: RunnerOp; count: number | null; os: RunnerOs; host?: string };
 
 /** The ask from a route body: an op, for add a count of 1 to MAX_RUNNERS (default 1), and an os (default windows). Throws a 400 otherwise. */
-export function runnerAsk(body: { op?: unknown; count?: unknown; os?: unknown }): RunnerAsk {
+export function runnerAsk(body: { op?: unknown; count?: unknown; os?: unknown; host?: unknown }): RunnerAsk {
+  const ask = runnerAskBase(body);
+  if (body.host === undefined || body.host === null || body.host === '') return ask;
+  if (typeof body.host !== 'string' || !/^[^\p{Cc}]{1,64}$/u.test(body.host)) throw new HttpError(400, "host must be a PC's machine name or hostname, 1 to 64 characters");
+  return { ...ask, host: body.host };
+}
+
+function runnerAskBase(body: { op?: unknown; count?: unknown; os?: unknown }): RunnerAsk {
   if (body.op !== 'add' && body.op !== 'list' && body.op !== 'remove') throw new HttpError(400, 'op must be add, list or remove');
   const os = body.os ?? 'windows';
   if (os !== 'windows' && os !== 'linux') throw new HttpError(400, 'os must be windows or linux');
@@ -267,7 +285,7 @@ export class RunnerJobs {
   /** Told each add's or remove's outcome, for the scheme Taskmaster's chat: one line, and the output to show under it. */
   onNote: (project: Project, words: string, detail: string) => void = () => {};
   /** Token notes a running job's scripts caused, by scheme id, with the job's machine: they go under its note, not beside it. */
-  private tokenNotes = new Map<number, { machineId: number; lines: string[] }>();
+  private tokenNotes = new Map<number, { machineIds: Set<number>; lines: string[] }>();
 
   constructor(store: Store, tokens: RunnerTokens, relay: Relay, idleWaitMs = IDLE_WAIT_MS, pollMs = IDLE_POLL_MS) {
     this.store = store;
@@ -288,43 +306,57 @@ export class RunnerJobs {
     }
     const running = this.jobs.get(project.id);
     if (running && running.view.ok === null) throw new HttpError(409, `${project.name} already has a runner job running (${running.view.op}, asked by ${running.view.by}); wait for it.`);
-    const machines = this.relay.runnerMachines(ask.os).filter((m) => mayFetch(this.store, m, project));
+    const online = this.relay.runnerMachines(ask.os).filter((m) => mayFetch(this.store, m, project));
+    const named = ask.host?.toLowerCase();
+    const machines = named ? online.filter((m) => m.name.toLowerCase() === named || this.relay.runnerHost(m.id)?.toLowerCase() === named) : online;
+    if (online.length && !machines.length) {
+      throw new HttpError(409, `No CI runner host named ${ask.host} may act for ${project.name} here; the ones online are ${online.map((m) => `${m.name} (${this.relay.runnerHost(m.id) ?? '?'})`).join(', ')}.`);
+    }
     if (!machines.length) {
       const where = ask.os === 'linux' ? 'Linux CI runner agent (the one in WSL)' : 'CI runner agent';
       const install = ask.os === 'linux' ? '"Linux runners in WSL"' : '"Install the runner agent"';
       throw new HttpError(
         409,
-        `No ${where} that may act for ${project.name} is online. Cara installs it once on her desktop (tools/ci-runner/README.md, ${install}); if it is installed, that PC is off or asleep${ask.os === 'linux' ? ', WSL is stopped' : ''}, or an admin hasn't added ${project.name} to it under Settings → Machines.`,
+        `No ${where} that may act for ${project.name} is online. It is installed once on each PC that hosts CI (tools/ci-runner/README.md, ${install}); if it is installed, that PC is off or asleep${ask.os === 'linux' ? ', WSL is stopped' : ''}, or an admin hasn't added ${project.name} to it under Settings → Machines.`,
       );
     }
-    const machine = machines.find((m) => !this.busy.has(m.id));
-    if (!machine) throw new HttpError(409, `The runner agent on ${machines[0].name} is busy with another scheme's job; try again in a few minutes.`);
+    // An add goes to one PC (the named one, else the first idle); list and remove reach every PC asked, which must all be free.
+    const free = machines.filter((m) => !this.busy.has(m.id));
+    const targets = ask.op === 'add' ? free.slice(0, 1) : free.length === machines.length ? machines : [];
+    if (!targets.length) throw new HttpError(409, `The runner agent on ${(free.length ? machines.filter((m) => this.busy.has(m.id)) : machines).map((m) => m.name).join(', ')} is busy with another scheme's job; try again in a few minutes.`);
+    const machine = targets[0];
     // The same checks the PC's scripts meet (a repo, the owner's GitHub link, a label), so a missing one fails here.
     const names = ask.op === 'list' ? null : await this.tokens.issue(machine, project.id, false);
-    const view: RunnerJobView = { op: ask.op, count: ask.count, os: ask.os, scheme: project.name, machine: machine.name, by: asker.name, started_at: Date.now(), finished_at: null, ok: null, text: '' };
-    this.busy.add(machine.id);
-    this.tokenNotes.set(project.id, { machineId: machine.id, lines: [] });
+    const view: RunnerJobView = { op: ask.op, count: ask.count, os: ask.os, scheme: project.name, machine: targets.map((m) => m.name).join(', '), by: asker.name, started_at: Date.now(), finished_at: null, ok: null, text: '' };
+    for (const m of targets) this.busy.add(m.id);
+    this.tokenNotes.set(project.id, { machineIds: new Set(targets.map((m) => m.id)), lines: [] });
     // A Linux runner's label (#510): add-runner.sh makes the same one from the label Citadel hands it.
     const label = names ? (ask.os === 'linux' ? `${names.label}-linux` : names.label) : '';
-    const done = this.run(project, machine, ask, label, view)
+    const done = this.run(project, targets, ask, label, view)
       .catch((err) => Object.assign(view, { ok: false, text: `Citadel failed while following the job: ${err?.message ?? err}`, finished_at: Date.now() }))
       .then(() => this.note(project, view))
       .catch((err) => console.error(`Couldn't note ${project.name}'s runner job:`, err))
       .finally(() => {
-        this.busy.delete(machine.id);
+        for (const m of targets) this.busy.delete(m.id);
         this.tokenNotes.delete(project.id);
       }) as Promise<void>;
     this.jobs.set(project.id, { view, done });
     return { ...view };
   }
 
-  private async run(project: Project, machine: Machine, ask: RunnerAsk, label: string, view: RunnerJobView) {
+  private async run(project: Project, machines: Machine[], ask: RunnerAsk, label: string, view: RunnerJobView) {
     const job = ask.op === 'add' ? { op: 'add' as const, scheme: project.id, count: ask.count! } : ask.op === 'remove' ? { op: 'remove' as const, scheme: project.id } : { op: 'list' as const };
-    const r = await this.relay.runnerJob(machine.id, job);
-    let text = r.output.trim() || '(it printed nothing)';
-    let ok = r.ok;
+    let ok = true;
+    const parts: string[] = [];
+    for (const machine of machines) {
+      const r = await this.relay.runnerJob(machine.id, job);
+      const out = r.output.trim() || '(it printed nothing)';
+      parts.push(machines.length > 1 ? `== ${machine.name} ==\n${out}` : out);
+      ok = ok && r.ok;
+    }
+    let text = parts.join('\n\n');
     if (ok && ask.op === 'add') {
-      const idle = await this.waitIdle(project, ask.count!, label);
+      const idle = await this.waitIdle(project, ask.count!, label, this.relay.runnerHost(machines[0].id));
       ok = idle.ok;
       text += `\n\nOn GitHub (label ${label}): ${idle.text}`;
     }
@@ -337,7 +369,7 @@ export class RunnerJobs {
    */
   absorb(project: Project, machine: Machine, words: string): boolean {
     const held = this.tokenNotes.get(project.id);
-    if (!held || held.machineId !== machine.id) return false;
+    if (!held || !held.machineIds.has(machine.id)) return false;
     held.lines.push(words);
     return true;
   }
@@ -353,18 +385,20 @@ export class RunnerJobs {
     this.onNote(project, words, [...(this.tokenNotes.get(project.id)?.lines ?? []), ...kept].join('\n'));
   }
 
-  /** Wait until GitHub shows at least `count` of the scheme's runners with `label` online and not busy, up to idleWaitMs. */
-  private async waitIdle(project: Project, count: number, label: string): Promise<{ ok: boolean; text: string }> {
+  /** Wait until GitHub shows at least `count` of the scheme's runners with `label` (on `host`, when given) online and not busy, up to idleWaitMs. */
+  private async waitIdle(project: Project, count: number, label: string, host?: string): Promise<{ ok: boolean; text: string }> {
     const end = Date.now() + this.idleWaitMs;
     let last = '';
     for (;;) {
       try {
-        const runners = await this.tokens.listed(project, label);
+        // Runner names start with their PC's hostname (add-runner.sh, .ps1): only that PC's own runners count. shortcut: a hostname that is another's name plus -something (desk, desk-2) is told apart by the dash only, fix when two PCs are named like that.
+        const h = host?.toLowerCase();
+        const runners = (await this.tokens.listed(project, label)).filter((x) => !h || x.name.toLowerCase() === h || x.name.toLowerCase().startsWith(`${h}-`));
         const idle = runners.filter((x) => x.status === 'online' && !x.busy).length;
         last = runners.length ? runners.map((x) => `${x.name} ${x.status !== 'online' ? x.status : x.busy ? 'Active' : 'Idle'}`).join(', ') : 'none listed yet';
         if (idle >= count) return { ok: true, text: last };
-      } catch (err: any) {
-        last = `couldn't ask GitHub: ${err.message}`;
+      } catch (err) {
+        last = `couldn't ask GitHub: ${thrown(err).message}`;
       }
       if (Date.now() >= end) return { ok: false, text: `${last}; fewer than ${count} Idle after ${Math.round(this.idleWaitMs / 1000)}s` };
       await sleep(this.pollMs);

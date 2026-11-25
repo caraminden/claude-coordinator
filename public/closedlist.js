@@ -70,7 +70,7 @@ export function mergeOpen(open, dismissed, before) {
     else gone = true;
     if (live && t.status !== 'closed' && wasClosed(before.get(t.id), t)) total--;
   }
-  states.set(next, { ...closedState(old) });
+  states.set(next, { ...closedState(old), busy: null, failed: false }); // a read still out belongs to the old list, which drops its answer
   // One dismissed while the stream was down is no longer in the fresh open list: restart the paging so the next read brings it.
   if (gone) Object.assign(closedState(next), { cursor: null, more: true });
   setClosedTotal(next, Math.max(0, total));

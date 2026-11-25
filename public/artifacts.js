@@ -77,18 +77,25 @@ export function onArtifactsChanged(projectId) {
   artifactRefresh = setTimeout(refreshArtifacts, 300);
 }
 
-async function refreshArtifacts() {
+export async function refreshArtifacts() {
   if (view?.kind !== 'project') return;
   const projectId = view.projectId;
   try {
-    const [artifacts, shared] = await Promise.all([api(`api/projects/${projectId}/artifacts`), api(`api/projects/${projectId}/shared`).catch(() => [])]);
+    const [artifacts, shared] = await Promise.all([api(`api/projects/${projectId}/artifacts`), api(`api/projects/${projectId}/shared`).catch(() => view.shared)]);
     if (view?.kind === 'project' && view.projectId === projectId) setArtifacts(artifacts, shared);
-  } catch {}
+  } catch {
+    if (view?.kind === 'project' && view.projectId === projectId && view.main === 'artifact') {
+      view.filesFailed = true;
+      renderArtifactHead();
+    }
+  }
 }
 
+/** The lists as read; null for one whose read failed keeps what the page has. */
 export function setArtifacts(artifacts, shared = view.shared) {
-  view.artifacts = artifacts;
-  view.shared = shared;
+  view.filesFailed = artifacts === null;
+  view.artifacts = artifacts ?? view.artifacts ?? [];
+  view.shared = shared ?? view.shared ?? [];
   renderShelf();
   if (view.main === 'files') renderFiles();
   if (view.main === 'artifact') renderArtifactHead();
@@ -774,6 +781,10 @@ export function renderArtifactHead() {
   const el = document.getElementById('artifact-head');
   if (!el) return;
   const a = view.artifacts.find((x) => x.id === view.artifactId);
+  if (!a && view.filesFailed) {
+    el.replaceChildren(h('div', { class: 'row' }, h('h2', {}, "Couldn't load this artifact"), h('span', { class: 'muted' }, 'The list of files did not load. '), h('button', { type: 'button', onclick: refreshArtifacts }, 'Retry')));
+    return;
+  }
   if (!a) {
     el.replaceChildren(h('div', { class: 'row' }, h('h2', {}, 'Artifact removed'), h('span', { class: 'muted' }, "The file was deleted from its minion's folder.")));
     return;

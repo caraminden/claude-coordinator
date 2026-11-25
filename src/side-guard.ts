@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { lex } from './tripwire.ts';
+import { thrown } from './thrown.ts';
 
 const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS', 'ToolSearch', 'WebSearch', 'WebFetch', 'Skill', 'TaskList', 'TaskGet', 'TaskOutput', 'BashOutput']);
 // Citadel's MCP tools that only read (src/mcp.ts); both servers' names, the minion's and the Taskmaster's.
@@ -143,7 +144,7 @@ const SAFE_REDIRECT = new Set(['<', '<<', '<<-', '<<<']);
 export const READ_ONLY = "This is a side question: a read-only copy of the minion's session. It can look (files, git, gh, logs, the database read-only) but not change anything";
 
 /** Why the fork may not make this call, or null when it is a read. */
-export function sideGuard(input: { tool_name?: unknown; tool_input?: any }): string | null {
+export function sideGuard(input: { tool_name?: unknown; tool_input?: Record<string, unknown> }): string | null {
   const tool = typeof input?.tool_name === 'string' ? input.tool_name : '';
   if (READ_TOOLS.has(tool)) return null;
   const mcp = /^mcp__(thread|coordinator)__([a-z_]+)$/.exec(tool);
@@ -292,8 +293,8 @@ export function sideGuardResult(stdin: string): { stdout?: string; stderr?: stri
   let why: string | null;
   try {
     why = sideGuard(JSON.parse(stdin));
-  } catch (err: any) {
-    why = `${READ_ONLY}, and the guard could not read this call (${err.message}).`;
+  } catch (err) {
+    why = `${READ_ONLY}, and the guard could not read this call (${thrown(err).message}).`;
   }
   return why ? { stderr: `[side question] ${why}\n`, code: 2 } : {};
 }

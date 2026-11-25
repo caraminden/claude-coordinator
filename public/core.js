@@ -870,7 +870,7 @@ export function loadEarlier(ticketId, page, from) {
     .then(async () => {
       const first = page.events[0].id;
       const older = await api(eventsUrl(ticketId, `before=${first}${from ? `&from=${from}` : ''}`));
-      Object.assign(page, { events: older.events.filter((e) => e.id < first).concat(page.events), more: older.more, tasks: older.tasks });
+      Object.assign(page, { events: older.events.filter((e) => e.id < first).concat(page.events), more: older.more, tasks: older.tasks, plan: older.plan });
       remember(ticketId, page);
       return page;
     });

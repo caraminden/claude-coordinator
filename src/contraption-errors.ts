@@ -11,6 +11,7 @@ import { afterAllWrites } from './http.ts';
 import { pacific, pacificDay, ZONE } from './pacific.ts';
 import { redact } from './timer-alerts.ts';
 import { every, type Job } from './every.ts';
+import { thrown } from './thrown.ts';
 
 const POLL_MS = 10 * 60_000;
 const DAY_MS = 86_400_000;
@@ -166,8 +167,8 @@ export class ErrorDigest {
           this.add(row, 'log', `${job}${errorKey(e.text)}`, `${job}${sampleLine(e.text)}`, e.at);
         }
         if (cursor) cursors[row.name] = cursor;
-      } catch (err: any) {
-        console.error(`Contraption errors: ${row.name}'s journal: ${err?.message ?? err}`);
+      } catch (err) {
+        console.error(`Contraption errors: ${row.name}'s journal: ${thrown(err).message ?? err}`);
       }
     }
     this.store.setSetting(CURSORS, cursors);
@@ -198,9 +199,9 @@ export class ErrorDigest {
         const file = join(folder, `${day}.md`);
         writeFileSync(`${file}.tmp`, render(this.store.getProject(scheme)?.name ?? 'This scheme', day, apps, mine, this.now(), all));
         renameSync(`${file}.tmp`, file);
-      } catch (err: any) {
+      } catch (err) {
         ok = false;
-        console.error(`Contraption errors: scheme ${scheme}'s ${day} file: ${err?.message ?? err}`);
+        console.error(`Contraption errors: scheme ${scheme}'s ${day} file: ${thrown(err).message ?? err}`);
       }
     }
     return ok;

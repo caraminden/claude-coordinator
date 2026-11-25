@@ -41,7 +41,7 @@ export type RunCmd = (cmd: string, args: string[], opts?: { timeout?: number }) 
 
 export const runCmd: RunCmd = (cmd, args, opts = {}) =>
   new Promise((resolve) => {
-    execFile(cmd, args, { timeout: opts.timeout ?? 60_000, maxBuffer: 16 << 20 }, (err: any, stdout, stderr) => {
+    execFile(cmd, args, { timeout: opts.timeout ?? 60_000, maxBuffer: 16 << 20 }, (err, stdout, stderr) => {
       resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: String(stdout), stderr: String(stderr || err?.message || '') });
     });
   });

@@ -197,7 +197,7 @@ export function linkedPaths(texts: string[], cwd: string): Set<string> {
  * must resolve (symlinks included) to a servable file type inside one of `roots` (the working
  * directory and the ticket's shared folder).
  */
-export async function resolveFile(path: string, cwd: string, roots: string[], typeOf = fileType) {
+export async function resolveFile(path: string, cwd: string, roots: string[], typeOf: (path: string) => (typeof FILE_TYPES)[string] | null | undefined = fileType) {
   const type = typeOf(path);
   if (!type || !cwd || path.includes('\0')) return null;
   try {

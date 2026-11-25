@@ -262,8 +262,8 @@ export function schemeRules(repo: string | null): RuleHome[] {
     return [];
   }
   if (!Array.isArray(list)) return [];
-  const text = (v: unknown) => typeof v === 'string' && v.trim() !== '';
-  return list.flatMap((r: any): RuleHome[] => {
+  const text = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
+  return list.flatMap((r: { id?: unknown; title?: unknown; pointer?: unknown; phrases?: unknown; home?: { kind?: unknown; section?: unknown; file?: unknown; anchor?: unknown } } | null): RuleHome[] => {
     if (!r || !text(r.id) || !text(r.title) || !text(r.pointer) || !Array.isArray(r.phrases)) return [];
     const h = r.home;
     const home =
@@ -273,7 +273,7 @@ export function schemeRules(repo: string | null): RuleHome[] {
           h?.kind === 'repo' && text(h.file) && !isAbsolute(h.file) && !h.file.split(/[\\/]/).includes('..')
           ? { kind: 'repo' as const, file: h.file, ...(text(h.section) ? { section: h.section } : text(h.anchor) ? { anchor: h.anchor } : {}) }
           : null;
-    const phrases = r.phrases.filter((p: unknown) => typeof p === 'string' && norm(p) !== '').slice(0, 40);
+    const phrases = r.phrases.filter((p: unknown): p is string => typeof p === 'string' && norm(p) !== '').slice(0, 40);
     return home && phrases.length ? [{ id: r.id, title: r.title, home, pointer: r.pointer, phrases }] : [];
   });
 }

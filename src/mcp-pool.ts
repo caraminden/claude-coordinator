@@ -13,6 +13,8 @@ import { handle } from './mcp.ts';
 import { poolAlive } from './pool-client.mjs';
 import { beatWhileOpen, turnStore, type TurnContext } from './pool-context.ts';
 import { dropLinks, machineRequest } from './pool-machine.ts';
+import { thrown } from './thrown.ts';
+import type { RpcRequest } from './mcp-types.ts';
 
 const [dir, version] = process.argv.slice(2);
 if (!dir || !version) throw new Error('usage: mcp-pool.ts <dir> <version>');
@@ -30,7 +32,7 @@ let idleSince = Date.now();
 
 const bearer = (req: IncomingMessage) => /^Bearer (\S+)$/.exec(String(req.headers.authorization ?? ''))?.[1] ?? '';
 
-async function body(req: IncomingMessage): Promise<any> {
+async function body<T>(req: IncomingMessage): Promise<T> {
   let text = '';
   for await (const c of req) {
     text += c;
@@ -65,7 +67,7 @@ async function turnOf(token: string): Promise<TurnContext | null> {
   return t ? { env: t.env, cwd: t.cwd } : null;
 }
 
-function register(token: string, b: any): string | null {
+function register(token: string, b: Record<string, unknown>): string | null {
   if (!token) return 'no token';
   if (!b || typeof b.env !== 'object' || !b.env || typeof b.cwd !== 'string') return 'needs env and cwd';
   const env: Record<string, string> = {};
@@ -83,8 +85,8 @@ function register(token: string, b: any): string | null {
  * One MCP message for a turn. A request's answer goes back as an event stream with comment beats, so a call that
  * waits long (an approval card can wait days) keeps its connection; a notification gets 202.
  */
-async function serve(req: IncomingMessage, res: ServerResponse, turn: TurnContext, run: (msg: any) => Promise<object | null>) {
-  let msg: any;
+async function serve(req: IncomingMessage, res: ServerResponse, turn: TurnContext, run: (msg: RpcRequest) => Promise<object | null>) {
+  let msg: RpcRequest;
   try {
     msg = await body(req);
   } catch {
@@ -98,7 +100,7 @@ async function serve(req: IncomingMessage, res: ServerResponse, turn: TurnContex
   }
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
   const stopBeat = beatWhileOpen(res);
-  const answer = await turnStore.run(turn, () => run(msg)).catch((err: any) => ({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: err.message } }));
+  const answer = await turnStore.run(turn, () => run(msg)).catch((err: unknown) => ({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: thrown(err).message } }));
   stopBeat();
   res.end(`event: message\ndata: ${JSON.stringify(answer)}\n\n`);
 }
@@ -110,7 +112,7 @@ const server = createServer(async (req, res) => {
     const token = bearer(req);
     if (req.method === 'POST' && url.pathname === '/register') {
       if (req.headers['x-pool-key'] !== key) return send(res, 403, { error: 'wrong key' });
-      let b;
+      let b: Parameters<typeof register>[1];
       try {
         b = await body(req);
       } catch {
@@ -131,8 +133,8 @@ const server = createServer(async (req, res) => {
     const [, id, srv] = machine!;
     const name = url.searchParams.get('name') || `machine ${id}`;
     return await serve(req, res, turn, (msg) => machineRequest(token, Number(id), srv as 'mcp' | 'ws', name, msg, join(dirname(dir), 'machine-tools')));
-  } catch (err: any) {
-    if (!res.headersSent) send(res, 500, { error: err.message });
+  } catch (err) {
+    if (!res.headersSent) send(res, 500, { error: thrown(err).message });
     else res.end();
   }
 });
@@ -192,8 +194,8 @@ function claim(): boolean {
       try {
         linkSync(mine, poolFile);
         return true;
-      } catch (err: any) {
-        if (err.code !== 'EEXIST') throw err;
+      } catch (err) {
+        if (thrown(err).code !== 'EEXIST') throw err;
       }
       if (other()) return false;
       try {

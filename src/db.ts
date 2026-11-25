@@ -1,9 +1,8 @@
 import { dirname, join } from 'node:path';
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
 import { Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
 import { ReviewSet } from './review-set.ts';
-import type { GruntRow } from './grunts.ts';
 import { Claims } from './claims.ts';
 import { MemoryProposals, MEMORY_PROPOSALS_SCHEMA } from './memory-curator.ts';
 import { ShipLessons } from './ship-lessons.ts';
@@ -11,8 +10,6 @@ import { UsageLedger } from './usage-ledger.ts';
 import { Ideas } from './ideas.ts';
 import { Memory } from './memory.ts';
 import { MinionIndex, MINION_INDEX_SCHEMA } from './minion-index.ts';
-import type { PromptHashes } from './prompt-hashes.ts';
-import type { KeepaliveRow } from './keepalive.ts';
 import { ciNumberQueries } from './db/ci-numbers.ts';
 import { contraptionRunQueries } from './db/contraption-runs.ts';
 import { deliveryQueries } from './db/deliveries.ts';
@@ -29,10 +26,11 @@ import { contraptionQueries } from './db/contraptions.ts';
 import { artifactQueries } from './db/artifacts.ts';
 import { claudeStateQueries } from './db/claude-state.ts';
 import { releaseQueries } from './db/releases.ts';
-import { turnRow } from './turn-row.ts';
 import { schemeQueries } from './db/schemes.ts';
 import { peopleQueries } from './db/people.ts';
 import { credentialQueries } from './db/credentials.ts';
+import { turnQueries } from './db/turns.ts';
+import { healthQueries } from './db/health.ts';
 import { slowMomentQueries } from './db/slow-moments.ts';
 import { viewQueries } from './db/views.ts';
 
@@ -40,7 +38,7 @@ import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
 import { scoped } from './read-scope.ts';
 import { CHAT, attachEventsForWrite, cardFatesTrigger, eventsHome, eventsMoved, eventsPath, eventsSchema, moveEvents } from './events-db.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
-import { type ClaudeStateRow, type EventRow, FLAKE_KEEP_MS, type FinishedStep, type FlakeFix, HEALTH_KEEP_MS, HEALTH_MAX_ROWS, HOST_SAMPLE_KEEP_MS, type HostSample, type Machine, STEP_RATIO, type SpendRowRaw, type Turn, type TurnResult, titleWithoutBuild, type CardFate, PUT_CLAUDE_STATE } from './db-rows.ts';
+import { type ClaudeStateRow, type EventRow, type Machine, titleWithoutBuild, type CardFate, PUT_CLAUDE_STATE } from './db-rows.ts';
 export * from './db-rows.ts';
 
 /** The newest event when #812 landed: a card at or below it still counts a typed message as handling it (PERSON_WROTE), or every old card nobody settled would wake up open. */
@@ -1543,307 +1541,11 @@ export class Store {
   /** TYPED_HANDLES_UP_TO; a test sets 0 to run the new rule on its small ids. */
   typedHandlesUpTo = TYPED_HANDLES_UP_TO;
 
-  /**
-   * Store a finished turn. Its cost is the session's running total minus the total at the session's
-   * previous turn; a total that went down means Claude Code started counting afresh (it restores the
-   * running total on --resume only when the session was the last one run in that folder), so the
-   * whole total is this turn's.
-   */
-  async recordTurn(ticketId: number, r: TurnResult): Promise<Turn> {
-    return turnRow(this.db, ticketId, r);
-  }
-
-  /** Keep a turn's Grunts (#948). A Grunt already kept (it was still running at an earlier turn's end) has its calls and cost refreshed, and stays under the turn that first saw it. */
-  recordGrunts(turnId: number, rows: GruntRow[]) {
-    const put = this.db.prepare(`INSERT INTO turn_grunts (agent_id, turn_id, agent_type, model, effort, calls, cost_usd, request_shape, spawn_depth, description)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET calls = excluded.calls, cost_usd = excluded.cost_usd, model = excluded.model, effort = excluded.effort`);
-    for (const g of rows) put.run(g.agent_id, turnId, g.agent_type, g.model, g.effort, g.calls, g.cost_usd, g.request_shape, g.spawn_depth, g.description);
-  }
-
-  /** Minions' turns that ended since `since`, oldest first, for the keepalive readout and its miss check (#862). */
-  minionTurnsSince(since: number): KeepaliveRow[] {
-    return this.db
-      .prepare(`SELECT t.ticket_id, t.ended_at, t.duration_ms, t.cost_usd, t.input_tokens, t.output_tokens,
-          t.cache_read_tokens, t.cache_write_tokens, t.keepalive FROM turns t JOIN tickets k ON k.id = t.ticket_id
-          WHERE t.ended_at >= ? AND k.kind != 'coordinator' AND t.side IS NULL ORDER BY t.ended_at, t.id`)
-      .all(since) as unknown as KeepaliveRow[];
-  }
-
-  /** A minion's latest turns' hash logs (#878), newest first, with how much of each turn's prompt came from the cache. */
-  promptHashes(ticketId: number, limit = 1): { ended_at: number; cache_read_tokens: number | null; cache_write_tokens: number | null; hashes: PromptHashes }[] {
-    const rows = this.db
-      .prepare(`SELECT ended_at, cache_read_tokens, cache_write_tokens, prompt_digest FROM turns
-        WHERE ticket_id = ? AND prompt_digest IS NOT NULL ORDER BY id DESC LIMIT ?`)
-      .all(ticketId, limit) as { ended_at: number; cache_read_tokens: number | null; cache_write_tokens: number | null; prompt_digest: string }[];
-    return rows.map(({ prompt_digest, ...r }) => ({ ...r, hashes: JSON.parse(prompt_digest) }));
-  }
-
-  /**
-   * Fill the turns table from stored result events, for turns from before it existed. Session ids
-   * come from each turn's init event. Only runs on an empty table; returns how many turns it added.
-   */
-  backfillTurns(): number {
-    if (this.db.prepare('SELECT 1 FROM turns LIMIT 1').get()) return 0;
-    const rows = this.db
-      .prepare(`SELECT id, ticket_id, data, created_at FROM events WHERE kind = 'claude'
-          AND (data LIKE '{"type":"system","subtype":"init"%' OR data LIKE '{"type":"result"%') ORDER BY id`)
-      .iterate() as Iterable<{ id: number; ticket_id: number; data: string; created_at: number }>;
-    const session = new Map<number, string | null>();
-    let added = 0;
-    this.db.exec('BEGIN');
-    try {
-      for (const row of rows) {
-        const ev = JSON.parse(row.data);
-        if (ev.type === 'system') {
-          session.set(row.ticket_id, ev.session_id ?? null);
-        } else if (typeof ev.total_cost_usd === 'number') {
-          turnRow(this.db, row.ticket_id, {
-            event_id: row.id,
-            session_id: session.get(row.ticket_id) ?? null,
-            ended_at: row.created_at,
-            session_cost_usd: ev.total_cost_usd,
-            duration_ms: ev.duration_ms,
-          });
-          added++;
-        }
-      }
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-    return added;
-  }
-
-  /** A ticket's turns, oldest first. */
-  listTurns(ticketId: number): Turn[] {
-    return this.db.prepare('SELECT * FROM turns WHERE ticket_id = ? ORDER BY id').all(ticketId) as unknown as Turn[];
-  }
-
-  /** Record finished steps (#571, public/progress.js applyEvent's `finished`); one already recorded (same start) is kept. */
-  addStepTimes(ticketId: number, steps: FinishedStep[], effort: string | null) {
-    if (!steps.length) return;
-    const add = this.db.prepare(`INSERT OR IGNORE INTO step_times (ticket_id, task_id, subject, estimate, started_at, finished_at, work_ms, model, effort)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-    this.db.exec('BEGIN');
-    try {
-      for (const s of steps) add.run(ticketId, s.id, s.subject, s.estimate, s.startedAt, s.finishedAt, Math.round(s.work), s.model, effort);
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-  }
-
-  /**
-   * What steps really took against their guesses (#571): working minutes over guessed minutes, summed over the
-   * newest STEP_RATIO.recent finished steps with a guess. The scheme's own once it has STEP_RATIO.scheme of them,
-   * else every scheme's, and 1 until there are STEP_RATIO.least anywhere. A sum, not the median step's ratio:
-   * that undershoots whole plans (progress-estimates-2026-11 report).
-   */
-  stepRatio(projectId: number): number {
-    const sum = (where: string, ...args: number[]) =>
-      this.db
-        .prepare(`SELECT COUNT(*) AS n, SUM(work_ms) AS work, SUM(estimate) AS guess FROM (
-      SELECT s.work_ms, s.estimate FROM step_times s JOIN tickets t ON t.id = s.ticket_id WHERE s.estimate IS NOT NULL ${where}
-      ORDER BY s.finished_at DESC LIMIT ${STEP_RATIO.recent})`)
-        .get(...args) as { n: number; work: number | null; guess: number | null };
-    const own = sum('AND t.project_id = ?', projectId);
-    const pick = own.n >= STEP_RATIO.scheme ? own : sum('');
-    const ratio = pick.n >= STEP_RATIO.least && pick.guess ? pick.work! / 60_000 / pick.guess : 1;
-    return ratio > 0 ? ratio : 1;
-  }
-
-  /** When a ticket's last finished turn ended (ms), or null before its first. */
-  lastTurnEnd(ticketId: number): number | null {
-    // A side question's fork (#932) isn't the minion's turn: its prefix may sit on another login, and the minion's own is no warmer for it.
-    return scoped(this.db, `last-turn-end:${ticketId}`, () => (this.db.prepare('SELECT ended_at FROM turns WHERE ticket_id = ? AND side IS NULL ORDER BY id DESC LIMIT 1').get(ticketId) as { ended_at: number } | undefined)?.ended_at ?? null);
-  }
-
-  /** What a ticket's turns have cost so far; `hostOnly`: the server login's turns only. */
-  ticketCost(ticketId: number, hostOnly = false): number {
-    return scoped(this.db, `cost:${ticketId}:${hostOnly}`, () => (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE ticket_id = ?${hostOnly ? ' AND payer IS NULL' : ''}`).get(ticketId) as { c: number }).c);
-  }
-
-  /**
-   * Every closed minion created since `since` that cost anything (open ones are still short of their final cost), every scheme (#1114): its `type` property (null untyped),
-   * the model it was set to or last ran on, and what its turns cost. src/minion-budget.ts takes the usual cost from these.
-   */
-  minionCosts(since: number): { type: string | null; model: string | null; cost: number }[] {
-    return this.db
-      .prepare(`SELECT (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
-          WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type,
-        coalesce(k.model, k.last_model) AS model, c.cost
-      FROM tickets k JOIN (SELECT ticket_id, SUM(cost_usd) AS cost FROM turns GROUP BY ticket_id) c ON c.ticket_id = k.id
-      WHERE k.kind = 'ticket' AND k.status = 'closed' AND k.created_at >= ? AND c.cost > 0`)
-      .all(since) as unknown as { type: string | null; model: string | null; cost: number }[];
-  }
-
-  /** Cost per local day ('2026-10-28') and project, for turns ended at or after `since`; `hostOnly`: the server login's turns only. */
-  dailyCosts(since: number, hostOnly = false): { day: string; project_id: number; cost: number; turns: number }[] {
-    return this.db
-      .prepare(`SELECT date(u.ended_at / 1000, 'unixepoch', 'localtime') AS day, t.project_id, SUM(u.cost_usd) AS cost, COUNT(*) AS turns
-          FROM turns u JOIN tickets t ON t.id = u.ticket_id WHERE u.ended_at >= ? ${hostOnly ? 'AND u.payer IS NULL ' : ''}GROUP BY day, t.project_id ORDER BY day`)
-      .all(since) as unknown as { day: string; project_id: number; cost: number; turns: number }[];
-  }
-
-  /** Spend since `since` by payer (null: the server login) and project, every payer's turns (#689). */
-  spendByPayer(since: number): { payer: number | null; project_id: number; cost: number }[] {
-    return this.db.prepare('SELECT u.payer, t.project_id, SUM(u.cost_usd) AS cost FROM turns u JOIN tickets t ON t.id = u.ticket_id WHERE u.ended_at >= ? GROUP BY u.payer, t.project_id').all(since) as unknown as { payer: number | null; project_id: number; cost: number }[];
-  }
-
-  /** What one payer's turns on one of their accounts cost since `since`; a turn from before #905 kept no account and counts as account 1's. */
-  accountSpend(payer: number | null, account: number, since: number): number | null {
-    // Turns kept no account before #905, so a window holding one of those can't be split by account (keepalive pings keep none, and cost next to nothing).
-    if (this.db.prepare('SELECT 1 FROM turns WHERE payer IS ? AND ended_at >= ? AND account IS NULL AND keepalive IS NULL LIMIT 1').get(payer, since)) return null;
-    return (this.db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS c FROM turns WHERE payer IS ? AND ended_at >= ? AND ${account === 1 ? '(account IS NULL OR account = 1)' : 'account = ?'}`).get(payer, since, ...(account === 1 ? [] : [account])) as { c: number }).c;
-  }
-
-  /**
-   * One payer's turns that ended in [since, until), summed in the database to one row per minion, kind of turn and model (#905,
-   * #956: all time stays a few thousand rows, never one per turn). Turns from before the split was kept sum under `model` null.
-   */
-  spendRows(payer: number | null, since: number, until: number): SpendRowRaw[] {
-    return this.db
-      .prepare(`SELECT u.ticket_id, u.keepalive, u.side, k.project_id, k.number, k.title, k.kind, k.created_by,
-          coalesce(k.last_model, k.model) AS minion_model, m.model, sum(coalesce(m.cost_usd, u.cost_usd)) AS cost,
-          (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id
-            WHERE p.target_type = 'minion' AND p.target_id = k.id AND pk.key = 'type' LIMIT 1) AS type
-        FROM turns u JOIN tickets k ON k.id = u.ticket_id LEFT JOIN turn_models m ON m.turn_id = u.id
-        WHERE u.ended_at >= ? AND u.ended_at < ? AND u.payer IS ?
-        GROUP BY u.ticket_id, u.keepalive, u.side, m.model`)
-      .all(since, until, payer) as unknown as SpendRowRaw[];
-  }
-
-  /** Health readings of these kinds since `since`, oldest first (#1123, the Status page). */
-  healthEventsSince(kinds: string[], since: number): { kind: string; at: number; commit_sha: string | null; detail: string }[] {
-    return this.db.prepare(`SELECT kind, at, commit_sha, detail FROM health_events WHERE kind IN (${kinds.map(() => '?').join(', ')}) AND at >= ? ORDER BY at`).all(...kinds, since) as unknown as { kind: string; at: number; commit_sha: string | null; detail: string }[];
-  }
-
-  /** One reading of perigee's memory, disk and load (#1123); drops readings past HOST_SAMPLE_KEEP_MS. */
-  addHostSample(s: HostSample) {
-    this.db
-      .prepare(
-        'INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss, cpu_psi, mem_psi, io_psi, swap_used, cpu_ledger, answer_time, db_cached, db_size, kswapd_rate, refault_rate, server_refault_rate, pgpgin_rate, thp_fallback_rate, warm_ms, warm_mb, warm_backoffs, open_fds, supervisors, tmp_used, app_mem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      )
-      .run(
-        s.at,
-        s.mem_total,
-        s.mem_avail,
-        s.disk_total,
-        s.disk_free,
-        s.load1,
-        s.rss,
-        s.cpu_psi ?? null,
-        s.mem_psi ?? null,
-        s.io_psi ?? null,
-        s.swap_used ?? null,
-        s.cpu_ledger ?? null,
-        s.answer_time ?? null,
-        s.db_cached ?? null,
-        s.db_size ?? null,
-        s.kswapd_rate ?? null,
-        s.refault_rate ?? null,
-        s.server_refault_rate ?? null,
-        s.pgpgin_rate ?? null,
-        s.thp_fallback_rate ?? null,
-        s.warm_ms ?? null,
-        s.warm_mb ?? null,
-        s.warm_backoffs ?? null,
-        s.open_fds ?? null,
-        s.supervisors ?? null,
-        s.tmp_used ?? null,
-        s.app_mem ?? null,
-      );
-    this.db.prepare('DELETE FROM host_samples WHERE at < ?').run(s.at - HOST_SAMPLE_KEEP_MS);
-  }
-
-  hostSamples(since: number): HostSample[] {
-    return this.db.prepare('SELECT * FROM host_samples WHERE at >= ? ORDER BY at').all(since) as unknown as HostSample[];
-  }
-
-  /** Record a health reading (#724); every 100th insert also drops rows past HEALTH_KEEP_MS and HEALTH_MAX_ROWS. */
-  addHealthEvent(kind: string, at: number, commit: string | null, detail: string) {
-    const { id } = this.db.prepare('INSERT INTO health_events (kind, at, commit_sha, detail) VALUES (?, ?, ?, ?) RETURNING id').get(kind, at, commit, detail.slice(0, 1000)) as { id: number };
-    if (Number(id) % 100 === 0) {
-      this.db.prepare('DELETE FROM health_events WHERE at < ?').run(at - HEALTH_KEEP_MS);
-      // Boots, slow-ship nudges, Investigate clicks and looks (#1273) are few and the Status page and the once-a-day rule need them: only the time keep drops them.
-      this.db.prepare("DELETE FROM health_events WHERE id <= ? AND kind NOT IN ('boot', 'live', 'stop', 'ship-slow', 'investigate', 'look')").run(Number(id) - HEALTH_MAX_ROWS);
-    }
-  }
-
-  /** Record the flakes of one run (#1063); rows older than FLAKE_KEEP_MS go with each write. */
-  addFlakeEvents(projectId: number, ticketId: number | null, commit: string | null, at: number, flakes: { file: string; source: string; detail: string; testName?: string; message?: string; cls?: string }[]) {
-    const add = this.db.prepare('INSERT INTO flake_events (project_id, file, at, commit_sha, ticket_id, source, detail, test_name, message, class) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    for (const f of flakes) add.run(projectId, f.file.slice(0, 200), at, commit, ticketId, f.source.slice(0, 40), f.detail.slice(0, 1500), (f.testName ?? '').slice(0, 200), (f.message ?? '').slice(0, 600), (f.cls ?? '').slice(0, 40));
-    if (flakes.length) this.db.prepare('DELETE FROM flake_events WHERE at < ?').run(at - FLAKE_KEEP_MS);
-  }
-
-  /** A scheme's flakiest test files since `since`: how often, when last, and the minion whose land saw the last one. */
-  flakeCounts(projectId: number, since: number, limit = 10): { file: string; count: number; last: number; ticketId: number | null }[] {
-    return this.db
-      .prepare(`SELECT file, COUNT(*) AS count, MAX(at) AS last,
-        (SELECT e2.ticket_id FROM flake_events e2 WHERE e2.project_id = e.project_id AND e2.file = e.file ORDER BY e2.at DESC, e2.id DESC LIMIT 1) AS ticketId
-      FROM flake_events e WHERE project_id = ? AND at >= ? GROUP BY file ORDER BY count DESC, last DESC LIMIT ?`)
-      .all(projectId, since, limit) as { file: string; count: number; last: number; ticketId: number | null }[];
-  }
-
-  /** Whether `file` already has a sighting within `tolMs` of `at`: a retro-log line the server already counted from the land's own output. */
-  hasFlakeNear(projectId: number, file: string, at: number, tolMs: number): boolean {
-    return !!this.db.prepare('SELECT 1 FROM flake_events WHERE project_id = ? AND file = ? AND at BETWEEN ? AND ? LIMIT 1').get(projectId, file, at - tolMs, at + tolMs);
-  }
-
-  /** Sighting times of `file` since `since`, oldest first. */
-  flakeSightings(projectId: number, file: string, since: number): number[] {
-    return (this.db.prepare('SELECT at FROM flake_events WHERE project_id = ? AND file = ? AND at >= ? ORDER BY at').all(projectId, file, since) as { at: number }[]).map((r) => r.at);
-  }
-
-  /** Files with a sighting since `since`. */
-  flakeFiles(projectId: number, since: number): string[] {
-    return (this.db.prepare('SELECT DISTINCT file FROM flake_events WHERE project_id = ? AND at >= ?').all(projectId, since) as { file: string }[]).map((r) => r.file);
-  }
-
-  /** The newest fix of a file (#1120), or undefined. */
-  flakeFix(projectId: number, file: string): FlakeFix | undefined {
-    return this.db.prepare('SELECT * FROM flake_fixes WHERE project_id = ? AND file = ? ORDER BY id DESC LIMIT 1').get(projectId, file) as FlakeFix | undefined;
-  }
-
-  flakeFixes(projectId: number): FlakeFix[] {
-    return this.db.prepare('SELECT * FROM flake_fixes WHERE project_id = ? ORDER BY id DESC').all(projectId) as unknown as FlakeFix[];
-  }
-
-  addFlakeFix(projectId: number, file: string, ticketId: number | null, startedAt: number, patch: Partial<FlakeFix> = {}): number {
-    const r = this.db.prepare('INSERT INTO flake_fixes (project_id, file, ticket_id, state, started_at, clean_runs, held_at, reopened) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(projectId, file, ticketId, patch.state ?? 'open', startedAt, patch.clean_runs ?? 0, patch.held_at ?? null, patch.reopened ?? 0);
-    return Number(r.lastInsertRowid);
-  }
-
-  updateFlakeFix(id: number, patch: Partial<Omit<FlakeFix, 'id' | 'project_id' | 'file'>>) {
-    const keys = Object.keys(patch) as (keyof typeof patch)[];
-    if (!keys.length) return;
-    this.db.prepare(`UPDATE flake_fixes SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => patch[k] as SQLInputValue), id);
-  }
-
-  /** The newest `n` failing outputs kept for a file. */
-  flakeDetails(projectId: number, file: string, n = 3): { at: number; detail: string }[] {
-    return this.db.prepare("SELECT at, detail FROM flake_events WHERE project_id = ? AND file = ? AND detail != '' ORDER BY at DESC, id DESC LIMIT ?").all(projectId, file, n) as { at: number; detail: string }[];
-  }
-
   /** How many `kind` readings fell in [from, to), the first one's time, and the commonest details with their counts. */
   healthCount(kind: string, from: number, to: number, top = 3): { count: number; first: number | null; top: { detail: string; n: number }[] } {
     const { count, first } = this.db.prepare('SELECT COUNT(*) AS count, MIN(at) AS first FROM health_events WHERE kind = ? AND at >= ? AND at < ?').get(kind, from, to) as { count: number; first: number | null };
     const rows = count ? (this.db.prepare('SELECT detail, COUNT(*) AS n FROM health_events WHERE kind = ? AND at >= ? AND at < ? GROUP BY detail ORDER BY n DESC, MIN(at) LIMIT ?').all(kind, from, to, top) as { detail: string; n: number }[]) : [];
     return { count: Number(count), first: first ?? null, top: rows.map((r) => ({ detail: r.detail, n: Number(r.n) })) };
-  }
-
-  /** The readings in [from, to), oldest first, at most `limit`, of `kinds` only if given: an incident's timeline (#1145). */
-  healthBetween(from: number, to: number, limit: number, kinds?: string[]): { at: number; kind: string; commit_sha: string | null; detail: string }[] {
-    const only = kinds?.length ? ` AND kind IN (${kinds.map(() => '?').join(', ')})` : '';
-    return this.db.prepare(`SELECT at, kind, commit_sha, detail FROM health_events WHERE at >= ? AND at < ?${only} ORDER BY at, id LIMIT ?`).all(from, to, ...(kinds ?? []), limit) as { at: number; kind: string; commit_sha: string | null; detail: string }[];
-  }
-
-  /** The newest `kind` reading before `before` (#1135: the last stall before a watchdog restart), or null. */
-  lastHealthEvent(kind: string, before: number): { at: number; detail: string } | null {
-    return (this.db.prepare('SELECT at, detail FROM health_events WHERE kind = ? AND at < ? ORDER BY at DESC LIMIT 1').get(kind, before) as { at: number; detail: string } | undefined) ?? null;
   }
 
   /**
@@ -1888,11 +1590,6 @@ export class Store {
     return (this.db.prepare(`SELECT key, value FROM settings WHERE ${where} ORDER BY key`).all(...args) as { key: string; value: string }[]).map((r) => ({ key: r.key, value: JSON.parse(r.value) as T }));
   }
 
-  /** What every payer's Fable turns cost since `since` (#1061), from the per-model split, so turns before it was kept count for nothing. */
-  fableSpend(since: number): number {
-    return (this.db.prepare("SELECT COALESCE(SUM(m.cost_usd), 0) AS c FROM turn_models m JOIN turns u ON u.id = m.turn_id WHERE u.ended_at >= ? AND m.model LIKE '%fable%'").get(since) as { c: number }).c;
-  }
-
   setSetting(key: string, value: unknown) {
     // An unchanged value writes nothing: ci-health alone rewrote 250 KB of the same job lists every 5 minutes (#680).
     this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE value IS NOT excluded.value').run(key, JSON.stringify(value));
@@ -1927,6 +1624,8 @@ export class Store {
  */
 // One area per line, so two branches adding areas touch different lines (#1313: a single long list here was a conflict hotspot).
 const AREAS = [
+  healthQueries,
+  turnQueries,
   credentialQueries,
   peopleQueries,
   schemeQueries,
@@ -1950,7 +1649,9 @@ const AREAS = [
   viewQueries,
 ];
 // The same list as a type: written out, since a type taken from AREAS would loop through Store's own type.
-type Areas = typeof credentialQueries &
+type Areas = typeof healthQueries &
+  typeof turnQueries &
+  typeof credentialQueries &
   typeof peopleQueries &
   typeof schemeQueries &
   typeof releaseQueries &

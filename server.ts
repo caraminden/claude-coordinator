@@ -35,7 +35,7 @@ import { StandingChecks } from './src/standing-checks.ts';
 import { startRealtime } from './src/realtime.ts';
 import { markStop, restartDetail, startWatchdog, takeMark, readStop } from './src/sd-watchdog.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
-import { judged, noteWould } from './src/judges.ts';
+import { judge, judged, noteWould } from './src/judges.ts';
 import { UltraReviews } from './src/ultrareview.ts';
 import { SideAsks } from './src/side-ask.ts';
 import { installing as hostToolInstalls } from './src/host-tools.ts';
@@ -123,6 +123,7 @@ import { callMandate } from './src/mandate-items.ts';
 import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
 import { TimerAlerts } from './src/timer-alerts.ts';
 import { FrozenShips } from './src/frozen-ships.ts';
+import { AppShots, killRun, runAlive, startRun } from './src/app-shots.ts';
 import { ErrorDigest, RESTART_WINDOW_MS } from './src/contraption-errors.ts';
 import { ensureCoordinatorFor } from './src/routes/projects.ts';
 import { KitSync, type KitSyncState } from './src/kit-sync.ts';
@@ -414,7 +415,9 @@ setInterval(
       .read()
       .then((r) => {
         const free = memoryEase.free();
-        runner.turnLine.tick(r, stormPeople(memoryStorms.current()), Date.now(), { freeGb: free === null ? null : free / 1024 ** 3, level: memoryEase.get().level });
+        const { level } = memoryEase.get();
+        runner.turnLine.tick(r, stormPeople(memoryStorms.current()), Date.now(), { freeGb: free === null ? null : free / 1024 ** 3, level });
+        runner.endCardWaits(r.starved || level !== 'ok');
       })
       .catch((e) => console.error('worker pool:', e)),
   POOL.everyMs,
@@ -2083,6 +2086,42 @@ const errorDigest = new ErrorDigest(store, {
 });
 contraptionTurns.onToolError = (c, tool, error) => void safely('error digest', () => errorDigest.toolError(c, tool, error));
 if (!BOOT_CHECK && !PREVIEW) errorDigest.start();
+// Every contraption's main pages, shot nightly from a sealed copy and compared with the night before (#1783).
+const appShotsMail = (scheme: number, text: string) => {
+  const tm = store.getOverlord(scheme);
+  if (tm) runner.leaveMail(tm.id, APP_NAME, text);
+  return !!tm;
+};
+const appShots = new AppShots(store, {
+  dir: join(DATA_DIR, 'app-shots'),
+  home: homedir(),
+  sharedDir: (id) => projectSharedDir(DATA_DIR, id),
+  citadel: () => alertScheme(0),
+  wake: judged(
+    'app-shots',
+    'wake',
+    (scheme: number, text: string) => {
+      if (!store.getOverlord(scheme)) return false;
+      tellHome(scheme, text);
+      return true;
+    },
+    () => true,
+    judgeNote((scheme) => scheme),
+  ),
+  mail: judged(
+    'app-shots',
+    'mail',
+    appShotsMail,
+    () => true,
+    judgeNote((scheme) => scheme),
+  ),
+  report: appShotsMail,
+  watching: judge('app-shots')?.mode === 'log-only',
+  start: startRun,
+  alive: runAlive,
+  kill: killRun,
+});
+if (!BOOT_CHECK && !PREVIEW && !services.opts.off) appShots.start();
 // Members already in schemes get their invites, and leavers' are withdrawn (#310); it settles, so later boots only retry what failed.
 if (!BOOT_CHECK) void safely('repo access sweep', () => repoAccess.sweep());
 runner.onTurnEnd = (ticketId) => github.poke(ticketId);

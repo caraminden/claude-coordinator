@@ -275,7 +275,7 @@ export interface RedMark {
   where?: string;
   /** The re-run of the workflow on main after its fix minion's fix went live (#1074), once Citadel has one. */
   rerun?: Rerun;
-  /** #1491: the streak's later red runs on the branch (a fix minion may name any of them), newest last, at most 20. */
+  /** #1491: the streak's later red runs on the branch (a fix minion may name one of them), newest last, at most 20. */
   runs?: number[];
   /** #1491: the first red run's failing tests, read once from its failed jobs' logs ([] when none named one): the fixer match and the Investigate brief. */
   failures?: { file: string; name: string; message: string }[];

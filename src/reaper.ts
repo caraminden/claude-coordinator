@@ -215,7 +215,7 @@ export async function supervisorOrphaned(home: string, landingsRoots: string[]):
 
 /** What the reaper reads and writes of the store. */
 export interface ReaperStore {
-  getTicket(id: number): { id: number; number: number; title: string; project_id: number; kind: string; status: string } | undefined;
+  getTicket(id: number): { id: number; number: number | null; title: string; project_id: number; kind: string; status: string } | undefined;
   addHealthEvent(kind: string, at: number, commit: string | null, detail: string): unknown;
 }
 
@@ -330,7 +330,8 @@ export class Reaper {
     let left = sent;
     while (left.length && Date.now() < deadline) {
       await sleep(200);
-      left = (await Promise.all(left.map(async (x) => ((await startOf(x.proc.pid)) === x.proc.start ? x : null)))).filter((x): x is T => !!x);
+      const alive = await Promise.all(left.map(async (x) => (await startOf(x.proc.pid)) === x.proc.start));
+      left = left.filter((_, i) => alive[i]);
     }
     for (const x of left) {
       if ((await startOf(x.proc.pid)) !== x.proc.start) continue;
@@ -376,7 +377,7 @@ export class Reaper {
     this.reapedAt = now;
     return sent.map((x) => {
       const t = this.o.store.getTicket(x.ticketId)!;
-      const r: Reaped = { ticket: x.ticketId, number: t.number, scheme: x.projectId, pid: x.proc.pid, command: shownCommand(x.proc.argv), cpuS: Math.round(x.proc.cpuS), ageS: Math.round(x.proc.ageS), signal: killed.has(x.proc.pid) ? 'KILL' : 'TERM' };
+      const r: Reaped = { ticket: x.ticketId, number: t.number!, scheme: x.projectId, pid: x.proc.pid, command: shownCommand(x.proc.argv), cpuS: Math.round(x.proc.cpuS), ageS: Math.round(x.proc.ageS), signal: killed.has(x.proc.pid) ? 'KILL' : 'TERM' };
       this.o.store.addHealthEvent(REAPED, now, this.o.commit, JSON.stringify(r));
       this.o.log(`Reaped pid ${r.pid} of closed minion #${r.number} (${r.signal}, ${r.cpuS} s of CPU over ${Math.round(r.ageS / 60)} min): ${r.command}`);
       return r;
@@ -401,7 +402,7 @@ export function byMinion(owned: Owned[], store: ReaperStore & { getProject(id: n
   for (const x of owned) {
     const t = store.getTicket(x.ticketId);
     if (!t || t.project_id !== x.projectId || t.kind === 'coordinator' || !canSee(x.projectId)) continue;
-    const row = rows.get(t.id) ?? rows.set(t.id, { ticket: t.id, number: t.number, title: t.title, scheme: store.getProject(t.project_id)?.name ?? '', schemeId: t.project_id, status: t.status, procs: [] }).get(t.id)!;
+    const row = rows.get(t.id) ?? rows.set(t.id, { ticket: t.id, number: t.number!, title: t.title, scheme: store.getProject(t.project_id)?.name ?? '', schemeId: t.project_id, status: t.status, procs: [] }).get(t.id)!;
     row.procs.push({ pid: x.proc.pid, command: shownCommand(x.proc.argv), cpuS: Math.round(x.proc.cpuS), ageS: Math.round(x.proc.ageS) });
   }
   const cpu = (r: MinionProcs) => r.procs.reduce((a, p) => a + p.cpuS, 0);

@@ -9,6 +9,7 @@ import { execFile, spawn } from 'node:child_process';
 import { appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { thrown } from './thrown.ts';
 
 /** A main ship of this many changed lines (added plus removed) or more carries a probe (the trial's line; 200 later). */
 export const PROBE_LINES = 600;
@@ -127,7 +128,7 @@ async function get(env: ProbeEnv, path: string): Promise<{ status: number; body:
   return { status: res.status, body, ms: Math.round(performance.now() - t0) };
 }
 
-const noAnswer = (err: any): Outcome => ({ result: 'cant', saw: err?.name === 'TimeoutError' ? 'no answer within the time limit' : `no answer: ${clip(String(err?.cause?.code ?? err?.message ?? err), 120)}` });
+const noAnswer = (err: unknown): Outcome => ({ result: 'cant', saw: thrown(err).name === 'TimeoutError' ? 'no answer within the time limit' : `no answer: ${clip(String(thrown(thrown(err).cause).code ?? thrown(err).message ?? err), 120)}` });
 const login = (env: ProbeEnv, path: string): Outcome => ({ result: 'cant', saw: `401: it needs a login${env.headers(path) ? " the minion's person doesn't have" : ' and the minion has no person to sign in as'}` });
 
 /** Run one probe against the live server. Never throws: a probe that can't run says so. */
@@ -177,8 +178,8 @@ export async function runProbe(p: Probe, env: ProbeEnv): Promise<Outcome> {
         return { result: ok ? 'pass' : 'fail', saw: `${v}` };
       }
     }
-  } catch (err: any) {
-    return { result: 'cant', saw: `the probe broke: ${clip(String(err?.message ?? err), 200)}` };
+  } catch (err) {
+    return { result: 'cant', saw: `the probe broke: ${clip(String(thrown(err).message ?? err), 200)}` };
   }
 }
 
@@ -327,8 +328,8 @@ export class LiveProbes {
         await this.d.runner.close(id, `The deploy is live and its live probe ${result === 'pass' ? 'passed' : "couldn't run"}, so it dismissed this minion.`);
       }
       return result;
-    } catch (err: any) {
-      console.error(`Minion ${id}'s live probe failed to report: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Minion ${id}'s live probe failed to report: ${thrown(err).message ?? err}`);
       return null;
     }
   }

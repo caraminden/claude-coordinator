@@ -111,8 +111,11 @@ const fail = (res: ServerResponse, status: number, error: string) => json(res, s
 const under = (path: string, entry: string) => path === entry || path.startsWith(entry.endsWith('/') ? entry : `${entry}/`);
 const whole = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1;
 
+/** A call's JSON body: unchecked, each route checks the fields it reads. */
+type AppBody = Record<string, unknown>;
+
 /** Why a push body would be refused (Citadel's src/fcm.ts parsePush), or null. */
-function pushProblem(app: string, b: any): string | null {
+function pushProblem(app: string, b: AppBody): string | null {
   const to = typeof b?.to === 'string' ? [b.to] : b?.to;
   if (!Array.isArray(to) || !to.length || to.length > 100 || to.some((l) => typeof l !== 'string' || !l || l.length > 200)) return 'to must be a login, or a list of 1 to 100 logins';
   for (const [k, max, min] of [
@@ -121,10 +124,11 @@ function pushProblem(app: string, b: any): string | null {
     ['open', 1000, 0],
     ['tag', 100, 0],
   ] as const) {
-    if (b[k] !== undefined && (typeof b[k] !== 'string' || b[k].length < min || b[k].length > max)) return `${k} must be a string of at most ${max} characters`;
+    const v = b[k];
+    if (v !== undefined && (typeof v !== 'string' || v.length < min || v.length > max)) return `${k} must be a string of at most ${max} characters`;
   }
   if (b.title === undefined && (b.body !== undefined || b.open !== undefined || b.tag !== undefined)) return 'body, open and tag go with a title';
-  if (b.open !== undefined && (!b.open.startsWith(`/apps/${app}/`) || /[\\\u0000-\u001f\u007f]|%2e|%2f|%5c|\/\.\.?(\/|$|\?|#)/i.test(b.open))) return `open must be a path under /apps/${app}/`;
+  if (b.open !== undefined && (!(b.open as string).startsWith(`/apps/${app}/`) || /[\\\u0000-\u001f\u007f]|%2e|%2f|%5c|\/\.\.?(\/|$|\?|#)/i.test(b.open as string))) return `open must be a path under /apps/${app}/`;
   const data: Record<string, string> = {};
   if (b.data !== undefined) {
     if (!b.data || typeof b.data !== 'object' || Array.isArray(b.data)) return 'data must be an object of string values';
@@ -136,8 +140,8 @@ function pushProblem(app: string, b: any): string | null {
   }
   if (b.title === undefined && !Object.keys(data).length) return 'Send a title or data (or both)';
   // Firebase's 4 KB, counted over the data block Citadel sends (the app's keys plus citadel_*).
-  const sent = { ...data, citadel_app: app, ...(b.title === undefined ? {} : { citadel_title: b.title, citadel_body: b.body ?? '', citadel_open: b.open, citadel_tag: b.tag }) };
-  const bytes = Object.entries(sent).reduce((n, [k, v]) => n + (v === undefined ? 0 : Buffer.byteLength(k) + Buffer.byteLength(v)), 0);
+  const sent: Record<string, unknown> = { ...data, citadel_app: app, ...(b.title === undefined ? {} : { citadel_title: b.title, citadel_body: b.body ?? '', citadel_open: b.open, citadel_tag: b.tag }) };
+  const bytes = Object.entries(sent).reduce((n, [k, v]) => n + (v === undefined ? 0 : Buffer.byteLength(k) + Buffer.byteLength(v as string)), 0);
   return bytes > 4096 ? `the data block comes to ${bytes} bytes; Firebase takes at most 4096` : null;
 }
 
@@ -195,7 +199,7 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
   const running = new Map<string, () => void>();
   let n = 0;
 
-  const body = async (req: IncomingMessage, res: ServerResponse, max: number): Promise<any | undefined> => {
+  const body = async (req: IncomingMessage, res: ServerResponse, max: number): Promise<AppBody | undefined> => {
     if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) return void fail(res, 415, 'Send application/json');
     const chunks: Buffer[] = [];
     let size = 0;
@@ -306,10 +310,10 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
         if (b === undefined) return;
         const bad = pushProblem(opts.app, b);
         if (bad) return fail(res, 400, bad);
-        const to: string[] = [...new Set<string>(typeof b.to === 'string' ? [b.to] : b.to)];
+        const to: string[] = [...new Set<string>(typeof b.to === 'string' ? [b.to] : (b.to as string[]))];
         const skipped = to.filter((l) => !people.some((p) => p.login === l && p.apps.includes(opts.app)));
-        const data = b.data && Object.keys(b.data).length ? b.data : undefined;
-        f.pushes.push({ to, title: b.title, body: b.body, open: b.open, tag: b.tag, data, skipped });
+        const data = b.data && Object.keys(b.data).length ? (b.data as Record<string, string>) : undefined;
+        f.pushes.push({ to, title: b.title as string | undefined, body: b.body as string | undefined, open: b.open as string | undefined, tag: b.tag as string | undefined, data, skipped });
         const devices = to.length - skipped.length;
         return json(res, 200, { devices, sent: devices, dropped: 0, skipped });
       }
@@ -330,18 +334,19 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
         if (b === undefined) return;
         const p = enabled(res, b.person);
         if (!p) return;
-        if (!ASK_KINDS.includes(b.kind)) return fail(res, 400, 'kind is bug, feature or data');
+        if (!ASK_KINDS.includes(b.kind as string)) return fail(res, 400, 'kind is bug, feature or data');
         if (b.kind !== 'data' && (typeof b.text !== 'string' || !b.text.trim() || b.text.length > 10_000)) return fail(res, 400, 'text is required');
-        if (b.kind === 'data' && !(b.files?.length || b.text || b.summary || b.item)) return fail(res, 400, 'data needs files, text, summary or item');
+        if (b.kind === 'data' && !((b.files as unknown[] | null | undefined)?.length || b.text || b.summary || b.item)) return fail(res, 400, 'data needs files, text, summary or item');
         if (b.minion !== undefined && (b.kind === 'data' || !whole(b.minion))) return fail(res, 400, 'minion is a whole number from 1');
         if (!home) return fail(res, 409, 'No home scheme');
         if (b.minion !== undefined && !p.member) return fail(res, 403, 'Only members can ask a minion');
         if (b.minion !== undefined && !opts.minions?.[b.minion]) return fail(res, 404, 'No such minion');
-        const named = (b.files ?? []).map((x: { name?: string; upload?: string }) => (x.upload === undefined ? x.name : uploads.get(x.upload)?.person === p.id ? (x.name ?? uploads.get(x.upload)!.name) : null));
+        const asked = (b.files ?? []) as { name?: string; upload?: string }[];
+        const named = asked.map((x) => (x.upload === undefined ? x.name : uploads.get(x.upload)?.person === p.id ? (x.name ?? uploads.get(x.upload)!.name) : null));
         if (named.includes(null)) return fail(res, 404, 'No upload');
-        for (const x of b.files ?? []) if (x.upload !== undefined) uploads.delete(x.upload);
+        for (const x of asked) if (x.upload !== undefined) uploads.delete(x.upload);
         f.asks.push(b);
-        const files = named.map((name: string) => `inbox/${opts.app}/${p.login}/${name}`);
+        const files = named.map((name) => `inbox/${opts.app}/${p.login}/${name}`);
         if (b.kind === 'data') return json(res, 202, { scheme: home.id, member: !!p.member, proposal: false, files, sidecar: `inbox/${opts.app}/${p.login}/${Date.now()}-ask.json` });
         if (b.minion !== undefined) return json(res, 202, { scheme: home.id, minion: b.minion, member: true, proposal: false, files });
         return json(res, 202, { scheme: home.id, member: !!p.member, proposal: b.kind === 'feature' && !p.member, files });
@@ -385,7 +390,7 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
       send('error', { code, message });
       res.end();
     };
-    const bad = badTurn(b);
+    const bad = badTurn({ ...b });
     if (bad) return refuse('bad_request', bad);
     const p = people.find((x) => x.id === b.person);
     if (!p || !p.apps.includes(opts.app)) return refuse('not_enabled', 'That person does not have this app enabled');
@@ -423,7 +428,7 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
         else if ('text' in step) send('text', { delta: step.text, parent, message: `${id}-m${message}` });
         else if ('media' in step) send('media', step.media);
         else if ('error' in step) {
-          if (!parent) send('error', { code: step.error, message: step.message ?? `fake ${step.error}` });
+          if (!parent) send('error', { code: step.error, message: ('message' in step ? step.message : undefined) ?? `fake ${step.error}` });
           return false;
         } else {
           const callId = `tool-${++n}`;
@@ -473,15 +478,15 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
   }
 
   // The turn body's rules from api.md ("Start a turn"); the first broken one names itself.
-  function badTurn(b: any): string | null {
+  function badTurn(b: AppBody): string | null {
     if (!whole(b?.person)) return 'person must be a user id from 1';
     if (typeof b.session !== 'string' || !/^[\w.:@-]{1,100}$/.test(b.session)) return 'session must match ^[\\w.:@-]{1,100}$';
     if (typeof b.prompt !== 'string' || !b.prompt.trim()) return 'prompt must not be blank';
     if (b.model !== undefined && !(typeof b.model === 'string' && /^[\w.[\]-]{1,60}$/.test(b.model))) return 'model is not valid';
-    if (b.compactWindow !== undefined && !(Number.isInteger(b.compactWindow) && b.compactWindow >= 10_000 && b.compactWindow <= 1_000_000)) return 'compactWindow must be 10000 to 1000000';
-    if (b.effort !== undefined && !['low', 'medium', 'high'].includes(b.effort)) return 'effort must be low, medium or high';
+    if (b.compactWindow !== undefined && !(whole(b.compactWindow) && b.compactWindow >= 10_000 && b.compactWindow <= 1_000_000)) return 'compactWindow must be 10000 to 1000000';
+    if (b.effort !== undefined && !['low', 'medium', 'high'].includes(b.effort as string)) return 'effort must be low, medium or high';
     for (const flag of ['fresh', 'toolSearch', 'webSearch', 'machines', 'blind', 'keep', 'media']) if (b[flag] !== undefined && typeof b[flag] !== 'boolean') return `${flag} must be true or false`;
-    if (b.timeoutSec !== undefined && !(Number.isInteger(b.timeoutSec) && b.timeoutSec >= 1 && b.timeoutSec <= 900)) return 'timeoutSec must be 1 to 900';
+    if (b.timeoutSec !== undefined && !(whole(b.timeoutSec) && b.timeoutSec <= 900)) return 'timeoutSec must be 1 to 900';
     if (b.mcp !== undefined) {
       if (!Array.isArray(b.mcp) || b.mcp.length > 10) return 'mcp is at most 10 servers';
       const seen = new Set<string>();

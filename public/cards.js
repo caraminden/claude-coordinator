@@ -83,7 +83,7 @@ export function approvalCard(ticketId, card) {
     { class: `qcard acard${m ? ' mcard' : ''}` },
     ...(m ? mergeHead(m, desc, call) : [h('div', { class: 'who' }, speaker('asks to run')), h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, card.tripwire ? 'Tripwire' : 'Needs approval'), toolTitle(card.tool)), desc, ...call]),
     card.tripwire ? h('div', { class: 'anote' }, `Blocked because: ${card.tripwire.reason}`) : '',
-    h('div', { class: 'anote' }, `Approve runs this one call once. If the turn ends first, it expires and doesn't run.`),
+    h('div', { class: 'anote' }, `Approve runs this one call once. If the turn is stopped first, it expires and doesn't run.`),
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), deny, approve),
   );
   let settled = false;

@@ -32,7 +32,7 @@ export function owners(prs: { number: number; headRefName: string }[], tickets: 
   for (const pr of prs) {
     const n = /^ticket\/(\d+)-/.exec(pr.headRefName)?.[1];
     const t = byBranch.get(pr.headRefName) ?? (n ? byNumber.get(Number(n)) : undefined);
-    if (t) out[pr.number] = { id: t.id, number: t.number, title: t.title };
+    if (t) out[pr.number] = { id: t.id, number: t.number!, title: t.title };
   }
   return out;
 }

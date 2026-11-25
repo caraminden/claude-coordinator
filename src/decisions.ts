@@ -302,7 +302,7 @@ export interface Edit {
   before: string;
   after: string;
   at: number;
-  by: string /** A link to see the edit, if any. */;
+  by: string /** A link to see the edit, if it has one. */;
   href?: string;
 }
 /** A decision an edit replaced, and the one that replaced it. */

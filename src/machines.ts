@@ -652,6 +652,11 @@ export class MachineRelay {
     });
   }
 
+  /** The hostname a connected runner agent reported (its runners' names start with it), or undefined when it isn't connected. */
+  runnerHost(machineId: number): string | undefined {
+    return this.agents.get(machineId)?.host;
+  }
+
   /** The runners on a ship run's job now (#1268), sent to every runner agent at each look and to one as it connects. */
   private shipList: { repo: string; runner: string }[] = [];
   sendShips(ships: { repo: string; runner: string }[]) {

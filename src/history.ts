@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { pagePlanKey, type Store } from './db.ts';
-import { applyEvent, createProgress } from '../public/progress.js';
+import { applyEvent, createProgress, planPlace } from '../public/progress.js';
 import { cutEvent } from '../public/eventcut.js';
 
 type Progress = ReturnType<typeof createProgress>;
@@ -15,8 +15,10 @@ const PLAN_RULES = createHash('sha256')
 /** A task-list state as saved in settings (planKey, pagePlanKey): it holds every event up to `upTo`. */
 export const packPlan = (p: Progress, upTo: number) => ({ rules: PLAN_RULES, upTo, p: { ...p, pendingCreates: [...p.pendingCreates], finished: undefined } });
 
+type SavedPlan = { rules?: unknown; upTo: number; p: Omit<Progress, 'pendingCreates' | 'finished'> & { pendingCreates: [unknown, unknown][] } };
+
 /** A saved state back (packPlan), or null when it's missing, malformed or from other task-list rules. */
-export function unpackPlan(saved: any): { upTo: number; p: Progress } | null {
+export function unpackPlan(saved: SavedPlan | null): { upTo: number; p: Progress } | null {
   const usable = saved?.rules === PLAN_RULES && Number.isInteger(saved.upTo) && Array.isArray(saved.p?.tasks) && Array.isArray(saved.p.pendingCreates);
   return usable ? { upTo: saved.upTo, p: { ...saved.p, pendingCreates: new Map(saved.p.pendingCreates), finished: null } } : null;
 }
@@ -26,7 +28,7 @@ const MAX_PAGE_EVENTS = 1000;
 
 // Plans as they stood before a page's first event, per store by "ticket:event". History is append-only,
 // so an entry never goes stale; replaying a long minion's earlier events costs ~10 ms, and opens repeat.
-const plansByStore = new WeakMap<Store, Map<string, unknown[]>>();
+const plansByStore = new WeakMap<Store, Map<string, PagePlan>>();
 const PLANS_KEPT = 200;
 // Each chat's replay state at the furthest page start read, so a newer page (a growing chat's newest page starts
 // later each open) replays only the events since, not the whole history: 1.3 s for a Taskmaster on live (#609).
@@ -47,15 +49,18 @@ export function historyPage(store: Store, ticketId: number, opts: { before?: num
   const from = open == null ? opts.from : Math.min(open, opts.from ?? open);
   const { events, more } = store.eventsPage(ticketId, before, limit, from);
   // Long tool inputs and results go as a beginning; an opened action fetches the whole event (eventcut.js).
-  return { events: events.map(cutEvent), more, tasks: more ? planBefore(store, ticketId, events[0].id) : [] };
+  return { events: events.map(cutEvent), more, ...(more ? planBefore(store, ticketId, events[0].id) : { tasks: [] }) };
 }
 
-function planBefore(store: Store, ticketId: number, eventId: number) {
-  const plans = plansByStore.get(store) ?? new Map<string, unknown[]>();
+/** The plan before a page: its steps, and where it is among them (#1923). */
+type PagePlan = { tasks: unknown[]; plan?: ReturnType<typeof planPlace> };
+
+function planBefore(store: Store, ticketId: number, eventId: number): PagePlan {
+  const plans = plansByStore.get(store) ?? new Map<string, PagePlan>();
   plansByStore.set(store, plans);
   const key = `${ticketId}:${eventId}`;
-  let tasks = plans.get(key);
-  if (!tasks) {
+  let plan = plans.get(key);
+  if (!plan) {
     const replays = replaysByStore.get(store) ?? new Map();
     replaysByStore.set(store, replays);
     let at = replays.get(ticketId);
@@ -72,11 +77,11 @@ function planBefore(store: Store, ticketId: number, eventId: number) {
       if (replays.size > PLANS_KEPT) replays.delete(replays.keys().next().value!);
       if (at?.before !== eventId) store.setSetting(pagePlanKey(ticketId), packPlan(p, eventId - 1));
     }
-    tasks = p.tasks;
-    plans.set(key, tasks);
+    plan = { tasks: p.tasks, plan: planPlace(p) };
+    plans.set(key, plan);
     if (plans.size > PLANS_KEPT) plans.delete(plans.keys().next().value!);
   }
-  return structuredClone(tasks);
+  return structuredClone(plan);
 }
 
 /** A Taskmaster session in a merged chat (#920): `mine` keeps only what Mine shows from the Overlord (public/mine.js). */
@@ -113,8 +118,8 @@ export function mergedPage(store: Store, parts: Part[], opts: { before?: number;
   const more = parts.some((p) => store.eventsBefore(p.id, start, 1, p.mine).length > 0);
   const own = parts[0];
   const firstOwn = events.find((e) => e.ticket_id === own?.id)?.id;
-  const tasks = own && !own.mine && firstOwn != null && store.eventsBefore(own.id, firstOwn, 1).length ? planBefore(store, own.id, firstOwn) : [];
-  return { events: events.map(cutEvent), more, tasks };
+  const plan: PagePlan = own && !own.mine && firstOwn != null && store.eventsBefore(own.id, firstOwn, 1).length ? planBefore(store, own.id, firstOwn) : { tasks: [] };
+  return { events: events.map(cutEvent), more, ...plan };
 }
 
 /** Every session's events after `after`, as one list in order (the merged chat's catch-up). */

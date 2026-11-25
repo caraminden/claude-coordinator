@@ -37,11 +37,11 @@ export function startTime(pid: number): string | null {
  * times leave this function.
  */
 export function tokenLife(home: string, now = Date.now()): { left: number; life: number } | 'none' | 'unknown' {
-  let auth: any;
+  let auth: { tokens?: { access_token?: unknown } } | null;
   try {
     auth = JSON.parse(readFileSync(join(home, 'auth.json'), 'utf8'));
-  } catch (err: any) {
-    return err.code === 'ENOENT' ? 'none' : 'unknown';
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'none' : 'unknown';
   }
   const token = auth?.tokens?.access_token;
   if (!token) return 'none';
@@ -123,8 +123,8 @@ export async function codexLock(home: string, onWait: () => void, opts: { env?: 
       // With its start time: a pid alone can be reused by an unrelated process once the holder died without unlocking (#468 S04-7).
       writeFileSync(join(dir, 'pid'), `${process.pid} ${startTime(process.pid) ?? ''}`.trim());
       break;
-    } catch (err: any) {
-      if (err.code !== 'EEXIST') throw err;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       let held = '';
       try {
         held = readFileSync(join(dir, 'pid'), 'utf8').trim();
@@ -135,8 +135,8 @@ export async function codexLock(home: string, onWait: () => void, opts: { env?: 
       let alive = false;
       try {
         if (pid) process.kill(pid, 0), (alive = true);
-      } catch (e: any) {
-        alive = e.code === 'EPERM';
+      } catch (e) {
+        alive = (e as NodeJS.ErrnoException).code === 'EPERM';
       }
       if (alive && started && startTime(pid) !== started) alive = false;
       let age = 0;

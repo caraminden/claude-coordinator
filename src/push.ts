@@ -2,10 +2,11 @@
 // for decisions, blockers and results (see notificationFor), never for every reply.
 // Everything is node:crypto: VAPID (RFC 8292) signs who is sending, and aes128gcm (RFC 8291)
 // encrypts the payload so the push service can't read it.
-import { createECDH, createPrivateKey, generateKeyPairSync, hkdfSync, randomBytes, sign, createCipheriv, type KeyObject } from 'node:crypto';
+import { createECDH, createPrivateKey, generateKeyPairSync, hkdfSync, randomBytes, sign, createCipheriv, type webcrypto, type KeyObject } from 'node:crypto';
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Store, PushSubscriptionRow, Ticket } from './db.ts';
+import { thrown } from './thrown.ts';
 
 /** The app's VAPID key pair: the public key as browsers want it (raw P-256 point, base64url). */
 export interface VapidKeys {
@@ -62,17 +63,17 @@ const MAX_BODY = 300;
  */
 export function loadVapidKeys(dataDir: string): VapidKeys {
   const file = join(dataDir, KEY_FILE);
-  let jwk: any;
+  let jwk: webcrypto.JsonWebKey;
   try {
     jwk = JSON.parse(readFileSync(file, 'utf8'));
-  } catch (err: any) {
-    if (err.code !== 'ENOENT') throw err;
+  } catch (err) {
+    if (thrown(err).code !== 'ENOENT') throw err;
     jwk = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'jwk' });
     writeFileSync(file, JSON.stringify(jwk), { mode: 0o600, flag: 'wx' });
   }
   chmodSync(file, 0o600);
   const privateKey = createPrivateKey({ key: jwk, format: 'jwk' });
-  const publicKey = Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')]).toString('base64url');
+  const publicKey = Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x!, 'base64url'), Buffer.from(jwk.y!, 'base64url')]).toString('base64url');
   return { publicKey, privateKey };
 }
 
@@ -162,15 +163,16 @@ export const DESKTOP = 'desktop:';
 export const desktopId = (raw: unknown) => (typeof raw === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(raw) ? raw : null);
 
 /** Is this a subscription worth storing: an https push service and well-formed keys? */
-export function validSubscription(raw: any): raw is PushSubscriptionJson {
-  if (!raw || typeof raw.endpoint !== 'string' || raw.endpoint.length > 2000) return false;
+export function validSubscription(raw: unknown): raw is PushSubscriptionJson {
+  const sub = raw as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } | null } | null | undefined;
+  if (!sub || typeof sub.endpoint !== 'string' || sub.endpoint.length > 2000) return false;
   try {
-    if (new URL(raw.endpoint).protocol !== 'https:') return false;
+    if (new URL(sub.endpoint).protocol !== 'https:') return false;
   } catch {
     return false;
   }
-  const p256dh = typeof raw.keys?.p256dh === 'string' ? Buffer.from(raw.keys.p256dh, 'base64url') : null;
-  const auth = typeof raw.keys?.auth === 'string' ? Buffer.from(raw.keys.auth, 'base64url') : null;
+  const p256dh = typeof sub.keys?.p256dh === 'string' ? Buffer.from(sub.keys.p256dh, 'base64url') : null;
+  const auth = typeof sub.keys?.auth === 'string' ? Buffer.from(sub.keys.auth, 'base64url') : null;
   return p256dh?.length === 65 && p256dh[0] === 4 && auth?.length === 16;
 }
 

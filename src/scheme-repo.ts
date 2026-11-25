@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { APP_NAME } from './appname.ts';
 import type { Store } from './db.ts';
 import { repoSlug } from './prlinks.ts';
+import { thrown } from './thrown.ts';
 
 const run = promisify(execFile);
 const TIMEOUT_MS = 10 * 60 * 1000;
@@ -39,9 +40,10 @@ const gitOk = (args: string[], cwd?: string) =>
   );
 
 /** A failed command's own words: git and gh put them on stderr. git's hints follow its error, so they go. */
-export function errorText(err: any): string {
-  const lines = (err?.stderr?.toString().trim() || err?.message || String(err)).split('\n').filter((l: string) => l.trim() && !/^hint:/.test(l));
-  return lines.slice(-3).join(' ') || String(err?.message ?? err);
+export function errorText(err: unknown): string {
+  const { stderr, message } = thrown(err);
+  const lines = (stderr?.toString().trim() || message || String(err)).split('\n').filter((l: string) => l.trim() && !/^hint:/.test(l));
+  return lines.slice(-3).join(' ') || String(message ?? err);
 }
 
 /** A GitHub account or organisation name. */

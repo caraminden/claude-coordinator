@@ -5,7 +5,7 @@
 // page's inputs that live in memory. Only what changed is posted.
 import type { Store, ContraptionRow } from './db.ts';
 import type { Runner } from './runner.ts';
-import type { SnapDelta, Ships } from './front.ts';
+import type { SnapDelta, Ships, StatusSnap } from './front.ts';
 import type { StatusPage } from './status-page.ts';
 import type { DiskUse } from './app-services.ts';
 import { jobList } from './every.ts';
@@ -29,7 +29,7 @@ export type LiveDeps = {
   /** The Status page's in-memory inputs, as server.ts gives them to its StatusPage. */
   /** The ship lines' inputs (Ships in src/front.ts), for /api/ship-lines. */
   ships: () => Ships;
-  statusInputs: { bootAt: number; commit: string; probing: boolean; lastMs: () => number | null; readerMs: () => number | null; storms: () => unknown; easing: () => unknown; desktops: () => unknown; diskUse: (row: ContraptionRow) => DiskUse | null };
+  statusInputs: { bootAt: number; commit: string; probing: boolean; lastMs: () => number | null; readerMs: () => number | null; storms: () => StatusSnap['storms']; easing: () => StatusSnap['easing']; desktops: () => StatusSnap['desktops']; diskUse: (row: ContraptionRow) => DiskUse | null };
   sweepMs?: number;
 };
 
@@ -58,11 +58,11 @@ export function publishLive(d: LiveDeps) {
   };
 
   let lastOther = '';
-  let units: { at: number; rows: unknown } | null = null;
+  let units: { at: number; rows: StatusSnap['units'] } | null = null;
   const others = async () => {
     const s = d.statusInputs;
     if (!units || Date.now() - units.at >= UNITS_MS) units = { at: Date.now(), rows: await d.status.unitRows(store.listContraptions()) };
-    const status = {
+    const status: StatusSnap = {
       bootAt: s.bootAt,
       commit: s.commit,
       cores: cores(),

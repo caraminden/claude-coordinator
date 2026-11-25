@@ -99,7 +99,7 @@ export const CODEX_IMAGE_TOOL = {
 };
 
 /** generate_image_codex: one --image-gen run of citadel-codex-review (src/codex-review.ts), which reaches the person's Codex as their reviews do, in the calling turn's env and folder. */
-export async function codexImage(args: any, env: NodeJS.ProcessEnv, cwd: string): Promise<string> {
+export async function codexImage(args: Record<string, unknown>, env: NodeJS.ProcessEnv, cwd: string): Promise<string> {
   if (typeof args.prompt !== 'string' || !args.prompt.trim()) throw new Error('prompt is required');
   if (typeof args.out !== 'string' || !args.out) throw new Error('out is required: a .png path');
   const refs = args.refs ?? [];

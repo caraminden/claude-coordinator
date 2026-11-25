@@ -14,6 +14,7 @@
 import { APP_NAME } from './appname.ts';
 import type { ContraptionRow, Ticket } from './db.ts';
 import { HttpError, json, readJson, type App, type Ctx } from './http.ts';
+import { thrown } from './thrown.ts';
 
 /** Contraption names Citadel keeps for its schemes when it calls Mandate for one. */
 export const SCHEME_CALLER = /^scheme-\d+$/;
@@ -81,7 +82,7 @@ export async function mandateItem({ req, res, app, params, caller }: Ctx) {
     }
     const { status, answer } = (last = await callMandate(mandate, identity, key, body));
     // A put on a ticked or deleted item changes nothing in Mandate, so neither does it here.
-    if (status === 200 && body && typeof body.title === 'string' && (answer as any)?.state === 'open') store.setSetting(titleKey(project.id, user.id, key), body.title);
+    if (status === 200 && body && typeof body.title === 'string' && (answer as { state?: unknown } | null | undefined)?.state === 'open') store.setSetting(titleKey(project.id, user.id, key), body.title);
     if (status === 200 && !body) store.deleteSetting(titleKey(project.id, user.id, key));
   }
   json(res, 200, last);
@@ -106,8 +107,8 @@ export async function callMandate(mandate: Pick<ContraptionRow, 'name' | 'title'
     } catch {
       return { status: r.status, answer: text.slice(0, 2000) };
     }
-  } catch (err: any) {
-    if (err?.name === 'TimeoutError') throw new HttpError(504, `${mandate.title} didn't answer within ${TIMEOUT_MS / 1000} s`);
+  } catch (err) {
+    if (thrown(err).name === 'TimeoutError') throw new HttpError(504, `${mandate.title} didn't answer within ${TIMEOUT_MS / 1000} s`);
     throw new HttpError(502, `${mandate.title} is not answering`);
   }
 }

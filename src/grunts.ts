@@ -5,6 +5,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { usageCost } from './spend-alert.ts';
 import { projectSlug, validSessionId } from './sessions.ts';
+import type { TokenUsage } from './claude-events.ts';
 
 export interface GruntRow {
   agent_id: string;
@@ -21,13 +22,18 @@ export interface GruntRow {
 const text = (v: unknown, max = 200) => (typeof v === 'string' && v ? v.slice(0, max) : null);
 const FIELDS = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'] as const;
 
+/** A transcript message's usage, the counts read here, unchecked. */
+interface RawUsage extends TokenUsage {
+  cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number };
+}
+
 /** One Grunt from its transcript's lines: usage counts once per message id (the blocks of a message repeat it, the largest wins). */
-function oneGrunt(agentId: string, meta: any, transcript: string): GruntRow {
-  const messages = new Map<string, { model: string; usage: any }>();
+function oneGrunt(agentId: string, meta: Record<string, unknown>, transcript: string): GruntRow {
+  const messages = new Map<string, { model: string; usage: RawUsage }>();
   let effort: string | null = null;
   for (const line of transcript.split('\n')) {
     if (!line.includes('"usage"')) continue;
-    let o: any;
+    let o: { type?: string; effort?: unknown; message?: { id?: unknown; model?: unknown; usage?: RawUsage } } | null;
     try {
       o = JSON.parse(line);
     } catch {
@@ -37,7 +43,7 @@ function oneGrunt(agentId: string, meta: any, transcript: string): GruntRow {
     if (o?.type !== 'assistant' || !m?.usage || typeof m.id !== 'string') continue;
     effort ??= text(o.effort, 20);
     const was = messages.get(m.id);
-    const usage: any = { ...(was?.usage ?? m.usage), ...m.usage };
+    const usage: RawUsage = { ...(was?.usage ?? m.usage), ...m.usage };
     for (const f of FIELDS) usage[f] = Math.max(Number(was?.usage?.[f]) || 0, Number(m.usage[f]) || 0);
     if (m.usage.cache_creation || was?.usage?.cache_creation) {
       const a = was?.usage?.cache_creation ?? {},

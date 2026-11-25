@@ -299,7 +299,7 @@ mark.find.current { background: var(--waiting); color: #fff; }
   padding: 0.35rem 0.7rem; text-align: left; font-size: 0.9em;
 }
 .progress-line:hover { border-color: var(--accent); }
-.progress-line .text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-line .text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .progress-line .count { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 .progress-line .chev { color: var(--muted); }
 .progress .meter { display: block; appearance: none; width: calc(100% - 0.4rem); height: 3px; border: 0; border-radius: 2px; margin: 0.25rem 0.2rem 0; background: var(--line); overflow: hidden; }
@@ -322,6 +322,10 @@ mark.find.current { background: var(--waiting); color: #fff; }
 .step.in_progress .subject { font-weight: 600; }
 .step.paused { border-color: var(--waiting); }
 .step.paused .icon { color: var(--waiting); animation: none; }
+/* Built and kept open under its tests (#1923): quieter than the step underway. */
+.step.held { border-color: var(--line); }
+.step.held .icon { animation: none; }
+.step.held .subject { font-weight: 500; color: var(--muted); }
 .step > summary { flex-wrap: wrap; }
 .progress-detail .request { margin: 0.1rem 0.3rem 0.6rem; font-size: 0.9em; }
 .progress-detail .request q { font-style: italic; }
@@ -475,6 +479,9 @@ details.recap-group:not([open]) > summary { margin: 0; }
 /* The readout line's "now" part (#551): what's running, or what it waits on (#544), whose bar takes the meter's place. */
 .progress-line .doing { color: var(--muted); }
 .progress-line .arrow { color: var(--muted); }
+/* How long the running call has run (#1923); it also takes the line's spare room. */
+.progress-line .ran { flex: 1 0 auto; margin-left: -0.35rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.progress-line .ran:not(:empty)::before { content: '· '; }
 .progress-line .doing b.f-wait, .wait-full b.f-wait { color: var(--held); }
 .progress-line .doing b.f-work, .progress-line .stepname b.f-work, .wait-full b.f-work { color: var(--running); }
 .progress-line .time { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }

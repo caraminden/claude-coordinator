@@ -39,6 +39,9 @@
 .PARAMETER SqueezePercent
   The share of the whole PC every runner not on a ship may use together while a ship runs, 1 to 100.
 
+.PARAMETER CitadelSqueezePercent
+  The same share while one of the ships is Citadel's own (marked first in ships.json), 1 to 100.
+
 .PARAMETER AgentPid
   The runner agent's process id: this script ends when that process does.
 
@@ -49,6 +52,7 @@
 param(
   [ValidateRange(1, 100)][int]$CpuPercent = 75,
   [ValidateRange(1, 100)][int]$SqueezePercent = 30,
+  [ValidateRange(1, 100)][int]$CitadelSqueezePercent = 10,
   [int]$AgentPid = 0,
   [ValidateRange(5, 300)][int]$EverySeconds = 15,
   [string]$GitBin = 'C:\Program Files\Git\bin',
@@ -245,8 +249,9 @@ $settled = @{}
 $lastStart = @{}
 $shipsFile = Join-Path $PSScriptRoot 'ships.json'
 $ships = @()
+$firstShip = $false
 $said = ''
-Write-Host "Holding every CI runner on this PC at below-normal priority, all of them together under $CpuPercent% of its $cores cores; while a ship runs, every other runner under $SqueezePercent% together."
+Write-Host "Holding every CI runner on this PC at below-normal priority, all of them together under $CpuPercent% of its $cores cores; while a ship runs, every other runner under $SqueezePercent% together ($CitadelSqueezePercent% while one is Citadel's)."
 
 # A runner folder's "repo|name" from the .runner file its setup wrote, as Citadel names a ship's runner; null until it reads.
 function Get-RunnerKey([string]$dir) {
@@ -264,6 +269,7 @@ function Read-Ship {
   try {
     $file = Get-Content -LiteralPath $shipsFile -Raw -ErrorAction Stop | ConvertFrom-Json
     if ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge [long]$file.until) { return @() }
+    $script:firstShip = @(@($file.ships) | Where-Object { $_.PSObject.Properties['first'] -and $_.first -eq $true }).Count -gt 0
     return @(@($file.ships) | ForEach-Object { ('{0}|{1}' -f ([string]$_.repo).ToLowerInvariant(), ([string]$_.runner).ToLowerInvariant()) } | Sort-Object -Unique)
   } catch { return @() }
 }
@@ -276,14 +282,15 @@ function Set-SlotRate {
   $ships = @($ships | Where-Object { $_ })
   $others = @($slots.Values | Where-Object { $ships -notcontains $_.Key })
   $busy = [math]::Max(1, @($others | Where-Object { $_.Busy }).Count)
-  $share = $SqueezePercent / $busy
+  $squeeze = if ($script:firstShip) { $CitadelSqueezePercent } else { $SqueezePercent }
+  $share = $squeeze / $busy
   foreach ($slot in $slots.Values) {
     $rate = if ($ships.Count -and $ships -notcontains $slot.Key) { if ($slot.Inside) { $share / $CpuPercent * 10000 } else { $share * 100 } } elseif ($slot.Inside) { 0 } else { $CpuPercent * 100 }
     $rate = [int][math]::Max([math]::Min($rate, 10000), [math]::Sign($rate))
     if ($rate -eq $slot.Rate) { continue }
     try { [CitadelCiJob]::SetRate($slot.Job, $rate); $slot.Rate = $rate } catch { Write-Host "Couldn't set $($slot.Key)'s share: $($_.Exception.Message)" }
   }
-  $now = if ($ships.Count) { "A ship runs on $($ships -join ', '): the $($others.Count) other runner(s) here held to $SqueezePercent% of the PC together, about $([math]::Round($share, 1))% each of the $busy running a job." } else { 'No ship runs: every runner has its normal share again.' }
+  $now = if ($ships.Count) { "A ship runs on $($ships -join ', '): the $($others.Count) other runner(s) here held to $squeeze% of the PC together, about $([math]::Round($share, 1))% each of the $busy running a job." } else { 'No ship runs: every runner has its normal share again.' }
   if ($now -ne $script:said -and ($ships.Count -or $script:said)) { Write-Host $now }
   $script:said = $now
 }

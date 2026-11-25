@@ -341,6 +341,9 @@
     "drawers.js": [
       "citadel-drawer-close",
       "citadel-drawer-open"
+    ],
+    "rail.js": [
+      "citadel-before-reload"
     ]
   },
   "markdown": {

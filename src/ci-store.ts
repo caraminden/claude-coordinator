@@ -19,6 +19,7 @@ import type { CiFile, Project, Store } from './db.ts';
 import { HttpError } from './http.ts';
 import { repoSlug } from './prlinks.ts';
 import { projectDir } from './workspace.ts';
+import { thrown } from './thrown.ts';
 
 export const KINDS = ['build', 'report', 'release'] as const;
 export type Kind = (typeof KINDS)[number];
@@ -92,8 +93,8 @@ export class RunTokens {
           this.failed = '';
         })
         // The keys held still verify; a token none of them signed gets a 503 naming this, not a 401 blaming the token.
-        .catch((err: any) => {
-          this.failed = String(err?.message ?? err);
+        .catch((err: unknown) => {
+          this.failed = String(thrown(err).message ?? err);
           console.warn(`CI store: reading GitHub's signing keys failed: ${this.failed}`);
         })
         .finally(() => (this.reading = null));
@@ -108,7 +109,7 @@ export class RunTokens {
     const bad = (why: string) => new HttpError(401, `Not a GitHub run token for this store (${why}). The job needs \`permissions: id-token: write\` and a token asked for with audience ${AUDIENCE}`);
     const parts = token.split('.');
     if (parts.length !== 3) throw bad('not a JWT');
-    let head: any, claims: any;
+    let head: Record<string, unknown>, claims: Record<string, unknown>;
     try {
       head = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
       claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
@@ -136,7 +137,7 @@ export class RunTokens {
     if (typeof claims.repository !== 'string' || !NAME.test(workflow) || !Number.isSafeInteger(runId) || runId <= 0 || !Number.isSafeInteger(runAttempt) || runAttempt <= 0 || !/^[0-9a-f]{40,64}$/.test(String(claims.sha))) {
       throw bad('it names no repo, workflow file, run or commit');
     }
-    return { repository: claims.repository, workflow, runId, runAttempt, sha: claims.sha, ref: String(claims.ref ?? '').slice(0, 300) };
+    return { repository: claims.repository, workflow, runId, runAttempt, sha: String(claims.sha), ref: String(claims.ref ?? '').slice(0, 300) };
   }
 }
 
@@ -275,8 +276,8 @@ export class CiStore {
     let real: string;
     try {
       real = await realpath(file);
-    } catch (err: any) {
-      if (err?.code === 'ENOENT') return null;
+    } catch (err) {
+      if (thrown(err).code === 'ENOENT') return null;
       throw err;
     }
     const root = await realpath(this.dir(f.project_id));
@@ -475,8 +476,8 @@ export class CiStore {
         await rmdir(dirname(real)).catch(() => {});
         await rmdir(dirname(dirname(real))).catch(() => {});
       }
-    } catch (err: any) {
-      console.error(`CI store: not deleting ${this.path(f)}:`, err?.message ?? err);
+    } catch (err) {
+      console.error(`CI store: not deleting ${this.path(f)}:`, thrown(err).message ?? err);
       return;
     }
     this.store.deleteCiFile(f.id);

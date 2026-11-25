@@ -14,6 +14,7 @@ import { stateWord } from './needs.ts';
 import { repoSlug } from './prlinks.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { workerWaitText } from './worker-wait.ts';
+import { thrown } from './thrown.ts';
 
 /** A minion's newest GitHub Actions run, on its branch (a PR's) or on land/<branch> (tools/land.sh's CI gate). */
 export interface CiRun {
@@ -57,16 +58,29 @@ export interface Facts {
   ci: CiRun | null | { error: string };
 }
 
+/** The fields of a GitHub Actions run read here. */
+interface GhRun {
+  name?: string;
+  path?: string;
+  head_branch?: string | null;
+  head_sha?: string;
+  status?: string | null;
+  conclusion?: string | null;
+  html_url?: string;
+  run_started_at?: string;
+  created_at: string;
+}
+
 /** The newest run on any of `branches` in `slug`, or null. */
 export async function newestRun(get: GhGet, slug: string, as: GithubEnv, branches: string[], tip: string | null): Promise<CiRun | null> {
   const found = await Promise.all(
     branches.map(async (b) => {
       const r = await get(`/repos/${slug}/actions/runs?branch=${encodeURIComponent(b)}&per_page=1`, null, as);
       if (r.status !== 200) throw new Error(`GitHub answered ${r.status}`);
-      return r.body?.workflow_runs?.[0] ?? null;
+      return (r.body as { workflow_runs?: GhRun[] } | null)?.workflow_runs?.[0] ?? null;
     }),
   );
-  const run = found.filter(Boolean).sort((a, b) => Date.parse(b.run_started_at ?? b.created_at) - Date.parse(a.run_started_at ?? a.created_at))[0];
+  const run = found.filter((r) => r !== null).sort((a, b) => Date.parse(b.run_started_at ?? b.created_at) - Date.parse(a.run_started_at ?? a.created_at))[0];
   if (!run) return null;
   return {
     workflow: String(run.name ?? run.path ?? 'CI'),
@@ -111,9 +125,9 @@ export async function liveFacts(app: App, ticketId: number, get: GhGet = ghGet):
   if (t.branch && slug && project?.repo_dir) {
     try {
       ci = await newestRun(get, slug, schemeGithub(store, app.github, project.repo_dir, app.dataDir), [t.branch, `land/${t.branch}`, `check/${t.branch}`, `early/${t.branch}`], status?.tip.slice(0, 8) ?? null);
-    } catch (err: any) {
+    } catch (err) {
       ci = {
-        error: String(err?.message ?? err)
+        error: String(thrown(err).message ?? err)
           .split('\n')[0]
           .slice(0, 120),
       };

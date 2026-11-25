@@ -11,6 +11,8 @@ import type { PrSnapshot } from './github.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { ciState, ciVerdict } from './ci-verdict.ts';
 import { every } from './every.ts';
+import { thrown } from './thrown.ts';
+import type { GhErrorBody, GhRun, GhRunsBody } from './gh-bodies.ts';
 
 export const POLL_MS = 20_000;
 /** Past this many runs in flight, each is looked at every SLOW_MS instead. */
@@ -43,6 +45,7 @@ export interface CiNow {
   failed?: string[];
 }
 
+const isRateLimited = (err: unknown) => typeof err === 'object' && err !== null && 'rateLimited' in err && !!err.rateLimited;
 const at = (s: string | null | undefined) => (s ? Date.parse(s) : NaN);
 const passed = (j: Job) => {
   const s = ciState(j.status, j.conclusion);
@@ -163,7 +166,7 @@ async function gitHead(cwd: string): Promise<string | null> {
 /** The CI run each minion waits on, polled from GitHub while in flight. */
 export class CiRuns {
   private watches = new Map<number, Watch>();
-  private cache = new Map<string, { etag: string | null; body: any }>();
+  private cache = new Map<string, { etag: string | null; body: unknown }>();
   private usuals = new Map<string, { at: number; usual: number | null }>();
   /** Each repo's queued runs, read once a poll while one of its watched runs is queued. */
   private queues = new Map<string, { id: number; created_at: string }[] | null>();
@@ -289,13 +292,13 @@ export class CiRuns {
         w.lastAt = now;
         try {
           await this.poll(w);
-        } catch (err: any) {
-          if (err?.rateLimited) {
+        } catch (err) {
+          if (isRateLimited(err)) {
             this.pausedUntil = now + RATE_LIMITED_MS;
             console.error('GitHub rate limit reached; pausing CI waits.');
             return;
           }
-          this.sayOnce(`${w.slug}:${err?.message}`, `CI wait poll of ${w.slug} failed (said once until a restart): ${err?.message ?? err}`);
+          this.sayOnce(`${w.slug}:${thrown(err).message}`, `CI wait poll of ${w.slug} failed (said once until a restart): ${thrown(err).message ?? err}`);
         }
         if (this.watches.get(id) === w) this.check(id);
       }
@@ -308,8 +311,8 @@ export class CiRuns {
   private async reformed(w: Watch): Promise<boolean> {
     const red = [...w.jobs.values()].flat().some((j) => j.conclusion === 'failure' || j.conclusion === 'cancelled' || j.conclusion === 'timed_out');
     if (!red || !w.runs.length) return false;
-    const body = await this.read(`repos/${w.slug}/actions/workflows/${LAND_WORKFLOW}/runs?per_page=5&branch=${encodeURIComponent(`land/${w.branch}`)}`, w.as);
-    const next = (body?.workflow_runs ?? []).find((r: { id: number; created_at: string }) => r.id > w.runs[0] && at(r.created_at) >= w.since! - 60_000);
+    const body: GhRunsBody | null = await this.read(`repos/${w.slug}/actions/workflows/${LAND_WORKFLOW}/runs?per_page=5&branch=${encodeURIComponent(`land/${w.branch}`)}`, w.as);
+    const next = (body?.workflow_runs ?? []).find((r) => r.id > w.runs[0] && at(r.created_at) >= w.since! - 60_000);
     if (!next) return false;
     Object.assign(w, { runs: [], jobs: new Map(), usual: new Map(), ended: undefined, ahead: undefined });
     return true;
@@ -322,13 +325,16 @@ export class CiRuns {
       if (w.sha === undefined) w.sha = (w.cwd && (await (this.d.head ?? gitHead)(w.cwd))) || '';
       const runs = `repos/${w.slug}/actions/workflows/${LAND_WORKFLOW}/runs?per_page=5&`;
       // A red or cancelled run from before this wait is one land.sh replaces with a new run, so it isn't this wait's.
-      const fresh = (r: any) => at(r.created_at) >= w.since! - 60_000;
+      const fresh = (r: GhRun) => at(r.created_at) >= w.since! - 60_000;
       const bySha = async () => {
-        const body = await this.read(`${runs}head_sha=${w.sha}`, w.as);
-        return (body?.workflow_runs ?? []).find((r: any) => fresh(r) || r.status !== 'completed' || !r.conclusion || r.conclusion === 'success');
+        const body: GhRunsBody | null = await this.read(`${runs}head_sha=${w.sha}`, w.as);
+        return (body?.workflow_runs ?? []).find((r) => fresh(r) || r.status !== 'completed' || !r.conclusion || r.conclusion === 'success');
       };
       // In a train the run is on the train's top, a descendant of this worktree's head: it is on land/<branch> all the same.
-      const byBranch = async () => ((await this.read(`${runs}branch=${encodeURIComponent(`${w.early ? 'early' : 'land'}/${w.branch}`)}`, w.as))?.workflow_runs ?? []).find(fresh);
+      const byBranch = async () => {
+        const body: GhRunsBody | null = await this.read(`${runs}branch=${encodeURIComponent(`${w.early ? 'early' : 'land'}/${w.branch}`)}`, w.as);
+        return (body?.workflow_runs ?? []).find(fresh);
+      };
       const run = (w.sha && (await bySha())) || (await byBranch());
       if (!run) return;
       w.runs = [run.id]; // its usual is the landing's own CI stage's (Waits)
@@ -336,13 +342,13 @@ export class CiRuns {
     }
     let complete = true;
     for (const id of w.runs) {
-      const body = await this.read(`repos/${w.slug}/actions/runs/${id}/jobs?per_page=100`, w.as);
+      const body: { jobs?: Job[] } | null = await this.read(`repos/${w.slug}/actions/runs/${id}/jobs?per_page=100`, w.as);
       if (Array.isArray(body?.jobs)) w.jobs.set(id, body.jobs);
       const jobs = w.jobs.get(id) ?? [];
       if (!w.usual.has(id)) w.usual.set(id, await this.usual(w, id));
       // Jobs that wait on others may not be listed yet, so the run itself says when it's over.
       if (!jobs.length || jobs.some((j) => j.status !== 'completed')) complete = false;
-      else if ((await this.read(`repos/${w.slug}/actions/runs/${id}`, w.as))?.status !== 'completed') complete = false;
+      else if ((await this.read<GhRun>(`repos/${w.slug}/actions/runs/${id}`, w.as))?.status !== 'completed') complete = false;
     }
     const c = ciNow([...w.jobs.values()].flat(), false);
     w.ahead = c?.stage === 'queued' ? await this.ahead(w, c.since) : undefined;
@@ -361,12 +367,12 @@ export class CiRuns {
     let runs = this.queues.get(w.slug);
     if (runs === undefined) {
       try {
-        const body = await this.read(`repos/${w.slug}/actions/runs?status=queued&per_page=100`, w.as);
+        const body: GhRunsBody | null = await this.read(`repos/${w.slug}/actions/runs?status=queued&per_page=100`, w.as);
         runs = body?.workflow_runs ?? [];
         // More than one page: the oldest may be missing, so no count rather than a wrong one.
         if ((body?.total_count ?? 0) > runs!.length) runs = null;
-      } catch (err: any) {
-        if (err?.rateLimited) throw err;
+      } catch (err) {
+        if (isRateLimited(err)) throw err;
         runs = null;
       }
       this.queues.set(w.slug, runs!);
@@ -379,36 +385,36 @@ export class CiRuns {
 
   /** The median length of a run's workflow's last five green runs, s; the workflow's read at most hourly. */
   private async usual(w: Watch, runId: number): Promise<number | null> {
-    let body,
+    let body: GhRunsBody | null,
       key = '';
     try {
-      const workflow = (await this.read(`repos/${w.slug}/actions/runs/${runId}`, w.as))?.workflow_id;
+      const workflow = (await this.read<GhRun>(`repos/${w.slug}/actions/runs/${runId}`, w.as))?.workflow_id;
       if (!workflow) return null;
       key = `${w.slug}:${workflow}`;
       const had = this.usuals.get(key);
       if (had && this.now() - had.at < USUAL_MS) return had.usual;
       body = await this.read(`repos/${w.slug}/actions/workflows/${workflow}/runs?status=success&per_page=5`, w.as);
-    } catch (err: any) {
-      if (err?.rateLimited) throw err;
+    } catch (err) {
+      if (isRateLimited(err)) throw err;
       return null; // the run still shows, with elapsed alone
     }
-    const took = (body?.workflow_runs ?? []).map((r: any) => (at(r.updated_at) - at(r.created_at)) / 1000).filter((s: number) => s > 0);
+    const took = (body?.workflow_runs ?? []).map((r) => (at(r.updated_at) - at(r.created_at)) / 1000).filter((s: number) => s > 0);
     const usual = median(took.map(Math.round));
     this.usuals.set(key, { at: this.now(), usual });
     return usual;
   }
 
   /** A GitHub answer's body, from cache on a 304; anything but a 200 or 304 throws. */
-  private async read(path: string, as: GithubEnv): Promise<any> {
+  private async read<T>(path: string, as: GithubEnv): Promise<T | null> {
     const had = this.cache.get(path);
     const r = await this.get(path, had?.etag ?? null, as);
-    if (r.status === 304 && had) return had.body;
+    if (r.status === 304 && had) return had.body as T | null;
     if (r.status === 200) {
       this.cache.set(path, { etag: r.etag, body: r.body });
       if (this.cache.size > 500) this.cache.delete(this.cache.keys().next().value!);
-      return r.body;
+      return r.body as T | null;
     }
-    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String(r.body?.message ?? '')))) throw Object.assign(new Error('rate limited'), { rateLimited: true });
+    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String((r.body as GhErrorBody | null)?.message ?? '')))) throw Object.assign(new Error('rate limited'), { rateLimited: true });
     throw new Error(`GitHub answered ${r.status} for ${path}`);
   }
 

@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HostJobs } from './host-job.ts';
 import { outputTail } from './land.ts';
+import type { CardQuestion } from './ci-armed.ts';
 
 /** The templates schemes copy, and where a scheme keeps its copy. */
 export const KIT_FILES: readonly { template: string; path: string }[] = [
@@ -326,7 +327,7 @@ export interface KitSyncDeps {
   env(person: number | null): Record<string, string>;
   /** Whether that environment's GitHub login can push to the repo whose origin is `repo`'s. */
   canPush(repoDir: string, env: Record<string, string>): Promise<boolean>;
-  postCard(ticket: number, card: { questions: unknown[]; kind: 'merge'; kitSync: string }): string;
+  postCard(ticket: number, card: { questions: CardQuestion[]; kind: 'merge'; kitSync: string }): string;
   settle(card: Card, line: string): void;
   /** A line in a chat everyone sees, with no turn. */
   note(ticket: number, text: string): void;

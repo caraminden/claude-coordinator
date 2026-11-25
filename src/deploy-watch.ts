@@ -12,6 +12,7 @@
 import { execFile } from 'node:child_process';
 import type { Project, Store } from './db.ts';
 import { pacific } from './pacific.ts';
+import { thrown } from './thrown.ts';
 
 /** Settings key: the commit last seen live, and the deploys still being watched. */
 export const WATCH_KEY = 'deploy-watch';
@@ -174,8 +175,8 @@ export class DeployWatch {
       // and the Status page still shows it with its cause.
       if (kind === 'loop-lag' && now - (this.d.bootAt ?? 0) < BOOT_QUIET_MS) kind = BOOT_STALL;
       this.d.store.addHealthEvent(kind, now, this.d.head(), detail);
-    } catch (err: any) {
-      console.error(`Recording a ${kind} health reading failed: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Recording a ${kind} health reading failed: ${thrown(err).message ?? err}`);
     }
   }
 
@@ -339,8 +340,8 @@ export class DeployWatch {
       ].join('\n');
       try {
         this.d.wake(s.ticketId, text);
-      } catch (err: any) {
-        console.error(`Deploy watch: waking minion ${s.ticketId} failed: ${err?.message ?? err}`);
+      } catch (err) {
+        console.error(`Deploy watch: waking minion ${s.ticketId} failed: ${thrown(err).message ?? err}`);
       }
     }
     const scheme = this.d.scheme();
@@ -356,8 +357,8 @@ export class DeployWatch {
       : '';
     try {
       this.d.mail(tm.id, `Post-deploy watch: after ${when}, ${lines.join('; ')} (${window} after vs before). ${woke}${loose} Nothing was reverted.`);
-    } catch (err: any) {
-      console.error(`Deploy watch: mailing the Taskmaster failed: ${err?.message ?? err}`);
+    } catch (err) {
+      console.error(`Deploy watch: mailing the Taskmaster failed: ${thrown(err).message ?? err}`);
     }
   }
 }
@@ -378,7 +379,7 @@ export class ClientErrors {
   private seen = new Map<string, { since: number; n: number; last: Map<string, number> }>();
 
   /** The row to record for `who`'s report, or null when it's a repeat, over the limit, or empty. */
-  take(who: string, body: any, now = Date.now()): string | null {
+  take(who: string, body: Record<string, unknown> | null, now = Date.now()): string | null {
     const text = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '');
     const message = text(body?.message, 300);
     if (!message || HARMLESS_CLIENT_ERRORS.some((h) => h.match.test(message))) return null;
@@ -386,7 +387,7 @@ export class ClientErrors {
     const source = text(body?.source, 300)
       .replace(/^[a-z]+:\/\/[^/]+/i, '')
       .replace(/[?#].*$/, '');
-    const line = Number.isInteger(body?.line) && body.line > 0 ? `:${body.line}` : '';
+    const line = typeof body?.line === 'number' && Number.isInteger(body.line) && body.line > 0 ? `:${body.line}` : '';
     const detail = `${body?.kind === 'rejection' ? 'Unhandled rejection: ' : ''}${message}${source ? ` (${source}${line})` : ''}`;
     let p = this.seen.get(who);
     if (!p || now - p.since >= RATE_MS) this.seen.set(who, (p = { since: now, n: 0, last: p?.last ?? new Map() }));

@@ -30,6 +30,7 @@ import { projectSharedDir } from '../workspace.ts';
 import { ensureCoordinator } from './projects.ts';
 import { addAppTurnsCheck } from '../standard-audits.ts';
 import { isAppTurnsRun } from '../schedules.ts';
+import { thrown } from '../thrown.ts';
 
 // Names the turn API (section 4) and the rail take under /api/contraptions/.
 
@@ -82,7 +83,7 @@ function path(v: unknown, what: string): string {
 }
 
 /** The registry fields a body sets; on create, the required ones must be there. */
-function fields(app: App, body: any, creating: boolean) {
+function fields(app: App, body: Record<string, unknown>, creating: boolean) {
   const out: Partial<Omit<ContraptionRow, 'id' | 'name' | 'created_at'>> = {};
   if (creating || body.title !== undefined) {
     const title = typeof body.title === 'string' ? body.title.replace(/[\x00-\x1f\x7f]/g, '').trim() : '';
@@ -729,8 +730,8 @@ export const contraptionRoutes: Route[] = [
         try {
           const { waited } = await app.services.act(c, action as 'start' | 'stop' | 'restart');
           done = [...(waited ? [waited] : []), `${{ start: 'Started', stop: 'Stopped', restart: 'Restarted' }[action]} ${app.services.unitOf(c)}.`];
-        } catch (err: any) {
-          log(false, String(err?.message ?? err));
+        } catch (err) {
+          log(false, String(thrown(err).message ?? err));
           throw err;
         }
         log(true, done.join(' '));

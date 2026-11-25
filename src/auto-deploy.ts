@@ -13,6 +13,7 @@ import { HttpError } from './http.ts';
 import type { Found, Kind } from './release-targets.ts';
 import type { SchemeReleases, TargetView } from './releases.ts';
 import type { LastGreen } from './last-green.ts';
+import { thrown } from './thrown.ts';
 
 /** The longest a target waits for ships still coming, counted from when its head first moved. */
 export const MAX_WAIT_MS = 10 * 60_000;
@@ -210,7 +211,7 @@ export class AutoDeploy {
         // Not awaited: a slow start (an APK downloading) mustn't hold up the other targets' checks.
         this.starting.add(key);
         void (async () => deployer.start(t, AUTO_BY, null))()
-          .catch((err: any) => this.d.failed(t, err?.message ?? String(err)))
+          .catch((err: unknown) => this.d.failed(t, thrown(err).message ?? String(err)))
           .finally(() => this.starting.delete(key));
       }
     }

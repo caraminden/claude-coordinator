@@ -12,6 +12,7 @@
  */
 import { lstat, readdir, readlink, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { thrown } from './thrown.ts';
 
 export const MIN_AGE_MS = 60 * 60_000;
 const NAMES: { re: RegExp; pid: boolean }[] = [
@@ -62,8 +63,8 @@ const alive = (pid: number) => {
   try {
     process.kill(pid, 0);
     return true;
-  } catch (err: any) {
-    return err.code === 'EPERM';
+  } catch (err) {
+    return thrown(err).code === 'EPERM';
   }
 };
 

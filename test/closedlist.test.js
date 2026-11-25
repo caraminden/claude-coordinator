@@ -40,3 +40,13 @@ test('a minion started while the answer was on its way stays; one dismissed whil
   assert.deepEqual(r.ids, [2, 3]);
   assert.deepEqual([r.total, r.cursor, r.more], [4, null, true]);
 });
+
+// HP6 (#1861): a dismissed-minions read still out when the list is swapped must not leave the new list "busy" for good.
+test('a reconnect during a read of dismissed minions leaves the new list free to read more', () => {
+  setView({ kind: 'project', tickets: new Map([[1, row(1, 10)]]) });
+  const before = new Map(view.tickets);
+  Object.assign(closedState(view.tickets), { busy: Promise.resolve(false), failed: true });
+  const next = mergeOpen([row(1, 10)], 0, before);
+  assert.equal(closedState(next).busy, null);
+  assert.equal(closedState(next).failed, false);
+});

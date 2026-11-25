@@ -21,7 +21,7 @@ const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\brunner\.send
  * if it decides on real inputs, register its judge in src/judges.ts (callers), new judges log-only; if not, bump the count.
  */
 const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
-  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 41 },
+  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 43 },
   'kit/skills/test-quality/scripts/test-overlap.ts': { why: 'an audit script: kills only the test process it started when that file runs past its time limit; judges nothing', calls: 1 },
   'src/running-turn.ts': { why: 'sends a running turn the signal the runner asks for (a stop, or what is left of a killed turn); judges nothing (#1937)', calls: 2 },
   'src/exit-with-parent.ts': { why: "kills only its own test server's processes when the parent test exits; judges nothing", calls: 2 },

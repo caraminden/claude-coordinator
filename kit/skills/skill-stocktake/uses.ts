@@ -21,7 +21,7 @@ function walk(dir: string): void {
 function scan(file: string): void {
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (!line.includes('"tool_use"')) continue;
-    let ev: any;
+    let ev: { timestamp: string; message?: { content?: ({ type?: string; id: string; name?: string; input?: { skill?: string; subagent_type?: string } } | null)[] } };
     try {
       ev = JSON.parse(line);
     } catch {

@@ -17,6 +17,7 @@ import { moveShip, REASON_MAX, seqsFor } from '../ship-line.ts';
 import { shipLines, stopShip, StopRefused } from '../ship-stop.ts';
 import { CARD_OPTIONS, welcomeAct, welcomeView } from '../welcome.ts';
 import { handoverState } from '../handover.ts';
+import { thrown } from '../thrown.ts';
 
 const MAX_CLIENTS = 100;
 
@@ -28,22 +29,22 @@ const slowSeen = new Map<string, { since: number; n: number }>();
 const SLOW_KINDS = new Set(['request', 'open', 'load', 'freeze']);
 
 /** The report's rows as stored, each field checked and clipped, at most `room` of them; malformed ones dropped. */
-export function slowRows(body: any, person: string, room: number, now = Date.now()): Omit<SlowMoment, 'id'>[] {
+export function slowRows(body: Record<string, unknown> | null | undefined, person: string, room: number, now = Date.now()): Omit<SlowMoment, 'id'>[] {
   const text = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f]/g, '').slice(0, max) : '');
   const ms = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(Math.min(Math.max(v, 0), SLOW_MAX_MS)) : null);
   const out: Omit<SlowMoment, 'id'>[] = [];
-  for (const m of Array.isArray(body?.moments) ? body.moments.slice(0, 20) : []) {
+  for (const m of Array.isArray(body?.moments) ? (body.moments.slice(0, 20) as (Record<string, unknown> | null)[]) : []) {
     const total = ms(m?.total),
       at = Math.round(Number(m?.at));
     // A day back at most, and nothing from the future: a report kept offline overnight still counts.
-    if (out.length >= room || !SLOW_KINDS.has(m?.kind) || total === null || !(at > now - 86_400_000 && at < now + 60_000)) continue;
+    if (out.length >= room || !m || typeof m.kind !== 'string' || !SLOW_KINDS.has(m.kind) || total === null || !(at > now - 86_400_000 && at < now + 60_000)) continue;
     const page = text(m.page, 120);
     const scheme = /^#\/p\/(\d+)/.exec(page);
     out.push({
       at,
       person,
-      device: text(body.device, 60),
-      tab: text(m.tab ?? body.tab, 12),
+      device: text(body?.device, 60),
+      tab: text(m.tab ?? body?.tab, 12),
       kind: m.kind,
       what: text(m.what, 160),
       page,
@@ -519,14 +520,14 @@ export async function makeKey(app: App, session: Session, name: string) {
   if (!app.store.canSee(session, c.home_scheme)) throw new HttpError(403, `Only a member of ${app.store.getProject(c.home_scheme)?.name ?? 'its'} scheme can make ${c.title}'s release key`);
   try {
     await app.apkBuilds.makeKey(c, session.name);
-  } catch (err: any) {
-    throw new HttpError(409, err?.message ?? String(err));
+  } catch (err) {
+    throw new HttpError(409, thrown(err).message ?? String(err));
   }
   app.releases.poll();
 }
 
 /** The scheme and target a release action names, if the person may see that scheme. */
-function releaseTarget(store: Store, session: Session, body: any): { projectId: number; target: string } {
+function releaseTarget(store: Store, session: Session, body: Record<string, unknown>): { projectId: number; target: string } {
   const projectId = Number(body?.projectId);
   if (!Number.isInteger(projectId) || !store.canSee(session, projectId)) throw new HttpError(404, 'No such scheme');
   return { projectId, target: str(body?.target, 'target') };

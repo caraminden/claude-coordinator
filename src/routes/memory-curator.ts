@@ -14,7 +14,7 @@ import { deliverAnswer, postPlan } from './tickets.ts';
 const folderOf = (app: App, project: Project, id: string) => memoryFolders(project.repo_dir, memoryLogins(app)).find((f) => f.id === id) ?? null;
 
 /** The proposal's card in its run's chat, if it has one. */
-export function tidyCard(app: App, p: Proposal): { id: number; card: any } | null {
+export function tidyCard(app: App, p: Proposal): { id: number; card: { id?: string; status?: string; by?: string } & Record<string, unknown> } | null {
   if (p.ticket_id === null) return null;
   const event = app.store.eventsOfKinds(p.ticket_id, ['plan']).find((e) => JSON.parse(e.data)?.memory?.proposal === p.id);
   return event ? { id: event.id, card: JSON.parse(event.data) } : null;
@@ -152,7 +152,7 @@ export const memoryCuratorRoutes: Route[] = [
         throw new HttpError(409, p.status === 'superseded' ? 'A newer tidy replaced yours; nothing of yours was applied. Close yourself with close_self.' : `${p.decided_by} already ${p.status === 'applied' ? 'applied' : 'turned down'} this tidy; nothing more to apply. Report that and close yourself with close_self.`);
       const card = tidyCard(app, p)?.card;
       if (card?.status !== 'approved') throw new HttpError(409, 'Not approved: a member approves the tidy on its card (or ticks it on the Memory page), and the answer comes as a message. Apply nothing yourself; end your turn in state ready.');
-      const { changes, applied, skipped } = decideTidy(app, project, p, approveAll(p.changes), card.by);
+      const { changes, applied, skipped } = decideTidy(app, project, p, approveAll(p.changes), card.by!);
       const line = `Applied ${applied.length} of the ${approveAll(p.changes).length} changes ${card.by} approved (${countLine(applied) || 'none took'}).${skipped.length ? ` Skipped: ${skipped.map((c) => `${c.file} (${c.outcome})`).join(', ')}.` : ''}`;
       return json(res, 200, { line, changes: changes.map((c) => ({ action: c.action, file: c.file, outcome: c.outcome })) });
     },

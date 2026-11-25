@@ -12,13 +12,16 @@ import { GLOBAL_OWNER } from './properties.ts';
 import { identity } from './scheme-repo.ts';
 import { installCommand, installTool, MANIFEST, manifestText, readManifest, toolLabel, withTool, type HostTool } from './host-tools.ts';
 import type { App } from './http.ts';
+import { thrown } from './thrown.ts';
 
 const git = (args: string[], cwd: string) => new Promise<void>((done, fail) => execFile('git', args, { cwd }, (err, _o, stderr) => (err ? fail(new Error(`git ${args[0]}: ${stderr || err.message}`)) : done())));
 
 /** Runs behind the approve: the asking minion hears how it went, and the chore minion ships the line. Never throws. */
 export async function approveHostTool(app: App, askingId: number, t: HostTool, by: string): Promise<void> {
   const { store, runner } = app;
-  const tell = (text: string) => runner.send(askingId, APP_NAME, text);
+  const tell = (text: string): void => {
+    runner.send(askingId, APP_NAME, text);
+  };
   const label = toolLabel(t);
   try {
     const byHand = t.source === 'pacman';
@@ -49,7 +52,7 @@ export async function approveHostTool(app: App, askingId: number, t: HostTool, b
         ? `Approved ${label}, but the server has no root, so it isn't installed yet: ask a person with a card (to: cara, who runs perigee) to run this in a fish shell on perigee:\n\`\`\`fish\n${installCommand(t)}\n\`\`\`\n${ship}`
         : `Installed ${label} on the server (\`${installCommand(t)}\`): its command is on your PATH from your next turn. ${ship}`,
     );
-  } catch (err: any) {
-    tell(`${label} was approved, but listing it failed: ${err?.message ?? err}. Tell your Taskmaster: the tool ${t.source === 'pacman' ? 'still needs a person to install it' : 'may be installed but is not listed'}.`);
+  } catch (err) {
+    tell(`${label} was approved, but listing it failed: ${thrown(err).message ?? err}. Tell your Taskmaster: the tool ${t.source === 'pacman' ? 'still needs a person to install it' : 'may be installed but is not listed'}.`);
   }
 }

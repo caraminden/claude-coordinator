@@ -338,6 +338,7 @@ export const proposalRoutes: Route[] = [
       const body = await readJson(req);
       const tool = str(body.tool_name, 'Tool name', 300);
       const input = body.input && typeof body.input === 'object' ? body.input : {};
+      const use = typeof body.tool_use_id === 'string' ? body.tool_use_id.slice(0, 200) : undefined;
       const project = store.getProject(ticket.project_id)!;
       const rules = lines(project.approval_rules).length > 0;
       // A merge's card shows the PR, looked up once now as the turn's own GitHub login.
@@ -359,7 +360,7 @@ export const proposalRoutes: Route[] = [
       if ((merge || goCall) && !runner.isRunning(id)) throw new HttpError(409, 'The minion is not mid-turn');
       // Judged with the turn's TMPDIR (src/turn-launch.ts), as its hook judged it, not the server's own.
       const cfg = { ...tripwireConfig(project.id, claudeConfigDir(process.env), true), env: { ...process.env, TMPDIR: tmpDirFor(runner.tmpRoot(project.id), id) } };
-      const r = runner.approvals.ask(id, tool, input, ticket.cwd, cfg, rules, merge ? { ...merge, pr } : undefined, target, retry);
+      const r = runner.approvals.ask(id, tool, input, ticket.cwd, cfg, rules, merge ? { ...merge, pr } : undefined, target, retry, use);
       return json(res, 'id' in r ? 201 : 200, r);
     },
   },

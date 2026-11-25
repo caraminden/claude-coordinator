@@ -9,6 +9,7 @@
 import { closeSync, openSync, readSync } from 'node:fs';
 import { isMainThread, Worker, workerData } from 'node:worker_threads';
 import type { Store } from './db.ts';
+import { thrown } from './thrown.ts';
 
 export const WARM_MS = 5000;
 export const SLOW_MB_S = 200;
@@ -79,7 +80,7 @@ export function warmDatabase(store: Store, everyMs = WARM_MS, settingMs = 5000):
   apply();
   const timer = setInterval(apply, settingMs);
   timer.unref();
-  worker.on('error', (err) => console.error(`Database warmer failed: ${err?.message ?? err}`));
+  worker.on('error', (err: unknown) => console.error(`Database warmer failed: ${thrown(err).message ?? err}`));
   worker.once('exit', () => clearInterval(timer));
   return {
     worker,
@@ -105,8 +106,8 @@ if (!isMainThread && workerData?.warm) {
     try {
       dbFd ??= openSync(path, 'r');
       bytes += readThrough(dbFd, buf);
-    } catch (err: any) {
-      if (err?.code !== 'ENOENT') console.error(`Database warmer: reading the database: ${err?.message ?? err}`);
+    } catch (err) {
+      if (thrown(err).code !== 'ENOENT') console.error(`Database warmer: reading the database: ${thrown(err).message ?? err}`);
     }
     try {
       const fd = openSync(`${path}-wal`, 'r');
@@ -115,8 +116,8 @@ if (!isMainThread && workerData?.warm) {
       } finally {
         closeSync(fd);
       }
-    } catch (err: any) {
-      if (err?.code !== 'ENOENT') console.error(`Database warmer: reading the WAL: ${err?.message ?? err}`);
+    } catch (err) {
+      if (thrown(err).code !== 'ENOENT') console.error(`Database warmer: reading the WAL: ${thrown(err).message ?? err}`);
     }
     return { bytes, ms: performance.now() - t0 };
   };

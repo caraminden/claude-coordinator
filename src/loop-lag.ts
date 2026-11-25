@@ -9,6 +9,7 @@ import { basename } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { ZONE } from './pacific.ts';
 import { CGROUP_ROOT, hostTextSync, PSI_FILES, SELF_CGROUP } from './host-signals.ts';
+import { thrown } from './thrown.ts';
 
 const SAMPLE_US = 10_000;
 /** A fresh profile this often keeps its samples bounded (about 60,000) when nothing stalls. */
@@ -346,7 +347,7 @@ class Sampler {
     this.chain = (async () => {
       const s = this.session!;
       s.connect();
-      s.on('Profiler.consoleProfileFinished', (m: any) => this.finished.set(m.params.title, m.params.profile));
+      s.on('Profiler.consoleProfileFinished', (m: { params: { title: string; profile: Profile } }) => this.finished.set(m.params.title, m.params.profile));
       await s.post('Profiler.enable');
       await s.post('Profiler.setSamplingInterval', { interval: SAMPLE_US });
       this.timed(() => console.profile(this.title));
@@ -387,8 +388,8 @@ class Sampler {
         this.finished.delete(old);
         if (!profile) throw new Error('V8 gave no profile');
         return profile;
-      } catch (err: any) {
-        this.log(`The event-loop sampler stopped (${err?.message ?? err}): stall lines won't say what ran.`);
+      } catch (err) {
+        this.log(`The event-loop sampler stopped (${thrown(err).message ?? err}): stall lines won't say what ran.`);
         this.stop();
         return null;
       }
@@ -411,7 +412,7 @@ class Sampler {
  * a stall over 2 s names the other processes that have any of `files` (the databases) open (#622). `stop`
  * ends the watch and the sampler.
  */
-export function watchLoopLag(log: (text: string) => void = console.warn, every = 100, over = 500, { profile = false, files = [] as string[], backlog = () => 0 } = {}): { stop(): void } {
+export function watchLoopLag(log: (text: string) => void = console.warn, every = 100, over = 500, { profile = false, files = [] as string[], backlog = (): number => 0 } = {}): { stop(): void } {
   const sampler = profile ? new Sampler(log) : null;
   const waits = startWaitSampler(over);
   let last = process.hrtime.bigint();

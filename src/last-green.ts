@@ -101,7 +101,7 @@ export class LastGreen {
       if ((await this.contains(repoDir, sha, ref)) !== true) continue;
       // Older than the kept one (a late run on an earlier commit): last green never goes back.
       if (had && (await this.contains(repoDir, had.sha, sha)) !== true && (await this.contains(repoDir, had.sha, ref)) !== false) break;
-      this.store.setSetting<Green>(GREEN(projectId), { sha, at: this.now() });
+      this.store.setSetting(GREEN(projectId), { sha, at: this.now() } satisfies Green);
       break;
     }
     const green = this.get(projectId);

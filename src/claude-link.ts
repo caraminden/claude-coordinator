@@ -18,6 +18,7 @@ import type { Store } from './db.ts';
 import { accountReady, accountUsageKey, pickAccount, WARM_MS, type Meter, type Pick } from './account-pick.ts';
 import { claudeConfigDir, projectSlug } from './sessions.ts';
 import { ensureGradleInit } from './build-cache.ts';
+import { thrown } from './thrown.ts';
 
 const IMAGE_REPO = 'localhost/citadel-claude';
 /** The checkout this server runs from (prompts.ts CHECKOUT). */
@@ -656,7 +657,7 @@ export class ClaudeLink {
 
   /** The environment a command for account `n` runs with: the server's, minus any login that would win over the folder's own. */
   private hostEnv(dir: string): NodeJS.ProcessEnv {
-    const env = { ...process.env, CLAUDE_CONFIG_DIR: dir };
+    const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: dir };
     for (const v of AUTH_VARS) delete env[v];
     return env;
   }
@@ -733,8 +734,8 @@ export class ClaudeLink {
           resolve();
         });
       });
-    } catch (err: any) {
-      login.error = err.message;
+    } catch (err) {
+      login.error = thrown(err).message;
     }
     return this.status(uid);
   }

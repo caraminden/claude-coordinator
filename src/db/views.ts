@@ -3,7 +3,7 @@ import type { SavedView, Store } from '../db.ts';
 
 export const viewQueries = {
   listViews(this: Store, projectId: number, owner: string): SavedView[] {
-    const rows = this.db.prepare('SELECT * FROM person_views WHERE project_id = ? AND owner = ? ORDER BY name COLLATE NOCASE').all(projectId, owner) as any[];
+    const rows = this.db.prepare('SELECT * FROM person_views WHERE project_id = ? AND owner = ? ORDER BY name COLLATE NOCASE').all(projectId, owner) as unknown as (Omit<SavedView, 'picks'> & { picks: string })[];
     return rows.map((r) => ({ ...r, picks: JSON.parse(r.picks) }));
   },
 

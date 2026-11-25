@@ -69,13 +69,13 @@ export function machineSetupWindows(url, name, token) {
   ].join('\n');
 }
 
-/** The CI runner agent's one-time install line (tools/ci-runner/README.md), for an admin PowerShell on Cara's desktop, with this app's machines address and the token filled in. */
+/** The CI runner agent's one-time install line (tools/ci-runner/README.md), for an admin PowerShell on a PC that hosts CI, with this app's machines address and the token filled in. */
 export function machineSetupRunnerAgent(url, token) {
   const u = url.replace(/\/$/, '');
   return `$u = '${u}'; iwr "$u/ci-runner/install-runner-agent.ps1" -UseBasicParsing -OutFile "$env:TEMP\\install-runner-agent.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\\install-runner-agent.ps1" -CitadelUrl $u -MachineToken '${token}'`;
 }
 
-/** The Linux runner agent's install line (#510, tools/ci-runner/README.md "Linux runners in WSL"), for a root shell in the WSL distro on Cara's desktop. */
+/** The Linux runner agent's install line (#510, tools/ci-runner/README.md "Linux runners in WSL"), for a root shell in the WSL distro on a PC that hosts CI. */
 export function machineSetupRunnerAgentLinux(url, token) {
   const u = url.replace(/\/$/, '');
   // A fresh file of root's own: a fixed /tmp name left by another user (an earlier try outside root) can't be

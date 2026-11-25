@@ -5,7 +5,7 @@
 import { existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
-import { resolveFile } from './artifacts.ts';
+import { fileType, resolveFile } from './artifacts.ts';
 import type { Credentials } from './credentials.ts';
 import type { OpenrouterCallKind, Store } from './db.ts';
 import { HttpError } from './http.ts';
@@ -112,6 +112,18 @@ interface SpeechModel {
   description?: string;
 }
 
+/** A row of OpenRouter's models list, as read here. */
+interface Model extends SpeechModel {
+  supported_parameters?: string[];
+}
+/** One event of a streamed completion with audio. */
+interface StreamChunk {
+  id?: string | null;
+  choices?: { delta?: { audio?: { data?: unknown } } }[];
+  usage?: { cost?: unknown };
+  error?: { message?: unknown } | null;
+}
+
 /**
  * The most a speech call could cost, or null when it can't be bounded. OpenRouter lists a speech model's
  * input price with no unit (per character, per UTF-8 byte or per token), so it's charged per UTF-8 byte,
@@ -189,7 +201,10 @@ export type MediaTool = (typeof MEDIA_TOOLS)[number];
 const IMAGE_EXT = new Set(['.png', '.webp', '.svg']);
 const AUDIO_EXT = new Set(['.mp3', '.wav']);
 const SPEECH_FORMATS = ['mp3', 'wav', 'pcm'];
-export const INPUT_IMAGE = (p: string) => (/\.(png|jpe?g|webp)$/i.test(p) ? 'image' : null);
+export const INPUT_IMAGE = (p: string) => {
+  const ext = /\.(png|jpe?g|webp)$/i.exec(p)?.[0];
+  return ext ? fileType(`image${ext}`) : null; // by its ending alone: a file named just .png counts too
+};
 const MEDIA_TYPES: Record<string, string> = { 'image/png': '.png', 'image/webp': '.webp', 'image/jpeg': '.jpg', 'image/svg+xml': '.svg' };
 const MAX_INPUT_BYTES = 20 * 1024 * 1024;
 
@@ -198,7 +213,7 @@ export class OpenRouter {
   private creds: Credentials;
   private fetch: Fetch;
   private base: string;
-  private models: { at: number; byId: Map<string, any> } | null = null;
+  private models: { at: number; byId: Map<string, Model> } | null = null;
   private endpoints = new Map<string, { at: number; list: ImageEndpoint[] }>();
 
   constructor(store: Store, creds: Credentials, fetchFn: Fetch = globalThis.fetch, base = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1') {
@@ -241,7 +256,7 @@ export class OpenRouter {
     const res = await this.request(key.trim(), 'GET', '/key').catch((err) => {
       throw err instanceof HttpError && err.status === 403 ? new HttpError(400, "OpenRouter didn't accept that key") : err;
     });
-    const data = ((await res.json()) as { data?: Record<string, any> }).data ?? {};
+    const data = ((await res.json()) as { data?: Record<string, unknown> }).data ?? {};
     const now = Date.now();
     this.creds.put(userId, 'openrouter', key.trim(), {
       cap_usd: capUsd,
@@ -346,12 +361,12 @@ export class OpenRouter {
   }
 
   /** The models list (public), kept a day; refetched once for an id it doesn't know. */
-  private async model(id: string): Promise<any> {
+  private async model(id: string): Promise<Model> {
     for (const fresh of [false, true]) {
       if (fresh || !this.models || Date.now() - this.models.at > DAY) {
         const res = await this.fetch(`${this.base}/models?output_modalities=all`, { signal: AbortSignal.timeout(30_000) });
         if (!res.ok) throw new HttpError(502, `OpenRouter's model list answered ${res.status}`);
-        const list = ((await res.json()) as { data?: any[] }).data ?? [];
+        const list = ((await res.json()) as { data?: Model[] }).data ?? [];
         this.models = { at: Date.now(), byId: new Map(list.map((m) => [m.id, m])) };
       }
       const m = this.models!.byId.get(id);
@@ -379,7 +394,7 @@ export class OpenRouter {
    * A minion's tool call: check its arguments (they come from a turn), book it against the person's
    * cap, call OpenRouter, and write the file(s) with a `<file>.json` note of how each was made.
    */
-  async tool(name: MediaTool, args: Record<string, any>, ctx: ToolContext) {
+  async tool(name: MediaTool, args: Record<string, unknown>, ctx: ToolContext) {
     const { key, cap } = this.key(ctx.userId);
     const userId = ctx.userId!;
     if (name === 'generate_speech') return this.speech(userId, key, cap, args, ctx);
@@ -396,7 +411,7 @@ export class OpenRouter {
       if (seconds !== undefined && !(seconds > 0 && seconds <= EFFECT_SECONDS)) throw new HttpError(400, `seconds is between 0 and ${EFFECT_SECONDS}`);
       if (kind === 'effect' && extname(out).toLowerCase() !== '.mp3') throw new HttpError(400, 'Sound effects come as .mp3');
       const seed = args.seed;
-      if (seed !== undefined && !(Number.isSafeInteger(seed) && seed >= 0)) throw new HttpError(400, 'seed is a whole number from 0');
+      if (seed !== undefined && !(typeof seed === 'number' && Number.isSafeInteger(seed) && seed >= 0)) throw new HttpError(400, 'seed is a whole number from 0');
       const file = target(out, 1, 0, args.overwrite === true);
       const model = args.model ?? MODELS[kind];
       // Only models that list seed take one (Lyria does; no effect model does today): refused before anything is spent.
@@ -429,7 +444,7 @@ export class OpenRouter {
     if (clear === 'matte' && format !== 'png') throw new HttpError(400, `${model} has no transparent background of its own, so Citadel mattes it from black: out must end in .png (or pick a model with one, like bytedance-seed/seedream-5-0-flash)`);
     const files = Array.from({ length: n }, (_, i) => target(out, n, i, args.overwrite === true));
     const sent = clear === 'matte' ? `${prompt}\n\n${BLACK_BACKGROUND}` : prompt;
-    const estimate = imageEstimate(endpoints, { resolution: args.resolution, n, refs: refs.length, promptChars: sent.length });
+    const estimate = imageEstimate(endpoints, { resolution: args.resolution as string | undefined, n, refs: refs.length, promptChars: sent.length });
     const id = this.reserve(userId, cap, ctx, 'image', model, estimate);
     const { value: images, cost } = await this.settled(userId, id, estimate!, async () => {
       const res = await this.request(key, 'POST', '/images', {
@@ -482,7 +497,7 @@ export class OpenRouter {
    * Text read aloud (#808). `input` goes to OpenRouter exactly as given (phoneme tags, SSML, IPA,
    * whitespace): never trimmed or rewritten, and refused rather than cut when it's over the model's limit.
    */
-  private async speech(userId: number, key: string, cap: number, args: Record<string, any>, ctx: ToolContext) {
+  private async speech(userId: number, key: string, cap: number, args: Record<string, unknown>, ctx: ToolContext) {
     const { input, voice, instructions, speed } = args;
     if (typeof args.model !== 'string' || !/^[\w.-]+\/[\w.:-]+$/.test(args.model)) throw new HttpError(400, 'model is required: an OpenRouter speech model id, like fish-audio/drama-3');
     if (typeof input !== 'string' || !input.trim()) throw new HttpError(400, 'input is required: the text to read');
@@ -491,7 +506,7 @@ export class OpenRouter {
     if (speed !== undefined && !(typeof speed === 'number' && speed >= 0.25 && speed <= 4)) throw new HttpError(400, 'speed is a number from 0.25 to 4 (1 is normal)');
     const out = outPath(args.out, ctx.roots, new Set(SPEECH_FORMATS.map((f) => `.${f}`)), ctx.place ?? MINION_PLACE);
     const format = args.response_format ?? extname(out).slice(1).toLowerCase();
-    if (!SPEECH_FORMATS.includes(format)) throw new HttpError(400, 'response_format is mp3, wav or pcm');
+    if (typeof format !== 'string' || !SPEECH_FORMATS.includes(format)) throw new HttpError(400, 'response_format is mp3, wav or pcm');
     if (extname(out).toLowerCase() !== `.${format}`) throw new HttpError(400, `out must end in .${format} for response_format ${format}`);
     const model = args.model;
     const m = await this.model(model);
@@ -594,7 +609,7 @@ export class OpenRouter {
 }
 
 /** The events of a server-sent event stream's `data:` lines, as JSON. */
-async function* sse(res: Response): AsyncGenerator<any> {
+async function* sse(res: Response): AsyncGenerator<StreamChunk> {
   if (!res.body) return;
   const decoder = new TextDecoder();
   let buf = '';
@@ -608,7 +623,7 @@ async function* sse(res: Response): AsyncGenerator<any> {
       const data = line.slice(5).trim();
       if (data === '[DONE]') return;
       try {
-        yield JSON.parse(data);
+        yield JSON.parse(data) as StreamChunk;
       } catch {}
     }
   }

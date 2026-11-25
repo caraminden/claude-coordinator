@@ -409,7 +409,9 @@ keeper log, `shared/project/reports/ships-first-windows-squeeze-2026-11-21.md`).
   out. `keep-runners.ps1` gives each runner its own slot, a job named `Global\CitadelCiRunner-<folder>` nested in the
   shared 75% job, names it from the runner's `.runner` file, and re-reads `ships.json` every 2 seconds. While a ship
   runs, the slots not on a ship share `-SqueezePercent` (30, `SQUEEZE_PERCENT` in `public/runner-agent.mjs`) of the
-  PC, split evenly among the ones running a job; a ship's slot keeps no cap of its own (only the shared 75%). A
+  PC, or `-CitadelSqueezePercent` (10, `WINDOWS_CITADEL_SQUEEZE_PERCENT`) while one of the ships is Citadel's own (the
+  watch marks those `first: true` in `ships.json`; Josh, 2026-11-24, picked "Squeeze Peek's builds harder" on the
+  Taskmaster's card, replacing Cara's Nov 20 30% for that case; Linux stays at 30), split evenly among the ones running a job; a ship's slot keeps no cap of its own (only the shared 75%). A
   runner whose slot can't nest in the shared job (a session runner already in its logon task's job) gets the same
   share of the PC on its own job.
 - **WSL.** The Linux agent finds each `citadel-runner-*` service's folder, names it the same way, and sets

@@ -43,7 +43,7 @@ function spinCpuMs(): number {
   const at = process.cpuUsage();
   for (let i = 0; i < 1500; i++) {
     appendFileSync(spinFile, `${JSON.stringify({ i, t: 'working on it' })}\n`);
-    JSON.parse(readFileSync(spinFile, 'utf8').slice(0, 40).split('\n')[0]);
+    JSON.parse(readFileSync(spinFile, 'utf8').slice(0, 40).split('\n')[0]); // raw-read-ok: the test's own file, written whole on the line above
   }
   rmSync(spinFile, { force: true });
   const d = process.cpuUsage(at);

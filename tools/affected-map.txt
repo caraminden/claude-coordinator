@@ -138,7 +138,7 @@ test/**: test/one-until.test.ts test/raw-log-read.test.ts
 
 # The test tooling's own tests.
 tools/citadel-test: test/citadel-test.test.ts test/affected.test.ts
-tools/mem-room: test/mem-room.test.ts test/citadel-test.test.ts test/citadel-heavy.test.ts
+tools/mem-room: test/mem-room.test.ts test/container-room.test.ts test/citadel-test.test.ts test/citadel-heavy.test.ts
 tools/heavy-ci.ts: test/heavy-ci.test.ts test/long-jobs.test.ts test/citadel-heavy.test.ts
 tools/who-touches: test/who-touches.test.ts
 tools/who-uses: test/who-uses.test.ts

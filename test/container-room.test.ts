@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { containerRooms, publishRooms, ROOM_FILE } from '../src/container-room.ts';
+import { scriptEnv } from './script-env.ts';
 
 // src/container-room.ts (#1982): each container's room under its own memory limit, for tools/mem-room inside it.
 const root = mkdtempSync(join(tmpdir(), 'container-room-'));
@@ -89,14 +91,18 @@ test("a Taskmaster's container has its own line, apart from its person's", async
   ]);
 });
 
-test('the file has a line for each container, and a stopped one loses its line with the next reading', async () => {
-  const c = slice('file');
+test('tools/mem-room reads what publishRooms wrote: each container its own, the host none', async () => {
+  const c = slice('e2e');
   const heavy = join(root, 'projects', '.heavy');
   const two = unit(join(c, 'citadel-claude-2.service'), { current: 9 * GB, cache: 500 * MB });
   const three = unit(join(c, 'citadel-claude-3.service'), { current: 5 * GB });
   await publishRooms(c, heavy);
-  assert.equal(readFileSync(join(heavy, ROOM_FILE), 'utf8'), `${ino(two)} 1524 citadel-claude-2.service\n${ino(three)} 5120 citadel-claude-3.service\n`);
-  rmSync(join(c, 'citadel-claude-3.service'), { recursive: true }); // timing-ok: own temp dir
+  const info = join(root, 'meminfo');
+  writeFileSync(info, 'MemAvailable: 20971520 kB\n');
+  const mb = (cgroup: string) => spawnSync(join(import.meta.dirname, '..', 'tools', 'mem-room'), ['mb'], { encoding: 'utf8', env: scriptEnv({ CITADEL_MEM_ROOM_MB: undefined, CITADEL_HEAVY_CGROUP: join(root, 'none'), CITADEL_MEMINFO: info, CITADEL_HEAVY_DIR: heavy, CITADEL_OWN_CGROUP: cgroup }) }).stdout.trim();
+  assert.deepEqual([mb(two), mb(three), mb(root)], ['1524', '5120', '20480']);
+  // The container stops: its line goes with the next reading.
+  rmSync(join(c, 'citadel-claude-3.service'), { recursive: true });
   await publishRooms(c, heavy);
   assert.equal(readFileSync(join(heavy, ROOM_FILE), 'utf8'), `${ino(two)} 1524 citadel-claude-2.service\n`);
   assert.ok(!existsSync(join(heavy, `${ROOM_FILE}.tmp`)), 'written by a rename');

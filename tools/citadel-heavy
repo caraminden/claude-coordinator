@@ -311,7 +311,7 @@ load_text() {
 }
 
 # Memory room (#1340): the job's start waits while the room for heavy work (tools/mem-room: the smaller of MemAvailable
-# and the heavy slice's headroom) is under what the job needs, CITADEL_HEAVY_MEM_NEED MB (default 2000: one suite). After
+# and the heavy slice's headroom, or a container's own) is under what the job needs, CITADEL_HEAVY_MEM_NEED MB (default 2000: one suite). After
 # CITADEL_HEAVY_MEM_WAIT s (default 300) it starts anyway and a test run sizes its own workers to the room it finds
 # (citadel-test, npm test). Without a reading it never waits. Priority jobs skip this, as they skip the load wait.
 mem_need=${CITADEL_HEAVY_MEM_NEED:-2000}

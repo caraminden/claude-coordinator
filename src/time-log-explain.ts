@@ -234,6 +234,7 @@ export function explainInput(title: string, log: TimeLog, events: EventRow[], ke
   // The parts in order, labelled, with as much as fits.
   const labels = new Map<string, number>();
   const partLabels = new Map<string, string>();
+  const byEvent = new Map<number, string>();
   const L: string[] = [`Minion: ${one(title, 200)}`];
   let n = 0;
   let used = L[0].length;
@@ -242,7 +243,9 @@ export function explainInput(title: string, log: TimeLog, events: EventRow[], ke
     const r = p.row;
     const lab = (event: number | null | undefined) => {
       if (!event) return '';
-      const k = `e${++n}`;
+      // One label an event, however many lines quote it.
+      const k = byEvent.get(event) ?? `e${++n}`;
+      byEvent.set(event, k);
       labels.set(k, event);
       return `[${k}] `;
     };

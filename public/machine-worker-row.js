@@ -96,9 +96,12 @@ function folded(k, id, title, ...inside) {
   return el;
 }
 
+/** The caps being typed, until that PC's own change under them; else its own, or the starting ones. */
+const capsFor = (m, k) => (k.caps && k.capsOver === JSON.stringify(m.worker.caps) ? k.caps : (m.worker.caps ?? WORKER_CAPS));
+
 /** Four numbers its owner sets; the command below follows them as they are typed. */
 function capsInputs(m, k, follow) {
-  const set = k.caps ?? m.worker.caps ?? WORKER_CAPS;
+  const set = capsFor(m, k);
   const field = (key, label, unit, max) => {
     const input = h('input', { type: 'text', inputmode: 'numeric', id: `worker-cap-${m.id}-${key}`, value: String(set[key]), maxlength: String(max).length, 'aria-label': `${label}${unit ? ` (${unit})` : ''}` });
     input.oninput = () => {
@@ -106,7 +109,8 @@ function capsInputs(m, k, follow) {
       input.setAttribute('aria-invalid', String(n === null));
       // Half-typed: the command keeps its last whole number.
       if (n === null) return;
-      k.caps = { ...(k.caps ?? m.worker.caps ?? WORKER_CAPS), [key]: n };
+      k.caps = { ...capsFor(m, k), [key]: n };
+      k.capsOver = JSON.stringify(m.worker.caps);
       follow();
     };
     return h('label', { class: 'worker-cap' }, h('span', {}, label), h('span', { class: 'worker-cap-box' }, input, unit ? h('i', {}, unit) : null));
@@ -136,7 +140,7 @@ function installBlock(m, k, redraw) {
   const win = windows(m);
   const box = h('div', { class: 'worker-command' });
   const draw = () => {
-    const caps = k.caps ?? m.worker.caps ?? WORKER_CAPS;
+    const caps = capsFor(m, k);
     box.replaceChildren(shell(win ? 'powershell' : 'bash', (win ? machineSetupWorkerWindows : machineSetupWorkerLinux)(k.link.agent_url, k.link.token, caps)));
   };
   draw();
@@ -163,8 +167,8 @@ function installBlock(m, k, redraw) {
 function capsBlock(m, k) {
   const box = h('div', { class: 'worker-command' });
   const draw = () => {
-    const caps = k.caps ?? m.worker.caps;
-    const same = !caps || Object.keys(WORKER_CAPS).every((key) => caps[key] === m.worker.caps?.[key]);
+    const caps = capsFor(m, k);
+    const same = Object.keys(WORKER_CAPS).every((key) => caps[key] === m.worker.caps?.[key]);
     box.replaceChildren(same ? h('p', { class: 'muted small' }, 'These are its caps now. Change a number to get the command that sets it there.') : shell(m.worker.wsl ? 'powershell' : 'bash', workerCapsCommand(m.worker.wsl, caps)));
   };
   draw();

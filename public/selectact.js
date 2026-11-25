@@ -64,7 +64,13 @@ export function selectionActions(s, form) {
       },
     },
     // Aside is the composer's own (minions only); a selection across two messages offers only Reply.
-    s.single && form.querySelector('.side-ask') && { id: 'aside', label: 'Ask on the side', title: 'Start a side question with this quote', icon: '💬', run: () => put(`/btw ${quoteOf(s.text)}`) },
+    s.single && form.querySelector('.side-ask') && { id: 'aside', label: 'Ask on the side', title: 'Start a side question with this quote', icon: '💬', run: () => {
+        // The composer puts the draft back once this question is asked (C2), if the box still holds exactly this.
+        const aside = `/btw ${quoteOf(s.text)}`;
+        textarea._asideDraft = { draft: textarea.value, aside };
+        put(aside);
+      },
+    },
     s.single &&
       id && {
         id: 'link',

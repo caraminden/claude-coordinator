@@ -222,7 +222,9 @@ export function composer(chatId, ticket) {
       return;
     }
     sideStrip.hidden = true;
-    box.value = '';
+    const kept = textarea._asideDraft;
+    textarea._asideDraft = null;
+    box.value = kept && box.value.trim() === kept.aside.trim() ? kept.draft : '';
     api(`api/tickets/${chatId}/side`, { method: 'POST', body: { text } }).catch((ex) => {
       if (!box.value.trim()) box.value = text;
       alertNote(`Side question not asked: ${ex.message}`);

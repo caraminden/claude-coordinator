@@ -326,7 +326,7 @@ const bearer = (req: Ctx['req']) => String(req.headers.authorization).replace(/^
  */
 export function deliverAnswer(app: App, ticketId: number, author: string, text: string, extra: object, images: Awaited<ReturnType<typeof saveImages>> = [], files: Awaited<ReturnType<typeof messageFiles>> = []) {
   // A card's answer wakes a sealed minion too (#718): answering is as deliberate as Unseal.
-  app.runner.send(ticketId, author, text, images, extra, false, files);
+  app.runner.send(ticketId, author, text, images, { ...extra, quick: true }, false, files);
 }
 
 /**

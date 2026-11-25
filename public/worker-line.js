@@ -306,7 +306,7 @@ const hueOf = (name) =>
       1,
   );
 
-const LANE_HOW = "Beside the pool, for what people say and answer and the server's wake-ups, while every worker is taken. One still running after 2 minutes counts in the pool.";
+const LANE_HOW = "Beside the pool, for what people say and answer and the server's wake-ups, while every worker is taken. One still running after 2 minutes counts in the pool, up to 2 over its size.";
 
 /** The quick lane's state, for the tile and the drawer. */
 export const quickLane = (lane) => h('span', { title: LANE_HOW }, toneChip(lane.used ? 'info' : lane.size ? 'neutral' : 'warn', 'Quick lane'), ` ${laneSaid(lane)}`);

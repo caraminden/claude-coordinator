@@ -148,5 +148,5 @@ test('the quick lane in words, at each memory level', () => {
   assert.equal(laneSaid({ used: 1, size: 1, moved: 0 }), '1 of 1 working, 1 while memory is under strain');
   assert.equal(laneSaid({ used: 0, size: 0, moved: 0 }), 'closed while memory is tight');
   assert.equal(laneSaid({ used: 2, size: 0, moved: 1 }), '2 working, closed while memory is tight · 1 moved to the pool');
-  assert.equal(lineWhy({ quick: true, warm: true }), 'may use the quick lane · warm, about to go cold');
+  assert.equal(lineWhy({ quick: true, warm: true }), 'or quick lane · warm, about to go cold');
 });

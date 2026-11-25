@@ -267,7 +267,7 @@ export class TurnLine {
   wait(ticketId: number): WorkerWait | null {
     const entry = this.entries.find((e) => e.ticket === ticketId);
     if (!entry) return null;
-    return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null, held: this.heldBy(entry), ...(this.host.asks(ticketId, entry.via).quick ? { quick: true as const } : {}) };
+    return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null, held: this.heldBy(entry), ...(this.line().find((w) => w.ticket === ticketId)?.quick ? { quick: true as const } : {}) };
   }
 
   /** Why a waiting turn wouldn't start even on a worker of its own, in words; it starts by itself once that clears. */

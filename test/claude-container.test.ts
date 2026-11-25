@@ -14,8 +14,8 @@ import { fallbacks } from '../src/fallbacks.ts';
 import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
 import { TASKMASTER_SLICE, TURN_SLICE } from '../src/turn-launch.ts';
 import { jsonLines, lines, tempRoot, testPins, followed, runnerInsides } from './helpers.ts';
-import { until } from './wait.ts';
 import { holds } from './holds.ts';
+import { until } from './wait.ts';
 testPins();
 
 // Turns in a person's own Claude container (#213). A fake `podman` on PATH runs `exec` on the host,
@@ -646,19 +646,23 @@ test("a Taskmaster's container waits out a sign-in's start, which chowns the vol
   const { link, starts, uid } = linkedPerson('signin');
   (link as unknown as { logins: Map<number, object> }).logins.set(uid, {});
   const name = link.name(uid);
-  let ended = false;
-  const main = link.ensure(uid).then(() => (ended = true));
-  const tm = link.ensure(uid, true, true);
-  // As it starts: whether the sign-in's start was over.
   const inner = link as unknown as { containers: Containers };
   const start = inner.containers.start.bind(inner.containers);
-  const at: [string, boolean][] = [];
-  inner.containers.start = (spec) => (at.push([spec.name, ended]), start(spec));
+  const at: string[] = [];
+  let chowned = () => {};
+  const chown = new Promise<void>((ok) => (chowned = ok));
+  inner.containers.start = async (spec) => {
+    at.push(spec.name);
+    if (spec.name === name) await chown;
+    await start(spec);
+  };
+  const main = link.ensure(uid);
+  const tm = link.ensure(uid, true, true);
+  await until('the sign-in starts', () => at.length > 0);
+  await holds('the Taskmaster waits', () => !at.includes(`${name}-tm`), { ms: 400 });
+  chowned();
   await Promise.all([main, tm]);
-  assert.deepEqual(at, [
-    [name, false],
-    [`${name}-tm`, true],
-  ]);
+  assert.deepEqual(at, [name, `${name}-tm`]);
   assert.ok(starts()[0].includes(`${name}:${process.env.HOME}:U`), 'the sign-in mends the volume');
 });
 

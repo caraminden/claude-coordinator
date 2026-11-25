@@ -197,16 +197,14 @@ export async function prepareHandoff(app: App, ticket: Ticket, raw: unknown, que
 /** Whether a change touches the ship pipeline (tools/pipeline-files.txt, where a repo has one) and so ships only from the `pipeline-lane` claim's holder; null when it may ship. */
 async function laneRefusal(app: App, ticket: Ticket): Promise<string | null> {
   if (app.store.claims.get(ticket.project_id, 'pipeline-lane')?.holder === ticket.id) return null;
-  // Main's list too: a branch that drops a path from the list, or the list itself, still changes the pipeline.
+  // A branch that drops the list changes the list, which is in its own list; a repo without one has no pipeline files.
   const list = await readFile(join(ticket.cwd!, 'tools', 'pipeline-files.txt'), 'utf8').catch((err) => {
-    if (err.code === 'ENOENT') return null;
+    if (err.code === 'ENOENT') return '';
     throw err;
   });
-  const main = await gitOut(['show', 'main:tools/pipeline-files.txt'], ticket.cwd!);
-  if (list === null && main === null) return null;
   const changed = await gitOut(['diff', '--name-only', '--no-renames', '-z', 'main...HEAD'], ticket.cwd!, { trim: false });
   if (changed === null) return "it couldn't tell whether the change needs the pipeline lane";
-  const paths = ['tools/pipeline-files.txt', ...`${list ?? ''}\n${main ?? ''}`.split('\n').map((l) => l.trim())].filter((l) => l && !l.startsWith('#'));
+  const paths = ['tools/pipeline-files.txt', ...list.split('\n').map((l) => l.trim())].filter((l) => l && !l.startsWith('#'));
   const hit = changed.split('\0').find((f) => f && paths.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p)));
   return hit ? `${hit} is a pipeline file and you don't hold the pipeline lane` : null;
 }

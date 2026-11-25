@@ -1124,7 +1124,7 @@ function sqliteReason(args: Word[], st: State, cfg: TripwireConfig): string | nu
   // The turn's own scheme folder (its worktrees, TMPDIRs) holds the scheme's own databases, not the live
   // ones (#468 S01-5); where a symlink or glob there leads still counts.
   const own = join(cfg.data, 'projects', String(cfg.project));
-  const p = pathsOf(file, st, cfg).find((x) => under(x, cfg.data) && !under(x, own));
+  const p = pathsOf(file, st, cfg).find((x) => under(x, cfg.data) && !under(x, own) && !(cfg.copies && under(x, cfg.copies)));
   if (!p) return null;
   const readonly = a.some((t) => t === '-readonly' || t === '--readonly' || t.includes('mode=ro'));
   if (/^state\b/.test(basename(p)) && !readonly) return `${basename(p)} holds every minion's Claude session. Open it with \`sqlite3 -readonly\`.`;

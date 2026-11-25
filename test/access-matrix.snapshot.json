@@ -19,6 +19,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/app-copy/nope": {
+  "anon": "401 Not logged in",
+  "person": "403 Only a minion's turn gets a copy of an app's data",
+  "member": "403 Only a minion's turn gets a copy of an app's data",
+  "outsider": "403 Only a minion's turn gets a copy of an app's data",
+  "tmA": "403 Only a minion's turn gets a copy of an app's data",
+  "tmB": "403 Only a minion's turn gets a copy of an app's data",
+  "m1": "403 nope isn't one of this scheme's contraptions: only a minion in an app's home scheme may copy its data. Ask that scheme's Taskmaster.",
+  "m2": "403 nope isn't one of this scheme's contraptions: only a minion in an app's home scheme may copy its data. Ask that scheme's Taskmaster."
+ },
  "GET /api/app/instructions": {
   "anon": "401 Not logged in",
   "person": "200",

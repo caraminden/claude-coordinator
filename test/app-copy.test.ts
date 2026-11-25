@@ -279,7 +279,7 @@ test("another scheme's minion is refused", async () => {
 });
 
 test("a minion whose scheme has an app has the tool; one in a scheme without, or a Taskmaster, hasn't", async () => {
-  const names = async (role: string, apps?: string) => (await mcpOnce(agentEnv(srv.base, 'x', mine, role, { COORDINATOR_HOME_CONTRAPTIONS: apps }), 'tools/list', {}, tmp)).tools.map((t: { name: string }) => t.name);
+  const names = async (role: string, apps?: string) => (await mcpOnce(agentEnv(srv.base, 'x', mine, role, { COORDINATOR_HOME_CONTRAPTIONS: apps }), 'tools/list', {}, tmp.track)).tools.map((t: { name: string }) => t.name);
   assert.ok((await names('thread', 'trips')).includes('copy_app_data'));
   assert.ok(!(await names('thread')).includes('copy_app_data'));
   assert.ok(!(await names('coordinator', 'trips')).includes('copy_app_data'));

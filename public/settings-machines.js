@@ -197,7 +197,7 @@ function renderMachineSetup() {
         {
           os: 'runner-plain',
           tab: 'Linux',
-          label: 'Root shell (sudo -i) on a Linux PC (tools/ci-runner/README.md, "Linux runners on plain Linux"): installs the same agent as a systemd service. Runs a CI job as a user of its own with no sudo.',
+          label: 'Root shell (sudo -i) on a Linux PC (tools/ci-runner/README.md, "Linux runners on plain Linux"): installs the same agent as a systemd service. CI jobs run as a user of their own, with no sudo.',
           text: machineSetupRunnerAgentLinux(t.url, t.token),
           note: "It installs Node, git and the runner's libraries where they are missing (Debian or Ubuntu; elsewhere it names what to install), starts the agent and waits until this machine shows online. All CI there is held to 75% of the PC, or the owner's own number in /opt/citadel-runner-agent/caps.json.",
         },

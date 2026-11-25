@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lists every GitHub Actions runner in the WSL distro on Cara's desktop (Citadel #510), the Linux twin of
+# Lists every GitHub Actions runner on this Linux PC or in this WSL distro (Citadel #510), the Linux twin of
 # list-runners.ps1: Citadel's runners (the units add-runner.sh wrote, each naming its repo) with their state, then any
 # other runner folder in /opt, which Citadel didn't make and never touches. Read-only.
 set -euo pipefail

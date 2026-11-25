@@ -156,7 +156,7 @@ test('a CI runner host is added from its own button and gets its own install lin
   await openMachines();
   await add('runner-pc', '.machine-add.runners');
   // Windows first, whatever this browser runs on: the Windows agent is the usual one; Linux in WSL is a second host (#510).
-  assert.deepEqual(await page.eval<string[]>('[...document.querySelectorAll("#machine-setup .chip")].map((b) => b.textContent)'), ['Windows', 'Linux in WSL']);
+  assert.deepEqual(await page.eval<string[]>('[...document.querySelectorAll("#machine-setup .chip")].map((b) => b.textContent)'), ['Windows', 'Linux in WSL', 'Linux']);
   assert.equal(await pressed(), 'Windows');
   const [line] = await shown();
   assert.ok(line.startsWith("$u = 'https://citadel.zip';"), line); // the setup line names Citadel's public address, not the host it was made on (#1635)
@@ -164,6 +164,9 @@ test('a CI runner host is added from its own button and gets its own install lin
   await page.eval('[...document.querySelectorAll("#machine-setup .chip")].find((b) => b.textContent === "Linux in WSL").click()');
   await wait('the Linux line', 'document.querySelector("#machine-setup [aria-pressed=true]")?.textContent === "Linux in WSL"');
   const [linux] = await shown();
+  await page.eval('[...document.querySelectorAll("#machine-setup .chip")].find((b) => b.textContent === "Linux").click()');
+  await wait('the plain Linux line', 'document.querySelector("#machine-setup [aria-pressed=true]")?.textContent === "Linux"');
+  assert.deepEqual(await shown(), [linux], 'plain Linux takes the same line');
   assert.equal(linux, line.replace(/^\$u = '([^']+)'.*'(ccm_[^']+)'$/, `u='$1'; f=$$(mktemp) && curl -fsSL "$u/ci-runner/install-runner-agent.sh" -o "$f" && CC_MACHINE_TOKEN='$2' bash "$f" "$u"`), 'the same address and token');
   // It sits under CI runners from the start, before its agent has ever connected.
   assert.equal((await machine('runner-pc')).runners, true);
@@ -197,4 +200,38 @@ test('Who gets it is one list of scheme chips: + scheme adds one at once, × tak
   assert.deepEqual(await chips(), ['Other scheme']);
   await wait('the removal to be saved', `fetch('api/machines').then((r) => r.json()).then((l) => l.find((m) => m.id === ${machine.id}).projects.length === 1)`);
   assert.deepEqual(await saved(), [other.id]);
+});
+
+test("a member who is no admin adds their own PC as a CI runner host and lends it to their scheme, not another's (#1933)", { skip }, async () => {
+  // Signed in as a member of a scheme of their own: no admin, and not in Citadel's (scheme 2, whose members count as one).
+  await srv.call('/api/projects', { name: 'Filler' });
+  const made = (await srv.call('/api/people', { name: 'Mira' })).data;
+  const invited = await fetch(`${srv.base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
+  const srvCookie = invited.headers.get('set-cookie')!.split(';')[0];
+  await page.send('Network.clearBrowserCookies');
+  const [name, value] = srvCookie.split('=');
+  await page.send('Network.setCookie', { name, value, url: srv.base });
+  try {
+    const mira = srv.as({ cookie: srvCookie });
+    const mine = (await mira('/api/projects', { name: "Mira's" })).data;
+    await page.send('Page.navigate', { url: `${srv.base}/#/p/${mine.id}/machines` });
+    await wait('the Machines page', '!!document.querySelector(".machine-add-toggle") && !!document.querySelector("#machine-list")');
+    assert.equal(await page.eval('[...document.querySelectorAll("button")].some((b) => b.textContent === "Add a CI runner host")'), true);
+    await add('mira-pc', '.machine-add.runners');
+    await open('mira-pc');
+    const chips = `[...${row('mira-pc')}.querySelectorAll('.scheme-chip > span')].map((c) => c.textContent)`;
+    assert.deepEqual(await page.eval(chips), [], 'lent to nothing until its owner picks');
+    const picks = await page.eval<string[]>(`[...${row('mira-pc')}.querySelectorAll('select.add-scheme option')].map((o) => o.textContent)`);
+    assert.deepEqual(picks, ['+ scheme', "Mira's"], 'only the schemes she is in');
+    await page.eval(`(() => { const s = ${row('mira-pc')}.querySelector('select.add-scheme'); s.value = '${mine.id}'; s.dispatchEvent(new Event('change')); })()`);
+    await wait('the lend', `${row('mira-pc')}.querySelectorAll('.scheme-chip').length === 1`);
+    await wait('the lend to be saved', `fetch('api/machines').then((r) => r.json()).then((l) => l.length === 1 && l[0].projects.length === 1)`);
+    // Another member's machine isn't hers to see or change.
+    assert.equal((await machine('mira-pc')).owner_id !== null, true);
+    assert.equal((await mira(`/api/machines/${(await machine('runner-pc')).id}`, { projects: [] }, 'PATCH')).status, 404);
+  } finally {
+    await page.send('Network.clearBrowserCookies');
+    const [n, v] = srv.cookie.split('=');
+    await page.send('Network.setCookie', { name: n, value: v, url: srv.base });
+  }
 });

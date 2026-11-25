@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Removes one scheme's Citadel-made Linux runners from the WSL distro on Cara's desktop (Citadel #510), the Linux twin
+# Removes one scheme's Citadel-made Linux runners from this Linux PC or WSL distro (Citadel #510), the Linux twin
 # of remove-runner.ps1. The runner agent in that distro runs it as root for `ci_runners remove` with os linux:
 #
 #   remove-runner.sh <scheme id, name or label> <citadel machines url>

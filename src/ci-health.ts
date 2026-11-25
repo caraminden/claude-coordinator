@@ -49,6 +49,7 @@
 import { createHash } from 'node:crypto';
 import { quietUntil, type AlertPart } from './alert-wakes.ts';
 import { breather } from './breathe.ts';
+import { briefNumbers } from './ci-brief.ts';
 import { lines } from './approvals.ts';
 import { APP_NAME } from './appname.ts';
 import { runnerLabel, schemeLabels } from './ci-runner.ts';
@@ -969,19 +970,6 @@ export class CiHealth {
     return this.store.listTickets(p.id).filter((x) => x.number != null && (mark.chat?.ids.includes(x.id) || x.created_at >= (mark.told ?? 0) - 60_000));
   }
 
-  /** The long numbers (run ids) in each minion's first message, which never changes: so each is read off disk once (#1974). */
-  private briefs = new Map<string, string>();
-  private brief(t: Ticket): string {
-    const key = `${t.id}:${t.created_at}`; // a deleted minion's id can come back
-    const kept = this.briefs.get(key);
-    if (kept != null) return kept;
-    const data = this.store.firstMessage(t.id);
-    if (data == null) return ''; // none yet: look again next time
-    const numbers = (data.match(/\d{4,}/g) ?? []).join(' ');
-    this.briefs.set(key, numbers);
-    return numbers;
-  }
-
   /** The red's named fix minion: only these are held open and re-run for (#1074); a credited fixer (mark.fixer) only touched the file. */
   fixTicket(p: Project, mark: RedMark): Ticket | null {
     const held = mark.rerun ? this.store.getTicket(mark.rerun.ticket) : null;
@@ -991,7 +979,7 @@ export class CiHealth {
     // #1849: a title or brief naming a run is the strong claim; a chat mention alone only counts when no strong one is open.
     const cands = this.candidates(p, mark)
       .sort((a, b) => a.created_at - b.created_at)
-      .map((x) => ({ x, strong: ids.some((id) => x.title.includes(id) || this.brief(x).includes(id)) }))
+      .map((x) => ({ x, strong: ids.some((id) => x.title.includes(id) || briefNumbers(this.store, x).includes(id)) }))
       .filter((c) => c.strong || mark.chat?.ids.includes(c.x.id));
     const open = (c: { x: Ticket }) => c.x.status !== 'closed';
     // First open strong one (Josh, 2026-11-19), then an open holder, then an open chat-named one; else the newest closed one.
@@ -1039,9 +1027,9 @@ export class CiHealth {
       mark.chat = { ids: [...found], upTo };
       save();
     }
-    // The briefs fixTicket reads, in the same paced way: after a restart that is every candidate's.
+    // The briefs fixTicket reads (src/ci-brief.ts), in the same paced way: after a restart that is every candidate's.
     for (const t of this.candidates(p, mark)) {
-      this.brief(t);
+      briefNumbers(this.store, t);
       await breathe();
     }
     if (!mark.failures) {

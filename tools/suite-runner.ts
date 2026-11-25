@@ -16,6 +16,13 @@
 // overlapping"): N divided by the suites running, back to N once it is alone. CITADEL_SUITE_WINDOW names this run's own
 // window file (tests.yml, #1811); the others in its folder are the other suites'. node's run() can't change its
 // concurrency once started, so each file waits at tools/suite-gate.ts before its first import until a place is free.
+//
+// Load-sensitive files run last (#1898; Josh, 2026-11-24, "Can we move the load sensitive tests to only run when load is
+// low?"). CITADEL_LATE_TESTS names a file listing them, one per line (tests.yml fetches it from Citadel, which makes it from
+// the retro log's flake lines: src/late-tests.ts). They are ordered last and wait at the gate until every other file has
+// ended, and then up to LATE_WAIT_MS for other suites' main waves (shorter in a run already long); then LATE_AT_ONCE run at
+// a time. A red there is red like any other. While a suite's own main wave is over, "<window>.late" beside its window tells
+// the others not to wait for it, so two suites never wait for each other.
 import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, relative, resolve, join } from 'node:path';
@@ -64,6 +71,17 @@ export function readTimes(path: string | undefined): Map<string, number> {
   return times;
 }
 
+// The files on the late list that this run has (relative to its folder in the list); none when it can't be read.
+export function readLate(path: string | undefined, files: string[], cwd = process.cwd()): string[] {
+  if (!path) return [];
+  try {
+    const listed = new Set(readFileSync(path, 'utf8').split('\n').filter(Boolean));
+    return files.filter((f) => listed.has(relative(cwd, f)));
+  } catch {
+    return [];
+  }
+}
+
 // Longest first; files with no time go before them all, in name order; ties keep name order.
 export function order(files: string[], times: Map<string, number>, cwd = process.cwd()): string[] {
   if (times.size === 0) return [...files].sort();
@@ -93,46 +111,89 @@ export function mergeTimes(old: Map<string, number>, ran: Map<string, number>, c
 // 2 s (below), so a killed run's, left open, counts for a minute at most.
 const BEAT_MS = 2000;
 const STALE_MS = 60_000;
-export function otherSuites(window: string, now = Date.now()): number {
+export const otherSuites = (window: string, now = Date.now()) => otherWindows(window, now).length;
+/** Those still in their main wave: no "<window>.late" beside them. */
+export const otherMainWaves = (window: string, now = Date.now()) => otherWindows(window, now).filter((w) => !existsSync(`${w}.late`)).length;
+
+function otherWindows(window: string, now: number): string[] {
   const dir = dirname(window);
-  let n = 0;
+  const out: string[] = [];
   try {
     for (const f of readdirSync(dir)) {
       if (f === basename(window)) continue;
+      const path = join(dir, f);
       try {
-        const end = readFileSync(join(dir, f), 'utf8').trim().split(' ')[1];
-        if (end === '0' && now - statSync(join(dir, f)).mtimeMs < STALE_MS) n++;
+        const end = readFileSync(path, 'utf8').trim().split(' ')[1];
+        if (end === '0' && now - statSync(path).mtimeMs < STALE_MS) out.push(path);
       } catch {} // gone meanwhile
     }
   } catch {} // no windows folder: alone
-  return n;
+  return out;
 }
 
 export const filesAtOnce = (own: number, others: number) => Math.max(1, Math.ceil(own / (others + 1)));
 
-// The files' gate: a folder with "<pid>.wait" for each file waiting, "<pid>.run" for each let in, and "open" while nothing
-// is held back, so a suite alone never waits. Returns its stop.
-function startGate(window: string, own: number): () => void {
+const LATE_AT_ONCE = 2;
+// A ship's run has 9 minutes on CI in all (land.sh's LAND_CI_TIMEOUT), so the wait is short and ends by the 4th minute.
+const LATE_WAIT_MS = 60_000;
+const LATE_WAIT_BY_MS = 240_000;
+export const lateWait = (wait: number, elapsed: number) => Math.max(0, Math.min(wait, LATE_WAIT_BY_MS - elapsed));
+// Some main file never reached the gate (it couldn't write there): none running this long is the wave's end too.
+const SETTLED_MS = 10_000;
+
+// The files' gate: a folder with "<pid>.wait" for each file waiting ("<pid>.late" for one on the late list, which `late`
+// holds), "<pid>.run" for each let in, and "open" while nothing but the late files is held back, so a suite alone never
+// waits. Returns its stop.
+function startGate(window: string | undefined, own: number, late: string[], mains: number, started: number): () => void {
   const dir = mkdtempSync(join(process.env.RUNNER_TEMP ?? tmpdir(), 'suite-gate-'));
   const open = join(dir, 'open');
-  let others = 0;
+  const ownLate = window ? `${window}.late` : undefined;
+  writeFileSync(join(dir, 'late'), late.join('\n'));
+  let others = -1;
   let beat = -Infinity;
+  const seen = new Set<number>(); // main files that reached the gate
+  const lateRun = new Set<number>();
+  let quietSince = 0; // since when no main file runs or waits
+  let waveEnd = 0; // when the main wave ended
+  let waveGo = false; // the late files may start
   const look = () => {
     if (Date.now() - beat < BEAT_MS) return;
     beat = Date.now();
-    try {
-      utimesSync(window, new Date(), new Date());
-    } catch {} // no window: the others can't see this suite, and it still sees them
-    const n = otherSuites(window);
-    if (n !== others) process.stdout.write(`suite-runner: ${n} other suite(s) on this machine, so ${filesAtOnce(own, n)} test files at once (${own} alone)\n`);
+    if (window) {
+      try {
+        utimesSync(window, new Date(), new Date());
+      } catch {} // no window: the others can't see this suite, and it still sees them
+    }
+    const n = window ? otherSuites(window) : 0;
+    if (n !== others && (n || others > 0)) process.stdout.write(`suite-runner: ${n} other suite(s) on this machine, so ${filesAtOnce(own, n)} test files at once (${own} alone)\n`);
     others = n;
     if (filesAtOnce(own, n) === own) writeFileSync(open, '');
     else rmSync(open, { force: true });
   };
+  // Whether the late files may start now: the main wave has ended, and other suites' main waves too, or the cap passed.
+  const lateMay = (running: number, waiting: number) => {
+    if (waveGo) return true;
+    const now = Date.now();
+    quietSince = running || waiting ? 0 : quietSince || now;
+    if (!waveEnd) {
+      // node starts files in order, so a main file not seen yet is only starting.
+      if (!quietSince || (seen.size < mains && now - quietSince < SETTLED_MS)) return false;
+      waveEnd = now;
+      try {
+        if (ownLate) writeFileSync(ownLate, '');
+      } catch {} // the others then wait for this suite up to their cap
+    }
+    const busy = window ? otherMainWaves(window) : 0;
+    if (busy && now - waveEnd < lateWait(Number(process.env.CITADEL_LATE_WAIT ?? LATE_WAIT_MS), waveEnd - started)) return false;
+    waveGo = true;
+    if (busy) process.stdout.write(`suite-runner: ${busy} other suite(s) in their main wave after ${((now - waveEnd) / 1000).toFixed(1)} s: the load-sensitive test files run now\n`);
+    process.stdout.write(`suite-runner: the main wave has ended; ${late.length} load-sensitive test files run now, ${LATE_AT_ONCE} at once, after ${Math.round((now - started) / 1000)} s\n`);
+    return true;
+  };
   const tick = () => {
     look();
     const max = filesAtOnce(own, others);
-    if (max === own) return;
+    if (max === own && !late.length) return;
     const names = readdirSync(dir);
     const of = (kind: string) =>
       names
@@ -140,16 +201,33 @@ function startGate(window: string, own: number): () => void {
         .map((f) => parseInt(f, 10))
         .sort((a, b) => a - b); // node starts files in order, so the lowest pid waited longest
     let running = 0;
+    let lateRunning = 0;
     for (const pid of of('.run')) {
-      if (existsSync(`/proc/${pid}`)) running++;
-      else rmSync(join(dir, `${pid}.run`), { force: true });
+      if (!lateRun.has(pid)) seen.add(pid);
+      if (!existsSync(`/proc/${pid}`)) rmSync(join(dir, `${pid}.run`), { force: true });
+      else if (lateRun.has(pid)) lateRunning++;
+      else running++;
     }
-    for (const pid of of('.wait')) {
-      if (running >= max) break;
+    const waiting = of('.wait');
+    const letIn = (pid: number, kind: string) => {
       try {
-        renameSync(join(dir, `${pid}.wait`), join(dir, `${pid}.run`));
-        running++;
-      } catch {} // it let itself in while the gate was open
+        renameSync(join(dir, `${pid}.${kind}`), join(dir, `${pid}.run`));
+        return true;
+      } catch {
+        return false; // it let itself in while the gate was open
+      }
+    };
+    const held = waiting.length;
+    for (const pid of waiting) {
+      if (running >= max) break;
+      if (letIn(pid, 'wait')) running++;
+    }
+    const lates = of('.late');
+    if (!lates.length || !lateMay(running, held)) return;
+    for (const pid of lates) {
+      if (lateRunning >= LATE_AT_ONCE) break;
+      lateRun.add(pid);
+      if (letIn(pid, 'late')) lateRunning++;
     }
   };
   tick();
@@ -158,6 +236,7 @@ function startGate(window: string, own: number): () => void {
   return () => {
     clearInterval(timer);
     rmSync(dir, { recursive: true, force: true });
+    if (ownLate) rmSync(ownLate, { force: true });
   };
 }
 
@@ -184,13 +263,16 @@ async function main() {
   const o = parseArgs(process.argv.slice(2));
   const timesPath = process.env.CITADEL_TEST_TIMES || undefined;
   const old = readTimes(timesPath);
-  const files = order(expand(o.targets.length ? o.targets : ['test/']), old);
+  const all = order(expand(o.targets.length ? o.targets : ['test/']), old);
+  const late = readLate(process.env.CITADEL_LATE_TESTS, all);
+  delete process.env.CITADEL_LATE_TESTS;
+  const files = [...all.filter((f) => !late.includes(f)), ...late];
   // The times file is this run's: a test that starts a run of its own must not rewrite it. (Not run()'s env option:
   // the leak guard's global setup adds its run id to process.env after this point, and the tests must inherit it.)
   delete process.env.CITADEL_TEST_TIMES;
   const window = process.env.CITADEL_SUITE_WINDOW;
   delete process.env.CITADEL_SUITE_WINDOW;
-  const stopGate = window ? startGate(window, o.concurrency) : undefined;
+  const stopGate = window || late.length ? startGate(window, o.concurrency, late, all.length - late.length, Date.now()) : undefined;
   const stream = run({
     files,
     concurrency: o.concurrency,

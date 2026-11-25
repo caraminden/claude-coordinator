@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { expand, filesAtOnce, mergeTimes, order, otherSuites, readTimes } from '../tools/suite-runner.ts';
+import { expand, filesAtOnce, lateWait, mergeTimes, order, otherMainWaves, otherSuites, readTimes } from '../tools/suite-runner.ts';
 import { tempRoot } from './helpers.ts';
 import { until } from './wait.ts';
 
@@ -192,4 +192,77 @@ test('a run steps down when another suite starts, and back up once it ends', asy
   assert.ok(most(0, 5) > 2, `alone at first: ${r.atOnce}`);
   assert.ok(most(18, 22) <= 2, `stepped down: ${r.atOnce}`);
   assert.ok(most(30) > 2, `stepped back up: ${r.atOnce}`);
+});
+
+// Load-sensitive files run last (#1898): CITADEL_LATE_TESTS names a file listing them.
+// Runs the files in `body` (name: its test's code), each logging "+name" and "-name", 8 at once, with `late` listed.
+async function lateRun(name: string, files: string[], late: string[], env: Record<string, string> = {}, red = '', windows: string[] = []) {
+  const cwd = join(scratch.dir, name);
+  const win = join(cwd, 'windows');
+  mkdirSync(join(cwd, 'test'), { recursive: true });
+  mkdirSync(win);
+  for (const w of ['me', ...windows]) writeFileSync(join(win, w), w.endsWith('.late') ? '' : '100 0\n');
+  for (const f of files)
+    writeFileSync(
+      join(cwd, 'test', `${f}.test.mjs`),
+      // timing-ok: each file holds its place long enough to overlap the others
+      `import test from 'node:test';\nimport { appendFileSync } from 'node:fs';\nappendFileSync('log', '+${f}\\n');\ntest('${f}', async () => { await new Promise((r) => setTimeout(r, 600)); appendFileSync('log', '-${f}\\n'); if ('${f}' === '${red}') throw new Error('no'); });\n`,
+    );
+  writeFileSync(join(cwd, 'late'), [...late.map((f) => `test/${f}.test.mjs`), 'test/gone.test.mjs', ''].join('\n'));
+  const all: Record<string, string | undefined> = { ...process.env, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_PROGRESS_TO: undefined, CITADEL_TEST_TIMES: undefined, CITADEL_SUITE_WINDOW: undefined, RUNNER_TEMP: cwd, CITADEL_LATE_TESTS: join(cwd, 'late'), ...env };
+  if (all.CITADEL_SUITE_WINDOW) all.CITADEL_SUITE_WINDOW = join(win, 'me');
+  const r = await new Promise<{ code: number | null; out: string }>((res) => execFile(process.execPath, [runner, '--concurrency', '8', '--timeout', '30000', '--failed-to', 'failed', '--', 'test/'], { cwd, env: all, timeout: 50_000 }, (e, out) => res({ code: e ? (e.code as number) : 0, out })));
+  const log = readFileSync(join(cwd, 'log'), 'utf8').trim().split('\n');
+  let n = 0;
+  let most = 0;
+  for (const l of log.filter((l) => late.includes(l.slice(1)))) most = Math.max(most, (n += l[0] === '+' ? 1 : -1));
+  return { ...r, log, most, win, failed: () => readFileSync(join(cwd, 'failed'), 'utf8') };
+}
+
+test('listed files start once every other file has ended, two at once, and a run with none listed there is as before', async () => {
+  const late = ['a1', 'a2', 'a3', 'a4', 'a5'];
+  const r = await lateRun('late', [...late, 'm1', 'm2', 'm3'], late);
+  assert.equal(r.code, 0, r.out);
+  const firstLate = r.log.findIndex((l) => late.includes(l.slice(1)));
+  assert.deepEqual(r.log.slice(0, firstLate).sort(), ['+m1', '+m2', '+m3', '-m1', '-m2', '-m3'], `the main wave first: ${r.log}`);
+  assert.equal(r.log.length, 16, 'every file ran once');
+  assert.equal(r.most, 2, `two at once: ${r.log}`);
+  assert.match(r.out, /suite-runner: the main wave has ended; 5 load-sensitive test files run now, 2 at once/);
+  assert.match(r.out, /^ℹ pass 8$/m, 'one report for both waves');
+});
+
+test('a failure among the late files fails the run and is named for the rerun', async () => {
+  const r = await lateRun('late-red', ['a1', 'm1'], ['a1'], {}, 'a1');
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.failed(), /^test\/a1\.test\.mjs\t\d+\n$/);
+});
+
+test('a suite of only listed files runs them, and a list that cannot be read changes nothing', async () => {
+  const only = await lateRun('late-only', ['a1', 'a2', 'a3'], ['a1', 'a2', 'a3']);
+  assert.equal(only.code, 0, only.out);
+  assert.equal(only.log.length, 6);
+  const none = await lateRun('late-none', ['a1', 'm1'], ['a1'], { CITADEL_LATE_TESTS: join(scratch.dir, 'no-such-list') });
+  assert.equal(none.code, 0, none.out);
+  assert.doesNotMatch(none.out, /load-sensitive/);
+});
+
+test("the late files wait for another suite's main wave, and for no longer than the cap", async () => {
+  const r = await lateRun('late-cap', ['a1', 'm1'], ['a1'], { CITADEL_SUITE_WINDOW: 'me', CITADEL_LATE_WAIT: '1500' }, '', ['other']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /suite-runner: 1 other suite\(s\) in their main wave after \d+\.\d s: the load-sensitive test files run now/);
+});
+
+test("a suite in its own late wave holds nobody's late files back, so two suites never wait for each other", async () => {
+  const r = await lateRun('late-both', ['a1', 'm1'], ['a1'], { CITADEL_SUITE_WINDOW: 'me', CITADEL_LATE_WAIT: '40000' }, '', ['other', 'other.late']);
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /in their main wave after/);
+  assert.equal(otherMainWaves(join(r.win, 'me')), 0);
+  rmSync(join(r.win, 'other.late'));
+  assert.equal(otherMainWaves(join(r.win, 'me')), 1);
+});
+
+test('the wait for other suites is cut short in a run that is already long', () => {
+  assert.equal(lateWait(60_000, 100_000), 60_000);
+  assert.equal(lateWait(60_000, 200_000), 40_000);
+  assert.equal(lateWait(60_000, 300_000), 0);
 });

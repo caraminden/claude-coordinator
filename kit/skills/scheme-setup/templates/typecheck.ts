@@ -50,9 +50,11 @@ export async function tscErrors(root = ROOT, projects = PROJECTS): Promise<TscEr
       (r) => r.stdout,
       (e: { stdout?: string; stderr?: string; message: string }) => {
         if (e.stdout && /error TS\d+/.test(e.stdout)) {
-          if (/^Check time:/m.test(e.stdout)) return e.stdout;
-          // After a syntax error, or one in the config, tsc skips every file's types: those zeros would pass as clean.
-          // shortcut: TypeScript before 5.9 prints the line either way, so there a skipped run still reads as clean.
+          if (/^Check time:/m.test(e.stdout) && !/(?:^|: )error TS1800[23]:/m.test(e.stdout)) return e.stdout;
+          // After a syntax error, or one in the config, tsc skips every file's types, and TS18002 and TS18003 are
+          // a config with no files at all: those zeros would pass as clean.
+          // shortcut: made for TypeScript 7. Before 5.9 a skipped run prints the line too, and before 7 a cached run of an
+          // `incremental` config prints none and is refused; pass `--incremental false` here if a repo needs that.
           const why = parseTsc(e.stdout, root).map((x) => (x.line ? `  ${x.file}(${x.line},${x.col}) ${x.code} ${x.text}` : `  ${x.text}`));
           throw new Error(`tsc stopped before it checked any types, so no count can be trusted: fix these first\n${why.slice(0, 40).join('\n')}`);
         }
@@ -328,7 +330,7 @@ async function main(args: string[]) {
     const [tracked, typed] = await Promise.all([tsFiles(), tscFiles()]);
     for (const f of files.map((f) => relative(ROOT, resolve(f)))) {
       const counted = tracked.includes(f);
-      const checked = typed.has(f) && /\.(?:[cm]?ts|tsx)$/.test(f);
+      const checked = typed.has(f) && (f in table || /\.(?:[cm]?ts|tsx)$/.test(f));
       if (!counted && !checked) {
         console.log(`${f}: not a file this check covers (a typo, not TypeScript, or not yet in git)`);
         process.exitCode = 1;

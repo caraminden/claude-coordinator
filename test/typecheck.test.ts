@@ -144,6 +144,17 @@ test('a syntax error that makes tsc skip every type is refused, not read as erro
     writeFileSync(join(dir, 'two.ts'), 'export {};\n');
     writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: ['nope'] }, include: ['*.ts'] }));
     assert.match(check('--update', '--moved').out, /before it checked any types[\s\S]*TS2688/);
+    // So does a config that matches no files, though tsc then prints a check time of 0.
+    for (const [config, code] of [
+      [{ include: ['nothing/*.ts'] }, /TS18003/],
+      [{ files: [] }, /TS18002/],
+    ] as const) {
+      writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: [] }, ...config }));
+      const { code: exit, out } = check('--update', '--moved');
+      assert.equal(exit, 1, out);
+      assert.match(out, code);
+    }
+    assert.equal(readFileSync(join(dir, 'typecheck-baseline.json'), 'utf8'), baseline);
   } finally {
     done();
   }
@@ -156,9 +167,13 @@ test('a file can be named by its absolute path, and one the check does not cover
     const typo = check('bda.ts');
     assert.match(typo.out, /bda\.ts: not a file this check covers/);
     assert.equal(typo.code, 1);
-    assert.match(check('tools/typecheck.ts').out, /not a file this check covers|not in any tsconfig/);
+    assert.match(check('tools/typecheck.ts').out, /not a file this check covers/);
     execFileSync('git', ['add', 'tools'], { cwd: dir });
     assert.match(check('tools/typecheck.ts').out, /its type errors are not checked/);
+    // A .js file that checkJs has tsc check is covered: the gate names this command for it.
+    writeFileSync(join(dir, 'j.js'), '/** @type {number} */\nexport const j = "x";\n');
+    writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: [], allowJs: true, checkJs: true }, include: ['*.ts', '*.js'] }));
+    assert.match(check('j.js').out, /errors 1 [\s\S]*TS2322/);
     writeFileSync(join(dir, 'new.ts'), 'export const x: number = "a";\n');
     assert.match(check('new.ts').out, /errors 1 [\s\S]*its escapes are not counted/);
   } finally {

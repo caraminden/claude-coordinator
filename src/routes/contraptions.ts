@@ -11,7 +11,7 @@ import type { IncomingMessage } from 'node:http';
 import { APP_NAME } from '../appname.ts';
 import { adminAskRefusal } from '../access.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { ASK_FILES_MAX, ASK_ITEM_MAX, ASK_SUMMARY_MAX, askFiles, askLine, askMessage, askSummary, saveAskFiles } from '../contraption-asks.ts';
+import { ASK_FILES_MAX, ASK_ITEM_MAX, ASK_SUMMARY_MAX, ASK_UPLOAD_MAX, ASK_UPLOAD_PENDING_MAX, askFiles, askLine, askMessage, askSummary, askUploadsDir, findAskUpload, pendingUploadBytes, saveAskFiles, stageAskUpload, sweepAskUploads } from '../contraption-asks.ts';
 import { AUDIT_DAYS, parseTurn, TurnError } from '../contraption-turns.ts';
 import { loadImages } from '../turn-images.ts';
 import { listMedia, mcpMessage, mediaDir, mediaFile, mediaTools, MEDIA_TYPE, runMediaTool } from '../contraption-media.ts';
@@ -246,6 +246,8 @@ const ASK_LIMIT = 10;
 /** Data asks wake no one, so they get more room (one per save, say); a loop backstop on their count, not their size. */
 const DATA_ASK_LIMIT = 60;
 const ASK_WINDOW_MS = 10 * 60_000;
+/** Big-file uploads for asks (#1841): a loop backstop on their count; ASK_UPLOAD_PENDING_MAX bounds the disk. */
+const UPLOAD_LIMIT = 20;
 const askTimes = new Map<string, number[]>();
 
 /** A turn API route: 'contraption' routes get the calling contraption (src/contraptions.ts caller) as ctx.contraption. */
@@ -770,6 +772,35 @@ export const contraptionRoutes: Route[] = [
     },
   },
   {
+    // A big file for an ask (#1841), the raw body streamed to disk as it arrives, never held in memory: the ask
+    // then names it in its files as { upload }. Unsent uploads are deleted after a day.
+    method: 'POST',
+    path: '/api/contraptions/asks/files',
+    who: 'contraption',
+    async handler({ req, res, url, app, contraption: c }) {
+      const person = enabledPerson(app, c, url);
+      homeOf(app, c, person);
+      const key = `${c.name}:${person}:upload`;
+      const recent = (askTimes.get(key) ?? []).filter((t) => Date.now() - t < ASK_WINDOW_MS);
+      if (recent.length >= UPLOAD_LIMIT) throw new HttpError(429, `At most ${UPLOAD_LIMIT} uploads per person in ${ASK_WINDOW_MS / 60_000} minutes: try again later`);
+      const dir = askUploadsDir(app.dataDir);
+      await sweepAskUploads(dir);
+      const room = ASK_UPLOAD_PENDING_MAX - (await pendingUploadBytes(dir, c.name, person));
+      const full = new HttpError(429, `At most ${ASK_UPLOAD_PENDING_MAX / 1024 ** 3} GiB of uploads per person not yet sent with an ask: send one, or wait a day for unsent ones to clear`);
+      const declared = Number(req.headers['content-length'] ?? 0);
+      if (declared > ASK_UPLOAD_MAX) throw new HttpError(413, `An uploaded file is at most ${ASK_UPLOAD_MAX / 1024 ** 2} MiB`);
+      if (declared > room || room <= 0) throw full;
+      askTimes.set(key, [...recent, Date.now()]);
+      const max = Math.min(ASK_UPLOAD_MAX, room);
+      try {
+        return json(res, 201, await stageAskUpload(dir, c.name, person, url.searchParams.get('name') ?? '', req, max));
+      } catch (err) {
+        if (err instanceof HttpError && err.status === 413) throw max < ASK_UPLOAD_MAX ? full : new HttpError(413, `An uploaded file is at most ${ASK_UPLOAD_MAX / 1024 ** 2} MiB`);
+        throw err;
+      }
+    },
+  },
+  {
     // A bug report or feature ask from a contraption's server, as one of its people: files into the home
     // scheme's shared folder, the ask to its Taskmaster, waking it. A data ask (#318) only files: its files
     // and a sidecar holding its words, with no message and no wake. With `minion`, a member's ask goes
@@ -795,7 +826,9 @@ export const contraptionRoutes: Route[] = [
       const text = kind === 'data' && (body.text === undefined || body.text === null) ? null : str(body.text, 'Text', 10_000);
       const summary = askLine(body.summary, 'Summary', ASK_SUMMARY_MAX) ?? (text === null ? null : askSummary(text));
       const item = askLine(body.item, 'Item', ASK_ITEM_MAX);
-      const files = askFiles(body.files);
+      const uploads = askUploadsDir(app.dataDir);
+      await sweepAskUploads(uploads);
+      const files = await askFiles(body.files, (id) => findAskUpload(uploads, c.name, person.id, id));
       const scheme = c.home_scheme === null ? undefined : app.store.getProject(c.home_scheme);
       if (!scheme) throw new HttpError(409, `${c.title} has no home scheme to send asks to: an admin sets one in Settings → Contraptions`);
       // A member as #211 counts one: in the scheme, or an admin.
@@ -804,10 +837,10 @@ export const contraptionRoutes: Route[] = [
       if (kind === 'data') {
         if (!files.length && text === null && summary === null && item === null) throw new HttpError(400, 'A data ask needs files, text, a summary or an item');
         askTimes.set(key, [...recent, Date.now()]);
-        const paths = saveAskFiles(shared, c.name, person.login, files);
+        const paths = await saveAskFiles(shared, c.name, person.login, files);
         const at = new Date().toISOString();
         const record = { contraption: c.name, person: person.login, item, summary, text, files: paths, at };
-        const [sidecar] = saveAskFiles(shared, c.name, person.login, [{ name: `${at.replace(/[:.]/g, '-')}-ask.json`, data: Buffer.from(`${JSON.stringify(record, null, 2)}\n`) }]);
+        const [sidecar] = await saveAskFiles(shared, c.name, person.login, [{ name: `${at.replace(/[:.]/g, '-')}-ask.json`, data: Buffer.from(`${JSON.stringify(record, null, 2)}\n`) }]);
         return json(res, 202, { scheme: scheme.name, member, proposal: false, files: paths, sidecar });
       }
       // Straight to one minion of the home scheme (#416), with no Taskmaster in the path: members only,
@@ -818,7 +851,7 @@ export const contraptionRoutes: Route[] = [
         if (!t || t.kind === 'coordinator') throw new HttpError(404, `No minion #${minion} in ${scheme.name}`);
         if (t.status === 'closed') throw new HttpError(409, `#${minion} in ${scheme.name} is dismissed: a person reopens it first`);
         askTimes.set(key, [...recent, Date.now()]);
-        const paths = saveAskFiles(shared, c.name, person.login, files);
+        const paths = await saveAskFiles(shared, c.name, person.login, files);
         const ask = askMessage(c, scheme, person, member, kind, text!, paths, item);
         // Under the person's own name, so the turn runs as them (runner.turnPerson goes by author); never typed, so never a go to merge.
         app.runner.send(t.id, person.name, ask.text, [], { asker: person.id, hold: true, ask: { kind, contraption: c.title, person: person.name, member, summary, ...(item ? { item } : {}) } });
@@ -827,7 +860,7 @@ export const contraptionRoutes: Route[] = [
       // The asker's own Taskmaster there once split (#919), else the Overlord: an ask never splits a scheme.
       const taskmaster = app.store.coordinatorFor(scheme.id, person.id) ?? (await ensureCoordinator(app, scheme));
       askTimes.set(key, [...recent, Date.now()]);
-      const paths = saveAskFiles(shared, c.name, person.login, files);
+      const paths = await saveAskFiles(shared, c.name, person.login, files);
       const ask = askMessage(c, scheme, person, member, kind, text!, paths, item);
       // The chat shows the ask collapsed to a header and its summary (public/askcard.js); the turn reads the whole text.
       const shown = { kind, contraption: c.title, person: person.name, member, summary, ...(item ? { item } : {}) };

@@ -3,10 +3,12 @@
 // the home scheme's inbox; a non-member's feature ask is a proposal only.
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { askSummary, README_INBOX_LINE, safeName, saveAskFiles } from '../src/contraption-asks.ts';
+import { ASK_UPLOAD_TTL_MS, askSummary, askUploadsDir, README_INBOX_LINE, safeName, saveAskFiles, stageAskUpload, sweepAskUploads } from '../src/contraption-asks.ts';
 import { askHeader } from '../public/askcard.js';
 import { messagePerson } from '../src/access.ts';
 import { Contraptions } from '../src/contraptions.ts';
@@ -71,12 +73,12 @@ test("an ask's header line: kind, contraption, person and item", () => {
   assert.equal(askHeader({ kind: 'bug', contraption: 'Peek Auras', person: 'Rachel', member: true, summary: 'x' }), 'Bug report · Peek Auras · Rachel');
 });
 
-test('files never follow an inbox folder linked out of the shared folder', () => {
+test('files never follow an inbox folder linked out of the shared folder', async () => {
   const dir = mkdtempSync(join(root, 'escape-'));
   const outside = mkdtempSync(join(root, 'outside-'));
   mkdirSync(join(dir, 'inbox', 'peek-auras'), { recursive: true });
   symlinkSync(outside, join(dir, 'inbox', 'peek-auras', 'josh'));
-  assert.throws(() => saveAskFiles(dir, 'peek-auras', 'josh', [{ name: 'a.txt', data: Buffer.from('x') }]), /outside the shared folder/);
+  await assert.rejects(saveAskFiles(dir, 'peek-auras', 'josh', [{ name: 'a.txt', data: Buffer.from('x') }]), /outside the shared folder/);
   assert.deepEqual(readdirSync(outside), []);
 });
 
@@ -347,4 +349,90 @@ test("an ask to the Taskmaster runs on its asker's login, split or not (#1449 P1
   // Split, and Rachel has no Taskmaster of her own: the Overlord takes it, still on hers, not the owner's.
   store.splitScheme(Lanterns.id, Olive.id);
   assert.match(await noteAfter(Rachel.id, 'Handles too hot'), /^Turns for Rachel start once/);
+});
+
+test('staged uploads (#1841): over the cap removed mid-stream, unsent ones swept after a day', async () => {
+  const dir = mkdtempSync(join(root, 'stage-'));
+  async function* chunks(n: number) {
+    for (let i = 0; i < n; i++) yield Buffer.alloc(4, i);
+  }
+  await assert.rejects(stageAskUpload(dir, 'peek-auras', 1, 'big.bin', chunks(5), 10), (err: { status?: number }) => err.status === 413);
+  assert.deepEqual(readdirSync(join(dir, 'peek-auras', '1')), [], 'the partial upload is gone');
+  const up = await stageAskUpload(dir, 'peek-auras', 1, '../clip.webm', chunks(2), 10);
+  assert.equal(up.size, 8);
+  assert.match(up.upload, /^[0-9a-f]{24}$/);
+  await sweepAskUploads(dir);
+  assert.deepEqual(readdirSync(join(dir, 'peek-auras', '1')), [up.upload], 'a fresh one stays');
+  await sweepAskUploads(dir, Date.now() + ASK_UPLOAD_TTL_MS + 1);
+  assert.deepEqual(readdirSync(join(dir, 'peek-auras', '1')), [], 'a day on, it is swept');
+});
+
+test('POST /api/contraptions/asks/files (#1841): a 100 MB file streamed, then named by an ask', { timeout: 120_000 }, async () => {
+  // Its own scheme and contraption, so the rate limits count from zero.
+  const Rec = store.createProject('Recorder', null, Cara.id);
+  store.addMember(Rec.id, Rachel.id);
+  const rec = keys.register({ name: 'rec', title: 'Rec', port: 9104, icon: null, home_scheme: Rec.id, open_paths: '[]', static_paths: null, relay_paths: '[]', default_model: null, turn_cap: null, restart_risk: 'unassessed', restart_note: '' });
+  for (const u of [Josh, Rachel]) store.setContraptionUser(rec.id, u.id, true, Cara.id);
+  const recKey = readFileSync(join(data, 'contraptions', 'rec', 'contraption.key'), 'utf8');
+  const srv = await bootServer({ root, ...slowWrites });
+  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
+  const auth = { Authorization: `Bearer ${recKey}` };
+  const upload = async (person: number, name: string, body: Buffer) => {
+    const res = await fetch(`${srv.base}/api/contraptions/asks/files?person=${person}&name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': 'video/webm', ...auth }, body });
+    return { status: res.status, body: (await res.json()) as { upload: string; name: string; size: number } };
+  };
+  const ask = async (body: object) => {
+    const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...auth }, body: JSON.stringify(body) });
+    return { status: res.status, body: (await res.json()) as { files: string[] } };
+  };
+  const recShared = projectSharedDir(data, Rec.id);
+  const staged = join(askUploadsDir(data), 'rec');
+
+  // A 60 s 1080p screen recording's size, made here, never committed.
+  const video = Buffer.alloc(100 * 1024 * 1024);
+  for (let i = 0; i < video.length; i += 4096) video.writeUInt32LE(i, i);
+  const sum = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+  let up = await upload(Rachel.id, 'screen recording.webm', video);
+  assert.equal(up.status, 201, JSON.stringify(up.body));
+  assert.equal(up.body.size, video.length);
+  const id = up.body.upload;
+
+  // Not enabled, or no person: refused before any of it is kept.
+  assert.equal((await upload(Dana.id, 'x.webm', Buffer.from('x'))).status, 403);
+  assert.equal((await upload(0, 'x.webm', Buffer.from('x'))).status, 400);
+  // Over 200 MiB by its Content-Length: refused before the body is read.
+  const big = await new Promise<number>((resolve, reject) => {
+    const req = request(`${srv.base}/api/contraptions/asks/files?person=${Rachel.id}&name=big.webm`, { method: 'POST', headers: { ...auth, 'Content-Length': 201 * 1024 * 1024 } }, (res) => resolve(res.statusCode!));
+    req.on('error', reject);
+    req.flushHeaders();
+  });
+  assert.equal(big, 413);
+  // Someone else's upload id is no upload of theirs.
+  assert.equal((await ask({ person: Josh.id, kind: 'bug', text: 'Not mine', files: [{ upload: id }] })).status, 404);
+  assert.equal((await ask({ person: Rachel.id, kind: 'bug', text: 'Bad id', files: [{ upload: '../../etc' }] })).status, 400);
+
+  // A bug report naming the upload and an inline file: both land in the inbox, the big one moved, not copied in memory.
+  const r = await ask({ person: Rachel.id, kind: 'bug', text: 'The aura flickers, see the recording', files: [{ upload: id, name: 'flicker.webm' }, { name: 'log.txt', data: b64('frame 12') }] });
+  assert.equal(r.status, 202, JSON.stringify(r.body));
+  assert.deepEqual(r.body.files, ['inbox/rec/rachel/flicker.webm', 'inbox/rec/rachel/log.txt']);
+  assert.equal(sum(readFileSync(join(recShared, 'inbox', 'rec', 'rachel', 'flicker.webm'))), sum(video));
+  assert.deepEqual(readdirSync(join(staged, String(Rachel.id))), [], 'the staged upload is gone once filed');
+  const msg = await until("the ask in Recorder's Taskmaster chat", () => {
+    const tm = store.getCoordinator(Rec.id);
+    return tm && store.listEvents(tm.id).find((e) => e.kind === 'user_message' && e.data.includes('The aura flickers'));
+  });
+  assert.match(JSON.parse(msg!.data).text, /inbox\/rec\/rachel\/flicker\.webm/);
+  // Used once: a second ask naming it finds nothing.
+  assert.equal((await ask({ person: Rachel.id, kind: 'bug', text: 'Again', files: [{ upload: id }] })).status, 404);
+
+  // A data ask takes uploads too, under its own name when it gives none.
+  up = await upload(Josh.id, 'session.webm', Buffer.from('small clip'));
+  const d = await ask({ person: Josh.id, kind: 'data', files: [{ upload: up.body.upload }] });
+  assert.equal(d.status, 202, JSON.stringify(d.body));
+  assert.deepEqual(d.body.files, ['inbox/rec/josh/session.webm']);
+  assert.equal(readFileSync(join(recShared, 'inbox', 'rec', 'josh', 'session.webm'), 'utf8'), 'small clip');
+
+  // A loop is cut off at 20 uploads in 10 minutes.
+  for (let i = 1; i < 20; i++) assert.equal((await upload(Josh.id, `${i}.txt`, Buffer.from('x'))).status, 201, `upload ${i}`);
+  assert.equal((await upload(Josh.id, 'one too many.txt', Buffer.from('x'))).status, 429);
 });

@@ -76,8 +76,9 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   6 messages per pair of Taskmasters in 10 minutes. The token is passed in the environment, not on the
   command line, so other users on the box can't read it from `ps`.
 - A **contraption**'s own server (local, with its contraption key, never through Caddy) sends its people's
-  bug reports and feature asks to its home scheme with `POST /api/contraptions/asks`: files (16 MiB in all)
-  go into that scheme's shared folder under `inbox/<contraption>/<login>/`, and the ask reaches its
+  bug reports and feature asks to its home scheme with `POST /api/contraptions/asks`: files (16 MiB in all
+  as base64, or big ones up to 200 MiB each streamed first to `POST /api/contraptions/asks/files` and named by
+  the id it answers) go into that scheme's shared folder under `inbox/<contraption>/<login>/`, and the ask reaches its
   Taskmaster labelled like `message_taskmaster`'s; a non-member's feature ask is a proposal only
   (`src/contraption-asks.ts`). Its body is `{ person, kind: 'bug' | 'feature', text, summary?, item?, files? }`:
   the chat shows a header line (kind, contraption, person, `item` such as an aura's name, at most 100

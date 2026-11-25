@@ -4,11 +4,14 @@
 // inbox/<contraption>/<login>/, and the ask goes to its Taskmaster, labelled like #211's relays. As there,
 // a non-member's feature ask is a proposal only, and their bug reports are worked as usual. A data ask (#318)
 // only files: its files plus a `<time>-ask.json` sidecar with its item, summary and text, waking no one.
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { constants, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFile, link, mkdir, readdir, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { extname, join, sep } from 'node:path';
 import type { ContraptionRow, Project, User } from './db.ts';
 import { HttpError } from './http.ts';
 import { asData } from './quote.ts';
+import { MAX_UPLOAD_BYTES, saveUpload } from './uploads.ts';
 
 /** The most a single ask's files may come to, decoded. */
 export const ASK_FILES_MAX = 16 * 1024 * 1024;
@@ -27,17 +30,28 @@ export function safeName(name: string): string {
   );
 }
 
-export interface AskFile {
-  name: string;
-  data: Buffer;
-}
+/** A file to file with an ask: its bytes, or (#1841) an upload staged on disk, moved in rather than read. */
+export type AskFile = { name: string; data: Buffer } | { name: string; path: string };
 
-/** The files a body carries, as `[{ name, data }]` with data in base64, checked whole before any is written. */
-export function askFiles(v: unknown): AskFile[] {
+/**
+ * The files a body carries, checked whole before any is written: `{ name, data }` with data in base64 (16 MiB
+ * in all), or `{ upload, name? }` naming a file sent first to POST /api/contraptions/asks/files, which `upload`
+ * finds (the caller's own uploads only).
+ */
+export async function askFiles(v: unknown, upload: (id: string) => Promise<{ name: string; path: string }> = noUpload): Promise<AskFile[]> {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v) || v.length > MAX_FILES) throw new HttpError(400, `Files must be a list of at most ${MAX_FILES}`);
   let total = 0;
-  return v.map((f) => {
+  const ids = new Set<string>();
+  const files = v.map((f): AskFile | { name?: string; upload: string } => {
+    if (f && f.upload !== undefined) {
+      if (typeof f.upload !== 'string' || !UPLOAD_ID.test(f.upload) || (f.name !== undefined && (typeof f.name !== 'string' || !f.name.trim()))) {
+        throw new HttpError(400, 'An uploaded file is { upload, name? }: the id POST /api/contraptions/asks/files answered');
+      }
+      if (ids.has(f.upload)) throw new HttpError(400, `Upload ${f.upload} is named twice`);
+      ids.add(f.upload);
+      return { name: f.name, upload: f.upload };
+    }
     if (!f || typeof f.name !== 'string' || !f.name.trim() || typeof f.data !== 'string' || !f.data || f.data.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(f.data)) {
       throw new HttpError(400, 'Each file needs a name and its data in base64');
     }
@@ -46,38 +60,148 @@ export function askFiles(v: unknown): AskFile[] {
     if (total > ASK_FILES_MAX) throw new HttpError(413, `Files come to more than ${ASK_FILES_MAX / 1024 / 1024} MiB`);
     return { name: f.name, data };
   });
+  // Each checked first, so a bad entry anywhere refuses the ask before any upload is looked for.
+  const out: AskFile[] = [];
+  for (const f of files) {
+    if (!('upload' in f)) out.push(f);
+    else {
+      const up = await upload(f.upload);
+      out.push({ name: f.name ?? up.name, path: up.path });
+    }
+  }
+  return out;
+}
+
+const noUpload = async (id: string): Promise<never> => {
+  throw new HttpError(404, `No upload ${id}`);
+};
+
+// Big files (#1841): a contraption streams each one to POST /api/contraptions/asks/files first, so a 100 MB screen
+// recording is never a base64 string in a JSON body held whole in memory, then names it in the ask's files. It is
+// staged at <dataDir>/ask-uploads/<contraption>/<person id>/<upload id>/<name> until an ask moves it into the inbox.
+
+/** The most one uploaded file may be: the composer's limit. */
+export const ASK_UPLOAD_MAX = MAX_UPLOAD_BYTES;
+/** The most a person may have uploaded through one contraption and not yet sent with an ask. */
+export const ASK_UPLOAD_PENDING_MAX = 1024 * 1024 * 1024;
+/** An upload no ask has taken is deleted after this. */
+export const ASK_UPLOAD_TTL_MS = 24 * 60 * 60_000;
+const UPLOAD_ID = /^[0-9a-f]{24}$/;
+
+export const askUploadsDir = (dataDir: string) => join(dataDir, 'ask-uploads');
+
+/** Where one person's uploads through one contraption are staged. */
+const uploadsOf = (dir: string, contraption: string, person: number) => join(dir, safeName(contraption), String(person));
+
+/** One staged upload's file (each id folder holds one), or null when it's gone. */
+async function stagedFile(folder: string): Promise<{ name: string; path: string; size: number; at: number } | null> {
+  try {
+    const [name] = await readdir(folder);
+    if (!name) return null;
+    const st = await stat(join(folder, name));
+    return { name, path: join(folder, name), size: st.size, at: st.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+/** A folder's entries; none when it's gone (another request may take or sweep one meanwhile). */
+const ls = (dir: string) => readdir(dir).catch(() => [] as string[]);
+
+/** Bytes a person has staged through a contraption and not yet sent. */
+export async function pendingUploadBytes(dir: string, contraption: string, person: number): Promise<number> {
+  const mine = uploadsOf(dir, contraption, person);
+  let sum = 0;
+  for (const id of await ls(mine)) sum += (await stagedFile(join(mine, id)))?.size ?? 0;
+  return sum;
+}
+
+/**
+ * Stream `body` into a new upload for `person` through `contraption`, at most `max` bytes (413 past it, the partial
+ * file removed). Returns its id, which only that contraption and person can name in an ask.
+ */
+export async function stageAskUpload(dir: string, contraption: string, person: number, rawName: string, body: AsyncIterable<Buffer>, max = ASK_UPLOAD_MAX) {
+  const id = randomBytes(12).toString('hex');
+  const folder = join(uploadsOf(dir, contraption, person), id);
+  try {
+    const saved = await saveUpload(folder, rawName, body, max);
+    return { upload: id, name: saved.name, size: saved.size };
+  } catch (err) {
+    await rm(folder, { recursive: true, force: true });
+    throw err;
+  }
+}
+
+/** The staged upload `id` of this contraption and person: 404 when it's another's, used or expired. */
+export async function findAskUpload(dir: string, contraption: string, person: number, id: string) {
+  const up = UPLOAD_ID.test(id) ? await stagedFile(join(uploadsOf(dir, contraption, person), id)) : null;
+  if (!up) throw new HttpError(404, `No upload ${id}: an upload is used by one ask, and kept ${ASK_UPLOAD_TTL_MS / 3_600_000} hours`);
+  return up;
+}
+
+/**
+ * Delete uploads no ask took within ASK_UPLOAD_TTL_MS. shortcut: run on each upload and ask, not on a timer, so a
+ * stray waits for the next one; the pending cap bounds it. A timer if that ever matters.
+ */
+export async function sweepAskUploads(dir: string, now = Date.now()) {
+  for (const c of await ls(dir))
+    for (const p of await ls(join(dir, c)))
+      for (const id of await ls(join(dir, c, p))) {
+        const folder = join(dir, c, p, id);
+        // An empty folder is an upload still claiming its name: an old one goes too.
+        const at = (await stagedFile(folder))?.at ?? (await stat(folder).then((st) => st.mtimeMs, () => now));
+        if (now - at > ASK_UPLOAD_TTL_MS) await rm(folder, { recursive: true, force: true });
+      }
 }
 
 /**
  * Write an ask's files into `shared`/inbox/<contraption>/<login>/, never over one already there (clip.peekclip,
- * then clip-2.peekclip). The first time inbox/ is made, the shared folder's README gets a line saying what it is.
- * Returns their paths relative to the shared folder.
+ * then clip-2.peekclip); an upload is moved in. The first time inbox/ is made, the shared folder's README gets a
+ * line saying what it is. Returns their paths relative to the shared folder.
  */
-export function saveAskFiles(shared: string, contraption: string, login: string, files: AskFile[]): string[] {
+export async function saveAskFiles(shared: string, contraption: string, login: string, files: AskFile[]): Promise<string[]> {
   if (!files.length) return [];
   const inbox = join(shared, 'inbox');
   if (!existsSync(inbox)) {
-    mkdirSync(inbox, { recursive: true });
+    await mkdir(inbox, { recursive: true });
     noteInbox(shared);
   }
   const rel = ['inbox', safeName(contraption), safeName(login)];
   const dir = join(shared, ...rel);
-  mkdirSync(dir, { recursive: true });
+  await mkdir(dir, { recursive: true });
   // A folder some minion swapped for a link elsewhere is not followed out of the shared folder.
-  if (!(realpathSync(dir) + sep).startsWith(realpathSync(shared) + sep)) throw new HttpError(409, 'The inbox folder points outside the shared folder');
-  return files.map((f) => {
+  if (!((await realpath(dir)) + sep).startsWith((await realpath(shared)) + sep)) throw new HttpError(409, 'The inbox folder points outside the shared folder');
+  const paths: string[] = [];
+  for (const f of files) {
     const name = safeName(f.name);
     const ext = extname(name);
     for (let n = 1; ; n++) {
       const as = n === 1 ? name : `${name.slice(0, name.length - ext.length)}-${n}${ext}`;
       try {
-        writeFileSync(join(dir, as), f.data, { flag: 'wx' });
-        return [...rel, as].join('/');
-      } catch (err: any) {
-        if (err.code !== 'EEXIST' || n > 999) throw err;
+        if ('data' in f) await writeFile(join(dir, as), f.data, { flag: 'wx' });
+        else await moveIn(f.path, join(dir, as));
+        paths.push([...rel, as].join('/'));
+        break;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST' || n > 999) throw err;
       }
     }
-  });
+  }
+  return paths;
+}
+
+/** Move a staged upload to `to`, never over a file there (EEXIST), then drop its upload folder: one ask uses it. */
+async function moveIn(from: string, to: string) {
+  try {
+    await link(from, to);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') throw new HttpError(409, 'An upload was used by another ask meanwhile');
+    if (code !== 'EXDEV') throw err;
+    await copyFile(from, to, constants.COPYFILE_EXCL); // a data dir split over two filesystems
+  }
+  await unlink(from);
+  await rm(join(from, '..'), { recursive: true, force: true });
 }
 
 /** Add the inbox/ line to the shared folder's README: under its Layout list when it has one, else at the end. */

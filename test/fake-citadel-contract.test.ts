@@ -45,6 +45,9 @@ const probes: Probe[] = [
   { name: 'ask: not enabled', method: 'POST', path: '/api/contraptions/asks', body: { person: Dana.id, kind: 'bug', text: 'x' } },
   { name: 'ask: not JSON', method: 'POST', path: '/api/contraptions/asks', raw: '{', type: 'application/json' },
   { name: 'ask: wrong content type', method: 'POST', path: '/api/contraptions/asks', raw: 'x', type: 'text/plain' },
+  { name: 'ask: an unknown upload', method: 'POST', path: '/api/contraptions/asks', body: { person: Josh.id, kind: 'bug', text: 'x', files: [{ upload: 'a'.repeat(24) }] } },
+  { name: 'ask files: an upload', method: 'POST', path: `/api/contraptions/asks/files?person=${Josh.id}&name=clip.webm`, raw: 'CLIP', type: 'video/webm' },
+  { name: 'ask files: not enabled', method: 'POST', path: `/api/contraptions/asks/files?person=${Dana.id}&name=clip.webm`, raw: 'CLIP', type: 'video/webm' },
   { name: 'spend', method: 'POST', path: '/api/contraptions/spend', body: { service: 'azure-speech', usd: 0.42 } },
   { name: 'spend: no usd', method: 'POST', path: '/api/contraptions/spend', body: { service: 'azure-speech' } },
   // Push: only refusals, which are checked before the key file is (a real send here would read the box's own).

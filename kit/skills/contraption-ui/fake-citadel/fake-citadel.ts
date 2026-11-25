@@ -3,7 +3,7 @@
 // X-Citadel-Identity header a page request would carry. Node 24+, no dependencies.
 //
 // It answers the calls `references/api.md` describes, with the same statuses and body shapes:
-//   turns (SSE, scripted), cancel, messages, verdict, sessions, media + openrouter, spend, asks, home,
+//   turns (SSE, scripted), cancel, messages, verdict, sessions, media + openrouter, spend, asks (and asks/files uploads), home,
 //   minions, relay, push (each enabled person has one phone, and every send reaches it).
 // Citadel's own repo runs it against the real API (test/fake-citadel-contract.test.ts), so the two can't
 // drift. What it leaves out: the audit, caps, containers, jobs, embeddings and secrets; a call to one of
@@ -190,6 +190,8 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
 
   const sessions = new Map<string, { person: number; name: string; lastUsed: number; busy: boolean }>();
   const turnState = new Map<string, { person: number; ended: boolean; replied: boolean }>();
+  // Big files for asks, from POST /api/contraptions/asks/files: counted, not kept.
+  const uploads = new Map<string, { person: number; name: string }>();
   const running = new Map<string, () => void>();
   let n = 0;
 
@@ -311,6 +313,18 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
         const devices = to.length - skipped.length;
         return json(res, 200, { devices, sent: devices, dropped: 0, skipped });
       }
+      if (path === '/api/contraptions/asks/files' && m === 'POST') {
+        const p = enabled(res, q.get('person'));
+        if (!p) return;
+        if (!home) return fail(res, 409, 'No home scheme');
+        let size = 0;
+        for await (const c of req) size += c.length;
+        if (size > 200 * 1024 * 1024) return fail(res, 413, 'An uploaded file is at most 200 MiB');
+        const upload = randomBytes(12).toString('hex');
+        const name = (q.get('name') ?? '').split(/[\\/]/).pop() || 'file';
+        uploads.set(upload, { person: p.id, name });
+        return json(res, 201, { upload, name, size });
+      }
       if (path === '/api/contraptions/asks' && m === 'POST') {
         const b = await body(req, res, 23_000_000);
         if (b === undefined) return;
@@ -323,8 +337,11 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
         if (!home) return fail(res, 409, 'No home scheme');
         if (b.minion !== undefined && !p.member) return fail(res, 403, 'Only members can ask a minion');
         if (b.minion !== undefined && !opts.minions?.[b.minion]) return fail(res, 404, 'No such minion');
+        const named = (b.files ?? []).map((x: { name?: string; upload?: string }) => (x.upload === undefined ? x.name : uploads.get(x.upload)?.person === p.id ? (x.name ?? uploads.get(x.upload)!.name) : null));
+        if (named.includes(null)) return fail(res, 404, 'No upload');
+        for (const x of b.files ?? []) if (x.upload !== undefined) uploads.delete(x.upload);
         f.asks.push(b);
-        const files = (b.files ?? []).map((x: { name: string }) => `inbox/${opts.app}/${p.login}/${x.name}`);
+        const files = named.map((name: string) => `inbox/${opts.app}/${p.login}/${name}`);
         if (b.kind === 'data') return json(res, 202, { scheme: home.id, member: !!p.member, proposal: false, files, sidecar: `inbox/${opts.app}/${p.login}/${Date.now()}-ask.json` });
         if (b.minion !== undefined) return json(res, 202, { scheme: home.id, minion: b.minion, member: true, proposal: false, files });
         return json(res, 202, { scheme: home.id, member: !!p.member, proposal: b.kind === 'feature' && !p.member, files });

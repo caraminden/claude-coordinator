@@ -604,7 +604,7 @@ Authorization: Bearer <contraption.key>
 | `text` | Required for `bug` and `feature`, at most 10,000 characters; optional for `data` |
 | `summary` | One line, at most 200 characters, shown in the Taskmaster's chat under a header with the whole ask behind a toggle. Default: the text's first sentence |
 | `item` | One line, at most 100: what the ask is about (an aura, a list), shown in the header |
-| `files` | Up to 20, each `{ name, data }` with `data` base64; at most 16 MiB decoded in all (413 past it). The whole request body is capped at about 23 MB (16 MiB in base64 plus 1 MB) |
+| `files` | Up to 20, each `{ name, data }` with `data` base64, at most 16 MiB decoded in all (413 past it; the whole request body is capped at about 23 MB), or `{ upload, name? }` naming a big file you uploaded first (below), which doesn't count toward the 16 MiB. Mix them freely |
 | `minion` | Optional: a minion number in your home scheme. A `bug` or `feature` ask goes straight to that minion instead of the Taskmaster (below); 400 with `data` or anything but a whole number from 1 |
 
 - **Bug and feature** go into the home scheme Taskmaster's chat, waking it, labelled with your app,
@@ -626,8 +626,32 @@ Authorization: Bearer <contraption.key>
 - **Files** land in the home scheme's shared folder at `inbox/<contraption>/<login>/`, names made
   safe, with `-2`, `-3`… on a clash. `files` and `sidecar` in the answer are those paths, relative
   to the shared folder.
+- **Big files** (a screen recording, say): stream each one first to
+  `POST /api/contraptions/asks/files?person=<sub>&name=<file name>` as the raw request body (any
+  `Content-Type`, no base64, no JSON), then name it in the ask. Each file is at most 200 MiB (413,
+  from its `Content-Length` before any is read, or once the stream passes it). Answers
+  `201 { upload, name, size }`; 403 when your app isn't enabled for the person, 409 with no home
+  scheme. An upload is only yours for that person, is used by one ask (moved into the inbox, so a
+  second ask naming it gets 404), and is deleted if no ask names it within a day. Upload and send
+  with the same `person`:
+
+  ```js
+  const up = await fetch(`${CITADEL}/api/contraptions/asks/files?person=${sub}&name=flicker.webm`, {
+    method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'video/webm' },
+    body: createReadStream(path), duplex: 'half', // streamed from disk; a Buffer works too
+  }).then((r) => r.json()); // { upload: '3f9c…', name: 'flicker.webm', size: 98123456 }
+  await fetch(`${CITADEL}/api/contraptions/asks`, {
+    method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ person: sub, kind: 'bug', text: 'The aura flickers, see the recording',
+      files: [{ upload: up.upload }, { name: 'log.txt', data: logBase64 }] }),
+  });
+  ```
+
+  The ask answers 404 for an `upload` that isn't this person's through your app, was used, or
+  expired; 400 for one named twice or not an upload id.
 - **Rate limits** per person: 10 bug and feature asks in 10 minutes, 60 data asks in 10 minutes,
-  then 429. Held in memory, so a Citadel restart resets them.
+  then 429. Uploads: 20 in 10 minutes, and at most 1 GiB uploaded but not yet sent with an ask
+  (429 past either). Held in memory, so a Citadel restart resets the counts.
 - `409` when your app has no home scheme.
 
 ## Your home scheme and its minions

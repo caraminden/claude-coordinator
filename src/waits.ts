@@ -551,60 +551,31 @@ export interface HeavyJob {
  * starts no process (#1562; it ran `flock -n` per held slot every 2 s). Only the inode is matched: btrfs names a
  * different device here than stat does, and a stale .who on a slot whose inode another filesystem has locked is all a clash costs.
  */
-export function flockedInodes(text = read('/proc/locks')): Set<number> | null {
+export function flockedInodes(text: string | null): Set<number> | null {
   if (text == null) return null;
   return new Set([...text.matchAll(/^\d+:\s+FLOCK\s+\S+\s+\S+\s+\S+\s+[0-9a-f]+:[0-9a-f]+:(\d+)\s/gm)].map((m) => Number(m[1])));
 }
 
 /** Whether a heavy slot's lock is held: a holder killed past its trap leaves its .who behind, but not the lock. */
-export function slotHeld(file: string, locked = flockedInodes()): boolean {
-  return heldIn(locked, stat(file)?.ino);
-}
-const heldIn = (locked: Set<number> | null, ino: number | undefined) => !locked || (ino !== undefined && locked.has(ino)); // no lock list at all: trust the file; no lock file: nobody holds its lock
+export const heldIn = (locked: Set<number> | null, ino: number | undefined) => !locked || (ino !== undefined && locked.has(ino)); // no lock list at all: trust the file; no lock file: nobody holds its lock
 
-/** heldSlots with the lock list and each slot's file read off the server's thread (#1807). */
+/** heldIn for one look at the heavy folder, off the server's thread (#1807): the lock list is read once, and only if a slot has a .who. */
 export function heldSlotsA(): (file: string) => Promise<boolean> {
   let locked: Promise<Set<number> | null> | undefined;
   return async (file) => heldIn(await (locked ??= readA('/proc/locks').then((t) => flockedInodes(t))), (await statA(file))?.ino);
 }
 
-/** slotHeld for one look at the heavy folder: the lock list is read once, and only if a slot has a .who. */
-export function heldSlots(): (file: string) => boolean {
-  let locked: Set<number> | null | undefined;
-  return (file) => slotHeld(file, locked === undefined ? (locked = flockedInodes()) : locked);
-}
-
 const STALE_WAITER_MS = 60_000; // citadel-heavy freshens a waiter's file at least every 20 s
+
+export type HeavyJobs = { holders: HeavyJob[]; waiters: HeavyJob[] };
 
 /**
  * citadel-heavy's holders (slot-N.who: "who: what (since HH:MM, pid N)", while slot-N's lock is held) and
  * waiters (wait-<pid>-<random>: who, what, since s, reason; freshened while it waits). A holder running a Node test
  * suite gets its counts from slot-N.progress, which citadel-heavy has tools/citadel-node write.
+ * Every file is read off the server's thread (#1807); `held` may answer later.
  */
-export function readHeavy(dir: string, now = Date.now(), held = heldSlots()): { holders: HeavyJob[]; waiters: HeavyJob[] } {
-  const holders: HeavyJob[] = [],
-    waiters: HeavyJob[] = [];
-  for (const name of files(dir)) {
-    const f = join(dir, name),
-      m = name.match(/^slot-(\d+)\.who$/);
-    if (m) {
-      const w = holderOf(read(f)?.trim()),
-        at = mtime(f);
-      if (w && at != null && held(join(dir, `slot-${m[1]}`))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, pid: Number(w[3]), tests: readTestCounts(join(dir, `slot-${m[1]}.progress`), at) });
-    } else if (/^wait-\d+-\d+$/.test(name) && now - (mtime(f) ?? 0) < STALE_WAITER_MS) {
-      const w = waiterOf(read(f));
-      if (w) waiters.push({ ...w, pid: Number(name.split('-')[1]) });
-    }
-  }
-  for (const j of [...holders, ...waiters]) {
-    const f = j.pid ? frozenCached(j.pid) : null;
-    if (f) j.frozen = noteFrozen(j.who, f.cg);
-  }
-  return { holders, waiters: waiters.sort((a, b) => a.since - b.since) };
-}
-
-/** readHeavy with every file read off the server's thread (#1807); `held` may answer later. */
-export async function readHeavyA(dir: string, now = Date.now(), held: (slotFile: string) => boolean | Promise<boolean> = heldSlotsA()): Promise<{ holders: HeavyJob[]; waiters: HeavyJob[] }> {
+export async function readHeavyA(dir: string, now = Date.now(), held: (slotFile: string) => boolean | Promise<boolean> = heldSlotsA()): Promise<HeavyJobs> {
   const holders: HeavyJob[] = [],
     waiters: HeavyJob[] = [];
   await Promise.all(
@@ -636,7 +607,7 @@ export async function readHeavyA(dir: string, now = Date.now(), held: (slotFile:
  * off the thread, at most a refresh old. A failed read keeps the last answer; nothing here throws.
  */
 export class HeavySnapshot {
-  private last: { holders: HeavyJob[]; waiters: HeavyJob[] } = { holders: [], waiters: [] };
+  private last: HeavyJobs = { holders: [], waiters: [] };
   private reading: Promise<void> | null = null;
   private dir: string;
   private held?: (slotFile: string) => boolean | Promise<boolean>;
@@ -667,7 +638,7 @@ function waiterOf(text: string | null): HeavyJob | null {
 }
 
 /** Each heavy job's wait, by its who ("Citadel #544 (cara)"). */
-export function heavyWaits({ holders, waiters }: ReturnType<typeof readHeavy>, usual: (key: string) => number | null, name: (who: string) => string): Map<string, Wait> {
+export function heavyWaits({ holders, waiters }: HeavyJobs, usual: (key: string) => number | null, name: (who: string) => string): Map<string, Wait> {
   const out = new Map<string, Wait>();
   for (const h of holders) {
     const c = h.tests,
@@ -936,8 +907,8 @@ export class Waits {
   }
 
   /** The heavy folder as the last poll read it (off the thread); a person's own action reuses it rather than read the folder in the thread. */
-  private lastHeavy: ReturnType<typeof readHeavy> = { holders: [], waiters: [] };
-  private apply(land: { line: LandTicket[]; took: number[] } | null, heavy: ReturnType<typeof readHeavy>, early: EarlyFile | null = null, off = false) {
+  private lastHeavy: HeavyJobs = { holders: [], waiters: [] };
+  private apply(land: { line: LandTicket[]; took: number[] } | null, heavy: HeavyJobs, early: EarlyFile | null = null, off = false) {
     this.lastHeavy = heavy;
     const now = this.now();
     const next = new Map<number, Wait & { key?: string }>();

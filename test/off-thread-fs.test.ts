@@ -324,8 +324,6 @@ test("the heavy-jobs folder is read off the server's thread: a snapshot refreshe
   const gone = new HeavySnapshot(join(root, 'nope'));
   await gone.refresh();
   assert.deepEqual(gone.get(), { holders: [], waiters: [] });
-  // Nothing in server.ts reads the folder with the synchronous twin.
-  assert.doesNotMatch(readFileSync(join(import.meta.dirname, '..', 'server.ts'), 'utf8'), /\breadHeavy\(/);
 });
 
 /** A scheme with a kit ship line of `n` tickets (the first holding it), its releases wired as server.ts wires them. */

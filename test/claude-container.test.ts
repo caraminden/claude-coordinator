@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { turnPlace } from '../src/access.ts';
-import { ANDROID_JDK, ANDROID_SDK, androidEnv, checkoutMounts, checkoutMountsAsync, ClaudeLink, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
+import { ANDROID_JDK, ANDROID_SDK, androidEnv, checkoutMountsAsync, ClaudeLink, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
 import { Containers, runArgs, specHash, unitProps, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { CodexLink } from '../src/codex-link.ts';
@@ -416,7 +416,7 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   };
   const creds = new Credentials(store, 'x'.repeat(40));
   const link = new ClaudeLink(store, creds, join(root, 'data'), fake, new Containers(fakeRun), 'citadel-claude-t-');
-  const spec = link.spec(josh.id);
+  const spec = await link.spec(josh.id);
   const home = process.env.HOME!;
   for (const m of spec.mounts) {
     for (const bad of ['.ssh', '.config/gh', '.config/claude-coordinator', '.claude/.credentials.json', 'coordinator.db', 'state.db']) assert.ok(!m.src.includes(bad), `${m.src} mounts ${bad}`);
@@ -432,8 +432,8 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   assert.ok(existsSync(join(hook, 'citadel-hook.mjs')));
   // The code the server runs is readable, never writable (#621).
   const checkout = join(import.meta.dirname, '..');
-  // A test tree with devDependencies installed (fast-check's node_modules, #1657) has too many ignored files to cover, so it isn't mounted: the spec follows checkoutMounts.
-  const covered = checkoutMounts(checkout);
+  // A test tree with devDependencies installed (fast-check's node_modules, #1657) has too many ignored files to cover, so it isn't mounted: the spec follows checkoutMountsAsync.
+  const covered = await checkoutMountsAsync(checkout);
   assert.deepEqual(
     spec.mounts.filter((m) => m.src === checkout),
     covered ? [{ src: checkout, dst: checkout, ro: true }] : [],
@@ -445,12 +445,12 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   writeFileSync(join(live, '.env'), 'TOKEN=x');
   writeFileSync(join(live, 'c.db'), '');
   writeFileSync(join(live, 'code.ts'), '');
-  assert.deepEqual(checkoutMounts(live), [
+  assert.deepEqual(await checkoutMountsAsync(live), [
     { src: live, dst: live, ro: true },
     { src: '/dev/null', dst: join(live, '.env'), ro: true },
     { src: '/dev/null', dst: join(live, 'c.db'), ro: true },
   ]);
-  assert.equal(checkoutMounts(join(root, 'not-a-repo')), null);
+  assert.equal(await checkoutMountsAsync(join(root, 'not-a-repo')), null);
   assert.equal(link.place(josh.id), null);
   assert.equal(link.linked(josh.id), null);
   // A fresh server has no run/turns yet; podman refuses a bind mount whose folder is missing.
@@ -606,12 +606,12 @@ test("a person's container mounts their own turns' files, never another person's
   const dirOf = (container: string) => execs.findLast((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === container).at(-1) as string;
   const annDir = dirOf(link.name(ann.id));
   const benDir = dirOf(link.name(ben.id));
-  const sees = (uid: number, path: string) => link.spec(uid).mounts.some((m) => !m.volume && (path === m.src || path.startsWith(m.src + '/')));
-  assert.ok(sees(ann.id, annDir) && sees(ben.id, benDir), 'each container sees its own turns');
-  assert.ok(!sees(ann.id, benDir), "Ann's container can't reach Ben's turn files");
-  assert.ok(!sees(ben.id, annDir), "Ben's container can't reach Ann's turn files");
+  const sees = async (uid: number, path: string) => (await link.spec(uid)).mounts.some((m) => !m.volume && (path === m.src || path.startsWith(m.src + '/')));
+  assert.ok((await sees(ann.id, annDir)) && (await sees(ben.id, benDir)), 'each container sees its own turns');
+  assert.ok(!(await sees(ann.id, benDir)), "Ann's container can't reach Ben's turn files");
+  assert.ok(!(await sees(ben.id, annDir)), "Ben's container can't reach Ann's turn files");
   // A turn on the host (the server login's) keeps its folder straight under run/turns.
-  assert.ok(!sees(ann.id, join(r.turnsDir, `${a}-1`)), "no container reaches the host's turn files");
+  assert.ok(!(await sees(ann.id, join(r.turnsDir, `${a}-1`))), "no container reaches the host's turn files");
 });
 
 /** A linked person's ClaudeLink over a podman that logs its calls; `running` names the containers up, from any spec. */
@@ -707,20 +707,21 @@ test("a Taskmaster's container is its person's other one: same volume and mounts
   assert.ok(main.includes('--slice=citadel.slice') && main.includes('MemoryHigh=12G'));
   // Neither start chowns the volume (:U walks it, and fails on a file the other container deletes meanwhile); a sign-in's does.
   for (const c of [unit, main]) assert.ok(c.includes(`${name}:${process.env.HOME}`), 'the one volume, as it is');
-  assert.equal(link.spec(uid).chown, false);
+  assert.equal((await link.spec(uid)).chown, false);
   const signIn = link as unknown as { logins: Map<number, object> };
   signIn.logins.set(uid, {});
-  assert.equal(link.spec(uid).chown, true);
+  assert.equal((await link.spec(uid)).chown, true);
   link.busy = (c) => (c === `${name}-tm` ? 1 : 0);
-  assert.equal(link.spec(uid).chown, false, 'not while a Taskmaster turn writes in it');
+  assert.equal((await link.spec(uid)).chown, false, 'not while a Taskmaster turn writes in it');
   link.busy = () => 0;
   signIn.logins.delete(uid);
-  assert.equal(new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), root, fake, new Containers(), 'citadel-claude-new-').spec(store.createUser({ name: 'New', login: 'new' }).id).chown, true);
+  assert.equal((await new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), root, fake, new Containers(), 'citadel-claude-new-').spec(store.createUser({ name: 'New', login: 'new' }).id)).chown, true);
   // Every mount the same but its list of sessions, which Claude Code keys by pid: one list each.
-  const of = (tm: boolean) => link.spec(uid, undefined, tm).mounts.map((m) => `${m.src} ${m.dst}`);
-  const extra = of(true).filter((m) => !of(false).includes(m));
+  const of = async (tm: boolean) => (await link.spec(uid, tm)).mounts.map((m) => `${m.src} ${m.dst}`);
+  const [tms, minionMounts] = [await of(true), await of(false)];
+  const extra = tms.filter((m) => !minionMounts.includes(m));
   assert.deepEqual(
-    of(false).filter((m) => !of(true).includes(m)),
+    minionMounts.filter((m) => !tms.includes(m)),
     [],
   );
   assert.ok(extra.length > 0 && extra.every((m) => /sessions-taskmaster \S+\/sessions$/.test(m)), extra.join('\n'));
@@ -742,7 +743,7 @@ test("a Taskmaster's container is its person's other one: same volume and mounts
   assert.deepEqual([...running], []);
 });
 
-test("a container turn has the host's tools: the image installs what schemes' scripts call, host toolchains are mounted, the image's own win (#247)", () => {
+test("a container turn has the host's tools: the image installs what schemes' scripts call, host toolchains are mounted, the image's own win (#247)", async () => {
   // Tools Delve's, Peek Auras' and Mandate's scripts and the kit call, by the image package that brings each.
   const containerfile = readFileSync(join(import.meta.dirname, '..', 'deploy', 'claude-container', 'Containerfile'), 'utf8');
   const apt = containerfile
@@ -759,7 +760,7 @@ test("a container turn has the host's tools: the image installs what schemes' sc
   try {
     const creds = new Credentials(store, 'x'.repeat(40));
     const link = new ClaudeLink(store, creds, join(root, 'data'), fake, new Containers(async () => ({ code: 0, stdout: '', stderr: '' })), 'citadel-claude-tools-');
-    const mounts = link.spec(josh.id).mounts;
+    const mounts = (await link.spec(josh.id)).mounts;
     for (const d of ['.dotnet', '.local/bin', '.local/share/mise', '.local/godot', '.local/share/godot/export_templates', '.cargo/bin', '.rustup', '.cache/ms-playwright', '.local/share/android-sdk']) {
       assert.ok(
         mounts.some((m) => m.src === join(home, d) && m.dst === join(home, d) && m.ro),
@@ -802,7 +803,7 @@ test("the host's Android toolchain (#379): turns get ANDROID_HOME and JAVA_HOME 
   try {
     const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), fake, new Containers(fakeRun), 'citadel-claude-android-');
     assert.ok(
-      link.spec(josh.id).mounts.some((m) => m.src === sdk && m.dst === sdk && m.ro),
+      (await link.spec(josh.id)).mounts.some((m) => m.src === sdk && m.dst === sdk && m.ro),
       'the SDK is mounted read-only',
     );
     await link.ensure(josh.id);
@@ -812,7 +813,7 @@ test("the host's Android toolchain (#379): turns get ANDROID_HOME and JAVA_HOME 
   }
 });
 
-test("Godot's export templates are mounted only where the host has them, and the rest of its data folder stays the person's own (#290)", () => {
+test("Godot's export templates are mounted only where the host has them, and the rest of its data folder stays the person's own (#290)", async () => {
   const home = mkdtempSync(join(root, 'godot-home-'));
   mkdirSync(join(home, '.local/share/godot/app_userdata'), { recursive: true });
   const saved = process.env.HOME;
@@ -820,10 +821,10 @@ test("Godot's export templates are mounted only where the host has them, and the
   try {
     const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), fake, new Containers(async () => ({ code: 0, stdout: '', stderr: '' })), 'citadel-claude-godot-');
     const godot = (mounts: { src: string }[]) => mounts.filter((m) => m.src.startsWith(join(home, '.local/share/godot')));
-    assert.deepEqual(godot(link.spec(josh.id).mounts), [], 'no templates on the host: nothing mounted');
+    assert.deepEqual(godot((await link.spec(josh.id)).mounts), [], 'no templates on the host: nothing mounted');
     const templates = join(home, '.local/share/godot/export_templates');
     mkdirSync(join(templates, '4.7.2.stable.mono'), { recursive: true });
-    assert.deepEqual(godot(link.spec(josh.id).mounts), [{ src: templates, dst: templates, ro: true }]);
+    assert.deepEqual(godot((await link.spec(josh.id)).mounts), [{ src: templates, dst: templates, ro: true }]);
   } finally {
     process.env.HOME = saved;
   }
@@ -1023,9 +1024,7 @@ test('checkoutMountsAsync: covers what git ignores right now, and a file ignored
     { src: live, dst: live, ro: true },
     { src: '/dev/null', dst: join(live, '.env'), ro: true },
   ]);
-  assert.deepEqual(await checkoutMountsAsync(live), checkoutMounts(live));
   assert.equal(await checkoutMountsAsync(join(live, 'nope')), null);
   for (let i = 0; i < 51; i++) writeFileSync(join(live, `f${i}.db`), '');
   assert.equal(await checkoutMountsAsync(live), null, 'over MAX_MASKED nothing is mounted');
-  assert.equal(checkoutMounts(live), null);
 });

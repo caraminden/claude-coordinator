@@ -409,7 +409,7 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       // Node's compile cache for the server's modules (#1518): a cold boot type-strips and compiles the whole app, about
       // 4 s of CPU, which a loaded box stretched past listeningPort's 20 s (access-matrix's smoke flake). In this checkout's
       // own git dir, so a land's smoke boots warm from the minion's own runs, yet it adds no ignored files to the checkout
-      // (checkoutMounts won't mount one with over 50) and goes when the worktree does; Node rechecks each file's content.
+      // (checkoutMountsAsync won't mount one with over 50) and goes when the worktree does; Node rechecks each file's content.
       ...compileCache(),
       ...opts.env,
     },

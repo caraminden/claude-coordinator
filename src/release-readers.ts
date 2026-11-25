@@ -15,7 +15,7 @@ import { BEHIND_OLD, CITADEL_TARGET, HOLDS_LINE, git, landedIn, OLD_LAND, reache
 import { holds, shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
 import { frozenChip, frozenWords, type Frozen } from './frozen-ships.ts';
-import { behindOld, median, ordinal, readHeavy, readQueue, readQueueA, type LandTicket } from './waits.ts';
+import { behindOld, median, ordinal, readQueue, readQueueA, type HeavyJobs, type LandTicket } from './waits.ts';
 import { ciState, ciVerdict } from './ci-verdict.ts';
 
 const RECENT = 5;
@@ -87,12 +87,12 @@ export interface ContraptionDeps {
   /** Its deploy running now. */
   running: (name: string) => DeployView | null;
   /** The heavy queue's holders and waiters (citadel-heavy's files), to tell a build waiting in line from one running long. */
-  heavy?: () => ReturnType<typeof readHeavy>;
+  heavy?: () => HeavyJobs;
   now?: () => number;
 }
 
 /** What a deploy's build is waiting on in the heavy queue (waiter "<app> deploy"), in words; null when it isn't waiting. */
-export function buildWait(heavy: ReturnType<typeof readHeavy>, who: string): string | null {
+export function buildWait(heavy: HeavyJobs, who: string): string | null {
   const i = heavy.waiters.findIndex((w) => w.who === who);
   if (i < 0) return null;
   if (heavy.waiters[i].reason === 'load') return 'perigee is busy · waiting for load to ease';

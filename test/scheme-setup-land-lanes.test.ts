@@ -28,7 +28,7 @@ function laneSetup(files: string[], { lanes = LANES, extra = '', builtin = false
   const checks = join(q.dir, 'checks');
   const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), CHECKS: checks, PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_BATCH: batch || '1' }; // no batch: off, so a test of one landing's run isn't batched by the template's default (4)
   const started: ReturnType<typeof q.land>[] = [];
-  const land = (i: number) => started[started.push(q.land(i, ciEnv)) - 1];
+  const land = (i: number, extra: Record<string, string> = {}) => started[started.push(q.land(i, { ...ciEnv, ...extra })) - 1];
   type L = ReturnType<typeof land>;
   const lands = async (...is: number[]) => {
     const out: L[] = [];
@@ -254,6 +254,98 @@ test("lanes: with batches the top's run takes the lane of the batch's whole rang
     assert.match(all[0].stderr(), /landed [0-9a-f]+ "[^"]*" in a batch with ticket\/2-x, ticket\/3-x/);
   } finally {
     l.stop();
+  }
+});
+
+test("lanes: the head asks CI about a batch's green commit in the lane its run took, though main..it is another lane by then", async () => {
+  // Lane fast has CI of its own, so its answer about a commit that ran in lane full is "no run".
+  const extra = `CHECK_FAST='${gated}'\nCHECK='${gated}'\nCI_WORKFLOWS_FAST=fast.yml\n`;
+  const c = laneSetup(['src/core/Cargo.toml', 'src/x.txt'], { extra, stack: '1', batch: '2' });
+  try {
+    writeFileSync(join(c.ci, 'status.sh'), '#!/bin/bash\necho "$# ${1:0:12} ${2:-}" >>"$CI_DIR/status.log"\nread -r code <"$CI_DIR/${1:0:12}" 2>/dev/null || code=3\n[ "$2" = full ] || code=3\nexit "$code"\n', { mode: 0o755 });
+    c.open();
+    const a = c.land(1);
+    const ta = await c.tip(a);
+    const b = c.land(2);
+    const tb = await c.tip(b);
+    assert.deepEqual(c.sent(b), [`${tb} land/full/ticket/2-x`], "the batch's range has the full path under it");
+    c.verdict(ta, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    c.verdict(tb, GREEN);
+    assert.equal(await b.exit, 0, b.stderr());
+    assert.equal(c.mainAt(), tb);
+    assert.doesNotMatch(c.asked(), new RegExp(`^2 ${tb} fast$`, 'm'));
+  } finally {
+    c.stop();
+  }
+});
+
+test("lanes: a docs commit green as its own batch's lane light doesn't carry the red code under it when a bisect puts them in one batch", async () => {
+  const extra = `CHECK_LIGHT='${gated}'\nCHECK_FAST='${gated}'\nCI_WORKFLOWS_FAST=fast.yml\n`;
+  const c = laneSetup(['src/a.txt', 'src/b.txt', 'src/c.txt', 'docs/d.md'], { extra, stack: '2', batch: '3' });
+  try {
+    const [a, b, d3, d4] = await c.lands(1, 2, 3, 4);
+    c.open();
+    const t3 = await c.tip(d3);
+    await until(`the docs commit's green: ${d4.stderr()}`, () => /lane light runs no CI/.test(d4.stderr()));
+    c.verdict(t3, RED);
+    const ta = await c.tip(a); // the bisect's halfway member
+    c.verdict(ta, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    const tb = await c.tip(b); // the red commit's batch is b, it and the docs commit now
+    assert.equal(c.mainAt(), ta, 'the docs commit is not landed on its own green, with the red one under it');
+    c.verdict(tb, GREEN);
+    assert.equal(await b.exit, 0, b.stderr());
+    assert.equal(await d3.exit, 1);
+    assert.match(d3.stderr(), /CI is red/);
+    assert.equal(await d4.exit, 0, d4.stderr());
+  } finally {
+    c.stop();
+  }
+});
+
+test("lanes: a docs commit green in lane light runs in the batch's lane once a part landing puts unasked code under it", async () => {
+  const extra = `CHECK_LIGHT='${gated}'\nCHECK_FAST='${gated}'\nCI_WORKFLOWS_FAST=fast.yml\n`;
+  const c = laneSetup(['src/a.txt', 'src/b.txt', 'src/c.txt', 'docs/d.md'], { extra, stack: '2', batch: '3' });
+  try {
+    c.open();
+    const a = c.land(1);
+    const ta = await c.tip(a); // the top of its batch, for now
+    const [b, d3, d4] = await c.lands(2, 3, 4);
+    await until(`the docs commit's green: ${d4.stderr()}`, () => /lane light runs no CI/.test(d4.stderr()));
+    c.verdict(ta, GREEN);
+    assert.equal(await a.exit, 0, a.stderr());
+    const t4 = await c.tip(d4);
+    assert.equal(c.mainAt(), ta, 'nothing landed on the docs commit alone');
+    assert.match(d4.stderr(), /green in lane light, but its batch now starts at/);
+    c.verdict(t4, GREEN);
+    for (const x of [b, d3, d4]) assert.equal(await x.exit, 0, x.stderr());
+    assert.equal(c.mainAt(), t4);
+  } finally {
+    c.stop();
+  }
+});
+
+test('lanes: a head that takes the batch for another lane than the green member does asks CI after CI_START, and never waits for good', async () => {
+  // The head's land.sh has no lanes yet; the member's has, and the batch that a part landing grew is still its lane.
+  const extra = `CHECK_FAST='${gated}'\nCI_WORKFLOWS_FAST=fast.yml\n[ -z "\${NO_LANES:-}" ] || LANES=\n`;
+  const c = laneSetup(['src/a.txt', 'src/b.txt', 'src/c.txt', 'src/d.txt'], { extra, stack: '2', batch: '3' });
+  try {
+    c.open();
+    const a = c.land(1);
+    const ta = await c.tip(a); // the top of its batch, for now
+    const b = c.land(2, { NO_LANES: '1', LAND_CI_START: '5' });
+    c.verdict(await c.tip(b), 2); // its own run stays running
+    const [d3, d4] = await c.lands(3, 4);
+    const t4 = await c.tip(d4);
+    c.verdict(t4, GREEN);
+    await until(`the member's green: ${d4.stderr()}`, () => /CI is green on/.test(d4.stderr()));
+    c.verdict(ta, GREEN);
+    for (const x of [a, b, d3, d4]) assert.equal(await x.exit, 0, x.stderr());
+    assert.equal(c.mainAt(), t4);
+    assert.match(c.asked(), new RegExp(`^1 ${t4} $`, 'm'), 'the head asked, with no lane');
+  } finally {
+    c.stop();
   }
 });
 

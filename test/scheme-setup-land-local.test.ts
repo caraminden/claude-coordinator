@@ -162,6 +162,35 @@ test('land_rebased runs on the branch rebased onto main, before the check, and t
   assert.equal(git(r.wt, 'rev-parse', 'ticket/1-x'), git(r.main, 'rev-parse', 'main'), 'the branch sits on what shipped');
 });
 
+// CO1 (#1866): what a red landing left on the branch held land_rebased's own commit, whose title is never "#N:", so the
+// landing after the fix was refused for a lost title nobody lost.
+for (const [where, check, config, local] of [
+  ['the check', 'test ! -e red', {}, ''],
+  ['the early check', 'test ! -e red', { EARLY_CHECK: '1', CHECK_LIGHT: 'test ! -e red' }, ''],
+  ['the guards', 'true', { GUARD_CMD: 'test ! -e red' }, ''],
+  ['land_preflight', 'true', {}, 'land_preflight() { ! git cat-file -e "$1:red" 2>/dev/null; }\n'],
+  ['CI', 'true', { CI_STATUS: '! git cat-file -e "$1:red" #' }, ''],
+  ["CI, on the early check's own build", 'true', { EARLY_CHECK: '1', CHECK_LIGHT: 'true', CI_STATUS: '! git cat-file -e "$1:red" #' }, ''],
+] as [string, string, Record<string, string>, string][]) {
+  test(`a landing red in ${where} after land_rebased made a commit leaves the branch rebased without it, and ships once fixed`, () => {
+    const r = setup(check, config, rebasedHook + local);
+    const titled = (title: string) => git(r.wt, 'commit', '-q', '--amend', '-m', title);
+    r.commit(r.main, 'm.txt', 'main moved\n');
+    r.commit(r.wt, 'red', 'x\n');
+    titled('#1: the work');
+    const quick = { LAND_CI_POLL: '0', LAND_CI_GRACE: '0' };
+    const red = r.run(quick);
+    assert.equal(red.status, 1, red.stderr);
+    assert.equal(git(r.wt, 'branch', '--show-current'), 'ticket/1-x');
+    assert.equal(git(r.wt, 'log', '--format=%s', '-2'), '#1: the work\nm.txt: main moved', 'the branch sits on main, with its own commits only');
+    git(r.wt, 'rm', '-q', 'red');
+    git(r.wt, 'commit', '-qm', '#1: the fix');
+    const again = r.run(quick);
+    assert.equal(again.status, 0, again.stderr);
+    assert.match(git(r.main, 'log', '--format=%s', 'main', '-3'), /^rebased on .*\n#1: the fix\n#1: the work$/);
+  });
+}
+
 test('a land_rebased that fails, or leaves changes uncommitted, refuses the landing and main stays', () => {
   for (const body of ['false', 'echo x >>a.txt', 'echo x >new.txt']) {
     const r = setup('true', {}, `land_rebased() { ${body}; }\n`);

@@ -86,6 +86,21 @@ test('a declared command that fails, or writes outside its files, refuses and th
   }
 });
 
+test("a refused ship's regenerated commit leaves with it, so titles ending in (#N) aren't refused as lost on the next try", () => {
+  // The check fails once, after the command ran.
+  const r = setup('[ -e "$(git rev-parse --absolute-git-dir)/tried" ] || { touch "$(git rev-parse --absolute-git-dir)/tried"; exit 1; }', {});
+  write(r.wt, { 'a.txt': 'ONE\n' }, 'format the txt files (#1)', declare(FMT, '*.txt'));
+  write(r.main, { 'b.txt': 'bee\n' }, 'b.txt');
+  const res = r.run();
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /making \*\.txt again/);
+  assert.equal(git(r.wt, 'log', '-1', '--format=%s'), 'format the txt files (#1)', 'the branch is left without the commit the script made');
+  assert.equal(git(r.wt, 'branch', '--show-current'), 'ticket/1-x');
+  const again = r.run();
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(show(r, 'b.txt'), 'BEE');
+});
+
 test('a command with no files declared, or files with no command, is refused before anything moves', () => {
   for (const [body, want] of [
     ['Regenerate: true', /a Regenerate: trailer but no Regenerate-files:/],

@@ -25,7 +25,7 @@ export const ALLOWED: Record<string, [number, string]> = {
 };
 
 // Symlinks are skipped on purpose: their target is counted where it really lives.
-export function lineCounts(dir = root): Record<string, number> {
+export function lineCounts(dir = root, roots = ROOTS, code = CODE): Record<string, number> {
   const out: Record<string, number> = {};
   const walk = (rel: string) => {
     if (!existsSync(join(dir, rel))) return; // a root this repo lacks
@@ -35,10 +35,10 @@ export function lineCounts(dir = root): Record<string, number> {
       if (KIT_SYNCED.has(path)) continue;
       const st = lstatSync(join(dir, path));
       if (st.isDirectory()) walk(path);
-      else if (st.isFile() && CODE.test(e)) out[path] = readFileSync(join(dir, path), 'utf8').split('\n').length - 1;
+      else if (st.isFile() && code.test(e)) out[path] = readFileSync(join(dir, path), 'utf8').split('\n').length - 1;
     }
   };
-  for (const r of ROOTS) walk(r);
+  for (const r of roots) walk(r);
   return out;
 }
 
@@ -74,16 +74,16 @@ test('the check fails on growth past the limit or past an allowed size, and pass
 });
 
 test("a kit-synced file over the limit is not counted, and the scheme's own big file still is", () => {
+  // Its own folders and extensions, not the repo's: ROOTS and CODE are set per repo.
   const dir = mkdtempSync(join(tmpdir(), 'size-budget-'));
   try {
     const big = 'x\n'.repeat(LIMIT + 10);
-    for (const f of ['tools/land.sh', 'src/own.ts']) {
+    for (const f of ['tools/land.sh', 'tools/own.sh']) {
       mkdirSync(join(dir, f, '..'), { recursive: true });
       writeFileSync(join(dir, f), big);
     }
-    const counts = lineCounts(dir);
-    assert.ok(!('tools/land.sh' in counts), 'tools/land.sh is kit-synced, so it is skipped');
-    assert.equal(counts['src/own.ts'], LIMIT + 10);
+    const counts = lineCounts(dir, ['tools'], /\.sh$/);
+    assert.deepEqual(counts, { 'tools/own.sh': LIMIT + 10 }, 'tools/land.sh is kit-synced, so it is skipped');
     assert.equal(overBudget(counts, {}, LIMIT).length, 1, "the scheme's own file is still over budget");
   } finally {
     rmSync(dir, { recursive: true, force: true });

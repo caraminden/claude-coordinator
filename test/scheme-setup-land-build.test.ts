@@ -174,7 +174,7 @@ test('--build ships a build whose commits mix "#N:" and plain titles; a plain sh
   const b = buildSetup();
   writeFileSync(join(b.wts[0], 'f1.txt'), 'x\n');
   git(b.wts[0], 'add', '-A');
-  git(b.wts[0], 'commit', '-qm', '#1: feeder');
+  git(b.wts[0], 'commit', '-q', '--amend', '-m', '#1: feeder');
   assert.equal(b.run(1, '--into', 'build/1', 'f1.txt').status, 0);
   git(b.wts[2], 'reset', '-q', '--hard', 'build/1');
   b.commit(b.wts[2], 'f3.txt', '3\n'); // "f3.txt: 3": no "#N" while a sibling has one
@@ -188,6 +188,57 @@ test('--build ships a build whose commits mix "#N:" and plain titles; a plain sh
   git(plain.wts[0], 'commit', '-qm', '#1: a');
   plain.commit(plain.wts[0], 'h.txt', 'y\n');
   assert.match(plain.run(1).stderr, /lost its #N: title/);
+});
+
+// DR5 (#1866): a feeder's lost title got into the build, whose hashes nobody may reword after.
+test("--into refuses a feeder's lost title with the build untouched; titles already in the build or main don't count", () => {
+  const b = buildSetup();
+  const plain = b.run(2, '--into', 'build/1', 'f2.txt'); // a feeder with no "#N" title at all merges in
+  assert.equal(plain.status, 0, plain.stderr);
+  const build = b.at('build/1');
+  writeFileSync(join(b.wts[0], 'g.txt'), 'x\n');
+  git(b.wts[0], 'add', '-A');
+  git(b.wts[0], 'commit', '-qm', '#1: feeder'); // on "f1.txt: 1"
+  const res = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /commit [0-9a-f]+ \("f1\.txt: 1"\) lost its #N: title/);
+  assert.match(res.stderr, /build\/1 and ticket\/1-x are untouched/);
+  assert.equal(b.at('build/1'), build);
+  git(b.wts[0], 'reset', '-q', '--soft', 'HEAD~2');
+  git(b.wts[0], 'commit', '-qm', '#1: feeder');
+  b.commit(b.main, 'c.txt', 'someone else\n');
+  git(b.wts[0], 'merge', '-q', '--no-edit', 'main');
+  const again = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(again.status, 0, again.stderr);
+});
+
+test("--into: a check red after land_rebased made a commit leaves the feeder's branch without it, and the fixed one merges", () => {
+  const b = buildSetup({}, rebasedHook);
+  git(b.wts[0], 'commit', '-q', '--amend', '-m', '#1: feeder');
+  b.commit(b.wts[0], 'red', 'x\n');
+  git(b.wts[0], 'commit', '-q', '--amend', '-m', '#1: red');
+  assert.equal(b.run(2, '--into', 'build/1', 'f2.txt').status, 0); // the build moves, so the feeder rebases
+  const build = b.at('build/1');
+  const red = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(red.status, 1, red.stderr);
+  assert.match(red.stderr, /the check failed on the rebased branch/);
+  assert.equal(git(b.wts[0], 'log', '--format=%s', `${build}..ticket/1-x`), '#1: red\n#1: feeder', 'rebased, with its own commits only');
+  git(b.wts[0], 'rm', '-q', 'red');
+  git(b.wts[0], 'commit', '-qm', '#1: fix');
+  const again = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(b.at('build/1'), b.at('ticket/1-x'));
+});
+
+test('--into: a commit made in the worktree while land_rebased runs stays on the branch when the hook fails', () => {
+  // The hook's git commit is its own; the other one is a person's, as from a shell beside it.
+  const b = buildSetup({}, 'land_rebased() { env -u GIT_REFLOG_ACTION git commit -q --allow-empty -m "#1: by hand"; return 1; }\n');
+  git(b.wts[0], 'commit', '-q', '--amend', '-m', '#1: feeder');
+  assert.equal(b.run(2, '--into', 'build/1', 'f2.txt').status, 1); // the hook fails for every feeder
+  const red = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(red.status, 1, red.stderr);
+  assert.match(red.stderr, /land_rebased failed/);
+  assert.equal(git(b.wts[0], 'log', '--format=%s', '-2', 'ticket/1-x'), '#1: by hand\n#1: feeder');
 });
 
 test("--build refuses a branch not at a build's tip, and one a merge of main ahead of it", () => {

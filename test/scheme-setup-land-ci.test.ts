@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { env, git, landLockFree, sleep, until, queueSetup, timingLines, ciSetup, GREEN, RED, LOST } from './scheme-setup-land-fixture.ts';
+import { env, git, landLockFree, sleep, until, queueSetup, timingLines, ciSetup, rebasedHook, GREEN, RED, LOST } from './scheme-setup-land-fixture.ts';
 
 test('CI gate: the commit goes to a scratch branch, and lands only once CI passed exactly that commit', async () => {
   const c = ciSetup(1, { stack: '1' });
@@ -304,24 +304,30 @@ test('the stack: a run lost twice parks that landing with exit 75, and the one b
 
 // KT7 (#1519): a second land.sh in a worktree whose landing is still alive leaves that landing alone, where the
 // killed-landing recovery used to take its detached HEAD back onto the branch and abort its rebase.
-test('a land.sh run again while the first is still landing in that worktree touches nothing, and the first lands', async () => {
-  const c = ciSetup(1);
-  try {
-    const a = c.land(1);
-    const ta = await c.tip(a);
-    assert.equal(c.on(1), '', 'the first is detached on its rebased commit');
-    const again = c.land(1);
-    assert.equal(await again.exit, 1, again.stderr());
-    assert.match(again.stderr(), /a landing is still running in .* \(pid \d+\) and has its HEAD detached on purpose, so this touched nothing/);
-    assert.doesNotMatch(again.stderr(), /stopped mid-way/);
-    assert.equal(git(c.wt, 'rev-parse', 'HEAD'), git(c.main, 'rev-parse', ta), "still on the first one's commit");
-    c.verdict(ta, GREEN);
-    assert.equal(await a.exit, 0, a.stderr());
-    assert.deepEqual(c.landed(), ['f1.txt: 1']);
-  } finally {
-    c.stop();
-  }
-});
+// CO4 (#1866): with land_rebased too, whose note of its commit named nobody.
+for (const [hook, local] of [
+  ['', undefined],
+  [", after land_rebased's commit", rebasedHook],
+] as const) {
+  test(`a land.sh run again while the first is still landing in that worktree touches nothing, and the first lands${hook}`, async () => {
+    const c = ciSetup(1, { local });
+    try {
+      const a = c.land(1);
+      const ta = await c.tip(a);
+      assert.equal(c.on(1), '', 'the first is detached on its rebased commit');
+      const again = c.land(1);
+      assert.equal(await again.exit, 1, again.stderr());
+      assert.match(again.stderr(), /a landing is still running in .* \(pid \d+\) and has its HEAD detached on purpose, so this touched nothing/);
+      assert.doesNotMatch(again.stderr(), /stopped mid-way/);
+      assert.equal(git(c.wt, 'rev-parse', 'HEAD'), git(c.main, 'rev-parse', ta), "still on the first one's commit");
+      c.verdict(ta, GREEN);
+      assert.equal(await a.exit, 0, a.stderr());
+      assert.equal(c.landed()[0], 'f1.txt: 1');
+    } finally {
+      c.stop();
+    }
+  });
+}
 
 test('the stack: when the head is killed mid-CI the ones behind build again on main, and its branch is as it was', async () => {
   const c = ciSetup(3);
@@ -593,6 +599,34 @@ test('CI gate: an old red run of the same commit is not believed just after the 
     assert.equal(await c.tip(b), next);
     assert.equal(await b.exit, 75, b.stderr());
     assert.match(b.stderr(), /CI gave no answer about [0-9a-f]{12} for 1 min \(exit 5 from "\$CI_FAKE"; above\)/);
+  } finally {
+    c.stop();
+  }
+});
+
+test('CI gate: GitHub not answering past CI_LIMIT parks saying that, with no ci-down note; one missed answer is asked again', async () => {
+  const c = ciSetup(1, { stack: '1' });
+  // CI's answers in turn, one a line, the last one for good; each is logged.
+  const answers = (...codes: number[]) => {
+    writeFileSync(join(c.ci, 'answers'), codes.map((n) => `${n}\n`).join(''));
+    writeFileSync(join(c.ci, 'asked'), '');
+  };
+  const asked = () => readFileSync(join(c.ci, 'asked'), 'utf8').trim().split('\n');
+  try {
+    writeFileSync(join(c.ci, 'status.sh'), '#!/bin/bash\nf=$CI_DIR/answers\nread -r code <"$f"\n[ "$(wc -l <"$f")" = 1 ] || sed -i 1d "$f"\necho "$code" >>"$CI_DIR/asked"\nexit "$code"\n', { mode: 0o755 });
+    // The run was going when GitHub stopped answering (exit 5), and it hasn't answered since.
+    answers(3, 2, 5);
+    const a = c.land(1, { LAND_CI_TIMEOUT: '2' });
+    assert.equal(await a.exit, 75, a.stderr());
+    assert.match(a.stderr(), /GitHub didn't answer since \d\d:\d\d \(\d+ polls failed in a row; exit 5 from "\$CI_FAKE"; above\), so nothing landed, and whether CI on [0-9a-f]{12} finished isn't known\./);
+    assert.doesNotMatch(a.stderr(), /hasn't finished within/);
+    assert.ok(!existsSync(join(c.state, 'ci-down')), 'a GitHub outage is no word about the runners');
+    // One missed answer at the limit says nothing: the next one, that the run still goes, decides.
+    answers(3, 2, 5, 2);
+    const b = c.land(1, { LAND_CI_TIMEOUT: '3', LAND_CI_POLL: '2' });
+    assert.equal(await b.exit, 75, b.stderr());
+    assert.match(b.stderr(), /CI on [0-9a-f]{12} hasn't finished within 1 min/);
+    assert.deepEqual(asked(), ['3', '2', '5', '2']);
   } finally {
     c.stop();
   }
@@ -964,6 +998,43 @@ test('batches: a scheme that sets no LAND_BATCH batches up to 4 (#1321), and the
   }
 });
 
+// CO3 (#1866): members that landed leave one by one, and while they did the ones behind counted them into batches of
+// their own, so each became a batch's top for a moment and pushed a run.
+for (const stack of ['1', '']) {
+  test(`batches: while a batch that landed leaves the line, the next one still pushes one run, its top's (CI_STACK ${stack || 'unset'})`, async () => {
+    const c = ciSetup(8, { stack, batch: 'default', check: gated });
+    try {
+      // main's push is slow, as GitHub's is, so the members that wait for it leave after the head.
+      writeFileSync(join(c.origin, 'hooks', 'update'), '#!/bin/bash\n[ "$1" != refs/heads/main ] || sleep 1\n', { mode: 0o755 });
+      const all = await c.lands(1, 2, 3, 4, 5, 6, 7, 8);
+      c.open();
+      const t4 = await c.tip(all[3]);
+      await until(
+        "the second batch's builds",
+        () =>
+          c
+            .tickets()
+            .slice(4)
+            .filter((t) => /^checked|CI/.test(c.phase(t))).length === 4,
+      );
+      c.verdict(t4, GREEN);
+      for (const l of all.slice(0, 4)) assert.equal(await l.exit, 0, l.stderr());
+      const t8 = await c.tip(all[7]);
+      c.verdict(t8, GREEN);
+      for (const l of all.slice(4)) assert.equal(await l.exit, 0, l.stderr());
+      assert.deepEqual(
+        all.map((l) => c.sent(l)),
+        [[], [], [], [t4], [], [], [], [t8]],
+        'one run for each batch, on its top',
+      );
+      assert.equal(c.mainAt(), t8);
+      assert.equal(all[7].stderr().trimEnd().split('\n').pop(), `ship: landed ${t8} batch 4 of 4 deploy none`);
+    } finally {
+      c.stop();
+    }
+  });
+}
+
 test("batches: a landing that changes the pipeline (a PIPELINE_FILES path) ships alone, and the ones around it can't batch over it", async () => {
   const c = ciSetup(3, { batch: 'default', stack: '1', check: gated, files: (i) => (i === 2 ? 'deploy/run.sh' : `f${i}.txt`), local: 'PIPELINE_FILES=pipe.txt\n' });
   try {
@@ -980,6 +1051,25 @@ test("batches: a landing that changes the pipeline (a PIPELINE_FILES path) ships
     }
     assert.doesNotMatch(all[0].stderr() + all[2].stderr(), /ships alone|landed in a batch/);
     assert.deepEqual(c.landed(), ['pipe.txt: # the deploy script deploy/', 'f1.txt: 1', 'deploy/run.sh: 2', 'f3.txt: 3']);
+  } finally {
+    c.stop();
+  }
+});
+
+test("batches: a batch whose top's CI passed on its LAND_KNOWN_RED lands, though the head has none of its own", async () => {
+  const c = ciSetup(2, { batch: '2', stack: '1', check: gated });
+  try {
+    writeFileSync(join(c.ci, 'status.sh'), '#!/bin/bash\nread -r code <"$CI_DIR/${1:0:12}" 2>/dev/null || code=3\n[ "$code" != 1 ] || echo "ci.yml: completed failure https://x"\nexit "$code"\n', { mode: 0o755 });
+    const [a] = await c.lands(1);
+    const b = c.land(2, { LAND_KNOWN_RED: 'ci:ci.yml\t#42 is fixing it' });
+    await until('both tickets', () => c.issued() === 2);
+    c.open();
+    const tb = await c.tip(b);
+    c.verdict(tb, RED);
+    assert.equal(await a.exit, 0, a.stderr());
+    assert.equal(await b.exit, 0, b.stderr());
+    assert.match(b.stderr(), /failed only on known reds, so it goes on: ci:ci\.yml: known red, #42 is fixing it/);
+    assert.equal(git(c.main, 'rev-parse', 'main').slice(0, 12), tb);
   } finally {
     c.stop();
   }

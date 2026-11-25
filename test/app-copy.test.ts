@@ -299,15 +299,13 @@ test('a turn stopped while its copy is under way leaves nothing', async () => {
   writeFileSync(join(root, 'plan.json'), JSON.stringify({ apps: ['big'] }));
   await srv.call(`/api/tickets/${mine.id}/messages`, { text: 'try the migration' });
   const parts = join(srv.data, 'run', 'app-copies');
-  await until('the copy to begin', () => existsSync(parts) && (readdirSync(parts, { recursive: true }) as string[]).some((f) => f.endsWith('.db')));
+  await until('the copy to begin', () => existsSync(parts) && readdirSync(parts).length > 0);
   await srv.call(`/api/tickets/${mine.id}/stop`, {});
   writeFileSync(join(root, 'plan.json'), JSON.stringify({ apps: [] }));
   await until('what it copied to go', () => readdirSync(parts).length === 0);
   await idle(mine.id);
-  assert.deepEqual(
-    (readdirSync(join(srv.data, 'run', 'turns'), { recursive: true }) as string[]).filter((f) => f.endsWith('.db')),
-    [],
-  );
+  const turns = join(srv.data, 'run', 'turns');
+  assert.ok(!readdirSync(turns).some((t) => existsSync(join(turns, t, 'app-copy'))), 'none was handed to the turn');
 });
 
 test('the tool itself answers with the folder and what it holds', async () => {

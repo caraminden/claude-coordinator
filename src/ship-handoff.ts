@@ -165,7 +165,7 @@ export interface Prepared {
 }
 
 /** What a prepared hand-off takes: hand_off_land's arguments for a plain ship to main, less the go, which is the click. */
-const PREPARED_KEYS = ['summary', 'learned', 'risk', 'risk_reason', 'probe', 'fix', 'stay_open', 'waiting_on'];
+const PREPARED_KEYS = ['summary', 'learned', 'risk', 'risk_reason', 'probe', 'fix', 'deploy', 'stay_open', 'waiting_on'];
 const isShipOption = (label: unknown) => /^ship it$/i.test(String(label ?? '').trim());
 /** A branch in a build under way merges there, and the build minion's own go card opens its ship in its turn: both cards go to the minion. */
 const inBuild = (app: App, ticket: Ticket) => !!buildBranch(app.store.getProject(ticket.project_id)?.repo_dir ?? null, ticket.build) || (ticket.build != null && app.store.getSetting<number>(buildOwnerKey(ticket.project_id, ticket.build)) === ticket.id);

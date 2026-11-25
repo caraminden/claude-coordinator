@@ -67,4 +67,4 @@ The steps (section 5):
   at once, when the ship would have been refused (a claim the ship needs is read at the press): fix it and post the card again. Then pressing Ship It starts the ship with
   no turn of yours, and the press is the go. Change nothing after the card: a new commit, an uncommitted edit or a person's
   message makes the press come to you as an ordinary answer with a line saying why, and you hand off yourself. Leave
-  `hand_off` out on a feeder's or build card, where ships go by pull request, and when you owe steps between the go and the ship.
+  `hand_off` out on a feeder's or build card, where ships go by pull request, for an `outage` ship, and when you owe steps between the go and the ship.

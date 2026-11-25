@@ -116,7 +116,7 @@ function scratch(files: Record<string, string>): { dir: string; check: (...args:
   writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: [] }, include: ['*.ts'] }));
   for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
   execFileSync('git', ['init', '-q'], { cwd: dir });
-  execFileSync('git', ['add', '*.ts'], { cwd: dir });
+  execFileSync('git', ['add', ':(glob)*.ts'], { cwd: dir });
   const check = (...args: string[]) => {
     const r = spawnSync(process.execPath, [join(dir, 'tools', 'typecheck.ts'), ...args], { cwd: dir, encoding: 'utf8' });
     return { code: r.status, out: r.stdout + r.stderr };

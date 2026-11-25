@@ -3,10 +3,10 @@
     "hash": "8bba6a71956c35a5",
     "at": "2026-11-25",
     "days": 3,
-    "inputs": "3259 TypeScript file changes in 708 commits",
-    "hits": 79,
+    "inputs": "3276 TypeScript file changes in 717 commits",
+    "hits": 78,
     "real": 0,
-    "summary": "0 as before, 79 new, 0 gone"
+    "summary": "0 as before, 78 new, 0 gone"
   },
   "app-shots": {
     "hash": "06b527913fbf81dd",

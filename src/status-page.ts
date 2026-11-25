@@ -626,7 +626,7 @@ export class StatusPage {
     if (longStall >= STALL_WARN_S) reasons.push(['warn', `a ${longStall.toFixed(1)} s stall in the last day`, 'stalls']);
     const stormS = storms.filter((s) => s.at >= dayAgo).reduce((n, s) => n + s.stalled, 0) + stormsNow.reduce((n, s) => n + s.stalled, 0);
     if (stormS >= STORM_WARN_S) reasons.push(['warn', `${stormS < 90 ? `${Math.round(stormS)} s` : `${Math.round(stormS / 60)} min`} stalled at a memory limit in the last day`, 'memory-limits']);
-    if (easeNow) reasons.push(['warn', `easing off memory since ${pacificStamp(easeNow.since)}: ${easeNow.why}`, 'easing']);
+    if (easeNow) reasons.push([easeNow.level === 'tight' ? 'bad' : 'warn', `easing off memory since ${pacificStamp(easeNow.since)}: ${easeNow.why}`, 'easing']);
     const cold = store.healthEventsSince(['cache-cold'], dayAgo).at(-1);
     if (cold) reasons.push(['warn', `the database fell out of memory ${pacificStamp(cold.at)}: ${cold.detail}`, 'cache']);
     const slow = store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1);

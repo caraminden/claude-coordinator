@@ -512,6 +512,7 @@ test('easing or tight (#1850): the CPU tile counts one live reading over the lin
     assert.ok(c.verdict.tiles.includes('cpu'), `${level}: one live reading over 8 warns`);
     assert.match(c.verdict.reasons[c.verdict.tiles.indexOf('cpu')], /load 20 now, over 8 on 4 cores/);
     assert.equal(c.easing.now?.level, level);
+    assert.equal(c.verdict.tone, level === 'tight' ? 'bad' : 'warn', 'tight reads worse than easing');
     assert.equal(c.easing.now?.at, now - 4000, "the reading's own time reaches the page");
     assert.equal(c.easing.now?.load1, 20);
     assert.deepEqual(c.host.series, fine.host.series, 'history charts read host_samples only');

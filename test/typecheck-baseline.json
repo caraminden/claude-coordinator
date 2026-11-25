@@ -1,5 +1,4 @@
 {
-  "src/access.ts": [0, 1],
   "src/backup.ts": [0, 3],
   "src/db/deliveries.ts": [0, 2],
   "src/effort-retros.ts": [2, 2],
@@ -167,7 +166,6 @@
   "test/waits.test.ts": [0, 1],
   "test/wake-when-live-outbox.test.ts": [0, 1],
   "test/wake-when-live.test.ts": [0, 1],
-  "tools/boot-check-claude.ts": [0, 2],
   "tools/boot-check.ts": [2, 10],
   "tools/ci-progress.ts": [1, 1],
   "tools/heavy-ci.ts": [0, 8],

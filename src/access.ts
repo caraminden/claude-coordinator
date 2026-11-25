@@ -10,14 +10,25 @@ import { GLOBAL_OWNER } from './properties.ts';
 /** Stream messages only admins get: Citadel-wide instructions. (The machines list goes to each person filtered: server.ts broadcast.) */
 const ADMIN_ONLY = new Set(['app-instructions']);
 
+/** What messageScope reads of a stream message: each kind (`type`) carries its own. */
+interface StreamMessage {
+  type: string;
+  projectId?: unknown;
+  ticketId?: unknown;
+  ticket?: { project_id: number };
+  project?: { id: number };
+  event?: { ticket_id?: unknown };
+}
+
 /** The scheme a stream message is about, 'admin' for admin-only news, or null for everyone's. */
-export function messageScope(store: Store, msg: any): number | 'admin' | null {
+export function messageScope(store: Store, message: object): number | 'admin' | null {
+  const msg = message as StreamMessage;
   if (ADMIN_ONLY.has(msg.type)) return 'admin';
   if (typeof msg.projectId === 'number') return msg.projectId;
   if (msg.projectId === undefined && 'projectId' in msg) return 'admin'; // its minion is gone
-  if (msg.type === 'ticket') return msg.ticket.project_id;
-  if (msg.type === 'project') return msg.project.id;
-  const ticketId = msg.type === 'event' ? msg.event.ticket_id : msg.ticketId;
+  if (msg.type === 'ticket') return msg.ticket!.project_id;
+  if (msg.type === 'project') return msg.project!.id;
+  const ticketId = msg.type === 'event' ? msg.event!.ticket_id : msg.ticketId;
   // A message about a minion that is gone goes to nobody but admins.
   if (typeof ticketId === 'number') return store.getTicket(ticketId)?.project_id ?? 'admin';
   return null;

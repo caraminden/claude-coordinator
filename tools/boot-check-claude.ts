@@ -10,6 +10,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { loadStretch } from '../src/load-stretch.ts';
+import { thrown } from '../src/thrown.ts';
 
 const args = process.argv.slice(2);
 const role = process.env.COORDINATOR_ROLE ?? '';
@@ -54,7 +55,7 @@ async function check(): Promise<string> {
   let id = 0;
   const tool = async (name: string, params: object = {}): Promise<string> => {
     const result = await call(++id, 'tools/call', { name, arguments: params });
-    const text = (result.content ?? []).map((c: any) => c.text ?? '').join('\n');
+    const text = (result.content ?? []).map((c: { text?: string }) => c.text ?? '').join('\n');
     if (result.isError) throw new Error(`MCP ${name} failed: ${text.slice(0, 1000)}`);
     return text;
   };
@@ -103,8 +104,9 @@ try {
   writeFileSync('report.json', JSON.stringify({ ok: true, found }));
   out({ type: 'result', subtype: 'success', is_error: false, result: `boot check: ${found}`, session_id: 'boot-check' });
   process.exit(0);
-} catch (err: any) {
-  writeFileSync('report.json', JSON.stringify({ ok: false, error: err.message }));
-  out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: err.message, session_id: 'boot-check' });
+} catch (err) {
+  const { message } = thrown(err);
+  writeFileSync('report.json', JSON.stringify({ ok: false, error: message }));
+  out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: message, session_id: 'boot-check' });
   process.exit(1);
 }

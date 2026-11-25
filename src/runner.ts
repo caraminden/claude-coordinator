@@ -10,7 +10,7 @@ import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs
 import { basename, dirname, join, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
-import { Relay, clip, loopHolds, loopKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
+import { Relay, clip, loopHolds, LOOP_LIMIT, LOOP_WINDOW_MS } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
 import { askerKey, buildOwnerKey, onboardingOpen, pagePlanKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketState, type TurnResult } from './db.ts';
 import { APP_NAME } from './appname.ts';
@@ -27,6 +27,7 @@ import type { Wait } from './waits.ts';
 import { releaseEmulatorLease } from './emulator-lease.ts';
 import { track } from './settled.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
+import { HeldMail } from './held-mail.ts';
 import { Lanes } from './lanes.ts';
 import { DismissedCleanup } from './dismissed-cleanup.ts';
 import { buildBranch, landsBuilds, projectDir, surveyReports } from './workspace.ts';
@@ -92,7 +93,7 @@ import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type Proc
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
-import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, startHoldKey, START_HOLD_PREFIX, startNote, CARD, chatNote, costReason, markOf, passed, REASON, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
+import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, startHoldKey, CARD, chatNote, costReason, markOf, passed, REASON, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, readAgentFiles, renderSet, reviewSetLine, withoutGoneAgents } from './review-set.ts';
@@ -110,8 +111,6 @@ import { realClock, type Clock, type ClockTimer } from './clock.ts';
 import { sleepKey, stateWord, type Sleep } from './needs.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
-/** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
-const STRIKE_SEARCH = 500;
 /** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
 const CODEX_LOG_MAX = 2 * HANDOVER_MAX;
 /** Whether `path` is there, asked off the server's thread (#1808). */
@@ -591,9 +590,6 @@ function truncate(s: string): string {
   return s.length > MAX_TOOL_OUTPUT ? s.slice(0, MAX_TOOL_OUTPUT) + `\n… [truncated ${s.length - MAX_TOOL_OUTPUT} chars]` : s;
 }
 
-/** A stored event's data as `strike` reads it: a Claude event, or a note or message with its `text`. */
-type StruckData = Partial<ClaudeEvent> & { text?: string; strikes?: { text: string; reason: string; at: number }[] };
-
 /**
  * Shrink a stream-json event before storing it, keeping only what the chat, the progress readout
  * and the coordinator's transcript read: thinking, usage, ids and background-task echoes are most
@@ -806,6 +802,7 @@ export class Runner {
   /** Cards whose minion's process ended while they waited (#1916). */
   private cardWaits: WaitList<KeptCard>;
   private relays: Relay;
+  private held: HeldMail;
   private cleanup: DismissedCleanup;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
   placeFor?: (person: number | null, warm?: string, taskmaster?: boolean) => TurnPlace | { refused: string };
@@ -1042,6 +1039,23 @@ export class Runner {
       broadcastTicket: (id) => this.broadcastTicket(id),
       parked: (t) => this.parked(t),
       hold: (id, msg, coldAt) => this.queue.hold(id, msg, coldAt),
+    });
+    this.held = new HeldMail({
+      store,
+      queue: this.queue,
+      relays: this.relays,
+      lanes: this.lanes,
+      now: () => this.now(),
+      noTurns: () => this.noTurns,
+      heldFor: (id) => this.heldFor(id),
+      emit: (id, kind, data) => this.emit(id, kind, data),
+      broadcastTicket: (id) => this.broadcastTicket(id),
+      isRunning: (id) => this.isRunning(id),
+      dropDisabled: (id) => this.dropDisabled(id),
+      refused: (id, person) => this.refused(id, person),
+      turnPerson: (t, p, waiting) => this.turnPerson(t, p, waiting),
+      next: (id, now) => this.next(id, now),
+      send: (id, author, text, images, extra, steer) => this.send(id, author, text, images, extra, steer),
     });
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
@@ -2506,129 +2520,54 @@ export class Runner {
     this.relays.leaveMail(to, author, text);
   }
 
-  /**
-   * Held (#718): on hold on purpose (state sealed), waiting on start_after, or on its start card (#1757, which isn't sealed
-   * but runs nothing until a person answers), and not dismissed. A message to it is held.
-   */
+  // Held mail, seals, sleep and start cards: src/held-mail.ts.
+
   parked(t: Ticket): boolean {
-    return t.kind !== 'coordinator' && t.status !== 'closed' && (t.state === 'parked' || !!this.heldFor(t.id) || !!this.startHold(t.id));
+    return this.held.parked(t);
   }
 
-  /** Its start card's estimate while it waits on one (#1674), for the list: { usd }, or null. */
   startHold(ticketId: number): { usd: number } | null {
-    const hold = this.store.getSetting<{ usd: number }>(startHoldKey(ticketId));
-    return hold ? { usd: hold.usd } : null;
+    return this.held.startHold(ticketId);
   }
 
-  /**
-   * A person OK'd a held start (#1757): its first turn starts with their go, then its held brief and anything left for it.
-   * The caller has deleted the hold.
-   */
   startHeld(ticketId: number, author: string, how: string) {
-    this.dropDisabled(ticketId);
-    this.send(ticketId, author, `${how} Your brief, and anything left for you while you waited, follow.`);
-    this.broadcastTicket(ticketId);
+    return this.held.startHeld(ticketId, author, how);
   }
 
-  /**
-   * Minions created sealed on their start card before #1757 move out of the seal, once at boot (it finds none after):
-   * state cleared, their note the new one. One chained on start_after stays sealed on its chain. Returns how many moved.
-   */
   unsealStartHolds(): number {
-    let moved = 0;
-    for (const { key, value } of this.store.settingsWithPrefix<{ usd: number }>(START_HOLD_PREFIX)) {
-      const t = this.store.getTicket(Number(key.slice(START_HOLD_PREFIX.length)));
-      // Only #1674's own seal (its note): a seal a person set later, for another reason, stays.
-      if (!t || t.status === 'closed' || t.state !== 'parked' || this.heldFor(t.id) || !/^waits for its start card/.test(t.note ?? '')) continue;
-      this.store.updateTicket(t.id, { state: null, note: startNote(value.usd) });
-      moved++;
-    }
-    if (moved) console.log(`start cards: ${moved} minion${moved === 1 ? '' : 's'} waiting on a start card moved out of sealed (#1757)`);
-    return moved;
+    return this.held.unsealStartHolds();
   }
 
-  /** Messages held for this minion's next turn (#718's sealed ones and held mail). */
   heldCount(ticketId: number): number {
-    return this.queue.get(ticketId).held?.length ?? 0;
+    return this.held.heldCount(ticketId);
   }
 
-  /**
-   * Put a minion to sleep or wake it (#1636), as `by` (a person's name): nothing else changes, and it needs no turn. False
-   * for a Taskmaster, a dismissed minion, or one already that way.
-   */
   sleep(ticketId: number, by: string, asleep: boolean): boolean {
-    const t = this.store.getTicket(ticketId);
-    if (!t || t.kind === 'coordinator' || t.status === 'closed' || !!this.store.getSetting(sleepKey(ticketId)) === asleep) return false;
-    if (asleep) this.store.setSetting(sleepKey(ticketId), { at: this.now(), by } satisfies Sleep);
-    else this.store.deleteSetting(sleepKey(ticketId));
-    this.emit(ticketId, 'note', { text: asleep ? `${by} put this minion to sleep.` : `${by} woke this minion.` });
-    this.broadcastTicket(ticketId);
-    return true;
+    return this.held.sleep(ticketId, by, asleep);
   }
 
-  /**
-   * Unseal a minion in state sealed (#718): the state clears now, and unless `quiet` (a message wakes it instead) a
-   * turn starts that reads what was held for it, with a message from `author` (a person's name runs it as them, as a
-   * card's answer does). A chained minion starts with its brief instead (routes/tickets.ts unparkTicket). False when
-   * it isn't in state sealed.
-   */
   unpark(ticketId: number, by: string, author: string, quiet = false): boolean {
-    const t = this.store.getTicket(ticketId);
-    if (!t || t.kind === 'coordinator' || t.status === 'closed' || t.state !== 'parked') return false;
-    this.emit(ticketId, 'note', { text: `${by} unsealed this minion.` });
-    if (!quiet && !this.isRunning(ticketId)) {
-      this.dropDisabled(ticketId); // so the count below says only what follows (#1509)
-      const n = this.heldCount(ticketId);
-      const held = n ? `${n === 1 ? 'The message' : `The ${n} messages`} left for you while you were sealed ${n === 1 ? 'follows' : 'follow'}.` : 'Nothing was left for you while you were sealed.';
-      // Queued before the state clears (#1378): a crash between the two leaves a turn to start, not held mail nothing releases.
-      this.send(ticketId, author, `${author === by ? 'Unsealed' : `${by} unsealed`} you. ${held} Pick up where you left off.`);
-    }
-    this.store.updateTicket(ticketId, { state: null });
-    this.broadcastTicket(ticketId);
-    return true;
+    return this.held.unpark(ticketId, by, author, quiet);
   }
 
-  /**
-   * Mail held for a cold session wakes it once the first has waited COLD_HOLD_MAX_MS, or at once if the
-   * session went fresh meanwhile (nothing left to re-read), but never a dismissed minion. A person's
-   * message takes it sooner. Run every minute.
-   */
   coldSweep(now = this.now()) {
-    if (this.noTurns) return;
-    for (const p of this.store.listProjects()) {
-      for (const t of this.store.listTickets(p.id)) {
-        const since = this.queue.get(t.id).coldAt;
-        if (!since || (t.session_id && now - since < msgSettings(p).holdH * 3_600_000)) continue;
-        // A sealed minion's mail waits for its unseal or wake, however long (#718).
-        if (this.parked(t)) continue;
-        if (this.isRunning(t.id) || this.lanes.busy(t.id)) continue;
-        this.releaseMail(t, p);
-      }
-    }
+    return this.held.coldSweep(now);
   }
 
-  /**
-   * Queue a ticket's held mail as a turn: the cold hold's cap ran out, or `by` (a person) asked from the Held list (#1059).
-   * Never a dismissed minion's, nor while its Claude can't run a turn (#468 S03-6). Returns how many messages went.
-   */
   releaseMail(t: Ticket, p: Project, by = ''): number {
-    let mail = this.queue.heldMail(t.id);
-    // A dismissed minion isn't reopened by the cap: its mail waits for a person's message, or its dismissal's cleanup notes it.
-    if (!mail.length || t.status === 'closed') {
-      this.queue.warm(t.id);
-      return 0;
-    }
-    if (this.startHold(t.id)) return 0; // only its start card's answer starts it (#1757)
-    // A disabled person's held mail never runs, on their login or anyone else's (#1270 C3, #1509).
-    if (this.dropDisabled(t.id)) mail = this.queue.heldMail(t.id);
-    if (!mail.length) return 0;
-    if (this.refused(t.id, this.turnPerson(t, p, { msgs: [], held: mail }))) return 0; // keeps the cold time, so the cap still fires
-    const hours = msgSettings(p).holdH;
-    const text = by ? `${by} delivered the held mail, so it runs now.` : t.session_id ? `Held mail has waited ${hours} hours, so it runs now.` : 'Held mail runs now: the session is fresh, so waking it is cheap.';
-    this.emit(t.id, 'note', { text });
-    this.queue.release(t.id);
-    this.next(t.id, true);
-    return mail.length;
+    return this.held.releaseMail(t, p, by);
+  }
+
+  strike(by: number, quote: string, reason: string): { ticketId: number } {
+    return this.held.strike(by, quote, reason);
+  }
+
+  continueLoops(ticketIds: number[], by: string): number {
+    return this.held.continueLoops(ticketIds, by);
+  }
+
+  continueLoop(ticketId: number, by: string): number {
+    return this.held.continueLoop(ticketId, by);
   }
 
   /**
@@ -2649,102 +2588,6 @@ export class Runner {
         return { id: m.id ?? null, author: d.author ?? m.author.replace(/^Held mail from |, sent .*$/g, ''), from: m.from ?? d.from ?? null, need: d.need ?? null, note: !!d.note, parked: !!d.parked, at: e?.created_at ?? 0, text: text.length > 600 ? `${text.slice(0, 600)}…` : text };
       }),
     };
-  }
-
-  /**
-   * strike_text: thread `by` was proven wrong, so `quote` (its own words, verbatim) is struck through
-   * where it shows: in the newest of its replies, or of its messages to another thread, that contains
-   * it. A note with the reason goes in that chat, and in `by`'s own if that's another one.
-   */
-  strike(by: number, quote: string, reason: string): { ticketId: number } {
-    const texts = (e: EventRow, data: StruckData): string[] => (e.kind === 'claude' ? (data.type === 'assistant' ? ((data.message?.content ?? []) as ContentBlock[]).filter((b) => b.type === 'text').map((b) => b.text!) : []) : [data.text ?? '']);
-    let e: EventRow | undefined;
-    let data!: StruckData;
-    // Find it first: leaving the loop closes the read before anything is written.
-    for (const w of this.store.wordsBy(by, STRIKE_SEARCH)) {
-      data = JSON.parse(w.data);
-      if (texts(w, data).some((t) => t.includes(quote))) {
-        e = w;
-        break;
-      }
-    }
-    if (!e) throw new Error(`None of your newest ${STRIKE_SEARCH} replies or messages contains that text. Quote it exactly as you wrote it, Markdown and all, from a single message.`);
-    const strikes: { text: string; reason: string; at: number }[] = data.strikes ?? [];
-    if (strikes.some((s) => s.text === quote)) throw new Error('That text is struck through already');
-    strikes.push({ text: quote, reason, at: this.now() });
-    this.store.setEventData(e.id, { ...data, strikes });
-    this.emit(e.ticket_id, 'strike', { event: e.id, strikes });
-    // `strike` lets the chat draw the quote struck through; `chat` (another chat's note only) is where the message shows.
-    const where = this.store.getTicket(e.ticket_id)!;
-    const words = clip(quote.replace(/[*`~]/g, ''));
-    for (const id of new Set([e.ticket_id, by])) {
-      const chat = id === e.ticket_id ? null : { project: where.project_id, number: where.number };
-      const place = chat ? ` in ${where.number == null ? `the ${AGENT_NAME}'s chat` : `#${where.number}`}` : '';
-      this.emit(id, 'note', { text: `Struck through as wrong${place}: "${words}". ${reason}`, strike: { quote: words, reason, chat } });
-    }
-    return { ticketId: e.ticket_id };
-  }
-
-  /**
-   * continueLoop for each of `ticketIds` that has loop state (a person writing to a Taskmaster continues every minion of
-   * its scheme): one read of the loop keys, not one continueLoop per minion, which held the server 0.7 s a message (#1029).
-   */
-  continueLoops(ticketIds: number[], by: string): number {
-    // loop:<minion>, loop:taskmasters:<a>:<b> and loop:minions:<a>:<b> each name the chats whose loops they hold.
-    const named = new Set(this.store.settingKeys('loop:').flatMap((key) => key.split(':').slice(1).map(Number)));
-    let total = 0;
-    for (const id of ticketIds) if (named.has(id)) total += this.continueLoop(id, by);
-    return total;
-  }
-
-  /**
-   * A person continued a minion paused by the loop guard, or wrote into its chat or its Taskmaster's:
-   * the held messages go through in order and its count starts again. For a Taskmaster, the same for
-   * each of its exchanges with other schemes' Taskmasters. Returns how many were held.
-   */
-  continueLoop(ticketId: number, by: string): number {
-    const ticket = this.store.getTicket(ticketId);
-    if (!ticket) return 0;
-    const loops: { key: string; chats: () => number[]; pair?: true }[] =
-      ticket.kind === 'coordinator'
-        ? this.store
-            .listProjects()
-            .flatMap((p) => this.store.listCoordinators(p.id))
-            .filter((c) => c && c.id !== ticketId)
-            .map((c) => ({ key: pairKey(ticketId, c!.id), chats: () => [ticketId, c!.id] }))
-        : // Its Taskmaster only once there's a loop to lift: looking it up for every minion cost 0.2 ms each (#1029).
-          [
-            { key: loopKey(ticketId), chats: () => this.relays.loopChats(ticket) },
-            // Its direct exchanges with the scheme's other minions (#783).
-            ...this.store
-              .settingKeys(MINION_PAIRS)
-              .map((key) => key.slice(MINION_PAIRS.length).split(':').map(Number))
-              .filter((ids) => ids.includes(ticketId))
-              .map(([a, b]) => ({ key: minionPairKey(a, b), chats: () => [ticketId, a === ticketId ? b : a], pair: true as const })),
-          ];
-    let total = 0;
-    for (const { key, chats, pair } of loops) {
-      const loop = this.store.getSetting<LoopState>(key);
-      if (!loop) continue;
-      this.store.deleteSetting(key);
-      const n = loop.held.length;
-      if (!n) continue;
-      const text = `${by} continued, so ${n === 1 ? 'the held message' : `the ${n} held messages`} went through.`;
-      // A minion's note is keyed by the minion in both chats; a Taskmasters' or two minions' note by each chat's own.
-      for (const id of chats()) this.emit(id, 'loop_continued', { minion: ticket.kind === 'coordinator' || pair ? id : ticketId, by, text });
-      // The rows' loop badges go (#1067): a chat that gets a held message is broadcast by its send; the rest that showed one, here.
-      for (const id of pair || ticket.kind === 'coordinator' ? chats() : [ticketId]) if (!loop.held.some((m) => m.to === id)) this.broadcastTicket(id);
-      // Only the Taskmaster's messages to its minion steer; Taskmasters' and minions' to each other queue.
-      for (const m of loop.held) {
-        if (pair) this.relays.copyToTaskmaster(m.to, m.author, m.text);
-        // A minion dismissed since never reopens for another minion's message (#783): it waits as mail.
-        if (m.mail || this.store.getTicket(m.to)?.status === 'closed') this.relays.mail(m.to, m.author, m.text, m.from);
-        else if (pair) this.send(m.to, m.author, m.text, [], { from: m.from, hold: true, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, false);
-        else this.send(m.to, m.author, m.text, [], { from: m.from, hold: true, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, ticket.kind !== 'coordinator' && m.to === ticketId);
-      }
-      total += n;
-    }
-    return total;
   }
 
   /** Waiting on a person (an approval or a card): its silence is theirs, not the turn's. */

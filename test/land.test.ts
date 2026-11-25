@@ -1814,6 +1814,27 @@ test('a commit that lost its #N: title is refused by the smoke check, before the
   assert.equal(r.run().status, 0);
 });
 
+test('the smoke check does not blame a title the rebase leaves out: one main has cherry-picked, or one that came off main (#1983)', () => {
+  for (const kind of ['cherry-picked', 'taken back']) {
+    const r = setup();
+    r.commit(r.wt, 'x.txt', 'no number in this title');
+    const x = git(r.wt, 'rev-parse', 'HEAD');
+    if (kind === 'cherry-picked') {
+      r.commit(r.source, 'm.txt', 'main moved');
+      git(r.source, 'cherry-pick', x);
+    } else {
+      const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+      mkdirSync(state);
+      writeFileSync(join(state, 'taken-back'), `${x} ticket/9-other\n`);
+    }
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    git(r.wt, 'commit', '-q', '--amend', '-m', '#1: mine');
+    const res = r.run();
+    assert.equal(res.status, 0, `${kind}: ${res.stderr}`);
+    assert.equal(git(r.source, 'log', '-1', '--format=%s'), '#1: mine');
+  }
+});
+
 test("the smoke check refuses a .ts file that doesn't parse, by the branch's tools/parse-check.ts (#1012)", () => {
   const r = setup();
   writeFileSync(join(r.wt, 'tools', 'parse-check.ts'), "console.log('src/x.ts does not parse (Expected a semicolon)'); process.exit(1);\n");

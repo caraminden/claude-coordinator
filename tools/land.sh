@@ -489,8 +489,8 @@ fi
 
 # Commit titles (#1489): a rebase stopped on a conflict and continued with GIT_EDITOR=true used to read "#N: ..." as a comment
 # and drop it. One line in $lost naming the first commit that lost its title while a sibling kept theirs; a plain scheme has none.
-lost_title() {
-  [ "$mode" = build ] || [ ! -x "$tools/commit-titles.sh" ] || lost=$("$tools/commit-titles.sh" "$([ "$mode" = into ] && echo "refs/heads/$build" || echo main)" 2>&1)
+lost_title() { # <a commit the rebase leaves behind, under_of's, or nothing>
+  [ "$mode" = build ] || [ ! -x "$tools/commit-titles.sh" ] || lost=$("$tools/commit-titles.sh" "$([ "$mode" = into ] && echo "refs/heads/$build" || echo main)" ${1:+"$1"} 2>&1)
 }
 # The smoke check (#1012): before the line, the checks that fail in seconds, so a land they refuse never waits in line
 # or for CI (#1006: about 40 of 86 refusals at the lock were these). It reads the branch's own tools (a repo without
@@ -508,7 +508,7 @@ smoke() {
     under=$(under_of)
     early_check main "before the line" || smoke_fail "it conflicts with main"
   fi
-  lost_title || { say "smoke: $lost"; smoke_fail "a commit title is wrong"; } # what waited in line to hear it (#1983)
+  lost_title "${under-}" || { say "smoke: $lost"; smoke_fail "a commit title is wrong"; } # what waited in line to hear it (#1983)
   if [ -f tools/parse-check.ts ]; then
     out=$("$tools/citadel-node" --no-warnings tools/parse-check.ts 2>/dev/null) || true
     [ -z "$out" ] || { sed 's/^/land: smoke: /' <<<"$out" >&2; smoke_fail "a .ts file does not parse"; }

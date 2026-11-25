@@ -790,11 +790,29 @@ test('a commit that lost its "#N:" title beside one that has it is refused by na
   assert.equal(res.status, 1);
   assert.match(res.stderr, /lost its #N: title/);
   assert.doesNotMatch(res.stderr, /^(queue|land: rebasing)/m, 'before the line (#1983)');
+  assert.match(res.stderr, /^land: smoke: a commit title is wrong, before the line \(\d+ s\), so nothing landed and nobody waited on it\./m, 'the wording landResult (src/land.ts) reads');
   assert.equal(git(r.main, 'rev-parse', 'main'), before);
   const late = r.run({ LAND_SMOKE: '0' }); // and at the front, for what the rebase did
   assert.equal(late.status, 1);
   assert.match(late.stderr, /^land: rebasing [^]*lost its #N: title/m);
   assert.equal(git(r.main, 'rev-parse', 'main'), before);
+});
+
+test('the smoke check does not blame a title the rebase leaves out: one main has cherry-picked, or one land_under names (#1983)', () => {
+  for (const kind of ['cherry-picked', 'land_under']) {
+    const r = setup('true', {}, 'land_under() { [ ! -e "$UNDER" ] || cat "$UNDER"; }\n');
+    const under = join(r.dir, 'under');
+    commitAs(r, 'x.txt', 'no number in this title');
+    const x = git(r.wt, 'rev-parse', 'HEAD');
+    if (kind === 'cherry-picked') {
+      r.commit(r.main, 'm.txt', 'main moved');
+      git(r.main, 'cherry-pick', x);
+    } else writeFileSync(under, `${x}\n`);
+    commitAs(r, 'b.txt', '#1: mine');
+    const res = r.run({ UNDER: under });
+    assert.equal(res.status, 0, `${kind}: ${res.stderr}`);
+    assert.equal(git(r.main, 'log', '-1', '--format=%s'), '#1: mine');
+  }
 });
 
 // #1626: in a scheme whose titles end in "(#N)", none starts "#N", so only an empty subject is a lost title.

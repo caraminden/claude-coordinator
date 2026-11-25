@@ -4554,9 +4554,9 @@
  },
  "PUT /api/workers": {
   "anon": "401 Not logged in",
-  "person": "400 size or pause is needed, not both",
-  "member": "400 size or pause is needed, not both",
-  "outsider": "400 size or pause is needed, not both",
+  "person": "400 size, pause or limits is needed, one of them",
+  "member": "400 size, pause or limits is needed, one of them",
+  "outsider": "400 size, pause or limits is needed, one of them",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
   "m1": "403 A minion may only update itself",

@@ -272,6 +272,8 @@ test('a turn placed on a machine starts, streams, steers, survives a server rest
   await until("the machine's copy of the folder to go, once the server is done with it", () => !existsSync(local));
 
   // Stop: the interrupt is applied on the machine, and claude's own result ends the turn.
+  // Its link, not its syncs, says it can take a turn: they come back sooner after the restart, and until the link does a turn runs at home.
+  await until('the machine to be back online', async () => (await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'w1' && m.online));
   rmSync(release);
   writeFileSync(heard, '');
   await call(`/api/tickets/${ticket.id}/messages`, { text: 'again' });

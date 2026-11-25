@@ -52,7 +52,7 @@ export function openRunsOn(t) {
     const rows = (machines ?? []).map((m) => option(m.name, `${m.name} only`, m.why ? `Can't be picked: ${m.why}` : `It waits while ${m.name} is off, away or busy`, m.why && m.name !== now));
     const gone = !['anywhere', 'perigee'].includes(now) && machines && !machines.some((m) => m.name === now);
     list.replaceChildren(
-      option('anywhere', 'Anywhere', 'At perigee; on your own connected computer when perigee has no free worker'),
+      option('anywhere', 'Anywhere', 'At perigee; on your own connected computer when perigee is full or someone with none waits for it'),
       option('perigee', 'Perigee only', 'Never on another computer'),
       ...rows,
       gone ? option(now, `${now} only`, "Not yours to pick, or it isn't connected to Citadel any more", true) : '',

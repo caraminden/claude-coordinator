@@ -5,7 +5,7 @@ import { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { until } from './wait.ts';
-import { nextSize as size, pick, POOL, TurnLine, type Waiting } from '../src/turn-line.ts';
+import { nextSize as size, pick, POOL, TurnLine, type LinePlace, type Waiting } from '../src/turn-line.ts';
 import { DEFAULT_LIMITS as L, refuse } from '../src/turn-limits.ts';
 import { Store } from '../src/db.ts';
 import type { Block, MachineHost, MachinePlace } from '../src/machine-pools.ts';
@@ -198,7 +198,7 @@ test('past that, a share is in proportion to what a person has running and waiti
 test('an empty line picks nothing', () => assert.equal(pick([], new Map(), 0), null));
 
 /** A line with no Runner: `started` is who it started, `saved` its settings. */
-function line(saved: Record<string, unknown> = {}, pools?: MachineHost) {
+function line(saved: Record<string, unknown> = {}, pools?: MachineHost, asks: (id: number) => LinePlace = () => ({ person: 1, rank: 1 })) {
   const busy = new Set<number>();
   const started: number[] = [];
   const stopped: number[] = [];
@@ -206,7 +206,7 @@ function line(saved: Record<string, unknown> = {}, pools?: MachineHost) {
     store: { getSetting: <T>(k: string) => saved[k] as T, setSetting: (k: string, v: unknown) => void (saved[k] = v), deleteSetting: (k: string) => void delete saved[k], addHealthEvent: () => {} },
     exempt: () => false,
     busy: (id) => busy.has(id),
-    asks: () => ({ person: 1, rank: 1 }),
+    asks,
     forced: () => null,
     start: (e) => {
       started.push(e.ticket);
@@ -342,25 +342,29 @@ test('a most under the size, or a fewest over it, pulls the size in on the next 
 });
 
 // Build 7 T4: a pool per place. Josh, 2026-11-25: "I just want to be able to increase the worker pool by connecting more
-// machines", and his pick "overflow only"; Cara the same day: a minion marked as needing one machine.
+// machines"; Cara the same day: a minion marked as needing one machine.
 const DESK = 7;
-function places(saved: Record<string, unknown> = {}) {
+function places(saved: Record<string, unknown> = {}, asks?: (id: number) => LinePlace, not: number[] = []) {
   const desk: MachinePlace = { id: DESK, name: 'desk', owner: 1, cap: 3, block: null, away: null, load: { reading: { cpu: 10, mem: 0 }, box: ok, at: Date.now() } };
   const marks = new Map<number, number>();
-  const never = new Set<number>();
+  const never = new Set(not);
   const stuck: { ticket: number; block: Block }[] = [];
-  const l = line(saved, {
-    machines: () => [desk],
-    mark: (id) => marks.get(id) ?? null,
-    nameOf: () => 'desk',
-    takes: (_m, id) => (never.has(id) ? { why: 'not lent', never: true } : null),
-    stuck: (ticket, _since, block) => void stuck.push({ ticket, block }),
-  });
+  const l = line(
+    saved,
+    {
+      machines: () => [desk],
+      mark: (id) => marks.get(id) ?? null,
+      nameOf: () => 'desk',
+      takes: (_m, id) => (never.has(id) ? { why: 'not lent', never: true } : null),
+      stuck: (ticket, _since, block) => void stuck.push({ ticket, block }),
+    },
+    asks,
+  );
   l.turns.setSize(1, 'Cara');
   return { ...l, desk, marks, never, stuck, at: (id: number) => l.turns.placeOf(id) };
 }
 
-test('a machine takes a turn only when perigee has no free worker, up to its own size', () => {
+test('with nobody else waiting, perigee first, then the machine up to its own size, then wait', () => {
   const p = places();
   assert.deepEqual([p.turns.enter(1), p.at(1)], [true, 0], 'perigee first');
   assert.deepEqual([p.turns.enter(2), p.at(2)], [true, DESK], 'perigee is full: the machine');
@@ -498,4 +502,123 @@ test("a machine's turns are not in its person's share at perigee", () => {
   );
   assert.equal(p.turns.enter(3), true);
   assert.equal(p.at(3), 0);
+});
+
+// Josh, 2026-11-25: "1. Perigee if it has room and no one else needs it 2. Your machine if it has room and perigee either is
+// full or someone without their own worker pool has jobs to run 3. Perigee if you have no machine and there are slots on
+// perigee 4. Wait". Cara (1 to 99) owns the desk; Josh (100 and up) has no machine.
+const josh = (id: number) => id >= 100;
+const people =
+  (urgent: number[] = []) =>
+  (id: number): LinePlace => ({ person: josh(id) ? 2 : 1, rank: 1, ...(urgent.includes(id) ? { urgent: 0 } : {}) });
+const list = (urgent?: number[]) => places({}, people(urgent), [100]);
+
+test('step 2: while someone with no machine waits, an owner goes to the machine and perigee stays theirs', () => {
+  const p = list();
+  p.turns.join(100);
+  assert.deepEqual([p.turns.enter(1), p.at(1)], [true, DESK], 'perigee has room, and Josh needs it');
+  assert.deepEqual([p.turns.enter(100), p.at(100)], [true, 0], 'step 3');
+  p.turns.stop();
+});
+
+test('step 3: a machineless turn is first at perigee, though an owner has waited longer', async () => {
+  const p = list();
+  p.desk.cap = 1;
+  p.turns.enter(90);
+  p.turns.enter(91);
+  assert.deepEqual([p.at(90), p.at(91)], [0, DESK]);
+  for (const id of [1, 2, 100]) p.turns.join(id);
+  assert.deepEqual(p.turns.order(), [100, 1, 2], 'and the line shows it');
+  await p.turns.hold(90, () => {});
+  await until('Josh to start', () => p.started.length);
+  assert.deepEqual([p.started, p.at(100)], [[100], 0]);
+  assert.deepEqual([p.turns.has(1), p.turns.has(2)], [true, true], 'step 4: the full machine is still a machine');
+  await p.turns.hold(100, () => {});
+  await until('then perigee is the owner’s, with nobody else in need', () => p.started.includes(1));
+  assert.equal(p.at(1), 0);
+  p.turns.stop();
+});
+
+test('a newcomer owner with a full machine waits while a machineless turn waits, perigee free', () => {
+  const p = list();
+  p.turns.setSize(1, 'Cara', DESK);
+  void p.turns.reattach(91, () => new Promise(() => {}), DESK);
+  p.turns.join(100);
+  assert.equal(p.turns.enter(1), false);
+  assert.deepEqual([p.turns.enter(100), p.at(100)], [true, 0]);
+  p.turns.stop();
+});
+
+test('a machine that cannot take a turn at all is no machine: it stands with the machineless', () => {
+  for (const no of [(p: ReturnType<typeof list>) => void (p.desk.block = { why: 'away' }), (p: ReturnType<typeof list>) => void p.never.add(1), (p: ReturnType<typeof list>) => void p.marks.set(1, 0), (p: ReturnType<typeof list>) => void (p.desk.cap = 0)]) {
+    const p = list();
+    no(p);
+    p.turns.join(1);
+    p.turns.join(100);
+    assert.deepEqual(p.turns.order(), [1, 100]);
+    assert.deepEqual([p.turns.enter(1), p.at(1)], [true, 0]);
+    p.turns.stop();
+  }
+});
+
+test('one that waits but cannot start at perigee does not need it', () => {
+  for (const [id, not] of [
+    [100, (p: ReturnType<typeof list>) => void p.busy.add(100)],
+    [2, (p: ReturnType<typeof list>) => void p.marks.set(2, DESK)],
+  ] as const) {
+    const p = list();
+    not(p);
+    p.turns.join(id);
+    assert.deepEqual([p.turns.enter(1), p.at(1)], [true, 0]);
+    p.turns.stop();
+  }
+});
+
+test('an Urgent owner’s turn starts before a machineless one: on the machine, or at perigee when that is full', async () => {
+  for (const full of [false, true]) {
+    const p = list([1]);
+    let over = () => {};
+    p.turns.enter(90);
+    void p.turns.hold(90, () => new Promise<void>((r) => (over = r)));
+    void p.turns.reattach(91, () => new Promise(() => {}), DESK);
+    void p.turns.reattach(92, () => new Promise(() => {}), DESK);
+    p.turns.join(100);
+    p.turns.join(1);
+    assert.deepEqual(p.turns.order(), [1, 100]);
+    if (!full) p.turns.setSize(3, 'Cara', DESK);
+    else over();
+    await until('the urgent one to start', () => p.started.length);
+    assert.deepEqual([p.started[0], p.at(1)], [1, full ? 0 : DESK]);
+    p.turns.stop();
+  }
+});
+
+test('an Urgent owner’s turn uses its machine while perigee is needed, so both start', async () => {
+  const p = list([1]);
+  p.turns.join(100);
+  p.turns.join(1);
+  await until('both to start', () => p.started.length === 2);
+  assert.deepEqual([p.started, p.at(1), p.at(100)], [[1, 100], DESK, 0]);
+});
+
+test('after 90 minutes an owner’s turn stands at perigee as if there were no machine', () => {
+  const first = (since: number) =>
+    places(
+      {
+        'turn-line': [
+          { ticket: 1, since },
+          { ticket: 100, since: Date.now() },
+        ],
+      },
+      people(),
+      [100],
+    ).started[0];
+  assert.deepEqual([first(Date.now() - POOL.longMs), first(Date.now() - POOL.longMs + 60_000)], [1, 100]);
+});
+
+test('pick: with no machine first, after Urgent and Start now, the shares unchanged within each', () => {
+  const own = (x: Waiting): Waiting => ({ ...x, own: true });
+  assert.deepEqual(order([own(w(1, 7)), w(2, 8), own(w(3, 9)), w(4, 8)]), [2, 4, 1, 3]);
+  assert.deepEqual(order([w(2, 8), own({ ...w(1, 7), urgent: 0 })]), [1, 2]);
+  assert.deepEqual(order([w(2, 8), own({ ...w(1, 7), forced: true })]), [1, 2]);
 });

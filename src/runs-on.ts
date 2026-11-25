@@ -1,5 +1,5 @@
 // "Runs on" (Build 7 T4; Cara, 2026-11-25: "Add it to Build 7 now"): where a minion's turns may run. Nothing saved is
-// anywhere: perigee, and a machine when perigee is full. `home` is perigee only; a machine is that one only, whatever
+// anywhere: perigee, and its person's machine by the list in src/turn-line.ts. `home` is perigee only; a machine is that one only, whatever
 // perigee holds, and it waits while that computer can't take it (src/turn-line.ts). Saved in the settings table, so a
 // restart keeps it. When it can't ever run there, or has waited a day, a card asks the minion's owner.
 import type { Store } from './db.ts';

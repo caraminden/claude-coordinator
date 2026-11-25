@@ -127,7 +127,8 @@ export const CREATE_TICKET = {
       reason: PICK_REASON,
       runs_on: {
         type: 'string',
-        description: "Where its turns may run: 'anywhere' (default; a connected machine only when perigee is full), 'perigee', or a machine's name for work that needs that computer. Only the machine's owner picks it, so their own ask must name it; its turns wait while that computer is off.",
+        description:
+          "Where its turns may run: 'anywhere' (default; its owner's connected machine when perigee is full or someone with no machine waits for it), 'perigee', or a machine's name for work that needs that computer. Only the machine's owner picks it, so their own ask must name it; its turns wait while that computer is off.",
       },
       workflow: WORKFLOW,
       plugin_folders: PLUGIN_FOLDERS,

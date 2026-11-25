@@ -8,9 +8,12 @@
 // turn needs no starting any more is simply dropped when it comes up.
 //
 // One line, a pool per place (Build 7 T4): place 0 is perigee, any other is a connected machine's id (src/machine-pools.ts),
-// each with its own saved size and limits. Overflow only (Josh, 2026-11-25): a machine takes a turn only while perigee has no
-// free worker, and only its owner's. A minion marked for a machine (src/runs-on.ts) is the one exception: it starts there
-// whatever perigee holds, and nowhere else.
+// each with its own saved size and limits. Where a turn goes (Josh, 2026-11-25): "1. Perigee if it has room and no
+// one else needs it 2. Your machine if it has room and perigee either is full or someone without their own worker pool has
+// jobs to run 3. Perigee if you have no machine and there are slots on perigee 4. Wait", where the jobs that count are
+// waiting turns ("Their turns are waiting"). Judged per turn: a machine that can't take it (away, not lent, a ship's tests)
+// is no machine, one that is only full still is. A minion marked for a machine (src/runs-on.ts) is the one exception: it
+// starts there whatever perigee holds, and nowhere else.
 import { HOLD } from './start-now.ts';
 import type { Store } from './db.ts';
 import type { PressureReading } from './pressure.ts';
@@ -80,6 +83,8 @@ export interface LinePlace {
   first?: boolean;
   /** 0 its session is about to go cold, 1 under way, 2 brand new. */
   heat?: 0 | 1 | 2;
+  /** Its person's own machine could take it, so at perigee it stands behind those that have none. */
+  own?: boolean;
 }
 
 /** A waiting turn as `pick` sees it. */
@@ -114,7 +119,7 @@ export function nextSize(s: { size: number; at: number; used: number; waiting: n
 const less = (a: number[], b: number[]) => a.map((n, i) => n - b[i]).find((d) => d) ?? 0;
 
 /**
- * Whose turn a free worker takes: the ones started now by a person, the Urgent in their order, then the person furthest below their share, then the first in
+ * Whose turn a free worker takes: the ones started now by a person, the Urgent in their order, then those with no machine of their own, then the person furthest below their share, then the first in
  * that person's own order. Everyone's first two workers come before anyone's third; past that a share is in proportion to
  * what a person has running and waiting.
  */
@@ -134,7 +139,7 @@ export function pick(waiting: Waiting[], running: Map<number, number>, now: numb
   const urgent = (w: Waiting) => (w.forced ? -1 : (w.urgent ?? Number.MAX_SAFE_INTEGER));
   let best: Waiting | null = null;
   for (const w of waiting) {
-    const by = best && (urgent(w) - urgent(best) || share(w.person) - share(best.person) || oldest.get(w.person)! - oldest.get(best.person)! || w.person - best.person || less(own(w), own(best)));
+    const by = best && (urgent(w) - urgent(best) || Number(!!w.own) - Number(!!best.own) || share(w.person) - share(best.person) || oldest.get(w.person)! - oldest.get(best.person)! || w.person - best.person || less(own(w), own(best)));
     if (by === null || by < 0) best = w;
   }
   return best;
@@ -203,7 +208,7 @@ export class TurnLine {
     return this.granted.get(ticketId)?.place ?? 0;
   }
 
-  /** Its machine can't take the turn it was given a worker for there: an overflow turn runs at perigee, over the size if need be. */
+  /** Its machine can't take the turn it was given a worker for there: unless marked for it, it runs at perigee, over the size if need be. */
   comeHome(ticketId: number) {
     const held = this.granted.get(ticketId);
     if (held) held.place = 0;
@@ -248,7 +253,7 @@ export class TurnLine {
     const running = this.byPerson();
     // A turn that waits for its machine takes no place in front of anyone, so those stand last.
     const there = new Set(this.entries.filter((e) => this.need(e.ticket)).map((e) => e.ticket));
-    const asked = this.asked(this.entries);
+    const asked = this.asked(this.entries, true);
     let rest = asked.filter((w) => !there.has(w.ticket));
     const line: Waiting[] = [];
     for (let w = pick(rest, running, Date.now()); w; w = pick(rest, running, Date.now())) {
@@ -534,19 +539,37 @@ export class TurnLine {
 
   /** Where a turn can start at this moment, or null: it waits. */
   private placeFor(me: LineEntry, via?: RetryKind): number | null {
-    const first = (ready: LineEntry[]) => {
-      const rest = ready.filter((e) => e.ticket !== me.ticket);
-      return !rest.length || this.best([me, ...rest])?.ticket === me.ticket;
-    };
     const mark = this.host.pools?.mark(me.ticket) ?? null;
-    const free = this.used() < this.size();
-    if (!mark) {
-      const full = this.full(this.host.asks(me.ticket, via).person);
-      if (!full && this.forcedFor(me.ticket) !== null) return 0;
-      if (free) return !full && first(this.ready()) ? 0 : null;
-    }
-    const there = mark === 0 ? undefined : this.machines().find((m) => (!mark || m.id === mark) && !this.host.pools!.takes(m.id, me.ticket, via) && first(this.ready(m)));
-    return there?.id ?? null;
+    const full = this.full(this.host.asks(me.ticket, via).person);
+    if (!mark && !full && this.forcedFor(me.ticket) !== null) return 0;
+    if (mark || this.used() >= this.size()) return this.machineFor(me, via);
+    const ready = this.ready();
+    const there = this.needed(ready.filter((e) => e.ticket !== me.ticket)) ? this.machineFor(me, via) : null;
+    return there ?? (!full && this.isFirst(me, ready, true) ? 0 : null);
+  }
+
+  private isFirst(me: LineEntry, ready: LineEntry[], home = false): boolean {
+    const rest = ready.filter((e) => e.ticket !== me.ticket);
+    return !rest.length || this.best([me, ...rest], home)?.ticket === me.ticket;
+  }
+
+  /** The machine a turn can start on now, or null. */
+  private machineFor(me: LineEntry, via = me.via): number | null {
+    const mark = this.host.pools?.mark(me.ticket) ?? null;
+    if (mark === 0) return null;
+    return this.machines().find((m) => (!mark || m.id === mark) && !this.host.pools!.takes(m.id, me.ticket, via) && this.isFirst(me, this.ready(m)))?.id ?? null;
+  }
+
+  /** Someone with no machine of their own waits for perigee. */
+  private needed(ready: LineEntry[]): boolean {
+    return ready.some((e) => !this.hasMachine(e));
+  }
+
+  /** Its person's own machine could take it, be it full now. Not for ever (Josh's Taskmaster, 2026-11-25): waiting this long, it stands at perigee as if there were none. */
+  private hasMachine(e: LineEntry): boolean {
+    const pools = this.host.pools;
+    if (!pools || pools.mark(e.ticket) !== null || Date.now() - e.since >= POOL.longMs) return false;
+    return pools.machines().some((m) => !m.block && this.sizeOf(m) > 0 && !pools.takes(m.id, e.ticket, e.via));
   }
 
   /** The machines a turn can start on now: nothing holds them and a worker there is free. */
@@ -617,8 +640,10 @@ export class TurnLine {
     if (this.timer || this.closed || this.host.detached || this.admitting !== null) return;
     if (!this.entries.length || this.paused()) return;
     const ready = this.ready();
-    const entry = this.best(this.used() < this.size() ? ready : ready.filter((e) => this.forcedFor(e.ticket) !== null));
-    if (entry) return this.admit(entry, 0);
+    const forced = (e: LineEntry) => this.forcedFor(e.ticket) !== null;
+    const entry = this.best(this.used() < this.size() ? ready : ready.filter(forced), true);
+    // Urgent puts it first; its own machine is still its place while perigee is needed.
+    if (entry) return this.admit(entry, (!forced(entry) && this.needed(ready) && this.machineFor(entry)) || 0);
     for (const m of this.machines()) {
       const there = this.best(this.ready(m));
       if (there) return this.admit(there, m.id);
@@ -669,11 +694,11 @@ export class TurnLine {
     this.pumpIn(0);
   }
 
-  /** The waiting turns that could start in a place: at perigee all but those marked for a machine, on a machine those marked for it and, while perigee has no free worker, any it may take. */
+  /** The waiting turns that could start in a place: at perigee all but those marked for a machine, on a machine those marked for it and, while perigee is full or needed, any it may take. */
   private ready(m?: MachinePlace): LineEntry[] {
     const idle = this.entries.filter((e) => !this.host.busy(e.ticket));
     if (!m) return idle.filter((e) => !this.need(e.ticket) && !(this.stalled.size && this.full(this.host.asks(e.ticket, e.via).person)));
-    const over = this.used() >= this.size();
+    const over = this.used() >= this.size() || this.needed(this.ready());
     return idle.filter((e) => {
       const mark = this.host.pools!.mark(e.ticket);
       return (mark === m.id || (mark === null && over)) && !this.host.pools!.takes(m.id, e.ticket, e.via);
@@ -685,13 +710,14 @@ export class TurnLine {
     return this.stalled.has(person) && [...this.granted.values()].some((g) => g.person === person && !g.place && !g.lent);
   }
 
-  private best(entries: LineEntry[]): LineEntry | null {
-    const w = pick(this.asked(entries), this.byPerson(), Date.now());
+  private best(entries: LineEntry[], home = false): LineEntry | null {
+    const w = pick(this.asked(entries, home), this.byPerson(), Date.now());
     return w && entries.find((e) => e.ticket === w.ticket)!;
   }
 
-  private asked(entries: LineEntry[]): Waiting[] {
-    return entries.map((e) => ({ ...e, ...this.host.asks(e.ticket, e.via), ...(this.forcedFor(e.ticket) !== null ? { forced: true } : {}) }));
+  /** `home`: as they stand for perigee. */
+  private asked(entries: LineEntry[], home = false): Waiting[] {
+    return entries.map((e) => ({ ...e, ...this.host.asks(e.ticket, e.via), own: home && this.hasMachine(e), ...(this.forcedFor(e.ticket) !== null ? { forced: true } : {}) }));
   }
 
   private byPerson(): Map<number, number> {

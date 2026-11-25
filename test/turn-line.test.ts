@@ -1044,7 +1044,7 @@ async function shipsAsItStarts() {
   return { desk: { machine: m.id, name: m.name }, m, s };
 }
 
-test('an overflow turn whose machine went as it started runs at perigee; one marked for it waits with its messages (Build 7 T4)', async (t) => {
+test('a turn whose machine went as it started runs at perigee; one marked for it waits with its messages (Build 7 T4)', async (t) => {
   t.after(() => (runner.pools = null));
   const { desk, s } = await shipsAsItStarts();
   runner.turnLine.setSize(1, 'Cara');

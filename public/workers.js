@@ -162,7 +162,9 @@ export function workersPanel(page) {
     const size = pool.fixed ? `Set to ${pool.fixed.size} by ${pool.fixed.by}` : `Auto, between ${w.min} and ${w.max}${pool.why ? `: moved to ${pool.size} workers ${ago(pool.at)}, ${pool.why}` : ''}`;
     const limits = limitsOf(home, "What Auto steers by. A change takes effect within 10 seconds; a set that can't work is refused with the reason.");
     // With a computer connected, perigee is one place of several and its controls are in its row.
-    const places = w.machines.length ? h('div', { class: 'hue-rows st-places' }, placeRow(home, null, [[size], ['Takes turns first; a connected computer takes one only when perigee is full']], [h('label', { class: 'small' }, 'Turns at once', sizePick(home)), limits]), ...w.machines.map(machineRow)) : null;
+    const places = w.machines.length
+      ? h('div', { class: 'hue-rows st-places' }, placeRow(home, null, [[size], ['Takes turns first. While it is full, or someone with no computer connected waits for it, those with their own use that']], [h('label', { class: 'small' }, 'Turns at once', sizePick(home)), limits]), ...w.machines.map(machineRow))
+      : null;
     el.replaceChildren(
       h('h4', {}, 'Workers'),
       h('b', { class: 'st-value' }, value),

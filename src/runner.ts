@@ -2575,7 +2575,7 @@ export class Runner {
 
   /**
    * The machine a turn starts on now that it has a worker; null: perigee. A machine that can't take it since the line gave
-   * it one there (offline, a ship's tests, another sender): an overflow turn runs here, and one marked for a machine goes
+   * it one there (offline, a ship's tests, another sender): one not marked for it runs here, and one marked for a machine goes
    * back in the line ('wait') with its queue and its resume kept.
    */
   private startPlace(ticket: Ticket, person: number | null, via?: RetryKind): { id: number; name: string } | 'wait' | null {

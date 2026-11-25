@@ -67,12 +67,14 @@ let moved = new Set(); // minions whose click took them out of the list they wer
 function withWords(data) {
   for (const m of data?.minions ?? []) {
     const w = words.get(m.id);
-    if (w && (w.saved === null || data.asked <= w.saved)) setWhy(m, w.why);
+    if (!w) continue;
+    if (w.saved === null || data.asked <= w.saved) setWhy(m, w.why, data.repo);
+    else had.set(m.id, m.why); // someone else's, since
   }
 }
-function setWhy(m, why) {
+function setWhy(m, why, repo) {
   m.why = why;
-  if (m.end === 'nothing' || m.end === 'why') m.end = why ? 'why' : 'nothing';
+  if (['nothing', 'why', 'norepo'].includes(m.end)) m.end = why ? 'why' : repo ? 'nothing' : 'norepo';
 }
 
 /** Save why minion `m` closed, or that it isn't recorded (null): shown at once, put back if it didn't save. */
@@ -82,7 +84,7 @@ function mark(m, why) {
     words.set(m.id, w);
     moved.add(m.id);
     const now = last?.data?.minions?.find((x) => x.id === m.id);
-    if (now) setWhy(now, w.why);
+    if (now) setWhy(now, w.why, last.data.repo);
     last?.show();
   };
   const w = { why, saved: null };
@@ -259,10 +261,11 @@ export function flowTab(id, name, data, retry) {
       show: () => {},
       redraw() {
         const at = el.contains(document.activeElement) ? (document.activeElement.closest('[aria-label]')?.getAttribute('aria-label') ?? null) : null;
+        const word = at && document.activeElement.textContent;
         el.replaceChildren(...build(id, name, this.data, retry, () => this.redraw()));
         if (!at) return;
         const now = el.querySelector(`[aria-label="${CSS.escape(at)}"]`);
-        (now?.matches('[role=group].chips') ? now.querySelector('.on') : now)?.focus({ preventScroll: true });
+        (now?.matches('[role=group]') ? ([...now.querySelectorAll('button')].find((b) => b.textContent === word) ?? now.querySelector('.on')) : now)?.focus({ preventScroll: true });
       },
     };
   } else if (last.data === data) return last.el;
@@ -468,7 +471,7 @@ function build(id, name, data, retry, redraw) {
 /** One minion in the list, opening its chat. */
 function rowOf(id, m, most) {
   const bar = put(h('i', {}), { '--pct': `${most ? ((m.cost / most) * 100).toFixed(1) : 0}%` });
-  const facts = [NAME.kind[m.kind], m.refused ? plural(m.refused, 'refused ship') : '', m.why && m.end === 'answer' ? `closed as ${m.why}` : '', ['nothing', 'why', 'norepo', 'answer'].includes(m.end) ? m.said || 'No closing note' : ''].filter(Boolean).join(' · ');
+  const facts = [NAME.kind[m.kind], m.refused ? plural(m.refused, 'refused ship') : '', ['nothing', 'why', 'norepo', 'answer'].includes(m.end) ? m.said || 'No closing note' : ''].filter(Boolean).join(' · ');
   return h(
     'li',
     {},
@@ -480,9 +483,12 @@ function rowOf(id, m, most) {
       h('span', { class: 'muted flow-row-facts' }, facts),
       h('span', { class: 'flow-row-bar', 'aria-hidden': 'true' }, bar),
     ),
-    ['nothing', 'why', 'norepo'].includes(m.end) ? whyOf(m) : '',
+    ['nothing', 'why', 'norepo', 'answer'].includes(m.end) ? whyOf(m) : '',
   );
 }
+
+/** The three words, and any other a scheme gave the property that these have. */
+const wordsOf = (ms) => [...new Set([...WHY, ...ms.flatMap((m) => m.why ?? [])])];
 
 const listWords = (xs) => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} or ${xs.at(-1)}`);
 
@@ -492,7 +498,7 @@ function whyOf(m) {
     'div',
     { class: 'flow-why', role: 'group', 'aria-label': `Why #${m.number} closed`, 'data-id': String(m.id), 'data-hue': `end-${m.end}` },
     h('span', { class: 'muted' }, m.why ? 'Closed as' : 'Not recorded'),
-    ...WHY.map((w) => h('button', { type: 'button', class: `chip${m.why === w ? ' on' : ''}`, 'aria-pressed': String(m.why === w), onclick: () => mark(m, m.why === w ? null : w) }, w[0].toUpperCase() + w.slice(1))),
+    ...wordsOf([m]).map((w) => h('button', { type: 'button', class: `chip${m.why === w ? ' on' : ''}`, 'aria-pressed': String(m.why === w), onclick: () => mark(m, m.why === w ? null : w) }, w[0].toUpperCase() + w.slice(1))),
   );
 }
 
@@ -502,7 +508,7 @@ function summary(ms, early) {
     there = refused.filter((m) => m.end === 'late'),
     nothing = ms.filter((m) => m.end === 'nothing' || m.end === 'norepo'),
     why = ms.filter((m) => m.end === 'why'),
-    where = nothing[0]?.end === 'norepo' ? 'closed, with no repo to look in' : 'closed with nothing on main, why not recorded';
+    where = nothing[0]?.end === 'norepo' ? 'closed, with no repo to look in and why not recorded' : 'closed with nothing on main, why not recorded';
   return [
     h('b', {}, num(ms.length)),
     ` ${ms.length === 1 ? 'minion' : 'minions'}, ${money(value(ms, 'cost'))}. `,
@@ -510,7 +516,7 @@ function summary(ms, early) {
       ? [h('b', {}, num(refused.length)), ` had two or more refused ships${there.length === refused.length ? ', and all of them still got there. ' : `, and ${num(there.length)} of those still got there. `}`]
       : [early ? 'None is on record with two or more refused ships. ' : 'None had two or more refused ships. ']),
     ...(nothing.length ? [h('b', {}, num(nothing.length)), ` ${nothing.length === 1 ? 'feature, fix or chore' : 'features, fixes and chores'} ${where}: ${money(value(nothing, 'cost'))}.`] : ['No feature, fix or chore closed with nothing on main and no word why.']),
-    ...(why.length ? [' ', h('b', {}, num(why.length)), ` more ${why.length === 1 ? 'was' : 'were'} closed as ${listWords(WHY.filter((w) => why.some((m) => m.why === w)))}.`] : []),
+    ...(why.length ? [' ', h('b', {}, num(why.length)), ` more ${why.length === 1 ? 'was' : 'were'} closed as ${listWords(wordsOf(why).filter((w) => why.some((m) => m.why === w)))}: ${money(value(why, 'cost'))}.`] : []),
   ];
 }
 

@@ -56,6 +56,16 @@ test('a minion’s own close says why, and an unknown word refuses the close and
   await end(m.id);
 });
 
+test('a close that its turn’s stop calls off leaves no word for whoever closes it next', async () => {
+  const m = await minion();
+  assert.equal((await close(m, { as: 'replaced' })).status, 202);
+  assert.ok((await srv.call(`/api/tickets/${m.id}/stop`, {})).status < 300);
+  await until('it to stop', async () => (await get(m.id)).status !== 'running');
+  assert.notEqual((await get(m.id)).status, 'closed');
+  assert.equal((await srv.call(`/api/tickets/${m.id}/status`, { status: 'closed' })).status, 200);
+  assert.deepEqual([(await get(m.id)).status, (await get(m.id)).properties.closedAs], ['closed', undefined]);
+});
+
 test('a close refused because a card waits saves no word', async () => {
   const m = await minion();
   const asked = await srv.as({ token: m.token })(`/api/tickets/${m.id}/questions`, { questions: [{ question: 'Keep it?', options: [{ label: 'A', recommended: true }, { label: 'B' }] }] });
@@ -90,15 +100,15 @@ test('a person closes in one click with no word, and sets one after; the Taskmas
 test('the Flow tab’s read carries the word', async () => {
   const v = (await srv.call(`/api/projects/${project.id}/flow`)).data as { minions: { end: string; why: string | null }[] };
   assert.ok(v.minions, JSON.stringify(v));
-  // No repo here, so nothing says whether one reached main.
+  // Its word is its ending, in a scheme with no repo too.
   assert.deepEqual(
     v.minions
       .map((m) => [m.end, m.why])
       .filter(([, why]) => why)
       .sort(),
     [
-      ['norepo', 'dropped'],
-      ['norepo', 'replaced'],
+      ['why', 'dropped'],
+      ['why', 'replaced'],
     ],
   );
 });

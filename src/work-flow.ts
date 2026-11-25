@@ -19,7 +19,7 @@ import { turnEnv } from './turn-launch.ts';
 export type Kind = 'feature' | 'bug' | 'chore' | 'research' | 'other';
 /** shipped: refusals were recorded, and there were fewer than two. untold: on main from before they were, or live with a ship it ran itself. other: on main with no ship or release of its own. */
 export type Path = 'shipped' | 'untold' | 'refused' | 'other' | 'never';
-/** build: merged into a major build that isn't on main. nothing: feature, fix or chore work closed with nothing on main, and no word why. why: the same, with its word saved. norepo: either, in a scheme with no repo to look in. */
+/** build: merged into a major build that isn't on main. nothing: feature, fix or chore work closed with nothing on main, and no word why. norepo: the same in a scheme with no repo to look in. why: either, with its word saved. */
 export type End = 'live' | 'late' | 'main' | 'build' | 'nothing' | 'why' | 'norepo' | 'answer' | 'open';
 /** Refused hand-offs, and hand-offs' own ship notes, are in the chats from this Pacific day on. */
 export const REFUSALS_FROM = '2026-11-14';
@@ -59,6 +59,8 @@ export interface FlowView {
   minions: FlowMinion[];
   /** Minions whose chats haven't been read, or not since they last changed: left out of `minions`, the next read has more of them. */
   unread: number;
+  /** Whether the scheme has a repo to look in. */
+  repo: boolean;
   /** Whether main's commits could be read. */
   git: boolean;
   /** Whether the range reaches before refused ships were kept. */
@@ -101,7 +103,7 @@ export function settle(m: Pick<FlowRow, 'type' | 'status' | 'why' | 'live' | 'bu
   if (f.merged || m.merged_pr) return { path, end: 'build' };
   if (m.status !== 'closed') return { path, end: 'open' };
   if (kind === 'research' || kind === 'other') return { path, end: 'answer' };
-  return { path, end: !repo ? 'norepo' : m.why ? 'why' : 'nothing' };
+  return { path, end: m.why ? 'why' : repo ? 'nothing' : 'norepo' };
 }
 
 /** The minions `log` (git log --format=%cn%x09%s) names: the #N a subject starts or ends with, else its first. GitHub's own merges end with a pull request's number. */
@@ -259,6 +261,7 @@ export class WorkFlow {
         return { id: r.id, number: r.number, title: r.title, kind: kindOf(r.type), ...settle(r, f, on.has(r.number), !!repo), why: r.status === 'closed' ? r.why : null, cost: r.cost, refused: f.refused, said: f.said };
       }),
       unread: rows.length - read.length,
+      repo: !!repo,
       git: !repo || named !== null,
       early: from < RECORDED,
       releases: rows.some((r) => r.live),

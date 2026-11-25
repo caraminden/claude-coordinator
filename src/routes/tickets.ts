@@ -1411,14 +1411,19 @@ export const ticketRoutes: Route[] = [
       if (ticket.kind === 'coordinator') throw new HttpError(400, 'The Taskmaster cannot be dismissed');
       if (runner.isRunning(id)) throw new HttpError(409, 'Stop the minion before dismissing it');
       // Why it closed, in one word (#1989; Josh, 2026-11-25, "Save one word"): an agent says it, a person's one click doesn't.
-      if (body.status === 'closed' && body.as != null) {
-        store.props.set('minion', id, ticket.project_id, { closedAs: body.as }, session.name);
-        if (ticket.status === 'closed') runner.broadcastTicket(id);
-      }
+      const as = body.status === 'closed' && body.as != null ? { closedAs: body.as } : null;
+      if (as) store.props.check(ticket.project_id, as);
       // Already as asked: a second dismissal, or a reopen of a minion that isn't dismissed, changes nothing.
-      if ((body.status === 'closed') === (ticket.status === 'closed')) return json(res, 200, ticketView(app, id));
+      if ((body.status === 'closed') === (ticket.status === 'closed')) {
+        if (as) store.props.set('minion', id, ticket.project_id, as, session.name);
+        if (as) runner.broadcastTicket(id);
+        return json(res, 200, ticketView(app, id));
+      }
       if (body.status === 'closed') {
-        await runner.close(id, `${session.name} dismissed this minion.`);
+        const closed = runner.close(id, `${session.name} dismissed this minion.`);
+        if (as) store.props.set('minion', id, ticket.project_id, as, session.name);
+        if (as) runner.broadcastTicket(id);
+        await closed;
       } else {
         store.updateTicket(id, { status: body.status });
         await ownWrites(); // the broadcast, the worktree check and the reply read it back (#1244)

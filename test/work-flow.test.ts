@@ -238,6 +238,8 @@ test('a minion closed with its word reads as that, not as a loss; one closed wit
   store.updateTicket(b.id, { status: 'idle' });
   store.updateTicket(b.id, { status: 'closed' });
   store.updateTicket(c.id, { status: 'running' });
+  store.props.set('minion', c.id, p.id, { closedAs: 'done' }, 'the minion'); // its close_self, then cancelled
+  store.updateTicket(c.id, { status: 'idle' });
   store.updateTicket(c.id, { status: 'closed' });
   assert.deepEqual(
     [(await ends())[b.id], (await ends())[c.id]],
@@ -288,7 +290,7 @@ test('a ship with no refusals on record and no note of its own is never a first 
   const why = { ...m, why: 'replaced' };
   assert.deepEqual(settle(m, none, false), { path: 'never', end: 'nothing' });
   assert.deepEqual(settle(why, none, false), { path: 'never', end: 'why' });
-  assert.equal(settle(why, none, false, false).end, 'norepo');
+  assert.equal(settle(why, none, false, false).end, 'why');
   assert.equal(settle({ ...why, live: 1 }, none, true).end, 'live');
   assert.equal(settle({ ...why, status: 'idle' }, none, false).end, 'open');
   assert.equal(settle({ ...why, type: 'research' }, none, false).end, 'answer');

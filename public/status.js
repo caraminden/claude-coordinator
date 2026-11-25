@@ -3,7 +3,7 @@
 // tiles, each with its last 8 days. It reads /api/status (src/status-page.ts) every 30 s and changes
 // nothing. Every tile keeps its size whatever its numbers say, so a re-read moves nothing. The Status chip beside
 // CI's opens that tab, its dot the worst verdict it shows.
-import { ago, api, h, view, poller, pacificStamp, pacificIso, pacificClockBare, pacificClock } from './base.js';
+import { ago, api, h, keepView, view, poller, pacificStamp, pacificIso, pacificClockBare, pacificClock } from './base.js';
 import { toast } from './ui/status.js';
 import { emptyCard, hueRow, schemeTag, showFirst, toneChip } from './look.js';
 import { optimistic } from './ui/optimistic.js';
@@ -807,7 +807,7 @@ const LINES_MS = 3_000;
  * cleanly (it leaves the line and main stays as it was): it shows "Stopping…" at once, and a refusal puts the button back
  * with a toast and a Retry. The tile is last and wide, so rows coming and going move nothing above it.
  */
-function shipLinePanel(page) {
+export function shipLinePanel(page) {
   let lines = null;
   let failed = null;
   const stopping = new Set(); // "<projectId>:<seq>" sent and not yet gone from the line
@@ -854,8 +854,9 @@ function shipLinePanel(page) {
     );
     if (focused) el.querySelector(`[data-key="${CSS.escape(focused)}"]`)?.focus();
   };
+  let running = false;
   const load = async () => {
-    if (!page.isConnected && lines !== null) return;
+    if (!page.isConnected && lines !== null) return void (running = false);
     if (!document.hidden && (el.isConnected || lines === null)) {
       try {
         lines = (await api('api/ship-lines')).lines;
@@ -870,7 +871,13 @@ function shipLinePanel(page) {
     setTimeout(load, LINES_MS);
   };
   draw();
-  load();
+  // The chain ends while the pane is off screen; showing the tab again starts it (#1922 WP1).
+  el.resume = () => {
+    if (running) return;
+    running = true;
+    load();
+  };
+  el.resume();
   return el;
 }
 
@@ -929,12 +936,16 @@ export function statusPane(onData = () => {}) {
           servicePanel = m.servicePanel;
           draw();
         },
-        () => {},
+        // A 403 is "not an admin": it stays off. Any other failure (a restart) leaves it unread for the next show to try again.
+        (err) => {
+          if (err?.status !== 403) contraptions = null;
+        },
       );
     }
     return '';
   };
-  const draw = () => {
+  const draw = () => keepView(el, drawNow);
+  const drawNow = () => {
     const { citadel, apps, days, now, shipTimes = [] } = data;
     const mine = apps.filter((a) => scope === 'all' || a.scheme === scope).sort((x, y) => x.title.localeCompare(y.title));
     const app = mine.find((a) => `app:${a.name}` === picked);
@@ -976,6 +987,7 @@ export function statusPane(onData = () => {}) {
       if (data) draw();
     }
     refresh.now();
+    lines.resume();
   };
   return el;
 }

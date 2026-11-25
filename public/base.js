@@ -88,6 +88,32 @@ export function whenShown(fn) {
  * a throw is the read's own business (catch inside it). `now()` starts a read at once unless one is running or due, so
  * whoever joins while a read runs takes its answer: no second read (#1610).
  */
+/**
+ * Run `build`, which replaces nodes inside `root`, then give the keyboard focus and each inner scroll back to the node in the
+ * same place of the new tree (#1922 WP14): a timed redraw otherwise drops them to the body.
+ */
+export function keepView(root, build) {
+  const place = (n) => {
+    const path = [];
+    for (; n && n !== root; n = n.parentNode) path.unshift([...n.parentNode.children].indexOf(n));
+    return n === root ? path : null;
+  };
+  const at = (path) => path.reduce((n, i) => n?.children[i], root);
+  const a = document.activeElement;
+  const focus = a && a !== root && root.contains(a) ? { path: place(a), tag: a.tagName } : null;
+  const scrolls = [...root.querySelectorAll('*')].filter((n) => n.scrollTop || n.scrollLeft).map((n) => [place(n), n.scrollTop, n.scrollLeft, n.tagName]);
+  build();
+  for (const [path, top, left, tag] of scrolls) {
+    const n = path && at(path);
+    if (n && n.tagName === tag) {
+      n.scrollTop = top;
+      n.scrollLeft = left;
+    }
+  }
+  const n = focus?.path && at(focus.path);
+  if (n && n.tagName === focus.tag && n !== document.activeElement) n.focus({ preventScroll: true });
+}
+
 export function poller(read, every) {
   let timer = null,
     busy = false;

@@ -178,7 +178,7 @@ function landRedsBlock(s, lr) {
 
 /** The tab's sections for scheme `s`; `data` is its /test-health read, null until it arrives. */
 export function testHealth(s, data, refresh) {
-  if (data?.error) return [h('p', { class: 'muted' }, "Couldn't read test health. Pick the tab again to retry.")];
+  if (data?.error) return [h('p', { class: 'muted' }, "Couldn't read test health. ", h('button', { type: 'button', class: 'secondary small', onclick: () => refresh() }, 'Try again'))];
   if (!data) return [h('p', { class: 'muted' }, 'Reading test health…')];
   return [fastBlock(s, data.fast, data.now), landRedsBlock(s, data.landReds), flakeBlock(s, data.flakes, refresh)];
 }

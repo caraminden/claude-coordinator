@@ -1595,7 +1595,15 @@ export const projectRoutes: Route[] = [
         const ft = fx?.ticket_id == null ? undefined : store.getTicket(fx.ticket_id);
         // The fix (#1120): its minion's number and person, its age, and the clean runs of the 50 the desktop proof needs.
         const fix = fx && { state: fx.state, minion: ft?.number ?? null, owner: ft?.person_id == null ? null : (store.getUser(ft.person_id)?.name ?? null), startedAt: fx.started_at, heldAt: fx.held_at, cleanRuns: fx.clean_runs, need: PROOF_RUNS, reopened: fx.reopened };
-        return { ...f, ...app.store.flakeMessages(project.id, f.file, Date.now() - FLAKE_WINDOW_MS), before, changedAt: at, fix: fix ?? null, minion: open.find((t) => t.title === title)?.number ?? ft?.number ?? null, lastMinion: f.ticketId == null ? null : (store.getTicket(f.ticketId)?.number ?? null) };
+        return {
+          ...f,
+          ...app.store.flakeMessages(project.id, f.file, Date.now() - FLAKE_WINDOW_MS),
+          before,
+          changedAt: at,
+          fix: fix ?? null,
+          minion: open.find((t) => t.title === title)?.number ?? (ft && (ft.status !== 'closed' || fx?.state === 'held') ? ft.number : null),
+          lastMinion: f.ticketId == null ? null : (store.getTicket(f.ticketId)?.number ?? null),
+        };
       });
       // The last day's land runs, each red one under its cause (#1607); null when GitHub can't be read.
       const since = Date.now() - LAND_REDS_MS;

@@ -607,7 +607,7 @@ ships 30 minutes at most. A ship's `land/**` run is never touched, and another s
 held 4 hours at most.
 **One flake proof beside ships** (Josh, 2026-11-25, picked "Let them run, one at a time" on #1902's card; it narrows both his earlier
 picks, for flake proofs only): one proof starts and runs on whatever the ship line does, and the next, the longest held first, starts when it ends.
-A ship, its own check and the early next train never wait for one; main's run stops one when it may start, and a heavy job or suite runs before or after it, never beside.
+A ship, its own check and the early next train never wait for one; main's run, heavy jobs and suites run before or after one, never beside: each waits for the one that runs, and goes before the next if it may start.
 No proof starts while a ship's red tests run again alone (`rerun failed files alone`); one already running goes on.
 **One Citadel job at a time** (#1906; Josh, 2026-11-24: "Citadel never runs two heavy jobs at once"): the runs of Citadel's
 own repo go one by one, in the order ship, main's full run, a ship's own check (`check/**`, a light check) or the early next

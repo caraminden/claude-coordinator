@@ -14,7 +14,7 @@
 // keeps no other waiting, and none waits behind lower ones past SLOT_WAIT_MS.
 // One flake proof beside ships (Josh, 2026-11-25, picked "Let them run, one at a time"): a proof starts and runs on whatever the
 // ship line does, never two at once, the longest held first. A ship, its own check and the early next train never wait for one; main's run, heavy
-// jobs and suites still do not run beside one, and one of those that may start goes before the next proof. No proof starts
+// jobs and suites still do not run beside one: each waits for it to end, and one that may start goes before the next proof. No proof starts
 // while a ship's red tests run again alone (one already running goes on).
 // Left out: desktop.yml (a release build), other schemes' push-started builds, which the runner agents squeeze (src/ci-ships.ts).
 // A job asks before it starts (POST /api/ci-hold; citadel-heavy reads hold.json). Fails open: a job that can't ask, or a
@@ -350,8 +350,8 @@ export class CiHold {
   /** Why this run must not be running now for a ship's or main's sake, or null. `start`: optional work also waits the settle time. */
   private shipsFirst(kind: HoldKind, h: HeldRun | undefined, start: boolean, now: number): string | null {
     if (kind === 'main') return this.mainPast(h, now) ? null : this.shipWhy(now);
-    // No ship stops a proof; main's run does once it may go itself.
-    if (kind === 'proof') return !this.shipWhy(now) || [...this.held.values()].some((m) => m.kind === 'main' && this.mainPast(m, now)) ? this.mainWhy(now) : null;
+    // Nothing stops a proof that was let in; none starts while main's run may go itself.
+    if (kind === 'proof') return start && (!this.shipWhy(now) || [...this.held.values()].some((m) => m.kind === 'main' && this.mainPast(m, now))) ? this.mainWhy(now) : null;
     if (!sideRun(kind)) return start ? this.gate(now, h?.stops) : this.stopWhy(now);
     if (!this.fresh(now)) return null;
     return this.seen.ship ? "a ship's tests are running" : start ? this.mainWhy(now) : null;
@@ -449,7 +449,7 @@ export class CiHold {
         const runs = a.run.status === 'in_progress';
         if (a.repo === own) {
           // A queued check or early run takes no runner's time: it asks when it starts. Main's running one yields to a ship (#1906).
-          const first = a.kind !== 'main' && a.kind !== 'proof' && !sideRun(a.kind) ? why : runs || a.kind === 'proof' || a.kind === 'main' ? this.shipsFirst(a.kind, h, false, now) : null;
+          const first = a.kind !== 'main' && a.kind !== 'proof' && !sideRun(a.kind) ? why : runs || a.kind === 'main' ? this.shipsFirst(a.kind, h, false, now) : null;
           if (first) await this.hold(a.repo, a.run, a.kind, first, now);
           else if (runs && !this.has(a.run.id) && this.unasked(a.run.id, now) && !this.slotPast(h, now)) {
             const taken = this.taken(a.kind, a.run.id, now);

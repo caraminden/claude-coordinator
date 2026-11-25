@@ -916,6 +916,8 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
     // XDG_RUNTIME_DIR: without it every one fails, NuGet's restore included (#225).
     if (tmp) env.XDG_RUNTIME_DIR = tmp;
   }
+  // On a connected machine claude signs in with that machine's own login, so none of the server's sign-in is sent there.
+  if (facts.machine) for (const v of AUTH_VARS) delete env[v];
   env = { ...env, ...androidEnv(homedir(), env.PATH) };
   // mise's shims last (#1147): an approved host tool runs by name, and never shadows one the turn had before.
   env = { ...env, ...facts.env.heavy, PATH: [...(pins.PIN_HAS.heavy ? [join(pin, 'bin', 'heavy')] : []), join(pin, 'bin'), env.PATH, join(homedir(), '.local/share/mise/shims')].filter(Boolean).join(':') };

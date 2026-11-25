@@ -8,7 +8,7 @@ import { writeOffThread, type Writer } from '../src/db-writer.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { busyNow, track } from '../src/settled.ts';
-import { procsUnder, settled, stopTurns, testPins } from './helpers.ts';
+import { procsUnder, settled, stopTurns, testPins, until } from './helpers.ts';
 testPins();
 
 // #1437: a test waits until the work it started is finished, not for its first sign. settled() only resolves once the
@@ -17,7 +17,7 @@ const root = mkdtempSync(join(tmpdir(), 'settled-'));
 const writers: Writer[] = [];
 after(async () => {
   for (const w of writers) await w.stop();
-  // timing-ok: only the in-process Store's database is in root, and its writers have stopped above; bootServer cleans its own
+  // timing-ok: in root are in-process Stores' databases, their writers stopped above, and a turn its own test stops; bootServer cleans its own
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -71,10 +71,17 @@ test("stopTurns waits out a turn that is still launching, then stops it, so noth
     () => ({}),
     fake,
   );
-  runner.relay(minion.id, minion.id, 'Taskmaster', 'go');
-  assert.equal(runner.turnStartedAt(minion.id), null, 'still launching');
-  await stopTurns(dir);
-  runner.noTurns = true; // its killed turn isn't resumed in the folder the teardown deletes
-  assert.notEqual(runner.turnStartedAt(minion.id), null, 'the launch is over, so it has nothing left to make');
-  assert.deepEqual([...procsUnder([dir]).values()], [], 'and the turn it started is stopped');
+  let started = 0;
+  runner.onTurnStart = () => started++;
+  try {
+    runner.relay(minion.id, minion.id, 'Taskmaster', 'go');
+    assert.equal(started, 0, 'still launching');
+    await stopTurns(dir);
+    assert.equal(started, 1, 'the launch is over, so it has nothing left to make');
+    assert.deepEqual([...procsUnder([dir]).values()], [], 'and the turn it started is stopped');
+  } finally {
+    await until('its launch to be over', () => started > 0);
+    runner.noTurns = true; // its killed turn isn't resumed in the folder the teardown deletes
+    await stopTurns(dir);
+  }
 });

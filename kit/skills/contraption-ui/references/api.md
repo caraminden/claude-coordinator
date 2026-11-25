@@ -206,7 +206,7 @@ X-Citadel-Identity: v1.<base64url(JSON claims)>.<base64url(Ed25519 signature ove
 | Claim | Meaning |
 |---|---|
 | `app` | Your name. Refuse a header naming another app |
-| `sub` | The person's Citadel user id, a JSON number (an integer): stable, the key for their data. Apps that key folders or maps on it use `String(sub)` |
+| `sub` | The person's Citadel user id, a JSON number (an integer): stable, the key for their data. Apps that key folders or maps on it use `String(sub)`, but send `Number(person.sub)` as `person` in a body (an ask refuses a string with 403) |
 | `login`, `name` | Their login and display name, which can change |
 | `iat`, `exp` | Seconds; `exp` is `iat + 60` |
 | `from`, `fromTitle` | Only on a relayed call (the calling contraption's name and title) or a session read (`scheme-<id>` and the scheme's name) |

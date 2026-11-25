@@ -43,6 +43,9 @@ const probes: Probe[] = [
   { name: 'ask: data with nothing', method: 'POST', path: '/api/contraptions/asks', body: { person: Josh.id, kind: 'data' } },
   { name: 'ask: a bad kind', method: 'POST', path: '/api/contraptions/asks', body: { person: Josh.id, kind: 'rant', text: 'x' } },
   { name: 'ask: not enabled', method: 'POST', path: '/api/contraptions/asks', body: { person: Dana.id, kind: 'bug', text: 'x' } },
+  { name: 'ask: a string person is refused', method: 'POST', path: '/api/contraptions/asks', body: { person: String(Josh.id), kind: 'bug', text: 'x' } },
+  { name: 'ask: files that are not a list', method: 'POST', path: '/api/contraptions/asks', body: { person: Josh.id, kind: 'bug', text: 'x', files: 'a.txt' } },
+  { name: 'ask: minion null is none', method: 'POST', path: '/api/contraptions/asks', body: { person: Josh.id, kind: 'bug', text: 'x', minion: null } },
   { name: 'ask: not JSON', method: 'POST', path: '/api/contraptions/asks', raw: '{', type: 'application/json' },
   { name: 'ask: wrong content type', method: 'POST', path: '/api/contraptions/asks', raw: 'x', type: 'text/plain' },
   { name: 'ask: an unknown upload', method: 'POST', path: '/api/contraptions/asks', body: { person: Josh.id, kind: 'bug', text: 'x', files: [{ upload: 'a'.repeat(24) }] } },
@@ -130,7 +133,8 @@ test('a scripted turn plays back the events the real stream has, in order', asyn
     body: JSON.stringify({ person: 1, session: 's', prompt: 'find fire' }),
   });
   const events = [...(await res.text()).matchAll(/^event: (.+)$/gm)].map((m) => m[1]);
-  assert.deepEqual(events, ['start', 'text', 'tool', 'tool_result', 'text', 'tool', 'text', 'tool_result', 'end']);
+  // A Grunt's words ('hm') are never streamed, as on Citadel.
+  assert.deepEqual(events, ['start', 'text', 'tool', 'tool_result', 'text', 'tool', 'tool_result', 'end']);
   assert.equal(fake.turns[0].prompt, 'find fire');
 });
 
@@ -184,4 +188,16 @@ test("a push reaches each enabled person's one phone, and the fake records it wi
   });
   assert.deepEqual([res.status, await res.json()], [200, { devices: 1, sent: 1, dropped: 0, skipped: ['off', 'nobody'] }]);
   assert.deepEqual(fake.pushes, [{ to: ['tester', 'off', 'nobody'], title: 'Hi', body: undefined, open: '/apps/peek-auras/x', tag: undefined, data: { k: 'v' }, skipped: ['off', 'nobody'] }]);
+});
+
+test('turn ids are numbers, a verdict reason may be null, and scripted asks hit 429 and a dismissed minion', async () => {
+  const fake = await startFakeCitadel({ app: 'a', people: [{ id: 1, login: 't', name: 'T', member: true }], askLimit: 1, minions: { 3: { number: 3, status: 'closed' } } });
+  after(() => fake.close());
+  const post = (path: string, body: unknown) => fetch(`${fake.url}/api/contraptions/${path}`, { method: 'POST', headers: { Authorization: `Bearer ${fake.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  // Citadel takes null for these as the default (its no_plan error here comes after validation); so does the fake.
+  const start = JSON.parse(/^data: (.+)$/m.exec(await (await post('turns', { person: 1, session: 's', prompt: 'x', model: null, effort: null, compactWindow: null, timeoutSec: null })).text())![1]);
+  assert.equal(typeof start.turn, 'number');
+  assert.equal((await post(`turns/${start.turn}/verdict`, { verdict: 'pass', reason: null })).status, 200);
+  assert.equal((await post('asks', { person: 1, kind: 'bug', text: 'x', minion: 3 })).status, 409);
+  assert.equal((await post('asks', { person: 1, kind: 'bug', text: 'x' })).status, 429);
 });

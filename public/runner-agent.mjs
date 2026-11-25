@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Citadel's CI runner agent (#328; Josh, 2026-11-05: "Citadel installs it itself"). It runs elevated, as SYSTEM, on
-// the PC that hosts every scheme's self-hosted GitHub Actions runners (Cara's desktop), and does exactly three
+// the PC that hosts every scheme's self-hosted GitHub Actions runners (first Cara's desktop; any PC with the agent), and does exactly three
 // things when Citadel asks: add a scheme's runners, list the runner services, remove a scheme's runners. Each is a
 // PowerShell script installed next to this file (add-runner.ps1, list-runners.ps1, remove-runner.ps1); it runs only
 // those, with arguments it checks itself, one job at a time, and never downloads code. It also reports the PC's load

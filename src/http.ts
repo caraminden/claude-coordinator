@@ -358,7 +358,7 @@ export interface App {
   ciTests?: (repo: string, runId: number, c: TestCounts) => void;
   /** Numbers the schemes' CI sends per run, kept for months and flagged on a step up (src/ci-numbers.ts, #1369). */
   ciNumbers: CiNumbers;
-  /** Jobs for the CI runner agent on Cara's desktop: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */
+  /** Jobs for the CI runner agent on a CI PC: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */
   runnerJobs: RunnerJobs;
   /** People's own Claude plans, in a container each (src/claude-link.ts, #213). */
   claude: ClaudeLink;

@@ -12,6 +12,7 @@ import { dragReorder } from './reorder.js';
 import { applyMove, dropped, lineGroups, lineWhy, nextUrgent } from './worker-linemath.js';
 
 const READ_MS = 10_000;
+const HOW = 'Next first. Drag one into Urgent to send it ahead; drag it below to let the order choose.';
 const ops = []; // moves on their way to the server, or shown until a read has them
 let open = null; // the drawer: { dialog, list, line, workers, failed }
 let reads = 0;
@@ -33,6 +34,7 @@ export function setUrgent(row, on, before, { undoing = false } = {}) {
   const was = new Map([...minionObjects(id)].map((t) => [t, t.urgent ?? null]));
   const op = { row, on, before, by: me, dead: false };
   const name = `#${row.number}`;
+  const others = [...was.values(), g?.urgent.find((r) => r.ticket === id)].some((u) => u?.kind && u.kind !== 'person'); // the server can't take its reason back from a press
   const show = (mark) => {
     for (const t of minionObjects(id)) t.urgent = mark === undefined ? (was.get(t) ?? null) : mark;
     renderSidebar();
@@ -40,7 +42,7 @@ export function setUrgent(row, on, before, { undoing = false } = {}) {
     draw();
   };
   if (!undoing)
-    toast(on && wasOn ? `Moved ${name} in Urgent` : on ? `${name} is Urgent: it goes ahead of the line` : `${name} is no longer Urgent`, {
+    toast(on && wasOn ? `Moved ${name} in Urgent` : on ? `${name} is Urgent: it goes ahead of the line` : `${name} is no longer Urgent${others ? '. Undo marks it as yours' : ''}`, {
       undo: { run: () => setUrgent(row, wasOn, wasOn ? back : undefined, { undoing: true }), live: () => !op.dead },
     });
   return optimistic({
@@ -61,7 +63,7 @@ export function setUrgent(row, on, before, { undoing = false } = {}) {
     label: `${on ? (wasOn ? 'move' : 'mark') : 'unmark'} ${name} ${on && wasOn ? 'in Urgent' : 'Urgent'}`,
   })
     .then(async ({ urgent }) => {
-      for (const t of minionObjects(id)) t.urgent = urgent;
+      if (!ops.some((o) => o !== op && !o.dead && o.row.ticket === id)) for (const t of minionObjects(id)) t.urgent = urgent; // a later press shows its own
       await read();
       drop(op);
       draw();
@@ -98,7 +100,7 @@ export function urgentButton(t) {
       onclick: () => toggleUrgent(t),
     },
     h('span', { class: 'urgent-bang', 'aria-hidden': 'true' }, '!'),
-    h('span', { class: u ? '' : 'urgent-off' }, u ? `Urgent · ${u.by}` : 'Urgent'),
+    h('span', {}, u ? `Urgent · ${u.by}` : 'Urgent'),
   );
 }
 
@@ -116,7 +118,7 @@ export const lineMoved = () => open && read();
 export function openLine(from = null) {
   if (open) return;
   const list = h('ol', { class: 'line-rows' });
-  const body = h('div', { class: 'line-drawer-body' }, h('div', { class: 'line-pool' }), h('p', { class: 'line-how muted small' }, 'Next first. Drag one into Urgent to send it ahead; drag it below to let the order choose.'), list);
+  const body = h('div', { class: 'line-drawer-body' }, h('div', { class: 'line-pool' }), h('p', { class: 'line-how muted small' }, HOW), list);
   const onHash = () => dialog.close();
   const gutter = innerWidth - document.documentElement.clientWidth;
   const dialog = openDialog({
@@ -134,8 +136,7 @@ export function openLine(from = null) {
   dragReorder(list, {
     items: () => [...list.querySelectorAll(':scope > li[data-item]')],
     onDrop: (a, b) => {
-      const g = shown();
-      const move = dropped(g, a, b);
+      const move = dropped(open.drawn, a, b); // the rows it was dropped among: a read since then waits for the drop
       if (!move) return toast('Below Urgent the order is automatic. Drop it in Urgent to send it ahead.');
       open.dropping = true; // the drag already slid the rows there
       setUrgent(move.row, move.on, move.before);
@@ -213,9 +214,10 @@ function button(key, label, text, onclick, cls = 'ar', pressed) {
 
 function rowOf(r, g, i, inUrgent) {
   const id = r.ticket;
-  const name = id == null ? h('span', { class: 'muted' }, 'A minion in another scheme') : h('a', { class: 'line-name', href: `#/p/${r.project}/t/${r.number}`, title: `#${r.number} ${r.title}` }, h('span', { class: 'num' }, `#${r.number}`), ` ${r.title}`);
+  const name = id == null ? h('span', { class: 'muted' }, 'A minion in another scheme') : h('a', { class: 'line-name', 'data-key': `name-${id}`, href: `#/p/${r.project}/t/${r.number}`, title: `#${r.number} ${r.title}` }, h('span', { class: 'num' }, `#${r.number}`), ` ${r.title}`);
   const why = lineWhy(r);
-  const bits = [r.person, r.since && r.waiting !== false ? waited(r.since) : r.waiting === false ? 'not waiting now' : '', inUrgent ? '' : why].filter(Boolean);
+  const other = id != null && r.project !== view?.projectId && view?.projects?.find((p) => p.id === r.project)?.name;
+  const bits = [r.person, other, r.since && r.waiting !== false ? waited(r.since) : r.waiting === false ? 'not waiting now' : '', inUrgent ? '' : why].filter(Boolean);
   const meta = h('span', { class: 'line-meta', title: [...bits, why].filter(Boolean).join(' · ') }, bits.join(' · '), inUrgent ? [bits.length ? ' · ' : '', h('b', { class: 'line-urgent' }, 'urgent'), why ? ` ${why}` : ''] : '');
   // Rest rows have one move, into Urgent, so their ↑ goes there; the Urgent rows step through the group, and out of it at its end.
   const u = g.urgent;
@@ -251,13 +253,14 @@ function draw() {
   // A redraw would drop what a person holds: let go first.
   if (open.list.classList.contains('reorder-active')) return void (open.later ??= setTimeout(() => open && ((open.later = null), draw()), 300));
   const { list, dialog } = open;
-  const g = shown();
+  const g = (open.drawn = shown());
   const focus = list.contains(document.activeElement) ? document.activeElement.dataset.key : null;
   dialog.querySelector('.line-pool').replaceChildren(...pool());
   if (!g) {
     dialog.querySelector('h2').textContent = 'The line';
     return list.replaceChildren(h('li', { class: 'line-note muted' }, open.failed ? `Couldn't read it: ${open.failed}` : 'Reading…'));
   }
+  list.previousElementSibling.textContent = open.failed ? `Couldn't read it again, so this may be old: ${open.failed}` : HOW;
   const waiting = g.urgent.filter((r) => r.waiting !== false).length + g.rest.length;
   dialog.querySelector('h2').textContent = `The line · ${waiting} waiting`;
   const tops = new Map([...list.querySelectorAll('[data-id]')].map((el) => [el.dataset.id, el.offsetTop]));

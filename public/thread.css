@@ -100,9 +100,9 @@ button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
   .ticket-head > .row > button { flex: none; white-space: nowrap; }
   .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 11rem; }
 }
-/* Beside two open sidebars the line is full: what isn't set shows its icon alone, and a name on Urgent takes the spare words' room (#1889). */
+/* Beside two open sidebars the line is full: the words Pin, Note and Ultra can spare make room for Urgent's (#1889). */
 @media (min-width: 801px) and (max-width: 1700px) {
-  .ticket-head .head-sub > .note-btn:not(.on) > :is(.wide-only, .urgent-off), .ticket-head .head-sub:has(> .urgent-btn.on) .wide-only { display: none; }
+  .ticket-head .head-sub .wide-only { display: none; }
 }
 /* Refresh button at the top of the screen, phones only (desktop browsers have their own). */
 .refresh-btn { display: none; }

@@ -656,7 +656,7 @@ button.line-btn:is(:hover, :focus-visible) { border-color: var(--line); backgrou
 button.line-btn.bang:is(:hover, :focus-visible) { border-color: var(--error); background: none; color: var(--error); }
 .line-btn.bang.on { border-color: var(--error); background: var(--error); color: var(--panel); }
 button.line-btn.bang.on:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--error) 80%, var(--ink)); color: var(--panel); }
-@media (max-width: 800px) { .line-t > .line-meta { white-space: normal; } .line-btn { width: 2.4rem; height: 2.4rem; } .line-ctl { gap: 0.1rem; } }
+@media (max-width: 800px) { .line-t > .line-meta { white-space: normal; } .line-t > .line-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; } .line-btn { width: 2.4rem; height: 2.4rem; } .line-ctl { gap: 0.1rem; } }
 .st-lines .hue-row-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-line-meta { display: inline-flex; align-items: center; gap: 0.6rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .st-line-meta .cui-btn { min-width: 7.5rem; }

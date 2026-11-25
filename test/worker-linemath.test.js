@@ -115,5 +115,6 @@ test('why it stands there', () => {
   assert.equal(lineWhy(tag(2, { kind: 'server', by: 'Citadel', reason: 'a fix' })), 'by Citadel: a fix');
   assert.equal(lineWhy(tag(null, { by: undefined })), '');
   assert.equal(lineWhy(wait(4, { warm: true })), 'warm, about to go cold');
+  assert.equal(lineWhy(wait(4, { first: true, warm: true })), 'ship refused, or others wait on it · warm, about to go cold');
   assert.equal(lineWhy(wait(4)), '');
 });

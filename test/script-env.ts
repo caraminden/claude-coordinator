@@ -7,6 +7,7 @@
 //   CITADEL_HEAVY_FALLBACK_FILE   citadel-heavy -> heavy-ci.ts (#1160): the file it writes when nothing ran on CI.
 //   LAND_REBASED                  land.sh -> its rebased copy (unset again before any child, cleared in case).
 //   DEPLOY_TIMES                  land.sh -> deploy.sh: the file deploy.sh notes its "queued" and "live" times in (#565).
+//   DEPLOY_RIDERS                 land.sh -> deploy.sh: the file its train's riders wrote who to report to in (#1865).
 //   LAND_REDO                     land.sh -> the copy that starts over after main went back (unset again before any child, like LAND_REBASED).
 //   LAND_RETRIED, LAND_RETRY_NOW, LAND_FLAKE_KEPT, LAND_ASIDE  land.sh -> the copy that goes again after a refusal by the pipeline (#1360; LAND_ASIDE: a pulled front stepping aside, #1918; unset again before any child).
 //   LAND_FIX                      a person -> land.sh: "this branch fixes the commit whose deploy was rolled back"; the suite a landing runs inherits it.
@@ -25,6 +26,7 @@ export const SCRIPT_ENV = [
   'DEPLOY_LOCKED',
   'DEPLOY_TESTED',
   'DEPLOY_TIMES',
+  'DEPLOY_RIDERS',
   'DEPLOY_QUEUE_TICKET',
   'CITADEL_HEAVY_HELD',
   'CITADEL_HEAVY_FALLBACK_FILE',

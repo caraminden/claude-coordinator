@@ -1129,12 +1129,8 @@ export const placeRank = (brief: string | undefined): number => (brief == null ?
 
 /** Where a land stands from land.sh's `queue:` lines: in line for the lock (its place), or landing. */
 export function landProgress(output: string, since: number): Progress {
-  const last =
-    output
-      .split('\n')
-      .filter((l) => l.startsWith('queue: '))
-      .at(-1) ?? '';
-  const place = /^queue: (next|\d+(?:st|nd|rd|th)) in line for the land lock/.exec(last)?.[1];
+  // The newest line that says where it stands: others ("the wait has no time limit") come after it.
+  const place = [...output.matchAll(/^queue: (?:(next|\d+(?:st|nd|rd|th)) in line for the land lock|got the land lock)/gm)].at(-1)?.[1];
   if (place) {
     const text = `in line to ship (${place})`;
     return { stage: 'land', since, usual: null, waitingOn: text, text, brief: place };

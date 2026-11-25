@@ -1,8 +1,11 @@
 // A landing or deploy killed part way, and a restart waiting on running turns (#553).
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { holds } from './holds.ts';
 import { git, until, pipe, land, subjects, proc } from './land-recover-fixture.ts';
 import { quietProc } from './quiet-proc.ts';
 
@@ -96,6 +99,49 @@ test('a restart waiting on running turns says so to the landing: how many, for h
   writeFileSync(join(p.dir, 'interruptible'), '0');
   assert.deepEqual(await p.restarts(1), ['0']);
   assert.equal(git(p.live, 'rev-parse', 'last-good'), tip);
+});
+
+// A server that hangs at its start took longer to fail than the deploy watched for: it shipped, and the roll back came after.
+test('a restart still under way when the live watch runs out is waited for: one that then fails takes its commit off main', { timeout: 120_000 }, async (t) => {
+  const p = await pipe(t, 1);
+  p.commit(p.wts[0], 'RUN_BAD', 'hangs at start\n');
+  const gate = join(p.dir, 'gives-up');
+  t.after(() => writeFileSync(gate, '')); // a failed test leaves no restart hanging
+  const landing = p.start(land, p.wts[0], { RUN_BAD_GATE: gate, DEPLOY_HEALTHY_WAIT: '1', DEPLOY_TEST_LIVE_GRACE: '0' });
+  let over = false;
+  void landing.done.then(() => (over = true));
+  const phase = () => existsSync(join(p.state, 'restart')) && readFileSync(join(p.state, 'restart'), 'utf8');
+  await until('the server to be restarting', () => /restarting/.test(phase() || ''));
+  // The watch's limit is 2 s here.
+  await holds('the landing waits for the verdict', () => !over, { ms: 4000 });
+  writeFileSync(gate, '');
+  const res = await landing.done;
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /the restart on .* failed and was rolled back/);
+  assert.equal(git(p.source, 'rev-parse', 'main'), p.base, `main is back:\n${res.stderr}`);
+  assert.deepEqual(await p.restarts(1), ['1']);
+});
+
+// The front's landing fails and takes the train off main; its riders go back in line and ship on their own (ADR 0020).
+test("a restart rolled back while its deploy watches tells the deploy's own minion, and no rider whose ship is still under way", { timeout: 120_000 }, async (t) => {
+  const p = await pipe(t, 1);
+  const told: string[] = [];
+  const api = createServer((req, res) => {
+    told.push(`${req.headers.authorization} ${req.url}`);
+    res.end('{}');
+  });
+  await new Promise<void>((ok) => api.listen(0, '127.0.0.1', ok));
+  t.after(() => void api.close());
+  const url = `http://127.0.0.1:${(api.address() as AddressInfo).port}`;
+  const tip = p.commit(p.source, 'RUN_BAD', 'never comes up\n');
+  const riders = join(p.dir, 'riders');
+  writeFileSync(riders, `${url} tok8 8 ${tip}\n`);
+  const res = await p.run(join(p.source, 'tools', 'deploy.sh'), p.source, { DEPLOY_RIDERS: riders, COORDINATOR_API: url, COORDINATOR_TICKET: '7', COORDINATOR_TOKEN: 'tok7', DEPLOY_SETTLE: '5', DEPLOY_TEST_LIVE_POLL: '0.1' });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /failed and was rolled back/);
+  assert.deepEqual(await p.restarts(1), ['1']);
+  assert.equal(told.length, 1, told.join('\n'));
+  assert.match(told[0], /^Bearer tok7 .*\/7\//);
 });
 
 // #565: how long each phase of a landing took, and each queued restart, in the day's retro log.

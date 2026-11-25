@@ -85,6 +85,8 @@ export function causeOf(lead: string, own: RetroLine[], after: RetroLine[]): { c
   const train = (kind: string) => after.find((l) => l.kind === kind && l.run != null && sameShip(l.parts[0] ?? '', lead));
   const of = (kind: string) => own.find((l) => l.kind === kind) ?? (borrow && TRAIN.includes(kind) ? train(kind) : undefined);
   if (of("shipped through main's red")) return { cause: 'main', rider: false, why: `main was red on ${of("shipped through main's red")!.parts[1] ?? 'the same test'} too` };
+  const main = own.find((l) => l.kind.startsWith('red on main too')); // refused or sent back in line for main's own red test (#1478)
+  if (main && borrow) return { cause: 'main', rider: false, why: `main was red on ${main.parts[1] ?? 'the same test'} too` };
   const bisect = of('ship train red');
   if (bisect) {
     const culprit = bisect.parts[1] ?? '';

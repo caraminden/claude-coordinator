@@ -602,6 +602,12 @@ if [ "$mode" = land ] && [ -n "$regen_attrs" ]; then
   QUEUE_TRAIN=hold
   [ -n "$quiet" ] || say "$branch declares Regenerate files (${regen_pats[*]}), so it holds the line: it goes first among the waiters, alone, behind only ships a person placed"
 fi
+# The front (pid $1) hands its riders' lines to deploy.sh (DEPLOY_RIDERS): "<api> <token> <ticket> <train commit>", as
+# its reporter() writes this one's own. A failed write never stops a landing.
+train_reporter() {
+  [ -n "${COORDINATOR_API:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ] && [ -n "${COORDINATOR_TICKET:-}" ] || return 0
+  (umask 077 && echo "$COORDINATOR_API $COORDINATOR_TOKEN $COORDINATOR_TICKET $2" >>"$state/riders-$1") || true
+}
 train_verdict() {
   local f=$train_dir/${DEPLOY_QUEUE_TICKET##*/} v a b c d e x lines=() at requeue=''
   # One read, no look first (#1914): the front may remove the file in between, and an unset v ended the ship under set -u.
@@ -614,7 +620,7 @@ train_verdict() {
   if [ -n "${1:-}" ]; then
     [ "$v" != riding ] || { rm -f "$f"; riding=''; return 0; }
     if [ "$v" = moving ] && [ -n "$d" ] && [ "$(queue_proc "$d")" = "$d $e" ]; then
-      [ "$at" != "$c" ] || git reset -q --keep "$a" || true
+      [ "$at" != "$c" ] || { train_reporter "$d" "$a"; git reset -q --keep "$a" || true; }
       queue_done
       flock -u 9
       requeue=1
@@ -632,7 +638,8 @@ train_verdict() {
       [ "$riding" = "$x" ] || { riding=$x; queue_phase "$x"; say "$x: waiting for CI on the train${b:+ without it}"; }
       return 1 ;;
     moving)
-      [ "$at" != "$c" ] || git reset -q --keep "$a" || true
+      # Before its branch moves, which the front waits for: who its deploy's restart reports to too (#1865).
+      [ "$at" != "$c" ] || { train_reporter "$d" "$a"; git reset -q --keep "$a" || true; }
       return 1 ;;
     back)
       [ "$at" != "$a" ] || git reset -q --keep "$b" || true
@@ -658,11 +665,12 @@ train_verdict() {
       else
         # An urgent fix riding the train lets the front's restart skip the starved-box hold (deploy.sh's hold, #1417),
         # and a restart still held says when it expects to go.
-        [ -z "${LAND_URGENT:-}${LAND_FIX:-}" ] || touch "$state/urgent"
+        # Only while that restart waits: it takes the mark as it starts, and one left after that would be the next restart's.
+        [ -z "${LAND_URGENT:-}${LAND_FIX:-}" ] || { [ ! -s "$state/hold" ] && { [ -n "$(queue_restart "$state")" ] || ! systemctl --user is-active -q "${DEPLOY_UNIT:-cc-restart-when-idle}" 2>/dev/null; }; } || touch "$state/urgent"
         if [ -s "$state/hold" ] && read -r x d <"$state/hold" 2>/dev/null && [[ $x =~ ^[0-9]+$ ]]; then
-          echo "deploy: not live yet: the restart $c's ship train queued carries it; the box is starved ($d), so it waits for it to ease, live by about $(TZ=America/Los_Angeles date -d "@$((x + 60))" '+%H:%M %Z') at the latest, and reports in that minion's chat" >&2
+          echo "deploy: not live yet: the restart $c's ship train queued carries it; the box is starved ($d), so it waits for it to ease, live by about $(TZ=America/Los_Angeles date -d "@$((x + 60))" '+%H:%M %Z') at the latest, and reports here too" >&2
         else
-          echo "deploy: not live yet: the restart $c's ship train queued carries it, and reports in that minion's chat" >&2
+          echo "deploy: not live yet: the restart $c's ship train queued carries it, and reports here too" >&2
         fi
       fi
       queue_done
@@ -1057,7 +1065,7 @@ main_boot() {
     # A copy that can't be made can't tell, so the ship is judged alone, as before.
     git -C "$SOURCE" archive "$m" | tar -x -C "$d" || { rm -rf "${d:?}"; echo 0; exit 0; }
     rc=0
-    timeout -k 10 "${DEPLOY_BOOT_TIMEOUT:-420}" "$d/tools/citadel-node" "$d/tools/boot-check.ts" "$d" "${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}" >"$state/boot-main.log" 2>&1 9>&- 7>&- 6>&- 4>&- || rc=$?
+    timeout -k 10 "${DEPLOY_BOOT_TIMEOUT:-600}" "$d/tools/citadel-node" "$d/tools/boot-check.ts" "$d" "${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}" >"$state/boot-main.log" 2>&1 9>&- 7>&- 6>&- 4>&- || rc=$?
     rm -rf "${d:?}"
     echo "$m $rc $(date +%s)" >"$state/boot-main"
     echo "$rc"
@@ -1075,14 +1083,14 @@ preflight() {
   land_mark preflight preflight
   began=$(date +%s)
   # As deploy.sh runs it: the commit's own check, a limit from outside, not as `node`, and without the locks' fds.
-  timeout -k 10 "${DEPLOY_BOOT_TIMEOUT:-420}" "$here/tools/citadel-node" "$here/tools/boot-check.ts" "$here" "${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}" >/dev/null 9>&- 7>&- 6>&- || rc=$?
+  timeout -k 10 "${DEPLOY_BOOT_TIMEOUT:-600}" "$here/tools/citadel-node" "$here/tools/boot-check.ts" "$here" "${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}" >/dev/null 9>&- 7>&- 6>&- || rc=$?
   if [ "$rc" = 0 ]; then
     say "the boot check passes on $short, so this landing goes on"
     return 0
   fi
   # 124, or 137 from timeout's KILL: stopped at the limit, which is not a verdict on the change (as deploy.sh says of it).
   if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
-    say "the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-420} s): running it on main, to tell a broken main from a broken change"
+    say "the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-600} s): running it on main, to tell a broken main from a broken change"
   else
     say "$short fails the same check here (its output is above): running it on main, to tell a broken main from a broken change"
   fi
@@ -1109,7 +1117,7 @@ preflight() {
     LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept LAND_ASIDE=$aside exec bash "$tools/land.sh" "${args[@]}" # RETRY_NOW: not quiet, so a land.sh the fix changed takes over
   fi
   retro_log "preflight refusal · $label · refusing since $since ($why)"
-  [ "$rc" != 124 ] && [ "$rc" != 137 ] || refuse "deploy has been refusing since $since: $why, and the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-420} s), so no CI run was spent and $untouched; $branch keeps the rebased work. A hang is not a verdict on the change: run it again, and if it hangs again tell the Taskmaster, since landings are blocked until that is fixed"
+  [ "$rc" != 124 ] && [ "$rc" != 137 ] || refuse "deploy has been refusing since $since: $why, and the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-600} s), so no CI run was spent and $untouched; $branch keeps the rebased work. A hang is not a verdict on the change: run it again, and if it hangs again tell the Taskmaster, since landings are blocked until that is fixed"
   refuse "deploy has been refusing since $since: $why, and $short fails the same check here (its output is above) while main passes it, so the cause is in your change: no CI run was spent and $untouched; $branch keeps the rebased work. Fix it and land again"
 }
 # A light land deploys without the boot check, so a refusing deploy doesn't hold it up.
@@ -2964,9 +2972,10 @@ trap 'main_back; exit 129' HUP
 bad_check # again: a rollback may have come while this one waited for CI
 # Until this ends by itself, however the deploy goes; a kill that skips the trap leaves it for the next landing.
 { echo "$old $tip"; echo "$train_owner"; train_others; } >"$state/moving"
-trap 'land_rc=$?; train_release; train_drop; top_done; land_timing $land_rc || true; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
+trap 'land_rc=$?; train_release; train_drop; top_done; land_timing $land_rc || true; rm -f "$state/riders-$$"; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
 moved=1
-git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
+# gc.auto=0: a git gc --auto detaches and would keep the lock it inherits.
+git -C "$SOURCE" -c gc.auto=0 merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"
 [ -z "${known_by[$tip]:-}" ] || say "shipped past known flakes ${known_by[$tip]}"
 [ -z "${through_by[$tip]:-}" ] || say "shipped through main's red on ${through_by[$tip]}"
@@ -2974,6 +2983,7 @@ if [ ${#train_n[@]} -gt 0 ]; then
   # Each rider moves its own branch (its worktree is its own) within a poll of the line, before the deploy writes the
   # release row, which finds each ship by its branch's tip (src/releases.ts landedIn).
   me=$(queue_proc $$)
+  rm -f "$state/riders-$$" # a killed landing's, with this pid
   for ((i = 0; i < ${#train_n[@]}; i++)); do train_say "$i" "moving ${train_tip[$i]} $branch ${train_was[$i]} $me"; done
   for ((w = 0; w < 20; w++)); do
     late=''
@@ -2991,7 +3001,7 @@ early_kept || { early_next 'this one deploys' </dev/null 9>&- 7>&- 6>&- & wait $
 queue_phase "deploying"
 land_mark deploy deploy
 
-if ! DEPLOY_LOCKED=1 DEPLOY_TESTED="$tested" DEPLOY_TIMES="$times" "$here/tools/deploy.sh" 6>&-; then
+if ! DEPLOY_LOCKED=1 DEPLOY_TESTED="$tested" DEPLOY_TIMES="$times" DEPLOY_RIDERS="$state/riders-$$" "$here/tools/deploy.sh" 6>&-; then
   main_back
   refuse "the deploy failed after main moved; main keeps $(git log -1 --format=%h "$tip"). The deploy's lines above say why and what to do"
 fi

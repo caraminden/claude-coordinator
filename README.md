@@ -637,7 +637,7 @@ a run (the defaults are set for perigee; each script's comments say more):
 | `LAND_BUILD_WAIT` | 3600 s | `land.sh --into`, `--full`, `--build`: wait for the run on the same build ahead of it |
 | `DEPLOY_QUEUE_STALL` | 900 s | the line: give up when nothing at its head has moved for this long |
 | `DEPLOY_TEST_TIMEOUT` | 600 s | `run-tests.sh`: the suite on perigee |
-| `DEPLOY_BOOT_TIMEOUT` | 420 s | `deploy.sh`: the boot check, from outside (it gives up by itself at 180 s) |
+| `DEPLOY_BOOT_TIMEOUT` | 600 s | `deploy.sh`: the boot check, from outside (it gives up by itself at 180 s, counted afresh up to three times) |
 | `DEPLOY_UNKNOWN_WAIT` | 60 s | the queued restart: a server that is up but doesn't answer, before it restarts anyway |
 | `CITADEL_HEAVY_MAX_WAIT` | 3600 s | `citadel-heavy`: give up (exit 75) when no slot has changed hands for this long |
 | `CITADEL_HEAVY_HEAD_STALE` | 60 s | `citadel-heavy`: a head of the line silent this long is stopped, and jobs go past it |

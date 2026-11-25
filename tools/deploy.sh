@@ -36,7 +36,7 @@ URL=${DEPLOY_URL:-http://127.0.0.1:8573}
 DB=${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}
 UNIT=${DEPLOY_UNIT:-cc-restart-when-idle}
 IDLE_TRIES=${DEPLOY_IDLE_TRIES:-720} # 10 s apart: 2 h
-BOOT_TIMEOUT=${DEPLOY_BOOT_TIMEOUT:-420} # boot-check.ts gives up by itself at 180 s, twice over
+BOOT_TIMEOUT=${DEPLOY_BOOT_TIMEOUT:-600} # past boot-check.ts's own limit: 180 s, three times over (its arm())
 IDLE_POLL=${DEPLOY_IDLE_POLL:-10} # seconds between looks at the running turns (tests shrink it)
 UNKNOWN_WAIT=${DEPLOY_UNKNOWN_WAIT:-60} # how long a restart waits on a server that is up but doesn't answer
 NOW=${DEPLOY_NOW:-} # set: restart without waiting for interruptible turns (--now)
@@ -46,6 +46,7 @@ WANT=${DEPLOY_TARGET:-} # and the commit it rolls back to (#1271)
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-60} # a start answers in ~1 s; one that migrates waits for it: dropping events_old took 12-29 s on copies (#1169 ship 3)
 HANDOVER_WAIT=${DEPLOY_HANDOVER_WAIT:-160} # a warm handover's longest: the new server's 90 s to ready + 60 s to live (src/handover.ts)
 SETTLE=${DEPLOY_SETTLE:-30} # after the first healthy answer, check again this much later (#520); tests use fractions
+RESTART_WAIT=${DEPLOY_RESTART_WAIT:-900} # the longest a deploy watches a restart under way, as long as the next one waits for its lock (deploy-queue.sh)
 REPORT_WAIT=${DEPLOY_REPORT_WAIT:-30} # seconds to wait for the server to take a deploy report
 REPORT_RETRY=${DEPLOY_REPORT_RETRY:-60} # and how long to keep trying one that never reached it
 REMOTE=${DEPLOY_REMOTE-origin} # set it empty to skip the push (dev copies)
@@ -648,7 +649,7 @@ deploy() {
     git_live fetch -q "$SOURCE" main
     git_live reset -q --hard "$TO"
   else
-    git_live pull -q --ff-only "$SOURCE" main
+    git_live -c gc.auto=0 pull -q --ff-only "$SOURCE" main # a git gc --auto detaches and would keep the locks it inherits
   fi
   new=$(git_live rev-parse HEAD)
   running=$(health commit)
@@ -660,7 +661,14 @@ deploy() {
     say "nothing to deploy: the server already runs $(short "$new")"
     mark queued
     mark live
-    report_me "Nothing to deploy: the server already runs $(short "$new")."
+    # The same code under a new commit (a revert of one rolled back late): take it as live, and send it to GitHub.
+    local pushed='' none=ok
+    if [ -z "$TO" ] && [ "$running" != "$new" ]; then
+      [ "$(health reload)" != sighup ] || systemctl --user kill -s HUP --kill-whom=main "$SERVICE" || true
+      [ "$(git_live rev-parse -q --verify 'last-good^{commit}')" != "$running" ] || git_live tag -f last-good "$new" >/dev/null
+      pushed=$(push_github "$new") || none=warn
+    fi
+    report_me "Nothing to deploy: the server already runs $(short "$new").$pushed" "$none"
     return 0
   fi
   say "deploying $(short "$new") ($kind change)"
@@ -765,6 +773,9 @@ deploy() {
     if [ -n "${COORDINATOR_TICKET:-}" ] && [ -n "${COORDINATOR_TOKEN:-}" ]; then
       (umask 077 && echo "${COORDINATOR_API:-$URL} $COORDINATOR_TOKEN $COORDINATOR_TICKET" >>"$STATE/reporters" && echo "$COORDINATOR_TICKET $new" >>"$STATE/reporter-commits")
     fi
+    # The ships riding this one's train hear it as it does (#1865; tools/land.sh train_reporter).
+    [ -s "${DEPLOY_RIDERS:-}" ] || return 0
+    (umask 077 && awk '{ print $1, $2, $3 }' "$DEPLOY_RIDERS" >>"$STATE/reporters" && awk '{ print $3, $4 }' "$DEPLOY_RIDERS" >>"$STATE/reporter-commits")
   }
   # The unit runs a private copy of the version just pulled, so a later pull or a rollback can't
   # rewrite the script under it.
@@ -815,9 +826,15 @@ deploy() {
   # Usually it is live within seconds and checked again SETTLE s later (last-good moves); say how that went here, as
   # this turn carries on through the restart. A rollback fails this deploy (#553), so land.sh takes the commit off main.
   local bad was limit=$((HEALTHY_WAIT * 2 + ${SETTLE%.*} + LIVE_GRACE)) # whole seconds: a test's SETTLE can be a fraction
+  # A restart under way (it has the restart lock, queue_restart) is watched past that, to its verdict: a server that hangs
+  # at its start takes minutes to fail, and "not live yet" counted it as shipped. Read before each look, so the look after it ends sees its verdict.
+  local looks i=0 phase='' from=$SECONDS
+  looks=$(awk -v l="$limit" -v p="$LIVE_POLL" 'BEGIN { print int(l / p + 0.5) }')
   was=$(cat "$STATE/bad" 2>/dev/null || true)
-  for _ in $(seq "$(awk -v l="$limit" -v p="$LIVE_POLL" 'BEGIN { print int(l / p + 0.5) }')"); do
+  while [ "$i" -lt "$looks" ] || { [ -n "$phase" ] && [ $((SECONDS - from)) -lt "$RESTART_WAIT" ]; }; do
+    i=$((i + 1))
     sleep "$LIVE_POLL"
+    [ "$i" -lt "$looks" ] || phase=$(queue_restart "$STATE")
     # A roll back's verdict is its own restart's, read below (#1271): the checkout and last-good move once that lets go.
     if [ -n "$TO" ]; then
       systemctl --user is-active -q "$UNIT" 2>/dev/null || break
@@ -831,6 +848,10 @@ deploy() {
     fi
     bad=$(cat "$STATE/bad" 2>/dev/null || true)
     if [ -n "$bad" ] && [ "$bad" != "$was" ] && git_live merge-base --is-ancestor "$new" "${bad##* }" 2>/dev/null; then
+      # The train's riders go back in line and ship on their own: the restart, still bringing last-good up, tells them no failure.
+      if [ -s "${DEPLOY_RIDERS:-}" ] && [ -f "$STATE/reporters" ]; then
+        (umask 077 && awk 'NR == FNR { r[$1 " " $2 " " $3]; next } !($0 in r)' "$DEPLOY_RIDERS" "$STATE/reporters" >"$STATE/reporters.$$") && mv "$STATE/reporters.$$" "$STATE/reporters"
+      fi
       say "the restart on $(short "${bad##* }") failed and was rolled back; its report in this chat says why (see journalctl --user -u $UNIT)"
       exit 1
     fi
@@ -844,7 +865,7 @@ deploy() {
   elif [ -z "$NOW" ] && [[ $n =~ ^[1-9][0-9]*$ ]]; then
     say "not live yet: the restart is waiting for $(turns "$n") a restart would cut off to finish (at most $((IDLE_TRIES * 10 / 60)) min more), and reports here when it is live. To restart without waiting: tools/deploy.sh --now (see journalctl --user -u $UNIT)"
   else
-    say "not live yet after $limit s; the restart reports here when it is (see journalctl --user -u $UNIT)"
+    say "not live yet after $((SECONDS - from)) s; the restart reports here when it is (see journalctl --user -u $UNIT)"
   fi
   # A roll back waits for its restart's verdict (#1271): the Releases card reads this exit, so "not live yet" can't end it.
   [ -n "$TO" ] || return 0

@@ -524,6 +524,7 @@ if (!BOOT_CHECK && !PREVIEW) every('minion jobs', 3_000, () => minionJobs.pump()
 // Minions that called wake_when_live hear from "Citadel" once the deploy they wait on is live. Sent
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text, light) => runner.send(ticketId, APP_NAME, text, [], light ? { light } : {}), outbox);
+if (!BOOT_CHECK && DATA_DIR === DEFAULT_DATA_DIR) waiters.proven = null; // until liveOn knows whether this boot can still be rolled back
 // A reopened minion's held waits go back to waiting (the outbox), and one whose deploy came live meanwhile is found now.
 runner.onStop = (ticketId, eventIds) => outbox.stoppedMessages(ticketId, eventIds);
 runner.onTurnStart = (ticketId, eventIds) => {
@@ -626,10 +627,13 @@ function catchUp(repoDir: string) {
     .catch((err) => console.error('Checking waiters after a merge failed:', err));
 }
 /** The server now runs `head`: wake its waiters, and dismiss pending-deploy minions it ships. */
-function liveOn(head: string | null) {
+function liveOn(head: string | null, booted = false) {
   // Not waited for (#526): its git and gh calls take seconds, and the server answers meanwhile.
   deployWatch?.live(head);
   void (async () => {
+    // A restart that settles badly is rolled back: nothing is closed or told "live" before deploy.sh stands by it.
+    if (booted && !(await waiters.prove())) return;
+    waiters.proven = head;
     await waiters.check(head);
     for (const id of await waiters.pendingLive()) runner.deployLive(id);
     void liveProbes.sweep().catch((err) => console.error(`The live probe sweep failed: ${err?.message ?? err}`)); // #1741: a kept probe whose ship this head has; never holds up what follows
@@ -998,7 +1002,7 @@ if (!BOOT_CHECK) {
   // Anything a close missed (a restart mid-close, a container turn's job re-parented to the container's init), hourly;
   // and test servers' turn supervisors left in their units once their folder or their ship is gone (#1758).
   every('reap closed minions', 3600_000, () => reaper.reap().finally(() => reaper.reapSupervisors()), 10 * 60_000);
-  liveOn(BOOT_COMMIT);
+  liveOn(BOOT_COMMIT, true);
 }
 // Citadel's recovery promises, checked at boot and hourly, report only (#1415, src/standing-checks.ts): reads in a worker.
 const standingChecks = new StandingChecks({
@@ -1881,7 +1885,7 @@ const liveProbes = new LiveProbes({
   },
   isLive: async (id, commit) => {
     const dir = store.getProject(store.getTicket(id)?.project_id ?? 0)?.repo_dir;
-    const head = waiters.head;
+    const head = waiters.proven;
     if (!commit || !dir || !head) return false;
     return new Promise((done) => execFile('git', ['merge-base', '--is-ancestor', commit, head], { cwd: dir }, (err) => done(!err)));
   },

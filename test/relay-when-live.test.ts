@@ -108,7 +108,7 @@ test('addRelay asks again when a deploy went live while its check ran (late, not
   w.live = async () => {
     // The first check runs against the old head and says no; the head moves before it returns.
     if (++calls === 1) {
-      w.head = 'head-2';
+      w.head = w.proven = 'head-2';
       return false;
     }
     return true;

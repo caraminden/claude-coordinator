@@ -1051,6 +1051,7 @@ test("landPhase reads the phase from land.sh's newest phase line", () => {
   assert.equal(landPhase("queue: 2nd in line\nland: riding in ticket/3-a's ship train: waiting for CI on the train\nland: pulled off ticket/3-a's ship train on a guess, red in test/a.test.ts: waiting for CI on the train without it\n"), 'landing: pulled off its train');
   assert.equal(landPhase('land: CI passed\nland: master is now at d1a5c2f "x"\n'), 'landing: deploying', 'any default branch (KT2)');
   assert.equal(landPhase('land: waiting for CI on abc\nland: build/3 is now at d1a5c2f "x"; master is untouched\n'), 'landing: waiting on CI', 'a build merge is not a deploy');
+  for (const lock of ['deploy', 'land']) assert.equal(landPhase(`queue: 2nd in line (ahead: #12)\nqueue: got the ${lock} lock\n`), 'landing: starting'); // land-core.sh's lock is the land lock
   assert.equal(landPhase('queue: 2nd in line (ahead: #12)\nqueue: got the deploy lock\nland: rebasing ticket/1-x onto main (abc "y")\n'), 'landing: rebasing');
   assert.equal(landPhase('land: rebasing a onto main\nland: running test/a.test.ts on abc1234\nok 1\n'), 'landing: running tests');
   assert.equal(landPhase("land: rebasing a onto main\nland: waiting for CI on abc1234: the full suite on Cara's desktop (at most 6 min, then it runs here)\n"), 'landing: waiting on CI');

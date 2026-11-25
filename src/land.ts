@@ -452,16 +452,20 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
   // After a retry in place (#1360), only the second attempt counts: the first one's flake labels are no proof now.
   const again = output.lastIndexOf('not your change: keeping its place in line');
   if (again >= 0) output = output.slice(again);
-  const failedFiles = [...new Set([...output.matchAll(/✖ ([^ :]+\.test\.ts)(?::\d+)? › /gm)].map((m) => m[1]))];
+  // citadel-test's `✖ file › name` (the smoke check and the guards), and where the suite itself refused the ship, run-tests.sh's
+  // labels in the last run's log: an earlier one can be a train's, with another ship's tests.
+  const suiteLog = /^land: tests failed on the rebased branch/m.test(output) ? (output.split(/^land: .*$/m).findLast((s) => /run-tests: \S+\.test\.ts: /.test(s)) ?? '') : '';
+  const failedFiles = [...new Set([...output.matchAll(/✖ ([^ :]+\.test\.ts)(?::\d+)? › /gm), ...suiteLog.matchAll(/run-tests: (\S+\.test\.ts): (?:failed again alone|hung when rerun alone|rerun alone stopped)/g)].map((m) => m[1]))];
   const k = (kind: string, line: string) => ({ kind, line });
-  if (/(won't (rebase|merge( \S+)? in) onto?\b.*cleanly|^land: smoke: it conflicts with main|^CONFLICT \(|the (rebase onto|merging) .* failed \(see git's output)/m.test(output))
-    return k('conflict', "Kind: merge conflict. Yours: rebase onto main by hand, keep the other minions' changes, re-test, commit, hand off again.");
+  if (/(won't (rebase|merge) \S+ .*cleanly|^land: smoke: it conflicts with main|^CONFLICT \(|the (rebase onto|merging) .* failed \(see git's output)/m.test(output)) return k('conflict', "Kind: merge conflict. Yours: rebase onto main by hand, keep the other minions' changes, re-test, commit, hand off again.");
   if (/a \.ts file does not parse|^land: smoke: .*SyntaxError/m.test(output)) return k('parse', 'Kind: parse error (a .ts file does not parse, which would stop the server). Yours, not infra: the lines below name the file and line; fix it, re-test, hand off again.');
   // A burn-in red (#1443) quotes the failing copy's output, which can hold a "passed alone" line: still the ship's own.
   if (/failed its burn-in in CI/.test(output)) return k('burn-in', 'Kind: a new or changed test failed its burn-in (racy when run as copies at once). Yours: fix the race (a shared path, a fixed port, a timing assumption), not the wait; run it with tools/burn-in.sh <file>, then hand off again.');
   const testsRed = /tests failed on the rebased branch/.test(output) || failedFiles.length > 0;
   if (!testsRed && /failed in its setup step|runner clock:|the runner needs fixing/.test(output)) return k('ci', 'Kind: CI or runner problem. Not yours: nothing in your change failed. Hand off again; if it repeats, tell the Taskmaster.');
-  if (/boot check/i.test(output) && /SQLITE_|database is locked|sqlite.*(crash|abort|segfault)/i.test(output)) return k('boot-copy', 'Kind: boot-check copy failure (SQLite lock or sqlite crash on the database copy). Not yours: nothing is wrong with your change. Just hand off again.');
+  // Only the copy's own troubles: node marks every SQL error, the change's own too, ERR_SQLITE_ERROR.
+  if (/^deploy: boot check failed|^land: .*fails the same check here/m.test(output) && /SQLITE_(BUSY|LOCKED|CORRUPT|IOERR|FULL)|database (table )?is locked|database or disk is full|disk I\/O error|database disk image is malformed|sqlite.*(crash|abort|segfault)/i.test(output))
+    return k('boot-copy', 'Kind: boot-check copy failure (SQLite lock or sqlite crash on the database copy). Not yours: nothing is wrong with your change. Just hand off again.');
   // A run that skipped a test (#1914) is refused whatever else failed, its flakes included: before the passed-alone line.
   if (/^land: (a test was|\d+ tests were) skipped in CI /m.test(output))
     return k('skipped-test', "Kind: CI skipped a test, so a check didn't run. Never a flake, so handing off the same commit again is refused too. Make the test run in CI (or not register there); if your change has nothing to do with it, the runner lacks something: tell the Taskmaster which test.");
@@ -485,7 +489,7 @@ const PHASES: [RegExp, string][] = [
   [/^land: (rebasing|merging main)/, 'rebasing'],
   [/^land: smoke: /, 'smoke check'],
   [/^land: own check: /, 'own check'], // a ship's own CI before the line (#1567)
-  [/^queue: got the deploy lock/, 'starting'],
+  [/^queue: got the (deploy|land) lock/, 'starting'],
   [/^queue: /, 'in line'],
   // A rider waits outside the line for its train's verdict (#1166); "back in line" puts it in line again.
   [/^land: riding in \S+'s ship train/, 'riding'],

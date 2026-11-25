@@ -14,6 +14,9 @@
 // counts as work in: it is on main trivially.
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { buildRefOf, madeCommits } from './branch.ts';
 import type { Store, Ticket } from './db.ts';
@@ -209,6 +212,18 @@ async function git(dir: string, args: string[]): Promise<string | null> {
   }
 }
 
+/** The last-good commit while `head`, which the checkout `dir` runs, is a deploy's that hasn't settled (null: not known yet); else `head`. Only a checkout deploy.sh deploys to has a cc-deploy folder. */
+async function lastGood(dir: string, head: string | null): Promise<string | null> {
+  const own = await git(dir, ['rev-parse', '--absolute-git-dir']);
+  if (head && !own && (await stat(join(dir, '.git')).catch(() => null))) return null; // git failed: not known, asked again
+  if (!head || !own || !(await stat(join(own, 'cc-deploy')).catch(() => null))) return head;
+  const good = await git(dir, ['rev-parse', '-q', '--verify', 'last-good^{commit}']);
+  if (!good) return (await git(dir, ['tag', '-l', 'last-good'])) === '' ? head : null; // no tag yet, or git failed
+  if (good === head) return head;
+  // A commit from before last-good is a roll back on trial (#1271): not known until deploy.sh tags it, as one that fails goes back.
+  return (await git(dir, ['merge-base', '--is-ancestor', head, good])) !== null ? null : good;
+}
+
 /**
  * The commit of `ref` by which `tip`'s work is in it, or null: `tip` when `ref` contains it, else the
  * newest commit of `ref` with the same change as one of tip's own commits, once every one of those
@@ -299,6 +314,8 @@ export class LiveWaiters {
   sent: (rs: Relay[]) => void = () => {};
   /** The commit the server runs now: what it booted from, then what its front end last reloaded to. */
   head: string | null;
+  /** The commit deploy.sh stands by: `head`, or last-good while `head` can still be rolled back (prove). Null: not known yet, so nothing is live. */
+  proven: string | null;
   /** The check waiting for its turn, if any, and the end of the newest one: checks run one at a time. */
   private queued: Promise<number> | null = null;
   private last: Promise<unknown> = Promise.resolve();
@@ -310,7 +327,7 @@ export class LiveWaiters {
   constructor(store: Store, repo: string, head: string | null, send: (ticketId: number, text: string, light?: boolean) => void, outbox?: Outbox) {
     this.store = store;
     this.repo = repo;
-    this.head = head;
+    this.head = this.proven = head;
     this.send = send;
     this.outbox = outbox;
     outbox?.register({
@@ -760,12 +777,12 @@ export class LiveWaiters {
     // Asked again if a deploy went live meanwhile, as add() does: its check has been and gone without this relay.
     let since: string | null;
     do {
-      since = this.head;
+      since = this.proven;
       if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since })) {
         this.deliver(relay);
         return { queued: false, relay };
       }
-    } while (since !== this.head);
+    } while (since !== this.proven);
     if (this.outbox) {
       const row = this.outbox.add({ ...this.relayRow(relay), when_kind: (await this.elsewhere(r.ticket)) ? 'merged' : 'live' });
       relay = this.relayOf(row);
@@ -801,7 +818,7 @@ export class LiveWaiters {
       const found: Delivery[] = [];
       for (const r of this.store.listDeliveries({ kind: 'relay', states: ['waiting'] })) {
         if (r.met_at != null) continue;
-        const w = { ticket: r.payload.ticket, commit: r.when_arg, reason: '', since: this.head };
+        const w = { ticket: r.payload.ticket, commit: r.when_arg, reason: '', since: this.proven };
         const shipped = (await this.live(w)) ? 'live' : await this.shippedRebased(w, r.created_at);
         if (shipped === 'live') found.push(r);
         else if (shipped === 'dead') this.outbox.cancel(r.id, `#${this.store.getTicket(w.ticket)?.number ?? w.ticket} was dismissed without shipping \`${(w.commit ?? '').slice(0, 7)}\``);
@@ -815,7 +832,7 @@ export class LiveWaiters {
     }
     const ready: Relay[] = [];
     const old = () => this.store.getSetting<Relay[]>(RELAYS) ?? []; // the table's rows are the outbox's: only the old key is delivered here
-    for (const r of old()) if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since: this.head })) ready.push(r);
+    for (const r of old()) if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since: this.proven })) ready.push(r);
     // Dropped before sending, so a send that throws can't deliver one twice; read again: one cancelled meanwhile stays cancelled.
     const now = old();
     const go = ready.filter((r) => now.some((o) => o.id === r.id));
@@ -865,7 +882,7 @@ export class LiveWaiters {
    * in a merged PR counts by the PR's merge commit, which a squash or rebase merge needs.
    */
   private async live(w: Waiter): Promise<boolean> {
-    const head = this.head;
+    const head = this.proven;
     if (!head) return false;
     const other = await this.elsewhere(w.ticket);
     if (other) return !!w.commit && (!!(await this.merged(other, w.commit)) || !!(await this.prs.commit(other, w.commit))?.commit);
@@ -908,11 +925,13 @@ export class LiveWaiters {
    */
   async add(ticket: number, commit: string | null, reason: string, light = false): Promise<boolean> {
     let w: Waiter;
+    let at: string | null; // null: this boot isn't judged yet, so the next deploy counts from what prove() would start at
     // Asked again if a deploy went live meanwhile: its check has been and gone without this waiter.
     do {
-      w = { ticket, commit, reason, since: this.head, ...(light ? { light: true as const } : {}) };
+      at = this.proven;
+      w = { ticket, commit, reason, since: at ?? (await lastGood(this.repo, this.head)), ...(light ? { light: true as const } : {}) };
       if (commit && (await this.live(w))) return false;
-    } while (w.since !== this.head);
+    } while (at !== this.proven);
     if (this.outbox) {
       const t = this.store.getTicket(ticket);
       this.store.setSetting(
@@ -944,7 +963,7 @@ export class LiveWaiters {
    * shares that one: it starts after the call, so it sees all the call would.
    */
   check(head: string | null = this.head): Promise<number> {
-    this.head = head;
+    if (head !== this.head) this.head = this.proven = head;
     if (!this.queued) {
       const next = this.last.then(() => {
         this.queued = null;
@@ -957,7 +976,7 @@ export class LiveWaiters {
   }
 
   private async checkNow(): Promise<number> {
-    const head = this.head;
+    const head = this.proven;
     const short = (c: string) => c.slice(0, 7);
     const text = async (w: Waiter) => (w.commit && (await this.elsewhere(w.ticket)) ? `\`${short(w.commit)}\` is on the scheme's main now: ${w.reason}` : `${w.commit ? `\`${short(w.commit)}\` is live now` : 'A deploy is live now'} (the server runs \`${short(head!)}\`): ${w.reason}`);
     // The table's waits: the check finds one live, the outbox sends it (and retries a send that throws). A wait of a dismissed minion is the outbox's to hold.
@@ -996,19 +1015,34 @@ export class LiveWaiters {
   }
 
   /**
+   * A deploy's restart can still be rolled back until deploy.sh has checked it again and tagged it last-good: resolves true
+   * once it is, with `proven` at `head`, or false when another commit took over. A server still up after `cap` ms was not
+   * rolled back (that would have stopped it), so it counts as proven even when the deploy died before its tag.
+   */
+  async prove(every = 3000, cap = 15 * 60_000): Promise<boolean> {
+    const head = this.head;
+    for (const end = Date.now() + cap; ; await sleep(every, undefined, { ref: false })) {
+      const good = Date.now() < end ? await lastGood(this.repo, head) : head;
+      if (this.head !== head) return false;
+      this.proven = good;
+      if (good === head) return true;
+    }
+  }
+
+  /**
    * Minions in pending-deploy whose branch the live commit contains, by hash or by change. A deploy reports
    * only to the minions that ran it, so this also catches one whose commit went live in someone else's
    * restart. A branch the minion never committed on is no evidence: any live commit contains it.
    */
   async pendingLive(): Promise<number[]> {
-    if (!this.head) return [];
+    if (!this.proven) return [];
     const ids: number[] = [];
     for (const p of this.store.listProjects()) {
       if (!p.repo_dir) continue;
       for (const t of this.store.listTickets(p.id)) {
         if (t.state !== 'pending-deploy' || t.status === 'closed' || !t.branch) continue;
         // A scheme whose repo doesn't have the live commit (another app's) fails here, as it should.
-        if ((await this.committed(p.repo_dir, t.branch, 0)) && (await within(p.repo_dir, this.head, `refs/heads/${t.branch}`))) ids.push(t.id);
+        if ((await this.committed(p.repo_dir, t.branch, 0)) && (await within(p.repo_dir, this.proven, `refs/heads/${t.branch}`))) ids.push(t.id);
       }
     }
     return ids;

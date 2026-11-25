@@ -61,7 +61,7 @@ export function failureDetail(output: string, code: number | null): FailureDetai
   const kind =
     cls === 'conflict' || conflicts.length
       ? 'merge conflict'
-      : code === 75 || /^land: .*(gave no verdict|timed out waiting for CI)/m.test(output)
+      : code === 75 || /^land: .*(gave no verdict|CI and perigee both busy, try again)/m.test(output)
         ? 'CI timeout'
         : cls === 'parse'
           ? 'parse error'

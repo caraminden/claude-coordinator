@@ -47,6 +47,7 @@ kit/skills/scheme-setup/templates/
 test/script-env.ts
 test/git.ts
 test/wait.ts
+test/holds.ts
 test/quiet-proc.ts
 test/leak-guard.ts
 test/leak-file.ts

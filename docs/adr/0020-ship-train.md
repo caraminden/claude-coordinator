@@ -142,7 +142,9 @@ the last one in line waited for every run ahead of it.
   `tools/land.sh` documents each format above `train_verdict`. deploy.sh lets go of the line once a restart is queued,
   while the restart is still judged (#566), so a rider can get the lock with its verdict still `moving`: while the
   front's process lives, the rider hands the line on and waits outside it for the verdict. A train whose restart is
-  rolled back comes off main, and its riders hear `back`, never `landed`.
+  rolled back comes off main, and its riders hear `back`, never `landed`. Before its branch moves, each rider writes
+  who to report to in `<state>/riders-<the front's pid>`, so the restart the front queues reports to every rider's
+  minion too: that it is live, gave up waiting, or was rolled back once the landing was over (#1865).
 
 Who is passed over (each keeps its place, and ships on its own when it reaches the front):
 

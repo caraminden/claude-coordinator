@@ -235,3 +235,14 @@ process.exit(1);
   await promisify(execFile)(process.execPath, [join(repo, 'tools', 'boot-check.ts'), checkout, db], { timeout: 50_000 }).catch(() => {});
   assert.equal(readFileSync(seen, 'utf8'), 'none');
 });
+
+test('every outside limit on the boot check is past its own backstop, armed again after each long step (#1865)', () => {
+  const read = (f: string) => readFileSync(join(import.meta.dirname, '..', 'tools', f), 'utf8');
+  const check = read('boot-check.ts');
+  const own = (check.match(/^ *arm\(\);/gm)!.length * Number(/\}, ([\d_]+)\)\.unref/.exec(check)![1].replaceAll('_', ''))) / 1000;
+  assert.ok(own >= 360, `${own} s read from boot-check.ts`);
+  for (const f of ['deploy.sh', 'land.sh', 'land.local.sh']) {
+    const limits = [...read(f).matchAll(/DEPLOY_BOOT_TIMEOUT:-(\d+)/g)].map((m) => Number(m[1]));
+    assert.ok(limits.length && limits.every((l) => l > own), `${f}: ${limits} s, for a check that gives up by itself at ${own} s`);
+  }
+});

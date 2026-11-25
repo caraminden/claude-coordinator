@@ -306,14 +306,14 @@ citadel_boot_preflight() {
   short=$(git rev-parse --short "$1")
   say "deploy has been refusing since $since ($why): running its boot check on $short before a CI run is spent on it"
   queue_phase "boot check before CI since $(date +%H:%M)"
-  timeout -k 10 "${DEPLOY_BOOT_TIMEOUT:-420}" "$here/tools/citadel-node" "$here/tools/boot-check.ts" "$here" "${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}" >/dev/null || rc=$?
+  timeout -k 10 "${DEPLOY_BOOT_TIMEOUT:-600}" "$here/tools/citadel-node" "$here/tools/boot-check.ts" "$here" "${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}" >/dev/null || rc=$?
   if [ "$rc" = 0 ]; then
     say "the boot check passes on $short, so this landing goes on"
     return 0
   fi
   citadel_retro_log "preflight refusal · $(citadel_label) · refusing since $since ($why)"
   if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
-    say "deploy has been refusing since $since: $why, and the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-420} s), so no CI run was spent and main is untouched; $branch keeps the rebased work. A hang is not a verdict on the change: run it again, and if it hangs again tell the Taskmaster, since landings are blocked until that is fixed"
+    say "deploy has been refusing since $since: $why, and the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-600} s), so no CI run was spent and main is untouched; $branch keeps the rebased work. A hang is not a verdict on the change: run it again, and if it hangs again tell the Taskmaster, since landings are blocked until that is fixed"
   else
     say "deploy has been refusing since $since: $why, and $short fails the same check here (its output is above), so no CI run was spent and main is untouched; $branch keeps the rebased work. If the cause is in your change, fix it and land again. If it isn't, landings are blocked until the fix for it lands (that fix passes this check and lands as usual): tell the Taskmaster, and don't retry until then"
   fi

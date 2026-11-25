@@ -65,6 +65,7 @@ flock -n "$lock" true && held=no || held=yes
 echo "locked=$DEPLOY_LOCKED held=$held" >"$DEPLOY_NOTE"
 until [ -z "\${FAKE_DEPLOY_GATE:-}" ] || [ -e "\$FAKE_DEPLOY_GATE" ]; do sleep 0.05; done
 [ -z "\${FAKE_DEPLOY_LOG:-}" ] || git -C "$DEPLOY_SOURCE" rev-parse main >>"\$FAKE_DEPLOY_LOG"
+[ -z "\${FAKE_DEPLOY_LOG:-}" ] || cat "\${DEPLOY_RIDERS:-/dev/null}" >"\$FAKE_DEPLOY_LOG.riders" 2>/dev/null
 if [ -n "\${FAKE_RESTART_GATE:-}" ]; then
   echo "queued \$(date +%s)" >>"\$DEPLOY_TIMES"
   rm -f "\$DEPLOY_QUEUE_TICKET"

@@ -655,3 +655,22 @@ test('riders of a restart held for a starved box say when it expects to be live;
     l.done();
   }
 });
+
+// Its restart takes the mark as it starts (#1865): one left later would let the next, unrelated restart skip the hold.
+test('an urgent rider marks its restart only while it still waits: for turns, yes; once it is under way or over, no', async () => {
+  for (const [at, active, underWay] of [
+    ['waiting', true, false],
+    ['under way', true, true],
+    ['over', false, false],
+  ] as const) {
+    const l = await line([{}, { env: { FAKE_NOT_LIVE: '1' } }, { env: { LAND_URGENT: '1' } }], {}, (r) => {
+      writeFileSync(join(r.dir, 'bin', 'systemctl'), `#!/bin/sh\ncase "$*" in *'is-active -q cc-restart-when-idle'*) exit ${active ? 0 : 3} ;; esac\nexit 1\n`, { mode: 0o755 });
+    });
+    if (underWay) writeFileSync(join(l.state, 'restart'), `${process.pid} ${readFileSync('/proc/self/stat', 'utf8').split(') ').pop()!.split(' ')[19]}\nrestarting claude-coordinator since 10:00\n`);
+    const done = await l.go();
+    done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+    assert.match(done[2].stderr, /^deploy: not live yet: the restart ticket\/2-x's ship train queued carries it, and reports here too/m);
+    assert.equal(existsSync(join(l.state, 'urgent')), at === 'waiting', at);
+    l.done();
+  }
+});

@@ -476,6 +476,21 @@ test("a rider that gets the lock while its train's restart is judged waits outsi
   l.done();
 });
 
+test("every rider's minion is handed to the train's deploy, with its own train commit, for the restart to report to (#1865)", async () => {
+  const me = (n: number) => ({ env: { COORDINATOR_API: 'http://127.0.0.1:1', COORDINATOR_TOKEN: `tok${n}`, COORDINATOR_TICKET: String(n) } });
+  const l = await line([me(1), me(2), me(3), {}, me(5)]);
+  const done = await l.go();
+  for (const d of done) assert.equal(d.status, 0, d.stderr);
+  const at = (i: number) => git(l.r.source, 'rev-parse', `ticket/${i}-x`);
+  assert.deepEqual(readFileSync(join(l.r.dir, 'deploys.riders'), 'utf8').trim().split('\n').sort(), [`http://127.0.0.1:1 tok3 3 ${at(3)}`, `http://127.0.0.1:1 tok5 5 ${at(5)}`]);
+  assert.deepEqual(
+    readdirSync(l.state).filter((f) => f.startsWith('riders-')),
+    [],
+    'no token is left behind',
+  );
+  l.done();
+});
+
 test('a train whose restart is rolled back: its riders go back in line and land on their own', async () => {
   const { l, done } = await restart(true);
   assert.equal(done[1].status, 1, done[1].stderr);

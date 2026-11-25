@@ -148,6 +148,11 @@ test("readTail: the log's end, read again only once it grows; a cut first line i
   assert.equal(readTail(f), 'land: last\n');
 });
 
+test("a red on main too says it isn't the ship's, with what main needs", () => {
+  const n = landNews([...front, ...red.slice(0, -1), "land: red on main too: not this train's: test/x.test.ts fails run alone on main's tip 1a2b3c4 here, so no ship on the train is to blame and none is refused. Main needs a fix for test/x.test.ts"].join('\n'), name);
+  assert.deepEqual(n.at(-1), { tone: 'warn', text: "Red on main too, not this train's: x; main needs a fix" });
+});
+
 test('suspects: the ships pulled off the train replace the bisect line, naming each with its failing tests (G2)', () => {
   const sus =
     'land: suspects: #1331 (test/memory.test.ts, test/a.test.ts; failed alone: sent back), #1351 (test/b.test.ts; a guess: waits for the verdict): CI is red on the ship train (' +

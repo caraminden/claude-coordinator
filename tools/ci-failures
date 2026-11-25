@@ -75,8 +75,8 @@ const runsFor = (query) => api(`actions/runs?per_page=${list ? count : 5}${query
 const newest = (runs) => runs.sort((a, b) => b.created_at.localeCompare(a.created_at));
 
 function branchRuns(branch) {
-  const own = branch.replace(/^(land|early)\//, ''); // a ship's CI copy runs on land/, an early next train's on early/ (#1568)
-  return newest([own, `land/${own}`, `early/${own}`].flatMap((b) => runsFor(`&branch=${encodeURIComponent(b)}`)));
+  const own = branch.replace(/^(land|early|check)\//, ''); // a ship's CI copy runs on land/, an early next train's on early/ (#1568), its own check on check/ (#1567)
+  return newest([own, `land/${own}`, `early/${own}`, `check/${own}`].flatMap((b) => runsFor(`&branch=${encodeURIComponent(b)}`)));
 }
 
 function findRun() {
@@ -92,7 +92,7 @@ function findRun() {
   const branch = target || git('rev-parse', '--abbrev-ref', 'HEAD');
   if (!branch || branch === 'HEAD') die(`not on a branch here: name a run id, sha or branch\n${usage}`);
   const runs = branchRuns(branch);
-  if (!runs.length) die(`no run for ${branch} or its land/ twin in ${repo}`);
+  if (!runs.length) die(`no run for ${branch} or its land/, early/ or check/ twin in ${repo}`);
   return runs[0];
 }
 

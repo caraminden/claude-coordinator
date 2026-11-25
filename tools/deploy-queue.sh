@@ -386,9 +386,10 @@ taken_back() {
 # So the restart no longer needs the deploy lock, and the next landing rebases and passes its gate beside it; only
 # its fast-forward and its deploy wait for the restart's verdict. A restart still waiting on busy turns holds nothing.
 #   restart_lock <state>   hold it on fd 7. Returns 1 when it wasn't let go within DEPLOY_RESTART_WAIT seconds (a
-#                          restart ends within about 5 min: two restarts with their settle checks, and the reports).
+#                          restart ends within about 13 min at its slowest: the database copy, a handover that times out, two
+#                          restarts with their settle checks, each health ask up to 4 s, and the reports).
 restart_lock() {
-  local phase said="" started=$SECONDS limit=${DEPLOY_RESTART_WAIT:-600}
+  local phase said="" started=$SECONDS limit=${DEPLOY_RESTART_WAIT:-900}
   if ! exec 7>"$1/restart.lock"; then
     echo "queue: can't open the restart lock $1/restart.lock for writing, so nothing landed or deployed: a person needs to look at it" >&2
     return 1

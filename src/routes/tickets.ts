@@ -689,7 +689,7 @@ export const ticketRoutes: Route[] = [
       const body = await readJson(req).catch(() => ({}));
       if (body?.left === true) return json(res, 200, { seen_at: store.seenAt(session.name, id), closed: app.runner.closeIfSeen(id, session.name) });
       clearMentions(store, session.name, id);
-      return json(res, 200, { seen_at: store.markSeen(session.name, id) });
+      return json(res, 200, { seen_at: await store.markSeen(session.name, id) });
     },
   },
   {

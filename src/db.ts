@@ -74,6 +74,8 @@ export * from './db-rows.ts';
 export const TYPED_HANDLES_UP_TO = 696493;
 
 const APP_INSTRUCTIONS = 'app_instructions';
+/** How long the write worker's connection waits out another connection's write lock: giving up loses the write. */
+export const WRITER_BUSY_MS = 30_000;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -1230,7 +1232,7 @@ export class Store {
     this.path = path;
     // Wait out another connection's write (a test's second Store, a backup) instead of failing at once with SQLITE_BUSY.
     // The writer waits longer: it waits on its own thread, and giving up loses the write.
-    this.db = new DatabaseSync(path, { timeout: opts.writer ? 30_000 : 5000, readOnly: !!opts.reader });
+    this.db = new DatabaseSync(path, { timeout: opts.writer ? WRITER_BUSY_MS : 5000, readOnly: !!opts.reader });
     // NORMAL: in WAL mode it fsyncs at checkpoints, not on every commit, which a busy disk made cost 150-300 ms
     // each. A power cut can lose the last few seconds of writes; an app crash loses nothing (#470, Cara 2026-11-10).
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;');
@@ -1946,6 +1948,9 @@ export class Store {
 
   /** The next events.id to hand out, set by the write worker's start (src/db-writer.ts); null writes inline and lets SQLite pick. */
   eventIds: { next: number; floor: () => number } | null = null;
+  /** Resolves once every write queued on the write worker has run (null: none queued, or no worker), for async code
+   * that writes on this thread next, so it waits off the event loop (src/db-writer.ts). */
+  allWritten: () => Promise<void> | null = () => null;
 
   /** events.db, the chat log's own file (src/events-db.ts); null for an in-memory store. */
   get eventsPath(): string | null {
@@ -2019,7 +2024,12 @@ export class Store {
    * running total on --resume only when the session was the last one run in that folder), so the
    * whole total is this turn's.
    */
-  recordTurn(ticketId: number, r: TurnResult): Turn {
+  async recordTurn(ticketId: number, r: TurnResult): Promise<Turn> {
+    return this.turnRow(ticketId, r);
+  }
+
+  /** recordTurn's write, run at once: backfillTurns runs it in its own transaction. */
+  private turnRow(ticketId: number, r: TurnResult): Turn {
     const last = (side: boolean, session?: string | null) =>
       this.db.prepare(`SELECT id, session_id, session_cost_usd FROM turns WHERE ticket_id = ? AND side IS ?${session ? ' AND session_id = ?' : ''} ORDER BY id DESC LIMIT 1`).get(ticketId, side ? 1 : null, ...(session ? [session] : [])) as { id: number; session_id: string | null; session_cost_usd: number } | undefined;
     // A side thread's turns follow its own fork's (threads interleave); the fork's first starts from its parent's total.
@@ -2111,7 +2121,7 @@ export class Store {
         if (ev.type === 'system') {
           session.set(row.ticket_id, ev.session_id ?? null);
         } else if (typeof ev.total_cost_usd === 'number') {
-          this.recordTurn(row.ticket_id, {
+          this.turnRow(row.ticket_id, {
             event_id: row.id,
             session_id: session.get(row.ticket_id) ?? null,
             ended_at: row.created_at,

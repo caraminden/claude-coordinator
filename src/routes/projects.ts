@@ -58,7 +58,7 @@ import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
 import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
 import { addArchitectureCheck, addMemoryCurator } from '../standard-audits.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
-import { buildNumber, HttpError, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
+import { afterAllWrites, buildNumber, HttpError, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 /** Home's 14-day ship buckets, the same for every person, kept a minute (#1217 review). */
@@ -169,13 +169,16 @@ export async function ensureCoordinator(app: App, project: Project): Promise<Tic
   const cwd = join(projectDir(app.dataDir, project.id), 'coordinator');
   await mkdir(cwd, { recursive: true });
   try {
-    const t = store.createTicket({
-      project_id: project.id,
-      kind: 'coordinator',
-      title: 'Coordinator',
-      permission_mode: COORDINATOR_PERMISSION_MODE,
-      created_by: AGENT_NAME,
-    });
+    // A value write: the queue empties off the event loop first, so creating it never waits there (#1877).
+    const t = await afterAllWrites(() =>
+      store.createTicket({
+        project_id: project.id,
+        kind: 'coordinator',
+        title: 'Coordinator',
+        permission_mode: COORDINATOR_PERMISSION_MODE,
+        created_by: AGENT_NAME,
+      }),
+    );
     store.setTicketDir(t.id, cwd, null);
   } catch {
     // Lost a race with a concurrent request; the unique index kept a single coordinator.

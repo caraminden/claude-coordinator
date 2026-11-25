@@ -115,6 +115,9 @@ function unit(v: Float32Array): Float32Array {
 
 type Pending = { project_id: number; ticket_id: number; person_id: number | null; source_kind: SourceKind; source_id: number; ts: number; text: string };
 
+/** A memory_chunks row as index sends it: project, ticket, person, source kind and id, ts, text, vector, model. */
+type ChunkRow = [number, number | null, number | null, string, number, number, string, Uint8Array, string];
+
 export class Memory {
   private db: DatabaseSync;
   private store: Store;
@@ -135,6 +138,8 @@ export class Memory {
    * saw, then minions whose title or note changed, then rows another model embedded. Returns how many it embedded.
    */
   async index(projectId: number, embed: Embed, model: string, max = 32, now = Date.now()): Promise<number> {
+    // Off the event loop: what the last pass sent the write worker is read as done, not embedded again (#1877).
+    await this.store.allWritten();
     const turns = this.pendingTurns(projectId, max, now);
     const key = (p: Pending) => `${p.source_kind}:${p.source_id}`;
     const todo = turns.chunks.filter((p) => !this.skipped.has(key(p)));
@@ -146,10 +151,6 @@ export class Memory {
           .slice(0, max - todo.length),
       );
     if (todo.length < max) todo.push(...this.staleRows(projectId, model, max - todo.length));
-    const put = this.db.prepare(`INSERT INTO memory_chunks (project_id, ticket_id, person_id, source_kind, source_id, ts, text, vec, model)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (source_kind, source_id) DO UPDATE SET project_id = excluded.project_id, ticket_id = excluded.ticket_id, person_id = excluded.person_id,
-        ts = excluded.ts, text = excluded.text, vec = excluded.vec, model = excluded.model`);
     // Two texts a request: 8 full chunks took ~85 s of a whole core (#525), too near llamaEmbed's 120 s timeout on a busy box.
     for (let i = 0; i < todo.length; i += PER_REQUEST) {
       const part = todo.slice(i, i + PER_REQUEST);
@@ -171,14 +172,22 @@ export class Memory {
           }
         }
       }
-      part.forEach((p, j) => {
-        if (!vecs[j]) return;
-        put.run(p.project_id, p.ticket_id, p.person_id, p.source_kind, p.source_id, p.ts, p.text, new Uint8Array(vecs[j].buffer), model);
-        if (p.source_kind === 'ticket') this.ticketTexts?.set(p.source_id, p.text);
-      });
+      const rows = part.flatMap((p, j): ChunkRow[] => (vecs[j] ? [[p.project_id, p.ticket_id, p.person_id, p.source_kind, p.source_id, p.ts, p.text, new Uint8Array(vecs[j].buffer), model]] : []));
+      // On the server it goes to the write worker: waiting here for the queue held the server's thread 4.4 s (Nov 24).
+      if (rows.length) this.putChunks(rows);
+      for (const p of part.filter((_, j) => vecs[j])) if (p.source_kind === 'ticket') this.ticketTexts?.set(p.source_id, p.text);
     }
     if (turns.mark !== null) this.store.setSetting(this.markKey(projectId), turns.mark);
     return todo.length;
+  }
+
+  /** Store embedded chunks: index's write, sent to the write worker on the server. */
+  putChunks(rows: ChunkRow[]) {
+    const put = this.db.prepare(`INSERT INTO memory_chunks (project_id, ticket_id, person_id, source_kind, source_id, ts, text, vec, model)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (source_kind, source_id) DO UPDATE SET project_id = excluded.project_id, ticket_id = excluded.ticket_id, person_id = excluded.person_id,
+        ts = excluded.ts, text = excluded.text, vec = excluded.vec, model = excluded.model`);
+    for (const r of rows) put.run(...r);
   }
 
   private markKey = (projectId: number) => `memory_turns_after:${projectId}`;

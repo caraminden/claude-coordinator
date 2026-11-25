@@ -19,16 +19,16 @@ function setup(name: string) {
 
 const close = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-9, `${a} ≈ ${b}`);
 
-test("a turn's cost is the rise in the session's running total", () => {
+test("a turn's cost is the rise in the session's running total", async () => {
   const { store, t } = setup('delta');
   const now = Date.now();
-  const a = store.recordTurn(t.id, { session_id: 's1', ended_at: now, session_cost_usd: 0.5, usage: { input_tokens: 3, output_tokens: 40, cache_read_input_tokens: 1000, cache_creation_input_tokens: 200 } });
+  const a = await store.recordTurn(t.id, { session_id: 's1', ended_at: now, session_cost_usd: 0.5, usage: { input_tokens: 3, output_tokens: 40, cache_read_input_tokens: 1000, cache_creation_input_tokens: 200 } });
   close(a.cost_usd, 0.5);
   assert.deepEqual([a.input_tokens, a.output_tokens, a.cache_read_tokens, a.cache_write_tokens], [3, 40, 1000, 200]);
-  close(store.recordTurn(t.id, { session_id: 's1', ended_at: now, session_cost_usd: 1.25 }).cost_usd, 0.75);
+  close((await store.recordTurn(t.id, { session_id: 's1', ended_at: now, session_cost_usd: 1.25 })).cost_usd, 0.75);
   // A total that went down started afresh; so does a new session.
-  close(store.recordTurn(t.id, { session_id: 's1', ended_at: now, session_cost_usd: 0.2 }).cost_usd, 0.2);
-  close(store.recordTurn(t.id, { session_id: 's2', ended_at: now, session_cost_usd: 0.9 }).cost_usd, 0.9);
+  close((await store.recordTurn(t.id, { session_id: 's1', ended_at: now, session_cost_usd: 0.2 })).cost_usd, 0.2);
+  close((await store.recordTurn(t.id, { session_id: 's2', ended_at: now, session_cost_usd: 0.9 })).cost_usd, 0.9);
   close(store.ticketCost(t.id), 0.5 + 0.75 + 0.2 + 0.9);
   assert.equal(store.listTurns(t.id).length, 4);
 });

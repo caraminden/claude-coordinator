@@ -21,7 +21,7 @@ export const seenQueries = {
     return row?.seen_at ?? 0;
   },
 
-  markSeen(this: Store, name: string, ticketId: number): number {
+  async markSeen(this: Store, name: string, ticketId: number): Promise<number> {
     const now = Date.now();
     this.db.prepare('INSERT INTO ticket_seen (name, ticket_id, seen_at) VALUES (?, ?, ?) ON CONFLICT(name, ticket_id) DO UPDATE SET seen_at = excluded.seen_at').run(name, ticketId, now);
     return now;

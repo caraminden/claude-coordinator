@@ -160,7 +160,7 @@ export class ArtifactScanner {
       }
       const pinned = new Set(this.store.pinnedArtifactPaths(ticketId));
       const shown = found.filter((f) => linked.has(isAbsolute(f.path) ? f.path : join(ticket.cwd, f.path)) || pinned.has(f.path));
-      if (this.store.syncArtifacts(ticket, shown)) this.broadcast({ type: 'artifacts', projectId: ticket.project_id });
+      if (await this.store.syncArtifacts(ticket, shown)) this.broadcast({ type: 'artifacts', projectId: ticket.project_id });
       await this.scanShared(ticket.project_id);
     })();
     this.scanning.set(ticketId, job);

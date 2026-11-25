@@ -3237,8 +3237,8 @@ export class Runner {
   }
 
   /** A keepalive's result: costed apart, and its miss stops its series; too many misses in a day switch keepalives off. */
-  private keepaliveResult(ticketId: number, ev: ClaudeEvent) {
-    this.store.recordTurn(ticketId, {
+  private async keepaliveResult(ticketId: number, ev: ClaudeEvent) {
+    await this.store.recordTurn(ticketId, {
       session_id: typeof ev.session_id === 'string' ? ev.session_id : null,
       ended_at: Date.now(),
       session_cost_usd: ev.total_cost_usd!,
@@ -4771,7 +4771,7 @@ export class Runner {
     if (this.keepalives.has(ticketId)) {
       if (validSessionId(ev.session_id) && ev.session_id !== this.store.getTicket(ticketId)?.session_id) this.store.updateTicket(ticketId, { session_id: ev.session_id });
       if (ev.type === 'result') onResult(!!ev.is_error, typeof ev.result === 'string' ? ev.result : null);
-      if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') this.keepaliveResult(ticketId, ev);
+      if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') void this.keepaliveResult(ticketId, ev).catch((e) => console.error(`[keepalive] minion ${ticketId}: ${(e as Error).message}`));
       return;
     }
     if (ev.type === 'codex_waiting') return this.emit(ticketId, 'note', { text: CODEX_WAITING });
@@ -4873,23 +4873,27 @@ export class Runner {
     if (ev.type === 'result' && this.sentBack.delete(ticketId)) this.replaceSentBack(ticketId, row.id);
     if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
       const state = this.store.getSetting<TurnState>(turnKey(ticketId));
-      const turn = this.store.recordTurn(ticketId, {
-        event_id: row.id,
-        session_id: typeof ev.session_id === 'string' ? ev.session_id : null,
-        ended_at: row.created_at,
-        session_cost_usd: ev.total_cost_usd,
-        duration_ms: ev.duration_ms,
-        usage: ev.usage,
-        payer: this.payerOf(state?.person),
-        hashes: state?.hashes ?? null,
-        account: state?.account ?? null,
-        modelUsage: ev.modelUsage,
-      });
-      this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
-      this.recordGrunts(ticketId, turn.id, state, ev.session_id);
-      // The turn's real cost, for a Codex turn (unmetered) or one the estimate undercounted; its reply is out, so no steer.
-      const ticket = this.store.getTicket(ticketId);
-      if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
+      void this.store
+        .recordTurn(ticketId, {
+          event_id: row.id,
+          session_id: typeof ev.session_id === 'string' ? ev.session_id : null,
+          ended_at: row.created_at,
+          session_cost_usd: ev.total_cost_usd,
+          duration_ms: ev.duration_ms,
+          usage: ev.usage,
+          payer: this.payerOf(state?.person),
+          hashes: state?.hashes ?? null,
+          account: state?.account ?? null,
+          modelUsage: ev.modelUsage,
+        })
+        .then((turn) => {
+          this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
+          this.recordGrunts(ticketId, turn.id, state, ev.session_id);
+          // The turn's real cost, for a Codex turn (unmetered) or one the estimate undercounted; its reply is out, so no steer.
+          const ticket = this.store.getTicket(ticketId);
+          if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
+        })
+        .catch((e) => console.error(`[turn] minion ${ticketId}: its turn's cost was not recorded: ${(e as Error).message}`));
     }
     if (ev.type === 'user' && Array.isArray(ev.message?.content) && (ev.message!.content as ContentBlock[]).some((b) => b?.type === 'tool_result')) {
       this.onFilesMayChange(ticketId, false);

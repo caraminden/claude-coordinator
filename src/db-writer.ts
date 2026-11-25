@@ -4,10 +4,11 @@
 // disk stalled (14.3 s on a one-row write, #791). So the Store's void writes go to one worker with its own connection,
 // in order, and the server's own connection only reads. A read waits a moment for writes still queued, so it sees
 // them; a stalled disk only makes reads stale for as long as it lasts, never stops them.
-// Writes that return something stay on the server's thread for now, after the queue (step 2 of #795 moves them).
+// Most writes that return something stay on the server's thread, after the queue; the ones the server waited on most
+// (ASYNC_WRITES) run on the worker too and resolve with their value (#1877, step 2 of #795).
 import type { StatementSync } from 'node:sqlite';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
-import { Store } from './db.ts';
+import { Store, WRITER_BUSY_MS } from './db.ts';
 import { writes } from './http.ts';
 import { busySource } from './settled.ts';
 import { thrown } from './thrown.ts';
@@ -91,12 +92,21 @@ export const WRITES = [
   'addHostSample',
   'addFlakeEvents',
   'updateFlakeFix',
+  'usage.addCounts',
+  'memory.putChunks',
   'props.backfillOther',
   'props.setBuild',
   'schedules.ran',
   'schedules.heldNote',
   'memory.deleteTicket',
 ];
+
+/**
+ * Writes whose callers await their value (each returns a Promise in the Store): on the worker, in order with the rest,
+ * resolving with what the worker's run returned (#1877). They held the server's thread longest waiting for the queue
+ * (Nov 24: 15.4 s in recordTurn). Their arguments and values survive postMessage.
+ */
+export const ASYNC_WRITES = ['recordTurn', 'markSeen', 'syncArtifacts'];
 
 /** Writes that return a value: they run on the server's thread after the queue, and a write they make inside runs with them. */
 export const VALUE_WRITES = [
@@ -140,7 +150,6 @@ export const VALUE_WRITES = [
   'schedules.create',
   'schedules.update',
   'schedules.remove',
-  'memory.index',
   'reviews.create',
   'reviews.save',
   'reviews.restore',
@@ -220,7 +229,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   let seq = 0;
   let stalled = 0; // a read gave up waiting for this write: later reads don't wait until it has run
   let inline = 0; // inside a write on this thread: writes it makes run with it
-  const pending = new Map<number, { name: string; args: unknown[]; resolve: () => void; reject: (e: Error) => void }>();
+  const pending = new Map<number, { name: string; args: unknown[]; resolve: (value?: unknown) => void; reject: (e: Error) => void }>();
   // Responses waiting for their request's writes (#1244): each until the write numbered `seq` has run.
   const waiters = new Set<{ seq: number; done: () => void }>();
   // Settings sent and not yet written, by key (null: deleted). A read that gave up waiting still sees them, or a
@@ -320,12 +329,21 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     }
   };
 
+  // A raw statement's wait names the code that ran it: 'SQL BEGIN' alone didn't say whose transaction waited 20.5 s (#1877).
+  const sqlWhat = (sql: string) => {
+    const at = new Error().stack
+      ?.split('\n')
+      .slice(3)
+      .find((l) => !l.includes('db-writer.ts'));
+    const fn = at && /at (?:async )?([\w$.<>]+) \(/.exec(at)?.[1];
+    return `SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}${fn ? ` (in ${fn})` : ''}`;
+  };
   // The store's connection: reads wait a moment for queued writes, and its own writes for all of them.
   const maxEvent = db.prepare('SELECT max(id) AS id FROM events');
   const prepare = db.prepare.bind(db);
   db.prepare = ((sql: string, ...rest: never[]) => {
     const st = prepare(sql, ...rest) as StatementSync;
-    const before = WRITE_SQL.test(sql) ? () => (openStep(), beforeWrite(`SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}`)) : () => beforeRead(sql);
+    const before = WRITE_SQL.test(sql) ? () => (openStep(), applied() < seq && beforeWrite(sqlWhat(sql))) : () => beforeRead(sql);
     for (const m of ['run', 'get', 'all', 'iterate'] as const) {
       const f = (st as Stmt)[m].bind(st);
       (st as Stmt)[m] = (...a: unknown[]) => {
@@ -338,7 +356,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   const exec = db.exec.bind(db);
   db.exec = ((sql: string) => {
     openStep();
-    if (!db.isTransaction) beforeWrite(`SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}`);
+    if (!db.isTransaction && applied() < seq) beforeWrite(sqlWhat(sql));
     return exec(sql);
   }) as typeof db.exec;
 
@@ -370,6 +388,36 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
       }
     };
   }
+  for (const name of ASYNC_WRITES) {
+    const { obj, method } = owner(store, name);
+    const f = obj[method];
+    if (typeof f !== 'function') throw new Error(`db-writer: no ${name} to send to the write worker`);
+    obj[method] = function (this: unknown, ...args: unknown[]) {
+      openStep();
+      if (!alive || inline || db.isTransaction) return f.apply(this, args);
+      const n = send(name, args);
+      if (n === null) {
+        beforeWrite(name);
+        return f.apply(this, args);
+      }
+      return new Promise((resolve, reject) => pending.set(n, { name, args, resolve, reject }));
+    };
+  }
+  // Post a write to the worker as the next in the queue; null if postMessage can't copy its arguments.
+  const send = (name: string, args: unknown[]) => {
+    const n = seq + 1;
+    try {
+      worker.postMessage({ seq: n, name, args });
+    } catch (e) {
+      console.error(`DB write ${name} can't go to the write worker (${thrown(e).message ?? e}): run on the server's thread.`);
+      return null;
+    }
+    seq = n;
+    Atomics.store(shared, 2, BigInt(n));
+    const req = writes.request.getStore();
+    if (req && !req.done) req.seq = n;
+    return n;
+  };
   for (const name of WRITES) {
     const { obj, method } = owner(store, name);
     const f = obj[method];
@@ -378,19 +426,12 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
       openStep();
       // Inside a transaction or another write on this thread it runs with that, or the worker would wait on our lock.
       if (!alive || inline || db.isTransaction) return f.apply(this, args);
-      const n = seq + 1;
-      try {
-        worker.postMessage({ seq: n, name, args });
-      } catch (e) {
+      const n = send(name, args);
+      if (n === null) {
         // An argument postMessage can't copy: run it here, after the queue.
-        console.error(`DB write ${name} can't go to the write worker (${thrown(e).message ?? e}): run on the server's thread.`);
         beforeWrite(name);
         return f.apply(this, args);
       }
-      seq = n;
-      Atomics.store(shared, 2, BigInt(n));
-      const req = writes.request.getStore();
-      if (req && !req.done) req.seq = n;
       if (name === 'setSetting') unwritten.set(args[0] as string, { seq: n, json: JSON.stringify(args[1]) });
       else if (name === 'deleteSetting') unwritten.set(args[0] as string, { seq: n, json: null });
       else if (name === 'setSettings') {
@@ -400,7 +441,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
       // The server's connection must not checkpoint either while the checkpoint worker does (src/checkpoint.ts).
       else if (name === 'autoCheckpoint') exec(`PRAGMA wal_autocheckpoint = ${args[0] ? 1000 : 0}`);
       FORGETS[name]?.(store, args as number[]);
-      const p = new Promise<void>((resolve, reject) => pending.set(n, { name, args, resolve, reject }));
+      const p = new Promise<unknown>((resolve, reject) => pending.set(n, { name, args, resolve, reject }));
       p.catch(() => {
         /* logged by the worker; a caller that awaits sees it */
       });
@@ -408,12 +449,12 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     };
   }
 
-  worker.on('message', ({ seq: n, error }: { seq: number; error?: string }) => {
+  worker.on('message', ({ seq: n, error, value }: { seq: number; error?: string; value?: unknown }) => {
     const p = pending.get(n);
     pending.delete(n);
     if (p) FORGETS[p.name]?.(store, p.args as number[]);
     if (error) p?.reject(new Error(error));
-    else p?.resolve();
+    else p?.resolve(value);
     for (const w of waiters) if (applied() >= w.seq) w.done();
   });
   worker.once('exit', (code) => {
@@ -440,6 +481,8 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     if (alive && !drain(10_000, 'the exit')) console.error(`DB write worker: ${seq - applied()} queued writes not written by exit.`);
     alive = false;
   });
+  // Code that is already async waits for the queue here, off the event loop, before a write on this thread (#1877).
+  store.allWritten = () => writes.landed?.(true) ?? null;
   worker.unref(); // after the listeners: adding one refs the worker again
   console.log(`DB writes run on a worker thread (started in ${readyMs - (until - Date.now())} ms).`);
   return { drain, queued: () => seq - applied(), stop: () => worker.terminate(), shared };
@@ -457,14 +500,38 @@ if (!isMainThread && workerData?.writer) {
   Atomics.store(shared, 1, 1n);
   Atomics.notify(shared, 1);
   const pause = delayMs ? new Int32Array(new SharedArrayBuffer(4)) : null;
-  parentPort!.on('message', ({ seq, name, args, step }: { seq: number; name: string; args: unknown[]; step?: bigint }) => {
+  // How long the write waited for another connection's write lock: a try with no busy wait first, so a free lock costs
+  // two statements, and only a held one (SQLITE_BUSY) is waited out and timed. Lock first, then the write: what is left of a
+  // slow write is time inside it, the disk. shortcut: a connection that takes the lock between the two is counted as writing.
+  const lockWait = () => {
+    try {
+      store.db.exec('PRAGMA busy_timeout = 0; BEGIN IMMEDIATE; ROLLBACK;');
+      return 0;
+    } catch {
+      if (store.db.isTransaction) store.db.exec('ROLLBACK');
+    } finally {
+      store.db.exec(`PRAGMA busy_timeout = ${WRITER_BUSY_MS}`);
+    }
+    const t0 = performance.now();
+    try {
+      store.db.exec('BEGIN IMMEDIATE; ROLLBACK;');
+    } catch {
+      if (store.db.isTransaction) store.db.exec('ROLLBACK');
+    }
+    return Math.max(1, Math.round(performance.now() - t0));
+  };
+  const run = async ({ seq, name, args, step }: { seq: number; name: string; args: unknown[]; step?: bigint }) => {
     // Every write of the step was sent before this, so all of them have run.
     if (step) return (Atomics.store(shared, 3, step), Atomics.notify(shared, 3));
+    const t0 = performance.now();
+    const locked = lockWait();
     if (pause) Atomics.wait(pause, 0, 0, delayMs);
     let error: string | undefined;
+    let value: unknown;
     try {
       const { obj, method } = owner(store, name);
-      obj[method](...args);
+      // An ASYNC_WRITES method's body runs at once; awaiting it only unwraps the value.
+      value = await obj[method](...args);
     } catch (e) {
       error = String(thrown(e).message ?? e);
       console.error(`DB write ${name} failed on the write worker: ${thrown(e).stack ?? e}`);
@@ -474,8 +541,27 @@ if (!isMainThread && workerData?.writer) {
         /* the health log is best effort */
       }
     }
+    const took = Math.round(performance.now() - t0);
     Atomics.store(shared, 0, BigInt(seq));
     Atomics.notify(shared, 0);
-    parentPort!.postMessage({ seq, error });
+    try {
+      parentPort!.postMessage({ seq, error, value });
+    } catch (e) {
+      parentPort!.postMessage({ seq, error: `its value can't go back to the server's thread: ${thrown(e).message ?? e}` });
+    }
+    if (took >= SLOW_DRAIN_MS) {
+      const text = `${name} took ${took} ms on the write worker: ${locked ? `${locked} ms waiting for another connection's write lock (SQLITE_BUSY)` : 'the write lock was free'}; ${took - locked} ms writing`;
+      console.error(`DB write: ${text}.`);
+      try {
+        store.addHealthEvent('db-write-slow', Date.now(), null, text);
+      } catch {
+        /* the health log is best effort */
+      }
+    }
+  };
+  // One at a time, in the order sent: the chain keeps an awaited value write's successor from starting before it ends.
+  let chain: Promise<unknown> = Promise.resolve();
+  parentPort!.on('message', (m) => {
+    chain = chain.then(() => run(m)).catch((e) => console.error(`DB write worker: ${thrown(e).stack ?? e}`));
   });
 }

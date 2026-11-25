@@ -29,7 +29,11 @@ The Store's void writes run on one worker thread with its own connection, in the
   queue once skipped a job's chat card and sent an agent the lend from before (main red, 2026-11-21).
 - Writes that return a value (createTicket and about 30 more) still run on the server's thread, after the
   whole queue. If the queue doesn't empty within 30 s they throw instead of running ahead of it.
-  Step 2 moves them.
+  Step 2 (#1877, 2026-11-24, after the server froze for 15 and 21 s waiting on them) moved the hot ones:
+  `recordTurn`, `markSeen` and `syncArtifacts` are async and run on the worker, resolving with its value
+  (`ASYNC_WRITES`); memory's index sends its chunks (`memory.putChunks`) and the usage ledger its counts
+  (`usage.addCounts`) as void writes; `createTicket` from a route or a new minion waits for the queue with
+  `afterAllWrites`, off the event loop. The worker runs one message at a time, so order still holds.
 - addEvent picks its event's id on the server's thread, so it still returns the row at once.
 - At exit, the queue is written first, for up to 10 s.
 - If the worker can't start or stops, writes go back to the server's thread. Writes it had queued when it
@@ -43,5 +47,7 @@ The Store's void writes run on one worker thread with its own connection, in the
 - A stalled disk delays writes and leaves reads briefly stale. It no longer freezes pages, turns or tool calls.
 - A write that breaks a constraint no longer throws at its caller. A route that answers from such a
   failure awaits the write (the machine rename's 409).
-- A value-returning write still waits for the queue. If the disk stalls under one, the event loop waits
-  too, until step 2.
+- The value writes left on the server's thread still wait for the queue. They're rare; a raw-SQL wait now
+  names the function it came from in its `db-write-wait` row, so the next slow one says where to look.
+- The worker logs every write that took 500 ms or more (`db-write-slow`): how long it waited for another
+  connection's write lock (SQLITE_BUSY) and how long it spent writing (the disk).

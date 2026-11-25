@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
-import { READ_WAIT_MS, SLOW_DRAIN_MS, VALUE_WRITES, WRITES, writeOffThread, type Writer } from '../src/db-writer.ts';
+import { ASYNC_WRITES, READ_WAIT_MS, SLOW_DRAIN_MS, VALUE_WRITES, WRITES, writeOffThread, type Writer } from '../src/db-writer.ts';
 import { Store } from '../src/db.ts';
 import { json, ownWrites, writes } from '../src/http.ts';
 import { attachEventsIfThere } from '../src/events-db.ts';
@@ -176,6 +176,101 @@ test("a write on the server's thread that waits long for the queue is named in t
   const rows = store.healthEventsSince(['db-write-wait'], 0);
   assert.equal(rows.length, 1);
   assert.match(rows[0].detail, /^createProject on the server's thread waited \d+ ms for 1 queued writes$/);
+});
+
+// #1877: on Nov 24 a db-write-wait said the server waited 20.5 s for 3 queued writes, and nothing said why the worker took
+// that long. The worker names each slow write itself: the time it waited for another connection's write lock, and the
+// time inside the write (the disk).
+test('the write worker names each slow write: its method, the wait for the write lock, and the time writing (#1877)', async () => {
+  const { store, w } = open(SLOW_DRAIN_MS + 100);
+  store.setSetting('k', 'slow');
+  assert.ok(w.drain(5000));
+  await until('the slow-write row lands', () => store.healthEventsSince(['db-write-slow'], 0).length > 0);
+  const [row] = store.healthEventsSince(['db-write-slow'], 0);
+  assert.match(row.detail, /^setSetting took (\d+) ms on the write worker: the write lock was free; (\d+) ms writing$/);
+  assert.ok(Number(/(\d+) ms writing/.exec(row.detail)![1]) >= SLOW_DRAIN_MS, 'the stalled "disk" counts as time writing');
+});
+
+test("a slow write that waited for another connection's write lock says so (SQLITE_BUSY), apart from its time writing (#1877)", async () => {
+  const { store, w } = open();
+  const other = new DatabaseSync(store.path);
+  other.exec('BEGIN IMMEDIATE');
+  const freed = setTimeout(() => other.exec('COMMIT'), SLOW_DRAIN_MS + 200);
+  store.setSetting('k', 'behind a lock');
+  await until('the write lands once the lock is let go', () => !w.queued());
+  clearTimeout(freed);
+  other.close();
+  await until('the slow-write row lands', () => store.healthEventsSince(['db-write-slow'], 0).length > 0);
+  const [row] = store.healthEventsSince(['db-write-slow'], 0);
+  const m = /^setSetting took \d+ ms on the write worker: (\d+) ms waiting for another connection's write lock \(SQLITE_BUSY\); (\d+) ms writing$/.exec(row.detail);
+  assert.ok(m, row.detail);
+  assert.ok(Number(m[1]) >= SLOW_DRAIN_MS, `the lock wait is named: ${row.detail}`);
+  assert.ok(Number(m[2]) < SLOW_DRAIN_MS, `and kept apart from the time writing: ${row.detail}`);
+});
+
+// #1877, #795's step 2: recordTurn, markSeen and syncArtifacts waited on the server's thread for the whole queue (15.4 s
+// on Nov 24). They run on the worker now, in order, and their callers await the value.
+test('recordTurn, markSeen and syncArtifacts on a stalled disk never hold the event loop; each resolves with its value, after the writes before it (#1877)', async () => {
+  const { store, w } = open(600);
+  const t = ticket(store);
+  w.drain();
+  let worst = 0,
+    last = performance.now();
+  const tick = setInterval(() => {
+    worst = Math.max(worst, performance.now() - last);
+    last = performance.now();
+  }, 10);
+  store.setSetting('before', 1); // queued ahead of them: 600 ms of "disk"
+  const t0 = performance.now();
+  const turn = store.recordTurn(t.id, { session_id: 's', ended_at: Date.now(), session_cost_usd: 2 });
+  const seen = store.markSeen('cara', t.id);
+  const synced = store.syncArtifacts(t, [{ path: 'a.html', size: 1, mtime: 1 }]);
+  const sent = performance.now() - t0;
+  // timing-ok: a true speed bound (they are sent, not run, here); on main each waited out the 600 ms queue on this thread
+  assert.ok(sent < 200, `sending them held the server's thread ${Math.round(sent)} ms`);
+  assert.ok(w.queued() >= 3, 'they are queued on the worker, behind the setting');
+  const [row, at, changed] = await Promise.all([turn, seen, synced]);
+  clearInterval(tick);
+  assert.equal(row.ticket_id, t.id);
+  assert.equal(row.cost_usd, 2);
+  assert.ok(at > 0);
+  assert.equal(changed, true);
+  // Each resolved once it had landed: a read sees it, and the setting queued ahead of them landed first.
+  assert.equal(store.getSetting('before'), 1);
+  assert.equal(store.ticketCost(t.id), 2);
+  assert.equal(store.seenAt('cara', t.id), at);
+  assert.deepEqual(
+    store.listArtifacts(t.project_id).map((a) => a.path),
+    ['a.html'],
+  );
+  // timing-ok: a true speed bound (the loop is never held), listed for a bench in #1444
+  assert.ok(worst < 300, `the event loop was held ${Math.round(worst)} ms`);
+});
+
+test('a value write sent to the worker that fails rejects at its caller, and the writes after it still land (#1877)', async () => {
+  const { store, w } = open();
+  const t = ticket(store);
+  w.drain();
+  await assert.rejects(store.recordTurn(t.id + 1000, { session_id: 's', ended_at: Date.now(), session_cost_usd: 1 }), /FOREIGN KEY/);
+  store.setSetting('after', 1);
+  assert.ok(w.drain(5000));
+  assert.equal(store.getSetting('after'), 1);
+});
+
+test("the usage ledger's flush never waits for the queue on the server's thread: its counts go to the worker (#1877)", async () => {
+  const { store, w } = open(SLOW_DRAIN_MS * 2);
+  store.setSetting('k', 'queued'); // 1 s of "disk" ahead of the flush
+  store.usage.used('page', 'home', 1);
+  const t0 = performance.now();
+  store.usage.flush();
+  const took = performance.now() - t0;
+  // timing-ok: a true speed bound; on main the flush's BEGIN waited out the queue here
+  assert.ok(took < 200, `the flush held the server's thread ${Math.round(took)} ms`);
+  assert.ok(w.drain(5000));
+  assert.deepEqual(
+    store.usage.rows().map((r) => [r.kind, r.name, r.n]),
+    [['page', 'home', 1]],
+  );
 });
 
 test('a read that gives up waiting for queued writes is in the health log, named, with the reads since the last row; one row per minute at most (#1656)', () => {
@@ -353,11 +448,10 @@ const STAYS_ON_THREAD: Record<string, string> = {
   // The constructor's one-time migrations: they run before the writer starts.
   ...Object.fromEntries(['attachState', 'moveSharedViews', 'serverLoginOwnerOnly', 'groupByType', 'closedAtFromNotes', 'dropEarlyPeekAurasBuilds', 'shippingFromRules', 'lendingLists', 'numberTickets', 'settleBuilds', 'props.seed', 'props.insertSeed', 'schedules.fillTriggers'].map((m) => [m, 'boot'])),
   // Helpers that run inside a listed write, with it.
-  // The usage ledger batches counts in memory and flushes on the server's thread on a timer (#1306).
-  'usage.flush': "the ledger's own timer",
+  // The usage ledger batches counts in memory and sends them as usage.addCounts on a timer (#1306, #1877).
   'usage.prune': "the ledger's own timer",
-  'usage.rows': 'an admin read that flushes first',
   dropAudit: 'inside sweepTurnAudit and deleteTurnAudit',
+  turnRow: 'inside recordTurn and backfillTurns',
   'props.insertValue': 'inside props.registerValues and props.review',
   'props.putStage': 'inside props.statusChanged',
   'props.statusChanged': 'inside updateTicket',
@@ -417,7 +511,7 @@ const STAYS_ON_THREAD: Record<string, string> = {
 
 test("every Store method that writes is sent to the worker or listed as staying on the server's thread (#1285)", () => {
   const store = new Store(join(root, 'lists.db')) as any;
-  const listed = new Set<string>([...WRITES, ...VALUE_WRITES]);
+  const listed = new Set<string>([...WRITES, ...VALUE_WRITES, ...ASYNC_WRITES]);
   const runsSql = /\.run\(|\bdb\.exec\(|[`'"]\s*(INSERT|UPDATE|DELETE|REPLACE)\s/i;
   const writers: string[] = [];
   const scan = (obj: object, prefix: string) => {

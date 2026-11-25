@@ -1,5 +1,5 @@
 import type { Store, Project } from './db.ts';
-import { HttpError } from './http.ts';
+import { afterAllWrites, HttpError } from './http.ts';
 import { errorText } from './scheme-repo.ts';
 
 export type NewMinionSpec = { title: string; props: Record<string, unknown>; model?: string | null; effort?: string | null; build?: number | null };
@@ -11,7 +11,8 @@ export type NewMinionSpec = { title: string; props: Record<string, unknown>; mod
  */
 export async function makeMinion(store: Store, project: Project, m: NewMinionSpec, by: string, makeDir: (id: number, number: number) => Promise<{ cwd: string; branch: string | null }>, afterWrites: () => Promise<unknown> = async () => {}) {
   store.props.check(project.id, m.props);
-  const { id, number } = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'bypassPermissions', created_by: by });
+  // A value write: the queue empties off the event loop first, so creating it never waits there (#1877).
+  const { id, number } = await afterAllWrites(() => store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'bypassPermissions', created_by: by }));
   try {
     const { notes } = store.props.set('minion', id, project.id, m.props, by);
     store.props.startStage(id);

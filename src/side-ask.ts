@@ -202,20 +202,22 @@ export class SideAsks {
     const ev = this.runner.emit(t.ticketId, 'side_answer', { thread: t.id, ask: run.ask, ok, text: ok ? result.result : why, cost_usd: cost });
     // Its cost is the asker's (sender pays), kept apart from the minion's own turns.
     if (cost !== null && t.forkId) {
-      const turn: Turn = this.store.recordTurn(t.ticketId, {
-        event_id: ev.id,
-        session_id: t.forkId,
-        ended_at: ev.created_at,
-        session_cost_usd: cost,
-        duration_ms: result.duration_ms,
-        usage: result.usage,
-        payer: this.runner.payerOf(t.asker),
-        account: t.account,
-        modelUsage: result.modelUsage,
-        side: true,
-        fork_of: minion,
-      });
-      this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(t.ticketId)?.project_id });
+      void this.store
+        .recordTurn(t.ticketId, {
+          event_id: ev.id,
+          session_id: t.forkId,
+          ended_at: ev.created_at,
+          session_cost_usd: cost,
+          duration_ms: result.duration_ms,
+          usage: result.usage,
+          payer: this.runner.payerOf(t.asker),
+          account: t.account,
+          modelUsage: result.modelUsage,
+          side: true,
+          fork_of: minion,
+        })
+        .then((turn: Turn) => this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(t.ticketId)?.project_id }))
+        .catch((e) => console.error(`[side-ask] ${t.id}: its turn's cost was not recorded: ${(e as Error).message}`));
     }
     rmSync(run.dir, { recursive: true, force: true });
     t.run = null;

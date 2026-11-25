@@ -49,7 +49,7 @@ test('the store keeps them under the turn, and a later read updates a Grunt inst
   const store = new Store(join(root, 'c.db'));
   const p = store.createProject('P', null);
   const t = store.createTicket({ project_id: p.id, kind: 'ticket', title: 'T', permission_mode: 'default', created_by: 'x' });
-  const turn = store.recordTurn(t.id, { session_id: session, ended_at: 1, session_cost_usd: 1 });
+  const turn = await store.recordTurn(t.id, { session_id: session, ended_at: 1, session_cost_usd: 1 });
   const rows = await readGrunts(root, cwd, session);
   store.recordGrunts(turn.id, rows);
   store.recordGrunts(

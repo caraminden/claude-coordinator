@@ -27,6 +27,9 @@ export interface UsageRow {
   days: number;
 }
 
+/** A count as flush writes it: day, kind, name, distinct people, uses. */
+type UsageCount = [string, UsageKind, string, number, number];
+
 interface Pending {
   day: string;
   kind: UsageKind;
@@ -77,29 +80,47 @@ export class UsageLedger {
     }
   }
 
-  /** Write the counts so far. Returns whether it wrote; on a failure the counts are kept for the next flush. */
+  /**
+   * Write the counts so far. On the server they go to the write worker, so a flush never waits for its queue (#1877).
+   * Returns whether it sent them; a failed write puts its counts back for the next flush.
+   */
   flush(): boolean {
     if (!this.pending.size) return true;
-    try {
-      const up = this.db.prepare(`INSERT INTO usage_counts (day, kind, name, people, n) VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT (day, kind, name) DO UPDATE SET n = n + excluded.n, people = MAX(people, excluded.people)`);
-      this.db.exec('BEGIN');
-      try {
-        for (const [key, p] of this.pending) up.run(p.day, p.kind, p.name, this.seen.get(key)?.size ?? 0, p.n);
-        this.db.exec('COMMIT');
-      } catch (err) {
-        try {
-          this.db.exec('ROLLBACK');
-        } catch {
-          /* already closed */
-        }
-        throw err;
+    const sent = [...this.pending];
+    const rows = sent.map(([key, p]): UsageCount => [p.day, p.kind, p.name, this.seen.get(key)?.size ?? 0, p.n]);
+    this.pending.clear();
+    const back = (err: unknown) => {
+      console.error(`[usage] flush failed, will retry: ${(err as Error).message}`);
+      for (const [key, p] of sent) {
+        const now = this.pending.get(key);
+        if (now) now.n += p.n;
+        else this.pending.set(key, p);
       }
-      this.pending.clear();
+    };
+    try {
+      Promise.resolve(this.addCounts(rows) as unknown).catch(back);
       return true;
     } catch (err) {
-      console.error(`[usage] flush failed, will retry: ${(err as Error).message}`);
+      back(err);
       return false;
+    }
+  }
+
+  /** flush's write: add each count to its day's row. */
+  addCounts(rows: UsageCount[]) {
+    const up = this.db.prepare(`INSERT INTO usage_counts (day, kind, name, people, n) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT (day, kind, name) DO UPDATE SET n = n + excluded.n, people = MAX(people, excluded.people)`);
+    this.db.exec('BEGIN');
+    try {
+      for (const r of rows) up.run(...r);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        /* already closed */
+      }
+      throw err;
     }
   }
 

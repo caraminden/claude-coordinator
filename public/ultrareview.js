@@ -78,6 +78,9 @@ function openUltra(t) {
   const later = () => {
     clearTimeout(timer);
     btn.disabled = true;
+    // A size check still in flight is for the old paths: its answer must not enable Start (WP8, #1858).
+    seq++;
+    checked = null;
     timer = setTimeout(check, 400);
   };
   form.addEventListener('change', (e) => e.target.name === 'mode' && check());
@@ -101,7 +104,8 @@ function openUltra(t) {
   (hasBranch ? btn : paths).focus();
   // Someone with prepped reviews here opens on them.
   batch.load().then((rows) => {
-    if (rows.length && form.elements.mode.value !== 'batch') {
+    // Only over a form nobody has touched: a late read never switches someone mid-typing to the batch (WP8, #1858).
+    if (rows.length && form.elements.mode.value !== 'batch' && !paths.value.trim()) {
       form.elements.mode.value = 'batch';
       check();
     }
@@ -118,6 +122,8 @@ function batchPanel(t, dialogOf) {
   let rows = [];
   let github = true;
   let poll = null;
+  let sending = false; // Prep's POST is out: the poll's redraw must not re-enable the button (WP7, #1858)
+  let changed = 0; // bumped by every send, Start and Discard: a read begun before one is out of date when it answers
   const list = h('div', { class: 'ur-rows' });
   const areas = h('div', { class: 'ur-areas' });
   const refused = h('div', { class: 'cui-notice ur-refused', 'data-tone': 'danger', role: 'alert', hidden: true });
@@ -177,7 +183,7 @@ function batchPanel(t, dialogOf) {
     list.replaceChildren(...rows.map(rowEl));
     listBox.hidden = !rows.length;
     noGithub.hidden = github;
-    prep.disabled = !github;
+    prep.disabled = !github || sending;
     clearTimeout(poll);
     // While a PR is being opened or a review runs, the rows follow it.
     if (rows.some((r) => r.state === 'prepping' || r.state === 'running')) poll = setTimeout(() => dialogOf()?.open && load(), 3000);
@@ -209,6 +215,7 @@ function batchPanel(t, dialogOf) {
   };
 
   const setRow = (id, patch) => {
+    changed++;
     rows = patch ? rows.map((x) => (x.id === id ? { ...x, ...patch } : x)) : rows.filter((x) => x.id !== id);
     draw();
   };
@@ -245,6 +252,8 @@ function batchPanel(t, dialogOf) {
     const filled = asks.map((a, i) => [a, boxes[i]]).filter(([a]) => a.paths.length);
     refused.hidden = true;
     if (!filled.length) return showRefused([{ name: '', error: 'Name the files or folders for at least one area.' }]);
+    sending = true;
+    changed++;
     prep.disabled = true;
     prep.textContent = 'Prepping…';
     try {
@@ -258,6 +267,7 @@ function batchPanel(t, dialogOf) {
     } catch (ex) {
       showRefused([{ name: '', error: ex.message }]);
     } finally {
+      sending = false;
       prep.textContent = 'Prep draft PRs';
       draw();
     }
@@ -269,8 +279,10 @@ function batchPanel(t, dialogOf) {
   };
 
   async function load() {
+    const began = changed;
     try {
       const r = await api(`api/tickets/${t.id}/ultrareview/batch`);
+      if (began !== changed) return rows;
       rows = r.rows;
       github = r.github;
     } catch {

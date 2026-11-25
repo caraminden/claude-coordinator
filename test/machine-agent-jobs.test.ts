@@ -87,7 +87,7 @@ const stickContainer = (id: number, stuck: boolean) => setBox(id, { ...container
 const podmanCalls = () => jsonLines(join(fakes, 'argv.log'));
 
 // ---------- the app's side ----------
-type State = { id: number; state: string; run_s: number; error?: string; outputs?: { path: string; size: number; uploaded: boolean }[]; exit_code?: number; held_vram_mb?: number; log_tail?: string };
+type State = { id: number; state: string; run_s: number; gpu_pct?: number | null; error?: string; outputs?: { path: string; size: number; uploaded: boolean }[]; exit_code?: number; held_vram_mb?: number; log_tail?: string };
 const app = {
   states: [] as State[],
   uploads: new Map<string, Buffer>(),
@@ -820,5 +820,29 @@ test('a report the app leaves unanswered does not hold the next tick, or the tim
   } finally {
     app.hold = null;
     for (const go of app.held.splice(0)) go();
+  }
+});
+
+test('a tick whose GPU sample outlasts a job says nothing more about that job (#1964)', async () => {
+  // Under load the sample (a process start) took longer than a job's whole ending, and the tick then reported the job as it
+  // found it, on its own connection: the app could hear "uploading" after "done".
+  const dir = mkdtempSync(join(root, 'smi-'));
+  const r = runner(block(), () => {}, { nvidiaSmi: [node, slowSmi, dir], tickMs: 5 });
+  const ends = start();
+  const stays = start();
+  await r.handle(ends);
+  try {
+    await until('the first sample starts', () => jsonLines(join(dir, 'smi.log')).length >= 1, undefined, statesTail);
+    exitContainer(ends.id, 0);
+    await until('done', () => lastState(ends.id)?.state === 'done', undefined, statesTail);
+    await r.handle(stays);
+    writeFileSync(join(dir, 'go'), '');
+    // The witness: the ticks after the held one report the next job twice, each a whole sample later.
+    await until('two ticks report the job still running', () => statesOf(stays.id).filter((s) => s.gpu_pct === 42).length >= 2, undefined, statesTail);
+    const heard = statesOf(ends.id).map((s) => s.state);
+    assert.deepEqual(heard.slice(heard.indexOf('done')), ['done'], 'the held tick reported the ended job again');
+  } finally {
+    writeFileSync(join(dir, 'go'), '');
+    await r.handle({ type: 'job.stop', id: stays.id });
   }
 });

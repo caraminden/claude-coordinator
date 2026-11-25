@@ -1819,7 +1819,8 @@ export class JobRunner {
 
   /** Every tick: GPU use, the time limit, the disk cap now and then, and a report for each live job (a starting one too, so the app knows it isn't lost: MA8). */
   async tick() {
-    const live = [...this.jobs.values()].filter((j) => ['starting', 'running', 'paused'].includes(j.state) && !j.final);
+    const isLive = (j) => ['starting', 'running', 'paused'].includes(j.state) && !j.final;
+    const live = [...this.jobs.values()].filter(isLive);
     const now = Date.now();
     // shortcut: a tick longer than two intervals (a slow nvidia-smi) leaves gpu_busy_s short by the rest of it; count from the tick's end if that number is ever more than a display.
     const dt = Math.min(now - this.lastSample, 2 * this.tickMs) / 1000;
@@ -1832,6 +1833,9 @@ export class JobRunner {
     // Without a block now, a running job keeps its time limit; the disk cap needs the block's number.
     const cap = slow && this.block ? this.block.max_disk_gb * 1024 ** 3 : 0;
     for (const j of live) {
+      // It ended while the sample was out (#1964): finish() reports it from here on, and a report from this tick, on a
+      // connection of its own, could reach the app after the last one.
+      if (!isLive(j)) continue;
       j._gpu = gpu;
       if (j.state === 'running' && !j.pausing) {
         if (j.kind.gpu && gpu && gpu.pct >= GPU_BUSY_PCT) j.gpu_busy_s += dt;

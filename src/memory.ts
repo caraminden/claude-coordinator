@@ -172,6 +172,7 @@ export class Memory {
     if (todo.length < max) todo.push(...this.staleRows(projectId, model, max - todo.length));
     if (todo.length < max) todo.push(...this.lateReplies(projectId, max - todo.length, now));
     // Two texts a request: 8 full chunks took ~85 s of a whole core (#525), too near llamaEmbed's 120 s timeout on a busy box.
+    let written = 0;
     for (let i = 0; i < todo.length; i += PER_REQUEST) {
       const part = todo.slice(i, i + PER_REQUEST);
       // A 4xx names one bad chunk: retry its pair one by one, skip the refused, go on. A 5xx or a dead connection still throws.
@@ -196,10 +197,12 @@ export class Memory {
       // On the server it goes to the write worker: waiting here for the queue held the server's thread 4.4 s (Nov 24).
       // Awaited (off the loop): a failed insert stops the pass before its mark moves, as it did on the server's thread.
       if (rows.length) await (this.putChunks(rows) as unknown);
+      written += rows.length;
       for (const p of part.filter((_, j) => vecs[j])) if (p.source_kind === 'ticket') this.ticketTexts?.set(p.source_id, p.text);
     }
     if (turns.mark !== null) this.store.setSetting(this.markKey(projectId), turns.mark);
-    return todo.length;
+    // The vectors written, not the chunks tried: a pass that only met refused chunks is 0, so a caller looping until 0 stops (ME1).
+    return written;
   }
 
   /** Store embedded chunks: index's write, sent to the write worker on the server. */
@@ -350,7 +353,12 @@ export class Memory {
 
   /** Rows embedded by another model, to embed again with this one. */
   private staleRows(projectId: number, model: string, max: number): Pending[] {
-    return this.db.prepare('SELECT project_id, ticket_id, person_id, source_kind, source_id, ts, text FROM memory_chunks WHERE project_id = ? AND model != ? LIMIT ?').all(projectId, model, max) as unknown as Pending[];
+    // Left out in SQL: a chunk the embedder refused keeps its old model and would come back every pass, a loop for the caller (ME1).
+    const out = [...this.skipped];
+    return this.db
+      .prepare(`SELECT project_id, ticket_id, person_id, source_kind, source_id, ts, text FROM memory_chunks WHERE project_id = ? AND model != ?
+      ${out.length ? `AND (source_kind || ':' || source_id) NOT IN (${out.map(() => '?').join(',')})` : ''} LIMIT ?`)
+      .all(projectId, model, ...out, max) as unknown as Pending[];
   }
 
   /**

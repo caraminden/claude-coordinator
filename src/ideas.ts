@@ -67,7 +67,7 @@ export function derive(i: Pick<Idea, 'pick' | 'ticket_id'>, shipped: boolean): I
   if (i.ticket_id) return shipped ? 'built' : 'started';
   if (!i.pick) return 'proposed';
   if (i.pick === 'later') return 'later';
-  if (/^(skip|cut|no|drop|not.now)/i.test(i.pick)) return 'skipped';
+  if (/^(skip|cut|no|drop|not.now)\b/i.test(i.pick)) return 'skipped';
   return 'picked';
 }
 

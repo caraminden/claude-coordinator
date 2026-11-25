@@ -670,3 +670,11 @@ test('the resume gap: 30 s for unproven waits, 5 s for ones a turn getting throu
   assert.deepEqual([both.wait.ticket, both.due], [2, now + 4_000]);
   assert.equal(nextLimitResume([], 0, 30_000, 5_000), null);
 });
+
+test('"resets 3am" is right on the night the clocks change (ME5)', () => {
+  const zone = '(America/Los_Angeles)';
+  // 12:00 AM PST on the night clocks spring forward: 3am is already PDT, 10:00Z.
+  assert.equal(parseResetTime(`resets 3am ${zone}`, Date.parse('2026-03-08T08:00:00Z')), Date.parse('2026-03-08T10:00:00Z'));
+  // 6pm PDT on the evening before they fall back: 3am next day is PST, 11:00Z.
+  assert.equal(parseResetTime(`resets 3am ${zone}`, Date.parse('2026-10-31T23:00:00Z')), Date.parse('2026-11-01T11:00:00Z'));
+});

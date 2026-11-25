@@ -510,3 +510,24 @@ test('a chunk the embedder refuses with a 4xx is skipped once and indexing moves
   await assert.rejects(store.memory.index(A.id, down, 'fake', 8), /503/);
   store.db.close();
 });
+
+test('after a model change, a refused chunk leaves later passes at 0 vectors, so a caller looping until 0 stops (ME1)', async () => {
+  const { store, A, a1, a2 } = world(join(root, 'refused-stale.db'));
+  turn(store, a1.id, 'Cara', 'POISON chunk about kiwis', 'Kiwis.');
+  turn(store, a2.id, 'Josh', 'A fine question about limes', 'Limes.');
+  while ((await store.memory.index(A.id, embed, 'old')) > 0);
+  const refusing: Embed = async (texts) => {
+    if (texts.some((t) => t.includes('POISON'))) throw Object.assign(new Error('embedding service answered 400'), { status: 400 });
+    return texts.map(fakeVec);
+  };
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    let passes = 0;
+    while ((await store.memory.index(A.id, refusing, 'new', 8)) > 0) assert.ok(++passes < 10, 'it must not loop');
+    assert.equal(await store.memory.index(A.id, refusing, 'new', 8), 0);
+  } finally {
+    console.error = orig;
+  }
+  store.db.close();
+});

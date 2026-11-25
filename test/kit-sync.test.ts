@@ -433,3 +433,48 @@ test('a case line with a trailing comment still opens a case', () => {
   assert.deepEqual(dupCaseLabels('case "$1" in # kinds\n  a) : ;;\n  a) : ;;\nesac\n'), ['a']);
   assert.deepEqual(dupCaseLabels('case "$1" in # outer\n  a) case "$2" in # inner\n  *) : ;;\nesac ;;\n  *) : ;;\nesac\n'), []);
 });
+
+test("a round is saved as each scheme's check starts, so a restart mid-round finds the checks that run (ME2)", async () => {
+  const { HostJobs } = await import('../src/host-job.ts');
+  const { KitSync } = await import('../src/kit-sync.ts');
+  const root = mkdtempSync(join(tmpdir(), 'kit-sync-save-'));
+  const jobs = new HostJobs(() => false);
+  try {
+    const kit = repo(root, 'kit');
+    const land1 = "#!/usr/bin/env bash\n# v1\nCHECK='true'\n";
+    commit(kit, { [LAND.template]: land1 }, 'v1');
+    const projectsDir = join(root, 'projects');
+    commit(repo(projectsDir, '3/repo'), { [LAND.path]: land1 }, 'setup');
+    commit(repo(projectsDir, '4/repo'), { [LAND.path]: land1 }, 'setup');
+    commit(kit, { [LAND.template]: land1.replace('# v1', '# v2') }, 'v2');
+    type Saved = { round?: { schemes: { name: string; state: string }[] } };
+    let saved: Saved | undefined;
+    const seen: string[][] = [];
+    const watching = { start: (o: Parameters<typeof jobs.start>[0]) => (seen.push((saved?.round?.schemes ?? []).map((x) => `${x.name}:${x.state}`)), jobs.start(o)), state: jobs.state.bind(jobs) };
+    const ks = new KitSync({
+      kitDir: kit,
+      projectsDir,
+      runDir: join(root, 'run'),
+      jobs: watching,
+      load: () => saved && JSON.parse(JSON.stringify(saved)),
+      save: (s) => (saved = JSON.parse(JSON.stringify(s))),
+      projects: () => [
+        { id: 3, name: 'One' },
+        { id: 4, name: 'Two' },
+      ],
+      home: () => 2,
+      chat: async (p) => 100 + p,
+      env: () => ({ PATH: process.env.PATH!, HOME: process.env.HOME! }),
+      canPush: async () => true,
+      postCard: () => 'q',
+      settle: () => {},
+      note: () => {},
+      mail: () => {},
+    });
+    await ks.poll();
+    assert.deepEqual(seen[0], [], 'nothing is saved before the first check starts');
+    assert.deepEqual(seen[1], ['One:checking'], "the second check starts with the first one's already saved");
+  } finally {
+    await tidy(jobs, root);
+  }
+});

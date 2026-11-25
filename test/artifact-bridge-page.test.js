@@ -65,6 +65,19 @@ function page(entries = []) {
       deliver({ re: m.id, ok, result, error: ok ? undefined : String(result) });
     },
     waiting: (op) => posted.filter((p) => p.op === op && !p.answered),
+    /** Say the viewer has the oldest unanswered `op` and is working on it (#1862). */
+    ack(op, known) {
+      const m = posted.find((p) => p.op === op && !p.answered);
+      assert.ok(m, `no ${op} request waiting`);
+      deliver({ ack: m.id, known });
+    },
+    /** Refuse the oldest unanswered `op` as a restart does: worth sending again. */
+    restarting(op) {
+      const m = posted.find((p) => p.op === op && !p.answered);
+      assert.ok(m, `no ${op} request waiting`);
+      m.answered = true;
+      deliver({ re: m.id, ok: false, error: 'Citadel is restarting, try again in a moment', retry: true });
+    },
   };
 }
 
@@ -176,6 +189,131 @@ test('a write the viewer refuses for good still fails at once, and the save stat
   p.answer('write', 'Too many writes; slow down', false);
   await assert.rejects(set, /Too many writes/);
   assert.equal(p.ctx.citadel.saveState(), 'saved');
+});
+
+/** Answer the page's questions whether its request is still being worked on, as a live viewer does, until stopped. */
+function aliveViewer(p) {
+  const timer = setInterval(() => {
+    for (const m of p.waiting('alive')) {
+      m.answered = true;
+      p.deliver({ ack: m.id });
+    }
+  }, 5);
+  return () => clearInterval(timer);
+}
+
+test('a write the viewer is still working on past the limit is waited for, then sent again if it failed (#1862)', async (t) => {
+  const p = page([['k', 'a']]);
+  t.after(aliveViewer(p));
+  p.answer('hello', { person: 'Cara', entries: [{ key: 'k', value: 'a' }] });
+  await p.ctx.citadel.ready;
+  let failed = null;
+  const set = p.ctx.citadel.storage.set('k', 'b').catch((e) => {
+    failed = e.message;
+  });
+  await wait(10);
+  p.ack('write');
+  await wait(500); // past the 150 ms limit three times over
+  assert.equal(failed, null, 'the viewer is there and has it');
+  assert.equal(p.bars.length, 0);
+  assert.equal(p.waiting('write').length, 1, 'not sent beside the one on its way, which could land after a later write');
+  p.restarting('write');
+  await wait(40);
+  assert.equal(JSON.stringify(p.waiting('write').map((m) => m.entries)), JSON.stringify([[{ key: 'k', value: 'b' }]]));
+  p.answer('write', { entries: [{ key: 'k', value: 'b' }] });
+  await set;
+  assert.equal(failed, null);
+  assert.equal(p.ctx.citadel.saveState(), 'saved');
+});
+
+test('a viewer that took a write and then went away still puts the bar up (#1862)', async () => {
+  const p = page();
+  p.answer('hello', { person: 'Cara', entries: [] });
+  await p.ctx.citadel.ready;
+  const set = p.ctx.citadel.storage.set('k', 'b');
+  await wait(10);
+  p.ack('write');
+  await assert.rejects(set, /did not answer/);
+  assert.equal(p.waiting('alive').length, 1, 'asked before giving up');
+  assert.equal(p.bars.length, 1);
+});
+
+test('a send the viewer is still posting past the limit does not read as failed (#1862)', async (t) => {
+  const p = page();
+  t.after(aliveViewer(p));
+  Object.assign(p.ctx.document, { createTreeWalker: () => ({ nextNode: () => null }) });
+  p.ctx.NodeFilter = {};
+  p.answer('hello', { person: 'Cara', entries: [] });
+  await p.ctx.citadel.ready;
+  const sent = p.ctx.citadel.send('Picks: 3');
+  await wait(5);
+  p.ack('send');
+  await wait(300);
+  p.answer('send', { sent: true, to: '#4' });
+  assert.equal((await sent).to, '#4');
+});
+
+test('a page opened while Citadel restarts joins once it is back, and what was picked meanwhile is saved (#1862)', async () => {
+  const p = page([['k', 'a']]);
+  const states = [];
+  p.ctx.citadel.watchSaves((s) => states.push(s));
+  p.ack('hello', { person: 'Cara', file: 'p.html', owner: 'Josh', draw: true });
+  p.restarting('hello');
+  // The viewer is there, so the page is too: it draws what it was served with and takes picks.
+  assert.equal(await p.ctx.citadel.ready, true);
+  assert.equal(JSON.stringify(await p.ctx.citadel.info()), JSON.stringify({ person: 'Cara', file: 'p.html', owner: 'Josh', draw: true }));
+  const set = p.ctx.citadel.storage.set('k', 'b');
+  await wait(20);
+  p.restarting('hello');
+  await wait(30);
+  assert.equal(p.waiting('write').length, 0, 'nothing is written before the hello lands');
+  assert.equal(p.ctx.citadel.saveState(), 'retrying');
+  p.answer('hello', {
+    person: 'Cara',
+    file: 'p.html',
+    owner: 'Josh',
+    entries: [
+      { key: 'k', value: 'x' },
+      { key: 'n', value: 1 },
+    ],
+  });
+  await wait(10);
+  assert.equal(await p.ctx.citadel.storage.get('n'), 1, "others' changes came with the hello");
+  assert.equal(await p.ctx.citadel.storage.get('k'), 'b', 'the pick stays on top');
+  p.answer('write', { entries: [] });
+  await set;
+  assert.equal(p.bars.length, 0);
+  assert.deepEqual([...new Set(states)], ['saved', 'retrying', 'saving']);
+  assert.equal(p.ctx.citadel.saveState(), 'saved');
+});
+
+test('a page whose hello hangs draws once the viewer is known to be there, and saves when it lands (#1862)', async (t) => {
+  const p = page();
+  t.after(aliveViewer(p));
+  p.ack('hello', { person: 'Cara', file: 'p.html', owner: 'Josh', draw: false });
+  await wait(200); // the hello's limit is 5 s, 50 ms here
+  assert.equal(await Promise.race([p.ctx.citadel.ready, wait(50)]), true);
+  const set = p.ctx.citadel.storage.set('k', 1);
+  p.answer('hello', { person: 'Cara', entries: [] });
+  await wait(10);
+  p.answer('write', { entries: [] });
+  await set;
+});
+
+test('a page the viewer refuses says on the page that a change is not saved; one nobody answers stays quiet (#1862)', async () => {
+  const refused = page();
+  refused.answer('hello', 'That page is no longer there', false);
+  await wait(5);
+  refused.answer('hello', 'That page is no longer there', false);
+  assert.equal(await refused.ctx.citadel.ready, false);
+  assert.equal(refused.bars.length, 0, 'nothing to lose yet');
+  await assert.rejects(refused.ctx.citadel.storage.set('k', 1), /isn't connected/);
+  assert.equal(refused.bars.length, 1);
+  // Opened some other way: the page says itself that it can't save, as before.
+  const alone = page();
+  assert.equal(await alone.ctx.citadel.ready, false);
+  await assert.rejects(alone.ctx.citadel.storage.set('k', 1), /isn't connected/);
+  assert.equal(alone.bars.length, 0);
 });
 
 test('typing on the page tells the viewer, at most once a second, so a new front end does not reload under it (#821)', async () => {

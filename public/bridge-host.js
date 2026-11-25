@@ -4,6 +4,7 @@
 // It never sends by itself. A page can also open one of its own pictures to draw on (#946), and send the
 // marked copies with its text.
 
+import { me } from './base.js';
 import { answerNow } from './inbox.js';
 
 export const TAG = 'citadel-bridge-1';
@@ -32,7 +33,7 @@ export function readRequest(e, from = frames) {
   const m = e.data;
   if (!frame || e.origin !== 'null' || !m || typeof m !== 'object' || m.bridge !== TAG) return null;
   if (!Number.isSafeInteger(m.id) || typeof m.page !== 'string' || m.page.length > 4000) return null;
-  if (m.op === 'hello' || m.op === 'list' || m.op === 'typing') return { frame, req: { id: m.id, op: m.op, page: m.page } };
+  if (m.op === 'hello' || m.op === 'list' || m.op === 'typing' || m.op === 'alive') return { frame, req: { id: m.id, op: m.op, page: m.page } };
   if (m.op === 'write' && Array.isArray(m.entries) && m.entries.length && m.entries.length <= MAX_ENTRIES) return { frame, req: { id: m.id, op: 'write', page: m.page, entries: m.entries } };
   if (m.op === 'send' && typeof m.text === 'string' && m.text.trim() && m.text.length <= MAX_TEXT && validImages(m.images)) {
     const items = Array.isArray(m.items) && m.items.length <= 500 ? m.items.filter((i) => i && typeof i === 'object').map(({ collection, id, title, label }) => ({ collection, id, title, label })) : null;
@@ -73,8 +74,8 @@ export function takeWrite(frame, now = Date.now()) {
 let typedAt = 0;
 export const bridgeTypedAt = () => typedAt;
 
-/** Whether a page open here holds writes Citadel couldn't take yet (it was restarting): a reload would lose them. */
-export const bridgeUnsaved = () => [...frames].some((f) => alive(f) && f.unsaved);
+/** Whether a page open here holds writes Citadel couldn't take yet (it was restarting), or has one or a Send on its way: a reload would lose them. */
+export const bridgeUnsaved = () => [...frames].some((f) => alive(f) && (f.unsaved || [...f.working.values()].some((op) => op === 'write' || op === 'send')));
 
 /** A failure worth sending again: the network, or Caddy's answer while Citadel restarts. */
 const transient = (err) => err?.retry === true || err instanceof TypeError || [502, 503, 504].includes(err?.status);
@@ -92,7 +93,7 @@ const alive = (f) => (f.iframe ? f.iframe.isConnected : !f.tab.closed);
 export function attachBridge(iframe, { open, name, owner, api, draw = null, tab = null, afterSend = null }) {
   for (const f of frames) if (!alive(f)) frames.delete(f); // a closed viewer's frame, which nothing else would let go of (#1760)
   if (!frames.size) addEventListener('message', onMessage);
-  frames.add({ iframe: tab ? null : iframe, tab, open, name, owner, api, draw: tab ? null : draw, marks: new Map(), store: null, page: null, afterSend: tab ? null : afterSend });
+  frames.add({ iframe: tab ? null : iframe, tab, open, name, owner, api, draw: tab ? null : draw, marks: new Map(), working: new Map(), sends: new Map(), store: null, page: null, afterSend: tab ? null : afterSend });
 }
 
 /** Open `src` (an HTML page) in a new tab that keeps its bridge to this viewer; false if the browser refused. */
@@ -114,6 +115,13 @@ async function onMessage(e) {
   // opaque, so '*' is the only target that reaches it.
   const reply = (body) => e.source.postMessage({ bridge: TAG, re: req.id, ...body }, '*');
   if (req.op === 'typing') return void (typedAt = Date.now());
+  // The page hears at once that its request is here, and again whenever it asks (`alive`) while it is worked on, so it
+  // can tell Citadel being slow from a viewer that is gone (#1862). A page from before that drops both unread. A hello
+  // is told what this viewer knows by itself, for a page opened while Citadel is down.
+  const ack = (more) => e.source.postMessage({ bridge: TAG, ack: req.id, ...more }, '*');
+  if (req.op === 'alive') return void (frame.working.has(req.id) && ack());
+  frame.working.set(req.id, req.op);
+  ack(req.op === 'hello' ? { known: { person: me, file: frame.name, owner: frame.owner, draw: !!frame.draw } } : {});
   try {
     if (req.op === 'draw') {
       if (!frame.draw) throw new Error("Drawing on a picture works only in Citadel's viewer");
@@ -128,13 +136,23 @@ async function onMessage(e) {
       // Only on a person's click or key: a page never sends as them by itself. A frame's click reaches
       // this window; a tab's doesn't, so a tab only gets a gap between sends.
       if (frame.iframe && navigator.userActivation && !navigator.userActivation.isActive) throw new Error('citadel.send works only from a click or key press');
+      // The same Send pressed again while the first is out is that one, not another message. One pressed again after
+      // a failure keeps its id: the server may have taken the first, its reply lost, and takes an id once (#1862).
+      const key = JSON.stringify([req.text, req.items, req.images]);
+      const again = frame.sends.get(key)?.out;
+      if (again) return reply({ ok: true, result: { sent: true, to: (await again).to.label } });
       if (frame.tab && Date.now() - (frame.sentAt ?? 0) < TAB_SEND_GAP) throw new Error('Sent a moment ago; wait a few seconds before sending again');
       // #1409: the choices card this page answers drops from the counts at the click; a refused send brings it back.
       const unanswer = frame.open?.ticket ? answerNow(frame.open.ticket, (i) => !!i.card?.doc && (i.card.doc.path === frame.open.path || i.card.doc.path?.endsWith(`/${frame.open.path}`))) : () => {};
-      const r = await frame.api('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text, images: req.images, items: req.items } }).catch((e) => {
+      const send = frame.sends.get(key) ?? { id: crypto.randomUUID(), out: null };
+      frame.sends.set(key, send);
+      send.out = frame.api('api/artifact-send', { method: 'POST', body: { open: frame.open, page: req.page, text: req.text, images: req.images, items: req.items, sendId: send.id } });
+      const r = await send.out.catch((e) => {
+        send.out = null;
         unanswer();
         throw e;
       });
+      frame.sends.delete(key);
       frame.sentAt = Date.now(); // after it went, so a retry after a failure isn't held back
       reply({ ok: true, result: { sent: true, to: r.to.label } });
       // Sent: the viewer goes away and the chat shows the message, unless the page keeps it open (send's keepOpen).
@@ -152,10 +170,12 @@ async function onMessage(e) {
     const result = req.op === 'hello' ? { person: r.person, file: frame.name, owner: frame.owner, entries: r.entries, draw: !!frame.draw } : { entries: r.entries };
     reply({ ok: true, result });
   } catch (err) {
-    // A write the page sends again until it lands (artifact-bridge.js) holds a reload here; one refused
-    // for good won't be sent again, so it doesn't.
-    if (req.op === 'write') frame.unsaved = transient(err);
+    // A write the page sends again until it lands (artifact-bridge.js) holds a reload here, and so does a hello,
+    // which may have writes waiting on it; one refused for good won't be sent again, so it doesn't.
+    if (req.op === 'write' || req.op === 'hello') frame.unsaved = transient(err);
     reply({ ok: false, error: err.message, ...(transient(err) ? { retry: true } : {}) });
+  } finally {
+    frame.working.delete(req.id);
   }
 }
 
@@ -170,11 +190,27 @@ async function storeCall(frame, page, body) {
 export function onArtifactData(store) {
   for (const f of frames) {
     if (!alive(f)) frames.delete(f);
-    else if (f.store === store && f.page) {
-      storeCall(f, f.page, { op: 'list' }).then(
-        (r) => win(f)?.postMessage({ bridge: TAG, op: 'changed', entries: r.entries }, '*'),
-        () => {},
-      );
+    else if (f.store === store && f.page) refresh(f);
+  }
+}
+
+/** The live stream dropped, and what it missed is gone: send every page open here what its store holds now (#1862). */
+export function refreshFrames() {
+  for (const f of frames) if (alive(f) && f.page) refresh(f);
+}
+
+/** Send a frame its store, tried again while Citadel is down; an answer older than one it was sent is dropped. */
+async function refresh(f) {
+  const turn = (f.asked = (f.asked ?? 0) + 1);
+  for (let gap = 1000; alive(f) && f.asked === turn; gap = Math.min(gap * 2, 15000)) {
+    try {
+      const r = await storeCall(f, f.page, { op: 'list' });
+      if (turn < (f.shown ?? 0)) return;
+      f.shown = turn;
+      return win(f)?.postMessage({ bridge: TAG, op: 'changed', entries: r.entries }, '*');
+    } catch (err) {
+      if (!transient(err)) return;
+      await new Promise((r) => setTimeout(r, gap));
     }
   }
 }

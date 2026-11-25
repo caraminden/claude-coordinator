@@ -501,6 +501,20 @@ test("a page's Send carries its marked pictures into the chat, checked as pasted
   assert.equal(store.listEvents(M.id).filter((e) => e.kind === 'user_message').length, before, 'a refused picture sends nothing');
 });
 
+test("a page's Send pressed again under the same id posts once (#1862)", async () => {
+  const page = await pageOf(PICKER.id);
+  const count = () => store.listEvents(M.id).filter((e) => e.kind === 'user_message').length;
+  const before = count();
+  const send = (text: string, sendId: string) => sendPage({ open: { artifact: PICKER.id }, page, text, sendId });
+  const [a, b] = await Promise.all([send('once', 'id-1'), send('once', 'id-1')]);
+  assert.deepEqual([a.status, b.status], [202, 202]);
+  assert.deepEqual(a.data, b.data);
+  assert.equal((await send('once', 'id-1')).status, 202);
+  assert.equal(count(), before + 1);
+  assert.equal((await send('once', 'id-2')).status, 202);
+  assert.equal(count(), before + 2, 'a new id is a new message');
+});
+
 test("a page's Send is refused for another page, an empty text, and anyone but a person", async () => {
   const page = await pageOf(PICKER.id);
   const before = store.listEvents(M.id).filter((e) => e.kind === 'user_message').length;

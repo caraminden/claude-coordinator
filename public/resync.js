@@ -5,6 +5,7 @@ import { inMerged } from './mine.js';
 import { freshest, mergeOpen } from './closedlist.js';
 import { eventsUrl, keptOpen, reconnecting, route } from './core.js';
 import { setArtifacts } from './artifacts.js';
+import { refreshFrames } from './bridge-host.js';
 import { appendEvent } from './thread.js';
 import { refreshBranch, renderTicketHead } from './thread-head.js';
 import { schedulePaintRefs } from './refstate.js';
@@ -56,6 +57,7 @@ function failed(seq) {
 
 /** Refresh the open scheme and chat in place, so a half-typed message in the composer survives. Never rejects. */
 export async function resync() {
+  refreshFrames(); // the pages open in the viewer and in Open tabs, whatever is on screen (#1862)
   if (view?.kind !== 'project') {
     stopCatchingUp(); // route() loads the page afresh
     return route();

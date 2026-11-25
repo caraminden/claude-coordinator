@@ -101,6 +101,8 @@ export interface Episode {
 export interface EaseNow {
   level: EaseLevel;
   since: number;
+  /** When the numbers below were read (the 5 s reading), for the page's "read 3 s ago". */
+  at: number | null;
   why: string;
   free: number | null;
   reclaim: number | null;
@@ -340,6 +342,7 @@ export class MemoryEase {
     return {
       level: this.level,
       since: this.since,
+      at: s?.at ?? null,
       why: this.why,
       free: s?.avail ?? null,
       reclaim: s?.reclaim == null ? null : Math.round(s.reclaim),

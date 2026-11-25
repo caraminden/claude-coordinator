@@ -227,7 +227,7 @@ test('memory easing (#1748): spells per day and their minutes, the last with its
   store.addHealthEvent('memory-easing', now - 20 * 60_000, 'x', episode(now - 20 * 60_000, 6, [ours.id, theirs.id]));
   store.addHealthEvent('memory-easing', now - 9 * 60_000, 'x', 'not json');
   let going: EaseNow | null = null;
-  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now, easing: () => going });
+  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now, easing: () => going, load: () => 0 });
   let c = (await page.build(viewer(store, josh.id, true))).citadel;
   assert.equal(c.easing.counts.at(-1), 2);
   assert.equal(c.easing.minutes.at(-1), 10);
@@ -240,6 +240,7 @@ test('memory easing (#1748): spells per day and their minutes, the last with its
   going = {
     level: 'easing',
     since: now - 5 * 60_000,
+    at: now - 3000,
     why: '4.2 GB free (eases under 6.0 GB, back over 8.0 GB)',
     free: 4.2e9,
     reclaim: 300,
@@ -490,6 +491,37 @@ test('the CPU tile (#1273) reads load1 from host_samples against the cores, and 
   const i = c.verdict.tiles.indexOf('cpu');
   assert.equal(c.verdict.reasons[i], 'load over 8 on 4 cores for 15 min');
   assert.equal(c.verdict.tone, 'warn');
+});
+
+test('easing or tight (#1850): the CPU tile counts one live reading over the line, the reading carries its age, history is unchanged; fine is as before', async () => {
+  const { store, josh, citadel } = setup('cpu-easing');
+  const now = sameDayNow();
+  const s = { mem_total: 100, mem_avail: 50, disk_total: 100, disk_free: 50, rss: 1 };
+  store.addHostSample({ at: now - 5 * 60_000, ...s, load1: 3 });
+  let going: EaseNow | null = null;
+  let load = 20;
+  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now, cores: 4, load: () => load, easing: () => going });
+  const build = async () => (await page.build(viewer(store, josh.id, true))).citadel;
+  const eng = (level: 'easing' | 'tight'): EaseNow => ({ level, since: now - 60_000, at: now - 4000, why: 'x', free: 2e9, reclaim: 98_233, swapOut: 40e6, lines: { easeFree: 6e9, backFree: 8e9, tightFree: 3e9 }, waiting: { starts: 0, heavy: 0, nested: 0 }, slowed: [], episodeSince: now - 60_000 });
+  const fine = await build();
+  assert.ok(!fine.verdict.tiles.includes('cpu'), 'fine: a high live load alone, with no 15 minutes of history, does not warn');
+  assert.equal(fine.easing.now, null);
+  for (const level of ['easing', 'tight'] as const) {
+    going = eng(level);
+    const c = await build();
+    assert.ok(c.verdict.tiles.includes('cpu'), `${level}: one live reading over 8 warns`);
+    assert.match(c.verdict.reasons[c.verdict.tiles.indexOf('cpu')], /load 20 now, over 8 on 4 cores/);
+    assert.equal(c.easing.now?.level, level);
+    assert.equal(c.easing.now?.at, now - 4000, "the reading's own time reaches the page");
+    assert.equal(c.easing.now?.load1, 20);
+    assert.deepEqual(c.host.series, fine.host.series, 'history charts read host_samples only');
+    assert.deepEqual(c.host.latest, fine.host.latest);
+  }
+  load = 3;
+  assert.ok(!(await build()).verdict.tiles.includes('cpu'), 'easing with a calm load: no cpu reason');
+  going = null;
+  load = 20;
+  assert.ok(!(await build()).verdict.tiles.includes('cpu'), 'back to fine: the 15-minute rule again');
 });
 
 test('Investigate (#1273): an app tile goes to its home scheme, and the minion quoting its tag is the one on it', async () => {

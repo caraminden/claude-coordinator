@@ -434,7 +434,19 @@ function cpuTile(cpu, now) {
   });
 }
 
+/** How old a live reading is, to the second ("read 4 s ago"); the 5-minute rows stay on `ago`. */
+const readAge = (at) => {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+  return s < 60 ? `read ${s} s ago` : `read ${ago(at)}`;
+};
+/** While the box is easing or tight, the headline tiles say so from the live reading: warn for easing, bad for tight. */
+const easeTone = (n) => (n ? (n.level === 'tight' ? 'bad' : 'warn') : null);
+/** "churning: reclaiming 98,233 pages a second, swapping out 40 MB/s" (tight: "tight: ..."), the numbers the 5 s reading has. */
+const churn = (n) =>
+  `${n.level === 'tight' ? 'tight' : 'churning'}: ${n.reclaim != null ? `reclaiming ${n.reclaim.toLocaleString('en-US')} pages a second` : 'under its memory line'}${n.swapOut ? `, swapping out ${Math.round(n.swapOut / 1e6)} MB/s` : ''}`;
+
 function citadelTiles(c, days, now, ships, redraw) {
+  const n = c.easing?.now ?? null;
   const today = days.length - 1;
   const lastStall = c.stalls.last;
   const host = c.host.latest;
@@ -444,17 +456,17 @@ function citadelTiles(c, days, now, ships, redraw) {
   const ci = c.ci;
   const red = ci?.workflows.filter((w) => w.conclusion && w.conclusion !== 'success') ?? [];
   return [
-    tile('Memory', mem === null ? 'No reading yet' : `${mem}% used`, host ? `${bytes(host.mem_avail)} free of ${bytes(host.mem_total)} · Citadel's server ${bytes(host.rss)}` : 'Read every 5 minutes', hourLine(c.host.series, 1, { from, to: now, label: 'memory used each hour, at its worst' }), {
-      tone: mem !== null && mem >= 90 ? 'warn' : null,
+    tile('Memory', n && n.free != null && host ? `${bytes(n.free)} free · ${n.level === 'tight' ? 'tight' : 'easing'}` : mem === null ? 'No reading yet' : `${mem}% used`, n && n.free != null && host ? `${churn(n)} · ${readAge(n.at ?? now)} · of ${bytes(host.mem_total)}` : host ? `${bytes(host.mem_avail)} free of ${bytes(host.mem_total)} · Citadel's server ${bytes(host.rss)}` : 'Read every 5 minutes', hourLine(c.host.series, 1, { from, to: now, label: 'memory used each hour, at its worst' }), {
+      tone: easeTone(n) ?? (mem !== null && mem >= 90 ? 'warn' : null),
       key: 'memory',
       chart: `% used, hourly worst: ${perHour(c.host.series, 1)}`,
     }),
     tile(
       'CPU',
-      host ? `load ${Math.round(host.load1)} on ${c.host.cores} cores` : 'No reading yet',
-      c.host.peak ? `Load is tasks running or waiting, not a percent · Peak ${Math.round(c.host.peak.load1)} at ${pacificClockBare(c.host.peak.at)} · warns over ${c.host.cpuWarn} for ${c.host.cpuWarnMin} min` : 'Read every 5 minutes',
+      n ? `load ${Math.round(n.load1)} on ${c.host.cores} cores` : host ? `load ${Math.round(host.load1)} on ${c.host.cores} cores` : 'No reading yet',
+      n ? `Now, ${readAge(n.at ?? now)} · ${n.level === 'tight' ? 'tight' : 'easing'} on memory, so the ${c.host.cpuWarnMin}-minute rule is off · warns over ${c.host.cpuWarn}` : c.host.peak ? `Load is tasks running or waiting, not a percent · Peak ${Math.round(c.host.peak.load1)} at ${pacificClockBare(c.host.peak.at)} · warns over ${c.host.cpuWarn} for ${c.host.cpuWarnMin} min` : 'Read every 5 minutes',
       hourLine(c.host.series, 3, { from, to: now, label: 'load each hour, at its highest', max: Math.max(c.host.cpuWarn * 1.25, ...c.host.series.map((s) => s[3] ?? 0)), rule: c.host.cpuWarn, tip: (v) => `load ${v} at its highest` }),
-      { tone: c.verdict.tiles?.includes('cpu') ? 'warn' : null, key: 'cpu', chart: `load, hourly highest: ${perHour(c.host.series, 3)}` },
+      { tone: c.verdict.tiles?.includes('cpu') ? (n?.level === 'tight' ? 'bad' : 'warn') : null, key: 'cpu', chart: `load, hourly highest: ${perHour(c.host.series, 3)}` },
     ),
     tile('Uptime', `up ${span(now - c.uptime.bootAt)}`, `Started ${when(c.uptime.bootAt)}: ${c.uptime.reason ?? 'no reason on record yet'}`, dayBars(days, c.uptime.restarts, { tip: (i) => plural(c.uptime.restarts[i], 'start'), label: 'starts a day' }), {
       tone: c.uptime.reason?.startsWith('a restart') && now - c.uptime.bootAt < 86_400_000 ? 'warn' : null,
@@ -475,7 +487,7 @@ function citadelTiles(c, days, now, ships, redraw) {
     ...(c.jobs?.length ? [jobsTile(c.jobs, now)] : []),
     ...(c.checks ? [checksTile(c.checks, now)] : []),
     ...(c.host.cpu ? [cpuTile(c.host.cpu, now)] : []),
-    answerTile(c.host.answer, now),
+    answerTile(c.host.answer, now, n),
     ...(c.slow ? [slowTile(c.slow)] : []),
     cacheTile(c.host, now, c.verdict),
     tile(
@@ -540,7 +552,7 @@ function citadelTiles(c, days, now, ships, redraw) {
  * newest probe (and beside it a reader thread's, #1628), the last window's p95 against the target and the last day's p95 as a line with the target's p95 as its rule.
  */
 const ms = (v) => (v == null ? '–' : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`);
-function answerTile(a, now) {
+function answerTile(a, now, n) {
   const key = 'answer';
   if (!a?.probing) return tile('Answer time', 'Not probing here', 'Only the live server probes', h('div', {}, toneChip('neutral', 'Off here')), { key, chart: '' });
   const l = a.latest,
@@ -550,10 +562,10 @@ function answerTile(a, now) {
   return tile(
     'Answer time',
     a.now == null && !l ? 'No reading yet' : `${ms(a.now)} now${a.reader != null ? ` · readers ${ms(a.reader)}` : ''}`,
-    l ? `Last 5 min: p95 ${ms(l.p95)}, p99 ${ms(l.p99)}, worst ${ms(l.max)} · target p95 ${ms(t.p95)}, p99 ${ms(t.p99)}` : `target p95 ${ms(t.p95)}, p99 ${ms(t.p99)}`,
+    `${n ? `${n.level === 'tight' ? 'Tight' : 'Easing'} on memory, so answers may be slow · ` : ''}${l ? `Last 5 min: p95 ${ms(l.p95)}, p99 ${ms(l.p99)}, worst ${ms(l.max)} · target p95 ${ms(t.p95)}, p99 ${ms(t.p99)}` : `target p95 ${ms(t.p95)}, p99 ${ms(t.p99)}`}`,
     hourLine(a.rows, 2, { from: now - 24 * 3_600_000, to: now, label: 'answer time p95 for each 5 minutes over the last day', max, rule: t.p95, tip: (v) => `p95 ${ms(v)}` }),
     {
-      tone: a.alert ? 'warn' : null,
+      tone: easeTone(n) ?? (a.alert ? 'warn' : null),
       key,
       chart: `${target}; p95 per 5 min, last day: ${a.rows
         .slice(-24)
@@ -700,13 +712,13 @@ function easeTile(e, days, now) {
       : 'Free memory stayed above the line all week';
   const value = n ? (n.level === 'tight' ? 'Tight now' : 'Easing off now') : e.counts[today] ? `${plural(e.counts[today], 'spell')} today` : 'None today';
   const el = tile('Memory easing', value, sub, dayBars(days, e.minutes, { tip: (i) => `${plural(e.counts[i], 'spell')}${e.counts[i] ? `, ${e.minutes[i]} min` : ''}`, label: 'minutes eased off a day' }), {
-    tone: n ? 'warn' : null,
+    tone: easeTone(n),
     wide: true,
     key: 'easing',
     chart: `minutes eased off a day: ${perDay(days, e.minutes)}; spells a day: ${perDay(days, e.counts)}`,
   });
   // While easing the headline is a toned chip, so it reads as "slowing down" at a glance and not as the stripe alone.
-  if (n) el.querySelector('.st-value').replaceChildren(toneChip('warn', value));
+  if (n) el.querySelector('.st-value').replaceChildren(toneChip(n.level === 'tight' ? 'danger' : 'warn', value));
   return el;
 }
 

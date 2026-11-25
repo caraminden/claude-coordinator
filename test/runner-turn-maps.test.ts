@@ -2,10 +2,10 @@
 // turn (TurnState, so a restart mid-turn keeps it), rebuilt at boot from another saved row, or dropped on purpose. A new
 // one fails here until it is put in one of the three, so a value a restart loses is caught when it is written.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { runnerSource } from './runner-files.ts';
 
-const src = readFileSync(new URL('../src/runner.ts', import.meta.url), 'utf8');
+const src = runnerSource();
 
 /** In TurnState: saved by saveTurn, restored by recover() or reattach. */
 const SAVED: Record<string, string> = {

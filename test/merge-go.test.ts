@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { RUNNER_FILES } from './runner-files.ts';
 import { execFileSync, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -583,7 +584,7 @@ test("the messages route marks a person's own message typed, and the Taskmaster'
 
 test('typed is set in exactly one place: the person path of the messages route', () => {
   const hits: string[] = [];
-  for (const f of ['src/routes/tickets.ts', 'src/routes/projects.ts', 'src/routes/app.ts', 'src/runner.ts', 'src/prompts.ts', 'src/mcp.ts', 'src/mcp-lookup.ts', 'src/mcp-minions.ts', 'src/mcp-scheme.ts', 'src/mcp-cards.ts', 'src/mcp-ship.ts', 'src/mcp-apps.ts', 'src/mcp-call.ts', 'src/schedules.ts']) {
+  for (const f of ['src/routes/tickets.ts', 'src/routes/projects.ts', 'src/routes/app.ts', ...RUNNER_FILES, 'src/prompts.ts', 'src/mcp.ts', 'src/mcp-lookup.ts', 'src/mcp-minions.ts', 'src/mcp-scheme.ts', 'src/mcp-cards.ts', 'src/mcp-ship.ts', 'src/mcp-apps.ts', 'src/mcp-call.ts', 'src/schedules.ts']) {
     const path = join(REPO, f);
     if (!existsSync(path)) continue;
     for (const line of readFileSync(path, 'utf8').split('\n')) if (/typed: true/.test(line)) hits.push(`${f}: ${line.trim()}`);

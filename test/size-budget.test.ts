@@ -19,7 +19,7 @@ export const ALLOWED: Record<string, [number, string]> = {
   'public/core.js': [1514, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/ci-health.ts': [1560, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/runner.ts': [
-    5827,
+    5625,
     'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+11: busy and a recorded answer its chat reads next turn, #1930) (+5: the state a status line gives, kept on its event, #1923) (+134: cards that outlive their turn, #1916) (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+135: worker-line host, stop, pause, boot and view calls; the line itself is turn-line.ts, #1868) (+43: facts for the order of the line and a keepalive in line, #1888) (+15: the compaction callout wiring; the count is compactions.ts, #1920) (+18: a stop settles the outbox rows it dropped, #1904) (+15: what a killed turn spent and kills together, #1938) (+6: a seal set during a cut-off turn stays, #1958) (+17: where a turn runs, its Stop and its prompt line for the jobs it hands over, #1890) (+6: Start now wiring; the holds are start-now.ts, #1957)',
   ],
   'tools/land.sh': [2841, 'the ship script is one shell program; its steps share state and are pinned by tests (+141: a red train pulls every likely ship and hands what is left to the next one, #1918)'],

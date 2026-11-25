@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { runnerSource } from './runner-files.ts';
 import { Store } from '../src/db.ts';
 import { HeldStarts, HOLD_MAX_MS } from '../src/held-starts.ts';
 import { ScheduledRuns } from '../src/schedules.ts';
@@ -135,7 +136,7 @@ test('a person, a Taskmaster, a follow-on and a wake never read the pressure', a
   // The reader is only given to HeldStarts, which only ScheduledRuns and the flake fixer call, and by server.ts to the
   // runner's line of kill resumes (#1364), which holds only those; runner.send has no gate.
   const { readFileSync } = await import('node:fs');
-  const runner = readFileSync(new URL('../src/runner.ts', import.meta.url), 'utf8');
+  const runner = runnerSource();
   const wake = readFileSync(new URL('../src/wake.ts', import.meta.url), 'utf8');
   assert.ok(!/pressure/.test(runner) && !/pressure|held-starts/.test(wake));
   const server = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');

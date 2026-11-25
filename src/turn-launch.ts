@@ -382,6 +382,14 @@ export function turnEnv(from: NodeJS.ProcessEnv): Record<string, string> {
   env.TZ = TURN_TZ;
   return env;
 }
+/**
+ * A turn's environment as it goes to a connected machine (Build 7, specs/worker-machines.md section 4): claude and gh sign in
+ * there with that machine's own logins, so no Claude or GitHub sign-in of the server's or the person's is sent, by name or by family.
+ */
+export function machineEnv(env: Record<string, string>): Record<string, string> {
+  const signIn = (k: string) => AUTH_VARS.includes(k) || /^(ANTHROPIC_|CLAUDE_CODE_OAUTH|CLAUDE_CONFIG_DIR$|GH_TOKEN$|GITHUB_TOKEN$|GH_ENTERPRISE_TOKEN$|GH_CONFIG_DIR$)/.test(k);
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !signIn(k)));
+}
 /** Cara's pick on #760 (2026-11-15), no real calls in a week: ListAgents lists other local sessions; ReportFindings is the built-in code-review's (citadel:self-review reviews instead). */
 const UNPICKED_TOOLS = ['ListAgents', 'ReportFindings'];
 /**
@@ -916,8 +924,6 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
     // XDG_RUNTIME_DIR: without it every one fails, NuGet's restore included (#225).
     if (tmp) env.XDG_RUNTIME_DIR = tmp;
   }
-  // On a connected machine claude signs in with that machine's own login, so none of the server's sign-in is sent there.
-  if (facts.machine) for (const v of AUTH_VARS) delete env[v];
   env = { ...env, ...androidEnv(homedir(), env.PATH) };
   // mise's shims last (#1147): an approved host tool runs by name, and never shadows one the turn had before.
   env = { ...env, ...facts.env.heavy, PATH: [...(pins.PIN_HAS.heavy ? [join(pin, 'bin', 'heavy')] : []), join(pin, 'bin'), env.PATH, join(homedir(), '.local/share/mise/shims')].filter(Boolean).join(':') };
@@ -965,6 +971,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   if (facts.jobMachines?.length) env.COORDINATOR_JOB_MACHINES = facts.jobMachines.join(',');
   if (facts.seamTrial && ticket.kind !== 'coordinator') env.COORDINATOR_SEAM_TRIAL = '1';
   const configDir = place.host ? claudeConfigDir(env) : place.configDir;
+  if (facts.machine) env = machineEnv(env);
   let command = place.host ? facts.claudeBin : resolveClaude(facts.claudeBin);
   if (codex) {
     // The shim runs in claude's place (src/codex-turn.ts), from the hand-over the runner writes; it skips that when it resumes the thread.

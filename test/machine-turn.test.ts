@@ -7,6 +7,7 @@ import { bootServer, lines, ok, stopProcs, tempRoot, until, type Booted } from '
 import { machineFakes } from './machine-fakes.ts';
 import { MachineTurn, machineLink, placeTurn, placedAt, sameClaude, syncTurns, type MachineLaunch } from '../src/machine-turn.ts';
 import { runningTurn, wrapperAlive } from '../src/running-turn.ts';
+import { machineEnv } from '../src/turn-launch.ts';
 import { containerArgs, workerConfig, Worker } from '../public/machine-worker.mjs';
 
 // A turn on a connected machine (Build 7 T2): the sync contract by itself, then the whole path with the real server,
@@ -195,6 +196,25 @@ setInterval(() => fs.existsSync(${JSON.stringify(release)}) && end('done'), 20);
 `,
 );
 chmodSync(claude, 0o755);
+
+test("a machine turn's environment carries no Claude or GitHub sign-in", () => {
+  const sent = machineEnv({
+    PATH: '/bin',
+    GIT_AUTHOR_NAME: 'Josh',
+    COORDINATOR_TOKEN: 't',
+    CLAUDE_CODE_TMPDIR: '/t',
+    GH_TOKEN: 'gho_x',
+    GITHUB_TOKEN: 'x',
+    GH_CONFIG_DIR: '/srv/gh',
+    CLAUDE_CONFIG_DIR: '/srv/claude',
+    CLAUDE_CODE_OAUTH_TOKEN: 'x',
+    CLAUDE_CODE_USE_BEDROCK: '1',
+    ANTHROPIC_API_KEY: 'x',
+    ANTHROPIC_CUSTOM_HEADERS: 'x',
+    ANTHROPIC_FOUNDRY_API_KEY: 'x',
+  });
+  assert.deepEqual(Object.keys(sent).sort(), ['CLAUDE_CODE_TMPDIR', 'COORDINATOR_TOKEN', 'GIT_AUTHOR_NAME', 'PATH']);
+});
 
 test('a turn placed on a machine starts, streams, steers, survives a server restart and ends there', async () => {
   const env = { CLAUDE_BIN: claude, ANTHROPIC_API_KEY: 'the-servers-key', PATH: `${bin}:${process.env.PATH}` };

@@ -115,7 +115,9 @@ test('a landing a restart cut off reads as ended without a code, not as running 
   assert.equal(l.running(), 1);
   await until('land.sh starts', () => l.get(3)!.output.includes('token:'));
   process.kill(Number(readFileSync(join(s.data, 'run', 'landings', '3', 'pid'), 'utf8')), 'SIGKILL');
-  s.go(); // so the orphaned land.sh ends too
+  s.go();
+  // The orphaned land.sh ends before its folder goes: with `go` removed first, it waits out its 30 s.
+  await until('the orphaned land.sh ends', () => l.get(3)!.output.includes('env stays out'));
   await until('the child is gone', () => l.running() === 0);
   const next = new Landings(s.data);
   const r = next.get(3)!;

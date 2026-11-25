@@ -16,8 +16,8 @@ export const ALLOWED: Record<string, [number, string]> = {
   'public/core.js': [1514, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/ci-health.ts': [1560, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/runner.ts': [
-    5635,
-    'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+5: the state a status line gives, kept on its event, #1923) (+134: cards that outlive their turn, #1916) (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+135: worker-line host, stop, pause, boot and view calls; the line itself is turn-line.ts, #1868) (+43: facts for the order of the line and a keepalive in line, #1888) (+15: the compaction callout wiring; the count is compactions.ts, #1920)',
+    5656,
+    'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+21: a turn placed on a machine, #1962) (+5: the state a status line gives, kept on its event, #1923) (+134: cards that outlive their turn, #1916) (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+135: worker-line host, stop, pause, boot and view calls; the line itself is turn-line.ts, #1868) (+43: facts for the order of the line and a keepalive in line, #1888) (+15: the compaction callout wiring; the count is compactions.ts, #1920)',
   ],
   'src/mcp.ts': [
     2924,
@@ -26,7 +26,7 @@ export const ALLOWED: Record<string, [number, string]> = {
   'src/db.ts': [1703, 'schema, migrations and settings; its queries are moving to src/db/<area>.ts, a piece at a time (#1842; 1683 plus room for the ships waiting in line beside it, tightened next piece)'],
   'tools/land.sh': [2841, 'the ship script is one shell program; its steps share state and are pinned by tests (+141: a red train pulls every likely ship and hands what is left to the next one, #1918)'],
   'kit/skills/scheme-setup/templates/land.sh': [2879, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted'],
-  'public/machine-agent.mjs': [2474, 'standalone agent a person runs on their own computer: one file so it can be copied alone (raised once for the Biome reformat, #1792)'],
+  'public/machine-agent.mjs': [2496, 'standalone agent a person runs on their own computer: one file so it can be copied alone (+22: loads the worker file, which is its own, #1962) (raised once for the Biome reformat, #1792)'],
   'src/routes/projects.ts': [2105, 'every /projects route; split by page is queued (+2: a waiting minion counts as working, #1868) (raised once for the Biome reformat, #1792) (+30: same-scheme Taskmaster message, #1855) (+4: the stale check and its wait for queued saves, #1859)'],
   'src/tripwire.ts': [1830, 'the tripwire rules; high risk to edit, so a split waits for its own change (raised once for the Biome reformat, #1792)'],
   'src/routes/tickets.ts': [1936, 'every /tickets route; split by page is queued (+19: #1823 unchain, +13: card types replacing any, #1799) (raised once for the Biome reformat, #1792) (+3: a hand-off and a deploy report move its place in line, #1888)'],

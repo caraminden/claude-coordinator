@@ -231,7 +231,7 @@ test('a turn placed on a machine starts, streams, steers, survives a server rest
   assert.equal(first.status, 200, "and the call arrives as the turn's own");
   assert.match(text(local, 'stream.jsonl'), /heard 1/, "claude's stream is written on the machine");
   await until('the stream to come home', () => /heard 1/.test(text(dir, 'stream.jsonl')));
-  assert.equal(JSON.parse(text(dir, 'pid.json')).claude > 0, true);
+  await until('its pid to come home', () => existsSync(join(dir, 'pid.json')) && JSON.parse(text(dir, 'pid.json')).claude > 0);
   assert.match(readFileSync(calls, 'utf8'), /^run -d .*--userns=keep-id.* citadel-worker sleep infinity$/m);
 
   // The tool route serves only that machine's turns, with the turn's token.

@@ -333,7 +333,7 @@ function build(id, name, data, retry, redraw) {
       showFirst({
         key: `flow-${id}-${st.pick.col}-${st.pick.key}-${shown.key}`,
         items: some.map((m) => rowOf(id, m, some[0].cost)),
-        n: 8,
+        n: 6,
         noun: 'minions',
         wrap: (xs) => h('ol', { class: 'flow-rows' }, ...xs),
       }),
@@ -369,7 +369,7 @@ function build(id, name, data, retry, redraw) {
       showFirst({
         key: `flow-table-${id}`,
         items: rows(ms, st.unit).map((x) => h('tr', {}, ...COLS.map(([col]) => h('td', {}, ...both(NAME[col][x[col]], SHORT[col][x[col]]))), h('td', {}, num(x.n)), h('td', {}, money(x.cost)))),
-        n: 18,
+        n: 8,
         noun: 'rows',
         wrap: (xs) =>
           h(

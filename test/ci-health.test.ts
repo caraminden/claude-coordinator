@@ -283,6 +283,11 @@ function world({ delve = false } = {}) {
     workflows: [] as { id: number; name: string; path: string; state: string }[],
     // GitHub's main tip, for the re-run after a red's fix ships (#1074).
     mainHead: 'aaaa000fff',
+    // Whether the workflow list is whole: GitHub's own count, when a test sets one; and workflow 7 deleted.
+    workflowCount: null as number | null,
+    gone: false,
+    // Workflow files' text by name (contents API), for the run name.
+    files: new Map<string, string>(),
     // The repo's CI_RUNNER variable (the kit's switch onto GitHub's runners); null: unset (404).
     ciRunner: null as string | null,
     scheduled: [] as Run[],
@@ -306,7 +311,8 @@ function world({ delve = false } = {}) {
     if (gh.rateLimited) return { status: 403, etag: null, body: { message: 'API rate limit exceeded for user ID 1.' } };
     let body: unknown;
     if (path.startsWith('repos/caraminden/notes/')) body = { total_count: 0, workflows: [] };
-    else if (path.endsWith('/actions/workflows?per_page=100')) body = { workflows: [{ id: 7, name: 'desktop', path: '.github/workflows/desktop.yml', state: 'active' }, { id: 8, name: 'old', state: 'disabled_manually' }, ...gh.workflows] };
+    else if (path.endsWith('/actions/workflows?per_page=100'))
+      body = { ...(gh.workflowCount != null && { total_count: gh.workflowCount }), workflows: [...(gh.gone ? [] : [{ id: 7, name: 'desktop', path: '.github/workflows/desktop.yml', state: 'active' }]), { id: 8, name: 'old', state: 'disabled_manually' }, ...gh.workflows] };
     else if (path.endsWith('/actions/runners?per_page=100') && gh.runnersDenied) return { status: 403, etag: null, body: { message: 'Resource not accessible by integration' } };
     else if (path === 'repos/caraminden/delve/actions/runners?per_page=100') body = { runners: gh.delveRunners };
     else if (path.endsWith('/actions/runners?per_page=100')) body = { runners: gh.runners };
@@ -318,6 +324,7 @@ function world({ delve = false } = {}) {
     else if (path.endsWith('/actions/runs?event=schedule&branch=main&per_page=20')) body = { workflow_runs: path.startsWith('repos/caraminden/peek-auras/') ? gh.scheduled : [] };
     else if (path.endsWith('/actions/runs?event=workflow_dispatch&per_page=50')) body = { workflow_runs: path.startsWith('repos/caraminden/peek-auras/') ? gh.dispatched : [] };
     else if (path.endsWith('/actions/runs?per_page=50')) body = { workflow_runs: gh.runs };
+    else if (gh.files.has(/\/contents\/\.github\/workflows\/([^?]+)/.exec(path)?.[1] ?? '')) body = { content: Buffer.from(gh.files.get(/workflows\/([^?]+)/.exec(path)![1])!).toString('base64') };
     else if (/^repos\/caraminden\/[^/]+$/.test(path)) body = { default_branch: 'main' };
     else if (/\/runs\/\d+\/jobs/.test(path)) body = { jobs: gh.jobs.get(Number(/runs\/(\d+)\//.exec(path)![1])) ?? [] };
     else if (/check-runs\/\d+\/annotations/.test(path)) body = gh.notes.get(Number(/check-runs\/(\d+)\//.exec(path)![1])) ?? [{ message: BILLING, annotation_level: 'failure' }];
@@ -1771,6 +1778,251 @@ test("a red whose jobs ran on GitHub's own runners isn't re-run by Citadel: the 
   assert.ok(!posts.some((p) => p.endsWith('/dispatches')), 'no Actions minutes spent');
   assert.match(said(w, health, 'ci.open')!, /need re-running by hand/);
   assert.ok(!w.quiet.includes('ci.open'), 'an alarm: a re-run on GitHub costs Actions minutes, so only a person can start it');
+});
+
+/** #1954: a world whose red (run 9101 of workflow 7) re-runs, dismisses and dispatches into lists the test reads. */
+function redWorld() {
+  const w = outsideWorld();
+  w.quietDelve();
+  const posts: string[] = [];
+  const dismissed: number[] = [];
+  const held: [number, string | null][] = [];
+  const tips = { ship: null as string | null };
+  const deps = {
+    ...w.outside,
+    post: async (path: string) => (posts.push(path), { status: 204 }),
+    shipped: async () => tips.ship,
+    held: (id: number, note: string | null) => void held.push([id, note]),
+    dismiss: (id: number) => void dismissed.push(id),
+  };
+  const run = (id: number, msAgo: number, conclusion: string | null, fields: Partial<Run> = {}) => runOf({ id, event: 'schedule', name: 'tests', workflow_id: 7, path: '.github/workflows/desktop.yml', conclusion, created_at: iso(msAgo), updated_at: iso(msAgo - MIN), ...fields });
+  w.gh.jobs.set(9101, [job({ run_id: 9101, name: 'test', conclusion: 'failure', labels: ['self-hosted'] })]);
+  const fixer = (text = 'Fix the red tests run 9101 on main') => {
+    const t = w.minion(w.peek.id, `ticket/fix-${ids++}`);
+    w.store.addEvent(t.id, 'user_message', { text });
+    return t;
+  };
+  type Mark = { run: number; rerun?: { ticket: number; run?: number; error?: string } };
+  const marks = () => w.store.getSetting<Record<string, Mark>>(`ci-health:red:${w.peek.id}`) ?? {};
+  const mainSaid = () => w.told.filter(([, t]) => /back to green|went red/.test(t)).map(([, t]) => t);
+  const problem = (h: CiHealth) =>
+    h
+      .snapshot(() => true)
+      .find((s) => s.id === w.peek.id)
+      ?.problems.find((x) => x.key === 'red:7');
+  return { ...w, posts, dismissed, held, tips, deps2: deps, red: new CiHealth(w.store, deps), run, fixer, marks, mainSaid, problem };
+}
+
+test("a closed fix minion's re-run is let go: the open one isn't said to have shipped, and green frees the open one (#1954, 2CA2)", async () => {
+  const w = redWorld();
+  w.gh.mainRuns = [w.run(9101, 30 * MIN, 'failure')];
+  await w.red.tick(NOW);
+  const a = w.fixer();
+  w.tips.ship = 'tip-a';
+  await w.red.tick(NOW + 5 * MIN);
+  assert.equal(w.marks()['7'].rerun?.ticket, a.id, 'its re-run started');
+  w.store.updateTicket(a.id, { status: 'closed' });
+  const b = w.fixer();
+  w.tips.ship = null;
+  await w.red.tick(NOW + 10 * MIN);
+  assert.equal(w.marks()['7'].rerun, undefined, 'a mark naming a closed minion is cleared on the next read');
+  assert.deepEqual(w.problem(w.red)!.fixMinion, { number: b.number, closed: false });
+  assert.doesNotMatch(w.problem(w.red)!.title, /shipped/);
+  // Its live deploy holds it; the green is its own, not the closed one's.
+  w.store.updateTicket(b.id, { state: 'outside', note: 'waiting on the CI re-run' });
+  w.gh.mainRuns = [w.run(9102, -11 * MIN, 'success'), ...w.gh.mainRuns];
+  await w.red.tick(NOW + 15 * MIN);
+  assert.deepEqual(w.dismissed, [b.id]);
+});
+
+test("a named fix minion that took the hold isn't said to have shipped by another's re-run; green frees both (#1954, 2CA2's sibling)", async () => {
+  const w = redWorld();
+  w.gh.mainRuns = [w.run(9101, 30 * MIN, 'failure')];
+  await w.red.tick(NOW);
+  const chat = w.minion(w.peek.id, 'ticket/900-chat');
+  w.store.addEvent(chat.id, 'user_message', { text: 'unrelated' });
+  w.store.addEvent(chat.id, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text: 'this is run 9101' }] } });
+  w.tips.ship = 'tip-c';
+  await w.red.tick(NOW + 5 * MIN);
+  assert.equal(w.marks()['7'].rerun?.ticket, chat.id);
+  const named = w.fixer();
+  w.tips.ship = null;
+  await w.red.tick(NOW + 10 * MIN);
+  assert.deepEqual(w.problem(w.red)!.fixMinion, { number: named.number, closed: false });
+  assert.doesNotMatch(w.problem(w.red)!.title, /shipped/);
+  w.store.updateTicket(named.id, { state: 'outside', note: 'waiting on the CI re-run' });
+  w.gh.mainRuns = [w.run(9102, -11 * MIN, 'success'), ...w.gh.mainRuns];
+  await w.red.tick(NOW + 15 * MIN);
+  assert.deepEqual(w.dismissed, [chat.id, named.id]);
+});
+
+test("a fix that didn't hold rings an hour after the first red since its minion closed, however often reds follow (#1954, 2CA3)", async () => {
+  const w = redWorld();
+  w.gh.mainRuns = [w.run(9101, 30 * MIN, 'failure')];
+  await w.red.tick(NOW);
+  const a = w.fixer();
+  w.store.updateTicket(a.id, { status: 'closed' });
+  w.store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(NOW, a.id);
+  // A red every 30 min, the first ending 11 min after it closed.
+  for (const [i, min] of [10, 40, 70].entries()) {
+    w.gh.mainRuns = [w.run(9110 + i, -min * MIN, 'failure'), ...w.gh.mainRuns];
+    await w.red.tick(NOW + (min + 2) * MIN);
+  }
+  assert.equal(w.problem(w.red)!.quiet, undefined, 'an hour after the first, it rings');
+  assert.match(w.problem(w.red)!.title, new RegExp(`still red after fix minion #${a.number} closed`));
+  const early = redWorld();
+  early.gh.mainRuns = [early.run(9101, 30 * MIN, 'failure')];
+  await early.red.tick(NOW);
+  const e = early.fixer();
+  early.store.updateTicket(e.id, { status: 'closed' });
+  early.store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(NOW, e.id);
+  early.gh.mainRuns = [early.run(9110, -10 * MIN, 'failure'), ...early.gh.mainRuns];
+  await early.red.tick(NOW + 70 * MIN);
+  assert.equal(early.problem(early.red)!.held, NOW + 71 * MIN, 'not before');
+  // Reopened and closed again: its hour starts over.
+  early.store.updateTicket(e.id, { status: 'idle' });
+  await early.red.tick(NOW + 72 * MIN);
+  early.store.updateTicket(e.id, { status: 'closed' });
+  early.store.db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?').run(NOW + 80 * MIN, e.id);
+  early.gh.mainRuns = [early.run(9111, -90 * MIN, 'failure'), ...early.gh.mainRuns];
+  await early.red.tick(NOW + 92 * MIN);
+  assert.equal(early.problem(early.red)!.held, NOW + 151 * MIN);
+});
+
+test('the still ship line names the ship that holds the lock, not the lowest ticket; its steps are progress (#1954, 2CA4)', () => {
+  const s = newLandState();
+  const line = (phase: string) => [land(0, 'tools/deploy.sh', 'line'), land(512, '#512', phase), land(507, '#507', 'line')];
+  landStep(s, line('rebase'), NOW);
+  landStep(s, line('tests'), NOW + 15 * MIN);
+  assert.deepEqual(landProblems(s, NOW + 30 * MIN), [], 'its next step is progress, though a lower ticket waits');
+  const [slow] = landProblems(s, NOW + 36 * MIN);
+  assert.match(slow.title, /: #512 is first of 2, 1 waiting behind$/);
+  assert.match(slow.plain!.what, /with #512 first of 2/);
+});
+
+test('a dispatched re-run GitHub never lists is sent once more, then said; a late run clears that (#1954, 2CA5)', async () => {
+  const w = redWorld();
+  w.gh.mainRuns = [w.run(9101, 30 * MIN, 'failure')];
+  await w.red.tick(NOW);
+  const a = w.fixer();
+  w.tips.ship = 'tip-a';
+  await w.red.tick(NOW + 5 * MIN);
+  await w.red.tick(NOW + 15 * MIN);
+  assert.equal(w.posts.length, 1, 'GitHub may take a while to list it');
+  await w.red.tick(NOW + 20 * MIN);
+  assert.equal(w.posts.length, 2, 'lost: sent again, once');
+  assert.equal(w.problem(w.red)!.quiet, true);
+  await new CiHealth(w.store, w.deps2).tick(NOW + 25 * MIN);
+  assert.equal(w.posts.length, 2, 'not again after a restart');
+  await w.red.tick(NOW + 35 * MIN);
+  assert.equal(w.posts.length, 2);
+  const x = w.problem(w.red)!;
+  assert.equal(x.quiet, undefined, 'lost twice: it rings a person');
+  assert.match(x.why!, /never listed a run/);
+  assert.deepEqual(w.held.at(-1), [a.id, 'waiting on a person to re-run desktop.yml on main']);
+  w.gh.mainRuns = [w.run(9102, -36 * MIN, null, { event: 'workflow_dispatch', status: 'in_progress' }), ...w.gh.mainRuns];
+  await w.red.tick(NOW + 40 * MIN);
+  assert.equal(w.marks()['7'].rerun?.error, undefined);
+  assert.equal(w.problem(w.red)!.quiet, true, 'it runs after all');
+  assert.equal(w.posts.length, 2);
+});
+
+test("a workflow whose run name shows its input: another input's green neither clears a red nor hides it, and Citadel doesn't start it (#1954, 2CA6)", async () => {
+  const w = redWorld();
+  w.gh.files.set('desktop.yml', 'name: flake-proof\nrun-name: flake-proof ${{ inputs.file }}\non:\n  workflow_dispatch:\n');
+  const proof = (id: number, msAgo: number, conclusion: string, file: string) => w.run(id, msAgo, conclusion, { event: 'workflow_dispatch', name: 'flake-proof', display_title: `flake-proof ${file}` });
+  w.gh.mainRuns = [proof(9101, 30 * MIN, 'failure', 'test/x.test.ts')];
+  await w.red.tick(NOW);
+  const a = w.fixer();
+  w.gh.mainRuns = [proof(9102, 10 * MIN, 'success', 'test/y.test.ts'), ...w.gh.mainRuns];
+  w.gh.dispatched = w.gh.mainRuns;
+  await w.red.tick(NOW + 5 * MIN);
+  assert.equal(w.marks()['7']?.run, 9101, "y's green says nothing of x");
+  assert.equal(w.mainSaid().filter((t) => /is back to green on/.test(t)).length, 0);
+  assert.equal(w.problem(w.red)!.fixMinion!.number, a.number, 'and the red still shows');
+  // Its fix ships: a dispatch without the input would be refused, so a person starts it.
+  w.tips.ship = 'tip-a';
+  await w.red.tick(NOW + 10 * MIN);
+  assert.deepEqual(w.posts, []);
+  assert.equal(w.problem(w.red)!.quiet, undefined);
+  assert.match(w.problem(w.red)!.why!, /takes an input/);
+  // x's own green clears it and frees the minion.
+  w.gh.mainRuns = [proof(9103, -12 * MIN, 'success', 'test/x.test.ts'), ...w.gh.mainRuns];
+  w.gh.dispatched = w.gh.mainRuns;
+  await w.red.tick(NOW + 15 * MIN);
+  assert.deepEqual([w.marks()['7'], w.dismissed], [undefined, [a.id]]);
+  // A red of one input under a newer green of another still starts a streak.
+  w.gh.mainRuns = [proof(9105, -18 * MIN, 'success', 'test/y.test.ts'), proof(9104, -17 * MIN, 'failure', 'test/z.test.ts'), ...w.gh.mainRuns];
+  w.gh.dispatched = w.gh.mainRuns;
+  await w.red.tick(NOW + 20 * MIN);
+  assert.equal(w.marks()['7']?.run, 9104);
+});
+
+test('a run name of its own that shows no input (a sha, an actor) is still one verdict: any green clears the red (#1954, 2CA6)', async () => {
+  const w = redWorld();
+  w.gh.files.set('desktop.yml', 'run-name: tests ${{ github.sha }}\non:\n  workflow_dispatch:\n    inputs:\n      x:\n');
+  w.gh.mainRuns = [w.run(9101, 30 * MIN, 'failure', { event: 'workflow_dispatch', display_title: 'tests abc' })];
+  await w.red.tick(NOW);
+  w.gh.mainRuns = [w.run(9102, 10 * MIN, 'success', { event: 'workflow_dispatch', display_title: 'tests def' }), ...w.gh.mainRuns];
+  await w.red.tick(NOW + 5 * MIN);
+  assert.equal(w.marks()['7'], undefined);
+});
+
+test("a deleted or disabled workflow's red goes and frees its fix minion; a list that isn't whole drops nothing (#1954, 2CA9)", async () => {
+  const w = redWorld();
+  w.gh.mainRuns = [w.run(9101, 30 * MIN, 'failure')];
+  await w.red.tick(NOW);
+  const a = w.fixer();
+  w.store.updateTicket(a.id, { state: 'outside', note: 'waiting on the CI re-run' });
+  w.gh.gone = true;
+  w.gh.workflowCount = 101;
+  await w.red.tick(NOW + 5 * MIN);
+  assert.equal(w.marks()['7']?.run, 9101, 'a first page of more is not the whole list');
+  w.gh.workflowCount = null;
+  w.gh.hidden = /actions\/workflows\?per_page=100$/;
+  await w.red.tick(NOW + 10 * MIN);
+  assert.equal(w.marks()['7']?.run, 9101, "nor is a list GitHub wouldn't give");
+  w.gh.hidden = null;
+  assert.match(w.red.hold(a.id)!, /run 9101/);
+  await w.red.tick(NOW + 15 * MIN);
+  assert.deepEqual([w.marks()['7'], w.dismissed, w.red.hold(a.id)], [undefined, [a.id], null]);
+  assert.match(w.told.at(-1)![1], /deleted or disabled on GitHub/);
+});
+
+test('red, green, red in one read: no "back to green"; the fix minion is freed and the new red starts its own streak at once (#1954, 2CA10)', async () => {
+  const w = redWorld();
+  w.gh.mainRuns = [w.run(9101, 30 * MIN, 'failure')];
+  await w.red.tick(NOW);
+  const a = w.fixer();
+  w.store.updateTicket(a.id, { state: 'outside', note: 'waiting on the CI re-run' });
+  w.gh.mainRuns = [w.run(9103, -3 * MIN, 'failure'), w.run(9102, -2 * MIN, 'success'), ...w.gh.mainRuns];
+  await w.red.tick(NOW + 5 * MIN);
+  const heard = w.mainSaid();
+  assert.equal(heard.length, 2, 'the first red and the new one');
+  assert.match(heard[1], /run 9103 failed on/);
+  assert.match(heard[1], /It was green in between: .*runs\/9102 .*after run 9101 failed/);
+  assert.deepEqual(w.dismissed, [a.id]);
+  assert.equal(w.marks()['7'].run, 9103);
+});
+
+test("a run that couldn't start is red: it wakes the Taskmaster, shows red on the CI page, and its fix is re-run on the runners older runs used (#1954, 2CA11)", async () => {
+  const w = redWorld();
+  w.gh.jobs.set(9100, [job({ run_id: 9100, name: 'test', labels: ['self-hosted'] })]);
+  w.gh.mainRuns = [w.run(9101, 30 * MIN, 'startup_failure'), w.run(9100, 60 * MIN, 'success')];
+  w.gh.jobs.delete(9101);
+  await w.red.tick(NOW);
+  assert.match(w.mainSaid()[0], /went red: desktop\.yml .* run 9101 failed on .*never started/);
+  const shown = w.red.snapshot(() => true).find((s) => s.id === w.peek.id)!;
+  assert.equal(shown.view.workflows[0].verdict!.conclusion, 'failure');
+  assert.equal(w.problem(w.red)!.quiet, true);
+  w.fixer();
+  w.tips.ship = 'tip-a';
+  await w.red.tick(NOW + 5 * MIN);
+  assert.equal(w.posts.length, 1, 'dispatched, not left for a person as hosted');
+  // A later one of the streak counts as its red run too.
+  w.gh.mainRuns = [w.run(9102, -6 * MIN, 'startup_failure'), ...w.gh.mainRuns];
+  await w.red.tick(NOW + 10 * MIN);
+  assert.deepEqual((w.marks()['7'] as { runs?: number[] }).runs, [9102]);
 });
 
 test('quieting a workflow after it went red clears its open red on the next poll, with no back-to-green message', async () => {

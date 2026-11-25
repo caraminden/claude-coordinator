@@ -223,6 +223,44 @@ test('a held fix is reopened only by a sighting after its commit reached main, n
   assert.equal(st.flakeFix(project.id, f2)!.state, 'open', 'not on main: reopened on the sighting after its proof');
 });
 
+test('an open fix whose minion closed unproven counts sightings from after its fix shipped (#1954, 2CA7)', async () => {
+  const dir = mkdtempSync(join(root, 'openship-'));
+  const st = new Store(join(dir, 'c.db'));
+  const project = st.createProject('S', null);
+  const file = 'test/open.test.ts';
+  const now = Date.now();
+  const began = now - 5 * 3_600_000;
+  const t = st.createTicket({ project_id: project.id, title: 'Steady the open test', permission_mode: 'x', created_by: 'T' });
+  st.setTicketDir(t.id, dir, 'ticket/11-fix');
+  st.updateTicket(t.id, { status: 'closed' });
+  st.addFlakeFix(project.id, file, t.id, began);
+  let shipped: number | null | undefined = began + 2 * 3_600_000;
+  let started = 0;
+  const fx = new FlakeFixes({
+    store: st,
+    sharedDir: () => null,
+    runs: async () => [],
+    jobs: async () => [],
+    now: () => now,
+    shippedAt: async () => shipped,
+    start: async (_p, b) => (started++, { id: st.createTicket({ project_id: project.id, title: b.title, permission_mode: 'x', created_by: 'T' }).id }),
+  });
+  const sight = (at: number) => st.addFlakeEvents(project.id, null, null, at, [{ file, source: 'in CI', detail: '' }]);
+  for (const h of [0.5, 1, 1.5]) sight(began + h * 3_600_000);
+  await fx.escalate(project, now);
+  assert.equal(started, 0, '3 sightings while it worked were of main without the fix');
+  shipped = null;
+  await fx.escalate(project, now);
+  assert.equal(started, 1, 'it never shipped: they count from its start, as before');
+  const own = st.flakeFix(project.id, file)!;
+  st.updateFlakeFix(own.id, { ticket_id: t.id, started_at: began });
+  for (const x of st.listTickets(project.id)) st.updateTicket(x.id, { status: 'closed' });
+  shipped = began + 2 * 3_600_000;
+  for (const h of [2.5, 3, 3.5]) sight(began + h * 3_600_000);
+  await fx.escalate(project, now);
+  assert.equal(started, 2, '3 after the ship: the fix did not hold');
+});
+
 test("shippedAt reads when main first held a branch's tip from its reflog; null off main, undefined when the branch is gone (#1521)", async () => {
   const repo = mkdtempSync(join(root, 'git-'));
   const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'core.logAllRefUpdates=true', ...a], { cwd: repo, encoding: 'utf8' }).trim();

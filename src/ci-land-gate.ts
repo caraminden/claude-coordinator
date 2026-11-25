@@ -48,6 +48,8 @@ export interface LandState {
   /** #1342: when the line last moved (its head, the head's phase or CI run, or a land leaving), and what it looked like then. Absent in state kept before. */
   moved?: number;
   head?: string;
+  /** The head's seq: the ship that holds the lock, else the next in the line's order, which a reorder can take from the lowest seq. Absent in state kept before. */
+  first?: number;
 }
 export const newLandState = (): LandState => ({ lands: {}, fellBack: [] });
 
@@ -88,11 +90,12 @@ export function landStep(s: LandState, seen: LandSeen[], now: number): LandState
       delete s.lands[key];
       left = true;
     }
-  // The head is the lowest seq in the line: it holds the lock, and each phase or CI run it passes through is progress.
-  const first = seen.filter((x) => x.name !== 'tools/deploy.sh').sort((a, b) => a.seq - b.seq)[0];
+  // The head is the first in the line as seen (Waits' queueFrom: the lock's holder, then the line's order), not the lowest seq; each phase or CI run it passes through is progress.
+  const first = seen.find((x) => x.name !== 'tools/deploy.sh');
   const head = first ? `${first.seq}/${first.phase}/${first.ci ?? ''}/${first.run ?? ''}` : '';
   if (s.moved == null || left || head !== s.head) s.moved = now;
   s.head = head;
+  s.first = first?.seq;
   return s;
 }
 
@@ -125,7 +128,7 @@ export function landProblems(s: LandState, now: number): Problem[] {
   }
   // Ringing needs a line that is still non-empty and has not moved: a deep line whose head keeps changing is just busy.
   const line = Object.entries(s.lands)
-    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .sort((a, b) => Number(Number(b[0]) === s.first) - Number(Number(a[0]) === s.first) || Number(a[0]) - Number(b[0]))
     .map(([, l]) => l);
   const since = s.moved ?? now;
   if (line.length && now - since >= LAND_SLOW_MS) {

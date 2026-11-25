@@ -17,5 +17,7 @@ sender passed `urgent`. The idea was to save the cost of reloading a cold contex
 - **`urgent` does nothing now.** The tools no longer offer it; the server still accepts it, so old prompts don't break.
 - **Unchanged:** a parked minion still holds everything until it is unparked or woken, the loop guard still holds
   runaway exchanges, card answers and a person's own messages always run, and keepalives keep their gates (#1274).
+- **A minion whose process ended on an approval card (#1916):** mail still waits for the card's answer, as it did while that
+  turn sat blocked on the card. A person's own words resume it and expire the card.
 - **Draining:** mail held before the change keeps its scheme's hold cap (3 hours unless the scheme set another). The sweep, the Held list's Deliver now and the
   `msg_cold_min` / `msg_hold_h` columns stay, but their settings are gone from the rules page. Nothing is migrated.

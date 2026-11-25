@@ -696,7 +696,8 @@ html:has(> body > .line-drawer:modal) { scrollbar-gutter: auto; padding-right: v
 .line-how { margin: 0.6rem 0 0.4rem; }
 .line-rows { display: grid; gap: 0.3rem; margin: 0; padding: 0; list-style: none; }
 .line-head { margin-top: 0.5rem; padding: 0.15rem 0; color: var(--muted); font-size: 0.85em; font-weight: 600; }
-.line-head.urgent { margin-top: 0; color: var(--error); }
+.line-head.urgent { color: var(--error); }
+.line-head.urgent:first-child { margin-top: 0; }
 .line-lane { padding: 0.8rem 0.7rem; border: 1px dashed color-mix(in srgb, var(--error) 55%, var(--line)); border-radius: 8px; color: var(--muted); font-size: 0.85em; text-align: center; }
 .line-rows.reorder-active .line-lane { background: color-mix(in srgb, var(--error) 8%, transparent); }
 .line-row { display: flex; align-items: center; gap: 0.5rem; min-height: 3rem; box-sizing: border-box; padding: 0.3rem 0.4rem 0.3rem 0.5rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: grab; transition: border-color 0.12s, background 0.12s; }

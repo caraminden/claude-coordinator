@@ -373,13 +373,13 @@ function rowOf(r, g, i, inUrgent) {
 /** A turn that started in the quick lane, and whether it counts in the pool by now. */
 function laneRow(t) {
   const name = t.ticket == null ? h('span', { class: 'muted' }, 'A minion in another scheme') : h('a', { class: 'line-name', 'data-key': `name-${t.ticket}`, href: `#/p/${t.project}/t/${t.number}`, title: `#${t.number} ${t.title}` }, h('span', { class: 'num' }, `#${t.number}`), ` ${t.title}`);
-  const meta = [t.person, `since ${pacificClock(t.since)}`, t.moved ? 'in the pool now' : ''].filter(Boolean).join(' · ');
+  const meta = [t.person, `since ${pacificClock(t.since)}`].filter(Boolean).join(' · ');
   return h(
     'li',
     { class: `line-row lane${t.ticket != null && t.ticket === open.from ? ' here' : ''}${t.ticket == null ? ' other' : ''}`, 'data-cat': t.person ? hueOf(t.person) : null },
     h('span', { class: 'line-who', 'aria-hidden': 'true' }),
     h('span', { class: 'line-t' }, name, h('span', { class: 'line-meta' }, meta)),
-    t.moved ? toneChip('neutral', 'Moved') : toneChip('info', 'Quick'),
+    t.moved ? toneChip('neutral', 'In the pool') : toneChip('info', 'Quick'),
   );
 }
 

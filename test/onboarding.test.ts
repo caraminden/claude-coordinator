@@ -186,8 +186,9 @@ test('Tune up turns onboarding back on in tune-up mode and messages the Taskmast
   assert.equal((await call(`/api/projects/${p.id}/tune-up`, { method: 'POST' })).status, 200, 'and again once it is done');
 });
 
+// Without the turn's own COORDINATOR_* env: its ticket would make the tool server keep a tool list in this TMPDIR.
 test('Taskmasters get propose_plan and list_catalogue, and set_project_settings takes onboarding', async () => {
-  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_ROLE: 'coordinator' }, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('COORDINATOR_'))), COORDINATOR_ROLE: 'coordinator' }, stdio: ['pipe', 'pipe', 'inherit'] });
   const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
   const tools = (await reply).result.tools;

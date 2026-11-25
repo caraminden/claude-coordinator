@@ -13,6 +13,7 @@ import { runsOnPullRequest, type PrSnapshot } from './github.ts';
 import { HttpError, type App } from './http.ts';
 import { NOTIFY_STATES } from './push.ts';
 import { ensureCoordinator } from './routes/projects.ts';
+import type { Prepared } from './ship-handoff.ts';
 
 /** One question on a card, as ask_question takes it. */
 export interface CardQuestion {
@@ -36,7 +37,8 @@ export interface Card {
   secret?: { name: string; scope: string; why?: string };
   asker?: number /** A minion's budget card past 10x (#1672): its Stop stops the turn. */;
   budget?: true /** A start card (#1674): the brief's expected cost; the server acts on its answer. */;
-  startCost?: number;
+  startCost?: number /** A ship card's prepared hand-off (#1930): Ship It starts it with no turn. */;
+  handoff?: Prepared;
 }
 export interface Armed {
   sha: string;
@@ -55,7 +57,7 @@ const short = (sha: string) => sha.slice(0, 7);
 /** Post a question card in a minion's chat, as ask_question does; returns its id and link. */
 export function postCard(app: App, ticket: TicketFields, card: Card): { id: string; href: string } {
   const { runner } = app;
-  const { questions, kind, into, to, notice, doc, secret, asker, job, recipe, mergeable, kitSync, budget, startCost } = card;
+  const { questions, kind, into, to, notice, doc, secret, asker, job, recipe, mergeable, kitSync, budget, startCost, handoff } = card;
   const id = randomBytes(6).toString('hex');
   const event = runner.emit(ticket.id, 'question', {
     id,
@@ -66,6 +68,7 @@ export function postCard(app: App, ticket: TicketFields, card: Card): { id: stri
     ...(kitSync ? { kitSync } : {}),
     ...(budget ? { budget } : {}),
     ...(startCost ? { startCost } : {}),
+    ...(handoff ? { handoff } : {}),
     ...(to ? { to } : {}),
     ...(mergeable ? { mergeable } : {}),
     ...(notice ? { notice } : {}),

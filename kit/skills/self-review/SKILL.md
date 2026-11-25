@@ -179,7 +179,7 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
   wrong way, and how>` or `Process: none`. Anything
   but none goes to the scheme's retro log (the answer-check hook writes it), where the process digest batches it.
 - **At or above the threshold (High), unless the fix route holds:** stop before shipping. The card
-  and the steps are in `references/ship.md`, "The High route". Ship only on a go.
+  (with the hand-off prepared on it) and the steps are in `references/ship.md`, "The High route". Ship only on a go.
 
 ## UI findings
 

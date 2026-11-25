@@ -61,3 +61,10 @@ The steps (section 5):
   and an `ask_question` card with `kind: "merge"` and header "Ship It" (the minions list's chip reads "Ship It"), "Ship this <label>-risk change?" (Ship It /
   Hold, with your pick marked recommended). A feeder's change merges into its build, so its card says Merge: header "Merge", "Merge this <label>-risk change into Build <n>?" (Merge / Hold). Set state null, note `risk <label>: waiting for a go`,
   and end the turn. Ship only on a go.
+- **Prepare the ship with the card** (#1930): when your change goes to main by `hand_off_land`, commit everything first
+  and pass `hand_off` on that card: the arguments you would hand it off with, without `go` (`summary`, `risk`, `risk_reason`,
+  `learned`, `probe`; `fix` only for a rolled-back deploy's). One option is labelled exactly `Ship It`. A refusal comes back
+  at once, when the ship would have been refused: fix it and post the card again. Then pressing Ship It starts the ship with
+  no turn of yours, and the press is the go. Change nothing after the card: a new commit, an uncommitted edit or a person's
+  message makes the press come to you as an ordinary answer with a line saying why, and you hand off yourself. Leave
+  `hand_off` out on a feeder's or build card, where ships go by pull request, and when you owe steps between the go and the ship.

@@ -3,7 +3,6 @@
 import { azureSpeech } from '../azure-speech.ts';
 import { CARD_STOP, money, SPLIT, START, START_CARD_USD, startHoldKey } from '../minion-budget.ts';
 import { parseSpend } from '../outside-spend.ts';
-import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, sep } from 'node:path';
@@ -15,12 +14,10 @@ import { choicesPage, commentMessage, optionImageProblem, pageTitle } from '../a
 import { cardLabel } from '../card-links.ts';
 import { cardTwin } from '../card-twins.ts';
 import { checkNeed } from '../needs.ts';
-import { armForCi, mergeCard, postCard, replyToKey, tellTaskmaster } from '../ci-armed.ts';
+import { armForCi, type Card, mergeCard, postCard, replyToKey, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
 import { runnerLabel, schemeLabels } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
-import { needsGo } from '../../public/shipping.js';
-import { offSkills } from '../skills.ts';
 import { buildOwnerKey, EFFORTS, MODELS, PERSON_NOTE_MAX, TICKET_STATES, type Ticket, type TicketState } from '../db.ts';
 import { buildBranch } from '../workspace.ts';
 import { historyPage } from '../history.ts';
@@ -28,10 +25,9 @@ import { factsText, liveFacts } from '../live-facts.ts';
 import { hostCheck } from '../host-check.ts';
 import { shipRisk, shipRiskText } from '../ship-risk.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
-import { landArgs, landConflict, landPhase, type Handoff } from '../land.ts';
-import { changedLines, parseProbe, PROBE_HELP, PROBE_LINES } from '../live-probe.ts';
+import { landArgs } from '../land.ts';
+import { checkHandoff, prepareHandoff, shipOnClick, startHandoff } from '../ship-handoff.ts';
 import { criticRefusal } from '../critic-gate.ts';
-import { fixLine, fixProofProblem, parseFixProof } from '../fix-proof.ts';
 import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
 import { MEDIA_TOOLS, type MediaTool } from '../openrouter.ts';
 import { previewPath } from '../previews.ts';
@@ -43,7 +39,7 @@ import { cleanPaths, defaultBranch, diffSize, LIMITS, overLimit, type BatchRow, 
 import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { SIDE_MAX_CHARS } from '../side-ask.ts';
 import { chatCommands } from '../slash-commands.ts';
-import { afterAllWrites, buildNumber, HANDOFF_FIX, HttpError, json, oneOf, ownWrites, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
+import { afterAllWrites, buildNumber, HttpError, json, oneOf, ownWrites, readJson, replyList, str, ticketView, workflowSwitch, type App, type Ctx, type Route, type TicketView } from '../http.ts';
 import { SECRET_ENV_PREFIX, secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { fileUploadsDir, messageFiles, resolveTicketFile, saveImages, ticketRoots } from './files.ts';
 import { deciding, postPlan } from '../plan-cards.ts';
@@ -925,7 +921,7 @@ export const ticketRoutes: Route[] = [
       const proj = kind && ticket.build ? app.store.getProject(ticket.project_id) : null;
       const into = proj && ticket.kind !== 'coordinator' && buildBranch(proj.repo_dir, ticket.build) && app.store.getSetting<number>(buildOwnerKey(proj.id, ticket.build!)) !== ticket.id ? ticket.build! : null;
       const mergeable = questions.length > 0 && !kind && body.when_ci_passes !== true;
-      const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(into ? { into } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
+      const card: Card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(into ? { into } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
       // A card that repeats one open or just answered is refused once; not_duplicate posts it. Both are counted (settings
       // card_twin:refused and card_twin:override) so the false-alarm rate can be read.
       const checkTwin = () => {
@@ -956,6 +952,10 @@ export const ticketRoutes: Route[] = [
       }
       if (body.for_everyone !== true) checkTwin();
       // Held until CI passes on the pushed commit (#715): posted then with no turn, or now if it already passed.
+      if (body.hand_off !== undefined) {
+        if (!kind || !questions.length) throw new HttpError(400, 'hand_off goes with a question card of kind ship');
+        card.handoff = await prepareHandoff(app, app.store.getTicket(ticket.id)!, body.hand_off, questions);
+      }
       const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { card }) : null;
       if (armed) return json(res, 202, { armed });
       return json(res, 201, mergeCard(app, ticket, ticket, card) ?? postCard(app, ticket, card));
@@ -1097,6 +1097,7 @@ export const ticketRoutes: Route[] = [
         runner.broadcastTicket(id);
         return json(res, 202, ticketView(app, id));
       }
+      if (deciding.has(card.id)) throw new HttpError(409, 'Someone is answering that card right now');
       const { questions } = data;
       const answers = cleanAnswers(questions, body.answers, (Array.isArray(body.images) && body.images.length > 0) || (Array.isArray(body.files) && body.files.length > 0));
       // A machine job's go card (#857): only the machine's owner or an admin answers it, and their pick is the job's go.
@@ -1177,7 +1178,30 @@ export const ticketRoutes: Route[] = [
         const kept = await saveImages(app, ticket, body.images);
         runner.recordAnswer(id, session.name, `My answers to the question card:\n\n${text}`, { ...answer, ...(kept.length ? { images: kept.map((i) => i.name) } : {}) });
         deliverAnswer(app, asker.id, session.name, `My answers to your question card for everyone (in the Overlord's chat):\n\n${text}`, {}, await saveImages(app, asker, body.images), files);
-      } else deliverAnswer(app, id, session.name, `My answers to your question card:\n\n${text}`, answer, await saveImages(app, ticket, body.images), files);
+      } else {
+        // Ship It on a card with its hand-off prepared ships now, with no turn (#1930); else the minion gets the answer, with why.
+        const mine = `My answers to your question card:\n\n${text}`;
+        const images = await saveImages(app, ticket, body.images);
+        let why: string | null;
+        deciding.add(card.id);
+        try {
+          why = await shipOnClick(
+            app,
+            store.getTicket(id)!,
+            { event: card.id, data },
+            {
+              by: session.name,
+              uid: session.uid ?? null,
+              picked: answers.flatMap((a) => a.selected),
+              added: images.length + files.length > 0 || answers.some((a) => a.other),
+              record: (held) => runner.recordAnswer(id, session.name, mine, answer, { by: APP_NAME, text: held }),
+            },
+          );
+        } finally {
+          deciding.delete(card.id);
+        }
+        if (why !== null) deliverAnswer(app, id, session.name, `${mine}${why ? `\n\n(${APP_NAME} didn't ship it by itself: ${why}.)` : ''}`, answer, images, files);
+      }
       runner.echoOverlordAnswer(ticket, session.name, text, asker && asker.status !== 'closed' ? asker.id : id, session.uid);
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
@@ -1626,117 +1650,9 @@ export const ticketRoutes: Route[] = [
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const body = (await readJson(req)) ?? {};
-      if (ticket.kind !== 'ticket' || !ticket.cwd) throw new HttpError(403, 'Only a minion with a worktree lands with tools/land.sh');
-      if (!existsSync(join(ticket.cwd, 'tools', 'land.sh'))) throw new HttpError(404, 'This worktree has no tools/land.sh: land the way the scheme instructions say');
-      // No risk label is high (Q10, Build 4): a scheme whose pre-ship review is off, with nothing else giving the label, has every ship wait for a person's go.
-      const labeller = app.store.reviews.labelGiver(ticket.project_id);
-      const unlabelled = labeller ? '' : "this scheme's pre-ship review is off and nothing else gives the risk label";
-      const h: Handoff = unlabelled
-        ? { summary: str(body.summary, 'Summary', 300, HANDOFF_FIX), risk: 'high', reason: `No risk label: ${unlabelled}${typeof body.risk_reason === 'string' && body.risk_reason.trim() ? `. ${body.risk_reason.trim()}` : ''}`.slice(0, 300) }
-        : { summary: str(body.summary, 'Summary', 300, HANDOFF_FIX), risk: oneOf(body.risk, ['low', 'medium', 'high'], 'Risk') as Handoff['risk'], reason: str(body.risk_reason, 'Risk reason', 300, ': call hand_off_land again with risk_reason: one line on why that label, plus what you chose not to fix') };
-      // The scheme's go threshold (#1043, Shipping in Minion rules): from that label up, a change ships only on a person's go.
-      // A feeder's merge into its build branch is covered by the build's go card (buildLines in prompts.ts).
-      const project = app.store.getProject(ticket.project_id);
-      const goFrom = project?.go_from ?? 'high';
-      const hasGo = typeof body.go === 'string' && !!body.go.trim();
-      const reviewOff = !!project && offSkills(project).includes('self-review');
-      if (body.into === undefined && (unlabelled || needsGo(goFrom, h.risk)) && !hasGo && body.fix_proof !== undefined && !unlabelled && goFrom !== 'all' && !reviewOff) {
-        // #1398 (Cara, 2026-11-20, "Fixes ship; data still asks"): a bug fix that proves itself ships with no go, and its
-        // shipped line says so. Not where every change waits for a person, nor with no label; data and auth always ask.
-        let proof;
-        try {
-          proof = parseFixProof(body.fix_proof);
-        } catch (err) {
-          throw new HttpError(400, thrown(err).message!);
-        }
-        const why = await fixProofProblem(ticket.cwd, proof, app.store.props.forTarget('minion', ticket.id).type);
-        if (why) throw new HttpError(400, `Not handed off as a fix without a go: ${why}. Ask with a ship card (kind ship) and hand it off with go instead`);
-        // The reason carries the line, so the shipped line says it (and Releases reads it there) without a field in land.ts, a pipeline file.
-        h.reason = `${h.reason.replace(/[.\s]+$/, '')}. ${fixLine(proof)}`;
-      } else if (body.into === undefined && (unlabelled || needsGo(goFrom, h.risk))) {
-        if (!hasGo)
-          throw new HttpError(
-            400,
-            unlabelled
-              ? `Not handed off: ${unlabelled}, so this ship waits for a person's go. Ask with a ship card (kind ship), then hand it off again with go naming who gave it and when`
-              : `In this scheme ${goFrom === 'all' ? 'every change' : `a ${h.risk}-risk change`} ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first${goFrom === 'all' || reviewOff ? '' : '. A bug fix that proves itself passes fix_proof instead (self-review skill, "The go threshold")'}`,
-          );
-        h.go = str(body.go, 'Go', 200);
-      } else if (body.into === undefined && project && offSkills(project).includes('self-review')) {
-        // Cara's Q10 (#1062, ADR 0014): with self-review off nothing labels a change's risk, so every ship waits for a person's go.
-        if (typeof body.go !== 'string' || !body.go.trim()) throw new HttpError(400, "This scheme has turned self-review off, so every change ships only on a person's go: name who gave it and when in go, or ask with a ship card (kind ship) first");
-        h.go = str(body.go, 'Go', 200);
-      }
-      // A blocking reviewer or critic whose last verdict on this minion failed holds the ship (Q7, Block or advise), a feeder's merge too, until it passes or a person gives the go.
-      const holds = app.store.reviews.holds(ticket.project_id, ticket.id);
-      if (holds.length && !h.go) {
-        if (typeof body.go !== 'string' || !body.go.trim())
-          throw new HttpError(
-            400,
-            `Not handed off: ${holds.map((x) => `${x.name} (\`${x.slug}\`, last verdict ${x.verdict})`).join(', ')} ${holds.length > 1 ? 'block' : 'blocks'} this ship. Fix what it found and run it again until it passes (record each round with review_set run), or ask a person with a ship card (kind ship) and hand it off again with go naming who gave it and when`,
-          );
-        h.go = str(body.go, 'Go', 200);
-      }
-      if (body.deploy !== undefined && typeof body.deploy !== 'boolean') throw new HttpError(400, 'deploy must be true or false');
-      if (body.deploy === false) h.deploy = false;
-      if (body.stay_open !== undefined && typeof body.stay_open !== 'boolean') throw new HttpError(400, 'stay_open must be true or false');
-      if (body.waiting_on !== undefined && body.stay_open !== true) throw new HttpError(400, 'waiting_on goes with stay_open: true');
-      if (body.stay_open === true) {
-        h.stayOpen = true;
-        if (body.waiting_on !== undefined) h.waitingOn = str(body.waiting_on, 'waiting_on', 120);
-      }
-      // The live probe (#1741): a ship to main of PROBE_LINES or more names one check the server runs once it's live, where something of the scheme is served here.
-      if (body.probe !== undefined) {
-        if (body.into !== undefined) throw new HttpError(400, 'A probe goes with a ship to main, not a merge into a build');
-        try {
-          h.probe = parseProbe(body.probe);
-        } catch (err) {
-          throw new HttpError(400, `${thrown(err).message}. ${PROBE_HELP}`);
-        }
-        if (h.probe.kind === 'sql' && (await app.waiters.elsewhere(ticket.id))) throw new HttpError(400, "A sql probe reads this server's own database, so only the scheme it runs uses one: pick http or timing");
-      } else if (body.into === undefined) {
-        // As the ship's own app deploys pick them (server.ts, LandHandoffs' apps): a home app on main.
-        const served = !(await app.waiters.elsewhere(ticket.id)) || (body.deploy !== false && app.store.listContraptions().some((c) => c.home_scheme === ticket.project_id && !!c.repo && (c.branch ?? 'main') === 'main'));
-        const lines = served ? await changedLines(ticket.cwd) : 0;
-        if (lines >= PROBE_LINES) throw new HttpError(400, `Not handed off: this change is ${lines} lines (${PROBE_LINES} or more), so it names one check the server runs once it's live, with no model: a pass is a line in your chat, a fail wakes you. Pick what would show it broken live. ${PROBE_HELP}`);
-      }
-      let args: string[];
-      try {
-        args = landArgs(body, ticket.cwd);
-      } catch (err) {
-        throw new HttpError(400, thrown(err).message!);
-      }
-      // The critic gate (#1504): a critic this change matches runs before the ship, a feeder's merge too.
-      const unjudged = await criticRefusal(app.store.reviews, { ...ticket, cwd: ticket.cwd! }, args, body.fix === true);
-      if (unjudged) throw new HttpError(400, unjudged);
-      // The build minion's take-in of main isn't the end of its work: a clean one would dismiss it mid-build.
-      if (args.includes('--full')) throw new HttpError(400, 'A build minion takes main in within its turn: run tools/land.sh --into build/<n> --full yourself (in a container, the land tool)');
-      // As land.sh's own first check, but now, before the minion ends its turn on a land that would refuse at once.
-      const dirty = await new Promise<string>((done) => execFile('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: ticket.cwd! }, (err, out) => done(err ? `git status failed: ${err.message}` : out.trim())));
-      if (dirty) throw new HttpError(409, `Not handed off: your worktree has uncommitted changes. Commit them first.\n${dirty.slice(0, 2000)}`);
-      const env = app.runner.hostEnv(ticket, String(req.headers.authorization).replace(/^Bearer /, ''));
-      if (body.fix === true) env.LAND_FIX = '1';
-      if (body.outage === true) env.LAND_URGENT = '1'; // its restart skips deploy.sh's starved-box hold (#1417)
-      // Fast mode (#1017): low and medium lands go live on the smoke check; every land in the scheme is let through on known reds.
-      const scheme = app.store.getProject(ticket.project_id);
-      if (scheme?.land_mode === 'fast') {
-        if (h.risk !== 'high') env.LAND_FAST = '1';
-        const known = app.fastMode?.knownRed(ticket.project_id);
-        if (known) env.LAND_KNOWN_RED = known;
-      }
-      // A branch that wouldn't rebase cleanly is sent back now, in the minion's own turn, not after its wait in line (#770).
-      const clash = await landConflict(ticket.cwd, env, args);
-      if (clash) throw new HttpError(409, `Not handed off: ${clash}`);
-      // Its three lines (#1119) ride with the hand-off and queue on a clean land; they never refuse it.
-      const learned = parseLearned(body.learned);
-      if (learned !== null) {
-        h.learned = learned;
-        h.touched = await touchedFiles(ticket.cwd, args[0] === '--into' ? [args[1], `origin/${args[1]}`, 'main'] : undefined);
-      }
-      if (!app.landings.handOff(ticket.id, ticket.cwd, env, args, h)) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
-      app.runner.places.refused(ticket.id, false);
-      app.store.updateTicket(ticket.id, { state: 'outside', note: landPhase('') });
-      app.runner.broadcastTicket(ticket.id);
+      const mine = app.store.getTicket(ticket.id)!;
+      const ready = await checkHandoff(app, mine, body, String(req.headers.authorization).replace(/^Bearer /, ''));
+      if (!startHandoff(app, mine, ready)) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
       return json(res, 202, { ok: true });
     },
   },

@@ -1793,7 +1793,17 @@ const THREAD_TOOLS = () => [
     description: "Label this minion for the scheme's minions list: its short title, build and where things stand (its kind of work is the `type` property: set_properties). Leave out what should stay. Call it once you know the short ask; the end of a turn's state and note go in your final reply's status line instead.",
     inputSchema: { type: 'object', properties: { title: TITLE, state: stateSchema(C().DEPLOYS), note: NOTE, replies: REPLIES, build: BUILD } },
   },
-  ASK_QUESTION(),
+  // A minion's ship card also prepares its hand-off (#1930).
+  {
+    ...ASK_QUESTION(),
+    inputSchema: {
+      ...ASK_QUESTION().inputSchema,
+      properties: {
+        ...ASK_QUESTION().inputSchema.properties,
+        hand_off: { type: 'object', description: "With kind ship, your own ship to main: hand_off_land's arguments but go, so Ship It ships it with no turn of yours (self-review)" },
+      },
+    },
+  },
   SETTLE_QUESTION,
   STRIKE_TEXT,
   PROPOSE_PLAN,
@@ -2491,7 +2501,12 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
       if (args.questions == null) throw new Error('questions is required, unless you send a notice to one person (to and notice), ask on a choices page (doc) or ask for a secret (secret)');
       const ci = args.when_ci_passes === true ? { when_ci_passes: true } : {};
       const everyone = args.for_everyone === true ? { for_everyone: true } : {};
-      const { id: questionId, href, armed, merged } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { questions: args.questions, ...(args.not_duplicate === true ? { not_duplicate: true } : {}), ...(args.kind ? { kind: args.kind } : {}), ...direct, ...ci, ...everyone });
+      const {
+        id: questionId,
+        href,
+        armed,
+        merged,
+      } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { questions: args.questions, ...(args.not_duplicate === true ? { not_duplicate: true } : {}), ...(args.kind ? { kind: args.kind } : {}), ...(args.hand_off !== undefined ? { hand_off: args.hand_off } : {}), ...direct, ...ci, ...everyone });
       if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
       if (merged)
         return `Your earlier question card of this turn was still unanswered, so these questions joined it (up to 8 questions in all): people see one card with one Send and answer all of them in one message. Its link is ${href} (the same one; link it, e.g. [the card below](${href}), "below" this turn, "above" later). End your turn now with a short reply; the answers will come as the next message.`;

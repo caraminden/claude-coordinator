@@ -1075,6 +1075,11 @@ export class Runner {
     return [...this.turns.keys()];
   }
 
+  /** Whether a turn of its runs, or one is owed: messages or a worker it waits for, or a cut-off turn to carry on (#1930). */
+  busy(ticketId: number): boolean {
+    return this.isRunning(ticketId) || this.strayWaits.has(ticketId) || this.turnLine.has(ticketId) || this.queue.size(ticketId) > 0 || !!this.queue.get(ticketId).owed;
+  }
+
   /** A turn launching (startTurn, #1808) counts: it is past the queue's take, so a message now waits for it as for a live one. */
   isRunning(ticketId: number): boolean {
     return this.turns.has(ticketId) || this.launching.has(ticketId);
@@ -3633,8 +3638,13 @@ export class Runner {
     this.broadcastTicket(chat.id);
   }
 
-  /** A card's answer kept in its chat without waking it: a for-everyone card's answer wakes its asker instead (#921). */
-  recordAnswer(ticketId: number, author: string, text: string, extra: object) {
+  /**
+   * A card's answer kept in its chat without waking it: a for-everyone card's answer wakes its asker instead (#921).
+   * `held` is what the chat's own next turn reads of it, if it has one, from `by` (a Ship It the server shipped, #1930).
+   */
+  recordAnswer(ticketId: number, author: string, text: string, extra: object, held?: { by: string; text: string }) {
+    // No event id: the chat's line is the person's answer, which people shouldn't read as not sent yet.
+    if (held) this.queue.hold(ticketId, { author: held.by, text: held.text, images: [], fyi: true, asker: null });
     this.emit(ticketId, 'user_message', { author, text: hideTokens(text), ...extra });
     this.broadcastTicket(ticketId);
   }

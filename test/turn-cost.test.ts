@@ -3,10 +3,12 @@
 // window when all of them are live, and divides by the turn-seconds. The budget is in test/turn-cost.json and may only
 // fall: lower it when the number drops; raise it never (fix what made a turn dearer, or say why in the commit).
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { Store } from '../src/db.ts';
+import type { PoolSize } from '../src/turn-line.ts';
 import { bootServer, stopTurns, until, ok } from './helpers.ts';
 
 const TURNS = 100,
@@ -46,6 +48,11 @@ createInterface({ input: process.stdin }).once('line', () => {
 `,
   );
   chmodSync(fake, 0o755);
+  // All of them run at once: the worker pool (#1868) would hold most in line.
+  mkdirSync(join(root, 'data'), { recursive: true });
+  const seed = new Store(join(root, 'data', 'coordinator.db'));
+  seed.setSetting('turn-pool', { size: TURNS, at: 0, fixed: { size: TURNS, by: 'test' } } satisfies PoolSize);
+  seed.close();
   const srv = await bootServer({ root, env: { CLAUDE_BIN: fake } });
   try {
     const project = ok(await srv.call('/api/projects', { name: 'Load' }));

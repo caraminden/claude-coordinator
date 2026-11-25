@@ -73,13 +73,17 @@ button.tl-head { cursor: pointer; }
 .tl-own { font-style: italic; }
 /* Explain (#1994): its line under the ribbon, and Haiku's lines in a row in place of the minion's outcome. */
 .tl-explain { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; margin-top: 0.5rem; font-size: 0.85em; }
-.tl-explain .tl-stale { color: var(--waiting); }
+.tl-explain .tl-stale { font-size: inherit; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; flex-basis: 100%; margin: 0; }
 .tl-writing { color: var(--muted); animation: pulse 1.4s infinite; }
 .tl-explain + .cui-failed { margin-top: 0.4rem; }
 .tl-read { grid-column: 1 / -1; display: grid; gap: 0.2rem; margin: -0.15rem 0.6rem 0.45rem 2.1rem; padding: 0; list-style: none; font-size: 0.9em; overflow-wrap: anywhere; }
 .tl-read .tl-k { vertical-align: baseline; }
-.time-log .tl-ev { display: inline-grid; place-items: center; min-width: 1.35em; height: 1.35em; margin-right: 0.2em; padding: 0 0.2em; box-sizing: border-box; border: 1px solid var(--line); border-radius: 3px; color: var(--muted); font-size: 0.78em; font-variant-numeric: tabular-nums; text-decoration: none; vertical-align: 0.1em; }
-.time-log .tl-ev:hover, .time-log .tl-ev:focus-visible { border-color: var(--ink); color: var(--ink); }
+/* The square is drawn small; its box is a whole tap target, kept out of the line's height by negative margins. */
+.time-log .tl-ev { position: relative; display: inline-grid; place-items: center; width: 24px; height: 24px; margin: -5px 0; color: var(--muted); font-size: 0.78em; font-variant-numeric: tabular-nums; text-decoration: none; vertical-align: middle; }
+.time-log .tl-evs { white-space: nowrap; }
+.time-log .tl-ev::after { content: ''; position: absolute; left: 50%; top: 50%; width: 1.35em; height: 1.35em; transform: translate(-50%, -50%); box-sizing: border-box; border: 1px solid var(--line); border-radius: 3px; pointer-events: none; }
+.time-log .tl-ev:hover, .time-log .tl-ev:focus-visible { color: var(--ink); }
+.time-log .tl-ev:hover::after, .time-log .tl-ev:focus-visible::after { border-color: var(--ink); }
 .tl-jump { font-size: 0.82em; }
 .tl-row .tl-jump { padding: 0.5rem 0.65rem 0.4rem 0; white-space: nowrap; }
 .tl-more { justify-self: start; }
@@ -90,7 +94,8 @@ button.tl-head { cursor: pointer; }
   .tl-row .tl-jump { min-height: var(--control-h); box-sizing: border-box; padding-top: 0.45rem; }
   .tl-meta { flex-basis: 100%; justify-content: flex-start; padding-left: 1.5rem; }
   .tl-read { margin-left: 0.75rem; }
-  .time-log .tl-ev { min-width: 1.9em; height: 1.9em; }
+  .time-log .tl-ev { width: var(--citadel-control-h, 40px); height: var(--citadel-control-h, 40px); margin: -11px 0; }
+  .time-log .tl-ev::after { width: 1.9em; height: 1.9em; }
 }
 @media (prefers-reduced-motion: reduce) {
   .tl-ribbon.busy, .tl-ribbon.live::after, .tl-writing { animation: none; }

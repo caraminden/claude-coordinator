@@ -123,7 +123,7 @@ function rowEl(r, isLast, log) {
     { class: `tl-row tl-${r.type}${r.status ? ` ${r.status}` : ''}${r.kind === 'lost' ? ' lost' : ''}${r.guess ? ' guess' : ''}${r.status === 'in_progress' && !isRunning() ? ' paused' : ''}${on ? ' on' : ''}`, 'data-row': key },
     key ? h('button', { class: 'tl-head', 'aria-pressed': String(!!on), title: `${when}. ${on ? 'Show the whole ribbon' : 'Show on the ribbon'}`, 'data-focus': key, onclick: () => pick(on ? null : key) }, head) : h('div', { class: 'tl-head' }, head),
     r.event ? h('a', { class: 'tl-jump', href: jumpHref(view.ticket, r.event), title: 'Show in the chat', 'aria-label': 'Show in the chat', 'data-focus': `jump ${key}` }, 'Chat ↗') : '',
-    read?.length ? readingOf(read) : line ? h('p', { class: 'tl-note' }, read ? h('span', { class: 'tl-own', title: 'Haiku found nothing in the chat to add here' }, 'Its own words: ') : '', line) : '',
+    read?.length ? readingOf(read) : line ? h('p', { class: 'tl-note' }, explained(log) ? h('span', { class: 'tl-own', title: read ? 'Haiku found nothing in the chat to add here' : 'Haiku had nothing to read here yet' }, 'Its own words: ') : '', line) : '',
   );
 }
 
@@ -140,9 +140,15 @@ const readingOf = (lines) =>
         'li',
         { class: l.kind },
         l.kind !== 'work' ? swatch(l.kind) : '',
-        h('span', {}, l.text),
-        ' ',
-        l.ev.map((ev, i) => h('a', { class: 'tl-ev', href: jumpHref(view.ticket, ev), title: 'Show in the chat', 'aria-label': `Show in the chat: what line ${i + 1} rests on` }, String(i + 1))),
+        // The last word rides with the squares, so a square never starts a line alone.
+        h('span', {}, l.text.replace(/\S+$/, '')),
+        h(
+          'span',
+          { class: 'tl-evs' },
+          /\S+$/.exec(l.text)?.[0] ?? '',
+          '\u00a0',
+          l.ev.map((ev, i) => h('a', { class: 'tl-ev', href: jumpHref(view.ticket, ev), title: 'Show in the chat', 'aria-label': `Show in the chat: what line ${i + 1} rests on` }, String(i + 1))),
+        ),
       ),
     ),
   );
@@ -183,10 +189,10 @@ function explainBar(e, log) {
   if (last) {
     const all = x.presses.map((p) => `${p.by}, ${stamp(p.at)}${cents(p.cost)}`).join('\n');
     bits.push(
-      h('span', { class: 'tl-by', tabindex: 0, 'data-tip': `Haiku read the chat's record of each part. It can miss things: each line's squares show what it rests on.\n${all}` }, h('b', {}, "Haiku's reading"), ` · ${last.by}, ${stamp(last.at)}${cents(last.cost)}`),
+      h('span', { class: 'tl-by', tabindex: 0, 'data-tip': `Haiku read the chat's record of each part. It can miss things: each line's squares show what it rests on.\n${all}` }, h('b', {}, panel.ui.tlPlain ? "Haiku's reading (hidden)" : "Haiku's reading"), ` · ${last.by}, ${stamp(last.at)}${cents(last.cost)}`),
       h('button', { class: 'small secondary', 'data-focus': 'plain', 'aria-pressed': String(!!panel.ui.tlPlain), onclick: () => ((panel.ui.tlPlain = !panel.ui.tlPlain), draw()) }, panel.ui.tlPlain ? 'Show Explain' : 'Hide Explain'),
     );
-    if (fresh && !writing) bits.push(h('span', { class: 'tl-stale' }, 'Out of date: something new since'), failed ? '' : btn(`Explain the new part${fresh > 1 ? 's' : ''}`));
+    if (fresh && !writing) bits.push(h('div', { class: 'cui-notice tl-stale', 'data-tone': 'warn', role: 'status' }, h('span', {}, `Out of date: new in the chat since ${stamp(last.at)}`), failed ? '' : btn(`Explain the new part${fresh > 1 ? 's' : ''}`)));
   }
   return [bits.length ? h('div', { class: 'tl-explain' }, bits) : '', failed || ''];
 }

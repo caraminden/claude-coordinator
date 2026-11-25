@@ -7,7 +7,9 @@ export interface WorkerWait {
   of: number;
   paused: string | null;
   held?: string | null;
+  /** The one machine it may start on (src/runs-on.ts), and what it waits for there; `never`: until someone changes something, so a person is asked. */
+  machine?: { name: string; why: string; never?: true };
 }
 
 const nth = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
-export const workerWaitText = (w: WorkerWait) => (w.paused ? `waiting: ${w.paused} paused all minions` : `waiting for a worker, ${nth(w.place)} of ${w.of} in line`);
+export const workerWaitText = (w: WorkerWait) => (w.paused ? `waiting: ${w.paused} paused all minions` : w.machine ? `waiting for ${w.machine.name}: ${w.machine.why}` : `waiting for a worker, ${nth(w.place)} of ${w.of} in line`);

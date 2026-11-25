@@ -151,7 +151,7 @@ export function liveState(ticket: LiveMinion, events: EventRow[], now = Date.now
   } else if (ticket.approvals) {
     waits.push(`a person: ${ticket.approvals} approval card(s) waiting, its process ended to free its memory until the answer`);
   } else if (ticket.worker_wait) {
-    waits.push(`a worker: no turn is running, its next one starts by itself (${workerWaitText(ticket.worker_wait)})`);
+    waits.push(`a worker: no turn is running, its next one ${ticket.worker_wait.machine?.never ? "can't start until a person acts" : 'starts by itself'} (${workerWaitText(ticket.worker_wait)})`);
   } else if (ticket.server_work?.kind === 'job') {
     waits.push(`a job of its own the server runs on, for ${ago(now - (ticket.server_work.since ?? now))} so far (${ticket.server_work.text}): no turn is running, and its end wakes it`);
   } else {

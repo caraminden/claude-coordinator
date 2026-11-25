@@ -343,12 +343,7 @@ export async function unparkTicket(app: App, ticket: Ticket | TicketView, by: st
   if (hold) {
     if (author !== by) throw new HttpError(409, `#${ticket.number} waits for a person's start card (its brief expects about ${money(hold.usd)}): only a person's answer or Unseal starts it`);
     app.store.deleteSetting(startHoldKey(ticket.id));
-    const card = app.store.eventsOfKinds(ticket.id, ['question']).find((e) => JSON.parse(e.data).id === hold.card);
-    if (card) {
-      const settled = { at: Date.now(), by };
-      app.store.setEventData(card.id, { ...JSON.parse(card.data), settled });
-      app.runner.emit(ticket.id, 'question_result', { id: hold.card, settled });
-    }
+    app.runner.settleCard(ticket.id, hold.card, by);
     // Not sealed since #1757 and not chained: this Unseal is its go.
     if (ticket.state !== 'parked' && !app.runner.heldFor(ticket.id)) {
       if (!quiet) app.runner.startHeld(ticket.id, author, "I OK'd your start.");
@@ -1166,6 +1161,12 @@ export const ticketRoutes: Route[] = [
       if (data.budget && answers[0]?.selected[0] === CARD_STOP) {
         stopMinion(app, ticket, session.name);
         runner.recordAnswer(id, session.name, `My answer to your budget card: ${CARD_STOP}. I stopped your turn.`, { answer: { questionId: body.questionId, answers } });
+        return json(res, 202, ticketView(app, id));
+      }
+      // A pick on the card of a turn that waits for its computer (Build 7 T4): recorded, as the turn it is about is the one that waits. Words or files added to it go in as a message too.
+      const added = !!answers[0]?.other || (Array.isArray(body.images) && body.images.length > 0) || (Array.isArray(body.files) && body.files.length > 0);
+      if (data.runsOn && runner.runsOn.answer(id, answers[0]?.selected[0]) && !added) {
+        runner.recordAnswer(id, session.name, `My answer to your Runs on card: ${answers[0].selected[0]}.`, { answer: { questionId: body.questionId, answers } });
         return json(res, 202, ticketView(app, id));
       }
       const text = questions

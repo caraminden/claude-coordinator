@@ -75,6 +75,7 @@ export async function patchMachine(app: Ctx['app'], session: Ctx['session'], mac
   } catch {
     throw new HttpError(409, 'A machine with that name already exists');
   }
+  if (typeof fields.name === 'string') app.runner.runsOn.renamed(machine.id, machine.name, fields.name);
   if (projects !== undefined) app.store.setMachineProjects(machine.id, projects);
   if (lend) app.machines.setLend(machine.id, lend);
   await ownWrites(); // what follows re-reads the grants and the machine (#1244)
@@ -561,6 +562,7 @@ export const machineRoutes: Route[] = [
       // Before its rows go: the agent is told to stop, and each job's minion hears (2MA9).
       app.jobs.drop(machine.id, `${machine.name} was removed from Citadel`, () => true);
       app.store.deleteMachine(machine.id);
+      app.runner.turnLine.forget(machine.id);
       app.ciLoad.forget(machine.id);
       app.machines.disconnect(machine.id);
       await ownWrites(); // the broadcast re-reads the list (#1244)

@@ -1116,7 +1116,7 @@ export function renderTyping() {
   if (!running && view.folds.length) flushFolds();
   // The server working for it with no turn (#727: a handed-off land) gets the line too, in its own words.
   const server = workingBy(t) === 'server';
-  const show = running || !!t.approvals || view.sendingTo === t.id || server;
+  const show = running || !!t.approvals || view.sendingTo === t.id || server || !!t.worker_wait?.machine;
   const wasHidden = el.hidden;
   el.hidden = !show;
   // A redraw mustn't drop the focus on its button.

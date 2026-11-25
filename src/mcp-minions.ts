@@ -125,6 +125,10 @@ export const CREATE_TICKET = {
       model: MODEL,
       effort: EFFORT,
       reason: PICK_REASON,
+      runs_on: {
+        type: 'string',
+        description: "Where its turns may run: 'anywhere' (default; a connected machine only when perigee is full), 'perigee', or a machine's name for work that needs that computer. Only the machine's owner picks it, so their own ask must name it; its turns wait while that computer is off.",
+      },
       workflow: WORKFLOW,
       plugin_folders: PLUGIN_FOLDERS,
       expected_cost: {
@@ -579,6 +583,7 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
         parent: args.parent,
         build: args.build,
         build_owner: args.build_owner === true || undefined,
+        runs_on: args.runs_on,
         model: args.model ?? null,
         effort: args.effort ?? null,
         pick_reason: args.reason,

@@ -37,7 +37,8 @@ export interface Card {
   secret?: { name: string; scope: string; why?: string };
   asker?: number /** A minion's budget card past 10x (#1672): its Stop stops the turn. */;
   budget?: true /** A start card (#1674): the brief's expected cost; the server acts on its answer. */;
-  startCost?: number /** A ship card's prepared hand-off (#1930): Ship It starts it with no turn. */;
+  startCost?: number /** The card of a turn that waits for the computer it is marked for (Build 7 T4): the server acts on its answer. */;
+  runsOn?: true /** A ship card's prepared hand-off (#1930): Ship It starts it with no turn. */;
   handoff?: Prepared;
 }
 export interface Armed {
@@ -57,7 +58,7 @@ const short = (sha: string) => sha.slice(0, 7);
 /** Post a question card in a minion's chat, as ask_question does; returns its id and link. */
 export function postCard(app: App, ticket: TicketFields, card: Card): { id: string; href: string } {
   const { runner } = app;
-  const { questions, kind, into, to, notice, doc, secret, asker, job, recipe, mergeable, kitSync, budget, startCost, handoff } = card;
+  const { questions, kind, into, to, notice, doc, secret, asker, job, recipe, mergeable, kitSync, budget, startCost, runsOn, handoff } = card;
   const id = randomBytes(6).toString('hex');
   const event = runner.emit(ticket.id, 'question', {
     id,
@@ -68,6 +69,7 @@ export function postCard(app: App, ticket: TicketFields, card: Card): { id: stri
     ...(kitSync ? { kitSync } : {}),
     ...(budget ? { budget } : {}),
     ...(startCost ? { startCost } : {}),
+    ...(runsOn ? { runsOn } : {}),
     ...(handoff ? { handoff } : {}),
     ...(to ? { to } : {}),
     ...(mergeable ? { mergeable } : {}),

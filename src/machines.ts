@@ -686,6 +686,12 @@ export class MachineRelay {
     for (const agent of this.agents.values()) if (agent.runners) agent.res.write(`data: ${JSON.stringify({ ships: shipsFor(agent.host) })}\n\n`);
   }
 
+  /** A ship's tests run on the computer a machine's agent is on: the agent's host is that PC's name, with a part of its own after it for a WSL distro. */
+  shipsThere(machineId: number): boolean {
+    for (let host = this.agents.get(machineId)?.host ?? ''; host; host = host.slice(0, Math.max(0, host.lastIndexOf('-')))) if (this.shipsFor(host).length) return true;
+    return false;
+  }
+
   /** Send a runner agent one job and wait for its answer; a refusal, an offline agent or no answer in time comes back as ok: false. */
   runnerJob(machineId: number, job: RunnerJob, timeoutMs = RUNNER_JOB_MS): Promise<RunnerJobResult> {
     const agent = this.agents.get(machineId);

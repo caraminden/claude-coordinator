@@ -9,6 +9,7 @@ import { renderSidebar } from './sidebar.js';
 import { jobOf } from './threadstate.js';
 import { renderTicketHead, setStatus, unpark } from './thread-head.js';
 import { PICKABLE, describe, pageName, pointAtElement } from './pick.js';
+import { openRunsOn } from './runs-on.js';
 import { readSelection, selectionActions } from './selectact.js';
 import { mountMenus } from './ui/menu.js';
 import { heldSaid, toggleStartNow, toggleUrgent } from './worker-line.js';
@@ -126,7 +127,8 @@ function minionMenu(row, t) {
       { label: 'Copy link', icon: '🔗', run: () => copy(abs(threadHref(t)), 'Link') },
       !coord && { label: `Copy “${ref}”`, icon: '#', run: () => copy(ref, ref) },
       !coord && t.status !== 'closed' && needsServer({ label: t.urgent ? `Take off Urgent (set by ${t.urgent.by})` : 'Mark Urgent', icon: '!', run: () => toggleUrgent(t) }),
-      !coord && t.status !== 'closed' && (t.start_now || t.worker_wait) && needsServer({ ...(t.start_now ? { label: 'Release', icon: '⏏', keys: heldSaid(t.start_now).replace('since ', '') } : { label: 'Start now', icon: '▶' }), run: () => toggleStartNow(t) }),
+      !coord && t.status !== 'closed' && (t.start_now || (t.worker_wait && !t.worker_wait.machine)) && needsServer({ ...(t.start_now ? { label: 'Release', icon: '⏏', keys: heldSaid(t.start_now).replace('since ', '') } : { label: 'Start now', icon: '▶' }), run: () => toggleStartNow(t) }),
+      !coord && t.status !== 'closed' && needsServer({ label: `Runs on: ${t.runs_on?.on ?? 'anywhere'}…`, icon: '⌂', run: () => openRunsOn(t) }),
       state && '-',
       state,
     ],

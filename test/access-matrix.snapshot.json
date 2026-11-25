@@ -3492,6 +3492,26 @@
   "m1": "400 contraption is required",
   "m2": "403 A minion may only update itself"
  },
+ "GET /api/tickets/:minion1/runs-on": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/tickets/:minion1/runs-on": {
+  "anon": "401 Not logged in",
+  "person": "400 runs_on is anywhere or perigee",
+  "member": "400 runs_on is anywhere or perigee",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people change where a minion runs; a new minion's is create_ticket's runs_on",
+  "tmB": "403 Only people change where a minion runs; a new minion's is create_ticket's runs_on",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/secret": {
   "anon": "401 Not logged in",
   "person": "404 No such secret card",
@@ -4379,6 +4399,26 @@
   "outsider": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
   "tmA": "400 contraption is required",
   "tmB": "403 Only the minion or Taskmaster itself can ask for a release key in its chat",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "GET /api/tickets/:taskmasterA/runs-on": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such minion",
+  "tmA": "403 Not available to the Taskmaster",
+  "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "PUT /api/tickets/:taskmasterA/runs-on": {
+  "anon": "401 Not logged in",
+  "person": "400 A Taskmaster always runs at perigee",
+  "member": "400 A Taskmaster always runs at perigee",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people change where a minion runs; a new minion's is create_ticket's runs_on",
+  "tmB": "403 Only people change where a minion runs; a new minion's is create_ticket's runs_on",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

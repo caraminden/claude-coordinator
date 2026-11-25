@@ -197,7 +197,7 @@ setInterval(() => fs.existsSync(${JSON.stringify(release)}) && end('done'), 20);
 chmodSync(claude, 0o755);
 
 test('a turn placed on a machine starts, streams, steers, survives a server restart and ends there', async () => {
-  const env = { CLAUDE_BIN: claude, CITADEL_WORKER_FORCE: 'w1', PATH: `${bin}:${process.env.PATH}` };
+  const env = { CLAUDE_BIN: claude, PATH: `${bin}:${process.env.PATH}` };
   srv = await bootServer({ root, env });
   procs.push(srv.proc);
   const turnsDir = join(srv.data, 'run', 'turns');
@@ -222,11 +222,11 @@ test('a turn placed on a machine starts, streams, steers, survives a server rest
   await until('the home turn to end', async () => (await call(`/api/tickets/${home.id}`)).ticket.status !== 'running');
   writeFileSync(heard, '');
 
-  // Switched on by its owner: the next turn is the machine's, its worker's claude being the server's.
+  // Switched on by its owner and lent to the scheme: a minion marked for it runs there, its worker's claude being the server's, with perigee's own workers all free.
   await until("the worker to say its claude's version", () => /claude here is 9\.9\.9/.test(agent.output()));
-  await call(`/api/machines/${machine.id}`, { lend: { server: null, workspaces: [], worker: true } }, 'PATCH');
+  await call(`/api/machines/${machine.id}`, { lend: { server: null, workspaces: [], worker: true }, projects: [project.id] }, 'PATCH');
   rmSync(release);
-  const ticket = await call(`/api/projects/${project.id}/tickets`, { message: 'on the machine' });
+  const ticket = await call(`/api/projects/${project.id}/tickets`, { message: 'on the machine', runs_on: 'w1' });
   const first = JSON.parse((await until('the machine turn to say what it heard', () => lines(heard).length === 1 && lines(heard)))[0]);
   const dir = join(turnsDir, (await until('its folder', () => require_dirs(turnsDir).find((d) => existsSync(join(turnsDir, d, 'machine')))))!);
   const local = join(workerRoot, 'fs', dir);
@@ -272,8 +272,7 @@ test('a turn placed on a machine starts, streams, steers, survives a server rest
   await until("the machine's copy of the folder to go, once the server is done with it", () => !existsSync(local));
 
   // Stop: the interrupt is applied on the machine, and claude's own result ends the turn.
-  // Its link, not its syncs, says it can take a turn: they come back sooner after the restart, and until the link does a turn runs at home.
-  await until('the machine to be back online', async () => (await call('/api/machines')).find((m: { name: string; online: boolean }) => m.name === 'w1' && m.online));
+  // Its syncs come back sooner than its link after the restart: marked for it, the turn waits for the link rather than run at home.
   rmSync(release);
   writeFileSync(heard, '');
   await call(`/api/tickets/${ticket.id}/messages`, { text: 'again' });

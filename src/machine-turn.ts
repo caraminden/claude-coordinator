@@ -40,6 +40,10 @@ export interface WorkerInfo {
   /** Its owner's cap on turns at once. */
   max: number;
   at: number;
+  /** Its CPU and memory pressure (whole percents over a minute) and free memory; null where it can't say, and from an agent before T4. */
+  load?: { cpu: number | null; mem: number | null; freeGb: number | null } | null;
+  /** Its worker has a Claude sign-in; null when it couldn't tell. */
+  signedIn?: boolean | null;
 }
 
 /** The machines' connections, set by the server at start (server.ts): a module here reads them without holding the relay. */
@@ -197,7 +201,13 @@ async function owned(machineId: number, dir: unknown): Promise<boolean> {
  * here and the turns it should start. A turn it names that is no longer the machine's (ended and tidied here) is `gone`.
  */
 type Sync = { turns: Record<string, SyncReply>; start: { dir: string; launch: MachineLaunch }[] };
-type SyncBody = { worker?: { claude?: unknown; max?: unknown }; turns?: unknown };
+type SyncBody = { worker?: { claude?: unknown; max?: unknown; load?: unknown; signedIn?: unknown }; turns?: unknown };
+/** An agent's load, checked: nothing for a kernel without pressure files, which Auto reads as not known. */
+function loadSaid(raw: unknown): WorkerInfo['load'] {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const n = (k: string) => (typeof o[k] === 'number' && o[k] >= 0 ? o[k] : null);
+  return n('cpu') === null && n('mem') === null ? null : { cpu: n('cpu'), mem: n('mem'), freeGb: n('freeGb') };
+}
 /** Each machine's syncs run one after another: an append is checked against the size read just before it, so two at once (a retry of one that timed out) could write the same bytes twice. */
 const lines = new Map<number, Promise<unknown>>();
 export function syncTurns(machineId: number, body: SyncBody): Promise<Sync> {
@@ -210,7 +220,8 @@ export function syncTurns(machineId: number, body: SyncBody): Promise<Sync> {
 }
 
 async function syncNow(machineId: number, body: SyncBody): Promise<Sync> {
-  if (body.worker) workers.set(machineId, { claude: typeof body.worker.claude === 'string' ? body.worker.claude.slice(0, 80) : null, max: Math.max(0, Math.floor(Number(body.worker.max)) || 0), at: Date.now() });
+  if (body.worker)
+    workers.set(machineId, { claude: typeof body.worker.claude === 'string' ? body.worker.claude.slice(0, 80) : null, max: Math.max(0, Math.floor(Number(body.worker.max)) || 0), at: Date.now(), load: loadSaid(body.worker.load), signedIn: typeof body.worker.signedIn === 'boolean' ? body.worker.signedIn : null });
   const turns: Record<string, SyncReply> = {};
   const held = new Set<string>();
   for (const t of (Array.isArray(body.turns) ? body.turns : []) as SyncTurn[]) {

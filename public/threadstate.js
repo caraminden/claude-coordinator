@@ -46,7 +46,8 @@ export function rowState(t, usage, now = Date.now()) {
  */
 export function workingBy(t) {
   // Nor one waiting on its start card (#1757): it hasn't run, and its card is a person's to answer.
-  if (t.status === 'running' || (t.status === 'new' && !t.parked_for && !t.start_hold && t.state !== 'parked' && !isCoordinator(t))) return 'turn';
+  // Nor one waiting for the computer it is marked for (Build 7 T4): it is blocked.
+  if (t.status === 'running' || (t.status === 'new' && !t.worker_wait?.machine && !t.parked_for && !t.start_hold && t.state !== 'parked' && !isCoordinator(t))) return 'turn';
   return t.status !== 'closed' && t.server_work ? 'server' : null;
 }
 
@@ -55,7 +56,7 @@ export const workingLabel = (t, verb = 'working') => `This ${isCoordinator(t) ? 
 
 const nth = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
 /** A minion with a turn to start and no worker yet (#1868): it shows as working, and this is its one line of truth. `hold`: a person started it now (#1957). */
-export const workerWaitLabel = (w, hold) => (hold ? (w.held ? `Waiting: ${w.held}` : 'Starting now, on a worker of its own') : w.paused ? `Waiting: ${w.paused} paused all minions` : `Waiting for a worker, ${nth(w.place)} in line`);
+export const workerWaitLabel = (w, hold) => (hold && !w.machine ? (w.held ? `Waiting: ${w.held}` : 'Starting now, on a worker of its own') : w.paused ? `Waiting: ${w.paused} paused all minions` : w.machine ? `Waiting for ${w.machine.name}: ${w.machine.why}` : `Waiting for a worker, ${nth(w.place)} in line`);
 
 /** The waits that gave their worker back (#1890), and whether too many of their wakes came cold (past 10%). */
 export function waitsLine(w) {

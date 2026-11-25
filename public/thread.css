@@ -403,7 +403,7 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
 .typing-act { display: flex; align-items: center; gap: 0.5rem; margin: 2px 0 calc(0.75rem - 2px); }
 .typing-act:empty { display: none; }
 .typing:hover .lead, .typing:focus-visible .lead { text-decoration: underline; }
-.typing.in-line .lead { text-decoration: underline dotted; text-underline-offset: 0.2em; }
+.typing.in-line .lead { text-decoration: underline dotted; text-underline-offset: 0.2em; white-space: normal; }
 .typing .lead { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .typing .queued { flex: none; font-variant-numeric: tabular-nums; }
 .typing .sep { flex: none; opacity: 0.6; }

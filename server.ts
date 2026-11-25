@@ -47,7 +47,8 @@ import { claudeConfigDir, lastEffort } from './src/sessions.ts';
 import { buildOwnerKey, SCHEMA_VERSION, Store, type Artifact, type CiNumberStep, type Project, type User } from './src/db.ts';
 import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
-import { machineLink, sameClaude, workerInfo } from './src/machine-turn.ts';
+import { MachinePools } from './src/machine-pools.ts';
+import { machineLink, workerInfo } from './src/machine-turn.ts';
 import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { shipsOn, ShipWatch } from './src/ci-ships.ts';
@@ -696,20 +697,19 @@ if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
 const ciNumbers = new CiNumbers(store);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
-// Turns on connected machines (Build 7 T2, src/machine-turn.ts). Nothing places one yet (T4 does): only CITADEL_WORKER_FORCE, for trying a worker.
+// Turns on connected machines (Build 7, src/machine-turn.ts) and the machines as places for them (src/machine-pools.ts).
 machineLink.online = (id) => machines.isOnline(id);
 machineLink.poke = (id) => machines.pokeWorker(id);
-// This box's claude, asked once: a machine whose worker has another version gets no turn (never silently run).
-const homeClaude = config.workerForce ? await new Promise<string | null>((done) => execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => done(err ? null : out.trim().split('\n')[0]))) : null;
-runner.workerFor = (_ticket, person) => {
-  const m = config.workerForce ? store.listMachines().find((x) => x.name === config.workerForce) : null;
-  // Its owner's turns only (Josh, 2026-11-25), its switch on, and a worker agent there that has said so.
-  if (!(m && person !== null && m.owner_id === person && machines.lendsWorker(m) && machines.isOnline(m.id))) return null;
-  const there = workerInfo(m.id)?.claude ?? null;
-  if (sameClaude(homeClaude, there)) return { id: m.id, name: m.name };
-  console.log(`Machine ${m.name} gets no turn: its worker's claude is ${there ?? 'unknown'}, this server's is ${homeClaude ?? 'unknown'}`);
-  return null;
-};
+runner.pools = new MachinePools({
+  store,
+  online: (id) => machines.isOnline(id),
+  lends: (m) => machines.lendsWorker(m),
+  info: workerInfo,
+  ships: (id) => machines.shipsThere(id),
+  claude: () => new Promise((done) => execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => done(err ? null : out.trim().split('\n')[0]))),
+  changed: () => runner.turnLine.pump(),
+  now: Date.now,
+});
 runner.refuseTurn = (ticket, author, from, asker) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from, asker);
 runner.placeFor = (person, warm, taskmaster) => turnPlace(store, claudeLink, person, warm, taskmaster);
 runner.accountFor = (person, warm) => claudeLink.accountFor(person, warm);
@@ -2530,6 +2530,13 @@ runner.onBudgetCard = (ticketId, question) => {
   const owner = ticket && store.minionOwner(ticket);
   const to = owner != null ? store.getUser(owner)?.name : undefined;
   if (ticket) postCard(app, ticket, { questions: [question], budget: true, ...(to ? { to } : {}) });
+};
+// A turn that can't start on the one computer its minion is marked for (Build 7 T4): its owner picks.
+runner.onRunsOnCard = (ticketId, question) => {
+  const ticket = store.getTicket(ticketId);
+  const owner = ticket && store.minionOwner(ticket);
+  const to = owner != null ? store.getUser(owner)?.name : undefined;
+  return ticket ? postCard(app, ticket, { questions: [question], runsOn: true, ...(to ? { to } : {}) }).id : null;
 };
 const routes = router(apiRoutes);
 

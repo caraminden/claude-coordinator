@@ -6,10 +6,16 @@
 // The line holds no messages: those stay in each minion's queue (src/minion-queue.ts), and a resume's wait or debt stays
 // where it was (src/resumes.ts, the queue's `owed`). An entry says only "this minion has a turn to start", so one whose
 // turn needs no starting any more is simply dropped when it comes up.
+//
+// One line, a pool per place (Build 7 T4): place 0 is perigee, any other is a connected machine's id (src/machine-pools.ts),
+// each with its own saved size and limits. Overflow only (Josh, 2026-11-25): a machine takes a turn only while perigee has no
+// free worker, and only its owner's. A minion marked for a machine (src/runs-on.ts) is the one exception: it starts there
+// whatever perigee holds, and nowhere else.
 import { HOLD } from './start-now.ts';
 import type { Store } from './db.ts';
 import type { PressureReading } from './pressure.ts';
-import { limitsOf, refuse, LIMIT_INFO, type LimitKey, type PoolBox, type PoolLimits, type SavedLimits } from './turn-limits.ts';
+import { limitsOf, MACHINE_LIMITS, refuse, LIMIT_INFO, type LimitKey, type PoolBox, type PoolLimits, type SavedLimits } from './turn-limits.ts';
+import type { Block, MachineHost, MachinePlace } from './machine-pools.ts';
 import type { RetryKind } from './turn-outcome.ts';
 import type { WorkerWait } from './worker-wait.ts';
 
@@ -23,12 +29,18 @@ export const POOL = {
   agedMs: 20 * 60_000,
   /** Waited this long (#1888), it goes first in its person's share, whatever else waits there. */
   longMs: 90 * 60_000,
+  /** A machine's size until its Auto moves it (its owner's cap is the ceiling). */
+  machineStart: 2,
+  /** A machine's load sample older than this is no reading: its size stays as it is. */
+  loadStaleMs: 60_000,
 };
 
 const LINE = 'turn-line';
 const SIZE = 'turn-pool';
 const PAUSE = 'turns-paused';
 const LIMITS = 'turn-pool-limits';
+/** A place's own copy of a pool setting; perigee's is the one from before there were places. */
+const keyOf = (key: string, place: number) => (place ? `${key}:${place}` : key);
 
 /** `via`: the auto-resume it waits to start, else its queue's turn. */
 export interface LineEntry {
@@ -147,6 +159,8 @@ export interface LineHost {
   carded(): { ticket: number; person: number }[];
   /** Who waits, or why they all do, changed. */
   changed(ids: number[]): void;
+  /** The connected machines' pools; left out, perigee is the only place. */
+  pools?: MachineHost;
   readonly gapMs: number;
   readonly detached: boolean;
 }
@@ -157,10 +171,10 @@ export class TurnLine {
   /**
    * Turns that run: the minion, how many of its lane's steps count on it (an account switch queues its resume in its turn's end), and whose
    * share. A `lent` one only waits on an approval card, so its worker is back in the pool until the answer (#1916); a `forced` one
-   * started on a worker of its own (#1957), that person's.
+   * started on a worker of its own (#1957), that person's. `place`: whose pool the worker is of.
    */
-  private granted = new Map<number, { steps: number; person: number; lent?: true; forced?: number }>();
-  private admitting: number | null = null;
+  private granted = new Map<number, { steps: number; person: number; place: number; lent?: true; forced?: number }>();
+  private admitting: { ticket: number; place: number } | null = null;
   private timer?: NodeJS.Timeout;
   /** Until a boot's resumes are in (open): the line takes turns in but starts none. */
   private closed = false;
@@ -171,19 +185,33 @@ export class TurnLine {
   private ordered: { at: number; line: Waiting[] } | null = null;
   /** The waiting turns a full container holds, as pages last heard. */
   private heldFull = '';
+  /** What each turn marked for a machine waits on there, as pages last heard. */
+  private heldThere = '';
 
   constructor(host: LineHost) {
     this.host = host;
     this.entries = host.store.getSetting<LineEntry[]>(LINE) ?? [];
   }
 
-  used(): number {
-    return [...this.granted.values()].filter((g) => !g.lent).length;
+  /** A place's workers that run a turn. */
+  used(place = 0): number {
+    return [...this.granted.values()].filter((g) => g.place === place && !g.lent).length;
+  }
+
+  /** Where a turn that holds a worker runs: 0 perigee, else a machine. */
+  placeOf(ticketId: number): number {
+    return this.granted.get(ticketId)?.place ?? 0;
+  }
+
+  /** Its machine can't take the turn it was given a worker for there: an overflow turn runs at perigee, over the size if need be. */
+  comeHome(ticketId: number) {
+    const held = this.granted.get(ticketId);
+    if (held) held.place = 0;
   }
 
   /** The minions that wait on an approval card without a worker. */
   lent(): number {
-    return this.granted.size - this.used() + this.carded().length;
+    return [...this.granted.values()].filter((g) => g.lent).length + this.carded().length;
   }
 
   /**
@@ -192,7 +220,8 @@ export class TurnLine {
    */
   setLent(ticketId: number, lent: boolean) {
     const held = this.granted.get(ticketId);
-    if (!held || !!held.lent === lent) return;
+    // A machine's worker stays with its turn: the agent there counts every live turn against its cap.
+    if (!held || held.place || !!held.lent === lent) return;
     if (lent) held.lent = true;
     else delete held.lent;
     this.ordered = null;
@@ -217,13 +246,17 @@ export class TurnLine {
   line(): Waiting[] {
     if (this.ordered && Date.now() - this.ordered.at < 1000) return this.ordered.line;
     const running = this.byPerson();
-    let rest = this.asked(this.entries);
+    // A turn that waits for its machine takes no place in front of anyone, so those stand last.
+    const there = new Set(this.entries.filter((e) => this.need(e.ticket)).map((e) => e.ticket));
+    const asked = this.asked(this.entries);
+    let rest = asked.filter((w) => !there.has(w.ticket));
     const line: Waiting[] = [];
     for (let w = pick(rest, running, Date.now()); w; w = pick(rest, running, Date.now())) {
       line.push(w);
       running.set(w.person, (running.get(w.person) ?? 0) + 1);
       rest = rest.filter((r) => r !== w);
     }
+    line.push(...asked.filter((w) => there.has(w.ticket)));
     this.ordered = { at: Date.now(), line };
     return line;
   }
@@ -231,7 +264,33 @@ export class TurnLine {
   wait(ticketId: number): WorkerWait | null {
     const entry = this.entries.find((e) => e.ticket === ticketId);
     if (!entry) return null;
-    return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null, held: this.heldBy(entry) };
+    return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null, held: this.heldBy(entry), ...this.machineWait(entry) };
+  }
+
+  /** Its waiting turn may only start on the machine it is marked for. */
+  waitsForMachine(ticketId: number): boolean {
+    return !!this.need(ticketId) && this.has(ticketId);
+  }
+
+  /** The machine a minion is marked for, or null. */
+  private need(ticketId: number): number | null {
+    return this.host.pools?.mark(ticketId) || null;
+  }
+
+  private machineWait(entry: LineEntry): Pick<WorkerWait, 'machine'> {
+    const need = this.need(entry.ticket);
+    if (!need) return {};
+    const { name, block } = this.held(need, entry);
+    return { machine: { name, why: block?.why ?? 'next there', ...(block?.never ? { never: true as const } : {}) } };
+  }
+
+  /** What keeps a turn marked for a machine from starting there now: what the machine or the turn can't do, else no free worker. */
+  private held(need: number, entry: LineEntry): { name: string; block: Block | null } {
+    const pools = this.host.pools!;
+    const m = pools.machines().find((x) => x.id === need);
+    const block = pools.takes(need, entry.ticket, entry.via) ?? m?.block ?? null;
+    const [used, size] = [this.used(need), this.size(need)];
+    return { name: pools.nameOf(need, entry.ticket), block: block ?? (used >= size ? { why: `busy: ${used} of ${size} worker${size === 1 ? '' : 's'}` } : null) };
   }
 
   /** Why a waiting turn wouldn't start even on a worker of its own, in words; it starts by itself once that clears. */
@@ -239,6 +298,11 @@ export class TurnLine {
     const paused = this.paused();
     if (paused) return `${paused.by} paused all minions`;
     if (this.closed || this.host.detached) return 'Citadel is restarting';
+    const need = this.need(entry.ticket);
+    if (need) {
+      const { name, block } = this.held(need, entry);
+      return block && `it runs only on ${name}: ${block.why}`;
+    }
     if (this.stalled.size && this.full(this.host.asks(entry.ticket, entry.via).person)) return 'the container it runs in is at its memory limit';
     const hold = this.host.forced(entry.ticket);
     return hold && this.forcedFor(entry.ticket) === null ? `${HOLD.each} turns ${hold.by} started now are still running` : null;
@@ -256,7 +320,10 @@ export class TurnLine {
   force(ticketId: number) {
     this.reordered();
     const entry = this.entries.find((e) => e.ticket === ticketId);
-    if (entry && this.admitting === null && !this.host.busy(ticketId) && !this.heldBy(entry)) this.admit(entry);
+    if (!entry) return;
+    // A machine's size and its owner's cap hold for everyone: there it only goes first.
+    if (this.need(ticketId)) return this.pumpIn(0);
+    if (this.admitting === null && !this.host.busy(ticketId) && !this.heldBy(entry)) this.admit(entry, 0);
   }
 
   /** Those whose process has ended too; one still ending counts as its turn. */
@@ -284,32 +351,40 @@ export class TurnLine {
     return [...out.values()].map((p) => (this.full(p.person) ? { ...p, stalled: true as const } : p)).sort((a, b) => all(b) - all(a) || a.person - b.person);
   }
 
-  pool(): PoolSize {
-    return this.host.store.getSetting<PoolSize>(SIZE) ?? { size: POOL.start, at: 0 };
+  pool(place = 0): PoolSize {
+    return this.host.store.getSetting<PoolSize>(keyOf(SIZE, place)) ?? { size: place ? POOL.machineStart : POOL.start, at: 0 };
   }
 
-  size(): number {
-    const p = this.pool();
-    return p.fixed?.size ?? p.size;
+  /** A machine's is never over its owner's cap, which its agent holds too. */
+  size(place = 0): number {
+    if (!place) return this.pool().fixed?.size ?? this.pool().size;
+    const m = this.host.pools?.machines().find((x) => x.id === place);
+    return m ? this.sizeOf(m) : 0;
   }
 
-  /** The limits Auto steers by: the saved changes over the defaults. */
-  limits(): PoolLimits {
-    return limitsOf(this.host.store.getSetting<SavedLimits>(LIMITS));
+  /** On Auto with no word of its load (an agent from before it said it), it holds at its fewest. */
+  private sizeOf(m: MachinePlace): number {
+    const p = this.pool(m.id);
+    return Math.min(p.fixed?.size ?? (this.loadOf(m) ? p.size : this.limits(m.id).min), m.cap);
   }
 
-  savedLimits(): SavedLimits {
-    return this.host.store.getSetting<SavedLimits>(LIMITS) ?? { values: {}, by: {} };
+  /** The limits Auto steers a place by: the saved changes over the defaults. */
+  limits(place = 0): PoolLimits {
+    return limitsOf(this.savedLimits(place), place ? MACHINE_LIMITS : undefined);
+  }
+
+  savedLimits(place = 0): SavedLimits {
+    return this.host.store.getSetting<SavedLimits>(keyOf(LIMITS, place)) ?? { values: {}, by: {} };
   }
 
   /**
    * People's changes: a number sets that limit, null puts back its default. All or none: a set that can't be used throws the reason.
    * Each one is a health event, so the Status graphs can be read against it.
    */
-  setLimits(changes: Partial<Record<LimitKey, number | null>>, by: string, now = Date.now()) {
-    const saved = this.savedLimits();
+  setLimits(changes: Partial<Record<LimitKey, number | null>>, by: string, now = Date.now(), place = 0) {
+    const saved = this.savedLimits(place);
     const next: SavedLimits = { values: { ...saved.values }, by: { ...saved.by } };
-    const before = this.limits();
+    const before = this.limits(place);
     const lines: string[] = [];
     for (const i of LIMIT_INFO) {
       const v = changes[i.key];
@@ -318,25 +393,60 @@ export class TurnLine {
       else next.values[i.key] = v;
       next.by[i.key] = { by, at: now };
     }
-    const after = limitsOf(next);
+    const after = limitsOf(next, place ? MACHINE_LIMITS : undefined);
     const why = refuse(after);
     if (why) throw new Error(why);
     for (const i of LIMIT_INFO) if (changes[i.key] !== undefined && before[i.key] !== after[i.key]) lines.push(`${i.label}: ${before[i.key]} to ${after[i.key]} ${i.unit}`);
     if (!lines.length) return;
-    this.host.store.setSetting(LIMITS, next);
-    this.host.store.addHealthEvent('pool-limits', now, null, `${by} changed the worker pool's limits. ${lines.join('; ')}`);
+    this.host.store.setSetting(keyOf(LIMITS, place), next);
+    const whose = place ? `the limits of ${this.host.pools?.nameOf(place) ?? `machine ${place}`}'s workers` : "the worker pool's limits";
+    this.host.store.addHealthEvent('pool-limits', now, null, `${by} changed ${whose}. ${lines.join('; ')}`);
     this.pump();
   }
 
   /** What the Workers tile shows (src/routes/workers.ts). */
   summary() {
-    return { used: this.used(), lent: this.lent(), running: this.granted.size, forced: [...this.granted.values()].filter((g) => g.forced !== undefined && !g.lent).length, size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people() };
+    return { used: this.used(), lent: this.lent(), running: this.granted.size, forced: [...this.granted.values()].filter((g) => g.forced !== undefined && !g.lent).length, size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people(), machines: this.machinePools() };
+  }
+
+  /** Each machine that lends workers, as the tile's rows have it. */
+  private machinePools() {
+    return (this.host.pools?.machines() ?? []).map((m) => {
+      const L = this.limits(m.id);
+      const load = this.loadOf(m);
+      // At its fewest, a shrink has nothing to take away: the row says what it can't give way to.
+      const pressed = load && starvedBy(load.reading, load.box, L) ? starveWhy(load.reading, load.box, L) : null;
+      return {
+        id: m.id,
+        name: m.name,
+        owner: m.owner,
+        used: this.used(m.id),
+        size: this.sizeOf(m),
+        cap: m.cap,
+        pool: this.pool(m.id),
+        min: Math.min(L.min, m.cap),
+        max: Math.min(L.max, m.cap),
+        waiting: this.entries.filter((e) => this.need(e.ticket) === m.id).length,
+        block: m.block?.why ?? null,
+        away: m.away,
+        pressed,
+      };
+    });
+  }
+
+  private loadOf(m: MachinePlace, now = Date.now()) {
+    return m.load && now - m.load.at < POOL.loadStaleMs ? m.load : null;
+  }
+
+  /** A machine was removed: its number may come to another. */
+  forget(place: number) {
+    for (const key of [SIZE, LIMITS]) this.host.store.deleteSetting(keyOf(key, place));
   }
 
   /** A person's number, or null for Auto. */
-  setSize(size: number | null, by: string) {
-    const { fixed: _, ...p } = this.pool();
-    this.host.store.setSetting(SIZE, size === null ? p : { ...p, fixed: { size, by } });
+  setSize(size: number | null, by: string, place = 0) {
+    const { fixed: _, ...p } = this.pool(place);
+    this.host.store.setSetting(keyOf(SIZE, place), size === null ? p : { ...p, fixed: { size, by } });
     this.pump();
   }
 
@@ -352,12 +462,37 @@ export class TurnLine {
       this.heldFull = full.join();
       this.host.changed(this.waiting());
     }
+    this.tickMachines(now);
     this.pumpIn(0);
     if (p.fixed) return;
-    const size = nextSize({ ...p, used: this.used(), waiting: this.entries.length }, reading, box, this.limits(), now);
+    const size = nextSize({ ...p, used: this.used(), waiting: this.entries.filter((e) => !this.need(e.ticket)).length }, reading, box, this.limits(), now);
     if (size === p.size) return;
     this.host.store.setSetting(SIZE, { size, at: now, why: size < p.size ? starveWhy(reading, box, this.limits()) : 'perigee is calm and turns wait' });
     this.pump();
+  }
+
+  /** Auto's step in each machine's pool, by that machine's own samples, and a look at the turns that wait for one. */
+  private tickMachines(now: number) {
+    const pools = this.host.pools;
+    if (!pools) return;
+    for (const m of pools.machines()) {
+      const p = this.pool(m.id);
+      const load = this.loadOf(m, now);
+      if (p.fixed || m.block || !m.cap || !load) continue;
+      const L = this.limits(m.id);
+      const capped = { ...L, min: Math.min(L.min, m.cap), max: Math.min(L.max, m.cap) };
+      const size = nextSize({ ...p, used: this.used(m.id), waiting: this.ready(m).length }, load.reading, load.box, capped, now);
+      if (size !== p.size) this.host.store.setSetting(keyOf(SIZE, m.id), { size, at: now, why: starvedBy(load.reading, load.box, L) ? `${starveWhy(load.reading, load.box, L)} there` : size < p.size ? 'its most was lowered' : `${m.name} is calm and turns wait` } satisfies PoolSize);
+    }
+    const held = this.entries.flatMap((e) => {
+      const need = this.need(e.ticket);
+      return need ? [{ e, ...this.held(need, e) }] : [];
+    });
+    for (const { e, block } of held) if (block) pools.stuck(e.ticket, e.since, block);
+    const said = held.map(({ e, block }) => `${e.ticket} ${block?.why}`).join('\n');
+    if (said === this.heldThere) return;
+    this.heldThere = said;
+    this.host.changed(held.map(({ e }) => e.ticket));
   }
 
   paused(): Pause | null {
@@ -386,19 +521,37 @@ export class TurnLine {
       held.steps++;
       return true;
     }
-    if (this.admitting === ticketId) return this.grant(ticketId, via);
+    if (this.admitting?.ticket === ticketId) return this.grant(ticketId, via, this.admitting.place);
     const own = this.entries.find((e) => e.ticket === ticketId);
     // Its queue's turn never goes before the resume it waits for: the resume takes the queue along.
-    const forced = this.forcedFor(ticketId) !== null;
-    const first = !paused && !this.closed && !this.host.busy(ticketId) && (forced || this.used() < this.size()) && !(own?.via && !via) && !this.full(this.host.asks(ticketId, via).person);
-    if (first) {
-      if (forced) return this.grant(ticketId, via);
-      const me = own ?? { ticket: ticketId, since: Date.now(), via };
-      const rest = this.ready().filter((e) => e.ticket !== ticketId);
-      if (!rest.length || this.best([me, ...rest])?.ticket === ticketId) return this.grant(ticketId, via);
+    if (!paused && !this.closed && !this.host.busy(ticketId) && !(own?.via && !via)) {
+      const place = this.placeFor(own ?? { ticket: ticketId, since: Date.now(), via }, via);
+      if (place !== null) return this.grant(ticketId, via, place);
     }
     this.join(ticketId, via);
     return false;
+  }
+
+  /** Where a turn can start at this moment, or null: it waits. */
+  private placeFor(me: LineEntry, via?: RetryKind): number | null {
+    const first = (ready: LineEntry[]) => {
+      const rest = ready.filter((e) => e.ticket !== me.ticket);
+      return !rest.length || this.best([me, ...rest])?.ticket === me.ticket;
+    };
+    const mark = this.host.pools?.mark(me.ticket) ?? null;
+    const free = this.used() < this.size();
+    if (!mark) {
+      const full = this.full(this.host.asks(me.ticket, via).person);
+      if (!full && this.forcedFor(me.ticket) !== null) return 0;
+      if (free) return !full && first(this.ready()) ? 0 : null;
+    }
+    const there = mark === 0 ? undefined : this.machines().find((m) => (!mark || m.id === mark) && !this.host.pools!.takes(m.id, me.ticket, via) && first(this.ready(m)));
+    return there?.id ?? null;
+  }
+
+  /** The machines a turn can start on now: nothing holds them and a worker there is free. */
+  private machines(): MachinePlace[] {
+    return (this.host.pools?.machines() ?? []).filter((m) => !m.block && this.used(m.id) < this.sizeOf(m));
   }
 
   /** The waiting turns' places changed under the line (a drag, an Urgent tag). */
@@ -413,7 +566,7 @@ export class TurnLine {
     const own = this.entries.find((e) => e.ticket === ticketId);
     if (!own) this.save([...this.entries, { ticket: ticketId, since: Date.now(), ...(via ? { via } : {}) }]);
     else if (via && own.via !== via) this.save(this.entries.map((e) => (e === own ? { ...own, via } : e)));
-    if (this.used() < this.size() || this.forcedFor(ticketId) !== null) this.pumpIn(0);
+    if (this.used() < this.size() || this.forcedFor(ticketId) !== null || this.host.pools?.machines().length) this.pumpIn(0);
   }
 
   /** Forget the line, the pause and the pool's size: a boot check's or a preview's copied database mustn't start the live minions' turns, or wait on their pause. */
@@ -436,9 +589,9 @@ export class TurnLine {
   }
 
   /** A turn the last server left running holds its worker, over the size if need be. */
-  reattach(ticketId: number, step: () => unknown): unknown {
+  reattach(ticketId: number, step: () => unknown, place = 0): unknown {
     if (this.host.exempt(ticketId)) return step();
-    this.grant(ticketId);
+    this.grant(ticketId, undefined, place);
     return this.hold(ticketId, step);
   }
 
@@ -465,12 +618,16 @@ export class TurnLine {
     if (!this.entries.length || this.paused()) return;
     const ready = this.ready();
     const entry = this.best(this.used() < this.size() ? ready : ready.filter((e) => this.forcedFor(e.ticket) !== null));
-    if (entry) this.admit(entry);
+    if (entry) return this.admit(entry, 0);
+    for (const m of this.machines()) {
+      const there = this.best(this.ready(m));
+      if (there) return this.admit(there, m.id);
+    }
   }
 
-  private admit(entry: LineEntry) {
+  private admit(entry: LineEntry, place: number) {
     this.save(this.entries.filter((e) => e.ticket !== entry.ticket));
-    this.admitting = entry.ticket;
+    this.admitting = { ticket: entry.ticket, place };
     try {
       this.host.start(entry);
     } catch (err) {
@@ -494,12 +651,12 @@ export class TurnLine {
     this.timer.unref();
   }
 
-  private grant(ticketId: number, via?: RetryKind): true {
+  private grant(ticketId: number, via?: RetryKind, place = 0): true {
     const held = this.granted.get(ticketId);
     if (held) {
       held.steps++;
       delete held.lent;
-    } else this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, forced: this.forcedFor(ticketId) ?? undefined });
+    } else this.granted.set(ticketId, { steps: 1, person: this.host.asks(ticketId, via).person, place, forced: place ? undefined : (this.forcedFor(ticketId) ?? undefined) });
     this.leave(ticketId);
     return true;
   }
@@ -512,13 +669,20 @@ export class TurnLine {
     this.pumpIn(0);
   }
 
-  private ready(): LineEntry[] {
-    return this.entries.filter((e) => !this.host.busy(e.ticket) && !(this.stalled.size && this.full(this.host.asks(e.ticket, e.via).person)));
+  /** The waiting turns that could start in a place: at perigee all but those marked for a machine, on a machine those marked for it and, while perigee has no free worker, any it may take. */
+  private ready(m?: MachinePlace): LineEntry[] {
+    const idle = this.entries.filter((e) => !this.host.busy(e.ticket));
+    if (!m) return idle.filter((e) => !this.need(e.ticket) && !(this.stalled.size && this.full(this.host.asks(e.ticket, e.via).person)));
+    const over = this.used() >= this.size();
+    return idle.filter((e) => {
+      const mark = this.host.pools!.mark(e.ticket);
+      return (mark === m.id || (mark === null && over)) && !this.host.pools!.takes(m.id, e.ticket, e.via);
+    });
   }
 
   /** Their container is out of memory with a turn of theirs in it, so another would only stall it more; with none running, one may start. */
   private full(person: number): boolean {
-    return this.stalled.has(person) && [...this.granted.values()].some((g) => g.person === person && !g.lent);
+    return this.stalled.has(person) && [...this.granted.values()].some((g) => g.person === person && !g.place && !g.lent);
   }
 
   private best(entries: LineEntry[]): LineEntry | null {
@@ -532,7 +696,8 @@ export class TurnLine {
 
   private byPerson(): Map<number, number> {
     const running = new Map<number, number>();
-    for (const g of this.granted.values()) if (!g.lent) running.set(g.person, (running.get(g.person) ?? 0) + 1);
+    // A machine's workers are its owner's own, so they take nothing from that person's share of perigee's.
+    for (const g of this.granted.values()) if (!g.lent && !g.place) running.set(g.person, (running.get(g.person) ?? 0) + 1);
     return running;
   }
 

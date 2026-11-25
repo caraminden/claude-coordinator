@@ -614,6 +614,19 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-workers-act select { width: auto; margin: 0; padding-block: var(--space-1); font-size: 0.82em; }
 .st-workers-act .cui-btn { min-width: 9.5rem; margin: 0; }
 .st-line-rows { min-height: 7.5rem; align-content: start; }
+/* A row per place that runs turns (Build 7 T4): perigee, then each connected computer. */
+.st-places { margin-block: var(--space-2); }
+.st-place { display: grid; gap: var(--space-1); padding: var(--space-2) var(--space-3); border-radius: 7px; border-left: 3px solid var(--h); background: color-mix(in srgb, var(--h) 6%, var(--panel)); }
+.st-place-head { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.st-place .meter-text { min-width: 8.5rem; }
+.runs-on-opt { display: flex; gap: var(--space-3); align-items: flex-start; margin: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.runs-on-opt input { width: auto; margin: var(--space-1) 0 0; }
+.runs-on-opt > span { display: grid; min-width: 0; }
+.runs-on-opt b { color: var(--ink); }
+.runs-on-opt.off { cursor: default; opacity: 0.65; }
+.st-place-act label { display: inline-flex; gap: var(--space-2); align-items: center; margin: 0; }
+.st-place-act select { width: auto; margin: 0; padding-block: var(--space-1); font-size: 0.82em; }
+.st-place-act .st-limits { margin-block: var(--space-1) 0; }
 /* The line for a worker (worker-line.js, #1889): a drawer from the right, full height, nearly the whole of a phone. */
 .line-drawer { width: min(29rem, 94vw); height: calc(100dvh - var(--cui-dialog-top)); max-height: none; margin: 0 0 0 auto; border-width: 0 0 0 1px; border-radius: 0; animation: line-drawer-in 0.18s ease-out; }
 /* It reaches the window's edge: the page's scrollbar room goes, and the page behind keeps its width. */

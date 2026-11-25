@@ -18,6 +18,7 @@ import type { MinionQueue } from './minion-queue.ts';
 import type { Resumes } from './resumes.ts';
 import type { LinePlaces } from './line-place.ts';
 import type { TurnLine } from './turn-line.ts';
+import type { RunsOn } from './runs-on.ts';
 import type { Urgent } from './urgent.ts';
 import { contextKey, windowKey, shippedKey, closeCancelledKey, turnKey, talkedKey, commandsKey } from './turn-keys.ts';
 import type { Broadcast, TurnState } from './runner.ts';
@@ -28,6 +29,7 @@ export interface ClosingDeps {
   queue: MinionQueue;
   lanes: Lanes;
   turnLine: TurnLine;
+  runsOn: Pick<RunsOn, 'over'>;
   urgent: Urgent;
   places: LinePlaces;
   resumes: Resumes;
@@ -167,6 +169,7 @@ export class Closing {
 
   private dropQueue(ticketId: number, keepHeld = false) {
     this.d.turnLine.leave(ticketId);
+    this.d.runsOn.over(ticketId);
     this.d.urgent.done(ticketId);
     this.d.endStartNow(ticketId);
     this.d.places.refused(ticketId, false);

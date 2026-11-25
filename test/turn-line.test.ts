@@ -8,6 +8,8 @@ import { Store } from '../src/db.ts';
 import { workerRoutes } from '../src/routes/workers.ts';
 import { stormPeople } from '../src/memory-storms.ts';
 import type { WaitEnded } from '../src/minion-jobs.ts';
+import { codexSwitchKey } from '../src/codex.ts';
+import { MachinePools } from '../src/machine-pools.ts';
 import { Runner } from '../src/runner.ts';
 import { lines, stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
@@ -62,7 +64,7 @@ const josh = store.createUser({ name: 'Josh', login: 'josh' });
 store.addMember(project.id, cara.id);
 store.addMember(project.id, josh.id);
 
-const inside = (r: Runner) => r as unknown as { turns: Map<number, { dir: string }>; launchTurn: () => Promise<unknown> };
+const inside = (r: Runner) => r as unknown as { turns: Map<number, { dir: string }>; lanes: { busy(id: number): boolean }; launchTurn: () => Promise<unknown> };
 
 const sent: { type: string; line?: unknown }[] = [];
 function makeRunner() {
@@ -1025,4 +1027,79 @@ test('a stop while waiting for a worker tells the outbox which queued messages i
   await idle(b);
   await idle(a);
   runner.onStop = () => [];
+});
+
+/** Cara's machine, lent to the scheme, with a ship starting on it between the line giving a turn a worker there and the turn's launch. */
+async function shipsAsItStarts() {
+  const m = store.listMachines()[0] ?? store.createMachine('desk', 'h', 'Cara', cara.id);
+  store.setMachineProjects(m.id, [project.id]);
+  const s = { ships: false };
+  const pools = new MachinePools({ store, online: () => true, lends: () => true, info: () => ({ claude: '1', max: 1, at: Date.now(), load: { cpu: 0, mem: 0, freeGb: 9 } }), ships: () => s.ships, claude: () => Promise.resolve('1'), changed: () => {}, now: Date.now });
+  pools.launch = (...a) => {
+    s.ships = true;
+    return MachinePools.prototype.launch.apply(pools, a);
+  };
+  runner.pools = pools;
+  await until('its claude', () => pools.machines()[0].block === null);
+  return { desk: { machine: m.id, name: m.name }, m, s };
+}
+
+test('an overflow turn whose machine went as it started runs at perigee; one marked for it waits with its messages (Build 7 T4)', async (t) => {
+  t.after(() => (runner.pools = null));
+  const { desk, s } = await shipsAsItStarts();
+  runner.turnLine.setSize(1, 'Cara');
+  const [a, b, c, j] = [minion(), minion(), minion(), minion()];
+  say(a);
+  await started(a);
+  say(j, 'hello', 'Josh');
+  assert.equal(runner.turnLine.has(j), true, "not Josh's machine");
+  runner.stop(j);
+  say(b);
+  await started(b);
+  assert.deepEqual([runner.turnLine.placeOf(b), runner.turnLine.used()], [0, 2], 'home, over the size');
+  s.ships = false;
+  runner.runsOn.set(c, desk, 'Cara');
+  say(c, 'kept words');
+  await until('it to be back in line', () => s.ships && runner.turnLine.has(c) && !inside(runner).lanes.busy(c));
+  assert.equal(turnsOf(c).length, 0);
+  const view = runner.view(store.getTicket(c)!);
+  assert.deepEqual([view.state, view.note, view.status === 'running'], ['blocked', "Waiting for desk: a ship's tests are running there", false]);
+  runner.runsOn.set(c, null, 'Cara');
+  end(a);
+  end(b);
+  await started(c);
+  assert.match(turnsOf(c)[0], /kept words/);
+});
+
+test('a killed turn marked for a machine that went keeps its resume in the line', async (t) => {
+  t.after(() => (runner.pools = null));
+  const { desk, s } = await shipsAsItStarts();
+  const a = minion();
+  say(a);
+  await started(a);
+  runner.runsOn.set(a, desk, 'Cara');
+  const live = inside(runner).turns.get(a)!;
+  await until('its pid', () => existsSync(join(live.dir, 'pid.json')));
+  const pids = JSON.parse(readFileSync(join(live.dir, 'pid.json'), 'utf8'));
+  process.kill(pids.wrapper, 'SIGKILL');
+  process.kill(-pids.claude, 'SIGKILL');
+  await until('the resume to be back in line', () => s.ships && runner.turnLine.has(a) && !inside(runner).lanes.busy(a));
+  assert.equal(turnsOf(a).length, 1);
+  runner.runsOn.set(a, null, 'Cara');
+  await until('the resume', () => turnsOf(a).length === 2);
+  assert.match(turnsOf(a)[1], /was killed/);
+});
+
+test('a turn on Codex marked for a machine waits, and says it runs at perigee only', async (t) => {
+  t.after(() => (runner.pools = null));
+  const { desk } = await shipsAsItStarts();
+  const a = minion();
+  runner.runsOn.set(a, desk, 'Cara');
+  store.setSetting(codexSwitchKey(cara.id), true);
+  t.after(() => store.deleteSetting(codexSwitchKey(cara.id)));
+  t.mock.method(runner as unknown as { codexWhy: () => string | null }, 'codexWhy', () => null);
+  say(a);
+  await until('it to wait', () => runner.view(store.getTicket(a)!).worker_wait);
+  assert.deepEqual(runner.view(store.getTicket(a)!).worker_wait!.machine, { name: 'desk', why: 'its next turn is on Codex, which runs at perigee only', never: true });
+  runner.stop(a);
 });

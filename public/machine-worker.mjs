@@ -21,6 +21,8 @@ import { isAbsolute, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SYNC_MS = 500;
+const LOAD_MS = 10_000;
+const SIGNED_IN_MS = 5 * 60_000;
 /** The most of one file's new bytes in one sync: a long stream catches up over several. */
 const CHUNK = 2_000_000;
 const APPENDED = ['stream.jsonl', 'stderr.log'];
@@ -64,6 +66,21 @@ export function containerArgs(cfg, launch, extraMounts = []) {
 /** @param {string} cmd @param {string[]} args @param {number} [timeout] @returns {Promise<{ code: number, out: string, err: string }>} */
 const run = (cmd, args, timeout = 60_000) => new Promise((done) => execFile(cmd, args, { timeout, maxBuffer: 4 << 20 }, (err, out, stderr) => done({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(stderr || err?.message || '') })));
 
+/** How pressed this computer is: "some avg60" of its CPU and memory as whole percents (no kernel pressure files: null), and free memory in GB. */
+export function hostLoad(read = (/** @type {string} */ file) => readFileSync(file, 'utf8')) {
+  /** @param {string} file @param {RegExp} what */
+  const number = (file, what) => {
+    try {
+      return Number(read(file).match(what)?.[1] ?? NaN);
+    } catch {
+      return NaN;
+    }
+  };
+  const or = (/** @type {number} */ n) => (Number.isNaN(n) ? null : n);
+  const pressure = (/** @type {string} */ kind) => or(Math.round(number(`/proc/pressure/${kind}`, /^some .*avg60=([\d.]+)/m)));
+  return { cpu: pressure('cpu'), mem: pressure('memory'), freeGb: or(Math.round(number('/proc/meminfo', /^MemAvailable:\s+(\d+)/m) / 104858) / 10) };
+}
+
 const size = (/** @type {string} */ file) => {
   try {
     return statSync(file).size;
@@ -95,6 +112,9 @@ export class Worker {
     /** @type {Map<string, Turn>} */
     this.turns = new Map();
     this.claude = null;
+    this.load = { at: 0, now: hostLoad() };
+    /** @type {{ at: number, now: boolean | null }} */
+    this.signedIn = { at: 0, now: null };
     this.busy = false;
     this.again = false;
     this.port = 0;
@@ -171,7 +191,7 @@ export class Worker {
   async sync() {
     const turns = [...this.turns.values()].map((t) => this.report(t));
     const claude = this.claude;
-    const res = await this.call('/api/machines/turns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ worker: { claude, max: this.cfg.max }, turns: turns.map((r) => r.body) }), signal: AbortSignal.timeout(30_000) });
+    const res = await this.call('/api/machines/turns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ worker: { claude, max: this.cfg.max, ...this.facts() }, turns: turns.map((r) => r.body) }), signal: AbortSignal.timeout(30_000) });
     if (!res.ok) throw new Error(`it answered ${res.status}`);
     this.said = null;
     // Said once the app has it: with another version than the app's own claude, no turn comes here.
@@ -341,6 +361,27 @@ export class Worker {
     const r = await this.exec(podman, ['run', '-d', ...args], 15 * 60_000);
     if (r.code) throw new Error(`the worker container did not start: ${r.err.trim().split('\n').pop()}`);
     await this.version(['exec', container]);
+  }
+
+  /** Its load and sign-in, for the app's placement: each read again as it ages, on the sync that finds it old. */
+  facts(now = Date.now()) {
+    if (now - this.load.at >= LOAD_MS) this.load = { at: now, now: hostLoad() };
+    if (now - this.signedIn.at >= SIGNED_IN_MS) {
+      this.signedIn.at = now;
+      void this.checkSignIn();
+    }
+    return { load: this.load.now, signedIn: this.signedIn.now };
+  }
+
+  /** Whether the worker's home volume holds a Claude sign-in: that the file is there, never what is in it. */
+  async checkSignIn() {
+    const { podman, container, image } = this.cfg;
+    const has = await this.exec(podman, ['volume', 'ls', '-q', '--filter', `name=^${container}-home$`]);
+    if (has.code) return void (this.signedIn.now = null);
+    if (!has.out.trim()) return void (this.signedIn.now = false);
+    // Words, not an exit code: a podman that failed or timed out says nothing about the sign-in.
+    const said = (await this.exec(podman, ['run', '--rm', '--userns=keep-id', '-v', `${container}-home:/h:ro`, image, 'sh', '-c', 'test -s /h/.claude/.credentials.json && echo yes || echo no'])).out.trim();
+    this.signedIn.now = said === 'yes' ? true : said === 'no' ? false : null;
   }
 
   /** `claude --version` there, by `podman <how…>`. @param {string[]} how */

@@ -45,7 +45,10 @@ export interface SavedLimits {
   by: Partial<Record<LimitKey, { by: string; at: number }>>;
 }
 
-export const limitsOf = (saved: SavedLimits | null | undefined): PoolLimits => ({ ...DEFAULT_LIMITS, ...saved?.values });
+/** A connected machine's defaults (Build 7 T4): it may shrink to one worker, as its pressure counts its CI's load too. */
+export const MACHINE_LIMITS: PoolLimits = { ...DEFAULT_LIMITS, min: 1 };
+
+export const limitsOf = (saved: SavedLimits | null | undefined, defaults = DEFAULT_LIMITS): PoolLimits => ({ ...defaults, ...saved?.values });
 
 /** Why this set can't be used, or null. */
 export function refuse(l: PoolLimits): string | null {

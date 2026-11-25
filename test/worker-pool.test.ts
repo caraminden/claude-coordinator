@@ -8,6 +8,7 @@ import { until } from './wait.ts';
 import { nextSize as size, pick, POOL, TurnLine, type Waiting } from '../src/turn-line.ts';
 import { DEFAULT_LIMITS as L, refuse } from '../src/turn-limits.ts';
 import { Store } from '../src/db.ts';
+import type { Block, MachineHost, MachinePlace } from '../src/machine-pools.ts';
 import type { PoolBox } from '../src/turn-limits.ts';
 
 const ok: PoolBox = { freeGb: 16, level: 'ok' };
@@ -197,7 +198,7 @@ test('past that, a share is in proportion to what a person has running and waiti
 test('an empty line picks nothing', () => assert.equal(pick([], new Map(), 0), null));
 
 /** A line with no Runner: `started` is who it started, `saved` its settings. */
-function line(saved: Record<string, unknown> = {}) {
+function line(saved: Record<string, unknown> = {}, pools?: MachineHost) {
   const busy = new Set<number>();
   const started: number[] = [];
   const stopped: number[] = [];
@@ -216,6 +217,7 @@ function line(saved: Record<string, unknown> = {}) {
     carded: () => [],
     gapMs: 0,
     detached: false,
+    pools,
   });
   return { turns, busy, started, stopped, saved };
 }
@@ -337,4 +339,163 @@ test('saved limits steer at once, record who and when, a health event each, and 
 test('a most under the size, or a fewest over it, pulls the size in on the next tick', () => {
   assert.equal(nextSize({ ...full, size: 20, used: 3 }, { cpu: 5, mem: 0 }, 1_000, ok, { ...L, max: 12 }), 12);
   assert.equal(nextSize({ ...full, size: 5, used: 5 }, { cpu: 5, mem: 0 }, 1_000, ok, { ...L, min: 8 }), 8);
+});
+
+// Build 7 T4: a pool per place. Josh, 2026-11-25: "I just want to be able to increase the worker pool by connecting more
+// machines", and his pick "overflow only"; Cara the same day: a minion marked as needing one machine.
+const DESK = 7;
+function places(saved: Record<string, unknown> = {}) {
+  const desk: MachinePlace = { id: DESK, name: 'desk', owner: 1, cap: 3, block: null, away: null, load: { reading: { cpu: 10, mem: 0 }, box: ok, at: Date.now() } };
+  const marks = new Map<number, number>();
+  const never = new Set<number>();
+  const stuck: { ticket: number; block: Block }[] = [];
+  const l = line(saved, {
+    machines: () => [desk],
+    mark: (id) => marks.get(id) ?? null,
+    nameOf: () => 'desk',
+    takes: (_m, id) => (never.has(id) ? { why: 'not lent', never: true } : null),
+    stuck: (ticket, _since, block) => void stuck.push({ ticket, block }),
+  });
+  l.turns.setSize(1, 'Cara');
+  return { ...l, desk, marks, never, stuck, at: (id: number) => l.turns.placeOf(id) };
+}
+
+test('a machine takes a turn only when perigee has no free worker, up to its own size', () => {
+  const p = places();
+  assert.deepEqual([p.turns.enter(1), p.at(1)], [true, 0], 'perigee first');
+  assert.deepEqual([p.turns.enter(2), p.at(2)], [true, DESK], 'perigee is full: the machine');
+  assert.deepEqual([p.turns.enter(3), p.at(3)], [true, DESK]);
+  assert.deepEqual([p.turns.enter(4), p.turns.has(4)], [false, true], 'both are full (Auto starts a machine at 2)');
+  assert.deepEqual([p.turns.used(), p.turns.used(DESK), p.turns.size(DESK)], [1, 2, 2], 'each place counts its own');
+  p.turns.stop();
+});
+
+test('a machine never runs one the turn may not, nor one while something holds the machine', () => {
+  const p = places();
+  p.turns.enter(1);
+  p.never.add(2);
+  assert.equal(p.turns.enter(2), false, "not its owner's, not lent, home only");
+  p.marks.set(3, 0);
+  assert.equal(p.turns.enter(3), false, 'perigee only');
+  p.desk.block = { why: "a ship's tests are running there" };
+  assert.equal(p.turns.enter(4), false);
+  p.turns.stop();
+});
+
+test('a waiting turn goes to a machine as its worker frees, and home when perigee frees first', async () => {
+  const p = places();
+  p.desk.cap = 1;
+  for (const id of [1, 2, 3, 4]) p.turns.enter(id);
+  assert.deepEqual([p.at(1), p.at(2)], [0, DESK]);
+  await p.turns.hold(2, () => {});
+  await until('the third turn to start there', () => p.started.includes(3));
+  assert.equal(p.at(3), DESK);
+  await p.turns.hold(1, () => {});
+  await until('the fourth to start at perigee', () => p.started.includes(4));
+  assert.equal(p.at(4), 0);
+});
+
+test("a size over the owner's cap starts nothing more, and no word of its load holds Auto at its fewest", () => {
+  const p = places();
+  p.turns.setSize(9, 'Cara', DESK);
+  assert.equal(p.turns.size(DESK), 3);
+  p.turns.setSize(null, 'Cara', DESK);
+  assert.equal(p.turns.size(DESK), 2);
+  p.desk.load = null;
+  assert.equal(p.turns.size(DESK), 1, 'unknown is never zero load');
+  p.desk.load = { reading: { cpu: 0, mem: 0 }, box: ok, at: Date.now() - POOL.loadStaleMs - 1 };
+  assert.equal(p.turns.size(DESK), 1, 'nor is an old reading');
+  p.desk.cap = 0;
+  assert.equal(p.turns.size(DESK), 0, 'no cap said yet');
+});
+
+test("Auto sizes a machine on its own pressure, leaves perigee's alone, and says what it can't give way to", () => {
+  const p = places({ 'turn-pool': { size: 10, at: 0 } });
+  const now = Date.now();
+  p.turns.setSize(1, 'Cara');
+  const tick = (cpu: number, at: number) => {
+    p.desk.load = { reading: { cpu, mem: 0 }, box: ok, at };
+    p.turns.tick(calm, [], at, ok);
+  };
+  const why = () => p.turns.summary().machines[0].pool.why;
+  for (const id of [1, 2, 3, 4]) p.turns.enter(id);
+  tick(10, now + 60_000);
+  assert.deepEqual([p.turns.size(DESK), why()], [3, 'desk is calm and turns wait']);
+  tick(60, now + 120_000);
+  tick(60, now + 180_000);
+  tick(60, now + 240_000);
+  assert.deepEqual([p.turns.pool(DESK).size, why()], [1, 'CPU pressure 60% there'], 'down to its fewest');
+  tick(60, Date.now());
+  assert.equal(p.turns.summary().machines[0].pressed, 'CPU pressure 60%', 'the row says so at the floor, CI counting too');
+  assert.deepEqual([p.turns.pool().size, p.turns.size()], [10, 1], "perigee's saved size is as it was");
+  p.turns.stop();
+});
+
+test('limits are each place’s own', () => {
+  const p = places();
+  p.turns.setLimits({ max: 2 }, 'Josh', Date.now(), DESK);
+  assert.deepEqual([p.turns.limits(DESK).max, p.turns.limits().max], [2, L.max]);
+  p.turns.forget(DESK);
+  assert.equal(p.turns.limits(DESK).max, L.max);
+});
+
+test('a marked minion starts on its machine with perigee empty, and waits for it while perigee stays free', async () => {
+  const p = places();
+  p.marks.set(1, DESK);
+  p.marks.set(2, DESK);
+  assert.deepEqual([p.turns.enter(1), p.at(1), p.turns.used()], [true, DESK, 0]);
+  p.desk.block = { why: 'away since Nov 25, 2:14 PM PST', since: 1 };
+  assert.equal(p.turns.enter(2), false);
+  assert.equal(p.turns.waitsForMachine(2), true);
+  assert.deepEqual(p.turns.wait(2)!.machine, { name: 'desk', why: 'away since Nov 25, 2:14 PM PST' });
+  assert.equal(p.turns.enter(3), true, 'it holds up nobody at perigee');
+  p.turns.tick(calm, [], Date.now(), ok);
+  assert.deepEqual(p.stuck, [{ ticket: 2, block: p.desk.block }], 'and its card is asked about');
+  p.desk.block = null;
+  p.desk.cap = 1;
+  assert.equal(p.turns.wait(2)!.machine!.why, 'busy: 1 of 1 worker');
+  p.turns.tick(calm, [], Date.now(), ok);
+  assert.equal(p.stuck.length, 2);
+  await p.turns.hold(1, () => {});
+  await until('the second to start there', () => p.started.includes(2));
+  assert.equal(p.at(2), DESK);
+});
+
+test('Start now on a marked minion passes neither its machine nor its cap', () => {
+  const p = places();
+  p.marks.set(1, DESK);
+  p.desk.block = { why: 'away' };
+  p.turns.enter(1);
+  p.turns.force(1);
+  assert.deepEqual([p.started, p.turns.has(1)], [[], true]);
+  p.turns.stop();
+});
+
+test("a machine's worker stays with a turn that waits on a card: the agent there counts it", () => {
+  const p = places();
+  void p.turns.reattach(1, () => new Promise(() => {}), DESK);
+  p.turns.setLent(1, true);
+  assert.deepEqual([p.turns.used(DESK), p.turns.lent()], [1, 0]);
+  p.turns.stop();
+});
+
+test("a turn re-attached on a machine holds that machine's worker, and one that comes home holds perigee's", () => {
+  const p = places();
+  void p.turns.reattach(1, () => new Promise(() => {}), DESK);
+  assert.deepEqual([p.turns.used(), p.turns.used(DESK)], [0, 1]);
+  p.turns.comeHome(1);
+  assert.deepEqual([p.turns.used(), p.turns.used(DESK)], [1, 0]);
+});
+
+test("a machine's turns are not in its person's share at perigee", () => {
+  const p = places();
+  p.turns.reattach(1, () => new Promise(() => {}), DESK);
+  p.turns.reattach(2, () => new Promise(() => {}), DESK);
+  assert.deepEqual(
+    [...p.turns.people()].map((x) => x.used),
+    [2],
+    'the tile still counts them as working',
+  );
+  assert.equal(p.turns.enter(3), true);
+  assert.equal(p.at(3), 0);
 });

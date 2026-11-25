@@ -217,7 +217,8 @@ const releaseTitle = (u) => `Release the worker of its own (${heldSaid(u)}). A r
 
 /** Under the chat: Start now while it waits for a worker, or whose worker it has and Release; null for neither. */
 export function startNowLine(t) {
-  if (t.status === 'closed' || !(t.start_now || t.worker_wait)) return null;
+  // A machine's cap is its owner's, so Start now can't hurry a wait for one.
+  if (t.status === 'closed' || !(t.start_now || (t.worker_wait && !t.worker_wait.machine))) return null;
   const u = t.start_now;
   if (u) return [toneChip('info', `Own worker: ${heldSaid(u)}`), ownButton(t, 'Release', releaseTitle(u))];
   const { held } = t.worker_wait;

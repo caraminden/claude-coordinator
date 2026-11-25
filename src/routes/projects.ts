@@ -32,6 +32,7 @@ import { pacific } from '../pacific.ts';
 import { checkAudits } from '../standard-audits.ts';
 import { FLAKE_WINDOW_MS, PROOF_RUNS, fileChangedAt, flakeBrief } from '../flakes.ts';
 import { LAND_REDS_MS, landReds, readRetro } from '../land-reds.ts';
+import { runsOnPick } from './workers.ts';
 import { MODEL_REQUIRED, scheduleFields, scheduleTemplate, scheduleView } from './schedule-api.ts';
 import { turnEnv, turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
@@ -1477,7 +1478,10 @@ export const projectRoutes: Route[] = [
       // The build's own minion (build branches, specs/build-branches.md): it keeps the list and lands the build.
       const owner = body.build_owner === true;
       if (owner && !build && !given('build')) throw new HttpError(400, "build_owner needs a build: pass build (the scheme's highest build number plus one for a new one)");
+      // Where its turns run (Build 7 T4), checked as the person who asked: only a machine's owner picks it.
+      const runsOn = body.runs_on == null ? null : runsOnPick(app, project.id, body.runs_on, caller ? caller.person_id : (session.uid ?? null));
       const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name);
+      if (runsOn) app.runner.runsOn.set(id, runsOn, session.name);
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
       store.addPick(id, model, effort, pickBy, because);
       store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : (session.uid ?? null), parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });

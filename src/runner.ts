@@ -55,7 +55,9 @@ import { armOf, SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, type SeamTrial, trialLine }
 import { COMPACT_COMMAND, freshStartText, LOST_DIGEST_ENTRIES, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
-import { MachineTurn, placeTurn } from './machine-turn.ts';
+import { MachineTurn, placedAt, placeTurn } from './machine-turn.ts';
+import type { Block, MachineHost, MachinePools } from './machine-pools.ts';
+import { RunsOn, type runsOnCard } from './runs-on.ts';
 import { offSkills, pruneKit } from './skills.ts';
 import { alive, copyPinned, launchPlan, type EveryScheme, type LaunchPlan, TASKMASTER_SLICE, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wrapperSpec } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
@@ -499,11 +501,11 @@ export class Runner {
   /** Machines online now and lent to this scheme (access.ts lendsMachine); a thread's turn gets each one's MCP tools. */
   /** The online machines a turn in this scheme gets, for these askers (#306: their own machines). */
   machines: (project: Project, askers: number[]) => TurnMachine[] = () => [];
-  /**
-   * The connected machine this turn is placed on (Build 7 T2, src/machine-turn.ts), or null: it runs here. Nothing places
-   * one by default; server.ts sets it, and only ever for an ordinary minion's turn on Claude.
-   */
-  workerFor: (ticket: Ticket, person: number | null) => { id: number; name: string } | null = () => null;
+  /** The connected machines as places for turns (Build 7 T4), set by server.ts; none yet: a turn marked for one waits. */
+  pools: MachinePools | null = null;
+  /** Where each minion's turns may run, when a person said (Build 7 T4). */
+  readonly runsOn: RunsOn;
+  onRunsOnCard: (ticketId: number, question: ReturnType<typeof runsOnCard>) => string | null = () => null;
   /** Files on disk may have changed. `soon`: a turn ended or a reply linked a file, so look within seconds; false: a tool result, looked at throttled (#1542). */
   onFilesMayChange: (ticketId: number, soon: boolean) => void = () => {};
   /** Where the minion's change is, branch to live (src/branch.ts), for its bar and its row's badge. */
@@ -726,8 +728,20 @@ export class Runner {
     });
     this.startNow = new StartNow({ store, over: (id) => holdOver(store.getTicket(id), (t) => this.parked(t) && !this.turnLine.has(id) && !this.lanes.busy(id)), changed: (ids) => this.lineChanged(ids), now: () => this.now() });
     this.places = new LinePlaces({ store, urgent: this.urgent, chains: () => this.chains(), now: () => this.now() });
+    this.runsOn = new RunsOn({
+      store,
+      ask: (id, question) => this.onRunsOnCard(id, question),
+      settle: (id, card) => this.settleCard(id, card, APP_NAME),
+      changed: (id) => {
+        this.turnLine.reordered();
+        this.turnLine.pump();
+        this.broadcastTicket(id);
+      },
+      now: () => this.now(),
+    });
     this.turnLine = new TurnLine({
       store,
+      pools: this.machineHost,
       exempt: (id) => (store.getTicket(id)?.kind ?? 'coordinator') === 'coordinator',
       busy: (id) => this.lanes.busy(id),
       asks: (id, via) => this.lineAsks(id, via),
@@ -851,6 +865,7 @@ export class Runner {
       queue: this.queue,
       lanes: this.lanes,
       turnLine: this.turnLine,
+      runsOn: this.runsOn,
       urgent: this.urgent,
       places: this.places,
       resumes: this.resumes,
@@ -1099,6 +1114,7 @@ export class Runner {
       turn_live: !closed && (this.turns.has(ticket.id) ? !this.keepalives.has(ticket.id) : !!this.launching.get(ticket.id) && !this.launching.get(ticket.id)!.keepalive),
       // Its turn waits for a worker (#1868): it shows as working, and its activity line says where it stands.
       worker_wait: closed ? null : this.turnLine.wait(ticket.id),
+      runs_on: closed ? null : this.runsOn.view(ticket.id),
       // Who marked it Urgent, when and why (#1888).
       urgent: closed ? null : this.urgent.view(ticket.id),
       start_now: closed ? null : this.startNow.view(ticket.id),
@@ -1157,6 +1173,7 @@ export class Runner {
     const live = this.live(ticket, ratio);
     this.onLive(ticket.id, live);
     const { asks, ...shown } = live;
+    const away = shown.worker_wait?.machine;
     const cards = closed ? [] : this.store.openCardsOf(ticket.id);
     // Who is still in the scheme and their names, read once per list (#1449).
     const props = list?.properties ?? this.store.props.forTarget('minion', ticket.id);
@@ -1176,7 +1193,9 @@ export class Runner {
       // token, minted at that start, is the only one that still works, so anything acting on "idle, nothing queued"
       // got 401s from it (#1618). Combined here, not in live(), so a reader's own fresh row still has the say once the
       // turn has ended (its copy of live() is posted on each broadcast, src/reader-live.ts).
-      status: shown.turn_live || shown.worker_wait ? 'running' : ticket.status,
+      status: shown.turn_live || (shown.worker_wait && !away) ? 'running' : ticket.status,
+      // One that waits for the computer it is marked for is stuck outside: blocked, with what it waits for (Build 7 T4).
+      ...(away && !shown.turn_live ? { state: 'blocked' as const, note: `Waiting for ${away.name}: ${away.why}` } : {}),
       // Messages the loop guard holds for a person's Continue (#1067), for the row's badge and the chat's held-mail card.
       loop_hold: closed ? null : (once('loop-holds', () => loopHolds(this.store)).get(ticket.id) ?? null),
       held_mail: this.heldMail(ticket),
@@ -1555,10 +1574,14 @@ export class Runner {
     // The calls it had open, in what the chat kept of this turn.
     for (const e of this.store.eventsOfKinds(ticketId, ['claude'], this.store.lastTurnEvent(ticketId))) if (e.created_at >= live.startedAt) noteCalls(live.calls, JSON.parse(e.data));
     this.lanes.run(ticketId, 're-attached turn', () =>
-      this.turnLine.reattach(ticketId, () => {
-        this.lendWorker(ticketId);
-        return live.ended;
-      }),
+      this.turnLine.reattach(
+        ticketId,
+        () => {
+          this.lendWorker(ticketId);
+          return live.ended;
+        },
+        (!turn.unit && placedAt(turn.dir!)?.id) || 0,
+      ),
     );
     if (turn.card) this.endLive(live, ticketId);
     const { where } = runningTurn(live);
@@ -1657,6 +1680,7 @@ export class Runner {
               this.queue.owe(ticketId, null);
               return;
             }
+            if (this.startPlace(ticket, person, via) === 'wait') return;
             // An account switch's note went with the turn that stopped (endFailed); a kill resume's with the kill (one line).
             if (via !== 'switch' && !killLine)
               this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : paused ? 'Resumed after the pause' : 'Resumed after a server restart' });
@@ -1677,7 +1701,7 @@ export class Runner {
       );
     const ran = this.lanes.run(ticketId, 'resume', () => this.turnLine.hold(ticketId, step));
     // One that started no turn (dismissed, refused, a start that bailed) ends its wait here, as it did before it was kept.
-    if (token) void ran.then(() => ours() && this.resumes.cancelLimitWait(ticketId));
+    if (token) void ran.then(() => ours() && !this.turnLine.has(ticketId) && this.resumes.cancelLimitWait(ticketId));
     return ran;
   }
 
@@ -2073,7 +2097,10 @@ export class Runner {
   unqueue(ticketId: number, eventId: number, by: string): boolean {
     // A wait's held messages are in the queue too (#468 S03-9).
     if (!this.queue.remove(ticketId, eventId)) return false;
-    if (!this.queue.size(ticketId) && !this.fresh.freshStep(ticketId)) this.turnLine.leave(ticketId, true);
+    if (!this.queue.size(ticketId) && !this.fresh.freshStep(ticketId)) {
+      this.turnLine.leave(ticketId, true);
+      this.runsOn.over(ticketId);
+    }
     const projectId = this.store.getTicket(ticketId)?.project_id;
     if (projectId !== undefined) this.approvals.unsaid(projectId, eventId);
     this.emit(ticketId, 'unqueued', { id: eventId, by });
@@ -2257,6 +2284,7 @@ export class Runner {
     }
     if (!live) {
       const lined = this.turnLine.leave(ticketId);
+      this.runsOn.over(ticketId);
       // Waiting for its resume after a kill (#1364): likewise.
       if (this.resumes.cancelKillWait(ticketId)) {
         this.queue.drop(ticketId);
@@ -2459,6 +2487,7 @@ export class Runner {
               this.broadcastTicket(ticketId);
               return;
             }
+            if (this.startPlace(ticket, person) === 'wait') return;
             const carriesOn = !this.queue.wakes(ticketId);
             return this.ranTurn(this.startTurn(project, ticket, this.takeQueue(ticketId), person, {}, carriesOn));
           };
@@ -2502,9 +2531,67 @@ export class Runner {
     this.turnLine.join(ticketId, rerun ? undefined : retry.via);
   }
 
-  /** A minion's status as people read it: one waiting for a worker is working. */
+  /** A minion's status as people read it: one waiting for a worker is working, unless it waits for its own computer. */
   shownStatus(ticket: Ticket): Ticket['status'] {
-    return this.turnLine.has(ticket.id) ? 'running' : ticket.status;
+    return this.turnLine.has(ticket.id) && !this.turnLine.waitsForMachine(ticket.id) ? 'running' : ticket.status;
+  }
+
+  /** Take back a card that no longer asks anything. */
+  settleCard(ticketId: number, cardId: string, by: string) {
+    const card = this.store.eventsOfKinds(ticketId, ['question']).find((e) => JSON.parse(e.data).id === cardId);
+    if (!card) return;
+    const settled = { at: Date.now(), by };
+    this.store.setEventData(card.id, { ...JSON.parse(card.data), settled });
+    this.emit(ticketId, 'question_result', { id: cardId, settled });
+  }
+
+  /** What the line asks of the machines, with what each minion's next turn is. */
+  private readonly machineHost: MachineHost = {
+    machines: () => this.pools?.machines() ?? [],
+    mark: (id) => {
+      const need = this.runsOn.needs(id);
+      return need && this.fresh.freshStep(id) ? 0 : need;
+    },
+    nameOf: (machineId, id) => (id !== undefined && this.runsOn.get(id)?.machine === machineId ? this.runsOn.get(id)!.name : (this.pools?.nameOf(machineId) ?? `machine ${machineId}`)),
+    takes: (machineId, id, via) => {
+      const ticket = this.store.getTicket(id);
+      const project = ticket && this.store.getProject(ticket.project_id);
+      if (!ticket || !project) return { why: 'its minion is gone', never: true };
+      const person = this.turnPerson(ticket, project, this.waiting(id), !!via);
+      const home = this.turnAtHome(ticket, project, person);
+      if (home) return home;
+      if (!this.pools) return { why: 'the server is starting' };
+      return this.pools.refuses(machineId, ticket, person, this.runsOn.get(id)?.name);
+    },
+    stuck: (id, since, block) => this.runsOn.stuck(id, since, block),
+  };
+
+  /** Only an ordinary minion's turn on Claude is ever placed on a machine (spec section 2): why this one, a fresh start's step or one that Codex runs, isn't. */
+  private turnAtHome(ticket: Ticket, project: Project, person: number | null): Block | null {
+    if (this.fresh.freshStep(ticket.id)) return { why: 'this turn runs at perigee', never: true };
+    const codex = isCodexModel(turnSettings(ticket, project).model) || (person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person)));
+    return codex && !this.codexWhy(person) ? { why: 'its next turn is on Codex, which runs at perigee only', never: true } : null;
+  }
+
+  /**
+   * The machine a turn starts on now that it has a worker; null: perigee. A machine that can't take it since the line gave
+   * it one there (offline, a ship's tests, another sender): an overflow turn runs here, and one marked for a machine goes
+   * back in the line ('wait') with its queue and its resume kept.
+   */
+  private startPlace(ticket: Ticket, person: number | null, via?: RetryKind): { id: number; name: string } | 'wait' | null {
+    const need = this.machineHost.mark(ticket.id);
+    const at = this.turnLine.placeOf(ticket.id);
+    if (!need && !at) return null;
+    const project = this.store.getProject(ticket.project_id);
+    const home = need === 0 || (need && need !== at) || !project || this.turnAtHome(ticket, project, person);
+    const on = home ? null : this.pools?.launch(at, ticket, person, this.runsOn.get(ticket.id)?.name);
+    if (on && 'id' in on) return on;
+    if (need) {
+      this.turnLine.join(ticket.id, via);
+      return 'wait';
+    }
+    this.turnLine.comeHome(ticket.id);
+    return null;
   }
 
   private lineMoved = new Set<number>();
@@ -2788,8 +2875,10 @@ export class Runner {
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
     const same = codexThread?.person === person && codexThread.thread;
     if (!step && !keepalive && !codex) this.fresh.seamEnrol(ticket.id);
-    // Only an ordinary minion's turn on Claude is ever placed on a machine (spec section 2): Taskmasters, Codex turns, keepalives and fresh-session steps run here.
-    const worker = ticket.kind !== 'coordinator' && !codex && !keepalive && !step ? this.workerFor(ticket, person) : null;
+    // The place startPlace found a moment ago; one whose machine went since waits there for it. Codex turns, keepalives and fresh-session steps run here (turnAtHome).
+    const at = codex || keepalive || step ? 0 : this.turnLine.placeOf(ticket.id);
+    const worker = at ? { id: at, name: this.pools!.nameOf(at) } : null;
+    if (!keepalive && !step) this.runsOn.over(ticket.id);
     let built: Awaited<ReturnType<Runner['buildLaunch']>>;
     try {
       built = await this.buildLaunch(project, ticket, {
@@ -3121,7 +3210,7 @@ export class Runner {
       codex: { thread: string | null } | null;
       github?: number | null;
       side?: boolean;
-      /** The machine it is placed on (workerFor). */
+      /** The machine it is placed on (startPlace). */
       worker?: { id: number; name: string } | null;
     },
   ) {

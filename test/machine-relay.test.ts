@@ -227,6 +227,20 @@ test('a lend keeps gpu_off only when it is true', () => {
   assert.deepEqual(cleanLend({ server: null, workspaces: [], gpu_off: 'yes' }), { server: null, workspaces: [] });
 });
 
+test('a machine is testing a ship while one runs on its PC, its WSL distro included (Build 7 T4)', () => {
+  const { store, relay } = world();
+  const ids = ['pc', 'PC-Ubuntu-24', 'laptop'].map((host, i) => {
+    const m = store.createMachine(`m${i}`, `h${i}`, 'Cara');
+    relay.connectAgent(m, stream(), { host, command: 'worker' });
+    return m.id;
+  });
+  relay.sendShips((host) => (host.toLowerCase() === 'pc' ? [{ repo: 'a/b', runner: 'PC' }] : []));
+  assert.deepEqual(
+    [...ids, 999].map((id) => relay.shipsThere(id)),
+    [true, true, false, false],
+  );
+});
+
 test('ships (#1268) go to every runner agent at each look, and to one that connects while a ship runs, never to a lent machine', () => {
   const { store, relay, box } = world();
   const win = store.createMachine('win-runners', 'y', 'Cara');

@@ -38,7 +38,7 @@ export type ReaderData = {
   memorySchemes: number[] | null;
   /** DATA_DIR, where the Status page reads backups from. */
   dataDir: string;
-  /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang` or `=slow` in a query ends, hangs or slows (500 ms) this thread mid-request, and `=main` sends it to the main thread. */
+  /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang`, `=stall-<ms>` or `=slow` in a query ends, hangs, stalls or slows (500 ms) this thread mid-request, and `=main` sends it to the main thread. */
   testHooks?: boolean;
   /** A test server's (CITADEL_READER_BOOT_WAIT): a path this thread waits for while it starts, so a test can stop the server while a reader still is (#1625). */
   bootWait?: string;
@@ -349,6 +349,9 @@ if (workerData?.reader) {
     if (data.testHooks && /[?&]citadel-test-reader=main\b/.test(m.url)) return parentPort!.postMessage({ id: m.id, answer: null });
     if (data.testHooks && /[?&]citadel-test-reader=exit\b/.test(m.url)) process.exit(1);
     if (data.testHooks && /[?&]citadel-test-reader=hang\b/.test(m.url)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+    // A disk that answers nothing for that many ms.
+    const stall = data.testHooks && /[?&]citadel-test-reader=stall-(\d+)/.exec(m.url);
+    if (stall) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(stall[1]));
     if (data.testHooks && /[?&]citadel-test-reader=slow\b/.test(m.url)) {
       console.log('Reader test hook: slow');
       await sleep(500);

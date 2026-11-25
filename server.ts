@@ -2540,6 +2540,9 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
         while (Date.now() < until);
         return json(res, 200, {});
       }
+      // test/reader-stall.test.ts: a page read that holds this thread, as one on a swamped disk does.
+      const held = SETTLED_ROUTE && /[?&]citadel-test-main-read=(\d+)/.exec(req.url ?? '');
+      if (held) for (const until = Date.now() + Number(held[1]); Date.now() < until; );
       // test/front.test.ts: one step of the main thread that writes, pauses, then writes again; no reader may see the half.
       if (SETTLED_ROUTE && req.url?.startsWith('/api/test/half-step')) {
         const q = requestUrl(req).searchParams,

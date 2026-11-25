@@ -210,6 +210,19 @@ test('a fresh machine, whose memory folder is empty, gets every note back, also 
   assert.equal(s.has(server, 'a.md'), false);
 });
 
+for (const folder of ['missing', 'empty'])
+  test(`the first note of a new scheme reaches the server from a container that lacks the mount, its memory folder ${folder}`, async () => {
+    const s = scheme();
+    if (folder === 'empty') mkdirSync(join(server, s.memory), { recursive: true });
+    const volume = join(s.at, 'volume');
+    const josh = s.turns(volume);
+    await josh.start();
+    s.note(volume, 'first.md', 'first');
+    await josh.end();
+    assert.equal(s.has(server, 'first.md'), true);
+    assert.equal(s.stored('first.md'), true);
+  });
+
 test("a note written later under a deleted note's name is kept, in a copy without the mount too", async () => {
   const s = scheme();
   await s.seed();

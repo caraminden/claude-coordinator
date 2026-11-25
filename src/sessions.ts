@@ -158,7 +158,7 @@ async function syncMemory(store: Store, project: Project, root: string, configDi
   const server = claudeConfigDir(process.env);
   const real = (dir: string) => realpath(join(dir, root)).catch(() => null);
   const [a, b] = await Promise.all([real(configDir), real(server)]);
-  if (a === b) return;
+  if (a !== null && a === b) return;
   const [here, there] = await Promise.all([fileTimes(configDir, root), fileTimes(server, root)]);
   if (!here || !there) return;
   const key = `memory-seen:${join(configDir, root)}`;
@@ -193,7 +193,8 @@ async function syncMemory(store: Store, project: Project, root: string, configDi
       next[path] = seen[path]; // deleted here
     else if ((mine === undefined || mine < mtime) && (await copy(server, configDir, path, mtime))) next[path] = mtime;
   }
-  if (!same(stored, next) && (stored || Object.keys(next).length)) store.setSetting(key, next);
+  // Also when it holds nothing yet: the first notes of a new scheme are then new ones, not old copies.
+  if (!same(stored, next)) store.setSetting(key, next);
 }
 
 /**

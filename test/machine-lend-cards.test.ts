@@ -178,10 +178,12 @@ test("taking the scheme off ends its minions' open sessions, as the page does", 
   await verdict('Cara', minion, r.id, 'approve');
   for (let s = await stream.read(); !s.done; s = await stream.read());
   assert.deepEqual((await boxNow()).projects, []);
+  // Approve starts a turn, and its launch mints the minion's next token some 50 ms after the verdict returns (#1808):
+  // a token read before then is the turn before's by the time the server checks it, a 401 (#1886). So the turn ends first.
+  await idle(minion);
   const again = await fetch(`${srv.base}/api/machines/${box.id}/session`, { headers: { Authorization: `Bearer ${agentToken(srv.data, minion.id)}` } });
   assert.equal(again.status, 403);
   await again.body!.cancel();
-  await idle(minion);
 });
 
 /** One JSON-RPC call through the real MCP server (src/mcp.ts) as an agent of this scheme. */

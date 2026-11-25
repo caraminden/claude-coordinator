@@ -31,7 +31,7 @@ test('a generated app passes its own tests, with every placeholder filled', () =
   const { NODE_TEST_CONTEXT: _, ...env } = process.env;
   const run = spawnSync(process.execPath, ['--test', '--test-reporter=tap', 'test/'], { cwd: join(repo, 'apps/trip-notes'), env, encoding: 'utf8', timeout: 60_000 });
   assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
-  assert.match(run.stdout, /# pass 8/);
+  assert.match(run.stdout, /# pass 10/);
 });
 
 test('no runner, no workflow', () => {

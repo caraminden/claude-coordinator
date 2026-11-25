@@ -266,6 +266,11 @@ export class CiHold {
     return own ? [...new Set([own, ...this.d.repos().map((r) => r.toLowerCase())])] : [];
   }
 
+  /** Why a ship holds the desktop now, for what else gives way to one (src/runner-cap.ts); null with the hold off. */
+  shipNow(now = Date.now()): string | null {
+    return this.offNow ? null : this.shipWhy(now);
+  }
+
   /** Why a ship holds the desktop now, or null. An old look at GitHub doesn't count: the line alone does. */
   private shipWhy(now: number): string | null {
     const n = this.d.line();

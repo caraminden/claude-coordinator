@@ -438,7 +438,7 @@ export const machineRoutes: Route[] = [
         const t = app.store.getTicket(j.ticket);
         return t && canSee(t.project_id) ? { ...j, number: t.number, schemeId: t.project_id } : j;
       });
-      json(res, 200, { ...load, long, minions, reaped, hold: app.ciHold ? heldRows(app.ciHold.state(), app.store, canSee) : null });
+      json(res, 200, { ...load, long, minions, reaped, hold: app.ciHold ? { ...heldRows(app.ciHold.state(), app.store, canSee), cap: app.runnerCap?.text() ?? null } : null });
     },
   },
   // Who holds the shared Android emulator's lease (#1128), for the Machines page.

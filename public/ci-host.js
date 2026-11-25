@@ -110,7 +110,7 @@ function minionsRow(l) {
 const RUNS = { ship: 'ship', main: 'main', check: 'own check', early: 'early tests', proof: 'flake proof', heavy: 'heavy job', suite: 'test run' };
 function holdRow(l) {
   if (!l.hold) return '';
-  const { off, why, busy, running = [] } = l.hold;
+  const { off, why, busy, running = [], cap } = l.hold;
   const handed = (l.long ?? []).filter(handedOver).map((j) => ({ ...j, why: why ?? busy ?? (j.quiet ? 'starts within a minute' : 'starts at 2am') }));
   const runs = [...l.hold.held, ...handed].sort((a, b) => a.since - b.since);
   const waits = runs.filter((r) => r.phase !== 'resumed').length;
@@ -118,10 +118,11 @@ function holdRow(l) {
   const note = off ? 'nothing is held: jobs run side by side' : runs.length ? `longest ${held(runs[0], l.now)}` : (why ?? busy ?? 'optional jobs start at once');
   const [row] = settingsRow(
     { key: 'host-hold', icon: 'lock', hue: runs.length || off ? 'waiting' : 'done', title: 'One job at a time', summary: [chip, note] },
-    runs.length || running.length
+    runs.length || running.length || cap
       ? h(
           'div',
           { class: 'hue-rows' },
+          cap ? hueRow({ hue: 'waiting', meta: 'ships first' }, cap) : '',
           ...running.map((r) => hueRow({ hue: 'running', meta: RUNS[r.kind] }, r.kind === 'ship' ? "A ship's tests" : r.what, h('span', { class: 'muted' }, ' · running now'), r.url ? [' · ', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'CI run')] : '')),
           ...runs.map((r) =>
             hueRow(

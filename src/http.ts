@@ -34,6 +34,7 @@ import type { Secrets } from './secrets.ts';
 import type { RepoAccess } from './repo-access.ts';
 import type { CiLoad } from './ci-load.ts';
 import type { CiHealth } from './ci-health.ts';
+import type { RunnerCap } from './runner-cap.ts';
 import type { RunnerJobs, RunnerTokens } from './ci-runner.ts';
 import type { ChunkedUploads } from './chunked-uploads.ts';
 import type { CiNumbers } from './ci-numbers.ts';
@@ -360,6 +361,7 @@ export interface App {
   ciTests?: (repo: string, runId: number, c: TestCounts) => void;
   /** Optional work kept off the CI desktop while ships go first (src/ci-hold.ts, #1902); absent in tests that don't need it. */
   ciHold?: Pick<CiHold, 'ask' | 'state'>;
+  runnerCap?: Pick<RunnerCap, 'text'>;
   /** Numbers the schemes' CI sends per run, kept for months and flagged on a step up (src/ci-numbers.ts, #1369). */
   ciNumbers: CiNumbers;
   /** Jobs for the CI runner agent on a CI PC: add, list, remove a scheme's runners (src/ci-runner.ts, #328). */

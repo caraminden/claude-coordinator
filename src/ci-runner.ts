@@ -163,6 +163,22 @@ export class RunnerTokens {
     if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
   }
 
+  /** Take one custom label off a runner, as the repo's owner; one it doesn't have is already off (src/runner-cap.ts). */
+  async dropLabel(project: Project, id: number, label: string): Promise<void> {
+    const { slug, owner, ownerToken, hint } = this.repoOf(project);
+    const r = await this.github(ownerToken, 'DELETE', `/repos/${slug}/actions/runners/${id}/labels/${encodeURIComponent(label)}`);
+    if (r.status !== 200 && r.status !== 404) throw new HttpError(502, await refused(r, owner.name, slug, hint));
+  }
+
+  /** Give a runner one more custom label, as the repo's owner; false when GitHub finds no such runner. */
+  async addLabel(project: Project, id: number, label: string): Promise<boolean> {
+    const { slug, owner, ownerToken, hint } = this.repoOf(project);
+    const r = await this.github(ownerToken, 'POST', `/repos/${slug}/actions/runners/${id}/labels`, { labels: [label] });
+    if (r.status === 404) return false;
+    if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
+    return true;
+  }
+
   /** The runners GitHub lists for a scheme's repo, asked with the owner's login (#328). */
   async listed(project: Project): Promise<Listed[]> {
     const { slug, owner, ownerToken, hint } = this.repoOf(project);
@@ -261,7 +277,7 @@ export interface RunnerJobView {
 }
 
 /** A runner as GitHub lists it, checked. */
-interface Listed {
+export interface Listed {
   id: number;
   name: string;
   status: string;

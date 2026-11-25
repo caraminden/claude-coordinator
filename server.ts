@@ -113,6 +113,7 @@ import { sweepKept } from './src/replay-keep.ts';
 import { loadDecisions, memoryLogins } from './src/decisions-load.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
+import { RunnerCap, runnersBeside } from './src/runner-cap.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
 import { POOL } from './src/turn-line.ts';
 import { pressure } from './src/pressure.ts';
@@ -2117,6 +2118,18 @@ const ciHold = new CiHold({
 });
 // After the first read of the long jobs: before it, a held one would look free to start again in the day.
 if (!BOOT_CHECK && !PREVIEW) void longJobs.refresh().then(() => ciHold.start());
+// One Peek build while Citadel ships (#1902; Josh, 2026-11-25, "Yes, use labels"). His pick is for Peek alone.
+const CAPPED_REPO = 'caraminden/peek-auras';
+const runnerCap = new RunnerCap({
+  project: () => schemeOf(CAPPED_REPO) ?? null,
+  label: (p) => runnerLabel(p.name),
+  why: () => ciHold.shipNow(),
+  here: () => runnersBeside(ciLoad.runnersByPc(), liveSlug),
+  tokens: runnerTokens,
+  store,
+  report: (p, text) => tellHeld(repoSlug(p.repo_url)!, text),
+});
+if (!BOOT_CHECK && !PREVIEW) runnerCap.start();
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
 fallbacks.observe = (job, error) => deployWatch?.record('fallback', `${job}: ${error}`.replace(/\d+/g, '#'));
@@ -2429,6 +2442,7 @@ const app: App = {
   ciNumbers,
   ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c),
   ciHold,
+  runnerCap,
   chunked,
   claude: claudeLink,
   codex: codexLink,

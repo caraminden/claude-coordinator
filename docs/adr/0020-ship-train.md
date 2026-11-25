@@ -339,3 +339,5 @@ runner was busy. Those 96 are the gap.
   change), and a red that is a skip, not a failure (#1561's realtime test; `citadel-test` passes a skip, CI fails one).
   Replayed against the 16 reds, the failing file was in the ship's own and affected set for 13.
 - Each logs `light check · <branch> · <verdict> · <s>`. Off: `LAND_LIGHT_CHECK=0` or `<state>/light-check-off`.
+
+Josh, 2026-11-25, picked "Yes, use labels" on #1902's card ("may Citadel take the job label off Peek's spare build runners while a ship is in line, and put it back after?"): Peek builds one at a time during Citadel ships, capped at 4 hours (`src/runner-cap.ts`).

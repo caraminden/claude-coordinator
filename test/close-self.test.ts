@@ -53,6 +53,7 @@ const runner = new Runner(
   () => ({}),
   fake,
 );
+runner.pollMs = 10; // the turn-end poll: its 250 ms default was most of each test's wait
 
 function newTicket() {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });

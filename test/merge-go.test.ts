@@ -473,6 +473,7 @@ test('a typed go is recorded for the scheme when sent, steered or not; a relay n
     () => ({}),
     fake,
   );
+  runner.pollMs = 10; // the turn-end poll; its 250 ms default was most of finish()'s wait
   const project = store.createProject('Delve', null);
   store.setProjectSettings(project.id, { approval_rules: 'Bash(gh pr merge:*)' });
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'bypassPermissions', created_by: 'Cara' });

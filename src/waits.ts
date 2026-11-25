@@ -877,7 +877,7 @@ export class Waits {
   /** The newest `n` output lines of the heavy run this minion holds a slot for (#1681); none when it has no run. */
   async tail(ticketId: number, n: number): Promise<string[]> {
     const h = (await readHeavyA(this.d.heavyDir, this.now(), this.d.held)).holders.find((x) => this.ticketFor(x.who) === ticketId);
-    return h ? readTail(join(this.d.heavyDir, `slot-${h.slot - 1}.out`), n) : [];
+    return h ? readTail(join(this.d.heavyDir, `slot-${h.slot! - 1}.out`), n) : [];
   }
 
   private name = (label: string) => {

@@ -12,7 +12,7 @@ import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
 import { Relay, loopHolds, LOOP_LIMIT, LOOP_WINDOW_MS } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
-import { askerKey, buildOwnerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketState, type TurnResult } from './db.ts';
+import { askerKey, buildOwnerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketFields, type TicketState, type TurnResult } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import { CompactWatch } from './compactions.ts';
 import type { Claim } from './claims.ts';
@@ -438,7 +438,7 @@ function owedRetries(o: OwedResume): Retries {
 }
 
 /** How a turn's MCP server reaches the API; without `token` it mints the ticket's next turn token, which retires the one before. */
-export type CoordinatorEnv = (ticket: Ticket, token?: string) => Record<string, string>;
+export type CoordinatorEnv = (ticket: TicketFields, token?: string) => Record<string, string>;
 
 export class Runner {
   private turns = new Map<number, LiveTurn>();
@@ -628,7 +628,7 @@ export class Runner {
    * The environment a host turn's tools get, for running a minion's tools/land.sh on the host (src/land.ts).
    * It carries the calling turn's own token: a fresh one would log that turn's tools out (#225).
    */
-  hostEnv(ticket: Ticket, token?: string): Record<string, string> {
+  hostEnv(ticket: TicketFields, token?: string): Record<string, string> {
     const project = this.store.getProject(ticket.project_id);
     // land.sh's retro_log and run-tests.sh's log_flake write there, as they do from a turn.
     const shared = project && this.sharedDir(project);
@@ -652,7 +652,7 @@ export class Runner {
   }
 
   /** citadel-heavy's slots (#325), in the projects folder every person's container mounts at the same path, and who a job runs for. */
-  private heavyEnv(ticket: Ticket, person: number | null): Record<string, string> {
+  private heavyEnv(ticket: TicketFields, person: number | null): Record<string, string> {
     const payer = person ? this.store.getUser(person)?.login : undefined;
     const who = `${this.store.getProject(ticket.project_id)?.name ?? '?'} #${ticket.number}${payer ? ` (${payer})` : ''}`;
     // One Gradle build cache for every worktree (#1153, src/build-cache.ts).
@@ -2173,7 +2173,7 @@ export class Runner {
 
   // Held mail, seals, sleep and start cards: src/held-mail.ts.
 
-  parked(t: Ticket): boolean {
+  parked(t: TicketFields): boolean {
     return this.held.parked(t);
   }
 
@@ -2685,7 +2685,7 @@ export class Runner {
   }
 
   /** Whether `ticket` is a split scheme's Overlord (#919, #921): the Taskmaster that is nobody's own, beside one per person. */
-  isOverlord(ticket: Ticket | undefined): boolean {
+  isOverlord(ticket: TicketFields | undefined): boolean {
     return !!ticket && ticket.kind === 'coordinator' && ticket.coordinator_of == null && this.store.isSplit(ticket.project_id);
   }
 
@@ -2694,7 +2694,7 @@ export class Runner {
    * Taskmaster that asked for everyone); every other Taskmaster in the scheme hears it as held mail (#921), but not the
    * answerer's own: talking to the Overlord from their chat, they answered it themselves, and the answer is on the settled card (#1630).
    */
-  echoOverlordAnswer(overlord: Ticket, by: string, text: string, actor = overlord.id, byUid?: number | null) {
+  echoOverlordAnswer(overlord: TicketFields, by: string, text: string, actor = overlord.id, byUid?: number | null) {
     if (!this.isOverlord(overlord)) return;
     const mine = byUid ?? this.personOf?.(by) ?? null;
     const line = text.length > 600 ? text.slice(0, 600) + '…' : text;

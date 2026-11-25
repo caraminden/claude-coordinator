@@ -5,7 +5,7 @@
 import { AGENT_NAME } from './auth.ts';
 import { msgSettings } from './msg-settings.ts';
 import { type Relay, clip, loopKey, MINION_PAIRS, minionPairKey, pairKey, type LoopState } from './minion-relay.ts';
-import type { EventRow, Project, Store, Ticket } from './db.ts';
+import type { EventRow, Project, Store, Ticket, TicketFields } from './db.ts';
 import type { Lanes } from './lanes.ts';
 import type { ClaudeEvent, ContentBlock } from './claude-events.ts';
 import { startHoldKey, START_HOLD_PREFIX, startNote } from './minion-budget.ts';
@@ -49,7 +49,7 @@ export class HeldMail {
    * Held (#718): on hold on purpose (state sealed), waiting on start_after, or on its start card (#1757, which isn't sealed
    * but runs nothing until a person answers), and not dismissed. A message to it is held.
    */
-  parked(t: Ticket): boolean {
+  parked(t: TicketFields): boolean {
     return t.kind !== 'coordinator' && t.status !== 'closed' && (t.state === 'parked' || !!this.d.heldFor(t.id) || !!this.startHold(t.id));
   }
 

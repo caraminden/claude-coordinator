@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { PoolSpec } from './pool-client.mjs';
 import { linkTree, pinSparesAt, takeSpare } from './pin-spares.ts';
+import { thrown } from './thrown.ts';
 import { cp, rm } from 'node:fs/promises';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
 import { androidEnv, AUTH_VARS, resolveClaude, type TurnPlace } from './claude-link.ts';
@@ -31,8 +32,8 @@ export function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch (err: any) {
-    return err.code === 'EPERM';
+  } catch (err) {
+    return thrown(err).code === 'EPERM';
   }
 }
 

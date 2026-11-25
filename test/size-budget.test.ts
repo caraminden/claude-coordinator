@@ -19,7 +19,7 @@ export const ALLOWED: Record<string, [number, string]> = {
   'public/core.js': [1514, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/ci-health.ts': [1560, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/runner.ts': [
-     5696,
+    5696,
     'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+23: a turn placed on a machine, #1962) (+11: busy and a recorded answer its chat reads next turn, #1930) (+5: the state a status line gives, kept on its event, #1923) (+134: cards that outlive their turn, #1916) (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+135: worker-line host, stop, pause, boot and view calls; the line itself is turn-line.ts, #1868) (+43: facts for the order of the line and a keepalive in line, #1888) (+15: the compaction callout wiring; the count is compactions.ts, #1920) (+18: a stop settles the outbox rows it dropped, #1904) (+8: what a killed turn spent, #1938)',
   ],
   'src/mcp.ts': [

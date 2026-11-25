@@ -3,6 +3,7 @@
 // read, edit and delete them here. Not src/memory.ts, which is search by meaning over chats.
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { projectSlug } from './sessions.ts';
 import { pacificDay } from './pacific.ts';
@@ -28,7 +29,7 @@ export const memoryDir = (configDir: string, repoDir: string): string => join(co
  * config dir (a container's accounts mount the server's copy, claude-link.ts) give one folder, labelled by the first.
  * Only projects/<slug>/memory/ is ever named: nothing else in a config dir (credentials) is reachable from here.
  */
-export function memoryFolders(repoDir: string | null, logins: MemoryLogin[]): MemoryFolder[] {
+export function memoryFolders(repoDir: string | null, logins: MemoryLogin[], real: (dir: string) => string = realpathSync): MemoryFolder[] {
   if (!repoDir) return [];
   const seen = new Set<string>();
   const out: MemoryFolder[] = [];
@@ -38,7 +39,7 @@ export function memoryFolders(repoDir: string | null, logins: MemoryLogin[]): Me
     // Only the dedupe key follows the link: the id and the path stay as they were.
     let key = dir;
     try {
-      key = realpathSync(dir);
+      key = real(dir);
     } catch {
       /* no folder yet: its path is its key */
     }
@@ -47,6 +48,14 @@ export function memoryFolders(repoDir: string | null, logins: MemoryLogin[]): Me
     out.push({ label: l.label, dir, id: createHash('sha1').update(dir).digest('hex').slice(0, 12), rel: join('projects', projectSlug(repoDir), 'memory') });
   }
   return out;
+}
+
+/** memoryFolders with the links followed off the server's thread (#1980). */
+export async function memoryFoldersA(repoDir: string | null, logins: MemoryLogin[]): Promise<MemoryFolder[]> {
+  if (!repoDir) return [];
+  const dirs = [...new Set(logins.map((l) => memoryDir(l.configDir, repoDir)))];
+  const keys = new Map(await Promise.all(dirs.map(async (d) => [d, await realpath(d).catch(() => d)] as const)));
+  return memoryFolders(repoDir, logins, (d) => keys.get(d)!);
 }
 
 export interface MemoryNote {

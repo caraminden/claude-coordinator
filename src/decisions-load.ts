@@ -2,12 +2,12 @@
 // texts to src/decisions.ts. Also the held note to the scheme's Taskmaster when a new reversal leaves copies behind
 // (Josh, 2026-11-19, picked "Tell the Taskmaster").
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { access, lstat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { adrDir, assemble, gitEdits, githubHref, memTitle, type Doc, type DecisionList, type Edit, type SourceKind } from './decisions.ts';
 import { gitOut } from './git.ts';
-import { mdFiles } from './rule-overlap.ts';
-import { memoryFolders, type MemoryLogin } from './memory-files.ts';
+import { mdFilesA } from './rule-overlap.ts';
+import { memoryFoldersA, type MemoryLogin } from './memory-files.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import type { App } from './http.ts';
 import type { Project } from './db.ts';
@@ -29,13 +29,19 @@ export function memoryLogins(app: Pick<App, 'store' | 'claude'>): MemoryLogin[] 
   );
 }
 
-const read = (path: string): string => {
+// Every file here is read off the server's thread (#1980): a busy disk holds one call for seconds.
+const read = async (path: string): Promise<string> => {
   try {
-    return lstatSync(path).isFile() ? readFileSync(path, 'utf8') : '';
+    return (await lstat(path)).isFile() ? await readFile(path, 'utf8') : '';
   } catch {
     return '';
   }
 };
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
 
 /** A repo's files as Docs, with their git history and links to GitHub when the repo is there. */
 async function repoDocs(repo: string, repoUrl: string | null, groups: { kind: SourceKind; files: string[]; paths: string[]; adr?: (f: string) => boolean }[], got: { historyFailed: boolean }): Promise<Doc[]> {
@@ -46,14 +52,16 @@ async function repoDocs(repo: string, repoUrl: string | null, groups: { kind: So
     (file, sha) => githubHref(repoUrl, sha, file),
   );
   if (edits.failed) got.historyFailed = true;
-  return groups.flatMap((g) =>
-    g.files.map((file) => ({
-      kind: g.kind,
-      place: { label: file, file, href: githubHref(repoUrl, branch, file) },
-      text: read(join(repo, file)),
-      adr: g.adr?.(file),
-      edits: edits.get(file),
-    })),
+  return Promise.all(
+    groups.flatMap((g) =>
+      g.files.map(async (file) => ({
+        kind: g.kind,
+        place: { label: file, file, href: githubHref(repoUrl, branch, file) },
+        text: await read(join(repo, file)),
+        adr: g.adr?.(file),
+        edits: edits.get(file),
+      })),
+    ),
   );
 }
 
@@ -77,12 +85,14 @@ export async function loadDecisions(app: App, project: Project): Promise<Decisio
     { kind: 'scheme', place: { label: 'Scheme instructions', href: `#/p/${pid}/instructions` }, text: project.instructions ?? '', edits: historyEdits(store.instructionHistory(pid, HISTORY), `#/p/${pid}/instructions`) },
   ];
   const got = { historyFailed: false };
-  const repo = project.repo_dir && existsSync(project.repo_dir) ? project.repo_dir : null;
+  const repo = project.repo_dir && (await exists(project.repo_dir)) ? project.repo_dir : null;
   if (repo) {
-    const adr = adrDir(read(join(repo, 'CLAUDE.md')));
-    const rules = ['CLAUDE.md', 'AGENTS.md'].filter((f) => existsSync(join(repo, f))).concat(mdFiles(repo, '.claude/rules'));
+    const adr = adrDir(await read(join(repo, 'CLAUDE.md')));
+    const rules: string[] = [];
+    for (const f of ['CLAUDE.md', 'AGENTS.md']) if (await exists(join(repo, f))) rules.push(f);
+    rules.push(...(await mdFilesA(repo, '.claude/rules')));
     // A README in the ADR folder is its index, not a decision.
-    const adrs = mdFiles(repo, adr.replace(/\/$/, ''), 0).filter((f) => !/readme|template/i.test(f));
+    const adrs = (await mdFilesA(repo, adr.replace(/\/$/, ''), 0)).filter((f) => !/readme|template/i.test(f));
     docs.push(
       ...(await repoDocs(
         repo,
@@ -96,19 +106,18 @@ export async function loadDecisions(app: App, project: Project): Promise<Decisio
     );
   }
   const citadelUrl = store.getProject(GLOBAL_OWNER)?.repo_url ?? null;
-  docs.push(...(await repoDocs(ROOT, citadelUrl, [{ kind: 'kit', files: mdFiles(ROOT, 'kit'), paths: ['kit'] }], got)));
+  docs.push(...(await repoDocs(ROOT, citadelUrl, [{ kind: 'kit', files: await mdFilesA(ROOT, 'kit'), paths: ['kit'] }], got)));
   const seen = new Set<string>();
-  for (const f of memoryFolders(project.repo_dir, memoryLogins(app))) {
+  for (const f of await memoryFoldersA(project.repo_dir, memoryLogins(app))) {
     let files: string[] = [];
     try {
-      files = readdirSync(f.dir)
-        .filter((n) => /\.md$/.test(n) && n !== 'MEMORY.md')
-        .sort();
+      files = (await readdir(f.dir)).filter((n) => /\.md$/.test(n) && n !== 'MEMORY.md').sort();
     } catch {
       continue;
     }
-    for (const file of files) {
-      const text = read(join(f.dir, file));
+    const texts = await Promise.all(files.map((file) => read(join(f.dir, file))));
+    for (const [i, file] of files.entries()) {
+      const text = texts[i];
       // Two logins can hold the same note; list it once.
       const key = `${file}|${text}`;
       if (seen.has(key)) continue;

@@ -2,6 +2,7 @@
 // instruction edit, every paragraph elsewhere that already speaks to the same thing. Pure functions over texts, so the
 // repo test (test/rule-homes.test.ts) and the server's Settings check run the same code.
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { lstat, readdir } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { githubHref, norm } from './decisions.ts';
 import { PHRASE_HITS, RULE_HOMES, RUN_WORDS, type RuleHome } from './rule-homes.ts';
@@ -197,6 +198,21 @@ export function mdFiles(repo: string, dir: string, depth = 6, re = /\.md$/i): st
     }
     return st.isDirectory() ? mdFiles(repo, rel, depth - 1, re) : re.test(n) ? [rel] : [];
   });
+}
+
+/** mdFiles with every folder read off the server's thread (#1980). */
+export async function mdFilesA(repo: string, dir: string, depth = 6, re = /\.md$/i): Promise<string[]> {
+  if (depth < 0) return [];
+  const names = await readdir(join(repo, dir)).catch((): string[] => []);
+  const found = await Promise.all(
+    names.sort().map(async (n) => {
+      const rel = dir ? `${dir}/${n}` : n;
+      const st = await lstat(join(repo, rel)).catch(() => null);
+      if (!st) return [];
+      return st.isDirectory() ? mdFilesA(repo, rel, depth - 1, re) : re.test(n) ? [rel] : [];
+    }),
+  );
+  return found.flat();
 }
 
 export const readIn = (root: string, f: string): string | null => {

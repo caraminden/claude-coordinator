@@ -1,7 +1,7 @@
 // A reader per kind of found target (#627, src/release-targets.ts finds them), each filling src/releases.ts's shape.
 // read() answers from what refresh() last read (git, files, GitHub), so the 2-second poll costs nothing.
 import { readFileSync } from 'node:fs';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DeployView } from './app-services.ts';
 import type { Job, Run } from './ci-health.ts';
@@ -15,7 +15,7 @@ import { BEHIND_OLD, CITADEL_TARGET, HOLDS_LINE, git, landedIn, OLD_LAND, reache
 import { holds, shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
 import { frozenChip, frozenWords, type Frozen } from './frozen-ships.ts';
-import { behindOld, median, ordinal, readHeavy, readQueue, type LandTicket } from './waits.ts';
+import { behindOld, median, ordinal, readHeavy, readQueue, readQueueA, type LandTicket } from './waits.ts';
 import { ciState, ciVerdict } from './ci-verdict.ts';
 
 const RECENT = 5;
@@ -1145,6 +1145,10 @@ const frozenLead = (lead: Progress, f: Frozen): Partial<Progress> => ({ waitingO
 export const landQueue = (repo: string) => join(repo, '.git', 'land-queue');
 /** That line's tickets, in its order: their 8th line (index 7) is "order" when their land.sh follows .order. */
 export const schemeLine = (repo: string) => readQueue(landQueue(repo), 7);
+const landScript = (repo: string) => join(repo, 'tools', 'land.sh');
+/** A scheme's line, and whether its own land.sh follows .order yet: until it does, no landing in its line can move. */
+type LineRead = { line: LandTicket[]; current: boolean };
+const lineRead = (line: LandTicket[], script: string): LineRead => ({ line, current: /^queue_order\(\)/m.test(script) });
 
 /** Why no landing in a scheme's line can move yet (#1007): the land.sh on its main predates reordering. */
 export const OLD_SCHEME_LAND = "Can't move yet: this scheme's land script is older than reordering, so its changes ship in turn until it copies the kit's newer one";
@@ -1176,24 +1180,57 @@ export class LandsInFlight {
     return this.files.get(t.id) ?? null;
   }
 
-  attach(views: Omit<TargetView, 'testCopies'>[]) {
+  /** Each scheme's line as last read off the server's thread (#1980), for the polls that only show it. */
+  private lines = new Map<number, LineRead>();
+  /** Goes up at each fresh read: a refresh that began before one is older than it. */
+  private reads = 0;
+  private reading: Promise<void> | null = null;
+
+  /** Read the line of every scheme with a landing, off the server's thread; one read at a time. */
+  refresh(): Promise<void> {
+    return (this.reading ??= this.readLines().finally(() => {
+      this.reading = null;
+    }));
+  }
+
+  private async readLines() {
+    const at = this.reads;
+    const repos = new Map<number, string>();
+    for (const id of this.d.landings.handoffs()) {
+      const t = this.d.landings.get(id)?.code === null ? this.d.store.getTicket(id) : undefined;
+      const p = t?.branch ? this.d.store.getProject(t.project_id) : null;
+      if (p?.repo_dir) repos.set(p.id, p.repo_dir);
+    }
+    const read = await Promise.all(
+      [...repos].map(async ([id, repo]) => {
+        const [line, script] = await Promise.all([readQueueA(landQueue(repo), 7), readFile(landScript(repo), 'utf8').catch(() => '')]);
+        return [id, lineRead(line, script)] as const;
+      }),
+    );
+    if (at === this.reads) this.lines = new Map(read);
+  }
+
+  /** `fresh` reads each line in the thread, for a person's or a Taskmaster's own move; else the line is refresh()'s. */
+  attach(views: Omit<TargetView, 'testCopies'>[], fresh = true) {
     const now = (this.d.now ?? Date.now)();
     const { store } = this.d;
     // Each scheme's land line (the kit's land template's <.git>/land-queue, #1007), read once: a landing's ticket in it
     // (by its branch) gives its place, and each target's part of the line is what the Releases page reorders.
-    const lines = new Map<number, { line: LandTicket[]; current: boolean }>();
+    if (fresh) {
+      this.reads++;
+      this.lines = new Map();
+    }
     const lineOf = (p: Project) => {
-      if (!lines.has(p.id)) {
-        // Whether the scheme's own land.sh follows .order yet: until it does, no landing in its line can move.
+      if (fresh && !this.lines.has(p.id)) {
         let script = '';
         try {
-          script = readFileSync(join(p.repo_dir!, 'tools', 'land.sh'), 'utf8');
+          script = readFileSync(landScript(p.repo_dir!), 'utf8');
         } catch {
           /* none: no line to read either */
         }
-        lines.set(p.id, { line: schemeLine(p.repo_dir!), current: /^queue_order\(\)/m.test(script) });
+        this.lines.set(p.id, lineRead(schemeLine(p.repo_dir!), script));
       }
-      return lines.get(p.id)!;
+      return this.lines.get(p.id) ?? lineRead([], '');
     };
     const landing = this.d.landings
       .handoffs()

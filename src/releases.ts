@@ -231,7 +231,9 @@ export interface ReleasesDeps {
   /** A target's Roll back to last green (src/rollback.ts), or null. */
   rollback?: (tv: Omit<TargetView, 'testCopies'>, views: Omit<TargetView, 'testCopies'>[]) => RollbackInfo | null;
   /** Put each scheme's changes still on their way to main (open PRs) on its targets (PrsInFlight.attach, #655). */
-  inFlight?: (views: Omit<TargetView, 'testCopies'>[]) => void;
+  inFlight?: (views: Omit<TargetView, 'testCopies'>[], fresh: boolean) => void;
+  /** Read the ship lines off the server's thread, for the next inFlight that isn't `fresh` (LandsInFlight.refresh, #1980). */
+  lines?: () => Promise<void>;
 }
 
 /** A target's releases named by its own template (#764): "Build {n}" → "Build 997"; a next with no number yet "Next build". */
@@ -252,13 +254,13 @@ export class Releases {
     this.d = d;
   }
 
-  /** Every scheme with a target or a test copy, read afresh. */
-  read(): SchemeReleases[] {
+  /** Every scheme with a target or a test copy, read afresh; not `fresh`, its ship lines are as `lines` last read them. */
+  read(fresh = true): SchemeReleases[] {
     const copies = this.d.testCopies();
     const byScheme = new Map<number, SchemeReleases>();
     const scheme = (id: number) => byScheme.get(id) ?? byScheme.set(id, { projectId: id, targets: [], testCopies: [] }).get(id)!;
     const views = this.d.readers.flatMap((r) => r.read());
-    this.d.inFlight?.(views);
+    this.d.inFlight?.(views, fresh);
     for (const t of views) named(t);
     for (const t of views) {
       const deploy = this.d.deploy?.(t);
@@ -309,9 +311,15 @@ export class Releases {
     return [...byScheme.values()].sort((a, b) => a.projectId - b.projectId);
   }
 
-  /** Read again, and send each scheme whose part changed (an empty one when it has nothing any more). */
-  poll() {
-    this.last = this.read();
+  /** poll for the timers and events that only show the line: its files are read off the server's thread (#1980). */
+  async pollA() {
+    await this.d.lines?.();
+    this.poll(false);
+  }
+
+  /** Read again, and send each scheme whose part changed (an empty one when it has nothing any more). Whatever acts on the ship line polls `fresh`. */
+  poll(fresh = true) {
+    this.last = this.read(fresh);
     const now = new Map(this.last.map((s) => [s.projectId, s]));
     for (const id of new Set([...this.shown.keys(), ...now.keys()])) {
       const s = now.get(id) ?? { projectId: id, targets: [], testCopies: [] };
@@ -333,7 +341,7 @@ export class Releases {
     this.refreshing ??= (async () => {
       if (scan) await this.d.scan?.().catch((err) => console.error('Finding release targets failed:', err));
       for (const r of this.d.readers) await r.refresh?.().catch((err) => console.error('Reading release targets failed:', err));
-      this.poll();
+      await this.pollA();
     })().finally(() => (this.refreshing = null));
     return this.refreshing;
   }

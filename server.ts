@@ -51,7 +51,7 @@ import { CiHold, withoutHeld } from './src/ci-hold.ts';
 import { writeHold } from './src/ci-hold-file.ts';
 import { shipsOn, ShipWatch } from './src/ci-ships.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
-import { LongJobs, readLongJobs } from './src/long-jobs.ts';
+import { LongJobs } from './src/long-jobs.ts';
 import { gruntAtWork } from './src/live-state.ts';
 import { MinionJobs } from './src/minion-jobs.ts';
 import { CACHE_TTL_MS } from './src/keepalive.ts';
@@ -639,7 +639,7 @@ function liveOn(head: string | null, booted = false) {
     void liveProbes.sweep().catch((err) => console.error(`The live probe sweep failed: ${err?.message ?? err}`)); // #1741: a kept probe whose ship this head has; never holds up what follows
     // Last, so nothing above waits on it; after waiters.check, which moves the head that says whose code is live.
     await citadelServer.live(head);
-    releases.poll();
+    await releases.pollA();
   })().catch((err) => console.error('Checking waiters after a deploy failed:', err));
 }
 const machines = new MachineRelay(store, () => broadcast({ type: 'machines', machines: machines.list() }));
@@ -815,6 +815,8 @@ const longJobs = new LongJobs({
   heldRun: (run) => ciHold.isHeld(run),
   report: (slug, text) => tellHeld(slug, text),
 });
+// The pump's and CI's lookups read this, not the folder (#1980).
+if (!BOOT_CHECK) every('long jobs folder', 3_000, () => longJobs.refresh());
 if (!BOOT_CHECK && !PREVIEW) every('long heavy jobs', 60_000, () => longJobs.pump(), 30_000);
 // Contraption turns and app deploys run as the server's children: a restart waits for them. Ultra reviews
 // run in units of their own as landings do; only ones that fell back to a child count.
@@ -1275,7 +1277,7 @@ const urgentFixes = new UrgentFixes({
     ),
 });
 services.onDeploy = (view) => {
-  if (view.finished_at === null) return releases.poll();
+  if (view.finished_at === null) return showReleases();
   // Its frames open in Citadel catch up to the new version (#1690, public/frames.js appDeployed).
   if (view.state === 'deployed') broadcast({ type: 'app-deployed', name: view.name });
   const live = view.state === 'deployed' && !services.opts.off ? store.getContraption(view.name) : undefined;
@@ -1441,7 +1443,7 @@ const rollback = new Rollback({
   lastGreen,
   repoDir: (id) => store.getProject(id)?.repo_dir ?? null,
   tell: tellHome,
-  changed: () => releases.poll(),
+  changed: () => showReleases(),
   get: (k) => store.getSetting(k) ?? undefined,
   set: (k, v) => store.setSetting(k, v),
   // An APK Citadel builds after each deploy (#837: a feed, no release workflow) rolls back with its app (ADR 0012).
@@ -1509,8 +1511,9 @@ const releases = new Releases({
     const name = tv.target.kind === 'contraption' ? /^app:(.+)$/.exec(tv.target.id)?.[1] : null;
     return name && apkBuilds.keyless(name) ? name : null;
   },
-  inFlight: (views) => {
-    landsInFlight.attach(views);
+  lines: () => landsInFlight.refresh(),
+  inFlight: (views, fresh) => {
+    landsInFlight.attach(views, fresh);
     prsInFlight.attach(views);
     attachFailures(views, { store, landing: (id) => landings.hasHandoff(id), running: (id) => runner.isRunning(id) });
   },
@@ -1524,6 +1527,10 @@ const releases = new Releases({
     return all;
   },
 });
+/** Show a change on the release cards from an event with nobody waiting on it. */
+function showReleases() {
+  releases.pollA().catch((err) => console.error(`Reading the releases failed: ${thrown(err).message ?? err}`));
+}
 // Auto-deploy and the release cards' Deploy button (#629, src/auto-deploy.ts): each kind's release step.
 const autoDeploy = new AutoDeploy({
   store,
@@ -1666,13 +1673,13 @@ if (!BOOT_CHECK || PREVIEW) {
   // A few small files, so every 2 s: a landing's phases last tens of seconds.
   every('waits', 2_000, async () => {
     await waits.poll();
-    releases.poll();
+    await releases.pollA();
   });
   // Release targets' git reads every 15 s, and finding every scheme's targets again every 5 minutes (#627).
   every('release reads', SHIP_POLL_MS, async () => {
     await releases.refresh();
     await autoDeploy.tick();
-    releases.poll(); // a due time it just noted shows on the cards
+    await releases.pollA(); // a due time it just noted shows on the cards
   });
   every('release targets', 20 * SHIP_POLL_MS, () => releases.refresh(true), 0);
   ciRuns.start();
@@ -1728,14 +1735,14 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 // its scheme); no turn runs.
 const ciHealth = new CiHealth(store, {
   outbox,
-  longs: () => readLongJobs(join(DATA_DIR, 'projects', '.heavy')),
+  longs: () => longJobs.list(),
   get: withoutHeld(ghGet, (run) => ciHold.isHeld(run)),
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   // shortcut: compares against the clone's local branch, so a scheme whose clone lags GitHub's main gets its last green late; read origin's ref too if one does.
   green: (p, runs, branch) => {
     if (p.repo_dir)
       lastGreen.note(p.id, p.repo_dir, `refs/heads/${branch}`, runs).then(
-        () => releases.poll(),
+        () => showReleases(),
         (err) => console.error(`Last green of ${p.name} failed:`, err),
       );
   },
@@ -1821,7 +1828,7 @@ const fastMode = new FastMode({
     const p = store.getProject(id);
     if (p?.repo_dir)
       lastGreen.note(id, p.repo_dir, 'refs/heads/main', [{ head_sha: sha, workflow_id: 0, status: 'completed', conclusion: 'success', created_at: new Date().toISOString(), file: 'land.sh --verify' }]).then(
-        () => releases.poll(),
+        () => showReleases(),
         (err) => console.error(`Last green of ${p.name} failed:`, err),
       );
   },
@@ -2096,7 +2103,7 @@ const ciHold = new CiHold({
       () => false,
     )),
   ticket: (repo, branch, heavyId) => {
-    if (heavyId) return readLongJobs(join(DATA_DIR, 'projects', '.heavy')).find((j) => j.id === heavyId)?.ticket ?? null;
+    if (heavyId) return longJobs.list().find((j) => j.id === heavyId)?.ticket ?? null;
     const p = schemeOf(repo);
     return (p && store.listTickets(p.id).find((t) => t.branch === branch)?.id) ?? null;
   },
@@ -2108,7 +2115,8 @@ const ciHold = new CiHold({
   store,
   publish: (state) => writeHold(join(DATA_DIR, 'projects', '.heavy'), state),
 });
-if (!BOOT_CHECK && !PREVIEW) ciHold.start();
+// After the first read of the long jobs: before it, a held one would look free to start again in the day.
+if (!BOOT_CHECK && !PREVIEW) void longJobs.refresh().then(() => ciHold.start());
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
 fallbacks.observe = (job, error) => deployWatch?.record('fallback', `${job}: ${error}`.replace(/\d+/g, '#'));

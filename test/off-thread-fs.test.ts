@@ -4,10 +4,19 @@
 import assert from 'node:assert/strict';
 import fs, { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import { loadDecisions } from '../src/decisions-load.ts';
+import type { App } from '../src/http.ts';
+import { LongJobs } from '../src/long-jobs.ts';
+import { memoryDir } from '../src/memory-files.ts';
+import { LandsInFlight } from '../src/release-readers.ts';
+import { Releases } from '../src/releases.ts';
+import { moveShip } from '../src/ship-line.ts';
+import { stopShip } from '../src/ship-stop.ts';
 import { FlakeFixes } from '../src/flake-fixes.ts';
 import { Waits } from '../src/waits.ts';
 import { Runner } from '../src/runner.ts';
@@ -27,7 +36,7 @@ after(async () => {
 
 /** Runs `fn` and returns the synchronous fs calls made under `dir` before it returned its promise's result. */
 async function syncCallsUnder<T>(dir: string, fn: () => T | Promise<T>): Promise<string[]> {
-  const names = ['readFileSync', 'readdirSync', 'writeFileSync', 'renameSync', 'existsSync', 'statSync', 'openSync', 'accessSync', 'mkdirSync', 'rmSync', 'linkSync', 'symlinkSync', 'cpSync', 'copyFileSync', 'appendFileSync', 'lstatSync', 'readlinkSync', 'utimesSync'] as const;
+  const names = ['readFileSync', 'readdirSync', 'writeFileSync', 'renameSync', 'existsSync', 'statSync', 'openSync', 'accessSync', 'mkdirSync', 'rmSync', 'linkSync', 'symlinkSync', 'cpSync', 'copyFileSync', 'appendFileSync', 'lstatSync', 'realpathSync', 'readlinkSync', 'utimesSync'] as const;
   const real = Object.fromEntries(names.map((n) => [n, fs[n]]));
   const seen: string[] = [];
   for (const n of names)
@@ -317,4 +326,141 @@ test("the heavy-jobs folder is read off the server's thread: a snapshot refreshe
   assert.deepEqual(gone.get(), { holders: [], waiters: [] });
   // Nothing in server.ts reads the folder with the synchronous twin.
   assert.doesNotMatch(readFileSync(join(import.meta.dirname, '..', 'server.ts'), 'utf8'), /\breadHeavy\(/);
+});
+
+/** A scheme with a kit ship line of `n` tickets (the first holding it), its releases wired as server.ts wires them. */
+function shipLine(name: string, n: number) {
+  const store = new Store(join(root, `${name}.db`));
+  const repo = join(root, `${name}-repo`);
+  const q = join(repo, '.git', 'land-queue');
+  mkdirSync(q, { recursive: true });
+  mkdirSync(join(repo, 'tools'));
+  writeFileSync(join(repo, 'tools', 'land.sh'), 'queue_order() {\n  :\n}\n');
+  const p = store.createProject(name, 'https://github.com/o/x');
+  store.setProjectRepoDir(p.id, repo);
+  const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+  const me = `${process.pid} ${stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[19]}`;
+  const ids: number[] = [];
+  const add = (i: number) => {
+    const t = store.createTicket({ project_id: p.id, title: `Change ${i}`, permission_mode: 'default', created_by: 'Cara' });
+    store.setTicketDir(t.id, root, `ticket/${i}-c`);
+    ids.push(t.id);
+    writeFileSync(join(q, String(i).padStart(10, '0')), [me, i === 1 ? '1795067420' : '0', `ticket/${i}-c`, 'waiting', '-', '-', '-', 'order'].join('\n') + '\n');
+  };
+  for (let i = 1; i <= n; i++) add(i);
+  const target = { id: 'ci:w:r', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', numbering: null };
+  const lands = new LandsInFlight({ store, finder: { list: () => [target] } as never, landings: { handoffs: () => ids, get: () => ({ output: 'queue: next in line\n', code: null }) } });
+  const reader = { read: () => [{ target, current: null, next: null, line: [], recent: [] }] };
+  const releases = new Releases({ store, readers: [reader as never], testCopies: () => new Map(), broadcast: () => {}, lines: () => lands.refresh(), inFlight: (v, fresh) => lands.attach(v, fresh) });
+  const line = () => releases.view(() => true)[0].targets.flatMap((t) => t.line.map((e) => e.name));
+  return { store, repo, q, p, ids, releases, line, add };
+}
+
+test("the release poll reads each scheme's ship line with no synchronous file call on the server's thread (#1980)", async () => {
+  const w = shipLine('poll-line', 3);
+  assert.deepEqual(await syncCallsUnder(w.repo, () => w.releases.pollA()), []);
+  assert.equal(w.line().length, 3);
+  assert.deepEqual(await syncCallsUnder(w.repo, () => w.releases.refresh()), []);
+  // The server's timers and event handlers poll this way.
+  assert.doesNotMatch(readFileSync(join(import.meta.dirname, '..', 'server.ts'), 'utf8'), /\breleases\.poll\(/);
+});
+
+test('what acts on the ship line reads it fresh, never the snapshot of the last poll (#1980)', async () => {
+  const w = shipLine('fresh-line', 3);
+  await w.releases.pollA();
+  const app = { store: w.store, releases: w.releases, waits: undefined };
+  const by = { name: 'Cara', taskmaster: false };
+  // Since that poll #2 shipped and #4 joined.
+  rmSync(join(w.q, '0000000002'));
+  w.add(4);
+  assert.throws(() => moveShip(app, w.p.id, 2, [2, 3], by), /no longer waiting in line/);
+  assert.deepEqual(moveShip(app, w.p.id, 4, [4, 3], by), [4, 3]);
+  // A stop (src/ship-stop.ts): its ticket left the line since the poll.
+  await w.releases.pollA();
+  rmSync(join(w.q, '0000000001'));
+  assert.throws(() => stopShip(fake<App>(app), w.p.id, 1, 'Cara'), /not|longer|left|isn't/);
+  assert.doesNotMatch(readFileSync(join(import.meta.dirname, '..', 'src', 'ship-stop.ts'), 'utf8'), /readQueueA|LandsInFlight/);
+});
+
+test('a poll already reading the line never puts an older line over the one an action just read (#1980)', async () => {
+  const w = shipLine('late-line', 3);
+  const late = w.releases.pollA(); // reads #2 while it waits
+  rmSync(join(w.q, '0000000002'));
+  w.releases.poll();
+  assert.equal(w.line().length, 2);
+  await late;
+  assert.equal(w.line().length, 2);
+});
+
+test("the long-jobs pump, sweep and lookups make no synchronous file call on the server's thread (#1980)", async () => {
+  const dir = join(root, 'long-heavy');
+  const long = join(dir, 'long');
+  mkdirSync(long, { recursive: true });
+  const now = Date.now();
+  const job = (id: string, more: object) => writeFileSync(join(long, `${id}.json`), JSON.stringify({ id, ticket: 1, slug: 'o/r', sha: 'a'.repeat(40), command: 'x', what: 'x', who: 'C #1', queued_at: now, state: 'queued', ...more }));
+  job('a-1-a', { quiet: true });
+  job('b-2-b', { state: 'running', run_id: 7, slug: 'o/q' });
+  job('c-3-c', { state: 'done', ended_at: now - 30 * 24 * 3600_000 });
+  writeFileSync(join(long, 'c-3-c.log'), 'x');
+  writeFileSync(join(long, '.old.tmp'), 'x');
+  fs.utimesSync(join(long, '.old.tmp'), new Date(0), new Date(0));
+  writeFileSync(join(long, '.new.tmp'), 'x');
+  let saved = '';
+  const jobs = new LongJobs({
+    dir,
+    scheme: () => ({ projectId: 1, slug: null }),
+    hours: () => ({}) as never,
+    gh: async () => '',
+    wake: () => {},
+    note: () => {},
+  });
+  const ok = new LongJobs({
+    dir,
+    scheme: (t) => ({ projectId: t, slug: 'o/r' }),
+    hours: () => ({}) as never,
+    gh: async (_p, args) => {
+      if (args.some((a) => a.endsWith('/dispatches'))) saved = await readFile(join(long, 'a-1-a.json'), 'utf8');
+      return JSON.stringify({ default_branch: 'main', content: '' });
+    },
+    wake: () => {},
+    note: () => {},
+  });
+  const seen = await syncCallsUnder(dir, async () => {
+    await ok.refresh();
+    assert.equal(ok.heldSince('a-1-a'), undefined);
+    assert.equal(ok.list().length, 3);
+    await ok.pump();
+    assert.equal(ok.mayResume('a-1-a'), true);
+    await jobs.pump();
+  });
+  assert.deepEqual(seen, []);
+  assert.equal(JSON.parse(saved).state, 'dispatched', 'saved before GitHub is asked, so a crash never runs it twice');
+  assert.deepEqual(fs.readdirSync(long).sort(), ['.new.tmp', 'a-1-a.json', 'b-2-b.json']);
+  for (const f of ['server.ts', 'src/routes/machines.ts']) assert.doesNotMatch(readFileSync(join(import.meta.dirname, '..', f), 'utf8'), /\breadLongJobs\(/);
+});
+
+test("loading a scheme's decisions makes no synchronous file call on the server's thread (#1980)", async () => {
+  const repo = join(root, 'dec-repo');
+  mkdirSync(join(repo, '.claude', 'rules', 'deep'), { recursive: true });
+  writeFileSync(join(repo, 'CLAUDE.md'), '- One (Cara, 2026-11-19: "kept").\n');
+  writeFileSync(join(repo, '.claude', 'rules', 'deep', 'a.md'), '- Two (Cara, 2026-11-20: "second").\n');
+  fs.symlinkSync(join(repo, '.claude'), join(repo, '.claude', 'rules', 'loop'));
+  const config = join(root, 'dec-config');
+  const mem = memoryDir(config, repo);
+  mkdirSync(mem, { recursive: true });
+  writeFileSync(join(mem, 'n.md'), '- Three (Cara, 2026-11-21: "third").\n');
+  const store = new Store(join(root, 'dec.sqlite'));
+  store.createUser({ name: 'Cara', login: 'cara' });
+  const u = store.listUsers()[0];
+  store.listUsers = () => [{ ...u, server_login: 1 } as never];
+  const p = store.createProject('Dec', null);
+  store.setProjectRepoDir(p.id, repo);
+  const app = fake<App>({ store, claude: fake<App['claude']>({ accounts: () => ({ accounts: [{ n: 1, linkedAt: 0 }], inUse: 1 }), configDir: () => config }), runner: fake<App['runner']>({ leaveMail: () => {} }) });
+  let rules: string[] = [];
+  const load = async () => {
+    rules = (await loadDecisions(app, store.getProject(p.id)!)).decisions.map((d) => d.rule);
+  };
+  assert.deepEqual(await syncCallsUnder(root, load), []);
+  for (const r of ['One', 'Two', 'Three']) assert.ok(rules.includes(r), r);
+  assert.deepEqual(await syncCallsUnder(join(import.meta.dirname, '..', 'kit'), load), []);
 });

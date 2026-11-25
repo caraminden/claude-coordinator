@@ -324,7 +324,10 @@ if (workerData?.reader) {
     // While main is inside a step this waits for it. When it is only the writer that is behind, it waits a second: past
     // that the main thread would answer from what is written too (READ_WAIT_MS there), so a reader does (#2003), from a
     // transaction no other request shares. A person's own writes are in it: main holds their answer until they are.
-    let until = Date.now() + STEP_WAIT_MS,
+    // The second starts over when main was in a step meanwhile, at most twice: a main thread that is always in one
+    // step or the next must not keep it waiting.
+    const start = Date.now();
+    let until = start + STEP_WAIT_MS,
       wait = READ_WAIT_MS;
     while (!tx || tx.at < stepsOpened(data.shared)) {
       if (tx) {
@@ -333,8 +336,8 @@ if (workerData?.reader) {
       }
       let at = atWholeStep(store.db, data.shared, wait);
       if (at === null && !writerUp(data.shared)) return null;
-      if (inStep(data.shared)) until = Date.now() + STEP_WAIT_MS;
-      if (at === null && Date.now() >= until) {
+      if (inStep(data.shared)) until = Math.min(Date.now(), start + 2 * STEP_WAIT_MS) + STEP_WAIT_MS;
+      else if (at === null && Date.now() >= until) {
         pin(store.db);
         at = -1n;
       }

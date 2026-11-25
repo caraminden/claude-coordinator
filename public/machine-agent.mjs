@@ -1330,6 +1330,7 @@ export class JobRunner {
     this.timer.unref();
     this.block = null;
     this.closed = false;
+    // Until it has looked in its jobs folder (a block broken since the start) it can't say what it holds: nothing is lost on that (2MA5).
     this.restored = false;
     this.ready = this.setBlock(block).catch((err) => this.log(`Jobs: could not read the jobs folder: ${err.message}`));
   }
@@ -1351,8 +1352,6 @@ export class JobRunner {
 
   /** The jobs this agent holds and hasn't finished telling the app about, for the app's reconcile on connect. */
   known() {
-    // Not looked yet (its block is broken since it started): it can't say what it holds, so nothing is lost on it (2MA5).
-    if (!this.restored) return undefined;
     return [...this.jobs.values()]
       .filter((j) => !j.final_sent)
       .slice(0, 100)
@@ -1566,7 +1565,13 @@ export class JobRunner {
   async fetchInputOnce(job, f, inputToken) {
     if (job.stopping) return;
     const url = `/api/machines/job-input?job=${job.id}&name=${encodeURIComponent(f.name)}`;
-    const res = await this.call('GET', url, { headers: { 'X-Job-Token': inputToken } });
+    // A stop cuts it short before its answer too (2MA11); an answer after that is dropped.
+    const call = this.call('GET', url, { headers: { 'X-Job-Token': inputToken } });
+    const { signal } = job._abort;
+    const res = await new Promise((ok, fail) => {
+      signal.addEventListener('abort', () => fail(new Error(`${f.name}: stopped`)), { once: true });
+      call.then((r) => (signal.aborted ? r.destroy() : ok(r)), fail);
+    });
     if (res.statusCode !== 200) {
       const err = new Error(`${f.name}: the app answered ${res.statusCode} ${(await readBody(res)).error ?? ''}`.trim());
       err.final = res.statusCode < 500;
@@ -2284,7 +2289,7 @@ async function main() {
       method: 'POST',
       headers: { ...auth, 'Content-Type': 'application/json' },
       // v says which agent this is: the app shows one without it as set up the old way.
-      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}), problems: [...(host?.summary().problems ?? []), ...runner.leftover()], ...(jobs ? { jobs } : {}), known_jobs: runner.known() }),
+      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}), problems: [...(host?.summary().problems ?? []), ...runner.leftover()], ...(jobs ? { jobs } : {}), ...(runner.restored ? { known_jobs: runner.known() } : {}) }),
     })
       .then(async (res) => {
         // fetch doesn't throw on a refusal; a silent one hid #301's 404.

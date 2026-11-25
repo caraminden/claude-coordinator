@@ -353,7 +353,7 @@ test('a job runs, reports, and only what stays inside /out uploads; a symlink ou
   // A second job waits for the GPU slot.
   const second = start();
   await r.handle(second);
-  assert.match(lastState(second.id)?.error ?? '', /GPU slot/);
+  assert.match(lastState(Number(second.id))?.error ?? '', /GPU slot/);
 
   const out = join(d, 'out');
   writeFileSync(join(out, 'clip.json'), '{"text":"hi"}');
@@ -742,10 +742,23 @@ test('a job started while another is being stopped waits for it, and is refused 
   const fourth = start();
   await r.handle(fourth);
   await until('the fourth refused', () => lastState(fourth.id)?.state === 'failed', undefined, statesTail);
-  assert.match(lastState(fourth.id)?.error ?? '', /wouldn't stop/);
+  assert.match(lastState(Number(fourth.id))?.error ?? '', /wouldn't stop/);
   stickContainer(second.id, false);
   await r.handle({ type: 'job.stop', id: second.id });
   await until('stopped', () => lastState(second.id)?.state === 'stopped', undefined, statesTail);
+});
+
+test('a stop while an input has not answered ends the job at once, as stopped (2MA11)', async () => {
+  const r = runner();
+  const msg = start();
+  let asked = false;
+  const call = r.call.bind(r);
+  r.call = (...a: Parameters<typeof call>) => (String(a[1]).startsWith('/api/machines/job-input') ? ((asked = true), new Promise<never>(() => {})) : call(...a));
+  const started = r.handle(msg);
+  await until('the input asked for', () => asked);
+  await r.handle({ type: 'job.stop', id: msg.id });
+  await started;
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
 });
 
 test('a stop while its image is pulled ends the job at once, as stopped (2MA11)', async () => {
@@ -766,9 +779,10 @@ test('an agent that starts with no jobs block cannot say what it holds, and name
   r.close();
   const back = runner(null);
   await back.ready;
-  assert.equal(back.known(), undefined);
+  assert.equal(back.restored, false);
   await back.setBlock(block());
-  assert.ok(back.known().some((k: { id: number; state: string }) => k.id === msg.id && k.state === 'running'));
+  assert.equal(back.restored, true);
+  assert.ok(back.known().some((k) => k.id === msg.id && k.state === 'running'));
   await back.handle({ type: 'job.stop', id: msg.id });
   await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
 });

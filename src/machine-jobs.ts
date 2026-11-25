@@ -314,6 +314,9 @@ export function jobStage(state: string): JobStage {
 
 const tokenHash = (t: string) => createHash('sha256').update(t).digest('hex');
 
+/** How long an agent may take over a job.resume before its "paused" is believed (2MA3); it reports every 10 s. */
+const RESUME_ACTS_MS = 15_000;
+
 export class MachineJobs {
   private d: JobDeps;
   private timers: Job[] = [];
@@ -558,6 +561,7 @@ export class MachineJobs {
     if (!this.mayDecide(who, m)) throw new HttpError(403, `Only ${m.name}'s owner or an admin can pause its jobs`);
     if (job.state !== 'running' && job.state !== 'starting') throw new HttpError(409, `Job #${id} is ${job.state}, not running`);
     if (!this.d.send(m.id, { type: 'job.pause', id })) throw new HttpError(409, this.unreachable(m));
+    this.resumeSent.delete(id);
     this.store.updateMachineJob(id, { state: 'paused', paused_by: 'owner' });
     this.changed(id);
     return this.store.getMachineJob(id)!;
@@ -689,6 +693,7 @@ export class MachineJobs {
 
   private hold(job: MachineJob, by: 'hours' | 'machine') {
     if (!this.d.send(job.machine_id, { type: 'job.pause', id: job.id })) return;
+    this.resumeSent.delete(job.id);
     this.store.updateMachineJob(job.id, { state: 'paused', paused_by: by });
     this.changed(job.id);
   }
@@ -741,6 +746,7 @@ export class MachineJobs {
     this.ended(j.id, `Job #${j.id} (${j.kind_name}) on ${this.machineOf(j).name} failed: ${error}.`);
   }
 
+  /** When each job was last sent a job.resume again; a pause or a person's resume starts it afresh. */
   private resumeSent = new Map<number, number>();
 
   /** Send job.resume again, at most once a minute for a job. False when it wasn't sent. */
@@ -791,8 +797,9 @@ export class MachineJobs {
     const pauseFailed = typeof body.pause_failed === 'string' ? body.pause_failed.slice(0, 500) : null;
     const held = job.state === 'paused' && (state === 'running' || state === 'starting') && !pauseFailed;
     // A "paused" from before the agent acted on a job.resume, or one it never got (2MA3): told again, at most once a
-    // minute; a second one inside that minute is believed.
-    const resumes = job.state === 'running' && state === 'paused' && !job.error && this.sendResume(m.id, id);
+    // minute, and the agent gets a few seconds to act on it; one still paused after those is believed.
+    const acting = now - (this.resumeSent.get(id) ?? -Infinity) < RESUME_ACTS_MS;
+    const resumes = job.state === 'running' && state === 'paused' && !job.error && (acting || this.sendResume(m.id, id));
     this.store.updateMachineJob(id, {
       state: held ? 'paused' : resumes ? 'running' : state,
       live: JSON.stringify(live),

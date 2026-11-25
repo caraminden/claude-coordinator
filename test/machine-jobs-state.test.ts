@@ -12,7 +12,7 @@ const tmp = tempRoot('machine-jobs-state');
 const stores: Store[] = [];
 after(async () => {
   for (const s of stores) s.db.close();
-  await ;
+  await tmp.teardown();
 });
 let n = 0;
 function world() {
@@ -67,6 +67,10 @@ test('a "paused" the agent sent before it acted on a resume is answered with the
   w.jobs.report(w.m(), { id, state: 'paused', run_s: 1 });
   assert.equal(w.job(id).state, 'running');
   assert.deepEqual(w.sent, [{ type: 'job.resume', id }]);
+  w.clock.t += 5_000;
+  w.jobs.report(w.m(), { id, state: 'paused', run_s: 1 });
+  assert.equal(w.job(id).state, 'running', 'it may still be acting on it');
+  w.clock.t += 15_000;
   w.jobs.report(w.m(), { id, state: 'paused', run_s: 1 });
   assert.equal(w.job(id).state, 'paused', 'it did not take: shown as it is');
   assert.equal(w.sent.length, 1);

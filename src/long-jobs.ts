@@ -342,6 +342,7 @@ export function longView(jobs: LongJob[], now = Date.now()) {
     .filter((j) => !j.ended_at || now - j.ended_at < 24 * 3600_000)
     .map((j) => ({
       id: j.id,
+      ticket: j.ticket,
       who: j.who,
       what: j.what,
       quiet: !!j.quiet,

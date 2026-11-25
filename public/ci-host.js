@@ -112,7 +112,8 @@ function holdRow(l) {
   const { off, why } = l.hold;
   const handed = (l.long ?? []).filter(handedOver).map((j) => ({ ...j, why: why ?? (j.quiet ? 'starts within a minute' : 'starts at 2am') }));
   const runs = [...l.hold.held, ...handed].sort((a, b) => a.since - b.since);
-  const chip = off ? toneChip('warn', 'Off') : runs.length ? toneChip('warn', `${runs.length} held`) : why ? toneChip('info', 'Ships first') : toneChip('ok', 'Nothing held');
+  const waits = runs.filter((r) => r.phase !== 'resumed').length;
+  const chip = off ? toneChip('warn', 'Off') : waits ? toneChip('warn', `${waits} held`) : runs.length ? toneChip('info', 'Starting again') : why ? toneChip('info', 'Ships first') : toneChip('ok', 'Nothing held');
   const note = off ? 'nothing is held for ships' : runs.length ? `longest ${held(runs[0], l.now)}` : (why ?? 'optional jobs start at once');
   const [row] = settingsRow(
     { key: 'host-hold', icon: 'lock', hue: runs.length || off ? 'waiting' : 'done', title: 'Held for ships', summary: [chip, note] },
@@ -123,11 +124,11 @@ function holdRow(l) {
           ...runs.map((r) =>
             hueRow(
               { hue: r.phase === 'resumed' ? 'running' : 'waiting', meta: held(r, l.now) },
-              r.scheme ? schemeTag(r.scheme, r.who) : '',
+              r.scheme ? schemeTag(r.scheme, r.number ? r.scheme : r.who) : '',
               r.number ? [' ', minionLink(r)] : '',
               ` ${r.what} · `,
               h('span', { class: 'muted' }, r.phase === 'resumed' ? 'starting again' : r.why),
-              r.url ? [' · ', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'CI run')] : '',
+              r.url ? [' · ', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'CI run')] : h('span', { class: 'muted' }, ' · no CI run yet'),
             ),
           ),
         )

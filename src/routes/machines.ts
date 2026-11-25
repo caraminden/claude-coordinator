@@ -430,7 +430,12 @@ export const machineRoutes: Route[] = [
       // What runs from which minion, and what closed minions left that was stopped this week (#1365, src/reaper.ts).
       const minions = app.reaper ? byMinion(await app.reaper.running(), app.store, canSee) : [];
       const reaped = reapedRows(app.store.healthEventsSince([REAPED], Date.now() - 7 * 24 * 3600_000), app.store, canSee);
-      json(res, 200, { ...hostLoad(app.heavyDir, Date.now(), undefined, owners, await readHeavyA(app.heavyDir)), minions, reaped, hold: app.ciHold ? heldRows(app.ciHold.state(), app.store, canSee) : null });
+      const load = hostLoad(app.heavyDir, Date.now(), undefined, owners, await readHeavyA(app.heavyDir));
+      const long = load.long.map((j) => {
+        const t = app.store.getTicket(j.ticket);
+        return t && canSee(t.project_id) ? { ...j, number: t.number, schemeId: t.project_id } : j;
+      });
+      json(res, 200, { ...load, long, minions, reaped, hold: app.ciHold ? heldRows(app.ciHold.state(), app.store, canSee) : null });
     },
   },
   // Who holds the shared Android emulator's lease (#1128), for the Machines page.

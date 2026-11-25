@@ -115,14 +115,18 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 }
 .machine-fix { display: block; margin-top: 0.3rem; }
 /* Minion turns on a machine's row (Build 7 T5, machine-worker-row.js): the tone of how it stands runs down its left. */
-.worker { --w: var(--line); display: grid; gap: 0.7rem; padding: 0.6rem 0.75rem; border: 1px solid var(--line); border-left: 3px solid var(--w); border-radius: 8px; background: color-mix(in srgb, var(--w) 5%, transparent); transition: border-color var(--fast, 0.15s), background var(--fast, 0.15s); }
+.worker { --w: var(--line); display: grid; gap: 0.7rem; padding: 0.6rem 0.75rem; border: 1px solid var(--line); border-left: 3px solid var(--w); border-radius: 8px; background: color-mix(in srgb, var(--w) 5%, transparent); transition: border-color var(--citadel-motion, 120ms), background var(--citadel-motion, 120ms); }
 .worker[data-tone='ok'] { --w: var(--done); }
 .worker[data-tone='warn'] { --w: var(--waiting); }
-.worker[data-tone='danger'] { --w: var(--danger); }
+.worker[data-tone='danger'] { --w: var(--error); }
 .worker[data-tone='info'] { --w: var(--running); }
 .worker > * { min-width: 0; }
 .worker-head { display: flex; gap: 0.7rem; align-items: center; }
-.worker-head .rules-switch { flex: none; }
+.worker-head .rules-switch { flex: none; min-height: 0; }
+/* Its tap area on a phone: the switch itself stays its own size. */
+.worker-head .rules-switch::before { content: ''; position: absolute; inset: -0.7rem -0.35rem; }
+.worker-head-line { display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: center; }
+.machine-wide { grid-column: 1 / -1; }
 .worker-head-text { display: grid; gap: 0.15rem; min-width: 0; justify-items: start; }
 .worker-part { display: grid; gap: 0.5rem; padding-top: 0.65rem; border-top: 1px solid var(--line); }
 .worker-part > *, .worker-install > *, .worker-command, .worker-sign > * { min-width: 0; margin: 0; }
@@ -141,17 +145,17 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .worker-cap > span:first-child { color: var(--muted); }
 .worker-cap-box { position: relative; display: block; }
 .worker-cap-box input { width: 100%; margin: 0; box-sizing: border-box; font-variant-numeric: tabular-nums; }
-.worker-cap-box input[aria-invalid='true'] { border-color: var(--danger); }
+.worker-cap-box input[aria-invalid='true'] { border-color: var(--error); }
 .worker-cap-box i { position: absolute; right: 0.6rem; top: 50%; transform: translateY(-50%); color: var(--muted); font-style: normal; font-size: 0.85em; pointer-events: none; }
-.worker-checks { list-style: none; display: grid; gap: 1px; margin: 0; padding: 0; }
-.worker-checks li { display: grid; grid-template-columns: 1.3rem minmax(0, 14rem) minmax(0, 1fr); gap: 0.1rem 0.5rem; align-items: baseline; padding: 0.25rem 0.4rem; border-radius: 6px; transition: background var(--fast, 0.15s); }
-.worker-checks li:hover { background: var(--hover, color-mix(in srgb, var(--ink) 5%, transparent)); }
+.worker-checks { container-type: inline-size; list-style: none; display: grid; gap: 1px; margin: 0; padding: 0; }
+.worker-checks li { display: grid; grid-template-columns: 1.3rem minmax(0, 1fr) minmax(0, 1.15fr); gap: 0.1rem 0.5rem; align-items: baseline; padding: 0.25rem 0.4rem; border-radius: 6px; transition: background var(--citadel-motion, 120ms); }
+.worker-checks li:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .worker-check-mark { text-align: center; font-weight: 700; color: var(--muted); }
 .worker-check-text { color: var(--muted); overflow-wrap: anywhere; }
 .worker-checks li[data-state='waiting'] .worker-check-name { color: var(--muted); }
 .worker-checks li[data-state='ok'] .worker-check-mark { color: var(--done); }
-.worker-checks li[data-state='fail'] { background: color-mix(in srgb, var(--danger) 9%, transparent); }
-.worker-checks li[data-state='fail'] :is(.worker-check-mark, .worker-check-text) { color: var(--danger); }
+.worker-checks li[data-state='fail'] { background: color-mix(in srgb, var(--error) 9%, transparent); }
+.worker-checks li[data-state='fail'] :is(.worker-check-mark, .worker-check-text) { color: var(--error); }
 .worker-fold { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .worker-fold > summary { cursor: pointer; color: var(--muted); }
 .worker-fold > summary:hover { color: var(--ink); }
@@ -159,6 +163,8 @@ h4.machine-group { margin: 0.8rem 0 0.2rem; font-size: 0.72em; font-weight: 600;
 .worker-part .worker-fold { border-top: 0; padding-top: 0; }
 @media (max-width: 600px) {
   .worker-caps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (max-width: 26rem) {
   .worker-checks li { grid-template-columns: 1.3rem minmax(0, 1fr); }
   .worker-check-text { grid-column: 2; }
 }

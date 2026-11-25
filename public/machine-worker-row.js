@@ -18,15 +18,14 @@ export function forgetWorkerLink(id) {
   if (k) k.link = k.error = null;
 }
 
-const windows = (m) => (m.worker.host ? m.worker.wsl : (keptFor(m.id).os ?? (/win/i.test(navigator.userAgentData?.platform ?? navigator.platform) ? 'windows' : 'linux')) === 'windows');
+const windows = (m) => (m.worker.host ? m.worker.wsl : (keptFor(m.id).os ?? (/^linux/i.test(navigator.userAgentData?.platform ?? navigator.platform) && !/android/i.test(navigator.userAgent) ? 'linux' : 'windows')) === 'windows');
 const mine = (m) => m.owner_id !== null && m.owner_id === account?.id;
 
 /** How a worker stands, in a word or two and a line: the most pressing thing first. */
 export function workerState(m) {
   const w = m.worker;
-  const on = windows(m) ? 'that PC' : 'that computer';
-  if (!w.on) return { tone: 'neutral', word: 'Off', why: w.here ? 'It is set up and connected, and takes no turns while this is off.' : 'Its owner can let their own minions run on this computer.' };
-  if (!w.here && !w.host) return { tone: 'info', word: 'Not set up yet', why: `Run the command once on ${on}.` };
+  if (!w.on) return { tone: 'neutral', word: 'Off', why: w.here ? 'It is set up and connected, and takes no turns while this is off.' : mine(m) ? 'Let your own minions run on this PC.' : 'Its owner can let their own minions run on it.' };
+  if (!w.here && !w.host) return { tone: 'info', word: 'Not set up yet', why: 'Run the command below once on that PC.' };
   if (!w.here) return { tone: 'warn', word: 'Away', why: `Last heard from ${w.seen ? ago(w.seen) : 'some time ago'}. ${w.wsl ? 'Signing out of Windows stops it until its owner signs in again.' : 'It is off, or off the network.'}` };
   if (w.image?.state === 'failed') return { tone: 'danger', word: 'Image failed', why: `${w.image.text} It tries again in 10 minutes.` };
   if (w.image?.state === 'building') return { tone: 'info', word: 'Building its image', why: w.image.text };
@@ -41,8 +40,23 @@ export function workerState(m) {
   return { tone: 'ok', word: 'Ready', why: `Its owner's minions run there, up to ${w.caps?.workers ?? '?'} at once.` };
 }
 
-/** The Minion turns part of a row's closed line. */
-export const workerSummary = (m) => (m.worker?.on ? ` · Minion turns: ${workerState(m).word.toLowerCase()}` : '');
+/** The worker is all that computer runs: no agent of Citadel's was ever connected from it. */
+const only = (m) => !m.online && !m.last_seen_at && m.worker?.on;
+
+/** A worker-only row's state word and hue while its worker isn't ready; null leaves the row's own. */
+export function workerWord(m) {
+  if (!only(m) || m.status !== 'ready') return null;
+  const { tone } = workerState(m);
+  return { info: ['Setting up', 'running'], warn: ['Needs a fix', 'waiting'], danger: ['Needs a fix', 'danger'] }[tone] ?? null;
+}
+
+/** A row's reason with its Minion turns in it; they stand for it where the worker is all that computer runs. */
+export function workerReason(m) {
+  if (!m.worker?.on) return m.reason;
+  const { word } = workerState(m);
+  const turns = `Minion turns: ${word[0].toLowerCase()}${word.slice(1)}`;
+  return only(m) || word === m.reason || m.reason === 'Runs minion turns' ? turns : `${m.reason} · ${turns}`;
+}
 
 /** A change to the row's worker, shown at once, with its request behind. */
 function change(m, fields, send, label, redraw) {
@@ -132,7 +146,7 @@ function installBlock(m, k, redraw) {
     { class: 'worker-install' },
     m.worker.host ? null : h('div', { class: 'row worker-os', role: 'group', 'aria-label': 'That PC runs' }, tab('windows', 'Windows'), tab('linux', 'Linux')),
     capsInputs(m, k, draw),
-    h('p', { class: 'small' }, win ? 'On that PC, open PowerShell as yourself (not as administrator) and run:' : 'On that computer, open a terminal and run (it asks for your password):'),
+    h('p', { class: 'small' }, win ? 'On that PC, open PowerShell as yourself (not as administrator) and run:' : 'On that PC, open a terminal and run (it asks for your password):'),
     box,
     h(
       'p',
@@ -172,7 +186,7 @@ function signIns(m, k) {
   return h(
     'section',
     { class: 'worker-part' },
-    h('div', { class: 'worker-part-head' }, h('h4', {}, 'Your sign-ins there'), chip('Claude', w.signed_in), chip('GitHub', w.github)),
+    h('div', { class: 'worker-part-head' }, h('h4', {}, 'Sign-ins there'), chip('Claude', w.signed_in), chip('GitHub', w.github)),
     w.image?.state === 'building' && todo.length ? h('p', { class: 'muted small' }, 'These work once its image is built.') : null,
     todo.length ? h('p', { class: 'small' }, `In ${win ? 'PowerShell' : 'a terminal'} on that PC:`) : null,
     ...todo.map(how),
@@ -234,7 +248,7 @@ export function workerSection(m, redraw) {
     h(
       'div',
       { class: 'worker-head-text' },
-      h('span', { class: 'worker-head-line' }, w.on ? toneChip(st.tone, st.word) : h('b', {}, 'Off')),
+      h('span', { class: 'worker-head-line' }, h('b', {}, 'Minion turns'), w.on ? toneChip(st.tone, st.word) : null),
       h('span', { class: 'muted small' }, m.owner_id === null && !w.on ? 'A machine runs only its owner\'s minions, and this one is shared. To use that PC, add it again with "Mine" ticked and switch it on in that row.' : st.why),
     ),
   );
@@ -246,7 +260,7 @@ export function workerSection(m, redraw) {
     { class: 'worker', 'data-tone': st.tone },
     head,
     w.here && caps
-      ? statTiles([caps.workers, 'minions at once', 'running'], [caps.threads, 'CPU threads', 'running'], [`${caps.memory_gb} GB`, 'memory', 'running'], [w.disk_gb === null ? `${caps.disk_gb} GB` : `${Math.round(w.disk_gb)}/${caps.disk_gb} GB`, w.disk_gb === null ? 'disk' : 'disk used', w.full ? 'waiting' : 'running'])
+      ? statTiles([caps.workers, 'minions at once', 'running'], [caps.threads, 'CPU threads', 'running'], [`${caps.memory_gb} GB`, 'memory', 'running'], [`${w.disk_gb === null ? caps.disk_gb : Math.round(w.disk_gb)} GB`, w.disk_gb === null ? 'disk' : `disk of ${caps.disk_gb}`, w.full ? 'waiting' : 'running'])
       : null,
     owner ? null : h('p', { class: 'muted small' }, 'Its owner sets it up, signs in and changes its caps on that PC.'),
     owner && !w.host ? h('section', { class: 'worker-part' }, h('div', { class: 'worker-part-head' }, h('h4', {}, 'Run once on that PC')), installBlock(m, k, redraw)) : null,

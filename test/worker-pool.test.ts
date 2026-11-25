@@ -44,16 +44,46 @@ test('one that waited 20 minutes goes with the front group', () => {
 
 test('everyone gets their first two workers before anyone gets more', () => {
   const waiting = [w(1, 7), w(2, 7), w(3, 7), w(4, 7), w(5, 8)];
-  assert.equal(pick(waiting, new Map([[7, 2], [8, 1]]), 0)?.ticket, 5);
+  assert.equal(
+    pick(
+      waiting,
+      new Map([
+        [7, 2],
+        [8, 1],
+      ]),
+      0,
+    )?.ticket,
+    5,
+  );
 });
 
 test('past that, a share is in proportion to what a person has running and waiting', () => {
   const joshs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => w(n, 7, 1, n + 100));
   const caras = [w(20, 8), w(21, 8)];
   // Josh runs 3 of 13, Cara 2 of 4: he is further below his share.
-  assert.equal(pick([...caras, ...joshs], new Map([[7, 3], [8, 2]]), 0)?.ticket, 1);
+  assert.equal(
+    pick(
+      [...caras, ...joshs],
+      new Map([
+        [7, 3],
+        [8, 2],
+      ]),
+      0,
+    )?.ticket,
+    1,
+  );
   // Josh runs 8 of 18, Cara 2 of 8: she is.
-  assert.equal(pick([...joshs, ...[20, 21, 22, 23, 24, 25].map((n) => w(n, 8))], new Map([[7, 8], [8, 2]]), 0)?.ticket, 20);
+  assert.equal(
+    pick(
+      [...joshs, ...[20, 21, 22, 23, 24, 25].map((n) => w(n, 8))],
+      new Map([
+        [7, 8],
+        [8, 2],
+      ]),
+      0,
+    )?.ticket,
+    20,
+  );
 });
 
 test('an empty line picks nothing', () => assert.equal(pick([], new Map(), 0), null));

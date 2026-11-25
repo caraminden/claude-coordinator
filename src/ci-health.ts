@@ -1076,20 +1076,15 @@ export class CiHealth {
     const heldOk = held && held.project_id === p.id && held.number != null ? held : null;
     // #1491: any red run of the streak, not only its first: a minion started later names the newest.
     const ids = [mark.run, ...(mark.runs ?? [])].map(String);
-    // #1849: a title or brief naming a run is the strong claim; a chat mention alone (an investigator, a reviewer) only
-    // counts when no strong one is open, so it can't take or keep the hold from the minion the red was briefed to.
+    // #1849: a title or brief naming a run is the strong claim; a chat mention alone only counts when no strong one is open.
     const cands = this.store
       .listTickets(p.id)
       .filter((x) => x.number != null && (mark.chat?.ids.includes(x.id) || x.created_at >= (mark.told ?? 0) - 60_000))
       .sort((a, b) => a.created_at - b.created_at)
-      .map((x) => {
-        const brief = this.store.eventsOfKinds(x.id, ['user_message'])[0]?.data ?? '';
-        return { x, strong: ids.some((id) => x.title.includes(id) || brief.includes(id)) };
-      })
+      .map((x) => ({ x, strong: ids.some((id) => x.title.includes(id) || (this.store.eventsOfKinds(x.id, ['user_message'])[0]?.data ?? '').includes(id)) }))
       .filter((c) => c.strong || mark.chat?.ids.includes(c.x.id));
     const open = (c: { x: Ticket }) => c.x.status !== 'closed';
-    // The first open strong one (Josh, 2026-11-19: a later minion that only quotes the run can't take the hold from the open
-    // one), then an open holder, then an open chat-named one; a closed holder keeps it only when nobody open names the run.
+    // First open strong one (Josh, 2026-11-19), then an open holder, then an open chat-named one; a closed holder only when nobody open names the run.
     const pick = cands.find((c) => c.strong && open(c))?.x ?? (heldOk && heldOk.status !== 'closed' ? heldOk : null) ?? cands.find(open)?.x;
     return pick ?? heldOk ?? cands.filter((c) => c.strong).at(-1)?.x ?? cands.at(-1)?.x ?? null;
   }

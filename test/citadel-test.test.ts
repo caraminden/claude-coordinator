@@ -247,3 +247,19 @@ test('a plain red on a quiet box, and a green run, get no hint', async () => {
   assert.equal(g.code, 0, g.out);
   assert.doesNotMatch(g.out, /Before chasing/);
 });
+
+// #1928: citadel-test's own wiring of the shared limit: its files wait for a place held elsewhere, the run says so, and starts anyway.
+test('a run waits for a held place, starts anyway after the wait, and says so in one line', async () => {
+  const heavyDir = join(tmp, 'gate-heavy');
+  mkdirSync(heavyDir, { recursive: true });
+  const holder = spawn('flock', [join(heavyDir, 'test-slot-0'), 'sleep', '600'], { stdio: 'ignore', detached: true });
+  try {
+    await until('the place held', () => existsSync(join(heavyDir, 'test-slot-0')));
+    const r = await run([file('gated.test.ts', `test('ran', () => {});`)], noList, { CITADEL_TEST_FILES: '1', CITADEL_TEST_FILES_MIN: '1', CITADEL_TEST_FILES_MAX: '1', CITADEL_TEST_ROOM_WAIT: '1', CITADEL_HEAVY_DIR: heavyDir, CITADEL_HEAVY_PRESSURE: join(tmp, 'no-psi') });
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /^citadel-test: waiting for room: 1 test files may run at once on this box and other runs hold them; starts anyway after 1 s$/m);
+    assert.equal(r.out.match(/waiting for room/g)?.length, 1);
+  } finally {
+    process.kill(-holder.pid!, 'SIGTERM'); // the group: flock's sleep too
+  }
+});

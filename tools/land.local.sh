@@ -142,7 +142,7 @@ CHECK=''
 # Citadel's early check is the merge-tree trial, which the core's smoke always does; it has no light check to run.
 EARLY_CHECK=0
 # Citadel land.sh 929-939: a feeder's --into runs the test files it names, without the always-tests.
-CHECK_FILE_CMD='CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${DEPLOY_TEST_TIMEOUT:-600}" {file}'
+CHECK_FILE_CMD='CITADEL_TEST_FILES=0 CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${DEPLOY_TEST_TIMEOUT:-600}" {file}'
 # Citadel land.sh smoke(): parse check, stale docs, always-tests and changed tests, flake retry (citadel_smoke).
 SMOKE_CMD=citadel_smoke
 # citadel-test's own limit (LAND_SMOKE_TIMEOUT) decides first; this outer one only covers the flake reruns after it.
@@ -224,7 +224,7 @@ citadel_smoke() {
     fi
     if [ ${#tests[@]} -gt 0 ]; then
       citadel_tell "smoke: running ${#tests[@]} test files"
-      out=$(tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "${tests[@]}" 2>&1) || rc=$?
+      out=$(CITADEL_TEST_FILES=0 tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "${tests[@]}" 2>&1) || rc=$?
       if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
         citadel_tell "smoke: the tests ran past ${LAND_SMOKE_TIMEOUT:-300} s, so they don't decide: getting in line, and CI runs them all"
         exit 124
@@ -235,7 +235,7 @@ citadel_smoke() {
         # Each failed file once more alone (ADR 0006): one that passes alone is a likely flake from load and doesn't decide.
         mapfile -t failed < <(sed -nE 's/^✖ ([^ :]+\.test\.ts)(:[0-9]+)? › .*/\1/p' <<<"$out" | sort -u)
         for f in "${failed[@]}"; do
-          CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "$f" >/dev/null 2>&1 || still+=("$f")
+          CITADEL_TEST_FILES=0 CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "$f" >/dev/null 2>&1 || still+=("$f")
         done
         if [ ${#failed[@]} -gt 0 ] && [ ${#still[@]} -eq 0 ]; then
           for f in "${failed[@]}"; do citadel_retro_log "flake · $f · smoke · $label"; citadel_tell "flake: $f · smoke"; done
@@ -259,7 +259,7 @@ citadel_guards() {
   done
   if [ ! -x tools/citadel-test ] || [ ${#tests[@]} -eq 0 ]; then exit 0; fi
   short=$(git rev-parse --short HEAD)
-  out=$(CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_GUARD_TIMEOUT:-120}" "${tests[@]}" 2>&1) || rc=$?
+  out=$(CITADEL_TEST_FILES=0 CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_GUARD_TIMEOUT:-120}" "${tests[@]}" 2>&1) || rc=$?
   case $rc in
     0) citadel_tell "guard tests passed on $short in $((SECONDS - t0)) s"; exit 0 ;;
     2 | 124 | 137) echo "$out"; exit 2 ;;

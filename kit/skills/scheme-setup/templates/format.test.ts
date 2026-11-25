@@ -10,7 +10,8 @@ import { join } from 'node:path';
 const root = join(import.meta.dirname, '..');
 const bin = join(root, 'node_modules/.bin/biome');
 
-export const FIX = 'Run `tools/fmt` and commit the result. A branch that was started before the reformat: run `tools/fmt` on your branch, commit it, then rebase onto main (`git rebase main -X theirs` keeps your side of every formatting-only conflict, and the formatter fixes the rest again).';
+export const FIX =
+  "Run `tools/fmt` and commit the result. When a rebase onto main conflicts over formatting: format your branch first, `git rebase main`, settle each conflict by hand keeping both main's change and yours (never `-X theirs` or `-X ours`: one drops landed work without a word, the other yours), then `tools/fmt` again.";
 
 test('every .ts, .js and .mjs file is formatted', { skip: !existsSync(bin) && !process.env.CI ? 'Biome is not installed here (run `npm ci`); CI runs this check' : false }, () => {
   assert.ok(existsSync(bin), 'Biome is missing: run `npm ci`');

@@ -4,7 +4,7 @@
 # flags are formatted instead of the whole repo, e.g. `tools/fmt src/runner.ts`.
 # `tools/fmt --own` (and `--check --own`, test/format-own.test.ts) takes only the files this branch changed: against
 # main, or the build/<n> it was rebased onto, so never another minion's. Uncommitted edits count; a file git doesn't track
-# is formatted but never checked, since it isn't in the ship. Exit 3: Biome couldn't run, so nothing was checked.
+# is formatted but never checked, since it isn't in the ship. At a build's tip, with no edits, it takes the whole build's. Exit 3: Biome couldn't run, so nothing was checked.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 bin=node_modules/.bin/biome
@@ -18,7 +18,8 @@ how=(format --write); [ -z "$check" ] || how=(format)
 [ -n "$own" ] || exec "${run[@]}" "${how[@]}" "${@:-.}"
 
 base=$(git merge-base main HEAD) || { echo "fmt: there is no main to compare with, so nothing was checked" >&2; exit 3; }
-while read -r b; do # a build branch under this one: its feeders' files are theirs
+while read -r b; do # a build branch under this one: its feeders' files are theirs, unless this is the build's own ship (at its tip, land.sh --build)
+  [ "$(git rev-parse "$b")" != "$(git rev-parse HEAD)" ] || ! git diff --quiet HEAD -- || continue
   b=$(git merge-base "$b" HEAD) && git merge-base --is-ancestor "$base" "$b" && base=$b
 done < <(git for-each-ref --format='%(refname)' 'refs/heads/build/*')
 files=()

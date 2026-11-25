@@ -18,7 +18,7 @@ function fmtRepo(installed = true) {
   const r = setup();
   for (const f of ['tools/fmt', 'tools/citadel-test', 'tools/citadel-test-reporter.ts', 'tools/citadel-node', 'tools/citadel-node.cjs', 'tools/mem-room', 'test/leak-guard.ts', 'test/leak-file.ts', 'test/format-own.test.ts', 'biome.json', 'package.json']) {
     mkdirSync(dirname(join(r.source, f)), { recursive: true });
-    cpSync(join(repo, f), join(r.source, f));
+    if (existsSync(join(repo, f))) cpSync(join(repo, f), join(r.source, f)); // a base without the check fails on what it lets through
   }
   // Only the format check of the real list; whether the list has it is asserted below.
   const listed = readFileSync(join(repo, 'tools/always-tests.txt'), 'utf8')
@@ -121,13 +121,21 @@ test("--own leaves a build's other feeders' files alone", { skip }, () => {
   assert.equal(x.code, 1);
   assert.match(x.out, /mine2\.ts/);
   assert.doesNotMatch(x.out, /other-feeder/);
+  // The build's own ship is at its tip: every file it brings to main is its own, a feeder's too (--into has no smoke check).
+  git(r.source, 'branch', '-f', 'build/7', 'ticket/1-x');
+  const tip = r.fmt(['--check', '--own']);
+  assert.equal(tip.code, 1, tip.out);
+  assert.match(tip.out, /other-feeder/);
+  // A feeder that starts there and edits a file answers for its edit alone.
+  assert.equal(r.fmt(['mine2.ts']).code, 0);
+  const edit = r.fmt(['--check', '--own']);
+  assert.equal(edit.code, 0, edit.out);
 });
 
-// The advice in test/format.test.ts: -X theirs, which it used to give, drops a landed change.
+// The advice in test/format.test.ts and the kit's copy: -X theirs, which it used to give, drops a landed change.
 test('the reformat advice never drops landed work', () => {
-  for (const f of ['test/format.test.ts']) {
+  for (const f of ['test/format.test.ts', 'kit/skills/scheme-setup/templates/format.test.ts']) {
     const fix = /export const FIX =\s*(.*);/.exec(readFileSync(join(repo, f), 'utf8'))![1];
-    assert.match(fix, /settle each conflict by hand/, f);
-    assert.match(fix, /never `-X theirs`/, f);
+    assert.doesNotMatch(fix, /rebase[^`]*(-X|--strategy)/, f);
   }
 });

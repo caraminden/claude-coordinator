@@ -109,6 +109,8 @@ const installed = typeof matchMedia === 'function' && matchMedia('(display-mode:
 // Citadel's page in a contraption's layer (below): the contraption under it, whose entry puts the layer away (its layer message).
 const inLayer = !inContraption && !!framedIn;
 let layerApp;
+// One that reloads while put away is so from the start: the parent's message only comes once it has loaded.
+if (inLayer && window.frameElement?.closest('.citadel-layer')?.hidden) document.documentElement.classList.add('put-away');
 
 let layer = null; // a contraption's installed window: Citadel's page over it, kept once opened (#311)
 let layerOpener = null;

@@ -151,10 +151,20 @@ test('a hidden tab that reloaded itself marks its chat seen only once shown', { 
   assert.deepEqual(await posted(page), ['seen 101']);
 });
 
-test('a mark still waiting to be sent when the tab is hidden is not sent', { skip }, async () => {
+test('a mark still waiting when the chat goes out of sight goes at once, so it never covers what comes next', { skip }, async () => {
   const page = await openChat();
-  await page.eval(`finish(); hide(true); posts.length = 0`);
-  assert.deepEqual(await posted(page), []);
+  assert.deepEqual(await page.eval(`finish(); hide(true); [...posts]`), ['left 101', 'seen 101']);
+  await page.eval('hide(false)');
+  await posted(page);
+  await page.eval(`posts.length = 0; finish(); location.hash = '#/apps/toc'`);
+  await waitFor(page, 'the app', `document.documentElement.classList.contains('framed')`);
+  await page.eval(`finish(); location.hash = '#/p/1/t/8'`);
+  await waitFor(page, 'the other chat', `document.getElementById('ticket-head')?.textContent.includes('Minion 8')`);
+  assert.deepEqual(
+    (await posted(page)).filter((p) => p.endsWith(' 101')),
+    ['seen 101'],
+    'only what was on screen is seen, and nothing is left',
+  );
 });
 
 test('a tab shown again with its stream alive marks the chat seen', { skip }, async () => {
@@ -224,9 +234,11 @@ test("a chat in Citadel's put-away layer is not marked seen or here until the la
   await page.eval(`${w}.finish(); ${w}.reconnect(); ${w}.hide(true); ${w}.hide(false)`);
   assert.deepEqual(await posted(page, w), []);
   // A new front end reloads it out of sight: still put away, and where it was.
-  await page.eval(`${w}.location.reload()`);
+  // Its parent's word only comes with its load event, here never: it knows by itself.
+  await page.eval(`document.addEventListener('load', (e) => e.target.tagName === 'IFRAME' && e.stopPropagation(), true); ${w}.location.reload()`);
   await waitFor(page, 'the chat again', `${w}.document.getElementById('ticket-head')?.textContent.includes('Minion 7') && ${w}.streams.length`);
   assert.deepEqual(await posted(page, w), []);
+  assert.equal(await page.eval(`${w}.presence.includes(101)`), false);
   await click('window', '');
   await waitFor(page, 'the layer back', `!document.querySelector('.citadel-layer').hidden`);
   assert.deepEqual(await posted(page, w), ['seen 101']);

@@ -1051,7 +1051,9 @@ const listed = (id) => (view?.kind === 'project' ? (view.tickets?.get(id) ?? (vi
 /** The open chat is going out of sight (a hidden tab, an app over it, a put-away layer): what it was when last seen, until it's back. */
 function chatCovered() {
   const t = listed(view?.id);
-  if (t) view.sawAt ??= t.updated_at;
+  if (!t) return;
+  view.sawAt ??= t.updated_at;
+  seenTimers.get(t.id)?.(); // a mark still waiting was asked for in sight: sent now, as what happens next isn't seen
 }
 
 /** Back in sight from under an app or a put-away layer. */
@@ -1070,7 +1072,7 @@ function coverWith(name, src) {
   reportPresence();
 }
 
-const seenTimers = new Map();
+const seenTimers = new Map(); // chat id → sends its waiting mark now
 /** Record that you have looked at the open chat as it is now (shortly, so a burst of updates sends one), if it can be seen. */
 export function markSeen(ticketId) {
   if (!chatInSight()) return void (view?.id === ticketId && (view.sawAt ??= 0));
@@ -1082,20 +1084,20 @@ export function markSeen(ticketId) {
     renderSidebar();
   }
   if (seenTimers.has(ticketId)) return;
-  seenTimers.set(
-    ticketId,
-    setTimeout(async () => {
-      seenTimers.delete(ticketId);
-      if (!me || (view?.id === ticketId && !chatInSight())) return; // it went out of sight first: marked when it's back
-      try {
-        const { seen_at } = await api(`api/tickets/${ticketId}/seen`, { method: 'POST', body: {} });
-        if (view?.kind !== 'project') return;
-        if (view.seen[ticketId] === seen_at) return; // nothing changed: no second redraw per update (#1532)
-        view.seen[ticketId] = seen_at;
-        scheduleSidebar();
-      } catch {}
-    }, 800),
-  );
+  const send = async () => {
+    clearTimeout(timer);
+    seenTimers.delete(ticketId);
+    if (!me) return;
+    try {
+      const { seen_at } = await api(`api/tickets/${ticketId}/seen`, { method: 'POST', body: {} });
+      if (view?.kind !== 'project') return;
+      if (view.seen[ticketId] === seen_at) return; // nothing changed: no second redraw per update (#1532)
+      view.seen[ticketId] = seen_at;
+      scheduleSidebar();
+    } catch {}
+  };
+  const timer = setTimeout(send, 800);
+  seenTimers.set(ticketId, send);
 }
 
 /**
@@ -1110,8 +1112,8 @@ function leaveSeen(ticketId) {
 addEventListener('pagehide', () => document.visibilityState === 'visible' && view?.kind === 'project' && leaveSeen(view.id));
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'hidden' || view?.kind !== 'project') return;
-  chatCovered();
   leaveSeen(view.id);
+  chatCovered();
 });
 
 function onEvent(event) {

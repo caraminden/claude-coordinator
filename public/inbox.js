@@ -1,7 +1,7 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, heldWhilePressed, phase, isCoordinator, isSeen, jumpHref, schemeIcon, taskmasterLabel, threadHref, view } from './base.js';
-import { answeredItems, withoutCards, cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
+import { answeredItems, putBackCards, withoutCards, cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
 import { TM_VIEW } from './mine.js';
 import { iconSrc } from './schemes.js';
 import { askWhy, mentions } from './threadstate.js';
@@ -48,7 +48,7 @@ export function answerNow(ticketId, which) {
   redraw();
   return () => {
     for (const i of hit) answered.delete(i.key);
-    if (t) Object.assign(t, { open_cards: cards, replies });
+    putBackCards(view, ticketId, t, { open_cards: cards, replies });
     redraw();
   };
 }
@@ -67,8 +67,15 @@ export async function refreshInbox() {
   // Home's list (#1140) moves with the same news as every scheme's counts.
   if (view.home) import('./home.js').then((m) => m.refreshHomeSoon());
   const projectId = view.projectId;
-  takeItems(projectId, await fetchInbox(projectId));
+  const mine = ++fetchSeq;
+  const items = await fetchInbox(projectId);
+  // Two fetches overlap: the older answer, landing last, must not draw over the newer (WP10, #1858).
+  if (mine < drawnSeq) return;
+  drawnSeq = mine;
+  takeItems(projectId, items);
 }
+let fetchSeq = 0;
+let drawnSeq = 0;
 
 /** Draw a scheme's items as fetched: by refreshInbox, or by the scheme's open, which fetched them just now (project.js). */
 export function takeItems(projectId, items) {

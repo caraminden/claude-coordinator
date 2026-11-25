@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { answeredItems, withoutCards, cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
+import { answeredItems, putBackCards, withoutCards, cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -232,4 +232,16 @@ test("answering a card drops it from the strip count and the row's open cards be
   assert.equal(minionCount(stripItems(view, items, both)), 1, 'its last card answered: the minion leaves the count');
   const cards = [{ href: '#/p/2/t/9?e=50' }, { href: '#/p/2/t/9?e=51' }];
   assert.deepEqual(withoutCards(cards, hit), [{ href: '#/p/2/t/9?e=51' }]);
+});
+
+test('a refused answer puts the cards back on the live row, not the copy it began with (WP11)', () => {
+  const old = { id: 900, open_cards: [], replies: [] };
+  const live = { id: 900, open_cards: [], replies: [] }; // a stream update replaced the row's object
+  const view = { tickets: new Map([[900, live]]) };
+  putBackCards(view, 900, old, { open_cards: [{ href: '?e=5' }], replies: ['x'] });
+  assert.equal(live.open_cards.length, 1);
+  assert.equal(old.open_cards.length, 0);
+  const gone = { tickets: new Map() };
+  putBackCards(gone, 900, old, { open_cards: [{ href: '?e=5' }], replies: [] });
+  assert.equal(old.open_cards.length, 1, 'a row the page no longer knows takes it on the old copy');
 });

@@ -37,3 +37,10 @@ export function groupSchedules(schedules) {
     .filter(([, , rows]) => rows.length)
     .map(([title, hue, rows]) => [title, hue, byCategory(rows)]);
 }
+
+// A schedule that was paused has no next run until the server gives one: null reads as "–", never as 1970 (WP9, #1858).
+const fmt = (ms, opts) => (ms == null ? '–' : new Date(ms).toLocaleString([], opts));
+export const when = (ms) => fmt(ms, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+export const soon = (ms) => fmt(ms, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+/** The live schedule that runs next; one with no time yet is never "next". */
+export const nextSchedule = (live) => live.filter((s) => s.next_run_at != null).reduce((a, s) => (a && a.next_run_at <= s.next_run_at ? a : s), null);

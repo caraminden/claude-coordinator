@@ -585,3 +585,15 @@ test("a failed prep shows GitHub's words on its row and deletes what it pushed",
   assert.match(failed.error!, /Resource not accessible by integration/);
   await until('its branches go', () => gh.calls().some((c) => c.includes(`DELETE repos/o/r/git/refs/heads/${head}-base`)));
 });
+
+test('pressing Prep twice for the same area preps it once (WP7, #1858)', async () => {
+  const { dir, bare } = githubRepo();
+  const gh = fakeGh();
+  const { ur } = reviews(bigRepoClaude().bin, { host: true }, { github: linked, gh: gh.bin, remoteUrl: () => bare });
+  const area = { repo: dir, base: 'main', name: 'Lib', paths: ['lib'], size: { files: 2, lines: 3 } };
+  const [first, second] = await Promise.allSettled([ur.prep(7, 1, 'Cara', area), ur.prep(7, 1, 'Cara', area)]);
+  assert.equal(first.status, 'fulfilled');
+  assert.equal(second.status, 'rejected');
+  assert.match(String((second as PromiseRejectedResult).reason), /already being prepped/);
+  assert.equal(ur.rows(7, 1).length, 1);
+});

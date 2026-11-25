@@ -6,15 +6,11 @@ import { modelName } from './composer.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow, settingsTabs, settingsTitle } from './settings.js';
 import { optimistic } from './ui/optimistic.js';
-import { briefSkills, briefSummary, groupSchedules } from './schedule-text.js';
+import { briefSkills, briefSummary, groupSchedules, nextSchedule, soon, when } from './schedule-text.js';
 import { loadingLine } from './ui/state.js';
 
 // A chip's tone as the hue of its row's tile and bar (Citadel's look, #1068).
 const HUE = { ok: 'done', warn: 'waiting', danger: 'danger', info: 'running', neutral: 'held' };
-
-const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-const soon = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
 const money = (n) => `$${n.toFixed(n < 10 ? 2 : 0)}`;
 
@@ -208,7 +204,7 @@ function schedulePage(s) {
           hueRow({ hue: 'accent', lead: 'Model' }, s.model ? modelName(s.model) : 'the model table’s pick'),
           hueRow({ hue: 'accent', lead: 'Effort' }, s.effort ?? 'the model table’s pick'),
           hueRow({ hue: 'teal', lead: 'Type' }, s.type),
-          hueRow({ hue, lead: 'When' }, h('span', { title: cron }, s.when, s.paused ? '' : [' · next ', h('span', { title: new Date(s.next_run_at).toString() }, when(s.next_run_at))])),
+          hueRow({ hue, lead: 'When' }, h('span', { title: cron }, s.when, s.paused ? '' : [' · next ', h('span', { title: s.next_run_at == null ? '' : new Date(s.next_run_at).toString() }, when(s.next_run_at))])),
           hueRow({ hue: 'held', lead: 'Cron' }, h('code', {}, s.cron)),
           s.trigger_count != null ? hueRow({ hue: 'teal', lead: 'Early' }, triggerText(s), h('span', { class: 'muted tnum' }, ` · ${s.trigger_so_far ?? 0} so far`)) : '',
         ),
@@ -227,7 +223,7 @@ function schedulePage(s) {
 /** Every schedule at once: what runs on a timer, the next one, and what is paused; then where to pick one. */
 function overview(schedules) {
   const live = schedules.filter((s) => !s.paused);
-  const next = live.reduce((a, s) => (a && a.next_run_at <= s.next_run_at ? a : s), null);
+  const next = nextSchedule(live);
   const failed = schedules.filter((s) => s.last_error).length;
   return [
     statTiles([String(live.length), 'on a timer', 'running'], [next ? soon(next.next_run_at) : '–', next ? `next · ${next.name}` : 'nothing due', 'teal'], [String(schedules.length - live.length), 'paused or done', 'held'], failed ? [String(failed), "didn't start", 'danger'] : null),
@@ -237,8 +233,16 @@ function overview(schedules) {
   ];
 }
 
+let drawnFor; // the schedule the page shows now: a redraw for the same one waits for a field being edited
 function drawPage() {
   if (!pageEl?.isConnected) return;
+  // Fields save on change: a redraw under one in use drops the typed text and the focus (WP5, #1858), so it waits for the blur.
+  const f = document.activeElement;
+  if (drawnFor === current && f && pageEl.contains(f) && f.matches('input, textarea, select')) {
+    f.addEventListener('blur', drawPage, { once: true });
+    return;
+  }
+  drawnFor = current;
   const s = current && data?.schedules?.find((x) => x.id === current);
   const head = h(
     'div',

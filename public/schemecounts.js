@@ -147,5 +147,11 @@ const sleeping = (view, i) => !!itemTicket(view, i.ticketId)?.asleep && !['appro
 /** The items a person just answered on a minion: its card with that id (an item's `card.id` is the question, plan or approval id), or the ones `which` (a function of the item) picks. #1409 drops them from every count at the click. */
 export const answeredItems = (items, ticketId, which) => items.filter((i) => i.ticketId === ticketId && (typeof which === 'function' ? which(i) : i.card?.id === which));
 
+/** A refused answer's undo: the cards go back on the minion row as it is now, since a stream update may have replaced the object the answer began with (WP11, #1858). */
+export function putBackCards(view, ticketId, was, back) {
+  const live = itemTicket(view, ticketId) ?? was;
+  if (live) Object.assign(live, back);
+}
+
 /** A row's open_cards less the answered items' cards (a card link names its chat event, `?e=<eventId>`, as the item does). */
 export const withoutCards = (cards, answered) => cards.filter((c) => !answered.some((i) => c.href?.endsWith(`?e=${i.eventId}`)));

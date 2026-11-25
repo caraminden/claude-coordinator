@@ -43,7 +43,16 @@ export function ideasPage() {
   const replace = (idea) => {
     const i = data.ideas.findIndex((x) => x.id === idea.id);
     if (i >= 0) data.ideas[i] = idea;
-    render();
+    // Only this idea's row is rebuilt: a number being typed in another row keeps its field (WP6, #1858).
+    const mine = rows.filter((x) => x.r.id === idea.id);
+    if (!mine.length || mine.some((x) => x.pin && idea.status !== 'later')) return render();
+    for (const x of mine) {
+      const el = row(idea);
+      x.el.replaceWith(el);
+      Object.assign(x, { el, r: idea });
+    }
+    drawPick();
+    filter();
   };
 
   const row = (r) => {
@@ -125,25 +134,9 @@ export function ideasPage() {
     meta.textContent = data.ideas.length ? `${words.length || status ? `${shown} of ` : ''}${data.ideas.length} idea${data.ideas.length === 1 ? '' : 's'} · from choices pages with a Later option and the handoffs folder · noted picks also show in Decisions` : '';
   };
 
-  const render = () => {
-    rows.length = 0;
-    const waiting = new Set(data.waiting);
-    const pins = data.ideas.filter((r) => waiting.has(r.id) && r.status === 'later');
-    pinned.replaceChildren(
-      ...pins.map((r) => {
-        const el = row(r);
-        rows.push({ el, r, pin: true });
-        return el;
-      }),
-    );
-    list.replaceChildren(
-      ...data.ideas.map((r) => {
-        const el = row(r);
-        rows.push({ el, r });
-        return el;
-      }),
-    );
+  const drawPick = () => {
     const counts = Object.fromEntries(STATUSES.map((s) => [s, data.ideas.filter((r) => r.status === s).length]));
+    if (status && !counts[status]) status = ''; // its last idea moved away: the filter goes back to all
     pick.replaceChildren(
       ...[['', `All ${data.ideas.length}`], ...STATUSES.filter((s) => counts[s]).map((s) => [s, `${cap(s)} ${counts[s]}`])].map(([key, label]) =>
         h(
@@ -162,6 +155,27 @@ export function ideasPage() {
         ),
       ),
     );
+  };
+
+  const render = () => {
+    rows.length = 0;
+    const waiting = new Set(data.waiting);
+    const pins = data.ideas.filter((r) => waiting.has(r.id) && r.status === 'later');
+    pinned.replaceChildren(
+      ...pins.map((r) => {
+        const el = row(r);
+        rows.push({ el, r, pin: true });
+        return el;
+      }),
+    );
+    list.replaceChildren(
+      ...data.ideas.map((r) => {
+        const el = row(r);
+        rows.push({ el, r });
+        return el;
+      }),
+    );
+    drawPick();
     filter();
   };
   api(`api/projects/${p.id}/ideas`).then(

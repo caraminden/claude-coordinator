@@ -3,6 +3,7 @@ import { api, h, icon, me, view } from './base.js';
 import { threadRefs } from './core.js';
 import { settingsHelp, settingsRow, settingsTabs, settingsTitle, tuneUpButton } from './settings.js';
 import { filterChoices, samePicks, valueCounts, viewPicks } from './propfilter.js';
+import { sharedRead } from './shared-read.js';
 import { otherOwner, takeOver } from './payer.js';
 import { renderSidebar } from './sidebar.js';
 import { optimistic } from './ui/optimistic.js';
@@ -144,22 +145,9 @@ const filterSeen = new Map();
 
 // The registry is asked for by the filter and the Settings count in the same load: one read serves both, until a few
 // seconds after it's answered (counted from the answer, so a slow open doesn't ask twice, #1528).
-let registryRead = null;
-function readRegistry(projectId) {
-  if (registryRead?.projectId !== projectId || (registryRead.at && Date.now() - registryRead.at > 5000)) {
-    const entry = { projectId, at: 0, read: api(`api/projects/${projectId}/properties`) };
-    registryRead = entry;
-    entry.read.then(
-      () => {
-        entry.at = Date.now();
-      },
-      () => {
-        if (registryRead === entry) registryRead = null;
-      },
-    );
-  }
-  return registryRead.read;
-}
+const registry = sharedRead((projectId) => api(`api/projects/${projectId}/properties`));
+const readRegistry = registry.read;
+const forgetRegistry = registry.forget;
 
 /** Fetch a scheme's filter data before it is shown (project.js waits on it the first time); a scheme seen before shows its last and refreshes behind. */
 export function preparePropFilter(projectId) {
@@ -401,6 +389,7 @@ const openProps = new Set(); // keys (and the new-key row) left open, across red
 
 export function onPropertiesChanged(projectId) {
   if (view?.kind !== 'project' || (projectId !== null && projectId !== view.projectId)) return;
+  forgetRegistry();
   renderSettingsCount();
   propFilter.keys = null;
   renderPropFilter();
@@ -426,14 +415,17 @@ export function propertiesPage() {
   return section;
 }
 
+let renderSeq = 0; // a draw whose read was answered after a newer draw began is dropped
 async function renderPropertiesPage() {
   const body = document.getElementById('props-body');
   if (!body) return;
+  const mine = ++renderSeq;
   let reg;
   try {
     reg = await loadProperties();
+    if (mine !== renderSeq) return;
   } catch (err) {
-    body.replaceChildren(h('p', { class: 'muted' }, err.message));
+    if (mine === renderSeq) body.replaceChildren(h('p', { class: 'muted' }, err.message));
     return;
   }
   if (!reg || !body.isConnected) return;
@@ -453,6 +445,7 @@ async function renderPropertiesPage() {
       const r = await api(`api/projects/${view.projectId}/properties/${path}`, { method: 'POST', body: payload });
       if (r.warnings?.length) return r.warnings;
       done?.();
+      forgetRegistry();
       renderPropertiesPage();
       renderSettingsCount();
     } catch (err) {

@@ -40,3 +40,15 @@ test("standard audits come first, then the scheme's own split by category with O
   ]);
   assert.deepEqual(groupSchedules([]), []);
 });
+
+test('a schedule with no next time reads "–", and is never the next one (WP9)', async () => {
+  const { nextSchedule, soon, when } = await import('../public/schedule-text.js');
+  assert.equal(soon(null), '–');
+  assert.equal(when(null), '–');
+  assert.notEqual(soon(1_000_000_000_000), '–');
+  const a = { name: 'a', next_run_at: null };
+  const b = { name: 'b', next_run_at: 5 };
+  const c = { name: 'c', next_run_at: 9 };
+  assert.equal(nextSchedule([a, c, b]).name, 'b');
+  assert.equal(nextSchedule([a]), null);
+});

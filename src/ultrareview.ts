@@ -291,6 +291,7 @@ export class UltraReviews {
   private live = new Map<string, Running>();
   private timers = new Map<string, NodeJS.Timeout>();
   private prepping = new Map<number, Promise<unknown>>();
+  private asking = new Set<string>(); // areas whose prep has begun and not yet made its row: a repeated press must not prep them twice
   private deps: Deps;
   private jobs: HostJobs;
 
@@ -571,7 +572,15 @@ export class UltraReviews {
   async prep(ticketId: number, uid: number, by: string, a: AreaAsk): Promise<BatchRow> {
     if (overLimit(a.size)) throw new Error(`${a.name}: ${fmt(a.size.files)} files, ${fmt(a.size.lines)} lines, over the CLI's limit of ${fmt(LIMITS.files)} files and ${fmt(LIMITS.lines)} lines. Split it.`);
     if (!this.deps.github(uid)) throw new Error(`${a.name}: ${NO_GITHUB}`);
-    const slug = await repoOnGithub(a.repo);
+    const again = `${ticketId}:${uid}:${a.repo}:${a.base}:${a.name}:${JSON.stringify(a.paths)}`;
+    if (this.asking.has(again) || this.batch().some((x) => x.state === 'prepping' && x.ticketId === ticketId && x.uid === uid && x.repo === a.repo && x.base === a.base && x.name === a.name && JSON.stringify(x.paths) === JSON.stringify(a.paths))) throw new Error(`${a.name}: it is already being prepped`);
+    this.asking.add(again);
+    let slug: string;
+    try {
+      slug = await repoOnGithub(a.repo);
+    } finally {
+      this.asking.delete(again);
+    }
     const id = newId();
     const head = `review/${branchSlug(a.name)}-${id.slice(-6)}`;
     const row: BatchRow = {

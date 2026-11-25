@@ -24,7 +24,8 @@ let pageEl = null,
   pageProject = null,
   focus = null,
   drawnSig = '',
-  entered = false;
+  entered = false,
+  scrolledToFocus = false; // the focused card is scrolled to once per visit: the redraws replace its node, so a flag on it never held
 
 function read(projectId, after) {
   const c = cache.get(projectId) ?? { at: 0, chains: null, after: [] };
@@ -53,6 +54,7 @@ export const chainsHref = (projectId, number) => `#/p/${projectId}/chains${numbe
 export function chainsPage(projectId, number) {
   focus = number ?? null;
   entered = false;
+  scrolledToFocus = false;
   drawnSig = '';
   pageProject = projectId;
   pageEl = h('section', { class: 'artifacts-main chains-main' });
@@ -125,14 +127,21 @@ function draw(projectId) {
         : !chains.length
           ? [emptyCard('No minion waits on another right now', 'When one starts after another, waits on its work, queues for the pipeline lane or feeds a build, its chain shows here.', { mark: '⛓' })]
           : [summary(chains), legend(), ...chains.map((ch) => chainCard(ch))];
+  // Each chain's sideways scroll survives the rebuild, by its key.
+  const sideways = new Map([...pageEl.querySelectorAll('.chain-card')].map((card) => [card.dataset.key, card.querySelector('.chain-flow')?.scrollLeft ?? 0]));
   pageEl.replaceChildren(head, ...body);
+  for (const card of pageEl.querySelectorAll('.chain-card')) {
+    const x = sideways.get(card.dataset.key);
+    const flow = card.querySelector('.chain-flow');
+    if (x && flow) flow.scrollLeft = x;
+  }
   pageEl.classList.toggle('enter', !entered && !!chains?.length);
   if (chains?.length) entered = true;
   requestAnimationFrame(() => {
     for (const flow of pageEl.querySelectorAll('.chain-flow')) wire(flow);
     const hit = focus != null && pageEl.querySelector('.chain-card.focus');
-    if (hit && !hit.dataset.scrolled) {
-      hit.dataset.scrolled = '1';
+    if (hit && !scrolledToFocus) {
+      scrolledToFocus = true;
       hit.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     }
   });

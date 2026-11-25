@@ -396,7 +396,7 @@ test("agents read and write their scheme's pages, by artifact or path, and no ot
 
 test('artifact_data is offered to minions and Taskmasters, and reads a page', async () => {
   const call = (role: string, msg: object, env: object = {}) => {
-    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_ROLE: role, ...env }, stdio: ['pipe', 'pipe', 'inherit'] });
+    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_TICKET: undefined, COORDINATOR_ROLE: role, ...env }, stdio: ['pipe', 'pipe', 'inherit'] });
     const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, ...msg }) + '\n');
     return reply.finally(() => child.kill());

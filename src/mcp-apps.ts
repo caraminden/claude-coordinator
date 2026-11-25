@@ -224,7 +224,7 @@ export const CONTRAPTION_READ = {
 /** A private copy of an app's live data for this turn (src/app-copy.ts): a home scheme's minions. */
 export const COPY_APP_DATA = () => ({
   name: 'copy_app_data',
-  description: `Get a private, throwaway copy of the live data of one of this scheme's apps (${C().HOME_CONTRAPTIONS.join(', ')}), to try a migration or a check on: its SQLite databases, each consistent while the app keeps running. It returns the folder, yours to change; the live folder isn't touched, and the copy is deleted when this turn ends. Asking again replaces it with a fresh copy. Works in a container turn. It holds everyone's rows, so print counts and checks, never rows, and copy none of it elsewhere. Only on a turn a member of this scheme asked for.`,
+  description: `Get a private, throwaway copy of the live data of one of this scheme's apps (${C().HOME_CONTRAPTIONS.join(', ')}), to try a migration or a check on: its SQLite databases, each consistent while the app keeps running. It returns the folder, yours to change; the live data isn't touched, and the copy is deleted when this turn ends. Asking again replaces it with a fresh copy. Works in a container turn. It holds everyone's rows, so print counts and checks, never rows, and copy none of it elsewhere. Only on a turn a member of this scheme asked for.`,
   inputSchema: {
     type: 'object',
     properties: {

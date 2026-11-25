@@ -28,7 +28,8 @@ export interface CopyAsk {
 }
 /** The disk a copy leaves free: a database's copy shares no blocks with the live one. */
 const SPARE = 10 * 1024 ** 3;
-const TIMEOUT_MS = 10 * 60_000;
+/** Under the 5 minutes the MCP tool's fetch waits for an answer. */
+const TIMEOUT_MS = 4 * 60_000;
 
 /** Why this minion's turn may not copy that app's data, or null. */
 export function copyRefusal(store: Store, ticket: Pick<Ticket, 'id' | 'project_id'>, name: string): string | null {
@@ -70,8 +71,8 @@ export async function sweepAppCopies(dataDir: string, before = Date.now()): Prom
   for (const n of await readdir(root).catch(() => [] as string[])) if (Number(n.split('-')[1]) < before) await rm(join(root, n), { recursive: true, force: true });
 }
 
-/** Minions with a copy under way: one at a time each. */
-const copying = new Set<number>();
+/** One copy at a time: two could each find room on the disk and together take what must stay free. */
+let copying = false;
 
 export async function copyAppData({ req, res, app, params, caller }: Ctx) {
   const { store, runner } = app;
@@ -84,8 +85,8 @@ export async function copyAppData({ req, res, app, params, caller }: Ctx) {
   const asker = store.getUser(store.turnAsker(ticket.id)!)!;
   const turn = runner.turnFolder(ticket.id);
   if (!turn) throw new HttpError(409, 'The turn that asked has ended');
-  if (copying.has(ticket.id)) throw new HttpError(409, 'A copy for this minion is under way: wait for it');
-  copying.add(ticket.id);
+  if (copying) throw new HttpError(409, "Another copy of an app's data is under way, and one runs at a time: try again in a minute");
+  copying = true;
   const ended = new AbortController();
   // Stopped within a second of the turn's end, however it ended.
   const watch = setInterval(() => runner.turnFolder(ticket.id) !== turn && ended.abort(), 1000);
@@ -110,6 +111,6 @@ export async function copyAppData({ req, res, app, params, caller }: Ctx) {
   } finally {
     clearInterval(watch);
     await rm(part, { recursive: true, force: true });
-    copying.delete(ticket.id);
+    copying = false;
   }
 }

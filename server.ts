@@ -1170,9 +1170,9 @@ if (!BOOT_CHECK && !PREVIEW) {
   );
   // Contraption turns' media files past 30 days (#732); first soon after boot, as deploys restart the server more often than daily.
   every('contraption media sweep', 24 * 60 * 60_000, async () => void sweepMedia(join(DATA_DIR, 'contraption-media')), 10 * 60_000);
-  // Kept chats for replay past 30 days (#836), apps that stopped keeping included.
   // Half-made copies of an app's data a crash left (#1884): at once, since they hold its people's rows.
   void sweepAppCopies(DATA_DIR).catch((err) => console.error(`Sweeping app copies failed: ${err?.message ?? err}`));
+  // Kept chats for replay past 30 days (#836), apps that stopped keeping included.
   every('kept chats sweep', 24 * 60 * 60_000, async () => sweepKept(DATA_DIR), 10 * 60_000);
 }
 // Contraption turns' audit rows past AUDIT_DAYS (#844), soon after boot and then daily. Previews and dev copies (BOOT_CHECK) don't sweep: they live hours and are deleted when stopped.

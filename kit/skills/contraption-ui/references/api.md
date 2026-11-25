@@ -1049,12 +1049,17 @@ folder isn't touched, calling again gives a fresh copy, and the copy is deleted 
 fails or is killed. A background job that outlives the turn loses it.
 
 - `files: true` brings the other files too. Never copied: `.env` and key files (names like `*.pem`,
-  `*.key`, `id_ed25519`, or holding secret, token, password or credential), links, and `backups/`; the answer lists what was left
-  out. A secret stored inside a database is copied with it.
+  `*.key`, `id_ed25519`, or holding secret, token, password or credential, in a folder so named too), `secrets/` and the like, links, and
+  `backups/`; nor a file that can't be read. The answer lists what was left out. Elsewhere a database is copied whatever its name,
+  with any secret stored inside it.
+- The live data is only read. A database in WAL mode that your app has closed may gain SQLite's own empty `-wal` and
+  `-shm` files beside it. A host turn has always been able to reach the live folder by its path: run the check on the copy.
+- While it lasts, the copy can also be read by that person's other container turns, whose container is the same one.
 - It holds everyone's rows: print counts and checks, never rows. Each copy leaves a line in the chat
   naming who asked.
 - Refused: a minion outside the home scheme, a turn not asked for by one of its members, a Taskmaster,
-  a copy over 10 GB, or one that would leave under 10 GB of disk free. It takes at most 10 minutes.
+  a copy over 10 GB, or one that would leave under 10 GB of disk free. It takes at most
+  4 minutes, and one copy runs at a time across Citadel.
 
 **Data snapshots** (#1137; Josh, 2026-11-19, picked "Build it"). A deploy whose commit changes a
 `migrations` path stops your app and its timers, copies its `DATA_DIR` to

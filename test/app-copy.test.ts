@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
@@ -40,6 +40,11 @@ mkdirSync(join(data, 'backups', '2026-11-23'), { recursive: true });
 writeFileSync(join(data, 'backups', '2026-11-23', 'x.txt'), 'old');
 writeFileSync(join(root, 'outside.txt'), 'outside');
 symlinkSync(join(root, 'outside.txt'), join(data, 'link.txt'));
+
+// Enough databases that a copy can be caught half way.
+const big = join(home, '.local/share/big');
+mkdirSync(big);
+for (let i = 0; i < 1500; i++) copyFileSync(join(data, 'sub', 'cache.sqlite'), join(big, `${i}.db`));
 
 let n = 0;
 const scratch = () => join(root, `copy-${++n}`);
@@ -122,12 +127,29 @@ test('too much data, too little disk, no databases and a folder that is not ther
   }
 });
 
+test('a database is copied whatever its name; secret files and folders, and a file that cannot be read, are left out and named', async () => {
+  const from = join(root, 'named');
+  mkdirSync(join(from, 'secret-santa'), { recursive: true });
+  mkdirSync(join(from, 'secrets'));
+  for (const f of ['token-ledger.db', 'secret-santa/draws.db', 'secrets/vault.db']) copyFileSync(join(data, 'sub', 'cache.sqlite'), join(from, f));
+  for (const f of ['api-token.txt', 'plain.txt', 'secret-santa/list.txt', 'shut.txt']) writeFileSync(join(from, f), 'x');
+  chmodSync(join(from, 'shut.txt'), 0);
+  const to = scratch();
+  const r = await copy({ from, to, files: true });
+  assert.deepEqual(tree(to), ['plain.txt', 'secret-santa/draws.db', 'token-ledger.db']);
+  assert.deepEqual(r.left_out.sort(), ['api-token.txt', 'secret-santa/list.txt', 'secrets', 'shut.txt']);
+  assert.equal(r.files, 1);
+});
+
 test('a copy stopped half way leaves nothing', async () => {
   const to = scratch();
   const stop = new AbortController();
-  const p = copy({ to, signal: stop.signal });
+  const p = copy({ from: big, to, signal: stop.signal });
+  const stopped = assert.rejects(p);
+  await until('the copy to begin', () => existsSync(to) && readdirSync(to).length > 0);
+  assert.ok(readdirSync(to).length < readdirSync(big).length, 'it is not done');
   stop.abort();
-  await assert.rejects(p);
+  await stopped;
   assert.equal(existsSync(to), false);
 });
 
@@ -201,7 +223,7 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
     }
     out.push({ status: r.status, data, migrated });
   }
-  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ out }) + '\\n');
+  appendFileSync(${JSON.stringify(join(root, 'turns.jsonl'))}, JSON.stringify({ out, token: plan.hold && process.env.COORDINATOR_TOKEN }) + '\\n');
   if (plan.hold) return void setInterval(() => {}, 1000);
   if (plan.fail) process.exit(1);
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }));
@@ -237,6 +259,7 @@ before(async () => {
   const q = (await srv.call('/api/projects', { name: 'Delve' })).data;
   const c = await srv.call('/api/contraptions', { name: 'trips', title: 'Trips', port: await tmp.down(), home_scheme: p.id });
   assert.equal(c.status, 201, JSON.stringify(c.data));
+  assert.equal((await srv.call('/api/contraptions', { name: 'big', title: 'Big', port: await tmp.down(), home_scheme: p.id })).status, 201);
   mine = (await srv.call(`/api/projects/${p.id}/tickets`, { message: 'start' })).data;
   theirs = (await srv.call(`/api/projects/${q.id}/tickets`, { message: 'start' })).data;
   await idle(mine.id);
@@ -257,7 +280,7 @@ test('a turn migrates its copy, the live data is untouched, and the copy is gone
   await until('the copy to go', () => !existsSync(a.data.dir));
   assert.equal(rows(join(data, 'trips.db')), 1);
   assert.deepEqual(readdirSync(join(srv.data, 'run', 'app-copies')), []);
-  assert.match(JSON.stringify((await srv.call(`/api/tickets/${mine.id}/events`)).data), /private copy of the live data of Trips/);
+  assert.match(JSON.stringify((await srv.call(`/api/tickets/${mine.id}/events`)).data), /Cara's turn took a private copy of the live data of Trips/);
 });
 
 test("the copy sits in the turn's own folder and goes when the turn fails or is stopped", async () => {
@@ -270,6 +293,31 @@ test("the copy sits in the turn's own folder and goes when the turn fails or is 
   assert.ok(existsSync(join(held.data.dir, 'trips.db')));
   await srv.call(`/api/tickets/${mine.id}/stop`, {});
   await until('the stopped turn’s copy to go', () => !existsSync(held.data.dir));
+});
+
+test('a turn stopped while its copy is under way leaves nothing', async () => {
+  writeFileSync(join(root, 'plan.json'), JSON.stringify({ apps: ['big'] }));
+  await srv.call(`/api/tickets/${mine.id}/messages`, { text: 'try the migration' });
+  const parts = join(srv.data, 'run', 'app-copies');
+  await until('the copy to begin', () => existsSync(parts) && (readdirSync(parts, { recursive: true }) as string[]).some((f) => f.endsWith('.db')));
+  await srv.call(`/api/tickets/${mine.id}/stop`, {});
+  writeFileSync(join(root, 'plan.json'), JSON.stringify({ apps: [] }));
+  await until('what it copied to go', () => readdirSync(parts).length === 0);
+  await idle(mine.id);
+  assert.deepEqual(
+    (readdirSync(join(srv.data, 'run', 'turns'), { recursive: true }) as string[]).filter((f) => f.endsWith('.db')),
+    [],
+  );
+});
+
+test('the tool itself answers with the folder and what it holds', async () => {
+  await turn(mine, { apps: [], hold: true });
+  const { token } = jsonLines(join(root, 'turns.jsonl')).at(-1)!;
+  const r = await mcpOnce(agentEnv(srv.base, token, mine, 'thread', { COORDINATOR_HOME_CONTRAPTIONS: 'trips', TMPDIR: root }), 'tools/call', { name: 'copy_app_data', arguments: { app: 'trips' } }, tmp.track);
+  assert.match(r.content[0].text, /^A private copy of trips's live data is in \S+\/app-copy\/trips: .*trips\.db \(/);
+  assert.match(r.content[0].text, /It left out .*backups/);
+  await srv.call(`/api/tickets/${mine.id}/stop`, {});
+  await idle(mine.id);
 });
 
 test("another scheme's minion is refused", async () => {

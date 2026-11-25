@@ -334,6 +334,7 @@ export const SCHEMA_HISTORY = [
   [116, 'machine_jobs.pause_failed (#1956)'],
   [117, 'claims.landed, keep (#1985)'],
   [118, 'wait_records (#1992)'],
+  [119, 'claims.handed, beside, beside_since, beside_landed, claim_queue.ready (#1985)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

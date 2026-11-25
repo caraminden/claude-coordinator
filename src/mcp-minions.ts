@@ -502,7 +502,7 @@ function claimLine(c: ClaimView) {
   const waiting = (c.queue ?? []).filter((q) => q.state !== 'done');
   const left = c.estimate ? `, about ${Math.round((c.estimate.left_ms / 3_600_000) * 10) / 10} h left (an estimate from the last ${c.estimate.of} holders)` : '';
   const line = waiting.length ? `; queue: ${waiting.map(chip).join(', ')}; ${c.done} of ${c.total} done${left}` : '';
-  return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}${c.keep ? ', kept through its next live' : ''}${line}`;
+  return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}${c.keep ? ', kept through its next live' : ''}${c.beside_number ? `, #${c.beside_number} shipping beside it` : ''}${line}`;
 }
 
 /** Answers this family's tools; NOT_HERE for any other. */

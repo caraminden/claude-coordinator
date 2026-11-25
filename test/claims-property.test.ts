@@ -11,7 +11,20 @@ const seed = Number(process.env.FC_SEED ?? 20261122);
 const NAME = 'pipeline-lane';
 const ticket = fc.integer({ min: 1, max: 5 });
 
-type Cmd = { op: 'take'; t: number } | { op: 'queue'; ts: number[] } | { op: 'release' } | { op: 'passOn'; how: 'live' | 'released' | 'dismissed' } | { op: 'releaseHeldBy'; t: number } | { op: 'staleRelease'; saw: number } | { op: 'ship'; t: number } | { op: 'live' } | { op: 'keep'; keep: boolean };
+type Cmd =
+  | { op: 'take'; t: number }
+  | { op: 'queue'; ts: number[] }
+  | { op: 'release' }
+  | { op: 'passOn'; how: 'live' | 'released' | 'dismissed' }
+  | { op: 'releaseHeldBy'; t: number }
+  | { op: 'staleRelease'; saw: number }
+  | { op: 'ship'; t: number }
+  | { op: 'live' }
+  | { op: 'keep'; keep: boolean }
+  | { op: 'beside'; t: number }
+  | { op: 'besideLive' }
+  | { op: 'handOff'; t: number }
+  | { op: 'skip'; t: number };
 
 const cmd: fc.Arbitrary<Cmd> = fc.oneof(
   fc.record({ op: fc.constant('take' as const), t: ticket }),
@@ -23,6 +36,10 @@ const cmd: fc.Arbitrary<Cmd> = fc.oneof(
   fc.record({ op: fc.constant('ship' as const), t: ticket }),
   fc.record({ op: fc.constant('live' as const) }),
   fc.record({ op: fc.constant('keep' as const), keep: fc.boolean() }),
+  fc.record({ op: fc.constant('beside' as const), t: ticket }),
+  fc.record({ op: fc.constant('besideLive' as const) }),
+  fc.record({ op: fc.constant('handOff' as const), t: ticket }),
+  fc.record({ op: fc.constant('skip' as const), t: ticket }),
 );
 
 function fresh() {
@@ -40,10 +57,18 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
       let now = 1000;
       let shipped = 0; // the holder's ships not live yet (#1985)
       let keep = false;
+      let beside = 0; // the waiting one shipping beside the holder, and its ships not live yet
+      let besideShips = 0;
+      let handed = false;
+      const dropBeside = () => {
+        if (beside && !waiting.includes(beside)) beside = besideShips = 0;
+      };
       const modelPass = () => {
-        holder = waiting.shift() ?? null;
-        shipped = 0;
-        keep = false;
+        holder = beside || (waiting[0] ?? null);
+        waiting = waiting.filter((t) => t !== holder);
+        shipped = beside ? besideShips : 0;
+        beside = besideShips = 0;
+        keep = handed = false;
       };
       for (const c of cmds) {
         now += 10;
@@ -60,6 +85,7 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
           case 'queue': {
             claims.setQueue(1, NAME, c.ts, 'p', now);
             waiting = [...new Set(c.ts)].filter((t) => t !== holder);
+            dropBeside();
             break;
           }
           case 'release':
@@ -72,12 +98,14 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
           case 'releaseHeldBy': {
             claims.releaseHeldBy(c.t, 'dismissed', now);
             waiting = waiting.filter((t) => t !== c.t);
+            dropBeside();
             if (holder === c.t) modelPass();
             break;
           }
           case 'ship': {
             claims.shipped(c.t, `c${now}`);
             if (holder === c.t) shipped++;
+            else if (beside === c.t) besideShips++;
             break;
           }
           case 'live': {
@@ -89,6 +117,41 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
           }
           case 'keep': {
             if (holder != null) claims.take(1, NAME, holder, 'p', '', now, (keep = c.keep));
+            break;
+          }
+          case 'beside': {
+            const seen = claims.get(1, NAME);
+            const let_in = !!seen && claims.setBeside(seen, c.t, now);
+            const may: boolean = holder != null && !beside && waiting.includes(c.t);
+            assert.equal(let_in, may);
+            if (may) beside = c.t;
+            break;
+          }
+          case 'besideLive': {
+            const seen = claims.get(1, NAME);
+            const went = !!seen && claims.besideLive(seen, seen.beside_landed.split(' '), now);
+            assert.equal(went, besideShips > 0);
+            if (went) {
+              waiting = waiting.filter((t) => t !== beside);
+              dropBeside();
+            }
+            break;
+          }
+          case 'handOff': {
+            claims.handedOff(c.t);
+            if (holder === c.t) handed = true;
+            break;
+          }
+          case 'skip': {
+            const seen = claims.get(1, NAME);
+            const r = seen && claims.skip(seen, c.t, now);
+            const may: boolean = holder != null && !handed && !shipped && !keep && waiting.includes(c.t);
+            assert.equal(!!r, may, 'only an unready holder, for one that waits');
+            if (may) {
+              waiting = [holder!, ...waiting.filter((t) => t !== c.t)];
+              holder = c.t;
+              beside = besideShips = 0;
+            }
             break;
           }
           case 'staleRelease': {
@@ -105,6 +168,7 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
         const real = claims.get(1, NAME);
         assert.equal(real?.holder ?? null, holder, 'holder matches the model');
         assert.deepEqual([real?.landed ? real.landed.split(' ').length : 0, !!real?.keep], [shipped, keep], 'its ships and keep match the model');
+        assert.deepEqual([real?.beside ?? 0, real?.beside_landed ? real.beside_landed.split(' ').length : 0, !!real?.handed], [beside, besideShips, handed], 'the one beside it and its hand-off match the model');
         const wait = claims.waiting(1, NAME);
         assert.deepEqual(wait, waiting, 'the waiting line matches the model: none lost, order kept');
         assert.equal(new Set(wait).size, wait.length, 'nobody waits twice');

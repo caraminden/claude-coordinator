@@ -274,16 +274,59 @@ test('a kept claim stays through its next live, once', () => {
   assert.equal(claims.get(1, 'pipeline-lane'), undefined);
 });
 
-test('a database from before #1985 gains the two columns, its claim as it was', () => {
+test('a database from before #1985 gains its columns, its claim as it was but counted as handed off', () => {
   const db = new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE projects (id INTEGER PRIMARY KEY); INSERT INTO projects (id) VALUES (1);
     CREATE TABLE claims (project_id INTEGER NOT NULL, name TEXT NOT NULL, holder INTEGER NOT NULL, taken_by TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', since INTEGER NOT NULL, PRIMARY KEY (project_id, name));
     INSERT INTO claims VALUES (1, 'pipeline-lane', 580, 'Josh', 'part B', 1000);`);
   const claims = new Claims(db);
-  assert.deepEqual({ ...claims.get(1, 'pipeline-lane') }, { project_id: 1, name: 'pipeline-lane', holder: 580, taken_by: 'Josh', note: 'part B', since: 1000, landed: '', keep: 0 });
+  assert.deepEqual({ ...claims.get(1, 'pipeline-lane') }, { project_id: 1, name: 'pipeline-lane', holder: 580, taken_by: 'Josh', note: 'part B', since: 1000, landed: '', keep: 0, handed: 1, beside: 0, beside_since: 0, beside_landed: '' });
   new Claims(db);
   claims.shipped(580, 'one');
   assert.equal(claims.holderLive(claims.get(1, 'pipeline-lane')!, ['one'])?.from.holder, 580, 'held from before: its next live passes it on');
+});
+
+// Josh, 2026-11-25, "Ship together if no shared files" (#1985).
+test('one beside the holder: its live ends its turn; the holder going first makes it the holder with what it shipped', () => {
+  const claims = bare();
+  const lane = () => claims.get(1, 'pipeline-lane')!;
+  claims.take(1, 'pipeline-lane', 580, 'Josh', '', 1000);
+  claims.setQueue(1, 'pipeline-lane', [601, 602, 603], 'Cara', 1000);
+  assert.equal(claims.setBeside(lane(), 700, 1100), false, 'only one that waits');
+  assert.equal(claims.setBeside(lane(), 602, 1100), true);
+  assert.equal(claims.setBeside(lane(), 603, 1100), false, 'one at a time');
+  // Its ship goes live first.
+  claims.shipped(602, 'b1');
+  assert.deepEqual([lane().landed, lane().beside_landed], ['', 'b1'], "kept apart from the holder's");
+  assert.equal(claims.besideLive(lane(), ['other'], 1200), false);
+  assert.equal(claims.besideLive(lane(), ['b1'], 1200), true);
+  assert.deepEqual([lane().holder, lane().beside, lane().beside_landed, claims.waiting(1, 'pipeline-lane')], [580, 0, '', [601, 603]]);
+  // The holder goes first: the one beside it is next, ahead of the line, and its own live passes it on.
+  claims.setBeside(lane(), 603, 1300);
+  claims.shipped(603, 'c1');
+  claims.shipped(580, 'a1');
+  assert.equal(claims.holderLive(lane(), ['a1'], 1400)!.to!.holder, 603);
+  assert.deepEqual([lane().landed, lane().beside, lane().beside_landed], ['c1', 0, '']);
+  assert.equal(claims.holderLive(lane(), ['c1'], 1500)!.to!.holder, 601);
+  assert.equal(lane().landed, '');
+});
+
+test('one beside the holder loses that place with its place in the queue', () => {
+  const claims = bare();
+  const lane = () => claims.get(1, 'pipeline-lane')!;
+  claims.take(1, 'pipeline-lane', 580, 'Josh');
+  claims.setQueue(1, 'pipeline-lane', [601, 602], 'Cara');
+  claims.setBeside(lane(), 602);
+  claims.shipped(602, 'b1');
+  claims.setQueue(1, 'pipeline-lane', [602, 601], 'Cara');
+  assert.deepEqual([lane().beside, lane().beside_landed], [602, 'b1'], 'a new order keeps it');
+  claims.setQueue(1, 'pipeline-lane', [601], 'Cara');
+  assert.deepEqual([lane().beside, lane().beside_landed], [0, '']);
+  claims.setBeside(lane(), 601);
+  claims.releaseHeldBy(601);
+  assert.equal(lane().beside, 0);
+  assert.equal(claims.release(1, 'pipeline-lane')?.holder, 580);
+  assert.equal(claims.get(1, 'pipeline-lane'), undefined);
 });
 
 // The wiring: a server that comes up on a commit a holder shipped passes its claim on.

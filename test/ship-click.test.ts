@@ -218,6 +218,55 @@ test('what rules the server out sends the answer to the minion with why', async 
   await fellBack(feeder, await feeder.card({ questions: [merge] }), null, { selected: ['Merge'] });
 });
 
+test('one let in beside the lane holder hands off unless they came to share a pipeline file (#1985)', async () => {
+  const holder = await minion({ file: 'src/pipe/a.ts' });
+  const beside = await minion({ file: 'src/pipe/b.ts' });
+  store.claims.take(projectId, 'pipeline-lane', holder.id, 'Cara');
+  store.claims.setQueue(projectId, 'pipeline-lane', [beside.id], 'Cara');
+  store.claims.setBeside(store.claims.get(projectId, 'pipeline-lane')!, beside.id);
+  const card = await beside.card();
+  beside.commit('src/pipe/a.ts');
+  assert.match(String((await beside.post(HAND_OFF)).data.error), /both change src\/pipe\/a\.ts/);
+  git(beside.cwd, 'reset', '-q', '--hard', 'HEAD~1');
+  const r = await beside.press(card);
+  assert.equal(r.status, 202, JSON.stringify(r.data));
+  await until('its ship to start', () => beside.texts().some((t) => /started this ship with no turn/.test(t)));
+  assert.equal(store.claims.get(projectId, 'pipeline-lane')!.handed, 0, "the holder hasn't handed off");
+  store.claims.releaseHeldBy(beside.id);
+  store.claims.release(projectId, 'pipeline-lane');
+});
+
+test("a waiting minion's hand-off is held for the lane and marks it ready; another change of its ships (#1985)", async () => {
+  const holder = await minion({ file: 'src/pipe/a.ts' });
+  const waiting = await minion({ file: 'src/pipe/b.ts' });
+  const plain = await minion({ file: 'src/plain.ts' });
+  store.claims.take(projectId, 'pipeline-lane', holder.id, 'Cara');
+  store.claims.setQueue(projectId, 'pipeline-lane', [waiting.id, plain.id], 'Cara');
+  const handOff = (id: number) => srv.as({ token: agentToken(srv.data, id) })(`/api/tickets/${id}/land/handoff`, { ...HAND_OFF, go: 'Cara, 1:00 PM PST' });
+  const r = await handOff(waiting.id);
+  assert.equal(r.status, 409);
+  assert.match(String(r.data.error), /holds the pipeline lane\. You are marked ready/);
+  const ready = () => store.claims.queue(projectId, 'pipeline-lane').map((q) => [q.ticket, q.ready]);
+  assert.deepEqual(ready(), [
+    [waiting.id, 1],
+    [plain.id, 0],
+  ]);
+  store.claims.setQueue(projectId, 'pipeline-lane', [plain.id, waiting.id], 'Cara');
+  assert.deepEqual(
+    ready(),
+    [
+      [plain.id, 0],
+      [waiting.id, 1],
+    ],
+    'a new order keeps it',
+  );
+  const ok = await handOff(plain.id);
+  assert.ok(ok.status < 300, JSON.stringify(ok.data));
+  store.claims.releaseHeldBy(waiting.id);
+  store.claims.releaseHeldBy(plain.id);
+  store.claims.release(projectId, 'pipeline-lane');
+});
+
 test('a pipeline change ships from the click only for the lane holder', async () => {
   const out = await minion({ file: 'src/pipe/deep/x.ts' });
   await fellBack(out, await out.card(), /src\/pipe\/deep\/x\.ts is a pipeline file and you don't hold the pipeline lane/);

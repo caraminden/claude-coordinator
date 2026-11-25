@@ -5,6 +5,7 @@ import { clip } from './minion-relay.ts';
 import { askerKey, pagePlanKey, planKey, type EventRow, type Project, type Store, type Ticket } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import type { Claim } from './claims.ts';
+import { SHIP_LANE, SKIP_AFTER_MS } from './ship-lane.ts';
 import type { Approvals } from './approvals.ts';
 import { cardText, type CardLink } from './card-links.ts';
 import type { Lanes } from './lanes.ts';
@@ -78,8 +79,17 @@ export class Closing {
    */
   async holdersLive(live: (ticketId: number, commit: string) => Promise<boolean>) {
     for (const c of this.d.store.claims.shippedClaims()) {
-      const went: string[] = [];
-      for (const commit of c.landed.split(' ')) if (await live(c.holder, commit)) went.push(commit);
+      const seenLive = async (id: number, landed: string) => {
+        const went: string[] = [];
+        for (const commit of landed.split(' ').filter(Boolean)) if (await live(id, commit)) went.push(commit);
+        return went;
+      };
+      const went = await seenLive(c.holder, c.landed);
+      const ahead = await seenLive(c.beside, c.beside_landed);
+      if (this.d.store.claims.besideLive(c, ahead)) {
+        this.d.emit(c.beside, 'note', { text: `Its change is live, so its turn beside the ${c.name} claim's holder is over.` });
+        this.d.broadcast({ type: 'claims', projectId: c.project_id });
+      }
       const holder = this.d.store.getTicket(c.holder);
       const passed = this.d.store.claims.holderLive(c, went);
       if (!passed || !holder) {
@@ -95,7 +105,7 @@ export class Closing {
   /** A dismissed minion's claims (#921) pass to the next in each one's queue, or free themselves (#1334: claimPassed). */
   private freeClaims(ticketId: number) {
     const minion = this.d.store.getTicket(ticketId);
-    const shipped = this.d.store.claims.shippedClaims().some((c) => c.holder === ticketId);
+    const shipped = this.d.store.claims.shippedClaims().some((c) => c.landed && c.holder === ticketId);
     const passed = this.d.store.claims.releaseHeldBy(ticketId, shipped ? 'live' : 'dismissed');
     if (minion) this.claimPassed(minion.project_id, passed, `#${minion.number}, its holder, ${shipped ? 'shipped and was dismissed' : 'was dismissed'}`, `#${minion.number} ${minion.title}`);
   }
@@ -112,8 +122,11 @@ export class Closing {
     const keeper = this.d.store.getOverlord(projectId);
     for (const { from, to } of passed) {
       const next = to && this.d.store.getTicket(to.holder);
-      if (next && next.status !== 'closed') {
-        const line = `You hold the ${to!.name} claim now: ${why}. It passes to the next in its queue when your change is live, or you are dismissed. More than one piece to ship? Before the first ships, ask your Taskmaster (message_coordinator, need: ask) to keep it for you (claim's keep).`;
+      if (next && next.status !== 'closed' && from?.beside === next.id) {
+        // Let in beside it already: it was woken then, and its ship may be running (a message would count as one to answer).
+        this.d.emit(next.id, 'note', { text: `It holds the ${to!.name} claim now: ${why}.` });
+      } else if (next && next.status !== 'closed') {
+        const line = `You hold the ${to!.name} claim now: ${why}. It passes to the next in its queue when your change is live, or you are dismissed. More than one piece to ship? Before the first ships, ask your Taskmaster (message_coordinator, need: ask) to keep it for you (claim's keep).${to!.name === SHIP_LANE ? ` Hand off within ${SKIP_AFTER_MS / 60_000} min: past that, one that is ready goes first and you are next after it.` : ''}`;
         if (this.d.heldFor(next.id)) this.d.send(next.id, APP_NAME, line, [], { hold: true });
         else {
           if (next.state === 'parked') this.d.store.updateTicket(next.id, { state: null });

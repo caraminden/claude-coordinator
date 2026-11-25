@@ -161,6 +161,7 @@ import { parseFlakes } from './src/flakes.ts';
 import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
 import { shipDeploys } from './src/ship-deploys.ts';
+import { ShipLane } from './src/ship-lane.ts';
 import { StallWatch } from './src/stall-signals.ts';
 import { apkDeployer, publisher } from './src/apk-deploy.ts';
 import { ApkBuilds } from './src/apk-build.ts';
@@ -1816,6 +1817,21 @@ const liveProbes = new LiveProbes({
 });
 runner.probeHold = (id) => liveProbes.hold(id);
 const shipApps = shipDeploys({ store, services, autoDeploy, startDeploy: (row, by, uid) => startDeploy(app, row, by, null, uid) });
+const shipLane = new ShipLane({
+  store,
+  busy: (id) => runner.busy(id),
+  heldFor: (id) => runner.heldFor(id),
+  shipping: (id) => landings.hasHandoff(id),
+  claimPassed: (projectId, passed, why, author) => runner.claimPassed(projectId, passed, why, author),
+  wake: (id, text) => {
+    if (store.getTicket(id)?.state === 'parked') store.updateTicket(id, { state: null });
+    runner.send(id, APP_NAME, text, [], {}, runner.isRunning(id));
+  },
+  leaveMail: (id, author, text) => runner.leaveMail(id, author, text),
+  broadcast,
+});
+// Not in a preview or a dev copy: they name the live worktrees, and wake nobody.
+if (!runner.noTurns) setInterval(() => void shipLane.sweep().catch((err) => console.error('The ship-script lane:', err)), 60_000).unref();
 const landHandoffs = new LandHandoffs({
   landings,
   store,

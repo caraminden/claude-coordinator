@@ -931,8 +931,10 @@ test("the quick lane takes people's own words and answers and the server's wake-
     ["an approval's answer", true, () => runner.queue.put(id, { author: 'System', text: 'approved', images: [], card: 'c1' }) ?? runner.turnLine.enter(id)],
     ['a job or a wait that ended', true, () => runner.send(id, 'Citadel', 'your job ended')],
     ['your ship went through', true, () => runner.send(id, 'Citadel', 'it went through', [], { light: true })],
-    ['CI', true, () => runner.send(id, 'GitHub', 'CI failed')],
-    ['a refused ship', false, () => runner.send(id, 'Citadel', "didn't go through", [], { fix: true })],
+    ["a plan's answer", true, () => runner.send(id, 'Cara', 'Plan approved', [], Object.assign({ plan: {} }, { quick: true }))],
+    ['CI passed', true, () => runner.send(id, 'GitHub', 'CI passed', [], { fyi: true, light: true })],
+    ['red CI, or a remark on its PR', false, () => runner.send(id, 'GitHub', 'CI failed')],
+    ["a refused ship, or an agent's Unseal", false, () => runner.send(id, 'Citadel', "didn't go through", [], { quick: false })],
     ["another minion's message", false, () => runner.send(id, 'a mate', 'fyi', [], { from: mate })],
     ["a minion's message under a server name", false, () => runner.send(id, 'Citadel', 'fyi', [], { from: mate })],
     ['a script', false, () => runner.send(id, 'Cara', 'from a script')],
@@ -944,7 +946,7 @@ test("the quick lane takes people's own words and answers and the server's wake-
     assert.equal(quick(), yes, what);
     runner.stop(id);
   }
-  runner.send(id, 'Citadel', "didn't go through", [], { fix: true });
+  runner.send(id, 'Citadel', "didn't go through", [], { quick: false });
   say(id, 'try this');
   assert.equal(quick(), true, 'mail of another kind beside it holds nothing up');
   runner.stop(id);

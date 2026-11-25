@@ -318,7 +318,7 @@ export const proposalRoutes: Route[] = [
                       : notes === null
                         ? `Plan approved: build it this way. ("${card.summary}")`
                         : `Revise the plan ("${card.summary}") before building:\n\n${notes}\n\nPost the revised plan with propose_plan, and write no code until it is approved.`,
-          { plan: { planId: card.id, verdict: body.verdict } },
+          { plan: { planId: card.id, verdict: body.verdict }, quick: true },
         );
         // After the answer, so its message comes first; it runs behind the click (an install can take minutes).
         if (card.hostTool && notes === null) void approveHostTool(app, id, card.hostTool, session.name);

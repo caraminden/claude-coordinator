@@ -2027,12 +2027,12 @@ export class Runner {
     author: string,
     text: string,
     images: MessageImage[] = [],
-    extra: { comment?: { about: string; path?: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; fix?: boolean; hold?: boolean; brief?: boolean; everyone?: boolean; ask?: object; answer?: object } & object = {},
+    extra: { comment?: { about: string; path?: string }; from?: number; typed?: boolean; asker?: number | null; fyi?: boolean; light?: boolean; quick?: boolean; hold?: boolean; brief?: boolean; everyone?: boolean; ask?: object; answer?: object } & object = {},
     steer = false,
     files: MessageFile[] = [],
   ): { event: EventRow; parked?: true } {
     // Whose ask it is, when that isn't its author's or relay's now: a contraption's person, or a held relay's asker.
-    const { asker: askedBy, fyi, light, fix, hold, ...shown } = extra;
+    const { asker: askedBy, fyi, light, quick, hold, ...shown } = extra;
     extra = shown;
     if (!fyi) this.onMessage?.(ticketId);
     const ticket = this.store.getTicket(ticketId);
@@ -2090,7 +2090,7 @@ export class Runner {
       ...(extra.typed || 'answer' in extra ? { own: true } : {}),
       ...(fyi ? { fyi: true } : {}),
       ...(light ? { light: true as const } : {}),
-      ...(fix ? { fix: true as const } : {}),
+      ...(quick === undefined ? {} : { quick }),
       asker,
     };
     if (parked) {

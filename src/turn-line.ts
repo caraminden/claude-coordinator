@@ -9,7 +9,7 @@
 //
 // The quick lane (#1986; Josh, 2026-11-25: "ok, build the quick lane"): with no worker free in the pool, a few turns more may
 // run, for a person's own words and answers and the server's wake-ups (`quick`, src/line-place.ts). One that runs on past
-// POOL.laneMs counts in the pool from then on, over its size if need be, and the lane has its worker back.
+// POOL.laneMs counts in the pool from then on, up to POOL.laneOver over its size, and the lane has its worker back.
 import { HOLD } from './start-now.ts';
 import type { Store } from './db.ts';
 import type { PressureReading } from './pressure.ts';
@@ -31,6 +31,8 @@ export const POOL = {
   lane: { ok: 2, easing: 1, tight: 0 } satisfies Record<PoolBox['level'], number>,
   /** A quick lane turn still running after this counts in the pool. */
   laneMs: 2 * 60_000,
+  /** How far over its size the pool takes such turns; the next keeps its lane worker until there is room. Josh's pick said "up to 2 turns sitting on top of the pool". */
+  laneOver: 2,
 };
 
 const LINE = 'turn-line';
@@ -265,7 +267,7 @@ export class TurnLine {
   wait(ticketId: number): WorkerWait | null {
     const entry = this.entries.find((e) => e.ticket === ticketId);
     if (!entry) return null;
-    return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null, held: this.heldBy(entry) };
+    return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null, held: this.heldBy(entry), ...(this.host.asks(ticketId, entry.via).quick ? { quick: true as const } : {}) };
   }
 
   /** Why a waiting turn wouldn't start even on a worker of its own, in words; it starts by itself once that clears. */
@@ -385,7 +387,8 @@ export class TurnLine {
     // A turn still launching when the pause came, or re-attached since.
     if (this.paused()?.stop) this.stopRunning();
     this.level = box.level;
-    for (const { lane } of this.granted.values()) if (lane && now - lane.since >= POOL.laneMs) lane.moved = true;
+    const own = [...this.granted.values()].filter((g) => g.forced !== undefined && !g.lent).length;
+    for (const g of this.granted.values()) if (inLane(g) && now - g.lane!.since >= POOL.laneMs && this.used() - own < this.size() + POOL.laneOver) g.lane!.moved = true;
     const p = this.pool();
     this.starved = starvedBy(reading, box, this.limits());
     this.stalled = new Set(p.fixed ? [] : stalled);

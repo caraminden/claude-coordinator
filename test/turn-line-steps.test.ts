@@ -445,6 +445,23 @@ test('two minutes on, a lane turn counts in the pool past its size, nothing is s
   assert.deepEqual([x.started, x.l.summary().lane.moved], [['9'], 0]);
 });
 
+test('moved turns sit at most 2 over the pool, however many come: the next keeps its lane worker until there is room', async (t) => {
+  const x = quickLine(t, [2, 3, 4, 5, 6]);
+  const start = Date.now();
+  const tick = (min: number) => x.l.tick(CALM, [], start + min * MIN, box('ok'));
+  x.run(2);
+  x.run(3);
+  tick(2);
+  assert.deepEqual([...lane(x), x.l.summary().lane.moved], [3, 0, 2, 2], 'a pool of 1 with 2 on top');
+  assert.deepEqual([x.run(4), x.run(5), x.run(6)], [true, true, false]);
+  tick(9);
+  assert.deepEqual([...lane(x), x.l.summary().lane.moved], [3, 2, 2, 2], 'no room on top: they keep their lane workers');
+  await x.end(1);
+  tick(9);
+  assert.deepEqual([...lane(x), x.l.summary().lane.moved], [3, 1, 2, 3], 'room for one');
+  assert.deepEqual(x.stopped, []);
+});
+
 test('the lane has 2 workers in calm, 1 while memory eases and none while it is tight; its running turns go on', async (t) => {
   const x = quickLine(t);
   x.run(2);

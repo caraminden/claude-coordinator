@@ -33,9 +33,10 @@ export function heatOf(session: boolean, last: { ended_at: number } | null, now:
 
 /**
  * Whether a message starts its minion in the quick lane (#1986, src/turn-line.ts): a person's own words (a comment on a file
- * too), an answer to a card, a plan or an approval, or the server waking it. Another minion's message doesn't, nor a refused ship to fix.
+ * too), an answer to a card, a plan or an approval, or the server waking it, GitHub's good news too (CI passed, its PR merged).
+ * Another minion's message doesn't, nor a refused ship or red CI to fix, nor a remark on its PR.
  */
-export const quickMessage = (m: QueuedMessage) => !m.from && !m.fix && !!(m.own || m.card || m.about || m.author === APP_NAME || m.author === GITHUB_NAME);
+export const quickMessage = (m: QueuedMessage) => m.quick ?? (!m.from && !!(m.own || m.card || m.about || m.author === APP_NAME || (m.author === GITHUB_NAME && m.fyi)));
 
 /** The open minions that other open minions wait on: a chained start, a wait on its work, a claim it holds with a queue behind it. */
 export function waitedOn(store: Store, chains: Chain[]): Set<number> {

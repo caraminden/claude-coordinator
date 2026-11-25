@@ -36,7 +36,7 @@ export interface HeldMailDeps {
   refused: (ticketId: number, person: number | null) => boolean;
   turnPerson: (ticket: TicketFields, project: Project, waiting: { msgs: QueuedMessage[]; held: QueuedMessage[] }) => number | null;
   next: (ticketId: number, now?: boolean) => void;
-  send: (ticketId: number, author: string, text: string, images?: [], extra?: { from?: number; hold?: boolean; asker?: number | null }, steer?: boolean) => unknown;
+  send: (ticketId: number, author: string, text: string, images?: [], extra?: { from?: number; hold?: boolean; quick?: boolean; asker?: number | null }, steer?: boolean) => unknown;
 }
 
 export class HeldMail {
@@ -120,7 +120,7 @@ export class HeldMail {
       const n = this.heldCount(ticketId);
       const held = n ? `${n === 1 ? 'The message' : `The ${n} messages`} left for you while you were sealed ${n === 1 ? 'follows' : 'follow'}.` : 'Nothing was left for you while you were sealed.';
       // Queued before the state clears (#1378): a crash between the two leaves a turn to start, not held mail nothing releases.
-      this.d.send(ticketId, author, `${author === by ? 'Unsealed' : `${by} unsealed`} you. ${held} Pick up where you left off.`);
+      this.d.send(ticketId, author, `${author === by ? 'Unsealed' : `${by} unsealed`} you. ${held} Pick up where you left off.`, [], { quick: false });
     }
     this.d.store.updateTicket(ticketId, { state: null });
     this.d.broadcastTicket(ticketId);

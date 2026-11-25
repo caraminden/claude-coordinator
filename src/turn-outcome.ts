@@ -20,7 +20,7 @@ export function isNetworkFailure(text: string): boolean {
   return NETWORK_ERROR.test(text) && !isAuthFailure(text) && !/\b(status|API Error:) [1-5]\d\d\b/i.test(text);
 }
 
-export type Kind = 'ok' | 'stopped' | 'closing' | 'limit' | 'net' | 'switch-account' | 'account-error' | 'killed' | 'failed';
+export type Kind = 'ok' | 'stopped' | 'paused' | 'closing' | 'limit' | 'net' | 'switch-account' | 'account-error' | 'killed' | 'failed';
 
 /**
  * What an ending sets off besides its kind. A turn that ended well: `cleared` (its failure note, the limits it proved
@@ -63,6 +63,8 @@ export function nextRetries(r: Retries, kind: RetryKind): Retries {
 /** The fields of a saved turn this reads. The four counters are rows saved before the retries record (#1379). */
 export interface EndedTurn {
   stopped?: true;
+  /** A pause stopped it to carry on later (#1868). */
+  paused?: true;
   closing?: string | null;
   result?: { error: boolean; text: string | null };
   fresh?: string;
@@ -138,6 +140,8 @@ export function outcome(end: TurnEnd): Outcome {
   const base = { reason: null, killed: null, authFailed: false };
   if (end.cut) return cutOutcome(turn, r, end.cut.rerun);
   if (stopped) return { kind: 'stopped', followUps: [], ...base };
+  // Not the turn's doing, so it counts towards no cap.
+  if (turn?.paused) return { kind: 'paused', followUps: [], ...base, retry: { via: 'restart', retries: r } };
   const code = exit?.code ?? null;
   // Citadel only signals claude on a stop, so any other signal (143 is claude's own exit on SIGTERM) came from outside.
   const killed =

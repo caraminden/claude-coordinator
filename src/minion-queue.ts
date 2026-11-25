@@ -13,6 +13,8 @@ export type OwedResume = {
   resumes: number;
   limitTries?: number;
   onAccount?: true;
+  /** A pause stopped it (#1868): its resume says so. */
+  paused?: true;
   killTries?: number;
   switchTries?: number;
   /** What the cut-off turn set and its resume reads (Runner's TurnState from, parkedAs, status, #1452), so a restart before the resume keeps them. */

@@ -557,11 +557,13 @@ test('the page at a glance (#1094): judged this week, the last run, unwatched fo
   assert.deepEqual(row.coverage, { changes: 3, watched: 1, gap: { folder: 'game/logic', changes: 2 } });
 });
 
-// RV5: the page's Save sends the version its form opened with. Pinned in the source: the form's flow needs a live broadcast
-// mid-edit to differ, which the page's browser test can't stage.
+// RV5: the page's Save sends the version its form opened with. Pinned in the source here too, for a box with no Chromium:
+// reviews-page-browser.test.ts stages it, with a newer list arriving mid-edit.
 test("RV5: the edit form's Save sends the version it opened with, not the list's current one", () => {
   const src = readFileSync(join(import.meta.dirname, '..', 'public', 'reviews.js'), 'utf8');
-  const save = src.slice(src.indexOf('const submit = async (ev)'), src.indexOf("state.mode = 'view'", src.indexOf('const submit = async (ev)')));
+  const at = src.indexOf('async function saveEdit(e');
+  assert.ok(at > 0, 'both edit forms save through saveEdit');
+  const save = src.slice(at, src.indexOf('\n}\n', at));
   assert.match(save, /version: e\.version\b/);
   assert.doesNotMatch(save, /entry\(e\.slug\)\?\.version/);
 });

@@ -313,6 +313,19 @@ test('after a refused stale save, Cancel then Edit opens the newest version', { 
   await waitFor(page, 'the save', `sets[1][0].body === 'mine again'`);
 });
 
+for (const name of ['UI critic', 'Pre-ship review']) {
+  test(`Save in ${name}'s form is refused when a newer list arrived while it was open`, { skip }, async () => {
+    const page = await reviews();
+    const at = name === 'UI critic' ? 0 : 2;
+    await page.eval(`openEdit('${name}'), press('Cancel')`);
+    await page.eval(`Object.assign(sets[1][${at}], { version: 8, body: 'theirs' }), sets[1][1].name = 'Renamed critic', window.late = hold('GET api/projects/1/reviews'), changed(), press('Edit by hand'), type('${BODY}', 'mine'), late.open()`);
+    await waitFor(page, 'the newer list', `$('.rv-board').textContent.includes('Renamed critic')`);
+    await page.eval(`press('Save')`);
+    await waitFor(page, 'the refusal', `$('.rv-form .error')?.hidden === false`);
+    assert.equal(await page.eval(`sets[1][${at}].body`), 'theirs');
+  });
+}
+
 // ---- SP10: late answers ----
 
 test('a list answered after a newer one leaves the newer one on the page', { skip }, async () => {

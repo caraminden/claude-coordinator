@@ -61,5 +61,14 @@
     "hits": 16,
     "real": 19,
     "summary": "16 as before, 0 new, 2 gone"
+  },
+  "seen-guard": {
+    "hash": "cab90620e70a296f",
+    "at": "2026-11-25",
+    "days": 3,
+    "inputs": "115 minion sessions, 8523 Bash and Read calls, 39305k chars printed, 37820k with the guard",
+    "hits": 408,
+    "real": 0,
+    "summary": "0 as before, 408 new, 0 gone"
   }
 }

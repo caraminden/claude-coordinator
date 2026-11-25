@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlink
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { apkPaths, ApkBuilds, capacitorApp, manifestWarnings, type Runner } from '../src/apk-build.ts';
-import type { ContraptionRow } from '../src/db.ts';
+import { apkPaths, ApkBuilds, capacitorApp, manifestWarnings, type ApkBuildDeps, type Runner } from '../src/apk-build.ts';
+import { Store, type ContraptionRow } from '../src/db.ts';
+import { TargetFinder } from '../src/release-targets.ts';
 import { git } from './git.ts';
 
 // src/apk-build.ts (#837): once a Capacitor app's deploy is live, an APK whose inputs changed is built, numbered by the
@@ -50,7 +51,7 @@ function app(name: string, cap = true) {
 }
 
 /** A builder with every outside step faked; `calls` records what ran, `told` what the Taskmaster was told. */
-function builder(o: { ciRelease?: boolean; fail?: string; code?: number; oom?: boolean } = {}) {
+function builder(o: { ciRelease?: boolean | ApkBuildDeps['ciRelease']; fail?: string; code?: number; oom?: boolean } = {}) {
   const calls: string[][] = [];
   const cwds = new Map<string, string>();
   const told: string[] = [];
@@ -79,7 +80,7 @@ function builder(o: { ciRelease?: boolean; fail?: string; code?: number; oom?: b
     heavy: '/bin/citadel-heavy',
     folder: (row) => join(root, 'apps', row.name),
     dataDir: (row) => join(root, 'data', row.name),
-    ciRelease: () => !!o.ciRelease,
+    ciRelease: typeof o.ciRelease === 'function' ? o.ciRelease : () => !!o.ciRelease,
     published: (row, code, c) => published.push([row.name, code, c]),
     tell: (_row, text) => told.push(text),
     run,
@@ -342,4 +343,39 @@ test('a keyed contraption skipped as not a Capacitor app is told to its scheme o
   const plain = app('plainkeyless', false);
   await b.check(plain.row, '#3');
   assert.equal(told.length, 1, 'no key, no tell');
+});
+
+test("an app a release workflow signs is never built or told before its scheme's targets are scanned; an unreadable clone is skipped quietly", async () => {
+  // Mandate, 2026-11-24 (#1870): the 60 s startup sweep ran while the first scan was still going, read the empty
+  // target list as "no release workflow" and told its scheme to add a Capacitor root it doesn't need.
+  const store = new Store(join(root, 'targets.db'));
+  const repo = join(root, 'scheme-repo');
+  mkdirSync(join(repo, '.github/workflows'), { recursive: true });
+  git(repo, 'init', '-q', '-b', 'main');
+  writeFileSync(join(repo, '.github/workflows/android-release.yml'), 'on:\n  workflow_dispatch:\njobs:\n  release:\n    steps:\n      - run: ./gradlew assembleRelease\n');
+  commit(repo, {});
+  const p = store.createProject('Signed', 'https://github.com/o/signed');
+  store.setProjectRepoDir(p.id, repo);
+  const { row: plain, data } = app('signed', false);
+  key('signed');
+  const row = { ...plain, home_scheme: p.id };
+  mkdirSync(join(data, 'android'), { recursive: true });
+  writeFileSync(join(data, 'android/latest.json'), JSON.stringify({ versionCode: 13 }));
+  store.createContraption({ name: 'signed', title: 'Signed', icon: null, port: 9, home_scheme: p.id, open_paths: '[]', relay_paths: '[]', repo: 'o/signed', branch: null, folder: join(root, 'apps/signed'), default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: 'h', keys_at: 0 });
+  const finder = new TargetFinder({ store, own: () => null, apkFeed: (name) => join(root, 'data', name, 'android/latest.json') });
+  const { b, told, calls } = builder({ ciRelease: (r) => finder.ciRelease(r) });
+  const early = b.check(row, 'auto-deploy');
+  await finder.scan();
+  assert.deepEqual(await early, { skipped: 'a release workflow signs its APKs' });
+  assert.deepEqual(told, [], 'nothing told while the targets were unknown');
+  assert.deepEqual(calls, [], 'nothing built');
+
+  // A scheme whose clone git can't read on the first scan: unknown, so skipped with no notice either.
+  const lost = new TargetFinder({ store, own: () => null, apkFeed: (name) => join(root, 'data', name, 'android/latest.json') });
+  rmSync(join(repo, '.git'), { recursive: true, force: true });
+  const blind = builder({ ciRelease: (r) => lost.ciRelease(r) }).b.check(row, 'auto-deploy');
+  await lost.scan();
+  assert.deepEqual(await blind, { skipped: "its scheme's release targets aren't known yet" });
+  assert.deepEqual(told, []);
+  assert.ok(!existsSync(join(root, 'cache/signed/not-capacitor-told')));
 });

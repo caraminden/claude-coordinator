@@ -461,6 +461,11 @@ export class TargetFinder {
     return kind ? all.filter((t) => t.kind === kind) : all;
   }
 
+  /** Whether a release workflow signs `app`'s APKs (src/apk-build.ts leaves those to CI). */
+  async ciRelease(app: ContraptionRow): Promise<boolean> {
+    return this.list('apk').some((t) => t.contraption === app.name && !!t.workflow);
+  }
+
   async scan() {
     const { store } = this.d;
     const apps = store.listContraptions();

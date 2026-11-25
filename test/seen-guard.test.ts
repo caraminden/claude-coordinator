@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterCompact, fileRuns, seenHook } from '../kit/hooks/seen.ts';
+import { jsonLines } from './helpers.ts';
 import { logPath } from '../kit/hooks/retro-log.ts';
 
 const HOOKS = join(import.meta.dirname, '../kit/hooks');
@@ -162,11 +163,7 @@ test('a gulp is told once at 100k chars of files, then every 60k', (t) => {
 
 test('old windows are dropped from the log, and the windows left keep their place', (t) => {
   const { dir, bash, b, compact } = setup(t);
-  const rows = () =>
-    readFileSync(join(dir, 'seen-s.jsonl'), 'utf8')
-      .trim()
-      .split('\n')
-      .map((r) => JSON.parse(r));
+  const rows = () => jsonLines(join(dir, 'seen-s.jsonl'));
   for (let w = 0; w < 9; w++) {
     bash(`sed -n '${w * 100 + 1},${w * 100 + 100}p' src/b.ts`, b(w * 100 + 1, w * 100 + 100));
     compact();

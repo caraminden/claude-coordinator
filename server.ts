@@ -26,7 +26,7 @@ import { LiveProbes, probeLog, runProbe } from './src/live-probe.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { AnswerProbe } from './src/answer-time.ts';
 import { StatusPage, recordBoot, recordLive } from './src/status-page.ts';
-import { citadelSliceDir, MemoryStorms } from './src/memory-storms.ts';
+import { citadelSliceDir, MemoryStorms, stormPeople } from './src/memory-storms.ts';
 import { readGrowth } from './src/growth-alarm.ts';
 import type { Delivery } from './src/db/deliveries.ts';
 import { Reaper, shownCommand, type ReaperStore } from './src/reaper.ts';
@@ -409,7 +409,7 @@ setInterval(
   () =>
     void pressure
       .read()
-      .then((r) => runner.turnLine.tick(r))
+      .then((r) => runner.turnLine.tick(r, stormPeople(memoryStorms.current())))
       .catch((e) => console.error('worker pool:', e)),
   POOL.everyMs,
 ).unref();

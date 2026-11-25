@@ -1,7 +1,7 @@
 // The progress readout under a chat's head: the step line, its meter and the plan's steps. The pure half is progress.js.
 import { api, dismissedWhen, h, isCoordinator, statusLabel, view } from './base.js';
 import { threadRefs, usage } from './core.js';
-import { rowState, workingBy } from './threadstate.js';
+import { rowState, workerWaitLabel, workingBy } from './threadstate.js';
 import { progressTrack, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
 import { waitTail } from './wait-tail.js';
 import { EMPTY_TRACK } from './threadstate.js';
@@ -197,7 +197,7 @@ export function renderProgress() {
   // Phones show this line in place of the state (#492), so an idle chat's line leads with it.
   // The server working for it (#727) leads the line in place of the finished plan's step: "Server" and its land stage.
   const server = !running && workingBy(view.ticket) === 'server';
-  const step = server || !line ? '' : live ? stepName(p, running) : narrow.matches && !running ? `${headState(view.ticket)} · ${stripped}` : stripped;
+  const step = server || !line ? '' : view.ticket.worker_wait ? workerWaitLabel(view.ticket.worker_wait) : live ? stepName(p, running) : narrow.matches && !running ? `${headState(view.ticket)} · ${stripped}` : stripped;
   const doing = !w && live ? nowDoing(view.turnActions, Date.now()) : '';
   const now = w ? waitNow(w) : doing;
   // The step count sits in its own chip, so a phone's cut-off text never hides it; the turn's action

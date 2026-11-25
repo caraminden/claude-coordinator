@@ -2,6 +2,7 @@
 // and the pause), and each waiting minion's place as the line moves.
 import { ago, api, h, view } from './base.js';
 import { hueRow, toneChip } from './look.js';
+import { renderProgress } from './progress-ui.js';
 import { renderTyping } from './thread.js';
 import { optimistic } from './ui/optimistic.js';
 
@@ -17,6 +18,7 @@ export function onWorkers({ line, paused }) {
     if (t?.worker_wait && place.has(t.id)) Object.assign(t.worker_wait, { place: place.get(t.id), of: line.length, paused });
   }
   renderTyping();
+  renderProgress();
 }
 
 /** The tile, reading the pool every 3 s while `page` shows. */
@@ -86,7 +88,11 @@ export function workersPanel(page) {
           ? [button('resume', 'Resume minions', 'Waiting turns start again, and stopped ones carry on', () => pause(false)), w.paused.stop ? '' : button('stop', 'Stop running ones', 'Stop the running turns too; they carry on after Resume', () => pause('stop'))]
           : [button('pause', 'Pause new turns', 'Running turns finish; no new minion turn starts until Resume', () => pause(true)), button('stop', 'Pause and stop running ones', 'Running turns stop and carry on where they were after Resume', () => pause('stop'))]),
       ),
-      h('div', { class: 'hue-rows st-line-rows' }, ...w.people.map((p) => hueRow({ hue: p.used ? 'running' : 'waiting', lead: String(p.used), meta: h('span', { class: 'muted small' }, p.waiting ? `${p.waiting} waiting` : '') }, p.name, h('span', { class: 'muted' }, p.used ? ' working' : '')))),
+      h(
+        'div',
+        { class: 'hue-rows st-line-rows' },
+        ...w.people.map((p) => hueRow({ hue: p.used ? 'running' : 'waiting', lead: String(p.used), meta: h('span', { class: 'muted small' }, `${p.waiting ? `${p.waiting} waiting` : ''}${p.stalled ? ' · held: their container is out of memory' : ''}`) }, p.name, h('span', { class: 'muted' }, p.used ? ' working' : ''))),
+      ),
     );
     if (focused) el.querySelector(`[data-key="${CSS.escape(focused)}"]`)?.focus();
   };

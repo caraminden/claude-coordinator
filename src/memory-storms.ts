@@ -239,6 +239,13 @@ export class MemoryStorms {
   }
 }
 
+/** The people whose containers these storms are in (#1868: none of their next turns start meanwhile). */
+export const stormPeople = (storms: Pick<Storm, 'group'>[]): number[] =>
+  storms.flatMap((s) => {
+    const m = s.group.match(/^citadel-claude-(\d+)\.service$/);
+    return m ? [Number(m[1])] : [];
+  });
+
 /** A stored storm's detail, or null for one that doesn't parse. */
 export function parseStorm(detail: string): Storm | null {
   try {

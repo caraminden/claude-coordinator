@@ -1,5 +1,6 @@
 // The app as a whole: signing in and out, health for tools/deploy.sh, who you are, the event stream,
 // costs and which minion owns each PR.
+import { avatarsView } from '../avatar.ts';
 import { WARMER_SETTING } from '../db-warmer.ts';
 import { hashPassword, looksLikeUrl, NOT_PEOPLE, type Session } from '../auth.ts';
 import { costDays, FABLE_CAP_KEY, fableMeter, hostWeek, spendSplit, weekLimit, whereItWent } from '../costs.ts';
@@ -90,7 +91,17 @@ function meView({ store, claude, runner }: Ctx['app'], session: Ctx['session']) 
   const user = session.uid ? store.getUser(session.uid) : undefined;
   const turns = !!user?.server_login || (!!user && claude.linked(user.id) === 'linked');
   // welcome: the first-day checklist (#1151), null once it's gone; here so the chat draws with it, never under it later.
-  return { id: user?.id ?? null, name: session.name, login: user?.login ?? null, admin: !!session.admin, turns, payer: runner.payerOf(user?.id), keepChats: !!user && !store.getSetting<boolean>(optOutKey(user.id)), welcome: user ? welcomeView(store, user, turns) : null };
+  return {
+    id: user?.id ?? null,
+    name: session.name,
+    login: user?.login ?? null,
+    admin: !!session.admin,
+    turns,
+    payer: runner.payerOf(user?.id),
+    avatars: user ? avatarsView(store, user.id) : null,
+    keepChats: !!user && !store.getSetting<boolean>(optOutKey(user.id)),
+    welcome: user ? welcomeView(store, user, turns) : null,
+  };
 }
 
 export const appRoutes: Route[] = [

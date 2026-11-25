@@ -81,6 +81,9 @@ test('a relay, a wake, a system message, a schedule, a contraption post and a re
   assert.deepEqual(await turnEnv(() => r.send(t.id, 'System', 'Note')), none, 'a system message');
   // relay.ts schemeHook: "[Mandate]: Cara ticked …".
   assert.deepEqual(await turnEnv(() => r.send(t.id, 'Mandate', 'Cara ticked "x" (key k)', [], { asker: null })), none, "a contraption's post");
-  assert.deepEqual(await turnEnv(() => (r as any).resume(t.id, 1)), none, 'a resume after a restart');
+  // Owed first, as recover() does: called with the last turn's lane step still ending, the resume waits in the worker
+  // line, which starts it from what is owed. With nothing owed the line started a plain turn of an empty queue: no turn (#1907).
+  r.queue.owe(t.id, { resumes: 1 });
+  assert.deepEqual(await turnEnv(() => (r as any).resume(t.id, 'restart', { restart: 1 })), none, 'a resume after a restart');
   // Two people typing in one turn leave it no one's (typedBy 0): the typedBy test in mandate-items.test.ts.
 });

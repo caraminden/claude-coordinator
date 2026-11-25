@@ -22,6 +22,18 @@ test('a parse error names itself, so it is never read as infra', () => {
   assert.match(c!.line, /Yours, not infra/);
 });
 
+test('a failing test whose own output says SyntaxError is not a parse error (#1961)', () => {
+  const out = [
+    "land: smoke:   Reloading on SIGHUP failed (re-pinning turn files or public/); still serving the old commit, so deploy.sh restarts: SyntaxError: Expected property name or '}' in JSON at position 2 (line 1 column 3)",
+    ...['deploy', 'a', 'b'].map((f) => `land: smoke: ✖ test/${f}.test.ts:3 › it`),
+    'land: tests failed (exit 1)',
+  ].join('\n');
+  assert.equal(kind(out), 'own-test');
+  // a real parse refusal from either script still reads as parse
+  assert.equal(kind('land: smoke: src/mcp.ts:812: SyntaxError: x\nland: smoke: a .ts file does not parse, before the line'), 'parse');
+  assert.equal(kind('src/mcp.ts:812: SyntaxError: x\na .ts file does not parse'), 'parse'); // land.local.sh's citadel_smoke_fail
+});
+
 test('a skipped test beside files that passed alone is the ship to fix, not one to hand off again (#1914)', () => {
   const flake = 'run-tests: test/a.test.ts: failed in the full run, passed alone: likely load';
   const end = 'land: tests failed on the rebased branch in CI (https://x/2), so main is untouched';

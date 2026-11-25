@@ -468,7 +468,12 @@ export function classifyLandFailure(output: string): { kind: string; line: strin
   const failedFiles = [...new Set([...output.matchAll(/✖ ([^ :]+\.test\.ts)(?::\d+)? › /gm), ...suiteLog.matchAll(/run-tests: (\S+\.test\.ts): (?:failed again alone|hung when rerun alone|rerun alone stopped)/g)].map((m) => m[1]))];
   const k = (kind: string, line: string) => ({ kind, line });
   if (/(won't (rebase|merge) \S+ .*cleanly|^land: smoke: it conflicts with main|^CONFLICT \(|the (rebase onto|merging) .* failed \(see git's output)/m.test(output)) return k('conflict', "Kind: merge conflict. Yours: rebase onto main by hand, keep the other minions' changes, re-test, commit, hand off again.");
-  if (/a \.ts file does not parse|^land: smoke: .*SyntaxError/m.test(output)) return k('parse', 'Kind: parse error (a .ts file does not parse, which would stop the server). Yours, not infra: the lines below name the file and line; fix it, re-test, hand off again.');
+  // Only the refusal's own line: both ship scripts print "a .ts file does not parse" after parse-check's lines, whereas a
+  // "SyntaxError" under "land: smoke: " can be a failing test's own output (#1961: deploy.test.ts logs one on purpose).
+  // Checked the neighbours for the same trap: "it conflicts with main" and "^CONFLICT (" are land.sh's own fixed phrases
+  // (a test line starting with them is not realistic), the burn-in/skipped-test/passed-alone/ci patterns match land.sh's own
+  // lines (a test's output has no such text, and ci is gated on !testsRed), boot-check needs "boot check" with SQLite words.
+  if (/a \.ts file does not parse/.test(output)) return k('parse', 'Kind: parse error (a .ts file does not parse, which would stop the server). Yours, not infra: the lines below name the file and line; fix it, re-test, hand off again.');
   // A burn-in red (#1443) quotes the failing copy's output, which can hold a "passed alone" line: still the ship's own.
   if (/failed its burn-in in CI/.test(output)) return k('burn-in', 'Kind: a new or changed test failed its burn-in (racy when run as copies at once). Yours: fix the race (a shared path, a fixed port, a timing assumption), not the wait; run it with tools/burn-in.sh <file>, then hand off again.');
   // The fallback's no-answers on perigee (#1863): the log shown above them can hold a ✖ of a file that then passed alone.

@@ -868,8 +868,9 @@ function stageWords(p, current, words) {
 /**
  * Summary line, e.g. "Running the test suite… · 2 of 7 done". Its one count is steps done, the number
  * the list's badge and the readout's meter show, so no two views read differently (#72, #518).
+ * `worked` keeps a line after a turn of only words, since it opens the minion's time log (#1991).
  */
-export function progressLine(p, running) {
+export function progressLine(p, running, worked = false) {
   const { total, done, current } = stepInfo(p, running);
   // A finished plan from an earlier turn says nothing about a turn that is running now.
   if (!running && p.turnFailed) return 'Last turn failed: see the error below';
@@ -879,7 +880,7 @@ export function progressLine(p, running) {
     if (done === total) return `Done · ${total}/${total} steps`;
     return `${!running ? 'Paused' : done ? 'Working' : 'Planning'}…${running && p.lastAction ? ` ${p.lastAction} ·` : ''} ${count}`;
   }
-  if (!running) return p.turnActions ? `Finished · ${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : '';
+  if (!running) return p.turnActions ? `Finished · ${p.turnActions} action${p.turnActions === 1 ? '' : 's'}` : worked ? 'Finished' : '';
   return p.lastAction ? `Working… ${p.lastAction}` : 'Working…';
 }
 

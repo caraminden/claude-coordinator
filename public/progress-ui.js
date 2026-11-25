@@ -200,7 +200,8 @@ export function renderProgress() {
   // A new minion not parked on start_after reads as working while its first turn sets up, as its list row does (#696);
   // a Taskmaster that hasn't run yet is only waiting for a message.
   const running = (view.ticket.status === 'running' && !view.ticket.worker_wait) || (view.ticket.status === 'new' && !view.ticket.parked_for && !view.ticket.start_hold && view.ticket.state !== 'parked' && !isCoordinator(view.ticket));
-  const line = progressLine(p, running);
+  // A minion that has ever worked always has its line, the way into its time log (Josh, 2026-11-25: "Always show the line").
+  const line = progressLine(p, running, view.sawInit && !isCoordinator(view.ticket));
   // One line (#551, Josh's pick): the step › what's happening now · steps done · time. While it waits on
   // something (#544: the land line, a heavy slot, the restart), the wait takes the "now" part and its time,
   // and its bar replaces the meter. A wait shows after the turn has ended too (outside, pending-deploy).

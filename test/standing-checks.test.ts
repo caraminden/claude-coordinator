@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { CHECKS, HEALTH_KIND, integrityDue, keptChecks, runChecks, StandingChecks, standingStatus, type Snapshot } from '../src/standing-checks.ts';
+import { CHECKS, HEALTH_KIND, integrityDue, keptChecks, runChecks, StandingChecks, standingStatus, type Finding, type Snapshot } from '../src/standing-checks.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'standing-checks-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -26,7 +26,7 @@ function setup() {
 }
 const snap = (s: Partial<Snapshot> = {}): Snapshot => ({ at: NOW, queued: {}, appTurns: [], procs: [], ...s });
 const check = (store: Store, dataDir: string, s: Partial<Snapshot> = {}, integrity = false) => runChecks({ db: store.db, dataDir, now: NOW, snap: snap(s), integrity });
-const only = (found: { check: string }[], name: string) => found.filter((f) => f.check === name);
+const only = (found: Finding[], name: string) => found.filter((f) => f.check === name);
 
 test('the named list holds the eight checks', () => {
   assert.deepEqual(

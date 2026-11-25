@@ -33,14 +33,14 @@ async function mcp(env: Record<string, string>, method: string, params: object =
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   try {
-    const reply = new Promise<any>((ok) => createInterface({ input: child.stdout }).once('line', (l) => ok(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
+    const reply = new Promise<{ result: { tools: { name: string; description: string }[]; isError?: boolean; content: { text: string }[] } }>((ok) => createInterface({ input: child.stdout! }).once('line', (l) => ok(JSON.parse(l))));
+    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
     return (await reply).result;
   } finally {
     child.kill();
   }
 }
-const tools = async (env: Record<string, string>) => (await mcp(env, 'tools/list')).tools as { name: string; description: string }[];
+const tools = async (env: Record<string, string>) => (await mcp(env, 'tools/list')).tools;
 const both = { COORDINATOR_MEDIA: '1', COORDINATOR_CODEX_IMAGES: '1' };
 
 test('the media tools are listed for every minion whatever its person has, refused at call time without, and never for a Taskmaster (#878)', async () => {

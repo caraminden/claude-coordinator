@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { ciPublisher, DesktopError, DesktopFeeds, desktopTargetOf, KEEP, NO_FILE, NO_FILE_MS } from '../src/desktop-feed.ts';
 import { LAUNCHER_SOURCES, Launchers } from '../src/desktop-launcher.ts';
 import { desktopRoutes } from '../src/routes/desktop.ts';
+import { json } from './typed.ts';
 
 let root: string;
 before(async () => (root = await mkdtemp(join(tmpdir(), 'desktop-feed-'))));
@@ -303,7 +304,7 @@ test('the open routes serve the feed, a kept build and the install zip, and 404 
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/desktop`;
   try {
-    const feed = await (await fetch(`${base}/5/app/feed.json`)).json();
+    const feed = await json<{ build: number; launcher: { file: string }; zip: string; sha256: string }>(await fetch(`${base}/5/app/feed.json`));
     assert.equal(feed.build, 1);
     assert.equal(feed.launcher.file, 'launcher.exe');
     const zip = Buffer.from(await (await fetch(`${base}/5/app/${feed.zip}`)).arrayBuffer());

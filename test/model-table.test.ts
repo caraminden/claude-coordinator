@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BY_TYPE, CLAUDE_MODELS, EFFORT_LEVELS, FALLBACK, guessType, pickFor, tableText, tierSummary, TIERS } from '../public/model-table.js';
 import { EFFORTS, MODELS } from '../src/db.ts';
+import type { Project, Ticket } from '../src/db-rows.ts';
 import { systemPrompt } from '../src/prompts.ts';
+import { fake } from './typed.ts';
 
 // The model table (#698): one copy that the prompt and the server's starts read.
 
@@ -45,8 +47,8 @@ test("the box guesses the type from a first message's words", () => {
 });
 
 test("the Taskmaster's prompt carries the table, with every tier's model and effort", () => {
-  const project = { id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' } as any;
-  const prompt = systemPrompt(project, { id: 1, number: null, title: 'Taskmaster', kind: 'coordinator' } as any, '/s', '/p', '/t', '/m', [], true, '');
+  const project = fake<Project>({ id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' });
+  const prompt = systemPrompt(project, fake<Ticket>({ id: 1, number: null, title: 'Taskmaster', kind: 'coordinator' }), '/s', '/p', '/t', '/m', [], true, '');
   assert.ok(prompt.includes(tableText()));
   assert.doesNotMatch(prompt, /leave both out/i);
 });
@@ -59,18 +61,18 @@ test('the picked-because line names who chose (#1061)', async () => {
 });
 
 test('the Taskmaster prompt switches to Opus high on its own once Fable is over its cap (#1061)', () => {
-  const project = { id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo', fable_ok: 'on' } as any;
-  const t = { id: 1, number: null, title: 'Taskmaster', kind: 'coordinator' } as any;
-  const args = [project, t, '/s', '/p', '/t', '/m', [], true, '', null, [], null, false, null, null, false, null, []] as const;
-  const under = (systemPrompt as any)(...args, false),
-    over = (systemPrompt as any)(...args, true);
+  const project = fake<Project>({ id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo', fable_ok: 'on' });
+  const t = fake<Ticket>({ id: 1, number: null, title: 'Taskmaster', kind: 'coordinator' });
+  const args: [Project, Ticket, string, string, string, string, [], boolean, string, null, [], null, boolean, null, null, boolean, null, []] = [project, t, '/s', '/p', '/t', '/m', [], true, '', null, [], null, false, null, null, false, null, []];
+  const under = systemPrompt(...args, false),
+    over = systemPrompt(...args, true);
   assert.doesNotMatch(under, /over the weekly cap/);
   assert.match(over, /Fable use is over the weekly cap[^.]*start Fable-tier minions on Opus high/);
 });
 
 test("the model tiers moved out of every minion's prompt render in citadel:subagents and citadel:briefing from the table (#1574)", () => {
   const line = `Models by kind of work, from the Taskmaster's model table: ${tierSummary(true)}.`;
-  const minion = systemPrompt({ id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' } as any, { id: 9, number: 9, title: 'x', kind: 'ticket', branch: 'ticket/9-x' } as any, '/shared/9', '/shared/project', '/tickets', '/memory', [], true, '');
+  const minion = systemPrompt(fake<Project>({ id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' }), fake<Ticket>({ id: 9, number: 9, title: 'x', kind: 'ticket', branch: 'ticket/9-x' }), '/shared/9', '/shared/project', '/tickets', '/memory', [], true, '');
   assert.ok(!minion.includes('Models by kind of work'), 'the line left the minion prompt');
   const kit = join(import.meta.dirname, '..', 'kit');
   for (const skill of ['subagents', 'briefing']) {

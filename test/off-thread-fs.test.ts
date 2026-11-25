@@ -12,11 +12,13 @@ import { FlakeFixes } from '../src/flake-fixes.ts';
 import { Waits } from '../src/waits.ts';
 import { Runner } from '../src/runner.ts';
 import { FakeClock } from './fake-clock.ts';
+import { fake } from './typed.ts';
 import type { SchemeRefs } from '../src/scheme-refs.ts';
 import { gzipSync } from 'node:zlib';
 import { fillPinSpares, readySpares, SPARES } from '../src/pin-spares.ts';
 import { stopTurns, testPins, until, followed, runnerInsides } from './helpers.ts';
 
+type FlakeDeps = ConstructorParameters<typeof FlakeFixes>[0];
 const root = mkdtempSync(join(tmpdir(), 'off-thread-fs-'));
 after(async () => {
   await stopTurns(root);
@@ -29,15 +31,15 @@ async function syncCallsUnder<T>(dir: string, fn: () => T | Promise<T>): Promise
   const real = Object.fromEntries(names.map((n) => [n, fs[n]]));
   const seen: string[] = [];
   for (const n of names)
-    (fs as any)[n] = (p: unknown, ...rest: unknown[]) => {
+    (fs as Record<string, unknown>)[n] = (p: unknown, ...rest: unknown[]) => {
       if (typeof p === 'string' && p.startsWith(dir)) seen.push(`${n} ${p.slice(dir.length)}`);
-      return (real[n] as any)(p, ...rest);
+      return (real[n] as (...args: unknown[]) => unknown)(p, ...rest);
     };
   syncBuiltinESMExports();
   try {
     await fn();
   } finally {
-    for (const n of names) (fs as any)[n] = real[n];
+    for (const n of names) (fs as Record<string, unknown>)[n] = real[n];
     syncBuiltinESMExports();
   }
   return seen;
@@ -64,9 +66,9 @@ test("a card reaches a running turn's snapshot with no synchronous file call on 
   mkdirSync(dir, { recursive: true });
   const file = join(dir, 'scheme-refs.json');
   writeFileSync(file, '{}');
-  (runner as any).turns.set(a.id, { dir });
+  runnerInsides(runner).turns.set(a.id, { dir });
   // A turn whose folder is already gone gets no file made for it.
-  (runner as any).turns.set(b.id, { dir: join(turns, 'gone') });
+  runnerInsides(runner).turns.set(b.id, { dir: join(turns, 'gone') });
 
   // Other minions' cards (C has no turn running) reach A's snapshot off the thread: the first refreshes the scheme at
   // once, the second waits for the gap's end, while the first write may still be under way.
@@ -94,7 +96,7 @@ test("a card reaches a running turn's snapshot with no synchronous file call on 
   assert.equal(refs.cards!.length, 3);
   assert.deepEqual(fs.readdirSync(dir), ['scheme-refs.json']);
   assert.equal(fs.existsSync(join(turns, 'gone')), false);
-  (runner as any).turns.clear();
+  runnerInsides(runner).turns.clear();
 });
 
 test("the flake log is read with no synchronous file call on the server's thread", async () => {
@@ -106,7 +108,7 @@ test("the flake log is read with no synchronous file call on the server's thread
   const line = (t: string, branch: string) => `- ${t}Z · flake · test/x.test.ts · load 17.0 · ticket/${branch} · in CI`;
   writeFileSync(join(shared, 'retro-log', '2026-11-20', 'land.md'), `# Retro log\n\n${[line('05:00:14', 'a'), line('05:08:44', 'b'), line('05:16:02', 'c')].join('\n')}\n`);
   const woken: string[] = [];
-  const fx = new FlakeFixes({ store, sharedDir: () => shared, wake: (_p: unknown, text: string) => void woken.push(text) } as any);
+  const fx = new FlakeFixes(fake<FlakeDeps>({ store, sharedDir: () => shared, wake: fake<FlakeDeps['wake']>((_p: unknown, text: string) => void woken.push(text)) }));
   const now = Date.parse('2026-11-20T05:20:00Z');
   let found = 0;
   const calls = await syncCallsUnder(shared, async () => {

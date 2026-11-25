@@ -70,7 +70,7 @@ test("the environment is the server's filtered one plus the turn's own, and noth
   assert.equal(p.env.COORDINATOR_TICKET, String(minion.id));
   assert.equal(p.env.CITADEL_MINION_TITLE, minion.title, "the kit's title check reads it (#1154)");
   // The kit's hooks cache their compiled code in the folder the turn's own hooks do (#1296).
-  const tripwire = JSON.parse(p.files.find((f) => f.name === 'settings.json')!.text).hooks.PreToolUse.find((m: any) => m.hooks[0].onFailure === 'block').hooks[0].command;
+  const tripwire = JSON.parse(p.files.find((f) => f.name === 'settings.json')!.text).hooks.PreToolUse.find((m: { hooks: { onFailure: string }[] }) => m.hooks[0].onFailure === 'block').hooks[0].command;
   assert.equal(p.env.CITADEL_HOOK_CACHE, join(dir, 'pin', '.compile-cache'));
   assert.ok(tripwire.startsWith(`NODE_COMPILE_CACHE='${p.env.CITADEL_HOOK_CACHE}' `), tripwire);
   // The turn's pinned tools come first on PATH, bin/heavy's wrappers before them when the pinned folder has it (the Android toolchain may follow, when this machine has one).

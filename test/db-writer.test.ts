@@ -553,7 +553,7 @@ const STAYS_ON_THREAD: Record<string, string> = {
 };
 
 test("every Store method that writes is sent to the worker or listed as staying on the server's thread (#1285)", () => {
-  const store = new Store(join(root, 'lists.db')) as any;
+  const store = new Store(join(root, 'lists.db'));
   const listed = new Set<string>([...WRITES, ...VALUE_WRITES, ...ASYNC_WRITES]);
   const runsSql = /\.run\(|\bdb\.exec\(|[`'"]\s*(INSERT|UPDATE|DELETE|REPLACE)\s/i;
   const writers: string[] = [];

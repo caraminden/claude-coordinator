@@ -72,14 +72,14 @@ function inPage(mode: string | undefined, titlebar: [number, number, number] | u
       this.cssRules = cssRules;
     }
   }
-  const window: any = { matchMedia: (q: string) => ({ media: q }) };
+  const window: { matchMedia: (q: string) => { media: string }; __uiShotEmulate?: () => void } = { matchMedia: (q: string) => ({ media: q }) };
   new Function('window', 'innerWidth', 'CSSMediaRule', 'document', emulation(mode, titlebar))(window, 1000, CSSMediaRule, { styleSheets: sheets.map((cssRules) => ({ cssRules })) });
   return { window, CSSMediaRule };
 }
 
 function styleRule(decls: Record<string, string>) {
   const values = { ...decls };
-  const style: any = Object.assign(Object.keys(values), {
+  const style = Object.assign(Object.keys(values), {
     getPropertyValue: (p: string) => values[p],
     getPropertyPriority: () => '',
     setProperty: (p: string, v: string) => (values[p] = v),
@@ -96,7 +96,7 @@ test('display-mode queries match the one asked for, in matchMedia and in stylesh
   const wco = new CSSMediaRule({ mediaText: '(display-mode: window-controls-overlay)' });
   const nested = new CSSMediaRule({ mediaText: '(display-mode: standalone)' });
   sheet.push(new CSSMediaRule({ mediaText: 'screen' }, [wco, nested]));
-  window.__uiShotEmulate();
+  window.__uiShotEmulate!();
   assert.deepEqual([wco.media.mediaText, nested.media.mediaText], ['(min-width: 0px)', '(max-width: 0px)']);
 });
 
@@ -108,7 +108,7 @@ test('env(titlebar-area-*) becomes the strip, fallbacks and all', () => {
     color: 'red',
   });
   const { window } = inPage(undefined, [80, 0, 28], [[r]]);
-  window.__uiShotEmulate();
+  window.__uiShotEmulate!();
   assert.deepEqual(r.values, { 'min-height': '28px', 'padding-right': 'calc(1rem + 100vw - 80px - 920px)', '--top-inset': '28px', color: 'red' });
 });
 

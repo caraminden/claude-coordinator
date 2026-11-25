@@ -11,6 +11,11 @@ import { parseMerge, type PrInfo } from '../src/merge-card.ts';
 import { Runner } from '../src/runner.ts';
 import { agentToken, bootServer, REPO, stopProcs, stopTurns, turnSaved, until, testPins } from './helpers.ts';
 testPins();
+import { json, type ApiEvent } from './typed.ts';
+
+type GoResult = { by: string; via: { message: number; text: string; scheme: number; ticket: number | null; to?: number } };
+type Said = { text: string; typed?: boolean };
+type Asked = { id?: number; refused?: string };
 
 // A person's own typed "merge it" lets the turn that reads it merge once with no card (#201). Only
 // the messages route's person path marks a message typed; relays, card answers and agents never can.
@@ -188,9 +193,9 @@ const own = { number: 196, head: 'ticket/50-feeder', open: true };
 const typed = (text: string, id = 1) => ({ author: 'Cara', text, id, typed: true });
 
 function gate(store?: GoStore) {
-  const results: any[] = [];
+  const results: GoResult[] = [];
   const notes: { ticket: number; text: string }[] = [];
-  const a = new Approvals((t, kind, data: any) => (kind === 'approval_result' ? results.push(data) : kind === 'note' && notes.push({ ticket: t, text: data.text })), store);
+  const a = new Approvals((t, kind, data) => (kind === 'approval_result' ? results.push(data as GoResult) : kind === 'note' && notes.push({ ticket: t, text: (data as { text: string }).text })), store);
   const merge = (ticket = FEEDER.id, target: MergeTarget | null = own, rules = true, scheme = 1) => {
     const r = a.ask(ticket, 'Bash', MERGE, '/w', { ...CFG, project: scheme }, rules, undefined, target);
     return 'id' in r ? a.get(ticket, r.id).state : 'refused';
@@ -569,14 +574,14 @@ test("the messages route marks a person's own message typed, and the Taskmaster'
     });
     assert.equal(asTaskmaster.status, 202);
     assert.equal((await srv.call(`/api/tickets/${t.id}/messages`, { text: 'merge it' })).status, 202);
-    const said = async () => (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
+    const said = async () => (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.filter((e: ApiEvent) => e.kind === 'user_message').map((e: ApiEvent) => JSON.parse(e.data));
     const msgs = await until('both messages', async () => {
       const m = await said();
-      return m.some((d: any) => d.text === 'merge it') && m.some((d: any) => d.text === 'merge it, from the Taskmaster') && m;
+      return m.some((d: Said) => d.text === 'merge it') && m.some((d: Said) => d.text === 'merge it, from the Taskmaster') && m;
     });
-    assert.equal(msgs.find((d: any) => d.text === 'merge it').typed, true);
-    assert.equal(msgs.find((d: any) => d.text === 'merge it, from the Taskmaster').typed, undefined);
-    assert.equal(msgs.find((d: any) => d.text === 'build it').typed, undefined, 'a brief is not typed');
+    assert.equal(msgs.find((d: Said) => d.text === 'merge it').typed, true);
+    assert.equal(msgs.find((d: Said) => d.text === 'merge it, from the Taskmaster').typed, undefined);
+    assert.equal(msgs.find((d: Said) => d.text === 'build it').typed, undefined, 'a brief is not typed');
   } finally {
     await srv.stop();
   }
@@ -657,16 +662,16 @@ test('through the routes: a typed go lets one plain merge of the right PR throug
     git(['remote', 'set-url', 'origin', 'https://github.com/cara/delve.git'], project.repo_dir);
     const minion = () => ({ Authorization: `Bearer ${agentToken(srv.data, t.id)}`, 'Content-Type': 'application/json' });
     await turnAuth(srv, t.id);
-    const ask = async (command: string) => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Merge the PR' } }) })).json();
+    const ask = async (command: string) => json<Asked>(await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Merge the PR' } }) }));
     const merge = async (command: string) => {
       const r = await ask(command);
       assert.ok(r.id, JSON.stringify(r));
       // A go settles the card before the POST answers; a long-poll on a waiting one would hold for 25 s.
-      const settled = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.find((e: any) => e.kind === 'approval_result' && JSON.parse(e.data).id === r.id);
+      const settled = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.find((e: ApiEvent) => e.kind === 'approval_result' && JSON.parse(e.data).id === r.id);
       return settled ? JSON.parse(settled.data).state : 'pending';
     };
     const say = async (text: string) => assert.equal((await srv.call(`/api/tickets/${t.id}/messages`, { text })).status, 202);
-    const steered = async (text: string) => until(`"${text}" steered`, async () => (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.some((e: any) => e.kind === 'user_message' && JSON.parse(e.data).text === text));
+    const steered = async (text: string) => until(`"${text}" steered`, async () => (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.some((e: ApiEvent) => e.kind === 'user_message' && JSON.parse(e.data).text === text));
 
     // The Taskmaster relaying her words is not a go.
     await fetch(`${srv.base}/api/tickets/${t.id}/messages`, { method: 'POST', headers: { Authorization: `Bearer ${agentToken(srv.data, coordinator.id)}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'merge it' }) });
@@ -700,9 +705,9 @@ test('through the routes: a typed go lets one plain merge of the right PR throug
     assert.match((await ask('cd .. && gh pr merge --merge 2>&1')).refused ?? '', /`gh pr merge 191 --repo cara\/delve --merge`/);
     assert.equal(await merge('gh pr merge 191 -R cara/delve --merge --body done'), 'pending', 'a body');
     assert.equal(await merge('gh pr merge 191 -R cara/delve --merge'), 'allowed');
-    const results = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.filter((e: any) => e.kind === 'approval_result').map((e: any) => JSON.parse(e.data));
+    const results = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.filter((e: ApiEvent) => e.kind === 'approval_result').map((e: ApiEvent) => JSON.parse(e.data));
     assert.deepEqual(
-      results.map((r: any) => [r.by, r.via?.text]),
+      results.map((r: GoResult) => [r.by, r.via?.text]),
       [
         ['Cara', 'merge it'],
         ['Cara', 'merge it'],
@@ -731,14 +736,14 @@ test("through the routes: Delve #42's go in one minion lets the build minion mer
     git(['remote', 'set-url', 'origin', 'https://github.com/cara/delve.git'], project.repo_dir);
     const auth = await turnAuth(srv, build.id);
     const merge = async (command: string) => {
-      const r = await (await fetch(`${srv.base}/api/tickets/${build.id}/approvals`, { method: 'POST', headers: auth, body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Fold the PR' } }) })).json();
+      const r = await json<Asked>(await fetch(`${srv.base}/api/tickets/${build.id}/approvals`, { method: 'POST', headers: auth, body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Fold the PR' } }) }));
       assert.ok(r.id, JSON.stringify(r));
-      const settled = (await srv.call(`/api/tickets/${build.id}/events?after=0`)).data.find((e: any) => e.kind === 'approval_result' && JSON.parse(e.data).id === r.id);
+      const settled = (await srv.call(`/api/tickets/${build.id}/events?after=0`)).data.find((e: ApiEvent) => e.kind === 'approval_result' && JSON.parse(e.data).id === r.id);
       return settled && JSON.parse(settled.data);
     };
     assert.equal(await merge('gh pr merge 188 --repo cara/delve --merge'), undefined, 'no go yet: the card');
     assert.equal((await srv.call(`/api/tickets/${category.id}/messages`, { text: 'you can fold 188' })).status, 202);
-    const said = await until('the go', async () => (await srv.call(`/api/tickets/${category.id}/events?after=0`)).data.find((e: any) => e.kind === 'user_message' && JSON.parse(e.data).text === 'you can fold 188'));
+    const said = await until('the go', async () => (await srv.call(`/api/tickets/${category.id}/events?after=0`)).data.find((e: ApiEvent) => e.kind === 'user_message' && JSON.parse(e.data).text === 'you can fold 188'));
     const r = await merge('gh pr merge 188 --repo cara/delve --merge --match-head-commit 2efe2fb20f139cc9e77834436066a504c2793977');
     assert.deepEqual([r?.state, r?.by, r?.via], ['allowed', 'Cara', { message: said.id, text: 'you can fold 188', scheme: project.id, ticket: category.number }]);
     assert.equal((await merge('gh pr merge 188 --repo cara/delve --merge --match-head-commit 7ff3d3e693550d12e4dabcdacc5db281fe382b7b'))?.state, 'allowed', 'a new head after the go');
@@ -764,11 +769,11 @@ test('Delve replays: a typed fold survives restarts mid-turn, a refused merge an
     git(['remote', 'set-url', 'origin', 'https://github.com/cara/delve.git'], project.repo_dir);
     const minion = () => ({ Authorization: `Bearer ${agentToken(srv.data, t.id)}`, 'Content-Type': 'application/json' });
     const attached = () => turnAuth(srv, t.id);
-    const ask = async (command: string) => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Fold the PR' } }) })).json();
+    const ask = async (command: string) => json<Asked>(await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command, description: 'Fold the PR' } }) }));
     const merge = async (command: string) => {
       const r = await ask(command);
       assert.ok(r.id, JSON.stringify(r));
-      const settled = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.find((e: any) => e.kind === 'approval_result' && JSON.parse(e.data).id === r.id);
+      const settled = (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.find((e: ApiEvent) => e.kind === 'approval_result' && JSON.parse(e.data).id === r.id);
       return settled ? JSON.parse(settled.data).state : 'pending';
     };
     const restart = async () => {
@@ -781,7 +786,7 @@ test('Delve replays: a typed fold survives restarts mid-turn, a refused merge an
 
     // #63 (10-31): "Fold it", then two other minions' deploys restarted the server before the merge.
     assert.equal((await srv.call(`/api/tickets/${t.id}/messages`, { text: 'Fold it' })).status, 202);
-    await until('"Fold it" steered', async () => (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.some((e: any) => e.kind === 'user_message' && JSON.parse(e.data).text === 'Fold it'));
+    await until('"Fold it" steered', async () => (await srv.call(`/api/tickets/${t.id}/events?after=0`)).data.some((e: ApiEvent) => e.kind === 'user_message' && JSON.parse(e.data).text === 'Fold it'));
     await restart();
     await restart();
     // #63 and #72: a --match-head-commit GitHub refused (made up, or too short), then the retry.

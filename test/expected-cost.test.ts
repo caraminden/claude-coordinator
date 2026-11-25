@@ -6,7 +6,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { ASK, askText, type Budget, expectedCost, markOf, START_CARD_USD, turnLine, WAKE, withEstimate } from '../src/minion-budget.ts';
 import { agentToken, bootServer, mintedAgentToken } from './helpers.ts';
+import { json, type Refused } from './typed.ts';
 import { until } from './wait.ts';
+
+type Made = { id: number; notes: string[]; state: string | null; start_hold: { usd: number } | null; note: string; budget: { usd: number } };
 
 // Every brief states an expected cost (#1674; Cara, 2026-11-22, "Build it" on #1668's card): the budget's marks scale
 // from it, and a brief expected over $30 waits for a person's start card.
@@ -40,12 +43,12 @@ test("a Taskmaster brief over $30 waits for a person's start card; under it, or 
   try {
     const { data: p } = await s.call('/api/projects', { name: 'Delve' }); // any scheme
     const tm = (await s.call(`/api/projects/${p.id}`)).data.coordinator;
-    const asTaskmaster = (path: string, body: object) =>
+    const asTaskmaster = <T = Made>(path: string, body: object) =>
       fetch(`${s.base}${path}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${agentToken(s.data, tm.id)}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      }).then(async (r) => ({ status: r.status, data: await r.json() }));
+      }).then(async (r) => ({ status: r.status, data: await json<T>(r) }));
     const create = (title: string, message: string, extra: object = {}) => asTaskmaster(`/api/projects/${p.id}/tickets`, { title, message, model: 'claude-opus-5-5', effort: 'high', properties: { type: 'feature' }, ...extra });
     const events = async (id: number) => (await s.call(`/api/tickets/${id}/events?after=0`)).data as { id: number; kind: string; data: string }[];
     const card = async (id: number) => (await events(id)).map((e) => ({ e, d: JSON.parse(e.data) })).find(({ e, d }) => e.kind === 'question' && d.startCost);
@@ -87,7 +90,7 @@ test("a Taskmaster brief over $30 waits for a person's start card; under it, or 
     assert.equal((await s.call(`/api/tickets/${id}`)).data.ticket.status, 'new', 'no turn ran');
 
     // The Taskmaster can't start it around the card, and can't answer cards at all.
-    const unseal = await asTaskmaster(`/api/tickets/${id}/unpark`, {});
+    const unseal = await asTaskmaster<Refused>(`/api/tickets/${id}/unpark`, {});
     assert.equal(unseal.status, 409, JSON.stringify(unseal.data));
     assert.match(unseal.data.error, /start card/);
     assert.equal((await asTaskmaster(`/api/tickets/${id}/answer`, { questionId: held.d.id, answers: [{ selected: ['Start'] }] })).status, 403);
@@ -154,7 +157,7 @@ test('a minion sealed on its start card before #1757 moves out of the seal at bo
         method: 'POST',
         headers: { Authorization: `Bearer ${agentToken(s.data, tm.id)}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, message, model: 'claude-opus-5-5', effort: 'high', properties: { type: 'feature' } }),
-      }).then(async (r) => (await r.json()).id as number);
+      }).then(async (r) => (await json<{ id: number }>(r)).id);
     ids = [await create('Old big', 'Do it all.\nExpected cost: $35'), await create('Plain seal', 'Fix it.\nExpected cost: $5'), await create('Sealed later', 'Do it all.\nExpected cost: $40')];
   } finally {
     await s.stop();

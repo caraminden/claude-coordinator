@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { Store } from '../src/db.ts';
 import { loadDecisions, tellStale } from '../src/decisions-load.ts';
 import assert from 'node:assert/strict';
+import type { App } from '../src/http.ts';
+import { fake } from './typed.ts';
 import { adrDir, assemble, githubHref, inScope, parseAdr, parseDecisions, replay, searchDecisions, type Doc } from '../src/decisions.ts';
 
 const NAMES = ['Cara Minden', 'Josh', 'Alex'];
@@ -169,7 +171,7 @@ test('loadDecisions: the Land then Ship save shows as a reversal, and its Taskma
   const project = store.createProject('Peek', null);
   const tm = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' });
   const mail: string[] = [];
-  const app = { store, claude: { accounts: () => null, configDir: () => null }, runner: { leaveMail: (to: number, _a: string, text: string) => mail.push(`${to}|${text}`) } } as any;
+  const app = fake<App>({ store, claude: fake<App['claude']>({ accounts: () => null, configDir: () => null }), runner: fake<App['runner']>({ leaveMail: (to: number, _a: string, text: string) => mail.push(`${to}|${text}`) }) });
   store.setAppInstructions(LAND, 'Cara');
   store.setProjectInstructions(project.id, '- Say land (Cara, 2026-11-19: "Retire it" and "Land").', 'Cara');
   const first = await loadDecisions(app, store.getProject(project.id)!);
@@ -205,7 +207,7 @@ test("loadDecisions reads a repo's rules but never through a symlink", async () 
   symlinkSync(join(dir, 'outside.md'), join(repo, '.claude', 'rules', 'link.md'));
   symlinkSync(dir, join(repo, '.claude', 'rules', 'folder'));
   store.setProjectRepoDir(project.id, repo);
-  const app = { store, claude: { accounts: () => null, configDir: () => null }, runner: { leaveMail: () => {} } } as any;
+  const app = fake<App>({ store, claude: fake<App['claude']>({ accounts: () => null, configDir: () => null }), runner: fake<App['runner']>({ leaveMail: () => {} }) });
   const { decisions } = await loadDecisions(app, store.getProject(project.id)!);
   const rules = decisions.filter((d) => d.places.some((p) => p.kind === 'repo')).map((d) => d.rule);
   assert.deepEqual(rules, ['Real rule']);

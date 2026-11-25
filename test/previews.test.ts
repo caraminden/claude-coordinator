@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { copyData, Previews } from '../src/previews.ts';
 import { agentToken, listeningPort, PASSWORD, SECRET, tempRoot, TEST_ZONE } from './helpers.ts';
+import { json } from './typed.ts';
 import { until } from './wait.ts';
 
 // Previews (src/previews.ts): the live server runs a minion's worktree in preview mode on a copy of
@@ -19,7 +20,7 @@ after(async () => {
   // The server's last writes land before it is stopped and its folder deleted (#1437, CITADEL_TEST_SETTLED below).
   const busy: string[] = base
     ? await fetch(`${base}/api/test/settled`)
-        .then((r) => r.json())
+        .then((r) => json<{ busy: string[] }>(r))
         .then(
           (r) => r.busy,
           () => [],
@@ -116,16 +117,16 @@ before(async () => {
 
 test('a minion has no preview until it starts one', async () => {
   assert.equal((await page(`/preview/${ticket.id}/`)).status, 404);
-  const view = await (await fetch(`${base}/api/tickets/${ticket.id}`, { headers: { Cookie: cookie } })).json();
+  const view = await json<{ ticket: { preview: boolean } }>(await fetch(`${base}/api/tickets/${ticket.id}`, { headers: { Cookie: cookie } }));
   assert.equal(view.ticket.preview, false);
 });
 
 test('start_preview boots the worktree and returns the full link; the view offers it', async () => {
   const res = await startPreview(ticket.id);
-  const body = await res.json();
+  const body = await json<{ error: string; url: string }>(res);
   assert.equal(res.status, 200, body.error);
   assert.equal(body.url, `https://app.example/preview/${ticket.id}/`);
-  const view = await (await fetch(`${base}/api/tickets/${ticket.id}`, { headers: { Cookie: cookie } })).json();
+  const view = await json<{ ticket: { preview: boolean } }>(await fetch(`${base}/api/tickets/${ticket.id}`, { headers: { Cookie: cookie } }));
   assert.equal(view.ticket.preview, true);
 });
 
@@ -141,7 +142,7 @@ test('the proxy serves the preview to a signed-in person, as that person, withou
   assert.equal(res.status, 200);
   assert.match(await res.text(), /<title>Citadel preview<\/title>/);
   const me = await fetch(`${base}/preview/${ticket.id}/api/me`, { headers: { Cookie: cookie } });
-  const { welcome, ...who } = await me.json();
+  const { welcome, ...who } = await json<{ welcome?: { done: boolean } }>(me);
   assert.deepEqual(who, { id: 1, name: 'Cara', login: 'cara', admin: true, turns: true, payer: null, keepChats: true });
   assert.equal(typeof welcome?.done, 'boolean', "the preview's person carries their first-day welcome too (#1151)");
   // The preview's logout clears its cookie; that header must not reach the browser.
@@ -193,7 +194,7 @@ test("an HTML page's file token gets through without a login, to the preview's o
   // The preview refuses a forged token itself; the bypass is for reading files only.
   const forged = await fetch(`${base}/preview/${ticket.id}/api/files/p${project.id}.zzzzzz.forged/pic.png`);
   assert.equal(forged.status, 403);
-  assert.match((await forged.json()).error, /expired/);
+  assert.match((await json<{ error: string }>(forged)).error, /expired/);
   assert.equal((await fetch(`${base}/preview/${ticket.id}/api/files/x`, { method: 'POST' })).status, 401);
   // The preview's front end sits at /preview/N/c/, so its relative links ask under /c/ (#468 S08-3).
   const cPath = `/preview/${ticket.id}/c/api/projects/${project.id}/shared/file?path=gallery.html`;
@@ -209,7 +210,7 @@ test("an HTML page's file token gets through without a login, to the preview's o
 test('a branch without preview mode is refused, and nothing is left running', async () => {
   const res = await startPreview(old.id);
   assert.equal(res.status, 502);
-  assert.match((await res.json()).error, /no preview mode; rebase/);
+  assert.match((await json<{ error: string }>(res)).error, /no preview mode; rebase/);
   assert.equal(existsSync(join(data, 'previews', String(old.id))), false);
 });
 
@@ -271,7 +272,7 @@ setTimeout(() => createServer((req, res) => res.end(JSON.stringify({ ok: true, p
   try {
     const starting = previews.start(s4.getTicket(t.id)!);
     s4.updateTicket(t.id, { status: 'closed' });
-    await assert.rejects(starting, (err: any) => err.status === 409);
+    await assert.rejects(starting, (err: Error & { status: number }) => err.status === 409);
     assert.equal(previews.isRunning(t.id), false);
     assert.equal(previews.offered(t.id), false);
     assert.equal(existsSync(join(previews.root, String(t.id))), false);

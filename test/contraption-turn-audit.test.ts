@@ -5,7 +5,11 @@ import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { agentToken, bootServer, mintedAgentToken, tempRoot } from './helpers.ts';
+import { json } from './typed.ts';
 import { agentEnv, mcpAgent } from './mcp-agent.ts';
+
+/** The parts of the audit's answer these tests read. */
+type Audit = { turns: { id: number; contraption: string; person: string; prompt: string; system: string; output: string; blind: boolean; verdict: string; verdict_reason: string }[]; keep_days: number };
 
 const tmp = tempRoot('turn-audit-');
 const root = tmp.dir;
@@ -46,7 +50,7 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
   const josh = await person('Josh', 'joshs-long-password');
   const olive = await person('Olive', 'olives-long-password');
   assert.equal((await srv.call(`/api/projects/${alpha}/members`, { person: josh.id })).status, 200);
-  const as = (who: { cookie: string }, path: string) => fetch(srv.base + path, { headers: { Cookie: who.cookie } }).then(async (r) => ({ status: r.status, data: await r.json() }));
+  const as = (who: { cookie: string }, path: string) => fetch(srv.base + path, { headers: { Cookie: who.cookie } }).then(async (r) => ({ status: r.status, data: await json<Audit>(r) }));
 
   // Two apps: one at home in Alpha, one in Bravo.
   const keyOf = async (name: string, home: number) => {
@@ -79,7 +83,7 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
   const read = await as(josh, `/api/projects/${alpha}/contraption-turns`);
   assert.equal(read.status, 200);
   assert.deepEqual(
-    read.data.turns.map((t: any) => t.id),
+    read.data.turns.map((t) => t.id),
     [id],
     "only Alpha's apps",
   );
@@ -100,7 +104,7 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
   assert.notEqual(byKey.status, 200);
   // The admin reads Bravo's.
   assert.deepEqual(
-    (await srv.call(`/api/projects/${bravo}/contraption-turns`)).data.turns.map((t: any) => t.id),
+    (await srv.call(`/api/projects/${bravo}/contraption-turns`)).data.turns.map((t: { id: number }) => t.id),
     [elsewhere],
   );
 
@@ -122,7 +126,7 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
   await mintedAgentToken(srv.data, minion);
   assert.equal((await bearer(minion, `/api/projects/${alpha}/contraption-turns`)).status, 403, 'a minion');
   // Getting the app gave Alpha its weekly app turns check (#844); that check's current run reads the audit.
-  const checks = (await srv.call(`/api/projects/${alpha}/schedules`)).data.schedules.filter((s: any) => s.template === 'app-turns');
+  const checks = (await srv.call(`/api/projects/${alpha}/schedules`)).data.schedules.filter((s: { template: string }) => s.template === 'app-turns');
   assert.equal(checks.length, 1);
   const { DatabaseSync } = await import('node:sqlite');
   const rw = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });

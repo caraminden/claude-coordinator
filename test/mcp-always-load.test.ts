@@ -41,8 +41,8 @@ test('the plan tool refuses exactly the calls the readout ignores, with the same
     let refused = '';
     try {
       planResult(call);
-    } catch (e: any) {
-      refused = e.message;
+    } catch (e) {
+      refused = (e as Error).message;
     }
     assert.equal(refused, planError(call), JSON.stringify(call));
   }

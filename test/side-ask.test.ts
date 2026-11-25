@@ -74,7 +74,7 @@ const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
 const cara = store.createUser({ name: 'Cara', login: 'cara', server_login: true });
 const josh = store.createUser({ name: 'Josh', login: 'josh' });
-const sent: any[] = [];
+const sent: unknown[] = [];
 const runner = new Runner(
   store,
   (m) => sent.push(m),
@@ -126,7 +126,7 @@ test("a side question leaves the minion's session, history and next turn untouch
   assert.equal(store.listEvents(m.id).filter((e) => !e.kind.startsWith('side')).length, events, "no chat entry but the side thread's own");
 
   // Its cost is Josh's, marked as a side question, and kept out of the minion's own turns.
-  const row = store.db.prepare('SELECT * FROM turns WHERE ticket_id = ? AND side = 1').get(m.id) as any;
+  const row = store.db.prepare('SELECT * FROM turns WHERE ticket_id = ? AND side = 1').get(m.id) as { payer: number; cost_usd: number; session_id: string };
   assert.equal(row.payer, josh.id);
   assert.equal(row.cost_usd, 0.25);
   assert.notEqual(row.session_id, m.session);
@@ -146,7 +146,7 @@ test('a follow-up resumes the fork, only its asker may send one, and an ended th
   const m = await minion();
   const ev = await sides.ask(m.id, cara.id, 'Cara', 'first?');
   await until('it', () => answers(m.id).length === 1);
-  const forkId = (store.db.prepare('SELECT session_id FROM turns WHERE ticket_id = ? AND side = 1').get(m.id) as any).session_id;
+  const forkId = (store.db.prepare('SELECT session_id FROM turns WHERE ticket_id = ? AND side = 1').get(m.id) as { session_id: string }).session_id;
   await assert.rejects(sides.ask(m.id, josh.id, 'Josh', 'me too?', ev.thread), /Only the person who started/);
   await sides.ask(m.id, cara.id, 'Cara', 'and then?', ev.thread);
   await until('it', () => answers(m.id).length === 2);
@@ -193,7 +193,7 @@ test('it answers while the minion is mid-turn, and the fork runs with the read-o
   assert.match(refused(fork.write)?.stderr ?? '', /\[side question\].*read-only/, JSON.stringify(fork.write));
   assert.ok(refused(fork.rm), JSON.stringify(fork.rm));
   assert.ok(
-    fork.read.every((r: any) => r.status === 0),
+    fork.read.every((r: { status: number }) => r.status === 0),
     JSON.stringify(fork.read),
   );
   assert.ok(!existsSync(join(m.cwd, 'x')));
@@ -221,7 +221,7 @@ test("an answer that lands between the tick's two looks is not lost (#1619)", as
   rmSync(exit);
   let gaps = 0;
   const read = hand.read.bind(hand);
-  hand.read = (t: any, toEnd: boolean) => {
+  hand.read = (t: unknown, toEnd: boolean) => {
     read(t, toEnd);
     if (gaps++) return;
     writeFileSync(stream, printed.trimEnd());

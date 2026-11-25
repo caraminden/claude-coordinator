@@ -51,9 +51,9 @@ function setup(side: boolean, name: string) {
     wordingHooks(wording.shared, wording.sent, pins.WORDING),
     schemeRefsHooks(schemeRefs.refs, schemeRefs.sent, pins.SCHEME_REFS),
     { matcher: BIG_READ_MATCHER, command: `'${process.execPath}' '${join(pins.KIT, 'hooks', 'big-read.ts')}'` },
-  ].map((h: any) => ({ matcher: h.matcher, command: h.command ?? h.hooks[0].command, hard: !!h.hard }));
+  ].map((h: { matcher: string; command?: string; hooks?: { command: string }[]; hard?: boolean }) => ({ matcher: h.matcher, command: h.command ?? h.hooks![0].command, hard: !!h.hard }));
   // Its own sent files: wording and scheme-refs let a sentence through the second time, by design.
-  const runner = hookRunHooks({ ...(side ? { side: true } : {}), tripwire: tripwireCfg, wording: { ...wording, sent: join(dir, 'runner-wording-sent') }, schemeRefs: { ...schemeRefs, sent: join(dir, 'runner-scheme-refs-sent') }, kit: pins.KIT });
+  const runner: { matcher: string; hooks: { command: string; onFailure?: string }[] }[] = hookRunHooks({ ...(side ? { side: true } : {}), tripwire: tripwireCfg, wording: { ...wording, sent: join(dir, 'runner-wording-sent') }, schemeRefs: { ...schemeRefs, sent: join(dir, 'runner-scheme-refs-sent') }, kit: pins.KIT });
   return { alone, runner };
 }
 
@@ -64,7 +64,7 @@ const reason = (s: string) => JSON.parse(s).hookSpecificOutput.permissionDecisio
 function same(call: object, side = false, label = JSON.stringify(call).slice(0, 80)) {
   const { alone, runner } = setup(side, `case-${Math.random().toString(36).slice(2)}`);
   const input = JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 's', cwd: worktree, ...call });
-  const tool = (call as any).tool_name;
+  const tool = (call as { tool_name: string }).tool_name;
   const outs = alone.filter((h) => new RegExp(h.matcher).test(tool)).map((h) => run(h.command, input));
   const entries = runner.filter((e) => new RegExp(e.matcher).test(tool));
   assert.equal(entries.length, outs.length > 0 ? 1 : 0, `${label}: the runner starts exactly when some old hook did, once`);

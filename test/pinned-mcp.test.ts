@@ -20,7 +20,7 @@ test('the pinned mcp.ts starts from its pinned dir and answers initialize', asyn
   });
   let stderr = '';
   child.stderr.on('data', (d) => (stderr += d));
-  const reply = new Promise<any>((resolve, reject) => {
+  const reply = new Promise<{ id: number; result: { serverInfo: { name: string } } }>((resolve, reject) => {
     createInterface({ input: child.stdout }).once('line', (line) => resolve(JSON.parse(line)));
     child.once('exit', (code) => reject(new Error(`mcp.ts exited (${code}): ${stderr}`)));
   });

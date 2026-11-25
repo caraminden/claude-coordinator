@@ -8,7 +8,7 @@ shared: src/turn-launch.ts src/machines.ts src/routes/machines.ts public/machine
 #1962: src/running-turn.ts
 #1972: public/machine-worker.mjs src/machine-turn.ts test/machine-turn.test.ts src/machine-sync.ts test/machine-sync.test.ts src/sessions.ts src/routes/files.ts public/machine-sync.mjs
 #1973: (merged in)
-#2006: public/settings-machines.js public/machine-setup.js public/machines.css src/machine-lend.ts public/worker-agent.mjs src/worker-join.ts test/worker-join.test.ts test/worker-agent.test.ts test/worker-install.test.ts test/machine-lend.test.ts tools/worker/ server.ts src/machine-pools.ts test/machine-pools.test.ts
+#2006: public/settings-machines.js public/machine-setup.js public/machines.css src/machine-lend.ts public/worker-agent.mjs public/machine-worker-row.js src/worker-join.ts test/worker-join.test.ts test/worker-install.test.ts test/machine-worker-browser.test.ts tools/worker/ server.ts src/machine-pools.ts test/machine-pools.test.ts
 
 A feeder's own line is added by #1935 when its number is known, before the next piece starts. The plan, by piece:
 

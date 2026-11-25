@@ -35,7 +35,7 @@ export const MAIN_WAIT_MS = 30 * 60_000;
 export const OTHERS_CAP_MS = 4 * 3600_000;
 /** A job that has run this long keeps no other waiting: a hung one can't hold the line. */
 export const SLOT_HOLD_MS = 4 * 3600_000;
-/** The most a job waits behind lower jobs of Citadel's, with no ship in the way: a long queue can't hold it for ever. */
+/** The most a job waits behind lower jobs of Citadel's, from the first time it did (ships still go first): a long queue can't hold it for ever. */
 export const SLOT_WAIT_MS = 24 * 3600_000;
 /** A run seen on a runner this long without having been let in (its workflow asks nothing) is stopped when another has the slot. */
 const UNASKED_MS = 2 * 60_000;
@@ -494,7 +494,7 @@ export class CiHold {
         if (taken && (h.why !== taken || h.behind === undefined)) {
           Object.assign(h, { why: taken, behind: h.behind ?? now });
           this.save();
-        } else if (ship) delete h.behind;
+        }
         if (taken && !this.slotPast(h, now)) return;
         if (sideRun(h.kind) && this.queued.size) return;
       }

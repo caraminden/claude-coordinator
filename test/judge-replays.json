@@ -21,10 +21,10 @@
     "hash": "e28af654e204f3a9",
     "at": "2026-11-25",
     "days": 3,
-    "inputs": "114 minion sessions, 192 compactions",
-    "hits": 51,
+    "inputs": "115 minion sessions, 212 compactions",
+    "hits": 55,
     "real": 0,
-    "summary": "0 as before, 51 new, 0 gone"
+    "summary": "0 as before, 55 new, 0 gone"
   },
   "container-relief": {
     "hash": "eab8521d09c5e684",

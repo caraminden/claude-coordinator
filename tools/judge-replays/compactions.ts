@@ -4,8 +4,9 @@
 import { createReadStream, globSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { createInterface } from 'node:readline';
+import { finished } from 'node:stream/promises';
 import { CompactWatch } from '../../src/compactions.ts';
+import { jsonLines } from '../../src/json-lines.ts';
 import type { ClaudeEvent } from '../../src/claude-events.ts';
 import type { Ticket } from '../../src/db.ts';
 import type { Act, ReplayCtx, ReplayResult } from './types.ts';
@@ -37,19 +38,15 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
       note: () => {},
       now: () => at,
     });
-    for await (const line of createInterface({ input: createReadStream(file) })) {
-      let e: Row;
-      try {
-        e = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (e.isSidechain) continue;
+    const stream = createReadStream(file);
+    jsonLines<Row>(stream, (e) => {
+      if (e.isSidechain) return;
       if (e.timestamp) at = Date.parse(e.timestamp);
       const compacted = e.type === 'system' && e.subtype === 'compact_boundary';
       if (compacted && at > since) compactions++;
       watch.observe(id, { ...e, compact_metadata: { duration_ms: e.compactMetadata?.durationMs } } as ClaudeEvent);
-    }
+    });
+    await finished(stream);
   }
   return {
     inputs: `${files.length} minion sessions, ${compactions} compactions`,

@@ -23,9 +23,9 @@ const minions = new Map<string, { id: number; number: number }>();
 before(async () => {
   srv = await bootServer();
   projectId = (await srv.call('/api/projects', { name: 'P' })).data.id;
-  for (const t of await Promise.all(titles.map(async (title) => (await srv.call(`/api/projects/${projectId}/tickets`, { title, message: 'hi' })).data))) minions.set(t.title, t);
-  await until('the first turns to end', async () => (await Promise.all([...minions.values()].map(async (t) => (await srv.call(`/api/tickets/${t.id}`)).data.ticket.status))).every((s) => s !== 'running'));
   if (!skip) {
+    for (const t of await Promise.all(titles.map(async (title) => (await srv.call(`/api/projects/${projectId}/tickets`, { title, message: 'hi' })).data))) minions.set(t.title, t);
+    await until('the first turns to end', async () => (await Promise.all([...minions.values()].map(async (t) => (await srv.call(`/api/tickets/${t.id}`)).data.ticket.status))).every((s) => s !== 'running'));
     browser = await launch(bin!);
     mouseBrowser = await launch(bin!, ['--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2']);
   }

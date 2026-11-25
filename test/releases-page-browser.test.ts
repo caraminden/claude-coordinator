@@ -16,6 +16,7 @@ const STUB = pageStub(
     if (/^api\\/projects\\/1$/.test(path)) return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator: { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: Date.now(), created_at: Date.now() }, tickets: [] });
     if (path === 'api/ci') return reply(200, { schemes: [], pcs: [] });
     if (path === 'api/releases') { await window.gate; return reply(200, { schemes: [] }); }
+    if (/inbox$/.test(path)) return reply(200, []); // this file's server answered an inbox with []
   }
 `,
   { hello: true },

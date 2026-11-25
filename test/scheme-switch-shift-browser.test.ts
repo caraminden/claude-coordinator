@@ -23,6 +23,7 @@ const STUB = pageStub(`
     if ((m = path.match(/^api\\/projects\\/(\\d)\\/properties$/))) return late({ keys: m[1] === '1' ? [{ key: 'type', status: 'active', value_kind: 'enum', values: [{ value: 'bug', status: 'active' }] }] : [], proposals: [] });
     if ((m = path.match(/^api\\/projects\\/(\\d)\\/views$/))) return late([]);
     if ((m = path.match(/^api\\/tickets\\/(\\d+)\\/events$/))) return reply(200, { events: [], tasks: [], more: false });
+    if (/inbox$/.test(path)) return reply(200, []); // this file's server answered an inbox with []
   }
 `);
 

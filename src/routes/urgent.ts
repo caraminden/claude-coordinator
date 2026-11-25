@@ -18,6 +18,7 @@ function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?:
     const t = store.getTicket(id);
     return t && store.canSee(session, t.project_id) ? { ticket: id, project: t.project_id, number: t.number, title: t.title } : { ticket: null };
   };
+  const ordered = runner.turnLine.line();
   return {
     forced: runner.startNow.list().map((h) => {
       const t = minion(h.ticket);
@@ -28,7 +29,7 @@ function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?:
       // Who and why only to those who see it: a Taskmaster's mark names its scheme.
       return { ...t, waiting: runner.turnLine.has(m.ticket), kind: m.kind, at: m.at, ...(t.ticket ? { by: m.by, reason: m.reason } : {}) };
     }),
-    line: runner.turnLine.line().map((w) => ({
+    line: ordered.map((w) => ({
       ...minion(w.ticket),
       person: store.getUser(w.person)?.name ?? null,
       since: w.since,
@@ -39,6 +40,8 @@ function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?:
       first: !!w.first,
       warm: w.heat === 0,
       fresh: w.heat === 2,
+      // Behind those with no computer of their own connected.
+      after: !!w.own && ordered.some((x) => !x.own && !runner.turnLine.waitsForMachine(x.ticket)),
     })),
   };
 }

@@ -565,11 +565,16 @@ export class TurnLine {
     return ready.some((e) => !this.hasMachine(e));
   }
 
-  /** Its person's own machine could take it, be it full now. Not for ever (Josh's Taskmaster, 2026-11-25): waiting this long, it stands at perigee as if there were none. */
+  /** Its person's own machine could take it, be it full now. */
   private hasMachine(e: LineEntry): boolean {
     const pools = this.host.pools;
-    if (!pools || pools.mark(e.ticket) !== null || Date.now() - e.since >= POOL.longMs) return false;
+    if (!pools || pools.mark(e.ticket) !== null) return false;
     return pools.machines().some((m) => !m.block && this.sizeOf(m) > 0 && !pools.takes(m.id, e.ticket, e.via));
+  }
+
+  /** It stands at perigee behind those with no machine. Not for ever (Josh's Taskmaster, 2026-11-25): waiting longMs, it stands with them, though it needs perigee no more than before. */
+  private behind(e: LineEntry): boolean {
+    return Date.now() - e.since < POOL.longMs && this.hasMachine(e);
   }
 
   /** The machines a turn can start on now: nothing holds them and a worker there is free. */
@@ -642,7 +647,7 @@ export class TurnLine {
     const ready = this.ready();
     const forced = (e: LineEntry) => this.forcedFor(e.ticket) !== null;
     const entry = this.best(this.used() < this.size() ? ready : ready.filter(forced), true);
-    // Urgent puts it first; its own machine is still its place while perigee is needed.
+    // Urgent or a long wait puts it first; its own machine is still its place while perigee is needed.
     if (entry) return this.admit(entry, (!forced(entry) && this.needed(ready) && this.machineFor(entry)) || 0);
     for (const m of this.machines()) {
       const there = this.best(this.ready(m));
@@ -717,7 +722,7 @@ export class TurnLine {
 
   /** `home`: as they stand for perigee. */
   private asked(entries: LineEntry[], home = false): Waiting[] {
-    return entries.map((e) => ({ ...e, ...this.host.asks(e.ticket, e.via), own: home && this.hasMachine(e), ...(this.forcedFor(e.ticket) !== null ? { forced: true } : {}) }));
+    return entries.map((e) => ({ ...e, ...this.host.asks(e.ticket, e.via), own: home && this.behind(e), ...(this.forcedFor(e.ticket) !== null ? { forced: true } : {}) }));
   }
 
   private byPerson(): Map<number, number> {

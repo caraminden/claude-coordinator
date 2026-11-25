@@ -131,7 +131,7 @@ export function workersPanel(page) {
       'div',
       { class: 'st-place', 'data-hue': chip ? 'waiting' : 'running', 'data-place': String(p.id) },
       h('div', { class: 'st-place-head' }, h('b', {}, p.name), chip ?? ''),
-      meter(p.size ? p.used / p.size : 0, `${p.used} of ${p.size} workers`),
+      meter(p.size ? p.used / p.size : 0, `${p.used} of ${p.size} ${p.size === 1 ? 'worker' : 'workers'}`),
       ...notes.map((line) => h('div', { class: 'st-sub muted' }, line.filter(Boolean).join(' · '))),
       controls ? h('div', { class: 'st-place-act' }, ...controls) : '',
     );

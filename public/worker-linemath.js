@@ -61,5 +61,5 @@ export function nextUrgent(groups, id) {
 /** Why it stands where it does, in a few words. */
 export function lineWhy(r) {
   if (r.kind) return r.by ? `by ${r.by}${r.reason ? `: ${r.reason}` : ''}` : '';
-  return [r.first ? 'ship refused, or others wait on it' : '', r.warm ? 'warm, about to go cold' : !r.first && r.fresh ? 'brand new' : ''].filter(Boolean).join(' · ');
+  return [r.first ? 'ship refused, or others wait on it' : '', r.warm ? 'warm, about to go cold' : !r.first && r.fresh ? 'brand new' : '', r.after ? 'after those with no computer connected' : ''].filter(Boolean).join(' · ');
 }

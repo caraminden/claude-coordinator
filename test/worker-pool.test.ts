@@ -616,6 +616,23 @@ test('after 90 minutes an owner’s turn stands at perigee as if there were no m
   assert.deepEqual([first(Date.now() - POOL.longMs), first(Date.now() - POOL.longMs + 60_000)], [1, 100]);
 });
 
+test('a long wait alone does not send an owner’s turn to its machine: nobody else needs perigee', async () => {
+  const p = places({}, people(), [100]);
+  const since = Date.now() - POOL.longMs;
+  for (const id of [1, 2]) p.turns.join(id);
+  const q = places(
+    {
+      'turn-line': [
+        { ticket: 1, since },
+        { ticket: 2, since },
+      ],
+    },
+    people(),
+  );
+  await until('both lines to start', () => p.started.length + q.started.length === 4);
+  for (const l of [p, q]) assert.deepEqual([l.at(1), l.at(2)], [0, DESK]);
+});
+
 test('pick: with no machine first, after Urgent and Start now, the shares unchanged within each', () => {
   const own = (x: Waiting): Waiting => ({ ...x, own: true });
   assert.deepEqual(order([own(w(1, 7)), w(2, 8), own(w(3, 9)), w(4, 8)]), [2, 4, 1, 3]);

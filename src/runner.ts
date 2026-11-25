@@ -798,7 +798,7 @@ export class Runner {
   private cardWaits: WaitList<KeptCard>;
   private relays: Relay;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
-  placeFor?: (person: number | null, warm?: string) => TurnPlace | { refused: string };
+  placeFor?: (person: number | null, warm?: string, taskmaster?: boolean) => TurnPlace | { refused: string };
   /** The account such a turn would run on, moving nothing (ClaudeLink.accountFor, #1888): null for none. */
   accountFor?: (person: number, warm?: string) => number | null;
   /** The start_after chains still to fire (LiveWaiters.chains, set by the server): the minions that wait on another. */
@@ -3699,7 +3699,7 @@ export class Runner {
     // A hidden keepalive (#862): it re-reads the cached prefix and changes nothing of the minion's, the chat included.
     const keepalive = !!batch[0]?.keepalive;
     // Whose Claude it runs on (sender pays, #213): the host's login for its owner, else their own container.
-    const claudePlace = this.placeFor?.(person, warmKey(ticket)) ?? { host: true as const };
+    const claudePlace = this.placeFor?.(person, warmKey(ticket), ticket.kind === 'coordinator') ?? { host: true as const };
     if ('refused' in claudePlace) {
       if (keepalive) return;
       this.emit(ticket.id, 'note', { text: claudePlace.refused });

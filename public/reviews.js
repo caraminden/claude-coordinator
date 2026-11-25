@@ -26,7 +26,7 @@ const pacific = pacificStamp;
 const TYPING = 'input:not([type=checkbox]), select, textarea';
 
 let pageEl = null;
-let state = null; // { projectId, entries, starters, audits, glance, selected, mode: 'view'|'edit'|'history'|'new', versions, ask, lenses, newWhen, kept, behind }
+let state = null; // { projectId, entries, starters, audits, glance, selected, mode: 'view'|'edit'|'history'|'new', versions, ask, lenses, newWhen, kept, behind, loads, shown }
 // The tab ('scheme' or 'all') and the Every scheme rows outlive a scheme switch: the table is the same on every scheme.
 const every = { tab: 'scheme', rows: null, error: null };
 
@@ -44,7 +44,7 @@ function labelGiver() {
 
 export function reviewsPage() {
   const projectId = view.projectId;
-  if (state?.projectId !== projectId) state = { projectId, entries: null, starters: [], audits: [], glance: null, selected: null, mode: 'view', versions: null, ask: null, lenses: null, newWhen: '', kept: new Map(), behind: false };
+  if (state?.projectId !== projectId) state = { projectId, entries: null, starters: [], audits: [], glance: null, selected: null, mode: 'view', versions: null, ask: null, lenses: null, newWhen: '', kept: new Map(), behind: false, loads: 0, shown: 0 };
   pageEl = h('section', {
     class: 'reviews-main',
     onkeydown: (e) => {
@@ -65,11 +65,12 @@ function closePage() {
 
 async function load() {
   const at = state;
+  const n = ++at.loads;
   at.behind = false;
   try {
     const { entries, starters, audits, glance } = await api(url());
-    if (state !== at) return;
-    Object.assign(state, { error: null, entries, starters, audits: audits ?? [], glance: glance ?? null });
+    if (state !== at || n < at.shown) return; // a newer list is on the page already
+    Object.assign(state, { error: null, shown: n, entries, starters, audits: audits ?? [], glance: glance ?? null });
     if (state.selected && !entry(state.selected) && !audit(state.selected)) state.selected = null;
     if (!state.selected && entries.length && matchMedia('(min-width: 801px)').matches) state.selected = entries[0].slug;
   } catch (err) {
@@ -152,9 +153,20 @@ function drawPage() {
       ].map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(every.tab === k), onclick: () => setTab(k) }, label)),
     ),
   );
-  if (every.tab === 'all') return pageEl.replaceChildren(head, everyTable());
+  if (every.tab === 'all') {
+    pageEl.replaceChildren(head, everyTable());
+    pageEl.append(offScreen());
+    return;
+  }
   const body = state.error ? [h('p', { class: 'error' }, state.error)] : !state.entries ? [loadingLine('Loading…')] : [h('div', { class: 'rv-boardbox' }, board(), repoGroup()), detail()];
   pageEl.replaceChildren(head, state.entries ? headline() : '', state.entries ? describeBox() : '', h('div', { class: 'rv-body' }, ...body));
+  pageEl.append(offScreen());
+}
+
+/** Unsaved typing this view doesn't show stays in the page, hidden, so it still holds a deploy's reload (core.js, unsentWork). */
+function offScreen() {
+  const parts = [...state.kept.values(), state.ask?.input].filter((el) => el && !pageEl.contains(el) && (el.matches('[data-draft]') || el.querySelector('[data-draft]')));
+  return h('div', { hidden: true }, ...parts);
 }
 
 function setTab(k) {
@@ -1352,6 +1364,7 @@ async function describe(ask) {
     ask.note = `Couldn't ask: ${err.message}`;
   }
   ask.busy = false;
+  markAsk(ask);
   if (state === s) draw();
 }
 

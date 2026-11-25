@@ -273,6 +273,25 @@ test("a form with typed text holds a deploy's reload; an untouched or put-back o
   assert.equal(await page.eval('drafts()'), false, 'an answered one');
 });
 
+test("typed text holds a deploy's reload while the Every scheme tab is up", { skip }, async () => {
+  const page = await reviews();
+  await page.eval(`openEdit('UI critic'), type('${BODY}', 'typed'), press('Every scheme', '.rv-tabs')`);
+  await waitFor(page, 'the other tab', `!$('.rv-board')`);
+  assert.equal(await page.eval('drafts()'), true, 'a typed rubric');
+  await page.eval(`press('This scheme', '.rv-tabs'), press('Cancel'), press('Every scheme', '.rv-tabs')`);
+  assert.equal(await page.eval('drafts()'), false, 'a closed form');
+  await page.eval(`press('This scheme', '.rv-tabs'), type('.rv-ask-row input', 'stricter'), window.late = hold('reviews/describe'), press('Ask'), press('Every scheme', '.rv-tabs')`);
+  assert.equal(await page.eval('drafts()'), true, 'an unanswered description');
+  await page.eval('late.open()');
+  await waitFor(page, 'the answer', '!drafts()');
+});
+
+test('hand-offs left unsaved behind an Edit form hold the reload too', { skip }, async () => {
+  const page = await reviews();
+  await page.eval(`press('+ Step'), press('Edit by hand')`);
+  assert.equal(await page.eval('drafts()'), true);
+});
+
 // ---- SP6: a refused stale save ----
 
 test('after a refused stale save, Cancel then Edit opens the newest version', { skip }, async () => {
@@ -289,6 +308,14 @@ test('after a refused stale save, Cancel then Edit opens the newest version', { 
 });
 
 // ---- SP10: late answers ----
+
+test('a list answered after a newer one leaves the newer one on the page', { skip }, async () => {
+  const page = await reviews();
+  await page.eval(`window.late = hold('GET api/projects/1/reviews'), changed(), sets[1][0].version = 8, changed()`);
+  await waitFor(page, 'the newer list', `$('.rv-ver')?.textContent.includes('Version 8')`);
+  await page.eval(`late.open(), drawn()`);
+  assert.match(String(await page.eval(`$('.rv-ver').textContent`)), /Version 8/);
+});
 
 test("a save answered after a scheme switch leaves the other scheme's set and open form alone", { skip }, async () => {
   const page = await reviews();

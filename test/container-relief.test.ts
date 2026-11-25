@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -148,8 +148,8 @@ test('two readings under the line do not start the minute over, so a flapping st
   assert.deepEqual(r.killed, [12]);
 });
 
-/** Ends the read waiting on this FIFO: opening it for writing without waiting fails until that read has opened it. */
-async function endRead(fifo: string) {
+/** The write end of this FIFO, once a read has opened it: opening it for writing without waiting fails until then. */
+async function writeEnd(fifo: string): Promise<number> {
   let fd = -1;
   await until('the FIFO has a reader', () => {
     try {
@@ -159,8 +159,11 @@ async function endRead(fifo: string) {
       return false;
     }
   });
-  closeSync(fd);
+  return fd;
 }
+
+/** Ends the read waiting on this FIFO. */
+const endRead = async (fifo: string) => closeSync(await writeEnd(fifo));
 
 for (const [what, change] of [
   ['was reused', (f) => writeFileSync(join(f.proc, '12', 'stat'), `12 (x) S 1 ${'0 '.repeat(17)}501 0 0\n`)],
@@ -195,22 +198,47 @@ test('the worker, on real processes: the big one is SIGKILLed while the small on
   try {
     await Promise.all([once(small.stdout!, 'data'), once(big.stdout!, 'data')]);
     f.procs([small.pid!, big.pid!]);
-    f.read(90);
+    // Each reading is handed over through two FIFOs, so none comes between the one that kills and the calm one after it
+    // (a storm on a timer runs on until this process sees the exit, which on a loaded box is late enough for a second kill).
+    const events = join(f.slice, 'citadel-claude-2.service', 'memory.events.local');
+    const pressure = join(f.slice, 'citadel-claude-2.service', 'memory.pressure');
+    execFileSync('mkfifo', [events, pressure]);
+    const hand = (fd: number, line: string) => {
+      writeSync(fd, line);
+      closeSync(fd);
+    };
+    /** Hands over a stuck reading; resolves once the worker is done with it (the next reading has begun), with that one's write end. */
+    const stuck = async (fd: number, high: number) => {
+      hand(fd, `high ${high}\n`);
+      hand(await writeEnd(pressure), 'some avg10=90.00\n');
+      return writeEnd(events);
+    };
     const told: Victim[] = [];
     const worker = startContainerRelief({ dir: f.slice, prefix: 'citadel-claude-', everyMs: 50, stuckMs: 300, report: (v) => void told.push(v) });
-    const storm = setInterval(() => f.read(90), 40);
     try {
-      await gone(big);
-      clearInterval(storm);
-      f.read(0, 0);
+      let fd = await writeEnd(events);
+      try {
+        fd = await stuck(fd, 1); // the baseline
+        fd = await stuck(fd, 2); // the minute starts
+        const from = Date.now();
+        await until('the container has been stuck long enough', () => Date.now() - from >= 300);
+        fd = await stuck(fd, 3); // the kill
+      } finally {
+        // Plain files from here on, calm: a worker waiting on a FIFO could not be stopped. O_RDWR opens one with no reader too.
+        const ends = [events, pressure].map((fifo) => openSync(fifo, constants.O_RDWR));
+        for (const fifo of [events, pressure]) rmSync(fifo);
+        f.read(0, 0);
+        for (const end of ends) closeSync(end);
+      }
+      closeSync(fd);
       await until('the kill is told', () => told.length > 0);
+      assert.equal(told[0].pid, big.pid);
+      await gone(big);
       assert.equal(big.signalCode, 'SIGKILL');
       assert.equal(small.signalCode, null);
-      assert.equal(told[0].pid, big.pid);
       assert.ok(told[0].bytes > 200 * MB, `${told[0].bytes}`);
-      assert.match(readFileSync(`/proc/${small.pid}/status`, 'utf8'), /^State:\s+[SR]/m);
+      assert.doesNotMatch(readFileSync(`/proc/${small.pid}/status`, 'utf8'), /^State:\s+[ZX]/m);
     } finally {
-      clearInterval(storm);
       worker.stop();
     }
   } finally {

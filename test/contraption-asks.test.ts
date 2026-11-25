@@ -24,7 +24,11 @@ type AskBody = { error: string; scheme: string; member: boolean; proposal: boole
 const root = mkdtempSync(join(tmpdir(), 'contraption-asks-'));
 const data = join(root, 'data');
 mkdirSync(data, { recursive: true });
+let booted: ReturnType<typeof bootServer> | undefined;
+/** One server for every route test below, booted by the first that needs it. Each test works in its own contraption (the ask and upload limits count per contraption and person) and registers it before the first call, which the server reads from the DB per request. */
+const server = () => (booted ??= bootServer({ root, ...slowWrites }));
 after(async () => {
+  await (await booted)?.stop(); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
@@ -87,8 +91,7 @@ test('files never follow an inbox folder linked out of the shared folder', async
 });
 
 test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path', { timeout: 60_000 }, async () => {
-  const srv = await bootServer({ root, ...slowWrites });
-  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
+  const srv = await server();
   const ask = async (body: object, headers: Record<string, string> = { Authorization: `Bearer ${KEY}` }) => {
     const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
     return { status: res.status, body: await json<AskBody>(res) };
@@ -263,8 +266,7 @@ test('POST /api/contraptions/asks with minion (#416): straight to that minion, m
   const gone = minion('Dismissed');
   store.updateTicket(gone.id, { status: 'closed' });
   for (let i = 0; i < 5; i++) minion(`Peek ${i}`, Peek.id); // #5 exists in Peek Auras only
-  const srv = await bootServer({ root, ...slowWrites });
-  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
+  const srv = await server();
   const ask = async (body: object) => {
     const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tocKey}` }, body: JSON.stringify(body) });
     return { status: res.status, body: await json<AskBody>(res) };
@@ -331,8 +333,7 @@ test("an ask to the Taskmaster runs on its asker's login, split or not (#1449 P1
   for (const u of [Josh, Rachel, Olive]) store.setContraptionUser(lanterns.id, u.id, true, Cara.id);
   const key = readFileSync(join(data, 'contraptions', 'lanterns', 'contraption.key'), 'utf8');
   mkdirSync(projectSharedDir(data, Lanterns.id), { recursive: true });
-  const srv = await bootServer({ root, ...slowWrites });
-  after(() => srv.stop());
+  const srv = await server();
   /** Send an ask and return the note the Taskmaster's chat got right after it. */
   const noteAfter = async (person: number, text: string) => {
     const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ person, kind: 'bug', text }) });
@@ -380,8 +381,7 @@ test('POST /api/contraptions/asks/files (#1841): a 100 MB file streamed, then na
   const rec = keys.register({ name: 'rec', title: 'Rec', port: 9104, icon: null, home_scheme: Rec.id, open_paths: '[]', static_paths: null, relay_paths: '[]', default_model: null, turn_cap: null, restart_risk: 'unassessed', restart_note: '' });
   for (const u of [Josh, Rachel]) store.setContraptionUser(rec.id, u.id, true, Cara.id);
   const recKey = readFileSync(join(data, 'contraptions', 'rec', 'contraption.key'), 'utf8');
-  const srv = await bootServer({ root, ...slowWrites });
-  after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
+  const srv = await server();
   const auth = { Authorization: `Bearer ${recKey}` };
   const upload = async (person: number, name: string, body: Buffer) => {
     const res = await fetch(`${srv.base}/api/contraptions/asks/files?person=${person}&name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': 'video/webm', ...auth }, body });

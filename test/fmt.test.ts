@@ -142,3 +142,12 @@ test("a build's own ship is refused for any unformatted file the build brings to
   assert.equal(r.fmt(['--own'], { FMT_WHOLE_BUILD: '1' }).code, 0);
   assert.equal(readFileSync(join(r.wt, 'feeder.ts'), 'utf8'), GOOD);
 });
+
+test('the format check leaves no skipped test on CI, which refuses a run with one (tests.yml), and still runs elsewhere', () => {
+  const run = (CI: string) => spawnSync(process.execPath, ['--test', '--test-reporter=spec', 'test/format-own.test.ts'], { cwd: repo, encoding: 'utf8', env: { ...env, NODE_TEST_CONTEXT: undefined, CI } }).stdout;
+  const ci = run('true');
+  assert.match(ci, /^ℹ skipped 0$/m);
+  assert.match(ci, /^ℹ fail 0$/m);
+  assert.doesNotMatch(ci, /this branch changed is formatted/, 'test/format.test.ts checks every file there');
+  assert.match(run(''), /this branch changed is formatted/);
+});

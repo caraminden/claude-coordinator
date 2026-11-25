@@ -53,6 +53,10 @@ export function workingBy(t) {
 /** Whose turn it is, in words (Cara, 2026-11-14: "This Minion is working" and "This Taskmaster is working"). */
 export const workingLabel = (t, verb = 'working') => `This ${isCoordinator(t) ? 'Taskmaster' : 'Minion'} is ${verb}`;
 
+const nth = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`;
+/** A minion with a turn to start and no worker yet (#1868): it shows as working, and this is its one line of truth. */
+export const workerWaitLabel = (w) => (w.paused ? `Waiting: ${w.paused} paused all minions` : `Waiting for a worker, ${nth(w.place)} in line`);
+
 /** The server's work in words, at its landing's stage (t.wait, src/waits.ts): "Server: testing (CI: the full suite)". */
 export function serverLabel(w) {
   if (!w) return 'Server is shipping…';
@@ -234,8 +238,9 @@ export function rowWhy(t, st, now = Date.now()) {
     }
     more = 'Turns go this quiet less than 0.1% of the time (5,620 turns, Nov 2026).';
   } else if (workingBy(t) === 'turn') {
-    lines.push(t.turnStartedAt ? `Since ${at(t.turnStartedAt)}.` : t.status === 'new' ? 'Setting up its first turn.' : 'Its turn is running.');
-    if (t.last_activity) lines.push(`Now: ${t.last_activity}`);
+    if (t.worker_wait) lines.push(`${workerWaitLabel(t.worker_wait)}.`, `Since ${at(t.worker_wait.since)}.`);
+    else lines.push(t.turnStartedAt ? `Since ${at(t.turnStartedAt)}.` : t.status === 'new' ? 'Setting up its first turn.' : 'Its turn is running.');
+    if (t.last_activity && !t.worker_wait) lines.push(`Now: ${t.last_activity}`);
     if (t.steps) lines.push(`${t.steps.done} of ${t.steps.total} steps done${t.steps.since && t.steps.usual ? `; this one ${span(now - t.steps.since)} of ~${span(t.steps.usual * 1000)} guessed` : ''}.`);
   } else if (t.limit_resume_at && t.state === 'limited') {
     lines.push(`Hit the usage limit at ${pacific(t.updated_at, now)}; resumes by itself at ${pacific(t.limit_resume_at, now)}.`);

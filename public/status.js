@@ -11,6 +11,7 @@ import { pcWord } from './ci-desktop.js';
 import { LAST_SCHEME } from './sidebar.js';
 import { scopedPageHash } from './page-scope.js';
 import { opening } from './releases.js';
+import { workersPanel } from './workers.js';
 
 const REFRESH_MS = 30_000;
 const when = pacificStamp;
@@ -872,6 +873,7 @@ export function statusPane(onData = () => {}) {
   const detail = h('div', { class: 'st-detail' }, h('p', { class: 'muted' }, 'Reading status…'));
   const el = h('div', { class: 'st-page' }, pills, detail);
   const lines = shipLinePanel(el);
+  const workers = workersPanel(el);
   const pill = (key, name, v) =>
     h(
       'button',
@@ -928,7 +930,7 @@ export function statusPane(onData = () => {}) {
       h('div', { class: 'ci-head' }, h('h3', {}, app ? app.title : 'Citadel'), toneChip(CHIP[v.tone], WORD[v.tone]), app ? h('a', { href: `/apps/${app.name}/`, target: '_blank', rel: 'noopener' }, 'Open it') : '', h('span', { class: 'muted small' }, `read ${ago(now)}`)),
       h('p', { class: 'st-why' }, ...(v.reasons.length ? why : [app ? 'Running, deployed and quiet.' : 'Up, no failed service, no long stalls, memory, disk and CI fine.'])),
       app ? controls(app.name) : '',
-      h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : [...citadelTiles(citadel, days, now, shipTimes, draw), lines])),
+      h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : [...workers, ...citadelTiles(citadel, days, now, shipTimes, draw), lines])),
     );
   };
   let tried = false;

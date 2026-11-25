@@ -606,6 +606,11 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-tile.st-ship { grid-template-rows: none; grid-auto-rows: auto; min-height: 0; gap: 0.4rem; }
 .st-tile.st-lines { grid-template-rows: none; grid-auto-rows: auto; gap: 0.4rem; }
 .st-lines .st-sub { display: block; }
+.st-workers .st-line-rows { min-height: 0; }
+.st-workers-act { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.st-workers-act label { display: inline-flex; gap: var(--space-2); align-items: center; }
+.st-workers-act select { width: auto; }
+.st-workers-act .cui-btn { min-width: 9.5rem; }
 .st-line-rows { min-height: 7.5rem; align-content: start; }
 .st-lines .hue-row-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-line-meta { display: inline-flex; align-items: center; gap: 0.6rem; white-space: nowrap; font-variant-numeric: tabular-nums; }

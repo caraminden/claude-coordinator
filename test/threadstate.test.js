@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setAccount, setView } from '../public/base.js';
-import { askWhy, mentions, byUrgency, cardChip, cardsYours, pacific, progressWhy, refBucket, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, spokenCell, workingBy } from '../public/threadstate.js';
+import { askWhy, mentions, byUrgency, cardChip, cardsYours, pacific, progressWhy, refBucket, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, spokenCell, workerWaitLabel, workingBy } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000,
@@ -583,4 +583,19 @@ test('refBucket: a minion link in chat is waiting, working, deployed or neutral 
     [{ status: 'closed', release: { stuck: true } }, 'waiting'],
   ];
   for (const [over, bucket] of rows) assert.equal(refBucket(over && { ...t({}), ...over }), bucket, JSON.stringify(over));
+});
+
+test('a minion waiting for a worker shows as working; its hover says its place and since when, or who paused (#1868)', () => {
+  const waiting = { status: 'running', last_activity: 'Running tests', worker_wait: { since: NOW - 3 * MIN, place: 3, of: 8, paused: null } };
+  assert.deepEqual(pill(waiting), [1, 'work', 'working', 'pulse']);
+  const why = (over) => rowWhy(t(over), rowState(t(over), null, NOW), NOW).lines;
+  assert.equal(why(waiting)[0], 'Waiting for a worker, 3rd in line.');
+  assert.match(why(waiting)[1], /^Since .*3m ago\.$/);
+  assert.equal(why(waiting).length, 2, 'no stale step from its last turn');
+  assert.equal(why({ ...waiting, worker_wait: { ...waiting.worker_wait, paused: 'Josh' } })[0], 'Waiting: Josh paused all minions.');
+});
+
+test('workerWaitLabel: places read as words do', () => {
+  const at = (place) => workerWaitLabel({ place }).match(/, (\w+) in/)[1];
+  assert.deepEqual([1, 2, 3, 4, 11, 12, 13, 21, 22, 112].map(at), ['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '112th']);
 });

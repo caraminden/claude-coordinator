@@ -181,6 +181,11 @@ export class TurnLine {
     return p.fixed?.size ?? p.size;
   }
 
+  /** What the Workers tile shows (src/routes/workers.ts). */
+  summary() {
+    return { used: this.used(), size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people() };
+  }
+
   /** A person's number, or null for Auto. */
   setSize(size: number | null, by: string) {
     const { fixed: _, ...p } = this.pool();

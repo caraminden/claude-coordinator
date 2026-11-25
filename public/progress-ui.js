@@ -179,7 +179,7 @@ export function renderProgress() {
   const progressEl = view.progressEl;
   // A new minion not parked on start_after reads as working while its first turn sets up, as its list row does (#696);
   // a Taskmaster that hasn't run yet is only waiting for a message.
-  const running = view.ticket.status === 'running' || (view.ticket.status === 'new' && !view.ticket.parked_for && !view.ticket.start_hold && view.ticket.state !== 'parked' && !isCoordinator(view.ticket));
+  const running = (view.ticket.status === 'running' && !view.ticket.worker_wait) || (view.ticket.status === 'new' && !view.ticket.parked_for && !view.ticket.start_hold && view.ticket.state !== 'parked' && !isCoordinator(view.ticket));
   const line = progressLine(p, running);
   // One line (#551, Josh's pick): the step › what's happening now · steps done · time. While it waits on
   // something (#544: the land line, a heavy slot, the restart), the wait takes the "now" part and its time,
@@ -302,7 +302,7 @@ export function headState(t) {
 
 /** Whether the running turn's init event has arrived: until then the per-turn state is still the last turn's. */
 export function initSeen() {
-  return view.turnInitAt >= view.ticket.turnStartedAt;
+  return !view.ticket.worker_wait && view.turnInitAt >= view.ticket.turnStartedAt;
 }
 
 export const narrow = matchMedia('(max-width: 800px)');

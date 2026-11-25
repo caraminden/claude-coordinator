@@ -1,0 +1,111 @@
+// The worker pool (#1868): the Status page's Workers tile (how many minion turns run at once, who has them, the size
+// and the pause), and each waiting minion's place as the line moves.
+import { ago, api, h, view } from './base.js';
+import { hueRow, toneChip } from './look.js';
+import { renderTyping } from './thread.js';
+import { optimistic } from './ui/optimistic.js';
+
+const READ_MS = 3_000;
+const SIZES = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 40, 50];
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/** The line moved: `line` is every waiting minion's id, next first, `paused` who paused them all. */
+export function onWorkers({ line, paused }) {
+  if (view?.kind !== 'project') return;
+  const place = new Map(line.map((id, i) => [id, i + 1]));
+  for (const t of [...view.tickets.values(), view.ticket]) {
+    if (t?.worker_wait && place.has(t.id)) Object.assign(t.worker_wait, { place: place.get(t.id), of: line.length, paused });
+  }
+  renderTyping();
+}
+
+/** The tile, reading the pool every 3 s while `page` shows. */
+export function workersPanel(page) {
+  let w = null;
+  let failed = null;
+  let sent = 0; // changes on their way: a read started before one lands would show the old state
+  const el = h('section', { class: 'st-tile wide st-lines st-workers', 'data-tile': 'workers' });
+  const set = (body, next, label) => {
+    const was = w;
+    sent++;
+    return optimistic({
+      key: el,
+      apply: () => {
+        w = { ...w, ...next };
+        draw();
+      },
+      send: () => api('api/workers', { method: 'PUT', body }),
+      undo: () => {
+        w = was;
+        draw();
+      },
+      label,
+    })
+      .then((now) => {
+        w = now;
+        draw();
+      })
+      .catch(() => {})
+      .finally(() => sent--);
+  };
+  const pause = (how) => {
+    if (how === 'stop' && !confirm(`Stop the ${plural(w.used, 'running minion turn')} now? Each carries on where it was after Resume. Taskmasters keep running.`)) return;
+    set({ pause: how }, { paused: how ? { by: 'you', at: Date.now(), ...(how === 'stop' ? { stop: true } : {}) } : null }, how ? 'pause minions' : 'resume minions');
+  };
+  const button = (key, text, title, onclick) => h('button', { type: 'button', class: 'cui-btn cui-small', 'data-key': key, title, onclick }, text);
+  const draw = () => {
+    const focused = el.contains(document.activeElement) ? document.activeElement.dataset.key : undefined;
+    if (!w) return el.replaceChildren(h('h4', {}, 'Workers'), h('b', { class: 'st-value' }, failed ? `Couldn't read it: ${failed}` : 'Reading…'));
+    const { pool } = w;
+    const value = `${w.used} of ${w.size} working${w.waiting ? ` · ${w.waiting} waiting` : ''}`;
+    const size = pool.fixed ? `Set to ${pool.fixed.size} by ${pool.fixed.by}` : `Auto, between ${w.min} and ${w.max}${pool.why ? `: moved to ${pool.size} ${ago(pool.at)}, ${pool.why}` : ''}`;
+    const sizes = [...new Set([...SIZES, ...(pool.fixed ? [pool.fixed.size] : [])])].sort((a, b) => a - b);
+    const pick = h(
+      'select',
+      {
+        class: 'small',
+        'data-key': 'size',
+        onchange: (e) => {
+          const n = e.target.value === 'auto' ? null : Number(e.target.value);
+          const { fixed: _, ...auto } = pool;
+          set({ size: n }, { size: n ?? pool.size, pool: n === null ? auto : { ...pool, fixed: { size: n, by: 'you' } } }, 'set the workers');
+        },
+      },
+      h('option', { value: 'auto', selected: !pool.fixed }, `Auto (${pool.size})`),
+      ...sizes.map((n) => h('option', { value: String(n), selected: pool.fixed?.size === n }, String(n))),
+    );
+    el.replaceChildren(
+      h('h4', {}, 'Workers'),
+      h('b', { class: 'st-value' }, w.paused ? toneChip('warn', `${w.paused.stop ? 'Paused and stopped' : 'Paused'} by ${w.paused.by}, ${ago(w.paused.at)}`) : '', w.paused ? ' ' : '', value),
+      h('div', { class: 'st-sub muted' }, failed ? `Couldn't read it: ${failed}` : `${size} · Taskmasters always run`),
+      h(
+        'div',
+        { class: 'st-workers-act' },
+        h('label', {}, 'Minion turns at once', pick),
+        ...(w.paused
+          ? [button('resume', 'Resume minions', 'Waiting turns start again, and stopped ones carry on', () => pause(false)), w.paused.stop ? '' : button('stop', 'Stop running ones', 'Stop the running turns too; they carry on after Resume', () => pause('stop'))]
+          : [button('pause', 'Pause new turns', 'Running turns finish; no new minion turn starts until Resume', () => pause(true)), button('stop', 'Pause and stop running ones', 'Running turns stop and carry on where they were after Resume', () => pause('stop'))]),
+      ),
+      h('div', { class: 'hue-rows st-line-rows' }, ...w.people.map((p) => hueRow({ hue: p.used ? 'running' : 'waiting', lead: String(p.used), meta: h('span', { class: 'muted small' }, p.waiting ? `${p.waiting} waiting` : '') }, p.name, h('span', { class: 'muted' }, p.used ? ' working' : '')))),
+    );
+    if (focused) el.querySelector(`[data-key="${CSS.escape(focused)}"]`)?.focus();
+  };
+  const load = async () => {
+    if (!page.isConnected && w !== null) return;
+    if (!document.hidden && !sent && (el.isConnected || w === null)) {
+      try {
+        const now = await api('api/workers');
+        // An open size list would close under the redraw.
+        if (!sent) w = now;
+        failed = null;
+      } catch (err) {
+        failed = err.message;
+      }
+      if (!el.querySelector('select:focus')) draw();
+    }
+    setTimeout(load, READ_MS);
+  };
+  draw();
+  load();
+  return el;
+}

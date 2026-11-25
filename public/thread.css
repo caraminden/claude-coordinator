@@ -43,6 +43,10 @@
 .ticket-head .note-btn:is(:hover, :focus-visible) { background: var(--line); color: var(--ink); }
 .ticket-head .pin-btn.on { color: var(--accent); }
 .ticket-head .pin-btn.on .icon { fill: currentColor; }
+.ticket-head .urgent-btn.on { color: var(--error); background: color-mix(in srgb, var(--error) 10%, transparent); font-weight: 600; }
+.ticket-head .urgent-btn.on:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--error) 18%, transparent); color: var(--error); }
+.urgent-bang, .urgent-mark { flex: none; display: inline-grid; place-items: center; width: 1.15em; height: 1.15em; border: 1.5px solid currentColor; border-radius: 4px; box-sizing: border-box; font-size: 0.85em; font-weight: 800; line-height: 1; }
+.urgent-btn.on .urgent-bang, .urgent-mark { border-color: var(--error); background: var(--error); color: var(--panel); }
 .ticket-head .meta { color: var(--muted); font-size: 0.85em; margin-top: 0.25rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ticket-head button { padding: 0.2rem 0.65rem; font-size: 0.85em; }
 /* The minion header's Stop, Dismiss and Reopen, tinted by what they do so the minion's state reads at a glance (#166). */

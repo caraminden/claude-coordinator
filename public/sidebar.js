@@ -20,6 +20,7 @@ import { openDialog } from './ui/dialog.js';
 import { mountTips } from './ui/tip.js';
 import { optimistic } from './ui/optimistic.js';
 import { chainsHref } from './chains.js';
+import { urgentMark } from './worker-line.js';
 
 // ---------- projects ----------
 
@@ -629,7 +630,7 @@ export function threadRow(t, href = threadHref(t)) {
   return h(
     'a',
     { class: `thread-row s-${t.status} f-${asleep ? 'idle' : st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${spend ? ' spend' : ''}${active ? ' active' : ''}${asleep ? ' asleep' : ''}`, href, title: details, 'data-id': t.id },
-    h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), asleep ? sleepMark(t) : '', h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
+    h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), asleep ? sleepMark(t) : '', t.urgent ? urgentMark(t) : '', h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     // Messages the loop guard holds for a person (#1067; Josh, 2026-11-19: "a minion badge for the loop guard"): Continue is in its chat.
     t.loop_hold ? h('span', { class: 'loop-badge', title: `The loop guard holds ${t.loop_hold.n === 1 ? 'a message' : `${t.loop_hold.n} messages`} here: open the chat to continue` }, `⏸ ${t.loop_hold.n}`) : '',

@@ -24,6 +24,7 @@ import { clamp, markQueued, messageBody, previewNodes, showTakenBack, strikeNote
 import { initSeen, leftText, narrow, phaseRows, progressUi, renderProgress, scheduleProgress } from './progress-ui.js';
 import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, settleSpend, speaker, spendCard } from './cards.js';
 import { markHeld, refreshBranch, renderTicketHead, unpark } from './thread-head.js';
+import { openLine } from './worker-line.js';
 
 // Mine or Everyone (#920): how this device opens your Taskmaster in a scheme with several.
 export function tmViewMode() {
@@ -331,7 +332,7 @@ export function chatSection(chatId, ticket) {
     renderProgress();
     view.progressEl.scrollIntoView({ block: 'nearest' });
   };
-  view.typingEl.onclick = openReadout;
+  view.typingEl.onclick = () => (view.ticket?.worker_wait ? openLine(view.ticket.id) : openReadout());
   // Opening at the first unread message leaves the newest out of sight; this takes you there.
   // It sits in the composer's button row at every width, where it covers no chat words.
   const latest = h('button', { type: 'button', class: 'small secondary to-latest', title: 'Jump to the latest', 'aria-label': 'Jump to the latest', hidden: true }, h('span', { 'aria-hidden': 'true' }, '↓'), h('span', { class: 'wide-only' }, ' Latest'));
@@ -1090,6 +1091,8 @@ export function renderTyping() {
   const wasHidden = el.hidden;
   el.hidden = !show;
   if (!show) return;
+  el.classList.toggle('in-line', !!t.worker_wait);
+  el.title = t.worker_wait ? 'See the line for workers' : 'Show the work so far';
   const lead = t.approvals ? 'Waiting for someone to approve or deny' : t.worker_wait ? workerWaitLabel(t.worker_wait) : running ? workingLabel(t) : view.sendingTo === t.id ? workingLabel(t, 'thinking…') : rowState(t, usage).label;
   // Held mail counts as queued while it works (#1067): it has no card then, and its bubble may be above the loaded history.
   const queued = (t.queued ?? 0) + (running ? (t.held_mail?.items?.length ?? 0) : 0);

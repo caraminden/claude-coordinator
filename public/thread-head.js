@@ -20,6 +20,7 @@ import { waitingStrip } from './waiting.js';
 import { canBack, canForward, goBack, goForward } from './navstack.js';
 import { markQueued } from './bubbles.js';
 import { headState, narrow, scheduleProgress } from './progress-ui.js';
+import { urgentButton } from './worker-line.js';
 import { renderTyping, syncHeldBrief, tmBanner, tmViewSwitch } from './thread.js';
 
 // ---------- branch and pull request ----------
@@ -231,6 +232,7 @@ export function renderTicketHead() {
     shipLine(t),
     coord ? '' : personNoteButton(t),
     coord ? '' : pinButton(t),
+    coord ? '' : urgentButton(t),
     coord ? '' : propertyChip(t),
     coord ? '' : chainLink(t, renderTicketHead),
     budgetChip(t),

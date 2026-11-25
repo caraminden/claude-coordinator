@@ -776,6 +776,7 @@ background: var(--citadel-warn-tint);</code></pre></div>
       </div>
       <div class="mk-about">
         <p>Every modal is this dialog (Cara, 2026-11-08: "the X to close should stay at the top and clicking off the modal should close it"). A native <code>&lt;dialog&gt;</code> opened with <code>showModal()</code>: the head is sticky on the surface colour, spans the box and keeps equal room above and below its title and ✕; the body scrolls under it; the box fits the window (8px in on a phone) and the page behind stays still. Width 480px, or <code>--cui-dialog-width</code>. In the installed app it opens below the title bar strip, <code>--cui-dialog-top</code>, so the window controls never cover it and its ✕ takes clicks (#772): set no <code>top</code> of your own, and size a full-height one <code>calc(100dvh - var(--cui-dialog-top))</code>.</p>
+        <p>Citadel's right-hand drawer is this dialog with <code>.line-drawer</code> (<code>public/worker-line.js</code>, the line for workers): full height, 29rem or 94% of a phone, sliding in unless motion is reduced. Its rows are <code>.line-row</code> (a bar in their person's hue, place, name over meta, ↑ ↓ and a red <code>!</code>), and an Urgent minion wears the filled <code>.urgent-mark</code> in the list.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/dialog.js</code> (<code>mountDialogs</code>, <code>openDialog</code>) · <code>.cui-dialog</code>, <code>.cui-dialog-head</code> in <code>ui/base.css</code></p>
       </div>
     </div>

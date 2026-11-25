@@ -10,6 +10,7 @@ import { renderTicketHead, setStatus, unpark } from './thread-head.js';
 import { PICKABLE, describe, pageName, pointAtElement } from './pick.js';
 import { readSelection, selectionActions } from './selectact.js';
 import { mountMenus } from './ui/menu.js';
+import { toggleUrgent } from './worker-line.js';
 import { copyText } from './ui/markdown.js';
 import { toast } from './ui/status.js';
 
@@ -117,7 +118,16 @@ function minionMenu(row, t) {
     ...KIND.minion,
     name: coord ? ref : `${ref} ${t.title ?? ''}`.trim(),
     foot: FOOT,
-    items: [...pointItems(row), { label: `Open ${ref}`, icon: '→', keys: 'Enter', run: () => row.click() }, newTab(row.href), { label: 'Copy link', icon: '🔗', run: () => copy(abs(threadHref(t)), 'Link') }, !coord && { label: `Copy “${ref}”`, icon: '#', run: () => copy(ref, ref) }, state && '-', state],
+    items: [
+      ...pointItems(row),
+      { label: `Open ${ref}`, icon: '→', keys: 'Enter', run: () => row.click() },
+      newTab(row.href),
+      { label: 'Copy link', icon: '🔗', run: () => copy(abs(threadHref(t)), 'Link') },
+      !coord && { label: `Copy “${ref}”`, icon: '#', run: () => copy(ref, ref) },
+      !coord && t.status !== 'closed' && needsServer({ label: t.urgent ? `Take off Urgent (set by ${t.urgent.by})` : 'Mark Urgent', icon: '!', run: () => toggleUrgent(t) }),
+      state && '-',
+      state,
+    ],
   };
 }
 

@@ -5,6 +5,7 @@ import { hueRow, toneChip } from './look.js';
 import { renderProgress } from './progress-ui.js';
 import { renderTyping } from './thread.js';
 import { optimistic } from './ui/optimistic.js';
+import { lineMoved, openLine } from './worker-line.js';
 
 const READ_MS = 3_000;
 const SIZES = Array.from({ length: 50 }, (_, i) => i + 1);
@@ -12,6 +13,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** The line moved: `line` is every waiting minion's id, next first, `paused` who paused them all. */
 export function onWorkers({ line, paused }) {
+  lineMoved();
   if (view?.kind !== 'project') return;
   const place = new Map(line.map((id, i) => [id, i + 1]));
   for (const t of [...view.tickets.values(), view.ticket]) {
@@ -124,6 +126,7 @@ export function workersPanel(page) {
         'div',
         { class: 'st-workers-act' },
         h('label', {}, 'Minion turns at once', pick),
+        button('line', w.waiting ? `See the line (${w.waiting})` : 'See the line', 'Who waits for a worker, next first, and who is Urgent', () => openLine()),
         ...(w.paused
           ? [button('resume', 'Resume minions', 'Waiting turns start again, and stopped ones carry on', () => pause(false)), w.paused.stop ? '' : button('stop', 'Stop running ones', 'Stop the running turns too; they carry on after Resume', () => pause('stop'))]
           : [button('pause', 'Pause new turns', 'Running turns finish; no new minion turn starts until Resume', () => pause(true)), button('stop', 'Pause and stop running ones', 'Running turns stop and carry on where they were after Resume', () => pause('stop'))]),

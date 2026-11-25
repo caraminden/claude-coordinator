@@ -122,6 +122,8 @@
 /* Messages the loop guard holds (#1067): amber like the card it stands for, since a person's Continue releases them. */
 .thread-row .loop-badge { align-self: center; white-space: nowrap; font-size: 0.78em; font-weight: 650; line-height: 1.35; padding: 0.1rem 0.45rem; border-radius: 999px; font-variant-numeric: tabular-nums;
   color: var(--waiting); background: color-mix(in srgb, var(--waiting) 15%, var(--panel)); }
+/* Urgent (#1889): a filled red mark before its number (thread.css has its look). */
+.thread-row .urgent-mark { margin-right: 0.3rem; vertical-align: 0.05em; }
 /* An open card waiting on people (#575): an outlined amber chip beside the state pill, a link to the card itself;
    grey like the parked pill on a parked or dismissed row. */
 .thread-row .card-badge { --chip: var(--waiting); align-self: center; white-space: nowrap; font-size: 0.78em; font-weight: 650; line-height: 1.35; padding: calc(0.1rem - 1px) calc(0.45rem - 1px);

@@ -190,6 +190,8 @@ function cutOutcome(turn: EndedTurn | null, r: Retries, rerun: boolean): Outcome
   // Its reply is in (a kill after a good result line): ended as the watched path ends it, killed with no resume (2A1).
   // An error result (a limit, say) left the work undone, so it still resumes.
   if ((turn?.result && !turn.result.error) || turn?.closing !== undefined) return { kind: 'killed', followUps: [], ...base };
+  // A pause stopped it, so its resume counts towards no cap here either.
+  if (turn?.paused) return { kind: 'paused', followUps: [], ...base, retry: { via: 'restart', retries: r } };
   return { kind: 'killed', followUps: [], ...base, ...retry(r, 'restart') };
 }
 

@@ -448,7 +448,7 @@ export const projectRoutes: Route[] = [
     handler: async ({ res, app: { store, runner }, session }) => {
       const hidden = store.hiddenProjects(session.uid ?? -1);
       const member = store.memberSchemes(session.uid);
-      const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
+      const busy = (t: Ticket) => isWorking({ status: runner.shownStatus(t), approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
       const seenItems = store.seenItems(session.name);
       // In the order they dragged the shelf into (#649); one they haven't placed goes at the end.
       const schemes: Project[] = inOrder(visibleSchemes(store, session), (p: Project) => p.id, session.uid === undefined ? [] : store.listOrder(session.uid, 'schemes'));
@@ -480,7 +480,7 @@ export const projectRoutes: Route[] = [
                 fresh: !!seen && waiting.some((i) => !seen.has(i.key)),
                 running: !hidden.has(p.id) && tickets.some(busy),
                 working: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && busy(t)).length,
-                shipping: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && isShipping({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) })).length,
+                shipping: hidden.has(p.id) ? 0 : tickets.filter((t) => t.kind === 'ticket' && isShipping({ status: runner.shownStatus(t), approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) })).length,
                 icon: await iconVersion(p.repo_dir, { store, projectId: p.id }),
                 // Its Taskmaster, so a scheme switch fetches that chat alongside the scheme (#538): the person's own once split (#919).
                 coordinator_id: store.coordinatorFor(p.id, session.uid ?? null)?.id ?? null,
@@ -498,7 +498,7 @@ export const projectRoutes: Route[] = [
     who: ['person'],
     handler: async ({ res, app: { store, runner, ciHealth }, session }) => {
       await homeBuckets.ready(store);
-      const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
+      const busy = (t: Ticket) => isWorking({ status: runner.shownStatus(t), approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
       const home = homeView(store, runner.approvals, session, busy, homeSince(store, session.name, Date.now()), Date.now(), homeBuckets);
       // The waiting minions as a scheme's list draws them (#1217: Josh, 2026-11-20, "the normal minion list render"), and when this person last opened each.
       const ids = [...new Set(home.items.map((i) => i.ticketId))];
@@ -1802,11 +1802,13 @@ export const projectRoutes: Route[] = [
       const hit = chainCache.get(project.id);
       if (hit && hit.at > Date.now() - 5000) return json(res, 200, { chains: hit.chains });
       const { store } = app;
+      const shown = (t: Ticket) => ({ ...t, status: app.runner.shownStatus(t) });
+      const found = (t: Ticket | undefined) => t && shown(t);
       const chains = chainsOf({
-        tickets: store.listTickets(project.id),
+        tickets: store.listTickets(project.id).map(shown),
         waitsOf: (t) => app.runner.outboxWaits(t) as WaitLink[],
-        find: (p, n) => store.getTicketByNumber(p, n),
-        get: (id) => store.getTicket(id),
+        find: (p, n) => found(store.getTicketByNumber(p, n)),
+        get: (id) => found(store.getTicket(id)),
         claims: store.claims.list(project.id).map((c) => ({ name: c.name, holder: c.holder, waiting: store.claims.waiting(project.id, c.name) })),
         builds: (app.builds?.get(project.id) ?? []).map((b) => ({ build: b.build, owner: b.owner })),
       });

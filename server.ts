@@ -434,6 +434,7 @@ if (previews) {
   // Builds' previews are of this server's own code, so only its own scheme has them.
   previews.buildScheme = ownScheme;
 }
+if (BOOT_CHECK) runner.turnLine.clear();
 if (!BOOT_CHECK) {
   // Before any recover() below, so a job lost across the restart is recorded too (#1325).
   jobLost.hear = (_dir, detail) => store.addHealthEvent('job-killed', Date.now(), null, detail);

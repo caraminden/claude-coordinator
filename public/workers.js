@@ -7,7 +7,7 @@ import { renderTyping } from './thread.js';
 import { optimistic } from './ui/optimistic.js';
 
 const READ_MS = 3_000;
-const SIZES = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 40, 50];
+const SIZES = Array.from({ length: 50 }, (_, i) => i + 1);
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** The line moved: `line` is every waiting minion's id, next first, `paused` who paused them all. */
@@ -25,6 +25,8 @@ export function onWorkers({ line, paused }) {
 export function workersPanel(page) {
   let w = null;
   let failed = null;
+  let first = true; // the page is put in after this returns
+  let open = false; // the size list
   let sent = 0; // changes on their way: a read started before one lands would show the old state
   const el = h('section', { class: 'st-tile wide st-lines st-workers', 'data-tile': 'workers' });
   const set = (body, next, label) => {
@@ -67,7 +69,11 @@ export function workersPanel(page) {
       {
         class: 'small',
         'data-key': 'size',
+        onpointerdown: () => (open = true),
+        onkeydown: () => (open = true),
+        onblur: () => (open = false),
         onchange: (e) => {
+          open = false;
           const n = e.target.value === 'auto' ? null : Number(e.target.value);
           const { fixed: _, ...auto } = pool;
           set({ size: n }, { size: n ?? pool.size, pool: n === null ? auto : { ...pool, fixed: { size: n, by: 'you' } } }, 'set the workers');
@@ -98,17 +104,18 @@ export function workersPanel(page) {
     if (focused) el.querySelector(`[data-key="${CSS.escape(focused)}"]`)?.focus();
   };
   const load = async () => {
-    if (!page.isConnected && w !== null) return;
+    if (!page.isConnected && !first) return;
+    first = false;
     if (!document.hidden && !sent && (el.isConnected || w === null)) {
       try {
         const now = await api('api/workers');
-        // An open size list would close under the redraw.
         if (!sent) w = now;
         failed = null;
       } catch (err) {
         failed = err.message;
       }
-      if (!el.querySelector('select:focus')) draw();
+      // An open size list would close under the redraw.
+      if (!open) draw();
     }
     setTimeout(load, READ_MS);
   };

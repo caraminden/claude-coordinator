@@ -100,7 +100,7 @@ export function scheduleView(app: App, s: Schedule) {
   // What each run found and cost is read from the minion and the turns by id, never copied (H1, #1057).
   const run = (id: number | null) => {
     const t = id ? app.store.getTicket(id) : null;
-    return t ? { number: t.number, state: t.state, status: t.status, note: t.note, cost: app.store.ticketCost(t.id) } : null;
+    return t ? { number: t.number, state: t.state, status: app.runner.shownStatus(t), note: t.note, cost: app.store.ticketCost(t.id) } : null;
   };
   const last = run(s.last_ticket_id);
   // A standard audit's run renders its kit template fresh, so its page shows that text, not the copy from its last run (#1083).

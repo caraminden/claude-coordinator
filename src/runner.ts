@@ -1789,7 +1789,8 @@ export class Runner {
     if (state === 'try' || (state === 'ready' && !atCall)) return `its state is ${state}, which tells people something is waiting for them`;
     // Complete is finished work kept open on purpose (#547): a report to read, or a person's close.
     if (state === 'complete') return 'its state is complete: it closes once a member has seen it';
-    if (!atCall && this.turnLine.has(ticketId)) return 'a turn of its own waits for a worker';
+    // Its running turn's own close_self closes after it; a turn still waiting is work nobody has done.
+    if (!(atCall && this.isRunning(ticketId)) && this.turnLine.has(ticketId)) return 'a turn of its own waits for a worker';
     return this.ciHold?.(ticketId) ?? null;
   }
 
@@ -1967,7 +1968,7 @@ export class Runner {
           const resumed = out.kind !== 'stopped' && !out.followUps.includes('rerun') ? out.retry : undefined;
           // Owed before the turn's record goes, so a crash between finds one of them, with what the resume carries on (#1452).
           // A kill resume's count rides along (RETRIES), so a kill after the restart still counts as the second in a row.
-          if (resumed) this.queue.owe(t.id, { ...owedOf(resumed.via, resumed.retries), ...(Object.keys(carry).length ? { carry } : {}) });
+          if (resumed) this.queue.owe(t.id, { ...owedOf(resumed.via, resumed.retries), ...(out.kind === 'paused' ? { paused: true } : {}), ...(Object.keys(carry).length ? { carry } : {}) });
           this.store.deleteSetting(turnKey(t.id));
           if (turn?.dir) rmSync(turn.dir, { recursive: true, force: true });
           this.setStatus(t.id, 'idle');
@@ -3335,7 +3336,13 @@ export class Runner {
   private waitOutPause(ticketId: number, turn: TurnState, retry: { via: RetryKind; retries: Retries }) {
     const rerun = !turn.offset && this.queue.giveBack(ticketId).length > 0;
     if (!rerun) this.queue.owe(ticketId, { ...owedOf(retry.via, retry.retries), paused: true });
-    this.turnLine.enter(ticketId, rerun ? undefined : retry.via);
+    // Never takes a worker here: the turn ending still holds its own, and a Resume may have come already.
+    this.turnLine.join(ticketId, rerun ? undefined : retry.via);
+  }
+
+  /** A minion's status as people read it: one waiting for a worker is working. */
+  shownStatus(ticket: Ticket): Ticket['status'] {
+    return this.turnLine.has(ticket.id) ? 'running' : ticket.status;
   }
 
   private lineMoved = new Set<number>();
@@ -3375,7 +3382,9 @@ export class Runner {
       const waiting = this.waiting(ticketId);
       const person = this.turnPerson(ticket, project, fresh ? [] : waiting, !!via) ?? 0;
       if (waiting.msgs.some((m) => m.own)) return { person, rank: 0 };
-      const started = fresh || !ticket.session_id || via === 'restart' || via === 'switch' || waiting.msgs.some((m) => m.from && this.store.getTicket(m.from)?.kind === 'coordinator');
+      // A first turn a person or a minion asked for; a schedule's or Citadel's own has no asker.
+      const asked = !ticket.session_id && waiting.msgs.some((m) => m.from || m.asker != null);
+      const started = fresh || asked || via === 'restart' || via === 'switch' || waiting.msgs.some((m) => m.from && this.store.getTicket(m.from)?.kind === 'coordinator');
       return { person, rank: started ? 1 : 2 };
     } catch (err) {
       // One minion's trouble doesn't hold the line up; its turn's start meets the same trouble and says so.

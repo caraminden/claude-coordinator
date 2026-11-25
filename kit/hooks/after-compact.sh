@@ -4,11 +4,14 @@
 # requester's words, the checklist, handoff files) instead of the summary's paraphrase. Its output
 # joins the compacted context. Turns and Taskmasters both compact at about 180k (autoCompactWindow in the runner's per-turn settings).
 # Hooks run in the session's folder; CLAUDE_PROJECT_DIR is that folder when Claude Code sets it.
+input="$(cat)"
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
 echo "[after-compact] This conversation was just compacted. Before acting on anything the summary"
 echo "paraphrases (someone's ask, an open question, a go-ahead), re-read it at the source: their"
 echo "latest messages, your checklist, the PR, the handoff file. Don't redo work the summary"
 echo "says is done; check it in git."
+# What it had read, its notes, and a word when it keeps compacting (seen.ts, #1920).
+printf '%s' "$input" | NODE_COMPILE_CACHE="${CITADEL_HOOK_CACHE:-}" node "$(dirname "${BASH_SOURCE[0]}")/seen.ts" 2>/dev/null
 git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 branch="$(git branch --show-current 2>/dev/null)"
 echo "Branch: ${branch:-detached} at $(git log -1 --format='%h %s' 2>/dev/null)"

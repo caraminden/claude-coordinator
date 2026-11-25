@@ -29,9 +29,10 @@ Prefer a narrow matcher and the end of a turn over every call.
 | `flail-brake.ts` | PostToolUse on edits, Bash (runs inside `run.ts`) | Same test red three times with no edit | reminds, once per streak |
 | `batch-nudge.ts` | PostToolUse on Read, Grep, Glob, Bash, edits (runs inside flail-brake.ts) | Third single read-only call in a row, even-numbered minions only; a one-week trial (#1278) | reminds, once per run |
 | `retro-log.ts` | PostToolUse on Bash (inside `run.ts`), Stop, SubagentStop | Writes the retro log the other modes count into | counts |
-| `run.ts` | PostToolUse on Bash, file tools, Read, Grep, Glob | Runs test-first, any-nudge, flail-brake (with batch-nudge) and retro-log in one node process, in hooks.json's old order (#1296) | as each check |
+| `run.ts` | PostToolUse on Bash, file tools, Read, Grep, Glob | Runs test-first, any-nudge, flail-brake (with batch-nudge), retro-log and seen.ts in one node process, in hooks.json's old order (#1296) | as each check |
 | `hook-input.ts` | none: not a hook | The types of the hook input and transcript lines the hooks read (#1799) | none |
-| `after-compact.sh` | SessionStart after a compaction | Puts back the branch, head and what to re-read | reminds |
+| `seen.ts` (inside `run.ts`) | PostToolUse, Bash and Read | File lines already in context, unchanged, aren't printed again | rewrites the output |
+| `after-compact.sh` | SessionStart after a compaction | Puts back the branch, head, what it had read and its notes | reminds |
 
 ## Citadel's turn hooks (`src/`, installed per turn by `src/turn-launch.ts`): every scheme
 

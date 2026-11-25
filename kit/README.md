@@ -41,8 +41,8 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     Grep, Glob, or a Bash that only reads) it adds one line saying to send independent lookups in one message. Only
     minions with an even number (the other half is the control); Grunts and Taskmasters never. A call sent with
     others in one message, an edit or a writing Bash ends the run. The trial's readout decides whether it stays.
-  - `run.ts` (PostToolUse and PostToolUseFailure): test-first, any-nudge, flail-brake (with batch-nudge) and retro-log's
-    after-call lines in one node process per call (#1296), each as it ran alone; one that throws says nothing.
+  - `run.ts` (PostToolUse and PostToolUseFailure): test-first, any-nudge, flail-brake (with batch-nudge), retro-log's
+    after-call lines and seen.ts's rewritten output in one node process per call (#1296), each as it ran alone; one that throws says nothing.
   - `big-read.ts` (PreToolUse on Read and Bash, every Citadel turn, Grunts included; not in hooks.json: it runs inside
     the turn's one PreToolUse process, `src/hook-run.ts`, #1296): sends back a
     whole read of a big file (over 600 lines or 25k chars): a Read with no `limit`, or a plain
@@ -62,8 +62,15 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     and agents it can't read (another plugin's) go through.
     A call it lets through without `run_in_background` gets `false`, so Grunts run in the
     foreground unless a call asks otherwise (#1031).
-  - `after-compact.sh` (SessionStart, compact): the branch, head and uncommitted files, and a
-    reminder to re-read the record rather than the summary.
+  - `seen.ts` (PostToolUse on Bash and Read, Grunts included, inside run.ts; #1920): file lines already in the session's
+    context, unchanged, aren't printed again whatever printed them (it matches the output to the files, not the command).
+    Read less than an hour ago with no compaction since: 15+ such lines become one line. Read before a compaction: 12k
+    chars a window and any run of up to 25 lines print again, a bigger run becomes its outline. Changed lines print.
+    `# allow_large` in the command, or `allow_large: true` on Read, prints all, counted in the retro log (`re-read`).
+    Past 100k chars of file text in a window it says to write notes and grep. Fails open.
+  - `after-compact.sh` (SessionStart, compact): the branch, head and uncommitted files, a reminder to re-read the record
+    rather than the summary, and from seen.ts the ranges it had read with what they hold, its `$TMPDIR/notes.md`, and on
+    a second compaction within 15 minutes what it went back to.
 - `schedules/<slug>.md` are the standard audits' templates (#799): a scheduled run whose row names one
   gets that body, `{scheme}` filled in, plus the scheme's own notes (`src/schedules.ts`). Frontmatter
   holds the defaults, the stagger and `applies:`, which the setup plan checks before adding one.

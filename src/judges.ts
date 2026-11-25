@@ -237,6 +237,15 @@ export const JUDGES: Judge[] = [
     callers: ['kit/hooks/big-read.ts'],
   },
   {
+    id: 'seen-guard',
+    name: 'Seen guard (#1920, PostToolUse)',
+    mode: 'act', // Josh, 2026-11-24: "we CERTAINLY shouldnt let a minion read the same file over and over"; replayed over 3 days first
+    replay: true,
+    acts: "leaves file lines the session already printed, unchanged, out of a Bash or Read call's output, and says at 100k chars of file text to write notes",
+    pins: [{ path: 'kit/hooks/seen.ts', symbols: ['CUT_MIN', 'SMALL', 'CONTEXT', 'REREAD_CHARS', 'FRESH_MS', 'GULP', 'GULP_AGAIN', 'fileRuns', 'cuts', 'seenHook'] }],
+    callers: ['kit/hooks/seen.ts'],
+  },
+  {
     id: 'effort-retros',
     name: 'Effort retros (#1751)',
     mode: 'act', // Cara, 2026-11-24: "Start for real now"

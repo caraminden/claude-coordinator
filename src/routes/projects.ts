@@ -371,7 +371,7 @@ function queuedState(app: App, t: Ticket | undefined, done: boolean): { state: s
   if (chain) return { state: 'chained', after: app.store.getTicket(chain.after)?.number ?? null };
   if (!t || t.status === 'closed') return { state: 'gone', after: null };
   if (t.status === 'new') return { state: 'new', after: null };
-  return { state: app.runner.isRunning(t.id) ? 'working' : 'waiting', after: null };
+  return { state: app.runner.isRunning(t.id) || app.runner.turnLine.has(t.id) ? 'working' : 'waiting', after: null };
 }
 
 /**

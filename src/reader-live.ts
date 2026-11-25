@@ -116,7 +116,7 @@ export function publishLive(d: LiveDeps) {
       // A first pass that failed is tried again, or these pages would stay on main until a restart.
       if (!seeded) return await seed();
       await others();
-      for (const id of runner.runningIds()) liveOf(id);
+      for (const id of [...runner.runningIds(), ...runner.turnLine.waiting()]) liveOf(id);
       if (++tick % SWEEP_ALL === 0) {
         const open = store.listProjects().flatMap((p) =>
           store

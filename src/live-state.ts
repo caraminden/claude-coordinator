@@ -3,6 +3,7 @@
 // Runs inside the pinned MCP server, so it imports only ./ files (turn-launch.ts pinnedCopy).
 import { hideTokens } from './hide-tokens.ts';
 import { stateWord } from './needs.ts';
+import { workerWaitText } from './worker-wait.ts';
 
 interface EventRow {
   kind: string;
@@ -73,7 +74,7 @@ export function liveState(ticket: any, events: EventRow[], now = Date.now()): st
   parsed.forEach((e, i) => {
     if (e.ev?.type === 'system' && e.ev.subtype === 'init') from = i;
   });
-  const running = ticket.status === 'running';
+  const running = ticket.status === 'running' && !ticket.worker_wait;
   // A turn that started but hasn't sent its init yet isn't the last one: an old unanswered call isn't running.
   if (running && ticket.turnStartedAt && (parsed[from]?.created_at ?? 0) < ticket.turnStartedAt) {
     from = parsed.findIndex((e) => e.created_at >= ticket.turnStartedAt);
@@ -98,7 +99,7 @@ export function liveState(ticket: any, events: EventRow[], now = Date.now()): st
     }
   }
   const started = ticket.turnStartedAt ?? turn[0]?.created_at ?? null;
-  const out = [`Live state of #${ticket.number}: status ${ticket.status}${running && started ? `, turn running ${ago(now - started)}` : ''}`];
+  const out = [`Live state of #${ticket.number}: status ${ticket.worker_wait ? 'waiting for a worker' : ticket.status}${running && started ? `, turn running ${ago(now - started)}` : ''}`];
   if (ticket.cwd) out.push(`worktree: ${ticket.cwd}`);
 
   const waits: string[] = [];
@@ -116,6 +117,8 @@ export function liveState(ticket: any, events: EventRow[], now = Date.now()): st
     } else if (!ticket.approvals) {
       waits.push(`the model: ${lastAt ? `${ago(now - lastAt)} since the turn's last event` : 'no events from this turn yet'}`);
     }
+  } else if (ticket.worker_wait) {
+    waits.push(`a worker: no turn is running, its next one starts by itself (${workerWaitText(ticket.worker_wait)})`);
   } else {
     waits.push(`nothing: no turn is running (${ticket.state ? `state ${stateWord(ticket.state)}` : 'its turn ended'})`);
   }

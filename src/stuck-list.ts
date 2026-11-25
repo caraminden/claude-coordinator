@@ -27,7 +27,7 @@ type Wait = { kind?: string; state?: string };
 /** Something will move it without a person: a turn running or queued, a wait in the outbox, a ship or land under way, a usage-limit resume, held mail on a timer. */
 function coming(t: Ticket, v: View): boolean {
   const waits = ((v.outbox_waits ?? []) as Wait[]).filter((w) => w.state === 'waiting' || w.state === 'sending' || (w.state === 'held' && w.kind !== 'chain'));
-  return t.status === 'running' || v.queued > 0 || waits.length > 0 || !!v.wakes_on || !!v.wait || !!v.server_work || v.limit_resume_at != null || !!v.held_mail?.until || (v.approvals?.length ?? 0) > 0 || (!!v.ship && ['build', 'main', 'deploying'].includes(v.ship.stage));
+  return t.status === 'running' || v.queued > 0 || !!v.worker_wait || waits.length > 0 || !!v.wakes_on || !!v.wait || !!v.server_work || v.limit_resume_at != null || !!v.held_mail?.until || (v.approvals?.length ?? 0) > 0 || (!!v.ship && ['build', 'main', 'deploying'].includes(v.ship.stage));
 }
 
 interface Item {

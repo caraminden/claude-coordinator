@@ -1,10 +1,12 @@
 /** Shapes the MCP tools read from Citadel's own API answers and requests (#1799: these replaced any in src/mcp.ts). */
 import type { CardLink } from './card-links.ts';
+import type { WorkerWait } from './worker-wait.ts';
 
 /** A minion as the API's views send it: the fields these tools read. */
 export interface TicketView {
   id: number;
   number: number;
+  worker_wait?: WorkerWait | null;
   title: string;
   properties?: Record<string, unknown>;
   build?: number | string | null;

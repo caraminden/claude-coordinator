@@ -11,6 +11,7 @@ import { pickFor } from '../public/model-table.js';
 import { pacific } from './pacific.ts';
 import { projectSharedDir } from './workspace.ts';
 import { faultPoint } from './fault-points.ts';
+import { inLine } from './turn-line.ts';
 
 /** What an activity trigger counts (#1798): ships to main, or minions made. */
 export type TriggerKind = 'ships' | 'minions';
@@ -741,7 +742,7 @@ export class ScheduledRuns {
     // Two runs at once would step on each other (and double the cost), so a slot is skipped while the last run works,
     // or waits to resume after a usage limit, an outage or a kill. Not state 'limited': a run that gave up keeps it for good.
     // A trigger just waits for the next hourly check, quietly: no slot of the calendar's was missed.
-    if (last && (last.status === 'running' || runner.limitWait(last.id) || runner.netWait(last.id) || runner.killWait(last.id))) return triggered ? undefined : store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
+    if (last && (last.status === 'running' || inLine(store, last.id) || runner.limitWait(last.id) || runner.netWait(last.id) || runner.killWait(last.id))) return triggered ? undefined : store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
     // The activity gate (#745): a quiet stretch costs nothing, no minion and no note, and the window keeps growing. It
     // gates calendar slots; a trigger's own count was just met.
     const minions = store.schedules.minionsSince(s, by);

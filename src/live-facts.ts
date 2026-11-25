@@ -13,6 +13,7 @@ import { pacific } from './pacific.ts';
 import { stateWord } from './needs.ts';
 import { repoSlug } from './prlinks.ts';
 import type { GithubEnv } from './scheme-repo.ts';
+import { workerWaitText } from './worker-wait.ts';
 
 /** A minion's newest GitHub Actions run, on its branch (a PR's) or on land/<branch> (tools/land.sh's CI gate). */
 export interface CiRun {
@@ -87,7 +88,7 @@ export function storedFacts(store: Store, runner: Pick<Runner, 'view'>, t: Ticke
     number: t.number ?? 0,
     title: t.title,
     scheme: store.getProject(t.project_id)?.name ?? '',
-    status: t.status,
+    status: v.worker_wait ? workerWaitText(v.worker_wait) : t.status,
     state: t.state ?? null,
     note: t.note ?? null,
     parkedOn: v.wakes_on ?? v.parked_for ?? null,
@@ -172,7 +173,7 @@ export function handoffSheet(store: Store, runner: Pick<Runner, 'view'>, taskmas
   const cards = rows.flatMap(({ f }) => f.cards.map((c) => `- #${f.number}: ${cardText(c)}`)).slice(0, SHEET_MINIONS);
   const parks = rows.filter(({ f }) => f.state === 'parked').map((r) => `${line(r)} (${r.f.parkedOn ? `wakes on: ${r.f.parkedOn}` : 'nothing wakes it by itself'})`);
   const flight = rows
-    .filter(({ f }) => f.status === 'running' || (f.state && f.state !== 'parked'))
+    .filter(({ f }) => f.status === 'running' || f.status.startsWith('waiting') || (f.state && f.state !== 'parked'))
     .slice(0, SHEET_MINIONS)
     .map(line);
   const ships = rows.filter(({ f }) => f.ship).map(({ f }) => `- #${f.number}: ${f.ship!.text}`);

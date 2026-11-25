@@ -4,6 +4,7 @@
 // notes. Never: person_notes, tool calls or their output, contraption turns.
 import type { DatabaseSync } from 'node:sqlite';
 import type { Store } from './db.ts';
+import { inLine } from './turn-line.ts';
 
 // No foreign keys, like person_notes, so an older release's deleteTicket still works after a rollback;
 // reads join tickets and drop rows older than their minion (an id reused after such a delete).
@@ -245,7 +246,7 @@ export class Memory {
       // No result (refused, or the turn died): once it's stuck, its reply is what came before the next message.
       const next = (this.db.prepare("SELECT MIN(id) AS id FROM events WHERE ticket_id = ? AND id > ? AND kind = 'user_message'").get(m.ticket_id, m.id) as { id: number | null }).id;
       // A turn still running past the hour is its minion's latest: it may yet reply.
-      const live = next === null && this.store.getTicket(m.ticket_id)?.status === 'running';
+      const live = next === null && (this.store.getTicket(m.ticket_id)?.status === 'running' || inLine(this.store, m.ticket_id));
       if (now - m.created_at < (live ? LIVE_MS : STUCK_MS)) return 'running';
       end = next ?? Infinity;
     }

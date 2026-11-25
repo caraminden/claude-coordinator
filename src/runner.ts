@@ -1206,6 +1206,8 @@ export class Runner {
       // one of those (it never shows as running, above), and a dismissed minion has nothing live.
       // A launching turn's token is minted already (#1808): it counts, unless it's a keepalive's.
       turn_live: !closed && (this.turns.has(ticket.id) ? !this.keepalives.has(ticket.id) : !!this.launching.get(ticket.id) && !this.launching.get(ticket.id)!.keepalive),
+      // Its turn waits for a worker (#1868): it shows as working, and its activity line says where it stands.
+      worker_wait: closed ? null : this.turnLine.wait(ticket.id),
       // What steps took against their guesses (#571), which both bars scale the guesses by: the one ratio steps.usual used.
       step_ratio: ratio,
       steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
@@ -1277,7 +1279,7 @@ export class Runner {
       // token, minted at that start, is the only one that still works, so anything acting on "idle, nothing queued"
       // got 401s from it (#1618). Combined here, not in live(), so a reader's own fresh row still has the say once the
       // turn has ended (its copy of live() is posted on each broadcast, src/reader-live.ts).
-      status: shown.turn_live ? 'running' : ticket.status,
+      status: shown.turn_live || shown.worker_wait ? 'running' : ticket.status,
       // Messages the loop guard holds for a person's Continue (#1067), for the row's badge and the chat's held-mail card.
       loop_hold: closed ? null : (once('loop-holds', () => loopHolds(this.store)).get(ticket.id) ?? null),
       held_mail: this.heldMail(ticket),
@@ -1726,7 +1728,7 @@ export class Runner {
    * those turns to end. Returns whether it was dismissed.
    */
   deployLive(ticketId: number): boolean {
-    if (this.isRunning(ticketId) || this.queued(ticketId)) {
+    if (this.isRunning(ticketId) || this.queued(ticketId) || this.turnLine.has(ticketId)) {
       this.deployedMidTurn.add(ticketId);
       if (this.turns.has(ticketId)) this.saveTurn(ticketId, { deployed: true });
       return false;
@@ -1787,6 +1789,7 @@ export class Runner {
     if (state === 'try' || (state === 'ready' && !atCall)) return `its state is ${state}, which tells people something is waiting for them`;
     // Complete is finished work kept open on purpose (#547): a report to read, or a person's close.
     if (state === 'complete') return 'its state is complete: it closes once a member has seen it';
+    if (!atCall && this.turnLine.has(ticketId)) return 'a turn of its own waits for a worker';
     return this.ciHold?.(ticketId) ?? null;
   }
 
@@ -1806,7 +1809,7 @@ export class Runner {
   ciGreen(ticketId: number, text: string) {
     const t = this.store.getTicket(ticketId);
     if (!t || t.status === 'closed') return;
-    if (this.isRunning(ticketId) || this.queued(ticketId)) {
+    if (this.isRunning(ticketId) || this.queued(ticketId) || this.turnLine.has(ticketId)) {
       if (!this.closeAfterTurn(ticketId, text)) this.emit(ticketId, 'note', { text: `${text.replace(/,? so it dismissed this fix minion\.?$/, '.')} It stays open for the work still under way.` });
       return;
     }
@@ -1844,7 +1847,7 @@ export class Runner {
   closeIfSeen(ticketId: number, name: string): boolean {
     const t = this.store.getTicket(ticketId);
     if (!t || t.state !== 'complete' || t.status === 'closed' || t.status === 'running' || this.isRunning(ticketId)) return false;
-    if (this.queue.size(ticketId) || this.store.openCardAt(ticketId) !== null || this.approvals.waiting(ticketId)) return false;
+    if (this.queue.size(ticketId) || this.turnLine.has(ticketId) || this.store.openCardAt(ticketId) !== null || this.approvals.waiting(ticketId)) return false;
     if (this.store.seenAt(name, ticketId) < t.updated_at) return false;
     void this.close(ticketId, `Closed: ${name} saw its result`);
     return true;
@@ -2181,7 +2184,8 @@ export class Runner {
               return;
             }
             // An account switch's note went with the turn that stopped (endFailed); a kill resume's with the kill (one line).
-            if (via !== 'switch' && !killLine) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : paused ? 'Resumed after the pause' : 'Resumed after a server restart' });
+            if (via !== 'switch' && !killLine)
+              this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : paused ? 'Resumed after the pause' : 'Resumed after a server restart' });
             // It carries on the interrupted turn, so it runs for that turn's person.
             return this.ranTurn(
               this.startTurn(
@@ -3332,6 +3336,23 @@ export class Runner {
     const rerun = !turn.offset && this.queue.giveBack(ticketId).length > 0;
     if (!rerun) this.queue.owe(ticketId, { ...owedOf(retry.via, retry.retries), paused: true });
     this.turnLine.enter(ticketId, rerun ? undefined : retry.via);
+  }
+
+  private lineMoved = new Set<number>();
+
+  /** Pages hear who started or stopped waiting, and everyone's place, at most every 200 ms: a burst shifts every place once. */
+  private lineChanged(ids: number[]) {
+    if (this.detached) return;
+    if (!this.lineMoved.size) {
+      setTimeout(() => {
+        const moved = [...this.lineMoved];
+        this.lineMoved.clear();
+        if (this.detached) return;
+        for (const id of moved) this.broadcastTicket(id);
+        this.broadcast({ type: 'workers', line: this.turnLine.order(), paused: this.turnLine.paused()?.by ?? null });
+      }, 200).unref();
+    }
+    for (const id of ids) this.lineMoved.add(id);
   }
 
   /** Start a turn the line gave a worker: the resume it waited for as it stands now, else its queue's turn. */

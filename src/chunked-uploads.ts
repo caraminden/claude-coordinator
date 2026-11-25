@@ -116,10 +116,11 @@ export class ChunkedUploads {
 
   /** How far an upload has got: the bytes on disk, or its answer if it is finishing (or, with `finished`, has finished). */
   async status(who: Uploader, target: Target, id: string, finished = false): Promise<Answer> {
+    const asked = this.finishing.get(id);
     const meta = await this.load(who, target, id);
     const offset = await this.offset(id);
     // The .part is gone only once the upload is finishing or finished (or was dropped).
-    const work = this.finishing.get(id);
+    const work = asked ?? this.finishing.get(id);
     if (work) return work;
     if (offset !== null) return { id, offset, size: meta.size };
     const rec = await this.record(id);
@@ -141,7 +142,7 @@ export class ChunkedUploads {
     this.busy.add(id);
     try {
       const rec = await this.record(id);
-      if (rec) return rec.answer ? this.answer(rec) : await this.finish(id, this.told(rec, tell));
+      if (rec) return rec.answer ? this.answer(rec) : await this.finish(id, () => this.told(rec, tell));
       const have = await this.offset(id);
       if (have === null) throw gone();
       if (offset !== have) throw new HttpError(409, `The upload is at byte ${have}, not ${offset}`, true);
@@ -162,7 +163,7 @@ export class ChunkedUploads {
         await file.close();
       }
       if (have + n < meta.size) return { id, offset: have + n, size: meta.size };
-      return await this.finish(id, this.placed(meta, place, tell));
+      return await this.finish(id, () => this.placed(meta, place, tell));
     } finally {
       this.busy.delete(id);
     }
@@ -177,6 +178,7 @@ export class ChunkedUploads {
   }
 
   private async placed(meta: Meta, place: Place, tell: Tell): Promise<Answer> {
+    // shortcut: a kill in the instant between these two leaves the file with no record, and a retry sends it again; place a claimed name recorded first if that ever happens.
     const rec = { meta, file: await place(meta, this.part(meta.id)) };
     await this.keep(rec);
     await rm(this.metaPath(meta.id), { force: true });
@@ -189,7 +191,9 @@ export class ChunkedUploads {
     return this.answer(done);
   }
 
-  private async finish(id: string, work: Promise<Answer>): Promise<Answer> {
+  private async finish(id: string, run: () => Promise<Answer>): Promise<Answer> {
+    // Known as finishing before any of it runs.
+    const work = Promise.resolve().then(run);
     this.finishing.set(id, work);
     try {
       return await work;

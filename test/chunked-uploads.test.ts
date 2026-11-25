@@ -189,7 +189,7 @@ test('an upload whose last answer is lost while the app is being told finishes a
     await until('the app to be told', async () => told.length > before);
     last.destroy();
     // Asked while the app is still thinking, by a retry that asks, one that sends, and a Cancel.
-    const asked = ask(APP, 'GET', `${base}/${id}`, app);
+    const asked = ask(APP, 'GET', `${base}/${id}?finished=1`, app);
     const sent = ask(APP, 'PUT', `${base}/${id}?offset=0`, app, 'abc');
     const cancelled = await ask(APP, 'DELETE', `${base}/${id}`, app);
     assert.equal(cancelled.status, 409, 'a cancel too late says the file is there');
@@ -233,9 +233,16 @@ test('a restart after the file is placed: the next PUT tells the app, and the fi
     await assert.rejects(d.status({ uid: 2, login: 'olive' }, target, a.id, true), (e: unknown) => (e as HttpError).status === 404);
     const path = join(dir, 'out', 'a');
     const done = { id: a.id, offset: 1, size: 1, done: true, path, app: calls + 1 };
-    const tell = async () => ({ app: ++calls });
+    let asked: Promise<unknown> | undefined;
+    // A plain GET asked while the app thinks gets the answer too.
+    const tell = async () => {
+      asked = d.status(cara, target, a.id);
+      return { app: ++calls };
+    };
     assert.deepEqual(await d.put(cara, target, a.id, 1, Readable.from([]), put, tell), done);
+    assert.deepEqual(await asked, done);
     assert.deepEqual(await d.status(cara, target, a.id, true), done);
+    await assert.rejects(d.status(cara, target, a.id), (err: unknown) => (err as HttpError).status === 404);
     assert.equal(calls, 1);
     assert.deepEqual(readdirSync(join(dir, 'out')), ['a']);
     // 3 days on, the next start after a restart forgets it.
@@ -286,6 +293,7 @@ test("the kit's client (ui/upload.js) pauses, resumes after a reload from where 
   const plain = globalThis.fetch;
   const withCookie = (o: RequestInit = {}) => ({ ...o, headers: { ...(o.headers as object), Cookie: srv.cookie } });
   const stored = new Map<string, string>();
+  let puts = 0;
   let lose = false; // the next finished answer breaks off on its way back
   class Xhr {
     upload: { onprogress: ((e: { loaded: number }) => void) | null } = { onprogress: null };
@@ -303,6 +311,7 @@ test("the kit's client (ui/upload.js) pauses, resumes after a reload from where 
       this.#stop.abort();
     }
     send(body: Blob) {
+      puts++;
       plain(this.#how[1], withCookie({ method: this.#how[0], body, signal: this.#stop.signal })).then(
         async (r) => {
           this.status = r.status;
@@ -347,15 +356,11 @@ test("the kit's client (ui/upload.js) pauses, resumes after a reload from where 
 
     // Its last answer lost (#1945): the retry learns it finished, and nothing is sent again.
     lose = true;
-    const bytes: number[] = [];
-    const lost = startUpload(endpoint, new File([data], 'lost.bin'), { folder: 'inbox/Kit', onChange: (u: { sent: number }) => void bytes.push(u.sent) });
+    puts = 0;
+    const lost = startUpload(endpoint, new File([data], 'lost.bin'), { folder: 'inbox/Kit' });
     assert.equal(((await lost.done) as { path: string }).path, 'inbox/Kit/lost.bin');
     assert.equal(lose, false, 'an answer was lost');
-    assert.deepEqual(
-      bytes,
-      bytes.toSorted((a, b) => a - b),
-      'never back to the start',
-    );
+    assert.equal(puts, 3, 'its three chunks, and no PUT after');
     assert.deepEqual(readdirSync(join(projectSharedDir(srv.data, project), 'inbox/Kit')), ['lost.bin', 'photos.bin']);
 
     // Cancelled: done answers null and the server lets it go.

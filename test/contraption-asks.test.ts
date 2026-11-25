@@ -412,7 +412,15 @@ test('POST /api/contraptions/asks/files (#1841): a 100 MB file streamed, then na
   assert.equal((await ask({ person: Rachel.id, kind: 'bug', text: 'Bad id', files: [{ upload: '../../etc' }] })).status, 400);
 
   // A bug report naming the upload and an inline file: both land in the inbox, the big one moved, not copied in memory.
-  const r = await ask({ person: Rachel.id, kind: 'bug', text: 'The aura flickers, see the recording', files: [{ upload: id, name: 'flicker.webm' }, { name: 'log.txt', data: b64('frame 12') }] });
+  const r = await ask({
+    person: Rachel.id,
+    kind: 'bug',
+    text: 'The aura flickers, see the recording',
+    files: [
+      { upload: id, name: 'flicker.webm' },
+      { name: 'log.txt', data: b64('frame 12') },
+    ],
+  });
   assert.equal(r.status, 202, JSON.stringify(r.body));
   assert.deepEqual(r.body.files, ['inbox/rec/rachel/flicker.webm', 'inbox/rec/rachel/log.txt']);
   assert.equal(sum(readFileSync(join(recShared, 'inbox', 'rec', 'rachel', 'flicker.webm'))), sum(video));
@@ -432,7 +440,7 @@ test('POST /api/contraptions/asks/files (#1841): a 100 MB file streamed, then na
   assert.deepEqual(f.body.files, ['inbox/rec/rachel/mock.png']);
 
   // A data ask takes uploads too, under its own name when it gives none.
-  up = await upload(Josh.id,'session.webm', Buffer.from('small clip'));
+  up = await upload(Josh.id, 'session.webm', Buffer.from('small clip'));
   const d = await ask({ person: Josh.id, kind: 'data', files: [{ upload: up.body.upload }] });
   assert.equal(d.status, 202, JSON.stringify(d.body));
   assert.deepEqual(d.body.files, ['inbox/rec/josh/session.webm']);

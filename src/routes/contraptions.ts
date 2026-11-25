@@ -804,9 +804,7 @@ export const contraptionRoutes: Route[] = [
         const room = Math.min(unsent, budget);
         const full = new HttpError(
           429,
-          unsent <= budget
-            ? `At most ${ASK_UPLOAD_PENDING_MAX / 1024 ** 3} GiB of uploads per person not yet sent with an ask: send one, or wait a day for unsent ones to clear`
-            : `At most ${UPLOAD_WINDOW_BYTES / 1024 ** 3} GiB uploaded per person in ${ASK_WINDOW_MS / 60_000} minutes: try again later`,
+          unsent <= budget ? `At most ${ASK_UPLOAD_PENDING_MAX / 1024 ** 3} GiB of uploads per person not yet sent with an ask: send one, or wait a day for unsent ones to clear` : `At most ${UPLOAD_WINDOW_BYTES / 1024 ** 3} GiB uploaded per person in ${ASK_WINDOW_MS / 60_000} minutes: try again later`,
         );
         if (declared > room || room <= 0) throw full;
         const max = Math.min(ASK_UPLOAD_MAX, room);

@@ -149,7 +149,12 @@ export async function sweepAskUploads(dir: string, now = Date.now()) {
       for (const id of await ls(join(dir, c, p))) {
         const folder = join(dir, c, p, id);
         // An empty folder is an upload still claiming its name: an old one goes too.
-        const at = (await stagedFile(folder))?.at ?? (await stat(folder).then((st) => st.mtimeMs, () => now));
+        const at =
+          (await stagedFile(folder))?.at ??
+          (await stat(folder).then(
+            (st) => st.mtimeMs,
+            () => now,
+          ));
         if (now - at > ASK_UPLOAD_TTL_MS) await rm(folder, { recursive: true, force: true });
       }
 }

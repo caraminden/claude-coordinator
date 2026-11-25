@@ -528,6 +528,29 @@ test("the server login gets a Codex-only container (#341): its Codex turns go th
   assert.ok(!log.some((c) => c.join(' ').includes('volume rm')), 'it has no Claude link, so its volume stays');
 });
 
+test('a paused container with turns in it is never replaced, and an idle one is (#1938)', async () => {
+  const log: string[][] = [];
+  const vol = join(root, 'pause-vol');
+  let up = 'false';
+  let paused = true;
+  const fakeRun: RunCmd = async (cmd, args) => {
+    log.push([cmd, ...args]);
+    if (cmd === 'systemd-run') [up, paused] = ['true', false];
+    // podman's own words for a paused one: Running false, Paused true.
+    if (args[0] === 'container' && args[1] === 'inspect') return { code: 0, stdout: `${paused && args[3].includes('.State.Paused') ? 'paused' : up} deadbeef`, stderr: '' };
+    if (args[0] === 'volume' && args[1] === 'inspect') return { code: 0, stdout: vol + '\n', stderr: '' };
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), fake, new Containers(fakeRun), 'citadel-claude-pause-');
+  const touched = () => log.filter((c) => c[0] === 'systemd-run' || c[1] === 'stop' || c[1] === 'rm');
+  link.busy = () => 25;
+  await assert.rejects(link.ensure(josh.id, true), /is paused with turns in it.*podman unpause citadel-claude-pause-/);
+  assert.deepEqual(touched(), []);
+  link.busy = () => 1; // the starting turn alone
+  await link.ensure(josh.id, true);
+  assert.ok(touched().some((c) => c[0] === 'systemd-run'));
+});
+
 test("a host turn wakes the server login's stopped Codex container for its reviews, and never replaces a running one, stale or not (#398)", async () => {
   const log: string[][] = [];
   const vol = join(root, 'wake-vol');

@@ -202,6 +202,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/github.ts` | Watches minions' pull requests and messages them about CI, reviews and merges |
 | `src/workspace.ts` | Clones scheme repos, creates per-ticket worktrees |
 | `src/instructions.ts` | Finds Claude Code instruction and memory files to import as scheme instructions |
+| `src/kill-wave.ts` | Turns that died together with no record of how: their notes say how many and in which container (#1938) |
 | `src/turn-row.ts` | One turn's row: what a result event says of it, and its write, shared by `recordTurn` and `backfillTurns` (#1877) |
 | `src/db.ts`, `src/db-schema.ts`, `src/db-rows.ts` | The SQLite database: `db.ts` opens it and holds the migrations, settings and area list; `db-schema` is the CREATE TABLE text; `db-rows` holds the row types and the option lists and limits that go with them, which `db.ts` re-exports |
 | `src/auth.ts` | Per-person sign-in (and the admin's shared password), invite links, signed session cookies |

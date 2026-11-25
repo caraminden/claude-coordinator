@@ -584,6 +584,8 @@ export class ClaudeLink {
     // A server shutting down never replaces one: its busy() no longer sees the turns it let go of (2026-11-05: a
     // turn starting during a deploy's restart replaced a stale-spec container and killed the ~20 turns in it).
     if (now.state === 'running' && (this.closing || now.spec === specHash(spec) || this.busy(spec.name) > (forTurn ? 1 : 0))) return;
+    // podman says a paused container isn't running: replacing it took the 25 turns frozen in it (#1938).
+    if (now.state === 'paused' && (this.closing || this.busy(spec.name) > (forTurn ? 1 : 0))) throw new Error(`${spec.name} is paused with turns in it, so no turn starts there. Unpause it on the server: podman unpause ${spec.name}`);
     await this.containers.start(spec);
     void this.containers.pruneImages(IMAGE_REPO, spec.image);
   }
@@ -640,7 +642,7 @@ export class ClaudeLink {
    */
   async wakeCodex(uid: number): Promise<void> {
     if (!this.codexPlace(uid) || this.starting.has(this.name(uid))) return;
-    if ((await this.containers.status(this.name(uid))).state !== 'running') await this.ensure(uid);
+    if (!['running', 'paused'].includes((await this.containers.status(this.name(uid))).state)) await this.ensure(uid);
   }
 
   private containerEnv(n = 1): Record<string, string> {

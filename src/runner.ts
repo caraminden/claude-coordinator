@@ -31,6 +31,7 @@ import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { thrown } from './thrown.ts';
 import type { ClaudeEvent, ContentBlock, LoadError, ModelUsage } from './claude-events.ts';
+import { KillWaves } from './kill-wave.ts';
 import { killedSpend, turnOf } from './turn-row.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
 import { readScope } from './read-scope.ts';
@@ -925,6 +926,7 @@ export class Runner {
   onSpendAlert: (ticketId: number, text: string, eventId: number, person: number | null) => void = () => {};
   /** Each running turn's spend meter, by the turn's start (a new turn starts a new one). */
   private spends = new Map<number, { startedAt: number; meter: SpendMeter; prior: number; budget: Budget | null }>();
+  private killWaves: KillWaves;
   /** A minion passed four times its budget (#1114): the server tells its Taskmaster. */
   onBudgetWake: (ticketId: number, text: string) => void = () => {};
   /** A minion past 10x its budget (#1672): the server posts this card to its owner. */
@@ -936,6 +938,7 @@ export class Runner {
 
   constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
+    this.killWaves = new KillWaves(store);
     const self = this;
     this.resumes = new Resumes({
       store,
@@ -4646,7 +4649,11 @@ export class Runner {
     const cleared = out.followUps.includes('cleared');
     const status: 'idle' | 'error' = cleared || out.kind === 'stopped' || out.kind === 'paused' || out.kind === 'card' ? 'idle' : 'error';
     if (out.kind === 'paused') this.waitOutPause(ticketId, turn!, out.retry!);
-    if (status === 'error') out = this.endFailed(ticketId, live, turn, end, out, hideSecrets(stderr.slice(-10).join('\n'), secrets), code);
+    if (status === 'error') {
+      out = this.endFailed(ticketId, live, turn, end, out, hideSecrets(stderr.slice(-10).join('\n'), secrets), code);
+      const said = out.killed && !exit ? this.store.eventsOfKinds(ticketId, ['note', 'error']).findLast((e) => JSON.parse(e.data).text?.startsWith(out.killed)) : undefined;
+      if (said) this.killWaves.add(live.container, Date.now(), said);
+    }
     // Claude has the Codex turns now.
     else if (cleared && turn?.handBack) this.store.deleteSetting(codexThreadKey(ticketId));
     // A hand-back turn that failed or was stopped may still have done work Codex's thread never saw: the next Codex turn starts a new one from the hand-over.

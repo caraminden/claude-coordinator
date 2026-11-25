@@ -26,7 +26,7 @@ export const ALLOWED: Record<string, [number, string]> = {
   'kit/skills/scheme-setup/templates/land.sh': [3010, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted (+8: the count merge rule, #1917) (+2: ships a person placed, #1827) (+121: wrong refusals, #1866)'],
   'public/machine-agent.mjs': [2517, 'standalone agent a person runs on their own computer: one file so it can be copied alone (raised once for the Biome reformat, #1792) (+43: jobs keep their state across reconnect, Pause and Stop, #1956)'],
   'src/routes/projects.ts': [2105, 'every /projects route; split by page is queued (+2: a waiting minion counts as working, #1868) (raised once for the Biome reformat, #1792) (+30: same-scheme Taskmaster message, #1855) (+4: the stale check and its wait for queued saves, #1859)'],
-  'src/tripwire.ts': [1830, 'the tripwire rules; high risk to edit, so a split waits for its own change (raised once for the Biome reformat, #1792)'],
+  'src/tripwire.ts': [1840, 'the tripwire rules; high risk to edit, so a split waits for its own change (raised once for the Biome reformat, #1792) (+10: types replacing any, #1816)'],
   'src/routes/tickets.ts': [1936, 'every /tickets route; split by page is queued (+19: #1823 unchain, +13: card types replacing any, #1799) (raised once for the Biome reformat, #1792) (+3: a hand-off and a deploy report move its place in line, #1888)'],
   'tools/dev-seeds.ts': [2104, 'seed data for dev copies; grows with every table (raised once for the Biome reformat, #1792)'],
 };

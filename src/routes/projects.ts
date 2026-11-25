@@ -451,6 +451,12 @@ function visibleSchemes(store: App['store'], who: { uid?: number; admin?: boolea
 // What one line of list_tickets shows (ticketLine in src/mcp.ts), and all a minion gets of another.
 export const LINE_FIELDS = ['number', 'title', 'properties', 'build', 'model', 'effort', 'workflow', 'plugin_dirs', 'status', 'state', 'queued', 'closing', 'note', 'branch', 'created_by', 'parent', 'last_activity', 'open_cards'] as const;
 
+/** The message ids a Taskmaster session's queue and held mail hold: Mine and Everyone mark other sessions' waiting messages with them (#1853). */
+function queueMarks(app: App, t: Parameters<App['runner']['view']>[0]) {
+  const { queued_ids, held_ids } = app.runner.view(t);
+  return { queued_ids, held_ids };
+}
+
 export const projectRoutes: Route[] = [
   {
     method: 'GET',
@@ -807,7 +813,7 @@ export const projectRoutes: Route[] = [
       // offered replies count as seen in Needs you and whether its turn spins the pill, as for any minion (#1400).
       const all_tms = app.store.listCoordinators(project.id);
       const own = !caller && all_tms.length > 1 ? (app.store.coordinatorFor(project.id, session.uid!) ?? coordinator) : coordinator;
-      const taskmasters = all_tms.length > 1 ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : (app.store.getUser(t.coordinator_of)?.name ?? null), updated_at: t.updated_at, status: t.status })) : [];
+      const taskmasters = all_tms.length > 1 ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : (app.store.getUser(t.coordinator_of)?.name ?? null), updated_at: t.updated_at, status: t.status, ...queueMarks(app, t) })) : [];
       return json(res, 200, { project, coordinator: readScope(app.store.db, () => ticketView(app, own.id)), taskmasters, tickets, dismissed, ...(which === 'closed' ? { more } : {}), seen, person_notes, pins, builds, build_previews });
     },
   },

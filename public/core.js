@@ -1006,10 +1006,12 @@ export function onTicketUpdate(ticket) {
     const tm = view.taskmasters?.find((t) => t.id === ticket.id);
     const before = tm?.ticket;
     if (tm) tm.ticket = ticket;
+    const state = view.merged?.states.get(ticket.id);
+    if (state) state.ticket = ticket;
     if (view.id === ticket.id) {
       view.ticket = ticket;
       renderTicketHead();
-    }
+    } else if (state || tm) renderTicketHead(); // its waiting messages' marks follow its queue (#1853)
     return void inboxTicket(before, ticket);
   }
   const before = ticket.kind === 'coordinator' ? view.coordinator : view.tickets.get(ticket.id);

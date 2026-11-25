@@ -107,7 +107,11 @@ function stepNote(text) {
 }
 
 function actionList(actions, key) {
-  return h('div', { class: 'actions' }, actions.map((a) => actionEl(a, key)));
+  return h(
+    'div',
+    { class: 'actions' },
+    actions.map((a) => actionEl(a, key)),
+  );
 }
 
 /** Which parts of a ticket's readout are expanded; kept per ticket so re-renders and reconnects don't collapse it. */

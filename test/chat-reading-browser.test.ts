@@ -97,3 +97,19 @@ test('the opened list of individual actions and an opened action stay open when 
   assert.equal(await page.eval(`document.querySelectorAll('.progress-detail .actions details.act').length`), 3);
   assert.equal(await page.eval(`document.querySelector('.progress-detail .actions details.act')?.open`), true, 'the opened action stays open');
 });
+
+test('tracking notes: every note in a group is stamped and dates it, and a minion-to-minion copy stays out of the group', { skip }, async () => {
+  const page = await browser.page(`${app.base}#/p/1/t/7`, { width: 1280, height: 800 });
+  await waitFor(page, 'the chat to draw', `document.getElementById('log').textContent.includes('NEW needle two')`);
+  const mail = (text: string, author: string) => `stream.onmessage({ data: JSON.stringify({ type: 'event', event: ev('user_message', { author: ${JSON.stringify(author)}, mail: true, text: ${JSON.stringify(text)} }) }) })`;
+  await page.eval(`${mail('(for your tracking; nothing to do) a', '#9 Alpha')}; ${mail('(for your tracking; nothing to do) b', '#9 Alpha')}; ${mail('(for your tracking; nothing to do) c', '#9 Alpha')}`);
+  await waitFor(page, 'the group', `document.querySelectorAll('#log .mcopies.tracked .mc-list > *').length === 3`);
+  const stamped = await page.eval<number>(`document.querySelectorAll('#log .mcopies.tracked .mc-list > [data-eid]').length`);
+  assert.equal(stamped, 3, 'every note in the group can be jumped to');
+  const groupAt = await page.eval<string>(`document.querySelector('#log .mcopies.tracked').dataset.at`);
+  assert.ok(Number(groupAt) > 0, 'the group has a time, so it counts as unread');
+  // A minion-to-minion copy right after does not land inside the tracking row.
+  await page.eval(`stream.onmessage({ data: JSON.stringify({ type: 'event', event: ev('minion_copy', { from: 3, to: 4, author: '#3 X', text: 'hello' }) }) })`);
+  await waitFor(page, 'the copy row', `document.querySelectorAll('#log .mcopies').length === 2`);
+  assert.equal(await page.eval(`document.querySelector('#log .mcopies.tracked .who').textContent`), '3 tracking notes from #9');
+});

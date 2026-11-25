@@ -35,6 +35,9 @@ export function sideEvent(rows, event, data, ticket, live) {
   return fresh ? row.el : null;
 }
 
+// A half-typed follow-up, kept per thread: the row is drawn again when older history loads or the chat reopens (T8).
+const drafts = new Map();
+
 function sideRow(id, first, ticket, live) {
   const mine = first.by === me;
   const who = h('span', { class: 'who' });
@@ -58,6 +61,8 @@ function sideRow(id, first, ticket, live) {
           class: 'small secondary',
           onclick: () => {
             follow.hidden = true;
+            box.value = '';
+            drafts.delete(key);
           },
         },
         'Cancel',
@@ -82,15 +87,23 @@ function sideRow(id, first, ticket, live) {
   const actions = h('span', { class: 'row side-actions' }, followBtn || '', toMinion);
   const el = h('details', { class: 'msg coord side-thread', 'data-thread': id, open: (mine && live) || null }, h('summary', {}, who, preview), list, follow, h('div', { class: 'side-bottom' }, foot, actions));
   const row = { el, list, cost: 0, state: 'asking', at: null, draw: null };
+  const key = `${ticket.id}:${id}`;
+  if (drafts.has(key)) {
+    box.value = drafts.get(key);
+    follow.hidden = false;
+  }
+  box.addEventListener('input', () => (box.value ? drafts.set(key, box.value) : drafts.delete(key)));
 
   follow.onsubmit = (e) => {
     e.preventDefault();
     const text = box.value.trim();
     if (!text) return;
     box.value = '';
+    drafts.delete(key);
     follow.hidden = true;
     api(`api/tickets/${ticket.id}/side`, { method: 'POST', body: { text, thread: id } }).catch((ex) => {
       box.value ||= text;
+      drafts.set(key, box.value);
       follow.hidden = false;
       foot.textContent = `Not asked: ${ex.message}`;
     });

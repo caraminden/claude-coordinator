@@ -444,7 +444,8 @@ const SESSION_STATE = ['ticket', 'part', 'progress', 'actions', 'turnActions', '
 const sessionState = (o) => Object.fromEntries(SESSION_STATE.map((k) => [k, o[k]]));
 
 function newSessionState(part) {
-  const ticket = view.taskmasters?.find((t) => t.id === part.id)?.ticket ?? { id: part.id, kind: 'coordinator', project_id: view.projectId, status: 'idle' };
+  const tm = view.taskmasters?.find((t) => t.id === part.id);
+  const ticket = tm?.ticket ?? { id: part.id, kind: 'coordinator', project_id: view.projectId, status: 'idle', queued_ids: tm?.queued_ids, held_ids: tm?.held_ids };
   return {
     ticket,
     part,
@@ -638,13 +639,19 @@ function drawEvent(event, scroll) {
         let prev = log.lastElementChild;
         while (prev && pending.has(prev)) prev = prev.previousElementSibling;
         bubble.dataset.tracking = data.author;
-        if (prev?.matches('.mcopies.tracked') && prev.dataset.author === data.author) addTracked(prev, bubble);
+        // A note inside a group row is stamped itself (a jump link finds it) and dates the group: the whole row reads as new (T5).
+        const join = (group) => {
+          bubble.dataset.eid = event.id;
+          group.dataset.at = event.created_at;
+          return addTracked(group, bubble);
+        };
+        if (prev?.matches('.mcopies.tracked') && prev.dataset.author === data.author) join(prev);
         else if (prev?.dataset.tracking === data.author) {
           // The second note: the lone one above joins a new group row.
           const group = newTracked(data.author);
           prev.replaceWith(group);
           group.dataset.at = prev.dataset.at;
-          addTracked(addTracked(group, prev), bubble);
+          join(addTracked(group, prev));
         } else nodes.push(bubble);
       } else nodes.push(bubble);
     }
@@ -719,7 +726,7 @@ function drawEvent(event, scroll) {
     const pending = new Set(view.pendingMessages.map((m) => m.el));
     let prev = log.lastElementChild;
     while (prev && pending.has(prev)) prev = prev.previousElementSibling;
-    if (prev?.matches('.mcopies')) addMinionCopy(prev, data, event);
+    if (prev?.matches('.mcopies:not(.tracked)')) addMinionCopy(prev, data, event);
     else nodes.push(addMinionCopy(newMinionCopies(), data, event));
   } else if (event.kind === 'side' || event.kind === 'side_answer') {
     // A side question and its answers share one row (#932, sidethread.js).
@@ -818,6 +825,7 @@ function drawEvent(event, scroll) {
     for (const n of nodes) {
       n.classList.toggle('ovl', !!view.part.overlord);
       n.dataset.session = view.part.label;
+      n.dataset.tm = view.ticket?.id; // whose queue marks it (thread-head.js)
       if (n.matches('.msg.user')) n.querySelector('.who')?.append(h('span', { class: 'msg-tag' }, `to ${view.part.label}`));
     }
   // A for-everyone card a person's Taskmaster asked through the Overlord (#921) says whose it was.
@@ -846,7 +854,7 @@ function drawEvent(event, scroll) {
   if (event.kind === 'claude' && data.type === 'result') flushFolds();
   mergePushNotes(log);
   renderTyping();
-  if (scroll && event.kind === 'user_message') releaseReply();
+  if (scroll && event.kind === 'user_message' && data.author === me) releaseReply(); // only your own message ends the hold (T9)
   if (scroll && spoke && (followChat || replyHold)) holdReply(spoke);
   if (scroll) afterLiveDraw();
 }
@@ -1006,13 +1014,17 @@ function settleText(t, fate) {
     view.narrationEl = null;
     return;
   }
+  // A reply the link check replaced while it waited in the folds is gone: nothing to collapse (T6).
+  if (!t.el.isConnected) return;
+  // A strike redrew the body in place while the turn ran; fold the one on screen, not the one first drawn.
+  const body = t.el.querySelector('[data-body]') ?? t.body;
   if (!view.narrationEl?.isConnected) {
     view.narrationEl = h('details', { class: 'msg coord narration', 'data-at': t.el.dataset.at }, h('summary', {}), h('div', { class: 'notes' }));
     t.el.before(view.narrationEl);
   }
   t.el.remove();
   // Its event id goes with it, so a jump link (?e=) still finds the line inside the row.
-  view.narrationEl.querySelector('.notes').append(h('div', { class: 'note-text', 'data-eid': t.el.dataset.eid }, t.body));
+  view.narrationEl.querySelector('.notes').append(h('div', { class: 'note-text', 'data-eid': t.el.dataset.eid }, body));
   narrationSummary(view.narrationEl);
 }
 

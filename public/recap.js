@@ -57,7 +57,8 @@ export async function showRecap() {
   log.append(card);
   // Its top just under the pinned thread bar, which is stuck there since the chat opened at its end.
   card.style.scrollMarginTop = `${(document.getElementById('ticket-head')?.getBoundingClientRect().bottom ?? 0) + 8}px`;
-  card.scrollIntoView({ block: 'start' });
+  // Someone already scrolling reads on where they are; the card is below (T3).
+  if (!view.scrolledByYou) card.scrollIntoView({ block: 'start' });
 }
 
 /** A chat event: your own message means you're back, so the recap goes. */

@@ -103,10 +103,19 @@ export function renderTicketHead() {
   chat?.classList.toggle('role-taskmaster', coord);
   chat?.classList.toggle('role-minion', !coord);
   const bubbles = [...(chat?.querySelectorAll('.log [data-event]') ?? [])];
-  const lastHeld = bubbles.findLast((b) => b.heldData && t.held_ids?.includes(Number(b.dataset.event)));
+  // Another Taskmaster session's messages (Mine, Everyone) are marked with that session's queue, not this one's (#1853).
+  const ownerOf = (b) => {
+    const id = Number(b.dataset.tm);
+    if (!id || id === t.id) return t;
+    const tm = view.taskmasters?.find((x) => x.id === id);
+    return view.merged?.states.get(id)?.ticket ?? tm?.ticket ?? tm ?? t;
+  };
+  const lastHeldOf = new Map();
+  for (const b of bubbles) if (b.heldData && ownerOf(b).held_ids?.includes(Number(b.dataset.event))) lastHeldOf.set(ownerOf(b).id, b);
   for (const bubble of bubbles) {
-    markQueued(bubble, t);
-    if (bubble.heldData) markHeld(bubble, t, bubble === lastHeld);
+    const owner = ownerOf(bubble);
+    markQueued(bubble, owner);
+    if (bubble.heldData) markHeld(bubble, owner, bubble === lastHeldOf.get(owner.id));
   }
   const box = chat?.querySelector('.composer textarea');
   if (box) box.placeholder = composerPlaceholder(t);

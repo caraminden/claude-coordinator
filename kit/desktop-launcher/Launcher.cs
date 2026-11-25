@@ -24,6 +24,7 @@ using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace Citadel.Desktop
@@ -61,7 +62,7 @@ namespace Citadel.Desktop
     public static class Program
     {
         /// <summary>This launcher's version: the feed offers a newer one by a higher number. Raise it with every change.</summary>
-        public const int Version = 3;
+        public const int Version = 4;
 
         [STAThread]
         public static int Main(string[] args)
@@ -105,6 +106,8 @@ namespace Citadel.Desktop
     public class Launcher
     {
         public static readonly TimeSpan Grace = Trial.Grace;
+        /// <summary>How long a start with a build to try waits for the feed first (#1942): enough for a slow first connection, short enough that an offline PC's app still opens.</summary>
+        static readonly TimeSpan FeedWait = TimeSpan.FromSeconds(5);
         const long MaxDownload = 4L * 1024 * 1024 * 1024;
 
         readonly string dir;
@@ -148,8 +151,10 @@ namespace Citadel.Desktop
                         CheckForUpdates(state, false);
                         if (state.Pending == null) throw new Exception("Couldn't download " + Title + " from " + config.Feed + ": see launcher.log.");
                     }
-                    bool tryNow = Trial.TryNow(state, () => ACopyRuns(state));
-                    if (state.Pending != null && !tryNow)
+                    // Only a start with a build to try waits for the feed. The running copy is asked again after the wait.
+                    bool withdrawn = Trial.TryNow(state, () => ACopyRuns(state)) && DropWithdrawn(state, FeedBeforeTrial());
+                    bool tryNow = !withdrawn && Trial.TryNow(state, () => ACopyRuns(state));
+                    if (state.Pending != null && !withdrawn && !tryNow)
                         Log("build " + state.Pending.Id + " waits: a copy of " + Title + " is already running, and a new start would hand off to it, proving nothing about the new build");
                     var started = tryNow ? TryPending(state) : StartCurrent(state);
                     EndLauncherTrial();
@@ -379,8 +384,8 @@ namespace Citadel.Desktop
 
         // ---- Updates ----
 
-        /// <summary>Read the feed and download what is newer: the app's build (tried on the next start) and the launcher.</summary>
-        void CheckForUpdates(State state, bool launcherToo)
+        /// <summary>The app's feed, or null (with a line in the log) when it can't be read or is another app's.</summary>
+        Feed ReadFeed()
         {
             Feed f;
             try
@@ -390,30 +395,58 @@ namespace Citadel.Desktop
             catch (Exception e)
             {
                 Log("couldn't read the feed: " + e.Message);
-                return;
+                return null;
             }
-            if (f == null || f.App != config.App) { Log("the feed is for " + (f == null ? "nothing" : f.App) + ", not " + config.App + ": ignored"); return; }
+            if (f == null || f.App != config.App) { Log("the feed is for " + (f == null ? "nothing" : f.App) + ", not " + config.App + ": ignored"); return null; }
+            return f;
+        }
+
+        /// <summary>
+        /// The feed, if it answers within FeedWait; else null, and the waiting build is tried as if there were no feed. Waited
+        /// for on a thread of its own: a request's own timeout leaves out looking up the name and finding a proxy.
+        /// </summary>
+        Feed FeedBeforeTrial()
+        {
+            var read = Task.Run(() => ReadFeed());
+            if (read.Wait(FeedWait)) return read.Result;
+            Log("the feed didn't answer within " + FeedWait.TotalSeconds + " s: carrying on without it");
+            return null;
+        }
+
+        /// <summary>Drop the waiting build if the feed took it back (Trial.Withdrawn). True when it did. Its folder goes with the next Cleanup.</summary>
+        bool DropWithdrawn(State state, Feed f)
+        {
+            if (f == null) return false;
+            lock (state)
+            {
+                if (!Trial.Withdrawn(state, f.Build)) return false;
+                var b = state.Pending;
+                state.Pending = null;
+                // Unsaved, state.json still names it: kept here too, so Cleanup leaves its folder and the next start drops it.
+                if (!TrySave(state)) state.Pending = b;
+                Log("build " + b.Id + " is not tried: the feed now names build " + f.Build);
+                return true;
+            }
+        }
+
+        /// <summary>Read the feed and download what is newer: the app's build (tried on the next start) and the launcher.</summary>
+        void CheckForUpdates(State state, bool launcherToo)
+        {
+            var f = ReadFeed();
+            if (f == null) return;
             if (Trial.WantsBuild(state, f.Build))
             {
                 try
                 {
-                    var staged = Stage(f);
-                    Build old;
-                    // The probation watch may have changed the state meanwhile (it runs beside this).
-                    lock (state)
-                    {
-                        old = state.Pending;
-                        state.Pending = staged;
-                        Save(state);
-                    }
-                    if (old != null && old.Id != staged.Id) TryDeleteDir(P("versions", old.Id.ToString()));
-                    Log("build " + f.Build + " is ready: it is tried on the next start");
+                    Stage(f, state);
                 }
                 catch (Exception e)
                 {
                     Log("couldn't download build " + f.Build + ": " + e.Message);
                 }
             }
+            // After the download: a crash on probation beside it puts the bad build back in line, and a failed one leaves it there.
+            DropWithdrawn(state, f);
             if (launcherToo && f.Launcher != null && f.Launcher.Version > Program.Version && !BadLaunchers().Contains(f.Launcher.Version))
             {
                 try
@@ -427,8 +460,8 @@ namespace Citadel.Desktop
             }
         }
 
-        /// <summary>Download a build, check its size and SHA-256 against the feed, and unpack it into versions\&lt;build&gt;.</summary>
-        Build Stage(Feed f)
+        /// <summary>Download a build, check its size and SHA-256 against the feed, unpack it into versions\&lt;build&gt; and make it the one to try.</summary>
+        void Stage(Feed f, State state)
         {
             // A path inside the build, as the server takes it ("App.exe", "bin/App.exe"): no root, drive or "..".
             if (string.IsNullOrEmpty(f.Exe) || f.Exe.IndexOfAny(new[] { '\\', ':' }) >= 0 || f.Exe.StartsWith("/")
@@ -444,15 +477,25 @@ namespace Citadel.Desktop
                 TryDeleteDir(part);
                 Unzip(zip, part);
                 if (!File.Exists(Path.Combine(part, f.Exe))) throw new Exception("the build has no " + f.Exe);
-                TryDeleteDir(final);
-                Directory.Move(part, final);
+                var staged = new Build { Id = f.Build, Exe = f.Exe, Started = f.Started == "alive" ? "alive" : "file" };
+                // The probation watch may have changed the state meanwhile (it runs beside this). After a crash back to this very
+                // build its folder is in use: replacing it would break the app that runs.
+                lock (state)
+                {
+                    if (!Trial.WantsBuild(state, f.Build)) { Log("build " + f.Build + " was downloaded, but it isn't wanted any more"); return; }
+                    TryDeleteDir(final);
+                    Directory.Move(part, final);
+                    // The one it replaces may be the build to go back to: its folder goes with the next Cleanup, if nothing needs it.
+                    state.Pending = staged;
+                    Save(state);
+                }
+                Log("build " + f.Build + " is ready: it is tried on the next start");
             }
             finally
             {
                 TryDelete(zip);
                 TryDeleteDir(part);
             }
-            return new Build { Id = f.Build, Exe = f.Exe, Started = f.Started == "alive" ? "alive" : "file" };
         }
 
         void UpdateLauncher(LauncherInfo info)

@@ -168,8 +168,10 @@ export class RunnerTokens {
     const { slug, owner, ownerToken, hint } = this.repoOf(project);
     const r = await this.github(ownerToken, 'GET', `/repos/${slug}/actions/runners?per_page=100`);
     if (r.status !== 200) throw new HttpError(502, await refused(r, owner.name, slug, hint));
-    const body = (await r.json().catch(() => ({}))) as { runners?: (GhRunner | null)[] };
-    return (Array.isArray(body.runners) ? body.runners : []).flatMap((x) => (x && Number.isSafeInteger(x.id) ? [{ id: Number(x.id), name: String(x.name), status: String(x.status), busy: x.busy === true, labels: (Array.isArray(x.labels) ? x.labels : []).map((l: { name?: unknown } | null) => String(l?.name)) }] : []));
+    const body = (await r.json().catch(() => null)) as { runners?: (GhRunner | null)[] } | null;
+    // Not an empty list: an add would take every runner it sees later for a new one.
+    if (!Array.isArray(body?.runners)) throw new HttpError(502, `GitHub sent a list of ${slug}'s runners Citadel can't read`);
+    return body.runners.flatMap((x) => (x && Number.isSafeInteger(x.id) ? [{ id: Number(x.id), name: String(x.name), status: String(x.status), busy: x.busy === true, labels: (Array.isArray(x.labels) ? x.labels : []).map((l: { name?: unknown } | null) => String(l?.name)) }] : []));
   }
 
   /** The scheme's repo, owner, owner's GitHub token and runner label; throws an HttpError saying what's missing. */
@@ -474,8 +476,8 @@ export class RunnerJobs {
         // The scripts say "Registering <name> on <repo>" for each; GitHub may list one a moment later.
         const due = [...(answer?.output ?? '').matchAll(/^Registering (\S+) on /gm)].map((m) => m[1]);
         if (answer && !due.length && !fresh.length) return { ok: false, none: true, text: `No new runner, so none got the role ${role}; runners already there keep their labels.` };
-        // A failed add isn't waited for: what it did register has its role.
-        if (answer && (!answer.ok || (due.every((n) => fresh.some((x) => x.name === n)) && fresh.every((x) => x.status === 'online')))) return { ok: true, text: last };
+        // A failed add waits for what it did register to get its role, not to come online.
+        if (answer && due.every((n) => fresh.some((x) => x.name === n)) && (!answer.ok || fresh.every((x) => x.status === 'online'))) return { ok: true, text: last };
         if (!last) last = 'none listed yet';
       } catch (err) {
         const left = fresh.find((x) => !given.has(x.id));

@@ -33,12 +33,13 @@ function stream() {
 function fakeGithub() {
   const calls: string[] = [];
   const runners: { id?: number; name: string; status: string; busy: boolean; labels: { name: string }[] }[] = [];
-  /** Set to make GitHub refuse to change labels. */
-  const refuse = { labels: false };
+  /** Set to make GitHub refuse to change labels, or send a list that is no list. */
+  const refuse = { labels: false, unreadable: false };
   const fetch = (async (url: string, init?: RequestInit) => {
     const path = url.replace('https://api.github.com', '');
     calls.push(`${init?.method ?? 'GET'} ${path}`);
     if (String((init?.headers as any)?.Authorization) !== 'Bearer gho_cara') return Response.json({ message: 'Bad credentials' }, { status: 401 });
+    if (refuse.unreadable && path.includes('/runners?')) return new Response('<html>');
     if (path.startsWith('/repos/caraminden/peek-auras/actions/runners?')) return Response.json({ total_count: runners.length, runners: runners.map((r, i) => Object.assign(r, { id: r.id ?? i + 1 })) });
     const put = init?.method === 'PUT' && /^\/repos\/caraminden\/peek-auras\/actions\/runners\/(\d+)\/labels$/.exec(path);
     if (put && refuse.labels) return Response.json({ message: 'no labels today' }, { status: 500 });
@@ -459,5 +460,24 @@ test('an add asks GitHub what is there first: when it cannot, nothing reaches th
   const fetchBroken = new RunnerTokens(w.store, w.link, true, (async () => Response.json({ message: 'down' }, { status: 503 })) as typeof globalThis.fetch);
   const jobs = new RunnerJobs(w.store, fetchBroken, w.relay, 100, 10);
   await assert.rejects(jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1, os: 'windows', role: 'side' }), { status: 502, message: /down/ });
+  assert.equal(w.agent.sent.filter((m) => m.runners).length, 0);
+});
+
+test("a failed add waits for the runner it registered when GitHub lists it late, and doesn't wait for it to come online", async () => {
+  const w = world();
+  await w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 2, os: 'windows', role: 'side' });
+  w.answer(false, "Registering DESKTOP-G248IJ8 on caraminden/peek-auras with label peek-auras-ci\n1 runner(s) weren't added");
+  await tick();
+  await tick();
+  w.gh.runners.push({ ...gh('DESKTOP-G248IJ8', 'peek-auras-ci'), status: 'offline' });
+  assert.equal((await w.jobs.wait(w.scheme.id, 5000))!.ok, false);
+  assert.deepEqual(labelsOf(w, 'DESKTOP-G248IJ8'), ['peek-auras-ci', 'peek-auras-ci-side']);
+});
+
+test("an add whose list of the runners already there can't be read stops before the PC, so none of them is taken for new", async () => {
+  const w = world();
+  w.gh.runners.push(gh('DESKTOP-G248IJ8', 'peek-auras-ci', 'by-hand'));
+  w.gh.refuse.unreadable = true;
+  await assert.rejects(w.jobs.start(w.scheme, w.cara.id, { op: 'add', count: 1, os: 'windows', role: 'side' }), { status: 502, message: /can't read/ });
   assert.equal(w.agent.sent.filter((m) => m.runners).length, 0);
 });

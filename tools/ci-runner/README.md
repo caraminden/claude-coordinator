@@ -121,7 +121,10 @@ role's labels on the runners the add makes, through GitHub's API with the scheme
 - **Only new runners.** One already on GitHub keeps its labels, whoever gave them; an add that makes no new runner says so, and
   fails if a role was asked for. To change one, `ci_runners remove` and add again, or by hand as the repo's admin:
   `gh api -X PUT repos/<owner>/<repo>/actions/runners/<id>/labels -f 'labels[]=…'` (it replaces the custom labels).
-- **Limits.** A `side` or `long` runner carries `L`, since side jobs ask for both, so a ship's job can still start on one: for
+- **Every add asks GitHub first** for the runners already there, so one is refused while GitHub can't answer, or while the
+  scheme's owner has no GitHub login.
+- **Limits.** The hold on side work while a ship runs (`src/ci-hold.ts`, #1902) is by repo, not by PC: a second PC's side runner
+  waits too. A `side` or `long` runner carries `L`, since side jobs ask for both, so a ship's job can still start on one: for
   Citadel, keep land runners on one PC, and expect a ship on a second PC's side runner when the first PC's are busy or off.
   For a few seconds after it registers, a new runner has its script's labels. If Citadel restarts during an add, the
   runners keep those; look on GitHub, and use the line above.

@@ -158,7 +158,7 @@ test("each PC gets its own ships only (#1934): by the runners its agents list, e
   assert.deepEqual(on('DESK-linux'), ['desk']);
   assert.deepEqual(on('Odd Name'), ['desk'], 'a hand-named runner is known from its agent');
   assert.deepEqual(on('desk-2-linux'), ['laptop'], "the agents' own list beats the name");
-  assert.deepEqual(on('desk-2-linux', 'c/d'), ['desk-2'], 'no list yet: the longest hostname the name starts with');
+  assert.deepEqual(on('desk-2-linux', 'c/d'), [], 'no list yet, and two hostnames fit: nobody is slowed on a guess');
   assert.deepEqual(on('DESK', 'c/d'), ['desk']);
   assert.deepEqual(on('deskside', 'c/d'), []);
   assert.deepEqual(shipsOn('DESK', [{ repo: 'a/b', runner: 'DESK-linux' }], pcs), [{ repo: 'a/b', runner: 'DESK-linux' }], "an agent's hostname in any case");

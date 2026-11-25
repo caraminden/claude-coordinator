@@ -32,8 +32,9 @@ export type Pcs = Map<string, Set<string>>;
 function pcOf(ship: Ship, pcs: Pcs): string | undefined {
   const name = ship.runner.toLowerCase();
   for (const [host, runners] of pcs) if (runners.has(`${ship.repo.toLowerCase()}/${name}`)) return host;
-  // No sample lists it (a server just started, a runner just added): a runner's name starts with its PC's hostname.
-  return [...pcs.keys()].filter((h) => name === h || name.startsWith(`${h}-`)).sort((a, b) => b.length - a.length)[0];
+  // No sample lists it (a server just started, a runner just added): a runner's name starts with its PC's hostname, unless two do (DESK-2 is DESK's second runner, or a PC).
+  const hosts = [...pcs.keys()].filter((h) => name === h || name.startsWith(`${h}-`));
+  return hosts.length === 1 ? hosts[0] : undefined;
 }
 
 /** The ships the PC `host` squeezes for: those on its own runners, or only Citadel's own while one of them is. */

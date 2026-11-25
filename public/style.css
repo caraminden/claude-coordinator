@@ -14,11 +14,6 @@
   --done: #15803d;
   --held: #7c3aed;
   --waiting-tint: #f5b40b; /* --waiting reads brown as a tint on white */
-  /* The time log's ribbon, and any view of where a minion's time went (#1991): working, waiting, lost, and nobody's time. */
-  --tl-work: var(--running);
-  --tl-wait: color-mix(in srgb, var(--waiting) 45%, var(--waiting-tint));
-  --tl-lost: var(--error);
-  --tl-gone: var(--closed);
   --on-accent: #fff; /* text and icons on --accent */
   /* Colour roles for apps (#683, Cara 2026-11-14 picked "Moderate"): a second accent for highlights and six
      category hues for kinds of things (tags, covers, avatars, section icons). Citadel's own screens don't use

@@ -1,4 +1,12 @@
 /* What a minion's progress line opens to (#1991): the ribbon of its time over its steps. */
+/* For any view of where a minion's time went: working, waiting, lost, and nobody's time. Here, not in style.css, whose
+   every variable apps are served (theme.ts). */
+:root {
+  --tl-work: var(--running);
+  --tl-wait: color-mix(in srgb, var(--waiting) 45%, var(--waiting-tint));
+  --tl-lost: var(--error);
+  --tl-gone: var(--closed);
+}
 .progress-detail.timed { padding: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .progress-detail.timed > .wait-line, .progress-detail.timed > .request { margin: 0.6rem 0.75rem 0; }
 .time-log { padding: 0 0.75rem 0.75rem; }

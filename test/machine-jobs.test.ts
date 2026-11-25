@@ -724,9 +724,45 @@ test('a failed pause on the machine shows as running with why; a job silent in "
   jobs.pause(a.id, who);
   jobs.report(m(), { id: a.id, state: 'running', run_s: 5, pause_failed: 'podman pause failed: state improper' });
   assert.equal(store.getMachineJob(a.id)!.state, 'running');
-  assert.match(store.getMachineJob(a.id)!.error ?? '', /Pause didn't take.*state improper/);
+  const failedPause = () => jobs.view(store.getMachineJob(a.id)!).pause_failed;
+  assert.match(failedPause() ?? '', /state improper/);
+  assert.equal(store.getMachineJob(a.id)!.error, null, 'error means a stop was asked');
+  jobs.report(m(), { id: a.id, state: 'running', run_s: 6 });
+  assert.match(failedPause() ?? '', /state improper/, 'the next report keeps it');
+  sent.length = 0;
+  jobs.reconcile(m(), [{ id: a.id, state: 'running' }], t);
+  assert.deepEqual(
+    sent.filter((s) => s.type === 'job.stop'),
+    [],
+    'a reconnect after a failed pause leaves the job running (2MA1)',
+  );
+  jobs.pause(a.id, who);
+  jobs.report(m(), { id: a.id, state: 'paused', run_s: 7 });
+  assert.equal(failedPause(), null, 'a pause that took clears it');
+  jobs.resume(a.id, who);
+  jobs.report(m(), { id: a.id, state: 'running', run_s: 8, pause_failed: 'podman pause failed: again' });
   jobs.report(m(), { id: a.id, state: 'done', run_s: 9 });
-  assert.equal(store.getMachineJob(a.id)!.error, null, 'a finished job keeps no stale pause error');
+  assert.equal(failedPause(), null, 'a finished job keeps no stale pause failure');
+
+  const over = queue();
+  jobs.decide(over.id, 'now', who);
+  jobs.report(m(), { id: over.id, state: 'running', run_s: 0 });
+  jobs.pause(over.id, who);
+  jobs.report(m(), { id: over.id, state: 'running', run_s: 5, pause_failed: 'podman pause failed' });
+  sent.length = 0;
+  jobs.report(m(), { id: over.id, state: 'running', run_s: 100_000 });
+  assert.ok(
+    sent.some((s) => s.type === 'job.stop' && s.id === over.id),
+    'the limit still stops a job whose pause failed (2MA1)',
+  );
+  sent.length = 0;
+  jobs.reconcile(m(), [{ id: over.id, state: 'running' }], t);
+  assert.ok(
+    sent.some((s) => s.type === 'job.stop' && s.id === over.id),
+    'a lost stop is sent again',
+  );
+  jobs.report(m(), { id: over.id, state: 'stopped', run_s: 100_001 });
+  assert.match(store.getMachineJob(over.id)!.error ?? '', /limit/, 'it ends with the reason it was stopped');
 
   const b = queue();
   jobs.decide(b.id, 'now', who);

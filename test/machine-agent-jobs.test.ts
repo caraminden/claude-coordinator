@@ -797,6 +797,7 @@ test('a failed podman pause is reported to the app, not only logged (MA2)', asyn
   const said = lastState(msg.id) as any;
   assert.equal(said.state, 'running');
   assert.match(said.pause_failed ?? '', /podman pause failed/);
+  assert.equal(JSON.parse(readFileSync(join(r.dir({ id: String(msg.id), home: jobsDir }), 'job.json'), 'utf8')).pause_failed ?? null, null, 'once heard, a restarted agent does not say it again (2MA1)');
   stickContainer(msg.id, false);
   await r.handle({ type: 'job.stop', id: msg.id });
   await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);

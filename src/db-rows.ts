@@ -184,6 +184,8 @@ export interface MachineJob {
   outputs: string;
   upload_bytes: number;
   swept_at: number | null;
+  /** Why its last pause didn't take, while it runs on (2MA1); null once it paused or ended. Never `error`, which on an active job means a stop was asked. */
+  pause_failed: string | null;
 }
 
 /** One number a CI run sent (#1369, src/ci-numbers.ts). */

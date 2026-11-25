@@ -205,7 +205,8 @@ CREATE TABLE IF NOT EXISTS machine_jobs (
   error TEXT,
   outputs TEXT NOT NULL DEFAULT '[]',
   upload_bytes INTEGER NOT NULL DEFAULT 0,
-  swept_at INTEGER
+  swept_at INTEGER,
+  pause_failed TEXT
 );
 CREATE INDEX IF NOT EXISTS machine_jobs_machine ON machine_jobs(machine_id, state);
 CREATE INDEX IF NOT EXISTS machine_jobs_ticket ON machine_jobs(ticket_id);

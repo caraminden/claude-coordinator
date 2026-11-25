@@ -142,6 +142,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['machines', 'jobs', 'ALTER TABLE machines ADD COLUMN jobs TEXT'],
   // Its owner's job hours, one-off window and Pause (#857, src/machine-jobs.ts JobSettings); null: the defaults.
   ['machines', 'job_settings', 'ALTER TABLE machines ADD COLUMN job_settings TEXT'],
+  // Why a running job's last pause didn't take (#1956, 2MA1).
+  ['machine_jobs', 'pause_failed', 'ALTER TABLE machine_jobs ADD COLUMN pause_failed TEXT'],
   // Its token sealed under SESSION_SECRET (#1355), so its owner can show it again; null for one linked before, until a relink.
   ['machines', 'token_sealed', 'ALTER TABLE machines ADD COLUMN token_sealed TEXT'],
   ['projects', 'instructions', "ALTER TABLE projects ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"],
@@ -328,6 +330,7 @@ export const SCHEMA_HISTORY = [
   [113, 'slow_moments (#1752)'],
   [114, 'host_samples open_fds, supervisors, tmp_used, app_mem (#1762)'],
   [115, "schedules.trigger_kind, trigger_count, trigger_gap_hours; standard audits' rows take their template's trigger (#1798)"],
+  [116, 'machine_jobs.pause_failed (#1956)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

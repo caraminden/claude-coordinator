@@ -201,6 +201,7 @@ function body(v) {
     // A Stop the agent hasn't acted on yet: the server keeps the state until the agent reports it ended.
     if (v.error) out.push(h('p', { class: 'jc-why' }, `Stopping, waiting for the machine (${v.error})`));
     else if (v.state === 'uploading') out.push(h('p', { class: 'jc-why' }, 'Sending its results back'));
+    else if (v.state === 'running' && v.pause_failed) out.push(h('p', { class: 'jc-why' }, `Pause didn't take, still running: ${v.pause_failed}`));
     if (v.state === 'paused') out.push(...pausedParts(v));
   } else {
     const run = v.run_s;

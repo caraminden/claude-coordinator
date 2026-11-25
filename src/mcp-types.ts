@@ -119,6 +119,7 @@ export interface QueuedJob {
   waits?: string;
   paused_by?: string;
   error?: string;
+  pause_failed?: string | null;
   run_s: number;
   limit_s: number;
   gpu_busy_s: number;

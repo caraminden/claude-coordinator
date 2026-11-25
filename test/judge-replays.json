@@ -8,6 +8,15 @@
     "real": 0,
     "summary": "0 as before, 112 new, 0 gone"
   },
+  "app-shots": {
+    "hash": "06b527913fbf81dd",
+    "at": "2026-11-25",
+    "days": 5,
+    "inputs": "182 shots of 2 nights",
+    "hits": 0,
+    "real": 0,
+    "summary": "0 as before, 0 new, 0 gone"
+  },
   "ci-red": {
     "hash": "c49c1598cb3647d2",
     "at": "2026-11-23",

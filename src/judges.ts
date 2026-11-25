@@ -273,6 +273,19 @@ export const JUDGES: Judge[] = [
     pins: [{ path: 'src/container-relief.ts', symbols: ['RELIEF', 'KEEP', 'step', 'processes', 'ContainerRelief.look', 'ContainerRelief.relieve'] }],
     callers: ['src/container-relief.ts'],
   },
+  {
+    id: 'app-shots',
+    name: 'Nightly contraption screenshots (#1783)',
+    mode: 'log-only', // Josh, 2026-11-25: "Watch only for a week"
+    replay: true,
+    acts: "wakes a contraption's home scheme's Taskmaster when a page of it newly broke overnight; a layout change after a ship is held mail (log-only still mails Citadel's own Taskmaster when the run itself failed)",
+    pins: [
+      { path: 'src/shot-judge.ts', symbols: ['BIG_CHANGE', 'ERROR_PAGE', 'sameError', 'problems'] },
+      { path: 'tools/app-shots/picture.ts', symbols: ['CELLS', 'CELL_DIFF', 'LEAST_CONTENT', 'flatShare', 'background', 'cells', 'differs', 'changed'] },
+      { path: 'src/app-shots.ts', symbols: ['AppShots.read'] },
+    ],
+    callers: ['src/app-shots.ts', 'tools/app-shots/app-shots.ts', 'tools/app-shots/inner.ts'],
+  },
 ];
 
 export const judge = (id: string): Judge | undefined => JUDGES.find((j) => j.id === id);

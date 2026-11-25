@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -148,6 +148,20 @@ test('two readings under the line do not start the minute over, so a flapping st
   assert.deepEqual(r.killed, [12]);
 });
 
+/** Ends the read waiting on this FIFO: opening it for writing without waiting fails until that read has opened it. */
+async function endRead(fifo: string) {
+  let fd = -1;
+  await until('the FIFO has a reader', () => {
+    try {
+      fd = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  closeSync(fd);
+}
+
 for (const [what, change] of [
   ['was reused', (f) => writeFileSync(join(f.proc, '12', 'stat'), `12 (x) S 1 ${'0 '.repeat(17)}501 0 0\n`)],
   ['left the container', (f) => f.procs([13])],
@@ -165,7 +179,7 @@ for (const [what, change] of [
     execFileSync('mkfifo', [cmdline]);
     const reading = r.run(5, 80);
     change(f);
-    closeSync(openSync(cmdline, 'r+'));
+    await endRead(cmdline);
     await reading;
     assert.deepEqual(r.killed, [13]);
   });

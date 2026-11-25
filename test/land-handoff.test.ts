@@ -700,7 +700,8 @@ test("landResult reads the real deploy.sh's lines: live, already live, and a res
         writeFileSync(join(bin, 'systemd-run'), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
         return bin;
       };
-      await as('queued', fake('idle-bin', 'exit 0'), [/^deploy: restart queued as /, /^deploy: not live yet after 1 s/], 'restart', { DEPLOY_HEALTHY_WAIT: '0', DEPLOY_SETTLE: '0', DEPLOY_TEST_LIVE_GRACE: '1' });
+      // The seconds are counted on a whole-second clock and the box may be slow, so any count is right (#1998): the words are what is read.
+      await as('queued', fake('idle-bin', 'exit 0'), [/^deploy: restart queued as /, /^deploy: not live yet after [1-9]\d* s; the restart reports here when it is/], 'restart', { DEPLOY_HEALTHY_WAIT: '0', DEPLOY_SETTLE: '0', DEPLOY_TEST_LIVE_GRACE: '1' });
       await as('joined', fake('joined-bin', 'echo "Failed to start transient service unit: Unit cc-restart-when-idle.service already exists." >&2; exit 1'), [/^deploy: a restart is already queued as/], 'restart');
       // #1417: a restart held for a starved box (its note in <state>/hold) says when it expects to go, in the words the
       // shipped line reads (src/land.ts's held).

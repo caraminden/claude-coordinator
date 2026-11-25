@@ -2779,7 +2779,7 @@ export class Runner {
     const shown = !this.noTurns && !args[2][0]?.keepalive && was !== undefined && was !== 'running';
     if (shown) this.setStatus(id, 'running');
     try {
-      return await this.launchTurn(...args);
+      return await track('turn launches', this.launchTurn(...args));
     } finally {
       this.launching.delete(id);
       if (!this.turns.has(id)) {

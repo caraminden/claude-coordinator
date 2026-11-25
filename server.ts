@@ -4,7 +4,7 @@ import { flagUnbacked, FLAG_KEY } from './src/backup-flag.ts';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { thrown } from './src/thrown.ts';
 import { createConnection, Server as NetServer, type AddressInfo } from 'node:net';
@@ -1426,6 +1426,7 @@ const testCopyReader = new TestCopyReader({
 // Roll back to last green (#1016, src/rollback.ts): each scheme's last green from CI health's reads, and the button on
 // a Releases card that can deploy a given commit: an app's two-slot deploy, or Citadel's own tools/deploy.sh --to.
 const lastGreen = new LastGreen(store);
+const ROLLBACK_DIR = join(DATA_DIR, 'run', 'rollback');
 const rollback = new Rollback({
   lastGreen,
   repoDir: (id) => store.getProject(id)?.repo_dir ?? null,
@@ -1441,7 +1442,8 @@ const rollback = new Rollback({
     apk: apkReader,
     services,
     jobs: new HostJobs(() => runner.units),
-    dir: join(DATA_DIR, 'run', 'rollback'),
+    dir: ROLLBACK_DIR,
+    clear: () => rmSync(ROLLBACK_DIR, { recursive: true, force: true }),
     copy: !!services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR,
     deployLive: config.deployLive,
     env: process.env,

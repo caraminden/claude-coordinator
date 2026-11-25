@@ -1,6 +1,5 @@
 // The ways back (Roll back to last green, src/rollback.ts): what each kind of release target does when its button is
 // pressed, whether that still runs, and which app an APK follows. server.ts hands in the readers and the job runner.
-import { rmSync } from 'node:fs';
 import { rollBackApk, type RollbackApk } from './apk-release.ts';
 import { ServiceError } from './app-services.ts';
 import type { ContraptionRow, Project } from './db.ts';
@@ -25,6 +24,8 @@ export interface RollbackStarterDeps {
   jobs: Pick<HostJobs, 'state' | 'start'>;
   /** Where Citadel's own roll back keeps its job. */
   dir: string;
+  /** Delete that folder, once its job has ended. */
+  clear: () => void;
   /** A copy of Citadel (a preview, a dev copy): another DATA_DIR, or one that doesn't deploy. */
   copy: boolean;
   /** This server was given a checkout to deploy (DEPLOY_LIVE), so even a copy may roll it back. */
@@ -54,7 +55,7 @@ export function rollbackStarters(d: RollbackStarterDeps): Required<Pick<Rollback
     const p = d.ownScheme();
     const pin = p && d.lastGreen.pinned(p.id, CITADEL_TARGET);
     if (p && pin && job.code !== 0 && current !== pin.sha) d.failed(p.id, CITADEL_TARGET, pin.sha, `tools/deploy.sh --to said: ${job.output.trim().split('\n').slice(-3).join(' ') || `exit ${job.code}`}`);
-    rmSync(d.dir, { recursive: true, force: true });
+    d.clear();
     return false;
   }
 

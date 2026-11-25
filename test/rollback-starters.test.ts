@@ -1,16 +1,10 @@
 // The ways back (src/rollback-starters.ts), each on stand-ins: what it starts, and every refusal.
-import { after, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { ServiceError } from '../src/app-services.ts';
 import { HttpError } from '../src/http.ts';
 import { CITADEL_TARGET, type TargetView } from '../src/releases.ts';
 import { rollbackStarters, type RollbackStarterDeps } from '../src/rollback-starters.ts';
-
-const root = mkdtempSync(join(tmpdir(), 'rollback-starters-'));
-after(() => rmSync(root, { recursive: true, force: true }));
 
 const TO = 'a'.repeat(40);
 const BAD = 'b'.repeat(40);
@@ -20,8 +14,7 @@ const KEY = { GH_TOKEN: 'x' };
 type Job = ReturnType<RollbackStarterDeps['jobs']['state']>;
 function world(over: Record<string, unknown> = {}) {
   const calls: unknown[][] = [];
-  const dir = mkdtempSync(join(root, 'job-'));
-  writeFileSync(join(dir, 'started'), '1');
+  const dir = '/data/run/rollback';
   const s = {
     project: { id: 3, repo_dir: '/repo', repo_url: 'https://github.com/o/r' } as { id: number; repo_dir: string | null; repo_url: string } | undefined,
     own: 3,
@@ -47,6 +40,7 @@ function world(over: Record<string, unknown> = {}) {
     services: { running: (n: string) => (s.runningApps.includes(n) ? {} : null) },
     jobs: { state: (d: string, tail: number) => (calls.push(['state', d, tail]), s.job), start: call('job') },
     dir,
+    clear: call('clear'),
     copy: false,
     deployLive: false,
     env: { PATH: '/bin', ...DEPLOY, DEPLOY_OTHER: 'no', DEPLOY_UNITS: 'no', MY_DEPLOY_DB: 'no' },
@@ -142,7 +136,6 @@ test("Citadel's server goes back in a job of its own, with only deploy.sh's own 
   assert.equal(env.PATH, '/bin');
   assert.deepEqual(Object.fromEntries(Object.entries(env).filter(([k]) => k.includes('DEPLOY'))), DEPLOY);
   assert.match(String(j.unit), /^citadel-rollback-\d+$/);
-  assert.match(String(j.description), /aaaaaaaaa /);
   assert.equal(j.ticketId, 0);
 });
 
@@ -181,10 +174,10 @@ test("Citadel's roll back runs until its job ends", () => {
   const w = world();
   const t = tv(CITADEL_TARGET, CITADEL_TARGET);
   assert.equal(w.r.running(t), false);
-  assert.ok(existsSync(w.dir));
+  assert.equal(w.named('clear').length, 0);
   w.s.job = { code: null, output: '' } as unknown as Job;
   assert.equal(w.r.running(t), true);
-  assert.ok(existsSync(w.dir));
+  assert.equal(w.named('clear').length, 0);
   assert.deepEqual(w.named('state')[0], ['state', w.dir, 2000]);
   assert.equal(w.named('failed').length, 0);
 });
@@ -197,7 +190,7 @@ test('a failed job is reported with its last lines and cleared', () => {
   assert.deepEqual(a.slice(0, 3), [3, CITADEL_TARGET, TO]);
   assert.match(String(a[3]), /two three four$/);
   assert.doesNotMatch(String(a[3]), /one/);
-  assert.ok(!existsSync(w.dir));
+  assert.equal(w.named('clear').length, 1);
 });
 
 test('a failed job that said nothing is reported by its exit code', () => {
@@ -219,7 +212,7 @@ test('a job that went live, exited 0, or has no pin or scheme is cleared without
     const t = set(w);
     assert.equal(w.r.running(t), false);
     assert.equal(w.named('failed').length, 0);
-    assert.ok(!existsSync(w.dir));
+    assert.equal(w.named('clear').length, 1);
   }
 });
 

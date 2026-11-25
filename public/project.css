@@ -647,13 +647,25 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .ds-hit { fill: transparent; }
 .ds-rest { fill: var(--line); }
 .ds-strip { cursor: pointer; outline: none; }
-.ds-strip:hover .ds-hit, .ds-strip.on .ds-hit { fill: color-mix(in srgb, var(--ink) 10%, transparent); }
+.ds-strip:hover .ds-hit, .ds-strip.on .ds-hit { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
+.ds-picked { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: var(--control-h); margin-top: var(--space-2); }
+.ds-picked[hidden] { display: none; }
+.ds-picked-name { min-width: 0; overflow-wrap: anywhere; }
 .ds-tip { display: grid; gap: 0.1rem; white-space: normal; }
-.ds-table-wrap { overflow-x: auto; }
+/* Shadows at an edge with more table past it, so a table wider than the panel says it scrolls. */
+.ds-table-wrap {
+  overflow-x: auto;
+  background:
+    linear-gradient(to right, var(--panel) 40%, transparent) left / 2rem 100% no-repeat local,
+    linear-gradient(to left, var(--panel) 40%, transparent) right / 2rem 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) left / 0.8rem 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) right / 0.8rem 100% no-repeat scroll;
+}
 .ds-table { width: 100%; border-collapse: collapse; font-size: var(--size-small); font-variant-numeric: tabular-nums; }
 .ds-table th, .ds-table td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 .ds-table th { color: var(--muted); font-weight: 600; }
-.ds-table td:first-child { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; }
+.ds-table caption { caption-side: bottom; padding-top: var(--space-1); text-align: left; }
+.ds-table td:first-child { min-width: 9rem; white-space: normal; overflow-wrap: anywhere; }
 .ds-note { margin: 0; font-size: var(--size-small); }
 .st-fit-head .st-sub { margin-top: var(--space-1); }
 .st-fit-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); margin-top: var(--space-2); }

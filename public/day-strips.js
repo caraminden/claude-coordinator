@@ -206,7 +206,7 @@ export function dayStripsPanel() {
       legend,
       sumBar(tot, all),
       look === 'table' ? table(rows) : chart(rows),
-      look === 'table' ? '' : h('p', { class: 'muted ds-note' }, 'Each strip starts at its minion’s start and ends when it went live, on a square-root scale so short ones stay readable. Hover or tap one for its times; click to open it.'),
+      look === 'table' ? '' : h('p', { class: 'muted ds-note' }, 'Each strip starts at its minion’s start and ends when it went live, on a square-root scale so short ones stay readable. Hover one for its times and click to open it; on a phone, tap one to name it.'),
       tot.none ? h('p', { class: 'muted ds-note' }, `Nothing recorded: ${WHY.none}`) : '',
     );
   };
@@ -239,7 +239,7 @@ export function dayStripsPanel() {
     for (const t of TICKS) {
       if (t > longest) break;
       const x = X(t);
-      if (x - lastX < (phone ? 44 : 52) || x > w - 24) continue;
+      if (x - lastX < (phone ? 44 : 64) || x > w - 24) continue;
       lastX = x;
       g.append(svg('line', { class: 'ds-grid', x1: x, x2: x, y1: top - 4, y2: H }), svg('text', { class: 'ds-tick', x, y: 11, 'text-anchor': 'middle' }, tickWord(t)));
     }
@@ -258,36 +258,50 @@ export function dayStripsPanel() {
     const open = (s) => {
       location.hash = `#/p/${scheme}/t/${s.number}`;
     };
-    // A mouse click opens the minion; a tap names it first (the tip), and a second tap on the same one opens it.
+    // A strip is a few px tall, too small to tap twice with confidence: a tap picks it and names it in a line under the chart, with a full-size button that opens it.
+    const pickLine = h('div', { class: 'ds-picked', 'aria-live': 'polite' });
+    const showPick = () => {
+      const s = rows.find((r) => r.id === picked);
+      pickLine.replaceChildren(
+        ...(s
+          ? [h('span', { class: 'ds-picked-name' }, h('b', {}, name(s)), h('span', { class: 'muted' }, ` ${clock(s.start, day)} to ${clock(s.live, day)}, ${dur(s.live - s.start)}`)), h('button', { type: 'button', class: 'secondary', onclick: () => open(s) }, s.number != null ? `Open #${s.number}` : 'Open')]
+          : [h('span', { class: 'muted' }, 'Tap a strip to name it here.')]),
+      );
+      pickLine.hidden = !s && !phone;
+    };
+    showPick();
+    // A mouse click opens the minion; a tap picks it (above).
     g.addEventListener('click', (e) => {
       const s = at(e);
       if (!s) return;
-      if (e.pointerType === 'touch' && picked !== s.id) {
-        picked = s.id;
-        for (const r of g.querySelectorAll('.ds-strip.on')) r.classList.remove('on');
-        e.target.closest('.ds-strip').classList.add('on');
-        return;
-      }
-      open(s);
+      if (e.pointerType !== 'touch') return open(s);
+      picked = s.id;
+      for (const r of g.querySelectorAll('.ds-strip.on')) r.classList.remove('on');
+      e.target.closest('.ds-strip').classList.add('on');
+      showPick();
     });
     g.addEventListener('keydown', (e) => {
       const s = e.key === 'Enter' && at(e);
       if (s) open(s);
     });
-    return h('div', { class: 'ds-strips' }, g);
+    return h('div', { class: 'ds-strips' }, g, pickLine);
   };
 
-  const table = (rows) =>
-    h(
+  /** The strips as rows: the length and the parts that have any time first, the clock times (one zone, in the caption) last. */
+  const table = (rows) => {
+    const cols = PARTS.filter(([k]) => rows.some((s) => s.totals[k] >= 1000));
+    return h(
       'div',
       { class: 'ds-table-wrap' },
       h(
         'table',
         { class: 'ds-table' },
-        h('thead', {}, h('tr', {}, h('th', {}, 'Minion'), h('th', {}, `Started (${pacificZone()})`), h('th', {}, `Live (${pacificZone()})`), h('th', {}, 'Start to live'), ...PARTS.map(([, words]) => h('th', {}, words)))),
-        h('tbody', {}, ...rows.map((s) => h('tr', {}, h('td', {}, h('a', { href: `#/p/${scheme}/t/${s.number}` }, name(s))), h('td', {}, clock(s.start, day)), h('td', {}, clock(s.live, day)), h('td', {}, dur(s.live - s.start)), ...PARTS.map(([k]) => h('td', {}, s.totals[k] >= 1000 ? dur(s.totals[k]) : '–'))))),
+        h('caption', { class: 'muted' }, `Times in ${pacificZone()}`),
+        h('thead', {}, h('tr', {}, h('th', {}, 'Minion'), h('th', {}, 'Start to live'), ...cols.map(([, words]) => h('th', {}, words)), h('th', {}, 'Started'), h('th', {}, 'Live'))),
+        h('tbody', {}, ...rows.map((s) => h('tr', {}, h('td', {}, h('a', { href: `#/p/${scheme}/t/${s.number}` }, name(s))), h('td', {}, dur(s.live - s.start)), ...cols.map(([k]) => h('td', {}, s.totals[k] >= 1000 ? dur(s.totals[k]) : '–')), h('td', {}, clock(s.start, day)), h('td', {}, clock(s.live, day))))),
       ),
     );
+  };
 
   /** Point it at scheme `to` (an id, or 'all'). The list redraws often, so the same scheme is read again only once its read is old. */
   el.show = (to) => {

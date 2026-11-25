@@ -166,7 +166,7 @@ describe('the smoke pass through the turn tools, the file viewer and the launch 
 
   // #120: /events started paging by default, and read_ticket, still reading the bare route, failed on every minion (#142).
   test('a read_ticket that fails on a long chat fails it', { timeout: 200_000 }, async () => {
-    const checkout = brokenCheckout('paged-read', 'src/mcp.ts', '`/api/tickets/${n}/events?after=0`', '`/api/tickets/${n}/events`');
+    const checkout = brokenCheckout('paged-read', 'src/mcp-minions.ts', '`/api/tickets/${n}/events?after=0`', '`/api/tickets/${n}/events`');
     const run = await bootCheck(checkout);
     assert.equal(run.ok, false);
     assert.match(run.out, /A Taskmaster turn started, but: MCP read_ticket failed/);

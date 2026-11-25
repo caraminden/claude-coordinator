@@ -5269,10 +5269,8 @@ export class Runner {
     });
   }
 
-  /**
-   * Read each scheme's newest cards' rows into the store's memory in small steps, yielding between them, so the first
-   * refsShared after a restart doesn't read 500 scattered rows in one go (Store.warmCardRows). Quits on its own errors.
-   */
+  /** Read each scheme's newest cards' rows into the store's memory in small steps, yielding between them, so the first
+   * refsShared after a restart doesn't read 500 scattered rows in one go (Store.warmCardRows). Quits on its own errors. */
   async warmCards(chunk = 25, pauseMs = 5) {
     try {
       for (const p of this.store.listProjects()) {

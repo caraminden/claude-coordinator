@@ -16,6 +16,10 @@ import { Store } from '../src/db.ts';
 import { READ_WAIT_MS } from '../src/db-writer.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { bootServer, SECRET, stopTurns, until } from './helpers.ts';
+import { json } from './typed.ts';
+
+/** The parts of the asks API's answers these tests read. */
+type AskBody = { error: string; scheme: string; member: boolean; proposal: boolean; files: string[]; sidecar: string };
 
 const root = mkdtempSync(join(tmpdir(), 'contraption-asks-'));
 const data = join(root, 'data');
@@ -87,7 +91,7 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const ask = async (body: object, headers: Record<string, string> = { Authorization: `Bearer ${KEY}` }) => {
     const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
-    return { status: res.status, body: await res.json() };
+    return { status: res.status, body: await json<AskBody>(res) };
   };
   const tm = () => store.getCoordinator(Peek.id);
   const said = () =>
@@ -100,13 +104,15 @@ test('POST /api/contraptions/asks: key, person, inbox, labels and the Caddy path
   const good = { person: Josh.id, kind: 'feature', text: 'Let me tag an aura with a colour', files: [{ name: '../../../escape/clip.peekclip', data: b64('CLIP') }] };
 
   // Wrong or missing key, or no Bearer.
-  for (const headers of [{}, { Authorization: 'Bearer ck_' + 'x'.repeat(43) }, { Authorization: KEY }]) {
+  const wrongKeys: Record<string, string>[] = [{}, { Authorization: 'Bearer ck_' + 'x'.repeat(43) }, { Authorization: KEY }];
+  for (const headers of wrongKeys) {
     const r = await ask(good, headers);
     assert.equal(r.status, 401, JSON.stringify(headers));
     assert.match(r.body.error, /Unknown contraption key/);
   }
   // Through Caddy, or with a browser's sign-in, it is refused even with the right key.
-  for (const extra of [{ 'X-Forwarded-For': '100.64.0.7' }, { Forwarded: 'for=100.64.0.7' }, { Cookie: srv.cookie }]) {
+  const webPaths: Record<string, string>[] = [{ 'X-Forwarded-For': '100.64.0.7' }, { Forwarded: 'for=100.64.0.7' }, { Cookie: srv.cookie }];
+  for (const extra of webPaths) {
     const r = await ask(good, { Authorization: `Bearer ${KEY}`, ...extra });
     assert.equal(r.status, 403, JSON.stringify(extra));
     assert.match(r.body.error, /not through the web/);
@@ -261,7 +267,7 @@ test('POST /api/contraptions/asks with minion (#416): straight to that minion, m
   after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   const ask = async (body: object) => {
     const res = await fetch(`${srv.base}/api/contraptions/asks`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tocKey}` }, body: JSON.stringify(body) });
-    return { status: res.status, body: await res.json() };
+    return { status: res.status, body: await json<AskBody>(res) };
   };
   const said = (id: number) =>
     store

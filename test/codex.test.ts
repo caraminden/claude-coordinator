@@ -10,8 +10,8 @@ import { Containers } from '../src/containers.ts';
 import { IMAGE_INSTRUCTIONS, images, notReady, outPath, overPace, REQUIREMENTS, review, usageLine } from '../src/codex-review.ts';
 import { startTime } from '../src/codex-lock.ts';
 import { jsonLines } from './helpers.ts';
-// @ts-expect-error: a plain .mjs, shipped into the image as is.
 import { patchPaths } from '../deploy/claude-container/codex/citadel-hook.mjs';
+import { fake } from './typed.ts';
 import { until } from './wait.ts';
 
 // Codex as a read-only second-opinion reviewer (#330): the managed tripwire hook baked into each
@@ -142,7 +142,7 @@ test("a contraption's Codex turn runs only the contraption's own tools: no shell
 test("an image run's hook lets image_gen through and nothing else, its reference images checked as reads (#738)", () => {
   const img = configFile({ script: tripwire, config, mode: 'image' });
   // Codex 0.166's real call, as the hook got it live in a container: the tool image_gen.imagegen, named with the dot dropped.
-  const gen = (ti: object, tool_name = 'image_genimagegen') => ({ hook_event_name: 'PreToolUse', tool_name, tool_input: ti, cwd: worktree });
+  const gen = (ti: object | string | null, tool_name = 'image_genimagegen') => ({ hook_event_name: 'PreToolUse', tool_name, tool_input: ti, cwd: worktree });
   for (const name of ['image_gen', 'image_gen.imagegen']) assert.equal(hook(gen({ prompt: 'a red dot' }, name), img).code, 0, name);
   for (const name of ['image_gen_x', 'mcp__image_gen__imagegen', 'imagegen']) assert.equal(hook(gen({ prompt: 'a red dot' }, name), img).code, 2, name);
   assert.equal(hook(gen({ prompt: 'a red dot' }), img).code, 0);
@@ -151,7 +151,7 @@ test("an image run's hook lets image_gen through and nothing else, its reference
   assert.equal(key.code, 2);
   assert.match(key.stderr, /SSH keys/);
   assert.equal(hook(gen({ prompt: 'x', referenced_image_paths: 'ref.png' }), img).code, 2, 'refs that are not a list');
-  for (const ti of ['{"prompt":"x","referenced_image_paths":["~/.ssh/id_rsa"]}', { arguments: '{"prompt":"x"}' }, [{ prompt: 'x' }], null]) assert.equal(hook(gen(ti as any), img).code, 2, `arguments shaped ${JSON.stringify(ti)}`);
+  for (const ti of ['{"prompt":"x","referenced_image_paths":["~/.ssh/id_rsa"]}', { arguments: '{"prompt":"x"}' }, [{ prompt: 'x' }], null]) assert.equal(hook(gen(ti), img).code, 2, `arguments shaped ${JSON.stringify(ti)}`);
   for (const call of [bash('git status'), patch('*** Add File: x\n+y'), { tool_name: 'mcp__thread__x', tool_input: {}, cwd: worktree }, { tool_name: 'view_image', tool_input: { path: 'a.png' }, cwd: worktree }]) {
     const r = hook(call, configFile({ script: tripwire, config, mode: 'image', mcp: ['thread'] }));
     assert.equal(r.code, 2, `${call.tool_name} is blocked`);
@@ -507,11 +507,11 @@ const wait = setInterval(() => {
   process.env.PATH = `${bin}:${savedPath}`;
   try {
     let linked = true;
-    const claude = { volumeHome: () => (linked ? home : null), serverLogin: () => false, name: () => 'citadel-claude-2', ensure: async () => {} } as unknown as ClaudeLink;
+    const claude = fake<ClaudeLink>({ volumeHome: () => (linked ? home : null), serverLogin: () => false, name: () => 'citadel-claude-2', ensure: async () => {} });
     // The first start waits (a container rebuilding); later ones are instant.
     let started_ = () => {};
     const slow = new Promise<void>((r) => (started_ = r));
-    (claude as any).ensure = () => slow;
+    Object.assign(claude, { ensure: () => slow });
     const codex = new CodexLink(claude, new Containers());
     assert.deepEqual(codex.status(2), { state: 'not linked' });
     // From the click on, while the container is still starting, Settings shows it and keeps polling.

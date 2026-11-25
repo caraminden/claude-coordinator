@@ -59,6 +59,6 @@ test('a turn that died while the server was down keeps the text it wrote meanwhi
   await d.boot();
   // Recovery's note on the cut-off turn (resumed, or why not) comes after anything it read from the stream.
   await until('the boot took the turn up', () => d.notes(id).some((n) => /restart/.test(n)));
-  const said = d.stream(id, 'assistant').flatMap((m) => m.message.content.map((c: any) => c.text));
+  const said = d.stream(id, 'assistant').flatMap((m) => m.message!.content.map((c) => c.text));
   assert.ok(said.includes(words), `C8: the turn's last text was dropped; its chat ends: ${JSON.stringify(d.notes(id).at(-1))}`);
 });

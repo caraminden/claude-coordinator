@@ -55,7 +55,7 @@ test('an upload is a few named numbers with units, and big or odd ones are refus
   const refused = (body: unknown, status: number, why: RegExp) =>
     assert.throws(
       () => parseNumbers(body),
-      (err: any) => err.status === status && why.test(err.message),
+      (err: Error & { status: number }) => err.status === status && why.test(err.message),
       String(why),
     );
   refused({}, 400, /numbers/);
@@ -156,7 +156,7 @@ test('a scheme can only start so many series', () => {
           { name: 'brand-new', value: 1 },
         ],
       }),
-    (err: any) => err.status === 413 && /series/.test(err.message),
+    (err: Error & { status: number }) => err.status === 413 && /series/.test(err.message),
   );
   assert.equal(store.ciNumbers(p.id, 's1').length, 1);
 });

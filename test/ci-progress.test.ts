@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -28,7 +29,7 @@ test("the body is the progress file's lines, as Citadel's route takes them", () 
 });
 
 test('it asks GitHub for a run token for the store and posts the counts with it, again while they last; a refusal never stops it', async () => {
-  const got: { auth: string; body: any }[] = [];
+  const got: { auth: string; body: { phase?: string } }[] = [];
   const asks: string[] = [];
   let refuse = 1;
   const server = createServer((req, res) => {
@@ -49,7 +50,7 @@ test('it asks GitHub for a run token for the store and posts the counts with it,
     });
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  const url = `http://127.0.0.1:${(server.address() as any).port}`;
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const file = join(dir, 'tests.progress');
   writeFileSync(file, '96\n212\ntest/runner.test.ts\ntest/a.test.ts\n');
   const env = { ...process.env, ACTIONS_ID_TOKEN_REQUEST_URL: `${url}/token?x=1`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'ask-token', CITADEL_STORE_URL: url, CI_PROGRESS_EVERY: '0.02', RUNNER_ENVIRONMENT: 'self-hosted' };
@@ -82,7 +83,7 @@ test('it asks GitHub for a run token for the store and posts the counts with it,
 });
 
 test("stopped once the tests end, it sends the run's last counts on its way out, though run-tests.sh has removed the file", async () => {
-  const got: any[] = [];
+  const got: unknown[] = [];
   const server = createServer((req, res) => {
     let text = '';
     req.on('data', (c) => (text += c));
@@ -94,7 +95,7 @@ test("stopped once the tests end, it sends the run's last counts on its way out,
     });
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  const url = `http://127.0.0.1:${(server.address() as any).port}`;
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const file = join(dir, 'last.progress');
   writeFileSync(file, '5\n5\n\ntest/a.test.ts\n');
   const env = { ...process.env, ACTIONS_ID_TOKEN_REQUEST_URL: `${url}/token?x=1`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'ask-token', CITADEL_STORE_URL: url, CI_PROGRESS_EVERY: '0.05', RUNNER_ENVIRONMENT: 'self-hosted' };

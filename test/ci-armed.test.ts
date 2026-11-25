@@ -5,7 +5,10 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { armedKey, armForCi, ciFinished, registerCiArmed, type Armed } from '../src/ci-armed.ts';
 import { Outbox, type OutboxRunner } from '../src/outbox.ts';
-import { Store } from '../src/db.ts';
+import { Store, type EventRow } from '../src/db.ts';
+import type { App } from '../src/http.ts';
+import type { Runner } from '../src/runner.ts';
+import { fake } from './typed.ts';
 import { GithubWatcher, type Check, type PrSnapshot } from '../src/github.ts';
 import { git } from './git.ts';
 
@@ -30,23 +33,23 @@ function setup(name: string, prCi = true) {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, dir, 'ticket/1-t');
   const ticket = store.getTicket(t.id)!;
-  const log = { events: [] as [string, any][], relays: [] as string[], wakes: [] as boolean[], notified: [] as any[], running: false, held: false as boolean | 'mail' };
-  const runner = {
-    emit: (_id: number, kind: string, data: any) => (log.events.push([kind, data]), { id: log.events.length }),
+  const log = { events: [] as [string, { questions?: unknown; kind?: string }][], relays: [] as string[], wakes: [] as boolean[], notified: [] as { kind?: string }[], running: false, held: false as boolean | 'mail' };
+  const runner = fake<Runner>({
+    emit: (_id: number, kind: string, data: unknown) => (log.events.push([kind, data as { questions?: unknown; kind?: string }]), { id: log.events.length } as EventRow),
     broadcastTicket: () => {},
     isRunning: () => log.running,
     queued: () => 0,
     relay: (_from: number, _to: number, _author: string, text: string, _urgent: boolean, wake: boolean) => (log.held === true ? true : (log.relays.push(text), log.wakes.push(wake), log.held)),
-  };
+  });
   const outbox = new Outbox(store, { send: () => ({ event: { id: 1 } }), holds: () => false, onLane: (_i: number, _w: string, step: () => unknown) => Promise.resolve().then(step), leaveMail: () => {} } as unknown as OutboxRunner, { author: 'Citadel' });
-  const app = { store, runner, outbox, dataDir: join(root, `${name}-data`), notify: (_id: number, n: any) => log.notified.push(n) } as any;
+  const app = fake<App>({ store, runner, outbox, dataDir: join(root, `${name}-data`), notify: (_id: number, n: { kind?: string }) => log.notified.push(n) });
   registerCiArmed(() => app, store, outbox);
   const armedRow = () => store.listDeliveries({ kind: 'ci_armed', to: ticket.id, states: ['waiting'] })[0];
   return { dir, sha, store, ticket, app, log, outbox, armedRow };
 }
 const boot = (s: { outbox: Outbox }) => s.outbox.boot();
 /** CI finished: the watcher's call, then the outbox's send. */
-async function finish(s: ReturnType<typeof setup>, ...args: [any, 'passed' | 'failed']) {
+async function finish(s: ReturnType<typeof setup>, ...args: [PrSnapshot, 'passed' | 'failed']) {
   await s.outbox.boot(); // nothing is sent before boot
   const got = await ciFinished(s.app, s.ticket, ...args);
   await s.outbox.poke({ type: 'tick' });
@@ -197,7 +200,7 @@ test("a message that throws is retried without posting the card again, and the m
   const { sha, store, ticket, app, log } = s;
   let fail = true;
   const relay = app.runner.relay;
-  app.runner.relay = (...a: any[]) => {
+  app.runner.relay = (...a: Parameters<typeof relay>) => {
     if (fail) throw new Error('boom');
     return relay(...a);
   };

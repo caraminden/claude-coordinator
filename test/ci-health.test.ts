@@ -31,6 +31,7 @@ import {
   skippedJobs,
   verdictPair,
   type GhAnswer,
+  type Problem,
   type Job,
   type Run,
   firstTickDelay,
@@ -51,6 +52,7 @@ import { Store } from '../src/db.ts';
 import { machineRoutes } from '../src/routes/machines.ts';
 import { Readable } from 'node:stream';
 import { fellBackWhy } from '../src/ci-land-gate.ts';
+import { thrown } from '../src/thrown.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'ci-health-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -128,7 +130,7 @@ test('a long job running inside its deadline is not hung; past it, it rings as a
   const run = 45038989266;
   const hrs = (n: number) => n * HOUR;
   const running = (msAgo: number, run_id = run) => job({ status: 'in_progress', conclusion: null, run_id, name: 'heavy', runner_name: 'DESKTOP-G248IJ8-linux-3', started_at: iso(msAgo) });
-  const long = (command: string, state: 'running' | 'done' = 'running') => [{ run_id: run, state, command, started_at: NOW - hrs(3) } as any];
+  const long = (command: string, state: 'running' | 'done' = 'running') => [{ run_id: run, state, command, started_at: NOW - hrs(3) }];
   assert.deepEqual(hungProblems([running(hrs(3))], NOW, long('DEADLINE_MIN=330 ./x')), [], 'inside its own deadline');
   assert.deepEqual(hungProblems([running(hrs(5))], NOW, long('make')), [], 'no DEADLINE_MIN: the 6 h cap');
   const [p] = hungProblems([running(hrs(6))], NOW, [{ ...long('DEADLINE_MIN=330 ./x')[0], started_at: NOW - hrs(6) }]);
@@ -271,8 +273,8 @@ function world({ delve = false } = {}) {
   store.setContraptionUser(mandate.id, josh.id, true, cara.id);
 
   const gh = {
-    runners: [{ name: 'DESKTOP-G248IJ8-desktop', status: 'online' }] as { name: string; status: string }[],
-    delveRunners: [] as { name: string; status: string }[],
+    runners: [{ name: 'DESKTOP-G248IJ8-desktop', status: 'online' }] as { name: string; status: string; busy?: boolean; labels?: { name: string }[] }[],
+    delveRunners: [] as { name: string; status: string; busy?: boolean; labels?: { name: string }[] }[],
     runnersDenied: false,
     runs: [] as Run[],
     jobs: new Map<number, Job[]>(),
@@ -293,7 +295,7 @@ function world({ delve = false } = {}) {
     // Paths GitHub answers 404 for: a private repo the reading login can't see (#607).
     hidden: null as RegExp | null,
   };
-  const etagOf = (body: any) =>
+  const etagOf = (body: unknown) =>
     `W/"${JSON.stringify(body).length}-${JSON.stringify(body)
       .split('')
       .reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 7)}"`;
@@ -302,7 +304,7 @@ function world({ delve = false } = {}) {
     if (gh.down?.test(path)) return { status: 502, etag: null, body: { message: 'Server Error' } };
     if (gh.hidden?.test(path)) return { status: 404, etag: null, body: { message: 'Not Found' } };
     if (gh.rateLimited) return { status: 403, etag: null, body: { message: 'API rate limit exceeded for user ID 1.' } };
-    let body: any;
+    let body: unknown;
     if (path.startsWith('repos/caraminden/notes/')) body = { total_count: 0, workflows: [] };
     else if (path.endsWith('/actions/workflows?per_page=100')) body = { workflows: [{ id: 7, name: 'desktop', path: '.github/workflows/desktop.yml', state: 'active' }, { id: 8, name: 'old', state: 'disabled_manually' }, ...gh.workflows] };
     else if (path.endsWith('/actions/runners?per_page=100') && gh.runnersDenied) return { status: 403, etag: null, body: { message: 'Resource not accessible by integration' } };
@@ -354,7 +356,7 @@ const waitingRun = (w: ReturnType<typeof world>, t: number, id = 3001) => {
 
 test('the CI page reads each scheme it may see: runners with their job, the queue, verdicts on main with skipped jobs, runs and open problems; items link it (#968)', async () => {
   const w = world();
-  w.gh.runners = [{ ...desk('online'), busy: true } as any, desk('offline', 'DESKTOP-G248IJ8-2')];
+  w.gh.runners = [{ ...desk('online'), busy: true }, desk('offline', 'DESKTOP-G248IJ8-2')];
   const running = runOf({ id: 4001, status: 'in_progress', conclusion: null, created_at: iso(5 * MIN) });
   w.gh.runs = [running];
   w.gh.jobs.set(4001, [
@@ -422,18 +424,18 @@ test('a problem is one Mandate alert per admin with Mandate, cleared when fixed,
   const w = world();
   const t0 = NOW;
   await w.health.tick(t0);
-  assert.deepEqual(w.puts, [], 'all clear: nothing sent');
+  assert.deepEqual<typeof w.puts>(w.puts, [], 'all clear: nothing sent');
   assert.ok(!w.gh.calls.some((c) => c.startsWith('repos/caraminden/notes/') && !c.includes('/workflows?')), 'a repo with no workflows costs one call');
 
   // The desktop runner goes offline: with nothing waiting on it, that's the page's, not a ring (#968).
   w.gh.runners = [desk('offline')];
   await w.health.tick(t0 + 5 * MIN);
   await w.health.tick(t0 + HOUR);
-  assert.deepEqual(w.puts, []);
+  assert.deepEqual<typeof w.puts>(w.puts, []);
   // A job waits on it: 10 minutes later Cara hears, once. Josh isn't an admin; Rachel has no Mandate.
   waitingRun(w, t0 + HOUR);
   await w.health.tick(t0 + HOUR + WAIT_MS - MIN);
-  assert.deepEqual(w.puts, []);
+  assert.deepEqual<typeof w.puts>(w.puts, []);
   await w.health.tick(t0 + HOUR + WAIT_MS);
   assert.equal(w.puts.length, 1);
   assert.deepEqual(w.puts[0].slice(0, 2), ['Cara', 'ci.open']);
@@ -691,16 +693,16 @@ test("wake_when_runners_back (#541): a minion parked on CI hears once, when a ru
   w.gh.runners = [
     { name: 'DESKTOP-G248IJ8', status: 'offline', labels: [{ name: 'peek-auras-ci' }] },
     { name: 'X', status: 'online', labels: [{ name: 'other-ci' }] },
-  ] as any;
+  ];
   await health.tick(NOW);
-  assert.deepEqual(sent, []);
+  assert.deepEqual<typeof sent>(sent, []);
   assert.deepEqual(
     runnerWaiters(w.store).map((x) => x.ticket),
     [parked, other],
   );
 
   // The Linux runner comes back: Peek's minion is woken once, Delve's (no runner of its own online) keeps waiting.
-  w.gh.runners = [{ name: 'DESKTOP-G248IJ8-linux', status: 'online', labels: [{ name: 'self-hosted' }, { name: 'peek-auras-ci-linux' }] }] as any;
+  w.gh.runners = [{ name: 'DESKTOP-G248IJ8-linux', status: 'online', labels: [{ name: 'self-hosted' }, { name: 'peek-auras-ci-linux' }] }];
   await health.tick(NOW + 5 * MIN);
   await health.tick(NOW + 10 * MIN);
   assert.equal(sent.length, 1);
@@ -712,7 +714,7 @@ test("wake_when_runners_back (#541): a minion parked on CI hears once, when a ru
   );
 
   // Without a way to send, nobody is dropped.
-  w.gh.delveRunners = [{ name: 'D', status: 'online', labels: [{ name: 'delve-ci' }] }] as any;
+  w.gh.delveRunners = [{ name: 'D', status: 'online', labels: [{ name: 'delve-ci' }] }];
   await w.health.tick(NOW + 15 * MIN);
   assert.deepEqual(
     runnerWaiters(w.store).map((x) => x.ticket),
@@ -970,9 +972,9 @@ test("the land gate's items: its Taskmaster's alone first (no Mandate item), the
   };
   await lands(1, ['#544', '#555']);
   const opened = t;
-  assert.deepEqual(w.puts, [], 'quiet: no phone hears, its Taskmaster does');
+  assert.deepEqual<typeof w.puts>(w.puts, [], 'quiet: no phone hears, its Taskmaster does');
   await lands(3, ['#556', '#557']);
-  assert.deepEqual(w.puts, [], 'more in a row inside the hour: still quiet');
+  assert.deepEqual<typeof w.puts>(w.puts, [], 'more in a row inside the hour: still quiet');
   t = opened + HOUR;
   await w.health.land(w.peek.id, [], t);
   assert.deepEqual(
@@ -1567,8 +1569,8 @@ test('Investigate on a red starts one Sonnet-medium bug minion in its scheme, br
     try {
       await route.handler({ req, res, app, project: peek, session: { name: 'Josh', uid: josh.id } } as any);
       return { status: res.status, body: JSON.parse(res.body) };
-    } catch (err: any) {
-      return { status: err.status, body: err.message };
+    } catch (err) {
+      return { status: thrown(err).status, body: thrown(err).message };
     }
   };
   assert.equal((await press({ workflow: 'x' })).status, 400);
@@ -1660,7 +1662,7 @@ test("a red's fix minion is held open; once its fix is on main the workflow is d
   await new CiHealth(w.store, deps).tick(NOW + 25 * MIN);
   assert.equal(dispatches().length, 1);
   assert.match(item()!, /being re-tested/, 'the item says the re-run is under way (the run itself is on the CI page)');
-  assert.deepEqual(dismissed, []);
+  assert.deepEqual<typeof dismissed>(dismissed, []);
 
   // Red again: the fix minion is woken with the new run, the item points at it, and it stays held.
   w.gh.jobs.set(9202, [job({ run_id: 9202, name: 'test', conclusion: 'failure', labels: ['self-hosted', 'citadel-ci-linux'], steps: [{ name: 'Test', conclusion: 'failure' }] })]);
@@ -2042,19 +2044,19 @@ test('each run and queued job on the CI page names the minion whose change it te
   w.gh.jobs.set(6001, [job({ run_id: 6001, name: 'screen', status: 'queued', conclusion: null, runner_name: null, steps: [], labels: ['peek-auras-desktop'], created_at: iso(22 * MIN) })]);
   await w.health.tick(NOW);
 
-  const v = w.health.snapshot(() => true)[0].view as any;
-  const who = (id: number) => v.runs.find((r: any) => r.id === id).who;
+  const v = w.health.snapshot(() => true)[0].view;
+  const who = (id: number) => v.runs.find((r) => r.id === id)!.who;
   assert.deepEqual(who(6001), { href: `#/p/${w.peek.id}/t/${n(sound.id)}`, label: `#${n(sound.id)} Sound tab` }, "a land's push to main: the minion whose branch tops the commit");
   assert.deepEqual(who(6002), { href: `#/p/${w.peek.id}/t/${n(drag.id)}`, label: `#${n(drag.id)} Panel drag` }, "a land's CI copy on land/<branch>");
   assert.equal(who(6003).href, `#/p/${w.peek.id}/t/${n(drag.id)}`, "a run by hand on the minion branch is the minion's");
   assert.deepEqual(who(6004), { label: 'scheduled run' });
   assert.deepEqual(who(6005), { label: 'main itself' }, 'a push to main no land tops');
   assert.deepEqual(
-    v.waiting.map((j: any) => [j.name, j.who.label]),
+    v.waiting.map((j) => [j.name, j.who.label]),
     [['screen', `#${n(sound.id)} Sound tab`]],
     "the queued job links its run's minion",
   );
-  assert.equal(v.workflows[0].verdict.who.label, `#${n(sound.id)} Sound tab`, 'the verdict on main names the land it tested');
+  assert.equal(v.workflows[0].verdict!.who.label, `#${n(sound.id)} Sound tab`, 'the verdict on main names the land it tested');
 });
 
 test("the CI page's Running now: each running job with its runner, start and minion, and the queue per set of labels with the online runners that serve it (#1019)", async () => {
@@ -2062,7 +2064,7 @@ test("the CI page's Running now: each running job with its runner, start and min
   const drag = w.store.createTicket({ project_id: w.peek.id, title: 'Panel drag', permission_mode: 'default', created_by: 'cara' });
   w.store.updateTicket(drag.id, { branch: 'ticket/588-panel-drag' } as any);
   const n = w.store.getTicket(drag.id)!.number!;
-  w.gh.runners = [{ ...desk('online'), busy: true } as any, desk('offline', 'DESKTOP-G248IJ8-2')];
+  w.gh.runners = [{ ...desk('online'), busy: true }, desk('offline', 'DESKTOP-G248IJ8-2')];
   const mine = runOf({ id: 7001, status: 'in_progress', conclusion: null, head_branch: 'land/ticket/588-panel-drag', created_at: iso(20 * MIN) });
   const queued = runOf({ id: 7002, status: 'queued', conclusion: null, event: 'schedule', created_at: iso(15 * MIN) });
   w.gh.runs = [mine, queued];
@@ -2079,9 +2081,9 @@ test("the CI page's Running now: each running job with its runner, start and min
   ]);
   await w.health.tick(NOW);
 
-  const v = w.health.snapshot(() => true)[0].view as any;
+  const v = w.health.snapshot(() => true)[0].view;
   assert.deepEqual(
-    v.running.map((j: any) => [j.name, j.runner, j.since, j.who.label]),
+    v.running.map((j) => [j.name, j.runner, j.since, j.who.label]),
     [
       ['e2e', 'DESKTOP-G248IJ8-desktop', iso(12 * MIN), `#${n} Panel drag`],
       ['lint', 'GitHub Actions 3', iso(19 * MIN), `#${n} Panel drag`],

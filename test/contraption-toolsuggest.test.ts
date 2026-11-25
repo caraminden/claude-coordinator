@@ -5,6 +5,7 @@ import { chmodSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import type { ClaudePlaces } from '../src/contraption-turns.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { tempRoot, testPins } from './helpers.ts';
@@ -50,18 +51,18 @@ const contraptions = new Contraptions(store, 's'.repeat(40), join(root, 'keys'))
 const mandate = contraptions.register({ name: 'mandate', title: 'Mandate', port: 9101, icon: null, home_scheme: null, open_paths: '[]', default_model: 'haiku', turn_cap: null });
 const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true, server_login: true });
 store.setContraptionUser(mandate.id, cara.id, true, cara.id);
-const places = {
-  place: (uid: number | null) => (uid === cara.id ? { host: true as const } : null),
+const places: ClaudePlaces = {
+  place: (uid) => (uid === cara.id ? { host: true as const } : null),
   codexPlace: () => null,
   expire: () => {},
   configDirs: () => [join(root, 'claude')],
   limitedView: () => ({ next: null, resetAt: 0 }),
 };
 const serverEnv = { PATH: process.env.PATH, HOME: homedir(), CLAUDE_CONFIG_DIR: join(root, 'claude'), LANG: 'C.UTF-8' };
-const turns = new ContraptionTurns(store, contraptions, places as any, { dataDir: data, claudeBin: fake, env: serverEnv } as any);
+const turns = new ContraptionTurns(store, contraptions, places, { dataDir: data, claudeBin: fake, env: serverEnv });
 
 async function said(body: object): Promise<string> {
-  const evs: { event: string; data: any }[] = [];
+  const evs: { event: string; data: { delta?: string } }[] = [];
   await turns.run(mandate, parseTurn({ person: cara.id, prompt: 'x', ...body }, mandate), (event, data) => evs.push({ event, data }));
   return evs
     .filter((e) => e.event === 'text')

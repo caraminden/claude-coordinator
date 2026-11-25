@@ -326,7 +326,7 @@ test('samples wait in memory and are written together, with nothing lost to a re
   const desk = store.createMachine('desk', '', 'Cara');
   const lab = store.createMachine('lab', '', 'Cara');
   const saved = () => store.runnerLoadSince(0).map((r) => [r.machine_id, r.at]);
-  const changes = () => Number((store.db.prepare('SELECT total_changes() AS n').get() as any).n);
+  const changes = () => Number((store.db.prepare('SELECT total_changes() AS n').get() as { n: number }).n);
   const before = changes();
   load.add(desk.id, sample(0, { host: 'DESK' }), NOW);
   load.add(lab.id, sample(0, { host: 'LAB' }), NOW + 1);

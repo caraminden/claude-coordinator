@@ -48,7 +48,7 @@ test('MCP servers go to Codex with their secrets moved into the environment, nam
   assert.deepEqual(m.config['mcp_servers.thread'], { command: 'node', args: ['mcp.ts'], env_vars: ['COORDINATOR_TOKEN', 'COORDINATOR_TICKET'], tool_timeout_sec: 86_400 });
   assert.equal(JSON.stringify(m.config).includes('sekrit') || JSON.stringify(m.config).includes('apptoken'), false, 'no secret in the config');
   assert.equal(m.env.COORDINATOR_TOKEN, 'sekrit');
-  const app: any = m.config['mcp_servers.app'];
+  const app = m.config['mcp_servers.app'] as { env_http_headers: Record<string, string>; tool_timeout_sec: number };
   assert.equal(m.env[app.env_http_headers.Authorization], 'Bearer apptoken');
   assert.equal(app.tool_timeout_sec, 600);
 });
@@ -194,7 +194,32 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
 );
 chmodSync(fake, 0o755);
 
-type Run = { code: number | null; events: any[]; calls: any[] };
+type Block = { type: string; name?: string; is_error?: boolean; content: string; input: { todos: { status: string }[]; command?: string; prompt?: string }; [key: string]: unknown };
+type Ev = {
+  type: string;
+  subtype: string;
+  model: string;
+  codex_thread: string;
+  session_id?: string;
+  mcp_servers: unknown;
+  isReplay?: boolean;
+  uuid: string;
+  is_error: boolean;
+  result: string;
+  total_cost_usd?: number;
+  rate_limits: { primary: { usedPercent: number } };
+  codex_resume_failed: string;
+  usage: { input_tokens: number; cache_read_input_tokens: number };
+  message: { content: Block[] };
+};
+type Call = {
+  id: number;
+  method: string;
+  argv: string[];
+  result?: { decision: string };
+  params: { developerInstructions: string; config: Record<string, { env_vars: string[] }>; approvalPolicy: string; sandbox: string; model: string; effort: string; threadId: string; expectedTurnId: string; input: { text: string }[] };
+};
+type Run = { code: number | null; events: Ev[]; calls: Call[] };
 /** Run the shim with Claude's args; `input` lines go to stdin, the last after the first result unless `keepOpen`. */
 function run(args: string[], opts: { cwd?: string; fake?: string; lines?: object[]; steer?: object; sigterm?: boolean; env?: object; lockedMs?: number; lockPid?: string; killAfterMs?: number } = {}): Promise<Run> {
   rmSync(fakeLog, { force: true });
@@ -218,9 +243,9 @@ function run(args: string[], opts: { cwd?: string; fake?: string; lines?: object
     writeFileSync(join(lock, 'pid'), opts.lockPid);
   }
   const child = tmp.spawn(process.execPath, [SHIM, ...args], { cwd: opts.cwd ?? root, env: { PATH: process.env.PATH, HOME: home, CODEX_HOME: join(home, '.codex'), CITADEL_CODEX_BIN: fake, FAKE: opts.fake ?? '', COORDINATOR_TOKEN: 'tok', ...opts.env }, stdio: ['pipe', 'pipe', 'inherit'] });
-  const events: any[] = [];
+  const events: Ev[] = [];
   let buf = '';
-  child.stdout.on('data', (d) => {
+  child.stdout!.on('data', (d) => {
     buf += d;
     let nl;
     while ((nl = buf.indexOf('\n')) >= 0) {
@@ -228,12 +253,12 @@ function run(args: string[], opts: { cwd?: string; fake?: string; lines?: object
       buf = buf.slice(nl + 1);
       events.push(ev);
       if (ev.type === 'codex_waiting' && opts.lockedMs) letGo(opts.lockedMs);
-      if (ev.type === 'system' && opts.steer) setTimeout(() => child.stdin.write(JSON.stringify(opts.steer) + '\n'), 200);
+      if (ev.type === 'system' && opts.steer) setTimeout(() => child.stdin!.write(JSON.stringify(opts.steer) + '\n'), 200);
       if (ev.type === 'system' && opts.sigterm) setTimeout(() => child.kill('SIGTERM'), 200);
-      if (ev.type === 'result') child.stdin.end(() => writeFileSync(join(home, 'input-ended'), ''));
+      if (ev.type === 'result') child.stdin!.end(() => writeFileSync(join(home, 'input-ended'), ''));
     }
   });
-  for (const l of opts.lines ?? [{ type: 'user', message: { role: 'user', content: '[Josh]: go' } }]) child.stdin.write(JSON.stringify(l) + '\n');
+  for (const l of opts.lines ?? [{ type: 'user', message: { role: 'user', content: '[Josh]: go' } }]) child.stdin!.write(JSON.stringify(l) + '\n');
   if (opts.killAfterMs) setTimeout(() => child.kill('SIGKILL'), opts.killAfterMs).unref();
   // 'close', not 'exit': the shim's last lines can still be in its stdout pipe when it exits.
   return new Promise((resolve) =>
@@ -253,28 +278,28 @@ test('a Codex turn reads as a Claude turn: init, words, Bash, patches, MCP, trip
   const logFile = join(dir, 'codex-log.jsonl');
   const r = await run(['-p', '--verbose', '--model', 'claude-opus-5-5', '--effort', 'xhigh', '--append-system-prompt-file', join(dir, 'system.md'), '--mcp-config', join(dir, 'mcp.json'), '--include-partial-messages', '--permission-mode', 'bypassPermissions', '--codex-log', logFile]);
   assert.equal(r.code, 0);
-  const init = r.events.find((e) => e.type === 'system');
+  const init = r.events.find((e) => e.type === 'system')!;
   assert.deepEqual([init.type, init.subtype, init.model, init.codex_thread, init.session_id], ['system', 'init', 'gpt-6-astra', 'th1', undefined]);
   assert.deepEqual(init.mcp_servers, [{ name: 'thread', status: 'connected' }]);
   // The rate-limit read races the thread's start, so its line can come anywhere.
-  const types = r.events.filter((e) => e.type !== 'codex_rate_limits').map((e) => (e.type === 'assistant' ? `a:${e.message.content.map((b: any) => b.name ?? b.type).join()}` : e.type === 'user' ? `u:${e.message.content[0].is_error}` : e.type));
+  const types = r.events.filter((e) => e.type !== 'codex_rate_limits').map((e) => (e.type === 'assistant' ? `a:${e.message.content.map((b) => b.name ?? b.type).join()}` : e.type === 'user' ? `u:${e.message.content[0].is_error}` : e.type));
   assert.deepEqual(types, ['system', 'stream_event', 'stream_event', 'a:text', 'a:Bash', 'u:true', 'a:apply_patch', 'u:false', 'a:mcp__thread__set_thread_status', 'u:false', 'a:Tripwire', 'u:true', 'a:TodoWrite', 'a:text', 'result']);
   assert.equal(r.events.filter((e) => e.type === 'codex_rate_limits').length, 1);
-  const bash = r.events.find((e) => e.message?.content?.[0]?.name === 'Bash');
+  const bash = r.events.find((e) => e.message?.content?.[0]?.name === 'Bash')!;
   assert.deepEqual(bash.message.content[0].input, { command: 'npm test' });
-  const todo = r.events.find((e) => e.message?.content?.[0]?.name === 'TodoWrite').message.content[0].input.todos;
+  const todo = r.events.find((e) => e.message?.content?.[0]?.name === 'TodoWrite')!.message.content[0].input.todos;
   assert.deepEqual(
-    todo.map((t: any) => t.status),
+    todo.map((t) => t.status),
     ['in_progress', 'pending'],
   );
-  const result = r.events.at(-1);
+  const result = r.events.at(-1)!;
   assert.deepEqual([result.is_error, result.result, result.usage.input_tokens, result.usage.cache_read_input_tokens, result.total_cost_usd], [false, 'Done 1.', 40, 60, undefined]);
   // Codex got the system prompt and the Codex note as developer instructions, the servers in config, the token by name only.
-  const start = r.calls.find((c) => c.method === 'thread/start').params;
+  const start = r.calls.find((c) => c.method === 'thread/start')!.params;
   assert.match(start.developerInstructions, /^CITADEL SYSTEM PROMPT\n\n## Running on Codex/);
   assert.deepEqual(start.config['mcp_servers.thread'].env_vars, ['COORDINATOR_TOKEN']);
   assert.equal([start.approvalPolicy, start.sandbox].join(), 'never,danger-full-access');
-  const turn = r.calls.find((c) => c.method === 'turn/start').params;
+  const turn = r.calls.find((c) => c.method === 'turn/start')!.params;
   assert.deepEqual([turn.model, turn.effort, turn.input[0].text], ['gpt-6-astra', 'xhigh', '[Josh]: go']);
   assert.ok(
     r.calls.some((c) => c.id === 77 && c.result?.decision === 'decline'),
@@ -290,7 +315,7 @@ test('a Codex turn reads as a Claude turn: init, words, Bash, patches, MCP, trip
 
 test('a message mid-turn steers it, and one replayed comes back marked as taken', async () => {
   const r = await run(['--replay-user-messages'], { fake: 'steer', steer: { type: 'user', uuid: 'u2', message: { role: 'user', content: 'also this' } }, lines: [{ type: 'user', uuid: 'u1', message: { role: 'user', content: 'go' } }], sigterm: false });
-  const steer = r.calls.find((c) => c.method === 'turn/steer');
+  const steer = r.calls.find((c) => c.method === 'turn/steer')!;
   assert.deepEqual([steer.params.threadId, steer.params.expectedTurnId, steer.params.input[0].text], ['th1', 'tu1', 'also this']);
   assert.deepEqual(
     r.events.filter((e) => e.isReplay).map((e) => e.uuid),
@@ -302,11 +327,11 @@ test('a steer refused because the turn just ended starts the next turn, rather t
   const r = await run([], { fake: 'late-steer', env: { CITADEL_CODEX_QUIET_MS: '3000' }, steer: { type: 'user', message: { role: 'user', content: 'also this' } } });
   const starts = r.calls.filter((c) => c.method === 'turn/start');
   assert.deepEqual(
-    starts.map((c) => c.params.input.at(-1).text),
+    starts.map((c) => c.params.input.at(-1)!.text),
     ['[Josh]: go', 'also this'],
   );
   assert.equal(r.code, 0);
-  const last = r.events.at(-1);
+  const last = r.events.at(-1)!;
   assert.deepEqual([last.type, last.is_error, last.result], ['result', false, 'Done 2.']);
 });
 
@@ -316,7 +341,7 @@ test("stopping a Codex turn interrupts it; Codex's usage limit ends it in Claude
   assert.equal(stopped.code, 143);
   assert.ok(!stopped.events.some((e) => e.type === 'result'));
   const limited = await run([], { fake: 'limit' });
-  const result = limited.events.at(-1);
+  const result = limited.events.at(-1)!;
   assert.equal(result.is_error, true);
   assert.match(result.result, /^You've hit your Codex usage limit · resets \d/);
   assert.ok(limited.events.some((e) => e.type === 'codex_rate_limits' && e.rate_limits.primary.usedPercent === 100));
@@ -324,7 +349,7 @@ test("stopping a Codex turn interrupts it; Codex's usage limit ends it in Claude
 
 test('a Codex turn that goes quiet is stopped with an error', async () => {
   const r = await run([], { fake: 'hang', env: { CITADEL_CODEX_QUIET_MS: '300' } });
-  assert.match(r.events.at(-1).result, /Codex sent nothing/);
+  assert.match(r.events.at(-1)!.result, /Codex sent nothing/);
   assert.equal(r.code, 1);
 });
 
@@ -332,8 +357,8 @@ test("a Codex turn that waits a while for the person's Codex lock says so, then 
   const r = await run(['-p', '--output-format', 'stream-json', '--input-format', 'stream-json'], { lockedMs: 1500, env: { CITADEL_CODEX_WAIT_NOTE_MS: '200' } });
   assert.equal(r.events[0].type, 'codex_waiting');
   assert.equal(r.events.filter((e) => e.type === 'codex_waiting').length, 1, 'said once');
-  assert.equal(r.events.at(-1).type, 'result');
-  assert.equal(r.events.at(-1).is_error, false);
+  assert.equal(r.events.at(-1)!.type, 'result');
+  assert.equal(r.events.at(-1)!.is_error, false);
 });
 
 test('a lock whose pid now belongs to another process (a reused pid) is stale, and the turn runs (#468 S04-7)', async () => {
@@ -348,11 +373,11 @@ test('a stored Codex thread resumes without the hand-over; one that is gone star
   const handover = join(root, 'handover.md');
   writeFileSync(handover, '[Message] earlier');
   const resumed = await run(['--codex-thread', 'th9', '--codex-handover', handover]);
-  assert.equal(resumed.events.find((e) => e.type === 'system').codex_thread, 'th9');
-  assert.equal(resumed.calls.find((c) => c.method === 'turn/start').params.input.length, 1);
+  assert.equal(resumed.events.find((e) => e.type === 'system')!.codex_thread, 'th9');
+  assert.equal(resumed.calls.find((c) => c.method === 'turn/start')!.params.input.length, 1);
   const fresh = await run(['--codex-thread', 'gone', '--codex-handover', handover]);
-  assert.equal(fresh.events.find((e) => e.type === 'system').codex_resume_failed, 'gone');
-  const input = fresh.calls.find((c) => c.method === 'turn/start').params.input;
+  assert.equal(fresh.events.find((e) => e.type === 'system')!.codex_resume_failed, 'gone');
+  const input = fresh.calls.find((c) => c.method === 'turn/start')!.params.input;
   assert.match(input[0].text, /taking over this conversation from Claude[\s\S]*<conversation>\n\[Message\] earlier\n<\/conversation>/);
   assert.equal(input[1].text, '[Josh]: go');
 });
@@ -362,7 +387,7 @@ test("a contraption's Codex turn has no shell, no patches, no kit and no Codex n
   const argv = r.calls[0].argv.join(' ');
   assert.match(argv, /features\.shell_tool=false/);
   assert.match(argv, /web_search="disabled"/);
-  assert.doesNotMatch(r.calls.find((c) => c.method === 'thread/start').params.developerInstructions, /Running on Codex/);
+  assert.doesNotMatch(r.calls.find((c) => c.method === 'thread/start')!.params.developerInstructions, /Running on Codex/);
   const web = await run(['--codex-mode', 'contraption', '--tools', 'WebSearch,WebFetch']);
   assert.match(web.calls[0].argv.join(' '), /web_search="live"/);
 });
@@ -396,7 +421,7 @@ test("the kit's skills install once: a turn starting beside another leaves an in
 test("Codex's generated images show as GenerateImage and are copied into the worktree's generated/ folder", async () => {
   const dir = join(root, 'img');
   mkdirSync(dir);
-  const r = await run(['-p'], { fake: 'image', cwd: dir } as any);
+  const r = await run(['-p'], { fake: 'image', cwd: dir });
   const uses = r.events.filter((e) => e.message?.content?.[0]?.name === 'GenerateImage');
   assert.deepEqual(
     uses.map((e) => e.message.content[0].input.prompt),

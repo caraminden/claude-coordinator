@@ -17,7 +17,7 @@ function fakeGithub(tokens: Record<string, string>, admins: Record<string, strin
     const path = url.replace('https://api.github.com', '');
     calls.push(`${init?.method ?? 'GET'} ${path}`);
     if (opts.down) throw new Error('fetch failed');
-    const me = tokens[String((init?.headers as any)?.Authorization ?? '').replace('Bearer ', '')];
+    const me = tokens[String((init?.headers as Record<string, string> | undefined)?.Authorization ?? '').replace('Bearer ', '')];
     const headers = { 'X-OAuth-Scopes': opts.scopes };
     if (!me) return Response.json({ message: 'Bad credentials' }, { status: 401, headers });
     const m = /^\/repos\/([^/]+\/[^/]+)\/actions\/runners(?:\/(registration-token|\d+)|\?per_page=(\d+)&page=(\d+))$/.exec(path);

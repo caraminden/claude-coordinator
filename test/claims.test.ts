@@ -146,7 +146,7 @@ test('a holder whose work shipped passes its claim on as shipped when dismissed,
       new DatabaseSync(join(dir, 'test.db'), { readOnly: true })
         .prepare('SELECT holder, how FROM claim_spans ORDER BY rowid')
         .all()
-        .map((r: any) => [r.holder, r.how]);
+        .map((r) => [r.holder, r.how]);
     store.claims.take(p, 'pipeline-lane', a.id, 'Cara');
     runner.holderShipped(a.id);
     runner.holderShipped(other.id);
@@ -158,7 +158,7 @@ test('a holder whose work shipped passes its claim on as shipped when dismissed,
     runner.heldFor = (id) => (id === c.id ? "#2 B's work is live" : null);
     await runner.close(b.id, 'Cara dismissed this minion.');
     assert.equal(store.claims.get(p, 'pipeline-lane')?.holder, c.id);
-    assert.match(JSON.stringify(store.getSetting<any>(`minion-queue:${c.id}`)?.held ?? null), /You hold the pipeline-lane claim now/);
+    assert.match(JSON.stringify(store.getSetting<{ held?: string }>(`minion-queue:${c.id}`)?.held ?? null), /You hold the pipeline-lane claim now/);
     assert.equal(runner.isRunning(c.id), false, 'no turn of its own');
     assert.deepEqual(how(), [
       [a.id, 'live'],
@@ -251,7 +251,7 @@ test('a queued claim passes to the next minion with one chat line when its holde
   assert.equal(took.data.claim.holder_number, a.number);
   assert.equal(await said(a.id), 1, 'the first holder hears it');
   assert.deepEqual(
-    took.data.claim.queue.map((q: any) => q.number),
+    took.data.claim.queue.map((q: { number: number }) => q.number),
     [b.number],
   );
   assert.deepEqual([took.data.claim.done, took.data.claim.total, took.data.claim.estimate], [0, 2, null], 'no history: no estimate');
@@ -259,7 +259,7 @@ test('a queued claim passes to the next minion with one chat line when its holde
   assert.equal((await call(`${url}/pipeline-lane/queue`, { method: 'PUT', body: { queue: [c.number, b.number] } })).status, 200);
   assert.equal((await call(`${url}/pipeline-lane/queue`, { method: 'PUT', body: { queue: [] }, as: b.id })).status, 403);
   assert.deepEqual(
-    (await call(url)).data.claims[0].queue.map((q: any) => q.number),
+    (await call(url)).data.claims[0].queue.map((q: { number: number }) => q.number),
     [c.number, b.number],
   );
 
@@ -278,7 +278,7 @@ test('a queued claim passes to the next minion with one chat line when its holde
   const now = (await call(url)).data.claims[0];
   assert.equal(now.holder_number, c.number);
   assert.deepEqual(
-    now.queue.map((q: any) => [q.number, q.state]),
+    now.queue.map((q: { number: number; state: string }) => [q.number, q.state]),
     [
       [a.number, 'done'],
       [b.number, now.queue[1].state],
@@ -311,7 +311,7 @@ test("the Taskmaster's claim, release and list_claims tools, and list_tickets sh
     env: { ...process.env, MACHINES_URL: undefined, COORDINATOR_API: base, COORDINATOR_TOKEN: agentToken(join(root, 'data'), page.coordinator.id), COORDINATOR_PROJECT: String(p.id), COORDINATOR_ROLE: 'coordinator', COORDINATOR_TICKET: String(page.coordinator.id) },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
-  const replies = new Map<number, (r: any) => void>();
+  const replies = new Map<number, (r: { result: { content: { text: string }[] } }) => void>();
   createInterface({ input: mcp.stdout! }).on('line', (l) => {
     const r = JSON.parse(l);
     replies.get(r.id)?.(r);

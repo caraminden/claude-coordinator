@@ -26,7 +26,7 @@ test('appending a Codex turn past the log cap keeps only its newest lines, at mo
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Josh' });
   const line = (n: number) => `${JSON.stringify({ n, pad: 'x'.repeat(990) })}\n`;
   const old = Array.from({ length: Math.ceil((2 * HANDOVER_MAX) / 1000) }, (_, i) => line(i)).join('');
-  store.setSetting<CodexThread>(codexThreadKey(t.id), { thread: 'th1', log: old } as CodexThread);
+  store.setSetting(codexThreadKey(t.id), { thread: 'th1', log: old } as CodexThread);
   const dir = join(root, 'turn');
   mkdirSync(dir);
   writeFileSync(join(dir, 'codex-log.jsonl'), line(999999));

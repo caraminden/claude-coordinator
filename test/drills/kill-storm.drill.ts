@@ -54,7 +54,7 @@ test("5 kills in under a minute: the ship's result is reported once", () => {
 // A5: an incident opens only for 5 minutes down, so a storm of short kills opens none.
 test('5 kills in under a minute open an incident', gap('A5'), async () => {
   // The recorder's first tick (a minute after boot) writes its state; a fix may open the incident sooner.
-  const s = await until('the incident recorder ticked', () => d.setting('incidents'), 90_000).catch((e) => {
+  const s = await until('the incident recorder ticked', () => d.setting<{ open?: unknown; done?: unknown[] }>('incidents'), 90_000).catch((e) => {
     if (timedOut(e)) assert.fail(`A5: no incident state was written in 90 s after 5 kills`);
     throw e;
   });

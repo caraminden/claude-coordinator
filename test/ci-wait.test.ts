@@ -7,7 +7,8 @@ import { BUSY, CiRuns, KEEP_MS, ciNow, pendingRuns } from '../src/ci-wait.ts';
 import type { Job } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import { Store } from '../src/db.ts';
-import { Waits } from '../src/waits.ts';
+import { Waits, type TestCounts } from '../src/waits.ts';
+import { thrown } from '../src/thrown.ts';
 
 // src/ci-wait.ts (#546): a CI run's jobs and steps as a minion's wait.
 const T0 = Date.parse('2026-11-11T20:00:00Z');
@@ -63,7 +64,7 @@ test("pendingRuns: the Actions runs of a PR's pending checks", async () => {
 
 /** A fake GitHub: answers by path from `answers`, counting calls; an unchanged body is a 304. */
 function github() {
-  const answers = new Map<string, any>();
+  const answers = new Map<string, unknown>();
   const calls: string[] = [];
   const get = async (path: string, etag: string | null) => {
     calls.push(path);
@@ -336,7 +337,7 @@ test("a landing's CI shows its suite's test files as its job sends them, and its
   const t = Math.floor(Date.now() / 1000);
   const body = `${b64({ alg: 'RS256', kid: 'k1', typ: 'JWT' })}.${b64({ iss: ISSUER, aud: AUDIENCE, exp: t + 300, nbf: t - 300, repository: 'o/r', run_id: '9', run_attempt: '1', sha: 'a'.repeat(40), ref: 'refs/heads/land/x', workflow_ref: 'o/r/.github/workflows/tests.yml@refs/heads/land/x' })}`;
   const token = `${body}.${sign('RSA-SHA256', Buffer.from(body), keys.privateKey).toString('base64url')}`;
-  const app = { ciStore: new CiStore(store, join(root, 'store'), new RunTokens(async () => [{ ...keys.publicKey.export({ format: 'jwk' }), kid: 'k1' }])), ciTests: (repo: string, run: number, c: any) => ci.testCounts(repo, run, c) };
+  const app = { ciStore: new CiStore(store, join(root, 'store'), new RunTokens(async () => [{ ...keys.publicKey.export({ format: 'jwk' }), kid: 'k1' }])), ciTests: (repo: string, run: number, c: TestCounts) => ci.testCounts(repo, run, c) };
   const route = agentRoutes.find((r) => r.path === '/api/ci-tests')!;
   const post = async (sent: unknown, auth = `Bearer ${token}`) => {
     const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(sent))]), { headers: { 'content-type': 'application/json', authorization: auth } });
@@ -353,8 +354,8 @@ test("a landing's CI shows its suite's test files as its job sends them, and its
     try {
       await route.handler({ req, res, app } as any);
       return res.status;
-    } catch (err: any) {
-      return err.status;
+    } catch (err) {
+      return thrown(err).status;
     }
   };
   assert.equal(await post({ done: 143, total: 412, file: 'test/releases.test.ts' }, 'Bearer nope'), 401, 'no run token, no count');

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { ShipWatch, type Ship } from '../src/ci-ships.ts';
 
 /** A fake GitHub: paths to bodies, a 304 for a path asked again with the etag it gave, and every path asked. */
-function github(pages: Record<string, any>) {
+function github(pages: Record<string, unknown>) {
   const asked: string[] = [];
   const get = async (path: string, etag: string | null) => {
     asked.push(path);
@@ -20,10 +20,10 @@ function github(pages: Record<string, any>) {
 const runs = (repo: string) => `repos/${repo}/actions/runs?status=in_progress&per_page=50`;
 const jobs = (repo: string, id: number) => `repos/${repo}/actions/runs/${id}/jobs?filter=latest&per_page=100`;
 
-function watch(gh: ReturnType<typeof github>, repos = ['caraminden/claude-coordinator', 'caraminden/peek-auras'], as = (_: string): {} | null => ({}), first?: () => string | null) {
+function watch(gh: ReturnType<typeof github>, repos = ['caraminden/claude-coordinator', 'caraminden/peek-auras'], as = (_: string): Record<string, string> | null => ({}), first?: () => string | null) {
   const sent: Ship[][] = [];
   const logs: string[] = [];
-  const w = new ShipWatch({ repos: () => repos, as: as as any, send: (s) => sent.push(s), get: gh.get as any, log: (l) => logs.push(l), first });
+  const w = new ShipWatch({ repos: () => repos, as, send: (s) => sent.push(s), get: gh.get, log: (l) => logs.push(l), first });
   return { w, sent, logs };
 }
 
@@ -140,6 +140,6 @@ test("an early next train's run is squeezed while a ship runs; with none, the ol
   });
   const { w } = watch(gh, [repo]);
   assert.deepEqual(await w.tick(0), [{ repo, runner: 'DESKTOP-linux' }], 'the ship run alone: both early runs are squeezed');
-  gh.pages[runs(repo)] = { workflow_runs: gh.pages[runs(repo)].workflow_runs.filter((r: any) => r.id !== 1) };
+  gh.pages[runs(repo)] = { workflow_runs: (gh.pages[runs(repo)] as { workflow_runs: { id: number }[] }).workflow_runs.filter((r) => r.id !== 1) };
   assert.deepEqual(await w.tick(15_000), [{ repo, runner: 'DESKTOP-linux-2' }], "ticket/4-x's early run counted once ticket/3-x shipped: it is the ship, and ticket/5-x's stays squeezed");
 });

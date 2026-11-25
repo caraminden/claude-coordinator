@@ -71,10 +71,10 @@ test("each person's Codex usage is their own, the server login's included", () =
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   const amy = store.createUser({ name: 'Amy', login: 'amy' });
   const cara = store.createUser({ name: 'Cara', login: 'cara', server_login: true });
-  const sent: any[] = [];
+  const sent: { type: string; to: number }[] = [];
   const r = new Runner(
     store,
-    (m) => sent.push(m),
+    (m) => sent.push(m as { type: string; to: number }),
     () => ({}),
     'claude',
   );

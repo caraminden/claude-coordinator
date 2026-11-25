@@ -294,7 +294,7 @@ test('sms goes through serve to the console with the host token, and serve refus
     assert.equal(await answer('planted'), 'KO: unknown step\n');
     assert.equal(readFileSync(victim, 'utf8'), 'keep me\n');
     assert.equal(readFileSync(join(home, '.emulator_console_auth_token'), 'utf8'), 'sekrit\n');
-    assert.deepEqual(got, []);
+    assert.deepEqual(got, [] as string[]);
 
     // down from a turn that can't read the token (its own adb emu kill is refused) goes through serve too.
     got.length = 0;

@@ -8,12 +8,15 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { Store } from '../../src/db.ts';
 import { agentToken, bootServer, releaseFake, stopTurns, until, type Booted } from '../helpers.ts';
 
 /** test()'s option for a drill that shows finding `code`: it must fail with that finding's assertion, and only that. */
 export const gap = (code: string) => ({ expectFailure: new RegExp(`(^|: )${code}: `) });
+
+/** A line of a minion's saved claude stream, the parts the drills read. */
+export type StreamLine = { type: string; message?: { content: { text?: string }[] } };
 
 export class Drill {
   readonly root: string;
@@ -72,7 +75,7 @@ export class Drill {
   }
 
   /** Rows from the server's database, read the way an outsider does (read-only, its own connection). */
-  rows<T = any>(sql: string, ...args: any[]): T[] {
+  rows<T = Record<string, unknown>>(sql: string, ...args: SQLInputValue[]): T[] {
     const db = new DatabaseSync(join(this.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
     try {
       return db.prepare(sql).all(...args) as T[];
@@ -90,7 +93,7 @@ export class Drill {
       : 0;
   }
 
-  setting<T = any>(key: string): T | null {
+  setting<T = unknown>(key: string): T | null {
     const row = this.rows<{ value: string }>('SELECT value FROM settings WHERE key = ?', key)[0];
     return row ? JSON.parse(row.value) : null;
   }
@@ -100,7 +103,7 @@ export class Drill {
   }
 
   /** The stream lines of `type` saved in a minion's chat. */
-  stream(id: number, type: string): any[] {
+  stream(id: number, type: string): StreamLine[] {
     return this.rows<{ data: string }>("SELECT data FROM events WHERE ticket_id = ? AND kind = 'claude' ORDER BY id", id)
       .map((r) => JSON.parse(r.data))
       .filter((d) => d.type === type);

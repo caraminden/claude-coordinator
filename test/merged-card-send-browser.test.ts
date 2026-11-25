@@ -23,7 +23,7 @@ const STUB = `<script>
     const path = url.pathname.replace(/^\\//, '');
     if (path === 'api/me') return reply(200, { name: 'Cara', login: 'cara', admin: true, uid: 1 });
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
-    if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [minion(7)], seen: {}, person_notes: {}, pins: [] });
+    if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [minion(7), ...Array.from({ length: 16 }, (_, i) => minion(20 + i))], seen: {}, person_notes: {}, pins: [] });
     if (path === 'api/projects/1/recap') return reply(200, { since: null, turns: {} });
     let m;
     if ((m = path.match(/^api\\/tickets\\/(\\d+)\\/answer$/))) { sent.push(JSON.parse(init.body)); return new Promise(() => {}); }
@@ -102,4 +102,20 @@ test('a recommended option nobody picked is not styled as picked', { skip }, asy
   const plain = await style('.qcard [data-q="0"] .opt[data-label="C1"]');
   assert.notEqual(suggested, plain, 'a suggestion looks different from a plain option');
   assert.notEqual(suggested.split('|')[0], picked.split('|')[0], 'not the picked fill');
+});
+
+// The chat redrawn (leave it and come back): the kept picks cover all 8 questions, and the replayed question_more must not add blanks.
+test('a merged card redrawn after it grew can still be sent (C1)', { skip }, async () => {
+  const page = await open();
+  await page.eval(`document.querySelector('.qcard [data-q="0"] .opt[data-label="B1"]').click()`);
+  // Past the kept chats (12), the next visit draws it again from its events.
+  for (let n = 20; n < 36; n++) {
+    await page.eval(`location.hash = '#/p/1/t/${n}'`);
+    await waitFor(page, 'the other chat', `document.getElementById('ticket-head')?.textContent.includes('Minion ${n}')`);
+  }
+  await page.eval(`location.hash = '#/p/1/t/7'`);
+  await waitFor(page, 'the card again', `document.querySelectorAll('.qcard .q').length === 8`);
+  for (let n = 1; n <= 8; n++) await page.eval(`document.querySelector('.qcard [data-q="${n - 1}"] .opt[data-label="B${n}"]').click()`);
+  assert.equal(await page.eval(`document.querySelector('.qcard .progress').textContent`), 'All answered');
+  assert.equal(await page.eval(`${sendBtn}.disabled`), false);
 });

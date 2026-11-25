@@ -818,7 +818,7 @@ export function questionCard(ticketId, card, opts = {}) {
     extend(questions) {
       for (const q of questions.slice(card.questions.length)) {
         card.questions.push(q);
-        picks.push({ selected: new Set(), other: '' });
+        if (picks.length < card.questions.length) picks.push({ selected: new Set(), other: '' }); // kept picks may already cover it (a redrawn card)
         atts.el.before(drawQ(q, card.questions.length - 1));
       }
       sendBtn.textContent = 'Send answers';

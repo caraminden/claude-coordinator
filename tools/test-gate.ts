@@ -14,7 +14,8 @@
 // A new file starts only while fewer places than that are held, the ones above a shrunk limit included.
 // Waiting: a line of small files in $CITADEL_HEAVY_DIR/test-line, each kept fresh while it waits and holding no place. It goes
 // by each file's number within its own run, then by when it asked: a run's first file is never behind another run's later
-// ones, and within a run they go in order. A file starts anyway after CITADEL_TEST_ROOM_WAIT seconds (120), so nothing is stuck.
+// ones, and within a run they go in order. CITADEL_TEST_ROOM_WAIT seconds (120) after
+// the run's first wait its files start anyway, the later ones too, so nothing is stuck.
 // The run's first file to wait half a second writes one line to $CITADEL_TEST_GATE_NOTE, which citadel-test prints as it
 // appears. Any error here lets the file run.
 import { spawn } from 'node:child_process';
@@ -41,36 +42,25 @@ function pressure(): number | null {
   }
 }
 
-// A place is taken by a helper that holds the flock until this process is gone: it prints ok (taken) or no (busy).
-const HOLD = '( flock -n "$1" sh -c \'echo ok; exec tail --pid="$0" -f /dev/null\' "$2" || echo no ) &';
-function tryHold(file: string): Promise<boolean> {
+// Counts the held places, the ones above a shrunk limit too, and takes a free one when fewer than the limit are held; one lock
+// around both, so two files can't count the same room. The place's lock passes to a helper that lives until this process is gone.
+const TAKE = `exec 9>"$1" && flock -w 5 9 || exit; pid=$2 limit=$3 held=0 got=; shift 3
+for f; do
+  if [ -n "$got" ]; then flock -n "$f" true || held=$((held + 1))
+  elif exec 8>"$f" && flock -n 8; then got=1
+  else held=$((held + 1)); fi
+done
+[ -n "$got" ] && [ "$held" -lt "$limit" ] || exit
+tail --pid="$pid" -f /dev/null 9>&- >/dev/null 2>&1 &
+echo ok`;
+function take(dir: string, places: string[], limit: number): Promise<boolean> {
   return new Promise((done) => {
     const { CITADEL_LEAK_FILE: _, ...clean } = env;
-    const c = spawn('sh', ['-c', HOLD, 'sh', file, String(process.pid)], { env: clean, stdio: ['ignore', 'pipe', 'ignore'] });
-    let out = '';
-    const finish = (ok: boolean) => {
-      c.stdout.destroy();
-      c.unref();
-      done(ok);
-    };
-    c.stdout.on('data', (b) => {
-      out += b;
-      if (out.includes('ok')) finish(true);
-      else if (out.includes('no')) finish(false);
-    });
-    c.on('error', () => finish(true));
-    c.on('close', () => finish(out.includes('ok')));
-  });
-}
-
-// How many places are held right now, over all of them: a shrink must count the files still running in the places above it.
-function heldPlaces(files: string[]): Promise<number> {
-  return new Promise((done) => {
-    const c = spawn('sh', ['-c', 'for f; do flock -n "$f" true || echo held; done', 'sh', ...files], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const c = spawn('sh', ['-c', TAKE, 'sh', join(dir, 'test-count'), String(process.pid), String(limit), ...places], { env: clean, stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     c.stdout.on('data', (b) => (out += b));
-    c.on('error', () => done(0));
-    c.on('close', () => done(out.split('held').length - 1));
+    c.on('error', () => done(true));
+    c.on('close', () => done(out.includes('ok')));
   });
 }
 
@@ -94,34 +84,44 @@ async function gate() {
   const mine = join(line, me);
   const cap = n(env.CITADEL_TEST_ROOM_WAIT, 120) * 1000;
   const since = Date.now();
-  let told = !note;
+  // The cap is the run's: it counts from the run's first wait (the note's own time), so a run of many files can't wait it many
+  // times over and run into citadel-test's own limit.
+  const firstWait = () => {
+    try {
+      return note ? Math.min(since, statSync(note).mtimeMs) : since;
+    } catch {
+      return since;
+    }
+  };
+  let touched = 0;
   try {
     for (;;) {
-      writeFileSync(mine, '');
+      const now = Date.now();
+      if (now - touched >= 1000) {
+        writeFileSync(mine, '');
+        touched = now;
+      }
       const live = readdirSync(line).filter((f) => {
         try {
-          return Date.now() - statSync(join(line, f)).mtimeMs < 5000;
+          const age = now - statSync(join(line, f)).mtimeMs;
+          if (age > 60_000) rmSync(join(line, f), { force: true }); // a killed waiter's
+          return age < 5000;
         } catch {
           return false;
         }
       });
-      const waited = Date.now() - since;
       const p = pressure();
       const limit = limitAt(p, start, min, max);
-      const head = live.sort()[0] === me;
-      if (head && (await heldPlaces(places)) < limit) for (const f of places) if (await tryHold(f)) return;
-      if (waited >= cap) {
-        // Started past the limit, it still takes a place if one is free, so the others count it.
-        for (const f of places) if (await tryHold(f)) return;
-        return;
-      }
-      if (!told && note && waited >= 500) {
-        told = true;
+      const capped = now - firstWait() >= cap;
+      // Past the cap it starts whatever is held, still taking a place if one is free, so the others count it.
+      if ((capped || live.sort()[0] === me) && (await take(dir, places, capped ? max : limit))) return;
+      if (capped) return;
+      if (note && now - since >= 500) {
         try {
-          writeFileSync(note, `waiting for room: ${limit} test files may run at once on this box${p === null ? '' : ` (CPU pressure ${p}%)`} and other files hold them; each starts anyway after ${cap / 1000} s\n`, { flag: 'wx' });
+          writeFileSync(note, `waiting for room: ${limit} test files may run at once on this box${p === null ? '' : ` (CPU pressure ${p}%)`} and other files hold them; this run waits at most ${cap / 1000} s in all\n`, { flag: 'wx' });
         } catch {}
       }
-      await sleep(head ? 150 : 50);
+      await sleep(250);
     }
   } finally {
     rmSync(mine, { force: true });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -56,12 +56,17 @@ test('the limit steps with CPU pressure: the floor when busy, one less, the star
   assert.equal(limitAt(40, 1, 2, 8), 2, 'never under the floor');
 });
 
-test('ten test files at once keep to the shared limit, across separate runs', async () => {
+test('test files of separate runs keep to the one limit, arriving while others are picked', async () => {
   const { env, run } = setup(20);
-  const codes = await Promise.all(Array.from({ length: 10 }, () => file(env)));
-  assert.deepEqual(new Set(codes), new Set([0]));
+  const jobs: Promise<number | null>[] = [];
+  // Four runs of four files, the later runs' first files sorting ahead of the earlier runs' later ones.
+  for (let r = 0; r < 4; r++) {
+    for (let i = 0; i < 4; i++) jobs.push(file({ ...env, CITADEL_TEST_GATE_NOTE: `${env.CITADEL_TEST_GATE_NOTE}-${r}` }, 400));
+    await until(`run ${r} to have files in`, () => existsSync(`${env.CITADEL_TEST_GATE_NOTE}-${r}.n`));
+  }
+  assert.deepEqual(new Set(await Promise.all(jobs)), new Set([0]));
   assert.ok(peak(run) <= 4, `peak ${peak(run)}`);
-  assert.ok(peak(run) >= 3, 'and they did overlap');
+  assert.equal(readFileSync(join(run, 'seen'), 'utf8').trim().split('\n').length, 16, 'and all of them ran');
 });
 
 test('a busy box shrinks the limit and a calm one grows it, read at each file start', async () => {
@@ -159,4 +164,30 @@ test("a one-file run goes before a long run's remaining files, though they were 
     letGo?.();
   }
   assert.deepEqual(readFileSync(join(run, 'order'), 'utf8').trim().split('\n'), ['long-1', 'short', 'long-2', 'long-3']);
+});
+
+test("the wait's cap is the run's, not each file's: past it the run's later files start at once", async () => {
+  const { env, run, dir } = setup(20);
+  const one: NodeJS.ProcessEnv = { ...env, CITADEL_TEST_FILES: '1', CITADEL_TEST_FILES_MIN: '1', CITADEL_TEST_FILES_MAX: '1', CITADEL_TEST_ROOM_WAIT: '600' };
+  const free = await holdPlace(dir, 0);
+  try {
+    writeFileSync(one.CITADEL_TEST_GATE_NOTE!, 'waiting for room\n');
+    const past = new Date(Date.now() - 601_000);
+    utimesSync(one.CITADEL_TEST_GATE_NOTE!, past, past); // the run's first wait was 601 s ago
+    assert.equal(await file(one, 10), 0);
+    assert.ok(existsSync(join(run, 'seen')), 'it ran with the place still held');
+  } finally {
+    free();
+  }
+});
+
+test('an entry a killed waiter left in line holds nobody up, and is removed', async () => {
+  const { env, dir } = setup(20);
+  const left = join(dir, 'test-line', '000000-000000000000000-dead');
+  mkdirSync(join(dir, 'test-line'), { recursive: true });
+  writeFileSync(left, '');
+  const past = new Date(Date.now() - 120_000);
+  utimesSync(left, past, past);
+  assert.equal(await file({ ...env, CITADEL_TEST_ROOM_WAIT: '600' }, 10), 0);
+  assert.ok(!existsSync(left));
 });

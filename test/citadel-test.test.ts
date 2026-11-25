@@ -268,10 +268,33 @@ test('a run waits for a held place, starts anyway after the wait, and says so in
       CITADEL_HEAVY_HELD: undefined,
     });
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /^citadel-test: waiting for room: 1 test files may run at once on this box and other files hold them; each starts anyway after 2 s$/m);
+    assert.match(r.out, /^citadel-test: waiting for room: 1 test files may run at once on this box and other files hold them; this run waits at most 2 s in all$/m);
     assert.equal(r.out.match(/waiting for room/g)?.length, 1);
     assert.ok(r.out.indexOf('waiting for room') < r.out.indexOf('1 passed'), 'said while it waits, not after the counts');
   } finally {
     process.kill(-holder.pid!, 'SIGTERM'); // the group: flock's sleep too
+  }
+});
+
+test('citadel-test killed outright leaves no watcher holding its output open', async () => {
+  const heavyDir = join(tmp, 'gate-killed');
+  const up = join(tmp, 'killed-up');
+  const f = file('killed.test.ts', `import { writeFileSync } from 'node:fs';\ntest('long', async () => { writeFileSync(${JSON.stringify(up)}, ''); await new Promise((r) => setTimeout(r, 600_000)); });`); // timing-ok: the run is killed
+  const env = scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: noList, CITADEL_HEAVY_DIR: heavyDir, CITADEL_TEST_FILES: '4', RUNNER_TEMP: undefined, GITHUB_ACTIONS: undefined, CITADEL_HEAVY_HELD: undefined });
+  const child = scratch.spawn(bin, [f], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  await until('the test running', () => existsSync(up));
+  // The watcher is citadel-test's own child and runs the same script.
+  const kids = readFileSync(`/proc/${child.pid}/task/${child.pid}/children`, 'utf8').trim().split(' ');
+  const watcher = kids.find((k) => readFileSync(`/proc/${k}/cmdline`, 'utf8').includes('tools/citadel-test'));
+  assert.ok(watcher, 'the watcher is up');
+  child.kill('SIGKILL');
+  try {
+    await until('the watcher gone', () => !existsSync(`/proc/${watcher}`));
+  } finally {
+    for (const k of kids) {
+      try {
+        process.kill(-Number(k), 'SIGKILL'); // the runner's own group, which a SIGKILL of citadel-test leaves (as on main)
+      } catch {}
+    }
   }
 });

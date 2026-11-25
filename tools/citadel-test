@@ -17,8 +17,8 @@
 # that imports one (format: specs/affected-tests-map.md). The light check on CI's side runner and the ship's gate use it.
 # One shared limit (#1928): the test files running at once across every citadel-test run on the box stay within CITADEL_TEST_FILES
 # (4 to start, 0 = off), which tools/test-gate.ts moves between CITADEL_TEST_FILES_MIN (2) and CITADEL_TEST_FILES_MAX (8) by the host's
-# CPU pressure (its header has the steps). A file waits for a place holding nothing, and starts anyway after CITADEL_TEST_ROOM_WAIT
-# seconds (120); a run that waits prints one line saying so. Not on CI (RUNNER_TEMP, GITHUB_ACTIONS), not inside a
+# CPU pressure (its header has the steps). A file waits for a place holding nothing, and starts anyway once its run has waited
+# CITADEL_TEST_ROOM_WAIT seconds (120) since its first wait, as the rest of the run then does; a run that waits prints one line saying so. Not on CI (RUNNER_TEMP, GITHUB_ACTIONS), not inside a
 # citadel-heavy job (CITADEL_HEAVY_HELD), and land.sh's smoke check runs with CITADEL_TEST_FILES=0.
 # The full suite is the land gate's job (tools/land.sh), so it refuses to run on a folder.
 set -uo pipefail
@@ -93,7 +93,7 @@ gate_note= watch= gate_opts=${NODE_OPTIONS:-}
 if [ "${CITADEL_TEST_FILES:-4}" != 0 ] && [ -z "${RUNNER_TEMP:-}${GITHUB_ACTIONS:-}${CITADEL_HEAVY_HELD:-}" ] && command -v flock >/dev/null && [ -f "$root/tools/test-gate.ts" ]; then
   gate_note=$(mktemp -u); gate_opts="${NODE_OPTIONS:-} --import=$root/tools/test-gate.ts"; export CITADEL_TEST_GATE_NOTE=$gate_note
   # Says the wait when it happens, not at the end; read -t on a pipe nobody writes is a sleep with no child to leave behind.
-  ( exec {nap}<> <(:); until [ -s "$gate_note" ]; do read -rt 0.3 -u "$nap"; done; say "$(cat "$gate_note")" ) >/dev/null & watch=$!
+  ( exec {nap}<> <(:); until [ -s "$gate_note" ]; do kill -0 $$ 2>/dev/null || exit; read -rt 0.3 -u "$nap"; done; say "$(cat "$gate_note")" ) >/dev/null & watch=$!
 fi
 trap 'rm -f "$err" "$out" "$failed" ${gate_note:+"$gate_note" "$gate_note.n"}; [ -z "$watch" ] || kill "$watch" 2>/dev/null' EXIT
 start=$SECONDS

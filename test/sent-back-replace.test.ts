@@ -15,7 +15,7 @@ const root = mkdtempSync(join(tmpdir(), 'sent-back-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
-const broadcasts: any[] = [];
+const broadcasts: { event?: { kind: string; data: string | { event: number; by: number } } }[] = [];
 const runner = new Runner(
   store,
   (m) => broadcasts.push(m),
@@ -78,7 +78,7 @@ test('a bare KEEP after the send-back keeps the first version and drops the KEEP
   const swap = broadcasts
     .map((b) => b.event)
     .filter((e) => e?.kind === 'replaced')
-    .at(-1);
+    .at(-1)!;
   const { event, by } = typeof swap.data === 'string' ? JSON.parse(swap.data) : swap.data;
   assert.ok(by < event, 'open chats drop the KEEP, not the reply');
   assert.deepEqual(

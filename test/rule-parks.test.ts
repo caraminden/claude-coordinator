@@ -4,9 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { Store } from '../src/db.ts';
+import { Store, type Ticket } from '../src/db.ts';
+import type { App } from '../src/http.ts';
+import type { Runner } from '../src/runner.ts';
+import type { Chain, LiveWaiters } from '../src/wake.ts';
 import { mailParksUnderOldRule, rulePhrases } from '../src/rule-parks.ts';
 import { bootServer, until, type Booted } from './helpers.ts';
+import { fake } from './typed.ts';
 
 // #1488: on Nov 21 Cara picked "Build in parallel" for the pipeline lane, but minions parked "waiting for pipeline
 // lane", and the chains behind them, stayed parked until she asked why #1168 wasn't working.
@@ -27,9 +31,9 @@ test('parked minions whose note names the changed rule, and the chains behind th
     const store = new Store(join(dir, 'db.sqlite'));
     const project = store.createProject('P', null);
     const tm = store.createTicket({ project_id: project.id, title: 'TM', permission_mode: 'default', created_by: 'x', kind: 'coordinator' });
-    const make = (title: string, state: string | null, note: string) => {
+    const make = (title: string, state: Ticket['state'], note: string) => {
       const t = store.createTicket({ project_id: project.id, title, permission_mode: 'default', created_by: 'x' });
-      store.updateTicket(t.id, { state, note } as any);
+      store.updateTicket(t.id, { state, note });
       return store.getTicket(t.id)!;
     };
     const lane = make('Lane', 'parked', 'go given; waiting for pipeline lane (11th)');
@@ -37,13 +41,10 @@ test('parked minions whose note names the changed rule, and the chains behind th
     const chained2 = make('Chained 2', null, 'starts when #2 is live');
     const other = make('Other', 'parked', "waiting on Josh's GPU");
     const running = make('Running', null, 'waiting for pipeline lane');
-    const chains = [
-      { ticket: chained.id, after: lane.id },
-      { ticket: chained2.id, after: chained.id },
-    ];
+    const chains = [fake<Chain>({ ticket: chained.id, after: lane.id }), fake<Chain>({ ticket: chained2.id, after: chained.id })];
     const mail: { to: number; text: string }[] = [];
-    const runner = { parked: (t: any) => t.state === 'parked' || chains.some((c) => c.ticket === t.id), leaveMail: (to: number, _a: string, text: string) => mail.push({ to, text }) };
-    const app = { store, runner, waiters: { chains: () => chains } } as any;
+    const runner = { parked: (t: Ticket) => t.state === 'parked' || chains.some((c) => c.ticket === t.id), leaveMail: (to: number, _a: string, text: string) => mail.push({ to, text }) };
+    const app = fake<App>({ store, runner: fake<Runner>(runner), waiters: fake<LiveWaiters>({ chains: () => chains }) });
 
     mailParksUnderOldRule(app, [store.getProject(project.id)!], OLD, NEW, 'scheme');
     assert.equal(mail.length, 1);

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { agentToken, bootServer, until, fakeClaude } from './helpers.ts';
+import { json } from './typed.ts';
 
 // The scheme spinner counts only turns doing work, not one held open on an approval card (#373;
 // Cara, 2026-11-07: "it should only count actually working minions"). isWorking's own cases: schemecounts.test.ts.
@@ -19,13 +20,13 @@ test('api/projects: a turn waiting on an approval card is not working until some
     const project = (await srv.call('/api/projects', { name: 'Delve' })).data;
     assert.equal((await srv.call(`/api/projects/${project.id}`, { approval_rules: 'Bash(echo:*)' }, 'PATCH')).status, 200);
     const t = (await srv.call(`/api/projects/${project.id}/tickets`, { message: 'build it', title: 'Build it' })).data;
-    const pill = async () => (await srv.call('/api/projects')).data.find((p: any) => p.id === project.id);
+    const pill = async () => (await srv.call('/api/projects')).data.find((p: { id: number }) => p.id === project.id);
     const minion = () => ({ Authorization: `Bearer ${agentToken(srv.data, t.id)}`, 'Content-Type': 'application/json' });
     // Once the fake has its prompt the turn's own token is issued: before that a token with no nonce passes, then stops.
     await until('the turn', async () => existsSync(started) && (await fetch(`${srv.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion() })).ok);
     assert.deepEqual(await pill().then(({ running, working }) => ({ running, working })), { running: true, working: 1 }, 'mid-turn');
 
-    const card = await (await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command: 'echo hi', description: 'Say hi' } }) })).json();
+    const card = await json<{ id: string }>(await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command: 'echo hi', description: 'Say hi' } }) }));
     assert.ok(card.id, JSON.stringify(card));
     assert.deepEqual(await pill().then(({ running, working }) => ({ running, working })), { running: false, working: 0 }, 'held on the card: waiting on a person');
 

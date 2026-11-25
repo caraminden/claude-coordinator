@@ -67,7 +67,7 @@ const Cara = store.createUser({ name: 'Cara', login: 'cara', admin: true, server
 const Josh = store.createUser({ name: 'Josh', login: 'josh' });
 const Dana = store.createUser({ name: 'Dana', login: 'dana' });
 for (const u of [Josh, Dana]) store.updateUser(u.id, { password_hash: await hashPassword(PASSWORD) });
-let P: any;
+let P: { id: number };
 let KEY = '';
 
 let base = '';
@@ -87,7 +87,7 @@ const ok = async (path: string, opts: Parameters<typeof call>[1] = {}) => {
 };
 
 const turns = () => jsonLines(join(root, 'turns.jsonl'));
-let ticket: any;
+let ticket: { id: number; number: number; status: string };
 const live = () => agentToken(data, ticket.id);
 const idle = () => until('the turn to end', async () => (await ok(`/api/tickets/${ticket.id}`)).ticket.status !== 'running');
 
@@ -139,7 +139,7 @@ test('a saved secret never reaches the chat, the events, the files or the prompt
 
   const events = await ok(`/api/tickets/${ticket.id}/events?after=0`);
   assert.ok(!JSON.stringify(events).includes(VALUE), 'the value is in the events');
-  const card = JSON.parse(events.find((e: any) => e.kind === 'question').data);
+  const card = JSON.parse(events.find((e: { kind: string }) => e.kind === 'question').data);
   assert.deepEqual({ name: card.secret.name, saved: card.settled.saved }, { name: 'SITE_PW', saved: 'SITE_PW' });
   const view = await ok(`/api/tickets/${ticket.id}`);
   assert.ok(!JSON.stringify(view).includes(VALUE), 'the value is in the ticket view');
@@ -208,16 +208,16 @@ test("people list, replace and delete their own secrets; a scheme's are its memb
   const mine = await ok('/api/secrets');
   assert.ok(!JSON.stringify(mine).includes(VALUE) && !JSON.stringify(mine).includes(SCHEME_VALUE), 'a list holds a value');
   assert.deepEqual(
-    mine.person.map((s: any) => s.name),
+    mine.person.map((s: { name: string }) => s.name),
     ['SITE_PW'],
   );
   assert.deepEqual(
-    mine.schemes.map((s: any) => [s.project, s.name]),
+    mine.schemes.map((s: { project: number; name: string }) => [s.project, s.name]),
     [[P.id, 'AZURE_KEY']],
   );
   // Cara's own is hers alone; the scheme's is Josh's too, and not Dana's.
   const josh = await ok('/api/secrets', { as: 'Josh' });
-  assert.deepEqual([josh.person, josh.schemes.map((s: any) => s.name)], [[], ['AZURE_KEY']]);
+  assert.deepEqual([josh.person, josh.schemes.map((s: { name: string }) => s.name)], [[], ['AZURE_KEY']]);
   const dana = await ok('/api/secrets', { as: 'Dana' });
   assert.deepEqual([dana.person, dana.schemes], [[], []]);
   assert.equal((await call('/api/secrets', { method: 'PUT', as: 'Dana', body: { scope: 'scheme', project: P.id, name: 'AZURE_KEY', value: 'mine now' } })).status, 403);

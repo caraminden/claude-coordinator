@@ -5,8 +5,11 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Project, Store } from '../src/db.ts';
+import type { AppInstructions } from '../src/db-rows.ts';
 import { settingsOverlaps } from '../src/instructions-save.ts';
 import { RULE_HOMES } from '../src/rule-homes.ts';
+import { fake } from './typed.ts';
 import { added, findCopies, overlapsFor, paragraphs, repoHomes, repoSources, schemeRules, type Source } from '../src/rule-overlap.ts';
 
 const root = join(import.meta.dirname, '..');
@@ -95,8 +98,8 @@ test("a scheme's own registered rule is checked on its saves, outside its home s
         'not a rule',
       ]),
     );
-    const project = { id: 7, name: 'Delve', instructions: '', repo_dir: repo, repo_url: null } as any;
-    const store = { appInstructions: () => ({ text: '' }), getProject: () => undefined } as any;
+    const project = fake<Project>({ id: 7, name: 'Delve', instructions: '', repo_dir: repo, repo_url: null });
+    const store = fake<Store>({ appInstructions: () => fake<AppInstructions>({ text: '' }), getProject: () => undefined });
     const check = (text: string, scope: 'scheme' | 'citadel' = 'scheme') => settingsOverlaps({ store }, project, scope, '', text);
 
     const lunch = check('## Food\n\nOn Fridays we order pizza from Marios and eat at noon sharp in the big room.');

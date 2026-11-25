@@ -64,9 +64,9 @@ test('tokens are blanked from what goes back to Citadel', () => {
 });
 
 test('one job at a time: the script gets the machine token in its environment, and its exit code decides ok', async () => {
-  const calls: any[] = [];
+  const calls: { cmd: { command: string; args: string[] }; token?: string }[] = [];
   let release!: () => void;
-  const run = (cmd: any, env: any) => {
+  const run = (cmd: { command: string; args: string[] }, env: NodeJS.ProcessEnv) => {
     calls.push({ cmd, token: env.CC_MACHINE_TOKEN });
     return new Promise((r) => {
       release = () => r({ code: 0, output: 'Done. --token AABCDEFGHIJKLMNOPQRSTUVWXYZ12' });
@@ -136,7 +136,7 @@ test("end to end: the agent connects as a runner agent, a member's list runs its
     writeFileSync(join(installed, 'keep-runners.ps1'), '');
     const logFile = join(srv.root, 'agent.log');
     agent = spawn(process.execPath, [join(installed, 'runner-agent.mjs'), srv.base, '--token-file', tokenFile, '--os', 'windows', '--sample-ms', '200', '--log', logFile], { env: { ...process.env, SystemRoot: join(srv.root, 'win') }, stdio: 'ignore' });
-    const online = await until('the runner agent to connect', async () => (await srv.call('/api/machines')).data.find((m: any) => m.name === 'desk-runners' && m.online));
+    const online = await until('the runner agent to connect', async () => (await srv.call('/api/machines')).data.find((m: { name: string; online?: boolean }) => m.name === 'desk-runners' && m.online));
     assert.equal(online.runners, true);
     // The cap and yield (#552): started from its folder with the cap and the agent's pid, its lines in the agent's log.
     const held = await until('keep-runners.ps1 to start', async () => existsSync(logFile) && /keep-runners: holding: .*/.exec(readFileSync(logFile, 'utf8'))?.[0]);
@@ -156,7 +156,7 @@ test("end to end: the agent connects as a runner agent, a member's list runs its
     assert.doesNotMatch(job.text, new RegExp(made.data.token));
 
     // Its load samples (#534) reach the CI desktop view: the second look on, since CPU needs two.
-    const pc = await until('a load sample', async () => (await srv.call('/api/ci-desktop')).data.pcs.find((p: any) => p.now));
+    const pc = await until('a load sample', async () => (await srv.call('/api/ci-desktop')).data.pcs.find((p: { now?: unknown }) => p.now));
     assert.equal(pc.now.queue, 2);
     assert.equal(pc.now.idle_sec, 180);
     assert.deepEqual(pc.restarts, [], 'a restart from before the last day is history');
@@ -273,7 +273,7 @@ test("a sample: nothing on the first look, then percentages of the whole PC, nam
   t += 30_000;
   times = { idle: 1250, total: 3000 };
   procs = [{ ...procs[0], cpu: 2 + 48 }];
-  const s = await sampler.take();
+  const s = (await sampler.take())!;
   assert.equal(s.cpu, 75);
   assert.equal(s.os, 'linux');
   assert.ok(s.cores >= 1 && s.mem_total > s.mem_free);
@@ -350,7 +350,7 @@ test('Linux: a quota changes only when its share does, and the squeeze lifts whe
     await squeeze.update(ship);
     calls.length = 0;
     await squeeze.update(ship);
-    assert.deepEqual(calls, [], 'the same share is not set again every 15 seconds');
+    assert.deepEqual(calls, [] as string[], 'the same share is not set again every 15 seconds');
     work(['/opt/r/actions-runner-claude-coordinator-2', '/opt/r/actions-runner-twireader', '/opt/r/actions-runner-twireader-2']);
     await squeeze.update(ship);
     assert.equal(calls.length, 3);
@@ -369,7 +369,7 @@ test('Linux: a quota changes only when its share does, and the squeeze lifts whe
     calls.length = 0;
     tick(SHIP_HOLD_MS - 1);
     await squeeze.tick();
-    assert.deepEqual(calls, []);
+    assert.deepEqual(calls, [] as string[]);
     tick(1);
     await squeeze.tick();
     assert.ok(calls.length === 3 && calls.every((c) => c.endsWith('CPUQuota=')), 'Citadel silent for 2 minutes: lifted');

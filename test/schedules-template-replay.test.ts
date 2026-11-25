@@ -28,7 +28,7 @@ test("a template schedule's page renders its kit template fresh with the notes, 
   const db = new DatabaseSync(join(root, 'data', 'coordinator.db'), { timeout: 30_000 });
   db.prepare('UPDATE schedules SET brief = ? WHERE id = ?').run('STALE stored copy', id);
   db.close();
-  const page = (await call(`/api/projects/${p.id}/schedules`)).data.schedules.find((s: any) => s.id === id);
+  const page = (await call(`/api/projects/${p.id}/schedules`)).data.schedules.find((s: { id: number; brief: string }) => s.id === id);
   assert.notEqual(page.brief, 'STALE stored copy', 'the page shows the stored copy instead of the template');
   assert.equal(page.brief, fresh, 'the fresh template plus notes');
 });

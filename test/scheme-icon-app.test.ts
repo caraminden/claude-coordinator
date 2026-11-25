@@ -9,6 +9,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MAX_ICON_BYTES } from '../src/scheme-icon.ts';
 import { bootServer, stopTurns } from './helpers.ts';
+import { json } from './typed.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'scheme-icon-app-'));
 const data = join(root, 'data');
@@ -71,7 +72,7 @@ test("a scheme with no repo icon shows its home app's icon, inert, capped, versi
   const srv = await bootServer({ root });
   after(() => srv.stop());
   const get = (id: number) => fetch(`${srv.base}/api/projects/${id}/icon`, { headers: { Cookie: srv.cookie } });
-  const list = async () => Object.fromEntries((await fetch(`${srv.base}/api/projects`, { headers: { Cookie: srv.cookie } }).then((r) => r.json())).map((p: any) => [p.name, p.icon]));
+  const list = async () => Object.fromEntries((await fetch(`${srv.base}/api/projects`, { headers: { Cookie: srv.cookie } }).then((r) => json<{ name: string; icon: unknown }[]>(r))).map((p) => [p.name, p.icon]));
 
   const res = await get(twi.id);
   assert.equal(res.status, 200);

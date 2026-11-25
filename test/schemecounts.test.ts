@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { answeredItems, putBackCards, withoutCards, cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
+import { fake } from './typed.ts';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -123,7 +124,7 @@ test('schemePill: violet only when something new waits, not when the count moved
 });
 
 test("the scheme you're in: a new ask is new unless the chat you're on asks it, until you open another chat (#548)", () => {
-  const item = (key, ticketId) => ({ key, ticketId });
+  const item = (key: string, ticketId: number) => ({ key, ticketId });
   const a = item('question:1', 7),
     b = item('replies:8', 8),
     c = item('plan:3', 9);
@@ -154,14 +155,14 @@ test("app badge: on while any visible scheme is purple, the open scheme by this 
 
 test('app badge: calls the API only on a change, and nothing without it (#980)', () => {
   const calls: string[] = [];
-  const nav = { setAppBadge: () => (calls.push('set'), Promise.resolve()), clearAppBadge: () => (calls.push('clear'), Promise.resolve()) };
+  const nav = fake<Navigator & { setAppBadge(): Promise<void>; clearAppBadge(): Promise<void> }>({ setAppBadge: () => (calls.push('set'), Promise.resolve()), clearAppBadge: () => (calls.push('clear'), Promise.resolve()) });
   const st = { on: null as boolean | null };
   syncBadge(true, st, nav);
   syncBadge(true, st, nav);
   syncBadge(false, st, nav);
   syncBadge(false, st, nav);
   assert.deepEqual(calls, ['set', 'clear']);
-  assert.equal(syncBadge(true, { on: null }, {} as any), false);
+  assert.equal(syncBadge(true, { on: null }, fake<Navigator>({})), false);
 });
 
 // #1400: Peek Auras' rail said 2 away from it and 1 inside it. It's split (#919): the page lists Cara's own Taskmaster
@@ -222,11 +223,11 @@ test("answering a card drops it from the strip count and the row's open cards be
   assert.equal(minionCount(stripItems(view, items)), 2);
   const hit = answeredItems(items, 9, 'qa');
   assert.deepEqual(
-    hit.map((i) => i.key),
+    hit.map((i: { key: string }) => i.key),
     ['question:50'],
     "only that minion's card with that id",
   );
-  const gone = new Set(hit.map((i) => i.key));
+  const gone = new Set(hit.map((i: { key: string }) => i.key));
   assert.equal(stripItems(view, items, gone).length, 2);
   assert.equal(minionCount(stripItems(view, items, gone)), 2, 'it still has its other card');
   const both = new Set([...gone, 'question:51']);

@@ -38,13 +38,14 @@ const read = (path: string): string => {
 };
 
 /** A repo's files as Docs, with their git history and links to GitHub when the repo is there. */
-async function repoDocs(repo: string, repoUrl: string | null, groups: { kind: SourceKind; files: string[]; paths: string[]; adr?: (f: string) => boolean }[]): Promise<Doc[]> {
+async function repoDocs(repo: string, repoUrl: string | null, groups: { kind: SourceKind; files: string[]; paths: string[]; adr?: (f: string) => boolean }[], got: { historyFailed: boolean }): Promise<Doc[]> {
   const branch = (await gitOut(['rev-parse', '--abbrev-ref', 'HEAD'], repo))?.trim() || 'main';
   const edits = await gitEdits(
     repo,
     groups.flatMap((g) => g.paths),
     (file, sha) => githubHref(repoUrl, sha, file),
   );
+  if (edits.failed) got.historyFailed = true;
   return groups.flatMap((g) =>
     g.files.map((file) => ({
       kind: g.kind,
@@ -75,6 +76,7 @@ export async function loadDecisions(app: App, project: Project): Promise<Decisio
     { kind: 'citadel', place: { label: 'Citadel-wide instructions', href: `#/p/${pid}/app-instructions` }, text: app_.text, edits: historyEdits(store.appInstructionHistory(HISTORY), `#/p/${pid}/app-instructions`) },
     { kind: 'scheme', place: { label: 'Scheme instructions', href: `#/p/${pid}/instructions` }, text: project.instructions ?? '', edits: historyEdits(store.instructionHistory(pid, HISTORY), `#/p/${pid}/instructions`) },
   ];
+  const got = { historyFailed: false };
   const repo = project.repo_dir && existsSync(project.repo_dir) ? project.repo_dir : null;
   if (repo) {
     const adr = adrDir(read(join(repo, 'CLAUDE.md')));
@@ -82,14 +84,19 @@ export async function loadDecisions(app: App, project: Project): Promise<Decisio
     // A README in the ADR folder is its index, not a decision.
     const adrs = mdFiles(repo, adr.replace(/\/$/, ''), 0).filter((f) => !/readme|template/i.test(f));
     docs.push(
-      ...(await repoDocs(repo, project.repo_url, [
-        { kind: 'repo', files: rules, paths: ['CLAUDE.md', 'AGENTS.md', '.claude/rules'] },
-        { kind: 'adr', files: adrs, paths: [adr], adr: () => true },
-      ])),
+      ...(await repoDocs(
+        repo,
+        project.repo_url,
+        [
+          { kind: 'repo', files: rules, paths: ['CLAUDE.md', 'AGENTS.md', '.claude/rules'] },
+          { kind: 'adr', files: adrs, paths: [adr], adr: () => true },
+        ],
+        got,
+      )),
     );
   }
   const citadelUrl = store.getProject(GLOBAL_OWNER)?.repo_url ?? null;
-  docs.push(...(await repoDocs(ROOT, citadelUrl, [{ kind: 'kit', files: mdFiles(ROOT, 'kit'), paths: ['kit'] }])));
+  docs.push(...(await repoDocs(ROOT, citadelUrl, [{ kind: 'kit', files: mdFiles(ROOT, 'kit'), paths: ['kit'] }], got)));
   const seen = new Set<string>();
   for (const f of memoryFolders(project.repo_dir, memoryLogins(app))) {
     let files: string[] = [];
@@ -125,7 +132,7 @@ export async function loadDecisions(app: App, project: Project): Promise<Decisio
   if (hit?.hash === hash) return hit.list;
   const list = assemble(docs, names, staleKinds);
   cache.set(pid, { hash, list });
-  tellStale(app, project, list);
+  tellStale(app, project, list, got.historyFailed);
   return list;
 }
 
@@ -133,12 +140,13 @@ export async function loadDecisions(app: App, project: Project): Promise<Decisio
  * Leave the scheme's Taskmaster a held note for each new reversal that still has copies written in this scheme.
  * The first look at a scheme only records what is there, so turning this on does not mail every old reversal.
  */
-export function tellStale(app: App, project: Project, list: DecisionList) {
+export function tellStale(app: App, project: Project, list: DecisionList, historyFailed = false) {
   const key = `decisions_told:${project.id}`;
   const told = app.store.getSetting<string[]>(key);
   const now = list.decisions.filter((d) => d.reversed?.stale.length);
   const ids = now.map((d) => d.id);
-  if (!told) return void app.store.setSetting(key, ids);
+  // A history that couldn't be read leaves its reversals out of this look: record nothing, or the next load mails them all as new (2ME8).
+  if (!told) return historyFailed ? undefined : void app.store.setSetting(key, ids);
   const fresh = now.filter((d) => !told.includes(d.id));
   if (!fresh.length) return;
   app.store.setSetting(key, [...new Set([...told, ...ids])].slice(-500));

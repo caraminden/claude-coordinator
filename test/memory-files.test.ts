@@ -49,7 +49,7 @@ test('a save made from older text is refused once the note changed, and an unche
   saveNote(dir, 'b.md', 'a session wrote this');
   assert.throws(
     () => saveNote(dir, 'b.md', "the page's older edit", opened),
-    (e: any) => e.status === 409 && /changed since you opened it/.test(e.message),
+    (e: Error & { status?: number }) => e.status === 409 && /changed since you opened it/.test(e.message),
   );
   assert.equal(readFileSync(join(dir, 'b.md'), 'utf8'), 'a session wrote this');
   saveNote(dir, 'b.md', 'saved from what was shown', 'a session wrote this');

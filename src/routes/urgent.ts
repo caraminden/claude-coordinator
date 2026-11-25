@@ -86,6 +86,8 @@ export const urgentRoutes: Route[] = [
       if (on) {
         const t = markable(store.getTicket(ticket.id), 'starts now');
         if (!turnLine.has(t.id) && startNow.get(t.id)?.user !== session.uid) throw new HttpError(409, "It isn't waiting for a worker");
+        // In a scheme they can't see any more: theirs to neither use nor release, so it doesn't count.
+        for (const h of startNow.list()) if (h.user === session.uid && !store.canSee(session, store.getTicket(h.ticket)!.project_id)) startNow.end(h.ticket);
         const refused = startNow.press(t.id, session.uid, session.name);
         if (refused && 'theirs' in refused) throw new HttpError(409, `${refused.theirs.by} gave it a worker of its own already`);
         if (refused) {

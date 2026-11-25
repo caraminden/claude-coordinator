@@ -66,10 +66,11 @@ export class StartNow {
     const was = this.get(ticketId);
     if (was && was.user !== user) return { theirs: was };
     if (was) return this.touch(ticketId, user);
-    const mine = this.list().filter((h) => h.user === user);
+    this.sweep();
+    const mine = this.saved.filter((h) => h.user === user);
     if (mine.length >= HOLD.each) return { full: mine };
     const at = this.d.now();
-    this.save([...this.list(), { ticket: ticketId, user, by, since: at, at }], [ticketId]);
+    this.save([...this.saved, { ticket: ticketId, user, by, since: at, at }], [ticketId]);
     return null;
   }
 

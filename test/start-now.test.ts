@@ -95,7 +95,7 @@ test("one person's hold refuses another's, until it ends", () => {
 });
 
 /** The route's handler, as the router calls it once it has let the caller in. */
-async function put(app: unknown, ticket: unknown, body: unknown, session: object = { name: 'Josh', uid: JOSH }) {
+async function put(app: unknown, ticket: unknown, body: unknown, session: object = { name: 'Josh', uid: JOSH, admin: true }) {
   const route = urgentRoutes.find((r) => r.path === '/api/tickets/:ticket/start-now')!;
   const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: { 'content-type': 'application/json' } });
   const res = { status: 0, text: '', headersSent: false, setHeader() {}, writeHead: (s: number) => ((res.status = s), res), end: (b?: string) => void (res.text = b ?? '') };
@@ -142,6 +142,14 @@ test('the route starts a waiting minion, refuses one that is not, and names the 
     held(hold),
   );
   assert.match(full.error, new RegExp(`#${t(a)!.number} and #`));
+  const away = held(hold)[0];
+  const spare = minion();
+  waits.add(spare);
+  const blind = { ...app, store: Object.assign(Object.create(store), { canSee: (_: unknown, p: number) => p !== 99, getTicket: (id: number) => (id === away ? { ...store.getTicket(id)!, project_id: 99 } : store.getTicket(id)) }) };
+  assert.equal((await put(blind, t(spare), { on: true })).status, 200, 'one in a scheme they left neither counts nor shows');
+  assert.ok(!held(hold).includes(away));
+  hold.end(spare);
+  assert.equal(hold.press(away, JOSH, 'Josh'), null);
   const off = await put(app, t(a), { on: false }, { name: 'Cara', uid: CARA });
   assert.deepEqual([off.status, off.start_now, held(hold).includes(a)], [200, null, false], "anyone's to release");
 });

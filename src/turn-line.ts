@@ -245,6 +245,7 @@ export class TurnLine {
   }
 
   /** Who gave it a worker of its own, while they have one left: a hold let go mid-turn keeps its worker until that turn ends, or presses in a row would pass "Two per person". */
+  // shortcut: a restart forgets who started a let-go turn, so its person may start one more; save it with the turn if that's ever used.
   private forcedFor(ticketId: number): number | null {
     const user = this.host.forced(ticketId)?.user;
     if (user === undefined) return null;

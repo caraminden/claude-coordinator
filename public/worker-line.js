@@ -409,7 +409,7 @@ function draw() {
     ...(g.urgent.length ? [] : [h('li', { class: 'line-lane' }, 'Nobody is Urgent. Drop a minion here, or press ! on it.')]),
     ...g.urgent.map((r) => rowOf(r, g, num(r), true)),
     h('li', { class: 'line-head', 'data-item': '', 'data-divider': '' }, 'Then, in order'),
-    ...(g.rest.length ? g.rest.map((r) => rowOf(r, g, num(r), false)) : [h('li', { class: 'line-none' }, emptyCard('Nobody waits for a worker', 'Minions line up here when every worker is taken.'))]),
+    ...(g.rest.length ? g.rest.map((r) => rowOf(r, g, num(r), false)) : [h('li', { class: 'line-none' }, emptyCard(waiting ? 'Nobody else waits for a worker' : 'Nobody waits for a worker', 'Minions line up here when every worker is taken.'))]),
   );
   // The heading and a minion nobody here can see are places to drop past, not rows to pick up.
   for (const el of list.querySelectorAll('[data-divider], .other')) el.addEventListener('pointerdown', (e) => e.stopPropagation());

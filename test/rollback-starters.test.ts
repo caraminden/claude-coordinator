@@ -48,7 +48,7 @@ function world(over: Record<string, unknown> = {}) {
     dir,
     copy: false,
     deployLive: false,
-    env: { PATH: '/bin', DEPLOY_LIVE: '/scratch', DEPLOY_SOURCE: '', DEPLOY_OTHER: 'no', MY_DEPLOY_DB: 'no' },
+    env: { PATH: '/bin', DEPLOY_LIVE: '/scratch', DEPLOY_SOURCE: '', DEPLOY_OTHER: 'no', DEPLOY_UNITS: 'no', MY_DEPLOY_DB: 'no' },
     ownScheme: () => (s.own === 3 ? s.project : { id: s.own }),
     githubOf: (d: string) => ({ ...KEY, dir: d }),
     startDeploy: call('deploy'),
@@ -140,7 +140,7 @@ test("Citadel's server goes back in a job of its own, with only deploy.sh's own 
   assert.deepEqual(j.argv, ['bash', 'tools/deploy.sh', '--to', TO]);
   assert.equal(env.PATH, '/bin');
   assert.equal(env.DEPLOY_LIVE, '/scratch');
-  for (const k of ['DEPLOY_SOURCE', 'DEPLOY_OTHER', 'MY_DEPLOY_DB']) assert.ok(!(k in env), k);
+  for (const k of ['DEPLOY_SOURCE', 'DEPLOY_OTHER', 'DEPLOY_UNITS', 'MY_DEPLOY_DB']) assert.ok(!(k in env), k);
   assert.match(String(j.unit), /^citadel-rollback-\d+$/);
   assert.match(String(j.description), /aaaaaaaaa /);
   assert.equal(j.ticketId, 0);

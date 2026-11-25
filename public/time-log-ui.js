@@ -179,16 +179,16 @@ function explainBar(e, log) {
   const btn = (label) => h('button', { class: 'small tl-explain-btn', 'data-focus': 'explain', disabled: !!writing, onclick: explain }, label);
   const bits = [];
   if (writing) bits.push(h('span', { class: 'tl-writing', role: 'status' }, `Haiku is writing what happened in each ${last ? 'new part' : 'step'}…`, x.writing && !e.explaining ? ` (asked by ${x.writing.by})` : ''));
-  else if (!last) bits.push(btn('Explain'), h('span', { class: 'muted' }, 'Haiku writes what happened in each step'));
+  else if (!last && !failed) bits.push(btn('Explain'), h('span', { class: 'muted' }, 'Haiku writes what happened in each step'));
   if (last) {
     const all = x.presses.map((p) => `${p.by}, ${stamp(p.at)}${cents(p.cost)}`).join('\n');
     bits.push(
       h('span', { class: 'tl-by', tabindex: 0, 'data-tip': `Haiku read the chat's record of each part. It can miss things: each line's squares show what it rests on.\n${all}` }, h('b', {}, "Haiku's reading"), ` · ${last.by}, ${stamp(last.at)}${cents(last.cost)}`),
       h('button', { class: 'small secondary', 'data-focus': 'plain', 'aria-pressed': String(!!panel.ui.tlPlain), onclick: () => ((panel.ui.tlPlain = !panel.ui.tlPlain), draw()) }, panel.ui.tlPlain ? 'Show Explain' : 'Hide Explain'),
     );
-    if (fresh && !writing) bits.push(h('span', { class: 'tl-stale' }, 'Out of date: something new since'), btn(`Explain the new part${fresh > 1 ? 's' : ''}`));
+    if (fresh && !writing) bits.push(h('span', { class: 'tl-stale' }, 'Out of date: something new since'), failed ? '' : btn(`Explain the new part${fresh > 1 ? 's' : ''}`));
   }
-  return [h('div', { class: 'tl-explain' }, bits), failed || ''];
+  return [bits.length ? h('div', { class: 'tl-explain' }, bits) : '', failed || ''];
 }
 
 /** A time in the log: its day too when that isn't the day the log starts on. */

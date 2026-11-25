@@ -241,7 +241,12 @@ test("the kit's built-ins: on every scheme's page once, switchable, their own te
     BUILT_INS.map((b) => b.slug),
     'each once, in the kit order, first on the page',
   );
-  assert.ok(kit.every((e) => e.stage === 'ship' && e.enabled && !e.trial && e.source?.startsWith('kit:')));
+  assert.deepEqual(
+    kit.filter((e) => !e.enabled).map((e) => e.slug),
+    ['verifier'],
+    'every built-in is on but the opt-in verifier (#1740)',
+  );
+  assert.ok(kit.every((e) => e.stage === 'ship' && !e.trial && e.source?.startsWith('kit:')));
   assert.equal(set.list(9).length, 0, 'per scheme: another scheme gets its own when its page opens');
   // A scheme switches one and adds to its text; the kit's name, kind and trial are not its to change.
   set.save(3, 'lens-tests', { enabled: false }, 'Josh', 'Turned off');
@@ -260,6 +265,24 @@ test("every lens in the self-review's lenses.md has a built-in, and no built-in 
     BUILT_INS.filter((b) => b.slug.startsWith('lens-')).map((b) => b.name.replace(/^Lens: /, '')),
     lenses,
   );
+});
+
+test('the opt-in verifier (#1740): off says nothing to turns, on is said, per scheme, and its additions reach the Grunt only then', () => {
+  const { set } = fresh();
+  const dir = join(root, 'kit-verifier');
+  set.ensureBuiltIns(3);
+  set.ensureBuiltIns(9);
+  assert.equal(kitLine(set.list(3), dir), '', 'off is how the kit has it');
+  set.save(3, 'verifier', { body: 'Try it in Peek too.' }, 'Josh', 'Edited by hand');
+  assert.equal(kitLine(set.list(3), dir), '');
+  set.save(3, 'verifier', { enabled: true }, 'Josh', 'Turned on');
+  const line = kitLine(set.list(3), dir);
+  assert.match(line, /^Kit reviewers: This scheme switched on: Verifier \(/);
+  assert.doesNotMatch(line, /switched off/);
+  assert.match(line, /verifier\.md` \(Verifier\)/);
+  assert.equal(kitLine(set.list(9), dir), '', 'another scheme stays off');
+  set.ensureBuiltIns(3);
+  assert.equal(set.get(3, 'verifier')?.enabled, true, 'opening the page again keeps the switch');
 });
 
 test('who gives the risk label: the pre-ship review, else a calibrated entry marked to; the turn hears which', () => {

@@ -43,6 +43,7 @@ scheme with Fable off gets them without Fable):
 | `citadel:investigator` | sonnet | medium |
 | `citadel:scout` | sonnet | medium |
 | `citadel:fresh-eyes` | opus | high |
+| self-review's verifier (`general-purpose`) | sonnet | medium |
 | `citadel:professor` | opus | high |
 | `citadel:critic` | from the rubric | from the rubric |
 

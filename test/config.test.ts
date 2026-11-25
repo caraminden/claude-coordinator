@@ -15,6 +15,7 @@ test('an empty environment gives every default', () => {
     contraptionsDir: null,
     preview: false,
     bootCheck: false,
+    exitsWithTest: false,
     idleExitMs: 0,
     noCowDb: false,
     dbWriteDelayMs: 0,

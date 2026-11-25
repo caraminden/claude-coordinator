@@ -25,7 +25,7 @@ const minionObjects = (id) => new Set([view?.tickets?.get(id), view?.ticket?.id 
  * Mark or unmark `row` ({ ticket, number, title }): it shows at once here, in its header and its row, and the request
  * runs behind; a refusal puts it back with a toast and a Retry.
  */
-export function setUrgent(row, on, before) {
+export function setUrgent(row, on, before, { undoing = false } = {}) {
   const id = row.ticket;
   const g = shown();
   const wasOn = g ? g.urgent.some((r) => r.ticket === id) : [...minionObjects(id)].some((t) => t.urgent);
@@ -39,9 +39,10 @@ export function setUrgent(row, on, before) {
     if (view?.id === id) renderTicketHead();
     draw();
   };
-  toast(on && wasOn ? `Moved ${name} in Urgent` : on ? `${name} is Urgent: it goes ahead of the line` : `${name} is no longer Urgent`, {
-    undo: { run: () => setUrgent(row, wasOn, wasOn ? back : undefined), live: () => !op.dead },
-  });
+  if (!undoing)
+    toast(on && wasOn ? `Moved ${name} in Urgent` : on ? `${name} is Urgent: it goes ahead of the line` : `${name} is no longer Urgent`, {
+      undo: { run: () => setUrgent(row, wasOn, wasOn ? back : undefined, { undoing: true }), live: () => !op.dead },
+    });
   return optimistic({
     key: 'urgent', // each move's `before` counts on the ones ahead of it
     sets: `urgent:${id}`,
@@ -97,7 +98,7 @@ export function urgentButton(t) {
       onclick: () => toggleUrgent(t),
     },
     h('span', { class: 'urgent-bang', 'aria-hidden': 'true' }, '!'),
-    h('span', {}, u ? `Urgent · ${u.by}` : 'Urgent'),
+    h('span', { class: u ? '' : 'urgent-off' }, u ? `Urgent · ${u.by}` : 'Urgent'),
   );
 }
 
@@ -117,6 +118,7 @@ export function openLine(from = null) {
   const list = h('ol', { class: 'line-rows' });
   const body = h('div', { class: 'line-drawer-body' }, h('div', { class: 'line-pool' }), h('p', { class: 'line-how muted small' }, 'Next first. Drag one into Urgent to send it ahead; drag it below to let the order choose.'), list);
   const onHash = () => dialog.close();
+  const gutter = innerWidth - document.documentElement.clientWidth;
   const dialog = openDialog({
     title: 'The line',
     body,
@@ -127,6 +129,7 @@ export function openLine(from = null) {
     },
   });
   addEventListener('hashchange', onHash);
+  document.documentElement.style.setProperty('--line-gutter', `${gutter}px`);
   open = { dialog, list, line: null, workers: null, failed: null, from };
   dragReorder(list, {
     items: () => [...list.querySelectorAll(':scope > li[data-item]')],

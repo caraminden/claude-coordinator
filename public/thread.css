@@ -100,6 +100,10 @@ button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
   .ticket-head > .row > button { flex: none; white-space: nowrap; }
   .find-box .chat-find:focus, .find-box .chat-find:not(:placeholder-shown) { width: 11rem; }
 }
+/* Beside two open sidebars the line is full: what isn't set shows its icon alone, and a name on Urgent takes the spare words' room (#1889). */
+@media (min-width: 801px) and (max-width: 1700px) {
+  .ticket-head .head-sub > .note-btn:not(.on) > :is(.wide-only, .urgent-off), .ticket-head .head-sub:has(> .urgent-btn.on) .wide-only { display: none; }
+}
 /* Refresh button at the top of the screen, phones only (desktop browsers have their own). */
 .refresh-btn { display: none; }
 @media (max-width: 800px) {
@@ -134,6 +138,7 @@ button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
   .ticket-head .head-sub[hidden] { display: none; }
   /* A minion's ✎ for a new person note (#146): just the pen on phones. */
   .ticket-head .note-btn { width: var(--head-btn); height: var(--head-btn); justify-content: center; padding: 0; }
+  .ticket-head .note-btn.urgent-btn { width: auto; padding: 0 0.45rem; } /* it says who, on a phone too */
   /* In the ⋯ menu: ↻ ‹ › end the line. */
   .ticket-head .head-sub .head-nav { margin-left: auto; }
   .ticket-head .head-sub .head-nav > .refresh-btn { width: var(--head-btn); height: var(--head-btn); }
@@ -389,6 +394,7 @@ details.turn-end .actions { text-align: left; padding: 0 0 0 0.2rem; font-size: 
    what's running and the time sit in the thread bar's readout above, so they aren't repeated here. */
 .typing { display: flex; align-items: center; gap: 0.4rem; margin: 0.25rem 0 0.75rem; padding: 0; border: 0; border-radius: 10px; background: none; max-width: 100%; text-align: left; color: var(--muted); font-size: 0.9em; white-space: nowrap; cursor: pointer; }
 .typing:hover .lead, .typing:focus-visible .lead { text-decoration: underline; }
+.typing.in-line .lead { text-decoration: underline dotted; text-underline-offset: 0.2em; }
 .typing .lead { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .typing .queued { flex: none; font-variant-numeric: tabular-nums; }
 .typing .sep { flex: none; opacity: 0.6; }

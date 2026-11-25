@@ -83,8 +83,8 @@ function appServer(env: Record<string, string | undefined>) {
   child.on('exit', () => children.delete(child));
   const waiting = new Map<number, (m: Reply) => void>();
   let id = 1;
-  jsonLines<Reply>(child.stdout!, (m) => {
-    if (m.id !== undefined && m.method === undefined) waiting.get(m.id)?.(m), waiting.delete(m.id);
+  jsonLines<Reply | null>(child.stdout!, (m) => {
+    if (m?.id !== undefined && m.method === undefined) waiting.get(m.id)?.(m), waiting.delete(m.id);
   });
   const call = (method: string, params: object) => new Promise<Reply>((r) => (waiting.set(++id, r), child.stdin!.write(JSON.stringify({ id, method, params }) + '\n')));
   const ready = call('initialize', { clientInfo: { name: 'citadel-test', version: '1' }, capabilities: { experimentalApi: false } }).then(() => child.stdin!.write(JSON.stringify({ method: 'initialized' }) + '\n'));

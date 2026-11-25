@@ -4,8 +4,8 @@
 // access token's expiry or after a 401, and reloads the login from disk first. So a run holds the person's
 // lock just long enough to check the token, refreshing it early while it holds the lock, and then runs
 // beside the others; it keeps the lock for the whole run only when that can't be made safe (`serial`).
-// Taken by a Codex turn (src/codex-turn.ts) and citadel-codex-review (src/codex-review.ts); no local
-// imports, so it pins on its own.
+// Taken by a Codex turn (src/codex-turn.ts) and citadel-codex-review (src/codex-review.ts); it
+// imports only json-lines.ts, which is pinned with it.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

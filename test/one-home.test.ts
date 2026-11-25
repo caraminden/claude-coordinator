@@ -35,11 +35,20 @@ const FAMILIES: Record<string, Family> = {
   },
   'JSON lines': {
     use: 'jsonLines in src/json-lines.ts',
-    copy: /while \(\((\w+) = \w+\.indexOf\('\\n'\)\) (?:>= 0|> -1|!== -1)\)/g,
-    planted: ["while ((nl = buf.indexOf('\\n')) >= 0) {"],
+    copy: /while \(\((\w+) = \w+\.indexOf\('\\n'\)\) (?:>= 0|> -1|!== -1)\)|\bcreateInterface\(\s*\{\s*input\b/g,
+    planted: ["while ((nl = buf.indexOf('\\n')) >= 0) {", "createInterface({ input: child.stdout }).on('line', (line) => JSON.parse(line));"],
     kept: {
       'src/json-lines.ts': { copies: 1, why: 'the home' },
       'src/openrouter.ts': { copies: 1, why: 'server-sent events, not a JSON value a line' },
+      // readline also hands over a last line with no newline, and splits at U+2028: moving one is a behaviour change.
+      'src/replay.ts': { copies: 2, why: "its own stdin, and a stand-in turn's output, on readline" },
+      'src/mcp.ts': { copies: 1, why: 'its own stdin, on readline' },
+      'src/machine-mcp.ts': { copies: 1, why: 'its own stdin, on readline' },
+      'src/handover.ts': { copies: 2, why: 'plain words, not JSON' },
+      'src/ports.ts': { copies: 1, why: 'plain text' },
+      'tools/boot-check-claude.ts': { copies: 1, why: 'pulls replies one at a time (async iterator)' },
+      'tools/prompt-evals/stub.ts': { copies: 1, why: 'its own stdin, on readline' },
+      'tools/review-escapes/fake-claude.mjs': { copies: 2, why: 'a fake outside src/, on readline' },
     },
   },
   'error alias': {
@@ -50,9 +59,13 @@ const FAMILIES: Record<string, Family> = {
   },
   'file reply': {
     use: 'sendFile in src/http.ts',
-    copy: /pipeline\(createReadStream\(\w+\), (?:ctx\.)?res\)/g,
-    planted: ['await pipeline(createReadStream(file), ctx.res).catch(() => {});'],
-    kept: { 'src/http.ts': { copies: 1, why: 'the home' } },
+    copy: /pipeline\(createReadStream\([^()]*\), (?:ctx\.)?res\)/g,
+    planted: ['await pipeline(createReadStream(file), ctx.res).catch(() => {});', 'await pipeline(createReadStream(file.path), res);'],
+    kept: {
+      'src/http.ts': { copies: 1, why: 'the home' },
+      'src/routes/files.ts': { copies: 1, why: 'answers ranges' },
+      'src/machine-jobs.ts': { copies: 1, why: 'a broken send is an error there, and there is no HEAD' },
+    },
   },
   setting: {
     use: 'a named setting in src/config.ts',

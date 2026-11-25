@@ -125,6 +125,11 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     inputs: `${files.length} minion sessions, ${calls} Bash and Read calls, ${Math.round(was / 1000)}k chars printed, ${Math.round(is / 1000)}k with the guard`,
     hits,
     real: [],
-    limits: ["files are main's at the time: lines the minion had edited, and files outside its worktree, never match, so this undercounts", 'only transcripts this login can read', 'a model that is refused a repeat may do something else; the transcript goes on as it did'],
+    limits: [
+      "files are main's at the time: lines the minion had edited, and files outside its worktree, never match, so this undercounts",
+      'main is sampled each half hour: a file that landed inside one matches from the next',
+      'only transcripts this login can read',
+      'a model that is refused a repeat may do something else; the transcript goes on as it did',
+    ],
   };
 }

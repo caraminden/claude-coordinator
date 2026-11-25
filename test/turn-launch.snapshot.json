@@ -116,7 +116,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 180000,
+   "autoCompactWindow": 250000,
    "bashOutputMaxChars": 12000,
    "skillOverrides": {
     "update-config": "off",
@@ -321,7 +321,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 180000,
+   "autoCompactWindow": 250000,
    "bashOutputMaxChars": 12000,
    "skillOverrides": {
     "update-config": "off",
@@ -1332,7 +1332,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 180000,
+   "autoCompactWindow": 250000,
    "bashOutputMaxChars": 12000,
    "skillOverrides": {
     "update-config": "off",
@@ -1533,7 +1533,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 180000,
+   "autoCompactWindow": 250000,
    "bashOutputMaxChars": 12000,
    "skillOverrides": {
     "update-config": "off",
@@ -1740,7 +1740,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 180000,
+   "autoCompactWindow": 250000,
    "bashOutputMaxChars": 12000,
    "skillOverrides": {
     "update-config": "off",
@@ -1962,7 +1962,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 180000,
+   "autoCompactWindow": 250000,
    "bashOutputMaxChars": 12000,
    "skillOverrides": {
     "update-config": "off",
@@ -2187,7 +2187,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 180000,
+   "autoCompactWindow": 250000,
    "bashOutputMaxChars": 12000,
    "skillOverrides": {
     "update-config": "off",
@@ -2394,7 +2394,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 180000,
+   "autoCompactWindow": 250000,
    "bashOutputMaxChars": 12000,
    "skillOverrides": {
     "update-config": "off",
@@ -2605,7 +2605,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 180000,
+   "autoCompactWindow": 250000,
    "bashOutputMaxChars": 12000,
    "skillOverrides": {
     "update-config": "off",
@@ -2813,7 +2813,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 180000,
+   "autoCompactWindow": 250000,
    "bashOutputMaxChars": 12000,
    "skillOverrides": {
     "update-config": "off",
@@ -3013,7 +3013,7 @@
    },
    "syncClaudeAiSkills": false,
    "disableClaudeAiConnectors": true,
-   "autoCompactWindow": 180000,
+   "autoCompactWindow": 250000,
    "bashOutputMaxChars": 12000,
    "skillOverrides": {
     "update-config": "off",

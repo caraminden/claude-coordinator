@@ -123,7 +123,7 @@ test('after a compaction a range to edit prints again, the wholesale second pass
   const told = compact();
   assert.match(told, /- src\/a\.ts 1-400: .*1 part1/);
   assert.match(told, /- src\/b\.ts 1-900/);
-  assert.match(told, /notes\.md/);
+  assert.match(told, /notes-s\.md/);
   assert.doesNotMatch(told, /in 15 minutes/);
   assert.equal(bash('sed -n 1,100p src/a.ts', a(1, 100)).cut, false, 'the first 12k chars print again');
   const r = bash('sed -n 1,400p src/b.ts', b(1, 400));
@@ -134,7 +134,7 @@ test('after a compaction a range to edit prints again, the wholesale second pass
   assert.match(bash('sed -n 1,100p src/a.ts', a(1, 100)).text, /unchanged since you printed them/);
   assert.equal(bash('sed -n 1,90p src/a.ts # allow_large', a(1, 90)).cut, false);
   const again = compact();
-  assert.match(again, /This is compaction 2 in 15 minutes; you went back to: .*a\.ts.*Before anything else write what you know.*notes\.md/);
+  assert.match(again, /This is compaction 2 in 15 minutes; you went back to: .*a\.ts.*Before anything else write what you know.*notes-s\.md/);
 });
 
 test('past the hour, or with the notes kept, the compaction message follows', (t) => {
@@ -142,10 +142,10 @@ test('past the hour, or with the notes kept, the compaction message follows', (t
   bash('sed -n 1,100p src/a.ts', a(1, 100));
   compact();
   files.now += 16 * 60_000;
-  disk.set(join(dir, 'notes.md'), ['a.ts:12 is the bug']);
+  disk.set(join(dir, 'notes-s.md'), ['a.ts:12 is the bug']);
   const told = compact();
   assert.doesNotMatch(told, /in 15 minutes/);
-  assert.match(told, /Your notes, .*notes\.md \(1 lines.*\na\.ts:12 is the bug/);
+  assert.match(told, /Your notes, .*notes-s\.md \(1 lines.*\na\.ts:12 is the bug/);
 });
 
 test('a gulp is told once at 100k chars of files, then every 60k', (t) => {
@@ -158,6 +158,23 @@ test('a gulp is told once at 100k chars of files, then every 60k', (t) => {
   }
   const n = said.filter(Boolean).length;
   assert.ok(!said[0] && n >= 2 && n <= 4, `told ${n} times: ${said}`);
+});
+
+test('old windows are dropped from the log, and the windows left keep their place', (t) => {
+  const { dir, bash, b, compact } = setup(t);
+  const rows = () =>
+    readFileSync(join(dir, 'seen-s.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((r) => JSON.parse(r));
+  for (let w = 0; w < 9; w++) {
+    bash(`sed -n '${w * 100 + 1},${w * 100 + 100}p' src/b.ts`, b(w * 100 + 1, w * 100 + 100));
+    compact();
+  }
+  assert.equal(rows().filter((r) => r.hashes).length, 4);
+  assert.equal(rows().filter((r) => r.compact).length, 9);
+  assert.equal(bash("sed -n '801,900p' src/b.ts; sed -n '601,700p' src/b.ts", [...b(801, 900), ...b(601, 700)]).cut, true, 'a window still kept');
+  assert.equal(bash("sed -n '1,100p' src/b.ts", b(1, 100)).cut, false, 'one dropped');
 });
 
 test('an escape is counted in the retro log', (t) => {

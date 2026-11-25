@@ -5,16 +5,17 @@
  * command names (or one read before) are a read of those lines, through Read, cat, sed, a pipe, a cd or a loop alike.
  *
  * - Read less than an hour ago with no compaction since: 15+ unchanged lines become one line saying when they came.
- * - Read before a compaction: the first REREAD_CHARS of them print again per window, and any run of up to SMALL lines
- *   (a range about to be edited); a bigger run becomes its outline.
+ * - Read before a compaction: any run of up to SMALL lines (a range about to be edited) prints again, and a longer one
+ *   while the window's re-reads fit in REREAD_CHARS; one that doesn't fit (the wholesale second pass) becomes its outline.
  * - A changed line prints, with CONTEXT lines around it. `# allow_large` in a command, or `allow_large: true` on Read,
  *   prints everything; each use that mattered is counted in the retro log.
  *
  * It adds a line once a window has GULP chars of file text. afterCompact (after-compact.sh) marks a compaction and hands back
- * what was read. The log of what was read is $TMPDIR/citadel-kit/seen-<session>.jsonl, append-only. Fails open.
+ * what was read. The log of what was read is $TMPDIR/citadel-kit/seen-<session>.jsonl; a compaction drops what is
+ * older than KEEP_WINDOWS windows. Fails open.
  */
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +30,7 @@ const FRESH_MS = 60 * 60_000; // past this Claude Code may have cleared the old 
 const GULP = 100_000;
 const GULP_AGAIN = 60_000;
 const BURST_MS = 15 * 60_000;
+const KEEP_WINDOWS = 4;
 const FILE_MAX = 2 * 1024 * 1024;
 const DEF = /^ {0,2}(?:export )?(?:default )?(?:async )?(?:pub(?:\([^)]*\))? )?(?:(?:function|class|interface|type|enum|struct|impl|fn|def|func|test|describe)\b[*\s('"`]*([\w$.: -]{2,50})|([A-Za-z_]\w+)\s*\(\)\s*\{)|^(?:export )?const ([A-Za-z_$][\w$]{3,})|^(#{1,4} .{1,50})/;
 
@@ -61,7 +63,10 @@ export interface Files {
   now: number;
 }
 
-const stateFile = (input: HookInput, dir: string) => join(dir, `seen-${`${input.session_id ?? 'unknown'}${input.agent_id ? `-${input.agent_id}` : ''}`.replace(/[^\w.-]/g, '_')}.jsonl`);
+const who = (input: HookInput) => `${input.session_id ?? 'unknown'}${input.agent_id ? `-${input.agent_id}` : ''}`.replace(/[^\w.-]/g, '_');
+const stateFile = (input: HookInput, dir: string) => join(dir, `seen-${who(input)}.jsonl`);
+/** A session's own notes, a Grunt's its own: one minion's later sessions and its Grunts share its TMPDIR. */
+const notesName = (input: HookInput) => `notes-${(input.agent_id ?? input.session_id ?? 'unknown').replace(/[^\w.-]/g, '_').slice(0, 8)}.md`;
 
 function append(input: HookInput, dir: string, entries: Entry[]): void {
   if (!entries.length) return;
@@ -188,7 +193,7 @@ interface Cut {
 }
 
 /** The parts of these runs to leave out, and how many chars of earlier-window text still print. */
-function cuts(shown: string[], runs: Run[], s: State, show: (p: string) => string, now: number, how: string): { cuts: Cut[]; again: number[] } {
+function cuts(shown: string[], runs: Run[], s: State, show: (p: string) => string, now: number, how: string, notes: string): { cuts: Cut[]; again: number[] } {
   const out: Cut[] = [];
   const again: number[] = [];
   let used = s.again;
@@ -217,7 +222,7 @@ function cuts(shown: string[], runs: Run[], s: State, show: (p: string) => strin
             at: r.at + lo,
             len: hi - lo,
             chars: size(lo, hi),
-            text: `[seen] ${place}: you read these ${when}, before your context was compacted; unchanged since.${has ? ` They hold: ${has}.` : ''} grep -n for what you need, print the up to ${SMALL} lines you are about to edit, and keep what you find in $TMPDIR/notes.md. ${how} prints them all.`,
+            text: `[seen] ${place}: you read these ${when}, before your context was compacted; unchanged since.${has ? ` They hold: ${has}.` : ''} grep -n for what you need, print the up to ${SMALL} lines you are about to edit, and keep what you find in $TMPDIR/${notes}. ${how} prints them all.`,
           });
         } else {
           used += size(a, b);
@@ -256,7 +261,7 @@ export function seenHook(input: HookInput, files: Files = { read: readText, stat
   const show = (p: string) => (p.startsWith(`${cwd}/`) ? relative(cwd, p) : p);
   const allowed = isRead ? !!ti.allow_large : /#\s*allow_large\b/.test(command);
   const by = isRead ? 'Read' : command.replace(/\s+/g, ' ').slice(0, 60);
-  const found = cuts(shown, runs, s, show, files.now, isRead ? 'allow_large: true' : '"# allow_large" in the command');
+  const found = cuts(shown, runs, s, show, files.now, isRead ? 'allow_large: true' : '"# allow_large" in the command', notesName(input));
   let cut = found.cuts;
   if (allowed && cut.length) note(input, 're-read', `allow_large printed ${cut.reduce((n, c) => n + c.chars, 0)} chars again that the seen guard would have left out (${show(runs[0].path)})`);
   if (allowed) cut = [];
@@ -287,7 +292,7 @@ export function seenHook(input: HookInput, files: Files = { read: readText, stat
     for (const e of [...s.reads.filter((r) => r.win === s.compacts.length), ...entries]) per.set(e.file, (per.get(e.file) ?? 0) + e.chars);
     const top = [...per].sort((a, b) => b[1] - a[1]).slice(0, 3);
     context.push(
-      `[seen] ${Math.round(total / 1000)}k chars of files are in your context now (${top.map(([p, n]) => `${basename(p)} ${Math.round(n / 1000)}k`).join(', ')}), and a compaction will drop them. Stop printing ranges: write what you have found, with line numbers, to $TMPDIR/notes.md, then grep -n for the rest.`,
+      `[seen] ${Math.round(total / 1000)}k chars of files are in your context now (${top.map(([p, n]) => `${basename(p)} ${Math.round(n / 1000)}k`).join(', ')}), and a compaction will drop them. Stop printing ranges: write what you have found, with line numbers, to $TMPDIR/${notesName(input)}, then grep -n for the rest.`,
     );
   }
   let updated: unknown;
@@ -321,6 +326,12 @@ function ranges(list: { from: number; to: number }[]): { from: number; to: numbe
 /** What a compacted session gets back: the ranges it had read and what they hold, its notes, and on a second compaction within 15 minutes what it read again. */
 export function afterCompact(input: HookInput, files: Files = { read: readText, stateDir: join(tmpdir(), 'citadel-kit'), now: Date.now() }, tmp = tmpdir()): string {
   const s = load(input, files.stateDir);
+  const first = s.compacts.length - KEEP_WINDOWS + 1;
+  // Every compaction's row stays, so the windows keep their numbers and a burst its count.
+  if (first > 0 && s.reads.some((r) => r.win < first)) {
+    const rows: Entry[] = [0, ...s.compacts].flatMap((t, win) => [...(win ? [{ t, compact: 1 as const }] : []), ...(win < first ? [] : s.reads.filter((r) => r.win === win))]);
+    writeFileSync(stateFile(input, files.stateDir), rows.map((e) => `${JSON.stringify(e)}\n`).join(''));
+  }
   append(input, files.stateDir, [{ t: files.now, compact: 1 }]);
   const cwd = String(input.cwd ?? process.cwd());
   const show = (p: string) => (p.startsWith(`${cwd}/`) ? relative(cwd, p) : p);
@@ -347,7 +358,7 @@ export function afterCompact(input: HookInput, files: Files = { read: readText, 
       );
     }
   }
-  const notes = join(tmp, 'notes.md');
+  const notes = join(tmp, notesName(input));
   const kept = files.read(notes);
   if (kept) out.push(`Your notes, ${notes} (${linesOf(kept).length} lines, the last of them here):\n${kept.slice(-2500)}`);
   const burst = s.compacts.filter((t) => files.now - t < BURST_MS).length;

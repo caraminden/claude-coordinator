@@ -69,7 +69,7 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     `# allow_large` in the command, or `allow_large: true` on Read, prints all, counted in the retro log (`re-read`).
     Past 100k chars of file text in a window it says to write notes and grep. Fails open.
   - `after-compact.sh` (SessionStart, compact): the branch, head and uncommitted files, a reminder to re-read the record
-    rather than the summary, and from seen.ts the ranges it had read with what they hold, its `$TMPDIR/notes.md`, and on
+    rather than the summary, and from seen.ts the ranges it had read with what they hold, its `$TMPDIR/notes-<session>.md`, and on
     a second compaction within 15 minutes what it went back to.
 - `schedules/<slug>.md` are the standard audits' templates (#799): a scheduled run whose row names one
   gets that body, `{scheme}` filled in, plus the scheme's own notes (`src/schedules.ts`). Frontmatter

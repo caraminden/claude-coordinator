@@ -112,7 +112,7 @@ function chart({ files, top, z, on, splitting, inFolder }) {
       svg.append(d.el);
     });
     entered = true;
-    text(W - R - 2, T - 14, 'Split these', 'zone-name', 'end');
+    text(W - R - 2, T - 14, top.length ? 'Split these' : 'Big and busy: none yet', 'zone-name', 'end');
     const names = svgEl('g', {});
     svg.append(names);
     nameDots = () => label(names, { W, H, L, B, most: phone ? 4 : 8 });
@@ -355,7 +355,7 @@ function build(id, name, data, retry) {
     ? [toneChip('ok', 'Nothing to split')]
     : !open.length
       ? [toneChip('violet', 'All being split'), h('span', {}, `${plural(top.length, 'file')} in the corner, each with a minion on it.`)]
-      : [toneChip('warn', `${plural(open.length, 'file')} to split`), h('span', {}, 'First ', h('b', {}, shortName(lead.path, names)), `: ${facts(lead)}.`)];
+      : [toneChip('warn', `${plural(open.length, 'file')} to split`), top.length > open.length ? toneChip('violet', `${top.length - open.length} being split`) : '', h('span', {}, 'First ', h('b', {}, shortName(lead.path, names)), `: ${facts(lead)}.`)];
   return [
     head(when),
     stale ?? '',

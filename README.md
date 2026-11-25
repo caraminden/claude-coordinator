@@ -186,6 +186,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/mcp-call.ts` | What every family of MCP tools shares: the turn's settings, the API call, minion number lookups, shared field text |
 | `src/mcp-apps.ts` | MCP tools for apps and contraptions: definitions and handlers (make_app, deploys, releases, app reads and turns) |
 | `src/mcp-ship.ts` | MCP tools for shipping and CI: definitions and handlers (hand_off_land, wakes, the ship line, runners, CI files, ship lessons) |
+| `src/mcp-cards.ts` | MCP tools that put a card in front of a person: definitions and handlers (questions, plans, proposals, approvals) |
 | `src/mcp-types.ts` | Types only: the API answers and requests `src/mcp.ts`'s tools read (#1799) |
 | `src/approvals.ts` | Approval rules, plugin folders, and the Approve / Deny cards |
 | `src/inbox.ts`, `public/inbox.js` | The Needs-you inbox: a scheme's open cards and ready/try minions, as a strip at the top of the minions list |

@@ -71,6 +71,7 @@ const DRAFTS = `<script>
     if (path === 'api/projects') return reply([1, 2].map((id) => ({ id, name: id === 1 ? 'Alpha' : 'Beta', inbox: 0, icon: null })));
     let m = path.match(/^api\\/projects\\/(\\d)$/);
     if (m) return reply({ project: { id: +m[1], name: m[1] === '1' ? 'Alpha' : 'Beta', instructions: '' }, coordinator: { id: 100 + +m[1], project_id: +m[1], kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: now, created_at: now }, tickets: [] });
+    if (/properties$/.test(path)) return reply({ keys: [] });
     if (path === 'api/reviews/schemes') return reply({ schemes: [] });
     m = path.match(/^api\\/projects\\/(\\d)\\/reviews(?:\\/([^/]+))?(?:\\/(.+))?$/);
     if (!m) return reply([]);

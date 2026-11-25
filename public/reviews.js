@@ -23,6 +23,7 @@ const COLUMNS = [
 ];
 const KINDS = ['critic', 'reviewer', 'checker', 'referee', 'teacher', 'audit'];
 const pacific = pacificStamp;
+const TYPING = 'input:not([type=checkbox]), select, textarea';
 
 let pageEl = null;
 let state = null; // { projectId, entries, starters, audits, glance, selected, mode: 'view'|'edit'|'history'|'new', versions, ask, lenses, newWhen, kept, behind }
@@ -50,7 +51,7 @@ export function reviewsPage() {
       if (e.key === 'Escape' && state.mode === 'view') closePage();
     },
     // Not at once: a redraw between a press and its click would swallow the click.
-    onfocusout: () => setTimeout(catchUp, 500),
+    onfocusout: (e) => e.target.matches(TYPING) && setTimeout(catchUp, 500),
   });
   draw();
   load();
@@ -88,7 +89,7 @@ export function onReviewsChanged(projectId) {
 function catchUp() {
   if (!state?.behind || !pageEl?.isConnected) return;
   const at = document.activeElement;
-  const typing = pageEl.contains(at) && at.matches('input:not([type=checkbox]), select, textarea');
+  const typing = pageEl.contains(at) && at.matches(TYPING);
   if (state.mode === 'edit' || state.mode === 'new' || typing) return;
   load();
   if (every.tab === 'all') loadEvery();

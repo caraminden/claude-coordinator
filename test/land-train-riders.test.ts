@@ -2,7 +2,8 @@
 // tests them in one CI run and ships them in one deploy; a red train keeps splitting until the bad ship is found (land-train-split.test.ts).
 // This file: guard runs, flakes, cut-off runs, CI with no answer, restarts and retried fronts (split from land-train.test.ts, #1723).
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -453,4 +454,29 @@ test('a retried ship whose train goes red goes back in line as any rider does, i
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f3.txt: 3', 'f4.txt: 4']);
   assert.deepEqual(retried(l), ['· retry in place · ticket/2-x · CI and perigee both busy for 0 min · refused']);
   l.done();
+});
+
+test("a rider whose file its front removes as it reads it is back in line, like one with no file: it doesn't die (#1914)", () => {
+  const land = readFileSync(join(import.meta.dirname, '../tools/land.sh'), 'utf8');
+  const body = /^train_verdict\(\) \{\n[\s\S]*?^\}$/m.exec(land)?.[0];
+  assert.ok(body, 'tools/land.sh has no train_verdict()');
+  const dir = mkdtempSync(join(tmpdir(), 'land-verdict-read-'));
+  try {
+    // The race in one step: a look at the file says it has text, and opening it fails.
+    writeFileSync(join(dir, '7'), 'riding ticket/2-x\n');
+    chmodSync(join(dir, '7'), 0);
+    for (const [held, riding, want] of [
+      ['', '', 'rc=0 riding=\n'],
+      ['', '1', 'phase: waiting\nland: back in line on its own: the ship train went without ticket/7-x\nrc=0 riding=\n'],
+      ['held', '1', 'phase: waiting\nland: back in line on its own: the ship train went without ticket/7-x\nrc=0 riding=\n'],
+    ]) {
+      const script: string = `set -euo pipefail\nsay() { echo "land: $*"; }\nqueue_phase() { echo "phase: $*"; }\n${body}\ntrain_dir=$1 riding=$2 branch=ticket/7-x DEPLOY_QUEUE_TICKET=queue/7 rc=0\ntrain_verdict $3 || rc=$?\necho "rc=$rc riding=$riding"`;
+      const r = spawnSync('bash', ['-c', script, 'bash', dir, riding, held], { encoding: 'utf8', cwd: join(import.meta.dirname, '..') });
+      assert.equal(r.stderr, '');
+      assert.equal(r.stdout, want, `held "${held}", riding "${riding}"`);
+      assert.equal(r.status, 0);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

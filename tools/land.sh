@@ -558,11 +558,12 @@ if [ "$mode" = land ] && [ -n "$regen_attrs" ]; then
 fi
 train_verdict() {
   local f=$train_dir/${DEPLOY_QUEUE_TICKET##*/} v a b c d e x lines=() at requeue=''
-  if [ -z "${DEPLOY_QUEUE_TICKET:-}" ] || [ ! -s "$f" ]; then
+  # One read, no look first (#1914): the front may remove the file in between, and an unset v ended the ship under set -u.
+  [ -z "${DEPLOY_QUEUE_TICKET:-}" ] || read -r v a b c d e 2>/dev/null <"$f" || true
+  if [ -z "${v:-}" ]; then
     [ -z "$riding" ] || { riding=''; queue_phase waiting; say "back in line on its own: the ship train went without $branch"; }
     return 0
   fi
-  read -r v a b c d e <"$f" || true
   at=$(git rev-parse HEAD)
   if [ -n "${1:-}" ]; then
     [ "$v" != riding ] || { rm -f "$f"; riding=''; return 0; }

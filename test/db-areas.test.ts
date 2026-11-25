@@ -36,41 +36,9 @@ statePath
 /** Areas not split out yet. A step that moves an area takes its names off; nothing is added here. One name per line, sorted, so
  * two branches removing names rarely touch the same lines. */
 const NOT_MOVED_YET = `
-accountSpend
-addFlakeEvents
-addFlakeFix
-addHealthEvent
-addHostSample
-addStepTimes
-backfillTurns
-dailyCosts
-fableSpend
-flakeCounts
-flakeDetails
-flakeFiles
-flakeFix
-flakeFixes
-flakeSightings
-hasFlakeNear
-healthBetween
 healthCount
-healthEventsSince
-hostSamples
-lastHealthEvent
-lastTurnEnd
-listTurns
-minionCosts
-minionTurnsSince
-promptHashes
-recordGrunts
-recordTurn
 shippedSince
-spendByPayer
-spendRows
-stepRatio
-ticketCost
 turnOutcomes
-updateFlakeFix
 `;
 
 /** The methods declared in src/db.ts's Store class body, by name. */

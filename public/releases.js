@@ -248,13 +248,13 @@ function trainNow(next, c, waits) {
   const members = `Releasing now: ${t.members?.join(', ')}`;
   if (t.role === 'rider') return [h('b', { class: 'work' }, 'Riding'), ' ', h('span', { class: 'muted', title: members }, `in ${t.front}'s train`)];
   if (t.role === 'front') return [h('span', { title: members }, changeNow(next, c))];
-  return [h('b', { class: 'waits' }, t.label), ...earlyNote(c)];
+  return [h('b', { class: 'waits' }, t.label)];
 }
 
 /** A waiting ship's early test (#1905): "Testing early · 12/40 files", "Passed early", or why it was dropped. */
 function earlyNote(c) {
   const e = c.early;
-  return e ? [' ', h('span', { class: `early early-${e.state} ${e.state === 'running' || e.state === 'passed' ? '' : 'waits'}`, title: e.text }, '· ' + e.brief)] : [];
+  return e ? [' ', h('span', { class: `early muted early-${e.state}`, title: e.text }, e.brief)] : [];
 }
 
 /** A change's stage and its short words: "Deploy ~50s left", "Line 2nd". */
@@ -727,6 +727,7 @@ function changeList(projectId, tv) {
             { class: 'where' },
             ...(i === 0 && (!c.train || c.train.role === 'front') ? [h('b', { class: c.waitingOn ? 'waits' : 'work' }, c.label ?? stageName(c.stage))] : [stageTrack(n.stages, c, { mini: true }), ...trainNow(n, c, i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? waiting() : null)]),
           ),
+          ...(i > 0 && c.train?.role === 'waiting' && c.early ? [h('span', { class: 'early-line' }, ...earlyNote(c).slice(1))] : []),
           lastTryLine(c),
           landNext(wait),
           stuck(why),

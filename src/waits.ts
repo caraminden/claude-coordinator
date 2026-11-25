@@ -400,7 +400,7 @@ export function earlyTest(ci: { stage: string; text: string; done?: number; tota
 export function earlyWait(w: Wait, e: EarlyTest): Wait {
   const count = e.state === 'running' && e.total ? ` ${e.done}/${e.total}` : '';
   const word = e.state === 'running' ? `early${count}` : e.state === 'passed' ? 'passed early' : e.state === 'failed' ? 'early failed' : 'early dropped';
-  return { ...w, early: e, chip: `${w.chip} · ${word}`, text: `${w.text}. ${e.text}`, brief: w.brief ? `${w.brief} · ${e.brief}` : e.brief };
+  return { ...w, early: e, chip: `${w.chip} · ${word}`, text: `${w.text}. ${e.text}`, brief: w.brief ? `${e.brief} · ${w.brief}` : e.brief };
 }
 
 /** The Releases page's words for a holder's CI after an early run counted for it (land.sh's early_gate). */

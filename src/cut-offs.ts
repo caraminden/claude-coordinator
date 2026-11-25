@@ -1,10 +1,11 @@
 // Commands a time limit cut off (#1992), read from a minion's stream as it arrives. A command only moved to the background
-// kept running, and a citadel-wait that ran out is a wait, so neither is one.
+// kept running, and a citadel-wait that ran out is a wait, so neither is one. One of a
+// minion's own (`timeout 590 tail -f … | grep -m1`) is kept, by `timeout`: its command says what it was.
 import type { ClaudeEvent } from './claude-events.ts';
 import type { CutOff } from './db/wait-records.ts';
 
 const COMMAND_MAX = 300;
-const CITADEL_TEST = /\bcitadel-test\b/;
+const CITADEL_TEST = /(?:^|[\s;&|(`/])citadel-test(?=\s|$)/;
 /** `timeout [options] <length>`: -k and -s take a value of their own. */
 const TIMEOUT = /(?:^|[\s;&|(`])timeout(?:\s+(?:-[ks]\s+\S+|--?[a-z][\w=.-]*))*\s+(\d+(?:\.\d+)?)([smhd]?)(?=\s)/g;
 const UNIT: Record<string, number> = { '': 1, s: 1, m: 60, h: 3600, d: 86400 };
@@ -15,9 +16,9 @@ export function cutOffOf(command: string, output: string, isError: boolean): Pic
   // The tools' own words, when the command ran that tool: one that only prints a log with them in it doesn't count.
   const tested = CITADEL_TEST.test(command) && /^✖ stopped at the time limit, (\d+) s/m.exec(output);
   if (tested) return say('citadel-test', tested[1]);
-  const ran = /\brun-tests\.sh\b/.test(command) && /^run-tests: the tests ran past (\d+)s and were stopped/m.exec(output);
+  const ran = /(?:^|[\s;&|(`/])run-tests\.sh(?=\s|$)/.test(command) && /^run-tests: the tests ran past (\d+)s and were stopped/m.exec(output);
   if (ran) return say('run-tests', ran[1]);
-  if (!isError || !/^Exit code 124\b/.test(output) || /^citadel-wait: still waiting /m.test(output)) return null;
+  if (!isError || !/^Exit code 124\b/.test(output) || /^citadel-(wait: still waiting |job: still running; )/m.test(output)) return null;
   const limits = new Set([...command.matchAll(TIMEOUT)].map((m) => Number(m[1]) * UNIT[m[2]]));
   if (limits.size) return say('timeout', limits.size === 1 ? [...limits][0] : undefined);
   // Its line can fall past the kept output: the command says it.
@@ -45,6 +46,7 @@ export class CutOffs {
       const name = /^Background command "([\s\S]*)" was stopped/.exec(ev.summary!)?.[1];
       this.note(ticketId, ev.tool_use_id, { limit: 'background' }, name);
     }
+    if (ev.type === 'result') this.calls.delete(ticketId);
     if (!Array.isArray(ev.message?.content)) return;
     for (const b of ev.message.content) {
       if (ev.type === 'assistant' && b?.type === 'tool_use' && b.name === 'Bash' && typeof b.input?.command === 'string') {
@@ -58,7 +60,6 @@ export class CutOffs {
         if (cut) this.note(ticketId, b.tool_use_id, cut);
       }
     }
-    if (ev.type === 'result') this.calls.delete(ticketId);
   }
 
   private note(ticketId: number, id: string | undefined, cut: Pick<CutOff, 'limit' | 'seconds'>, name?: string) {

@@ -22,7 +22,7 @@ import { ensureGradleInit, GRADLE_CACHE_CAP, gradleCacheDir, trimCache } from '.
 import { diskUsage, low, size } from './src/build-output.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
-import { ShipTrail, type ShipLine } from './src/ship-trail.ts';
+import { everyLine, ShipTrail } from './src/ship-trail.ts';
 import { LiveProbes, probeLog, runProbe } from './src/live-probe.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { AnswerProbe } from './src/answer-time.ts';
@@ -1929,24 +1929,7 @@ runner.serverWork = (id, fresh) => (fresh ? (landings.hasHandoff(id) ? { kind: '
 const shipTrail = new ShipTrail({
   store,
   landings,
-  lines: async () => {
-    const numbered = (id: number | null, label: string) => (id === null ? label : `#${store.getTicket(id)?.number ?? id}`);
-    const line = (tickets: ShipLine['line'], kit: boolean, minion: ShipLine['minion']): ShipLine => ({ line: tickets, kit, minion, name: (label) => numbered(minion(label), label) });
-    const own = ownScheme()?.id;
-    const others = store.listProjects().filter((p) => p.repo_dir && p.id !== own);
-    const reads = others.map(async (p) => {
-      const of = (label: string) =>
-        landings
-          .handoffs()
-          .map((id) => store.getTicket(id))
-          .find((t) => t?.project_id === p.id && t.branch === label) ?? store.ticketByBranch(label);
-      return line(await readQueueA(landQueue(p.repo_dir!), 7), true, (label) => {
-        const t = of(label);
-        return t?.project_id === p.id ? t.id : null;
-      });
-    });
-    return [line(waits.line, false, (label) => waits.ticketFor(label)), ...(await Promise.all(reads))];
-  },
+  lines: () => everyLine({ store, own: ownScheme()?.id ?? null, line: waits.line, ticketFor: (label) => waits.ticketFor(label) }),
 });
 const trailPoll = () => shipTrail.poll().catch((err) => console.error(`[ship trail] ${thrown(err).message}`));
 if (!BOOT_CHECK && !PREVIEW) every('land hand-offs', 5_000, async () => (serverWork.sync(), await trailPoll(), await landHandoffs.poll(), serverWork.sync()));

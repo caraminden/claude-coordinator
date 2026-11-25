@@ -109,6 +109,7 @@ process.stdin.once('data', () => {
   chmodSync(bin, 0o755);
   const srv = await bootServer({ root, env: { CLAUDE_BIN: bin, NODE_NO_WARNINGS: '1' } });
   let id = 0;
+  let next = 0;
   try {
     const as = async (who: number, body: unknown) => {
       const res = await fetch(`${srv.base}/api/tickets/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), who)}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -128,15 +129,19 @@ process.stdin.once('data', () => {
     await srv.call(`/api/tickets/${id}`, { state: 'try' }, 'PATCH');
     await srv.call(`/api/tickets/${id}/messages`, { text: 'go on' });
     await settled('ready');
+    const follow = (await srv.call(`/api/projects/${project.id}/tickets`, { title: 'Next', message: 'go', start_after: (await ticket()).number })).data;
+    next = (follow.ticket ?? follow).id;
   } finally {
     await srv.stop();
   }
   const store = new Store(join(root, 'data', 'coordinator.db'));
   const { states, cuts } = store.waitRecords(id);
+  const sealed = store.waitRecords(next).states[0];
   store.db.close();
   const me = 'minion';
   const person = states.find((s) => s.by.kind === 'person')?.by.name;
   assert.ok(person);
+  assert.deepEqual([sealed.new, sealed.by.name], ['parked', person], 'made behind another: sealed by whoever made it');
   assert.deepEqual(
     states.map((s) => [s.old, s.new, [s.by.kind, s.by.name].filter(Boolean).join(' ')]),
     [

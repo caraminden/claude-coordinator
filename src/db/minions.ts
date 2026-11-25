@@ -28,9 +28,9 @@ export const minionQueries = {
     return this.db.prepare('SELECT * FROM tickets WHERE project_id = ? AND number = ?').get(projectId, number) as unknown as Ticket | undefined;
   },
 
-  /** The minion on a branch (the land line names its waiters by branch, src/waits.ts): an open one first, then the newest. */
-  ticketByBranch(this: Store, branch: string): Ticket | undefined {
-    return this.db.prepare("SELECT * FROM tickets WHERE branch = ? ORDER BY status = 'closed', id DESC LIMIT 1").get(branch) as unknown as Ticket | undefined;
+  /** The minion on a branch (the land line names its waiters by branch, src/waits.ts): an open one first, then the newest; a branch name is per scheme. */
+  ticketByBranch(this: Store, branch: string, projectId: number | null = null): Ticket | undefined {
+    return this.db.prepare("SELECT * FROM tickets WHERE branch = ? AND project_id = coalesce(?, project_id) ORDER BY status = 'closed', id DESC LIMIT 1").get(branch, projectId) as unknown as Ticket | undefined;
   },
 
   /** A scheme's minions open now or closed since `since` (ms), each with its first message's data (its brief, if posted), for the duplicate-start check (#1488). */

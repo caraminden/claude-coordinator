@@ -1519,7 +1519,7 @@ export const projectRoutes: Route[] = [
       if (follow) {
         const { leader, when } = follow;
         waiters.chain({ ticket: id, after: leader.id, when, message: brief0, from: session.name, base: follow.base, since: follow.since });
-        store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} ${chainIs(when, leader.build)}` });
+        store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} ${chainIs(when, leader.build)}` }, { kind: session.agent === undefined ? 'person' : 'agent', name: session.name });
         runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work ${chainIs(when, leader.build)}. Messages to it wait for that start; Unseal starts it now.` });
         runner.broadcastTicket(id);
         notes.push(`Sealed: it starts by itself once #${leader.number}'s work ${chainIs(when, leader.build)}. Messages to it are held for that start; message_ticket with \`unpark\` starts it now.`);

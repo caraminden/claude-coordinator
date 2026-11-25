@@ -15,6 +15,7 @@ import { landArgs, landConflict, landPhase, type Handoff } from './land.ts';
 import { changedLines, parseProbe, PROBE_HELP, PROBE_LINES } from './live-probe.ts';
 import { pacificStamp } from './pacific.ts';
 import { reviewRefusal } from './review-gate.ts';
+import type { ChangeBy } from './db/wait-records.ts';
 import { parseLearned, touchedFiles } from './ship-lessons.ts';
 import { offSkills } from './skills.ts';
 import { thrown } from './thrown.ts';
@@ -155,10 +156,10 @@ export async function checkHandoff(app: App, ticket: Ticket, body: Record<string
 }
 
 /** Start it: land.sh runs and the minion shows as landing. False when a landing already runs for it. */
-export function startHandoff(app: App, ticket: Ticket, { cwd, env, args, h }: Ready): boolean {
+export function startHandoff(app: App, ticket: Ticket, { cwd, env, args, h }: Ready, by?: ChangeBy): boolean {
   if (!app.landings.handOff(ticket.id, cwd, env, args, h)) return false;
   app.runner.places.refused(ticket.id, false);
-  app.store.updateTicket(ticket.id, { state: 'outside', note: landPhase('') });
+  app.store.updateTicket(ticket.id, { state: 'outside', note: landPhase('') }, by);
   app.runner.broadcastTicket(ticket.id);
   return true;
 }
@@ -264,7 +265,7 @@ export async function shipOnClick(app: App, ticket: Ticket, card: { event: numbe
     clear();
     const fresh = app.store.eventsOfKinds(ticket.id, ['question'], card.event - 1).find((e) => e.id === card.event);
     if (!fresh || JSON.parse(fresh.data).settled) return 'you settled the card meanwhile';
-    if (!startHandoff(app, ticket, ready)) return 'a ship of yours already ran';
+    if (!startHandoff(app, ticket, ready, { kind: 'person', name: answer.by })) return 'a ship of yours already ran';
     // A ship that fails wakes it on the presser's login, as the turn their answer would have started ran on it.
     if (answer.uid != null && answer.uid !== ticket.person_id) app.store.updateTicket(ticket.id, { person_id: answer.uid });
     answer.record(`${answer.by} answered your ship card: Ship It. ${APP_NAME} handed your ship off as you prepared it, with no turn of yours. If it has to go again and what they approved is unchanged, hand it off with go "${go}".`);

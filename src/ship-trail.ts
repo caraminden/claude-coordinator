@@ -1,7 +1,9 @@
 // Each ship's place in line and stages, with their times (#1992): looked at every few seconds from the server's side, in
 // Citadel's own line and in every scheme that ships with the kit's land.sh, and kept however the ship ended.
 import { classifyLandFailure, landPhase as outputPhase, landResult, NO_CODE, type Landing } from './land.ts';
-import { heldOf, landPhase, pulledOf, ridingOf, type LandTicket } from './waits.ts';
+import { heldOf, landPhase, pulledOf, readQueueA, ridingOf, type LandTicket } from './waits.ts';
+import { landQueue } from './release-readers.ts';
+import type { Store } from './db.ts';
 import type { ShipStep } from './db/wait-records.ts';
 
 type Step = Pick<ShipStep, 'stage' | 'label' | 'place' | 'behind'>;
@@ -67,6 +69,21 @@ export interface ShipLine {
   kit: boolean;
   minion(label: string): number | null;
   name(label: string): string;
+}
+
+/** Citadel's line as `line` has it, and every other scheme's read now. */
+export async function everyLine(d: { store: Pick<Store, 'listProjects' | 'ticketByBranch' | 'getTicket'>; own: number | null; line: LandTicket[]; ticketFor(label: string): number | null }): Promise<ShipLine[]> {
+  const ship = (line: LandTicket[], kit: boolean, minion: ShipLine['minion']): ShipLine => ({
+    line,
+    kit,
+    minion,
+    name: (label) => {
+      const id = minion(label);
+      return id === null ? label : `#${d.store.getTicket(id)?.number ?? id}`;
+    },
+  });
+  const others = d.store.listProjects().filter((p) => p.repo_dir && p.id !== d.own);
+  return [ship(d.line, false, d.ticketFor), ...(await Promise.all(others.map(async (p) => ship(await readQueueA(landQueue(p.repo_dir!), 7), true, (label) => d.store.ticketByBranch(label, p.id)?.id ?? null))))];
 }
 
 export interface TrailDeps {

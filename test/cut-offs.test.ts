@@ -25,6 +25,8 @@ test('a command that only moved to the background, a wait that ran out and a log
   const none: [string, string, boolean][] = [
     ['timeout 600 npm test', 'Command did not complete within its 120s timeout and was moved to the background (ID: b1).', false],
     ['timeout 600 citadel-wait pid 12', 'Exit code 124\ncitadel-wait: still waiting for pid 12 after 590 s', true],
+    ['cat "$TMPDIR/citadel-test.log"', '✖ stopped at the time limit, 300 s', false],
+    ['citadel-job --watch ab12cd-1234abcd', 'Exit code 124\ncitadel-job: still running; run it again to keep waiting (output so far: /x)', true],
     ['cat "$TMPDIR/x.log"', '✖ stopped at the time limit, 300 s', false],
     ['rg -n "ran past" .', 'run-tests: the tests ran past 1500s and were stopped', false],
     ['timeout 30 grep x y', 'Exit code 1', true],
@@ -62,7 +64,7 @@ test('a background command stopped at its limit is one cut-off, named by its cal
   const w = watch();
   w.feed(1, call('a', 'sleep 9999'), result('a', 'Command running in background with ID: x', false), stopped('a'));
   assert.deepEqual(w.got, [[1, { at: 1000, limit: 'background', command: 'sleep 9999', tool_use_id: 'a' }]]);
-  w.feed(1, { type: 'result' } as ClaudeEvent, { type: 'system', subtype: 'init' } as ClaudeEvent, stopped('a'));
+  w.feed(1, { type: 'result' } as ClaudeEvent, stopped('a'));
   assert.equal(w.got[1][1].command, 'Run the long one', 'its call was in an earlier turn: the name it was run under');
   w.feed(1, { ...stopped('a'), summary: 'Background command "x" completed (exit code 0)' } as ClaudeEvent);
   assert.equal(w.got.length, 2);

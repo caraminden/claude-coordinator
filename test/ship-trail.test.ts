@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { ShipStep } from '../src/db/wait-records.ts';
 import { NO_CODE, type Landing } from '../src/land.ts';
-import { ShipTrail, type ShipLine } from '../src/ship-trail.ts';
+import { everyLine, ShipTrail, type ShipLine } from '../src/ship-trail.ts';
 import type { LandTicket } from '../src/waits.ts';
+import { tempRoot } from './helpers.ts';
+
+const tmp = tempRoot('ship-trail-');
+after(() => tmp.teardown());
 
 // Where a minion's ship stood, kept as it moves (#1992): its place, its stages and how it ended, in Citadel's line and a
 // scheme's on the kit's land.sh.
@@ -146,4 +152,32 @@ test('a poll while one runs shares it', async () => {
   w.hand(w.ids[0]);
   await Promise.all([w.trail.poll(), w.trail.poll()]);
   assert.equal(w.steps(w.ids[0]).length, 1);
+});
+
+test("every scheme's own line is read from its repo, and a branch two schemes share is each one's own minion", async () => {
+  const store = new Store(':memory:');
+  const stat = readFileSync('/proc/self/stat', 'utf8');
+  const me = `${process.pid} ${stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[19]}`;
+  const branch = 'ticket/12-fix-login';
+  const mk = (name: string, repo: string | null) => {
+    const p = store.createProject(name, null);
+    if (repo) store.setProjectRepoDir(p.id, repo);
+    const t = store.createTicket({ project_id: p.id, title: name, permission_mode: 'default', created_by: 'Cara' });
+    store.setTicketDir(t.id, repo ?? '/', branch);
+    return { p, t };
+  };
+  const repo = join(tmp.dir, 'repo');
+  mkdirSync(join(repo, '.git', 'land-queue'), { recursive: true });
+  writeFileSync(join(repo, '.git', 'land-queue', '0001'), `${me}\n\n${branch}\nwaiting\n`);
+  const own = mk('Citadel', join(tmp.dir, 'own'));
+  const other = mk('Other', repo);
+  mk('Newer', null);
+  const lines = await everyLine({ store, own: own.p.id, line: [t(branch)], ticketFor: () => own.t.id });
+  assert.deepEqual(
+    lines.map((l) => [l.kit, l.line.map((x) => [x.label, x.phase]), l.minion(branch), l.name(branch)]),
+    [
+      [false, [[branch, '']], own.t.id, `#${own.t.number}`],
+      [true, [[branch, 'waiting']], other.t.id, `#${other.t.number}`],
+    ],
+  );
 });

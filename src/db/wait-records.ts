@@ -4,7 +4,10 @@ import { WAITS_SINCE_KEY } from '../db-keys.ts';
 import type { Store } from '../db.ts';
 import type { TicketState } from '../db-rows.ts';
 
-/** Who made a change: the minion itself, another agent (the Taskmaster, another minion), a person, or the server. */
+/**
+ * Who made a change: the minion itself, another agent (the Taskmaster, another minion), a person, or the server, which
+ * also makes the ones that follow from someone's act (a message starts a turn and clears the state, a ship stopped).
+ */
 export interface ChangeBy {
   kind: 'minion' | 'agent' | 'person' | 'server';
   name?: string;

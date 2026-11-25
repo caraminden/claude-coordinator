@@ -743,12 +743,19 @@ function changeList(projectId, tv) {
           n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
           e.holds ? [h('b', { class: 'work' }, e.label ?? stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')] : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)],
         ),
+        frozenLine(e),
         lastTryLine(e),
         landNext(wait),
         stuck(why),
         placedNote(placed),
       ),
     );
+  }
+  /** A frozen ship or check (#1881): it isn't waiting, its cgroup is frozen; since when Citadel saw it, and the command that thaws it. */
+  function frozenLine(e) {
+    if (!e.frozen) return '';
+    const at = new Date(e.frozen.since).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+    return h('span', { class: 'frozen stuck', title: 'The time is when Citadel first saw it frozen; nothing records who froze it.' }, h('b', { class: 'waits' }, `Frozen since ${at}`), ' · to thaw it, run on perigee: ', h('code', {}, e.frozen.thaw));
   }
   /** Who placed a waiter (#1358): a person's drag pins it; a Taskmaster's move says why it went there. */
   function placedNote(p) {

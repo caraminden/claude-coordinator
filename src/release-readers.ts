@@ -14,6 +14,7 @@ import { verdict, type PrSnapshot } from './github.ts';
 import { BEHIND_OLD, CITADEL_TARGET, HOLDS_LINE, git, landedIn, OLD_LAND, reachedMain, releaseOf, type Change, type LineEntry, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
 import { holds, shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
+import { frozenChip, frozenWords, type Frozen } from './frozen-ships.ts';
 import { behindOld, median, ordinal, readHeavy, readQueue, type LandTicket } from './waits.ts';
 import { ciState, ciVerdict } from './ci-verdict.ts';
 
@@ -1091,6 +1092,9 @@ export function landProgress(output: string, since: number): Progress {
   return { stage: 'land', since, usual: null, waitingOn: null, text: 'shipping: tests, then onto main' };
 }
 
+/** A frozen ship's progress says so in place of waiting or shipping (#1881), what it was doing after. */
+const frozenLead = (lead: Progress, f: Frozen): Partial<Progress> => ({ waitingOn: frozenChip(f), text: `${frozenWords(f)}. It was: ${lead.text}`, brief: frozenChip(f) });
+
 /** A scheme's land line: the kit's land template's tickets, in its main checkout's git folder (#1007). */
 export const landQueue = (repo: string) => join(repo, '.git', 'land-queue');
 /** That line's tickets, in its order: their 8th line (index 7) is "order" when their land.sh follows .order. */
@@ -1171,7 +1175,7 @@ export class LandsInFlight {
       const on = new Set(shipsTo(this.filesOf(t, targets[0]?.branch ?? 'main', p.repo_dir), targets));
       if (!this.seen.has(id)) this.seen.set(id, now);
       const lead = landProgress(run!.output, this.seen.get(id)!);
-      const change: Change = { ...asChange(t), ...lead };
+      const change: Change = { ...asChange(t), ...lead, ...(q && at >= 0 && q.line[at]?.frozen && frozenLead(lead, q.line[at].frozen!)) };
       const l = q && at >= 0 ? q.line[at] : null;
       const waits = l?.got === 0;
       const entry: LineEntry | null = l && {
@@ -1183,6 +1187,7 @@ export class LandsInFlight {
         movable: waits && !l.holds && !!l.orders && q!.current && !behindOld(q!.line, l),
         stage: waits ? 'line' : 'land',
         since: l.mtime,
+        ...(l.frozen && { frozen: l.frozen }),
         ...(waits && !q!.current ? { why: OLD_SCHEME_LAND } : waits && l.holds ? { why: HOLDS_LINE } : waits && !l.orders ? { why: OLD_LAND } : waits && behindOld(q!.line, l) ? { why: BEHIND_OLD } : {}),
       };
       for (const tv of mine.filter((v) => on.has(v.target.id))) {

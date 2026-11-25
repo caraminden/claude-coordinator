@@ -12,6 +12,7 @@ import type { Ship } from './branch.ts';
 import type { NewsItem } from './land-news.ts';
 import type { FailureDetail, FailureNext, LastTry } from './ship-failures.ts';
 import type { Project, ReleaseRow, Store } from './db.ts';
+import type { Frozen } from './frozen-ships.ts';
 import { fixLineIn } from './fix-proof.ts';
 import { gitOut } from './git.ts';
 import { buildPreviewPath, previewKey, previewPath } from './previews.ts';
@@ -136,6 +137,8 @@ export interface LineEntry {
   since: number;
   /** Back in line after a failed ship try: that try (#1375). */
   lastTry?: LastTry;
+  /** Its process sits in a frozen cgroup (#1881): since when Citadel saw it, the unit and the command that thaws it. */
+  frozen?: Frozen;
 }
 
 export interface TestCopy {
@@ -484,6 +487,7 @@ export class CitadelServer implements Reader {
         movable: t.got === 0 && !t.holds && !ridingOf(t.phase) && !!t.orders && !behindOld(lineTickets, t),
         stage: t.got > 0 ? landPhase(t.phase).stage : 'line',
         since: t.mtime,
+        ...(t.frozen && { frozen: t.frozen }),
         ...(t.got > 0 && { label: (id != null ? this.d.wait(id)?.label : undefined) ?? landPhase(t.phase).label }),
         ...(t.got === 0 && t.holds ? { why: HOLDS_LINE } : t.got === 0 && !t.orders ? { why: OLD_LAND } : t.got === 0 && behindOld(lineTickets, t) ? { why: BEHIND_OLD } : {}),
       };

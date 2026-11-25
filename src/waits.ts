@@ -12,6 +12,7 @@ import type { Store } from './db.ts';
 import type { Ship } from './branch.ts';
 import type { CiRuns } from './ci-wait.ts';
 import type { LandSeen } from './ci-health.ts';
+import { frozenCgroup, frozenCached, frozenChip, frozenWords, noteFrozen, type Frozen } from './frozen-ships.ts';
 
 export interface Wait {
   /** Its source: land (the land line and its landing), heavy (a heavy slot), ci (a PR's CI run), restart. */
@@ -36,6 +37,8 @@ export interface Wait {
   train?: { role: 'front' | 'rider' | 'waiting'; label: string; size?: number; front?: string; members?: string[] };
   /** A landing's CI test files failed so far (POST /api/ci-tests, #1368). */
   failed?: string[];
+  /** Its process is in a frozen cgroup (#1881): the line says so in place of "waiting". */
+  frozen?: Frozen;
   /** When it ended, ms: a CI run's pass or fail, shown a while after; its time stops there. */
   ended?: number;
 }
@@ -172,6 +175,8 @@ export interface LandTicket {
   orders?: boolean;
   holds?: boolean;
   tests?: TestCounts | null;
+  /** Its process sits in a frozen cgroup (#1881). */
+  frozen?: Frozen;
 }
 
 /** The waiting tickets' numbers in the order people set on the Releases page (#1002): queue/.order, as deploy-queue.sh reads it. */
@@ -229,7 +234,12 @@ export function readQueue(q: string, orderAt: number, alive = procAlive): LandTi
     .filter((n) => /^\d+$/.test(n))
     .sort()
     .map((name) => ({ name, text: read(join(q, name)), at: mtime(join(q, name)) }));
-  return queueFrom(orderFrom(read(join(q, '.order'))), tickets, orderAt, alive);
+  const line = queueFrom(orderFrom(read(join(q, '.order'))), tickets, orderAt, alive);
+  for (const t of line) {
+    const f = frozenCached(parseInt(t.proc));
+    if (f) t.frozen = noteFrozen(t.label, f.cg);
+  }
+  return line;
 }
 
 /** readQueue with every file read off the server's thread (#1807). */
@@ -241,7 +251,14 @@ export async function readQueueA(q: string, orderAt: number, alive = procAlive):
       .sort()
       .map(async (name) => ({ name, text: await readA(join(q, name)), at: await mtimeA(join(q, name)) })),
   );
-  return queueFrom(orderFrom(order), tickets, orderAt, alive);
+  const line = queueFrom(orderFrom(order), tickets, orderAt, alive);
+  await Promise.all(
+    line.map(async (t) => {
+      const f = await frozenCgroup(parseInt(t.proc));
+      if (f) t.frozen = noteFrozen(t.label, f.cg);
+    }),
+  );
+  return line;
 }
 
 function queueFrom(order: number[], tickets: { name: string; text: string | null; at: number | null }[], orderAt: number, alive: (proc: string) => boolean): LandTicket[] {
@@ -425,7 +442,17 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
     const shortLabel = label.replace(/^Releasing next$/, 'next train').replace(/^Train (\d+).*/, 'train $1');
     out.set(t.label, { kind: 'land', stage: 'line', chip: `line · ${shortLabel}`, text: `${label}: ${text}`, brief: label, since: t.mtime, usual: usualS, train: { role: 'waiting', label } });
   });
+  for (const t of line) overlayFrozen(out.get(t.label), t.frozen);
   return out;
+}
+
+/** A frozen process's wait says so, in place of waiting or running (#1881): since when, and the command that thaws it; what it was doing follows. */
+function overlayFrozen(w: Wait | undefined, f: Frozen | undefined) {
+  if (!w || !f) return;
+  w.frozen = f;
+  w.chip = frozenChip(f);
+  w.brief = w.chip;
+  w.text = `${frozenWords(f)}. It was: ${w.text}`;
 }
 
 export interface HeavyJob {
@@ -435,6 +462,9 @@ export interface HeavyJob {
   reason?: string;
   slot?: number;
   tests?: TestCounts | null;
+  pid?: number;
+  /** Its process sits in a frozen cgroup (#1881). */
+  frozen?: Frozen;
 }
 
 /**
@@ -482,11 +512,15 @@ export function readHeavy(dir: string, now = Date.now(), held = heldSlots()): { 
     if (m) {
       const w = holderOf(read(f)?.trim()),
         at = mtime(f);
-      if (w && at != null && held(join(dir, `slot-${m[1]}`))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, tests: readTestCounts(join(dir, `slot-${m[1]}.progress`), at) });
+      if (w && at != null && held(join(dir, `slot-${m[1]}`))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, pid: Number(w[3]), tests: readTestCounts(join(dir, `slot-${m[1]}.progress`), at) });
     } else if (/^wait-\d+-\d+$/.test(name) && now - (mtime(f) ?? 0) < STALE_WAITER_MS) {
       const w = waiterOf(read(f));
-      if (w) waiters.push(w);
+      if (w) waiters.push({ ...w, pid: Number(name.split('-')[1]) });
     }
+  }
+  for (const j of [...holders, ...waiters]) {
+    const f = j.pid ? frozenCached(j.pid) : null;
+    if (f) j.frozen = noteFrozen(j.who, f.cg);
   }
   return { holders, waiters: waiters.sort((a, b) => a.since - b.since) };
 }
@@ -502,18 +536,24 @@ export async function readHeavyA(dir: string, now = Date.now(), held: (slotFile:
       if (m) {
         const [text, at] = await Promise.all([readA(f), mtimeA(f)]);
         const w = holderOf(text?.trim());
-        if (w && at != null && (await held(join(dir, `slot-${m[1]}`)))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, tests: await readTestCountsA(join(dir, `slot-${m[1]}.progress`), at) });
+        if (w && at != null && (await held(join(dir, `slot-${m[1]}`)))) holders.push({ who: w[1], what: w[2], since: at, slot: Number(m[1]) + 1, pid: Number(w[3]), tests: await readTestCountsA(join(dir, `slot-${m[1]}.progress`), at) });
       } else if (/^wait-\d+-\d+$/.test(name) && now - ((await mtimeA(f)) ?? 0) < STALE_WAITER_MS) {
         const w = waiterOf(await readA(f));
-        if (w) waiters.push(w);
+        if (w) waiters.push({ ...w, pid: Number(name.split('-')[1]) });
       }
+    }),
+  );
+  await Promise.all(
+    [...holders, ...waiters].map(async (j) => {
+      const f = j.pid ? await frozenCgroup(j.pid) : null;
+      if (f) j.frozen = noteFrozen(j.who, f.cg);
     }),
   );
   holders.sort((a, b) => a.slot! - b.slot!); // reads finish in any order
   return { holders, waiters: waiters.sort((a, b) => a.since - b.since) };
 }
 
-const holderOf = (text: string | null | undefined) => text?.match(/^(.*?): (.*) \(since \d\d:\d\d, pid \d+\)$/);
+const holderOf = (text: string | null | undefined) => text?.match(/^(.*?): (.*) \(since \d\d:\d\d, pid (\d+)\)$/);
 function waiterOf(text: string | null): HeavyJob | null {
   const [who, what, since, reason] = (text ?? '').split('\n');
   return who && Number(since) ? { who, what, since: Number(since) * 1000, reason } : null;
@@ -554,6 +594,7 @@ export function heavyWaits({ holders, waiters }: ReturnType<typeof readHeavy>, u
             : `${place} in line for a heavy slot${busy ? `, all held (${busy})` : ''}`;
       out.set(w.who, { kind: 'heavy', stage: 'slot', chip: w.reason === 'load' ? 'slot · busy box' : w.reason === 'memory' ? 'slot · short on memory' : `slot · ${place}`, text, since: w.since, usual: usual('heavy:slot') });
     });
+  for (const j of [...holders, ...waiters]) overlayFrozen(out.get(j.who), j.frozen);
   return out;
 }
 

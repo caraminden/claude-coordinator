@@ -122,6 +122,7 @@ import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
 import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
 import { TimerAlerts } from './src/timer-alerts.ts';
+import { FrozenShips } from './src/frozen-ships.ts';
 import { ErrorDigest, RESTART_WINDOW_MS } from './src/contraption-errors.ts';
 import { ensureCoordinatorFor } from './src/routes/projects.ts';
 import { KitSync, type KitSyncState } from './src/kit-sync.ts';
@@ -132,7 +133,7 @@ import { usageName } from './src/usage-ledger.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
-import { Waits, readHeavy, readQueue } from './src/waits.ts';
+import { Waits, labelTicket, readHeavy, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
 import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
@@ -148,7 +149,7 @@ import { shipFirst } from './src/ship-line.ts';
 import { StallWatch } from './src/stall-signals.ts';
 import { dispatch, OldApk, OtherKey, publish, rollBackApk } from './src/apk-release.ts';
 import { ApkBuilds } from './src/apk-build.ts';
-import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, MainReader, PrsInFlight, ROLLBACK_BRANCH, TestCopyReader } from './src/release-readers.ts';
+import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, landQueue, MainReader, PrsInFlight, ROLLBACK_BRANCH, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder, type Found } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
@@ -2009,6 +2010,22 @@ const timerAlerts = new TimerAlerts(store, {
   },
 });
 if (!BOOT_CHECK && !services.opts.off) timerAlerts.start();
+// Ships and checks in the line whose cgroup somebody froze (#1881): each freeze and thaw is a health event, and one frozen over 5 minutes is
+// one Mandate alert for its scheme's owner, cleared when it thaws. Reads only what the line's readers noted; it thaws nothing.
+const frozenShips = new FrozenShips(store, {
+  mandate: (from, person, key, title, link) => mandateAlert('Frozen ships', from, person, key, title, link),
+  schemeOf: (label) => {
+    const t = labelTicket(store, label);
+    const p = t && store.getProject(t.project_id);
+    return p ? { id: p.id, name: p.name } : null;
+  },
+  fallback: () => ownScheme(),
+  scan: async () => {
+    const dirs = [waits.queue && { q: waits.queue, at: 4 }, ...store.listProjects().map((p) => p.repo_dir && { q: landQueue(p.repo_dir), at: 7 })];
+    await Promise.all([...dirs.map((d) => d && readQueueA(d.q, d.at)), readHeavyA(join(DATA_DIR, 'projects', '.heavy'))]);
+  },
+});
+if (!BOOT_CHECK) frozenShips.start();
 // Each app's DATA_DIR size for Settings and the app's own read (#847): du in the background, never on a request.
 if (!BOOT_CHECK) services.watchDisk(() => store.listContraptions());
 // Apps with a database but no backup timer or disk_warn_gb are flagged to their scheme's Taskmaster, once each (#1383).

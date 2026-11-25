@@ -607,6 +607,8 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-tile.st-lines { grid-template-rows: none; grid-auto-rows: auto; gap: 0.4rem; }
 .st-lines .st-sub { display: block; }
 .st-workers .st-line-rows { min-height: 0; }
+/* A phone's line is too short for "2 of 11 working · 2 waiting on a card". */
+.st-workers .st-value { white-space: normal; }
 .st-workers-act { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-block: var(--space-2); }
 .st-workers-act label { display: inline-flex; gap: var(--space-2); align-items: center; margin: 0; }
 .st-workers-act select { width: auto; margin: 0; padding-block: var(--space-1); font-size: 0.82em; }

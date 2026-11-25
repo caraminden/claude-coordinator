@@ -78,7 +78,8 @@ export function workersPanel(page) {
     );
     el.replaceChildren(
       h('h4', {}, 'Workers'),
-      h('b', { class: 'st-value' }, w.paused ? toneChip('warn', `${w.paused.stop ? 'Paused and stopped' : 'Paused'} by ${w.paused.by}, ${ago(w.paused.at)}`) : '', w.paused ? ' ' : '', value),
+      h('b', { class: 'st-value' }, value),
+      w.paused ? h('div', {}, toneChip('warn', `${w.paused.stop ? 'Paused and stopped' : 'Paused'} by ${w.paused.by}, ${ago(w.paused.at)}`)) : '',
       h('div', { class: 'st-sub muted' }, failed ? `Couldn't read it: ${failed}` : `${size} · Taskmasters always run`),
       h(
         'div',
@@ -91,7 +92,7 @@ export function workersPanel(page) {
       h(
         'div',
         { class: 'hue-rows st-line-rows' },
-        ...w.people.map((p) => hueRow({ hue: p.used ? 'running' : 'waiting', lead: String(p.used), meta: h('span', { class: 'muted small' }, `${p.waiting ? `${p.waiting} waiting` : ''}${p.stalled ? ' · held: their container is out of memory' : ''}`) }, p.name, h('span', { class: 'muted' }, p.used ? ' working' : ''))),
+        ...w.people.map((p) => hueRow({ hue: p.used ? 'running' : 'waiting', lead: String(p.used), meta: h('span', { class: 'muted small' }, `${p.waiting ? `${p.waiting} waiting` : ''}${p.stalled ? ' · held: container full' : ''}`) }, p.name, h('span', { class: 'muted' }, p.used ? ' working' : ''))),
       ),
     );
     if (focused) el.querySelector(`[data-key="${CSS.escape(focused)}"]`)?.focus();

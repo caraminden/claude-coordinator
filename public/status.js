@@ -930,7 +930,7 @@ export function statusPane(onData = () => {}) {
       h('div', { class: 'ci-head' }, h('h3', {}, app ? app.title : 'Citadel'), toneChip(CHIP[v.tone], WORD[v.tone]), app ? h('a', { href: `/apps/${app.name}/`, target: '_blank', rel: 'noopener' }, 'Open it') : '', h('span', { class: 'muted small' }, `read ${ago(now)}`)),
       h('p', { class: 'st-why' }, ...(v.reasons.length ? why : [app ? 'Running, deployed and quiet.' : 'Up, no failed service, no long stalls, memory, disk and CI fine.'])),
       app ? controls(app.name) : '',
-      h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : [...workers, ...citadelTiles(citadel, days, now, shipTimes, draw), lines])),
+      h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : [workers, ...citadelTiles(citadel, days, now, shipTimes, draw), lines])),
     );
   };
   let tried = false;

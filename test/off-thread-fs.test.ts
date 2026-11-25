@@ -384,10 +384,38 @@ test('what acts on the ship line reads it fresh, never the snapshot of the last 
 
 test('a poll already reading the line never puts an older line over the one an action just read (#1980)', async () => {
   const w = shipLine('late-line', 3);
-  const late = w.releases.pollA(); // reads #2 while it waits
+  // Its read has all three tickets and waits on land.sh when the line moves.
+  const { readFile: realRead, stat: realStat } = fs.promises;
+  let read = 0;
+  let open = () => {};
+  const gate = new Promise<void>((done) => {
+    open = done;
+  });
+  const patch = (readFn: typeof realRead, statFn: typeof realStat) => {
+    Object.assign(fs.promises, { readFile: readFn, stat: statFn });
+    syncBuiltinESMExports();
+  };
+  patch(
+    (async (...a: Parameters<typeof realRead>) => {
+      if (String(a[0]).endsWith('land.sh')) await gate;
+      return realRead(...a);
+    }) as typeof realRead,
+    (async (...a: Parameters<typeof realStat>) => {
+      const st = await realStat(...a);
+      if (String(a[0]).startsWith(w.q)) read++;
+      return st;
+    }) as typeof realStat,
+  );
+  const late = w.releases.pollA();
+  try {
+    await until('the poll read the three tickets', () => read === 3);
+  } finally {
+    patch(realRead, realStat);
+  }
   rmSync(join(w.q, '0000000002'));
   w.releases.poll();
   assert.equal(w.line().length, 2);
+  open();
   await late;
   assert.equal(w.line().length, 2);
 });
@@ -434,6 +462,13 @@ test("the long-jobs pump, sweep and lookups make no synchronous file call on the
     await jobs.pump();
   });
   assert.deepEqual(seen, []);
+  // A folder that can't be listed keeps the last answer: a held job must not look unknown, so free to start.
+  fs.renameSync(long, `${long}-away`);
+  writeFileSync(long, '');
+  await ok.refresh();
+  assert.equal(ok.list().length, 3);
+  rmSync(long);
+  fs.renameSync(`${long}-away`, long);
   assert.equal(JSON.parse(saved).state, 'dispatched', 'saved before GitHub is asked, so a crash never runs it twice');
   assert.deepEqual(fs.readdirSync(long).sort(), ['.new.tmp', 'a-1-a.json', 'b-2-b.json']);
   for (const f of ['server.ts', 'src/routes/machines.ts']) assert.doesNotMatch(readFileSync(join(import.meta.dirname, '..', f), 'utf8'), /\breadLongJobs\(/);

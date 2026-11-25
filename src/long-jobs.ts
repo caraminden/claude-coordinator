@@ -120,10 +120,15 @@ export function readLongJobs(heavyDir: string): LongJob[] {
   );
 }
 
-/** readLongJobs with every file read off the server's thread (#1980). */
+/** readLongJobs with every file read off the server's thread (#1980). Throws when the folder is there and can't be listed. */
 export async function readLongJobsA(heavyDir: string): Promise<LongJob[]> {
   const root = join(heavyDir, 'long');
-  const names = (await readdir(root).catch((): string[] => [])).filter((n) => n.endsWith('.json'));
+  const names = (
+    await readdir(root).catch((err): string[] => {
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    })
+  ).filter((n) => n.endsWith('.json'));
   return jobsFrom(await Promise.all(names.map(async (n): Promise<[string, string]> => [n, await readFile(join(root, n), 'utf8').catch(() => '')])));
 }
 
@@ -165,7 +170,7 @@ export class LongJobs {
     return this.jobs;
   }
 
-  /** Read the folder off the server's thread; one read at a time. Never throws. */
+  /** Read the folder off the server's thread; one read at a time. A failed read keeps the last answer; nothing here throws. */
   refresh(): Promise<void> {
     const at = this.reads;
     return (this.reading ??= readLongJobsA(this.d.dir)
@@ -174,6 +179,7 @@ export class LongJobs {
         const mine = new Map(this.busy ? this.jobs.map((j) => [j.id, j]) : []);
         this.jobs = read.map((j) => mine.get(j.id) ?? j);
       })
+      .catch(() => {})
       .finally(() => {
         this.reading = null;
       }));

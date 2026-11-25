@@ -177,7 +177,7 @@ export function overlapsFor(news: Para[], sources: Source[], inHome: (rule: Rule
 
 /**
  * Markdown files (or those matching `re`) under a folder of a repo, as repo-relative paths; none when it is missing.
- * The one walker for instruction files: the Decisions page (src/decisions-load.ts) reads its sources with it too.
+ * The one walker for instruction files; the Decisions page (src/decisions-load.ts) uses its twin, mdFilesA.
  */
 export function mdFiles(repo: string, dir: string, depth = 6, re = /\.md$/i): string[] {
   if (depth < 0) return [];

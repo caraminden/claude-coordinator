@@ -39,27 +39,28 @@ const APP = `<!doctype html><meta charset="utf-8"><body><textarea id="t"></texta
   const tell = (test, value) => parent.postMessage({ app, test, value }, '*');
   // Text left in the box, as a draft someone stopped typing: no input event, so only the box's value holds a reload back.
   addEventListener('message', (e) => { if (typeof e.data?.fill === 'string') { document.getElementById(e.data.id ?? 't').value = e.data.fill; tell('filled', e.data.fill); } });
-  // With ?box, Citadel UI's message box too (#1939): its sends settle when told, its tray holds what it's told, and its clock can be moved on.
+  // With ?box, Citadel UI's message box too (#1939): its sends settle when told, each box has its own tray, and its clock can be moved on.
   if (new URLSearchParams(location.search).has('box')) {
     const { mountComposer } = await import('/apps/_citadel/ui/composer.js');
     let settle = () => {};
-    let tray = 0;
     let skew = 0;
     const now = Date.now;
     Date.now = () => now() + skew;
     const place = document.body.appendChild(document.createElement('div'));
-    const mount = () => mountComposer(place, {
+    let trays = []; // the first chat's, then the next's
+    const mount = (tray = { files: 0 }) => (trays.push(tray), mountComposer(place, {
       autofocus: false,
-      canSend: (text) => !!text || tray > 0,
-      send: () => new Promise((ok, no) => { tray = 0; settle = (sent) => (sent ? ok() : no(new Error('refused'))); }),
+      canSend: (text) => !!text || tray.files > 0,
+      send: () => new Promise((ok, no) => { tray.files = 0; settle = (sent) => (sent ? ok() : no(new Error('refused'))); }),
       onError: () => tell('step', 'settle:' + box.value), // the words are back
-    });
+    }));
     let box = mount();
     addEventListener('message', (e) => {
       const { box: step, value } = e.data ?? {};
       if (step === 'send') { box.value = value; box.form.requestSubmit(); }
       else if (step === 'settle') { settle(value); if (!value) return; }
-      else if (step === 'tray') tray = value;
+      else if (step === 'tray') trays[0].files = value; // the first chat's
+      else if (step === 'drawn') return requestAnimationFrame(() => requestAnimationFrame(() => tell('step', 'drawn:')));
       else if (step === 'skew') skew = value;
       else if (step === 'other chat') { place.replaceChildren(); box = mount(); } // as Peek does for another aura
       else return;
@@ -201,12 +202,12 @@ async function askedToReload(page: Page, answer: 'held' | 'reload', why: string)
   if (answer === 'held') assert.equal(await page.eval('echo.peek.loads'), 1, why);
 }
 
-test('a frame out of sight with a message still being sent is held, and reloads once it is sent', { skip }, async () => {
+test('a frame out of sight with a message still being sent is held, and reloads when asked again once it is sent', { skip }, async () => {
   const page = await twoFrames('?box');
   await inBox(page, 'send', 'words with screenshots');
   await askedToReload(page, 'held', 'held while the message is on its way');
   await inBox(page, 'settle', true);
-  await waitFor(page, 'the reload, asked again by itself', 'echo.peek.loads === 2');
+  await askedToReload(page, 'reload', 'it was sent');
 });
 
 test('a frame already stale when the person sends and leaves is held too', { skip }, async () => {
@@ -238,8 +239,12 @@ test('a message being sent from a box the page has since replaced (another chat 
 
 test('files waiting to go with an empty box hold the reload, in a box the page has replaced too', { skip }, async () => {
   const page = await twoFrames('?box');
+  await page.eval(`showFrame('peek')`);
+  await inBox(page, 'drawn', null);
   await inBox(page, 'tray', 2);
+  await page.eval('hideFrames()');
   await askedToReload(page, 'held', 'held by the files');
+  await inBox(page, 'other chat', null);
   await inBox(page, 'other chat', null);
   await askedToReload(page, 'held', 'the first chat still has them');
   await inBox(page, 'tray', 0);

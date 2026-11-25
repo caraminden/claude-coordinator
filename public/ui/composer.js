@@ -337,10 +337,13 @@ export function mountComposer(el, opts) {
   answerReload();
   // Only a framed page is asked, so Citadel's own chats aren't kept here.
   if (opts.canSend && window.parent !== window) {
-    for (const b of boxes) if (b.shown && !b.form.isConnected && !waiting(b)) boxes.delete(b);
+    for (const b of boxes) {
+      b.shown ||= b.form.isConnected;
+      if (b.shown && !b.form.isConnected && !waiting(b)) boxes.delete(b);
+    }
     const b = { form, canSend: opts.canSend, shown: false };
     boxes.add(b);
-    requestAnimationFrame(() => (b.shown = form.isConnected)); // one built off the page and shown later is never dropped
+    requestAnimationFrame(() => (b.shown ||= form.isConnected)); // one built off the page waits for its first showing
   }
   if (opts.autofocus !== false) {
     dropGone(); // each box holds its whole page, so the ones gone go now, not at the next focus

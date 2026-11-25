@@ -141,9 +141,10 @@ const NAMES: Record<HoldKind, string> = { proof: 'flake proof', heavy: 'heavy jo
 export function withoutHeld(get: GhGet, isHeld: (run: number) => boolean): GhGet {
   return async (path, etag, as) => {
     const r = await get(path, etag, as);
-    const runs = r.body?.workflow_runs;
+    const body = r.body as RunList | null;
+    const runs = body?.workflow_runs;
     if (!Array.isArray(runs) || !runs.some((run) => isHeld(run.id))) return r;
-    return { ...r, body: { ...r.body, workflow_runs: runs.filter((run) => !isHeld(run.id)) } };
+    return { ...r, body: { ...body, workflow_runs: runs.filter((run) => !isHeld(run.id)) } };
   };
 }
 
@@ -479,7 +480,7 @@ export class CiHold {
   /** A run as it is now, never from a cached list; null when it was deleted. */
   private async one(path: string, as: GithubEnv): Promise<GhRun | null> {
     const r = await (this.d.get ?? ghGet)(path, null, as);
-    if (r.status === 200) return r.body;
+    if (r.status === 200) return r.body as GhRun | null;
     if (r.status === 404) return null;
     throw new Error(`GitHub answered ${r.status} for ${path}`);
   }
@@ -490,10 +491,11 @@ export class CiHold {
     const r = await (this.d.get ?? ghGet)(path, had?.etag ?? null, as);
     if (r.status === 304 && had) return had.body;
     if (r.status === 200) {
-      this.cache.set(path, { etag: r.etag, body: r.body });
-      return r.body;
+      const body = r.body as RunList;
+      this.cache.set(path, { etag: r.etag, body });
+      return body;
     }
-    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String(r.body?.message ?? '')))) throw new RateLimited();
+    if (r.status === 429 || (r.status === 403 && /rate limit/i.test(String((r.body as { message?: unknown } | null)?.message ?? '')))) throw new RateLimited();
     throw new Error(`GitHub answered ${r.status} for ${path}`);
   }
 

@@ -83,10 +83,10 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
     },
   });
   for (; now <= ctx.now; now += HOLD_POLL_MS) await hold.tick(now);
-  // Quiet from here: whatever is still held must come back.
-  for (const end = now + 3600_000; now < end; now += HOLD_POLL_MS) await hold.tick(now);
+  // Quiet from here: whatever is still held must come back. Two proofs of one file go one after the other, after a back-off of up to 40 min.
+  for (const end = now + 3 * 3600_000; now < end; now += HOLD_POLL_MS) await hold.tick(now);
   const stuck = hold.state(now).held.filter((h) => h.phase !== 'resumed');
-  if (stuck.length) throw new Error(`still held after an hour with nothing running: ${stuck.map((h) => h.what).join(', ')}`);
+  if (stuck.length) throw new Error(`still held after 3 hours with nothing running: ${stuck.map((h) => h.what).join(', ')}`);
   const sorted = waits.sort((a, b) => a - b);
   const min = (ms: number | undefined) => Math.round((ms ?? 0) / 60_000);
   return {

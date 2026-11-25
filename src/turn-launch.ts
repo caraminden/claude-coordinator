@@ -563,7 +563,7 @@ const envDenies = (folders: string[]) => folders.flatMap((d) => [`Read(/${d}/**/
 /**
  * The one `node` command a Taskmaster may run: citadel:briefing and citadel:subagents run kit/model-tiers.ts when
  * they load, and a refused `!` command fails the whole skill (#1979). Exact rules, each path as Claude Code fills it
- * in (`..` and all; tried in real runs), so no other script, argument or chained command matches.
+ * in (`..` and all; tried in real runs), so no other script or argument matches. Each part of a chain still needs its own rule.
  */
 const modelTierRules = (kit: string) => ['briefing', 'subagents'].map((skill) => `Bash(node "${kit}/skills/${skill}/../../model-tiers.ts")`);
 
@@ -571,6 +571,7 @@ const modelTierRules = (kit: string) => ['briefing', 'subagents'].map((skill) =>
  * How the coordinator may look at the project's code: its main checkout and every ticket folder,
  * readable but not writable. Bash runs only read-only commands (READ_ONLY_COMMANDS), on those folders,
  * readDirs and the box-health files: Claude Code still refuses a read command's path outside them.
+ * Given the turn's kit, it also runs the model table's script (modelTierRules).
  * `git -C <dir> <read-only command>` is allowed per folder; each rule pins the exact folder as a prefix,
  * since `*` in a rule would also match `git -C x commit -m "fix log"`. Anything else that would ask
  * for approval is denied (test/coordinator-access.test.ts replays the calls that used to be).

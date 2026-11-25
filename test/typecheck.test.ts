@@ -7,6 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { holds } from './holds.ts';
 import { ROOT, compare, describe, escapes, lowered, measure, moved, parseTsc, readBaseline, tscErrors, upMessage } from '../tools/typecheck.ts';
 
 test('no file has more type errors or escapes than its baseline', async () => {
@@ -197,4 +198,50 @@ test('a string continued onto the next line with a backslash does not hide an an
   }
   // An unclosed template full of continued lines must not send the pattern into endless backtracking: this hangs if so.
   escapes(`const s = \`${'\\\r\n'.repeat(40)}`, 'x.tsx');
+});
+
+// #2033: type checks share the limit citadel-test's files wait on (tools/test-gate.ts), so several started together don't each take ~1 GB.
+test('a type check waits while the shared limit is held, says so, and goes once it is freed', async () => {
+  const { spawn } = await import('node:child_process');
+  const { dir, done } = scratch({ 'a.ts': 'export const a: number = 1;\n' });
+  const heavy = join(dir, 'heavy');
+  mkdirSync(heavy);
+  copyFileSync(join(ROOT, 'tools', 'test-gate.ts'), join(dir, 'tools', 'test-gate.ts'));
+  // One place in all, and something else holds it.
+  const env = { ...process.env, CITADEL_HEAVY_DIR: heavy, CITADEL_TEST_FILES: '1', CITADEL_TEST_FILES_MIN: '1', CITADEL_TEST_FILES_MAX: '1', CITADEL_HEAVY_PRESSURE: join(dir, 'none'), RUNNER_TEMP: '', GITHUB_ACTIONS: '', CITADEL_HEAVY_HELD: '' };
+  const holder = spawn('sh', ['-c', 'exec 8>"$1" && flock -n 8 && echo held && exec sleep 600', 'sh', join(heavy, 'test-slot-0')], { stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    await new Promise((r) => holder.stdout.once('data', r));
+    const child = spawn(process.execPath, [join(dir, 'tools', 'typecheck.ts'), '--init'], { cwd: dir, env });
+    let out = '';
+    child.stderr.on('data', (b) => (out += b));
+    child.stdout.on('data', (b) => (out += b));
+    const exited = new Promise<number | null>((r) => child.on('close', r));
+    await holds('the check has not run', () => child.exitCode === null, { after: () => /typecheck: waiting for room/.test(out) });
+    assert.match(out, /typecheck: waiting for room/, 'it says it is waiting');
+    holder.kill();
+    assert.equal(await exited, 0, `it goes once the place is free: ${out}`);
+  } finally {
+    holder.kill();
+    done();
+  }
+});
+
+test('a type check does not wait on CI, in a heavy job, with the limit off, or when the repo has no gate', async () => {
+  const { dir, check, done } = scratch({ 'a.ts': 'export const a: number = 1;\n' });
+  try {
+    const heavy = join(dir, 'heavy');
+    mkdirSync(join(heavy, 'x'), { recursive: true });
+    // No tools/test-gate.ts in this copy: the other schemes' case.
+    assert.equal(check('--init').code, 0);
+    copyFileSync(join(ROOT, 'tools', 'test-gate.ts'), join(dir, 'tools', 'test-gate.ts'));
+    for (const skip of [{ GITHUB_ACTIONS: 'true' }, { CITADEL_HEAVY_HELD: '1' }, { CITADEL_TEST_FILES: '0' }]) {
+      // A limit of one, with the one place held by a file lock this run can't take: waiting would run past the timeout below.
+      const r = spawnSync(process.execPath, [join(dir, 'tools', 'typecheck.ts')], { cwd: dir, encoding: 'utf8', timeout: 60_000, env: { ...process.env, CITADEL_HEAVY_DIR: heavy, CITADEL_TEST_FILES_MIN: '0', CITADEL_TEST_ROOM_WAIT: '1', ...skip } });
+      assert.equal(r.status, 0, JSON.stringify(skip) + r.stderr);
+      assert.doesNotMatch(r.stderr, /waiting for room/);
+    }
+  } finally {
+    done();
+  }
 });

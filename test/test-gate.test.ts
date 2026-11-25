@@ -191,3 +191,17 @@ test('an entry a killed waiter left in line holds nobody up, and is removed', as
   assert.equal(await file({ ...env, CITADEL_TEST_ROOM_WAIT: '600' }, 10), 0);
   assert.ok(!existsSync(left));
 });
+
+test("a worker thread a file starts doesn't wait for a place or take one", async () => {
+  const { env, run } = setup(20);
+  const one = { ...env, CITADEL_TEST_FILES: '1', CITADEL_TEST_FILES_MIN: '1', CITADEL_TEST_FILES_MAX: '1', CITADEL_TEST_ROOM_WAIT: '30' };
+  // The file holds the only place; the worker it starts must come up at once, not queue behind it for the 30 s wait.
+  const wfile = join(root, `worker-${n}.cjs`); // a file worker: the preloads run in it, an eval one skips them
+  writeFileSync(wfile, `require('worker_threads').parentPort.postMessage(1)`);
+  const code = `const {Worker}=require('worker_threads');const t=Date.now();const w=new Worker(${JSON.stringify(wfile)});w.on('message',()=>{require('fs').writeFileSync(require('path').join(process.env.RUN,'worker-ms'),String(Date.now()-t));process.exit(0)})`;
+  const c = spawn(process.execPath, ['-e', code], { env: { ...one, NODE_OPTIONS: `--import=${gate}` }, stdio: 'ignore' }); // as tools/citadel-test sets it
+  assert.equal(await new Promise((r) => c.on('close', r)), 0);
+  const ms = Number(readFileSync(join(run, 'worker-ms'), 'utf8'));
+  assert.ok(ms < 3000, `the worker took ${ms} ms`);
+  assert.ok(!existsSync(join(env.CITADEL_HEAVY_DIR!, 'test-line')) || readdirSync(join(env.CITADEL_HEAVY_DIR!, 'test-line')).length === 0, 'and left no line file');
+});

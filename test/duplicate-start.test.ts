@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
 import { projectSharedDir } from '../src/workspace.ts';
 import { agentToken, bootServer, type Booted } from './helpers.ts';
+import { until } from './wait.ts';
 
 // #1488: a Taskmaster started two minions from one handoff (Nov 20, the flake fixes) because the twin check only ran
 // on the memory index. Now the server refuses a second start from the same handoff file, index or not, while the first
@@ -49,6 +50,9 @@ test("a chained minion's held brief counts, and a minion closed over 3 days ago 
 
   const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });
   const close = (ago: number) => db.prepare("UPDATE tickets SET status = 'closed', closed_at = ? WHERE project_id = ? AND kind = 'ticket' AND title != 'Leader'").run(Date.now() - ago, p.id);
+  // A turn (/bin/false here) that ends after the raw close would set the status back and clear closed_at.
+  const starts = db.prepare("SELECT status FROM tickets WHERE project_id = ? AND kind = 'ticket' AND id != ?");
+  await until('every start to have ended its turn', () => starts.all(p.id, held.data.id).every((t) => t.status === 'error'));
   close(2 * 86_400_000);
   assert.equal((await start('Again', `Your brief is ${shared}/handoffs/y.md`)).status, 409, 'closed 2 days ago still counts');
   close(4 * 86_400_000);

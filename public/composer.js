@@ -355,9 +355,13 @@ export function composer(chatId, ticket) {
           .join('\n\n');
         if (!form.isConnected) {
           // You left the chat: the box is gone, and a new one may hold fresh text. Put it in the saved draft, never over live text.
-          const cur = loadDraft(`cc-draft:${chatId}`) ?? '';
-          saveDraft(`cc-draft:${chatId}`, cur.trim() ? `${back}\n${cur}` : back);
-          alertNote("An upload failed, so your message was not sent. It is in this chat's draft.");
+          // The chat may be open again in a new composer: it takes the text the way a taken-back message does.
+          const live = chatOpen(chatId) && document.querySelector('.composer');
+          if (live?.editBack) live.editBack(back);
+          else {
+            const cur = loadDraft(`cc-draft:${chatId}`) ?? '';
+            saveDraft(`cc-draft:${chatId}`, cur.trim() ? `${back}\n${cur}` : back);
+          }
           toast("Upload failed: your message is in the chat's draft", { tone: 'warn', ms: 8000 });
           return;
         }
@@ -755,13 +759,16 @@ function mentionMenu(form, textarea, people) {
   menu.addEventListener('pointerdown', (e) => e.preventDefault());
   textarea.addEventListener('input', () => {
     active = 0;
+    dismissed = false;
     update();
   });
   textarea.addEventListener('blur', close);
   // A caret moved by click or keys (Home, Left, Right) can leave "@" behind: re-read it, so the menu closes.
-  textarea.addEventListener('click', update);
+  let dismissed = false; // Escape closes it until the query changes
+  const reread = () => dismissed || update();
+  textarea.addEventListener('click', reread);
   textarea.addEventListener('keyup', (e) => {
-    if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape', 'Shift'].includes(e.key)) update();
+    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) reread();
   });
   form.addEventListener(
     'keydown',
@@ -772,6 +779,7 @@ function mentionMenu(form, textarea, people) {
         active = (active + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length;
         mark();
       } else if (e.key === 'Escape') {
+        dismissed = true;
         close();
       } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
         pick(shown[active]);

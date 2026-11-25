@@ -15,7 +15,10 @@ export const LIMIT = 1500;
 export const ALLOWED: Record<string, [number, string]> = {
   'public/core.js': [1601, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
   'src/ci-health.ts': [1560, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
-  'src/runner.ts': [5421, 'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808)'],
+  'src/runner.ts': [
+    5498,
+    'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+77: worker-line host, stop and boot calls; the line itself is turn-line.ts, #1868)',
+  ],
   'src/db.ts': [4135, 'schema, migrations and settings; queries are already moving to src/db/<area>.ts (+1: SCHEMA_HISTORY row 115, #1798; +2: types replacing any, #1799) (raised once for the Biome reformat, #1792)'],
   'src/mcp.ts': [2898, 'every MCP tool definition and handler; split by tool family is queued (+5: apply_memory, #1803) (raised once for the Biome reformat, #1792)'],
   'tools/land.sh': [2509, 'the ship script is one shell program; its steps share state and are pinned by tests'],

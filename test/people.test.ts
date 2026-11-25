@@ -206,6 +206,7 @@ test("a member taken out of a scheme stops paying for their old minions' automat
   await until('the queued start asks for a place', () => asked.length === 1);
   store.setSetting(`minion-queue:${hers.id}`, { held: [{ author: 'Held mail from #4 Work', text: 'fyi', images: [] }] });
   assert.equal(runner.releaseMail(store.getTicket(hers.id)!, store.getProject(games.id)!), 0);
+  runner.queue.owe(hers.id, { resumes: 1 }); // as recover saves it, so it keeps in the worker line (#1868)
   (runner as any).resume(hers.id, 1);
   await until('the resume asks for a place', () => asked.length === 3);
   assert.deepEqual(asked, [josh.id, josh.id, josh.id]);
@@ -332,6 +333,7 @@ test("a disabled person's held mail is dropped with a line, and never decides or
   assert.deepEqual(runner.queue.peek(hers.id), []);
   // A restart resume runs on her login (her interrupted turn's), and his held mail doesn't ride along on it.
   store.setSetting(`minion-queue:${hers.id}`, { held: [{ author: 'Josh', text: 'resumed with', images: [], parked: '2026-11-21 20:10' }] });
+  runner.queue.owe(hers.id, { resumes: 1 });
   (runner as any).resume(hers.id, 1);
   await until('the resume starts a turn', () => started.length === 2);
   assert.equal(started[1].person, olive.id);

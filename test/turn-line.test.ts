@@ -158,7 +158,7 @@ test("a person's own message goes ahead of automatic work in their share", async
   await started(auto);
 });
 
-test("a freed worker goes to whoever is furthest below their share, which grows with what they have waiting", async () => {
+test('a freed worker goes to whoever is furthest below their share, which grows with what they have waiting', async () => {
   runner.turnLine.setSize(5, 'Cara');
   const caras = [minion(), minion(), minion(), minion(), minion()];
   for (const id of caras) say(id);

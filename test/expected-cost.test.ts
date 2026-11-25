@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { ASK, askText, type Budget, expectedCost, markOf, START_CARD_USD, turnLine, WAKE, withEstimate } from '../src/minion-budget.ts';
-import { agentToken, bootServer } from './helpers.ts';
+import { agentToken, bootServer, mintedAgentToken } from './helpers.ts';
 import { until } from './wait.ts';
 
 // Every brief states an expected cost (#1674; Cara, 2026-11-22, "Build it" on #1668's card): the budget's marks scale
@@ -109,6 +109,7 @@ test("a Taskmaster brief over $30 waits for a person's start card; under it, or 
     assert.equal(r.status, 202, JSON.stringify(r.data));
     await until('it is dismissed', async () => (await s.call(`/api/tickets/${split.data.id}`)).data.ticket.status === 'closed');
     await until('the Taskmaster hears', async () => (await events(tm.id)).some((e) => e.kind === 'user_message' && /Split first/.test(JSON.parse(e.data).text)));
+    await mintedAgentToken(s.data, tm.id); // that wakes it: its turn's token replaces the one used so far
 
     // $30 or under starts as today; no estimate starts too, with a nudge for one.
     const small = await create('Small', 'Fix it.\nExpected cost: $30', { expected_cost: 30 });

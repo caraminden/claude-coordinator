@@ -2,6 +2,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ARM_SIZE, armOf, enrol, SEAM_CONTEXT_TOKENS, type SeamTrial } from '../src/seam-trial.ts';
+import { TURN_SETTINGS } from '../src/turn-launch.ts';
+
+// Real compactions land near 82-88% of the window: a mark above that enrols nobody (the trial's first four days).
+test('the mark sits below where minions compact', () => {
+  assert.ok(SEAM_CONTEXT_TOKENS < 0.8 * TURN_SETTINGS.autoCompactWindow);
+});
 
 test('only past the mark, once per minion, alternating groups, and nobody once both are full', () => {
   assert.equal(enrol(null, 1, SEAM_CONTEXT_TOKENS, 5), null);

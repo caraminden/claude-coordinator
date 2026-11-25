@@ -580,9 +580,9 @@ test('a failed handoff that leaves it big does not loop; the next real turn hand
   }
 });
 
-// The seam trial (#1129): minions past 150k at a turn's end are enrolled, groups taking turns; the fresh group is told
+// The seam trial (#1129): minions past the mark as their next turn starts are enrolled, groups taking turns; the fresh group is told
 // to hand off at a seam and carries straight on from its handoff and the server's facts sheet.
-test('seam trial: minions whose turn ends past 150k are enrolled, fresh then control, and only the fresh one is told', async () => {
+test('seam trial: minions whose next turn starts past the mark are enrolled, fresh then control, and only the fresh one is told', async () => {
   store.deleteSetting(SEAM_TRIAL_KEY);
   const [a, b, small] = [taskmaster('old', null), taskmaster('old', null), taskmaster('old', null)];
   try {
@@ -598,6 +598,16 @@ test('seam trial: minions whose turn ends past 150k are enrolled, fresh then con
       await endTurn(id, 'ok');
       await waitIdle(id);
     }
+    assert.equal(store.getSetting(SEAM_TRIAL_KEY), null, 'a turn that only ends past the mark enrols nobody');
+    const texts: [number, string][] = [];
+    for (const id of [small, a, b]) {
+      const count = callCount();
+      runner.send(id, 'Josh', 'next');
+      await started(id);
+      texts.push([id, promptText((await lastCall(count)).prompt)]);
+      await endTurn(id, 'ok');
+      await waitIdle(id);
+    }
     const trial = store.getSetting<SeamTrial>(SEAM_TRIAL_KEY)!;
     assert.deepEqual(
       trial.fresh.map((e) => e.id),
@@ -608,18 +618,7 @@ test('seam trial: minions whose turn ends past 150k are enrolled, fresh then con
       [b],
     );
     assert.equal(trial.fresh[0].context, SEAM_CONTEXT_TOKENS + 1);
-    for (const [id, told] of [
-      [a, true],
-      [b, false],
-    ] as const) {
-      const count = callCount();
-      runner.send(id, 'Josh', 'next');
-      await started(id);
-      const text = promptText((await lastCall(count)).prompt);
-      assert.equal(/Fresh-session trial: you are in the group/.test(text), told, `minion ${id}`);
-      await endTurn(id, 'ok');
-      await waitIdle(id);
-    }
+    for (const [id, text] of texts) assert.equal(/Fresh-session trial: you are in the group/.test(text), id === a, `minion ${id}`);
     // A control minion can't hand off by itself.
     assert.match(runner.recordHandoff(b, 'x') ?? '', /fresh-session trial's fresh group/);
   } finally {

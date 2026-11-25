@@ -3171,7 +3171,7 @@ export class Runner {
     this.requestFresh(ticketId, `${Math.round(size / 1000)}k tokens of context at the end of a turn`, true);
   }
 
-  /** Enrol a minion whose turn ended past the seam trial's mark (#1129), every scheme; the Citadel Taskmaster hears once both groups are full. */
+  /** Enrol a minion whose turn starts past the seam trial's mark (#1129), every scheme: at the start, so only minions that carry on are in it; the Citadel Taskmaster hears once both groups are full. */
   private seamEnrol(ticketId: number) {
     const t = this.store.getTicket(ticketId);
     const p = t && this.store.getProject(t.project_id);
@@ -3483,6 +3483,7 @@ export class Runner {
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
     const same = codexThread?.person === person && codexThread.thread;
+    if (!step && !keepalive) this.seamEnrol(ticket.id);
     let built: Awaited<ReturnType<Runner['buildLaunch']>>;
     try {
       built = await this.buildLaunch(project, ticket, {
@@ -4340,7 +4341,6 @@ export class Runner {
       this.setStatus(ticketId, status);
     }
     if (turn && out.followUps.includes('fresh')) this.freshAtTurnEnd(ticketId, turn);
-    if (out.followUps.includes('seam')) this.seamEnrol(ticketId);
     // A real turn that ended well starts a keepalive series from the prefix it cached (#862); anything else ends the series.
     if (turn?.fp && turn.fpParts && out.followUps.includes('keepalive')) this.store.setSetting(keepaliveKey(ticketId), { fp: turn.fp, parts: turn.fpParts, since: Date.now(), ...(turn.light ? { light: true as const } : {}) } satisfies KeepaliveSeries);
     else this.store.deleteSetting(keepaliveKey(ticketId));

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { expand, mergeTimes, order, readTimes } from '../tools/suite-runner.ts';
+import { expand, filesAtOnce, mergeTimes, order, otherSuites, readTimes } from '../tools/suite-runner.ts';
 import { tempRoot } from './helpers.ts';
+import { until } from './wait.ts';
 
 // tools/suite-runner.ts (#1565): run-tests.sh's `node --test`, with files started longest first.
 const scratch = tempRoot('suite-runner-');
@@ -97,4 +98,95 @@ test('a run ends once its tests do, even when a file leaves a handle open (the C
   assert.equal(r.killed, false, 'the run hung on the open handle');
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /^ℹ pass 1$/m);
+});
+
+// Overlapping suites (#1871): each suite's window file is in one folder every runner on the machine shares.
+test('a suite alone runs all its files at once; overlapping ones split them, never below one', () => {
+  assert.deepEqual(
+    [0, 1, 2, 3].map((n) => filesAtOnce(16, n)),
+    [16, 8, 6, 4],
+  );
+  assert.deepEqual(
+    [0, 1, 2, 9].map((n) => filesAtOnce(8, n)),
+    [8, 4, 3, 1],
+    "a ship's own check starts from 8",
+  );
+});
+
+test("other suites are the open windows written in the last minute: not this run's own, an ended one or a killed run's", () => {
+  const dir = join(scratch.dir, 'windows');
+  mkdirSync(dir);
+  const now = Date.now();
+  const put = (name: string, text: string, ageS = 0) => {
+    writeFileSync(join(dir, name), text);
+    utimesSync(join(dir, name), (now - ageS * 1000) / 1000, (now - ageS * 1000) / 1000);
+  };
+  put('me', '100 0\n');
+  assert.equal(otherSuites(join(dir, 'me'), now), 0);
+  put('ended', '100 160\n');
+  put('killed', '100 0\n', 61);
+  put('empty', '');
+  assert.equal(otherSuites(join(dir, 'me'), now), 0);
+  put('live', '100 0\n', 59);
+  put('live2', '100 0\n');
+  assert.equal(otherSuites(join(dir, 'me'), now), 2);
+  assert.equal(otherSuites(join(dir, 'none', 'me'), now), 0, 'no windows folder: alone');
+});
+
+// Runs `files` files of 4 at once, each logging its start and end, with a window folder; `during` changes the windows mid-run.
+async function overlapRun(name: string, files: number, during: (win: string, log: () => string[]) => Promise<void>) {
+  const cwd = join(scratch.dir, name);
+  const win = join(cwd, 'windows');
+  mkdirSync(join(cwd, 'test'), { recursive: true });
+  mkdirSync(win);
+  writeFileSync(join(win, 'me'), '100 0\n');
+  const body =
+    // timing-ok: each file holds its place long enough to overlap the others
+    "import test from 'node:test';\nimport { appendFileSync } from 'node:fs';\nappendFileSync('log', '+\\n');\ntest('t', async () => { await new Promise((r) => setTimeout(r, 600)); if (process.env.CITADEL_SUITE_GATE || process.env.CITADEL_SUITE_WINDOW) throw new Error('the gate leaked'); appendFileSync('log', '-\\n'); });\n";
+  for (let i = 0; i < files; i++) writeFileSync(join(cwd, 'test', `f${String(i).padStart(2, '0')}.test.mjs`), body);
+  const log = () => {
+    try {
+      return readFileSync(join(cwd, 'log'), 'utf8').trim().split('\n');
+    } catch {
+      return [];
+    }
+  };
+  const before = during(win, log); // its first windows are written before the run starts
+  const env = { ...process.env, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_PROGRESS_TO: undefined, CITADEL_TEST_TIMES: undefined, RUNNER_TEMP: cwd, CITADEL_SUITE_WINDOW: join(win, 'me') };
+  const r = await new Promise<{ code: number | null; out: string }>((res) => execFile(process.execPath, [runner, '--concurrency', '4', '--timeout', '30000', '--', 'test/'], { cwd, env, timeout: 50_000 }, (e, out) => res({ code: e ? ((e.code as number | null) ?? -1) : 0, out })));
+  await before;
+  // How many ran at once after each start, in order.
+  let n = 0;
+  const atOnce: number[] = [];
+  for (const l of log()) {
+    n += l === '+' ? 1 : -1;
+    if (l === '+') atOnce.push(n);
+  }
+  return { ...r, atOnce };
+}
+
+test('a run beside another suite holds its files to its share, and nothing a test starts sees the gate', async () => {
+  const r = await overlapRun('beside', 8, async (win) => writeFileSync(join(win, 'other'), '100 0\n'));
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.atOnce.length, 8);
+  assert.ok(Math.max(...r.atOnce) <= 2, `2 of 4 at once beside one other suite, got ${r.atOnce}`);
+  assert.match(r.out, /1 other suite\(s\) on this machine, so 2 test files at once \(4 alone\)/);
+});
+
+test('a run steps down when another suite starts, and back up once it ends', async () => {
+  const r = await overlapRun('steps', 40, async (win, log) => {
+    const starts = () => log().filter((l) => l === '+').length;
+    await until('the first four files to start', () => starts() >= 4);
+    writeFileSync(join(win, 'other'), '100 0\n');
+    const beat = setInterval(() => utimesSync(join(win, 'other'), new Date(), new Date()), 500);
+    const at = starts();
+    await until('18 more files to start', () => starts() >= at + 18, 40_000);
+    clearInterval(beat);
+    rmSync(join(win, 'other'));
+  });
+  assert.equal(r.code, 0, r.out);
+  const most = (from: number, to?: number) => Math.max(...r.atOnce.slice(from, to));
+  assert.ok(most(0, 5) > 2, `alone at first: ${r.atOnce}`);
+  assert.ok(most(18, 22) <= 2, `stepped down: ${r.atOnce}`);
+  assert.ok(most(30) > 2, `stepped back up: ${r.atOnce}`);
 });

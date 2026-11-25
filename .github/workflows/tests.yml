@@ -17,9 +17,10 @@ on:
     - cron: '30 13 * * *' # the quietest hour for lands: no commit reached main at 13:xx UTC in the 14 days to 2026-11-12
   workflow_dispatch:
 
-# One suite at a time on the desktop, however many runners there are: two at once (2026-11-11, load 30-35 on its 32
-# threads) failed in a different file every run. Landings come one at a time anyway. Any other run (the nightly, or one
-# started by hand) has a group of its own: a run waiting in a group cancels the one waiting before it, which would be a
+# One land's run at a time on the desktop, however many runners there are, but not one suite: a ship's own check, the early
+# next trains' runs and one other run each have a group of their own and overlap with it, so three or four suites can run
+# at once. While they do, each runs fewer test files at once (tools/suite-runner.ts, #1871; Josh, 2026-11-24, "Scale down
+# when overlapping"). Any other run (the nightly, or one started by hand) has its group because a run waiting in a group cancels the one waiting before it, which would be a
 # landing's. It waits for the lands instead, and yields the CPU to one that starts while it runs (below). A ship's own
 # check (check/**) is one at a time in a group of its own: at most one of them beside a land's run (Cara, 2026-11-22,
 # "Gated, after C and B": one extra runner, used only when free). The early next train's run (early/**, #1568) has a group
@@ -216,12 +217,13 @@ jobs:
           node tools/ci-progress.ts "$RUNNER_TEMP/tests.progress" & poster=$!
           tools/ci-runner/win-ports.sh before "$RUNNER_TEMP/win-ports" || true # Windows' half of the leak count (#1763): the step after the numbers
           # The window this suite ran in, kept on the machine's disk where every runner on it can read it (#1811): a suite that
-          # shared the machine with another suite run reads slow for that reason, not the code's, so the numbers step skips it.
+          # shared the machine with another suite run reads slow for that reason, not the code's, so the numbers step skips it. While it
+          # runs, suite-runner.ts freshens it every 2 s and counts the others' to see how many suites share the machine (#1871).
           win=/tmp/citadel-suite-windows-$(id -u); mkdir -p "$win"; find "$win" -type f -mmin +1440 -delete 2>/dev/null || true
           me="$win/${GITHUB_RUN_ID:-0}-$$"; wstart=$(date +%s); echo "$wstart 0" >"$me"
           trap '[ "$(cut -d" " -f2 "$me" 2>/dev/null)" != 0 ] || echo "$wstart $(date +%s)" >"$me"' EXIT # a cancelled run closes its window too
           started=$SECONDS
-          DEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_LATER="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
+          DEPLOY_TEST_CPU_WEIGHT= CITADEL_SUITE_WINDOW="$me" DEPLOY_RERUN_LATER="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
           wend=$(date +%s); echo "$wstart $wend" >"$me"
           # Overlapped: another run's window started before this one ended and ended after it began (or is still open, written in the last 30 min: a killed run leaves one).
           rm -f "$RUNNER_TEMP/suite-overlap"

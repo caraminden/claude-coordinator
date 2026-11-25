@@ -11,8 +11,14 @@
 // It reports as the CLI did there: spec to stdout, tools/failed-files-reporter.ts to --failed-to, and
 // tools/progress-reporter.ts when CITADEL_TEST_PROGRESS_TO is set (the CLI path got it from tools/citadel-node). It
 // exits 1 when a test failed, as the CLI does, and forces exit once the tests end (--test-force-exit).
-import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { relative, resolve, join } from 'node:path';
+//
+// While other full suites run on the machine, this one runs fewer files at once (#1871; Josh, 2026-11-24, "Scale down when
+// overlapping"): N divided by the suites running, back to N once it is alone. CITADEL_SUITE_WINDOW names this run's own
+// window file (tests.yml, #1811); the others in its folder are the other suites'. node's run() can't change its
+// concurrency once started, so each file waits at tools/suite-gate.ts before its first import until a place is free.
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, relative, resolve, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { run } from 'node:test';
 import { spec } from 'node:test/reporters';
@@ -83,6 +89,78 @@ export function mergeTimes(old: Map<string, number>, ran: Map<string, number>, c
     .join('');
 }
 
+// How many other suites run now: open windows ("<start> 0") written in the last minute. Each suite freshens its own every
+// 2 s (below), so a killed run's, left open, counts for a minute at most.
+const BEAT_MS = 2000;
+const STALE_MS = 60_000;
+export function otherSuites(window: string, now = Date.now()): number {
+  const dir = dirname(window);
+  let n = 0;
+  try {
+    for (const f of readdirSync(dir)) {
+      if (f === basename(window)) continue;
+      try {
+        const end = readFileSync(join(dir, f), 'utf8').trim().split(' ')[1];
+        if (end === '0' && now - statSync(join(dir, f)).mtimeMs < STALE_MS) n++;
+      } catch {} // gone meanwhile
+    }
+  } catch {} // no windows folder: alone
+  return n;
+}
+
+export const filesAtOnce = (own: number, others: number) => Math.max(1, Math.ceil(own / (others + 1)));
+
+// The files' gate: a folder with "<pid>.wait" for each file waiting, "<pid>.run" for each let in, and "open" while nothing
+// is held back, so a suite alone never waits. Returns its stop.
+function startGate(window: string, own: number): () => void {
+  const dir = mkdtempSync(join(process.env.RUNNER_TEMP ?? tmpdir(), 'suite-gate-'));
+  const open = join(dir, 'open');
+  let others = 0;
+  let beat = -Infinity;
+  const look = () => {
+    if (Date.now() - beat < BEAT_MS) return;
+    beat = Date.now();
+    try {
+      utimesSync(window, new Date(), new Date());
+    } catch {} // no window: the others can't see this suite, and it still sees them
+    const n = otherSuites(window);
+    if (n !== others) process.stdout.write(`suite-runner: ${n} other suite(s) on this machine, so ${filesAtOnce(own, n)} test files at once (${own} alone)\n`);
+    others = n;
+    if (filesAtOnce(own, n) === own) writeFileSync(open, '');
+    else rmSync(open, { force: true });
+  };
+  const tick = () => {
+    look();
+    const max = filesAtOnce(own, others);
+    if (max === own) return;
+    const names = readdirSync(dir);
+    const of = (kind: string) =>
+      names
+        .filter((f) => f.endsWith(kind))
+        .map((f) => parseInt(f, 10))
+        .sort((a, b) => a - b); // node starts files in order, so the lowest pid waited longest
+    let running = 0;
+    for (const pid of of('.run')) {
+      if (existsSync(`/proc/${pid}`)) running++;
+      else rmSync(join(dir, `${pid}.run`), { force: true });
+    }
+    for (const pid of of('.wait')) {
+      if (running >= max) break;
+      try {
+        renameSync(join(dir, `${pid}.wait`), join(dir, `${pid}.run`));
+        running++;
+      } catch {} // it let itself in while the gate was open
+    }
+  };
+  tick();
+  process.env.CITADEL_SUITE_GATE = dir;
+  const timer = setInterval(tick, 100);
+  return () => {
+    clearInterval(timer);
+    rmSync(dir, { recursive: true, force: true });
+  };
+}
+
 function parseArgs(argv: string[]) {
   const o: { concurrency: number; timeout: number; globalSetup?: string; failedTo?: string; targets: string[] } = { concurrency: 1, timeout: Infinity, targets: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -110,11 +188,15 @@ async function main() {
   // The times file is this run's: a test that starts a run of its own must not rewrite it. (Not run()'s env option:
   // the leak guard's global setup adds its run id to process.env after this point, and the tests must inherit it.)
   delete process.env.CITADEL_TEST_TIMES;
+  const window = process.env.CITADEL_SUITE_WINDOW;
+  delete process.env.CITADEL_SUITE_WINDOW;
+  const stopGate = window ? startGate(window, o.concurrency) : undefined;
   const stream = run({
     files,
     concurrency: o.concurrency,
     timeout: o.timeout,
     forceExit: true,
+    ...(stopGate ? { execArgv: ['--import', join(import.meta.dirname, 'suite-gate.ts')] } : {}),
     ...(o.globalSetup ? { globalSetupPath: resolve(o.globalSetup) } : {}),
   });
   // Each reporter reads its own copy of the events, as the CLI's reporters do.
@@ -154,6 +236,7 @@ async function main() {
     }
     for (const p of copies) p.write(event);
   }
+  stopGate?.();
   for (const p of copies) p.end();
   await Promise.all(done);
   if (timesPath && ran.size) {

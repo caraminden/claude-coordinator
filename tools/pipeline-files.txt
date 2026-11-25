@@ -35,6 +35,7 @@ tools/boot-check.ts
 tools/failed-files-reporter.ts
 tools/progress-reporter.ts
 tools/suite-runner.ts
+tools/suite-gate.ts
 tools/ci-progress.ts
 tools/citadel-node
 tools/citadel-node.cjs

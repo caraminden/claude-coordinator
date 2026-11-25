@@ -110,7 +110,7 @@ function minionsRow(l) {
 function holdRow(l) {
   if (!l.hold) return '';
   const { off, why } = l.hold;
-  const handed = (l.long ?? []).filter(handedOver).map((j) => ({ ...j, why: why ?? 'starts within a minute' }));
+  const handed = (l.long ?? []).filter(handedOver).map((j) => ({ ...j, why: why ?? (j.quiet ? 'starts within a minute' : 'starts at 2am') }));
   const runs = [...l.hold.held, ...handed].sort((a, b) => a.since - b.since);
   const chip = off ? toneChip('warn', 'Off') : runs.length ? toneChip('warn', `${runs.length} held`) : why ? toneChip('info', 'Ships first') : toneChip('ok', 'Nothing held');
   const note = off ? 'nothing is held for ships' : runs.length ? `longest ${held(runs[0], l.now)}` : (why ?? 'optional jobs start at once');
@@ -138,7 +138,7 @@ function holdRow(l) {
 }
 
 // Long jobs (#1363): `citadel-heavy --long` queues them for the scheme's CI at night, from 2am (src/long-jobs.ts).
-const handedOver = (j) => j.quiet && j.state === 'queued'; // in "Held for ships"
+const handedOver = (j) => (j.quiet || j.held) && j.state === 'queued'; // in "Held for ships"
 const LONG = { queued: 'waits for 2am', dispatched: 'sent to CI, waiting for a runner', running: 'running on CI', done: 'passed' };
 const LONG_HUE = { queued: 'waiting', dispatched: 'running', running: 'running', done: 'done', failed: 'danger', lost: 'danger' };
 function longRow(l) {

@@ -583,7 +583,7 @@ testing, or main's full run waits or runs, and starts each again, from its begin
 ships 30 minutes at most. A ship's `land/**` and `check/**` runs are never touched, and another scheme's heavy jobs are
 held 4 hours at most. A job asks before it starts (`tools/ci-hold-ask.ts`, the run's OIDC token, `POST /api/ci-hold`) and
 goes ahead when Citadel doesn't answer. Held jobs show on the CI page ("Held for ships"); one held a day is reported to
-its Taskmaster. Off switch: `touch` the deploy state folder's `hold-off`, which also lets early runs (`early/**`) start again. The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
+its Taskmaster. Off switch: `touch` the deploy state folder's `hold-off`, which also lets early runs (`early/**`) start again; touch it too while `CI_RUNNER=github`, since the hold can't see that those runs are not on the desktop. The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
 skipped: perigee skips none, so a skip means the runner lacks something. What the suite needs goes in the runner's
 own home, with no root: Node, `pwsh` with PSScriptAnalyzer for the `.ps1` lint, Chrome's headless shell for the
 browser tests, and `libatomic1` and `sqlite3` unpacked from their `.deb`s. Those last two are tidier installed once

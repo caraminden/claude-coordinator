@@ -2057,6 +2057,7 @@ const ciHold = new CiHold({
   },
   closed: (id) => store.getTicket(id)?.status === 'closed',
   mayResume: (heavyId) => longJobs.mayResume(heavyId),
+  heldSince: (heavyId) => longJobs.heldSince(heavyId),
   tell: (id, text) => runner.leaveMail(id, APP_NAME, text),
   report: tellHeld,
   store,

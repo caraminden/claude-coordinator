@@ -32,8 +32,8 @@ const RECANCEL_MS = 60_000;
 const RATE_LIMITED_MS = 5 * 60_000;
 /** A ship's run counts this long: GitHub keeps some abandoned runs "queued" for good. */
 const SHIP_RUN_MS = 60 * 60_000;
-/** Reruns GitHub refuses in a row before the job is given up and its minion told. */
-const MAX_MISSES = 5;
+/** Reruns that failed in a row, RECANCEL_MS apart, before the job is given up and its minion (or Taskmaster) told: an hour. */
+const MAX_MISSES = 60;
 const STATUSES = ['queued', 'in_progress', 'pending'];
 
 export type HoldKind = 'proof' | 'heavy' | 'suite' | 'main';
@@ -96,6 +96,8 @@ export interface HoldDeps {
   closed: (ticket: number) => boolean;
   /** Whether a stopped citadel-heavy job may start again now: a long one only at night. */
   mayResume?: (heavyId: string) => boolean;
+  /** Since when a citadel-heavy job Citadel dispatched was held before it had a run: its wait isn't counted from zero. */
+  heldSince?: (heavyId: string) => number | undefined;
   tell: (ticket: number, text: string) => void;
   report: (repo: string, text: string) => void;
   store: { getSetting<T>(key: string): T | null; setSetting(key: string, value: unknown): void };
@@ -129,6 +131,8 @@ export function kindOf(run: GhRun, own: boolean): HoldKind | 'ship' | null {
   return b === 'main' ? 'main' : 'suite';
 }
 
+/** Runs of one group can't wait side by side on GitHub: a second waiting run cancels the first (the workflows' `concurrency`). */
+const groupOf = (repo: string, kind: HoldKind, what: string) => (kind === 'heavy' ? null : kind === 'proof' ? `${repo} ${what}` : `${repo} suite`);
 const heavyId = (kind: HoldKind, title: string) => (kind === 'heavy' ? (/^heavy (\S+)$/.exec(title)?.[1] ?? null) : null);
 const NAMES: Record<HoldKind, string> = { proof: 'flake proof', heavy: 'heavy job', suite: 'test run', main: "main's full run" };
 
@@ -163,6 +167,7 @@ export class CiHold {
   private offNow = false;
   private job: Job | null = null;
   private said = '';
+  private publishing: Promise<unknown> = Promise.resolve();
   /** Ship and main runs at the last good look, and when that was. */
   private seen = { at: 0, ship: 0, main: false };
   /** Since when nothing has stood in optional work's way; null while something does. */
@@ -219,7 +224,7 @@ export class CiHold {
   private stopWhy(now: number): string | null {
     const ship = this.shipWhy(now);
     if (ship) return ship;
-    const mainWaits = [...this.held.values()].some((h) => h.kind === 'main' && h.phase !== 'resumed');
+    const mainWaits = [...this.held.values()].some((h) => h.kind === 'main' && h.phase !== 'resumed' && now - h.since < SHIP_RUN_MS);
     return mainWaits || (this.fresh(now) && this.seen.main) ? "main's full test run goes first" : null;
   }
 
@@ -258,8 +263,14 @@ export class CiHold {
     } finally {
       this.busy = false;
       this.report(now);
-      await Promise.resolve(this.d.publish?.({ at: now, ...this.state(now) })).catch((err) => this.say(`CI hold: ${err?.message ?? err}`));
+      await this.publish(now);
     }
+  }
+
+  /** One write at a time, each of the state as it is then. */
+  private publish(now: number) {
+    this.publishing = this.publishing.then(() => this.d.publish?.({ at: now, ...this.state(now) })).catch((err) => this.say(`CI hold: ${err?.message ?? err}`));
+    return this.publishing;
   }
 
   private async look(own: string, now: number) {
@@ -276,9 +287,10 @@ export class CiHold {
           const list: GhRun[] = (await this.read(`repos/${repo}/actions/runs?status=${status}&per_page=100`, as, used))?.workflow_runs ?? [];
           for (const run of list) {
             const kind = Number.isInteger(run?.id) ? kindOf(run, repo === own) : null;
-            if (kind === 'ship') {
-              if (now - Date.parse(run.run_started_at ?? run.created_at ?? '') < SHIP_RUN_MS) ship++;
-            } else if (kind) active.set(run.id, { repo, run, kind });
+            const old = now - Date.parse(run.run_started_at ?? run.created_at ?? '') >= SHIP_RUN_MS;
+            if (!kind || ((kind === 'ship' || kind === 'main') && old)) continue;
+            if (kind === 'ship') ship++;
+            else active.set(run.id, { repo, run, kind });
             if (kind === 'main') main = true;
           }
         }
@@ -300,16 +312,28 @@ export class CiHold {
         if (a.kind === 'main') {
           // A running main run is left alone (it asked before it started); a queued one waits its turn off the runner.
           if (shipWhy && a.run.status !== 'in_progress' && !this.mainPast(h, now)) await this.hold(a.repo, a.run, a.kind, shipWhy, now);
-        } else if (why && !this.capped(a.repo, h?.since, now)) await this.hold(a.repo, a.run, a.kind, why, now);
+        } else if (why && !this.capped(a.repo, this.since(h, a.kind, a.run), now)) await this.hold(a.repo, a.run, a.kind, why, now);
       }
     }
     if (!off) this.gate(now); // keeps the quiet spell's start
-    for (const h of [...this.held.values()]) await this.follow(h, active.has(h.run), off, now);
-    this.said = '';
+    const groups = new Set<string | null>();
+    for (const a of active.values()) groups.add(groupOf(a.repo, a.kind, a.run.display_title || NAMES[a.kind]));
+    for (const h of this.held.values()) if (h.phase === 'resumed' && now - h.at <= RECANCEL_MS) groups.add(groupOf(h.repo, h.kind, h.what));
+    let failed = false;
+    // Main's run first: it and the suites share a group.
+    for (const h of [...this.held.values()].sort((a, b) => Number(b.kind === 'main') - Number(a.kind === 'main'))) {
+      try {
+        await this.follow(h, active.has(h.run), off, now, groups);
+      } catch (err) {
+        failed = true; // one run's trouble keeps no other from coming back
+        this.say(`CI hold: run ${h.run}: ${(err as Error)?.message ?? err}`);
+      }
+    }
+    if (!failed) this.said = '';
   }
 
   /** One held run's next step. */
-  private async follow(h: HeldRun, isActive: boolean, off: boolean, now: number) {
+  private async follow(h: HeldRun, isActive: boolean, off: boolean, now: number, groups: Set<string | null>) {
     const as = this.d.as(h.repo);
     if (!as) return;
     const path = `repos/${h.repo}/actions/runs/${h.run}`;
@@ -320,7 +344,7 @@ export class CiHold {
       });
     if (h.phase === 'stopping') {
       if (isActive) {
-        if (now - h.at < RECANCEL_MS) return;
+        if (off || now - h.at < RECANCEL_MS) return;
         const force = (h.misses ?? 0) >= 2; // the third ask, about 3 minutes on
         h.misses = (h.misses ?? 0) + 1;
         h.at = now;
@@ -328,8 +352,9 @@ export class CiHold {
         await post(force ? 'force-cancel' : 'cancel');
         return;
       }
-      const run: GhRun = await this.one(path, as);
-      if (run?.status !== 'completed') return;
+      const run = await this.one(path, as);
+      if (!run) return this.drop(h); // deleted on GitHub
+      if (run.status !== 'completed') return;
       // It ended by itself before the cancel reached it: its result stands.
       if (run.conclusion !== 'cancelled') return this.drop(h);
       Object.assign(h, { phase: 'held', at: now, attempt: run.run_attempt ?? h.attempt, misses: 0 });
@@ -337,25 +362,39 @@ export class CiHold {
     }
     if (h.phase === 'held') {
       if (isActive) return this.phase(h, 'resumed', now); // started again by hand
-      if (h.ticket !== null && this.d.closed(h.ticket)) return this.drop(h);
       const id = heavyId(h.kind, h.what);
+      if (id) h.ticket ??= this.d.ticket(h.repo, '', id); // a job stopped in its turn is queued only after
+      if (h.ticket !== null && this.d.closed(h.ticket)) return this.drop(h);
+      const group = groupOf(h.repo, h.kind, h.what);
       const clear = h.kind === 'main' ? !this.shipWhy(now) || this.mainPast(h, now) : (!this.gate(now, h.stops) || this.capped(h.repo, h.since, now)) && (id === null || (this.d.mayResume?.(id) ?? true));
-      if (!off && !clear) return;
+      if ((!off && !clear) || (group && groups.has(group)) || (h.misses && now - h.at < RECANCEL_MS)) return;
       const { status } = await post('rerun');
-      if (status >= 200 && status < 300) return this.phase(h, 'resumed', now);
+      if (status >= 200 && status < 300) {
+        groups.add(group);
+        return this.phase(h, 'resumed', now);
+      }
       h.misses = (h.misses ?? 0) + 1;
-      if (h.misses >= MAX_MISSES) {
-        if (h.ticket !== null) this.d.tell(h.ticket, `GitHub refused to start your ${NAMES[h.kind]} again (${h.what}, ${h.url}, HTTP ${status}) after ships held it. Start it again yourself.`);
+      h.at = now;
+      if (h.misses >= MAX_MISSES || status === 404) {
+        const refused = `GitHub refused to start ${h.ticket === null ? 'a' : 'your'} ${NAMES[h.kind]} again (${h.what}, ${h.url}, HTTP ${status}) after ships held it.`;
+        if (h.ticket !== null) this.d.tell(h.ticket, `${refused} Start it again yourself.`);
+        else this.d.report(h.repo, `${refused} Nothing starts it again now.`);
         return this.drop(h);
       }
       this.save();
       return;
     }
     if (h.phase === 'resumed' && !isActive && now - h.at > RECANCEL_MS) {
-      const run: GhRun = await this.one(path, as);
-      // Ended on its own after it came back, or GitHub never showed the new attempt.
-      if (run?.status === 'completed' && ((run.run_attempt ?? 0) > h.attempt || now - h.at > 10 * 60_000)) this.drop(h);
+      const run = await this.one(path, as);
+      // Ended on its own after it came back, or GitHub never showed the new attempt, or it was deleted.
+      if (!run) return this.drop(h);
+      if (run.status === 'completed' && ((run.run_attempt ?? 0) > h.attempt || now - h.at > 10 * 60_000)) this.drop(h);
     }
+  }
+
+  private since(h: HeldRun | undefined, kind: HoldKind, run: GhRun): number | undefined {
+    const id = heavyId(kind, run.display_title ?? '');
+    return h?.since ?? (id ? this.d.heldSince?.(id) : undefined);
   }
 
   private phase(h: HeldRun, phase: HeldRun['phase'], now: number) {
@@ -379,7 +418,7 @@ export class CiHold {
       what,
       url: run.html_url ?? `https://github.com/${repo}/actions/runs/${run.id}`,
       ticket: had?.ticket ?? (kind === 'main' ? null : this.d.ticket(repo, run.head_branch ?? '', heavyId(kind, what))),
-      since: had?.since ?? now,
+      since: this.since(had, kind, run) ?? now,
       why,
       phase: 'stopping',
       at: now,
@@ -389,6 +428,7 @@ export class CiHold {
     };
     this.held.set(run.id, h);
     this.save();
+    await this.publish(now); // before the cancel: citadel-heavy must never see the cancelled run without its hold
     if (!had && h.ticket !== null)
       this.d.tell(
         h.ticket,
@@ -405,17 +445,17 @@ export class CiHold {
     if (!own || !as || (this.offNow = await this.d.off())) return yes;
     const why = this.held.get(runId)?.phase === 'resumed' ? this.stopWhy(now) : this.gate(now);
     if (!why) return yes;
-    let run: GhRun;
+    let run: GhRun | null;
     try {
       run = await this.one(`repos/${repo}/actions/runs/${runId}`, as);
     } catch {
       return yes;
     }
     const kind = run ? kindOf(run, repo.toLowerCase() === own) : null;
-    if (!kind || kind === 'ship') return yes;
+    if (!run || !kind || kind === 'ship') return yes;
     const h = this.held.get(runId);
     if (h?.phase === 'stopping') return { go: false, why: h.why };
-    const held = kind === 'main' ? (this.mainPast(h, now) ? null : this.shipWhy(now)) : this.capped(repo.toLowerCase(), h?.since, now) ? null : why;
+    const held = kind === 'main' ? (this.mainPast(h, now) ? null : this.shipWhy(now)) : this.capped(repo.toLowerCase(), this.since(h, kind, run), now) ? null : why;
     if (!held) return yes;
     await this.hold(repo.toLowerCase(), run, kind, held, now);
     return { go: false, why: held };
@@ -435,10 +475,11 @@ export class CiHold {
     this.d.store.setSetting(KEY, [...this.held.values()]);
   }
 
-  /** A run as it is now, never from a cached list. */
-  private async one(path: string, as: GithubEnv): Promise<GhRun> {
+  /** A run as it is now, never from a cached list; null when it was deleted. */
+  private async one(path: string, as: GithubEnv): Promise<GhRun | null> {
     const r = await (this.d.get ?? ghGet)(path, null, as);
     if (r.status === 200) return r.body;
+    if (r.status === 404) return null;
     throw new Error(`GitHub answered ${r.status} for ${path}`);
   }
 

@@ -22,6 +22,7 @@ function world(now = DAY, saved: unknown = null) {
     reports: [] as string[],
     closed: new Set<number>(),
     resume: true,
+    since: undefined as number | undefined,
     answer: null as (() => Promise<{ status: number }>) | null,
     settings: new Map<string, unknown>(saved ? [['ci-hold', saved]] : []),
     published: null as (HoldState & { at: number }) | null,
@@ -51,6 +52,7 @@ function world(now = DAY, saved: unknown = null) {
     ticket: () => 7,
     closed: (t) => w.closed.has(t),
     mayResume: () => w.resume,
+    heldSince: () => w.since,
     tell: (ticket, text) => w.told.push({ ticket, text }),
     report: (_repo, text) => w.reports.push(text),
     store: { getSetting: <T>(k: string) => (w.settings.get(k) as T) ?? null, setSetting: (k, v) => w.settings.set(k, structuredClone(v)) },
@@ -59,7 +61,10 @@ function world(now = DAY, saved: unknown = null) {
     get: async (path) => {
       if (w.down) throw new Error('GitHub is down');
       const one = /runs\/(\d+)$/.exec(path);
-      if (one) return { status: 200, etag: null, body: { ...w.runs.find((r) => r.id === Number(one[1])) } };
+      if (one) {
+        const r = w.runs.find((x) => x.id === Number(one[1]));
+        return r ? { status: 200, etag: null, body: { ...r } } : { status: 404, etag: null, body: {} };
+      }
       const [, repo, status] = /^repos\/(.+?)\/actions\/runs\?status=(\w+)/.exec(path)!;
       return { status: 200, etag: null, body: { workflow_runs: w.runs.filter((r) => r.repo === repo && r.status === status).map((r) => ({ ...r })) } };
     },
@@ -343,17 +348,113 @@ test("a closed minion's job is not started again, and a long job only when it ma
   assert.deepEqual(v.posts, ['cancel 1', 'rerun 1']);
 });
 
-test('GitHub refusing the rerun five times hands it back to its minion', async () => {
+test('GitHub refusing the rerun for an hour hands it back to its minion, a blip of a few minutes does not', async () => {
   const w = world();
   w.line = 1;
-  w.proof();
+  const p = w.proof();
+  await w.for(MIN);
+  w.line = 0;
+  w.answer = async () => ({ status: 503 });
+  await w.for(30 * MIN);
+  assert.equal(w.told.length, 1, 'not given up');
+  w.answer = null;
+  await w.for(2 * MIN);
+  assert.equal(p.status, 'queued', 'back once GitHub takes it');
+  Object.assign(p, { status: 'completed', conclusion: 'success' });
+  await w.for(5 * MIN);
+  const other = w.proof();
+  w.line = 1;
   await w.for(MIN);
   w.line = 0;
   w.answer = async () => ({ status: 403 });
-  await w.for(10 * MIN);
-  assert.equal(w.told.length, 2);
-  assert.match(w.told[1].text, /Start it again yourself/);
+  await w.for(80 * MIN);
+  assert.equal(other.conclusion, 'cancelled');
+  assert.match(w.told.at(-1)!.text, /Start it again yourself/);
   assert.deepEqual(w.settings.get('ci-hold'), []);
+});
+
+test("main's run that can't come back is told to the Taskmaster", async () => {
+  const w = world();
+  w.line = 1;
+  w.main({ status: 'queued' });
+  await w.for(MIN);
+  w.line = 0;
+  w.answer = async () => ({ status: 404 });
+  await w.for(10 * MIN);
+  assert.equal(w.reports.length, 1);
+  assert.match(w.reports[0], /refused to start a main's full run/);
+});
+
+test('the hold is published before its cancel is sent, when a job asks between two looks too', async () => {
+  const w = world();
+  const p = w.proof();
+  await w.tick();
+  w.line = 1;
+  const seen: boolean[] = [];
+  w.answer = async () => {
+    seen.push(!!w.published?.held.some((h) => h.run === p.id));
+    return { status: 202 };
+  };
+  await w.hold.ask(OWN, p.id, w.now + 1000);
+  assert.deepEqual(seen, [true]);
+});
+
+test('three held suites come back one at a time: they share a concurrency group, where a new waiting run cancels the last', async () => {
+  const w = world();
+  w.line = 1;
+  const suites = [1, 2, 3].map(() => w.add('tests', { file: 'tests.yml' }));
+  await w.for(MIN);
+  w.line = 0;
+  await w.for(20 * MIN);
+  assert.deepEqual(
+    suites.map((s) => s.status),
+    ['queued', 'completed', 'completed'],
+  );
+  Object.assign(suites[0], { status: 'completed', conclusion: 'success' });
+  await w.for(3 * MIN);
+  assert.equal(suites[1].status, 'queued');
+  assert.equal(suites[2].conclusion, 'cancelled');
+  assert.equal((w.settings.get('ci-hold') as unknown[]).length, 2, 'the third is still held, not dropped');
+});
+
+test("main's run goes before a suite held beside it, and an hour-old queued main run holds nothing", async () => {
+  const w = world();
+  w.line = 1;
+  const suite = w.add('tests', { file: 'tests.yml' });
+  const main = w.main({ status: 'queued' });
+  await w.for(MIN);
+  w.line = 0;
+  await w.for(10 * MIN);
+  assert.equal(main.status, 'queued');
+  assert.equal(suite.conclusion, 'cancelled');
+  const x = world();
+  x.main({ status: 'queued', run_started_at: new Date(DAY - 61 * MIN).toISOString() });
+  x.proof();
+  await x.for(10 * MIN);
+  assert.deepEqual(x.posts, []);
+});
+
+test('a held run deleted on GitHub keeps no other from coming back', async () => {
+  const w = world();
+  w.line = 1;
+  w.proof();
+  const other = w.add('flake-proof test/y.test.ts', { file: 'flake-proof.yml' });
+  await w.for(5_000);
+  w.runs.shift();
+  w.line = 0;
+  await w.for(10 * MIN);
+  assert.equal(other.status, 'queued');
+});
+
+test('switched off, a run being stopped gets no more cancels', async () => {
+  const w = world();
+  w.line = 1;
+  w.proof();
+  w.answer = async () => ({ status: 500 });
+  await w.tick();
+  w.off = true;
+  await w.for(10 * MIN);
+  assert.deepEqual(w.posts, ['cancel 1']);
 });
 
 test('a ship run GitHub left queued for over an hour holds nothing', async () => {
@@ -362,6 +463,16 @@ test('a ship run GitHub left queued for over an hour holds nothing', async () =>
   w.proof();
   await w.for(10 * MIN);
   assert.deepEqual(w.posts, []);
+});
+
+test("another scheme's job dispatched at its cap by the queue is not held for four hours more", async () => {
+  const w = world();
+  w.since = w.now - 4 * 60 * MIN;
+  w.add('heavy abc-1-x', { file: 'citadel-heavy.yml', repo: 'o/peek' });
+  w.line = 1;
+  await w.for(10 * MIN);
+  assert.deepEqual(w.posts, []);
+  assert.deepEqual(await w.hold.ask('o/peek', 1, w.now), { go: true, why: null });
 });
 
 test("another scheme's heavy job goes ahead after four hours of a line that never empties, and Citadel's own does not", async () => {

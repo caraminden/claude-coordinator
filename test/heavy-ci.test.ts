@@ -16,6 +16,17 @@ test('slugOf reads github.com remotes only', () => {
   assert.equal(slugOf('https://gitlab.com/o/r'), null);
 });
 
+test("a turn's copy of heavy-ci.ts runs alone, with no src/ beside it (src/turn-launch.ts)", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'heavy-alone-'));
+  try {
+    writeFileSync(join(dir, 'heavy-ci.ts'), readFileSync(join(import.meta.dirname, '../tools/heavy-ci.ts')));
+    const r = spawnSync(process.execPath, [join(dir, 'heavy-ci.ts'), '--repo'], { cwd: dir, encoding: 'utf8' });
+    assert.match(r.stderr, /not a git checkout/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('commandLine quotes for bash, and commandOutput takes the lines between the markers with the status', () => {
   assert.equal(commandLine(['cargo', 'test', '--workspace']), 'cargo test --workspace');
   assert.equal(commandLine(['sh', '-c', "echo 'a b'"]), `sh -c 'echo '\\''a b'\\'''`);
@@ -377,4 +388,5 @@ test('with no minion to wake, a stopped job waits here for the same run to come 
   const res = run(r, 'held', { COORDINATOR_TICKET: undefined });
   assert.equal(res.status, 3, res.stderr);
   assert.equal(res.stdout, 'hello from CI\n');
+  assert.ok(Number(readFileSync(join(r.gh, 'polls'), 'utf8')) >= 7, 'it watched the run past its cancelled end');
 });

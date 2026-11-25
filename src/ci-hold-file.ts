@@ -1,10 +1,9 @@
 // What src/ci-hold.ts publishes after every look, beside citadel-heavy's long jobs (a folder every turn can read, in a
-// container too): tools/heavy-ci.ts asks it before it starts a job. A file not rewritten for HOLD_STALE_MS means the
+// container too): tools/heavy-ci.ts asks it before it starts a job. A file not rewritten for its HOLD_STALE_MS means the
 // server is down or old, so it holds nothing: optional work fails open.
 import { chmod, mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export const HOLD_STALE_MS = 2 * 60_000;
 export interface HoldFile {
   at: number;
   off: boolean;
@@ -14,7 +13,7 @@ export interface HoldFile {
   held: { run: number }[];
 }
 
-export const holdPath = (heavyDir: string) => join(heavyDir, 'long', 'hold.json');
+const holdPath = (heavyDir: string) => join(heavyDir, 'long', 'hold.json');
 
 export async function writeHold(heavyDir: string, state: HoldFile) {
   const file = holdPath(heavyDir);

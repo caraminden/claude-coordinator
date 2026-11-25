@@ -258,8 +258,7 @@ test('ships hold a long job at night too, and one held over a day is told to the
   s.deps.now = () => now;
   await s.pump.pump();
   assert.equal(s.dispatches().length, 0);
-  quiet(s);
-  now = Math.max(readLongJobs(s.dir)[0].held_at!, readLongJobs(s.dir)[0].queued_at) + 24 * 3600_000;
+  now = readLongJobs(s.dir)[0].held_at! + 24 * 3600_000;
   await s.pump.pump();
   await s.pump.pump();
   assert.equal(told.length, 1);

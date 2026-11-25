@@ -210,6 +210,11 @@ export class LongJobs {
     return !j || !!j.quiet || this.open(j);
   }
 
+  /** Since when ships have held a job, before it had a run or after. */
+  heldSince(id: string): number | undefined {
+    return this.list().find((x) => x.id === id)?.held_at;
+  }
+
   /** Dispatch a queued job: a long one in its hours, either kind only while no ship holds the desktop; false when it waits. */
   private async start(j: LongJob, projectId: number): Promise<boolean> {
     if (!j.quiet && !this.open(j)) return false;
@@ -219,7 +224,7 @@ export class LongJobs {
         j.held_at = j.quiet ? j.queued_at : this.now();
         this.save(j);
       }
-      if (j.quiet && !j.reported && this.now() - j.queued_at >= DAY_MS) {
+      if (!j.reported && this.now() - j.held_at >= DAY_MS) {
         j.reported = true;
         this.save(j);
         this.d.report?.(j.slug, `A heavy job has been held off the CI desktop for over 24 hours (${j.what}, ${j.who}): ${why}. Ships go first, so it starts once the line is empty; it is never forced. The CI page lists what is held.`);
@@ -340,6 +345,7 @@ export function longView(jobs: LongJob[], now = Date.now()) {
       who: j.who,
       what: j.what,
       quiet: !!j.quiet,
+      held: !!j.held_at,
       slug: j.slug,
       state: j.state,
       since: j.ended_at ?? j.started_at ?? j.dispatched_at ?? j.queued_at,

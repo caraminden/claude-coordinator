@@ -16,13 +16,15 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { HOLD_STALE_MS, type HoldFile, holdPath } from '../src/ci-hold-file.ts';
+import { join } from 'node:path';
+import type { HoldFile } from '../src/ci-hold-file.ts';
 
 export const FALLBACK = 120;
 export const BEGIN = '=== citadel-heavy: the command starts ===';
 export const END = '=== citadel-heavy: the command exited ';
 const WORKFLOW = 'citadel-heavy.yml';
+/** A hold.json (src/ci-hold-file.ts) older than this holds nothing. Turns run this file alone (src/turn-launch.ts): it imports only types. */
+const HOLD_STALE_MS = 2 * 60_000;
 const say = (text: string) => process.stderr.write(`citadel-heavy: ${text}\n`);
 const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
 
@@ -177,7 +179,7 @@ async function waitForShips(slug: string, poll: number) {
  *  unread, so the job goes ahead). */
 function readHold(): HoldFile | null {
   try {
-    const h = JSON.parse(readFileSync(holdPath(dirname(longDir())), 'utf8'));
+    const h = JSON.parse(readFileSync(join(longDir(), 'hold.json'), 'utf8'));
     return Number.isFinite(h?.at) && Date.now() - h.at < HOLD_STALE_MS && Array.isArray(h.held) && Array.isArray(h.repos) ? h : null;
   } catch {
     return null;

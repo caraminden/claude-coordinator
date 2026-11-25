@@ -27,7 +27,7 @@ const store = (drop: number, status: number) => {
   return { s, seen };
 };
 
-const run = async (script: string, args: string[], storeUrl: string) => {
+const run = async (script: string, args: readonly string[], storeUrl: string) => {
   const gh = await listen(github);
   return new Promise<{ status: number | null; stdout: string }>((done) => {
     const p = spawn('bash', [join(DIR, script), ...args], {

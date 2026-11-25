@@ -83,7 +83,7 @@ export function workersPanel(page) {
     return h(
       'div',
       { class: 'st-limit' },
-      h('label', {}, h('span', {}, row.label), h('span', { class: 'st-limit-in' }, input, h('span', { class: 'muted' }, row.unit))),
+      h('label', {}, h('span', {}, row.label), h('span', { class: 'st-limit-in' }, input, h('span', { class: 'muted st-limit-unit' }, row.unit))),
       h('div', { class: 'st-limit-note muted small' }, [crossed, changed].filter(Boolean).join(' · ')),
       row.by ? button(`reset-${row.key}`, 'Reset to default', `Put back ${row.default} ${row.unit}`, () => setLimit(row, null)) : '',
     );
@@ -93,6 +93,7 @@ export function workersPanel(page) {
     const focused = el.contains(document.activeElement) ? document.activeElement.dataset.key : undefined;
     if (!w) return el.replaceChildren(h('h4', {}, 'Workers'), h('b', { class: 'st-value' }, failed ? `Couldn't read it: ${failed}` : 'Reading…'));
     const { pool } = w;
+    const changed = w.limits.filter((l) => l.by).length;
     const value = `${w.used} of ${w.size} working${w.waiting ? ` · ${w.waiting} waiting` : ''}`;
     const size = pool.fixed ? `Set to ${pool.fixed.size} by ${pool.fixed.by}` : `Auto, between ${w.min} and ${w.max}${pool.why ? `: moved to ${pool.size} ${ago(pool.at)}, ${pool.why}` : ''}`;
     const sizes = [...new Set([...SIZES, ...(pool.fixed ? [pool.fixed.size] : [])])].sort((a, b) => a - b);
@@ -127,7 +128,13 @@ export function workersPanel(page) {
           ? [button('resume', 'Resume minions', 'Waiting turns start again, and stopped ones carry on', () => pause(false)), w.paused.stop ? '' : button('stop', 'Stop running ones', 'Stop the running turns too; they carry on after Resume', () => pause('stop'))]
           : [button('pause', 'Pause new turns', 'Running turns finish; no new minion turn starts until Resume', () => pause(true)), button('stop', 'Pause and stop running ones', 'Running turns stop and carry on where they were after Resume', () => pause('stop'))]),
       ),
-      h('details', { class: 'st-limits', open: limitsOpen, ontoggle: (e) => (limitsOpen = e.target.open) }, h('summary', {}, 'Limits'), h('p', { class: 'muted small' }, "What Auto steers by. A change takes effect within 10 seconds; a set that can't work is refused with the reason."), ...w.limits.map(limitRow)),
+      h(
+        'details',
+        { class: 'st-limits', open: limitsOpen, ontoggle: (e) => (limitsOpen = e.target.open) },
+        h('summary', {}, 'Limits ', changed ? toneChip('info', `${changed} changed`) : toneChip('neutral', 'all defaults')),
+        h('p', { class: 'muted small' }, "What Auto steers by. A change takes effect within 10 seconds; a set that can't work is refused with the reason."),
+        ...w.limits.map(limitRow),
+      ),
       h(
         'div',
         { class: 'hue-rows st-line-rows' },

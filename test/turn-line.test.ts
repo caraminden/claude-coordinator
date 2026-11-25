@@ -458,6 +458,8 @@ test('a second turn of a running minion joins the line when the first ends', asy
 
 test("Auto moves the size and lets turns through as it grows; a person's number holds until it is put back on Auto", async () => {
   runner.turnLine.setSize(null, 'Cara');
+  // The test's pool starts under Auto's fewest (4): lower it, or the first tick would pull the size up to it (#1892).
+  runner.turnLine.setLimits({ min: 1 }, 'Cara');
   store.setSetting('turn-pool', { size: 1, at: 0 });
   const [a, b] = [minion(), minion()];
   say(a);
@@ -473,6 +475,7 @@ test("Auto moves the size and lets turns through as it grows; a person's number 
   runner.turnLine.tick(calm);
   await started(b);
   assert.equal(makeRunner().turnLine.size(), 2, 'a restart keeps it');
+  runner.turnLine.setLimits({ min: null }, 'Cara');
 });
 
 /** A call to the Workers tile's route, as Josh. */

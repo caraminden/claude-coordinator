@@ -75,6 +75,8 @@ export function starvedBy(r: Pick<PressureReading, 'cpu' | 'mem'>, box: PoolBox,
 
 /** Auto's next size. A shrink counts from what runs: a size above that would let a burst (a Resume) start on a starved box. */
 export function nextSize(s: { size: number; at: number; used: number; waiting: number }, r: Pick<PressureReading, 'cpu' | 'mem'>, box: PoolBox, L: PoolLimits, now: number): number {
+  // A fewest or most set past the size takes effect on the next tick, whatever the box is doing.
+  if (s.size > L.max || s.size < L.min) return Math.min(L.max, Math.max(L.min, s.size));
   if (starvedBy(r, box, L)) return now - s.at < L.shrinkSec * 1000 ? s.size : Math.max(L.min, Math.min(s.size, s.used) - 1);
   const calm = r.cpu !== null && r.cpu < L.growCpu && (r.mem ?? 0) < L.growMem && box.level === 'ok';
   if (!calm || !s.waiting || s.used < s.size || now - s.at < L.growSec * 1000) return s.size;

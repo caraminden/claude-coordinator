@@ -750,10 +750,12 @@ a.chain-node:is(:hover, :focus-visible) { transform: translateY(-1px); box-shado
 /* The Workers tile's collapsed Limits section (#1892). */
 .st-limits { margin-block: var(--space-2); }
 .st-limits summary { cursor: pointer; font-weight: 600; }
-.st-limit { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-1) var(--space-3); align-items: center; padding-block: var(--space-2); border-top: 1px solid var(--line); }
+.st-limit-unit { width: 4.2rem; }
+.st-limit { display: grid; row-gap: var(--space-2); grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-1) var(--space-3); align-items: center; padding-block: var(--space-2); border-top: 1px solid var(--line); }
 .st-limit label { display: contents; margin: 0; }
 .st-limit-in { display: inline-flex; gap: var(--space-2); align-items: center; }
 .st-limit input { width: 5.5rem; margin: 0; }
 .st-limit-note { grid-column: 1; }
-.st-limit .cui-btn { grid-column: 2; grid-row: 2; margin: 0; }
+.st-limit .cui-btn { grid-column: 2; grid-row: 2; margin: 0; justify-self: end; }
+.st-limit-note { align-self: center; }
 .st-limit-note { font-size: 0.82em; }

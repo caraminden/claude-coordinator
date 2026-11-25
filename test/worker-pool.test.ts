@@ -196,3 +196,8 @@ test('saved limits steer at once, record who and when, a health event each, and 
   assert.equal(turns.limits().shrinkCpu, 50);
   assert.equal(store.healthEventsSince(['pool-limits'], 0).length, 2);
 });
+
+test('a most under the size, or a fewest over it, pulls the size in on the next tick', () => {
+  assert.equal(nextSize({ ...full, size: 20, used: 3 }, { cpu: 5, mem: 0 }, 1_000, ok, { ...L, max: 12 }), 12);
+  assert.equal(nextSize({ ...full, size: 5, used: 5 }, { cpu: 5, mem: 0 }, 1_000, ok, { ...L, min: 8 }), 8);
+});

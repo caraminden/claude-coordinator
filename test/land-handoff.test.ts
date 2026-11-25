@@ -23,7 +23,7 @@ const LIVE = 'land: main is now at abc1234 "#9: usage bar"\ndeploy: live now: th
 const RESTART = 'land: main is now at def5678 "#9: server bit"\ndeploy: restart queued as citadel-restart: running turns carry on through it, and it reports here\ndeploy: not live yet after 75 s; the restart reports here when it is\n';
 
 /** A Landings in a data dir of its own, a minion worktree whose land.sh prints `out` and exits `code`, and fake deps that record what the server did. */
-function setup(name: string, opts: { owner?: number | null; ownerState?: string | null; running?: boolean; kept?: string | null; runners?: boolean; liveAlready?: boolean; liveAtWait?: boolean; apps?: string[]; deployOps?: DeployOps } = {}) {
+function setup(name: string, opts: { owner?: number | null; ownerState?: string | null; running?: boolean; kept?: string | null; runners?: boolean; liveAlready?: boolean; liveAtWait?: boolean; apps?: string[]; deployOps?: DeployOps; requeue?: HandoffDeps['requeue'] } = {}) {
   const data = join(root, name, 'data');
   const cwd = join(root, name, 'wt');
   mkdirSync(join(cwd, 'tools'), { recursive: true });
@@ -95,6 +95,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
       return true;
     },
     ...(opts.deployOps ? { apps: () => opts.apps ?? [], deployOps: opts.deployOps } : {}),
+    ...(opts.requeue ? { requeue: opts.requeue } : {}),
   };
   const land = async (out: string, code = 0, h: object = H, args: string[] = []) => {
     writeFileSync(join(cwd, 'tools', 'land.sh'), `printf '%b' ${JSON.stringify(out)}\nexit ${code}\n`);
@@ -264,6 +265,67 @@ test('a failed land leads its wake with the kind of red (#1013), and an unknown 
   await b.land('land: something odd\n', 1);
   await b.handoffs.poll();
   assert.match(b.sent[0], /^Your handed-off land didn't go through/);
+});
+
+// #2030 (Josh, 2026-11-25, "Yes, re-queue it"): a refusal on load alone goes back in line with no turn, once a hand-off.
+const ALONE = 'run-tests: test/b.test.ts: failed in the full run, passed alone: likely load, not your change (1-minute load 44.13)\nland: tests failed on the rebased branch in CI again (https://github.com/o/r/actions/runs/1), on the one fresh run after a red whose files all passed alone (test/a.test.ts), so main is untouched. A second red refuses whatever its labels say\n';
+
+test('a passed-alone refusal goes back in line by itself with a note and no wake; refused again, the minion is woken as before (#2030)', async () => {
+  const asked: { requeued?: true }[] = [];
+  const s = setup('requeue', {
+    requeue: async (_id, h) => {
+      asked.push(h);
+      s.landings.settled(1); // as the server's hand-off does, so the next one can start
+      return null;
+    },
+  });
+  await s.land(ALONE, 1);
+  await s.handoffs.poll();
+  assert.equal(asked.length, 1, 'the server put it back in line');
+  assert.deepEqual(s.sent, [], 'no wake, so no turn');
+  assert.equal(s.notes.length, 1);
+  assert.match(s.notes[0], /put this ship back in line by itself/);
+  assert.notEqual(s.ticket.state, null, 'still shipping, not idle');
+  // The re-queued hand-off carries its mark: refused again, the minion hears of it.
+  await s.land(ALONE, 1, { requeued: true });
+  await s.handoffs.poll();
+  assert.equal(asked.length, 1, 'once per hand-off');
+  assert.equal(s.sent.length, 1);
+  assert.match(s.sent[0], /^Kind: the failed files failed in the full run but passed alone/);
+  assert.equal(s.ticket.state, null);
+});
+
+test("a passed-alone refusal the server can't put back in line wakes the minion, saying why (#2030)", async () => {
+  const s = setup('requeue-no', { requeue: async () => 'your branch moved since the hand-off' });
+  await s.land(ALONE, 1);
+  await s.handoffs.poll();
+  assert.equal(s.sent.length, 1);
+  assert.match(s.sent[0], /It wasn't put back in line by itself: your branch moved since the hand-off\./);
+  assert.deepEqual(s.landings.handoffs(), [], 'reported');
+});
+
+test('only a passed-alone refusal goes back by itself: failed again alone, burn-in, own test, a broken test or two keeps already wake the minion (#2030)', async () => {
+  const kinds = {
+    'failed again alone': `${ALONE}run-tests: test/c.test.ts: failed again alone\n`,
+    'burn-in': `${ALONE}land: test/d.test.ts failed its burn-in in CI\n`,
+    'own test': '✖ test/e.test.ts › it breaks\nland: tests failed on the rebased branch in CI (https://github.com/o/r/actions/runs/2), so main is untouched\n',
+    'broken test': `land: broken test, not a flake: test/b.test.ts red in 6 of the last 10 runs\n${ALONE}`,
+    'kept twice': `land: only flakes failed again (test/b.test.ts), but it has kept its place 2 times already, so it is refused this time\n${ALONE}`,
+  };
+  for (const [kind, out] of Object.entries(kinds)) {
+    let asked = 0;
+    const s = setup(`requeue-${kind.replace(/ /g, '-')}`, {
+      requeue: async () => {
+        asked++;
+        return null;
+      },
+    });
+    await s.land(out, 1);
+    await s.handoffs.poll();
+    assert.equal(asked, 0, `${kind}: not put back in line`);
+    assert.equal(s.sent.length, 1, `${kind}: woken at once`);
+    assert.equal(s.notes.length, 0, kind);
+  }
 });
 
 test('a high-risk land carries its go in the shipped line', async () => {

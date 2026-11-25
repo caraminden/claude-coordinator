@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { ANDROID_JDK, ANDROID_SDK, androidEnv, checkoutMounts, ClaudeLink, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
+import { ANDROID_JDK, ANDROID_SDK, androidEnv, checkoutMounts, checkoutMountsAsync, ClaudeLink, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
 import { Containers, runArgs, specHash, unitProps, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { CodexLink } from '../src/codex-link.ts';
@@ -809,4 +809,42 @@ test('a relayed message is checked against the person its turn would run for, so
   r.send(id, 'GitHub', 'CI passed');
   assert.deepEqual(seenFrom, [77, undefined]);
   assert.ok(notes(id).includes('held'));
+});
+
+test('ClaudeLink: starting a container turn never runs a blocking process spawn on the main thread', async () => {
+  const cp = (await import('node:child_process')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const dataRoot = mkdtempSync(join(root, 'nospawn-'));
+  const fakeRun: RunCmd = async (_c, args) => (args[0] === 'container' ? { code: 0, stdout: 'true deadbeef', stderr: '' } : { code: 0, stdout: join(dataRoot, 'vol') + '\n', stderr: '' });
+  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(dataRoot, 'data'), 'claude', new Containers(fakeRun), 'citadel-claude-t-');
+  const real = cp.execFileSync;
+  const sync: string[] = [];
+  const spy = (...a: Parameters<typeof real>) => (sync.push(String(a[0])), real(...a));
+  Object.assign(cp, { execFileSync: spy });
+  syncBuiltinESMExports();
+  try {
+    await link.ensure(josh.id, true);
+  } finally {
+    Object.assign(cp, { execFileSync: real });
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(sync, []);
+});
+
+test('checkoutMountsAsync: covers what git ignores right now, and a file ignored later is covered on the next read', async () => {
+  const live = mkdtempSync(join(root, 'live-'));
+  execFileSync('git', ['init', '-q', live]);
+  writeFileSync(join(live, '.gitignore'), '.env\n*.db\n');
+  writeFileSync(join(live, 'code.ts'), '');
+  assert.deepEqual(await checkoutMountsAsync(live), [{ src: live, dst: live, ro: true }]);
+  writeFileSync(join(live, '.env'), 'TOKEN=x');
+  assert.deepEqual(await checkoutMountsAsync(live), [
+    { src: live, dst: live, ro: true },
+    { src: '/dev/null', dst: join(live, '.env'), ro: true },
+  ]);
+  assert.deepEqual(await checkoutMountsAsync(live), checkoutMounts(live));
+  assert.equal(await checkoutMountsAsync(join(live, 'nope')), null);
+  for (let i = 0; i < 51; i++) writeFileSync(join(live, `f${i}.db`), '');
+  assert.equal(await checkoutMountsAsync(live), null, 'over MAX_MASKED nothing is mounted');
+  assert.equal(checkoutMounts(live), null);
 });

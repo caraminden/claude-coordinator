@@ -7,7 +7,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative } from 'node:path';
 import { execResult } from './exec.ts';
@@ -39,12 +39,22 @@ export const CONTAINER_MEMORY = { high: '10G', max: '12G', swap: '4G' };
 export function checkoutMounts(dir: string): Mount[] | null {
   let ignored: string[];
   try {
-    ignored = execFileSync('git', ['-C', dir, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard'], { encoding: 'utf8', timeout: 10_000 }).split('\0').filter(Boolean);
+    ignored = execFileSync('git', IGNORED_ARGS(dir), { encoding: 'utf8', timeout: 10_000 }).split('\0').filter(Boolean);
   } catch {
     return null;
   }
+  return maskedMounts(dir, ignored);
+}
+const IGNORED_ARGS = (dir: string) => ['-C', dir, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard'];
+function maskedMounts(dir: string, ignored: string[]): Mount[] | null {
   if (ignored.length > MAX_MASKED) return null;
   return [{ src: dir, dst: dir, ro: true }, ...ignored.map((f) => ({ src: '/dev/null', dst: join(dir, f), ro: true }))];
+}
+/** checkoutMounts without blocking the event loop: the same list, read fresh on every call (nothing is cached, so a new .env is covered at once). */
+export async function checkoutMountsAsync(dir: string): Promise<Mount[] | null> {
+  const r = await execResult('git', IGNORED_ARGS(dir), { timeout: 10_000 });
+  if (r.code !== 0 || r.fail) return null;
+  return maskedMounts(dir, r.out.split('\0').filter(Boolean));
 }
 const CONTAINERFILE_DIR = join(import.meta.dirname, '..', 'deploy', 'claude-container');
 /**
@@ -80,6 +90,14 @@ export function containerPath(hostPath = ''): string {
 }
 
 /** A short hash of every file in an image's build folder, by path and contents, so a change to any of them rebuilds it. */
+export async function imageHashAsync(dir: string): Promise<string> {
+  const h = createHash('sha256');
+  for (const f of ((await readdir(dir, { recursive: true })) as string[]).sort()) {
+    const p = join(dir, f);
+    if ((await stat(p)).isFile()) h.update(`${f}\0`).update(await readFile(p));
+  }
+  return h.digest('hex').slice(0, 12);
+}
 export function imageHash(dir: string): string {
   const h = createHash('sha256');
   for (const f of (readdirSync(dir, { recursive: true }) as string[]).sort()) {
@@ -453,7 +471,7 @@ export class ClaudeLink {
   }
 
   /** What a person's container is made of. Every mount sits at its host path, so worktrees, session folders and prompts match. */
-  spec(uid: number): ContainerSpec {
+  spec(uid: number, pre?: { checkout?: Mount[] | null; image?: string }): ContainerSpec {
     const name = this.name(uid);
     const mounts: Mount[] = [
       { src: name, dst: this.home, volume: true },
@@ -468,7 +486,7 @@ export class ClaudeLink {
     for (const d of TOOL_DIRS) if (existsSync(join(this.home, d))) mounts.push({ src: join(this.home, d), dst: join(this.home, d), ro: true });
     // The code this server runs, read-only, so a member's turn checks the live checkout as a host turn does (#621). A dev
     // copy runs from a worktree, already mounted writable under projects/.
-    if (!LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/')) mounts.push(...(checkoutMounts(LIVE_CHECKOUT) ?? []));
+    if (!LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/')) mounts.push(...((pre && 'checkout' in pre ? pre.checkout : checkoutMounts(LIVE_CHECKOUT)) ?? []));
     // The contraptions' folders, read-only, for a Citadel member or admin: their Citadel Taskmaster turns read every scheme (#656).
     const user = this.store.getUser(uid);
     // Their parent folders: a folder is a link into its two slots beside it (#801), which a mount of the link would pin at
@@ -492,7 +510,7 @@ export class ClaudeLink {
       // In every account's folder (#779), linked or not, so linking another never changes the spec under running turns.
       for (let n = 1; n <= MAX_ACCOUNTS; n++) mounts.push({ src, dst: join(this.home, accountDir(n), 'projects', slug, 'memory') });
     }
-    return { name, image: this.image(), mounts, env: { HOME: this.home }, memory: CONTAINER_MEMORY };
+    return { name, image: pre?.image ?? this.image(), mounts, env: { HOME: this.home }, memory: CONTAINER_MEMORY };
   }
 
   /** Build the image if needed, make the volume and start the container (or keep it, if it runs from this spec or turns run in it). */
@@ -505,7 +523,12 @@ export class ClaudeLink {
   }
 
   private async start(uid: number, forTurn: boolean): Promise<void> {
-    const spec = this.spec(uid);
+    // The two slow reads of a spec (git's ignored list, the image folder walk) run off the main thread, fresh every start.
+    const [checkout, image] = await Promise.all([
+      LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/') ? Promise.resolve(null) : checkoutMountsAsync(LIVE_CHECKOUT),
+      imageHashAsync(CONTAINERFILE_DIR).then((h) => `${IMAGE_REPO}:${h}`),
+    ]);
+    const spec = this.spec(uid, { checkout, image });
     await this.containers.ensureImage(spec.image, CONTAINERFILE_DIR);
     await this.containers.createVolume(spec.name);
     // A bind mount's folder must exist: a fresh server has no run/turns until its first turn.

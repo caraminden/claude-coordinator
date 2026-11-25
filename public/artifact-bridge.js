@@ -128,6 +128,9 @@
   let sending = Promise.resolve();
   // Flushed but not yet answered: a refresh meanwhile keeps them on top, as it does the queue.
   const inFlight = new Map();
+  // Refused for good, with what the page shows and why (#1940): on top of refreshes too, and not saved until its key lands.
+  const refused = new Map();
+  const refusedWhy = () => [...refused.values()].at(-1)?.why;
   function write(key, value) {
     // null (NaN and the like clone to it) is the wire's delete, so it deletes here too.
     const v = value === undefined ? undefined : (clone(value) ?? undefined);
@@ -140,6 +143,7 @@
       queue = new Map();
       flushing = null;
       for (const e of entries) inFlight.set(e.key, e.value);
+      const left = [...entries];
       sending = sending
         .catch(() => {})
         .then(async () => {
@@ -147,7 +151,14 @@
             if (heard) cutOff(); // a viewer is there but won't keep this page's changes; with none, the page says so itself
             throw new Error(NO_VIEWER);
           }
-          for (let i = 0; i < entries.length; i += 100) await keep(entries.slice(i, i + 100));
+          while (left.length) {
+            await keep(left.slice(0, 100));
+            for (const e of left.splice(0, 100)) refused.delete(e.key);
+          }
+        })
+        .catch((err) => {
+          for (const e of left) refused.set(e.key, { value: e.value, why: err.message });
+          throw err;
         })
         .finally(() => {
           for (const e of entries) if (inFlight.get(e.key) === e.value) inFlight.delete(e.key);
@@ -181,19 +192,19 @@
     }
   }
 
-  // Whether what the page shows is saved (#821): 'saved', 'saving' (on its way) or 'retrying' (Citadel is
-  // down or restarting; it is sent again until it lands). Watchers hear each change.
+  // Whether what the page shows is saved (#821): 'saved', 'saving' (on its way), 'retrying' (Citadel is
+  // down or restarting; it is sent again until it lands) or 'failed' (refused, #1940). Watchers hear each change, and why it failed.
   const saveWatchers = new Set();
   let saveState = 'saved';
   const nowSaving = () => {
     const busy = queue.size || inFlight.size || flushing;
-    return retrying || (joining && busy) ? 'retrying' : busy ? 'saving' : 'saved';
+    return retrying || (joining && busy) ? 'retrying' : busy ? 'saving' : refused.size ? 'failed' : 'saved';
   };
   function saves() {
     const s = nowSaving();
     if (s === saveState) return;
     saveState = s;
-    for (const fn of saveWatchers) fn(s);
+    for (const fn of saveWatchers) fn(s, s === 'failed' ? refusedWhy() : undefined);
   }
   let warned = false;
   const warn = (err) => {
@@ -204,7 +215,9 @@
   // The store as the server has it now (another person's or an agent's write); writes not yet sent or answered stay on top.
   function replace(entries) {
     const next = new Map(entries.map((e) => [e.key, e.value]));
-    for (const [k, v] of [...inFlight, ...queue]) {
+    // One the server has after all (its answer was lost) is saved.
+    for (const [k, { value }] of refused) if (JSON.stringify(next.get(k) ?? null) === JSON.stringify(value)) refused.delete(k);
+    for (const [k, v] of [...[...refused].map(([k, { value }]) => [k, value]), ...inFlight, ...queue]) {
       if (v === null) next.delete(k);
       else next.set(k, v);
     }
@@ -212,6 +225,7 @@
     data.clear();
     for (const [k, v] of next) data.set(k, v);
     if (changed.length) notify(changed);
+    saves();
   }
 
   addEventListener('message', (e) => {
@@ -354,12 +368,12 @@
       list: async (prefix = '') => [...data.keys()].filter((k) => k.startsWith(prefix)),
       watch: (fn) => watch('', () => fn(), true),
     },
-    /** 'saved', 'saving' or 'retrying' (Citadel is down or restarting, and it is sent again until it lands). */
+    /** 'saved', 'saving', 'retrying' (Citadel is down or restarting, and it is sent again until it lands) or 'failed' (refused, and not sent again). */
     saveState: () => saveState,
-    /** Call `fn(state)` now and on each change of saveState; returns the unwatch. */
+    /** Call `fn(state, why)` now and on each change of saveState (`why`: a 'failed' one's reason); returns the unwatch. */
     watchSaves: (fn) => {
       saveWatchers.add(fn);
-      fn(saveState);
+      fn(saveState, saveState === 'failed' ? refusedWhy() : undefined);
       return () => saveWatchers.delete(fn);
     },
     /**
@@ -376,6 +390,11 @@
       // `items`: the page's pick items ({ collection, id, title, label }), for the scheme's ideas ledger (#1150).
       const extra = { ...(keepOpen ? { keepOpen: true } : {}), ...(Array.isArray(items) && items.length ? { items } : {}) };
       const r = images?.length ? await request('send', { text: String(text), images, ...extra }, 60000) : await request('send', { text: String(text), ...extra });
+      // Once what the page wrote on this answer is stored, the viewer may close (#1940): not with something refused.
+      setTimeout(async () => {
+        while (flushing || inFlight.size) await (flushing ?? sending).catch(() => {});
+        host.postMessage({ bridge: TAG, id: ++seq, op: 'kept', page: cfg.page, all: !refused.size }, '*');
+      });
       // Pages made before #417 (kit v1, hand-rolled ones) then say the text waits in the comment box; it was sent.
       setTimeout(() => {
         const walk = document.createTreeWalker(document.body ?? document.documentElement, NodeFilter.SHOW_TEXT);

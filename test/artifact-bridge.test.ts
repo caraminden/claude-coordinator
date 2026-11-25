@@ -157,11 +157,15 @@ test("the viewer answers only its own frames' sandboxed pages, with well-formed 
   assert.equal(msg({ op: 'write', entries: Array(101).fill({ key: 'k' }) }), null);
   assert.equal(msg({ op: 'write', entries: [{ key: 'k', value: 1 }] })?.req.op, 'write');
   assert.equal(msg({ op: 'send', text: ' ' }), null);
-  assert.equal(msg({ op: 'send', text: 'x'.repeat(10_001) }), null);
+  assert.equal(msg({ op: 'send', text: 'x'.repeat(10_000) })?.req.op, 'send');
+  assert.equal(msg({ op: 'send', text: 'x'.repeat(10_001) })?.req.op, 'refuse', 'told why, never posted (#1940)');
+  assert.equal(msg({ op: 'send', text: 'x'.repeat(10_001) }, { source: {} }), null);
   assert.equal(msg({ op: 'send', text: 'Picks: 3' })?.req.text, 'Picks: 3');
   assert.equal(msg({ op: 'send', text: 'x', keepOpen: true })?.req.keepOpen, true);
   assert.equal(msg({ op: 'send', text: 'x', keepOpen: 'yes' })?.req.keepOpen, undefined, 'only a real true keeps it open');
   assert.equal(msg({ op: 'typing' })?.req.op, 'typing');
+  assert.equal(msg({ op: 'kept' })?.req.op, 'kept');
+  assert.equal(msg({ op: 'refuse' }), null, 'only the viewer makes one');
   // Marked pictures (#946): a list of at most 6 { mediaType, data }, and only those two keys go on.
   const img = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
   assert.deepEqual(msg({ op: 'send', text: 'x', images: [{ ...img, extra: 1 }] })?.req.images, [img]);

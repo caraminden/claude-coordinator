@@ -26,7 +26,6 @@ export const ALLOWED: Record<string, [number, string]> = {
     2939,
     'every MCP tool definition and handler; split by tool family is queued (+15: hand_off on a ship card, #1930) (+2: a kind per plan step, #1923) (+1: the worker wait in a minion line, #1868) (+5: apply_memory, #1803) (raised once for the Biome reformat, #1792) (+17: mark_urgent, #1888) (+3: same-scheme person text, #1855) (+1: before and first, #1909)',
   ],
-  'src/db.ts': [1703, 'schema, migrations and settings; its queries are moving to src/db/<area>.ts, a piece at a time (#1842; 1683 plus room for the ships waiting in line beside it, tightened next piece)'],
   'tools/land.sh': [2841, 'the ship script is one shell program; its steps share state and are pinned by tests (+141: a red train pulls every likely ship and hands what is left to the next one, #1918)'],
   'kit/skills/scheme-setup/templates/land.sh': [2887, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted (+8: the count merge rule, #1917)'],
   'public/machine-agent.mjs': [2474, 'standalone agent a person runs on their own computer: one file so it can be copied alone (raised once for the Biome reformat, #1792)'],

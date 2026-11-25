@@ -342,8 +342,12 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   // A minion lands two commits; its branch tip is main's.
   const t = store.createTicket({ project_id: p.id, title: 'Snooze', permission_mode: 'default', created_by: 'Josh' });
   store.setTicketDir(t.id, root, 'ticket/1-snooze');
+  // Committed an hour ago on its own branch, and only now (a kit sync's ff) on main: the card counts from the ff.
+  git(repo, 'checkout', '-q', '-b', 'work');
   gitAt(Date.now() - 3_600_000, repo, 'commit', '-q', '--allow-empty', '-m', 'one');
   gitAt(Date.now(), repo, 'commit', '-q', '--allow-empty', '-m', 'two');
+  git(repo, 'checkout', '-q', 'main');
+  git(repo, 'merge', '-q', '--ff-only', 'work');
   const tip = git(repo, 'rev-parse', 'HEAD');
   git(repo, 'branch', 'ticket/1-snooze', tip);
   await reader.refresh();
@@ -360,7 +364,7 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
     v.next?.changes.map((c) => c.title),
     ['Snooze'],
   );
-  assert.ok(Math.abs(v.next!.since - (Date.now() - 3_600_000)) < 2000, 'since the oldest undeployed commit');
+  assert.ok(Math.abs(v.next!.since - Date.now()) < 5000, 'since the oldest undeployed commit reached main, not since it was committed');
 
   // A first deploy that failed leaves the commit it started from serving, still Release 1.
   store.addContraptionDeploy({ name: 'mandate', from_sha: base, to_sha: 'bad', by: 'Cara', started_at: now - 9.5e6, finished_at: now - 9.5e6, outcome: 'rolled back', stages: '{}', changes: '[]' });

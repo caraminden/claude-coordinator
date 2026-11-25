@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { turnPlace } from '../src/access.ts';
 import { ANDROID_JDK, ANDROID_SDK, androidEnv, checkoutMounts, checkoutMountsAsync, ClaudeLink, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
 import { Containers, runArgs, specHash, unitProps, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
@@ -11,10 +12,10 @@ import { CodexLink } from '../src/codex-link.ts';
 import { Store } from '../src/db.ts';
 import { fallbacks } from '../src/fallbacks.ts';
 import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
-import { TURN_SLICE } from '../src/turn-launch.ts';
+import { TASKMASTER_SLICE, TURN_SLICE } from '../src/turn-launch.ts';
 import { jsonLines, lines, tempRoot, testPins, followed, runnerInsides } from './helpers.ts';
-import { until } from './wait.ts';
 import { holds } from './holds.ts';
+import { until } from './wait.ts';
 testPins();
 
 // Turns in a person's own Claude container (#213). A fake `podman` on PATH runs `exec` on the host,
@@ -44,7 +45,8 @@ const [cmd, ...rest] = args.slice(detached ? 3 : 2);
 const run = cmd === 'node' ? process.execPath : cmd;
 // FAKE_PODMAN_HANGS: a detached exec never returns, as podman does on a stuck lock. FAKE_PODMAN_SLOW: it starts late.
 const start = () => spawn(run, rest, { detached: true, stdio: 'ignore' }).unref();
-if (detached && process.env.FAKE_PODMAN_HANGS) {
+// FAKE_PODMAN_FULL: the container whose minions hold it at its memory limit, where an exec stalls (#1882).
+if (detached && (process.env.FAKE_PODMAN_HANGS || process.env.FAKE_PODMAN_FULL === args[2])) {
   require('node:fs').writeFileSync(${JSON.stringify(hungPid)}, String(process.pid));
   setInterval(() => {}, 1000);
 }
@@ -126,6 +128,15 @@ function newTicket() {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Josh' });
   store.setTicketDir(t.id, root, null);
   return t.id;
+}
+/** The scheme's one Taskmaster (a scheme has one at a time). */
+let made: { id: number } | undefined;
+function taskmaster() {
+  if (!made) {
+    made = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Josh', kind: 'coordinator' });
+    store.setTicketDir(made.id, root, null);
+  }
+  return made;
 }
 const notes = (id: number) =>
   store
@@ -213,6 +224,15 @@ test("a container turn's exec runs in a scope of its own under the turns slice, 
   );
   const cmd = scope.slice(scope.findIndex((a: string) => a === 'podman'));
   assert.deepEqual(cmd.slice(0, 4), ['podman', 'exec', '-d', 'citadel-claude-test-2']);
+  // A Taskmaster's goes with the other Taskmaster turns: minions at their slice's limit would stall its exec (#1882).
+  const tm = taskmaster();
+  r.send(tm.id, 'Josh', 'hello');
+  await until("status(tm) === 'idle'", () => status(tm.id) === 'idle' && jsonLines(calls).some((c) => c[0] === 'systemd-run' && c.some((a: string) => a.startsWith('--unit=citadel-turn-') && a.includes(`-${tm.id}-`))));
+  assert.ok(
+    jsonLines(calls)
+      .findLast((c) => c[0] === 'systemd-run')!
+      .includes(`--slice=${TASKMASTER_SLICE}`),
+  );
   assert.ok(notes(id).every((n) => !/citadel-claude-test-2:/.test(n)));
 });
 
@@ -373,6 +393,9 @@ test('podman run arguments: keep-id, host network, a :U volume, binds at their o
     args.filter((x) => x.startsWith('--pids-limit')),
     ['--pids-limit=32768'],
   );
+  // A slice of its own is in the hash; without one the hash is as before, so people's running containers are kept (#1882).
+  assert.notEqual(specHash(spec), specHash({ ...spec, slice: 'citadel-taskmasters.slice' }));
+  assert.ok(runArgs({ ...spec, chown: false }).includes('citadel-claude-1:/home/u'));
   // The limit is in the hash (without it this spec's is 58d8a50d7a94), so a container started before it restarts once idle.
   assert.equal(specHash(spec), '3851a80c72b8');
   for (const a of ['--userns=keep-id', '--network=host', '--init', '--rm']) assert.ok(args.includes(a), a);
@@ -566,6 +589,134 @@ test("a person's container mounts their own turns' files, never another person's
   assert.ok(!sees(ben.id, annDir), "Ben's container can't reach Ann's turn files");
   // A turn on the host (the server login's) keeps its folder straight under run/turns.
   assert.ok(!sees(ann.id, join(r.turnsDir, `${a}-1`)), "no container reaches the host's turn files");
+});
+
+/** A linked person's ClaudeLink over a podman that logs its calls; `running` names the containers up, from any spec. */
+function linkedPerson(tag: string) {
+  const log: string[][] = [];
+  const running = new Set<string>();
+  const vol = join(root, `${tag}-vol`);
+  const fakeRun: RunCmd = async (cmd, args) => {
+    log.push([cmd, ...args]);
+    if (args[0] === 'container' && args[1] === 'inspect') return running.has(args.at(-1)!) ? { code: 0, stdout: 'true deadbeef', stderr: '' } : { code: 1, stdout: '', stderr: 'no such container' };
+    if (args[0] === 'volume' && args[1] === 'inspect') return { code: 0, stdout: vol + '\n', stderr: '' };
+    if (cmd === 'systemd-run') running.add(args.find((a) => a.startsWith('--unit='))!.slice(7));
+    if (cmd === 'podman' && args[0] === 'stop') running.delete(args.at(-1)!);
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const creds = new Credentials(store, 'x'.repeat(40));
+  // Claude Code's folder is mounted read-only, so the fake one sits apart from the data dir.
+  const claude = join(root, `${tag}-claude`, 'claude');
+  mkdirSync(join(root, `${tag}-claude`));
+  writeFileSync(claude, '');
+  const link = new ClaudeLink(store, creds, root, claude, new Containers(fakeRun), `citadel-claude-${tag}-`);
+  const user = store.createUser({ name: tag, login: tag });
+  creds.put(user.id, 'claude_runner', link.name(user.id), { container: link.name(user.id), home: vol, linkedAt: 1 });
+  const starts = () => log.filter((c) => c[0] === 'systemd-run');
+  return { link, log, running, starts, uid: user.id };
+}
+
+test("a Taskmaster answers while its person's minions hold their container at its limit (#1882)", async () => {
+  const { link, uid } = linkedPerson('room');
+  const tm = taskmaster();
+  const minion = newTicket();
+  const r = runner((person, warm, taskmaster) => turnPlace(store, link, person, warm, taskmaster));
+  r.personOf = () => uid;
+  process.env.FAKE_PODMAN_FULL = link.name(uid);
+  try {
+    r.send(minion, 'room', 'build it');
+    await until('the minion waits on its full container', () => jsonLines(calls).some((c) => c[0] === 'exec' && c[1] === '-d' && c[2] === link.name(uid)));
+    const before = store.listEvents(tm.id).at(-1)?.id ?? 0;
+    r.send(tm.id, 'room', 'is CI choking?');
+    await until('the Taskmaster answers', () => status(tm.id) === 'idle' && store.listEvents(tm.id).some((e) => e.id > before && e.kind === 'claude' && JSON.parse(e.data).is_error === false));
+    assert.equal(status(minion), 'running', 'the full container answers nobody');
+    assert.deepEqual(errors(tm.id), []);
+    // Its own person's login, in the same folder as ever.
+    const env = jsonLines(seen).at(-1).env;
+    assert.equal(env.CLAUDE_CONFIG_DIR, join(homedir(), '.claude'));
+    assert.equal(r.inContainer(link.name(uid)), 1, "the minion's turn");
+  } finally {
+    delete process.env.FAKE_PODMAN_FULL;
+    r.stop(minion);
+    process.kill(Number(readFileSync(hungPid, 'utf8')), 'SIGKILL');
+  }
+});
+
+test("a Taskmaster's container waits out a sign-in's start, which chowns the volume they share (#1882)", async () => {
+  const { link, starts, uid } = linkedPerson('signin');
+  (link as unknown as { logins: Map<number, object> }).logins.set(uid, {});
+  const name = link.name(uid);
+  const inner = link as unknown as { containers: Containers };
+  const start = inner.containers.start.bind(inner.containers);
+  const at: string[] = [];
+  let chowned = () => {};
+  const chown = new Promise<void>((ok) => (chowned = ok));
+  inner.containers.start = async (spec) => {
+    at.push(spec.name);
+    if (spec.name === name) await chown;
+    await start(spec);
+  };
+  const main = link.ensure(uid);
+  const tm = link.ensure(uid, true, true);
+  await until('the sign-in starts', () => at.length > 0);
+  await holds('the Taskmaster waits', () => !at.includes(`${name}-tm`), { ms: 400 });
+  chowned();
+  await Promise.all([main, tm]);
+  assert.deepEqual(at, [name, `${name}-tm`]);
+  assert.ok(starts()[0].includes(`${name}:${process.env.HOME}:U`), 'the sign-in mends the volume');
+});
+
+test("a Taskmaster's container is its person's other one: same volume and mounts, its own limit and slice, apart from a minions' container that fills, restarts or dies (#1882)", async () => {
+  const { link, running, starts, uid } = linkedPerson('apart');
+  const name = `citadel-claude-apart-${uid}`;
+  const place = link.place(uid, undefined, true);
+  const minions = link.place(uid);
+  assert.ok(place && !place.host && minions && !minions.host);
+  assert.deepEqual([place.container, minions.container], [`${name}-tm`, name]);
+  // Same login, folders and account: only the container differs.
+  assert.deepEqual({ ...place, container: 0, ensure: 0 }, { ...minions, container: 0, ensure: 0 });
+  // The two start at once, each once, however many turns ask.
+  await Promise.all([place.ensure(), minions.ensure(), link.ensure(uid, true, true)]);
+  assert.equal(starts().length, 2);
+  const unit = starts().find((c) => c.includes(`--unit=${name}-tm`))!;
+  for (const p of ['--slice=citadel-taskmasters.slice', 'ManagedOOMPreference=omit', 'OOMPolicy=continue', 'MemoryHigh=3G', 'MemoryMax=4G', 'MemorySwapMax=2G']) assert.ok(unit.indexOf(p) > 0 && unit.indexOf(p) < unit.indexOf('podman'), p);
+  const main = starts().find((c) => c.includes(`--unit=${name}`))!;
+  assert.ok(main.includes('--slice=citadel.slice') && main.includes('MemoryHigh=10G'));
+  // Neither start chowns the volume (:U walks it, and fails on a file the other container deletes meanwhile); a sign-in's does.
+  for (const c of [unit, main]) assert.ok(c.includes(`${name}:${process.env.HOME}`), 'the one volume, as it is');
+  assert.equal(link.spec(uid).chown, false);
+  const signIn = link as unknown as { logins: Map<number, object> };
+  signIn.logins.set(uid, {});
+  assert.equal(link.spec(uid).chown, true);
+  link.busy = (c) => (c === `${name}-tm` ? 1 : 0);
+  assert.equal(link.spec(uid).chown, false, 'not while a Taskmaster turn writes in it');
+  link.busy = () => 0;
+  signIn.logins.delete(uid);
+  assert.equal(new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), root, fake, new Containers(), 'citadel-claude-new-').spec(store.createUser({ name: 'New', login: 'new' }).id).chown, true);
+  // Every mount the same but its list of sessions, which Claude Code keys by pid: one list each.
+  const of = (tm: boolean) => link.spec(uid, undefined, tm).mounts.map((m) => `${m.src} ${m.dst}`);
+  const extra = of(true).filter((m) => !of(false).includes(m));
+  assert.deepEqual(
+    of(false).filter((m) => !of(true).includes(m)),
+    [],
+  );
+  assert.ok(extra.length > 0 && extra.every((m) => /sessions-taskmaster \S+\/sessions$/.test(m)), extra.join('\n'));
+  // A changed spec replaces only the container with nothing running in it.
+  link.busy = (c) => (c === name ? 20 : 0);
+  await link.ensure(uid, true, true);
+  await link.ensure(uid, true);
+  assert.equal(starts().length, 3, "the Taskmaster's own, idle, restarted; the minions' busy one kept");
+  link.busy = (c) => (c === `${name}-tm` ? 2 : 0);
+  // The minions' container dies: its next start leaves the Taskmaster's turns running.
+  running.delete(name);
+  await link.ensure(uid, true);
+  assert.ok(running.has(`${name}-tm`));
+  assert.equal(starts().filter((c) => c.includes(`--unit=${name}-tm`)).length, 2);
+  // Unlinking waits for a Taskmaster's turn too, then removes both.
+  await assert.rejects(link.unlink(uid), /Turns are running/);
+  link.busy = () => 0;
+  await link.unlink(uid);
+  assert.deepEqual([...running], []);
 });
 
 test("a container turn has the host's tools: the image installs what schemes' scripts call, host toolchains are mounted, the image's own win (#247)", () => {

@@ -295,3 +295,24 @@ test("the Status page's backup check makes no synchronous file call on the serve
     assert.deepEqual(seen, [], `synchronous fs calls under ${dir}`);
   }
 });
+
+test("the heavy-jobs folder is read off the server's thread: a snapshot refreshed in the background feeds memory easing and the release readers", async () => {
+  const { HeavySnapshot } = await import('../src/waits.ts');
+  const heavy = join(root, 'heavy');
+  mkdirSync(heavy, { recursive: true });
+  writeFileSync(join(heavy, 'wait-1234-5'), `Citadel #1 (cara)\nnpm test\n${Math.floor(Date.now() / 1000)}\nmemory\n`);
+  const snap = new HeavySnapshot(heavy);
+  assert.deepEqual(snap.get(), { holders: [], waiters: [] }, 'empty before the first read');
+  const seen = await syncCallsUnder(heavy, async () => {
+    await snap.refresh();
+    assert.equal(snap.get().waiters.length, 1);
+    assert.equal(snap.get().waiters[0].reason, 'memory');
+  });
+  assert.deepEqual(seen, []);
+  // A folder that can't be read keeps the last answer and never throws.
+  const gone = new HeavySnapshot(join(root, 'nope'));
+  await gone.refresh();
+  assert.deepEqual(gone.get(), { holders: [], waiters: [] });
+  // Nothing in server.ts reads the folder with the synchronous twin.
+  assert.doesNotMatch(readFileSync(join(import.meta.dirname, '..', 'server.ts'), 'utf8'), /\breadHeavy\(/);
+});

@@ -14,14 +14,17 @@
 // Once a run has started it never falls back: a stop or a lost run is reported, not run twice.
 //   node heavy-ci.ts --long <command> [args...]   queues a long job and exits at once (#1363, below)
 import { execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { HoldFile } from '../src/ci-hold-file.ts';
 
 export const FALLBACK = 120;
 export const BEGIN = '=== citadel-heavy: the command starts ===';
 export const END = '=== citadel-heavy: the command exited ';
 const WORKFLOW = 'citadel-heavy.yml';
+/** A hold.json (src/ci-hold-file.ts) older than this holds nothing. Turns run this file alone (src/turn-launch.ts): it imports only types. */
+const HOLD_STALE_MS = 2 * 60_000;
 const say = (text: string) => process.stderr.write(`citadel-heavy: ${text}\n`);
 const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
 
@@ -136,7 +139,7 @@ function snapshot(): string {
 
 /** How many ship runs (land/* branches, tools/land.sh) are queued or running on the repo's CI now; 0 when GitHub doesn't say. */
 function shipRuns(slug: string): number {
-  // Only runs from the last 15 minutes count, as in tests.yml's wait for the lands: GitHub keeps some abandoned ones queued.
+  // Only runs from the last 15 minutes count: GitHub keeps some abandoned ones queued.
   const since = Date.now() - 15 * 60_000;
   let n = 0;
   for (const status of ['queued', 'in_progress']) {
@@ -170,6 +173,71 @@ async function waitForShips(slug: string, poll: number) {
     }
     await sleep(poll);
   }
+}
+
+/** Deploys first (#1902): the server's word on why a job may not start on the CI desktop now, or null (its file stale or
+ *  unread, so the job goes ahead). */
+function readHold(): HoldFile | null {
+  try {
+    const h = JSON.parse(readFileSync(join(longDir(), 'hold.json'), 'utf8'));
+    return Number.isFinite(h?.at) && Date.now() - h.at < HOLD_STALE_MS && Array.isArray(h.held) && Array.isArray(h.repos) ? h : null;
+  } catch {
+    return null;
+  }
+}
+function holdWhy(slug: string): string | null {
+  const h = readHold();
+  return h?.repos.includes(slug.toLowerCase()) ? h.why : null;
+}
+const heldRun = (run: number) => readHold()?.held.some((h) => h.run === run) ?? false;
+/** The exit status of a job handed to Citadel's queue: nothing has run yet, or it was stopped and starts again. */
+export const HANDED_OVER = 75;
+
+/** Wait here while ships hold the CI desktop, up to CITADEL_HEAVY_HOLD_WAIT s (default 300); false when they still do. */
+async function waitForHold(slug: string, poll: number): Promise<boolean> {
+  const limit = (Number(process.env.CITADEL_HEAVY_HOLD_WAIT) || 300) * 1000;
+  const from = Date.now();
+  let told = 0;
+  for (let why = holdWhy(slug); why; why = holdWhy(slug)) {
+    if (Date.now() - from >= limit) return false;
+    if (Date.now() - told >= 300_000) {
+      say(`waiting: ${why}, and ships go first on the CI desktop (${Math.round((Date.now() - from) / 60000)} min)`);
+      told = Date.now();
+    }
+    await sleep(poll);
+  }
+  return true;
+}
+
+/** Write a job for the server's queue (src/long-jobs.ts). */
+function writeJob(job: Record<string, unknown> & { id: string }) {
+  const dir = longDir();
+  // Open to every account: turns in people's containers write here, and the server rewrites the files as jobs move.
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+    try {
+      chmodSync(dir, 0o777);
+    } catch {
+      /* not ours */
+    }
+  }
+  writeFileSync(join(dir, `.${job.id}.tmp`), JSON.stringify(job) + '\n', { mode: 0o666 });
+  renameSync(join(dir, `.${job.id}.tmp`), join(dir, `${job.id}.json`));
+}
+
+/** Hand a job ships hold to Citadel, which starts it once the line is empty and wakes the minion with its result; false
+ *  outside a minion's turn, or with a command too long for the queue (nobody to wake: the caller keeps waiting). */
+function handOver(job: { id: string; slug: string; sha: string; command: string; argv: string[] }, run?: { id: number; url: string }): boolean {
+  const ticket = Number(process.env.COORDINATOR_TICKET);
+  if (!Number.isInteger(ticket) || ticket <= 0 || job.command.length > 20_000) return false;
+  const { argv, ...rest } = job;
+  const what = (process.env.CITADEL_HEAVY_WHAT || argv.join(' ')).slice(0, 100);
+  const now = Date.now();
+  writeJob({ ...rest, ticket, what, who: (process.env.CITADEL_HEAVY_WHO || 'someone').slice(0, 200), queued_at: now, quiet: true, ...(run ? { state: 'running', dispatched_at: now, run_id: run.id, url: run.url } : { state: 'queued' }) });
+  say(
+    `${run ? 'a ship joined the line, so this job was stopped' : 'ships still hold the CI desktop'}: Citadel ${run ? 'starts it again' : 'starts it'} by itself once the line is empty, and wakes you with its exit status and output (${join(longDir(), `${job.id}.log`)}). Nothing has passed or failed (exit ${HANDED_OVER}); end your turn, and don't run it again`,
+  );
+  return true;
 }
 
 /** The command line the workflow runs: in the same folder of the repo as here. */
@@ -224,17 +292,7 @@ function queueLong(argv: string[]): number {
   const what = (process.env.CITADEL_HEAVY_WHAT || argv.join(' ')).slice(0, 100);
   const job = { id, ticket, slug, sha, command, what, who: (process.env.CITADEL_HEAVY_WHO || 'someone').slice(0, 200), queued_at: Date.now(), state: 'queued' };
   const dir = longDir();
-  // Open to every account: turns in people's containers write here, and the server rewrites the files as jobs move.
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-    try {
-      chmodSync(dir, 0o777);
-    } catch {
-      /* not ours */
-    }
-  }
-  writeFileSync(join(dir, `.${id}.tmp`), JSON.stringify(job) + '\n', { mode: 0o666 });
-  renameSync(join(dir, `.${id}.tmp`), join(dir, `${id}.json`));
+  writeJob(job);
   process.stdout.write(`${id}\n`);
   say(`queued long job ${id} (${what}) for ${slug}'s CI. It starts at night (from 2am, in the CI PC's job hours), so end your turn now: you are woken with its exit status and output (${join(dir, `${id}.log`)}) when it ends`);
   return 0;
@@ -246,7 +304,8 @@ async function main(argv: string[]): Promise<number> {
   const queueLimit = Number(process.env.CITADEL_HEAVY_CI_QUEUE) || 600;
   const slug = repo();
   const command = remoteCommand(argv);
-  const id = newId();
+  const ship = process.env.CITADEL_HEAVY_SHIP === '1'; // a ship's own light check (#1620): never held
+  const id = `${ship ? 'ship' : ''}${newId()}`;
   const ref = `refs/citadel-heavy/${id}`;
   let sha: string;
   try {
@@ -261,7 +320,9 @@ async function main(argv: string[]): Promise<number> {
         .pop()})`,
     );
   }
+  let kept = false; // handed over: the queued job still needs its snapshot
   const unref = () => {
+    if (kept) return;
     try {
       git('push', '-q', '--no-verify', 'origin', `:${ref}`);
     } catch {
@@ -311,7 +372,10 @@ async function main(argv: string[]): Promise<number> {
   process.on('SIGINT', () => stop(2));
   process.on('SIGTERM', () => stop(15));
   try {
-    if (process.env.CITADEL_HEAVY_SHIP !== '1') await waitForShips(slug, poll); // a ship's own light check (#1620) is one
+    if (!ship) {
+      while (!(await waitForHold(slug, poll))) if (handOver({ id, slug, sha, command, argv })) return ((kept = true), HANDED_OVER);
+      await waitForShips(slug, poll); // the repo's own ships, and what the hold says when it can't be read
+    }
     try {
       const branch = gh([`repos/${slug}`], 'reading the repo').default_branch;
       // From here a run may exist even if the call failed (it timed out after GitHub took it), so it is looked for.
@@ -340,10 +404,16 @@ async function main(argv: string[]): Promise<number> {
     let told = 0;
     for (;;) {
       if (run.status === 'completed') {
-        completed = true;
-        break;
+        // Stopped for a ship (#1902): the same run starts again, so this is no result.
+        if (!heldRun(run.id)) {
+          completed = true;
+          break;
+        }
+        if (handOver({ id, slug, sha, command, argv }, { id: run.id, url: run.html_url })) return ((kept = true), HANDED_OVER);
+        started = false;
+        queued = Date.now();
       }
-      if (!started && run.status !== 'queued' && run.status !== 'waiting' && run.status !== 'pending' && run.status !== 'requested') {
+      if (!started && run.status !== 'completed' && run.status !== 'queued' && run.status !== 'waiting' && run.status !== 'pending' && run.status !== 'requested') {
         started = true;
         // Only for the runner's name: an unread answer here must not cancel a run a runner just took.
         let job: any;
@@ -354,7 +424,7 @@ async function main(argv: string[]): Promise<number> {
         }
         say(`a runner took it${job?.runner_name ? ` (${job.runner_name})` : ''}; its output comes when it ends`);
       }
-      if (!started && Date.now() - queued >= queueLimit * 1000) {
+      if (!started && run.status !== 'completed' && Date.now() - queued >= queueLimit * 1000) {
         // Busy runners mean wait (Josh: "things slow down, but perigee is fine"); only a CI running nothing at all,
         // the desktop off, sends the job back here. Reading the runners themselves needs admin, so other runs tell.
         if (gh([`repos/${slug}/actions/runs?status=in_progress&per_page=1`], 'reading the runs').total_count > 0) {

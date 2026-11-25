@@ -94,7 +94,7 @@ export function tempRoot(prefix = 'test-'): TempRoot {
     dir,
     path: (...parts) => join(dir, ...parts),
     // A server.ts started this way exits with the test (#1546); other children (a Codex shim forwards CITADEL_* names) don't get the variable.
-    spawn: (cmd, args, opts) => track(spawn(cmd, args, opts?.env && args.some((a) => /server\.ts$/.test(a)) ? { ...opts, env: { CITADEL_EXIT_WITH_PARENT: '1', ...opts.env } } : (opts ?? {}))),
+    spawn: (cmd, args, opts) => track(spawn(cmd, args, opts?.env && args.some((a) => /server\.ts$/.test(a)) ? { ...opts, env: { CITADEL_EXIT_WITH_PARENT: String(process.pid), ...opts.env } } : (opts ?? {}))),
     track,
     serve,
     down: () => serve(createNetServer((sock) => sock.destroy())),
@@ -388,7 +388,7 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       // test server's indexers (#1301, #1349). A test of the gate passes its own CITADEL_PSI_CPU file (none comes in from
       // the runner's env); test/host-signals-guards.test.ts checks every test that starts server.ts itself sets this too.
       // It exits, and stops its turns and supervisors, when the test's process does, however that ends (#1546).
-      CITADEL_EXIT_WITH_PARENT: '1',
+      CITADEL_EXIT_WITH_PARENT: String(process.pid),
       CITADEL_HOST_SIGNALS: 'fixed',
       CITADEL_PSI_CPU: undefined,
       CITADEL_PSI_MEMORY: undefined,

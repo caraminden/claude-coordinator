@@ -19,7 +19,7 @@ concurrency:
 
 permissions:
   contents: read
-  actions: read # the batches' wait reads tests.yml's runs, as tests.yml's wait step does
+  id-token: write # the run's own token, no secret: the ask below
 
 # Only on the runner that carries the side label (#1240): a proof holds its runner up to 90 minutes, and on 2026-11-20
 # proofs on both runners sent every land for three hours to the suite on perigee. The other runner stays the lands'.
@@ -34,6 +34,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26
+      # Deploys first (#1902): while a ship is in line this run is stopped here and Citadel starts it again (tools/ci-hold-ask.ts).
+      - name: ask Citadel whether ships go first
+        run: node tools/ci-hold-ask.ts
       # Node 26 needs libatomic1, and deploy.sh, backup.sh and prune.sh the sqlite3 CLI. A fresh distro has neither,
       # and a job has no root, so until someone runs `apt-get install -y libatomic1 sqlite3` there as root they are
       # unpacked from their .debs into the runner's home.
@@ -59,6 +62,10 @@ jobs:
           [ -S "$dir/bus" ] || { echo "No systemd user manager for $(id -un). As root in the distro: loginctl enable-linger $(id -un)"; exit 1; }
           echo "XDG_RUNTIME_DIR=$dir" >>"$GITHUB_ENV"
           echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$dir/bus" >>"$GITHUB_ENV"
+      # What killed or cancelled jobs left running (#1900), and this job's own temp folder (TMPDIR, kept per runner).
+      - name: clear what earlier jobs left running
+        continue-on-error: true
+        run: node test/ci-leftovers.ts start
       - name: the file's name
         env:
           FILE: ${{ inputs.file }}
@@ -78,17 +85,22 @@ jobs:
           echo "$dir/$v" >>"$GITHUB_PATH"
           "$dir/$v/pwsh" -NoProfile -Command 'if (-not (Get-Module -ListAvailable PSScriptAnalyzer | Where-Object Version -eq 1.25.0)) { Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force }'
       - name: 10 clean runs (1 of 5)
-        env: { FILE: '${{ inputs.file }}', GH_TOKEN: '${{ github.token }}' }
+        env: { FILE: '${{ inputs.file }}' }
         run: tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (2 of 5)
-        env: { FILE: '${{ inputs.file }}', GH_TOKEN: '${{ github.token }}' }
+        env: { FILE: '${{ inputs.file }}' }
         run: tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (3 of 5)
-        env: { FILE: '${{ inputs.file }}', GH_TOKEN: '${{ github.token }}' }
+        env: { FILE: '${{ inputs.file }}' }
         run: tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (4 of 5)
-        env: { FILE: '${{ inputs.file }}', GH_TOKEN: '${{ github.token }}' }
+        env: { FILE: '${{ inputs.file }}' }
         run: tools/flake-proof.sh "$FILE" 10
       - name: 10 clean runs (5 of 5)
-        env: { FILE: '${{ inputs.file }}', GH_TOKEN: '${{ github.token }}' }
+        env: { FILE: '${{ inputs.file }}' }
         run: tools/flake-proof.sh "$FILE" 10
+      # Only this job's: a suite stopped at its limit or cancelled never got to its own cleanup (#1900).
+      - name: clear what this job left running
+        if: always()
+        continue-on-error: true
+        run: node test/ci-leftovers.ts end

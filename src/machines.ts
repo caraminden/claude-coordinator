@@ -204,7 +204,7 @@ interface Agent {
   timers: NodeJS.Timeout[];
   /** A CI runner agent (public/runner-agent.mjs, #328): it serves no MCP server, only runner jobs. */
   runners: boolean;
-  /** Which runners it adds (#510): Windows services, or Linux ones inside WSL. An agent that doesn't say is a Windows one. */
+  /** Which runners it adds (#510): Windows services, or Linux ones (in WSL or on plain Linux). An agent that doesn't say is a Windows one. */
   os: 'windows' | 'linux';
   /** When it last beat; null for an agent from before beats, which is never dropped for missing them. */
   beat?: number;

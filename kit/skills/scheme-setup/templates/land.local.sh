@@ -90,12 +90,14 @@
 # Ship-time merges: files two branches often change in the same place, which the rebase merges by rule rather than
 # stopping on, a line "<path> <rule> [<regex>]" each. Rules: append <regex> (lines both add to a list whose opening
 # line matches), sum <regex> (lines matching <regex> both changed: numbers both raised become main's plus this
-# branch's raise, notes both added keep both), main (main's copy: a file land_rebased makes again), hook (land_merge
+# branch's raise, notes both added keep both), count <regex> (as sum, and a number either side lowered adds up too: a
+# list of sizes), main (main's copy: a file land_rebased makes again), hook (land_merge
 # below). Anything a rule isn't sure of stops the rebase, as a clash in any other file does. The header of
 # tools/land.sh says the rest.
 # MERGES='
 # test/prompt-budget.test.ts sum ^const\ (BUDGET|KIT_BUDGET)\ =
 # src/db.ts append ^const\ MIGRATIONS
+# test/size-budget.test.ts count ^\ \ .[[:alnum:]/._-]+.:\ \[[0-9]+,
 # test/prompt-baseline.json main
 # '
 
@@ -202,7 +204,7 @@
 # }
 
 # MERGES's hook rule: merge <path>, leaving the result in <ours>. <side> says which of ours and theirs is main's
-# (ours in a rebase). Exit 0 clean; anything else stops the rebase as a clash does. With append or sum lines for the
+# (ours in a rebase). Exit 0 clean; anything else stops the rebase as a clash does. With append, sum or count lines for the
 # same path, it runs with LAND_MERGE_DIFF3=1 and leaves its clashes as diff3 markers (size 31, main/base/branch) for
 # those rules; tools/ship-numbers.ts does.
 # land_merge() { # <side> <base> <ours> <theirs> <path>

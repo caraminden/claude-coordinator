@@ -199,6 +199,10 @@ test("a pooled turn reaches its place's shared tool server by HTTP, with its own
   assert.equal(p.pool!.systemdRun, undefined);
   assert.ok(plan({ pool: true, unit: 'citadel-turn-x' }).pool!.systemdRun!.some((a) => a.startsWith('--unit=citadel-mcp-pool-')));
   assert.equal(plan({ pool: true, place: container, unit: 'never-used' }).pool!.systemdRun, undefined);
+  // Their Taskmaster container counts pids apart, and a pool's record is kept by pid: never the one record for both (#1882).
+  const taskmaster = { ...minion, kind: 'coordinator' as const };
+  assert.notEqual(plan({ pool: true, place: container, ticket: taskmaster }).pool!.dir, plan({ pool: true, place: container }).pool!.dir);
+  assert.equal(plan({ pool: true, ticket: taskmaster }).pool!.dir, plan({ pool: true }).pool!.dir, 'the host is one place');
   const codex = plan({ pool: true, codex: { thread: null } });
   assert.equal(codex.pool, undefined);
   assert.equal(

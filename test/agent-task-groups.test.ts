@@ -34,7 +34,7 @@ test('a task that has ended but left its group running is ended with the agent',
   const config = tmp.path('machine-agent.json');
   writeFileSync(config, JSON.stringify({ workspaces: { w: { path: ws, tasks: { launch: { run: ['sh', '-c', `sleep 47 & echo "child $!"`] } } } } }));
   // An app that lends the workspace, then asks for the task once; the agent's answers come back on /send.
-  const replies: any[] = [];
+  const replies: { message?: { result?: { content?: { text?: string }[] } } }[] = [];
   const srv = createServer((req, res) => {
     let body = '';
     req.on('data', (d) => (body += d));

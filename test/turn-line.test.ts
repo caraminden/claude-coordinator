@@ -903,3 +903,23 @@ test('the Workers tile reads the limits with the last 7 days beside each line, a
   const back = reset.limits.find((l: { key: string }) => l.key === 'shrinkCpu');
   assert.deepEqual([back.value, back.by], [50, undefined]);
 });
+
+test('a stop while waiting for a worker tells the outbox which queued messages it dropped', async () => {
+  runner.turnLine.setSize(1, 'Cara');
+  const [a, b] = [minion(), minion()];
+  say(a);
+  await started(a);
+  const brief = runner.send(b, 'Citadel', 'the original brief', [], { brief: true });
+  const dropped: number[][] = [];
+  runner.onStop = (_id, ids) => (dropped.push(ids), ids);
+  assert.equal(runner.stop(b), true);
+  assert.deepEqual(dropped, [[brief.event.id]]);
+  say(b, 'go on');
+  end(a);
+  await started(b);
+  assert.match(turnsOf(b)[0], /the original brief/, 'the stopped minion still starts with its brief');
+  end(b);
+  await idle(b);
+  await idle(a);
+  runner.onStop = () => [];
+});

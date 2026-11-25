@@ -5,7 +5,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Auth, looksLikeUrl, type Nonces } from '../src/auth.ts';
-import { Store } from '../src/db.ts';
+import { Store, type User } from '../src/db.ts';
+import type { IncomingMessage } from 'node:http';
+import { fake } from './typed.ts';
 
 test('a site address is not a name', () => {
   assert.ok(looksLikeUrl('https//cara.apps.webplatformisbestplatf'));
@@ -17,7 +19,7 @@ test('a site address is not a name', () => {
 
 test('a session cookie naming a site address no longer signs in', () => {
   const auth = new Auth('a-password-long-enough', 'x'.repeat(32));
-  const cookie = (name: string) => ({ headers: { cookie: auth.issueCookie({ id: 1, name }, false).split(';')[0] } }) as any;
+  const cookie = (name: string) => fake<IncomingMessage>({ headers: { cookie: auth.issueCookie({ id: 1, name }, false).split(';')[0] } });
   assert.equal(auth.session(cookie('Josh'))?.name, 'Josh');
   assert.equal(auth.session(cookie('https//cara.apps.webplatformisbestplatf')), null);
 });
@@ -30,7 +32,7 @@ test('an agent token lives for its turn: the next turn or closing the minion kil
     get: (id) => (gone.has(id) ? null : { ...(kept.get(id) ?? { current: null, previous: null }), closed: closed.has(id) }),
     set: (id, nonces) => void kept.set(id, nonces),
   });
-  const as = (token: string, method = 'GET', url = '/api/tickets/7') => auth.session({ method, url, headers: { authorization: `Bearer ${token}` } } as any)?.agent;
+  const as = (token: string, method = 'GET', url = '/api/tickets/7') => auth.session(fake<IncomingMessage>({ method, url, headers: { authorization: `Bearer ${token}` } }))?.agent;
   const report = (token: string) => as(token, 'POST', '/api/tickets/7/deploy');
 
   // The old kind of token works until the minion's first turn token, then never again.
@@ -69,23 +71,23 @@ test('an agent token lives for its turn: the next turn or closing the minion kil
 
 test("a session over 7 days old is renewed on use; a newer one, a disabled person's, an agent's or a preview's is not", (t) => {
   const DAY = 86400_000;
-  const people = new Map<number, any>([
-    [1, { id: 1, name: 'Cara', disabled_at: null }],
-    [2, { id: 2, name: 'Olive', disabled_at: Date.now() }],
+  const people = new Map<number, User>([
+    [1, fake<User>({ id: 1, name: 'Cara', disabled_at: null })],
+    [2, fake<User>({ id: 2, name: 'Olive', disabled_at: Date.now() })],
   ]);
-  const users = { getUser: (id: number) => people.get(id), findUser: () => undefined, isAdmin: (u: any) => !!u?.admin && !u.disabled_at } as any;
+  const users = fake<Store>({ getUser: (id: number) => people.get(id), findUser: () => undefined, isAdmin: (u) => !!u?.admin && !u.disabled_at });
   const auth = new Auth('a-password-long-enough', 'x'.repeat(32), undefined, users);
   const now = Date.now();
   /** A request carrying a cookie issued `days` ago. */
   const aged = (a: Auth, id: number, days: number) => {
     const clock = t.mock.method(Date, 'now', () => now - days * DAY);
-    const cookie = a.issueCookie({ id, name: people.get(id).name }, false).split(';')[0];
+    const cookie = a.issueCookie({ id, name: people.get(id)!.name }, false).split(';')[0];
     clock.mock.restore();
-    return { headers: { cookie } } as any;
+    return fake<IncomingMessage>({ headers: { cookie } });
   };
   const renewed = auth.renewal(auth.session(aged(auth, 1, 8)), true);
   assert.match(renewed ?? '', /^cc_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=15552000; Secure$/);
-  const fresh = auth.session({ headers: { cookie: renewed!.split(';')[0] } } as any)!;
+  const fresh = auth.session(fake<IncomingMessage>({ headers: { cookie: renewed!.split(';')[0] } }))!;
   assert.equal(fresh.uid, 1);
   assert.ok(fresh.exp > now + 179 * DAY, 'the new cookie runs a full 180 days from now');
   assert.equal(auth.renewal(fresh, true), null, 'and is not renewed again on the next request');
@@ -95,7 +97,7 @@ test("a session over 7 days old is renewed on use; a newer one, a disabled perso
   assert.equal(auth.session(aged(auth, 1, 181)), null, 'and one unused for 181 days does not');
   // A cookie issued under the old 30-day rule, 2 days ago: renewed on its next request.
   const payload = Buffer.from(JSON.stringify({ name: 'Cara', uid: 1, exp: now + 28 * DAY })).toString('base64url');
-  const legacy = { headers: { cookie: `cc_session=${payload}.${createHmac('sha256', 'x'.repeat(32)).update(payload).digest('base64url')}` } } as any;
+  const legacy = fake<IncomingMessage>({ headers: { cookie: `cc_session=${payload}.${createHmac('sha256', 'x'.repeat(32)).update(payload).digest('base64url')}` } });
   assert.equal(auth.session(legacy)?.uid, 1);
   assert.match(auth.renewal(auth.session(legacy), false) ?? '', /Max-Age=15552000$/, 'a 30-day cookie moves to 180 days on its next request');
   assert.equal(auth.session(aged(auth, 2, 8)), null, 'a disabled person is signed out');
@@ -112,7 +114,7 @@ test("a removed person's id is never handed to the next person, so their old coo
     const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
     const bob = store.createUser({ name: 'Bob', login: 'bob' });
     const auth = new Auth('a-password-long-enough', 'x'.repeat(32), undefined, store);
-    const request = { headers: { cookie: auth.issueCookie(bob, false).split(';')[0] } } as any;
+    const request = fake<IncomingMessage>({ headers: { cookie: auth.issueCookie(bob, false).split(';')[0] } });
     assert.equal(auth.session(request)?.name, 'Bob');
     store.deleteUser(bob.id, cara.id);
     assert.equal(auth.session(request), null);
@@ -147,13 +149,13 @@ test("a contraption host's sign-in token works once, for its app only, for a min
 });
 
 test("a contraption host's cookie signs its person in on that app only, and is never a Citadel session (#709)", () => {
-  const people = new Map<number, any>([[7, { id: 7, name: 'Josh' }]]);
-  const users = { getUser: (id: number) => people.get(id), findUser: () => undefined, isAdmin: () => false } as any;
+  const people = new Map<number, { id: number; name: string; disabled_at?: unknown }>([[7, { id: 7, name: 'Josh' }]]);
+  const users = fake<Store>({ getUser: (id: number) => people.get(id) as User | undefined, findUser: () => undefined, isAdmin: () => false });
   const auth = new Auth('a-password-long-enough', 'x'.repeat(32), undefined, users);
   const secure = auth.issueAppCookie('mandate', { id: 7 }, true);
   assert.match(secure, /^cc_app=[^;]+; Path=\/; HttpOnly; Max-Age=15552000; SameSite=None; Secure; Partitioned$/);
   assert.match(auth.issueAppCookie('mandate', { id: 7 }, false), /; SameSite=Lax$/);
-  const req = (cookie: string) => ({ headers: { cookie } }) as any;
+  const req = (cookie: string) => fake<IncomingMessage>({ headers: { cookie } });
   const jar = secure.split(';')[0];
   assert.equal(auth.appSession(req(jar), 'mandate')?.name, 'Josh');
   assert.equal(auth.appSession(req(jar), 'peek'), null, 'another app');
@@ -186,7 +188,7 @@ test(
   withStore((store, auth) => {
     const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
     const bob = store.createUser({ name: 'Bob', login: 'bob' });
-    const request = { headers: { cookie: auth.issueCookie(bob, false).split(';')[0] } } as any;
+    const request = fake<IncomingMessage>({ headers: { cookie: auth.issueCookie(bob, false).split(';')[0] } });
     assert.equal(auth.session(request)?.uid, bob.id);
     store.deleteUser(bob.id, cara.id);
     store.createUser({ name: 'Bob', login: 'bob2' });
@@ -253,7 +255,7 @@ test(
 
 test('a contraption cookie over 7 days old is renewed on use, so friends stay signed in to apps', () => {
   const DAY = 86400_000;
-  const users = { getUser: (id: number) => ({ id, name: 'Josh' }), findUser: () => undefined, isAdmin: () => false } as any;
+  const users = fake<Store>({ getUser: (id: number) => fake<User>({ id, name: 'Josh' }), findUser: () => undefined, isAdmin: () => false });
   const auth = new Auth('a-password-long-enough', 'x'.repeat(32), undefined, users);
   const now = Date.now();
   const old = { name: 'Josh', uid: 7, exp: now + (180 - 8) * DAY };

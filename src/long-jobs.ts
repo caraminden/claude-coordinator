@@ -3,7 +3,8 @@
 // <CITADEL_HEAVY_DIR>/long/<id>.json, then the minion ends its turn. This pump, once a minute, starts each queued job on
 // its scheme's CI at night: from 2am Pacific until the job hours of the PC running that repo's runners end (the GPU jobs'
 // hours, src/machine-jobs.ts; Cara, 2026-11-20, picked "Nights only", "Start them at 2am"), one long job per repo at a time,
-// so ships never test beside one in the day. A workflow with a `long` input runs it on a runner of its own (#1592: on
+// so ships never test beside one in the day. A quiet job (#1902) is an ordinary heavy job ships held: it starts as soon as
+// src/ci-hold.ts lets it, day or night. A workflow with a `long` input runs it on a runner of its own (#1592: on
 // 2026-11-22 one held the side runner for 5 hours while five flake proofs queued behind it). It reads
 // the run from GitHub on every pass, so a restart loses nothing; when the run ends it writes the command's output to
 // <id>.log beside the job and wakes the minion that queued it, as a GPU job's end does. Every scheme with a
@@ -23,6 +24,12 @@ export interface LongJob {
   who: string;
   queued_at: number;
   state: LongState;
+  /** #1902: an ordinary heavy job a ship held off CI. It starts once the line is empty, by day too, under its usual limit. */
+  quiet?: boolean;
+  /** When ships first held it (src/ci-hold.ts). */
+  held_at?: number;
+  /** A quiet job held a day was told to its Taskmaster. */
+  reported?: boolean;
   dispatched_at?: number;
   started_at?: number;
   ended_at?: number;
@@ -51,6 +58,11 @@ export interface LongDeps {
   wake(ticket: number, text: string, light: boolean): void;
   /** A line in the minion's chat that wakes nobody. */
   note(ticket: number, text: string): void;
+  /** Why optional work may not start on this repo's CI now (src/ci-hold.ts), or null. */
+  hold?(slug: string, since?: number): string | null;
+  /** A run the hold stopped and will start again. */
+  heldRun?(run: number): boolean;
+  report?(slug: string, text: string): void;
   now?: () => number;
 }
 
@@ -65,6 +77,7 @@ const MAX_MISSES = 60;
 const MAX_TRIES = 3;
 /** A dispatched job GitHub shows no run for after this long goes back in line. */
 const NO_RUN_MS = 5 * 60_000;
+const DAY_MS = 24 * 3600_000;
 /** Ended jobs and their logs are kept this long. */
 export const KEEP_MS = 7 * 24 * 3600_000;
 const ID = /^[a-z0-9]+-\d+-[a-z0-9]+$/;
@@ -138,7 +151,9 @@ export class LongJobs {
     this.busy = true;
     try {
       const jobs = this.list();
-      const held = new Set(jobs.filter((j) => ACTIVE.includes(j.state)).map((j) => j.slug.toLowerCase()));
+      // One long job per repo at a time, and one quiet one beside it: they run on different runners.
+      const lane = (j: LongJob) => `${j.quiet ? 'quiet ' : ''}${j.slug.toLowerCase()}`;
+      const held = new Set(jobs.filter((j) => ACTIVE.includes(j.state)).map(lane));
       for (const j of jobs) {
         const s = this.d.scheme(j.ticket);
         if (ENDED.includes(j.state)) {
@@ -154,8 +169,8 @@ export class LongJobs {
           continue;
         }
         try {
-          if (j.state === 'queued' && !held.has(j.slug.toLowerCase())) {
-            if (await this.start(j, s.projectId)) held.add(j.slug.toLowerCase());
+          if (j.state === 'queued' && !held.has(lane(j))) {
+            if (await this.start(j, s.projectId)) held.add(lane(j));
           } else if (ACTIVE.includes(j.state)) await this.watch(j, s.projectId);
           if (j.misses && !ENDED.includes(j.state)) {
             j.misses = 0;
@@ -182,25 +197,53 @@ export class LongJobs {
     }
   }
 
-  /** Dispatch a queued job from 2am until its PC's job hours end; false when it waits. */
-  private async start(j: LongJob, projectId: number): Promise<boolean> {
+  /** Whether a long job may run now: from 2am until its PC's job hours end. A paused machine (its GPU jobs' pause) holds it too. */
+  private open(j: LongJob): boolean {
     const hours = this.d.hours(j.slug),
       now = this.now();
-    // A paused machine (its GPU jobs' pause) holds long jobs too.
-    if (hours.paused || !hoursOpen(hours, now) || !hoursOpen({ ...hours, start: LONG_START, until: null }, now)) return false;
+    return !hours.paused && hoursOpen(hours, now) && hoursOpen({ ...hours, start: LONG_START, until: null }, now);
+  }
+
+  /** Whether a stopped heavy run may start again now (src/ci-hold.ts): a long job only in its hours, any other whenever. */
+  mayResume(id: string): boolean {
+    const j = this.list().find((x) => x.id === id);
+    return !j || !!j.quiet || this.open(j);
+  }
+
+  /** Since when ships have held a job, before it had a run or after. */
+  heldSince(id: string): number | undefined {
+    return this.list().find((x) => x.id === id)?.held_at;
+  }
+
+  /** Dispatch a queued job: a long one in its hours, either kind only while no ship holds the desktop; false when it waits. */
+  private async start(j: LongJob, projectId: number): Promise<boolean> {
+    if (!j.quiet && !this.open(j)) return false;
+    const why = this.d.hold?.(j.slug, j.held_at);
+    if (why) {
+      if (!j.held_at) {
+        j.held_at = j.quiet ? j.queued_at : this.now();
+        this.save(j);
+      }
+      if (!j.reported && this.now() - j.held_at >= DAY_MS) {
+        j.reported = true;
+        this.save(j);
+        this.d.report?.(j.slug, `A heavy job has been held off the CI desktop for over 24 hours (${j.what}, ${j.who}): ${why}. Ships go first, so it starts once the line is empty; it is never forced. The CI page lists what is held.`);
+      }
+      return false;
+    }
     const branch = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}`])).default_branch;
     // GitHub checks inputs against the workflow on the branch it runs, so `minutes` goes only when that copy declares it.
     const wf = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}/contents/.github/workflows/${WORKFLOW}?ref=${encodeURIComponent(branch)}`]));
     const text = Buffer.from(wf.content ?? '', 'base64').toString('utf8');
-    const minutes = /^\s+minutes:\s*$/m.test(text) ? ['-f', `inputs[minutes]=${LONG_MINUTES}`] : [];
+    const minutes = !j.quiet && /^\s+minutes:\s*$/m.test(text) ? ['-f', `inputs[minutes]=${LONG_MINUTES}`] : [];
     // A `long` input sends it to the runner with the long label, so flake proofs and heavy runs never queue behind it on the side runner (#1592; that runner takes side work too between long jobs, #1646).
-    if (/^\s+long:\s*$/m.test(text)) minutes.push('-f', 'inputs[long]=true');
+    if (!j.quiet && /^\s+long:\s*$/m.test(text)) minutes.push('-f', 'inputs[long]=true');
     // Saved first and never put back on an error: a dispatch GitHub took but didn't answer is found by watch(), and one it
     // never took goes back in line there once it shows no run, so the command can't run twice.
     Object.assign(j, { state: 'dispatched', dispatched_at: this.now(), tries: (j.tries ?? 0) + 1 });
     this.save(j);
     await this.d.gh(projectId, ['-X', 'POST', `repos/${j.slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`, '-f', `inputs[sha]=${j.sha}`, '-f', `inputs[command]=${j.command}`, '-f', `inputs[id]=${j.id}`, ...minutes]);
-    this.d.note(j.ticket, `Long job ${j.id} (${j.what}) went to ${j.slug}'s CI for the night.`);
+    this.d.note(j.ticket, j.quiet ? `Heavy job ${j.id} (${j.what}) went to ${j.slug}'s CI: no ship is in line now.` : `Long job ${j.id} (${j.what}) went to ${j.slug}'s CI for the night.`);
     return true;
   }
 
@@ -221,6 +264,14 @@ export class LongJobs {
       }
       Object.assign(j, { run_id: run.id, url: run.html_url });
       this.save(j);
+    }
+    // Stopped for a ship: the same run starts again, so its cancelled end isn't the job's.
+    if (this.d.heldRun?.(j.run_id!)) {
+      if (j.state === 'running') {
+        Object.assign(j, { state: 'dispatched', started_at: undefined }); // its deadline (hungProblems) starts again too
+        this.save(j);
+      }
+      return;
     }
     const run = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}/actions/runs/${j.run_id}`]));
     if (run.status !== 'completed') {
@@ -261,10 +312,11 @@ export class LongJobs {
     const ran = j.started_at ? ` after ${dur((j.ended_at ?? this.now()) - j.started_at)}` : '';
     const log = existsSync(this.logPath(j.id)) ? this.logPath(j.id) : null;
     const run = j.url ? ` CI run: ${j.url}` : '';
+    const name = j.quiet ? 'Heavy job' : 'Long job';
     const text =
       state === 'lost'
-        ? `Long job ${j.id} (${j.what}) was lost: ${why}.${log ? ` What it printed: ${log}.` : ''}${run} Nothing more runs; queue it again with citadel-heavy --long if it still needs to run.`
-        : `Long job ${j.id} (${j.what}) ${state === 'done' ? 'passed' : 'failed'} with exit ${code}${ran}. Output: ${log}.${run}`;
+        ? `${name} ${j.id} (${j.what}) was lost: ${why}.${log ? ` What it printed: ${log}.` : ''}${run} Nothing more runs; ${j.quiet ? 'run it again with citadel-heavy' : 'queue it again with citadel-heavy --long'} if it still needs to run.`
+        : `${name} ${j.id} (${j.what}) ${state === 'done' ? 'passed' : 'failed'} with exit ${code}${ran}. Output: ${log}.${run}`;
     this.d.wake(j.ticket, text, state === 'done');
     j.woke = true;
     this.save(j);
@@ -290,8 +342,11 @@ export function longView(jobs: LongJob[], now = Date.now()) {
     .filter((j) => !j.ended_at || now - j.ended_at < 24 * 3600_000)
     .map((j) => ({
       id: j.id,
+      ticket: j.ticket,
       who: j.who,
       what: j.what,
+      quiet: !!j.quiet,
+      held: !!j.held_at,
       slug: j.slug,
       state: j.state,
       since: j.ended_at ?? j.started_at ?? j.dispatched_at ?? j.queued_at,

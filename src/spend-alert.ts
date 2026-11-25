@@ -72,6 +72,8 @@ export function usageCost(model: unknown, usage: object & { output_tokens?: unkn
 export interface SpendState {
   /** The estimate so far, in dollars. */
   usd: number;
+  /** The part of it no result has said yet, by model: what is lost if the turn is killed now (#1938). */
+  open?: Record<string, number>;
   /** How many stages have fired. */
   fired: number;
   /** Someone picked Keep going: no more alerts this turn. */
@@ -104,6 +106,7 @@ interface Message {
  */
 export class SpendMeter {
   usd: number;
+  open: Record<string, number> = {};
   fired: number;
   muted?: string;
   alert?: { stage: number; event: number; at: number };
@@ -111,6 +114,7 @@ export class SpendMeter {
 
   constructor(state: SpendState = { usd: 0, fired: 0 }) {
     this.usd = num(state.usd);
+    this.open = { ...state.open };
     this.fired = Math.max(0, Math.floor(num(state.fired)));
     if (state.muted) this.muted = state.muted;
     const a = state.alert;
@@ -118,7 +122,7 @@ export class SpendMeter {
   }
 
   get state(): SpendState {
-    return { usd: this.usd, fired: this.fired, ...(this.muted ? { muted: this.muted } : {}), ...(this.alert ? { alert: this.alert } : {}) };
+    return { usd: this.usd, open: { ...this.open }, fired: this.fired, ...(this.muted ? { muted: this.muted } : {}), ...(this.alert ? { alert: this.alert } : {}) };
   }
 
   /** Count a stream event (a no-op for anything but an assistant message with usage); true if the estimate moved. */
@@ -142,8 +146,14 @@ export class SpendMeter {
     const cost = msg.input + output * msg.outPrice;
     if (cost === msg.cost) return false;
     this.usd += cost - msg.cost;
+    this.open[String(model)] = num(this.open[String(model)]) + cost - msg.cost;
     msg.cost = cost;
     return true;
+  }
+
+  /** A result has said what it all cost so far. */
+  settle() {
+    this.open = {};
   }
 
   /**

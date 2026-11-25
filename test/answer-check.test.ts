@@ -14,7 +14,7 @@ const call = (name: string, i: number) => [
 ];
 const say = (text: string) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
 const calls = (names: string[]) => names.flatMap((n, i) => call(n, i));
-const jsonl = (...entries: any[]) =>
+const jsonl = (...entries: unknown[]) =>
   entries
     .flat()
     .map((e) => JSON.stringify(e))
@@ -326,7 +326,7 @@ test('ship check: a hand-off with no self-review in the session is a hit; a revi
   const ship = (n: number) => tool('mcp__thread__hand_off_land', { summary: 'x' }, n);
   const skill = (n: number) => tool('Skill', { skill: 'citadel:self-review' }, n);
   const grunt = (n: number) => tool('Agent', { subagent_type: 'citadel:reviewer', prompt: 'review' }, n);
-  const check = (...entries: any[]) => {
+  const check = (...entries: unknown[]) => {
     const t = jsonl(...entries);
     return shipReviewCheck(readTurn(t, 'p1'), t);
   };

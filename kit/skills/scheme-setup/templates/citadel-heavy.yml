@@ -6,7 +6,8 @@
 # (refs/citadel-heavy/<id>, which no push trigger sees), starts this workflow on it, waits, prints what the command
 # printed between the two markers below and exits with its status. `citadel-heavy --long <command>` only queues the job:
 # Citadel starts it here at night (from 2am, in the CI PC's job hours) with a longer `minutes`,
-# and wakes the minion with the result (#1363). A repo without this file runs its heavy jobs in
+# and wakes the minion with the result (#1363). On the PC Citadel's own ships test on, a job waits while one is in line
+# (4 hours at most; Citadel #1902): Citadel stops it, starts it again and tells its minion. A repo without this file runs its heavy jobs in
 # perigee's one small, low-priority slot: slow, on purpose (Josh, 2026-11-20: "perigee is fine and nothing breaks,
 # we just ship less").
 #

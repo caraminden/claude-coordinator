@@ -3,7 +3,7 @@
   Adds one scheme's self-hosted GitHub Actions runners to this Windows PC, in the shape of Delve's delve-ci.
 
 .DESCRIPTION
-  Citadel #320, #328. Every scheme's CI runs on Cara's desktop, with runner instances of its own per repo (a
+  Citadel #320, #328. Every scheme's CI runs on its members' own PCs (first Cara's desktop), with runner instances of its own per repo (a
   personal GitHub account's runner serves one repo only). This script:
     1. asks Citadel which repo and label the scheme has (no token yet), and skips each instance whose folder
        or service is already here: safe to run again, and a higher -Count adds only the missing ones;
@@ -39,7 +39,7 @@
 
 .PARAMETER MachineToken
   That machine's token (ccm_...). Defaults to the CC_MACHINE_TOKEN environment variable. The machine must
-  belong to someone in the scheme (Cara's reaches every scheme), or be lent to the scheme.
+  belong to someone in the scheme (a CI host is lent to it too), or be lent to the scheme.
 
 .PARAMETER Count
   How many runner instances the scheme should have here, 1 to 4 (default 1): one job runs on each at a time.

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { briefWarning, namedFiles } from '../src/brief-lint.ts';
 import { agentToken, bootServer } from './helpers.ts';
+import { json } from './typed.ts';
 
 // The check on new briefs (#1108, citadel:briefing): a warning, never a refusal, when an agent's brief
 // has no quoted words from a person or no "Done when".
@@ -61,7 +62,7 @@ test('create_ticket from the Taskmaster gets the warning in its notes; a person 
         method: 'POST',
         headers: { Authorization: `Bearer ${agentToken(s.data, tm.id)}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'claude-sonnet-5-5', effort: 'medium', properties: { type: 'feature' }, ...body }),
-      }).then(async (r) => ({ status: r.status, data: await r.json() }));
+      }).then(async (r) => ({ status: r.status, data: await json<{ notes: string[] }>(r) }));
 
     const bare = await asTaskmaster({ title: 'Retry', message: 'Add a retry button to failed uploads.' });
     assert.equal(bare.status, 201, JSON.stringify(bare.data));

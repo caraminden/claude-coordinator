@@ -91,6 +91,45 @@ test('a file that leaves a process, a port, a unit and a temp folder goes red na
   }
 });
 
+// A turn-cost supervisor that systemd started between the guard's one scan and its kill outlived the file by hours (#1900).
+test('what a leftover starts while the guard is cleaning up goes too', { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lateleak-'));
+  const out = join(dir, 'out.json');
+  let left: { dir: string; watcher: number } | undefined;
+  try {
+    writeFileSync(
+      join(dir, 'late.test.mjs'),
+      `import { test } from 'node:test';
+import { spawn } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { setTimeout as nap } from 'node:timers/promises';
+test('leaves a process whose death starts another', async () => {
+  const at = (f) => join(process.env.LATE_DIR, f);
+  const pid = async (f) => { while (!existsSync(at(f)) || !readFileSync(at(f), 'utf8').trim()) await nap(20); // timing-ok: polls for a file the process writes once
+    return Number(readFileSync(at(f), 'utf8')); };
+  // In nobody's tree, so it is reaped at once when killed.
+  spawn('sh', ['-c', '(setsid sh -c \\'echo $$ >"$1"; sleep 300; :\\' first "$1" "$2" </dev/null >/dev/null 2>&1 &)', 'sh', at('first'), tmpdir()], { stdio: 'ignore' });
+  const first = await pid('first');
+  // As systemd is to the guard: carries no mark of the file, and starts something that does once the first is killed.
+  spawn('env', ['-i', 'PATH=' + process.env.PATH, 'sh', '-c', '(setsid sh -c \\'echo $$ >"$1"; while kill -0 $2 2>/dev/null; do sleep 0.02; done; exec sh -c "sleep 300; :" late "\${3#x}"\\' watcher "$1" "$2" "$3" </dev/null >/dev/null 2>&1 &)', 'sh', at('watcher'), String(first), 'x' + tmpdir()], { stdio: 'ignore' });
+  writeFileSync(process.env.LEAKFIX_OUT, JSON.stringify({ dir: tmpdir(), watcher: await pid('watcher') }));
+});
+`,
+    );
+    const env: NodeJS.ProcessEnv = { ...process.env, LEAKFIX_OUT: out, LATE_DIR: dir };
+    delete env.NODE_TEST_CONTEXT;
+    const r = spawnSync(process.execPath, ['--test', `--test-global-setup=${GUARD}`, 'late.test.mjs'], { cwd: dir, env, encoding: 'utf8' });
+    left = JSON.parse(readFileSync(out, 'utf8')) as { dir: string; watcher: number };
+    assert.match(r.stdout + r.stderr, /process\(es\) still running/, 'the guard found the first one');
+    await until('the watcher to have started the second, and it to be gone', () => !alive(left!.watcher)); // it execs into the second
+  } finally {
+    if (left && alive(left.watcher)) process.kill(left.watcher, 'SIGKILL');
+    rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
+});
+
 const none: Leftovers = { procs: [], units: [], ports: [], tmp: [] };
 
 test('a baseline lets a file leave as many as it allows, fails one more, and asks to be lowered when it leaves fewer', () => {

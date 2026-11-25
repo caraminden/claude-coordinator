@@ -17,12 +17,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { copyDb } from './db-copy.ts';
 import { Auth, type Session } from './auth.ts';
-import type { Project, Store, Ticket } from './db.ts';
+import type { Project, Store, TicketFields } from './db.ts';
 import { HttpError } from './http.ts';
 import { freePort } from './ports.ts';
 import { forward } from './proxy.ts';
 import { projectDir } from './workspace.ts';
 import { every } from './every.ts';
+import { thrown } from './thrown.ts';
 
 /** The setting that says a minion offers a preview (its view shows the Open preview button). */
 export const previewKey = (ticketId: number) => `preview:${ticketId}`;
@@ -73,7 +74,7 @@ const buildKey = (n: number) => `build-${n}`;
  * request: fetch with AbortSignal.timeout sometimes never ended against a server that accepts and never
  * answers (seen on the CI runner, #1197), which held the boot loop past its deadline.
  */
-function health(port: number, ms = 3000): Promise<any> {
+function health(port: number, ms = 3000): Promise<{ preview?: unknown } | null> {
   return new Promise((resolve) => {
     const req = get({ host: '127.0.0.1', port, path: '/api/health' }, (res) => {
       let body = '';
@@ -196,7 +197,7 @@ export class Previews {
   }
 
   /** (Re)start a ticket's preview from its worktree as it is now, and offer it. */
-  async start(ticket: Ticket): Promise<void> {
+  async start(ticket: TicketFields): Promise<void> {
     if (ticket.kind !== 'ticket' || !ticket.cwd || !ticket.branch) throw new PreviewError(400, 'Only a minion with a worktree can have a preview');
     if (ticket.status === 'closed') throw new PreviewError(409, 'This minion is dismissed');
     if (!existsSync(join(ticket.cwd, 'server.ts'))) throw new PreviewError(400, 'This worktree has no server.ts to preview');
@@ -379,8 +380,8 @@ export class Previews {
             await gitAsync('git', ['worktree', 'prune'], opts);
             await gitAsync('git', ['worktree', 'add', '--quiet', '--detach', cwd, tip], opts);
           }
-        } catch (err: any) {
-          throw new PreviewError(502, `Could not check out build/${n} for its preview: ${String(err.stderr || err.message).trim()}`);
+        } catch (err) {
+          throw new PreviewError(502, `Could not check out build/${n} for its preview: ${String(thrown(err).stderr || thrown(err).message).trim()}`);
         }
         if (!existsSync(join(cwd, 'server.ts'))) throw new PreviewError(400, `build/${n} has no server.ts to preview`);
       });

@@ -356,6 +356,8 @@ export interface Ticket {
   created_at: number;
   updated_at: number;
 }
+/** What a tickets row and a view of one (Runner.view, whose replies are parsed) share. */
+export type TicketFields = Omit<Ticket, 'replies'>;
 
 /** A row of repo_collaborators: see its CREATE TABLE. */
 export interface RepoCollaborator {
@@ -552,6 +554,8 @@ export interface TurnResult {
   account?: number | null;
   /** The result's `modelUsage`: each model's running session cost, Grunts' models included (#905). */
   modelUsage?: Record<string, ModelUsage>;
+  /** A killed turn's estimated spend by model (#1938), in place of a result's: the session's running totals stay as they were, since claude saved none of it. */
+  estimate?: Record<string, number>;
 }
 
 /** A person's own named property filter in a scheme (#194): key → the values ticked for it. */
@@ -608,6 +612,10 @@ export interface ContraptionRow {
   keys_at: number;
   created_at: number;
 }
+
+/** What a new contraption's row needs: the columns with a default, or that may be null, can be left out (#1817). */
+export type NewContraption = Omit<ContraptionRow, 'id' | 'created_at' | Defaulted> & Partial<Pick<ContraptionRow, Defaulted>>;
+type Defaulted = 'icon' | 'home_scheme' | 'open_paths' | 'static_paths' | 'relay_paths' | 'repo' | 'branch' | 'folder' | 'subdir' | 'restart_risk' | 'restart_note' | 'default_model' | 'turn_cap';
 
 /** A contraption's named session for one person, and the Claude session it resumes. */
 export interface ContraptionSession {

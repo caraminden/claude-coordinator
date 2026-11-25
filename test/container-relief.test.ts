@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { until } from './wait.ts';
-import { ContainerRelief, RELIEF, startContainerRelief, victimText, type Victim } from '../src/container-relief.ts';
+import { ContainerRelief, RELIEF, startContainerRelief, TASKMASTER_SLICE, victimText, type Victim } from '../src/container-relief.ts';
+import { TASKMASTER_SLICE as TURNS_OWN } from '../src/turn-launch.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'container-relief-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -107,8 +108,19 @@ test('a squeeze below the line, short of a minute, or with no high events kills 
   assert.deepEqual(r.killed, []);
 });
 
+test("a person's Taskmaster container, in the Taskmasters' slice, is relieved the same way (#1882)", async () => {
+  assert.equal(TASKMASTER_SLICE, TURNS_OWN);
+  const f = fake(`${TASKMASTER_SLICE}/citadel-claude-2-tm.service`);
+  f.add(11, { anon: 400 });
+  f.add(12, { name: 'cargo', anon: 3000 });
+  f.procs([11, 12]);
+  const r = relief(f);
+  await r.run(70, 80);
+  assert.deepEqual(r.killed, [12]);
+});
+
 test('only the containers of this server: another prefix, a slice or a turn scope is never touched', async () => {
-  for (const unit of ['citadel-claude-ab12cd-2.service', 'citadel-turns.slice', 'claude-coordinator.service']) {
+  for (const unit of ['citadel-claude-ab12cd-2.service', 'citadel-turns.slice', 'claude-coordinator.service', `${TASKMASTER_SLICE}/citadel-turn-a-1.service`, `${TASKMASTER_SLICE}/citadel-claude-ab12cd-2-tm.service`]) {
     const f = fake(unit);
     f.add(12, { anon: 3000 });
     f.procs([12]);

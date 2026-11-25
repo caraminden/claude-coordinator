@@ -38,6 +38,18 @@ function repo() {
   return { dir, base, run, done: () => rmSync(dir, { recursive: true, force: true }) }; // timing-ok: own temp dir
 }
 
+// #1928: citadel-test's own default pick narrowed, so the light check asks for the wide one by name, and still works with a citadel-test from before --wide.
+test('light-check-run asks a citadel-test that has --wide for the wide pick, and an older one for --affected', () => {
+  const r = repo();
+  try {
+    writeFileSync(join(r.dir, 'new-ct'), '#!/usr/bin/env bash\n# knows --wide\necho "args $*"\n', { mode: 0o755 });
+    assert.match(r.run(0, '', { LIGHT_CHECK_TEST: join(r.dir, 'new-ct') }).out, new RegExp(`^args --wide --base ${r.base} --timeout 240$`, 'm'));
+    assert.match(r.run(0, '').out, new RegExp(`^args --affected --base ${r.base}`, 'm'), 'a citadel-test without --wide');
+  } finally {
+    r.done();
+  }
+});
+
 test("light-check-run: green, red that is the ship's own, flakes, main's own red, a run cut off (#1620)", () => {
   const r = repo();
   try {

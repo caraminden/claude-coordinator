@@ -4,12 +4,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { BUILDS_LINE, buildLines, systemPrompt } from '../src/prompts.ts';
+import type { Project, Ticket, TicketKind } from '../src/db.ts';
+import { BUILDS_LINE, buildLines, systemPrompt, type BuildRole } from '../src/prompts.ts';
 import { landsBuilds } from '../src/workspace.ts';
+import { fake } from './typed.ts';
 
-const project = { id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' } as any;
-const minion = { id: 9, number: 12, title: 'A feeder', kind: 'ticket', branch: 'ticket/12-a-feeder', build: 7 } as any;
-const prompt = (build: any, builds = false, kind = 'ticket') => systemPrompt(project, { ...minion, kind }, null, null, '/tickets', null, [], true, '', null, [], build, builds);
+const project = fake<Project>({ id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' });
+const minion = fake<Ticket>({ id: 9, number: 12, title: 'A feeder', kind: 'ticket', branch: 'ticket/12-a-feeder', build: 7 });
+const prompt = (build: BuildRole | null, builds = false, kind: TicketKind = 'ticket') => systemPrompt(project, { ...minion, kind }, null, null, '/tickets', null, [], true, '', null, [], build, builds);
 
 test('build lines are given only to a minion in a build with its branch made, and the Taskmaster gets the build line only when the scheme can land one', () => {
   assert.deepEqual(buildLines(null), []);

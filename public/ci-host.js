@@ -56,7 +56,7 @@ export function hostLoadBlock(l) {
       : emptyCard('No heavy jobs this week', 'Builds and test runs that take a slot show here with how long they waited.', { mark: '·', hue: 'muted' }),
   );
 
-  return h('section', { class: 'ci-block ci-host' }, h('h3', { class: 'settings-section', 'data-hue': 'running' }, 'Host load'), h('div', { class: 'settings-rows' }, slots, line, longRow(l), week, minionsRow(l)));
+  return h('section', { class: 'ci-block ci-host' }, h('h3', { class: 'settings-section', 'data-hue': 'running' }, 'Host load'), h('div', { class: 'settings-rows' }, slots, line, holdRow(l), longRow(l), week, minionsRow(l)));
 }
 
 const minionLink = (m) => h('a', { href: threadNumberHref(m.schemeId ?? m.scheme, m.number) }, `#${m.number}`);
@@ -106,11 +106,44 @@ function minionsRow(l) {
   return row;
 }
 
+// Deploys first (#1902): optional runs kept off the CI desktop while a ship goes first (src/ci-hold.ts).
+function holdRow(l) {
+  if (!l.hold) return '';
+  const { off, why } = l.hold;
+  const handed = (l.long ?? []).filter(handedOver).map((j) => ({ ...j, why: why ?? (j.quiet ? 'starts within a minute' : 'starts at 2am') }));
+  const runs = [...l.hold.held, ...handed].sort((a, b) => a.since - b.since);
+  const waits = runs.filter((r) => r.phase !== 'resumed').length;
+  const chip = off ? toneChip('warn', 'Off') : waits ? toneChip('warn', `${waits} held`) : runs.length ? toneChip('info', 'Starting again') : why ? toneChip('info', 'Ships first') : toneChip('ok', 'Nothing held');
+  const note = off ? 'nothing is held for ships' : runs.length ? `longest ${held(runs[0], l.now)}` : (why ?? 'optional jobs start at once');
+  const [row] = settingsRow(
+    { key: 'host-hold', icon: 'lock', hue: runs.length || off ? 'waiting' : 'done', title: 'Held for ships', summary: [chip, note] },
+    runs.length
+      ? h(
+          'div',
+          { class: 'hue-rows' },
+          ...runs.map((r) =>
+            hueRow(
+              { hue: r.phase === 'resumed' ? 'running' : 'waiting', meta: held(r, l.now) },
+              r.scheme ? schemeTag(r.scheme, r.number ? r.scheme : r.who) : '',
+              r.number ? [' ', minionLink(r)] : '',
+              ` ${r.what} · `,
+              h('span', { class: 'muted' }, r.phase === 'resumed' ? 'starting again' : r.why),
+              r.url ? [' · ', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'CI run')] : h('span', { class: 'muted' }, ' · no CI run yet'),
+            ),
+          ),
+        )
+      : emptyCard('Nothing is held', 'Flake proofs, heavy jobs and test runs started by hand stop here while a ship is in line, and start again by themselves.'),
+    h('p', { class: 'look-prose' }, "A ship's own tests are never stopped. A job starts from its beginning when it comes back, and one held for a day is reported to its Taskmaster."),
+  );
+  return row;
+}
+
 // Long jobs (#1363): `citadel-heavy --long` queues them for the scheme's CI at night, from 2am (src/long-jobs.ts).
+const handedOver = (j) => (j.quiet || j.held) && j.state === 'queued'; // in "Held for ships"
 const LONG = { queued: 'waits for 2am', dispatched: 'sent to CI, waiting for a runner', running: 'running on CI', done: 'passed' };
 const LONG_HUE = { queued: 'waiting', dispatched: 'running', running: 'running', done: 'done', failed: 'danger', lost: 'danger' };
 function longRow(l) {
-  const jobs = l.long ?? [];
+  const jobs = (l.long ?? []).filter((j) => !handedOver(j));
   const running = jobs.filter((j) => j.state === 'running' || j.state === 'dispatched').length,
     queued = jobs.filter((j) => j.state === 'queued').length;
   const summary = running || queued ? [running && toneChip('info', `${running} running`), queued && toneChip('warn', `${queued} queued`)].filter(Boolean) : [toneChip('ok', 'None queued'), jobs.length ? `${jobs.length} ended today` : 'run at night, from 2am'];

@@ -16,7 +16,7 @@ import { homeScheme, openStartScheme, renderSidebar, scheduleSidebar } from './s
 import { openBroken } from './home.js';
 import { forgetSchemes, showProject, showReleases, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, showArtifact, showFile, showSharedFile } from './artifacts.js';
-import { bridgeTypedAt, bridgeUnsaved, onArtifactData, tabBridgeOpen } from './bridge-host.js';
+import { bridgeTypedAt, bridgeUnsaved, onArtifactData, refreshFrames, tabBridgeOpen } from './bridge-host.js';
 import { appendEvent, jumpToEvent, renderCardJump } from './thread.js';
 import { renderBranch, renderTicketHead } from './thread-head.js';
 import { replaceHash } from './navstack.js';
@@ -810,7 +810,7 @@ document.addEventListener('visibilitychange', () => {
   else if (missedNews(hiddenAt, heardAt, Date.now(), frozen)) {
     deploysMissed();
     if (view?.kind === 'project') resync();
-    else countsIfOwed();
+    else refreshFrames(), countsIfOwed();
   } else {
     if (view?.kind === 'project' && view.id) markSeen(view.id); // what it changed to while hidden is on screen now
     countsIfOwed();

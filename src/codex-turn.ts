@@ -19,7 +19,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { callLine, CODEX_NOTE, isTurnNote, codexModelFor, saveGenerated, toCodexPreamble } from './codex.ts';
-import { codexLock, LOCK_ENV, startTime } from './codex-lock.ts';
+import { codexLock, LOCK_ENV, lockHolder } from './codex-lock.ts';
 import { jsonLines } from './json-lines.ts';
 import type { ClaudeEvent, ClaudeMessage } from './claude-events.ts';
 
@@ -314,7 +314,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
     ...JSON.parse(env.CITADEL_CODEX_EXTRA_ARGS || '[]'),
   ];
   // Its shell's citadel-codex-review runs inside this turn: under this lock, when the turn keeps it (#468 S04-6).
-  const lockEnv = { [LOCK_ENV]: `${process.pid} ${startTime(process.pid) ?? ''}`.trim() };
+  const lockEnv = { [LOCK_ENV]: await lockHolder() };
   const child = spawn(env.CITADEL_CODEX_BIN || 'codex', codexArgs, { cwd, env: { ...env, ...mcp.env, ...lockEnv }, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stderr!.on('data', (b) => process.stderr.write(b));
   let nextId = 1;

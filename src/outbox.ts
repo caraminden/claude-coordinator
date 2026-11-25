@@ -183,6 +183,17 @@ export class Outbox {
     if (rows.some((r) => r.state === 'held')) void this.poke({ type: 'reopened', ticket: ticketId });
   }
 
+  /** A person's stop dropped these queued messages: the rows that handed them are over (dropped), not sent again as a failed send; returns those messages' ids. */
+  stoppedMessages(ticketId: number, eventIds: number[]): number[] {
+    const ids = new Set(eventIds);
+    const now = this.now();
+    const settled: number[] = [];
+    for (const r of this.store.listDeliveries({ to: ticketId, states: ['sending'] })) {
+      if (r.event_id != null && ids.has(r.event_id) && this.store.updateDelivery(r.id, { state: 'dropped', reason: 'stopped' }, ['sending'], now)) settled.push(r.event_id);
+    }
+    return settled;
+  }
+
   stop() {
     this.stopped = true;
     clearTimeout(this.timer);

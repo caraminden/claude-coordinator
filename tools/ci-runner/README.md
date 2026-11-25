@@ -1,37 +1,65 @@
 # Shared CI runners
 
-Every scheme's GitHub Actions jobs run on self-hosted runners on Cara's Windows desktop
-(DESKTOP-G248IJ8), not on GitHub's hosted runners: GitHub refuses hosted jobs on the caraminden
-account, and we don't have the minutes anyway (Josh, 2026-11-05: "We need to make the default for
-all schemes to use caras desktop for CI"). It copies Delve's `delve-ci` runner: a personal account's
-runner serves one repo only, so each scheme's repo gets its own runner instance on that PC.
+Every scheme's GitHub Actions jobs run on self-hosted runners on a member's own PC, not on GitHub's
+hosted runners: GitHub refuses hosted jobs on the caraminden account, and we don't have the minutes
+anyway (Josh, 2026-11-05: "We need to make the default for all schemes to use caras desktop for CI").
+A personal account's runner serves one repo only, so each scheme's repo gets its own runner instance
+on each PC that runs its CI (Delve's `delve-ci` shape).
+
+This page is for **the PC's owner**: the person who adds a PC as a CI runner host. Any member can (#1933). The
+worked example throughout is Cara's Windows desktop (DESKTOP-G248IJ8), the first one; its names, sizes and dated
+notes are that PC's, not settings yours must copy.
+
+## Add your PC
+
+1. On Citadel's Machines page, press **Add a CI runner host** and name it. The machine is yours; nobody else's
+   schemes can use it until you say so.
+2. Run the install line it shows on the PC itself:
+
+   | Your PC | Tab | Section below |
+   |---|---|---|
+   | Windows, for Windows jobs | **Windows** | [Install the runner agent](#install-the-runner-agent-the-pcs-owner-once) |
+   | Windows, for Linux jobs | **Linux in WSL** | [Linux runners in WSL](#linux-runners-in-wsl-510) |
+   | Linux | **Linux** | [Linux runners on plain Linux](#linux-runners-on-plain-linux-1933) |
+
+   A Windows PC that runs both kinds of job is two hosts, one per agent.
+3. Open the host's line and pick schemes under **Runs CI for**. A scheme's runners can go on it only when you own
+   it, you are in that scheme and you lent it. Un-lending stops new runners; ask `ci_runners remove` from the scheme
+   first to take its old ones off.
+   An admin's new host is shared, with no owner: any admin lends it, and it runs CI for no scheme until one does.
+4. Someone in the scheme asks for runners (`ci_runners`, below). Set the [caps](#your-own-caps) first if 75% of the
+   PC is too much.
+
+CI jobs run code from the repos you lend to, as accounts of their own without administrator rights. Don't lend a PC
+to a scheme whose members you wouldn't let run programs on it.
 
 | | Each scheme's runner |
 |---|---|
 | Folder | `C:\actions-runner-<repo>`, then `-2` … for more instances (up to 4), each with a `.citadel-runner` marker |
 | Label | `<scheme-slug>-ci`: the scheme's name in lowercase with dashes (`Peek Auras` → `peek-auras-ci`) |
-| Service | `actions.runner.<owner>-<repo>.DESKTOP-G248IJ8` (then `…-2` …), as NETWORK SERVICE, delayed automatic start, restart on failure; one job at a time |
+| Service | `actions.runner.<owner>-<repo>.<PC>` (then `…-2` …), as NETWORK SERVICE, delayed automatic start, restart on failure; one job at a time |
 | `.env` | telemetry off, `C:\Program Files\Git\bin` first on PATH so `bash` steps run, and tool folders of its own: `MISE_DATA_DIR`, `MISE_CACHE_DIR`, `MISE_STATE_DIR`, `RUSTUP_HOME` and `CARGO_HOME` under `<its folder>\tools\` (#370: runners sharing NETWORK SERVICE's one profile broke each other's mise and cargo on Peek Auras). Runners added before #370 don't have these; remove and add them again to get them |
 
-**Hard rules on that PC.** Never restart or reboot it (Windows Update is paused there). Never touch
+**Hard rules on a PC that hosts CI.** Never restart or reboot it for CI (Windows Update is paused on Cara's). Never touch
 another scheme's runner, Delve's (`C:\actions-runner`, `-2`, `-3`, `-4`, `-perf`) above all.
 Registration tokens (and the Linux scripts' removal tokens) last about an hour and are never written down.
 
 ## How runners get there
 
 Citadel installs them itself (#328; Josh, 2026-11-05: "Citadel installs it itself"). The **CI runner
-agent** (`public/runner-agent.mjs`) runs on the desktop as SYSTEM, from a scheduled task, and dials
+agent** (`public/runner-agent.mjs`) runs on the PC as SYSTEM (as root on Linux), from a scheduled task, and dials
 out to Citadel like a machine agent. It does three things, and only when a member of the scheme asks:
 
-| Ask | What runs on the desktop |
+| Ask | What runs on a Windows PC |
 |---|---|
 | `add`, with a count of 1 to 4 | `add-runner.ps1 -Scheme <id> -Count <n>`: installs the missing instances, then Citadel waits until GitHub shows them Idle |
 | `list` | `list-runners.ps1`: every `actions.runner.*` service, its state and folder, and whether Citadel made it |
 | `remove` | `remove-runner.ps1 -Scheme <id>`: only folders whose `.citadel-runner` marker names the scheme's repo. Citadel takes each runner off GitHub; the script then deletes its service and folder |
 
-With `os: linux` (`{"op": "add", "count": 1, "os": "linux"}`) the same three go to the **Linux** runner agent in WSL
-on the same PC instead, which runs `add-runner.sh`, `list-runners.sh` or `remove-runner.sh`: see
-[Linux runners in WSL](#linux-runners-in-wsl-510).
+With `os: linux` (`{"op": "add", "count": 1, "os": "linux"}`) the same three go to a **Linux** runner agent (in WSL, or on a
+Linux PC) instead, which runs `add-runner.sh`, `list-runners.sh` or `remove-runner.sh`: see
+[Linux runners in WSL](#linux-runners-in-wsl-510) and
+[on plain Linux](#linux-runners-on-plain-linux-1933). With more than one PC, `host` names the one an `add` goes to.
 
 People and Taskmasters ask with the `ci_runners` tool (a minion's or the Taskmaster's), or
 `POST /api/projects/<id>/ci-runners` with `{"op": "add", "count": 2}`. Citadel checks the asker is in the
@@ -74,11 +102,10 @@ Session runners (below) are added by hand, not by the agent: their logon task is
 who runs `add-runner.ps1`, and the agent runs as SYSTEM. The agent's `list` shows them and its
 `remove` removes them.
 
-## Install the runner agent (Cara, once)
+## Install the runner agent (the PC's owner, once)
 
-1. On Citadel's Machines page, press **Add a CI runner host** under the list (admins see
-   it) and name it `cara-desktop-runners`. Copy its token (`ccm_…`) and the address its setup lines connect to.
-   Being Cara's, it may act for every scheme.
+1. On Citadel's Machines page, press **Add a CI runner host** under the list and name it (Cara's is
+   `cara-desktop-runners`). Copy its token (`ccm_…`) and the address its setup lines connect to.
 2. Easiest: the page shows the whole line, address and token filled in, right after you add the host (or make a new token for it). Copy that and skip to the end of this step. By hand: open PowerShell **as administrator** and paste this. Put that address in
    `$u` and the token in place of `ccm_…`:
 
@@ -90,9 +117,9 @@ who runs `add-runner.ps1`, and the agent runs as SYSTEM. The agent's `list` show
    downloads the agent and its scripts (printing their SHA-256), registers the task
    **Citadel runner agent** (SYSTEM, at startup, retried every 5 minutes), starts it and waits
    until it connects, then proves the CPU cap (#552, "Cap and yield" below). There's no reboot and no runner is registered or removed. The Machines page then shows
-   `cara-desktop-runners` online.
+   it online.
 3. Run the same line again whenever these scripts change, to update the agent. The lines it
-   prints at the end say how to stop or remove it; removing the agent leaves its runners in place.
+   prints at the end say how to stop or remove it; removing the agent leaves its runners in place. Installing again keeps `caps.json`.
 
 ## By hand (the fallback)
 
@@ -104,7 +131,7 @@ $env:CC_MACHINE_TOKEN = 'ccm_…'
 ```
 
 - The token is any machine token that may act for the scheme: a machine owned by someone in
-  the scheme (an admin's works for all of them), or an ownerless one lent to it.
+  the scheme (a CI runner host must be lent to it too), or an ownerless one lent to it or open to every scheme.
 - The scheme's owner must have linked GitHub in Settings → Your account, and the scheme must
   have a GitHub repo that owner admins. Citadel asks GitHub for the token with that login
   (`POST /api/machines/runner-token`, `src/ci-runner.ts`) and notes each one in the scheme
@@ -188,7 +215,7 @@ second copy of the runner agent that runs inside that distro.
 
 | | Each scheme's Linux runner |
 |---|---|
-| Where | the WSL distro `citadel-ci`, which belongs to the Windows account that installed it (Cara's) |
+| Where | the WSL distro `citadel-ci`, which belongs to the Windows account that installed it |
 | Folder | `/opt/actions-runner-<repo>`, then `-2` … (up to 4), the scheme's user's alone, with a `.citadel-runner` marker for people (`"mode": "linux"`) |
 | Label | `<scheme-slug>-ci-linux` (`theory-of-crafting-ci-linux`); GitHub adds `self-hosted`, `Linux`, `X64`. Every runner but the first also gets `<scheme-slug>-ci-linux-side`, for long jobs that must leave the first one free |
 | Name | `<PC>-linux`, then `<PC>-linux-2` … |
@@ -199,7 +226,7 @@ second copy of the runner agent that runs inside that distro.
 | Kept up by | the logon task **Citadel WSL runners** (`keep-wsl-up.ps1`), which holds the distro open: WSL stops a distro seconds after the last program using it exits, and its services with it |
 
 The distro is **cut off from Windows** (`/etc/wsl.conf`: no `C:` mount, no running Windows programs), because a CI job
-there runs inside Cara's own WSL and could otherwise read her files or run programs as her. Install a scheme's
+there runs inside its owner's own WSL and could otherwise read their files or run programs as them. Install a scheme's
 system packages (a `-dev` library, a browser's shared libraries) by hand, as root in the distro, like a Windows
 runner's scheme-specific tools.
 
@@ -211,13 +238,13 @@ line, and no machine token. `remove` trusts only the service files in `/etc/syst
 (`remove-runner.sh` refuses if that ever stops being true), never a folder's marker, which a job could forge; it
 deletes the scheme's user with its last runner.
 
-Its one limit: WSL distros are each Windows user's own, so the task runs **while Cara is logged on**, like the
-session runners. After a reboot, the Linux runners come back when she logs on. (A SYSTEM task can't reliably start a
+Its one limit: WSL distros are each Windows user's own, so the task runs **while its owner is logged on**, like the
+session runners. After a reboot, the Linux runners come back when they log on. (A SYSTEM task can't reliably start a
 user's distro, and a distro of SYSTEM's own is unproven.)
 
-### Set it up (Cara, once)
+### Set it up (the PC's owner, once)
 
-Nothing here needs Administrator or a reboot. Checked on 2026-11-10: the desktop has WSL 3.0.5 with
+Nothing here needs Administrator or a reboot. On Cara's desktop (checked on 2026-11-10): it has WSL 3.0.5 with
 VirtualMachinePlatform Enabled and no distros yet. **If any step says a reboot or a Windows feature is needed, stop
 there and tell the minion**: the PC is never restarted for this.
 
@@ -234,7 +261,7 @@ there and tell the minion**: the PC is never restarted for this.
    socket for every port a WSL program listens on, and on Cara's PC it never closed them after the test suites'
    servers did: ~1,760 piled up in 36 hours (Nov 22–24), until Windows ran short of ports and Citadel froze for
    seconds at a time (#1753). Nothing here needs it: the runners, ToC's runners and the Android emulator's tunnel
-   all connect outward from WSL. The cost: Windows can't open a server in any of Cara's WSL distros at
+   all connect outward from WSL. The cost: Windows can't open a server in any of the PC's WSL distros at
    `localhost` (the distro's own IP, `wsl -d <distro> hostname -I`, still works). In the same PowerShell:
 
    ```powershell
@@ -253,7 +280,7 @@ there and tell the minion**: the PC is never restarted for this.
 
    (`networkingMode=mirrored`, step 3's fallback, also has no relay; `localhostForwarding` only applies to NAT.)
 2. **Its host on Citadel.** On Citadel's Machines page, press **Add a CI runner host** and name it
-   `cara-desktop-linux`. Leave the install line open on the **Linux in WSL** tab and press **Copy**. Give the host
+   (Cara's is `cara-desktop-linux`). Leave the install line open on the **Linux in WSL** tab and press **Copy**. Give the host
    the schemes that should get Linux runners (Theory of Crafting) under its line, as for the Windows host.
 3. **The Linux agent.** In PowerShell, open a root shell in the distro, then paste the line:
 
@@ -270,7 +297,7 @@ there and tell the minion**: the PC is never restarted for this.
    ```
 
    The second run installs Node, git and the runner's libraries, starts the agent and waits until it connects. The
-   Machines page then shows `cara-desktop-linux` online.
+   Machines page then shows it online.
    If it can't reach Citadel's address, WSL's network isn't reaching the tailnet: add these two lines to
    `%UserProfile%\.wslconfig` (make the file if it's not there), run `wsl --shutdown`, and start this step again
    ([`.wslconfig` settings](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#wslconfig)):
@@ -305,11 +332,33 @@ tarball and stubbed `systemctl`, `runuser`, `useradd` and `userdel` (`test/runne
 systemd in the distro, the tailnet from WSL's network, and whether the logon task really holds the distro up are
 first tried by Cara's setup.
 
+## Linux runners on plain Linux (#1933)
+
+A Linux PC (or VM) runs the same agent as the WSL distro, installed by the same script, without the WSL steps: no
+`wsl.conf`, no logon task, no `.wslconfig`. It needs systemd, a 64-bit Intel or AMD processor, and root for the install. Debian and Ubuntu get what's
+missing from `apt`; on another distro, install Node 18+, git, curl, ca-certificates and libicu first (the script
+names them and stops).
+
+1. Add the host on the Machines page and leave its install line on the **Linux** tab ("Add your PC" above).
+2. In a root shell on the PC (`sudo -i`), paste the line. It starts `citadel-runner-agent` and waits until it connects.
+   It also names any home folder that every user of the PC can read, CI jobs included, with the line that closes it.
+3. Lend it, then ask for runners with `os: linux`.
+
+Everything in the table and the paragraphs under "Linux runners in WSL" holds here (folders, labels, users, services),
+except what is about the distro itself. The runners start with the PC, with nobody logged on. All of them share
+`citadel-runners.slice`, held to 75% of the PC's cores ([Your own caps](#your-own-caps)). A runner the PC had before
+this takes the slice at its next start. To update, run the line again.
+
+**What has been tested** (#1933, Nov 25 2026): the install, on a fresh Debian 12 VM (x64, software-emulated, 2 cores)
+against a stand-in Citadel. It installed with no WSL step and no `/etc/wsl.conf`, connected, and answered a list job; a
+busy loop in the slice used 149% of one core (75% of the PC), then 81% after `caps.json` said 40; a second install kept
+`caps.json`. Not tried: a real GitHub runner added on plain Linux, another distro, and `caps.json` on a real Windows PC.
+
 ## Load samples (#534)
 
 Each runner agent also samples its PC every 30 seconds and posts the sample to Citadel, which keeps 14 days of
-them (`src/ci-load.ts`). It is read-only: it changes no runner, count, VM setting or workflow. The Machines page
-shows the result under **CI desktop load**, to everyone signed in: a verdict, CPU
+them (`src/ci-load.ts`). It is read-only: it changes no runner, count, VM setting or workflow. The Releases page's
+Overview tab shows the result under **CI PC load**, to everyone signed in: a verdict, CPU
 and memory now, the last 24 hours with hard restarts marked, and each pool of runners (a repo and its labels)
 with how many are busy and what waits.
 
@@ -325,7 +374,7 @@ with how many are busy and what waits.
   2 minutes with every runner of their pool busy and the CPU under 60%), **full** (jobs wait and the PC is busy
   too), else **fine**. A verdict that holds for 30 minutes (a crash at once) becomes one quiet Mandate item for
   the schemes with runners there, taken away when it ends. It never rings.
-- **Turning it on** (Cara, after the change is live): the agents never update themselves, so run each host's
+- **Turning it on** on a PC installed before it shipped: the agents never update themselves, so run each host's
   install line again. Windows: step 2 of "Install the runner agent" above, for the Windows runner host. WSL:
   `wsl -d citadel-ci -u root`, then step 3 of "Set it up" under "Linux runners in WSL", for the WSL runner host.
   Until then the panel shows the queues from GitHub and "No samples yet".
@@ -343,6 +392,30 @@ counts stay; jobs just run slower when it's busy. The PC has 16 cores, 32 thread
 | Windows runners, every one on the PC (Delve's, Peek's, Mandate's, ToC's, the session runners) | `keep-runners.ps1`, which the Windows agent keeps running: one job object, `Global\CitadelCiRunners` | below-normal priority, all together at most 75% (`CI_CPU_PERCENT` in `public/runner-agent.mjs`) |
 | The WSL VM (Citadel's and ToC's Linux runners, and the Android emulator, #533) | `processors=24` (16 until Cara raised it on 2026-11-22, #1606) in Cara's `%UserProfile%\.wslconfig`; inside it, the runners niced (`citadel-runner-.service.d/yield.conf`, written by `install-runner-agent.sh`) | at most 24 of the 32 threads; the emulator's 4 cores come first |
 | The test box VM (Peek's desktop tests) | `Set-VMProcessor -Count 6 -Maximum 75 -RelativeWeight 50`, set by `tools/win-test-box/new-test-box.ps1` | about 4.5 of 32 threads, already; left as it is |
+
+### Your own caps
+
+The PC's owner sets how much of it CI may use, in a file `caps.json` beside the agent. Both settings are optional;
+without the file (no PC had one before #1933) today's 75 and 30 hold.
+
+```json
+{ "cpu_percent": 50, "squeeze_percent": 20 }
+```
+
+| Setting | What it caps | Default |
+|---|---|---|
+| `cpu_percent` | all CI on the PC together | 75 |
+| `squeeze_percent` | the other runners, together, while a scheme's ship runs on the PC ("Ships go first"); never above `cpu_percent` | 30 |
+
+Both are whole percents of the PC, 1 to 100. A value that isn't is logged and its default used. On Windows, the 10%
+the others get while Citadel's own ship runs comes down with `squeeze_percent` below 10.
+
+- **Windows:** `C:\ProgramData\citadel-runner-agent\caps.json`, written as administrator. Then restart the task
+  **Citadel runner agent** (end it and run it, in Task Scheduler).
+- **Linux:** `/opt/citadel-runner-agent/caps.json`, written as root. Then `systemctl restart citadel-runner-agent`.
+- **WSL:** the same file, for `squeeze_percent` only: `.wslconfig`'s `processors` is what holds the VM down (below).
+
+A restart of the agent leaves the runners and their jobs going. Installing again keeps the file.
 
 **Windows.** Every 15 seconds `keep-runners.ps1` finds each `RunnerService.exe` and `Runner.Listener.exe` and
 everything started under them, and puts what isn't held yet into the job. The job runs everything in it at below-normal
@@ -369,7 +442,7 @@ Where Git Bash is installed it also starts a ping through bash in the squeezed s
 (with breakaway allowed it doesn't: tried on the test box, Nov 21). `install-runner-agent.ps1` runs it at its end; it touches no runner. By hand, in an administrator
 PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\citadel-runner-agent\keep-runners.ps1 -Prove`.
 
-**WSL** (by hand, once, as Cara). WSL's VM has no job object Windows can cap; `.wslconfig` is what limits it
+**WSL** (by hand, once, as the Windows account that owns the distro). WSL's VM has no job object Windows can cap; `.wslconfig` is what limits it
 ([`.wslconfig` settings](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#wslconfig)). In a normal PowerShell:
 
 ```powershell
@@ -425,7 +498,7 @@ keeper log, `shared/project/reports/ships-first-windows-squeeze-2026-11-21.md`).
   priority is keyed to Citadel's repo (the live checkout's origin): when both run, its ships keep their share. A squeezed build still runs, just slower, and returns to its normal share the moment the
   ship ends.
 
-**Install (Cara, once, after this ships).** Both agents need the new scripts; the lines below reuse each agent's own
+**Install (the PC's owner, once, on a PC installed before it shipped).** Both agents need the new scripts; the lines below reuse each agent's own
 token from its folder, so nothing needs copying. In PowerShell **as administrator**:
 
 ```powershell
@@ -502,8 +575,15 @@ thing that pushes there (`check/**` through `tools/own-check.sh`, above): it sen
 while it holds the deploy lock, and deletes the branch again. A land that touches no pipeline file leaves out the
 pipeline's own test files (#581, `tools/pipeline-files.txt`), so the whole suite also runs on main every night at
 13:30 UTC. That run and any started by hand are in a concurrency group of their own (a run waiting in the lands' group
-would cancel the land waiting there): they wait for the lands' runs, up to 30 minutes, then run niced beside any
-that start. The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
+would cancel the land waiting there), niced.
+**Deploys first** (#1902; Josh, 2026-11-24: "while a ship is in line, nothing optional runs on the CI desktop"):
+`src/ci-hold.ts` stops flake proofs, heavy jobs and suites started by hand on a branch while a ship is in line or
+testing, or main's full run waits or runs, and starts each again, from its beginning, once the line has been empty for
+5 minutes (1 at night, 23:00 to 06:00 Pacific; longer each time the same run is stopped again). Main's full run waits for
+ships 30 minutes at most. A ship's `land/**` and `check/**` runs are never touched, and another scheme's heavy jobs are
+held 4 hours at most. A job asks before it starts (`tools/ci-hold-ask.ts`, the run's OIDC token, `POST /api/ci-hold`) and
+goes ahead when Citadel doesn't answer. Held jobs show on the CI page ("Held for ships"); one held a day is reported to
+its Taskmaster. Off switch: `touch` the deploy state folder's `hold-off`, which also lets early runs (`early/**`) start again; touch it too while `CI_RUNNER=github`, since the hold can't see that those runs are not on the desktop. The workflow runs `tools/run-tests.sh`, the same run `land.sh` makes on perigee, and fails when any test is
 skipped: perigee skips none, so a skip means the runner lacks something. What the suite needs goes in the runner's
 own home, with no root: Node, `pwsh` with PSScriptAnalyzer for the `.ps1` lint, Chrome's headless shell for the
 browser tests, and `libatomic1` and `sqlite3` unpacked from their `.deb`s. Those last two are tidier installed once
@@ -583,7 +663,7 @@ A retry would need all four of these:
 
 ## Check it
 
-- `ci_runners list`, or on the desktop `Get-Service actions.runner.*`, lists each runner and whether it is Running.
+- `ci_runners list`, or on the PC `Get-Service actions.runner.*`, lists each runner and whether it is Running.
   A runner's own log is in `C:\actions-runner-<repo>\_diag`.
 - On GitHub: the repo's Settings → Actions → Runners shows it Idle or Active, or
   `gh api repos/<owner>/<repo>/actions/runners --jq '.runners[] | [.name, .status, .busy] | @tsv'`.
@@ -592,7 +672,7 @@ A retry would need all four of these:
 
 ## Fall back to hosted runners
 
-When the desktop is off for a while, set the repo variable `CI_RUNNER` to `github`
+When a scheme's CI PC is off for a while, set the repo variable `CI_RUNNER` to `github`
 (`gh variable set CI_RUNNER --body github --repo <owner>/<repo>`) and jobs run on `ubuntu-latest`;
 delete it (`gh variable delete CI_RUNNER --repo <owner>/<repo>`) to come back. Hosted jobs spend
 Actions minutes, and the caraminden account can't run them at all while its payment fails, so ask

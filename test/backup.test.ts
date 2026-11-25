@@ -36,8 +36,8 @@ test('the backup page loads nothing from outside itself', () => {
 });
 
 test("the app's service worker leaves /backup to the network", () => {
-  const listeners: Record<string, (e: any) => void> = {};
-  const self = { addEventListener: (type: string, fn: (e: any) => void) => (listeners[type] = fn) };
+  const listeners: Record<string, (e: unknown) => void> = {};
+  const self = { addEventListener: (type: string, fn: (e: unknown) => void) => (listeners[type] = fn) };
   new Function('self', 'fetch', readFileSync(join(REPO, 'public', 'sw.js'), 'utf8'))(self, () => new Promise(() => {}));
   const answered = (url: string) => {
     let called = false;
@@ -136,16 +136,16 @@ test('/backup serves the page and sends to and reads from the Citadel scheme (2)
   assert.equal(typeof sent.data.running, 'boolean');
   const read = await srv.call('/backup/messages');
   assert.equal(read.status, 200);
-  const mine = read.data.lines.find((l: any) => l.kind === 'user_message');
+  const mine = read.data.lines.find((l: { kind: string; author: string; text: string }) => l.kind === 'user_message');
   assert.deepEqual({ author: mine.author, text: mine.text }, { author: 'Cara', text: 'The front end is broken, please fix it' });
   // It went to the Taskmaster's own chat, as the main app shows it.
   const events = (await srv.call(`/api/tickets/${opened.coordinator.id}/events?after=0`)).data;
-  assert.ok(events.some((e: any) => e.kind === 'user_message' && JSON.parse(e.data).text === 'The front end is broken, please fix it'));
+  assert.ok(events.some((e: { kind: string; data: string }) => e.kind === 'user_message' && JSON.parse(e.data).text === 'The front end is broken, please fix it'));
   // Polling from the newest line returns nothing new. The turn (CLAUDE_BIN is /bin/false) ends with its own error line, whenever
   // the box gets to it: let it land first, so it can't arrive between the two reads.
   const settled = await until('the turn ends', async () => {
     const m = await srv.call('/backup/messages');
-    return m.data.lines.some((l: any) => l.kind === 'error') && m.data;
+    return m.data.lines.some((l: { kind: string }) => l.kind === 'error') && m.data;
   });
   assert.deepEqual((await srv.call(`/backup/messages?after=${settled.last}`)).data.lines, []);
 

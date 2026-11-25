@@ -50,6 +50,8 @@ test/wait.ts
 test/quiet-proc.ts
 test/leak-guard.ts
 test/leak-file.ts
+test/ci-leftovers.ts
+test/ci-leftovers.test.ts
 test/land-fixture.ts
 test/land-train-fixture.ts
 test/land-recover-fixture.ts

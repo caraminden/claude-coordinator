@@ -71,6 +71,19 @@ export const JUDGES: Judge[] = [
     pins: [{ path: 'src/ci-problems.ts', symbols: ['WAIT_MS', 'HUNG_MS', 'stuckProblems', 'hungProblems', 'neverStarted', 'deadGroups', 'deadProblem'] }],
   },
   {
+    id: 'ci-hold',
+    name: 'Deploys first: the CI desktop hold (#1902)',
+    mode: 'act',
+    replay: true,
+    acts: "stops optional CI runs while a ship is in line and starts them again after, telling their minions, and wakes the scheme's Taskmaster once about one held over a day",
+    pins: [
+      {
+        path: 'src/ci-hold.ts',
+        symbols: ['SETTLE_DAY_MS', 'SETTLE_NIGHT_MS', 'MAX_BACKOFF', 'NIGHT', 'MAIN_WAIT_MS', 'OTHERS_CAP_MS', 'REPORT_MS', 'isNight', 'kindOf', 'CiHold.shipWhy', 'CiHold.stopWhy', 'CiHold.gate', 'CiHold.capped', 'CiHold.mainPast', 'CiHold.look', 'CiHold.follow', 'CiHold.ask', 'CiHold.report'],
+      },
+    ],
+  },
+  {
     id: 'ci-land-gate',
     name: 'CI health: the land gate (#1342)',
     mode: 'act',

@@ -18,6 +18,7 @@ import { projectDir, projectSharedDir } from '../workspace.ts';
 import type { PageItem } from '../ideas.ts';
 import { connection, HttpError, json, ownWrites, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
 import { imageSize } from '../image-size.ts';
+import { sendIdOf, sendOnce } from '../send-ids.ts';
 import { MAX_LABEL, MAX_MARKS, marksTitle, parseMarks, type Mark } from '../../public/ui/marks.js';
 
 /** A ticket as the files helpers need it: the row, or the API's view of it (whose replies are a list). */
@@ -708,31 +709,37 @@ export const fileRoutes: Route[] = [
       const to = ticket ?? (linker && app.store.getTicket(linker.ticket_id)) ?? app.store.coordinatorFor(project.id, session.uid ?? null);
       if (!to) throw new HttpError(404, 'No minion or Taskmaster to send this to');
       const { about, text } = commentMessage(to.cwd && abs.startsWith(to.cwd + sep) ? abs.slice(to.cwd.length + 1) : abs, str(body.text, 'Answer', 10_000));
-      app.runner.send(to.id, session.name, text, await saveImages(app, to, body.images), { comment: { path: abs, about }, hold: true });
-      // The picks answer the chat's choices cards for this page (#804).
-      let answered = false;
-      for (const e of app.store.eventsOfKinds(to.id, ['question'])) {
-        const q = JSON.parse(e.data);
-        if (q.doc?.path !== abs || q.settled) continue;
-        const settled = { at: Date.now(), by: session.name, sent: true };
-        app.store.setEventData(e.id, { ...q, settled });
-        app.runner.emit(to.id, 'question_result', { id: q.id, settled });
-        answered = true;
-      }
-      if (answered) app.runner.broadcastTicket(to.id);
-      app.runner.personWrote(to.id);
-      // The ideas ledger (#1150): a Later-style pick bar's items become rows now, with the titles the page sent.
-      try {
-        app.store.ideas.readPage(project.id, file, to.kind === 'ticket' ? to.number : null, pageItems(body.items), String(body.text ?? ''));
-        app.store.ideas.restatus(project.id);
-      } catch (e) {
-        console.error(`ideas: ${file}: ${(e as Error).message}`);
-      }
-      // As in the chat: writing to the Taskmaster continues the loop guard for every minion of the scheme.
-      app.runner.continueLoops(
-        (to.kind === 'coordinator' ? app.store.listTickets(project.id) : [to]).map((t) => t.id),
-        session.name,
-      );
+      // Pressed again, its reply slow or lost: taken once (#1862, as the message box's), kept on the message for after a
+      // restart. Under no one chat, since another minion may have linked a shared page meanwhile.
+      const sendId = sendIdOf(body.sendId);
+      await sendOnce(0, sendId, async () => {
+        if (sendId && app.store.tookSend(to.id, sendId)) return;
+        app.runner.send(to.id, session.name, text, await saveImages(app, to, body.images), { comment: { path: abs, about }, hold: true, ...(sendId ? { sendId } : {}) });
+        // The picks answer the chat's choices cards for this page (#804).
+        let answered = false;
+        for (const e of app.store.eventsOfKinds(to.id, ['question'])) {
+          const q = JSON.parse(e.data);
+          if (q.doc?.path !== abs || q.settled) continue;
+          const settled = { at: Date.now(), by: session.name, sent: true };
+          app.store.setEventData(e.id, { ...q, settled });
+          app.runner.emit(to.id, 'question_result', { id: q.id, settled });
+          answered = true;
+        }
+        if (answered) app.runner.broadcastTicket(to.id);
+        app.runner.personWrote(to.id);
+        // The ideas ledger (#1150): a Later-style pick bar's items become rows now, with the titles the page sent.
+        try {
+          app.store.ideas.readPage(project.id, file, to.kind === 'ticket' ? to.number : null, pageItems(body.items), String(body.text ?? ''));
+          app.store.ideas.restatus(project.id);
+        } catch (e) {
+          console.error(`ideas: ${file}: ${(e as Error).message}`);
+        }
+        // As in the chat: writing to the Taskmaster continues the loop guard for every minion of the scheme.
+        app.runner.continueLoops(
+          (to.kind === 'coordinator' ? app.store.listTickets(project.id) : [to]).map((t) => t.id),
+          session.name,
+        );
+      });
       return json(res, 202, { to: { id: to.id, kind: to.kind, number: to.number, label: to.kind === 'coordinator' ? 'the Taskmaster' : `#${to.number ?? to.id}` } });
     },
   },

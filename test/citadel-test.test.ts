@@ -26,7 +26,7 @@ writeFileSync(noList, '# no repo-wide files\n');
 
 function run(args: string[], always = noList, extraEnv: Record<string, string | undefined> = {}): Promise<{ code: number | null; out: string; ms: number }> {
   const start = Date.now();
-  const child = scratch.spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined, CITADEL_MEM_ROOM_MB: undefined, ...extraEnv }), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = scratch.spawn(bin, args, { cwd: repo, env: scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: always, CITADEL_TEST_EXTRA: undefined, CITADEL_TEST_FILES: '0', CITADEL_MEM_ROOM_MB: undefined, ...extraEnv }), stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (b) => (out += b));
   child.stderr.on('data', (b) => (out += b));
@@ -185,13 +185,14 @@ test('--affected with nothing changed is not a failure: it says so and runs only
 });
 
 test('workers follow the memory room: a short room says so and runs fewer files at once (#1340)', async () => {
+  // Room for one: on 4 CPUs (a pinned heavy job, #1928, or a small runner) two workers is the normal half, not short.
   const f = file('room.test.ts', `test('one', () => {});`);
-  const short = await run([f], noList, { CITADEL_MEM_ROOM_MB: '700' });
+  const short = await run([f], noList, { CITADEL_MEM_ROOM_MB: '350' });
   assert.equal(short.code, 0, short.out);
-  assert.match(short.out, /memory room is short \(700 MB free for heavy work\): running 2 worker\(s\) at a time/);
+  assert.match(short.out, /memory room is short \(350 MB free for heavy work\): running 1 worker\(s\) at a time/);
   const plenty = await run([f], noList, { CITADEL_MEM_ROOM_MB: '100000' });
   assert.doesNotMatch(plenty.out, /memory room is short/);
-  const pinned = await run([f], noList, { CITADEL_MEM_ROOM_MB: '700', CITADEL_TEST_CONCURRENCY: '3' });
+  const pinned = await run([f], noList, { CITADEL_MEM_ROOM_MB: '350', CITADEL_TEST_CONCURRENCY: '3' });
   assert.doesNotMatch(pinned.out, /memory room is short/, 'an explicit CITADEL_TEST_CONCURRENCY wins');
 });
 
@@ -246,4 +247,54 @@ test('a plain red on a quiet box, and a green run, get no hint', async () => {
   const g = await run([file('hint-green.test.ts', `test('ok', () => {});`)], noList, { CITADEL_TEST_LOADAVG: join(tmp, 'none.txt'), CITADEL_TEST_CORES: '1' });
   assert.equal(g.code, 0, g.out);
   assert.doesNotMatch(g.out, /Before chasing/);
+});
+
+// #1928: citadel-test's own wiring of the shared limit: its files wait for a place held elsewhere, the run says so, and starts anyway.
+test('a run waits for a held place, starts anyway after the wait, and says so in one line', async () => {
+  const heavyDir = join(tmp, 'gate-heavy');
+  mkdirSync(heavyDir, { recursive: true });
+  const holder = spawn('flock', [join(heavyDir, 'test-slot-0'), 'sleep', '600'], { stdio: 'ignore', detached: true });
+  try {
+    await until('the place held', () => existsSync(join(heavyDir, 'test-slot-0')));
+    const r = await run([file('gated.test.ts', `test('ran', () => {});`)], noList, {
+      CITADEL_TEST_FILES: '1',
+      CITADEL_TEST_FILES_MIN: '1',
+      CITADEL_TEST_FILES_MAX: '1',
+      CITADEL_TEST_ROOM_WAIT: '2',
+      CITADEL_HEAVY_DIR: heavyDir,
+      CITADEL_HEAVY_PRESSURE: join(tmp, 'no-psi'),
+      RUNNER_TEMP: undefined,
+      GITHUB_ACTIONS: undefined,
+      CITADEL_HEAVY_HELD: undefined,
+    });
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /^citadel-test: waiting for room: 1 test files may run at once on this box and other files hold them; this run waits at most 2 s in all$/m);
+    assert.equal(r.out.match(/waiting for room/g)?.length, 1);
+    assert.ok(r.out.indexOf('waiting for room') < r.out.indexOf('1 passed'), 'said while it waits, not after the counts');
+  } finally {
+    process.kill(-holder.pid!, 'SIGTERM'); // the group: flock's sleep too
+  }
+});
+
+test('citadel-test killed outright leaves no watcher holding its output open', async () => {
+  const heavyDir = join(tmp, 'gate-killed');
+  const up = join(tmp, 'killed-up');
+  const f = file('killed.test.ts', `import { writeFileSync } from 'node:fs';\ntest('long', async () => { writeFileSync(${JSON.stringify(up)}, ''); await new Promise((r) => setTimeout(r, 600_000)); });`); // timing-ok: the run is killed
+  const env = scriptEnv({ TMPDIR: tmp, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_ALWAYS: noList, CITADEL_HEAVY_DIR: heavyDir, CITADEL_TEST_FILES: '4', RUNNER_TEMP: undefined, GITHUB_ACTIONS: undefined, CITADEL_HEAVY_HELD: undefined });
+  const child = scratch.spawn(bin, [f], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  await until('the test running', () => existsSync(up));
+  // The watcher is citadel-test's own child and runs the same script.
+  const kids = readFileSync(`/proc/${child.pid}/task/${child.pid}/children`, 'utf8').trim().split(' ');
+  const watcher = kids.find((k) => readFileSync(`/proc/${k}/cmdline`, 'utf8').includes('tools/citadel-test'));
+  assert.ok(watcher, 'the watcher is up');
+  child.kill('SIGKILL');
+  try {
+    await until('the watcher gone', () => !existsSync(`/proc/${watcher}`));
+  } finally {
+    for (const k of kids) {
+      try {
+        process.kill(-Number(k), 'SIGKILL'); // the runner's own group, which a SIGKILL of citadel-test leaves (as on main)
+      } catch {}
+    }
+  }
 });

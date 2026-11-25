@@ -13,6 +13,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Credentials } from './credentials.ts';
 import type { Store, User } from './db.ts';
+import { thrown } from './thrown.ts';
 
 /** `workflow` too: without it GitHub refuses a push that touches .github/workflows. */
 export const SCOPES = 'repo workflow';
@@ -206,8 +207,8 @@ export class GithubLink {
       this.errors.delete(uid);
       // A limited link that works means the App's expiring tokens were turned off.
       if (s.limited) this.store.deleteSetting(REFUSED);
-    } catch (err: any) {
-      this.errors.set(uid, err.message);
+    } catch (err) {
+      this.errors.set(uid, thrown(err).message ?? String(err));
     }
     return s.projectId;
   }

@@ -329,3 +329,48 @@ test("a dismissed follower's chain is held 3 days and goes on after a reopen, th
   await s.waiters.check();
   assert.deepEqual([rows(gone.id)[0].state, rows(gone.id)[0].reason], ['dropped', 'its minion was deleted']);
 });
+
+test('a stop while the chained start waits for a worker settles the row: no second start, no second line', async () => {
+  const s = server();
+  let queued = true; // the runner holds the brief while the minion waits in the worker line
+  const holds = () => queued;
+  (s.outbox as unknown as { runner: { holds: () => boolean } }).runner.holds = holds;
+  await s.outbox.boot();
+  const leader = minion();
+  const follower = await chain(s.waiters, leader.id);
+  work(leader.branch);
+  merge(leader.branch);
+  await s.waiters.check();
+  await s.outbox.poke({ type: 'tick' });
+  assert.equal(s.r.sent.length, 1);
+  assert.equal(rows(follower.id)[0].state, 'sending');
+
+  // stop_ticket: the runner drops the queued brief and tells the outbox.
+  queued = false;
+  s.outbox.stoppedMessages(follower.id, [s.r.sent[0].event]);
+  assert.equal(rows(follower.id)[0].state, 'dropped');
+  s.now.t += 3_600_000;
+  await s.outbox.poke({ type: 'tick' });
+  await s.waiters.check();
+  assert.equal(s.r.sent.length, 1, 'no second start');
+  assert.equal(s.r.notes.length, 1, 'no second "so this minion started."');
+  assert.equal(rows(follower.id)[0].state, 'dropped');
+});
+
+test('a chained start dropped by anything but a stop is still sent again', async () => {
+  const s = server();
+  await s.outbox.boot();
+  const leader = minion();
+  const follower = await chain(s.waiters, leader.id);
+  work(leader.branch);
+  merge(leader.branch);
+  await s.waiters.check();
+  await s.outbox.poke({ type: 'tick' });
+  assert.equal(s.r.sent.length, 1);
+  s.now.t += 3_600_000; // the runner no longer holds it and no turn started
+  await s.outbox.poke({ type: 'tick' }); // read as a failed send: retried after its wait
+  s.now.t += 3_600_000;
+  await s.outbox.poke({ type: 'tick' });
+  assert.equal(s.r.sent.length, 2, 'sent again');
+  assert.equal(rows(follower.id)[0].attempts, 1);
+});

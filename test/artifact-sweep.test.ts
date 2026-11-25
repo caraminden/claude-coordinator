@@ -1,6 +1,8 @@
 // The weekly GitHub artifact sweep (src/artifact-sweep.ts, #657): which artifacts it deletes and which it never touches.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { Project, Store } from '../src/db.ts';
+import { fake } from './typed.ts';
 import { ArtifactSweep, MAX_DELETES, kindOf, plan, type Artifact } from '../src/artifact-sweep.ts';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
@@ -58,20 +60,16 @@ test("the round deletes per repo with that scheme's login, counts bytes, and lea
   const peek = mk(5);
   const asked: string[] = [];
   const deleted: string[] = [];
-  const store: any = {
-    settings: new Map<string, unknown>(),
-    getSetting(k: string) {
-      return this.settings.get(k);
-    },
-    setSetting(k: string, v: unknown) {
-      this.settings.set(k, v);
-    },
+  const settings = new Map<string, unknown>();
+  const store = fake<Store>({
+    getSetting: <T>(k: string) => settings.get(k) as T | null,
+    setSetting: (k: string, v: unknown) => void settings.set(k, v),
     listProjects: () => [
-      { id: 1, name: 'Peek', repo_url: 'https://github.com/caraminden/peek-auras.git', repo_dir: '/a' },
-      { id: 2, name: 'Other', repo_url: 'https://github.com/friend/private.git', repo_dir: '/b' },
-      { id: 3, name: 'Dup', repo_url: 'https://github.com/caraminden/peek-auras', repo_dir: '/c' },
+      fake<Project>({ id: 1, name: 'Peek', repo_url: 'https://github.com/caraminden/peek-auras.git', repo_dir: '/a' }),
+      fake<Project>({ id: 2, name: 'Other', repo_url: 'https://github.com/friend/private.git', repo_dir: '/b' }),
+      fake<Project>({ id: 3, name: 'Dup', repo_url: 'https://github.com/caraminden/peek-auras', repo_dir: '/c' }),
     ],
-  };
+  });
   const sweep = new ArtifactSweep(store, {
     as: (p) => ({ GH_TOKEN: `tok-${p.id}` }),
     get: async (path, _e, as) => {
@@ -97,14 +95,11 @@ test("the round deletes per repo with that scheme's login, counts bytes, and lea
 
 function oneRepo(artifacts: Artifact[], status: number) {
   const deleted: number[] = [];
-  const store: any = {
-    s: new Map(),
-    getSetting() {
-      return undefined;
-    },
+  const store = fake<Store>({
+    getSetting: <T>() => undefined as T | null,
     setSetting() {},
-    listProjects: () => [{ id: 1, name: 'P', repo_url: 'https://github.com/o/r', repo_dir: '/a' }],
-  };
+    listProjects: () => [fake<Project>({ id: 1, name: 'P', repo_url: 'https://github.com/o/r', repo_dir: '/a' })],
+  });
   const sweep = new ArtifactSweep(store, {
     as: () => undefined,
     get: async (path) => (path.endsWith('/r') ? { status: 200, etag: null, body: { default_branch: 'main' } } : { status: 200, etag: null, body: { artifacts } }),
@@ -146,7 +141,7 @@ test('one round deletes at most MAX_DELETES from a repo', async () => {
 test('a later page that fails still sweeps what page one listed', async () => {
   const page1 = Array.from({ length: 100 }, (_, i) => art(`x-${sha(i)}`, 5 + i / 100, 1, 'land/z'));
   const deleted: number[] = [];
-  const store: any = { getSetting() {}, setSetting() {}, listProjects: () => [{ id: 1, name: 'P', repo_url: 'https://github.com/o/r', repo_dir: '/a' }] };
+  const store = fake<Store>({ getSetting: <T>() => undefined as T | null, setSetting() {}, listProjects: () => [fake<Project>({ id: 1, name: 'P', repo_url: 'https://github.com/o/r', repo_dir: '/a' })] });
   const sweep = new ArtifactSweep(store, {
     as: () => undefined,
     get: async (path) => (path.endsWith('/r') ? { status: 200, etag: null, body: {} } : path.endsWith('&page=1') ? { status: 200, etag: null, body: { artifacts: page1 } } : { status: 502, etag: null, body: null }),
@@ -157,16 +152,12 @@ test('a later page that fails still sweeps what page one listed', async () => {
 });
 
 test('tick waits a week after its first look, then runs once', async () => {
-  const store: any = {
-    s: new Map(),
-    getSetting(k: string) {
-      return this.s.get(k);
-    },
-    setSetting(k: string, v: unknown) {
-      this.s.set(k, v);
-    },
+  const settings = new Map<string, unknown>();
+  const store = fake<Store>({
+    getSetting: <T>(k: string) => settings.get(k) as T | null,
+    setSetting: (k: string, v: unknown) => void settings.set(k, v),
     listProjects: () => [],
-  };
+  });
   const sweep = new ArtifactSweep(store, { as: () => undefined });
   assert.equal(await sweep.tick(NOW), null);
   assert.equal(await sweep.tick(NOW + 6 * DAY), null);

@@ -15,20 +15,33 @@
   const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
   const data = new Map(cfg.entries.map((e) => [e.key, e.value]));
 
-  // Requests to the viewer, answered by id.
+  // Requests to the viewer, answered by id. Ids start anywhere, so an answer meant for this frame before it
+  // reloaded is never taken for one of this page's. The viewer also says at once that it has a request (`ack`): past the
+  // limit one it has is asked after (`alive`) rather than given up on, so Citadel being slow never reads as a
+  // viewer that is gone, and nothing is sent beside a copy still on its way (#1862).
   const pending = new Map();
-  let seq = 0;
-  function request(op, extra, ms = 15000) {
+  let seq = Math.floor(Math.random() * 1e9);
+  let heard = false; // the viewer has spoken to this page
+  function request(op, extra, ms = 15000, { onAck, onLate } = {}) {
     return new Promise((resolve, reject) => {
       if (!host) return reject(new Error(NO_VIEWER));
       const id = ++seq;
-      const timer = setTimeout(() => {
+      const post = (m) => host.postMessage({ bridge: TAG, id, page: cfg.page, ...m }, '*');
+      const p = { resolve, reject, acked: false, onAck };
+      const late = () => {
+        if (p.acked) {
+          onLate?.();
+          p.acked = false;
+          p.timer = setTimeout(late, Math.min(ms, 15000));
+          return post({ op: 'alive' });
+        }
         pending.delete(id);
         if (op !== 'hello') cutOff();
         reject(new Error(op === 'hello' ? NO_VIEWER : 'Citadel did not answer'));
-      }, ms);
-      pending.set(id, { resolve, reject, timer });
-      host.postMessage({ bridge: TAG, id, op, page: cfg.page, ...extra }, '*');
+      };
+      p.timer = setTimeout(late, ms);
+      pending.set(id, p);
+      post({ op, ...extra });
     });
   }
 
@@ -45,19 +58,55 @@
     document.body.append(bar);
   }
 
-  // Who is looking and who made the page, once the viewer answers; false when there is no viewer.
+  // Who is looking and who made the page, once the viewer answers; false when there is no viewer. A viewer that
+  // can't reach Citadel (it is down or restarting) says who all the same, so the page opens on what it was served
+  // with and takes picks; its writes wait for `joined`, the hello that lands, tried as often as a write is (#1862).
   let info = null;
-  const hello = (tries) => request('hello', {}, 5000).catch((err) => (tries > 1 ? hello(tries - 1) : Promise.reject(err)));
-  const ready = host
-    ? hello(2).then(
+  let joining = false; // the viewer is there, Citadel isn't yet
+  let opened;
+  const early = new Promise((r) => (opened = r));
+  const open = (r) => {
+    info = { person: r.person, file: r.file, owner: r.owner, draw: !!r.draw };
+    opened(true);
+  };
+  async function hello() {
+    let known = null;
+    const meanwhile = () => {
+      joining = true;
+      if (known) open(known);
+      saves();
+    };
+    let tries = 2;
+    for (let gap = 1000; ; gap = Math.min(gap * 2, 15000)) {
+      try {
+        return await request('hello', {}, 5000, { onAck: (k) => (known = k ?? known), onLate: meanwhile });
+      } catch (err) {
+        if (!err.retry) {
+          if (!--tries) throw err;
+          continue;
+        }
+        meanwhile();
+        await new Promise((r) => setTimeout(r, gap));
+      }
+    }
+  }
+  const joined = host
+    ? hello().then(
         (r) => {
-          info = { person: r.person, file: r.file, owner: r.owner, draw: !!r.draw };
+          joining = false;
+          open(r);
           replace(r.entries);
+          saves();
           return true;
         },
-        () => false,
+        () => {
+          joining = false;
+          saves();
+          return false;
+        },
       )
     : Promise.resolve(false);
+  const ready = Promise.race([early, joined]);
 
   // Watchers of keys (`key`) or of every key under a prefix (`prefix`), told after any change.
   const watchers = new Set();
@@ -94,7 +143,10 @@
       sending = sending
         .catch(() => {})
         .then(async () => {
-          if (!(await ready)) throw new Error(NO_VIEWER);
+          if (!(await joined)) {
+            if (heard) cutOff(); // a viewer is there but won't keep this page's changes; with none, the page says so itself
+            throw new Error(NO_VIEWER);
+          }
           for (let i = 0; i < entries.length; i += 100) await keep(entries.slice(i, i + 100));
         })
         .finally(() => {
@@ -133,7 +185,10 @@
   // down or restarting; it is sent again until it lands). Watchers hear each change.
   const saveWatchers = new Set();
   let saveState = 'saved';
-  const nowSaving = () => (retrying ? 'retrying' : queue.size || inFlight.size || flushing ? 'saving' : 'saved');
+  const nowSaving = () => {
+    const busy = queue.size || inFlight.size || flushing;
+    return retrying || (joining && busy) ? 'retrying' : busy ? 'saving' : 'saved';
+  };
   function saves() {
     const s = nowSaving();
     if (s === saveState) return;
@@ -162,7 +217,14 @@
   addEventListener('message', (e) => {
     const m = e.data;
     if (e.source !== host || !m || m.bridge !== TAG) return;
+    heard = true;
     if (m.op === 'changed') return replace(m.entries);
+    const acked = pending.get(m.ack);
+    if (acked) {
+      acked.acked = true;
+      acked.onAck?.(m.known);
+      return;
+    }
     const p = pending.get(m.re);
     if (!p) return;
     pending.delete(m.re);

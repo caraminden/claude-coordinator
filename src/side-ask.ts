@@ -9,6 +9,7 @@ import type { Store, Turn } from './db.ts';
 import { promptMessage } from './prompts.ts';
 import type { Runner } from './runner.ts';
 import { projectSlug, validSessionId } from './sessions.ts';
+import type { ClaudeEvent } from './claude-events.ts';
 
 /** One side thread: its fork, once the first answer named it, and the ask running in it, if any. */
 export interface SideThread {
@@ -45,7 +46,7 @@ export class SideAsks {
   private launching = new Set<number>();
   private timer: NodeJS.Timeout | null = null;
   private offsets = new Map<number, number>();
-  private found = new Map<number, { forkId?: string; result?: any }>();
+  private found = new Map<number, { forkId?: string; result?: ClaudeEvent }>();
 
   private store: Store;
   private runner: Launch;
@@ -168,7 +169,7 @@ export class SideAsks {
     const seen = this.found.get(run.ask) ?? {};
     for (const line of text.slice(from, end).split('\n')) {
       if (!line.trim()) continue;
-      let ev: any;
+      let ev: ClaudeEvent | null;
       try {
         ev = JSON.parse(line);
       } catch {
@@ -201,7 +202,7 @@ export class SideAsks {
     const cost = typeof result?.total_cost_usd === 'number' ? result.total_cost_usd : null;
     const ev = this.runner.emit(t.ticketId, 'side_answer', { thread: t.id, ask: run.ask, ok, text: ok ? result.result : why, cost_usd: cost });
     // Its cost is the asker's (sender pays), kept apart from the minion's own turns.
-    if (cost !== null && t.forkId) {
+    if (result && cost !== null && t.forkId) {
       void this.store
         .recordTurn(t.ticketId, {
           event_id: ev.id,

@@ -1,7 +1,7 @@
 // A question card that repeats one still open, or one just answered, is refused once (#1536's sibling #1508; Cara,
 // 2026-11-21: "Catch a card asked twice"). A plain text comparison of the questions and option labels, no memory index.
 import { cardHref } from './card-links.ts';
-import type { Store, Ticket } from './db.ts';
+import type { Store, TicketFields } from './db.ts';
 
 const WORDS = (s: string) =>
   new Set(
@@ -35,7 +35,7 @@ export const ANSWERED_WITHIN_MS = 24 * 3600_000;
  * scheme that the same people can answer (no `to`, or the same `to`), and cards answered in the last 24 hours.
  * Choices-page, secret and notice cards (no questions) are never compared.
  */
-export function cardTwin(store: Store, ticket: Ticket, card: { questions: Q[]; to?: string | null }, now = Date.now()): string | null {
+export function cardTwin(store: Store, ticket: TicketFields, card: { questions: Q[]; to?: string | null }, now = Date.now()): string | null {
   // An advisory check: a broken row must never stop a card being asked.
   try {
     return findTwin(store, ticket, card, now);
@@ -44,7 +44,7 @@ export function cardTwin(store: Store, ticket: Ticket, card: { questions: Q[]; t
   }
 }
 
-function findTwin(store: Store, ticket: Ticket, card: { questions: Q[]; to?: string | null }, now = Date.now()): string | null {
+function findTwin(store: Store, ticket: TicketFields, card: { questions: Q[]; to?: string | null }, now = Date.now()): string | null {
   if (!card.questions.length) return null;
   const to = card.to?.toLowerCase() ?? null;
   const open = new Set(store.openCards(ticket.project_id).map((e) => e.id));

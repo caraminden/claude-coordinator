@@ -30,7 +30,7 @@ export function createProgress() {
     prep: false, // the review skill is open and no reviewer has started
     side: null, // the untagged step the minion said it is on, until the server next sees another stage worked on
     closing: false, // close_self was called this turn, and nothing since says it stays open
-    finished: null, // [] collects finished steps for step_times (#571), which the runner drains; null collects nothing
+    finished: /** @type {import('../src/db-rows.ts').FinishedStep[] | null} */ (null), // [] collects finished steps for step_times (#571), which the runner drains; null collects nothing
   };
 }
 
@@ -433,6 +433,7 @@ function allDone(p) {
 /**
  * Apply one stored event. Returns the tool calls in it that count as work, each tagged with the id
  * of the step it belongs to (null when no step was in progress). `at` (the event's time) dates a step's start.
+ * @param {number | null} [at]
  */
 export function applyEvent(p, kind, data, at = null) {
   const actions = [];

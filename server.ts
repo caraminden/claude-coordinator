@@ -48,6 +48,8 @@ import { buildOwnerKey, SCHEMA_VERSION, Store, type Artifact, type CiNumberStep,
 import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { machineLink, sameClaude, workerInfo } from './src/machine-turn.ts';
+import { CiHold, withoutHeld } from './src/ci-hold.ts';
+import { writeHold } from './src/ci-hold-file.ts';
 import { ShipWatch } from './src/ci-ships.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
 import { LongJobs, readLongJobs } from './src/long-jobs.ts';
@@ -136,7 +138,7 @@ import { usageName } from './src/usage-ledger.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
-import { Waits, labelTicket, readHeavy, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
+import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
 import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
@@ -273,7 +275,7 @@ const SHOWN_NAME = PREVIEW ? `${APP_NAME} preview` : APP_NAME;
 const PARENT = process.ppid;
 if (PREVIEW) every('preview parent check', 2000, () => process.ppid !== PARENT && process.exit(0));
 // A server a test started goes with the test too, and takes its turns and supervisors along (#1546); never the live data folder's.
-if (DATA_DIR !== DEFAULT_DATA_DIR) exitWithParent(DATA_DIR, every, PARENT);
+const leaveWithTest = DATA_DIR !== DEFAULT_DATA_DIR ? exitWithParent(DATA_DIR, every, PARENT) : undefined;
 // Stalls of the event loop are named in the journal (#526), the start's own synchronous work included, with the code that ran (#609).
 // A long one names who else has the databases open: a lock they hold, or a copy loading the disk (#622).
 // The post-deploy watch (#724), made once the store and waiters are: stalls before then are the boot's own.
@@ -487,6 +489,7 @@ outbox.register({ kind: 'box_job', describe: (r) => `test box news: ${String(r.p
 // with runner.send, not relay, so the loop guard neither counts nor holds them.
 const waiters = new LiveWaiters(store, import.meta.dirname, BOOT_COMMIT, (ticketId, text, light) => runner.send(ticketId, APP_NAME, text, [], light ? { light } : {}), outbox);
 // A reopened minion's held waits go back to waiting (the outbox), and one whose deploy came live meanwhile is found now.
+runner.onStop = (ticketId, eventIds) => outbox.stoppedMessages(ticketId, eventIds);
 runner.onTurnStart = (ticketId, eventIds) => {
   const held = store.listDeliveries({ to: ticketId, states: ['held'] }).some((r) => r.kind === 'wake_when_live' || r.kind === 'chain');
   outbox.turnStarted(ticketId, eventIds);
@@ -666,7 +669,7 @@ runner.workerFor = (_ticket, person) => {
   return null;
 };
 runner.refuseTurn = (ticket, author, from, asker) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from, asker);
-runner.placeFor = (person, warm) => turnPlace(store, claudeLink, person, warm);
+runner.placeFor = (person, warm, taskmaster) => turnPlace(store, claudeLink, person, warm, taskmaster);
 runner.accountFor = (person, warm) => claudeLink.accountFor(person, warm);
 runner.onAuthFailure = (person, account) => claudeLink.expire(person, account);
 // Several Claude accounts per person (#779): which one turns run on, and moving on from one at its limit.
@@ -781,6 +784,9 @@ const longJobs = new LongJobs({
     runner.emit(id, 'note', { text });
     runner.broadcastTicket(id);
   },
+  hold: (slug, since) => ciHold.why(slug, since),
+  heldRun: (run) => ciHold.isHeld(run),
+  report: (slug, text) => tellHeld(slug, text),
 });
 if (!BOOT_CHECK && !PREVIEW) every('long heavy jobs', 60_000, () => longJobs.pump(), 30_000);
 // Contraption turns and app deploys run as the server's children: a restart waits for them. Ultra reviews
@@ -1050,11 +1056,14 @@ if (!BOOT_CHECK && !PREVIEW) every('trouble post-mortems', 10 * 60_000, () => tr
 // Claude sessions wait, and while it's tight the fastest-growing big turn is held at its size. Nothing is killed. Only the
 // real server reads it: a preview or dev copy would otherwise hold the live turns too.
 const growthStop = new GrowthStop();
+// The heavy folder is read off the thread every few seconds; memory easing and the release readers take its last answer.
+const heavySnapshot = new HeavySnapshot(join(DATA_DIR, 'projects', '.heavy'));
+if (!BOOT_CHECK) every('heavy folder', 3_000, () => heavySnapshot.refresh(), 0);
 const memoryEase = new MemoryEase({
   heavyDir: join(DATA_DIR, 'projects', '.heavy'),
   record: (at, episode) => store.addHealthEvent('memory-easing', at, BOOT_COMMIT ?? null, JSON.stringify(episode)),
   waiting: () => {
-    const { waiters } = readHeavy(join(DATA_DIR, 'projects', '.heavy'));
+    const { waiters } = heavySnapshot.get();
     return { starts: heldStarts.list().length, heavy: waiters.filter((w) => w.reason === 'memory').length, nested: waiters.filter((w) => w.reason === 'ease').length };
   },
   slowed: () => growthStop.slowed(),
@@ -1208,7 +1217,7 @@ const citadelServer = new CitadelServer({
 });
 // Every other scheme's targets, found from what it has (#627, src/release-targets.ts), and a reader per kind.
 const targetFinder = new TargetFinder({ store, own: ownScheme, apkFeed: (name) => join(services.opts.home, '.local/share', name, 'android', 'latest.json') });
-const contraptionReader = new ContraptionReader({ store, finder: targetFinder, folder: (row) => services.folder(row), running: (name) => services.running(name), heavy: () => readHeavy(join(DATA_DIR, 'projects', '.heavy')) });
+const contraptionReader = new ContraptionReader({ store, finder: targetFinder, folder: (row) => services.folder(row), running: (name) => services.running(name), heavy: () => heavySnapshot.get() });
 // A Capacitor app's APK, built and published once a deploy carrying a change to it is live (#837, src/apk-build.ts).
 const apkBuilds = new ApkBuilds({
   home: services.opts.home,
@@ -1691,6 +1700,7 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 const ciHealth = new CiHealth(store, {
   outbox,
   longs: () => readLongJobs(join(DATA_DIR, 'projects', '.heavy')),
+  get: withoutHeld(ghGet, (run) => ciHold.isHeld(run)),
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   // shortcut: compares against the clone's local branch, so a scheme whose clone lags GitHub's main gets its last green late; read origin's ref too if one does.
   green: (p, runs, branch) => {
@@ -2018,24 +2028,57 @@ const ciLoad = new CiLoad(store, {
 if (!BOOT_CHECK) ciLoad.start();
 // Ships go first on the CI desktop (#1268): every 15 s, the runners on a ship run's job in any repo with runners on an
 // agent's PC go to the runner agents, which squeeze every other runner there while one runs (src/ci-ships.ts).
+// The agents' samples name their runners' repos; a scheme whose self-hosted jobs ran today counts too, for an agent that sends none.
+const runnerRepos = () =>
+  [
+    ...ciLoad.runnerRepos(),
+    ...store
+      .listProjects()
+      .filter((p) => ciHealth.recent.get(p.id)?.some((j) => j.labels?.includes('self-hosted')))
+      .map((p) => repoSlug(p.repo_url) ?? ''),
+  ].filter(Boolean);
+const schemeOf = (repo: string) => store.listProjects().find((x) => x.repo_dir && repoSlug(x.repo_url)?.toLowerCase() === repo.toLowerCase());
+const asScheme = (repo: string) => {
+  const p = schemeOf(repo);
+  return p ? githubOf(p.repo_dir!) : null;
+};
 const shipWatch = new ShipWatch({
-  // The agents' samples name their runners' repos; a scheme whose self-hosted jobs ran today counts too, for an agent that sends none.
-  repos: () =>
-    [
-      ...ciLoad.runnerRepos(),
-      ...store
-        .listProjects()
-        .filter((p) => ciHealth.recent.get(p.id)?.some((j) => j.labels?.includes('self-hosted')))
-        .map((p) => repoSlug(p.repo_url) ?? ''),
-    ].filter(Boolean),
-  as: (repo) => {
-    const p = store.listProjects().find((x) => x.repo_dir && repoSlug(x.repo_url)?.toLowerCase() === repo);
-    return p ? githubOf(p.repo_dir!) : null;
-  },
+  repos: runnerRepos,
+  as: asScheme,
   send: (ships) => machines.sendShips(ships),
   first: () => liveSlug,
 });
 if (!BOOT_CHECK) shipWatch.start();
+// Deploys first (#1902, Josh 2026-11-24): while a ship is in Citadel's line, optional work stays off the CI desktop.
+const tellHeld = (repo: string, text: string) => {
+  const p = schemeOf(repo);
+  for (const t of p ? taskmastersFor(store, p.id) : []) runner.send(t.id, APP_NAME, text, [], runner.isOverlord(t) ? { everyone: true } : {});
+};
+const ciHold = new CiHold({
+  own: () => liveSlug?.toLowerCase() ?? null,
+  repos: () => runnerRepos().map((r) => r.toLowerCase()),
+  as: asScheme,
+  line: () => waits.line.filter((l) => l.label !== 'tools/deploy.sh').length,
+  off: async () =>
+    !!deployState &&
+    (await stat(join(deployState, 'hold-off')).then(
+      () => true,
+      () => false,
+    )),
+  ticket: (repo, branch, heavyId) => {
+    if (heavyId) return readLongJobs(join(DATA_DIR, 'projects', '.heavy')).find((j) => j.id === heavyId)?.ticket ?? null;
+    const p = schemeOf(repo);
+    return (p && store.listTickets(p.id).find((t) => t.branch === branch)?.id) ?? null;
+  },
+  closed: (id) => store.getTicket(id)?.status === 'closed',
+  mayResume: (heavyId) => longJobs.mayResume(heavyId),
+  heldSince: (heavyId) => longJobs.heldSince(heavyId),
+  tell: (id, text) => runner.leaveMail(id, APP_NAME, text),
+  report: tellHeld,
+  store,
+  publish: (state) => writeHold(join(DATA_DIR, 'projects', '.heavy'), state),
+});
+if (!BOOT_CHECK && !PREVIEW) ciHold.start();
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate
 // alert for every admin, from the job's scheme, linking its minion, cleared once a job gets its own unit again (#532).
 fallbacks.observe = (job, error) => deployWatch?.record('fallback', `${job}: ${error}`.replace(/\d+/g, '#'));
@@ -2344,6 +2387,7 @@ const app: App = {
   ciStore,
   ciNumbers,
   ciTests: (repo, run, c) => ciRuns.testCounts(repo, run, c),
+  ciHold,
   chunked,
   claude: claudeLink,
   codex: codexLink,
@@ -2724,6 +2768,7 @@ function closeDown(why: string) {
   // well inside systemd's default 90 s stop timeout (deploy/claude-coordinator.service sets none).
   const exit = async () => {
     await Promise.race([Promise.all([throughFront?.quiet, holdsLifted]), sleep(SHUTDOWN_GRACE_MS, undefined, { ref: false })]);
+    await leaveWithTest?.();
     process.exit(0);
   };
   // Through the front thread (#1563) this thread keeps listening until the front has let go of the port and answered

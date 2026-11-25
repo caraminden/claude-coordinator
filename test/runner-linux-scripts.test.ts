@@ -219,3 +219,74 @@ test('remove refuses a units folder others can write to, where a unit proves not
     chmodSync(units, 0o700);
   }
 });
+
+/** The installer (#1933) against a fake root: what it wrote, and what it said. `kernel` is the running kernel's name. */
+function install(kernel: string, opts: { wslDir?: boolean; systemd?: boolean } = {}) {
+  const fake = join(tmp, `root-${kernel}-${!!opts.wslDir}-${opts.systemd ?? true}`);
+  for (const d of ['proc/sys/kernel', 'etc/systemd/system', 'var/log', 'home/pal', ...(opts.systemd === false ? [] : ['run/systemd/system']), ...(opts.wslDir ? ['run/WSL'] : [])]) mkdirSync(join(fake, d), { recursive: true });
+  writeFileSync(join(fake, 'proc/sys/kernel/osrelease'), `${kernel}\n`);
+  chmodSync(join(fake, 'home/pal'), 0o755);
+  const bin = join(fake, 'bin');
+  mkdirSync(bin, { recursive: true });
+  stub(bin, 'install', 'mkdir -p "${!#}"');
+  // The agent's log says it connected once its service is started.
+  stub(bin, 'systemctl', `echo "systemctl $*" >> "$LOG"; [ "$1" = enable ] && echo 'Connected to citadel as "x"' >> ${join(fake, 'var/log/citadel-runner-agent.log')}; true`);
+  stub(bin, 'apt-get', 'echo "apt-get $*" >> "$LOG"');
+  stub(bin, 'ldconfig', 'echo libicuuc.so.72');
+  return { fake, run: () => run('install-runner-agent.sh', [base], { CITADEL_TEST_ROOT: fake, PATH: `${bin}:${process.env.PATH_FOR_SCRIPTS}` }) };
+}
+
+test('on plain Linux the install touches no WSL setting, caps all CI in a slice, and says what is left to do (#1933)', async () => {
+  const { fake, run: go } = install('6.1.0-52-amd64');
+  const r = await go();
+  assert.equal(r.code, 0, r.out);
+  assert.equal(existsSync(join(fake, 'etc/wsl.conf')), false, 'no WSL file');
+  assert.doesNotMatch(r.out, /wsl|WSL|PowerShell/, 'no Windows step');
+  const cores = Number(execFileSync('nproc').toString());
+  const sliceFile = readFileSync(join(fake, 'etc/systemd/system/citadel-runners.slice'), 'utf8');
+  assert.match(sliceFile, new RegExp(`^CPUQuota=${cores * 75}%$`, 'm'));
+  assert.match(readFileSync(join(fake, 'etc/systemd/system/citadel-runner-.service.d/yield.conf'), 'utf8'), /^Slice=citadel-runners\.slice$/m);
+  // A file of the same name in the unit's own folder replaces the prefix's: the agent is not in the slice it caps.
+  assert.equal(readFileSync(join(fake, 'etc/systemd/system/citadel-runner-agent.service.d/yield.conf'), 'utf8'), '[Service]\nSlice=system.slice\n');
+  assert.match(readFileSync(join(fake, 'etc/systemd/system/citadel-runner-agent.service'), 'utf8'), /runner-agent\.mjs/);
+  assert.match(r.out, /open its line and pick the schemes/);
+  // A CI job's user reads what anyone may: the owner hears which home is open.
+  assert.match(r.out, /home\/pal can be read by every user here/);
+});
+
+test('in WSL the install still walls the distro off, caps nothing in it, and changes nothing once walled (#1933)', async () => {
+  for (const [kernel, wslDir] of [
+    ['6.6.87.2-microsoft-standard-WSL2', false],
+    ['6.6.0-custom', true],
+  ] as const) {
+    const { fake, run: go } = install(kernel, { wslDir });
+    const first = await go();
+    assert.equal(first.code, 0, first.out);
+    assert.match(first.out, /Restart the distro/);
+    const conf = readFileSync(join(fake, 'etc/wsl.conf'), 'utf8');
+    assert.match(conf, /^\[interop\]\nenabled=false$/m);
+    assert.equal(existsSync(join(fake, 'etc/systemd/system/citadel-runner-agent.service')), false, 'it stops there');
+    const second = await go();
+    assert.equal(second.code, 0, second.out);
+    assert.equal(existsSync(join(fake, 'etc/systemd/system/citadel-runners.slice')), false, '.wslconfig caps that VM');
+    assert.doesNotMatch(readFileSync(join(fake, 'etc/systemd/system/citadel-runner-.service.d/yield.conf'), 'utf8'), /Slice=/);
+    assert.match(second.out, /keep-wsl-up\.ps1/);
+  }
+});
+
+test('a PC that is not x64 is refused before anything is written', async () => {
+  const { fake, run: go } = install('6.1.0-52-arm64');
+  stub(join(fake, 'bin'), 'uname', 'echo aarch64');
+  const r = await go();
+  assert.equal(r.code, 1);
+  assert.match(r.out, /This PC is aarch64/);
+  assert.equal(existsSync(join(fake, 'opt')), false);
+});
+
+test('plain Linux without systemd is refused before anything is written', async () => {
+  const { fake, run: go } = install('6.1.0-52-amd64', { systemd: false });
+  const r = await go();
+  assert.equal(r.code, 1);
+  assert.match(r.out, /systemd is not running here/);
+  assert.equal(existsSync(join(fake, 'opt')), false);
+});

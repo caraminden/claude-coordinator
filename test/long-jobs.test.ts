@@ -227,3 +227,55 @@ test('a job that ended but whose wake never went out (a restart in between) wake
   await new LongJobs(s.deps).pump();
   assert.equal(s.wakes.length, 1, 'once woken, never again');
 });
+
+// Deploys first (#1902): a heavy job handed over while ships were in line (`quiet`), and long jobs, wait for the line.
+function quiet(s: ReturnType<typeof setup>, o: Record<string, unknown> = {}) {
+  const f = join(s.dir, 'long', 'j1-1700000000-abc.json');
+  writeFileSync(f, JSON.stringify({ ...JSON.parse(readFileSync(f, 'utf8')), quiet: true, ...o }));
+}
+
+test('a handed-over job starts in the day once the line is empty, on the side runner with the normal limit', async () => {
+  const s = setup([1], { now: NOON, workflow: 'on:\n  workflow_dispatch:\n    inputs:\n      minutes:\n      long:\n' });
+  quiet(s);
+  let why: string | null = '2 ships are in line';
+  s.deps.hold = () => why;
+  await s.pump.pump();
+  assert.equal(s.dispatches().length, 0);
+  why = null;
+  await s.pump.pump();
+  assert.equal(s.dispatches().length, 1);
+  assert.doesNotMatch(s.dispatches()[0].join(' '), /inputs\[(long|minutes)\]/);
+  assert.match(s.notes.join('\n'), /Heavy job .* went to own\/repo1's CI/);
+  assert.equal(longView(readLongJobs(s.dir), NOON)[0].quiet, true);
+});
+
+test('ships hold a long job at night too, and one held over a day is told to the Taskmaster once', async () => {
+  const s = setup([1], { now: NIGHT });
+  const told: string[] = [];
+  s.deps.hold = () => 'a ship is in line';
+  s.deps.report = (_slug, text) => told.push(text);
+  let now = NIGHT;
+  s.deps.now = () => now;
+  await s.pump.pump();
+  assert.equal(s.dispatches().length, 0);
+  now = readLongJobs(s.dir)[0].held_at! + 24 * 3600_000;
+  await s.pump.pump();
+  await s.pump.pump();
+  assert.equal(told.length, 1);
+  assert.match(told[0], /held off the CI desktop for over 24 hours .*a ship is in line/);
+});
+
+test('a running job the hold stopped is not ended by its cancelled run, and wakes its minion when the run comes back and ends', async () => {
+  const s = setup([1], { now: NOON });
+  quiet(s, { state: 'running', run_id: 100, url: 'https://github.com/run/100', dispatched_at: NOON });
+  Object.assign(s.run, { status: 'completed', conclusion: 'cancelled' });
+  let held = true;
+  s.deps.heldRun = () => held;
+  await s.pump.pump();
+  assert.deepEqual([readLongJobs(s.dir)[0].state, s.wakes.length], ['dispatched', 0]);
+  held = false;
+  Object.assign(s.run, { conclusion: 'success', log: ['2026-11-20T09:00:01.0Z ' + BEGIN, '2026-11-20T09:00:02.0Z hi', `2026-11-20T09:00:03.0Z ${END}0 ===`].join('\n') });
+  await s.pump.pump();
+  assert.equal(readLongJobs(s.dir)[0].state, 'done');
+  assert.match(s.wakes[0][1], /^Heavy job/);
+});

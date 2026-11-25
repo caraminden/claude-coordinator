@@ -88,7 +88,7 @@ test('a sample stores the columns, three cold ones fire one event, and the page 
   assert.equal(store.healthEventsSince(['cache-cold'], 0).length, 1);
   await page.sample();
   assert.equal(store.healthEventsSince(['cache-cold'], 0).length, 1, 'one event per spell');
-  const data: any = await page.build({ canSee: () => true, admin: true, key: 'k' });
+  const data = await page.build({ canSee: () => true, admin: true, key: 'k' });
   assert.equal(data.citadel.host.cache.length > 0, true);
   assert.equal(data.citadel.host.cache[0][1], 5);
   assert.match(data.citadel.verdict.reasons.join('|'), /database fell out of memory/);

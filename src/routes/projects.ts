@@ -12,7 +12,7 @@ import { APP_NAME } from '../appname.ts';
 import { catalogue } from '../catalogue.ts';
 import { findPlugins } from '../plugin-scan.ts';
 import { AGENT_NAME } from '../auth.ts';
-import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type User } from '../db.ts';
+import { askerKey, buildOwnerKey, BUILDS_MODES, EFFORTS, FABLE_OKS, GH_RUNNERS_MODES, GRILL_MODES, LAND_MODES, MAX_INSTRUCTIONS, MAX_PERSONAL_INSTRUCTIONS, MODELS, ONBOARDING, ONBOARDING_MODES, onboardingOpen, type Project, type Ticket, type TicketFields, type User } from '../db.ts';
 import { adminAskRefusal, askedCitadelKey, CITADEL_REPLY_MS, adminOwned, taskmasterTargets } from '../access.ts';
 import { HomeBucketCache, homeSince, homeView, inboxItems, inboxWaiting, minionCount } from '../inbox.ts';
 import { readScope } from '../read-scope.ts';
@@ -113,7 +113,7 @@ async function putOnGithub(app: App, projectId: number, dir: string, slug: strin
  * The scheme another scheme's Taskmaster (`from`) may message: only schemes the turn's person is in, and Citadel (src/access.ts).
  * A scheme they aren't in gets the same answer as one that doesn't exist, so its name doesn't leak.
  */
-export function schemeTarget(app: App, from: Ticket, scheme: unknown) {
+export function schemeTarget(app: App, from: TicketFields, scheme: unknown) {
   const { store } = app;
   const want = String(scheme ?? '')
     .trim()

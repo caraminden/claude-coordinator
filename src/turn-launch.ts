@@ -960,11 +960,12 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
       : facts.unit
         ? { how: 'unit', systemdRun: ['--user', '--collect', '--quiet', ...group, '-p', 'UMask=0077', ...thpProps(), ...wrapper], scope: ['--user', '--scope', '--collect', '--quiet', ...group], wrapper }
         : { how: 'child', wrapper };
-  // One pool per place (the host's turns folder, or a person's) and version; it gets a plain env, each turn's own comes with its registration.
+  // One pool per place (the host's turns folder, or a person's; their Taskmaster container's apart, as it counts pids apart and the
+  // record is kept by pid, #1882) and version; it gets a plain env, each turn's own comes with its registration.
   // On the host it runs in a unit of its own, so it outlives the turn that started it, in the Taskmasters' slice (#1280):
   // it serves their Citadel tools too, so a minion storm mustn't stall it (about 70M). `omit` (#1338): every turn's
   // Citadel tools go through it, and with minion turns `avoid` it would otherwise be oomd's pick ahead of all of them.
-  const poolDir = join(dirname(dir), '.pool', pins.POOL_VERSION);
+  const poolDir = join(dirname(dir), !place.host && ticket.kind === 'coordinator' ? '.pool-taskmaster' : '.pool', pins.POOL_VERSION);
   const poolEnv = Object.fromEntries(['PATH', 'HOME', 'LANG', 'TZ'].filter((k) => env[k]).map((k) => [k, env[k]]));
   const poolUnit = `citadel-mcp-pool-${createHash('sha256').update(poolDir).digest('hex').slice(0, 12)}`;
   const pool: PoolSpec | undefined = pooled

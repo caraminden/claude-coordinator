@@ -269,8 +269,8 @@ park() { say "$*"; exit 75; }
 #                                 Nothing printed, a failure or a commit not given: the bisect halves as always.
 #   land_merge <side> <base> <ours> <theirs> <path>  the "hook" rule of MERGES: merges the file, leaving the result in
 #                                 <ours>; <side> names which of ours and theirs is $BRANCH's. Exit 0 clean, else
-#                                 it stops the rebase as a clash does. With LAND_MERGE_DIFF3=1 (the path has append or
-#                                 sum lines too) it leaves its clashes in <ours> as this script's diff3 markers and
+#                                 it stops the rebase as a clash does. With LAND_MERGE_DIFF3=1 (the path has append, sum
+#                                 or count lines too) it leaves its clashes in <ours> as this script's diff3 markers and
 #                                 those rules take them (the header at MERGES).
 land_failures() {
   awk '
@@ -305,10 +305,12 @@ fi
 #                          word by word. A number both raised becomes $BRANCH's plus the branch's raise (37_900 and
 #                          37_800 over 37_500: 38_200), and words both add at the same place (a note each in a comment)
 #                          keep $BRANCH's, then the branch's.
+#   <path> count <regex>   as sum, for a list of sizes or counts: a number either side lowered adds up too (main 110 and
+#                          the branch 95 over 100: 105). Two sides changing one #N differently is a clash.
 #   <path> main            $BRANCH's copy: a file land_rebased makes again from the merged tree (a baseline).
 #   <path> hook            land.local.sh's land_merge decides.
-# A path may have several append and sum lines: each clash tries them in order. main takes the whole file, so it stands
-# alone. hook may come with append and sum lines (Citadel's src/db.ts: renumbered by its hook, appended by rule): the
+# A path may have several append, sum and count lines: each clash tries them in order. main takes the whole file, so it stands
+# alone. hook may come with append, sum and count lines (Citadel's src/db.ts: renumbered by its hook, appended by rule): the
 # hook runs first with LAND_MERGE_DIFF3=1 set, and where it can't merge cleanly it leaves this script's own clash
 # markers in <ours> (git merge-file -p --diff3 --marker-size=31 -L main -L base -L branch: the side that is $BRANCH first) and
 # exits non-zero; the path's other rules then take those clashes, as they would git's.
@@ -351,16 +353,18 @@ merge_hunk() { # <rule> <regex>, on M (main's lines), O (base) and B (the branch
     append)
       [ ${#O[@]} = 0 ] && [[ $head =~ $2 ]] || return 1
       for l in "${M[@]}" "${B[@]}"; do [[ $l =~ ^[[:space:]] ]] || return 1; done
+      # A key both added ('a.ts': twice) would let the last one win: a clash for a person.
+      for l in "${M[@]}" "${B[@]}"; do [[ ! $l =~ ^[[:space:]]+([\'\"][^\'\"]+[\'\"]): ]] || echo "${BASH_REMATCH[1]}"; done | sort | uniq -d | grep -q . && return 1
       printf '%s\n' "${M[@]}" "${B[@]}" ;;
-    sum)
+    sum | count)
       [ ${#O[@]} != 0 ] && [ ${#M[@]} = ${#O[@]} ] && [ ${#B[@]} = ${#O[@]} ] || return 1
       for ((i = 0; i < ${#O[@]}; i++)); do
-        [[ ${O[i]} =~ $2 ]] && merge_words "${M[i]}" "${O[i]}" "${B[i]}" || return 1
+        [[ ${O[i]} =~ $2 ]] && merge_words "${M[i]}" "${O[i]}" "${B[i]}" "$1" || return 1
       done ;;
     *) return 1 ;;
   esac
 }
-# <main's line> <base> <the branch's>: the line merged a word at a time (runs of digits and _, of letters, of spaces,
+# <main's line> <base> <the branch's> <sum or count>: the line merged a word at a time (runs of digits and _, of letters, of spaces,
 # or one other character), or fails. Each number is followed by its side's tag (@m, @o, @b), which never matches
 # across sides: git would take a raise both made alike once, and the tag makes every number a clash summed here (one
 # nobody changed sums to itself), while the number itself still lines the words up.
@@ -386,8 +390,12 @@ merge_words() {
           for w in "${M[@]}" "${B[@]}"; do out+=$w; done
         elif [ ${#O[@]}${#M[@]}${#B[@]} = 111 ] && [[ $O$M$B =~ ^[0-9_]+$ ]] && [[ $O =~ ^[0-9] && $M =~ ^[0-9] && $B =~ ^[0-9] ]]; then
           m=$((10#${M//_/})) o=$((10#${O//_/})) b=$((10#${B//_/}))
-          [ "$m" -ge "$o" ] && [ "$b" -ge "$o" ] || { rm -rf "$d"; return 1; }
           n=$((m + b - o))
+          if [ "$4" = count ]; then
+            [ "$n" -ge 0 ] && { [[ $out != *'#' ]] || [ "$m" = "$o" ] || [ "$b" = "$o" ]; } || { rm -rf "$d"; return 1; }
+          else
+            [ "$m" -ge "$o" ] && [ "$b" -ge "$o" ] || { rm -rf "$d"; return 1; }
+          fi
           if [[ $M == *_* ]]; then
             local g=''
             while [ ${#n} -gt 3 ]; do g=_${n: -3}$g n=${n:0:${#n}-3}; done
@@ -411,7 +419,7 @@ merge_driver() {
     case $rule in
       main) [ ${#rules[@]} = 0 ] && [ -z "$hook" ] || return 1; rules=(main); break ;; # the whole file: alone
       hook) [ -z "$hook" ] || return 1; hook=1 ;;
-      append | sum) [ -n "$re" ] || return 1; rules+=("$rule" "$re") ;;
+      append | sum | count) [ -n "$re" ] || return 1; rules+=("$rule" "$re") ;;
       *) return 1 ;;
     esac
   done <<<"$MERGES"

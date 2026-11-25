@@ -26,7 +26,7 @@ let pub = '';
 mkdirSync(join(root, 'data'), { recursive: true });
 const seed = new Store(join(root, 'data', 'coordinator.db'));
 const project = seed.createProject('Uploads', null).id;
-const told: { login: string | null; body: any }[] = [];
+const told: { login: string | null; body: unknown }[] = [];
 
 const stub = createServer((req: IncomingMessage, res: ServerResponse) => {
   let text = '';
@@ -39,7 +39,9 @@ const stub = createServer((req: IncomingMessage, res: ServerResponse) => {
   });
 });
 
-type Got = { status: number; body: any };
+/** The parts of the server's answers these tests read. */
+type UpBody = { id: string; chunk: number; offset: number; size: number; done: boolean; path: string; app: unknown };
+type Got = { status: number; body: UpBody };
 /** A request to the server as `host`, with an optional body (fetch can't set Host). */
 function ask(host: string, method: string, path: string, headers: Record<string, string>, body?: Buffer | string): Promise<Got> {
   return new Promise((resolve, reject) => {
@@ -47,11 +49,11 @@ function ask(host: string, method: string, path: string, headers: Record<string,
       let text = '';
       res.on('data', (d) => (text += d));
       res.on('end', () => {
-        let parsed: any = text;
+        let parsed: unknown = text;
         try {
           parsed = JSON.parse(text);
         } catch {}
-        resolve({ status: res.statusCode!, body: parsed });
+        resolve({ status: res.statusCode!, body: parsed as UpBody });
       });
     });
     r.on('error', reject);
@@ -105,7 +107,7 @@ test('a big file goes into the shared folder in chunks, resuming after a connect
   }
   assert.ok(at > CHUNK_SIZE && at <= CHUNK_SIZE + 1024 * 1024, `resumes from ${at}`);
   // On like the kit's client: a 409 (the broken PUT still finishing) asks where it got to.
-  let done: Got = { status: 0, body: {} };
+  let done: Got = { status: 0, body: {} as UpBody };
   const statuses: number[] = [];
   for (let i = 0; i < 100 && !done.body.done; i++) {
     done = await put(at, data.subarray(at, at + CHUNK_SIZE));
@@ -172,18 +174,18 @@ test('the free-disk floor counts what uploads under way still have to send; a st
     c.free = async () => 150;
     const cara = { uid: 1, login: 'cara' };
     const target = { kind: 'shared', project: 1 } as const;
-    await assert.rejects(c.start(cara, target, { name: 'big', size: 60 }), (e: any) => e.status === 507 && /Not enough room/.test(e.message));
+    await assert.rejects(c.start(cara, target, { name: 'big', size: 60 }), (e: Error & { status: number }) => e.status === 507 && /Not enough room/.test(e.message));
     const a = await c.start(cara, target, { name: 'a', size: 40 });
     // 150 free, 40 still owed by a: 20 more would leave 90, under the floor.
-    await assert.rejects(c.start(cara, target, { name: 'b', size: 20 }), (e: any) => e.status === 507);
+    await assert.rejects(c.start(cara, target, { name: 'b', size: 20 }), (e: Error & { status: number }) => e.status === 507);
     // Someone else's, or one for another place, is not found.
-    await assert.rejects(c.status({ uid: 2, login: 'olive' }, target, a.id), (e: any) => e.status === 404);
-    await assert.rejects(c.status(cara, { kind: 'app', app: 'stub' }, a.id), (e: any) => e.status === 404);
+    await assert.rejects(c.status({ uid: 2, login: 'olive' }, target, a.id), (e: Error & { status: number }) => e.status === 404);
+    await assert.rejects(c.status(cara, { kind: 'app', app: 'stub' }, a.id), (e: Error & { status: number }) => e.status === 404);
     // Down at the floor, chunks wait.
     c.free = async () => 99;
     await assert.rejects(
       c.put(cara, target, a.id, 0, [Buffer.from('x')], async () => ({})),
-      (e: any) => e.status === 507,
+      (e: Error & { status: number }) => e.status === 507,
     );
     // Untouched for 3 days, it's given up at the next start, and no longer counted.
     const old = (Date.now() - 4 * 24 * 3600 * 1000) / 1000;
@@ -241,7 +243,7 @@ test("the kit's client (ui/upload.js) pauses, resumes after a reload from where 
     const file = new File([data], 'photos.bin', { lastModified: 1 });
 
     // Paused once the first chunk is in: it stays at that offset.
-    const first = startUpload(endpoint, file, { folder: 'inbox/Kit', onChange: (u: any) => u.sent >= CHUNK_SIZE && u.pause() });
+    const first = startUpload(endpoint, file, { folder: 'inbox/Kit', onChange: (u) => u.sent >= CHUNK_SIZE && u.pause() });
     await until('the upload to pause', async () => first.state === 'paused', 2000);
     assert.equal(first.state, 'paused');
     const id = JSON.parse([...stored.values()][0]).id;
@@ -249,15 +251,15 @@ test("the kit's client (ui/upload.js) pauses, resumes after a reload from where 
 
     // A reload: a new client for the same file picks the upload up rather than starting another.
     const second = startUpload(endpoint, file, { folder: 'inbox/Kit' });
-    const result: any = await second.done;
-    assert.equal(result.path, 'inbox/Kit/photos.bin');
-    assert.equal(result.size, data.length);
+    const result = await second.done;
+    assert.equal(result!.path, 'inbox/Kit/photos.bin');
+    assert.equal(result!.size, data.length);
     assert.ok(readFileSync(join(projectSharedDir(srv.data, project), 'inbox/Kit/photos.bin')).equals(data));
     assert.deepEqual(readdirSync(join(projectSharedDir(srv.data, project), 'inbox/Kit')), ['photos.bin']);
     assert.equal(stored.size, 0, 'a finished upload is forgotten');
 
     // Cancelled: done answers null and the server lets it go.
-    const third = startUpload(endpoint, new File([data], 'gone.bin'), { onChange: (u: any) => u.sent > 0 && u.cancel() });
+    const third = startUpload(endpoint, new File([data], 'gone.bin'), { onChange: (u) => u.sent > 0 && u.cancel() });
     assert.equal(await third.done, null);
     await until('the chunked dir to empty', async () => !readdirSync(join(root, 'data', 'chunked')).length, 1000);
     assert.deepEqual(readdirSync(join(root, 'data', 'chunked')), []);

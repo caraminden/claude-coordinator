@@ -20,11 +20,13 @@ const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\brunner\.send
  * Files with act calls that aren't judges, each with why and its count of act calls. A new act call in one of them is red:
  * if it decides on real inputs, register its judge in src/judges.ts (callers), new judges log-only; if not, bump the count.
  */
+// Two ships that change an entry merge by rule (count, MERGES in tools/land.local.sh, #1917).
+// biome-ignore format: one line per entry is what the merge rule reads
 const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
-  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 43 },
+  'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 45 },
   'kit/skills/test-quality/scripts/test-overlap.ts': { why: 'an audit script: kills only the test process it started when that file runs past its time limit; judges nothing', calls: 1 },
   'src/running-turn.ts': { why: 'sends a running turn the signal the runner asks for (a stop, or what is left of a killed turn); judges nothing (#1937)', calls: 2 },
-  'src/exit-with-parent.ts': { why: "kills only its own test server's processes when the parent test exits; judges nothing", calls: 2 },
+  'src/exit-with-parent.ts': { why: "kills only its own test server's processes when the parent test exits (and asks whether that test is alive); judges nothing", calls: 3 },
   'src/worktree-deps.ts': { why: 'stops its own npm install past its time limit; judges nothing', calls: 1 },
   'src/ci-armed.ts': { why: "tellTaskmaster itself and the minion's own message tool", calls: 3 },
   'src/routes/tickets.ts': { why: "messages a minion or person sends on purpose, and tracking notes, and a person's Split first on a start card (#1674)", calls: 11 },

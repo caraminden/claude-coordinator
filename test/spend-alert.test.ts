@@ -52,7 +52,7 @@ test('each stage fires once, the highest when several pass at once, and Keep goi
   muted.muted = 'Cara';
   muted.addMessage('x', 'claude-opus-5-5', { input_tokens: 10_000_000 }, 0); // $70
   assert.equal(muted.crossed(DEFAULT_STAGES), null);
-  assert.deepEqual(muted.state, { usd: 70, fired: 2, muted: 'Cara' });
+  assert.deepEqual(muted.state, { usd: 70, open: { 'claude-opus-5-5': 40 }, fired: 2, muted: 'Cara' });
 });
 
 test("stages from the setting, and the alert's words", () => {

@@ -19,7 +19,7 @@ test('turns count by the model they ran on, consults by turn, and escalations ap
   const p = store.createProject('P', null);
   const make = (model: string, effort: string) => {
     const t = store.createTicket({ project_id: p.id, title: model, permission_mode: 'bypassPermissions', created_by: 'Cara' });
-    store.updateTicket(t.id, { model, effort } as any);
+    store.updateTicket(t.id, { model, effort });
     return t.id;
   };
   const db = store.db;

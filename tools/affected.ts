@@ -1,10 +1,13 @@
 // The affected-tests map reader (#1112): which test files a change can break. tools/citadel-test --affected runs it.
 // The map's format is the spec in the shared folder's specs/affected-tests-map.md; tools/affected-map.txt is Citadel's map.
-//   node tools/affected.ts [--root <repo>] [--map <file>] [--base <ref>] [--paths <changed path>...]
+//   node tools/affected.ts [--root <repo>] [--map <file>] [--base <ref>] [--narrow] [--paths <changed path>...]
+// --narrow (#1928, what citadel-test runs by default): only the tests touched and the @samename ones; no map rule, no
+// @imports, nothing unmapped. The wide pick (no flag) is what CI, land.sh's smoke check and the burn-in read.
 // Prints one line per answer on stdout, tab-separated:
 //   run <test path> <why: "touched", or "map:<line> <source glob>" for each rule that picked it>
 //   unmapped <changed path>        (no rule covers it and it is not a test file)
 //   empty                          (nothing changed)
+//   wide <n>                       (with --narrow: how many more tests the wide pick would run)
 //   full                           (@fallback full and a path is unmapped: run the full suite instead)
 // Exits 0, 2 on a bad map or a missing base, 3 for `full`. --paths stands in for the git diff (the tests use it).
 import { spawnSync } from 'node:child_process';
@@ -98,7 +101,7 @@ export function directImports(root: string, file: string): string[] {
 
 export type Answer = { run: { test: string; why: string[] }[]; unmapped: string[]; empty: boolean; full: boolean };
 
-export function affected(map: Map, changed: string[], tracked: string[], root: string): Answer {
+export function affected(map: Map, changed: string[], tracked: string[], root: string, narrow = false): Answer {
   const picked = new Map<string, string[]>();
   const add = (test: string, why: string) => {
     const w = picked.get(test) ?? [];
@@ -111,7 +114,7 @@ export function affected(map: Map, changed: string[], tracked: string[], root: s
     const isTest = map.tests.some((re) => re.test(p));
     if (isTest && existsSync(join(root, p))) add(p, 'touched');
     let covered = isTest;
-    for (const r of map.rules) {
+    for (const r of narrow ? [] : map.rules) {
       if (!r.re.test(p)) continue;
       if (r.glob !== '**') covered = true;
       for (const t of r.tests) {
@@ -132,7 +135,7 @@ export function affected(map: Map, changed: string[], tracked: string[], root: s
       }
     }
     // @imports: a changed source file also runs every tracked test file that imports it directly (#1809).
-    if (!isTest && map.imports.some((re) => re.test(p))) {
+    if (!narrow && !isTest && map.imports.some((re) => re.test(p))) {
       imports ??= new Map(tracked.filter((t) => map.tests.some((re) => re.test(t))).map((t) => [t, directImports(root, t)]));
       for (const [t, deps] of imports)
         if (deps.includes(p)) {
@@ -140,7 +143,7 @@ export function affected(map: Map, changed: string[], tracked: string[], root: s
           covered = true;
         }
     }
-    if (!covered) unmapped.push(p);
+    if (!covered && !narrow) unmapped.push(p);
   }
   const run = [...picked].sort(([a], [b]) => a.localeCompare(b)).map(([test, why]) => ({ test, why }));
   return { run, unmapped, empty: changed.length === 0, full: map.fallback === 'full' && unmapped.length > 0 };
@@ -150,12 +153,14 @@ if (import.meta.main) {
   const argv = process.argv.slice(2);
   let root = resolve(import.meta.dirname, '..'),
     mapFile = '',
-    base = 'main';
+    base = 'main',
+    narrow = false;
   let paths: string[] | null = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--root') root = resolve(argv[++i]);
     else if (argv[i] === '--map') mapFile = argv[++i];
     else if (argv[i] === '--base') base = argv[++i];
+    else if (argv[i] === '--narrow') narrow = true;
     else if (argv[i] === '--paths') {
       paths = argv.slice(i + 1);
       break;
@@ -169,9 +174,11 @@ if (import.meta.main) {
     if (!mapFile) throw new Error('no tools/affected-map.txt (or affected-map.txt) in the repo');
     const map = parseMap(readFileSync(mapFile, 'utf8'));
     const changed = paths ?? changedPaths(root, base);
-    const a = affected(map, changed, git(root, ['ls-files']), root);
+    const tracked = git(root, ['ls-files']);
+    const a = affected(map, changed, tracked, root, narrow);
     if (a.empty) console.log('empty');
     for (const r of a.run) console.log(`run\t${r.test}\t${r.why.join(', ')}`);
+    if (narrow) console.log(`wide\t${affected(map, changed, tracked, root).run.filter((r) => !a.run.some((n) => n.test === r.test)).length}`);
     for (const u of a.unmapped) console.log(`unmapped\t${u}`);
     if (a.full) {
       console.log('full');

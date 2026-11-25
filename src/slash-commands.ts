@@ -4,7 +4,7 @@
 // commands (/btw, /fresh, /help) are the front end's (public/slash-commands.js) and never reach a turn.
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Store, Ticket } from './db.ts';
+import type { Store, TicketFields } from './db.ts';
 import { commandsKey, schemeCommandsKey, type LoadedCommands } from './runner.ts';
 
 /** One line on Claude Code's built-ins and bundled skills that have no file to read it from. */
@@ -94,7 +94,7 @@ export interface CommandInfo {
  * The commands a chat's turns load, each with its line: its own last turn's list, else the scheme's newest (a chat
  * with no turn yet). `loaded` is false when no turn in the scheme has said, so the composer refuses nothing.
  */
-export function chatCommands(store: Store, ticket: Ticket): { loaded: boolean; commands: CommandInfo[] } {
+export function chatCommands(store: Store, ticket: TicketFields): { loaded: boolean; commands: CommandInfo[] } {
   const loaded = store.getSetting<LoadedCommands>(commandsKey(ticket.id)) ?? store.getSetting<LoadedCommands>(schemeCommandsKey(ticket.project_id));
   if (!loaded?.names?.length) return { loaded: false, commands: [] };
   const commands = loaded.names.map((name) => {

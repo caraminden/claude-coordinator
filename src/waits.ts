@@ -617,6 +617,35 @@ export async function readHeavyA(dir: string, now = Date.now(), held: (slotFile:
   return { holders, waiters: waiters.sort((a, b) => a.since - b.since) };
 }
 
+/**
+ * The heavy folder as the server's thread sees it (btrfs can hold a readdir for seconds): the last answer of a read made
+ * off the thread, at most a refresh old. A failed read keeps the last answer; nothing here throws.
+ */
+export class HeavySnapshot {
+  private last: { holders: HeavyJob[]; waiters: HeavyJob[] } = { holders: [], waiters: [] };
+  private reading: Promise<void> | null = null;
+  private dir: string;
+  private held?: (slotFile: string) => boolean | Promise<boolean>;
+  constructor(dir: string, held?: (slotFile: string) => boolean | Promise<boolean>) {
+    this.dir = dir;
+    this.held = held;
+  }
+  get() {
+    return this.last;
+  }
+  /** One read at a time: a call while one is under way waits for that one. */
+  refresh(): Promise<void> {
+    return (this.reading ??= readHeavyA(this.dir, Date.now(), this.held)
+      .then((r) => {
+        this.last = r;
+      })
+      .catch(() => {})
+      .finally(() => {
+        this.reading = null;
+      }));
+  }
+}
+
 const holderOf = (text: string | null | undefined) => text?.match(/^(.*?): (.*) \(since \d\d:\d\d, pid (\d+)\)$/);
 function waiterOf(text: string | null): HeavyJob | null {
   const [who, what, since, reason] = (text ?? '').split('\n');
@@ -856,10 +885,10 @@ export class Waits {
   }
   private reads = 0;
 
-  /** poll for a person's own action (setOrder), which must have the line before it returns: it reads in the thread. */
+  /** poll for a person's own action (setOrder), which must have the line before it returns: it reads the land line in the thread and takes the heavy folder from the last poll. */
   private pollNow() {
     this.reads++;
-    this.apply(this.d.deployState ? readLandLine(this.d.deployState, this.d.alive) : null, readHeavy(this.d.heavyDir, this.now(), this.d.held), this.d.deployState ? readEarly(this.d.deployState) : null, !!(this.d.deployState && stat(join(this.d.deployState, 'early-off'))));
+    this.apply(this.d.deployState ? readLandLine(this.d.deployState, this.d.alive) : null, this.lastHeavy, this.d.deployState ? readEarly(this.d.deployState) : null, !!(this.d.deployState && stat(join(this.d.deployState, 'early-off'))));
   }
 
   /** Which waiting ships have an early run, and which just lost theirs (#1905): the file goes when land.sh throws the run away. */
@@ -892,7 +921,10 @@ export class Waits {
     return watch;
   }
 
+  /** The heavy folder as the last poll read it (off the thread); a person's own action reuses it rather than read the folder in the thread. */
+  private lastHeavy: ReturnType<typeof readHeavy> = { holders: [], waiters: [] };
   private apply(land: { line: LandTicket[]; took: number[] } | null, heavy: ReturnType<typeof readHeavy>, early: EarlyFile | null = null, off = false) {
+    this.lastHeavy = heavy;
     const now = this.now();
     const next = new Map<number, Wait & { key?: string }>();
     if (land) {

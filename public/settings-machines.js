@@ -59,7 +59,13 @@ function machineAddForm(runners, label) {
     status,
     // The steps sit in the form they are about (#492), not in a paragraph under the list.
     runners
-      ? ''
+      ? h(
+          'ol',
+          { class: 'settings-steps' },
+          h('li', {}, h('strong', {}, 'Name it'), ' and press Add CI runner host.'),
+          h('li', {}, h('strong', {}, 'Paste the line it shows'), ' on that PC, as administrator or root. Any 64-bit Intel or AMD PC with Windows, or Linux with systemd.'),
+          h('li', {}, h('strong', {}, 'Open its line and pick the schemes'), ' under Runs CI for. Only those schemes can put runners on it: CI there runs code their members push.'),
+        )
       : h(
           'ol',
           { class: 'settings-steps' },
@@ -100,7 +106,7 @@ export function machinesPage(main = {}) {
   shownTokens.clear();
   const add = machineAddForm(false, 'Add machine');
   // A CI runner host is a different program with a different job, so it has its own add and install line (#439).
-  const runners = account?.admin ? machineAddForm(true, 'Add CI runner host') : null;
+  const runners = machineAddForm(true, 'Add CI runner host');
   const section = h(
     'section',
     { class: 'artifacts-main machines-main' },
@@ -123,9 +129,9 @@ export function machinesPage(main = {}) {
     h('div', { id: 'machine-list', class: 'machine-list' }),
     h('p', { id: 'emulator-lease', class: 'muted small', role: 'status' }, 'Android emulator: checking…'),
     // The CI desktop's load moved to the CI page (#968, Cara: "move the CI box performance page from machines into here"), since #1423 the Releases page's Overview tab.
-    h('p', { class: 'muted small' }, "CI runners, their queue and the CI desktop's load are on ", h('a', { href: `#/p/${view.projectId}/ci` }, "the Releases page's Overview tab"), '.'),
-    runners ? h('div', { class: 'row machines-bar runners-bar' }, h('span', { class: 'muted small' }, "A CI runner host adds and removes schemes' CI runners on its PC (tools/ci-runner/README.md)."), h('span', { class: 'spacer' }), runners.toggle) : '',
-    runners ? runners.form : '',
+    h('p', { class: 'muted small' }, "CI runners, their queue and the CI PCs' load are on ", h('a', { href: `#/p/${view.projectId}/ci` }, "the Releases page's Overview tab"), '.'),
+    h('div', { class: 'row machines-bar runners-bar' }, h('span', { class: 'muted small' }, "A CI runner host adds and removes schemes' CI runners on its PC, for the schemes you lend it to."), h('span', { class: 'spacer' }), runners.toggle),
+    runners.form,
     h('p', { class: 'muted small' }, 'Nothing typed here runs a command on a machine.'),
     h(
       'details',
@@ -184,9 +190,16 @@ function renderMachineSetup() {
         {
           os: 'runner-linux',
           tab: 'Linux in WSL',
-          label: 'Root shell in the CI runners\' WSL distro on that PC (wsl -d citadel-ci -u root; tools/ci-runner/README.md, "Linux runners in WSL"): installs the Linux runner agent as a systemd service.',
+          label: 'Root shell in the CI runners\' WSL distro on the Windows PC (wsl -d citadel-ci -u root; tools/ci-runner/README.md, "Linux runners in WSL"): installs the Linux runner agent as a systemd service.',
           text: machineSetupRunnerAgentLinux(t.url, t.token),
           note: "The first time, it sets up /etc/wsl.conf and asks you to restart the distro and paste this again. Then it installs Node, git and the runner's libraries, starts the agent and waits until this machine shows online. Use a host of its own for this, not the Windows agent's.",
+        },
+        {
+          os: 'runner-plain',
+          tab: 'Linux',
+          label: 'Root shell (sudo -i) on a Linux PC (tools/ci-runner/README.md, "Linux runners on plain Linux"): installs the same agent as a systemd service. CI jobs run as a user of their own, with no sudo.',
+          text: machineSetupRunnerAgentLinux(t.url, t.token),
+          note: "It installs Node, git and the runner's libraries where they are missing (Debian or Ubuntu; elsewhere it names what to install), starts the agent and waits until this machine shows online. All CI there is held to 75% of the PC, or the owner's own number in /opt/citadel-runner-agent/caps.json.",
         },
       ]
     : [
@@ -544,7 +557,7 @@ function machineBody(m) {
       'div',
       { class: 'machine-kv' },
       m.runners ? kv('Does', 'Adds, lists and removes CI runners for schemes, when Citadel asks') : kv('Lends', machineLends(m)),
-      m.runners ? (m.owner_id === null ? kv('Runs CI for', m.scoped ? machineLending(m) : 'Every scheme an admin owns') : []) : kv('Who gets it', m.owner_id === null ? '' : h('div', { class: 'small muted' }, `Only turns ${m.created_by} asks for (and their contraptions), in:`), machineLending(m)),
+      m.runners ? kv('Runs CI for', m.owner_id === null && !m.scoped ? 'Every scheme an admin owns' : machineLending(m)) : kv('Who gets it', m.owner_id === null ? '' : h('div', { class: 'small muted' }, `Only turns ${m.created_by} asks for (and their contraptions), in:`), machineLending(m)),
       kv(
         'Computer',
         h('span', {}, [m.host, m.online ? (m.command && !m.runners ? `runs ${m.command}` : '') : m.last_seen_at ? `last seen ${ago(m.last_seen_at)}` : 'never connected', m.sessions ? `${m.sessions} in use` : ''].filter(Boolean).join(' · ') || '—'),
@@ -635,7 +648,21 @@ function machineLending(m) {
   const now = () => (view.machines?.find((x) => x.id === m.id) ?? m).projects ?? [];
   const save = (projects) => patchMachine(m, { projects }, `change which schemes get ${m.name}`, renderMachineList);
   const chips = now().map((id) =>
-    h('span', { class: 'chip scheme-chip' }, h('span', {}, schemeName(id)), h('button', { type: 'button', title: `Take ${m.name} from ${schemeName(id)}: its minions lose it now, mid-turn too`, 'aria-label': `Remove ${schemeName(id)}`, onclick: () => save(now().filter((x) => x !== id)) }, '×')),
+    h(
+      'span',
+      { class: 'chip scheme-chip' },
+      h('span', {}, schemeName(id)),
+      h(
+        'button',
+        {
+          type: 'button',
+          title: m.runners ? `Stop ${m.name} taking new runners for ${schemeName(id)}. Remove its runners first: ones already there keep running` : `Take ${m.name} from ${schemeName(id)}: its minions lose it now, mid-turn too`,
+          'aria-label': `Remove ${schemeName(id)}`,
+          onclick: () => save(now().filter((x) => x !== id)),
+        },
+        '×',
+      ),
+    ),
   );
   const rest = (view.projects ?? []).filter((p) => !now().includes(p.id));
   const add = h(

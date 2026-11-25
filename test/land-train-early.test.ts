@@ -379,7 +379,7 @@ test("early next train: a record for a ship that wasn't next is dropped by the n
   assert.ok(!existsSync(join(l.state, 'early')));
 });
 
-test('early next train: with no free runner nothing is pushed early, and with LAND_EARLY=0 or <state>/early-off nothing is tried (#1366)', async () => {
+test('early next train: with no free runner nothing is pushed early, and with LAND_EARLY=0, <state>/early-off or the CI hold on nothing is tried (#1366, #1902)', async () => {
   // The one runner is online, so each ship's CI waits for its run, but busy (a heavy job holds it), so never free.
   const runners = JSON.stringify({ runners: [{ status: 'online', busy: true, labels: [{ name: 'citadel-ci-linux' }] }] });
   const l = await line(
@@ -393,12 +393,10 @@ test('early next train: with no free runner nothing is pushed early, and with LA
   assert.doesNotMatch(done[3].stderr, /early next train/);
   assert.deepEqual(retro(l.r.dir, ' · early train · '), []);
   l.done();
-  for (const how of ['env', 'file'] as const) {
+  for (const how of ['env', 'file', 'hold'] as const) {
     const off = await line([{}, {}, {}, {}], (d) => ({ ...shared(d), LAND_TRAIN_MAX: '1', ...(how === 'env' ? { LAND_EARLY: '0' } : {}) }));
-    if (how === 'file') {
-      mkdirSync(off.state, { recursive: true });
-      writeFileSync(join(off.state, 'early-off'), '');
-    }
+    if (how === 'file') writeFileSync(join(off.state, 'early-off'), '');
+    if (how === 'hold') rmSync(join(off.state, 'hold-off'));
     const offDone = await off.go();
     offDone.forEach((d, i) => assert.equal(d.status, 0, `${how}: ship ${i + 1}: ${d.stderr}`));
     assert.doesNotMatch(offDone.map((d) => d.stderr).join('\n'), /early next train/, how);

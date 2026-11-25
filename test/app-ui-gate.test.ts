@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { contractFindings, markdown, wordFindings } from '../tools/app-ui-gate.ts';
+import { contractFindings, markdown, wordFindings, type Allow } from '../tools/app-ui-gate.ts';
+import { fake } from './typed.ts';
 
 test('kit names the app uses that the contract lacks are found; its own definitions are not', () => {
   const f = contractFindings({
@@ -11,7 +12,9 @@ test('kit names the app uses that the contract lacks are found; its own definiti
 });
 
 test('the report names a finding and its mode', () => {
-  const md = markdown({ app: 'x', mode: 'report', measured: 1, contract: [], words: [], errors: 0, clean: false, pages: [{ path: '/', counts: { tap: 1 }, pages: [{ width: 390, findings: [{ check: 'tap', selector: '#go' }] }] }] } as any);
+  const md = markdown(
+    fake<Parameters<typeof markdown>[0]>({ app: 'x', mode: 'report', measured: 1, contract: [], words: [], errors: 0, clean: false, pages: [fake<Parameters<typeof markdown>[0]['pages'][number]>({ path: '/', counts: { tap: 1 }, pages: [{ width: 390, findings: [{ check: 'tap', selector: '#go' }] }] })] }),
+  );
   assert.match(md, /390px tap: #go/);
   assert.match(md, /Mode: report/);
 });
@@ -28,7 +31,7 @@ test('internal words in what people read are found; code, comments and an allow-
   assert.deepEqual(hits, ['page /home/', 'page scheme', 'page shared/project', 'page tickets/', 'page grunt', 'script contraption', 'script taskmaster'].sort());
   const allowed = wordFindings(texts, [{ word: 'scheme', reason: 'a colour scheme' }]);
   assert.ok(!allowed.some((h) => h.word === 'scheme'));
-  assert.throws(() => wordFindings(texts, [{ word: 'scheme' } as any]), /reason/);
+  assert.throws(() => wordFindings(texts, [fake<Allow>({ word: 'scheme' })]), /reason/);
 });
 
 test('a plain page with none of the words is clean', () => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Adds one scheme's Linux GitHub Actions runners inside the WSL distro on Cara's desktop (Citadel #510), the Linux
+# Adds one scheme's Linux GitHub Actions runners on a CI PC: plain Linux, or a WSL distro on a Windows one (Citadel #510), the Linux
 # twin of add-runner.ps1. The runner agent in that distro runs it as root when someone asks `ci_runners add` with
 # os linux:
 #
@@ -35,7 +35,7 @@ die() { echo "add-runner: $*" >&2; exit 1; }
 [[ $count =~ ^[1-4]$ ]] || die "count must be 1 to 4, not $count"
 [[ -n ${CC_MACHINE_TOKEN:-} ]] || die 'No machine token: set CC_MACHINE_TOKEN (the runner agent does).'
 [[ $(id -u) == 0 ]] || die 'Run this as root: adding users and systemd services needs it.'
-[[ -d /run/systemd/system ]] || die 'systemd is not running in this distro; install-runner-agent.sh turns it on in /etc/wsl.conf.'
+[[ -d /run/systemd/system ]] || die 'systemd is not running here (in WSL, install-runner-agent.sh turns it on in /etc/wsl.conf).'
 
 # Citadel's answer about the scheme: repo, label and, when $1 is true, a token, one per line; or why not.
 citadel() {

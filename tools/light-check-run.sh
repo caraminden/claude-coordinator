@@ -28,7 +28,9 @@ if [ -n "$lock" ] && [ "$(cat node_modules/.light-check-lock 2>/dev/null)" != "$
     || { tail -n 20 "$out"; verdict "no verdict: npm ci failed (its lines above say why)"; }
 fi
 rc=0
-nice -n 10 "$ct" --affected --base "$base" --timeout "${LIGHT_CHECK_LIMIT:-240}" >"$out" 2>&1 </dev/null || rc=$?
+# The wide pick (#1928): a citadel-test from before --wide existed picks it by itself.
+wide=--affected; grep -q -- '--wide' "$ct" 2>/dev/null && wide=--wide
+nice -n 10 "$ct" "$wide" --base "$base" --timeout "${LIGHT_CHECK_LIMIT:-240}" >"$out" 2>&1 </dev/null || rc=$?
 tail -n 60 "$out"
 case $rc in
   0) verdict green ;;

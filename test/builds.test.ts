@@ -62,7 +62,7 @@ test('a build branch counts its feeders merged in and open, not its owner, and h
 });
 
 test("Builds broadcasts a scheme's headers when they change, and only then", async () => {
-  const sent: any[] = [];
+  const sent: { type?: unknown }[] = [];
   const b = new Builds({ store, broadcast: (m) => sent.push(m) });
   await b.poll();
   assert.equal(sent.length, 1);

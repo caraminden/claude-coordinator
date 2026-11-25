@@ -12,7 +12,7 @@ import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
 import { Relay, clip, loopHolds, loopKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
-import { askerKey, buildOwnerKey, onboardingOpen, pagePlanKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketState } from './db.ts';
+import { askerKey, buildOwnerKey, onboardingOpen, pagePlanKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketState, type TurnResult } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import { CompactWatch } from './compactions.ts';
 import type { Claim } from './claims.ts';
@@ -31,7 +31,7 @@ import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
 import { thrown } from './thrown.ts';
 import type { ClaudeEvent, ContentBlock, LoadError, ModelUsage } from './claude-events.ts';
-import { turnOf } from './turn-row.ts';
+import { killedSpend, turnOf } from './turn-row.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
 import { readScope } from './read-scope.ts';
 import { accountUsageKey, usageKey } from './account-pick.ts';
@@ -53,7 +53,7 @@ import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
 import { MachineTurn, placeTurn } from './machine-turn.ts';
 import { offSkills, pruneKit } from './skills.ts';
-import { alive, copyPinned, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wrapperSpec } from './turn-launch.ts';
+import { alive, copyPinned, launchPlan, type EveryScheme, type LaunchPlan, TASKMASTER_SLICE, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wrapperSpec } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
 import { hideSecrets, hideSecretsIn, secretEnv } from './secrets.ts';
 import { takeStatus, type StatusFields } from './status-trailer.ts';
@@ -701,6 +701,8 @@ export class Runner {
   onClose: (ticketId: number) => Promise<void> | void = () => {};
   /** A turn started and saved the messages it carries (their event ids): the outbox marks what it handed over as sent (server.ts). */
   onTurnStart: (ticketId: number, eventIds: number[]) => void = () => {};
+  /** A stop dropped the messages with these event ids from the minion's queue: the outbox settles the rows that handed them and answers with the ones whose message stays as held mail (server.ts). */
+  onStop: (ticketId: number, eventIds: number[]) => number[] = () => [];
   /** A folder outside the repo where a ticket can put files it fetched or made to show people. */
   filesDir: (ticket: Ticket) => string | null = () => null;
   /** The folder every thread and the coordinator of a project can read and write, for handoffs and notes. */
@@ -741,7 +743,7 @@ export class Runner {
   private cardWaits: WaitList<KeptCard>;
   private relays: Relay;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
-  placeFor?: (person: number | null, warm?: string) => TurnPlace | { refused: string };
+  placeFor?: (person: number | null, warm?: string, taskmaster?: boolean) => TurnPlace | { refused: string };
   /** The account such a turn would run on, moving nothing (ClaudeLink.accountFor, #1888): null for none. */
   accountFor?: (person: number, warm?: string) => number | null;
   /** The start_after chains still to fire (LiveWaiters.chains, set by the server): the minions that wait on another. */
@@ -1016,6 +1018,12 @@ export class Runner {
   /** The minions whose turns are running now (src/reader-live.ts: what they last did changes with no broadcast). */
   runningIds(): number[] {
     return [...this.turns.keys()];
+  }
+
+  /** Whether a turn of its runs, or one is owed: messages or a worker it waits for, or a cut-off turn to carry on, after its approval card too (#1930). */
+  busy(ticketId: number): boolean {
+    const waits = this.limitWait(ticketId) || this.netWait(ticketId) || this.killWait(ticketId) || cardHeld(this.store, ticketId);
+    return !!waits || this.isRunning(ticketId) || this.strayWaits.has(ticketId) || this.turnLine.has(ticketId) || this.queue.size(ticketId) > 0 || !!this.queue.get(ticketId).owed;
   }
 
   /** A turn launching (startTurn, #1808) counts: it is past the queue's take, so a message now waits for it as for a live one. */
@@ -1966,6 +1974,7 @@ export class Runner {
           // A kill resume's count rides along (RETRIES), so a kill after the restart still counts as the second in a row.
           if (resumed) this.queue.owe(t.id, { ...owedOf(resumed.via, resumed.retries), ...(out.kind === 'paused' ? { paused: true } : {}), ...(Object.keys(carry).length ? { carry } : {}) });
           this.store.deleteSetting(turnKey(t.id));
+          this.keepKilled(t.id, turn, null);
           if (turn?.dir) rmSync(turn.dir, { recursive: true, force: true });
           this.setStatus(t.id, 'idle');
           // Stopped on purpose: it already says so, and no resume. What was queued before the stop went with it;
@@ -2895,6 +2904,23 @@ export class Runner {
   }
 
   stop(ticketId: number): boolean {
+    const queued = this.queue.msgs(ticketId).filter((m) => m.id != null);
+    const stopped = this.stopTurn(ticketId);
+    // The stop dropped these from the queue: the outbox must not read that as a send that failed, and send them again.
+    // The ones it had handed (a chain's brief) stay as held mail: they start nothing, and ride with the next turn someone starts.
+    if (stopped && queued.length) {
+      const keep = new Set(
+        this.onStop(
+          ticketId,
+          queued.map((m) => m.id!),
+        ),
+      );
+      for (const m of queued) if (keep.has(m.id!)) this.queue.hold(ticketId, m);
+    }
+    return stopped;
+  }
+
+  private stopTurn(ticketId: number): boolean {
     const live = this.turns.get(ticketId);
     const card = this.dropCard(ticketId, 'The turn was stopped while this waited.');
     const launching = this.launching.get(ticketId);
@@ -3526,8 +3552,13 @@ export class Runner {
     this.broadcastTicket(chat.id);
   }
 
-  /** A card's answer kept in its chat without waking it: a for-everyone card's answer wakes its asker instead (#921). */
-  recordAnswer(ticketId: number, author: string, text: string, extra: object) {
+  /**
+   * A card's answer kept in its chat without waking it: a for-everyone card's answer wakes its asker instead (#921).
+   * `held` is what the chat's own next turn reads of it, if it has one, from `by` (a Ship It the server shipped, #1930).
+   */
+  recordAnswer(ticketId: number, author: string, text: string, extra: object, held?: { by: string; text: string }) {
+    // No event id: the chat's line is the person's answer, which people shouldn't read as not sent yet.
+    if (held) this.queue.hold(ticketId, { author: held.by, text: held.text, images: [], fyi: true, asker: null });
     this.emit(ticketId, 'user_message', { author, text: hideTokens(text), ...extra });
     this.broadcastTicket(ticketId);
   }
@@ -3592,7 +3623,7 @@ export class Runner {
     // A hidden keepalive (#862): it re-reads the cached prefix and changes nothing of the minion's, the chat included.
     const keepalive = !!batch[0]?.keepalive;
     // Whose Claude it runs on (sender pays, #213): the host's login for its owner, else their own container.
-    const claudePlace = this.placeFor?.(person, warmKey(ticket)) ?? { host: true as const };
+    const claudePlace = this.placeFor?.(person, warmKey(ticket), ticket.kind === 'coordinator') ?? { host: true as const };
     if ('refused' in claudePlace) {
       if (keepalive) return;
       this.emit(ticket.id, 'note', { text: claudePlace.refused });
@@ -4248,7 +4279,7 @@ export class Runner {
    * Start a turn's wrapper in the person's container, detached. Rootless podman leaves an exec's conmon
    * in the caller's cgroup, so a restart of this server's unit SIGTERMs it (conmon passes that on to the
    * wrapper, which ignores it), waits out the stop timeout and SIGKILLs it (#258). So with units,
-   * `podman exec` runs in a transient scope under the turns slice, which the restart leaves alone and
+   * `podman exec` runs in a transient scope under the turns slice (a Taskmaster's under theirs), which the restart leaves alone and
    * which goes once the turn ends. The wrapper's pids are the container's, so the `container` file
    * tells wrapperAlive to go by its heartbeat instead, and on a stale one by whether the wrapper is still in /proc.
    */
@@ -4265,7 +4296,7 @@ export class Runner {
     // Stopped while it started (stop() wrote exit.json), and maybe finished since: nothing more to start or to say.
     const over = async () => !(await exists(dir)) || exists(join(dir, 'exit.json'));
     const exec = ['podman', 'exec', '-d', place.container, ...wrapper];
-    const scoped = ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${TURN_SLICE}`, ...exec];
+    const scoped = ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${this.store.getTicket(ticketId)?.kind === 'coordinator' ? TASKMASTER_SLICE : TURN_SLICE}`, ...exec];
     place
       .ensure()
       // As with host turns, a failed systemd-run still runs the turn, though a restart then SIGKILLs its conmon.
@@ -4484,6 +4515,7 @@ export class Runner {
     // Its session's cache is warm on this account for the next hour (src/account-pick.ts): its next turn stays there.
     if (turn?.person && !turn.codex && turn.account) this.onRan?.(turn.person, `ticket:${ticketId}`, turn.account);
     if (this.keepalives.delete(ticketId)) return this.wrapUpKeepalive(ticketId, live, turn, exit);
+    this.keepKilled(ticketId, turn, exit);
     if (unsent.length) {
       this.emit(ticketId, 'note', { text: `${unsent.length === 1 ? 'A message' : `${unsent.length} messages`} arrived as the turn ended, so the next turn picks ${unsent.length === 1 ? 'it' : 'them'} up.` });
     }
@@ -4919,23 +4951,9 @@ export class Runner {
     if (ev.type === 'result' && this.sentBack.delete(ticketId)) this.replaceSentBack(ticketId, row.id);
     if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
       const state = this.store.getSetting<TurnState>(turnKey(ticketId));
-      void this.store
-        .recordTurn(ticketId, {
-          event_id: row.id,
-          ...turnOf(ev),
-          ended_at: row.created_at,
-          payer: this.payerOf(state?.person),
-          hashes: state?.hashes ?? null,
-          account: state?.account ?? null,
-        })
-        .then((turn) => {
-          this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
-          this.recordGrunts(ticketId, turn.id, state, ev.session_id);
-          // The turn's real cost, for a Codex turn (unmetered) or one the estimate undercounted; its reply is out, so no steer.
-          const ticket = this.store.getTicket(ticketId);
-          if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
-        })
-        .catch((e) => console.error(`[turn] minion ${ticketId}: its turn's cost was not recorded: ${(e as Error).message}`));
+      this.keepTurn(ticketId, state, { event_id: row.id, ...turnOf(ev), ended_at: row.created_at });
+      this.spends.get(ticketId)?.meter.settle();
+      if (state?.spend?.open) this.saveTurn(ticketId, { spend: { ...state.spend, open: {} } });
     }
     if (ev.type === 'user' && Array.isArray(ev.message?.content) && (ev.message!.content as ContentBlock[]).some((b) => b?.type === 'tool_result')) {
       this.onFilesMayChange(ticketId, false);
@@ -4945,6 +4963,26 @@ export class Runner {
       this.onFilesMayChange(ticketId, true);
     }
     this.notePushes(ticketId, ev);
+  }
+
+  /** Record what a turn cost, from its result or, killed with none, its estimate. */
+  private keepTurn(ticketId: number, state: TurnState | null | undefined, r: TurnResult) {
+    void this.store
+      .recordTurn(ticketId, { ...r, payer: this.payerOf(state?.person), hashes: state?.hashes ?? null, account: state?.account ?? null })
+      .then((turn) => {
+        this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(ticketId)?.project_id });
+        this.recordGrunts(ticketId, turn.id, state, r.session_id);
+        // The turn's real cost, for a Codex turn (unmetered) or one the estimate undercounted; its reply is out, so no steer.
+        const ticket = this.store.getTicket(ticketId);
+        if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
+      })
+      .catch((e) => console.error(`[turn] minion ${ticketId}: its turn's cost was not recorded: ${(e as Error).message}`));
+  }
+
+  /** A turn that died with no result to say what it cost (#1938). Called after its record is gone: a crash between loses the estimate, never counts it twice. */
+  private keepKilled(ticketId: number, turn: TurnState | null | undefined, exit: Parameters<typeof killedSpend>[1]) {
+    const estimate = killedSpend(turn, exit);
+    if (estimate) this.keepTurn(ticketId, turn, { session_id: this.store.getTicket(ticketId)?.session_id, session_cost_usd: 0, ended_at: Date.now(), estimate });
   }
 
   /** Keep the turn's Grunts (#948), read from the turn's config dir (a container's home volume as the host sees it); behind the turn, and a failure only logs. */

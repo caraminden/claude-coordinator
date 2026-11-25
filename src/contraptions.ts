@@ -19,7 +19,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { appFolder, appRoot, MANIFEST, parseManifest } from './app-services.ts';
 import { seal, sealKey, unseal } from './credentials.ts';
-import type { ContraptionRow, Store, User } from './db.ts';
+import type { ContraptionRow, NewContraption, Store, User } from './db.ts';
 import { connection, HttpError } from './http.ts';
 import { inOrder } from '../public/reorder.js';
 
@@ -93,7 +93,7 @@ export class Contraptions {
   }
 
   /** Register a contraption with fresh keys. The key files are written first, so a failed write registers nothing. */
-  register(fields: Omit<ContraptionRow, 'id' | 'created_at' | 'identity_public' | 'identity_private' | 'key_hash' | 'keys_at' | 'repo' | 'branch' | 'folder' | 'subdir'> & Partial<Pick<ContraptionRow, 'repo' | 'branch' | 'folder' | 'subdir'>>): ContraptionRow {
+  register(fields: Omit<NewContraption, 'identity_public' | 'identity_private' | 'key_hash' | 'keys_at'>): ContraptionRow {
     return this.store.createContraption({ ...fields, ...this.newKeys(fields.name) });
   }
 

@@ -132,7 +132,7 @@ if (-not $mine) {
 # repo's runner service runs from, so a planted folder is never the reason a service or a GitHub runner goes.
 # A session runner's stand-in for the service is its logon task "GitHub runner <label>" starting it from that folder.
 # shortcut: a standard user could make such a task for themselves beside a planted folder, which a service can't be;
-# fine on Cara's one-person PC (Citadel is for trusted friends), check the task's user is an admin if that changes.
+# fine while everyone with an account on the PC is trusted (Citadel is for friends), check the task's user is an admin if not.
 $owner, $repoName = $names.repo -split '/', 2
 $prefix = "actions.runner.$owner-$repoName."
 $services = @{}

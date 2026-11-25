@@ -4,11 +4,11 @@
 // number to take.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { ci, env, git, setup } from './land-fixture.ts';
+import { ci, env, git, setup, write } from './land-fixture.ts';
 
 type R = ReturnType<typeof setup>;
 const OK = 'test/ok.test.mjs';
@@ -22,14 +22,6 @@ const BASE: [number, string][] = [
   [95, 'tickets.goal (#1130)'],
 ];
 
-function write(where: string, files: Record<string, string>, msg: string) {
-  for (const [f, text] of Object.entries(files)) {
-    mkdirSync(join(where, f, '..'), { recursive: true });
-    writeFileSync(join(where, f), text);
-  }
-  git(where, 'add', '-A');
-  git(where, 'commit', '-qm', msg);
-}
 // main with db.ts and ADR 0001, and the minion's worktree on it.
 function start() {
   const r = setup();

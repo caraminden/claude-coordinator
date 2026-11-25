@@ -8,6 +8,7 @@
 // imports only json-lines.ts, which is pinned with it.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readlink, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { jsonLines } from './json-lines.ts';
@@ -56,6 +57,15 @@ export function tokenLife(home: string, now = Date.now()): { left: number; life:
 
 /** A refresh is over, or its codex killed, within this of its start (refresh's two limits and some slack). */
 const REFRESH_MAX_MS = 70_000;
+/** A holder keeps its lock this fresh, and one in the person's other container (#1882), whose pid can't be checked here, is gone after FOREIGN_MAX_MS. */
+const BEAT_MS = 5000;
+const FOREIGN_MAX_MS = 120_000;
+
+/** The pid namespace a process counts its pids in, or '' off Linux. */
+const pidNs = () => readlink('/proc/self/ns/pid').catch(() => '');
+
+/** What a lock's pid file says of this process. Its start time, since a pid alone can be reused once the holder died without unlocking (#468 S04-7). */
+export const lockHolder = async () => `${process.pid} ${startTime(process.pid) ?? ''} ${await pidNs()}`.trim();
 
 /**
  * Have a short `codex app-server` refresh the login now (account/read with refreshToken); resolves once it
@@ -117,11 +127,11 @@ export async function codexLock(home: string, onWait: () => void, opts: { env?: 
   const began = now();
   mkdirSync(home, { recursive: true });
   const dir = join(home, 'citadel-turn.lock');
+  const [me, ownNs] = [await lockHolder(), await pidNs()];
   for (let said = false; ; ) {
     try {
       mkdirSync(dir);
-      // With its start time: a pid alone can be reused by an unrelated process once the holder died without unlocking (#468 S04-7).
-      writeFileSync(join(dir, 'pid'), `${process.pid} ${startTime(process.pid) ?? ''}`.trim());
+      writeFileSync(join(dir, 'pid'), me);
       break;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
@@ -130,11 +140,12 @@ export async function codexLock(home: string, onWait: () => void, opts: { env?: 
         held = readFileSync(join(dir, 'pid'), 'utf8').trim();
       } catch {}
       if (opts.inTurn && held && held === env[LOCK_ENV]) return { unlock: () => {}, waitedMs: 0, refreshed: false, serial: false };
-      const [p, started] = held.split(/\s+/);
+      const [p, started, ns] = held.split(/\s+/);
       const pid = Number(p) || 0;
+      const foreign = !!ns && ns !== ownNs;
       let alive = false;
       try {
-        if (pid) process.kill(pid, 0), (alive = true);
+        if (pid && !foreign) process.kill(pid, 0), (alive = true);
       } catch (e) {
         alive = (e as NodeJS.ErrnoException).code === 'EPERM';
       }
@@ -145,6 +156,7 @@ export async function codexLock(home: string, onWait: () => void, opts: { env?: 
       } catch {
         continue; // its holder just unlocked: try again
       }
+      if (foreign) alive = age <= FOREIGN_MAX_MS;
       // No pid yet: its holder is between mkdir and write, unless that was a while ago. A holder that died
       // refreshing (a stopped turn, a review's timeout) left its codex to finish: the lock waits that out,
       // or the next run would send the same refresh token.
@@ -156,7 +168,12 @@ export async function codexLock(home: string, onWait: () => void, opts: { env?: 
       }
     }
   }
-  const unlock = () => rmSync(dir, { recursive: true, force: true });
+  // Removed under us: nothing to keep fresh.
+  const beat = setInterval(() => void utimes(dir, new Date(), new Date()).catch(() => {}), BEAT_MS).unref();
+  const unlock = () => {
+    clearInterval(beat);
+    rmSync(dir, { recursive: true, force: true });
+  };
   const waitedMs = now() - began;
   try {
     let life = tokenLife(home);

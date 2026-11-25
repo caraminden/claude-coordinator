@@ -1,21 +1,24 @@
-# Host Taskmaster turns, every scheme's and the Overlord's, and the shared Citadel tools pool every host turn calls
-# (src/turn-launch.ts TASKMASTER_SLICE, about 70M), under citadel.slice
+# Taskmaster turns, every scheme's and the Overlord's: the host's, and each person's Taskmaster container
+# (citadel-claude-N-tm, #1882; src/claude-link.ts TASKMASTER_MEMORY: throttled past 3G, killed past 4G). Also the shared
+# Citadel tools pool every host turn calls (src/turn-launch.ts TASKMASTER_SLICE, about 70M). Under citadel.slice
 # and apart from citadel-turns.slice (#1280). Cara, 2026-11-20: "when we do have issues they become really hard to debug
 # and fix if the taskmaster also becomes unresponsive". On 2026-11-20 minion turns plus a land filled the turns'
 # 10G and stalled every turn in it, the Taskmasters too; here a minion storm in that slice doesn't throttle them. A
 # storm across all of citadel.slice (its 19G) still reaches them, and the kernel's own oom-killer can still pick them.
 # Sized from the journal's "memory peak" lines, 2026-11-18 to 20: 68 Taskmaster turns, p50 404M, p90 463M, max 572M.
-# MemoryHigh 4G holds about seven at their largest at once and keeps one runaway from crowding the server.
+# MemoryHigh 6G (4G until #1882, which host turns alone had reached) holds about ten at their largest at once, on the host
+# and in containers, and keeps a runaway from crowding the server.
 # CPUWeight 400 against 100 for minion turns and containers (the server has 1000): at load 70 even hooks timed out.
 # ManagedOOMPreference=omit, as the server has (#1257): when oomd acts on user@.service's pressure it passes them over
 # for a minion turn. Each unit sets it too. Uninstalled, the slice still keeps them apart, with no limits of its own.
-# No MemoryLow yet. A reserve here does protect against reclaim that citadel.slice's MemoryHigh starts, without root
-# (measured for citadel-turns.slice's MemoryLow=8G, #1338), but not against reclaim the whole box starts, since
-# user.slice above has none. systemd-oomd never kills for this slice's own pressure (its drop-in, deploy/oomd.md).
+# MemoryLow 2G (#1882): what Taskmasters use up to that is the last reclaimed when citadel.slice passes its MemoryHigh (measured
+# for citadel-turns.slice's MemoryLow=8G, #1338), not when the whole box runs short, since user.slice above has none.
+# systemd-oomd never kills for this slice's own pressure (its drop-in, deploy/oomd.md).
 [Unit]
 Description=Taskmaster turns of Citadel
 
 [Slice]
-MemoryHigh=4G
+MemoryHigh=6G
+MemoryLow=2G
 CPUWeight=400
 ManagedOOMPreference=omit

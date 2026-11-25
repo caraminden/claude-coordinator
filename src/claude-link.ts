@@ -19,6 +19,7 @@ import { accountReady, accountUsageKey, pickAccount, WARM_MS, type Meter, type P
 import { claudeConfigDir, projectSlug } from './sessions.ts';
 import { ensureGradleInit } from './build-cache.ts';
 import { thrown } from './thrown.ts';
+import { TASKMASTER_SLICE } from './turn-launch.ts';
 
 const IMAGE_REPO = 'localhost/citadel-claude';
 /** The checkout this server runs from (prompts.ts CHECKOUT). */
@@ -31,6 +32,12 @@ const MAX_MASKED = 50;
  * Raised from 6G/8G (#1258; Josh, 2026-11-20, "Raise to 10 GB": his container hit 6G with ~10 minions and a Rust build).
  */
 export const CONTAINER_MEMORY = { high: '10G', max: '12G', swap: '4G' };
+/**
+ * Each person's Taskmaster container (#1882; Josh, 2026-11-25, "Its own small container"): their Taskmasters' turns alone, on the
+ * same login volume and files, so minions filling the container above can't slow or kill them. Host Taskmaster turns measured 0.4G
+ * (median) to 0.57G at most, and a person had 5 or more at once in 5 of 822 starts in 14 days (8 at most): that many together are throttled.
+ */
+export const TASKMASTER_MEMORY = { high: '3G', max: '4G', swap: '2G' };
 
 /**
  * The live checkout's read-only mount, with each file git ignores there (`.env`, `env`, a stray `.db`, the test box's
@@ -227,8 +234,8 @@ export class ClaudeLink {
   busy: (container: string) => number = () => 0;
   /** Set once the server is shutting down: it has let go of its turns, so busy() reads 0 while they still run. */
   private closing = false;
-  /** Starts in flight, per person: two turns starting at once share one. */
-  private starting = new Map<number, Promise<void>>();
+  /** Starts in flight, per container: two turns starting at once share one. */
+  private starting = new Map<string, Promise<void>>();
 
   private store: Store;
   private credentials: Credentials;
@@ -252,6 +259,11 @@ export class ClaudeLink {
   /** Container and volume name for a person. */
   name(uid: number): string {
     return `${this.prefix}${uid}`;
+  }
+
+  /** The container a person's Taskmasters' turns run in (#1882), on the same volume. */
+  taskmasterName(uid: number): string {
+    return `${this.name(uid)}-tm`;
   }
 
   meta(uid: number): ClaudeMeta | null {
@@ -480,10 +492,9 @@ export class ClaudeLink {
   }
 
   /** What a person's container is made of. An async caller passes `pre` (read with checkoutMountsAsync / imageHashAsync): without it the spec spawns git and walks the image folder on the main thread.  Every mount sits at its host path, so worktrees, session folders and prompts match. */
-  spec(uid: number, pre?: { checkout?: Mount[] | null; image?: string }): ContainerSpec {
-    const name = this.name(uid);
+  spec(uid: number, pre?: { checkout?: Mount[] | null; image?: string }, taskmaster = false): ContainerSpec {
     const mounts: Mount[] = [
-      { src: name, dst: this.home, volume: true },
+      { src: this.name(uid), dst: this.home, volume: true },
       { src: join(this.dataDir, 'projects'), dst: join(this.dataDir, 'projects') },
       { src: this.turnsDir(uid), dst: this.turnsDir(uid) },
       { src: dirname(resolveClaude(this.claudeBin)), dst: dirname(resolveClaude(this.claudeBin)), ro: true },
@@ -519,29 +530,39 @@ export class ClaudeLink {
       // In every account's folder (#779), linked or not, so linking another never changes the spec under running turns.
       for (let n = 1; n <= MAX_ACCOUNTS; n++) mounts.push({ src, dst: join(this.home, accountDir(n), 'projects', slug, 'memory') });
     }
-    return { name, image: pre?.image ?? this.image(), mounts, env: { HOME: this.home }, memory: CONTAINER_MEMORY };
+    const home = this.meta(uid)?.home;
+    // Only a sign-in's start chowns a volume (link()), and not while Taskmaster turns write in it: a file that goes mid-walk fails it.
+    const made = { image: pre?.image ?? this.image(), mounts, env: { HOME: this.home }, chown: !taskmaster && (!home || (this.logins.has(uid) && !this.busy(this.taskmasterName(uid)))) };
+    if (!taskmaster) return { ...made, name: this.name(uid), memory: CONTAINER_MEMORY };
+    // Claude Code lists its running sessions by pid, and the two containers count pids apart: one list each.
+    if (home) for (let n = 1; n <= MAX_ACCOUNTS; n++) mounts.push({ src: join(home, accountDir(n), 'sessions-taskmaster'), dst: join(this.home, accountDir(n), 'sessions') });
+    return { ...made, name: this.taskmasterName(uid), memory: TASKMASTER_MEMORY, slice: TASKMASTER_SLICE, props: ['ManagedOOMPreference=omit'] };
   }
 
   /** Build the image if needed, make the volume and start the container (or keep it, if it runs from this spec or turns run in it). */
-  ensure(uid: number, forTurn = false): Promise<void> {
-    const now = this.starting.get(uid);
+  ensure(uid: number, forTurn = false, taskmaster = false): Promise<void> {
+    const name = taskmaster ? this.taskmasterName(uid) : this.name(uid);
+    const now = this.starting.get(name);
     if (now) return now;
-    const run = this.start(uid, forTurn).finally(() => this.starting.delete(uid));
-    this.starting.set(uid, run);
+    // A sign-in's start chowns the volume: no Taskmaster turn starts writing in it meanwhile (spec()).
+    const chowning = taskmaster && this.logins.has(uid) ? this.starting.get(this.name(uid)) : undefined;
+    const run = (chowning ? chowning.catch(() => {}).then(() => this.start(uid, forTurn, taskmaster)) : this.start(uid, forTurn, taskmaster)).finally(() => this.starting.delete(name));
+    this.starting.set(name, run);
     return run;
   }
 
-  private async start(uid: number, forTurn: boolean): Promise<void> {
+  private async start(uid: number, forTurn: boolean, taskmaster: boolean): Promise<void> {
     // The two slow reads of a spec (git's ignored list, the image folder walk) run off the main thread, fresh every start.
     const [checkout, image] = await Promise.all([LIVE_CHECKOUT.startsWith(join(this.dataDir, 'projects') + '/') ? Promise.resolve(null) : checkoutMountsAsync(LIVE_CHECKOUT), imageHashAsync(CONTAINERFILE_DIR).then((h) => `${IMAGE_REPO}:${h}`)]);
-    const spec = this.spec(uid, { checkout, image });
+    const spec = this.spec(uid, { checkout, image }, taskmaster);
+    const volume = this.name(uid);
     await this.containers.ensureImage(spec.image, CONTAINERFILE_DIR);
-    await this.containers.createVolume(spec.name);
+    await this.containers.createVolume(volume);
     // A bind mount's folder must exist: a fresh server has no run/turns until its first turn.
     for (const m of spec.mounts) if (!m.volume && !m.ro) mkdirSync(m.src, { recursive: true });
     // Mounts inside HOME need their folders made in the volume first, as the person: podman makes missing
     // ones as root, and a root-owned ~/.claude left Claude unable to save the sign-in.
-    const vol = await this.containers.volumePath(spec.name);
+    const vol = await this.containers.volumePath(volume);
     if (vol && this.serverLogin(uid)) this.store.setSetting(containerHomeKey(uid), vol);
     for (const m of spec.mounts) if (vol && !m.volume && m.dst.startsWith(this.home + '/')) mkdirSync(join(vol, relative(this.home, m.dst)), { recursive: true });
     // Gradle's defaults (no daemon idling on 1 GB): the person's ~/.gradle is their own, so it gets the host's copy.
@@ -574,9 +595,9 @@ export class ClaudeLink {
 
   /**
    * Where a turn for `uid` runs, or null when it can't run (not linked, signed out). `warm` names the session it resumes,
-   * if any (pick()): a fresh one, or one with no session yet, goes where new work goes.
+   * if any (pick()): a fresh one, or one with no session yet, goes where new work goes. A Taskmaster's goes in a container apart.
    */
-  place(uid: number | null, warm?: string): TurnPlace | null {
+  place(uid: number | null, warm?: string, taskmaster = false): TurnPlace | null {
     const user = uid ? this.store.getUser(uid) : undefined;
     if (!user) return null;
     const set = this.accounts(user.id);
@@ -592,12 +613,12 @@ export class ClaudeLink {
     if (!c || c.failed || !n) return null;
     return {
       host: false,
-      container: c.meta.container,
+      container: taskmaster ? this.taskmasterName(user.id) : c.meta.container,
       configDir: join(c.meta.home, accountDir(n)),
       home: c.meta.home,
       turnsDir: this.turnsDir(user.id),
       env: this.containerEnv(n),
-      ensure: () => this.ensure(user.id, true),
+      ensure: () => this.ensure(user.id, true, taskmaster),
       account: n,
     };
   }
@@ -618,7 +639,7 @@ export class ClaudeLink {
    * there. Never replaces a running one, stale or not, since a review may be running in it that busy() can't see.
    */
   async wakeCodex(uid: number): Promise<void> {
-    if (!this.codexPlace(uid) || this.starting.has(uid)) return;
+    if (!this.codexPlace(uid) || this.starting.has(this.name(uid))) return;
     if ((await this.containers.status(this.name(uid))).state !== 'running') await this.ensure(uid);
   }
 
@@ -809,12 +830,13 @@ export class ClaudeLink {
     // shortcut: a sign-in abandoned across a restart leaves its small volume behind until they link and unlink again.
     const started = this.logins.has(uid) || !!this.meta(uid);
     const name = this.name(uid);
-    if (this.busy(name)) throw new Error('Turns are running on your Claude now: stop them first, then unlink.');
+    if (this.busy(name) || this.busy(this.taskmasterName(uid))) throw new Error('Turns are running on your Claude now: stop them first, then unlink.');
     this.cancel(uid);
     if (!started) return;
     if ((await this.containers.status(name)).state === 'running') {
       for (const a of set?.accounts ?? [{ n: 1 }]) await this.claudeCmd(uid, a.n, ['auth', 'logout']);
     }
+    await this.containers.stop(this.taskmasterName(uid));
     await this.containers.stop(name);
     await this.containers.removeVolume(name);
     this.credentials.remove(uid, 'claude_runner');

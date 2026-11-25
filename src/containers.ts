@@ -29,6 +29,15 @@ export interface ContainerSpec {
    * cgroup has none and neither ever applied (#1214: a container started with --memory 6g peaked at 22.3G). No CPU cap, as before.
    */
   memory?: { high: string; max: string; swap: string };
+  /** The systemd slice its unit runs in; unset, Containers' own (citadel.slice). Part of the spec, so a change restarts it. */
+  slice?: string;
+  /** Unit properties besides the memory limits, e.g. oomd passing it over. */
+  props?: string[];
+  /**
+   * Whether a named volume is chowned as it mounts (podman's :U walks every file and fails if one goes meanwhile). False where the
+   * volume is already the person's and their other container may be writing in it (#1882).
+   */
+  chown?: boolean;
 }
 
 export interface CmdResult {
@@ -57,10 +66,10 @@ const SPEC_LABEL = 'citadel.spec';
  */
 const PIDS_LIMIT = 32_768;
 
-/** A short hash of what a container is made of: image, mounts, env and limits. */
+/** A short hash of what a container is made of: image, mounts, env, limits and slice (one with no slice of its own keeps its hash). */
 export function specHash(spec: ContainerSpec): string {
   return createHash('sha256')
-    .update(JSON.stringify([spec.image, spec.mounts, spec.env ?? {}, spec.memory ?? null, PIDS_LIMIT]))
+    .update(JSON.stringify([spec.image, spec.mounts, spec.env ?? {}, spec.memory ?? null, PIDS_LIMIT, ...(spec.slice ? [spec.slice, spec.props ?? []] : [])]))
     .digest('hex')
     .slice(0, 12);
 }
@@ -77,7 +86,7 @@ export function runArgs(spec: ContainerSpec): string[] {
   for (const [k, v] of Object.entries(spec.env ?? {})) args.push('-e', `${k}=${v}`);
   for (const m of spec.mounts) {
     // A named volume is chowned to the user (:U), so keep-id's user owns its own home.
-    args.push(m.volume ? '-v' : '--mount', m.volume ? `${m.src}:${m.dst}:U${m.ro ? ',ro' : ''}` : `type=bind,src=${m.src},dst=${m.dst}${m.ro ? ',ro' : ''}`);
+    args.push(m.volume ? '-v' : '--mount', m.volume ? `${m.src}:${m.dst}${[...(spec.chown === false ? [] : ['U']), ...(m.ro ? ['ro'] : [])].map((o, i) => (i ? ',' : ':') + o).join('')}` : `type=bind,src=${m.src},dst=${m.dst}${m.ro ? ',ro' : ''}`);
   }
   args.push(spec.image, 'sleep', 'infinity');
   return args;
@@ -114,10 +123,10 @@ export class Containers {
     const now = await this.status(spec.name);
     if (now.state === 'running' && now.spec === specHash(spec)) return;
     if (now.state !== 'missing') await this.stop(spec.name);
-    // Every turn of the person runs in this one container, so an OOM kill must take only the process the
+    // Many of the person's turns run in this one container, so an OOM kill must take only the process the
     // kernel picked: systemd's default OOMPolicy=stop would stop the unit and every turn with it. The memory limits sit
     // on this unit, whose cgroup holds conmon and the payload, so going past them OOM-kills inside the container only.
-    const unit = await this.run('systemd-run', ['--user', '--collect', '--quiet', `--unit=${spec.name}`, `--slice=${this.slice}`, '-p', 'TimeoutStopSec=20', '-p', 'OOMPolicy=continue', ...thpProps(), ...unitProps(spec), 'podman', 'run', ...runArgs(spec)]);
+    const unit = await this.run('systemd-run', ['--user', '--collect', '--quiet', `--unit=${spec.name}`, `--slice=${spec.slice ?? this.slice}`, '-p', 'TimeoutStopSec=20', '-p', 'OOMPolicy=continue', ...(spec.props ?? []).flatMap((p) => ['-p', p]), ...thpProps(), ...unitProps(spec), 'podman', 'run', ...runArgs(spec)]);
     if (unit.code !== 0) throw new Error(`could not start ${spec.name}: ${unit.stderr.trim() || `systemd-run exited ${unit.code}`}`);
     const until = Date.now() + timeoutMs;
     while (Date.now() < until) {

@@ -12,6 +12,13 @@ import { Store } from '../src/db.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { attachBridge, bridgeTypedAt, bridgeUnsaved, onArtifactData, ownPicture, readRequest, takeWrite, TAG } from '../public/bridge-host.js';
 import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { json } from './typed.ts';
+
+// The parts of the API's answers these tests read.
+type Entry = { key: string; value?: unknown; by?: string };
+type Posted = { bridge?: string; op?: string; ok?: boolean; retry?: boolean; entries?: Entry[] };
+type McpReply = { result: { tools: { name: string }[]; isError?: boolean; content: { text: string }[] } };
+type Answer = { person: string; entries: Entry[]; error: string; id: string; to: { id: number; label: string } };
 
 const tmp = tempRoot('artifact-bridge-');
 const root = tmp.dir;
@@ -64,16 +71,16 @@ async function pageOf(id: number) {
   assert.equal(res.status, 302);
   return new URL(res.headers.get('location')!, `${srv.base}/api/artifacts/${id}/raw`).pathname.replace('/api/files/', '');
 }
-const bridge = (body: object, headers: Record<string, string> = { Cookie: srv.cookie }) => fetch(`${srv.base}/api/artifact-data`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json() }));
+const bridge = (body: object, headers: Record<string, string> = { Cookie: srv.cookie }) => fetch(`${srv.base}/api/artifact-data`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await json<Answer>(r) }));
 const agent = (id: number, body: object) =>
   fetch(`${srv.base}/api/projects/${store.getTicket(id)!.project_id}/artifact-data`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${tokens.agentToken(id)}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }).then(async (r) => ({ status: r.status, data: await r.json() }));
+  }).then(async (r) => ({ status: r.status, data: await json<Answer>(r) }));
 
 test('the bridge goes in after the doctype, or first, and what it inlines cannot close its script', () => {
-  const cfg = (entries: any[] = []) => ({ page: 't1-0.x.y/p.html', entries });
+  const cfg = (entries: { key: string; value: unknown; by: string; at: number }[] = []) => ({ page: 't1-0.x.y/p.html', entries });
   const html = (s: string) => injectBridge(Buffer.from(s), cfg([{ key: 'k', value: '</script><!-- \u2028', by: 'Cara', at: 1 }])).toString();
   const withDoctype = html('\uFEFF<!-- made by a tool -->\n<!doctype html><title>x</title>');
   assert.match(withDoctype, /^\uFEFF<!-- made by a tool -->\n<!doctype html><script>\(function \(cfg\)/);
@@ -138,8 +145,8 @@ test('writes are checked: key length, value size, entries per write, keys and by
 test("the viewer answers only its own frames' sandboxed pages, with well-formed requests", () => {
   const win = {};
   const frame = { iframe: { isConnected: true, contentWindow: win } };
-  const frames = new Set<any>([frame]);
-  const msg = (data: any, over: object = {}) => readRequest({ source: win, origin: 'null', data: { bridge: TAG, id: 1, page: 'p', ...data }, ...over }, frames);
+  const frames = new Set([frame]);
+  const msg = (data: object, over: object = {}): { frame: unknown; req: { op: string; text?: string; keepOpen?: boolean; images?: unknown[]; src?: string } } | null => readRequest({ source: win, origin: 'null', data: { bridge: TAG, id: 1, page: 'p', ...data }, ...over }, frames);
   assert.equal(msg({ op: 'hello' })?.frame, frame);
   assert.equal(msg({ op: 'hello' }, { source: {} }), null, 'another window');
   assert.equal(msg({ op: 'hello' }, { origin: srv.base }), null, 'a page with an origin (not sandboxed)');
@@ -181,20 +188,22 @@ test("the viewer answers only its own frames' sandboxed pages, with well-formed 
 });
 
 test('a write Citadel could not take while it restarts tells the page to try again, and holds a new front end until it lands (#821)', async (t) => {
-  let onMessage: any = null;
-  (globalThis as any).addEventListener = (type: string, fn: any) => {
-    if (type === 'message') onMessage = fn;
-  };
+  let onMessage = null as ((e: object) => void) | null;
+  Object.assign(globalThis, {
+    addEventListener: (type: string, fn: typeof onMessage) => {
+      if (type === 'message') onMessage = fn;
+    },
+  });
   t.after(() => {
-    delete (globalThis as any).addEventListener;
+    delete (globalThis as { addEventListener?: unknown }).addEventListener;
   });
   let fail: Error | null = new TypeError('Failed to fetch');
   const api = async () => {
     if (fail) throw fail;
     return { store: 's9', entries: [], person: 'Cara' };
   };
-  const posted: any[] = [];
-  const win = { postMessage: (m: any) => posted.push(m) };
+  const posted: Posted[] = [];
+  const win = { postMessage: (m: Posted) => posted.push(m) };
   const iframe = { isConnected: true, contentWindow: win };
   attachBridge(iframe, { open: { artifact: 9 }, name: 'p9.html', owner: 'Cara', api });
   // Taken out at the end, so the next test's viewer starts with no frames (and listens afresh).
@@ -202,22 +211,22 @@ test('a write Citadel could not take while it restarts tells the page to try aga
     iframe.isConnected = false;
     onArtifactData('none');
   });
-  const write = (id: number) => onMessage({ source: win, origin: 'null', data: { bridge: TAG, id, op: 'write', page: 'p9', entries: [{ key: 'k', value: 1 }] } });
+  const write = (id: number) => onMessage!({ source: win, origin: 'null', data: { bridge: TAG, id, op: 'write', page: 'p9', entries: [{ key: 'k', value: 1 }] } });
   const settle = () => new Promise((r) => setImmediate(r));
 
   write(1);
   await settle();
-  assert.equal(posted.at(-1).ok, false);
-  assert.equal(posted.at(-1).retry, true, 'the network failing is worth retrying');
+  assert.equal(posted.at(-1)!.ok, false);
+  assert.equal(posted.at(-1)!.retry, true, 'the network failing is worth retrying');
   assert.equal(bridgeUnsaved(), true, 'a page holds unsaved writes');
   fail = Object.assign(new Error('Citadel is restarting, try again in a moment'), { status: 502 });
   write(2);
   await settle();
-  assert.equal(posted.at(-1).retry, true, 'a 502 while Citadel restarts too');
+  assert.equal(posted.at(-1)!.retry, true, 'a 502 while Citadel restarts too');
   fail = Object.assign(new Error('Value too big'), { status: 400 });
   write(3);
   await settle();
-  assert.ok(!posted.at(-1).retry, 'a refusal is not retried');
+  assert.ok(!posted.at(-1)!.retry, 'a refusal is not retried');
   assert.equal(bridgeUnsaved(), false, 'refused for good: the page will not send it again, so nothing holds a reload');
   fail = new TypeError('Failed to fetch');
   write(4);
@@ -226,27 +235,27 @@ test('a write Citadel could not take while it restarts tells the page to try aga
   fail = null;
   write(5);
   await settle();
-  assert.equal(posted.at(-1).ok, true);
+  assert.equal(posted.at(-1)!.ok, true);
   assert.equal(bridgeUnsaved(), false, 'landed');
   fail = new TypeError('Failed to fetch');
   write(6);
   await settle();
   fail = null;
-  onMessage({ source: win, origin: 'null', data: { bridge: TAG, id: 7, op: 'hello', page: 'p9' } });
+  onMessage!({ source: win, origin: 'null', data: { bridge: TAG, id: 7, op: 'hello', page: 'p9' } });
   await settle();
   assert.equal(bridgeUnsaved(), false, 'a page that reloaded has no write left to send');
 
   // Typing on the page counts as typing in Citadel, and gets no answer.
   const n = posted.length;
   const before = Date.now();
-  onMessage({ source: win, origin: 'null', data: { bridge: TAG, id: 8, op: 'typing', page: 'p9' } });
+  onMessage!({ source: win, origin: 'null', data: { bridge: TAG, id: 8, op: 'typing', page: 'p9' } });
   await settle();
   assert.ok(bridgeTypedAt() >= before);
   assert.equal(posted.length, n);
 });
 
 test('a frame writes in a burst of 40, then 20 a second', () => {
-  const f: any = {};
+  const f = {};
   let n = 0;
   while (takeWrite(f, 1000)) n++;
   assert.equal(n, 40);
@@ -258,31 +267,33 @@ test('a frame writes in a burst of 40, then 20 a second', () => {
 
 test('a store changed elsewhere reaches the frames showing it, with what it holds now, and no other frame', async (t) => {
   // The viewer's window is the boundary: its message listener and each frame's postMessage are stand-ins.
-  let onMessage: any = null;
-  (globalThis as any).addEventListener = (type: string, fn: any) => {
-    if (type === 'message') onMessage = fn;
-  };
-  t.after(() => {
-    delete (globalThis as any).addEventListener;
+  let onMessage = null as ((e: object) => void) | null;
+  Object.assign(globalThis, {
+    addEventListener: (type: string, fn: typeof onMessage) => {
+      if (type === 'message') onMessage = fn;
+    },
   });
-  const held: Record<string, any[]> = { s1: [{ key: 'pick', value: 1 }], s2: [{ key: 'pick', value: 9 }] };
+  t.after(() => {
+    delete (globalThis as { addEventListener?: unknown }).addEventListener;
+  });
+  const held: Record<string, Entry[]> = { s1: [{ key: 'pick', value: 1 }], s2: [{ key: 'pick', value: 9 }] };
   const storeOf: Record<string, string> = { pa: 's1', pa2: 's1', pb: 's2' };
-  const calls: any[] = [];
-  const api = async (path: string, { body }: any) => {
+  const calls: string[][] = [];
+  const api = async (path: string, { body }: { body: { page: string; op: string } }) => {
     calls.push([path, body.page, body.op]);
     return { store: storeOf[body.page], entries: held[storeOf[body.page]] };
   };
   const settle = () => new Promise((r) => setImmediate(r));
   const frame = (page: string) => {
-    const posted: any[] = [];
-    const win = { postMessage: (m: any) => posted.push(m) };
+    const posted: Posted[] = [];
+    const win = { postMessage: (m: Posted) => posted.push(m) };
     const iframe = { isConnected: true, contentWindow: win };
     attachBridge(iframe, { open: { artifact: 1 }, name: `${page}.html`, owner: 'Cara', api });
     return { page, win, iframe, posted };
   };
   const [a, a2, b, gone, quiet] = [frame('pa'), frame('pa2'), frame('pb'), frame('pa'), frame('pa')];
   // Each frame's page lists its store once (that's how the viewer learns which store a frame shows), but `quiet`'s never asks.
-  for (const f of [a, a2, b, gone]) onMessage({ source: f.win, origin: 'null', data: { bridge: TAG, id: 1, op: 'list', page: f.page } });
+  for (const f of [a, a2, b, gone]) onMessage!({ source: f.win, origin: 'null', data: { bridge: TAG, id: 1, op: 'list', page: f.page } });
   await settle();
   for (const f of [a, a2, b, gone]) f.posted.length = 0;
   calls.length = 0;
@@ -312,7 +323,7 @@ test('a served page carries the bridge and what it saved', async () => {
   assert.equal(w.status, 200, JSON.stringify(w.data));
   assert.equal(w.data.person, 'Cara');
   assert.deepEqual(
-    w.data.entries.map((e: any) => [e.key, e.value, e.by]),
+    w.data.entries.map((e) => [e.key, e.value, e.by]),
     [['db/picks/cleric', { pick: 3, note: '</script>' }, 'Cara']],
   );
   const res = await fetch(`${srv.base}/api/files/${page}`);
@@ -363,7 +374,7 @@ test('a shared page saves under its own store, opened from the shared folder', a
   assert.equal(w.status, 200, JSON.stringify(w.data));
   const r = await agent(TA.id, { path: 'scheme shared/board.html' });
   assert.deepEqual(
-    r.data.entries.map((e: any) => [e.key, e.value]),
+    r.data.entries.map((e) => [e.key, e.value]),
     [['localStorage/zoom', '2']],
   );
 });
@@ -371,7 +382,7 @@ test('a shared page saves under its own store, opened from the shared folder', a
 test("agents read and write their scheme's pages, by artifact or path, and no other scheme's", async () => {
   const byId = await agent(M.id, { artifact: PICKER.id });
   assert.equal(byId.status, 200, JSON.stringify(byId.data));
-  assert.ok(byId.data.entries.some((e: any) => e.key === 'db/picks/cleric'));
+  assert.ok(byId.data.entries.some((e) => e.key === 'db/picks/cleric'));
   const set = await agent(TA.id, {
     path: join(root, 'work', 'picker.html'),
     entries: [
@@ -381,11 +392,11 @@ test("agents read and write their scheme's pages, by artifact or path, and no ot
   });
   assert.equal(set.status, 200, JSON.stringify(set.data));
   assert.deepEqual(
-    set.data.entries.map((e: any) => [e.key, e.by]),
+    set.data.entries.map((e) => [e.key, e.by]),
     [['db/picks/rogue', 'Taskmaster']],
   );
   const rel = await agent(M.id, { path: 'picker.html', entries: [{ key: 'storage/n', value: 5 }] });
-  assert.deepEqual(rel.data.entries.find((e: any) => e.key === 'storage/n').by, `#${M.number}`);
+  assert.deepEqual(rel.data.entries.find((e) => e.key === 'storage/n')!.by, `#${M.number}`);
   // Scheme B's page, by id and by path; a page that isn't HTML; a path out of every folder.
   assert.equal((await agent(M.id, { artifact: THEIRS.id })).status, 404);
   assert.equal((await agent(M.id, { path: join(root, 'work-b', 'theirs.html') })).status, 404);
@@ -396,13 +407,13 @@ test("agents read and write their scheme's pages, by artifact or path, and no ot
 
 test('artifact_data is offered to minions and Taskmasters, and reads a page', async () => {
   const call = (role: string, msg: object, env: object = {}) => {
-    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_ROLE: role, ...env }, stdio: ['pipe', 'pipe', 'inherit'] });
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, ...msg }) + '\n');
+    const child = tmp.spawn(process.execPath, [join(REPO, 'src', 'mcp.ts')], { env: { ...process.env, COORDINATOR_TICKET: undefined, COORDINATOR_ROLE: role, ...env }, stdio: ['pipe', 'pipe', 'inherit'] });
+    const reply = new Promise<McpReply>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
+    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, ...msg }) + '\n');
     return reply.finally(() => child.kill());
   };
   for (const role of ['coordinator', 'thread']) {
-    const names = (await call(role, { method: 'tools/list' })).result.tools.map((t: any) => t.name);
+    const names = (await call(role, { method: 'tools/list' })).result.tools.map((t) => t.name);
     assert.ok(names.includes('artifact_data'), role);
   }
   const { result } = await call(
@@ -427,7 +438,7 @@ const askDoc = (doc: string) =>
     method: 'POST',
     headers: { Authorization: `Bearer ${tokens.agentToken(M.id)}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ doc }),
-  }).then(async (r) => ({ status: r.status, data: await r.json() }));
+  }).then(async (r) => ({ status: r.status, data: await json<Answer>(r) }));
 const cardData = (id: string) =>
   store
     .listEvents(M.id)
@@ -450,7 +461,7 @@ test('a choices card names a page with pick bars, and only such a page (#804)', 
 });
 
 // These start turns on M and the Taskmaster, which retires the nonce-less agent tokens the tests above use: keep them last.
-const sendPage = (body: object, headers: Record<string, string> = { Cookie: srv.cookie }) => fetch(`${srv.base}/api/artifact-send`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json() }));
+const sendPage = (body: object, headers: Record<string, string> = { Cookie: srv.cookie }) => fetch(`${srv.base}/api/artifact-send`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await json<Answer>(r) }));
 const lastMessage = (id: number) =>
   store
     .listEvents(id)
@@ -499,6 +510,36 @@ test("a page's Send carries its marked pictures into the chat, checked as pasted
   const html = Buffer.from('<script>alert(1)</script>').toString('base64');
   assert.equal((await sendPage({ open: { artifact: PICKER.id }, page, text: 'x', images: [{ mediaType: 'image/png', data: html }] })).status, 415);
   assert.equal(store.listEvents(M.id).filter((e) => e.kind === 'user_message').length, before, 'a refused picture sends nothing');
+});
+
+test("a page's Send pressed again under the same id posts once (#1862)", async () => {
+  const page = await pageOf(PICKER.id);
+  const count = () => store.listEvents(M.id).filter((e) => e.kind === 'user_message').length;
+  const before = count();
+  const send = (text: string, sendId: string) => sendPage({ open: { artifact: PICKER.id }, page, text, sendId });
+  const [a, b] = await Promise.all([send('once', 'id-1'), send('once', 'id-1')]);
+  assert.deepEqual([a.status, b.status], [202, 202]);
+  assert.deepEqual(a.data, b.data);
+  assert.equal((await send('once', 'id-1')).status, 202);
+  assert.equal(count(), before + 1);
+  assert.equal((await send('once', 'id-2')).status, 202);
+  assert.equal(count(), before + 2, 'a new id is a new message');
+  // Taken before a restart, which forgot the ids it held: the message kept it.
+  store.addEvent(M.id, 'user_message', { author: 'Cara', text: 'once', sendId: 'id-3' });
+  assert.equal((await send('once', 'id-3')).status, 202);
+  assert.equal(count(), before + 3);
+});
+
+test("a shared page's Send pressed again goes to the one chat, though another minion linked the page meanwhile (#1862)", async () => {
+  writeFileSync(join(shared, 'relinked.html'), '<p>takes</p>');
+  const page = await sharedPage('relinked.html');
+  const send = () => sendPage({ open: { project: A.id, path: 'relinked.html' }, page, text: 'A', sendId: 'id-shared' });
+  assert.equal((await send()).status, 202);
+  assert.equal(lastMessage(TA.id).text, 'A');
+  const linker = thread(A.id, 'ticket', 'work-relinker');
+  store.syncArtifacts(linker, [{ path: join(shared, 'relinked.html'), size: 1, mtime: 1 }]);
+  assert.equal((await send()).status, 202);
+  assert.equal(store.listEvents(linker.id).filter((e) => e.kind === 'user_message').length, 0);
 });
 
 test("a page's Send is refused for another page, an empty text, and anyone but a person", async () => {

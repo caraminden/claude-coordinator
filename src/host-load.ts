@@ -119,8 +119,8 @@ export interface HostLoad {
   now: number;
 }
 
-export function hostLoad(dir: string, now = Date.now(), pressureFile?: string, owners?: AppOwners): HostLoad {
-  const { holders, waiters } = readHeavy(dir, now);
+export function hostLoad(dir: string, now = Date.now(), pressureFile?: string, owners?: AppOwners, heavy: ReturnType<typeof readHeavy> = readHeavy(dir, now)): HostLoad {
+  const { holders, waiters } = heavy;
   const tag = (j: HeavyJob) => ({ ...j, scheme: schemeOfWho(j.who, owners) });
   let history = '';
   try {

@@ -290,13 +290,11 @@ under_of() {
   done < <(cat "$state/taken-back" 2>/dev/null || true)
   echo "$u"
 }
-# Ship-time merges (#1221, #1418): git with the kit core's merge driver (tools/land-core.sh --merge, by the MERGES rules
-# in land.local.sh) for the files tools/ship-numbers.attributes names. A SCHEMA_HISTORY number main took while this
-# waited goes to the branch's next free one (ship-numbers.ts), MIGRATIONS lines both sides added are kept, a prompt
-# budget both raised becomes main's plus the branch's raise, and the prompt baseline takes main's copy, measured again
-# below. What a rule isn't sure of conflicts as before. <main side> names which side of the merge is main or the build
-# (ours for merge-tree and a rebase, theirs for --build's merge of main). Only land.sh's own merges get it, not a
-# person's rebase. A tools/ that lacks the core (mid-rebase onto a build without it) renumbers only, or merges as git would.
+# Ship-time merges (#1221, #1418): git with the kit core's driver (tools/land-core.sh --merge, MERGES in land.local.sh) for
+# the files tools/ship-numbers.attributes names: a SCHEMA_HISTORY number main took moves on (ship-numbers.ts), MIGRATIONS
+# lines both added stay, budgets, size caps and judges' counts add up, the prompt baseline is main's, measured again below.
+# The rest conflicts as before. <main side>: main's or the build's (ours for merge-tree and a rebase, theirs for --build's
+# merge of main). Not for a person's rebase. A tools/ without the core (mid-rebase) renumbers only, or merges as git would.
 numbers_git() {
   local side=$1
   shift
@@ -492,7 +490,7 @@ smoke() {
     done < <(cat "$state/pulled/${branch//\//-}" 2>/dev/null)
     if [ ${#tests[@]} -gt 0 ]; then
       say "smoke: running ${#tests[@]} test files"
-      out=$(tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "${tests[@]}" 2>&1) || rc=$?
+      out=$(CITADEL_TEST_FILES=0 tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "${tests[@]}" 2>&1) || rc=$?
       if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
         say "smoke: the tests ran past ${LAND_SMOKE_TIMEOUT:-300} s, so they don't decide: getting in line, and CI runs them all"
       elif [ "$rc" = 2 ]; then # citadel-test couldn't start them (its usage and setup errors), which says nothing about the branch
@@ -503,7 +501,7 @@ smoke() {
         local failed=() still=()
         mapfile -t failed < <(sed -nE 's/^✖ ([^ :]+\.test\.ts)(:[0-9]+)? › .*/\1/p' <<<"$out" | sort -u)
         for f in "${failed[@]}"; do
-          CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "$f" >/dev/null 2>&1 || still+=("$f")
+          CITADEL_TEST_FILES=0 CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "$f" >/dev/null 2>&1 || still+=("$f")
         done
         if [ ${#failed[@]} -gt 0 ] && [ ${#still[@]} -eq 0 ]; then
           for f in "${failed[@]}"; do retro_log "flake · $f · smoke · $label"; say "flake: $f · smoke"; done
@@ -1077,7 +1075,7 @@ guard_run() {
   for f in test/schema-compat.test.ts test/prompt-budget.test.ts test/one-until.test.ts test/ui-contract.test.ts test/size-budget.test.ts; do [ ! -f "$dir/$f" ] || tests+=("$f"); done
   [ -x "$dir/tools/citadel-test" ] && [ ${#tests[@]} -gt 0 ] || return 3
   [ -n "${1:-}" ] || land_mark guards guards
-  guard_out=$(cd "$dir" && CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_GUARD_TIMEOUT:-120}" "${tests[@]}" 2>&1 9>&- 7>&- 6>&- </dev/null) || guard_rc=$?
+  guard_out=$(cd "$dir" && CITADEL_TEST_FILES=0 CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_GUARD_TIMEOUT:-120}" "${tests[@]}" 2>&1 9>&- 7>&- 6>&- </dev/null) || guard_rc=$?
   case $guard_rc in 0) return 0 ;; 2 | 124 | 137) return 2 ;; *) return 1 ;; esac
 }
 guard_files() { sed -nE 's/^✖ ([^ :]+\.test\.ts).*/\1/p' <<<"$guard_out" | sort -u | paste -sd, -; }
@@ -1655,13 +1653,13 @@ top_done() { local x _ p; read -r x _ p 2>/dev/null <"$state/train-top" && [ "$p
 # and ci_gate takes the early run as its own. <state>/early: "<top> <its branch> <when pushed> <this branch> <onto>
 # <its riders' tickets, comma-separated, or ->"; that landing builds its train of those riders only (early_look), so
 # ships that joined the line since don't change it, and at its gate counts the run or cancels it (early_gate). Off:
-# LAND_EARLY=0, or for every landing, touch <state>/early-off.
+# LAND_EARLY=0, or <state>/early-off; it goes only with the CI desktop's hold off (<state>/hold-off, #1902).
 early_ahead='' early_top='' early_pid='' train_only=''
 early_slug() { local url; url=$(git remote get-url "$REMOTE" 2>/dev/null) || return 1; url=${url#*github.com[:/]}; echo "${url%.git}"; }
 # [<what this train is doing>]: the words for the say line, at its deploy (default: while its CI runs, top_gate).
 early_next() {
   local q=$state/queue t x c l nb='' nt='' r own_e wt lane_e slug free out top n riders st waited=$SECONDS
-  [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
+  [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && [ -e "$state/hold-off" ] && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
   [ -z "$split_of" ] || return 0 # a red train being split (train_bisect): its next ships may be the red one's, and a red early run runs again
   ! pipeline_touch "$old" "$tip" || return 0 # the next one runs this train's own land.sh, not this one
   local -A QUEUE_RANK=()
@@ -1861,10 +1859,12 @@ train_build() {
     if [ -z "$skip" ]; then
       if [ -z "$wt" ]; then
         wt=$(mktemp -d "${TMPDIR:-/tmp}/land-train.XXXXXX") && git worktree add -q --detach "$wt" "$cur" 2>/dev/null || { say "ship train: couldn't make a scratch worktree, so this ships alone"; wt=''; break; }
+        regen_attrs=$(git -C "$wt" rev-parse --absolute-git-dir)/rider.attributes
+        grep ' rider$' "$tools/ship-numbers.attributes" >"$regen_attrs" || true # nothing runs after a rider's rebase (no renumbered ADRs, no measured baseline), so only the size lists merge there
       fi
       # Stacked already by the early next train (early_next), else rebased here.
       if { c=$(stacked_of "$cur" "$r") && git -C "$wt" checkout -q --detach "$c" 2>/dev/null; } ||
-        { git -C "$wt" checkout -q --detach "$r" 2>/dev/null && { git -C "$wt" "${rr[@]}" rebase -q --onto "$cur" "$base" >/dev/null 2>&1 || { rerere_on "$wt" git && retro_log "train prep replayed · $b onto $branch's train ($(git rev-parse --short "$cur"))"; }; }; }; then
+        { git -C "$wt" checkout -q --detach "$r" 2>/dev/null && { numbers_git ours -C "$wt" "${rr[@]}" rebase -q --onto "$cur" "$base" >/dev/null 2>&1 || { rerere_on "$wt" numbers_git ours && retro_log "train prep replayed · $b onto $branch's train ($(git rev-parse --short "$cur"))"; }; }; }; then
         c=$(git -C "$wt" rev-parse HEAD)
         if [ "$c" = "$cur" ]; then skip="main already has all of it"
         elif pipeline_touch "$cur" "$c"; then skip="it changes the ship pipeline, which ships alone"

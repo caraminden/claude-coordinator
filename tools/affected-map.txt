@@ -14,6 +14,7 @@
 
 # The database: its schema, its secrets list, and the first-run commit budget.
 src/db.ts: test/db-setup.test.ts test/host-check.test.ts test/db-areas.test.ts
+src/db-schema.ts: test/db-setup.test.ts test/host-check.test.ts test/schema-compat.test.ts
 src/db/*.ts: test/db-areas.test.ts test/db-writer.test.ts
 src/db-view.ts: test/host-check.test.ts
 src/host-check.ts: test/host-check.test.ts
@@ -75,6 +76,7 @@ test/access-matrix.snapshot.json: test/access-matrix.test.ts
 
 # The front end: Citadel UI's contract, relative URLs under previews, hand-built parts, the theme, the service worker.
 public/**: test/boot-check.test.ts test/ui-contract.test.ts test/relative-urls.test.ts test/hand-built-parts.test.ts test/theme.test.ts test/sw.test.ts
+public/reviews.js: test/review-set-api.test.ts
 # home.js imports the app shell (core, sidebar), which node can't load; inbox.js loads it lazily (Build 5).
 public/home.js: test/inbox.test.js test/home.test.ts
 src/theme.ts: test/ui-contract.test.ts test/theme.test.ts
@@ -104,7 +106,10 @@ tools/ci-runner/**: test/ps1-lint.test.ts test/ci-runner-choice.test.ts test/run
 tools/own-check.sh: test/land-train-early.test.ts test/ci-runner-choice.test.ts
 tools/light-check.sh: test/land-train-early.test.ts
 tools/light-check-run.sh: test/light-check-run.test.ts
-tools/land.sh: test/land-regenerate.test.ts test/ci-runner-choice.test.ts test/land-burn-in.test.ts test/land-verdicts.test.ts test/land-train.test.ts test/land-train-riders.test.ts test/land-train-early.test.ts test/land-train-split.test.ts test/land-train-suspects.test.ts test/script-env.test.ts
+tools/land.sh: test/land-regenerate.test.ts test/ci-runner-choice.test.ts test/land-burn-in.test.ts test/land-verdicts.test.ts test/land-train.test.ts test/land-train-riders.test.ts test/land-train-early.test.ts test/land-train-split.test.ts test/land-train-suspects.test.ts test/script-env.test.ts test/land-size-list.test.ts
+kit/skills/scheme-setup/templates/land.sh: test/land-size-list.test.ts test/land-numbers.test.ts
+tools/land.local.sh: test/land-size-list.test.ts test/land-numbers.test.ts
+tools/ship-numbers.attributes: test/land-size-list.test.ts test/land-numbers.test.ts
 tools/burn-in.sh: test/burn-in.test.ts test/flake-proof-yields.test.ts test/ci-runner-choice.test.ts
 tools/flake-proof.sh: test/flake-proof-yields.test.ts
 tools/win-test-box/**: test/ps1-lint.test.ts

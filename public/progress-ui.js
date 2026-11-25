@@ -289,10 +289,17 @@ export function renderProgress() {
     // The log's element stays where it is, so a redraw takes no focus, scroll or half-made click from it.
     const log = timeLogPanel();
     const detail = log.parentElement === prevDetail && prevDetail ? prevDetail : h('div', { class: 'progress-detail timed' }, log);
-    for (const c of [...detail.children]) if (c !== log) c.remove();
+    // The turn's own actions, which its line in the chat lists only once it ends; kept while none is new or done, as the log is.
+    const old = detail.querySelector(':scope > .cmds');
+    const acts = live ? view.turnActions : [];
+    const sig = acts.map((a) => `${a.block.id}${!!a.result}`).join();
+    const cmds = acts.length && (old?.dataset.sig === sig ? old : phaseRows(acts, true, 'turn')[1]);
+    if (cmds) cmds.dataset.sig = sig;
+    const refocus = cmds !== old && old?.querySelector(':scope > summary') === document.activeElement;
+    for (const c of [...detail.children]) if (c !== log && c !== cmds) c.remove();
     detail.prepend(...[waitLine, request].filter(Boolean));
-    // The turn's own actions, which its line in the chat lists only once it ends.
-    if (running && view.turnActions.length) detail.append(phaseRows(view.turnActions, true, 'turn')[1]);
+    if (cmds && cmds !== old) detail.append(cmds);
+    if (refocus) cmds?.firstChild.focus({ preventScroll: true });
     for (const c of [...progressEl.children]) if (c !== detail) c.remove();
     progressEl.prepend(...[bar, meter, caption, w ? waitTail(view.ticket.id, w) : ''].filter(Boolean));
     if (detail.parentElement !== progressEl) progressEl.append(detail);

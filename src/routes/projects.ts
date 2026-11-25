@@ -137,6 +137,28 @@ export function schemeTarget(app: App, from: Ticket, scheme: unknown) {
   return { own, person, who, project };
 }
 
+/**
+ * message_taskmaster naming the sender's own scheme with a `person` (#1855): that member's Taskmaster in a split scheme.
+ * Null when it names another scheme, or none: schemeTarget then answers (own scheme without a person says message_ticket).
+ * Refuses the sender itself, an unknown person, and a member with no Taskmaster of their own.
+ */
+function sameSchemeTarget(app: App, from: Ticket, scheme: unknown, person: unknown) {
+  const { store } = app;
+  const want = String(scheme ?? '').trim().toLowerCase();
+  const own = store.getProject(from.project_id)!;
+  if (want !== own.name.toLowerCase() && want !== String(own.id)) return null;
+  if (person == null || person === '') return null;
+  const raw = str(person, 'person', 200);
+  const user = store.findUser('name', store.props.personName(raw) || raw);
+  if (!user) throw new HttpError(400, `No person called "${raw}"`);
+  const to = store.listCoordinators(own.id).find((t) => t.coordinator_of === user.id);
+  if (!to) throw new HttpError(400, `${user.name} has no ${AGENT_NAME} of their own in ${own.name}: ${own.name} is one scheme, so ask them in the chat or leave a note on a minion`);
+  if (to.id === from.id) throw new HttpError(400, `That is yourself: ${user.name} is your own ${AGENT_NAME}`);
+  const asker = store.turnAsker(from.id) ?? own.owner_id;
+  const asked = asker === null ? undefined : store.getUser(asker);
+  return { own, person: asked, who: { uid: asked?.id, admin: !!asked?.admin }, project: own, to };
+}
+
 /** The project's coordinator ticket, created the first time someone opens the project. */
 export async function ensureCoordinator(app: App, project: Project): Promise<Ticket> {
   const { store } = app;
@@ -260,7 +282,7 @@ async function startChecks(app: App, projectId: number, id: number, startedBy: s
           options: [
             { label: 'Both stay', description: 'Different work after all; nothing to do.', recommended: true },
             { label: `Dismiss #${minion.number}`, description: `#${theirs.number} carries on; #${minion.number} is dismissed and its starter told why.` },
-            { label: 'Merge into one', description: `Both owners' Taskmasters are told to agree which minion carries on with both briefs.` },
+            { label: 'Merge into one', description: `Both owners' Taskmasters are sent a note, which they read on their next turn, to agree which minion carries on with both briefs.` },
           ],
         },
       ],
@@ -2005,9 +2027,11 @@ export const projectRoutes: Route[] = [
         text = formatAsk(form.ask);
         if (text.length > 10_000) throw new HttpError(400, 'Message is too long: at most 10,000 characters, a longer one goes in file');
       }
-      const wake = body.wake !== false && need !== 'fyi';
-      const { own, person, who, project } = schemeTarget(app, from, body.scheme);
-      const to = await taskmasterTo(app, from, own, project, body.person);
+      // Its own scheme plus a person: that member's Taskmaster there, as held mail only (a wake would start a turn on their login).
+      const mate = sameSchemeTarget(app, from, body.scheme, body.person);
+      const wake = body.wake !== false && need !== 'fyi' && !mate;
+      const { own, person, who, project } = mate ?? schemeTarget(app, from, body.scheme);
+      const to = mate?.to ?? (await taskmasterTo(app, from, own, project, body.person));
       const toCitadel = project.id === GLOBAL_OWNER;
       // Citadel's Taskmaster weighs a non-member's ask differently (its prompt). Names that could fake
       // the membership clause (a scheme called "X, for Cara, a Citadel member") come quoted.
@@ -2021,7 +2045,7 @@ export const projectRoutes: Route[] = [
       if (!held) store.setSetting(replyKey(to.id, own.id), from.id);
       // Citadel may answer for a while once a message of theirs has reached it.
       if (toCitadel && !held) store.setSetting(askedCitadelKey(own.id), Date.now());
-      if (!held) runner.emit(from.id, 'note', { need, text: `${wake || woke ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });
+      if (!held) runner.emit(from.id, 'note', { need, text: `${wake || woke ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}${mate ? ` (${store.getUser(to.coordinator_of!)?.name ?? 'someone'}'s)` : ''}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });
       return json(res, 202, { scheme: project.name, held, left, ...(woke ? { woke } : {}), ...(file ? { file: file.path } : {}) });
     },
   },

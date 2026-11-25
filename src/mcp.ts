@@ -742,7 +742,7 @@ const TOOLS = () => [
       type: 'object',
       properties: {
         scheme: { type: 'string', description: 'The other scheme, by name or id; a wrong one lists them' },
-        person: { type: 'string', description: "For a scheme with a Taskmaster per person: whose to reach (a member's name); one with none of their own, or none named, reaches its Overlord. Leave it out to answer: a reply goes back to the one that wrote to you" },
+        person: { type: 'string', description: "For a scheme with a Taskmaster per person: whose to reach (a member's name); one with none of their own, or none named, reaches its Overlord. With your own scheme and a person, it reaches that member's Taskmaster there, as held mail they read on their next turn (it never starts a turn); without a person, your own scheme says to use message_ticket. Leave it out to answer: a reply goes back to the one that wrote to you" },
         text: {
           type: 'string',
           maxLength: 10000,

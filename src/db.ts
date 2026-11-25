@@ -38,7 +38,7 @@ import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
 import { scoped } from './read-scope.ts';
 import { CHAT, attachEventsForWrite, cardFatesTrigger, eventsHome, eventsMoved, eventsPath, eventsSchema, moveEvents } from './events-db.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
-import { type ClaudeStateRow, type EventRow, HEALTH_KEEP_MS, HEALTH_MAX_ROWS, HOST_SAMPLE_KEEP_MS, type Machine, titleWithoutBuild, type CardFate, PUT_CLAUDE_STATE } from './db-rows.ts';
+import { type ClaudeStateRow, type EventRow, type Machine, titleWithoutBuild, type CardFate, PUT_CLAUDE_STATE } from './db-rows.ts';
 export * from './db-rows.ts';
 
 /** The newest event when #812 landed: a card at or below it still counts a typed message as handling it (PERSON_WROTE), or every old card nobody settled would wake up open. */

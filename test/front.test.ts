@@ -68,7 +68,7 @@ const PATHS = [
   '/api/box-capacity',
   // Slice 3 (#1628): the rest of people's GETs that read only the database and the snapshot.
   ...['commands', 'ship-risk', 'time-log'].flatMap((r) => [`/api/tickets/${M1.id}/${r}`, `/api/tickets/${MB.id}/${r}`, `/api/tickets/9999/${r}`]),
-  ...['members', 'taskmaster-events', 'instructions/history', 'my-instructions', 'my-instructions/history', 'repo-setup', 'plugins', 'properties', 'views', 'search?q=one', 'past-minions', 'schedule-audits', 'ship-lessons', 'claims', 'contraption-turns'].flatMap((r) => [
+  ...['members', 'taskmaster-events', 'instructions/history', 'my-instructions', 'my-instructions/history', 'repo-setup', 'plugins', 'properties', 'views', 'search?q=one', 'past-minions', 'schedule-audits', 'ship-lessons', 'claims', 'contraption-turns', 'day-strips?day=2026-11-20'].flatMap((r) => [
     `/api/projects/${A.id}/${r}`,
     `/api/projects/${B.id}/${r}`,
     `/api/projects/999/${r}`,

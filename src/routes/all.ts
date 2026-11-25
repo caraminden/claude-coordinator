@@ -16,6 +16,7 @@ import { ciStoreRoutes } from './ci-store.ts';
 import { desktopRoutes } from './desktop.ts';
 import { pushRoutes } from './push.ts';
 import { timeLogRoutes } from './time-log.ts';
+import { dayStripsRoutes } from './day-strips.ts';
 import { unitRoutes } from './units.ts';
 import { contraptionRoutes } from './contraptions.ts';
 import { skillRoutes } from './skills.ts';
@@ -30,6 +31,7 @@ export const apiRoutes = [
   ...reviewRoutes,
   ...ticketRoutes,
   ...timeLogRoutes,
+  ...dayStripsRoutes,
   ...proposalRoutes,
   ...memoryCuratorRoutes,
   ...fileRoutes,

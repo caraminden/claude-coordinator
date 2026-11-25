@@ -42,6 +42,14 @@ export const minionQueries = {
       .all(projectId, since) as { id: number; number: number; title: string; status: string; data: string | null }[];
   },
 
+  /** A scheme's minions dismissed in [from, to), each with the text of its last note: why it was dismissed (#1996, the day strips). */
+  dismissedIn(this: Store, projectId: number, from: number, to: number): (Ticket & { last_note: string | null })[] {
+    return this.db
+      .prepare(`SELECT t.*, (SELECT json_extract(e.data, '$.text') FROM events e WHERE e.ticket_id = t.id AND e.kind = 'note' ORDER BY e.id DESC LIMIT 1) AS last_note
+      FROM tickets t WHERE t.project_id = ? AND t.kind = 'ticket' AND t.status = 'closed' AND t.closed_at >= ? AND t.closed_at < ?`)
+      .all(projectId, from, to) as unknown as (Ticket & { last_note: string | null })[];
+  },
+
   /** All tickets in a project, including the coordinator. */
   listTickets(this: Store, projectId: number): Ticket[] {
     // In a read scope (#1527) the rows are shared, not copied: copying Citadel's 1,500 rows per call cost more than the

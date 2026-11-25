@@ -42,6 +42,7 @@ export const READER_ROUTES: readonly string[] = [
   '/api/tickets/:ticket/commands',
   '/api/tickets/:ticket/ship-risk',
   '/api/tickets/:ticket/time-log',
+  '/api/projects/:project/day-strips',
   '/api/ship-lines',
   '/api/app/instructions',
   '/api/app/instructions/history',

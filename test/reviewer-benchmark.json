@@ -1,9 +1,9 @@
 {
- "hash": "4b3f6fd154480141",
+ "hash": "07dc15dae061ce6e",
  "parts": {
   "reviewer": "74365b1b33254f33",
   "self-review §2": "d2990a67150f6f0c",
-  "lenses": "3c9a62dd530d4906",
+  "lenses": "9596884702cab3e6",
   "ponytail-review": "9dd27f8bc79cbdf2"
  },
  "at": "2026-11-24",
@@ -15,43 +15,43 @@
  "planted": {
   "named": [
    18,
-   20
+   19
   ],
   "of": 22,
   "casesNamed": [
    18,
-   20
+   19
   ],
   "controlsWith": [
-   1,
-   1
+   2,
+   2
   ],
   "controls": 5,
   "findings": [
-   36,
-   37
+   39,
+   36
   ]
  },
  "escapes": {
   "named": [
-   2,
-   5
+   4,
+   2
   ],
   "of": 36,
   "casesNamed": [
-   2,
-   5
+   4,
+   2
   ],
   "controlsWith": [
-   6,
-   6
+   3,
+   4
   ],
   "controls": 10,
   "findings": [
-   27,
-   21
+   20,
+   18
   ]
  },
- "cost": 24.67,
- "results": "shared/project/reports/reviewer-benchmark-baseline-2026-11.md"
+ "cost": 26.51,
+ "results": "shared/project/reports/reviewer-benchmark-1830-test-habits"
 }

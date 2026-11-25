@@ -1,7 +1,8 @@
 // What a running turn costs the server's one thread (#1559). 100 fake turns, each writing two lines a second, run on a
 // real server; the test reads the main thread's CPU time over a window when all of them are live, and
-// divides by the turn-seconds. CPU time is not load-proof (#1896): on a crowded box the same work costs 1.4 to 2 times the
-// CPU (a shared core, cold caches after each preemption), so the reading is scaled by a spin timed in the same window. The budget is in test/turn-cost.json and may only
+// divides by the turn-seconds. CPU time is not load-proof (#1896): on a crowded box the same turns cost the thread 1.4
+// to 2 times the CPU, so the reading is scaled by a spin timed in the same window (spinCpuMs).
+// The budget is in test/turn-cost.json and may only
 // fall: lower it when the number drops; raise it never (fix what made a turn dearer, or say why in the commit).
 import assert from 'node:assert/strict';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -31,11 +32,12 @@ function mainCpuMs(pid: number): number {
   return (Number(f[11]) + Number(f[12])) * 10;
 }
 
-// What a fixed piece of file and JSON work, the server's kind, costs this process in CPU right now. On a quiet box it is
-// SPIN_QUIET_MS (22 on perigee, 25 on the CI desktop); under 10 copies at once it read 53 to 76 while the turn cost read
-// 2.6 to 3.7 against 1.2 to 1.8 quiet. The reading is only ever scaled down, so a faster box is not judged harder.
-// shortcut: under load the scaled number runs up to a third low, so a regression under 1.5x can pass a crowded run; a quiet run still catches it.
-const SPIN_QUIET_MS = 22;
+// What a fixed piece of file and JSON work costs this process in CPU right now: 22 ms on a quiet perigee, 25 on the CI
+// desktop. With 10 copies at once on the desktop it read 53 to 76 while the turn cost read 2.6 to 3.7, against 1.8 with
+// one copy; the server thread's involuntary switches went from 2 to between 2,400 and 11,800. The reading is only ever
+// scaled down, and by half at most: the spin rises more than the turn cost does (3x against 2x).
+// shortcut: a crowded run can pass a turn up to 1.4x over budget (the crowd costs 1.4x, the scale takes off 2x); a quiet run catches it.
+const SPIN_QUIET_MS = 25;
 const spinFile = join(root, 'spin');
 function spinCpuMs(): number {
   const at = process.cpuUsage();
@@ -87,7 +89,7 @@ createInterface({ input: process.stdin }).once('line', () => {
     }
     const raw = (mainCpuMs(srv.proc.pid!) - before) / (TURNS * WINDOW_S);
     const spin = spins.sort((a, b) => a - b)[spins.length >> 1];
-    const perTurnSecond = raw * Math.min(1, SPIN_QUIET_MS / spin);
+    const perTurnSecond = raw * Math.max(0.5, Math.min(1, SPIN_QUIET_MS / spin));
     const { msPerTurnSecond } = JSON.parse(readFileSync(budgetFile, 'utf8'));
     writeFileSync(stop, '');
     console.log(`main thread: ${perTurnSecond.toFixed(3)} ms of CPU per turn-second (budget ${msPerTurnSecond}; read ${raw.toFixed(3)}, spin ${spin.toFixed(0)} ms against ${SPIN_QUIET_MS} quiet)`);

@@ -317,7 +317,7 @@ export function promptParts(
         'People follow your work through a progress readout ("Running tests… 3/7") built from your task list, so for anything beyond a quick answer, plan the work with the `plan` tool (mcp__thread) before starting it:',
         '- Make 3 to 7 steps that are conceptual chunks someone skimming would follow ("Find where the sidebar text comes from", "Make the readout show phases", "Test it on a copy"), not individual commands.',
         '- Give each a `why`, one sentence on what it involves and why, a short `doing` ("Finding where the sidebar text comes from"), and `minutes`: your guess of its minutes, which fills the readout\'s bar. Guess your own working minutes, not a person\'s, and guess short: half of all steps finish in under 3 minutes and three quarters in under 7; ship and self-review steps run longer (half by 5, nine in ten by 30); only about one step in eleven passes 20.',
-        '- Give each a `kind`, then leave the bar alone: the server moves it from what you do, back too (an edit after a red test). Call `plan` again only when the steps change, or a step it has wrong needs your `status`, which wins.',
+        '- Give each a `kind`, then leave the bar alone: the server moves it from what you do, back too (an edit after a red test). Call `plan` again only when the steps change, or a step it has wrong, or one with no kind, needs your `status`, which wins.',
         '- If the plan changes, add, reword or drop steps so the list stays true.',
         'Tool calls show only in that readout, so put anything people need to see in your reply text.',
         ...CHAT_FACTS,

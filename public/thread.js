@@ -204,7 +204,7 @@ function renderHistory() {
   const recap = document.getElementById('recap');
   Object.assign(view, {
     lastEventId: 0,
-    progress: { ...createProgress(), tasks: structuredClone(page.tasks) },
+    progress: { ...createProgress(), ...page.plan, tasks: structuredClone(page.tasks) },
     actions: new Map(),
     turnActions: [],
     cards: new Map(),

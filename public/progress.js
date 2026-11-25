@@ -28,9 +28,14 @@ export function createProgress() {
     asked: false, // a card went out this turn, so it isn't answered yet
     planned: false, // this turn made a plan call
     prep: false, // the review skill is open and no reviewer has started
+    side: null, // the untagged step the minion said it is on, until the server next sees another stage worked on
+    closing: false, // close_self was called this turn, and nothing since says it stays open
     finished: null, // [] collects finished steps for step_times (#571), which the runner drains; null collects nothing
   };
 }
+
+/** Where a tagged plan is (#1923), for a page that starts in the middle of one (history.ts). */
+export const planPlace = ({ at, asked, planned, prep, side, closing }) => ({ at, asked, planned, prep, side, closing });
 
 const basename = (path) =>
   String(path ?? '')
@@ -213,9 +218,10 @@ export function actionPhase(block) {
 export const STEP_KINDS = { read: 'Reading', build: 'Building', test: 'Testing', review: 'Reviewing', ask: 'Asking', ship: 'Shipping' };
 
 const SCRATCH_RE = /TMPDIR|\/tmp\//;
-const TESTS_RE = /^(?:(?:npm|pnpm|yarn|bun)(?: run)? test|(?:npx |uv run |python3? -m )?(?:pytest|unittest|jest|vitest|playwright test)\b|(?:cargo|go|dotnet|make|mix|swift|flutter) (?:\S+ )?test\b|ctest\b|(?:\S*-)?node (?:-\S+ )*--test\b|citadel-test\b|(?:\.\/)?gradlew\b.*test|node \S*ui-shot\.ts|gh workflow run\b)/i;
+const TESTS_RE =
+  /^(?:(?:npm|pnpm|yarn|bun)(?: run)? test|(?:npx |uv run |python3? -m )?(?:pytest|unittest|jest|vitest|playwright test)\b|(?:cargo|go|dotnet|make|mix|swift|flutter) (?:\S+ )?test\b|ctest\b|(?:\S*-)?node (?:-\S+ )*--test\b|citadel-test\b|(?:\.\/)?gradlew\b.*test|node \S*ui-shot\.ts|gh workflow run \S*(?:test|check|proof|ci\b))/i;
 // A repo's own check script: tools/burn-in.sh, node tools/shake-check.ts.
-const CHECKER_RE = /^(?:(?:node|bash|sh|python3?|npx tsx|bun|deno run)(?: -\S+)* )?[^\s"'=]*(?:test|check|shot|burn-in|smoke|e2e)[^\s"'/]*\.(?:sh|m?[jt]s|py)\b/i;
+const CHECKER_RE = /^(?:(?:node|bash|sh|python3?|npx tsx|bun|deno run)(?: -\S+)* )?(?:[^\s"'=]*[/_.-])?(?:screen|type|self|run|unit)?(?:test|check|shot|burn-in|smoke|e2e)s?\d*(?:[_.-][^\s"'/]*)?\.(?:sh|m?[jt]s|py)\b/i;
 // The kit's checks beside a review (self-review's side-check.sh, the Codex second opinion).
 const SIDE_RE = /^"?[^\s"]*(?:side-check\.sh|citadel-codex-review)\b/;
 // Programs that only run another: timeout 300 npm test, mise exec -- cargo test.
@@ -242,7 +248,7 @@ function commandKind(command) {
       .replace(/^[({]\s*|^(?:if|then|do|else|while|!)\s+/, '')
       .replace(WRAPPER_RE, '');
     if (/^cd\s/.test(seg)) inScratch = SCRATCH_RE.test(seg);
-    if (/^(?:(?:ba)?sh |\.\/)?(?:\S+\/)?tools\/(?:land|deploy)\.sh\b(?!.*--(?:help|dry))|^gh pr (?:create|merge|ready)\b/.test(seg)) return 'ship';
+    if (/^(?:(?:ba)?sh |\.\/)?(?:\S+\/)?tools\/(?:land|deploy)\.sh\b(?!.*--(?:help|dry))|^gh pr (?:create(?!.* (?:--draft|-d)\b)|merge|ready)\b/.test(seg)) return 'ship';
     if (SIDE_RE.test(seg)) reviewed = true;
     else if (TESTS_RE.test(seg) || (CHECKER_RE.test(seg) && !inScratch && !SCRATCH_RE.test(seg))) tested = true;
     if (inScratch || /^(?:git (?!apply|mv|rm)|rg |grep )/.test(seg)) continue;
@@ -442,6 +448,8 @@ export function applyEvent(p, kind, data, at = null) {
     p.turnOk = !data.is_error;
     if (p.turnOk) p.turnFailed = false;
     p.planMoved = false;
+    // A close is the end only once its turn is over: an open card refuses it, and the replay sees no results.
+    if (p.closing && !p.asked) finishPlan(p, at);
     for (const t of p.tasks) settle(t, at);
   }
 
@@ -453,6 +461,7 @@ export function applyEvent(p, kind, data, at = null) {
     p.planMoved = false;
     p.asked = false;
     p.planned = false;
+    p.closing = false;
     if (typeof data.model === 'string') p.model = data.model;
     // A plan finished in an earlier turn belongs to that chunk of work, not this one.
     if (p.tasks.length && allDone(p)) p.tasks = [];
@@ -507,9 +516,10 @@ export function applyEvent(p, kind, data, at = null) {
         actions.push({ block, taskId: task?.id ?? null });
       }
     }
-    // The state its reply ends on (runner.ts stripStatus), or the call that sets one or closes it: nothing is left to do.
-    const says = (b) => b.type === 'tool_use' && (b.name === 'mcp__thread__close_self' || (b.name === 'mcp__thread__set_thread_status' && NOTHING_LEFT.has(b.input?.state)));
-    if (!data.parent_tool_use_id && (NOTHING_LEFT.has(data.turn_state) || data.message?.content?.some?.(says))) finishPlan(p, at);
+    // The state its reply ends on (runner.ts stripStatus), or the call that sets one: nothing is left to do.
+    const calls = (name) => data.message?.content?.find?.((b) => b.type === 'tool_use' && b.name === name);
+    if (!data.parent_tool_use_id && calls('mcp__thread__close_self')) p.closing = true;
+    if (!data.parent_tool_use_id && (NOTHING_LEFT.has(data.turn_state) || NOTHING_LEFT.has(calls('mcp__thread__set_thread_status')?.input?.state))) finishPlan(p, at);
   } else if (data.type === 'user') {
     for (const block of data.message?.content ?? []) {
       if (block.type !== 'tool_result' || !p.pendingCreates.has(block.tool_use_id)) continue;
@@ -555,8 +565,8 @@ export function planError(input) {
     const bad = ['step', 'doing', 'why', 'outcome'].find((k) => s[k] != null && typeof s[k] !== 'string');
     if (bad) return `Step ${s.n}: ${bad} is text.`;
     if (s.minutes != null && !(Number.isFinite(s.minutes) && s.minutes >= 0)) return `Step ${s.n}: minutes is a number.`;
-    if (s.status != null && !Object.hasOwn(PLAN_STATUS, s.status)) return `Step ${s.n}: status is todo, doing, done or dropped.`;
-    if (s.kind != null && !Object.hasOwn(STEP_KINDS, s.kind)) return `Step ${s.n}: kind is read, build, test, review, ask or ship.`;
+    if (s.status != null && !(typeof s.status === 'string' && Object.hasOwn(PLAN_STATUS, s.status))) return `Step ${s.n}: status is todo, doing, done or dropped.`;
+    if (s.kind != null && !(typeof s.kind === 'string' && Object.hasOwn(STEP_KINDS, s.kind))) return `Step ${s.n}: kind is read, build, test, review, ask or ship.`;
   }
   return '';
 }
@@ -583,21 +593,23 @@ function applyPlan(p, callId, input, at) {
     if (s.kind) task.kind = s.kind;
     updateTask(p, idx, update, at);
     // The minion's own word wins for its step (#1923): done stays done, doing is where the plan is, todo takes it back.
-    if (s.status === 'done') Object.assign(task, { own: 'done', seen: true });
-    else if (s.status) task.own = undefined;
-    if (s.status === 'todo') task.seen = false;
+    if (s.status) Object.assign(task, { own: s.status, seen: s.status !== 'todo' });
     if (s.status === 'doing') {
-      task.seen = true;
-      p.at = task.kind ? task.id : null;
+      for (const t of p.tasks) if (t !== task && t.own === 'doing') t.own = undefined;
+      p.side = task.kind ? null : task.id;
+      if (task.kind) p.at = task.id;
     }
   }
   const stages = stagesOf(p);
+  // The step it took back was the one underway: the plan is on the last one it saw before.
+  if (leadOf(stages[stageAt(p, stages)] ?? []) === undefined && p.tasks.find((t) => t.id === p.at)?.own === 'todo') p.at = stages.flat().findLast((t) => t.seen)?.id ?? p.at;
   // A step dropped from under the plan leaves it on the step before; a new plan is on its first step.
-  if (stages.length && stageAt(p, stages) < 0 && !p.tasks.some((t) => !t.kind && t.status === 'in_progress')) {
+  if (stages.length && stageAt(p, stages) < 0) {
     const last = stages.flat().findLast((t) => t.seen);
     p.at = (last ?? stages[0][0]).id;
   }
-  if (stageAt(p, stages) >= 0) goTo(p, stages, stageAt(p, stages), at);
+  // On a step with no kind, the tagged ones stay as they are until their work shows.
+  if (stageAt(p, stages) >= 0 && !onSide(p)) goTo(p, stages, stageAt(p, stages), at);
 }
 
 /** The kinds whose order can't be read from the calls: work goes round them until a card or a ship. */
@@ -625,6 +637,9 @@ function stagesOf(p) {
   }
   return out;
 }
+
+/** The minion is on a step with no kind, which only it can tick. */
+const onSide = (p) => p.tasks.some((t) => t.id === p.side && t.status === 'in_progress');
 
 const stageAt = (p, stages = stagesOf(p)) => stages.findIndex((st) => st.some((t) => t.id === p.at));
 
@@ -681,7 +696,14 @@ function sawWork(p, work, at) {
     const behind = stages.findLastIndex((st, i) => i < cur && has(i, kind));
     to = has(cur, 'ask') && next >= 0 && (!p.asked || behind < 0) ? next : behind;
   }
-  if (to < 0) return;
+  // A card mid-work is a question, not the plan's ask: that comes once what's before it was worked on.
+  if (kind === 'ask' && work === 'ask' && stages.slice(cur + 1, to).some((st) => !st.some((t) => t.seen))) to = -1;
+  if (to < 0 || (to === cur && onSide(p))) return;
+  p.side = null;
+  p.closing = false;
+  // Newer work than the minion's own word: a step it took back is worked on again.
+  if (to !== cur) for (const t of p.tasks) if (t.own === 'doing') t.own = undefined;
+  if (to !== cur || stages[to].every((t) => t.own === 'todo' || t.own === 'done')) for (const t of stages[to]) if (t.own === 'todo') t.own = undefined;
   if (!prep || to !== cur) p.prep = prep;
   p.planMoved = true;
   goTo(p, stages, to, at);
@@ -689,7 +711,7 @@ function sawWork(p, work, at) {
 
 function goTo(p, stages, to, at) {
   p.at = stages[to][0].id;
-  for (const t of stages[to]) t.seen = true;
+  for (const t of stages[to]) if (t.own !== 'todo') t.seen = true;
   arrange(p, stages, at);
 }
 
@@ -705,9 +727,10 @@ function arrange(p, stages, at) {
   if (p.prep && stages[cur].some((t) => t.kind === 'review')) while (from > 0 && stages[from - 1].some((t) => t.kind === 'build' || t.kind === 'test')) from--;
   const held = (i) => i >= from && i < cur;
   for (const [i, st] of stages.entries()) {
-    const open = st.filter((t) => t.own !== 'done');
+    const open = st.filter((t) => t.own !== 'done' && t.own !== 'todo');
+    for (const t of st) if (t.own === 'todo') setStatus(p, t, 'pending', at);
     if (!open.length) continue;
-    const lead = open[0];
+    const lead = leadOf(st);
     if (i < cur && !held(i) && lead.seen) {
       for (const t of open) settle(t, at);
       // A shared stage's time, split by the guesses: the steps' own can't be told apart.
@@ -716,9 +739,10 @@ function arrange(p, stages, at) {
       if (open.some((t) => t.status !== 'completed')) for (const t of open) t.work = work * (guess ? (t.estimate ?? 0) / guess : 1 / open.length);
       for (const t of open) setStatus(p, t, 'completed', at);
     } else if (i === cur || (held(i) && lead.seen)) {
-      for (const t of open) {
+      for (const [n, t] of open.entries()) {
         t.stage = lead.id;
-        setStatus(p, t, 'in_progress', at);
+        // The minion named one of them: those after it wait.
+        setStatus(p, t, lead.own === 'doing' && n > open.indexOf(lead) ? 'pending' : 'in_progress', at);
         if (held(i) || t !== lead) settle(t, at);
       }
     } else {
@@ -773,10 +797,13 @@ export function planTrack(p) {
   return [...p.tasks].sort((a, b) => (rank[a.status] ?? 2) - (rank[b.status] ?? 2) || (a.status === 'completed' ? (a.doneN ?? 0) - (b.doneN ?? 0) : 0)).map((t) => [t.estimate ?? null, state(t)]);
 }
 
-/** The step the server's stage is timed and shown under: its first not marked done by the minion (#1923). */
+/** A stage's step it is timed and shown under: the one the minion said it is on, else its first still open (#1923). */
+const leadOf = (st) => st.find((t) => t.own === 'doing') ?? st.find((t) => t.own !== 'done' && t.own !== 'todo');
+
+/** The lead of the stage underway. */
 function stepLead(p) {
   const stages = stagesOf(p);
-  return stages[stageAt(p, stages)]?.find((t) => t.own !== 'done')?.id ?? null;
+  return leadOf(stages[stageAt(p, stages)] ?? [])?.id ?? null;
 }
 
 /** A step that is built and now being tested (#1923): not ticked yet, as a failed test brings the bar back to it. */
@@ -815,14 +842,15 @@ export function stepInfo(p, running = false) {
   const total = p.tasks.length;
   const done = p.tasks.filter((t) => t.status === 'completed').length;
   const lead = stepLead(p);
-  const at = p.tasks.findIndex((t) => t.id === lead && t.status === 'in_progress');
+  const on = onSide(p) ? p.side : lead;
+  const at = p.tasks.findIndex((t) => t.id === on && t.status === 'in_progress');
   const currentIdx = running && !p.planMoved ? -1 : at >= 0 ? at : p.tasks.findIndex((t) => t.status === 'in_progress');
   const current = currentIdx >= 0 ? p.tasks[currentIdx] : null;
   return { total, done, current, step: current ? currentIdx + 1 : done };
 }
 
 /** The steps of the stage underway: more than one when the server can't tell them apart (#1923). */
-const sharedSteps = (p, current) => (current ? p.tasks.filter((t) => t === current || (t.kind && current.kind && t.status === 'in_progress' && t.stage === current.stage)) : []);
+const sharedSteps = (p, current) => (current ? p.tasks.filter((t) => t === current || (t.kind && current.kind && t.status === 'in_progress' && t.stage === current.stage && current.own !== 'doing')) : []);
 
 /** What the stage underway is called: its step's own words, or the kinds of a shared stage ("Building, 2 steps", #1923). */
 function stageWords(p, current, words) {

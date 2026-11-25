@@ -23,8 +23,9 @@ function chat(steps, { kinds = true } = {}) {
     review: () => call('Agent', { subagent_type: 'citadel:reviewer', description: 'Review' }),
     read: () => call('Read', { file_path: '/repo/src/a.ts' }),
     ship: () => call('mcp__thread__hand_off_land', { summary: 'x' }),
+    over: () => ev({ type: 'result', subtype: 'success', is_error: false }),
     turn: () => {
-      ev({ type: 'result', subtype: 'success', is_error: false });
+      c.over();
       ev({ type: 'system', subtype: 'init' });
     },
     end: (turn_state) => ev({ type: 'assistant', ...(turn_state ? { turn_state } : {}), message: { content: [{ type: 'text', text: 'Done.' }] } }),
@@ -266,7 +267,63 @@ test('close_self and a complete status end the plan; other states leave the step
   c.end('ready');
   assert.equal(c.bar(), 'cccci');
   c.call('mcp__thread__close_self', {});
+  assert.equal(c.bar(), 'cccci', 'asked for, not granted yet');
+  c.over();
   assert.equal(c.bar(), 'ccccc');
+  // A card still out refuses it, and work after it says it stays open.
+  for (const after of [(x) => x.call('mcp__thread__ask_question', { questions: [] }), (x) => x.edit()]) {
+    const d = chat([['read'], ['build'], ['test'], ['ask']]);
+    d.edit();
+    d.call('mcp__thread__close_self', {});
+    after(d);
+    d.over();
+    assert.equal(d.bar(), 'cipp');
+  }
+});
+
+test("a step taken back, or named inside a shared stage, reads as the minion's word says", () => {
+  const c = usual();
+  c.edit();
+  c.test();
+  c.plan([{ n: 3, status: 'todo' }]);
+  assert.equal(c.bar(), 'cippp', 'back on the step before it');
+  c.test();
+  assert.equal(c.bar(), 'ciipp', 'and worked on again once its work shows');
+  const d = chat([['read'], ['build', 'One'], ['build', 'Two'], ['build', 'Three'], ['test']]);
+  d.edit();
+  assert.equal(stepName(d.p, true), 'Building, 3 steps');
+  d.plan([{ n: 3, status: 'doing' }]);
+  d.edit();
+  assert.deepEqual([d.bar(), stepName(d.p, true)], ['ciipp', 'Two']);
+  d.test();
+  assert.deepEqual([d.bar(), stepName(d.p, true)], ['ciiii', 'test']);
+  d.edit();
+  assert.equal(stepName(d.p, true), 'Building, 3 steps', 'newer work than its word');
+});
+
+test('a step with no kind set to doing is the one underway until the next stage shows', () => {
+  const c = chat([['read'], ['build'], [undefined, 'Tidy up'], ['test'], ['ship']]);
+  c.edit();
+  c.plan([{ n: 3, status: 'doing' }]);
+  assert.equal(stepName(c.p, true), 'Tidy up');
+  c.edit();
+  assert.equal(stepName(c.p, true), 'Tidy up', 'its edits are its own');
+  c.test();
+  assert.equal(stepName(c.p, true), 'test');
+  c.ship();
+  assert.equal(stepName(c.p, true), 'ship');
+});
+
+test('a question mid-work is not the plan’s ask; a card after what is before it is', () => {
+  const ask = (c) => c.call('mcp__thread__ask_question', { questions: [] });
+  const c = chat([['read'], ['build'], ['test'], ['ask'], ['ship']]);
+  ask(c);
+  c.edit();
+  ask(c);
+  assert.equal(c.bar(), 'cippp');
+  c.test();
+  ask(c);
+  assert.equal(c.bar(), 'cccip');
 });
 
 test('what a call shows: writes outside scratch folders build, named runners test, the rest says nothing', () => {
@@ -274,6 +331,8 @@ test('what a call shows: writes outside scratch folders build, named runners tes
   for (const cmd of ["cat > src/a.ts <<'E'\nx\nE", "sed -i 's/a/b/' src/a.ts", "python3 - <<'E'\np='src/a.ts'; open(p,'w').write(s)\nE", 'git apply fix.patch', 'echo x >> docs/a.md']) assert.equal(bash(cmd), 'build', cmd);
   for (const cmd of ['npm test', 'cd app && timeout 300 npx vitest run', 'citadel-test test/a.test.ts | tail -5', 'node tools/ui-shot.ts "#/p/1"', 'tools/burn-in.sh test/a.test.ts', 'dotnet test --filter X', 'node --test test/', 'tools/citadel-node --test test/a.test.ts']) assert.equal(bash(cmd), 'test', cmd);
   for (const cmd of ['tools/land.sh', 'gh pr create --fill', 'gh pr merge 5']) assert.equal(bash(cmd), 'ship', cmd);
+  for (const cmd of ['gh workflow run flake-proof.yml', 'bash scripts/run_tests.sh', 'node x/screenshot.mjs', 'node tools/shake-check.ts', 'python3 selftest.py']) assert.equal(bash(cmd), 'test', cmd);
+  for (const cmd of ['gh pr create --draft --fill', 'gh workflow run deploy.yml', 'bash scripts/checkout.sh', 'node tools/latest-release.ts']) assert.equal(bash(cmd), '', cmd);
   for (const cmd of [
     'rg -n foo src',
     'git commit -qm "npm test"',

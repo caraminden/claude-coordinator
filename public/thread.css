@@ -325,7 +325,7 @@ mark.find.current { background: var(--waiting); color: #fff; }
 /* Built and kept open under its tests (#1923): quieter than the step underway. */
 .step.held { border-color: var(--line); }
 .step.held .icon { animation: none; }
-.step.held .subject { font-weight: 500; }
+.step.held .subject { font-weight: 500; color: var(--muted); }
 .step > summary { flex-wrap: wrap; }
 .progress-detail .request { margin: 0.1rem 0.3rem 0.6rem; font-size: 0.9em; }
 .progress-detail .request q { font-style: italic; }

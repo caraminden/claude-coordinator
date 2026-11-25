@@ -414,3 +414,19 @@ test("after a restart, a chat's first open carries on from the saved replay, not
   again.deleteTicket(t.id);
   assert.equal(again.getSetting(`plan:${t.id}:page`), null);
 });
+
+test('a page that starts mid-plan carries where the plan is, so its edits and tests move the bar (#1923)', () => {
+  const { store, t } = setup('mid-plan');
+  const call = (name: string, input: object) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `k${++tool}`, name, input }] } });
+  const steps = ['read', 'build', 'test'].map((kind, i) => ({ n: i + 1, step: kind, kind }));
+  turn(store, t.id, 20, [call('mcp__thread__plan', { steps }), call('Edit', { file_path: '/repo/a.ts' })]);
+  turn(store, t.id, 1, [call('Bash', { command: 'npm test' })]);
+  const page = historyPage(store, t.id, { limit: 10 });
+  assert.equal(page.more, true);
+  const p: ReturnType<typeof createProgress> = { ...createProgress(), ...page.plan, tasks: structuredClone(page.tasks) as never[] };
+  for (const e of page.events) applyEvent(p, e.kind, typeof e.data === 'string' ? JSON.parse(e.data) : e.data, e.created_at);
+  assert.deepEqual(
+    p.tasks.map((s: { status: string }) => s.status),
+    ['completed', 'in_progress', 'in_progress'],
+  );
+});

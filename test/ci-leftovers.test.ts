@@ -21,7 +21,11 @@ const alive = (pid: number) => {
   }
 };
 after(async () => {
-  for (const pid of pids) if (alive(pid)) process.kill(pid, 'SIGKILL');
+  for (const pid of pids.flatMap((p) => [-p, p])) {
+    try {
+      process.kill(pid, 'SIGKILL'); // a group where it leads one, with its sleep
+    } catch {}
+  }
   for (const p of children) p.kill('SIGKILL');
   await until('all to be gone', () => !pids.some(alive));
   rmSync(base, { recursive: true, force: true }); // timing-ok: own temp dir, its processes gone

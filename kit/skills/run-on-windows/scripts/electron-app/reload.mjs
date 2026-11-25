@@ -40,7 +40,9 @@ const app = spawn(electron, [`--remote-debugging-port=${dbg}`, ...(profile ? [`-
 // Any exit, a throw included, takes the app down with it and removes the temp profile.
 process.on('exit', () => {
   app.kill();
-  if (profile) rmSync(profile, { recursive: true, force: true });
+  try {
+    if (profile) rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+  } catch {}
 });
 let browserWs;
 for (let i = 0; i < 60 && !browserWs; i++) {

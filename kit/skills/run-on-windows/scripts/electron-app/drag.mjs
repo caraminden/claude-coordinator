@@ -45,7 +45,9 @@ const mouse = (cmd) =>
 process.on('exit', () => {
   app.kill();
   ps.kill();
-  rmSync(profile, { recursive: true, force: true });
+  try {
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+  } catch {}
 });
 let browserWs;
 for (let i = 0; i < 60 && !browserWs; i++) {

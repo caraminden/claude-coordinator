@@ -662,13 +662,13 @@ test("another scheme's heavy job goes ahead after four hours of a line that neve
   assert.equal(w.hold.why('o/elsewhere', undefined, w.now), null, 'a repo with no runner there is never held');
 });
 
-test("CI health never reads a held run's cancel as a red, and reads everything else", async () => {
-  const body = { total_count: 2, workflow_runs: [{ id: 1 }, { id: 2 }] };
+test('CI health reads a held run as one that waits, never as a red, and everything else as it is', async () => {
+  const body = { total_count: 2, workflow_runs: [{ id: 1, status: 'completed', conclusion: 'cancelled' }, { id: 2 }] };
   const get = withoutHeld(
     async () => ({ status: 200, etag: 'e', body }),
     (run) => run === 1,
   );
-  assert.deepEqual(await get('runs', null, undefined as never), { status: 200, etag: 'e', body: { total_count: 2, workflow_runs: [{ id: 2 }] } });
+  assert.deepEqual(await get('runs', null, undefined as never), { status: 200, etag: 'e', body: { total_count: 2, workflow_runs: [{ id: 1, status: 'queued', conclusion: null }, { id: 2 }] } });
   const jobs = { status: 200, etag: 'e', body: { jobs: [] } };
   assert.equal(
     await withoutHeld(
@@ -1242,4 +1242,22 @@ test('a proof held 2 hours is reported as waiting for its turn, not for ships', 
   await w.tick();
   assert.match(w.reports[0], /one at a time/);
   assert.doesNotMatch(w.reports[0], /a ship is in line/);
+});
+
+test("a second main run held drops the first: one comes back, the newest, with the first's wait", async () => {
+  const w = world();
+  w.line = 1;
+  const a = w.main();
+  await w.tick();
+  await w.for(3 * 60 * MIN);
+  const b = w.main();
+  await w.for(2 * MIN);
+  assert.deepEqual(
+    w.hold.state(w.now).held.map((h) => h.run),
+    [b.id],
+    'the first tests older code, and one verdict is enough',
+  );
+  await w.for(60 * MIN);
+  assert.equal(b.status, 'queued', 'its 4 hours count from the first');
+  assert.ok(!w.posts.includes(`rerun ${a.id}`));
 });

@@ -1185,8 +1185,10 @@ export class CiHealth {
     const file = workflowFile(runs.find((r) => r.id === mark.run) ?? runs[0] ?? ({ name: 'its workflow' } as Run));
     const re = mark.rerun?.ticket === t.id ? mark.rerun : undefined;
     if (re && !re.failed) {
-      // Ours is the first dispatched run since: GitHub runs the branch's tip when it starts it, which can be past re.sha.
-      const seen = re.dispatched || re.inputs ? runs.filter((r) => r.event === 'workflow_dispatch' && at(r.created_at) >= re.at - 60_000).sort((a, b) => at(a.created_at) - at(b.created_at))[0] : runs.filter((r) => r.head_sha === re.sha).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
+      // Ours is the first run started since (the daily one tests the tip too): GitHub runs the branch's tip when it starts it, which can be past re.sha.
+      const started = runs.filter((r) => /^(workflow_dispatch|schedule)$/.test(r.event ?? '') && at(r.created_at) >= re.at - 60_000).sort((a, b) => at(a.created_at) - at(b.created_at));
+      // A cancelled one gave way to a later one (the CI desktop hold keeps main's newest).
+      const seen = re.dispatched || re.inputs ? (started.find((r) => r.conclusion !== 'cancelled') ?? started[0]) : runs.filter((r) => r.head_sha === re.sha).sort((a, b) => at(b.created_at) - at(a.created_at))[0];
       if (seen && (seen.id !== re.run || seen.head_sha !== re.sha)) {
         re.run = seen.id;
         re.sha = seen.head_sha;

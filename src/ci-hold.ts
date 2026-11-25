@@ -220,14 +220,14 @@ function shortWhy(why: string): string {
   return /long job/.test(why) ? 'waits for its hours' : 'ships first';
 }
 
-/** CI health's GitHub reads without the held runs: a run stopped for a ship starts again, so its cancel is nobody's red. */
+/** CI health's GitHub reads with the held runs as waiting: a run stopped for a ship starts again, so its cancel is nobody's red and nobody need start another. */
 export function withoutHeld(get: GhGet, isHeld: (run: number) => boolean): GhGet {
   return async (path, etag, as) => {
     const r = await get(path, etag, as);
     const body = r.body as RunList | null;
     const runs = body?.workflow_runs;
     if (!Array.isArray(runs) || !runs.some((run) => isHeld(run.id))) return r;
-    return { ...r, body: { ...body, workflow_runs: runs.filter((run) => !isHeld(run.id)) } };
+    return { ...r, body: { ...body, workflow_runs: runs.map((run) => (isHeld(run.id) ? { ...run, status: 'queued', conclusion: null } : run)) } };
   };
 }
 
@@ -540,6 +540,7 @@ export class CiHold {
     const groups = new Set<string | null>();
     for (const a of active.values()) groups.add(groupOf(a.repo, a.kind, a.run.display_title || NAMES[a.kind]));
     for (const h of this.held.values()) if (h.phase === 'resumed' && now - h.at <= RECANCEL_MS) groups.add(groupOf(h.repo, h.kind, h.what));
+    this.oneMain();
     let failed = false;
     // In order: main's run first (it and the suites share a group), then a ship's checks, then the longest held.
     for (const h of [...this.held.values()].sort((a, b) => RANK[a.kind] - RANK[b.kind] || a.since - b.since)) {
@@ -688,6 +689,15 @@ export class CiHold {
   private since(h: HeldRun | undefined, kind: HoldKind, run: GhRun): number | undefined {
     const id = heavyId(kind, run.display_title ?? '');
     return h?.since ?? (id ? this.d.heldSince?.(id) : undefined);
+  }
+
+  /** Of main's runs that wait, only the newest comes back (the others test older code), with the longest one's wait. */
+  private oneMain() {
+    const [last, ...older] = [...this.held.values()].filter((h) => h.kind === 'main' && h.phase === 'held').sort((a, b) => b.run - a.run);
+    for (const h of older) {
+      last.since = Math.min(last.since, h.since);
+      this.drop(h);
+    }
   }
 
   private phase(h: HeldRun, phase: HeldRun['phase'], now: number) {

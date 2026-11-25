@@ -12,6 +12,7 @@
 //   LAND_RETRIED, LAND_RETRY_NOW, LAND_FLAKE_KEPT, LAND_ASIDE  land.sh -> the copy that goes again after a refusal by the pipeline (#1360; LAND_ASIDE: a pulled front stepping aside, #1918; unset again before any child).
 //   LAND_FIX                      a person -> land.sh: "this branch fixes the commit whose deploy was rolled back"; the suite a landing runs inherits it.
 //   LAND_URGENT                   a person -> land.sh -> deploy.sh: "this fixes shipping or an outage now": its restart skips the starved-box hold (#1417).
+//   LAND_RISK                     the server's hand-off -> land.sh: the ship's risk label, for the quick train line (#1912).
 //   CITADEL_TEST_PROGRESS(_TO)    citadel-heavy and run-tests.sh -> citadel-node -> its reporter: where a run's counts go.
 //   CITADEL_TEST_FILES            land.sh's smoke check -> citadel-test: 0, the shared limit on test files (#1928) doesn't hold a ship's own check.
 //   CITADEL_TEST_ALWAYS           land.sh's smoke check -> citadel-test: rerun a failed file without the always-tests (#1012).
@@ -38,6 +39,7 @@ export const SCRIPT_ENV = [
   'LAND_ASIDE',
   'LAND_FIX',
   'LAND_URGENT',
+  'LAND_RISK',
   'CITADEL_TEST_PROGRESS',
   'CITADEL_TEST_PROGRESS_TO',
   'CITADEL_TEST_ALWAYS',

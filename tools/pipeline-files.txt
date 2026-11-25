@@ -24,6 +24,7 @@ tools/run-tests.sh
 tools/parse-check.ts
 tools/citadel-test
 tools/affected.ts
+tools/quick-train.ts
 tools/affected-map.txt
 tools/always-tests.txt
 tools/lanes

@@ -738,6 +738,16 @@ prep_check() {
   say "prep: $branch will conflict with ${cause:-a ship} once $fb's ship train ships; conflicted files: ${files:-none named}; record the fix against $top from $base to $head"
   return 0
 }
+# Whether this ship would ride the quick train, and why not (#1912; tools/quick-train.ts, specs/quick-train.md in the shared
+# folder): one retro line per ship, and nothing else. In a subshell, its failures swallowed, so it never decides a landing.
+# LAND_RISK is the hand-off's label (src/ship-handoff.ts). shortcut: judged on the branch before its rebase.
+quick_train_line() (
+  set +e
+  { [ "$mode" = land ] || [ "$mode" = build ]; } && [ -f "$tools/quick-train.ts" ] || exit 0
+  base=$(under_of) && [ -n "$base" ] || base=$(git merge-base main HEAD)
+  out=$(timeout 60 "$tools/citadel-node" "$tools/quick-train.ts" --main main --base "$base" --risk "${LAND_RISK:-}")
+  retro_log "quick train · $label · ${out:-not: could not be judged}"
+) >/dev/null 2>&1 9>&- 7>&- 6>&- 5>&- </dev/null || true
 # Every gh call of any landing is counted in $state/gh-calls (epoch seconds, the landing's branch and the endpoint, no tokens), so
 # the next time the 5,000 an hour run out, `cut -d" " -f2 "$state/gh-calls" | sort | uniq -c` says which landing asked how often (#1655).
 # GitHub's rate_limit read costs none of them, so gh_quota's isn't counted (#1722).
@@ -760,6 +770,7 @@ if [ -z "$resumed" ]; then
       waited_on=$now under=$(under_of)
       early_check main "waiting in line"
     }
+    quick_train_line
     # A ship's own check (#1567): with others in line and the check runner free, its CI runs first on that runner.
     [ "$mode" != land ] || [ ! -f "$tools/own-check.sh" ] || { . "$tools/own-check.sh"; own_check; }
     queue_lock "$state" "$branch" || { land_timing 1; exit 1; }

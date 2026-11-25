@@ -78,7 +78,7 @@ test/land-train-fixture.ts: test/land-train.test.ts test/land-train-riders.test.
 test/access-matrix.snapshot.json: test/access-matrix.test.ts
 
 # The front end: Citadel UI's contract, relative URLs under previews, hand-built parts, the theme, the service worker.
-public/**: test/boot-check.test.ts test/ui-contract.test.ts test/relative-urls.test.ts test/hand-built-parts.test.ts test/theme.test.ts test/sw.test.ts
+public/**: test/boot-check.test.ts test/ui-contract.test.ts test/relative-urls.test.ts test/hand-built-parts.test.ts test/theme.test.ts test/sw.test.ts test/show-parts.test.ts
 public/reviews.js: test/review-set-api.test.ts
 # home.js imports the app shell (core, sidebar), which node can't load; inbox.js loads it lazily (Build 5).
 public/home.js: test/inbox.test.js test/home.test.ts
@@ -150,7 +150,9 @@ tools/judge-replays/**: test/judges.test.ts
 
 # The pre-ship reviewer's text, lenses and model (#1738): a change needs its benchmark rerun and recorded.
 kit/agents/reviewer.md: test/reviewer-benchmark.test.ts
-kit/skills/self-review/**: test/reviewer-benchmark.test.ts
+kit/skills/self-review/**: test/reviewer-benchmark.test.ts test/review-set.test.ts
+src/review-backfill.json: test/review-set.test.ts
+tools/citadel-where: test/show-parts.test.ts
 kit/skills/ponytail-review/**: test/reviewer-benchmark.test.ts
 kit/skills/citadel-words/**: test/citadel-words.test.ts
 src/wording.ts: test/citadel-words.test.ts

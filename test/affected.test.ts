@@ -194,6 +194,13 @@ test('any public/ change picks the boot-check test', () => {
     );
 });
 
+// #1912: the cheap guards a low ship tripped that its own pick missed (#1910's ten days of reds, replayed).
+test('a public/ change picks the show-parts guard, and a lens change the review-set one', () => {
+  const picks = (p: string, t: string) => lines([p]).run.some((r) => r.test === t);
+  for (const p of ['public/parts.js', 'public/style.css', 'tools/citadel-where']) assert.ok(picks(p, 'test/show-parts.test.ts'), p);
+  for (const p of ['kit/skills/self-review/lenses/ui.md', 'src/review-backfill.json']) assert.ok(picks(p, 'test/review-set.test.ts'), p);
+});
+
 test('a test that directly imports a src/, public/ or tools/ module is picked when that module changes (#1809)', () => {
   const missed: string[] = [];
   for (const t of tracked.filter((f) => map.tests.some((re) => re.test(f)))) {

@@ -358,6 +358,30 @@ test("a retro log that can't be written changes neither a landing's output nor i
   assert.equal(runs[0].status, 0);
 });
 
+// #1912: judged and logged as a ship joins the line, never acted on (tools/quick-train.ts).
+test('a ship logs whether it would ride the quick train, and ships the same either way', () => {
+  const r = setup();
+  r.commit(r.source, 'tools/pipeline-files.txt', 'p.txt\n');
+  r.commit(r.source, 'tools/affected-map.txt', '*.txt: test/a.test.ts\n');
+  const lines = (dir: string) => landLog(dir).match(/quick train · .*/g);
+  const go = (n: number, file: string, risk: string) => {
+    r.commit(r.wt, file, `${n}\n`);
+    const shared = join(r.dir, `shared-${n}`);
+    const res = r.run({ COORDINATOR_SHARED_DIR: shared, LAND_RISK: risk });
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+    assert.doesNotMatch(res.stdout + res.stderr, /quick train/, 'nothing of it reaches the landing itself');
+    return lines(shared);
+  };
+  // The branch starts behind main and rebases onto it: the judge runs once, not again in the rebased copy.
+  assert.deepEqual(go(1, 'b.txt', 'low'), ['quick train · ticket/1-x · would qualify']);
+  assert.deepEqual(go(2, 'p.txt', 'low'), ['quick train · ticket/1-x · not: sensitive: pipeline (p.txt)']);
+  assert.deepEqual(go(3, 'b.txt', ''), ['quick train · ticket/1-x · not: no risk label']);
+  // A map that can't be read: the ship goes on, and the line says it wasn't judged.
+  r.commit(r.source, 'tools/affected-map.txt', 'no colon here\n');
+  assert.deepEqual(go(4, 'b.txt', 'low'), ['quick train · ticket/1-x · not: could not be judged']);
+});
+
 test('a run of this very commit that is already green lands at once; one that was red is run again', () => {
   const r = setup();
   const c = ci(r);

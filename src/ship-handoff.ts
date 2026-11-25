@@ -129,6 +129,7 @@ export async function checkHandoff(app: App, ticket: Ticket, body: Record<string
   if (typeof caller === 'function') caller();
   const env = app.runner.hostEnv(ticket, typeof caller === 'string' ? caller : undefined);
   if (body.fix === true) env.LAND_FIX = '1';
+  env.LAND_RISK = h.risk; // land.sh logs whether the ship would ride the quick train (#1912)
   if (body.outage === true) env.LAND_URGENT = '1'; // its restart skips deploy.sh's starved-box hold (#1417)
   // Fast mode (#1017): low and medium lands go live on the smoke check; every land in the scheme is let through on known reds.
   const scheme = app.store.getProject(ticket.project_id);

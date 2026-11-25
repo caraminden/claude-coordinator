@@ -981,7 +981,7 @@ test('a high bug fix with fix_proof ships without a go and its line says so; wit
 
 // Fast mode (#1017): in a fast scheme a low or medium land gets LAND_FAST=1 and a high one doesn't; both get the
 // scheme's known reds. Peek-like scheme, not Citadel (the every-scheme skill).
-test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, and the known-red ledger to every land', async () => {
+test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, and the known-red ledger and its risk label to every land', async () => {
   const srv = await bootServer();
   try {
     const store = new Store(join(srv.data, 'coordinator.db'));
@@ -994,7 +994,7 @@ test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, an
       mkdirSync(join(cwd, 'tools'), { recursive: true });
       const dump = join(srv.root, `${name}.env`);
       // Written whole, then renamed in: a bare redirect creates the file empty first, and the wait below saw it that way under load.
-      writeFileSync(join(cwd, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0\nprintf 'fast=%s\\nknown=%s\\n' "\${LAND_FAST:-}" "\${LAND_KNOWN_RED:-}" >${JSON.stringify(dump + '.part')}\nmv ${JSON.stringify(dump + '.part')} ${JSON.stringify(dump)}\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
+      writeFileSync(join(cwd, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0\nprintf 'fast=%s\\nknown=%s\\nrisk=%s\\n' "\${LAND_FAST:-}" "\${LAND_KNOWN_RED:-}" "\${LAND_RISK:-}" >${JSON.stringify(dump + '.part')}\nmv ${JSON.stringify(dump + '.part')} ${JSON.stringify(dump)}\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
       git(cwd, 'init', '-q');
       git(cwd, 'add', '.');
       git(cwd, 'commit', '-qm', 'init');
@@ -1004,9 +1004,9 @@ test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, an
       await until(`${name} land.sh ran`, () => existsSync(dump), 20_000);
       return readFileSync(dump, 'utf8');
     };
-    assert.equal(await landWith('low', { risk: 'low' }), 'fast=1\nknown=test/x.test.ts\t#41 is fixing it\n');
-    assert.equal(await landWith('medium', { risk: 'medium' }), 'fast=1\nknown=test/x.test.ts\t#41 is fixing it\n');
-    assert.equal(await landWith('high', { risk: 'high', go: 'Cara, 10:00 PST' }), 'fast=\nknown=test/x.test.ts\t#41 is fixing it\n', 'high keeps the full gate');
+    assert.equal(await landWith('low', { risk: 'low' }), 'fast=1\nknown=test/x.test.ts\t#41 is fixing it\nrisk=low\n');
+    assert.equal(await landWith('medium', { risk: 'medium' }), 'fast=1\nknown=test/x.test.ts\t#41 is fixing it\nrisk=medium\n');
+    assert.equal(await landWith('high', { risk: 'high', go: 'Cara, 10:00 PST' }), 'fast=\nknown=test/x.test.ts\t#41 is fixing it\nrisk=high\n', 'high keeps the full gate');
   } finally {
     await srv.stop();
   }

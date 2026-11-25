@@ -12,7 +12,7 @@ test('an ask with no "what I checked" comes back with a one-line reason', () => 
 });
 
 test('every part is required', () => {
-  for (const k of ['saw', 'wanted', 'by']) assert.match((checkAsk({ ...full, [k]: '' }) as any).error, new RegExp(k));
+  for (const k of ['saw', 'wanted', 'by']) assert.match((checkAsk({ ...full, [k]: '' }) as { error: string }).error, new RegExp(k));
 });
 
 test('a full ask lays out the same way every time, with free text after', () => {

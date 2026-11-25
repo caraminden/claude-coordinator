@@ -51,7 +51,7 @@ test('with auto-checkpoint off, commits leave the database file alone', () => {
 test('the worker checkpoints, and the store goes back to checkpointing itself when it stops', async () => {
   const s = store();
   const worker = checkpointOffThread(s, 20, 1000)!;
-  assert.equal((s.db.prepare('PRAGMA wal_autocheckpoint').get() as any).wal_autocheckpoint, 0);
+  assert.equal((s.db.prepare('PRAGMA wal_autocheckpoint').get() as { wal_autocheckpoint: number }).wal_autocheckpoint, 0);
   const before = size(s.path);
   fill(s);
   // Rounds that ran during fill() are queued, stale: wait for the copy itself.
@@ -59,7 +59,7 @@ test('the worker checkpoints, and the store goes back to checkpointing itself wh
   // The file grows as the copy runs: let that round finish before stopping the worker in the middle of it.
   await settled();
   await worker.terminate();
-  assert.equal((s.db.prepare('PRAGMA wal_autocheckpoint').get() as any).wal_autocheckpoint, 1000);
+  assert.equal((s.db.prepare('PRAGMA wal_autocheckpoint').get() as { wal_autocheckpoint: number }).wal_autocheckpoint, 1000);
   s.db.close();
 });
 

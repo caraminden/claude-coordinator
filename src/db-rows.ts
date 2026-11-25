@@ -611,6 +611,10 @@ export interface ContraptionRow {
   created_at: number;
 }
 
+/** What a new contraption's row needs: the columns with a default, or that may be null, can be left out (#1817). */
+export type NewContraption = Omit<ContraptionRow, 'id' | 'created_at' | Defaulted> & Partial<Pick<ContraptionRow, Defaulted>>;
+type Defaulted = 'icon' | 'home_scheme' | 'open_paths' | 'static_paths' | 'relay_paths' | 'repo' | 'branch' | 'folder' | 'subdir' | 'restart_risk' | 'restart_note' | 'default_model' | 'turn_cap';
+
 /** A contraption's named session for one person, and the Claude session it resumes. */
 export interface ContraptionSession {
   contraption_id: number;

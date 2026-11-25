@@ -73,8 +73,8 @@ test("picking an option brings the card's Send above the sticky composer on a ph
       { env: { ...process.env, DEV_URL: '', DEV_COOKIE: '' } },
     );
     let t = '';
-    p.stdout.on('data', (d) => (t += d));
-    p.stderr.on('data', (d) => (t += d));
+    p.stdout!.on('data', (d) => (t += d));
+    p.stderr!.on('data', (d) => (t += d));
     p.on('exit', () => ok(t));
   });
   assert.match(text, /eval: \{"enabled":true,"onTop":true\}/, text);

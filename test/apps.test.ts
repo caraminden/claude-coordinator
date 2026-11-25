@@ -13,6 +13,7 @@ import { isOpenPath } from '../src/apps.ts';
 import { Auth } from '../src/auth.ts';
 import { verifyIdentity } from '../src/contraptions.ts';
 import { agentToken, bootServer, PASSWORD, SECRET, until, type Booted } from './helpers.ts';
+import { json } from './typed.ts';
 
 let srv: Booted;
 let pub = '';
@@ -229,7 +230,7 @@ test('a stream the contraption drops ends for the browser too, so it reconnects'
 
 test('bodies up to 20 MiB go through; bigger ones are refused', async () => {
   const ok = await get('/apps/stub/upload', asCara(), { method: 'POST', body: Buffer.alloc(20 * 1024 * 1024) });
-  assert.equal((await ok.json()).size, 20 * 1024 * 1024);
+  assert.equal((await json<{ size: number }>(ok)).size, 20 * 1024 * 1024);
   const n = seen.length;
   const big = await get('/apps/stub/upload', asCara(), { method: 'POST', body: Buffer.alloc(20 * 1024 * 1024 + 1) });
   assert.equal(big.status, 413);
@@ -299,7 +300,7 @@ test('using an app or the API with a session over 7 days old renews it; logout s
   assert.ok(page.headers.getSetCookie().includes('stub=1; Path=/apps/stub/'), "the contraption's own cookies still go through");
   assert.equal(lastSeen().headers.cookie, undefined, 'the contraption never sees the session, old or new');
   const me = await get('/api/me', { Cookie: renewed.split(';')[0] });
-  assert.equal((await me.json()).id, cara, 'the fresh cookie signs Cara in');
+  assert.equal((await json<{ id: number }>(me)).id, cara, 'the fresh cookie signs Cara in');
   assert.deepEqual(sessionCookies(me), [], 'and is not renewed again');
 
   assert.equal(sessionCookies(await get('/api/me', { Cookie: old })).length, 1, 'the API renews too');
@@ -357,7 +358,7 @@ test('the rail and drawers: their scripts are served to contraptions, and lists 
   assert.equal((await get('/apps/_citadel/theme.css', { 'If-None-Match': `"stale", W/${etag}` })).status, 304);
   assert.equal((await get('/apps/_citadel/theme.css', { 'If-None-Match': '"stale"' })).status, 200);
   assert.deepEqual(
-    (await (await get('/api/contraptions/mine', asCara())).json()).map((c: { name: string }) => c.name),
+    (await json<{ name: string }[]>(await get('/api/contraptions/mine', asCara()))).map((c) => c.name),
     ['stub'],
   );
   // Nothing enabled: an empty list, so no rail.

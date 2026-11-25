@@ -3,12 +3,13 @@ import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { createServer as createHttpServer } from 'node:http';
-import { createServer, type Server } from 'node:net';
+import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, type AddressInfo, type Server } from 'node:net';
 import { after, beforeEach, test } from 'node:test';
 import { AppServices, folderHolds, manifestOn, parseManifest, serviceOptions, unitFiles, type ServiceOptions } from '../src/app-services.ts';
 import type { ContraptionRow } from '../src/db.ts';
 import { fakeSystemd, settled, tempRoot } from './helpers.ts';
+import { fake as standIn } from './typed.ts';
 import { until } from './wait.ts';
 
 // Citadel writes and runs contraptions' user services (#266). Everything here runs against a stand-in
@@ -110,7 +111,7 @@ test("units stop mise at the app folder's parent, so a repo-root mise.toml above
 });
 
 test('only the live server, or a dev copy with stand-ins for both systemctl and the unit folder, touches systemd', () => {
-  const rest = { keysDir: () => '', citadelUrl: () => '' };
+  const rest = standIn<Pick<ServiceOptions, 'keysDir' | 'citadelUrl' | 'logDir'>>({ keysDir: () => '', citadelUrl: () => '' });
   assert.equal(serviceOptions({}, true, false, rest).off, null);
   assert.match(serviceOptions({}, true, true, rest).off!, /boot check or a preview/);
   assert.match(serviceOptions({ CITADEL_SYSTEMCTL: '/x' }, false, false, rest).off!, /Only the live/);
@@ -394,7 +395,7 @@ function remote(repo: string) {
 async function listening(): Promise<Server & { port: number }> {
   const srv = createServer((s) => s.end());
   await tmp.serve(srv);
-  return Object.assign(srv, { port: (srv.address() as any).port });
+  return Object.assign(srv, { port: (srv.address() as AddressInfo).port });
 }
 async function done(name: string) {
   for (;;) {
@@ -844,7 +845,7 @@ test("a deploy that doesn't come up healthy rolls back, and says so when the rol
   await tmp.serve(svc);
   // In a finally: a server left listening keeps the file, and the deploy lock, running forever (#377).
   try {
-    const c = { ...row(name, (svc.address() as any).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    const c = { ...row(name, (svc.address() as AddressInfo).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     services.deploy(c, 'Cara');
     const first = await done(name);
     assert.equal(first.state, 'deployed', first.said.join('\n'));
@@ -879,7 +880,7 @@ test("a deploy checks, as the person deploying, that the app installs as its own
   });
   await tmp.serve(svc);
   try {
-    const c = { ...row(name, (svc.address() as any).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    const c = { ...row(name, (svc.address() as AddressInfo).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     services.deploy(c, 'Cara', [], () => 'v1.signed.header');
     const d = await done(name);
     assert.equal(d.state, 'deployed', 'a warning, never a failure');
@@ -927,7 +928,7 @@ test('an install check that cannot run is no to-do and no "no rail icon": it is 
   });
   await tmp.serve(svc);
   try {
-    const c = { ...row(name, (svc.address() as any).port), icon: null, repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    const c = { ...row(name, (svc.address() as AddressInfo).port), icon: null, repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     const icons: string[] = [],
       todos: string[][] = [],
       notes: string[] = [];
@@ -945,7 +946,7 @@ test('an install check that cannot run is no to-do and no "no rail icon": it is 
     notes.length = 0;
     slow = false;
     let calls = 0;
-    const orig = svc.listeners('request')[0] as any;
+    const orig = svc.listeners('request')[0] as (q: IncomingMessage, s: ServerResponse) => void;
     svc.removeAllListeners('request');
     svc.on('request', (q, s) => {
       if (q.url === home && calls++ === 0) return void s.writeHead(503).end('x');
@@ -975,7 +976,7 @@ test('a deploy fills an empty rail icon from its manifest, and hands back what i
   });
   await tmp.serve(svc);
   try {
-    const c = { ...row(name, (svc.address() as any).port), icon: null, repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+    const c = { ...row(name, (svc.address() as AddressInfo).port), icon: null, repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
     const icons: string[] = [];
     const todos: string[][] = [];
     const hooks = (took: boolean) => ({ setIcon: (icon: string) => (icons.push(icon), took), todo: (t: string[]) => todos.push(t) });
@@ -1180,7 +1181,7 @@ exit 0
     res.writeHead(req.url === '/health' && !db.includes('GARBLED') ? 200 : 500).end();
   });
   await tmp.serve(svc);
-  const c = { ...row(name, (svc.address() as any).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
+  const c = { ...row(name, (svc.address() as AddressInfo).port), repo: `cara/${name}`, branch: null, folder: null } as ContraptionRow;
   const manifest = appManifest([], { health: '/health', migrations: ['migrate.sh'] });
   const db = () => readFileSync(join(data, 'db.txt'), 'utf8');
   const snaps = join(home, '.local/share', `.${name}.snapshots`);

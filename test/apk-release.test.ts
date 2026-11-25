@@ -80,7 +80,7 @@ test('publish refuses an APK signed with another key than the published one, cha
   const read: string[] = [];
   const certs = async (apk: string) => (read.push(apk), [readFileSync(apk, 'utf8') === 'old' ? 'aaa' : key === 'same' ? 'aaa' : 'bbb']);
   const go = () => publish({ slug: 'o/mandate', runId: 9, feedFile, current: 6, main: { code: 7, name: '1.7' }, as: undefined, stored, certs });
-  await assert.rejects(go(), (err: any) => err instanceof OtherKey && /another key \(certificate SHA-256 bbb\) than the published mandate-6\.apk \(aaa\)/.test(err.message));
+  await assert.rejects(go(), (err: Error) => err instanceof OtherKey && /another key \(certificate SHA-256 bbb\) than the published mandate-6\.apk \(aaa\)/.test(err.message));
   assert.deepEqual(read.sort(), [join(dir, 'mandate-6.apk'), stored].sort(), 'both APKs were read');
   assert.equal(JSON.parse(readFileSync(feedFile, 'utf8')).versionCode, 6, 'the feed is untouched');
   assert.ok(!existsSync(join(dir, 'mandate-7.apk')), 'and the APK not copied in');
@@ -127,8 +127,8 @@ test("a CI-signed APK's roll back points the branch at last green, then signs it
   assert.deepEqual(calls, ['point cara/mandate citadel/rollback abc123', 'dispatch cara/mandate android-release.yml citadel/rollback {"version_code":"12"}']);
 
   calls.length = 0;
-  await assert.rejects(rollBackApk({ ...o, copy: true }, 'abc123'), (e: any) => e.status === 409 && /doesn't release/.test(e.message));
-  await assert.rejects(rollBackApk({ ...o, current: null }, 'abc123'), (e: any) => e.status === 409);
+  await assert.rejects(rollBackApk({ ...o, copy: true }, 'abc123'), (e: Error & { status: number }) => e.status === 409 && /doesn't release/.test(e.message));
+  await assert.rejects(rollBackApk({ ...o, current: null }, 'abc123'), (e: Error & { status: number }) => e.status === 409);
   assert.deepEqual(calls, [], 'a refused roll back moves no branch and starts no run');
 
   // Last green's workflow from before the scheme added the input: GitHub's 422 becomes what the card says to do.
@@ -138,7 +138,7 @@ test("a CI-signed APK's roll back points the branch at last green, then signs it
       throw Object.assign(new Error('gh: Unexpected inputs provided: ["version_code"] (HTTP 422)'), { stderr: '' });
     },
   };
-  await assert.rejects(rollBackApk(old, 'abc123'), (e: any) => e.status === 409 && /doesn't take a version_code input yet/.test(e.message) && /build 12/.test(e.message));
+  await assert.rejects(rollBackApk(old, 'abc123'), (e: Error & { status: number }) => e.status === 409 && /doesn't take a version_code input yet/.test(e.message) && /build 12/.test(e.message));
   const down = {
     ...o,
     start: async () => {

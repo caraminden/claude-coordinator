@@ -47,7 +47,7 @@ test('one wake per alert, not per recipient, after the burst settles, naming who
   w.wakes.raise({ from: peek, key: 'fallback.ab', title: 'Turn for #12 ran inside the server', link: '/c/#/p/4/t/12', person: 'Cara' }, NOON);
   w.wakes.raise({ from: peek, key: 'fallback.ab', title: 'Turn for #12 ran inside the server', link: '/c/#/p/4/t/12', person: 'Josh' }, NOON + SEC);
   await w.tick(NOON + 30 * SEC);
-  assert.deepEqual(w.woken, [], 'still inside the batch window');
+  assert.deepEqual<[number, string][]>(w.woken, [], 'still inside the batch window');
   await w.tick(NOON + SEC + BATCH_MS);
   assert.equal(w.woken.length, 1);
   const [scheme, text] = w.woken[0];

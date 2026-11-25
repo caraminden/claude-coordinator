@@ -58,7 +58,7 @@ test('the check skips, with no minion, a stretch with no app turns, runs when th
 
   const cara = store.createUser({ name: 'Cara', login: 'cara' });
   store.putTurnAudit(store.startContraptionTurn(app.id, cara.id, 'ex-1'), { model: null, blind: false, images: 0, system: 's', prompt: 'p', output: 'o' });
-  (store as any).db.prepare('UPDATE schedules SET next_run_at = ? WHERE id = ?').run(Date.now() - 1, s.id);
+  store.db.prepare('UPDATE schedules SET next_run_at = ? WHERE id = ?').run(Date.now() - 1, s.id);
   await runs.runDue();
   assert.equal(made.length, 1, 'a turn since the last run: the check runs');
   assert.equal(store.schedules.get(s.id)!.last_skip, null);

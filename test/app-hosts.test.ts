@@ -18,7 +18,7 @@ const tmp = tempRoot('app-hosts-');
 let srv: Booted;
 let port = 0;
 let pub = '';
-const seen: { path: string; headers: IncomingHttpHeaders; sub: string | null }[] = [];
+const seen: { path: string; headers: IncomingHttpHeaders; sub: number | null }[] = [];
 
 const svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
 const stub = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -237,7 +237,7 @@ test("the rail's answers on a contraption's host: who you are, where Citadel is,
   const icon = await ask(APP, '/apps/_citadel/icon/stub', { Cookie: jar });
   assert.equal(icon.status, 200);
   assert.equal(icon.headers['content-type'], 'image/svg+xml');
-  assert.match(icon.headers['content-security-policy']!, /^sandbox/);
+  assert.match(icon.headers['content-security-policy'] as string, /^sandbox/);
   assert.equal(icon.headers['x-content-type-options'], 'nosniff');
   assert.equal((await ask(APP, '/apps/_citadel/icon/nope', { Cookie: jar })).status, 404);
   // On Citadel's host the same answers, with Citadel where it already is.
@@ -247,7 +247,7 @@ test("the rail's answers on a contraption's host: who you are, where Citadel is,
 
 test("Citadel's page may frame its contraptions' hosts and be framed by them, and no other site", async () => {
   const got = await ask(citadel, '/c/', page);
-  const csp = got.headers['content-security-policy']!;
+  const csp = got.headers['content-security-policy'] as string;
   assert.match(csp, new RegExp(`frame-src 'self' \\*\\.${DOMAIN.replace('.', '\\.')}`));
   assert.match(csp, new RegExp(`frame-ancestors 'self' \\*\\.${DOMAIN.replace('.', '\\.')}`));
 });

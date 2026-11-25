@@ -8,6 +8,7 @@ import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { type Chain, chainIs, githubPrs, LiveWaiters, mergedPr, mergedPrOf, missingCommits, type PrMerge, startChained } from '../src/wake.ts';
 import { bootServer, holds, stopTurns, stopProcs, testPins } from './helpers.ts';
+import { json, type Reply } from './typed.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -635,7 +636,7 @@ test("Start now hears when the brief couldn't be sent, and the brief stays held 
   );
   const { id } = minion();
   const w = new LiveWaiters(store, live.dir, live.commit(), () => {});
-  w.chain({ ticket: id, after: 0, when: 'merged', message: 'build part two', from: 'Taskmaster', base: null as any, since: 0 });
+  w.chain({ ticket: id, after: 0, when: 'merged', message: 'build part two', from: 'Taskmaster', base: null, since: 0 });
   runner.send = () => {
     throw new Error('disk full');
   };
@@ -646,18 +647,32 @@ test("Start now hears when the brief couldn't be sent, and the brief stays held 
 test("through the server: start_after parks the minion with its brief held; the leader's dismissal or Unpark starts it, a message is held for that start; a brief is marked as one", async () => {
   const { base, cookie, proc } = await bootServer({ root });
   procs.push(proc);
-  const call = async (path: string, body?: unknown) => {
+  // The parts of the API's answers these tests read.
+  type Answer = {
+    id: number;
+    number: number;
+    state: string;
+    note: string;
+    notes: string[];
+    parked_for: string | null;
+    wakes_on: string;
+    held: string;
+    held_brief: { text: string; leader: number; when: string; is: string } | null;
+    error: string;
+    ticket: { status: string; state: string; note: string; parked_for: string; wakes_on: string; held_brief: { text: string; leader: number; when: string; is: string } };
+  };
+  const call = async <T = Answer>(path: string, body?: unknown): Promise<Reply<T>> => {
     const res = await fetch(base + path, {
       method: body ? 'POST' : 'GET',
       headers: { Cookie: cookie, ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
-    return { status: res.status, data: await res.json() };
+    return { status: res.status, data: await json<T>(res) };
   };
-  const messages = async (id: number) => (await call(`/api/tickets/${id}/events?after=0`)).data.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
-  const said = async (id: number) => (await messages(id)).map((m: any) => m.text);
+  const messages = async (id: number) => (await call<{ kind: string; data: string }[]>(`/api/tickets/${id}/events?after=0`)).data.filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data) as { text: string; brief?: boolean; parked?: boolean });
+  const said = async (id: number) => (await messages(id)).map((m) => m.text);
   // The brief that starts a minion is marked, so the chat shows it unfolded; later messages aren't.
-  const briefs = async (id: number) => (await messages(id)).map((m: any) => !!m.brief);
+  const briefs = async (id: number) => (await messages(id)).map((m) => !!m.brief);
   const idle = async (id: number) => {
     await until('the ticket to stop running', async () => (await call(`/api/tickets/${id}`)).data.ticket.status !== 'running');
   };

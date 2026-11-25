@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { azureCost, azureSpeech, billedChars, buildSsml, formatExt, type AzureDeps } from '../src/azure-speech.ts';
+import type { SpendInput } from '../src/outside-spend.ts';
 
 // generate_speech with provider azure (#842), against a mocked Azure.
 const root = mkdtempSync(join(tmpdir(), 'azure-speech-'));
@@ -11,16 +12,16 @@ after(() => rmSync(root, { recursive: true, force: true }));
 const KEY = 'sekrit-key-123';
 
 function setup(status = 200) {
-  const calls: { url: string; init: any }[] = [];
-  const booked: any[] = [];
+  const calls: { url: string; init: { body: string; method: string; headers: Record<string, string> } }[] = [];
+  const booked: SpendInput[] = [];
   const deps: AzureDeps = {
     secret: (n) => ({ AZURE_SPEECH_KEY: KEY, AZURE_SPEECH_REGION: 'westus2' })[n] ?? null,
     book: (s) => {
       booked.push(s);
       return { month_usd: 1, cap_usd: null, over_cap: false };
     },
-    fetch: (async (url: any, init: any) => {
-      calls.push({ url: String(url), init });
+    fetch: (async (url: string | URL | Request, init: RequestInit) => {
+      calls.push({ url: String(url), init: init as (typeof calls)[number]['init'] });
       return new Response(status === 200 ? Buffer.from('MP3DATA') : 'nope ' + KEY, { status });
     }) as typeof fetch,
   };
@@ -73,7 +74,7 @@ test('no key: refused before any call; a refusal from Azure never echoes the key
   await assert.rejects(azureSpeech({ input: 'Hi', out: 'd.mp3' }, { roots: [root] }, s.deps), /no Azure Speech key.*AZURE_SPEECH_KEY/);
   assert.equal(s.calls.length, 0);
   const f = setup(401);
-  await assert.rejects(azureSpeech({ input: 'Hi', out: 'e.mp3' }, { roots: [root] }, f.deps), (e: any) => !e.message.includes(KEY) && /401/.test(e.message));
+  await assert.rejects(azureSpeech({ input: 'Hi', out: 'e.mp3' }, { roots: [root] }, f.deps), (e: Error) => !e.message.includes(KEY) && /401/.test(e.message));
   assert.equal(f.booked.length, 0);
   assert.ok(!existsSync(join(root, 'e.mp3')));
 });

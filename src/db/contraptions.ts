@@ -1,5 +1,5 @@
 // Contraptions: their rows, who uses them, sessions, turns, turn audits and errors (#1313: src/db.ts by area).
-import type { ContraptionErrorRow, ContraptionRow, ContraptionSession, ContraptionTurnRow, TurnAuditRow } from '../db-rows.ts';
+import type { ContraptionErrorRow, ContraptionRow, ContraptionSession, ContraptionTurnRow, NewContraption, TurnAuditRow } from '../db-rows.ts';
 import type { Store } from '../db.ts';
 
 export const contraptionQueries = {
@@ -16,7 +16,7 @@ export const contraptionQueries = {
     return this.db.prepare('SELECT * FROM contraptions WHERE key_hash = ?').get(hash) as unknown as ContraptionRow | undefined;
   },
 
-  createContraption(this: Store, c: Omit<ContraptionRow, 'id' | 'created_at'>): ContraptionRow {
+  createContraption(this: Store, c: NewContraption): ContraptionRow {
     const keys = Object.keys(c) as (keyof typeof c)[];
     this.db.prepare(`INSERT INTO contraptions (${keys.join(', ')}, created_at) VALUES (${keys.map(() => '?').join(', ')}, ?)`).run(...keys.map((k) => c[k] ?? null), Date.now());
     return this.getContraption(c.name)!;

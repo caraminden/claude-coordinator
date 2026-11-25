@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
+import { json } from './typed.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import type { Route } from '../src/http.ts';
 import { bootServer, PASSWORD, SECRET, tempRoot } from './helpers.ts';
@@ -190,7 +191,7 @@ test('every route answers each kind of caller as recorded', { timeout: 120_000 }
   after(() => srv.stop()); // waits for the server to exit, so it isn't writing when the folder goes (#218)
   // Besides the admin (person): a member of scheme A who doesn't own it, and someone in no scheme.
   const invited = async (name: string) => {
-    const made = await fetch(`${srv.base}/api/people`, { method: 'POST', headers: { Cookie: srv.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => r.json());
+    const made = await fetch(`${srv.base}/api/people`, { method: 'POST', headers: { Cookie: srv.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then((r) => json<{ token: string; person: { id: number } }>(r));
     const res = await fetch(`${srv.base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
     return { id: made.person.id as number, cookie: res.headers.get('set-cookie')!.split(';')[0] };
   };

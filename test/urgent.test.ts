@@ -423,5 +423,5 @@ test("a mark saved without a kind that is a Taskmaster's still counts as the sav
   store.setSetting('urgent', { on: [{ ticket: 5, kind: 'person', by: 'Josh', at: 1 }], off: [] });
   const again = new Urgent(store, () => {});
   assert.equal(again.put(6, TM, 5), 'that would put it ahead of a minion Josh marked or placed');
-  assert.equal(urgent.list().length, 0);
+  assert.equal(again.put(5, TM, 'first'), 'Josh already marked it Urgent');
 });

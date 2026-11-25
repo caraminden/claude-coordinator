@@ -102,6 +102,7 @@ export class Urgent {
       const lastPerson = rest.slice(0, cur).findLastIndex((m) => m.kind === 'person');
       spot = lastPerson + 1;
     } else {
+      if (where === ticketId && was) return null;
       spot = rest.findIndex((m) => m.ticket === where);
       if (spot < 0) return 'that minion is not Urgent any more';
       const blocking = rest.slice(spot, cur).find((m) => m.kind === 'person');

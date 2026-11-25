@@ -31,6 +31,8 @@ export const env = {
   CITADEL_HEAVY_DIR: join(root, 'heavy'),
   LAND_QUIET_PROC: quiet,
   CITADEL_HEAVY_PRESSURE: join(quiet, 'pressure', 'cpu'),
+  DEPLOY_TEST_PSI_CPU: join(quiet, 'pressure', 'cpu'), // deploy.sh's starved-box hold reads these, never the box's (#1833)
+  DEPLOY_TEST_PSI_MEMORY: join(quiet, 'pressure', 'memory'),
   DEPLOY_TEST_CPU_WEIGHT: '',
   NODE_TEST_CONTEXT: undefined,
   COORDINATOR_TICKET: undefined,

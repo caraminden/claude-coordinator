@@ -8,9 +8,11 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { accountUsageKey } from '../src/account-pick.ts';
 import { ClaudeLink, type ClaudeAccount } from '../src/claude-link.ts';
+import { CodexLink } from '../src/codex-link.ts';
 import { Containers, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
+import { peopleRoutes } from '../src/routes/people.ts';
 import { until, holds } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'claude-link-'));
@@ -25,6 +27,10 @@ writeFileSync(
 require('node:fs').appendFileSync(${JSON.stringify(execs)}, process.argv.slice(2).join(' ') + '\\n');
 const mode = process.env.FAKE_PODMAN;
 if (mode === 'silent') setInterval(() => {}, 1000);
+if (mode === 'link-then-wait') {
+  console.log('Open https://claude.ai/oauth/authorize?x=1 to sign in');
+  setInterval(() => {}, 1000);
+}
 if (mode === 'link-then-exit') {
   console.log('Open https://claude.ai/oauth/authorize?x=1 to sign in');
   setTimeout(() => process.exit(0), 100);
@@ -38,9 +44,9 @@ process.env.PATH = `${bin}:${process.env.PATH}`;
 const store = new Store(join(root, 'test.db'));
 const fakeRun: RunCmd = async () => ({ code: 0, stdout: '', stderr: '' });
 let n = 0;
-function newLink() {
+function newLink(run: RunCmd = fakeRun) {
   const user = store.createUser({ name: `P${++n}`, login: `p${n}` });
-  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), join(bin, 'claude'), new Containers(fakeRun), `citadel-claude-l${n}-`);
+  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), join(bin, 'claude'), new Containers(run), `citadel-claude-l${n}-`);
   return { link, uid: user.id };
 }
 const execCount = () => readFileSync(execs, 'utf8').split('\n').filter(Boolean).length;
@@ -99,8 +105,8 @@ test('a sign-in that ends while waiting for the code says so instead of waiting 
 // Several Claude accounts (#779): which account turns run on, and how a limit, an expiry and a pin move it.
 const acct = (n: number, extra: Partial<ClaudeAccount> = {}): ClaudeAccount => ({ n, linkedAt: 1, ...extra });
 
-function linkedPerson(accounts: ClaudeAccount[], inUse = accounts[0].n) {
-  const { link, uid } = newLink();
+function linkedPerson(accounts: ClaudeAccount[], inUse = accounts[0].n, run?: RunCmd) {
+  const { link, uid } = newLink(run);
   const creds = new Credentials(store, 'x'.repeat(40));
   creds.put(uid, 'claude_runner', link.name(uid), { container: link.name(uid), home: join(root, `home-${uid}`), linkedAt: 1, accounts, inUse });
   return { link, uid, creds };
@@ -293,4 +299,124 @@ test('two account folders signed in to one Claude organization say so; one email
     if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = was;
   }
+});
+
+// Cancel only ever cancels (#1856). The tests go through the route, as the page does: a DELETE is Cancel's unless it
+// carries unlink=1, so a page from before #1856, whose Cancel and Unlink were one request, removes nothing either.
+type Reply = { status: number; body: Record<string, unknown> };
+async function del(path: '/api/me/claude' | '/api/me/codex', query: string, uid: number, link: ClaudeLink, codex?: CodexLink): Promise<Reply> {
+  const route = peopleRoutes.find((r) => r.method === 'DELETE' && r.path === path)!;
+  const out: Reply = { status: 0, body: {} };
+  const res = { destroyed: false, headersSent: false, writeHead: (s: number) => void (out.status = s), end: (b: Buffer | string) => void (out.body = JSON.parse(String(b))) };
+  const app = { claude: link, codex, runner: { usageOf: () => null, codexView: () => null } };
+  await route.handler({ res, app, session: { uid }, url: new URL(`http://x${path}${query}`), params: {} } as unknown as Parameters<typeof route.handler>[0]);
+  return out;
+}
+
+/** A running container whose every command is kept, and a home with a sign-in for each account. */
+function signedIn(...accounts: ClaudeAccount[]) {
+  const ran: string[] = [];
+  const run: RunCmd = async (cmd, args) => {
+    ran.push([cmd, ...args].join(' '));
+    return { code: 0, stdout: args[0] === 'container' && args[1] === 'inspect' ? 'true spec' : '', stderr: '' };
+  };
+  const person = linkedPerson(accounts, accounts[0].n, run);
+  const home = join(root, `home-${person.uid}`);
+  for (const a of accounts) {
+    mkdirSync(join(home, a.n === 1 ? '.claude' : `.claude-${a.n}`), { recursive: true });
+    writeFileSync(join(home, a.n === 1 ? '.claude' : `.claude-${a.n}`, '.credentials.json'), '{}');
+  }
+  return { ...person, ran, home, run };
+}
+const REMOVES = /logout|podman stop|podman rm|volume rm/;
+
+for (const [what, accounts, n] of [
+  ['their only account', [acct(1)], 1],
+  ['their only account, expired', [acct(1, { expired: 1 })], 1],
+  ['one of several', [acct(1), acct(2)], 2],
+] as [string, ClaudeAccount[], number][]) {
+  test(`Cancel with no sign-in in memory removes nothing: ${what} (#1856)`, async () => {
+    const { link, uid, ran, home } = signedIn(...accounts);
+    const before = link.accounts(uid);
+    const meter = { weekly: null, session: null, updatedAt: 1 };
+    store.setSetting(accountUsageKey(uid, n), meter);
+    const r = await del('/api/me/claude', `?account=${n}`, uid, link);
+    assert.equal(r.status, 200);
+    assert.deepEqual(link.accounts(uid), before);
+    assert.deepEqual(
+      ran.filter((c) => REMOVES.test(c)),
+      [],
+    );
+    assert.ok(existsSync(join(home, n === 1 ? '.claude' : `.claude-${n}`, '.credentials.json')));
+    assert.deepEqual(store.getSetting(accountUsageKey(uid, n)), meter);
+  });
+}
+
+test('Cancel with no sign-in in memory keeps a server login’s extra account (#1856)', async () => {
+  const user = store.createUser({ name: 'Host 1856', login: `host${++n}`, server_login: true });
+  const link = new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), join(root, 'data'), join(bin, 'claude'), new Containers(fakeRun), `citadel-claude-h${n}-`);
+  store.setSetting(`claude_accounts:${user.id}`, { accounts: [acct(1), acct(2)], inUse: 1 });
+  const dir = join(root, 'data', 'claude-accounts', String(user.id), '2');
+  mkdirSync(dir, { recursive: true });
+  await del('/api/me/claude', '?account=2', user.id, link);
+  assert.ok(existsSync(dir));
+  assert.equal(link.accounts(user.id)?.accounts.length, 2);
+});
+
+test('Cancel of a live sign-in: "Link again" keeps its account, another account’s is left alone, a first one’s container and volume go (#1856)', async () => {
+  process.env.FAKE_PODMAN = 'link-then-wait';
+  const again = signedIn(acct(1));
+  again.link.ensure = async () => {};
+  assert.equal((await again.link.link(again.uid, 1)).state, 'waiting for code');
+  again.ran.length = 0;
+  // A card left open on another account's old sign-in: not the one in progress.
+  await del('/api/me/claude', '?account=2', again.uid, again.link);
+  assert.equal(again.link.status(again.uid).state, 'waiting for code');
+  await del('/api/me/claude', '?account=1', again.uid, again.link);
+  assert.equal(again.link.status(again.uid).state, 'linked');
+  assert.deepEqual(
+    again.ran.filter((c) => REMOVES.test(c)),
+    [],
+  );
+
+  const ran: string[] = [];
+  const first = newLink(async (cmd, args) => {
+    ran.push([cmd, ...args].join(' '));
+    return { code: 0, stdout: '', stderr: '' };
+  });
+  first.link.ensure = async () => {};
+  assert.equal((await first.link.link(first.uid, 1)).state, 'waiting for code');
+  await del('/api/me/claude', '?account=1', first.uid, first.link);
+  assert.equal(first.link.status(first.uid).state, 'not linked');
+  assert.ok(ran.includes(`podman volume rm -f ${first.link.name(first.uid)}`), ran.join('\n'));
+});
+
+test('Unlink still removes: the only account with its volume, one of several with its folder (#1856)', async () => {
+  const one = signedIn(acct(1));
+  await del('/api/me/claude', '?account=1&unlink=1', one.uid, one.link);
+  assert.equal(one.link.linked(one.uid), null);
+  assert.ok(one.ran.includes(`podman volume rm -f ${one.link.name(one.uid)}`));
+  const two = signedIn(acct(1), acct(2));
+  await del('/api/me/claude', '?account=2&unlink=1', two.uid, two.link);
+  assert.equal(existsSync(join(two.home, '.claude-2')), false);
+  assert.deepEqual(
+    two.link.accounts(two.uid)?.accounts.map((a) => a.n),
+    [1],
+  );
+});
+
+test("Codex's Cancel never signs out, even once the sign-in has finished; Sign out does (#1856)", async () => {
+  const { link, uid, ran, home, run } = signedIn(acct(1));
+  link.ensure = async () => {};
+  const codex = new CodexLink(link, new Containers(run));
+  mkdirSync(join(home, '.codex'), { recursive: true });
+  writeFileSync(join(home, '.codex', 'auth.json'), '{}');
+  const r = await del('/api/me/codex', '', uid, link, codex);
+  assert.equal(r.body.state, 'linked');
+  assert.deepEqual(
+    ran.filter((c) => REMOVES.test(c)),
+    [],
+  );
+  await del('/api/me/codex', '?unlink=1', uid, link, codex);
+  assert.equal(ran.filter((c) => / codex logout /.test(c)).length, 1);
 });

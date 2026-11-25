@@ -441,7 +441,7 @@ function claudeCard() {
           onclick: async () => {
             const last = accounts.length < 2;
             if (!confirm(last ? 'Unlink your Claude? Citadel signs you out and deletes your container and its files; your messages wait in the chat until you link again.' : `Unlink ${a.email ?? `account ${a.n}`}? Citadel signs it out and deletes its folder; your turns carry on with your other accounts.`)) return;
-            render(await api(`api/me/claude?account=${a.n}`, { method: 'DELETE' }).catch((err) => ({ ...st, error: err.message })));
+            render(await api(`api/me/claude?account=${a.n}&unlink=1`, { method: 'DELETE' }).catch((err) => ({ ...st, error: err.message })));
           },
         },
         'Unlink',
@@ -455,14 +455,10 @@ function claudeCard() {
         : 'Every account signs in with Anthropic inside your own container on the server: Citadel never sees a password or token, only the one-time code you paste here. ',
       "Link only accounts of your own: sharing one breaks Anthropic's terms.",
     );
+    // One failed poll is tried again while the card shows: a restart or a dropped request mustn't end it (#1856).
+    const again = (ms = 2000) => (poll = setTimeout(() => api('api/me/claude').then(render, () => card.isConnected && again(5000)), ms));
     if (st.state === 'starting') {
-      poll = setTimeout(
-        () =>
-          api('api/me/claude')
-            .then(render)
-            .catch(() => {}),
-        2000,
-      );
+      again();
       return card.replaceChildren(title('Starting', 'off'), errLine, h('p', {}, st.host ? "Starting Anthropic's sign-in." : "Starting your container and Anthropic's sign-in. The first time builds Citadel's image, which can take a few minutes."));
     }
     if (st.state === 'waiting for code') {
@@ -473,7 +469,15 @@ function claudeCard() {
         e.preventDefault();
         send.disabled = true;
         send.textContent = 'Signing in…';
-        render(await api('api/me/claude/code', { method: 'POST', body: { code: code.value.trim() } }).catch((err) => ({ ...st, error: err.message })));
+        render(
+          // Refused: the sign-in may be gone (a restart, another tab), so show what there is now (#1856).
+          await api('api/me/claude/code', { method: 'POST', body: { code: code.value.trim() } }).catch((err) =>
+            api('api/me/claude').then(
+              (now) => ({ ...now, error: err.message }),
+              () => ({ ...st, error: err.message }),
+            ),
+          ),
+        );
       };
       return card.replaceChildren(
         title(st.linking > 1 || accounts.length ? `Signing in account ${st.linking}` : 'Signing in', 'off'),
@@ -582,7 +586,7 @@ function codexCard() {
     if (!card.isConnected && poll) return;
     const title = (chip, cls = '') => h('h3', {}, 'Codex', h('span', { class: `link-chip ${cls}` }, chip));
     const errLine = st.error ? h('p', { class: 'error', role: 'status' }, st.error) : '';
-    const act = (label, method, cls = '', ask = '') =>
+    const act = (label, method, cls = '', ask = '', path = 'api/me/codex') =>
       h(
         'button',
         {
@@ -591,20 +595,13 @@ function codexCard() {
           onclick: async (e) => {
             if (ask && !confirm(ask)) return;
             e.target.disabled = true;
-            render(await api('api/me/codex', { method }).catch((err) => ({ ...st, error: err.message })));
+            render(await api(path, { method }).catch((err) => ({ ...st, error: err.message })));
           },
         },
         label,
       );
     const note = h('p', { class: 'muted small' }, 'Self-review asks Codex for a second opinion on your ChatGPT plan, counting against its limits. ', 'You sign in with OpenAI inside your own container on the server: Citadel never sees your password or token.');
-    const again = () =>
-      (poll = setTimeout(
-        () =>
-          api('api/me/codex')
-            .then(render)
-            .catch(() => {}),
-        2000,
-      ));
+    const again = (ms = 2000) => (poll = setTimeout(() => api('api/me/codex').then(render, () => card.isConnected && again(5000)), ms));
     if (st.override !== undefined) setCodex(st.override);
     // Josh, 2026-11-05: the override lives here, beside the sign-in, not in view all the time.
     const override =
@@ -646,7 +643,7 @@ function codexCard() {
         errLine,
         h('p', {}, 'Signed in with ChatGPT.'),
         st.override ? codexWindowsBlock() : '',
-        h('div', { class: 'row' }, act('Sign out', 'DELETE', 'secondary', "Sign out of Codex? Self-review stops asking it, and your turns can't run on it, until you sign in again.")),
+        h('div', { class: 'row' }, act('Sign out', 'DELETE', 'secondary', "Sign out of Codex? Self-review stops asking it, and your turns can't run on it, until you sign in again.", 'api/me/codex?unlink=1')),
         override,
         note,
       );

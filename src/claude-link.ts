@@ -784,12 +784,23 @@ export class ClaudeLink {
   }
 
   /**
+   * Cancel on account `n`'s sign-in. With none in memory (lost in a restart, or finished on another device) nothing is
+   * removed, nor is an account already linked; a first account's sign-in still clears the container and volume it started.
+   */
+  async cancelSignIn(uid: number, n?: number): Promise<void> {
+    const login = this.logins.get(uid);
+    if (!login || (n !== undefined && login.n !== n)) return;
+    if (this.accounts(uid)) return this.cancel(uid);
+    await this.unlink(uid);
+  }
+
+  /**
    * Unlink account `n`: sign it out and remove its folder. With no `n`, or the last account, sign out inside the
    * container, stop it, and remove the volume with everything in it.
    */
   async unlink(uid: number, n?: number): Promise<void> {
     const set = this.accounts(uid);
-    // Cancel on a sign-in again ("Link again"): only that sign-in stops; the account it was for stays linked.
+    // A sign-in again ("Link again") is in progress: only that stops; the account it was for stays linked.
     if (n !== undefined && this.logins.get(uid)?.n === n && set?.accounts.some((a) => a.n === n)) return this.cancel(uid);
     // The server login has no container of Claude's to remove: its Codex one lives in that volume.
     if (this.serverLogin(uid) && n === undefined) return this.cancel(uid);

@@ -359,7 +359,9 @@ export const peopleRoutes: Route[] = [
     async handler({ res, app, session, url }) {
       // One account of several (#779), or with none named, the whole link.
       const account = url.searchParams.get('account');
-      await app.claude.unlink(uidOf(session), account ? Number(account) : undefined).catch((err) => {
+      const n = account ? Number(account) : undefined;
+      // Only Unlink's unlink=1 removes anything (#1856). Without it this is Cancel, an old tab's Unlink included.
+      await (url.searchParams.has('unlink') ? app.claude.unlink(uidOf(session), n) : app.claude.cancelSignIn(uidOf(session), n)).catch((err) => {
         throw new HttpError(400, err.message);
       });
       await ownWrites(); // the reply reads the credential back (#1244)
@@ -397,10 +399,13 @@ export const peopleRoutes: Route[] = [
     method: 'DELETE',
     path: '/api/me/codex',
     who: ['person'],
-    async handler({ res, app, session }) {
-      await app.codex.unlink(uidOf(session)).catch((err) => {
-        throw new HttpError(400, err.message);
-      });
+    async handler({ res, app, session, url }) {
+      // Only Sign out's unlink=1 signs out, as for Claude above (#1856).
+      if (!url.searchParams.has('unlink')) app.codex.cancel(uidOf(session));
+      else
+        await app.codex.unlink(uidOf(session)).catch((err) => {
+          throw new HttpError(400, err.message);
+        });
       return json(res, 200, codexState(app, uidOf(session)));
     },
   },

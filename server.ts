@@ -2090,6 +2090,7 @@ runner.onTurnEnd = (ticketId) => github.poke(ticketId);
 github.onMerged = (repoDir, ticket, base) => {
   // Into a build branch isn't shipped yet.
   if (!base?.startsWith('build/')) runner.urgent.done(ticket.id);
+  runner.places.refused(ticket.id, false);
   catchUp(repoDir);
 };
 
@@ -2352,10 +2353,15 @@ runner.onStatusTrailer = (id, fields) => {
   }
 };
 // What a minion armed for CI goes out when CI passes, with no turn (#715).
-github.onCi = (ticket, pr, result) => ciFinished(app, ticket, pr, result);
+github.onCi = (ticket, pr, result) => {
+  if (result === 'passed' && store.getProject(ticket.project_id)?.ship_path !== 'citadel') runner.places.refused(ticket.id, false);
+  return ciFinished(app, ticket, pr, result);
+};
 // A scheme that ships by pull request fails a ship when CI goes red on the PR; land.sh schemes count theirs in LandHandoffs.
 github.onCiFailed = (t) => {
-  if (store.getProject(t.project_id)?.ship_path !== 'citadel') stallWatch.shipFailed(t.id, 'red CI on its PR');
+  if (store.getProject(t.project_id)?.ship_path === 'citadel') return;
+  stallWatch.shipFailed(t.id, 'red CI on its PR');
+  runner.places.refused(t.id, true);
 };
 // A minion past four times its budget (#1114): its Taskmaster hears, waking unless cold (no one's around to act on it then).
 runner.onBudgetWake = (ticketId, text) => {

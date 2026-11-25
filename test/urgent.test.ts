@@ -7,12 +7,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { after, test } from 'node:test';
+import type { RedMark } from '../src/ci-problems.ts';
 import { Store } from '../src/db.ts';
 import type { HttpError } from '../src/http.ts';
 import { heatOf, LinePlaces, sameAccount, waitedOn } from '../src/line-place.ts';
 import { urgentRoutes } from '../src/routes/urgent.ts';
 import { Urgent, type UrgentBy } from '../src/urgent.ts';
-import { UrgentFixes, type RedFix } from '../src/urgent-fixes.ts';
+import { redFixes, UrgentFixes, type RedFix } from '../src/urgent-fixes.ts';
 import type { Chain } from '../src/wake.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'urgent-'));
@@ -45,6 +46,8 @@ test('the newest press goes last, a drag keeps its spot and who marked it, and a
   assert.deepEqual(ids(), [1, 2, 3]);
   urgent.set(4, CARA, 2);
   assert.deepEqual([ids(), urgent.get(4)?.by], [[1, 4, 2, 3], 'Cara'], 'dragged in from below');
+  urgent.set(4, CARA, 4);
+  assert.deepEqual(ids(), [1, 4, 2, 3], 'dropped on itself');
   urgent.set(1, CARA);
   assert.deepEqual([ids(), urgent.get(1)?.by], [[1, 4, 2, 3], 'Josh'], 'a second press moves nothing');
   assert.deepEqual(new Urgent(store, () => {}).list(), urgent.list());
@@ -65,6 +68,11 @@ test("a person's choice, on or off, stands against a Taskmaster's and the server
   urgent.set(2, TM);
   assert.equal(urgent.set(2, JOSH), null, "a person's press takes a Taskmaster's over");
   assert.match(urgent.unset(2, TM)!, /Josh/);
+  urgent.set(5, SERVER);
+  urgent.set(5, JOSH, 2);
+  urgent.passed(() => true);
+  assert.deepEqual([urgent.get(5)?.by, urgent.place(5)], ['Josh', 1], "a person's drag is their choice: it outlasts the server's reason");
+  assert.match(urgent.unset(5, TM)!, /Josh/);
   urgent.set(3, TM);
   assert.equal(urgent.unset(3, TM), null);
   assert.equal(urgent.set(3, SERVER), 'Urgent was taken off it');
@@ -156,6 +164,52 @@ test("Urgent taken off a red's fix by a person stays off, and a chain held or re
   chains[0] = chain(next, fix, true);
   f.tick();
   assert.deepEqual(ids(), []);
+});
+
+test('a new red takes the place of a follow-up, never of another fix', () => {
+  const { f, reds, chains, red, chain, minion, ids } = fixes();
+  const [fix, next, fix2, fix3] = [minion(), minion(), minion(), minion()];
+  reds.push(red(fix));
+  chains.push(chain(next, fix));
+  f.tick();
+  assert.deepEqual(ids(), [fix, next]);
+  reds.push(red(fix2, 'p:2'), red(fix3, 'p:3'));
+  f.tick();
+  f.tick();
+  assert.deepEqual(ids(), [fix, fix2]);
+});
+
+test("of a failed restart's reports only the tip's minion is tagged; one past the two gets a place once there is one", () => {
+  const { f, minion, urgent, ids } = fixes();
+  const [tip, older, gaveUp] = [minion(), minion(), minion()];
+  f.deployReported('Citadel', older, false, 'Deploy of abc1234 failed: rolled back. This restart was for your def5678 and the newer commits up to abc1234.');
+  f.deployReported('Citadel', gaveUp, false, 'Gave up waiting for the turns to end');
+  assert.deepEqual(ids(), []);
+  f.deployReported('Citadel', tip, false, 'Deploy of abc1234 failed: rolled back');
+  assert.equal(urgent.view(tip)?.reason, 'Its deploy of Citadel failed');
+  const [b, c] = [minion(), minion()];
+  f.deployEnded('delve', b, false, 'x');
+  f.deployEnded('peek', c, false, 'x');
+  assert.deepEqual(ids(), [tip, b]);
+  f.deployReported('Citadel', older, true, 'Live');
+  f.tick();
+  assert.deepEqual(ids(), [b, c]);
+  f.deployEnded('delve', tip, false, 'x');
+  assert.deepEqual(ids(), [c, tip], "a newer failure of the same app's takes the older one's place");
+});
+
+test("the reds read are each scheme's red workflows and, in fast mode, the change a red is pinned on", () => {
+  const { store, peek, minion } = world();
+  const [a, b, shut] = [minion(), minion(), minion()];
+  store.updateTicket(shut, { status: 'closed' });
+  const num = (id: number) => store.getTicket(id)!.number;
+  store.setSetting(`ci-health:red:${peek.id}`, { 7: { run: 99, runs: [99, 101], file: 'tests.yml' }, 8: { run: 5 } });
+  const fixTicket = (_: unknown, m: RedMark) => (m.run === 99 ? store.getTicket(a)! : null);
+  const fast = () => [b, shut].map((id) => ({ ids: ['x.test.ts'], sha: `s${id}`, n: num(id), at: 3 }));
+  const key = `${peek.id}:7`;
+  assert.deepEqual(redFixes(store, fixTicket, fast), [{ key, run: '101', what: 'tests.yml is red', ticket: a }], 'no fix minion, or not in fast mode: nothing');
+  store.setProjectSettings(peek.id, { land_mode: 'fast' });
+  assert.deepEqual(redFixes(store, fixTicket, fast).slice(1), [{ key: `${peek.id}:s${b}`, run: '3', what: 'x.test.ts is red', ticket: b }]);
 });
 
 test('a failed deploy tags the minion that ran it, and the next good one takes it off', () => {
@@ -280,7 +334,7 @@ test("the line shows a person only their schemes' minions, with the rest as plac
       [a, false, true],
     ],
   );
-  assert.ok(!JSON.stringify(data).includes('private'));
+  assert.ok(!/private|Peek Auras Taskmaster/.test(JSON.stringify(data)), 'neither the reason nor whose Taskmaster');
 });
 
 test("mark_urgent is on the Taskmaster tool list and not on a minion's", () => {

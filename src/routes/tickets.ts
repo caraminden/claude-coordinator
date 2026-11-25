@@ -1508,8 +1508,7 @@ export const ticketRoutes: Route[] = [
       (loud ? console.error : console.log)(`Deploy report for minion ${id}: ${text}`);
       const event = runner.emit(id, loud ? 'error' : 'note', { text });
       if (loud) app.notify(id, { kind: 'error', text, eventId: event.id });
-      // Only a deploy that rolled back or never came up, not one that gave up before it restarted anything.
-      if (!failed || /^Deploy of \S+ failed/.test(text)) app.urgentFixes?.deployEnded(APP_NAME, id, !failed, `Its deploy of ${APP_NAME} failed`);
+      app.urgentFixes?.deployReported(APP_NAME, id, !failed, text);
       if (failed) store.setSetting(DEPLOY_FAILURE, { text, head: waiters.head });
       // A failed deploy leaves the minion in pending-deploy, so the error stays in view.
       const dismissed = !failed && runner.deployLive(id);

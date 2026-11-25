@@ -21,7 +21,8 @@ function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?:
   return {
     urgent: runner.urgent.list().map((m) => {
       const t = minion(m.ticket);
-      return { ...t, waiting: runner.turnLine.has(m.ticket), by: m.by, kind: m.kind, at: m.at, ...(m.reason && t.ticket ? { reason: m.reason } : {}) };
+      // Who and why only to those who see it: a Taskmaster's mark names its scheme.
+      return { ...t, waiting: runner.turnLine.has(m.ticket), kind: m.kind, at: m.at, ...(t.ticket ? { by: m.by, reason: m.reason } : {}) };
     }),
     line: runner.turnLine.line().map((w) => ({
       ...minion(w.ticket),

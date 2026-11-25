@@ -79,7 +79,7 @@ export class LinePlaces {
     return this.waited.ids.has(ticketId);
   }
 
-  /** Its handed-off ship was refused; `false` once it tries again, ships or closes. */
+  /** Its handed-off ship was refused, or in a pull-request scheme its PR's CI went red; `false` once it tries again, passes, ships or closes. */
   refused(ticketId: number, yes: boolean) {
     if (yes) this.d.store.setSetting(refusedKey(ticketId), true);
     else this.d.store.deleteSetting(refusedKey(ticketId));

@@ -7,6 +7,7 @@ import type { Store } from './db.ts';
 const URGENT = 'urgent';
 /** Tags the server sets by itself at any one time, so people's order stays theirs (the replay's "Two"). */
 const SERVER_MAX = 2;
+export const SERVER_FULL = `the server has marked ${SERVER_MAX} already`;
 
 export interface UrgentBy {
   kind: 'person' | 'taskmaster' | 'server';
@@ -60,8 +61,8 @@ export class Urgent {
   }
 
   /**
-   * Into the group, or with `before` (a minion in it, null for the end: a drag) to that spot. A drag inside the group moves
-   * it and keeps who marked it and why; a press on an agent's or the server's tag takes it over, spot kept. Why not, or null.
+   * Into the group, or with `before` (a minion in it, null for the end: a drag) to that spot. A drag inside the group keeps
+   * which person marked it; a press or a drag on an agent's or the server's tag makes it the person's. Why not, or null.
    */
   set(ticketId: number, how: UrgentBy, before?: number | null): string | null {
     const was = this.get(ticketId);
@@ -72,11 +73,11 @@ export class Urgent {
     if (how.kind === 'server') {
       if (this.off.some((o) => o.ticket === ticketId)) return 'Urgent was taken off it';
       if (was) return null;
-      if (this.on.filter((m) => m.kind === 'server').length >= SERVER_MAX) return `the server has marked ${SERVER_MAX} already`;
+      if (this.on.filter((m) => m.kind === 'server').length >= SERVER_MAX) return SERVER_FULL;
     }
-    const mark: UrgentMark = was && (was.kind === 'person' || before !== undefined) ? was : { ...how, ticket: ticketId, at: Date.now() };
+    const mark: UrgentMark = was?.kind === 'person' ? was : { ...how, ticket: ticketId, at: Date.now() };
     const rest = this.on.filter((m) => m.ticket !== ticketId);
-    const spot = before === undefined ? this.place(ticketId) : rest.findIndex((m) => m.ticket === before);
+    const spot = before === undefined || before === ticketId ? this.place(ticketId) : rest.findIndex((m) => m.ticket === before);
     rest.splice(spot === undefined || spot < 0 ? rest.length : spot, 0, mark);
     this.save(
       rest,

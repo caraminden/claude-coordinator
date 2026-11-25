@@ -342,6 +342,10 @@ test("a script's JSDoc any and @ts- comments count, in every form tsc honours (#
     '//// @ts-ignore: why',
     "const s = '/**'; /** @type {any} */ let b = 1;",
     'const r = /[\'"`]/; /** @type {any} */ let b = 1;',
+    '/** @type {"a\\"}" | any} */',
+    "/** @type {'it\\'s }' | any} */",
+    '/** @type {T extends string ? any : never} */',
+    '/** @type {{ any: string, b: any }} */',
   ];
   for (const code of one) assert.equal(scriptEscapes(`${code}\nexport let x = 1;\n`), 1, code);
   assert.equal(scriptEscapes('/**\n * @param {any} a\n * @param {any} b\n * @returns {Promise<any>}\n */\nfunction f(a, b) {}\n'), 3);

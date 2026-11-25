@@ -12,8 +12,9 @@ Status: accepted, 2026-11-24. Minion #1789.
   rides the suite, so every ship runs it. It fails when a file's tsc errors, or its escapes (an explicit `any` in a
   type, a `@ts-ignore`, `@ts-expect-error` or `@ts-nocheck`), go above `test/typecheck-baseline.json`. Lower counts
   pass; `node tools/typecheck.ts --update` writes them down and can never raise one. Moving or splitting code re-files its counts with `--update --moved`, refused when a repo total went up.
-- **Escapes** are counted with Node's own `module.stripTypeScriptTypes`: an `any` it blanks was a type. No parser of
-  our own.
+- **Escapes** are counted with Node's own `module.stripTypeScriptTypes`: an `any` it blanks was a type. No TypeScript parser of
+  our own. A JavaScript file has no types for it to strip, so a front-end script's
+  JSDoc is read by a small reader of its own (`scriptEscapes`, #2010) that counts when unsure.
 - **What it costs:** `typescript` (7.x, the native compiler) and `@types/node` join `fast-check` as devDependencies;
   nothing that runs imports them, as in ADR 0029. About 2 s a suite run. A worktree made before this needs `npm ci`
   once, or the test says so.

@@ -284,7 +284,7 @@ export function scriptEscapes(code: string): number {
       let end = i + 1;
       if (doc[i] === '{') {
         for (let depth = 1; end < doc.length && depth > 0; end++) {
-          const quoted = /^'[^'\n]*'|^"[^"\n]*"|^`[^`]*`/.exec(doc.slice(end))?.[0];
+          const quoted = /^'(?:\\.|[^'\\\n])*'|^"(?:\\.|[^"\\\n])*"|^`(?:\\.|[^`\\])*`/.exec(doc.slice(end))?.[0];
           if (quoted) end += quoted.length - 1;
           else if (doc[end] === '{') depth++;
           else if (doc[end] === '}') depth--;
@@ -302,7 +302,8 @@ export function scriptEscapes(code: string): number {
         }
         end = i + bare.length;
       }
-      n += blankTypeText(doc.slice(i, end)).match(/(?<![\w$])any(?![\w$])|\*/g)?.length ?? 0;
+      // A field or parameter named any (`{ any: string }`) is no escape; `? any :` in a conditional type is.
+      n += blankTypeText(doc.slice(i, end)).match(/(?<![\w$])(?<![{,;(]\s*)any(?![\w$])|(?<![\w$])any(?![\w$])(?!\s*\??:)|\*/g)?.length ?? 0;
       i = end;
     }
   }

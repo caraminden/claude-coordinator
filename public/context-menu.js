@@ -126,7 +126,7 @@ function minionMenu(row, t) {
       { label: 'Copy link', icon: '🔗', run: () => copy(abs(threadHref(t)), 'Link') },
       !coord && { label: `Copy “${ref}”`, icon: '#', run: () => copy(ref, ref) },
       !coord && t.status !== 'closed' && needsServer({ label: t.urgent ? `Take off Urgent (set by ${t.urgent.by})` : 'Mark Urgent', icon: '!', run: () => toggleUrgent(t) }),
-      !coord && t.status !== 'closed' && (t.start_now || t.worker_wait) && needsServer({ label: t.start_now ? `Release its worker (${heldSaid(t.start_now)})` : `Start now${t.worker_wait.held ? ` (waits: ${t.worker_wait.held})` : ''}`, icon: '▶', run: () => toggleStartNow(t) }),
+      !coord && t.status !== 'closed' && (t.start_now || t.worker_wait) && needsServer({ ...(t.start_now ? { label: 'Release worker', icon: '⏏', keys: heldSaid(t.start_now).replace('since ', '') } : { label: 'Start now', icon: '▶' }), run: () => toggleStartNow(t) }),
       state && '-',
       state,
     ],

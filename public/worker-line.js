@@ -8,12 +8,12 @@ import { renderTicketHead } from './thread-head.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
-import { emptyCard } from './look.js';
+import { emptyCard, toneChip } from './look.js';
 import { dragReorder } from './reorder.js';
 import { applyMove, applyStart, dropped, lineGroups, lineWhy, nextUrgent, ownSaid } from './worker-linemath.js';
 
 const READ_MS = 10_000;
-const HOW = 'Next first. Drag one into Urgent to send it ahead; drag it below to let the order choose. Start now gives one a worker of its own at once, past the pool, for as long as you work with it: two each.';
+const HOW = 'Next first. Drag one into Urgent to send it ahead; drag it below to let the order choose. Start now: a worker of its own, two each.';
 const starts = []; // the same for Start now and Release
 const ops = []; // moves on their way to the server, or shown until a read has them
 let open = null; // the drawer: { dialog, list, line, workers, failed }
@@ -177,7 +177,7 @@ function askRelease(row, holds) {
     title: 'You hold two workers already',
     className: 'own-full',
     body: [
-      h('p', {}, `Two each is the most. Release one, and #${row.number} takes its place, once any turn it has running ends.`),
+      h('p', {}, `Two each is the most. Release one and #${row.number} gets its worker, as soon as any turn that one is running ends.`),
       h(
         'ul',
         { class: 'line-rows' },
@@ -219,7 +219,7 @@ const releaseTitle = (u) => `Release the worker of its own (${heldSaid(u)}). A r
 export function startNowLine(t) {
   if (t.status === 'closed' || !(t.start_now || t.worker_wait)) return null;
   const u = t.start_now;
-  if (u) return [h('span', { class: 'own-said' }, `Own worker: ${heldSaid(u)}`), ownButton(t, 'Release', releaseTitle(u))];
+  if (u) return [toneChip('info', `Own worker: ${heldSaid(u)}`), ownButton(t, 'Release', releaseTitle(u))];
   const { held } = t.worker_wait;
   return [ownButton(t, 'Start now', held ? `Start now: it starts once it can (${held})` : "Start now: a worker of its own, past the pool's size, for as long as you work with it")];
 }

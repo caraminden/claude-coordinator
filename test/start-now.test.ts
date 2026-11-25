@@ -18,6 +18,7 @@ let n = 0;
 function world() {
   const store = new Store(join(root, `${++n}.db`));
   const peek = store.createProject('Peek Auras', null);
+  for (const name of ['Josh', 'Cara']) store.addMember(peek.id, store.createUser({ name, login: name.toLowerCase() }).id);
   const clock = { now: 1_000_000_000 };
   const changed: number[] = [];
   const over = new Set<number>();
@@ -95,7 +96,7 @@ test("one person's hold refuses another's, until it ends", () => {
 });
 
 /** The route's handler, as the router calls it once it has let the caller in. */
-async function put(app: unknown, ticket: unknown, body: unknown, session: object = { name: 'Josh', uid: JOSH, admin: true }) {
+async function put(app: unknown, ticket: unknown, body: unknown, session: object = { name: 'Josh', uid: JOSH }) {
   const route = urgentRoutes.find((r) => r.path === '/api/tickets/:ticket/start-now')!;
   const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { headers: { 'content-type': 'application/json' } });
   const res = { status: 0, text: '', headersSent: false, setHeader() {}, writeHead: (s: number) => ((res.status = s), res), end: (b?: string) => void (res.text = b ?? '') };

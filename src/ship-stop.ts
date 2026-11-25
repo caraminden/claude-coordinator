@@ -8,6 +8,7 @@
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { frozenWords } from './frozen-ships.ts';
 import type { App } from './http.ts';
 import { landQueue } from './release-readers.ts';
 import { CITADEL_TARGET } from './releases.ts';
@@ -58,7 +59,7 @@ export function shipRows(line: LandTicket[], who: (label: string) => { name: str
       heldSince: t.got > 0 ? t.got * 1000 : null,
       since: t.mtime,
       stage: p ? p.stage : 'line',
-      text: p ? t.phase.replace(/ since \d\d:\d\d$/, '') || p.text : 'waiting',
+      text: t.frozen ? frozenWords(t.frozen) : p ? t.phase.replace(/ since \d\d:\d\d$/, '') || p.text : 'waiting',
       noStop: cantStop(t),
     };
   });

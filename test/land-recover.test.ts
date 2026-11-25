@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { git, until, pipe, land, subjects } from './land-recover-fixture.ts';
+import { git, until, pipe, land, subjects, proc } from './land-recover-fixture.ts';
+import { quietProc } from './quiet-proc.ts';
 
 // The drill's worst (F2): with land.sh gone nothing put main back, and every later landing failed its own boot
 // check on the stranded commit and was told to fix its own change.
@@ -135,4 +136,20 @@ test('a landing and its restart each leave a timing line in the retro log, lande
   assert.match(restart[0], /· restart · [0-9a-f]{7} · idle-wait \d+ · backup \d+ · healthy - · settle - · restart · rolled back$/);
   assert.equal(timing.length, 1, lines().join('\n'));
   assert.match(timing[0], /· timing · ticket\/2-x · line \d+ · rebase \d+ · ci-queue - · ci-run - · fallback \d+\+\d+ · deploy \d+ · live - · refused at deploy$/);
+});
+
+// #1833: the deploys here read the box's own CPU pressure, so on a CI desktop at 51% their restarts waited for it to
+// ease and three files failed in main's run. They read the fixture's fake /proc: starved there, the restart says so.
+test("a deploy here reads the fixture's pressure files, never the box's", { timeout: 120_000 }, async (t) => {
+  const p = await pipe(t, 1);
+  // Memory, not CPU: land.sh's quiet check and citadel-heavy read the CPU file, and would wait on it.
+  writeFileSync(join(proc, 'pressure', 'memory'), 'some avg10=97.00 avg60=97.00 avg300=97.00 total=1\n');
+  try {
+    p.commit(p.wts[0], 'b.txt', 'mine\n');
+    const res = await p.run(land, p.wts[0], { DEPLOY_PRESSURE_HOLD: '1' });
+    await p.restarts(1);
+    assert.match(`${res.stderr}\n${p.restartLog()}`, /starved \(memory pressure 97%\)/);
+  } finally {
+    quietProc(proc);
+  }
 });

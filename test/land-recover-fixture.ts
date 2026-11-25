@@ -18,6 +18,8 @@ export { git };
 export const tools = join(import.meta.dirname, '..', 'tools');
 const root = mkdtempSync(join(tmpdir(), 'land-recover-'));
 after(() => rmSync(root, { recursive: true, force: true }));
+// The fake /proc every pressure check here reads (#1833: a deploy that read the box's held its restart on a starved CI desktop).
+export const proc = quietProc(join(root, 'proc'));
 const env = {
   ...scriptEnv(),
   COORDINATOR_CONTAINER: undefined,
@@ -26,8 +28,10 @@ const env = {
   COORDINATOR_TOKEN: undefined,
   COORDINATOR_API: undefined,
   CITADEL_HEAVY_DIR: join(root, 'heavy'),
-  LAND_QUIET_PROC: quietProc(join(root, 'proc')),
-  CITADEL_HEAVY_PRESSURE: join(root, 'proc', 'pressure', 'cpu'),
+  LAND_QUIET_PROC: proc,
+  CITADEL_HEAVY_PRESSURE: join(proc, 'pressure', 'cpu'),
+  DEPLOY_TEST_PSI_CPU: join(proc, 'pressure', 'cpu'),
+  DEPLOY_TEST_PSI_MEMORY: join(proc, 'pressure', 'memory'),
   NODE_TEST_CONTEXT: undefined,
   DEPLOY_TEST_CPU_WEIGHT: '',
   LAND_CI: '0',

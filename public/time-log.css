@@ -61,6 +61,7 @@ button.tl-head { cursor: pointer; }
   .tl-ribbon { height: 38px; }
   .time-log .tl-head { flex-wrap: wrap; row-gap: 0.15rem; }
   .tl-head .subject { flex: 1 1 70%; }
+  .tl-row .tl-jump { min-height: var(--control-h); box-sizing: border-box; padding-top: 0.45rem; }
   .tl-meta { flex-basis: 100%; justify-content: flex-start; padding-left: 1.5rem; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -491,7 +491,7 @@ function whyOf(m) {
   return h(
     'div',
     { class: 'flow-why', role: 'group', 'aria-label': `Why #${m.number} closed`, 'data-id': String(m.id), 'data-hue': `end-${m.end}` },
-    h('span', { class: 'muted' }, m.why ? 'Closed as' : 'Not recorded. Was it'),
+    h('span', { class: 'muted' }, m.why ? 'Closed as' : 'Not recorded'),
     ...WHY.map((w) => h('button', { type: 'button', class: `chip${m.why === w ? ' on' : ''}`, 'aria-pressed': String(m.why === w), onclick: () => mark(m, m.why === w ? null : w) }, w[0].toUpperCase() + w.slice(1))),
   );
 }

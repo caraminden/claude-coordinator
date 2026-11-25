@@ -208,6 +208,7 @@
 .flow-row-bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--h) 14%, transparent); }
 .flow-row-bar i { display: block; height: 100%; width: var(--pct); border-radius: inherit; background: var(--h); }
 .flow-why { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); padding: 0 var(--space-2) var(--space-2); font-size: var(--size-small); }
+.flow-why > span { min-width: 6.2em; } /* the words stay put when one is picked */
 .flow-why .chip { cursor: pointer; min-height: 24px; transition: background var(--motion), border-color var(--motion); }
 .flow-why .chip:hover { border-color: var(--h); }
 .flow-why .chip.on { border-color: var(--h); background: color-mix(in srgb, var(--h) 12%, var(--panel)); }

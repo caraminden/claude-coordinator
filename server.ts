@@ -135,7 +135,7 @@ import { usageName } from './src/usage-ledger.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
-import { Waits, labelTicket, readHeavy, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
+import { HeavySnapshot, Waits, labelTicket, readHeavyA, readQueue, readQueueA } from './src/waits.ts';
 import { lineFor } from './src/ship-stop.ts';
 import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
@@ -1035,11 +1035,14 @@ if (!BOOT_CHECK && !PREVIEW) every('trouble post-mortems', 10 * 60_000, () => tr
 // Claude sessions wait, and while it's tight the fastest-growing big turn is held at its size. Nothing is killed. Only the
 // real server reads it: a preview or dev copy would otherwise hold the live turns too.
 const growthStop = new GrowthStop();
+// The heavy folder is read off the thread every few seconds; memory easing and the release readers take its last answer.
+const heavySnapshot = new HeavySnapshot(join(DATA_DIR, 'projects', '.heavy'));
+if (!BOOT_CHECK) every('heavy folder', 3_000, () => heavySnapshot.refresh(), 0);
 const memoryEase = new MemoryEase({
   heavyDir: join(DATA_DIR, 'projects', '.heavy'),
   record: (at, episode) => store.addHealthEvent('memory-easing', at, BOOT_COMMIT ?? null, JSON.stringify(episode)),
   waiting: () => {
-    const { waiters } = readHeavy(join(DATA_DIR, 'projects', '.heavy'));
+    const { waiters } = heavySnapshot.get();
     return { starts: heldStarts.list().length, heavy: waiters.filter((w) => w.reason === 'memory').length, nested: waiters.filter((w) => w.reason === 'ease').length };
   },
   slowed: () => growthStop.slowed(),
@@ -1193,7 +1196,7 @@ const citadelServer = new CitadelServer({
 });
 // Every other scheme's targets, found from what it has (#627, src/release-targets.ts), and a reader per kind.
 const targetFinder = new TargetFinder({ store, own: ownScheme, apkFeed: (name) => join(services.opts.home, '.local/share', name, 'android', 'latest.json') });
-const contraptionReader = new ContraptionReader({ store, finder: targetFinder, folder: (row) => services.folder(row), running: (name) => services.running(name), heavy: () => readHeavy(join(DATA_DIR, 'projects', '.heavy')) });
+const contraptionReader = new ContraptionReader({ store, finder: targetFinder, folder: (row) => services.folder(row), running: (name) => services.running(name), heavy: () => heavySnapshot.get() });
 // A Capacitor app's APK, built and published once a deploy carrying a change to it is live (#837, src/apk-build.ts).
 const apkBuilds = new ApkBuilds({
   home: services.opts.home,

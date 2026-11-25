@@ -7,7 +7,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { runnerAsk } from '../ci-runner.ts';
-import { testCounts } from '../waits.ts';
+import { readHeavyA, testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
@@ -418,7 +418,7 @@ export const machineRoutes: Route[] = [
       // What runs from which minion, and what closed minions left that was stopped this week (#1365, src/reaper.ts).
       const minions = app.reaper ? byMinion(await app.reaper.running(), app.store, canSee) : [];
       const reaped = reapedRows(app.store.healthEventsSince([REAPED], Date.now() - 7 * 24 * 3600_000), app.store, canSee);
-      json(res, 200, { ...hostLoad(app.heavyDir, Date.now(), undefined, owners), minions, reaped });
+      json(res, 200, { ...hostLoad(app.heavyDir, Date.now(), undefined, owners, await readHeavyA(app.heavyDir)), minions, reaped });
     },
   },
   // Who holds the shared Android emulator's lease (#1128), for the Machines page.

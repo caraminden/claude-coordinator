@@ -2,7 +2,7 @@
 # SessionStart hook, matcher "compact" (kit/hooks/hooks.json): after a compaction, puts back what a
 # summary blurs, the branch, head and uncommitted files, and points the session at the record (the
 # requester's words, the checklist, handoff files) instead of the summary's paraphrase. Its output
-# joins the compacted context. Turns and Taskmasters both compact at about 180k (autoCompactWindow in the runner's per-turn settings).
+# joins the compacted context. Minions compact at about 217k, Taskmasters at about 147k (autoCompactWindow in the runner's per-turn settings).
 # Hooks run in the session's folder; CLAUDE_PROJECT_DIR is that folder when Claude Code sets it.
 input="$(cat)"
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0

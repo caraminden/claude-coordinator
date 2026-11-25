@@ -403,7 +403,8 @@ export const LEAN_CONTEXT = { syncClaudeAiSkills: false, disableClaudeAiConnecto
 /**
  * Claude Code settings every turn of every scheme gets, whatever the repo's own .claude/settings.json
  * says (Taskmasters' folders have none): where a turn compacts, in tokens, and how much of a Bash
- * command's output it keeps, and the bundled skills that stay out of the prefix (#708). Minions compact at about 150k (real compactions land near 82-88% of the window; #703).
+ * command's output it keeps, and the bundled skills that stay out of the prefix (#708). Minions compact at about 217k (Claude Code compacts about 33k under the window). Josh, 2026-11-25, picked
+ * "220k, for every minion" over Cara's 2026-11-14 150k (#703): its saving was mostly re-reading after each summary (#1920).
  */
 /**
  * Bundled Claude Code skills that never fired in 19 days of transcripts (#699), set "off" (Claude Code 2.1.323's
@@ -414,8 +415,8 @@ export const LEAN_CONTEXT = { syncClaudeAiSkills: false, disableClaudeAiConnecto
  * plugin-authoring (Delve's mods) and the rest stay on.
  */
 export const UNUSED_BUNDLED_SKILLS = Object.fromEntries(['update-config', 'schedule', 'loop', 'keybindings-help', 'workflow-authoring', 'init', 'simplify', 'fewer-permission-prompts', 'run', 'security-review', 'code-review'].map((n) => [n, 'off'])) as Record<string, 'off'>;
-export const TURN_SETTINGS = { autoCompactWindow: 180_000, bashOutputMaxChars: 12_000, skillOverrides: UNUSED_BUNDLED_SKILLS };
-/** A Taskmaster's compact window (#423): same window as a minion's since #703, kept as its own constant; it hands off past FRESH_CONTEXT_TOKENS (turn end) or FRESH_IDLE_CONTEXT_TOKENS (idle) anyway. */
+export const TURN_SETTINGS = { autoCompactWindow: 250_000, bashOutputMaxChars: 12_000, skillOverrides: UNUSED_BUNDLED_SKILLS };
+/** A Taskmaster's compact window (#423): about 147k; #1920's 220k is minions' only. It hands off past FRESH_CONTEXT_TOKENS (turn end) or FRESH_IDLE_CONTEXT_TOKENS (idle) anyway. */
 export const TASKMASTER_COMPACT_WINDOW = 180_000;
 /**
  * Read rules every turn gets, so the Read, Grep and Glob tools can't open a login or a transcript

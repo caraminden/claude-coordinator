@@ -128,7 +128,7 @@ async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { mo
 
 test("a minion turn gets the compaction window, no service secrets, Claude Code's model and the scheme's effort", async () => {
   const t = await turn('ticket', 'connected');
-  assert.equal(t.settings.autoCompactWindow, 180000);
+  assert.equal(t.settings.autoCompactWindow, 250000);
   assert.equal(t.env.MACHINES_URL, undefined);
   assert.equal(t.env.COORDINATOR_PASSWORD, undefined);
   assert.equal(t.env.XDG_RUNTIME_DIR, '/run/user/1000');
@@ -184,14 +184,14 @@ test("every turn of every scheme loads its own pinned copy of the kit, and share
   const b = store.createProject(`Kit B ${Math.random()}`, null);
   store.setProjectSettings(b.id, { plugin_dirs: 'tools/mods/x' });
   const turns = [await turn('ticket', 'connected', {}, undefined, a.id), await turn('ticket', 'connected', {}, undefined, b.id), await turn('coordinator', 'connected', {}, undefined, b.id)];
-  for (const t of turns) {
-    const dirs = t.args.flatMap((arg: string, i: number) => (arg === '--plugin-dir' ? [t.args[i + 1]] : []));
+  for (const [i, t] of turns.entries()) {
+    const dirs = t.args.flatMap((arg: string, n: number) => (arg === '--plugin-dir' ? [t.args[n + 1]] : []));
     assert.equal(dirs.length, 1, 'the kit, and no scheme folder that does not exist');
     const kit = dirs[0];
     assert.equal(basename(kit), 'kit');
     // The turn's own folder (beside its settings), not the server's copy a restart sweeps, nor the repo.
     assert.equal(dirname(dirname(kit)), dirname(t.flag('--settings')));
-    assert.equal(t.settings.autoCompactWindow, 180000);
+    assert.equal(t.settings.autoCompactWindow, i === 2 ? 180000 : 250000);
     assert.equal(t.settings.bashOutputMaxChars, 12000);
   }
 });

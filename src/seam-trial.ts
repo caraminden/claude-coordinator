@@ -8,7 +8,7 @@ import type { Ticket } from './db.ts';
 
 /** The trial's one setting: who is in which group, since when. */
 export const SEAM_TRIAL_KEY = 'seam-trial';
-/** A minion whose turn starts past this much context (tokens) is enrolled. Josh's 150k can't be reached: minions compact at about 147k (TURN_SETTINGS, #703), so nobody was enrolled Nov 20-24. */
+/** A minion whose turn starts past this much context (tokens) is enrolled. Josh's 150k couldn't be reached while minions compacted at about 147k, so nobody was enrolled Nov 20-24; since #1920 they compact at about 217k. */
 export const SEAM_CONTEXT_TOKENS = 120_000;
 /** Minions per group. */
 export const ARM_SIZE = 20;

@@ -442,8 +442,7 @@ const readAge = (at) => {
 /** While the box is easing or tight, the headline tiles say so from the live reading: warn for easing, bad for tight. */
 const easeTone = (n) => (n ? (n.level === 'tight' ? 'bad' : 'warn') : null);
 /** "churning: reclaiming 98,233 pages a second, swapping out 40 MB/s" (tight: "tight: ..."), the numbers the 5 s reading has. */
-const churn = (n) =>
-  `${n.level === 'tight' ? '' : 'churning: '}${n.reclaim != null ? `reclaiming ${n.reclaim.toLocaleString('en-US')} pages a second` : 'under its memory line'}${n.swapOut ? `, swapping out ${Math.round(n.swapOut / 1e6)} MB/s` : ''}`;
+const churn = (n) => `${n.level === 'tight' ? '' : 'churning: '}${n.reclaim != null ? `reclaiming ${n.reclaim.toLocaleString('en-US')} pages a second` : 'under its memory line'}${n.swapOut ? `, swapping out ${Math.round(n.swapOut / 1e6)} MB/s` : ''}`;
 
 function citadelTiles(c, days, now, ships, redraw) {
   const n = c.easing?.now ?? null;
@@ -456,15 +455,25 @@ function citadelTiles(c, days, now, ships, redraw) {
   const ci = c.ci;
   const red = ci?.workflows.filter((w) => w.conclusion && w.conclusion !== 'success') ?? [];
   return [
-    tile('Memory', n && n.free != null && host ? `${bytes(n.free)} free · ${n.level === 'tight' ? 'tight' : 'easing'}` : mem === null ? 'No reading yet' : `${mem}% used`, n && n.free != null && host ? `${n.at ? `${readAge(n.at)} · ` : ''}${churn(n)}` : host ? `${bytes(host.mem_avail)} free of ${bytes(host.mem_total)} · Citadel's server ${bytes(host.rss)}` : 'Read every 5 minutes', hourLine(c.host.series, 1, { from, to: now, label: 'memory used each hour, at its worst' }), {
-      tone: easeTone(n) ?? (mem !== null && mem >= 90 ? 'warn' : null),
-      key: 'memory',
-      chart: `% used, hourly worst: ${perHour(c.host.series, 1)}`,
-    }),
+    tile(
+      'Memory',
+      n && n.free != null && host ? `${bytes(n.free)} free · ${n.level === 'tight' ? 'tight' : 'easing'}` : mem === null ? 'No reading yet' : `${mem}% used`,
+      n && n.free != null && host ? `${n.at ? `${readAge(n.at)} · ` : ''}${churn(n)}` : host ? `${bytes(host.mem_avail)} free of ${bytes(host.mem_total)} · Citadel's server ${bytes(host.rss)}` : 'Read every 5 minutes',
+      hourLine(c.host.series, 1, { from, to: now, label: 'memory used each hour, at its worst' }),
+      {
+        tone: easeTone(n) ?? (mem !== null && mem >= 90 ? 'warn' : null),
+        key: 'memory',
+        chart: `% used, hourly worst: ${perHour(c.host.series, 1)}`,
+      },
+    ),
     tile(
       'CPU',
       n ? `load ${Math.round(n.load1)} on ${c.host.cores} cores` : host ? `load ${Math.round(host.load1)} on ${c.host.cores} cores` : 'No reading yet',
-      n ? `${n.level === 'tight' ? 'Tight' : 'Easing'} on memory · live load, warns over ${c.host.cpuWarn} at once` : c.host.peak ? `Load is tasks running or waiting, not a percent · Peak ${Math.round(c.host.peak.load1)} at ${pacificClockBare(c.host.peak.at)} · warns over ${c.host.cpuWarn} for ${c.host.cpuWarnMin} min` : 'Read every 5 minutes',
+      n
+        ? `${n.level === 'tight' ? 'Tight' : 'Easing'} on memory · live load, warns over ${c.host.cpuWarn} at once`
+        : c.host.peak
+          ? `Load is tasks running or waiting, not a percent · Peak ${Math.round(c.host.peak.load1)} at ${pacificClockBare(c.host.peak.at)} · warns over ${c.host.cpuWarn} for ${c.host.cpuWarnMin} min`
+          : 'Read every 5 minutes',
       hourLine(c.host.series, 3, { from, to: now, label: 'load each hour, at its highest', max: Math.max(c.host.cpuWarn * 1.25, ...c.host.series.map((s) => s[3] ?? 0)), rule: c.host.cpuWarn, tip: (v) => `load ${v} at its highest` }),
       { tone: easeTone(n) ?? (c.verdict.tiles?.includes('cpu') ? 'warn' : null), key: 'cpu', chart: `load, hourly highest: ${perHour(c.host.series, 3)}` },
     ),

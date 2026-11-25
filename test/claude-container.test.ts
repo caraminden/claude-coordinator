@@ -368,6 +368,10 @@ test('podman run arguments: keep-id, host network, a :U volume, binds at their o
   assert.ok(!args.includes('--memory') && !args.includes('--cpus'));
   assert.deepEqual(unitProps(spec), ['-p', 'MemoryHigh=10G', '-p', 'MemoryMax=12G', '-p', 'MemorySwapMax=4G']);
   assert.notEqual(specHash(spec), specHash({ ...spec, memory: { ...spec.memory, max: '14G' } }), 'a new cap restarts the container once idle');
+  // Podman's own default is 2048 tasks, which every turn of the person shares: 31 turns hit it and five claudes aborted (#1848).
+  assert.deepEqual(args.filter((x) => x.startsWith('--pids-limit')), ['--pids-limit=32768']);
+  // The hash of this spec before the limit, so a container started then is seen as changed and restarts once idle.
+  assert.notEqual(specHash(spec), '58d8a50d7a94');
   for (const a of ['--userns=keep-id', '--network=host', '--init', '--rm']) assert.ok(args.includes(a), a);
   assert.ok(!args.some((a) => /--pid=host|--privileged/.test(a)));
   assert.ok(args.includes('citadel-claude-1:/home/u:U'));

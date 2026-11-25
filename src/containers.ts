@@ -49,10 +49,17 @@ export const runCmd: RunCmd = (cmd, args, opts = {}) =>
 /** The label that records which spec a container was started from, so a changed spec restarts it. */
 const SPEC_LABEL = 'citadel.spec';
 
+/**
+ * The container's own ceiling on tasks (processes and threads), shared by every turn the person runs at once. Podman's
+ * default of 2048 refused 504 forks on 2026-11-24 and five claudes aborted (#1848). Just under the unit's own TasksMax
+ * (35743 on perigee), so a fork bomb still stops here.
+ */
+const PIDS_LIMIT = 32_768;
+
 /** A short hash of what a container is made of: image, mounts, env and limits. */
 export function specHash(spec: ContainerSpec): string {
   return createHash('sha256')
-    .update(JSON.stringify([spec.image, spec.mounts, spec.env ?? {}, spec.memory ?? null]))
+    .update(JSON.stringify([spec.image, spec.mounts, spec.env ?? {}, spec.memory ?? null, PIDS_LIMIT]))
     .digest('hex')
     .slice(0, 12);
 }
@@ -65,7 +72,7 @@ export function unitProps(spec: ContainerSpec): string[] {
 
 /** podman run's arguments for a spec, after `run`. */
 export function runArgs(spec: ContainerSpec): string[] {
-  const args = ['--rm', '--replace', '--name', spec.name, '--init', '--userns=keep-id', '--network=host', '--cgroups=split', '--label', `${SPEC_LABEL}=${specHash(spec)}`];
+  const args = ['--rm', '--replace', '--name', spec.name, '--init', '--userns=keep-id', '--network=host', '--cgroups=split', `--pids-limit=${PIDS_LIMIT}`, '--label', `${SPEC_LABEL}=${specHash(spec)}`];
   for (const [k, v] of Object.entries(spec.env ?? {})) args.push('-e', `${k}=${v}`);
   for (const m of spec.mounts) {
     // A named volume is chowned to the user (:U), so keep-id's user owns its own home.

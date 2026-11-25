@@ -105,6 +105,7 @@ test('the word any in a comment or quoted text inside a type does not count; a r
   assert.equal(escapes('const r = /[`\'"]/;\nlet a: any = 1;\nconst s = /`/;\nlet b = a as any;\n'), 2);
   assert.equal(escapes('const r = /\\/*/;\nlet a: any = "*/";\n'), 1);
   assert.equal(escapes('export type U = "any" | any;\nexport const v: "https://any" | any;\n', 'x.d.ts'), 2);
+  assert.equal(escapes('// a comment ends here\u2028export type T = any;\n', 'x.d.ts'), 1, 'U+2028 ends a line too');
 });
 
 /** A scratch repo with its own copy of the check, for what only a run of it shows. */
@@ -174,6 +175,10 @@ test('a file can be named by its absolute path, and one the check does not cover
     writeFileSync(join(dir, 'j.js'), '/** @type {number} */\nexport const j = "x";\n');
     writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, types: [], allowJs: true, checkJs: true }, include: ['*.ts', '*.js'] }));
     assert.match(check('j.js').out, /errors 1 [\s\S]*TS2322/);
+    writeFileSync(join(dir, 'j.js'), 'export const j = 1;\n');
+    const clean = check('j.js');
+    assert.match(clean.out, /errors 0 [\s\S]*only with checkJs/);
+    assert.equal(clean.code, 0);
     writeFileSync(join(dir, 'new.ts'), 'export const x: number = "a";\n');
     assert.match(check('new.ts').out, /errors 1 [\s\S]*its escapes are not counted/);
   } finally {

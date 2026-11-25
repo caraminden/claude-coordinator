@@ -118,7 +118,7 @@ function stripTypes(code: string): string {
 }
 
 const DIRECTIVE = /^[ \t]*(?:\/\/|\/\*+)[ \t]*@ts-(?:ignore|expect-error|nocheck)\b/gm;
-const TEXT = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"/y;
+const TEXT = /\/\*[\s\S]*?\*\/|\/\/.*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"/y;
 const WORD = /(?<![\w$])any(?![\w$])/g;
 
 /** Code with comments and string literals blanked to spaces, so positions stay put. Template `${}` holes are kept. */
@@ -330,7 +330,8 @@ async function main(args: string[]) {
     const [tracked, typed] = await Promise.all([tsFiles(), tscFiles()]);
     for (const f of files.map((f) => relative(ROOT, resolve(f)))) {
       const counted = tracked.includes(f);
-      const checked = typed.has(f) && (f in table || /\.(?:[cm]?ts|tsx)$/.test(f));
+      const checked = typed.has(f);
+      const script = /\.(?:[cm]?js|jsx)$/.test(f);
       if (!counted && !checked) {
         console.log(`${f}: not a file this check covers (a typo, not TypeScript, or not yet in git)`);
         process.exitCode = 1;
@@ -339,7 +340,8 @@ async function main(args: string[]) {
       const base = existsSync(BASELINE) ? readBaseline()[f] : undefined;
       console.log(`${f}: errors ${table[f]?.errors ?? 0} (baseline ${base?.errors ?? 0}), escapes ${table[f]?.escapes ?? 0} (baseline ${base?.escapes ?? 0})`);
       if (!checked) console.log('  not in any tsconfig of PROJECTS: its type errors are not checked');
-      if (!counted) console.log('  not tracked by git: its escapes are not counted');
+      if (script) console.log('  JavaScript: its types are checked only with checkJs or @ts-check, and its escapes are not counted');
+      else if (!counted) console.log('  not tracked by git: its escapes are not counted');
       for (const e of errors.filter((e) => e.file === f)) console.log(`  ${e.line}:${e.col} ${e.code} ${e.text.replace(/\n/g, '\n    ')}`);
     }
     return;

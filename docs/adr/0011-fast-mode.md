@@ -10,6 +10,7 @@ build, rollback first").
   rules, CI, or the `set_project_settings` tool. Turning it on is refused while the scheme's `tools/land.sh` doesn't
   know `LAND_FAST` and `--verify`, so a scheme re-syncs from the kit's land template first. Citadel's own scheme stays
   off (Cara: "Later"). Around 2026-11-26 the other schemes' numbers go to Cara, with the question for Citadel.
+  Josh answered it on 2026-11-24 with the quick train (ADR 0035): fast mode itself stays off for Citadel.
 - **Which lands are fast** (Cara, 2026-11-19: "Label, plus pipeline files"): a land labelled low or medium gets
   `LAND_FAST=1`, and the template lands it on `SMOKE_CMD` alone, with no `CHECK_CMD` and no CI wait. High-risk lands keep
   the full gate. So do branches that touch the land pipeline (`tools/land.sh`, `tools/land.local.sh`, anything under `.github/`, the lanes file) or a

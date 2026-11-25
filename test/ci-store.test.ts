@@ -401,7 +401,7 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
     assert.match(spawnSync('tar', ['-tzf', fromScript.find((f: any) => f.kind === 'report').path], { encoding: 'utf8' }).stdout, /^reports\/sub\/index\.html$/m);
     assert.deepEqual(readdirSync(work).sort(), ['app.apk', 'reports'], "nothing left in the runner's temp folder");
     // A store that can't be reached, or no run token: a report warns and passes, a build fails the step.
-    const down = { CITADEL_STORE_URL: 'http://127.0.0.1:1' };
+    const down = { CITADEL_STORE_URL: 'http://127.0.0.1:1', CI_UPLOAD_WAIT: '0' };
     assert.equal((await job(['--kind', 'report', 'reports'], down)).status, 0);
     assert.match((await job(['--kind', 'report', 'reports'], down)).stdout, /^::warning::ci-upload: the store at .* didn't answer/m);
     assert.equal((await job(['--kind', 'build', 'app.apk'], down)).status, 1);
@@ -611,7 +611,7 @@ test("over HTTP: a job uploads at the machines address only, and the scheme's me
       assert.equal(plus.status, 0, plus.stdout + plus.stderr);
       assert.equal(readFileSync(join(pullDir, 'app+debug.zip'), 'utf8'), 'plus build');
       assert.match((await pull(['--name', 'x.zip'], { ACTIONS_ID_TOKEN_REQUEST_URL: '' })).stdout, /^::error::ci-download: no run token: the job needs 'permissions: id-token: write'/m);
-      assert.match((await pull(['--name', 'x.zip'], { CITADEL_STORE_URL: 'http://127.0.0.1:1' })).stdout, /^::error::ci-download: the store at .* didn't answer/m);
+      assert.match((await pull(['--name', 'x.zip'], { CITADEL_STORE_URL: 'http://127.0.0.1:1', CI_DOWNLOAD_WAIT: '0' })).stdout, /^::error::ci-download: the store at .* didn't answer/m);
       // A 503 (the store couldn't read GitHub's keys yet) is tried again, for the list and for the bytes.
       let busy = 0;
       const flaky = createServer((req, res) => {

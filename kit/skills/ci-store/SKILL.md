@@ -82,7 +82,7 @@ permission as an upload:
   finish first. A workflow started by `workflow_run` runs for the default branch's newest commit,
   not the commit of the run that started it, so it only finds that run's files when they are the same.
 - A download that can't happen, or finds no match, fails the step (`--list` prints nothing for no
-  match). A 503 (the store couldn't yet read GitHub's signing keys) is retried, as uploads are.
+  match). A 503 (the store couldn't yet read GitHub's signing keys) is retried, as uploads are, and so is a store that gives no answer at all (Citadel restarting): 6 tries 30 s apart.
 - The routes it calls, on the store's address: `GET /api/ci-store?commit=&workflow=&kind=&target=&name=&run=`
   lists the matches as JSON, and each file's `url` (`/api/ci-store/<id>/<name>`) is the bytes, both with
   `Authorization: Bearer <run token>`.

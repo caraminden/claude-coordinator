@@ -706,7 +706,7 @@ const ciNumbers = new CiNumbers(store);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
 // Turns on connected machines (Build 7, src/machine-turn.ts) and the machines as places for them (src/machine-pools.ts).
 const serverClaude = () => new Promise<string | null>((done) => execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => done(err ? null : out.trim().split('\n')[0])));
-const workers = new WorkerJoin({ store, lends: (m) => machines.lendsWorker(m), info: workerInfo, ships: (id) => machines.shipsThere(id), claude: serverClaude, changed: () => broadcast({ type: 'machines', machines: machines.list() }), now: Date.now });
+const workers = new WorkerJoin({ store, lends: (m) => machines.lendsWorker(m), info: workerInfo, ships: (id) => machines.shipsAtWorker(id), claude: serverClaude, changed: () => broadcast({ type: 'machines', machines: machines.list() }), now: Date.now });
 machines.workers = workers;
 if (!BOOT_CHECK) every('worker rows', 1000, () => workers.tick());
 // A worker's link is its own sync: that computer's agent, if it has one, is another program.
@@ -717,7 +717,7 @@ runner.pools = new MachinePools({
   online: (id) => workers.here(id),
   lends: (m) => machines.lendsWorker(m),
   info: workerInfo,
-  ships: (id) => machines.shipsThere(id),
+  ships: (id) => machines.shipsAtWorker(id),
   hold: (id) => workers.hold(id),
   claude: serverClaude,
   changed: () => runner.turnLine.pump(),

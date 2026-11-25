@@ -711,8 +711,14 @@ export class MachineRelay {
 
   /** A ship's tests run on the computer a machine's agent or worker is on: its host is that PC's name, with a part of its own after it for a WSL distro. */
   shipsThere(machineId: number): boolean {
-    for (const on of [this.agents.get(machineId)?.host, this.workers?.host(machineId)]) for (let host = on ?? ''; host; host = host.slice(0, Math.max(0, host.lastIndexOf('-')))) if (this.shipsFor(host).length) return true;
+    for (let host = this.agents.get(machineId)?.host ?? ''; host; host = host.slice(0, Math.max(0, host.lastIndexOf('-')))) if (this.shipsFor(host).length) return true;
     return false;
+  }
+
+  /** shipsThere, or on the PC its minion-turn worker reports from (Build 7 T5): a worker may run with no agent there. */
+  shipsAtWorker(machineId: number): boolean {
+    for (let host = this.workers?.host(machineId) ?? ''; host; host = host.slice(0, Math.max(0, host.lastIndexOf('-')))) if (this.shipsFor(host).length) return true;
+    return this.shipsThere(machineId);
   }
 
   /** Send a runner agent one job and wait for its answer; a refusal, an offline agent or no answer in time comes back as ok: false. */

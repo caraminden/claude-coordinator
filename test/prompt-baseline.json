@@ -65,7 +65,7 @@
   "Each minion is a separate Claude Code session with its own g": 1040,
   "Minion titles are the short ask, about 30 characters (\"Usage": 414,
   "Ship line: `order_ship_line` moves a waiting ship (Cara, 202": 452,
-  "Workers: `mark_urgent` puts a minion first in line for a wor": 150,
+  "Workers: `mark_urgent` puts a minion in the Urgent group, ah": 176,
   "Minions run in the background. To see progress, read them; d": 139,
   "Start every minion people ask for at once: the box paces tur": 260,
   "The scheme's main checkout is at /repo and minion worktrees ": 372,

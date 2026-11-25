@@ -346,6 +346,18 @@ test('a job started again and held again keeps its first start time', async () =
   assert.match(w.reports[0], /held since Nov 24, 12:00 PM PST/);
 });
 
+test("another scheme's held job is noted apart, to its own repo", async () => {
+  const w = world();
+  const to: string[] = [];
+  (w.hold as unknown as { d: { report: (repo: string, text: string) => void } }).d.report = (repo) => to.push(repo);
+  w.line = 1;
+  w.heavy();
+  w.heavy({ repo: 'o/peek' });
+  await w.tick();
+  await w.tick(REPORT_MS);
+  assert.deepEqual(to.sort(), [OWN, 'o/peek']);
+});
+
 test('the list line of a held minion: since when and why, only while it is held', async () => {
   const w = world();
   w.line = 1;

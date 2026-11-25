@@ -99,6 +99,7 @@ export interface FakeCitadel {
   identity(person?: number, extra?: { from?: string; fromTitle?: string; app?: string; ttlSec?: number }): string;
   /** Everything recorded, for assertions. */
   turns: TurnRequest[];
+  /** Turn ids as the URL carried them: strings, though the `start` event's `turn` is a number. */
   canceled: string[];
   messages: { turn: string; person: number; text: string }[];
   verdicts: { turn: string; verdict: string; reason?: string }[];
@@ -349,11 +350,8 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
         if (b.kind === 'data' && !((b.files as unknown[] | null | undefined)?.length || b.text || b.summary || b.item)) return fail(res, 400, 'data needs files, text, summary or item');
         if (b.minion != null && (b.kind === 'data' || !whole(b.minion))) return fail(res, 400, 'minion is a whole number from 1');
         if (!home) return fail(res, 409, 'No home scheme');
-        if (opts.askLimit !== undefined) {
-          const k = `${p.id}${b.kind === 'data' ? ':data' : ''}`;
-          if ((askCount.get(k) ?? 0) >= opts.askLimit) return fail(res, 429, `At most ${opts.askLimit} asks per person: try again later`);
-          askCount.set(k, (askCount.get(k) ?? 0) + 1);
-        }
+        const limitKey = `${p.id}${b.kind === 'data' ? ':data' : ''}`;
+        if (opts.askLimit !== undefined && (askCount.get(limitKey) ?? 0) >= opts.askLimit) return fail(res, 429, `At most ${opts.askLimit} asks per person: try again later`);
         if (b.minion != null && !p.member) return fail(res, 403, 'Only members can ask a minion');
         if (b.minion != null && !opts.minions?.[b.minion as number]) return fail(res, 404, 'No such minion');
         if (b.minion != null && opts.minions![b.minion as number].status === 'closed') return fail(res, 409, `#${b.minion} is dismissed: a person reopens it first`);
@@ -361,6 +359,7 @@ export async function startFakeCitadel(opts: FakeOptions): Promise<FakeCitadel> 
         const named = asked.map((x) => (x.upload === undefined ? x.name : uploads.get(x.upload)?.person === p.id ? (x.name ?? uploads.get(x.upload)!.name) : null));
         if (named.includes(null)) return fail(res, 404, 'No upload');
         for (const x of asked) if (x.upload !== undefined) uploads.delete(x.upload);
+        askCount.set(limitKey, (askCount.get(limitKey) ?? 0) + 1); // only a filed ask counts, as on Citadel
         f.asks.push(b);
         const files = named.map((name) => `inbox/${opts.app}/${p.login}/${name}`);
         if (b.kind === 'data') return json(res, 202, { scheme: home.id, member: !!p.member, proposal: false, files, sidecar: `inbox/${opts.app}/${p.login}/${Date.now()}-ask.json` });

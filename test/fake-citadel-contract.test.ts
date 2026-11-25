@@ -199,5 +199,6 @@ test('turn ids are numbers, a verdict reason may be null, and scripted asks hit 
   assert.equal(typeof start.turn, 'number');
   assert.equal((await post(`turns/${start.turn}/verdict`, { verdict: 'pass', reason: null })).status, 200);
   assert.equal((await post('asks', { person: 1, kind: 'bug', text: 'x', minion: 3 })).status, 409);
+  assert.equal((await post('asks', { person: 1, kind: 'bug', text: 'x' })).status, 202); // the refused 409 used none up
   assert.equal((await post('asks', { person: 1, kind: 'bug', text: 'x' })).status, 429);
 });

@@ -32,7 +32,7 @@ export interface LinkCheckConfig {
   refs?: string;
 }
 
-/** How a send-back starts, which the runner looks for to swap the reply for its rewrite (Runner.replaceSentBack). */
+/** How a send-back starts, which the runner looks for to swap the reply for its rewrite (turn-events.ts replaceSentBack). */
 export const SENT_BACK = 'Your reply was sent back before people saw it.';
 /** The whole answer that keeps a sent-back reply as it was, so a false alarm costs a word, not a rewrite (#404). */
 export const KEEP = 'KEEP';

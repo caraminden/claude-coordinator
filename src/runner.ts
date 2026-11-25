@@ -19,7 +19,6 @@ import type { Claim } from './claims.ts';
 import { fableMeter } from './costs.ts';
 import { Approvals, lines, type Go } from './approvals.ts';
 import type { TurnGithub } from './github-link.ts';
-import { KEEP, SENT_BACK } from './link-check.ts';
 import type { SchemeRefs } from './scheme-refs.ts';
 import { cardHref, cardLabel, cardWhat, settledHow, type CardLink, type SettledCard } from './card-links.ts';
 import type { Ship } from './branch.ts';
@@ -31,13 +30,14 @@ import { Fresh, roleWord, type FreshState } from './fresh.ts';
 import { HeldMail } from './held-mail.ts';
 import { KeepaliveRun } from './keepalive-run.ts';
 import { Closing } from './closing.ts';
+import { TurnEvents } from './turn-events.ts';
 import { Lanes } from './lanes.ts';
 import { DismissedCleanup } from './dismissed-cleanup.ts';
 import { buildBranchLater, landsBuilds, projectDir, surveyReports } from './workspace.ts';
 import { thrown } from './thrown.ts';
-import type { ClaudeEvent, ContentBlock, LoadError, ModelUsage } from './claude-events.ts';
+import type { ClaudeEvent, ContentBlock } from './claude-events.ts';
 import { KillWaves } from './kill-wave.ts';
-import { killedSpend, turnOf } from './turn-row.ts';
+import { killedSpend } from './turn-row.ts';
 import { publicAddress } from './http.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
 import { readScope } from './read-scope.ts';
@@ -49,7 +49,7 @@ import { dropTurnDir, makeTmpDir, sweepDroppedTurnDirs, sweepTmpDirs } from './t
 import { endFiles, STEER_PENDING, steerLater, unsentSteers, unsentSteersAtBoot, type EndFiles, type TurnFiles } from './turn-files.ts';
 import { size } from './build-output.ts';
 import { gradleCacheDir } from './build-cache.ts';
-import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, CODEX_WAITING, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
+import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKey, fitLog, isCodexModel, readParts, toClaudePreamble, CODEX_MODELS, HANDOVER_MAX, type CodexThread, type CodexUsage } from './codex.ts';
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { decideHold, Holds, type HoldDecision } from './prompt-hold.ts';
 import { stuckList } from './stuck-list.ts';
@@ -65,16 +65,16 @@ import { RunsOn, type runsOnCard } from './runs-on.ts';
 import { offSkills, pruneKit } from './skills.ts';
 import { alive, copyPinned, launchPlan, type EveryScheme, type LaunchPlan, TASKMASTER_SLICE, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wrapperSpec } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
-import { hideSecrets, hideSecretsIn, secretEnv } from './secrets.ts';
-import { takeStatus, type StatusFields } from './status-trailer.ts';
+import { hideSecrets, secretEnv } from './secrets.ts';
+import type { StatusFields } from './status-trailer.ts';
 import { appFolder, slotsOf } from './app-services.ts';
 import { DEFAULT_CONTRAPTIONS_DIR } from './contraptions.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { KEEPALIVE_TEXT, changedParts, claudeStamp, contextText, fingerprint, keepaliveKey, prefixParts, treeHash, turnDate, type KeepaliveSeries } from './keepalive.ts';
 import { homedir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { answerPrompt, callOf, CARD_HOLD_MS, cardHeld, cardWait, keptCards, losesPass, newCalls, noteCalls, readsSteers, repliedPrompt, sameCall, STEER_LAG_MS, type CardPass, type KeptCard, type TurnCalls } from './card-wait.ts';
-import { longestTool, noteEvent, quietAt, type Activity, type ProcCheck } from './quiet.ts';
+import { answerPrompt, callOf, CARD_HOLD_MS, cardHeld, cardWait, keptCards, newCalls, noteCalls, repliedPrompt, sameCall, type CardPass, type KeptCard, type TurnCalls } from './card-wait.ts';
+import { longestTool, quietAt, type Activity, type ProcCheck } from './quiet.ts';
 import { applyEvent, createProgress, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
@@ -94,7 +94,7 @@ import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
 import { holdOver, StartNow } from './start-now.ts';
 import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
-import { describeActivity, DROPPED_TYPES, guessWindow, pushKind, slimEvent } from './stream-events.ts';
+import { describeActivity, guessWindow, pushKind, slimEvent } from './stream-events.ts';
 import { usageWindow, type CodexLimits, type CodexWindow, type LoadedCommands, type MessageFile, type MessageImage, type QueuedMessage, type RateLimitInfo, type Usage } from './turn-messages.ts';
 import { contextKey, windowKey, freshKey, handoffKey, failNoteKey, closeCancelledKey, turnKey, warmKey, savingKey, commandsKey, schemeCommandsKey } from './turn-keys.ts';
 import { sleepKey, type Sleep } from './needs.ts';
@@ -518,6 +518,7 @@ export class Runner {
   private keepaliveRun: KeepaliveRun;
   private fresh: Fresh;
   private closer: Closing;
+  private turnEvents: TurnEvents;
   private cleanup: DismissedCleanup;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all; `only`: on a machine, its accounts signed in there (#2061). */
   placeFor?: (person: number | null, warm?: string, taskmaster?: boolean, only?: number[]) => TurnPlace | { refused: string };
@@ -875,6 +876,44 @@ export class Runner {
       ciHold: (id) => this.ciHold?.(id),
       probeHold: (id) => this.probeHold?.(id),
       armed: (id, claim, fallback) => this.armed?.(id, claim, fallback) ?? false,
+    });
+    this.turnEvents = new TurnEvents({
+      store,
+      now: () => this.now(),
+      turns: this.turns,
+      keepalives: this.keepalives,
+      statuses: this.statuses,
+      sentBack: this.sentBack,
+      contextSizes: this.contextSizes,
+      contextShown: this.contextShown,
+      mainModels: this.mainModels,
+      pushCalls: this.pushCalls,
+      compactWatch: this.compactWatch,
+      promptHolds: () => this.promptHolds,
+      emit: (id, kind, data, reserved) => this.emit(id, kind, data, reserved),
+      broadcast: (msg) => this.broadcast(msg),
+      broadcastTicket: (id) => this.broadcastTicket(id),
+      saveTurn: (id, patch) => this.saveTurn(id, patch),
+      secretsOfTurn: (id) => this.secretsOfTurn(id),
+      updateUsage: (info, id) => this.updateUsage(info, id),
+      updateCodexUsage: (l, person) => this.updateCodexUsage(l, person),
+      lendWorker: (id) => this.lendWorker(id),
+      quietSince: (id, live, now) => this.quietSince(id, live, now),
+      checkQuiet: (id, live, now) => this.checkQuiet(id, live, now),
+      keepaliveResult: (id, ev) => this.keepaliveRun.keepaliveResult(id, ev),
+      meterSpend: (id, ev) => this.meterSpend(id, ev),
+      progressFor: (id) => this.progressFor(id),
+      recordSteps: (id, p) => this.recordSteps(id, p),
+      savePlan: (id, p, upTo) => this.savePlan(id, p, upTo),
+      carryReply: (id) => this.carryReply(id),
+      keepTurn: (id, state, r) => this.keepTurn(id, state, r),
+      settleSpend: (id) => this.spends.get(id)?.meter.settle(),
+      setFailNote: (id, fields) => this.setFailNote(id, fields),
+      onStatusTrailer: (id, fields) => this.onStatusTrailer(id, fields),
+      onStreamEvent: (id, ev) => this.onStreamEvent(id, ev),
+      onRawEvent: (id, ev) => this.onRawEvent(id, ev),
+      onFilesMayChange: (id, soon) => this.onFilesMayChange(id, soon),
+      onTurnError: (id, text, eventId) => this.onTurnError(id, text, eventId),
     });
     this.promptHolds = new Holds(store);
     this.unitTag = createHash('sha256').update(this.turnsDir).digest('hex').slice(0, 8);
@@ -2422,18 +2461,14 @@ export class Runner {
     return this.fresh.freshSweep(now);
   }
 
-  /**
-   * Keep the slash commands a turn loaded (Claude Code's init event lists them), for the composer's menu and its
-   * check of what it sends (#937). Terminal-only ones and internal `__` ones are left out. Written only on a change.
-   */
+  // A turn's events, line by line: src/turn-events.ts.
+
+  private handleLine(ticketId: number, line: string, onResult: (isError: boolean, result: string | null) => void) {
+    return this.turnEvents.handleLine(ticketId, line, onResult);
+  }
+
   private saveCommands(ticketId: number, ev: ClaudeEvent) {
-    const terminal = new Set(Array.isArray(ev.terminal_slash_commands) ? ev.terminal_slash_commands : []);
-    const names = [...new Set<string>(ev.slash_commands!.filter((n: unknown) => typeof n === 'string' && n && !n.startsWith('__') && !terminal.has(n)))];
-    const plugins = (Array.isArray(ev.plugins) ? ev.plugins : []).filter((p) => typeof p?.name === 'string' && typeof p.path === 'string' && p.path.startsWith('/')).map((p) => ({ name: p.name, path: p.path }));
-    const loaded: LoadedCommands = { names, plugins, cwd: typeof ev.cwd === 'string' ? ev.cwd : '' };
-    const ticket = this.store.getTicket(ticketId);
-    if (JSON.stringify(this.store.getSetting(commandsKey(ticketId))) !== JSON.stringify(loaded)) this.store.setSetting(commandsKey(ticketId), loaded);
-    if (ticket && JSON.stringify(this.store.getSetting(schemeCommandsKey(ticket.project_id))) !== JSON.stringify(loaded)) this.store.setSetting(schemeCommandsKey(ticket.project_id), loaded);
+    return this.turnEvents.saveCommands(ticketId, ev);
   }
 
   /** Start due keepalives, weekly readout included (src/keepalive-run.ts). Run every minute. */
@@ -4047,159 +4082,6 @@ export class Runner {
     return secrets;
   }
 
-  private handleLine(ticketId: number, line: string, onResult: (isError: boolean, result: string | null) => void) {
-    if (!line.trim()) return;
-    let ev: ClaudeEvent;
-    const secrets = this.secretsOfTurn(ticketId);
-    try {
-      ev = JSON.parse(line);
-    } catch {
-      this.emit(ticketId, 'note', { text: hideSecrets(line, secrets) });
-      return;
-    }
-    if (!ev || typeof ev !== 'object') return;
-    // A turn that prints a saved secret (#838) never puts it in the chat, its reply or its activity line.
-    if (secrets.size) ev = hideSecretsIn(ev, secrets);
-    if (ev.type === 'rate_limit_event') this.updateUsage(ev.rate_limit_info, ticketId);
-    const live = this.turns.get(ticketId);
-    if (live) {
-      live.activity = noteEvent(live.activity, ev, Date.now());
-      const pass = this.store.getSetting<TurnState>(turnKey(ticketId))?.pass;
-      if (pass && losesPass(pass, live.calls, ev)) this.saveTurn(ticketId, { pass: undefined });
-      noteCalls(live.calls, ev);
-      if (live.unread && readsSteers(live.calls, ev) && this.now() - live.unread > STEER_LAG_MS) {
-        live.unread = undefined;
-        this.saveTurn(ticketId, { unread: undefined });
-      }
-      if (ev.type === 'system' && ev.subtype === 'background_tasks_changed') this.saveTurn(ticketId, { background: live.calls.background });
-      this.lendWorker(ticketId);
-      if (this.quietSince(ticketId, live) === null && this.store.getSetting<TurnState>(turnKey(ticketId))?.quiet) this.checkQuiet(ticketId, live);
-    }
-    // A keepalive (#862) shows nothing: only its session id and its cost are kept.
-    if (this.keepalives.has(ticketId)) {
-      if (validSessionId(ev.session_id) && ev.session_id !== this.store.getTicket(ticketId)?.session_id) this.store.updateTicket(ticketId, { session_id: ev.session_id });
-      if (ev.type === 'result') onResult(!!ev.is_error, typeof ev.result === 'string' ? ev.result : null);
-      if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') void this.keepaliveRun.keepaliveResult(ticketId, ev).catch((e) => console.error(`[keepalive] minion ${ticketId}: ${(e as Error).message}`));
-      return;
-    }
-    if (ev.type === 'codex_waiting') return this.emit(ticketId, 'note', { text: CODEX_WAITING });
-    if (ev.type === 'codex_gate') return console.log(`[codex] minion ${ticketId}: login check waited ${Number(ev.waited_ms) || 0} ms${ev.refreshed ? ', refreshed the login' : ''}${ev.serial ? ', runs serial' : ''}`);
-    if (ev.type === 'codex_rate_limits') return this.updateCodexUsage(ev.rate_limits, this.store.getSetting<TurnState>(turnKey(ticketId))?.person ?? null);
-    if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.codex_thread === 'string') {
-      const t = this.store.getSetting<CodexThread>(codexThreadKey(ticketId));
-      if (t && t.thread !== ev.codex_thread) this.store.setSetting(codexThreadKey(ticketId), { ...t, thread: ev.codex_thread });
-      if (ev.codex_resume_failed) this.emit(ticketId, 'note', { text: `Codex couldn't pick up its thread ${ev.codex_resume_failed}, so this turn starts a new one from the hand-over log.` });
-    }
-    if (ev.type === 'assistant' && !ev.parent_tool_use_id && Array.isArray(ev.message?.content)) this.countUse(ev.message.content);
-    // Each main-thread API call re-reads the whole context: its input is the context's size.
-    const u = ev.type === 'assistant' && !ev.parent_tool_use_id ? ev.message?.usage : null;
-    if (u) {
-      const size = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-      const shown = this.contextShown.get(ticketId);
-      this.contextSizes.set(ticketId, size);
-      // The meter follows the turn (#1193), but a view() per API call is too many: a change of 1k or more, at most every 2 s.
-      if (!shown || (Math.abs(size - shown.size) >= 1000 && Date.now() - shown.at >= 2000)) {
-        this.contextShown.set(ticketId, { size, at: Date.now() });
-        this.broadcastTicket(ticketId);
-      }
-    }
-    if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.model === 'string') this.mainModels.set(ticketId, ev.model);
-    if (ev.type === 'result' && ev.modelUsage && typeof ev.modelUsage === 'object') {
-      // Grunts' models are in modelUsage too: the window is the main model's.
-      const main = this.mainModels.get(ticketId);
-      const mu: ModelUsage | null = main ? (ev.modelUsage[main] ?? ev.modelUsage[main.replace(/\[1m\]$/i, '')]) : null;
-      if (mu && Number(mu.contextWindow) > 0) this.store.setSetting(windowKey(ticketId), Number(mu.contextWindow));
-    }
-    if (ev.type === 'result') this.contextShown.delete(ticketId);
-    if (ev.type === 'result' && this.contextSizes.has(ticketId)) {
-      this.store.setSetting(contextKey(ticketId), this.contextSizes.get(ticketId));
-      this.contextSizes.delete(ticketId);
-    }
-    if (ev.type === 'assistant') {
-      // An alert is extra: a failure in it must not cost the line its place in the chat.
-      try {
-        this.meterSpend(ticketId, ev);
-      } catch (err) {
-        console.error(`[spend] minion ${ticketId}: metering failed:`, thrown(err).message);
-      }
-    }
-    if (DROPPED_TYPES.has(ev.type)) return;
-    // Joined into paths and passed to --resume later, and a container can write its stream: only what looks like an id.
-    if (validSessionId(ev.session_id) && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
-      this.store.updateTicket(ticketId, { session_id: ev.session_id });
-    }
-    if (this.compactWatch.observe(ticketId, ev)) this.broadcastTicket(ticketId);
-    // The held prompt (#1276): a compaction summarises its note away, and a turn that ran has read the note it carried.
-    if (ev.type === 'system' && ev.subtype === 'compact_boundary') this.promptHolds.compacted(ticketId);
-    // Only a turn that ran has read its note: after an error the next turn carries it again.
-    if (ev.type === 'result' && !ev.is_error) this.promptHolds.ran(ticketId, this.store.getTicket(ticketId)?.session_id ?? null);
-    if (ev.type === 'result') onResult(!!ev.is_error, typeof ev.result === 'string' ? ev.result : null);
-    if (ev.type === 'assistant' && !ev.parent_tool_use_id && Array.isArray(ev.message?.content)) ev = this.stripStatus(ticketId, ev);
-    if (ev.type === 'result') {
-      const status = this.statuses.get(ticketId);
-      this.statuses.delete(ticketId);
-      if (status && !ev.is_error && !(this.store.getCabal(ticketId) && this.store.getSetting<TurnState>(turnKey(ticketId))?.fresh)) this.onStatusTrailer(ticketId, status);
-      if (status) this.saveTurn(ticketId, { status: undefined });
-    }
-    // Likewise the model: remembered from turns that ran without one chosen.
-    const t = ev.type === 'system' && ev.subtype === 'init' && typeof ev.model === 'string' ? this.store.getTicket(ticketId) : null;
-    if (t && !t.model && ev.model !== t.last_model) {
-      this.store.updateTicketQuietly(ticketId, { last_model: ev.model });
-      this.broadcastTicket(ticketId);
-    }
-    if (ev.type === 'system' && ev.subtype === 'init' && Array.isArray(ev.mcp_servers)) this.checkMcp(ticketId, ev.mcp_servers);
-    if (ev.type === 'system' && ev.subtype === 'init') this.checkLoadErrors(ticketId, ev);
-    if (ev.type === 'system' && ev.subtype === 'init' && Array.isArray(ev.slash_commands)) this.saveCommands(ticketId, ev);
-    if (ev.type === 'system' && ev.subtype === 'init' && typeof ev.claude_code_version === 'string') {
-      const hashes = this.store.getSetting<TurnState>(turnKey(ticketId))?.hashes;
-      if (hashes) this.saveTurn(ticketId, { hashes: { ...hashes, claude: ev.claude_code_version } });
-    }
-    // A process ended for its card says the call was rejected and the turn failed; the chat shows it still waiting.
-    if (live?.card && ev.type === 'user') return;
-    if (live?.card && ev.type === 'result') ev = { ...ev, is_error: false, result: '' };
-    this.onRawEvent(ticketId, ev);
-    const slim = slimEvent(ev);
-    if (!slim) return;
-    const progress = this.progressFor(ticketId);
-    const row = this.emit(ticketId, 'claude', slim);
-    try {
-      this.onStreamEvent(ticketId, slim);
-    } catch (err) {
-      console.error(`[stall] minion ${ticketId}: counting failed:`, thrown(err).message);
-    }
-    // The stored event's own time, so a step's start matches what a replay of the events (history, the backfill) finds.
-    applyEvent(progress, 'claude', slim, row.created_at);
-    this.recordSteps(ticketId, progress);
-    const activity = progress.tasks.length ? progressLine(progress, ev.type !== 'result') : describeActivity(ev);
-    if (activity && activity !== this.store.getTicket(ticketId)?.last_activity) {
-      this.store.updateTicket(ticketId, { last_activity: activity });
-      // Keep the board's progress line live, not just on status changes.
-      this.broadcastTicket(ticketId);
-    }
-    if (ev.type === 'result') this.savePlan(ticketId, progress, row.id);
-    if (ev.type === 'result' && !ev.is_error) this.carryReply(ticketId);
-    if (ev.type === 'user' && ((ev.message?.content ?? []) as ContentBlock[]).some?.((b) => typeof b?.text === 'string' && b.text.includes(SENT_BACK)) && !this.sentBack.has(ticketId)) {
-      this.sentBack.add(ticketId);
-      this.saveTurn(ticketId, { sentBack: true });
-    }
-    // shortcut: a turn stopped, or cut off and resumed, before the result keeps both versions (a re-attached one doesn't, #1452); rare, so left.
-    if (ev.type === 'result' && this.sentBack.delete(ticketId)) this.replaceSentBack(ticketId, row.id);
-    if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
-      const state = this.store.getSetting<TurnState>(turnKey(ticketId));
-      this.keepTurn(ticketId, state, { event_id: row.id, ...turnOf(ev), ended_at: row.created_at });
-      this.spends.get(ticketId)?.meter.settle();
-      if (state?.spend?.open) this.saveTurn(ticketId, { spend: { ...state.spend, open: {} } });
-    }
-    if (ev.type === 'user' && Array.isArray(ev.message?.content) && (ev.message!.content as ContentBlock[]).some((b) => b?.type === 'tool_result')) {
-      this.onFilesMayChange(ticketId, false);
-    }
-    // A reply that links a file shows it in the artifacts list as it lands (the scan's own test: replyTexts).
-    if (ev.type === 'assistant' && Array.isArray(ev.message?.content) && (ev.message!.content as ContentBlock[]).some((b) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(']('))) {
-      this.onFilesMayChange(ticketId, true);
-    }
-    this.notePushes(ticketId, ev);
-  }
-
   /** Record what a turn cost, from its result or, killed with none, its estimate. */
   private keepTurn(ticketId: number, state: TurnState | null | undefined, r: TurnResult) {
     void this.store
@@ -4337,33 +4219,6 @@ export class Runner {
     return true;
   }
 
-  /** A main-thread message without its status trailer, remembering the last good one for the turn's end; a bad one is noted once. */
-  private stripStatus(ticketId: number, ev: ClaudeEvent): ClaudeEvent {
-    let changed = false;
-    let state = '';
-    const content = (ev.message!.content as ContentBlock[]).flatMap((b): ContentBlock[] => {
-      if (b?.type !== 'text' || typeof b.text !== 'string') return [b];
-      const { text, status, bad } = takeStatus(b.text);
-      if (text === b.text) return [b];
-      changed = true;
-      if (status) {
-        this.statuses.set(ticketId, status);
-        this.saveTurn(ticketId, { status });
-        state = typeof status.state === 'string' ? status.state : '';
-      }
-      if (bad) {
-        // A later reply's bad line (a sent-back reply's rewrite) doesn't let an earlier reply's line stand.
-        if (this.statuses.delete(ticketId)) this.saveTurn(ticketId, { status: undefined });
-        console.log(`[status] minion ${ticketId}: ignored a status trailer, ${bad}`);
-        this.emit(ticketId, 'note', { text: `The reply's status line was ignored (${bad}), so the state stays as it was.` });
-      }
-      return text ? [{ ...b, text }] : [];
-    });
-    if (!changed) return ev;
-    // The end it named stays on the stored event: the plan's last step is ticked by it, in every replay (progress.js, #1923).
-    return { ...ev, message: { ...ev.message, content }, ...(state ? { turn_state: state } : {}) };
-  }
-
   /**
    * A reply the link check sent back gives way to its rewrite once the turn ends (#281, Cara's pick
    * "Replace in place"): it's marked `replaced` in the stored history, which the chat skips, and a
@@ -4371,45 +4226,6 @@ export class Runner {
    * so narration on the way there doesn't count; with no words after it, or just KEEP, the first version stays.
    */
   private sentBack = new Set<number>(); // tickets whose running turn had a reply sent back
-
-  private replaceSentBack(ticketId: number, resultId: number) {
-    // A Grunt's words aren't the reply.
-    const words = (data: ClaudeEvent) => data.type === 'assistant' && !data.parent_tool_use_id && ((data.message?.content ?? []) as ContentBlock[]).some((b) => b?.type === 'text' && b.text?.trim());
-    const sentBack = (data: ClaudeEvent) => data.type === 'user' && Array.isArray(data.message?.content) && data.message.content.some((b) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(SENT_BACK));
-    const swaps: { original: EventRow; rewrite?: EventRow }[] = [];
-    let last: EventRow | null = null;
-    for (const e of this.store.eventsPage(ticketId, resultId, 1).events) {
-      if (e.kind !== 'claude') continue;
-      const data: ClaudeEvent = JSON.parse(e.data);
-      if (sentBack(data)) {
-        if (last) swaps.push({ original: last });
-      } else if (words(data)) {
-        last = e;
-        const open = swaps.at(-1);
-        if (open && open.original !== e) open.rewrite = e;
-      }
-    }
-    const text = (data: ClaudeEvent) =>
-      (data.message!.content as ContentBlock[])
-        .filter((b) => b?.type === 'text')
-        .map((b) => b.text)
-        .join('')
-        .trim();
-    for (const { original, rewrite } of swaps) {
-      if (!rewrite) continue;
-      // A bare KEEP stands by the first version (#404): the KEEP is what gives way.
-      const [gone, by] =
-        text(JSON.parse(rewrite.data))
-          .replace(/[*_.!]/g, '')
-          .toUpperCase() === KEEP
-          ? [rewrite, original]
-          : [original, rewrite];
-      const data: ClaudeEvent & { replaced?: number } = JSON.parse(gone.data);
-      if (data.replaced) continue;
-      this.store.setEventData(gone.id, { ...data, replaced: by.id });
-      this.emit(ticketId, 'replaced', { event: gone.id, by: by.id });
-    }
-  }
 
   /** Counts each running turn's compactions and calls a burst out (#1920). */
   private compactWatch = new CompactWatch({
@@ -4427,79 +4243,8 @@ export class Runner {
   /** The model each running turn's init event named. */
   private mainModels = new Map<number, string>();
 
-  /** The usage ledger (#1306): each tool, skill and Grunt type a main-thread message calls. Never throws. */
-  private countUse(blocks: ContentBlock[]) {
-    try {
-      for (const b of blocks) {
-        if (b?.type !== 'tool_use' || typeof b.name !== 'string') continue;
-        const m = /^mcp__(?:thread|coordinator)__(.+)$/.exec(b.name);
-        if (m) this.store.usage.used('tool', m[1]);
-        else if (b.name === 'Skill' && typeof b.input?.skill === 'string') this.store.usage.used('skill', b.input.skill);
-        else if ((b.name === 'Agent' || b.name === 'Task') && typeof b.input?.subagent_type === 'string') this.store.usage.used('grunt', b.input.subagent_type);
-      }
-    } catch {
-      /* counting never fails a turn */
-    }
-  }
-
   /** Bash calls that push or open a pull request, by tool_use id, until their result comes back. */
   private pushCalls = new Map<string, 'push' | 'pr'>();
-
-  /** A note in the chat for each push or pull request, saying whose GitHub it went out as (Cara's pick: "only a chat note"). */
-  private notePushes(ticketId: number, ev: ClaudeEvent) {
-    const blocks: ContentBlock[] = Array.isArray(ev.message?.content) ? ev.message.content : [];
-    for (const b of blocks) {
-      if (ev.type === 'assistant' && b?.type === 'tool_use' && b.name === 'Bash' && typeof b.input?.command === 'string' && typeof b.id === 'string') {
-        const kind = pushKind(b.input.command);
-        if (kind) this.pushCalls.set(b.id, kind);
-      }
-      if (ev.type !== 'user' || b?.type !== 'tool_result' || !this.pushCalls.has(b.tool_use_id!)) continue;
-      const kind = this.pushCalls.get(b.tool_use_id!)!;
-      this.pushCalls.delete(b.tool_use_id!);
-      const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
-      // Absent: GitHub linking isn't set up, and the box's own login pushes as before.
-      if (turn?.github === undefined) continue;
-      const who = turn.person ? (this.store.getUser(turn.person)?.name ?? 'Its person') : 'Nobody';
-      if (turn.github && !b.is_error) this.emit(ticketId, 'note', { text: kind === 'pr' ? `Opened a pull request as @${turn.github} (${who}'s GitHub)` : `Pushed as @${turn.github} (${who}'s GitHub)` });
-      else if (!turn.github && b.is_error) this.emit(ticketId, 'note', { text: `Couldn't ${kind === 'pr' ? 'open a pull request' : 'push'}: this turn runs for ${who}, who hasn't linked GitHub. Link it in Settings → Your account.` });
-    }
-  }
-
-  /**
-   * Say so in the chat (as an error, which pushes) when the turn's own MCP server didn't connect:
-   * without it a minion can't set its status or ask questions, and a Taskmaster can't manage minions.
-   */
-  private checkMcp(ticketId: number, servers: NonNullable<ClaudeEvent['mcp_servers']>) {
-    const role = this.store.getTicket(ticketId)?.kind === 'coordinator' ? 'coordinator' : 'thread';
-    const status = servers.find((s) => s?.name === role)?.status;
-    // Pending: still starting after Claude Code's startup wait; it may yet connect.
-    if (status === 'connected' || status === 'pending') return;
-    const text = `The ${role} MCP server is ${typeof status === 'string' ? status : 'missing'} in this turn, so its mcp__${role} tools are unavailable. Check the server log.`;
-    console.error(`Ticket ${ticketId}: ${text}`);
-    const event = this.emit(ticketId, 'error', { text });
-    this.onTurnError(ticketId, text, event.id);
-  }
-
-  /**
-   * A plugin or MCP server that fails to load is skipped and the turn still exits 0 (AG-03): say so in the chat as an error
-   * and on the minion's note. It warns and doesn't end the turn: a missing thread/coordinator server already has checkMcp's error.
-   */
-  private checkLoadErrors(ticketId: number, ev: ClaudeEvent) {
-    const line = (e: LoadError, kind: string) => {
-      const name = typeof e === 'object' ? (e?.plugin ?? e?.name ?? e?.server) : null;
-      const why = typeof e === 'string' ? e : (e?.error ?? e?.message ?? JSON.stringify(e));
-      return `${name ? `${name} ` : ''}${kind}: ${why}`;
-    };
-    const role = this.store.getTicket(ticketId)?.kind === 'coordinator' ? 'coordinator' : 'thread';
-    // The turn's own server already got checkMcp's error.
-    const lines = [...(Array.isArray(ev.plugin_errors) ? ev.plugin_errors.map((e) => line(e, 'plugin')) : []), ...(Array.isArray(ev.mcp_server_errors) ? ev.mcp_server_errors.filter((e) => (typeof e === 'string' ? undefined : e?.name) !== role).map((e) => line(e, 'MCP server')) : [])];
-    if (!lines.length) return;
-    const text = `This turn started with load errors, so some of its skills, hooks or tools are missing: ${lines.join('; ')}`.slice(0, 1500);
-    console.error(`Ticket ${ticketId}: ${text}`);
-    const event = this.emit(ticketId, 'error', { text });
-    this.setFailNote(ticketId, { note: `Load errors: ${lines.length} in this turn's init`.slice(0, 60) });
-    this.onTurnError(ticketId, text, event.id);
-  }
 
   /**
    * A minion's progress as a contraption may see it (#421): the readout's line ("Showing the rune cost… · 1 of 6 done") and step,

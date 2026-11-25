@@ -63,7 +63,7 @@ export interface ClaudeEvent {
   session_id?: string;
   uuid?: string;
   parent_tool_use_id?: string | null;
-  /** The state a reply's status trailer gave, kept on its stored event (runner.ts stripStatus). */
+  /** The state a reply's status trailer gave, kept on its stored event (turn-events.ts stripStatus). */
   turn_state?: string;
   message?: ClaudeMessage;
   /** result */

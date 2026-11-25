@@ -453,11 +453,13 @@ test('a write the writer is still holding is never missed: the read waits for it
   const slow = await bootServer({ root, env: { CITADEL_DB_WRITE_DELAY_MS: '300' } });
   try {
     await readerAnswers(slow);
-    // Held 300 ms on the writer: a reader waits for it, never the main thread.
+    // Held 300 ms on the writer: a reader waits for it, never the main thread. Once its queue is more than a reader's
+    // wait behind (many copies of this file at once), the answer is the 503 the page asks again on (public/base.js).
     const sent = slow.call(`/api/tickets/${M1.id}/messages`, { text: 'read your writes' });
     await until('a read that waited for the held write', async () => {
       const t0 = Date.now();
       const got = await get(slow, PATHS[0], slow.cookie);
+      if (got.status === 503 && JSON.parse(got.body).retry === true) return false;
       assert.deepEqual([got.status, got.reader], [200, true]);
       // timing-ok: a read that waits for nothing takes a few ms; the write is held 300
       return Date.now() - t0 > 100;

@@ -54,6 +54,21 @@ export interface DesktopIndex {
   builds: DesktopBuild[];
   /** The CI run (`ci:<run id>`) the feed last followed: a later by-hand publish stands until CI moves on, a restart too. */
   ci?: string;
+  /** Why CI runs couldn't be published, by run id, so a restart still says it; a run that is published goes from here. */
+  failed?: Record<string, string>;
+}
+
+/** Why a run wasn't published when its build never reached the CI store (2RE4), and how long that may take. */
+export const NO_FILE = "its build isn't in the CI store";
+export const NO_FILE_MS = 30 * 60_000;
+
+/** A build's CI run, when it came from one ("ci:<run id>"). */
+export const ciRun = (source: string | undefined): number | null => (/^ci:\d+$/.test(source ?? '') ? Number(source!.slice(3)) : null);
+
+/** `failed` without `source`'s run; undefined when none is left (so the key leaves the file). */
+function failedBut(failed: DesktopIndex['failed'], source: string | undefined): DesktopIndex['failed'] {
+  const left = Object.fromEntries(Object.entries(failed ?? {}).filter(([run]) => `ci:${run}` !== source));
+  return Object.keys(left).length ? left : undefined;
 }
 
 export interface PublishAsk {
@@ -118,7 +133,7 @@ export class DesktopFeeds {
   async apps(projectId: number): Promise<DesktopIndex[]> {
     const names = await readdir(join(projectDir(this.dataDir, projectId), 'desktop')).catch(() => [] as string[]);
     const out = await Promise.all(names.filter((n) => DESKTOP_APP.test(n)).map((n) => this.index(projectId, n)));
-    return out.filter((x): x is DesktopIndex => !!x);
+    return out.filter((x): x is DesktopIndex => !!x?.builds.length);
   }
 
   /** What the launcher reads: the current build, and the newest launcher when there is one. */
@@ -165,6 +180,8 @@ export class DesktopFeeds {
     if (!(STARTED as readonly string[]).includes(started)) throw new DesktopError(`started is one of ${STARTED.join(', ')}`);
     if (ask.exe !== undefined && !exeName(ask.exe)) throw new DesktopError(`exe is a path to an .exe inside the build, like "App.exe" or "bin/App.exe": not "${ask.exe}"`);
     await mkdir(dir, { recursive: true });
+    // What an interrupted publish or install zip left (2RE7): both are queued per app, so nothing here is in use.
+    for (const old of await readdir(dir)) if (/^\.(in|install)-/.test(old)) await rm(join(dir, old), { recursive: true, force: true });
     const index: DesktopIndex = (await this.index(ask.projectId, ask.app)) ?? { app: ask.app, current: 0, builds: [] };
     const was = index.title;
     if (ask.title?.trim()) index.title = ask.title.trim().slice(0, 80);
@@ -173,8 +190,8 @@ export class DesktopFeeds {
     const seen = ask.source ? index.builds.find((b) => b.source === ask.source) : undefined;
     if (seen) {
       if (ask.follow && index.ci === ask.source) return { build: seen, already: true, ...paths };
-      const next = { ...index, current: seen.build, ...(ask.follow ? { ci: ask.source } : {}) };
-      if (index.current !== next.current || index.ci !== next.ci || index.title !== was) await writeIndex(dir, next);
+      const next = { ...index, current: seen.build, ...(ask.follow ? { ci: ask.source } : {}), failed: failedBut(index.failed, ask.source) };
+      if (index.current !== next.current || index.ci !== next.ci || index.title !== was || index.failed?.[String(ciRun(ask.source))]) await writeIndex(dir, next);
       // The build's zip is already made, so its own settings stay; the reply names any asked to change (#1522).
       const asked = { exe: ask.exe, started: ask.started, version: ask.version ? String(ask.version).slice(0, 40) : undefined };
       const ignored = (Object.keys(asked) as (keyof typeof asked)[]).filter((k) => asked[k] !== undefined && asked[k] !== seen[k]);
@@ -209,12 +226,24 @@ export class DesktopFeeds {
       };
       const builds = [entry, ...index.builds];
       const kept = builds.slice(0, KEEP);
-      await writeIndex(dir, { ...index, current: build, builds: kept, ...(ask.follow ? { ci: ask.source } : {}) });
+      await writeIndex(dir, { ...index, current: build, builds: kept, ...(ask.follow ? { ci: ask.source } : {}), failed: failedBut(index.failed, ask.source) });
       for (const b of builds.slice(KEEP)) await rm(join(dir, b.zip), { force: true });
       return { build: entry, ...paths };
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
+  }
+
+  /** Keep why CI run `run` couldn't be published; the newest few runs' only. */
+  noteFailed(projectId: number, app: string, run: number, why: string): Promise<void> {
+    return this.queued(`${projectId}/${app}`, async () => {
+      const dir = this.dir(projectId, app);
+      await mkdir(dir, { recursive: true });
+      const index: DesktopIndex = (await this.index(projectId, app)) ?? { app, current: 0, builds: [] };
+      const all: Record<string, string> = { ...index.failed, [run]: why };
+      const kept = Object.entries(all).sort(([a], [b]) => Number(b) - Number(a));
+      await writeIndex(dir, { ...index, failed: Object.fromEntries(kept.slice(0, 20)) });
+    });
   }
 
   /**
@@ -352,36 +381,67 @@ export interface CiPublishDeps {
   /** News for the scheme's Taskmaster. */
   tell: (projectId: number, text: string) => void;
   log?: (msg: string) => void;
+  now?: () => number;
 }
 
 /**
  * Publishes the build a ci target with a desktop app has out (Josh, 2026-11-19: "Auto from CI, plus by hand"): its newest
  * released run, or the run a roll back pins. The index keeps the run it followed last, so a by-hand publish stands until CI
- * moves to another run, through restarts too. A run that failed to publish isn't tried again until the server restarts;
- * `failed` says which, so its target's card shows it as a failed try rather than live (#1522).
+ * moves to another run, through restarts too. A run that failed to publish isn't tried again until the server restarts,
+ * and its failure is kept in the index meanwhile, so the retry failing the same way is no news (2RE4). One whose build isn't
+ * in the CI store after NO_FILE_MS is said once, and still goes out if it comes. `failed` says why a run isn't out, so its
+ * target's card shows it as a failed try rather than live (#1522).
  */
 export function ciPublisher(d: CiPublishDeps) {
-  const failed = new Set<string>();
+  const now = d.now ?? Date.now;
+  const failed = new Map<string, string>();
+  /** Failed since the start: not tried again. A failure from before it is, though it shows as failed till then. */
+  const tried = new Set<string>();
   const busy = new Set<string>();
+  /** When each run was first seen with no build in the CI store. */
+  const missing = new Map<string, number>();
   const publish = (t: { projectId: number; name: string; desktop: DesktopTarget }, run: { id: number; sha: string }) => {
     const key = `${t.projectId}/${t.desktop.app}/${run.id}`;
-    if (failed.has(key) || busy.has(key)) return;
+    if (tried.has(key) || busy.has(key)) return;
     busy.add(key);
     return (async () => {
-      if ((await d.feeds.index(t.projectId, t.desktop.app))?.ci === `ci:${run.id}`) return;
+      const index = await d.feeds.index(t.projectId, t.desktop.app);
+      if (index?.ci === `ci:${run.id}`) return;
+      const had = index?.failed?.[String(run.id)];
+      if (had) failed.set(key, had);
+      /** Kept and told, unless the same failure was before. */
+      const fail = async (why: string, text: string) => {
+        const before = had ?? failed.get(key);
+        failed.set(key, why);
+        if (before === why) return;
+        await d.feeds.noteFailed(t.projectId, t.desktop.app, run.id, why).catch((err) => d.log?.(`desktop: keeping ${key}'s failure failed: ${(err as Error).message}`));
+        d.tell(t.projectId, text);
+      };
       const file = await d.file(t.projectId, run.id);
-      if (!file) return;
+      if (!file) {
+        const since = missing.get(key) ?? now();
+        missing.set(key, since);
+        if (now() - since >= NO_FILE_MS)
+          await fail(
+            NO_FILE,
+            `${t.name}: CI run ${run.id}'s build isn't in the CI store after ${NO_FILE_MS / 60_000} minutes (a kind=release .zip, .tgz, .tar.gz or .exe), so it can't go on the ${t.desktop.app} desktop feed. PCs keep the build they have. Upload it from that run (citadel:ci-store) and it goes out by itself; the next green run tries again, or publish_desktop publishes a build by hand.`,
+          );
+        return;
+      }
       try {
         const out = await d.feeds.publish({ projectId: t.projectId, app: t.desktop.app, file, exe: t.desktop.exe, started: t.desktop.started, title: t.desktop.title ?? t.name, commit: run.sha, source: `ci:${run.id}`, by: 'ci', follow: true });
+        failed.delete(key);
+        missing.delete(key);
         if (!out.already) d.tell(t.projectId, `${t.name}: published desktop build ${out.build.build} of ${t.desktop.app} from CI run ${run.id} (${run.sha.slice(0, 9)}). PCs switch to it on the start after next (one start downloads it, the next tries it); a first install is at ${out.install}.`);
       } catch (err) {
-        failed.add(key);
-        d.log?.(`desktop: publishing ${key} failed: ${(err as Error).message}`);
-        d.tell(t.projectId, `${t.name}: couldn't publish CI run ${run.id}'s build to the ${t.desktop.app} desktop feed: ${(err as Error).message}. PCs keep the build they have. Fix the build or citadel-app.json's desktop settings; the next green run tries again, or publish_desktop publishes a build by hand.`);
+        tried.add(key);
+        const why = (err as Error).message;
+        d.log?.(`desktop: publishing ${key} failed: ${why}`);
+        await fail(why, `${t.name}: couldn't publish CI run ${run.id}'s build to the ${t.desktop.app} desktop feed: ${why}. PCs keep the build they have. Fix the build or citadel-app.json's desktop settings; the next green run tries again, or publish_desktop publishes a build by hand.`);
       }
     })().finally(() => busy.delete(key));
   };
-  return Object.assign(publish, { failed: (projectId: number, app: string, run: number) => failed.has(`${projectId}/${app}/${run}`) });
+  return Object.assign(publish, { failed: (projectId: number, app: string, run: number) => failed.get(`${projectId}/${app}/${run}`) ?? null });
 }
 
 /** A target override's `desktop`, kept when well formed. */

@@ -312,6 +312,26 @@ function subApp(name: string, manifest = true) {
   return a;
 }
 
+test('a bump of a native package the Android project builds reaches the APK; a server dependency bump does not (2RE6)', async () => {
+  const lock = (native: string, server: string) => JSON.stringify({ packages: { 'node_modules/@capacitor/app': { version: native, integrity: `i${native}` }, 'node_modules/ws': { version: server } } });
+  const settings = "include ':capacitor-app'\nproject(':capacitor-app').projectDir = new File('../node_modules/@capacitor/app/android')\n";
+  for (const [name, dir, make] of [
+    ['bump', '', app],
+    ['bumpsub', 'android/', subApp],
+  ] as const) {
+    const { live, row } = make(name);
+    key(name);
+    commit(live, { [dir ? 'android/native/capacitor.settings.gradle' : 'android/capacitor.settings.gradle']: settings, [`${dir}package-lock.json`]: lock('1.0.0', '1.0.0') });
+    const { b } = builder();
+    const was = await b.check(row, '#1');
+    assert.ok('built' in was, name);
+    commit(live, { [`${dir}package-lock.json`]: lock('1.0.0', '2.0.0') });
+    assert.deepEqual(await b.check(row, '#2'), { skipped: 'nothing in its APK changed' }, `${name}: a server package`);
+    commit(live, { [`${dir}package-lock.json`]: lock('1.0.1', '2.0.0') });
+    assert.ok('built' in (await b.check(row, '#3')), `${name}: the native package`);
+  }
+});
+
 test('a Capacitor project in a subfolder named in citadel-app.json is built from there and published', async () => {
   const { live, row, data } = subApp('sub');
   key('sub');

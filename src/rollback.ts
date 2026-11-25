@@ -39,6 +39,8 @@ export interface RollbackDeps {
   follows?: (t: Omit<TargetView, 'testCopies'>) => string | null;
   /** Whether a target's roll back still runs (its deploy, its job). */
   running: (t: Omit<TargetView, 'testCopies'>) => boolean;
+  /** The versionCode a CI-signed APK's app serves now; null until its feed and its roll back's runs were read since the start. */
+  published: (t: Omit<TargetView, 'testCopies'>) => number | null;
   /** Tell the target's scheme's Taskmaster. */
   tell: (projectId: number, text: string) => void;
   /** A git answer came in that changes what a card shows: read the releases again. */
@@ -105,12 +107,23 @@ export class Rollback {
     const current = tv.current?.commit ?? tv.current?.version;
     // Something else deployed over it (a land's deploy of the fix, a person's Deploy): the pin is over.
     let pin = this.d.lastGreen.pinned(projectId, id);
-    if (pin && !running && current && current !== (pin.build?.sha ?? pin.sha) && current !== pin.from) {
+    if (pin && !running && this.passed(tv, pin, current)) {
       this.d.lastGreen.unpin(projectId, id);
       pin = null;
     }
     const can = !running && !!current && /^[0-9a-f]{40}$/.test(current) && this.isOlder(dir, green.sha, current) === true;
     return { sha: green.sha, can, pin, running, failed: this.fails()[key] ?? null };
+  }
+
+  /**
+   * Something else went out over a pin. An APK's: only a higher versionCode than the roll back's, as its card can't name
+   * the commit until everything is read (2RE1). A CI package's held build: never, as what a desktop feed names (a by-hand
+   * build, a publish that ended after the press) is no newer green (2RE2).
+   */
+  private passed(tv: Omit<TargetView, 'testCopies'>, pin: Pin, current: string | undefined): boolean {
+    if (pin.build) return false;
+    if (pin.code) return (this.d.published(tv) ?? 0) > pin.code;
+    return !!current && current !== pin.sha && current !== pin.from;
   }
 
   /** The button: deploy last green now and pin the target there. Throws (an HttpError) when it can't. */

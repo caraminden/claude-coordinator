@@ -9,12 +9,16 @@ import { Store } from '../src/db.ts';
 import type { Job, Run } from '../src/ci-health.ts';
 import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
-import type { Pin } from '../src/last-green.ts';
+import { NO_FILE, type DesktopIndex } from '../src/desktop-feed.ts';
+import { LastGreen, type Pin } from '../src/last-green.ts';
+import { Rollback } from '../src/rollback.ts';
 import { ApkReader, buildWait, shipsOnTarget, ROLLBACK_BRANCH, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, landQueue, LandsInFlight, schemeLine, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
 import { BEHIND_OLD, CITADEL_TARGET, landedIn, named, OLD_LAND, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 import { git, gitAt } from './git.ts';
+import { until } from './wait.ts';
 import { writeOrder } from '../src/waits.ts';
+import { releaseName } from '../public/releasemath.js';
 
 // src/release-targets.ts and src/release-readers.ts (#627): every scheme's targets found from what it has, and a reader per kind.
 const root = mkdtempSync(join(tmpdir(), 'release-targets-'));
@@ -74,6 +78,102 @@ const facts = (over: Partial<SchemeFacts> = {}): SchemeFacts => ({
   ...over,
 });
 const ids = (f: SchemeFacts) => detect(f).map((t) => `${t.kind} ${t.id} ${t.name}`);
+
+test("a restart over a published CI-signed APK's roll back keeps its pin, whatever was read so far (2RE1)", async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const p = store.createProject('Mandate', 'https://github.com/o/mandate');
+  store.setProjectRepoDir(p.id, '/repo');
+  const t: Found = { id: 'apk:android-release', projectId: p.id, name: 'Android', kind: 'apk', link: null, branch: 'main', workflow: '.github/workflows/android-release.yml', contraption: 'mandate' };
+  const now = Date.now(),
+    m = 60_000;
+  const G = 'a'.repeat(40),
+    F = 'b'.repeat(40),
+    X = 'e'.repeat(40);
+  const main: Run[] = [
+    { ...run(8, 'completed', 'success', now - 20 * m, now - 10 * m), head_sha: X },
+    { ...run(7, 'completed', 'success', now - 120 * m, now - 112 * m), head_sha: F },
+  ];
+  const back: Run[] = [{ ...run(20, 'completed', 'success', now - 60 * m, now - 52 * m), head_branch: ROLLBACK_BRANCH, head_sha: G }];
+  store.recordApkPublish({ projectId: p.id, contraption: 'mandate', versionCode: 6, runId: 20, by: 'Cara', uid: null });
+  const lastGreen = new LastGreen(store, async () => true);
+  store.setSetting(`last-green:${p.id}`, { sha: G, at: 1 });
+  lastGreen.pin(p.id, t.id, { sha: G, from: F, by: 'Cara', code: 6 });
+  const pinned = () => lastGreen.pinned(p.id, t.id);
+  /** A server just started: a fresh reader and roll back over the saved pin, whose GitHub reads wait on `gate` or answer null (`down`). */
+  const boot = (o: { down?: boolean; gate?: Promise<void>; feed?: Promise<void>; code?: number } = {}) => {
+    const actions: Actions = {
+      async workflowRuns(_p, _w, branch) {
+        if (branch !== ROLLBACK_BRANCH) return main;
+        await o.gate;
+        return o.down ? null : back;
+      },
+      async runJobs() {
+        return [];
+      },
+    };
+    const reader = new ApkReader({
+      store,
+      finder: finderOf([t]),
+      actions,
+      now: () => now,
+      feed: async () => {
+        await o.feed;
+        return { versionCode: o.code ?? 6, versionName: '1.4', at: now - 50 * m };
+      },
+      pinned,
+      rolledBack: () => {},
+      rollbackFailed: () => {},
+    });
+    const rb = new Rollback({
+      lastGreen,
+      repoDir: () => '/repo',
+      contains: async () => true,
+      starters: { apk: () => {} },
+      running: (tv) => reader.rollingBack(tv.target.projectId, tv.target.id),
+      published: (tv) => reader.published(tv.target.projectId, tv.target.id),
+      tell: () => {},
+      changed: () => {},
+      get: (k) => store.getSetting(k) ?? undefined,
+      set: (k, v) => store.setSetting(k, v),
+    });
+    return { reader, poll: () => rb.info(reader.read()[0]) };
+  };
+  const hold = () => {
+    let go = () => {};
+    const gate = new Promise<void>((r) => (go = r));
+    return { gate, go: () => go() };
+  };
+
+  // Polled before anything was read, then with main's runs listed and the feed not read yet.
+  const a = hold();
+  const b = hold();
+  const s1 = boot({ feed: a.gate, gate: b.gate });
+  const reading = s1.reader.refresh();
+  s1.poll();
+  await until("main's runs are listed", () => !!s1.reader.read()[0].current);
+  assert.equal(s1.reader.read()[0].current?.version, X, 'the card stands on the newest signed run');
+  s1.poll();
+  assert.ok(pinned(), 'no feed read: no verdict');
+  a.go();
+  await until('the feed is read', () => s1.reader.read()[0].current?.number === 6);
+  s1.poll();
+  assert.ok(pinned(), "the feed read, the roll back's runs not: no verdict");
+  b.go();
+  await reading;
+  assert.equal(s1.poll()?.pin?.code, 6);
+
+  // GitHub answers nothing at all after a restart.
+  const s2 = boot({ down: true });
+  await s2.reader.refresh();
+  s2.poll();
+  assert.ok(pinned(), 'GitHub down: no verdict');
+
+  // The same build republished from another commit is still the roll back's number; only a higher one ends it.
+  const s3 = boot({ code: 7 });
+  await s3.reader.refresh();
+  assert.equal(s3.poll()?.pin, null, 'a higher build went out over it');
+  assert.equal(pinned(), null);
+});
 
 test('a contraption, an APK workflow and a Windows release job are three targets; a debug build and a test job are none', () => {
   const found = detect(
@@ -575,7 +675,7 @@ test("the CI package reader: a desktop target's run is live, with its install li
   let feed: string[] = ['ci:2'];
   const refused = new Set<number>([3]);
   const published: number[] = [];
-  const desktop = Object.assign((_t: unknown, r: { id: number }) => void published.push(r.id), { failed: (_p: number, app: string, r: number) => app === 'peek' && refused.has(r) });
+  const desktop = Object.assign((_t: unknown, r: { id: number }) => void published.push(r.id), { failed: (_p: number, app: string, r: number) => (app === 'peek' && refused.has(r) ? 'no exe' : null) });
   const feeds = { index: async (_p: number, app: string) => ({ app, current: 1, builds: feed.map((source, i) => ({ build: feed.length - i, exe: 'Peek.exe', started: 'file' as const, zip: `peek-${i}.zip`, sha256: '', size: 0, at: 0, source })) }) };
   const reader = new CiPackageReader({ store, finder: finderOf([t]), actions: fakeActions(runs, jobs).actions, now: () => now, desktop, feeds });
   const install = `/api/desktop/${p.id}/peek/install.zip`;
@@ -617,6 +717,164 @@ test("the CI package reader: a desktop target's run is live, with its install li
   await bare.refresh();
   [v] = bare.read();
   assert.deepEqual([v.current?.version, v.next], ['sha3', null], 'no publisher: no feed gate, no publish stage');
+});
+
+/** A desktop target over a feed a test sets: `index()` answers `at.index`; `why` is why a run couldn't be published. */
+function desktopWorld(runs: Run[], jobs: Record<number, Job[]>, now: number, pins: Record<string, Pin> = {}, extra: Partial<Found> = {}, needRuns?: { runs: Run[]; jobs: Record<number, Job[]> }) {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const p = store.createProject('Peek Auras', 'https://github.com/o/r');
+  const t: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main', workflow: '.github/workflows/windows.yml', job: 'release', desktop: { app: 'peek' }, ...extra };
+  const at: { index: DesktopIndex | null; why: Map<number, string>; now: number } = { index: null, why: new Map(), now };
+  const asked: number[] = [];
+  const desktop = Object.assign((_t: unknown, r: { id: number }) => void asked.push(r.id), { failed: (_p: number, _a: string, r: number) => at.why.get(r) ?? null });
+  const own = fakeActions(runs, jobs).actions;
+  const need = needRuns && fakeActions(needRuns.runs, needRuns.jobs).actions;
+  const actions: Actions = need ? { workflowRuns: (pr, w, b) => (w === 'windows.yml' ? own : need).workflowRuns(pr, w, b), runJobs: async (pr, r) => (needRuns.jobs[r.id] ? need : own).runJobs(pr, r) } : own;
+  const reader = new CiPackageReader({ store, finder: finderOf([t]), actions, now: () => at.now, desktop, feeds: { index: async () => at.index }, lastGreen: { get: () => null, pinned: (_p, id) => pins[id] ?? null } });
+  return { at, asked, t, repo: (dir: string) => store.setProjectRepoDir(p.id, dir), read: async () => (await reader.refresh(), reader.read()[0]), install: `/api/desktop/${p.id}/peek/install.zip` };
+}
+/** A feed over builds given as [number, source, commit?], naming `current`. */
+const feedOf = (current: number, ci: string | undefined, builds: [number, string, string?][]): DesktopIndex => ({
+  app: 'peek',
+  current,
+  ...(ci ? { ci } : {}),
+  builds: builds.map(([build, source, commit]) => ({ build, exe: 'Peek.exe', started: 'file' as const, zip: `peek-${build}.zip`, sha256: '', size: 0, at: 5000 + build, source, ...(commit ? { commit } : {}) })),
+});
+/** Released runs of these ids, newest first. */
+const releasedRuns = (now: number, ids: number[]) => {
+  const m = 60_000;
+  return {
+    runs: ids.map((id, i) => run(id, 'completed', 'success', now - (30 + 30 * i) * m, now - (25 + 30 * i) * m)),
+    jobs: Object.fromEntries(ids.map((id, i) => [id, [job(id, 'release', 'completed', 'success', now - (28 + 30 * i) * m, now - (25 + 30 * i) * m)]])),
+  };
+};
+
+test("the CI package reader: a desktop target's current release is the build its feed names, a by-hand one as itself (2RE2)", async () => {
+  const now = Date.now();
+  const { runs, jobs } = releasedRuns(now, [5, 4, 3]);
+  const w = desktopWorld(runs, jobs, now);
+  const builds: [number, string, string?][] = [
+    [3, 'ci:5'],
+    [2, 'ci:4'],
+    [1, 'ci:3'],
+  ];
+  // A by-hand publish of an older CI build: the feed serves that run, so the card says it.
+  w.at.index = feedOf(1, 'ci:5', builds);
+  let v = await w.read();
+  assert.deepEqual([v.current?.version, v.current?.link, v.next], ['sha3', w.install, null]);
+  assert.deepEqual(
+    v.recent.map((r) => [r.version, r.outcome]),
+    [
+      ['sha5', 'live'],
+      ['sha4', 'live'],
+    ],
+    'the newer ones were live once: Previous',
+  );
+  // A by-hand build from no CI run: named as itself, by the commit it says it was made from.
+  const hex = 'c'.repeat(40);
+  w.at.index = feedOf(9, 'ci:5', [[9, 'file:mine.zip', hex], ...builds]);
+  v = await w.read();
+  assert.deepEqual([v.current?.name, v.current?.number, v.current?.version, v.current?.live, v.current?.link, v.next], ['Build 9, by hand', null, hex, 5009, w.install, null]);
+  assert.equal(releaseName(v.current!), 'Build 9, by hand', 'the page names it so');
+  assert.equal(v.recent[0].version, 'sha5');
+  // CI's next run still leads over it.
+  w.at.now += 10 * 60_000; // past the idle re-read
+  runs.unshift(run(6, 'in_progress', null, now - 60_000));
+  jobs[6] = [job(6, 'release', 'in_progress', null, now - 30_000, null)];
+  v = await w.read();
+  assert.equal(v.next?.stage, 'package');
+});
+
+test("the CI package reader: a roll back's card holds its build only while the feed names it, and says when the feed couldn't take it (2RE2)", async () => {
+  const now = Date.now();
+  const { runs, jobs } = releasedRuns(now, [5, 4, 3]);
+  const pins: Record<string, Pin> = {};
+  const w = desktopWorld(runs, jobs, now, pins);
+  w.at.index = feedOf(3, 'ci:5', [
+    [3, 'ci:5'],
+    [2, 'ci:4'],
+    [1, 'ci:3'],
+  ]);
+  await w.read(); // each run counted as a release
+  // Run 3's build is pruned; then a roll back pins it.
+  w.at.index = feedOf(3, 'ci:5', [
+    [3, 'ci:5'],
+    [2, 'ci:4'],
+  ]);
+  pins[w.t.id] = { sha: 'sha3', from: 'sha5', by: 'Cara', at: now - 1000, build: { run: 3, sha: 'sha3', workflow: 'windows.yml' } };
+  let v = await w.read();
+  assert.deepEqual([v.current?.version, v.next?.stage, v.next?.waitingOn, v.next?.text], ['sha5', 'publish', null, "publishing the roll back's build to the desktop feed"], 'PCs still get run 5');
+  w.at.why.set(3, 'disk full');
+  v = await w.read();
+  assert.deepEqual([v.current?.version, v.next?.waitingOn], ['sha5', "the desktop feed couldn't take the roll back's build: it waits on a fix"]);
+  w.at.why.clear();
+  w.at.index = feedOf(4, 'ci:3', [
+    [4, 'ci:3'],
+    [3, 'ci:5'],
+    [2, 'ci:4'],
+  ]);
+  v = await w.read();
+  assert.deepEqual([v.current?.version, v.next], ['sha3', null], 'the feed names it: held');
+  // A by-hand build over the pin: what PCs get, and nothing is on its way.
+  w.at.index = feedOf(5, 'ci:3', [
+    [5, 'file:mine.zip'],
+    [4, 'ci:3'],
+    [3, 'ci:5'],
+  ]);
+  v = await w.read();
+  assert.deepEqual([v.current?.name, v.next], ['Build 5, by hand', null]);
+  // The pin is gone: the feed goes back to following the newest run, and says so until it has.
+  delete pins[w.t.id];
+  w.at.index = feedOf(4, 'ci:3', [
+    [4, 'ci:3'],
+    [3, 'ci:5'],
+    [2, 'ci:4'],
+  ]);
+  v = await w.read();
+  assert.deepEqual([v.current?.version, v.next?.text], ['sha3', 'publishing to the desktop feed']);
+});
+
+test("the CI package reader: only the newest released run reads as publishing; one the feed couldn't take says why (2RE4)", async () => {
+  const now = Date.now();
+  const { runs, jobs } = releasedRuns(now, [5, 4, 3]);
+  const w = desktopWorld(runs, jobs, now);
+  w.at.index = feedOf(1, 'ci:3', [[1, 'ci:3']]);
+  let v = await w.read();
+  assert.deepEqual([v.next?.text, w.asked], ['publishing to the desktop feed', [5]]);
+  // Run 5 fails again after a restart; run 4 never went out either, and nothing publishes it now.
+  w.at.why.set(5, 'disk full');
+  v = await w.read();
+  assert.equal(v.current?.version, 'sha3');
+  assert.equal(v.next?.text === 'publishing to the desktop feed', false, 'run 4 is superseded, not publishing');
+  // With something on main past the current build, what waits is named.
+  const repo = join(root, `desk-repo-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  landOne(repo, now, 'a.txt');
+  const first = git(repo, 'rev-parse', 'HEAD').trim();
+  landOne(repo, now, 'b.txt');
+  runs[2].head_sha = first;
+  w.repo(repo);
+  v = await w.read();
+  assert.equal(v.next?.waitingOn, "the desktop feed couldn't take its build: it waits on a fix");
+  w.at.why.set(5, NO_FILE);
+  v = await w.read();
+  assert.equal(v.next?.waitingOn, "its build isn't in the CI store: it waits on a fix");
+});
+
+test('the CI package reader: a build that shipped but never went out, older than the one publishing, is not the next release (2RE4)', async () => {
+  const now = Date.now();
+  const { runs, jobs } = releasedRuns(now, [5, 4, 3]);
+  // Run 4's desktop tests never passed; run 5 went out, then a person named run 3's build again.
+  const ok = (id: number, sha: string, conclusion: string): Run => ({ ...run(id, 'completed', conclusion, now - 20 * 60_000, now - 10 * 60_000), head_sha: sha });
+  const need = { runs: [ok(105, 'sha5', 'success'), ok(104, 'sha4', 'failure'), ok(103, 'sha3', 'success')], jobs: Object.fromEntries([105, 104, 103].map((id) => [id, [job(id, 'desktop', 'completed', id === 104 ? 'failure' : 'success', 1, 2)]])) };
+  const w = desktopWorld(runs, jobs, now, {}, { needs: ['.github/workflows/desktop.yml'] }, need);
+  w.at.index = feedOf(1, 'ci:5', [
+    [2, 'ci:5'],
+    [1, 'ci:3'],
+  ]);
+  const v = await w.read();
+  assert.deepEqual([v.current?.version, v.next], ['sha3', null]);
 });
 
 test('the CI package reader: a run waiting for a runner waits, with no estimate', async () => {
@@ -1526,6 +1784,42 @@ test('handed-off lands list in line order, not minion-number order (#766)', asyn
     (got as { later?: boolean }[]).map((c) => !!c.later),
     [false, true, true, true, true],
   );
+});
+
+test("a minion's second ship waits in the line while its first waits to go out, and shows once (2RE5)", async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `land-repo-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  landOne(repo, Date.now(), 'README.md');
+  const p = store.createProject('Peek Auras', 'https://github.com/o/peek');
+  store.setProjectRepoDir(p.id, repo);
+  const x = store.createTicket({ project_id: p.id, title: 'Overlay fix', permission_mode: 'default', created_by: 'Cara' });
+  store.setTicketDir(x.id, root, 'ticket/1-overlay');
+  const queue = join(repo, '.git/land-queue');
+  mkdirSync(queue);
+  const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+  const me = `${process.pid} ${stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[19]}`;
+  const row = (got: number) => writeFileSync(join(queue, '0000000001'), [me, got, 'ticket/1-overlay', 'waiting', '-', '-', '-', 'order'].join('\n') + '\n');
+  const ci: Found = { id: 'ci:windows:release', projectId: p.id, name: 'Windows', kind: 'ci', link: null, branch: 'main' };
+  const lands = new LandsInFlight({ store, finder: finderOf([ci]), landings: { handoffs: () => [x.id], get: () => ({ output: 'queue: next in line\n', code: null }) }, now: () => 1000 });
+  const first = { ticketId: x.id, number: x.number, title: x.title, stage: 'ci', since: 1, usual: null, waitingOn: null, text: 'Build running' };
+  const at = () => {
+    const tv = { target: { id: ci.id, projectId: p.id, name: 'Windows', kind: 'ci', link: null }, current: null, next: { number: 2, stage: 'ci', since: 1, usual: null, waitingOn: null, text: '', eta: null, stages: [], changes: [first] }, line: [] as { ticketId: number; holds: boolean }[], recent: [] };
+    lands.attach([tv] as never);
+    return tv;
+  };
+  row(0);
+  let tv = at();
+  assert.deepEqual(
+    tv.line.map((e) => [e.ticketId, e.holds]),
+    [[x.id, false]],
+    'the waiting ship has its row',
+  );
+  assert.deepEqual(tv.next.changes, [first], 'and the change is listed once');
+  row(5);
+  tv = at();
+  assert.deepEqual([tv.line, tv.next.changes], [[], [first]], 'landing now: the change already stands for it');
 });
 
 test('a handed-off land is on its targets from the hand-off: in line, then landing, ahead of what is on main (#764)', async () => {

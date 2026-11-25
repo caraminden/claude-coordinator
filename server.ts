@@ -1406,6 +1406,7 @@ const rollback = new Rollback({
     const t = tv.target.kind === 'apk' ? targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id) : null;
     return t?.contraption && !t.workflow ? `app:${t.contraption}` : null;
   },
+  published: (tv) => (tv.target.kind === 'apk' ? apkReader.published(tv.target.projectId, tv.target.id) : null),
   running: (tv) => (tv.target.kind === CITADEL_TARGET ? citadelRollingBack(tv.current?.version ?? null) : tv.target.kind === 'apk' ? apkReader.rollingBack(tv.target.projectId, tv.target.id) : !!services.running(/^app:(.+)$/.exec(tv.target.id)?.[1] ?? '')),
   starters: {
     contraption: (tv, to, by, uid) => {

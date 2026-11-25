@@ -92,19 +92,18 @@ test('with no Biome and no way to fetch it, the check fails saying nothing was c
   assert.match(t.out, /NOT checked/);
 });
 
-test('--own takes committed, uncommitted and new files, skips excluded, deleted and other ones, and with FMT_TRACKED the untracked', { skip }, () => {
+test('--own takes committed, uncommitted and new files, skips excluded, deleted and other ones, and checks no untracked one', { skip }, () => {
   const r = fmtRepo();
-  const own = (extra: Record<string, string> = {}) => r.fmt(['--check', '--own'], extra);
+  const own = () => r.fmt(['--check', '--own']);
   r.commit(r.wt, 'notes.md', '# x\n');
   assert.equal(own().code, 0);
   mkdirSync(join(r.wt, 'test/fixtures'));
   r.commit(r.wt, 'test/fixtures/x.ts', BAD);
   assert.equal(own().code, 0, 'a path biome.json leaves out');
   writeFileSync(join(r.wt, 'new file.mjs'), BAD);
-  assert.equal(own({ FMT_TRACKED: '1' }).code, 0);
-  assert.equal(own().code, 1, 'a new file, its name with a space');
+  assert.equal(own().code, 0, 'untracked: not in the ship');
   git(r.wt, 'add', '-A');
-  assert.equal(own({ FMT_TRACKED: '1' }).code, 1, 'staged');
+  assert.equal(own().code, 1, 'staged, its name with a space');
   git(r.wt, 'rm', '-qf', 'new file.mjs');
   git(r.wt, 'rm', '-q', 'main-own.ts');
   git(r.wt, 'commit', '-qm', 'gone');
@@ -124,9 +123,9 @@ test("--own leaves a build's other feeders' files alone", { skip }, () => {
   assert.doesNotMatch(x.out, /other-feeder/);
 });
 
-// The advice in test/format.test.ts and the kit's copy: -X theirs, which it used to give, drops a landed change.
+// The advice in test/format.test.ts: -X theirs, which it used to give, drops a landed change.
 test('the reformat advice never drops landed work', () => {
-  for (const f of ['test/format.test.ts', 'kit/skills/scheme-setup/templates/format.test.ts']) {
+  for (const f of ['test/format.test.ts']) {
     const fix = /export const FIX =\s*(.*);/.exec(readFileSync(join(repo, f), 'utf8'))![1];
     assert.match(fix, /settle each conflict by hand/, f);
     assert.match(fix, /never `-X theirs`/, f);

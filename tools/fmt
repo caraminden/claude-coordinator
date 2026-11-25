@@ -3,8 +3,8 @@
 # Uses the repo's own install (npm ci) and otherwise the same pinned version through npx. Files named after the
 # flags are formatted instead of the whole repo, e.g. `tools/fmt src/runner.ts`.
 # `tools/fmt --own` (and `--check --own`, test/format-own.test.ts) takes only the files this branch changed: against
-# main, or the build/<n> it was rebased onto, so never another minion's. Uncommitted and new files count too, and
-# with FMT_TRACKED=1 (a ship) only tracked ones. Exit 3: Biome couldn't run, so nothing was checked.
+# main, or the build/<n> it was rebased onto, so never another minion's. Uncommitted edits count; a file git doesn't track
+# is formatted but never checked, since it isn't in the ship. Exit 3: Biome couldn't run, so nothing was checked.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 bin=node_modules/.bin/biome
@@ -24,7 +24,7 @@ done < <(git for-each-ref --format='%(refname)' 'refs/heads/build/*')
 files=()
 while IFS= read -r -d '' f; do
   case $f in *.ts | *.js | *.mjs) [ ! -f "$f" ] || [ -L "$f" ] || files+=("$f") ;; esac
-done < <(git diff -z --no-renames --name-only --diff-filter=d "$base" --; [ -n "${FMT_TRACKED:-}" ] || git ls-files -z --others --exclude-standard)
+done < <(git diff -z --no-renames --name-only --diff-filter=d "$base" --; [ -n "$check" ] || git ls-files -z --others --exclude-standard)
 [ ${#files[@]} -gt 0 ] || { echo "fmt: this branch changes no .ts, .js or .mjs file"; exit 0; }
 "${run[@]}" --version >/dev/null 2>&1 || {
   echo "fmt: Biome could not run here (no node_modules/.bin/biome, and npx could not fetch it), so the format of ${#files[@]} changed files was NOT checked. Run npm ci in $PWD, then this again" >&2

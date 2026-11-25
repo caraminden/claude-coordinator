@@ -412,7 +412,6 @@ if [ -n "$check" ]; then
   exit 0 # --full: no rebase, so nothing to check
 fi
 
-export FMT_TRACKED=1 # the format check (tools/fmt --own, #1885) judges what ships: an untracked file does not
 # The smoke check (#1012): before the line, the checks that fail in seconds, so a land they refuse never waits in line
 # or for CI (#1006: about 40 of 86 refusals at the lock were these). It reads the branch's own tools (a repo without
 # one skips that check). Tests that run past LAND_SMOKE_TIMEOUT (300 s) don't decide: CI still runs everything.

@@ -82,7 +82,7 @@ function world(idleMs = 10_000) {
     assert.equal(relay.runnerResult(pc, { id: job.id, ok, output }), true);
     return job;
   };
-  return { store, cara, josh, olive, scheme, other, gh, relay, jobs, notes, details, pc, agent, answer };
+  return { store, cara, josh, olive, scheme, other, gh, relay, jobs, tokens, notes, details, pc, agent, answer };
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 30));
@@ -314,15 +314,22 @@ test("a member's own CI host runs CI only for the schemes they lent it to and ar
   const agent = stream();
   w.relay.connectAgent(pc, agent, { host: 'JOSH-PC', command: 'citadel runner agent', runners: true, os: 'linux' });
   const add = () => w.jobs.start(w.scheme, w.josh.id, { op: 'list', count: null, os: 'linux' });
+  // The same rule holds for the token its own scripts ask for; without a mint, nothing goes to GitHub.
+  const token = () => w.tokens.issue(w.store.getMachine(pc.id)!, w.scheme.id, false);
+  await assert.rejects(token(), { status: 404 });
   await assert.rejects(add(), { status: 409 });
   // Lent to a scheme he is not in: still nothing for it.
   w.store.setMachineProjects(pc.id, [w.other.id]);
   await assert.rejects(w.jobs.start(w.other, w.cara.id, { op: 'list', count: null, os: 'linux' }), { status: 409 });
   w.store.setMachineProjects(pc.id, [w.scheme.id]);
+  assert.equal((await token()).label, 'peek-auras-ci');
   assert.equal((await add()).machine, 'josh-pc');
   const job = agent.sent.find((m) => m.runners).runners;
   w.relay.runnerResult(pc, { id: job.id, ok: true, output: 'none' });
   await tick();
+  w.store.setMachineProjects(pc.id, []);
+  await assert.rejects(token(), { status: 404 }, 'un-lent again');
+  w.store.setMachineProjects(pc.id, [w.scheme.id]);
   // He leaves the scheme: the lend stays on the list and reaches nothing.
   w.store.removeMember(w.scheme.id, w.josh.id);
   await assert.rejects(w.jobs.start(w.scheme, w.cara.id, { op: 'list', count: null, os: 'linux' }), { status: 409 });

@@ -601,7 +601,7 @@ export function releasesShell() {
     if (pc) {
       const x = ciRead?.pcs.find((y) => y.host === pc);
       tabsEl.replaceChildren();
-      body.replaceChildren(h('div', { class: 'ci-head' }, h('h3', {}, pc), h('span', { class: 'muted small' }, 'CI desktop load')), x ? h('div', { class: 'ci-block ci-desktops' }, pcCard(x)) : '', hostLoadBlock(hostRead));
+      body.replaceChildren(h('div', { class: 'ci-head' }, h('h3', {}, pc), h('span', { class: 'muted small' }, 'CI PC load')), x ? h('div', { class: 'ci-block ci-desktops' }, pcCard(x)) : '', hostLoadBlock(hostRead));
       return;
     }
     // All has no one CI: its tabs are Releases' board and every app's Status. A scheme without CI keeps the CI tabs, each saying so.

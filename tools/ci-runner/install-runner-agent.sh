@@ -34,6 +34,7 @@ die() { echo "install-runner-agent: $*" >&2; exit 1; }
 
 [[ -n $url ]] || die 'usage: install-runner-agent.sh http://perigee.tail59477f.ts.net:8574'
 [[ $(id -u) == 0 ]] || die 'Run this as root: sudo -i on Linux, or in PowerShell wsl -d citadel-ci -u root for WSL'
+[[ $(uname -m) == x86_64 ]] || die "This PC is $(uname -m): the GitHub runner it would add is the x64 one, so only 64-bit Intel and AMD PCs work."
 # WSL2 says so in its kernel's name or with /run/WSL; either is enough, as being wrong would leave Windows reachable.
 osrelease=$(cat "$r/proc/sys/kernel/osrelease")
 wsl=false
@@ -100,7 +101,10 @@ mkdir -p "$units/citadel-runner-.service.d"
 printf '%s\n' '# Citadel #552: CI yields to the emulator and anything else in this VM.' '[Service]' 'Nice=10' 'CPUWeight=20' > "$units/citadel-runner-.service.d/yield.conf"
 if ! $wsl; then
   # Plain Linux (#1933): all CI in one slice, held to 75% of the PC's cores, or what caps.json says (the agent sets it).
-  # In WSL, .wslconfig's processors= caps the VM. (The agent's own unit matches this prefix too, harmlessly.)
+  # In WSL, .wslconfig's processors= caps the VM. The agent's own unit matches this prefix too, so its more specific
+  # yield.conf replaces that one: in the capped slice, busy CI would starve the agent that sets the cap.
+  mkdir -p "$units/citadel-runner-agent.service.d"
+  printf '[Service]\nSlice=system.slice\n' > "$units/citadel-runner-agent.service.d/yield.conf"
   printf 'Slice=citadel-runners.slice\n' >> "$units/citadel-runner-.service.d/yield.conf"
   printf '%s\n' '[Unit]' 'Description=Citadel CI runners, capped together' '[Slice]' 'CPUAccounting=yes' "CPUQuota=$(( $(nproc) * 75 ))%" > "$units/citadel-runners.slice"
 fi
@@ -159,5 +163,5 @@ else
 fi
 echo "Its log:   tail -f $log"
 echo 'Stop it:   systemctl disable --now citadel-runner-agent'
-echo "Remove it: systemctl disable --now citadel-runner-agent; rm -rf $dir $units/citadel-runner-agent.service"
+echo "Remove it: systemctl disable --now citadel-runner-agent; rm -rf $dir $units/citadel-runner-agent.service $units/citadel-runner-agent.service.d"
 echo '(Removing the agent leaves every runner it added in place.)'

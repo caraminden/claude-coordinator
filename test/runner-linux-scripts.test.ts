@@ -246,6 +246,8 @@ test('on plain Linux the install touches no WSL setting, caps all CI in a slice,
   const sliceFile = readFileSync(join(fake, 'etc/systemd/system/citadel-runners.slice'), 'utf8');
   assert.match(sliceFile, new RegExp(`^CPUQuota=${cores * 75}%$`, 'm'));
   assert.match(readFileSync(join(fake, 'etc/systemd/system/citadel-runner-.service.d/yield.conf'), 'utf8'), /^Slice=citadel-runners\.slice$/m);
+  // A file of the same name in the unit's own folder replaces the prefix's: the agent is not in the slice it caps.
+  assert.equal(readFileSync(join(fake, 'etc/systemd/system/citadel-runner-agent.service.d/yield.conf'), 'utf8'), '[Service]\nSlice=system.slice\n');
   assert.match(readFileSync(join(fake, 'etc/systemd/system/citadel-runner-agent.service'), 'utf8'), /runner-agent\.mjs/);
   assert.match(r.out, /open its line and pick the schemes/);
   // A CI job's user reads what anyone may: the owner hears which home is open.
@@ -270,6 +272,15 @@ test('in WSL the install still walls the distro off, caps nothing in it, and cha
     assert.doesNotMatch(readFileSync(join(fake, 'etc/systemd/system/citadel-runner-.service.d/yield.conf'), 'utf8'), /Slice=/);
     assert.match(second.out, /keep-wsl-up\.ps1/);
   }
+});
+
+test('a PC that is not x64 is refused before anything is written', async () => {
+  const { fake, run: go } = install('6.1.0-52-arm64');
+  stub(join(fake, 'bin'), 'uname', 'echo aarch64');
+  const r = await go();
+  assert.equal(r.code, 1);
+  assert.match(r.out, /This PC is aarch64/);
+  assert.equal(existsSync(join(fake, 'opt')), false);
 });
 
 test('plain Linux without systemd is refused before anything is written', async () => {

@@ -26,8 +26,7 @@ notes are that PC's, not settings yours must copy.
 3. Open the host's line and pick schemes under **Runs CI for**. A scheme's runners can go on it only when you own
    it, you are in that scheme and you lent it. Un-lending stops new runners; ask `ci_runners remove` from the scheme
    first to take its old ones off.
-   An admin's new host is shared, with no owner: an admin does the lending for it, or leaves it open to every scheme
-   an admin owns.
+   An admin's new host is shared, with no owner: any admin lends it, and it runs CI for no scheme until one does.
 4. Someone in the scheme asks for runners (`ci_runners`, below). Set the [caps](#your-own-caps) first if 75% of the
    PC is too much.
 
@@ -336,7 +335,7 @@ first tried by Cara's setup.
 ## Linux runners on plain Linux (#1933)
 
 A Linux PC (or VM) runs the same agent as the WSL distro, installed by the same script, without the WSL steps: no
-`wsl.conf`, no logon task, no `.wslconfig`. It needs systemd, and root for the install. Debian and Ubuntu get what's
+`wsl.conf`, no logon task, no `.wslconfig`. It needs systemd, a 64-bit Intel or AMD processor, and root for the install. Debian and Ubuntu get what's
 missing from `apt`; on another distro, install Node 18+, git, curl, ca-certificates and libicu first (the script
 names them and stops).
 
@@ -355,8 +354,8 @@ this takes the slice at its next start. To update, run the line again.
 ## Load samples (#534)
 
 Each runner agent also samples its PC every 30 seconds and posts the sample to Citadel, which keeps 14 days of
-them (`src/ci-load.ts`). It is read-only: it changes no runner, count, VM setting or workflow. The Machines page
-shows the result under **CI PCs' load**, to everyone signed in: a verdict, CPU
+them (`src/ci-load.ts`). It is read-only: it changes no runner, count, VM setting or workflow. The Releases page's
+Overview tab shows the result under **CI PC load**, to everyone signed in: a verdict, CPU
 and memory now, the last 24 hours with hard restarts marked, and each pool of runners (a repo and its labels)
 with how many are busy and what waits.
 

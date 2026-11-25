@@ -655,8 +655,7 @@ runner.machines = (project, askers) => machines.online().filter((m) => lendsMach
 machineLink.online = (id) => machines.isOnline(id);
 machineLink.poke = (id) => machines.pokeWorker(id);
 // This box's claude, asked once: a machine whose worker has another version gets no turn (never silently run).
-let homeClaude: string | null = null;
-if (config.workerForce) execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => void (homeClaude = err ? null : out.trim().split('\n')[0]));
+const homeClaude = config.workerForce ? await new Promise<string | null>((done) => execFile(config.claudeBin, ['--version'], { timeout: 30_000 }, (err, out) => done(err ? null : out.trim().split('\n')[0]))) : null;
 runner.workerFor = (_ticket, person) => {
   const m = config.workerForce ? store.listMachines().find((x) => x.name === config.workerForce) : null;
   // Its owner's turns only (Josh, 2026-11-25), its switch on, and a worker agent there that has said so.

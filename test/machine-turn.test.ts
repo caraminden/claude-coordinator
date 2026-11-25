@@ -222,7 +222,8 @@ test('a turn placed on a machine starts, streams, steers, survives a server rest
   await until('the home turn to end', async () => (await call(`/api/tickets/${home.id}`)).ticket.status !== 'running');
   writeFileSync(heard, '');
 
-  // Switched on by its owner: the next turn is the machine's.
+  // Switched on by its owner: the next turn is the machine's, its worker's claude being the server's.
+  await until("the worker to say its claude's version", () => /claude here is 9\.9\.9/.test(agent.output()));
   await call(`/api/machines/${machine.id}`, { lend: { server: null, workspaces: [], worker: true } }, 'PATCH');
   rmSync(release);
   const ticket = await call(`/api/projects/${project.id}/tickets`, { message: 'on the machine' });

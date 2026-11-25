@@ -153,6 +153,11 @@ export class Worker {
       });
   }
 
+  /** A fact logged when it changes. @param {string} text */
+  quietly(text) {
+    if (text !== this.told) this.log((this.told = text));
+  }
+
   /** Log a trouble once until it changes, not twice a second. @param {string} text */
   quiet(text) {
     if (text !== this.said) this.log((this.said = text));
@@ -165,9 +170,12 @@ export class Worker {
 
   async sync() {
     const turns = [...this.turns.values()].map((t) => this.report(t));
-    const res = await this.call('/api/machines/turns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ worker: { claude: this.claude, max: this.cfg.max }, turns: turns.map((r) => r.body) }), signal: AbortSignal.timeout(30_000) });
+    const claude = this.claude;
+    const res = await this.call('/api/machines/turns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ worker: { claude, max: this.cfg.max }, turns: turns.map((r) => r.body) }), signal: AbortSignal.timeout(30_000) });
     if (!res.ok) throw new Error(`it answered ${res.status}`);
     this.said = null;
+    // Said once the app has it: with another version than the app's own claude, no turn comes here.
+    if (claude) this.quietly(`Minion turns: claude here is ${claude}`);
     const reply = await res.json();
     for (const r of turns) await this.heard(r.turn, r, reply.turns?.[r.turn.dir]);
     for (const s of Array.isArray(reply.start) ? reply.start : []) {
@@ -340,6 +348,7 @@ export class Worker {
     const v = await this.exec(this.cfg.podman, [...how, this.cfg.claude ?? 'claude', '--version'], 15 * 60_000);
     // Unknown when it can't say: the server then places nothing here, rather than trust an old answer.
     this.claude = v.code ? null : v.out.trim().split('\n')[0].slice(0, 80) || null;
+    this.poke();
   }
 
   /**

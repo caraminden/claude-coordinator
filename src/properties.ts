@@ -444,8 +444,11 @@ export class Registry {
     this.putStage(ticketId, stage.id, ideation ? 'idea' : 'in-progress');
   }
 
-  /** Dismissing a minion moves it to done; reopening a done minion moves it back to in-progress. */
+  /** Dismissing a minion moves it to done; reopening a done minion moves it back to in-progress. One that runs again, or reopens, isn't closed as anything. */
   statusChanged(ticketId: number, before: string, after: string) {
+    if (before !== after && (before === 'closed' || after === 'running')) {
+      this.db.prepare("DELETE FROM properties WHERE target_type = 'minion' AND target_id = ? AND key_id = (SELECT id FROM property_keys WHERE scope IS NULL AND key = 'closedAs')").run(ticketId);
+    }
     const stage = this.globalKey('stage');
     if (!stage || before === after) return;
     const current = this.valuesFor('minion', ticketId, stage.id)[0];

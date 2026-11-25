@@ -150,7 +150,7 @@
 /* The Flow tab (#1989, public/work-flow.js): a scheme's minions from kind, through how they got to main, to how they ended. */
 [data-hue=kind-feature] { --h: var(--cat-1); } [data-hue=kind-bug] { --h: var(--cat-3); } [data-hue=kind-chore] { --h: var(--cat-2); } [data-hue=kind-research] { --h: var(--waiting); } [data-hue=kind-other] { --h: var(--muted); }
 [data-hue=path-shipped], [data-hue=path-untold], [data-hue=path-other], [data-hue=path-never], [data-hue=end-open], [data-hue=end-norepo] { --h: var(--muted); } [data-hue=path-refused], [data-hue=end-late] { --h: var(--waiting); }
-[data-hue=end-live] { --h: var(--done); } [data-hue=end-main] { --h: var(--cat-2); } [data-hue=end-build] { --h: var(--held); } [data-hue=end-nothing] { --h: var(--error); } [data-hue=end-answer] { --h: var(--cat-6); }
+[data-hue=end-live] { --h: var(--done); } [data-hue=end-main] { --h: var(--cat-2); } [data-hue=end-build] { --h: var(--held); } [data-hue=end-nothing] { --h: var(--error); } [data-hue=end-why] { --h: var(--cat-5); } [data-hue=end-answer] { --h: var(--cat-6); }
 .flow-ctl-right { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .flow-ctl .chips { align-items: center; }
 .flow-dates { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--size-small); color: var(--muted); }
@@ -207,6 +207,10 @@
 .flow-row-facts { grid-column: 1 / -1; font-size: var(--size-small); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .flow-row-bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--h) 14%, transparent); }
 .flow-row-bar i { display: block; height: 100%; width: var(--pct); border-radius: inherit; background: var(--h); }
+.flow-why { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); padding: 0 var(--space-2) var(--space-2); font-size: var(--size-small); }
+.flow-why .chip { cursor: pointer; min-height: 24px; transition: background var(--motion), border-color var(--motion); }
+.flow-why .chip:hover { border-color: var(--h); }
+.flow-why .chip.on { border-color: var(--h); background: color-mix(in srgb, var(--h) 12%, var(--panel)); }
 .flow-table-wrap { overflow-x: auto; }
 .flow-table tr > :is(th, td):nth-child(-n+3) { text-align: left; }
 .flow-table tfoot tr > td:nth-child(n) { text-align: right; }
@@ -224,6 +228,7 @@
 }
 @media (max-width: 760px) {
   .flow-name { min-height: var(--control-h); }
+  .flow-why .chip { min-height: var(--control-h); min-width: var(--control-h); }
 }
 @media (prefers-reduced-motion: reduce) {
   .flow-river svg, .flow-river .thread { animation: none; }

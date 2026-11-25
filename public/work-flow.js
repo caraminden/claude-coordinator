@@ -4,6 +4,7 @@
 import { api, h, icon } from './base.js';
 import { COLS, dayBefore, layout, money, nodesOf, ribbon, rows, value } from './flowmath.js';
 import { emptyCard, showFirst, toneChip } from './look.js';
+import { optimistic } from './ui/optimistic.js';
 
 const num = (n) => n.toLocaleString('en-US');
 const plural = (n, one, many = `${one}s`) => `${num(n)} ${n === 1 ? one : many}`;
@@ -44,14 +45,59 @@ const kept = new Map(); // scheme id -> the newest read of the range that was pi
 export async function readFlow(id) {
   if (st.days) setDays(st.days);
   const key = rangeKey();
+  const asked = Date.now();
   let data;
   try {
-    data = { ...(await api(`api/projects/${id}/flow?from=${st.from}&to=${st.to}`)), key };
+    data = { asked, ...(await api(`api/projects/${id}/flow?from=${st.from}&to=${st.to}`)), key };
   } catch (err) {
     data = { error: err.message || true, key };
   }
   if (key === rangeKey()) kept.set(id, data);
   return kept.get(id) ?? data;
+}
+
+// ---------- why one closed ----------
+
+const WHY = ['done', 'replaced', 'dropped'];
+const words = new Map(); // minion id -> { why, saved }: what was clicked here, and when the server had it; null until it has
+const had = new Map(); // minion id -> the word the server last had
+let moved = new Set(); // minions whose click took them out of the list they were clicked in: they stay in it until another is picked
+
+/** A read that set out before the server had a click doesn't undo it. */
+function withWords(data) {
+  for (const m of data?.minions ?? []) {
+    const w = words.get(m.id);
+    if (w && (w.saved === null || data.asked <= w.saved)) setWhy(m, w.why);
+  }
+}
+function setWhy(m, why) {
+  m.why = why;
+  if (m.end === 'nothing' || m.end === 'why') m.end = why ? 'why' : 'nothing';
+}
+
+/** Save why minion `m` closed, or that it isn't recorded (null): shown at once, put back if it didn't save. */
+function mark(m, why) {
+  if (!had.has(m.id)) had.set(m.id, m.why);
+  const show = (w) => {
+    words.set(m.id, w);
+    moved.add(m.id);
+    const now = last?.data?.minions?.find((x) => x.id === m.id);
+    if (now) setWhy(now, w.why);
+    last?.show();
+  };
+  const w = { why, saved: null };
+  optimistic({
+    key: `closedAs:${m.id}`,
+    sets: `closedAs:${m.id}`,
+    apply: () => show(w),
+    send: async () => {
+      await api(`api/tickets/${m.id}/properties`, { method: 'PUT', body: { properties: { closedAs: why } } });
+      w.saved = Date.now();
+      had.set(m.id, why);
+    },
+    undo: () => words.get(m.id) === w && show({ why: had.get(m.id), saved: Date.now() }),
+    label: why ? `mark #${m.number} ${why}` : `clear why #${m.number} closed`,
+  });
 }
 
 // ---------- the river ----------
@@ -205,10 +251,12 @@ let again = null; // the timer of a read that still lacks some chats
 /** The Flow tab for scheme `id`: `data` is its read, null while it's on its way. `retry` reads again. */
 export function flowTab(id, name, data, retry) {
   if (last?.id !== id) {
+    moved = new Set();
     const el = h('div', { class: 'flow-tab code-tab' });
     last = {
       id,
       el,
+      show: () => {},
       redraw() {
         const at = el.contains(document.activeElement) ? (document.activeElement.closest('[aria-label]')?.getAttribute('aria-label') ?? null) : null;
         el.replaceChildren(...build(id, name, this.data, retry, () => this.redraw()));
@@ -219,6 +267,7 @@ export function flowTab(id, name, data, retry) {
     };
   } else if (last.data === data) return last.el;
   last.data = data;
+  withWords(data);
   last.redraw();
   clearTimeout(again);
   if (data?.unread) again = setTimeout(() => last.el.isConnected && retry(), 4000);
@@ -232,6 +281,7 @@ function build(id, name, data, retry, redraw) {
   const chip = (words, on, act) => h('button', { type: 'button', class: `chip${on ? ' on' : ''}`, 'aria-pressed': String(on), onclick: act }, words);
   const choose = (act) => {
     act();
+    moved = new Set();
     redraw();
     void retry();
   };
@@ -256,6 +306,7 @@ function build(id, name, data, retry, redraw) {
   );
   let map = null;
   let show = redraw;
+  last.show = redraw;
   const controls = h(
     'div',
     { class: 'code-ctl flow-ctl' },
@@ -322,27 +373,32 @@ function build(id, name, data, retry, redraw) {
   const listBox = h('div', { class: 'flow-list' });
   const legend = h('div', { class: 'flow-names' });
   const has = (p) => ms.some((m) => m[p.col] === p.key);
-  if (!has(st.pick)) {
-    const first = ['nothing', 'norepo', 'late', 'live', 'main', 'answer', 'open', 'build'].find((key) => has({ col: 'end', key }));
+  if (!has(st.pick) && !ms.some((m) => moved.has(m.id))) {
+    const first = ['nothing', 'why', 'norepo', 'late', 'live', 'main', 'answer', 'open', 'build'].find((key) => has({ col: 'end', key }));
     st.pick = { col: 'end', key: first };
   }
   const drawList = () => {
-    const some = ms.filter((m) => m[st.pick.col] === st.pick.key).sort((a, b) => b.cost - a.cost || b.number - a.number);
+    const some = ms.filter((m) => m[st.pick.col] === st.pick.key);
+    const listed = ms.filter((m) => some.includes(m) || moved.has(m.id)).sort((a, b) => b.cost - a.cost || b.number - a.number);
+    const at = listBox.contains(document.activeElement) ? (document.activeElement.closest('.flow-why')?.dataset.id ?? null) : null;
+    const word = at && document.activeElement.textContent;
     const cost = value(some, 'cost');
     listBox.replaceChildren(
       h('h4', { 'data-hue': `${st.pick.col}-${st.pick.key}` }, h('i', { class: 'flow-key', 'aria-hidden': 'true' }), NAME[st.pick.col][st.pick.key], h('span', { class: 'muted' }, `${plural(some.length, 'minion')} · ${money(cost)}`)),
-      st.pick.col === 'end' && st.pick.key === 'nothing' ? h('p', { class: 'muted small flow-cant' }, "Why each one closed isn't recorded, so one stopped on purpose and given to others can't be told from a loss. Its closing note is shown where it left one.") : '',
+      st.pick.col === 'end' && st.pick.key === 'nothing' ? h('p', { class: 'muted small flow-cant' }, 'Nothing says why these closed: they may be a loss, or stopped on purpose, or given to others. Know which? Say so, and it moves to its own ending. Those closed before Nov 25 were never asked.') : '',
       showFirst({
         key: `flow-${id}-${st.pick.col}-${st.pick.key}-${shown.key}`,
-        items: some.map((m) => rowOf(id, m, some[0].cost)),
+        items: listed.map((m) => rowOf(id, m, listed[0].cost)),
         n: 6,
         noun: 'minions',
         wrap: (xs) => h('ol', { class: 'flow-rows' }, ...xs),
       }),
     );
+    if (at) [...listBox.querySelectorAll(`.flow-why[data-id="${at}"] button`)].find((b) => b.textContent === word)?.focus({ preventScroll: true });
   };
   const pick = (p) => {
     st.pick = p;
+    moved = new Set();
     show();
   };
   const drawLegend = () => {
@@ -368,6 +424,7 @@ function build(id, name, data, retry, redraw) {
     );
     if (at) legend.querySelector(`[data-hue="${at}"]`)?.focus({ preventScroll: true });
   };
+  const sum = h('p', { class: 'flow-words' }, ...summary(ms, shown.early));
   const stage = h('div', { class: 'flow-stage' });
   if (st.table) {
     stage.append(
@@ -399,17 +456,19 @@ function build(id, name, data, retry, redraw) {
     map.draw();
     drawLegend();
     drawList();
+    sum.replaceChildren(...summary(ms, shown.early));
   };
+  last.show = () => show();
   drawLegend();
   drawList();
-  body.append(h('div', { class: 'code-sum flow-sum' }, h('span', { class: 'settings-tile' }, icon('chart')), summary(ms, shown.early)), stage, legend, listBox);
+  body.append(h('div', { class: 'code-sum flow-sum' }, h('span', { class: 'settings-tile' }, icon('chart')), sum), stage, legend, listBox);
   return [head, controls, ...notes, body, how(shown)];
 }
 
 /** One minion in the list, opening its chat. */
 function rowOf(id, m, most) {
   const bar = put(h('i', {}), { '--pct': `${most ? ((m.cost / most) * 100).toFixed(1) : 0}%` });
-  const facts = [NAME.kind[m.kind], m.refused ? plural(m.refused, 'refused ship') : '', ['nothing', 'norepo', 'answer'].includes(m.end) ? m.said || 'No closing note' : ''].filter(Boolean).join(' · ');
+  const facts = [NAME.kind[m.kind], m.refused ? plural(m.refused, 'refused ship') : '', m.why && m.end === 'answer' ? `closed as ${m.why}` : '', ['nothing', 'why', 'norepo', 'answer'].includes(m.end) ? m.said || 'No closing note' : ''].filter(Boolean).join(' · ');
   return h(
     'li',
     {},
@@ -421,6 +480,19 @@ function rowOf(id, m, most) {
       h('span', { class: 'muted flow-row-facts' }, facts),
       h('span', { class: 'flow-row-bar', 'aria-hidden': 'true' }, bar),
     ),
+    ['nothing', 'why', 'norepo'].includes(m.end) ? whyOf(m) : '',
+  );
+}
+
+const listWords = (xs) => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} or ${xs.at(-1)}`);
+
+/** Why one closed, and the three words to say it with; the one on takes itself back. */
+function whyOf(m) {
+  return h(
+    'div',
+    { class: 'flow-why', role: 'group', 'aria-label': `Why #${m.number} closed`, 'data-id': String(m.id), 'data-hue': `end-${m.end}` },
+    h('span', { class: 'muted' }, m.why ? 'Closed as' : 'Not recorded. Was it'),
+    ...WHY.map((w) => h('button', { type: 'button', class: `chip${m.why === w ? ' on' : ''}`, 'aria-pressed': String(m.why === w), onclick: () => mark(m, m.why === w ? null : w) }, w[0].toUpperCase() + w.slice(1))),
   );
 }
 
@@ -429,17 +501,17 @@ function summary(ms, early) {
   const refused = ms.filter((m) => m.path === 'refused'),
     there = refused.filter((m) => m.end === 'late'),
     nothing = ms.filter((m) => m.end === 'nothing' || m.end === 'norepo'),
+    why = ms.filter((m) => m.end === 'why'),
     where = nothing[0]?.end === 'norepo' ? 'closed, with no repo to look in' : 'closed with nothing on main, why not recorded';
-  return h(
-    'p',
-    { class: 'flow-words' },
+  return [
     h('b', {}, num(ms.length)),
     ` ${ms.length === 1 ? 'minion' : 'minions'}, ${money(value(ms, 'cost'))}. `,
     ...(refused.length
       ? [h('b', {}, num(refused.length)), ` had two or more refused ships${there.length === refused.length ? ', and all of them still got there. ' : `, and ${num(there.length)} of those still got there. `}`]
       : [early ? 'None is on record with two or more refused ships. ' : 'None had two or more refused ships. ']),
-    ...(nothing.length ? [h('b', {}, num(nothing.length)), ` ${nothing.length === 1 ? 'feature, fix or chore' : 'features, fixes and chores'} ${where}: ${money(value(nothing, 'cost'))}.`] : ['No feature, fix or chore closed with nothing on main.']),
-  );
+    ...(nothing.length ? [h('b', {}, num(nothing.length)), ` ${nothing.length === 1 ? 'feature, fix or chore' : 'features, fixes and chores'} ${where}: ${money(value(nothing, 'cost'))}.`] : ['No feature, fix or chore closed with nothing on main and no word why.']),
+    ...(why.length ? [' ', h('b', {}, num(why.length)), ` more ${why.length === 1 ? 'was' : 'were'} closed as ${listWords(WHY.filter((w) => why.some((m) => m.why === w)))}.`] : []),
+  ];
 }
 
 const how = (data) =>
@@ -455,6 +527,6 @@ const how = (data) =>
     h(
       'p',
       { class: 'look-prose muted small' },
-      'A refused ship is a hand-off that did not go through, kept in its chat since Nov 14, or a note of two failed ships, since Nov 19. A ship from before then, or one the minion ran itself, has none on record, so it reads "refusals not recorded" rather than as a first try. Why a minion closed isn\'t recorded either: one stopped on purpose and given to others counts with the rest.',
+      'A refused ship is a hand-off that did not go through, kept in its chat since Nov 14, or a note of two failed ships, since Nov 19. A ship from before then, or one the minion ran itself, has none on record, so it reads "refusals not recorded" rather than as a first try. Why a minion closed is one word it or the Taskmaster says as it closes it, since Nov 25, or a person says in the list: done, replaced by another, or dropped on purpose. One with no word reads "not recorded", never guessed.',
     ),
   );

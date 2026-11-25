@@ -9,6 +9,8 @@ export interface FlowRow {
   status: string;
   created_at: number;
   updated_at: number;
+  /** Why it closed, in one word, when it was saved (`closedAs`). */
+  why: string | null;
   /** Every turn's cost, a killed turn's estimate too (#1938). */
   cost: number;
   /** A release or an app's deploy that went live names it. */
@@ -30,6 +32,7 @@ export const flowQueries = {
         )
         SELECT t.id, t.number, t.title, t.status, t.build, t.created_at, t.updated_at,
           (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id WHERE p.target_type = 'minion' AND p.target_id = t.id AND pk.key = 'type' LIMIT 1) AS type,
+          (SELECT p.value FROM properties p JOIN property_keys pk ON pk.id = p.key_id WHERE p.target_type = 'minion' AND p.target_id = t.id AND pk.scope IS NULL AND pk.key = 'closedAs' LIMIT 1) AS why,
           (SELECT COALESCE(SUM(u.cost_usd), 0) FROM turns u WHERE u.ticket_id = t.id) AS cost,
           (t.number IN (SELECT number FROM live) OR t.id IN (SELECT id FROM deployed)) AS live,
           EXISTS (SELECT 1 FROM github_seen g WHERE g.ticket_id = t.id AND g.key GLOB 'pr*:state:MERGED:*') AS merged_pr

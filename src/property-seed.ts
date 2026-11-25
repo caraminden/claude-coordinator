@@ -67,6 +67,18 @@ export const GLOBAL_SEED: SeedKey[] = [
     multi: false,
     value_kind: 'text',
   },
+  {
+    key: 'closedAs',
+    label: 'Closed as',
+    description: "Why a minion closed, in one word, said as it closes (close_self and close_ticket take it) or set later on the Releases page's Flow tab. It goes when the minion runs again. One closed without it, or before 2026-11-25, has none: never guess it.",
+    multi: false,
+    value_kind: 'enum',
+    values: [
+      { value: 'done', description: 'Its work is finished, or was found already done.' },
+      { value: 'replaced', description: 'Another minion has the work.' },
+      { value: 'dropped', description: 'Stopped on purpose, and nobody has the work.' },
+    ],
+  },
 ];
 
 /** Delve's own keys, for the scheme named Delve. Ranger + Void has no name yet, so it isn't a class. */

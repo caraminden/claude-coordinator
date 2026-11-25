@@ -21,6 +21,7 @@ export const ENDS = [
   ['late', 'Got there after refusals', 'After refusals'],
   ['build', 'In a build that is not on main', 'In a build'],
   ['nothing', 'Closed, nothing on main', 'Not on main'],
+  ['why', 'Done, replaced or dropped', 'Said why'],
   ['norepo', 'Closed, no repo to look in', 'No repo'],
   ['answer', 'Answer, report or design', 'Answer'],
   ['open', 'Still open', 'Open'],

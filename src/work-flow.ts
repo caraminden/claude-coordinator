@@ -19,8 +19,8 @@ import { turnEnv } from './turn-launch.ts';
 export type Kind = 'feature' | 'bug' | 'chore' | 'research' | 'other';
 /** shipped: refusals were recorded, and there were fewer than two. untold: on main from before they were, or live with a ship it ran itself. other: on main with no ship or release of its own. */
 export type Path = 'shipped' | 'untold' | 'refused' | 'other' | 'never';
-/** build: merged into a major build that isn't on main. nothing: feature, fix or chore work closed with nothing on main. norepo: the same, in a scheme with no repo to look in. */
-export type End = 'live' | 'late' | 'main' | 'build' | 'nothing' | 'norepo' | 'answer' | 'open';
+/** build: merged into a major build that isn't on main. nothing: feature, fix or chore work closed with nothing on main, and no word why. why: the same, with its word saved. norepo: either, in a scheme with no repo to look in. */
+export type End = 'live' | 'late' | 'main' | 'build' | 'nothing' | 'why' | 'norepo' | 'answer' | 'open';
 /** Refused hand-offs, and hand-offs' own ship notes, are in the chats from this Pacific day on. */
 export const REFUSALS_FROM = '2026-11-14';
 
@@ -40,11 +40,14 @@ export interface ChatFacts {
 }
 
 export interface FlowMinion {
+  id: number;
   number: number;
   title: string;
   kind: Kind;
   path: Path;
   end: End;
+  /** done, replaced or dropped, on a closed one that has it saved. */
+  why: string | null;
   cost: number;
   refused: number;
   said: string;
@@ -86,7 +89,7 @@ const KINDS: Kind[] = ['feature', 'bug', 'chore', 'research'];
 export const kindOf = (type: string | null): Kind => KINDS.find((k) => k === type) ?? 'other';
 
 /** How a minion got to main, and how it ended. */
-export function settle(m: Pick<FlowRow, 'type' | 'status' | 'live' | 'build' | 'merged_pr' | 'created_at'>, f: Omit<ChatFacts, 'id' | 'said'>, named: boolean, repo = true): { path: Path; end: End } {
+export function settle(m: Pick<FlowRow, 'type' | 'status' | 'why' | 'live' | 'build' | 'merged_pr' | 'created_at'>, f: Omit<ChatFacts, 'id' | 'said'>, named: boolean, repo = true): { path: Path; end: End } {
   const kind = kindOf(m.type);
   // A build minion's pull request may have gone into its build's branch: only a release or a commit says it is on main.
   const ownPr = !!m.merged_pr && m.build === null;
@@ -98,7 +101,7 @@ export function settle(m: Pick<FlowRow, 'type' | 'status' | 'live' | 'build' | '
   if (f.merged || m.merged_pr) return { path, end: 'build' };
   if (m.status !== 'closed') return { path, end: 'open' };
   if (kind === 'research' || kind === 'other') return { path, end: 'answer' };
-  return { path, end: repo ? 'nothing' : 'norepo' };
+  return { path, end: !repo ? 'norepo' : m.why ? 'why' : 'nothing' };
 }
 
 /** The minions `log` (git log --format=%cn%x09%s) names: the #N a subject starts or ends with, else its first. GitHub's own merges end with a pull request's number. */
@@ -253,7 +256,7 @@ export class WorkFlow {
       to,
       minions: read.map((r) => {
         const f = kept[r.id];
-        return { number: r.number, title: r.title, kind: kindOf(r.type), ...settle(r, f, on.has(r.number), !!repo), cost: r.cost, refused: f.refused, said: f.said };
+        return { id: r.id, number: r.number, title: r.title, kind: kindOf(r.type), ...settle(r, f, on.has(r.number), !!repo), why: r.status === 'closed' ? r.why : null, cost: r.cost, refused: f.refused, said: f.said };
       }),
       unread: rows.length - read.length,
       git: !repo || named !== null,

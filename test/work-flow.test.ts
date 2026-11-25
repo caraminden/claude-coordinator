@@ -209,6 +209,45 @@ test('a chat is read once until its minion changes, and one not read in time is 
   assert.ok(Object.keys(JSON.parse(readFileSync(join(dir, `${scheme.id}.json`), 'utf8'))).length >= 15);
 });
 
+test('a minion closed with its word reads as that, not as a loss; one closed without it stays unrecorded, and running again forgets it', async () => {
+  const p = store.createProject('Words', null);
+  store.setProjectRepoDir(p.id, repo);
+  const make = async (as: string | null) => {
+    const t = await minion(`closed as ${as}`, { type: 'feature', closed: false, project: p.id });
+    store.updateTicket(t.id, { status: 'running' });
+    if (as) store.props.set('minion', t.id, p.id, { closedAs: as }, 'Taskmaster');
+    store.updateTicket(t.id, { status: 'closed' });
+    return t;
+  };
+  const [a, b, c, d] = [await make('done'), await make('Replaced'), await make('dropped'), await make(null)];
+  const flow = new WorkFlow(store, { dir: join(root, 'k3'), read: readApart, db, waitMs: 60_000 });
+  const ends = async () => Object.fromEntries((await flow.view(p.id, FROM, TO)).minions.map((m) => [m.id, [m.end, m.why]]));
+  assert.deepEqual(await ends(), { [a.id]: ['why', 'done'], [b.id]: ['why', 'replaced'], [c.id]: ['why', 'dropped'], [d.id]: ['nothing', null] });
+  assert.throws(() => store.props.set('minion', d.id, p.id, { closedAs: 'lost' }, 'Cara'), /lost/);
+  // Set by a person afterwards, and taken back.
+  store.props.set('minion', d.id, p.id, { closedAs: 'dropped' }, 'Cara');
+  store.props.set('minion', a.id, p.id, { closedAs: null }, 'Cara');
+  assert.deepEqual(
+    [(await ends())[d.id], (await ends())[a.id]],
+    [
+      ['why', 'dropped'],
+      ['nothing', null],
+    ],
+  );
+  // Reopened, or a close that was cancelled and followed by a turn: whoever closes it next says why again.
+  store.updateTicket(b.id, { status: 'idle' });
+  store.updateTicket(b.id, { status: 'closed' });
+  store.updateTicket(c.id, { status: 'running' });
+  store.updateTicket(c.id, { status: 'closed' });
+  assert.deepEqual(
+    [(await ends())[b.id], (await ends())[c.id]],
+    [
+      ['nothing', null],
+      ['nothing', null],
+    ],
+  );
+});
+
 test('commits that cannot be read say so', async () => {
   const bare = store.createProject('No Git', null);
   store.setProjectRepoDir(bare.id, join(root, 'nowhere'));
@@ -237,7 +276,7 @@ test('which minion a commit names: the number its subject starts or ends with; G
 
 test('a ship with no refusals on record and no note of its own is never a first try', () => {
   const none = { refused: 0, stalled: false, shipped: false, merged: false };
-  const m = { type: 'feature', status: 'closed', live: 0, merged_pr: 0, build: null, created_at: Date.parse('2026-11-20T12:00:00-08:00') };
+  const m = { type: 'feature', status: 'closed', why: null, live: 0, merged_pr: 0, build: null, created_at: Date.parse('2026-11-20T12:00:00-08:00') };
   const early = { ...m, created_at: Date.parse('2026-11-13T12:00:00-08:00') };
   assert.deepEqual(settle({ ...m, live: 1 }, none, true), { path: 'untold', end: 'live' });
   assert.deepEqual(settle({ ...m, live: 1 }, { ...none, shipped: true }, true), { path: 'shipped', end: 'live' });
@@ -245,10 +284,18 @@ test('a ship with no refusals on record and no note of its own is never a first 
   assert.deepEqual(settle(early, none, true), { path: 'untold', end: 'main' });
   assert.deepEqual(settle(m, none, true), { path: 'other', end: 'main' });
   assert.deepEqual(settle(m, none, false, false), { path: 'never', end: 'norepo' });
+  // A word why counts only where nothing reached main: a live one is live, an open one open, an answer an answer.
+  const why = { ...m, why: 'replaced' };
+  assert.deepEqual(settle(m, none, false), { path: 'never', end: 'nothing' });
+  assert.deepEqual(settle(why, none, false), { path: 'never', end: 'why' });
+  assert.equal(settle(why, none, false, false).end, 'norepo');
+  assert.equal(settle({ ...why, live: 1 }, none, true).end, 'live');
+  assert.equal(settle({ ...why, status: 'idle' }, none, false).end, 'open');
+  assert.equal(settle({ ...why, type: 'research' }, none, false).end, 'answer');
 });
 
 test('nodes that cost nothing: their ribbons stay inside them in dollars', () => {
-  const free = (end: string) => ({ number: 1, title: 'x', kind: 'feature', path: 'never', end, cost: 0, refused: 0, said: '' });
+  const free = (end: string) => ({ id: 1, why: null, number: 1, title: 'x', kind: 'feature', path: 'never', end, cost: 0, refused: 0, said: '' });
   for (const ms of [
     [free('open'), free('nothing')],
     [free('open'), free('nothing'), { ...free('live'), kind: 'bug', path: 'shipped', cost: 5 }],

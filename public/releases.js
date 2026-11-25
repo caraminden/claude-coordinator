@@ -5,7 +5,7 @@
 // chip beside a minion's PR info (take F).
 // Bars follow the spec's rule: by stage, sized by usual time, the current one stopping at 90% (waitBar's cap) and
 // amber past LATE, a wait hatched with its reason, and no estimate while anything ahead waits.
-import { ago, api, fileUrl, h, heldWhilePressed, pacificClock, schemeIcon, view } from './base.js';
+import { ago, api, fileUrl, h, heldWhilePressed, pacificClock, pacificStamp, schemeIcon, view } from './base.js';
 import { iconSrc } from './schemes.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, releaseName, segments, shortSpan, stuckFor } from './releasemath.js';
@@ -754,7 +754,7 @@ function changeList(projectId, tv) {
   /** A frozen ship or check (#1881): it isn't waiting, its cgroup is frozen; since when Citadel saw it, and the command that thaws it. */
   function frozenLine(e) {
     if (!e.frozen) return '';
-    const at = new Date(e.frozen.since).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+    const at = pacificStamp(e.frozen.since);
     return h(
       'span',
       { class: 'frozen stuck', title: 'The time is when Citadel first saw it frozen; nothing records who froze it.' },

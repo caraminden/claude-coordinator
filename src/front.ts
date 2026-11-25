@@ -262,7 +262,12 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
     if (early) return void early.push(m);
     if (counted && announced) announced--;
     else Atomics.add(posted, 0, 1);
-    front!.postMessage(m);
+    try {
+      front!.postMessage(m);
+    } catch (err) {
+      Atomics.sub(posted, 0, 1); // never sent: a count the front thread can't reach would send every read to main for good
+      throw err;
+    }
   };
   // The front thread's pooled connections stay open until it closes them, so a reused one is never closed under a request.
   server.keepAliveTimeout = 0;

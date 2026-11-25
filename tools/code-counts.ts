@@ -14,7 +14,7 @@ import { KIT_FILES } from '../src/kit-sync.ts';
 
 const CODE = /\.(c|cc|cjs|cpp|cs|css|dart|ex|exs|fs|gd|gdshader|glsl|go|h|hpp|html|java|js|jsx|kt|kts|lua|m|mjs|mm|php|ps1|py|rb|rs|scala|scss|sh|sql|svelte|swift|ts|tsx|vue|wgsl|zig)$/;
 const TEST = /(^|\/)(tests?|__tests__|specs?|e2e|fixtures)\/|[._-](test|spec)\.[^/]+$|(^|\/)test_[^/]+$|Tests?\.(cs|java|kt)$/;
-const THEIRS = /(^|\/)(node_modules|vendor|third[_-]party|dist)\/|\.(min|gen|generated|g)\.[^/]+$/;
+const THEIRS = /(^|\/)(node_modules|vendor|docs|third[_-]party|dist)\/|\.(min|gen|generated|g)\.[^/]+$/;
 /** Our own code: what a split could pay on. */
 export const counted = (path: string) => CODE.test(path) && !TEST.test(path) && !THEIRS.test(path);
 

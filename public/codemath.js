@@ -2,13 +2,14 @@
 
 /** Lines at which a file is big enough to be worth splitting. */
 export const BIG = 900;
-/** The fewest minions that make a file busy, in a scheme of any size. */
-const BUSY = 4;
+/** Minions that make a file busy (Josh's picked mock: 900 lines, 40 minions), and the fewest in a scheme with less going on. */
+const BUSY = 40;
+const FEWEST = 4;
 
-/** Where the marked corner starts: big files that at least a quarter as many minions changed as the busiest big one. */
-export const zone = (files) => ({ lines: BIG, changed: Math.max(BUSY, Math.round(Math.max(0, ...files.filter((f) => f.lines >= BIG).map((f) => f.changed)) / 4)) });
+/** Where the marked corner starts: 40 minions, or a quarter of the busiest big file's where that is fewer. */
+export const zone = (files) => ({ lines: BIG, changed: Math.min(BUSY, Math.max(FEWEST, Math.round(Math.max(0, ...files.filter((f) => f.lines >= BIG).map((f) => f.changed)) / 4))) });
 
-/** What a split pays: how busy, weighed by how big, and 3 for each bug fix. The order matches the Nov 2026 architecture check's picks. */
+/** What a split pays: how busy, weighed by how big, and 3 for each bug fix. */
 export const score = (f) => Math.log(f.lines / 100) * f.changed + 3 * f.bugs;
 
 /** The files in the corner, the best to split first. */

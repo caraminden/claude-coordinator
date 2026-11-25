@@ -191,14 +191,18 @@ test('a title names a file by path or by name, and has to say split', () => {
   assert.deepEqual(on('Break up the land script, land.sh'), ['kit/templates/land.sh', 'tools/land.sh']);
   assert.deepEqual(on('Split tools/land.sh'), ['tools/land.sh']);
   assert.deepEqual(on('Splitting runner.ts, piece 6'), ['src/runner.ts']);
+  assert.deepEqual(on('Split the runner along its seams'), ['src/runner.ts']);
+  assert.deepEqual(on('Split the land line'), []); // a name this short is a common word
   assert.deepEqual(on('Fix runner.ts'), []);
   assert.deepEqual(on('Split these files on the Code tab'), []);
 });
 
-test('the zone is big files a quarter as busy as the busiest; the list is the zone, best score first', () => {
+test('the zone is big files 40 minions changed, or a quarter as busy as the busiest; the list is the zone, best score first', () => {
   const f = (path: string, lines: number, changed: number, bugs = 0) => ({ path, lines, changed, bugs, who: [] });
   const files = [f('huge-quiet', 5000, 3), f('big-busy', 4000, 100), f('mid', 1000, 40, 2), f('small-busy', 200, 150), f('under', 1200, 24)];
   assert.deepEqual(zone(files), { lines: 900, changed: 25 });
+  assert.equal(zone([f('server', 2969, 246)]).changed, 40);
+  assert.equal(zone([f('a', 2969, 5)]).changed, 4);
   assert.deepEqual(
     candidates(files).map((x: { path: string }) => x.path),
     ['big-busy', 'mid'],

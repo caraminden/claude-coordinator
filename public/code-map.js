@@ -359,6 +359,10 @@ function build(id, name, data, retry) {
     head(when),
     stale ?? '',
     h('section', { class: 'ci-block code-block', 'data-hue': open.length ? 'accent' : 'done' }, h('div', { class: 'code-sum' }, h('span', { class: 'settings-tile' }, icon('chart')), ...sum), h('div', { class: 'code-ctl' }, chips, views), h('div', { class: 'code-grid' }, stage, listBox)),
-    h('p', { class: 'look-prose muted small' }, `Code files only: tests, docs and files that came from elsewhere are left out. A minion counts once per file. A change stops counting once its file is cut to under half the size it had, and a file never counts the minion that made it, so a split starts fresh.`),
+    h(
+      'p',
+      { class: 'look-prose muted small' },
+      `Code files only: tests, docs, other people's code and copies of Citadel's kit are left out. A minion counts once per file, and a commit that names no minion counts as one of its own. Busy is ${z.changed} minions here: 40, or a quarter of the busiest big file's where that is fewer. A change stops counting once its file is cut to under half the size it had, and a file never counts the minion that made it, so a split starts fresh.`,
+    ),
   ];
 }

@@ -42,7 +42,8 @@ export type SplitBy = { number: number; title: string };
 
 /**
  * Which files an open minion is already splitting, by its title ("Split runner.ts into modules", "Break up tools/land.sh"):
- * a path names that file; a bare file name names every file called that.
+ * a path names that file; a bare file name, with or without its ending ("Split the runner"), names every file called that.
+ * It leans to saying yes: a wrong match shows a minion to look at, a missed one would propose the same split twice.
  */
 export function splitting(files: readonly { path: string }[], minions: readonly SplitBy[]): Record<string, SplitBy[]> {
   const out: Record<string, SplitBy[]> = {};
@@ -50,7 +51,13 @@ export function splitting(files: readonly { path: string }[], minions: readonly 
     if (!/\b(split|break(ing)? up|carve)/i.test(m.title)) continue;
     const words = m.title.split(/[\s,;:()"'`]+/).map((w) => w.replace(/^\.\/|\.+$/g, ''));
     for (const f of files) {
-      if (words.some((w) => w && (f.path === w || f.path.endsWith(`/${w}`)) && /\.\w+$/.test(w))) (out[f.path] ??= []).push({ number: m.number, title: m.title });
+      const stem =
+        f.path
+          .split('/')
+          .at(-1)
+          ?.replace(/\.\w+$/, '')
+          .toLowerCase() ?? '';
+      if (words.some((w) => (/\.\w+$/.test(w) && (f.path === w || f.path.endsWith(`/${w}`))) || (stem.length > 3 && w.toLowerCase() === stem))) (out[f.path] ??= []).push({ number: m.number, title: m.title });
     }
   }
   return out;

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { cutStrip, dayStartMs, dayStrips, PARTS } from '../src/day-strips.ts';
+import { cutStrip, dayBounds, dayStartMs, dayStrips, PARTS } from '../src/day-strips.ts';
 import type { TimeSeg } from '../src/time-log.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'day-strips-'));
@@ -48,6 +48,8 @@ test('a Pacific day starts at its own midnight, summer or winter; anything else 
   assert.equal(dayStartMs('nope'), null);
   assert.equal(dayStartMs('2026-02-31'), null, 'a day the calendar lacks is no day (the route answers 400, not 500)');
   assert.equal(dayStartMs('2026-13-01'), null);
+  assert.deepEqual(dayBounds('2026-11-20'), { from: DAY0, to: DAY0 + 24 * 60 * MIN });
+  assert.equal(dayBounds('9999-12-31'), null, 'a day with no next day is no day either (the route answers 400)');
 });
 
 test('a strip: the log clipped to live, gaps nothing explains, and the ship stages over waits but never over work', () => {

@@ -141,11 +141,18 @@ function wentLive(store: Store, projectId: number, from: number, to: number): Ma
   return out;
 }
 
-/** Every minion of scheme `projectId` that went live on Pacific day `day`, as strips, oldest start first. */
-export async function dayStrips(store: Store, projectId: number, day: string, now = Date.now()): Promise<DayStrips> {
+/** Pacific day `day`'s first ms and the next day's; null for a string that isn't a day, or a day with no next one (9999-12-31). */
+export function dayBounds(day: string): { from: number; to: number } | null {
   const from = dayStartMs(day);
   const to = from == null ? null : dayStartMs(nextDay(day));
-  if (from == null || to == null) throw new Error(`Not a day: ${day}`);
+  return from == null || to == null ? null : { from, to };
+}
+
+/** Every minion of scheme `projectId` that went live on Pacific day `day`, as strips, oldest start first. */
+export async function dayStrips(store: Store, projectId: number, day: string, now = Date.now()): Promise<DayStrips> {
+  const bounds = dayBounds(day);
+  if (!bounds) throw new Error(`Not a day: ${day}`);
+  const { from, to } = bounds;
   const live = wentLive(store, projectId, from, Math.min(to, now + 1));
   const types = store.props.forTargets('minion', [...live.keys()]);
   const strips: Strip[] = [];

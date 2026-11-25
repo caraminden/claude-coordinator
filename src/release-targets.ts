@@ -447,8 +447,12 @@ export class TargetFinder {
   /** Each shared file's build, by its path and mtime, so a scan doesn't open a zip twice. */
   private builds = new Map<string, ReturnType<typeof buildOf>>();
   private seenBuilds = new Set<string>();
+  /** Settles once the first scan has ended, failed or not. */
+  private scanned: Promise<void>;
+  private firstScanned = () => {};
   constructor(d: FinderDeps) {
     this.d = d;
+    this.scanned = new Promise((resolve) => (this.firstScanned = resolve));
   }
 
   /** Every scheme's test-copy sources, as last found. */
@@ -461,12 +465,25 @@ export class TargetFinder {
     return kind ? all.filter((t) => t.kind === kind) : all;
   }
 
-  /** Whether a release workflow signs `app`'s APKs (src/apk-build.ts leaves those to CI). */
-  async ciRelease(app: ContraptionRow): Promise<boolean> {
+  /**
+   * Whether a release workflow signs `app`'s APKs (src/apk-build.ts leaves those to CI). Waits for the first scan, as
+   * the list is empty until then (#1870); null when its scheme's targets still aren't known (a clone git couldn't read).
+   */
+  async ciRelease(app: ContraptionRow): Promise<boolean | null> {
+    await this.scanned;
+    if (app.home_scheme !== null && !this.found.has(app.home_scheme)) return null;
     return this.list('apk').some((t) => t.contraption === app.name && !!t.workflow);
   }
 
   async scan() {
+    try {
+      await this.scanAll();
+    } finally {
+      this.firstScanned();
+    }
+  }
+
+  private async scanAll() {
     const { store } = this.d;
     const apps = store.listContraptions();
     const seen = new Set<number>();

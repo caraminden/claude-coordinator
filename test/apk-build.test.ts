@@ -361,7 +361,7 @@ test("an app a release workflow signs is never built or told before its scheme's
   const row = { ...plain, home_scheme: p.id };
   mkdirSync(join(data, 'android'), { recursive: true });
   writeFileSync(join(data, 'android/latest.json'), JSON.stringify({ versionCode: 13 }));
-  store.createContraption({ name: 'signed', title: 'Signed', icon: null, port: 9, home_scheme: p.id, open_paths: '[]', relay_paths: '[]', repo: 'o/signed', branch: null, folder: join(root, 'apps/signed'), default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: 'h', keys_at: 0 });
+  store.createContraption({ name: 'signed', title: 'Signed', icon: null, port: 9, home_scheme: p.id, open_paths: '[]', relay_paths: '[]', repo: 'o/signed', branch: null, folder: join(root, 'apps/signed'), default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: 'h', keys_at: 0, static_paths: null, restart_risk: 'unassessed', restart_note: '', subdir: null });
   const finder = new TargetFinder({ store, own: () => null, apkFeed: (name) => join(root, 'data', name, 'android/latest.json') });
   const { b, told, calls } = builder({ ciRelease: (r) => finder.ciRelease(r) });
   const early = b.check(row, 'auto-deploy');

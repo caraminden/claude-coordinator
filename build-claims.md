@@ -24,3 +24,4 @@ A feeder's own line is added by #1935 when its number is known, before the next 
 - #1962's three real-run fixes merged in on 2026-11-25 (8de6e66e7); the two files it borrowed are back on #1972's line.
 - Lent to #2006 for its merge (2026-11-25): server.ts (the `online` lines of T2 and T4; then shared again), src/machine-pools.ts and test/machine-pools.test.ts (T4's `away()`; then T6's).
 - T3 (#1972) merged in on 2026-11-25; src/runner.ts, lent for it, is shared again; src/routes/machines.ts is lent on to #2006 for its merge (it changes #1962's sync route line), then shared. Its line's files and #1962's src/running-turn.ts are T6's (#2011).
+- When T5 (#2006) is in: server.ts and src/routes/machines.ts go to #2011 for its merge (T6 changes lines in both), src/runner.ts too (lines of #1973), src/machine-pools.ts and its test too; then all back to shared.

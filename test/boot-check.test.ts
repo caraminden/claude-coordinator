@@ -157,7 +157,7 @@ describe('the smoke pass through the turn tools, the file viewer and the launch 
 
   // #43: a new import the pinned copy of mcp.ts lacked (the pinner follows only `from './x'`), so every turn's tool server died on start.
   test('a tool server that dies on start fails it', { timeout: 200_000 }, async () => {
-    const checkout = brokenCheckout('no-tool-server', 'src/mcp.ts', "import { existsSync } from 'node:fs';", "import { existsSync } from 'node:fs';\nimport './appname-extra.ts';");
+    const checkout = brokenCheckout('no-tool-server', 'src/mcp.ts', "import { createInterface } from 'node:readline';", "import { createInterface } from 'node:readline';\nimport './appname-extra.ts';");
     writeFileSync(join(checkout, 'src', 'appname-extra.ts'), '');
     const run = await bootCheck(checkout);
     assert.equal(run.ok, false);

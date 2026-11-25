@@ -205,7 +205,7 @@ test('two pinned versions run side by side, each serving only its own turns, and
     cpSync(join(REPO, 'src'), d, { recursive: true, filter: (f) => !f.includes('node_modules') });
     return d;
   });
-  const newer = join(copies[1], 'mcp.ts');
+  const newer = join(copies[1], 'mcp-minions.ts');
   writeFileSync(newer, readFileSync(newer, 'utf8').replace("name: 'close_self',", "name: 'close_self_v2',"));
   const sOld = spec(r, 'old', join(copies[0], 'mcp-pool.ts'));
   const sNew = spec(r, 'new', join(copies[1], 'mcp-pool.ts'));

@@ -263,7 +263,7 @@ load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || load='?'
 # That is a lost run, not a hang: land.sh reads this line (with no test failed before it) as a run cut off from outside.
 ran=$((SECONDS - started))
 if [ "$rc" -eq 124 ] || { [ "$rc" -eq 137 ] && [ "$ran" -ge "$limit" ]; }; then
-  echo "run-tests: the tests ran past ${limit}s and were stopped: a test hung (the hung file is the one with no results above)." | tee -a "$log" >&2
+  echo "run-tests: the tests ran past ${limit}s and were stopped: a test hung (the files still running are named on the \"still running:\" lines above)." | tee -a "$log" >&2
 elif [ "$rc" -gt 128 ]; then
   echo "run-tests: the tests were killed (exit $rc) after ${ran}s, before the ${limit}s limit: stopped from outside (the out-of-memory killer?), not a hang, so this run says nothing about the change" | tee -a "$log" >&2
 fi

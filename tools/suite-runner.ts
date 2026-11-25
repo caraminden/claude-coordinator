@@ -145,8 +145,26 @@ async function main() {
         for await (const _ of progress(copy())) void _;
       })(),
     );
-  for await (const event of stream as AsyncIterable<{ type: string; data: { file?: string; nesting?: number; success?: boolean; details?: { duration_ms?: number } } }>) {
+  // Files running now (#1879): a file's own events have name === file; its tests' have the test's name. When the
+  // time limit's TERM arrives, each file still running is named with its seconds and its running test(s).
+  const active = new Map<string, { t0: number; tests: Set<string> }>();
+  process.on('SIGTERM', () => {
+    const lines = [...active].map(([f, a]) => `still running: ${f} (${Math.round((Date.now() - a.t0) / 1000)}s)${a.tests.size ? ` in test: ${[...a.tests].join(', ')}` : ''}\n`);
+    process.stdout.write(lines.join(''), () => process.exit(143));
+  });
+  for await (const event of stream as AsyncIterable<{ type: string; data: { file?: string; name?: string; nesting?: number; success?: boolean; details?: { duration_ms?: number } } }>) {
     const { type, data } = event;
+    if (data.file && (type === 'test:dequeue' || type === 'test:complete')) {
+      const f = relative(process.cwd(), data.file);
+      if (data.name === data.file) {
+        if (type === 'test:dequeue') active.set(f, { t0: Date.now(), tests: new Set() });
+        else active.delete(f);
+      } else if (data.name) {
+        const a = active.get(f);
+        if (type === 'test:dequeue') a?.tests.add(data.name);
+        else a?.tests.delete(data.name);
+      }
+    }
     if (type === 'test:summary' && data.file === undefined && !data.success) failed = true;
     if ((type === 'test:pass' || type === 'test:fail') && data.file && data.nesting === 0) {
       const f = relative(process.cwd(), data.file);

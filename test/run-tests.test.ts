@@ -170,6 +170,8 @@ test('a hang is never rerun: the time limit fails the run with its line, and not
   const r = await run(['ok.test.mjs', 'once.test.mjs', 'hang.test.mjs'], { DEPLOY_TEST_TIMEOUT: '4' });
   assert.equal(r.code, 124, r.log);
   assert.match(r.stderr, /ran past 4s and were stopped: a test hung/);
+  assert.match(r.log, /^still running: test\/hang\.test\.mjs \(\d+s\) in test: hangs$/m, r.log);
+  assert.doesNotMatch(r.log, /still running: test\/(ok|once)\.test\.mjs/);
   assert.doesNotMatch(r.log, /passed alone|failed again alone/);
   assert.equal(existsSync(join(r.dir, 'land-test-rerun.log')), false, 'nothing was rerun');
   assert.equal(r.retro, '');

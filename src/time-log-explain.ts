@@ -4,6 +4,7 @@
 // session kept, in the presser's scratch folder. The server keeps only lines whose evidence is in the chat and that state
 // no length or clock time (the page prints those itself). Kept per minion; a second press writes only the parts whose
 // events are new. Rules: the shared folder's specs/minion-time-log/minion-time-log.md ("Explain").
+import { setImmediate as yieldNow } from 'node:timers/promises';
 import type { EventRow } from './db-rows.ts';
 import type { TimeLog, TimeRow } from './time-log.ts';
 
@@ -50,8 +51,9 @@ export interface ExplainView {
 export const EXPLAIN_VERSION = 1;
 export const EXPLAIN_MODEL = 'haiku';
 /** A press older than this is taken as gone (a restart, a lost call): another can start. */
-export const WRITE_MS = 4 * 60_000;
-/** At most this many parts in one press, and this much input: what's left stays fresh, for the next press. */
+export const WRITE_MS = 10 * 60_000;
+/** At most this many parts in one call, and this much input; a press makes up to EXPLAIN_ROUNDS calls, and what's left stays fresh, for the next press. */
+export const EXPLAIN_ROUNDS = 3;
 const MAX_PARTS = 40;
 const MAX_INPUT = 90_000;
 const PART_LINES = 60;
@@ -146,7 +148,7 @@ interface Part {
 }
 
 /** The input for the parts `keys` of `log`, from the chat's `events` (oldest first). */
-export function explainInput(title: string, log: TimeLog, events: EventRow[], keys: string[]): { text: string; labels: Map<string, number>; parts: Map<string, string> } {
+export async function explainInput(title: string, log: TimeLog, events: EventRow[], keys: string[]): Promise<{ text: string; labels: Map<string, number>; parts: Map<string, string> }> {
   const want = new Set(keys);
   const rowParts = new Map<number, Part>();
   timed(log).forEach((r) => {
@@ -162,8 +164,11 @@ export function explainInput(title: string, log: TimeLog, events: EventRow[], ke
     return segs.find((s) => s.row !== undefined)?.row;
   };
   const tools = new Map<string, { name: string; input: Record<string, unknown> }>();
-  const says: { at: number; text: string }[] = [];
+  const says: { at: number; text: string; event: number }[] = [];
+  let seen = 0;
   for (const ev of events) {
+    // A long chat parses for a while on the server's thread: let other requests run between slices.
+    if (++seen % 200 === 0) await yieldNow();
     let d: Record<string, unknown>;
     try {
       d = JSON.parse(ev.data);
@@ -191,7 +196,7 @@ export function explainInput(title: string, log: TimeLog, events: EventRow[], ke
       if (!Array.isArray(blocks)) continue;
       for (const b of blocks) {
         if (b.type === 'text' && d.type === 'assistant' && b.text && b.text.trim().length > 15) {
-          says.push({ at, text: b.text });
+          says.push({ at, text: b.text, event: ev.id });
           add(`The minion wrote: "${one(b.text, 240)}"`);
         } else if (b.type === 'tool_use' && b.id && b.name) {
           const input = b.input ?? {};
@@ -265,7 +270,7 @@ export function explainInput(title: string, log: TimeLog, events: EventRow[], ke
     const out = [`== PART ${label}: ${lab(r.event)}${head}. ${span}${lens ? `, ${lens}` : ''}`];
     if (r.type === 'wait') {
       const last = says.findLast((x) => x.at <= r.start!);
-      if (last) out.push(`   the minion's last words before it: "${one(last.text, 260)}"`);
+      if (last) out.push(`   ${lab(last.event)}the minion's last words before it: "${one(last.text, 260)}"`);
     }
     const entries = p.entries.length > PART_LINES ? [...p.entries.slice(0, 15), null, ...p.entries.slice(-(PART_LINES - 15))] : p.entries;
     for (const e of entries) out.push(e ? `   ${lab(e.event)}${clock(e.at)} ${e.text}` : `   … ${p.entries.length - PART_LINES} more actions`);

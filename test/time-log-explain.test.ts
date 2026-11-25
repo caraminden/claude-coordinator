@@ -42,8 +42,8 @@ const events: EventRow[] = [
   claude(8, 26, { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'g2', name: 'Agent', input: { description: 'x' } }] }, parent_tool_use_id: 'g' }),
 ];
 
-test('the input: each asked part in time order, its events labelled, a wait with the last words before it, a Grunt from its findings', () => {
-  const input = explainInput('Fix the parser', log, events, KEYS);
+test('the input: each asked part in time order, its events labelled, a wait with the last words before it, a Grunt from its findings', async () => {
+  const input = await explainInput('Fix the parser', log, events, KEYS);
   assert.deepEqual(
     [...input.parts.entries()],
     [
@@ -55,7 +55,7 @@ test('the input: each asked part in time order, its events labelled, a wait with
   const t = input.text;
   assert.match(t, /PART P1: step "Read" \(done\); the minion's own outcome: "Found it."/);
   assert.match(t, /PART P2: \[e\d+\] WAIT: Waiting on Cara/);
-  assert.match(t, /the minion's last words before it: "The bug is in the parser/);
+  assert.match(t, /\[e\d+\] the minion's last words before it: "The bug is in the parser/, 'its own label, so a wait with no event of its own can rest on it');
   assert.match(t, /The Grunt reported: \*\*Findings\*\* 1\. The parser drops the last line\./);
   assert.doesNotMatch(t, /Read it all/, 'a report starts at its findings');
   assert.match(t, /Cara wrote to it: Yes, ship it/);
@@ -69,13 +69,13 @@ test('the input: each asked part in time order, its events labelled, a wait with
       label,
     );
   // Only the parts asked for.
-  const second = explainInput('Fix the parser', log, events, [KEYS[2]]);
+  const second = await explainInput('Fix the parser', log, events, [KEYS[2]]);
   assert.deepEqual([...second.parts.values()], [KEYS[2]]);
   assert.doesNotMatch(second.text, /Waiting on Cara/);
 });
 
-test("the reply: lines whose evidence isn't in the log, or that state a length or a time, are dropped; at most 4 a part", () => {
-  const input = explainInput('Fix the parser', log, events, KEYS);
+test("the reply: lines whose evidence isn't in the log, or that state a length or a time, are dropped; at most 4 a part", async () => {
+  const input = await explainInput('Fix the parser', log, events, KEYS);
   const real = [...input.labels.keys()];
   const reply = JSON.stringify({
     parts: [
@@ -107,13 +107,13 @@ test("the reply: lines whose evidence isn't in the log, or that state a length o
   assert.deepEqual([...empty.values()], [[], [], []], 'every asked part gets an entry, empty when nothing came back');
 });
 
-test('a length or a clock time in a line', () => {
+test('a length or a clock time in a line', async () => {
   for (const t of ['It took 12 minutes.', 'After an hour it gave up.', 'Waited half an hour.', 'Ran for 37 s.', 'At 3:05 it shipped.', 'two hours of tests', 'several minutes later', 'a 5m run']) assert.ok(statesLength(t), t);
   for (const t of ['It ran the tests twice.', 'It shipped the fix.', 'Step 2 of 4 failed.', 'It waited on Cara.', 'Found 3 bugs in the minutes file.', 'An index takes the query to 40 ms.']) assert.ok(!statesLength(t), t);
 });
 
-test('kept, out of date, and a second press writes only the new parts', () => {
-  const input = explainInput('Fix the parser', log, events, KEYS);
+test('kept, out of date, and a second press writes only the new parts', async () => {
+  const input = await explainInput('Fix the parser', log, events, KEYS);
   const first = new Map(KEYS.map((k, i) => [k, [{ kind: 'work' as const, text: `Part ${i}.`, ev: [1] }]]));
   let e = mergeReading(readExplain(null), log, first, KEYS, { by: 'Josh', at: at(31), cost: 0.004, parts: 3 }, 8);
   assert.equal(input.parts.size, 3);
@@ -148,13 +148,13 @@ test('kept, out of date, and a second press writes only the new parts', () => {
   );
 });
 
-test('a press under way shows to everyone, and one older than the limit is taken as gone', () => {
+test('a press under way shows to everyone, and one older than the limit is taken as gone', async () => {
   const e: Explain = { ...readExplain(null), writing: { by: 'Josh', at: at(0) } };
   assert.deepEqual(explainView(e, log, null, at(1)).writing, { by: 'Josh', at: at(0) });
   assert.equal(explainView(e, log, null, at(10)).writing, null);
 });
 
-test('a saved reading of version 1 still reads, and a later version with fields it does not know', () => {
+test('a saved reading of version 1 still reads, and a later version with fields it does not know', async () => {
   // Frozen: what version 1 writes. Never edit this; add a case for a new version beside it.
   const v1 = `{"v":1,"parts":{"step:${at(0)}":{"lines":[{"kind":"work","text":"It found the bug.","ev":[1,2]}],"end":${at(10)}},"wait:${at(10)}":{"lines":[],"end":${at(20)}}},"upTo":8,"presses":[{"by":"Josh","at":${at(31)},"cost":0.004,"parts":2}]}`;
   const e = readExplain(v1);

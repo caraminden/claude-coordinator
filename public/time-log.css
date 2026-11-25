@@ -70,6 +70,7 @@ button.tl-head { cursor: pointer; }
 .tl-guess { color: var(--muted); font-size: 0.85em; font-weight: 400; }
 .tl-total .tl-guess { font-size: 1em; }
 .tl-note { grid-column: 1 / -1; margin: -0.15rem 0.6rem 0.45rem 2.1rem; font-size: 0.9em; color: var(--muted); overflow-wrap: anywhere; }
+.tl-own { font-style: italic; }
 /* Explain (#1994): its line under the ribbon, and Haiku's lines in a row in place of the minion's outcome. */
 .tl-explain { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; margin-top: 0.5rem; font-size: 0.85em; }
 .tl-explain .tl-stale { color: var(--waiting); }

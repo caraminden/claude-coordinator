@@ -6,7 +6,7 @@ import type { EventRow } from '../db-rows.ts';
 import type { Store } from '../db.ts';
 import { HttpError, json, type Route } from '../http.ts';
 import { runOneShot } from '../review-describe.ts';
-import { EXPLAIN_MODEL, EXPLAIN_SYSTEM, explainInput, explainView, mergeReading, nothingRead, readExplain, readReading, rowKey } from '../time-log-explain.ts';
+import { EXPLAIN_MODEL, EXPLAIN_ROUNDS, EXPLAIN_SYSTEM, type ExplainLine, explainInput, explainView, mergeReading, nothingRead, readExplain, readReading, rowKey } from '../time-log-explain.ts';
 import { timeLog, type LogTicket } from '../time-log.ts';
 import { thrown } from '../thrown.ts';
 import { turnEnv } from '../turn-launch.ts';
@@ -62,30 +62,47 @@ export const timeLogRoutes: Route[] = [
       if (view.writing) throw new HttpError(409, `${view.writing.by} is writing it now`);
       if (!view.fresh.length) return json(res, 200, await logWithExplain(store, ticket));
       const by = session.name ?? 'Someone';
-      store.saveTimeLogExplain(ticket.id, JSON.stringify({ ...saved, writing: { by, at: Date.now() } }));
+      const mine = { by, at: Date.now() };
+      store.saveTimeLogExplain(ticket.id, JSON.stringify({ ...saved, writing: mine }));
       try {
         // From a while before the first new part, so a wait has the minion's last words before it.
         const from = Math.min(...log.rows.filter((r) => view.fresh.includes(rowKey(r)!)).map((r) => r.start!));
         const after = saved.presses.length ? Math.max(0, store.eventIdAt(from - 30 * 60_000) - 1) : 0;
         const events = await eventsFrom(store, ticket.id, after);
-        const input = explainInput(ticket.title, log, events, view.fresh);
-        const { text, cost } = await runOneShot(place, `Log (times Pacific):\n\n${input.text}`, {
-          claudeBin: process.env.CLAUDE_BIN ?? 'claude',
-          hostEnv: turnEnv(process.env),
-          cwd: join(app.claude.turnsDir(uid), 'time-log-explain'),
-          timeoutMs: 3 * 60_000,
-          model: EXPLAIN_MODEL,
-          effort: 'low',
-          system: EXPLAIN_SYSTEM,
-        });
-        const read = readReading(text, input.labels, input.parts);
+        // A long log goes in a few calls; a later call that fails keeps what the earlier ones read.
+        const read = new Map<string, ExplainLine[]>();
+        let cost: number | null = null;
+        let left = view.fresh;
+        for (let round = 0; round < EXPLAIN_ROUNDS && left.length; round++) {
+          const input = await explainInput(ticket.title, log, events, left);
+          try {
+            const got = await runOneShot(place, `Log (times Pacific):\n\n${input.text}`, {
+              claudeBin: process.env.CLAUDE_BIN ?? 'claude',
+              hostEnv: turnEnv(process.env),
+              cwd: join(app.claude.turnsDir(uid), 'time-log-explain'),
+              timeoutMs: 3 * 60_000,
+              model: EXPLAIN_MODEL,
+              effort: 'low',
+              system: EXPLAIN_SYSTEM,
+            });
+            for (const [key, lines] of readReading(got.text, input.labels, input.parts)) read.set(key, lines);
+            if (got.cost !== null) cost = (cost ?? 0) + got.cost;
+          } catch (err) {
+            if (!read.size) throw err;
+            break;
+          }
+          const sent = new Set(input.parts.values());
+          left = left.filter((key) => !sent.has(key));
+        }
         if (nothingRead(read)) throw new Error('Haiku wrote nothing the chat backs up');
-        // Read again: a press can take a minute, and another write (none, by the guard above) or a pruned part may have come.
+        // Every fresh part loses its old lines, read or not: one left out stays fresh (no reading) for the next press.
         saved = readExplain(store.timeLogExplain(ticket.id));
         const upTo = events.at(-1)?.id ?? saved.upTo;
-        store.saveTimeLogExplain(ticket.id, JSON.stringify(mergeReading(saved, log, read, view.fresh, { by, at: Date.now(), cost, parts: input.parts.size }, upTo)));
+        store.saveTimeLogExplain(ticket.id, JSON.stringify(mergeReading(saved, log, read, view.fresh, { by, at: Date.now(), cost, parts: read.size }, upTo)));
       } catch (err) {
-        store.saveTimeLogExplain(ticket.id, JSON.stringify({ ...readExplain(store.timeLogExplain(ticket.id)), writing: undefined }));
+        // Clear only this press's marker: one that ran past the limit may have a newer press behind it.
+        const now = readExplain(store.timeLogExplain(ticket.id));
+        if (now.writing?.at === mine.at && now.writing.by === by) store.saveTimeLogExplain(ticket.id, JSON.stringify({ ...now, writing: undefined }));
         throw new HttpError(502, String(thrown(err).message ?? err).replace(/^The agent didn't answer: /, ''));
       }
       return json(res, 200, await logWithExplain(store, ticket));

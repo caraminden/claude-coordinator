@@ -24,6 +24,7 @@ case "$*" in *stream-json*)
 esac
 { printf 'cwd %s\\n' "$PWD"; for a in "$@"; do printf 'arg %s\\n' "$a"; done; } >> ${seen}
 cat > ${seen}-stdin
+grep -q 'Break the parser' ${seen}-stdin && { echo 'API Error: 529 overloaded' >&2; exit 1; }
 printf '%s' '{"type":"result","is_error":false,"total_cost_usd":0.0031,"result":"{\\"parts\\":[{\\"part\\":\\"P1\\",\\"lines\\":[{\\"text\\":\\"It read the parser to find the bug.\\",\\"kind\\":\\"work\\",\\"evidence\\":[\\"e1\\"]},{\\"text\\":\\"It read for 4 minutes.\\",\\"kind\\":\\"work\\",\\"evidence\\":[\\"e1\\"]}]}]}"}'
 `,
   );
@@ -46,7 +47,11 @@ test('Explain on a running minion: Haiku on the presser login, the minion untouc
     return (Array.isArray(d) ? d : d.events) as { id: number; kind: string; data: unknown }[];
   };
   await until('the turn running and its line in', async () => (await ticket()).status === 'running' && (await events()).some((e) => JSON.stringify(e.data).includes('Reading the parser')));
+  // A message waits in its queue behind the running turn.
+  assert.equal((await srv.call(`/api/tickets/${m.id}/messages`, { text: 'and then this', after: true })).status, 202);
+  await until('the message queued', async () => (await ticket()).queued === 1);
   const before = { t: await ticket(), events: (await events()).map((e) => e.id) };
+  assert.equal(before.t.session_id, 'turn-session');
   const dir = before.t.dir as string | null;
   const files = dir && existsSync(dir) ? readdirSync(dir).sort() : null;
 
@@ -88,7 +93,8 @@ test('Explain on a running minion: Haiku on the presser login, the minion untouc
   // The minion as it was: its turn still running on its own session, nothing new in its chat, its folder alone.
   const now = await ticket();
   assert.equal(now.status, 'running');
-  assert.equal(now.session_id ?? null, before.t.session_id ?? null);
+  assert.equal(now.session_id, 'turn-session');
+  assert.equal(now.queued, 1, 'the queued message still waits');
   assert.deepEqual(
     (await events()).map((e) => e.id),
     before.events,
@@ -109,4 +115,14 @@ test('Explain on a running minion: Haiku on the presser login, the minion untouc
   assert.equal(again.status, 200);
   assert.deepEqual(again.data.explain.fresh, []);
   assert.equal(readFileSync(seen, 'utf8').match(/^cwd /gm)?.length, 1, 'Haiku ran once');
+
+  // A press that fails leaves no reading and no marker behind: the step list stays and Retry can run at once.
+  const { data: m2 } = await srv.call(`/api/projects/${p.id}/tickets`, { message: 'Break the parser', properties: { type: 'chore' } });
+  await until('the second turn running', async () => (await srv.call(`/api/tickets/${m2.id}`)).data.ticket.status === 'running' && (await srv.call(`/api/tickets/${m2.id}/time-log`)).data.rows?.length > 0);
+  const failed = await srv.call(`/api/tickets/${m2.id}/time-log/explain`, {});
+  assert.equal(failed.status, 502, JSON.stringify(failed.data));
+  const log2 = (await srv.call(`/api/tickets/${m2.id}/time-log`)).data;
+  assert.equal(log2.explain.writing, null);
+  assert.deepEqual(log2.explain.presses, []);
+  assert.ok(log2.rows.length, 'the step list is still there');
 });

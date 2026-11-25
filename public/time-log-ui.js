@@ -123,7 +123,7 @@ function rowEl(r, isLast, log) {
     { class: `tl-row tl-${r.type}${r.status ? ` ${r.status}` : ''}${r.kind === 'lost' ? ' lost' : ''}${r.guess ? ' guess' : ''}${r.status === 'in_progress' && !isRunning() ? ' paused' : ''}${on ? ' on' : ''}`, 'data-row': key },
     key ? h('button', { class: 'tl-head', 'aria-pressed': String(!!on), title: `${when}. ${on ? 'Show the whole ribbon' : 'Show on the ribbon'}`, 'data-focus': key, onclick: () => pick(on ? null : key) }, head) : h('div', { class: 'tl-head' }, head),
     r.event ? h('a', { class: 'tl-jump', href: jumpHref(view.ticket, r.event), title: 'Show in the chat', 'aria-label': 'Show in the chat', 'data-focus': `jump ${key}` }, 'Chat ↗') : '',
-    read?.length ? readingOf(read) : line ? h('p', { class: 'tl-note' }, line) : '',
+    read?.length ? readingOf(read) : line ? h('p', { class: 'tl-note' }, read ? h('span', { class: 'tl-own', title: 'Haiku found nothing in the chat to add here' }, 'Its own words: ') : '', line) : '',
   );
 }
 

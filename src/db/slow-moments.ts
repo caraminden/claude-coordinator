@@ -2,7 +2,9 @@
 // tab, and where the time went. Small rows, the newest SLOW_KEEP kept, shown on the Status page.
 import type { Store } from '../db.ts';
 
-export const SLOW_KEEP = 500;
+// Over a day of rows, so the Status page's "in the last day" is whole: people's pages sent 1,924 in the first 36 h (2026-11-25).
+// shortcut: a worse day than this is counted short, raise it if one comes.
+export const SLOW_KEEP = 3000;
 
 export type SlowMoment = {
   id: number;

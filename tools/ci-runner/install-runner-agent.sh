@@ -134,7 +134,7 @@ RestartSec=60
 [Install]
 WantedBy=multi-user.target
 EOF
-skip=$(wc -l < "$log" 2>/dev/null || echo 0)
+skip=0; [[ ! -f $log ]] || skip=$(wc -l < "$log")
 systemctl daemon-reload
 systemctl enable --now citadel-runner-agent >/dev/null
 echo 'Started. Waiting for it to connect...'

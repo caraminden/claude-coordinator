@@ -52,7 +52,7 @@ import { COMPACT_COMMAND, freshStartText, handoffPrompt, LOST_DIGEST_ENTRIES, mi
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorAlive, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
 import { offSkills, pruneKit } from './skills.ts';
-import { alive, copyPinned, launchPlan, type EveryScheme, type LaunchPlan, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wrapperSpec } from './turn-launch.ts';
+import { alive, copyPinned, launchPlan, type EveryScheme, type LaunchPlan, TASKMASTER_SLICE, TURN_BUILD_JOBS, TURN_SLICE, turnEnv, turnPins, turnSettings, USAGE_LIMIT, wrapperSpec } from './turn-launch.ts';
 import { hideTokens } from './hide-tokens.ts';
 import { hideSecrets, hideSecretsIn, secretEnv } from './secrets.ts';
 import { takeStatus, type StatusFields } from './status-trailer.ts';
@@ -4345,7 +4345,7 @@ export class Runner {
    * Start a turn's wrapper in the person's container, detached. Rootless podman leaves an exec's conmon
    * in the caller's cgroup, so a restart of this server's unit SIGTERMs it (conmon passes that on to the
    * wrapper, which ignores it), waits out the stop timeout and SIGKILLs it (#258). So with units,
-   * `podman exec` runs in a transient scope under the turns slice, which the restart leaves alone and
+   * `podman exec` runs in a transient scope under the turns slice (a Taskmaster's under theirs), which the restart leaves alone and
    * which goes once the turn ends. The wrapper's pids are the container's, so the `container` file
    * tells wrapperAlive to go by its heartbeat instead, and on a stale one by whether the wrapper is still in /proc.
    */
@@ -4362,7 +4362,7 @@ export class Runner {
     // Stopped while it started (stop() wrote exit.json), and maybe finished since: nothing more to start or to say.
     const over = async () => !(await exists(dir)) || exists(join(dir, 'exit.json'));
     const exec = ['podman', 'exec', '-d', place.container, ...wrapper];
-    const scoped = ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${TURN_SLICE}`, ...exec];
+    const scoped = ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${this.store.getTicket(ticketId)?.kind === 'coordinator' ? TASKMASTER_SLICE : TURN_SLICE}`, ...exec];
     place
       .ensure()
       // As with host turns, a failed systemd-run still runs the turn, though a restart then SIGKILLs its conmon.

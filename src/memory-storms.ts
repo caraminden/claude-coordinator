@@ -11,6 +11,7 @@ import { every, type Job } from './every.ts';
 import { CGROUP_ROOT, hostText, SELF_CGROUP } from './host-signals.ts';
 import { shownCommand } from './reaper.ts';
 import { thrown } from './thrown.ts';
+import { TASKMASTER_SLICE } from './turn-launch.ts';
 
 export const STORM_EVERY_MS = 15_000;
 /**
@@ -152,7 +153,10 @@ async function readGroup(dir: string): Promise<GroupReading | null> {
 /** The groups that carry limits: citadel.slice itself, its slices and each person's container. */
 const watched = (name: string) => name.endsWith('.slice') || /^citadel-claude-\d+\.service$/.test(name);
 
-/** Reads `dir` (citadel.slice) and its watched children, by path. */
+/** A person's Taskmaster container, in the Taskmasters' slice (#1882). stormPeople leaves it out: its storm holds none of their minions. */
+const taskmasterBox = (name: string) => /^citadel-claude-\d+-tm\.service$/.test(name);
+
+/** Reads `dir` (citadel.slice), its watched children and the Taskmaster containers, by path. */
 export async function readGroups(dir: string): Promise<Map<string, GroupReading>> {
   const out = new Map<string, GroupReading>();
   let names: string[] = [];
@@ -161,7 +165,9 @@ export async function readGroups(dir: string): Promise<Map<string, GroupReading>
   } catch {
     return out;
   }
-  const dirs = [dir, ...names.map((n) => join(dir, n))];
+  const tmSlice = join(dir, TASKMASTER_SLICE);
+  const boxes = (await readdir(tmSlice).catch(() => [] as string[])).filter(taskmasterBox);
+  const dirs = [dir, ...names.map((n) => join(dir, n)), ...boxes.map((n) => join(tmSlice, n))];
   const read = await Promise.all(dirs.map(readGroup));
   dirs.forEach((d, i) => read[i] && out.set(d, read[i]!));
   return out;

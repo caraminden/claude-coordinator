@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { turnPlace } from '../src/access.ts';
 import { ANDROID_JDK, ANDROID_SDK, androidEnv, checkoutMounts, checkoutMountsAsync, ClaudeLink, containerPath, GRADLE_PROPS, IMAGE_PATH, signInOutcome, signInUrl, TOOL_DIRS } from '../src/claude-link.ts';
 import { Containers, runArgs, specHash, unitProps, type RunCmd } from '../src/containers.ts';
 import { Credentials } from '../src/credentials.ts';
@@ -11,7 +12,7 @@ import { CodexLink } from '../src/codex-link.ts';
 import { Store } from '../src/db.ts';
 import { fallbacks } from '../src/fallbacks.ts';
 import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
-import { TURN_SLICE } from '../src/turn-launch.ts';
+import { TASKMASTER_SLICE, TURN_SLICE } from '../src/turn-launch.ts';
 import { jsonLines, lines, tempRoot, testPins, followed, runnerInsides } from './helpers.ts';
 import { until } from './wait.ts';
 import { holds } from './holds.ts';
@@ -128,6 +129,15 @@ function newTicket() {
   store.setTicketDir(t.id, root, null);
   return t.id;
 }
+/** The scheme's one Taskmaster (a scheme has one at a time). */
+let made: { id: number } | undefined;
+function taskmaster() {
+  if (!made) {
+    made = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Josh', kind: 'coordinator' });
+    store.setTicketDir(made.id, root, null);
+  }
+  return made;
+}
 const notes = (id: number) =>
   store
     .listEvents(id)
@@ -214,6 +224,15 @@ test("a container turn's exec runs in a scope of its own under the turns slice, 
   );
   const cmd = scope.slice(scope.findIndex((a: string) => a === 'podman'));
   assert.deepEqual(cmd.slice(0, 4), ['podman', 'exec', '-d', 'citadel-claude-test-2']);
+  // A Taskmaster's goes with the other Taskmaster turns: minions at their slice's limit would stall its exec (#1882).
+  const tm = taskmaster();
+  r.send(tm.id, 'Josh', 'hello');
+  await until("status(tm) === 'idle'", () => status(tm.id) === 'idle' && jsonLines(calls).some((c) => c[0] === 'systemd-run' && c.some((a: string) => a.startsWith('--unit=citadel-turn-') && a.includes(`-${tm.id}-`))));
+  assert.ok(
+    jsonLines(calls)
+      .findLast((c) => c[0] === 'systemd-run')!
+      .includes(`--slice=${TASKMASTER_SLICE}`),
+  );
   assert.ok(notes(id).every((n) => !/citadel-claude-test-2:/.test(n)));
 });
 
@@ -599,10 +618,9 @@ function linkedPerson(tag: string) {
 
 test("a Taskmaster answers while its person's minions hold their container at its limit (#1882)", async () => {
   const { link, uid } = linkedPerson('room');
-  const tm = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Josh', kind: 'coordinator' });
-  store.setTicketDir(tm.id, root, null);
+  const tm = taskmaster();
   const minion = newTicket();
-  const r = runner((_person, warm, taskmaster) => link.place(uid, warm, taskmaster) ?? { refused: 'not linked' });
+  const r = runner((person, warm, taskmaster) => turnPlace(store, link, person, warm, taskmaster));
   r.personOf = () => uid;
   process.env.FAKE_PODMAN_FULL = link.name(uid);
   try {
@@ -642,6 +660,13 @@ test("a Taskmaster's container is its person's other one: same volume and mounts
   // Neither start chowns the volume (:U walks it, and fails on a file the other container deletes meanwhile); a sign-in's does.
   for (const c of [unit, main]) assert.ok(c.includes(`${name}:${process.env.HOME}`), 'the one volume, as it is');
   assert.equal(link.spec(uid).chown, false);
+  const signIn = link as unknown as { logins: Map<number, object> };
+  signIn.logins.set(uid, {});
+  assert.equal(link.spec(uid).chown, true);
+  link.busy = (c) => (c === `${name}-tm` ? 1 : 0);
+  assert.equal(link.spec(uid).chown, false, 'not while a Taskmaster turn writes in it');
+  link.busy = () => 0;
+  signIn.logins.delete(uid);
   assert.equal(new ClaudeLink(store, new Credentials(store, 'x'.repeat(40)), root, fake, new Containers(), 'citadel-claude-new-').spec(store.createUser({ name: 'New', login: 'new' }).id).chown, true);
   // Every mount the same but its list of sessions, which Claude Code keys by pid: one list each.
   const of = (tm: boolean) => link.spec(uid, undefined, tm).mounts.map((m) => `${m.src} ${m.dst}`);

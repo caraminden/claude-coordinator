@@ -33,8 +33,9 @@ const MAX_MASKED = 50;
  */
 export const CONTAINER_MEMORY = { high: '10G', max: '12G', swap: '4G' };
 /**
- * Each person's Taskmaster container (#1882; Josh, 2026-11-24, "Its own small container"): their Taskmasters' turns alone, on the
- * same login volume and files, so minions filling the container above can't slow or kill them. Turns measured 0.2 to 0.6G; at most 8 at once in 14 days.
+ * Each person's Taskmaster container (#1882; Josh, 2026-11-25, "Its own small container"): their Taskmasters' turns alone, on the
+ * same login volume and files, so minions filling the container above can't slow or kill them. Host Taskmaster turns measured 0.4G
+ * (median) to 0.57G at most, and a person had 5 or more at once in 5 of 822 starts in 14 days (8 at most): that many together are throttled.
  */
 export const TASKMASTER_MEMORY = { high: '3G', max: '4G', swap: '2G' };
 
@@ -530,8 +531,8 @@ export class ClaudeLink {
       for (let n = 1; n <= MAX_ACCOUNTS; n++) mounts.push({ src, dst: join(this.home, accountDir(n), 'projects', slug, 'memory') });
     }
     const home = this.meta(uid)?.home;
-    // Only a sign-in's start chowns a volume (link()): any other may find their other container writing in it, which fails the walk.
-    const made = { image: pre?.image ?? this.image(), mounts, env: { HOME: this.home }, chown: !taskmaster && (!home || this.logins.has(uid)) };
+    // Only a sign-in's start chowns a volume (link()), and not while Taskmaster turns write in it: a file that goes mid-walk fails it.
+    const made = { image: pre?.image ?? this.image(), mounts, env: { HOME: this.home }, chown: !taskmaster && (!home || (this.logins.has(uid) && !this.busy(this.taskmasterName(uid)))) };
     if (!taskmaster) return { ...made, name: this.name(uid), memory: CONTAINER_MEMORY };
     // Claude Code lists its running sessions by pid, and the two containers count pids apart: one list each.
     if (home) for (let n = 1; n <= MAX_ACCOUNTS; n++) mounts.push({ src: join(home, accountDir(n), 'sessions-taskmaster'), dst: join(this.home, accountDir(n), 'sessions') });

@@ -118,7 +118,7 @@ export interface Outcome {
   followUps: FollowUp[];
   /** Why it failed: the kill, Claude's own error, or claude's start error. */
   reason: string | null;
-  /** The kill's words, when it was killed from outside. */
+  /** The kill's words, when it was killed from outside, or the crash's when claude aborted itself (SIGABRT). */
   killed: string | null;
   /** Its account's sign-in stopped working. */
   authFailed: boolean;
@@ -145,10 +145,12 @@ export function outcome(end: TurnEnd): Outcome {
   const code = exit?.code ?? null;
   // Citadel never sends SIGABRT: claude raises it on itself when it can't go on (#1848: five turns whose container was refused threads).
   const abort = exit?.signal === 'SIGABRT';
-  const said = abort ? end.stderr.findLast((l) => /pthread|resource temporarily|EAGAIN|out of memory|fatal error|panic/i.test(l))?.trim() : null;
+  // In our words, never stderr's own: it can hold a secret, and this goes in the chat.
+  const said = end.stderr.join('\n');
+  const why = /pthread|resource temporarily|EAGAIN/i.test(said) ? "it couldn't start a thread or a process" : /out of memory|allocation failed/i.test(said) ? 'it ran out of memory' : null;
   // Citadel only signals claude on a stop, so any other signal (143 is claude's own exit on SIGTERM) came from outside.
   const killed = abort
-    ? `Claude crashed with SIGABRT.\nIt stops itself this way when it can't go on: most likely it couldn't start a thread or a process, or it ran out of memory.${said ? ` It said: ${said.slice(0, 300)}` : ''}`
+    ? `Claude crashed with SIGABRT.\nIt stops itself this way when it can't go on: ${why ? `its last output says ${why}` : "most likely it couldn't start a thread or a process, or it ran out of memory"}.`
     : exit && (exit.signal || code === 143)
       ? `Killed by ${exit.signal ?? 'SIGTERM (exit 143)'} from outside Citadel.\nNobody pressed Stop and turns have no time limit, so most likely ${end.ran.unit ? '' : 'the server restarted (this turn ran without a unit of its own) or '}one of the turn's own commands (a kill or pkill) hit claude's process.`
       : // Its wrapper went too, with no record of how: nobody pressed Stop, so it failed (#468 S03-4).

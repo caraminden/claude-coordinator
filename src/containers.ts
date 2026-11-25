@@ -50,9 +50,10 @@ export const runCmd: RunCmd = (cmd, args, opts = {}) =>
 const SPEC_LABEL = 'citadel.spec';
 
 /**
- * The container's own ceiling on tasks (processes and threads), shared by every turn the person runs at once. Podman's
- * default of 2048 refused 504 forks on 2026-11-24 and five claudes aborted (#1848). Just under the unit's own TasksMax
- * (35743 on perigee), so a fork bomb still stops here.
+ * The payload cgroup's ceiling on tasks (processes and threads), shared by every turn the person runs at once. Podman's
+ * default of 2048 refused 504 forks on 2026-11-24 and five claudes aborted (#1848). It holds only until systemd takes the
+ * payload's controllers back (seen later in a container's life: no pids.max, 3083 threads); from then on only the unit's
+ * TasksMax (35743 on perigee) does. Just under that, so either way about the same ceiling applies.
  */
 const PIDS_LIMIT = 32_768;
 

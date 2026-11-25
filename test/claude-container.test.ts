@@ -373,8 +373,8 @@ test('podman run arguments: keep-id, host network, a :U volume, binds at their o
     args.filter((x) => x.startsWith('--pids-limit')),
     ['--pids-limit=32768'],
   );
-  // The hash of this spec before the limit, so a container started then is seen as changed and restarts once idle.
-  assert.notEqual(specHash(spec), '58d8a50d7a94');
+  // The limit is in the hash (without it this spec's is 58d8a50d7a94), so a container started before it restarts once idle.
+  assert.equal(specHash(spec), '3851a80c72b8');
   for (const a of ['--userns=keep-id', '--network=host', '--init', '--rm']) assert.ok(args.includes(a), a);
   assert.ok(!args.some((a) => /--pid=host|--privileged/.test(a)));
   assert.ok(args.includes('citadel-claude-1:/home/u:U'));

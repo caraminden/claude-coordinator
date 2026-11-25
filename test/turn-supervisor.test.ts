@@ -30,10 +30,11 @@ writeFileSync(
   join(bin, 'systemd-run'),
   `#!/bin/sh
 echo "$*" >> "${bin}/calls"
-scope= expand=1
+scope= expand=1 unit=
 while [ $# -gt 0 ]; do case $1 in
   --) shift; break;;
   --scope) scope=1;;
+  --unit=*) unit=\${1#--unit=};;
   --expand-environment=no) expand=;;
   -p|-E) shift;;
   -*) ;;
@@ -44,7 +45,15 @@ if [ -n "$scope" ]; then
   [ -f "${bin}/hang-scope" ] && : > "${bin}/scope-hanging"
   while [ -f "${bin}/hang-scope" ]; do sleep 0.05; [ -f "${bin}/hang-scope" ] || exit 1; done
   [ -f "${bin}/no-scope" ] || [ -n "$expand" ] && { echo "no scopes here" >&2; exit 1; }; exec "$@"; fi
+# One unit of a name at a time, as systemd has it: the runner asks again every 100 ms here while its supervisor is
+# starting, and without this each ask started another, which wrote its supervisor.json over a later test's stand-in (#1872).
+until mkdir "${bin}/starting" 2>/dev/null; do sleep 0.02; done
+was=$(cat "${bin}/$unit.pid" 2>/dev/null)
+if [ -n "$was" ] && kill -0 "$was" 2>/dev/null; then
+  rmdir "${bin}/starting"; echo "Unit $unit.service was already loaded" >&2; exit 1; fi
 setsid "$@" </dev/null >/dev/null 2>&1 &
+echo $! > "${bin}/$unit.pid"
+rmdir "${bin}/starting"
 `,
 );
 writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "systemctl $*" >> "${bin}/calls"\n`);
@@ -326,6 +335,7 @@ test('"Is this still going?" on a supervisor turn names the command claude runs,
 test('the runner starts its supervisor when it starts, before any turn', async () => {
   const r = server();
   (r as any).turnsDir = join(root, 'warm');
+  (r as any).unitTag = 'warm'; // a turns folder of its own has a unit name of its own: the one above still runs
   mkdirSync(join(root, 'warm'));
   assert.equal(readSupervisor(spec(r).dir), null);
   r.recover();

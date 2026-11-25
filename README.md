@@ -211,6 +211,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/turn-row.ts` | One turn's row: what a result event says of it, and its write, shared by `recordTurn` and `backfillTurns` (#1877) |
 | `src/db.ts`, `src/db-schema.ts`, `src/db-rows.ts` | The SQLite database: `db.ts` opens it and holds the migrations, settings and area list; `db-schema` is the CREATE TABLE text; `db-rows` holds the row types and the option lists and limits that go with them, which `db.ts` re-exports |
 | `src/auth.ts` | Per-person sign-in (and the admin's shared password), invite links, signed session cookies |
+| `src/avatar.ts`, `public/avatars.js`, `public/avatar-card.js` | Speaker avatars in chat, a person's own switch (off until turned on) and picture: saved, marked on every speaker's name (drawn by `public/avatars.css`), and its account row |
 | `src/access.ts`, `src/routes/people.ts`, `public/people.js` | Who sees what: news filtered by scheme membership, the turn gate, People and Members |
 | `public/` | Front end (vanilla JS, no build); its files are in the rows below |
 | `kit/` | The Citadel kit: a Claude Code plugin (skills, agents, hooks) every turn of every scheme loads |

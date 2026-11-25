@@ -48,17 +48,14 @@ export async function readAvatar(store: Store, dataDir: string, person: number) 
   return pic && body ? { type: pic.type, body } : null;
 }
 
-const url = (person: number, pic: AvatarPic) => `api/people/${person}/avatar?v=${pic.v}`;
-
-/** What api/me says: whether this person has avatars on, their own picture, and (only with it on) everyone's, by display name. */
+/** What api/me says: whether this person has avatars on, their own picture, and everyone's by display name (or null). */
 export function avatarsView(store: Store, person: number) {
-  const on = store.getSetting<boolean>(avatarsOnKey(person)) === true;
-  const mine = store.getSetting<AvatarPic>(avatarPicKey(person));
-  const people: Record<string, string> = {};
-  if (on)
-    for (const u of store.listUsers()) {
-      const pic = store.getSetting<AvatarPic>(avatarPicKey(u.id));
-      if (pic) people[u.name] = url(u.id, pic);
-    }
-  return { on, pic: mine ? url(person, mine) : null, people };
+  // In id order, which is the order their hues go by (public/avatars.js).
+  const people: Record<string, string | null> = {};
+  for (const u of store.listUsers()) {
+    const pic = store.getSetting<AvatarPic>(avatarPicKey(u.id));
+    people[u.name] = pic ? `api/people/${u.id}/avatar?v=${pic.v}` : null;
+  }
+  const name = store.getUser(person)?.name ?? '';
+  return { on: store.getSetting<boolean>(avatarsOnKey(person)) === true, pic: people[name] ?? null, people };
 }

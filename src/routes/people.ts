@@ -455,20 +455,16 @@ export const peopleRoutes: Route[] = [
     },
   },
   {
-    // Your picture: the page crops it to a small square first, so the body is the image itself.
+    // Your picture, as base64: the page crops it to a small square first.
     method: 'PUT',
     path: '/api/me/avatar',
     who: ['person'],
     async handler({ req, res, app, session }) {
-      const chunks: Buffer[] = [];
-      let size = 0;
-      for await (const chunk of req) {
-        size += chunk.length;
-        if (size > AVATAR_MAX_BYTES) throw new HttpError(413, `The picture must be under ${AVATAR_MAX_BYTES / 1024} KB`);
-        chunks.push(chunk);
-      }
+      const { data } = await readJson(req, AVATAR_MAX_BYTES * 2);
+      const body = Buffer.from(typeof data === 'string' ? data : '', 'base64');
+      if (body.length > AVATAR_MAX_BYTES) throw new HttpError(413, `The picture must be under ${AVATAR_MAX_BYTES / 1024} KB`);
       const uid = uidOf(session);
-      await saveAvatar(app.store, app.dataDir, uid, Buffer.concat(chunks));
+      await saveAvatar(app.store, app.dataDir, uid, body);
       return json(res, 200, avatarsView(app.store, uid));
     },
   },

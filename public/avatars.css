@@ -1,0 +1,59 @@
+/* Speaker avatars in chat (#1976), only for a person who turned them on (avatars.js). Picked by Josh on 2026-11-25 from
+   three rounds of mocks: in the name row at 28px, hooded figures "Each its own hood", minions crimson, the name and the
+   bubble's left edge in the speaker's hue. People's hues skip the minions' red and the Taskmasters' violet. */
+.speaker-avatars {
+  --av-size: 28px;
+  --av-minion: #be123c;
+  --av-grunt: #6b6862;
+  --av-app: #6b7280;
+  --av-sun: #a16207;
+}
+@media (prefers-color-scheme: dark) { .speaker-avatars { --av-minion: #fb7185; --av-grunt: #a8a29e; --av-app: #9ca3af; --av-sun: #fde047; } }
+.speaker-avatars :is([data-speaker="minion"], .msg:has(> .who[data-speaker="minion"], > summary > .who[data-speaker="minion"])) { --av-hue: var(--av-minion); }
+.speaker-avatars :is([data-speaker="taskmaster"], .msg:has(> .who[data-speaker="taskmaster"], > summary > .who[data-speaker="taskmaster"])) { --av-hue: var(--held); }
+.speaker-avatars :is([data-speaker="overlord"], .msg:has(> .who[data-speaker="overlord"], > summary > .who[data-speaker="overlord"])) { --av-hue: var(--held); }
+.speaker-avatars :is([data-speaker="grunt"], .msg:has(> .who[data-speaker="grunt"], > summary > .who[data-speaker="grunt"])) { --av-hue: var(--av-grunt); }
+.speaker-avatars :is([data-speaker="citadel"], .msg:has(> .who[data-speaker="citadel"], > summary > .who[data-speaker="citadel"])) { --av-hue: var(--av-app); }
+.speaker-avatars :is([data-speaker="github"], .msg:has(> .who[data-speaker="github"], > summary > .who[data-speaker="github"])) { --av-hue: var(--av-app); }
+.speaker-avatars :is([data-person-hue="0"], .msg:has(> .who[data-person-hue="0"], > summary > .who[data-person-hue="0"])) { --av-hue: var(--cat-2); }
+.speaker-avatars :is([data-person-hue="1"], .msg:has(> .who[data-person-hue="1"], > summary > .who[data-person-hue="1"])) { --av-hue: var(--cat-5); }
+.speaker-avatars :is([data-person-hue="2"], .msg:has(> .who[data-person-hue="2"], > summary > .who[data-person-hue="2"])) { --av-hue: var(--cat-4); }
+.speaker-avatars :is([data-person-hue="3"], .msg:has(> .who[data-person-hue="3"], > summary > .who[data-person-hue="3"])) { --av-hue: var(--av-sun); }
+.speaker-avatars [data-speaker="minion"] { --avatar: url(avatar-minion.svg); }
+.speaker-avatars [data-speaker="taskmaster"] { --avatar: url(avatar-taskmaster.svg); }
+.speaker-avatars [data-speaker="overlord"] { --avatar: url(avatar-overlord.svg); }
+.speaker-avatars [data-speaker="grunt"] { --avatar: url(avatar-grunt.svg); }
+.speaker-avatars [data-speaker="citadel"] { --avatar: url(icon.svg); }
+.speaker-avatars [data-speaker="github"] { --avatar: url(avatar-github.svg); }
+/* The avatar stands left of the name, whose lines keep clear of it; ::before is an ask's disclosure mark. */
+.speaker-avatars .who[data-speaker] { position: relative; padding-left: calc(var(--av-size) + 0.5rem); padding-block: max(0px, (var(--av-size) - 1lh) / 2); }
+.speaker-avatars .who[data-speaker]::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--av-size);
+  height: var(--av-size);
+  background: var(--avatar) center / cover;
+}
+.speaker-avatars .who[data-speaker="person"]::after { border-radius: 50%; }
+/* No picture: their initial on their colour. */
+.speaker-avatars .who[data-speaker="person"]:not(.has-pic)::after {
+  content: attr(data-initial);
+  content: attr(data-initial) / '';
+  display: grid;
+  place-items: center;
+  background: var(--av-hue);
+  color: var(--on-accent);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+/* A collapsed row gives back the height the avatar takes. */
+.speaker-avatars .msg.coord > summary .who[data-speaker] { margin-block: -0.2rem; }
+/* The name and the bubble's left edge in the speaker's hue; cards keep their own colours. The row's tags stay muted. */
+.speaker-avatars :is(.msg > .who, .msg > summary > .who)[data-speaker] { color: var(--av-hue); font-weight: 600; }
+:where(.speaker-avatars .who[data-speaker]) .msg-tag { color: var(--muted); font-weight: normal; }
+.speaker-avatars .msg:has(> .who[data-speaker], > summary > .who[data-speaker]) { border-left: 3px solid var(--av-hue); border-radius: 3px 10px 10px 3px; }
+/* The settings sample. */
+.avatar-sample { display: flex; flex-direction: column; gap: 0.5rem; max-width: 26rem; margin-block: 0.25rem; }
+.avatar-sample p { margin: 0; }

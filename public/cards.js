@@ -1,5 +1,6 @@
 // The cards in a chat that wait on a person: approval (and merge), plan, loop and question cards.
 // appendEvent in thread.js builds them, and each registers itself in view.cards so later events settle it.
+import { asSpeaker } from './avatars.js';
 import { account, ago, api, fileHref, fileKind, fileUrl, h, noAutofill, isCoordinator, me, taskmasterLabel, taskmasterName, view } from './base.js';
 import { catchUpEvents, markdown, threadRefs } from './core.js';
 import { optimistic } from './ui/optimistic.js';
@@ -22,6 +23,13 @@ export function speaker(doing = '') {
   return doing ? ['The ', taskmasterLabel(view.ticket.project_id), ` ${doing}`] : taskmasterLabel(view.ticket.project_id);
 }
 
+/** Which speaker that is, for its avatar (avatars.js). With one Taskmaster per person (#919) the one that is nobody's is the Overlord. */
+export function speakerKind() {
+  if (!view.ticket || !isCoordinator(view.ticket)) return 'minion';
+  const own = view.taskmasters?.some((t) => t.person_id != null) && view.taskmasters.find((t) => t.id === view.ticket.id)?.person_id === null;
+  return view.part?.overlord || (!view.part && own) ? 'overlord' : 'taskmaster';
+}
+
 /**
  * A card's header line: who asks, and on a card addressed to one person (#687) whom, with how long it has
  * waited on them ("Your Minion asks Josh · waiting on Josh, 4m"), until done() says how it ended. `opts.at` is
@@ -31,7 +39,7 @@ function whoLine(doing, card, opts = {}) {
   const verb = card.to ? `${doing} ${card.to === me ? 'you' : card.to}` : doing;
   const wait = h('span', { class: 'to-wait' }, card.to ? ` · waiting on ${card.to === me ? 'you' : card.to}${opts.at ? `, ${ago(opts.at).replace(/ ago$/, '')}` : ''}` : '');
   return {
-    el: h('div', { class: 'who' }, speaker(verb), wait),
+    el: asSpeaker(h('div', { class: 'who' }, speaker(verb), wait), speakerKind()),
     done(text) {
       if (!card.to) return;
       wait.textContent = ` · ${text}`;
@@ -81,7 +89,7 @@ export function approvalCard(ticketId, card) {
   const el = h(
     'div',
     { class: `qcard acard${m ? ' mcard' : ''}` },
-    ...(m ? mergeHead(m, desc, call) : [h('div', { class: 'who' }, speaker('asks to run')), h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, card.tripwire ? 'Tripwire' : 'Needs approval'), toolTitle(card.tool)), desc, ...call]),
+    ...(m ? mergeHead(m, desc, call) : [asSpeaker(h('div', { class: 'who' }, speaker('asks to run')), speakerKind()), h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, card.tripwire ? 'Tripwire' : 'Needs approval'), toolTitle(card.tool)), desc, ...call]),
     card.tripwire ? h('div', { class: 'anote' }, `Blocked because: ${card.tripwire.reason}`) : '',
     h('div', { class: 'anote' }, `Approve runs this one call once. If the turn is stopped first, it expires and doesn't run.`),
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), deny, approve),
@@ -154,7 +162,7 @@ function mergeHead(m, desc, call) {
     !pr && (m.moved && !m.repo ? "The command changes folder first, so the PR wasn't looked up." : "Couldn't look the PR up on GitHub; this is what the command says."),
   ].filter(Boolean);
   return [
-    h('div', { class: 'who' }, speaker(intoBuild(m) ? 'asks to merge into the build' : 'asks to ship')),
+    asSpeaker(h('div', { class: 'who' }, speaker(intoBuild(m) ? 'asks to merge into the build' : 'asks to ship')), speakerKind()),
     h(
       'div',
       { class: 'qtitle' },

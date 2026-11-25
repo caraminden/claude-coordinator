@@ -20,9 +20,10 @@ import { sideEvent } from './sidethread.js';
 import { selectActions } from './selectact.js';
 import { chatWelcome, refreshWelcome } from './welcome.js';
 import { applyEvent, createProgress, nowDoing, planEstimate, runningFor } from './progress.js';
+import { asSpeaker, authorKind } from './avatars.js';
 import { clamp, markQueued, messageBody, previewNodes, showTakenBack, strikeNote, unclamp, userBubble } from './bubbles.js';
 import { initSeen, leftText, narrow, phaseRows, progressUi, renderProgress, scheduleProgress } from './progress-ui.js';
-import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, settleSpend, speaker, spendCard } from './cards.js';
+import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, settleSpend, speaker, speakerKind, spendCard } from './cards.js';
 import { markHeld, refreshBranch, renderTicketHead, unpark } from './thread-head.js';
 import { openLine, startNowLine } from './worker-line.js';
 
@@ -613,7 +614,7 @@ function drawEvent(event, scroll) {
       else if (data.author !== me) card.el.dataset.at = event.created_at;
     } else if (data.answer) {
       // The card is in history not loaded yet.
-      nodes.push(stamped(h('div', { class: 'msg user answer' }, h('div', { class: 'who' }, data.author), data.answer.secret ? h('div', { class: 'answer-lines' }, `→ saved the secret as ${data.answer.secret}`) : answerSummary(data.answer.answers)), event));
+      nodes.push(stamped(h('div', { class: 'msg user answer' }, asSpeaker(h('div', { class: 'who' }, data.author), authorKind(data.author), data.author), data.answer.secret ? h('div', { class: 'answer-lines' }, `→ saved the secret as ${data.answer.secret}`) : answerSummary(data.answer.answers)), event));
     } else {
       const bubble = userBubble(
         data.author,
@@ -781,7 +782,7 @@ function drawEvent(event, scroll) {
         // A reply the link check sent back, which its rewrite replaced (#281).
         if (block.type === 'text' && block.text.trim() && !data.replaced) {
           const body = messageBody(block.text, data.strikes, event.ticket_id, event.id);
-          const msg = stamped(h('div', { class: 'msg reply', 'data-reply-event': event.id }, h('div', { class: 'who' }, speaker()), body), event);
+          const msg = stamped(h('div', { class: 'msg reply', 'data-reply-event': event.id }, asSpeaker(h('div', { class: 'who' }, speaker()), speakerKind()), body), event);
           nodes.push(msg);
           spoke = msg;
           view.latestReply = event.id;
@@ -916,7 +917,7 @@ function addGruntText(log, id, text, data, event) {
     line = h(
       'details',
       { class: 'msg coord grunt', 'data-grunt': id, 'data-at': event.created_at },
-      h('summary', {}, stepMark('done'), h('span', { class: 'who' }, h('span', { class: 'name' }, `Grunt · ${name}`)), h('span', { class: 'preview' }), h('span', { class: 'dur' })),
+      h('summary', {}, stepMark('done'), asSpeaker(h('span', { class: 'who' }, h('span', { class: 'name' }, `Grunt · ${name}`)), 'grunt'), h('span', { class: 'preview' }), h('span', { class: 'dur' })),
       h('div', { class: 'msg grunt-body' }, body),
     );
     // Not `name`: on a <details> that makes same-named lines one group, opening one closing the rest.
@@ -935,7 +936,7 @@ function addGruntText(log, id, text, data, event) {
   }
   if (!line.isConnected) group.lastChild.append(line);
   const all = [...group.lastChild.children];
-  group.firstChild.replaceChildren(h('span', { class: 'who' }, groupTitle(all.length, Math.max(...all.map((l) => l.end)) - Math.min(...all.map((l) => l.start)), shortDuration)), h('span', { class: 'preview' }, all.map((l) => l.gruntLabel).join(', ')));
+  group.firstChild.replaceChildren(asSpeaker(h('span', { class: 'who' }, groupTitle(all.length, Math.max(...all.map((l) => l.end)) - Math.min(...all.map((l) => l.start)), shortDuration)), 'grunt'), h('span', { class: 'preview' }, all.map((l) => l.gruntLabel).join(', ')));
 }
 
 /** An empty group row for copies of minion-to-minion messages; addMinionCopy fills it. */
@@ -964,7 +965,7 @@ function addMinionCopy(group, data, event) {
 
 /** An empty group row for one sender's tracking notes; addTracked fills it. */
 function newTracked(author) {
-  return h('details', { class: 'msg coord mcopies tracked', 'data-author': author }, h('summary', {}, h('span', { class: 'who' }), h('span', { class: 'preview' })), h('div', { class: 'mc-list' }));
+  return h('details', { class: 'msg coord mcopies tracked', 'data-author': author }, h('summary', {}, asSpeaker(h('span', { class: 'who' }), authorKind(author), author), h('span', { class: 'preview' })), h('div', { class: 'mc-list' }));
 }
 
 /** One tracking note's own row into its group: the count and the sender in the summary, the newest note as the preview. */
@@ -1034,7 +1035,7 @@ function narrationSummary(row) {
   const bodies = row.querySelectorAll(':scope > .notes > .note-text > [data-body]');
   const n = bodies.length;
   const last = bodies[n - 1];
-  row.querySelector('summary').replaceChildren(h('span', { class: 'who' }, h('span', { class: 'name' }, `${n} update${n === 1 ? '' : 's'}`)), h('span', { class: 'preview' }, last ? previewNodes(last.source, last.strikes) : ''));
+  row.querySelector('summary').replaceChildren(asSpeaker(h('span', { class: 'who' }, h('span', { class: 'name' }, `${n} update${n === 1 ? '' : 's'}`)), speakerKind()), h('span', { class: 'preview' }, last ? previewNodes(last.source, last.strikes) : ''));
 }
 
 /**
@@ -1051,7 +1052,12 @@ export function syncHeldBrief() {
   if (old?.dataset.key === key) return;
   old?.remove();
   const body = markdown(b.text, view.ticket.id);
-  const el = h('div', { class: `msg user held-brief ${senderTone(b.from)}`.trim(), 'data-key': key }, h('div', { class: 'who' }, h('span', { class: 'name' }, b.from), h('span', { class: 'msg-tag' }, threadRefs(`Brief, held until #${b.leader} ${b.is ?? (b.when === 'live' ? 'is live' : 'has shipped')}`))), body);
+  const el = h(
+    'div',
+    { class: `msg user held-brief ${senderTone(b.from)}`.trim(), 'data-key': key },
+    asSpeaker(h('div', { class: 'who' }, h('span', { class: 'name' }, b.from), h('span', { class: 'msg-tag' }, threadRefs(`Brief, held until #${b.leader} ${b.is ?? (b.when === 'live' ? 'is live' : 'has shipped')}`))), authorKind(b.from), b.from),
+    body,
+  );
   if (b.text.length > 500 || b.text.split('\n').length > 8) {
     el.classList.add('clamped');
     el.append(

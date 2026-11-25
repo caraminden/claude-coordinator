@@ -648,21 +648,25 @@ test("turning off kept app chats deletes the person's kept files and no one else
 
 test('speaker avatars (#1976): off until you turn them on, yours alone, and a picture is a small real image', async () => {
   const on = async (who: string) => (await as(who, '/api/me')).data.avatars;
-  assert.deepEqual(await on('Josh'), { on: false, pic: null, people: {} });
+  const { people: all, ...first } = await on('Josh');
+  assert.deepEqual(first, { on: false, pic: null });
+  assert.ok('Cara' in all && Object.values(all).every((p) => p === null));
   assert.equal((await as('Josh', '/api/me/avatars', { on: 'yes' }, 'PUT')).status, 400);
   assert.equal((await as('Josh', '/api/me/avatars', { on: true }, 'PUT')).status, 200);
   assert.equal((await on('Josh')).on, true);
   assert.equal((await on('Cara')).on, false, 'nobody else');
 
-  const put = async (who: string, body: Buffer) => fetch(srv.base + '/api/me/avatar', { method: 'PUT', headers: { cookie: people[who].cookie, 'Content-Type': 'image/png' }, body: new Uint8Array(body) });
+  const put = (who: string, body: Buffer) => as(who, '/api/me/avatar', { data: body.toString('base64') }, 'PUT');
   const png = Buffer.concat([Buffer.from('\x89PNG\r\n\x1a\n', 'latin1'), Buffer.alloc(40)]);
   assert.equal((await put('Cara', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'))).status, 400);
   assert.equal((await put('Cara', Buffer.concat([png, Buffer.alloc(300 * 1024)]))).status, 413);
+  assert.equal((await as('Cara', '/api/me/avatar', { data: 7 }, 'PUT')).status, 400);
   assert.equal((await put('Cara', png)).status, 200);
   const mine = await on('Cara');
   assert.match(mine.pic, /^api\/people\/\d+\/avatar\?v=\w+$/);
-  assert.deepEqual(mine.people, {}, 'with the switch off, no pictures are sent');
-  assert.deepEqual((await on('Josh')).people, { Cara: mine.pic });
+  const seen = (await on('Josh')).people;
+  assert.equal(seen.Cara, mine.pic);
+  assert.equal(seen.Josh, null);
   const got = await fetch(`${srv.base}/${mine.pic}`, { headers: { cookie: people.Josh.cookie } });
   assert.equal(got.headers.get('content-type'), 'image/png');
   assert.equal(got.headers.get('x-content-type-options'), 'nosniff');
@@ -671,7 +675,7 @@ test('speaker avatars (#1976): off until you turn them on, yours alone, and a pi
   assert.equal((await fetch(`${srv.base}/${mine.pic}`)).status, 401, 'signed-in people only');
 
   assert.equal((await as('Cara', '/api/me/avatar', undefined, 'DELETE')).data.pic, null);
-  assert.deepEqual((await on('Josh')).people, {});
+  assert.equal((await on('Josh')).people.Cara, null);
   assert.equal((await as('Josh', new URL(`${srv.base}/${mine.pic}`).pathname)).status, 404);
   await as('Josh', '/api/me/avatars', { on: false }, 'PUT');
 });
@@ -682,8 +686,8 @@ test('removing a person removes their picture and their switch (#1976)', async (
   const claimed = await fetch(`${srv.base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'paula-password' }) });
   const cookie = claimed.headers.get('set-cookie')!.split(';')[0];
   await fetch(`${srv.base}/api/me/avatars`, { method: 'PUT', headers: { cookie, 'Content-Type': 'application/json' }, body: '{"on":true}' });
-  const jpeg = new Uint8Array(Buffer.from('\xff\xd8\xff\xe0 sample', 'latin1'));
-  assert.equal((await fetch(`${srv.base}/api/me/avatar`, { method: 'PUT', headers: { cookie }, body: jpeg })).status, 200);
+  const jpeg = Buffer.from('\xff\xd8\xff\xe0 sample', 'latin1').toString('base64');
+  assert.equal((await fetch(`${srv.base}/api/me/avatar`, { method: 'PUT', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ data: jpeg }) })).status, 200);
   const file = join(srv.data, 'avatars', String(id));
   assert.ok(existsSync(file));
   assert.equal((await as('Cara', `/api/people/${id}`, undefined, 'DELETE')).status, 200);

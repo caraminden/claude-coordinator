@@ -819,7 +819,6 @@ const longJobs = new LongJobs({
   },
   hold: (slug, since) => ciHold.why(slug, since),
   heldRun: (run) => ciHold.isHeld(run),
-  report: (slug, text) => tellHeld(slug, text),
 });
 // The pump's and CI's lookups read this, not the folder (#1980).
 if (!BOOT_CHECK) every('long jobs folder', 3_000, () => longJobs.refresh());
@@ -2092,6 +2091,9 @@ const ciHold = new CiHold({
   report: tellHeld,
   number: (id) => store.getTicket(id)?.number ?? undefined,
   changed: (id) => runner.broadcastTicket(id),
+  waiting: () => longJobs.list().flatMap((j) => (j.state === 'queued' && j.held_at && j.held_why ? [{ id: j.id, repo: j.slug.toLowerCase(), ticket: j.ticket, what: j.what, since: j.held_at, why: j.held_why, reported: !!j.reported }] : [])),
+  told: (heavyId) => void longJobs.told(heavyId).catch((e) => console.error(`CI hold: ${heavyId}: ${e?.message ?? e}`)),
+  heldTold: (heavyId) => longJobs.list().find((j) => j.id === heavyId)?.reported,
   store,
   publish: (state) => writeHold(join(DATA_DIR, 'projects', '.heavy'), state),
 });

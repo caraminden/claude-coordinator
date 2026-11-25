@@ -163,6 +163,19 @@ test('a message queued behind the turn defers the dismissal to the end of that t
   assert.equal(status(id), 'closed');
 });
 
+test("a held CI run's line is the minion's note in its view, until it is dismissed", () => {
+  const id = newTicket();
+  store.updateTicket(id, { state: 'outside', note: '50-run proof running' });
+  runner.heldLine = (t) => (t === id ? 'held off CI since 4:20 AM PST, ships first' : null);
+  try {
+    assert.equal(runner.view(store.getTicket(id)!).note, 'held off CI since 4:20 AM PST, ships first');
+    store.updateTicket(id, { status: 'closed' });
+    assert.equal(runner.view(store.getTicket(id)!).note, '50-run proof running');
+  } finally {
+    runner.heldLine = undefined;
+  }
+});
+
 test("a red's fix minion isn't dismissed by its deploy or close_self until CI health lets it go; green dismisses it (#1074)", () => {
   const id = newTicket();
   let hold: string | null = 'it fixes the red tests run 9201 on main';

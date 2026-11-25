@@ -249,20 +249,25 @@ test('a handed-over job starts in the day once the line is empty, on the side ru
   assert.equal(longView(readLongJobs(s.dir), NOON)[0].quiet, true);
 });
 
-test('ships hold a long job at night too, and one held over a day is told to the Taskmaster once', async () => {
+test('ships hold a long job at night too, and it keeps since when and why for the hold to tell', async () => {
   const s = setup([1], { now: NIGHT });
-  const told: string[] = [];
-  s.deps.hold = () => 'a ship is in line';
-  s.deps.report = (_slug, text) => told.push(text);
+  let why: string | null = 'a ship is in line';
+  s.deps.hold = () => why;
   let now = NIGHT;
   s.deps.now = () => now;
   await s.pump.pump();
   assert.equal(s.dispatches().length, 0);
-  now = readLongJobs(s.dir)[0].held_at! + 24 * 3600_000;
+  const since = readLongJobs(s.dir)[0].held_at;
+  now += 3600_000;
+  why = '2 ships are in line';
   await s.pump.pump();
+  await s.pump.refresh();
+  await s.pump.told(readLongJobs(s.dir)[0].id);
+  assert.deepEqual([readLongJobs(s.dir)[0].held_at, readLongJobs(s.dir)[0].held_why, readLongJobs(s.dir)[0].reported], [since, '2 ships are in line', true]);
+  why = null;
   await s.pump.pump();
-  assert.equal(told.length, 1);
-  assert.match(told[0], /held off the CI desktop for over 24 hours .*a ship is in line/);
+  assert.equal(s.dispatches().length, 1);
+  assert.equal(readLongJobs(s.dir)[0].held_why, undefined, 'dispatched: no longer waiting');
 });
 
 test('a running job the hold stopped is not ended by its cancelled run, and wakes its minion when the run comes back and ends', async () => {

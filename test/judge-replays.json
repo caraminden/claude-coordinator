@@ -18,10 +18,10 @@
     "summary": "0 as before, 0 new, 0 gone"
   },
   "ci-hold": {
-    "hash": "7c5b21fc758e7cd8",
+    "hash": "a0c5b77456bef73e",
     "at": "2026-11-25",
     "days": 3,
-    "inputs": "571 CI runs of caraminden/claude-coordinator (gh, read-only); 203 runs held, waits median 110 min, longest 1352 min",
+    "inputs": "569 CI runs of caraminden/claude-coordinator (gh, read-only); 205 runs held, waits median 100 min, longest 1125 min",
     "hits": 262,
     "real": 0,
     "summary": "0 as before, 262 new, 0 gone"

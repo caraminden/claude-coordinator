@@ -4,7 +4,7 @@
 // host had 12 to 15 GB free. Only the journal saw it. This reads citadel.slice and its slices and containers every 15 s and,
 // when one gains `high` events in its own memory.events.local while its tasks stall on memory for at least LINE of the
 // time (memory.pressure's `some` total), records a 'memory-high' health event once the storm ends: the group, how long,
-// the seconds stalled and its largest unit. The Status page shows them. Read-only, and quiet where there is no such cgroup.
+// the seconds stalled, its largest unit and its top processes by anon memory. The Status page shows them. Read-only, and quiet where there is no such cgroup.
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { every, type Job } from './every.ts';
@@ -52,6 +52,47 @@ export interface Storm {
   /** The largest unit inside it at the worst reading, and its memory. */
   unit: string | null;
   unitBytes: number | null;
+  /** Its processes using the most anon memory (RSS plus swap) at the worst reading, biggest first (#1876). */
+  top?: Proc[];
+}
+
+/** One process in a group, by anon memory: /proc/<pid>/status's RssAnon and VmSwap (not memory.peak, which counts page cache). */
+export interface Proc {
+  pid: number;
+  anon: number;
+  swap: number;
+  /** Its command line, cut to CMD_CHARS. */
+  cmd: string;
+}
+
+/** How many processes a storm names, and how much of each command line. */
+export const TOP_N = 5;
+const CMD_CHARS = 120;
+
+/** The `n` processes in cgroup `dir` and every cgroup below it with the most anon memory (RSS plus swap), biggest first. */
+export async function topProcesses(dir: string, n = TOP_N, proc = '/proc'): Promise<Proc[]> {
+  const pids: number[] = [];
+  const walk = async (at: string, depth: number): Promise<void> => {
+    const [procs, kids] = await Promise.all([readFile(join(at, 'cgroup.procs'), 'utf8').catch(() => ''), readdir(at, { withFileTypes: true }).catch(() => [])]);
+    for (const p of procs.split('\n')) if (/^\d+$/.test(p)) pids.push(Number(p));
+    if (depth < 8) await Promise.all(kids.filter((e) => e.isDirectory()).map((e) => walk(join(at, e.name), depth + 1)));
+  };
+  await walk(dir, 0);
+  const kb = (status: string, key: string) => 1024 * Number(status.match(new RegExp(`^${key}:\\s+(\\d+) kB`, 'm'))?.[1] ?? 0);
+  const read = await Promise.all(
+    pids.map(async (pid): Promise<Proc | null> => {
+      try {
+        const [status, cmdline] = await Promise.all([readFile(join(proc, String(pid), 'status'), 'utf8'), readFile(join(proc, String(pid), 'cmdline'), 'utf8').catch(() => '')]);
+        return { pid, anon: kb(status, 'RssAnon'), swap: kb(status, 'VmSwap'), cmd: cmdline.split('\0').filter(Boolean).join(' ').slice(0, CMD_CHARS) };
+      } catch {
+        return null; // it exited meanwhile
+      }
+    }),
+  );
+  return read
+    .filter((p): p is Proc => p !== null)
+    .sort((a, b) => b.anon + b.swap - (a.anon + a.swap))
+    .slice(0, n);
 }
 
 /** The cgroup dir named citadel.slice above (or at) this process's own, from /proc/self/cgroup; null when there is none. */
@@ -134,6 +175,7 @@ interface Open {
   limit: number | null;
   unit: string | null;
   unitBytes: number | null;
+  top: Proc[];
 }
 
 export interface StormDeps {
@@ -143,6 +185,7 @@ export interface StormDeps {
   now?: () => number;
   read?: (dir: string) => Promise<Map<string, GroupReading>>;
   largest?: (dir: string) => Promise<{ unit: string; bytes: number } | null>;
+  top?: (dir: string) => Promise<Proc[]>;
 }
 
 export class MemoryStorms {
@@ -184,15 +227,16 @@ export class MemoryStorms {
           if (open) this.close(path, open);
           continue;
         }
-        const o = open ?? { start: this.lastAt, end: now, stalledUs: 0, highs: 0, peak: 0, limit: g.limit, unit: null, unitBytes: null };
+        const o = open ?? { start: this.lastAt, end: now, stalledUs: 0, highs: 0, peak: 0, limit: g.limit, unit: null, unitBytes: null, top: [] };
         o.end = now;
         o.stalledUs += stalledUs;
         o.highs += g.high - prev.high;
         o.limit = g.limit;
         if (share >= o.peak || !o.unit) {
           o.peak = Math.max(o.peak, share);
-          const top = await (this.d.largest ?? largestUnit)(path);
-          if (top) [o.unit, o.unitBytes] = [top.unit, top.bytes];
+          const [big, top] = await Promise.all([(this.d.largest ?? largestUnit)(path), (this.d.top ?? topProcesses)(path)]);
+          if (big) [o.unit, o.unitBytes] = [big.unit, big.bytes];
+          if (top.length) o.top = top;
         }
         this.open.set(path, o);
       }
@@ -213,7 +257,7 @@ export class MemoryStorms {
     this.open.delete(path);
     const stalled = o.stalledUs / 1e6;
     if (stalled < MIN_STALL_S) return;
-    const storm: Storm = { group: basename(path), seconds: Math.round((o.end - o.start) / 1000), stalled: Math.round(stalled), highs: o.highs, peak: Math.min(1, Math.round(o.peak * 100) / 100), limit: o.limit, unit: o.unit, unitBytes: o.unitBytes };
+    const storm: Storm = { group: basename(path), seconds: Math.round((o.end - o.start) / 1000), stalled: Math.round(stalled), highs: o.highs, peak: Math.min(1, Math.round(o.peak * 100) / 100), limit: o.limit, unit: o.unit, unitBytes: o.unitBytes, top: o.top };
     try {
       this.d.record(o.start, storm);
     } catch (err: any) {
@@ -223,7 +267,7 @@ export class MemoryStorms {
 
   /** Storms still going, as they stand (for the Status page's "now"). */
   current(): Storm[] {
-    return [...this.open].map(([path, o]) => ({ group: basename(path), seconds: Math.round((o.end - o.start) / 1000), stalled: Math.round(o.stalledUs / 1e6), highs: o.highs, peak: Math.min(1, Math.round(o.peak * 100) / 100), limit: o.limit, unit: o.unit, unitBytes: o.unitBytes }));
+    return [...this.open].map(([path, o]) => ({ group: basename(path), seconds: Math.round((o.end - o.start) / 1000), stalled: Math.round(o.stalledUs / 1e6), highs: o.highs, peak: Math.min(1, Math.round(o.peak * 100) / 100), limit: o.limit, unit: o.unit, unitBytes: o.unitBytes, top: o.top }));
   }
 
   start() {

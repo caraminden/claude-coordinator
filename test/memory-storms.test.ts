@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { citadelSliceDir, largestUnit, MemoryStorms, parseStorm, readGroups, type GroupReading, type Storm } from '../src/memory-storms.ts';
+import { citadelSliceDir, largestUnit, MemoryStorms, parseStorm, readGroups, topProcesses, type GroupReading, type Storm } from '../src/memory-storms.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'memory-storms-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -45,6 +45,41 @@ test('readGroups reads citadel.slice, its slices and containers, not the server;
   assert.deepEqual(await largestUnit(w), { unit: 'citadel-claude-2.service', bytes: 6 }, 'a big unit beside a bigger slice of small ones');
 });
 
+test('topProcesses ranks every process in a container and its cgroups below by anon memory plus swap, not page cache', async () => {
+  const c = join(root, 'procs', 'citadel-claude-2.service');
+  const proc = join(root, 'procs', 'proc');
+  const cg = (dir: string, pids: number[]) => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'cgroup.procs'), pids.map((p) => `${p}\n`).join(''));
+  };
+  const ps = (pid: number, anonKb: number, swapKb: number, file: number, argv: string[]) => {
+    mkdirSync(join(proc, String(pid)), { recursive: true });
+    writeFileSync(join(proc, String(pid), 'status'), `Name:\tx\nVmRSS:\t${anonKb + file} kB\nRssAnon:\t${anonKb} kB\nRssFile:\t${file} kB\nVmSwap:\t${swapKb} kB\n`);
+    writeFileSync(join(proc, String(pid), 'cmdline'), argv.join('\0') + '\0');
+  };
+  cg(c, [10]);
+  cg(join(c, 'libpod-payload-abc'), [11, 12, 13, 99]);
+  cg(join(c, 'libpod-payload-abc', 'nested'), [14]);
+  ps(10, 1000, 0, 0, ['conmon']);
+  ps(11, 200_000, 0, 9_000_000, ['/usr/bin/claude', '-p']); // mostly page cache: small
+  ps(12, 3_000_000, 1_000_000, 0, ['cargo', 'build', '--release']);
+  ps(13, 500_000, 0, 0, ['node', 'x'.repeat(300)]);
+  ps(14, 2_000_000, 0, 0, ['rustc', 'big.rs']);
+  // 99 exited between reading cgroup.procs and its status: skipped
+  const top = await topProcesses(c, 3, proc);
+  assert.deepEqual(
+    top.map((p) => [p.pid, p.anon, p.swap]),
+    [
+      [12, 3_000_000 * 1024, 1_000_000 * 1024],
+      [14, 2_000_000 * 1024, 0],
+      [13, 500_000 * 1024, 0],
+    ],
+  );
+  assert.equal(top[0].cmd, 'cargo build --release');
+  assert.equal(top[2].cmd.length, 120, 'a long command line is cut');
+  assert.deepEqual(await topProcesses(join(root, 'procs', 'gone'), 3, proc), [], 'a cgroup that went away names nobody');
+});
+
 /** A run of readings, one per 15 s: each [high, stalled seconds in that step] for one group. */
 async function run(steps: [number, number][]) {
   const recorded: { at: number; storm: Storm }[] = [];
@@ -52,7 +87,7 @@ async function run(steps: [number, number][]) {
   let high = 0,
     someUs = 0;
   const g = (): Map<string, GroupReading> => new Map([['/c/citadel-turns.slice', { name: 'citadel-turns.slice', high, someUs, current: 10, limit: 20 }]]);
-  const s = new MemoryStorms({ dir: '/c', now: () => t, read: async () => g(), largest: async () => ({ unit: 'citadel-land-x.service', bytes: 4 }), record: (at, storm) => recorded.push({ at, storm }) });
+  const s = new MemoryStorms({ dir: '/c', now: () => t, read: async () => g(), largest: async () => ({ unit: 'citadel-land-x.service', bytes: 4 }), top: async () => [{ pid: 7, anon: 3, swap: 1, cmd: 'cargo build' }], record: (at, storm) => recorded.push({ at, storm }) });
   await s.tick();
   for (const [dh, stalled] of steps) {
     t += 15_000;
@@ -74,7 +109,7 @@ test('a storm is high events with stalls at or over the line; it is recorded onc
   ]);
   assert.equal(recorded.length, 1);
   assert.equal(recorded[0].at, 1_000_000 + 15_000, 'from the reading before its first stormy one');
-  assert.deepEqual(recorded[0].storm, { group: 'citadel-turns.slice', seconds: 45, stalled: 27, highs: 1600, peak: 0.8, limit: 20, unit: 'citadel-land-x.service', unitBytes: 4 });
+  assert.deepEqual(recorded[0].storm, { group: 'citadel-turns.slice', seconds: 45, stalled: 27, highs: 1600, peak: 0.8, limit: 20, unit: 'citadel-land-x.service', unitBytes: 4, top: [{ pid: 7, anon: 3, swap: 1, cmd: 'cargo build' }] });
 });
 
 test('stalls without high events, high events without stalls, and blips under MIN_STALL_S are not storms', async () => {

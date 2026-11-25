@@ -13,6 +13,7 @@ import { scopedPageHash } from './page-scope.js';
 import { opening } from './releases.js';
 import { workersPanel } from './workers.js';
 import { capacityPanel } from './box-capacity.js';
+import { dayStripsPanel } from './day-strips.js';
 
 const REFRESH_MS = 30_000;
 const when = pacificStamp;
@@ -900,7 +901,8 @@ export function statusPane(onData = () => {}) {
   const panels = new Map(); // one built panel per app, so a redraw keeps its status text, journal and followed deploy
   const pills = h('nav', { class: 'chips st-apps', 'aria-label': 'Citadel and the apps' });
   const detail = h('div', { class: 'st-detail' }, h('p', { class: 'muted' }, 'Reading status…'));
-  const el = h('div', { class: 'st-page' }, pills, detail);
+  const strips = dayStripsPanel(); // the picked scheme's, whichever of Citadel or its apps is picked above
+  const el = h('div', { class: 'st-page' }, pills, detail, strips);
   const lines = shipLinePanel(el);
   const workers = workersPanel(el);
   const fit = capacityPanel(el);
@@ -992,6 +994,7 @@ export function statusPane(onData = () => {}) {
     refresh.now();
     lines.resume();
     fit.resume();
+    strips.show(to);
   };
   return el;
 }

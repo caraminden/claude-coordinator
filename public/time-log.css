@@ -6,6 +6,12 @@
   --tl-wait: color-mix(in srgb, var(--waiting) 45%, var(--waiting-tint));
   --tl-lost: var(--error);
   --tl-gone: var(--closed);
+  /* The day strips' parts (#1996): a wait named by what it waited on. */
+  --tl-line: var(--cat-5);
+  --tl-ci: var(--held);
+  --tl-deploy: var(--done);
+  --tl-other: color-mix(in srgb, var(--closed) 55%, var(--panel));
+  --tl-none: color-mix(in srgb, var(--muted) 22%, var(--panel));
 }
 .progress-detail.timed { padding: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .progress-detail.timed > .wait-line, .progress-detail.timed > .request { margin: 0.6rem 0.75rem 0; }

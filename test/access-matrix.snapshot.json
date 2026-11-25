@@ -1773,6 +1773,16 @@
   "m1": "403 Only the scheme's Taskmaster and its app turns check read the turn audit",
   "m2": "403 Only the scheme's Taskmaster and its app turns check read the turn audit"
  },
+ "GET /api/projects/:p/day-strips": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "200",
+  "outsider": "404 No such scheme",
+  "tmA": "200",
+  "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/projects/:p/decisions": {
   "anon": "401 Not logged in",
   "person": "200",

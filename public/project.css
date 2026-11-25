@@ -617,6 +617,44 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 /* How many minions fit (box-capacity.js, #1987): the slider, what it says, and load against the turns running. */
 .st-fit-say { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .st-fit .st-value { white-space: normal; }
+/* Minion day strips (#1996): a strip per minion that went live, from its start to live; colours from time-log.css. */
+.st-tile.ds-panel { grid-template-rows: none; grid-auto-rows: auto; min-height: 0; gap: var(--space-2); }
+.ds-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.ds-day { display: flex; align-items: center; gap: var(--space-1); }
+.ds-date { min-height: var(--control-h); font: inherit; }
+.ds-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.ds-body { display: grid; gap: var(--space-2); min-width: 0; }
+.ds-sum { margin: 0; }
+.ds-legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); font-size: var(--size-small); }
+.ds-key { display: inline-flex; align-items: center; gap: 0.35em; white-space: nowrap; }
+.ds-key[data-tip] { text-decoration: underline dotted var(--muted); text-underline-offset: 3px; cursor: help; }
+.ds-swatch { display: inline-block; width: 0.8em; height: 0.8em; border-radius: 2px; }
+.ds-panel svg { display: block; overflow: visible; }
+.ds-panel .p-work { fill: var(--tl-work); background: var(--tl-work); }
+.ds-panel .p-person { fill: var(--tl-wait); background: var(--tl-wait); }
+.ds-panel .p-line { fill: var(--tl-line); background: var(--tl-line); }
+.ds-panel .p-ci { fill: var(--tl-ci); background: var(--tl-ci); }
+.ds-panel .p-deploy { fill: var(--tl-deploy); background: var(--tl-deploy); }
+.ds-panel .p-other { fill: var(--tl-other); background: var(--tl-other); }
+.ds-panel .p-none { fill: var(--tl-none); background: var(--tl-none); }
+.ds-swatch.p-none, .ds-bar .p-none { stroke: var(--line); box-shadow: inset 0 0 0 1px var(--line); }
+.ds-bar rect:focus-visible, .ds-strip:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 1px; }
+.ds-bar-word { fill: var(--panel); font-size: 11px; font-weight: 700; pointer-events: none; }
+.ds-bar-word.on-none, .ds-bar-word.on-other { fill: var(--ink); }
+.ds-strips { min-width: 0; }
+.ds-grid { stroke: var(--line); stroke-width: 1; }
+.ds-tick { fill: var(--muted); font-size: 11px; }
+.ds-hit { fill: transparent; }
+.ds-rest { fill: var(--line); }
+.ds-strip { cursor: pointer; outline: none; }
+.ds-strip:hover .ds-hit, .ds-strip.on .ds-hit { fill: color-mix(in srgb, var(--ink) 10%, transparent); }
+.ds-tip { display: grid; gap: 0.1rem; white-space: normal; }
+.ds-table-wrap { overflow-x: auto; }
+.ds-table { width: 100%; border-collapse: collapse; font-size: var(--size-small); font-variant-numeric: tabular-nums; }
+.ds-table th, .ds-table td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.ds-table th { color: var(--muted); font-weight: 600; }
+.ds-table td:first-child { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; }
+.ds-note { margin: 0; font-size: var(--size-small); }
 .st-fit-head .st-sub { margin-top: var(--space-1); }
 .st-fit-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); margin-top: var(--space-2); }
 .st-fit-body[hidden] { display: none; }

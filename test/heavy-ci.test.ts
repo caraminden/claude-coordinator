@@ -32,13 +32,24 @@ test('commandLine quotes for bash, and commandOutput takes the lines between the
   assert.equal(commandLine(['sh', '-c', "echo 'a b'"]), `sh -c 'echo '\\''a b'\\'''`);
   const ts = (l: string) => `2026-11-20T10:00:00.1234567Z ${l}`;
   const log = ['﻿' + ts('##[group]Run actions/checkout@v4'), ts(BEGIN), ts('one'), ts(''), ts('two'), ts(`${END}3 ===`), ts('##[error]Process completed with exit code 3.')].join('\r\n');
-  assert.deepEqual(commandOutput(log), { lines: ['one', '', 'two'], code: 3 });
-  assert.deepEqual(commandOutput([ts(BEGIN), ts('half')].join('\n')), { lines: ['half'], code: null });
-  assert.deepEqual(commandOutput(ts('nothing')), { lines: [], code: null });
+  assert.deepEqual(commandOutput(log, 'failure'), { lines: ['one', '', 'two'], code: 3 });
+  assert.deepEqual(commandOutput([ts(BEGIN), ts('half')].join('\n'), 'failure'), { lines: ['half'], code: null });
+  assert.deepEqual(commandOutput(ts('nothing'), 'failure'), { lines: [], code: null });
   // CB3 (#1519): output with no newline at its end. A workflow copied before the fix ends it mid-line; the fixed one
   // prints a newline first, and that added line goes again.
-  assert.deepEqual(commandOutput([ts(BEGIN), ts('one'), ts(`no newline${END}0 ===`), ts('Post job cleanup.')].join('\n')), { lines: ['one', 'no newline'], code: 0 });
-  assert.deepEqual(commandOutput([ts(BEGIN), ts('done'), ts(''), ts(`${END}0 ===`)].join('\n')), { lines: ['done'], code: 0 });
+  assert.deepEqual(commandOutput([ts(BEGIN), ts('one'), ts(`no newline${END}0 ===`), ts('Post job cleanup.')].join('\n'), 'success'), { lines: ['one', 'no newline'], code: 0 });
+  assert.deepEqual(commandOutput([ts(BEGIN), ts('done'), ts(''), ts(`${END}0 ===`)].join('\n'), 'success'), { lines: ['done'], code: 0 });
+});
+
+// 2CA12 (#1954): a command's own output may quote the marker; only the last whole one, which the step prints, ends it.
+test("commandOutput: output that quotes the end marker isn't cut there, and its quoted status isn't the command's", () => {
+  const quoted = [BEGIN, `- '${END}0 ==='`, `${END}0 ===`, '1 test failed', '', `${END}1 ===`, `Post job: see ${END}`];
+  assert.deepEqual(commandOutput(quoted.join('\n'), 'failure'), { lines: quoted.slice(1, 4), code: 1 });
+  const after = [BEGIN, 'fine', '', `${END}0 ===`, `left over: node -e ${END}1 ===`];
+  assert.deepEqual(commandOutput(after.join('\n'), 'success'), { lines: ['fine'], code: 0 }, 'a marker quoted by the clean-up after it');
+  const unfinished = [BEGIN, `${END}0 ===`, 'still running'];
+  assert.equal(commandOutput(unfinished.join('\n'), 'cancelled').code, null, "a run that didn't succeed never reads as 0");
+  assert.deepEqual(commandOutput([BEGIN, `grep: ${END}%s`, 'still running'].join('\n'), 'cancelled'), { lines: [`grep: ${END}%s`, 'still running'], code: null });
 });
 
 // CB3 (#1519): the workflow's own step, Citadel's and the kit template's, run with a command whose output has no newline
@@ -55,7 +66,7 @@ test("both citadel-heavy workflows' command step keeps the end marker readable a
       .split('\n')
       .map((l) => `2026-11-20T10:00:00Z ${l}`)
       .join('\n');
-    assert.deepEqual(commandOutput(log), { lines: ['last words'], code: 4 }, f);
+    assert.deepEqual(commandOutput(log, 'failure'), { lines: ['last words'], code: 4 }, f);
   }
 });
 

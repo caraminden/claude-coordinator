@@ -22,6 +22,8 @@ import type { HoldFile } from '../src/ci-hold-file.ts';
 export const FALLBACK = 120;
 export const BEGIN = '=== citadel-heavy: the command starts ===';
 export const END = '=== citadel-heavy: the command exited ';
+/** The end marker whole, at its line's end. */
+const ENDED = new RegExp(`${END}\\D*(\\d+) ===$`);
 const WORKFLOW = 'citadel-heavy.yml';
 /** A hold.json (src/ci-hold-file.ts) older than this holds nothing. Turns run this file alone (src/turn-launch.ts): it imports only types. */
 const HOLD_STALE_MS = 2 * 60_000;
@@ -39,8 +41,8 @@ export function commandLine(argv: string[]): string {
   return argv.map((a) => (/^[\w./:=+,@%-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`)).join(' ');
 }
 
-/** The command's output and status from a job log: the lines between the markers, timestamps cut. No end marker: code null. */
-export function commandOutput(log: string): { lines: string[]; code: number | null } {
+/** The command's output and status from a job log: the lines between the markers, timestamps cut. No end marker, or a 0 from a run that didn't succeed: code null. */
+export function commandOutput(log: string, conclusion: string | null): { lines: string[]; code: number | null } {
   const lines = log
     .replace(/\r/g, '')
     .split('\n')
@@ -49,14 +51,15 @@ export function commandOutput(log: string): { lines: string[]; code: number | nu
   if (from < 0) return { lines: [], code: null };
   // The marker can share its line with output that had no newline at its end (CB3, #1519): the workflow prints a newline
   // before it now, and that added line goes again here; a workflow copied before that still ends mid-line.
-  const to = lines.findIndex((l, i) => i > from && l.includes(END));
+  // The last whole one that agrees with the run's conclusion: the command's own output, or the clean-up after it, may quote the marker (#1954, 2CA12).
+  const to = lines.findLastIndex((l, i) => i > from && ENDED.test(l) && (Number(ENDED.exec(l)?.[1]) === 0) === (conclusion === 'success'));
   if (to < 0) return { lines: lines.slice(from + 1), code: null };
-  const at = lines[to].indexOf(END);
-  const code = Number(/(\d+)/.exec(lines[to].slice(at + END.length))?.[1]);
+  const at = lines[to].lastIndexOf(END);
+  const code = Number(ENDED.exec(lines[to])?.[1]);
   const out = lines.slice(from + 1, to);
   if (at > 0) out.push(lines[to].slice(0, at));
   else if (out.length && out[out.length - 1] === '') out.pop();
-  return { lines: out, code: Number.isInteger(code) ? code : null };
+  return { lines: out, code };
 }
 
 class Fallback extends Error {}
@@ -453,7 +456,7 @@ async function main(argv: string[]): Promise<number> {
     started = true;
     const took = Math.round((Date.parse(job?.completed_at) - Date.parse(job?.started_at)) / 1000);
     if (took >= 0 && process.env.CITADEL_HEAVY_RAN_FILE) writeFileSync(process.env.CITADEL_HEAVY_RAN_FILE, `${took}\n`);
-    const out = job ? commandOutput(ghText(`repos/${slug}/actions/jobs/${job.id}/logs`, 'reading the log')) : { lines: [], code: null };
+    const out = job ? commandOutput(ghText(`repos/${slug}/actions/jobs/${job.id}/logs`, 'reading the log'), run.conclusion) : { lines: [], code: null };
     if (out.lines.length) process.stdout.write(out.lines.join('\n') + '\n');
     if (out.code === null) {
       say(`the CI run ended ${run.conclusion} before the command finished (${run.html_url}); nothing more runs here`);

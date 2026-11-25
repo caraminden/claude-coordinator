@@ -1,0 +1,7 @@
+{
+  // The service worker's type check (#2010): public/sw.js runs with a worker's globals, not a page's (tsconfig.public.json).
+  "extends": "./tsconfig.public.json",
+  "compilerOptions": { "lib": ["esnext", "webworker"] },
+  "include": ["public/sw.js"],
+  "exclude": []
+}

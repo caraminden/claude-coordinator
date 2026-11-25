@@ -12,6 +12,12 @@ const HIDDEN_TOOLS = new Set(['ToolSearch']);
 /** Whether a tool call is real work to show, rather than plan bookkeeping or housekeeping. */
 export const isWorkTool = (name) => !TASK_TOOLS.has(name) && !HIDDEN_TOOLS.has(name);
 
+/**
+ * A finished step as applyEvent collects it (#571). Declared here, not in src/, so the page's type check (tsconfig.public.json)
+ * never reads the server; src/db-rows.ts passes it on.
+ * @typedef {{ id: string, subject: string, estimate: number | null, startedAt: number, finishedAt: number, work: number, model: string | null }} FinishedStep
+ */
+
 export function createProgress() {
   return {
     // work: a step's milliseconds underway inside running turns; workFrom: when the running turn's share began (null between turns).
@@ -30,7 +36,7 @@ export function createProgress() {
     prep: false, // the review skill is open and no reviewer has started
     side: null, // the untagged step the minion said it is on, until the server next sees another stage worked on
     closing: false, // close_self was called this turn, and nothing since says it stays open
-    finished: /** @type {import('../src/db-rows.ts').FinishedStep[] | null} */ (null), // [] collects finished steps for step_times (#571), which the runner drains; null collects nothing
+    finished: /** @type {FinishedStep[] | null} */ (null), // [] collects finished steps for step_times (#571), which the runner drains; null collects nothing
   };
 }
 

@@ -687,8 +687,7 @@ export const HEALTH_MAX_ROWS = 5000;
 /** Store.stepRatio's numbers (#571): steps it sums, a scheme's own it needs, and the fewest it uses at all. */
 export const STEP_RATIO = { recent: 200, scheme: 50, least: 30 };
 
-/** A finished step as public/progress.js applyEvent collects it (#571). */
-export type FinishedStep = { id: string; subject: string; estimate: number | null; startedAt: number; finishedAt: number; work: number; model: string | null };
+export type { FinishedStep } from '../public/progress.js';
 
 /**
  * A title without a trailing build that matches its build field: "Lairs · Build #8" → "Lairs".

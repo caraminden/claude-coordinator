@@ -5,7 +5,7 @@
  *  - errors: tsc's errors in that file;
  *  - escapes: the ways round the checker, an explicit `any` in a type or a `@ts-ignore`, `@ts-expect-error` or
  *    `@ts-nocheck` comment (Cara, 2026-11-24: "make sure citadel and the rest of our typescript schemes don't cheat
- *    and use 'any'").
+ *    and use 'any'"). In a JavaScript file of SCRIPTS the `any` is one in a JSDoc type.
  * The baseline file holds each file's counts as of the last lowering. The check fails when a file's count goes above
  * its baseline, or a file not in the baseline has any; a count below it passes, and `--update` lowers the baseline to
  * match. Nothing here ever raises a count, except `--update --moved` after moving code, and only when no total rose.
@@ -31,6 +31,8 @@ export const ROOT = join(import.meta.dirname, '..');
 export const BASELINE = join(ROOT, 'typecheck-baseline.json');
 /** The tsconfigs tsc checks, from ROOT; `[]` counts escapes only, with no tsc. A listed one that isn't there is an error. */
 export const PROJECTS = ['tsconfig.json'];
+/** Git pathspecs of the JavaScript whose escapes count too (a front end a listed tsconfig checks with checkJs); `[]` for none. */
+export const SCRIPTS: string[] = [];
 // --- end of config ---
 
 const run = promisify(execFile);
@@ -108,7 +110,7 @@ function tscPath(root: string, project: string): string {
 }
 
 /** The files tsc reads over every project, paths from `root`. */
-async function tscFiles(root = ROOT, projects = PROJECTS): Promise<Set<string>> {
+export async function tscFiles(root = ROOT, projects = PROJECTS): Promise<Set<string>> {
   const out = new Set<string>();
   for (const p of projects.map((p) => join(root, p))) {
     const { stdout } = await run(process.execPath, [tscPath(root, p), '-p', p, '--listFilesOnly'], { cwd: root, maxBuffer: 64 * 1024 * 1024 });
@@ -265,9 +267,53 @@ export function countEscapes(code: string, file = 'x.ts', byPattern = false): { 
   return { n: directives + anys, by: 'types' };
 }
 
-/** The TypeScript files git tracks, the escape count's files. */
-export async function tsFiles(root = ROOT): Promise<string[]> {
-  const { stdout } = await run('git', ['ls-files', '-z', '--', '*.ts', '*.tsx', '*.mts', '*.cts'], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
+/**
+ * How many ways round the checker one JavaScript file takes: each `any` in a JSDoc type, or its older spelling `*`, and
+ * each mention of `@ts-ignore`, `@ts-expect-error` or `@ts-nocheck` (tsc reads one after code, in a block comment or in
+ * capitals too). Unsure, it counts: text that looks like one of these is one.
+ */
+export function scriptEscapes(code: string): number {
+  let n = code.match(/@ts-(?:ignore|expect-error|nocheck)/gi)?.length ?? 0;
+  for (const [comment] of code.matchAll(/\/\*\*[\s\S]*?\*\//g)) {
+    const doc = comment
+      .slice(3, -2)
+      .replace(/^\*+/, '')
+      .replace(/^[ \t]*\*/gm, '');
+    for (let i = doc.indexOf('@'); i >= 0 && i < doc.length; ) {
+      // A type is a brace group anywhere after the first tag (`@param x {any}` is read too) ...
+      let end = i + 1;
+      if (doc[i] === '{') {
+        for (let depth = 1; end < doc.length && depth > 0; end++) {
+          const quoted = /^'[^'\n]*'|^"[^"\n]*"|^`[^`]*`/.exec(doc.slice(end))?.[0];
+          if (quoted) end += quoted.length - 1;
+          else if (doc[end] === '{') depth++;
+          else if (doc[end] === '}') depth--;
+        }
+        if (doc[i + 1] === '@') {
+          i = end; // an inline {@link ...}
+          continue;
+        }
+      } else {
+        // ... or what follows a bare `@type` or `@this`.
+        const bare = /^@(?:type|this)\s+(?![{\s])[^@]*/.exec(doc.slice(i))?.[0];
+        if (!bare) {
+          i++;
+          continue;
+        }
+        end = i + bare.length;
+      }
+      n += blankTypeText(doc.slice(i, end)).match(/(?<![\w$])any(?![\w$])|\*/g)?.length ?? 0;
+      i = end;
+    }
+  }
+  return n;
+}
+
+const SCRIPT = /\.(?:[cm]?js|jsx)$/;
+
+/** The TypeScript files git tracks and the JavaScript SCRIPTS names, the escape count's files. */
+export async function tsFiles(root = ROOT, scripts = SCRIPTS): Promise<string[]> {
+  const { stdout } = await run('git', ['ls-files', '-z', '--', '*.ts', '*.tsx', '*.mts', '*.cts', ...scripts], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
   return stdout
     .split('\0')
     .filter(Boolean)
@@ -275,13 +321,14 @@ export async function tsFiles(root = ROOT): Promise<string[]> {
 }
 
 /** Today's counts: every file with an error or an escape, and nothing else. */
-export async function measure(root = ROOT, projects = PROJECTS): Promise<{ table: Table; errors: TscError[] }> {
-  const [errors, files] = await Promise.all([tscErrors(root, projects), tsFiles(root)]);
+export async function measure(root = ROOT, projects = PROJECTS, scripts = SCRIPTS): Promise<{ table: Table; errors: TscError[] }> {
+  const [errors, files] = await Promise.all([tscErrors(root, projects), tsFiles(root, scripts)]);
   const table: Table = {};
   const row = (f: string) => (table[f] ??= { errors: 0, escapes: 0 });
   for (const e of errors) row(e.file).errors++;
   for (const f of files) {
-    const n = escapes(readFileSync(join(root, f), 'utf8'), f);
+    const code = readFileSync(join(root, f), 'utf8');
+    const n = SCRIPT.test(f) ? scriptEscapes(code) : escapes(code, f);
     if (n) row(f).escapes += n;
   }
   return { table: sorted(table), errors };
@@ -367,7 +414,6 @@ async function main(args: string[]) {
     for (const f of files.map((f) => relative(ROOT, resolve(f)))) {
       const counted = tracked.includes(f);
       const checked = typed.has(f);
-      const script = /\.(?:[cm]?js|jsx)$/.test(f);
       if (!counted && !checked) {
         console.log(`${f}: not a file this check covers (a typo, not TypeScript, or not yet in git)`);
         process.exitCode = 1;
@@ -376,7 +422,7 @@ async function main(args: string[]) {
       const base = existsSync(BASELINE) ? readBaseline()[f] : undefined;
       console.log(`${f}: errors ${table[f]?.errors ?? 0} (baseline ${base?.errors ?? 0}), escapes ${table[f]?.escapes ?? 0} (baseline ${base?.escapes ?? 0})`);
       if (!checked) console.log('  not in any tsconfig of PROJECTS: its type errors are not checked');
-      if (script) console.log('  JavaScript: its types are checked only with checkJs or @ts-check, and its escapes are not counted');
+      if (SCRIPT.test(f) && !counted) console.log('  JavaScript: its types are checked only with checkJs or @ts-check, and its escapes are not counted');
       else if (!counted) console.log('  not tracked by git: its escapes are not counted');
       for (const e of errors.filter((e) => e.file === f)) console.log(`  ${e.line}:${e.col} ${e.code} ${e.text.replace(/\n/g, '\n    ')}`);
     }

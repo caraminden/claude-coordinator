@@ -1,0 +1,10 @@
+{
+  // The front end's type check (#2010): public/**/*.js as pages run it, with the DOM and no Node types. The service worker
+  // has its own globals: tsconfig.sw.json. Every script is its own module ("force"), so one file's top-level name can't
+  // stand in for a missing import in another. JSDoc here must not import a type from src/ that reaches Node's: that pulls
+  // the server into this check and counts its errors twice (declare the type in public/, as progress.js's FinishedStep).
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "lib": ["esnext", "dom", "dom.iterable"], "types": [], "checkJs": true, "moduleDetection": "force" },
+  "include": ["public/**/*.js"],
+  "exclude": ["public/sw.js"]
+}

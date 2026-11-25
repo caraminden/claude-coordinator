@@ -90,7 +90,8 @@ src/previews.ts: test/relative-urls.test.ts
 # thread), so it runs by path, not from always-tests.txt. A .mjs edit can raise a count in a .ts file that imports it.
 **/*.ts: test/typecheck.test.ts
 **/*.mjs: test/typecheck.test.ts
-tsconfig.json: test/typecheck.test.ts
+tsconfig*.json: test/typecheck.test.ts
+public/**/*.js: test/typecheck.test.ts
 package-lock.json: test/typecheck.test.ts
 **/*.ts: test/format.test.ts
 **/*.js: test/format.test.ts

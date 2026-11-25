@@ -4,6 +4,7 @@
 // Started by claude from the turn's --mcp-config with the machine's id as its argument; reaches the
 // app with the thread's token from the environment, like src/mcp.ts.
 import { createInterface } from 'node:readline';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 const API = process.env.COORDINATOR_API ?? 'http://127.0.0.1:8573';
 const TOKEN = process.env.COORDINATOR_TOKEN ?? '';
@@ -40,7 +41,7 @@ async function connect(first: boolean): Promise<Response> {
       why = `Could not reach the app: ${err.message}`;
     }
     if (Date.now() - started > 120_000) fail(why);
-    await new Promise((r) => setTimeout(r, 1000));
+    await sleep(1000);
   }
 }
 

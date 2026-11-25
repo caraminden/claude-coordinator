@@ -11,6 +11,7 @@ import { createConnection, Server as NetServer, type AddressInfo } from 'node:ne
 import type { Duplex } from 'node:stream';
 import { basename, extname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { isArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
@@ -2582,7 +2583,7 @@ function closeDown(why: string) {
   // the grace timer below can add one more grace on top of its own, which is the headroom this fix needs and still
   // well inside systemd's default 90 s stop timeout (deploy/claude-coordinator.service sets none).
   const exit = async () => {
-    await Promise.race([Promise.all([throughFront?.quiet, holdsLifted]), new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS).unref())]);
+    await Promise.race([Promise.all([throughFront?.quiet, holdsLifted]), sleep(SHUTDOWN_GRACE_MS, undefined, { ref: false })]);
     process.exit(0);
   };
   // Through the front thread (#1563) this thread keeps listening until the front has let go of the port and answered

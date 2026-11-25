@@ -6,6 +6,7 @@
 // own name, so it stays up without a unit file to install, and work goes in with `podman exec`.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { thpProps } from './unit-thp.ts';
 
 export interface Mount {
@@ -115,7 +116,7 @@ export class Containers {
       if ((await this.status(spec.name)).state === 'running') return;
       // Its unit ended (podman refused): say why now rather than at the timeout.
       if ((await this.run('systemctl', ['--user', 'is-active', spec.name])).stdout.trim() === 'inactive') break;
-      await new Promise((r) => setTimeout(r, 300));
+      await sleep(300);
     }
     // podman's own error line, not the whole command systemd-run logs before it.
     const log = (await this.run('journalctl', ['--user', '-u', spec.name, '-n', '20', '--no-pager', '-o', 'cat'])).stdout.split('\n');

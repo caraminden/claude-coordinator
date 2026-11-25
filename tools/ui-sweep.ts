@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { Auth } from '../src/auth.ts';
 import { copyDb } from '../src/db-copy.ts';
 import { freePort } from '../src/ports.ts';
@@ -220,7 +221,7 @@ async function main() {
   };
   process.on('exit', stop);
   const base = `http://127.0.0.1:${port}/`;
-  for (const end = Date.now() + 60_000; ; await new Promise((r) => setTimeout(r, 200))) {
+  for (const end = Date.now() + 60_000; ; await sleep(200)) {
     if (server.exitCode !== null) throw new Error(`server exited during boot:\n${log}`);
     if (Date.now() > end) throw new Error(`server did not answer in 60 s:\n${log}`);
     const ok = await fetch(`${base}api/health`).then(

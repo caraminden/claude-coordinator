@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { connect } from 'node:http2';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 export const GRPC_PORT = Number(process.env.CITADEL_ANDROID_GRPC || 18591);
 const MAX_RATE = 48000; // the emulator refuses more (INVALID_ARGUMENT)
@@ -148,7 +149,7 @@ export async function play(pcm: Pcm, seconds = 0, wait = 120, cancel?: AbortSign
   while (!recording(adb('shell', 'dumpsys', 'audio'))) {
     if (cancel?.aborted) return;
     if (Date.now() - t0 > wait * 1000) throw new Error(`nothing on the emulator opened the mic in ${wait} s; start recording in the app, then run it again (or start mic first and record within ${wait} s)`);
-    await new Promise((r) => setTimeout(r, 500));
+    await sleep(500);
   }
   if (cancel?.aborted) return;
   const stop = new AbortController();

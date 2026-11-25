@@ -3,6 +3,7 @@
 // Started by claude from the coordinator's --mcp-config; configured by environment.
 import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { APP_NAME } from './appname.ts';
 import { cardText, type CardLink } from './card-links.ts';
 import { liveState } from './live-state.ts';
@@ -1943,8 +1944,6 @@ const APPROVE = {
   },
 };
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 /**
  * Post an Approve / Deny card for a tool call and wait, however long it takes, for a person to
  * click. Answers in the shape Claude Code expects from a permission-prompt tool. Anything other
@@ -2642,7 +2641,7 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
       if (args.outage === true) body.outage = true;
       let r = await call<{ code: number | null; output?: unknown }>('POST', `/api/tickets/${C().TICKET}/land`, body);
       while (r.code === null) {
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        await sleep(5000);
         try {
           r = await call<{ code: number | null; output?: unknown }>('GET', `/api/tickets/${C().TICKET}/land`);
         } catch (err) {

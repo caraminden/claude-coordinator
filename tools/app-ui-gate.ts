@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { freePort } from '../src/ports.ts';
 import { startFakeCitadel } from '../kit/skills/contraption-ui/fake-citadel/fake-citadel.ts';
 import { measure } from '../kit/skills/critique/scripts/ui-measure.mjs';
@@ -173,7 +174,7 @@ export async function gate(o: ReturnType<typeof args>) {
   };
   try {
     const health = o.health ?? manifest.health ?? `${base}/`;
-    for (const end = Date.now() + 60_000; ; await new Promise((r) => setTimeout(r, 300))) {
+    for (const end = Date.now() + 60_000; ; await sleep(300)) {
       if (child.exitCode !== null) throw new Error(`the app exited at boot (${child.exitCode}):\n${log}`);
       if (Date.now() > end) throw new Error(`the app did not answer ${health} in 60 s:\n${log}`);
       if (

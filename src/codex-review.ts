@@ -25,6 +25,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { saveGenerated } from './codex.ts';
 import { codexLock } from './codex-lock.ts';
@@ -309,7 +310,7 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
       await call('initialize', { clientInfo: { name: 'citadel-codex-review', version: '1' }, capabilities: { experimentalApi: false, requestAttestation: false } });
       send({ method: 'initialized' });
       // An account without ChatGPT limits (or an older backend) can't answer: review anyway.
-      const read = (await Promise.race([call('account/rateLimits/read', { excludeResetCreditDetails: true }), new Promise((r) => setTimeout(r, 15_000).unref())]).catch(() => null)) as any;
+      const read = (await Promise.race([call('account/rateLimits/read', { excludeResetCreditDetails: true }), sleep(15_000, undefined, { ref: false })]).catch(() => null)) as any;
       limits = read?.rateLimitsByLimitId?.codex ?? read?.rateLimits ?? null;
       // shortcut: an image run also paces against any limit whose id names images (a failed generation carries its own limitId); the id isn't documented, so check it on a real read.
       const imageLimits = gen

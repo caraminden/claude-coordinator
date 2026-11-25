@@ -12,6 +12,7 @@ import { Store } from './db.ts';
 import { Auth } from './auth.ts';
 import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, type App, type Route } from './http.ts';
 import type { DatabaseSync } from 'node:sqlite';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { READ_WAIT_MS } from './db-writer.ts';
 import { CHAT } from './events-db.ts';
 import { llamaEmbed } from './memory.ts';
@@ -350,7 +351,7 @@ if (workerData?.reader) {
     if (data.testHooks && /[?&]citadel-test-reader=hang\b/.test(m.url)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
     if (data.testHooks && /[?&]citadel-test-reader=slow\b/.test(m.url)) {
       console.log('Reader test hook: slow');
-      await new Promise((r) => setTimeout(r, 500));
+      await sleep(500);
     }
     try {
       // Never older than the person's own last write, nor half of one main step: or the main thread answers.

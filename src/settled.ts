@@ -2,6 +2,7 @@
 // polling for a first sign of it or sleeping. The DB write worker, the session save and restore workers, the WAL
 // checkpoint round and the server's requests report here; settled() resolves once none is busy. Always on (a counter
 // each); only a test server serves it (CITADEL_TEST_SETTLED, server.ts), and an in-process test calls it directly.
+import { setTimeout as sleep } from 'node:timers/promises';
 
 const sources = new Set<() => string[]>();
 
@@ -44,6 +45,6 @@ export async function settled(ms = 30_000): Promise<string[]> {
       if (!busy.length) return [];
     }
     if (Date.now() >= until) return busy;
-    await new Promise((r) => setTimeout(r, 5));
+    await sleep(5);
   }
 }

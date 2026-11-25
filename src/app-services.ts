@@ -15,6 +15,7 @@ import { appendFile, mkdir, open, readdir, readFile, readlink, realpath, rename,
 import { connect } from 'node:net';
 import { constants as osConstants, homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { ContraptionRow } from './db.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { installCheck } from './pwa-check.ts';
@@ -822,7 +823,7 @@ export class AppServices {
         await say(`Stopped ${unit} after waiting an hour for it.`);
         return;
       }
-      await new Promise((r) => setTimeout(r, this.opts.minuteMs / 30));
+      await sleep(this.opts.minuteMs / 30);
     }
     await say('The earlier build ended: going on.');
   }
@@ -1249,7 +1250,7 @@ export class AppServices {
     let seen = '';
     // Polls scale with healthMs (1 s at most), so a short healthMs isn't spent asleep (#377).
     const poll = Math.min(1000, this.opts.healthMs / 10);
-    for (let first = true; Date.now() < until; await new Promise((r) => setTimeout(r, poll))) {
+    for (let first = true; Date.now() < until; await sleep(poll)) {
       const state = (await this.state(main)).active;
       const ok = state === 'active' && (await probe());
       if (!ok) {
@@ -1261,7 +1262,7 @@ export class AppServices {
       // Once more after a pause, so a service that starts and then crashes doesn't pass.
       if (!first) return;
       first = false;
-      await new Promise((r) => setTimeout(r, Math.min(3000, this.opts.healthMs / 10)));
+      await sleep(Math.min(3000, this.opts.healthMs / 10));
     }
     throw new Error(`Not healthy after ${Math.round(this.opts.healthMs / 1000)}s: ${seen || 'no answer'}. Its journal: contraption_service logs.`);
   }

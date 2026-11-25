@@ -52,6 +52,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { findChrome, launch, openPage, shot } from '../kit/skills/critique/scripts/ui-measure.mjs';
 
 const root = resolve(import.meta.dirname, '..');
@@ -225,7 +226,7 @@ function devCopy(): Server {
 async function freshAssets(s: Server): Promise<string> {
   const from = statSync(s.log!).size;
   process.kill(s.pid!, 'SIGHUP');
-  for (const end = Date.now() + 10_000; Date.now() < end; await new Promise((r) => setTimeout(r, 50))) {
+  for (const end = Date.now() + 10_000; Date.now() < end; await sleep(50)) {
     const tail = readFileSync(s.log!).subarray(from).toString();
     const done = /Reloaded public\/ on SIGHUP: front end \S+ → (\S+)/.exec(tail);
     if (done) return done[1];
@@ -234,7 +235,6 @@ async function freshAssets(s: Server): Promise<string> {
   throw new Error(`the dev copy did not re-read public/ within 10 s; see its log, ${s.log}`);
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** A load or step that never settles (a promise in the page that never resolves) fails instead of hanging the run. */
 async function within<T>(p: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;

@@ -83,6 +83,7 @@ import {
   type KeepaliveSeries,
 } from './keepalive.ts';
 import { homedir } from 'node:os';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type ProcCheck } from './quiet.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
@@ -5148,8 +5149,8 @@ export class Runner {
   async warmCards(chunk = 25, pauseMs = 5) {
     try {
       for (const p of this.store.listProjects()) {
-        while (this.store.warmCardRows(p.id, 500, chunk) > 0) await new Promise((r) => setTimeout(r, pauseMs));
-        await new Promise((r) => setTimeout(r, pauseMs));
+        while (this.store.warmCardRows(p.id, 500, chunk) > 0) await sleep(pauseMs);
+        await sleep(pauseMs);
       }
     } catch (err) {
       console.warn('warming card rows failed:', err);

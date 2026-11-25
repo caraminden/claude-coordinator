@@ -355,7 +355,7 @@ test('red CI refuses with main untouched, shows the failed log, and never falls 
   const res = c.run({ FAKE_CI: 'red', COORDINATOR_SHARED_DIR: shared }); // a flake and a real failure
   assert.equal(res.status, 1);
   assert.match(landLog(shared), /· flake · test\/slow\.test\.ts · load 31\.5 · ticket\/1-x · in CI$/m, 'a flake CI labelled reaches the retro log');
-  assert.match(landLog(shared), /· failed alone · test\/real\.test\.ts · ticket\/1-x · in CI$/m, "a file that failed by itself too: never one that runs last (#1898)");
+  assert.match(landLog(shared), /· failed alone · test\/real\.test\.ts · ticket\/1-x · in CI$/m, 'a file that failed by itself too: never one that runs last (#1898)');
   assert.doesNotMatch(landLog(shared), /failed alone · test\/slow/);
   assert.match(landLog(shared), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy - · live - · refused at ci$/m);
   assert.match(res.stderr, /the red test's output \(run 7\)\n.*real\.test\.ts: failed again alone.*\nland: tests failed on the rebased branch in CI \(https:\/\/ci\/7\), so main is untouched\n$/s);

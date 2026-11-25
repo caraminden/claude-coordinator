@@ -862,6 +862,31 @@ test("the CI package reader: only the newest released run reads as publishing; o
   assert.equal(v.next?.waitingOn, "its build isn't in the CI store: it waits on a fix");
 });
 
+test("the CI package reader: a failed publish kept in the feed's index stays among the releases after a restart, a newer run live (2RE4)", async () => {
+  const now = Date.now();
+  const { runs, jobs } = releasedRuns(now, [5, 4, 3]);
+  const w = desktopWorld(runs, jobs, now);
+  // Run 4 failed and run 5 went out; since the restart only run 5 was asked for, so the publisher knows nothing of run 4.
+  w.at.index = {
+    ...feedOf(2, 'ci:5', [
+      [2, 'ci:5'],
+      [1, 'ci:3'],
+    ]),
+    failed: { 4: 'disk full' },
+  };
+  const v = await w.read();
+  assert.deepEqual(
+    [v.current?.version, v.recent.map((r) => [r.version, r.outcome])],
+    [
+      'sha5',
+      [
+        ['sha4', 'failed'],
+        ['sha3', 'live'],
+      ],
+    ],
+  );
+});
+
 test('the CI package reader: a build that shipped but never went out, older than the one publishing, is not the next release (2RE4)', async () => {
   const now = Date.now();
   const { runs, jobs } = releasedRuns(now, [5, 4, 3]);

@@ -41,6 +41,13 @@ export function columnOf(stages, c) {
  */
 export const releaseName = (r, short = false) => (r.number != null ? (short ? `#${r.number}` : (r.name ?? `Release ${r.number}`)) : r.outcome === 'signed' ? 'a signed build' : r.outcome === 'live' ? (r.name ?? 'an earlier release') : r.outcome === 'failed' ? 'a failed try' : (r.name ?? 'Next release'));
 
+/** A roll back's held build isn't the one `tv`'s desktop feed names (2RE2): another commit's, or a by-hand build (the only named one with no number). */
+export const pinElsewhere = (tv) => {
+  const pin = tv.rollback?.pin;
+  const cur = tv.current;
+  return !!pin?.build && ((cur?.number == null && !!cur?.name) || (cur?.commit ?? cur?.version) !== pin.build.sha);
+};
+
 /** How long a change may wait on something outside the pipeline (a CI runner, a fix) before it reads as stuck (#1019). */
 export const STUCK_MS = 30 * 60_000;
 /** How long change or release `p` has been stuck (ms), or 0: a wait past STUCK_MS. A place in a line (the land line, "waits for the next land": a `brief`) is a queue, not stuck. */

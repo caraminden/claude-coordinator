@@ -319,7 +319,9 @@ test('the open routes serve the feed, a kept build and the install zip, and 404 
     const index = JSON.parse(await readFile(join(dir, 'feed.json'), 'utf8'));
     index.builds.push({ ...index.builds[0], build: 9, zip: 'app-9.zip' });
     await writeFile(join(dir, 'feed.json'), JSON.stringify(index));
-    for (const path of ['5/app/app-9.zip', '5/app/feed.json.tmp', '5/app/app-2.zip', '5/app/..%2Ffeed.json', '6/app/feed.json', '5/other/feed.json', '5/BAD/feed.json', 'x/app/feed.json']) {
+    // An app whose only publish failed has an index and no build (2RE4).
+    await feeds.noteFailed(5, 'none', 12, 'disk full');
+    for (const path of ['5/none/launcher.exe', '5/none/install.zip', '5/none/feed.json', '5/app/app-9.zip', '5/app/feed.json.tmp', '5/app/app-2.zip', '5/app/..%2Ffeed.json', '6/app/feed.json', '5/other/feed.json', '5/BAD/feed.json', 'x/app/feed.json']) {
       assert.equal((await fetch(`${base}/${path}`)).status, 404, path);
     }
   } finally {

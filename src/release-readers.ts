@@ -421,10 +421,10 @@ class RunsCache {
     return !!this.feeds.get(tkey(t))?.runs.has(id);
   }
   /** A desktop target's feed, read each refresh (feed()): the CI runs it holds, the build it names, the run it followed last, and the runs counted as the target's releases. */
-  private feeds = new Map<string, { runs: Set<number>; named: DesktopBuild | null; followed: number | null; counted: Set<number> }>();
+  private feeds = new Map<string, { runs: Set<number>; named: DesktopBuild | null; followed: number | null; failed: Record<string, string>; counted: Set<number> }>();
   feed(t: Found, index: DesktopIndex | null) {
     const builds = index?.builds ?? [];
-    this.feeds.set(tkey(t), { runs: new Set(builds.flatMap((b) => ciRun(b.source) ?? [])), named: builds.find((b) => b.build === index!.current) ?? null, followed: ciRun(index?.ci), counted: new Set(this.recorded(t)) });
+    this.feeds.set(tkey(t), { runs: new Set(builds.flatMap((b) => ciRun(b.source) ?? [])), named: builds.find((b) => b.build === index!.current) ?? null, followed: ciRun(index?.ci), failed: index?.failed ?? {}, counted: new Set(this.recorded(t)) });
   }
   /** The build a desktop target's feed names now, what PCs get (2RE2); null for any other target, and with no build on it. */
   named(t: Found): DesktopBuild | null {
@@ -433,6 +433,10 @@ class RunsCache {
   /** The CI run a desktop target's feed followed last: a by-hand publish stands over it until CI moves on. */
   followed(t: Found): number | null {
     return this.feeds.get(tkey(t))?.followed ?? null;
+  }
+  /** Why a run couldn't be published, as its feed's index keeps it through a restart (2RE4). */
+  kept(t: Found, run: number): string | null {
+    return this.feeds.get(tkey(t))?.failed[run] ?? null;
   }
   /** The run people have now: the one a desktop feed names (undefined for a by-hand build), else the newest that went out. */
   current(t: Found): RunJobs | undefined {
@@ -707,7 +711,7 @@ export class CiPackageReader implements Reader {
       const out = (r: RunJobs) => this.cache.out(t, r);
       // A desktop target's run CI released that its feed hasn't taken: on its way, or refused (#1522).
       const gated = this.cache.gated(t);
-      const why = (run: number) => (gated && !this.cache.onFeed(t, run) ? (this.d.desktop?.failed?.(t.projectId, t.desktop!.app, run) ?? null) : null);
+      const why = (run: number) => (gated && !this.cache.onFeed(t, run) ? (this.d.desktop?.failed?.(t.projectId, t.desktop!.app, run) ?? this.cache.kept(t, run)) : null);
       const publishFailed = (r: RunJobs) => this.cache.released(t, r) && why(r.run.id) !== null;
       const refusal = (run: number, what: string) => `${why(run) === NO_FILE ? `${what} isn't in the CI store` : `the desktop feed couldn't take ${what}`}: it waits on a fix`;
       const tried = (r: RunJobs) => out(r) || failedShip(r) || publishFailed(r);

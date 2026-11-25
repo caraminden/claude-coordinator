@@ -39,6 +39,7 @@ function makeRunner() {
     fake,
   );
   r.onTurnError = (ticket, text) => pushes.push({ ticket, text });
+  r.resumeGapMs = 0; // recover() spaces resumes 3 s apart live: left on, it ate most of a 5 s deadline (#1873)
   r.limitDelayMs = 0;
   r.limitGapMs = 0;
   r.limitProvenGapMs = 0;
@@ -470,7 +471,7 @@ test('a restart after a switch to the next account, before its resume starts, st
     runner = makeRunner();
     for (const k of ['personOf', 'placeFor', 'claudeAccounts', 'onLimit', 'onCleared'] as const) (runner as any)[k] = old[k];
     runner.recover();
-    await until('the resume on account 2 after the restart', () => turnsRun() === before + 2 && !runner.isRunning(id), 5_000);
+    await until('the resume on account 2 after the restart', () => turnsRun() === before + 2 && !runner.isRunning(id));
     assert.equal(s.inUse, 2);
     assert.match(lines(prompts).at(-1)!, /another of your person's Claude accounts/, 'it resumes as the account switch, not as a plain restart');
     assert.equal(store.getTicket(id)!.status, 'idle');
@@ -530,7 +531,7 @@ test('a restart while a limit resume restores the session keeps the resume and i
   (old as any).takeQueue = () => [];
   runner = makeRunner();
   runner.recover();
-  await until('the resume after the restart', () => turnsRun() === before + 1 && !runner.isRunning(id), 5_000);
+  await until('the resume after the restart', () => turnsRun() === before + 1 && !runner.isRunning(id));
   assert.match(lines(prompts).at(-1)!, /held through the restore/);
   assert.match(lines(prompts).at(-1)!, /usage limit, which has now reset/);
   assert.equal(runner.limitWait(id), null, 'the wait ends with the turn that took it');
@@ -549,7 +550,7 @@ test('a limit resume that starts no turn still ends its wait, though it is kept 
   runner.placeFor = () => ({ refused: 'Link Claude again.' });
   (runner as any).armLimitTimer();
   try {
-    await until('the refused resume to end its wait', () => runner.limitWait(id) === null && events(id, 'note').includes('Link Claude again.'), 5_000);
+    await until('the refused resume to end its wait', () => runner.limitWait(id) === null && events(id, 'note').includes('Link Claude again.'));
   } finally {
     runner.placeFor = undefined;
   }

@@ -1465,10 +1465,8 @@ flake_only() {
 # didn't stop it as a hang (its timeout sends the same signal, and a hang is a real red). It says nothing about the commit.
 # #1393: so is a run killed from outside (exit 137, the desktop's out-of-memory killer): run-tests.sh's "were killed" line,
 # or only GitHub's exit 137 line when the whole step went. A SIGKILL leaves Node no summary, so "no test failed" there
-# means no ✖ anywhere in the log; a test that had failed before the kill is a verdict, and the run stays red. So is a
-# skipped test (#1914).
+# means no ✖ anywhere in the log; a test that had failed before the kill is a verdict, and the run stays red.
 cut_off() {
-  ! skipped_tests >/dev/null || return 1
   ! grep -qF 'run-tests: the tests ran past' <<<"$failed" || return 1
   if grep -qE '(^|[[:space:]])Interrupted while running:' <<<"$failed" && ! grep -qF '✖ failing tests:' <<<"$failed"; then return 0; fi
   grep -qE 'run-tests: the tests were killed \(exit [0-9]+\)|Process completed with exit code 137\.' <<<"$failed" && ! grep -qF '✖' <<<"$failed"

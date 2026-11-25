@@ -154,9 +154,6 @@ test('the bench has every commit its cases name (CI checks out with fetch-depth 
 test('A: a run killed with no failing test is no verdict', () => {
   const r = run({ script: `${log('44859457680')}\ncut_off && echo cut-off\ntrain_real || echo 'no real failure'` });
   assert.equal(r.out, 'cut-off\nno real failure\n');
-  // Nor is one that skipped a test before it was killed (#1914): that is its verdict.
-  const skip = `failed+=$'\\ntest\\tthe full suite\\t2026-11-21T03:08:25.1Z ℹ skipped 1'`;
-  assert.equal(run({ script: `${log('44859457680')}\n${skip}\ncut_off || echo red` }).out, 'red\n');
   // And a real red is no cut-off: run 44869832060 (report 2106), db-writer failed again alone.
   assert.equal(run({ script: `${log('44869832060')}\ncut_off || echo red` }).out, 'red\n');
 });

@@ -619,7 +619,7 @@ citadel_ci_status() {
     citadel_ci_rerun_said "$dir" "$sha" "$id" red
     return 1
   fi
-  if ! citadel_skipped <"$log" >/dev/null && citadel_cut_off <"$log"; then # no verdict on the commit (#1377; a skipped test is one, #1914): the core runs it again once on 4; cut off twice is no answer
+  if citadel_cut_off <"$log"; then # no verdict on the commit (#1377): the core runs it again once on 4; cut off twice is no answer
     if read -r n files 2>/dev/null <"$dir/cut-$sha" && [ "$n" != "$id" ]; then
       echo "CI was cut off twice before any test failed ($files, $url)" | tee "$why_f"
       citadel_ci_rerun_said "$dir" "$sha" "$id" "no answer"

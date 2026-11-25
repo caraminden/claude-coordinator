@@ -161,7 +161,13 @@ export function renderTicketHead() {
   // Waiting on the usage limit, Stop ends the wait (src/runner.ts, stop).
   if (stoppable) {
     const stopping = stoppingIds.has(t.id);
-    actions.push(h('button', { class: 'secondary act-stop', disabled: stopping, title: t.status === 'running' ? undefined : t.limit_resume_at ? "Don't resume after the usage limit resets" : jobOf(t) ? "Stop what it waits for; it won't be woken" : undefined, onclick: () => stopChat(t, renderTicketHead) }, stopping ? 'Stopping…' : 'Stop'));
+    actions.push(
+      h(
+        'button',
+        { class: 'secondary act-stop', disabled: stopping, title: t.status === 'running' ? undefined : t.limit_resume_at ? "Don't resume after the usage limit resets" : jobOf(t) ? "Stop what it waits for; it won't be woken" : undefined, onclick: () => stopChat(t, renderTicketHead) },
+        stopping ? 'Stopping…' : 'Stop',
+      ),
+    );
   } else if (coord) {
     // The coordinator stays open for the life of the project; its Claude session can start fresh (#406).
     if (t.session_id && !t.fresh_pending) {

@@ -472,11 +472,6 @@ export class TurnLine {
     return this.entries.filter((e) => !this.host.busy(e.ticket) && !(this.stalled.size && this.full(this.host.asks(e.ticket, e.via).person)));
   }
 
-  /** Whether this person's container is at its memory limit, so a wait there gives its worker back at once (#1890). */
-  stalledFor(person: number): boolean {
-    return this.stalled.has(person);
-  }
-
   /** Their container is out of memory with a turn of theirs in it, so another would only stall it more; with none running, one may start. */
   private full(person: number): boolean {
     return this.stalled.has(person) && [...this.granted.values()].some((g) => g.person === person && !g.lent);

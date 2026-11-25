@@ -89,7 +89,7 @@ interface LiveMinion {
   worker_wait?: WorkerWait | null;
   queued?: number;
   approvals?: number;
-  server_work?: { kind: string; text: string; since: number } | null;
+  server_work?: { kind: string; text?: string; since?: number } | null;
 }
 
 /**
@@ -153,7 +153,7 @@ export function liveState(ticket: LiveMinion, events: EventRow[], now = Date.now
   } else if (ticket.worker_wait) {
     waits.push(`a worker: no turn is running, its next one starts by itself (${workerWaitText(ticket.worker_wait)})`);
   } else if (ticket.server_work?.kind === 'job') {
-    waits.push(`a job of its own the server runs on, for ${ago(now - ticket.server_work.since)} so far (${ticket.server_work.text}): no turn is running, and its end wakes it`);
+    waits.push(`a job of its own the server runs on, for ${ago(now - (ticket.server_work.since ?? now))} so far (${ticket.server_work.text}): no turn is running, and its end wakes it`);
   } else {
     waits.push(`nothing: no turn is running (${ticket.state ? `state ${stateWord(ticket.state)}` : 'its turn ended'})`);
   }

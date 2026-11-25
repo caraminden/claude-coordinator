@@ -104,7 +104,7 @@ function bashReason(command: string, cwd: string): string | null {
     }
   }
   if (!found.length) return null;
-  return `[citadel big-read] This prints ${found.join('; ')}, and that text stays in context for every later call. grep -n for what you need, then print a small range with sed -n 'a,bp' (or Read with offset/limit). If you really need it all, add # allow_large to the command.`;
+  return `[citadel big-read] This prints ${found.join('; ')}, and that text stays in context for every later call. grep -n for what you need, then print a small range with sed -n 'a,bp' (or Read with offset/limit). A Bash output over 12,000 characters is cut to a preview, so to read it all use Read with allow_large: true.`;
 }
 
 /** One hook call; returns what to print (a deny for Claude Code), or null to let the call run. */

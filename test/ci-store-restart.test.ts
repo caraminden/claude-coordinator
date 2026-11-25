@@ -13,7 +13,8 @@ const DIR = join(import.meta.dirname, '..', 'kit', 'skills', 'ci-store');
 writeFileSync(join(root, 'app.apk'), 'apk');
 
 const listen = (s: Server, port = 0) => new Promise<number>((r) => s.listen(port, '127.0.0.1', () => r((s.address() as { port: number }).port)));
-const github = createServer((_q, res) => res.end('{"count":1,"value":"tok"}'));
+const tokenAsks = { n: 0 };
+const github = createServer((_q, res) => (tokenAsks.n++, res.end('{"count":1,"value":"tok"}')));
 const ghPort = await listen(github); // up for the whole file, so a port a test frees is never taken by it
 after(() => github.close());
 
@@ -96,4 +97,33 @@ test('a store that never answers still gives up with the old message', async () 
   assert.equal(r.status, 1);
   assert.match(r.stdout, /::error::ci-upload: the store at .* didn't answer/);
   assert.equal(seen.n, 6);
+});
+
+test('a retry after a cut transfer asks GitHub for a new run token (the first may have run out during a long one)', async () => {
+  const { s, seen } = store(1, 201);
+  const port = await listen(s);
+  tokenAsks.n = 0;
+  const r = await run('ci-upload.sh', ['--kind', 'build', '--name', 'a.apk', 'app.apk'], `http://127.0.0.1:${port}`);
+  s.close();
+  assert.equal(r.status, 0, r.stdout);
+  assert.equal(seen.n, 2);
+  assert.equal(tokenAsks.n, 2, 'one token for the first try, one for the retry');
+});
+
+test('a download cut part-way (curl exit 18) is tried again', async () => {
+  let n = 0;
+  const s = createServer((req, res) => {
+    req.resume();
+    if (n++ === 0) {
+      res.writeHead(200, { 'Content-Length': '100' });
+      res.write('{"fi');
+      return void setTimeout(() => req.socket.destroy(), 50);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"files":[]}');
+  });
+  const port = await listen(s);
+  const r = await run('ci-download.sh', ['--list'], `http://127.0.0.1:${port}`);
+  s.close();
+  assert.equal(r.status, 0, r.stdout);
+  assert.equal(n, 2);
 });

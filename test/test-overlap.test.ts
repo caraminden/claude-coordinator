@@ -1,5 +1,9 @@
 // The audit's overlap list (kit/skills/test-quality/scripts/test-overlap.ts): lcov reading and pair ranking.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { nodeArgs, parseLcov, scorePairs } from '../kit/skills/test-quality/scripts/test-overlap.ts';
 
@@ -39,4 +43,21 @@ test('nodeArgs keeps the test script launcher, global setup and timeout', () => 
   assert.ok(r.flags.includes('--test-global-setup=test/leak-guard.ts'));
   assert.ok(!r.flags.some((f) => f.includes('$')), `a shell expression is not a flag: ${r.flags}`);
   assert.equal(nodeArgs('node --test').launcher, 'node');
+});
+
+test('a rerun still lists the files that were red', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'overlap-'));
+  mkdirSync(join(dir, 'test'));
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { test: 'node --test test/' } }));
+  writeFileSync(join(dir, 'src.js'), 'export const f = (x) => x + 1;\n');
+  writeFileSync(join(dir, 'test', 'red.test.js'), "import { test } from 'node:test';\nimport { f } from '../src.js';\ntest('r', () => { f(1); throw new Error('red'); });\n");
+  const script = join(import.meta.dirname, '..', 'kit', 'skills', 'test-quality', 'scripts', 'test-overlap.ts');
+  const run = (...extra: string[]) => spawnSync(process.execPath, [script, '--out', join(dir, 'out'), '--jobs', '1', ...extra, 'test/red.test.js'], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH } }).stdout; // no NODE_TEST_CONTEXT: the inner run is a run of its own
+  try {
+    assert.match(run(), /red or timed out.*red\.test\.js \(exit 1\)/);
+    assert.match(run(), /red or timed out.*red\.test\.js \(exit 1\)/, 'the rerun reuses the report and still lists it');
+    assert.match(run('--rescore'), /red or timed out/, '--rescore too');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

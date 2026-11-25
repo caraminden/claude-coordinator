@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { failedTests, mask, testRuns } from './retro-log.ts';
-import type { HookInput } from './hook-input.ts';
+import { agentSuffix, type HookInput } from './hook-input.ts';
 
 export const REMINDER = '[citadel test-first] Logic or bug work: write the failing test first and see it red (citadel:test-quality, citadel:bug-fixing); refactors, config and UI skip this. Self-review later runs new tests against the base and flags any that pass there.';
 
@@ -37,7 +37,7 @@ export function redRun(input: HookInput): boolean {
 
 /** One hook call; returns what to print (the reminder as context), or null. */
 export function testFirstHook(input: HookInput, stateDir = join(tmpdir(), 'citadel-kit')): string | null {
-  const file = join(stateDir, `test-first-${String(input?.session_id ?? 'unknown').replace(/[^\w.-]/g, '_')}`);
+  const file = join(stateDir, `test-first-${String(input?.session_id ?? 'unknown').replace(/[^\w.-]/g, '_')}${agentSuffix(input)}`);
   if (existsSync(file)) return null; // reminded already, or a red run came first
   const done = (why: string) => {
     mkdirSync(stateDir, { recursive: true });

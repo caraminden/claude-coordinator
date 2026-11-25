@@ -79,7 +79,11 @@ test("only this prompt's turn counts: earlier turns' tool calls and a compaction
 
 test('proposal without a card: a proposing heading or lead-in with no card or message is a hit', () => {
   const bare = readTurn(jsonl(prompt('audit the hooks'), calls(FIVE), say(PROPOSAL)), 'p1');
-  assert.deepEqual(answerCheck(bare), [`proposal without a card · "${PROPOSAL.replace(/\s+/g, ' ').slice(0, 120)}"`]);
+  assert.deepEqual(answerCheck(bare), [
+    `proposal without a card · matched "${PROPOSAL.split('\n')
+      .map((l) => l.trim())
+      .find((l) => proposalLine(l))}" · "${PROPOSAL.replace(/\s+/g, ' ').slice(0, 120)}"`,
+  ]);
   for (const action of ['mcp__thread__ask_question', 'mcp__thread__propose_plan', 'mcp__thread__message_coordinator', 'mcp__thread__create_ticket']) {
     assert.deepEqual(answerCheck(readTurn(jsonl(prompt('audit'), calls([...FIVE, action]), say(PROPOSAL)), 'p1')), [], action);
   }
@@ -100,6 +104,18 @@ test('proposalLine reads headings, bold lines and lead-ins, not the words in pas
   assert.equal(proposalLine('Note: see https://example.com/next-steps'), null);
   assert.equal(proposalLine('[Proposal: account linking](/shared/specs/linking.md): the spec you asked for.'), null);
   assert.equal(proposalLine("Worth a follow-up minion (I didn't do it here): the old run-back text."), "Worth a follow-up minion (I didn't do it here): the old run-back text.");
+});
+
+test('proposalLine skips only an anchored none, nothing or no after the colon', () => {
+  for (const t of ['Follow-ups: none.', 'Follow-ups: none', '- Next steps: nothing', '**Follow-ups:** none', 'Recommendation: no.']) assert.equal(proposalLine(t), null, t);
+  for (const t of ['No objections, proposal: ship it', 'Follow-ups: nothing blocks the rest, but do X', 'Next steps: none of these are done', 'Proposal: no more than three']) assert.notEqual(proposalLine(t), null, t);
+});
+
+test('every propose_ tool counts as a card', () => {
+  for (const tool of ['propose_machine_lend', 'mcp__thread__propose_host_tool', 'mcp__thread__propose_memory', 'mcp__thread__propose_machine_notes']) {
+    assert.deepEqual(answerCheck(readTurn(jsonl(prompt('audit'), calls([...FIVE, tool]), say(PROPOSAL)), 'p1')), [], tool);
+  }
+  assert.notDeepEqual(answerCheck(readTurn(jsonl(prompt('audit'), calls([...FIVE, 'mcp__thread__reproposed_x']), say(PROPOSAL)), 'p1')), []);
 });
 
 test('answer hook: logs each hit as a would-refuse line and refuses nothing; the job check runs it only on a stop it lets through', () => {

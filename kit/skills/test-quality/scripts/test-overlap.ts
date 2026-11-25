@@ -143,7 +143,6 @@ async function main(): Promise<void> {
   const { launcher, flags } = nodeArgs(script);
   const key = (f: string): string => f.replaceAll('/', '__');
   const started = Date.now();
-  const failed: string[] = [];
   let next = 0;
   let done = 0;
   const worker = async (): Promise<void> => {
@@ -153,7 +152,9 @@ async function main(): Promise<void> {
       if (!existsSync(dest)) {
         const cmd = [launcher, '--test', ...flags, '--experimental-test-coverage', `--test-coverage-exclude=${dir === '.' ? '**/*.test.*' : `${dir}/**`}`, '--test-coverage-exclude=**/node_modules/**', '--test-reporter=lcov', `--test-reporter-destination=${dest}`, f];
         const code = await runOne(cmd, root, 300_000);
-        if (code !== 0) failed.push(`${f} (exit ${code})`);
+        // The exit is kept beside the report: a rerun reuses the report and must still list a red file.
+        if (code !== 0) writeFileSync(`${dest}.exit`, String(code));
+        else rmSync(`${dest}.exit`, { force: true });
         if (code === null) rmSync(dest, { force: true }); // killed or never started: a partial report must not be kept and reused
       }
       done++;
@@ -162,7 +163,13 @@ async function main(): Promise<void> {
   };
   await Promise.all(Array.from({ length: Math.max(1, jobs) }, worker));
   const covered: Covered = new Map();
+  const failed: string[] = []; // this run's and earlier runs' red files: --rescore and a rerun list them too
   for (const f of files) {
+    try {
+      failed.push(`${f} (exit ${readFileSync(join(cov, `${key(f)}.lcov.exit`), 'utf8').trim()})`);
+    } catch {
+      /* no stored exit: green */
+    }
     const p = join(cov, `${key(f)}.lcov`);
     if (existsSync(p)) covered.set(f, parseLcov(readFileSync(p, 'utf8')));
   }

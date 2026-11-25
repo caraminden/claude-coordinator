@@ -2,6 +2,13 @@
 # Facts self-review needs first, printed when the skill loads (command injection in SKILL.md).
 # Read-only, capped, never fails: a missing piece prints a line saying so.
 cap() { head -n "$1"; }
+# The main branch: a local main if there is one, else the branch origin/HEAD points at, else a local master.
+main=main
+if ! git rev-parse --verify -q refs/heads/main >/dev/null; then
+  d=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+  if [ -n "$d" ] && git rev-parse --verify -q "refs/heads/$d" >/dev/null; then main=$d
+  elif git rev-parse --verify -q refs/heads/master >/dev/null; then main=master; fi
+fi
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "not in a git repo: run the commands in section 1 by hand"; exit 0; }
 cd "$root" || exit 0
 # The base is the first argument, else the build branch this one grew from (a feeder: build/<n>, the newest
@@ -10,12 +17,12 @@ cd "$root" || exit 0
 base=${1:-}
 if [ -z "$base" ]; then
   for b in $(git for-each-ref --sort=-committerdate --format='%(refname:short)' 'refs/heads/build/*'); do
-    git merge-base --is-ancestor "$b" main 2>/dev/null && continue
+    git merge-base --is-ancestor "$b" "$main" 2>/dev/null && continue
     mb=$(git merge-base "$b" HEAD 2>/dev/null) || continue
-    git merge-base --is-ancestor "$mb" main 2>/dev/null || { base=$b; break; }
+    git merge-base --is-ancestor "$mb" "$main" 2>/dev/null || { base=$b; break; }
   done
 fi
-[ -n "$base" ] || base=main
+[ -n "$base" ] || base=$main
 git rev-parse --verify -q "$base" >/dev/null || { echo "no local branch '$base': run the commands in section 1 by hand"; exit 0; }
 echo "branch: $(git rev-parse --abbrev-ref HEAD)  head: $(git rev-parse --short HEAD)  base: $base $(git rev-parse --short $base)"
 # A feeder's reviewers read the build's tip (references/review-extras.md, "A feeder"): say what other feeders merged since it started.

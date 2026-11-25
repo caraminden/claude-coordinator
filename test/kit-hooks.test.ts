@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { jobCheck, MAX_STOP_BLOCKS, stopHook } from '../kit/hooks/job-check.ts';
 import { bashLines, failedTests, logPath, note, refusals } from '../kit/hooks/retro-log.ts';
 import { isSourceFile, REMINDER, testFirstHook } from '../kit/hooks/test-first.ts';
@@ -213,6 +213,20 @@ test("retro log: reads this prompt's tripwire and guard refusals from the transc
   assert.equal(refusals(transcript).length, 3, "a subagent's transcript is read whole");
 });
 
+test('retro log: a line appended while the header is being built is not overwritten', () => {
+  const shared = mkdtempSync(join(tmpdir(), 'retro-race-'));
+  after(() => rmSync(shared, { recursive: true, force: true }));
+  const env = { COORDINATOR_SHARED_DIR: shared };
+  const path = logPath(shared, 'race', new Date());
+  mkdirSync(join(path, '..'), { recursive: true });
+  // Another hook got there first: its line is in the file when this one starts the log.
+  writeFileSync(path, '- 00:00:00Z · other · first\n');
+  note({ session_id: 'race', cwd: '/w' }, 'kind', 'second', env);
+  const text = readFileSync(path, 'utf8');
+  assert.match(text, /^- 00:00:00Z · other · first\n/);
+  assert.match(text, /kind · second\n$/);
+});
+
 test("retro log script: writes each line once, under the shared folder's retro-log/<date>/<session>.md", () => {
   const dir = shared();
   const transcript = join(mkdtempSync(join(tmpdir(), 'kit-tr-')), 't.jsonl');
@@ -284,6 +298,23 @@ test('test-first reminder: once per session on the first source edit, quiet afte
   const run = (input: string) => spawnSync(process.execPath, [join(HOOKS, 'test-first.ts')], { input, env: { ...process.env, TMPDIR: dir }, encoding: 'utf8' });
   assert.match(run(JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'Write', session_id: 'cli', cwd: '/w', tool_input: { file_path: 'src/x.ts' } })).stdout, /test-first/);
   assert.equal(run('not json').stdout, '');
+});
+
+test('test-first and flail brake keep their state per Grunt (agent_id), apart from the minion', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kit-agent-'));
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  const edit = (agent?: string) => testFirstHook({ hook_event_name: 'PostToolUse', tool_name: 'Edit', session_id: 'sg', cwd: '/w', tool_input: { file_path: '/w/src/a.ts' }, ...(agent ? { agent_id: agent } : {}) }, dir);
+  assert.ok(edit('g1'), "a Grunt's first source edit is reminded");
+  assert.equal(edit('g1'), null, 'once per Grunt');
+  assert.ok(edit('g2'), 'another Grunt is reminded too');
+  assert.ok(edit(), "the minion's reminder wasn't used up by its Grunts");
+  assert.equal(edit(), null);
+  const red = (agent?: string) => flailBrakeHook({ hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', session_id: 'sf', cwd: '/w', tool_input: { command: 'npm test' }, error: 'Exit code 1', ...(agent ? { agent_id: agent } : {}) }, dir);
+  assert.equal(red('g1'), null);
+  assert.equal(red('g2'), null);
+  assert.equal(red('g1'), null, "two Grunts' reds don't add up to a streak neither has");
+  assert.equal(red('g2'), null);
+  assert.match(String(red('g1')), /flail brake/, "one Grunt's own third red does");
 });
 
 test('flail brake: three identical red runs with no edit between give the line once; an edit, a green run or another command resets the count', () => {
@@ -384,7 +415,9 @@ test('big-read guard: sends back whole reads and plain cat/sed of big files, let
   denied(bash('git status; cat big.ts && echo done'), 'cat between other commands');
   denied(bash("sed -n '1,800p' big.ts"), 'sed range of 800 lines');
   denied(bash("sed -n '50,$p' big.ts"), 'sed to the end');
-  assert.match(denied(bash('cat small.ts big.ts'), 'two files'), /# allow_large/);
+  const twoFiles = denied(bash('cat small.ts big.ts'), 'two files');
+  assert.match(twoFiles, /Read with allow_large/);
+  assert.doesNotMatch(twoFiles, /# allow_large/, 'the marker is not suggested: the retry output would be cut to a preview');
   // Let through: small files and ranges, pipes, redirects, expansions, a cd first, other commands, and the marker.
   for (const c of [
     'cat small.ts',

@@ -85,3 +85,18 @@ test('a ship script identical to the kit template prints SYNC (medium), a one-li
   assert.match(out, /SHIP SCRIPT EDIT: tools\/land\.sh/);
   assert.doesNotMatch(out, /SYNC/);
 });
+
+test('a repo whose main branch is master is sized against master, and a local main still wins', () => {
+  const dir = join(root, 'master-repo');
+  spawnSync('git', ['init', '-q', '-b', 'master', dir]);
+  commit(dir, 'a.txt');
+  git(dir, 'switch', '-q', '-c', 'ticket/1-x');
+  commit(dir, 'x.txt');
+  const out = arrive(dir);
+  assert.match(out, /base: master /);
+  assert.match(out, /x\.txt/);
+  assert.doesNotMatch(out, /no local branch/);
+  // A repo with both: main is the main branch.
+  git(dir, 'branch', 'main', 'master');
+  assert.match(arrive(dir), /base: main /);
+});

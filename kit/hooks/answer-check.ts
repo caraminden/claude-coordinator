@@ -65,7 +65,10 @@ export function readTurn(transcript: string, promptId?: string): Turn {
     }
   }
   const isPrompt = (e: TranscriptEntry | null): e is TranscriptEntry => e?.type === 'user' && !e.isMeta && !e.isSidechain && !e.isCompactSummary && !(Array.isArray(e.message?.content) && e.message.content.some((b) => b?.type === 'tool_result'));
-  let start = promptId ? entries.findIndex((e) => e?.promptId === promptId) : -1;
+  // A turn resuming a killed one opens with Claude Code's own entries under its prompt id (an interrupted call's
+  // result, a synthetic "No response requested."), so the turn starts at the prompt itself.
+  let start = promptId ? entries.findIndex((e) => e?.promptId === promptId && isPrompt(e)) : -1;
+  if (start < 0 && promptId) start = entries.findIndex((e) => e?.promptId === promptId);
   if (start < 0) start = entries.findLastIndex(isPrompt);
   const turn: Turn = { toolCalls: [], finalText: '', steered: false };
   if (start >= 0) turn.prompt = textOf(entries[start]?.message?.content);

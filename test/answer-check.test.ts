@@ -61,6 +61,15 @@ test("a turn a person steered mid-turn is not a hit; a Grunt's finish notice is 
   assert.deepEqual(answerCheck(stopped), []);
 });
 
+test("a turn resuming a killed one starts at its prompt, past the interrupted call's result and Claude Code's own filler", () => {
+  const filler = { type: 'assistant', isApiErrorMessage: false, message: { role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: 'No response requested.' }] } };
+  const cut = { type: 'user', promptId: 'p2', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't0', is_error: true, content: "[Tool call interrupted: the session ended before this call's result was recorded]" }] } };
+  const turn = readTurn(jsonl(prompt('first'), call('Edit', 0)[0], cut, filler, prompt('[System]: your last turn was killed', 'p2'), call('mcp__thread__hand_off_land', 1), say(ANSWER)), 'p2');
+  assert.equal(turn.steered, false);
+  assert.equal(turn.prompt, '[System]: your last turn was killed');
+  assert.equal(shipReviewCheck(turn, '').length, 1, 'its unreviewed ship is logged');
+});
+
 test("only this prompt's turn counts: earlier turns' tool calls and a compaction summary don't", () => {
   const t = jsonl(prompt('first'), calls(FIVE), say(ANSWER), prompt('[Cara]: and the colour?', 'p2'), call('Bash', 9), { type: 'user', promptId: 'p2', isCompactSummary: true, message: { content: 'This session is being continued…' } }, say('Done: it is teal now.'));
   assert.deepEqual(readTurn(t, 'p2').toolCalls, ['Bash']);

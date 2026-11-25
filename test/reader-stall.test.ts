@@ -99,6 +99,9 @@ test('with no reader to be had, a page read fails within its wait, saying to ret
     rmSync(may); // the ones started in their place don't get ready
     await stall(srv, 'two.log', 10_000);
     const first = get(srv, PAGE);
+    // The tests' own client (bootServer's call) asks again on that answer, as the page does, so a read on a loaded
+    // runner waits for a reader rather than failing its test (#2012).
+    const asked = srv.call(PAGE);
     const worst = await slowestHealth(srv, first);
     const got = await first;
     assert.deepEqual([got.status, got.by], [503, 'front']);
@@ -107,6 +110,7 @@ test('with no reader to be had, a page read fails within its wait, saying to ret
     assert.ok(worst < HELD, `the main thread was held for ${worst} ms`);
     // Slow, not stuck: the same readers answer once their disk does, neither thrown away.
     await until('a reader answers again', async () => (await get(srv, PAGE)).by === 'reader');
+    assert.equal((await asked).status, 200, "the tests' client asked again until a reader answered");
     const log = readFileSync(join(root, 'two.log'), 'utf8');
     assert.match(log, /Reader thread silent for \d+ s: replacing it/);
     assert.doesNotMatch(log, /Reader thread (stopped|replaced|started again)/);

@@ -372,6 +372,9 @@ function compileCache(): { NODE_COMPILE_CACHE?: string } {
   return compileCacheDir ? { NODE_COMPILE_CACHE: compileCacheDir } : {};
 }
 
+/** How long bootServer's client keeps asking a read again on the front's "try again" 503: the page's GET_MS (public/base.js). */
+const ASK_AGAIN_MS = 60_000;
+
 export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean; script?: string; wrap?: string[]; log?: string; portMs?: number; fds?: number[] } = {}): Promise<Booted> {
   const root = opts.root ?? mkdtempSync(join(resolve(tmpdir()), 'boot-'));
   const data = join(root, 'data');
@@ -462,21 +465,31 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
   const as =
     (who: { cookie?: string; token?: string }): Caller =>
     async (path, body, method) => {
-      const res = await fetch(base + path, {
-        method: method ?? (body === undefined ? 'GET' : 'POST'),
-        headers: {
-          ...(who.cookie ? { Cookie: who.cookie } : {}),
-          ...(who.token ? { Authorization: `Bearer ${who.token}` } : {}),
-          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-      const text = await res.text();
-      let data: any = text;
-      try {
-        data = JSON.parse(text);
-      } catch {}
-      return { status: res.status, data };
+      const verb = method ?? (body === undefined ? 'GET' : 'POST');
+      // A page read no reader thread answered in time is a 503 that says to ask again (src/front.ts, #2003), and the
+      // page does, each second for a minute (public/base.js, send). So does this client: on a loaded runner a test's
+      // read otherwise failed on an answer no person would have seen (#2012). Only that answer, and only for a read.
+      const until = Date.now() + ASK_AGAIN_MS;
+      for (;;) {
+        const res = await fetch(base + path, {
+          method: verb,
+          headers: {
+            ...(who.cookie ? { Cookie: who.cookie } : {}),
+            ...(who.token ? { Authorization: `Bearer ${who.token}` } : {}),
+            ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const text = await res.text();
+        let data: any = text;
+        try {
+          data = JSON.parse(text);
+        } catch {}
+        const askAgain = verb === 'GET' && res.status === 503 && data?.retry === true && res.headers.get('x-citadel-answered') === 'front';
+        if (!askAgain || Date.now() >= until) return { status: res.status, data };
+        // timing-ok: the page's own pause between asks (public/base.js), not a wait for a state
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     };
   const call = as({ cookie });
   return { base, port, root, data, proc, zone: opts.env?.CITADEL_ZONE ?? TEST_ZONE, cookie, call, as, settled, stop };

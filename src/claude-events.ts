@@ -65,6 +65,8 @@ export interface ClaudeEvent {
   num_turns?: number;
   usage?: TokenUsage;
   modelUsage?: Record<string, ModelUsage>;
+  /** system compact_boundary */
+  compact_metadata?: { duration_ms?: number };
   /** system init */
   model?: string;
   cwd?: string;

@@ -14,6 +14,7 @@ import { Relay, clip, loopHolds, loopKey, MINION_PAIRS, minionPairKey, pairKey, 
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
 import { askerKey, buildOwnerKey, onboardingOpen, pagePlanKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketState } from './db.ts';
 import { APP_NAME } from './appname.ts';
+import { CompactWatch } from './compactions.ts';
 import type { Claim } from './claims.ts';
 import { fableMeter } from './costs.ts';
 import { Approvals, lines, type Go } from './approvals.ts';
@@ -1260,6 +1261,8 @@ export class Runner {
       // The chat's size meter (#1193): the context as of the turn's latest API call (so it moves mid-turn and drops after a compaction), against the model's window.
       context_live: this.turns.has(ticket.id) ? (this.contextSizes.get(ticket.id) ?? null) : null,
       running_cost: this.turns.has(ticket.id) ? (this.store.getSetting<TurnState>(turnKey(ticket.id))?.spend?.usd ?? 0) : 0, // #1913: the running turn's estimate, not yet in `cost`
+      // The running turn's compactions so far, beside the meter (#1920).
+      compactions: this.turns.has(ticket.id) ? this.compactWatch.of(ticket.id) : null,
     };
   }
 
@@ -4528,6 +4531,7 @@ export class Runner {
     // The emulator lease (#1128) ends with the turn that took it.
     const endedTicket = this.store.getTicket(ticketId);
     if (endedTicket) releaseEmulatorLease(join(this.dataDir, 'projects', '.heavy'), this.heavyEnv(endedTicket, endedTicket.person_id).CITADEL_HEAVY_WHO!);
+    this.compactWatch.ended(ticketId);
     this.onTurnEnd(ticketId);
     // Re-read the ticket: the turn may have given it its first (or a new) session id.
     const after = this.store.getTicket(ticketId);
@@ -4817,6 +4821,7 @@ export class Runner {
     if (validSessionId(ev.session_id) && ev.session_id !== this.store.getTicket(ticketId)?.session_id) {
       this.store.updateTicket(ticketId, { session_id: ev.session_id });
     }
+    if (this.compactWatch.observe(ticketId, ev)) this.broadcastTicket(ticketId);
     // The held prompt (#1276): a compaction summarises its note away, and a turn that ran has read the note it carried.
     if (ev.type === 'system' && ev.subtype === 'compact_boundary') this.promptHolds.compacted(ticketId);
     // Only a turn that ran has read its note: after an error the next turn carries it again.
@@ -5086,6 +5091,15 @@ export class Runner {
     }
   }
 
+  /** Counts each running turn's compactions and calls a burst out (#1920). */
+  private compactWatch = new CompactWatch({
+    ticket: (id) => this.store.getTicket(id),
+    tell: (t, text, wake) => {
+      const tm = this.store.ownerCoordinator(t);
+      if (tm) this.relay(t.id, tm.id, APP_NAME, text, false, wake, wake ? 'decision' : 'fyi');
+    },
+    note: (id, text) => this.emit(id, 'note', { text }),
+  });
   /** The running turn's latest context size, saved when it ends (contextKey). */
   private contextSizes = new Map<number, number>();
   /** What the last broadcast showed of a running turn's context size, and when (#1193). */

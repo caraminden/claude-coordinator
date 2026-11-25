@@ -113,11 +113,14 @@ export const JUDGES: Judge[] = [
   },
   {
     id: 'stall-signals',
-    name: 'Stall signals (#1139)',
+    name: 'Stall signals (#1139), and compacting over and over (#1920)',
     mode: 'act',
     replay: { notYet: 'a replay would read turn transcripts; their tool calls are kept, so this is next after the three' },
-    acts: "messages the minion's Taskmaster with a model step-up",
-    pins: [{ path: 'src/stall-signals.ts', symbols: ['RED_TIMES', 'CHURN_ROUNDS', 'SHIP_FAILS', 'failingTests'] }],
+    acts: "messages the minion's Taskmaster with a model step-up, or that it keeps compacting",
+    pins: [
+      { path: 'src/stall-signals.ts', symbols: ['RED_TIMES', 'CHURN_ROUNDS', 'SHIP_FAILS', 'failingTests'] },
+      { path: 'src/compactions.ts', symbols: ['BURST_MS'] },
+    ],
     callers: ['src/stall-signals.ts'],
   },
   {

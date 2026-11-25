@@ -577,6 +577,8 @@ details.recap-group:not([open]) > summary { margin: 0; }
 }
 /* The chat's context meter (#1193): fixed width, tabular numbers, so a changing number moves nothing. */
 .ctx-meter { display: inline-block; flex: none; min-width: 11ch; text-align: right; font-variant-numeric: tabular-nums; font-size: 0.85em; white-space: nowrap; }
+.ctx-compacts { flex: none; color: var(--muted); font-size: 0.85em; white-space: nowrap; }
+.ctx-compacts.hot { color: var(--danger, #c0392b); }
 .ctx-meter.hot { color: var(--danger, #c0392b); }
 
 /* A waiting heavy run's newest output (#1681) */

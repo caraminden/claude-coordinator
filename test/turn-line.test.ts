@@ -541,3 +541,29 @@ test("no more of a person's turns start while their container is at its memory l
   say(e);
   await started(e);
 });
+
+// #1892: the limits on the tile.
+test('the Workers tile reads the limits with the last 7 days beside each line, and a person changes and resets them', async () => {
+  const GB = 1024 ** 3;
+  const now = Date.now();
+  // 10 samples: CPU 0, 10, ... 90; memory pressure 0 except one at 25; free memory 16 GB except two at 5 GB.
+  for (let i = 0; i < 10; i++) store.addHostSample({ at: now - (i + 1) * 60_000, mem_total: 32 * GB, mem_avail: (i < 2 ? 5 : 16) * GB, disk_total: 1, disk_free: 1, load1: 0, rss: 0, cpu_psi: i * 10, mem_psi: i === 0 ? 25 : 0 } as Parameters<typeof store.addHostSample>[0]);
+  const tile = await workers('GET');
+  const row = (key: string) => tile.limits.find((l: { key: string }) => l.key === key);
+  assert.deepEqual([row('shrinkCpu').value, row('shrinkCpu').default, row('shrinkCpu').share], [50, 50, 50], '5 of 10 at 50% or more');
+  assert.equal(row('shrinkMem').share, 10);
+  assert.equal(row('shrinkFreeGb').share, 20);
+  assert.equal(row('shrinkCpu').by, undefined);
+  const set = await workers('PUT', { limits: { shrinkCpu: 80 } });
+  assert.deepEqual([set.min, set.limits.find((l: { key: string }) => l.key === 'shrinkCpu').share], [4, 20]);
+  const mine = set.limits.find((l: { key: string }) => l.key === 'shrinkCpu');
+  assert.equal(mine.by, 'Josh');
+  assert.ok(mine.at > 0);
+  await assert.rejects(workers('PUT', { limits: { min: 20, max: 10 } }), /can't be over/);
+  await assert.rejects(workers('PUT', { limits: { growCpu: 78 } }), /at least 5 points/);
+  await assert.rejects(workers('PUT', { limits: { nope: 1 } }), /not a limit/);
+  await assert.rejects(workers('PUT', { limits: { min: 3 }, size: 4 }), /one of them/);
+  const reset = await workers('PUT', { limits: { shrinkCpu: null } });
+  const back = reset.limits.find((l: { key: string }) => l.key === 'shrinkCpu');
+  assert.deepEqual([back.value, back.by], [50, undefined]);
+});

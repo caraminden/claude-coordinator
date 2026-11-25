@@ -329,6 +329,11 @@ export class MemoryEase {
   }
 
   /** For the Status page: null at ok. */
+  /** MemAvailable at the last reading, bytes (also at ok, where current() is null). */
+  free(): number | null {
+    return this.sample?.avail ?? null;
+  }
+
   current(): EaseNow | null {
     if (this.level === 'ok') return null;
     const s = this.sample;

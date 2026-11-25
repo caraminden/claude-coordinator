@@ -8,20 +8,13 @@
 // turn needs no starting any more is simply dropped when it comes up.
 import type { Store } from './db.ts';
 import type { PressureReading } from './pressure.ts';
+import { limitsOf, refuse, LIMIT_INFO, type LimitKey, type PoolBox, type PoolLimits, type SavedLimits } from './turn-limits.ts';
 import type { RetryKind } from './turn-outcome.ts';
 import type { WorkerWait } from './worker-wait.ts';
 
-/** Starting values (#1868): perigee averaged 15% CPU pressure at 7-9 turns, 34% at 10-12, 41% at 13-15, 59% at 26 and more. */
+/** The pool's fixed numbers. What Auto steers by (fewest and most, the pressure lines, the time per step) is src/turn-limits.ts, tunable (#1892). */
 export const POOL = {
   start: 10,
-  min: 4,
-  max: 30,
-  /** Grows only under these pressures (percent, some avg60); shrinks at src/pressure.ts's starved lines. */
-  calmCpu: 35,
-  calmMem: 8,
-  /** The least time between two steps up, and down: long enough to see what the last one did. */
-  growMs: 20_000,
-  shrinkMs: 30_000,
   everyMs: 10_000,
   /** Workers each person with work gets before anyone gets more. */
   first: 2,
@@ -32,6 +25,7 @@ export const POOL = {
 const LINE = 'turn-line';
 const SIZE = 'turn-pool';
 const PAUSE = 'turns-paused';
+const LIMITS = 'turn-pool-limits';
 
 /** `via`: the auto-resume it waits to start, else its queue's turn. */
 export interface LineEntry {
@@ -66,12 +60,25 @@ export interface Waiting {
   rank: number;
 }
 
+/** Which line made Auto shrink, for the tile. */
+function starveWhy(r: Pick<PressureReading, 'cpu' | 'mem'>, box: PoolBox, L: PoolLimits): string {
+  if (box.level === 'tight') return 'memory is tight';
+  if (r.cpu !== null && r.cpu >= L.shrinkCpu) return `CPU pressure ${r.cpu}%`;
+  if (r.mem !== null && r.mem >= L.shrinkMem) return `memory pressure ${r.mem}%`;
+  return `${box.freeGb?.toFixed(1)} GB free`;
+}
+
+/** Whether the box is over a shrink line. Memory level `tight` shrinks whatever the lines are set to. */
+export function starvedBy(r: Pick<PressureReading, 'cpu' | 'mem'>, box: PoolBox, L: PoolLimits): boolean {
+  return box.level === 'tight' || (r.cpu !== null && r.cpu >= L.shrinkCpu) || (r.mem !== null && r.mem >= L.shrinkMem) || (box.freeGb !== null && box.freeGb < L.shrinkFreeGb);
+}
+
 /** Auto's next size. A shrink counts from what runs: a size above that would let a burst (a Resume) start on a starved box. */
-export function nextSize(s: { size: number; at: number; used: number; waiting: number }, r: Pick<PressureReading, 'cpu' | 'mem' | 'starved'>, now: number): number {
-  if (r.starved) return now - s.at < POOL.shrinkMs ? s.size : Math.max(POOL.min, Math.min(s.size, s.used) - 1);
-  const calm = r.cpu !== null && r.cpu < POOL.calmCpu && (r.mem ?? 0) < POOL.calmMem;
-  if (!calm || !s.waiting || s.used < s.size || now - s.at < POOL.growMs) return s.size;
-  return Math.max(s.size, Math.min(POOL.max, s.size + 1));
+export function nextSize(s: { size: number; at: number; used: number; waiting: number }, r: Pick<PressureReading, 'cpu' | 'mem'>, box: PoolBox, L: PoolLimits, now: number): number {
+  if (starvedBy(r, box, L)) return now - s.at < L.shrinkSec * 1000 ? s.size : Math.max(L.min, Math.min(s.size, s.used) - 1);
+  const calm = r.cpu !== null && r.cpu < L.growCpu && (r.mem ?? 0) < L.growMem && box.level === 'ok';
+  if (!calm || !s.waiting || s.used < s.size || now - s.at < L.growSec * 1000) return s.size;
+  return Math.max(s.size, Math.min(L.max, s.size + 1));
 }
 
 /**
@@ -98,7 +105,7 @@ export function pick(waiting: Waiting[], running: Map<number, number>, now: numb
 
 /** What the line needs of the Runner. */
 export interface LineHost {
-  store: Pick<Store, 'getSetting' | 'setSetting' | 'deleteSetting'>;
+  store: Pick<Store, 'getSetting' | 'setSetting' | 'deleteSetting' | 'addHealthEvent'>;
   /** Takes no worker: a Taskmaster or the Overlord, or a minion that is gone. */
   exempt(ticketId: number): boolean;
   /** A step runs on its lane, so nothing of it can start now. */
@@ -183,6 +190,41 @@ export class TurnLine {
     return p.fixed?.size ?? p.size;
   }
 
+  /** The limits Auto steers by: the saved changes over the defaults. */
+  limits(): PoolLimits {
+    return limitsOf(this.host.store.getSetting<SavedLimits>(LIMITS));
+  }
+
+  savedLimits(): SavedLimits {
+    return this.host.store.getSetting<SavedLimits>(LIMITS) ?? { values: {}, by: {} };
+  }
+
+  /**
+   * People's changes: a number sets that limit, null puts back its default. All or none: a set that can't be used throws the reason.
+   * Each one is a health event, so the Status graphs can be read against it.
+   */
+  setLimits(changes: Partial<Record<LimitKey, number | null>>, by: string, now = Date.now()) {
+    const saved = this.savedLimits();
+    const next: SavedLimits = { values: { ...saved.values }, by: { ...saved.by } };
+    const before = this.limits();
+    const lines: string[] = [];
+    for (const i of LIMIT_INFO) {
+      const v = changes[i.key];
+      if (v === undefined) continue;
+      if (v === null) delete next.values[i.key];
+      else next.values[i.key] = v;
+      next.by[i.key] = { by, at: now };
+    }
+    const after = limitsOf(next);
+    const why = refuse(after);
+    if (why) throw new Error(why);
+    for (const i of LIMIT_INFO) if (changes[i.key] !== undefined && before[i.key] !== after[i.key]) lines.push(`${i.label}: ${before[i.key]} to ${after[i.key]} ${i.unit}`);
+    if (!lines.length) return;
+    this.host.store.setSetting(LIMITS, next);
+    this.host.store.addHealthEvent('pool-limits', now, null, `${by} changed the worker pool's limits. ${lines.join('; ')}`);
+    this.pump();
+  }
+
   /** What the Workers tile shows (src/routes/workers.ts). */
   summary() {
     return { used: this.used(), size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people() };
@@ -195,17 +237,17 @@ export class TurnLine {
     this.pump();
   }
 
-  /** Auto's step, every POOL.everyMs. `stalled`: the people whose container is at its memory limit: no more of their turns start until it recovers. */
-  tick(reading: PressureReading, stalled: Iterable<number> = [], now = Date.now()) {
+  /** Auto's step, every POOL.everyMs. `box`: free memory and the memory level. `stalled`: the people whose container is at its memory limit: no more of their turns start until it recovers. */
+  tick(reading: PressureReading, stalled: Iterable<number> = [], now = Date.now(), box: PoolBox = { freeGb: null, level: 'ok' }) {
     // A turn still launching when the pause came, or re-attached since.
     if (this.paused()?.stop) this.stopRunning();
     const p = this.pool();
     this.stalled = new Set(p.fixed ? [] : stalled);
     this.pumpIn(0);
     if (p.fixed) return;
-    const size = nextSize({ ...p, used: this.used(), waiting: this.entries.length }, reading, now);
+    const size = nextSize({ ...p, used: this.used(), waiting: this.entries.length }, reading, box, this.limits(), now);
     if (size === p.size) return;
-    this.host.store.setSetting(SIZE, { size, at: now, why: size < p.size ? reading.why : 'perigee is calm and turns wait' });
+    this.host.store.setSetting(SIZE, { size, at: now, why: size < p.size ? starveWhy(reading, box, this.limits()) : 'perigee is calm and turns wait' });
     this.pump();
   }
 

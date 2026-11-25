@@ -411,7 +411,10 @@ setInterval(
   () =>
     void pressure
       .read()
-      .then((r) => runner.turnLine.tick(r, stormPeople(memoryStorms.current())))
+      .then((r) => {
+        const free = memoryEase.free();
+        runner.turnLine.tick(r, stormPeople(memoryStorms.current()), Date.now(), { freeGb: free === null ? null : free / 1024 ** 3, level: memoryEase.get().level });
+      })
       .catch((e) => console.error('worker pool:', e)),
   POOL.everyMs,
 ).unref();

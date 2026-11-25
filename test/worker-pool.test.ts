@@ -1,7 +1,17 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { until } from './wait.ts';
-import { nextSize, pick, POOL, TurnLine, type Waiting } from '../src/turn-line.ts';
+import { nextSize as size, pick, POOL, TurnLine, type Waiting } from '../src/turn-line.ts';
+import { DEFAULT_LIMITS as L, refuse } from '../src/turn-limits.ts';
+import { Store } from '../src/db.ts';
+import type { PoolBox } from '../src/turn-limits.ts';
+
+const ok: PoolBox = { freeGb: 16, level: 'ok' };
+const nextSize = (s: Parameters<typeof size>[0], r: Parameters<typeof size>[1], now: number, box = ok, l = L) => size(s, r, box, l, now);
 
 // #1868, the pool's two rules. Josh, 2026-11-24: "Lets make the pool dynamic and performance of perigee based, not a static
 // number", and "you should scale based on how many minions the user has waiting as well".
@@ -15,8 +25,8 @@ test('the size grows by one while the pool is full, something waits and the box 
   assert.equal(nextSize(full, calm, LATER), 11);
   assert.equal(nextSize({ ...full, waiting: 0 }, calm, LATER), 10, 'nothing waits');
   assert.equal(nextSize({ ...full, used: 9 }, calm, LATER), 10, 'a worker is free');
-  assert.equal(nextSize(full, calm, POOL.growMs - 1), 10, 'it moved a moment ago');
-  assert.equal(nextSize({ ...full, size: POOL.max, used: POOL.max }, calm, LATER), POOL.max);
+  assert.equal(nextSize(full, calm, L.growSec * 1000 - 1), 10, 'it moved a moment ago');
+  assert.equal(nextSize({ ...full, size: L.max, used: L.max }, calm, LATER), L.max);
 });
 
 test('it holds between calm and starved, and with no reading', () => {
@@ -29,8 +39,8 @@ test('starved, it shrinks by one, from what runs if fewer run, to the floor and 
   assert.equal(nextSize(full, starved, LATER), 9);
   assert.equal(nextSize({ ...full, used: 6 }, starved, LATER), 5);
   assert.equal(nextSize({ ...full, used: 14 }, starved, LATER), 9, 'turns over the size do not raise it');
-  assert.equal(nextSize({ ...full, size: POOL.min }, starved, LATER), POOL.min);
-  assert.equal(nextSize(full, starved, POOL.shrinkMs - 1), 10);
+  assert.equal(nextSize({ ...full, size: L.min }, starved, LATER), L.min);
+  assert.equal(nextSize(full, starved, L.shrinkSec * 1000 - 1), 10);
 });
 
 const w = (ticket: number, person: number, rank = 1, since = ticket): Waiting => ({ ticket, person, rank, since });
@@ -94,7 +104,7 @@ function line(saved: Record<string, unknown> = {}) {
   const busy = new Set<number>();
   const started: number[] = [];
   const turns: TurnLine = new TurnLine({
-    store: { getSetting: <T>(k: string) => saved[k] as T, setSetting: (k: string, v: unknown) => void (saved[k] = v), deleteSetting: (k: string) => void delete saved[k] },
+    store: { getSetting: <T>(k: string) => saved[k] as T, setSetting: (k: string, v: unknown) => void (saved[k] = v), deleteSetting: (k: string) => void delete saved[k], addHealthEvent: () => {} },
     exempt: () => false,
     busy: (id) => busy.has(id),
     asks: () => ({ person: 1, rank: 1 }),
@@ -134,4 +144,55 @@ test("a boot check's copy forgets the line and the pause", () => {
   turns.clear();
   assert.deepEqual([turns.waiting(), turns.paused(), turns.size(), saved], [[], null, POOL.start, {}]);
   assert.equal(turns.enter(8), true, 'its own turn starts');
+});
+
+// #1892: the limits are settings.
+const mem = (extra = {}) => ({ ...full, ...extra });
+test("a changed CPU line moves where Auto shrinks, and defaults are today's numbers", () => {
+  assert.deepEqual(L, { min: 4, max: 30, growCpu: 35, growMem: 8, shrinkCpu: 50, shrinkMem: 20, shrinkFreeGb: 6, growSec: 20, shrinkSec: 30 });
+  const r = { cpu: 55, mem: 0 };
+  assert.equal(nextSize(full, r, LATER), 9);
+  assert.equal(nextSize(full, r, LATER, ok, { ...L, shrinkCpu: 60 }), 10, 'a higher line leaves it');
+  assert.equal(nextSize(full, { cpu: 30, mem: 0 }, LATER, ok, { ...L, shrinkCpu: 30, growCpu: 20 }), 9);
+});
+test('each line and time is read: free memory, memory pressure, fewest, most, seconds', () => {
+  assert.equal(nextSize(full, { cpu: 5, mem: 0 }, LATER, { freeGb: 5.9, level: 'ok' }), 9);
+  assert.equal(nextSize(full, { cpu: 5, mem: 0 }, LATER, { freeGb: 5.9, level: 'ok' }, { ...L, shrinkFreeGb: 4 }), 11, 'under the old 6 GB line, over the new 4');
+  assert.equal(nextSize(full, { cpu: 5, mem: 25 }, LATER), 9);
+  assert.equal(nextSize(mem({ size: 7 }), { cpu: 60, mem: 0 }, LATER, ok, { ...L, min: 7 }), 7, 'fewest');
+  assert.equal(nextSize(mem({ size: 12, used: 12 }), { cpu: 5, mem: 0 }, LATER, ok, { ...L, max: 12 }), 12, 'most');
+  assert.equal(nextSize(full, { cpu: 60, mem: 0 }, 10_000, ok, { ...L, shrinkSec: 5 }), 9, 'seconds per step down');
+  assert.equal(nextSize(full, { cpu: 5, mem: 0 }, 10_000, ok, { ...L, growSec: 10 }), 11, 'seconds per step up');
+});
+test('memory level tight shrinks whatever the lines say; easing never grows', () => {
+  const loose = { ...L, shrinkCpu: 100, shrinkMem: 100, shrinkFreeGb: 0.5 };
+  assert.equal(nextSize(full, { cpu: 1, mem: 0 }, LATER, { freeGb: 2, level: 'tight' }, loose), 9);
+  assert.equal(nextSize(full, { cpu: 1, mem: 0 }, LATER, { freeGb: 5, level: 'easing' }, loose), 10);
+});
+test('sets that can not work are refused with the reason', () => {
+  assert.equal(refuse(L), null);
+  assert.match(refuse({ ...L, min: 12, max: 8 })!, /Fewest workers \(12\) can't be over most workers \(8\)/);
+  assert.match(refuse({ ...L, growCpu: 48 })!, /at least 5 points above/);
+  assert.match(refuse({ ...L, shrinkMem: 10 })!, /memory pressure/);
+  assert.match(refuse({ ...L, growSec: 3 })!, /10 to 3600/);
+});
+
+const dir = mkdtempSync(join(tmpdir(), 'pool-limits-'));
+after(() => rmSync(dir, { recursive: true, force: true }));
+test('saved limits steer at once, record who and when, a health event each, and reset puts the default back', () => {
+  const store = new Store(join(dir, 'x.db'));
+  const turns = new TurnLine({ store, exempt: () => false, busy: () => false, asks: () => null, start: () => {}, pauseTurn: () => {}, changed: () => {}, gapMs: 0, detached: false } as never);
+  assert.deepEqual(turns.limits(), L);
+  turns.setLimits({ shrinkCpu: 60 }, 'Josh', 5_000);
+  assert.equal(turns.limits().shrinkCpu, 60);
+  assert.deepEqual(turns.savedLimits().by.shrinkCpu, { by: 'Josh', at: 5_000 });
+  const events = store.healthEventsSince(['pool-limits'], 0);
+  assert.equal(events.length, 1);
+  assert.match(events[0].detail, /Josh changed .*Shrink at CPU pressure: 50 to 60 %/);
+  assert.throws(() => turns.setLimits({ min: 40, max: 3 }, 'Josh'), /can't be over/);
+  assert.equal(turns.limits().max, 30, 'nothing of a refused set is kept');
+  assert.equal(store.healthEventsSince(['pool-limits'], 0).length, 1);
+  turns.setLimits({ shrinkCpu: null }, 'Josh', 6_000);
+  assert.equal(turns.limits().shrinkCpu, 50);
+  assert.equal(store.healthEventsSince(['pool-limits'], 0).length, 2);
 });

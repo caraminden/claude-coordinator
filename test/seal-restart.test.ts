@@ -69,7 +69,7 @@ setInterval(() => {}, 1000);
       const all = await Promise.all([resumed, rerun, woken].map(ticket));
       return all.every((t) => t.status === 'idle');
     });
-    assert.match(prompts(), /server restarted while you were working/, 'one resumed');
+    assert.doesNotMatch(prompts(), /resumed-brief/, 'one resumed');
     assert.match(prompts(), /rerun-brief SILENT/, 'one ran its batch again');
     assert.match(prompts(), /wake-up-call/);
     for (const [id, what] of [

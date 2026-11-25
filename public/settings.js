@@ -320,13 +320,19 @@ export function onProjectUpdate(project) {
   for (const el of document.querySelectorAll('[data-rules-review]')) el.dispatchEvent(new Event('settings-refresh'));
   onSkillsChanged();
   renderSidebar(); // its promoted groups may have changed
-  const text = document.getElementById('instructions-text');
-  // Someone else saved: show their text unless this tab has edits of its own.
-  if (text && !text.hasAttribute('data-draft')) text.value = project.instructions;
+  theirText('instructions-text', project.instructions);
   renderInstructionsHead();
   document.getElementById('onboarding-strip')?.replaceWith(onboardingStrip(project));
   renderGithubStrip();
   for (const b of document.querySelectorAll('.ticket-head button.tune-up')) b.replaceWith(tuneUpButton());
+}
+
+/** Someone else saved: show their text unless this tab has edits of its own, and bring the counter and buttons in step (sync). */
+function theirText(id, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!el.hasAttribute('data-draft')) el.value = text;
+  el.dispatchEvent(new Event('settings-refresh'));
 }
 
 /** Each onboarding step's place in the four (1, creating the scheme, is done by the time this shows). */
@@ -613,23 +619,34 @@ function fastModeRow(p) {
  * view.project at once and shown(true) redraws; the PATCH sends `body` behind it. A refusal puts the old values
  * back, unless a later save changed them again, and shown(false) says so; the page's fields keep what was typed,
  * so they read as drafts again. The server's own copy replaces ours once it answers, unless a later save is pending.
+ * `draft`: the typed text being saved (typedDraft's `begin()`).
  */
-function saveProject(p, mine, body, label, shown) {
-  const was = Object.fromEntries(Object.keys(mine).map((k) => [k, view.project?.[k]]));
+function saveProject(p, mine, body, label, shown, draft) {
+  let was;
   const ours = () => view.project?.id === p.id && Object.entries(mine).every(([k, v]) => view.project[k] === v);
   const result = optimistic({
     key: `scheme-settings:${p.id}`,
+    sets: `scheme-settings:${p.id}:${Object.keys(mine).sort()}`,
     apply: () => {
+      was = Object.fromEntries(Object.keys(mine).map((k) => [k, view.project?.[k]]));
       if (view.project?.id === p.id) Object.assign(view.project, mine);
       renderSidebar();
+      draft?.sent();
       shown(true);
     },
-    send: () => api(`api/projects/${p.id}`, { method: 'PATCH', body }),
-    undo: () => {
-      if (!ours()) return; // a later save changed them again
-      Object.assign(view.project, was);
+    send: () => api(`api/projects/${p.id}`, { method: 'PATCH', body }).finally(draft?.answered),
+    undo: (err) => {
+      // Otherwise someone's update, or a later save, changed them again: theirs stays, and the page still says it wasn't saved.
+      if (ours()) Object.assign(view.project, was);
       renderSidebar();
-      shown(false);
+      draft?.refused();
+      shown(false, err);
+      // The stream has no replay: a tab that missed their update fetches it, so Discard loads theirs as the refusal says.
+      if (err?.status === 409 && body.was)
+        api(`api/projects/${p.id}?tickets=open`).then(
+          ({ project }) => onProjectUpdate(project),
+          () => {},
+        );
     },
     label,
   });
@@ -638,6 +655,41 @@ function saveProject(p, mine, body, label, shown) {
     () => {},
   ); // a failure already said so in its toast
   return result;
+}
+
+/**
+ * A text field other people can save too (#1859). Keeps the stored text its draft began from, for the save to name as
+ * `was`, and the field's data-draft mark, which stands while a save is out: a refusal then finds the text still in the box.
+ */
+function typedDraft(el, saved, dirty = () => el.value.trim() !== saved().trim()) {
+  let base = saved();
+  let out = 0;
+  const sync = () => {
+    const changed = dirty();
+    if (!changed) base = saved();
+    el.toggleAttribute('data-draft', changed || out > 0);
+    return changed;
+  };
+  return {
+    /** Whether it holds unsaved text; also the place the mark and the base are brought up to date. */
+    sync,
+    /** One save of it, from its press: the text it began from, and what the save tells the draft as it goes. */
+    begin: () => {
+      const from = base;
+      return {
+        from,
+        sent: () => out++,
+        answered: () => {
+          out--;
+          sync();
+        },
+        refused: () => {
+          sync();
+          base = from;
+        },
+      };
+    },
+  };
 }
 
 /**
@@ -769,7 +821,7 @@ function rulesReviewBanner() {
 /** Main panel: Minion rules, each setting a row of pickers (public/minion-rules.js) with typed entry as the fallback. */
 export function approvalsEditor() {
   const p = view.project;
-  const rules = pickers({ settingsRow, settingsHelp, saveProject });
+  const rules = pickers({ settingsRow, settingsHelp, saveProject, typedDraft });
   const elsewhere = elsewhereRows(null);
   const section = h(
     'section',
@@ -997,15 +1049,21 @@ export function myInstructionsEditor() {
  * its one home, or a paragraph elsewhere sharing a run of its words), and the save goes ahead only on Save anyway.
  * Resolves true to save. A failed check never blocks a save. Then a Sonnet check on the person's own Claude login says
  * whether each really repeats (#1211; Josh, 2026-11-20: "List now, verdicts fill in"); Save anyway works throughout.
+ * Leaving while it checks saves, saying so: there is no list left to press Save anyway in, and the text would be lost (#1859).
  */
 async function checkRepeats(scope, text, box, status) {
+  const projectId = view.projectId;
   let found;
   try {
-    ({ found } = await api(`api/projects/${view.projectId}/instructions/overlaps`, { method: 'POST', body: { scope, text } }));
+    ({ found } = await api(`api/projects/${projectId}/instructions/overlaps`, { method: 'POST', body: { scope, text } }));
   } catch {
     return true;
   }
   if (!found.length) return (box.hidden = true);
+  if (!box.isConnected) {
+    toast(`Saving the instructions you left. Some of it is already said in ${found.length === 1 ? found[0].label : `${found.length} places`}`);
+    return true;
+  }
   status.textContent = '';
   return new Promise((done) => {
     const close = (go) => () => {
@@ -1027,18 +1085,18 @@ async function checkRepeats(scope, text, box, status) {
     );
     box.hidden = false;
     box.scrollIntoView({ block: 'nearest' });
-    void fillVerdicts(scope, text, box, marks, note, found.map((o) => `${o.label}|${o.line}`).join('\n'));
+    void fillVerdicts(projectId, scope, text, box, marks, note, found.map((o) => `${o.label}|${o.line}`).join('\n'));
   });
 }
 
 const VERDICT = { repeats: 'really repeats it', conflicts: 'conflicts with it', fine: 'only shares wording' };
 
 /** Sonnet's verdicts into the open repeats list; a later check or a closed list drops them. */
-async function fillVerdicts(scope, text, box, marks, note, places) {
+async function fillVerdicts(projectId, scope, text, box, marks, note, places) {
   const run = (box.dataset.run = String(Number(box.dataset.run ?? 0) + 1));
   let r;
   try {
-    r = await api(`api/projects/${view.projectId}/instructions/overlaps/verdicts`, { method: 'POST', body: { scope, text } });
+    r = await api(`api/projects/${projectId}/instructions/overlaps/verdicts`, { method: 'POST', body: { scope, text } });
   } catch (err) {
     r = { failed: err.message };
   }
@@ -1064,8 +1122,7 @@ let appInstructions = null;
 
 export function onAppInstructionsUpdate(instructions) {
   appInstructions = instructions;
-  const text = document.getElementById('app-instructions-text');
-  if (text && !text.hasAttribute('data-draft')) text.value = instructions.text;
+  theirText('app-instructions-text', instructions.text);
   renderAppInstructionsHead();
 }
 
@@ -1079,6 +1136,9 @@ function renderAppInstructionsHead() {
     h('div', { class: 'meta' }, "Every scheme's minions and Taskmaster get these, before their scheme's own.", a?.by ? ` Last changed by ${a.by} ${ago(a.at)}.` : ''),
   );
 }
+
+/** A refused save's status: the server's words when someone saved first. */
+const notSaved = (err) => (err?.status === 409 ? `Not saved: ${err.message}.` : 'Not saved.');
 
 /** Main panel: edit the instructions every scheme shares. */
 export function appInstructionsEditor() {
@@ -1096,10 +1156,10 @@ export function appInstructionsEditor() {
   const save = h('button', { type: 'button', disabled: true }, 'Save');
   const discard = h('button', { type: 'button', class: 'secondary', disabled: true }, 'Discard');
   const saved = () => appInstructions?.text ?? '';
+  // Nothing to save or discard until the GET has filled the field (it stays disabled if that fails).
+  const draft = typedDraft(textarea, saved, () => !textarea.disabled && textarea.value.trim() !== saved().trim());
   const sync = () => {
-    // Nothing to save or discard until the GET has filled the field (it stays disabled if that fails).
-    const dirty = !textarea.disabled && textarea.value.trim() !== saved().trim();
-    textarea.toggleAttribute('data-draft', dirty);
+    const dirty = draft.sync();
     const n = textarea.value.trim().length;
     counter.textContent = `${count(n)} / ${count(MAX_INSTRUCTIONS)}`;
     counter.classList.toggle('over', n > MAX_INSTRUCTIONS);
@@ -1111,6 +1171,7 @@ export function appInstructionsEditor() {
     status.textContent = '';
     sync();
   });
+  textarea.addEventListener('settings-refresh', sync);
   const [history, loadHistory] = recentChanges('api/app/instructions/history', (t) => {
     textarea.value = t;
     textarea.dispatchEvent(new Event('input'));
@@ -1127,8 +1188,9 @@ export function appInstructionsEditor() {
   };
   // Saved at once; a refusal puts the last saved text back as the saved one, and the field keeps what was typed as a draft.
   const saveNow = () => {
-    const was = appInstructions;
+    let was;
     const mine = { ...appInstructions, text: textarea.value, by: me, at: Date.now() };
+    const sending = draft.begin();
     const show = (a, said) => {
       appInstructions = a;
       status.textContent = said;
@@ -1136,10 +1198,19 @@ export function appInstructionsEditor() {
       sync();
     };
     optimistic({
-      key: 'app-instructions',
-      apply: () => show(mine, `Saved. Every scheme picks this up on its next turn. ${instructionCost(mine.text)}`),
-      send: () => api('api/app/instructions', { method: 'PUT', body: { text: mine.text } }),
-      undo: () => appInstructions === mine && show(was, 'Not saved.'), // unless a later save changed it again
+      sets: 'app-instructions',
+      apply: () => {
+        was = appInstructions;
+        sending.sent();
+        show(mine, `Saved. Every scheme picks this up on its next turn. ${instructionCost(mine.text)}`);
+      },
+      send: () => api('api/app/instructions', { method: 'PUT', body: { text: mine.text, was: sending.from } }).finally(sending.answered),
+      undo: (err) => {
+        sending.refused();
+        show(appInstructions === mine ? was : appInstructions, notSaved(err)); // someone's update, or a later save, stays
+        loadHistory();
+        if (err?.status === 409) api('api/app/instructions').then(onAppInstructionsUpdate, () => {}); // as in saveProject
+      },
       label: 'save the Citadel-wide instructions',
     }).then(
       (a) => {
@@ -1252,10 +1323,10 @@ export function instructionsEditor() {
   const status = h('span', { class: 'muted', role: 'status' });
   const save = h('button', { type: 'button' }, 'Save');
   const discard = h('button', { type: 'button', class: 'secondary' }, 'Discard');
+  const now = () => (view.project?.id === p.id ? view.project : p); // a save can outlast the page
+  const draft = typedDraft(textarea, () => now().instructions ?? '');
   const sync = () => {
-    const dirty = textarea.value.trim() !== (view.project.instructions ?? '').trim();
-    // Marked as a draft only while it differs, so the app still reloads for an update otherwise.
-    textarea.toggleAttribute('data-draft', dirty);
+    const dirty = draft.sync();
     const n = textarea.value.trim().length;
     counter.textContent = `${count(n)} / ${count(MAX_INSTRUCTIONS)}`;
     counter.classList.toggle('over', n > MAX_INSTRUCTIONS);
@@ -1267,6 +1338,7 @@ export function instructionsEditor() {
     status.textContent = '';
     sync();
   });
+  textarea.addEventListener('settings-refresh', sync);
   const repeats = h('div', { class: 'instructions-repeats', role: 'alert', hidden: true });
   save.onclick = async () => {
     status.textContent = 'Checking for repeats…';
@@ -1276,17 +1348,20 @@ export function instructionsEditor() {
     sync();
     if (!go) return;
     const instructions = textarea.value;
-    saveProject(p, { instructions, instructions_updated_by: me, instructions_updated_at: Date.now() }, { instructions }, 'save the instructions', (saved) => {
-      status.textContent = saved ? `Saved. Minions pick this up on their next turn. ${instructionCost(instructions)}` : 'Not saved.';
+    const sending = draft.begin();
+    const shown = (saved, err) => {
+      status.textContent = saved ? `Saved. Minions pick this up on their next turn. ${instructionCost(instructions)}` : notSaved(err);
       renderInstructionsHead();
       sync();
-    }).then(
+      if (!saved) loadHistory();
+    };
+    saveProject(p, { instructions, instructions_updated_by: me, instructions_updated_at: Date.now() }, { instructions, was: { instructions: sending.from } }, 'save the instructions', shown, sending).then(
       () => loadHistory(),
       () => {},
     );
   };
   discard.onclick = () => {
-    textarea.value = view.project.instructions ?? '';
+    textarea.value = now().instructions ?? '';
     status.textContent = '';
     sync();
   };

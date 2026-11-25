@@ -72,24 +72,30 @@ const SHOT_WIDTHS = [
 /** src/msg-settings.ts's defaults and bounds; test/held-list.test.ts keeps them equal. */
 export const MSG_DEFAULTS = { msg_loop_limit: 6, msg_loop_min: 10, msg_cold_min: 55, msg_hold_h: 3 };
 export const MSG_BOUNDS = { msg_loop_limit: [3, 20], msg_loop_min: [5, 60], msg_cold_min: [10, 55], msg_hold_h: [1, 12] };
+/** What a control is called, whichever way it is switched. */
+const nameOf = (el) => `${el.closest('[role=group]')?.ariaLabel ?? ''}|${el.ariaLabel ?? (el.closest('label') ?? el).textContent.replace(/^\+/, '').trim()}`;
 const shotList = (text) =>
   (text ?? '')
     .split(',')
     .map(Number)
     .filter((w) => w > 0);
 
-export function pickers({ settingsRow, settingsHelp, saveProject }) {
+export function pickers({ settingsRow, settingsHelp, saveProject, typedDraft }) {
   const p = view.project;
-  const stored = () => view.project;
+  const stored = () => (view.project?.id === p.id ? view.project : p); // a save can outlast the page
   // Read once the page opens (settings.js), then every row redraws.
   const data = { found: [], registry: [], workflows: [], failed: {} };
   /** A row that redraws its body from view.project whenever the project changes (onProjectUpdate dispatches settings-refresh). */
   const live = (meta, help, draw, ...after) => {
     const mount = h('div', { class: 'rules-body' });
     const [row, sum] = settingsRow(meta, help, mount, ...after);
+    // What a redraw would take the focus from keeps it: the same control, or the one drawn in its place.
+    const named = (el) => [...mount.querySelectorAll(el.tagName)].filter((x) => nameOf(x) === nameOf(el));
     const paint = () => {
-      const s = draw(mount);
-      sum.textContent = s;
+      const at = mount.contains(document.activeElement) && document.activeElement;
+      const nth = at && named(at).indexOf(at);
+      sum.textContent = draw(mount);
+      if (at && document.activeElement !== at) (at.isConnected ? at : named(at)[nth])?.focus({ preventScroll: true });
     };
     row.dataset.rulesRow = '';
     row.addEventListener('settings-refresh', paint);
@@ -100,11 +106,11 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     for (const el of document.querySelectorAll('[data-rules-row]')) el.dispatchEvent(new Event('settings-refresh'));
   };
   /** Save these fields at once. `fields` are the stored strings; list_groups goes as a list. */
-  const save = (fields, label) => {
-    const body = { ...fields };
+  const save = (fields, label, was, draft) => {
+    const body = { ...fields, ...(was && { was }) };
     if ('list_groups' in fields) body.list_groups = JSON.parse(fields.list_groups);
     if ('msg_never_hold' in fields) body.msg_never_hold = fields.msg_never_hold.split(',').filter(Boolean);
-    return saveProject(p, fields, body, label, refreshAll);
+    return saveProject(p, fields, body, label, refreshAll, draft);
   };
   /** `disabled` is true, false, or a test of each option's value. */
   const seg = (opts, cur, onPick, disabled = false, label = '') =>
@@ -151,22 +157,36 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
         type: 'button',
         class: 'rules-hand',
         onclick: () => {
-          area.hidden = false;
-          actions.hidden = false;
-          handOpen.hidden = true;
+          showHand();
           area.focus();
         },
       },
       'Add by hand',
     );
     const actions = h('div', { class: 'settings-row-actions', hidden: true }, saveBtn, discardBtn);
-    const dirty = () => lines(area.value).join('\n') !== handRules(stored()[key]).join('\n');
+    const showHand = () => {
+      area.hidden = actions.hidden = false;
+      handOpen.hidden = true;
+    };
+    const hand = () => handRules(stored()[key]).join('\n');
+    const draft = typedDraft(area, hand, () => lines(area.value).join('\n') !== hand());
     const sync = () => {
-      area.toggleAttribute('data-draft', dirty());
-      saveBtn.disabled = discardBtn.disabled = !dirty();
+      saveBtn.disabled = discardBtn.disabled = !draft.sync();
     };
     area.addEventListener('input', sync);
-    saveBtn.onclick = () => save({ [key]: text([...ticked(lines(stored()[key])).flatMap((a) => a.rules), ...lines(area.value)]) }, 'save approval rules');
+    saveBtn.onclick = () => {
+      const typed = lines(area.value).join('\n');
+      const ticks = ticked(lines(stored()[key])).flatMap((a) => a.rules);
+      const sending = draft.begin();
+      // A rule typed out that ticks a box is the box's from here on, so it leaves the field once it is saved.
+      save({ [key]: text([...ticks, ...lines(typed)]) }, 'save approval rules', { [key]: text([...ticks, ...lines(sending.from)]) }, sending).then(
+        () => {
+          if (lines(area.value).join('\n') === typed) area.value = hand();
+          sync();
+        },
+        () => {},
+      );
+    };
     discardBtn.onclick = () => {
       area.value = handRules(stored()[key]).join('\n');
       sync();
@@ -196,7 +216,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
           h('p', { class: 'cui-notice small' }, 'Bash rules match how a command starts: they catch mistakes, not a determined workaround.'),
         );
         if (!area.hasAttribute('data-draft')) area.value = handRules(stored()[key]).join('\n');
-        if (area.value && area.hidden) handOpen.click();
+        if (area.value && area.hidden) showHand();
         sync();
         const n = handRules(stored()[key]).length;
         return on.length || n ? `Asks before: ${[...on.map((a) => a.what), ...(n ? [`${n} by hand`] : [])].join(', ')}` : 'Nothing asks first';
@@ -442,21 +462,25 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
         type: 'button',
         class: 'rules-hand',
         onclick: () => {
-          note.hidden = false;
-          actions.hidden = false;
-          open.hidden = true;
+          showNote();
           note.focus();
         },
       },
       'Add by hand',
     );
-    const dirty = () => note.value.trim() !== (stored().shot_note ?? '');
+    const showNote = () => {
+      note.hidden = actions.hidden = false;
+      open.hidden = true;
+    };
+    const draft = typedDraft(note, () => stored().shot_note ?? '');
     const sync = () => {
-      note.toggleAttribute('data-draft', dirty());
-      saveBtn.disabled = discardBtn.disabled = !dirty();
+      saveBtn.disabled = discardBtn.disabled = !draft.sync();
     };
     note.addEventListener('input', sync);
-    saveBtn.onclick = () => save({ shot_note: note.value.trim() }, 'save the screenshot note');
+    saveBtn.onclick = () => {
+      const sending = draft.begin();
+      save({ shot_note: note.value.trim() }, 'save the screenshot note', { shot_note: sending.from }, sending);
+    };
     discardBtn.onclick = () => {
       note.value = stored().shot_note ?? '';
       sync();
@@ -509,7 +533,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
           h('div', { class: 'rules-pick' }, custom, ''),
         );
         if (!note.hasAttribute('data-draft')) note.value = s.shot_note ?? '';
-        if (note.value && note.hidden) open.click();
+        if (note.value && note.hidden) showNote();
         sync();
         return `${widths.join(' and ')}, ${themes.join(' and ')}${s.shots_required ? ', required' : ''}`;
       },
@@ -611,26 +635,30 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
    */
   const number = (meta, help, field, label, unit) => {
     const [min, max] = MSG_BOUNDS[field];
+    const now = () => stored()[field] ?? MSG_DEFAULTS[field];
+    let shown = ''; // the number the box last showed, so a redraw can tell one being typed
+    const input = h('input', {
+      type: 'number',
+      class: 'rules-number',
+      min,
+      max,
+      step: 1,
+      'aria-label': label,
+      onchange: () => {
+        const v = Number(input.value);
+        if (!Number.isInteger(v) || v < min || v > max) {
+          input.value = now();
+          return toast(`${label} is a whole number from ${min} to ${max}`);
+        }
+        shown = input.value; // sent, no longer being typed: a refusal puts the old number back
+        save({ [field]: v }, `set ${label.toLowerCase()}`);
+      },
+    });
+    const line = h('div', { class: 'rules-pick' }, input, h('span', { class: 'muted small' }, `${unit} (${min} to ${max}, default ${MSG_DEFAULTS[field]})`));
     return live(meta, help, (mount) => {
-      const cur = stored()[field] ?? MSG_DEFAULTS[field];
-      const input = h('input', {
-        type: 'number',
-        class: 'rules-number',
-        min,
-        max,
-        step: 1,
-        value: cur,
-        'aria-label': label,
-        onchange: () => {
-          const v = Number(input.value);
-          if (!Number.isInteger(v) || v < min || v > max) {
-            input.value = stored()[field] ?? MSG_DEFAULTS[field];
-            return toast(`${label} is a whole number from ${min} to ${max}`);
-          }
-          save({ [field]: v }, `set ${label.toLowerCase()}`);
-        },
-      });
-      mount.replaceChildren(h('div', { class: 'rules-pick' }, input, h('span', { class: 'muted small' }, `${unit} (${min} to ${max}, default ${MSG_DEFAULTS[field]})`)));
+      const cur = now();
+      if (!line.parentNode) mount.append(line); // never rebuilt: someone may be typing in it
+      if (document.activeElement !== input || input.value === shown) input.value = shown = String(cur);
       return `${cur} ${unit}`;
     });
   };

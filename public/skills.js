@@ -523,6 +523,7 @@ function setOff(item, off) {
   const next = off ? [...new Set([...was, item.slug])].sort() : was.filter((s) => s !== item.slug);
   optimistic({
     key: `scheme-settings:${p.id}`,
+    sets: `scheme-settings:${p.id}:skills_off`,
     apply: () => {
       if (data === d) d.off = next;
       if (view.project?.id === p.id) view.project.skills_off = next.join(' ');

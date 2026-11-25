@@ -186,6 +186,7 @@ export function peoplePage() {
           const set = (vals) => now() && render(shown.map((x) => (x.id === u.id ? { ...x, ...vals } : x)));
           optimistic({
             key: `person:${u.id}`,
+            sets: `person:${u.id}:${Object.keys(body)}`,
             apply: () => set(body),
             send: () => api(`api/people/${u.id}`, { method: 'PATCH', body }),
             undo: () => Object.entries(body).every(([k, v]) => now()?.[k] === v) && set(was),
@@ -498,7 +499,7 @@ function claudeCard() {
           title: on ? "New minions and cold wakes run on this account while it's ready" : 'Let Citadel pick again: soonest weekly reset first',
           onclick: () =>
             optimistic({
-              key: 'claude-use',
+              sets: `claude-use:${account?.id}`,
               apply: () => render({ ...st, pinned: on ? a.n : undefined, ...(on && a.ready ? { inUse: a.n } : {}) }),
               send: () =>
                 api('api/me/claude/use', { method: 'POST', body: { account: on ? a.n : null } }).then((next) => {

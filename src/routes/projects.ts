@@ -396,6 +396,22 @@ function queuedState(app: App, t: Ticket | undefined, done: boolean): { state: s
 }
 
 /**
+ * Refuse a save of `next` whose draft began from `was` when someone has saved other text since (`now`): the page keeps what
+ * was typed and the stored text stays (#1859). No `was` (an agent's call, an old tab) compares nothing, and neither does a
+ * save that changes nothing. `byLine`: a list, so its order doesn't count.
+ */
+function refuseStale(was: unknown, now: string, next: string, by?: string | null, byLine = false): void {
+  if (was === undefined) return;
+  if (typeof was !== 'string') throw new HttpError(400, 'was must be text');
+  const clean = (t: string) => {
+    const s = t.replace(/\r\n/g, '\n').trim();
+    return byLine ? [...new Set(s.split('\n').map((l) => l.trim()))].sort().join('\n') : s;
+  };
+  if (clean(was) === clean(now) || clean(next) === clean(now)) return;
+  throw new HttpError(409, `${by || 'Someone'} saved a different text since you opened it. Copy yours, Discard to load theirs, and make your change again`);
+}
+
+/**
  * A claim as the tools and the page show it: its holder's number and title and a Pacific time beside the ids, and its
  * queue (#1334): past holders, the holder's stage, the waiting in order, and when the history allows, each one's expected start.
  */
@@ -1027,6 +1043,14 @@ export const projectRoutes: Route[] = [
           throw new HttpError(409, `This scheme's repo is already ${project.repo_url}; send replace_repo: true to point it at ${repoUrl} instead`);
         }
       }
+      // `was`: the text the page's draft started from, by field (#1859). Left out (an agent's call, an old tab), nothing is compared.
+      if (body.was !== undefined) {
+        if (!body.was || typeof body.was !== 'object') throw new HttpError(400, 'was must be an object of fields');
+        const now = store.getProject(project.id)!;
+        if (body.instructions !== undefined) refuseStale(body.was.instructions, now.instructions, instructions, now.instructions_updated_by);
+        if (settings.approval_rules !== undefined) refuseStale(body.was.approval_rules, now.approval_rules, settings.approval_rules, null, true);
+        if (settings.shot_note !== undefined) refuseStale(body.was.shot_note, now.shot_note, settings.shot_note);
+      }
       // Worked out before anything is written, since it can still refuse (too many approval rules). The one gate (#1043): the go threshold and the merge approval can't disagree, whichever of them this save changed.
       const gate = shippingGate({ ...project, ...settings });
       if (gate.go_from !== (settings.go_from ?? project.go_from)) settings.go_from = gate.go_from;
@@ -1218,7 +1242,8 @@ export const projectRoutes: Route[] = [
       if (text.length > MAX_INSTRUCTIONS) {
         throw new HttpError(400, `Instructions are ${text.length.toLocaleString('en')} characters; the limit is ${MAX_INSTRUCTIONS.toLocaleString('en')}`);
       }
-      const was = store.appInstructions().text;
+      const { text: was, by } = store.appInstructions();
+      refuseStale(body.was, was, text, by);
       if (text !== was) {
         store.setAppInstructions(text, session.name);
         await ownWrites(); // the decisions log, the broadcast and the reply read them back (#1244)

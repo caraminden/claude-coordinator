@@ -405,7 +405,7 @@ link, signs in with Anthropic and pastes the one-time code back into the card, a
 the login stays in the volume. Citadel never sees a password or token. The
 container runs `sleep infinity` under a transient `systemd-run --user` unit (no
 unit file to install), with the host network, `--userns=keep-id` and a memory limit
-(throttled past 10 GB, killed past 12). Their Taskmasters' turns run in a second one,
+(throttled past 12 GB, killed past 14). Their Taskmasters' turns run in a second one,
 `citadel-claude-<user id>-tm`, on the same volume, login and mounts but with its own
 limit (3 GB and 4) in `citadel-taskmasters.slice`, so minions filling the first can't
 slow or kill them (#1882; `tools/taskmaster-room-trial.sh` measures it).

@@ -139,6 +139,17 @@ test('a newer proposal supersedes the open one, and turning it all down changes 
   await idle();
 });
 
+test('a tidy decided but whose card was never settled (a kill between) settles the card on the next press, instead of leaving buttons that 409 for good (2ME7)', async () => {
+  const r = await propose([{ action: 'flag', file: 'b.md', reason: 'check it' }]);
+  const store = new Store(join(srv.data, 'coordinator.db'));
+  assert.equal(store.memoryProposals.decide(r.proposal, { status: 'dismissed', changes: [], backup: [], by: 'Josh' }), true);
+  const card = await cardOf(r.proposal);
+  assert.equal(card.status, 'pending');
+  await assert.rejects(verdict('Cara', card.id, 'approve'), /409 Josh already turned down this tidy/);
+  assert.equal((await cardOf(r.proposal)).status, 'rejected', 'the card is settled, so its buttons are gone');
+  await idle();
+});
+
 // #1803 (Cara, 2026-11-24: "We should make it something a minion can do with approval"): Approve on the card, the run applies.
 test("approved on the card, the run applies the whole tidy through the page's path and is told to", async () => {
   writeFileSync(join(dir, 'd.md'), '---\nname: D\ndescription: dup\n---\ndelta\n');

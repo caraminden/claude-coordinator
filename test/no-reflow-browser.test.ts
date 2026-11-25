@@ -8,6 +8,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
@@ -15,9 +16,9 @@ const skip = !bin && skipMessage;
 // Runs before app.js: a fake server with three schemes, one with the longest name in the overview and idle, and
 // a short chat each for the Taskmaster and a minion. push(ticketId, n) sends n lines live; busy() makes the
 // long-named scheme start working with cards waiting, as its next counts fetch says.
-const STUB = `<script>
+const STUB = pageStub(
+  `
   window.ready = true;
-  const now = Date.now();
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'running', turnStartedAt: now - 60_000, updated_at: now, created_at: now - 600_000 };
   const minion = { id: 101, project_id: 1, kind: 'ticket', number: 7, title: 'A minion', status: 'running', turnStartedAt: now - 60_000, updated_at: now, created_at: now - 600_000 };
   const schemes = [
@@ -30,11 +31,7 @@ const STUB = `<script>
   const line = (ticket, text) => ev(ticket, 'claude', { type: 'assistant', message: { content: [{ type: 'text', text }] } });
   const start = (ticket) => [ev(ticket, 'user_message', { author: 'Cara', text: 'Build the thing.' }), ev(ticket, 'claude', { type: 'system', subtype: 'init', model: 'opus' }), line(ticket, 'Reading the code.')];
   const events = { 100: start(100), 101: start(101) };
-  const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  window.fetch = async (input) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-    const path = url.pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply(200, { name: 'Cara', login: 'cara', admin: true, uid: 1 });
+  function route(path, url) {
     if (path === 'api/projects') return reply(200, schemes);
     if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [minion], seen: {}, person_notes: {}, pins: [] });
     if (path === 'api/projects/1/recap') return reply(200, { since: null, turns: {} });
@@ -44,12 +41,8 @@ const STUB = `<script>
       if (url.search.includes('after=')) return reply(200, []);
       return reply(200, { events: events[m[1]] ?? [], tasks: [], more: false });
     }
-    if (/inbox$/.test(path)) return reply(200, { items: [] });
-    return reply(200, []);
-  };
-  let stream;
-  window.EventSource = class { constructor() { stream = this; setTimeout(() => this.onopen?.()); } close() {} };
-  const send = (msg) => stream.onmessage({ data: JSON.stringify(msg) });
+  }
+  const send = (msg) => window.es.onmessage({ data: JSON.stringify(msg) });
   window.push = (ticket, n) => { for (let i = 0; i < n; i++) send({ type: 'event', event: line(ticket, 'Step ' + i + ': another line of the turn, long enough to take a row of its own in the chat.') }); };
   window.busy = () => {
     Object.assign(schemes[1], { running: true, working: 12, inbox: 23, fresh: true });
@@ -62,7 +55,9 @@ const STUB = `<script>
   window.shifts = [];
   const working = (e) => e.sources.length > 0 && e.sources.every((s) => s.node?.closest?.('#log ~ .typing'));
   new PerformanceObserver((list) => { for (const e of list.getEntries()) if (!working(e)) window.shifts.push(e.value); }).observe({ type: 'layout-shift' });
-</script>`;
+`,
+  { open: true },
+);
 
 let app: App;
 let browser: Browser;

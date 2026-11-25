@@ -4,15 +4,16 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium, launch, waitFor, serveApp, skipMessage, type Browser, type App, type Page } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 import { holds } from './holds.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
 // Scheme 1 (Alpha) has three tall targets, so the middle one sits far below the fold; scheme 2 (Beta) has one.
-const STUB = `<script>
+const STUB = pageStub(
+  `
   window.ready = true;
-  const now = Date.now();
   const stages = [{ name: 'test', usual: 60000 }, { name: 'deploy', usual: 60000 }, { name: 'live', usual: 0 }];
   const changes = (from, label) => Array.from({ length: 14 }, (_, i) => ({ ticketId: from + i, number: from + i, title: label + ' change ' + i, stage: 'test', since: now - 60000, text: 'testing' }));
   const next = (number, list) => ({ number, stage: 'test', since: now - 600000, eta: now - 1000, stages, changes: list });
@@ -20,22 +21,18 @@ const STUB = `<script>
   window.relA = { projectId: 1, testCopies: [], targets: [target('server', 'Server', next(688, changes(500, 'Server'))), target('apk:app', 'Desktop app', next(6, [])), target('apk:more', 'Android', next(3, changes(600, 'Android')))] };
   window.relB = { projectId: 2, testCopies: [], targets: [target('server', 'Server', next(9, changes(700, 'Beta'))), target('file:windows', 'Windows', next(2, changes(900, 'Win')))] };
   window.bump = () => { relA.targets[0].next.eta += 1000; relA.targets[1].next.changes = changes(800, 'New'); es.onmessage({ data: JSON.stringify({ type: 'releases', projectId: 1, releases: relA }) }); };
-  const reply = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
   const proj = (id, name) => ({ project: { id, name, instructions: '' }, coordinator: { id: 100 + id, project_id: id, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: now, created_at: now }, tickets: [], dismissed: 0, seen: {}, person_notes: {}, pins: [] });
-  window.fetch = async (input) => {
-    const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply({ name: 'Cara', login: 'cara', admin: true, uid: 1 });
-    if (path === 'api/projects') return reply([{ id: 1, name: 'Alpha', inbox: 0, icon: null }, { id: 2, name: 'Beta', inbox: 0, icon: null }]);
-    if (/^api\\/projects\\/\\d$/.test(path)) return reply(proj(Number(path.slice(-1)), path.endsWith('1') ? 'Alpha' : 'Beta'));
-    if (/^api\\/projects\\/\\d\\/properties$/.test(path)) return reply({ keys: [], types: [], values: {}, views: [] });
-    if (/\\/events$/.test(path)) return reply({ events: [], tasks: [], more: false });
-    if (/inbox$/.test(path)) return reply({ items: [] });
-    if (path === 'api/ci') return reply({ schemes: [], pcs: [] });
-    if (path === 'api/releases') return reply({ schemes: [relA, relB] });
-    return reply([]);
-  };
-  window.EventSource = class { constructor() { window.es = this; setTimeout(() => this.onmessage?.({ data: JSON.stringify({ type: 'hello', usage: {}, version: 'v1' }) }), 100); } close() {} };
-</script>`;
+  function route(path) {
+    if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }, { id: 2, name: 'Beta', inbox: 0, icon: null }]);
+    if (/^api\\/projects\\/\\d$/.test(path)) return reply(200, proj(Number(path.slice(-1)), path.endsWith('1') ? 'Alpha' : 'Beta'));
+    if (/^api\\/projects\\/\\d\\/properties$/.test(path)) return reply(200, { keys: [], types: [], values: {}, views: [] });
+    if (/\\/events$/.test(path)) return reply(200, { events: [], tasks: [], more: false });
+    if (path === 'api/ci') return reply(200, { schemes: [], pcs: [] });
+    if (path === 'api/releases') return reply(200, { schemes: [relA, relB] });
+  }
+`,
+  { hello: true },
+);
 
 let app: App;
 let browser: Browser;

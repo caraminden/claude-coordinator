@@ -5,30 +5,26 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
-const STUB = `<script>
+const STUB = pageStub(`
   window.ready = true;
   const late = (body) => new Promise((r) => setTimeout(() => r(new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })), 250));
-  const reply = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
   const scheme = (id, name) => ({ project: { id, name, instructions: '' }, coordinator: { id: id * 100, project_id: id, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 },
     tickets: id === 1 ? [{ id: 101, project_id: 1, kind: 'ticket', number: 7, title: 'A minion', status: 'ready', updated_at: 0, created_at: 1 }] : [], seen: {}, person_notes: {}, pins: [] });
-  window.fetch = async (input) => {
-    const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply({ name: 'Cara', login: 'cara', admin: true, uid: 1 });
-    if (path === 'api/projects') return reply([{ id: 1, name: 'Alpha', inbox: 1, icon: null, coordinator_id: 100 }, { id: 2, name: 'Beta', inbox: 0, icon: null, coordinator_id: 200 }]);
+  function route(path) {
+    if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 1, icon: null, coordinator_id: 100 }, { id: 2, name: 'Beta', inbox: 0, icon: null, coordinator_id: 200 }]);
     let m;
-    if ((m = path.match(/^api\\/projects\\/(\\d)$/))) return reply(scheme(Number(m[1]), m[1] === '1' ? 'Alpha' : 'Beta'));
+    if ((m = path.match(/^api\\/projects\\/(\\d)$/))) return reply(200, scheme(Number(m[1]), m[1] === '1' ? 'Alpha' : 'Beta'));
     if ((m = path.match(/^api\\/projects\\/(\\d)\\/inbox$/))) return late({ items: m[1] === '1' ? [{ ticketId: 101, kind: 'state', key: 'a', state: 'ready' }] : [] });
     if ((m = path.match(/^api\\/projects\\/(\\d)\\/properties$/))) return late({ keys: m[1] === '1' ? [{ key: 'type', status: 'active', value_kind: 'enum', values: [{ value: 'bug', status: 'active' }] }] : [], proposals: [] });
     if ((m = path.match(/^api\\/projects\\/(\\d)\\/views$/))) return late([]);
-    if ((m = path.match(/^api\\/tickets\\/(\\d+)\\/events$/))) return reply({ events: [], tasks: [], more: false });
-    return reply([]);
-  };
-  window.EventSource = class { close() {} };
-</script>`;
+    if ((m = path.match(/^api\\/tickets\\/(\\d+)\\/events$/))) return reply(200, { events: [], tasks: [], more: false });
+  }
+`);
 
 let app: App;
 let browser: Browser;

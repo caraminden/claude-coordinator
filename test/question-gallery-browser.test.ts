@@ -8,6 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, type Page, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
@@ -30,18 +31,13 @@ const CARDS: Record<number, { questions: unknown[]; answered?: string[] }> = {
 
 // Runs before app.js: a fake server for the API. Answers are recorded in `sent` and never answered, as a
 // slow server would.
-const STUB = `<script>
+const STUB = pageStub(`
   window.ready = true;
   window.sent = [];
   const CARDS = ${JSON.stringify(CARDS)};
-  const now = Date.now();
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 };
   const minion = (n) => ({ id: n, project_id: 1, kind: 'ticket', number: n, title: 'Minion ' + n, status: 'idle', updated_at: 0, created_at: now - 1000 });
-  const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  window.fetch = async (input, init) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-    const path = url.pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply(200, { name: 'Cara', login: 'cara', admin: true, uid: 1 });
+  function route(path, url, init) {
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
     if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: Object.keys(CARDS).map((n) => minion(Number(n))), seen: {}, person_notes: {}, pins: [] });
     if (path === 'api/projects/1/recap') return reply(200, { since: null, turns: {} });
@@ -64,11 +60,8 @@ const STUB = `<script>
       if (card.answered) events.push({ id: 2, ticket_id: id, kind: 'user_message', data: JSON.stringify({ author: 'Cara', text: 'My answers', answer: { questionId: 'q' + id, answers: [{ selected: card.answered, other: '' }] } }), created_at: now - 50_000 });
       return reply(200, { events, tasks: [], more: false });
     }
-    if (/inbox$/.test(path)) return reply(200, { items: [] });
-    return reply(200, []);
-  };
-  window.EventSource = class { close() {} };
-</script>`;
+  }
+`);
 
 const PICTURE = (fill: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600"><rect width="900" height="600" fill="${fill}"/><circle cx="450" cy="300" r="160" fill="#40573a"/></svg>`;
 const FILLS: Record<string, string> = { garden: '#b8c9ad', forest: '#6f8f6a', desert: '#e3c99a' };

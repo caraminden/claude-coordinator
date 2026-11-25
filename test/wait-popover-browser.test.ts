@@ -3,32 +3,25 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
-const STUB = `<script>
+const STUB = pageStub(`
   window.ready = true;
-  const now = Date.now();
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 };
   const w = (id, chip, what, extra) => ({ id, state: 'waiting', chip, what, cancellable: true, ...extra });
   window.a = { id: 101, project_id: 1, kind: 'ticket', number: 1, title: 'Minion A', status: 'parked', updated_at: now, created_at: now - 600_000, outbox_waits: [w(1, '⇢ #2', 'the deploy of #2', { link: { project: 1, number: 2 } })] };
   const relay = { headline: 'Note from #1 once its change is live', line: 'Main is green again.', text: 'Main is green again. One. Two. Three and four.', facts: ['Set by #1 at 12:54 PST', 'waits for fa4fb3f to go live'], link: { project: 1, number: 1 } };
   window.b = { id: 102, project_id: 1, kind: 'ticket', number: 2, title: 'Minion B', status: 'parked', updated_at: now - 1, created_at: now - 600_000, outbox_waits: [w(2, '⏱ 01:32', 'check the run'), w(3, '⇢ #1', 'a second wait', relay), w(4, '⇢ live', 'x', { headline: 'Wakes when abc1234 is live', line: '', text: '', facts: [] })] };
-  const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  window.fetch = async (input) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-    const path = url.pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply(200, { name: 'Cara', login: 'cara', admin: true, uid: 1 });
+  function route(path, url) {
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
     if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [a, b], dismissed: 0, seen: {}, person_notes: {}, pins: [] });
     if (/\\/events$/.test(path)) return reply(200, url.search.includes('after=') ? [] : { events: [], tasks: [], more: false });
     if (/seen$/.test(path)) return reply(200, { seen_at: now });
-    if (/inbox$/.test(path)) return reply(200, { items: [] });
-    return reply(200, []);
-  };
-  window.EventSource = class { constructor() { window.es = this; } close() {} };
-</script>`;
+  }
+`);
 
 let app: App;
 let browser: Browser;

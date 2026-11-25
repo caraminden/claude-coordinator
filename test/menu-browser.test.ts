@@ -15,10 +15,16 @@ let browser: Browser;
 // Headless Chromium has no hover and no fine pointer; this one reports a mouse: (hover: hover) and (pointer: fine).
 let mouseBrowser: Browser;
 let projectId = 0;
+// Each test gets its own minion (drafts and point chips are kept per minion), all made up front at once: one wait for
+// their first turns, not one per test.
+const titles = ['Menu message', 'Menu draw', 'Menu native', 'Menu keyboard', 'Menu scroll', 'Menu mouse', 'Menu phone', 'Menu phone cancel', 'Menu in dialog', 'Menu in dialog click', 'Menu in dialog phone'];
+const minions = new Map<string, { id: number; number: number }>();
 
 before(async () => {
   srv = await bootServer();
   projectId = (await srv.call('/api/projects', { name: 'P' })).data.id;
+  for (const t of await Promise.all(titles.map(async (title) => (await srv.call(`/api/projects/${projectId}/tickets`, { title, message: 'hi' })).data))) minions.set(t.title, t);
+  await until('the first turns to end', async () => (await Promise.all([...minions.values()].map(async (t) => (await srv.call(`/api/tickets/${t.id}`)).data.ticket.status))).every((s) => s !== 'running'));
   if (!skip) {
     browser = await launch(bin!);
     mouseBrowser = await launch(bin!, ['--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2']);
@@ -32,8 +38,7 @@ after(async () => {
 });
 
 async function open(title: string, { mouse = false, phone = false } = {}) {
-  const t = (await srv.call(`/api/projects/${projectId}/tickets`, { title, message: 'hi' })).data;
-  await until('the first turn to end', async () => (await srv.call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
+  const t = minions.get(title)!;
   const page = await (mouse ? mouseBrowser : browser).page('data:text/html,<script>window.ready=true</script>', phone ? { width: 390, height: 800, touch: true } : { width: 1280, height: 800 });
   const [name, value] = srv.cookie.split('=');
   await page.send('Network.setCookie', { name, value, url: srv.base });

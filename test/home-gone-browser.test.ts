@@ -4,39 +4,35 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 import { holds } from './holds.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
-const STUB = `<script>
+const STUB = pageStub(`
   window.ready = true;
-  const now = Date.now();
   const mk = (id, project_id, number, title) => ({ id, project_id, kind: 'ticket', number, title, status: 'idle', updated_at: now, created_at: now - 1000 });
   const tickets = [mk(101, 1, 7, 'First minion'), mk(102, 1, 8, 'Second minion'), mk(103, 2, 9, 'Third minion')];
   window.waiting = [101, 102, 103];
-  const reply = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
-  window.fetch = async (input) => {
-    const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply({ name: 'Cara', login: 'cara', admin: true, uid: 1 });
-    if (path === 'api/projects') return reply([{ id: 1, name: 'Alpha', inbox: 0, icon: null }, { id: 2, name: 'Beta', inbox: 0, icon: null }]);
+  function route(path) {
+    if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }, { id: 2, name: 'Beta', inbox: 0, icon: null }]);
     let m;
     if ((m = path.match(/^api\\/projects\\/(\\d+)$/))) {
       const id = Number(m[1]);
-      return reply({ project: { id, name: id === 1 ? 'Alpha' : 'Beta', instructions: '' }, coordinator: { id: id * 100, project_id: id, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 }, tickets: tickets.filter((t) => t.project_id === id), seen: {}, person_notes: {}, pins: [] });
+      return reply(200, { project: { id, name: id === 1 ? 'Alpha' : 'Beta', instructions: '' }, coordinator: { id: id * 100, project_id: id, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 }, tickets: tickets.filter((t) => t.project_id === id), seen: {}, person_notes: {}, pins: [] });
     }
-    if (/^api\\/projects\\/\\d+\\/properties$/.test(path)) return reply({ keys: [], values: {} });
-    if (/^api\\/tickets\\/\\d+\\/events$/.test(path)) return reply({ events: [], more: false, tasks: [] });
-    if (path === 'api/home') return reply({
+    if (/^api\\/projects\\/\\d+\\/properties$/.test(path)) return reply(200, { keys: [], values: {} });
+    if (/^api\\/tickets\\/\\d+\\/events$/.test(path)) return reply(200, { events: [], more: false, tasks: [] });
+    if (path === 'api/home') return reply(200, {
       items: window.waiting.map((ticketId, i) => ({ id: i + 1, ticketId, kind: 'question', at: now })),
       tickets: tickets.filter((t) => window.waiting.includes(t.id)),
       schemes: [{ id: 1, name: 'Alpha', waiting: 0, working: 0, shipped: 0, daily: [] }, { id: 2, name: 'Beta', waiting: 0, working: 0, shipped: 0, daily: [] }],
       seen: {}, days: [], me: 'Cara',
     });
-    return reply([]);
-  };
-  window.EventSource = class { close() {} };
-</script>`;
+    if (/inbox$/.test(path)) return reply(200, []);
+  }
+`);
 
 let app: App;
 let browser: Browser;

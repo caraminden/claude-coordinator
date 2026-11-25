@@ -4,31 +4,26 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
 // Runs before app.js: a fake API, and an EventSource the test opens and drops (window.streams).
-const STUB = `<script>
+const STUB = pageStub(`
   window.ready = true;
   window.errors = [];
   addEventListener('error', (e) => errors.push(String(e.message)));
   addEventListener('unhandledrejection', (e) => errors.push(String(e.reason?.stack ?? e.reason)));
   const scheme = { id: 1, name: 'Alpha', inbox: 0, icon: null };
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 };
-  const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  window.fetch = async (input) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-    const path = url.pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply(200, { name: 'Cara', login: 'cara', admin: true, uid: 1 });
+  function route(path, url) {
     if (path === 'api/projects') return reply(200, [scheme]);
     if (path === 'api/projects/1') return reply(200, { project: { ...scheme, instructions: '' }, coordinator, tickets: [], seen: {}, person_notes: {}, pins: [] });
     if (path === 'api/tickets/100') return reply(200, { ticket: coordinator });
     if (/^api\\/tickets\\/\\d+\\/events$/.test(path)) return reply(200, url.search.includes('after=') ? [] : { events: [], tasks: [], more: false });
-    if (/inbox$/.test(path)) return reply(200, { items: [] });
     if (path === 'api/projects/1/properties') return reply(200, { keys: [] });
-    return reply(200, []);
-  };
+  }
   window.streams = [];
   window.EventSource = class {
     static CONNECTING = 0; static OPEN = 1; static CLOSED = 2;
@@ -39,7 +34,7 @@ const STUB = `<script>
   // What a browser does when the server ends the stream: an error, then it retries on its own.
   window.dropStream = () => { const es = streams.at(-1); es.readyState = 0; es.onerror?.(); };
   window.reopenStream = () => { const es = streams.at(-1); es.readyState = 1; es.onopen?.(); };
-</script>`;
+`);
 
 let app: App;
 let browser: Browser;

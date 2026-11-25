@@ -5,11 +5,12 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
-const STUB = `<script>
+const STUB = pageStub(`
   window.ready = true;
   localStorage.clear();
   localStorage.setItem('cc-inbox-open', location.search.includes('open') ? '1' : '0');
@@ -20,10 +21,10 @@ const STUB = `<script>
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 };
   const minion = { id: 101, project_id: 1, kind: 'ticket', number: 7, title: 'A minion', status: 'ready', updated_at: 0, created_at: 1 };
   const scheme = (tickets) => ({ project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets, seen: {}, person_notes: {}, pins: [] });
-  window.fetch = async (input) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-    const path = url.pathname.replace(/^\\//, ''), key = path + url.search;
-    if (path === 'api/me') return send(key, { name: 'Cara', login: 'cara', admin: true, uid: 1 }, 0);
+  // Every path is answered here, through send, so net records the first-paint /api/me and the fallbacks too.
+  function route(path, url) {
+    const key = path + url.search;
+    if (path === 'api/me') return send(key, me, 0);
     // The files and machines come late; the list in between; the scheme list's, strip's and filter's answers are quick.
     if (path === 'api/projects') return send(key, [{ id: 1, name: 'Alpha', inbox: 1, icon: null, coordinator_id: 100 }, { id: 2, name: 'Beta', inbox: 0, icon: null, coordinator_id: 200 }], 150);
     if (path === 'api/projects/1' && url.searchParams.has('number')) return send(key, scheme([minion]), 0);
@@ -35,8 +36,7 @@ const STUB = `<script>
     if (path === 'api/projects/1/shared' || path === 'api/machines') return send(key, [], 1200);
     if (/^api\\/tickets\\/\\d+\\/events$/.test(path)) return send(key, { events: [], tasks: [], more: false }, 0);
     return send(key, [], 0);
-  };
-  window.EventSource = class { close() {} };
+  }
   // Where the list's pieces sit below the panel's top, every frame from its first row until a few frames after the late answers.
   window.positions = []; window.drawnAt = null;
   const late = ['api/projects/1/artifacts', 'api/projects/1/shared', 'api/machines', 'api/projects/1/inbox'];
@@ -51,7 +51,7 @@ const STUB = `<script>
     if (late.every((k) => net.some(([q, w]) => q === k && w === 'answer'))) after++;
     if (after < 5) requestAnimationFrame(f); else window.watched = true;
   })();
-</script>`;
+`);
 
 let app: App;
 let browser: Browser;

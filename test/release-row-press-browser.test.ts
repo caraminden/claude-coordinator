@@ -4,28 +4,25 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium, launch, waitFor, serveApp, skipMessage, type Browser, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
-const STUB = `<script>
+const STUB = pageStub(
+  `
   window.ready = true;
-  const now = Date.now();
   window.rel = { projectId: 1, testCopies: [], targets: [{ target: { id: 'server', name: 'Server' }, line: [], recent: [], next: { number: 688, stage: 'test', since: now - 600000, eta: now - 1000, stages: [{ name: 'test', usual: 60000 }, { name: 'deploy', usual: 60000 }, { name: 'live', usual: 0 }], changes: [] } }] };
-  const reply = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
-  window.fetch = async (input) => {
-    const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply({ name: 'Cara', login: 'cara', admin: true, uid: 1 });
-    if (path === 'api/projects') return reply([{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
-    if (path === 'api/projects/1') return reply({ project: { id: 1, name: 'Alpha', instructions: '' }, coordinator: { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: now, created_at: now }, tickets: [], dismissed: 0, seen: {}, person_notes: {}, pins: [] });
-    if (/\\/events$/.test(path)) return reply({ events: [], tasks: [], more: false });
-    if (/inbox$/.test(path)) return reply({ items: [] });
-    if (path === 'api/ci') return reply({ schemes: [], pcs: [] });
-    if (path === 'api/releases') return reply({ schemes: [rel] });
-    return reply([]);
-  };
-  window.EventSource = class { constructor() { window.es = this; setTimeout(() => this.onmessage?.({ data: JSON.stringify({ type: 'hello', usage: {}, version: 'v1' }) }), 100); } close() {} };
-</script>`;
+  function route(path) {
+    if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
+    if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator: { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: now, created_at: now }, tickets: [], dismissed: 0, seen: {}, person_notes: {}, pins: [] });
+    if (/\\/events$/.test(path)) return reply(200, { events: [], tasks: [], more: false });
+    if (path === 'api/ci') return reply(200, { schemes: [], pcs: [] });
+    if (path === 'api/releases') return reply(200, { schemes: [rel] });
+  }
+`,
+  { hello: true },
+);
 
 let app: App;
 let browser: Browser;

@@ -7,13 +7,14 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, type Page, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
 // Runs before app.js: a fake server for the API. `failProjects` fails that many fetches of api/projects with
 // the 502 Caddy gives while the server restarts.
-const STUB = `<script>
+const STUB = pageStub(`
   window.ready = true;
   window.errors = [];
   addEventListener('error', (e) => errors.push(String(e.message)));
@@ -26,11 +27,7 @@ const STUB = `<script>
   window.failScheme = 0;
   const minion = (id) => ({ id: id * 100 + 1, project_id: id, kind: 'ticket', number: 1, title: titles[id], status: 'idle', updated_at: 0 });
   const coordinator = (id) => ({ id: id * 100, project_id: id, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 });
-  const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  window.fetch = async (input) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-    const path = url.pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply(200, { name: 'Cara', login: 'cara', admin: true, uid: 1 });
+  async function route(path, url) {
     if (path === 'api/projects') return window.failProjects-- > 0 ? new Response('Bad Gateway', { status: 502 }) : reply(200, schemes);
     let m;
     if ((m = path.match(/^api\\/projects\\/(\\d+)$/))) {
@@ -41,11 +38,8 @@ const STUB = `<script>
     }
     if ((m = path.match(/^api\\/tickets\\/(\\d+)$/))) return reply(200, { ticket: coordinator(Number(m[1]) / 100) });
     if (/^api\\/tickets\\/\\d+\\/events$/.test(path)) return reply(200, url.search.includes('after=') ? [] : { events: [], tasks: [], more: false });
-    if (/inbox$/.test(path)) return reply(200, { items: [] });
-    return reply(200, []);
-  };
-  window.EventSource = class { close() {} };
-</script>`;
+  }
+`);
 
 let app: App;
 let browser: Browser;

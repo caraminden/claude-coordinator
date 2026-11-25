@@ -7,29 +7,25 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
 // Runs before app.js: a fake server for the API. Twenty messages you've seen, one you haven't (short enough
 // to fit at the bottom), and a long one the catch-up (events?after=) brings once the test calls release().
-const STUB = `<script>
+const STUB = pageStub(`
   window.ready = true;
   let open;
   const held = new Promise((r) => (open = r));
   window.release = () => open();
-  const now = Date.now();
   const seenAt = now - 30_000;
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 };
   const minion = { id: 101, project_id: 1, kind: 'ticket', number: 7, title: 'A minion', status: 'idle', updated_at: now, created_at: now - 600_000 };
   const said = (id, text, at) => ({ id, ticket_id: 101, kind: 'user_message', data: JSON.stringify({ text, author: 'Josh' }), created_at: at });
   const long = (n) => Array.from({ length: n }, (_, i) => 'Line ' + i + ' of a long message.').join('\\n\\n');
   const seenEvents = Array.from({ length: 20 }, (_, i) => said(i + 1, 'Seen ' + i + '\\n\\n' + long(4), seenAt - 60_000 + i));
-  const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  window.fetch = async (input) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-    const path = url.pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply(200, { name: 'Cara', login: 'cara', admin: true, uid: 1 });
+  function route(path, url) {
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
     if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [minion], seen: { 101: seenAt }, person_notes: {}, pins: [] });
     let m;
@@ -40,11 +36,8 @@ const STUB = `<script>
       return reply(200, { events: [...seenEvents, said(21, 'The one you have not seen', now - 2000)], tasks: [], more: false });
     }
     if (/seen$/.test(path)) return reply(200, { seen_at: now });
-    if (/inbox$/.test(path)) return reply(200, { items: [] });
-    return reply(200, []);
-  };
-  window.EventSource = class { close() {} };
-</script>`;
+  }
+`);
 
 let app: App;
 let browser: Browser;

@@ -6,13 +6,13 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
-const STUB = `<script>
+const STUB = pageStub(`
   window.ready = true;
-  const now = Date.now();
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 };
   window.running = { id: 101, project_id: 1, kind: 'ticket', number: 1, title: 'A running minion', status: 'running', updated_at: now, created_at: now - 600_000 };
   const closed = Array.from({ length: 1000 }, (_, i) => ({ id: 200 + i, project_id: 1, kind: 'ticket', number: 2 + i, title: 'Dismissed minion ' + i, status: 'closed', updated_at: now - i * 60_000, created_at: now - 86_400_000 * 30, closed_at: now - i * 3_600_000 }));
@@ -26,22 +26,15 @@ const STUB = `<script>
     return { tickets: rows.slice(0, limit), more: rows.length > limit };
   };
   const url_ = (q) => String(q);
-  const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  window.fetch = async (input) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-    const path = url.pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply(200, { name: 'Cara', login: 'cara', admin: true, uid: 1 });
+  function route(path, url) {
     if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
     if (path === 'api/projects/1') return reply(200, url.search.includes('tickets=closed') ? closedPage(url.searchParams) : { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator, tickets: [running], dismissed: closed.length, seen: {}, person_notes: {}, pins: [] });
     let m;
     if ((m = path.match(/^api\\/tickets\\/(\\d+)$/))) return reply(200, { ticket: m[1] === '100' ? coordinator : m[1] === '101' ? running : closed[m[1] - 200] });
     if (/\\/events$/.test(path)) return reply(200, url.search.includes('after=') ? [] : { events: [], tasks: [], more: false });
     if (/seen$/.test(path)) return reply(200, { seen_at: now });
-    if (/inbox$/.test(path)) return reply(200, { items: [] });
-    return reply(200, []);
-  };
-  window.EventSource = class { constructor() { window.es = this; } close() {} };
-</script>`;
+  }
+`);
 
 let app: App;
 let browser: Browser;

@@ -4,13 +4,13 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, serveApp, skipMessage, waitFor, type App, type Browser } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 // Signed out and offline: the page only needs to get as far as the splash script. #stamp stands in for reloadQuietly().
-const stub = `<script>
-  window.fetch = () => Promise.resolve(new Response('{"error":"Not logged in"}', { status: 401 }));
-  window.EventSource = class { addEventListener() {} close() {} };
+const stub = pageStub(`
+  function route() { return new Response('{"error":"Not logged in"}', { status: 401 }); }
   if (location.hash === '#stamp') sessionStorage.setItem('cc-no-splash', String(Date.now()));
   if (location.hash === '#old') sessionStorage.setItem('cc-no-splash', String(Date.now() - 60000));
   // Slow head (a starved box, #1802): DOMContentLoaded comes after the splash's 1 s mark, so its lift is due the moment the app draws.
@@ -19,7 +19,7 @@ const stub = `<script>
   // is a timer that fires later, so this is always "while it shows", however long a loaded box takes to get a test's poll in.
   const bar = () => [...document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')].map((m) => m.content).join(' ');
   document.addEventListener('DOMContentLoaded', () => { window.whileShowing = { bar: bar(), splash: !!document.getElementById('splash'), gone: !!document.querySelector('#splash.gone') }; window.ready = true; });
-</script>`;
+`);
 let app: App;
 let browser: Browser;
 

@@ -2,25 +2,24 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
-const STUB = `<script>
+const STUB = pageStub(
+  `
   window.ready = true;
-  const reply = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
   window.gate = new Promise((r) => { window.open = r; });
-  window.fetch = async (input) => {
-    const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname.replace(/^\\//, '');
-    if (path === 'api/me') return reply({ name: 'Cara', login: 'cara', admin: true, uid: 1 });
-    if (path === 'api/projects') return reply([{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
-    if (/^api\\/projects\\/1$/.test(path)) return reply({ project: { id: 1, name: 'Alpha', instructions: '' }, coordinator: { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: Date.now(), created_at: Date.now() }, tickets: [] });
-    if (path === 'api/ci') return reply({ schemes: [], pcs: [] });
-    if (path === 'api/releases') { await window.gate; return reply({ schemes: [] }); }
-    return reply([]);
-  };
-  window.EventSource = class { constructor() { setTimeout(() => this.onmessage?.({ data: JSON.stringify({ type: 'hello', usage: {}, version: 'v1' }) }), 100); } close() {} };
-</script>`;
+  async function route(path) {
+    if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
+    if (/^api\\/projects\\/1$/.test(path)) return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator: { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: Date.now(), created_at: Date.now() }, tickets: [] });
+    if (path === 'api/ci') return reply(200, { schemes: [], pcs: [] });
+    if (path === 'api/releases') { await window.gate; return reply(200, { schemes: [] }); }
+  }
+`,
+  { hello: true },
+);
 
 let app: App;
 let browser: Browser;

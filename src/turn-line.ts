@@ -20,6 +20,8 @@ export const POOL = {
   first: 2,
   /** Waited this long, it goes with the front group, so automatic work can't wait for ever. */
   agedMs: 20 * 60_000,
+  /** Waited this long (#1888), it goes first in its person's share, whatever else waits there. */
+  longMs: 90 * 60_000,
 };
 
 const LINE = 'turn-line';
@@ -52,12 +54,23 @@ export interface Pause {
 /** Whether a minion waits for a worker, for a reader with only the database. */
 export const inLine = (store: Pick<Store, 'getSetting'>, ticketId: number) => (store.getSetting<LineEntry[]>(LINE) ?? []).some((e) => e.ticket === ticketId);
 
-/** A waiting turn as `pick` sees it. `rank`: 0 a person's own message or answer, 1 work started for them, 2 automatic. */
-export interface Waiting {
+/** A waiting turn's place (#1888), as the Runner knows it (src/line-place.ts). */
+export interface LinePlace {
+  person: number;
+  /** 0 a person's own message or answer, 1 work started for them, 2 automatic. */
+  rank: number;
+  /** Its spot in the Urgent group (src/urgent.ts), ahead of every share. */
+  urgent?: number;
+  /** Its ship was refused, or other minions wait on it. */
+  first?: boolean;
+  /** 0 its session is about to go cold, 1 under way, 2 brand new. */
+  heat?: 0 | 1 | 2;
+}
+
+/** A waiting turn as `pick` sees it. */
+export interface Waiting extends LinePlace {
   ticket: number;
   since: number;
-  person: number;
-  rank: number;
 }
 
 /** Which line made Auto shrink, for the tile. */
@@ -83,9 +96,12 @@ export function nextSize(s: { size: number; at: number; used: number; waiting: n
   return Math.max(s.size, Math.min(L.max, s.size + 1));
 }
 
+const less = (a: number[], b: number[]) => a.map((n, i) => n - b[i]).find((d) => d) ?? 0;
+
 /**
- * Whose turn a free worker takes: the person furthest below their share, then the first in their order. Everyone's first
- * two workers come before anyone's third; past that a share is in proportion to what a person has running and waiting.
+ * Whose turn a free worker takes: the Urgent in their order, then the person furthest below their share, then the first in
+ * that person's own order. Everyone's first two workers come before anyone's third; past that a share is in proportion to
+ * what a person has running and waiting.
  */
 export function pick(waiting: Waiting[], running: Map<number, number>, now: number): Waiting | null {
   const wants = new Map<number, number>();
@@ -97,9 +113,13 @@ export function pick(waiting: Waiting[], running: Map<number, number>, now: numb
   const oldest = new Map<number, number>();
   for (const w of waiting) oldest.set(w.person, Math.min(oldest.get(w.person) ?? Infinity, w.since));
   const rank = (w: Waiting) => (now - w.since >= POOL.agedMs ? 0 : w.rank);
+  const long = (w: Waiting) => (now - w.since >= POOL.longMs ? 0 : 1);
+  // Josh, 2026-11-24: "About to go cold first", after what is refused or holds others up; what came before (#1868) settles the rest.
+  const own = (w: Waiting) => [long(w), long(w) && w.first ? 0 : 1, long(w) && (w.heat ?? 1), rank(w), w.since, w.ticket];
+  const urgent = (w: Waiting) => w.urgent ?? Number.MAX_SAFE_INTEGER;
   let best: Waiting | null = null;
   for (const w of waiting) {
-    const by = best && (share(w.person) - share(best.person) || oldest.get(w.person)! - oldest.get(best.person)! || w.person - best.person || rank(w) - rank(best) || w.since - best.since || w.ticket - best.ticket);
+    const by = best && (urgent(w) - urgent(best) || share(w.person) - share(best.person) || oldest.get(w.person)! - oldest.get(best.person)! || w.person - best.person || less(own(w), own(best)));
     if (by === null || by < 0) best = w;
   }
   return best;
@@ -113,7 +133,7 @@ export interface LineHost {
   /** A step runs on its lane, so nothing of it can start now. */
   busy(ticketId: number): boolean;
   /** Whose share its turn counts in, and its place there. */
-  asks(ticketId: number, via?: RetryKind): { person: number; rank: number };
+  asks(ticketId: number, via?: RetryKind): LinePlace;
   /** Start its turn, now that a worker is free: it calls enter() again, which grants it. */
   start(entry: LineEntry): void;
   /** Stop its running turn to carry on later; one already ending or not yet launched is left. */
@@ -290,6 +310,12 @@ export class TurnLine {
     }
     this.join(ticketId, via);
     return false;
+  }
+
+  /** The waiting turns' places changed under the line (a drag, an Urgent tag). */
+  reordered() {
+    this.ordered = null;
+    this.host.changed(this.waiting());
   }
 
   /** Into the line (keeping a place it has), taking no worker even when one is free. */

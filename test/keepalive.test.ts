@@ -343,6 +343,80 @@ test('a real wake that arrives while a keepalive waits goes first, and the keepa
   assert.ok(!turnsOf(id).some((t) => t.keepalive));
 });
 
+/**
+ * Run `check` on a minion whose turn ended at `end` and that now waits for the pool's one worker with a message queued,
+ * then let the worker go and its turn run.
+ */
+async function lined(end: number, check: (id: number) => Promise<void>) {
+  const [busy, id] = [minion(), minion()];
+  await realTurn(id, end);
+  const release = (t: number) => writeFileSync(join(store.getTicket(t)!.cwd, 'release'), 'ok');
+  runner.turnLine.setSize(1, 'Cara');
+  try {
+    let before = callCount();
+    runner.send(busy, 'Cara', 'a long job');
+    await until('the worker to be taken', () => callCount() > before);
+    runner.send(id, 'Cara', 'here is my answer');
+    assert.equal(runner.turnLine.has(id), true, 'it waits for a worker');
+    await check(id);
+    before = callCount();
+    release(busy);
+    await until('its own turn to run', () => callCount() > before && runner.isRunning(id));
+    assert.ok(JSON.stringify(jsonLines(calls).at(-1)).includes('here is my answer'));
+    release(id);
+    await idle(id);
+    assert.ok(!turnsOf(id).at(-1)!.keepalive);
+  } finally {
+    runner.turnLine.setSize(50, 'Cara');
+    release(busy);
+    release(id);
+  }
+}
+
+// #1888. Josh, 2026-11-24: "Keep a minion's cache warm while it's in line?: Yes, like any idle minion".
+test('a minion in line for a worker gets its keepalive, takes no worker for it and keeps its place', async () => {
+  const end = pst(14);
+  await lined(end, async (id) => {
+    const since = runner.turnLine.wait(id)!.since;
+    // A state that says it waits on nobody turns an idle one away, not one about to carry on.
+    store.updateTicket(id, { state: 'blocked' });
+    const before = callCount();
+    runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
+    await until('the keepalive to run', () => callCount() > before);
+    await idle(id);
+    assert.ok(JSON.stringify(jsonLines(calls).at(-1)).includes(JSON.stringify(KEEPALIVE_TEXT).slice(1, -1)));
+    assert.equal(callCount(), before + 1, 'its own turn still waits');
+    assert.equal(turnsOf(id).at(-1)!.keepalive, 1);
+    assert.deepEqual([runner.turnLine.wait(id)?.since, runner.queued(id), runner.turnLine.used()], [since, 1, 1]);
+    // The next one is an hour on, as for an idle minion.
+    runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
+    await idle(id);
+    assert.equal(callCount(), before + 1, 'just one');
+  });
+});
+
+test('no keepalive in line when its turn would run on another Claude account than its last one', async () => {
+  const end = pst(14);
+  const cara = store.createUser({ name: 'Cara', login: 'cara', server_login: true });
+  runner.personOf = () => cara.id;
+  await lined(end, async (id) => {
+    const before = callCount();
+    runner.accountFor = () => 2;
+    try {
+      runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
+      await idle(id);
+      assert.equal(callCount(), before, 'the last turn ran on account 1');
+      runner.accountFor = () => 1;
+      runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
+      await until('the keepalive on its own account', () => callCount() > before);
+      await idle(id);
+    } finally {
+      runner.accountFor = undefined;
+      runner.personOf = undefined;
+    }
+  });
+});
+
 // 2A2 (#1510): a keepalive sweep that lands between recover() and its staggered resumes leaves the owed resume alone,
 // whether the keepalive would have run (and taken the resume's place) or backed out (and held the cut turn's batch as mail).
 for (const [name, dirty] of [

@@ -342,6 +342,12 @@ export class ClaudeLink {
     });
   }
 
+  /** The account place() would pick for such a turn, moving nothing: 1 for a server login with no accounts of its own, null for none. */
+  accountFor(uid: number, warm?: string): number | null {
+    const set = this.accounts(uid);
+    return (set && this.pick(uid, set, warm)?.n) ?? (this.serverLogin(uid) ? 1 : null);
+  }
+
   /** A turn of session `key` (as place() takes it) ended on account `n`: its cache is warm there for the next WARM_MS. */
   ran(uid: number, key: string, n: number) {
     const now = Date.now();

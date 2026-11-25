@@ -45,9 +45,13 @@ const hhmm = (ms: number, now: number) => {
 };
 
 /** The minion a wait names: a relay's sender, a chain's leader, a wait on another minion's work. */
-function otherOf(store: Store, r: Delivery): Ticket | null {
+export function otherId(r: Pick<Delivery, 'kind' | 'when_arg' | 'payload'>): number | null {
   const id = Number(r.when_arg?.ticket ?? r.when_arg?.after ?? r.payload?.after ?? (r.kind === 'relay' ? r.payload?.ticket : null));
-  return Number.isFinite(id) && id ? (store.getTicket(id) ?? null) : null;
+  return Number.isFinite(id) && id ? id : null;
+}
+function otherOf(store: Store, r: Delivery): Ticket | null {
+  const id = otherId(r);
+  return id ? (store.getTicket(id) ?? null) : null;
 }
 
 const sha = (r: Delivery) => (typeof r.when_arg === 'string' && /^[0-9a-f]{7,40}$/i.test(r.when_arg) ? r.when_arg.slice(0, 7) : null);

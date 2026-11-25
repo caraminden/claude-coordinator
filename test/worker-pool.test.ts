@@ -49,6 +49,103 @@ test('within a share: own messages, then started work, then automatic; then who 
   assert.equal(pick([w(1, 7, 2), w(2, 7, 1), w(3, 7, 0), w(4, 7, 0)], new Map(), 0)?.ticket, 3);
 });
 
+// #1888. Josh, 2026-11-24: "Who goes first inside one person's share?: About to go cold first", and Urgent, with "No limit",
+// goes ahead of every share.
+const MIN = 60_000;
+const order = (waiting: Waiting[], running = new Map<number, number>(), now = 0) => {
+  const left = [...waiting];
+  const ids: number[] = [];
+  for (let x = pick(left, running, now); x; x = pick(left, running, now)) {
+    ids.push(x.ticket);
+    running.set(x.person, (running.get(x.person) ?? 0) + 1);
+    left.splice(left.indexOf(x), 1);
+  }
+  return ids;
+};
+const cold = { heat: 2 } as const;
+const begun = { heat: 1 } as const;
+const warm = { heat: 0 } as const;
+for (const [name, waiting, want, now = 0] of [
+  [
+    'about to go cold, then under way, then brand new, whatever their ranks',
+    [
+      { ...w(1, 7, 0), ...cold },
+      { ...w(2, 7, 1), ...begun },
+      { ...w(3, 7, 2), ...warm },
+    ],
+    [3, 2, 1],
+  ],
+  [
+    'a refused ship or one others wait on before a warm one',
+    [
+      { ...w(1, 7), ...warm },
+      { ...w(2, 7), ...begun, first: true },
+    ],
+    [2, 1],
+  ],
+  [
+    'among equals, their own message first, then the longest wait',
+    [
+      { ...w(1, 7, 2, 1), ...begun },
+      { ...w(2, 7, 0, 3), ...begun },
+      { ...w(3, 7, 0, 2), ...begun },
+    ],
+    [3, 2, 1],
+  ],
+  [
+    '90 minutes in line before a refused ship',
+    [
+      { ...w(1, 7, 1, 90 * MIN), ...warm, first: true },
+      { ...w(2, 7, 2, 0), ...cold },
+    ],
+    [2, 1],
+    90 * MIN,
+  ],
+  [
+    'a minute less is not',
+    [
+      { ...w(1, 7, 1, 89 * MIN), ...warm, first: true },
+      { ...w(2, 7, 2, 0), ...cold },
+    ],
+    [1, 2],
+    89 * MIN,
+  ],
+  [
+    'Urgent in its saved order, before anything',
+    [
+      { ...w(1, 7, 0, 0), ...warm, first: true },
+      { ...w(2, 7), urgent: 1 },
+      { ...w(3, 7), urgent: 0 },
+    ],
+    [3, 2, 1],
+    95 * MIN,
+  ],
+] as [string, Waiting[], number[], number?][])
+  test(`inside one share: ${name}`, () => assert.deepEqual(order(waiting, new Map(), now), want));
+
+test('Urgent goes ahead of every share, however much its person has running', () => {
+  const waiting = [w(1, 8), { ...w(2, 7), urgent: 0 }, { ...w(3, 7), urgent: 1 }];
+  assert.deepEqual(order(waiting, new Map([[7, 9]])), [2, 3, 1]);
+});
+
+test('the order inside a share never moves the shares: 90 minutes or a refused ship is first only among their own', () => {
+  const waiting = [
+    { ...w(1, 7, 0, 0), first: true, ...warm },
+    { ...w(2, 8, 2, 95 * MIN), ...cold },
+  ];
+  assert.equal(
+    order(
+      waiting,
+      new Map([
+        [7, 2],
+        [8, 1],
+      ]),
+      95 * MIN,
+    )[0],
+    2,
+  );
+});
+
 test('one that waited 20 minutes goes with the front group', () => {
   assert.equal(pick([w(1, 7, 2, 0), w(2, 7, 0, POOL.agedMs)], new Map(), POOL.agedMs)?.ticket, 1);
 });

@@ -364,6 +364,11 @@ export const minionQueries = {
     return { ids: rows.map((r) => r.id), upTo };
   },
 
+  /** When a minion's last finished turn ended and whose plan and account it ran on (null: the server login; its first account), as lastTurnEnd; its cache is there. */
+  lastTurnOn(this: Store, id: number): { ended_at: number; payer: number | null; account: number | null } | null {
+    return scoped(this.db, `last-turn-on:${id}`, () => (this.db.prepare('SELECT ended_at, payer, account FROM turns WHERE ticket_id = ? AND side IS NULL ORDER BY id DESC LIMIT 1').get(id) as { ended_at: number; payer: number | null; account: number | null } | undefined) ?? null);
+  },
+
   /** Change a ticket's activity line without counting it as new activity. */
   setLastActivity(this: Store, id: number, text: string) {
     this.db.prepare('UPDATE tickets SET last_activity = ? WHERE id = ?').run(text, id);

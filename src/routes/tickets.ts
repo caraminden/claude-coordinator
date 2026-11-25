@@ -1733,6 +1733,7 @@ export const ticketRoutes: Route[] = [
         h.touched = await touchedFiles(ticket.cwd, args[0] === '--into' ? [args[1], `origin/${args[1]}`, 'main'] : undefined);
       }
       if (!app.landings.handOff(ticket.id, ticket.cwd, env, args, h)) throw new HttpError(409, 'A landing already runs for this minion: wait for its report');
+      app.runner.places.refused(ticket.id, false);
       app.store.updateTicket(ticket.id, { state: 'outside', note: landPhase('') });
       app.runner.broadcastTicket(ticket.id);
       return json(res, 202, { ok: true });

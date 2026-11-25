@@ -35,7 +35,7 @@ import { readScope } from './read-scope.ts';
 import { accountUsageKey, usageKey } from './account-pick.ts';
 import { type TurnPlace } from './claude-link.ts';
 import { asData } from './quote.ts';
-import { runsRepo } from './wake.ts';
+import { runsRepo, type Chain } from './wake.ts';
 import { clearTmpDirLater, dropTurnDir, makeTmpDir, sweepDroppedTurnDirs, sweepTmpDirs } from './turn-tmp.ts';
 import { clearBuildOutput, size, ticketWorktree } from './build-output.ts';
 import { gradleCacheDir } from './build-cache.ts';
@@ -97,7 +97,9 @@ import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
 import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume } from './resumes.ts';
-import { TurnLine, type LineEntry } from './turn-line.ts';
+import { LinePlaces, sameAccount, type OnAccount } from './line-place.ts';
+import { TurnLine, type LineEntry, type LinePlace } from './turn-line.ts';
+import { Urgent } from './urgent.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
 import { sleepKey, stateWord, type Sleep } from './needs.ts';
 
@@ -690,6 +692,8 @@ export class Runner {
   private resumes: Resumes;
   /** The worker pool and the line of turns waiting for one (src/turn-line.ts, #1868). */
   readonly turnLine: TurnLine;
+  readonly urgent: Urgent;
+  readonly places: LinePlaces;
   /** The waits' timers and probe delay, read by tests. */
   private get limitTimer() {
     return this.resumes.limitTimer;
@@ -774,6 +778,10 @@ export class Runner {
   private relays: Relay;
   /** Where a turn for a person runs (#213, src/claude-link.ts): the host, their own container, or why it can't run at all. */
   placeFor?: (person: number | null, warm?: string) => TurnPlace | { refused: string };
+  /** The account such a turn would run on, moving nothing (ClaudeLink.accountFor, #1888): null for none. */
+  accountFor?: (person: number, warm?: string) => number | null;
+  /** The start_after chains still to fire (LiveWaiters.chains, set by the server): the minions that wait on another. */
+  chains: () => Chain[] = () => [];
   /** A Claude turn of session `key` (warmKey) ended on `account`, so the session stays there while its cache is warm (ClaudeLink.ran, #793). */
   onRan?: (person: number, key: string, account: number) => void;
   /** Whether `person` has OpenRouter connected, so the turn's minion is offered the media tools (src/openrouter.ts, #717). */
@@ -950,6 +958,11 @@ export class Runner {
     const moved = migrateQueues(store);
     if (moved) console.log(`Moved ${moved} minions' saved messages into their queues (#1378).`);
     this.queue = new MinionQueue(store);
+    this.urgent = new Urgent(store, (ids) => {
+      this.turnLine.reordered();
+      this.lineChanged(ids);
+    });
+    this.places = new LinePlaces({ store, urgent: this.urgent, chains: () => this.chains(), now: () => this.now() });
     this.turnLine = new TurnLine({
       store,
       exempt: (id) => (store.getTicket(id)?.kind ?? 'coordinator') === 'coordinator',
@@ -1208,6 +1221,8 @@ export class Runner {
       turn_live: !closed && (this.turns.has(ticket.id) ? !this.keepalives.has(ticket.id) : !!this.launching.get(ticket.id) && !this.launching.get(ticket.id)!.keepalive),
       // Its turn waits for a worker (#1868): it shows as working, and its activity line says where it stands.
       worker_wait: closed ? null : this.turnLine.wait(ticket.id),
+      // Who marked it Urgent, when and why (#1888).
+      urgent: closed ? null : this.urgent.view(ticket.id),
       // What steps took against their guesses (#571), which both bars scale the guesses by: the one ratio steps.usual used.
       step_ratio: ratio,
       steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
@@ -1441,6 +1456,8 @@ export class Runner {
 
   private dropQueue(ticketId: number, keepHeld = false) {
     this.turnLine.leave(ticketId);
+    this.urgent.done(ticketId);
+    this.places.refused(ticketId, false);
     // A no-action notice (its own PR merged, #619) was never meant to be read before a close: it isn't named.
     const left = this.queue.clear(ticketId, keepHeld).filter((m) => !m.fyi);
     if (left.length) {
@@ -3140,28 +3157,42 @@ export class Runner {
     return !this.keepaliveGate(t, p, now);
   }
 
+  /** Whether its turn would run on Codex, which keeps no Claude cache. */
+  private codexTurn(t: Ticket, p: Project, person: number | null): boolean {
+    return isCodexModel(turnSettings(t, p).model) || (person !== null && !!this.store.getSetting<boolean>(codexSwitchKey(person))) || !!this.store.getSetting(codexThreadKey(t.id));
+  }
+
+  /** Whose plan and which account a turn of `t` for `person` would run on now (account 0: it couldn't run). */
+  private accountOf(t: Ticket, person: number | null): OnAccount {
+    return { payer: this.payerOf(person), account: person === null || !this.accountFor ? null : (this.accountFor(person, warmKey(t)) ?? 0) };
+  }
+
   /** Which of wantsKeepalive's gates turns a minion away, or null when a keepalive is due. */
   private keepaliveGate(t: Ticket, p: Project, now: number): string | null {
     if (t.kind === 'coordinator') return 'taskmaster';
     if (!t.session_id || !t.cwd) return 'no session';
     // A live turn, not isRunning: its own lane step re-checks here while it counts as launching (#1808), and a launch
     // under way elsewhere holds the lane, so the sweep's next() waits for it.
-    if (t.status !== 'idle' || this.turns.has(t.id) || this.queued(t.id)) return 'busy';
+    // One waiting in line for a worker is idle too (#1888, Josh, 2026-11-24: "like any idle minion"), whatever its state: it carries on soon.
+    const lined = this.turnLine.has(t.id);
+    if (t.status !== 'idle' || this.turns.has(t.id) || (this.queued(t.id) && !lined)) return 'busy';
     // A restart's resume still to start (2A2): a keepalive would take its place, or back out and hold its batch as mail.
     if (this.queue.owed(t.id)) return 'resume owed';
     if (this.limitWait(t.id)) return 'limit wait';
     if (this.netWait(t.id)) return 'net wait';
     if (this.killWait(t.id)) return 'kill wait';
-    if (this.parked(t)) return 'parked';
-    if (this.store.getSetting(sleepKey(t.id))) return 'asleep';
+    if (this.parked(t) && !lined) return 'parked';
+    if (this.store.getSetting(sleepKey(t.id)) && !lined) return 'asleep';
     if (this.store.getSetting(freshKey(t.id))) return 'fresh';
     // Outside (#1274): a day of gate counts found it turned away 120 of 233 due minions, nearly all in the ship line,
     // and about 30 a day of them were woken cold by their ship's result an hour or more later.
-    if (!(t.state === null || t.state === 'ready' || t.state === 'try' || t.state === 'outside' || this.store.openCardsOf(t.id).length)) return `state ${stateWord(t.state)}`;
+    if (!(lined || t.state === null || t.state === 'ready' || t.state === 'try' || t.state === 'outside' || this.store.openCardsOf(t.id).length)) return `state ${stateWord(t.state)}`;
     if (!inWindow(now)) return 'hours';
-    // Codex keeps no Claude cache.
-    const person = this.turnPerson(t, p, []);
-    if (isCodexModel(turnSettings(t, p).model) || (person !== null && this.store.getSetting<boolean>(codexSwitchKey(person))) || this.store.getSetting(codexThreadKey(t.id))) return 'codex';
+    const person = this.turnPerson(t, p, lined ? this.waiting(t.id) : []);
+    if (this.codexTurn(t, p, person)) return 'codex';
+    // In line it would run as the waiting turn: on another account that pays to write a cache the turn may not use (#1888).
+    const last = lined ? this.store.lastTurnOn(t.id) : null;
+    if (last && !sameAccount(last, this.accountOf(t, person))) return 'other account';
     const s = this.store.getSetting<KeepaliveSeries>(keepaliveKey(t.id));
     if (!s) return 'no series';
     if (s.stopped) return `stopped ${s.stopped}`;
@@ -3273,7 +3304,9 @@ export class Runner {
     if (this.lanes.busy(ticketId)) return;
     // A keepalive alone takes no worker; anything else waits in the line for one (#1868).
     const quiet = !this.queue.size(ticketId) && !this.freshStep(ticketId);
-    if (!quiet && !this.turnLine.enter(ticketId)) return;
+    // In line, only its keepalive runs (#1888): no worker, and its turn keeps its place.
+    const keepalive = !quiet && !this.turnLine.enter(ticketId);
+    if (keepalive && !this.keepalivePending.has(ticketId)) return;
     // Whose turn it will be, as below: a fresh-start step's is the minion's own, else the first queued message's.
     const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.freshStep(ticketId) ? [] : this.waiting(ticketId));
     // Nor beside a turn still live (#1464): the queue waits until it ends, then asks again.
@@ -3285,6 +3318,7 @@ export class Runner {
           const ticket = this.store.getTicket(ticketId);
           const project = ticket && this.store.getProject(ticket.project_id);
           if (!ticket || !project) return;
+          if (keepalive) return this.linedKeepalive(project, ticket);
           // A Taskmaster's fresh-start step runs first and alone; the queue waits for the fresh session
           // (but goes before a handoff Citadel asked for by itself: freshStep).
           // The keepalive or the queue's turn: after a fresh start that ran no turn, or at once.
@@ -3333,6 +3367,13 @@ export class Runner {
     this.lanes.run(ticketId, 'turn', quiet ? step : () => this.turnLine.hold(ticketId, step));
   }
 
+  /** The keepalive of a minion in line (#1888), as the turn it waits for would run; whatever else waits stays in line. */
+  private linedKeepalive(project: Project, ticket: Ticket): unknown {
+    const skew = this.keepalivePending.get(ticket.id);
+    if (!this.keepalivePending.delete(ticket.id) || !this.wantsKeepalive(ticket, project, this.now() + skew!)) return;
+    return this.ranTurn(this.startTurn(project, ticket, [{ author: 'System', text: KEEPALIVE_TEXT, images: [], keepalive: true }], this.turnPerson(ticket, project, this.waiting(ticket.id))));
+  }
+
   /** A turn a pause stopped waits in the line to carry on; one stopped before claude had its prompt runs its batch again. */
   private waitOutPause(ticketId: number, turn: TurnState, retry: { via: RetryKind; retries: Retries }) {
     const rerun = !turn.offset && this.queue.giveBack(ticketId).length > 0;
@@ -3374,19 +3415,21 @@ export class Runner {
   }
 
   /** Whose share a waiting turn counts in, and its place there (Waiting.rank). */
-  private lineAsks(ticketId: number, via?: RetryKind): { person: number; rank: number } {
+  private lineAsks(ticketId: number, via?: RetryKind): LinePlace {
     try {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project) return { person: 0, rank: 2 };
       const fresh = this.freshStep(ticketId);
       const waiting = this.waiting(ticketId);
-      const person = this.turnPerson(ticket, project, fresh ? [] : waiting, !!via) ?? 0;
-      if (waiting.msgs.some((m) => m.own)) return { person, rank: 0 };
+      const payer = this.turnPerson(ticket, project, fresh ? [] : waiting, !!via);
+      const person = payer ?? 0;
+      const place = this.places.place(ticket, () => (this.codexTurn(ticket, project, payer) ? null : this.accountOf(ticket, payer)));
+      if (waiting.msgs.some((m) => m.own)) return { person, rank: 0, ...place };
       // A first turn a person or a minion asked for; a schedule's or Citadel's own has no asker.
       const asked = !ticket.session_id && waiting.msgs.some((m) => m.from || m.asker != null);
       const started = fresh || asked || via === 'restart' || via === 'switch' || waiting.msgs.some((m) => m.from && this.store.getTicket(m.from)?.kind === 'coordinator');
-      return { person, rank: started ? 1 : 2 };
+      return { person, rank: started ? 1 : 2, ...place };
     } catch (err) {
       // One minion's trouble doesn't hold the line up; its turn's start meets the same trouble and says so.
       console.error(`Minion ${ticketId}: its place in the line could not be worked out:`, err);

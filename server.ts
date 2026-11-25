@@ -648,6 +648,7 @@ const ciNumbers = new CiNumbers(store);
 runner.machines = (project, askers) => machines.online().filter((m) => lendsMachine(store, m, project, askers));
 runner.refuseTurn = (ticket, author, from, asker) => turnRefusal(store, ticket, author, (uid) => claudeLink.linked(uid), from, asker);
 runner.placeFor = (person, warm) => turnPlace(store, claudeLink, person, warm);
+runner.accountFor = (person, warm) => claudeLink.accountFor(person, warm);
 runner.onAuthFailure = (person, account) => claudeLink.expire(person, account);
 // Several Claude accounts per person (#779): which one turns run on, and moving on from one at its limit.
 runner.claudeAccounts = (person) => claudeLink.accountList(person);
@@ -875,6 +876,7 @@ waiters.sent = (rs) => {
 };
 runner.heldFor = (id) => waiters.heldFor(id);
 runner.heldBrief = (id) => waiters.heldBrief(id);
+runner.chains = () => waiters.chains();
 runner.wakesOn = (id) => {
   const timed = timedWakes.next(id);
   return waiters.wakesOn(id) ?? heldStarts.wakesOn(id) ?? runnerWaiters(store).find((w) => w.ticket === id)?.reason ?? store.listDeliveries({ kind: 'runners_back', to: id, states: ['waiting'] })[0]?.payload.reason ?? (timed ? `wake ${pacificTime(timed.at)}: ${timed.note}` : null);
@@ -1825,11 +1827,13 @@ const landHandoffs = new LandHandoffs({
     if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output);
   },
   failed: (id, kind) => {
+    runner.places.refused(id, true);
     stallWatch.shipFailed(id, kind);
     const run = landings.get(id);
     if (run) recordFailure(store, id, run.output, run.code);
   },
   landed: (id, commit) => {
+    runner.urgent.done(id);
     runner.holderShipped(id);
     const t = store.getTicket(id);
     if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);
@@ -1844,6 +1848,7 @@ const landHandoffs = new LandHandoffs({
     addRunnerWaiter(store, id, reason, outbox);
     const run = landings.get(id); // CI gave no verdict: parked till runners are back, still a failed try (#1375)
     if (run) recordFailure(store, id, run.output, run.code);
+    runner.places.refused(id, true);
     return true;
   },
   liveAlready: async (id) => (await waiters.pendingLive()).includes(id),

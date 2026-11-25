@@ -93,6 +93,11 @@ export class Claims {
     return this.db.prepare('SELECT * FROM claims WHERE project_id = ? ORDER BY since, name').all(projectId) as unknown as Claim[];
   }
 
+  /** Who waits for each held claim, and who holds it, in every scheme. */
+  queued(): { ticket: number; holder: number }[] {
+    return this.db.prepare('SELECT q.ticket, c.holder FROM claim_queue q JOIN claims c ON c.project_id = q.project_id AND c.name = q.name WHERE q.done_at IS NULL').all() as { ticket: number; holder: number }[];
+  }
+
   get(projectId: number, name: string): Claim | undefined {
     return this.db.prepare('SELECT * FROM claims WHERE project_id = ? AND name = ?').get(projectId, name) as unknown as Claim | undefined;
   }

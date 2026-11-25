@@ -67,7 +67,7 @@ function github() {
   const calls: string[] = [];
   const get = async (path: string, etag: string | null) => {
     calls.push(path);
-    const body = answers.get(path.replace(/\?.*/, ''));
+    const body = answers.get(path) ?? answers.get(path.replace(/\?.*/, ''));
     if (body === undefined) return { status: 404, etag: null, body: { message: 'Not Found' } };
     const tag = JSON.stringify(body);
     return etag === tag ? { status: 304, etag, body: null } : { status: 200, etag: tag, body };
@@ -385,4 +385,46 @@ test("a landing's CI shows its suite's test files as its job sends them, and its
   at(65 + 46);
   await ci.tick();
   assert.deepEqual([waits.wait(m.id)!.brief, waits.wait(m.id)!.done, waits.wait(m.id)!.total], ['CI: step 7', 6, 8]);
+});
+
+test("a train front's CI run, on the train's top commit, is found by land/<branch> and followed to a re-formed train's new run", async () => {
+  const { gh, ci, waits, state, heads, at, now } = setup();
+  const m = minion('running');
+  heads.sha = 'front-head'; // the front's own worktree, an ancestor of the train's top the run is on
+  const f = join(state, 'queue', '0000000001');
+  writeFileSync(f, `100 77\n${now() / 1000 - 30}\n${m.branch}\nwaiting for CI since 12:01\n`);
+  utimesSync(f, now() / 1000, now() / 1000);
+  await waits.poll();
+  const runs = 'repos/o/r/actions/workflows/tests.yml/runs?per_page=5&';
+  gh.answers.set(`${runs}head_sha=front-head`, { workflow_runs: [] });
+  const byBranch = `${runs}branch=land%2F${encodeURIComponent(m.branch)}`;
+  gh.answers.set(byBranch, { workflow_runs: [{ id: 5, status: 'completed', conclusion: 'failure', created_at: iso(-3600) }] });
+  await ci.tick();
+  assert.equal(waits.wait(m.id)!.brief, 'CI: waiting for a run or runner', "an earlier train's run isn't this one's");
+  gh.answers.set(byBranch, {
+    workflow_runs: [
+      { id: 9, status: 'in_progress', created_at: iso(61) },
+      { id: 5, status: 'completed', conclusion: 'failure', created_at: iso(-3600) },
+    ],
+  });
+  gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { status: 'in_progress', steps: steps(1, 3) })] });
+  at(65);
+  await ci.tick();
+  assert.equal(waits.wait(m.id)!.chip, 'ship · CI 2/3');
+  // The train is re-formed after a red: its new run replaces the red one.
+  gh.answers.set('repos/o/r/actions/runs/9/jobs', { jobs: [job('test', { status: 'completed', conclusion: 'failure' })] });
+  gh.answers.set('repos/o/r/actions/runs/9', { id: 9, status: 'completed', conclusion: 'failure' });
+  at(70);
+  await ci.tick();
+  gh.answers.set(byBranch, {
+    workflow_runs: [
+      { id: 12, status: 'in_progress', created_at: iso(80) },
+      { id: 9, status: 'completed', conclusion: 'failure', created_at: iso(61) },
+    ],
+  });
+  gh.answers.set('repos/o/r/actions/runs/12/jobs', { jobs: [job('test', { status: 'in_progress', steps: steps(2, 3) })] });
+  at(90);
+  await ci.tick();
+  await ci.tick();
+  assert.equal(waits.wait(m.id)!.chip, 'ship · CI 3/3');
 });

@@ -269,6 +269,7 @@ export class CiRuns {
       for (const [id, w] of [...this.watches]) {
         if (w.ended) {
           if (now - w.ended >= KEEP_MS) this.drop(id);
+          else if (w.branch && (await this.reformed(w))) w.lastAt = now;
           continue;
         }
         if (inFlight > BUSY && now - w.lastAt < SLOW_MS) continue;
@@ -290,16 +291,32 @@ export class CiRuns {
     }
   }
 
+  /** A landing's red run, replaced by a newer one on land/<branch> (a train re-formed after the red): take it up afresh. */
+  private async reformed(w: Watch): Promise<boolean> {
+    const red = [...w.jobs.values()].flat().some((j) => j.conclusion === 'failure' || j.conclusion === 'cancelled' || j.conclusion === 'timed_out');
+    if (!red || !w.runs.length) return false;
+    const body = await this.read(`repos/${w.slug}/actions/workflows/${LAND_WORKFLOW}/runs?per_page=5&branch=${encodeURIComponent(`land/${w.branch}`)}`, w.as);
+    const next = (body?.workflow_runs ?? []).find((r: { id: number; created_at: string }) => r.id > w.runs[0] && at(r.created_at) >= w.since! - 60_000);
+    if (!next) return false;
+    Object.assign(w, { runs: [], jobs: new Map(), usual: new Map(), ended: undefined, ahead: undefined });
+    return true;
+  }
+
   private async poll(w: Watch) {
     if (w.branch && !w.runs.length) {
       // As land.sh finds it: the newest run of the commit it lands (its worktree's head once past the rebase), which may
       // be an earlier try's. Without the commit, the newest run of the land/<branch> it pushes, since this wait began.
       if (w.sha === undefined) w.sha = (w.cwd && (await (this.d.head ?? gitHead)(w.cwd))) || '';
       const runs = `repos/${w.slug}/actions/workflows/${LAND_WORKFLOW}/runs?per_page=5&`;
-      const body = await this.read(runs + (w.sha ? `head_sha=${w.sha}` : `branch=${encodeURIComponent(`land/${w.branch}`)}`), w.as);
       // A red or cancelled run from before this wait is one land.sh replaces with a new run, so it isn't this wait's.
       const fresh = (r: any) => at(r.created_at) >= w.since! - 60_000;
-      const run = (body?.workflow_runs ?? []).find((r: any) => (w.sha ? fresh(r) || r.status !== 'completed' || !r.conclusion || r.conclusion === 'success' : fresh(r)));
+      const bySha = async () => {
+        const body = await this.read(`${runs}head_sha=${w.sha}`, w.as);
+        return (body?.workflow_runs ?? []).find((r: any) => fresh(r) || r.status !== 'completed' || !r.conclusion || r.conclusion === 'success');
+      };
+      // In a train the run is on the train's top, a descendant of this worktree's head: it is on land/<branch> all the same.
+      const byBranch = async () => ((await this.read(`${runs}branch=${encodeURIComponent(`land/${w.branch}`)}`, w.as))?.workflow_runs ?? []).find(fresh);
+      const run = (w.sha && (await bySha())) || (await byBranch());
       if (!run) return;
       w.runs = [run.id]; // its usual is the landing's own CI stage's (Waits)
       w.usual.set(run.id, null);

@@ -386,7 +386,7 @@ test('a ship train (#1303): the front reads "Train of N", a rider reads riding i
   const front = waits.wait(f.id)!;
   assert.equal(front.train?.role, 'front');
   assert.equal(front.train?.size, 3);
-  assert.match(front.brief!, /^train of 3 · CI: starting$/);
+  assert.match(front.brief!, /^train of 3 · CI: waiting for a run or runner$/);
   const rider = waits.wait(r1.id)!;
   assert.equal(rider.train?.role, 'rider');
   assert.equal(rider.stage, 'test', "a rider is in the front's CI, not in line");

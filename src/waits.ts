@@ -341,7 +341,7 @@ export const EARLY_CI = { word: 'CI · early', label: 'CI · started early', tex
 
 // The one-line readout's words for a landing's test phases (#630): the stage and its count say the rest, and the
 // suite's file counts fill its piece of the track.
-const BRIEF: Record<string, string> = { ci: 'CI: starting', tests: 'full suite on perigee', reruns: 'failed files rerun alone on perigee', bisect: 'bisecting the red train' };
+const BRIEF: Record<string, string> = { ci: 'CI: waiting for a run or runner', tests: 'full suite on perigee', reruns: 'failed files rerun alone on perigee', bisect: 'bisecting the red train' };
 const HEAD_WORD: Record<string, string> = { rebase: 'rebasing', check: 'running the check', ci: 'waiting for CI', tests: 'testing', reruns: 'rerunning failed tests', bisect: 'bisecting', deploy: 'deploying' };
 
 /** A rider's queue phase (tools/land.sh's queue_phase while it rides): the branch of the front it rides with. A rider sent back reads "waiting" again. */

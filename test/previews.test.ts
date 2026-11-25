@@ -41,9 +41,12 @@ function worktree(name: string): string {
 function stubWorktree(name: string): string {
   const dir = join(root, name);
   mkdirSync(dir);
-  writeFileSync(join(dir, 'server.ts'), `import { createServer } from 'node:http';
+  writeFileSync(
+    join(dir, 'server.ts'),
+    `import { createServer } from 'node:http';
 createServer((req, res) => res.end(JSON.stringify({ ok: true, preview: true }))).listen(Number(process.env.PORT), '127.0.0.1');
-`);
+`,
+  );
   execFileSync('git', ['init', '-q'], { cwd: dir });
   return dir;
 }

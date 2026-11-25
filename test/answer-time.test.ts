@@ -56,7 +56,12 @@ test('the probe makes a real request on a fresh connection each time, and a slow
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const probe = new AnswerProbe({ everyMs: 100, lookMs: 20 });
   probe.start((server.address() as { port: number }).port);
-  await until('the slow answer lands', () => probe.lastMs != null && probe.lastMs >= 650, 30_000, () => `hits ${hits}, last ${probe.lastMs}`);
+  await until(
+    'the slow answer lands',
+    () => probe.lastMs != null && probe.lastMs >= 650,
+    30_000,
+    () => `hits ${hits}, last ${probe.lastMs}`,
+  );
   const w = probe.take(1, 1)!;
   probe.stop();
   server.close();

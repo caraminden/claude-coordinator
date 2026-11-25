@@ -60,15 +60,17 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
       let beside = 0; // the waiting one shipping beside the holder, and its ships not live yet
       let besideShips = 0;
       let handed = false;
+      let besideHanded = false;
       const dropBeside = () => {
-        if (beside && !waiting.includes(beside)) beside = besideShips = 0;
+        if (beside && !waiting.includes(beside)) [beside, besideShips, besideHanded] = [0, 0, false];
       };
       const modelPass = () => {
         holder = beside || (waiting[0] ?? null);
         waiting = waiting.filter((t) => t !== holder);
         shipped = beside ? besideShips : 0;
-        beside = besideShips = 0;
-        keep = handed = false;
+        keep = false;
+        handed = besideHanded;
+        [beside, besideShips, besideHanded] = [0, 0, false];
       };
       for (const c of cmds) {
         now += 10;
@@ -140,6 +142,7 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
           case 'handOff': {
             claims.handedOff(c.t);
             if (holder === c.t) handed = true;
+            else if (beside === c.t) besideHanded = true;
             break;
           }
           case 'skip': {
@@ -150,7 +153,7 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
             if (may) {
               waiting = [holder!, ...waiting.filter((t) => t !== c.t)];
               holder = c.t;
-              beside = besideShips = 0;
+              [beside, besideShips, besideHanded] = [0, 0, false];
             }
             break;
           }
@@ -168,7 +171,7 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
         const real = claims.get(1, NAME);
         assert.equal(real?.holder ?? null, holder, 'holder matches the model');
         assert.deepEqual([real?.landed ? real.landed.split(' ').length : 0, !!real?.keep], [shipped, keep], 'its ships and keep match the model');
-        assert.deepEqual([real?.beside ?? 0, real?.beside_landed ? real.beside_landed.split(' ').length : 0, !!real?.handed], [beside, besideShips, handed], 'the one beside it and its hand-off match the model');
+        assert.deepEqual([real?.beside ?? 0, real?.beside_landed ? real.beside_landed.split(' ').length : 0, !!real?.handed, !!real?.beside_handed], [beside, besideShips, handed, besideHanded], 'the one beside it and its hand-off match the model');
         const wait = claims.waiting(1, NAME);
         assert.deepEqual(wait, waiting, 'the waiting line matches the model: none lost, order kept');
         assert.equal(new Set(wait).size, wait.length, 'nobody waits twice');

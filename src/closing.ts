@@ -122,8 +122,8 @@ export class Closing {
     const keeper = this.d.store.getOverlord(projectId);
     for (const { from, to } of passed) {
       const next = to && this.d.store.getTicket(to.holder);
-      if (next && next.status !== 'closed' && from?.beside === next.id) {
-        // Let in beside it already: it was woken then, and its ship may be running (a message would count as one to answer).
+      if (next && next.status !== 'closed' && from?.beside === next.id && from.beside_handed) {
+        // Handed off beside it already: its ship may be running (a message would count as one to answer).
         this.d.emit(next.id, 'note', { text: `It holds the ${to!.name} claim now: ${why}.` });
       } else if (next && next.status !== 'closed') {
         const line = `You hold the ${to!.name} claim now: ${why}. It passes to the next in its queue when your change is live, or you are dismissed. More than one piece to ship? Before the first ships, ask your Taskmaster (message_coordinator, need: ask) to keep it for you (claim's keep).${to!.name === SHIP_LANE ? ` Hand off within ${SKIP_AFTER_MS / 60_000} min: past that, one that is ready goes first and you are next after it.` : ''}`;

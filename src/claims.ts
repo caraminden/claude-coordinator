@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS claims (
   handed INTEGER NOT NULL DEFAULT 0,
   beside INTEGER NOT NULL DEFAULT 0,
   beside_since INTEGER NOT NULL DEFAULT 0,
+  beside_handed INTEGER NOT NULL DEFAULT 0,
   beside_landed TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (project_id, name)
 );
@@ -64,9 +65,10 @@ export interface Claim {
   keep: number;
   /** 1: its holder has handed a ship off while holding it, so it isn't skipped for being slow (#1985). */
   handed: number;
-  /** The waiting minion shipping beside the holder (#1985), since when, and what it shipped that isn't live yet; 0 for none. */
+  /** The waiting minion shipping beside the holder (#1985), since when, whether it handed off, and what it shipped that isn't live yet; 0 for none. */
   beside: number;
   beside_since: number;
+  beside_handed: number;
   beside_landed: string;
 }
 
@@ -112,7 +114,8 @@ export class Claims {
     if (!cols.includes('keep')) db.exec('ALTER TABLE claims ADD COLUMN keep INTEGER NOT NULL DEFAULT 0');
     // 1 for a claim held when this arrives: whether its holder handed off before wasn't recorded. take() sets its own.
     if (!cols.includes('handed')) db.exec('ALTER TABLE claims ADD COLUMN handed INTEGER NOT NULL DEFAULT 1');
-    if (!cols.includes('beside')) db.exec("BEGIN; ALTER TABLE claims ADD COLUMN beside INTEGER NOT NULL DEFAULT 0; ALTER TABLE claims ADD COLUMN beside_since INTEGER NOT NULL DEFAULT 0; ALTER TABLE claims ADD COLUMN beside_landed TEXT NOT NULL DEFAULT ''; COMMIT");
+    if (!cols.includes('beside'))
+      db.exec("BEGIN; ALTER TABLE claims ADD COLUMN beside INTEGER NOT NULL DEFAULT 0; ALTER TABLE claims ADD COLUMN beside_since INTEGER NOT NULL DEFAULT 0; ALTER TABLE claims ADD COLUMN beside_handed INTEGER NOT NULL DEFAULT 0; ALTER TABLE claims ADD COLUMN beside_landed TEXT NOT NULL DEFAULT ''; COMMIT");
     const queued = (db.prepare('PRAGMA table_info(claim_queue)').all() as { name: string }[]).map((c) => c.name);
     if (!queued.includes('ready')) db.exec('ALTER TABLE claim_queue ADD COLUMN ready INTEGER NOT NULL DEFAULT 0');
   }
@@ -204,7 +207,7 @@ export class Claims {
         this.db.prepare('DELETE FROM claim_queue WHERE project_id = ? AND name = ?').run(projectId, name);
       } else {
         // One shipping beside it brings what it has shipped.
-        this.move(projectId, name, next, now, from.beside ? from.beside_landed : '');
+        this.move(projectId, name, next, now, from.beside ? from.beside_landed : '', from.beside_handed);
         this.db.prepare('DELETE FROM claim_queue WHERE project_id = ? AND name = ? AND ticket IN (?, ?)').run(projectId, name, next, from.holder);
         this.db.prepare('INSERT INTO claim_queue (project_id, name, ticket, pos, added_by, added_at, done_at, how) VALUES (?, ?, ?, -1, ?, ?, ?, ?)').run(projectId, name, from.holder, from.taken_by, from.since, now, how);
       }
@@ -217,13 +220,13 @@ export class Claims {
   }
 
   /** `name` is `holder`'s from `now`, with `landed` shipped and nothing else of the last holder's. */
-  private move(projectId: number, name: string, holder: number, now: number, landed = '') {
-    this.db.prepare("UPDATE claims SET holder = ?, note = '', since = ?, landed = ?, keep = 0, handed = 0, beside = 0, beside_since = 0, beside_landed = '' WHERE project_id = ? AND name = ?").run(holder, now, landed, projectId, name);
+  private move(projectId: number, name: string, holder: number, now: number, landed = '', handed = 0) {
+    this.db.prepare("UPDATE claims SET holder = ?, note = '', since = ?, landed = ?, keep = 0, handed = ?, beside = 0, beside_since = 0, beside_handed = 0, beside_landed = '' WHERE project_id = ? AND name = ?").run(holder, now, landed, handed, projectId, name);
   }
 
   /** A claim's beside place goes with its ticket's place in the queue. */
   private dropBeside() {
-    this.db.prepare("UPDATE claims SET beside = 0, beside_since = 0, beside_landed = '' WHERE beside != 0 AND beside NOT IN (SELECT ticket FROM claim_queue q WHERE q.project_id = claims.project_id AND q.name = claims.name AND q.done_at IS NULL)").run();
+    this.db.prepare("UPDATE claims SET beside = 0, beside_since = 0, beside_handed = 0, beside_landed = '' WHERE beside != 0 AND beside NOT IN (SELECT ticket FROM claim_queue q WHERE q.project_id = claims.project_id AND q.name = claims.name AND q.done_at IS NULL)").run();
   }
 
   /** `ticket`, waiting for `name`, could hand its ship off now but for the lane. False when it doesn't wait for it. */
@@ -231,9 +234,10 @@ export class Claims {
     return !!this.db.prepare('UPDATE claim_queue SET ready = 1 WHERE project_id = ? AND name = ? AND ticket = ? AND done_at IS NULL').run(projectId, name, ticket).changes;
   }
 
-  /** `holder` handed a ship off: its claims aren't skipped past it. */
+  /** `holder` handed a ship off, its claim's or beside it: its claims aren't skipped past it. */
   handedOff(holder: number): void {
     this.db.prepare('UPDATE claims SET handed = 1 WHERE holder = ?').run(holder);
+    this.db.prepare('UPDATE claims SET beside_handed = 1 WHERE beside = ?').run(holder);
   }
 
   /**

@@ -85,7 +85,7 @@ export class ShipLane {
     return null;
   }
 
-  /** Whether nothing of its is running, owed or waiting on a person. A sealed one counts: waiting for the lane is what it is sealed on. */
+  /** Whether nothing of its is running, owed or waiting on a person. One sealed for the lane counts; one sealed on its start_after doesn't. */
   private free(id: number) {
     const t = this.d.store.getTicket(id);
     return t?.status === 'idle' && !this.d.busy(id) && !this.d.shipping(id) && !this.d.heldFor(id) && this.d.store.openCardAt(id) === null;

@@ -280,7 +280,7 @@ test('a database from before #1985 gains its columns, its claim as it was but co
     CREATE TABLE claims (project_id INTEGER NOT NULL, name TEXT NOT NULL, holder INTEGER NOT NULL, taken_by TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', since INTEGER NOT NULL, PRIMARY KEY (project_id, name));
     INSERT INTO claims VALUES (1, 'pipeline-lane', 580, 'Josh', 'part B', 1000);`);
   const claims = new Claims(db);
-  assert.deepEqual({ ...claims.get(1, 'pipeline-lane') }, { project_id: 1, name: 'pipeline-lane', holder: 580, taken_by: 'Josh', note: 'part B', since: 1000, landed: '', keep: 0, handed: 1, beside: 0, beside_since: 0, beside_landed: '' });
+  assert.deepEqual({ ...claims.get(1, 'pipeline-lane') }, { project_id: 1, name: 'pipeline-lane', holder: 580, taken_by: 'Josh', note: 'part B', since: 1000, landed: '', keep: 0, handed: 1, beside: 0, beside_since: 0, beside_handed: 0, beside_landed: '' });
   new Claims(db);
   assert.equal(claims.take(1, 'another', 580, 'Josh').claim.handed, 0, 'a new claim there starts as not handed off');
   claims.release(1, 'another');
@@ -305,10 +305,11 @@ test('one beside the holder: its live ends its turn; the holder going first make
   assert.deepEqual([lane().holder, lane().beside, lane().beside_landed, claims.waiting(1, 'pipeline-lane')], [580, 0, '', [601, 603]]);
   // The holder goes first: the one beside it is next, ahead of the line, and its own live passes it on.
   claims.setBeside(lane(), 603, 1300);
+  claims.handedOff(603);
   claims.shipped(603, 'c1');
   claims.shipped(580, 'a1');
   assert.equal(claims.holderLive(lane(), ['a1'], 1400)!.to!.holder, 603);
-  assert.deepEqual([lane().landed, lane().beside, lane().beside_landed], ['c1', 0, '']);
+  assert.deepEqual([lane().landed, lane().handed, lane().beside, lane().beside_handed, lane().beside_landed], ['c1', 1, 0, 0, '']);
   assert.equal(claims.holderLive(lane(), ['c1'], 1500)!.to!.holder, 601);
   assert.equal(lane().landed, '');
 });
@@ -418,6 +419,30 @@ test('the Taskmaster claims the lane for a minion; minions only read; dismissing
   const lines = (digest.prepare('SELECT text FROM taskmaster_digest WHERE project_id = ? ORDER BY id').all(p.id) as { text: string }[]).map((r) => r.text);
   digest.close();
   assert.deepEqual(lines, []);
+});
+
+// #1985: one let in beside the holder that never handed off has to be told the claim is its own now.
+test('one beside the holder is told when it becomes the holder, unless it handed off already', async () => {
+  const { data: p } = await call('/api/projects', { method: 'POST', body: { name: 'Beside' } });
+  const tm = (await call(`/api/projects/${p.id}`)).data.coordinator.id;
+  const mk = async (message: string) => (await call(`/api/projects/${p.id}/tickets`, { method: 'POST', body: { message, properties: { type: 'chore' } } })).data;
+  const [a, b, c] = [await mk('one'), await mk('two'), await mk('three')];
+  const url = `/api/projects/${p.id}/claims`;
+  const said = async (id: number) => JSON.stringify((await call(`/api/tickets/${id}/events?after=0`)).data).split('You hold the pipeline-lane claim now').length - 1;
+  const beside = (id: number, handed: number) => {
+    const db = new DatabaseSync(join(root, 'data', 'coordinator.db'), { timeout: 30_000 });
+    db.prepare('UPDATE claims SET beside = ?, beside_handed = ? WHERE project_id = ?').run(id, handed, p.id);
+    db.close();
+  };
+  assert.equal((await call(url, { method: 'POST', body: { name: 'pipeline-lane', queue: [a.number, b.number, c.number] } })).status, 201);
+  beside(c.id, 0);
+  await call(`${url}/pipeline-lane`, { method: 'DELETE', as: tm });
+  assert.equal((await call(url)).data.claims[0].holder, c.id, 'the one beside goes first');
+  assert.equal(await said(c.id), 1);
+  beside(b.id, 1);
+  await call(`${url}/pipeline-lane`, { method: 'DELETE', as: tm });
+  assert.equal((await call(url)).data.claims[0].holder, b.id);
+  assert.equal(await said(b.id), 0, 'its ship is running: a note only');
 });
 
 // #1334, in a scheme that isn't Citadel's: the queue passes the claim on by itself.

@@ -228,18 +228,26 @@ test('a type check waits while the shared limit is held, says so, and goes once 
 });
 
 test('a type check does not wait on CI, in a heavy job, with the limit off, or when the repo has no gate', async () => {
+  const { spawn } = await import('node:child_process');
   const { dir, check, done } = scratch({ 'a.ts': 'export const a: number = 1;\n' });
   try {
     const heavy = join(dir, 'heavy');
-    mkdirSync(join(heavy, 'x'), { recursive: true });
+    mkdirSync(heavy);
     // No tools/test-gate.ts in this copy: the other schemes' case.
     assert.equal(check('--init').code, 0);
     copyFileSync(join(ROOT, 'tools', 'test-gate.ts'), join(dir, 'tools', 'test-gate.ts'));
-    for (const skip of [{ GITHUB_ACTIONS: 'true' }, { CITADEL_HEAVY_HELD: '1' }, { CITADEL_TEST_FILES: '0' }]) {
-      // A limit of one, with the one place held by a file lock this run can't take: waiting would run past the timeout below.
-      const r = spawnSync(process.execPath, [join(dir, 'tools', 'typecheck.ts')], { cwd: dir, encoding: 'utf8', timeout: 60_000, env: { ...process.env, CITADEL_HEAVY_DIR: heavy, CITADEL_TEST_FILES_MIN: '0', CITADEL_TEST_ROOM_WAIT: '1', ...skip } });
-      assert.equal(r.status, 0, JSON.stringify(skip) + r.stderr);
-      assert.doesNotMatch(r.stderr, /waiting for room/);
+    // One place in all, held by something else: a run that waited would sit until CITADEL_TEST_ROOM_WAIT (60 s) and say so.
+    const holder = spawn('sh', ['-c', 'exec 8>"$1" && flock -n 8 && echo held && exec sleep 600', 'sh', join(heavy, 'test-slot-0')], { stdio: ['ignore', 'pipe', 'ignore'] });
+    try {
+      await new Promise((r) => holder.stdout.once('data', r));
+      const base = { ...process.env, CITADEL_HEAVY_DIR: heavy, CITADEL_TEST_FILES: '1', CITADEL_TEST_FILES_MIN: '1', CITADEL_TEST_FILES_MAX: '1', CITADEL_HEAVY_PRESSURE: join(dir, 'none'), CITADEL_TEST_ROOM_WAIT: '60', RUNNER_TEMP: '', GITHUB_ACTIONS: '', CITADEL_HEAVY_HELD: '' };
+      for (const skip of [{ GITHUB_ACTIONS: 'true' }, { RUNNER_TEMP: '/tmp' }, { CITADEL_HEAVY_HELD: '1' }, { CITADEL_TEST_FILES: '0' }]) {
+        const r = spawnSync(process.execPath, [join(dir, 'tools', 'typecheck.ts')], { cwd: dir, encoding: 'utf8', timeout: 40_000, env: { ...base, ...skip } });
+        assert.equal(r.status, 0, JSON.stringify(skip) + r.stderr);
+        assert.doesNotMatch(r.stderr, /waiting for room/, JSON.stringify(skip));
+      }
+    } finally {
+      holder.kill();
     }
   } finally {
     done();

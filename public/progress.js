@@ -519,6 +519,7 @@ export function applyEvent(p, kind, data, at = null) {
     // The state its reply ends on (runner.ts stripStatus), or the call that sets one: nothing is left to do.
     const calls = (name) => data.message?.content?.find?.((b) => b.type === 'tool_use' && b.name === name);
     if (!data.parent_tool_use_id && calls('mcp__thread__close_self')) p.closing = true;
+    if (data.turn_state && !NOTHING_LEFT.has(data.turn_state)) p.closing = false; // another state cancels the close
     if (!data.parent_tool_use_id && (NOTHING_LEFT.has(data.turn_state) || NOTHING_LEFT.has(calls('mcp__thread__set_thread_status')?.input?.state))) finishPlan(p, at);
   } else if (data.type === 'user') {
     for (const block of data.message?.content ?? []) {
@@ -575,9 +576,9 @@ export function planError(input) {
 function applyPlan(p, callId, input, at) {
   if (planError(input)) return;
   // Naming step 1 with a title once the plan is finished starts a new one, its ids new; a late step 4 just adds.
-  // A tagged plan's last step may never be ticked (its ship ends the turn), so a later turn's new step 1 starts one too.
+  // A tagged plan's last step may never be ticked (its ship ends the turn), so a later turn's new step 1, with others, starts one too.
   const first = p.tasks.find((t) => (t.n ?? Number(t.id)) === 1);
-  const fresh = (s) => s.n === 1 && s.step && (allDone(p) || (p.at && !p.planned && first && s.step !== first.subject));
+  const fresh = (s) => s.n === 1 && s.step && (allDone(p) || (p.at && !p.planned && first && s.step !== first.subject && input.steps.filter((o) => o.step).length > 1));
   if (p.tasks.length && input.steps.some(fresh)) p.tasks = [];
   if (!p.tasks.some((t) => t.id === p.at)) p.at = null;
   p.planned = true;

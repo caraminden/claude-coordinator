@@ -190,6 +190,9 @@ test('a new plan in a later turn replaces a tagged one the ship left open; a fix
   c.edit();
   c.ship();
   c.turn();
+  c.plan([{ n: 1, step: 'Read it all' }]);
+  assert.equal(c.p.tasks.length, 5, 'one title alone is a fix-up in any turn');
+  c.turn();
   c.plan([
     { n: 1, step: 'Fix what CI found', kind: 'build' },
     { n: 2, step: 'Ship again', kind: 'ship' },
@@ -271,7 +274,7 @@ test('close_self and a complete status end the plan; other states leave the step
   c.over();
   assert.equal(c.bar(), 'ccccc');
   // A card still out refuses it, and work after it says it stays open.
-  for (const after of [(x) => x.call('mcp__thread__ask_question', { questions: [] }), (x) => x.edit()]) {
+  for (const after of [(x) => x.call('mcp__thread__ask_question', { questions: [] }), (x) => x.edit(), (x) => x.end('ready')]) {
     const d = chat([['read'], ['build'], ['test'], ['ask']]);
     d.edit();
     d.call('mcp__thread__close_self', {});

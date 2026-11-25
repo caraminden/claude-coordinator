@@ -65,7 +65,7 @@ test('test files of separate runs keep to the one limit, arriving while others a
     await until(`run ${r} to have files in`, () => existsSync(`${env.CITADEL_TEST_GATE_NOTE}-${r}.n`));
   }
   assert.deepEqual(new Set(await Promise.all(jobs)), new Set([0]));
-  assert.ok(peak(run) <= 4, `peak ${peak(run)}`);
+  assert.ok(peak(run) <= 4 && peak(run) >= 3, `peak ${peak(run)}`);
   assert.equal(readFileSync(join(run, 'seen'), 'utf8').trim().split('\n').length, 16, 'and all of them ran');
 });
 

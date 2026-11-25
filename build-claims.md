@@ -2,9 +2,9 @@
 
 build: #1935
 
-shared: src/runner.ts src/turn-launch.ts src/machines.ts src/routes/machines.ts public/machine-agent.mjs server.ts src/db.ts src/db/machines.ts src/mcp.ts README.md tools/affected-map.txt test/size-budget.test.ts test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/judges.test.ts
+shared: src/runner.ts src/turn-launch.ts src/machines.ts src/routes/machines.ts public/machine-agent.mjs server.ts src/db.ts src/db/machines.ts src/mcp.ts README.md tools/affected-map.txt test/size-budget.test.ts test/typecheck-baseline.json test/machine-fakes.ts docs/adr/0024-runner-seams.md docs/design-system/index.html test/sync-calls.json test/judges.test.ts test/running-turn.test.ts
 
-#1937: test/running-turn.test.ts
+#1937: (merged in; its test/running-turn.test.ts is shared, for T2 to add its kind)
 #1962: src/running-turn.ts src/mcp-pool.ts src/supervisor-client.ts src/turn-supervisor.mjs src/turn-run.mjs
 
 A feeder's own line is added by #1935 when its number is known, before the next piece starts. The plan, by piece:

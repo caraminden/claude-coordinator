@@ -118,6 +118,10 @@ test("the format template's way onto main replays a branch cut before the reform
     assert.equal(readFileSync(join(s.dir, 'f.js'), 'utf8'), "const a = { x: 100 };\nconst k1 = 1;\nconst k2 = 2;\nconst b = 'two';\nconst k3 = 33;\nconst k4 = 4;\nconst c = [33];\n");
     assert.equal(readFileSync(join(s.dir, 'hand.txt'), 'utf8'), 'fixed by hand\n');
     assert.equal(sh('git branch --show-current && git log --format=%s main..HEAD && git status --porcelain'), 'work\n#1: k3\n');
+    // Run again where nothing qualifies: an earlier run's ref must not carry the steps on.
+    const [first, second] = steps.trim().split('\n') as [string, string];
+    spawnSync('bash', ['-c', first], { cwd: s.dir, env });
+    assert.notEqual(spawnSync('bash', ['-c', second], { cwd: s.dir, env }).status, 0);
   } finally {
     s.done();
   }

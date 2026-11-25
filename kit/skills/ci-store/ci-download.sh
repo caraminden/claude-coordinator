@@ -56,10 +56,16 @@ echo "::add-mask::$token"
 # GET the store's $1 into $2. A 503 means the store couldn't read GitHub's signing keys to check the run
 # token (it tries again within seconds): wait and ask again, as ci-upload.sh does.
 fetch() {
-  local code try
+  local code try rc
   for try in 1 2 3 4 5 6; do
+    rc=0
     code=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
-      curl -sS --config - --max-time 1800 --connect-timeout 15 -o "$2" -w '%{http_code}' "$store$1") || give_up "the store at $store didn't answer"
+      curl -sS --config - --max-time 1800 --connect-timeout 15 -o "$2" -w '%{http_code}' "$store$1") || rc=$?
+    if [ "$rc" != 0 ]; then
+      # No answer at all (refused, reset, empty reply, connect timeout) is the store restarting: tried again like a 503.
+      case $rc in 6|7|28|35|52|55|56) [ "$try" != 6 ] || give_up "the store at $store didn't answer"; sleep "${CI_DOWNLOAD_WAIT:-30}"; continue ;; esac
+      give_up "the store at $store didn't answer"
+    fi
     [ "$code" = 503 ] && [ "$try" != 6 ] || break
     sleep "${CI_DOWNLOAD_WAIT:-30}"
   done

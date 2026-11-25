@@ -53,12 +53,19 @@ echo "::add-mask::$token"
 out=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ci-numbers.XXXXXX")
 trap 'rm -f "$out"' EXIT
 # 503: Citadel couldn't read GitHub's signing keys to check the token yet; it tries again within seconds.
-for try in 1 2 3; do
+# A curl that fails before an answer (refused, reset, empty reply, connect timeout: curl exits 6 7 28 35 52 55 56) is
+# Citadel restarting: tried again too, 6 tries 30 s apart.
+for try in 1 2 3 4 5 6; do
+  rc=0
   code=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
     curl -sS --config - --max-time 30 --connect-timeout 15 -H 'Content-Type: application/json' --data-binary "{\"numbers\":[$json]}" \
-      -o "$out" -w '%{http_code}' "$store/api/ci-numbers") || warn "Citadel at $store didn't answer"
-  [ "$code" = 503 ] && [ "$try" != 3 ] || break
-  sleep "${CI_UPLOAD_WAIT:-10}"
+      -o "$out" -w '%{http_code}' "$store/api/ci-numbers") || rc=$?
+  if [ "$rc" != 0 ]; then
+    case $rc in 6|7|28|35|52|55|56) [ "$try" != 6 ] || warn "Citadel at $store didn't answer"; sleep "${CI_UPLOAD_WAIT:-30}"; continue ;; esac
+    warn "Citadel at $store didn't answer"
+  fi
+  [ "$code" = 503 ] && [ "$try" != 6 ] || break
+  sleep "${CI_UPLOAD_WAIT:-30}"
 done
 [ "$code" = 201 ] || warn "Citadel refused the numbers (HTTP $code): $(head -c 600 "$out")"
 echo "ci-numbers: sent ${#pairs[@]} numbers to Citadel: $(cat "$out")"

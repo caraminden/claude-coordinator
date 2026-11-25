@@ -73,9 +73,16 @@ echo "::add-mask::$token"
 url="$store/api/ci-store/$name?kind=$kind${target:+&target=$target}"
 # 503: the store is taking other jobs' uploads and has no room to take this one beside them yet, or it
 # couldn't read GitHub's signing keys to check the run token (it tries again within seconds).
+# A curl that fails before an answer (refused, reset, empty reply, connect timeout: curl exits 6 7 28 35 52 55 56) is
+# the store restarting, which takes a few seconds: it is tried again like a 503, 6 tries 30 s apart (about 2.5 minutes).
 for try in 1 2 3 4 5 6; do
+  rc=0
   code=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
-    curl -sS --config - --max-time 1800 --connect-timeout 15 -T "$file" -o "$tmp/answer" -w '%{http_code}' "$url") || give_up "the store at $store didn't answer"
+    curl -sS --config - --max-time 1800 --connect-timeout 15 -T "$file" -o "$tmp/answer" -w '%{http_code}' "$url") || rc=$?
+  if [ "$rc" != 0 ]; then
+    case $rc in 6|7|28|35|52|55|56) [ "$try" != 6 ] || give_up "the store at $store didn't answer"; sleep "${CI_UPLOAD_WAIT:-30}"; continue ;; esac
+    give_up "the store at $store didn't answer"
+  fi
   [ "$code" = 503 ] && [ "$try" != 6 ] || break
   sleep "${CI_UPLOAD_WAIT:-30}"
 done

@@ -35,7 +35,7 @@ test("a Taskmaster in a split scheme reaches another member's Taskmaster as held
   try {
     const as = (id: number) => srv.as({ token: agentToken(join(dir, 'data'), id) });
     const send = (id: number, body: object) => as(id)('/api/taskmaster', { need: 'fyi', text: 'agree which minion carries on', ...body }, 'POST');
-    const events = async (id: number) => (await srv.as({ cookie: srv.cookie })(`/api/tickets/${id}/events?after=0`)).data.filter((x: any) => x.kind === 'user_message').map((x: any) => JSON.parse(x.data));
+    const events = async (id: number) => (await srv.as({ cookie: srv.cookie })(`/api/tickets/${id}/events?after=0`)).data.filter((x: { kind: string; data: string }) => x.kind === 'user_message').map((x: { kind: string; data: string }) => JSON.parse(x.data));
 
     // Cara's Taskmaster to Josh's, naming its own scheme: held mail, never a turn.
     const r = await send(caraTm.id, { scheme: 'Shared', person: 'Josh', wake: true });

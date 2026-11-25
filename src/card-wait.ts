@@ -19,7 +19,11 @@ export type CardWait = 'working' | 'lend' | 'end';
 export const newCalls = (background: string[] = []): TurnCalls => ({ open: new Map(), background, detached: false });
 
 // shortcut: by its words, so a job long over still keeps its turn's process; ask the kernel for the turn's other processes if many turns stay loaded for it.
-const DETACHES = /(?:^|[^&|>\d])&(?![&>\d])|\b(?:setsid|nohup|disown|systemd-run|citadel-dev-copy|citadel-heavy|start-emulator)\b/;
+const DETACHES = /(?:^|[^&|><])&(?![&>])|\b(?:setsid|nohup|disown|systemd-run|citadel-dev-copy(?! (?:stop|status|env|seed)\b)|start-emulator)\b/;
+// What runs a command inside quotes, whose `&` then counts too.
+const NESTS = /\$\(|`|<<|\b(?:ba|z|fi|da)?sh\b|\beval\b|\bxargs\b/;
+const QUOTED = /\\.|'[^']*'|"(?:\\.|[^"\\])*"/gs;
+const detaches = (command: string) => DETACHES.test(NESTS.test(command) ? command : command.replace(QUOTED, ' '));
 
 /** Take in one line of the turn's stream, stored or fresh. */
 export function noteCalls(turn: TurnCalls, ev: ClaudeEvent) {
@@ -31,9 +35,14 @@ export function noteCalls(turn: TurnCalls, ev: ClaudeEvent) {
     if (b?.type === 'tool_use' && typeof b.id === 'string') {
       turn.open.set(b.id, { name: String(b.name), parent: ev.parent_tool_use_id ?? null });
       const command = b.input?.command;
-      if (typeof command === 'string' && DETACHES.test(command)) turn.detached = true;
+      if (typeof command === 'string' && detaches(command)) turn.detached = true;
     } else if (b?.type === 'tool_result' && typeof b.tool_use_id === 'string') turn.open.delete(b.tool_use_id);
   }
+}
+
+/** Whether this line, already taken in, has claude read what it was steered: its own calls' results are all in, a Grunt's aside. */
+export function readsSteers(turn: TurnCalls, ev: ClaudeEvent): boolean {
+  return ev.type === 'user' && !ev.parent_tool_use_id && ![...turn.open.values()].some((c) => !c.parent);
 }
 
 /** What the turn does while these cards wait on people. A card asked without its call's id (a turn from before #1916) takes an open call of its tool, and never ends the process. */
@@ -57,7 +66,10 @@ export function cardWait(turn: TurnCalls, cards: { tool: string; use?: string }[
   return alone && !turn.background.length && !turn.detached ? 'end' : 'lend';
 }
 
-/** How long a turn that only waits on a card keeps its process; none while the box or its person's container is short (Josh, 2026-11-24). */
+/** A steer this fresh may not have reached claude yet, or the line read now may be older than it. */
+export const STEER_LAG_MS = 5_000;
+
+/** How long a turn that only waits on a card keeps its process: the Taskmaster's number, as #1890's. None while the box or its person's container is short. */
 export const CARD_HOLD_MS = 2 * 60_000;
 
 /** An approval card as the chat shows it. */
@@ -114,10 +126,12 @@ export function prOf(merge: object | undefined): string | null {
   return JSON.stringify(['number', 'url', 'state', 'head', 'base', 'oid'].map((k) => pr[k] ?? null));
 }
 
-/** The call a card asks about, or null when the card holds only part of it. */
+/** The call a card asks about, or null when the card holds only part of it, or a merge whose pull request couldn't be read. */
 export function callOf(card: ShownCard, cwd: string): CardCall | null {
   const input = card.input as { truncated?: unknown } | undefined;
   if (!input || 'truncated' in input) return null;
+  // Two failed lookups would read as the same pull request.
+  if (card.merge && !(card.merge as { pr?: { oid?: unknown } | null }).pr?.oid) return null;
   return { tool: card.tool, input, cwd, tripwire: card.tripwire?.reason ?? null, pr: prOf(card.merge) };
 }
 

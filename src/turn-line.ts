@@ -295,7 +295,7 @@ export class TurnLine {
 
   /** What the Workers tile shows (src/routes/workers.ts). */
   summary() {
-    return { used: this.used(), lent: this.lent(), size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people() };
+    return { used: this.used(), lent: this.lent(), running: this.granted.size, size: this.size(), pool: this.pool(), paused: this.paused(), waiting: this.entries.length, people: this.people() };
   }
 
   /** A person's number, or null for Auto. */

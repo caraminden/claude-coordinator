@@ -132,6 +132,8 @@ export function liveState(ticket: LiveMinion, events: EventRow[], now = Date.now
     } else if (!ticket.approvals) {
       waits.push(`the model: ${lastAt ? `${ago(now - lastAt)} since the turn's last event` : 'no events from this turn yet'}`);
     }
+  } else if (ticket.approvals) {
+    waits.push(`a person: ${ticket.approvals} approval card(s) waiting, its process ended to free its memory until the answer`);
   } else if (ticket.worker_wait) {
     waits.push(`a worker: no turn is running, its next one starts by itself (${workerWaitText(ticket.worker_wait)})`);
   } else {

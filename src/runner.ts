@@ -86,7 +86,7 @@ import {
 } from './keepalive.ts';
 import { homedir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { answerPrompt, callOf, CARD_HOLD_MS, cardHeld, cardWait, keptCards, losesPass, newCalls, noteCalls, repliedPrompt, sameCall, type CardPass, type KeptCard, type TurnCalls } from './card-wait.ts';
+import { answerPrompt, callOf, CARD_HOLD_MS, cardHeld, cardWait, keptCards, losesPass, newCalls, noteCalls, readsSteers, repliedPrompt, sameCall, STEER_LAG_MS, type CardPass, type KeptCard, type TurnCalls } from './card-wait.ts';
 import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type ProcCheck } from './quiet.ts';
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
@@ -209,6 +209,7 @@ export interface QueuedMessage {
   fyi?: boolean; // a notice that needs no action (its PR merged, CI passed): it doesn't cancel a pending close_self (#619)
   parked?: string; // held for a sealed minion (#718): when it was sent, "2026-11-14 18:02" UTC
   keepalive?: true; // a hidden keepalive (#862, src/keepalive.ts): no chat, no state, nothing of the minion's changes
+  card?: string; // the kept card it answers (#1916): only the turn that gets this may have its pass
   light?: true; // a machine's notice of success (a land that landed, CI passed, a job done): a turn of only these runs at low effort (#951)
 }
 
@@ -227,6 +228,8 @@ interface TurnState {
   paused?: true;
   /** Ended while only its approval card waited, which is kept for its answer (#1916). */
   card?: true;
+  /** As LiveTurn's. */
+  unread?: number;
   /** The approved call it may make once without another card. */
   pass?: CardPass;
   /** Present (a reason or null) once the thread asked to close after this turn. */
@@ -319,8 +322,8 @@ interface LiveTurn {
   activity: Activity;
   /** Its open calls and background work, for what it does while a card waits (#1916). */
   calls: TurnCalls;
-  /** Steered since its last tool result, so claude may hold a message it hasn't read: its process isn't ended for a card. */
-  unread?: boolean;
+  /** When it was last steered, until claude has surely read it: a process that may hold an unread message isn't ended for a card. */
+  unread?: number;
   /** Being ended for its card (TurnState.card). */
   card?: boolean;
   /** Stopped before its claude had started (no pid.json): signalled once it has. */
@@ -2473,7 +2476,7 @@ export class Runner {
     const answered: KeptCard = { ...kept, answer: { allow, by } };
     // Queued before the card is marked answered: a crash between the two queues it twice, never not at all (restoreCards).
     // shortcut: runs as the ended turn's person but without their own saved secrets, as every resume; keep secretPerson if one ever needs them.
-    this.queue.put(ticketId, { author: 'System', text: answerPrompt(answered), images: [], asker: kept.person }, true);
+    this.queue.put(ticketId, { author: 'System', text: answerPrompt(answered), images: [], asker: kept.person, card: id }, true);
     this.cardWaits.put(answered);
     if (!this.isRunning(ticketId)) this.next(ticketId, true);
     this.broadcastTicket(ticketId);
@@ -2494,6 +2497,9 @@ export class Runner {
       const result = events.find((e) => e.kind === 'approval_result');
       this.approvals.restore(kept.ticket, events);
       this.approvals.keep(kept.id);
+      // A crash between keeping the card and marking its turn: that turn still ends.
+      const turn = this.store.getSetting<TurnState>(turnKey(kept.ticket));
+      if (turn && !turn.card && (turn.startedAt ?? Infinity) <= kept.at) this.saveTurn(kept.ticket, { card: true });
       const { state, by } = result ? JSON.parse(result.data) : { state: 'pending' };
       if (state === 'allowed' || state === 'denied') this.cardAnswered(kept.ticket, kept.id, state === 'allowed', by);
       else if (state !== 'pending' || !events.length) this.cardWaits.take(kept.ticket);
@@ -2601,11 +2607,11 @@ export class Runner {
       appendFileSync(file, promptMessage([msg]));
       // A typed steer is a message the turn now answers too; a second person's leaves it no one's (#268).
       const typedBy = msg.typed && person && !extra.from ? (turn!.typedBy == null || turn!.typedBy === person ? person : 0) : turn!.typedBy;
-      live!.unread = true;
       this.queue.steered(ticketId, { end: statSync(file).size, msg });
       const row = line();
       this.heard(ticketId, ticket, msg);
-      this.saveTurn(ticketId, { typedBy });
+      live!.unread = this.now();
+      this.saveTurn(ticketId, { typedBy, unread: live!.unread });
       // A person steering in speaks after the relay, so what the turn starts now is theirs.
       if (person && !extra.from && this.turnFrom.delete(ticketId)) this.saveTurn(ticketId, { from: undefined });
       return { event: row };
@@ -4012,7 +4018,7 @@ export class Runner {
     };
     const kept = keepalive ? null : this.cardWaits.get(ticket.id);
     // shortcut: a resumed turn that fails before the call loses its pass, so the call asks again; save it with the retry if that happens often.
-    if (kept?.answer?.allow) turn.pass = { id: kept.id, by: kept.answer.by, call: kept.call };
+    if (kept?.answer?.allow && batch.some((m) => m.card === kept.id)) turn.pass = { id: kept.id, by: kept.answer.by, call: kept.call };
     this.store.setSetting(turnKey(ticket.id), turn);
     if (kept) this.dropCard(ticket.id, 'The turn ended while this waited.');
     if (kept) this.approvals.resumed(ticket.id);
@@ -4403,6 +4409,7 @@ export class Runner {
       activity: { at: Date.now(), tools: [] },
       calls: newCalls(turn.background),
       ...(turn.card ? { card: true } : {}),
+      ...(turn.unread ? { unread: turn.unread } : {}),
     };
     // The server's listener keeps the process up; a Runner alone (a test) can exit with turns followed.
     live.timer.unref();
@@ -4887,8 +4894,11 @@ export class Runner {
       live.activity = noteEvent(live.activity, ev, Date.now());
       const pass = this.store.getSetting<TurnState>(turnKey(ticketId))?.pass;
       if (pass && losesPass(pass, live.calls, ev)) this.saveTurn(ticketId, { pass: undefined });
-      if (ev.type === 'user') live.unread = false;
       noteCalls(live.calls, ev);
+      if (live.unread && readsSteers(live.calls, ev) && this.now() - live.unread > STEER_LAG_MS) {
+        live.unread = undefined;
+        this.saveTurn(ticketId, { unread: undefined });
+      }
       if (ev.type === 'system' && ev.subtype === 'background_tasks_changed') this.saveTurn(ticketId, { background: live.calls.background });
       this.lendWorker(ticketId);
       if (this.quietSince(ticketId, live) === null && this.store.getSetting<TurnState>(turnKey(ticketId))?.quiet) this.checkQuiet(ticketId, live);

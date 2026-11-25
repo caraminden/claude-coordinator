@@ -56,7 +56,7 @@ export function workersPanel(page) {
       .finally(() => sent--);
   };
   const pause = (how) => {
-    if (how === 'stop' && !confirm(`Stop the ${plural(w.used + w.lent, 'running minion turn')} now? Each carries on where it was after Resume. Taskmasters keep running.`)) return;
+    if (how === 'stop' && !confirm(`Stop the ${plural(w.running, 'running minion turn')} now? Each carries on where it was after Resume. Taskmasters keep running.`)) return;
     set({ pause: how }, { paused: how ? { by: 'you', at: Date.now(), ...(how === 'stop' ? { stop: true } : {}) } : null }, how ? 'pause minions' : 'resume minions');
   };
   const setLimit = (row, value) => {

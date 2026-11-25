@@ -36,27 +36,44 @@ export const loadedClosed = (list = view.tickets) => [...list.values()].filter((
 /** The Dismissed list's count: the server's, never below the rows already in hand. */
 export const closedCount = (list = view.tickets) => Math.max(closedState(list).total, loadedClosed(list).length);
 
+/** Was it dismissed as the count last had it? A minion the page never read and not just created was (a new minion is minutes old). */
+const wasClosed = (before, t) => (before ? before.status === 'closed' : t.created_at < Date.now() - 300_000);
+
 /** The stream moved a minion in or out of Dismissed: the count follows, for ones the page knew about. */
 export function noteTicketChange(before, ticket) {
   const s = closedState();
-  // A minion the page never read, now open and not just created: it was dismissed and reopened, so the count drops (a new minion is minutes old).
-  if (!before) {
-    if (ticket.status !== 'closed' && ticket.created_at < Date.now() - 300_000) s.total = Math.max(0, s.total - 1);
-    return;
-  }
-  if (before.status !== 'closed' && ticket.status === 'closed') s.total++;
-  else if (before.status === 'closed' && ticket.status !== 'closed') s.total = Math.max(0, s.total - 1);
+  if (ticket.status !== 'closed') {
+    if (wasClosed(before, ticket)) s.total = Math.max(0, s.total - 1);
+  } else if (before && before.status !== 'closed') s.total++;
 }
 
-/** A reconnect's fresh open list, with the dismissed rows already loaded kept (the fresh copy of any that reopened wins). */
-export function mergeOpen(open, dismissed) {
+/**
+ * Which of two copies to keep when a fetch answers: `now` on the page, `before` on it as the fetch began. The newer; on a
+ * tie the one the stream brought meanwhile, else the fetched one (some changes leave updated_at alone).
+ */
+export const freshest = (now, before, fetched) => (now?.updated_at > fetched.updated_at || (now && now !== before && now.updated_at === fetched.updated_at) ? now : fetched);
+
+/**
+ * A reconnect's fresh open list on the one shown, `before` as it was when the fetch began: what the stream brought
+ * meanwhile stands unless the answer is newer, and the dismissed rows already loaded are kept (the fresh copy of any that reopened wins).
+ */
+export function mergeOpen(open, dismissed, before) {
   const old = view.tickets;
-  const next = new Map(open.map((t) => [t.id, t]));
-  for (const t of old.values()) if (t.status === 'closed' && !next.has(t.id)) next.set(t.id, t);
+  const next = new Map(open.map((t) => [t.id, freshest(old.get(t.id), before.get(t.id), t)]));
+  let total = dismissed ?? 0;
+  for (const t of open) if (next.get(t.id).status === 'closed' && t.status !== 'closed') total++;
+  let gone = false;
+  for (const t of old.values()) {
+    if (next.has(t.id)) continue;
+    const live = before.get(t.id) !== t; // came while the fetch was on its way
+    if (t.status === 'closed' || live) next.set(t.id, t);
+    else gone = true;
+    if (live && t.status !== 'closed' && wasClosed(before.get(t.id), t)) total--;
+  }
   states.set(next, { ...closedState(old) });
   // One dismissed while the stream was down is no longer in the fresh open list: restart the paging so the next read brings it.
-  if ([...old.values()].some((t) => t.status !== 'closed' && !next.has(t.id))) Object.assign(closedState(next), { cursor: null, more: true });
-  setClosedTotal(next, dismissed);
+  if (gone) Object.assign(closedState(next), { cursor: null, more: true });
+  setClosedTotal(next, Math.max(0, total));
   return next;
 }
 

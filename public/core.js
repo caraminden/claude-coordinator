@@ -4,23 +4,24 @@ import { accountLine, combineWindows } from './claudeusage.js';
 import { shouldReload } from './update-when.js';
 import { inMerged } from './mine.js';
 import { KEPT_EVENTS, reloadQuietly, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, missedNews, newsArrived, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
-import { mergeOpen, noteTicketChange } from './closedlist.js';
+import { noteTicketChange } from './closedlist.js';
+import { catchingUp, chatHoled, holdEvent, resync, showCatchingUp, stopCatchingUp } from './resync.js';
 import { cutEvent } from './eventcut.js';
 import { plainKinds } from './settings-pages.js';
-import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushOff } from './settings.js';
+import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushOff, pushOn } from './settings.js';
 import { onMachinesUpdate } from './settings-machines.js';
 import { onWorkers } from './workers.js';
 import { costSoon } from './cost.js';
 import { homeScheme, openStartScheme, renderSidebar, scheduleSidebar } from './sidebar.js';
 import { openBroken } from './home.js';
 import { forgetSchemes, showProject, showReleases, showTicket } from './project.js';
-import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
+import { closeViewer, onArtifactsChanged, showArtifact, showFile, showSharedFile } from './artifacts.js';
 import { bridgeTypedAt, bridgeUnsaved, onArtifactData, tabBridgeOpen } from './bridge-host.js';
 import { appendEvent, jumpToEvent, renderCardJump } from './thread.js';
-import { refreshBranch, renderBranch, renderTicketHead } from './thread-head.js';
+import { renderBranch, renderTicketHead } from './thread-head.js';
 import { replaceHash } from './navstack.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
-import { countsIfOwed, forgetOtherSchemes, holdAnswered, inboxEvent, inboxOtherTicket, inboxTicket, onSeenItems, refreshSchemeCounts } from './inbox.js';
+import { countsIfOwed, holdAnswered, inboxEvent, inboxOtherTicket, inboxTicket, onSeenItems } from './inbox.js';
 import { onSchedulesChanged } from './schedules.js';
 import { onReviewsChanged } from './reviews.js';
 import { onHiddenChanged } from './hidden.js';
@@ -51,6 +52,7 @@ import { mountLoginMap } from './login-map.js';
 
 /** Every Settings and Orders page's route, built from the one table of pages (settings-pages.js). */
 const PAGE_ROUTE = new RegExp(`^#/p/(\\d+)/(${plainKinds().join('|')})$`);
+export { catchUpEvents } from './resync.js';
 export const app = document.getElementById('app');
 export const crumbs = document.getElementById('crumbs');
 const meEl = document.getElementById('me');
@@ -323,8 +325,8 @@ let reconnectChip = null;
 let reconnectTimer = null;
 // A deploy's warm handover (#1170) says so as it ends the stream: the next server is up, so no chip for a while.
 let quietUntil = 0;
-function reconnecting(on) {
-  if (on && (reconnectChip || reconnectTimer || catchUpChip)) return;
+export function reconnecting(on) {
+  if (on && (reconnectChip || reconnectTimer || catchingUp())) return;
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
   if (on) {
@@ -341,15 +343,11 @@ function reconnecting(on) {
   }
 }
 
-// The kept chat drawn at launch (#1144) says so until the live answers replace it; it stands in for Reconnecting….
-let catchUpChip = null;
-let keptOpen = false; // the kept chat's answers are on screen: no stream (its events would skip the gap), nothing kept anew
+export let keptOpen = false; // the kept chat's answers are on screen: no stream (its events would skip the gap), nothing kept anew
 
 /** Open the app on the kept chat (base.js keptChat) while the live answers come; resolves once it's drawn. */
 export function startKept(kept) {
-  reconnecting(false);
-  catchUpChip = h('div', { class: 'cui-chip reconnecting', 'data-tone': 'warn', role: 'status' }, h('span', { class: 'cui-spin', 'aria-hidden': 'true' }), 'Catching up…');
-  document.body.append(catchUpChip);
+  showCatchingUp();
   keptOpen = true;
   replayKept(kept);
   return start(kept.me).finally(() => replayKept(null));
@@ -365,12 +363,7 @@ export async function goLive(who) {
   initAppSwitch(me);
   // The stream first: resync holds what it sends until the catch-up has fetched what came before.
   connectStream();
-  try {
-    await resync();
-  } finally {
-    catchUpChip?.remove();
-    catchUpChip = null;
-  }
+  await resync(); // the chip goes once it has worked
   keepOpenChat();
 }
 
@@ -391,7 +384,7 @@ function keepOpenChatSoon() {
 /** Keep the open chat on the device for the next launch (base.js keepChat): the newest of its history and what opening it asked for. */
 function keepOpenChat() {
   const v = view;
-  if (v?.kind !== 'project' || !v.id || keptOpen || !/^#\/p\/\d+(\/t\/\d+)?$/.test(location.hash)) return;
+  if (v?.kind !== 'project' || !v.id || keptOpen || chatHoled() || !/^#\/p\/\d+(\/t\/\d+)?$/.test(location.hash)) return;
   const src = v.merged?.src ?? v.id;
   const page = eventCache.get(src);
   if (!page) return;
@@ -565,7 +558,9 @@ function unsentWork() {
 }
 
 let reloading = false;
+let clicked = false; // ↻ passes its click: a person asked, so a draft doesn't hold it back
 export async function reloadNow(ev) {
+  clicked ||= ev instanceof Event;
   if (reloading) return; // reloadWhenIdle asks every 2 s while the worker is fetching
   reloading = true;
   // Put the cursor back in the composer if that is where it was.
@@ -577,10 +572,10 @@ export async function reloadNow(ev) {
   // Only a ship waits on the worker; a ↻ reloads at once (the stream's hello catches a ship it missed).
   if (typeof reloadPending === 'string') {
     await freshShell(reloadPending).catch(() => {});
-    if (unsentWork()) return void (reloading = false); // something started while the worker fetched: wait for it (the dim comes off)
+    if (!clicked && unsentWork()) return void (reloading = false); // something started while the worker fetched: wait for it (the dim comes off)
   }
-  // ↻ passes its click; every other caller (a ship, the next navigation) is automatic and skips the splash.
-  if (ev instanceof Event) location.reload();
+  // Every other caller (a ship, the next navigation) is automatic and skips the splash.
+  if (clicked) location.reload();
   else reloadQuietly();
 }
 
@@ -822,51 +817,6 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-async function resync() {
-  if (view?.kind !== 'project') return route();
-  // Refresh in place so a half-typed message in the composer survives.
-  const v = view;
-  // The stream has no replay: live events for the open chat wait until the catch-up has fetched what
-  // came before them, or the catch-up (after the newest shown) would skip what was missed offline.
-  const hold = v.id ? (held?.view === v ? held : { view: v, events: [], owed: 0 }) : null;
-  if (hold) {
-    hold.owed++;
-    held = hold;
-  }
-  try {
-    const [{ coordinator, tickets, dismissed, seen, person_notes, pins, builds }, artifacts, chat] = await Promise.all([api(`api/projects/${view.projectId}?tickets=open`), api(`api/projects/${view.projectId}/artifacts`), view.id ? api(`api/tickets/${view.id}`) : null]);
-    if (view !== v) return; // you went to another view meanwhile; its own load is fresh
-    view.coordinator = coordinator;
-    view.tickets = mergeOpen(tickets, dismissed); // the dismissed rows already read stay (closedlist.js)
-    schedulePaintRefs(); // links already in the chat take the fresh states
-    view.seen = seen ?? view.seen;
-    view.personNotes = person_notes ?? view.personNotes;
-    view.pins = pins ?? view.pins;
-    view.builds = builds ?? view.builds;
-    if (view.id) markSeen(view.id);
-    renderSidebar();
-    // Cards raised or settled while the stream was down, here or in other schemes (the counts fetch the inbox after them).
-    forgetOtherSchemes();
-    refreshSchemeCounts();
-    setArtifacts(artifacts);
-    if (!chat) return;
-    view.ticket = chat.ticket;
-    renderTicketHead();
-    if (view.ticket.branch) refreshBranch(view.id);
-    await catchUpEvents();
-  } catch {
-  } finally {
-    if (hold && !--hold.owed) releaseHeld(hold);
-  }
-}
-
-/** Live events for the open chat held while resync catches up (see resync). */
-let held = null;
-function releaseHeld(hold) {
-  if (held === hold) held = null;
-  if (view === hold.view) for (const ev of hold.events) if (ev.id > view.lastEventId) appendEvent(ev);
-}
-
 // Threads' histories downloaded this session, each its newest page or more ({ events, more, tasks },
 // as the events route gives it), so reopening one only fetches what is new. Events are append-only,
 // so the cached part never goes stale. Most recently used last.
@@ -877,7 +827,7 @@ const EVENT_CACHE_THREADS = 12;
  * Where a chat's history comes from: a ticket id, or a merged Taskmaster view's URL (Mine and Everyone, #920,
  * thread.js mergedView) that pages several sessions as one. `query` is added to it.
  */
-const eventsUrl = (src, query = '') => (typeof src === 'number' ? `api/tickets/${src}/events${query && `?${query}`}` : `${src}${query && `&${query}`}`);
+export const eventsUrl = (src, query = '') => (typeof src === 'number' ? `api/tickets/${src}/events${query && `?${query}`}` : `${src}${query && `&${query}`}`);
 
 function remember(ticketId, page) {
   eventCache.delete(ticketId);
@@ -973,29 +923,6 @@ export function prefetchTopRows() {
   });
 }
 
-/** Draw what the open chat's history is missing since its newest event; how many were added. */
-export async function catchUpEvents() {
-  const v = view;
-  if (!v?.id) return 0;
-  // Live events wait until this has what came before them, or the first would move the cursor past the rest (see resync).
-  const hold = held?.view === v ? held : { view: v, events: [], owed: 0 };
-  hold.owed++;
-  held = hold;
-  try {
-    const events = await api(eventsUrl(v.merged?.src ?? v.id, `after=${v.lastEventId}`));
-    if (view !== v) return 0; // another view (or chat) opened meanwhile: these aren't its events
-    let added = 0;
-    for (const ev of events)
-      if (ev.id > view.lastEventId) {
-        appendEvent(ev);
-        added++;
-      }
-    return added;
-  } finally {
-    if (!--hold.owed) releaseHeld(hold);
-  }
-}
-
 export function onTicketUpdate(ticket) {
   if (view?.kind !== 'project') return;
   if (view.projectId !== ticket.project_id) return inboxOtherTicket(ticket);
@@ -1050,8 +977,7 @@ function onPersonNote({ projectId, ticketId, note }) {
 function onEvent(event) {
   if (view?.kind !== 'project' || (view.id !== event.ticket_id && !inMerged(view.merged, event))) return;
   if (event.id <= view.lastEventId) return;
-  if (held?.view === view) return void held.events.push(event);
-  appendEvent(event);
+  if (!holdEvent(event)) appendEvent(event);
 }
 
 // ---------- routing ----------
@@ -1069,7 +995,7 @@ function countPage(hash) {
   api('api/usage/page', { method: 'POST', body: { name } }).catch(() => {});
 }
 
-async function route() {
+export async function route() {
   if (!me) return;
   const jump = jumpParts(location.hash);
   if (jump) {
@@ -1307,6 +1233,7 @@ export function clearTopbarMeters() {
 
 function renderLogin() {
   reconnecting(false); // signed out: the stream's 401s aren't a restart
+  stopCatchingUp();
   setView(null);
   hideRail();
   dropFrames();
@@ -1487,8 +1414,12 @@ export function start(who) {
 export async function logout() {
   initAppSwitch(null);
   // Notifications on this device were for the person signing out.
-  await pushOff().catch(() => {});
-  await api('api/logout', { method: 'POST', body: {} });
+  const hadPush = await pushOff().catch(() => false);
+  try {
+    await api('api/logout', { method: 'POST', body: {} });
+  } catch {
+    if (me) return stillSignedIn(hadPush); // a 401 has shown the login already: nothing to undo
+  }
   eventCache.clear();
   forgetSchemes();
   clearTimeout(streamTimer);
@@ -1497,6 +1428,18 @@ export async function logout() {
   reconnecting(false);
   setAccount(null);
   renderLogin();
+}
+
+/** A sign-out that failed: put back what it took down, and say so. */
+async function stillSignedIn(hadPush) {
+  initAppSwitch(me);
+  const pushBack =
+    !hadPush ||
+    (await pushOn().then(
+      () => true,
+      () => false,
+    ));
+  toast(`Couldn't sign you out.${pushBack ? '' : ' Notifications on this device are off now.'}`, { tone: 'danger', action: { label: 'Try again', run: logout } });
 }
 
 // ---------- jumps ----------

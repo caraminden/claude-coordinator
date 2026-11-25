@@ -39,7 +39,7 @@ function keyBytes(b64) {
 }
 
 /** Ask for permission (only ever from a click), subscribe this browser and register it for you. */
-async function pushOn() {
+export async function pushOn() {
   if ((await Notification.requestPermission()) !== 'granted') throw new Error('Notifications are blocked for this site in the browser settings');
   if (desktop) {
     const id = localStorage.getItem(DESKTOP_PUSH) ?? crypto.randomUUID();
@@ -67,12 +67,14 @@ async function pushOn() {
   return api('api/push/subscription', { method: 'PUT', body: { subscription: sub.toJSON() } });
 }
 
+/** Unsubscribe this device; whether it was subscribed. */
 export async function pushOff() {
-  if (!pushSupported) return;
+  if (!pushSupported) return false;
   const sub = await pushSubscription();
-  if (!sub) return;
+  if (!sub) return false;
   await api('api/push/subscription', { method: 'DELETE', body: { endpoint: sub.endpoint } });
   await sub.unsubscribe();
+  return true;
 }
 
 // What this browser last said of its push state, drawn at once on the next scheme so the box keeps its height while it asks again.

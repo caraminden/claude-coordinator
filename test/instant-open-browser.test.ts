@@ -134,6 +134,20 @@ test('with the server there, the kept chat shows first and the live one replaces
   assert.equal(await page.eval(`[...document.querySelectorAll('#log .msg.user')].filter((m) => m.textContent.includes('hello from before')).length`), 1, 'nothing drawn twice');
 });
 
+test('Back and Forward work after the app opened on its kept chat (#1854)', { skip }, async () => {
+  const { srv, hash } = await server();
+  const page = await openOnce(srv, hash);
+  await page.send('Page.navigate', { url: `${srv.base}/c/` });
+  await waitFor(page, 'the live chat', `${said('hello from before')} && !document.querySelector('.reconnecting')`);
+  const nav = `import(new URL('navstack.js', location.href)).then((m) => 'back ' + m.canBack() + ', forward ' + m.canForward())`;
+  const scheme = hash.replace(/\/t\/.*/, '');
+  await page.eval(`(location.hash = ${JSON.stringify(scheme)}, undefined)`);
+  await until('the scheme page', async () => (await page.eval(nav)) === 'back true, forward false');
+  await page.eval(`(history.back(), undefined)`);
+  await waitFor(page, 'the chat again', `location.hash === ${JSON.stringify(hash)}`);
+  await until('the way forward again', async () => (await page.eval(nav)) === 'back false, forward true');
+});
+
 test('signing out forgets the kept chat, and what was asked, so the next person signing in on that page keeps none of it', { skip }, async () => {
   const { srv, hash, ticket } = await server();
   const page = await openOnce(srv, hash);

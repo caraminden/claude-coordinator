@@ -64,7 +64,7 @@ function boot() {
       app.replaceChildren(h('p', { class: 'error' }, `Couldn't open Citadel: ${err.message}`), h('button', { type: 'button', onclick: boot }, 'Try again'));
     });
   }
-  if (location.hash !== kept.hash) history.replaceState(null, '', kept.hash); // no hashchange: startKept routes
+  if (location.hash !== kept.hash) history.replaceState(history.state, '', kept.hash); // no hashchange: startKept routes; navstack.js's mark stays (Back)
   startKept(kept).then(() => catchUp(live, kept.login));
 }
 

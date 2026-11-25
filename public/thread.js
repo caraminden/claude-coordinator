@@ -66,7 +66,7 @@ async function setTmView(mode) {
     v.page = page;
     renderHistory();
     scrollToBottom();
-    await catchUpEvents();
+    await catchUpEvents().catch(() => {}); // tried again by itself (resync.js)
   } catch {
     if (view !== v || v.merged.src !== src) return;
     try {

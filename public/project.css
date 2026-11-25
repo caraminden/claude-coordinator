@@ -623,7 +623,7 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-fit.loading { min-height: 44rem; } /* about what it fills, so the tiles under it stay put */
 .st-fit-pick { display: grid; grid-template-columns: auto minmax(0, 1fr) 2.2rem; align-items: center; gap: var(--space-3); margin: 0; font-size: 0.9em; }
 .st-fit-n { font-size: 1.5rem; font-weight: 750; line-height: 1; text-align: right; color: var(--running); }
-.st-fit-range { width: 100%; min-height: 2.25rem; margin: 0; padding: 0; border: 0; background: none; appearance: none; cursor: grab; }
+.st-fit-range { width: 100%; min-height: 40px; margin: 0; padding: 0; border: 0; background: none; appearance: none; cursor: grab; }
 .st-fit-range:active { cursor: grabbing; }
 .st-fit-range::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--running) var(--at, 0%), var(--line) var(--at, 0%)); }
 .st-fit-range::-moz-range-track { height: 6px; border-radius: 3px; background: var(--line); }
@@ -666,7 +666,7 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-fit-notes { display: grid; gap: var(--space-2); }
 .st-fit-notes p { margin: 0; }
 .st-fit-tick.halo { stroke: var(--panel); stroke-width: 4px; paint-order: stroke; }
-.st-fit-scroll { overflow-x: auto; font-size: 0.9em; }
+.st-fit-scroll { overflow-x: auto; margin-bottom: var(--space-3); font-size: 0.9em; }
 .st-fit-scroll .ci-pools thead th { white-space: normal; vertical-align: bottom; }
 .st-fit-scroll .ci-pools th, .st-fit-scroll .ci-pools td { padding-inline: var(--space-1); }
 .st-fit-scroll .ci-pools :is(th, td):first-child { padding-left: 0; }

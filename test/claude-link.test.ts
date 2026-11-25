@@ -301,8 +301,8 @@ test('two account folders signed in to one Claude organization say so; one email
   }
 });
 
-// Cancel only ever cancels (#1856). The tests go through the route, as the page does: a DELETE is Cancel's unless it
-// carries unlink=1, so a page from before #1856, whose Cancel and Unlink were one request, removes nothing either.
+// Cancel never removes a linked account (#1856). The tests go through the route, as the page does: a DELETE is Cancel's
+// unless it carries unlink=1, so a page from before #1856, whose Cancel and Unlink were one request, removes none either.
 type Reply = { status: number; body: Record<string, unknown> };
 async function del(path: '/api/me/claude' | '/api/me/codex', query: string, uid: number, link: ClaudeLink, codex?: CodexLink): Promise<Reply> {
   const route = peopleRoutes.find((r) => r.method === 'DELETE' && r.path === path)!;
@@ -363,7 +363,7 @@ test('Cancel with no sign-in in memory keeps a server login’s extra account (#
   assert.equal(link.accounts(user.id)?.accounts.length, 2);
 });
 
-test('Cancel of a live sign-in: "Link again" keeps its account, another account’s is left alone, a first one’s container and volume go (#1856)', async () => {
+test('Cancel of a live sign-in: "Link again" and a second account’s keep what is linked, another account’s is left alone, a first one’s container and volume go (#1856)', async () => {
   process.env.FAKE_PODMAN = 'link-then-wait';
   const again = signedIn(acct(1));
   again.link.ensure = async () => {};
@@ -376,6 +376,21 @@ test('Cancel of a live sign-in: "Link again" keeps its account, another account�
   assert.equal(again.link.status(again.uid).state, 'linked');
   assert.deepEqual(
     again.ran.filter((c) => REMOVES.test(c)),
+    [],
+  );
+
+  const second = signedIn(acct(1));
+  second.link.ensure = async () => {};
+  assert.equal((await second.link.link(second.uid, 2)).state, 'waiting for code');
+  second.ran.length = 0;
+  await del('/api/me/claude', '?account=2', second.uid, second.link);
+  assert.equal(second.link.status(second.uid).state, 'linked');
+  assert.deepEqual(
+    second.link.accounts(second.uid)?.accounts.map((a) => a.n),
+    [1],
+  );
+  assert.deepEqual(
+    second.ran.filter((c) => REMOVES.test(c)),
     [],
   );
 

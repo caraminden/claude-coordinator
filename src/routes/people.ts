@@ -360,7 +360,7 @@ export const peopleRoutes: Route[] = [
       // One account of several (#779), or with none named, the whole link.
       const account = url.searchParams.get('account');
       const n = account ? Number(account) : undefined;
-      // Only Unlink's unlink=1 removes anything (#1856). Without it this is Cancel, an old tab's Unlink included.
+      // Only Unlink's unlink=1 removes a linked account (#1856). Without it this is Cancel, an old tab's Unlink included.
       await (url.searchParams.has('unlink') ? app.claude.unlink(uidOf(session), n) : app.claude.cancelSignIn(uidOf(session), n)).catch((err) => {
         throw new HttpError(400, err.message);
       });

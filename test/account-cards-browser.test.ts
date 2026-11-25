@@ -3,13 +3,13 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { chromium, launch, waitFor, type Browser, serveApp, skipMessage, type App } from './browser.ts';
+import { pageStub } from './page-stub.ts';
 
 const bin = chromium();
 const skip = !bin && skipMessage;
 
-const STUB = `<script>
+const STUB = pageStub(`
   window.ready = true;
-  const reply = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   // The cards' polls at once, not in seconds.
   const later = window.setTimeout;
   window.setTimeout = (f, ms, ...a) => later(f, ms === 2000 || ms === 5000 ? 20 : ms, ...a);
@@ -21,24 +21,18 @@ const STUB = `<script>
   window.fail = { claude: 0, codex: 0 };
   window.linkedClaude = { state: 'linked', accounts: one, inUse: 1 };
   window.codeBox = { state: 'waiting for code', accounts: one, inUse: 1, linking: 1, url: 'https://claude.ai/oauth/x' };
-  window.fetch = async (input, opts = {}) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-    const path = url.pathname.replace(/^\\//, '');
-    const method = opts.method ?? 'GET';
-    if (path === 'api/me') return reply({ name: 'Josh', login: 'josh', admin: false, uid: 2 });
-    if (path === 'api/projects') return reply([{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
-    if (/^api\\/projects\\/1$/.test(path)) return reply({ project: { id: 1, name: 'Alpha', instructions: '' }, coordinator: { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 }, tickets: [], members: [] });
-    if (path === 'api/me/claude/code') return reply({ error: 'No sign-in is waiting for a code: start linking again.' }, 400);
+  function route(path, url, { method = 'GET' } = {}) {
+    if (path === 'api/projects') return reply(200, [{ id: 1, name: 'Alpha', inbox: 0, icon: null }]);
+    if (path === 'api/projects/1') return reply(200, { project: { id: 1, name: 'Alpha', instructions: '' }, coordinator: { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 }, tickets: [], members: [] });
+    if (path === 'api/me/claude/code') return reply(400, { error: 'No sign-in is waiting for a code: start linking again.' });
     for (const who of ['claude', 'codex']) {
       if (path !== 'api/me/' + who) continue;
       if (method !== 'GET') window.sent.push(method + ' ' + path + url.search);
       else if (window.fail[who] > 0) { window.fail[who]--; throw new TypeError('Failed to fetch'); }
-      return reply(window[who]);
+      return reply(200, window[who]);
     }
-    return reply([]);
-  };
-  window.EventSource = class { close() {} };
-</script>`;
+  }
+`);
 
 let app: App;
 let browser: Browser;
@@ -64,7 +58,7 @@ const card = (name: string) => `[...document.querySelectorAll('.account-card')].
 const click = (name: string, label: string) => `[...${card(name)}.querySelectorAll('button')].find((b) => b.textContent === '${label}').click()`;
 const chip = (name: string) => `${card(name)}?.querySelector('.link-chip')?.textContent`;
 
-test('Cancel sends a request that cannot remove anything; Unlink and Sign out say they remove', { skip }, async () => {
+test('Cancel sends a request that cannot remove a linked account; Unlink and Sign out say they remove', { skip }, async () => {
   let page = await accountPage(`window.claude = window.codeBox; window.codex = { state: 'waiting', url: 'https://x', code: 'AB12' }`);
   await page.eval(`${click('Claude', 'Cancel')}; ${click('Codex', 'Cancel')}`);
   await waitFor(page, 'both requests', `window.sent.length === 2`);

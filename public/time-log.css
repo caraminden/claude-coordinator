@@ -52,7 +52,7 @@ button.tl-head { cursor: pointer; }
 .tl-row.pending .subject { font-weight: 400; color: var(--muted); }
 .tl-meta { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 0.7rem; font-size: 0.85em; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tl-ms { color: var(--ink); }
-.tl-guess { color: var(--muted); font-size: 0.85em; }
+.tl-guess { color: var(--muted); font-size: 0.85em; font-weight: 400; }
 .tl-total .tl-guess { font-size: 1em; }
 .tl-note { grid-column: 1 / -1; margin: -0.15rem 0.6rem 0.45rem 2.1rem; font-size: 0.9em; color: var(--muted); overflow-wrap: anywhere; }
 .tl-jump { font-size: 0.82em; }

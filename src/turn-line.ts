@@ -124,6 +124,8 @@ export class TurnLine {
   private timer?: NodeJS.Timeout;
   /** Until a boot's resumes are in (open): the line takes turns in but starts none. */
   private closed = false;
+  /** People whose container stalls at its own memory limit, which the box's readings barely show (#1874). */
+  private stalled = new Set<number>();
   private ordered: { at: number; ids: number[] } | null = null;
 
   constructor(host: LineHost) {
@@ -166,10 +168,10 @@ export class TurnLine {
   }
 
   /** Each person's workers and waiting turns, the most first. */
-  people(): { person: number; used: number; waiting: number }[] {
+  people(): { person: number; used: number; waiting: number; stalled?: true }[] {
     const out = new Map([...this.byPerson()].map(([person, used]) => [person, { person, used, waiting: 0 }]));
     for (const w of this.asked(this.entries)) out.set(w.person, { person: w.person, used: 0, ...out.get(w.person), waiting: (out.get(w.person)?.waiting ?? 0) + 1 });
-    return [...out.values()].sort((a, b) => b.used + b.waiting - a.used - a.waiting || a.person - b.person);
+    return [...out.values()].map((p) => (this.full(p.person) ? { ...p, stalled: true as const } : p)).sort((a, b) => b.used + b.waiting - a.used - a.waiting || a.person - b.person);
   }
 
   pool(): PoolSize {
@@ -193,11 +195,13 @@ export class TurnLine {
     this.pump();
   }
 
-  /** Auto's step, every POOL.everyMs. */
-  tick(reading: PressureReading, now = Date.now()) {
+  /** Auto's step, every POOL.everyMs. `stalled`: the people whose container is at its memory limit: no more of their turns start until it recovers. */
+  tick(reading: PressureReading, stalled: Iterable<number> = [], now = Date.now()) {
     // A turn still launching when the pause came, or re-attached since.
     if (this.paused()?.stop) this.stopRunning();
     const p = this.pool();
+    this.stalled = new Set(p.fixed ? [] : stalled);
+    this.pumpIn(0);
     if (p.fixed) return;
     const size = nextSize({ ...p, used: this.used(), waiting: this.entries.length }, reading, now);
     if (size === p.size) return;
@@ -234,7 +238,7 @@ export class TurnLine {
     if (this.admitting === ticketId) return this.grant(ticketId, via);
     const own = this.entries.find((e) => e.ticket === ticketId);
     // Its queue's turn never goes before the resume it waits for: the resume takes the queue along.
-    const first = !paused && !this.closed && !this.host.busy(ticketId) && this.granted.size < this.size() && !(own?.via && !via);
+    const first = !paused && !this.closed && !this.host.busy(ticketId) && this.granted.size < this.size() && !(own?.via && !via) && !this.full(this.host.asks(ticketId, via).person);
     if (first) {
       const me = own ?? { ticket: ticketId, since: Date.now(), via };
       const rest = this.ready().filter((e) => e.ticket !== ticketId);
@@ -330,7 +334,12 @@ export class TurnLine {
   }
 
   private ready(): LineEntry[] {
-    return this.entries.filter((e) => !this.host.busy(e.ticket));
+    return this.entries.filter((e) => !this.host.busy(e.ticket) && !(this.stalled.size && this.full(this.host.asks(e.ticket, e.via).person)));
+  }
+
+  /** Their container is out of memory with a turn of theirs in it, so another would only stall it more; with none running, one may start. */
+  private full(person: number): boolean {
+    return this.stalled.has(person) && [...this.granted.values()].some((g) => g.person === person);
   }
 
   private best(entries: LineEntry[]): LineEntry | null {

@@ -1,0 +1,25 @@
+// Mutants of src/minion-queue.ts (#1778): the one durable queue of a minion's messages: no message lost, doubled or reordered over a restart.
+export default {
+  file: 'src/minion-queue.ts',
+  tests: ['test/minion-queue.test.ts', 'test/queue-give-back.test.ts', 'test/restart-anywhere.test.ts', 'test/cold-mail.test.ts', 'test/steer.test.ts', 'test/auto-resume.test.ts', 'test/parked-hold.test.ts', 'test/minion-message.test.ts', 'test/taskmaster-mail.test.ts', 'test/closed-cleanup.test.ts', 'test/person-switch-session.test.ts'],
+  mutants: [
+    { id: 'q01', find: 'r.taken = [...(r.taken ?? []), ...batch];', replace: 'r.taken = batch;', why: "a resume's cut-off batch is overwritten by the next turn's, so those messages are lost on a restart" },
+    { id: 'q02', find: 'if (!batch.length && !r.owed && !r.coldAt) return [];', replace: 'if (!batch.length && !r.owed) return [];', why: "a turn's start leaves the cold-mail clock running when nothing else waits" },
+    { id: 'q03', find: 'else r.msgs = [...taken, ...(r.msgs ?? [])];', replace: 'else r.msgs = [...(r.msgs ?? []), ...taken];', why: 'a batch given back goes behind what arrived since, so messages run out of order' },
+    { id: 'q04', find: '      delete r.taken;\n    });\n    return taken;', replace: '    });\n    return taken;', why: 'a given-back batch stays taken too, so every message runs twice' },
+    { id: 'q05', find: 'if (r.taken || r.steered)', replace: 'if (r.steered)', why: "a finished turn's batch stays taken and is given back and run again after a restart" },
+    { id: 'q06', find: 'if (coldAt && !r.coldAt) r.coldAt = coldAt;', replace: 'if (coldAt) r.coldAt = coldAt;', why: 'each new mail restarts the cold cap clock, so held mail is never released' },
+    { id: 'q07', find: 'r.msgs = [...(r.msgs ?? []), ...(r.held ?? [])];\n        delete r.held;', replace: 'r.msgs = [...(r.held ?? []), ...(r.msgs ?? [])];\n        delete r.held;', why: 'released held mail jumps ahead of the messages already queued' },
+    { id: 'q08', find: 'if (unsent.length) r.msgs = ', replace: 'if (false) r.msgs = ', why: "steers that never reached claude are lost at the turn's end" },
+    { id: 'q09', find: '        delete r.owed;\n        delete r.steered;', replace: '        delete r.steered;', why: 'a stopped minion still owes its resume and restarts the turn after the restart' },
+    { id: 'q10', find: '        delete r.msgs;\n        delete r.owed;', replace: '        delete r.msgs;\n        delete r.held;\n        delete r.owed;', why: 'a stop drops held mail too, which should wait for the next turn' },
+    { id: 'q11', find: 'r.held = r.held?.filter((m) => !gone(m));', replace: 'r.held = r.held;', why: "a disabled person's held mail stays and is run later" },
+    { id: 'q12', find: 'r.msgs = r.msgs!.filter((m) => m.id !== eventId);', replace: 'r.msgs = r.msgs!.filter((m) => m.id === eventId);', why: "taking back one message deletes all the others" },
+    { id: 'q13', find: '{ held: r.held } : {}', replace: '{} : {}', why: "a closed minion's held mail is dropped even when it is kept" },
+    { id: 'q14', find: 'if (next.held?.length && next.coldAt) r.coldAt', replace: 'if (next.coldAt) r.coldAt', why: 'a cold-mail clock stays after its held mail is gone' },
+    { id: 'q15', find: '    if (next.taken?.length) r.taken = next.taken;\n', replace: '', why: 'a taken batch is not saved, so a restart mid-turn loses its messages' },
+    { id: 'q16', find: 'r.msgs = first ? [...msgs, ...(r.msgs ?? [])] : [...(r.msgs ?? []), ...msgs];', replace: 'r.msgs = first ? [...(r.msgs ?? []), ...msgs] : [...msgs, ...(r.msgs ?? [])];', why: 'queued messages run newest first and a put-first message goes last' },
+    { id: 'q17', find: 'once([...(now.msgs ?? []), ...f.front, ...f.msgs], seen)', replace: 'once([...(now.msgs ?? []), ...f.msgs, ...f.front], seen)', why: "the migration puts a network or kill wait's messages behind the queued ones" },
+    { id: 'q18', find: 'if (f.owed && !r.owed) r.owed = f.owed;', replace: '', why: 'the migration forgets the resume a restart still owes' },
+  ],
+};

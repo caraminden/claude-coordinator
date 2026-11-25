@@ -27,6 +27,7 @@ export function workersPanel(page) {
   let failed = null;
   let first = true; // the page is put in after this returns
   let open = false; // the size list
+  let limitsOpen = false; // the collapsed Limits section
   let sent = 0; // changes on their way: a read started before one lands would show the old state
   const el = h('section', { class: 'st-tile wide st-lines st-workers', 'data-tile': 'workers' });
   const set = (body, next, label) => {
@@ -55,6 +56,37 @@ export function workersPanel(page) {
   const pause = (how) => {
     if (how === 'stop' && !confirm(`Stop the ${plural(w.used, 'running minion turn')} now? Each carries on where it was after Resume. Taskmasters keep running.`)) return;
     set({ pause: how }, { paused: how ? { by: 'you', at: Date.now(), ...(how === 'stop' ? { stop: true } : {}) } : null }, how ? 'pause minions' : 'resume minions');
+  };
+  const setLimit = (row, value) => {
+    const limits = w.limits.map((l) => (l.key === row.key ? { ...l, value: value ?? l.default, ...(value === null ? { by: undefined, at: undefined } : { by: 'you', at: Date.now() }) } : l));
+    return set({ limits: { [row.key]: value } }, { limits }, `set ${row.label.toLowerCase()}`);
+  };
+  /** One limit: its number, what the last 7 days did against it, who set it, and Reset to default. */
+  const limitRow = (row) => {
+    const input = h('input', {
+      type: 'number',
+      class: 'small',
+      'data-key': `limit-${row.key}`,
+      'aria-label': row.label,
+      min: row.lo,
+      max: row.hi,
+      step: row.unit === 'GB' ? 0.5 : 1,
+      value: String(row.value),
+      onchange: (e) => {
+        const n = Number(e.target.value);
+        if (e.target.value === '' || !Number.isFinite(n) || n === row.value) return draw();
+        setLimit(row, n === row.default ? null : n);
+      },
+    });
+    const crossed = row.share === undefined ? '' : `${row.unit === 'GB' ? 'under' : 'at or over'} this ${row.share}% of the last 7 days`;
+    const changed = row.by ? `${row.by} changed it ${ago(row.at)}` : `default ${row.default} ${row.unit}`;
+    return h(
+      'div',
+      { class: 'st-limit' },
+      h('label', {}, h('span', {}, row.label), h('span', { class: 'st-limit-in' }, input, h('span', { class: 'muted' }, row.unit))),
+      h('div', { class: 'st-limit-note muted small' }, [crossed, changed].filter(Boolean).join(' · ')),
+      row.by ? button(`reset-${row.key}`, 'Reset to default', `Put back ${row.default} ${row.unit}`, () => setLimit(row, null)) : '',
+    );
   };
   const button = (key, text, title, onclick) => h('button', { type: 'button', class: 'cui-btn cui-small', 'data-key': key, title, onclick }, text);
   const draw = () => {
@@ -95,6 +127,7 @@ export function workersPanel(page) {
           ? [button('resume', 'Resume minions', 'Waiting turns start again, and stopped ones carry on', () => pause(false)), w.paused.stop ? '' : button('stop', 'Stop running ones', 'Stop the running turns too; they carry on after Resume', () => pause('stop'))]
           : [button('pause', 'Pause new turns', 'Running turns finish; no new minion turn starts until Resume', () => pause(true)), button('stop', 'Pause and stop running ones', 'Running turns stop and carry on where they were after Resume', () => pause('stop'))]),
       ),
+      h('details', { class: 'st-limits', open: limitsOpen, ontoggle: (e) => (limitsOpen = e.target.open) }, h('summary', {}, 'Limits'), h('p', { class: 'muted small' }, "What Auto steers by. A change takes effect within 10 seconds; a set that can't work is refused with the reason."), ...w.limits.map(limitRow)),
       h(
         'div',
         { class: 'hue-rows st-line-rows' },
@@ -115,7 +148,7 @@ export function workersPanel(page) {
         failed = err.message;
       }
       // An open size list would close under the redraw.
-      if (!open) draw();
+      if (!open && !el.querySelector('.st-limits input:focus')) draw();
     }
     setTimeout(load, READ_MS);
   };

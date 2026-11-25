@@ -4,8 +4,9 @@ import { execFileSync } from 'node:child_process';
 import { createReadStream, globSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { createInterface } from 'node:readline';
+import { finished } from 'node:stream/promises';
 import { afterCompact, seenHook } from '../../kit/hooks/seen.ts';
+import { jsonLines } from '../../src/json-lines.ts';
 import type { HookInput } from '../../kit/hooks/hook-input.ts';
 import type { Act, ReplayCtx, ReplayResult } from './types.ts';
 
@@ -67,20 +68,15 @@ export async function session(file: string, mainText: (path: string, at: number)
   const compacts: { at: number; text: string }[] = [];
   const uses = new Map<string, { name: string; input: Record<string, unknown> }>();
   try {
-    for await (const line of createInterface({ input: createReadStream(file) })) {
-      let e: Row;
-      try {
-        e = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (e.isSidechain) continue;
+    const stream = createReadStream(file);
+    jsonLines<Row>(stream, (e) => {
+      if (e.isSidechain) return;
       const at = Date.parse(e.timestamp ?? '') || steps.at(-1)?.at || 0;
       const files = { read: (p: string) => mainText(p, at), stateDir, now: at };
       const cwd = dirname(file).replace(/.*-(projects)-(\d+)-tickets-(\d+)$/, `${join(homedir(), '.local/share/claude-coordinator')}/$1/$2/tickets/$3`);
       const base = { session_id: basename(file, '.jsonl'), cwd: e.cwd ?? cwd };
       if (e.type === 'system' && e.subtype === 'compact_boundary') compacts.push({ at, text: afterCompact(base, files, stateDir) });
-      if (!Array.isArray(e.message?.content)) continue;
+      if (!Array.isArray(e.message?.content)) return;
       for (const b of e.message.content) {
         if (b.type === 'tool_use' && b.id && (b.name === 'Bash' || b.name === 'Read')) uses.set(b.id, { name: b.name, input: b.input ?? {} });
         const use = b.type === 'tool_result' ? uses.get(b.tool_use_id ?? '') : undefined;
@@ -94,7 +90,8 @@ export async function session(file: string, mainText: (path: string, at: number)
         if (o.additionalContext) said.push(o.additionalContext);
         steps.push({ at, win: compacts.length, tool: use.name, what: String(use.input.command ?? use.input.file_path ?? '').slice(0, 200), was: text.length, is: after.length + (o.additionalContext?.length ?? 0), lines: said });
       }
-    }
+    });
+    await finished(stream);
   } finally {
     rmSync(stateDir, { recursive: true, force: true });
   }

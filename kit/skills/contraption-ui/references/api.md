@@ -1096,9 +1096,9 @@ red would hold a real release. So name what your updater gates on.
 | Media call | $0.50 worst case, within the person's own monthly cap ($0 on Codex, within their Codex pace); files kept 30 days |
 | Restart wait for running turns | 3 minutes |
 | Turn audit kept, text kept, verdict reason | 14 days, 100,000 characters each, 2000 characters |
-| Ask files | 20 files, 16 MiB decoded |
+| Ask files | 20 files: 16 MiB decoded inline in all; each uploaded one (`asks/files`) 200 MiB, 1 GiB unsent per person, kept a day |
 | Ask text, summary, item | 10,000, 200, 100 characters |
-| Asks per person per 10 minutes | 10 bug/feature, 60 data |
+| Asks per person per 10 minutes | 10 bug/feature, 60 data; 20 uploads |
 | Minions in one list read | 50 |
 | Relay body, timeout | 64 KiB, 10 s |
 | Embed call | 16 texts of 4,000 characters |

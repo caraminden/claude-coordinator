@@ -722,3 +722,8 @@ export interface SkillTimeline {
 
 /** What Store.recentCards knows of a card: its first person's reply and its result, and the newest event id it looked at. */
 export type CardFate = { reply: string | null; result: string | null; upTo: number };
+
+/** The write Store.putClaudeState and StateDb.put share. */
+export const PUT_CLAUDE_STATE = `INSERT INTO claude_state (path, project_id, ticket_id, size, mtime, data) VALUES (?, ?, ?, ?, ?, ?)
+  ON CONFLICT(path) DO UPDATE SET project_id = excluded.project_id, ticket_id = excluded.ticket_id,
+    size = excluded.size, mtime = excluded.mtime, data = excluded.data`;

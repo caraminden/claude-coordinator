@@ -268,6 +268,19 @@ test('event-loop stalls in the first minutes after boot are kept as their own ki
   assert.equal(store.healthCount('loop-lag', 0, Infinity).count, 1, 'new code stalling after warm-up still counts');
 });
 
+test("a front-end deploy soon after a restart isn't blamed for stalls the boot's quiet window had renamed", () => {
+  const { store, w } = setup();
+  const at = Date.now();
+  // The 7 minutes before: warm-up stalls, all stored as the boot kind. The 7 after: the same stalls, now past the quiet window.
+  for (let i = 0; i < 39; i++) store.addHealthEvent(BOOT_STALL, at - 7 * MIN + i * 1000, null, 'stalled');
+  for (let i = 0; i < 9; i++) store.addHealthEvent('loop-lag', at + i * 1000, null, 'stalled');
+  assert.deepEqual(w.compare(at, 7 * MIN), []);
+  // On a long-up server the same 9 stalls with nothing before them still alert.
+  const later = at + 60 * MIN;
+  for (let i = 0; i < 9; i++) store.addHealthEvent('loop-lag', later + i * 1000, null, 'stalled');
+  assert.equal(w.compare(later, 7 * MIN).length, 1);
+});
+
 test("a stall in the watch's own query is not recorded, at any time", () => {
   const { store, watch } = setup();
   const w = watch();

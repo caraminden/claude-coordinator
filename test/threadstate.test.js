@@ -603,6 +603,13 @@ test('a minion waiting for a worker shows as working; its hover says its place a
   assert.equal(why({ ...waiting, worker_wait: { ...waiting.worker_wait, paused: 'Josh' } })[0], 'Waiting: Josh paused all minions.');
 });
 
+test('workerWaitLabel: one a person started now says so, and why it still waits (#1957)', () => {
+  const hold = { by: 'Josh', since: 1 };
+  assert.equal(workerWaitLabel({ place: 3, held: null }, hold), 'Starting now, on a worker of its own');
+  assert.equal(workerWaitLabel({ place: 1, held: 'Cara paused all minions', paused: 'Cara' }, hold), 'Waiting: Cara paused all minions');
+  assert.equal(workerWaitLabel({ place: 3 }, null), 'Waiting for a worker, 3rd in line');
+});
+
 test('workerWaitLabel: places read as words do', () => {
   const at = (place) => workerWaitLabel({ place }).match(/, (\w+) in/)[1];
   assert.deepEqual([1, 2, 3, 4, 11, 12, 13, 21, 22, 112].map(at), ['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '112th']);

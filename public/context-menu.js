@@ -11,7 +11,7 @@ import { renderTicketHead, setStatus, unpark } from './thread-head.js';
 import { PICKABLE, describe, pageName, pointAtElement } from './pick.js';
 import { readSelection, selectionActions } from './selectact.js';
 import { mountMenus } from './ui/menu.js';
-import { toggleUrgent } from './worker-line.js';
+import { heldSaid, toggleStartNow, toggleUrgent } from './worker-line.js';
 import { copyText } from './ui/markdown.js';
 import { toast } from './ui/status.js';
 
@@ -126,6 +126,7 @@ function minionMenu(row, t) {
       { label: 'Copy link', icon: '🔗', run: () => copy(abs(threadHref(t)), 'Link') },
       !coord && { label: `Copy “${ref}”`, icon: '#', run: () => copy(ref, ref) },
       !coord && t.status !== 'closed' && needsServer({ label: t.urgent ? `Take off Urgent (set by ${t.urgent.by})` : 'Mark Urgent', icon: '!', run: () => toggleUrgent(t) }),
+      !coord && t.status !== 'closed' && (t.start_now || t.worker_wait) && needsServer({ label: t.start_now ? `Release its worker (${heldSaid(t.start_now)})` : `Start now${t.worker_wait.held ? ` (waits: ${t.worker_wait.held})` : ''}`, icon: '▶', run: () => toggleStartNow(t) }),
       state && '-',
       state,
     ],

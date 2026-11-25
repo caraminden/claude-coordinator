@@ -2,11 +2,27 @@
 // move makes of them. No page in here, so Node tests it.
 import { moved } from './reorder.js';
 
-/** GET /api/line as two lists of rows: the Urgent group whole, waiting or not, then everyone else in the line. */
+/** GET /api/line as two lists of rows: the Urgent group whole, waiting or not, then everyone else in the line. One on a worker of its own is in neither, unless it's Urgent. */
 export function lineGroups({ urgent, line }) {
   const waits = new Map(line.filter((w) => w.ticket != null).map((w) => [w.ticket, w]));
-  return { urgent: urgent.map((m) => ({ ...(m.ticket == null ? {} : waits.get(m.ticket)), ...m })), rest: line.filter((w) => !w.urgent) };
+  return { urgent: urgent.map((m) => ({ ...(m.ticket == null ? {} : waits.get(m.ticket)), ...m })), rest: line.filter((w) => !w.urgent && !w.forced) };
 }
+
+/** GET /api/line after a Start now or a Release (#1957): `{ row, on, by, at }`. Applying one twice changes nothing more. */
+export function applyStart(data, { row, on, by, at }) {
+  const id = row.ticket;
+  const waits = data.line.some((w) => w.ticket === id);
+  const was = data.forced.find((f) => f.ticket === id);
+  const mark = was ?? { ticket: id, project: row.project, number: row.number, title: row.title, waiting: waits, since: at, by };
+  return {
+    ...data,
+    forced: on ? (was ? data.forced : [...data.forced, mark]) : data.forced.filter((f) => f.ticket !== id),
+    line: data.line.map((w) => (w.ticket === id ? { ...w, forced: on } : w)),
+  };
+}
+
+/** What a minion with a worker of its own is doing, in a few words. */
+export const ownSaid = (f, held) => (held ? `waiting: ${held}` : f.waiting ? 'starting' : f.working ? 'working' : 'idle');
 
 /**
  * `groups` after `op`, as the server will have it: { row, on, before, by }. `before` is the minion in the group it goes

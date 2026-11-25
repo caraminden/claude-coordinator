@@ -21,7 +21,7 @@ function line({ runner, store }: Pick<App, 'runner' | 'store'>, session: { uid?:
   return {
     forced: runner.startNow.list().map((h) => {
       const t = minion(h.ticket);
-      return { ...t, waiting: runner.turnLine.has(h.ticket), since: h.since, ...(t.ticket ? { by: h.by, user: h.user } : {}) };
+      return { ...t, waiting: runner.turnLine.has(h.ticket), working: runner.isRunning(h.ticket), since: h.since, ...(t.ticket ? { by: h.by, user: h.user } : {}) };
     }),
     urgent: runner.urgent.list().map((m) => {
       const t = minion(m.ticket);

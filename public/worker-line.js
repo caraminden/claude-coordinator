@@ -1,18 +1,20 @@
 // The line for a worker as a drawer, opened from any waiting minion's chip and the Workers tile, and the Urgent mark
 // (#1889; Josh, 2026-11-24: "W1 · A drawer, opened from any waiting minion"; 'make that a button on a minion, mark it as
 // "urgent"'). The server's order and what Urgent means: src/turn-line.ts, src/urgent.ts.
-import { api, h, me, view } from './base.js';
+import { api, h, me, pacificClock, view } from './base.js';
 import { renderSidebar } from './sidebar.js';
+import { renderTyping } from './thread.js';
 import { renderTicketHead } from './thread-head.js';
 import { openDialog } from './ui/dialog.js';
 import { optimistic } from './ui/optimistic.js';
 import { toast } from './ui/status.js';
 import { emptyCard } from './look.js';
 import { dragReorder } from './reorder.js';
-import { applyMove, dropped, lineGroups, lineWhy, nextUrgent } from './worker-linemath.js';
+import { applyMove, applyStart, dropped, lineGroups, lineWhy, nextUrgent, ownSaid } from './worker-linemath.js';
 
 const READ_MS = 10_000;
-const HOW = 'Next first. Drag one into Urgent to send it ahead; drag it below to let the order choose.';
+const HOW = 'Next first. Drag one into Urgent to send it ahead; drag it below to let the order choose. Start now gives one a worker of its own at once, past the pool, for as long as you work with it: two each.';
+const starts = []; // the same for Start now and Release
 const ops = []; // moves on their way to the server, or shown until a read has them
 let open = null; // the drawer: { dialog, list, line, workers, failed }
 let reads = 0;
@@ -107,9 +109,125 @@ export function urgentButton(t) {
 /** A minion row's red mark in the list. */
 export const urgentMark = (t) => h('span', { class: 'urgent-mark', role: 'img', 'aria-label': urgentSaid(t.urgent), title: urgentSaid(t.urgent) }, '!');
 
+// ---------- Start now: a worker of its own (#1957) ----------
+
+/** Who gave it one, and when, as words: "Josh, since 3:05 PM PST". */
+export const heldSaid = (u) => `${u.by}, since ${pacificClock(u.since)}`;
+
+/**
+ * Give `row` ({ ticket, project, number, title }) a worker of its own, or let it go: it shows at once, and the request
+ * runs behind. Refused at two, a dialog names the two, each with a Release that starts this one in its place.
+ */
+export function setStartNow(row, on) {
+  const id = row.ticket;
+  const name = `#${row.number}`;
+  const was = new Map([...minionObjects(id)].map((t) => [t, t.start_now ?? null]));
+  const op = { row, on, by: me, at: Date.now(), dead: false };
+  const show = (mark) => {
+    for (const t of minionObjects(id)) t.start_now = mark === undefined ? (was.get(t) ?? null) : mark;
+    renderSidebar();
+    if (view?.id === id) {
+      renderTicketHead();
+      renderTyping();
+    }
+    draw();
+  };
+  const done = () => starts.includes(op) && starts.splice(starts.indexOf(op), 1);
+  return optimistic({
+    key: 'start-now', // a Release makes room for the Start now after it
+    sets: `start-now:${id}`,
+    apply: () => {
+      op.dead = false;
+      if (!starts.includes(op)) starts.push(op);
+      show(on ? { by: me, since: op.at } : null);
+    },
+    // At two it's no failure to retry: the dialog has what to do.
+    send: () => api(`api/tickets/${id}/start-now`, { method: 'PUT', body: { on } }).catch((err) => (err.data?.holds ? { full: err.data.holds } : Promise.reject(err))),
+    undo: () => {
+      op.dead = true;
+      done();
+      show(undefined);
+    },
+    label: on ? `start ${name} now` : `release ${name}'s worker`,
+  })
+    .then(async ({ start_now, full }) => {
+      if (full) {
+        done();
+        show(undefined);
+        return askRelease(row, full);
+      }
+      if (!starts.some((o) => o !== op && !o.dead && o.row.ticket === id)) for (const t of minionObjects(id)) t.start_now = start_now; // a later press shows its own
+      await read();
+      done();
+      draw();
+      if (view?.id === id) {
+        renderTicketHead();
+        renderTyping();
+      }
+    })
+    .catch(() => {
+      done();
+      draw();
+    });
+}
+
+/** They hold two already: which to let go for `row`. */
+function askRelease(row, holds) {
+  const dialog = openDialog({
+    title: 'You hold two workers already',
+    className: 'own-full',
+    body: [
+      h('p', {}, `Two each is the most. Release one, and #${row.number} starts now in its place; a turn it has running still finishes.`),
+      h(
+        'ul',
+        { class: 'line-rows' },
+        holds.map((m) =>
+          h(
+            'li',
+            { class: 'line-row own' },
+            h('span', { class: 'line-t' }, h('span', { class: 'line-name' }, h('span', { class: 'num' }, `#${m.number}`), ` ${m.title}`), h('span', { class: 'line-meta' }, `yours since ${pacificClock(m.since)}`)),
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'cui-btn cui-small',
+                'aria-label': `Release #${m.number} and start #${row.number}`,
+                onclick: () => {
+                  dialog.close();
+                  setStartNow(m, false);
+                  setStartNow(row, true);
+                },
+              },
+              'Release',
+            ),
+          ),
+        ),
+      ),
+    ],
+  });
+}
+
+const rowOfTicket = (t) => ({ ticket: t.id, project: t.project_id, number: t.number ?? t.id, title: t.title });
+
+/** The right-click menu's, the header's and the waiting chip's press for a minion. */
+export const toggleStartNow = (t) => setStartNow(rowOfTicket(t), !t.start_now);
+
+const ownButton = (t, said, title) => h('button', { type: 'button', class: 'cui-btn cui-small', 'data-key': said, title, 'aria-label': title, onclick: () => toggleStartNow(t) }, said);
+const releaseTitle = (u) => `Release the worker of its own (${heldSaid(u)}). A running turn finishes, and the next waits in the line`;
+
+/** Under the chat: Start now while it waits for a worker, or whose worker it has and Release; null for neither. */
+export function startNowLine(t) {
+  if (t.status === 'closed' || !(t.start_now || t.worker_wait)) return null;
+  const u = t.start_now;
+  if (u) return [h('span', { class: 'own-said' }, `Own worker: ${heldSaid(u)}`), ownButton(t, 'Release', releaseTitle(u))];
+  const { held } = t.worker_wait;
+  return [ownButton(t, 'Start now', held ? `Start now: it starts once it can (${held})` : "Start now: a worker of its own, past the pool's size, for as long as you work with it")];
+}
+
 // ---------- the drawer ----------
 
-const shown = () => (open?.line ? ops.reduce(applyMove, lineGroups(open.line)) : null);
+const started = () => starts.reduce(applyStart, open.line);
+const shown = () => (open?.line ? ops.reduce(applyMove, lineGroups(started())) : null);
 
 /** Someone's place changed (the server says so on every move and wait), so an open drawer reads again. */
 export const lineMoved = () => open && read();
@@ -205,7 +323,7 @@ function pool() {
     bar.append(rest);
   }
   const keys = w.people.map((p) => h('span', { class: 'line-key', 'data-cat': hueOf(p.name) }, h('i'), `${p.name} ${p.used}`, p.waiting ? h('span', { class: 'muted' }, ` · ${p.waiting} waiting`) : ''));
-  return [h('b', {}, `${w.used} of ${w.size}`), ' working', w.paused ? h('span', { class: 'line-paused' }, ` · paused by ${w.paused.by}`) : '', bar, h('div', { class: 'line-keys' }, keys)];
+  return [h('b', {}, `${w.used} of ${w.size}`), ` working${w.forced ? `, ${w.forced} forced` : ''}`, w.paused ? h('span', { class: 'line-paused' }, ` · paused by ${w.paused.by}`) : '', bar, h('div', { class: 'line-keys' }, keys)];
 }
 
 function button(key, label, text, onclick, cls = 'ar', pressed) {
@@ -228,16 +346,18 @@ function rowOf(r, g, i, inUrgent) {
       .filter((x) => x.ticket != null)
       .at(to === undefined ? 0 : -1);
   const step = (d) => (d < 0 ? setUrgent(r, true, known(0, at)?.ticket) : setUrgent(r, true, known(at + 2)?.ticket ?? null));
+  const now = id == null || r.waiting === false || r.forced ? '' : button(`now-${id}`, "Start now: a worker of its own, past the pool's size", 'Start now', () => setStartNow(r, true), 'now');
   const ctl =
     id == null
       ? []
       : inUrgent
         ? [
+            now,
             at > 0 && known(0, at) ? button(`up-${id}`, 'Move up in Urgent', '↑', () => step(-1)) : h('span', { class: 'line-btn ar gap' }),
             button(`down-${id}`, at < u.length - 1 ? 'Move down in Urgent' : 'Move out of Urgent', '↓', () => (at < u.length - 1 ? step(1) : setUrgent(r, false))),
             button(`bang-${id}`, `${why ? `Urgent, ${why}. ` : ''}Take it off Urgent`, '!', () => setUrgent(r, false), 'bang on', true),
           ]
-        : [button(`up-${id}`, 'Move it into Urgent', '↑', () => setUrgent(r, true, null)), button(`bang-${id}`, 'Mark it Urgent', '!', () => setUrgent(r, true, null), 'bang', false)];
+        : [now, button(`up-${id}`, 'Move it into Urgent', '↑', () => setUrgent(r, true, null)), button(`bang-${id}`, 'Mark it Urgent', '!', () => setUrgent(r, true, null), 'bang', false)];
   return h(
     'li',
     { class: `line-row${inUrgent ? ' urgent' : ''}${r.person === me ? ' mine' : ''}${id != null && id === open.from ? ' here' : ''}${id == null ? ' other' : ''}`, 'data-item': '', 'data-id': id ?? null, 'data-cat': r.person ? hueOf(r.person) : null },
@@ -245,6 +365,22 @@ function rowOf(r, g, i, inUrgent) {
     h('span', { class: 'line-n' }, i == null ? '' : String(i)),
     h('span', { class: 'line-t' }, name, meta),
     h('span', { class: 'line-ctl' }, ctl),
+  );
+}
+
+/** A minion on a worker of its own: whose, since when, and Release. */
+function ownRow(f, held) {
+  const id = f.ticket;
+  if (id == null) return h('li', { class: 'line-row own other' }, h('span', { class: 'line-t' }, h('span', { class: 'muted' }, 'A minion in another scheme'), h('span', { class: 'line-meta' }, `since ${pacificClock(f.since)}`)));
+  return h(
+    'li',
+    { class: `line-row own${id === open.from ? ' here' : ''}` },
+    h('span', { class: 'line-t' }, h('a', { class: 'line-name', 'data-key': `name-${id}`, href: `#/p/${f.project}/t/${f.number}`, title: `#${f.number} ${f.title}` }, h('span', { class: 'num' }, `#${f.number}`), ` ${f.title}`), h('span', { class: 'line-meta' }, `${heldSaid(f)} · ${ownSaid(f, held)}`)),
+    h(
+      'span',
+      { class: 'line-ctl' },
+      button(`now-${id}`, releaseTitle(f), 'Release', () => setStartNow(f, false), 'now'),
+    ),
   );
 }
 
@@ -261,12 +397,14 @@ function draw() {
     return list.replaceChildren(h('li', { class: 'line-note muted' }, open.failed ? `Couldn't read it: ${open.failed}` : 'Reading…'));
   }
   list.previousElementSibling.textContent = open.failed ? `Couldn't read it again, so this may be old: ${open.failed}` : HOW;
-  const waiting = g.urgent.filter((r) => r.waiting !== false).length + g.rest.length;
+  const { forced, line } = started();
+  const waiting = line.length;
   dialog.querySelector('h2').textContent = `The line · ${waiting} waiting`;
   const tops = new Map([...list.querySelectorAll('[data-id]')].map((el) => [el.dataset.id, el.offsetTop]));
   let n = 0;
   const num = (r) => (r.waiting === false ? null : ++n);
   list.replaceChildren(
+    ...(forced.length ? [h('li', { class: 'line-head' }, 'Started now'), ...forced.map((f) => ownRow(f, f.ticket != null && line.find((w) => w.ticket === f.ticket)?.held))] : []),
     h('li', { class: 'line-head urgent' }, 'Urgent'),
     ...(g.urgent.length ? [] : [h('li', { class: 'line-lane' }, 'Nobody is Urgent. Drop a minion here, or press ! on it.')]),
     ...g.urgent.map((r) => rowOf(r, g, num(r), true)),

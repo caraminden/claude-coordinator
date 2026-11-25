@@ -97,7 +97,7 @@ export function workersPanel(page) {
     if (!w) return el.replaceChildren(h('h4', {}, 'Workers'), h('b', { class: 'st-value' }, failed ? `Couldn't read it: ${failed}` : 'Reading…'));
     const { pool } = w;
     const changed = w.limits.filter((l) => l.by).length;
-    const value = `${w.used} of ${w.size} working${w.lent ? ` · ${w.lent} waiting on a card` : ''}${w.waiting ? ` · ${w.waiting} waiting` : ''}`;
+    const value = `${w.used} of ${w.size} working${w.forced ? `, ${w.forced} forced` : ''}${w.lent ? ` · ${w.lent} waiting on a card` : ''}${w.waiting ? ` · ${w.waiting} waiting` : ''}`;
     const size = pool.fixed ? `Set to ${pool.fixed.size} by ${pool.fixed.by}` : `Auto, between ${w.min} and ${w.max}${pool.why ? `: moved to ${pool.size} ${ago(pool.at)}, ${pool.why}` : ''}`;
     const sizes = [...new Set([...SIZES, ...(pool.fixed ? [pool.fixed.size] : [])])].sort((a, b) => a - b);
     const pick = h(

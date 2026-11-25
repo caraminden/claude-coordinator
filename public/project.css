@@ -653,12 +653,15 @@ html:has(> body > .line-drawer:modal) { scrollbar-gutter: auto; padding-right: v
 .line-urgent { color: var(--error); }
 .line-ctl { flex: none; display: inline-flex; gap: 0.2rem; }
 .line-btn { display: inline-grid; place-items: center; width: 1.9rem; height: 1.9rem; box-sizing: border-box; margin: 0; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); font-size: 0.95em; line-height: 1; }
+.line-btn.now { width: auto; padding: 0 0.5rem; border-color: var(--line); font-size: 0.8em; white-space: nowrap; color: var(--ink); }
+.line-row.own .line-meta { white-space: normal; }
+.line-row.own { cursor: default; border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
 button.line-btn:is(:hover, :focus-visible) { border-color: var(--line); background: var(--line); color: var(--ink); }
 .line-btn.bang { border-color: var(--line); font-weight: 800; }
 button.line-btn.bang:is(:hover, :focus-visible) { border-color: var(--error); background: none; color: var(--error); }
 .line-btn.bang.on { border-color: var(--error); background: var(--error); color: var(--panel); }
 button.line-btn.bang.on:is(:hover, :focus-visible) { background: color-mix(in srgb, var(--error) 80%, var(--ink)); color: var(--panel); }
-@media (max-width: 800px) { .line-t > .line-meta { white-space: normal; } .line-t > .line-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; } .line-btn { width: 2.4rem; height: 2.4rem; } .line-ctl { gap: 0.1rem; } }
+@media (max-width: 800px) { .line-t > .line-meta { white-space: normal; } .line-t > .line-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; } .line-btn { width: 2.4rem; height: 2.4rem; } .line-btn.now { width: auto; } .line-ctl { gap: 0.1rem; } }
 .st-lines .hue-row-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-line-meta { display: inline-flex; align-items: center; gap: 0.6rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .st-line-meta .cui-btn { min-width: 7.5rem; }

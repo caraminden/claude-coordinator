@@ -24,7 +24,7 @@ import { clamp, markQueued, messageBody, previewNodes, showTakenBack, strikeNote
 import { initSeen, leftText, narrow, phaseRows, progressUi, renderProgress, scheduleProgress } from './progress-ui.js';
 import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, settleSpend, speaker, spendCard } from './cards.js';
 import { markHeld, refreshBranch, renderTicketHead, unpark } from './thread-head.js';
-import { openLine } from './worker-line.js';
+import { openLine, startNowLine } from './worker-line.js';
 
 // Mine or Everyone (#920): how this device opens your Taskmaster in a scheme with several.
 export function tmViewMode() {
@@ -91,6 +91,7 @@ export function chatView(chatId, ticket, merged = null) {
     ui: progressUi(chatId),
     actions: new Map(), // tool_use_id -> { block, taskId, result }
     turnActions: [], // actions of the current (or last) turn, in order
+    startNowEl: h('span', { class: 'typing-act' }), // beside it: Start now, or whose worker it has and Release
     typingEl: h('button', { type: 'button', class: 'typing', hidden: true, title: 'Show the work so far' }), // below the chat log
     folds: [], // the running turn's settled words, { text, fate } in order, folded when its answer arrives (#551)
     sendingTo: null, // ticket id while a message is on its way, before the server confirms the turn
@@ -354,7 +355,7 @@ export function chatSection(chatId, ticket) {
   form.prepend(h('div', { id: 'chat-waiting', hidden: true }));
   selectActions(log, form);
   // A new person's first-day welcome (#1151), over their Taskmaster's chat only.
-  return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), chatWelcome(ticket), log, view.typingEl, form);
+  return h('section', { class: 'chat' }, h('div', { class: 'ticket-head', id: 'ticket-head' }), chatWelcome(ticket), log, h('div', { class: 'typing-row' }, view.typingEl, view.startNowEl), form);
 }
 
 /** Find in the open conversation: highlights every match, Enter / ↓ for the next, Shift+Enter / ↑ for the previous. */
@@ -1112,10 +1113,14 @@ export function renderTyping() {
   const show = running || !!t.approvals || view.sendingTo === t.id || server;
   const wasHidden = el.hidden;
   el.hidden = !show;
+  // A redraw mustn't drop the focus on its button.
+  const focused = view.startNowEl.contains(document.activeElement);
+  view.startNowEl.replaceChildren(...(startNowLine(t) ?? []));
+  if (focused) view.startNowEl.querySelector('button')?.focus();
   if (!show) return;
   el.classList.toggle('in-line', !!t.worker_wait);
   el.title = t.worker_wait ? 'See the line for workers' : 'Show the work so far';
-  const lead = t.approvals ? 'Waiting for someone to approve or deny' : t.worker_wait ? workerWaitLabel(t.worker_wait) : running ? workingLabel(t) : view.sendingTo === t.id ? workingLabel(t, 'thinking…') : (jobOf(t)?.text ?? rowState(t, usage).label);
+  const lead = t.approvals ? 'Waiting for someone to approve or deny' : t.worker_wait ? workerWaitLabel(t.worker_wait, t.start_now) : running ? workingLabel(t) : view.sendingTo === t.id ? workingLabel(t, 'thinking…') : (jobOf(t)?.text ?? rowState(t, usage).label);
   // Held mail counts as queued while it works (#1067): it has no card then, and its bubble may be above the loaded history.
   const queued = (t.queued ?? 0) + (running ? (t.held_mail?.items?.length ?? 0) : 0);
   const key = `${lead}|${queued}`;

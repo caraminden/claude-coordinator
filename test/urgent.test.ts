@@ -329,7 +329,7 @@ test("the line shows a person only their schemes' minions, with the rest as plac
   startNow.press(a, josh.id, 'Josh');
   startNow.press(b, cara.id, 'A private person');
   const waiting = [b, a].map((ticket) => ({ ticket, person: cara.id, rank: 1, since: 5, heat: 0 as const, ...(ticket === b ? { urgent: 0 } : {}) }));
-  const app = { store, runner: { urgent, startNow, turnLine: { has: () => true, line: () => waiting, heldBy: () => null } } };
+  const app = { store, runner: { urgent, startNow, isRunning: () => false, turnLine: { has: () => true, line: () => waiting, heldBy: () => null } } };
   const { data } = await call('GET', '/api/line', app, { session: { name: 'Josh', uid: josh.id, admin: false } });
   assert.deepEqual(
     data.line.map((w) => [w.ticket, w.urgent, w.warm]),

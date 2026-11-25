@@ -26,7 +26,7 @@ export interface WorkerHold {
 
 export interface HoldDeps {
   store: Pick<Store, 'getSetting' | 'setSetting' | 'deleteSetting'>;
-  /** The minion can't use it any more: closed, gone, or sealed with no turn running or waiting. */
+  /** The minion can use it no longer: closed, gone, or sealed with no turn running or waiting. */
   over: (ticketId: number) => boolean;
   /** Holds of these minions began, ended or moved their clock. */
   changed: (ids: number[]) => void;

@@ -2,7 +2,7 @@
 // and the generator's output set, with an override, for a sample SVG.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -49,6 +49,13 @@ test('a bad config is refused by name: unknown role, a path out of the repo, a m
   assert.throws(() => resolveIcons(repo('b1', { icon: { overrides: { tiny: 'x.svg' } } })), /unknown icon role "tiny"/);
   assert.throws(() => resolveIcons(repo('b2', { icon: { source: '../evil.svg' } })), /inside the repo/);
   assert.throws(() => resolveIcons(repo('b3', { icon: { overrides: { small: 'nope.svg' } } })), /nope\.svg/);
+  assert.throws(() => resolveIcons(repo('b4', { icon: { background: 'red"/><x' } })), /background must be a #rgb/);
+  assert.throws(() => resolveIcons(repo('b5', { icon: { webDir: '../out' } })), /webDir must be a folder inside the repo/);
+  assert.throws(() => resolveIcons(repo('b6', { icon: { androidRes: '../out' } })), /androidRes must be a folder inside the repo/);
+  const linked = repo('b7', { icon: { webDir: 'web/out/icons' } });
+  mkdirSync(join(root, 'elsewhere'));
+  symlinkSync(join(root, 'elsewhere'), join(linked, 'web/out'));
+  assert.throws(() => resolveIcons(linked), /webDir web\/out\/icons points outside the repo/);
 });
 
 test('generates the web and Android set, an override changing only its own output', () => {

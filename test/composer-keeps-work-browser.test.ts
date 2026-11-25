@@ -74,3 +74,22 @@ test('"Send after this turn" survives the secret warning (C5)', { skip }, async 
   assert.equal(JSON.parse(await page.eval(`window.__bodies[0]`)).after, true);
   assert.ok(t.id);
 });
+
+// #937 (6106ca17): words typed after /fresh stay in the box with a note. Without it a fresh session starts and drops them.
+test('"/fresh" with words after it is refused and keeps them; "/fresh" alone asks to start one', { skip }, async () => {
+  const { page } = await open('fresh with words');
+  const press = (text: string) =>
+    page.eval(`(() => {
+      let asked = 0;
+      window.confirm = () => (asked++, true);
+      window.fetch = () => Promise.reject(new Error('cut off')); // no fresh session starts
+      const box = document.querySelector('.composer textarea');
+      box.value = ${JSON.stringify(text)};
+      box.form.requestSubmit();
+      const out = { asked, left: box.value, notes: document.querySelectorAll('#log .note.error').length };
+      box.value = '';
+      return JSON.stringify(out);
+    })()`);
+  assert.deepEqual(JSON.parse(await press('/fresh then fix the login page')), { asked: 0, left: '/fresh then fix the login page', notes: 1 });
+  assert.deepEqual(JSON.parse(await press('/fresh')), { asked: 1, left: '', notes: 1 });
+});

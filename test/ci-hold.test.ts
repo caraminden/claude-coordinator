@@ -230,6 +230,20 @@ test("main's run waits for ships off the runner, is back first when they end, an
   assert.deepEqual(w.posts.slice(2), [], 'the gap is a moment old: the next ship may be a minute off');
   await w.for(MAIN_SETTLE_MS);
   assert.deepEqual(w.posts.slice(2), ['rerun 2'], 'two quiet minutes are enough for main');
+
+  const u = world();
+  u.line = 1;
+  u.main({ status: 'queued' });
+  await u.tick();
+  u.line = 0;
+  await u.tick();
+  u.down = true;
+  await u.for(5 * MIN);
+  u.down = false;
+  await u.tick();
+  assert.deepEqual(u.posts, ['cancel 1'], 'a ship may have come and gone while GitHub could not be read');
+  await u.for(MAIN_SETTLE_MS + MIN);
+  assert.deepEqual(u.posts, ['cancel 1', 'rerun 1']);
   await w.for(20 * MIN);
   assert.ok(!w.posts.includes('rerun 1'), 'the proof waits for it');
 

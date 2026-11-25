@@ -458,8 +458,9 @@ export class CiHold {
       }
     }
     for (const path of this.cache.keys()) if (!used.has(path) && path.includes('?status=')) this.cache.delete(path);
+    const unseen = !this.fresh(now); // looks failed: a ship may have come and gone
     this.seen = { at: now, ship, main };
-    this.shipFree = this.shipWhy(now) ? null : (this.shipFree ?? now);
+    this.shipFree = this.shipWhy(now) ? null : unseen ? now : (this.shipFree ?? now);
     this.running = running;
     this.ships = ships;
     this.takeSlot(own, [...active.values()], now);

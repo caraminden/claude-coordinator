@@ -14,6 +14,7 @@ writeFileSync(join(root, 'app.apk'), 'apk');
 
 const listen = (s: Server, port = 0) => new Promise<number>((r) => s.listen(port, '127.0.0.1', () => r((s.address() as { port: number }).port)));
 const github = createServer((_q, res) => res.end('{"count":1,"value":"tok"}'));
+const ghPort = await listen(github); // up for the whole file, so a port a test frees is never taken by it
 after(() => github.close());
 
 // A store that drops the first `drop` requests with no reply, then answers `status`.
@@ -28,7 +29,7 @@ const store = (drop: number, status: number) => {
 };
 
 const run = async (script: string, args: readonly string[], storeUrl: string) => {
-  const gh = await listen(github);
+  const gh = ghPort;
   return new Promise<{ status: number | null; stdout: string }>((done) => {
     const p = spawn('bash', [join(DIR, script), ...args], {
       cwd: root,
@@ -36,7 +37,7 @@ const run = async (script: string, args: readonly string[], storeUrl: string) =>
     });
     let stdout = '';
     p.stdout.on('data', (d) => (stdout += d));
-    p.on('close', (status) => { github.close(); done({ status, stdout }); });
+    p.on('close', (status) => done({ status, stdout }));
   });
 };
 

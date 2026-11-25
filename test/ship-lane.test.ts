@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { Claims, type Claim } from '../src/claims.ts';
 import type { Ticket } from '../src/db.ts';
-import { ShipLane, SHIP_LANE, SKIP_AFTER_MS, type ShipLaneDeps } from '../src/ship-lane.ts';
+import { sharedPipelineFiles, ShipLane, SHIP_LANE, SKIP_AFTER_MS, type ShipLaneDeps } from '../src/ship-lane.ts';
 import { tempRoot } from './helpers.ts';
 
 const tmp = tempRoot('ship-lane-');
@@ -149,6 +149,31 @@ test('the next ready one that shares a ship-script file is not let in, nor one b
   await l.sweep(START + 1);
   assert.equal(l.claim()!.beside, 0);
   assert.deepEqual(l.woke, []);
+});
+
+test("a file either branch's own list names counts as shared", async () => {
+  // 1 drops tools/land.sh from its list and changes it.
+  const l = lane({ 1: ['tools/land.sh', 'src/pipe/a.ts'], 2: ['tools/land.sh'] });
+  l.write(l.tickets.get(1)!.cwd!, 'tools/pipeline-files.txt', 'src/pipe/\n');
+  l.shipping.add(1);
+  await l.sweep(START + 1);
+  assert.equal(l.claim()!.beside, 0);
+  // Once the holder is on main its branch changes nothing, and one let in before that isn't refused for it.
+  const done = lane({ 1: [], 2: ['tools/land.sh'] });
+  assert.deepEqual(await sharedPipelineFiles(done.tickets.get(2)!.cwd!, done.tickets.get(1)!.cwd!), []);
+});
+
+test('one taken out of the queue while it ships keeps the next from being let in', async () => {
+  const l = lane({ 1: ['tools/land.sh'], 2: ['src/pipe/a.ts'], 3: ['src/pipe/b.ts'] });
+  l.shipping.add(1);
+  await l.sweep(START + 1);
+  l.shipping.add(2);
+  l.claims.setQueue(1, SHIP_LANE, [3], 'TM');
+  await l.sweep(START + 2);
+  assert.deepEqual([l.claim()!.beside, l.woke.length], [0, 1]);
+  l.shipping.delete(2);
+  await l.sweep(START + 3);
+  assert.equal(l.claim()!.beside, 3);
 });
 
 test('a holder whose branch changes no ship-script file ships alone: nothing to compare', async () => {

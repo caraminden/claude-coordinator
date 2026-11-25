@@ -12,8 +12,8 @@ export const SHIP_LANE = 'pipeline-lane';
 /** How long a holder has to hand its change off before one that is ready goes first. */
 export const SKIP_AFTER_MS = 10 * 60_000;
 
-/** The pipeline files (tools/pipeline-files.txt, where a repo has one) a worktree's branch changes; null when git can't tell. */
-export async function pipelineChanges(cwd: string): Promise<string[] | null> {
+/** What a worktree's branch changes, and which of those are pipeline files (tools/pipeline-files.txt, where a repo has one); null when git can't tell. */
+async function branchChanges(cwd: string): Promise<{ all: string[]; pipeline: string[] } | null> {
   // A branch that drops the list changes the list, which is in its own list; a repo without one has no pipeline files.
   const list = await readFile(join(cwd, 'tools', 'pipeline-files.txt'), 'utf8').catch((err) => {
     if (err.code === 'ENOENT') return '';
@@ -22,7 +22,20 @@ export async function pipelineChanges(cwd: string): Promise<string[] | null> {
   const changed = await gitOut(['diff', '--name-only', '--no-renames', '-z', 'main...HEAD'], cwd, { trim: false });
   if (changed === null) return null;
   const paths = ['tools/pipeline-files.txt', ...list.split('\n').map((l) => l.trim())].filter((l) => l && !l.startsWith('#'));
-  return changed.split('\0').filter((f) => f && paths.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p)));
+  const all = changed.split('\0').filter(Boolean);
+  return { all, pipeline: all.filter((f) => paths.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p))) };
+}
+
+/** The pipeline files a worktree's branch changes; null when git can't tell. */
+export async function pipelineChanges(cwd: string): Promise<string[] | null> {
+  return (await branchChanges(cwd))?.pipeline ?? null;
+}
+
+/** The files both worktrees' branches change that either one's list calls a pipeline file: a branch can change its list. None once one is on main; null when git can't tell. */
+export async function sharedPipelineFiles(mine: string, holder: string): Promise<string[] | null> {
+  const [a, b] = await Promise.all([branchChanges(mine), branchChanges(holder)]);
+  if (!a || !b) return null;
+  return [...new Set([...a.pipeline, ...b.pipeline])].filter((f) => a.all.includes(f) && b.all.includes(f));
 }
 
 export interface ShipLaneDeps {
@@ -44,6 +57,8 @@ export interface ShipLaneDeps {
 export class ShipLane {
   private d: ShipLaneDeps;
   private running = false;
+  /** The last one let in beside each scheme's holder. shortcut: a restart forgets it, so only then can one taken out of the queue mid-ship have a second let in beside it. */
+  private lastIn = new Map<number, number>();
   constructor(d: ShipLaneDeps) {
     this.d = d;
   }
@@ -70,17 +85,17 @@ export class ShipLane {
       if (!claim.beside) await this.letIn(claim, holder, now);
     } else if (!claim.handed && !claim.landed && !claim.keep && now - claim.since >= SKIP_AFTER_MS) {
       const next = await this.firstReady(claim);
-      if (next) this.skip(claim, holder, next.ticket, now);
+      if (next) this.skip(claim, holder, next, now);
     }
   }
 
-  /** The first waiting minion that said it is ready (its hand-off was held for the lane) and is still free, with the pipeline files it changes. */
-  private async firstReady(claim: Claim): Promise<{ ticket: Ticket; files: string[] } | null> {
+  /** The first waiting minion that said it is ready (its hand-off was held for the lane) and is still free, with pipeline files changed. */
+  private async firstReady(claim: Claim): Promise<Ticket | null> {
     for (const { ticket: id } of this.d.store.claims.queue(claim.project_id, claim.name).filter((r) => r.done_at == null && r.ready)) {
       const ticket = this.d.store.getTicket(id);
-      const files = ticket && (await this.readyFiles(ticket));
+      const ready = ticket && (await this.hasPipelineWork(ticket));
       // Read again: the git calls take a moment, and a turn may have started.
-      if (ticket && files && this.free(ticket.id)) return { ticket, files };
+      if (ticket && ready && this.free(ticket.id)) return ticket;
     }
     return null;
   }
@@ -91,12 +106,11 @@ export class ShipLane {
     return t?.status === 'idle' && !this.d.busy(id) && !this.d.shipping(id) && !this.d.heldFor(id) && this.d.store.openCardAt(id) === null;
   }
 
-  /** The pipeline files it has committed; null while it is at work, or has something uncommitted or nothing to ship. */
-  private async readyFiles(t: Ticket): Promise<string[] | null> {
-    if (t.kind !== 'ticket' || !t.cwd || !this.free(t.id)) return null;
+  /** Whether it has pipeline files committed, nothing uncommitted, and isn't at work. */
+  private async hasPipelineWork(t: Ticket): Promise<boolean> {
+    if (t.kind !== 'ticket' || !t.cwd || !this.free(t.id)) return false;
     const dirty = await gitOut(['status', '--porcelain', '-uno'], t.cwd);
-    const files = dirty === '' ? await pipelineChanges(t.cwd) : null;
-    return files?.length ? files : null;
+    return dirty === '' && !!(await pipelineChanges(t.cwd))?.length;
   }
 
   private skip(claim: Claim, holder: Ticket, next: Ticket, now: number) {
@@ -111,12 +125,16 @@ export class ShipLane {
   }
 
   private async letIn(claim: Claim, holder: Ticket, now: number) {
+    // One taken out of the queue mid-ship is still shipping.
+    const last = this.lastIn.get(claim.project_id);
+    if (last !== undefined && last !== holder.id && this.d.shipping(last)) return;
     const next = await this.firstReady(claim);
-    const theirs = next && (await pipelineChanges(holder.cwd!));
-    // Nothing of the holder's changed in git: it ships something this can't compare, so it ships alone.
-    if (!next || !theirs?.length || theirs.some((f) => next.files.includes(f)) || !this.d.shipping(holder.id)) return;
-    if (!this.d.store.claims.setBeside(claim, next.ticket.id, now)) return;
-    this.d.wake(next.ticket.id, `You may ship now, beside #${holder.number} ${holder.title}, which holds the ${claim.name} claim: you change none of the same ship-script files. Rebase onto main, then hand off (hand_off_land). If its change goes live first, the claim is yours.`);
+    // A holder with no pipeline files changed is on main already, or ships something this can't compare: alone.
+    const shared = next && (await pipelineChanges(holder.cwd!))?.length ? await sharedPipelineFiles(next.cwd!, holder.cwd!) : null;
+    if (!next || shared?.length !== 0 || !this.d.shipping(holder.id)) return;
+    if (!this.d.store.claims.setBeside(claim, next.id, now)) return;
+    this.lastIn.set(claim.project_id, next.id);
+    this.d.wake(next.id, `You may ship now, beside #${holder.number} ${holder.title}, which holds the ${claim.name} claim: you change none of the same ship-script files. Rebase onto main, then hand off (hand_off_land). If its change goes live first, the claim is yours.`);
     this.d.broadcast({ type: 'claims', projectId: claim.project_id });
   }
 }

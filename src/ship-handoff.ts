@@ -16,7 +16,7 @@ import { changedLines, parseProbe, PROBE_HELP, PROBE_LINES } from './live-probe.
 import { pacificStamp } from './pacific.ts';
 import { reviewRefusal } from './review-gate.ts';
 import type { ChangeBy } from './db/wait-records.ts';
-import { pipelineChanges, SHIP_LANE } from './ship-lane.ts';
+import { pipelineChanges, sharedPipelineFiles, SHIP_LANE } from './ship-lane.ts';
 import { parseLearned, touchedFiles } from './ship-lessons.ts';
 import { offSkills } from './skills.ts';
 import { thrown } from './thrown.ts';
@@ -231,8 +231,7 @@ async function besideRefusal(app: App, ticket: Ticket): Promise<string | null> {
   const lane = app.store.claims.besideOf(ticket.project_id, ticket.id);
   const holder = lane && app.store.getTicket(lane.holder);
   if (!holder?.cwd) return null;
-  const [mine, theirs] = await Promise.all([pipelineChanges(ticket.cwd!), pipelineChanges(holder.cwd)]);
-  const both = mine && theirs && mine.filter((f) => theirs.includes(f));
+  const both = await sharedPipelineFiles(ticket.cwd!, holder.cwd);
   if (both?.length === 0) return null;
   app.store.claims.besideRefused(ticket.id);
   return both ? `you and #${holder.number}, which holds the pipeline lane, both change ${both.join(', ')}` : `it couldn't tell whether you and #${holder.number} share a ship-script file`;

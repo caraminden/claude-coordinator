@@ -94,7 +94,7 @@ export const RULE_HOMES: RuleHome[] = [
   {
     id: 'settings-edit',
     title: 'A Settings text edit ships like code',
-    home: { kind: 'repo', file: 'src/mcp.ts', anchor: 'const EDIT_INSTRUCTIONS' },
+    home: { kind: 'repo', file: 'src/mcp-scheme.ts', anchor: 'const EDIT_INSTRUCTIONS' },
     pointer: 'the edit_instructions description',
     phrases: ['is an agent instruction change', 'label it at least medium', 'keep its dated quotes'],
   },

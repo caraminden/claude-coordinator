@@ -113,5 +113,28 @@ export function needOne(args: Record<string, unknown>, fields: string[], tool: s
   if (!fields.some((k) => args[k] !== undefined)) throw new Error(`${tool}: pass at least one of ${fields.join(', ')}. Nothing was changed.`);
 }
 
+// The same lists as MODELS and EFFORTS in db.ts; the server checks them again. Required on create (#698;
+// Cara, 2026-11-14: "we should ALWAYS make an intentional choice about model"): the table is in the Taskmaster's prompt.
+export const MODEL_IDS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5-5+opus-advisor', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-fable-5-2', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'];
+/** The advisor trial's brief to the Taskmaster (#817; handoff from #813): whom it starts on the advisor. Here, not in public/model-table.js, as turns run a pinned copy of this file that carries only ./ imports. */
+export const ADVISOR_TRIAL = 'claude-sonnet-5-5+opus-advisor: Sonnet runs the turn and consults Opus at hard points; the model table says when. Never a Taskmaster.';
+export const EFFORT_IDS = ['low', 'medium', 'high', 'xhigh', 'max'];
+export const MODEL = {
+  type: 'string',
+  enum: MODEL_IDS,
+  description: `The model for the minion's turns, from the model table in your prompt. Required. gpt-6-* are Codex, only on a person's ask. ${ADVISOR_TRIAL}`,
+};
+export const EFFORT = {
+  type: 'string',
+  enum: EFFORT_IDS,
+  description: "The effort for the minion's turns, as in its composer. Required: the effort the model table pairs with your model for this kind of work. xhigh only after a Fable run failed twice or a person asks; never max.",
+};
+
+export const PROPERTIES = {
+  type: 'object',
+  description: 'Properties as { key: value }, e.g. { "type": "feature", "area": ["town", "ui"], "build": 8 }. Keys and values come from list_properties; aliases resolve to their value, and null clears a key. Unknown keys and values are refused with a "did you mean".',
+  additionalProperties: true,
+};
+
 /** A family's answer for a tool that is another family's. */
 export const NOT_HERE = Symbol("not this family's tool");

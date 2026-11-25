@@ -561,6 +561,13 @@ export interface EveryScheme {
 const envDenies = (folders: string[]) => folders.flatMap((d) => [`Read(/${d}/**/.env)`, `Read(/${d}/**/.env.*)`]);
 
 /**
+ * The one `node` command a Taskmaster may run: citadel:briefing and citadel:subagents run kit/model-tiers.ts when
+ * they load, and a refused `!` command fails the whole skill (#1979). Exact rules, each path as Claude Code fills it
+ * in (`..` and all; tried in real runs), so no other script, argument or chained command matches.
+ */
+const modelTierRules = (kit: string) => ['briefing', 'subagents'].map((skill) => `Bash(node "${kit}/skills/${skill}/../../model-tiers.ts")`);
+
+/**
  * How the coordinator may look at the project's code: its main checkout and every ticket folder,
  * readable but not writable. Bash runs only read-only commands (READ_ONLY_COMMANDS), on those folders,
  * readDirs and the box-health files: Claude Code still refuses a read command's path outside them.
@@ -581,6 +588,7 @@ export function coordinatorAccess(
   readDirs: string[] = [],
   everyScheme: EveryScheme | null = null,
   openTickets: string[] | null = null,
+  kit: string | null = null,
 ): { addDirs: string[]; settings: { permissions: { deny: string[]; allow: string[] }; autoMemoryDirectory?: string } } {
   const subdirs = (dir: string) => {
     try {
@@ -617,6 +625,7 @@ export function coordinatorAccess(
             .concat(HEALTH_FILES)
             .map((p) => `Read(/${p})`),
           ...READ_ONLY_COMMANDS,
+          ...(kit ? modelTierRules(kit) : []),
           ...readGit.flatMap((d) => READ_ONLY_GIT.map((c) => `Bash(git -C ${d} ${c})`)),
           ...(repoDir ? GIT_FETCH.map((c) => `Bash(git -C ${repoDir} ${c})`) : []),
         ],
@@ -844,7 +853,17 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   };
   if (rules.length) settings.permissions.ask = rules;
   if (ticket.kind === 'coordinator') {
-    const access = coordinatorAccess(project.repo_dir, facts.folders.tickets, sharedDir, memoryDir, project.id === GLOBAL_OWNER ? CHECKOUT : null, [facts.folders.data, join(homedir(), '.local/share/mise/installs')], project.id === GLOBAL_OWNER ? (facts.everyScheme ?? null) : null, facts.folders.openTickets ?? null);
+    const access = coordinatorAccess(
+      project.repo_dir,
+      facts.folders.tickets,
+      sharedDir,
+      memoryDir,
+      project.id === GLOBAL_OWNER ? CHECKOUT : null,
+      [facts.folders.data, join(homedir(), '.local/share/mise/installs')],
+      project.id === GLOBAL_OWNER ? (facts.everyScheme ?? null) : null,
+      facts.folders.openTickets ?? null,
+      kit,
+    );
     addDirs.push(...access.addDirs.filter((d) => !addDirs.includes(d)));
     const { permissions, ...rest } = access.settings;
     Object.assign(settings, rest);

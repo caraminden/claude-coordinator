@@ -1,7 +1,7 @@
 // launchPlan (src/turn-launch.ts) on its own: one fact changed at a time, and what that alone changes in
 // the plan. The whole launch of each kind of turn is pinned in test/turn-launch.test.ts.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -279,4 +279,20 @@ test('copyPinned links the pinned files instead of copying their bytes, and keep
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// #1979: a skill's load-time `!` command is checked against the allow rules after CLAUDE_SKILL_DIR is filled in,
+// as written (`..` kept; tried in real runs), and nobody can answer a Taskmaster's prompt.
+test('a Taskmaster may run exactly what citadel:briefing and citadel:subagents run when they load', () => {
+  const p = plan({ ticket: taskmaster });
+  const kit = flag(p, '--plugin-dir')!;
+  const rules = ['briefing', 'subagents'].map((skill) => {
+    const [, command] = readFileSync(join(import.meta.dirname, '..', 'kit', 'skills', skill, 'SKILL.md'), 'utf8').match(/^!`(.+)`$/m)!;
+    return `Bash(${command.replace('${CLAUDE_SKILL_DIR}', join(kit, 'skills', skill))})`;
+  });
+  assert.deepEqual(
+    file(p, 'settings.json').permissions.allow.filter((r: string) => r.startsWith('Bash(node')),
+    rules,
+  );
+  assert.ok(!file(plan(), 'settings.json').permissions.allow.some((r: string) => r.startsWith('Bash(')), "a minion's rules don't change");
 });

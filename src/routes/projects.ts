@@ -144,7 +144,9 @@ export function schemeTarget(app: App, from: Ticket, scheme: unknown) {
  */
 function sameSchemeTarget(app: App, from: Ticket, scheme: unknown, person: unknown) {
   const { store } = app;
-  const want = String(scheme ?? '').trim().toLowerCase();
+  const want = String(scheme ?? '')
+    .trim()
+    .toLowerCase();
   const own = store.getProject(from.project_id)!;
   if (want !== own.name.toLowerCase() && want !== String(own.id)) return null;
   if (person == null || person === '') return null;
@@ -2045,7 +2047,11 @@ export const projectRoutes: Route[] = [
       if (!held) store.setSetting(replyKey(to.id, own.id), from.id);
       // Citadel may answer for a while once a message of theirs has reached it.
       if (toCitadel && !held) store.setSetting(askedCitadelKey(own.id), Date.now());
-      if (!held) runner.emit(from.id, 'note', { need, text: `${wake || woke ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}${mate ? ` (${store.getUser(to.coordinator_of!)?.name ?? 'someone'}'s)` : ''}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });
+      if (!held)
+        runner.emit(from.id, 'note', {
+          need,
+          text: `${wake || woke ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}${mate ? ` (${store.getUser(to.coordinator_of!)?.name ?? 'someone'}'s)` : ''}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}`,
+        });
       return json(res, 202, { scheme: project.name, held, left, ...(woke ? { woke } : {}), ...(file ? { file: file.path } : {}) });
     },
   },

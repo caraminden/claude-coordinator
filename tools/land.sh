@@ -1083,6 +1083,7 @@ guards() {
     *)
       grep -v '^full output: ' <<<"$guard_out" | tail -n 60 | sed 's/^/land: guard: /' >&2
       retro_log "guard · $label · $(guard_files) · $((SECONDS - t0))s"
+      [ ! -f "$state/split" ] || ! grep -qF "${DEPLOY_QUEUE_TICKET##*/} $branch" "$state/split" || rm -f "$state/split" # the red train's bad ship is found (split_over)
       refuse "guard tests failed on $short, the branch rebased onto ${build:-main} (output above), so no CI run was spent and $untouched; $branch keeps the rebased work. Run citadel-test on that file, fix it, commit, then run this again" ;;
   esac
 }
@@ -2465,6 +2466,7 @@ elif [ "$rc" = 1 ]; then
     [ "$main_red_riders" = 0 ] || retry_in_place "red on main too: $main_red" # alone, a retry would only run CI on it again
     refuse "tests failed in CI ($ci_url) in $main_red, which fails on main's own tip too (run alone here): main is red, not this change, so $untouched${main_red_other:+. The run was also red on $main_red_other, which may be yours}. Run this again once main is green (a fix for $main_red has shipped)"
   fi
+  [ -z "$split_of" ] || retro_log "ship train red · $split_of · $branch · $ci_url"
   split_over
   # shellcheck disable=SC2046 # file names
   pulled_out $(train_real || train_failing)

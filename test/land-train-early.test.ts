@@ -265,7 +265,6 @@ test('conflict prep: when the train goes red and the rider drops out, the ship c
   assert.doesNotMatch(done[3].stderr, /resolved the rebase's conflicts/);
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'a.txt: four']);
   assert.equal(git(l.r.source, 'show', 'main:a.txt'), 'four');
-  assert.equal(git(l.r.source, 'rev-parse', 'ticket/3-x'), l.was[2], 'the red ship is as it was');
   l.done();
 });
 

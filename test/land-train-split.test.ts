@@ -7,7 +7,7 @@ import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { ci, git, land, setup } from './land-fixture.ts';
-import { line, shipped } from './land-train-fixture.ts';
+import { line, shared, shipped } from './land-train-fixture.ts';
 
 type Line = Awaited<ReturnType<typeof line>>;
 type Done = { status: number | null; stderr: string }[];
@@ -55,10 +55,18 @@ for (const [where, bad, tested, runs, deploys, alone] of [
   ['last', 7, ['3/6'], 7, 5, [5, 6, 7]],
 ] as const) {
   test(`one bad ship ${where} of six: each green section ships at once, only it goes back, and the rest form a full train again`, async () => {
-    const l = await line(ships(9, { [bad]: redTxt() }), { FAKE_RED_PATH: 'red.txt', LAND_TRAIN_MAX: '5' });
+    const l = await line(ships(9, { [bad]: redTxt() }), (d) => ({ FAKE_RED_PATH: 'red.txt', LAND_TRAIN_MAX: '5', ...shared(d) }));
     const done = await l.go();
     onlyBack(l, done, bad);
     assert.deepEqual(cuts(done), tested);
+    const retro = readdirSync(join(l.r.dir, 'shared/retro-log'))
+      .map((d) => readFileSync(join(l.r.dir, 'shared/retro-log', d, 'land.md'), 'utf8'))
+      .join('');
+    // The retro log's verdict (src/land-reds.ts) names the train's leader and the ship found, once.
+    assert.deepEqual(
+      [...retro.matchAll(/ship train red · (\S+) · (\S+)/g)].map((m) => `${m[1]} ${m[2]}`),
+      [`ticket/2-x ticket/${bad}-x`],
+    );
     for (const n of alone) assert.match(done[n - 1].stderr, new RegExp(`ship train: ticket/${n}-x is one of the \\d ships ticket/2-x's red train is down to, so this tests it alone`));
     assert.equal(l.runs(), runs);
     assert.equal(l.deployed().length, deploys, 'each section goes live by itself');

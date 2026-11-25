@@ -14,9 +14,19 @@ the last one in line waited for every run ahead of it.
 - **The shape** (Josh, 2026-11-20, "Plan approved: build it this way"): the ship at the front of the line takes up to
   `LAND_TRAIN_MAX` (6) ships waiting behind it, in line order. It replays each onto the one before it, runs CI once on
   the top, fast-forwards main to the top, and deploys once.
-- **A red train** is bisected by its prefixes, each assumed green below the first red one. The green part ships. The
-  first red ship is refused with its own CI run's failure, as it would be alone. The ships after it go back in line,
-  in their places. The front red: every rider goes back in line, and the front is refused as usual.
+- **A red train keeps splitting** (#1899; Josh, 2026-11-24: "keep splitting and any green section gets shipped, until
+  the bad change is found and then pulled out to be fixed and full train starts over"). It replaces "bisected, then the
+  green part ships and the first red ship is refused"; "the bisect" below means this splitting. CI runs the front part of
+  the train. Green: those ships go live at once, and the next ship in line fronts what is left, with those ships only
+  (`<state>/split` lists them; ships waiting behind don't join). Red: a smaller part. A split refuses a ship only as a
+  front tested alone on main, so a flake or a pair that fails only together blames nobody who passes alone: of such a
+  pair the earlier one ships and the later one goes back. Once the bad ship is found, the next front builds a full train
+  again from everything waiting. No early run is stacked on a train being split. Suspects still come first: a confirmed
+  cause (below) leaves at once and the rest get one run, no halves. Names that nothing confirms only pick where to cut:
+  just before the first of them, or the middle when they name nobody or more than half the ships. One bad ship of six
+  takes 3 to 5 CI runs to find, the red one included.
+- **What a pulled-out ship needs to board again** (#1899): the test files it failed run in its next smoke check, before
+  it gets in line (`<state>/pulled/`).
 - **Suspects before the bisect** (#1346; Cara, 2026-11-20: "we pull out the minions that touched the failing tests
   as they are vastly more likely to be the culprit and we send them back to minions to investigate and fix. We
   replace their slots in the current train with the next waiting minions and rerun the tests on the new train"). This
@@ -115,7 +125,7 @@ Who is passed over (each keeps its place, and ships on its own when it reaches t
 The guard tests (`guards()`, #1240) run on the train's top too, before its CI run (#1479, after the Nov 21 03:46 PST
 incident cost 6 CI runs on one rider's guard break). Red there: the train's prefixes are bisected with them, the first
 red rider is refused with their output, and the train is built again without it. A red train's CI bisect runs them on
-each step first, and a guard red is that step's answer with no CI run.
+each step first, and a guard red is that step's answer with no CI run; a front that fails its own ends the split.
 
 No train forms when CI can't answer (no remote, `LAND_CI=0`, a recent ci-down note), while deploys are refusing or
 rolled back, or with `<state>/train-off`. One ship's perigee fallback run is all perigee should take on. A train keeps its
@@ -154,8 +164,8 @@ Limits we know about:
 
 - shortcut: suspects come from the file paths in each ship's diff and the test's relative imports two levels deep,
   not from the failure text naming a ship. Upgrade if suspects often miss.
-- shortcut: a ship refused by a bisect waits for the whole bisect (log2 of the train's runs) before it hears. Upgrade
-  if trains are often red.
+- shortcut: a split's bad ship hears only when it fronts its part, after each green part ahead of it has gone live.
+  Upgrade if trains are often red.
 - shortcut: a rider's flake lines print in the front's output, under the front's branch, so the flake count names the
   front. Upgrade if flake blame starts to matter per ship.
 - A rider that hasn't moved its branch within 10 s of main moving may be missing from the release row. The deploy

@@ -61,12 +61,12 @@ test("the bisect counts its CI runs, or says land.sh's K of N; flakes run once m
     'land: failed in the full run but passed alone (test/memory.test.ts, test/minion-index.test.ts, test/overlord.test.ts, test/wake-when-live.test.ts); running CI once more on d66e2d82, the land needs a fully green run',
     wait,
     `land: CI passed on d66e2d82 in 337s (${url}/2)`,
-    `land: the bisect found ticket/1331-e the first ship that turned the train red (${url}/3): it is refused, and the 1 before it ship`,
+    'land: bisect: the first 2 of 5 ships tested green, so they ship now; back in line with nobody refused: ticket/1331-e ticket/1351-f ticket/1350-g; the red may be: ticket/1331-e',
   ];
   assert.deepEqual(landNews(lines.join('\n'), name).slice(1), [
     { tone: 'bad', text: 'CI red on the train: the Overlord hears of every start, and gets a card when one… · checks run one at a time' },
     { tone: 'warn', text: 'memory, minion-index, overlord +1 more failed in the full suite but passed alone: one fresh CI run' },
-    { tone: 'bad', text: '#1331 dropped: it turned the train red; back in line: #1351, #1350' },
+    { tone: 'warn', text: 'The first 2 of 5 ships tested green, so they ship now; back in line: #1331, #1351, #1350' },
   ]);
 });
 

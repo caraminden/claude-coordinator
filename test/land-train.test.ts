@@ -30,15 +30,14 @@ test('a red train is bisected: the ship that turned it red is refused with its o
   const l = await line([{}, {}, {}, { change: ['red.txt', 'red\n'] }, {}, {}], { FAKE_RED_PATH: 'red.txt' });
   const done = await l.go();
   assert.equal(done[3].status, 1, done[3].stderr);
-  assert.match(done[3].stderr, /land: tests failed in CI on ticket\/2-x's ship train \(https:\/\/ci\/\d+\), and its bisect found ticket\/4-x the first ship that turned it red/);
+  assert.match(done[3].stderr, /land: tests failed on the rebased branch in CI/);
   assert.match(done[3].stderr, /not ok 1 - the red test's output/, 'its own failure, on its own stderr');
-  assert.equal(git(l.r.source, 'rev-parse', 'ticket/4-x'), l.was[3], 'the red ship is as it was');
   assert.match(done[1].stderr, /suspects: no ship on the train touched test\/real\.test\.ts or what it imports, so the bisect looks for the ship/, 'the real failure maps to no ship (#1346)');
-  assert.match(done[1].stderr, /the bisect found ticket\/4-x the first ship that turned the train red \(https:\/\/ci\/\d+\): it is refused, and the 1 before it ship/);
-  // Each step for the Releases page (#1368, src/land-news.ts): the leader and ticket/3-x, then ticket/4-x too.
+  assert.match(done[1].stderr, /bisect: the first 2 of 5 ships tested green, so they ship now; back in line with nobody refused: ticket\/4-x ticket\/5-x ticket\/6-x; the red may be: ticket\/4-x ticket\/5-x ticket\/6-x/);
+  // Each step for the Releases page (#1368, src/land-news.ts): the leader and ticket/3-x, which ship.
   assert.deepEqual(
     [...done[1].stderr.matchAll(/^land: bisect: testing the first (\d+) of (\d+) ships$/gm)].map((m) => `${m[1]}/${m[2]}`),
-    ['2/5', '3/5'],
+    ['2/5'],
   );
   for (const i of [1, 2, 3, 5, 6]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   shipped(l, done[2], 3, 2, 2);
@@ -154,7 +153,7 @@ test('a red train with two confirmed causes and a failure no ship can be pinned 
   assert.match(done[1].stderr, /suspects: no ship could be pinned on test\/real\.test\.ts, so they stay on the train while the confirmed causes leave/);
   assert.match(done[1].stderr, /red again on test\/real\.test\.ts, which no ship could be pinned on, now that the confirmed causes are off the train: the bisect looks for the ship/);
   assert.equal(done[4].status, 1, done[4].stderr);
-  assert.match(done[4].stderr, /its bisect found ticket\/5-x the first ship that turned it red/);
+  assert.match(done[4].stderr, /land: tests failed on the rebased branch in CI/);
   for (const i of [1, 2, 6]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f6.txt: 6']);
   l.done();
@@ -173,22 +172,19 @@ test('a refilled train red again on the same test: the guess was wrong, so the h
   assert.match(done[1].stderr, /#4 goes back in line: the train was red again on test\/real\.test\.ts without it, so the guess was wrong/);
   assert.doesNotMatch(done[3].stderr, /refuse|likely the cause/, 'the innocent suspect is never refused (#1403)');
   assert.match(done[1].stderr, /red again on test\/real\.test\.ts with the likely causes off the train, so the guess was wrong: the bisect looks for the ship/);
-  assert.match(done[1].stderr, /the bisect found ticket\/5-x the first ship that turned the train red \(https:\/\/ci\/\d+\): it is refused, and the 1 before it ship/);
+  assert.match(done[1].stderr, /bisect: the first 2 of 4 ships tested green, so they ship now; back in line with nobody refused: ticket\/5-x ticket\/6-x; the red may be: ticket\/5-x ticket\/6-x/);
   assert.equal(done[4].status, 1, done[4].stderr);
-  assert.match(done[4].stderr, /its bisect found ticket\/5-x the first ship that turned it red/);
+  assert.match(done[4].stderr, /land: tests failed on the rebased branch in CI/);
   for (const i of [1, 2, 3, 4, 6, 7]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   shipped(l, done[2], 3, 2, 2);
-  // Ship 4, back in line, fronts the next train with ships 6 and 7.
-  for (const i of [6, 7]) shipped(l, done[i - 1], i, 4, 3);
-  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'test/real.test.ts: // x', 'f6.txt: 6', 'f7.txt: 7']);
-  // The next train's early run (#1568) started beside the red train's and was dropped with it; the refilled train stacks
-  // the next one again (dropped too if it was pushed before that train went red), and at the deploy ship 4's train is
-  // stacked once more, and that run counts. Each dropped run is a run the early start cost.
+  // Ship 4, back in line, fronts the next train with ship 7: ships 5 and 6 are still being split, so they don't ride it.
+  shipped(l, done[6], 7, 4, 2);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'test/real.test.ts: // x', 'f7.txt: 7', 'f6.txt: 6']);
+  // The next train's early run (#1568) started beside the red train's and was dropped with it. The split starts none, so
+  // the only other ones are stacked on ship 4's train, which is no part of the split.
   assert.match(done[1].stderr, /early next train: dropped the early CI run on ticket\/6-x's train \(the train ahead went red\)/);
-  assert.match(done[1].stderr, /early next train: ticket\/4-x \(with ticket\/6-x ticket\/7-x riding\) is stacked on this train's top and its CI starts now, while this one deploys/);
-  assert.match(done[3].stderr, /early next train: CI started on this train at \d\d:\d\d beside ticket\/2-x's, and it came out the same, so that run is its CI/);
-  const drops = done[1].stderr.match(/dropped the early CI run on \S+ train \(the train ahead went red\)/g)!.length;
-  assert.equal(l.runs(), 6 + drops, "ship 1's, the red train's, the refilled train's, two for the bisect, the next train's (its early run), and each early run dropped with a red");
+  const drops = done.flatMap((d) => d.stderr.match(/^land: early next train: dropped the early CI run on \S+ train \(the train ahead went red\)/gm) ?? []).length;
+  assert.equal(l.runs(), 7 + drops, "ship 1's, the red train's, the refilled train's, one for the bisect, ship 4's train's, ships 5's and 6's, and each early run dropped with a red");
   l.done();
 });
 
@@ -202,7 +198,7 @@ test("a held suspect whose test CI didn't rerun on the refilled train is no pass
   assert.doesNotMatch(done[1].stderr, /#4 is refused/);
   assert.doesNotMatch(done[3].stderr, /refuse|likely the cause/, 'the innocent suspect is never refused');
   assert.equal(done[4].status, 1, done[4].stderr);
-  assert.match(done[4].stderr, /its bisect found ticket\/5-x the first ship that turned it red/);
+  assert.match(done[4].stderr, /land: tests failed on the rebased branch in CI/);
   for (const i of [1, 2, 3, 4, 6, 7]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   l.done();
 });
@@ -217,7 +213,7 @@ test('a files guess that names two ships holds neither: a green run without both
   assert.match(done[1].stderr, /suspects: the files name more than one ship \(#3, #4\) for test\/real\.test\.ts/);
   assert.doesNotMatch(done[2].stderr, /refuse|likely the cause/, 'the innocent one is never refused');
   assert.equal(done[3].status, 1, done[3].stderr);
-  assert.match(done[3].stderr, /its bisect found ticket\/4-x the first ship that turned it red/);
+  assert.match(done[3].stderr, /land: tests failed on the rebased branch in CI/);
   for (const i of [1, 2, 3, 5]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   l.done();
 });
@@ -238,7 +234,7 @@ for (const [what, body, env] of [
     assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\): CI is red .* #4: perigee cannot fail those tests alone/);
     assert.match(done[1].stderr, /#4 goes back in line/);
     assert.equal(done[2].status, 1, done[2].stderr);
-    assert.match(done[2].stderr, /its bisect found ticket\/3-x the first ship that turned it red/);
+    assert.match(done[2].stderr, /land: tests failed on the rebased branch in CI/);
     for (const i of [1, 2, 4, 5]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
     l.done();
   });
@@ -249,7 +245,7 @@ test('a front that is only a files guess is not refused on it: the bisect finds 
   const done = await l.go();
   assert.match(done[1].stderr, /suspects: ticket\/2-x itself is only a guess from the files for test\/real\.test\.ts, and it can't wait off its own train, so the bisect looks for the ship/);
   assert.equal(done[3].status, 1, done[3].stderr);
-  assert.match(done[3].stderr, /its bisect found ticket\/4-x the first ship that turned it red/);
+  assert.match(done[3].stderr, /land: tests failed on the rebased branch in CI/);
   for (const i of [1, 2, 3]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   l.done();
 });

@@ -104,10 +104,9 @@ export function landNews(output: string, name: (branch: string) => string): News
       done();
       redNews(i); // land.sh guesses before it bisects, so no "CI is red" line came first
       news.push({ tone: 'bad', text: `Sent back to their minions: ${m[1].replace(/\(([^)]*)\)/g, (_, fs: string) => `(${fs.split(', ').map(short).join(', ')})`)}` });
-    } else if ((m = s.match(/^the bisect found (\S+) the first ship that turned the train red .*?the (\d+) before it ship/))) {
+    } else if ((m = s.match(/^bisect: the first (\d+) of (\d+) ships tested green, so they ship now; back in line with nobody refused: ([^;]*)/))) {
       done();
-      const at = riders.indexOf(m[1]);
-      news.push({ tone: 'bad', text: `${name(m[1])} dropped: it turned the train red${backInLine(at < 0 ? [] : riders.slice(at + 1))}` });
+      news.push({ tone: 'warn', text: `The first ${m[1]} of ${m[2]} ships tested green, so they ship now${backInLine(m[3].split(' ').filter(Boolean))}` });
     } else if ((m = s.match(/^the bisect found (\S+) itself red/))) {
       done();
       news.push({ tone: 'bad', text: `${name(m[1])} itself red${backInLine(riders)}` });

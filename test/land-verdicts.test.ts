@@ -34,7 +34,7 @@ const NOT_VERDICTS: Record<string, string> = {
   gate: 'calls cut_off, flake_only and known_flakes, benched here',
   smoke: 'the smoke check before the line: one ship alone, its own red',
   train_build: 'builds the train; keeps the last log for a rider it drops',
-  train_bisect: 'bisects with CI runs: no guess, each run decides',
+  train_bisect: 'splits with CI runs: a guess only picks where to cut, each run decides',
   train_suspects: 'calls train_real, train_pin and train_suspects_of, benched here, then holds or refuses what they name',
   flake_keep: 'calls flake_only and train_suspects_of, benched here',
 };

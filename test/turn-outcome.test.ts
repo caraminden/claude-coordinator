@@ -94,3 +94,13 @@ test('a row saved before the retries record reads its four counters', () => {
   assert.deepEqual(retriesOf({ resumes: 0 }), {});
   assert.deepEqual(retriesOf({ retries: { net: 1 }, resumes: 2 }), { net: 1 });
 });
+
+test('a SIGABRT is put down to claude aborting itself, with its last stderr word on why, not to a kill or a restart', () => {
+  const killed = (stderr: string[], signal = 'SIGABRT') => String(outcome(end({ turn: {}, exit: { code: null, signal }, stderr, ran: { unit: true, container: true } })).killed);
+  const quiet = killed([]);
+  assert.match(quiet, /^Claude crashed with SIGABRT\./);
+  assert.match(quiet, /couldn't start a thread or a process/);
+  assert.doesNotMatch(quiet, /outside Citadel|pkill|server restarted/);
+  assert.match(killed(['x', 'pthread_create: Resource temporarily unavailable', 'y']), /It said: pthread_create: Resource temporarily unavailable/);
+  assert.match(killed([], 'SIGKILL'), /^Killed by SIGKILL from outside Citadel\./);
+});

@@ -143,9 +143,13 @@ export function outcome(end: TurnEnd): Outcome {
   // Not the turn's doing, so it counts towards no cap.
   if (turn?.paused) return { kind: 'paused', followUps: [], ...base, retry: { via: 'restart', retries: r } };
   const code = exit?.code ?? null;
+  // Citadel never sends SIGABRT: claude raises it on itself when it can't go on (#1848: five turns whose container was refused threads).
+  const abort = exit?.signal === 'SIGABRT';
+  const said = abort ? end.stderr.findLast((l) => /pthread|resource temporarily|EAGAIN|out of memory|fatal error|panic/i.test(l))?.trim() : null;
   // Citadel only signals claude on a stop, so any other signal (143 is claude's own exit on SIGTERM) came from outside.
-  const killed =
-    exit && (exit.signal || code === 143)
+  const killed = abort
+    ? `Claude crashed with SIGABRT.\nIt stops itself this way when it can't go on: most likely its ${end.ran.container ? 'container' : 'unit'} was at a limit and it couldn't start a thread or a process, or it ran out of memory.${said ? ` It said: ${said.slice(0, 300)}` : ''}`
+    : exit && (exit.signal || code === 143)
       ? `Killed by ${exit.signal ?? 'SIGTERM (exit 143)'} from outside Citadel.\nNobody pressed Stop and turns have no time limit, so most likely ${end.ran.unit ? '' : 'the server restarted (this turn ran without a unit of its own) or '}one of the turn's own commands (a kill or pkill) hit claude's process.`
       : // Its wrapper went too, with no record of how: nobody pressed Stop, so it failed (#468 S03-4).
         !exit

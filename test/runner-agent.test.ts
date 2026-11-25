@@ -438,7 +438,7 @@ test("the owner's caps.json sets the caps on that PC; today's numbers without on
 
 test("Linux: the owner's squeeze is used, and the all-CI cap goes on the runners' slice only where the installer made one", async () => {
   const { squeeze, calls, units } = linuxRunners();
-  squeeze.percent = 10;
+  Object.assign(squeeze, { percent: 10 });
   await squeeze.update(cleanShips([{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux-2' }]));
   assert.ok(calls.includes('citadel-runner-caraminden-twireader.service CPUQuota=160%'), calls.join('; '));
   const ran: string[] = [];

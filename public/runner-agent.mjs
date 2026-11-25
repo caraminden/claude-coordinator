@@ -346,6 +346,8 @@ export const SLICE = 'citadel-runners.slice';
  * The PC's owner's caps (#1933), from caps.json beside this file, which only they (as admin or root) can write:
  * { "cpu_percent": 75, "squeeze_percent": 30 }, each optional. Read once, at the agent's start. A wrong value is logged
  * and keeps its default. The squeezes never exceed the cap they sit in.
+ * @param {string} dir
+ * @param {(line: string) => void} [log]
  */
 export function ownerCaps(dir, log = () => {}) {
   const caps = { cpu_percent: CI_CPU_PERCENT, squeeze_percent: SQUEEZE_PERCENT };

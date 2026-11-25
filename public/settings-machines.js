@@ -130,7 +130,7 @@ export function machinesPage(main = {}) {
     h('p', { id: 'emulator-lease', class: 'muted small', role: 'status' }, 'Android emulator: checking…'),
     // The CI desktop's load moved to the CI page (#968, Cara: "move the CI box performance page from machines into here"), since #1423 the Releases page's Overview tab.
     h('p', { class: 'muted small' }, "CI runners, their queue and the CI PCs' load are on ", h('a', { href: `#/p/${view.projectId}/ci` }, "the Releases page's Overview tab"), '.'),
-    h('div', { class: 'row machines-bar runners-bar' }, h('span', { class: 'muted small' }, "A CI runner host adds and removes schemes' CI runners on its PC (tools/ci-runner/README.md), for the schemes you lend it to."), h('span', { class: 'spacer' }), runners.toggle),
+    h('div', { class: 'row machines-bar runners-bar' }, h('span', { class: 'muted small' }, "A CI runner host adds and removes schemes' CI runners on its PC, for the schemes you lend it to."), h('span', { class: 'spacer' }), runners.toggle),
     runners.form,
     h('p', { class: 'muted small' }, 'Nothing typed here runs a command on a machine.'),
     h(

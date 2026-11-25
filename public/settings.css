@@ -153,9 +153,8 @@ a.settings-page-link .settings-row-title { display: inline-flex; align-items: ce
 .settings-card > .cui-notice, .machine-lends > .cui-notice { margin: 0.5rem 0 0; font-size: 0.88em; }
 :is(.instructions-main, .machines-main, .people-main) :is(p.muted, p.cui-notice, .ticket-head > .meta, .settings-card > p), .settings-steps, .machine-facts { max-width: 75ch; }
 .settings-steps { flex-basis: 100%; margin: 0.3rem 0 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 0.5rem; font-size: 0.9rem; }
-.settings-steps > li { counter-increment: step; display: grid; grid-template-columns: 1.6rem 1fr; gap: 0 0.6rem; align-items: start; }
-.settings-steps > li::before { content: counter(step); width: 1.6rem; height: 1.6rem; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); display: grid; place-items: center; font-size: 0.8em; font-weight: 700; }
-.settings-steps > li > * { grid-column: 2; }
+.settings-steps > li { counter-increment: step; position: relative; min-height: 1.6rem; padding-left: 2.2rem; }
+.settings-steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 1.6rem; height: 1.6rem; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); display: grid; place-items: center; font-size: 0.8em; font-weight: 700; }
 
 /* Settings → Members and People */
 .people-list { display: flex; flex-direction: column; gap: 0.25rem; margin: 1rem 0; }

@@ -702,7 +702,7 @@ test('removing a person removes their picture and their switch (#1976)', async (
   assert.ok(!('Paula' in (await as('Josh', '/api/me')).data.avatars.people), 'disabled people are left out');
   assert.equal((await as('Cara', `/api/people/${id}`, undefined, 'DELETE')).status, 200);
   assert.ok(!existsSync(file));
-  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true });
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
   assert.equal(db.prepare('SELECT count(*) AS n FROM settings WHERE key IN (?, ?)').get(`chat_avatars:${id}`, `avatar_pic:${id}`)?.n, 0);
   db.close();
 });

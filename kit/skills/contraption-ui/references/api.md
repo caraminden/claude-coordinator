@@ -650,8 +650,9 @@ Authorization: Bearer <contraption.key>
   The ask answers 404 for an `upload` that isn't this person's through your app, was used, or
   expired; 400 for one named twice or not an upload id.
 - **Rate limits** per person: 10 bug and feature asks in 10 minutes, 60 data asks in 10 minutes,
-  then 429. Uploads: 20 in 10 minutes, and at most 1 GiB uploaded but not yet sent with an ask
-  (429 past either). Held in memory, so a Citadel restart resets the counts.
+  then 429. Uploads: one at a time, 20 and 1 GiB in 10 minutes, and at most 1 GiB uploaded but
+  not yet sent with an ask (429 past any of them, also when a body without a Content-Length runs
+  past the room mid-stream; nothing of it is kept). Held in memory, so a Citadel restart resets the counts.
 - `409` when your app has no home scheme.
 
 ## Your home scheme and its minions
@@ -1098,7 +1099,7 @@ red would hold a real release. So name what your updater gates on.
 | Turn audit kept, text kept, verdict reason | 14 days, 100,000 characters each, 2000 characters |
 | Ask files | 20 files: 16 MiB decoded inline in all; each uploaded one (`asks/files`) 200 MiB, 1 GiB unsent per person, kept a day |
 | Ask text, summary, item | 10,000, 200, 100 characters |
-| Asks per person per 10 minutes | 10 bug/feature, 60 data; 20 uploads |
+| Asks per person per 10 minutes | 10 bug/feature, 60 data; 20 uploads, 1 GiB, one at a time |
 | Minions in one list read | 50 |
 | Relay body, timeout | 64 KiB, 10 s |
 | Embed call | 16 texts of 4,000 characters |

@@ -144,7 +144,8 @@ test('a write that fails inside its own transaction leaves none of it, and the n
 });
 
 // A worker can die with no 'exit' code of its own run (out of memory ends it as terminate() does).
-test('a worker that dies with a queue: every queued write is told, and the server reads and writes the file as it is', async () => {
+test('a worker that dies with a queue: every queued write is told, and the server reads and writes the file as it is', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
   const { store, w } = open({ delayMs: HELD }, (s) => s.setSetting('race-k', 'before'));
   const queued = ['a', 'b', 'c'].map((v) => outcome(store.setSetting('race-k', v)));
   const response = writes.landed!(true)!; // a response waiting for them
@@ -155,6 +156,11 @@ test('a worker that dies with a queue: every queued write is told, and the serve
   await dead;
   assert.deepEqual(await Promise.all([...queued, late]), Array(4).fill('the DB write worker stopped'), 'none is left waiting, none claims to be written');
   await response;
+  assert.deepEqual(
+    logged.mock.calls.map((c) => String(c.arguments[0])).filter((m) => m.startsWith('A response waited')),
+    [],
+    'let go by the death, not by its own time limit',
+  );
   assert.equal(w.queued(), 0);
   assert.equal(store.getSetting('race-k'), 'before', 'what the file holds: none of the lost writes');
   assert.equal(store.getSetting('race-late'), null);

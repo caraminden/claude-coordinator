@@ -274,3 +274,24 @@ test('a stop while a turn is still launching starts no turn, drops its queue and
   assert.match(prompt, /Again/);
   assert.doesNotMatch(prompt, /\bGo\b/, 'the stopped batch is not run again');
 });
+
+test("the Status page's backup check makes no synchronous file call on the server's thread (#1878)", async () => {
+  const { appBackup, readBackups } = await import('../src/backup-freshness.ts');
+  const home = join(root, 'backup-home');
+  const data = join(root, 'backup-data');
+  mkdirSync(join(home, '.local/share/mandate/backups/2026-11-24'), { recursive: true });
+  writeFileSync(join(home, '.local/share/mandate/backups/2026-11-24/m.db'), 'x');
+  mkdirSync(join(data, 'backups'), { recursive: true });
+  writeFileSync(join(data, 'backups', 'coordinator-2026-11-24.db'), 'x');
+  const now = Date.parse('2026-11-24T20:00:00Z');
+  for (const dir of [home, data]) {
+    const seen = await syncCallsUnder(dir, async () => {
+      const one = await appBackup(join(home, '.local/share/mandate'), now);
+      assert.deepEqual(one, { day: '2026-11-24', ok: true });
+      const all = await readBackups(data, home, [{ name: 'mandate', title: 'Mandate' }], now);
+      assert.equal(all.apps[0].day, '2026-11-24');
+      assert.ok(all.db);
+    });
+    assert.deepEqual(seen, [], `synchronous fs calls under ${dir}`);
+  }
+});

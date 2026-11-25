@@ -32,7 +32,7 @@ const now = Date.now();
 const found = await check(targets(db, home, Number(env.WATCHDOG_CITADEL_PORT) || undefined), { unitState: (u) => unitState(u, systemctl), answer });
 // A missed or failed night is one more finding (admins only: its key isn't an app's), pushed like a down alert once it has lasted the threshold, #1142.
 const appRows = db.prepare('SELECT name, title FROM contraptions ORDER BY name').all() as { name: string; title: string }[];
-const missing = backupProblems(readBackups(dataDir, home, appRows, now), now);
+const missing = backupProblems(await readBackups(dataDir, home, appRows, now), now);
 found.set('backup', { title: 'Nightly backup', finding: missing.length ? missing.join('; ') : null });
 const { messageFor, sent, unsent } = step(prev, found, now, minutes * 60_000);
 const message = messageFor(null);

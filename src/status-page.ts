@@ -17,7 +17,7 @@ import { pressure } from './pressure.ts';
 import { AnswerProbe, parseWindow, alertStep, describe, INTERIM, TARGET, SETTING_P95, SETTING_P99, type AnswerWindow } from './answer-time.ts';
 import { readLedger, ledgerSteps, cpuTable, cpuHours, CPU_GROUPS, type CpuWindow, type CpuHour } from './cpu-ledger.ts';
 import { stopEvent, type StopMark } from './sd-watchdog.ts';
-import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
+import { readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
 import { parseStorm, type Storm } from './memory-storms.ts';
 import { parseEpisode, type EaseNow, type Episode } from './memory-ease.ts';
@@ -478,16 +478,18 @@ export class StatusPage {
     const ownId = this.deps.ownScheme();
     const names = new Set(apps.map((a) => `app:${a.name}`));
     const shipTimes = shipTargets(store, days, ownId, (scheme, key) => (key.startsWith('app:') ? names.has(key) : scheme === ownId || (scheme != null && viewer.canSee(scheme))));
+    const home = this.deps.home ?? homedir();
+    const backup = await readBackups(this.deps.dataDir, home, apps, now);
     return {
       now,
       days,
       shipTimes,
-      citadel: this.citadel(viewer, now, days, since, units, apps),
-      apps: apps.map((a) => appVitals(store, a, now, days, since, unitOf(`citadel-app-${a.name}.service`), this.deps.diskUse?.(a) ?? null, this.deps.home)),
+      citadel: this.citadel(viewer, now, days, since, units, backup),
+      apps: apps.map((a, i) => appVitals(store, a, now, days, since, unitOf(`citadel-app-${a.name}.service`), this.deps.diskUse?.(a) ?? null, backup.apps[i])),
     };
   }
 
-  private citadel(viewer: Viewer, now: number, days: string[], since: number, units: UnitState[] | null, apps: ContraptionRow[]): CitadelStatus {
+  private citadel(viewer: Viewer, now: number, days: string[], since: number, units: UnitState[] | null, backup: BackupInfo): CitadelStatus {
     const { store, bootAt } = this.deps;
     const dayOf = (at: number) => pacificDay(at);
     const blank = () => Object.fromEntries(days.map((d) => [d, 0])) as Record<string, number>;
@@ -628,7 +630,6 @@ export class StatusPage {
     if (latest && latest.mem_avail / latest.mem_total < 0.1) reasons.push(['warn', 'under 10% of memory free', 'memory']);
     if (latest && latest.disk_free / latest.disk_total < 0.1) reasons.push(['warn', 'under 10% of disk free', 'disk']);
     if (cpuHigh) reasons.push(['warn', `load over ${cores * CPU_WARN_PER_CORE} on ${cores} cores for ${CPU_WARN_MS / 60_000} min`, 'cpu']);
-    const backup = readBackups(this.deps.dataDir, this.deps.home ?? homedir(), apps, now);
     const backupMissing = backupProblems(backup, now);
     if (backupMissing.length) reasons.push(['bad', `backups: ${backupMissing.join('; ')}`, 'backups']);
     if (ci && ci.tone !== 'ok') reasons.push([ci.tone, enough ? `${ci.runs - ci.green} of the last ${ci.runs} CI runs failed` : `CI red on main: ${redWorkflows.join(', ')}`, 'ci']);
@@ -707,7 +708,7 @@ function shipChanges(r: ReleaseRow): string[] {
 }
 
 /** One app's week: deploys, errors, agent turns and who ran them, disk, its service, and a verdict. */
-export function appVitals(store: Store, a: ContraptionRow, now: number, days: string[], since: number, unit: UnitState | null, disk: DiskUse | null, home = homedir()): AppStatus {
+export function appVitals(store: Store, a: ContraptionRow, now: number, days: string[], since: number, unit: UnitState | null, disk: DiskUse | null, backup: { day: string | null; ok: boolean }): AppStatus {
   const dayOf = (at: number) => pacificDay(at);
   const idx = new Map(days.map((d, i) => [d, i]));
   const zero = () => days.map(() => 0);
@@ -764,7 +765,6 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
   else if (deployTone !== 'ok') reasons.push([deployTone, `${nFailed} of ${deploys.length} deploys failed this week`, 'deploys']);
   if (lastDay >= APP_ERRORS_WARN) reasons.push(['warn', `${lastDay} errors in the last day`, 'errors']);
   if (disk?.warn_gb && disk.data_bytes !== null && disk.data_bytes >= disk.warn_gb * 1e9) reasons.push(['warn', `its data is over ${disk.warn_gb} GB`, 'disk']);
-  const backup = appBackup(join(home, '.local/share', a.name), now);
   if (backup.day && !backup.ok) reasons.push(['warn', `its last backup was ${backup.day}`, 'backup']);
   return {
     name: a.name,

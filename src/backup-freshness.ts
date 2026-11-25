@@ -3,7 +3,7 @@
 // last pulled the off-box copy (deploy/offbox-serve.sh touches offbox/.pulled), when that set was last made (offbox.sh
 // renames SHA256SUMS into place only once every step before it passed), and which apps wrote a dated folder
 // under their own DATA_DIR/backups/<day>/ (the #828 convention, before 04:00 PST).
-import { readdirSync, statSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pacificDay } from './pacific.ts';
 
@@ -28,10 +28,10 @@ export interface BackupInfo {
   apps: AppBackup[];
 }
 
-const newest = (dir: string, pattern: RegExp): string | null => {
+const newest = async (dir: string, pattern: RegExp): Promise<string | null> => {
   try {
     return (
-      readdirSync(dir)
+      (await readdir(dir))
         .filter((f) => pattern.test(f))
         .sort()
         .at(-1) ?? null
@@ -41,48 +41,48 @@ const newest = (dir: string, pattern: RegExp): string | null => {
   }
 };
 
-/** An app's newest dated backup folder with something in it, and whether that is recent enough: today's or yesterday's Pacific day, with slack. */
-export function appBackup(appData: string, now: number): { day: string | null; ok: boolean } {
+/** An app's newest dated backup folder with something in it, and whether that is recent enough: today's or yesterday's Pacific day, with slack. Async: the server's thread never waits on the disk for it (#1878). */
+export async function appBackup(appData: string, now: number): Promise<{ day: string | null; ok: boolean }> {
   const backups = join(appData, 'backups');
-  const days = (() => {
-    try {
-      return readdirSync(backups)
+  const days = await readdir(backups).then(
+    (fs) =>
+      fs
         .filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f))
         .sort()
-        .reverse();
-    } catch {
-      return [];
+        .reverse(),
+    () => [] as string[],
+  );
+  let day: string | null = null;
+  for (const d of days) {
+    const has = await readdir(join(backups, d)).then(
+      (fs) => fs.some((f) => !f.startsWith('.')),
+      () => false,
+    );
+    if (has) {
+      day = d;
+      break;
     }
-  })();
-  const day =
-    days.find((d) => {
-      try {
-        return readdirSync(join(backups, d)).some((f) => !f.startsWith('.'));
-      } catch {
-        return false;
-      }
-    }) ?? null;
+  }
   return { day, ok: !!day && day >= pacificDay(now - 30 * HOUR) };
 }
 
-export function readBackups(dataDir: string, home: string, apps: { name: string; title: string }[], now: number): BackupInfo {
+export async function readBackups(dataDir: string, home: string, apps: { name: string; title: string }[], now: number): Promise<BackupInfo> {
   const dir = join(dataDir, 'backups');
-  const file = newest(dir, /^coordinator-\d{4}-\d{2}-\d{2}\.db$/);
+  const file = await newest(dir, /^coordinator-\d{4}-\d{2}-\d{2}\.db$/);
   let db: BackupInfo['db'] = null;
   try {
     if (file) {
-      const s = statSync(join(dir, file));
+      const s = await stat(join(dir, file));
       db = { at: s.mtimeMs, size: s.size };
     }
   } catch {} // gone between the listing and the stat: no backup to report
-  const mtime = (f: string) => {
-    try {
-      return statSync(join(dataDir, 'offbox', f)).mtimeMs;
-    } catch {
-      return null;
-    }
-  };
-  return { db, pulledAt: mtime('.pulled'), setAt: mtime('SHA256SUMS'), apps: apps.map((a) => ({ name: a.name, title: a.title, ...appBackup(join(home, '.local/share', a.name), now) })) };
+  const mtime = (f: string) =>
+    stat(join(dataDir, 'offbox', f)).then(
+      (s) => s.mtimeMs,
+      () => null,
+    );
+  const [pulledAt, setAt, rows] = await Promise.all([mtime('.pulled'), mtime('SHA256SUMS'), Promise.all(apps.map(async (a) => ({ name: a.name, title: a.title, ...(await appBackup(join(home, '.local/share', a.name), now)) })))]);
+  return { db, pulledAt, setAt, apps: rows };
 }
 
 /**

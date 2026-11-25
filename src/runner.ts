@@ -3483,7 +3483,7 @@ export class Runner {
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
     const same = codexThread?.person === person && codexThread.thread;
-    if (!step && !keepalive) this.seamEnrol(ticket.id);
+    if (!step && !keepalive && !codex) this.seamEnrol(ticket.id);
     let built: Awaited<ReturnType<Runner['buildLaunch']>>;
     try {
       built = await this.buildLaunch(project, ticket, {

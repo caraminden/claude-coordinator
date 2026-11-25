@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -9,7 +9,8 @@ import { agentToken, bootServer, until, fakeClaude } from './helpers.ts';
 // Cara, 2026-11-07: "it should only count actually working minions"). isWorking's own cases: schemecounts.test.ts.
 const root = mkdtempSync(join(tmpdir(), 'scheme-spinner-'));
 after(() => rmSync(root, { recursive: true, force: true }));
-const fake = fakeClaude(root, { release: join(root, 'release') });
+const started = join(root, 'started');
+const fake = fakeClaude(root, { log: { path: started }, release: join(root, 'release') });
 
 test('api/projects: a turn waiting on an approval card is not working until someone answers it', async () => {
   // HOME holds the server's data, as on a real box: the tripwire refuses the card's `echo hi` in a folder beside its home (a CI runner's temp).
@@ -20,7 +21,8 @@ test('api/projects: a turn waiting on an approval card is not working until some
     const t = (await srv.call(`/api/projects/${project.id}/tickets`, { message: 'build it', title: 'Build it' })).data;
     const pill = async () => (await srv.call('/api/projects')).data.find((p: any) => p.id === project.id);
     const minion = () => ({ Authorization: `Bearer ${agentToken(srv.data, t.id)}`, 'Content-Type': 'application/json' });
-    await until('the turn', async () => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion() })).ok);
+    // Once the fake has its prompt the turn's own token is issued: before that a token with no nonce passes, then stops.
+    await until('the turn', async () => existsSync(started) && (await fetch(`${srv.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion() })).ok);
     assert.deepEqual(await pill().then(({ running, working }) => ({ running, working })), { running: true, working: 1 }, 'mid-turn');
 
     const card = await (await fetch(`${srv.base}/api/tickets/${t.id}/approvals`, { method: 'POST', headers: minion(), body: JSON.stringify({ tool_name: 'Bash', input: { command: 'echo hi', description: 'Say hi' } }) })).json();

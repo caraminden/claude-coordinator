@@ -135,7 +135,13 @@ export function withLine(index: string, file: string, line: string | null): stri
 function writeIndex(dir: string, next: string) {
   const path = join(dir, 'MEMORY.md');
   if (existsSync(path) && !plain(path)) throw new Error('MEMORY.md is not a plain file');
-  if (next.split('\n').length - 1 > INDEX_LINES || Buffer.byteLength(next) > INDEX_BYTES) throw new Error('MEMORY.md would pass the 200 lines or 25 KB that load');
+  const was = readIndex(dir);
+  if (next === was) return;
+  // Refuse a cap crossed, or one already crossed and grown: an index over the cap can still be shortened, line by line (2ME3).
+  const lines = next.split('\n').length - 1;
+  const bytes = Buffer.byteLength(next);
+  const grew = (over: boolean, now: number, before: number) => over && now > before;
+  if (grew(lines > INDEX_LINES, lines, was.split('\n').length - 1) || grew(bytes > INDEX_BYTES, bytes, Buffer.byteLength(was))) throw new Error('MEMORY.md would pass the 200 lines or 25 KB that load');
   writeAtomic(path, next);
 }
 

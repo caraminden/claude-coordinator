@@ -21,7 +21,7 @@ export function tidyCard(app: App, p: Proposal): { id: number; card: { id?: stri
 }
 
 /** Settle the proposal's card in the run's chat and tell the run, which then closes itself. */
-function settleCard(app: App, p: Proposal, status: 'approved' | 'rejected' | 'superseded', by: string, text: string) {
+function settleCard(app: App, p: Proposal, status: 'approved' | 'rejected' | 'superseded', by: string, text: string | null) {
   if (p.ticket_id === null) return;
   const found = tidyCard(app, p);
   // A card approved but not yet applied is settled again when the page turns it down or a newer tidy replaces it.
@@ -30,7 +30,7 @@ function settleCard(app: App, p: Proposal, status: 'approved' | 'rejected' | 'su
     app.store.setEventData(found.id, { ...found.card, ...result });
     app.runner.emit(p.ticket_id, 'plan_result', { id: found.card.id, ...result });
   }
-  if (app.store.getTicket(p.ticket_id)?.status !== 'closed') deliverAnswer(app, p.ticket_id, by, text, { memoryProposal: { id: p.id, status } });
+  if (text !== null && app.store.getTicket(p.ticket_id)?.status !== 'closed') deliverAnswer(app, p.ticket_id, by, text, { memoryProposal: { id: p.id, status } });
 }
 
 /** What the card's Approve all covers: every change but the flags, which change nothing. Deletes too (Cara, 2026-11-24, on #1803's card: "Include deletes",
@@ -105,7 +105,8 @@ export const memoryCuratorRoutes: Route[] = [
         body.changes,
       );
       const { proposal, superseded } = app.store.memoryProposals.create({ project_id: project.id, ticket_id: ticket.id, folder: t.folder.id, changes });
-      for (const old of superseded) settleCard(app, old, 'superseded', 'Citadel', `A newer memory tidy (from #${ticket.number}) replaced this one; nothing of yours was applied. Close yourself with close_self.`);
+      // The run's own earlier proposal is settled but not told: "close yourself" would withdraw the card it just made (2ME2).
+      for (const old of superseded) settleCard(app, old, 'superseded', 'Citadel', old.ticket_id === ticket.id ? null : `A newer memory tidy (from #${ticket.number}) replaced this one; nothing of yours was applied. Close yourself with close_self.`);
       const counts = countLine(changes);
       const event = postPlan(app, ticket.id, {
         summary: `Memory tidy: ${counts}`,

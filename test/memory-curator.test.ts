@@ -1,6 +1,6 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -10,8 +10,12 @@ import { applyChanges, checkChanges, countLine, KEEP_MS, MEMORY_PROPOSALS_SCHEMA
 const A = '---\nname: A\ndescription: first\n---\nalpha\n';
 const B = '---\nname: B\ndescription: second\n---\nbeta\n';
 const C = '---\nname: C\ndescription: unindexed\n---\ngamma\n';
+const roots: string[] = [];
+after(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })));
 const setup = () => {
-  const dir = join(mkdtempSync(join(tmpdir(), 'curator-')), 'memory');
+  const root = mkdtempSync(join(tmpdir(), 'curator-'));
+  roots.push(root);
+  const dir = join(root, 'memory');
   mkdirSync(dir);
   writeFileSync(join(dir, 'a.md'), A);
   writeFileSync(join(dir, 'b.md'), B);
@@ -124,6 +128,27 @@ test('put back into a full MEMORY.md leaves that note out and says so, and works
   writeFileSync(join(dir, 'MEMORY.md'), '- [A](a.md) — first\n');
   assert.deepEqual(restoreSaved(dir, backup), { restored: 1, failed: [] });
   assert.deepEqual(snapshot(dir), before);
+});
+
+test('an index already over the cap can be shortened, and Put back works while it stays over (2ME3)', () => {
+  const dir = setup();
+  const filler = '- filler line that is long enough to count\n'.repeat(210);
+  writeFileSync(join(dir, 'MEMORY.md'), `- [A](a.md) — first\n- [B](b.md) — second\n${filler}`);
+  const before = snapshot(dir);
+  const changes = checkChanges(view(dir), [
+    { action: 'index', file: 'a.md', line: '- [A](a.md) — 1st', reason: 'shorter' },
+    { action: 'edit', file: 'b.md', text: 'tidier b', line: '- [B](b.md) — 2nd', reason: 'shorter' },
+  ]);
+  const { changes: out, backup } = applyChanges(dir, changes, new Set([1, 2]));
+  assert.deepEqual(
+    out.map((c) => c.outcome),
+    ['applied', 'applied'],
+  );
+  assert.deepEqual(restoreSaved(dir, backup), { restored: 2, failed: [] });
+  assert.deepEqual(snapshot(dir), before);
+  // Growing it further still refuses.
+  const grow = checkChanges(view(dir), [{ action: 'add', file: 'd.md', text: 'new', line: '- [D](d.md)', reason: 'r' }]);
+  assert.match(applyChanges(dir, grow, new Set([1])).changes[0].outcome!, /^failed: MEMORY.md would pass/);
 });
 
 test('a note changed since the proposal is skipped, and the page sees it first', () => {

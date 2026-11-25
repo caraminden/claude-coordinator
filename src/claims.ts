@@ -198,7 +198,8 @@ export class Claims {
 
   /** `holder` shipped `commit`: kept on each claim it holds until that is live (holderLive) or the claim moves. */
   shipped(holder: number, commit: string): void {
-    this.db.prepare("UPDATE claims SET landed = trim(landed || ' ' || ?) WHERE holder = ?").run(commit, holder);
+    // Once per commit: a hand-off picked up again after a restart reports its ship again.
+    this.db.prepare("UPDATE claims SET landed = trim(landed || ' ' || ?1) WHERE holder = ?2 AND instr(' ' || landed || ' ', ' ' || ?1 || ' ') = 0").run(commit, holder);
   }
 
   /** The claims whose holder shipped something not seen live yet, in every scheme. */

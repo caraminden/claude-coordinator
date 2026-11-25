@@ -1296,6 +1296,7 @@ services.onDeploy = (view) => {
   const deployer = /^#(\d+)$/.exec(view.by);
   const minion = home != null && deployer ? store.getTicketByNumber(home, Number(deployer[1])) : undefined;
   urgentFixes.deployEnded(view.name, minion?.id ?? null, view.state === 'deployed', `Its deploy of ${view.name} ${view.state === 'rolled back' ? 'was rolled back' : 'failed'}`);
+  if (view.state === 'deployed') void passLiveClaims();
   if (home != null) rollback.deployEnded(home, `app:${view.name}`, view.state === 'deployed', view.to, view.said.at(-1) ?? view.state);
   // Nobody watches an auto-deploy (#629), so one that didn't go live is told to the app's home Taskmaster.
   const row = view.by === AUTO_BY && view.state !== 'deployed' ? store.getContraption(view.name) : undefined;
@@ -1904,6 +1905,7 @@ const liveProbes = new LiveProbes({
   },
 });
 runner.probeHold = (id) => liveProbes.hold(id);
+const shipApps = shipDeploys({ store, services, autoDeploy, startDeploy: (row, by, uid) => startDeploy(app, row, by, null, uid) });
 const landHandoffs = new LandHandoffs({
   landings,
   store,
@@ -1924,7 +1926,12 @@ const landHandoffs = new LandHandoffs({
     runner.urgent.done(id);
     runner.startNow.end(id);
     runner.holderShipped(id, commit);
-    void passLiveClaims(); // a front-end ship can be live by now, and another scheme's is live once it is on its main
+    // A front-end ship can be live by now. Another scheme's is once it is on its main, or its apps' deploy is live (the deploy's end passes it on).
+    // shortcut: one whose deploy failed passes on at Citadel's next go-live; make the claim ask the deploy when another scheme keeps claims.
+    void waiters
+      .elsewhere(id)
+      .then((other) => (other && shipApps.apps(id).length ? null : passLiveClaims()))
+      .catch((err) => console.error('Passing on the claims of a ship failed:', err));
     const t = store.getTicket(id);
     if (t && store.getProject(t.project_id)?.land_mode === 'fast') void fastMode.landed(t.project_id, id, commit);
   },
@@ -1948,7 +1955,7 @@ const landHandoffs = new LandHandoffs({
     return waiters.add(id, full || null, text, true);
   },
   buildOwner: (id, n) => store.getSetting<number>(buildOwnerKey(store.getTicket(id)?.project_id ?? 0, n)) ?? null,
-  ...shipDeploys({ store, services, autoDeploy, startDeploy: (row, by, uid) => startDeploy(app, row, by, null, uid) }),
+  ...shipApps,
 });
 // The minions the server is landing for (#727): working, in the views. Synced again after the poll, since settling a
 // land sends its row before the hand-off is marked settled.

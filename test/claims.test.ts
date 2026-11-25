@@ -208,7 +208,7 @@ test("a claim passes on once its holder's ship is live, the holder still open", 
     assert.notEqual(store.getTicket(a.id)!.status, 'closed', 'its holder stays open');
     assert.equal(store.claims.queue(p, 'pipeline-lane')[0].how, 'live');
     assert.match(JSON.stringify(store.eventsOfKinds(a.id, ['note'])), new RegExp(`passed to #${b.number}`));
-    assert.match(JSON.stringify(store.getSetting(`minion-queue:${b.id}`)), /when your change is live/);
+    assert.equal(JSON.stringify(store.getSetting(`minion-queue:${b.id}`)).split('You hold the pipeline-lane claim now').length - 1, 1, 'the new holder hears it once');
     await sweep();
     assert.equal(holder(), b.id, 'a live seen twice passes it on once');
 
@@ -241,6 +241,8 @@ test('a kept claim stays through its next live, once', () => {
   claims.take(1, 'pipeline-lane', 580, 'Josh', 'two pieces', 1000, true);
   claims.setQueue(1, 'pipeline-lane', [601], 'Josh');
   claims.shipped(580, 'one');
+  claims.shipped(580, 'one');
+  assert.equal(at().landed, 'one', 'a ship reported twice (a restart mid-ship) is one ship');
   assert.equal(claims.holderLive(at(), ['one']), undefined);
   assert.deepEqual([at().holder, at().keep, at().landed], [580, 0, ''], 'the first piece is live: it keeps the claim, and the keep is used');
   claims.shipped(580, 'two');

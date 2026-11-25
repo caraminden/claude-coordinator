@@ -1,6 +1,5 @@
 import { dirname, join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
-import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
 import { scheduleFirstWeek } from './first-week.ts';
@@ -16,7 +15,6 @@ import { MinionIndex, MINION_INDEX_SCHEMA } from './minion-index.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
 import { thrown } from './thrown.ts';
-import type { ClaudeEvent } from './claude-events.ts';
 import { ciNumberQueries } from './db/ci-numbers.ts';
 import { contraptionRunQueries } from './db/contraption-runs.ts';
 import { deliveryQueries } from './db/deliveries.ts';
@@ -26,11 +24,14 @@ import { minionQueries } from './db/minions.ts';
 import { pushQueries } from './db/push.ts';
 import { readWarmQueries } from './db/read-warm.ts';
 import { settingQueries } from './db/settings.ts';
+import { eventQueries } from './db/events.ts';
+import { cardQueries } from './db/cards.ts';
+import { seenQueries } from './db/seen.ts';
 import { slowMomentQueries } from './db/slow-moments.ts';
 import { viewQueries } from './db/views.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
-import { copyRow, inScope, scoped } from './read-scope.ts';
+import { copyRow, scoped } from './read-scope.ts';
 import { CHAT, attachEventsForWrite, cardFatesTrigger, eventsHome, eventsMoved, eventsPath, eventsSchema, moveEvents } from './events-db.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
 import {
@@ -58,7 +59,6 @@ import {
   type PersonNote,
   type PersonalLayer,
   type Project,
-  RECAP_AWAY_MS,
   type ReleaseRow,
   type RepoCollaborator,
   STEP_RATIO,
@@ -73,28 +73,14 @@ import {
   type User,
   onboardingOpen,
   titleWithoutBuild,
+  type CardFate,
 } from './db-rows.ts';
 export * from './db-rows.ts';
 
 /** The newest event when #812 landed: a card at or below it still counts a typed message as handling it (PERSON_WROTE), or every old card nobody settled would wake up open. */
 export const TYPED_HANDLES_UP_TO = 696493;
 
-/**
- * SQL on user_message event `a`: a person wrote it in that chat, so a card from before #812 counts it as handling it.
- * Not a relay from another chat (`from`: a minion, this or another scheme's Taskmaster), held mail, a
- * brief, Mandate's hook news, nor a name that isn't a person's (#610).
- */
-/** The Overlord's events every person's Mine shows (#920; public/mine.js inMine says the same): items marked for everyone, and its cards' answers and results so they settle there. */
-const MINE_EVENTS = `(json_extract(data, '$.everyone') = 1 OR kind IN ('question_result', 'question_more', 'card_reply', 'plan_result', 'approval_result')
-  OR (kind = 'user_message' AND (json_extract(data, '$.answer') IS NOT NULL OR json_extract(data, '$.plan') IS NOT NULL)))`;
-const PERSON_WROTE = `json_extract(a.data, '$.from') IS NULL AND json_extract(a.data, '$.mail') IS NULL AND json_extract(a.data, '$.brief') IS NULL
-  AND lower(coalesce(json_extract(a.data, '$.author'), '')) NOT IN (${[...NOT_PEOPLE, 'Mandate'].map((n) => `'${n.toLowerCase().replace(/'/g, "''")}'`).join(', ')})
-  AND coalesce(json_extract(a.data, '$.author'), '') NOT LIKE '#%'`;
-
 const APP_INSTRUCTIONS = 'app_instructions';
-
-/** What Store.recentCards knows of a card: its first person's reply and its result, and the newest event id it looked at. */
-type CardFate = { reply: string | null; result: string | null; upTo: number };
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -2119,60 +2105,8 @@ export class Store {
   /** updateTicket's (src/db/minions.ts): each close gets its own closed_at. */
   lastClosedAt = 0;
 
-  addEvent(ticketId: number, kind: string, data: unknown, reserved?: number): EventRow {
-    const now = Date.now();
-    const json = JSON.stringify(data);
-    // With the write worker on, the id is handed out here, so the row is known before the worker writes it (src/db-writer.ts).
-    let id: number | null = reserved ?? null;
-    if (id === null && this.eventIds) this.eventIds.next = (id = Math.max(this.eventIds.next, this.eventIds.floor())) + 1;
-    const rowid = this.insertEvent(id, ticketId, kind, json, now, data);
-    if (kind === 'user_message' && json.includes('status:')) this.noteLooks(ticketId, json, now);
-    return { id: id ?? (rowid as number), ticket_id: ticketId, kind, data: json, created_at: now };
-  }
-
-  /**
-   * The Status page's looks (#1273): a minion whose title, or a message to it, quotes a tile's tag ("status:citadel/cpu") is
-   * on that tile. Noted as it's written, a health event per tag, so the page reads a few rows and never scans messages.
-   */
-  noteLooks(ticketId: number, text: string, at: number) {
-    for (const tag of new Set(text.match(/status:(?:citadel|app:[\w.-]+)\/[a-z][a-z0-9-]*/g))) this.addHealthEvent('look', at, null, `${tag}\n${ticketId}`);
-  }
-
   /** The next events.id to hand out, set by the write worker's start (src/db-writer.ts); null writes inline and lets SQLite pick. */
   eventIds: { next: number; floor: () => number } | null = null;
-
-  /** addEvent's write: the row (its id, if one was handed out), and its author's latest action. Returns the row's id. */
-  insertEvent(id: number | null, ticketId: number, kind: string, json: string, now: number, data: unknown): number {
-    const r = this.db.prepare('INSERT INTO events (id, ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?, ?)').run(id, ticketId, kind, json, now);
-    // A message or an approval click is its author's latest action in the scheme, for the recap (Store.recap).
-    const actor = kind === 'user_message' ? (data as { author?: unknown } | null)?.author : kind === 'approval_result' ? (data as { by?: unknown } | null)?.by : null;
-    if (typeof actor === 'string') {
-      this.db
-        .prepare(`INSERT INTO last_actions (name, project_id, at) SELECT ?, project_id, ? FROM tickets WHERE id = ?
-        ON CONFLICT (name, project_id) DO UPDATE SET at = MAX(at, excluded.at)`)
-        .run(actor, now, ticketId);
-    }
-    return Number(r.lastInsertRowid);
-  }
-
-  getEvent(id: number): EventRow | undefined {
-    const e = scoped(this.db, `event:${id}`, () => this.db.prepare('SELECT * FROM events WHERE id = ?').get(id) as EventRow | undefined);
-    return copyRow(e);
-  }
-
-  /** Replace an event's data, for cards whose status lives in the card (plans). */
-  setEventData(id: number, data: unknown) {
-    this.db.prepare('UPDATE events SET data = ? WHERE id = ?').run(JSON.stringify(data), id);
-    this.forgetCards(id);
-  }
-
-  /**
-   * A chat's events of these kinds after event `afterId`, oldest first: by index, so a long chat's thousands of Claude
-   * events are never read. Reading a Taskmaster's whole chat to answer one card held the server 1-3 s (#759).
-   */
-  eventsOfKinds(ticketId: number, kinds: string[], afterId = 0): EventRow[] {
-    return this.db.prepare('SELECT * FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind IN (SELECT value FROM json_each(?)) AND id > ? ORDER BY id').all(ticketId, JSON.stringify(kinds), afterId) as unknown as EventRow[];
-  }
 
   /** A project's artifacts, newest first, with the title of the ticket that made each. */
   listArtifacts(projectId: number): (Artifact & { ticket_title: string; ticket_kind: TicketKind; ticket_number: number | null })[] {
@@ -2359,46 +2293,6 @@ export class Store {
     this.db.prepare('DELETE FROM claude_state WHERE path = ?').run(path);
   }
 
-  /** When `name` last looked at each of a project's threads: ticket id -> time. */
-  seenTimes(name: string, projectId: number): Record<number, number> {
-    // In a read scope (#1527) one read for every scheme: the scheme list asked twice a scheme, each walking all their marks.
-    if (inScope(this.db)) {
-      const all = scoped(this.db, `seen:${name}`, () => this.db.prepare('SELECT s.ticket_id, s.seen_at, t.project_id FROM ticket_seen s JOIN tickets t ON t.id = s.ticket_id WHERE s.name = ?').all(name) as { ticket_id: number; seen_at: number; project_id: number }[]);
-      return Object.fromEntries(all.filter((r) => r.project_id === projectId).map((r) => [r.ticket_id, r.seen_at]));
-    }
-    const rows = this.db.prepare('SELECT s.ticket_id, s.seen_at FROM ticket_seen s JOIN tickets t ON t.id = s.ticket_id WHERE s.name = ? AND t.project_id = ?').all(name, projectId) as { ticket_id: number; seen_at: number }[];
-    return Object.fromEntries(rows.map((r) => [r.ticket_id, r.seen_at]));
-  }
-
-  /** When `name` last had this minion open, or 0. */
-  seenAt(name: string, ticketId: number): number {
-    const row = this.db.prepare('SELECT seen_at FROM ticket_seen WHERE name = ? AND ticket_id = ?').get(name, ticketId) as { seen_at: number } | undefined;
-    return row?.seen_at ?? 0;
-  }
-
-  markSeen(name: string, ticketId: number): number {
-    const now = Date.now();
-    this.db.prepare('INSERT INTO ticket_seen (name, ticket_id, seen_at) VALUES (?, ?, ?) ON CONFLICT(name, ticket_id) DO UPDATE SET seen_at = excluded.seen_at').run(name, ticketId, now);
-    return now;
-  }
-
-  /** The minions `name` pinned in a project, oldest pin first (#179). */
-  pinnedTickets(name: string, projectId: number): number[] {
-    // A pin older than its minion belongs to a deleted one whose id was reused: a rolled-back release's deleteTicket leaves it behind.
-    const rows = this.db.prepare('SELECT p.ticket_id FROM ticket_pins p JOIN tickets t ON t.id = p.ticket_id WHERE p.name = ? AND t.project_id = ? AND p.pinned_at >= t.created_at ORDER BY p.pinned_at, p.ticket_id').all(name, projectId) as { ticket_id: number }[];
-    return rows.map((r) => r.ticket_id);
-  }
-
-  /** Whether `name` pinned this minion, by the same rule as pinnedTickets. */
-  isTicketPinned(name: string, ticketId: number): boolean {
-    return !!this.db.prepare('SELECT 1 FROM ticket_pins p JOIN tickets t ON t.id = p.ticket_id WHERE p.name = ? AND p.ticket_id = ? AND p.pinned_at >= t.created_at').get(name, ticketId);
-  }
-
-  setTicketPinned(name: string, ticketId: number, pinned: boolean) {
-    if (pinned) this.db.prepare('INSERT INTO ticket_pins (name, ticket_id, pinned_at) VALUES (?, ?, ?) ON CONFLICT(name, ticket_id) DO NOTHING').run(name, ticketId, Date.now());
-    else this.db.prepare('DELETE FROM ticket_pins WHERE name = ? AND ticket_id = ?').run(name, ticketId);
-  }
-
   /** People's notes on a scheme's minions, by ticket id. Only people's routes may hand these out. */
   personNotes(projectId: number): Record<number, PersonNote> {
     // A note older than its minion belongs to a deleted one whose id was reused: a rolled-back release's deleteTicket leaves it behind.
@@ -2415,45 +2309,6 @@ export class Store {
     const at = Date.now();
     this.db.prepare('INSERT INTO person_notes (ticket_id, text, updated_by, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(ticket_id) DO UPDATE SET text = excluded.text, updated_by = excluded.updated_by, updated_at = excluded.updated_at').run(ticketId, text, by, at);
     return { text, by, at };
-  }
-
-  /** Whether `name` has ever written or acted anywhere (#1151's welcome): recap leaves 0 for "never", so that doesn't count. */
-  hasActed(name: string): boolean {
-    return !!this.db.prepare('SELECT 1 FROM last_actions WHERE name = ? AND at > 0 LIMIT 1').get(name);
-  }
-
-  /**
-   * For the scheme recap: when `name` last acted anywhere in the scheme (a message, a card answer or
-   * plan verdict, which are messages too, or an approval click), and how many turns each thread
-   * has finished since. `since` is null if they never have.
-   */
-  recap(name: string, projectId: number): { since: number | null; turns: Record<number, number> } {
-    let row = this.db.prepare('SELECT at FROM last_actions WHERE name = ? AND project_id = ?').get(name, projectId) as { at: number } | undefined;
-    if (!row) {
-      // Once per person and scheme: from before last_actions, read from the events (1.5 s cold for Citadel, #538). 0: never acted.
-      const { since } = this.db
-        .prepare(`
-        SELECT MAX(e.created_at) AS since FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
-        WHERE t.project_id = ? AND e.kind IN ('user_message', 'approval_result') AND (
-          (e.kind = 'user_message' AND json_extract(e.data, '$.author') = ?)
-          OR (e.kind = 'approval_result' AND json_extract(e.data, '$.by') = ?))`)
-        .get(projectId, name, name) as { since: number | null };
-      row = { at: since ?? 0 };
-      this.db.prepare('INSERT INTO last_actions (name, project_id, at) VALUES (?, ?, ?) ON CONFLICT (name, project_id) DO UPDATE SET at = MAX(at, excluded.at)').run(name, projectId, row.at);
-    }
-    const since = row.at || null;
-    // The page shows the recap only after RECAP_AWAY_MS without an action, so the count isn't read before then:
-    // it reads every Claude event in the scheme since (0.3 s warm for Citadel, #538).
-    if (since == null || Date.now() - since < RECAP_AWAY_MS) return { since, turns: {} };
-    // Event ids grow with time, so start after the last turn that ended by `since` (turns_ended finds it): the index skips everything older.
-    const before = this.db.prepare('SELECT event_id FROM turns WHERE ended_at <= ? AND event_id IS NOT NULL ORDER BY ended_at DESC LIMIT 1').get(since) as { event_id: number } | undefined;
-    const rows = this.db
-      .prepare(`
-      SELECT e.ticket_id, COUNT(*) AS n FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
-      WHERE t.project_id = ? AND e.kind = 'claude' AND e.id > ? AND e.created_at > ? AND json_extract(e.data, '$.type') = 'result'
-      GROUP BY e.ticket_id`)
-      .all(projectId, before?.event_id ?? 0, since) as { ticket_id: number; n: number }[];
-    return { since, turns: Object.fromEntries(rows.map((r) => [r.ticket_id, r.n])) };
   }
 
   /**
@@ -2473,433 +2328,26 @@ export class Store {
     }
   }
 
-  /** A chat's newest plan card, or undefined: a real plan, not a machine's notes (#617), its lending (#1638) or a release key card (#837), which ride the same event kind. */
-  latestPlan(ticketId: number): EventRow | undefined {
-    return this.db
-      .prepare(`SELECT * FROM events WHERE ticket_id = ? AND kind = 'plan' AND json_extract(data, '$.machine') IS NULL
-      AND json_extract(data, '$.releaseKey') IS NULL AND json_extract(data, '$.machineLend') IS NULL ORDER BY id DESC LIMIT 1`)
-      .get(ticketId) as unknown as EventRow | undefined;
-  }
-
-  /** The backup chat's lines (src/backup.ts): the newest `limit` messages, notes, errors and replies with text after `afterId`, oldest first. */
-  chatTextEvents(ticketId: number, afterId: number, limit: number): EventRow[] {
-    return (
-      this.db
-        .prepare(`SELECT * FROM events WHERE ticket_id = ? AND id > ? AND (kind IN ('user_message', 'note', 'error')
-      OR (kind = 'claude' AND json_extract(data, '$.type') = 'assistant' AND instr(data, '"type":"text"') > 0))
-      ORDER BY id DESC LIMIT ?`)
-        .all(ticketId, afterId, limit) as unknown as EventRow[]
-    ).reverse();
-  }
-
-  /** A chat's events in [from, before), oldest first; `mine` keeps only what Mine shows from the Overlord (MINE_EVENTS). */
-  eventsBetween(ticketId: number, from: number, before: number, mine = false): EventRow[] {
-    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id >= ? AND id < ? ${mine ? `AND ${MINE_EVENTS}` : ''} ORDER BY id`).all(ticketId, from, before) as unknown as EventRow[];
-  }
-
-  /** A chat's newest `limit` events before `before`, newest first; `mine` as in eventsBetween. */
-  eventsBefore(ticketId: number, before: number, limit: number, mine = false): EventRow[] {
-    return this.db.prepare(`SELECT * FROM events WHERE ticket_id = ? AND id < ? ${mine ? `AND ${MINE_EVENTS}` : ''} ORDER BY id DESC LIMIT ?`).all(ticketId, before, limit) as unknown as EventRow[];
-  }
-
-  /** A chat's newest event of `kind` (#1149: the message a person just sent). */
-  lastEventOf(ticketId: number, kind: string): EventRow | undefined {
-    return this.db.prepare('SELECT * FROM events WHERE ticket_id = ? AND kind = ? ORDER BY id DESC LIMIT 1').get(ticketId, kind) as unknown as EventRow | undefined;
-  }
-
-  listEvents(ticketId: number, afterId = 0): EventRow[] {
-    return this.db.prepare('SELECT * FROM events WHERE ticket_id = ? AND id > ? ORDER BY id').all(ticketId, afterId) as unknown as EventRow[];
-  }
-
-  /**
-   * A page of a ticket's history before `before`, oldest first, in whole turns: as many of the newest
-   * turns as fit in `limit` events, and always at least one, so a running or long turn comes whole.
-   * A turn starts just after the previous turn's result, so the messages that started it come with it.
-   * With `from`, the page reaches back to the start of the turn holding that event too.
-   */
-  eventsPage(ticketId: number, before: number, limit: number, from?: number): { events: EventRow[]; more: boolean } {
-    const recent = this.db
-      .prepare(`
-      SELECT id, kind = 'claude' AND json_extract(data, '$.type') = 'result' AS ends FROM events
-      WHERE ticket_id = ? AND id < ? ORDER BY id DESC LIMIT ?`)
-      .all(ticketId, before, limit + 1) as { id: number; ends: number }[];
-    if (!recent.length) return { events: [], more: false };
-    let start = recent.at(-1)!.id;
-    if (recent.length > limit) {
-      // The oldest turn start in the newest `limit` events: the event after a result.
-      const i = recent.findLastIndex((r, n) => n > 0 && r.ends);
-      start = i > 0 ? recent[i - 1].id : this.turnStart(ticketId, recent[0].id);
-    }
-    if (from != null) start = Math.min(start, this.turnStart(ticketId, from));
-    // Notes after a long last turn (dismissed, deployed) aren't a turn: they come with the turn before them,
-    // so a minion never opens on nothing but "Load earlier" (#288).
-    const hasTurn = this.db
-      .prepare(`
-      SELECT 1 FROM events WHERE ticket_id = ? AND id >= ? AND id < ? AND (kind = 'user_message'
-        OR (kind = 'claude' AND json_extract(data, '$.type') = 'system' AND json_extract(data, '$.subtype') = 'init')) LIMIT 1`)
-      .get(ticketId, start, before);
-    const prev = !hasTurn && (this.db.prepare('SELECT MAX(id) AS id FROM events WHERE ticket_id = ? AND id < ?').get(ticketId, start) as { id: number | null });
-    if (prev && prev.id != null) start = this.turnStart(ticketId, prev.id);
-    const events = this.db.prepare('SELECT * FROM events WHERE ticket_id = ? AND id >= ? AND id < ? ORDER BY id').all(ticketId, start, before) as unknown as EventRow[];
-    const more = !!this.db.prepare('SELECT 1 FROM events WHERE ticket_id = ? AND id < ? LIMIT 1').get(ticketId, start);
-    return { events, more };
-  }
-
-  /** The first event of the turn holding event `id`: the one after the last result before it. */
-  private turnStart(ticketId: number, id: number): number {
-    const row = this.db
-      .prepare(`
-      SELECT MIN(id) AS id FROM events WHERE ticket_id = ? AND id > COALESCE((
-        SELECT MAX(id) FROM events WHERE ticket_id = ? AND id < ? AND kind = 'claude' AND json_extract(data, '$.type') = 'result'), 0)`)
-      .get(ticketId, ticketId, id) as { id: number | null };
-    return row.id ?? id;
-  }
-
-  /**
-   * A ticket's events before `before` that can change its task list (progress.js applyEvent): turn
-   * starts, Claude's messages and tool calls, and the results that give a TaskCreate its id. Tool results
-   * are most of the bytes, so they are left out by prefix, without parsing anyone's JSON (#497).
-   */
-  planEvents(ticketId: number, before = Number.MAX_SAFE_INTEGER, after = 0): EventRow[] {
-    return this.db
-      .prepare(`
-      SELECT * FROM events WHERE ticket_id = ? AND id < ? AND id > ? AND kind = 'claude' AND (data NOT LIKE '{"type":"user"%' OR instr(data, 'Task #') > 0)
-      ORDER BY id`)
-      .all(ticketId, before, after) as unknown as EventRow[];
-  }
-
-  /**
-   * A project's stored cards still waiting on a person, in threads that aren't dismissed: questions
-   * nobody has answered (nor the minion settled), and plans still pending. Approval cards live in memory (Approvals.pending).
-   * Only a card's own answer (a click, a doc Send, a held answer) clears it; a message typed in the chat doesn't (#812),
-   * since it may be about anything. The minion settles a card someone answered by typing (settle_question).
-   */
-  openCards(projectId: number): EventRow[] {
-    return this.openCardsWhere('t.project_id = ?', projectId);
-  }
-
-  /** One minion's open cards (openCards), oldest first. */
-  openCardsOf(ticketId: number): EventRow[] {
-    return [...scoped(this.db, `open-cards:${ticketId}`, () => this.openCardsWhere('e.ticket_id = ?', ticketId))];
-  }
-
-  /** When the oldest of a minion's open cards (openCards) was posted, or null with none. */
-  openCardAt(ticketId: number): number | null {
-    return this.openCardsOf(ticketId)[0]?.created_at ?? null;
-  }
-
-  /** The event id of the oldest of a minion's open cards (openCards) with at most `within` events after it, or null. */
-  openCardEventId(ticketId: number, within: number): number | null {
-    const id = this.openCardsWhere('e.ticket_id = ?', ticketId)[0]?.id;
-    if (id == null) return null;
-    const { n } = this.db.prepare('SELECT COUNT(*) AS n FROM events WHERE ticket_id = ? AND id > ?').get(ticketId, id) as { n: number };
-    return n <= within ? id : null;
-  }
-
-  /** Whether the chat still shows card event `eventId` under its turn's words: no message and no turn end since (public/thread.js heldCards). */
-  heldBelow(ticketId: number, eventId: number): boolean {
-    return !this.db.prepare("SELECT 1 FROM events WHERE ticket_id = ? AND id > ? AND (kind = 'user_message' OR (kind = 'claude' AND json_extract(data, '$.type') = 'result')) LIMIT 1").get(ticketId, eventId);
-  }
-
-  /** The id of the chat event that posted a minion's card `cardId` of `kind`, or null if there's none. */
-  cardEventId(ticketId: number, kind: string, cardId: string): number | null {
-    const row = this.db.prepare("SELECT id FROM events WHERE ticket_id = ? AND kind = ? AND json_extract(data, '$.id') = ? ORDER BY id DESC LIMIT 1").get(ticketId, kind, cardId) as { id: number } | undefined;
-    return row?.id ?? null;
-  }
-
-  private pickedCards(projectId: number, limit: number) {
-    return this.db
-      .prepare(`
-      SELECT * FROM (
-        SELECT e.id, t.number, t.kind AS tkind, t.status AS tstatus
-        FROM events e INDEXED BY events_cards JOIN tickets t ON t.id = e.ticket_id
-        WHERE t.project_id = ? AND e.kind IN ('question', 'plan', 'approval')
-        ORDER BY e.id DESC LIMIT ?)
-      ORDER BY id`)
-      .all(projectId, limit) as { id: number; number: number | null; tkind: string; tstatus: string }[];
-  }
-
-  private readCardRows(ids: number[]) {
-    if (!ids.length) return;
-    for (const row of this.db.prepare('SELECT * FROM events WHERE id IN (SELECT value FROM json_each(?))').all(JSON.stringify(ids)) as unknown as EventRow[]) {
-      this.cardRows.set(row.id, { ...row, cid: JSON.parse(row.data).id ?? null });
-    }
-  }
-
-  /**
-   * Read up to `chunk` of recentCards' card rows it hasn't read yet, and say how many are still unread. The first
-   * recentCards after a restart reads all 500 rows at once, scattered over a gigabyte file: 1.3 s of held loop when the
-   * disk was busy. The server calls this in small steps at start, so that first call finds them read.
-   */
-  warmCardRows(projectId: number, limit: number, chunk: number): number {
-    const unread = this.pickedCards(projectId, limit)
-      .filter((p) => !this.cardRows.has(p.id))
-      .map((p) => p.id);
-    this.readCardRows(unread.slice(0, chunk));
-    return Math.max(unread.length - chunk, 0);
-  }
-
-  /**
-   * A project's newest `limit` question, plan and approval cards, oldest first,
-   * each with its minion and how it was settled: the answer to it (`reply`), and an approval's result (`result`). For the link check (#531).
-   */
-  recentCards(projectId: number, limit: number): (EventRow & { number: number | null; tkind: string; tstatus: string; reply: string | null; result: string | null })[] {
-    // Which cards, from the index alone; their rows only for cards not read before. Re-reading the 500 rows every
-    // time, scattered over a gigabyte file, held the event loop 1-5 s whenever the page cache had dropped them (#759).
-    const picked = this.pickedCards(projectId, limit);
-    this.readCardRows(picked.filter((p) => !this.cardRows.has(p.id)).map((p) => p.id));
-    const cards = picked.flatMap((p) => {
-      const row = this.cardRows.get(p.id);
-      return row ? [{ ...row, number: p.number, tkind: p.tkind, tstatus: p.tstatus }] : [];
-    });
-    const upTo = (this.db.prepare('SELECT max(id) AS id FROM events').get() as { id: number | null }).id ?? 0;
-    // After a restart the memory is empty: take what was saved, as long as it is of this very card and not newer than the
-    // events (a deleted newest id can come back as another card, #762). Anything else is read again from the card on.
-    const lost = cards.filter((c) => !this.cardFates.has(c.id));
-    if (lost.length) {
-      const saved = new Map((this.db.prepare('SELECT * FROM card_fates WHERE card_id IN (SELECT value FROM json_each(?))').all(JSON.stringify(lost.map((c) => c.id))) as unknown as (CardFate & { card_id: number; ticket_id: number; cid: string | null; up_to: number })[]).map((r) => [r.card_id, r]));
-      for (const c of lost) {
-        const r = saved.get(c.id);
-        if (r && r.ticket_id === c.ticket_id && r.cid === (c.cid == null ? null : String(c.cid)) && r.up_to >= c.id && r.up_to <= upTo) {
-          this.cardFates.set(c.id, { reply: r.reply, result: r.result, upTo: r.up_to });
-          this.savedFates.set(c.id, { reply: r.reply, result: r.result, upTo: r.up_to });
-        }
-      }
-    }
-    const fates = cards.map((c) => this.cardFates.get(c.id) ?? { reply: null, result: null, upTo: c.id });
-    // Each chat's messages are read once from its oldest card still waiting, not once per card: 500 cards each
-    // scanning the rest of a long chat held the event loop 1-3 s (#622). By kind: left to itself SQLite walked
-    // events_ticket, every event of the chat (56,619 rows for 1,861 messages), 2-3 s from a cold cache after a restart.
-    for (const ticket of new Set(cards.map((c) => c.ticket_id))) {
-      const mine = cards.flatMap((c, i) => (c.ticket_id === ticket ? [{ cid: c.cid, approval: c.kind === 'approval', fate: fates[i] }] : []));
-      const from = (pick: (f: CardFate) => string | null, of = mine) => Math.min(...of.filter((m) => pick(m.fate) == null).map((m) => m.fate.upTo));
-      const replyFrom = from((f) => f.reply);
-      const replies =
-        replyFrom === Infinity
-          ? []
-          : (this.db
-              .prepare(`
-        SELECT a.id, coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) AS card,
-          json_object('author', json_extract(a.data, '$.author'), 'at', a.created_at, 'text', substr(json_extract(a.data, '$.text'), 1, 200),
-            'answer', json(json_extract(a.data, '$.answer'))) AS reply
-        FROM events a INDEXED BY events_ticket_kind WHERE a.ticket_id = ? AND a.kind = 'user_message' AND a.id > ? AND a.id <= ?
-          AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) IS NOT NULL ORDER BY a.id`)
-              .all(ticket, replyFrom, upTo) as { id: number; card: unknown; reply: string }[]);
-      // Only an approval gets a result: looking one up for every chat's questions and plans was half a cold call (#759).
-      const resultFrom = from(
-        (f) => f.result,
-        mine.filter((m) => m.approval),
-      );
-      const results =
-        resultFrom === Infinity
-          ? []
-          : (this.db
-              .prepare(`
-        SELECT id, json_extract(data, '$.id') AS card, json_set(data, '$.at', created_at) AS result
-        FROM events INDEXED BY events_ticket_kind WHERE ticket_id = ? AND kind = 'approval_result' AND id > ? AND id <= ? ORDER BY id`)
-              .all(ticket, resultFrom, upTo) as { id: number; card: unknown; result: string }[]);
-      for (const { cid, approval, fate } of mine) {
-        // Only a click on this card answers it: not one on another card, not a typed message (#812).
-        fate.reply ??= replies.find((a) => a.id > fate.upTo && a.card === cid)?.reply ?? null;
-        if (approval) fate.result ??= results.find((r) => r.id > fate.upTo && r.card === cid)?.result ?? null;
-        fate.upTo = upTo;
-      }
-    }
-    this.saveFates(cards, fates);
-    return cards.map(({ cid, ...c }, i) => {
-      this.cardFates.set(c.id, fates[i]);
-      return { ...c, reply: fates[i].reply, result: fates[i].result };
-    });
-  }
-
   // The fates as last written to card_fates. A fate is written when it is new or found something, and the newest event it
   // looked at only now and then (an unsettled card would otherwise write every call): a stale `up_to` only means
   // the next read after a restart scans a little more.
-  private savedFates = new Map<number, CardFate>();
-  private fatesSavedAt = 0;
-  private saveFates(cards: { id: number; ticket_id: number; cid: unknown }[], fates: CardFate[]) {
-    const now = Date.now();
-    const lagging = now - this.fatesSavedAt > 5 * 60_000;
-    const todo = cards.flatMap((c, i) => {
-      const was = this.savedFates.get(c.id),
-        f = fates[i];
-      return !was || was.reply !== f.reply || was.result !== f.result || (lagging && was.upTo !== f.upTo) ? [{ c, f }] : [];
-    });
-    if (!todo.length) return;
-    if (lagging) this.fatesSavedAt = now;
-    // On the write worker a failed write is only logged, so this remembers it as saved: it is read again after a restart.
-    if (this.putFates(todo.map(({ c, f }) => [c.id, c.ticket_id, c.cid == null ? null : String(c.cid), f.reply, f.result, f.upTo])) === false) return;
-    for (const { c, f } of todo) this.savedFates.set(c.id, { ...f });
-  }
-
-  /** saveFates' write, in one commit: rows of card_fates' columns. False if it failed. */
-  putFates(rows: unknown[][]): boolean {
-    const put = this.db.prepare('INSERT OR REPLACE INTO card_fates (card_id, ticket_id, cid, reply, result, up_to) VALUES (?, ?, ?, ?, ?, ?)');
-    try {
-      this.db.exec('BEGIN');
-      for (const r of rows) put.run(...(r as SQLInputValue[]));
-      this.db.exec('COMMIT');
-      return true;
-    } catch {
-      try {
-        this.db.exec('ROLLBACK');
-      } catch {
-        /* no transaction was open */
-      }
-      return false; // not saved: it is read again after a restart
-    }
-  }
-
+  savedFates = new Map<number, CardFate>();
+  fatesSavedAt = 0;
   // What recentCards found of each card, by event id: a reply or result once found stays (events are only appended),
   // and `upTo` is the newest event looked at, so the next read only scans messages after it (#622).
-  private cardFates = new Map<number, CardFate>();
+  cardFates = new Map<number, CardFate>();
 
   // recentCards' card rows, by event id, with the card's own id: a card's row only changes through setEventData and
   // goes with deleteTicket, which both drop it here (#759).
-  private cardRows = new Map<number, EventRow & { cid: unknown }>();
+  cardRows = new Map<number, EventRow & { cid: unknown }>();
 
   // Card events found answered, settled or no longer pending. None ever waits again (a plan never goes back to pending,
   // and events are only appended), so later reads skip their rows: cold, re-reading Citadel's 335 card rows and the
   // messages after them was 270 ms of the scheme list's 340 ms (#614).
-  private doneCards = new Set<number>();
-
-  /** Drop what recentCards and openCardsWhere remember of cards: one card's row (its data changed), or everything. */
-  forgetCards(id?: number) {
-    if (id !== undefined) return void this.cardRows.delete(id);
-    this.doneCards.clear();
-    this.cardFates.clear();
-    this.savedFates.clear();
-    this.cardRows.clear();
-  }
+  doneCards = new Set<number>();
 
   /** TYPED_HANDLES_UP_TO; a test sets 0 to run the new rule on its small ids. */
   typedHandlesUpTo = TYPED_HANDLES_UP_TO;
-
-  private openCardsWhere(scope: string, id: number): EventRow[] {
-    // Index-only: events_ticket_kind holds (ticket_id, kind, id).
-    const ids = (
-      this.db
-        .prepare(`SELECT e.id FROM events e INDEXED BY events_ticket_kind JOIN tickets t ON t.id = e.ticket_id
-      WHERE ${scope} AND t.status != 'closed' AND e.kind IN ('plan', 'question')`)
-        .all(id) as { id: number }[]
-    )
-      .map((r) => r.id)
-      .filter((i) => !this.doneCards.has(i));
-    if (!ids.length) return [];
-    const open = this.db
-      .prepare(`
-      SELECT e.* FROM events e WHERE e.id IN (SELECT value FROM json_each(?)) AND (
-        (e.kind = 'plan' AND json_extract(e.data, '$.status') = 'pending')
-        OR (e.kind = 'question' AND json_extract(e.data, '$.settled') IS NULL))
-      AND NOT EXISTS (
-        SELECT 1 FROM events a WHERE a.ticket_id = e.ticket_id AND a.kind = 'user_message' AND a.id > e.id
-          -- only this card's own answer settles it, a held one for a cold asker (#687) too; a typed message answers nothing (#812)
-          AND (coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) = json_extract(e.data, '$.id')
-            OR (e.id <= ${this.typedHandlesUpTo} AND ${PERSON_WROTE} AND json_extract(e.data, '$.to') IS NULL
-              AND coalesce(json_extract(a.data, '$.answer.questionId'), json_extract(a.data, '$.plan.planId')) IS NULL)))
-      ORDER BY e.id`)
-      .all(JSON.stringify(ids)) as unknown as EventRow[];
-    const still = new Set(open.map((e) => e.id));
-    for (const i of ids) if (!still.has(i)) this.doneCards.add(i);
-    return open;
-  }
-
-  /**
-   * The text of a ticket's replies that may link files (subagents' included), from its Claude events after event
-   * `after`, at most `limit` events read: `upTo` is the last one read, and `more` that there may be more after it.
-   * Read in pages from where the last scan stopped, since a long chat's whole history read cold held the server
-   * a second (#609).
-   */
-  replyTexts(ticketId: number, after = 0, limit = -1): { texts: string[]; upTo: number; more: boolean } {
-    const rows = this.db.prepare("SELECT id, CASE WHEN data LIKE '%\"type\":\"assistant\"%' AND data LIKE '%](%' THEN data END AS data FROM events WHERE ticket_id = ? AND kind = 'claude' AND id > ? ORDER BY id LIMIT ?").all(ticketId, after, limit) as { id: number; data: string | null }[];
-    const texts: string[] = [];
-    for (const { data } of rows) {
-      if (data == null) continue;
-      const content = JSON.parse(data).message?.content;
-      if (!Array.isArray(content)) continue;
-      for (const b of content) if (b?.type === 'text' && typeof b.text === 'string') texts.push(b.text);
-    }
-    return { texts, upTo: rows.at(-1)?.id ?? after, more: limit >= 0 && rows.length === limit };
-  }
-
-  /** Pass every stored Claude event through `fn` and save what it returns (null deletes the event). */
-  rewriteClaudeEvents(fn: (data: ClaudeEvent) => unknown): { changed: number; deleted: number } {
-    const changes: { id: number; data: string | null }[] = [];
-    for (const row of this.db.prepare("SELECT id, data FROM events WHERE kind = 'claude'").iterate() as Iterable<{ id: number; data: string }>) {
-      const next = fn(JSON.parse(row.data));
-      const data = next == null ? null : JSON.stringify(next);
-      if (data !== row.data) changes.push({ id: row.id, data });
-    }
-    const update = this.db.prepare('UPDATE events SET data = ? WHERE id = ?');
-    const remove = this.db.prepare('DELETE FROM events WHERE id = ?');
-    this.db.exec('BEGIN');
-    try {
-      for (const c of changes) c.data == null ? remove.run(c.id) : update.run(c.data, c.id);
-      // Task-list states saved from the old events (planKey) no longer match them.
-      if (changes.length) this.db.prepare("DELETE FROM settings WHERE key LIKE 'plan:%'").run();
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-    const deleted = changes.filter((c) => c.data == null).length;
-    if (deleted) {
-      // a deleted newest id can come back, below recentCards' `upTo`, as a card
-      this.cardFates.clear();
-      this.savedFates.clear();
-      this.db.prepare('DELETE FROM card_fates').run();
-      this.cardRows.clear();
-    }
-    return { changed: changes.length - deleted, deleted };
-  }
-
-  /** Newest-first messages and Claude output in a project whose raw JSON contains the text (case-insensitive for ASCII). */
-  findEvents(projectId: number, text: string, limit = 3000, ticketId?: number): EventRow[] {
-    // The data is JSON text: a quote, backslash or line break is stored escaped, so the needle is too.
-    const like = `%${JSON.stringify(text)
-      .slice(1, -1)
-      .replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    return this.db
-      .prepare(`SELECT e.* FROM events e JOIN tickets t ON t.id = e.ticket_id
-        WHERE t.project_id = ? AND e.kind IN ('user_message', 'claude') AND e.data LIKE ? ESCAPE '\\' ${ticketId ? 'AND e.ticket_id = ?' : ''}
-        ORDER BY e.id DESC LIMIT ?`)
-      .all(projectId, like, ...(ticketId ? [ticketId] : []), limit) as unknown as EventRow[];
-  }
-
-  /** PR events already handled for a ticket (keys starting with `prefix`, which is stripped). */
-  githubSeen(ticketId: number, prefix: string): string[] {
-    const like = `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    return (this.db.prepare("SELECT key FROM github_seen WHERE ticket_id = ? AND key LIKE ? ESCAPE '\\'").all(ticketId, like) as { key: string }[]).map((r) => r.key.slice(prefix.length));
-  }
-
-  /** Record PR events as handled; `delivered` says whether any were sent to the ticket. */
-  addGithubSeen(ticketId: number, keys: string[], delivered: boolean) {
-    const insert = this.db.prepare('INSERT OR IGNORE INTO github_seen (ticket_id, key, delivered, created_at) VALUES (?, ?, ?, ?)');
-    const now = Date.now();
-    this.db.exec('BEGIN');
-    try {
-      for (const k of keys) insert.run(ticketId, k, delivered ? 1 : 0, now);
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
-  }
-
-  /**
-   * When a ticket's turns since `since` started and ended: a turn starts with Claude's init event
-   * and ends with its result, an error, or a stop or restart note.
-   */
-  turnMarks(ticketId: number, since: number): { at: number; start: boolean }[] {
-    const rows = this.db
-      .prepare(`SELECT created_at, kind, data FROM events WHERE ticket_id = ? AND created_at >= ? AND (
-          (kind = 'claude' AND (data LIKE '{"type":"system","subtype":"init"%' OR data LIKE '{"type":"result"%'))
-          OR kind = 'error'
-          OR (kind = 'note' AND (data LIKE '{"text":"Stopped by user.%' OR data LIKE '{"text":"The server restarted during this turn%')))
-        ORDER BY id`)
-      .all(ticketId, since) as { created_at: number; kind: string; data: string }[];
-    return rows.map((r) => ({ at: r.created_at, start: r.kind === 'claude' && r.data.startsWith('{"type":"system"') }));
-  }
 
   /**
    * Store a finished turn. Its cost is the session's running total minus the total at the session's
@@ -3291,25 +2739,6 @@ export class Store {
     return (this.db.prepare('SELECT at, detail FROM health_events WHERE kind = ? AND at < ? ORDER BY at DESC LIMIT 1').get(kind, before) as { at: number; detail: string } | undefined) ?? null;
   }
 
-  /** The first event id created at or after `at`, by halving over ids (they grow with time), or one past the last: events has no index on time. */
-  eventIdAt(at: number): number {
-    // Two one-row lookups on the primary key: the one-query MIN(id), MAX(id) scanned the whole events table (0.7-1.3 s of stall).
-    const first = this.db.prepare('SELECT id FROM events ORDER BY id LIMIT 1').get() as { id: number } | undefined;
-    const last = this.db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1').get() as { id: number } | undefined;
-    if (!first || !last) return 1;
-    const ends = { lo: first.id, hi: last.id };
-    const next = this.db.prepare('SELECT id, created_at FROM events WHERE id >= ? ORDER BY id LIMIT 1');
-    let lo = Number(ends.lo),
-      hi = Number(ends.hi) + 1;
-    while (lo < hi) {
-      const mid = Math.floor((lo + hi) / 2);
-      const row = next.get(mid) as { id: number; created_at: number } | undefined;
-      if (!row || row.created_at >= at) hi = mid;
-      else lo = Number(row.id) + 1;
-    }
-    return lo;
-  }
-
   /**
    * How turns ended in [from, to) (#724): every finished turn (the turns table) plus every error event (a turn that
    * couldn't start or crashed), minus the turns that stopped on "Not logged in" (loggedOut: their accounts) or on a usage limit ("You've hit your 5-hour limit", USAGE_LIMIT: a person's
@@ -3447,9 +2876,22 @@ export class Store {
  * store.listMachines() and the rest. A new query goes in its area's file, not the class above: test/db-areas.test.ts fails on that.
  */
 // One area per line, so two branches adding areas touch different lines (#1313: a single long list here was a conflict hotspot).
-const AREAS = [ciNumberQueries, contraptionRunQueries, deliveryQueries, flakeQueries, machineQueries, minionQueries, pushQueries, readWarmQueries, settingQueries, slowMomentQueries, viewQueries];
+const AREAS = [seenQueries, cardQueries, eventQueries, ciNumberQueries, contraptionRunQueries, deliveryQueries, flakeQueries, machineQueries, minionQueries, pushQueries, readWarmQueries, settingQueries, slowMomentQueries, viewQueries];
 // The same list as a type: written out, since a type taken from AREAS would loop through Store's own type.
-type Areas = typeof ciNumberQueries & typeof contraptionRunQueries & typeof deliveryQueries & typeof flakeQueries & typeof machineQueries & typeof minionQueries & typeof pushQueries & typeof readWarmQueries & typeof settingQueries & typeof slowMomentQueries & typeof viewQueries;
+type Areas = typeof seenQueries &
+  typeof cardQueries &
+  typeof eventQueries &
+  typeof ciNumberQueries &
+  typeof contraptionRunQueries &
+  typeof deliveryQueries &
+  typeof flakeQueries &
+  typeof machineQueries &
+  typeof minionQueries &
+  typeof pushQueries &
+  typeof readWarmQueries &
+  typeof settingQueries &
+  typeof slowMomentQueries &
+  typeof viewQueries;
 // Without `this: Store` on the class's side, so a caller holding a Pick<Store, ...> can still call them.
 type AreaQueries = { [K in keyof Areas]: OmitThisParameter<Areas[K]> };
 export interface Store extends AreaQueries {}

@@ -719,3 +719,6 @@ export interface SkillTimeline {
   events: SkillEvent[];
   tickets: SkillTicket[];
 }
+
+/** What Store.recentCards knows of a card: its first person's reply and its result, and the newest event id it looked at. */
+export type CardFate = { reply: string | null; result: string | null; upTo: number };

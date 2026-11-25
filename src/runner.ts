@@ -51,7 +51,6 @@ import { claudeParts, codexResetAt, codexSwitchKey, codexThreadKey, codexUsageKe
 import { promptHashes, type PromptHashes } from './prompt-hashes.ts';
 import { decideHold, Holds, type HoldDecision } from './prompt-hold.ts';
 import { stuckList } from './stuck-list.ts';
-import { armOf, SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, type SeamTrial, trialLine } from './seam-trial.ts';
 import { COMPACT_COMMAND, freshStartText, LOST_DIGEST_ENTRIES, lostSessionText, promptMessage, promptParts, promptText, RESUME_CODEX_PROMPT, RESUME_PROMPT, TASKMASTER_LOOP_LIMIT, TASKMASTER_LOOP_WINDOW_MS, type PromptSections, type TurnMachine } from './prompts.ts';
 import { fallbacks } from './fallbacks.ts';
 import { ensureSupervisor, handTurn, supervisorAlive, supervisorSpec, type SupervisorSpec } from './supervisor-client.ts';
@@ -2482,8 +2481,8 @@ export class Runner {
     return this.fresh.requestFresh(ticketId, why, auto);
   }
 
-  recordHandoff(ticketId: number, summary: string, carryOn = true): string | null {
-    return this.fresh.recordHandoff(ticketId, summary, carryOn);
+  recordHandoff(ticketId: number, summary: string): string | null {
+    return this.fresh.recordHandoff(ticketId, summary);
   }
 
   freshSweep(now = Date.now()) {
@@ -2907,7 +2906,6 @@ export class Runner {
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
     const same = codexThread?.person === person && codexThread.thread;
-    if (!step && !keepalive && !codex) this.fresh.seamEnrol(ticket.id);
     let built: Awaited<ReturnType<Runner['buildLaunch']>>;
     try {
       built = await this.buildLaunch(project, ticket, {
@@ -3323,10 +3321,6 @@ export class Runner {
       // Its budget (#1114) each turn: what its kind of work usually costs and what it has used.
       const budget = ticket.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
       if (budget) parts.turn.budget = [turnLine(budget, this.store.ticketCost(ticket.id))];
-      // The seam trial's fresh group (#1129), while its context is past the mark: hand off at a seam it picks.
-      const seamSize = this.store.getSetting<number>(contextKey(ticket.id));
-      const seamFresh = ticket.kind === 'ticket' && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticket.id) === 'fresh';
-      if (seamFresh && seamSize && seamSize > SEAM_CONTEXT_TOKENS) parts.turn.seamTrial = [trialLine(seamSize)];
       const jobs = this.jobs?.turnLine(ticket.id);
       if (jobs) parts.turn.jobs = [jobs];
       // What changed since the held prompt, last in the turn's [System] note. A side question's fork gets the prompt, not the note.
@@ -3403,7 +3397,6 @@ export class Runner {
         typer: typer && !typer.disabled_at ? { id: typer.id, login: typer.login } : null,
         homeContraptions: homeOf,
         jobMachines,
-        seamTrial: seamFresh,
         appTurnsRun: ticket.kind !== 'coordinator' && homeOf.length > 0 && isAppTurnsRun(this.store, ticket),
         everyScheme,
         claudeBin: this.claudeBin,

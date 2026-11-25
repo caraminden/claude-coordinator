@@ -102,7 +102,6 @@
   "test/scheme-setup-land-fixture.ts": [1, 0],
   "test/scheme-setup-land-lanes.test.ts": [1, 0],
   "test/scheme-setup-land.test.ts": [1, 0],
-  "test/seam-trial.test.ts": [1, 0],
   "test/send-queue-browser.test.ts": [0, 2],
   "test/sent-back-replace.test.ts": [0, 2],
   "test/server-maps-free.test.ts": [0, 2],

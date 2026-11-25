@@ -361,20 +361,6 @@ function labelFields(args: Record<string, unknown>) {
   return out;
 }
 
-/** A minion's fresh_session (the seam trial's fresh group, #1129): the same route as a Taskmaster's, and it carries on by itself. */
-export const SEAM_FRESH = {
-  name: 'fresh_session',
-  description: `Hand off to a fresh Claude session at a seam you pick (your turn's [System] note says when you are in the trial): when this turn ends, your context resets and your next turn starts from \`summary\` (plus your system prompt, memory and a facts sheet ${APP_NAME} adds: your cards, state and people's last messages) instead of this whole conversation, and it starts by itself. People's chat history stays as it is. Commit your work first. In \`summary\` put: each person's asks and decisions in their own words, with who and when; your task list with what is done; the branch, its head and what is committed or pushed; cards waiting on people with their links; what is sealed or waited on; what you ruled out and why; and the next step. Facts, not history. Then reply in one line and end the turn.`,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      summary: { type: 'string', maxLength: 20000, description: 'The handoff your next session starts from, at most 20,000 characters' },
-      carry_on: { type: 'boolean', description: 'Default true: your fresh session starts at once. false when this turn ends waiting on a person or another minion: it then starts with the next message' },
-    },
-    required: ['summary'],
-  },
-};
-
 /**
  * A minion's task list (#1275): the progress readout (public/progress.js) reads these calls, as it reads TaskCreate and
  * TaskUpdate. Claude Code can't preload a built-in tool, so the plan lives in an always-loaded MCP tool (ALWAYS_LOAD);
@@ -689,10 +675,8 @@ export async function runMinionsTool(name: string, args: Record<string, unknown>
     case 'reopen_ticket':
       return `Reopened. ${ticketLine(await call<TicketView>('POST', `/api/tickets/${await id(args)}/status`, { status: 'idle' }))}`;
     case 'fresh_session':
-      await call('POST', `/api/tickets/${C().TICKET}/fresh-session`, { summary: args.summary, ...(C().ROLE === 'thread' ? { carry_on: args.carry_on !== false } : {}) });
-      return C().ROLE === 'thread' && args.carry_on !== false
-        ? 'Handoff saved: your session resets when this turn ends, and your next turn starts from it by itself. Reply in one line and end the turn.'
-        : 'Handoff saved: your session resets when this turn ends, and your next turn starts from it. Reply in one line and end the turn.';
+      await call('POST', `/api/tickets/${C().TICKET}/fresh-session`, { summary: args.summary });
+      return 'Handoff saved: your session resets when this turn ends, and your next turn starts from it. Reply in one line and end the turn.';
     case 'stop_ticket': {
       const { stopped, ship } = await call('POST', `/api/tickets/${await id(args)}/stop`, {});
       return [stopped ? 'Stopped.' : 'That minion was not running.', ship].filter(Boolean).join(' ');

@@ -257,25 +257,14 @@ Test-That 'rollback: 6 is current, 11 no longer waits, nothing struck' ($s.curre
 Test-That "rollback: 11's folder is gone, 6's is whole" ((-not (Test-Path (Join-Path $d 'versions\11'))) -and (Test-Path (Join-Path $d 'versions\6\App.exe')))
 Show-Install $d
 
-# 8. The feed still names the waiting build, or a newer one: it is tried as before.
+# 8. The feed still names the waiting build: it is tried as before.
 $d = New-Install 'named' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' } (New-Feed 'named' 11)
 $l = Start-Launcher $d
 Test-That 'named: 11 is tried' (Wait-Log $d 'build 11 started: it is now current, on probation' 45)
 Show-Install $d
 Stop-Install $d
 
-# 9. A feed that doesn't answer holds the app up by a few seconds at most, then the waiting build is tried as before.
-$d = New-Install 'slow' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' } (New-Feed 'slow' 6 12)
-$at = Get-Date
-$l = Start-Launcher $d
-Test-That 'slow: 11 is tried' (Wait-Log $d 'trying build 11' 45)
-$took = ((Get-Date) - $at).TotalSeconds
-Test-That ('slow: within 10 s (took {0:n1})' -f $took) ($took -lt 10)
-Test-That 'slow: 11 starts' (Wait-Log $d 'build 11 started: it is now current, on probation' 45)
-Show-Install $d
-Stop-Install $d
-
-# 10. The waiting build is put off by a running copy, and the roll back is read beside it: a later start, offline, runs 6.
+# 9. The waiting build is put off by a running copy, and the roll back is read beside it: a later start, offline, runs 6.
 $d = New-Install 'copyrollback' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' } (New-Feed 'copyrollback' 6)
 Start-Process -FilePath (Join-Path $d 'versions\6\App.exe') -WorkingDirectory (Join-Path $d 'versions\6')
 Start-Sleep -Seconds 2
@@ -287,11 +276,11 @@ Test-That 'copyrollback: 11 no longer waits' (-not (Get-State $d).pending)
 Set-Feed $d $offline
 $l = Start-Launcher $d
 [void]$l.WaitForExit(45000)
-Test-That 'copyrollback: the next start, offline, runs 6 and not 11' (((Get-Log $d) -match 'starting build 6') -and -not ((Get-Log $d) -match 'trying build 11'))
+Test-That 'copyrollback: the next start, offline, runs 6 and not 11' (([regex]::Matches((Get-Log $d), 'starting build 6').Count -eq 2) -and -not ((Get-Log $d) -match 'trying build 11'))
 Show-Install $d
 Stop-Install $d
 
-# 11. A build on probation crashes while the build the feed was rolled back to downloads: the running 6 keeps its files.
+# 10. A build on probation crashes while the build the feed was rolled back to downloads: the running 6 keeps its files.
 $z = Join-Path $root 'zip6'
 New-Item -ItemType Directory -Path $z | Out-Null
 Copy-Item (Join-Path $root 'bin\testapp.exe') (Join-Path $z 'App.exe')
@@ -307,6 +296,18 @@ $s = Get-State $d
 Test-That 'crashdownload: 6 is current and 7 no longer waits' ($s.current.id -eq 6 -and -not $s.pending)
 Test-That "crashdownload: the running 6's files are untouched" ((Test-Path (Join-Path $d 'versions\6\App.exe')) -and (Test-Path (Join-Path $d 'versions\6\label.txt')) -and ((Get-Content (Join-Path $d 'versions\6\label.txt')) -eq '6 (good)'))
 Show-Install $d
+
+# 11. A feed that doesn't answer holds the app up by a few seconds at most, then the waiting build is tried as before.
+# Last: its held-up answers would hold up the next one's.
+$d = New-Install 'slow' ($good6 + ',"pending":{"id":11,"exe":"App.exe","started":"file"}}') @{ 5 = 'good'; 6 = 'good'; 11 = 'good' } (New-Feed 'slow' 6 12)
+$at = Get-Date
+$l = Start-Launcher $d
+Test-That 'slow: 11 is tried' (Wait-Log $d 'trying build 11' 45)
+$took = ((Get-Date) - $at).TotalSeconds
+Test-That ('slow: within 10 s (took {0:n1})' -f $took) ($took -lt 10)
+Test-That 'slow: 11 starts' (Wait-Log $d 'build 11 started: it is now current, on probation' 45)
+Show-Install $d
+Stop-Install $d
 Stop-Process -Id $script:feed.Id -Force
 
 if ($script:failed -eq 0) { Write-Output 'all passed' } else { Write-Output "$($script:failed) failed" }

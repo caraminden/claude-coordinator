@@ -78,7 +78,8 @@ its current build is good and the builds it refused stay refused.
   The target's current release on the Releases page links the first-install zip.
 - **Roll back:** a roll back on that ci target pins an older run. The feed names that build again, and
   PCs that run the newer one go back to it on their next start but one; a PC that only has the newer one
-  downloaded never starts it, if it can reach the feed.
+  downloaded doesn't start it, unless the feed doesn't answer in 5 s or the older run is past the newest
+  three builds: that one is published again under a new number, so PCs try what waits first.
 
 Builds are kept under `<DATA_DIR>/projects/<id>/desktop/<app>/`: the newest three. The feed is open
 (no login) on the tailnet, like the app itself.

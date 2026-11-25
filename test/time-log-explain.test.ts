@@ -109,7 +109,7 @@ test("the reply: lines whose evidence isn't in the log, or that state a length o
 
 test('a length or a clock time in a line', () => {
   for (const t of ['It took 12 minutes.', 'After an hour it gave up.', 'Waited half an hour.', 'Ran for 37 s.', 'At 3:05 it shipped.', 'two hours of tests', 'several minutes later', 'a 5m run']) assert.ok(statesLength(t), t);
-  for (const t of ['It ran the tests twice.', 'It shipped the fix.', 'Step 2 of 4 failed.', 'It waited on Cara.', 'Found 3 bugs in the minutes file.']) assert.ok(!statesLength(t), t);
+  for (const t of ['It ran the tests twice.', 'It shipped the fix.', 'Step 2 of 4 failed.', 'It waited on Cara.', 'Found 3 bugs in the minutes file.', 'An index takes the query to 40 ms.']) assert.ok(!statesLength(t), t);
 });
 
 test('kept, out of date, and a second press writes only the new parts', () => {

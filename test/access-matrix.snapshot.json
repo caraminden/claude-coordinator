@@ -3622,6 +3622,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/time-log/explain": {
+  "anon": "401 Not logged in",
+  "person": "200",
+  "member": "409 Your Claude plan isn't linked (Settings → Your account), so there's no login of yours to run Explain on",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person explains a time log, on their own Claude login",
+  "tmB": "403 Only a person explains a time log, on their own Claude login",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/ultrareview": {
   "anon": "401 Not logged in",
   "person": "400 This scheme has no repo to review",
@@ -4519,6 +4529,16 @@
   "outsider": "404 No such minion",
   "tmA": "404 Only minions have a time log",
   "tmB": "403 Outside this Taskmaster's scheme: only the Citadel scheme's reads other schemes, on a turn a Citadel member or admin asked for",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/time-log/explain": {
+  "anon": "401 Not logged in",
+  "person": "404 Only minions have a time log",
+  "member": "404 Only minions have a time log",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person explains a time log, on their own Claude login",
+  "tmB": "403 Only a person explains a time log, on their own Claude login",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

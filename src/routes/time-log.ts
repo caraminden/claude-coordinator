@@ -86,7 +86,7 @@ export const timeLogRoutes: Route[] = [
         store.saveTimeLogExplain(ticket.id, JSON.stringify(mergeReading(saved, log, read, view.fresh, { by, at: Date.now(), cost, parts: input.parts.size }, upTo)));
       } catch (err) {
         store.saveTimeLogExplain(ticket.id, JSON.stringify({ ...readExplain(store.timeLogExplain(ticket.id)), writing: undefined }));
-        throw new HttpError(502, thrown(err).message ?? String(err));
+        throw new HttpError(502, String(thrown(err).message ?? err).replace(/^The agent didn't answer: /, ''));
       }
       return json(res, 200, await logWithExplain(store, ticket));
     },

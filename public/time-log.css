@@ -70,6 +70,15 @@ button.tl-head { cursor: pointer; }
 .tl-guess { color: var(--muted); font-size: 0.85em; font-weight: 400; }
 .tl-total .tl-guess { font-size: 1em; }
 .tl-note { grid-column: 1 / -1; margin: -0.15rem 0.6rem 0.45rem 2.1rem; font-size: 0.9em; color: var(--muted); overflow-wrap: anywhere; }
+/* Explain (#1994): its line under the ribbon, and Haiku's lines in a row in place of the minion's outcome. */
+.tl-explain { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; margin-top: 0.5rem; font-size: 0.85em; }
+.tl-explain .tl-stale { color: var(--waiting); }
+.tl-writing { color: var(--muted); animation: pulse 1.4s infinite; }
+.tl-explain + .cui-failed { margin-top: 0.4rem; }
+.tl-read { grid-column: 1 / -1; display: grid; gap: 0.2rem; margin: -0.15rem 0.6rem 0.45rem 2.1rem; padding: 0; list-style: none; font-size: 0.9em; overflow-wrap: anywhere; }
+.tl-read .tl-k { vertical-align: baseline; }
+.time-log .tl-ev { display: inline-grid; place-items: center; min-width: 1.35em; height: 1.35em; margin-right: 0.2em; padding: 0 0.2em; box-sizing: border-box; border: 1px solid var(--line); border-radius: 3px; color: var(--muted); font-size: 0.78em; font-variant-numeric: tabular-nums; text-decoration: none; vertical-align: 0.1em; }
+.time-log .tl-ev:hover, .time-log .tl-ev:focus-visible { border-color: var(--ink); color: var(--ink); }
 .tl-jump { font-size: 0.82em; }
 .tl-row .tl-jump { padding: 0.5rem 0.65rem 0.4rem 0; white-space: nowrap; }
 .tl-more { justify-self: start; }
@@ -79,7 +88,9 @@ button.tl-head { cursor: pointer; }
   .tl-head .subject { flex: 1 1 70%; }
   .tl-row .tl-jump { min-height: var(--control-h); box-sizing: border-box; padding-top: 0.45rem; }
   .tl-meta { flex-basis: 100%; justify-content: flex-start; padding-left: 1.5rem; }
+  .tl-read { margin-left: 0.75rem; }
+  .time-log .tl-ev { min-width: 1.9em; height: 1.9em; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .tl-ribbon.busy, .tl-ribbon.live::after { animation: none; }
+  .tl-ribbon.busy, .tl-ribbon.live::after, .tl-writing { animation: none; }
 }

@@ -1,6 +1,7 @@
 // What a minion's progress line opens to (#1991, Josh's pick of 2026-11-25): where its time went, as a ribbon of working,
 // waiting and lost time over its steps. src/time-log.ts cuts it; time-log.js fits it. The panel's element outlives a
-// redraw of the progress line, so a click, a scroll or focus in it isn't lost to the next event.
+// redraw of the progress line, so a click, a scroll or focus in it isn't lost to the next event. Explain (#1994): Haiku's
+// reading of each step and wait, kept for everyone (src/time-log-explain.ts), shown in the rows in place of the outcomes.
 import { api, h, heldWhilePressed, jumpHref, pacificClock, pacificClockBare, pacificDate, pacificIso, pacificStamp, view } from './base.js';
 import { firstSentence, shortDuration } from './chattext.js';
 import { grow, rowKey, tiles } from './time-log.js';
@@ -16,10 +17,10 @@ const ROWS = 30;
 const ICON = { completed: '✓', in_progress: '◐', pending: '○' };
 const KIND = { work: 'working', wait: 'waiting', lost: 'lost', gone: 'finished' };
 
-/** The last log read per chat, so reopening shows it at once: {log, at, sig, busy, failed}. */
+/** The last log read per chat, so reopening shows it at once: {log, at, sig, busy, failed, explaining, explainFailed}. */
 const logs = new Map();
 const entryOf = (id) => {
-  if (!logs.has(id)) logs.set(id, { log: null, at: 0, sig: '', busy: false, failed: '' });
+  if (!logs.has(id)) logs.set(id, { log: null, at: 0, sig: '', busy: false, failed: '', explaining: false, explainFailed: '' });
   if (logs.size > 30) logs.delete(logs.keys().next().value);
   return logs.get(id);
 };
@@ -63,7 +64,7 @@ export function timeLogPanel() {
     const list = h('div', { class: 'tl-rows' });
     panel = { id, ui: view.ui, top, list, el: h('div', { class: 'time-log' }, top, list), drawn: '' };
   }
-  tips ??= mountTips(document.body, { selector: '.tl-tile[data-tip], .tl-guess[data-tip]' });
+  tips ??= mountTips(document.body, { selector: '.tl-tile[data-tip], .tl-guess[data-tip], .tl-by[data-tip]' });
   clearInterval(clock);
   clock = setInterval(() => {
     if (!panel.el.isConnected) return clearInterval(clock);
@@ -102,7 +103,8 @@ function rowEl(r, isLast, log) {
   const going = isLast && !log?.closed && r.type !== 'step';
   const ms = r.work + r.wait + r.lost;
   const icon = r.type === 'step' ? (ICON[r.status] ?? (r.more ? '·' : '○')) : r.type === 'line' ? '·' : '‖';
-  const line = r.type === 'step' && !r.more && stepLine(r);
+  const read = key && explained(log)?.parts[key];
+  const line = !read?.length && r.type === 'step' && !r.more && stepLine(r);
   const when = r.start && `${at(r.start, log)} to ${going || (r.status === 'in_progress' && isRunning()) ? 'now' : at(r.end, log)}`;
   const head = [
     h('span', { class: 'icon', 'aria-hidden': 'true' }, icon),
@@ -121,8 +123,72 @@ function rowEl(r, isLast, log) {
     { class: `tl-row tl-${r.type}${r.status ? ` ${r.status}` : ''}${r.kind === 'lost' ? ' lost' : ''}${r.guess ? ' guess' : ''}${r.status === 'in_progress' && !isRunning() ? ' paused' : ''}${on ? ' on' : ''}`, 'data-row': key },
     key ? h('button', { class: 'tl-head', 'aria-pressed': String(!!on), title: `${when}. ${on ? 'Show the whole ribbon' : 'Show on the ribbon'}`, 'data-focus': key, onclick: () => pick(on ? null : key) }, head) : h('div', { class: 'tl-head' }, head),
     r.event ? h('a', { class: 'tl-jump', href: jumpHref(view.ticket, r.event), title: 'Show in the chat', 'aria-label': 'Show in the chat', 'data-focus': `jump ${key}` }, 'Chat ↗') : '',
-    line ? h('p', { class: 'tl-note' }, line) : '',
+    read?.length ? readingOf(read) : line ? h('p', { class: 'tl-note' }, line) : '',
   );
+}
+
+/** The log's reading when it is shown: there is one and it isn't hidden. */
+const explained = (log) => (log?.explain?.presses.length && !panel.ui.tlPlain ? log.explain : null);
+
+/** A part's lines, each with numbered squares that open the chat at the events it rests on. */
+const readingOf = (lines) =>
+  h(
+    'ul',
+    { class: 'tl-read' },
+    lines.map((l) =>
+      h(
+        'li',
+        { class: l.kind },
+        l.kind !== 'work' ? swatch(l.kind) : '',
+        h('span', {}, l.text),
+        ' ',
+        l.ev.map((ev, i) => h('a', { class: 'tl-ev', href: jumpHref(view.ticket, ev), title: 'Show in the chat', 'aria-label': `Show in the chat: what line ${i + 1} rests on` }, String(i + 1))),
+      ),
+    ),
+  );
+
+/** Explain: a press runs Haiku on the presser's own login; the reply is the log with its reading, for everyone. */
+async function explain() {
+  const id = panel.id;
+  const e = entryOf(id);
+  if (e.explaining) return;
+  Object.assign(e, { explaining: true, explainFailed: '' });
+  panel.ui.tlPlain = false;
+  draw();
+  try {
+    const log = await api(`api/tickets/${id}/time-log/explain`, { method: 'POST', body: {} });
+    Object.assign(e, { log, at: Date.now(), sig: view.ticket?.id === id ? signature() : '' });
+  } catch (err) {
+    e.explainFailed = err.message;
+  }
+  e.explaining = false;
+  if (panel?.id === id && panel.el.isConnected) draw();
+}
+
+const cents = (usd) => (usd == null ? '' : ` · ${usd * 100 < 0.1 ? '<0.1' : (usd * 100).toFixed(usd * 100 < 1 ? 2 : 1)}¢`);
+const stamp = (ms) => (pacificIso(ms) === pacificIso(Date.now()) ? pacificClock : pacificStamp)(ms);
+
+/** Explain's line under the ribbon: its button, or whose reading it is and whether something came since. */
+function explainBar(e, log) {
+  const x = log.explain;
+  if (!x || !log.rows.some((r) => r.start)) return '';
+  const writing = e.explaining || x.writing;
+  const failed = !writing && e.explainFailed && failedLine(`Explain didn't work: ${e.explainFailed}. The steps below are the minion's own.`, { retry: explain });
+  const last = x.presses.at(-1);
+  const fresh = x.fresh.length;
+  const btn = (label) => h('button', { class: 'small tl-explain-btn', 'data-focus': 'explain', disabled: !!writing, onclick: explain }, label);
+  const bits = [];
+  if (writing) bits.push(h('span', { class: 'tl-writing', role: 'status' }, `Haiku is writing what happened in each ${last ? 'new part' : 'step'}…`, x.writing && !e.explaining ? ` (asked by ${x.writing.by})` : ''));
+  else if (!last) bits.push(btn('Explain'), h('span', { class: 'muted' }, 'Haiku writes what happened in each step'));
+  if (last) {
+    const all = x.presses.map((p) => `${p.by}, ${stamp(p.at)}${cents(p.cost)}`).join('\n');
+    bits.push(
+      h('span', { class: 'tl-by', tabindex: 0, 'data-tip': `Haiku read the chat's record of each part. It can miss things: each line's squares show what it rests on.\n${all}` }, h('b', {}, "Haiku's reading"), ` · ${last.by}, ${stamp(last.at)}${cents(last.cost)}`),
+      h('button', { class: 'small secondary', 'data-focus': 'plain', 'aria-pressed': String(!!panel.ui.tlPlain), onclick: () => ((panel.ui.tlPlain = !panel.ui.tlPlain), draw()) }, panel.ui.tlPlain ? 'Show Explain' : 'Hide Explain'),
+    );
+    if (fresh && !writing) bits.push(h('span', { class: 'tl-stale' }, 'Out of date: something new since'), btn(`Explain the new part${fresh > 1 ? 's' : ''}`));
+  }
+  return [h('div', { class: 'tl-explain' }, bits), failed || ''];
 }
 
 /** A time in the log: its day too when that isn't the day the log starts on. */
@@ -208,7 +274,7 @@ function topOf(e, log) {
     ribbon(log),
     h('div', { class: 'tl-axis' }, h('span', {}, (pacificIso(log.start) === pacificIso(Date.now()) ? pacificClock : pacificStamp)(log.start)), h('span', {}, last.kind === 'gone' ? (log.closed ? 'dismissed' : 'finished') : log.closed ? `${at(log.end, log)}, dismissed` : 'now')),
     picked(log),
-    // Explain's slot: the minion after this fills it.
+    ...[explainBar(e, log)].flat(),
     retry || '',
   ];
 }
@@ -222,7 +288,9 @@ function draw() {
   // A pick made on a row behind the button opens the rest.
   const cut = ui.tlAll || rows.length <= ROWS + 5 || rows.slice(0, -ROWS).some((r) => rowKey(r) && rowKey(r) === ui.tlSel) ? 0 : rows.length - ROWS;
   // Nothing changed but a second's growth: leave what the pointer is on alone.
-  const drawn = JSON.stringify([rows, e.failed, !!log, ui.tlSel, ui.tlSeg, cut, isRunning(), panel.el.clientWidth, log && Math.round(log.end / FRESH_MS), view.progress.tasks.map((t) => [t.status, t.description, t.note])], (k, v) => (['work', 'wait', 'lost', 'end'].includes(k) ? Math.round(v / FRESH_MS) : v));
+  const drawn = JSON.stringify([rows, e.failed, !!log, log?.explain, e.explaining, e.explainFailed, ui.tlPlain, ui.tlSel, ui.tlSeg, cut, isRunning(), panel.el.clientWidth, log && Math.round(log.end / FRESH_MS), view.progress.tasks.map((t) => [t.status, t.description, t.note])], (k, v) =>
+    ['work', 'wait', 'lost', 'end'].includes(k) ? Math.round(v / FRESH_MS) : v,
+  );
   if (drawn === panel.drawn) return;
   panel.drawn = drawn;
   const focus = panel.el.contains(document.activeElement) ? document.activeElement.dataset.focus : null;

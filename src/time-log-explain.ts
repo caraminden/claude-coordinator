@@ -140,6 +140,8 @@ interface Part {
   entries: Entry[];
   reads: number;
   edits: Set<string>;
+  /** The first edit's event, so the line that lists them can be cited. */
+  edited: number | null;
   errors: number;
 }
 
@@ -149,7 +151,7 @@ export function explainInput(title: string, log: TimeLog, events: EventRow[], ke
   const rowParts = new Map<number, Part>();
   timed(log).forEach((r) => {
     const key = rowKey(r)!;
-    if (want.has(key)) rowParts.set(log.rows.indexOf(r), { label: '', key, row: r, entries: [], reads: 0, edits: new Set(), errors: 0 });
+    if (want.has(key)) rowParts.set(log.rows.indexOf(r), { label: '', key, row: r, entries: [], reads: 0, edits: new Set(), edited: null, errors: 0 });
   });
   // The segment an event falls in names its row; one with no row (a short gap) gives it to the row before.
   const segs = log.segs;
@@ -198,8 +200,10 @@ export function explainInput(title: string, log: TimeLog, events: EventRow[], ke
           if (!p) continue;
           const s = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '');
           if (READS.has(b.name)) p.reads++;
-          else if (EDITS.has(b.name)) p.edits.add((s('file_path') || s('notebook_path')).split('/').pop() || 'a file');
-          else if (b.name === 'Bash') add(`Command: ${one(s('description') || s('command'), 160)}`);
+          else if (EDITS.has(b.name)) {
+            p.edited ??= ev.id;
+            p.edits.add((s('file_path') || s('notebook_path')).split('/').pop() || 'a file');
+          } else if (b.name === 'Bash') add(`Command: ${one(s('description') || s('command'), 160)}`);
           else if (b.name === 'Agent' || b.name === 'Task') add(`Started a Grunt (helper): ${one(s('description'), 120)}`);
           else if (b.name.endsWith('hand_off_land')) add(`Handed its change off to ship: ${one(s('summary'), 200)}${s('risk') ? ` (risk ${s('risk')})` : ''}`);
           else if (b.name.endsWith('message_coordinator') || b.name.endsWith('message_minion')) add(`Messaged ${b.name.endsWith('coordinator') ? 'the Taskmaster' : 'another minion'}: ${one(s('text') || s('message'), 200)}`);
@@ -266,7 +270,7 @@ export function explainInput(title: string, log: TimeLog, events: EventRow[], ke
     const entries = p.entries.length > PART_LINES ? [...p.entries.slice(0, 15), null, ...p.entries.slice(-(PART_LINES - 15))] : p.entries;
     for (const e of entries) out.push(e ? `   ${lab(e.event)}${clock(e.at)} ${e.text}` : `   … ${p.entries.length - PART_LINES} more actions`);
     if (p.reads) out.push(`   (read or searched ${p.reads} times)`);
-    if (p.edits.size) out.push(`   (edited ${[...p.edits].slice(0, 8).join(', ')}${p.edits.size > 8 ? ` and ${p.edits.size - 8} more` : ''})`);
+    if (p.edits.size) out.push(`   ${lab(p.edited)}(edited ${[...p.edits].slice(0, 8).join(', ')}${p.edits.size > 8 ? ` and ${p.edits.size - 8} more` : ''})`);
     if (p.errors) out.push(`   (${p.errors} other tool call(s) returned an error)`);
     const text = out.join('\n');
     if (partLabels.size && used + text.length > MAX_INPUT) break;
@@ -290,9 +294,9 @@ Rules:
 - No summary of the whole log.
 Reply with JSON only: {"parts":[{"part":"P1","lines":[{"text":"...","kind":"work","evidence":["e1"]}]}]}`;
 
-/** Lines that say how long something took or when: the page prints those from the record, so a model's are dropped. */
+/** Lines that say how long something took or when: the page prints those from the record, so a model's are dropped. A speed in ms (a query's) is no step's length. */
 const LENGTH =
-  /\b(\d+(\.\d+)?|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|several|a few|few|half an?|many|couple of)[\s-]+(seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?)\b|\b\d+(\.\d+)?\s?(s|m|h|ms|min|hr)\b|\b\d{1,2}:\d{2}\b|\b(an?|half an?) (hour|minute|day)\b/i;
+  /\b(\d+(\.\d+)?|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|several|a few|few|half an?|many|couple of)[\s-]+(seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?)\b|\b\d+(\.\d+)?\s?(s|m|h|min|hr)\b|\b\d{1,2}:\d{2}\b|\b(an?|half an?) (hour|minute|day)\b/i;
 export const statesLength = (text: string) => LENGTH.test(text);
 
 /**

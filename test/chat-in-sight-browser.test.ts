@@ -113,7 +113,7 @@ after(async () => {
 
 /** Minion 7's chat, open in a tab on screen, its first seen mark sent. `w`: the window its page runs in. */
 async function chat(page: Page, w = 'window') {
-  await waitFor(page, "the chat and its first mark", `${w}.document.getElementById('ticket-head')?.textContent.includes('Minion 7') && ${w}.posts.includes('seen 101') && ${w}.presence.at(-1) === 101`);
+  await waitFor(page, 'the chat and its first mark', `${w}.document.getElementById('ticket-head')?.textContent.includes('Minion 7') && ${w}.posts.includes('seen 101') && ${w}.presence.at(-1) === 101`);
   await page.eval(`${w}.posts.length = 0, ${w}.presence.length = 0`);
 }
 const openChat = async () => {
@@ -190,7 +190,10 @@ test('a minion that finished under an app is still unread after leaving the app 
   await page.eval('finish()');
   await go(page, '#/p/1/t/8');
   await waitFor(page, 'the other chat', `document.getElementById('ticket-head')?.textContent.includes('Minion 8') && posts.includes('seen 102')`);
-  assert.deepEqual((await posted(page)).filter((p) => p.endsWith('101')), []);
+  assert.deepEqual(
+    (await posted(page)).filter((p) => p.endsWith('101')),
+    [],
+  );
 });
 
 test('a finished minion read before the app was opened is left when the app is left for another chat', { skip }, async () => {

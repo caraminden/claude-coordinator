@@ -1,6 +1,5 @@
 // The apps a ship deploys and how (src/ship-deploys.ts, #1838), on stand-ins: no server boot.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +7,7 @@ import { after, test } from 'node:test';
 import { askerKey, Store } from '../src/db.ts';
 import { HttpError } from '../src/http.ts';
 import { shipDeploys } from '../src/ship-deploys.ts';
+import { git, makeRepo } from './git.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'ship-deploys-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -15,17 +15,14 @@ let n = 0;
 
 /** A scheme with a minion, and shipDeploys over a scratch Store; `refuse` is what auto-deploy's deployNow throws. */
 function setup(opts: { off?: string; refuse?: Error; running?: boolean; noClone?: boolean } = {}) {
-  const dir = join(root, `s${++n}`);
-  mkdirSync(dir);
-  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+  const dir = makeRepo(join(root, `s${++n}`));
   const commit = (file: string, text: string) => {
     mkdirSync(join(dir, file, '..'), { recursive: true });
     writeFileSync(join(dir, file), text);
-    git('add', '-A');
-    git('commit', '-qm', file);
-    return git('rev-parse', 'HEAD');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-qm', file);
+    return git(dir, 'rev-parse', 'HEAD');
   };
-  git('init', '-q', '-b', 'main');
   const first = commit('README.md', 'x');
   const store = new Store(join(root, `db-${n}.sqlite`));
   const project = store.createProject(`p${n}`, null);
@@ -54,7 +51,7 @@ function setup(opts: { off?: string; refuse?: Error; running?: boolean; noClone?
   });
   const app = (name: string, fields: object = {}) =>
     store.createContraption({ name, title: name, icon: null, port: 9000 + n, home_scheme: project.id, open_paths: '[]', relay_paths: '[]', repo: 'https://x/y', branch: null, folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: `${name}${n}`, keys_at: 0, ...fields });
-  return { ...d, dir, git, commit, first, store, project, t, cara, asked, started, app, last };
+  return { ...d, commit, first, store, project, t, cara, asked, started, app, last };
 }
 
 test("apps: the scheme's own apps on main with a repo, and a folder app once its manifest is on main", () => {

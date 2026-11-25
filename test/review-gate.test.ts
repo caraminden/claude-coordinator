@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { CODEX_MODELS } from '../src/codex.ts';
 import { Store } from '../src/db.ts';
-import { reviewedSinceShip, reviewRefusal } from '../src/review-gate.ts';
+import { reviewsSinceShip, reviewRefusal } from '../src/review-gate.ts';
 import { addReview } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'review-gate-'));
@@ -30,7 +30,9 @@ test('a ship with no reviewer is refused in any scheme, whatever else ran; a rev
   call(t.id, 'Agent', { subagent_type: 'Explore', prompt: 'read kit/agents/reviewer.md' }, {});
   call(t.id, 'Agent', { subagent_type: 'citadel:reviewer' }, null);
   call(t.id, 'Agent', { subagent_type: 'citadel:reviewer' }, { is_error: true });
-  assert.ok(reviewRefusal(store, t, []), 'the skill alone, another Grunt, an unfinished review and a failed one are no review');
+  call(t.id, 'Agent', { subagent_type: 'citadel:reviewer', run_in_background: true }, {});
+  assert.ok(reviewRefusal(store, t, [], true), "a person's go is no review");
+  assert.ok(reviewRefusal(store, t, []), 'the skill alone, another Grunt, an unfinished review, a failed one and one only launched are no review');
   assert.ok(reviewRefusal(store, t, ['--into', 'build/2']), "a feeder's merge too");
   assert.ok(reviewRefusal(store, t, ['--build']), "a build's ship too");
   assert.equal(reviewRefusal(store, t, ['--into', 'build/2', '--full']), null, "a build's take-in of main");
@@ -43,12 +45,12 @@ test('a ship or a merge into a build uses the review up; a failed ship and other
   const t = minion();
   addReview(store, t.id);
   store.addEvent(t.id, 'note', { text: 'Your ship failed: main moved. Risk high.' });
-  assert.ok(reviewedSinceShip(store, t.id));
+  assert.ok(reviewsSinceShip(store, t.id).done);
   for (const text of ['Shipped abc1234: x. Risk low: docs. Live now.', 'Merged into build/2: x. Risk medium: y. ']) {
     store.addEvent(t.id, 'note', { text });
-    assert.ok(!reviewedSinceShip(store, t.id), text);
+    assert.ok(!reviewsSinceShip(store, t.id).done, text);
     addReview(store, t.id, `toolu_r${++n}`);
-    assert.ok(reviewedSinceShip(store, t.id));
+    assert.ok(reviewsSinceShip(store, t.id).done);
   }
 });
 
@@ -59,6 +61,7 @@ test('on a Codex turn, which has no Grunts, citadel-codex-review is the review; 
   call(t.id, 'Bash', { command: 'citadel-codex-review < b.md' }, { is_error: true }, codex);
   call(t.id, 'Bash', { command: 'citadel-codex-review < b.md' }, {}, 'claude-opus-5-5');
   assert.ok(reviewRefusal(store, t, []));
+  assert.equal(reviewRefusal(store, t, [], true), null, "its review can't run, so a person's go ships it");
   call(t.id, 'Bash', { command: 'citadel-codex-review < b.md' }, {}, codex);
   assert.equal(reviewRefusal(store, t, []), null);
 });

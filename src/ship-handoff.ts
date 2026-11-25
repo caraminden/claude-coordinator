@@ -128,7 +128,7 @@ export async function checkHandoff(app: App, ticket: Ticket, body: Record<string
   const dirty = await new Promise<string>((done) => execFile('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: ticket.cwd! }, (err, out) => done(err ? `git status failed: ${err.message}` : out.trim())));
   if (dirty) throw new HttpError(409, `Not handed off: your worktree has uncommitted changes. Commit them first.\n${dirty.slice(0, 2000)}`);
   // The review gate (#1938): a minion's reviewer reads every ship before it goes.
-  const unread = reviewRefusal(app.store, ticket, args);
+  const unread = reviewRefusal(app.store, ticket, args, hasGo);
   if (unread) throw new HttpError(400, unread);
   if (typeof caller === 'function') caller();
   const env = app.runner.hostEnv(ticket, typeof caller === 'string' ? caller : undefined);

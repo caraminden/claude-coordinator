@@ -29,6 +29,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { saveGenerated } from './codex.ts';
 import { codexLock } from './codex-lock.ts';
+import { jsonLines } from './json-lines.ts';
 
 export const REQUIREMENTS = '/etc/codex/requirements.toml';
 const HOOK = '/etc/codex/citadel-hook.mjs';
@@ -258,52 +259,38 @@ function reviewNow(brief: string, opts: ReviewOptions): Promise<{ code: number; 
     const timer = setTimeout(() => finish(124, `Codex didn't finish the ${gen ? 'image' : 'review'} within ${Math.round(opts.timeoutMs / 1000)} s.${last ? `\nIts last message:\n${last}` : ''}`), opts.timeoutMs);
     child.on('error', (err) => finish(3, `Couldn't start ${bin}: ${err.message}`));
     child.on('exit', (code) => finish(1, `codex app-server exited (${code}) before the ${gen ? 'image' : 'review'} finished.${tail(stderr)}`));
-    let buf = '';
-    child.stdout.on('data', (chunk) => {
-      buf += chunk;
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        let msg: any;
+    jsonLines<any>(child.stdout, (msg) => {
+      if (msg.id !== undefined && msg.method === undefined) {
+        waiting.get(msg.id)?.(msg);
+        waiting.delete(msg.id);
+      } else if (msg.id !== undefined) {
+        // A request from Codex: decline approvals, refuse the rest (no one is there to answer).
+        if (/requestApproval$|^(applyPatch|execCommand)Approval$/.test(msg.method)) send({ id: msg.id, result: { decision: 'decline' } });
+        else send({ id: msg.id, error: { code: -32601, message: `${msg.method} isn't available in a read-only review` } });
+      } else if (msg.method === 'account/rateLimits/updated') {
+        limits = msg.params?.rateLimits ?? limits;
+      } else if (msg.method === 'item/completed' && msg.params?.item?.type === 'agentMessage') {
+        last = String(msg.params.item.text ?? '');
+      } else if (gen && msg.method === 'item/completed' && msg.params?.item?.type === 'imageGeneration') {
         try {
-          msg = JSON.parse(line);
-        } catch {
-          continue;
+          saveGenerated(msg.params.item, gen.out, gen.overwrite === true);
+          saved = gen.out;
+        } catch (err: any) {
+          errors.push(err.message);
         }
-        if (msg.id !== undefined && msg.method === undefined) {
-          waiting.get(msg.id)?.(msg);
-          waiting.delete(msg.id);
-        } else if (msg.id !== undefined) {
-          // A request from Codex: decline approvals, refuse the rest (no one is there to answer).
-          if (/requestApproval$|^(applyPatch|execCommand)Approval$/.test(msg.method)) send({ id: msg.id, result: { decision: 'decline' } });
-          else send({ id: msg.id, error: { code: -32601, message: `${msg.method} isn't available in a read-only review` } });
-        } else if (msg.method === 'account/rateLimits/updated') {
-          limits = msg.params?.rateLimits ?? limits;
-        } else if (msg.method === 'item/completed' && msg.params?.item?.type === 'agentMessage') {
-          last = String(msg.params.item.text ?? '');
-        } else if (gen && msg.method === 'item/completed' && msg.params?.item?.type === 'imageGeneration') {
-          try {
-            saveGenerated(msg.params.item, gen.out, gen.overwrite === true);
-            saved = gen.out;
-          } catch (err: any) {
-            errors.push(err.message);
-          }
-        } else if (msg.method === 'hook/completed' && msg.params?.run?.status === 'blocked') {
-          // The hook's own deny reason, word for word, ahead of Codex's paraphrase of it (#738).
-          for (const e of msg.params.run.entries ?? []) if (e?.text) errors.push(String(e.text));
-        } else if (msg.method === 'error' && !msg.params?.willRetry) {
-          errors.push(String(msg.params?.error?.message ?? 'unknown error'));
-        } else if (msg.method === 'turn/completed') {
-          const turn = msg.params?.turn ?? {};
-          if (gen) {
-            if (saved) finish(0, `Wrote ${saved}`);
-            // The hook's deny reason and errors first, then Codex's own words (a refusal), then the status as a last resort (#738).
-            else finish(1, `Codex made no image: ${[...new Set([...errors, turn.error?.message, last].filter(Boolean))].join('\n') || `the turn ended ${turn.status ?? 'without a status'}`}`);
-          } else if (turn.status === 'completed' && last) finish(0, last);
-          else finish(1, `The Codex turn ended ${turn.status ?? 'without a status'}: ${turn.error?.message ?? errors.join('; ')}${last ? `\nIts last message:\n${last}` : ''}`.trim());
-        }
+      } else if (msg.method === 'hook/completed' && msg.params?.run?.status === 'blocked') {
+        // The hook's own deny reason, word for word, ahead of Codex's paraphrase of it (#738).
+        for (const e of msg.params.run.entries ?? []) if (e?.text) errors.push(String(e.text));
+      } else if (msg.method === 'error' && !msg.params?.willRetry) {
+        errors.push(String(msg.params?.error?.message ?? 'unknown error'));
+      } else if (msg.method === 'turn/completed') {
+        const turn = msg.params?.turn ?? {};
+        if (gen) {
+          if (saved) finish(0, `Wrote ${saved}`);
+          // The hook's deny reason and errors first, then Codex's own words (a refusal), then the status as a last resort (#738).
+          else finish(1, `Codex made no image: ${[...new Set([...errors, turn.error?.message, last].filter(Boolean))].join('\n') || `the turn ended ${turn.status ?? 'without a status'}`}`);
+        } else if (turn.status === 'completed' && last) finish(0, last);
+        else finish(1, `The Codex turn ended ${turn.status ?? 'without a status'}: ${turn.error?.message ?? errors.join('; ')}${last ? `\nIts last message:\n${last}` : ''}`.trim());
       }
     });
     (async () => {

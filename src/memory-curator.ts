@@ -75,15 +75,13 @@ export const hashText = (text: string): string => createHash('sha256').update(te
 /** The index line that links a note, or null. */
 export const lineFor = (index: string, file: string): string | null => index.split('\n').find((l) => l.includes(`](${file})`)) ?? null;
 
-const fail = (msg: string) => new HttpError(400, msg);
-
 /** A MEMORY.md line for `file`: one line, a markdown list item that links it. */
 function cleanLine(raw: unknown, file: string, i: number): string {
-  if (typeof raw !== 'string') throw fail(`Change ${i + 1} (${file}) needs line: its MEMORY.md line`);
+  if (typeof raw !== 'string') throw new HttpError(400, `Change ${i + 1} (${file}) needs line: its MEMORY.md line`);
   const line = raw.trim();
-  if (line.includes('\n')) throw fail(`Change ${i + 1} (${file}): line must be one line`);
-  if (!line.startsWith('- ') || !line.includes(`](${file})`)) throw fail(`Change ${i + 1} (${file}): line must be a list item that links the note, like "- [Name](${file}) — what it holds"`);
-  if (line.length > 300) throw fail(`Change ${i + 1} (${file}): line is ${line.length} characters; keep it under about 150`);
+  if (line.includes('\n')) throw new HttpError(400, `Change ${i + 1} (${file}): line must be one line`);
+  if (!line.startsWith('- ') || !line.includes(`](${file})`)) throw new HttpError(400, `Change ${i + 1} (${file}): line must be a list item that links the note, like "- [Name](${file}) — what it holds"`);
+  if (line.length > 300) throw new HttpError(400, `Change ${i + 1} (${file}): line is ${line.length} characters; keep it under about 150`);
   return line;
 }
 
@@ -92,33 +90,33 @@ function cleanLine(raw: unknown, file: string, i: number): string {
  * an add, and only real changes. Throws a 400 naming the first bad change.
  */
 export function checkChanges(folder: FolderView, raw: unknown): Change[] {
-  if (!Array.isArray(raw) || !raw.length) throw fail('changes must be a list of at least one change');
-  if (raw.length > 300) throw fail('At most 300 changes in one proposal');
+  if (!Array.isArray(raw) || !raw.length) throw new HttpError(400, 'changes must be a list of at least one change');
+  if (raw.length > 300) throw new HttpError(400, 'At most 300 changes in one proposal');
   const notes = new Map(folder.notes.map((n) => [n.file, n.text]));
   const seen = new Set<string>();
   return raw.map((c: any, i): Change => {
     const action = c?.action as Action;
-    if (!ACTIONS.includes(action)) throw fail(`Change ${i + 1}: action must be one of ${ACTIONS.join(', ')}`);
+    if (!ACTIONS.includes(action)) throw new HttpError(400, `Change ${i + 1}: action must be one of ${ACTIONS.join(', ')}`);
     // MEMORY.md itself can only be flagged (a long or stale line no note owns): its lines change through each note's change.
     const file = action === 'flag' && c.file === 'MEMORY.md' ? c.file : noteFile(c.file);
-    if (!file) throw fail(`Change ${i + 1}: file must be a note's file name, like some-note.md (MEMORY.md only with flag)`);
-    if (seen.has(file)) throw fail(`Change ${i + 1}: ${file} has two changes; make it one (an edit can change its text and its line)`);
+    if (!file) throw new HttpError(400, `Change ${i + 1}: file must be a note's file name, like some-note.md (MEMORY.md only with flag)`);
+    if (seen.has(file)) throw new HttpError(400, `Change ${i + 1}: ${file} has two changes; make it one (an edit can change its text and its line)`);
     seen.add(file);
     const reason = typeof c.reason === 'string' ? c.reason.trim() : '';
-    if (!reason || reason.length > 500) throw fail(`Change ${i + 1} (${file}) needs a reason under 500 characters: people decide from it`);
+    if (!reason || reason.length > 500) throw new HttpError(400, `Change ${i + 1} (${file}) needs a reason under 500 characters: people decide from it`);
     const was = file === 'MEMORY.md' ? folder.index : (notes.get(file) ?? null);
-    if (action === 'add' ? was !== null : was === null) throw fail(action === 'add' ? `Change ${i + 1}: ${file} already exists; edit it instead` : `Change ${i + 1}: there is no note ${file}`);
+    if (action === 'add' ? was !== null : was === null) throw new HttpError(400, action === 'add' ? `Change ${i + 1}: ${file} already exists; edit it instead` : `Change ${i + 1}: there is no note ${file}`);
     const wasLine = lineFor(folder.index, file);
     let text: string | null = null;
     let line: string | null = null;
     if (action === 'edit' || action === 'add') {
-      if (typeof c.text !== 'string' || !c.text.trim() || c.text.length > 200_000) throw fail(`Change ${i + 1} (${file}) needs text: the note's whole new text, under 200 KB`);
+      if (typeof c.text !== 'string' || !c.text.trim() || c.text.length > 200_000) throw new HttpError(400, `Change ${i + 1} (${file}) needs text: the note's whole new text, under 200 KB`);
       text = c.text.endsWith('\n') ? c.text : `${c.text}\n`;
     }
     if (action === 'add' || action === 'index' || (action === 'edit' && c.line !== undefined && c.line !== null && c.line !== '')) line = cleanLine(c.line, file, i);
     if (action === 'edit' && line === wasLine) line = null;
-    if (action === 'edit' && text === was && line === null) throw fail(`Change ${i + 1}: that is ${file} as it is now`);
-    if (action === 'index' && line === wasLine) throw fail(`Change ${i + 1}: that is ${file}'s line as it is now`);
+    if (action === 'edit' && text === was && line === null) throw new HttpError(400, `Change ${i + 1}: that is ${file} as it is now`);
+    if (action === 'index' && line === wasLine) throw new HttpError(400, `Change ${i + 1}: that is ${file}'s line as it is now`);
     return { id: i + 1, action, file, text, line, reason, was, wasLine };
   });
 }

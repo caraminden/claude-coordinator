@@ -1,11 +1,9 @@
 // Desktop apps' feeds (#1148, src/desktop-feed.ts). The launcher on a PC reads them with no login, like /api/health:
 // Citadel is reachable only over the tailnet, and a build holds nothing a scheme's members couldn't already share.
 // Publishing takes a scheme's minion, Taskmaster or member.
-import { createReadStream } from 'node:fs';
 import { lstat } from 'node:fs/promises';
-import { pipeline } from 'node:stream/promises';
 import { DesktopError, DesktopFeeds, type PublishAsk } from '../desktop-feed.ts';
-import { HttpError, json, publicOrigin, readJson, type App, type Ctx, type Route } from '../http.ts';
+import { HttpError, json, publicOrigin, readJson, sendFile, type App, type Ctx, type Route } from '../http.ts';
 import { resolveTicketFile } from './files.ts';
 
 function desktop(app: App) {
@@ -20,22 +18,18 @@ export function origin(req: Ctx['req'], preview = false): string {
 
 async function send(ctx: Ctx, file: string | null, type: string, name: string) {
   // lstat: a link planted in the desktop folder (it sits on a writable mount) is never followed.
-  const size =
-    file &&
-    (await lstat(file).then(
-      (s) => (s.isFile() ? s.size : null),
-      () => null,
-    ));
+  const size = file
+    ? await lstat(file).then(
+        (s) => (s.isFile() ? s.size : null),
+        () => null,
+      )
+    : null;
   if (!file || size === null) throw new HttpError(404, 'Not found');
-  ctx.res.writeHead(200, {
+  await sendFile(ctx.req, ctx.res, file, size, {
     'Content-Type': type,
-    'Content-Length': size,
-    'X-Content-Type-Options': 'nosniff',
     'Cache-Control': 'no-cache',
     'Content-Disposition': `attachment; filename="${name}"`,
   });
-  if (ctx.req.method === 'HEAD') return ctx.res.end();
-  await pipeline(createReadStream(file), ctx.res).catch(() => {});
 }
 
 export const desktopRoutes: Route[] = [

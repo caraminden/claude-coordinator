@@ -12,6 +12,8 @@ import type { ErrorDigest } from './contraption-errors.ts';
 import type { Landings } from './land.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import { gzip } from 'node:zlib';
 import { LOCAL_HEADER, MIN_GZIP_BYTES, PEER_HEADER } from './front.ts';
 // ownPath's one copy is the front thread's, which serves the front end's files by it (#1628).
@@ -198,6 +200,13 @@ export function clientIp(req: IncomingMessage): string {
   const fwd = req.headers['x-forwarded-for'];
   const last = typeof fwd === 'string' ? fwd.split(',').pop()!.trim() : '';
   return last || connection(req).remote || '?';
+}
+
+/** Answer with a whole file, no ranges. A client that goes away mid-file ends it quietly. */
+export async function sendFile(req: IncomingMessage, res: ServerResponse, file: string, size: number, headers: Record<string, string>): Promise<void> {
+  res.writeHead(200, { ...headers, 'Content-Length': size, 'X-Content-Type-Options': 'nosniff' });
+  if (req.method === 'HEAD') return void res.end();
+  await pipeline(createReadStream(file), res).catch(() => {});
 }
 
 /** True once the main thread listens behind the front thread (src/front.ts), on a local socket only it can reach. */

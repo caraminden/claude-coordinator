@@ -20,6 +20,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { callLine, CODEX_NOTE, isTurnNote, codexModelFor, saveGenerated, toCodexPreamble } from './codex.ts';
 import { codexLock, LOCK_ENV, startTime } from './codex-lock.ts';
+import { jsonLines } from './json-lines.ts';
 import type { ClaudeEvent, ClaudeMessage } from './claude-events.ts';
 
 /** Claude's --mcp-config file: each server is a stdio command or an HTTP url. */
@@ -561,32 +562,17 @@ export async function main(argv: string[], env: Record<string, string | undefine
     }
   };
 
-  let buf = '';
-  child.stdout!.setEncoding('utf8');
-  child.stdout!.on('data', (chunk: string) => {
-    buf += chunk;
-    let nl;
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line) continue;
-      let m: CodexMessage;
-      try {
-        m = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      heard();
-      if (m.id !== undefined && m.method === undefined) {
-        waiting.get(m.id)?.(m);
-        waiting.delete(m.id);
-      } else if (m.id !== undefined) {
-        // Requests from Codex: nobody can answer an approval here (the tripwire hook already checked the call).
-        if (/requestApproval$|^(applyPatch|execCommand)Approval$/.test(m.method!)) send({ id: m.id, result: { decision: 'decline' } });
-        else if (m.method === 'mcpServer/elicitation/request') send({ id: m.id, result: { action: 'decline' } });
-        else send({ id: m.id, error: { code: -32601, message: `${m.method} isn't available in a Citadel turn` } });
-      } else onMessage(m);
-    }
+  jsonLines<CodexMessage>(child.stdout!, (m) => {
+    heard();
+    if (m.id !== undefined && m.method === undefined) {
+      waiting.get(m.id)?.(m);
+      waiting.delete(m.id);
+    } else if (m.id !== undefined) {
+      // Requests from Codex: nobody can answer an approval here (the tripwire hook already checked the call).
+      if (/requestApproval$|^(applyPatch|execCommand)Approval$/.test(m.method!)) send({ id: m.id, result: { decision: 'decline' } });
+      else if (m.method === 'mcpServer/elicitation/request') send({ id: m.id, result: { action: 'decline' } });
+      else send({ id: m.id, error: { code: -32601, message: `${m.method} isn't available in a Citadel turn` } });
+    } else onMessage(m);
   });
   child.on('error', (err) => fail(new Error(`Couldn't start Codex: ${err.message}`)));
   child.on('exit', (code) => {
@@ -601,19 +587,8 @@ export async function main(argv: string[], env: Record<string, string | undefine
   });
 
   // Claude's stdin protocol: one user line per message; steers arrive mid-turn; the end of input ends the run once the turn is done.
-  let inBuf = '';
-  process.stdin.setEncoding('utf8');
-  process.stdin.on('data', (chunk: string) => {
-    inBuf += chunk;
-    let nl;
-    while ((nl = inBuf.indexOf('\n')) >= 0) {
-      const line = inBuf.slice(0, nl).trim();
-      inBuf = inBuf.slice(nl + 1);
-      try {
-        const ev = line ? JSON.parse(line) : null;
-        if (ev?.type === 'user') void userLine(ev);
-      } catch {}
-    }
+  jsonLines<ClaudeEvent | null>(process.stdin, (ev) => {
+    if (ev?.type === 'user') void userLine(ev);
   });
   process.stdin.on('end', () => {
     inputEnded = true;

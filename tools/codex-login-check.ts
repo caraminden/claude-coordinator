@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { after, before, test } from 'node:test';
 import { codexLock } from '../src/codex-lock.ts';
+import { jsonLines } from '../src/json-lines.ts';
 
 assert.equal(spawnSync('codex', ['--version'], { stdio: 'ignore' }).status, 0, 'this check needs codex installed');
 const root = mkdtempSync(join(tmpdir(), 'codex-race-'));
@@ -82,18 +83,8 @@ function appServer(env: Record<string, string | undefined>) {
   child.on('exit', () => children.delete(child));
   const waiting = new Map<number, (m: Reply) => void>();
   let id = 1;
-  let buf = '';
-  child.stdout!.on('data', (c) => {
-    buf += c;
-    let nl;
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      let m: Reply | undefined;
-      try {
-        m = JSON.parse(buf.slice(0, nl));
-      } catch {}
-      buf = buf.slice(nl + 1);
-      if (m?.id !== undefined && m.method === undefined) waiting.get(m.id)?.(m), waiting.delete(m.id);
-    }
+  jsonLines<Reply>(child.stdout!, (m) => {
+    if (m.id !== undefined && m.method === undefined) waiting.get(m.id)?.(m), waiting.delete(m.id);
   });
   const call = (method: string, params: object) => new Promise<Reply>((r) => (waiting.set(++id, r), child.stdin!.write(JSON.stringify({ id, method, params }) + '\n')));
   const ready = call('initialize', { clientInfo: { name: 'citadel-test', version: '1' }, capabilities: { experimentalApi: false } }).then(() => child.stdin!.write(JSON.stringify({ method: 'initialized' }) + '\n'));

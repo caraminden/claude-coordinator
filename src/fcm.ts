@@ -40,10 +40,9 @@ export interface PushSend {
   data?: Record<string, string>;
 }
 
-const bad = (msg: string) => new HttpError(400, msg);
 const optional = (v: unknown, field: string, max: number, min = 0): string | undefined => {
   if (v === undefined) return undefined;
-  if (typeof v !== 'string' || v.length < min || v.length > max) throw bad(`${field} must be a string of ${min ? `${min} to ` : 'at most '}${max} characters`);
+  if (typeof v !== 'string' || v.length < min || v.length > max) throw new HttpError(400, `${field} must be a string of ${min ? `${min} to ` : 'at most '}${max} characters`);
   return v;
 };
 const reservedKey = (k: string) => k.startsWith('citadel_') || ['from', 'notification', 'message_type'].includes(k) || k.startsWith('google.') || k.startsWith('gcm.');
@@ -52,7 +51,7 @@ const reservedKey = (k: string) => k.startsWith('citadel_') || ['from', 'notific
 export function parsePush(app: string, b: any): { to: string[]; send: PushSend } {
   const to = typeof b?.to === 'string' ? [b.to] : b?.to;
   if (!Array.isArray(to) || !to.length || to.length > PUSH_MAX_TO || to.some((l) => typeof l !== 'string' || !l || l.length > 200)) {
-    throw bad(`to must be a login, or a list of 1 to ${PUSH_MAX_TO} logins`);
+    throw new HttpError(400, `to must be a login, or a list of 1 to ${PUSH_MAX_TO} logins`);
   }
   const send: PushSend = {
     title: optional(b.title, 'title', 200, 1),
@@ -60,24 +59,24 @@ export function parsePush(app: string, b: any): { to: string[]; send: PushSend }
     open: optional(b.open, 'open', 1000),
     tag: optional(b.tag, 'tag', 100),
   };
-  if (send.title === undefined && (send.body !== undefined || send.open !== undefined || send.tag !== undefined)) throw bad('body, open and tag go with a title');
+  if (send.title === undefined && (send.body !== undefined || send.open !== undefined || send.tag !== undefined)) throw new HttpError(400, 'body, open and tag go with a title');
   // A tap opens it in the app's own pages: no other app's, and nothing a decoder could turn into one.
   if (send.open !== undefined && (!send.open.startsWith(`/apps/${app}/`) || /[\\\u0000-\u001f\u007f]|%2e|%2f|%5c|\/\.\.?(\/|$|\?|#)/i.test(send.open))) {
-    throw bad(`open must be a path under /apps/${app}/`);
+    throw new HttpError(400, `open must be a path under /apps/${app}/`);
   }
   if (b.data !== undefined) {
-    if (!b.data || typeof b.data !== 'object' || Array.isArray(b.data)) throw bad('data must be an object of string values');
+    if (!b.data || typeof b.data !== 'object' || Array.isArray(b.data)) throw new HttpError(400, 'data must be an object of string values');
     for (const [k, v] of Object.entries(b.data)) {
-      if (typeof v !== 'string') throw bad(`data.${k} must be a string`);
-      if (!k || reservedKey(k)) throw bad(`data key "${k}" is reserved: citadel_*, from, notification, message_type, google.* and gcm.* are not the app's`);
+      if (typeof v !== 'string') throw new HttpError(400, `data.${k} must be a string`);
+      if (!k || reservedKey(k)) throw new HttpError(400, `data key "${k}" is reserved: citadel_*, from, notification, message_type, google.* and gcm.* are not the app's`);
     }
     if (Object.keys(b.data).length) send.data = b.data;
   }
-  if (send.title === undefined && !send.data) throw bad('Send a title or data (or both)');
+  if (send.title === undefined && !send.data) throw new HttpError(400, 'Send a title or data (or both)');
   // The whole data block, Citadel's keys too, has to fit Firebase's 4 KB.
   const data = fcmMessage(app, '', send).message.data;
   const bytes = Object.entries(data).reduce((n, [k, v]) => n + Buffer.byteLength(k) + Buffer.byteLength(v), 0);
-  if (bytes > DATA_MAX_BYTES) throw bad(`data, title, body, open and tag come to ${bytes} bytes; Firebase takes at most ${DATA_MAX_BYTES} (4 KB)`);
+  if (bytes > DATA_MAX_BYTES) throw new HttpError(400, `data, title, body, open and tag come to ${bytes} bytes; Firebase takes at most ${DATA_MAX_BYTES} (4 KB)`);
   return { to: [...new Set(to as string[])], send };
 }
 

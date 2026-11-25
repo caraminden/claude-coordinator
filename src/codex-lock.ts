@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { jsonLines } from './json-lines.ts';
 
 /** A run starts with at least this much life in the access token (seconds), far from Codex's own 5-minute refresh. */
 export const MARGIN_S = 24 * 3600;
@@ -81,19 +82,9 @@ function refresh(bin: string, env: Record<string, string | undefined>, timeoutMs
     child.stdin.on('error', finish);
     child.on('error', () => ((done = true), clearTimeout(timer), resolve()));
     child.on('exit', finish);
-    let buf = '';
-    child.stdout.on('data', (chunk) => {
-      buf += chunk;
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        let m: any;
-        try {
-          m = JSON.parse(buf.slice(0, nl));
-        } catch {}
-        buf = buf.slice(nl + 1);
-        if (m?.id === 1) send({ method: 'initialized' }), send({ id: 2, method: 'account/read', params: { refreshToken: true } });
-        else if (m?.id === 2) finish();
-      }
+    jsonLines<{ id?: number } | null>(child.stdout, (m) => {
+      if (m?.id === 1) send({ method: 'initialized' }), send({ id: 2, method: 'account/read', params: { refreshToken: true } });
+      else if (m?.id === 2) finish();
     });
     send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'citadel-codex-login', version: '1' }, capabilities: { experimentalApi: false, requestAttestation: false } } });
   });

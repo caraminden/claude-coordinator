@@ -31,6 +31,27 @@ const FAMILIES: Record<string, Family> = {
       'tools/heavy-ci.ts': { copies: 1, why: 'pipeline lane; not converted yet, and it takes seconds' },
     },
   },
+  'JSON lines': {
+    use: 'jsonLines in src/json-lines.ts',
+    copy: /while \(\((\w+) = \w+\.indexOf\('\\n'\)\) (?:>= 0|> -1|!== -1)\)/g,
+    planted: ["while ((nl = buf.indexOf('\\n')) >= 0) {"],
+    kept: {
+      'src/json-lines.ts': { copies: 1, why: 'the home' },
+      'src/openrouter.ts': { copies: 1, why: 'server-sent events, not a JSON value a line' },
+    },
+  },
+  'error alias': {
+    use: "throw new HttpError(400, '…')",
+    copy: /\((\w+): string\)(?:: HttpError)? => new HttpError\(\d+, \1\)/g,
+    planted: ['const bad = (msg: string) => new HttpError(400, msg);'],
+    kept: {},
+  },
+  'file reply': {
+    use: 'sendFile in src/http.ts',
+    copy: /pipeline\(createReadStream\(\w+\), (?:ctx\.)?res\)/g,
+    planted: ['await pipeline(createReadStream(file), ctx.res).catch(() => {});'],
+    kept: { 'src/http.ts': { copies: 1, why: 'the home' } },
+  },
 };
 
 const root = join(import.meta.dirname, '..');

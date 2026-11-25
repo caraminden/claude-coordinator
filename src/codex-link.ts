@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripAnsi, type ClaudeLink } from './claude-link.ts';
 import { Containers } from './containers.ts';
+import { jsonLines } from './json-lines.ts';
 
 export type CodexState = 'no container' | 'not linked' | 'starting' | 'waiting' | 'linked';
 
@@ -163,24 +164,11 @@ export function appServerLimits(argv: string[], timeoutMs = 20_000): Promise<unk
     child.stdin.on('error', () => finish(null));
     child.on('error', () => finish(null));
     child.on('exit', () => finish(null));
-    let buf = '';
-    child.stdout.on('data', (chunk) => {
-      buf += chunk;
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        let m: any;
-        try {
-          m = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        if (m.id === 1) {
-          send({ method: 'initialized' });
-          send({ id: 2, method: 'account/rateLimits/read', params: { excludeResetCreditDetails: true } });
-        } else if (m.id === 2) finish(m.result?.rateLimitsByLimitId?.codex ?? m.result?.rateLimits);
-      }
+    jsonLines<{ id?: number; result?: { rateLimitsByLimitId?: { codex?: unknown }; rateLimits?: unknown } }>(child.stdout, (m) => {
+      if (m.id === 1) {
+        send({ method: 'initialized' });
+        send({ id: 2, method: 'account/rateLimits/read', params: { excludeResetCreditDetails: true } });
+      } else if (m.id === 2) finish(m.result?.rateLimitsByLimitId?.codex ?? m.result?.rateLimits);
     });
     send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'citadel-codex-usage', version: '1' }, capabilities: { experimentalApi: false, requestAttestation: false } } });
   });

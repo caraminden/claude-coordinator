@@ -1,14 +1,12 @@
 // The CI store's routes (#658, src/ci-store.ts): a runner's job uploads, and reads its own commit's files (#1266), on
 // the machines listener; a scheme's members, minions, Taskmaster and contraptions list and read its files on the app's
 // own address.
-import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { pipeline } from 'node:stream/promises';
 import { LIMITS } from '../ci-numbers.ts';
 import { KINDS, uploadAsk } from '../ci-store.ts';
 import type { CiFile } from '../db.ts';
 import { LastGreen } from '../last-green.ts';
-import { HttpError, json, readJson, type App, type Ctx, type Route } from '../http.ts';
+import { HttpError, json, readJson, sendFile, type App, type Ctx, type Route } from '../http.ts';
 
 /**
  * PUT /api/ci-store/<name>?kind=build|report|release[&target=<name>], the body the file, Authorization: Bearer <the
@@ -161,22 +159,18 @@ function named(app: App, params: Record<string, string>): CiFile | undefined {
 async function send(app: App, req: Ctx['req'], res: Ctx['res'], f: CiFile) {
   // Turns can write the scheme's folder: serve only a plain file that is still the store's own.
   const file = await app.ciStore.plain(f).catch(() => null);
-  const size =
-    file &&
-    (await stat(file).then(
-      (s) => s.size,
-      () => null,
-    ));
+  const size = file
+    ? await stat(file).then(
+        (s) => s.size,
+        () => null,
+      )
+    : null;
   if (!file || size === null) throw new HttpError(404, 'That file is no longer there');
-  res.writeHead(200, {
+  await sendFile(req, res, file, size, {
     'Content-Type': 'application/octet-stream',
-    'Content-Length': size,
-    'X-Content-Type-Options': 'nosniff',
     'Cache-Control': 'private, no-cache',
     'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(f.name)}`,
   });
-  if (req.method === 'HEAD') return res.end();
-  await pipeline(createReadStream(file), res).catch(() => {});
 }
 
 /**

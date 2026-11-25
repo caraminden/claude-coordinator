@@ -31,6 +31,7 @@ import type { ImageBlock } from './turn-images.ts';
 import { type CodexAt, type MediaTurn } from './contraption-media.ts';
 import { suggestTools, unknownToolName } from './tool-suggest.ts';
 import { args, mcpConfig, settings, toolNamesPrompt, userLine, MEDIA_SERVER } from './contraption-args.ts';
+import { jsonLines } from './json-lines.ts';
 import { keepTurn, keptDir, keptFile, dropKeptSession, optOutKey, sha256, cap, wantsKeep, type KeptCall } from './replay-keep.ts';
 import { claudeConfigDir, projectSlug, transcriptPath, validSessionId } from './sessions.ts';
 
@@ -39,7 +40,7 @@ const AGENT_CAP = readFileSync(join(import.meta.dirname, 'contraption-agent-cap.
 /** The stdio stand-in for a machine's MCP server, as minion turns use it (src/machine-mcp.ts). */
 const MACHINE_MCP = readFileSync(join(import.meta.dirname, 'machine-mcp.ts'), 'utf8');
 // A Codex turn (#337) runs the shim from its own folder in the container, and Codex's managed hook imports the tripwire from there.
-const CODEX_FILES = ['codex-turn.ts', 'codex-lock.ts', 'codex.ts', 'tripwire.ts', 'tripwire-base.ts', 'tripwire-git.ts'].map((f) => [f, readFileSync(join(import.meta.dirname, f), 'utf8')] as const);
+const CODEX_FILES = ['codex-turn.ts', 'codex-lock.ts', 'codex.ts', 'json-lines.ts', 'tripwire.ts', 'tripwire-base.ts', 'tripwire-git.ts'].map((f) => [f, readFileSync(join(import.meta.dirname, f), 'utf8')] as const);
 
 /** A contraption session's Codex thread while its turns run on Codex: dropped on the first Claude turn after, or a fresh session. */
 const codexKey = (c: number, person: number, session: string) => `codex:contraption:${c}:${person}:${session}`;
@@ -807,20 +808,11 @@ export class ContraptionTurns {
         }
       }
     };
-    let buf = '';
-    child.stdout!.setEncoding('utf8');
-    child.stdout!.on('data', (chunk: string) => {
-      buf += chunk;
-      let nl: number;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        if (!line.trim()) continue;
-        try {
-          handle(JSON.parse(line));
-        } catch {
-          // Not stream-json: claude printed something else.
-        }
+    jsonLines<Parameters<typeof handle>[0]>(child.stdout!, (ev) => {
+      try {
+        handle(ev);
+      } catch {
+        // An event of a shape nobody expected: the turn goes on.
       }
     });
     child.stderr!.setEncoding('utf8');

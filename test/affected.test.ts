@@ -194,7 +194,7 @@ test('any public/ change picks the boot-check test', () => {
     );
 });
 
-// #1912: the cheap guards a low ship tripped that its own pick missed (#1910's ten days of reds, replayed).
+// #1912: the two cheap guards that #1910 found red on low ships whose own pick missed them.
 test('a public/ change picks the show-parts guard, and a lens change the review-set one', () => {
   const picks = (p: string, t: string) => lines([p]).run.some((r) => r.test === t);
   for (const p of ['public/parts.js', 'public/style.css', 'tools/citadel-where']) assert.ok(picks(p, 'test/show-parts.test.ts'), p);

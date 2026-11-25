@@ -41,10 +41,13 @@ test('the sensitive list covers each kind, and a low label never overrides it', 
     ['.github/workflows/tests.yml', 'pipeline'],
     ['src/db.ts', 'saved data'],
     ['src/db/tickets.ts', 'saved data'],
+    ['src/db-schema.ts', 'saved data'],
     ['src/backup-flag.ts', 'saved data'],
     ['src/auth.ts', 'sign-in and access'],
     ['src/tripwire-git.ts', 'tripwire'],
     ['tools/guard.sh', 'tripwire'],
+    ['src/hook-run.ts', 'tripwire'],
+    ['src/claude-link.ts', 'turn start'],
     ['kit/skills/scheme-setup/templates/land.sh', 'pipeline'],
     ['src/runner.ts', 'turn start'],
     ['server.ts', 'turn start'],
@@ -99,6 +102,7 @@ test('the CLI asks the light lane first', () => {
   put('docs/a.md', 'x');
   commit('docs');
   assert.match(answer().out, /^not: light lane/);
+  assert.equal(answer(['--risk', 'low', '--mode', 'build']).out, 'not: not in the test map (docs/a.md)', "a build's own ship is always the full lane");
   git(repo, 'checkout', '-q', 'ship');
 });
 

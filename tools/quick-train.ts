@@ -1,6 +1,6 @@
 // Who qualifies for the quick train (#1912; Josh, 2026-11-24, on #1910's plan; specs/quick-train.md in the shared
 // folder). Judged and logged only: nothing rides on the answer yet. tools/land.sh calls it as a ship joins the line:
-//   node tools/quick-train.ts --main <ref> --base <commit> [--risk low|medium|high]
+//   node tools/quick-train.ts --main <ref> --base <commit> [--risk low|medium|high] [--mode land|build]
 // Prints one line: "would qualify", or "not: <why>[; <why>...]". Exits 0, or 2 when it can't judge.
 // A ship qualifies when all four hold: its label is low, it touches no sensitive file (the label alone never decides),
 // tools/affected.ts knows every changed path, and it picks at most CAP test files. The light lane is asked first: its
@@ -16,11 +16,32 @@ export const CAP = 40;
 // Beyond tools/pipeline-files.txt. A pattern ending / covers its folder, one ending * any path that starts so.
 const SENSITIVE: [kind: string, paths: string[]][] = [
   ['pipeline', ['tools/pipeline-files.txt', 'deploy/', '.github/', '.githooks/']],
-  ['saved data', ['src/db.ts', 'src/db/', 'src/events-db.ts']],
+  ['saved data', ['src/db.ts', 'src/db/', 'src/db-schema.ts', 'src/db-rows.ts', 'src/db-keys.ts', 'src/db-writer.ts', 'src/db-copy.ts', 'src/turn-row.ts', 'src/events-db.ts']],
   ['sign-in and access', ['src/auth.ts', 'src/access.ts', 'src/db-view.ts']],
-  ['tripwire', ['src/tripwire*', 'tools/guard.sh']],
+  // The processes that load and run it on each tool call count as the tripwire.
+  ['tripwire', ['src/tripwire*', 'src/hook-run.ts', 'src/hook-matchers.ts', 'src/pre-tool-hook.ts', 'src/side-guard.ts', 'tools/guard.sh']],
   ['kit templates', ['kit/skills/scheme-setup/templates/']],
-  ['turn start', ['server.ts', 'src/runner.ts', 'src/turn-launch.ts', 'src/turn-run.mjs', 'src/turn-supervisor.mjs', 'src/turn-wrapper.mjs', 'src/supervisor-client.ts', 'src/containers.ts', 'src/contraption-turns.ts', 'src/codex-turn.ts']],
+  [
+    'turn start',
+    [
+      'server.ts',
+      'src/runner.ts',
+      'src/turn-launch.ts',
+      'src/turn-line.ts',
+      'src/turn-keys.ts',
+      'src/turn-messages.ts',
+      'src/pool-client.mjs',
+      'src/turn-run.mjs',
+      'src/turn-supervisor.mjs',
+      'src/turn-wrapper.mjs',
+      'src/supervisor-client.ts',
+      'src/containers.ts',
+      'src/claude-link.ts',
+      'src/codex-link.ts',
+      'src/contraption-turns.ts',
+      'src/codex-turn.ts',
+    ],
+  ],
   ['Citadel UI contract', ['public/ui/', 'test/ui-contract.json']],
 ];
 
@@ -70,11 +91,12 @@ function main(argv: string[]): void {
   };
   const rev = opt('--main');
   const base = opt('--base');
-  if (!rev || !base) throw new Error('usage: quick-train.ts --main <ref> --base <commit> [--risk <label>]');
+  if (!rev || !base) throw new Error('usage: quick-train.ts --main <ref> --base <commit> [--risk <label>] [--mode land|build]');
   const root = git('rev-parse', '--show-toplevel').trim();
   const changed = git('diff', '--name-only', '--no-renames', base, 'HEAD').split('\n').filter(Boolean);
   const a = affected(parseMap(git('show', `${rev}:tools/affected-map.txt`)), changed, git('ls-files').split('\n').filter(Boolean), resolve(root));
-  const lane = spawnSync(join(import.meta.dirname, 'lane.sh'), [rev], { input: `${changed.join('\n')}\n`, encoding: 'utf8' }).stdout?.split(' ')[0];
+  // As tools/land.sh: a build's own ship is always the full lane, and a lane that can't be read is too.
+  const lane = opt('--mode') === 'build' ? 'full' : spawnSync(join(import.meta.dirname, 'lane.sh'), [rev], { input: `${changed.join('\n')}\n`, encoding: 'utf8' }).stdout?.split(' ')[0];
   const pipeline = pipelinePaths(git('show', `${rev}:tools/pipeline-files.txt`));
   const no = why({ risk: opt('--risk') || undefined, lane, changed, pipeline, unmapped: a.unmapped, tests: a.run.length });
   console.log(no.length ? `not: ${no.join('; ')}` : 'would qualify');

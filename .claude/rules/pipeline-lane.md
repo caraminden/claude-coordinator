@@ -4,6 +4,8 @@ paths:
   - "tools/land.sh"
   - "tools/land-core.sh"
   - "tools/land.local.sh"
+  - "tools/ship-format.sh"
+  - "tools/fmt"
   - "tools/deploy.sh"
   - "tools/deploy-queue.sh"
   - "tools/kit-land-drift.sh"

@@ -6,6 +6,8 @@
 # main, or the build/<n> it was rebased onto, so never another minion's. Uncommitted edits count; a file git doesn't track
 # is formatted but never checked, since it isn't in the ship. FMT_WHOLE_BUILD=1 (a build's own ship, land.sh --build)
 # takes everything the build adds to main. Exit 3: Biome couldn't run, so nothing was checked.
+# `tools/fmt --own --commit` (land.sh's format_ship): the tracked ones only, what changes going in a commit of its own, which
+# it names on stdout. Any trouble (Biome missing, failing or past FMT_TIMEOUT) leaves the files as they were, with no commit.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 bin=node_modules/.bin/biome
@@ -13,8 +15,8 @@ if [ -x "$bin" ]; then run=("$bin"); else
   version=$(node -p "require('./package.json').devDependencies['@biomejs/biome']")
   run=(npx --yes "@biomejs/biome@$version")
 fi
-check='' own=''
-while :; do case ${1:-} in --check) check=1 ;; --own) own=1 ;; *) break ;; esac; shift; done
+check='' own='' commit=''
+while :; do case ${1:-} in --check) check=1 ;; --own) own=1 ;; --commit) commit=1 ;; *) break ;; esac; shift; done
 how=(format --write); [ -z "$check" ] || how=(format)
 [ -n "$own" ] || exec "${run[@]}" "${how[@]}" "${@:-.}"
 
@@ -25,12 +27,26 @@ done < <(git for-each-ref --format='%(refname)' 'refs/heads/build/*')
 files=()
 while IFS= read -r -d '' f; do
   case $f in *.ts | *.js | *.mjs) [ ! -f "$f" ] || [ -L "$f" ] || files+=("$f") ;; esac
-done < <(git diff -z --no-renames --name-only --diff-filter=d "$base" --; [ -n "$check" ] || git ls-files -z --others --exclude-standard)
-[ ${#files[@]} -gt 0 ] || { echo "fmt: this branch changes no .ts, .js or .mjs file"; exit 0; }
+done < <(git diff -z --no-renames --name-only --diff-filter=d "$base" --; [ -n "$check$commit" ] || git ls-files -z --others --exclude-standard)
+[ ${#files[@]} -gt 0 ] || { [ -n "$commit" ] || echo "fmt: this branch changes no .ts, .js or .mjs file"; exit 0; }
+[ -z "$commit" ] || run=(timeout -k 5 "${FMT_TIMEOUT:-120}" "${run[@]}")
 "${run[@]}" --version >/dev/null 2>&1 || {
   echo "fmt: Biome could not run here (no node_modules/.bin/biome, and npx could not fetch it), so the format of ${#files[@]} changed files was NOT checked. Run npm ci in $PWD, then this again" >&2
   exit 3
 }
+if [ -n "$commit" ]; then
+  git diff --quiet HEAD -- "${files[@]}" || { echo "there are uncommitted edits"; exit 1; } # as_was would drop them
+  as_was() { git checkout -q -- "${files[@]}"; echo "$1"; exit 1; }
+  "${run[@]}" "${how[@]}" --no-errors-on-unmatched "${files[@]}" >/dev/null 2>&1 || as_was "Biome could not format every file"
+  mapfile -d '' -t files < <(git diff -z --name-only -- "${files[@]}")
+  [ ${#files[@]} -gt 0 ] || exit 0
+  # "#N: " only beside titles that have one: commit-titles.sh refuses a branch that mixes them.
+  n=$(git branch --show-current) n=${n#ticket/} n=${n%%-*}
+  [[ $'\n'$(git log --no-merges --format=%s "$base..HEAD") =~ $'\n'(WIP )?'#'[0-9] ]] || n=
+  git commit -q -m "${n:+#$n: }formatted at ship time" -m "By tools/land.sh with tools/fmt (Biome), only files this branch changed (#1885)." -- "${files[@]}" >/dev/null 2>&1 || as_was "git could not commit the formatted files"
+  echo "formatted ${#files[@]} of this ship's files in $(git rev-parse --short HEAD) ($(printf '%s\n' "${files[@]:0:5}" | paste -sd, | sed 's/,/, /g')$([ ${#files[@]} -le 5 ] || echo ', …'))"
+  exit 0
+fi
 rc=0
 "${run[@]}" "${how[@]}" --no-errors-on-unmatched --max-diagnostics=10 "${files[@]}" || rc=$?
 [ $rc = 0 ] || [ -z "$check" ] || echo "fmt: files this branch changed are not formatted. The fix, in $PWD: ${FMT_WHOLE_BUILD:+FMT_WHOLE_BUILD=1 }tools/fmt --own && git add -u && git commit -m 'format'" >&2

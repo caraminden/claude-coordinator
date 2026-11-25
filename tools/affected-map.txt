@@ -91,6 +91,7 @@ package-lock.json: test/typecheck.test.ts
 biome.json: test/format.test.ts
 package.json: test/format.test.ts
 tools/fmt: test/format.test.ts test/fmt.test.ts
+tools/ship-format.sh: test/fmt.test.ts
 test/format-own.test.ts: test/fmt.test.ts
 
 # PowerShell scripts are linted with pwsh.

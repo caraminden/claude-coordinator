@@ -833,10 +833,11 @@ export class LandHandoffs {
     const failed = deploys.filter((d) => !d.ok);
     const known = /^land: shipped past known flakes (.+)$/m.exec(run.output)?.[1]; // #1419: a red of known flakes only let through
     const through = /^land: shipped through main's red on (.+)$/m.exec(run.output)?.[1]; // #1478: red only on a test main's tip fails too
+    const formatted = /^land: format: formatted (\d+) of this ship's files in (.+)$/m.exec(run.output); // #1885: tools/ship-format.sh
     const flakeKept = (run.output.match(/^land: refused on flakes only .*not your change: keeping its place in line/gm) ?? []).length; // #1419 part 2
     await once('noted', () =>
       runner.emit(id, 'note', {
-        text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''}${through ? ` Shipped through main's red on ${through}: main still needs a fix for it.` : ''}${flakeKept ? ` Kept its place in line after ${flakeKept} red${flakeKept > 1 ? 's' : ''} of flakes only.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}`,
+        text: `${into ? 'Merged' : 'Shipped'} ${what}: ${strip(h.summary)}. Risk ${h.risk}: ${strip(h.reason)}.${h.go ? ` Go: ${strip(h.go)}.` : ''}${formatted ? ` The ship script formatted ${formatted[1]} of its files in a commit of its own, ${formatted[2]}.` : ''}${known ? ` Shipped past known flakes ${known}.` : ''}${through ? ` Shipped through main's red on ${through}: main still needs a fix for it.` : ''}${flakeKept ? ` Kept its place in line after ${flakeKept} red${flakeKept > 1 ? 's' : ''} of flakes only.` : ''} ${where}${deploys.map((d) => ` ${d.line}`).join('')}`,
       }),
     );
     await faultPoint('ship-noted'); // a drill's kill between the shipped line and the hand-off's rename (C2)

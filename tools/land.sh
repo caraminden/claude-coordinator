@@ -274,7 +274,6 @@ case $mode in
     done < <(git for-each-ref --format='%(refname)' 'refs/heads/build/')
 esac
 
-
 # A commit that came off main again (its restart was rolled back) while this branch was already rebased onto it
 # (#566: the gate runs beside that restart) is still under this branch, and a plain rebase would carry it back onto
 # main. It is left behind, unless it is this branch's own: this prints the newest such commit, for the rebase's --onto.
@@ -421,7 +420,7 @@ smoke() {
   local t0=$SECONDS out rc=0 tests=()
   smoke_fail() {
     retro_log "smoke · $label · $1 · $((SECONDS - t0))s"
-    refuse "smoke: $1, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test (citadel-test), commit, then run this again"
+    refuse "smoke: $1, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test (citadel-test), commit, then run this again${formatted:+. tools/land.sh $formatted}"
   }
   say "smoke: checking $branch before it queues"
   if [ "$mode" != full ]; then
@@ -441,7 +440,7 @@ smoke() {
   fi
   if [ -x tools/citadel-test ] && [ -f tools/always-tests.txt ]; then
     # The always-tests, and in a plain land the test files the branch adds or changes; citadel-test drops repeats.
-    mapfile -t tests < <(grep -vE '^[[:space:]]*(#|$)' tools/always-tests.txt; [ "$mode" != land ] || git diff --name-only --diff-filter=d "$(git merge-base main HEAD)" HEAD -- 'test/*.test.ts')
+    mapfile -t tests < <(grep -vE '^[[:space:]]*(#|$)' tools/always-tests.txt; [ "$mode" != land ] || git diff --name-only --diff-filter=d "$(git merge-base main HEAD)" HEAD -- 'test/*.test.ts'; [ -z "$formatted" ] || ls test/size-budget.test.ts 2>/dev/null)
     # The route test is off the always list (#1544): the map decides, from what this branch changed. Captured first (grep -q
     # under pipefail can SIGPIPE the reader), and a map that can't answer runs it, never skips it.
     if [ -f tools/affected.ts ]; then
@@ -478,6 +477,7 @@ smoke() {
   fi
   say "smoke: passed in $((SECONDS - t0)) s"
 }
+formatted=''; [ -n "$resumed" ] || [ "$mode" = build ] || [ ! -x tools/fmt ] || [ ! -f "$tools/ship-format.sh" ] || { . "$tools/ship-format.sh"; format_ship; } # the ship's own files, in a commit of their own (#1885)
 [ -n "$resumed" ] || [ "$mode" = into ] || [ "${LAND_SMOKE:-1}" = 0 ] || smoke
 quiet=$resumed
 [ "$redo" != 1 ] && [ -z "$now_again" ] || quiet=

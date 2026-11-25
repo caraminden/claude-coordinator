@@ -8,7 +8,7 @@ import { threadRow } from './sidebar.js';
 import { rowState } from './threadstate.js';
 import { recapSections } from './threadgroups.js';
 
-const AWAY_MS = 6 * 60 * 60 * 1000; // Cara, 2026-10-28: "only ... if you havent taken an action for 6+ hours". The server skips the count before then: RECAP_AWAY_MS in src/db-rows.ts.
+const AWAY_MS = 6 * 60 * 60 * 1000; // Cara, 2026-10-28: "only ... if you havent taken an action for 6+ hours". The server skips the count before then: RECAP_AWAY_MS in src/db.ts.
 
 /** Fetch the recap for the open Taskmaster chat and show it, if you have been away long enough. */
 export async function showRecap() {

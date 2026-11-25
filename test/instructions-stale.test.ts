@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { READ_WAIT_MS } from '../src/db-writer.ts';
 import { bootServer, type Booted } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'instr-stale-'));
@@ -76,4 +77,23 @@ test("typed minion rules: another person's rule and note are kept; the rules' or
   assert.equal(now.approval_rules, 'Bash(a:*)\nBash(b:*)\nBash(josh:*)');
   assert.equal(now.shot_note, 'Josh says phone too');
   assert.equal((await send('PATCH', path, { approval_rules: 'Bash(a:*)', was: { approval_rules: 'Bash(josh:*)\nBash(b:*)\nBash(a:*)' } })).status, 200);
+});
+
+test("a save still in the write queue counts as a version: two sent at once can't both win", async () => {
+  // As on a stalled disk: every write lands well after a read stops waiting for it.
+  const slow = await bootServer({ root: join(root, 'slow'), env: { CITADEL_DB_WRITE_DELAY_MS: String(READ_WAIT_MS * 4) } });
+  try {
+    const project = (await slow.call('/api/projects', { name: 'P' })).data;
+    const put = (to: string, body: object, method: string) => slow.call(to, body, method).then((r) => r.status);
+    const own = `/api/projects/${project.id}`;
+    const scheme = await Promise.all(['A.', 'B.'].map((instructions) => put(own, { instructions, was: { instructions: '' } }, 'PATCH')));
+    assert.deepEqual(scheme.sort(), [200, 409], 'the scheme');
+    const was = (await slow.call('/api/app/instructions')).data.text;
+    const wideSaves = await Promise.all(['A.', 'B.'].map((text) => put('/api/app/instructions', { text, was }, 'PUT')));
+    assert.deepEqual(wideSaves.sort(), [200, 409], 'Citadel-wide');
+    const rules = await Promise.all(['Bash(a:*)', 'Bash(b:*)'].map((approval_rules) => put(own, { approval_rules, was: { approval_rules: '' } }, 'PATCH')));
+    assert.deepEqual(rules.sort(), [200, 409], 'typed rules');
+  } finally {
+    await slow.stop();
+  }
 });

@@ -58,7 +58,7 @@ import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
 import { iconHeaders, iconVersion, readIcon } from '../scheme-icon.ts';
 import { addArchitectureCheck, addMemoryCurator } from '../standard-audits.ts';
 import { spokenText, TWIN_SCORE, type MemoryHit } from '../memory.ts';
-import { afterAllWrites, buildNumber, HttpError, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, type App, type Ctx, type Route } from '../http.ts';
+import { afterAllWrites, buildNumber, HttpError, json, oneOf, ownWrites, readJson, send, str, ticketView, workflowSwitch, writes, type App, type Ctx, type Route } from '../http.ts';
 
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 /** Home's 14-day ship buckets, the same for every person, kept a minute (#1217 review). */
@@ -1027,6 +1027,7 @@ export const projectRoutes: Route[] = [
           throw new HttpError(409, `This scheme's repo is already ${project.repo_url}; send replace_repo: true to point it at ${repoUrl} instead`);
         }
       }
+      while (body.was !== undefined && writes.landed?.(true)) await afterAllWrites(() => {}); // another save still queued is another version; from here to this save's write there is no await
       if (body.was !== undefined) refuseStaleFields(body.was, store.getProject(project.id)!, { instructions, ...settings });
       // Worked out before anything is written, since it can still refuse (too many approval rules). The one gate (#1043): the go threshold and the merge approval can't disagree, whichever of them this save changed.
       const gate = shippingGate({ ...project, ...settings });
@@ -1219,6 +1220,7 @@ export const projectRoutes: Route[] = [
       if (text.length > MAX_INSTRUCTIONS) {
         throw new HttpError(400, `Instructions are ${text.length.toLocaleString('en')} characters; the limit is ${MAX_INSTRUCTIONS.toLocaleString('en')}`);
       }
+      while (body.was !== undefined && writes.landed?.(true)) await afterAllWrites(() => {}); // as in the scheme's PATCH
       const { text: was, by } = store.appInstructions();
       refuseStale(body.was, was, text, by);
       if (text !== was) {

@@ -642,9 +642,11 @@ function saveProject(p, mine, body, label, shown, draft) {
       draft?.refused();
       shown(false, err);
       // The stream has no replay: a tab that missed their update fetches it, so Discard loads theirs as the refusal says.
+      // An update that arrived meanwhile may be newer than the answer: it stays.
+      const seen = view.project;
       if (err?.status === 409 && body.was)
         api(`api/projects/${p.id}?tickets=open`).then(
-          ({ project }) => onProjectUpdate(project),
+          ({ project }) => view.project === seen && onProjectUpdate(project),
           () => {},
         );
     },
@@ -1209,7 +1211,12 @@ export function appInstructionsEditor() {
         sending.refused();
         show(appInstructions === mine ? was : appInstructions, notSaved(err)); // someone's update, or a later save, stays
         loadHistory();
-        if (err?.status === 409) api('api/app/instructions').then(onAppInstructionsUpdate, () => {}); // as in saveProject
+        const seen = appInstructions;
+        if (err?.status === 409)
+          api('api/app/instructions').then(
+            (a) => appInstructions === seen && onAppInstructionsUpdate(a),
+            () => {},
+          ); // as in saveProject
       },
       label: 'save the Citadel-wide instructions',
     }).then(

@@ -87,8 +87,8 @@ const value = (page: Page, sel = box) => page.eval<string>(`document.querySelect
 const draft = (page: Page, sel = box) => page.eval<boolean>(`document.querySelector('${sel}').hasAttribute('data-draft')`);
 const status = (page: Page) => page.eval<string>(`document.querySelector('.instructions-actions [role=status]').textContent`);
 const waiting = (page: Page, n: number) => waitFor(page, `${n} writes`, `writes.length === ${n}`);
-/** Let the page do what an answer makes it do. */
-const settle = (page: Page) => page.eval('new Promise((r) => setTimeout(r, 100))');
+/** Let the page do what an answer makes it do: replies read after it, one behind the other, each with the page's turn to act on it. */
+const settle = (page: Page) => page.eval('(async () => { for (let i = 0; i < 10; i++) await reply({}).json().then(() => scheduler.yield()); })()');
 const instructions = () => open('p/1/instructions', `document.querySelector('${box}')?.value === 'Start.'`);
 const rules = () => open('p/1/approvals', `!!document.querySelector('[data-part="needs-approval"]')`);
 
@@ -141,6 +141,26 @@ test('a tab that missed their update loads it on the refusal, so Discard brings 
   assert.equal(await value(tab, wide), 'Wide mine.');
   await tab.eval(`press('Discard')`);
   assert.equal(await value(tab, wide), 'Wide Josh.');
+});
+
+test('an update that arrives while a refusal fetches theirs is newer, and stays (SP4)', { skip }, async () => {
+  const hold = `const real = window.fetch; window.reads = []; window.fetch = (url, o) => (!o?.method || o.method === 'GET') && /projects\\/1\\?tickets=open|app\\/instructions$/.test(String(url)) ? new Promise((done) => reads.push(async () => done(await real(url, o)))) : real(url, o)`;
+  const wide = '#app-instructions-text';
+  for (const [hash, sel, start, newer] of [
+    ['p/1/instructions', box, 'Start.', `theirs({ instructions: 'Newer.' })`],
+    ['p/1/app-instructions', wide, 'Wide start.', `push({ type: 'app-instructions', instructions: { text: 'Newer.', by: 'Josh', at: 3 } })`],
+  ]) {
+    const page = await open(hash, `document.querySelector('${sel}')?.value === '${start}'`);
+    await page.eval(`${hold}; type('${sel}', 'Mine.'); press('Save')`);
+    await waiting(page, 1);
+    await page.eval(`refuse('Josh saved a different text since you opened it')`);
+    await waitFor(page, 'the fetch', 'reads.length === 1');
+    // What it fetched was read before the update; `stored` is put back to that older text.
+    await page.eval(`${newer}; stored[1].instructions = stored.wide.text = 'Older.'; reads[0]()`);
+    await settle(page);
+    await page.eval(`press('Discard')`);
+    assert.equal(await value(page, sel), 'Newer.');
+  }
 });
 
 test('a save after another of yours began from it, answered or not (SP4)', { skip }, async () => {

@@ -210,6 +210,58 @@ test('a fresh machine, whose memory folder is empty, gets every note back, also 
   assert.equal(s.has(server, 'a.md'), false);
 });
 
+test("a note written later under a deleted note's name is kept, in a copy without the mount too", async () => {
+  const s = scheme();
+  await s.seed();
+  const volume = join(s.at, 'volume');
+  const josh = s.turns(volume);
+  await josh.start();
+  s.pageDelete('a.md');
+  await josh.end();
+  await josh.start();
+  s.note(volume, 'a.md', 'a new fact');
+  await josh.end();
+  assert.equal(readFileSync(join(server, s.memory, 'a.md'), 'utf8'), 'a new fact');
+  assert.equal(s.stored('a.md'), true);
+});
+
+test("a note that can't be copied across costs neither the turn's start nor its save", async () => {
+  const s = scheme();
+  await s.seed();
+  const volume = join(s.at, 'volume');
+  const josh = s.turns(volume);
+  await josh.start();
+  s.note(volume, 'x.md', 'a file here');
+  mkdirSync(join(server, s.memory, 'x.md')); // and a folder there
+  const transcript = join('projects', projectSlug(josh.ticket.cwd), 'sess.jsonl');
+  await josh.end();
+  assert.ok(s.store.getClaudeState(transcript), 'the transcript is stored');
+  await josh.start();
+  rmSync(join(server, s.memory, 'x.md'), { recursive: true }); // timing-ok: own temp dir
+  await josh.end();
+  assert.equal(s.has(server, 'x.md'), true, 'copied once it can be');
+});
+
+test("a note in a minion's own folder not stored yet, or whose rows the nightly prune dropped, is stored at the next save", async () => {
+  const s = scheme();
+  const josh = s.turns(join(s.at, 'volume'));
+  const own = join('projects', projectSlug(josh.ticket.cwd), 'memory', 'mine.md');
+  await josh.start();
+  mkdirSync(join(s.at, 'volume', own, '..'), { recursive: true });
+  writeFileSync(join(s.at, 'volume', own), 'mine');
+  await josh.start(); // a side question on the same login, mid-turn
+  await josh.end();
+  assert.ok(s.store.getClaudeState(own), 'stored though a start came between');
+  await josh.start();
+  await josh.end();
+  for (const r of s.store.listClaudeState(s.project.id, josh.ticket.id)) s.store.deleteClaudeState(r.path);
+  await josh.start();
+  await josh.end();
+  assert.ok(s.store.getClaudeState(own), 'stored again after the prune');
+  s.store.deleteTicket(josh.ticket.id);
+  assert.equal(s.store.getSetting(`memory-own:${josh.ticket.id}`), null);
+});
+
 test("a note in a minion's own folder that one login deleted isn't saved again from another login's older copy", async () => {
   const s = scheme();
   const volume = join(s.at, 'volume');

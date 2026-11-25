@@ -2967,7 +2967,7 @@ export class Runner {
     let lost: { text: string; entries: number } | null = null;
     try {
       const restored = await restoreSession(this.store, ticket, project, configDir);
-      // Everything stored is in the config dir now, so the end-of-turn save may prune what the turn deletes.
+      // Everything stored is back now, but for notes deleted since, so the end-of-turn save may prune what the turn deletes.
       had = storedPaths(this.store, ticket, project);
       if (restored) console.log(`Ticket ${ticket.id}: restored the Claude session from the database (${restored} file${restored === 1 ? '' : 's'}).`);
     } catch (err) {

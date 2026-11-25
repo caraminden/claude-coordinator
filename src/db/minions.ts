@@ -1,7 +1,7 @@
 // Minions and Taskmasters: the tickets table, who owns and touches a minion, Taskmaster splits and digests, and model picks
 // (#1313: src/db.ts by area).
 import type { Store, Ticket, TicketKind, User } from '../db.ts';
-import { askerKey, buildOwnerKey, pagePlanKey, planKey } from '../db-keys.ts';
+import { askerKey, buildOwnerKey, ownMemoryKey, pagePlanKey, planKey } from '../db-keys.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { copyRow, inScope, scoped, warm } from '../read-scope.ts';
 
@@ -281,6 +281,7 @@ export const minionQueries = {
     this.deleteSetting(askerKey(id));
     this.deleteSetting(planKey(id));
     this.deleteSetting(pagePlanKey(id));
+    this.deleteSetting(ownMemoryKey(id));
     this.db.prepare('DELETE FROM events WHERE ticket_id = ?').run(id);
     // The main file's copy from before the move (#1169) still links to tickets, so its rows go too, or the delete below fails.
     if (this.db.prepare("SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'events_old'").get()) this.db.prepare('DELETE FROM main.events_old WHERE ticket_id = ?').run(id);

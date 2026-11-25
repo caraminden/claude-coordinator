@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { isMainThread, parentPort, threadId, Worker, workerData } from 'node:worker_threads';
 import { gunzip as gunzipCb, gunzipSync, gzip, gzipSync } from 'node:zlib';
 import { track } from './settled.ts';
-import { StateDb, type ClaudeStateRow, type Project, type Store, type Ticket } from './db.ts';
+import { ownMemoryKey, StateDb, type ClaudeStateRow, type Project, type Store, type Ticket } from './db.ts';
 
 const gz = promisify(gzip);
 const gunzip = promisify(gunzipCb);
@@ -135,14 +135,15 @@ async function fileTimes(configDir: string, root: string): Promise<Map<string, n
   return out;
 }
 
-/** What a memory folder held (path to mtime) when it was last matched up: a note it held then and lacks now was deleted. */
+/**
+ * What a memory folder held (path to mtime) when it was last matched up: a note it held then and lacks now was deleted
+ * there. Negative: the note was gone on the other side by then, so this is an old copy until something writes it again.
+ */
 type Seen = Record<string, number>;
-const seenKey = (configDir: string, root: string) => `memory-seen:${join(configDir, root)}`;
-function putSeen(store: Store, key: string, seen: Seen) {
-  const was = store.getSetting<Seen>(key);
-  if (!was && !Object.keys(seen).length) return;
-  if (JSON.stringify(was) !== JSON.stringify(seen)) store.setSetting(key, seen);
-}
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/** What a minion's own memory folder held on a login when its last turn there started, of the notes that were stored. */
+const seenIn = (store: Store, ticket: Ticket, configDir: string): Seen => store.getSetting<Record<string, Seen>>(ownMemoryKey(ticket.id))?.[configDir] ?? {};
 
 /** Set while the server's empty memory folder is refilled from the database, so a refill cut off goes on. */
 const refillKey = (project: Project) => `memory-refill:${project.id}`;
@@ -160,30 +161,39 @@ async function syncMemory(store: Store, project: Project, root: string, configDi
   if (a === b) return;
   const [here, there] = await Promise.all([fileTimes(configDir, root), fileTimes(server, root)]);
   if (!here || !there) return;
-  const key = seenKey(configDir, root);
+  const key = `memory-seen:${join(configDir, root)}`;
+  const stored = store.getSetting<Seen>(key);
   // Never matched up (from before #1952): its notes are old copies. Empty: a new volume.
-  const seen: Seen = here.size ? (store.getSetting<Seen>(key) ?? Object.fromEntries(here)) : {};
+  const seen: Seen = here.size ? (stored ?? Object.fromEntries(here)) : {};
   const next: Seen = {};
-  const copy = async (from: string, to: string, path: string, mtime: number) => placeFile(to, path, await readFile(join(from, path)), mtime);
+  // A note that can't be copied keeps what was seen of it, so the next match-up tries again, and never fails the turn or its save.
+  const copy = async (from: string, to: string, path: string, mtime: number) => {
+    try {
+      await placeFile(to, path, await readFile(join(from, path)), mtime);
+      return true;
+    } catch (err) {
+      console.error(`Could not copy the memory note ${path} from ${from} to ${to}: ${(err as Error).message}`);
+      if (seen[path] === undefined) delete next[path];
+      else next[path] = seen[path];
+      return false;
+    }
+  };
   for (const [path, mtime] of here) {
-    next[path] = mtime;
-    if (seen[path] === mtime) continue;
+    const was = seen[path];
+    const changed = was === undefined || Math.abs(was) !== mtime;
     const theirs = there.get(path);
+    next[path] = mtime;
     // Known here before and gone there: deleted on the server, and the delete stands.
-    if (theirs === undefined ? seen[path] !== undefined : theirs >= mtime) continue;
-    await copy(configDir, server, path, mtime);
-    there.set(path, mtime);
+    if (theirs === undefined && !(changed && (was === undefined || was < 0))) next[path] = -mtime;
+    else if (changed && (theirs === undefined || theirs < mtime) && (await copy(configDir, server, path, mtime))) there.set(path, mtime);
   }
   for (const [path, mtime] of there) {
     const mine = here.get(path);
     if (mine === undefined && seen[path] >= mtime)
       next[path] = seen[path]; // deleted here
-    else if (mine === undefined || mine < mtime) {
-      await copy(server, configDir, path, mtime);
-      next[path] = mtime;
-    }
+    else if ((mine === undefined || mine < mtime) && (await copy(server, configDir, path, mtime))) next[path] = mtime;
   }
-  putSeen(store, key, next);
+  if (!same(stored, next) && (stored || Object.keys(next).length)) store.setSetting(key, next);
 }
 
 /**
@@ -192,17 +202,18 @@ async function syncMemory(store: Store, project: Project, root: string, configDi
  * container) never rolls the database back (#259). `prunable` is what the turn's config dir held
  * when it started (storedPaths, after restoreSession): only those rows may be dropped, when their
  * file has gone since or they belong to an earlier session. A row the config dir never had (another
- * login's new memory note) is no proof of anything, so it stays. Null prunes nothing.
+ * login's new transcript) is no proof of anything, so it stays. Null prunes nothing.
  * The scheme's memory is the server's folder: a row stored at the start whose note isn't there now was deleted.
  */
 export async function saveSession(store: Store, ticket: Ticket, project: Project, configDir: string, prunable: Set<string> | null) {
   const { ticketRoots, ownMemory, sharedMemory } = scope(ticket, project);
-  if (sharedMemory) await syncMemory(store, project, sharedMemory, configDir);
-  const seenOwn = ownMemory ? store.getSetting<Seen>(seenKey(configDir, ownMemory)) : null;
+  const seenOwn = seenIn(store, ticket, configDir);
   for (const [roots, ticketId, from] of [
     [ticketRoots, ticket.id, configDir],
     [sharedMemory ? [sharedMemory] : [], null, claudeConfigDir(process.env)],
   ] as const) {
+    // After the ticket's own files are stored, which it must never hold up.
+    if (ticketId === null && sharedMemory) await syncMemory(store, project, sharedMemory, configDir);
     const seen = new Set<string>();
     const unread: string[] = [];
     const puts: Put[] = [];
@@ -222,7 +233,7 @@ export async function saveSession(store: Store, ticket: Ticket, project: Project
         const row = store.getClaudeState(path);
         if (row && (row.mtime > mtime || (row.mtime === mtime && row.size === st.size))) continue;
         // An old copy of a note another login deleted.
-        if (!row && under(ownMemory, path) && seenOwn?.[path] === mtime) continue;
+        if (!row && under(ownMemory, path) && seenOwn[path] === mtime) continue;
         puts.push({ row: { path, project_id: project.id, ticket_id: ticketId, size: st.size, mtime }, file: join(from, path) });
       }
     }
@@ -279,7 +290,7 @@ async function staleRows(store: Store, ticket: Ticket, project: Project, configD
     stale.push(...notes.filter((r) => !held.includes(r.path)).map((r) => ({ path: r.path, configDir: server })));
   }
   const rows = all.filter((r) => !under(sharedMemory, r.path) && join(configDir, r.path).startsWith(configDir + sep));
-  const own = rows.some((r) => under(ownMemory, r.path)) && (await listFiles(configDir, ownMemory!))?.length ? store.getSetting<Seen>(seenKey(configDir, ownMemory!)) : null;
+  const own = rows.some((r) => under(ownMemory, r.path)) && (await listFiles(configDir, ownMemory!))?.length ? seenIn(store, ticket, configDir) : {};
   const mtimes = await Promise.all(
     rows.map((meta) =>
       stat(join(configDir, meta.path)).then(
@@ -290,7 +301,7 @@ async function staleRows(store: Store, ticket: Ticket, project: Project, configD
   );
   // Rounded as saveSession stores it: unrounded, a file whose mtime rounded up looked older than its own copy,
   // so each turn after one wrote its transcript back on the same login (#612).
-  const missing = (r: ClaudeStateRow) => !(under(ownMemory, r.path) && (own?.[r.path] ?? -1) >= r.mtime);
+  const missing = (r: ClaudeStateRow) => !(under(ownMemory, r.path) && own[r.path] >= r.mtime);
   stale.push(...rows.filter((r, i) => (mtimes[i] === null ? missing(r) : Math.round(mtimes[i]) < r.mtime)).map((r) => ({ path: r.path, configDir })));
   return stale;
 }
@@ -356,11 +367,14 @@ export async function restoreSession(store: Store, ticket: Ticket, project: Proj
   if (sharedMemory) await syncMemory(store, project, sharedMemory, configDir);
   const own = ownMemory && (await fileTimes(configDir, ownMemory));
   if (own) {
-    const key = seenKey(configDir, ownMemory);
-    // A stored note that isn't there after the restore was deleted there: still known.
-    const was = store.getSetting<Seen>(key) ?? {};
-    const gone = store.listClaudeState(project.id, ticket.id).filter((r) => under(ownMemory, r.path) && !own.has(r.path) && r.path in was);
-    putSeen(store, key, { ...Object.fromEntries(own), ...Object.fromEntries(gone.map((r) => [r.path, was[r.path]])) });
+    const rows = store.listClaudeState(project.id, ticket.id);
+    const was = seenIn(store, ticket, configDir);
+    const seen: Seen = {};
+    for (const r of rows) if (under(ownMemory, r.path) && (own.has(r.path) || r.path in was)) seen[r.path] = own.get(r.path) ?? was[r.path];
+    // A note with no row: one this login stored once, so another deleted it. Never one not stored yet, nor any once the nightly prune dropped all the minion's rows.
+    if (rows.length) for (const path of own.keys()) if (path in was) seen[path] ??= was[path];
+    const all = store.getSetting<Record<string, Seen>>(ownMemoryKey(ticket.id)) ?? {};
+    if (!same(all[configDir] ?? {}, seen)) store.setSetting(ownMemoryKey(ticket.id), { ...all, [configDir]: seen });
   }
   return written;
 }
@@ -406,7 +420,7 @@ if (!isMainThread && workerData?.sessionJob) {
   }
 }
 
-/** The paths of a ticket's stored session state and its project's shared memory: after a restore that worked, one whose file isn't there was deleted. */
+/** The paths of a ticket's stored session state and its project's shared memory: after a restore that worked, all are in the config dir, but for memory notes deleted there or on the server. */
 export function storedPaths(store: Store, ticket: Ticket, project: Project): Set<string> {
   return new Set([...store.listClaudeState(project.id, ticket.id), ...store.listClaudeState(project.id, null)].map((r) => r.path));
 }

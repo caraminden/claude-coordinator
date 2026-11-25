@@ -90,8 +90,8 @@ test('"/fresh" with words after it is refused and keeps them; "/fresh" alone ask
       box.form.requestSubmit();
       const out = { asked, left: box.value, notes: notes() - before };
       box.value = '';
-      return JSON.stringify(out);
+      return out;
     })()`);
-  assert.deepEqual(JSON.parse(await press('/fresh then fix the login page')), { asked: 0, left: '/fresh then fix the login page', notes: 1 });
-  assert.deepEqual(JSON.parse(await press('/fresh')), { asked: 1, left: '', notes: 0 });
+  assert.deepEqual(await press('/fresh then fix the login page'), { asked: 0, left: '/fresh then fix the login page', notes: 1 });
+  assert.deepEqual(await press('/fresh'), { asked: 1, left: '', notes: 0 });
 });

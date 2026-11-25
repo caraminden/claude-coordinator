@@ -208,10 +208,10 @@
 .flow-row-bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--h) 14%, transparent); }
 .flow-row-bar i { display: block; height: 100%; width: var(--pct); border-radius: inherit; background: var(--h); }
 .flow-table-wrap { overflow-x: auto; }
-.flow-table :is(th, td):nth-child(-n+3) { text-align: left; }
+.flow-table tr > :is(th, td):nth-child(-n+3) { text-align: left; }
+.flow-table tfoot tr > td:nth-child(n) { text-align: right; }
 .flow-table td:first-child { overflow-wrap: normal; }
 .flow-table tfoot :is(th, td) { font-weight: 650; color: var(--ink); border-bottom: 0; }
-.flow-table tfoot td { text-align: right; }
 @container (min-width: 440px) {
   .flow-block:not(.table) .flow-names { display: none; } /* the river has the names itself */
 }

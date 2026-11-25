@@ -125,7 +125,7 @@ function river(minions, on) {
     if (!W) return;
     const down = W < 440;
     const tight = W < 640; // shorter names; a phone's are in the lists under it (ci.css)
-    const pad = down ? 0 : tight ? 128 : 226;
+    const pad = down ? 0 : tight ? 136 : 226;
     const along = down ? W : Math.max(340, Math.min(500, W * 0.42));
     const across = down ? 430 : W - pad;
     const H = down ? across : along;

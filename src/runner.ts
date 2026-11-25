@@ -1243,6 +1243,7 @@ export class Runner {
       server_work: closed ? null : this.serverWork(ticket.id),
       // The chat's size meter (#1193): the context as of the turn's latest API call (so it moves mid-turn and drops after a compaction), against the model's window.
       context_live: this.turns.has(ticket.id) ? (this.contextSizes.get(ticket.id) ?? null) : null,
+      running_cost: this.turns.has(ticket.id) ? (this.store.getSetting<TurnState>(turnKey(ticket.id))?.spend?.usd ?? 0) : 0, // #1913: the running turn's estimate, not yet in `cost`
     };
   }
 
@@ -1301,7 +1302,6 @@ export class Runner {
       asleep: closed || ticket.kind !== 'ticket' ? null : this.store.getSetting<Sleep>(sleepKey(ticket.id)),
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
-      running_cost: this.turns.has(ticket.id) ? (this.store.getSetting<TurnState>(turnKey(ticket.id))?.spend?.usd ?? 0) : 0,
       // What its kind of work usually costs and its two marks (#1114), for the minion page's "$X of about $Y".
       budget: ticket.kind === 'ticket' && !closed ? this.budgetView(ticket, list?.properties) : null,
       // The server login's part of it, the share of its weekly limit the minions list shows (#468 S05-3).

@@ -39,7 +39,7 @@
 
 .PARAMETER MachineToken
   That machine's token (ccm_...). Defaults to the CC_MACHINE_TOKEN environment variable. The machine must
-  belong to someone in the scheme (Cara's reaches every scheme), or be lent to the scheme.
+  belong to someone in the scheme (a CI host is lent to it too), or be lent to the scheme.
 
 .PARAMETER Count
   How many runner instances the scheme should have here, 1 to 4 (default 1): one job runs on each at a time.

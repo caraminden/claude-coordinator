@@ -666,14 +666,14 @@ function secretsCard() {
   const card = h('div', { class: 'account-card secrets-card' }, loadingLine('Loading secrets…'));
   let schemes = [];
   const where = (s) => (s.scope === 'scheme' ? { scope: 'scheme', project: s.project } : { scope: 'person' });
-  const valueInput = () => h('input', { type: 'password', ...noAutofill('secret-value', 'new-password'), spellcheck: 'false', placeholder: 'The value', required: true, 'aria-label': 'The value' });
+  const valueInput = () => h('input', { type: 'password', ...noAutofill('secret-value', 'new-password'), spellcheck: 'false', placeholder: 'The value', required: true, 'data-draft': true, 'aria-label': 'The value' });
   const row = (s, st) => {
     const status = h('span', { class: 'muted small', role: 'status' });
     const replace = h('button', { type: 'button', class: 'secondary small' }, 'Replace');
     const del = h('button', { type: 'button', class: 'secondary small' }, 'Delete');
     const el = h(
       'div',
-      { class: 'secret-item' },
+      { class: 'secret-item', 'data-key': `${s.scope}|${s.project ?? ''}|${s.name}` },
       h('div', { class: 'row' }, h('code', {}, s.name), h('span', { class: 'muted small' }, `${s.scope === 'scheme' ? `${s.project_name} (scheme)` : 'yours'} · ${s.updated_by ? `${s.updated_by}, ` : ''}${ago(s.updated_at)}`), h('span', { class: 'spacer' }), replace, del),
       status,
     );
@@ -685,6 +685,7 @@ function secretsCard() {
         status.textContent = 'Saving…';
         try {
           await api('api/secrets', { method: 'PUT', body: { ...where(s), name: s.name, value: value.value } });
+          value.value = ''; // saved: the reload must not open this form again
           load();
         } catch (err) {
           status.textContent = err.message;
@@ -702,7 +703,7 @@ function secretsCard() {
     return el;
   };
   const addForm = () => {
-    const name = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: 'AZURE_SPEECH_KEY', required: true, pattern: '[A-Za-z][A-Za-z0-9_]{0,63}', 'aria-label': 'Name' });
+    const name = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: 'AZURE_SPEECH_KEY', required: true, pattern: '[A-Za-z][A-Za-z0-9_]{0,63}', 'data-draft': true, 'aria-label': 'Name' });
     const value = valueInput();
     const whose = h('select', { 'aria-label': 'Whose' }, h('option', { value: '' }, 'Mine'), ...schemes.map((p) => h('option', { value: p.id }, `${p.name} (scheme)`)));
     const status = h('span', { class: 'muted small', role: 'status' });
@@ -712,6 +713,8 @@ function secretsCard() {
       status.textContent = 'Saving…';
       try {
         await api('api/secrets', { method: 'PUT', body: { ...(whose.value ? { scope: 'scheme', project: Number(whose.value) } : { scope: 'person' }), name: name.value, value: value.value } });
+        form.reset(); // its own save is the only thing that clears it
+        status.textContent = '';
         load();
       } catch (err) {
         status.textContent = err.message;
@@ -719,8 +722,13 @@ function secretsCard() {
     };
     return form;
   };
+  let add = null; // built once: a reload for another secret's Replace or Delete must not empty a half-typed new one
   const render = (st) => {
     const all = [...st.person, ...st.schemes];
+    // A half-typed Replace on another secret is opened again on its new row.
+    const typed = new Map([...card.querySelectorAll('.secret-item')].map((el) => [el.dataset.key, el.querySelector('.secret-form input')?.value]).filter(([, v]) => v));
+    add ??= addForm();
+    const was = document.activeElement;
     card.replaceChildren(
       h('h3', {}, 'Secrets'),
       h('p', { class: 'small' }, 'Passwords and keys for minions and apps, saved here instead of typed into a chat. A minion gets them as ', h('code', {}, '$CITADEL_SECRET_<NAME>'), ": yours in turns that run as you, a scheme's in every turn in it. Values are kept encrypted and never shown again."),
@@ -728,11 +736,20 @@ function secretsCard() {
         ? h(
             'div',
             { class: 'secret-list' },
-            all.map((s) => row(s, st)),
+            all.map((s) => {
+              const el = row(s, st);
+              const v = typed.get(el.dataset.key);
+              if (v) {
+                [...el.querySelectorAll('button')][0].onclick();
+                el.querySelector('.secret-form input').value = v;
+              }
+              return el;
+            }),
           )
         : h('p', { class: 'muted small' }, 'None saved yet.'),
-      addForm(),
+      add,
     );
+    if (was && add.contains(was)) was.focus(); // the add form is moved, not rebuilt, but a move drops focus
   };
   const load = () =>
     Promise.all([api('api/secrets'), api('api/projects')])

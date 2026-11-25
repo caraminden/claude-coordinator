@@ -291,3 +291,8 @@ test('a chat message that looks like a password or key is caught; ordinary words
     assert.ok(!looksSecret(s), s);
   }
 });
+
+test('a password after an earlier harmless "key is…" in the same message is still caught', () => {
+  assert.equal(looksSecret('the key is below. password: hunter22'), 'hunter22');
+  assert.equal(looksSecret('the key is the name, the token is the one above'), null);
+});

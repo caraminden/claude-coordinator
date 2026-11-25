@@ -186,6 +186,15 @@ const ICON_HINT = '/icon' + '.svg';
 
 const riskSelect = (c) => h('select', { name: 'restart_risk' }, ...Object.entries(RISKS).map(([v, [label]]) => h('option', { value: v, selected: v === (c.restart_risk ?? 'unassessed') }, label)));
 
+/** The PATCH body for the fields of the form that changed (`v`), in the shapes the server takes. */
+function contraptionPatch(v) {
+  const body = { ...v };
+  if ('port' in v) body.port = Number(v.port);
+  if ('home_scheme' in v) body.home_scheme = v.home_scheme ? Number(v.home_scheme) : null;
+  for (const k of ['open_paths', 'relay_paths']) if (k in v) body[k] = v[k].split(/[\s,]+/).filter(Boolean);
+  return body;
+}
+
 /** One contraption as a row that opens (#997): who it's enabled for, its settings, its service and its keys. */
 function card(c, people, replace) {
   const field = (label, name, value, attrs = {}) => h('label', { class: attrs.wide ? 'wide' : '' }, label, h('input', { name, value: value ?? '', autocomplete: 'off', spellcheck: 'false', ...attrs, wide: undefined }));
@@ -210,13 +219,13 @@ function card(c, people, replace) {
     h('button', { type: 'submit' }, 'Save'),
     status,
   );
+  const loaded = Object.fromEntries(new FormData(form));
   // Saved at once (the form keeps what was typed); the server's copy redraws the card, and a refusal says it isn't.
   form.onsubmit = (e) => {
     e.preventDefault();
     const v = Object.fromEntries(new FormData(form));
-    // Untouched, the risk fields stay out of the save: a Taskmaster's newer value isn't put back to the page's old one.
-    if (v.restart_risk === (c.restart_risk ?? 'unassessed')) delete v.restart_risk;
-    if (v.restart_note === (c.restart_note ?? '')) delete v.restart_note;
+    // Only what was changed goes: an untouched box would put a newer value (a Taskmaster's, another admin's, a deploy's) back to the page's old one.
+    for (const k of Object.keys(v)) if (v[k] === loaded[k]) delete v[k];
     optimistic({
       key: `contraption:${c.name}`,
       apply: () => {
@@ -225,13 +234,7 @@ function card(c, people, replace) {
       send: () =>
         api(`api/contraptions/${c.name}`, {
           method: 'PATCH',
-          body: {
-            ...v,
-            port: Number(v.port),
-            home_scheme: v.home_scheme ? Number(v.home_scheme) : null,
-            open_paths: v.open_paths.split(/[\s,]+/).filter(Boolean),
-            relay_paths: v.relay_paths.split(/[\s,]+/).filter(Boolean),
-          },
+          body: contraptionPatch(v),
         }),
       undo: () => {
         status.textContent = 'Not saved.';

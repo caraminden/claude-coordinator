@@ -100,6 +100,8 @@ export function fableMeterView(w) {
     {
       type: 'button',
       onclick: async () => {
+        // Number('') is 0: a blank box would switch the cap off for every Fable-tier minion.
+        if (!input.value.trim()) return void (status.textContent = 'Type a percent from 0 to 100 first.');
         const pct = Number(input.value);
         status.textContent = 'Saving…';
         try {

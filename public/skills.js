@@ -416,8 +416,15 @@ function tune(item, u, r, d) {
   const kit = item.source === 'kit';
   if (kit && !data.canKit) return h('div', { class: 'sk-pane' }, emptyCard('Tuning a kit skill is for Citadel scheme members', 'A kit change reaches every scheme. Ask one of them, with what you see on this page.', { mark: 'i', hue: 'muted' }));
   const text = h('textarea', { class: 'cui-input sk-brief', rows: 12, 'aria-label': 'Brief' });
-  text.value = drafts.get(keyOf(item)) ?? tuneBrief(item, u, r, d);
-  text.addEventListener('input', () => drafts.set(keyOf(item), text.value));
+  const fresh = tuneBrief(item, u, r, d);
+  text.value = drafts.get(keyOf(item)) ?? fresh;
+  // An edited brief holds a deploy's reload back (core.js unsentWork); the untouched one doesn't.
+  const mark = () => text.toggleAttribute('data-draft', text.value !== fresh);
+  mark();
+  text.addEventListener('input', () => {
+    drafts.set(keyOf(item), text.value);
+    mark();
+  });
   const err = h('p', { class: 'error', hidden: true });
   const start = h(
     'button',

@@ -29,11 +29,15 @@ const KINDS = [
 
 // What the view shows, kept while the scheme stays open: the folder, search, kind, the file previewed, and
 // uploads on their way. A different scheme starts afresh.
-let st = null;
-const state = () => (st?.projectId === view.projectId ? st : (st = { projectId: view.projectId, sel: 'all', q: '', kind: 'all', open: null, limit: PAGE, pending: [], staged: null }));
+// One per scheme, so another scheme's uploads (and their progress rows and Retry) are kept while it is open.
+const states = new Map();
+const state = () => {
+  if (!states.has(view.projectId)) states.set(view.projectId, { projectId: view.projectId, sel: 'all', q: '', kind: 'all', open: null, limit: PAGE, pending: [], staged: null });
+  return states.get(view.projectId);
+};
 
-/** Whether a file is still uploading here; a reload now would lose it. */
-export const filesUploading = () => !!st?.pending.some((p) => !p.failed);
+/** Whether a file is still uploading in any scheme; a reload now would lose it. */
+export const filesUploading = () => [...states.values()].some((s) => s.pending.some((p) => !p.failed));
 
 const label = (folder) => (folder === MINIONS ? 'Linked by minions' : folder === TOP ? 'Top level' : folder === 'all' ? 'All' : folder === 'pinned' ? 'Pinned' : ORDER.includes(folder) ? folder[0].toUpperCase() + folder.slice(1) : folder);
 const folderOf = (path) => (path.includes('/') ? path.slice(0, path.indexOf('/')) : TOP);
@@ -321,7 +325,10 @@ function renderStage() {
   const el = document.getElementById('files-stage');
   if (!el) return;
   const s = state();
-  if (!s.staged) return el.replaceChildren();
+  if (!s.staged) return el.replaceChildren(), void (el.__staged = null);
+  // Already drawn for this very pick: a rebuild would take the folder box's focus and caret.
+  if (el.firstChild && el.__staged === s.staged) return;
+  el.__staged = s.staged;
   const { files } = s.staged;
   const known = folders(items()).shared.filter((k) => k !== TOP);
   const input = h('input', { type: 'text', list: 'files-folders', value: s.staged.folder, 'aria-label': 'Folder', spellcheck: 'false', autocomplete: 'off' });

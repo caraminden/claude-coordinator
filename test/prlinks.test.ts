@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { owners, prOwners, repoSlug } from '../src/prlinks.ts';
+import { until } from './wait.ts';
 import type { Project, Ticket } from '../src/db.ts';
 
 test('repoSlug reads GitHub https and ssh URLs', () => {
@@ -100,5 +101,108 @@ esac
     );
   } finally {
     process.env.PATH = path;
+  }
+});
+
+/** A stand-in gh on PATH that runs `body` (sh) for each call; returns a restore function. */
+function standInGh(bin: string, body: string): () => void {
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh\n${body}\n`);
+  chmodSync(join(bin, 'gh'), 0o755);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  return () => {
+    process.env.PATH = path;
+    rmSync(bin, { recursive: true }); // timing-ok: own temp dir
+  };
+}
+const proj = (id: number, slug: string) => ({ id, name: `S${id}`, repo_url: `https://github.com/${slug}` }) as unknown as Project;
+
+test('a copy older than 5 minutes answers at once while GitHub is asked behind it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'prlinks-gh-'));
+  const restore = standInGh(dir, `echo "$@" >> ${dir}/calls\n[ "$1" = pr ] || { echo '[]'; exit 0; }\nif [ -e ${dir}/slow ]; then while [ ! -e ${dir}/go ]; do sleep 0.05; done; echo '[{"number":2,"headRefName":"x"}]'; else echo '[{"number":1,"headRefName":"x"}]'; fi`);
+  try {
+    let clock = 1_000_000;
+    const p = [proj(1, 'stub/stale-a')];
+    const first = await prOwners(
+      p,
+      () => [],
+      () => clock,
+    );
+    assert.deepEqual(first[0].pulls, [1]);
+    writeFileSync(join(dir, 'slow'), '');
+    clock += 6 * 60_000;
+    const stale = await prOwners(
+      p,
+      () => [],
+      () => clock,
+    ); // gh has not answered; must not wait for it
+    assert.deepEqual(stale[0].pulls, [1]);
+    await prOwners(
+      p,
+      () => [],
+      () => clock,
+    ); // a second page while it runs
+    writeFileSync(join(dir, 'go'), '');
+    await until(
+      'the refresh landed',
+      async () =>
+        (
+          await prOwners(
+            p,
+            () => [],
+            () => clock,
+          )
+        )[0].pulls[0] === 2,
+    );
+    const prCalls = readFileSync(join(dir, 'calls'), 'utf8')
+      .split('\n')
+      .filter((l) => l.startsWith('pr '));
+    assert.equal(prCalls.length, 2, 'one refresh in flight, not one per page');
+  } finally {
+    restore();
+  }
+});
+
+test('a cold start asks every repo before the first has answered', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'prlinks-gh-'));
+  // The first repo's PR list waits up to 3 s for the second repo to be asked, and notes whether it was.
+  const restore = standInGh(dir, `[ "$1" = pr ] || { echo '[]'; exit 0; }\ntouch ${dir}/asked-$(echo $4 | tr / _)\nif [ "$4" = stub/cold-a ]; then i=0; while [ ! -e ${dir}/asked-stub_cold-b ] && [ $i -lt 60 ]; do sleep 0.05; i=$((i+1)); done; [ -e ${dir}/asked-stub_cold-b ] && touch ${dir}/saw-b; fi\necho '[]'`);
+  try {
+    await prOwners([proj(1, 'stub/cold-a'), proj(2, 'stub/cold-b')], () => []);
+    assert.ok(existsSync(join(dir, 'saw-b')), 'the second repo was asked while the first was still waiting');
+  } finally {
+    restore();
+  }
+});
+
+test('a failed refresh keeps the last good list', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'prlinks-gh-'));
+  const restore = standInGh(dir, `echo "$1" >> ${dir}/calls\n[ -e ${dir}/fail ] && exit 1\n[ "$1" = pr ] && echo '[{"number":7,"headRefName":"x"}]' || echo '[{"number":8}]'`);
+  try {
+    let clock = 5_000_000;
+    const p = [proj(1, 'stub/fail-a')];
+    await prOwners(
+      p,
+      () => [],
+      () => clock,
+    );
+    writeFileSync(join(dir, 'fail'), '');
+    clock += 6 * 60_000;
+    await prOwners(
+      p,
+      () => [],
+      () => clock,
+    ); // starts the failing refresh
+    await until('the failing calls ran', () => readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean).length >= 4);
+    await new Promise((r) => setTimeout(r, 200)); // timing-ok: gh exited, its answer is still being read
+    clock += 6 * 60_000;
+    const [r] = await prOwners(
+      p,
+      () => [],
+      () => clock,
+    );
+    assert.deepEqual([r.pulls, r.issues], [[7], [8]]);
+  } finally {
+    restore();
   }
 });

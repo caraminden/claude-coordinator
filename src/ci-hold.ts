@@ -10,7 +10,8 @@
 // light check's heavy job) or the early next train (early/), then optional work. A run takes the slot when it asks and is let
 // in. A ship stops whatever holds it. A check or early run starts only when nothing else of Citadel's runs or is queued (a
 // ship in line with no run doesn't count: that is when it is worth running), is never waited for, and comes back only while
-// its branch is there (land.sh deletes it when its ship goes on). Another lower job is waited for SLOT_WAIT_MS at most.
+// its branch is there (land.sh deletes it when its ship goes on). A job that ran SLOT_HOLD_MS
+// keeps no other waiting, and none waits behind lower ones past SLOT_WAIT_MS.
 // Left out: desktop.yml (a release build), other schemes' push-started builds, which the runner agents squeeze (src/ci-ships.ts).
 // A job asks before it starts (POST /api/ci-hold; citadel-heavy reads hold.json). Fails open: a job that can't ask, or a
 // GitHub this can't read, means optional work goes ahead; nothing here is asked by a ship. Off switch: <deploy state>/hold-off.
@@ -32,8 +33,10 @@ export const MAX_BACKOFF = 8;
 export const MAIN_WAIT_MS = 30 * 60_000;
 /** The most another scheme's job waits (a starting value). */
 export const OTHERS_CAP_MS = 4 * 3600_000;
-/** The most a job waits behind another lower job of Citadel's, with no ship in the way: a hung one can't hold it for ever. */
-export const SLOT_WAIT_MS = 4 * 3600_000;
+/** A job that has run this long keeps no other waiting: a hung one can't hold the line. */
+export const SLOT_HOLD_MS = 4 * 3600_000;
+/** The most a job waits behind lower jobs of Citadel's, with no ship in the way: a long queue can't hold it for ever. */
+export const SLOT_WAIT_MS = 24 * 3600_000;
 /** A run seen on a runner this long without having been let in (its workflow asks nothing) is stopped when another has the slot. */
 const UNASKED_MS = 2 * 60_000;
 /** A stopped check or early run that can't start again this long is let go: its ship went on without it. */
@@ -281,7 +284,13 @@ export class CiHold {
   /** The lower Citadel job in this run's way, in words, or null. An old look at GitHub doesn't count: it goes ahead. */
   private taken(run: number | null, now: number): string | null {
     const s = this.slot;
-    return s && s.run !== run && this.fresh(now) ? `a ${NAMES[s.kind]} is running (${s.what}), and Citadel runs one job at a time on the CI desktop`.replace(/^a (main's|next)/, '$1') : null;
+    return s && s.run !== run && this.fresh(now) && now - s.at < SLOT_HOLD_MS ? `a ${NAMES[s.kind]} is running (${s.what}), and Citadel runs one job at a time on the CI desktop`.replace(/^a (main's|next)/, '$1') : null;
+  }
+
+  /** On a runner a while without having been let in; one that ran past SLOT_HOLD_MS is left to end. */
+  private unasked(run: number, now: number) {
+    const on = now - (this.running0.get(run) ?? now);
+    return on >= UNASKED_MS && on < SLOT_HOLD_MS;
   }
 
   private slotPast(h: HeldRun | undefined, now: number) {
@@ -385,7 +394,7 @@ export class CiHold {
           // A queued check or early run takes no runner's time: it asks when it starts. Main's running one yields to a ship (#1906).
           const first = a.kind !== 'main' && !sideRun(a.kind) ? why : runs || a.kind === 'main' ? this.shipsFirst(a.kind, h, false, now) : null;
           if (first) await this.hold(a.repo, a.run, a.kind, first, now);
-          else if (runs && this.slot?.run !== a.run.id && now - (this.running0.get(a.run.id) ?? now) >= UNASKED_MS && !this.slotPast(h, now)) {
+          else if (runs && this.slot?.run !== a.run.id && this.unasked(a.run.id, now) && !this.slotPast(h, now)) {
             const taken = this.taken(a.run.id, now);
             if (taken) await this.hold(a.repo, a.run, a.kind, taken, now, true);
           }

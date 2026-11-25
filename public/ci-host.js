@@ -106,21 +106,23 @@ function minionsRow(l) {
   return row;
 }
 
-// Deploys first (#1902): optional runs kept off the CI desktop while a ship goes first (src/ci-hold.ts).
+// Deploys first (#1902), one Citadel job at a time (#1906): what runs on the CI desktop, what waits and why (src/ci-hold.ts).
+const RUNS = { ship: 'ship', main: 'main', check: 'own check', early: 'early tests', proof: 'flake proof', heavy: 'heavy job', suite: 'test run' };
 function holdRow(l) {
   if (!l.hold) return '';
-  const { off, why } = l.hold;
-  const handed = (l.long ?? []).filter(handedOver).map((j) => ({ ...j, why: why ?? (j.quiet ? 'starts within a minute' : 'starts at 2am') }));
+  const { off, why, busy, running = [] } = l.hold;
+  const handed = (l.long ?? []).filter(handedOver).map((j) => ({ ...j, why: why ?? busy ?? (j.quiet ? 'starts within a minute' : 'starts at 2am') }));
   const runs = [...l.hold.held, ...handed].sort((a, b) => a.since - b.since);
   const waits = runs.filter((r) => r.phase !== 'resumed').length;
-  const chip = off ? toneChip('warn', 'Off') : waits ? toneChip('warn', `${waits} held`) : runs.length ? toneChip('info', 'Starting again') : why ? toneChip('info', 'Ships first') : toneChip('ok', 'Nothing held');
-  const note = off ? 'nothing is held for ships' : runs.length ? `longest ${held(runs[0], l.now)}` : (why ?? 'optional jobs start at once');
+  const chip = off ? toneChip('warn', 'Off') : waits ? toneChip('warn', `${waits} held`) : runs.length ? toneChip('info', 'Starting again') : why ? toneChip('info', 'Ships first') : running.length ? toneChip('info', '1 job running') : toneChip('ok', 'Nothing held');
+  const note = off ? 'nothing is held: jobs run side by side' : runs.length ? `longest ${held(runs[0], l.now)}` : (why ?? busy ?? 'optional jobs start at once');
   const [row] = settingsRow(
-    { key: 'host-hold', icon: 'lock', hue: runs.length || off ? 'waiting' : 'done', title: 'Held for ships', summary: [chip, note] },
-    runs.length
+    { key: 'host-hold', icon: 'lock', hue: runs.length || off ? 'waiting' : 'done', title: 'One job at a time', summary: [chip, note] },
+    runs.length || running.length
       ? h(
           'div',
           { class: 'hue-rows' },
+          ...running.map((r) => hueRow({ hue: 'running', meta: RUNS[r.kind] }, r.kind === 'ship' ? "A ship's tests" : r.what, h('span', { class: 'muted' }, ' · running now'), r.url ? [' · ', h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'CI run')] : '')),
           ...runs.map((r) =>
             hueRow(
               { hue: r.phase === 'resumed' ? 'running' : 'waiting', meta: held(r, l.now) },
@@ -132,14 +134,18 @@ function holdRow(l) {
             ),
           ),
         )
-      : emptyCard('Nothing is held', 'Flake proofs, heavy jobs and test runs started by hand stop here while a ship is in line, and start again by themselves.'),
-    h('p', { class: 'look-prose' }, "A ship's own tests are never stopped. A job starts from its beginning when it comes back, and one held for a day is reported to its Taskmaster."),
+      : emptyCard('Nothing runs or waits', 'Citadel runs one heavy job at a time here: ships first, then the full run on main, then checks, then flake proofs, heavy jobs and test runs started by hand.'),
+    h(
+      'p',
+      { class: 'look-prose' },
+      "Order: a ship's tests (never stopped), the full run on main, a ship's own check or the next ship's early tests, then everything else. A ship stops whatever runs; that starts again from its beginning by itself, unless it was a check whose ship has gone on. A job that has run 4 hours keeps no other waiting, and a job held for a day is reported to its Taskmaster.",
+    ),
   );
   return row;
 }
 
 // Long jobs (#1363): `citadel-heavy --long` queues them for the scheme's CI at night, from 2am (src/long-jobs.ts).
-const handedOver = (j) => (j.quiet || j.held) && j.state === 'queued'; // in "Held for ships"
+const handedOver = (j) => (j.quiet || j.held) && j.state === 'queued'; // in "One job at a time"
 const LONG = { queued: 'waits for 2am', dispatched: 'sent to CI, waiting for a runner', running: 'running on CI', done: 'passed' };
 const LONG_HUE = { queued: 'waiting', dispatched: 'running', running: 'running', done: 'done', failed: 'danger', lost: 'danger' };
 function longRow(l) {

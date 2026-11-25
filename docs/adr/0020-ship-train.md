@@ -254,6 +254,12 @@ first, the train came out different, or the early run went red (it runs again, a
   fix recorded with conflict prep is replayed in the early stack too.
 - Off: `LAND_EARLY=0`, or `<state>/early-off`.
 
+### One Citadel job at a time (#1906)
+
+Josh, 2026-11-24, picked "One Citadel job, one Peek build". With the CI desktop's hold on (no `<state>/hold-off`) the early
+run goes only at the train's deploy, on an idle desktop, never beside its run; a ship's run stops it. The same holds for a
+ship's own check. Order, slot and caps: `src/ci-hold.ts`, `tools/ci-runner/README.md`. The sections below describe the hold off.
+
 ### While the train ahead's CI runs (#1568)
 
 Cara, 2026-11-21, "Go" on fix F of #1549's report (ship stalls), and 2026-11-22, picked "Low-priority run on a ship

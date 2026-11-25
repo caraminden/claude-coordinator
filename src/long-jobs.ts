@@ -243,7 +243,7 @@ export class LongJobs {
     Object.assign(j, { state: 'dispatched', dispatched_at: this.now(), tries: (j.tries ?? 0) + 1 });
     this.save(j);
     await this.d.gh(projectId, ['-X', 'POST', `repos/${j.slug}/actions/workflows/${WORKFLOW}/dispatches`, '-f', `ref=${branch}`, '-f', `inputs[sha]=${j.sha}`, '-f', `inputs[command]=${j.command}`, '-f', `inputs[id]=${j.id}`, ...minutes]);
-    this.d.note(j.ticket, j.quiet ? `Heavy job ${j.id} (${j.what}) went to ${j.slug}'s CI: no ship is in line now.` : `Long job ${j.id} (${j.what}) went to ${j.slug}'s CI for the night.`);
+    this.d.note(j.ticket, j.quiet ? `Heavy job ${j.id} (${j.what}) went to ${j.slug}'s CI: nothing is ahead of it now.` : `Long job ${j.id} (${j.what}) went to ${j.slug}'s CI for the night.`);
     return true;
   }
 

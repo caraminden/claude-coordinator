@@ -7,6 +7,7 @@
 # never runs more than one check at a time, beside at most one land's run:
 #   - only while someone else is in the line: with nobody ahead, its run in line starts as soon as a check would;
 #   - only with a runner labelled citadel-ci-linux-check online (tools/ci-runner/README.md); none, no check;
+#   - only on an idle CI desktop (ci_busy, land.sh) while the CI hold is on: one Citadel job at a time (#1906);
 #   - one check at a time (<state>/own-check.lock): a ship that would wait more than LAND_OWN_CHECK_WAIT (120 s) for the
 #     check running, going by the last check's time, gets the light check instead (tools/light-check.sh, #1620): its
 #     own and affected test files on CI's side runner.
@@ -47,6 +48,11 @@ own_check() {
   [ -n "$n" ] || return 0
   n=$(own_hub gh api "repos/$slug/actions/runners?per_page=100" --jq "[.runners[] | select(.status == \"online\" and any(.labels[]; .name == \"$OWN_CHECK_LABEL\"))] | length" 2>/dev/null) || n=''
   [[ $n =~ ^[1-9][0-9]*$ ]] || return 0
+  if ci_busy own_hub "$slug"; then # one Citadel job at a time (#1906): its ship doesn't wait for an idle desktop
+    say "own check: another Citadel job is on the CI desktop or queued, so this joins the line unchecked"
+    retro_log "own check · $label · skipped: the CI desktop was busy"
+    return 0
+  fi
   exec 5>"$state/own-check.lock" || return 0
   if ! flock -n 5; then
     read -r start b 2>/dev/null <"$state/own-check-run" || true

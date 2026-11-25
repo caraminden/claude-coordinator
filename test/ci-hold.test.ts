@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CiHold, type HoldState, heldRows, isNight, MAIN_WAIT_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_WAIT_MS, withoutHeld } from '../src/ci-hold.ts';
+import { CiHold, type HoldState, heldRows, isNight, MAIN_WAIT_MS, REPORT_MS, SETTLE_DAY_MS, SETTLE_NIGHT_MS, SLOT_HOLD_MS, SLOT_WAIT_MS, withoutHeld } from '../src/ci-hold.ts';
 
 // Deploys first (#1902): while a ship is in line, nothing optional runs on the CI desktop.
 const OWN = 'o/citadel';
@@ -652,7 +652,7 @@ test('a job behind another that never ends goes after four hours, and is not sto
   await w.for(10 * MIN);
   const [a, b] = [w.heavy(), w.proof()];
   assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
-  await w.for(SLOT_WAIT_MS - 5 * MIN);
+  await w.for(SLOT_HOLD_MS - 5 * MIN);
   assert.ok(!w.posts.includes('rerun 2'));
   await w.for(10 * MIN);
   assert.equal(w.posts.at(-1), 'rerun 2');
@@ -660,7 +660,23 @@ test('a job behind another that never ends goes after four hours, and is not sto
   assert.equal(await w.ask(b), true);
   await w.for(10 * MIN);
   assert.equal(w.posts.at(-1), 'rerun 2');
-  assert.equal(w.hold.why(OWN, w.now - SLOT_WAIT_MS, w.now), null, 'nor does one not dispatched yet wait longer');
+  assert.equal(a.status, 'in_progress', 'the long one is left to end');
+  assert.equal(w.hold.why(OWN, w.now - SLOT_WAIT_MS, w.now), null, 'one not dispatched yet waits a day at most');
+});
+
+test('a job that waited a day behind others goes beside them', async () => {
+  const w = world();
+  await w.for(10 * MIN);
+  const [a, b] = [w.heavy(), w.proof()];
+  assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
+  const saved = (w.settings.get('ci-hold') as Record<string, unknown>[]).map((h) => ({ ...h, behind: w.now - SLOT_WAIT_MS }));
+  const v = world(w.now, saved);
+  v.runs = w.runs;
+  await v.for(SETTLE_DAY_MS + 2 * MIN);
+  assert.equal(v.posts.at(-1), 'rerun 2');
+  b.status = 'in_progress';
+  await v.for(10 * MIN);
+  assert.deepEqual(v.posts, ['rerun 2'], 'and is not stopped again');
 });
 
 test('the one-job wait fails open and turns off: GitHub unread, hold-off', async () => {

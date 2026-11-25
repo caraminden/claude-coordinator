@@ -743,6 +743,18 @@ prep_check() {
 # GitHub's rate_limit read costs none of them, so gh_quota's isn't counted (#1722).
 # At the top level: hub() and own-check.sh's own_hub call it in every copy, the rebased one and --into too.
 gh_count() { [ "$1" != gh ] || printf '%s %s %s\n' "$(date +%s)" "${branch:-?}" "${2:-} ${3:-}" >>"$state/gh-calls" 2>/dev/null || true; }
+# <hub function> <slug>: 0 when Citadel's hold is on and a run of its own (ship, check, proof, heavy job, suite) is on the CI
+# desktop or queued: a check or early run starts on an idle one only (#1906, src/ci-hold.ts, which stops one that slips through).
+# Fails open: off, or GitHub not read, it isn't busy. A run left queued over an hour is one GitHub abandoned.
+ci_busy() {
+  local st n
+  [ ! -e "$state/hold-off" ] || return 1
+  for st in in_progress queued; do
+    n=$("$1" gh api "repos/$2/actions/runs?status=$st&per_page=100" --jq '[.workflow_runs[] | select((.path | test("/(tests|flake-proof|citadel-heavy)\\.yml")) and (.status != "queued" or (.created_at | fromdateiso8601) > now - 3600))] | length' 2>/dev/null) || n=''
+    [[ ! $n =~ ^[1-9][0-9]*$ ]] || return 0
+  done
+  return 1
+}
 # The rebased copy is the same process, so the ticket it was started with (none, from a land.sh older than the
 # line) still names it, and it holds both locks already (an exec keeps its fds); only the trap that removes the
 # ticket at the end has to be set again.
@@ -1801,13 +1813,14 @@ top_done() { local x _ p; read -r x _ p 2>/dev/null <"$state/train-top" && [ "$p
 # and ci_gate takes the early run as its own. <state>/early: "<top> <its branch> <when pushed> <this branch> <onto>
 # <its riders' tickets, comma-separated, or ->"; that landing builds its train of those riders only (early_look), so
 # ships that joined the line since don't change it, and at its gate counts the run or cancels it (early_gate). Off:
-# LAND_EARLY=0, or <state>/early-off; it goes only with the CI desktop's hold off (<state>/hold-off, #1902).
+# LAND_EARLY=0, or <state>/early-off. With the CI desktop's hold on (no <state>/hold-off, #1902, #1906) one Citadel job runs
+# at a time, so it goes only at this train's deploy, on an idle desktop, never beside this train's run.
 early_ahead='' early_top='' early_pid='' train_only='' train_left='' # train_left: train_only is what is left of a red train (#1918)
 early_slug() { local url; url=$(git remote get-url "$REMOTE" 2>/dev/null) || return 1; url=${url#*github.com[:/]}; echo "${url%.git}"; }
 # [<what this train is doing>]: the words for the say line, at its deploy (default: while its CI runs, top_gate).
 early_next() {
   local q=$state/queue t x c l nb='' nt='' r own_e wt lane_e slug free out top n riders st skip='' waited=$SECONDS
-  [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && [ -e "$state/hold-off" ] && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
+  [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && { [ -e "$state/hold-off" ] || [ -n "${1:-}" ]; } && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
   [ -z "$split_of" ] || return 0 # a red train being split (train_bisect): its next ships may be the red one's, and a red early run runs again
   ! pipeline_touch "$old" "$tip" || return 0 # the next one runs this train's own land.sh, not this one
   local -A QUEUE_RANK=()
@@ -1865,6 +1878,7 @@ early_next() {
     sleep "$CI_POLL"
   done
   free=$(hub gh api "repos/$slug/actions/runners?per_page=100" --jq "[.runners[] | select(.status == \"online\" and .busy == false and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>/dev/null) || free=''
+  ! ci_busy hub "$slug" || { say "early next train: another Citadel job is on the CI desktop or queued, so $nb's CI waits for its turn"; return 0; }
   [[ $free =~ ^[1-9][0-9]*$ ]] || { say "early next train: no free $CI_LABEL runner, so $nb's CI waits for its turn"; return 0; }
   [ ! -e "$state/early-stop.$$" ] || return 0
   # With its base (this train's top: main once it deploys), atomic, as ci_gate pushes it: the burn-in (#1443) compares with it.

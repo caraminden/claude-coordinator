@@ -98,15 +98,20 @@ export function step(state: IncidentState, triggers: Trigger[], now: number): { 
 /** A failed CI job as ci-health keeps it. */
 export interface RedJob {
   run_id: number;
+  /** The job's name: citadel-heavy.yml's one job is "heavy" (#2002). */
+  name?: string;
   conclusion: string | null;
   completed_at?: string | null;
 }
+const HEAVY_JOB = 'heavy';
 /** A burst of red runs: RED_COUNT or more runs with a failed job finished in the last RED_WINDOW_MS, after `after`. */
 export function redTrigger(jobs: RedJob[], after: number, now: number): Trigger | null {
   const since = Math.max(after, now - RED_WINDOW_MS);
   const runs = new Map<number, number>();
   for (const j of jobs) {
     const at = j.completed_at ? Date.parse(j.completed_at) : NaN;
+    // #2002: a minion's own citadel-heavy job exiting non-zero is its script's result, not CI breaking (6 of 8 reds in the 2026-11-25 01:53 incident); ship and main test runs still count.
+    if (j.name === HEAVY_JOB) continue;
     if (j.conclusion !== 'failure' || !(at > since) || at > now) continue;
     runs.set(j.run_id, Math.max(runs.get(j.run_id) ?? 0, at));
   }

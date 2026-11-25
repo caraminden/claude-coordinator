@@ -236,6 +236,15 @@ test('redTrigger: five failed runs in half an hour, counted once each, after the
   assert.equal(redTrigger(five, 0, T0 + 40 * MIN), null, 'outside the half hour');
 });
 
+test("redTrigger: a minion's own failed citadel-heavy job (#2002) is not a red; ship and main test reds are", () => {
+  const j = (run: number, min: number, name: string) => ({ run_id: run, name, conclusion: 'failure', completed_at: new Date(T0 + min * MIN).toISOString() });
+  const heavy = [1, 2, 3, 4, 5].map((n) => j(n, n, 'heavy'));
+  assert.equal(redTrigger(heavy, 0, T0 + 10 * MIN), null, 'five heavy jobs alone');
+  assert.equal(redTrigger([...heavy, j(6, 6, 'test'), j(7, 7, 'test')], 0, T0 + 10 * MIN), null, 'five heavy jobs plus two ship reds');
+  const five = [1, 2, 3, 4, 5].map((n) => j(n, n, 'test'));
+  assert.ok(redTrigger([...five, ...heavy.map((h) => ({ ...h, run_id: h.run_id + 10 }))], 0, T0 + 10 * MIN), 'five ship reds still open one');
+});
+
 test('journal, load and grouping read what they should', () => {
   const lines = journalEntries(
     [

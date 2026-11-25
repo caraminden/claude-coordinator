@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { promptMessage } from '../src/prompts.ts';
 import { isUploadName, safeFileName, saveUpload, UploadTooLarge } from '../src/uploads.ts';
+import { json, type ApiEvent } from './typed.ts';
 import { agentToken, bootServer, stopProcs, stopTurns } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'uploads-'));
@@ -53,7 +54,7 @@ test('an upload never overwrites, and one over the cap leaves nothing behind', a
 
 test('Claude is told where each attached file is, its size and type', () => {
   const line = JSON.parse(promptMessage([{ author: 'Cara', text: '', images: [], files: [{ name: 'art.zip', path: '/data/shared/9/uploads/art.zip', size: 5 * 1024 * 1024, type: 'application/zip' }] }]));
-  const text = line.message.content.map((c: any) => c.text).join('\n');
+  const text = line.message.content.map((c: { text: string }) => c.text).join('\n');
   assert.match(text, /^\[Cara\]: \(sent a file\)/);
   assert.match(text, /- \/data\/shared\/9\/uploads\/art\.zip \(5\.0 MB, application\/zip\)/);
 });
@@ -72,16 +73,16 @@ const call = (path: string, init: RequestInit & { as?: number } = {}) => fetch(b
 const postJson = (path: string, body: unknown) => call(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 test('people attach a file: it streams into the files folder, the message names it, and it downloads without rendering', async () => {
-  const p = await (await postJson('/api/projects', { name: 'Scheme' })).json();
-  const minion = await (await postJson(`/api/projects/${p.id}/tickets`, { message: 'hi' })).json();
-  const page = await (await call(`/api/projects/${p.id}`)).json();
+  const p = await json<{ id: number }>(await postJson('/api/projects', { name: 'Scheme' }));
+  const minion = await json<{ id: number }>(await postJson(`/api/projects/${p.id}/tickets`, { message: 'hi' }));
+  const page = await json<{ coordinator: { id: number } }>(await call(`/api/projects/${p.id}`));
   const folder = join(root, 'data', 'projects', String(p.id), 'shared', String(minion.id), 'uploads');
 
   const put = (id: number, name: string, body: string, as?: number) => call(`/api/tickets/${id}/uploads?name=${encodeURIComponent(name)}`, { method: 'PUT', body, as });
   const html = await put(minion.id, 'page.html', '<script>alert(1)</script>');
   assert.equal(html.status, 201);
   assert.deepEqual(await html.json(), { name: 'page.html', size: 25 });
-  const png = await (await put(minion.id, '../hero.png', 'not really a png')).json();
+  const png = await json<{ name: string }>(await put(minion.id, '../hero.png', 'not really a png'));
   assert.equal(png.name, 'hero.png');
   assert.ok(existsSync(join(folder, 'hero.png')));
   // The Taskmaster's chat takes files too, into its own folder.
@@ -124,12 +125,12 @@ test('people attach a file: it streams into the files folder, the message names 
     ],
   });
   assert.equal(sent.status, 202, await sent.clone().text());
-  const events = await (await call(`/api/tickets/${minion.id}/events?after=0`)).json();
+  const events = await json<ApiEvent[]>(await call(`/api/tickets/${minion.id}/events?after=0`));
   const msg = events
-    .map((e: any) => ({ ...e, data: typeof e.data === 'string' ? JSON.parse(e.data) : e.data }))
-    .filter((e: any) => e.kind === 'user_message')
+    .map((e) => ({ ...e, data: typeof e.data === 'string' ? JSON.parse(e.data) : e.data }))
+    .filter((e) => e.kind === 'user_message')
     .pop();
-  assert.deepEqual(msg.data.files, [
+  assert.deepEqual(msg!.data.files, [
     { name: 'page.html', size: 25, type: 'text/html' },
     { name: 'hero.png', size: 16, type: 'application/octet-stream' },
   ]);

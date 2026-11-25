@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { tripwire, type TripwireConfig } from '../src/tripwire.ts';
+import type { Project, Ticket } from '../src/db.ts';
+import { fake } from './typed.ts';
 import { coordinatorAccess, credentialDenies } from '../src/turn-launch.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'coordinator-access-'));
@@ -14,14 +16,14 @@ const tickets = join(root, 'tickets');
 mkdirSync(join(tickets, '7'), { recursive: true });
 
 test('adds the repo and the tickets folder, and denies edits in both', () => {
-  const { addDirs, settings } = coordinatorAccess(repo, tickets) as any;
+  const { addDirs, settings } = coordinatorAccess(repo, tickets);
   assert.deepEqual(addDirs, [repo, tickets]);
   assert.ok(settings.permissions.deny.includes(`Edit(/${repo}/**)`));
   assert.ok(settings.permissions.deny.includes(`Edit(/${tickets}/**)`));
 });
 
 test('allows read-only git -C with the exact folder as prefix', () => {
-  const { allow } = (coordinatorAccess(repo, tickets).settings as any).permissions;
+  const { allow } = coordinatorAccess(repo, tickets).settings.permissions;
   assert.ok(allow.includes(`Bash(git -C ${repo} log:*)`));
   assert.ok(allow.includes(`Bash(git -C ${join(tickets, '7')} status:*)`));
   assert.ok(allow.includes(`Bash(git -C ${repo} branch -a)`));
@@ -32,7 +34,7 @@ test('allows read-only git -C with the exact folder as prefix', () => {
 });
 
 test('without a repo, only the tickets folder is added and no git is allowed', () => {
-  const { addDirs, settings } = coordinatorAccess(null, tickets) as any;
+  const { addDirs, settings } = coordinatorAccess(null, tickets);
   assert.deepEqual(addDirs, [tickets]);
   assert.ok(settings.permissions.allow.includes('WebSearch') && settings.permissions.allow.includes('Bash(grep:*)'));
   assert.ok(!settings.permissions.allow.some((r: string) => r.startsWith('Bash(git')));
@@ -40,7 +42,7 @@ test('without a repo, only the tickets folder is added and no git is allowed', (
 
 test('a live checkout is added read-only, with read-only git, and only when given', () => {
   const live = join(root, 'live');
-  const { addDirs, settings } = coordinatorAccess(repo, tickets, null, null, live) as any;
+  const { addDirs, settings } = coordinatorAccess(repo, tickets, null, null, live);
   assert.deepEqual(addDirs, [repo, tickets, live]);
   assert.ok(settings.permissions.deny.includes(`Edit(/${live}/**)`));
   assert.ok(settings.permissions.allow.includes(`Bash(git -C ${live} log:*)`));
@@ -50,7 +52,7 @@ test('a live checkout is added read-only, with read-only git, and only when give
 
 test('given the open minions, git rules cover only their worktrees, so closed ones never grow the settings file', () => {
   mkdirSync(join(tickets, '8'), { recursive: true });
-  const { addDirs, settings } = coordinatorAccess(repo, tickets, null, null, null, [], null, [join(tickets, '8')]) as any;
+  const { addDirs, settings } = coordinatorAccess(repo, tickets, null, null, null, [], null, [join(tickets, '8')]);
   assert.deepEqual(addDirs, [repo, tickets]);
   assert.ok(settings.permissions.allow.includes(`Bash(git -C ${join(tickets, '8')} status:*)`));
   assert.ok(settings.permissions.allow.includes(`Bash(git -C ${repo} log:*)`));
@@ -299,8 +301,8 @@ test("#661: the Citadel Taskmaster's every-scheme settings.json stays under 1 Mi
     const turnDir = join(root, `launch-${own}-${schemes}-${perScheme}`);
     mkdirSync(turnDir, { recursive: true });
     return launchPlan({
-      project: { id: GLOBAL_OWNER, repo_dir: `${base}/2/repo`, approval_rules: '', plugin_dirs: '', optional_plugin_dirs: '' } as any,
-      ticket: { id: 1, kind: 'coordinator', permission_mode: 'default', cwd: `${base}/2/repo`, plugin_dirs: '' } as any,
+      project: fake<Project>({ id: GLOBAL_OWNER, repo_dir: `${base}/2/repo`, approval_rules: '', plugin_dirs: '', optional_plugin_dirs: '' }),
+      ticket: fake<Ticket>({ id: 1, kind: 'coordinator', permission_mode: 'default', cwd: `${base}/2/repo`, plugin_dirs: '' }),
       dir: turnDir,
       pins,
       place: { host: true },

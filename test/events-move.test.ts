@@ -15,7 +15,7 @@ after(() => rmSync(root, { recursive: true, force: true })); // timing-ok: own t
 
 const look = (path: string) => {
   const db = new DatabaseSync(path, { readOnly: true });
-  const q = (sql: string) => db.prepare(sql).all() as any[];
+  const q = (sql: string) => db.prepare(sql).all() as { name: string; sql: string; id: number; ticket_id: number; kind: string; data: string }[];
   const out = {
     tables: q("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'events%' ORDER BY name").map((r) => r.name),
     trigger: q("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'card_fates_events_deleted'").length === 1,
@@ -53,13 +53,13 @@ test('an old-layout database moves its chat log to events.db at start, keeps eve
   const moved = look(path);
   assert.deepEqual([moved.tables, moved.trigger, moved.moved, moved.old!.length], [['events_old'], false, true, first.rows]);
   const ev = new DatabaseSync(join(dir, 'events.db'), { readOnly: true });
-  assert.equal((ev.prepare('SELECT count(*) AS n FROM events').get() as any).n, first.rows);
+  assert.equal((ev.prepare('SELECT count(*) AS n FROM events').get() as { n: number }).n, first.rows);
   ev.close();
 
   // Card fates still go when an event goes: a TEMP trigger watches events.db.
   s.db.prepare('INSERT INTO card_fates (card_id, ticket_id, up_to) VALUES (1, ?, 1)').run(keep.id);
   s.db.prepare('DELETE FROM events WHERE id = ?').run(s.addEvent(keep.id, 'note', { text: 'brief' }).id);
-  assert.equal((s.db.prepare('SELECT count(*) AS n FROM card_fates').get() as any).n, 0);
+  assert.equal((s.db.prepare('SELECT count(*) AS n FROM card_fates').get() as { n: number }).n, 0);
 
   // A minion with rows in events_old (linked to tickets) can still be deleted; new and edited rows land in events.db.
   s.deleteTicket(gone.id);
@@ -118,12 +118,12 @@ test('events_old goes in batches only when events.db holds every one of its ids,
   };
   // An id events_old has that events.db lacks: it changes nothing and says how many.
   let db = open();
-  const first = (db.prepare('SELECT min(id) AS id FROM main.events_old').get() as any).id;
+  const first = (db.prepare('SELECT min(id) AS id FROM main.events_old').get() as { id: number }).id;
   db.prepare(`DELETE FROM ${CHAT}.events WHERE id = ?`).run(first);
   assert.deepEqual(dropEventsOld(db, { batch: 7 }), { missing: 1 });
-  assert.equal((db.prepare('SELECT count(*) AS n FROM main.events_old').get() as any).n, 300);
+  assert.equal((db.prepare('SELECT count(*) AS n FROM main.events_old').get() as { n: number }).n, 300);
   db.prepare(`INSERT INTO ${CHAT}.events SELECT * FROM main.events_old WHERE id = ?`).run(first);
-  const size = () => (db.prepare('PRAGMA main.page_count').get() as any).page_count;
+  const size = () => (db.prepare('PRAGMA main.page_count').get() as { page_count: number }).page_count;
   const pages = size();
 
   // Whole: it goes in batches of 7, each its own run (300 rows: 42 full, a short one, then one that finds none), and the file gives back the space.
@@ -177,7 +177,7 @@ test('a copy left by a move that stopped halfway is made again, and a main file 
     ev2
       .prepare('SELECT data FROM events')
       .all()
-      .map((r: any) => r.data),
+      .map((r) => r.data),
     [JSON.stringify({ text: 'kept' })],
   );
   ev2.close();
@@ -195,7 +195,7 @@ test('a start stopped after the drop but before the VACUUM leaves the space free
   const db = new DatabaseSync(path);
   db.prepare(`ATTACH DATABASE ? AS ${CHAT}`).run(eventsPath(path));
   db.exec('DROP TABLE main.events_old');
-  const free = () => (db.prepare('PRAGMA main.freelist_count').get() as any).freelist_count;
+  const free = () => (db.prepare('PRAGMA main.freelist_count').get() as { freelist_count: number }).freelist_count;
   assert.ok(free() > 290);
   assert.equal(dropEventsOld(db), null, 'under 100 MB free: not worth a VACUUM at start');
   const done = dropEventsOld(db, { minFreeMb: 0 }) as { rows: number };

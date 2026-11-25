@@ -29,7 +29,7 @@ const rows = (file: string) => {
   const r = db
     .prepare('SELECT ticket_id, created_at FROM events ORDER BY id')
     .all()
-    .map((x: any) => `${x.ticket_id}:${x.created_at}`);
+    .map((x) => `${x.ticket_id}:${x.created_at}`);
   const idx = db.prepare("SELECT count(*) n FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events'").get()!.n;
   db.close();
   return { r, idx };

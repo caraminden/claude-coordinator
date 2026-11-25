@@ -160,14 +160,18 @@ test("list_tickets and read_ticket read another scheme for the Citadel Taskmaste
   after(() => srv.stop());
   const tokens = new Auth(PASSWORD, SECRET);
   const api = (as: { id: number }, method: string, path: string) => fetch(srv.base + path, { method, headers: { Authorization: `Bearer ${tokens.agentToken(as.id)}`, 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : '{}' }).then((r) => r.status);
-  async function tool(as: { id: number; project_id: number }, name: string, args: object, citadelTools: boolean): Promise<any> {
+  type ToolDef = { name: string; inputSchema?: { properties?: { scheme?: unknown } } };
+  type ToolAnswer = { isError: boolean; text: string };
+  async function tool(as: { id: number; project_id: number }, name: 'tools/list', args: object, citadelTools: boolean): Promise<ToolDef[]>;
+  async function tool(as: { id: number; project_id: number }, name: string, args: object, citadelTools: boolean): Promise<ToolAnswer>;
+  async function tool(as: { id: number; project_id: number }, name: string, args: object, citadelTools: boolean): Promise<ToolDef[] | ToolAnswer> {
     const r = await mcpOnce(agentEnv(srv.base, tokens.agentToken(as.id), as, 'coordinator', { COORDINATOR_APP_INSTRUCTIONS: citadelTools ? '1' : undefined }), name === 'tools/list' ? 'tools/list' : 'tools/call', { name, arguments: args }, tmp.track);
     return name === 'tools/list' ? r.tools : { isError: !!r.isError, text: r.content[0].text as string };
   }
-  const schemeArg = (tools: any[], name: string) => !!tools.find((t) => t.name === name).inputSchema.properties.scheme;
+  const schemeArg = (tools: ToolDef[], name: string) => !!tools.find((t) => t.name === name)!.inputSchema!.properties!.scheme;
   assert.ok(schemeArg(await tool(tmCitadel, 'tools/list', {}, true), 'list_tickets') && schemeArg(await tool(tmCitadel, 'tools/list', {}, true), 'read_ticket'));
   assert.ok(!schemeArg(await tool(tmPeek, 'tools/list', {}, false), 'list_tickets'), "other Taskmasters aren't offered it");
-  assert.ok(!(await tool(tmCitadel, 'tools/list', {}, true)).some((t: any) => !['list_tickets', 'read_ticket', 'live_facts', 'message_taskmaster'].includes(t.name) && t.inputSchema?.properties?.scheme), 'no other tool takes a scheme (message_taskmaster always named the one it writes to)');
+  assert.ok(!(await tool(tmCitadel, 'tools/list', {}, true)).some((t) => !['list_tickets', 'read_ticket', 'live_facts', 'message_taskmaster'].includes(t.name) && t.inputSchema?.properties?.scheme), 'no other tool takes a scheme (message_taskmaster always named the one it writes to)');
 
   askedBy(tmCitadel, josh.id);
   const list = await tool(tmCitadel, 'list_tickets', { scheme: peek.id }, true);

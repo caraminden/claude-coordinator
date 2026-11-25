@@ -1,7 +1,9 @@
 // A deployed contraption's to-dos (#418) reach its home scheme's Taskmaster once per new list.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { ContraptionRow, Ticket } from '../src/db.ts';
 import { deployTodo } from '../src/routes/contraptions.ts';
+import { fake } from './typed.ts';
 
 test("a deploy's to-dos go to the home Taskmaster once per list, after a home scheme is set, and again after a clean deploy", async () => {
   const sent: { to: number; author: string; text: string; asker: unknown }[] = [];
@@ -10,14 +12,14 @@ test("a deploy's to-dos go to the home Taskmaster once per list, after a home sc
     dataDir: '/nonexistent',
     store: { getProject: (id: number) => (id === 5 ? { id: 5, name: 'Transdata' } : undefined), getCoordinator: () => ({ id: 50 }), coordinatorFor: () => undefined },
     runner: {
-      send: (to: number, author: string, text: string, _i: unknown, extra: any) => {
+      send: (to: number, author: string, text: string, _i: unknown, extra: { asker?: number | null }) => {
         if (fail) throw new Error('down');
         sent.push({ to, author, text, asker: extra.asker });
       },
     },
   } as any;
-  const c = (home: number | null) => ({ name: 'td', title: 'Transdata', home_scheme: home }) as any;
-  const minion = { kind: 'ticket', project_id: 5 } as any;
+  const c = (home: number | null) => fake<ContraptionRow>({ name: 'td', title: 'Transdata', home_scheme: home });
+  const minion = fake<Ticket>({ kind: 'ticket', project_id: 5 });
   const todo = ['It has no rail icon', 'Its page has no <link rel="manifest">'];
 
   // No home scheme yet: nothing sent, and nothing remembered, so setting one later still sends.
@@ -34,7 +36,7 @@ test("a deploy's to-dos go to the home Taskmaster once per list, after a home sc
   await deployTodo(app, c(5), minion, 7, todo.slice(1));
   assert.equal(sent.length, 2);
   // Its own Taskmaster deployed it: its tool answer has them already.
-  await deployTodo(app, c(5), { kind: 'coordinator', project_id: 5 } as any, 7, todo);
+  await deployTodo(app, c(5), fake<Ticket>({ kind: 'coordinator', project_id: 5 }), 7, todo);
   assert.equal(sent.length, 2);
   // A failed send isn't remembered, so the next deploy tries again.
   fail = true;

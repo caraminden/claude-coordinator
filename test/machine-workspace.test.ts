@@ -5,9 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { until } from './wait.ts';
-// @ts-ignore: a plain .mjs the agent's computers download
 import { WorkspaceHost, expand, joinScreenLine, leaveScreenLine, loadConfig, screenLine, screenState, workspaceReply } from '../public/machine-agent.mjs';
 import { JOB_WORDS } from '../src/machines.ts';
+
+// The parts of the agent's answers these tests read.
+type Answered = { result: { tools: { name: string }[]; isError: boolean } };
+type Refused = { error: { code: number } };
 
 // The agent's workspace tools against a real clone with a real origin, as on a laptop.
 const root = mkdtempSync(join(tmpdir(), 'machine-ws-'));
@@ -75,7 +78,7 @@ test('the config keeps good workspaces and tasks and says what it left out', () 
     [true, false, false],
   );
   assert.deepEqual(
-    host.summary().workspaces.map((w: any) => w.git_sync),
+    host.summary().workspaces.map((w) => w.git_sync),
     [true, false, false],
   );
   assert.deepEqual([...host.workspaces.get('delve').tasks.keys()], ['ok', 'nogodot', 'locked', 'slow', 'unset']);
@@ -101,7 +104,7 @@ test('reads stay inside the workspace and its read folders', async () => {
   await refused(call('read_file', { workspace: 'delve', path: 'escape/secret.txt' }), /outside workspace delve/);
   await refused(call('read_file', { workspace: 'delve', path: '.git/config' }), /\.git folder is off limits/);
   await refused(call('read_file', { workspace: 'nope', path: 'x' }), /No workspace "nope".*delve/);
-  assert.equal((await call('fetch_file', { workspace: 'delve', path: join(logs, 'godot.log') })).text.match(/to (\S+) on/)[1], '/srv/godot.log:18');
+  assert.equal((await call('fetch_file', { workspace: 'delve', path: join(logs, 'godot.log') })).text.match(/to (\S+) on/)![1], '/srv/godot.log:18');
   await refused(call('fetch_file', { workspace: 'delve', path: 'escape/secret.txt' }), /outside/);
 });
 
@@ -128,7 +131,7 @@ test('git_sync checks out a pushed branch, carries local changes, and stops on a
   const listed = (await call('workspaces')).text;
   assert.match(listed, /Checked out: detached at \w+ seven[\s\S]*- ok: .* \(says hi\)/);
   assert.doesNotMatch(listed.split('## vault')[0], /git_sync: off/);
-  assert.match(listed.split('## vault')[1], /git_sync: off/);
+  assert.match(listed.split('## vault')![1], /git_sync: off/);
 });
 
 test('git_sync refuses in a workspace that has it off and leaves its branch alone', async () => {
@@ -149,7 +152,7 @@ test('only configured tasks run, with hints, one at a time, and long ones become
   await refused(call('run_task', { workspace: 'delve', task: 'unset' }), /CITADEL_NOT_SET is not set/);
 
   const started = await call('run_task', { workspace: 'delve', task: 'slow', wait: 0 });
-  const id = started.text.match(/job (\w+)\)/)[1];
+  const id = started.text.match(/job (\w+)\)/)![1];
   assert.match(started.text, /still running/);
   await refused(call('git_sync', { workspace: 'delve', ref: 'main' }), /busy: task slow for #90 in Citadel/);
   await refused(call('run_task', { workspace: 'delve', task: 'ok' }), /busy/);
@@ -179,21 +182,21 @@ test('run_task names the commit it ran, and refuses a caller whose own git_sync 
 });
 
 test('the MCP side lists the tools and answers calls and unknown methods', async () => {
-  const list = await workspaceReply(host, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, 'x');
+  const list = (await workspaceReply(host, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, 'x')) as Answered;
   assert.deepEqual(
-    list.result.tools.map((t: any) => t.name),
+    list.result.tools.map((t) => t.name),
     ['workspaces', 'git_sync', 'run_task', 'job', 'stop_job', 'read_file', 'list_files', 'fetch_file'],
   );
-  const bad = await workspaceReply(host, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'run_task', arguments: { workspace: 'delve', task: 'nope' } } }, 'x');
+  const bad = (await workspaceReply(host, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'run_task', arguments: { workspace: 'delve', task: 'nope' } } }, 'x')) as Answered;
   assert.equal(bad.result.isError, true);
-  assert.equal((await workspaceReply(host, { jsonrpc: '2.0', id: 3, method: 'resources/list' }, 'x')).error.code, -32601);
+  assert.equal(((await workspaceReply(host, { jsonrpc: '2.0', id: 3, method: 'resources/list' }, 'x')) as Refused).error.code, -32601);
   assert.equal(await workspaceReply(host, { jsonrpc: '2.0', method: 'notifications/initialized' }, 'x'), null);
   // An agent whose every workspace has git_sync off doesn't offer it.
   const vaultOnly = join(root, 'vault-only.json');
   writeFileSync(vaultOnly, JSON.stringify({ workspaces: { vault: { path: vault, git_sync: false } } }));
-  const offered = await workspaceReply(new WorkspaceHost({ configFile: vaultOnly, jobsDir: join(root, 'jobs') }), { jsonrpc: '2.0', id: 4, method: 'tools/list' }, 'x');
+  const offered = (await workspaceReply(new WorkspaceHost({ configFile: vaultOnly, jobsDir: join(root, 'jobs') }), { jsonrpc: '2.0', id: 4, method: 'tools/list' }, 'x')) as Answered;
   assert.deepEqual(
-    offered.result.tools.map((t: any) => t.name),
+    offered.result.tools.map((t) => t.name),
     ['workspaces', 'run_task', 'job', 'stop_job', 'read_file', 'list_files', 'fetch_file'],
   );
 });
@@ -252,7 +255,7 @@ test('a task that takes arguments gets them as argv, no shell; others refuse the
 
 test('stop_job ends a launched app and frees the workspace and the screen', async () => {
   const started = await boxCall('run_task', { workspace: 'peek', task: 'app', wait: 1 });
-  const id = started.text.match(/job (\w+)\)/)[1];
+  const id = started.text.match(/job (\w+)\)/)![1];
   assert.match(started.text, /still running[\s\S]*window up/);
   assert.equal(JSON.parse(readFileSync(lockFile, 'utf8')).who, '#121 in Peek Auras');
   const stopped = await boxCall('stop_job', { id }, '#121 in Peek Auras');
@@ -267,8 +270,8 @@ test('stop_job also ends what the task started, off Windows (a shell running a l
   writeFileSync(file, JSON.stringify({ workspaces: { tree: { path: clone, tasks: { launch: { run: ['sh', '-c', 'sleep 47 & echo "child $!"; wait'] } } } } }));
   const tree = new WorkspaceHost({ configFile: file, jobsDir: join(root, 'tree-jobs') });
   const started = await tree.call('run_task', { workspace: 'tree', task: 'launch', wait: 1 }, '#1', async () => '');
-  const id = started.text.match(/job (\w+)\)/)[1];
-  const pid = Number(started.text.match(/child (\d+)/)[1]);
+  const id = started.text.match(/job (\w+)\)/)![1];
+  const pid = Number(started.text.match(/child (\d+)/)![1]);
   const alive = () => {
     try {
       process.kill(pid, 0);
@@ -306,7 +309,7 @@ const ciWaiter = (pid: number, since: number, token = `ci-${pid}`) => {
   writeFileSync(place, JSON.stringify({ pid, what: `desktop CI job ${token}`, who: 'GitHub Actions (caraminden/peek-auras)', since, token }));
   return place;
 };
-const jobId = (text: string) => text.match(/\(job (\w+)\)/)[1];
+const jobId = (text: string) => text.match(/\(job (\w+)\)/)![1];
 
 test("the screen's line (#1422): behind a live holder a screen task gets a place in line, not a refusal, and starts once the screen is free", async () => {
   holdLock(process.ppid);
@@ -321,7 +324,7 @@ test("the screen's line (#1422): behind a live holder a screen task gets a place
   assert.match(listed, /Screen: busy, desktop CI job for GitHub Actions \(peek-auras\)/);
   assert.match(listed, /1 in line[\s\S]*1\. task shell in peek for #121 in Peek Auras/);
   assert.deepEqual(
-    screenState(lockFile).line.map((w: any) => w.who),
+    screenState(lockFile).line.map((w) => w.who),
     ['#121 in Peek Auras'],
   );
   assert.match((await boxCall('job', { id, wait: 0.2 })).text, /waiting in line for the screen.*it is next, 1 in line/);
@@ -340,7 +343,7 @@ test("the screen's line serves CI jobs before minion tasks, each kind in arrival
   // A second CI job that arrives after the task still goes ahead of it; a second task stays behind the first.
   const later = ciWaiter(process.ppid, Date.now() + 5, 'ci-later');
   const second = joinScreenLine(lockFile, 'a screenshot', 'someone');
-  const order = screenLine(lockFile).map((w: any) => w.what);
+  const order = screenLine(lockFile).map((w) => w.what);
   assert.deepEqual(order.slice(0, 2), ['desktop CI job ci-' + process.ppid, 'desktop CI job ci-later']);
   assert.deepEqual(
     order.slice(2).map((w) => w.replace(/ in peek$/, '').replace(/^task shell.*/, 'task')),
@@ -368,7 +371,7 @@ test("the screen's line drops waiters that died or went quiet, and keeps a fresh
   writeFileSync(broken, 'nope');
   utimesSync(broken, old, old);
   assert.deepEqual(
-    screenLine(lockFile).map((w: any) => w.token),
+    screenLine(lockFile).map((w) => w.token),
     [`ci-${process.ppid}`],
   );
   assert.deepEqual(readdirSync(lineDir).sort(), [live, writing].map((p) => p.slice(lineDir.length + 1)).sort());
@@ -429,7 +432,7 @@ test('screenshots: off unless the owner turns them on, shared with the screen lo
 
   // The minion whose app holds the screen can look at it; another minion waits.
   const started = await boxCall('run_task', { workspace: 'peek', task: 'app', wait: 0 });
-  const id = started.text.match(/job (\w+)\)/)[1];
+  const id = started.text.match(/job (\w+)\)/)![1];
   assert.match((await boxCall('screenshot', { window: 'Peek' })).text, /Took window "Peek - Peek Auras", 800x600/);
   await refused(boxCall('screenshot', {}, '#7 in Delve'), /screen is busy: task app in peek for #121 in Peek Auras has the screen, started \d+ s ago\. Waited 1 s; nothing was taken\. A screenshot waits only inside its own call\. To see your app, start it with run_task: a screen task keeps its place in line/);
   await assert.rejects(boxCall('screenshot', {}, '#7 in Delve'), (err: Error) => !/try again|retry/i.test(err.message), 'a busy screen never says to retry by hand (#1819)');
@@ -437,8 +440,8 @@ test('screenshots: off unless the owner turns them on, shared with the screen lo
   assert.deepEqual(shots, ['', 'Peek']);
   await refused(boxCall('screenshot', { window: 'x'.repeat(201) }), /at most 200/);
 
-  const offered = await workspaceReply(box, { jsonrpc: '2.0', id: 9, method: 'tools/list' }, 'x');
-  assert.ok(offered.result.tools.some((t: any) => t.name === 'screenshot'));
+  const offered = (await workspaceReply(box, { jsonrpc: '2.0', id: 9, method: 'tools/list' }, 'x')) as Answered;
+  assert.ok(offered.result.tools.some((t) => t.name === 'screenshot'));
   if (process.platform !== 'win32') {
     const real = new WorkspaceHost({ configFile: boxFile, jobsDir: join(root, 'box-jobs') });
     await refused(

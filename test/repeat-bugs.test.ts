@@ -100,5 +100,4 @@ test('a third bug minion in a plain scheme starts flagged, one tier up', async (
 
   const other = await call(`/api/projects/${p.id}/tickets`, { title: 'Same words, a chore', message: slamNow.brief, properties: { type: 'chore' } });
   assert.deepEqual([other.data.model, other.data.effort], [BY_TYPE.chore.model, BY_TYPE.chore.effort], 'only bug minions are checked');
-  (store as Store & { close?: () => void }).close?.();
 });

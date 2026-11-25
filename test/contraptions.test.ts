@@ -8,8 +8,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Contraptions, verifyIdentity } from '../src/contraptions.ts';
-import { Store } from '../src/db.ts';
+import { Store, type ContraptionRow } from '../src/db.ts';
 import { bootServer } from './helpers.ts';
+import { fake, json, type Reply } from './typed.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'contraptions-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -112,8 +113,8 @@ test("a contraption's frame gets the clipboard only when its citadel-app.json as
     ['no-start', false],
     ['missing', false],
   ] as const)
-    assert.equal(await reader.clipboard({ name, folder: null }), want, name);
-  assert.equal(await reader.clipboard({ name: 'elsewhere', folder: join(home, 'apps', 'writes') }), true, 'its own folder, when it has one');
+    assert.equal(await reader.clipboard(fake<ContraptionRow>({ name, folder: null })), want, name);
+  assert.equal(await reader.clipboard(fake<ContraptionRow>({ name: 'elsewhere', folder: join(home, 'apps', 'writes') })), true, 'its own folder, when it has one');
 });
 
 test('a bearer contraption key names its contraption, and rotating replaces both keys', () => {
@@ -153,12 +154,12 @@ test('admins register, edit, enable and rotate; everyone else is refused, and li
   const made = await srv.call('/api/people', { name: 'Olive' });
   const invited = await fetch(`${srv.base}/api/invite/${made.data.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
   const olive = { id: made.data.person.id as number, cookie: invited.headers.get('set-cookie')!.split(';')[0] };
-  const asOlive = (path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') =>
+  const asOlive = <T = unknown>(path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') =>
     fetch(srv.base + path, {
       method,
       headers: { Cookie: olive.cookie, 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
-    }).then(async (r) => ({ status: r.status, data: await r.json() }));
+    }).then(async (r): Promise<Reply<T>> => ({ status: r.status, data: await json<T>(r) }));
 
   assert.equal((await srv.call('/api/contraptions', { name: 'Bad Name', title: 'x', port: 9000 })).status, 400);
   assert.equal((await srv.call('/api/contraptions', { name: 'mine', title: 'x', port: 9000 })).status, 400);
@@ -183,7 +184,7 @@ test('admins register, edit, enable and rotate; everyone else is refused, and li
     assert.equal((await asOlive(path, body, method)).status, 403, `${method} ${path}`);
 
   assert.equal((await srv.call(`/api/contraptions/mandate/people/${olive.id}`, { enabled: true }, 'PUT')).data.people.includes(olive.id), true);
-  const mine = (await asOlive('/api/contraptions/mine')).data;
+  const mine = (await asOlive<{ up: boolean }[]>('/api/contraptions/mine')).data;
   assert.deepEqual(mine, [{ name: 'mandate', title: 'Mandate!', icon: '/icon.svg', up: mine[0]?.up }]);
   assert.equal(typeof mine[0].up, 'boolean', 'whether it is up, for the rail (Contraptions.up, tested above)');
   assert.deepEqual((await srv.call('/api/contraptions/mine')).data, [], "an admin isn't enabled by being one");

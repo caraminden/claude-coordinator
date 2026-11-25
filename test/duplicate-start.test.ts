@@ -10,7 +10,7 @@ import { agentToken, bootServer, type Booted } from './helpers.ts';
 // on the memory index. Now the server refuses a second start from the same handoff file, index or not, while the first
 // is open or closed less than 3 days ago; not_duplicate overrides, and a person's own start is never refused.
 let srv: Booted;
-let p: any;
+let p: { id: number };
 let shared = '';
 before(async () => {
   srv = await bootServer();

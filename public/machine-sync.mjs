@@ -155,7 +155,8 @@ export async function withSnapshot(work, use) {
           .map((l) => l.slice(l.indexOf('\t') + 1)),
       );
     const submodules = await links();
-    await g(['add', '-u', '--', ':/']);
+    // No pathspec: a newer git (2.56) refuses one that matches nothing changed.
+    await g(['add', '-u']);
     /** @type {string[]} */
     const repos = [];
     /** @type {string[]} */

@@ -106,6 +106,29 @@ test('a holding ticket goes behind the ships a person placed, ahead of the rest,
   assert.match(readFileSync(join(q, '.order'), 'utf8'), /^# Cara moved core-b\n0000000002\n0000000001\n0000000004\n0000000003\n#pin 2\n$/);
 });
 
+// A placed ship that is landing has left the line: it pins nothing, or the holder would wait behind a ship it passed.
+test('a pinned ship that is landing no longer keeps a holding ticket behind the waiters it was placed after', () => {
+  const q = mkdtempSync(join(root, 'queue-pin-landing-'));
+  writeFileSync(join(q, '0000000001'), deployTicket('deploy-a'));
+  writeFileSync(join(q, '0000000002'), coreTicket('core-b').replace('\n0\n', '\n1764000000\n')); // it has the lock
+  writeFileSync(join(q, '0000000003'), [...deployTicket('deploy-held').trimEnd().split('\n').slice(0, 5), 'hold'].join('\n') + '\n');
+  writeFileSync(join(q, '.order'), '0000000001\n0000000002\n#pin 2\n');
+  const core = bash(`${fn(template, 'queue_order')}Q_DIR=$1; queue_order; printf '%s\\n' "\${Q_ORDER[@]}"`, q);
+  const deploy = bash(`. "$2"; queue_order "$1"; for t in 0000000001 0000000003; do echo "$(queue_key "$t") $t"; done | LC_ALL=C sort | cut -d' ' -f2`, q, deployQueue);
+  const server = readQueue(q, 4, () => true).map((t) => String(t.seq).padStart(10, '0'));
+  assert.deepEqual(deploy, ['0000000003', '0000000001'], 'deploy-queue.sh');
+  assert.deepEqual(
+    server.filter((t) => t !== '0000000002'),
+    ['0000000003', '0000000001'],
+    'the server (src/waits.ts)',
+  );
+  assert.deepEqual(
+    core.filter((t) => t !== '0000000002'),
+    ['0000000003', '0000000001'],
+    'the kit core',
+  );
+});
+
 test("land.local.sh's land_deploy hands deploy.sh the core's place in line", () => {
   const dir = mkdtempSync(join(root, 'land-deploy-ticket-'));
   const tools = join(dir, 'tools');

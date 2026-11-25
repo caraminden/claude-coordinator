@@ -39,7 +39,7 @@ function keyBytes(b64) {
 }
 
 /** Ask for permission (only ever from a click), subscribe this browser and register it for you. */
-export async function pushOn() {
+async function pushOn() {
   if ((await Notification.requestPermission()) !== 'granted') throw new Error('Notifications are blocked for this site in the browser settings');
   if (desktop) {
     const id = localStorage.getItem(DESKTOP_PUSH) ?? crypto.randomUUID();
@@ -67,14 +67,30 @@ export async function pushOn() {
   return api('api/push/subscription', { method: 'PUT', body: { subscription: sub.toJSON() } });
 }
 
-/** Unsubscribe this device; whether it was subscribed. */
+/** Unsubscribe this device: what it had set, for pushBackOn (null: it couldn't be read), or false if it wasn't subscribed. */
 export async function pushOff() {
   if (!pushSupported) return false;
   const sub = await pushSubscription();
   if (!sub) return false;
+  const was = await api('api/push/subscription', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => null);
   await api('api/push/subscription', { method: 'DELETE', body: { endpoint: sub.endpoint } });
   await sub.unsubscribe();
-  return true;
+  return was && !was.subscribed ? false : was;
+}
+
+/** Subscribe this device again with what pushOff found set; off if any of it can't be, so a muted scheme never pings. */
+export async function pushBackOn(was) {
+  await pushOn();
+  try {
+    const { endpoint } = await pushSubscription();
+    const set = (body) => api('api/push/subscription', { method: 'PATCH', body: { endpoint, ...body } });
+    if (was.onlyPinned) await set({ onlyPinned: true });
+    for (const projectId of was.muted) await set({ projectId, muted: true });
+    for (const projectId of was.everything) await set({ projectId, everything: true });
+  } catch (err) {
+    await pushOff().catch(() => {});
+    throw err;
+  }
 }
 
 // What this browser last said of its push state, drawn at once on the next scheme so the box keeps its height while it asks again.

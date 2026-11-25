@@ -190,14 +190,17 @@ test("in an installed app's window, another app opens in Citadel's layer over it
   assert.equal(await untilLayer(page, 'shown #/ inert'), 'shown #/ inert', "Citadel's entry: the same layer, at Citadel's own view");
 });
 
-test("Citadel's page reloading in the layer keeps where it is; opened again at an app, it goes there (#1854)", { skip }, async () => {
-  Object.assign(state, { tocUp: true, iconBroken: false, citadelDown: false });
-  const page = await browser.page(base + '?installed', { width: 1000 });
-  assert.equal(await until(page, 'img'), 'img');
-  await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').click()`);
-  assert.equal(await untilLayer(page, 'shown #/apps/toc inert'), 'shown #/apps/toc inert');
-  // After rail.js's own load listener, a message of ours: what it sent first has been handled by the time ours is.
-  const settled = await page.eval(`new Promise((ok) => {
+for (const own of [false, true])
+  test(`Citadel's page reloading in the layer keeps where it is; opened again at an app, it goes there${own ? ', on an own host' : ''} (#1854)`, { skip }, async () => {
+    Object.assign(state, { tocUp: true, iconBroken: false, citadelDown: false });
+    const page = await browser.page(base + '?installed', { width: 1000 });
+    assert.equal(await until(page, 'img'), 'img');
+    // On an app's own host Citadel's page is another origin's: its document can't be read.
+    if (own) await page.eval(`Object.defineProperty(HTMLIFrameElement.prototype, 'contentDocument', { get: () => null }), 0`);
+    await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').click()`);
+    assert.equal(await untilLayer(page, 'shown #/apps/toc inert'), 'shown #/apps/toc inert');
+    // After rail.js's own load listener, a message of ours: what it sent first has been handled by the time ours is.
+    const settled = await page.eval(`new Promise((ok) => {
     const f = document.querySelector('.citadel-layer iframe');
     f.addEventListener('load', () => {
       const w = f.contentWindow;
@@ -207,10 +210,10 @@ test("Citadel's page reloading in the layer keeps where it is; opened again at a
     f.contentWindow.location.hash = '#/p/1/t/5';
     f.contentWindow.location.reload();
   })`);
-  assert.equal(settled, '#/p/1/t/5');
-  await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').click()`);
-  assert.equal(await untilLayer(page, 'shown #/apps/toc inert'), 'shown #/apps/toc inert');
-});
+    assert.equal(settled, '#/p/1/t/5');
+    await page.eval(`document.querySelector('.citadel-rail a[data-app="toc"]').click()`);
+    assert.equal(await untilLayer(page, 'shown #/apps/toc inert'), 'shown #/apps/toc inert');
+  });
 
 test("in an app's native shell (a Capacitor WebView), the page gets no rail, handle or switcher", { skip }, async () => {
   const page = await browser.page(`${base}?native`, { width: 400 });

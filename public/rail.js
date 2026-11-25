@@ -115,6 +115,7 @@ if (inLayer && window.frameElement?.closest('.citadel-layer')?.hidden) document.
 let layer = null; // a contraption's installed window: Citadel's page over it, kept once opened (#311)
 let layerOpener = null;
 let layerGo = null; // the rail entry the layer is yet to go to
+let layerLoaded = false;
 
 /** In a contraption's installed window: show Citadel's page over this one at `item`, in the same window. */
 function openLayer(item) {
@@ -125,7 +126,8 @@ function openLayer(item) {
     // A page that reloaded stays where it is (it only goes where it was last asked to), and put away if it was.
     if (layer.hidden) post(f.contentWindow, 'away');
     else if (layerGo) post(f.contentWindow, 'go', { app: layerGo.name });
-    if (f.contentDocument?.readyState === 'complete') layerGo = null; // one still loading hears it at its load
+    // One still loading hears it at its load. On an app's own host its document can't be read: loaded once is all that shows.
+    if (layerLoaded && (f.contentDocument?.readyState ?? 'complete') === 'complete') layerGo = null;
   };
   layerGo = item;
   const frame = layer?.firstChild;
@@ -135,7 +137,10 @@ function openLayer(item) {
     const f = document.createElement('iframe');
     f.title = 'Citadel';
     f.src = item.href;
-    f.addEventListener('load', () => go(f));
+    f.addEventListener('load', () => {
+      layerLoaded = true;
+      go(f);
+    });
     layer.append(f);
     document.documentElement.append(layer); // beside <body>, which goes inert under it
   } else {

@@ -8,7 +8,7 @@ import { noteTicketChange } from './closedlist.js';
 import { catchingUp, chatHoled, holdEvent, resync, showCatchingUp, stopCatchingUp } from './resync.js';
 import { cutEvent } from './eventcut.js';
 import { plainKinds } from './settings-pages.js';
-import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushOff, pushOn } from './settings.js';
+import { DESKTOP_PUSH, onAppInstructionsUpdate, onProjectUpdate, pushBackOn, pushOff } from './settings.js';
 import { onMachinesUpdate } from './settings-machines.js';
 import { onWorkers } from './workers.js';
 import { costSoon } from './cost.js';
@@ -1433,12 +1433,7 @@ export async function logout() {
 /** A sign-out that failed: put back what it took down, and say so. */
 async function stillSignedIn(hadPush) {
   initAppSwitch(me);
-  const pushBack =
-    !hadPush ||
-    (await pushOn().then(
-      () => true,
-      () => false,
-    ));
+  const pushBack = hadPush === false || (!!hadPush && (await pushBackOn(hadPush).catch(() => 'off')) !== 'off');
   toast(`Couldn't sign you out.${pushBack ? '' : ' Notifications on this device are off now.'}`, { tone: 'danger', action: { label: 'Try again', run: logout } });
 }
 

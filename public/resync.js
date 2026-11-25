@@ -62,21 +62,12 @@ export async function resync() {
   }
   const v = view;
   const seq = ++asked;
-  // Live events for the open chat wait from here, or the catch-up (after the newest shown) would skip what was missed offline.
-  const hold = v.id ? holdEvents(v) : null;
   let ok = true;
-  try {
-    await refreshLists(v).catch(() => {
-      ok = false;
-    });
-    // Whatever the lists did: the chat's own messages wait on nothing else.
-    if (view === v)
-      await catchUpEvents().catch(() => {
-        ok = false;
-      });
-  } finally {
-    if (hold) letGo(hold);
-  }
+  const fell = () => {
+    ok = false;
+  };
+  // Together: however long the lists take, the chat's own messages don't wait for them.
+  await Promise.all([refreshLists(v).catch(fell), catchUpEvents().catch(fell)]);
   if (!ok) return failed(seq);
   if (view === v) good = Math.max(good, seq);
   if (good >= bad) stopCatchingUp();

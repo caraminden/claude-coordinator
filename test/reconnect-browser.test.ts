@@ -23,12 +23,24 @@ const STUB = pageStub(`
   // What the server has: the test changes these, and \`failing\` (a RegExp) answers 500 to the paths it matches.
   window.rows = [minion(101), minion(102)];
   window.log = [said(1, 101, 'first')];
+  window.push = { subscribed: true, muted: [1, 3], everything: [2], onlyPinned: true };
   window.failing = null;
   window.failed = 0;
   window.gate = null; // a promise the scheme's answer waits for, once it is made up
   window.live = (msg) => streams.at(-1).onmessage({ data: JSON.stringify(msg) });
-  async function route(path, url) {
+  async function route(path, url, init) {
     if (failing?.test(path)) return failed++, reply(500, { error: 'down' });
+    // This device's push row, as src/routes/push.ts keeps it: a new one starts with nothing set.
+    if (path === 'api/push/subscription') {
+      const body = JSON.parse(init.body);
+      if (init.method === 'PUT') push = { subscribed: true, muted: [], everything: [], onlyPinned: false };
+      if (init.method === 'DELETE') push = { subscribed: false };
+      if (init.method === 'PATCH') {
+        if (body.onlyPinned) push.onlyPinned = true;
+        else push[body.muted ? 'muted' : 'everything'].push(body.projectId);
+      }
+      return reply(200, push);
+    }
     if (path === 'api/projects') return reply(200, [scheme]);
     if (path === 'api/projects/1') {
       const answer = reply(200, { project: { ...scheme, instructions: '' }, coordinator, tickets: rows, dismissed: 0, seen: {}, person_notes: {}, pins: [] });
@@ -141,6 +153,14 @@ test('a scheme list that fails is tried again too, and the open chat stays live 
   await waitFor(page, 'the fresh list', `document.getElementById('threads').textContent.includes('Renamed') && !${chip}`);
 });
 
+test("a scheme list that takes its time doesn't hold up the open chat", { skip }, async () => {
+  const page = await openChat();
+  await page.eval(`gate = new Promise(() => {}), dropStream(), log.push(said(2, 101, 'missed')), reopenStream()`);
+  await waitFor(page, 'the catch-up', `${texts} === 'first,missed'`);
+  await page.eval(`log.push(said(3, 101, 'live')), live({ type: 'event', event: log.at(-1) })`);
+  await waitFor(page, 'the live one', `${texts} === 'first,missed,live'`);
+});
+
 test('switching chat drops what was held: the next chat is live at once, and the first is whole when reopened', { skip }, async () => {
   const page = await openChat();
   await page.eval(`dropStream(), log.push(said(2, 101, 'missed')), failing = /tickets.101.events/, reopenStream()`);
@@ -157,11 +177,10 @@ test('switching chat drops what was held: the next chat is live at once, and the
 test('a dismissal that arrives while a reconnect is fetching is not undone by the older answer', { skip }, async () => {
   const page = await openChat();
   const row = `import(new URL('base.js', location.href)).then((m) => m.view.tickets.get(102).status + ' ' + m.view.ticket.title)`;
-  await page.eval(`gate = new Promise((ok) => (window.letGo = ok)), dropStream(), reopenStream()`);
+  await page.eval(`rows = [...rows, { ...rows[1], id: 103, number: 3, title: 'Minion 103' }], gate = new Promise((ok) => (window.letGo = ok)), dropStream(), reopenStream()`);
   await page.eval(`live({ type: 'ticket', ticket: { ...rows[1], status: 'closed', updated_at: 20 } }), live({ type: 'ticket', ticket: { ...rows[0], title: 'Newer', updated_at: 20 } })`);
-  // The catch-up's chat history comes after its lists, so once it shows, they have been taken in.
-  await page.eval(`log.push(said(2, 101, 'missed')), letGo()`);
-  await waitFor(page, 'the catch-up', `${texts} === 'first,missed'`);
+  await page.eval(`letGo()`);
+  await waitFor(page, 'the older answer taken in', `document.getElementById('threads').textContent.includes('Minion 103')`);
   assert.equal(await page.eval(row), 'closed Newer');
 });
 
@@ -180,6 +199,7 @@ test('a sign-out that fails says so and leaves you as you were, notifications on
   await waitFor(page, 'the toast', `document.querySelector('.cui-toast:popover-open')?.textContent.includes("sign you out")`);
   assert.equal(await page.eval(texts), 'first', 'the chat is as it was');
   assert.ok(await page.eval(push), 'notifications are back on');
+  assert.deepEqual(await page.eval('window.push'), { subscribed: true, muted: [1, 3], everything: [2], onlyPinned: true }, 'as they were set');
   await page.eval(`failing = null, document.querySelector('.cui-toast-action').click()`);
   await waitFor(page, 'the login', `!!document.getElementById('login-form')`);
   assert.equal(await page.eval(push), null);

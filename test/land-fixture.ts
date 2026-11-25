@@ -211,6 +211,8 @@ case "$*" in
     [ "$n" -lt 2 ] || st=\${FAKE_CI_RERUN:-$st}
     # (a commit GitHub hasn't got yet has no run)
     if [ -n "\${FAKE_RED_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_RED_PATH" 2>/dev/null && st=red || st=green; fi
+    # FAKE_RED_BOTH="a b": red when the commit has both paths (a failure only in combination)
+    if [ -n "\${FAKE_RED_BOTH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; st=red; for e in \$FAKE_RED_BOTH; do git -C "${hub}" cat-file -e "$sha:$e" 2>/dev/null || st=green; done; fi
     if [ -n "\${FAKE_RED_TEXT:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" grep -qF "\$FAKE_RED_TEXT" "$sha" 2>/dev/null && st=red || st=green; fi
     if [ -n "\${FAKE_REAL:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; st=green; for e in \$FAKE_REAL; do git -C "${hub}" cat-file -e "$sha:\${e#*=}" 2>/dev/null && st=red; done; fi
     if [ -n "\${FAKE_FLAKY_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_FLAKY_PATH" 2>/dev/null && [ ! -e "${calls}.flaky" ] && st=red; fi

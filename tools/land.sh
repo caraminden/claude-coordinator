@@ -37,9 +37,10 @@
 # LAND_TRAIN_MAX (6) plain lands waiting behind it onto its own commit, runs CI once on the top, and steps 3 and 4 move
 # main and deploy once for them all. A red train whose really failing test fails on main's tip too refuses nobody
 # (train_main_red, #1430), and ships through main's red when that is its only real failure (#1478). Otherwise it first refuses the ship that turns its really failing tests red run
-# alone here, or holds off those whose change touched them (train_suspects, #1346, #1403) and runs again with the next ships in line in their places; failing that, it is bisected by
-# its prefixes: the green part ships, the first ship that turned it red is refused with its own failure, and the ships
-# after it stay in line. Each rider waits in line
+# alone here, or holds off those whose change touched them (train_suspects, #1346, #1403) and runs again with the next ships in line in their places; failing that, it is
+# split (train_bisect, #1899): its front part is tested, cut just before the ship its files name, else in the middle, and
+# ships as soon as it is green; the next front tests part of what is left, until one ship is red by itself. Only that one
+# is refused; the rest and the line then form a full train again. Each rider waits in line
 # as before and reads its verdict from <state>/train/<its ticket> (train_verdict below). Off: LAND_TRAIN=0, or for
 # every landing, touch <state>/train-off.
 # A ship refused by the pipeline, not its change, keeps its ticket and rides the next train, once (retry_in_place, #1360).
@@ -449,7 +450,7 @@ fi
 # shortcut: the tests run on the branch as it is, not on its rebase onto main; a break only the two together make
 # still meets CI in line. Run them on a merge-tree commit if those show up. Off: LAND_SMOKE=0.
 smoke() {
-  local t0=$SECONDS out rc=0 tests=()
+  local t0=$SECONDS out rc=0 tests=() f
   smoke_fail() {
     retro_log "smoke · $label · $1 · $((SECONDS - t0))s"
     refuse "smoke: $1, before the line ($((SECONDS - t0)) s), so nothing landed and nobody waited on it. Fix it, re-test (citadel-test), commit, then run this again${formatted:+. tools/land.sh $formatted}"
@@ -482,6 +483,10 @@ smoke() {
         say "smoke: the affected map couldn't answer, so the route test runs"; tests+=(test/access-matrix.test.ts)
       fi
     fi
+    # Sent back by its last ship for these (pulled_out): they pass here before it boards again.
+    while read -r f; do
+      [ ! -f "$f" ] || { say "smoke: $f failed $branch's last ship, so it runs here first"; tests+=("$f"); }
+    done < <(cat "$state/pulled/${branch//\//-}" 2>/dev/null)
     if [ ${#tests[@]} -gt 0 ]; then
       say "smoke: running ${#tests[@]} test files"
       out=$(tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "${tests[@]}" 2>&1) || rc=$?
@@ -492,7 +497,7 @@ smoke() {
       elif [ "$rc" != 0 ]; then
         # Each failed file once more on its own (no always-tests), as run-tests.sh does: one that passes alone is a
         # likely flake from load, which doesn't decide here (ADR 0006) and gets a flake line. A failure no file names fails.
-        local failed=() still=() f
+        local failed=() still=()
         mapfile -t failed < <(sed -nE 's/^✖ ([^ :]+\.test\.ts)(:[0-9]+)? › .*/\1/p' <<<"$out" | sort -u)
         for f in "${failed[@]}"; do
           CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_SMOKE_TIMEOUT:-300}" "$f" >/dev/null 2>&1 || still+=("$f")
@@ -507,7 +512,13 @@ smoke() {
       fi
     fi
   fi
+  rm -f "$state/pulled/${branch//\//-}"
   say "smoke: passed in $((SECONDS - t0)) s"
+}
+# <test file>...: what CI refused this ship for; its next hand-off's smoke check runs them too (#1899).
+pulled_out() {
+  [ $# -gt 0 ] && mkdir -p "$state/pulled" || return 0
+  printf '%s\n' "$@" >"$state/pulled/${branch//\//-}"
 }
 formatted=''; [ -n "$resumed" ] || [ "$mode" = build ] || [ ! -x tools/fmt ] || [ ! -f "$tools/ship-format.sh" ] || { . "$tools/ship-format.sh"; format_ship; } # the ship's own files, in a commit of their own (#1885)
 [ -n "$resumed" ] || [ "$mode" = into ] || [ "${LAND_SMOKE:-1}" = 0 ] || smoke
@@ -527,9 +538,8 @@ fi
 #   back <train commit> <tip it took> <front>    the train went without it, or didn't ship: back to waiting, as it was
 #   landed <train commit> <live|restart> <front> <tip it took> <ships>   it shipped; its next lines, if any, are said
 #                                                as they are (known flakes, #1419; main's red it shipped through, #1478)
-#   refused <front> <the red CI run> [likely <tests> [pinned]]   the bisect found it the first ship that turned the train red, or
-#   refused <front> guard-tests guard <tests>    the guard tests failed on the train with it and passed without it (#1479), or
-#                                                with likely: the real failures in <tests> (comma-separated) map to its change (#1346), and
+#   refused <front> guard-tests guard <tests>    the guard tests failed on the train with it and passed without it (#1479)
+#   refused <front> <the red CI run> likely <tests> [pinned]   the real failures in <tests> (comma-separated) map to its change (#1346), and
 #                                                with pinned: they failed alone here with it and passed without it (#1403); the
 #                                                failure's last lines follow
 # No file: on no train. <held>: this holds the lock now, so a riding is what a front that was killed left, and so is a
@@ -614,11 +624,13 @@ train_verdict() {
       rm -f "$f"
       [ ${#lines[@]} -lt 2 ] || printf '%s\n' "${lines[@]:1}" >&2
       land_timing 1 || true
+      # shellcheck disable=SC2086 # file names
+      pulled_out ${d//,/ }
       [ "$c" != guard ] || refuse "the guard tests failed on $a's ship train in ${d//,/, } with $branch on it and passed on the train before it, so it is the cause, and it was taken off the train before any CI run on it (output above): nothing of it landed and $untouched; $branch is as it was. Run citadel-test on that file, fix it, commit, then run this again"
       [ "$c" != burn ] || refuse "a new or changed test failed its burn-in in CI on $a's ship train ($b): ${d//,/, }, which $branch changed or which imports what it changed, so it is likely the cause, and it was taken off the train: nothing of it landed and $untouched; $branch is as it was. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again"
       [ "$c $e" != 'likely pinned' ] || refuse "tests failed in CI on $a's ship train ($b) in ${d//,/, }, and run alone on perigee it passed on the train up to the ship before $branch and failed with it, so it is the cause, and it was taken off the train: nothing of it landed and $untouched; $branch is as it was. Fix it, re-test, commit, then run this again"
       [ "$c" != likely ] || refuse "tests failed in CI on $a's ship train ($b) in ${d//,/, }, which $branch changed or which imports what it changed, so it is likely the cause (a guess from the files, not a bisect), and it was taken off the train: nothing of it landed and $untouched; $branch is as it was. Look into it: fix it if it is yours, re-test, commit, then run this again"
-      refuse "tests failed in CI on $a's ship train ($b), and its bisect found $branch the first ship that turned it red, so nothing of it landed and $untouched; $branch is as it was. Fix it, re-test, commit, then run this again" ;;
+      refuse "tests failed in CI on $a's ship train ($b), which was refused with $branch on it, so nothing of it landed and $untouched; $branch is as it was. Fix it, re-test, commit, then run this again" ;;
     *)
       rm -f "$f"
       [ -z "$requeue" ] || QUEUE_TRAIN='' queue_lock "$state" "$branch" || { land_timing 1; exit 1; } ;;
@@ -1594,6 +1606,7 @@ early_slug() { local url; url=$(git remote get-url "$REMOTE" 2>/dev/null) || ret
 early_next() {
   local q=$state/queue t x c l nb='' nt='' r own_e wt lane_e slug free out top n riders st waited=$SECONDS
   [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
+  [ -z "$split_of" ] || return 0 # a red train being split (train_bisect): its next ships may be the red one's, and a red early run runs again
   ! pipeline_touch "$old" "$tip" || return 0 # the next one runs this train's own land.sh, not this one
   local -A QUEUE_RANK=()
   local QUEUE_OLD=() QUEUE_ORDER_BY='' QUEUE_HOLD=' ' regen_attrs='' # another ship's merges get no Regenerate files of this one's
@@ -1739,7 +1752,7 @@ early_gate() {
 train_at() { if [ "$1" = 0 ]; then echo "$own"; else echo "${train_tip[$(($1 - 1))]}"; fi; }
 # [<ticket>...]: those first, in that order, then the rest of the line in its order (a refill after suspects, #1346).
 train_build() {
-  local max=${LAND_TRAIN_MAX:-6} q=$state/queue t l b r base c cur=$own wt='' skip down_at='' down_why='' x
+  local max=${LAND_TRAIN_MAX:-6} q=$state/queue t l b r base c cur=$own wt='' skip down_at='' down_why='' x half
   local -A tried=()
   [ "$mode" = land ] && [ "$lane" != light ] && [ "${LAND_TRAIN:-1}" != 0 ] && [ ! -e "$state/train-off" ] && [ "${QUEUE_TRAIN:-}" != hold ] || return 0
   [[ $max =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ] || return 0
@@ -1753,6 +1766,15 @@ train_build() {
   queue_order "$q"
   mkdir -p -m 700 "$train_dir"
   find "$train_dir" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true # a killed rider's, or one never read
+  split_look
+  if [ -n "$split_of" ]; then # the part of the ships the red train is down to that train_bisect would test next
+    x=($split_rest)
+    half=0
+    [ ${#x[@]} = 0 ] || half=$(split_cut "$((${#x[@]} + 1))" $split_guess)
+    say "ship train: $branch is one of the $((${#x[@]} + 1)) ships $split_of's red train is down to, so this tests $([ "$half" -gt 0 ] && echo "the first $((half + 1))" || echo "it alone")"
+    [ "$half" -gt 0 ] || return 0
+    [ "$half" -ge "$max" ] || max=$half
+  fi
   while read -r x t <&4; do # not on stdin, which git and perl below may read
     [ ${#train_n[@]} -lt "$max" ] || break
     [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && [ -z "${tried[${t##*/}]:-}" ] && mapfile -t l 2>/dev/null <"$t" || continue
@@ -1762,6 +1784,7 @@ train_build() {
     read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused ]] && continue # still on the train before this one, or refused by this one
     [ -z "${early_memo:-}" ] || [ "$x" != riding ] || continue # early_next: on the train before this one
     [ -z "$train_only" ] || [[ $train_only == *" ${t##*/} "* ]] || continue # early_look: the riders its early run has
+    if [[ $split_rest == *" ${t##*/} "* ]]; then [ -n "$split_of" ] || continue; else [ -z "$split_of" ] || continue; fi # the split's ships ride together only
     [[ $train_refused != *" ${t##*/} "* ]] || continue # refused as a suspect, though its rider already read the verdict
     [[ $train_held != *" ${t##*/} "* ]] || continue    # held off the train on a guess until the train without it has a verdict (#1403)
     [ "${l[1]:-}" = 0 ] && [ "${l[5]:-}" = train ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || continue
@@ -2134,6 +2157,7 @@ train_settle() {
     else
       say "$t is refused: the train without it passed ${held_files[$i]}"
       train_tell "${held_n[$i]}" "refused $branch ${held_run[$i]} likely ${held_files[$i]}" "${held_log[$i]}"
+      split_over
       train_refused+="${held_n[$i]} " train_refused_tips+=" ${held_was[$i]}"
     fi
   done
@@ -2152,6 +2176,7 @@ train_release() {
 train_suspects() {
   local round prev=' ' unres=' ' f m i k t v kind line sure_line held_line pin pd real=() wts=() hits=() keep=() was=() chg=() open=() rules_say=1
   local -A sus=() sure=() pins=()
+  split_guess=''
   for ((round = 1; round <= 3; round++)); do
     mapfile -t real < <(train_real) || true
     if [ ${#real[@]} = 0 ]; then
@@ -2205,14 +2230,17 @@ train_suspects() {
     done
     if [ ${#sure[@]} = 0 ]; then # nothing confirmed: the bisect, as before #1564
       if [ ${#open[@]} -gt 0 ]; then
+        split_guess=${!sus[*]}
         say "suspects: no ship on the train touched ${open[0]} or what it imports, so the bisect looks for the ship"
         return 1
       fi
       if [ -n "${sus[0]:-}" ]; then
+        split_guess=${!sus[*]}
         say "suspects: $branch itself is only a guess from the files for ${sus[0]}, and it can't wait off its own train, so the bisect looks for the ship"
         return 1
       fi
       if [[ $line == *,* ]]; then # a green run without them all couldn't tell which one did it
+        split_guess=${!sus[*]}
         say "suspects: the files name more than one ship ($line) for $(tr ' ' '\n' <<<"${v//, / }" | sort -u | paste -sd ' ' | sed 's/ /, /g'), tests perigee cannot fail alone, and a green run without them all could not tell which did it, so the bisect looks for the ship"
         return 1
       fi
@@ -2237,6 +2265,7 @@ train_suspects() {
     say "suspects: $line: CI is red on the ship train ($ci_url) in those tests.${sure_line:+ Run alone here, they failed with $sure_line and passed on the train before it, so that is the cause: back to its minion with the failure.}${held_line:+ $held_line: perigee cannot fail those tests alone, so the files are only a guess: they wait off the train, and are refused only if it does better without them.} The next ships in line take their places"
     retro_log "ship train suspects · $label · $line${sure_line:+ · failed alone here: $sure_line} · $ci_url"
     for f in "${real[@]}"; do [[ " ${open[*]} " == *" $f "* ]] || prev+="$f "; done
+    [ -z "$sure_line" ] || split_over
     keep=()
     for ((i = 0; i < ${#train_n[@]}; i++)); do
       v=${sus[$((i + 1))]:-}
@@ -2285,48 +2314,99 @@ train_suspects() {
   say "still red after 3 rounds of suspects, so the bisect looks for the ship"
   return 1
 }
-# A red train: which ship turned it red, by bisecting its prefixes (each assumed green below the first red one). The
-# green part ships, the first red ship is refused with its own failure, and the ships after it go back in line. This
-# one's own commit red: the whole train goes back in line, and this one is refused as usual. A no-answer: the train
-# goes back in line, and this one falls back on its own.
+# A red train (#1899; Josh, 2026-11-24: "keep splitting and any green section gets shipped, until the bad change is found
+# and then pulled out to be fixed and full train starts over"). The half at its front is tested; green, it ships at once
+# (that commit is tested and main hasn't moved, so it needs no further run) and the ships behind it go back in line,
+# nobody refused; red, its own first half is next. <state>/split holds the ships the red may be (split_say), so the next
+# front among them tests half of what is left (split_look, train_build), down to one ship tested by itself: only a red
+# there, on main as it then is, refuses it. So two ships red only together ship the first and send back the second, and a
+# flake refuses nobody. That found, the rest and the line form a full train again. A no-answer: the train goes back in
+# line, this one falls back on its own, and the split stays.
 # Each step past this one's own commit runs the guard tests first (#1479): red there is the step's answer, with no CI run.
 train_bisect() {
-  local lo=-1 hi=${#train_n[@]} mid hf=$failed hu=$ci_url hr=$reran hg='' g
-  say "CI is red on the ship train ($ci_url): finding the first ship that turned it red"
+  local hi=${#train_n[@]} lo g n back
+  n=$((hi + 1)) split_of=${split_of:-$label}
+  say "CI is red on the ship train ($ci_url): finding the first ship that turned it red${split_guess:+, cutting by the ships its files name}"
   queue_phase "finding the ship that turned the train red"
-  while [ $((hi - lo)) -gt 1 ]; do
-    mid=$(((lo + hi) / 2))
-    # The Releases page shows this step (#1368, src/land-news.ts): train_at "$mid" holds the leader and $mid riders.
-    say "bisect: testing the first $((mid + 1)) of $((${#train_n[@]} + 1)) ships"
+  while [ "$hi" -gt 0 ]; do
+    split_say "$hi"
+    lo=$(split_cut "$((hi + 1))" $split_guess)
+    # The Releases page shows this step (#1368, src/land-news.ts): train_at "$lo" holds the leader and $lo riders.
+    say "bisect: testing the first $((lo + 1)) of $n ships"
     g=0
-    [ "$mid" = 0 ] || guard_at "$(train_at "$mid")" || g=$?
+    [ "$lo" = 0 ] || guard_at "$(train_at "$lo")" || g=$?
     if [ "$g" = 1 ]; then
-      hi=$mid hf=$guard_out hu=guard-tests hr='' hg=$(guard_files)
-      hg=${hg:-guards}
-      say "the guard tests failed on the train up to ${train_br[$((mid - 1))]} ($(git rev-parse --short "$(train_at "$mid")")), so that step needs no CI run"
+      hi=$lo
+      say "the guard tests failed on the train up to ${train_br[$((lo - 1))]} ($(git rev-parse --short "$(train_at "$lo")")), so that step needs no CI run"
       continue
     fi
     rc=0
-    gate "$(train_at "$mid")" || rc=$?
-    [ "$rc" = 2 ] || retro_log "bisect run · $branch · $mid of ${#train_br[@]}" # a run without a timing line: tools/known-flakes.ts counts it
-    busy_gate "$(train_at "$mid")"
+    gate "$(train_at "$lo")" || rc=$?
+    [ "$rc" = 2 ] || retro_log "bisect run · $branch · $lo of ${#train_br[@]}" # a run without a timing line: tools/known-flakes.ts counts it
+    busy_gate "$(train_at "$lo")"
     if [ "$rc" = 2 ]; then return; fi
-    if [ "$rc" = 0 ]; then lo=$mid; else hi=$mid hf=$failed hu=$ci_url hr=$reran hg=''; fi
-  done
-  [ -n "$hg" ] || failed=$hf ci_url=$hu reran=$hr # a guard red's step had no CI run
-  if [ "$hi" = 0 ]; then
-    say "the bisect found $branch itself red, so the ships behind it go back in line"
-    train_drop
-    rc=1
+    if [ "$rc" = 1 ]; then hi=$lo; continue; fi
+    back=${train_br[*]:$lo}
+    say "bisect: the first $((lo + 1)) of $n ships tested green, so they ship now; back in line with nobody refused: $back; the red may be: ${train_br[*]:$lo:$((hi - lo))}"
+    retro_log "ship train green section · $label · $((lo + 1)) of $n ships · back in line: $back · $ci_url"
+    train_drop "$lo"
+    tip=$(train_at "$lo") short=$(git rev-parse --short "$(train_at "$lo")") rc=0
+    top_say
     return
-  fi
-  say "the bisect found ${train_br[$((hi - 1))]} the first ship that turned the train red (${hg:+its guard tests failed in $hg, with no CI run on it: }$hu): it is refused, and the ${lo} before it ship"
-  retro_log "ship train red · $label · ${train_br[$((hi - 1))]} · $hu${hg:+ $hg}"
-  train_say $((hi - 1)) "refused $branch $hu${hg:+ guard $hg}" "$(grep -v '^full output: ' <<<"$hf" | tail -n 40)"
-  train_drop "$hi"
-  train_tip=("${train_tip[@]:0:$((hi - 1))}") train_br=("${train_br[@]:0:$((hi - 1))}") train_n=("${train_n[@]:0:$((hi - 1))}") train_was=("${train_was[@]:0:$((hi - 1))}")
-  tip=$(train_at "$lo") short=$(git rev-parse --short "$(train_at "$lo")") rc=0
-  top_say
+  done
+  say "the bisect found $branch itself red, so the ships behind it go back in line"
+  train_drop
+  tip=$own short=$(git rev-parse --short "$own") rc=1
+  train_main_red || true # this red is its own run's: main's red still blames nobody
+}
+# The ships a red train is down to: <state>/split, the train's leader as retro_log names it, then a "<ticket> <branch>" line each.
+# [<rider>]: this one and its riders up to that one; "guess" ends the lines of those the files name (train_suspects).
+split_of='' split_rest='' split_guess=''
+split_say() {
+  local i g=" $split_guess "
+  {
+    echo "$split_of"
+    for ((i = 0; i <= $1; i++)); do
+      [ "$i" = 0 ] && printf '%s %s' "${DEPLOY_QUEUE_TICKET##*/}" "$branch" || printf '%s %s' "${train_n[$((i - 1))]}" "${train_br[$((i - 1))]}"
+      [[ $g != *" $i "* ]] && echo || echo ' guess'
+    done
+  } >"$state/split.tmp$$" && mv -f "$state/split.tmp$$" "$state/split"
+}
+# <ships> [<guessed one, from 0>...]: the last ship, from 0, of the part to test next. Just before the first guessed one (or
+# that one by itself, at the front), since the ships ahead of it are likely innocent; with no guess left among them, or one
+# naming over half of them, the middle. A guess only picks where to cut: it refuses nobody.
+split_cut() {
+  local n=$1 g first='' c=0
+  shift
+  for g; do
+    [ "$g" -lt "$n" ] || continue
+    c=$((c + 1))
+    [ -n "$first" ] && [ "$first" -le "$g" ] || first=$g
+  done
+  if [ "$c" = 0 ] || [ "$((c * 2))" -gt "$n" ]; then echo "$(((n - 2) / 2))"; else echo "$((first > 0 ? first - 1 : 0))"; fi
+}
+# Is this front one of them? Then split_of names their train and split_rest holds the tickets of those behind it there
+# and still in line; else split_rest holds all of them, which ride in no other train while the split goes on.
+split_look() {
+  local l=() i n b c x=()
+  split_of='' split_rest=' ' split_guess=''
+  mapfile -t l 2>/dev/null <"$state/split" || return 0
+  for ((i = 1; i < ${#l[@]}; i++)); do
+    read -r n b c <<<"${l[$i]}"
+    if [ "$n" = "${DEPLOY_QUEUE_TICKET##*/}" ] && [ "$b" = "$branch" ]; then
+      split_of=${l[0]} split_rest=' ' split_guess=${c:+0}
+    elif [ -e "$state/queue/$n" ]; then
+      split_rest+="$n "
+      x=($split_rest)
+      [ -z "$split_of" ] || [ -z "$c" ] || split_guess+=" ${#x[@]}"
+    fi
+  done
+}
+# The bad change is found (or the search is over): the next front builds a full train again.
+split_over() {
+  [ -n "$split_of" ] || return 0
+  rm -f "$state/split"
+  split_of='' split_rest=' ' split_guess=''
 }
 
 # The line and the lock go before the clean-up on GitHub (#553 M14): a hung gh or push held the lock up to 60 s more.
@@ -2385,6 +2465,9 @@ elif [ "$rc" = 1 ]; then
     [ "$main_red_riders" = 0 ] || retry_in_place "red on main too: $main_red" # alone, a retry would only run CI on it again
     refuse "tests failed in CI ($ci_url) in $main_red, which fails on main's own tip too (run alone here): main is red, not this change, so $untouched${main_red_other:+. The run was also red on $main_red_other, which may be yours}. Run this again once main is green (a fix for $main_red has shipped)"
   fi
+  split_over
+  # shellcheck disable=SC2046 # file names
+  pulled_out $(train_real || train_failing)
   [ -z "$suspect_tests" ] || [ -z "$burn_said" ] || refuse "a new or changed test failed its burn-in in CI on its ship train ($ci_url): $burn_said, in $suspect_tests, which $branch changed or which imports what it changed, so it is likely the cause: the ships behind it went back in line, so $untouched. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again"
   [ -z "$suspect_pinned" ] || refuse "tests failed in CI on its ship train ($ci_url) in $suspect_tests, and run alone on perigee it passed on main and failed with $branch on it, so it is the cause: the ships behind it went back in line, so $untouched. Fix it, re-test, commit, then run this again"
   [ -z "$suspect_tests" ] || refuse "tests failed in CI on its ship train ($ci_url) in $suspect_tests, which $branch changed or which imports what it changed, so it is likely the cause (a guess from the files, not a bisect): the ships behind it went back in line, so $untouched. Look into it: fix it if it is yours, re-test, commit, then run this again"

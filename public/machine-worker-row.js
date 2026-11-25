@@ -3,7 +3,7 @@
 // command its owner runs.
 import { account, ago, api, h, view } from './base.js';
 import { statTiles, toneChip } from './look.js';
-import { machineSetupWorkerLinux, machineSetupWorkerWindows, WORKER_CAPS, WORKER_CHECKS, workerCapsCommand, workerCommand } from './machine-setup.js';
+import { machineSetupWorkerLinux, machineSetupWorkerWindows, WORKER_CAPS, WORKER_CHECKS, workerCapsCommand, workerCommand, WORKER_LIMITS } from './machine-setup.js';
 import { markdownElement } from './ui/markdown.js';
 import { optimistic } from './ui/optimistic.js';
 import { failedLine, loadingLine } from './ui/state.js';
@@ -26,17 +26,17 @@ export function workerState(m) {
   const w = m.worker;
   if (!w.on) return { tone: 'neutral', word: 'Off', why: w.here ? 'It is set up and connected, and takes no turns while this is off.' : mine(m) ? 'Let your own minions run on this PC.' : 'Its owner can let their own minions run on it.' };
   if (!w.here && !w.host) return { tone: 'info', word: 'Not set up yet', why: 'Run the command below once on that PC.' };
-  if (!w.here) return { tone: 'warn', word: 'Away', why: `Last heard from ${w.seen ? ago(w.seen) : 'some time ago'}. ${w.wsl ? 'Signing out of Windows stops it until its owner signs in again.' : 'It is off, or off the network.'}` };
+  if (!w.here) return { tone: 'warn', word: 'Away', why: `Last heard from ${w.seen ? ago(w.seen) : 'some time ago'}. ${w.wsl ? 'Signing out of Windows stops it: sign in there, and it comes back by itself.' : 'Turn that PC on; if it is on, "sudo citadel-worker status" there says why.'}` };
   if (w.image?.state === 'failed') return { tone: 'danger', word: 'Image failed', why: `${w.image.text} It tries again in 10 minutes.` };
   if (w.image?.state === 'building') return { tone: 'info', word: 'Building its image', why: w.image.text };
   if (w.full) return { tone: 'warn', word: 'Disk cap reached', why: `It uses ${w.disk_gb} of ${w.caps?.disk_gb} GB, so no new turn starts there.` };
   if (!w.image) return { tone: 'info', word: 'Connecting', why: 'It is connected and is checking its image.' };
   if (w.claude_wanted) return { tone: 'warn', word: 'Wrong Claude version', why: `Its Claude is ${w.claude} and this server's is ${w.claude_wanted}. ${w.image.state === 'own' ? "Its image is its owner's own: update it there." : 'It updates itself.'}` };
   if (w.signed_in === false) return { tone: 'warn', word: 'Needs a Claude sign-in', why: 'No turn starts there until its owner signs in.' };
-  if (w.test && w.test.done && !w.test.ok) return { tone: 'danger', word: 'Self-test failed', why: w.test.why ?? 'The checks below say what is wrong.' };
+  if (w.test && w.test.done && !w.test.ok) return { tone: 'danger', word: 'Self-test failed', why: `No turn starts there until it passes. ${w.test.why ?? 'The checks below say what is wrong.'}` };
   if (w.signed_in === null) return { tone: 'info', word: 'Connecting', why: 'It is checking its sign-ins.' };
   if (!m.projects.length) return { tone: 'warn', word: 'Lent to no scheme', why: 'Pick the schemes whose minions may run there under "Who gets it".' };
-  if (!w.passed) return { tone: 'info', word: 'Not tested yet', why: 'Run the self-test once.' };
+  if (!w.passed) return { tone: 'info', word: 'Not tested yet', why: mine(m) ? 'No turn starts there until its self-test passes: run it below.' : 'No turn starts there until its owner runs its self-test.' };
   return { tone: 'ok', word: 'Ready', why: `Its owner's minions run there, up to ${w.caps?.workers ?? '?'} at once.` };
 }
 
@@ -102,12 +102,13 @@ const capsFor = (m, k) => (k.caps && k.capsOver === JSON.stringify(m.worker.caps
 /** Four numbers its owner sets; the command below follows them as they are typed. */
 function capsInputs(m, k, follow) {
   const set = capsFor(m, k);
-  const field = (key, label, unit, max) => {
-    const input = h('input', { type: 'text', inputmode: 'numeric', id: `worker-cap-${m.id}-${key}`, value: String(set[key]), maxlength: String(max).length, 'aria-label': `${label}${unit ? ` (${unit})` : ''}` });
+  const field = (key, label, unit) => {
+    const [min, max] = WORKER_LIMITS[key];
+    const input = h('input', { type: 'text', inputmode: 'numeric', id: `worker-cap-${m.id}-${key}`, value: String(set[key]), maxlength: String(max).length, title: `${min} to ${max}${unit ? ` ${unit}` : ''}`, 'aria-label': `${label}${unit ? ` (${unit})` : ''}` });
     input.oninput = () => {
-      const n = /^[1-9]\d*$/.test(input.value.trim()) ? Math.min(max, Number(input.value)) : null;
+      const n = /^[1-9]\d*$/.test(input.value.trim()) && Number(input.value) >= min && Number(input.value) <= max ? Number(input.value) : null;
       input.setAttribute('aria-invalid', String(n === null));
-      // Half-typed: the command keeps its last whole number.
+      // Half-typed, or out of bounds: the command keeps the last number that was neither.
       if (n === null) return;
       k.caps = { ...capsFor(m, k), [key]: n };
       k.capsOver = JSON.stringify(m.worker.caps);
@@ -115,7 +116,7 @@ function capsInputs(m, k, follow) {
     };
     return h('label', { class: 'worker-cap' }, h('span', {}, label), h('span', { class: 'worker-cap-box' }, input, unit ? h('i', {}, unit) : null));
   };
-  return h('div', { class: 'worker-caps' }, field('workers', 'Minions at once', '', 64), field('threads', 'CPU threads', '', 1024), field('memory_gb', 'Memory', 'GB', 4096), field('disk_gb', 'Disk', 'GB', 99999));
+  return h('div', { class: 'worker-caps' }, field('workers', 'Minions at once', ''), field('threads', 'CPU threads', ''), field('memory_gb', 'Memory', 'GB'), field('disk_gb', 'Disk', 'GB'));
 }
 
 /** The install command with this PC's own values. Its token is asked for once, when the block is first seen. */
@@ -156,7 +157,7 @@ function installBlock(m, k, redraw) {
       'p',
       { class: 'muted small' },
       win ? 'It makes a Linux distro of its own, citadel-workers, with no reach into Windows, and starts with your logon. ' : 'It makes a user of its own, citadel-worker, and starts at boot. ',
-      'Needs about 20 GB of disk to begin with',
+      'It keeps its own program and its image current from this Citadel. Needs about 20 GB of disk to begin with',
       win ? ' and WSL 2. Signing out of Windows stops it. ' : '. ',
       h('b', {}, "The command holds this machine's token: don't share or screenshot it."),
     ),
@@ -195,7 +196,7 @@ function signIns(m, k) {
     todo.length ? h('p', { class: 'small' }, `In ${win ? 'PowerShell' : 'a terminal'} on that PC:`) : null,
     ...todo.map(how),
     h('p', { class: 'muted small' }, 'You sign in on that PC yourself. Citadel sees only whether a sign-in is there.'),
-    done.length ? folded(k, 'sign', todo.length ? 'Sign in again' : 'Sign in as someone else, or again', ...done.map(how)) : null,
+    done.length ? folded(k, 'sign', 'Sign in again', ...done.map(how)) : null,
   );
 }
 
@@ -220,7 +221,7 @@ function selfTest(m, redraw) {
       { class: 'worker-part-head' },
       h('h4', {}, 'Self-test'),
       test ? toneChip(running ? 'info' : test.ok ? 'ok' : 'danger', running ? `${passed} of ${lines.length}` : test.ok ? 'All passed' : `${lines.length - passed} of ${lines.length} failed`) : toneChip('neutral', 'Not run yet'),
-      h('button', { type: 'button', class: test ? 'secondary small' : 'small', disabled: !!why, title: why ?? 'Takes about a minute; running turns go on', onclick: run }, running ? 'Running…' : test ? 'Test again' : 'Run the self-test'),
+      mine(m) && h('button', { type: 'button', class: test ? 'secondary small' : 'small', disabled: !!why, title: why ?? 'Takes about a minute; running turns go on', onclick: run }, running ? 'Running…' : test ? 'Test again' : 'Run the self-test'),
     ),
     test?.why ? h('p', { class: 'cui-notice', 'data-tone': 'danger' }, test.why) : null,
     h(

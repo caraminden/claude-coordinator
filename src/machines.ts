@@ -148,7 +148,8 @@ export type StatusFacts = {
 export function machineStatus(f: StatusFacts): MachineStatus {
   const s = (status: MachineStatus['status'], reason: string, fix: MachineStatus['fix'] = null, when: MachineStatus['when'] = null): MachineStatus => ({ status, reason, fix, when });
   // A worker alone is a whole machine: there may be no agent, or nothing else to lend, on that computer.
-  if (f.workerHere && !f.runners && !f.offers.length) return f.lent ? s('ready', 'Runs minion turns') : s('fix', 'Lent to no scheme', 'lend');
+  // An agent that was there and is gone is still missed: an always-on machine's lent tools went with it.
+  if (f.workerHere && !f.runners && !f.offers.length && (f.online || f.lastSeenAt === null || !f.alwaysOn)) return f.lent ? s('ready', 'Runs minion turns') : s('fix', 'Lent to no scheme', 'lend');
   if (!f.online) {
     const added = { label: 'added', at: f.createdAt } as const;
     if (f.lastSeenAt === null) return f.now - f.createdAt >= NEVER_CONNECTED_MS ? s('down', 'Never connected', 'remove', added) : s('asleep', 'Not connected yet', null, added);
@@ -708,9 +709,9 @@ export class MachineRelay {
     for (const agent of this.agents.values()) if (agent.runners) agent.res.write(`data: ${JSON.stringify({ ships: shipsFor(agent.host) })}\n\n`);
   }
 
-  /** A ship's tests run on the computer a machine's agent is on: the agent's host is that PC's name, with a part of its own after it for a WSL distro. */
+  /** A ship's tests run on the computer a machine's agent or worker is on: its host is that PC's name, with a part of its own after it for a WSL distro. */
   shipsThere(machineId: number): boolean {
-    for (let host = this.agents.get(machineId)?.host ?? ''; host; host = host.slice(0, Math.max(0, host.lastIndexOf('-')))) if (this.shipsFor(host).length) return true;
+    for (const on of [this.agents.get(machineId)?.host, this.workers?.host(machineId)]) for (let host = on ?? ''; host; host = host.slice(0, Math.max(0, host.lastIndexOf('-')))) if (this.shipsFor(host).length) return true;
     return false;
   }
 

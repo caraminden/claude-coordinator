@@ -35,9 +35,9 @@ export type CheckLine = { key: CheckKey; name: string; state: 'waiting' | 'runni
 export type SelfTest = { id: string; at: number; done: number | null; ok: boolean; why: string | null; lines: CheckLine[] };
 export type WorkerCaps = { workers: number; threads: number; memory_gb: number; disk_gb: number };
 type ImageState = { state: 'ready' | 'building' | 'failed' | 'own'; text: string };
-type Facts = { boot: string; started: number; at: number; host: string; wsl: boolean; caps: WorkerCaps | null; image: ImageState | null; github: boolean | null; disk_gb: number | null; full: boolean };
-/** Kept over a restart: how the worker was last set up and what its tests said. */
-type Kept = { host: string; wsl: boolean; caps: WorkerCaps | null; seen: number; test: SelfTest | null; passed: number | null };
+type Facts = { boot: string; at: number; since: number; host: string; wsl: boolean; caps: WorkerCaps | null; image: ImageState | null; github: boolean | null; disk_gb: number | null; full: boolean };
+/** Kept over a restart: how the worker was last set up (its newest install, by when that ran) and what its tests said. */
+type Kept = { installed?: number; host: string; wsl: boolean; caps: WorkerCaps | null; seen: number; test: SelfTest | null; passed: number | null };
 /** A machine's worker as its row shows it. */
 export type WorkerView = {
   on: boolean;
@@ -82,6 +82,8 @@ export interface WorkerJoinDeps {
   store: Pick<Store, 'getSetting' | 'setSetting' | 'listMachines'>;
   lends: (m: Machine) => boolean;
   info: (machineId: number) => WorkerInfo | null;
+  /** A ship's tests run on that computer: nothing that can wait starts there (ships go first). */
+  ships: (machineId: number) => boolean;
   /** `claude --version` here. */
   claude: () => Promise<string | null>;
   /** A worker's row differs from what people were last sent. */
@@ -125,6 +127,23 @@ export class WorkerJoin {
     this.tests.delete(machineId);
     this.scratch.delete(machineId);
     if (this.kept(machineId)) this.d.store.setSetting(`worker-join:${machineId}`, null);
+  }
+
+  /** The name of the computer its worker runs on, while it does. */
+  host(machineId: number): string {
+    return this.here(machineId) ? (this.facts.get(machineId)?.host ?? '') : '';
+  }
+
+  /** Why its worker takes no turns now, or null. Green means it can: a worker whose self-test has not passed, or last failed, takes none. One set up by hand has none. */
+  hold(machineId: number): string | null {
+    const facts = this.facts.get(machineId);
+    const kept = this.kept(machineId);
+    if (!kept) return null;
+    if (facts?.full) return `it is at its disk cap (${facts.disk_gb} of ${facts.caps?.disk_gb} GB)`;
+    if (facts?.image?.state === 'failed') return 'its image could not be built';
+    if (facts?.image?.state === 'building') return 'its image is being built';
+    if (kept.test && !kept.test.ok) return 'its self-test failed';
+    return kept.passed ? null : 'its self-test has not passed yet';
   }
 
   view(machine: Machine): WorkerView {
@@ -171,15 +190,17 @@ export class WorkerJoin {
   /** A worker program's word (POST /api/machines/worker), and what it should have and do. */
   async report(machine: Machine, body: Record<string, unknown>) {
     const boot = text(body.boot, 40);
-    const started = count(body.started, 1e14) ?? 0;
     const now = this.d.now();
+    const kept = this.kept(machine.id);
+    // Two PCs with one token (the worker moved to another): the newest install has it, also after the other one's reboot. A clock ahead is taken as now.
+    const installed = Math.min(count(body.installed, 1e14) ?? 0, now);
+    if (installed < (kept?.installed ?? 0)) return { replaced: true };
     const was = this.facts.get(machine.id);
-    // Two of them on one token (an install over an older one): the newer stays, and the older is told.
-    if (was && was.boot !== boot && was.started > started && now - was.at < HERE_MS) return { replaced: true };
     const facts: Facts = {
       boot,
-      started,
       at: now,
+      // Another program spoke for this machine a moment ago: it is told, and ends its turns, before this one takes any.
+      since: !was || was.boot === boot ? (was?.since ?? 0) : now - was.at < HERE_MS ? now : 0,
       host: text(body.host, 80),
       wsl: body.wsl === true,
       caps: cleanCaps(body.caps),
@@ -190,11 +211,11 @@ export class WorkerJoin {
     };
     this.facts.set(machine.id, facts);
     // seen is saved now and then: it only dates "away since" after a restart of this server.
-    const seen = this.kept(machine.id)?.seen ?? 0;
-    this.keep(machine.id, { host: facts.host, wsl: facts.wsl, caps: facts.caps, seen: now - seen > 5 * 60_000 ? now : seen });
+    const seen = kept?.seen ?? 0;
+    this.keep(machine.id, { installed, host: facts.host, wsl: facts.wsl, caps: facts.caps, seen: now - seen > 5 * 60_000 ? now : seen });
     this.heardTest(machine.id, body.test);
     const test = this.tests.get(machine.id);
-    return { ...(await this.wanted()), on: this.d.lends(machine), test: test ? test.id : null };
+    return { ...(await this.wanted()), on: this.d.lends(machine), test: test ? test.id : null, ships: this.d.ships(machine.id), wait: now - facts.since < HERE_MS };
   }
 
   /** Start a self-test; its worker takes it at its next word. */

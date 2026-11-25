@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { agentConfig, WorkerAgent } from '../public/worker-agent.mjs';
+import { agentConfig, interopOff, WorkerAgent } from '../public/worker-agent.mjs';
 import { Worker } from '../public/machine-worker.mjs';
 import type { Machine } from '../src/db.ts';
 import { cleanCaps, WorkerJoin } from '../src/worker-join.ts';
@@ -22,7 +22,7 @@ const CAPS = { workers: 2, threads: 4, memory_gb: 8, disk_gb: 60 };
 function joined() {
   const settings = new Map<string, unknown>();
   const machine = { id: 7, name: 'pc', owner_id: 1 } as Machine;
-  const at = { now: 1_000_000, sync: 1_000_000, lends: true, changed: 0, claude: '2.0.0 (Claude Code)' as string | null, signedIn: true as boolean | null };
+  const at = { now: 1_000_000, sync: 1_000_000, lends: true, ships: false, changed: 0, claude: '2.0.0 (Claude Code)' as string | null, signedIn: true as boolean | null };
   const join = new WorkerJoin({
     store: {
       getSetting: ((k: string, d: unknown) => settings.get(k) ?? d) as never,
@@ -30,12 +30,13 @@ function joined() {
       listMachines: () => [machine],
     },
     lends: () => at.lends,
+    ships: () => at.ships,
     info: () => (at.sync ? { claude: at.claude, max: 2, at: at.sync, signedIn: at.signedIn } : null),
     claude: async () => '2.0.0 (Claude Code)',
     changed: () => void at.changed++,
     now: () => at.now,
   });
-  const say = (over: Record<string, unknown> = {}) => join.report(machine, { boot: 'a', started: 1, host: 'PC', wsl: true, caps: CAPS, image: { state: 'ready', text: 'x' }, github: true, disk_gb: 3, full: false, ...over });
+  const say = (over: Record<string, unknown> = {}) => join.report(machine, { boot: 'a', installed: 1, host: 'PC', wsl: true, caps: CAPS, image: { state: 'ready', text: 'x' }, github: true, disk_gb: 3, full: false, ...over });
   return { join, machine, at, say, settings };
 }
 const all = (id: string, over: Record<string, string> = {}, done = true) => ({ id, done, lines: ['image', 'folders', 'sync', 'process', 'link', 'tools', 'disk', 'programs'].map((key) => ({ key, state: over[key] ?? 'ok', text: key })) });
@@ -60,13 +61,42 @@ test('a worker says only whether a sign-in is there: anything else in its word i
   assert.equal(cleanCaps({ ...CAPS, workers: '6' }), null);
 });
 
-test('of two workers on one token the newer stays and the older is told to stop', async () => {
-  const { at, say } = joined();
-  await say({ boot: 'new', started: 20 });
-  assert.deepEqual(await say({ boot: 'old', started: 10 }), { replaced: true });
-  assert.equal('replaced' in (await say({ boot: 'newer', started: 30 })), false);
-  at.now += 10_001;
-  assert.equal('replaced' in (await say({ boot: 'old', started: 10 })), false, 'one that went away holds nothing');
+test('of two workers on one token the newest install has it, also after a reboot of the other; the old one ends its turns first', async () => {
+  const { at, say, join } = joined();
+  assert.deepEqual(await say({ boot: 'old', installed: 10 }), { ...(await say({ boot: 'old', installed: 10 })), wait: false }, 'one alone has nothing to wait for');
+  at.now += 2000;
+  assert.equal(((await say({ boot: 'new', installed: 20 })) as { wait: boolean }).wait, true);
+  assert.deepEqual(await say({ boot: 'old', installed: 10 }), { replaced: true });
+  assert.equal(join.host(7), 'PC');
+  at.now += 10_000;
+  assert.equal(((await say({ boot: 'new', installed: 20 })) as { wait: boolean }).wait, false);
+  at.now += 3_600_000;
+  assert.deepEqual(await say({ boot: 'old-rebooted', installed: 10 }), { replaced: true }, 'kept, with nothing live to compare');
+  assert.equal('replaced' in (await say({ boot: 'new-rebooted', installed: 20 })), false);
+  // A clock a year ahead is taken as now, so a later install elsewhere still wins.
+  await say({ boot: 'ahead', installed: at.now + 365 * 86_400_000 });
+  at.now += 1000;
+  assert.equal('replaced' in (await say({ boot: 'later', installed: at.now })), false);
+});
+
+test('no turn until its self-test passes once, nor while it fails, its disk is full or its image is not there', async () => {
+  const { join, machine, at, say } = joined();
+  assert.equal(join.hold(7), null, 'one set up by hand has no self-test of this kind');
+  await say();
+  assert.match(join.hold(7)!, /not passed yet/);
+  await say({ test: all(join.startTest(machine).id) });
+  assert.equal(join.hold(7), null);
+  await say({ full: true, disk_gb: 61 });
+  assert.equal(join.hold(7), 'it is at its disk cap (61 of 60 GB)');
+  await say({ image: { state: 'building', text: '' } });
+  assert.match(join.hold(7)!, /being built/);
+  await say({ image: { state: 'failed', text: '' } });
+  assert.match(join.hold(7)!, /could not be built/);
+  await say();
+  await say({ test: all(join.startTest(machine).id, { link: 'fail' }) });
+  assert.match(join.hold(7)!, /self-test failed/);
+  at.ships = true;
+  assert.equal(((await say()) as { ships: boolean }).ships, true, "its program hears that a ship's tests run there");
 });
 
 /** The self-test an answer asks for. */
@@ -167,7 +197,7 @@ function fakePodman(workRoot: string) {
   const built = new Set<string>();
   const home = join(workRoot, 'home-volume');
   mkdirSync(join(home, '.claude'), { recursive: true });
-  const state = { kb: 1_048_576, buildFails: false, breakSync: false };
+  const state = { kb: 1_048_576, buildFails: false, breakSync: false, from: '' };
   const signedIn = () => existsSync(join(home, '.claude', '.credentials.json'));
   const run = (cmd: string, args: string[]): Promise<{ code: number; out: string; err: string }> => {
     const all = cmd === 'nice' ? args.slice(3) : args;
@@ -186,6 +216,7 @@ function fakePodman(workRoot: string) {
     if (all[0] === 'volume' && all[1] === 'inspect') return said(`${home}\n`);
     if (all[0] === 'volume' && all[1] === 'ls') return said('citadel-worker-home\n');
     if (line.includes('.credentials.json')) return said(signedIn() ? 'yes\n' : 'no\n');
+    if (all[0] === 'container' && state.from) return said(`${state.from}\n`);
     if (all[0] === 'container') return said('', 1);
     if (all[0] !== 'exec') return said('');
     const detached = all[1] === '-d';
@@ -293,10 +324,11 @@ test('the program joins: builds its image, says its sign-ins, holds the disk cap
     assert.equal(agent.worker.cfg.max, 0);
 
     // A newer install with this machine's token: this one stops for good.
-    const newer = await fetch(`${srv.base}/api/machines/worker`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ boot: 'newer', started: Date.now() + 1000 }) });
+    const newer = await fetch(`${srv.base}/api/machines/worker`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ boot: 'newer', installed: Date.now() }) });
     assert.equal(newer.status, 200);
     await going;
     assert.equal(left, 64);
+    assert.ok(pod.asked.includes('rm -f -t 0 citadel-worker'), 'its turns end with it: the other PC is handed them');
 
     // Switched off by its owner; the stored tick goes too.
     assert.equal((await patch({ worker: false })).status, 200);
@@ -306,6 +338,11 @@ test('the program joins: builds its image, says its sign-ins, holds the disk cap
     agent?.stop();
     await srv.stop();
   }
+});
+
+test("Windows programs are off only when wsl.conf's own section says so", () => {
+  assert.equal(interopOff('[automount]\nenabled=false\n[interop]\nenabled = false\n'), true);
+  for (const on of ['', '[automount]\nenabled=false\n', '[interop]\nenabled=true\n', '[interop]\n# enabled=false\n']) assert.equal(interopOff(on), false, on);
 });
 
 test('a build that fails says why and is not tried again for a while; nothing is placed there meanwhile', async () => {
@@ -327,6 +364,15 @@ test('a build that fails says why and is not tried again for a while; nothing is
   agent.builtAt = 0;
   await agent.keepImage('2.4.11', want);
   assert.equal(agent.image!.state, 'ready');
+  // Newer ones wait for the turns running in the old one: none starts meanwhile.
+  const old = agent.worker.cfg.image;
+  pod.state.from = old;
+  agent.worker.turns.set('t', {} as never);
+  await agent.keepImage('2.4.12', want);
+  assert.deepEqual([agent.worker.cfg.image, agent.image!.state, agent.worker.cfg.max], [old, 'building', 0]);
+  agent.worker.turns.clear();
+  await agent.keepImage('2.4.12', want);
+  assert.deepEqual([agent.worker.cfg.image, agent.image!.state], ['localhost/citadel-worker:abcdef12-2.4.12', 'ready']);
   // A claude or a hash that isn't one never reaches a build file.
   await agent.keepImage('2.4.12; rm -rf /', want);
   assert.equal(agent.worker.cfg.image, 'localhost/citadel-worker:abcdef12-2.4.11');

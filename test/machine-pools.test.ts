@@ -24,8 +24,8 @@ function setup() {
   store.addMember(project.id, cara.id);
   const m = store.createMachine('desk', 'h', 'Josh', josh.id);
   store.setMachineProjects(m.id, [project.id]);
-  const s = { online: true, lends: true, ships: false, claude: '2.1.0' as string | null, now: T, info: { claude: '2.1.0 (Claude Code)', max: 4, at: T, load: { cpu: 12, mem: 1, freeGb: 20 }, signedIn: true } as WorkerInfo | null, changed: 0 };
-  const build = () => new MachinePools({ store, online: () => s.online, lends: () => s.lends, info: () => s.info, ships: () => s.ships, claude: () => Promise.resolve(s.claude && `${s.claude} (Claude Code)`), changed: () => void s.changed++, now: () => s.now });
+  const s = { online: true, lends: true, ships: false, claude: '2.1.0' as string | null, now: T, info: { claude: '2.1.0 (Claude Code)', max: 4, at: T, load: { cpu: 12, mem: 1, freeGb: 20 }, signedIn: true } as WorkerInfo | null, hold: null as string | null, changed: 0 };
+  const build = () => new MachinePools({ store, online: () => s.online, lends: () => s.lends, info: () => s.info, ships: () => s.ships, hold: () => s.hold, claude: () => Promise.resolve(s.claude && `${s.claude} (Claude Code)`), changed: () => void s.changed++, now: () => s.now });
   const pools = build();
   return { store, josh, cara, project, m, s, build, pools, why: () => pools.machines()[0].block?.why ?? null };
 }
@@ -40,6 +40,11 @@ test('a machine that lends workers is a place, with its owner, cap and load', ()
   assert.deepEqual(t.pools.machines(), [{ id: t.m.id, name: 'desk', owner: t.josh.id, cap: 4, block: null, away: null, load: { reading: { cpu: 12, mem: 1 }, box: { freeGb: 20, level: 'ok' }, at: T } }]);
   t.s.lends = false;
   assert.deepEqual(t.pools.machines(), [], 'its switch off: no place at all');
+});
+
+test('what the worker itself holds turns for (its disk cap, its self-test) is the reason', () => {
+  t.s.hold = 'its self-test failed';
+  assert.equal(t.why(), 'its self-test failed');
 });
 
 test('an agent from before its load was said has none, never zero', () => {

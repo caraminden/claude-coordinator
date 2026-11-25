@@ -19,7 +19,7 @@ as() { (cd / && runuser -u "$user" -- env HOME="$home" XDG_RUNTIME_DIR="/run/use
 # A program in the worker's image, on this terminal, with the home its minions use: what it signs in to stays there.
 inside() {
   local tag
-  tag=$(cat "$home/worker/image-tag" 2>/dev/null) || die 'Its image is not built yet: the Machines page says when it is.'
+  tag=$(as cat "$home/worker/image-tag" 2>/dev/null) || die 'Its image is not built yet: the Machines page says when it is.'
   as podman run --rm -it --init --userns=keep-id --network=host -e HOME=/home/worker -w /home/worker -v citadel-worker-home:/home/worker:U "$tag" "$@"
 }
 
@@ -35,13 +35,13 @@ case ${1:-} in
     while [[ $# -gt 0 ]]; do
       case $1 in
         --no-restart) restart=false; shift; continue ;;
-        --workers) key=workers ;;
-        --threads) key=threads ;;
-        --memory) key=memory_gb ;;
-        --disk) key=disk_gb ;;
+        --workers) key=workers min=1 max=64 ;;
+        --threads) key=threads min=1 max=1024 ;;
+        --memory) key=memory_gb min=2 max=4096 ;;
+        --disk) key=disk_gb min=20 max=99999 ;;
         *) die "No setting $1: --workers, --threads, --memory (GB) or --disk (GB)." ;;
       esac
-      [[ ${2:-} =~ ^[1-9][0-9]{0,4}$ ]] || die "$1 takes a whole number."
+      [[ ${2:-} =~ ^[1-9][0-9]{0,4}$ && $2 -ge $min && $2 -le $max ]] || die "$1 takes a whole number from $min to $max."
       given+="$key=$2 "
       shift 2
     done
@@ -63,7 +63,7 @@ case ${1:-} in
     echo "Caps: $(num workers) minions at once, $threads threads, $memory GB of memory, $(num disk_gb) GB of disk." ;;
   status)
     as systemctl --user --no-pager status citadel-worker || true
-    tail -n 20 "$home/worker.log" ;;
+    as tail -n 20 "$home/worker.log" ;;
   remove)
     read -rp "This deletes the worker, its sign-ins and everything in $home. Type yes to go on: " sure
     [[ $sure == yes ]] || die 'Nothing was removed.'

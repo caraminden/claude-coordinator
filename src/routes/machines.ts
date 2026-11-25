@@ -614,10 +614,13 @@ export const machineRoutes: Route[] = [
     method: 'POST',
     path: '/api/machines/:machine/self-test',
     ...people,
-    handler: managed(({ res, app, machine }) => {
+    handler: managed(({ res, app, session, machine }) => {
       const workers = workersOf(app);
+      // It runs work on their PC, as their turns do.
+      if (machine.owner_id !== session.uid) throw new HttpError(403, 'Only its owner can run its self-test');
       if (!app.machines.lendsWorker(machine)) throw new HttpError(409, `Minion turns are off for ${machine.name}`);
       if (!workers.here(machine.id)) throw new HttpError(409, `${machine.name}'s worker isn't running`);
+      if (app.machines.shipsThere(machine.id)) throw new HttpError(409, "A ship's tests are running on that PC: run it once they end");
       if (workers.testing(machine.id)) throw new HttpError(409, 'Its self-test is already running');
       workers.startTest(machine);
       return json(res, 202, { machine: app.machines.view(machine) });

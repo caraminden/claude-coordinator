@@ -111,32 +111,37 @@ systemctl enable --now citadel-worker-mounts
 
 # 4. Its program, as Citadel serves it now, and the owner's settings, which its user can read but not change.
 install -d -m 750 -o root -g "$user" "$etc"
-install -d -m 700 -o "$user" -g "$user" "$home/app" "$home/worker"
+# What is in that user's home is written as that user: run again, minions may have put anything there, a link to one of root's files included.
+as() { (cd / && runuser -u "$user" -- env HOME="$home" XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"); }
+as mkdir -p "$home/app" "$home/worker" "$home/.config/systemd/user"
+got=$(mktemp)
+trap 'rm -f "$got"' EXIT
 get() {
-  curl -fsSL -o "$2" "$url/$1" || die "Couldn't download $url/$1"
-  echo "$(sha256sum "$2" | cut -d' ' -f1)  ${1##*/}"
+  curl -fsSL -o "$got" "$url/$1" || die "Couldn't download $url/$1"
+  echo "$(sha256sum "$got" | cut -d' ' -f1)  ${1##*/}"
 }
-get worker-agent.mjs "$home/app/worker-agent.mjs"
-chown "$user:$user" "$home/app/worker-agent.mjs"
-get worker-setup/citadel-worker "$r/usr/local/bin/citadel-worker"
-chmod 755 "$r/usr/local/bin/citadel-worker"
+get worker-agent.mjs
+as tee "$home/app/worker-agent.mjs" < "$got" > /dev/null
+get worker-setup/citadel-worker
+install -m 755 "$got" "$r/usr/local/bin/citadel-worker"
 ( umask 077; printf '%s' "$token" > "$etc/machine-token" )
 chown "root:$user" "$etc/machine-token"
 chmod 640 "$etc/machine-token"
 "$r/usr/local/bin/citadel-worker" caps --no-restart ${caps[@]+"${caps[@]}"}
+# When this install ran: with one token on two PCs, Citadel goes with the newest.
+date +%s%3N > "$etc/installed"
+chmod 644 "$etc/installed"
 
 # 5. The service, as that user's own, so every container of it is inside the caps.
 loginctl enable-linger "$user"
 for _ in $(seq 40); do [[ ! -S $r/run/user/$uid/bus ]] || break; sleep 0.5; done
-install -d -m 700 -o "$user" -g "$user" "$home/.config" "$home/.config/systemd" "$home/.config/systemd/user"
-cat > "$home/.config/systemd/user/citadel-worker.service" <<EOF
+as tee "$home/.config/systemd/user/citadel-worker.service" > /dev/null <<EOF
 [Unit]
 Description=Citadel minion worker
 
 [Service]
 # Its own newest program, taken at each start; the copy here serves when Citadel can't be reached.
-ExecStartPre=-/usr/bin/curl -fsSL --max-time 30 -o $home/app/worker-agent.mjs.new $url/worker-agent.mjs
-ExecStartPre=-/bin/mv -f $home/app/worker-agent.mjs.new $home/app/worker-agent.mjs
+ExecStartPre=-/bin/sh -c 'curl -fsSL --max-time 30 -o $home/app/worker-agent.mjs.new $url/worker-agent.mjs && mv -f $home/app/worker-agent.mjs.new $home/app/worker-agent.mjs'
 ExecStart=$(command -v node) $home/app/worker-agent.mjs $url $etc/config.json
 WorkingDirectory=$home
 StandardOutput=append:$home/worker.log
@@ -151,11 +156,9 @@ KillMode=process
 [Install]
 WantedBy=default.target
 EOF
-chown "$user:$user" "$home/.config/systemd/user/citadel-worker.service"
 log=$home/worker.log
 skip=0
-[[ ! -f $log ]] || skip=$(wc -l < "$log")
-as() { (cd / && runuser -u "$user" -- env HOME="$home" XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"); }
+[[ ! -f $log ]] || skip=$(as cat "$log" | wc -l)
 as systemctl --user daemon-reload
 as systemctl --user enable citadel-worker
 as systemctl --user restart citadel-worker
@@ -163,7 +166,7 @@ echo 'Started. Waiting for it to reach Citadel...'
 said=''
 for _ in $(seq "${CITADEL_TEST_WAIT:-60}"); do
   sleep 0.5
-  said=$(tail -n +"$((skip + 1))" "$log" 2>/dev/null || true)
+  said=$(as tail -n +"$((skip + 1))" "$log" 2>/dev/null || true)
   ! grep -q "Connected to \|can't start" <<< "$said" || break
 done
 echo "$said"

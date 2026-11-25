@@ -58,6 +58,8 @@ export interface MachinePoolsDeps {
   info: (machineId: number) => WorkerInfo | null;
   /** A ship's tests run on that computer. */
   ships: (machineId: number) => boolean;
+  /** Why its worker takes no turns now (src/worker-join.ts), or null. */
+  hold?: (machineId: number) => string | null;
   /** `claude --version` here. */
   claude: () => Promise<string | null>;
   /** A machine may take turns it couldn't a moment ago. */
@@ -103,6 +105,8 @@ export class MachinePools {
   private block(m: Machine, info: WorkerInfo | null, away: number | null): Block | null {
     if (!this.d.online(m.id)) return away === null ? { why: 'reconnecting' } : away ? { why: `away since ${pacificStamp(away)}`, since: away } : { why: 'it has not connected yet' };
     if (!info) return { why: 'its agent has not said it can run turns' };
+    const hold = this.d.hold?.(m.id);
+    if (hold) return { why: hold };
     const home = this.homeClaude();
     if (!sameClaude(home, info.claude)) return { why: home ? `its Claude is ${info.claude ?? 'not known'}, and this server's is ${home}` : 'checking its Claude' };
     return this.d.ships(m.id) ? { why: "a ship's tests are running there" } : null;

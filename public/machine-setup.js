@@ -95,8 +95,9 @@ export const WORKER_CHECKS = {
   programs: "Windows programs can't start",
 };
 
-/** A worker's caps before its owner sets any (Cara's desktop's starting values, Josh, 2026-11-25). */
+/** A worker's caps before its owner sets any (the Build 7 spec's starting values), and what each can be: tools/worker's scripts hold the same. */
 export const WORKER_CAPS = { workers: 6, threads: 8, memory_gb: 24, disk_gb: 60 };
+export const WORKER_LIMITS = { workers: [1, 64], threads: [1, 1024], memory_gb: [2, 4096], disk_gb: [20, 99999] };
 
 /** The line that makes a Windows PC a minion worker (tools/worker/install-worker.ps1), for its owner's normal PowerShell. */
 export function machineSetupWorkerWindows(url, token, caps) {

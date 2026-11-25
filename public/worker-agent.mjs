@@ -50,7 +50,7 @@ export function agentConfig(raw) {
 }
 
 export class WorkerAgent {
-  /** @param {{ config: unknown, appUrl: string, token: string, Worker: typeof import('./machine-worker.mjs').Worker, log?: (...a: unknown[]) => void, run?: typeof run, exit?: (code: number) => void }} o */
+  /** @param {{ config: unknown, appUrl: string, token: string, Worker: typeof import('./machine-worker.mjs').Worker, installed?: number, log?: (...a: unknown[]) => void, run?: typeof run, exit?: (code: number) => void }} o */
   constructor(o) {
     this.cfg = agentConfig(o.config);
     this.appUrl = o.appUrl;
@@ -62,7 +62,9 @@ export class WorkerAgent {
     this.podman = (cmd, args, timeout) => (args.includes(NO_IMAGE) ? Promise.resolve({ code: 1, out: '', err: 'no image yet' }) : this.exec(cmd, args, timeout));
     this.exit = o.exit ?? ((code) => process.exit(code));
     this.boot = randomBytes(8).toString('hex');
-    this.started = Date.now();
+    this.installed = o.installed ?? 0;
+    /** Another program spoke for this machine a moment ago: it ends its turns first. */
+    this.wait = true;
     // WSL2 says so in its kernel's name; the app then shows PowerShell commands.
     this.wsl = /microsoft/i.test(safeRead('/proc/sys/kernel/osrelease'));
     // No image yet: its claude is unknown, so the app places nothing here until it is.
@@ -126,22 +128,28 @@ export class WorkerAgent {
     return this.disk !== null && this.disk >= this.cfg.caps.disk_gb;
   }
 
-  /** The owner's most workers, or none while there is no image or the disk cap is reached: turns that run go on. */
+  /** The owner's most workers, or none while there is no image, it has only just taken this machine over or the disk cap is reached: turns that run go on. */
   fit() {
-    this.worker.cfg.max = this.full() || !(this.image?.state === 'own' || this.image?.state === 'ready') ? 0 : this.cfg.caps.workers;
+    this.worker.cfg.max = this.wait || this.full() || !(this.image?.state === 'own' || this.image?.state === 'ready') ? 0 : this.cfg.caps.workers;
   }
 
   /** Tell the app how this worker stands, and do what it answers. */
   async report() {
-    const body = { boot: this.boot, started: this.started, host: hostname(), wsl: this.wsl, caps: this.cfg.caps, image: this.image, github: this.github, disk_gb: this.disk, full: this.full(), test: this.test };
+    const body = { boot: this.boot, installed: this.installed, host: hostname(), wsl: this.wsl, caps: this.cfg.caps, image: this.image, github: this.github, disk_gb: this.disk, full: this.full(), test: this.test };
     const reply = await this.json('/api/machines/worker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     this.said = null;
     if (!this.code && !reply.replaced) this.log(`Connected to ${this.appUrl} as ${hostname()}`);
     if (reply.replaced) {
-      this.log('Another worker has this machine: this one stops. (Run the install command here again to move it back.)');
+      this.log('Another worker has this machine: this one stops, and its turns with it. (Run the install command here again to move it back.)');
       this.stop();
+      // The other one is handed these turns: they must not run on both.
+      await this.exec(this.cfg.podman, ['rm', '-f', '-t', '0', 'citadel-worker']);
+      this.worker.turns.clear();
+      this.worker.save();
       return this.exit(REPLACED);
     }
+    this.wait = reply.wait === true;
+    this.fit();
     // Newer code at the app: the service starts this again, on it. Turns run on in the container, but a restart can wait for them.
     this.code ??= reply.agent;
     if (reply.agent !== this.code && !this.worker.turns.size && !this.building && !this.testing) {
@@ -149,7 +157,9 @@ export class WorkerAgent {
       this.stop();
       return this.exit(0);
     }
-    if (reply.claude && reply.image) void this.keepImage(String(reply.claude).split(' ')[0], reply.image);
+    // Ships go first: a build would slow the tests a ship is waiting on.
+    if (reply.ships && !this.building && !this.image) this.image = { state: 'building', text: "Waiting for a ship's tests on this PC to end." };
+    else if (reply.claude && reply.image && !reply.ships) void this.keepImage(String(reply.claude).split(' ')[0], reply.image);
     void this.keepFacts();
     if (reply.test && reply.test !== this.test?.id && !this.testing) void this.selfTest(reply.test);
     else if (!reply.test && this.test?.done) this.test = null;
@@ -195,6 +205,12 @@ export class WorkerAgent {
     this.builtAt = Date.now();
     try {
       if ((await this.exec(this.cfg.podman, ['image', 'exists', tag])).code) await this.build(tag, claude, want);
+      const from = (await this.exec(this.cfg.podman, ['container', 'inspect', '--format', '{{.ImageName}}', 'citadel-worker'])).out.trim();
+      // Running turns keep the container they are in, and a turn started now would join them there: none is (fit), and the new image takes over when they end.
+      if (this.worker.cfg.image !== tag && this.worker.turns.size && from !== tag) {
+        this.image = { state: 'building', text: 'Its new image is ready, and takes over when the turns running there end.' };
+        return;
+      }
       this.worker.cfg.image = tag;
       await this.worker.version(['run', '--rm', tag]);
       if (!this.worker.claude) throw new Error('claude does not start in the image it built');
@@ -284,6 +300,8 @@ export class WorkerAgent {
       while (this.building) await sleep(500);
       if (this.image?.state === 'failed') throw new Error(`its image is not built: ${this.image.text}`);
       const w = this.newWorker(container, root, this.worker.cfg.image);
+      // It has this machine's token, and would be handed its turns.
+      w.poke = () => {};
       // Left by a test cut short: its container would stand in for this one's.
       await this.exec(podman, ['rm', '-f', '-t', '0', container]);
       line('image', 'running', 'Starting a container from it');
@@ -299,11 +317,16 @@ export class WorkerAgent {
         if (!mount.startsWith('shared')) throw new Error(`/ is mounted ${mount || 'unknown'}, not shared, so folders added later would not reach the container: run the install command again`);
         return 'A file made on either side shows on the other';
       });
-      for (const [key, name] of /** @type {const} */ ([
-        ['disk', 'no host disk'],
-        ['programs', 'no Windows programs'],
-      ]))
-        line(key, of(name)?.ok ? 'ok' : 'fail', of(name)?.ok && this.wsl && name === 'no Windows programs' ? 'Windows drives and programs are off in this distro' : (of(name)?.text ?? 'it said nothing'));
+      line('disk', of('no host disk')?.ok ? 'ok' : 'fail', of('no host disk')?.text ?? 'it said nothing');
+      await check('programs', async () => {
+        const l = of('no Windows programs');
+        if (!l?.ok) throw new Error(l?.text ?? 'it said nothing');
+        if (!this.wsl) return l.text;
+        // With its drives off there is no Windows program here to try, so this reads what turns them off, and looks for a way round it.
+        if (!interopOff(safeRead('/etc/wsl.conf'))) throw new Error('Windows programs are not switched off in /etc/wsl.conf: run the install command again');
+        if ((await inside('test -e /run/WSL')).code === 0) throw new Error("the container can reach WSL's own sockets (/run/WSL)");
+        return 'Windows drives and programs are off in this distro';
+      });
       const there = w.local(join(TEST_ROOT, 'scratch'));
       const synced = await check('sync', async () => {
         const began = performance.now();
@@ -386,6 +409,12 @@ async function until(what) {
   }
 }
 
+/** Whether a wsl.conf turns Windows programs off. @param {string} conf */
+export function interopOff(conf) {
+  const part = conf.split(/^\s*\[/m).find((p) => /^interop\s*\]/i.test(p)) ?? '';
+  return /^\s*enabled\s*=\s*"?false\b/im.test(part);
+}
+
 /** @param {string} file */
 function safeRead(file) {
   try {
@@ -417,7 +446,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (res?.ok) writeFileSync(to, await res.text());
     else if (!existsSync(to)) throw new Error(`could not download machine-worker.mjs (${res?.status ?? 'no answer'})`);
     const { Worker } = await import('./machine-worker.mjs');
-    await new WorkerAgent({ config, appUrl, token, Worker, log }).start();
+    const installed = Number(safeRead(join(dirname(file), 'installed'))) || 0;
+    await new WorkerAgent({ config, appUrl, token, installed, Worker, log }).start();
   } catch (err) {
     log(`This worker can't start: ${err.message}`);
     process.exit(1);

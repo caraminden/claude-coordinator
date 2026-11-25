@@ -176,11 +176,36 @@ function landRedsBlock(s, lr) {
   return block('Land runs', lr.red ? hue : 'done', row);
 }
 
+// The load-sensitive files CI runs after the main wave (#1898, src/late-tests.ts): why each is listed, and those kept off it.
+function lateBlock(s, late) {
+  const key = `health-late-${s.id}`;
+  const files = (n) => `${n} file${n === 1 ? '' : 's'}`;
+  const link = (n) => h('a', { href: `#/p/${s.id}/t/${n}` }, h('strong', {}, `#${n}`));
+  const line = (...parts) => h('span', { class: 'ci-detail-line muted' }, ...parts);
+  const listed = late.listed.map((f) => {
+    const [lo, hi] = f.loads.map(Math.round);
+    const why = `failed ${f.sightings} time${f.sightings === 1 ? '' : 's'} and passed alone, on ${f.branches.length} branches · load ${lo === hi ? lo : `${lo} to ${hi}`} · last ${ago(f.last)}`;
+    return hueRow({ hue: 'waiting', lead: String(f.branches.length) }, h('strong', { title: f.branches.join(', ') }, f.file), line(why), f.fixing ? line('being fixed by ', link(f.fixing)) : null);
+  });
+  const alone = late.alone.map((f) => {
+    const n = f.where.match(/^(?:ticket\/|#)(\d+)/)?.[1];
+    return hueRow({ hue: 'danger', lead: 'kept off' }, h('strong', {}, f.file), line('also failed run alone, so it may be a real bug: ', n ? link(n) : f.where === 'main' ? 'on main itself' : f.where, ` · ${ago(f.failedAlone)}`));
+  });
+  const [row] = settingsRow(
+    { key, icon: 'clock', hue: listed.length ? 'waiting' : 'done', title: 'Timing tests, run last', summary: listed.length ? [toneChip('warn', files(listed.length)), alone.length ? `${alone.length} kept off` : 'run after the rest, two at once'] : [toneChip('ok', 'None'), 'every test file runs in the main wave'] },
+    listed.length || alone.length ? statTiles([String(listed.length), 'run last', 'waiting'], [String(alone.length), 'kept off: failed alone', alone.length ? 'danger' : 'done'], [ago(late.readAt), 'CI last took the list', 'running']) : null,
+    listed.length ? showFirst({ key, items: listed, n: 5, noun: 'files' }) : emptyCard('No test file runs last', 'A file joins when it fails under load and passes alone on two branches within three days.'),
+    alone.length ? h('div', { class: 'hue-rows' }, ...alone) : null,
+    h('p', { class: 'look-prose' }, 'A file joins after it fails under load and passes alone on two branches within three days. It leaves after three clean days or a proven fix. A failure in these runs is red like any other.'),
+  );
+  return block('Timing tests', listed.length ? 'waiting' : 'done', row);
+}
+
 /** The tab's sections for scheme `s`; `data` is its /test-health read, null until it arrives. */
 export function testHealth(s, data, refresh) {
   if (data?.error) return [h('p', { class: 'muted' }, "Couldn't read test health. Pick the tab again to retry.")];
   if (!data) return [h('p', { class: 'muted' }, 'Reading test health…')];
-  return [fastBlock(s, data.fast, data.now), landRedsBlock(s, data.landReds), flakeBlock(s, data.flakes, refresh)];
+  return [fastBlock(s, data.fast, data.now), landRedsBlock(s, data.landReds), flakeBlock(s, data.flakes, refresh), ...(data.late ? [lateBlock(s, data.late)] : [])];
 }
 
 export const readHealth = (id) => api(`api/projects/${id}/test-health`);

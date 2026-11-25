@@ -316,6 +316,49 @@ test("a job reading the store is told who it is by its run token alone: 401 with
   await assert.rejects(unread.caller(job(runToken())), (err: any) => err.status === 503 && /couldn't read GitHub's signing keys/.test(err.message));
 });
 
+test("a job's read of the files that run last (#1898) is its own scheme's, and marks that the scheme's CI takes the list", async () => {
+  const { agentRoutes } = await import('../src/routes/machines.ts');
+  const { lateReadKey } = await import('../src/late-tests.ts');
+  const { projectSharedDir } = await import('../src/workspace.ts');
+  const store = new Store(join(root, 'late.db'));
+  const mandate = store.createProject('Mandate', 'https://github.com/caraminden/mandate', null);
+  const peek = store.createProject('Peek Auras', 'https://github.com/caraminden/peek-auras', null);
+  const dataDir = join(root, 'late');
+  const now = Date.now();
+  for (const [p, file] of [
+    [mandate, 'test/a.test.ts'],
+    [peek, 'test/b.test.ts'],
+  ] as const) {
+    const dir = join(projectSharedDir(dataDir, p.id), 'retro-log', new Date(now).toISOString().slice(0, 10));
+    mkdirSync(dir, { recursive: true });
+    const line = (branch: string) => `- 00:00:00Z · flake · ${file} · load 30.1 · ${branch} · in CI\n`;
+    writeFileSync(join(dir, 'land.md'), line('ticket/1-x') + line('ticket/2-y'));
+  }
+  const app = { store, dataDir, ciStore: new CiStore(store, join(root, 'late-store'), new RunTokens(async () => jwks)) };
+  const read = async (token: string | null) => {
+    const res = {
+      status: 0,
+      body: '',
+      headersSent: false,
+      setHeader() {},
+      writeHead(s: number) {
+        this.status = s;
+        return this;
+      },
+      end(b: unknown) {
+        this.body = String(b ?? '');
+      },
+    };
+    await agentRoutes.find((r) => r.path === '/api/late-tests')!.handler({ req: { headers: token ? { authorization: `Bearer ${token}` } : {} }, res, app } as never);
+    return JSON.parse(res.body);
+  };
+  await assert.rejects(read(null), { status: 401 });
+  assert.deepEqual(await read(runToken()), { files: ['test/a.test.ts'] });
+  assert.equal(store.getSetting(lateReadKey(peek.id)) ?? null, null, "Peek's CI hasn't asked");
+  assert.ok((store.getSetting<number>(lateReadKey(mandate.id)) ?? 0) >= now);
+  assert.deepEqual(await read(runToken({ repository: 'caraminden/peek-auras' })), { files: ['test/b.test.ts'] });
+});
+
 test('publish takes the APK from the store when the run put one there, and never asks GitHub', async () => {
   const dir = join(root, 'android');
   mkdirSync(dir, { recursive: true });

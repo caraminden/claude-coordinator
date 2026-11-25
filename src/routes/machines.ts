@@ -7,6 +7,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { lendsMachine, machinesFor, managesMachine, taskmasterSeesMachine } from '../access.ts';
 import { runnerAsk } from '../ci-runner.ts';
+import { lateList, lateReadKey } from '../late-tests.ts';
 import { testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
@@ -197,6 +198,17 @@ export const agentRoutes: Route[] = [
       if (!c) throw new HttpError(400, 'Send {done, total, file, failed?, phase?}: whole numbers, done at most total, total over 0; failed a list of file names; phase suite or rerun');
       app.ciTests?.(claims.repository, claims.runId, c);
       return json(res, 202, {});
+    },
+  },
+  // The load-sensitive test files a CI job's suite runs last (#1898): its own scheme's, by its run token (tools/late-tests.ts).
+  {
+    method: 'GET',
+    path: '/api/late-tests',
+    who: 'machine',
+    async handler({ req, res, app }) {
+      const { project } = await app.ciStore.caller(req);
+      app.store.setSetting(lateReadKey(project.id), Date.now());
+      return json(res, 200, { files: (await lateList(app, project.id)).listed.map((f) => f.file) });
     },
   },
 ];

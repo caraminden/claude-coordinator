@@ -223,7 +223,9 @@ jobs:
           me="$win/${GITHUB_RUN_ID:-0}-$$"; wstart=$(date +%s); echo "$wstart 0" >"$me"
           trap '[ "$(cut -d" " -f2 "$me" 2>/dev/null)" != 0 ] || echo "$wstart $(date +%s)" >"$me"' EXIT # a cancelled run closes its window too
           started=$SECONDS
-          DEPLOY_TEST_CPU_WEIGHT= CITADEL_SUITE_WINDOW="$me" DEPLOY_RERUN_LATER="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
+          # The load-sensitive files Citadel lists run after the main wave, two at once (#1898); with no list, all run in it.
+          late=$RUNNER_TEMP/late-tests; rm -f "$late"; node tools/late-tests.ts "$late" || true
+          DEPLOY_TEST_CPU_WEIGHT= CITADEL_LATE_TESTS="$([ ! -s "$late" ] || echo "$late")" CITADEL_SUITE_WINDOW="$me" DEPLOY_RERUN_LATER="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
           wend=$(date +%s); echo "$wstart $wend" >"$me"
           # Overlapped: another run's window started before this one ended and ended after it began (or is still open, written in the last 30 min: a killed run leaves one).
           rm -f "$RUNNER_TEMP/suite-overlap"

@@ -37,6 +37,7 @@ tools/progress-reporter.ts
 tools/suite-runner.ts
 tools/suite-gate.ts
 tools/ci-progress.ts
+tools/late-tests.ts
 tools/citadel-node
 tools/citadel-node.cjs
 tools/ci-runner/win-ports.sh

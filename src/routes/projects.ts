@@ -32,6 +32,7 @@ import { pacific } from '../pacific.ts';
 import { checkAudits } from '../standard-audits.ts';
 import { FLAKE_WINDOW_MS, PROOF_RUNS, fileChangedAt, flakeBrief } from '../flakes.ts';
 import { LAND_REDS_MS, landReds, readRetro } from '../land-reds.ts';
+import { lateView } from '../late-tests.ts';
 import { MODEL_REQUIRED, scheduleFields, scheduleTemplate, scheduleView } from './schedule-api.ts';
 import { turnEnv, turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
@@ -1570,7 +1571,7 @@ export const projectRoutes: Route[] = [
       const since = Date.now() - LAND_REDS_MS;
       const read = (await app.ciHealth?.runsSince(project, since)) ?? null;
       const landRed = read && { ...landReds(read.runs, await readRetro(projectSharedDir(app.dataDir, project.id), since, Date.now()), since), partial: read.partial };
-      json(res, 200, { fast: project.land_mode === 'fast' ? (app.fastMode?.view(project.id) ?? null) : null, flakes, landReds: landRed, now: Date.now() });
+      json(res, 200, { fast: project.land_mode === 'fast' ? (app.fastMode?.view(project.id) ?? null) : null, flakes, landReds: landRed, late: await lateView(app, project.id), now: Date.now() });
     },
   },
   // The first message "Start a minion to fix it" shows for a flaky file, for the person to read and confirm (#1063).

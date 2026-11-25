@@ -87,7 +87,13 @@ export class WorkerAgent {
 
   /** @param {string} container @param {string} root @param {string} image */
   newWorker(container, root, image) {
-    return new this.Worker({ config: { root, image, container, podman: this.cfg.podman, max: this.cfg.caps.workers, node: 'node', claude: 'claude' }, appUrl: this.appUrl, token: this.token, log: this.log, run: this.podman });
+    // No link of the agent's here: a start, steer or stop reaches it at its next sync (SYNC_MS, half a second). Machines.pokeWorker
+    // writes to the PC's other agent's stream, if it has one, whose worker is null without a worker block.
+    const w = new this.Worker({ config: { root, image, container, podman: this.cfg.podman, max: this.cfg.caps.workers, node: 'node', claude: 'claude' }, appUrl: this.appUrl, token: this.token, log: this.log, run: this.podman });
+    const call = w.call.bind(w);
+    // Its syncs say they are this program's: another worker with this token (an agent's worker block) is refused.
+    w.call = (path, init = {}) => call(path, { ...init, headers: { ...init.headers, 'X-Citadel-Worker': this.boot } });
+    return w;
   }
 
   async start() {

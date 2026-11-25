@@ -1061,7 +1061,7 @@
  },
  "POST /api/machines/:m/self-test": {
   "anon": "401 Not logged in",
-  "person": "409 Minion turns are off for mx",
+  "person": "403 Only its owner can run its self-test",
   "member": "404 No such machine",
   "outsider": "404 No such machine",
   "tmA": "403 Only people manage machines",

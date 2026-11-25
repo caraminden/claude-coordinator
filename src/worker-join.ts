@@ -13,8 +13,11 @@ import type { Machine, Store } from './db.ts';
 import { gitOut } from './git.ts';
 import { sameClaude, type WorkerInfo } from './machine-turn.ts';
 
-/** A worker that hasn't synced for this long is away: it syncs about twice a second. */
-const HERE_MS = 10_000;
+/**
+ * A worker that hasn't synced for this long is away (docs/adr/0024-runner-seams.md, T5): it syncs every SYNC_MS, half a
+ * second. A third of BEAT_STALE_MS (src/machine-turn.ts, 30 s), so a machine is away well before its turns' beats go stale.
+ */
+export const HERE_MS = 10_000;
 /** A self-test that has said nothing new for this long has failed: an image build is its longest step. */
 const QUIET_TEST_MS = 20 * 60_000;
 const CLAUDE_MS = 60_000;
@@ -58,6 +61,8 @@ export type WorkerView = {
   test: SelfTest | null;
   /** The last self-test that passed whole. */
   passed: number | null;
+  /** The PC's agent has a worker block too, and its syncs are refused. */
+  twice: boolean;
 };
 
 const text = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '');
@@ -94,6 +99,7 @@ export interface WorkerJoinDeps {
 export class WorkerJoin {
   private d: WorkerJoinDeps;
   private facts = new Map<number, Facts>();
+  private twice = new Map<number, number>();
   private tests = new Map<number, SelfTest & { heard: number }>();
   /** Each running test's scratch repo: the commit it was sent and the answer its worker must send back. */
   private scratch = new Map<number, { id: string; sha: string; nonce: string }>();
@@ -127,6 +133,16 @@ export class WorkerJoin {
     this.tests.delete(machineId);
     this.scratch.delete(machineId);
     if (this.kept(machineId)) this.d.store.setSetting(`worker-join:${machineId}`, null);
+  }
+
+  /** One worker a machine: while this program is here, a sync from anything else with its token (an agent's worker block) is refused, so one start is never offered to two. `from` is the program's X-Citadel-Worker header. */
+  refuses(machineId: number, from: unknown): boolean {
+    const facts = this.facts.get(machineId);
+    if (typeof from === 'string' && from === facts?.boot) return false;
+    if (!facts || this.d.now() - facts.at >= HERE_MS) return false;
+    if (!this.twice.has(machineId) || this.d.now() - this.twice.get(machineId)! > 30_000) this.d.changed();
+    this.twice.set(machineId, this.d.now());
+    return true;
   }
 
   /** The name of the computer its worker runs on, while it does. */
@@ -171,6 +187,7 @@ export class WorkerJoin {
       full: facts?.full ?? false,
       test: running.id ? (running as SelfTest) : (kept?.test ?? null),
       passed: kept?.passed ?? null,
+      twice: this.d.now() - (this.twice.get(machine.id) ?? 0) < 60_000,
     };
   }
 

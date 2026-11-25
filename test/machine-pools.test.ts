@@ -66,6 +66,18 @@ test('a ship, another Claude, no worker agent and no link each hold it', () => {
   assert.equal(t.why(), 'away since Nov 25, 2:14 PM PST');
 });
 
+test("with the PC's other agent still connected, a silent worker's away time grows", () => {
+  t.s.online = false;
+  t.s.now = T + 30 * MIN;
+  t.store.updateMachine(t.m.id, { last_seen_at: t.s.now });
+  assert.equal(t.why(), 'away since Nov 25, 2:14 PM PST');
+  t.s.info = null;
+  t.store.setSetting('worker-seen' as never, {} as never);
+  const fresh = t.build();
+  t.s.now += 2 * MIN;
+  assert.equal(fresh.machines()[0].away, T + 30 * MIN, 'before any sync, its agent dates it');
+});
+
 test("this server's Claude is asked first, then nothing waits on the next tick, and asked again as it ages", async () => {
   const fresh = t.build();
   assert.equal(fresh.machines()[0].block?.why, 'checking its Claude');

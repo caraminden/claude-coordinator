@@ -98,7 +98,8 @@ export class MachinePools {
       if (now - (this.seen[key] ?? 0) >= SEEN_MS) this.d.store.setSetting(SEEN, (this.seen = { ...this.seen, [key]: now }));
       return null;
     }
-    const last = Math.max(this.seen[key] ?? 0, m.last_seen_at ?? 0, info?.at ?? 0);
+    // The PC's other agent keeps its row's last_seen_at moving: it dates a worker only until that worker has synced once.
+    const last = Math.max(this.seen[key] ?? 0, info?.at ?? 0) || (m.last_seen_at ?? 0);
     return last && now - Math.max(info?.at ?? 0, this.began) < BACK_SOON_MS ? null : last;
   }
 

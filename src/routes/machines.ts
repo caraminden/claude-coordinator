@@ -217,7 +217,10 @@ export const agentRoutes: Route[] = [
   }),
   agent('POST', '/api/machines/upload', machineUpload),
   // A worker's turns (Build 7 T2, src/machine-turn.ts): the sync it makes about every half second, a turn's folder to start it from, and its tool calls home.
-  agent('POST', '/api/machines/turns', async ({ req, res }, machine) => json(res, 200, await syncTurns(machine.id, await readJson(req, 30_000_000)))),
+  agent('POST', '/api/machines/turns', async ({ req, res, app }, machine) => {
+    if (app.machines.workers?.refuses(machine.id, req.headers['x-citadel-worker'])) throw new HttpError(409, `${machine.name}'s minion turns run in its own worker program (citadel-worker): take the worker block out of this agent's config`);
+    return json(res, 200, await syncTurns(machine.id, await readJson(req, 30_000_000)));
+  }),
   agent('GET', '/api/machines/turn-folder', async ({ res, url }, machine) => {
     if (!(await sendFolder(machine.id, url.searchParams.get('dir'), res))) throw new HttpError(404, 'Not a turn placed on this machine');
   }),

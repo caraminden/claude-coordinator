@@ -49,12 +49,12 @@ async function open(name: string) {
 const says = { image: { state: 'ready', text: 'claude 2' }, github: false as boolean, signedIn: false as boolean, test: null as null | { id: string; done: boolean; lines: { key: string; state: string; text: string }[] } };
 let asked: string | null = null;
 async function post(path: string, body: object) {
-  const res = await fetch(srv.base + path, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const res = await fetch(srv.base + path, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Citadel-Worker': 'b' }, body: JSON.stringify(body) });
   return (await res.json()) as { test: string | null };
 }
 async function word() {
   await post('/api/machines/turns', { worker: { claude: '2.0.0', max: 3, signedIn: says.signedIn }, turns: [] });
-  asked = (await post('/api/machines/worker', { boot: 'b', started: 1, host: 'MY-PC', wsl: true, caps: { workers: 3, threads: 4, memory_gb: 10, disk_gb: 80 }, image: says.image, github: says.github, disk_gb: 12, full: false, test: says.test })).test;
+  asked = (await post('/api/machines/worker', { boot: 'b', installed: 1, host: 'MY-PC', wsl: true, caps: { workers: 3, threads: 4, memory_gb: 10, disk_gb: 80 }, image: says.image, github: says.github, disk_gb: 12, full: false, test: says.test })).test;
 }
 
 test('switched on, the row shows the command at once, and it follows the caps as they are typed', { skip }, async () => {

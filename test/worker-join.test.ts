@@ -331,6 +331,12 @@ test('the program joins: builds its image, says its sign-ins, holds the disk cap
     await until('the disk cap', async () => (await view()).worker.full);
     assert.equal(agent.worker.cfg.max, 0);
 
+    // An agent's worker block with this token: refused while this program is here, and the row says so.
+    const second = await fetch(`${srv.base}/api/machines/turns`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ worker: { claude: '2.4.11 (Claude Code)', max: 2 }, turns: [] }) });
+    assert.equal(second.status, 409);
+    assert.match(((await second.json()) as { error: string }).error, /take the worker block out/);
+    assert.equal((await view()).worker.twice, true);
+
     // A newer install with this machine's token: this one stops for good.
     const newer = await fetch(`${srv.base}/api/machines/worker`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ boot: 'newer', installed: Date.now() }) });
     assert.equal(newer.status, 200);
@@ -383,5 +389,5 @@ test('a build that fails says why and is not tried again for a while; nothing is
   assert.deepEqual([agent.worker.cfg.image, agent.image!.state], ['localhost/citadel-worker:abcdef12-2.4.12', 'ready']);
   // A claude or a hash that isn't one never reaches a build file.
   await agent.keepImage('2.4.12; rm -rf /', want);
-  assert.equal(agent.worker.cfg.image, 'localhost/citadel-worker:abcdef12-2.4.11');
+  assert.equal(agent.worker.cfg.image, 'localhost/citadel-worker:abcdef12-2.4.12');
 });

@@ -27,6 +27,7 @@ export function workerState(m) {
   if (!w.on) return { tone: 'neutral', word: 'Off', why: w.here ? 'It is set up and connected, and takes no turns while this is off.' : mine(m) ? 'Let your own minions run on this PC.' : 'Its owner can let their own minions run on it.' };
   if (!w.here && !w.host) return { tone: 'info', word: 'Not set up yet', why: 'Run the command below once on that PC.' };
   if (!w.here) return { tone: 'warn', word: 'Away', why: `Last heard from ${w.seen ? ago(w.seen) : 'some time ago'}. ${w.wsl ? 'Signing out of Windows stops it: sign in there, and it comes back by itself.' : 'Turn that PC on; if it is on, "sudo citadel-worker status" there says why.'}` };
+  if (w.twice) return { tone: 'warn', word: 'Two workers', why: "This PC's Citadel agent has a worker block in its config too, and is refused: take that block out. Its minion turns run in citadel-worker." };
   if (w.image?.state === 'failed') return { tone: 'danger', word: 'Image failed', why: `${w.image.text} It tries again in 10 minutes.` };
   if (w.image?.state === 'building') return { tone: 'info', word: 'Building its image', why: w.image.text };
   if (w.full) return { tone: 'warn', word: 'Disk cap reached', why: `It uses ${w.disk_gb} of ${w.caps?.disk_gb} GB, so no new turn starts there.` };

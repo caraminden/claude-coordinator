@@ -48,8 +48,11 @@
   font-size: 0.875rem;
   font-weight: 700;
 }
-/* A collapsed row gives back the height the avatar takes. */
-.speaker-avatars .msg.coord > summary .who[data-speaker] { margin-block: -0.2rem; }
+/* A collapsed row's avatar stands before its arrow, in line with the open bubbles'. The row is as tall as the avatar, so
+   its tap area no longer needs to reach past it (thread.css's #log summary). */
+.speaker-avatars #log .msg.coord > summary:has(> .who[data-speaker]) { position: relative; margin-block: 0; padding-block: max(0.3rem, var(--tap-pad) - 0.3rem); padding-left: calc(0.85rem + var(--av-size) + 0.5rem); }
+.speaker-avatars .msg.coord > summary > .who[data-speaker] { position: static; padding-left: 0; }
+.speaker-avatars .msg.coord > summary > .who[data-speaker]::after { left: 0.85rem; top: calc(50% - var(--av-size) / 2); }
 /* The name and the bubble's left edge in the speaker's hue; cards keep their own colours. The row's tags stay muted. */
 .speaker-avatars :is(.msg > .who, .msg > summary > .who)[data-speaker] { color: var(--av-hue); font-weight: 600; }
 :where(.speaker-avatars .who[data-speaker]) .msg-tag { color: var(--muted); font-weight: normal; }

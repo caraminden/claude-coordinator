@@ -22,7 +22,7 @@ export const ALLOWED: Record<string, [number, string]> = {
     5798,
     'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+11: busy and a recorded answer its chat reads next turn, #1930) (+5: the state a status line gives, kept on its event, #1923) (+134: cards that outlive their turn, #1916) (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792) (+135: the launch off the main thread and its stop and close deferrals, #1808) (+135: worker-line host, stop, pause, boot and view calls; the line itself is turn-line.ts, #1868) (+43: facts for the order of the line and a keepalive in line, #1888) (+15: the compaction callout wiring; the count is compactions.ts, #1920) (+18: a stop settles the outbox rows it dropped, #1904) (+15: what a killed turn spent and kills together, #1938)',
   ],
-  'src/mcp.ts': [2495, 'MCP tool lists, and the tool families not split out yet (#1843)'],
+  'src/mcp.ts': [2108, 'MCP tool lists, and the tool families not split out yet (#1843)'],
   'tools/land.sh': [2841, 'the ship script is one shell program; its steps share state and are pinned by tests (+141: a red train pulls every likely ship and hands what is left to the next one, #1918)'],
   'kit/skills/scheme-setup/templates/land.sh': [2887, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted (+8: the count merge rule, #1917)'],
   'public/machine-agent.mjs': [2474, 'standalone agent a person runs on their own computer: one file so it can be copied alone (raised once for the Biome reformat, #1792)'],

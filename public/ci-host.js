@@ -135,11 +135,11 @@ function holdRow(l) {
           ),
           cap ? hueRow({ hue: 'waiting', meta: 'ships first' }, cap) : '',
         )
-      : emptyCard('Nothing runs or waits', 'Citadel runs one heavy job at a time here: ships first, then the full run on main, then checks, then flake proofs, heavy jobs and test runs started by hand.'),
+      : emptyCard('Nothing runs or waits', 'Citadel runs one heavy job at a time here: ships first, then the full run on main, then checks, then heavy jobs and test runs started by hand. One flake proof at a time may run beside ships.'),
     h(
       'p',
       { class: 'look-prose' },
-      "Order: a ship's tests (never stopped), the full run on main, a ship's own check or the next ship's early tests, then everything else. A ship stops whatever runs (the full run on main goes beside ships once they have held it 30 minutes); what it stops starts again from its beginning by itself, unless it was a check whose ship has gone on. A job that has run 4 hours keeps no other waiting, and a job held for a day is reported to its Taskmaster.",
+      "Order: a ship's tests (never stopped), the full run on main, a ship's own check or the next ship's early tests, then everything else. A ship stops whatever runs but a flake proof: one of those at a time runs on beside ships, the longest held first. The full run on main goes beside ships once they have held it 30 minutes. A stopped job starts again from its beginning by itself, unless it was a check whose ship has gone on. A job that has run 4 hours keeps no other waiting, and a job held for a day is reported to its Taskmaster.",
     ),
   );
   return row;

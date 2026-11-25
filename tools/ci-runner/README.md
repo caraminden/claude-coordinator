@@ -607,16 +607,16 @@ ships 30 minutes at most. A ship's `land/**` run is never touched, and another s
 held 4 hours at most.
 **One flake proof beside ships** (Josh, 2026-11-25, picked "Let them run, one at a time" on #1902's card; it narrows both his earlier
 picks, for flake proofs only): one proof starts and runs on whatever the ship line does, and the next, the longest held first, starts when it ends.
-A ship, its own check and the early next train never wait for one; main's run, heavy jobs and suites run before or after one, never beside: each waits for the one that runs, and goes before the next if it may start.
+A ship, its own check and the early next train never wait for one; main's run stops one once it may start, as before; heavy jobs and suites never run beside one: each waits for the one that runs, and goes before the next if it may start.
 No proof starts while a ship's red tests run again alone (`rerun failed files alone`); one already running goes on.
 **One Citadel job at a time** (#1906; Josh, 2026-11-24: "Citadel never runs two heavy jobs at once"): the runs of Citadel's
 own repo go one by one, in the order ship, main's full run, a ship's own check (`check/**`, a light check) or the early next
 train (`early/**`), then heavy jobs and suites started by hand, then flake proofs. A job is let in when it asks; one told to wait is
-stopped and started again by itself. A ship's run stops whatever runs, main's included, until main's has
-waited 30 minutes for ships: then it runs beside them (#1902's cap, the one time two of them run at once but for the caps below). An own check or early run starts only
+stopped and started again by itself. A ship's run stops whatever runs but a flake proof, main's included, until main's has
+waited 30 minutes for ships: then it runs beside them (#1902's cap, the one time two of them run at once but for a proof and the caps below). An own check or early run starts only
 on an idle desktop (`ci_busy` in `deploy-queue.sh` before the push, the ask after): its ship goes on without it, and the stopped run
 comes back only while its branch is there. A job that has run 4 hours keeps no other
-waiting, and none waits behind lower ones past 24 hours (main's run waits for ships 30 minutes). Other
+waiting, and none waits behind lower ones past 24 hours (a proof waits its turn; main's run waits for ships 30 minutes). Other
 schemes' jobs neither take nor wait for the place. Compare ships before and after with `node tools/ship-runs.ts --at <when>`. A job asks before it starts (`tools/ci-hold-ask.ts`, the run's OIDC token, `POST /api/ci-hold`) and
 goes ahead when Citadel doesn't answer. Held jobs show on the CI page ("One job at a time"); one held a day is reported to
 its Taskmaster. Off switch: `touch` the deploy state folder's `hold-off`, which also lets Citadel's jobs run side by side again; touch it too while `CI_RUNNER=github`, since the hold can't see that those runs are not on the desktop.

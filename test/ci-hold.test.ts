@@ -203,11 +203,11 @@ test('heavy jobs and a suite started by hand are held too; another scheme only h
 
 test("main's queued run starts before anything optional, and a running optional job yields to it", async () => {
   const w = world();
-  w.heavy();
+  w.proof();
   await w.for(10 * MIN);
   const main = w.main({ status: 'queued' });
   await w.tick();
-  assert.deepEqual(w.posts, ['cancel 1'], 'the heavy job is stopped, main is not');
+  assert.deepEqual(w.posts, ['cancel 1'], 'the proof is stopped, main is not');
   assert.equal((await w.hold.ask(OWN, main.id, w.now)).go, true);
   Object.assign(main, { status: 'in_progress' });
   await w.for(8 * MIN);
@@ -1012,34 +1012,27 @@ test('proofs held before the change come back one by one, ships in line all day'
   assert.deepEqual(w.posts, ['rerun 1', 'rerun 2', 'rerun 3']);
 });
 
-test("main's run waits for a running proof, goes before the next, and holds none while it waits for ships itself", async () => {
+test("main's run stops a proof once it may start, not while it waits for ships itself", async () => {
   const w = world();
   w.line = 1;
-  const [a, b] = proofs(w, 2);
+  const p = w.proof();
   await w.tick();
-  assert.deepEqual([await w.ask(a), await w.ask(b)], [true, false]);
+  assert.equal(await w.ask(p), true);
   const main = w.main();
   assert.equal(await w.ask(main), false);
   await w.for(5 * MIN);
-  end(a);
-  await w.for(MIN);
-  assert.deepEqual(w.posts, ['cancel 2', 'cancel 3', 'rerun 2'], 'ships hold main, not the next proof');
-  b.status = 'in_progress';
-  assert.equal(await w.ask(b), true);
-  const c = w.add('flake-proof test/c.test.ts', { file: 'flake-proof.yml' });
-  assert.equal(await w.ask(c), false);
+  assert.deepEqual(w.posts, ['cancel 2']);
   w.line = 0;
-  await w.for(5 * MIN);
-  assert.equal(b.status, 'in_progress', 'main waits for it');
-  end(b);
-  await w.for(MIN);
-  assert.equal(w.posts.at(-1), 'rerun 3', 'main first');
+  await w.for(2 * MIN);
+  assert.deepEqual(w.posts, ['cancel 2', 'cancel 1', 'rerun 2']);
+  assert.match(w.told[0].text, /main's full test run goes first.*counted from zero/s);
+  assert.doesNotMatch(w.told[0].text, /ships go first/);
   main.status = 'in_progress';
   assert.equal(await w.ask(main), true);
   await w.for(5 * MIN);
   end(main);
   await w.for(2 * MIN);
-  assert.equal(w.posts.at(-1), 'rerun 4', 'then the proof, without the settle time');
+  assert.equal(w.posts.at(-1), 'rerun 1', 'back without the settle time');
 });
 
 test('a proof that waits for a runner keeps its turn, through a restart too', async () => {

@@ -10,8 +10,8 @@ interface Family {
   /** What a new copy should use instead. */
   use: string;
   copy: RegExp;
-  /** A copy the pattern must find (the old code's shape), so a pattern that stops matching goes red. */
-  planted: string;
+  /** Copies the pattern must find (the old code's shapes), so a pattern that stops matching goes red. */
+  planted: string[];
   /** Files that keep copies: how many, and why. */
   kept: Record<string, { copies: number; why: string }>;
 }
@@ -19,8 +19,8 @@ interface Family {
 const FAMILIES: Record<string, Family> = {
   wait: {
     use: "import { setTimeout as sleep } from 'node:timers/promises' (sleep(ms, undefined, { ref: false }) to not hold the process open)",
-    copy: /new Promise(?:<[^>]*>)?\(\s*\(?(\w+)\)?\s*=>\s*(?:void\s+)?setTimeout\(\s*\1\s*,/g,
-    planted: 'const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));',
+    copy: /new Promise(?:<[^>]*>)?\(\s*\(?(\w+)\)?\s*=>\s*(?:void\s+|\{\s*)?setTimeout\(\s*(?:\(\)\s*=>\s*)?\1\s*(?:\(\))?\s*,/g,
+    planted: ['const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));', 'new Promise<void>((done) => setTimeout(() => done(), ms))', 'new Promise((r) => {\n  setTimeout(r, 5);\n})'],
     kept: {
       'tools/ui-sweep.ts': { copies: 1, why: 'runs in the browser page, inside a string' },
       'tools/ui-shot.ts': { copies: 2, why: 'runs in the browser page, inside a string' },
@@ -34,8 +34,8 @@ const FAMILIES: Record<string, Family> = {
 };
 
 const root = join(import.meta.dirname, '..');
-const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', 'server.ts', 'src', 'tools'], { cwd: root, encoding: 'utf8' })
-  .split('\n')
+const files = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', 'server.ts', 'src', 'tools'], { cwd: root, encoding: 'utf8' })
+  .split('\0')
   .filter((f) => /\.(ts|mjs|js)$/.test(f) && existsSync(join(root, f)));
 
 const linesOf = (text: string, copy: RegExp) => [...text.matchAll(copy)].map((m) => text.slice(0, m.index).split('\n').length);
@@ -53,6 +53,6 @@ for (const [name, family] of Object.entries(FAMILIES)) {
   });
 
   test(`${name}: a planted copy is found`, () => {
-    assert.equal(linesOf(family.planted, family.copy).length, 1);
+    for (const p of family.planted) assert.equal(linesOf(p, family.copy).length, 1, p);
   });
 }

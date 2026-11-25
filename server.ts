@@ -106,6 +106,7 @@ import { loadDecisions, memoryLogins } from './src/decisions-load.ts';
 import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
+import { POOL } from './src/turn-line.ts';
 import { pressure } from './src/pressure.ts';
 import { MemoryEase } from './src/memory-ease.ts';
 import { GrowthStop } from './src/growth-stop.ts';
@@ -403,6 +404,8 @@ runner.noTurns = PREVIEW;
 runner.contraptionKeys = contraptions.dir;
 // The line of kill resumes (#1364) holds while the box is starved; nothing else in the runner waits on it.
 runner.killStarved = () => pressure.read();
+// The worker pool sizes itself to the box (#1868), unless a person set a number.
+setInterval(() => void pressure.read().then((r) => runner.turnLine.tick(r)).catch((e) => console.error('worker pool:', e)), POOL.everyMs).unref();
 // The server notices a stall (#1139): counts each minion's red tests, file churn and failed ships, and suggests a step-up to its Taskmaster.
 const stallWatch = new StallWatch({
   store,

@@ -68,6 +68,7 @@ function makeRunner() {
     fake,
   );
   r.pollMs = 10;
+  r.turnLine.setSize(50, 'Cara'); // its 16-turn wave all runs (#1868)
   r.resumeGapMs = 0;
   r.onTurnError = (ticket, text) => pushes.push({ ticket, text });
   r.personOf = (author) => (author === 'Josh' ? josh.id : author === 'Cara' ? cara.id : null);

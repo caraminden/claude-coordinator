@@ -19,7 +19,7 @@ export interface ComposerOptions {
   label?: string;
   /** Keep unsent text in localStorage under this key (as JSON), restored on mount: one key per chat. */
   draftKey?: string;
-  /** Whether a send may go, given the trimmed text (default: it isn't empty). For a message that can carry more than text, or to refuse while something is still getting ready. */
+  /** Whether a send may go, given the trimmed text (default: it isn't empty). For a message that can carry more than text, or to refuse while something is still getting ready. Also asked with '' before Citadel reloads the page by itself: true (files waiting) holds the reload, so answering '' must change nothing. */
   canSend?(text: string): boolean;
   /**
    * Put the caret in the box by itself (default true; false opts out): when it comes up, when the window

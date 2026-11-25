@@ -195,6 +195,34 @@ function focusOnceShown(textarea, frames = 60) {
   else textarea.dataset.cuiSeen = ''; // never shown: dropped once it's off the page
 }
 
+// ---------- an automatic reload (#1939) ----------
+// Citadel's rail.js reloads a framed app's page by itself after a deploy, and asks first with
+// citadel-before-reload on the document (rail.d.ts). What only this page holds says no: a message still being
+// sent (its box is already empty, and may be off the page by now) and files waiting in a tray with no words.
+
+/** A send that hasn't settled by now is taken as stuck: it stops holding the reload. Long enough for a video to upload. */
+const SEND_HOLD_MS = 10 * 60_000;
+const inFlight = new Set(); // one { at } per send not settled yet
+const boxes = new Set(); // every box that can send without words; one off the page stays while it has something to
+let asked = false;
+
+const waiting = (b) => {
+  try {
+    return !!b.canSend('');
+  } catch {
+    return false; // a box whose page is gone
+  }
+};
+
+function answerReload() {
+  if (asked) return;
+  asked = true;
+  document.addEventListener('citadel-before-reload', (e) => {
+    const since = Date.now() - SEND_HOLD_MS;
+    if ([...inFlight].some((s) => s.at > since) || [...boxes].some(waiting)) e.preventDefault();
+  });
+}
+
 // ---------- the composer ----------
 
 const make = (tag, props, ...children) => {
@@ -277,6 +305,8 @@ export function mountComposer(el, opts) {
     fit();
     save();
     sending++;
+    const flight = { at: Date.now() };
+    inFlight.add(flight);
     render();
     // Called straight away, inside the submit, so a caller can read state it set just before requestSubmit().
     let sent;
@@ -299,10 +329,19 @@ export function mountComposer(el, opts) {
       })
       .finally(() => {
         sending--;
+        inFlight.delete(flight); // after a failure's words are back, so one or the other always holds
         render();
       });
   });
   render();
+  answerReload();
+  // Only a framed page is asked, so Citadel's own chats aren't kept here.
+  if (opts.canSend && window.parent !== window) {
+    for (const b of boxes) if (b.shown && !b.form.isConnected && !waiting(b)) boxes.delete(b);
+    const b = { form, canSend: opts.canSend, shown: false };
+    boxes.add(b);
+    requestAnimationFrame(() => (b.shown = form.isConnected)); // one built off the page and shown later is never dropped
+  }
   if (opts.autofocus !== false) {
     dropGone(); // each box holds its whole page, so the ones gone go now, not at the next focus
     live.push(textarea);

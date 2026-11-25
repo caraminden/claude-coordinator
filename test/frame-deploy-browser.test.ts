@@ -39,6 +39,33 @@ const APP = `<!doctype html><meta charset="utf-8"><body><textarea id="t"></texta
   const tell = (test, value) => parent.postMessage({ app, test, value }, '*');
   // Text left in the box, as a draft someone stopped typing: no input event, so only the box's value holds a reload back.
   addEventListener('message', (e) => { if (typeof e.data?.fill === 'string') { document.getElementById(e.data.id ?? 't').value = e.data.fill; tell('filled', e.data.fill); } });
+  // With ?box, Citadel UI's message box too (#1939): its sends settle when told, its tray holds what it's told, and its clock can be moved on.
+  if (new URLSearchParams(location.search).has('box')) {
+    const { mountComposer } = await import('/apps/_citadel/ui/composer.js');
+    let settle = () => {};
+    let tray = 0;
+    let skew = 0;
+    const now = Date.now;
+    Date.now = () => now() + skew;
+    const place = document.body.appendChild(document.createElement('div'));
+    const mount = () => mountComposer(place, {
+      autofocus: false,
+      canSend: (text) => !!text || tray > 0,
+      send: () => new Promise((ok, no) => { tray = 0; settle = (sent) => (sent ? ok() : no(new Error('refused'))); }),
+      onError: () => tell('step', 'settle:' + box.value), // the words are back
+    });
+    let box = mount();
+    addEventListener('message', (e) => {
+      const { box: step, value } = e.data ?? {};
+      if (step === 'send') { box.value = value; box.form.requestSubmit(); }
+      else if (step === 'settle') { settle(value); if (!value) return; }
+      else if (step === 'tray') tray = value;
+      else if (step === 'skew') skew = value;
+      else if (step === 'other chat') { place.replaceChildren(); box = mount(); } // as Peek does for another aura
+      else return;
+      tell('step', [step, box.value].join(':'));
+    });
+  }
   tell('href', location.href);
   tell('loads', loads);
 </script>`;
@@ -157,4 +184,73 @@ test('a deploy the stream missed (it has no replay) is caught from the rail list
   await waitFor(page, "peek's frame to reload", 'echo.peek.loads === 2');
   assert.equal(await page.eval(`!!${offer}`), false, "toc's last deploy was before its frame loaded: no offer over it");
   assert.equal(await page.eval('echo.toc.loads'), 1);
+});
+
+// ---------- a message still being sent (#1939): its words have left the box, and only this page holds them ----------
+
+/** One step in peek's message box, done once its page says so. */
+async function inBox(page: Page, step: string, value: unknown, text = ''): Promise<void> {
+  await page.eval(`(echo.peek.step = null, tell('peek', { box: ${JSON.stringify(step)}, value: ${JSON.stringify(value)} }))`);
+  await waitFor(page, `${step} in peek's box`, `echo.peek.step === ${JSON.stringify(`${step}:${text}`)}`);
+}
+
+/** Asks peek's frame, out of sight, to reload for a new deploy. */
+async function askedToReload(page: Page, answer: 'held' | 'reload', why: string): Promise<void> {
+  await page.eval(`appDeployed('peek')`);
+  await waitFor(page, why, answer === 'held' ? `frameOf('peek').dataset.update === 'held'` : 'echo.peek.loads === 2');
+  if (answer === 'held') assert.equal(await page.eval('echo.peek.loads'), 1, why);
+}
+
+test('a frame out of sight with a message still being sent is held, and reloads once it is sent', { skip }, async () => {
+  const page = await twoFrames('?box');
+  await inBox(page, 'send', 'words with screenshots');
+  await askedToReload(page, 'held', 'held while the message is on its way');
+  await inBox(page, 'settle', true);
+  await waitFor(page, 'the reload, asked again by itself', 'echo.peek.loads === 2');
+});
+
+test('a frame already stale when the person sends and leaves is held too', { skip }, async () => {
+  const page = await twoFrames('?box');
+  await page.eval(`showFrame('peek')`);
+  await page.eval(`appDeployed('peek')`);
+  await waitFor(page, 'the offer over peek', `${offer}?.textContent.includes('new version')`);
+  await inBox(page, 'send', 'sent on the old version');
+  await page.eval('hideFrames()');
+  await waitFor(page, 'peek to say it holds a message being sent', `frameOf('peek').dataset.update === 'held'`);
+  assert.equal(await page.eval('echo.peek.loads'), 1);
+});
+
+test('a send that fails leaves its words in the box, which holds the reload as any unsent text does', { skip }, async () => {
+  const page = await twoFrames('?box');
+  await inBox(page, 'send', 'refused words');
+  await inBox(page, 'settle', false, 'refused words');
+  await askedToReload(page, 'held', 'held by the words put back');
+});
+
+test('a message being sent from a box the page has since replaced (another chat opened) holds the reload', { skip }, async () => {
+  const page = await twoFrames('?box');
+  await inBox(page, 'send', 'sent from the first chat');
+  await inBox(page, 'other chat', null);
+  await askedToReload(page, 'held', 'held by the first chat');
+  await inBox(page, 'settle', true);
+  await askedToReload(page, 'reload', 'it was sent');
+});
+
+test('files waiting to go with an empty box hold the reload, in a box the page has replaced too', { skip }, async () => {
+  const page = await twoFrames('?box');
+  await inBox(page, 'tray', 2);
+  await askedToReload(page, 'held', 'held by the files');
+  await inBox(page, 'other chat', null);
+  await askedToReload(page, 'held', 'the first chat still has them');
+  await inBox(page, 'tray', 0);
+  await askedToReload(page, 'reload', 'nothing waits');
+});
+
+test('a send that never settles holds the reload for ten minutes, not for ever', { skip }, async () => {
+  const page = await twoFrames('?box');
+  await inBox(page, 'send', 'stuck');
+  await inBox(page, 'skew', 10 * 60_000 - 30_000);
+  await askedToReload(page, 'held', 'still on its way');
+  await inBox(page, 'skew', 10 * 60_000 + 1000);
+  await askedToReload(page, 'reload', 'given up on');
 });

@@ -73,6 +73,16 @@ export const chromeIntent: (url: URL) => string;
 /** Whether the page runs inside an app's native shell (Capacitor WebView or a "CitadelApp" user agent), where the rail never renders. */
 export function inNativeApp(win?: unknown): boolean;
 
+declare global {
+  interface DocumentEventMap {
+    /**
+     * On document, before a framed page reloads itself out of sight onto its new version: preventDefault() while the
+     * page holds something unsent that no text field shows. Asked again every few seconds; ui/composer.js answers for its boxes.
+     */
+    'citadel-before-reload': CustomEvent<null>;
+  }
+}
+
 /**
  * Citadel's right-click menu on the page (#1665), mounted by rail.js; also `window.citadel.menu`. add() gives what
  * matches `selector` its own items, under a "From <app>" line between Point and Copy; the deepest match wins. `items` is

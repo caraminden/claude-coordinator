@@ -782,9 +782,12 @@ const TEXT_FIELDS = 'textarea, input:not([type]), input[type=text], input[type=s
 /**
  * Whether reloading this framed page would lose something typed (#1690): typing in the last few seconds, or a text field
  * changed from what it loaded with (emptied too). A field the page fills in itself counts too, so that one gets the offer, not a reload.
+ * What only the page knows (#1939: a message still being sent, files waiting in a tray) it says by cancelling
+ * citadel-before-reload, as ui/composer.js does for its boxes.
  */
 function unsentHere() {
   if (Date.now() - typedAt < TYPING_MS) return true;
+  if (!document.dispatchEvent(new CustomEvent('citadel-before-reload', { cancelable: true }))) return true;
   return [...document.querySelectorAll(TEXT_FIELDS)].some((el) => (el.isContentEditable ? el.textContent.trim() !== '' : el.value !== el.defaultValue));
 }
 

@@ -30,7 +30,8 @@ disabled while a message is on its way; 16 px on phones so iOS doesn't zoom; a m
   takes it from another field, a menu or a dialog, and a redraw or new message never moves it. Pass
   `false` for a box that isn't the page's main chat.
 - More options: `label` (the box's accessible name), `canSend(text)` (refuse, or allow an empty text
-  when something else rides along), `onError(err)` (show a failed send your own way).
+  when something else rides along; Citadel also asks `canSend('')` before it reloads your page by itself,
+  so answering it must change nothing), `onError(err)` (show a failed send your own way).
 - It returns `form`, `textarea`, `row` and `sendButton` too: put your own buttons (attach, a model
   picker) in `row` before Send, and restyle `.cui-composer` with your own selectors.
 - `fitHeight(textarea)` and `continueList(textarea, e, enterAddsLine)` from the same module give your

@@ -341,6 +341,8 @@ if (workerData?.reader) {
         pin(store.db);
         at = -1n;
       }
+      // The front thread answered it long since (four times READER_ANSWER_MS): a main thread stuck in a step must not pile these up here.
+      if (at === null && Date.now() - start > 5 * READER_ANSWER_MS) return null;
       if (at !== null) {
         let end!: () => void;
         tx = { at, refs: 0, done: new Promise<void>((r) => (end = r)), end };
@@ -383,6 +385,7 @@ if (workerData?.reader) {
     if (data.testHooks && /[?&]citadel-test-reader=hang\b/.test(m.url)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
     // A disk that answers nothing for that many ms.
     const stall = data.testHooks && /[?&]citadel-test-reader=stall-(\d+)/.exec(m.url);
+    if (stall) console.log('Reader test hook: stalled');
     if (stall) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(stall[1]));
     if (data.testHooks && /[?&]citadel-test-reader=slow\b/.test(m.url)) {
       console.log('Reader test hook: slow');

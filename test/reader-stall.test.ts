@@ -33,11 +33,10 @@ const get = async (srv: Booted, path: string, signal?: AbortSignal): Promise<Got
 };
 const readerAnswers = (srv: Booted) => until('a reader answers', async () => (await get(srv, PAGE)).by === 'reader');
 /** Stall both readers for `ms`: two requests, which go to a reader each, both given up at once by the page that sent them. */
-async function stall(srv: Booted, ms: number) {
+async function stall(srv: Booted, log: string, ms: number) {
   const gone = new AbortController();
   const sent = [1, 2].map((n) => get(srv, `/api/tickets/${M.id}/events?citadel-test-reader=stall-${ms}&n=${n}`, gone.signal).catch(() => null));
-  // timing-ok: both requests reach their reader; the checks after it fail, not pass, if one hasn't
-  await new Promise((r) => setTimeout(r, 300));
+  await until('both readers are stalled', () => readFileSync(join(root, log), 'utf8').split('Reader test hook: stalled').length === 3);
   gone.abort();
   await Promise.all(sent);
 }
@@ -60,7 +59,7 @@ test('with both readers stalled, page reads are answered by the readers started 
   const srv = await bootServer({ root, env: KNOBS, log: join(root, 'one.log') });
   try {
     await readerAnswers(srv);
-    await stall(srv, 15_000);
+    await stall(srv, 'one.log', 15_000);
     const t0 = Date.now();
     // As the page asks (public/base.js): again on a 503 that says so.
     const pages = Promise.all(
@@ -95,7 +94,7 @@ test('with no reader to be had, a page read fails within its wait, saying to ret
   try {
     await readerAnswers(srv);
     rmSync(may); // the ones started in their place don't get ready
-    await stall(srv, 10_000);
+    await stall(srv, 'two.log', 10_000);
     const first = get(srv, PAGE);
     const worst = await slowestHealth(srv, first);
     const got = await first;

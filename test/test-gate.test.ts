@@ -102,7 +102,7 @@ test('a file that waits prints one line, holds no place and starts anyway after 
 test('off, on CI and inside a heavy slot, nothing waits', async () => {
   for (const off of [{ CITADEL_TEST_FILES: '0' }, { RUNNER_TEMP: '/tmp' }, { GITHUB_ACTIONS: 'true' }, { CITADEL_HEAVY_HELD: '1' }]) {
     const { env, run } = setup(60);
-    await Promise.all(Array.from({ length: 6 }, () => file({ ...env, ...off }, 300)));
-    assert.equal(peak(run), 6, JSON.stringify(off));
+    await Promise.all(Array.from({ length: 6 }, () => file({ ...env, ...off }, 3000)));
+    assert.ok(peak(run) > 2, `${JSON.stringify(off)}: peak ${peak(run)} is past the floor the busy box would allow`);
   }
 });

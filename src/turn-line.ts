@@ -9,6 +9,7 @@
 import type { Store } from './db.ts';
 import type { PressureReading } from './pressure.ts';
 import type { RetryKind } from './turn-outcome.ts';
+import type { WorkerWait } from './worker-wait.ts';
 
 /** Starting values (#1868): perigee averaged 15% CPU pressure at 7-9 turns, 34% at 10-12, 41% at 13-15, 59% at 26 and more. */
 export const POOL = {
@@ -53,6 +54,9 @@ export interface Pause {
   stop?: true;
   at: number;
 }
+
+/** Whether a minion waits for a worker, for a reader with only the database. */
+export const inLine = (store: Pick<Store, 'getSetting'>, ticketId: number) => (store.getSetting<LineEntry[]>(LINE) ?? []).some((e) => e.ticket === ticketId);
 
 /** A waiting turn as `pick` sees it. `rank`: 0 a person's own message or answer, 1 work started for them, 2 automatic. */
 export interface Waiting {
@@ -120,6 +124,7 @@ export class TurnLine {
   private timer?: NodeJS.Timeout;
   /** Until a boot's resumes are in (open): the line takes turns in but starts none. */
   private closed = false;
+  private ordered: { at: number; ids: number[] } | null = null;
 
   constructor(host: LineHost) {
     this.host = host;
@@ -137,6 +142,34 @@ export class TurnLine {
 
   has(ticketId: number): boolean {
     return this.entries.some((e) => e.ticket === ticketId);
+  }
+
+  /** The waiting minions in the order they would start in if nothing else came. */
+  order(): number[] {
+    if (this.ordered && Date.now() - this.ordered.at < 1000) return this.ordered.ids;
+    const running = this.byPerson();
+    let rest = this.asked(this.entries);
+    const ids: number[] = [];
+    for (let w = pick(rest, running, Date.now()); w; w = pick(rest, running, Date.now())) {
+      ids.push(w.ticket);
+      running.set(w.person, (running.get(w.person) ?? 0) + 1);
+      rest = rest.filter((r) => r !== w);
+    }
+    this.ordered = { at: Date.now(), ids };
+    return ids;
+  }
+
+  wait(ticketId: number): WorkerWait | null {
+    const entry = this.entries.find((e) => e.ticket === ticketId);
+    if (!entry) return null;
+    return { since: entry.since, place: this.order().indexOf(ticketId) + 1, of: this.entries.length, paused: this.paused()?.by ?? null };
+  }
+
+  /** Each person's workers and waiting turns, the most first. */
+  people(): { person: number; used: number; waiting: number }[] {
+    const out = new Map([...this.byPerson()].map(([person, used]) => [person, { person, used, waiting: 0 }]));
+    for (const w of this.asked(this.entries)) out.set(w.person, { person: w.person, used: 0, ...out.get(w.person), waiting: (out.get(w.person)?.waiting ?? 0) + 1 });
+    return [...out.values()].sort((a, b) => b.used + b.waiting - a.used - a.waiting || a.person - b.person);
   }
 
   pool(): PoolSize {
@@ -296,18 +329,26 @@ export class TurnLine {
   }
 
   private best(entries: LineEntry[]): LineEntry | null {
-    const running = new Map<number, number>();
-    for (const g of this.granted.values()) running.set(g.person, (running.get(g.person) ?? 0) + 1);
-    const w = pick(
-      entries.map((e) => ({ ...e, ...this.host.asks(e.ticket, e.via) })),
-      running,
-      Date.now(),
-    );
+    const w = pick(this.asked(entries), this.byPerson(), Date.now());
     return w && entries.find((e) => e.ticket === w.ticket)!;
   }
 
+  private asked(entries: LineEntry[]): Waiting[] {
+    return entries.map((e) => ({ ...e, ...this.host.asks(e.ticket, e.via) }));
+  }
+
+  private byPerson(): Map<number, number> {
+    const running = new Map<number, number>();
+    for (const g of this.granted.values()) running.set(g.person, (running.get(g.person) ?? 0) + 1);
+    return running;
+  }
+
   private save(entries: LineEntry[]) {
+    const was = this.waiting();
     this.entries = entries;
+    this.ordered = null;
     this.host.store.setSetting(LINE, entries);
+    const now = this.waiting();
+    this.host.changed([...was.filter((id) => !now.includes(id)), ...now.filter((id) => !was.includes(id))]);
   }
 }

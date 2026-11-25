@@ -35,6 +35,7 @@ const OTHER: Record<string, string> = {
   mainModels: "the context window keeps its last turn's value until the next init event",
   strayWaits: 'a poll on a turn wrapper nothing here follows; liveTurn finds the stray turn folder again after a restart (#1464)',
   launching: 'a launch in flight on this server; its batch stays owed (queue.owe) until the turn is saved as running, so recover() runs it again after a crash mid-launch (#1808)',
+  lineMoved: 'the minions whose worker line place moved, for the next 200 ms broadcast; a page that reconnects reads the line itself (#1868)',
   strays: 'rebuilt at boot by noteStrays from the turn folders the last server left (#1808)',
   refsSeq: "a refresh counter by scheme; a restart starts every scheme's snapshot afresh (#1808)",
 };

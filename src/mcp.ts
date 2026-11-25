@@ -98,6 +98,7 @@ import { NEEDS, NEED_LINES, stateWord } from './needs.ts';
 import { heldToolText, msgFromEnv } from './msg-settings.ts';
 import { pacificDay, pacificStamp } from './pacific.ts';
 import { toolsForTurn } from './tool-hold.ts';
+import { workerWaitText } from './worker-wait.ts';
 const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says.` };
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
 const HELD = () => heldToolText(C().MSG, 'the minion and the Taskmaster');
@@ -1559,7 +1560,7 @@ function ticketLine(t: TicketView): string {
     t.effort ? `effort: ${t.effort}` : '',
     t.workflow ? 'workflow: on' : '',
     t.plugin_dirs ? `plugins: ${t.plugin_dirs.split('\n').join(', ')}` : '',
-    `status: ${t.status}${t.state ? `, ${stateWord(t.state)}` : ''}${t.asleep ? `, asleep (${t.asleep.by} put it to sleep; any message wakes it)` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
+    `status: ${t.worker_wait ? workerWaitText(t.worker_wait) : t.status}${t.state ? `, ${stateWord(t.state)}` : ''}${t.asleep ? `, asleep (${t.asleep.by} put it to sleep; any message wakes it)` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
     t.note ? `note: ${t.note}` : '',
     t.branch ? `branch: ${t.branch}` : '',
     t.worktree ? `worktree: ${t.worktree}` : '',

@@ -1,13 +1,16 @@
 // The ways back (src/rollback-starters.ts), each on stand-ins: what it starts, and every refusal.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ServiceError } from '../src/app-services.ts';
 import { HttpError } from '../src/http.ts';
 import { CITADEL_TARGET, type TargetView } from '../src/releases.ts';
 import { rollbackStarters, type RollbackStarterDeps } from '../src/rollback-starters.ts';
+
+const root = mkdtempSync(join(tmpdir(), 'rollback-starters-'));
+after(() => rmSync(root, { recursive: true, force: true }));
 
 const TO = 'a'.repeat(40);
 const BAD = 'b'.repeat(40);
@@ -16,8 +19,7 @@ const KEY = { GH_TOKEN: 'x' };
 type Job = ReturnType<RollbackStarterDeps['jobs']['state']>;
 function world(over: Record<string, unknown> = {}) {
   const calls: unknown[][] = [];
-  const dir = join(mkdtempSync(join(tmpdir(), 'rollback-starters-')), 'rollback');
-  mkdirSync(dir);
+  const dir = mkdtempSync(join(root, 'job-'));
   writeFileSync(join(dir, 'started'), '1');
   const s = {
     project: { id: 3, repo_dir: '/repo', repo_url: 'https://github.com/o/r' } as { id: number; repo_dir: string | null; repo_url: string } | undefined,

@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { bootServer, until, type Booted } from './helpers.ts';
-import { chromium, launch, waitFor, type Browser, type Page } from './browser.ts';
+import { chromium, launch, serveUi, waitFor, type Browser, type Page } from './browser.ts';
 
 const bin = chromium();
 const skip = !bin && 'no headless Chromium in ~/.cache/ms-playwright';
@@ -234,4 +234,55 @@ test('the phone sheet inside a modal dialog: its row runs, its dim closes only t
   const { x, y } = await page.centre('.cui-menu-item');
   await page.tap(x, y);
   await waitFor(page, 'the row to run', 'window.ran === 1');
+});
+
+// The sheet in an app's page: base.css and menu.js alone.
+const SHEET_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/ui/base.css">
+<style>body{margin:0}#bar{position:sticky;top:0;z-index:20;height:60px;background:#fff}</style><div id="bar"><button id="tab">Tab</button></div><p id="thing">Thing</p>
+<script type="module">
+  import { openMenu } from '/ui/menu.js';
+  window.taps = 0;
+  document.getElementById('tab').addEventListener('click', () => window.taps++);
+  window.sheet = () => void openMenu({ kind: 'Thing', sheet: true, items: [{ label: 'Open', run: () => {} }] }, 0, 0);
+  window.ready = true;
+</script>`;
+
+test("a bar with a z-index is under the sheet's dim: a tap there closes the sheet and doesn't reach it", { skip }, async () => {
+  const app = await serveUi(SHEET_PAGE);
+  try {
+    const page = await browser.page(app.base, { width: 390, height: 800, touch: true });
+    await page.eval('sheet()');
+    const box = await page.eval(`(() => { const s = document.querySelector('.cui-menu-scrim'), b = s.getBoundingClientRect(), c = getComputedStyle(s); return [b.x, b.y, b.width === innerWidth, b.height === innerHeight, c.borderTopWidth, c.paddingTop]; })()`);
+    assert.deepEqual(box, [0, 0, true, true, '0px', '0px'], 'the dim covers the page');
+    const { x, y } = await page.centre('#tab');
+    assert.equal(await page.eval(`document.elementFromPoint(${x}, ${y}).className`), 'cui-menu-scrim');
+    await waitFor(page, 'the sheet at the bottom', 'Math.abs(document.querySelector(".cui-menu").getBoundingClientRect().bottom - innerHeight) < 1');
+    const row = await page.centre('.cui-menu-item');
+    assert.equal(await page.eval(`!!document.elementFromPoint(${row.x}, ${row.y}).closest('.cui-menu')`), true, 'the sheet is above the dim');
+    await hold(400); // the dim ignores taps for its first 350 ms
+    await page.tap(x, y);
+    await waitFor(page, 'the sheet to close', `!${menuOpen}`);
+    assert.equal(await page.eval('window.taps'), 0);
+    assert.equal(await page.eval(`!!document.querySelector('.cui-menu-scrim')`), false);
+  } finally {
+    await app.close();
+  }
+});
+
+test('Back closes the sheet, with a hash route or pushState', { skip }, async () => {
+  const app = await serveUi(SHEET_PAGE);
+  try {
+    const page = await browser.page(app.base, { width: 390, height: 800, touch: true });
+    for (const go of [`location.hash = '#two'`, `history.pushState({}, '', '?two')`]) {
+      await page.eval(go);
+      await hold(100); // its own hashchange is over before the sheet opens
+      await page.eval('sheet()');
+      assert.equal(await page.eval(menuOpen), true);
+      await page.eval('history.back()');
+      await waitFor(page, 'the sheet to close', `!${menuOpen}`);
+    }
+  } finally {
+    await app.close();
+  }
 });

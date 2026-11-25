@@ -395,3 +395,41 @@ test("a toast's hide() hides it while it's the one showing, never a newer one; u
   assert.equal(await toastText(page), null);
   await assert.rejects(page.eval(`toast('x', { undo: { run() {} }, action: { label: 'Retry', run() {} } })`), /undo` or `action/);
 });
+
+test("a toast shown by another toast's action stays up, also when the action then throws", { skip }, async () => {
+  const page = await browser.page(base, { width: 900, height: 700 });
+  const up = `document.querySelector('.cui-toast').matches(':popover-open') && document.querySelector('.cui-toast').textContent`;
+  const act = `document.querySelector('.cui-toast-action').click()`;
+  await page.eval(`window.hidden = []; toast('Not saved', { action: { label: 'Retry', run: () => toast('Saved') }, onHide: () => hidden.push('first') })`);
+  await page.eval(act);
+  assert.equal(await page.eval(up), 'Saved');
+  assert.deepEqual(await page.eval('hidden'), ['first'], 'the first toast went once');
+  // A tap on the new one still sends it away, and an action with no toast of its own still closes its toast, thrown or not.
+  await page.eval(`document.querySelector('.cui-toast').click()`);
+  assert.equal(await page.eval(up), false);
+  await page.eval(`toast('Not saved', { action: { label: 'Retry', run: () => {} } }); ${act}`);
+  assert.equal(await page.eval(up), false);
+  await page.eval(`addEventListener('error', (e) => e.preventDefault(), { once: true }); toast('Not saved', { action: { label: 'Retry', run: () => { throw new Error('no'); } } }); ${act}`);
+  assert.equal(await page.eval(up), false);
+});
+
+test('a hidden kit part is hidden, and a hidden steady label still keeps its room', { skip }, async () => {
+  const page = await browser.page(base, { width: 900, height: 700 });
+  const shown = `(() => {
+    const classes = ['btn', 'input', 'chip', 'choices', 'choice', 'switch', 'spin', 'working', 'status', 'steady', 'skeleton', 'skeleton-card', 'loading', 'failed', 'empty', 'tabs', 'tab', 'menu-item', 'dialog-head', 'topbar', 'upload'];
+    return classes.filter((c) => {
+      const e = document.createElement('div');
+      e.className = 'cui-' + c;
+      e.hidden = true;
+      document.body.append(e);
+      return getComputedStyle(e).display !== 'none';
+    });
+  })()`;
+  assert.deepEqual(await page.eval(shown), []);
+  const label = await page.eval(`(() => {
+    document.body.insertAdjacentHTML('beforeend', '<span class="cui-steady"><span>A</span><span class="cui-chip" id="kept" hidden>Longer</span></span><label id="lab" hidden><input type="checkbox" class="cui-switch"></label>');
+    const s = getComputedStyle(document.getElementById('kept'));
+    return [s.display !== 'none', s.visibility, getComputedStyle(document.getElementById('lab')).display];
+  })()`);
+  assert.deepEqual(label, [true, 'hidden', 'none']);
+});

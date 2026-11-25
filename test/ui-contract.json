@@ -119,6 +119,7 @@
     "base.css": [
       "cui-btn",
       "cui-busy",
+      "cui-chat-empty",
       "cui-chip",
       "cui-choice",
       "cui-choices",
@@ -191,6 +192,7 @@
       "cui-ask",
       "cui-card",
       "cui-chat",
+      "cui-chat-empty",
       "cui-chev",
       "cui-empty",
       "cui-grunt",

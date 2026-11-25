@@ -190,6 +190,40 @@ test("lightbox: ←/→ step and wrap, the app hears of a person's move but not 
   await waitFor(page, 'the dialog to close', `shut === 1 && !document.querySelector('dialog.cui-lightbox')`);
 });
 
+test('lightbox: one finger swipes, two zoom and never step, and neither does a cancelled or a zoomed-in swipe', { skip }, async () => {
+  const page = await browser.page(app.base, { width: 390, height: 700, touch: true });
+  await page.eval(`window.lb = lightbox([{ src: '/media/screen-1.svg' }, { src: '/media/screen-2.svg' }, { src: '/media/screen-1.svg' }], { into: box });
+    window.send = (type, pointerId, clientX) => document.querySelector('.cui-lb-stage > *').dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'touch', pointerId, isPrimary: pointerId === 1, clientX, clientY: 200 }))`);
+  const run = (...events: [string, number, number][]) => page.eval<number>(`(() => { lb.go(0); for (const [t, id, x] of ${JSON.stringify(events)}) send('pointer' + t, id, x); return lb.at; })()`);
+  assert.equal(await run(['down', 1, 240], ['up', 1, 120]), 1, 'a swipe steps');
+  assert.equal(await run(['down', 1, 150], ['down', 2, 240], ['up', 1, 60], ['up', 2, 330]), 0, 'a pinch, first finger up first');
+  assert.equal(await run(['down', 1, 150], ['down', 2, 240], ['up', 2, 330], ['up', 1, 60]), 0, 'a pinch, second finger up first');
+  assert.equal(await run(['down', 1, 240], ['cancel', 1, 200], ['up', 1, 120]), 0, 'a cancelled one');
+  assert.equal(await run(['down', 1, 240], ['up', 2, 120]), 0, "another finger's lift");
+  await page.eval(`Object.defineProperty(visualViewport, 'scale', { value: 2, configurable: true })`);
+  assert.equal(await run(['down', 1, 240], ['up', 1, 120]), 0, 'a pan while zoomed in');
+  await page.eval(`delete visualViewport.scale`);
+  // The browser's own pinch, which the stage has to allow.
+  await page.eval('lb.go(0)');
+  const touches = (type: string, a: number, b: number) =>
+    page.send('Input.dispatchTouchEvent', {
+      type,
+      touchPoints:
+        type === 'touchEnd'
+          ? []
+          : [
+              { x: a, y: 200, id: 1 },
+              { x: b, y: 200, id: 2 },
+            ],
+    });
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+  await touches('touchStart', 150, 220);
+  for (let d = 10; d <= 110; d += 10) await touches('touchMove', 150 - d, 220 + d);
+  await touches('touchEnd', 0, 0);
+  await waitFor(page, 'the page to zoom', 'visualViewport.scale > 1.2');
+  assert.equal(await page.eval('lb.at'), 0);
+});
+
 // ———————————————————————————————————————————————————————— TripPresenter's gaps (#897)
 
 const PAN = (opts: string, pic = 'panorama') => `(() => { const i = new Image(); i.src = '/media/${pic}.svg'; box.append(i); window.p = panner(i, ${opts}); })()`;

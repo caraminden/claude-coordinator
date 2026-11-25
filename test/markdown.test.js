@@ -352,3 +352,22 @@ test('copying a shell-tagged block ends in exactly one newline; other blocks cop
   assert.equal(copyPayload('x', false), 'x');
   assert.equal(copyPayload('x\n', false), 'x\n');
 });
+
+test('a code span in a table cell shows an escaped pipe without its backslash, in a one-line preview too', () => {
+  const src = '| a | b |\n|---|---|\n| `x \\| y` | ``p \\| `q` `` |';
+  assert.match(md(src), /<td><code>x \| y<\/code><\/td><td><code>p \| `q` <\/code><\/td>/);
+  assert.equal(markdownLine(src).split('<br>')[1], '<code>x | y</code> · <code>p | `q` </code>');
+  // Outside a table the backslash is as typed.
+  assert.equal(md('`x \\| y`'), '<p><code>x \\| y</code></p>');
+  assert.match(md('| a |\n|---|\n| \\|x |'), /<td>\|x<\/td>/);
+});
+
+test('a heading keeps a # that ends its last word; a closing run of #s after a space goes', () => {
+  const text = (src) => md(src).replace(/<[^>]*>/g, '');
+  assert.equal(text('# C#'), 'C#');
+  assert.equal(text('## Why C# ##'), 'Why C#');
+  assert.equal(text('## Title ##'), 'Title');
+  assert.equal(text('## Title ## '), 'Title');
+  assert.equal(text('## Title'), 'Title');
+  assert.equal(text('## ##'), '');
+});

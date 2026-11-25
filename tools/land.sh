@@ -1050,16 +1050,16 @@ preflight() {
 [ "$mode" = into ] || [ "$mode" = full ] || [ "$lane" = light ] || preflight
 
 # The guard tests, on the rebased commit before a CI run is spent (#1240). Each checks the repo's files against what
-# main already holds (a schema number, the prompts' budget, the tests' own wait helpers, the UI contract), so a branch that
+# main already holds (a schema number, the prompts' budget, the tests' own wait helpers, the UI contract, the files' size limits), so a branch that
 # was clean alone can break one only together with main: the smoke check, on the branch as it was, can't see that, and
-# on 2026-11-20 these four were most of CI's real reds. A second or two. Only the ones the repo has; a feeder's merge
+# on 2026-11-20 the first four were most of CI's real reds, and size-budget reddened whole trains on 2026-11-24. A second or two. Only the ones the repo has; a feeder's merge
 # into a build (--into) skips them as it skips CI, and its build's own land runs them.
 # [<worktree>]: the guard tests the repo has, in that worktree (this one by default). 0: passed, 1: failed (its output
 # in $guard_out), 2: couldn't decide (citadel-test's exit in $guard_rc), 3: the repo has none.
 guard_run() {
   local dir=${1:-.} tests=() f
   guard_out='' guard_rc=0
-  for f in test/schema-compat.test.ts test/prompt-budget.test.ts test/one-until.test.ts test/ui-contract.test.ts; do [ ! -f "$dir/$f" ] || tests+=("$f"); done
+  for f in test/schema-compat.test.ts test/prompt-budget.test.ts test/one-until.test.ts test/ui-contract.test.ts test/size-budget.test.ts; do [ ! -f "$dir/$f" ] || tests+=("$f"); done
   [ -x "$dir/tools/citadel-test" ] && [ ${#tests[@]} -gt 0 ] || return 3
   [ -n "${1:-}" ] || land_mark guards guards
   guard_out=$(cd "$dir" && CITADEL_TEST_ALWAYS=/dev/null tools/citadel-test --timeout "${LAND_GUARD_TIMEOUT:-120}" "${tests[@]}" 2>&1 9>&- 7>&- 6>&- </dev/null) || guard_rc=$?

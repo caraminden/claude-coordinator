@@ -73,7 +73,7 @@ test('the guard tests land.sh runs before CI are picked for every path that can 
   for (const path of ['test/anything.test.ts', 'test/land-fixture.ts']) assert.ok(picked(path).includes('test/one-until.test.ts'), path);
   for (const path of ['public/app.js', 'public/ui/chat.js', 'public/style.css', 'src/theme.ts', 'test/ui-contract.json']) assert.ok(picked(path).includes('test/ui-contract.test.ts'), path);
   const sh = readFileSync(join(repo, 'tools', 'land.sh'), 'utf8');
-  for (const t of ['test/schema-compat.test.ts', 'test/prompt-budget.test.ts', 'test/one-until.test.ts', 'test/ui-contract.test.ts']) assert.ok(sh.includes(t), `land.sh's guards run ${t}`);
+  for (const t of ['test/schema-compat.test.ts', 'test/prompt-budget.test.ts', 'test/one-until.test.ts', 'test/ui-contract.test.ts', 'test/size-budget.test.ts']) assert.ok(sh.includes(t), `land.sh's guards run ${t}`);
 });
 
 // #1544: the route test is over 5 CPU-seconds, so it is on the map, not the always list.

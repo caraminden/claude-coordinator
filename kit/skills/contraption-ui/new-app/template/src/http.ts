@@ -32,8 +32,7 @@ export async function readJson(req: IncomingMessage, limit = MAX_JSON_BYTES): Pr
   }
 }
 
-export const send = (res: ServerResponse, status: number, body = '', type = 'text/plain; charset=utf-8') =>
-  void res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' }).end(body);
+export const send = (res: ServerResponse, status: number, body = '', type = 'text/plain; charset=utf-8') => void res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' }).end(body);
 
 export const json = (res: ServerResponse, status: number, body: unknown) => send(res, status, JSON.stringify(body), 'application/json');
 

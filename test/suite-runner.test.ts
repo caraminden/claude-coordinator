@@ -151,10 +151,10 @@ async function overlapRun(name: string, files: number, during: (win: string, log
       return [];
     }
   };
-  const before = during(win, log); // its first windows are written before the run starts
+  const changes = during(win, log); // its first windows are written before the run starts
   const env = { ...process.env, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_PROGRESS_TO: undefined, CITADEL_TEST_TIMES: undefined, RUNNER_TEMP: cwd, CITADEL_SUITE_WINDOW: join(win, 'me') };
-  const r = await new Promise<{ code: number | null; out: string }>((res) => execFile(process.execPath, [runner, '--concurrency', '4', '--timeout', '30000', '--', 'test/'], { cwd, env, timeout: 50_000 }, (e, out) => res({ code: e ? ((e.code as number | null) ?? -1) : 0, out })));
-  await before;
+  const child = new Promise<{ code: number | null; out: string }>((res) => execFile(process.execPath, [runner, '--concurrency', '4', '--timeout', '30000', '--', 'test/'], { cwd, env, timeout: 50_000 }, (e, out) => res({ code: e ? ((e.code as number | null) ?? -1) : 0, out })));
+  const [r] = await Promise.all([child, changes]);
   // How many ran at once after each start, in order.
   let n = 0;
   const atOnce: number[] = [];
@@ -180,9 +180,12 @@ test('a run steps down when another suite starts, and back up once it ends', asy
     writeFileSync(join(win, 'other'), '100 0\n');
     const beat = setInterval(() => utimesSync(join(win, 'other'), new Date(), new Date()), 500);
     const at = starts();
-    await until('18 more files to start', () => starts() >= at + 18, 40_000);
-    clearInterval(beat);
-    rmSync(join(win, 'other'));
+    try {
+      await until('18 more files to start', () => starts() >= at + 18, 40_000);
+    } finally {
+      clearInterval(beat);
+      rmSync(join(win, 'other'));
+    }
   });
   assert.equal(r.code, 0, r.out);
   const most = (from: number, to?: number) => Math.max(...r.atOnce.slice(from, to));

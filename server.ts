@@ -158,11 +158,12 @@ import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
 import { shipDeploys } from './src/ship-deploys.ts';
 import { StallWatch } from './src/stall-signals.ts';
-import { dispatch, OldApk, OtherKey, publish, rollBackApk } from './src/apk-release.ts';
+import { rollBackApk } from './src/apk-release.ts';
+import { apkDeployer, publisher } from './src/apk-deploy.ts';
 import { ApkBuilds } from './src/apk-build.ts';
 import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFlight, landQueue, MainReader, PrsInFlight, ROLLBACK_BRANCH, TestCopyReader } from './src/release-readers.ts';
 import type { PrSnapshot } from './src/github.ts';
-import { TargetFinder, type Found } from './src/release-targets.ts';
+import { TargetFinder } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
 import { apiRoutes } from './src/routes/all.ts';
 import { KIT_DIR, listSkills, warmUsage } from './src/skills.ts';
@@ -1379,25 +1380,7 @@ const apkReader = new ApkReader({
     if (pin) rollback.failed(t.projectId, t.id, pin.sha, why);
   },
 });
-/**
- * Publish release run `run`'s signed APK into `t`'s feed (src/apk-release.ts): the CI store's copy when it has one,
- * recorded (#663) and told to the scheme's Taskmaster. Throws publish()'s refusals (OldApk, OtherKey). Returns the code.
- */
-async function publishRun(t: Found, run: Run, current: number, main: { code: number; name: string | null }, by: string, uid: number | null): Promise<number> {
-  const p = store.getProject(t.projectId);
-  const slug = p && repoSlug(p.repo_url);
-  if (!p?.repo_dir || !slug || !t.contraption) throw new Error(`${t.name} has no repo or app to publish into`);
-  const feedFile = join(services.opts.home, '.local/share', t.contraption, 'android', 'latest.json');
-  // The signed APK the run put in the CI store (#658), when it did; else its GitHub artifact.
-  const stored = ciStore.releaseApk(p.id, run.id);
-  const code = await publish({ slug, runId: run.id, feedFile, current, main, as: githubOf(p.repo_dir), stored: (stored && (await ciStore.plain(stored))) ?? undefined });
-  if (stored) store.publishCiFile(stored.id, `${t.contraption}/android`);
-  // Who published what (#663): kept, and told to the scheme's Taskmaster.
-  store.recordApkPublish({ projectId: p.id, contraption: t.contraption, versionCode: code, runId: run.id, by, uid });
-  const who = uid != null && by.startsWith('#') ? `${by} (for ${store.getUser(uid)?.name ?? 'someone'})` : by;
-  tellHome(p.id, `${who} published ${t.contraption}'s Android build ${code} from ${t.workflow!.replace(/^.*\//, '')} run ${run.id}${run.head_branch === ROLLBACK_BRANCH ? ` (last green, rolled back on ${ROLLBACK_BRANCH})` : ''}.`);
-  return code;
-}
+const publishRun = publisher({ store, ciStore, home: services.opts.home, githubOf, tellHome });
 // Each minion's PR as the PR watcher last saw it, for Main's next release (#627).
 const prs = new Map<number, PrSnapshot>();
 const prDeps = {
@@ -1565,44 +1548,7 @@ const autoDeploy = new AutoDeploy({
         startDeploy(app, row, by, null, uid);
       },
     },
-    // An Android app (src/apk-release.ts): a bumped version starts its release workflow, and a signed run is published.
-    apk: {
-      waits: (t) => !!apkReader.pending(t),
-      head: async (t) => {
-        const w = apkReader.pending(t);
-        return !w ? null : w.step === 'dispatch' ? `dispatch:${w.head}` : `publish:${w.run.id}`;
-      },
-      start: async (t, by, uid) => {
-        const w = apkReader.pending(t);
-        const p = store.getProject(t.projectId);
-        const slug = p && repoSlug(p.repo_url);
-        if (!w || !p?.repo_dir || !slug || !t.workflow || !t.contraption)
-          throw new HttpError(409, `${t.name} has nothing to release: no signed APK newer than the published build is waiting, or a release run is still going. The Releases page reads CI every few minutes, so a run that just finished shows a little later.`);
-        const as = githubOf(p.repo_dir);
-        const release = async () => {
-          await dispatch(slug, t.workflow!.replace(/^.*\//, ''), t.branch, as);
-          apkReader.started(t);
-        };
-        const started = `No signed APK newer than the published build yet: started a release run of ${t.branch} (${t.workflow}). Once it has signed one, publish again.`;
-        let said = started;
-        if (w.step === 'dispatch') await release();
-        else {
-          try {
-            const code = await publishRun(t, w.run, w.current, w.main, by, uid);
-            said = `Published ${t.contraption}'s Android build ${code} from ${t.workflow!.replace(/^.*\//, '')} run ${w.run.id}: installed phones see the update now.`;
-          } catch (err) {
-            // A key the published APK wasn't signed with: refused, with nothing changed.
-            if (err instanceof OtherKey) throw new HttpError(409, err.message);
-            if (!(err instanceof OldApk)) throw err;
-            // Signed before main's version bump: sign main instead.
-            apkReader.tooOld(w.run.id);
-            await release();
-          }
-        }
-        void releases.refresh();
-        return said;
-      },
-    },
+    apk: apkDeployer({ store, apkReader, githubOf, publishRun, refresh: () => void releases.refresh() }),
   },
 });
 

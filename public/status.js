@@ -442,7 +442,7 @@ const readAge = (at) => {
 /** While the box is easing or tight, the headline tiles say so from the live reading: warn for easing, bad for tight. */
 const easeTone = (n) => (n ? (n.level === 'tight' ? 'bad' : 'warn') : null);
 /** "churning: reclaiming 98,233 pages a second, swapping out 40 MB/s" (tight: "tight: ..."), the numbers the 5 s reading has. */
-const churn = (n) => `${n.level === 'tight' ? '' : 'churning: '}${n.reclaim != null ? `reclaiming ${n.reclaim.toLocaleString('en-US')} pages a second` : 'under its memory line'}${n.swapOut ? `, swapping out ${Math.round(n.swapOut / 1e6)} MB/s` : ''}`;
+const churn = (n) => `${n.level === 'tight' ? '' : 'churning: '}${n.reclaim != null ? `reclaiming ${n.reclaim.toLocaleString('en-US')} pages/s` : 'under its memory line'}${n.swapOut ? `, swapping out ${Math.round(n.swapOut / 1e6)} MB/s` : ''}`;
 
 function citadelTiles(c, days, now, ships, redraw) {
   const n = c.easing?.now ?? null;
